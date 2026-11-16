@@ -1,6 +1,6 @@
 # Helpers
 
-Status: draft – ready for review · Part of [error handling](README.md) · Code blocks are the [reference design](README.md#reference-design)
+Status: implemented · Part of [error handling](README.md)
 
 Ready-made functions for Results, Options, AppErrors, parsing untrusted data, wrapping throwing code, and tests.
 
@@ -22,66 +22,7 @@ All in `src/shared/result.ts` (Result/Option/AppError helpers), `src/shared/pars
 | `summarizeArgs(args)`                         | `→ unknown`                                | Used by `atBoundary`; reusable for logs.                                                                                                             |
 | Test: `expectOk(r)`, `expectErrCode(r, code)` | [below](#testing)                          | Tests.                                                                                                                                               |
 
-```ts
-// → src/shared/result.ts (core helpers)
-export type AppResult<T> = Result<T, AppError>
-export type AsyncAppResult<T> = Promise<AppResult<T>>
-
-export function fail(
-  code: ErrorCode,
-  message: string,
-  options?: AppErrorOptions,
-): Result<never, AppError> {
-  return Err(new AppError(code, message, options))
-}
-
-export function ctx(
-  where: string,
-  data?: Readonly<Record<string, unknown>>,
-): (e: AppError) => AppError {
-  return (e) => e.withContext(where, data)
-}
-
-export function tryCatch<T>(fn: () => T, code: ErrorCode, message: string): AppResult<T> {
-  try {
-    return Ok(fn())
-  } catch (cause) {
-    return Err(cause instanceof AppError ? cause : new AppError(code, message, { cause }))
-  }
-}
-
-export async function tryAsync<T>(
-  fn: () => Promise<T>,
-  code: ErrorCode,
-  message: string,
-): AsyncAppResult<T> {
-  try {
-    return Ok(await fn())
-  } catch (cause) {
-    if (cause instanceof AppError) return Err(cause)
-    if (cause instanceof Error && cause.name === 'AbortError')
-      return Err(new AppError('op.aborted', message, { cause }))
-    return Err(new AppError(code, message, { cause }))
-  }
-}
-
-export function collect<T>(results: readonly AppResult<T>[]): AppResult<T[]> {
-  const values: T[] = []
-  const issues: Issue[] = []
-  for (const r of results) {
-    if (r.isOk()) {
-      values.push(r.unwrap())
-      continue
-    }
-    const e = r.unwrapErr()
-    if (e.code !== 'model.invariant') return Err(e)
-    issues.push(...e.issues)
-  }
-  return issues.length === 0
-    ? Ok(values)
-    : fail('model.invariant', `${issues.length} invalid value(s)`, { issues })
-}
-```
+Implementation: [`src/shared/result.ts`](../../../src/shared/result.ts) · tests: [`result.test.ts`](../../../src/shared/result.test.ts)
 
 ## Parsing untrusted data (Zod)
 
@@ -89,27 +30,7 @@ Decision: [ADR 0004](../../decisions/0004-zod-for-shape-validation.md). Every va
 
 **Shape vs. invariants:** the schema checks _structure and types_ (required fields, number vs. string, enums). Domain rules (angle < 90°, total chamfer ≤ max) live **only** in the model's invariants ([models.md](models.md)) – don't duplicate them in schemas. Parse first, then `Model.create(dto)`.
 
-```ts
-// → src/shared/parse.ts
-import type { z } from 'zod'
-
-export function parseWith<S extends z.ZodType>(
-  schema: S,
-  raw: unknown,
-  where: string,
-): AppResult<z.output<S>> {
-  const r = schema.safeParse(raw)
-  if (r.success) return Ok(r.data)
-  const issues: Issue[] = r.error.issues.map((i) => ({
-    path: i.path.filter((p): p is string | number => typeof p !== 'symbol'),
-    rule: i.code, // e.g. 'invalid_type'
-    message: i.message,
-  }))
-  return Err(
-    new AppError('input.malformed', `${issues.length} malformed value(s)`, { issues, where }),
-  )
-}
-```
+Implementation: [`src/shared/parse.ts`](../../../src/shared/parse.ts) · tests: [`parse.test.ts`](../../../src/shared/parse.test.ts)
 
 - Zod issues become `AppError.issues` with full paths (`chamfer.angleDeg`), so forms, agents and logs read them the same way as invariant issues.
 - DTO types are derived from schemas (`type ChamferDTO = z.infer<typeof ChamferDTO>`) – the schema is the contract.

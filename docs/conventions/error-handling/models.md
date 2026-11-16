@@ -1,75 +1,12 @@
 # Invariant models
 
-Status: draft – ready for review · Part of [error handling](README.md) · Code blocks are the [reference design](README.md#reference-design)
+Status: implemented · Part of [error handling](README.md)
 
 Models whose private constructor enforces invariants, created only through a static factory returning `AppResult`. Plus the model-centric scenarios: forms, updates, many inputs.
 
 ## Helpers
 
-```ts
-// → src/shared/model.ts
-/** Thrown ONLY inside private model constructors; never escapes construct(). */
-export class InvariantViolation extends Error {
-  override readonly name = 'InvariantViolation'
-  constructor(
-    readonly model: string,
-    readonly issues: readonly Issue[],
-  ) {
-    super(
-      `${model}: ${issues.map((i) => `${i.path.join('.') || '(root)'} ${i.message}`).join('; ')}`,
-    )
-  }
-}
-
-export interface InvariantChecker {
-  check(
-    ok: boolean,
-    path: IssuePath,
-    rule: string,
-    message: string,
-    params?: Record<string, unknown>,
-  ): void
-}
-
-/** Runs ALL checks, then throws one InvariantViolation listing every failure. */
-export function invariants(model: string, body: (c: InvariantChecker) => void): void {
-  const issues: Issue[] = []
-  body({
-    check(ok, path, rule, message, params) {
-      if (!ok)
-        issues.push(
-          params === undefined ? { path, rule, message } : { path, rule, message, params },
-        )
-    },
-  })
-  if (issues.length > 0) throw new InvariantViolation(model, issues)
-}
-
-/** Body of every static create(): calls the private constructor and classifies what it throws. */
-export function construct<T>(model: string, build: () => T): AppResult<T> {
-  try {
-    return Ok(build())
-  } catch (cause) {
-    if (cause instanceof InvariantViolation) {
-      return Err(
-        new AppError('model.invariant', cause.message, {
-          issues: cause.issues,
-          where: `${model}.create`,
-          cause,
-        }),
-      )
-    }
-    if (cause instanceof AppError) return Err(cause.withContext(`${model}.create`))
-    // Anything else is a bug in the constructor (TypeError, RangeError, …).
-    return Err(
-      new AppError('internal.unexpected', `${model} constructor threw unexpectedly`, {
-        where: `${model}.create`,
-        cause,
-      }),
-    )
-  }
-}
-```
+Implementation: [`src/shared/model.ts`](../../../src/shared/model.ts) · tests: [`model.test.ts`](../../../src/shared/model.test.ts)
 
 Classification table:
 
@@ -81,49 +18,7 @@ Classification table:
 
 ## A simple model
 
-```ts
-export interface ChamferProps {
-  readonly angleDeg: number
-  readonly sizeMm: number
-}
-
-export class Chamfer {
-  private constructor(
-    readonly angleDeg: number,
-    readonly sizeMm: number,
-  ) {
-    invariants('Chamfer', (c) => {
-      c.check(
-        Number.isFinite(angleDeg) && angleDeg > 0 && angleDeg < 90,
-        ['angleDeg'],
-        'range',
-        'must be between 0° and 90° (exclusive)',
-        { min: 0, max: 90, actual: angleDeg },
-      )
-      c.check(
-        Number.isFinite(sizeMm) && sizeMm > 0,
-        ['sizeMm'],
-        'positive',
-        'must be greater than 0',
-        { actual: sizeMm },
-      )
-    })
-    Object.freeze(this)
-  }
-
-  static create(p: ChamferProps): AppResult<Chamfer> {
-    return construct('Chamfer', () => new Chamfer(p.angleDeg, p.sizeMm))
-  }
-
-  with(patch: Partial<ChamferProps>): AppResult<Chamfer> {
-    return Chamfer.create({ ...this.toDTO(), ...patch })
-  }
-
-  toDTO(): ChamferProps {
-    return { angleDeg: this.angleDeg, sizeMm: this.sizeMm }
-  }
-}
-```
+Example (`Chamfer`: `private constructor` + `invariants()`, `static create()` via `construct()`, `with()`, `toDTO()`): [`src/shared/testing/chamfer.fixture.ts`](../../../src/shared/testing/chamfer.fixture.ts). It is a test fixture; the real feature models live in `src/core`.
 
 Model rules:
 
@@ -138,36 +33,7 @@ Model rules:
 
 Children are created first (collecting all child issues with prefixed paths); the parent constructor only receives valid children and checks cross-field rules.
 
-```ts
-export class EdgeTreatment {
-  private constructor(
-    readonly chamfers: readonly Chamfer[],
-    readonly maxTotalMm: number,
-  ) {
-    invariants('EdgeTreatment', (c) => {
-      const total = chamfers.reduce((s, ch) => s + ch.sizeMm, 0)
-      c.check(
-        total <= maxTotalMm,
-        ['chamfers'],
-        'maxTotal',
-        `total chamfer size ${total} mm exceeds ${maxTotalMm} mm`,
-        { total, maxTotalMm },
-      )
-    })
-  }
-
-  static create(p: {
-    chamfers: readonly ChamferProps[]
-    maxTotalMm: number
-  }): AppResult<EdgeTreatment> {
-    const children = collect(
-      p.chamfers.map((c, i) => Chamfer.create(c).mapErr((e) => e.prefixIssues('chamfers', i))),
-    )
-    if (children.isErr()) return children
-    return construct('EdgeTreatment', () => new EdgeTreatment(children.unwrap(), p.maxTotalMm))
-  }
-}
-```
+Example: `EdgeTreatment` in [`src/shared/testing/chamfer.fixture.ts`](../../../src/shared/testing/chamfer.fixture.ts).
 
 Child issues come back as `chamfers.1.angleDeg`, `chamfers.1.sizeMm` – directly mappable to form fields. Cross-field rules are only checked once all children are valid (a deliberate two-phase validation).
 

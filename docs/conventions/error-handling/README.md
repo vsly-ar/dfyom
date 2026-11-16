@@ -1,20 +1,20 @@
 # Error handling: Result, Option, AppError, invariant models
 
-Status: **draft – ready for review** (accept to start implementing)
+Status: **implemented** (accepted 2026-11-16)
 Principle: [principles.md §4](../../principles.md#4-explicit-errors-result-option-apperror-invariant-models) · Decisions: [ADR 0002 oxide.ts](../../decisions/0002-oxide-ts-result-option.md), [ADR 0004 Zod](../../decisions/0004-zod-for-shape-validation.md) · Logging side: [logging.md](../logging.md)
 
 Start here. This page has the rules and the map; each topic lives in its own file.
 
 ## Map
 
-| File                           | Read it when you…                                                                                           |
-| ------------------------------ | ----------------------------------------------------------------------------------------------------------- |
-| [library.md](library.md)       | want to know what oxide.ts offers, its verified pitfalls and risks, or performance limits                   |
-| [app-error.md](app-error.md)   | create or enrich an error, add an error code, send an error across a boundary                               |
-| [helpers.md](helpers.md)       | need a helper (`fail`, `ctx`, `tryCatch`, `collect`, `parseWith`, …), parse untrusted data, or write tests  |
-| [models.md](models.md)         | write a model, validate a form, update a model, validate many inputs                                        |
-| [boundaries.md](boundaries.md) | write a service/command chain, a UI handler, agent tool, CLI command, automation, worker or cancellable job |
-| [migrations.md](migrations.md) | load/save persisted data or change a persisted shape                                                        |
+| File                           | Read it when you…                                                                                                                                            |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [library.md](library.md)       | want to know what oxide.ts offers, its verified pitfalls and risks, or performance limits                                                                    |
+| [app-error.md](app-error.md)   | create or enrich an error, add an error code, send an error across a boundary                                                                                |
+| [helpers.md](helpers.md)       | need a helper (`fail`, `ctx`, `tryCatch`, `collect`, `parseWith`, …), parse untrusted data, or write tests                                                   |
+| [models.md](models.md)         | write a model, validate a form, update a model, validate many inputs                                                                                         |
+| [boundaries.md](boundaries.md) | write a service/command chain, a UI handler, agent tool, CLI command, automation, worker or cancellable job                                                  |
+| [migrations.md](migrations.md) | load/save persisted data or change a persisted shape (pre-alpha: [no migrations, reset instead](migrations.md#pre-alpha-exception-no-data-preservation-yet)) |
 
 ## Rules
 
@@ -65,9 +65,9 @@ Errors are created at the bottom with a **code** and **issues**, collect **conte
 3. Convert a plain class to an invariant model by adding `static create()`, making the constructor `private`, and fixing all `new X(` call sites (the compiler lists them).
 4. One module per commit; tests for the module's error codes are added in the same commit.
 
-## Reference design
+## Implementation
 
-Code blocks in these files are the **reference design**. They were compiled and tested (18 tests) against `oxide.ts@1.1.0`, `zod@4.6.7` and TypeScript 7.0.2 with this repo's `tsconfig.base.json`, on 2026-11-16. Once a block is implemented in `src/`, **replace it with a link to the file** ([documentation.md rule 3](../documentation.md#rules)).
+All of it lives in [`src/shared/`](../../../src/shared/): `errors/codes.ts`, `errors/app-error.ts`, `result.ts`, `parse.ts`, `model.ts`, `boundary.ts`, `migrate.ts`, plus test helpers and example models in `testing/`. Each topic file links its implementing file; the code is the contract, these docs hold the rules and scenarios. Dependencies: `oxide.ts` pinned to `1.1.0` (see [library.md](library.md#risks-and-mitigations)), `zod@^4.6.7`.
 
 ## Decisions
 
@@ -78,16 +78,3 @@ Code blocks in these files are the **reference design**. They were compiled and 
 | 3   | Lint enforcement                                  | Open. When ESLint is added: ban `oxide.ts` imports outside `src/shared/result.ts`, ban `Option.from`/`Result.from`, `no-restricted-syntax` for `ThrowStatement` outside constructors/`src/shared`. Custom rule for unused Results later. |
 | 4   | Localization of `userMessage` / issue messages    | Open. English now; `rule` + `params` are stable so i18n keys can be derived later.                                                                                                                                                       |
 | 5   | Agent API error contract                          | Open. `ResultWire` as defined in [app-error.md](app-error.md#serialization); confirm when [llm-api.md](../../architecture/llm-api.md) is designed.                                                                                       |
-
-## Implementation checklist
-
-When this doc set is accepted:
-
-- [ ] `npm i oxide.ts@1.1.0 zod@^4.6.7` (oxide.ts pinned exactly).
-- [ ] `src/shared/errors/codes.ts`, `src/shared/errors/app-error.ts` – [app-error.md](app-error.md)
-- [ ] `src/shared/result.ts`, `src/shared/parse.ts`, `src/shared/testing/result.ts` – [helpers.md](helpers.md)
-- [ ] `src/shared/model.ts` – [models.md](models.md#helpers)
-- [ ] `src/shared/boundary.ts` – [boundaries.md](boundaries.md#entry-points-ui-agent-cli-automation)
-- [ ] Tests ported from the prototype (invariants, composite, enrichment, serialization pitfalls, abort, parsing, migrations, boundary).
-- [ ] Replace each code block with a link to the implementing file; keep rules, tables and scenarios.
-- [ ] Set status to `implemented` in every file here and in [docs/README.md](../../README.md).

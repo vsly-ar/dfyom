@@ -1,6 +1,6 @@
 # oxide.ts: research findings
 
-Status: draft – ready for review · Part of [error handling](README.md) · Code blocks are the [reference design](README.md#reference-design)
+Status: implemented · Part of [error handling](README.md)
 
 What `oxide.ts@1.1.0` offers, how it behaves, its risks, and performance guidance. Source: the published package (`dist/*.d.ts`, `dist/*.js`) and runtime experiments.
 
@@ -16,7 +16,9 @@ What `oxide.ts@1.1.0` offers, how it behaves, its risks, and performance guidanc
 | Wrap throwing code | `Result.safe(fn, ...args)` / `Result.safe(promise)` → `Result<T, Error>` (non-Error throws become `new Error(String(x))`)                    |
 | Pattern matching   | `match(value, { Ok: …, Err: … })` (also nested patterns)                                                                                     |
 
-## Verified behaviours (each has a test in the prototype)
+## Verified behaviours
+
+Verified against `oxide.ts@1.1.0` with TypeScript 7.0.2 on 2026-11-16. The pitfalls we guard against at runtime (cloning, `Option.from(0)`) are pinned by tests in [`result.test.ts`](../../../src/shared/result.test.ts), so a library upgrade that changes them fails CI.
 
 | Behaviour                                                                                  | Consequence for us                                                                                                     |
 | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |

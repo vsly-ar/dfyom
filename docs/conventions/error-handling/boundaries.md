@@ -1,25 +1,12 @@
 # Call chains and boundaries
 
-Status: draft – ready for review · Part of [error handling](README.md) · Code blocks are the [reference design](README.md#reference-design)
+Status: implemented · Part of [error handling](README.md)
 
 How errors propagate and get enriched, where chains start (UI, agent, CLI, automation), and async/worker/cancellation rules.
 
 ## Call-chain enrichment
 
-```ts
-export function addChamferToPart(partId: string, input: ChamferProps): AppResult<Chamfer> {
-  if (partId === '')
-    return fail('model.invariant', 'part id is empty', { where: 'addChamferToPart' })
-  return Chamfer.create(input).mapErr(ctx('addChamferToPart', { partId }))
-}
-
-export function previewChamferArea(partId: string, input: ChamferProps): AppResult<number> {
-  const ch = addChamferToPart(partId, input)
-  if (ch.isErr()) return ch // early return: Err<AppError> fits AppResult<number>
-  const { sizeMm, angleDeg } = ch.unwrap() // allowed: checked in the same scope
-  return Ok(0.5 * sizeMm * sizeMm * Math.tan((angleDeg * Math.PI) / 180))
-}
-```
+Example: `addChamferToPart` (enriches with `ctx`) and `previewChamferArea` (early return across different Ok types, then `unwrap()` in the same scope) in [`src/shared/testing/chamfer.fixture.ts`](../../../src/shared/testing/chamfer.fixture.ts).
 
 Style: **early return** for multi-step logic (reads top-to-bottom, works the same in `async` functions); **`.map`/`.andThen`/`.mapErr` chains** for short pipelines. Don't nest `match` for control flow.
 
@@ -27,38 +14,7 @@ Style: **early return** for multi-step logic (reads top-to-bottom, works the sam
 
 Every chain starts in exactly one `atBoundary` call. It adds the entry frame (`kind:name` + summarized args), converts stray throws into `internal.unexpected`, and **reports once** (log at the code's severity + route to UI/agent/CLI). Lower layers never log-and-return the same error (that duplicates logs).
 
-```ts
-// → src/shared/boundary.ts
-export interface EntryPoint {
-  readonly kind: 'ui' | 'agent' | 'cli' | 'automation' | 'system'
-  readonly name: string // stable action id, identical for UI and agent: 'design.chamfer.apply'
-  readonly args?: unknown
-}
-export type ErrorReporter = (error: AppError, entry: EntryPoint) => void
-
-export async function atBoundary<T>(
-  entry: EntryPoint,
-  run: () => AppResult<T> | Promise<AppResult<T>>,
-  report: ErrorReporter,
-): Promise<AppResult<T>> {
-  let result: AppResult<T>
-  try {
-    result = await run()
-  } catch (cause) {
-    const e =
-      cause instanceof AppError
-        ? cause
-        : new AppError('internal.unexpected', `unhandled throw in ${entry.name}`, { cause })
-    result = Err(e)
-  }
-  if (result.isOk()) return result
-  const enriched = result
-    .unwrapErr()
-    .withContext(`${entry.kind}:${entry.name}`, { args: summarizeArgs(entry.args) })
-  report(enriched, entry)
-  return Err(enriched)
-}
-```
+Implementation: `atBoundary`, `EntryPoint`, `ErrorReporter`, `summarizeArgs` in [`src/shared/boundary.ts`](../../../src/shared/boundary.ts) · tests: [`boundary.test.ts`](../../../src/shared/boundary.test.ts)
 
 Resulting frames for an agent call with an invalid angle: `Chamfer.create → addChamferToPart → agent:design.chamfer.apply { args }`.
 
