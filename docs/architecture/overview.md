@@ -14,6 +14,8 @@ Status: draft
 | `scripts/`      | Node (dev tooling)                             | Repo tooling, e.g. [version bump](../conventions/versioning.md).                                         |
 | `docs/`         | –                                              | Source of truth ([README](../README.md)).                                                                |
 
+Enforced by `npm run lint` (import boundaries) and the two tsconfigs (no DOM / no Node globals in `src/core`, `src/shared`) – see [ADR 0015](../decisions/0015-eslint-with-typescript6-api.md).
+
 Build: `electron-vite` (`electron.vite.config.ts`) – outputs to `out/{main,preload,renderer}`.
 
 ## IPC

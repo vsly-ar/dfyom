@@ -23,7 +23,7 @@ The docs are the **source of truth**. Code implements what is documented here; w
 | Conventions  | [conventions/error-handling/](conventions/error-handling/README.md) – Result/Option, AppError, invariant models, Zod parsing, migrations | implemented |
 | Conventions  | [conventions/logging.md](conventions/logging.md) – structured logs                                                                       | stub        |
 | Conventions  | [conventions/testing.md](conventions/testing.md) – unit → virtual machine → real machine                                                 | draft       |
-| Conventions  | [conventions/versioning.md](conventions/versioning.md) – automatic version bump                                                          | accepted    |
+| Conventions  | [conventions/versioning.md](conventions/versioning.md) – automatic version bump                                                          | implemented |
 | Conventions  | [conventions/documentation.md](conventions/documentation.md) – how docs are written                                                      | accepted    |
 | Decisions    | [decisions/](decisions/) – architecture decision records (ADRs)                                                                          | –           |
 

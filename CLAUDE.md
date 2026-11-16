@@ -20,6 +20,6 @@ Guidance for AI agents working in this repo. Keep it short; link to docs instead
 
 ## Commands
 
-- `npm run check` – typecheck + tests; run before committing.
+- `npm run check` – typecheck + lint + format check + tests; run before committing (CI runs it too, see `docs/conventions/testing.md`).
 - `npm run dev` / `npm run build`.
 - Commits touching app code auto-bump the patch version via `.githooks/pre-commit` (`docs/conventions/versioning.md`).

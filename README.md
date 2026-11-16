@@ -13,7 +13,7 @@ Requires Node ≥ 22.12 (see `.nvmrc`).
 ```sh
 npm install        # also enables git hooks (.githooks/)
 npm run dev        # start the app with hot reload
-npm run check      # typecheck + unit tests
+npm run check      # typecheck + lint + format check + tests (CI runs this too)
 npm run build      # production build to out/
 ```
 

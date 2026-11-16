@@ -16,4 +16,11 @@ Status: draft · Principle: [principles.md §2](../principles.md#2-testability)
 ## Commands
 
 - `npm test` – all unit tests once; `npm run test:watch` – watch mode.
-- `npm run check` – typecheck + tests (run before committing).
+- `npm run lint` – ESLint incl. layer import boundaries ([ADR 0015](../decisions/0015-eslint-with-typescript6-api.md)); `npm run lint:fix` applies safe fixes.
+- `npm run format` / `npm run format:check` – Prettier (owns formatting; ESLint does not).
+- `npm run check` – `typecheck` + `lint` + `format:check` + `test`. Run before committing.
+- **CI** ([`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)) runs `npm ci` + `npm run check` on every push and pull request to `main`, with Node from `.nvmrc`.
+
+## Docs lint
+
+`scripts/docs-lint.test.mjs` (part of `npm test`) enforces [documentation.md](documentation.md): every doc is reachable from the [index](../README.md) (directly, via a folder link such as `decisions/`, or via an indexed folder README), has a valid `Status:` line in its first lines and the same status as in the index map, and every relative link and `#anchor` resolves (GitHub heading slugs).

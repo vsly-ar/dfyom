@@ -1,3 +1,5 @@
+// src/core and src/shared are checked here (no Node types) AND in tsconfig.node.json (no DOM lib):
+// together that keeps them environment-neutral. See ADR 0015.
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
