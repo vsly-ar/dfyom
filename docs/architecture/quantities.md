@@ -17,6 +17,8 @@ A quantity keeps what the user entered and derives everything else from it.
 
 Why not integer µm/nm storage: binary inch fractions are not integers in either (1/16″ = 1587.5 µm; 1/128″ = 198 437.5 nm). Keeping the entered rational is exact for every input, and float64 mm is far more precise than any machine downstream – the geometry layers compute in floating point anyway ([geometry.md](geometry.md)).
 
+Each project has a **unit system** (mm or inch), initialized from a user preference. Every field accepts either unit as typed; computed values are displayed in the project unit system.
+
 Display precision belongs to the **field** (e.g. a length field shows 3 decimals in mm); values entered as fractions are displayed as fractions.
 
 ## Tolerance
