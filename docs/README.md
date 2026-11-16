@@ -17,11 +17,11 @@ The docs are the **source of truth**. Code implements what is documented here; w
 | Architecture | [architecture/overview.md](architecture/overview.md) – processes, source layout, threading                                               | draft       |
 | Architecture | [architecture/llm-api.md](architecture/llm-api.md) – LLM/agent access, headless, multi-instance                                          | stub        |
 | Architecture | [architecture/commands.md](architecture/commands.md) – shared command layer for UI, agents, CLI                                          | accepted    |
-| Architecture | [architecture/persistence.md](architecture/persistence.md) – project archive, working folder, save/recovery                              | draft       |
+| Architecture | [architecture/persistence.md](architecture/persistence.md) – project archive, working folder, save/recovery                              | accepted    |
 | Architecture | [architecture/quantities.md](architecture/quantities.md) – units, tolerances, expressions (value objects)                                | accepted    |
 | Architecture | [architecture/geometry.md](architecture/geometry.md) – removal-based geometry, cutting-operation framework, layers                       | draft       |
 | Conventions  | [conventions/error-handling/](conventions/error-handling/README.md) – Result/Option, AppError, invariant models, Zod parsing, migrations | implemented |
-| Conventions  | [conventions/logging.md](conventions/logging.md) – structured logs                                                                       | stub        |
+| Conventions  | [conventions/logging.md](conventions/logging.md) – structured logs                                                                       | accepted    |
 | Conventions  | [conventions/testing.md](conventions/testing.md) – unit → virtual machine → real machine                                                 | draft       |
 | Conventions  | [conventions/versioning.md](conventions/versioning.md) – automatic version bump                                                          | implemented |
 | Conventions  | [conventions/documentation.md](conventions/documentation.md) – how docs are written                                                      | accepted    |

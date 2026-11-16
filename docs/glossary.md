@@ -44,3 +44,5 @@ Industry-standard terms as used in DFYOM. This list seeds the in-app wiki ([prin
 | V-carving           | Engraving with a V-bit whose depth follows the shape's local width, so corners come out sharp.                                     |
 | Medial axis         | Centerline of a shape (points equidistant from two or more edges); drives V-carving depth.                                         |
 | Vectorization       | Tracing a raster image into vector paths (also "image tracing").                                                                   |
+| Working folder      | Unpacked copy of an open project in app data, kept current after every change; used for crash recovery.                            |
+| Save history        | The last verified archives of a project, kept in app data ([persistence.md](architecture/persistence.md)).                         |
