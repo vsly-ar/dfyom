@@ -26,7 +26,7 @@ One `as const` object is the **single list of codes**. Codes are `area.reason`, 
 
 Implementation: [`src/shared/errors/codes.ts`](../../../src/shared/errors/codes.ts)
 
-Expected future areas (add when the feature's doc is written): `machine.*` (disconnected, alarm, limit), `device.*` (MCU/sensor), `plan.*` (collision, unreachable, tool not found), `geometry.*`, `script.*`, `agent.*` (permission denied).
+Expected future areas (add when the feature's doc is written): `machine.*` (disconnected, alarm, limit), `device.*` (MCU/sensor), `plan.*` (collision, unreachable, tool not found), `geometry.*`, `script.*`, `agent.*` (permission denial is `permission.denied`, [commands.md](../../architecture/commands.md#dispatcher-pipeline)).
 
 ## Enrichment rules
 
