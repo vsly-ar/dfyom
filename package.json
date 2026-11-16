@@ -5,7 +5,7 @@
   "private": true,
   "description": "Design For Your Own Manufacturing – design, plan and run parts on your own CNC machines.",
   "main": "./out/main/index.js",
-  "license": "UNLICENSED",
+  "license": "GPL-3.0-or-later",
   "engines": {
     "node": ">=22.12.0"
   },

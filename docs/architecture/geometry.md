@@ -76,7 +76,7 @@ All libraries sit behind interfaces (ports) in `src/core`; heavy evaluation runs
 - Conflicts: one operation's retained region inside another operation's removal region (DFM warning? priority?).
 - Exact representation of retained regions (2D boundary + Z profile?).
 - 4th/5th axis: `z = f(x, y)` surfaces stop working there; what replaces them.
-- Raster-to-vector tracing library (candidates: vtracer – MIT, imagetracerjs – public domain; avoid potrace – GPL) and how much the user can tune the tracing.
+- Raster-to-vector tracing library (candidates: vtracer – MIT, imagetracerjs – public domain, potrace – GPL, allowed by [ADR 0014](../decisions/0014-gpl-3-or-later-license.md)) and how much the user can tune the tracing.
 - Medial-axis computation for lines, arcs and Béziers: library or own.
 - Simulation model (Z-map vs. dexel – internal to simulation only); performance budget.
 - Spike results (see [ADR 0007](../decisions/0007-layered-geometry-without-brep-kernel.md)).
