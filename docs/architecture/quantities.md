@@ -1,6 +1,6 @@
 # Quantities: units, tolerances and expressions
 
-Status: accepted (task 2.1 implemented; expressions pending) · Terms: [glossary.md](../glossary.md) · Models: [error-handling/models.md](../conventions/error-handling/models.md) · Tasks: [v0.1 plan](../plans/v0.1.md) 2.1 (literals), 2.2 (expressions)
+Status: implemented (tasks 2.1 and 2.2) · Terms: [glossary.md](../glossary.md) · Models: [error-handling/models.md](../conventions/error-handling/models.md) · Tasks: [v0.1 plan](../plans/v0.1.md) 2.1 (literals), 2.2 (expressions)
 
 Every dimensional input (lengths, angles, feeds, speeds, …) is a **quantity**: an immutable invariant model, not a bare `number`. Sections up to [Tolerance](#tolerance) are task 2.1; [Expressions](#expressions-and-references) are task 2.2 and do not block 2.1.
 
@@ -111,9 +111,45 @@ Rules:
 - A bare number in `+`/`−` adopts the other operand's kind in the project unit (`D + 0.5` = D + 0.5 mm in a mm project); in `×`/`÷` it is a scalar.
 - Tolerance propagates by **worst-case interval arithmetic** for every operator: each operand is the interval [nominal + lower, nominal + upper]; the result's deviations are the result interval minus the nominal result (`a − b`: upper = `a.upper − b.lower`). Untoleranced operands count as exact; a result with no toleranced operand is untoleranced. A divisor interval containing 0 is an error.
 
+### Expression grammar
+
+```ebnf
+expression = ws, sum, [ ws, tolerance ], ws ;      (* tolerance: literal grammar, field kind *)
+sum        = product, { ws, ( "+" | "-" | "−" ), product } ;
+product    = unary, { ws, ( "*" | "×" | "/" | "÷" ), unary } ;
+unary      = ws, ( "-" | "−" ), unary | primary ;
+primary    = number | reference | "(", sum, ws, ")" ;
+number     = magnitude, [ ws, unit ] ;              (* literal grammar; unit of any kind *)
+reference  = name, { ".", name } ;  name = ( letter | "_" ), { letter | digit | "_" } ;
+```
+
+Decisions made with task 2.2 (conservative where the rules above left room):
+
+- **A valid literal stays a literal.** The field first tries the [literal grammar](#literal-grammar-task-21); only if that fails is the source an expression. So `10+0.1/-0.05` is still 10 with a tolerance. If both fail, the error that got further into the source is reported (ties: the expression's), e.g. `10 mm/min` in a length field stays a `quantity.unit` error.
+- **Trailing tolerance:** `±` (or `+/-`, `+-`) anywhere after the expression; a deviation pair only when its sign follows whitespace, is glued to a number and the pair runs to the end: `D +0.1/-0.05` is a tolerance, `D + 0.1` and `D+1/2` are additions. `D -1/2` is therefore the pair −1/+2 (rejected by `order`); write `D - 1/2`. A tolerance inside parentheses is a syntax error. Deviation units must be of the field kind; without a unit they take the field's default unit.
+- `1-1/2` stays rejected inside expressions (`hyphenatedMixedNumber`) so a mistyped mixed number never silently subtracts; write `D - 1/2`.
+- Unary minus only; unary plus (`D * +2`) is a syntax error. A number directly followed by a name (`2D`) is an unknown unit (no implicit multiplication). After a number, `unit/letters` is one unit only when it is a known spelling (`10 mm/min`); otherwise `/` is division (`10 mm/D`).
+- **Bare numbers:** `bare × bare`, `bare ÷ bare`, `bare ± bare` and `−bare` stay bare; a bare result takes the field's kind and default unit (`2 * 3` in an inch field = 6 in). A bare number adopting a length or feed rate in `+`/`−` uses the unit system of the field's default unit (`mm`… → mm, `in`/`ft`/`in/min` → inch); in a field whose default unit does not tell (angle, spindle speed, scalar) it is an `expression.dimension` error (`bareNumberUnit`: write the unit, e.g. `(D + 1 mm) / D`). Angle, spindle speed and scalar have one unit each.
+- The result must be of the field's kind (`resultKind`); scalar results are not silently given a unit.
+- The divisor interval is checked even when a trailing tolerance overrides propagation.
+- References resolve to the referenced quantity's exact value and **explicit** tolerance; an untoleranced reference counts as exact (general tolerances are not applied inside expressions).
+
+### Dependency graph
+
+Nodes are value ids, each mapped to the references its expression uses (`referencesOf`). `DependencyGraph.create` rejects cycles, including self-references, with `expression.cycle` (issue rule `cycle`, params `{ cycle: [a, b, …, a] }`), and gives the evaluation order (dependencies first; declaration order breaks ties). References that are not nodes (tool, machine, other inputs) are external inputs. `affectedBy(changed)` lists the transitive dependents of changed values or inputs, in evaluation order – exactly the values to re-evaluate.
+
+### Expression-sourced quantities
+
+An expression-sourced quantity is an ordinary `Quantity` (same model and [DTO](#persistence-dto), no extra field): `source` is the expression as entered, `kind` and `defaultUnit` are the field's, `exact` is the evaluated value, `tolerance` the trailing or propagated one.
+
+- On **edit**: `quantityFromSource(source, ctx, resolver)` – literal or expression, evaluated against a `ReferenceResolver` port (`resolve(name) → Option<Quantity>`; real resolvers for project variables, surfaces, tool and machine come with the design and library models).
+- On **load**: nothing is evaluated; the stored exact value is used as is ([lifecycle](#value)).
+- On an **input change**: the owner asks the graph what is affected and calls `reevaluate(quantity, resolver)` in that order; it re-parses the stored source with the stored kind and default unit. A literal comes back unchanged.
+- Dependencies are extracted by parsing the stored source (not evaluating it); a source the current parser cannot read returns its parse error, and the stored value stays.
+
 ## Persistence (DTO)
 
-Implementation in `src/core/quantity/` (each header links here): [`rational.ts`](../../src/core/quantity/rational.ts), [`units.ts`](../../src/core/quantity/units.ts), [`parse.ts`](../../src/core/quantity/parse.ts) (literal grammar), [`tolerance.ts`](../../src/core/quantity/tolerance.ts), [`quantity.ts`](../../src/core/quantity/quantity.ts) (model: `Quantity.parse(source, ctx)` / `create()` / `fromDTO()` → `AppResult`), [`quantity.dto.ts`](../../src/core/quantity/quantity.dto.ts); tests: [`quantity.test.ts`](../../src/core/quantity/quantity.test.ts). Expressions go to `src/core/expression/` (2.2).
+Implementation in `src/core/quantity/` (each header links here): [`rational.ts`](../../src/core/quantity/rational.ts), [`units.ts`](../../src/core/quantity/units.ts), [`parse.ts`](../../src/core/quantity/parse.ts) (literal grammar), [`tolerance.ts`](../../src/core/quantity/tolerance.ts), [`quantity.ts`](../../src/core/quantity/quantity.ts) (model: `Quantity.parse(source, ctx)` / `create()` / `fromDTO()` → `AppResult`), [`quantity.dto.ts`](../../src/core/quantity/quantity.dto.ts); tests: [`quantity.test.ts`](../../src/core/quantity/quantity.test.ts). Expressions in `src/core/expression/`: [`ast.ts`](../../src/core/expression/ast.ts) (AST, `referencesIn`), [`parse.ts`](../../src/core/expression/parse.ts) (`parseExpression`), [`evaluate.ts`](../../src/core/expression/evaluate.ts) (`evaluate`, `ReferenceResolver`), [`graph.ts`](../../src/core/expression/graph.ts) (`DependencyGraph`), [`quantity.ts`](../../src/core/expression/quantity.ts) (`quantityFromSource`, `reevaluate`, `referencesOf`); tests: [`expression.test.ts`](../../src/core/expression/expression.test.ts), [`graph.test.ts`](../../src/core/expression/graph.test.ts).
 
 ```ts
 // src/core/quantity/quantity.dto.ts – shape only; domain rules live in Quantity
@@ -143,6 +179,8 @@ Load: `parseWith(QuantityDtoSchema, …)` → `Quantity.fromDTO()`, which checks
 Added to [`codes.ts`](../../src/shared/errors/codes.ts) with the implementing task ([registry rules](../conventions/error-handling/app-error.md#error-code-registry)). All `warn`, not retryable; `issues` carry `rule` and `params` (`{ offset, expected }`) so the input field can mark the position.
 
 2.1 issue rules: `quantity.syntax` – `syntax`, `hyphenatedMixedNumber` (params add `hint`, e.g. `1 1/2"`), `zeroDenominator`, `maxLength`; `quantity.unit` – `unknownUnit`, `unitKind` (`expected` lists the kind's spellings). Their issue path is `[]` (the field itself). `model.invariant` issues use model paths: `exact.den`, `defaultUnit`, `source`, `tolerance.upper|lower` with rules `denominatorNonZero`, `unitKind`, `length`, `finite`, `order`, `symmetric`, `nonNegative`.
+
+2.2 issue rules (path `[]`, params `{ offset, … }` at the operator or operand): `expression.reference` – `unknownReference` (`name`); `expression.dimension` – `kindMismatch`, `unsupportedProduct` (`left`, `right`), `resultKind` (`expected`, `actual`), `bareNumberUnit` (`kind`); `expression.domain` – `divisionByZero`, `divisorContainsZero` (`lo`, `hi`); `expression.cycle` – `cycle` (`cycle`, no offset). Expression syntax errors are `quantity.syntax` / `quantity.unit` like literals.
 
 | Code                   | Task | When                                                                  |
 | ---------------------- | ---- | --------------------------------------------------------------------- |

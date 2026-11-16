@@ -4,73 +4,74 @@ Status: draft
 
 Industry-standard terms as used in DFYOM. This list seeds the in-app wiki ([principles.md §5](principles.md#5-user-friendly-beginner-friendly-highly-graphical)). One line each; detailed explanations belong to the wiki content, not here.
 
-| Term                 | Meaning in DFYOM                                                                                                                                       |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Stock                | Raw material blank a part is cut from; comes from the stock library.                                                                                   |
-| Working area         | Region of the stock a part's design is constrained to.                                                                                                 |
-| Part                 | A designed object made of operations and features; a project holds many.                                                                               |
-| Operation            | A single cutting action: facing, pocketing, drilling, profiling, chamfering, line/curve/shape cut, …                                                   |
-| Feature              | A named group of operations (e.g. a bolt hole = drilling + pocketing + chamfering + threading).                                                        |
-| Generalized tool     | A tool requirement rather than a concrete tool, e.g. "fly cutter or any finishing end mill ≥ 1/4″".                                                    |
-| Tolerance            | Allowed deviation attached to an operation or surface; loose by default.                                                                               |
-| Reference            | Datum an operation/surface is dimensioned from; part zero by default.                                                                                  |
-| Tabs                 | Small bridges left by cutout operations (profile, line/curve/shape cuts) to hold the part in the stock.                                                |
-| Part zero            | Origin of a part's coordinates in design mode ([design.md](modes/design.md#part-and-stock-v01)); set on the machine as the WCS in run mode.            |
-| Facing               | Operation that flattens the top of the stock by removing a thin layer.                                                                                 |
-| Pocket               | Recess with walls and a floor, cut to a depth inside a closed boundary.                                                                                |
-| Drilling             | Operation that makes round holes, blind (with a bottom) or through.                                                                                    |
-| Profile              | Cut along a closed shape's outline; a through profile with tabs is a cutout.                                                                           |
-| Inside corner radius | Radius of a pocket's vertical inside corners; must be ≥ the end mill's radius.                                                                         |
-| Slot width           | Width of the channel a profile cuts (kerf); at least the tool diameter.                                                                                |
-| Plan                 | Ordered sequence of setups that manufactures one or more parts.                                                                                        |
-| Setup                | One fixturing of the stock on a machine: stock + part placement, workholding, probing/zeroing, tool changes, passes.                                   |
-| Workholding          | Devices holding the stock (vises, clamps, vacuum table, …); from a library.                                                                            |
-| Pass                 | One toolpath run of a tool (roughing, finishing, …).                                                                                                   |
-| Air-cutting          | Tool moving at feed rate without engaging material.                                                                                                    |
-| DFM                  | Design for Manufacturability.                                                                                                                          |
-| gCode                | Machine instruction language exported per setup and executed in run mode.                                                                              |
-| Virtual machine      | Simulated CNC used for automated testing of runs ([conventions/testing.md](conventions/testing.md)).                                                   |
-| Fillet               | Rounded transition between surfaces; in DFYOM a retained region of a cutting operation.                                                                |
-| Floor fillet         | Fillet between a pocket floor and its walls (bottom radius); made with a bull-nose or ball end mill.                                                   |
-| Round-over           | Fillet on a convex (top) edge; made with a round-over bit or 3D passes.                                                                                |
-| Retained region      | DFYOM term: zone inside an operation's removal region that it deliberately leaves standing (tabs, fillets).                                            |
-| Carving              | Machining a 3D relief surface from vector shapes and profiles; expanded into passes in plan mode.                                                      |
-| Stepover             | Lateral distance between adjacent passes of a tool.                                                                                                    |
-| Stepdown             | Depth of material removed per pass along Z.                                                                                                            |
-| Scallop height       | Height of the ridges left between adjacent passes of a rounded tool; limits stepover for a given surface tolerance.                                    |
-| General tolerance    | Tolerance applied to untoleranced dimensions (ISO 2768 / title block tolerance); inherited in DFYOM.                                                   |
-| Symmetric tolerance  | Equal upper and lower deviation (`10 ±0.05`).                                                                                                          |
-| Bilateral tolerance  | Different upper and lower deviations (`10 +0.1/−0.05`); unilateral when one is 0.                                                                      |
-| Limit dimensions     | Tolerance stated as min and max values instead of nominal ± deviations; not in v0.1.                                                                   |
-| Nominal value        | The stated size a tolerance's deviations are measured from.                                                                                            |
-| Deviation            | Signed difference between a limit and the nominal value (upper and lower deviation).                                                                   |
-| Quantity             | A value with kind, unit, exact value and optional tolerance, as entered by the user ([quantities.md](architecture/quantities.md)).                     |
-| Unit system          | A project's display unit system, metric (mm) or inch.                                                                                                  |
-| Basic dimension      | GD&T: theoretically exact value toleranced by a feature control frame. Not used in DFYOM.                                                              |
-| Engraving            | Cutting shallow grooves along paths (on-line) or shallow flat-bottom pockets from vector shapes.                                                       |
-| V-carving            | Engraving with a V-bit whose depth follows the shape's local width, so corners come out sharp.                                                         |
-| Medial axis          | Centerline of a shape (points equidistant from two or more edges); drives V-carving depth.                                                             |
-| Vectorization        | Tracing a raster image into vector paths (also "image tracing").                                                                                       |
-| Working folder       | Unpacked copy of an open project in app data, kept current after every change; used for crash recovery.                                                |
-| Save history         | The last verified archives of a project, kept in app data ([persistence.md](architecture/persistence.md)).                                             |
-| Library              | Global app data of reusable stock, tools and machines, shared by all projects ([library.md](architecture/library.md)).                                 |
-| Library snapshot     | Copy of a library item's values stored in a project; parts and plans reference it, never the library item.                                             |
-| WCS / work offset    | Work coordinate system (G54–G59): part zero set on the machine; the work offset is its position in machine coordinates.                                |
-| Machine coordinates  | Coordinates relative to the machine's home position (G53); independent of any work offset.                                                             |
-| Travel               | Maximum movement of one machine axis (GRBL `$130`–`$132`).                                                                                             |
-| Work envelope        | Volume the tool can reach, given by the travel of all axes.                                                                                            |
-| Feed rate            | Speed of the tool through the material along the path (F word, mm/min or in/min).                                                                      |
-| Plunge rate          | Feed rate for moving the tool down into the material along Z.                                                                                          |
-| Spindle speed        | Rotational speed of the spindle (S word, rpm).                                                                                                         |
-| Chip load            | Thickness of material each cutting edge removes per revolution: feed rate ÷ (spindle speed × flutes).                                                  |
-| Climb milling        | Cutting where the tool's edge enters the material at maximum chip thickness (tool rotation and feed in the same direction at the cut); better finish.  |
-| Conventional milling | Cutting where the edge enters at zero chip thickness (rotation against the feed at the cut); more forgiving on machines with backlash.                 |
-| Flute                | Cutting edge and its chip groove on an end mill or drill; the flute count drives chip load.                                                            |
-| Flute length         | Length of the cutting part of a tool (LCF); limits cutting depth.                                                                                      |
-| Stickout             | Length of a tool protruding from the collet or holder.                                                                                                 |
-| Flat end mill        | End mill with a flat bottom (corner radius 0).                                                                                                         |
-| Ball end mill        | End mill with a hemispherical tip (corner radius = half the diameter).                                                                                 |
-| Bull-nose end mill   | End mill with a corner radius between 0 and half the diameter (also corner-radius end mill).                                                           |
-| Point angle          | Included angle of a drill tip (typically 118° or 135°).                                                                                                |
-| Cutting preset       | Named set of spindle speed, feed rate, plunge rate, stepdown and stepover for a tool, optionally per material ([library.md](architecture/library.md)). |
-| Material class       | DFYOM grouping of stock materials (softwood, aluminum, …) used to pick cutting presets.                                                                |
+| Term                 | Meaning in DFYOM                                                                                                                                                                                 |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Stock                | Raw material blank a part is cut from; comes from the stock library.                                                                                                                             |
+| Working area         | Region of the stock a part's design is constrained to.                                                                                                                                           |
+| Part                 | A designed object made of operations and features; a project holds many.                                                                                                                         |
+| Operation            | A single cutting action: facing, pocketing, drilling, profiling, chamfering, line/curve/shape cut, …                                                                                             |
+| Feature              | A named group of operations (e.g. a bolt hole = drilling + pocketing + chamfering + threading).                                                                                                  |
+| Generalized tool     | A tool requirement rather than a concrete tool, e.g. "fly cutter or any finishing end mill ≥ 1/4″".                                                                                              |
+| Tolerance            | Allowed deviation attached to an operation or surface; loose by default.                                                                                                                         |
+| Reference            | Datum an operation/surface is dimensioned from; part zero by default.                                                                                                                            |
+| Tabs                 | Small bridges left by cutout operations (profile, line/curve/shape cuts) to hold the part in the stock.                                                                                          |
+| Part zero            | Origin of a part's coordinates in design mode ([design.md](modes/design.md#part-and-stock-v01)); set on the machine as the WCS in run mode.                                                      |
+| Facing               | Operation that flattens the top of the stock by removing a thin layer.                                                                                                                           |
+| Pocket               | Recess with walls and a floor, cut to a depth inside a closed boundary.                                                                                                                          |
+| Drilling             | Operation that makes round holes, blind (with a bottom) or through.                                                                                                                              |
+| Profile              | Cut along a closed shape's outline; a through profile with tabs is a cutout.                                                                                                                     |
+| Inside corner radius | Radius of a pocket's vertical inside corners; must be ≥ the end mill's radius.                                                                                                                   |
+| Slot width           | Width of the channel a profile cuts (kerf); at least the tool diameter.                                                                                                                          |
+| Plan                 | Ordered sequence of setups that manufactures one or more parts.                                                                                                                                  |
+| Setup                | One fixturing of the stock on a machine: stock + part placement, workholding, probing/zeroing, tool changes, passes.                                                                             |
+| Workholding          | Devices holding the stock (vises, clamps, vacuum table, …); from a library.                                                                                                                      |
+| Pass                 | One toolpath run of a tool (roughing, finishing, …).                                                                                                                                             |
+| Air-cutting          | Tool moving at feed rate without engaging material.                                                                                                                                              |
+| DFM                  | Design for Manufacturability.                                                                                                                                                                    |
+| gCode                | Machine instruction language exported per setup and executed in run mode.                                                                                                                        |
+| Virtual machine      | Simulated CNC used for automated testing of runs ([conventions/testing.md](conventions/testing.md)).                                                                                             |
+| Fillet               | Rounded transition between surfaces; in DFYOM a retained region of a cutting operation.                                                                                                          |
+| Floor fillet         | Fillet between a pocket floor and its walls (bottom radius); made with a bull-nose or ball end mill.                                                                                             |
+| Round-over           | Fillet on a convex (top) edge; made with a round-over bit or 3D passes.                                                                                                                          |
+| Retained region      | DFYOM term: zone inside an operation's removal region that it deliberately leaves standing (tabs, fillets).                                                                                      |
+| Carving              | Machining a 3D relief surface from vector shapes and profiles; expanded into passes in plan mode.                                                                                                |
+| Stepover             | Lateral distance between adjacent passes of a tool.                                                                                                                                              |
+| Stepdown             | Depth of material removed per pass along Z.                                                                                                                                                      |
+| Scallop height       | Height of the ridges left between adjacent passes of a rounded tool; limits stepover for a given surface tolerance.                                                                              |
+| General tolerance    | Tolerance applied to untoleranced dimensions (ISO 2768 / title block tolerance); inherited in DFYOM.                                                                                             |
+| Symmetric tolerance  | Equal upper and lower deviation (`10 ±0.05`).                                                                                                                                                    |
+| Bilateral tolerance  | Different upper and lower deviations (`10 +0.1/−0.05`); unilateral when one is 0.                                                                                                                |
+| Limit dimensions     | Tolerance stated as min and max values instead of nominal ± deviations; not in v0.1.                                                                                                             |
+| Nominal value        | The stated size a tolerance's deviations are measured from.                                                                                                                                      |
+| Deviation            | Signed difference between a limit and the nominal value (upper and lower deviation).                                                                                                             |
+| Quantity             | A value with kind, unit, exact value and optional tolerance, as entered by the user ([quantities.md](architecture/quantities.md)).                                                               |
+| Expression           | A quantity entered as arithmetic over numbers and named values (`D/2 ±0.01`, `tool.diameter`); not a datum _reference_ ([quantities.md](architecture/quantities.md#expressions-and-references)). |
+| Unit system          | A project's display unit system, metric (mm) or inch.                                                                                                                                            |
+| Basic dimension      | GD&T: theoretically exact value toleranced by a feature control frame. Not used in DFYOM.                                                                                                        |
+| Engraving            | Cutting shallow grooves along paths (on-line) or shallow flat-bottom pockets from vector shapes.                                                                                                 |
+| V-carving            | Engraving with a V-bit whose depth follows the shape's local width, so corners come out sharp.                                                                                                   |
+| Medial axis          | Centerline of a shape (points equidistant from two or more edges); drives V-carving depth.                                                                                                       |
+| Vectorization        | Tracing a raster image into vector paths (also "image tracing").                                                                                                                                 |
+| Working folder       | Unpacked copy of an open project in app data, kept current after every change; used for crash recovery.                                                                                          |
+| Save history         | The last verified archives of a project, kept in app data ([persistence.md](architecture/persistence.md)).                                                                                       |
+| Library              | Global app data of reusable stock, tools and machines, shared by all projects ([library.md](architecture/library.md)).                                                                           |
+| Library snapshot     | Copy of a library item's values stored in a project; parts and plans reference it, never the library item.                                                                                       |
+| WCS / work offset    | Work coordinate system (G54–G59): part zero set on the machine; the work offset is its position in machine coordinates.                                                                          |
+| Machine coordinates  | Coordinates relative to the machine's home position (G53); independent of any work offset.                                                                                                       |
+| Travel               | Maximum movement of one machine axis (GRBL `$130`–`$132`).                                                                                                                                       |
+| Work envelope        | Volume the tool can reach, given by the travel of all axes.                                                                                                                                      |
+| Feed rate            | Speed of the tool through the material along the path (F word, mm/min or in/min).                                                                                                                |
+| Plunge rate          | Feed rate for moving the tool down into the material along Z.                                                                                                                                    |
+| Spindle speed        | Rotational speed of the spindle (S word, rpm).                                                                                                                                                   |
+| Chip load            | Thickness of material each cutting edge removes per revolution: feed rate ÷ (spindle speed × flutes).                                                                                            |
+| Climb milling        | Cutting where the tool's edge enters the material at maximum chip thickness (tool rotation and feed in the same direction at the cut); better finish.                                            |
+| Conventional milling | Cutting where the edge enters at zero chip thickness (rotation against the feed at the cut); more forgiving on machines with backlash.                                                           |
+| Flute                | Cutting edge and its chip groove on an end mill or drill; the flute count drives chip load.                                                                                                      |
+| Flute length         | Length of the cutting part of a tool (LCF); limits cutting depth.                                                                                                                                |
+| Stickout             | Length of a tool protruding from the collet or holder.                                                                                                                                           |
+| Flat end mill        | End mill with a flat bottom (corner radius 0).                                                                                                                                                   |
+| Ball end mill        | End mill with a hemispherical tip (corner radius = half the diameter).                                                                                                                           |
+| Bull-nose end mill   | End mill with a corner radius between 0 and half the diameter (also corner-radius end mill).                                                                                                     |
+| Point angle          | Included angle of a drill tip (typically 118° or 135°).                                                                                                                                          |
+| Cutting preset       | Named set of spindle speed, feed rate, plunge rate, stepdown and stepover for a tool, optionally per material ([library.md](architecture/library.md)).                                           |
+| Material class       | DFYOM grouping of stock materials (softwood, aluminum, …) used to pick cutting presets.                                                                                                          |

@@ -28,6 +28,27 @@ export const ERROR_CODES = {
     userMessage: 'The unit is unknown or does not fit this field.',
     retryable: false,
   },
+  // Expressions (task 2.2): docs/architecture/quantities.md#error-codes
+  'expression.reference': {
+    severity: 'warn',
+    userMessage: 'The formula refers to an unknown value.',
+    retryable: false,
+  },
+  'expression.cycle': {
+    severity: 'warn',
+    userMessage: 'The formulas refer to each other in a loop.',
+    retryable: false,
+  },
+  'expression.dimension': {
+    severity: 'warn',
+    userMessage: 'The units in the formula do not fit together or this field.',
+    retryable: false,
+  },
+  'expression.domain': {
+    severity: 'warn',
+    userMessage: 'The formula divides by zero.',
+    retryable: false,
+  },
   'input.malformed': {
     severity: 'warn',
     userMessage: 'The data has an unexpected format.',
