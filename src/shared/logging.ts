@@ -184,7 +184,7 @@ function isPromiseLike(v: unknown): v is PromiseLike<unknown> {
 // ---------------------------------------------------------------------------
 // Entries and forwarding (renderer, utility process, workers → main)
 
-/** One forwarded entry: flat like a pino line, minus `time`/`pid` (main stamps those). */
+/** One forwarded entry: `level`, `msg` and the sender's fields (main writes them under `fwd`). */
 export interface LogRecord {
   readonly level: LogLevel
   readonly msg: string
@@ -196,19 +196,6 @@ export const LOG_IPC_CHANNEL = 'dfyom:log'
 
 /** Window argument (`webPreferences.additionalArguments`) carrying the instance level to the preload. */
 export const RENDERER_LOG_LEVEL_ARG = '--dfyom-log-level'
-
-/** Keys main sets itself; forwarded values for them are discarded. */
-export const RESERVED_LOG_KEYS: readonly string[] = [
-  'level',
-  'time',
-  'msg',
-  'pid',
-  'hostname',
-  'proc',
-  'instance',
-  'app',
-  'win',
-]
 
 export interface EntryLoggerOptions {
   readonly level: LogLevel

@@ -8,11 +8,26 @@ import { AppError } from '../../shared/errors/app-error'
 import { serializeErr, type LogLevel, type Logger } from '../../shared/logging'
 import { cleanupLogs, LOG_RETENTION, type RetentionResult } from './retention'
 
-/** Keys censored anywhere from the top level to 3 levels deep. */
-export const REDACT_KEYS = ['token', 'password', 'secret', 'authorization', 'cookie', 'apiKey']
+const SECRET_KEYS = ['token', 'password', 'secret', 'authorization', 'cookie', 'apiKey', 'api_key']
+
+/** pino redaction is case-sensitive: each key as written, lower-case, Capitalized and UPPER-CASE. */
+export const REDACT_KEYS = [
+  ...new Set(
+    SECRET_KEYS.flatMap((k) => [
+      k,
+      k.toLowerCase(),
+      k[0]!.toUpperCase() + k.slice(1),
+      k.toUpperCase(),
+    ]),
+  ),
+]
 export const REDACT_CENSOR = '[redacted]'
 
-export function redactPaths(keys: readonly string[] = REDACT_KEYS, depth = 3): string[] {
+/**
+ * Paths from the top level to `depth` levels deep. 4 covers 3 levels inside a forwarded
+ * entry's `fwd` object.
+ */
+export function redactPaths(keys: readonly string[] = REDACT_KEYS, depth = 4): string[] {
   const paths: string[] = []
   for (let d = 0; d <= depth; d++)
     for (const k of keys) paths.push([...Array(d).fill('*'), k].join('.'))

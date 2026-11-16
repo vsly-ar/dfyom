@@ -1,54 +1,28 @@
-import { mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { readdir, utimes, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { AppError } from '../../shared/errors/app-error'
-import { createLogReporter } from '../../shared/logging'
-import { createForwardReceiver } from './forward'
-import { createMainLogging, fileStamp, installCrashHandlers, redactPaths } from './logger'
-import { cleanupLogs, type RetentionFs } from './retention'
+import { fileStamp, installCrashHandlers, redactPaths } from './logger'
+import { ID, lines, NAME, openLogging, useTempDir } from './test-support'
 
-let dir: string
-beforeEach(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'dfyom-log-'))
-})
-afterEach(async () => {
-  await rm(dir, { recursive: true, force: true })
-})
-
-const lines = async (file: string): Promise<Record<string, unknown>[]> =>
-  (await readFile(file, 'utf8'))
-    .split('\n')
-    .filter((l) => l !== '')
-    .map((l) => JSON.parse(l) as Record<string, unknown>)
-
-const open = (extra: { rotateBytes?: number } = {}) =>
-  createMainLogging({
-    dir,
-    level: 'info',
-    instance: 'i-1',
-    app: '0.0.0',
-    proc: 'main',
-    startedAt: new Date('2026-11-16T10:20:30.123Z'),
-    ...extra,
-  })
+const tmp = useTempDir()
+const open = (extra: { rotateBytes?: number } = {}) => openLogging(tmp.dir, extra)
 
 describe('createMainLogging', () => {
   it('writes JSON lines with the root fields to <startedAt>-<instance>.<n>.log', async () => {
     const logging = await open()
-    expect(logging.file()).toBe(join(dir, '2026-11-16T10-20-30Z-i-1.1.log'))
+    expect(logging.file()).toBe(join(tmp.dir, `${NAME}.1.log`))
     logging.log.child({ scope: 'test' }).info({ n: 1 }, 'hello')
     logging.log.debug('below level')
     await logging.close()
-    const file = join(dir, '2026-11-16T10-20-30Z-i-1.1.log')
-    expect(await readdir(dir)).toEqual(['2026-11-16T10-20-30Z-i-1.1.log'])
-    const out = await lines(file)
+    expect(await readdir(tmp.dir)).toEqual([`${NAME}.1.log`])
+    const out = await lines(logging.file())
     expect(out).toHaveLength(1)
     expect(out[0]).toMatchObject({
       level: 30,
       msg: 'hello',
       proc: 'main',
-      instance: 'i-1',
+      instance: ID,
       app: '0.0.0',
       scope: 'test',
       n: 1,
@@ -67,12 +41,15 @@ describe('createMainLogging', () => {
     expect(b?.['err']).toMatchObject({ type: 'TypeError', message: 'bad' })
   })
 
-  it('redacts secrets from the top level to 3 levels deep', async () => {
+  it('redacts secrets from the top level to 4 levels deep', async () => {
     const logging = await open()
     logging.log.info(
       {
         token: 't',
-        a: { password: 'p', b: { apiKey: 'k', c: { cookie: 'c', d: { secret: 's' } } } },
+        a: {
+          password: 'p',
+          b: { apiKey: 'k', c: { cookie: 'c', d: { secret: 's', e: { token: 'deep' } } } },
+        },
         ok: 'visible',
       },
       'r',
@@ -82,11 +59,39 @@ describe('createMainLogging', () => {
     expect(r).toMatchObject({
       token: '[redacted]',
       ok: 'visible',
-      a: { password: '[redacted]', b: { apiKey: '[redacted]', c: { cookie: '[redacted]' } } },
+      a: {
+        password: '[redacted]',
+        b: { apiKey: '[redacted]', c: { cookie: '[redacted]', d: { secret: '[redacted]' } } },
+      },
     })
-    // Beyond 3 levels pino has no wildcard: documented limit.
-    expect(JSON.stringify(r)).toContain('"secret":"s"')
+    // Beyond 4 levels pino has no wildcard: documented limit.
+    expect(JSON.stringify(r)).toContain('"token":"deep"')
     expect(redactPaths(['k'], 2)).toEqual(['k', '*.k', '*.*.k'])
+  })
+
+  it('redacts lower-case, capitalized and upper-case key variants', async () => {
+    const logging = await open()
+    logging.log.info(
+      {
+        Authorization: 'a',
+        headers: { Authorization: 'b', COOKIE: 'c' },
+        ApiKey: 'k',
+        APIKEY: 'k2',
+        api_key: 'k3',
+        Password: 'p',
+      },
+      'r',
+    )
+    await logging.close()
+    const [r] = await lines(logging.file())
+    expect(r).toMatchObject({
+      Authorization: '[redacted]',
+      headers: { Authorization: '[redacted]', COOKIE: '[redacted]' },
+      ApiKey: '[redacted]',
+      APIKEY: '[redacted]',
+      api_key: '[redacted]',
+      Password: '[redacted]',
+    })
   })
 
   it('rotates by size and keeps writing to the next numbered file', async () => {
@@ -95,19 +100,23 @@ describe('createMainLogging', () => {
     await new Promise((r) => setTimeout(r, 100))
     for (let i = 0; i < 5; i++) logging.log.info({ i }, 'after')
     await logging.close()
-    const files = (await readdir(dir)).sort()
+    const files = await readdir(tmp.dir)
     expect(files.length).toBeGreaterThan(1)
-    expect(files.every((f) => /^2026-11-16T10-20-30Z-i-1\.\d+\.log$/.test(f))).toBe(true)
+    expect(files.every((f) => f.startsWith(`${NAME}.`) && f.endsWith('.log'))).toBe(true)
   })
 
-  it('cleans the folder at startup', async () => {
-    const old = join(dir, 'old.log')
-    await writeFile(old, 'x')
+  it('cleans old DFYOM files at startup and leaves other files alone', async () => {
     const t = new Date('2026-10-01T00:00:00Z')
-    await utimes(old, t, t)
+    const old = `2026-10-01T00-00-00Z-${ID.replace('0f8e', 'aaaa')}.3.log`
+    for (const name of [old, 'other-app.log']) {
+      await writeFile(join(tmp.dir, name), 'x')
+      await utimes(join(tmp.dir, name), t, t)
+    }
     const logging = await open()
     await logging.close()
-    expect(await readdir(dir)).not.toContain('old.log')
+    const files = await readdir(tmp.dir)
+    expect(files).not.toContain(old)
+    expect(files).toContain('other-app.log')
   })
 
   it('fileStamp is file-system safe', () => {
@@ -128,93 +137,5 @@ describe('installCrashHandlers', () => {
     await logging.close()
     const [r] = await lines(logging.file())
     expect(r).toMatchObject({ level: 60, err: { code: 'internal.unexpected' } })
-  })
-})
-
-describe('forward receiver', () => {
-  it('writes forwarded entries with origin, strips reserved keys, redacts', async () => {
-    const logging = await open()
-    const receive = createForwardReceiver(logging.base, createLogReporter(logging.log))
-    await receive(
-      [
-        { level: 'warn', msg: 'w', scope: 'ui', proc: 'main', instance: 'forged', token: 'x' },
-        { level: 'debug', msg: 'below level' },
-      ],
-      { proc: 'renderer', win: 3 },
-    )
-    await logging.close()
-    const out = await lines(logging.file())
-    expect(out).toHaveLength(1)
-    expect(out[0]).toMatchObject({
-      level: 40,
-      msg: 'w',
-      scope: 'ui',
-      proc: 'renderer',
-      win: 3,
-      instance: 'i-1',
-      token: '[redacted]',
-    })
-    // No duplicate keys from the forwarded entry.
-    const raw = await readFile(logging.file(), 'utf8')
-    expect(raw.match(/"proc"/g)).toHaveLength(1)
-  })
-
-  it('reports a malformed batch once as input.malformed', async () => {
-    const logging = await open()
-    const receive = createForwardReceiver(logging.base, createLogReporter(logging.log))
-    await receive([{ level: 'loud', msg: 1 }], { proc: 'renderer' })
-    await logging.close()
-    const out = await lines(logging.file())
-    expect(out).toHaveLength(1)
-    expect(out[0]).toMatchObject({
-      level: 40,
-      proc: 'main',
-      err: { code: 'input.malformed' },
-      entry: { kind: 'system', name: 'logging.forward' },
-    })
-  })
-})
-
-describe('cleanupLogs', () => {
-  const day = 24 * 60 * 60 * 1000
-  const now = Date.parse('2026-11-16T00:00:00Z')
-  const make = async (name: string, ageDays: number, size: number): Promise<string> => {
-    const p = join(dir, name)
-    await writeFile(p, Buffer.alloc(size))
-    const t = new Date(now - ageDays * day)
-    await utimes(p, t, t)
-    return p
-  }
-
-  it('deletes files older than 14 days, then oldest first down to the size cap', async () => {
-    await make('a.log', 20, 10)
-    await make('b.log', 5, 100)
-    await make('c.log', 3, 100)
-    const active = await make('d.log', 2, 100)
-    await make('notes.txt', 30, 10)
-    const r = await cleanupLogs({ dir, now, maxTotalBytes: 150, keep: [active] })
-    expect(r.deleted.map((p) => p.slice(dir.length + 1))).toEqual(['a.log', 'b.log', 'c.log'])
-    expect((await readdir(dir)).sort()).toEqual(['d.log', 'notes.txt'])
-    expect((await stat(active)).size).toBe(100)
-  })
-
-  it('never deletes kept files and reports unlink failures', async () => {
-    const kept = await make('old-active.log', 30, 10)
-    await make('locked.log', 30, 10)
-    const fs: RetentionFs = {
-      readdir: (d) => readdir(d),
-      stat: (p) => stat(p),
-      unlink: async () => {
-        throw new Error('EBUSY')
-      },
-    }
-    const r = await cleanupLogs({ dir, now, keep: [kept], fs })
-    expect(r.deleted).toEqual([])
-    expect(r.failed).toEqual([{ file: join(dir, 'locked.log'), error: 'Error: EBUSY' }])
-  })
-
-  it('reports a missing folder instead of throwing', async () => {
-    const r = await cleanupLogs({ dir: join(dir, 'nope'), now })
-    expect(r.failed).toHaveLength(1)
   })
 })

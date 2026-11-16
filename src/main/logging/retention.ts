@@ -1,21 +1,32 @@
 // Log folder retention. Doc: docs/conventions/logging.md#files-and-rotation
-import { readdir, stat, unlink } from 'node:fs/promises'
+import { lstat, readdir, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 
 export const LOG_RETENTION = {
   rotateBytes: 10 * 1024 * 1024,
   maxAgeMs: 14 * 24 * 60 * 60 * 1000,
   maxTotalBytes: 200 * 1024 * 1024,
+  /** Files modified more recently may be open in a running instance: never deleted. */
+  minAgeMs: 10 * 60 * 1000,
 } as const
+
+/** `<startedAt>-<instance uuid>.<n>.log`, as written by createMainLogging. */
+const OWN_LOG_FILE =
+  /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.\d+\.log$/
+
+export function isOwnLogFile(name: string): boolean {
+  return OWN_LOG_FILE.test(name)
+}
 
 /** The fs calls retention needs; injectable so tests can simulate failures. */
 export interface RetentionFs {
   readdir(dir: string): Promise<string[]>
-  stat(path: string): Promise<{ size: number; mtimeMs: number; isFile(): boolean }>
+  /** Must not follow symlinks. */
+  lstat(path: string): Promise<{ size: number; mtimeMs: number; isFile(): boolean }>
   unlink(path: string): Promise<void>
 }
 
-const nodeFs: RetentionFs = { readdir: (d) => readdir(d), stat, unlink }
+const nodeFs: RetentionFs = { readdir: (d) => readdir(d), lstat, unlink }
 
 export interface RetentionOptions {
   readonly dir: string
@@ -24,6 +35,7 @@ export interface RetentionOptions {
   readonly keep?: readonly string[]
   readonly maxAgeMs?: number
   readonly maxTotalBytes?: number
+  readonly minAgeMs?: number
   readonly fs?: RetentionFs
 }
 
@@ -32,11 +44,16 @@ export interface RetentionResult {
   readonly failed: readonly { readonly file: string; readonly error: string }[]
 }
 
-/** Deletes `*.log` files older than maxAge, then oldest first until the folder is ≤ maxTotalBytes. */
+/**
+ * Considers only regular files named like DFYOM's own logs (no symlinks, no foreign files,
+ * neither deleted nor counted). Deletes those older than maxAge, then oldest first until
+ * they total ≤ maxTotalBytes; never deletes kept files or files modified within minAgeMs.
+ */
 export async function cleanupLogs(options: RetentionOptions): Promise<RetentionResult> {
   const fs = options.fs ?? nodeFs
   const maxAgeMs = options.maxAgeMs ?? LOG_RETENTION.maxAgeMs
   const maxTotalBytes = options.maxTotalBytes ?? LOG_RETENTION.maxTotalBytes
+  const minAgeMs = options.minAgeMs ?? LOG_RETENTION.minAgeMs
   const keep = new Set(options.keep ?? [])
   const deleted: string[] = []
   const failed: { file: string; error: string }[] = []
@@ -50,10 +67,10 @@ export async function cleanupLogs(options: RetentionOptions): Promise<RetentionR
 
   const files: { path: string; size: number; mtimeMs: number }[] = []
   for (const name of names) {
-    if (!name.endsWith('.log')) continue
+    if (!isOwnLogFile(name)) continue
     const path = join(options.dir, name)
     try {
-      const s = await fs.stat(path)
+      const s = await fs.lstat(path)
       if (s.isFile()) files.push({ path, size: s.size, mtimeMs: s.mtimeMs })
     } catch {
       // Vanished meanwhile (another instance cleaned up): nothing to do.
@@ -62,7 +79,7 @@ export async function cleanupLogs(options: RetentionOptions): Promise<RetentionR
   files.sort((a, b) => a.mtimeMs - b.mtimeMs)
 
   const remove = async (f: (typeof files)[number]): Promise<boolean> => {
-    if (keep.has(f.path)) return false
+    if (keep.has(f.path) || options.now - f.mtimeMs < minAgeMs) return false
     try {
       await fs.unlink(f.path)
       deleted.push(f.path)

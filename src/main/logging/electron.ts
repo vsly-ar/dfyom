@@ -59,10 +59,16 @@ export async function startLogging(): Promise<AppLogging> {
   installCrashHandlers(logging, (code) => app.exit(code))
 
   const report = createLogReporter(log.child({ scope: 'boundary' }))
-  const receive = createForwardReceiver(logging.base, report)
+  const receive = createForwardReceiver(logging, report)
   ipcMain.on(LOG_IPC_CHANNEL, (event, batch: unknown) => {
+    // Only a window's main frame may log (no subframes, no navigated-away frames).
+    const frame = event.senderFrame
+    const main = event.sender.mainFrame
+    if (frame === null || frame.processId !== main.processId || frame.routingId !== main.routingId)
+      return
     const win = BrowserWindow.fromWebContents(event.sender)?.id
-    void receive(batch, win === undefined ? { proc: 'renderer' } : { proc: 'renderer', win })
+    if (win === undefined) return
+    void receive(batch, { proc: 'renderer', win })
   })
 
   app.on('will-quit', () => {
