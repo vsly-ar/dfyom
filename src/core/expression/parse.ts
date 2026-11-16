@@ -27,6 +27,12 @@ const IDENTIFIER = /[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*/y
 const MUL = new Set(['*', '×'])
 const DIV = new Set(['/', '÷'])
 const OPERAND = ['number', 'reference', '(', '-']
+/** `+0.1/`, `-1 mm/`, `+1/16"/`: a sign glued to a number (optional unit), then the pair's "/". */
+const DEVIATION_PAIR_START =
+  /[+\-−](?:\d+(?:\.\d*)?|\.\d+)(?:[ \t\u00a0]*(?:[A-Za-zµ]+|["″'′°%]))?[ \t\u00a0]*\//y
+/** A fraction or mixed number starts here (`2/5`, `1 1/2`). */
+const FRACTION_START = /[ \t\u00a0\-\u2212]*\d+(?:[ \t\u00a0]+\d+)?\/\d/y
+const MIXED = /^[-−]?\d+[ \t\u00a0]+\d/
 
 /**
  * Parse an expression for a field. `ctx` is needed only for the trailing tolerance (its units
@@ -57,11 +63,19 @@ class ExpressionParser {
     this.skipWs()
     let tolerance: Option<ToleranceProps> = None
     if (!this.atEnd()) {
-      if (!this.atPlusMinus() && !this.atDeviationPair())
+      if (!this.atToleranceStart())
         return unexpectedAt(this.src, this.pos, ['operator', 'tolerance', 'end'])
       const scanner = new LiteralScanner(this.src, this.ctx.kind, this.pos)
       const tol = scanner.trailingTolerance(this.ctx.defaultUnit)
-      if (tol.isErr()) return tol
+      if (tol.isErr()) {
+        // The tolerance itself was complete but more text follows (`D ±0.1 * 2`); a
+        // malformed deviation (`D ±`, `D +0.1/x`) keeps its own error.
+        const issue = tol.unwrapErr().issues[0]
+        const expected = issue?.params?.['expected']
+        const followed =
+          issue?.rule === 'syntax' && Array.isArray(expected) && !expected.includes('digit')
+        return followed ? this.tolerancePosition() : tol
+      }
       tolerance = Some(tol.unwrap())
     }
     return Ok({ root: root.unwrap(), tolerance })
@@ -74,8 +88,7 @@ class ExpressionParser {
       if (left.isErr()) return left
       this.skipWs()
       const ch = this.peek()
-      if (ch === undefined || !SIGNS.has(ch) || this.atPlusMinus() || this.atDeviationPair())
-        return left
+      if (ch === undefined || !SIGNS.has(ch) || this.atToleranceStart()) return left
       const offset = this.pos++
       const right = this.product()
       if (right.isErr()) return right
@@ -85,6 +98,8 @@ class ExpressionParser {
 
   // product = unary, { ws, ( "*" | "×" | "/" | "÷" ), unary }
   private product(): AppResult<ExprNode> {
+    this.skipWs()
+    const start = this.pos
     let left = this.unary()
     for (;;) {
       if (left.isErr()) return left
@@ -94,6 +109,7 @@ class ExpressionParser {
       const offset = this.pos++
       const right = this.unary()
       if (right.isErr()) return right
+      if (DIV.has(ch) && this.isFraction(offset + 1)) return this.ambiguousDivision(start, offset)
       left = Ok(binary(MUL.has(ch) ? '*' : '/', offset, left.unwrap(), right.unwrap()))
     }
   }
@@ -116,6 +132,7 @@ class ExpressionParser {
       const inner = this.sum()
       if (inner.isErr()) return inner
       this.skipWs()
+      if (this.atToleranceStart()) return this.tolerancePosition()
       if (this.peek() !== ')') return unexpectedAt(this.src, this.pos, [')'])
       this.pos++
       return inner
@@ -144,16 +161,46 @@ class ExpressionParser {
   }
 
   /**
-   * `D +0.1/-0.05`: a sign after whitespace, glued to a number, that starts a deviation pair
-   * running to the end is the trailing tolerance; otherwise the sign is an operator.
+   * A tolerance starts here: `±` (or `+/-`, `+-`), or a sign after whitespace glued to a number
+   * and followed by the pair's `/` (`D +0.1/-0.05`). Such a sign is never an operator; the
+   * tolerance must end the expression.
    */
-  private atDeviationPair(): boolean {
-    const next = this.src[this.pos + 1]
-    if (!SIGNS.has(this.peek() ?? '') || !isWs(this.src[this.pos - 1])) return false
-    if (!isDigit(next) && next !== '.') return false
-    return new LiteralScanner(this.src, this.ctx.kind, this.pos)
-      .trailingTolerance(this.ctx.defaultUnit)
-      .isOk()
+  private atToleranceStart(): boolean {
+    if (this.atPlusMinus()) return true
+    if (!isWs(this.src[this.pos - 1])) return false
+    DEVIATION_PAIR_START.lastIndex = this.pos
+    return DEVIATION_PAIR_START.test(this.src)
+  }
+
+  private tolerancePosition(): AppResult<never> {
+    return reject(
+      'quantity.syntax',
+      'tolerancePosition',
+      'a tolerance can only follow the whole expression, at the end',
+      { offset: this.pos, expected: ['operator', ')', 'end'] },
+    )
+  }
+
+  /** The operand at `from` is written as a bare fraction or mixed number, possibly negated. */
+  private isFraction(from: number): boolean {
+    FRACTION_START.lastIndex = from
+    return FRACTION_START.test(this.src)
+  }
+
+  /** `D/2/5`: the fraction token would bind first (D ÷ ⅖); ask for parentheses. */
+  private ambiguousDivision(start: number, offset: number): AppResult<never> {
+    const left = this.src.slice(start, offset).trim()
+    const right = this.src.slice(offset + 1, this.pos).trim()
+    const hint = [`${left}/(${right})`]
+    const slash = right.indexOf('/')
+    if (!MIXED.test(right))
+      hint.push(`(${left}/${right.slice(0, slash)})/${right.slice(slash + 1)}`)
+    const message = `write ${hint.map((h) => `"${h}"`).join(' or ')}: a fraction after "/" is ambiguous`
+    return reject('quantity.syntax', 'ambiguousDivision', message, {
+      offset,
+      expected: ['('],
+      hint,
+    })
   }
 
   private skipWs(): void {

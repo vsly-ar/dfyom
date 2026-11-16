@@ -44,6 +44,35 @@ describe('DependencyGraph', () => {
     expect(e.issues[0]!.params).toMatchObject({ cycle: ['a', 'a'] })
   })
 
+  it('maps a reference to a tolerance limit or sub-value to the value that owns it', () => {
+    const e = expectErrCode(
+      DependencyGraph.create(
+        new Map([
+          ['a', ['b.max']],
+          ['b', ['a']],
+        ]),
+      ),
+      'expression.cycle',
+    )
+    expect(e.issues[0]!.params).toMatchObject({ cycle: ['a', 'b', 'a'] })
+    const g = graph({ a: ['pocket1.floor.z.max'], 'pocket1.floor.z': [], c: ['tool.diameter'] })
+    expect(g.order()).toEqual(['pocket1.floor.z', 'a', 'c'])
+    expect(g.affectedBy(['pocket1.floor.z'])).toEqual(['a'])
+    expect(g.affectedBy(['tool'])).toEqual(['c'])
+  })
+
+  it('handles long chains without recursion limits', () => {
+    const n = 20_000
+    const deps = new Map<string, string[]>()
+    for (let i = n - 1; i >= 0; i--) deps.set(`v${i}`, i === 0 ? [] : [`v${i - 1}`])
+    const g = expectOk(DependencyGraph.create(deps))
+    expect(g.order()[0]).toBe('v0')
+    expect(g.order()[n - 1]).toBe(`v${n - 1}`)
+    expect(g.affectedBy(['v0'])).toHaveLength(n - 1)
+    deps.set('v0', [`v${n - 1}`])
+    expectErrCode(DependencyGraph.create(deps), 'expression.cycle')
+  })
+
   it('lists what to re-evaluate when inputs change: transitive dependents, in order', () => {
     const g = graph({ a: ['b'], b: ['c'], c: [], d: ['tool.diameter'], e: [] })
     expect(g.affectedBy(['c'])).toEqual(['b', 'a'])

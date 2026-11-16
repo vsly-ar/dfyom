@@ -71,10 +71,24 @@ describe('expressions: arithmetic', () => {
     expect(exact('D - E - 1')).toBe('4')
   })
 
-  it('reads a fraction token before division (1/16" is a value, D/1/2 is D ÷ ½)', () => {
+  it('reads a fraction token as one value (1/16" is a value, D/2 a division)', () => {
     expect(exact('W + 1/16"')).toBe('2159/80')
-    expect(exact('D/1/2')).toBe('20')
     expect(exact('D + 1 1/2')).toBe('23/2')
+    expect(exact('1/2/5')).toBe('1/10') // (1/2) ÷ 5
+    expect(exact('D/(2/5)')).toBe('25')
+    expect(exact('(D/2)/5')).toBe('1')
+    expect(exact('D / -(1/2)')).toBe('-20')
+  })
+
+  it('rejects a fraction right after a division operator (D/2/5 would not be left-associative)', () => {
+    for (const source of ['D/2/5', 'D ÷ 2/5', 'D / -1/2', 'D / 1 1/2', 'D/1/16"']) {
+      const i = issue(source, 'quantity.syntax')
+      expect(i.rule, source).toBe('ambiguousDivision')
+    }
+    expect(issue('D/2/5', 'quantity.syntax').params).toMatchObject({
+      offset: 1,
+      hint: ['D/(2/5)', '(D/2)/5'],
+    })
   })
 
   it('converts units inside the expression exactly', () => {
@@ -161,8 +175,25 @@ describe('expressions: tolerance', () => {
     expect(tol('D +0.1/0')).toBe('deviations 1/10..0')
   })
 
-  it('accepts a tolerance only at the end of the expression', () => {
-    expect(issue('(D ±0.1) * 2', 'quantity.syntax').params).toMatchObject({ offset: 3 })
+  it('accepts a tolerance only at the end of the expression, never reading it as arithmetic', () => {
+    for (const [source, offset] of [
+      ['(D ±0.1) * 2', 3],
+      ['D ±0.1 * 2', 2],
+      ['(D +0.1/-0.05)', 3],
+      ['D +0.1/-0.1 * 2', 2],
+      ['D +1/2 * 3', 2],
+    ] as const) {
+      const i = issue(source, 'quantity.syntax')
+      expect(i.rule, source).toBe('tolerancePosition')
+      expect(i.params, source).toMatchObject({ offset })
+    }
+  })
+
+  it('reads a trailing deviation pair exactly like the literal grammar (order invariant)', () => {
+    expect(tol('D +2/1')).toBe(tol('10 +2/1')) // upper +2, lower +1: valid, shared sign
+    expect(tol('D +2/1')).toBe('deviations 2..1')
+    expect(expectErrCode(errorOf('D +1/2'), 'model.invariant').issues[0]!.rule).toBe('order')
+    expect(expectErrCode(errorOf('10 +1/2'), 'model.invariant').issues[0]!.rule).toBe('order')
   })
 })
 
