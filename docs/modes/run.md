@@ -27,6 +27,6 @@ To be specified before any real-machine control is implemented: e-stop semantics
 
 ## Open questions
 
-- Machine controller protocols to support first (GRBL, grblHAL, FluidNC, LinuxCNC, …).
+- Controllers after the GRBL family ([ADR 0013](../decisions/0013-grbl-first-controller.md)).
 - MCU communication protocol (serial, USB, network; message schema).
 - Script sandboxing per language.

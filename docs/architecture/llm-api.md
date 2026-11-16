@@ -2,6 +2,8 @@
 
 Status: stub · Principle: [principles.md §1](../principles.md#1-llm-first)
 
+Transports: MCP server (stdio + local HTTP) and CLI – [ADR 0011](../decisions/0011-mcp-and-cli-agent-api.md).
+
 ## Requirements (to be designed)
 
 - Parity: every user action is available to agents (likely via one command layer – [overview.md#ipc](overview.md#ipc)).
@@ -12,5 +14,4 @@ Status: stub · Principle: [principles.md §1](../principles.md#1-llm-first)
 
 ## Open questions
 
-- Transport: MCP server, local HTTP/WebSocket, CLI – or all of them over the same command layer.
 - Permission model for actions that affect a real machine.
