@@ -12,4 +12,4 @@ Use [`oxide.ts`](https://www.npmjs.com/package/oxide.ts) for Rust-style `Option<
 
 ## Consequences
 
-- Usage patterns, `AppError` shape and helpers are defined in [conventions/error-handling.md](../conventions/error-handling.md); the dependency is added when that doc is accepted.
+- Usage patterns, `AppError` shape and helpers are defined in [conventions/error-handling/](../conventions/error-handling/README.md); the dependency is added when that doc is accepted.

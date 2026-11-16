@@ -28,7 +28,7 @@ Everything is documented before it is implemented, and docs must not go stale. D
 
 Use [`oxide.ts`](https://www.npmjs.com/package/oxide.ts) `Option<T>` / `Result<T, E>` for function return contracts, and an app-specific `AppError` that is **enriched** as it travels up the call chain. Models enforce invariants in a private constructor; a static factory catches, classifies and returns a `Result`, so an invalid model can never exist.
 
-→ [conventions/error-handling.md](conventions/error-handling.md) (must be researched and accepted before first use)
+→ [conventions/error-handling/](conventions/error-handling/README.md)
 
 ## 5. User-friendly, beginner-friendly, highly graphical
 
@@ -51,4 +51,4 @@ Use [`oxide.ts`](https://www.npmjs.com/package/oxide.ts) `Option<T>` / `Result<T
 
 Typical scenarios (Result, Option, AppError, logging, CLI, …) get prepared, documented helpers instead of ad-hoc code.
 
-→ documented alongside each convention ([error-handling](conventions/error-handling.md), [logging](conventions/logging.md))
+→ documented alongside each convention ([error-handling](conventions/error-handling/helpers.md), [logging](conventions/logging.md))

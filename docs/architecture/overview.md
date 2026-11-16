@@ -33,4 +33,4 @@ Heavy operations (toolpath generation, simulation, optimization) run off the UI 
 ## Open questions
 
 - Command layer design shared by UI, agent API and CLI (undo/redo, action log that agents can observe).
-- Persistence format for projects and libraries, and its migration strategy (ties into [error-handling.md](../conventions/error-handling.md) migrations).
+- Persistence format for projects and libraries, and its migration strategy (ties into [error-handling/migrations.md](../conventions/error-handling/migrations.md)).
