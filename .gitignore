@@ -1,0 +1,29 @@
+# deps & build
+node_modules/
+out/
+dist/
+release/
+coverage/
+*.tsbuildinfo
+
+# local tooling caches
+graft/
+.vite/
+.eslintcache
+
+# env & logs
+.env
+.env.*
+!.env.example
+*.log
+logs/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Claude Code local-only settings
+.claude/settings.local.json

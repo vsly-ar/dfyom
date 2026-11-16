@@ -1,0 +1,3 @@
+#!/bin/sh
+# Auto-bump the app version when app code is committed. See docs/conventions/versioning.md
+node scripts/bump-version.mjs || exit 1
