@@ -33,6 +33,22 @@ export const ERROR_CODES = {
     retryable: true,
   },
   'op.aborted': { severity: 'info', userMessage: 'The operation was cancelled.', retryable: true },
+  // Command layer: docs/architecture/commands.md#dispatcher-pipeline
+  'command.unknown': {
+    severity: 'warn',
+    userMessage: 'This command does not exist.',
+    retryable: false,
+  },
+  'command.conflict': {
+    severity: 'info',
+    userMessage: 'The project changed in the meantime. Please try again.',
+    retryable: true,
+  },
+  'permission.denied': {
+    severity: 'warn',
+    userMessage: 'This action is not allowed.',
+    retryable: false,
+  },
   'external.failure': {
     severity: 'error',
     userMessage: 'An external component failed.',
