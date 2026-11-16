@@ -1,6 +1,6 @@
 # Quantities: units, tolerances and expressions
 
-Status: accepted · Terms: [glossary.md](../glossary.md) · Models: [error-handling/models.md](../conventions/error-handling/models.md) · Tasks: [v0.1 plan](../plans/v0.1.md) 2.1 (literals), 2.2 (expressions)
+Status: accepted (task 2.1 implemented; expressions pending) · Terms: [glossary.md](../glossary.md) · Models: [error-handling/models.md](../conventions/error-handling/models.md) · Tasks: [v0.1 plan](../plans/v0.1.md) 2.1 (literals), 2.2 (expressions)
 
 Every dimensional input (lengths, angles, feeds, speeds, …) is a **quantity**: an immutable invariant model, not a bare `number`. Sections up to [Tolerance](#tolerance) are task 2.1; [Expressions](#expressions-and-references) are task 2.2 and do not block 2.1.
 
@@ -19,7 +19,9 @@ A quantity keeps what the user entered and derives everything else from it.
 
 Why not integer µm/nm storage: binary inch fractions are not integers in either (1/16″ = 1587.5 µm; 1/128″ = 198 437.5 nm). Every v0.1 unit factor is rational (1 in = 127/5 mm), so the exact value is lossless in the canonical unit; decimals are exact too (`0.1` = 1/10). float64 mm is far more precise than any machine downstream – the geometry layers compute in floating point anyway ([geometry.md](geometry.md)).
 
-**Equality:** `a.equals(b)` ⇔ same kind, equal exact values and equal tolerances (exact). Source is not compared (`1"` equals `25.4 mm`). Never compare canonical floats for quantity equality.
+**Equality:** `a.equals(b)` ⇔ same kind, equal exact values and equal tolerances (exact upper and lower deviations). Source, default unit and tolerance notation are entry/display data and not compared (`1"` equals `25.4 mm`; `±0.05` equals `+0.05/−0.05`). Never compare canonical floats for quantity equality.
+
+**Model invariants** (`model.invariant`): source length 1–256; the default unit belongs to the kind; the canonical float64 is finite (a persisted exact value beyond float64 range is rejected); plus the [tolerance](#tolerance) and rational invariants.
 
 **Lifecycle:** the source is parsed (literal) or evaluated (expression) only when the user **edits** the value, or when an expression's inputs change. Otherwise the stored exact value is used as is, so a parser change alters an old value only when that value is updated, directly or indirectly. The model does **not** check that source and exact value agree.
 
@@ -36,6 +38,8 @@ Display precision belongs to the **field** only (e.g. a length field shows 3 dec
 | `feedRate`     | mm/min    | `mm/min`; `in/min`/`ipm`                                      | project unit /min   |
 | `spindleSpeed` | rpm       | `rpm`                                                         | rpm                 |
 | `scalar`       | 1         | none, `%` (= 1/100)                                           | none                |
+
+Persisted unit ids (`defaultUnit`) are `mm cm m um in ft deg mm/min in/min rpm 1 %`; `1` is the dimensionless unit (a bare `scalar`). `µ` is the micro sign U+00B5. Implementation: [`units.ts`](../../src/core/quantity/units.ts).
 
 - A unit of another kind is an error (`mm/min` in a length field). Counts (tabs, passes) are `scalar` fields with an integer field rule.
 - Not in v0.1: `rad` (π is not rational), DMS angles, compound feet-inch (`1' 6"`), surface speed, chip load, time.
@@ -63,7 +67,12 @@ unit      = (* spellings from the table above *) ;
 - `1-1/2"` is rejected with a hint to write `1 1/2"` (it would mean subtraction in an expression).
 - Deviations without a unit take the value's unit; the value without a unit takes the field's bare-number default.
 - Negative values are syntactically allowed; whether a field accepts them is a field/model rule (e.g. spindle speed > 0).
-- Source length ≤ 256 characters.
+- Source length ≤ 256 characters (UTF-16 code units, i.e. `string.length`; rule `maxLength`).
+- A `unit` token is a run of letters (optionally `letters/letters`, e.g. `mm/min`) or one symbol (`"″'′°%`). Any such token that is not a spelling of the field's kind is a `quantity.unit` error, so `1e3` (exponent) fails as unknown unit `e`.
+- `pm` is ASCII `+/-`/`+-` or `±` only (`+/−` with U+2212 is rejected).
+- `/` starts a `fraction` only when a digit follows it directly; otherwise it is the deviation separator: `+0/-0.05`, `+1/−0.05`, `+0.1/0`.
+- In a deviation pair, an upper deviation `digits/digits` is read as a fraction when the rest still forms a pair (`+1/16"/-0`, `+1/2/0`); otherwise it is an integer followed by the separator (`+1/0` = +1/0, not a zero denominator). `+1/2` therefore means upper +1, lower +2 (rejected: `order` invariant). Spaces around the separator (`+1 / 0`) are always unambiguous.
+- Implementation: [`parse.ts`](../../src/core/quantity/parse.ts) (`parseLiteral`), used by `Quantity.parse`.
 
 ## Tolerance
 
@@ -81,6 +90,7 @@ Representation and resolution:
 - Invariants: denominators ≠ 0; `upper ≥ lower`; `±` deviation ≥ 0. Both deviations may share a sign (`−0.02/−0.05`).
 - The value object stores **only the explicit tolerance**. The effective tolerance of an untoleranced value is resolved by the design model (`effectiveTolerance(quantity, scope)` walking operation → feature → part → project), never by the quantity itself.
 - General tolerance: one symmetric `±` tolerance per kind per scope (e.g. ±0.1 mm, ±0.5°); the nearest scope that sets one wins.
+- Implementation: [`tolerance.ts`](../../src/core/quantity/tolerance.ts) (`Tolerance.create`); `Quantity.tolerance` is an `Option<Tolerance>`.
 
 ## Expressions and references
 
@@ -103,7 +113,7 @@ Rules:
 
 ## Persistence (DTO)
 
-Planned files in `src/core/quantity/` (each header links here): `rational.ts`, `units.ts`, `parse.ts` (literal grammar), `tolerance.ts`, `quantity.ts` (model: `Quantity.parse(source, ctx)` / `create()` → `AppResult`), `quantity.dto.ts`. Expressions go to `src/core/expression/` (2.2).
+Implementation in `src/core/quantity/` (each header links here): [`rational.ts`](../../src/core/quantity/rational.ts), [`units.ts`](../../src/core/quantity/units.ts), [`parse.ts`](../../src/core/quantity/parse.ts) (literal grammar), [`tolerance.ts`](../../src/core/quantity/tolerance.ts), [`quantity.ts`](../../src/core/quantity/quantity.ts) (model: `Quantity.parse(source, ctx)` / `create()` / `fromDTO()` → `AppResult`), [`quantity.dto.ts`](../../src/core/quantity/quantity.dto.ts); tests: [`quantity.test.ts`](../../src/core/quantity/quantity.test.ts). Expressions go to `src/core/expression/` (2.2).
 
 ```ts
 // src/core/quantity/quantity.dto.ts – shape only; domain rules live in Quantity
@@ -131,6 +141,8 @@ Load: `parseWith(QuantityDtoSchema, …)` → `Quantity.fromDTO()`, which checks
 ## Error codes
 
 Added to [`codes.ts`](../../src/shared/errors/codes.ts) with the implementing task ([registry rules](../conventions/error-handling/app-error.md#error-code-registry)). All `warn`, not retryable; `issues` carry `rule` and `params` (`{ offset, expected }`) so the input field can mark the position.
+
+2.1 issue rules: `quantity.syntax` – `syntax`, `hyphenatedMixedNumber` (params add `hint`, e.g. `1 1/2"`), `zeroDenominator`, `maxLength`; `quantity.unit` – `unknownUnit`, `unitKind` (`expected` lists the kind's spellings). Their issue path is `[]` (the field itself). `model.invariant` issues use model paths: `exact.den`, `defaultUnit`, `source`, `tolerance.upper|lower` with rules `denominatorNonZero`, `unitKind`, `length`, `finite`, `order`, `symmetric`, `nonNegative`.
 
 | Code                   | Task | When                                                                  |
 | ---------------------- | ---- | --------------------------------------------------------------------- |
