@@ -17,6 +17,17 @@ export const ERROR_CODES = {
     userMessage: 'Some values are not valid.',
     retryable: false,
   },
+  // Quantity literals (task 2.1): docs/architecture/quantities.md#error-codes
+  'quantity.syntax': {
+    severity: 'warn',
+    userMessage: 'The value could not be read.',
+    retryable: false,
+  },
+  'quantity.unit': {
+    severity: 'warn',
+    userMessage: 'The unit is unknown or does not fit this field.',
+    retryable: false,
+  },
   'input.malformed': {
     severity: 'warn',
     userMessage: 'The data has an unexpected format.',
