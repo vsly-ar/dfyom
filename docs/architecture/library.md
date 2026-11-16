@@ -1,0 +1,126 @@
+# Library: stock, tools and machines
+
+Status: accepted · Storage rule: [persistence.md](persistence.md#library-references) · Values: [quantities.md](quantities.md) · Models: [error-handling/models.md](../conventions/error-handling/models.md) · Terms: [glossary.md](../glossary.md) · Task: [v0.1 plan](../plans/v0.1.md) 1.7 (models: 2.4)
+
+The library holds the user's **stock**, **tools** and **machines**. It is global app data shared by all projects; a project uses an item only through a **snapshot** ([persistence.md](persistence.md#library-references)). Workholding joins the library later. Every dimensional field is a [quantity](quantities.md) of the kind given below; "v0.1 = yes" means required (an optional field is `Option`).
+
+## Common fields
+
+| Field       | Type                             | v0.1 | Invariants        | Why                                                           |
+| ----------- | -------------------------------- | ---- | ----------------- | ------------------------------------------------------------- |
+| `id`        | string (UUID)                    | yes  | non-empty         | Target of `libraryItemId` in snapshots.                       |
+| `kind`      | `'stock' \| 'tool' \| 'machine'` | yes  | –                 | Discriminates the record and the snapshot `kind`.             |
+| `name`      | string                           | yes  | 1–120 chars       | Shown in pickers, plan sheets and gCode comments.             |
+| `notes`     | string                           | no   | ≤ 4000 chars      | Vendor, product number, where it is stored.                   |
+| `revision`  | integer                          | yes  | ≥ 1, +1 per write | Stale-write check across app instances ([Storage](#storage)). |
+| `updatedAt` | ISO 8601 string                  | yes  | –                 | Sorting; "library changed since snapshot" hint.               |
+
+## Stock
+
+v0.1 has one shape, the rectangular **block**; `shape` is a discriminant so round bar, tube and sheet can be added later.
+
+| Field            | Kind / type          | v0.1 | Invariants  | Why                                                                                                                        |
+| ---------------- | -------------------- | ---- | ----------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `shape`          | `'block'`            | yes  | –           | Selects the stock solid in `part = stock − …` ([geometry.md](geometry.md#principle-geometry-comes-from-material-removal)). |
+| `length` (X)     | length               | yes  | > 0         | Stock solid; facing region; profile and drilling must lie inside.                                                          |
+| `width` (Y)      | length               | yes  | > 0         | As above.                                                                                                                  |
+| `thickness` (Z)  | length               | yes  | > 0         | Facing amount, through-cut depth for profile and drilling. Its tolerance is the real stock variation.                      |
+| `material.name`  | string               | yes  | 1–120 chars | Shown to the user ("6061-T6", "birch plywood").                                                                            |
+| `material.class` | `MaterialClass` enum | yes  | –           | Key for feeds-and-speeds presets and DFM hints. Users cannot add classes.                                                  |
+
+`MaterialClass` (fixed enum): `softwood`, `hardwood`, `sheetGood` (MDF, plywood), `plastic`, `aluminum`, `brass`, `steel`, `other`.
+
+## Tool
+
+Types and field names follow ISO 13399 symbols as used by the Fusion tool library (`DC`, `LCF`, `OAL`, `NOF`, `RE`, `SIG` – [Autodesk forum example](https://forums.autodesk.com/t5/fusion-api-and-scripts/creating-a-cam-tool-with-api/td-p/12683292)) and the FreeCAD CAM tool-bit shapes (`Diameter`, `CuttingEdgeHeight`, `Length`, `ShankDiameter`, `CornerRadius`, `TipAngle` – [FreeCAD tool bits](https://github.com/FreeCAD/FreeCAD/tree/main/src/Mod/CAM/Tools/Bit)).
+
+| `type`            | v0.1 use                                                                                                       |
+| ----------------- | -------------------------------------------------------------------------------------------------------------- |
+| `flatEndMill`     | Facing (incl. surfacing bits), pocket, profile, inside corner radius ≥ tool radius.                            |
+| `bullNoseEndMill` | Floor fillet in one pass when `cornerRadius` matches ([geometry.md](geometry.md#fillets-as-retained-regions)). |
+| `ballEndMill`     | Floor fillet by 3D passes; later carving.                                                                      |
+| `drill`           | Drilling.                                                                                                      |
+
+| Field                 | Kind / type                     | v0.1           | Invariants                                                      | Why                                                                                |
+| --------------------- | ------------------------------- | -------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `type`                | enum above                      | yes            | –                                                               | Which operations may use the tool; toolpath tip shape.                             |
+| `diameter` (DC)       | length                          | yes            | > 0                                                             | Toolpath offset, stepover, minimum inside corner radius, drill hole size.          |
+| `cornerRadius` (RE)   | length                          | bull nose only | 0 < RE < DC/2; flat = 0 and ball = DC/2 are derived, not stored | Floor-fillet matching; tip shape for depth and scallop height.                     |
+| `fluteLength` (LCF)   | length                          | yes            | > 0                                                             | Maximum cutting depth per pass and per operation (plan check, not invariant).      |
+| `overallLength` (OAL) | length                          | yes            | > `fluteLength`                                                 | Plausibility of `stickout`; later collision checks.                                |
+| `stickout`            | length                          | no             | > 0, < `overallLength`                                          | Default length below the collet: deepest reachable floor; plan may override (1.9). |
+| `shankDiameter`       | length                          | no             | > 0                                                             | Collet size; later collision checks.                                               |
+| `fluteCount` (NOF)    | scalar, integer                 | yes            | ≥ 1                                                             | Chip load = feed rate / (spindle speed × flutes), shown next to feed presets.      |
+| `pointAngle` (SIG)    | angle                           | drill only     | 0° < SIG < 180° (118°/135° typical)                             | Tip length, so a through hole is drilled deep enough.                              |
+| `toolMaterial`        | `'carbide' \| 'hss' \| 'other'` | no             | –                                                               | Feeds-and-speeds hint.                                                             |
+| `coating`             | string                          | no             | ≤ 60 chars                                                      | Display only.                                                                      |
+| `presets`             | `CuttingPreset[]`               | no             | unique `name`; see below                                        | Feeds and speeds ([below](#feeds-and-speeds-presets)).                             |
+
+v0.1 has exactly the four types above. Later: holder (gauge length, collision shape), tool number (machine tool table), taper/chamfer/V-bit, fly cutter, face mill, tap.
+
+### Feeds-and-speeds presets
+
+Feeds and speeds are stored as optional presets on the tool, per material class, like the Fusion tool library's presets ([Autodesk blog](https://www.autodesk.com/products/fusion-360/blog/new-manufacturing-tool-library/)). How plan mode picks or fills a preset (manual entry, calculator) is task 1.9 ([plan](../plans/v0.1.md)):
+
+| `CuttingPreset` field | Kind / type     | Invariants                  |
+| --------------------- | --------------- | --------------------------- |
+| `name`                | string          | 1–60 chars                  |
+| `materialClass`       | `MaterialClass` | optional; none = any        |
+| `spindleSpeed`        | spindleSpeed    | > 0                         |
+| `feedRate`            | feedRate        | > 0                         |
+| `plungeRate`          | feedRate        | > 0                         |
+| `stepdown`            | length          | optional; > 0               |
+| `stepover`            | length          | optional; > 0, ≤ `diameter` |
+
+Chip load is derived and displayed, not stored (it is not a v0.1 quantity kind – [quantities.md](quantities.md#kinds-and-units)). Machine limits are checked by plan mode, not as tool invariants ([models.md](../conventions/error-handling/models.md#a-simple-model)).
+
+## Machine
+
+v0.1: a 3-axis router or mill on a GRBL-family controller ([ADR 0013](../decisions/0013-grbl-first-controller.md)). Limit fields mirror GRBL `$` settings ([GRBL v1.1 configuration](https://github.com/gnea/grbl/wiki/Grbl-v1.1-Configuration)), so they can be imported from `$$` output later and configure the virtual machine.
+
+| Field                | Kind / type                    | v0.1 | Invariants        | Why                                                                                                          |
+| -------------------- | ------------------------------ | ---- | ----------------- | ------------------------------------------------------------------------------------------------------------ |
+| `controller`         | `'grbl'`                       | yes  | –                 | Selects post-processor and streaming protocol; grblHAL/FluidNC use the same value.                           |
+| `travel.x/y/z`       | length ×3 (`$130–$132`)        | yes  | > 0               | **Work envelope** = travel box; plan checks that stock and toolpaths fit; `machine.travel.z` in expressions. |
+| `maxFeedRate.x/y/z`  | feedRate ×3 (`$110–$112`)      | yes  | > 0               | Feed rates above it are flagged; GRBL also rapids (G0) at it, so it drives run-time estimates.               |
+| `acceleration.x/y/z` | scalar ×3, mm/s² (`$120–$122`) | no   | > 0               | Better time estimates; virtual machine timing.                                                               |
+| `spindle.control`    | `'gcode' \| 'manual'`          | yes  | –                 | `manual` (trim router dial): export pauses (M0) and asks the user to set the speed; S words informative.     |
+| `spindle.maxSpeed`   | spindleSpeed (`$30`)           | yes  | > 0               | GRBL clamps S above `$30` silently, so plan flags it.                                                        |
+| `spindle.minSpeed`   | spindleSpeed (`$31`)           | no   | ≥ 0, < `maxSpeed` | Flags presets below the spindle's range.                                                                     |
+| `programUnits`       | `'mm' \| 'in'`                 | yes  | –                 | G21/G20 in exported gCode. GRBL settings are always mm; `$13` changes only reports.                          |
+| `toolChanger`        | `'none'`                       | yes  | –                 | Manual tool change: export stops (M0), the user changes the tool and re-zeros Z.                             |
+
+Axes are fixed X/Y/Z in v0.1; 4th/5th axis, homing direction, tool length sensor and tool table come later.
+
+## Snapshots
+
+The snapshot record and rule are owned by [persistence.md](persistence.md#library-references). This doc fixes:
+
+- `kind` is the item's `kind`; `values` is the item's DTO without `id`, `revision` and `updatedAt`, parsed with the same Zod schema and built with the same `Model.create()`. A snapshot never reads the library.
+- "Library changed" is shown when the item's current values differ from `values` (deep compare); no extra field.
+- Commands that take a snapshot (e.g. choosing stock in design mode, assigning a tool or machine in plan mode) and `project.snapshot.update` ("update from library") are project document commands, one undo step each.
+
+## Storage
+
+| Item     | Path                                                 | Content                                                  |
+| -------- | ---------------------------------------------------- | -------------------------------------------------------- |
+| Manifest | `<appData>/library/library.json`                     | `{ format: 'dfyom-library', schemaVersion: 1 }`          |
+| Items    | `<appData>/library/{stock,tools,machines}/<id>.json` | One item DTO per file, pretty-printed, stable key order. |
+
+- Writes are atomic per file (temp + fsync + rename), like the [working folder](persistence.md#working-folder-writes). Every instance shares the folder; a write whose `revision` differs from the file on disk fails with `command.conflict`.
+- An item that does not load is listed with its error and never deleted or overwritten automatically ([pre-alpha rule](../conventions/error-handling/migrations.md#pre-alpha-exception-no-data-preservation-yet)).
+- Commands: `library.{stock,tool,machine}.{add,update,remove}`; queries `.get` and `.list` ([naming](commands.md#naming)). They are `effect` commands ([kinds](commands.md#command-definition)): written to disk at once, **not undoable**, no history entry, still logged in the action log.
+- `remove` asks for confirmation: its args schema requires `confirm: true` (`z.literal(true)`), so a call without it fails with `input.malformed`. The UI sets it after a confirmation dialog; agents and CLI pass it explicitly. Projects keep their snapshots of a removed item.
+
+## Files (planned)
+
+| File                                            | Contents                                                |
+| ----------------------------------------------- | ------------------------------------------------------- |
+| `src/core/library/item.ts`                      | Common fields, `LibraryItemKind`, `MaterialClass`       |
+| `src/core/library/stock.ts`, `stock.dto.ts`     | `Stock` model and Zod DTO schema                        |
+| `src/core/library/tool.ts`, `tool.dto.ts`       | `Tool` model (per-type invariants), `CuttingPreset`     |
+| `src/core/library/machine.ts`, `machine.dto.ts` | `Machine` model and DTO                                 |
+| `src/core/library/snapshot.ts`                  | `Snapshot` model and DTO, `takeSnapshot`, changed-check |
+| `src/core/library/storage.ts`                   | `LibraryStorage` port (`list`, `get`, `put`, `remove`)  |
+| `src/core/library/commands.ts`                  | Library commands and queries                            |
+| `src/main/library/fs-storage.ts`                | Filesystem implementation of the port                   |

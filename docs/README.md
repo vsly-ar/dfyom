@@ -11,7 +11,7 @@ The docs are the **source of truth**. Code implements what is documented here; w
 | Product      | [roadmap.md](roadmap.md) – milestones as vertical slices                                                                                 | accepted    |
 | Product      | [plans/v0.1.md](plans/v0.1.md) – v0.1 tasks and status (living document)                                                                 | accepted    |
 | Product      | [glossary.md](glossary.md) – domain terms (industry standard)                                                                            | draft       |
-| Modes        | [modes/design.md](modes/design.md) – DFM-first part design                                                                               | draft       |
+| Modes        | [modes/design.md](modes/design.md) – DFM-first part design; v0.1 operations                                                              | accepted    |
 | Modes        | [modes/plan.md](modes/plan.md) – setups, toolpaths, optimization, gCode export                                                           | draft       |
 | Modes        | [modes/run.md](modes/run.md) – machine control, sensors, automation                                                                      | draft       |
 | Architecture | [architecture/overview.md](architecture/overview.md) – processes, source layout, threading                                               | draft       |
@@ -20,6 +20,7 @@ The docs are the **source of truth**. Code implements what is documented here; w
 | Architecture | [architecture/persistence.md](architecture/persistence.md) – project archive, working folder, save/recovery                              | accepted    |
 | Architecture | [architecture/quantities.md](architecture/quantities.md) – units, tolerances, expressions (value objects)                                | accepted    |
 | Architecture | [architecture/geometry.md](architecture/geometry.md) – removal-based geometry, cutting-operation framework, layers                       | draft       |
+| Architecture | [architecture/library.md](architecture/library.md) – stock, tool and machine library; snapshots                                          | accepted    |
 | Conventions  | [conventions/error-handling/](conventions/error-handling/README.md) – Result/Option, AppError, invariant models, Zod parsing, migrations | implemented |
 | Conventions  | [conventions/logging.md](conventions/logging.md) – structured logs                                                                       | accepted    |
 | Conventions  | [conventions/testing.md](conventions/testing.md) – unit → virtual machine → real machine                                                 | draft       |
