@@ -138,6 +138,27 @@ describe('Quantity.parse: tolerance', () => {
     expect(tol('10 +1 / 0')).toBe('deviations 1..0')
   })
 
+  it('separates integer deviations at "/" unless a digit follows (unilateral +0/−x)', () => {
+    expect(tol('10 +0/-0.05')).toBe('deviations 0..-1/20')
+    expect(tol('10 +1/-0.05')).toBe('deviations 1..-1/20')
+    expect(tol('10 +0/−0.05')).toBe('deviations 0..-1/20')
+    expect(tol('10 +0.1/-0.05')).toBe('deviations 1/10..-1/20')
+  })
+
+  it('reads digits/digits as a fraction deviation when the pair still completes', () => {
+    expect(tol('1" +1/16"/-0')).toBe('deviations 127/80..0')
+    expect(tol('1 +1/16/-1/32', LENGTH_IN)).toBe('deviations 127/80..-127/160')
+    expect(tol('10 +1/2/0')).toBe('deviations 1/2..0')
+  })
+
+  it('falls back to integer deviations when the fraction reading cannot complete the pair', () => {
+    expect(tol('10 +1/0')).toBe('deviations 1..0') // not a zero denominator
+    expect(tol('10 +1/0 mm')).toBe('deviations 1..0')
+    // "+1/2": as a fraction the lower deviation is missing; as integers lower (+2) > upper (+1).
+    const e = expectErrCode(Quantity.parse('10 +1/2', LENGTH_MM), 'model.invariant')
+    expect(e.issues.map((i) => i.rule)).toEqual(['order'])
+  })
+
   it('gives deviations without a unit the value unit, else their own unit', () => {
     expect(tol('1" ±0.001')).toBe('symmetric 127/5000..-127/5000') // 0.001 in
     expect(tol('1 ±0.001', LENGTH_IN)).toBe('symmetric 127/5000..-127/5000')
@@ -175,7 +196,8 @@ describe('Quantity.parse: rejections', () => {
   it('rejects a zero denominator', () => {
     expect(rejects('1/0', 'quantity.syntax', 'zeroDenominator')).toMatchObject({ offset: 0 })
     rejects('2 3/0', 'quantity.syntax', 'zeroDenominator')
-    rejects('10 +1/0', 'quantity.syntax', 'zeroDenominator') // write "+1 / 0"
+    rejects('10 ±1/0', 'quantity.syntax', 'zeroDenominator')
+    rejects('10 +1/0/-1', 'quantity.syntax', 'zeroDenominator')
   })
 
   it('rejects text outside the grammar, with the offset', () => {
@@ -186,13 +208,14 @@ describe('Quantity.parse: rejections', () => {
       ['1,5', 1], // decimal comma
       ['1 000', 2],
       ['1 / 2', 2],
-      ['1/ 2', 2],
+      ['1/ 2', 1], // "/" without a digit after it is not a fraction
       ['- 1', 1], // no space between sign and number
       ['.', 1],
       ['1.5/2', 3],
       ['10 ±-0.05', 4],
       ['10 +0.1', 7],
-      ['10 +1/2', 7], // "1/2" is a fraction, so the "/" between deviations is missing
+      ['10 +1/', 6],
+      ['10 +1/2/', 8],
       ['10 +/−0.05', 4], // only ASCII "+/-" is a ± spelling
       ['10 ±0.05 mm x', 12],
       ['10 mm mm', 6],

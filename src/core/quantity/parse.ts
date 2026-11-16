@@ -103,8 +103,21 @@ class LiteralParser {
     }
     if (!SIGNS.has(this.peek() ?? ''))
       return this.unexpected(unitAllowed ? ['unit', 'tolerance', 'end'] : ['tolerance', 'end'])
+    // `+1/16/-0`: "1/16" is a fraction; `+1/0`, `+1/-0.05`: "/" separates integer deviations.
+    // Read an upper `digits/digits` as a fraction first; if the pair then cannot complete, read
+    // it as an integer followed by the separator. If both fail, report the fraction reading.
+    const start = this.pos
+    const asFraction = this.deviationPair(valueUnit, true)
+    if (asFraction.isOk() || asFraction.unwrapErr().code !== 'quantity.syntax') return asFraction
+    this.pos = start
+    const asIntegers = this.deviationPair(valueUnit, false)
+    return asIntegers.isOk() ? asIntegers : asFraction
+  }
+
+  /** `sign, dev, ws, "/", ws, [sign], dev` up to the end of the source. */
+  private deviationPair(valueUnit: UnitId, upperFraction: boolean): AppResult<ToleranceProps> {
     const upperNeg = this.sign()
-    const upper = this.deviation(valueUnit, true)
+    const upper = this.deviation(valueUnit, upperFraction)
     if (upper.isErr()) return upper
     this.skipWs()
     if (this.peek() !== '/') return this.unexpected(['/'])
@@ -113,6 +126,8 @@ class LiteralParser {
     const lowerNeg = SIGNS.has(this.peek() ?? '') ? this.sign() : false
     const lower = this.deviation(valueUnit)
     if (lower.isErr()) return lower
+    this.skipWs()
+    if (!this.atEnd()) return this.unexpected(['end'])
     const u = upper.unwrap()
     const l = lower.unwrap()
     return Ok({
@@ -123,8 +138,8 @@ class LiteralParser {
   }
 
   // dev = magnitude, [ ws, unit ]; a deviation without a unit takes the value's unit.
-  private deviation(valueUnit: UnitId, inPair = false): AppResult<Rational> {
-    const m = this.magnitudeWithUnit(inPair)
+  private deviation(valueUnit: UnitId, fraction = true): AppResult<Rational> {
+    const m = this.magnitudeWithUnit(fraction)
     if (m.isErr()) return m
     const { value, unit } = m.unwrap()
     return Ok(value.mul(UNITS[unit.unwrapOr(valueUnit)].factor))
@@ -133,14 +148,14 @@ class LiteralParser {
   // value = [ sign ], magnitude, [ ws, unit ]
   private quantityValue(): AppResult<Magnitude> {
     const negative = SIGNS.has(this.peek() ?? '') ? this.sign() : false
-    const m = this.magnitudeWithUnit(false)
+    const m = this.magnitudeWithUnit(true)
     if (m.isErr()) return m
     const { value, unit } = m.unwrap()
     return Ok({ value: negative ? value.neg() : value, unit })
   }
 
-  private magnitudeWithUnit(inPair: boolean): AppResult<Magnitude> {
-    const m = this.magnitude(inPair)
+  private magnitudeWithUnit(fraction: boolean): AppResult<Magnitude> {
+    const m = this.magnitude(fraction)
     if (m.isErr()) return m
     const save = this.pos
     this.skipWs()
@@ -150,8 +165,8 @@ class LiteralParser {
     return Ok({ value: m.unwrap(), unit: unit.unwrap() })
   }
 
-  // magnitude = mixed | fraction | decimal
-  private magnitude(inPair: boolean): AppResult<Rational> {
+  // magnitude = mixed | fraction | decimal. `fraction: false` reads `1/…` as the integer 1.
+  private magnitude(fraction: boolean): AppResult<Rational> {
     const start = this.pos
     if (this.peek() === '.') {
       this.pos++
@@ -162,7 +177,9 @@ class LiteralParser {
     const whole = this.digits()
     if (whole === '') return this.unexpected(['digit'])
 
-    if (this.peek() === '/') return this.fractionAfter(whole, start, inPair)
+    // A fraction needs a digit right after "/"; otherwise "/" is left for the deviation pair.
+    if (fraction && this.peek() === '/' && isDigit(this.src[this.pos + 1]))
+      return this.fractionAfter(whole, start)
 
     const rest = this.src.slice(this.pos)
     if (HYPHENATED_MIXED.test(rest)) {
@@ -182,7 +199,7 @@ class LiteralParser {
       const numStart = this.pos
       const num = this.digits()
       if (num !== '' && this.peek() === '/' && isDigit(this.src[this.pos + 1])) {
-        const frac = this.fractionAfter(num, numStart, inPair)
+        const frac = this.fractionAfter(num, numStart)
         if (frac.isErr()) return frac
         return Ok(Rational.int(BigInt(whole)).add(frac.unwrap()))
       }
@@ -196,21 +213,16 @@ class LiteralParser {
     return Ok(Rational.int(BigInt(whole)))
   }
 
-  // fraction = digits, "/", digits (no spaces inside); `pos` is at the "/".
-  private fractionAfter(num: string, start: number, inPair: boolean): AppResult<Rational> {
+  // fraction = digits, "/", digits (no spaces inside); `pos` is at the "/", a digit follows.
+  private fractionAfter(num: string, start: number): AppResult<Rational> {
     this.pos++
     const den = this.digits()
-    if (den === '') return this.unexpected(['digit'])
     const r = Rational.create(BigInt(num), BigInt(den))
     if (r.isOk()) return r
-    return reject(
-      'quantity.syntax',
-      'zeroDenominator',
-      inPair
-        ? 'zero denominator; separate integer deviations with spaces, e.g. "+1 / 0"'
-        : 'zero denominator',
-      { offset: start, expected: ['digit'] },
-    )
+    return reject('quantity.syntax', 'zeroDenominator', 'zero denominator', {
+      offset: start,
+      expected: ['digit'],
+    })
   }
 
   /** A unit token if one starts here; quantity.unit if it is unknown or of another kind. */

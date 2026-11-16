@@ -70,7 +70,8 @@ unit      = (* spellings from the table above *) ;
 - Source length ≤ 256 characters (UTF-16 code units, i.e. `string.length`; rule `maxLength`).
 - A `unit` token is a run of letters (optionally `letters/letters`, e.g. `mm/min`) or one symbol (`"″'′°%`). Any such token that is not a spelling of the field's kind is a `quantity.unit` error, so `1e3` (exponent) fails as unknown unit `e`.
 - `pm` is ASCII `+/-`/`+-` or `±` only (`+/−` with U+2212 is rejected).
-- In a deviation pair, `digits/digits` is always read as a fraction (no spaces inside, as in `fraction`): `+1/0` is a zero denominator and `+1/2` lacks the separating `/`. Write `+1 / 0` (spaces) when the upper deviation is an integer; `+0.1/0` needs none.
+- `/` starts a `fraction` only when a digit follows it directly; otherwise it is the deviation separator: `+0/-0.05`, `+1/−0.05`, `+0.1/0`.
+- In a deviation pair, an upper deviation `digits/digits` is read as a fraction when the rest still forms a pair (`+1/16"/-0`, `+1/2/0`); otherwise it is an integer followed by the separator (`+1/0` = +1/0, not a zero denominator). `+1/2` therefore means upper +1, lower +2 (rejected: `order` invariant). Spaces around the separator (`+1 / 0`) are always unambiguous.
 - Implementation: [`parse.ts`](../../src/core/quantity/parse.ts) (`parseLiteral`), used by `Quantity.parse`.
 
 ## Tolerance
