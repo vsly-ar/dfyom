@@ -25,12 +25,18 @@ Concrete tools are chosen in [plan mode](plan.md).
 - Every operation and surface carries a **tolerance** – loose by default.
 - Every operation/surface may carry **references** – part zero by default.
 
-## Cutouts
+Values are [quantities](../architecture/quantities.md) (units, tolerances, expressions).
 
-Cutout operations (profile, straight/curved line and shape cuts) may include **tabs**.
+## Retained regions: tabs and fillets
+
+Cutting operations can leave zones standing: cutout operations (profile, straight/curved line and shape cuts) may include **tabs**, and pockets may leave **fillets**. Both use one mechanism – [geometry.md#cutting-operation-framework](../architecture/geometry.md#cutting-operation-framework).
+
+## Carving and engraving
+
+Carving and engraving work from **vectors** (SVG/DXF or drawn paths); raster images are traced to vectors on import. Each operation (engraving, V-carving, vector relief) has a profile and a tolerance; plan mode expands it into passes – [geometry.md#carving-and-engraving-vector-based](../architecture/geometry.md#carving-and-engraving-vector-based).
 
 ## Open questions
 
 - Data model for operations vs. features (composition, parameter inheritance).
 - How generalized tool requirements are expressed and matched against tool libraries.
-- Geometry kernel / representation (see future ADR).
+- Geometry representation: [ADR 0007](../decisions/0007-layered-geometry-without-brep-kernel.md) (pending spike).

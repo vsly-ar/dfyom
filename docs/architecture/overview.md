@@ -32,5 +32,6 @@ Heavy operations (toolpath generation, simulation, optimization) run off the UI 
 
 ## Open questions
 
-- Command layer design shared by UI, agent API and CLI (undo/redo, action log that agents can observe).
-- Persistence format for projects and libraries, and its migration strategy (ties into [error-handling/migrations.md](../conventions/error-handling/migrations.md)).
+- Command layer design: [commands.md](commands.md) ([ADR 0005](../decisions/0005-shared-command-layer.md)).
+- Persistence: [persistence.md](persistence.md) ([ADR 0006](../decisions/0006-project-archive-with-working-folder.md)).
+- Geometry: [geometry.md](geometry.md) ([ADR 0007](../decisions/0007-layered-geometry-without-brep-kernel.md)).
