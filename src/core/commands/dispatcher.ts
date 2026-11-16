@@ -6,6 +6,7 @@
  */
 import { freeze } from 'immer'
 import { summarizeArgs } from '../../shared/boundary'
+import type { AppError } from '../../shared/errors/app-error'
 import { parseWith } from '../../shared/parse'
 import {
   Err,
@@ -41,6 +42,7 @@ import type { AnyCommand, BuiltinCommand, DocumentCommand } from './define'
 import {
   applyDocPatches,
   DEFAULT_HISTORY_LIMITS,
+  entrySize,
   executeDocumentCommand,
   History,
   type HistoryEntry,
@@ -76,10 +78,27 @@ export interface DispatcherOptions {
   readonly ids?: IdGenerator
   readonly clock?: Clock
   readonly policy?: PermissionPolicy
+  /** Action-log limits (defaults in action-log.ts). */
   readonly logCapacity?: number
+  readonly logMaxChars?: number
+  /** Receives action-log listener throws (they never break a dispatch). */
+  readonly onListenerError?: (error: AppError) => void
   readonly historyLimits?: HistoryLimits
   /** Min interval between delivered progress ticks of a job. */
   readonly progressIntervalMs?: number
+  /** Finished jobs kept for `job(id)` and `job.*` (oldest evicted first; default 100). */
+  readonly maxFinishedJobs?: number
+}
+
+/** JSON copy for log events: never freezes or shares caller-owned objects. */
+function jsonCopy(value: unknown): unknown {
+  if (value === undefined) return undefined
+  const r = tryCatch(
+    () => JSON.parse(JSON.stringify(value)) as unknown,
+    'internal.unexpected',
+    'unserializable',
+  )
+  return r.isOk() ? r.unwrap() : '[unserializable]'
 }
 
 export interface Dispatcher {
@@ -122,6 +141,8 @@ class ProjectDispatcher implements Dispatcher {
   private readonly actionLog: WritableActionLog
   private readonly undo: History
   private readonly jobs = new Map<string, JobRun>()
+  private readonly finishedJobs: string[] = []
+  private readonly maxFinishedJobs: number
   /** Per source: the later of its last read revision and its last own commit. */
   private readonly baseline = new Map<string, number>()
   private tail: Promise<unknown> = Promise.resolve()
@@ -134,7 +155,12 @@ class ProjectDispatcher implements Dispatcher {
     this.clock = o.clock ?? systemClock
     this.policy = o.policy ?? defaultPermissionPolicy
     this.progressIntervalMs = o.progressIntervalMs ?? 100
-    this.actionLog = createActionLog(o.logCapacity === undefined ? {} : { capacity: o.logCapacity })
+    this.maxFinishedJobs = o.maxFinishedJobs ?? 100
+    this.actionLog = createActionLog({
+      ...(o.logCapacity === undefined ? {} : { capacity: o.logCapacity }),
+      ...(o.logMaxChars === undefined ? {} : { maxChars: o.logMaxChars }),
+      ...(o.onListenerError === undefined ? {} : { onListenerError: o.onListenerError }),
+    })
     this.undo = new History(o.historyLimits ?? DEFAULT_HISTORY_LIMITS)
   }
 
@@ -159,29 +185,55 @@ class ProjectDispatcher implements Dispatcher {
     return j === undefined ? None : Some(j)
   }
 
+  /** Never throws: any stray throw (schema, handler) becomes `internal.unexpected`. */
   query(name: string, rawArgs: unknown, source: Source): AppResult<QueryOutcome> {
+    const ran = tryCatch(
+      () => this.runQuery(name, rawArgs, source),
+      'internal.unexpected',
+      `query ${name} threw`,
+    )
+    return ran.isOk() ? ran.unwrap() : Err(ran.unwrapErr())
+  }
+
+  private runQuery(name: string, rawArgs: unknown, source: Source): AppResult<QueryOutcome> {
     const found = this.registry.query(name)
     if (found.isNone()) return fail('command.unknown', `unknown query ${name}`, { where: 'query' })
     const def = found.unwrap()
     const args = parseWith(def.args, rawArgs, name)
     if (args.isErr()) return args
     const revision = this.rev
-    const ran = tryCatch(
-      () => def.run(this.current, args.unwrap(), { source }),
-      'internal.unexpected',
-      `${name} threw`,
-    )
-    const value = ran.isOk() ? ran.unwrap() : Err(ran.unwrapErr())
+    const value = def.run(this.current, args.unwrap(), { source })
     if (value.isErr()) return Err(value.unwrapErr())
     this.recordBaseline(source, revision)
     return Ok({ value: value.unwrap(), revision })
   }
 
+  /** Never rejects: any stray throw becomes `internal.unexpected` (and is logged). */
   async dispatch(
     name: string,
     rawArgs: unknown,
     source: Source,
     opts: DispatchOptions = {},
+  ): AsyncAppResult<CommandOutcome> {
+    const ran = await tryAsync(
+      () => this.pipeline(name, rawArgs, source, opts),
+      'internal.unexpected',
+      `dispatch of ${name} threw`,
+    )
+    if (ran.isOk()) return ran.unwrap()
+    const logged = tryCatch(
+      () => this.logged(name, rawArgs, source, Err(ran.unwrapErr())),
+      'internal.unexpected',
+      'logging failed',
+    )
+    return logged.isOk() ? logged.unwrap() : Err(ran.unwrapErr())
+  }
+
+  private async pipeline(
+    name: string,
+    rawArgs: unknown,
+    source: Source,
+    opts: DispatchOptions,
   ): AsyncAppResult<CommandOutcome> {
     // 1. Look up
     const found = this.registry.command(name)
@@ -196,7 +248,8 @@ class ProjectDispatcher implements Dispatcher {
     // 2. Parse args
     const parsed = parseWith(def.args, rawArgs, name)
     if (parsed.isErr()) return this.logged(name, rawArgs, source, Err(parsed.unwrapErr()))
-    const args: unknown = parsed.unwrap()
+    // Frozen once: the same args go to the handler, the history entry and the log.
+    const args: unknown = freeze(parsed.unwrap(), true)
     // 3. Enqueue (FIFO; a failing step never breaks the chain)
     const run = this.tail.then(() => this.execute(def, args, source, opts))
     this.tail = run.then(
@@ -295,28 +348,43 @@ class ProjectDispatcher implements Dispatcher {
     const value = ran.result.unwrap()
     if (ran.patches.length === 0)
       return this.logged(def.name, args, ctx.source, Ok({ value, revision: this.rev }))
+    // Everything that can fail is computed before the commit: after it, nothing may throw.
+    const prepared = tryCatch(
+      () => ({
+        title: def.title(args),
+        size: entrySize({ args, patches: ran.patches, inversePatches: ran.inversePatches }),
+      }),
+      'internal.unexpected',
+      `${def.name}: title or history entry failed`,
+    )
+    if (prepared.isErr()) return this.logged(def.name, args, ctx.source, Err(prepared.unwrapErr()))
+    const { title, size } = prepared.unwrap()
+    const source = freeze({ kind: ctx.source.kind, id: ctx.source.id }, true)
     const revisionBefore = this.rev
-    this.commit(ran.next, ctx.source)
+    this.commit(ran.next, source)
     const outcome = Ok({ value, revision: this.rev })
-    const event = this.emit(ctx.source, {
+    const event = this.emit(source, {
       type: 'command',
       name: def.name,
       args: summarizeArgs(args),
       outcome: toWire(Ok(value)),
       patches: ran.patches,
     })
-    this.undo.push({
-      seq: event.seq,
-      command: def.name,
-      args,
-      source: ctx.source,
-      title: def.title(args),
-      patches: ran.patches,
-      inversePatches: ran.inversePatches,
-      revisionBefore,
-      revisionAfter: this.rev,
-      at: event.at,
-    })
+    this.undo.push(
+      {
+        seq: event.seq,
+        command: def.name,
+        args,
+        source,
+        title,
+        patches: ran.patches,
+        inversePatches: ran.inversePatches,
+        revisionBefore,
+        revisionAfter: this.rev,
+        at: event.at,
+      },
+      size,
+    )
     return outcome
   }
 
@@ -393,14 +461,16 @@ class ProjectDispatcher implements Dispatcher {
       id: jobId,
       startRevision: this.rev,
       progressIntervalMs: this.progressIntervalMs,
-      onLifecycle: (state, outcome) =>
+      onLifecycle: (state, outcome) => {
         this.emit(ctx.source, {
           type: 'job',
           jobId,
           name: def.name,
           state,
           ...(outcome === undefined ? {} : { outcome: toWire(outcome) }),
-        }),
+        })
+        if (state === 'finished') this.retireJob(jobId)
+      },
     })
     this.jobs.set(jobId, job)
     const out = this.logged(
@@ -413,8 +483,30 @@ class ProjectDispatcher implements Dispatcher {
     return out
   }
 
+  /** Keeps the newest `maxFinishedJobs` finished jobs; evicted ids answer like unknown ones. */
+  private retireJob(jobId: string): void {
+    this.finishedJobs.push(jobId)
+    while (this.finishedJobs.length > this.maxFinishedJobs) {
+      const old = this.finishedJobs.shift()
+      if (old !== undefined) this.jobs.delete(old)
+    }
+  }
+
+  /** Args and outcomes are JSON-copied so freezing the event never touches caller-owned objects. */
   private emit(source: Source, body: ActionEventBody) {
-    return this.actionLog.append({ ...body, at: this.nowIso(), source, revision: this.rev })
+    const copied = {
+      ...body,
+      ...('args' in body ? { args: jsonCopy(body.args) } : {}),
+      ...('outcome' in body && body.outcome !== undefined
+        ? { outcome: jsonCopy(body.outcome) }
+        : {}),
+    } as ActionEventBody
+    return this.actionLog.append({
+      ...copied,
+      at: this.nowIso(),
+      source: { kind: source.kind, id: source.id },
+      revision: this.rev,
+    })
   }
 
   /** Step 7 for dispatches without patches: log one command event, return the result. */

@@ -102,7 +102,8 @@ export class JobRun<R = unknown> implements JobHandle<R> {
   private lastEmitMs = Number.NEGATIVE_INFINITY
   private readonly listeners = new Set<(p: JobProgress) => void>()
   private readonly controller = new AbortController()
-  private wake: (() => void) | undefined
+  /** Every checkpoint currently parked (a job may await several at once). */
+  private waiters: (() => void)[] = []
   private begin: () => void = () => {}
 
   constructor(
@@ -166,14 +167,14 @@ export class JobRun<R = unknown> implements JobHandle<R> {
   }
 
   private wakeUp(): void {
-    const w = this.wake
-    this.wake = undefined
-    w?.()
+    const all = this.waiters
+    this.waiters = []
+    for (const w of all) w()
   }
 
   private async checkpoint(): Promise<void> {
     while (this.currentState === 'paused' && !this.controller.signal.aborted)
-      await new Promise<void>((resolve) => (this.wake = resolve))
+      await new Promise<void>((resolve) => this.waiters.push(resolve))
     this.controller.signal.throwIfAborted()
   }
 

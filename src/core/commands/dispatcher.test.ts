@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { z } from 'zod'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
 import { Ok, fail } from '../../shared/result'
 import { newProjectDoc, type ProjectDoc } from '../project/document'
@@ -116,6 +117,107 @@ describe('dispatch: document commands', () => {
   })
 })
 
+describe('robustness', () => {
+  const titleCrash: AnyCommand = {
+    ...renameProject,
+    name: 'project.title.crash',
+    title: () => {
+      throw new Error('title bug')
+    },
+  }
+  const leakDraft: AnyCommand = {
+    ...renameProject,
+    name: 'project.draft.leak',
+    run(draft: { name: string }, args: { name: string }) {
+      draft.name = args.name
+      return Ok({ leaked: draft })
+    },
+  }
+  const noteCommand: AnyCommand = {
+    ...setUnitSystem,
+    name: 'project.note.update',
+    args: z.object({ unitSystem: z.enum(['mm', 'inch']), note: z.string() }),
+  }
+  const throwingSchema: AnyCommand = {
+    ...renameProject,
+    name: 'project.schema.crash',
+    args: z.object({}).refine(() => {
+      throw new Error('refine bug')
+    }),
+  }
+
+  it('a throwing title → internal.unexpected, nothing committed, dispatch resolves', async () => {
+    const { d, events } = setup([titleCrash])
+    expectErrCode(await d.dispatch('project.title.crash', { name: 'X' }, ui), 'internal.unexpected')
+    expect(d.doc).toBe(initial)
+    expect(d.revision).toBe(0)
+    expect(d.history.undoable).toEqual([])
+    expect(events).toHaveLength(1)
+  })
+
+  it('a throwing log listener does not break dispatch, state or other listeners', async () => {
+    const reported: unknown[] = []
+    const { d, events } = setup([], { onListenerError: (e) => reported.push(e.code) })
+    d.log.subscribe({}, () => {
+      throw new Error('listener bug')
+    })
+    const after: number[] = []
+    d.log.subscribe({}, (e) => after.push(e.seq))
+    expectOk(await rename(d, 'A'))
+    expect(d.revision).toBe(1)
+    expect(d.history.undoable).toHaveLength(1)
+    expect(events).toHaveLength(1)
+    expect(after).toEqual([1])
+    expect(reported).toEqual(['internal.unexpected'])
+  })
+
+  it('dispatch and query never reject/throw, even when a schema throws', async () => {
+    const { d } = setup([throwingSchema])
+    expectErrCode(await d.dispatch('project.schema.crash', {}, ui), 'internal.unexpected')
+    expectOk(await rename(d, 'still works'))
+  })
+
+  it('stored args and patches are deeply frozen and cannot corrupt undo/redo', async () => {
+    const { d } = setup()
+    let mutated = true
+    d.log.subscribe({ withPatches: true }, (e) => {
+      if (e.type !== 'command' || e.patches === undefined) return
+      try {
+        ;(e.patches[0] as { value: unknown }).value = 'evil'
+      } catch {
+        mutated = false
+      }
+    })
+    expectOk(await rename(d, 'A'))
+    expect(mutated).toBe(false)
+    const entry = d.history.undoable[0]
+    expect(Object.isFrozen(entry?.args)).toBe(true)
+    expect(() => {
+      ;(entry?.inversePatches[0] as { value: unknown }).value = 'evil'
+    }).toThrow(TypeError)
+    expectOk(await d.dispatch('history.undo', {}, ui))
+    expect(d.doc).toEqual(initial)
+    expectOk(await d.dispatch('history.redo', {}, ui))
+    expect(d.doc.name).toBe('A')
+  })
+
+  it('a result containing draft proxies → internal.unexpected, no commit, log stays JSON', async () => {
+    const { d } = setup([leakDraft])
+    expectErrCode(await d.dispatch('project.draft.leak', { name: 'X' }, ui), 'internal.unexpected')
+    expect(d.doc).toBe(initial)
+    expect(d.revision).toBe(0)
+    expect(() => JSON.stringify(d.log.since(0, { withPatches: true }))).not.toThrow()
+  })
+
+  it('history size counts args, not only patches', async () => {
+    const { d } = setup([noteCommand], { historyLimits: { maxEntries: 100, maxChars: 1500 } })
+    const note = 'n'.repeat(1000)
+    expectOk(await d.dispatch('project.note.update', { unitSystem: 'inch', note }, ui))
+    expectOk(await d.dispatch('project.note.update', { unitSystem: 'mm', note }, ui))
+    expect(d.history.undoable).toHaveLength(1)
+  })
+})
+
 describe('undo / redo', () => {
   it('undo applies inverse patches; redo re-applies patches without re-running the handler', async () => {
     const { d, events } = setup()
@@ -172,7 +274,7 @@ describe('undo / redo', () => {
   })
 
   it('caps the history by entry count', async () => {
-    const { d } = setup([], { historyLimits: { maxEntries: 2, maxPatchChars: 1e9 } })
+    const { d } = setup([], { historyLimits: { maxEntries: 2, maxChars: 1e9 } })
     for (const n of ['A', 'B', 'C']) expectOk(await rename(d, n))
     expect(d.history.undoable.map((e) => e.args)).toEqual([{ name: 'B' }, { name: 'C' }])
   })

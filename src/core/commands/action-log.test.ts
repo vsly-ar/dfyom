@@ -13,6 +13,38 @@ const cmd = (name: string, source = uiSource()): NewActionEvent => ({
   patches: [{ op: 'replace', path: ['name'], value: name }],
 })
 
+describe('action log size cap', () => {
+  it('drops the oldest events when the serialized size exceeds maxChars', () => {
+    const log = createActionLog({ capacity: 100, maxChars: 2000 })
+    const big = (n: number) =>
+      ({ ...cmd('project.a.update'), args: 'x'.repeat(n) }) as NewActionEvent
+    log.append(big(600))
+    log.append(big(600))
+    log.append(big(600))
+    expect(log.since(0).map((e) => e.seq)).toEqual([2, 3])
+  })
+
+  it('always keeps the newest event', () => {
+    const log = createActionLog({ maxChars: 10 })
+    log.append(cmd('project.a.update'))
+    log.append(cmd('project.b.update'))
+    expect(log.since(0).map((e) => e.seq)).toEqual([2])
+  })
+
+  it('isolates throwing listeners and reports them', () => {
+    const reported: string[] = []
+    const log = createActionLog({ onListenerError: (e) => reported.push(e.code) })
+    const got: number[] = []
+    log.subscribe({}, () => {
+      throw new Error('bug')
+    })
+    log.subscribe({}, (e) => got.push(e.seq))
+    expect(() => log.append(cmd('project.a.update'))).not.toThrow()
+    expect(got).toEqual([1])
+    expect(reported).toEqual(['internal.unexpected'])
+  })
+})
+
 describe('action log', () => {
   it('assigns increasing seq numbers starting at 1', () => {
     const log = createActionLog()

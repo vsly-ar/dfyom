@@ -2,10 +2,12 @@
  * Observable stream of everything dispatched: event types, ring buffer, subscriptions.
  * Doc: docs/architecture/commands.md#action-log
  *
- * Listeners run synchronously inside the dispatcher and must not throw.
+ * Listeners run synchronously inside the dispatcher; a throwing listener is isolated (reported
+ * via `onListenerError`), so it can never break a dispatch. Events are deeply frozen.
  */
-import type { Patch } from 'immer'
-import type { ResultWire } from '../../shared/result'
+import { freeze, type Patch } from 'immer'
+import type { AppError } from '../../shared/errors/app-error'
+import { tryCatch, type ResultWire } from '../../shared/result'
 import { sameSource, type Source } from './context'
 
 interface EventBase {
@@ -67,6 +69,7 @@ export interface WritableActionLog extends ActionLog {
 }
 
 export const DEFAULT_LOG_CAPACITY = 1000
+export const DEFAULT_LOG_MAX_CHARS = 20_000_000
 
 function eventName(e: ActionEvent): string {
   switch (e.type) {
@@ -91,21 +94,46 @@ function view(f: LogFilter, e: ActionEvent): ActionEvent {
   return rest
 }
 
-export function createActionLog(opts: { capacity?: number } = {}): WritableActionLog {
+export interface ActionLogOptions {
+  /** Max retained events (default 1 000). */
+  readonly capacity?: number
+  /** Max total JSON size of retained events, in characters (default 20 M); the newest is always kept. */
+  readonly maxChars?: number
+  /** Receives listener throws as `internal.unexpected` (default: dropped). Other listeners still run. */
+  readonly onListenerError?: (error: AppError) => void
+}
+
+function jsonSize(e: ActionEvent): number {
+  const r = tryCatch(() => JSON.stringify(e).length, 'internal.unexpected', 'unserializable event')
+  return r.isOk() ? r.unwrap() : 0
+}
+
+export function createActionLog(opts: ActionLogOptions = {}): WritableActionLog {
   const capacity = opts.capacity ?? DEFAULT_LOG_CAPACITY
-  const buffer: ActionEvent[] = []
+  const maxChars = opts.maxChars ?? DEFAULT_LOG_MAX_CHARS
+  const buffer: { event: ActionEvent; size: number }[] = []
   const subscribers = new Set<{ filter: LogFilter; listener: (e: ActionEvent) => void }>()
   let lastSeq = 0
+  let totalChars = 0
+  const deliver = (listener: (e: ActionEvent) => void, e: ActionEvent) => {
+    const r = tryCatch(() => listener(e), 'internal.unexpected', 'action-log listener threw')
+    if (r.isErr())
+      opts.onListenerError?.(r.unwrapErr().withContext('ActionLog.append', { seq: e.seq }))
+  }
   return {
     get lastSeq() {
       return lastSeq
     },
     append(e) {
-      const event = { ...e, seq: ++lastSeq } as ActionEvent
-      buffer.push(event)
-      if (buffer.length > capacity) buffer.shift()
+      // Frozen once: events (and the patches/args they share with history) are read-only for all.
+      const event = freeze({ ...e, seq: ++lastSeq } as ActionEvent, true)
+      const size = jsonSize(event)
+      buffer.push({ event, size })
+      totalChars += size
+      while (buffer.length > 1 && (buffer.length > capacity || totalChars > maxChars))
+        totalChars -= buffer.shift()?.size ?? 0
       for (const s of [...subscribers])
-        if (matches(s.filter, event)) s.listener(view(s.filter, event))
+        if (matches(s.filter, event)) deliver(s.listener, view(s.filter, event))
       return event
     },
     subscribe(filter, listener) {
@@ -116,7 +144,10 @@ export function createActionLog(opts: { capacity?: number } = {}): WritableActio
       }
     },
     since(seq, filter = {}) {
-      return buffer.filter((e) => e.seq > seq && matches(filter, e)).map((e) => view(filter, e))
+      return buffer
+        .map((b) => b.event)
+        .filter((e) => e.seq > seq && matches(filter, e))
+        .map((e) => view(filter, e))
     },
   }
 }

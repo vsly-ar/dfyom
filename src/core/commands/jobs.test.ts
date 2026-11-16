@@ -7,22 +7,26 @@ import type { ActionEvent } from './action-log'
 import { getProject, renameProject } from './commands.fixture'
 import type { JobProgress } from './context'
 import { defineCommand } from './define'
-import { createDispatcher } from './dispatcher'
+import { createDispatcher, type DispatcherOptions } from './dispatcher'
 import type { WorkerTask } from './jobs'
 import { createRegistry } from './registry'
 import { agentSource, fakeClock, fakeIds, uiSource } from './testing'
 
 const ui = uiSource()
 
+const settle = () => new Promise((r) => setTimeout(r, 0))
+
 /** Steps are released one at a time by the test via `step()`. */
 function stepper() {
   const waiting: (() => void)[] = []
   return {
     wait: () => new Promise<void>((r) => waiting.push(r)),
+    /** How many handlers are parked in `wait()` (not in a checkpoint). */
+    pending: () => waiting.length,
     step: async () => {
-      while (waiting.length === 0) await new Promise((r) => setTimeout(r, 0))
+      while (waiting.length === 0) await settle()
       waiting.shift()?.()
-      await new Promise((r) => setTimeout(r, 0))
+      await settle()
     },
   }
 }
@@ -32,9 +36,10 @@ const double: WorkerTask<number, number> = {
   run: async (n) => Ok(n * 2),
 }
 
-function setup() {
+function setup(opts: Partial<DispatcherOptions> = {}) {
   const s = stepper()
   const clock = fakeClock(0)
+  // Each step: wait for the test, report progress, then a checkpoint (where pause/abort act).
   const generate = defineCommand({
     kind: 'job',
     name: 'plan.toolpath.generate',
@@ -45,18 +50,33 @@ function setup() {
     result: z.object({ name: z.string(), doubled: z.number() }),
     async run(doc, args, ctx) {
       for (let i = 0; i < args.steps; i++) {
-        await ctx.checkpoint()
         await s.wait()
         clock.advance(40)
         ctx.progress({ done: i + 1, total: args.steps })
+        await ctx.checkpoint()
       }
       const doubled = await ctx.services.workers.run(double, args.steps, ctx)
       if (doubled.isErr()) return doubled
       return Ok({ name: doc.name, doubled: doubled.unwrap() })
     },
   })
+  // Several concurrent checkpoints in one job (e.g. parallel sub-tasks).
+  const parallel = defineCommand({
+    kind: 'job',
+    name: 'plan.toolpath.check',
+    summary: 'Check toolpaths in parallel (test job).',
+    title: () => 'Check toolpaths',
+    machine: false,
+    args: z.object({}),
+    result: z.null(),
+    async run(_doc, _args, ctx) {
+      await s.wait()
+      await Promise.all([ctx.checkpoint(), ctx.checkpoint(), ctx.checkpoint()])
+      return Ok(null)
+    },
+  })
   const registry = expectOk(
-    createRegistry({ commands: [renameProject, generate], queries: [getProject] }),
+    createRegistry({ commands: [renameProject, generate, parallel], queries: [getProject] }),
   )
   const d = createDispatcher({
     registry,
@@ -64,15 +84,19 @@ function setup() {
     ids: fakeIds(),
     clock,
     progressIntervalMs: 100,
+    ...opts,
   })
   const events: ActionEvent[] = []
   d.log.subscribe({}, (e) => events.push(e))
-  const start = async (steps: number) => {
-    const out = expectOk(await d.dispatch('plan.toolpath.generate', { steps }, ui))
+  const startNamed = async (name: string, args: unknown) => {
+    const out = expectOk(await d.dispatch(name, args, ui))
     const { jobId } = out.value as { jobId: string }
     return d.job(jobId).unwrap()
   }
-  return { d, s, events, start }
+  const start = (steps: number) => startNamed('plan.toolpath.generate', { steps })
+  const control = async (verb: 'pause' | 'resume' | 'abort', jobId: string) =>
+    expectOk(await d.dispatch(`job.${verb}`, { jobId }, ui))
+  return { d, s, events, start, startNamed, control }
 }
 
 const shape = (e: ActionEvent) =>
@@ -110,18 +134,18 @@ describe('jobs', () => {
     expect(job.progress).toEqual({ done: 5, total: 5 })
   })
 
-  it('pause holds the job at its next checkpoint; resume continues', async () => {
-    const { d, s, events, start } = setup()
+  it('pause parks the handler in its next checkpoint; resume continues', async () => {
+    const { s, events, start, control } = setup()
     const job = await start(2)
-    await s.step()
-    expect(expectOk(await d.dispatch('job.pause', { jobId: job.id }, ui)).value).toEqual({
-      state: 'paused',
-    })
+    expect((await control('pause', job.id)).value).toEqual({ state: 'paused' })
+    await s.step() // step 1 runs, then the handler reaches the checkpoint and parks there
+    await settle()
     expect(job.state).toBe('paused')
     expect(job.progress?.done).toBe(1)
-    await new Promise((r) => setTimeout(r, 5))
-    expect(job.progress?.done).toBe(1)
-    expectOk(await d.dispatch('job.resume', { jobId: job.id }, ui))
+    expect(s.pending()).toBe(0) // not waiting for step 2: held in checkpoint()
+    await control('resume', job.id)
+    await settle()
+    expect(s.pending()).toBe(1) // passed the checkpoint, now waits for step 2
     await s.step()
     expectOk(await job.result)
     expect(events.map(shape)).toEqual([
@@ -135,19 +159,36 @@ describe('jobs', () => {
     ])
   })
 
-  it('abort ends the job with op.aborted, also while paused', async () => {
-    const { d, s, start } = setup()
+  it('abort wakes a handler parked in checkpoint and ends with op.aborted', async () => {
+    const { s, start, control } = setup()
     const job = await start(3)
+    await control('pause', job.id)
     await s.step()
-    expectOk(await d.dispatch('job.pause', { jobId: job.id }, ui))
-    expectOk(await d.dispatch('job.abort', { jobId: job.id }, ui))
-    await s.step() // the handler finishes its current step, then its checkpoint throws
+    await settle()
+    expect(s.pending()).toBe(0) // parked in checkpoint()
+    await control('abort', job.id)
     expectErrCode(await job.result, 'op.aborted')
     expect(job.state).toBe('finished')
     // Control of a finished job is a no-op reporting its state.
-    expect(expectOk(await d.dispatch('job.resume', { jobId: job.id }, ui)).value).toEqual({
-      state: 'finished',
-    })
+    expect((await control('resume', job.id)).value).toEqual({ state: 'finished' })
+  })
+
+  it('resume wakes all concurrent checkpoints', { timeout: 1000 }, async () => {
+    const { s, startNamed, control } = setup()
+    const job = await startNamed('plan.toolpath.check', {})
+    await control('pause', job.id)
+    await s.step()
+    await control('resume', job.id)
+    expectOk(await job.result)
+  })
+
+  it('abort wakes all concurrent checkpoints', { timeout: 1000 }, async () => {
+    const { s, startNamed, control } = setup()
+    const job = await startNamed('plan.toolpath.check', {})
+    await control('pause', job.id)
+    await s.step()
+    await control('abort', job.id)
+    expectErrCode(await job.result, 'op.aborted')
   })
 
   it('unknown job ids are rejected', async () => {
@@ -157,6 +198,23 @@ describe('jobs', () => {
       'input.malformed',
     )
     expect(e.issues[0]).toMatchObject({ path: ['jobId'], rule: 'unknownJob' })
+  })
+
+  it('finished jobs are evicted beyond the retention limit', async () => {
+    const { d, s, start } = setup({ maxFinishedJobs: 1 })
+    const first = await start(1)
+    await s.step()
+    await first.result
+    const second = await start(1)
+    await s.step()
+    await second.result
+    expect(d.job(first.id).isNone()).toBe(true)
+    expect(d.job(second.id).isSome()).toBe(true)
+    const e = expectErrCode(
+      await d.dispatch('job.abort', { jobId: first.id }, ui),
+      'input.malformed',
+    )
+    expect(e.issues[0]).toMatchObject({ rule: 'unknownJob' })
   })
 
   it('the follow-up document command uses startRevision: conflict if the inputs changed', async () => {

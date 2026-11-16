@@ -8,10 +8,10 @@
  * - auto-freeze ON: committed documents are deeply frozen, so effect/job snapshots, replicas and
  *   history can never be mutated by accident. Cost: freezing new subtrees on each commit.
  */
-import { enablePatches, Immer, type Patch } from 'immer'
+import { enablePatches, freeze, Immer, isDraft, type Patch } from 'immer'
 import { z } from 'zod'
 import { parseWith } from '../../shared/parse'
-import { Err, tryCatch, type AppResult } from '../../shared/result'
+import { Err, fail, tryCatch, type AppResult } from '../../shared/result'
 import type { ProjectDoc } from '../project/document'
 import type { CommandContext, Source } from './context'
 import type { BuiltinCommand, DocumentCommand } from './define'
@@ -43,13 +43,38 @@ export function executeDocumentCommand<S extends z.ZodType, R>(
   const ran = tryCatch(() => def.run(draft, args, ctx), 'internal.unexpected', `${def.name} threw`)
   const result = ran.isOk() ? ran.unwrap() : Err(ran.unwrapErr())
   if (result.isErr()) return { result, next: doc, patches: [], inversePatches: [] }
+  // Draft proxies are revoked by finishDraft: a result holding one would poison the log.
+  if (containsDraft(result.unwrap()))
+    return {
+      result: fail('internal.unexpected', `${def.name} returned an Immer draft in its result`, {
+        where: def.name,
+      }),
+      next: doc,
+      patches: [],
+      inversePatches: [],
+    }
   let patches: Patch[] = []
   let inversePatches: Patch[] = []
   const next = immer.finishDraft(draft, (p, ip) => {
     patches = p
     inversePatches = ip
   }) as ProjectDoc
-  return { result, next, patches, inversePatches }
+  // Frozen once, then shared read-only by history, log events and subscribers.
+  return {
+    result,
+    next,
+    patches: freeze(patches, true),
+    inversePatches: freeze(inversePatches, true),
+  }
+}
+
+/** Deep check for Immer drafts in a handler result (plain objects and arrays). */
+function containsDraft(value: unknown, seen = new Set<object>()): boolean {
+  if (typeof value !== 'object' || value === null) return false
+  if (isDraft(value)) return true
+  if (seen.has(value)) return false
+  seen.add(value)
+  return Object.values(value).some((v) => containsDraft(v, seen))
 }
 
 /** Parses raw args with the command's schema, then executes. */
@@ -91,33 +116,49 @@ export interface HistoryEntry {
 export interface HistoryLimits {
   /** Max undo entries kept (oldest dropped first). */
   readonly maxEntries: number
-  /** Max total JSON size of all entries' patches, in characters (oldest dropped first). */
-  readonly maxPatchChars: number
+  /**
+   * Max total JSON size of all undo entries (args + patches + inverse patches), in characters.
+   * Oldest dropped first; the newest entry is always kept.
+   */
+  readonly maxChars: number
 }
 
-export const DEFAULT_HISTORY_LIMITS: HistoryLimits = { maxEntries: 500, maxPatchChars: 50_000_000 }
+export const DEFAULT_HISTORY_LIMITS: HistoryLimits = { maxEntries: 500, maxChars: 50_000_000 }
 
-function entrySize(e: HistoryEntry): number {
-  return JSON.stringify(e.patches).length + JSON.stringify(e.inversePatches).length
+/** JSON size of an entry's payload; throws on unserializable data (callers wrap in tryCatch). */
+export function entrySize(e: Pick<HistoryEntry, 'args' | 'patches' | 'inversePatches'>): number {
+  return (
+    (JSON.stringify(e.args) ?? '').length +
+    JSON.stringify(e.patches).length +
+    JSON.stringify(e.inversePatches).length
+  )
+}
+
+interface Sized {
+  readonly entry: HistoryEntry
+  readonly size: number
 }
 
 /** Linear, memory-only undo/redo stacks of one project. */
 export class History {
-  private readonly undoStack: { entry: HistoryEntry; size: number }[] = []
-  private redoStack: HistoryEntry[] = []
+  private readonly undoStack: Sized[] = []
+  private redoStack: Sized[] = []
   private totalSize = 0
 
   constructor(private readonly limits: HistoryLimits = DEFAULT_HISTORY_LIMITS) {}
 
-  /** A new document commit: push and clear redo. */
-  push(entry: HistoryEntry): void {
-    const size = entrySize(entry)
+  /** A new document commit: push and clear redo. `size` from `entrySize`, computed beforehand. */
+  push(entry: HistoryEntry, size: number): void {
     this.undoStack.push({ entry, size })
     this.totalSize += size
     this.redoStack = []
+    this.trim()
+  }
+
+  private trim(): void {
     while (
       this.undoStack.length > this.limits.maxEntries ||
-      (this.totalSize > this.limits.maxPatchChars && this.undoStack.length > 0)
+      (this.totalSize > this.limits.maxChars && this.undoStack.length > 1)
     ) {
       const dropped = this.undoStack.shift()
       if (dropped !== undefined) this.totalSize -= dropped.size
@@ -129,7 +170,7 @@ export class History {
   }
 
   get redoable(): readonly HistoryEntry[] {
-    return [...this.redoStack]
+    return this.redoStack.map((e) => e.entry)
   }
 
   peekUndo(): HistoryEntry | undefined {
@@ -137,7 +178,7 @@ export class History {
   }
 
   peekRedo(): HistoryEntry | undefined {
-    return this.redoStack.at(-1)
+    return this.redoStack.at(-1)?.entry
   }
 
   /** Moves the top undo entry to the redo stack (after its inverse patches were applied). */
@@ -145,16 +186,16 @@ export class History {
     const top = this.undoStack.pop()
     if (top === undefined) return
     this.totalSize -= top.size
-    this.redoStack.push(top.entry)
+    this.redoStack.push(top)
   }
 
   /** Moves the top redo entry back to the undo stack (after its patches were re-applied). */
   markRedone(): void {
     const top = this.redoStack.pop()
     if (top === undefined) return
-    const size = entrySize(top)
-    this.undoStack.push({ entry: top, size })
-    this.totalSize += size
+    this.undoStack.push(top)
+    this.totalSize += top.size
+    this.trim()
   }
 }
 

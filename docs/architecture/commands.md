@@ -114,6 +114,13 @@ Execute `document`: `createDraft(doc)` → `run` → on `Err` drop the draft (st
 
 `CommandOutcome` is `{ value, revision }`: the handler's result and the revision after the command; a job's `value` is `{ jobId }`. Steps 1–2 fail before queueing but are still logged (step 7). A rejected or failing command never blocks the queue.
 
+Robustness rules (all tested in `dispatcher.test.ts`):
+
+- `dispatch` never rejects and `query` never throws: any stray throw (schema, handler, title) becomes `internal.unexpected`.
+- Everything that can fail – the handler, `title(args)`, the history entry's size – runs **before** the commit; after the commit nothing can throw, so there is never a changed document without its history entry.
+- A document result that contains Immer drafts (e.g. `Ok({ d: draft })`) is a bug → `internal.unexpected`, no commit (drafts are revoked by `finishDraft`).
+- Parsed args, patches and inverse patches are deeply frozen once and shared read-only by the handler, history entries and log events; event `args`/`outcome` are JSON copies, so freezing never touches caller-owned objects.
+
 Error codes `command.unknown` (also for unknown queries), `command.conflict` (retryable) and `permission.denied` are in [`ERROR_CODES`](../../src/shared/errors/codes.ts).
 
 The default `PermissionPolicy` (`permission.ts`) is conservative until [run.md#safety](../modes/run.md#safety) is specified: UI sources are allowed, every other source kind is denied. The port is injected per dispatcher (`createDispatcher({ policy })`) and may be async.
@@ -125,7 +132,7 @@ The default `PermissionPolicy` (`permission.ts`) is conservative until [run.md#s
 - Undo applies the top entry's `inversePatches`; redo re-applies `patches` – handlers are never re-run, so generated ids and timestamps stay stable.
 - Any new document commit clears the redo stack. No coalescing: gestures already produce one command each.
 - `effect`/`job` commands never touch history. Opening or resetting a project starts an empty history.
-- Undo history is kept **in memory only** in v0.1, capped by count/size (defaults: 500 entries, 50 M chars of patch JSON; oldest dropped first); it is lost on close or crash.
+- Undo history is kept **in memory only** in v0.1, capped by count/size (defaults: 500 entries, 50 M chars of JSON counting args, patches and inverse patches; oldest dropped first, the newest entry is always kept); it is lost on close or crash.
 - The entry `seq` is the action-log `seq` of the command event that created it.
 - Undo/redo with nothing to do returns `Ok({ entrySeq: null })` and is logged as a plain `command` event; a real step returns `{ entrySeq }` and is logged as an `undo`/`redo` event.
 
@@ -171,8 +178,8 @@ interface ActionLog {
 - `outcome` is the command's value (not the whole `CommandOutcome`; the event has its own `revision`).
 - Each dispatch logs exactly one event: an `undo`/`redo` event for a real history step, otherwise a `command` event (also for `job.*` control and the dispatch that starts a job). Job lifecycle events (`started`, `paused`, `resumed`, `finished`) are additional events emitted on actual state changes.
 - `names` filters match `history.undo`/`history.redo` for undo/redo events and the job command's name for job events.
-- `since` returns only what the ring buffer (default 1 000 events) still holds: a subscriber that sees a gap after its last `seq` must resync the full document.
-- Listeners run synchronously in the dispatcher and must not throw.
+- `since` returns only what the ring buffer still holds (defaults: 1 000 events and 20 M chars of event JSON, oldest dropped first, the newest always kept): a subscriber that sees a gap after its last `seq` must resync the full document.
+- Events are deeply frozen. Listeners run synchronously in the dispatcher; a throwing listener is isolated (the others still run, the dispatch is unaffected) and reported as `internal.unexpected` to the optional `onListenerError` callback (`createDispatcher({ onListenerError })`), otherwise dropped.
 - Queries and job progress ticks are not logged here (progress: [Jobs](#long-running-commands-jobs)).
 - The log is not the persisted project history; persistence stays as defined in [persistence.md](persistence.md). MCP mapping: [llm-api.md](llm-api.md).
 
@@ -198,7 +205,8 @@ interface QueryDef<S extends z.ZodType, R> {
 - `JobHandle`: `state`, `progress` (throttled stream, separate from Results – [boundaries.md](../conventions/error-handling/boundaries.md#async-workers-cancellation)), `result: AsyncAppResult<R>`.
 - Control: `job.pause`, `job.resume`, `job.abort` commands (agent-callable, logged). Abort → `op.aborted`. Work runs in workers / the utility process per [ADR 0008](../decisions/0008-threading-split-by-job.md).
 - Undo: a job is not undoable. If its result changes `ProjectDoc`, it is applied by one `document` command at the end (one undo step), dispatched with `expectedRevision` = revision at job start → `command.conflict` if the inputs changed meanwhile. The handle exposes that revision as `startRevision`; in v0.1 the caller (adapter or script) dispatches the follow-up.
-- Pausing takes effect at the handler's next `ctx.checkpoint()`. Aborting rejects the pending/next checkpoint with an `AbortError`; a job that ends after an abort always yields `op.aborted`. Controlling a finished job is a no-op that reports `{ state: 'finished' }`; an unknown `jobId` → `input.malformed` (issue rule `unknownJob`).
+- Pausing takes effect at the handler's next `ctx.checkpoint()`. Aborting rejects every pending and later checkpoint with an `AbortError` (a handler may await several checkpoints concurrently; resume and abort wake them all); a job that ends after an abort always yields `op.aborted`. Controlling a finished job is a no-op that reports `{ state: 'finished' }`; an unknown `jobId` → `input.malformed` (issue rule `unknownJob`).
+- The dispatcher retains the newest 100 finished jobs (`maxFinishedJobs`); older ones are evicted, after which `job(id)` returns `None` and `job.*` answers like an unknown id. The `finished` log event keeps the outcome.
 - Heavy work goes through the `WorkerPort` in `ctx.services.workers`. Until task 2.9 the port is backed by `inProcessWorkers` (runs tasks inline); the handler itself runs in-process in the dispatcher's process.
 
 ## Concurrency
