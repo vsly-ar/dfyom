@@ -57,6 +57,11 @@ const nodeOnlyImports = {
   })),
   patterns: [
     {
+      // Logging: only the Logger port lives in src/shared (docs/conventions/logging.md).
+      group: ['pino', 'pino-*'],
+      message: 'pino belongs in the per-process logger implementations; use the Logger port.',
+    },
+    {
       group: ['node:*'],
       message: 'Node built-in: keep src/core and src/shared environment-neutral.',
     },

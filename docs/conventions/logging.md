@@ -1,6 +1,6 @@
 # Logging
 
-Status: accepted · Principle: [principles.md §6](../principles.md#6-performance-and-stability) · Decision: [ADR 0009](../decisions/0009-pino-for-logging.md) · Errors: [boundaries.md](error-handling/boundaries.md#entry-points-ui-agent-cli-automation)
+Status: implemented · Principle: [principles.md §6](../principles.md#6-performance-and-stability) · Decision: [ADR 0009](../decisions/0009-pino-for-logging.md) · Errors: [boundaries.md](error-handling/boundaries.md#entry-points-ui-agent-cli-automation)
 
 Diagnostic logs for developers, support and agents debugging the app: structured JSON via **pino** (v10, MIT), one file per app instance, on by default at `info`.
 
@@ -24,7 +24,7 @@ Diagnostic logs for developers, support and agents debugging the app: structured
 | `debug` | Every dispatched command, timings, IPC/worker messages, decisions inside a module.        | dev only        |
 | `trace` | High-volume detail (per progress tick, per file in an archive). Never on by default.      | no              |
 
-- Default level: `info` in packaged builds, `debug` in `npm run dev`. Override: `DFYOM_LOG_LEVEL` env var or `--log-level` (app and CLI); applies to all processes of the instance.
+- Default level: `info` in packaged builds, `debug` in unpackaged runs (`npm run dev`, `npm run preview`). Override: `DFYOM_LOG_LEVEL` env var or `--log-level` (app and CLI); the flag wins over the env var; an invalid value is ignored and logged once as `warn`. Applies to all processes of the instance (renderers get it as a window argument). Implementation: `resolveLogLevel`.
 - `AppError` uses the code's `severity` from [the registry](error-handling/app-error.md#error-code-registry); both share the names `debug`…`fatal`.
 
 ## Fields
@@ -45,25 +45,31 @@ pino's own fields (`level`, `time`, `msg`, `pid`) plus:
 | `jobId`    | Job context child           | Job id                                                                                     |
 | `ms`       | `timed()` helper            | Duration in milliseconds                                                                   |
 | `err`      | Error serializer            | `AppError.toJSON()`                                                                        |
+| `entry`    | `logAppError`               | `{ kind: 'ui', name: 'design.chamfer.apply' }`                                             |
+| `dropped`  | Forwarder                   | Entries dropped by the rate limit in the last second                                       |
 
-Names are fixed here; add a row before using a new top-level field.
+Names are fixed here; add a row before using a new cross-cutting top-level field. Event-specific data (`count`, `file`, …) may use other names, but never pino's own (`level`, `time`, `msg`, `pid`) or a name from this table with another meaning – pino would write the key twice.
 
 ## Port and helpers
 
 `src/shared` stays environment-neutral: it holds only types and pure helpers. Each process has its own implementation.
 
-| File                           | Contents                                                                                                                                                                                                            |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/shared/logging.ts`        | `Logger` (`trace`…`fatal(obj?, msg)`, `child(bindings)`, `isLevelEnabled`) – a structural subset of pino's logger; `LogFields`; `timed(log, msg, fn)`; `logAppError(log, err, entry)`; `serializeErr`; `noopLogger` |
-| `src/shared/testing/logger.ts` | `createTestLogger()`: records entries in memory for assertions                                                                                                                                                      |
-| `src/main/logging/logger.ts`   | Root pino logger, file sink, redaction, uncaught-error hooks                                                                                                                                                        |
-| `src/main/logging/forward.ts`  | Receives forwarded batches from renderers and the utility process and writes them through the root logger                                                                                                           |
-| `src/renderer/logging.ts`      | pino browser build; `transmit` batches to main via the preload API (contract in `src/shared/preload-api.ts`)                                                                                                        |
-| Utility process entry          | pino writing to a stream that posts batches to main over its `MessagePort`                                                                                                                                          |
-| Worker entry (both kinds)      | Logger posting entries over the [worker protocol](../decisions/0008-threading-split-by-job.md) to its owner, which forwards them                                                                                    |
-| CLI / headless entry           | Same root logger as main, with `--data-dir` log folder and a `warn`+ copy on stderr                                                                                                                                 |
+| File                               | Contents                                                                                                                                                                                                                                                                                                                                                                                                |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/shared/logging.ts`            | `Logger` (`trace`…`fatal(obj?, msg)`, `child(bindings)`, `isLevelEnabled`) – a structural subset of pino's logger; `LogFields`; `resolveLogLevel`; `timed(log, msg, fn)`; `logAppError(log, err, entry)`; `createLogReporter`; `serializeErr`; `noopLogger`; `LogRecord` (forwarding wire format); `createEntryLogger` and `createLogForwarder` (batching and drop limit, for every forwarding process) |
+| `src/shared/testing/logger.ts`     | `createTestLogger()`: records entries in memory for assertions                                                                                                                                                                                                                                                                                                                                          |
+| `src/main/logging/logger.ts`       | Root pino logger, file sink, redaction, uncaught-error hooks; no Electron import (reused by CLI/headless)                                                                                                                                                                                                                                                                                               |
+| `src/main/logging/retention.ts`    | Age and size cleanup of the log folder                                                                                                                                                                                                                                                                                                                                                                  |
+| `src/main/logging/forward.ts`      | Receives forwarded batches from renderers and the utility process and writes them through the root logger                                                                                                                                                                                                                                                                                               |
+| `src/main/logging/electron.ts`     | Electron wiring: log folder, level, dev pretty output, renderer IPC channel, boundary reporter                                                                                                                                                                                                                                                                                                          |
+| `src/renderer/src/logging.ts`      | pino browser build; `transmit` batches to main via the preload API (contract in `src/shared/preload-api.ts`)                                                                                                                                                                                                                                                                                            |
+| Utility process entry (not yet)    | pino writing to a stream that posts batches from `createLogForwarder` to main over its `MessagePort`                                                                                                                                                                                                                                                                                                    |
+| Worker entry, both kinds (not yet) | `createEntryLogger` + `createLogForwarder` posting batches over the [worker protocol](../decisions/0008-threading-split-by-job.md) to its owner, which forwards them                                                                                                                                                                                                                                    |
+| CLI / headless entry (not yet)     | `createMainLogging` from `src/main/logging/logger.ts` with the `<data-dir>/logs/` folder and a `warn`+ copy on stderr                                                                                                                                                                                                                                                                                   |
 
-- Only the main process (or the headless/CLI process) writes the file; every other process forwards. Renderers forward every entry at or above the instance level, so the file is the one place to look. Forwarding batches entries (≤ 100 ms or 50 entries) and drops beyond 1 000 entries/s per process, logging one `warn` with the drop count.
+- Only the main process (or the headless/CLI process) writes the file; every other process forwards. Renderers forward every entry at or above the instance level, so the file is the one place to look. Forwarding batches entries (≤ 100 ms or 50 entries) and drops beyond 1 000 entries/s per process, logging one `warn` (`dropped`) when the second ends.
+- The writing process sets `proc` (and `win` from the IPC sender) itself and discards forwarded values for its own keys (`level`, `time`, `msg`, `pid`, `proc`, `instance`, `app`, `win`); `time` is when main writes the entry (≤ 100 ms after it was logged). A malformed batch is dropped and reported once as `input.malformed`.
+- Renderers also write to the DevTools console in unpackaged runs only.
 - `timed(log, msg, fn)` logs `msg` with `ms` at `debug` (`warn` above a given budget) and returns `fn`'s result unchanged.
 - The dispatcher logs one `debug` line per dispatch (`cmd`, `source`, `rev`, `ms`, `ok`); failures are logged by the boundary, not here.
 
@@ -71,23 +77,24 @@ Names are fixed here; add a row before using a new top-level field.
 
 - The boundary reporter ([`atBoundary`](../../src/shared/boundary.ts)) calls `logAppError(log, err, entry)`, which logs at `err.severity` with `{ err: err.toJSON(), entry: { kind, name } }` and `err.message` as `msg`. Args are already in the entry frame, summarized by `summarizeArgs`.
 - Every logger registers `serializeErr` for the `err` key: `AppError` → `toJSON()` ([serialization](error-handling/app-error.md#serialization)); other `Error` → pino's standard serializer.
-- Uncaught exceptions and unhandled rejections become `internal.unexpected` and are logged at `fatal` (main, utility, CLI) or `error` (renderer, worker), then flushed before exit.
+- Uncaught exceptions and unhandled rejections become `internal.unexpected` and are logged at `fatal` (main, utility, CLI; then flushed and the process exits with code 1) or `error` (renderer, worker; the process keeps running).
 
 ## Redaction
 
-- Applied in the writing process with pino `redact` (censor `[redacted]`), so forwarded entries are covered too: keys `token`, `password`, `secret`, `authorization`, `cookie`, `apiKey` at the top level and up to 3 levels deep (explicit wildcard paths such as `*.token`; pino has no recursive wildcard).
+- Applied in the writing process with pino `redact` (censor `[redacted]`), so forwarded entries are covered too: keys `token`, `password`, `secret`, `authorization`, `cookie`, `apiKey` at the top level and up to 3 levels deep (explicit paths `token`, `*.token`, `*.*.token`, `*.*.*.token`; pino has no recursive wildcard, so deeper keys are not censored).
 - Frames and fields must not contain secrets in the first place ([app-error.md](error-handling/app-error.md)); redaction is the safety net.
 - File paths (including the home directory) are logged as they are in v0.1. Later: an "Export logs" action that redacts them for sharing.
 
 ## Files and rotation
 
 - Folder: Electron `app.getPath('logs')` (macOS `~/Library/Logs/DFYOM/`, Windows `%APPDATA%\DFYOM\logs\`, Linux `~/.config/DFYOM/logs/`), or `<data-dir>/logs/` headless.
-- File: `<startedAt>-<instance>.log`, JSON lines, one per instance; rotated with **pino-roll** (MIT) by size; rotate at **10 MB**; at startup and on rotation delete files older than **14 days**, then oldest first until the folder is ≤ **200 MB** (fixed in v0.1).
+- File: `<startedAt>-<instance>.<n>.log` (`startedAt` in UTC as `2026-11-16T10-20-30Z`; `n` = 1, 2, … per rotation, numbered by pino-roll), JSON lines, one series per instance; rotated with **pino-roll** (MIT) by size; rotate at **10 MB**; at startup and on rotation delete `*.log` files older than **14 days** (by modification time), then oldest first until the folder is ≤ **200 MB** (fixed in v0.1). The file being written is never deleted.
+- If the folder can't be opened, the process logs to stderr only and logs that at `error`.
 - The file sink runs **in-process** (pino-roll's `SonicBoom` stream as destination), not as a `pino.transport` worker, so bundling stays simple; revisit if logging shows up in profiles.
 
 ## Development
 
-- `npm run dev` additionally pretty-prints to the terminal with **pino-pretty** (dev dependency); the file stays JSON.
+- Unpackaged runs additionally pretty-print to the terminal (stderr) with **pino-pretty** (dev dependency, externalized in `electron.vite.config.ts` and loaded only then); the file stays JSON.
 - Read a log file pretty with `npx pino-pretty < file.log`; agents read the JSON directly.
 
 ## Logs vs. action log
