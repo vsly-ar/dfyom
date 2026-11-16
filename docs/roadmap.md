@@ -13,7 +13,7 @@ Milestones are vertical slices through all three modes. A milestone lists the do
 3. **Run:** stream the gCode to the **virtual machine** (GRBL emulator) and show progress.
 4. **Cross-cutting:** command layer with undo ([commands.md](architecture/commands.md)), save/open ([persistence.md](architecture/persistence.md)), MCP + CLI access to everything above ([llm-api.md](architecture/llm-api.md)).
 
-Docs to accept first: [quantities](architecture/quantities.md), [geometry](architecture/geometry.md) (after the spike), [commands](architecture/commands.md), [persistence](architecture/persistence.md), [design mode](modes/design.md) (v0.1 operations only), plan-mode subset, virtual-machine spec, UI guidelines.
+Docs to accept first: [quantities](architecture/quantities.md), [geometry](architecture/geometry.md) (kernel decided: [ADR 0007](decisions/0007-layered-geometry-without-brep-kernel.md)), [commands](architecture/commands.md), [persistence](architecture/persistence.md), [design mode](modes/design.md) (v0.1 operations only), plan-mode subset, virtual-machine spec, UI guidelines.
 
 Out of scope: multiple setups, optimization, simulation beyond previews, carving, real machines.
 

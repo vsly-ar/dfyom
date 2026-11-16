@@ -39,4 +39,3 @@ Carving and engraving work from **vectors** (SVG/DXF or drawn paths); raster ima
 
 - Data model for operations vs. features (composition, parameter inheritance).
 - How generalized tool requirements are expressed and matched against tool libraries.
-- Geometry representation: [ADR 0007](../decisions/0007-layered-geometry-without-brep-kernel.md) (pending spike).

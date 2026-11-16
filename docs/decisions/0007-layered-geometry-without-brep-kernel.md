@@ -1,6 +1,6 @@
 # 0007 – Layered geometry without a B-rep kernel
 
-Status: draft (pending spike) · Date: 2026-11-16
+Status: accepted · Date: 2026-11-16
 
 ## Context
 
@@ -18,12 +18,30 @@ DFYOM designs parts as stock minus material removed by cutting operations ([geom
 
 ## Decision
 
-No general B-rep kernel. Our own analytic model is the source of truth; Clipper2 (2D), Manifold (3D) and our own vector-surface layer (V-carving, reliefs) evaluate it, all behind ports in `src/core`.
+No general B-rep kernel. Our own analytic model is the source of truth; it is evaluated by:
 
-To be confirmed by a **throwaway spike**: stock with pocket (with fillets) + drill + chamfer + profile with tabs, built with Clipper2 and Manifold in a worker. The spike measures performance and checks CavalierContours' bindings.
+- **2D:** `clipper2-ts` (pure TS port of Clipper2); Manifold's `CrossSection` for 2D that feeds straight into 3D. `cavalier-contours-js` stays the candidate for arc-preserving toolpath offsets (G2/G3).
+- **3D:** `manifold-3d` mesh booleans.
+- **Own primitives:** an **offset-loft** (closed contour + (offset, z) levels, labelled when built) for fillets and chamfers; our own vector-surface layer for V-carving and reliefs.
+
+All of them sit behind ports in `src/core`. Rules for using them: [geometry.md#evaluation-rules](../architecture/geometry.md#evaluation-rules).
+
+## Spike results
+
+Throwaway spike on branch `spike/geometry` (`spikes/geometry/FINDINGS.md` there). Test part: stock with facing, pocket (inside corner radius + floor fillet), 4 drills, chamfer, profile with 4 tabs.
+
+| Measure                          | Result                                                                                                                             |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Build time (Node worker, M1 Pro) | ~20 ms warm, ~55 ms cold (WASM init 6–8 ms)                                                                                        |
+| Payload                          | `manifold.wasm` 541 KB + 82 KB glue; `clipper2-ts` 123 KB min                                                                      |
+| Mesh                             | `status()` NoError; 2 444 triangles; volume +0.013 % vs. analytic at 0.01 mm tolerance (always more material – the safe direction) |
+| Surface ids                      | 31 surfaces kept through all booleans via `faceID` + reserved original ids; every checked triangle matched its analytic surface    |
+| Floor fillet                     | Offset-loft: 1 ms, 2 444 triangles at 0.01 mm. Minkowski: 7 ms. Stair slabs: 443 ms, 34 524 triangles (rejected)                   |
+| Clipper2 options                 | `clipper2-ts` 0.09 ms/op vs. `clipper2-wasm` 0.07 (broken typings, manual memory)                                                  |
 
 ## Consequences
 
-- Small bundle, fast evaluation, permissive licenses.
+- Small bundle (under 1 MB vs. 10–50 MB for OpenCascade), fast evaluation, licenses compatible with [ADR 0014](0014-gpl-3-or-later-license.md).
 - Fillets, tabs and carving must fit the cutting-operation framework; arbitrary free-form solid modeling is out of scope.
+- Costs we accept: float32 mesh I/O from JS, manual WASM memory (needs an ownership helper), degenerate triangles in output meshes.
 - STEP import later requires a separate converter (e.g. OpenCascade run only at import time).
