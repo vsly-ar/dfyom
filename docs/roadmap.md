@@ -10,6 +10,7 @@ Milestones are vertical slices through all three modes. A milestone lists the do
 
 1. **Design:** rectangular stock from a library; facing, pocket (with inside corner radius), drilling, profile with tabs; values are [quantities](architecture/quantities.md).
 2. **Plan:** one setup, one concrete tool per operation, basic passes; gCode export for GRBL ([ADR 0013](decisions/0013-grbl-first-controller.md)).
+   - Feeds-and-speeds calculator (surface speed, chip thinning, power) suggesting values when no preset fits ([feeds-speeds.md](architecture/feeds-speeds.md)).
 3. **Run:** stream the gCode to the **virtual machine** (GRBL emulator) and show progress.
 4. **Cross-cutting:** command layer with undo ([commands.md](architecture/commands.md)), save/open ([persistence.md](architecture/persistence.md)), MCP + CLI access to everything above ([llm-api.md](architecture/llm-api.md)).
 

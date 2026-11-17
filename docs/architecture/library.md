@@ -99,6 +99,7 @@ The snapshot record and rule are owned by [persistence.md](persistence.md#librar
 - `kind` is the item's `kind`; `values` is the item's DTO without `id`, `revision` and `updatedAt`, parsed with the same Zod schema and built with the same `Model.create()`. A snapshot never reads the library.
 - "Library changed" is shown when the item's current values differ from `values` (deep compare); no extra field.
 - Commands that take a snapshot (e.g. choosing stock in design mode, assigning a tool or machine in plan mode) and `project.snapshot.update` ("update from library") are project document commands, one undo step each.
+- When a library item used by the open project changes, the app notifies the user and suggests re-importing it. Each plan holds its own copies; they are updated per item and per plan (`plan.libraryItem.update`, [plan-v0.1.md](../modes/plan-v0.1.md#plans-are-snapshots)); `draft` plans follow library changes automatically, all other plans only on request.
 
 ## Storage
 

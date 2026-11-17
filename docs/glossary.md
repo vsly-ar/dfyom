@@ -74,3 +74,31 @@ Industry-standard terms as used in DFYOM. This list seeds the in-app wiki ([prin
 | Point angle          | Included angle of a drill tip (typically 118° or 135°).                                                                                                |
 | Cutting preset       | Named set of spindle speed, feed rate, plunge rate, stepdown and stepover for a tool, optionally per material ([library.md](architecture/library.md)). |
 | Material class       | DFYOM grouping of stock materials (softwood, aluminum, …) used to pick cutting presets.                                                                |
+| Toolpath             | Path the tool center follows (rapids, feeds, arcs, drill cycles); generated in plan mode, turned into gCode by the post-processor.                     |
+| Post-processor       | Converts toolpaths into the gCode dialect of one controller (v0.1: GRBL).                                                                              |
+| Clearance height     | Safe Z for rapids between operations and for tool changes, above stock and workholding.                                                                |
+| Retract height       | Lower safe Z for rapids between passes and pecks within one operation.                                                                                 |
+| Ramp entry           | Entering the material along a sloped path instead of plunging straight down.                                                                           |
+| Helical entry        | Entering the material along a descending circle (helix); also used for helical boring of holes with an end mill.                                       |
+| Peck drilling        | Drilling in steps, retracting between them to clear chips (G83); chip breaking retracts only slightly (G73).                                           |
+| Canned cycle         | One gCode word for a whole drilling cycle (G81–G83); not supported by GRBL 1.1, expanded into G0/G1.                                                   |
+| Finishing allowance  | Material left on walls by roughing passes and removed by a finishing pass (also "stock to leave").                                                     |
+| Breakthrough         | Distance a through cut or through hole goes below the stock bottom.                                                                                    |
+| Zigzag / one-way     | Facing patterns: cut in both directions, or in one direction with a retracted return.                                                                  |
+| Offset clearing      | Pocket clearing with concentric rings offset from the wall.                                                                                            |
+| Adaptive clearing    | Clearing with constant tool engagement (trochoidal-like paths); not in v0.1.                                                                           |
+| Tool change          | Swapping the tool in the spindle; manual in v0.1 (program stop, re-zero Z).                                                                            |
+| Design snapshot      | A plan's own copy of a part and its operations; later design edits do not change it ([plan-v0.1.md](modes/plan-v0.1.md#plans-are-snapshots)).          |
+| Plan status          | Lifecycle of a plan: draft, settled design, finalized, in use, archived.                                                                               |
+| Stale                | A plan's copy that differs from the current design or library item; shown, never updated silently.                                                     |
+| Surface speed        | Speed of the cutting edge relative to the material (m/min, SFM); with the diameter it gives the spindle speed.                                         |
+| Chip thinning        | Chip thickness smaller than the chip load when the radial engagement is below half the diameter; compensated by a higher feed.                         |
+| Sender               | Program that streams gCode to a controller and handles its responses, status reports and realtime commands.                                            |
+| Character counting   | GRBL streaming method: the sender keeps the controller's 128-byte RX buffer full by counting unacknowledged bytes.                                     |
+| Realtime command     | Single byte (`?`, `!`, `~`, ctrl-x, ≥ 0x80) GRBL acts on immediately, wherever it appears in the stream.                                               |
+| Feed hold            | Controlled stop of motion that keeps position; resumed with cycle start (`~`).                                                                         |
+| Override             | Live percentage adjustment of feed, rapid or spindle speed while running.                                                                              |
+| Homing               | Cycle that moves to the limit switches to establish machine coordinates (GRBL `$H`).                                                                   |
+| Soft limits          | Controller check that rejects targets outside the travel; needs homing (GRBL `$20`).                                                                   |
+| Alarm                | GRBL lock state after a limit, aborted motion or startup with homing enabled; cleared by `$H` or `$X`.                                                 |
+| Planner buffer       | Controller queue of upcoming motion blocks used for acceleration look-ahead (15 free blocks in GRBL).                                                  |

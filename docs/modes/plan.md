@@ -4,6 +4,8 @@ Status: draft · Terms: [glossary.md](../glossary.md)
 
 **Goal:** turn designed parts into a concrete, optimized, simulated manufacturing process using concrete machines and tools.
 
+The v0.1 subset (one setup, tool assignment, pass strategies, toolpaths) is specified in [plan-v0.1.md](plan-v0.1.md).
+
 ## Scope
 
 Initially **3-axis milling / router CNC machines**; keep 4th and 5th axis in mind in the data model.

@@ -39,18 +39,18 @@ The archive holds no undo history and no action log in v0.1.
 
 One JSON file per top-level record of `ProjectDoc`:
 
-| File                  | Content                                                   |
-| --------------------- | --------------------------------------------------------- |
-| `project.json`        | Project-level fields (id, name, unit system, revision, …) |
-| `parts/<id>.json`     | One part with its operations                              |
-| `plans/<id>.json`     | One plan with its setups                                  |
-| `snapshots/<id>.json` | One library-item snapshot (below)                         |
+| File                  | Content                                                                                                           |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `project.json`        | Project-level fields (id, name, unit system, revision, …)                                                         |
+| `parts/<id>.json`     | One part with its operations                                                                                      |
+| `plans/<id>.json`     | One plan: status, design snapshot, own library copies, setups ([plan-v0.1.md](../modes/plan-v0.1.md#plan-record)) |
+| `snapshots/<id>.json` | One library-item snapshot used by the design (below)                                                              |
 
 ### Library references
 
 Decided pending task 1.7 (it may refine fields, not the rule):
 
-- A project uses a library item only through a **snapshot**: `{ id, kind, libraryItemId, takenAt, values }`, a copy of the item's values at the time it was used. Parts and plans reference the snapshot `id`, never the library item directly.
+- A project uses a library item only through a **snapshot**: `{ id, kind, libraryItemId, takenAt, values }`, a copy of the item's values at the time it was used. Parts and plans reference the snapshot `id`, never the library item directly. Rule: `snapshots/` serves the design (parts); each plan keeps its own snapshots inside `plans/<id>.json` and references only those, so a plan never shares a snapshot with the design or another plan.
 - Loading a project never reads the library, so an archive opens unchanged on another machine or after the library item was edited or deleted.
 - Library changes reach a project only through an explicit, undoable command (e.g. "update from library"), which replaces the snapshot's `values`.
 

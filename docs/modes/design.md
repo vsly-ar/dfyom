@@ -105,6 +105,7 @@ The removal region is a slot of `slotWidth` beside the shape (outside it for `ou
 - The order matters for **references only**: `on` and expressions may reference stock surfaces and surfaces of **earlier** operations. This keeps the dependency graph acyclic and the list readable top to bottom.
 - A retained region (tab, fillet) inside another operation's removal region is removed; evaluation reports it as a DFM warning ([geometry.md open question](../architecture/geometry.md#open-questions)).
 - The design order is not the machining order; plan mode orders passes freely.
+- Design edits never change existing plans, except plans in `draft` status ([plan snapshots](plan-v0.1.md#plans-are-snapshots)).
 - **Repeat (later):** several identical features (a list of holes, a bolt circle, a row of pockets) are made by a **repeat** feature that instances one operation at several positions, never by list parameters on an operation. This is why drilling has one hole per operation.
 
 ## DFM checks

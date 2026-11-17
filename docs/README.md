@@ -13,6 +13,7 @@ The docs are the **source of truth**. Code implements what is documented here; w
 | Product      | [glossary.md](glossary.md) – domain terms (industry standard)                                                                            | draft       |
 | Modes        | [modes/design.md](modes/design.md) – DFM-first part design; v0.1 operations                                                              | accepted    |
 | Modes        | [modes/plan.md](modes/plan.md) – setups, toolpaths, optimization, gCode export                                                           | draft       |
+| Modes        | [modes/plan-v0.1.md](modes/plan-v0.1.md) – v0.1 plan subset: plan snapshots and status, one setup, tools, pass strategies, toolpaths     | accepted    |
 | Modes        | [modes/run.md](modes/run.md) – machine control, sensors, automation                                                                      | draft       |
 | Architecture | [architecture/overview.md](architecture/overview.md) – processes, source layout, threading                                               | draft       |
 | Architecture | [architecture/llm-api.md](architecture/llm-api.md) – LLM/agent access, headless, multi-instance                                          | stub        |
@@ -21,6 +22,8 @@ The docs are the **source of truth**. Code implements what is documented here; w
 | Architecture | [architecture/quantities.md](architecture/quantities.md) – units, tolerances, expressions (value objects)                                | accepted    |
 | Architecture | [architecture/geometry.md](architecture/geometry.md) – removal-based geometry, cutting-operation framework, layers                       | draft       |
 | Architecture | [architecture/library.md](architecture/library.md) – stock, tool and machine library; snapshots                                          | accepted    |
+| Architecture | [architecture/feeds-speeds.md](architecture/feeds-speeds.md) – feeds-and-speeds calculator (surface speed, chip thinning, power)         | stub        |
+| Architecture | [architecture/grbl.md](architecture/grbl.md) – GRBL post-processor and virtual machine (emulator)                                        | accepted    |
 | Conventions  | [conventions/error-handling/](conventions/error-handling/README.md) – Result/Option, AppError, invariant models, Zod parsing, migrations | implemented |
 | Conventions  | [conventions/logging.md](conventions/logging.md) – structured logs                                                                       | accepted    |
 | Conventions  | [conventions/testing.md](conventions/testing.md) – unit → virtual machine → real machine                                                 | draft       |
