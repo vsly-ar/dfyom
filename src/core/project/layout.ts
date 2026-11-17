@@ -37,8 +37,8 @@ export interface ProjectLayout {
   readonly collections: readonly string[]
 }
 
-/** v0.1 so far: `parts`, `plans` and `snapshots` are added by their tasks. */
-export const PROJECT_LAYOUT: ProjectLayout = { collections: [] }
+/** v0.1 so far: `parts` and `snapshots` (task 2.5); `plans` is added by task 2.13. */
+export const PROJECT_LAYOUT: ProjectLayout = { collections: ['parts', 'snapshots'] }
 
 export const PROJECT_FILE = 'project.json'
 export const MANIFEST_FILE = 'manifest.json'

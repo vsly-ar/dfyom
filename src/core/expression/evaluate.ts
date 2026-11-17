@@ -17,7 +17,7 @@ import type { Expression, ExprNode } from './ast'
 
 /**
  * Port to the values an expression may reference (project variables, surfaces, tool, machine).
- * Real resolvers come with the design/library models; tests use a fake.
+ * Design surfaces: `SurfaceTable.resolver` (src/core/design/surfaces.ts); tool/machine: plan mode.
  */
 export interface ReferenceResolver {
   /** Current value of a reference; None if there is no such reference. */

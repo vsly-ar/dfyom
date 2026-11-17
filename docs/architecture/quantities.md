@@ -143,7 +143,7 @@ Nodes are value ids, each mapped to the references its expression uses (`referen
 
 An expression-sourced quantity is an ordinary `Quantity` (same model and [DTO](#persistence-dto), no extra field): `source` is the expression as entered, `kind` and `defaultUnit` are the field's, `exact` is the evaluated value, `tolerance` the trailing or propagated one.
 
-- On **edit**: `quantityFromSource(source, ctx, resolver)` – literal or expression, evaluated against a `ReferenceResolver` port (`resolve(name) → Option<Quantity>`; real resolvers for project variables, surfaces, tool and machine come with the design and library models).
+- On **edit**: `quantityFromSource(source, ctx, resolver)` – literal or expression, evaluated against a `ReferenceResolver` port (`resolve(name) → Option<Quantity>`; the design resolver for surfaces is `SurfaceTable.resolver` in `src/core/design/surfaces.ts` ([design.md](../modes/design.md#implementation-task-25)); tool and machine resolvers come with plan mode, project variables once specified).
 - On **load**: nothing is evaluated; the stored exact value is used as is ([lifecycle](#value)).
 - On an **input change**: the owner asks the graph what is affected and calls `reevaluate(quantity, resolver)` in that order; it re-parses the stored source with the stored kind and default unit. A literal comes back unchanged.
 - Dependencies are extracted by parsing the stored source (not evaluating it); a source the current parser cannot read returns its parse error, and the stored value stays.
