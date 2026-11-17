@@ -5,7 +5,9 @@
  * All commands are `document` commands (one gesture = one undo step). Quantities arrive as
  * entered and are parsed here against the design reference resolver; every edit then checks the
  * whole part: own constraints, references (`design.referenced`), recalculation of dependants,
- * constraints of the others.
+ * constraints of the others. Every command on a part returns the part's DFM parameter and tool
+ * warnings with its result (docs/modes/design.md#dfm-warnings-task-28-wiring); a warning never
+ * fails a command.
  */
 import type { Draft } from 'immer'
 import { z } from 'zod'
@@ -21,6 +23,7 @@ import {
   type Option,
 } from '../../shared/result'
 import { defineCommand, defineQuery, type AnyCommand, type QueryDef } from '../commands/define'
+import type { CommandContext } from '../commands/context'
 import type { ReferenceResolver } from '../expression/evaluate'
 import { quantityFromSource } from '../expression/quantity'
 import { ItemIdSchema, NAME_MAX } from '../library/item'
@@ -55,6 +58,7 @@ import {
 } from './part.dto'
 import { checkReferences, recalculate, STOCK_TOP, SurfaceTable } from './surfaces'
 import { checkOperations, operationIssues } from './validate'
+import { DfmWarningSchema, libraryTools, partWarnings } from './warnings'
 
 // ── arg schemas ───────────────────────────────────────────────────────────────────────────
 
@@ -216,6 +220,31 @@ class Fields {
   done(): AppResult<void> {
     return collect(this.results).map(() => undefined)
   }
+}
+
+// ── warnings ──────────────────────────────────────────────────────────────────────────────
+
+const Warnings = z
+  .array(DfmWarningSchema)
+  .describe('DFM parameter and tool warnings of the part after the command; they never block')
+
+/**
+ * `value` plus the part's warnings against the current tool library. Without a library service
+ * only the geometric rules run, so an edit never fails because of the checks; a mapper error is
+ * a bug (`internal.unexpected`).
+ */
+function withWarnings<R extends object>(
+  value: R,
+  loaded: LoadedPart,
+  operations: readonly Operation[],
+  ctx: CommandContext,
+  where: string,
+) {
+  const library = ctx.services.library
+  const tools = library === undefined ? [] : libraryTools(library)
+  return partWarnings({ ...loaded.part, operations }, loaded.stock, loaded.units, tools)
+    .map((warnings) => ({ ...value, warnings }))
+    .mapErr((e) => e.withContext(where))
 }
 
 // ── part editing ──────────────────────────────────────────────────────────────────────────
@@ -440,8 +469,8 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
       generalTolerance: ToleranceArg.optional(),
       ...addParams,
     }),
-    result: z.object({ operationId: OperationIdSchema }),
-    run(draft, rawArgs, _ctx) {
+    result: z.object({ operationId: OperationIdSchema, warnings: Warnings }),
+    run(draft, rawArgs, ctx) {
       const where = `design.${spec.kind}.add`
       const args = rawArgs as {
         partId: string
@@ -462,7 +491,7 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
       const settled = settle([...ops, op], stock, id, false, where)
       if (settled.isErr()) return settled
       writeOperations(draft, args.partId, settled.unwrap())
-      return Ok({ operationId: id })
+      return withWarnings({ operationId: id }, loaded.unwrap(), settled.unwrap(), ctx, where)
     },
   })
 
@@ -478,8 +507,8 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
       generalTolerance: ToleranceArg.optional(),
       ...optionalParams,
     }),
-    result: z.object({}),
-    run(draft, rawArgs, _ctx) {
+    result: z.object({ warnings: Warnings }),
+    run(draft, rawArgs, ctx) {
       const where = `design.${spec.kind}.update`
       const args = rawArgs as {
         partId: string
@@ -507,7 +536,7 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
       const settled = settle(next, stock, prev.id, true, where)
       if (settled.isErr()) return settled
       writeOperations(draft, args.partId, settled.unwrap())
-      return Ok({})
+      return withWarnings({}, loaded.unwrap(), settled.unwrap(), ctx, where)
     },
   })
   return [add, update]
@@ -568,8 +597,8 @@ const partUpdate = defineCommand({
     name: NameArg.optional(),
     generalTolerance: ToleranceArg.optional(),
   }),
-  result: z.object({}),
-  run(draft, args, _ctx) {
+  result: z.object({ warnings: Warnings }),
+  run(draft, args, ctx) {
     const where = 'design.part.update'
     const loaded = load(draft, args.partId, where)
     if (loaded.isErr()) return loaded
@@ -583,7 +612,7 @@ const partUpdate = defineCommand({
     const dto = generalToleranceToDTO(tol)
     if (dto === undefined) delete target.generalTolerance
     else if (!deepEqual(target.generalTolerance, dto)) target.generalTolerance = dto
-    return Ok({})
+    return withWarnings({}, loaded.unwrap(), part.operations, ctx, where)
   },
 })
 
@@ -594,8 +623,8 @@ const operationRemove = defineCommand({
   title: () => 'Remove operation',
   machine: false,
   args: z.object(OpArg),
-  result: z.object({}),
-  run(draft, args, _ctx) {
+  result: z.object({ warnings: Warnings }),
+  run(draft, args, ctx) {
     const where = 'design.operation.remove'
     const loaded = load(draft, args.partId, where)
     if (loaded.isErr()) return loaded
@@ -607,7 +636,7 @@ const operationRemove = defineCommand({
     if (refs.isErr())
       return Err(refs.unwrapErr().withContext(where, { operationId: args.operationId }))
     draft.parts[args.partId]!.operations.splice(index.unwrap(), 1)
-    return Ok({})
+    return withWarnings({}, loaded.unwrap(), next, ctx, where)
   },
 })
 
@@ -621,8 +650,8 @@ const operationMove = defineCommand({
     ...OpArg,
     toIndex: z.number().int().min(0).describe('New 0-based position in the operation list'),
   }),
-  result: z.object({}),
-  run(draft, args, _ctx) {
+  result: z.object({ warnings: Warnings }),
+  run(draft, args, ctx) {
     const where = 'design.operation.move'
     const loaded = load(draft, args.partId, where)
     if (loaded.isErr()) return loaded
@@ -642,7 +671,7 @@ const operationMove = defineCommand({
         ],
         where,
       })
-    if (from === args.toIndex) return Ok({})
+    if (from === args.toIndex) return withWarnings({}, loaded.unwrap(), part.operations, ctx, where)
     const next = [...part.operations]
     const [moved] = next.splice(from, 1)
     next.splice(args.toIndex, 0, moved!)
@@ -652,7 +681,7 @@ const operationMove = defineCommand({
     const list = draft.parts[args.partId]!.operations
     const [dto] = list.splice(from, 1)
     list.splice(args.toIndex, 0, dto!)
-    return Ok({})
+    return withWarnings({}, loaded.unwrap(), next, ctx, where)
   },
 })
 
@@ -697,6 +726,26 @@ const operationList = defineQuery({
   },
 })
 
+const warningList = defineQuery({
+  name: 'design.warning.list',
+  summary:
+    'List the DFM parameter and tool warnings of a part, checked now against the whole tool library.',
+  args: z.object(PartArg),
+  result: z.object({ warnings: Warnings }),
+  run(doc, args, ctx) {
+    const where = 'design.warning.list'
+    const library = ctx.services.library
+    if (library === undefined)
+      return fail('internal.unexpected', 'no library service configured', { where })
+    const loaded = loadPart(doc, args.partId, where)
+    if (loaded.isErr()) return loaded
+    const { part, stock, units } = loaded.unwrap()
+    return partWarnings(part, stock, units, libraryTools(library))
+      .map((warnings) => ({ warnings }))
+      .mapErr((e) => e.withContext(where))
+  },
+})
+
 export const DESIGN_COMMANDS: readonly AnyCommand[] = [
   partAdd,
   partUpdate,
@@ -708,4 +757,4 @@ export const DESIGN_COMMANDS: readonly AnyCommand[] = [
   operationMove,
 ]
 
-export const DESIGN_QUERIES: readonly QueryDef[] = [partList, partGet, operationList]
+export const DESIGN_QUERIES: readonly QueryDef[] = [partList, partGet, operationList, warningList]
