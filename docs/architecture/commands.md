@@ -77,7 +77,7 @@ interface JobContext extends CommandContext {
 }
 ```
 
-The sketch above is abridged; `define.ts` and `context.ts` are the contract. Differences there: `run`/`title` are method signatures (so typed definitions fit the registry's `AnyCommand`), and a fourth kind, `builtin`, marks commands the dispatcher executes itself (`history.undo`/`history.redo`, `job.pause`/`job.resume`/`job.abort`). `Services` has only the `workers` port so far; the file-system and machine ports arrive with persistence (task 3.1) and run mode (task 3.9).
+The sketch above is abridged; `define.ts` and `context.ts` are the contract. Differences there: `run`/`title` are method signatures (so typed definitions fit the registry's `AnyCommand`), and a fourth kind, `builtin`, marks commands the dispatcher executes itself (`history.undo`/`history.redo`, `job.pause`/`job.resume`/`job.abort`). `Services` has the `workers` port and the optional `library` service ([library.md](library.md#storage)); queries receive `services` too. The file-system and machine ports arrive with persistence (task 3.1) and run mode (task 3.9).
 
 Rules:
 
