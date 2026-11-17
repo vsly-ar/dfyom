@@ -1,6 +1,6 @@
 # Persistence: project archive and working folder
 
-Status: accepted · Decision: [ADR 0006](../decisions/0006-project-archive-with-working-folder.md) · State: [commands.md](commands.md#project-state) · Loading: [migrations.md](../conventions/error-handling/migrations.md)
+Status: implemented · Decision: [ADR 0006](../decisions/0006-project-archive-with-working-folder.md) · State: [commands.md](commands.md#project-state) · Loading: [migrations.md](../conventions/error-handling/migrations.md)
 
 The project file is a zip archive; the main process unpacks it into a **working folder**, keeps that folder current after every commit, and builds, verifies and atomically swaps a new archive on save.
 
@@ -21,19 +21,20 @@ The archive holds no undo history and no action log in v0.1.
 
 `<appData>` is Electron's `userData` in the app, or `--data-dir` in headless/CLI runs (injected, so persistence code does not import Electron).
 
-| Item           | Path                                                 | Content                                                                                   |
-| -------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| Project file   | Anywhere the user chooses, extension `.dfyom`        | Zip of the working folder's documents plus `manifest.json`.                               |
-| Project folder | `<appData>/projects/<key>/`                          | `<key>` = project id; a second file with the same id open at once gets `<id>~2`, `~3`, …. |
-| Working folder | `<project folder>/work/`                             | Unpacked documents ([layout](#working-folder-layout)), `assets/` (not in v0.1).           |
-| State          | `<project folder>/state.json`                        | Project file path, `dirty`, last saved revision and manifest hash, working revision.      |
-| Lock           | `<project folder>/lock.json`                         | Instance id, PID, host, `startedAt`, `heartbeatAt`.                                       |
-| Save history   | `<project folder>/saves/<savedAt>-r<revision>.dfyom` | Verified archives, identical to what was written to the project file.                     |
+| Item           | Path                                                 | Content                                                                                           |
+| -------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Project file   | Anywhere the user chooses, extension `.dfyom`        | Zip of the working folder's documents plus `manifest.json`.                                       |
+| Project folder | `<appData>/projects/<key>/`                          | `<key>` = project id; a second file with the same id open at once gets `<id>~2`, `~3`, ….         |
+| Working folder | `<project folder>/work/`                             | Unpacked documents ([layout](#working-folder-layout)), `assets/` (not in v0.1).                   |
+| State          | `<project folder>/state.json`                        | `schemaVersion`, project id, file path, `dirty`, working and last saved revision, archive sha256. |
+| Lock           | `<project folder>/lock.json`                         | Instance id, PID, host, `startedAt`, `heartbeatAt`.                                               |
+| Save history   | `<project folder>/saves/<savedAt>-r<revision>.dfyom` | Verified archives, identical to what was written to the project file.                             |
 
 - Documents are **JSON**, pretty-printed with stable key order, so they diff cleanly. They are the `ProjectDoc` DTOs ([commands.md](commands.md#project-state)).
 - The stock/tool/machine **library is global app data**, not part of a project: sketched as `<appData>/library/`; format and location are defined in task 1.7 (library models doc, [plan](../plans/v0.1.md)).
 - `manifest.json`: `{ format: 'dfyom-project', schemaVersion, projectId, appVersion, savedAt, revision, files: [{ path, size, sha256 }] }`. It is the archive's single `schemaVersion` for all its documents.
 - Zip entries: JSON is deflated; files that are already compressed (images, recordings) are stored.
+- Zip library: **fflate** (MIT, so GPL-3.0-or-later compatible; pure JS, no native build). v0.1 archives hold only JSON, so they are built and read in memory (512 MB uncompressed limit as a zip-bomb guard); streaming comes with `assets/`.
 
 ### Working-folder layout
 
@@ -41,10 +42,12 @@ One JSON file per top-level record of `ProjectDoc`:
 
 | File                  | Content                                                                                                           |
 | --------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `project.json`        | Project-level fields (id, name, unit system, revision, …)                                                         |
+| `project.json`        | Project-level fields of `ProjectDoc` (name, unit system, …); id and revision are in the manifest and `state.json` |
 | `parts/<id>.json`     | One part with its operations                                                                                      |
 | `plans/<id>.json`     | One plan: status, design snapshot, own library copies, setups ([plan-v0.1.md](../modes/plan-v0.1.md#plan-record)) |
 | `snapshots/<id>.json` | One library-item snapshot used by the design (below)                                                              |
+
+The mapping is generic: `layout.ts` lists the `ProjectDoc` keys that are record collections (`<key>/<id>.json`, ids must match `[A-Za-z0-9_-]`); every other field goes to `project.json`. Parts, plans and snapshots register their key when they are added. Any other file in an archive or `work/` is `input.malformed`.
 
 ### Library references
 
@@ -56,19 +59,20 @@ Decided pending task 1.7 (it may refine fields, not the rule):
 
 ## Open
 
-1. Resolve the project folder; take the [lock](#lock) or fail with `persist.locked`.
-2. If `work/` exists with `dirty: true` → offer **recovery** ([below](#crash-recovery)).
-3. Otherwise unpack into a fresh `work/`: reject paths outside the folder (zip-slip), check every entry against the manifest.
-4. Load each document through the load pipeline ([migrations.md](../conventions/error-handling/migrations.md#rules-once-data-is-preserved)): `parseWith` → `Model.create`.
-5. Start the dispatcher with `revision` from the manifest and an empty undo history.
+1. Read and verify the archive in memory (zip-slip, manifest, entry set, sizes, hashes, load pipeline); nothing is written yet, so a bad file changes nothing.
+2. Resolve the project folder: the one whose `state.json` names this file, else the first free `<id>`, `<id>~2`, …; an unreadable folder is skipped, never reused. Take the [lock](#lock) or fail with `persist.locked`.
+3. If `state.json` says `dirty: true` → release the lock and return **recovery** ([below](#crash-recovery)) instead of opening.
+4. Otherwise unpack into a new folder, swap it in as `work/`, then write `state.json`. Zip-slip: entry names must be relative forward-slash paths without `.`/`..`/empty segments or drive letters, and every write is checked to stay inside `work/`.
+5. Each document went through the load pipeline in step 1 ([migrations.md](../conventions/error-handling/migrations.md#rules-once-data-is-preserved)): `parseWith` → `Model.create`.
+6. Start the dispatcher with `revision` from the manifest (`DispatcherOptions.revision`) and an empty undo history; `attachSession` feeds its commits to the working folder.
 
 ## Working folder writes
 
 There is no other autosave: the project file changes only on an explicit save.
 
-- After each committed document command, the changed records (known from the patches) are written to `work/`, debounced (~500 ms) and always flushed before save and close.
+- After each committed document command (and undo/redo), the changed records (known from the patches; a replaced collection rewrites all) are written to `work/`, debounced (~500 ms) and always flushed before save and close. Commits not yet flushed are lost in a crash.
 - Each file is written atomically: write `name.tmp`, fsync, rename. `state.json` (with `dirty: true` and the working revision) is written last.
-- Writes run in the main process outside the command queue; a write failure is logged and shown as a persistent warning ("unsaved changes are not protected"), not returned to the command.
+- Writes run in the main process outside the command queue; a write failure is logged and shown as a persistent warning ("unsaved changes are not protected"), not returned to the command. Failed writes stay pending and are retried by the next flush.
 
 ## Save
 
@@ -77,27 +81,30 @@ There is no other autosave: the project file changes only on an explicit save.
 1. Flush the working folder.
 2. Build `<target>.tmp-<random>` **in the target's directory** (same volume, so the rename is atomic); write `manifest.json` last; fsync.
 3. **Verify**: reopen the temp archive, check the entry set, sizes and hashes against the manifest, and load every document through the load pipeline.
-4. Rename the temp archive over the target (Windows: retry briefly on `EPERM`/`EBUSY`); fsync the directory on POSIX.
-5. Copy the new archive into `saves/` (copy-on-write clone where supported) and apply the retention limits. The first save of a session also adds the opened file if its hash is not in `saves/` yet.
-6. Update `state.json`: `dirty: false`, saved revision and manifest hash.
+4. Rename the temp archive over the target (Windows: retry briefly on `EPERM`/`EBUSY`); fsync the directory on POSIX. Leftover `<target>.tmp-<8 hex>` files of a crashed save are then deleted.
+5. Copy the new archive into `saves/` (copy-on-write clone where supported) and apply the retention limits. The first save of a session also adds the file being replaced (if it is a valid archive whose hash is not in `saves/` yet) – before step 2, since the rename replaces it.
+6. Update `state.json`: `dirty: false`, saved revision and archive sha256.
 
-Any failure in steps 1–4 deletes the temp file, leaves the project file untouched and returns an `AppError`. A failure in steps 5–6 is logged and shown as a warning; the save itself succeeded. "Save As" is the same sequence with a new target; the project id stays.
+Any failure before the rename in step 4 deletes the temp file, leaves the project file untouched and returns an `AppError` (`persist.verify` for a failed verification). Once the rename succeeded the save has happened: a failed directory fsync or a failure in steps 5–6 is logged and returned in the result's `warnings`. "Save As" is the same sequence with a new target; the project id and folder stay.
 
 ## Save-history retention
 
-Fixed in v0.1 (no settings): keep at most **20 saves** and **200 MB per project**, and **2 GB** across all projects; delete oldest first; never delete the newest save of a project.
+Fixed in v0.1 (no settings): keep at most **20 saves** and **200 MB per project**, and **2 GB** across all projects; delete oldest first; never delete the newest save of a project. Only files named `<savedAt>-r<revision>.dfyom` (`:` → `-`) are counted or deleted; the total limit also trims other projects' history.
 
 ## Lock
 
 - Create `lock.json` with exclusive create (`wx`); refresh `heartbeatAt` every 30 s; delete on close.
-- An existing lock is **stale** if its PID is not alive on this host, or `heartbeatAt` is older than 2 min. A stale lock is replaced by write-temp-and-rename; the takeover is logged.
-- A live lock → `persist.locked` with the holder's instance id and start time.
+- An existing lock is **stale** if its PID is not alive on this host, or `heartbeatAt` is older than 2 min. A lock file that does not parse (crash while creating it) is stale too. A stale lock is replaced by write-temp-and-rename and read back: if another instance won the race, `persist.locked`. The takeover is logged (`warn`).
+- A live lock → `persist.locked` with the holder's instance id and start time – also when the same instance opens the same file twice.
+- A heartbeat that finds another instance's lock (ours went stale, e.g. while the computer slept) stops and raises a persistent warning. Close deletes the lock only if it is still ours.
 
 ## Crash recovery
 
 - On app start, and on open, list project folders with `dirty: true` and no live lock, including never-saved (untitled) projects.
-- **Restore**: load `work/` through the load pipeline and continue as a dirty project (undo history empty). **Discard**: delete `work/` and open the archive (or nothing, for untitled projects).
-- If `work/` does not load (inconsistent after a crash mid-flush, or a schema change), recovery fails with its `AppError`; the user can open the last save or a file from `saves/`.
+- **Restore**: load `work/` through the load pipeline and continue as a dirty project at its working revision (undo history empty). **Discard**: replace `work/` with the archive's content and open it (untitled projects: delete the project folder and open nothing). Discard loads the project file first; if it does not load, nothing is deleted and its error is returned.
+- If `work/` does not load (inconsistent after a crash mid-flush, or a schema change), recovery fails with its `AppError` and keeps `work/`; the user can discard, or open the last save or a file from `saves/`.
+- Recovery runs before a project dispatcher exists, so it is not a registry command: `src/core/project/storage.ts` defines the app-level operations `project.recovery.list` (`listRecovery`) and `project.recovery.resolve` (`resolveRecovery`, args `{ key, action: 'restore' | 'discard', confirm }`). Discarding needs `confirm: true` for every adapter (UI, MCP, CLI); adapters wire them in their tasks.
+- Closing a project with unsaved changes keeps `work/` dirty, so it is offered for recovery next time; an unchanged untitled project's folder is deleted on close.
 
 ## Schema version (pre-alpha)
 
@@ -105,34 +112,37 @@ Per [migrations.md](../conventions/error-handling/migrations.md#pre-alpha-except
 
 ## Error codes
 
-| Code                | When                                                           | Status                  |
-| ------------------- | -------------------------------------------------------------- | ----------------------- |
-| `persist.io`        | Read, write, rename, fsync failed; disk full; permission       | existing                |
-| `input.malformed`   | Not a zip, missing or malformed manifest or document, zip-slip | existing                |
-| `persist.migration` | Newer `schemaVersion` than the app                             | existing                |
-| `model.invariant`   | Document fails a model invariant                               | existing                |
-| `persist.locked`    | Project open in another live instance                          | new: `warn`, retryable  |
-| `persist.verify`    | Temp archive failed verification (hash, entry set, load)       | new: `error`, retryable |
+| Code                | When                                                           | Status             |
+| ------------------- | -------------------------------------------------------------- | ------------------ |
+| `persist.io`        | Read, write, rename, fsync failed; disk full; permission       | existing           |
+| `input.malformed`   | Not a zip, missing or malformed manifest or document, zip-slip | existing           |
+| `persist.migration` | Newer `schemaVersion` than the app                             | existing           |
+| `model.invariant`   | Document fails a model invariant                               | existing           |
+| `persist.locked`    | Project open in another live instance                          | `warn`, retryable  |
+| `persist.verify`    | Temp archive failed verification (hash, entry set, load)       | `error`, retryable |
 
-New codes are added to [`ERROR_CODES`](../../src/shared/errors/codes.ts) with the implementation. Frames carry the project id and file paths, never document content.
+Codes are in [`ERROR_CODES`](../../src/shared/errors/codes.ts). Frames carry the project id and file paths, never document content.
 
-## Files (planned)
+## Files
 
 `src/core` stays headless: it defines the port and the pure parts; the filesystem lives in `src/main`.
 
-| File                                     | Contents                                                                                                                   |
-| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `src/core/project/storage.ts`            | `ProjectStorage` port (`open`, `flush`, `save`, `recover`, `listRecoverable`, `close`) used by commands via `ctx.services` |
-| `src/core/project/layout.ts`             | `ProjectDoc` ↔ file map (`{ path: json }`), manifest Zod schema, project `MigrationPlan`, load pipeline                    |
-| `src/main/persistence/paths.ts`          | `<appData>` resolution (injected; Electron or `--data-dir`)                                                                |
-| `src/main/persistence/archive.ts`        | Streaming zip read/write, hashing, zip-slip check                                                                          |
-| `src/main/persistence/working-folder.ts` | Atomic file writes, debounced flush, `state.json`                                                                          |
-| `src/main/persistence/save.ts`           | Save/verify/replace sequence                                                                                               |
-| `src/main/persistence/lock.ts`           | Lock, heartbeat, stale detection                                                                                           |
-| `src/main/persistence/recovery.ts`       | Recoverable-project scan, restore, discard                                                                                 |
-| `src/main/persistence/retention.ts`      | Save-history limits                                                                                                        |
+| File                                     | Contents                                                                                                                                                                                                  |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/core/project/storage.ts`            | `ProjectStorage` port (`create`, `open`, `recover`, `listRecoverable`, `close`); per-project `ProjectSession` (`changed`, `flush`, `save`) = `ctx.services.project`; recovery operations; `attachSession` |
+| `src/core/project/commands.ts`           | `project.save` effect command (`target` = Save As)                                                                                                                                                        |
+| `src/core/project/layout.ts`             | `ProjectDoc` ↔ file map (`{ path: json }`), manifest Zod schema, project `MigrationPlan`, load pipeline                                                                                                   |
+| `src/main/persistence/paths.ts`          | `<appData>` resolution (injected; Electron or `--data-dir`), project folder paths                                                                                                                         |
+| `src/main/persistence/fs.ts`             | `PersistFs` port over `node:fs`, atomic write, rename retry; tests wrap it with `faultFs` (`fs.testing.ts`)                                                                                               |
+| `src/main/persistence/storage.ts`        | `createProjectStorage`: the `ProjectStorage` implementation and sessions (open/create/recover/close, save sequence)                                                                                       |
+| `src/main/persistence/archive.ts`        | Streaming zip read/write, hashing, zip-slip check                                                                                                                                                         |
+| `src/main/persistence/working-folder.ts` | Atomic file writes, debounced flush, `state.json`                                                                                                                                                         |
+| `src/main/persistence/save.ts`           | Save/verify/replace sequence                                                                                                                                                                              |
+| `src/main/persistence/lock.ts`           | Lock, heartbeat, stale detection                                                                                                                                                                          |
+| `src/main/persistence/recovery.ts`       | Recoverable-project scan, restore, discard                                                                                                                                                                |
+| `src/main/persistence/retention.ts`      | Save-history limits                                                                                                                                                                                       |
 
-`src/main/persistence/` must not import Electron except through `paths.ts`, so the CLI and headless instances reuse it. Tests use a temp directory and inject failures (rename, fsync, corrupt entry) to prove the previous file survives.
+`src/main/persistence/` does not import Electron (the caller passes `userData` to `paths.ts`), so the CLI and headless instances reuse it. Tests use a temp directory and inject failures through `faultFs` – `fail` (one call throws) and `crash` (that call and every later one throws, so no cleanup runs, like a killed process) – at every step of save, flush and unpack, plus a corrupting write for verification, to prove the previous file survives.
 
 ## v0.1 scope
 

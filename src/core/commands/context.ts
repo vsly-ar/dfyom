@@ -5,6 +5,7 @@
  * Ports keep src/core headless: each process injects its own implementations.
  */
 import type { EntryPoint } from '../../shared/boundary'
+import type { ProjectSession } from '../project/storage'
 import type { WorkerPort } from './jobs'
 
 /**
@@ -36,11 +37,12 @@ export interface Clock {
 }
 
 /**
- * Injected service ports. Only `workers` exists so far; the file-system port arrives with
- * persistence (v0.1 task 3.1) and the machine port with run mode (task 3.9).
+ * Injected service ports. The machine port arrives with run mode (task 3.9).
  */
 export interface Services {
   readonly workers: WorkerPort
+  /** Persistence of the open project (docs/architecture/persistence.md); absent in tests. */
+  readonly project?: ProjectSession
 }
 
 export interface CommandContext {

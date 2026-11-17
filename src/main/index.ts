@@ -1,8 +1,11 @@
 // Electron main process entry. Process model: docs/architecture/overview.md
 import { app, BrowserWindow } from 'electron'
+import { hostname } from 'node:os'
 import { join } from 'node:path'
 import { RENDERER_LOG_LEVEL_ARG, type Logger, type LogLevel } from '../shared/logging'
 import { startLogging } from './logging/electron'
+import { resolveAppData } from './persistence/paths'
+import { createProjectStorage } from './persistence/storage'
 
 function createMainWindow(log: Logger, level: LogLevel): void {
   const win = new BrowserWindow({
@@ -32,7 +35,18 @@ function createMainWindow(log: Logger, level: LogLevel): void {
 }
 
 void app.whenReady().then(async () => {
-  const { log, level } = await startLogging()
+  const { log, level, instance } = await startLogging()
+  // Persistence smoke check until project IPC exists (tasks 3.3+): scan for recoverable projects.
+  const storage = createProjectStorage({
+    appData: resolveAppData(process.argv, app.getPath('userData')) ?? app.getPath('userData'),
+    appVersion: app.getVersion(),
+    owner: { instanceId: instance, pid: process.pid, host: hostname() },
+    log,
+  })
+  void storage.listRecoverable().then((r) => {
+    if (r.isOk()) log.info({ count: r.unwrap().length }, 'recoverable projects found')
+    else log.warn({ err: r.unwrapErr().toJSON() }, 'recovery scan failed')
+  })
   const windows = log.child({ scope: 'windows' })
   createMainWindow(windows, level)
   app.on('activate', () => {
