@@ -4,6 +4,7 @@
  */
 import type { Issue } from '../../shared/errors/app-error'
 import { fail, None, Ok, Some, type AppResult, type Option } from '../../shared/result'
+import { FEEDS_SPEEDS_QUERIES } from '../feeds-speeds/commands'
 import { LIBRARY_COMMANDS, LIBRARY_QUERIES } from '../library/commands'
 import type { AnyCommand, QueryDef } from './define'
 import { projectSave } from '../project/commands'
@@ -12,7 +13,7 @@ import { jobAbort, jobPause, jobResume } from './jobs'
 
 /** `<area>.<object>.<verb>` (or `<area>.<verb>` for area-level actions such as `history.undo`). */
 export const NAME_PATTERN =
-  /^(project|design|plan|run|library|history|job|app)(\.[a-z][a-zA-Z0-9]*){1,2}$/
+  /^(project|design|plan|run|library|feedsSpeeds|history|job|app)(\.[a-z][a-zA-Z0-9]*){1,2}$/
 
 /** Commands executed by the dispatcher itself; always registered. */
 export const BUILTIN_COMMANDS: readonly AnyCommand[] = [
@@ -25,7 +26,7 @@ export const BUILTIN_COMMANDS: readonly AnyCommand[] = [
 
 /** Domain commands and queries of the app; added by their features. */
 export const APP_COMMANDS: readonly AnyCommand[] = [...LIBRARY_COMMANDS, projectSave]
-export const APP_QUERIES: readonly QueryDef[] = [...LIBRARY_QUERIES]
+export const APP_QUERIES: readonly QueryDef[] = [...LIBRARY_QUERIES, ...FEEDS_SPEEDS_QUERIES]
 
 export interface Registry {
   command(name: string): Option<AnyCommand>

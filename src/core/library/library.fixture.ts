@@ -8,6 +8,7 @@ const DEFAULT_UNIT: Record<QuantityKind, UnitId> = {
   angle: 'deg',
   feedRate: 'mm/min',
   spindleSpeed: 'rpm',
+  power: 'W',
   scalar: '1',
 }
 
@@ -23,6 +24,7 @@ export const feed = (s: string) => qty('feedRate', s)
 export const rpm = (s: string) => qty('spindleSpeed', s)
 export const deg = (s: string) => qty('angle', s)
 export const num = (s: string) => qty('scalar', s)
+export const watt = (s: string) => qty('power', s)
 
 export const stockValues = () => ({
   kind: 'stock' as const,

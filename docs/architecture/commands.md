@@ -26,8 +26,8 @@ The code is the contract; each file's header links back here. No adapters yet (I
 ## Naming
 
 - `<area>.<object>.<verb>`, lowercase, camelCase within a segment: `design.pocket.add`, `plan.operation.move`, `run.job.start`. Area-level actions have two segments, `<area>.<verb>`: `history.undo`, `job.abort`. Names are unique across commands and queries (`NAME_PATTERN` in `registry.ts`).
-- Areas: `project`, `design`, `plan`, `run`, `library`, `history`, `job`, `app`.
-- Command verbs: `add`, `update`, `remove`, `move`, `apply`, `generate`, `start`, … Query verbs: `get`, `list`, `find`, `preview`.
+- Areas: `project`, `design`, `plan`, `run`, `library`, `feedsSpeeds` (calculator, [feeds-speeds.md](feeds-speeds.md#api)), `history`, `job`, `app`.
+- Command verbs: `add`, `update`, `remove`, `move`, `apply`, `generate`, `start`, … Query verbs: `get`, `list`, `find`, `preview`, `suggest`.
 - The name is the stable id used by UI, agents, CLI, logs and `EntryPoint.name` ([boundaries.md](../conventions/error-handling/boundaries.md#entry-points-ui-agent-cli-automation)). Transport-specific renaming (e.g. `.` → `_` for clients that reject dots) lives in the MCP adapter.
 
 ## Command definition

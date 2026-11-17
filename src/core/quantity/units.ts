@@ -5,7 +5,14 @@
 import { Option } from '../../shared/result'
 import { Rational } from './rational'
 
-export const QUANTITY_KINDS = ['length', 'angle', 'feedRate', 'spindleSpeed', 'scalar'] as const
+export const QUANTITY_KINDS = [
+  'length',
+  'angle',
+  'feedRate',
+  'spindleSpeed',
+  'power',
+  'scalar',
+] as const
 export type QuantityKind = (typeof QUANTITY_KINDS)[number]
 
 /** Persisted unit ids. `1` is the dimensionless unit of `scalar` (a bare number). */
@@ -20,6 +27,9 @@ export const UNIT_IDS = [
   'mm/min',
   'in/min',
   'rpm',
+  'W',
+  'kW',
+  'hp',
   '1',
   '%',
 ] as const
@@ -51,6 +61,10 @@ export const UNITS: Readonly<Record<UnitId, UnitInfo>> = {
   'mm/min': { kind: 'feedRate', factor: r(1n), spellings: ['mm/min'] },
   'in/min': { kind: 'feedRate', factor: r(127n, 5n), spellings: ['in/min', 'ipm'] },
   rpm: { kind: 'spindleSpeed', factor: r(1n), spellings: ['rpm'] },
+  W: { kind: 'power', factor: r(1n), spellings: ['w'] },
+  kW: { kind: 'power', factor: r(1000n), spellings: ['kw'] },
+  /** Mechanical horsepower: 550 ft·lbf/s = 745.69987158227022 W (exact decimal). */
+  hp: { kind: 'power', factor: r(74569987158227022n, 100000000000000n), spellings: ['hp'] },
   '1': { kind: 'scalar', factor: r(1n), spellings: [] },
   '%': { kind: 'scalar', factor: r(1n, 100n), spellings: ['%'] },
 }
