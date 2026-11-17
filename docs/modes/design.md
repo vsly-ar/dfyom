@@ -1,6 +1,6 @@
 # Design mode
 
-Status: accepted · Library: [library.md](../architecture/library.md) · Terms: [glossary.md](../glossary.md) · Geometry: [geometry.md](../architecture/geometry.md) · Values: [quantities.md](../architecture/quantities.md) · Commands: [commands.md](../architecture/commands.md)
+Status: implemented (v0.1 sections; remaining: design UI 3.6, worker-triggered evaluation 2.9) · Library: [library.md](../architecture/library.md) · Terms: [glossary.md](../glossary.md) · Geometry: [geometry.md](../architecture/geometry.md) · Values: [quantities.md](../architecture/quantities.md) · Commands: [commands.md](../architecture/commands.md)
 
 **Goal:** design parts that can be manufactured on the user's existing machines (DFM-first).
 
@@ -110,7 +110,7 @@ The removal region is a slot of `slotWidth` beside the shape (outside it for `ou
 
 ## DFM checks
 
-- Derived on every evaluation, never stored: constraint checks (sync, in the command) and geometry checks (worker, [evaluation rules](../architecture/geometry.md#evaluation-rules)). Codes, rules and the warning shape: [geometry.md](../architecture/geometry.md#evaluation-checks) (geometry) and [parameter and tool checks](../architecture/geometry.md#parameter-and-tool-checks) (`parameterChecks`, called by the commands).
+- Derived, never stored: parameter and tool checks (sync, in the commands and `design.warning.list`) and geometry checks (worker, [evaluation rules](../architecture/geometry.md#evaluation-rules)). Codes, rules and the warning shape: [geometry.md](../architecture/geometry.md#evaluation-checks) (geometry) and [parameter and tool checks](../architecture/geometry.md#parameter-and-tool-checks) (`parameterChecks`). How they reach commands and queries: [below](#dfm-warnings-task-28-wiring).
 - Tool checks compare against the whole **tool library** ([library.md](../architecture/library.md#tool): flat, bull-nose and ball end mills, drills), not a chosen machine. With an empty library only geometric checks run.
 - Library edits are non-undoable effect commands outside the project document, so they trigger a re-check but never change the part.
 - Each warning names the operation and parameter and suggests a value (e.g. "use cornerRadius ≥ 3.2 mm").
@@ -119,33 +119,35 @@ The removal region is a slot of `slotWidth` beside the shape (outside it for `ou
 
 Names follow [commands.md](../architecture/commands.md#naming); all are `document` commands, one gesture = one command. Quantities are passed as entered (`"1/16\""`); `Shape` as in [Positioning](#positioning-v01).
 
-| Command                                                                | Args                                                                     | Result            |
-| ---------------------------------------------------------------------- | ------------------------------------------------------------------------ | ----------------- |
-| `design.part.add`                                                      | `{ name, stockLibraryItemId }` – takes the stock snapshot                | `{ partId }`      |
-| `design.part.update`                                                   | `{ partId, name?, generalTolerance? }`                                   | `{}`              |
-| `design.facing.add` / `.pocket.add` / `.drilling.add` / `.profile.add` | `{ partId, name?, on?, …parameters }` – omitted parameters take defaults | `{ operationId }` |
-| `design.facing.update` / `.pocket.update` / …                          | `{ partId, operationId, …parameters to change }`                         | `{}`              |
-| `design.operation.remove`                                              | `{ partId, operationId }`                                                | `{}`              |
-| `design.operation.move`                                                | `{ partId, operationId, toIndex }`                                       | `{}`              |
+| Command                                                                | Args                                                                     | Result                      |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------ | --------------------------- |
+| `design.part.add`                                                      | `{ name, stockLibraryItemId }` – takes the stock snapshot                | `{ partId }`                |
+| `design.part.update`                                                   | `{ partId, name?, generalTolerance? }`                                   | `{ warnings }`              |
+| `design.facing.add` / `.pocket.add` / `.drilling.add` / `.profile.add` | `{ partId, name?, on?, …parameters }` – omitted parameters take defaults | `{ operationId, warnings }` |
+| `design.facing.update` / `.pocket.update` / …                          | `{ partId, operationId, …parameters to change }`                         | `{ warnings }`              |
+| `design.operation.remove`                                              | `{ partId, operationId }`                                                | `{ warnings }`              |
+| `design.operation.move`                                                | `{ partId, operationId, toIndex }`                                       | `{ warnings }`              |
 
 - v0.1: `design.part.add` fails with `model.invariant` when the project already has a part; `design.drilling.add` adds one hole.
 - `remove` and `move` are shared by all operation types. Both fail with `design.referenced` (new error code, task 2.5) if a later operation would reference a removed or later surface; the error lists the dependants.
-- Queries: `design.part.list` (ids and names, so an agent can find the part after reopening), `design.part.get`, `design.operation.list`, `design.warning.list` (DFM warnings of the last evaluation; task 2.8).
+- `warnings` are the part's DFM parameter and tool warnings after the command ([below](#dfm-warnings-task-28-wiring)); they never make a command fail.
+- Queries: `design.part.list` (ids and names, so an agent can find the part after reopening), `design.part.get`, `design.operation.list`, `design.warning.list { partId } → { warnings }` (the part's DFM warnings, [below](#dfm-warnings-task-28-wiring)).
 - Arg schemas and the operation DTO union live in `src/core/design/` and link back here ([Implementation](#implementation-task-25)).
 
 ## Implementation (task 2.5)
 
 Code in `src/core/design/`, each file's header links here:
 
-| File                | Contents                                                                                                     |
-| ------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `part.dto.ts`       | Part and operation DTOs (Zod), stored in `ProjectDoc.parts` (record `parts/<id>.json`)                       |
-| `operation.ts`      | Operations with `Quantity` values, DTO ↔ model, field kinds, defaults, `effectiveTolerance`                  |
-| `surfaces.ts`       | `SurfaceTable` (analytic z of horizontal surfaces), the reference resolver, `checkReferences`, recalculation |
-| `validate.ts`       | The constraints of the tables above (`model.invariant`)                                                      |
-| `geometry-input.ts` | `toGeometryInput(part, stock)`: the pure mapper to the geometry input (`src/core/geometry/model.ts`)         |
-| `load.ts`           | `loadPart(doc, partId)`, `partGeometryInput(doc, partId)`                                                    |
-| `commands.ts`       | The commands and queries above (`DESIGN_COMMANDS`, `DESIGN_QUERIES`)                                         |
+| File                | Contents                                                                                                                    |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `part.dto.ts`       | Part and operation DTOs (Zod), stored in `ProjectDoc.parts` (record `parts/<id>.json`)                                      |
+| `operation.ts`      | Operations with `Quantity` values, DTO ↔ model, field kinds, defaults, `effectiveTolerance`                                 |
+| `surfaces.ts`       | `SurfaceTable` (analytic z of horizontal surfaces), the reference resolver, `checkReferences`, recalculation                |
+| `validate.ts`       | The constraints of the tables above (`model.invariant`)                                                                     |
+| `geometry-input.ts` | `toGeometryInput(part, stock)`: the pure mapper to the geometry input (`src/core/geometry/model.ts`)                        |
+| `load.ts`           | `loadPart(doc, partId)`, `partGeometryInput(doc, partId)`                                                                   |
+| `commands.ts`       | The commands and queries above (`DESIGN_COMMANDS`, `DESIGN_QUERIES`)                                                        |
+| `warnings.ts`       | Tools → `DfmTool`, `partWarnings` (`parameterChecks` of a part), `DfmWarningSchema` ([below](#dfm-warnings-task-28-wiring)) |
 
 Decisions made with task 2.5, where this doc left room:
 
@@ -161,7 +163,15 @@ Decisions made with task 2.5, where this doc left room:
 - **Updates** replace `shape` as a whole (an omitted `cornerRadius` takes the default); `tabs` merges field by field.
 - **General tolerance** is `{ length?, angle? }`, each a deviation ≥ 0 (`"0.1 mm"` = ±0.1 mm), `null` clears it. `effectiveTolerance` walks operation → part; the project scope comes with project settings.
 - **`design.part.add`** reads the library synchronously (`services.library.lookup`) to take the snapshot ([commands.md](../architecture/commands.md#command-definition)).
-- **Not in 2.5:** DFM warnings and `design.warning.list` (task 2.8). Constraints are only the hard parameter errors of the tables above.
+- **Not in 2.5:** DFM warnings and `design.warning.list`; wired after task 2.8 ([below](#dfm-warnings-task-28-wiring)). Constraints are only the hard parameter errors of the tables above.
+
+### DFM warnings (task 2.8 wiring)
+
+- **Parameter and tool warnings** come from `parameterChecks` ([geometry.md](../architecture/geometry.md#parameter-and-tool-checks)) on the part's geometry input (`toGeometryInput`), computed fresh on every call and never stored. Tools: every readable tool item of the library (`services.library`; files that do not load are skipped), reduced to `DfmTool` in canonical mm (`type`, `diameter`, the bull-nose `cornerRadius`). Unit system: the project's `ProjectDoc.unitSystem` (`mm` → metric thresholds, `inch` → inch ones), as `loadPart` returns it.
+- **Command results carry them.** Every design command on a part (`design.part.update`, each `add`/`update`, `design.operation.remove`/`move`) returns `warnings` for that part after the command, so an agent sees the effect of an edit at once without a second call. `design.part.add` does not: an empty part has none. A warning never fails or rolls back a command; without a library service the commands check against an empty library (geometric rules only). The warnings are part of the command's result value, not of the document, so undo/redo do not replay them – query again after undo.
+- **`design.warning.list { partId } → { warnings }`** returns the same list for the current document and the current library, so it also reflects library edits, which never change the document. It fails with `input.malformed` for an unknown part and `internal.unexpected` without a library service (like `design.part.add`).
+- **Geometry warnings** (`dfm.loosePiece`, `dfm.retainedRemoved`, `dfm.surfaceMissing`) need an evaluation, which runs in the worker (task 2.9); neither the commands nor this query run it. The mapper already fills `PartGeometryInput.references` from `on` and the expression references (one entry per operation, parameter and surface) for `dfm.surfaceMissing`.
+- **Merging (task 2.9):** `design.warning.list` will append the warnings of the last finished evaluation of the current document revision to the parameter warnings, ordered by operation (design order), parameter warnings first within an operation. The two code sets are disjoint, so nothing is deduplicated. The result then also says whether that evaluation is current (`evaluation: 'done' | 'pending' | 'failed'`), so an agent knows when geometry warnings are still missing. Command results keep the synchronous warnings only: they never wait for the worker.
 
 ## Retained regions: tabs and fillets
 
