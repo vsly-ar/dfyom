@@ -143,4 +143,24 @@ describe('library commands', () => {
     )
     expectErrCode(d.query('library.stock.list', {}, agent), 'internal.unexpected')
   })
+
+  it('library queries are not project reads: they give an agent no baseline for undo', async () => {
+    const { d } = await setup()
+    expectOk(d.query('library.stock.list', {}, agent))
+    expectErrCode(await d.dispatch('history.undo', {}, agent), 'command.conflict')
+  })
+
+  it('a wrong-case id is rejected before it reaches storage', async () => {
+    const { d } = await setup()
+    const { id } = await add(d, 'stock', omitKind(stockValues()))
+    expectErrCode(
+      await d.dispatch(
+        'library.stock.remove',
+        { id: id.toUpperCase(), revision: 1, confirm: true },
+        agent,
+      ),
+      'input.malformed',
+    )
+    expect(expectOk(d.query('library.stock.get', { id }, agent)).value).toMatchObject({ id })
+  })
 })

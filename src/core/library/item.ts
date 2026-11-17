@@ -30,13 +30,17 @@ export const MaterialClassSchema = z.enum(MATERIAL_CLASSES)
 
 export const NAME_MAX = 120
 export const NOTES_MAX = 4000
-/** Ids are file names (`<id>.json`), so they are restricted to a path-safe alphabet. */
-export const ITEM_ID_PATTERN = /^[A-Za-z0-9_-]{1,120}$/
+/**
+ * Ids are file names (`<id>.json`), so they are restricted to a path-safe, lowercase alphabet:
+ * on case-insensitive file systems (APFS, NTFS) `Tool-1` and `tool-1` would be the same file.
+ */
+export const ITEM_ID_PATTERN = /^[a-z0-9_-]{1,120}$/
+export const ITEM_ID_RULE = 'must be 1–120 lowercase letters, digits, _ or -'
 
 export const ItemIdSchema = z
   .string()
   .regex(ITEM_ID_PATTERN)
-  .describe('Library item id (letters, digits, _ and -)')
+  .describe('Library item id (lowercase letters, digits, _ and -)')
 
 /** `id`, `revision`, `updatedAt`: library bookkeeping, not part of a snapshot's `values`. */
 export const ItemMetaDtoSchema = z.object({

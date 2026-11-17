@@ -3,11 +3,13 @@
  * Doc: docs/architecture/library.md#storage
  *
  * Layout: `library.json` (manifest), `stock/`, `tools/`, `machines/` with `<id>.json` each.
- * Writes are atomic per file (temp + fsync + rename). Every app instance shares the folder; the
- * `revision` check is done against the file on disk just before writing.
+ * Writes are atomic per file (temp + fsync + rename + directory fsync). Every app instance shares
+ * the folder; read → revision check → write/delete runs under a per-item lock file
+ * (`<id>.json.lock`, created with `wx`), so two instances cannot both pass the check. Locks and
+ * temp files left by a crashed instance are broken / swept once they are stale.
  */
-import { mkdir, open, readdir, readFile, rename, unlink } from 'node:fs/promises'
-import { join } from 'node:path'
+import { mkdir, open, readdir, readFile, rename, stat, unlink } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import { AppError } from '../../shared/errors/app-error'
 import {
   Err,
@@ -21,7 +23,7 @@ import {
   type AsyncAppResult,
   type Option,
 } from '../../shared/result'
-import { ITEM_ID_PATTERN, type LibraryItemKind } from '../../core/library/item'
+import { ITEM_ID_PATTERN, ITEM_ID_RULE, type LibraryItemKind } from '../../core/library/item'
 import type { LibraryItemDTO } from '../../core/library/library-item'
 import {
   checkPut,
@@ -37,11 +39,33 @@ const FOLDER: Record<LibraryItemKind, string> = {
   tool: 'tools',
   machine: 'machines',
 }
-const ITEM_FILE = /^([A-Za-z0-9_-]{1,120})\.json$/
+const ITEM_FILE = /^([a-z0-9_-]{1,120})\.json$/
+const TEMP_FILE = /\.tmp-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+const LOCK_FILE = /\.json\.lock$/
+
+export interface FsLibraryOptions {
+  /** Attempts to take a held item lock before `command.conflict` (default 100). */
+  readonly lockRetries?: number
+  /** Wait between attempts (default 20 ms). */
+  readonly lockRetryMs?: number
+  /** A lock older than this was left by a crashed instance and is broken (default 30 s). */
+  readonly staleLockMs?: number
+  /** Temp files older than this are swept on open (default 10 min). */
+  readonly staleTempMs?: number
+}
 
 /** Opens (and on first use creates) the library folder `root` = `<appData>/library`. */
-export async function createFsLibraryStorage(root: string): AsyncAppResult<LibraryStorage> {
-  const ready = await prepare(root)
+export async function createFsLibraryStorage(
+  root: string,
+  options: FsLibraryOptions = {},
+): AsyncAppResult<LibraryStorage> {
+  const opts = {
+    lockRetries: options.lockRetries ?? 100,
+    lockRetryMs: options.lockRetryMs ?? 20,
+    staleLockMs: options.staleLockMs ?? 30_000,
+    staleTempMs: options.staleTempMs ?? 10 * 60_000,
+  }
+  const ready = await prepare(root, opts)
   if (ready.isErr()) return ready
 
   const fileOf = (kind: LibraryItemKind, id: string) => join(root, FOLDER[kind], `${id}.json`)
@@ -93,27 +117,39 @@ export async function createFsLibraryStorage(root: string): AsyncAppResult<Libra
     async put(kind, dto: LibraryItemDTO, expected) {
       const valid = checkId(dto.id)
       if (valid.isErr()) return valid
-      const current = await read(kind, dto.id)
-      if (current.isErr()) return current
-      const ok = checkPut(kind, dto.id, current.unwrap(), expected)
-      if (ok.isErr()) return ok
-      return writeAtomic(fileOf(kind, dto.id), `${JSON.stringify(dto, null, 2)}\n`)
+      const file = fileOf(kind, dto.id)
+      return withLock(file, opts, async () => {
+        const current = await read(kind, dto.id)
+        if (current.isErr()) return current
+        const ok = checkPut(kind, dto.id, current.unwrap(), expected)
+        if (ok.isErr()) return ok
+        return writeAtomic(file, `${JSON.stringify(dto, null, 2)}\n`)
+      })
     },
 
     async remove(kind, id, expected) {
       const valid = checkId(id)
       if (valid.isErr()) return valid
-      const current = await read(kind, id)
-      if (current.isErr()) return current
-      const ok = checkRemove(kind, id, current.unwrap(), expected)
-      if (ok.isErr()) return ok
       const file = fileOf(kind, id)
-      return tryAsync(() => unlink(file), 'persist.io', `cannot delete ${file}`)
+      return withLock(file, opts, async () => {
+        const current = await read(kind, id)
+        if (current.isErr()) return current
+        const ok = checkRemove(kind, id, current.unwrap(), expected)
+        if (ok.isErr()) return ok
+        return tryAsync(
+          async () => {
+            await unlink(file)
+            await syncDir(dirname(file))
+          },
+          'persist.io',
+          `cannot delete ${file}`,
+        )
+      })
     },
   })
 }
 
-async function prepare(root: string): AsyncAppResult<void> {
+async function prepare(root: string, opts: Required<FsLibraryOptions>): AsyncAppResult<void> {
   for (const sub of Object.values(FOLDER)) {
     const dir = join(root, sub)
     const made = await tryAsync(
@@ -123,6 +159,8 @@ async function prepare(root: string): AsyncAppResult<void> {
     )
     if (made.isErr()) return made.map(() => undefined)
   }
+  for (const dir of [root, ...Object.values(FOLDER).map((sub) => join(root, sub))])
+    await sweep(dir, opts)
   const manifest = join(root, 'library.json')
   let text: string
   try {
@@ -160,17 +198,83 @@ async function writeAtomic(file: string, text: string): AsyncAppResult<void> {
       const fh = await open(tmp, 'w')
       try {
         await fh.writeFile(text, 'utf8')
-        await fh.sync()
+        await fh.sync() // writable handle: fsync on a read-only handle fails on Windows
       } finally {
         await fh.close()
       }
       await rename(tmp, file)
+      await syncDir(dirname(file))
     },
     'persist.io',
     `cannot write ${file}`,
   )
   if (r.isErr()) await unlink(tmp).catch(() => undefined)
   return r.mapErr((e) => e.withContext('writeAtomic', { file }))
+}
+
+/** Persist the rename/unlink itself. Windows cannot open a directory for fsync: skipped there. */
+async function syncDir(dir: string): Promise<void> {
+  if (process.platform === 'win32') return
+  const fh = await open(dir, 'r')
+  try {
+    await fh.sync()
+  } finally {
+    await fh.close()
+  }
+}
+
+/**
+ * Runs `fn` while holding `<file>.lock` (created exclusively). A held lock is retried, then
+ * reported as `command.conflict` (retryable); a stale lock is broken.
+ */
+async function withLock<T>(
+  file: string,
+  opts: Required<FsLibraryOptions>,
+  fn: () => AsyncAppResult<T>,
+): AsyncAppResult<T> {
+  const lock = `${file}.lock`
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const fh = await open(lock, 'wx')
+      await fh.writeFile(`${process.pid}\n`, 'utf8').finally(() => fh.close())
+      break
+    } catch (cause) {
+      if (!hasCode(cause, 'EEXIST'))
+        return fail('persist.io', `cannot lock ${file}`, { cause, where: lock })
+    }
+    const age = await stat(lock).then(
+      (st) => Date.now() - st.mtimeMs,
+      () => 0,
+    )
+    if (age > opts.staleLockMs) await unlink(lock).catch(() => undefined)
+    else if (attempt >= opts.lockRetries)
+      return fail('command.conflict', `${file} is being written by another instance; retry`, {
+        where: lock,
+      })
+    else await new Promise((r) => setTimeout(r, opts.lockRetryMs))
+  }
+  try {
+    return await fn()
+  } finally {
+    await unlink(lock).catch(() => undefined)
+  }
+}
+
+/** Best effort: removes temp files and locks left by a crashed instance. */
+async function sweep(dir: string, opts: Required<FsLibraryOptions>): Promise<void> {
+  const names = await readdir(dir).catch(() => [] as string[])
+  const now = Date.now()
+  for (const n of names) {
+    const maxAge = TEMP_FILE.test(n)
+      ? opts.staleTempMs
+      : LOCK_FILE.test(n)
+        ? opts.staleLockMs
+        : undefined
+    if (maxAge === undefined) continue
+    const p = join(dir, n)
+    const st = await stat(p).catch(() => undefined)
+    if (st !== undefined && now - st.mtimeMs > maxAge) await unlink(p).catch(() => undefined)
+  }
 }
 
 function parseJson(text: string, where: string): AppResult<unknown> {
@@ -185,13 +289,12 @@ function checkId(id: string): AppResult<void> {
   return ITEM_ID_PATTERN.test(id)
     ? Ok(undefined)
     : fail('input.malformed', `invalid library item id`, {
-        issues: [
-          { path: ['id'], rule: 'pattern', message: 'must be 1–120 letters, digits, _ or -' },
-        ],
+        issues: [{ path: ['id'], rule: 'pattern', message: ITEM_ID_RULE }],
         where: 'fs-storage',
         data: { id },
       })
 }
 
-const isMissing = (e: unknown): boolean =>
-  typeof e === 'object' && e !== null && (e as { code?: unknown }).code === 'ENOENT'
+const hasCode = (e: unknown, code: string): boolean =>
+  typeof e === 'object' && e !== null && (e as { code?: unknown }).code === code
+const isMissing = (e: unknown): boolean => hasCode(e, 'ENOENT')

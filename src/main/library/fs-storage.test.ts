@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -80,5 +80,72 @@ describe('filesystem library storage', () => {
     expectErrCode(await s.get('stock', '../library'), 'input.malformed')
     expectErrCode(await s.put('stock', item('../x'), null), 'input.malformed')
     expectErrCode(await s.remove('stock', 'a/b'), 'input.malformed')
+  })
+
+  it('rejects wrong-case ids, so a case-insensitive disk cannot alias another item', async () => {
+    const root = join(dir, 'library')
+    const s = expectOk(await createFsLibraryStorage(root))
+    expectOk(await s.put('stock', item('tool-1'), null))
+    expectErrCode(await s.get('stock', 'TOOL-1'), 'input.malformed')
+    expectErrCode(await s.put('stock', item('TOOL-1', 2), 1), 'input.malformed')
+    expectErrCode(await s.remove('stock', 'TOOL-1', 1), 'input.malformed')
+    expect(await readdir(join(root, 'stock'))).toEqual(['tool-1.json'])
+  })
+
+  it('a write waits for the per-item lock and fails with command.conflict while it is held', async () => {
+    const root = join(dir, 'library')
+    const s = expectOk(
+      await createFsLibraryStorage(root, { lockRetries: 3, lockRetryMs: 1, staleLockMs: 60_000 }),
+    )
+    expectOk(await s.put('stock', item('a'), null))
+    await writeFile(join(root, 'stock', 'a.json.lock'), 'other instance')
+    expectErrCode(await s.put('stock', item('a', 2), 1), 'command.conflict')
+    expectErrCode(await s.remove('stock', 'a', 1), 'command.conflict')
+    expect(await readFile(join(root, 'stock', 'a.json.lock'), 'utf8')).toBe('other instance')
+  })
+
+  it('a stale lock (crashed instance) is broken', async () => {
+    const root = join(dir, 'library')
+    const s = expectOk(await createFsLibraryStorage(root, { lockRetryMs: 1, staleLockMs: 1000 }))
+    expectOk(await s.put('stock', item('a'), null))
+    const lock = join(root, 'stock', 'a.json.lock')
+    await writeFile(lock, 'crashed')
+    const old = new Date(Date.now() - 60_000)
+    await utimes(lock, old, old)
+    expectOk(await s.put('stock', item('a', 2), 1))
+    expect(await readdir(join(root, 'stock'))).toEqual(['a.json'])
+  })
+
+  it('two instances writing the same revision: exactly one wins', async () => {
+    const root = join(dir, 'library')
+    const a = expectOk(await createFsLibraryStorage(root, { lockRetryMs: 1 }))
+    const b = expectOk(await createFsLibraryStorage(root, { lockRetryMs: 1 }))
+    expectOk(await a.put('stock', item('x'), null))
+    const rs = await Promise.all([
+      a.put('stock', { ...item('x', 2), name: 'A' }, 1),
+      b.put('stock', { ...item('x', 2), name: 'B' }, 1),
+    ])
+    expect(rs.filter((r) => r.isOk())).toHaveLength(1)
+    expect(await readdir(join(root, 'stock'))).toEqual(['x.json'])
+  })
+
+  it('opening sweeps stale temp and lock files, keeping fresh ones', async () => {
+    const root = join(dir, 'library')
+    expectOk(await createFsLibraryStorage(root))
+    const old = new Date(Date.now() - 60 * 60_000)
+    const files = {
+      oldTmp: join(root, 'tools', 't.json.tmp-0f8e2a4c-1b2d-4e6f-8a9b-0c1d2e3f4a5b'),
+      oldManifestTmp: join(root, 'library.json.tmp-0f8e2a4c-1b2d-4e6f-8a9b-0c1d2e3f4a5c'),
+      oldLock: join(root, 'stock', 'a.json.lock'),
+      freshTmp: join(root, 'tools', 'u.json.tmp-0f8e2a4c-1b2d-4e6f-8a9b-0c1d2e3f4a5d'),
+    }
+    for (const f of Object.values(files)) await writeFile(f, 'x')
+    for (const f of [files.oldTmp, files.oldManifestTmp, files.oldLock]) await utimes(f, old, old)
+    expectOk(await createFsLibraryStorage(root))
+    expect((await readdir(join(root, 'tools'))).sort()).toEqual([
+      'u.json.tmp-0f8e2a4c-1b2d-4e6f-8a9b-0c1d2e3f4a5d',
+    ])
+    expect(await readdir(join(root, 'stock'))).toEqual([])
+    expect((await readdir(root)).sort()).toEqual(['library.json', 'machines', 'stock', 'tools'])
   })
 })

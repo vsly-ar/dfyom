@@ -59,8 +59,10 @@ export function libraryStorageContract(
       expectOk(await s.remove('stock', 'a', 1))
       expect(expectOk(await s.list('stock'))).toEqual([])
       expectErrCode(await s.remove('stock', 'a'), 'input.malformed')
+      // Without a revision only an item whose revision cannot be read may be removed.
       expectOk(await s.put('stock', dto('b', 1), null))
-      expectOk(await s.remove('stock', 'b'))
+      expectErrCode(await s.remove('stock', 'b'), 'command.conflict')
+      expect(expectOk(await s.list('stock')).map((e) => e.id)).toEqual(['b'])
     })
   })
 }

@@ -7,7 +7,7 @@ import { z } from 'zod'
 import { construct, invariants } from '../../shared/model'
 import { parseWith } from '../../shared/parse'
 import type { AppResult } from '../../shared/result'
-import { ITEM_ID_PATTERN, ItemMetaDtoSchema, type LibraryItemKind } from './item'
+import { ITEM_ID_PATTERN, ITEM_ID_RULE, ItemMetaDtoSchema, type LibraryItemKind } from './item'
 import { Machine } from './machine'
 import { MachineValuesDtoSchema, type MachineValuesDTO } from './machine.dto'
 import { Stock } from './stock'
@@ -73,7 +73,7 @@ export class LibraryItem implements LibraryItemProps {
     readonly values: ItemValues,
   ) {
     invariants('LibraryItem', (c) => {
-      c.check(ITEM_ID_PATTERN.test(id), ['id'], 'pattern', 'must be 1–120 letters, digits, _ or -')
+      c.check(ITEM_ID_PATTERN.test(id), ['id'], 'pattern', ITEM_ID_RULE)
       c.check(
         Number.isInteger(revision) && revision >= 1,
         ['revision'],

@@ -74,6 +74,12 @@ export interface QueryDef<S extends z.ZodType = z.ZodType, R = unknown> {
   readonly summary: string
   readonly args: S
   readonly result: z.ZodType<R>
+  /**
+   * Whether the result depends on `ProjectDoc` (default true). Only such queries count as a
+   * read for the stale-write baseline (docs/architecture/commands.md#stale-writes); e.g.
+   * library queries read app data and set `false`.
+   */
+  readonly readsDocument?: boolean
   /** Side-effect free; reads the latest committed snapshot. */
   run(doc: ProjectDoc, args: z.output<S>, ctx: QueryContext): AppResult<R>
 }

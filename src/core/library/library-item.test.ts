@@ -31,6 +31,11 @@ describe('LibraryItem', () => {
       'input.malformed',
     )
     expect(e.issues.map((i) => i.path.join('.')).sort()).toEqual(['id', 'revision'])
+    // Ids are lowercase: case-insensitive file systems must not alias two ids.
+    expectErrCode(
+      parseLibraryItem({ ...meta, ...stockValues(), id: 'Stock-1' }, 't'),
+      'input.malformed',
+    )
     expectErrCode(
       parseLibraryItem({ ...meta, ...stockValues(), kind: 'tool' }, 't'),
       'input.malformed',

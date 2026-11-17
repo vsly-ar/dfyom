@@ -102,7 +102,9 @@ function forKind(kind: LibraryItemKind): { commands: AnyCommand[]; queries: Quer
         .int()
         .min(1)
         .optional()
-        .describe('Revision you read; omit only to remove an item that does not load'),
+        .describe(
+          'Revision you read; omit only to remove an item that does not load (else conflict)',
+        ),
       confirm: z.literal(true).describe('Must be true: the user confirmed the deletion'),
     }),
     result: z.object({ id: z.string() }),
@@ -117,6 +119,7 @@ function forKind(kind: LibraryItemKind): { commands: AnyCommand[]; queries: Quer
   const get = defineQuery({
     name: `library.${kind}.get`,
     summary: `Get one library ${label} with its revision.`,
+    readsDocument: false,
     args: z.object({ id: ItemIdSchema }),
     result: itemResult,
     run(_doc, args, ctx) {
@@ -142,6 +145,7 @@ function forKind(kind: LibraryItemKind): { commands: AnyCommand[]; queries: Quer
   const list = defineQuery({
     name: `library.${kind}.list`,
     summary: `List all library ${label} items, and files that do not load with their error.`,
+    readsDocument: false,
     args: z.object({}),
     result: z.object({
       items: z.array(itemResult),

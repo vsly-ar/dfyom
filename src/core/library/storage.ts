@@ -73,8 +73,12 @@ export function checkRemove(
       issues: [{ path: ['id'], rule: 'unknownItem', message: 'no such library item' }],
       where: 'LibraryStorage.remove',
     })
-  if (expected === undefined) return Ok(undefined)
   const actual = storedRevision(current.unwrap().content)
+  if (expected === undefined)
+    // Only an item that does not load (no readable revision) may be removed without one.
+    return actual === undefined
+      ? Ok(undefined)
+      : conflict(kind, id, `is at revision ${actual}; pass the revision you read`, { actual })
   return actual === expected
     ? Ok(undefined)
     : conflict(kind, id, `is at revision ${actual ?? 'unreadable'}`, { expected, actual })
