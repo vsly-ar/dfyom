@@ -195,6 +195,6 @@ Export (`effect` command, task 2.11) turns the ordered `Toolpath[]` of one setup
 | `src/core/plan/checks.ts`, `suggest.ts`, `order.ts`     | Tool/machine/feeds checks, tool ranking, default order and checks  |
 | `src/core/plan/commands.ts`                             | Commands and queries above                                         |
 | `src/core/toolpath/model.ts`                            | `Toolpath`, `Pass`, `Move` (the contract above)                    |
-| `src/core/toolpath/contour.ts`                          | Analytic offsets of rounded rectangles and circles                 |
+| `src/core/geometry/contour.ts`                          | Analytic offsets of rounded rectangles and circles                 |
 | `src/core/toolpath/{facing,pocket,drilling,profile}.ts` | Generators per strategy; tabs in `profile.ts`                      |
 | `src/core/toolpath/generate.ts`, `stats.ts`             | Job handler, input hash and cache, length/time estimates           |

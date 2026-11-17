@@ -1,6 +1,8 @@
 # Geometry
 
-Status: draft · Decision: [ADR 0007](../decisions/0007-layered-geometry-without-brep-kernel.md) · Terms: [glossary.md](../glossary.md)
+Status: accepted · Decision: [ADR 0007](../decisions/0007-layered-geometry-without-brep-kernel.md) · Operations: [design.md](../modes/design.md#operations-v01) · Values: [quantities.md](quantities.md) · Terms: [glossary.md](../glossary.md)
+
+[2.5D evaluation (v0.1)](#25d-evaluation-v01) specifies tasks 2.6–2.8 of the [v0.1 plan](../plans/v0.1.md). The [Carving (later)](#carving-later) sections are still draft and must not be implemented yet.
 
 ## Principle: geometry comes from material removal
 
@@ -36,15 +38,114 @@ The fillet becomes a retained region of the operation, and plan mode chooses how
 
 ### Surfaces and stable ids
 
-A surface id is derived from the operation and the surface's role, e.g. `pocket1.floor`, `pocket1.wall[2]`, `profile1.tab[0].top`. Ids do not depend on computed topology, so references in [expressions](quantities.md#expressions-and-references) survive edits. This avoids the topological naming problem of B-rep CAD. Each surface carries a tolerance (own or inherited).
+A surface id is derived from the operation and the surface's role, e.g. `pocket1.floor`, `pocket1.wall[2]`, `profile1.tab[0].top`. Ids do not depend on computed topology, so references in [expressions](quantities.md#expressions-and-references) survive edits. This avoids the topological naming problem of B-rep CAD. Each surface carries a tolerance (own or inherited). Mesh mapping: [Surface ids in meshes](#surface-ids-in-meshes).
 
-In meshes, surface ids are carried as Manifold `faceID`s under original ids reserved per operation (`Manifold.reserveIDs`), so every output triangle maps back to its surface after booleans. Always key by original id + face id together.
+## 2.5D evaluation (v0.1)
 
-### Representation: contour + profile (offset-loft)
+**Scope.** v0.1 contours are axis-aligned rounded rectangles and circles ([design.md](../modes/design.md#positioning-v01)), so every contour, offset, fillet ring and tab outline is computed **analytically** (exact arcs, flattened only when meshing) – as for toolpaths ([plan-v0.1.md](../modes/plan-v0.1.md#toolpath-generation-job)). v0.1 needs **no 2D library**: `clipper2-ts` and `CrossSection` enter with general shapes ([Layers](#layers)). The only geometry dependency is `manifold-3d` (exact version pinned, Apache-2.0).
 
-A 2.5D removal or retained region is a **closed contour** plus a **profile** of (offset, z) levels. Floor fillets, chamfers and round-overs are all profiles. They are built by our own **offset-loft** (one offset ring per level, bands between them, labelled when built). The loft is valid while every contour radius is ≥ the largest offset – the same limit a bull-nose or chamfer tool imposes, so the check doubles as a DFM warning. Below it, a Minkowski sum (inset prism ⊕ sphere) is the fallback.
+### Modules (`src/core/geometry/`, planned)
 
-## Carving and engraving (vector-based)
+| File                    | Contents                                                                                                                                                                                              |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `model.ts`              | `PartGeometryInput` (stock size + operations resolved to float64 mm), `Contour`, `Level`, `SurfaceId`, constants ([precision](#evaluation-rules))                                                     |
+| `contour.ts`, `loft.ts` | Analytic offset and flattening of rounded rectangles and circles (**one** implementation, shared with toolpaths); loft: `offsetLoft`, `offsetBand` → `LabelledMesh` (plain typed arrays, local frame) |
+| `operations.ts`         | Per operation: removal and retained `LabelledMesh`es plus its surface table                                                                                                                           |
+| `solid-port.ts`         | `SolidPort`: `fromMesh`, `union` (batch), `subtract`, `intersect`, `translate`, `status`, `decompose`, `volume`, `toMesh`; opaque `Solid`                                                             |
+| `manifold/`             | `SolidPort` on `manifold-3d` and the arena; the **only** code importing `manifold-3d` or calling `.delete()`                                                                                          |
+| `evaluate.ts`           | `evaluatePart(input, solids) → AppResult<PartEvaluation>`: build, compose, map surfaces, [checks](#evaluation-checks) (`checks.ts`); `testing/`: [test part](#testing) and oracles                    |
+
+### Building the solids
+
+Every solid is an offset-loft or offset band, **labelled at construction** – no unlabelled library primitives. `ov` = overshoot, `top` = 0 (stock top), `zf` = `on.z − depth`; `on.z` comes from the analytic model, never from a mesh. The stock is a labelled box `0..L × 0..W × −T..0`.
+
+| Operation | Removal (levels as offset, z; offset > 0 = inward)                                                           | Retained                      |
+| --------- | ------------------------------------------------------------------------------------------------------------ | ----------------------------- |
+| Facing    | Rectangle `−ov..L+ov × −ov..W+ov`: (0, ov) → (0, −depth)                                                     | –                             |
+| Pocket    | Shape: (0, ov) → (0, zf + f) → fillet levels → (f, zf); `f` = `floorRadius`                                  | Floor fillet, inside the loft |
+| Drilling  | Circle: (0, ov) → (0, zf) → `through`: (0, −T − ov) · `flat`: cap · `drillPoint`: (r, zf − r / tan(angle/2)) | –                             |
+| Profile   | Slot = outer prism − inner prism (both `−T − ov..ov`; the subtracted prism overshoots `2·ov`)                | Tabs: offset bands            |
+
+Composition: one batch `union` of all `removal − retained`, then `stock − union`. A fillet is built into its loft (the loft _is_ removal − retained); tabs are separate solids subtracted from their slot. Each mesh is built in a local frame centered on its contour and translated in Manifold (float64), per the [evaluation rules](#evaluation-rules).
+
+### Offset-loft
+
+A 2.5D removal is a **closed contour** plus a **profile** of (offset, z) levels; floor fillets and the drill point are profiles (chamfers and round-overs later).
+
+- Each level is the contour offset by `offset`, flattened with **one parameterization for all levels**, so rings correspond segment by segment. Bands between rings are ruled quads; caps are fans (all v0.1 rings are convex). An arc whose offset radius is ≤ ε becomes one vertex and its band a fan; zero-length segments (≤ ε) are dropped; a ring collapsed to a point (drill tip) closes with a fan.
+- Floor fillet levels: φₖ = k·π/(2n), offset = f(1 − cos φₖ), z = zf + f(1 − sin φₖ), n from the [chord tolerance](#evaluation-rules). `pointAngle` 180° is a flat bottom.
+- Labels: straight-segment bands → `wall[i]`, arc bands → `corner[i]`, fillet bands → `floorFillet`, bottom cap → `floor`/`bottom`, overshoot faces → `air`.
+- **Validity:** every contour radius ≥ the largest offset (the bull-nose tool limit, so it doubles as a DFM rule). design.md constraints (`floorRadius ≤ cornerRadius`, ≤ diameter/2) guarantee it in v0.1; a violation is a bug → `geometry.evaluation` (rule `loftInvalid`), never a silent fallback.
+- **Offset band (tabs):** the open sub-path of the shape covering the tab (width measured along the shape, positions as in [design.md](../modes/design.md#profile-with-tabs)), offset across the slot plus `ov` on both sides, from `−T − 2·ov` up to the tab top. Labels: top cap `tab[i].top`; end faces, normal to the shape, `tab[i].end[0|1]` in contour direction (counter-clockwise from above); all other faces `air` (outside the slot, so they never survive).
+- **Minkowski fallback** (inset prism ⊕ ball, measured 7 ms on the convex spike pocket): for contours that fail the validity rule. Deferred to free-form shapes ([open questions](#later)); no v0.1 operation reaches it, so `loftInvalid` fails loudly instead.
+
+### Surface ids in meshes
+
+- Each operation (and the stock) gets one original id per evaluation (`Manifold.reserveIDs`); `faceID` is the index into that operation's surface table. Index 0 is `air`; profiles add `offcut` (slot side away from the shape: may survive, not referenceable). Surfaces of zero size are left out (`corner[i]` when `cornerRadius` = 0).
+- After booleans every output triangle maps through (`runOriginalID`, `faceID`) to a surface; always key by both.
+
+| Surface ids ([design.md](../modes/design.md#operations-v01)) | Built from                                                                     |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------ |
+| `stock.top`, `.bottom`, `.side[0..3]`; `facing1.floor`       | Stock box (side 0 = front at y = 0, then counter-clockwise); facing bottom cap |
+| `pocket1.floor`, `.wall[i]`, `.corner[i]`, `.floorFillet`    | Pocket loft: bottom cap, straight bands, arc bands, fillet bands               |
+| `drill1.wall`, `drill1.bottom`                               | Drill loft: side bands; flat cap or point cone                                 |
+| `profile1.wall[i]`, `.corner[i]`                             | Shape-side prism (inner for `outside`, outer for `inside`)                     |
+| `profile1.tab[i].top`, `.tab[i].end[0\|1]`                   | Tab band top cap and end faces                                                 |
+
+### Evaluation rules
+
+- Input is **canonical float64 mm** ([quantities.md](quantities.md#value)); the design layer resolves quantities and expressions before evaluation, so geometry never sees `Quantity` objects or tolerances.
+- **Chord tolerance** (maximum sagitta) is 0.01 mm for every arc and fillet step in v0.1: segments per arc n = ⌈θ / (2·acos(1 − t/r))⌉ ≥ 1, inscribed, so meshes always keep slightly more material – the safe direction. Meshes serve preview and checks only – toolpaths are analytic – so surface tolerances do not tighten it (later: simulation and carving derive it from the surface tolerance).
+- Constants in `model.ts`: ε = 1e-6 mm (coincidence, collapse, zero length); `ov` = 1 mm; ε_V = 1e-3 mm³ (smallest volume that counts as a piece or an overlap).
+- Removals **overshoot** the stock and **overlap** each other; they never just touch (face-touching solids stay separate shells, and shared boundaries leave slivers). A subtracted solid overshoots further than the one it cuts; retained regions overshoot their removal on every unlabelled side.
+- Build labelled meshes near the origin and translate afterwards (JS mesh I/O is float32). Meshes are derived data; never read dimensions back from them.
+- Tolerate degenerate triangles in output meshes. Coincident faces of user geometry (e.g. two pockets sharing a wall plane) may leave slivers; pieces ≤ ε_V are ignored.
+- WASM objects are freed through one ownership helper ([arena per evaluation](#wasm-lifetime-and-ownership)).
+
+### Evaluation checks
+
+| Check                                                                    | Result                                                                                                      |
+| ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `status()` ≠ `NoError`                                                   | Error `geometry.evaluation` (new code, task 2.6); issue names the status                                    |
+| A triangle labelled `air` or with an unknown (original id, face id)      | Error `geometry.evaluation`, rule `airSurface` (a bug)                                                      |
+| `decompose()` yields more than one piece of volume > ε_V                 | Warning `loosePiece` per piece except the largest; names the operations whose surfaces bound it (`tabs`)    |
+| Nominal retained region (without overshoot) ∩ another op's removal > ε_V | Warning `retainedRemoved` naming both operations ([design.md](../modes/design.md#ordering-and-composition)) |
+| A surface referenced by `on` or an expression has no triangles           | Warning `surfaceMissing` naming the referencing operation and parameter                                     |
+
+Checks run in the worker after composition, in table order. Warnings follow [design.md DFM checks](../modes/design.md#dfm-checks) (operation, parameter, message, suggestion), are derived on every evaluation and never stored. Constraint and tool checks stay synchronous in the commands.
+
+### Worker and renderer
+
+- `evaluatePart` is a pure worker task run through the `WorkerPort` (host per [ADR 0008](../decisions/0008-threading-split-by-job.md), task 2.9). One evaluation per document revision serves UI, MCP and CLI; a newer revision aborts a running one (`op.aborted`). Results are derived data like toolpaths: cached by a hash of `PartGeometryInput`, not in `ProjectDoc`, not persisted. `design.warning.list` reads the last finished evaluation.
+- `PartEvaluation`: `positions` (Float32Array, part frame, mm, vertices split at surface boundaries), `indices` (Uint32Array), `triangleSurface` (Uint32Array, index into `surfaces`), `surfaces` (`SurfaceId[]`), `volume`, `pieces`, `warnings`, `stats` (ms, triangles). Typed-array buffers are **transferred**, not copied.
+- Renderer ([ADR 0010](../decisions/0010-react-three-fiber-viewport.md)): one `BufferGeometry` per evaluation, normals per surface (flat planes, smooth fillets); picking maps the raycast `faceIndex` through `triangleSurface` to a surface id; highlighting by surface; replaced geometries are disposed. The viewport never computes geometry.
+
+### WASM lifetime and ownership
+
+- One `manifold-3d` module per worker, initialized lazily on the first task (6–8 ms). The worker host passes the WASM binary in, so `src/core` needs no `fs`/`fetch`.
+- `withSolids(fn)` opens an **arena** for one evaluation and hands `fn` a `SolidPort`; every WASM object it creates is registered there and deleted on exit (success, error or abort). Results are copied into plain typed arrays before the arena closes; no WASM object outlives an evaluation or crosses a worker boundary. Manifold exceptions are wrapped with `tryCatch` inside `manifold/` into `geometry.evaluation` ([error handling](../conventions/error-handling/README.md)). Memory: a soak run of 1 000 evaluations must show the WASM heap plateau; otherwise the host recycles the worker after a fixed number of tasks (known issue, tasks 2.6/2.9).
+
+### Performance budgets (v0.1)
+
+Reference: Apple M1 Pro class, [test part](#testing), chord tolerance 0.01 mm. Measured by a benchmark script outside `npm run check` (timings are flaky in CI); CI asserts only the triangle budget and the heap plateau.
+
+| Measure                                 | Budget                | Spike             |
+| --------------------------------------- | --------------------- | ----------------- |
+| Warm evaluation incl. checks            | ≤ 50 ms               | 20 ms (no checks) |
+| Cold: WASM init + first evaluation      | ≤ 150 ms              | 55 ms             |
+| Output triangles                        | ≤ 20 000              | 2 444             |
+| WASM heap growth over 1 000 evaluations | ≤ 10 MB after warm-up | unmeasured        |
+
+### Testing
+
+- **Test part** (fixture in `testing/`; fixes the spike's invalid part): stock 100 × 60 × 20; facing 0.5; pocket 40 × 25 × 8 centered, `cornerRadius` 4, `floorRadius` 2; 4 drills Ø6 on a centered 70 × 30 pattern (`through`, `flat`, 2 × `drillPoint` 118°, depth 12); profile `outside` 84 × 44 R5 centered, `slotWidth` 6, 4 tabs 8 × 3 (stock margin 8 ≥ slot width). Expected: `NoError`, one piece, no geometry warnings, every design.md surface id present, mesh volume between analytic and analytic + 0.05 %. Variants: `tabs.count` 0 → `loosePiece`; a pocket over a tab → `retainedRemoved`; `side` `inside`.
+- **Oracles:** every triangle's centroid lies on its labelled analytic surface within the chord tolerance; every primitive is closed with `status()` `NoError` and its volume matches its formula.
+- **Edge cases:** `floorRadius` = `cornerRadius` (collapsed corner), `cornerRadius` = 0 and = min(length, width)/2, `floorRadius` = `depth`, `pointAngle` 180°, inside profile whose slot covers the opening; seeded random valid parameters per operation → `NoError`, no `air` triangle.
+- Geometry tests run in Node against the real `manifold-3d`; other modules may use a fake `SolidPort`.
+
+## Carving (later)
+
+### Carving and engraving (vector-based)
 
 The source of every carving and engraving is **vectors**: SVG/DXF or drawn paths (lines, arcs, Bézier curves). Raster images are **traced to vectors on import**; the design model never contains pixels.
 
@@ -65,34 +166,25 @@ For 3-axis work the result is still a surface `z = f(x, y)`, but it is **evaluat
 - **Stepover** is derived from the surface tolerance via **scallop height**, so the user specifies quality and the planner chooses the stepover.
 - Optimization works on passes, the same as for all other operations, so carving needs no special case.
 
-## Evaluation rules
-
-- Removals **overshoot** the stock and **overlap** each other; they never just touch (face-touching solids stay separate shells, and shared boundaries leave slivers).
-- Segment counts (arcs, fillet levels) are derived from the tolerance. Arcs are inscribed, so meshes always keep slightly more material – the safe direction.
-- Build labelled meshes near the origin and translate afterwards (JS mesh I/O is float32). Meshes are derived data; never read dimensions back from them.
-- After each evaluation check `status()` and `decompose()`: extra pieces reveal parts that are not held (e.g. tabs that connect to nothing) – a DFM warning.
-- Tolerate degenerate triangles in output meshes.
-- Clipper2 float functions default to 2 decimals – always pass a precision.
-- WASM objects are freed through one ownership helper (arena per evaluation).
-
 ## Layers
 
-| Layer           | Implementation                                                                                                       | Used for                                                                    |
-| --------------- | -------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| Analytic model  | Own, in `src/core`                                                                                                   | Source of truth: operations, surfaces, references, tolerances.              |
-| 2D              | `clipper2-ts`; Manifold `CrossSection` for 2D→3D; `cavalier-contours-js` candidate for arc offsets                   | Boundaries, offsets, tabs, 2.5D toolpaths (arcs kept for G2/G3).            |
-| 3D solid        | `manifold-3d` (mesh booleans)                                                                                        | Previews, in-process stock between setups, cut-apart pieces, collisions.    |
-| Vector surfaces | Own; medial-axis library to choose                                                                                   | Paths with Béziers, V-carve depths, relief profiles, drop-cutter toolpaths. |
-| Import          | SVG/DXF vectors; raster images traced to vectors; meshes (STL, OBJ, 3MF) for reference; STEP converted to mesh later | Carving/engraving sources, reference models.                                |
+| Layer           | Implementation                                                                                                                                                     | Used for                                                                    | v0.1                |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------- | ------------------- |
+| Analytic model  | Own, in `src/core`                                                                                                                                                 | Source of truth: operations, surfaces, references, tolerances.              | Yes                 |
+| 2D              | Own analytic contours (v0.1); later `clipper2-ts` (always pass a precision to float functions), Manifold `CrossSection`, `cavalier-contours-js` candidate for arcs | Boundaries, offsets, tabs, 2.5D toolpaths (arcs kept for G2/G3).            | Analytic only       |
+| 3D solid        | `manifold-3d` (mesh booleans)                                                                                                                                      | Previews, in-process stock between setups, cut-apart pieces, collisions.    | Previews and checks |
+| Vector surfaces | Own; medial-axis library to choose                                                                                                                                 | Paths with Béziers, V-carve depths, relief profiles, drop-cutter toolpaths. | No                  |
+| Import          | SVG/DXF vectors; raster images traced to vectors; meshes (STL, OBJ, 3MF) for reference; STEP converted to mesh later                                               | Carving/engraving sources, reference models.                                | No                  |
 
 All libraries sit behind interfaces (ports) in `src/core`; heavy evaluation runs in workers ([overview.md#threading](overview.md#threading)).
 
 ## Open questions
 
-- Conflicts: one operation's retained region inside another operation's removal region (DFM warning? priority?).
+### Later
+
+- Free-form shapes (deferred): Minkowski fallback for contours that fail loft validity; measure it on non-convex pockets first.
 - 4th/5th axis: `z = f(x, y)` surfaces stop working there; what replaces them.
 - Raster-to-vector tracing: `@visioncortex/vtracer` (MIT, WASM, Bézier output, still alpha) or Potrace (GPL, best black-and-white quality – allowed by [ADR 0014](../decisions/0014-gpl-3-or-later-license.md)); how much the user can tune the tracing.
 - Medial axis for V-carving – candidates: JSPoly (JS port of Boost.Polygon Voronoi, used by Kiri:Moto; segments only), `flo-mat` (MIT, works on Béziers directly), CGAL via WASM (GPL, allowed). Needs its own spike.
 - Arc-preserving offsets: `cavalier-contours-js` (young, single maintainer) vs. a WASM build of the Rust `cavalier_contours` crate.
-- Minkowski fallback on non-convex pockets (not measured); memory growth in a long-lived worker.
 - Simulation model (Z-map vs. dexel – internal to simulation only); performance budget.

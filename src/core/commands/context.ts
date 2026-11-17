@@ -5,6 +5,7 @@
  * Ports keep src/core headless: each process injects its own implementations.
  */
 import type { EntryPoint } from '../../shared/boundary'
+import type { Library } from '../library/library'
 import type { ProjectSession } from '../project/storage'
 import type { WorkerPort } from './jobs'
 
@@ -41,6 +42,8 @@ export interface Clock {
  */
 export interface Services {
   readonly workers: WorkerPort
+  /** The shared library (docs/architecture/library.md#storage); absent = library commands fail. */
+  readonly library?: Library
   /** Persistence of the open project (docs/architecture/persistence.md); absent in tests. */
   readonly project?: ProjectSession
 }
@@ -68,6 +71,7 @@ export interface JobContext extends CommandContext {
 
 export interface QueryContext {
   readonly source: Source
+  readonly services: Services
 }
 
 export const systemIds: IdGenerator = { next: (prefix) => `${prefix}-${crypto.randomUUID()}` }
