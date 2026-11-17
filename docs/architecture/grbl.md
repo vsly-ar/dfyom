@@ -152,6 +152,7 @@ interface ControllerTransport {
 - Run commands (`run.connection.open { target: 'virtual' }`, `run.job.start` as a `job`, [commands.md](commands.md#long-running-commands-jobs)) are `machine: true`.
 - **Permission rule** (for the `PermissionPolicy`, [commands.md](commands.md#dispatcher-pipeline) step 5): a machine command whose connection is virtual is allowed for every source (UI, agent, CLI, automation, system), since no real machine is affected; on a real connection the strict policy stays (only UI sources until [run.md#safety](../modes/run.md#safety) says otherwise). This makes the headless MCP exit criterion possible.
 - Progress: `done` = lines acknowledged with `ok`, `total` = program lines; the position from status reports drives the 3D view.
+- Run-mode design for task 3.9 (sender behaviour, clocks, machine host and protocol, run commands and job, safety): [run-v0.1.md](../modes/run-v0.1.md) (draft).
 
 ### Observability for tests
 

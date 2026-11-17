@@ -4,6 +4,8 @@ Status: draft · Terms: [glossary.md](../glossary.md)
 
 **Goal:** interact with the CNC machine. The baseline is running gCode; the mode goes far beyond that by integrating external devices.
 
+The v0.1 subset (streaming to the virtual machine, utility process, run commands, progress) is specified in [run-v0.1.md](run-v0.1.md) (draft).
+
 ## Devices
 
 - **Sensors:** cameras, vibration, temperature, weight/pressure, distance, power consumption, flow meters, encoders, external RPM monitor (when the spindle doesn't report RPM).
