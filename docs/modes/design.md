@@ -88,14 +88,14 @@ One round hole per operation, so every hole has stable surface ids; plan mode gr
 
 Through cut along a closed shape (cutout), holding the cut-out piece with **tabs**.
 
-| Parameter        | Kind   | Default      | Constraints                                                    | DFM warnings                                                                                    |
-| ---------------- | ------ | ------------ | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `shape`          | –      | required     | rectangle or circle; size > 0                                  | Slot leaves the stock: stock margin < `slotWidth` ("tabs hold nothing").                        |
-| `side`           | –      | `outside`    | `outside` (shape = part outline) or `inside` (shape = opening) | `inside`: same corner check as a pocket.                                                        |
-| `slotWidth`      | length | 6 mm / 1/4″  | > 0                                                            | Smaller than the smallest end-mill diameter in the library.                                     |
-| `tabs.count`     | scalar | 4            | integer ≥ 0; spaced evenly, first at the middle of `wall[0]`   | 0: "the piece comes loose at the last pass".                                                    |
-| `tabs.width`     | length | 6 mm / 1/4″  | > 0; all tabs fit on the perimeter                             | –                                                                                               |
-| `tabs.thickness` | length | 2 mm / 1/16″ | > 0; < stock thickness                                         | Evaluation finds a loose piece ([`decompose()`](../architecture/geometry.md#evaluation-rules)). |
+| Parameter        | Kind   | Default      | Constraints                                                                      | DFM warnings                                                                                    |
+| ---------------- | ------ | ------------ | -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `shape`          | –      | required     | rectangle or circle; size > 0                                                    | Slot leaves the stock: stock margin < `slotWidth` ("tabs hold nothing").                        |
+| `side`           | –      | `outside`    | `outside` (shape = part outline) or `inside` (shape = opening)                   | `inside`: same corner check as a pocket.                                                        |
+| `slotWidth`      | length | 6 mm / 1/4″  | > 0                                                                              | Smaller than the smallest end-mill diameter in the library.                                     |
+| `tabs.count`     | scalar | 4            | integer ≥ 0; spaced evenly, first at the middle of `wall[0]` (circle: the front) | 0: "the piece comes loose at the last pass".                                                    |
+| `tabs.width`     | length | 6 mm / 1/4″  | > 0; all tabs fit on the perimeter                                               | –                                                                                               |
+| `tabs.thickness` | length | 2 mm / 1/16″ | > 0; < stock thickness                                                           | Evaluation finds a loose piece ([`decompose()`](../architecture/geometry.md#evaluation-rules)). |
 
 The removal region is a slot of `slotWidth` beside the shape (outside it for `outside`, inside for `inside`), through the stock bottom; tabs are its retained regions, measured up from `stock.bottom`. Surfaces: `profile1.wall[i]`, `profile1.corner[i]` (as for a pocket), `profile1.tab[i].top`, `profile1.tab[i].end[0|1]`. Tool requirement: end mill with diameter ≤ `slotWidth` and enough flute length for the stock thickness.
 

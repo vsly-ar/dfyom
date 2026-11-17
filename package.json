@@ -1,7 +1,7 @@
 {
   "name": "dfyom",
   "productName": "DFYOM",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "private": true,
   "description": "Design For Your Own Manufacturing – design, plan and run parts on your own CNC machines.",
   "main": "./out/main/index.js",
@@ -17,6 +17,7 @@
     "typecheck": "node node_modules/typescript7/bin/tsc --noEmit -p tsconfig.node.json && node node_modules/typescript7/bin/tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
     "test:watch": "vitest",
+    "perf": "vitest run --config vitest.perf.config.mts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
@@ -45,6 +46,7 @@
   },
   "dependencies": {
     "immer": "^11.2.10",
+    "manifold-3d": "3.5.4",
     "oxide.ts": "1.1.0",
     "pino": "^10.4.0",
     "pino-roll": "^4.0.0",

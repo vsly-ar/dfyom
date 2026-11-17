@@ -86,6 +86,12 @@ export const ERROR_CODES = {
     userMessage: 'An external component failed.',
     retryable: true,
   },
+  // Geometry evaluation (task 2.6): docs/architecture/geometry.md#evaluation-checks
+  'geometry.evaluation': {
+    severity: 'error',
+    userMessage: 'The part geometry could not be computed. This is a bug.',
+    retryable: false,
+  },
   'internal.unexpected': {
     severity: 'error',
     userMessage: 'Something went wrong. This is a bug.',
