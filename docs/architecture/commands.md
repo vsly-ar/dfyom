@@ -216,11 +216,11 @@ interface QueryDef<S extends z.ZodType, R> {
 
 - `dispatch` of a `job` returns `{ jobId }` once started; the queue is released immediately.
 - `JobHandle`: `state`, `progress` (throttled stream, separate from Results – [boundaries.md](../conventions/error-handling/boundaries.md#async-workers-cancellation)), `result: AsyncAppResult<R>`.
-- Control: `job.pause`, `job.resume`, `job.abort` commands (agent-callable, logged). Abort → `op.aborted`. Work runs in workers / the utility process per [ADR 0008](../decisions/0008-threading-split-by-job.md).
+- Control: `job.pause`, `job.resume`, `job.abort` commands (agent-callable, logged). Abort → `op.aborted`. Work runs in compute workers ([ADR 0016](../decisions/0016-compute-workers-in-dispatcher-process.md), [workers.md](workers.md)) or the utility process. Queries `job.get { jobId }` and `job.list` read jobs (state, progress, start revision, outcome).
 - Undo: a job is not undoable. If its result changes `ProjectDoc`, it is applied by one `document` command at the end (one undo step), dispatched with `expectedRevision` = revision at job start → `command.conflict` if the inputs changed meanwhile. The handle exposes that revision as `startRevision`; in v0.1 the caller (adapter or script) dispatches the follow-up.
 - Pausing takes effect at the handler's next `ctx.checkpoint()`. Aborting rejects every pending and later checkpoint with an `AbortError` (a handler may await several checkpoints concurrently; resume and abort wake them all); a job that ends after an abort always yields `op.aborted`. Controlling a finished job is a no-op that reports `{ state: 'finished' }`; an unknown `jobId` → `input.malformed` (issue rule `unknownJob`).
 - The dispatcher retains the newest 100 finished jobs (`maxFinishedJobs`); older ones are evicted, after which `job(id)` returns `None` and `job.*` answers like an unknown id. The `finished` log event keeps the outcome.
-- Heavy work goes through the `WorkerPort` in `ctx.services.workers`. Until task 2.9 the port is backed by `inProcessWorkers` (runs tasks inline); the handler itself runs in-process in the dispatcher's process.
+- Heavy work goes through the `WorkerPort` in `ctx.services.workers`. In the app and CLI the port is the worker pool (`worker_threads` in the dispatcher's process, [workers.md](workers.md)); tests use the in-process fake; the handler itself runs in-process in the dispatcher's process.
 
 ## Concurrency
 
