@@ -14,6 +14,7 @@ The code is the contract; each file's header links back here. No adapters yet (I
 | `src/core/commands/context.ts`          | `CommandContext`, `JobContext`, `Source`, `IdGenerator`, `Clock`, `Services` (ports)                  |
 | `src/core/commands/registry.ts`         | Registry of all commands and queries; name checks; `APP_COMMANDS`/`APP_QUERIES`                       |
 | `src/core/commands/dispatcher.ts`       | Per-project queue and pipeline ([below](#dispatcher-pipeline)); `dispatch`, `query`                   |
+| `src/core/commands/args.ts`             | `parseArgs`: args shape check that rejects unknown keys ([pipeline](#dispatcher-pipeline))            |
 | `src/core/commands/history.ts`          | Immer setup, patch execution, undo/redo stacks; `history.undo`/`history.redo`                         |
 | `src/core/commands/action-log.ts`       | Event types, ring buffer, subscriptions                                                               |
 | `src/core/commands/jobs.ts`             | `JobHandle`, progress, pause/resume/abort, `WorkerPort` (+ in-process stub); `job.*` control commands |
@@ -103,12 +104,14 @@ Rules:
 | #   | Step                                                                                                   | Failure              |
 | --- | ------------------------------------------------------------------------------------------------------ | -------------------- |
 | 1   | Look up `name` in the registry                                                                         | `command.unknown`    |
-| 2   | `parseWith(def.args, rawArgs, name)`                                                                   | `input.malformed`    |
+| 2   | `parseArgs(def.args, rawArgs, name)` (`args.ts`): Zod shape check, then unknown keys at any depth      | `input.malformed`    |
 | 3   | Enqueue on the project's FIFO queue ([Concurrency](#concurrency))                                      | –                    |
 | 4   | Revision check ([Stale writes](#stale-writes))                                                         | `command.conflict`   |
 | 5   | If `def.machine`: `policy.check(def, args, source)` – rules in [run.md#safety](../modes/run.md#safety) | `permission.denied`  |
 | 6   | Execute by kind (below); stray throws → `internal.unexpected`                                          | handler's `AppError` |
 | 7   | Emit one action-log event (success **and** failure)                                                    | –                    |
+
+**Unknown keys** in args are rejected for every command and query (also by `runCommand`): Zod strips them, so a mistyped optional key (`dept` for `depth`) would silently take the default. Each key of the raw args must survive in the parsed value; one issue per unknown key, path = the key's path (`['shape', 'radius']`), rule `unrecognized_keys`. Reported once the shape check passes.
 
 Execute `document`: `createDraft(doc)` → `run` → on `Err` drop the draft (state, history and revision unchanged: **no partial patches**) → on `Ok` `finishDraft` with patches; empty patches = no-op, no history entry; otherwise commit, `revision++`, push history entry, clear redo stack, publish patches.
 

@@ -7,7 +7,7 @@
 import { freeze } from 'immer'
 import { summarizeArgs } from '../../shared/boundary'
 import type { AppError } from '../../shared/errors/app-error'
-import { parseWith } from '../../shared/parse'
+import { parseArgs } from './args'
 import {
   Err,
   fail,
@@ -202,7 +202,7 @@ class ProjectDispatcher implements Dispatcher {
     const found = this.registry.query(name)
     if (found.isNone()) return fail('command.unknown', `unknown query ${name}`, { where: 'query' })
     const def = found.unwrap()
-    const args = parseWith(def.args, rawArgs, name)
+    const args = parseArgs(def.args, rawArgs, name)
     if (args.isErr()) return args
     const revision = this.rev
     const value = def.run(this.current, args.unwrap(), { source, services: this.services })
@@ -249,7 +249,7 @@ class ProjectDispatcher implements Dispatcher {
       )
     const def = found.unwrap()
     // 2. Parse args
-    const parsed = parseWith(def.args, rawArgs, name)
+    const parsed = parseArgs(def.args, rawArgs, name)
     if (parsed.isErr()) return this.logged(name, rawArgs, source, Err(parsed.unwrapErr()))
     // Frozen once: the same args go to the handler, the history entry and the log.
     const args: unknown = freeze(parsed.unwrap(), true)

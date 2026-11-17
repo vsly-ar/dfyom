@@ -126,6 +126,51 @@ describe('dependency recalculation', () => {
     expect(s.d.doc).toBe(before)
   })
 
+  /** facing1 depth 1; pocket1 on stock.top, depth `5 mm - facing1.floor.z`; pocket2 from it. */
+  async function ownFormulaChain(depth2: string) {
+    const s = await designSetup()
+    const partId = s.partId
+    await s.run('design.facing.add', { partId, depth: '1' })
+    await s.run('design.pocket.add', {
+      partId,
+      on: 'stock.top',
+      shape: rect('40', '20'),
+      depth: '5 mm - facing1.floor.z',
+    })
+    await s.run('design.pocket.add', {
+      partId,
+      on: 'stock.top',
+      shape: rect('10', '10'),
+      depth: depth2,
+    })
+    return s
+  }
+
+  it("follows a chain through an operation's own formula (pocket1.depth → pocket1.floor.z)", async () => {
+    const s = await ownFormulaChain('-pocket1.floor.z + 1')
+    expect(exactOf((s.op('pocket2') as { depth: unknown }).depth)).toEqual({ num: '7', den: '1' })
+    await s.run('design.facing.update', { partId: s.partId, operationId: 'facing1', depth: '2' })
+    expect(exactOf((s.op('pocket1') as { depth: unknown }).depth)).toEqual({ num: '7', den: '1' })
+    expect(exactOf((s.op('pocket2') as { depth: unknown }).depth)).toEqual({ num: '8', den: '1' })
+  })
+
+  it('checks the constraints of dependants reached through an own formula', async () => {
+    const s = await ownFormulaChain('-pocket1.floor.z + 12') // 6 + 12 = 18 < 20
+    const before = s.d.doc
+    const e = await s.fail(
+      'design.facing.update',
+      { partId: s.partId, operationId: 'facing1', depth: '3' }, // pocket2 → 8 + 12 = 20
+      'model.invariant',
+    )
+    expect(e.issues).toEqual([
+      expect.objectContaining({
+        path: ['operations', 'pocket2', 'depth'],
+        rule: 'aboveStockBottom',
+      }),
+    ])
+    expect(s.d.doc).toBe(before)
+  })
+
   it('the graph orders surfaces and formulas and lists exactly the affected ones', async () => {
     const s = await chain('-pocket1.floor.z')
     await s.run('design.drilling.add', {
@@ -138,14 +183,37 @@ describe('dependency recalculation', () => {
     })
     const { part, stock } = loaded(s)
     const g = expectOk(designGraph(part.operations, stock))
-    expect(g.affectedBy(['pocket1#params'])).toEqual(['pocket1.floor.z', 'pocket2#depth'])
+    // a surface computed from a formula is affected too (pocket2.floor.z from pocket2#depth)
+    expect(g.affectedBy(['pocket1#params'])).toEqual([
+      'pocket1.floor.z',
+      'pocket2#depth',
+      'pocket2.floor.z',
+    ])
     expect(g.affectedBy(['facing1#params'])).toEqual([
       'facing1.floor.z',
       'pocket1.floor.z',
       'pocket2#depth',
+      'pocket2.floor.z',
       'drill1#depth',
+      'drill1.bottom.z',
     ])
     expect(g.affectedBy(['pocket2#params'])).toEqual(['pocket2.floor.z'])
+  })
+
+  it("a surface depends on its operation's own formulas, so the order and the list are complete", async () => {
+    const s = await ownFormulaChain('-pocket1.floor.z + 1')
+    const { part, stock } = loaded(s)
+    const g = expectOk(designGraph(part.operations, stock))
+    expect(g.affectedBy(['facing1#params'])).toEqual([
+      'facing1.floor.z',
+      'pocket1#depth',
+      'pocket1.floor.z',
+      'pocket2#depth',
+      'pocket2.floor.z',
+    ])
+    // evaluation order: a formula before the surface computed from it
+    const order = g.order()
+    expect(order.indexOf('pocket1#depth')).toBeLessThan(order.indexOf('pocket1.floor.z'))
   })
 })
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
 import { createRegistry } from '../commands/registry'
 import { expectUndoLaw } from '../commands/testing'
+import { newProjectDoc } from '../project/document'
 import { DESIGN_COMMANDS, DESIGN_QUERIES } from './commands'
 import { designSetup, type DesignSetup } from './design.fixture'
 
@@ -454,6 +455,71 @@ describe('validation errors (model.invariant, design.md constraints)', () => {
     expect(s.d.doc).toBe(before)
   })
 
+  it('an inside profile whose slot covers the opening builds no tabs, so tab width is not checked', async () => {
+    const s = await designSetup()
+    // Ø6 with the default 6 mm slot: 4 × 6 mm tabs would not fit on the 18.8 mm perimeter
+    await s.run('design.profile.add', { partId: s.partId, shape: circle('6'), side: 'inside' })
+    expect(s.op('profile1')).toMatchObject({ side: 'inside' })
+  })
+
+  const updates: [string, string, object, object, (string | number)[], string][] = [
+    [
+      'facing depth through the stock',
+      'facing',
+      {},
+      { depth: '20' },
+      ['depth'],
+      'lessThanStockThickness',
+    ],
+    [
+      'pocket corner radius too large',
+      'pocket',
+      { shape: rect('20', '10'), depth: '1' },
+      { shape: rect('20', '10', { cornerRadius: '6' }) },
+      ['shape', 'cornerRadius'],
+      'cornerRadiusRange',
+    ],
+    [
+      'pocket floor radius > depth',
+      'pocket',
+      { shape: rect('20', '10'), depth: '2' },
+      { floorRadius: '2.5' },
+      ['floorRadius'],
+      'floorRadiusRange',
+    ],
+    [
+      'drill point angle 200°',
+      'drilling',
+      { center: ['1', '1'], diameter: '3', bottom: 'drillPoint', depth: '4' },
+      { pointAngle: '200' },
+      ['pointAngle'],
+      'range',
+    ],
+    [
+      'profile tabs as thick as the stock',
+      'profile',
+      { shape: rect('20', '10') },
+      { tabs: { thickness: '20' } },
+      ['tabs', 'thickness'],
+      'lessThanStockThickness',
+    ],
+  ]
+
+  it.each(updates)('update: %s', async (_label, kind, add, update, path, rule) => {
+    const s = await designSetup()
+    const { operationId } = (await s.run(`design.${kind}.add`, { partId: s.partId, ...add })) as {
+      operationId: string
+    }
+    const before = s.d.doc
+    const e = await s.fail(
+      `design.${kind}.update`,
+      { partId: s.partId, operationId, ...update },
+      'model.invariant',
+    )
+    expect(e.issues).toContainEqual(expect.objectContaining({ path, rule }))
+    expect(s.d.doc).toBe(before)
+  })
+
   it('reports every invalid field of the operation at once', async () => {
     const s = await designSetup()
     const e = await s.fail(
@@ -488,6 +554,43 @@ describe('validation errors (model.invariant, design.md constraints)', () => {
       'quantity.syntax',
     )
     expect(center.issues[0]?.path).toEqual(['center', 1])
+  })
+
+  it('unknown arg keys are input.malformed with the key in the path (top level and nested)', async () => {
+    const s = await designSetup()
+    const before = s.d.doc
+    const top = await s.fail(
+      'design.facing.add',
+      { partId: s.partId, dept: '3' },
+      'input.malformed',
+    )
+    expect(top.issues).toEqual([expect.objectContaining({ path: ['dept'] })])
+    const nested = await s.fail(
+      'design.pocket.add',
+      { partId: s.partId, shape: { ...rect('10', '10'), radius: '2' }, depth: '1' },
+      'input.malformed',
+    )
+    expect(nested.issues).toEqual([expect.objectContaining({ path: ['shape', 'radius'] })])
+    const tabs = await s.fail(
+      'design.profile.add',
+      { partId: s.partId, shape: rect('20', '10'), tabs: { counts: '2' } },
+      'input.malformed',
+    )
+    expect(tabs.issues).toEqual([expect.objectContaining({ path: ['tabs', 'counts'] })])
+    expect(s.d.doc).toBe(before)
+  })
+
+  it('design.part.get: a stock id that is an Object.prototype key is a missing snapshot', () => {
+    const doc = {
+      ...newProjectDoc({ name: 'P', unitSystem: 'mm' }),
+      parts: { p1: { id: 'p1', name: 'P', stock: 'toString', operations: [] } },
+    }
+    const get = DESIGN_QUERIES.find((q) => q.name === 'design.part.get')!
+    const ui = { kind: 'ui', id: 'window-1' } as const
+    expectErrCode(
+      get.run(doc, { partId: 'p1' }, { source: ui, services: {} as never }),
+      'input.malformed',
+    )
   })
 
   it('unknown part / operation, wrong kind and malformed args are input.malformed', async () => {

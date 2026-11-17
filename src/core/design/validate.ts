@@ -10,7 +10,7 @@ import type { Stock } from '../library/stock'
 import type { Quantity } from '../quantity/quantity'
 import { Rational } from '../quantity/rational'
 import type { Operation, Shape } from './operation'
-import { SurfaceTable } from './surfaces'
+import { slotCoversOpening, SurfaceTable } from './surfaces'
 
 const ZERO = Rational.ZERO
 const HALF = Rational.create(1n, 2n).unwrap()
@@ -177,7 +177,14 @@ export function operationIssues(
       c.check(count.exact.compare(ZERO) >= 0, 'tabs.count', 'nonNegative', 'must be 0 or more', {
         actual: count.canonical,
       })
-      if (c.positive(op.tabs.width, 'tabs.width') && shapeOk && integer && count.canonical > 0) {
+      // no tabs are built when an inside slot covers the opening, so their width cannot conflict
+      if (
+        c.positive(op.tabs.width, 'tabs.width') &&
+        shapeOk &&
+        integer &&
+        count.canonical > 0 &&
+        !slotCoversOpening(op)
+      ) {
         const perimeter = shapePerimeter(op.shape)
         c.check(
           count.canonical * op.tabs.width.canonical < perimeter,

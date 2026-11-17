@@ -676,7 +676,7 @@ const partGet = defineQuery({
   run(doc, args) {
     const part = Object.hasOwn(doc.parts, args.partId) ? doc.parts[args.partId] : undefined
     if (part === undefined) return unknownPart(args.partId, 'design.part.get')
-    const stock = doc.snapshots[part.stock]
+    const stock = Object.hasOwn(doc.snapshots, part.stock) ? doc.snapshots[part.stock] : undefined
     if (stock === undefined)
       return fail('input.malformed', `stock snapshot ${part.stock} is missing`, {
         where: 'design.part.get',

@@ -17,7 +17,8 @@ import type { Source } from './context'
 import type { AnyCommand } from './define'
 import { createDispatcher, type DispatcherOptions } from './dispatcher'
 import { applyDocPatches } from './history'
-import { createRegistry } from './registry'
+import { createAppRegistry, createRegistry } from './registry'
+import { runCommand } from './testing'
 import { agentSource, fakeClock, fakeIds, uiSource } from './testing'
 
 const initial = newProjectDoc({ name: 'Bracket', unitSystem: 'mm' })
@@ -100,6 +101,42 @@ describe('dispatch: document commands', () => {
     expectErrCode(await d.dispatch('project.nope.update', {}, ui), 'command.unknown')
     expectErrCode(await d.dispatch('project.name.update', { name: 1 }, ui), 'input.malformed')
     expect(events.map((e) => e.type === 'command' && e.outcome.ok)).toEqual([false, false])
+  })
+
+  it('unknown arg keys → input.malformed naming the key; nothing runs (commands and queries)', async () => {
+    const { d, events } = setup()
+    const e = expectErrCode(
+      await d.dispatch('project.name.update', { name: 'Plate', nmae: 'x' }, ui),
+      'input.malformed',
+    )
+    expect(e.issues).toEqual([
+      expect.objectContaining({ path: ['nmae'], rule: 'unrecognized_keys' }),
+    ])
+    expect(d.revision).toBe(0)
+    expect(events).toHaveLength(1)
+    const j = expectErrCode(
+      await d.dispatch('run.machine.jog', { dxMm: 1, dy: 2 }, ui),
+      'input.malformed',
+    )
+    expect(j.issues[0]?.path).toEqual(['dy'])
+    const q = expectErrCode(d.query('project.doc.get', { extra: true }, ui), 'input.malformed')
+    expect(q.issues[0]?.path).toEqual(['extra'])
+    // also without a dispatcher
+    expectErrCode(runCommand(initial, renameProject, { name: 'P', x: 1 }).result, 'input.malformed')
+  })
+
+  it('every registered app command rejects unknown keys (e.g. library and project.save)', async () => {
+    const d = createDispatcher({ registry: expectOk(createAppRegistry()), doc: initial })
+    const save = expectErrCode(
+      await d.dispatch('project.save', { confirm: true, force: 1 }, ui),
+      'input.malformed',
+    )
+    expect(save.issues[0]?.path).toEqual(['force'])
+    const lib = expectErrCode(
+      await d.dispatch('library.stock.remove', { id: 's', confirm: true, purge: true }, ui),
+      'input.malformed',
+    )
+    expect(lib.issues[0]?.path).toEqual(['purge'])
   })
 
   it('empty patches = no-op: no revision, no history entry', async () => {

@@ -235,21 +235,27 @@ const paramsNode = (opId: string) => `${opId}#params`
 const paramNode = (opId: string, path: string) => `${opId}#${path}`
 
 /**
- * Nodes: each surface's `.z` (depends on its `on` surface and its operation's parameters) and
- * each expression parameter (depends on what it references).
+ * Nodes: each expression parameter (depends on what it references) and each surface's `.z`
+ * (depends on its `on` surface, its operation's parameters as a whole and each of its
+ * operation's expression parameters, so a chain through an operation's own formula is complete:
+ * `facing1.floor.z` → `pocket1#depth` → `pocket1.floor.z` → `pocket2#depth`).
  */
 export function designGraph(ops: readonly Operation[], stock: Stock): AppResult<DependencyGraph> {
   const table = SurfaceTable.build(ops, stock)
   const nodes = new Map<string, readonly string[]>()
   for (const [i, op] of ops.entries()) {
-    const on = op.kind === 'pocket' || op.kind === 'drilling' ? [`${op.on}.z`] : []
-    for (const e of table.before(i + 1))
-      if (e.owner === i) nodes.set(`${e.id}.z`, [...on, paramsNode(op.id)])
+    const formulas: string[] = []
     for (const p of quantityParams(op)) {
       const refs = referencesOf(p.value)
       if (refs.isErr()) return Err(refs.unwrapErr())
-      if (refs.unwrap().length > 0) nodes.set(paramNode(op.id, p.path), refs.unwrap())
+      if (refs.unwrap().length === 0) continue
+      const node = paramNode(op.id, p.path)
+      nodes.set(node, refs.unwrap())
+      formulas.push(node)
     }
+    const on = op.kind === 'pocket' || op.kind === 'drilling' ? [`${op.on}.z`] : []
+    for (const e of table.before(i + 1))
+      if (e.owner === i) nodes.set(`${e.id}.z`, [...on, paramsNode(op.id), ...formulas])
   }
   return DependencyGraph.create(nodes)
 }
