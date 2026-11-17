@@ -6,6 +6,7 @@
  */
 import type { EntryPoint } from '../../shared/boundary'
 import type { Library } from '../library/library'
+import type { ProjectSession } from '../project/storage'
 import type { WorkerPort } from './jobs'
 
 /**
@@ -37,13 +38,14 @@ export interface Clock {
 }
 
 /**
- * Injected service ports. The file-system port arrives with persistence (v0.1 task 3.1) and the
- * machine port with run mode (task 3.9).
+ * Injected service ports. The machine port arrives with run mode (task 3.9).
  */
 export interface Services {
   readonly workers: WorkerPort
   /** The shared library (docs/architecture/library.md#storage); absent = library commands fail. */
   readonly library?: Library
+  /** Persistence of the open project (docs/architecture/persistence.md); absent in tests. */
+  readonly project?: ProjectSession
 }
 
 export interface CommandContext {

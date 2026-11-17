@@ -18,7 +18,7 @@ The docs are the **source of truth**. Code implements what is documented here; w
 | Architecture | [architecture/overview.md](architecture/overview.md) – processes, source layout, threading                                               | draft       |
 | Architecture | [architecture/llm-api.md](architecture/llm-api.md) – LLM/agent access, headless, multi-instance                                          | stub        |
 | Architecture | [architecture/commands.md](architecture/commands.md) – shared command layer for UI, agents, CLI                                          | implemented |
-| Architecture | [architecture/persistence.md](architecture/persistence.md) – project archive, working folder, save/recovery                              | accepted    |
+| Architecture | [architecture/persistence.md](architecture/persistence.md) – project archive, working folder, save/recovery                              | implemented |
 | Architecture | [architecture/quantities.md](architecture/quantities.md) – units, tolerances, expressions (value objects)                                | implemented |
 | Architecture | [architecture/geometry.md](architecture/geometry.md) – removal-based geometry, cutting-operation framework, layers                       | accepted    |
 | Architecture | [architecture/library.md](architecture/library.md) – stock, tool and machine library; snapshots                                          | implemented |

@@ -64,6 +64,17 @@ export const ERROR_CODES = {
     userMessage: 'The file could not be read or written.',
     retryable: true,
   },
+  // Persistence (task 3.1): docs/architecture/persistence.md#error-codes
+  'persist.locked': {
+    severity: 'warn',
+    userMessage: 'This project is open in another DFYOM window or instance.',
+    retryable: true,
+  },
+  'persist.verify': {
+    severity: 'error',
+    userMessage: 'The saved file could not be verified; the previous file was kept.',
+    retryable: true,
+  },
   'op.aborted': { severity: 'info', userMessage: 'The operation was cancelled.', retryable: true },
   // Command layer: docs/architecture/commands.md#dispatcher-pipeline
   'command.unknown': {

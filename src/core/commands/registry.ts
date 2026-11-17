@@ -6,6 +6,7 @@ import type { Issue } from '../../shared/errors/app-error'
 import { fail, None, Ok, Some, type AppResult, type Option } from '../../shared/result'
 import { LIBRARY_COMMANDS, LIBRARY_QUERIES } from '../library/commands'
 import type { AnyCommand, QueryDef } from './define'
+import { projectSave } from '../project/commands'
 import { historyRedo, historyUndo } from './history'
 import { jobAbort, jobPause, jobResume } from './jobs'
 
@@ -23,7 +24,7 @@ export const BUILTIN_COMMANDS: readonly AnyCommand[] = [
 ]
 
 /** Domain commands and queries of the app; added by their features. */
-export const APP_COMMANDS: readonly AnyCommand[] = [...LIBRARY_COMMANDS]
+export const APP_COMMANDS: readonly AnyCommand[] = [...LIBRARY_COMMANDS, projectSave]
 export const APP_QUERIES: readonly QueryDef[] = [...LIBRARY_QUERIES]
 
 export interface Registry {
