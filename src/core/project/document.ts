@@ -12,15 +12,16 @@ import { parseWith } from '../../shared/parse'
 import type { AppResult } from '../../shared/result'
 import { PartDtoSchema } from '../design/part.dto'
 import { SnapshotDtoSchema } from '../library/snapshot'
+import { PlanDtoSchema } from '../plan/plan.dto'
 
 /** Display unit system of a project (docs/architecture/quantities.md, glossary "Unit system"). */
 export const UnitSystemSchema = z.enum(['mm', 'inch']).describe('Project display unit system')
 export type UnitSystem = z.output<typeof UnitSystemSchema>
 
 /**
- * Shape of the document. `parts` and `snapshots` are record collections keyed by id
- * (docs/architecture/persistence.md#working-folder-layout; parts: docs/modes/design.md).
- * Plans are added by task 2.13.
+ * Shape of the document. `parts`, `snapshots` and `plans` are record collections keyed by id
+ * (docs/architecture/persistence.md#working-folder-layout; parts: docs/modes/design.md; plans:
+ * docs/modes/plan-v0.1.md#plan-record).
  */
 export const ProjectDocSchema = z.object({
   name: z.string().describe('Project name'),
@@ -30,13 +31,20 @@ export const ProjectDocSchema = z.object({
     .record(z.string(), SnapshotDtoSchema)
     .default({})
     .describe('Library snapshots used by the design, by id'),
+  plans: z
+    .record(z.string(), PlanDtoSchema)
+    .default({})
+    .describe('Plans by id, each with its own design snapshot and library copies'),
 })
 
 export type ProjectDoc = Readonly<z.output<typeof ProjectDocSchema>>
 
 /** A new, deeply frozen document. */
 export function newProjectDoc(init: Pick<ProjectDoc, 'name' | 'unitSystem'>): ProjectDoc {
-  return freeze({ name: init.name, unitSystem: init.unitSystem, parts: {}, snapshots: {} }, true)
+  return freeze(
+    { name: init.name, unitSystem: init.unitSystem, parts: {}, snapshots: {}, plans: {} },
+    true,
+  )
 }
 
 /** Shape check of untrusted document data (files, IPC); result is deeply frozen. */

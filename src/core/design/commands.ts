@@ -49,6 +49,7 @@ import {
 import {
   DRILL_BOTTOMS,
   OperationDtoSchema,
+  type OperationDTO,
   OperationIdSchema,
   PartDtoSchema,
   PartIdSchema,
@@ -289,7 +290,14 @@ function settle(
 
 /** Writes operations whose DTO changed (and appended ones) to the draft. */
 function writeOperations(draft: Draft<ProjectDoc>, partId: string, ops: readonly Operation[]) {
-  const list = draft.parts[partId]!.operations
+  writeOperationList(draft.parts[partId]!.operations, ops)
+}
+
+/**
+ * Writes operations whose DTO changed (and appended ones) to a DTO list (a draft's part or a
+ * plan's design snapshot); the list must not be longer than `ops`.
+ */
+export function writeOperationList(list: OperationDTO[], ops: readonly Operation[]): void {
   ops.forEach((op, i) => {
     const dto = operationToDTO(op)
     if (i >= list.length) list.push(dto)
@@ -510,36 +518,50 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
     result: z.object({ warnings: Warnings }),
     run(draft, rawArgs, ctx) {
       const where = `design.${spec.kind}.update`
-      const args = rawArgs as {
-        partId: string
-        operationId: string
-        name?: string
-        generalTolerance?: ToleranceArgs
-      } & Args<P>
+      const args = rawArgs as { partId: string; operationId: string } & UpdateArgs<P>
       const loaded = load(draft, args.partId, where)
       if (loaded.isErr()) return loaded
-      const { part, stock, units } = loaded.unwrap()
-      const index = findOperation(part, args.operationId, spec.kind, where)
-      if (index.isErr()) return index
-      const i = index.unwrap()
-      const ops = part.operations
-      const prev = ops[i] as O
-      const f = new Fields(units, SurfaceTable.build(ops, stock).resolver(i))
-      const built = spec.build(args, prev, { f, id: prev.id, name: args.name ?? prev.name, ops })
-      const op = {
-        ...built,
-        generalTolerance: f.tolerance(args.generalTolerance, prev.generalTolerance),
-      }
-      const parsed = f.done()
-      if (parsed.isErr()) return Err(parsed.unwrapErr().withContext(where))
-      const next = ops.map((o, k) => (k === i ? op : o))
-      const settled = settle(next, stock, prev.id, true, where)
+      const settled = applyUpdate(spec, loaded.unwrap(), args.operationId, args, where)
       if (settled.isErr()) return settled
       writeOperations(draft, args.partId, settled.unwrap())
       return withWarnings({}, loaded.unwrap(), settled.unwrap(), ctx, where)
     },
   })
   return [add, update]
+}
+
+type UpdateArgs<P extends z.ZodRawShape> = {
+  name?: string
+  generalTolerance?: ToleranceArgs
+} & Args<P>
+
+/**
+ * One operation of a loaded part updated from args as entered, with the whole-part check
+ * (`settle`). Returns all operations; writes nothing.
+ */
+function applyUpdate<P extends z.ZodRawShape, O extends Operation>(
+  spec: KindSpec<P, O>,
+  loaded: LoadedPart,
+  operationId: string,
+  args: UpdateArgs<P>,
+  where: string,
+): AppResult<readonly Operation[]> {
+  const { part, stock, units } = loaded
+  const index = findOperation(part, operationId, spec.kind, where)
+  if (index.isErr()) return index
+  const i = index.unwrap()
+  const ops = part.operations
+  const prev = ops[i] as O
+  const f = new Fields(units, SurfaceTable.build(ops, stock).resolver(i))
+  const built = spec.build(args, prev, { f, id: prev.id, name: args.name ?? prev.name, ops })
+  const op = {
+    ...built,
+    generalTolerance: f.tolerance(args.generalTolerance, prev.generalTolerance),
+  }
+  const parsed = f.done()
+  if (parsed.isErr()) return Err(parsed.unwrapErr().withContext(where))
+  const next = ops.map((o, k) => (k === i ? op : o))
+  return settle(next, stock, prev.id, true, where)
 }
 
 // ── part and shared operation commands ────────────────────────────────────────────────────
@@ -745,6 +767,65 @@ const warningList = defineQuery({
       .mapErr((e) => e.withContext(where))
   },
 })
+
+const KIND_SPECS = {
+  facing: facingSpec,
+  pocket: pocketSpec,
+  drilling: drillingSpec,
+  profile: profileSpec,
+} as const
+
+type AnyParamKey =
+  | keyof typeof facingParams
+  | keyof typeof pocketParams
+  | keyof typeof drillingParams
+  | keyof typeof profileParams
+
+/**
+ * The parameter args of `design.<kind>.update` for every kind, all optional (equal names share
+ * one schema). Used by `plan.design.operation.update` (docs/modes/plan-v0.1.md#plans-are-snapshots).
+ */
+export const OPERATION_UPDATE_ARGS = {
+  name: NameArg.optional(),
+  generalTolerance: ToleranceArg.optional(),
+  ...Object.fromEntries(
+    Object.values(KIND_SPECS).flatMap((spec) =>
+      Object.entries(spec.params).map(([k, schema]) => [k, (schema as z.ZodType).optional()]),
+    ),
+  ),
+} as unknown as {
+  name: z.ZodOptional<typeof NameArg>
+  generalTolerance: z.ZodOptional<typeof ToleranceArg>
+} & { [K in AnyParamKey]: z.ZodOptional<z.ZodType> }
+
+/**
+ * Updates any operation of a loaded part with the rules of `design.<its kind>.update`, so a
+ * plan's design snapshot is edited exactly like the design. Parameters of another kind are
+ * `input.malformed` (rule `notForKind`). Returns all operations; writes nothing.
+ */
+export function updateOperation(
+  loaded: LoadedPart,
+  operationId: string,
+  args: Readonly<Record<string, unknown>>,
+  where: string,
+): AppResult<readonly Operation[]> {
+  const found = findOperation(loaded.part, operationId, undefined, where)
+  if (found.isErr()) return found
+  const kind = loaded.part.operations[found.unwrap()]!.kind
+  const spec = KIND_SPECS[kind] as unknown as KindSpec<z.ZodRawShape, Operation>
+  const allowed = new Set(['name', 'generalTolerance', ...Object.keys(spec.params)])
+  const foreign = Object.keys(args).filter((k) => args[k] !== undefined && !allowed.has(k))
+  if (foreign.length > 0)
+    return fail('input.malformed', `${foreign.join(', ')}: not a parameter of a ${kind}`, {
+      issues: foreign.map((k) => ({
+        path: [k],
+        rule: 'notForKind',
+        message: `not a parameter of a ${kind} operation`,
+      })),
+      where,
+    })
+  return applyUpdate(spec, loaded, operationId, args as UpdateArgs<z.ZodRawShape>, where)
+}
 
 export const DESIGN_COMMANDS: readonly AnyCommand[] = [
   partAdd,

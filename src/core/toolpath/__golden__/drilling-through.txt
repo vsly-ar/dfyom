@@ -1,0 +1,7 @@
+toolpath op-drill1 tool dr6 S3000
+stats cut 23.8026 rapid 40.8026 s 11.9692
+pass drill
+  rapid 15 15 10
+  rapid 15 15 1.5
+  drill 15 15 top -0.5 bottom -22.3026 simple retract 1.5 F150
+  rapid 15 15 10

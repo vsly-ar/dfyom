@@ -47,7 +47,7 @@ One JSON file per top-level record of `ProjectDoc`:
 | `plans/<id>.json`     | One plan: status, design snapshot, own library copies, setups ([plan-v0.1.md](../modes/plan-v0.1.md#plan-record)) |
 | `snapshots/<id>.json` | One library-item snapshot used by the design (below)                                                              |
 
-The mapping is generic: `layout.ts` lists the `ProjectDoc` keys that are record collections (`<key>/<id>.json`, ids must match `[A-Za-z0-9_-]`); every other field goes to `project.json`. `parts` and `snapshots` are registered (task 2.5); `plans` registers its key with task 2.13. Any other file in an archive or `work/` is `input.malformed`.
+The mapping is generic: `layout.ts` lists the `ProjectDoc` keys that are record collections (`<key>/<id>.json`, ids must match `[A-Za-z0-9_-]`); every other field goes to `project.json`. `parts` and `snapshots` are registered (task 2.5), `plans` with task 2.13. Any other file in an archive or `work/` is `input.malformed`.
 
 ### Library references
 
