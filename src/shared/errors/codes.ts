@@ -109,6 +109,12 @@ export const ERROR_CODES = {
     userMessage: 'Later operations refer to this operation. Change or remove them first.',
     retryable: false,
   },
+  // Machine connection (task 3.8): docs/architecture/grbl.md#transport-and-sender
+  'machine.connection': {
+    severity: 'error',
+    userMessage: 'The connection to the machine is closed or lost.',
+    retryable: true,
+  },
   'internal.unexpected': {
     severity: 'error',
     userMessage: 'Something went wrong. This is a bug.',
