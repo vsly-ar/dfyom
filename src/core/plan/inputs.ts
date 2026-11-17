@@ -4,10 +4,11 @@
  * cache keys on. Doc: docs/modes/plan-v0.1.md#toolpath-generation-job (seam: "Implementation
  * (task 2.13)" in the same doc).
  *
- * `plan.toolpath.generate` (a `job`, 2.9/2.10) calls `planOperationInputs` on the document it
- * started with and hands each input to a `ToolpathGenerator` through the `WorkerPort`.
+ * `plan.toolpath.generate` (a `job`, src/core/toolpath/generate.ts) calls `planOperationInputs`
+ * on the document it started with, maps each input with `toGeneratorInputs` and runs the
+ * generators through the `WorkerPort` (docs/architecture/workers.md#toolpath-cache).
  */
-import { fail, Ok, type AppResult, type AsyncAppResult, type Option } from '../../shared/result'
+import { fail, Ok, type AppResult, type Option } from '../../shared/result'
 import type { Operation, Part } from '../design/operation'
 import type { OperationKind } from '../design/part.dto'
 import type { Machine } from '../library/machine'
@@ -54,12 +55,6 @@ export interface PlanOperationInput {
    */
   readonly inputHash: string
 }
-
-/** Signature 2.10 implements per strategy; `Toolpath` is defined by 2.10 (src/core/toolpath). */
-export type ToolpathGenerator<Toolpath> = (
-  input: PlanOperationInput,
-  ctx: { readonly checkpoint: () => Promise<void> },
-) => AsyncAppResult<Toolpath>
 
 /**
  * Inputs of the listed plan operations (all by default), in machining order. Error findings of

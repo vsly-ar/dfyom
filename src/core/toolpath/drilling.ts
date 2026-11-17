@@ -4,6 +4,7 @@
  */
 import { EPSILON, type Vec2, type Vec3 } from '../geometry/model'
 import { Err, Ok, type AppResult } from '../../shared/result'
+import { noSteps, type Steps } from '../workers/steps'
 import { commonIssues, levels, toolpath } from './common'
 import type { DrillingInput, Toolpath } from './model'
 import { flat, MoveBuilder, slope, type Seg } from './path'
@@ -20,7 +21,14 @@ export function tipLength(diameter: number, pointAngle: number): number {
   return pointAngle >= 180 ? 0 : diameter / 2 / Math.tan((pointAngle * Math.PI) / 360)
 }
 
-export function generateDrilling(input: DrillingInput): AppResult<Toolpath> {
+/**
+ * One hole is one step (`steps.step()` once, after the input checks); a plan operation's holes
+ * step one by one in `generateRequest`.
+ */
+export function generateDrilling(
+  input: DrillingInput,
+  steps: Steps = noSteps,
+): AppResult<Toolpath> {
   const { tool, cutting, heights, stock, operation: op, strategy: st } = input
   const issues = commonIssues(input)
   issues.positive('operation.diameter', op.diameter)
@@ -115,7 +123,7 @@ export function generateDrilling(input: DrillingInput): AppResult<Toolpath> {
         bottom: op.bottom.pointAngle,
       },
     )
-  const ok = issues.result('generateDrilling', input.planOperationId)
+  const ok = issues.result('generateDrilling', input.planOperationId).andThen(() => steps.step())
   if (ok.isErr()) return Err(ok.unwrapErr())
 
   // z where the hole reaches its full diameter

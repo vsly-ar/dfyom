@@ -12,7 +12,7 @@ import {
   type LogLevel,
   type Logger,
 } from '../../shared/logging'
-import { createForwardReceiver } from './forward'
+import { createForwardReceiver, type ForwardReceiver } from './forward'
 import { createMainLogging, createStderrLogging, installCrashHandlers } from './logger'
 
 export interface AppLogging {
@@ -22,6 +22,8 @@ export interface AppLogging {
   /** Instance level; passed to renderers so they forward the same entries. */
   readonly level: LogLevel
   readonly instance: string
+  /** Writes batches forwarded by other threads/processes (compute workers). */
+  readonly forward: ForwardReceiver
 }
 
 /** pino-pretty (dev dependency) on stderr; only loaded in unpackaged runs. */
@@ -81,5 +83,5 @@ export async function startLogging(): Promise<AppLogging> {
   if (ignored.length > 0) self.warn({ ignored }, 'invalid log level override ignored')
   log.info({ logLevel: level, file: logging.file(), packaged: !isDev }, 'app started')
 
-  return { log, report, level, instance }
+  return { log, report, level, instance, forward: receive }
 }

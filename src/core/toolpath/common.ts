@@ -4,6 +4,7 @@
  */
 import type { Issue } from '../../shared/errors/app-error'
 import { fail, Ok, type AppResult } from '../../shared/result'
+import type { Steps } from '../workers/steps'
 import type { GeneratorInput, Pass, Toolpath } from './model'
 import { toolpathStats } from './stats'
 
@@ -93,6 +94,14 @@ export function levels(top: number, bottom: number, stepdown: number): number[] 
   if (depth <= 1e-9) return []
   const n = Math.max(1, Math.ceil(depth / stepdown - 1e-9))
   return Array.from({ length: n }, (_, k) => (k === n - 1 ? bottom : top - (depth * (k + 1)) / n))
+}
+
+/**
+ * One step per pass (docs/architecture/workers.md#abort-and-pause): `pass(k)` reports pass k
+ * (0-based) of `total` and returns `Err(op.aborted)` once aborted.
+ */
+export function passSteps(steps: Steps, total: number): (k: number) => AppResult<void> {
+  return (k) => steps.step({ done: k, total, label: `pass ${k + 1}/${total}` })
 }
 
 export function toolpath(

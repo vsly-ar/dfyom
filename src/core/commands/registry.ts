@@ -10,8 +10,9 @@ import { LIBRARY_COMMANDS, LIBRARY_QUERIES } from '../library/commands'
 import { draftPlanAutoRebuild, PLAN_COMMANDS, PLAN_QUERIES } from '../plan/commands'
 import type { AnyCommand, DocumentHook, QueryDef } from './define'
 import { projectSave } from '../project/commands'
+import { toolpathGenerateJob, toolpathGet } from '../toolpath/generate'
 import { historyRedo, historyUndo } from './history'
-import { jobAbort, jobPause, jobResume } from './jobs'
+import { jobAbort, jobGet, jobList, jobPause, jobResume } from './jobs'
 
 /** `<area>.<object>.<verb>` (or `<area>.<verb>` for area-level actions such as `history.undo`). */
 export const NAME_PATTERN =
@@ -26,18 +27,23 @@ export const BUILTIN_COMMANDS: readonly AnyCommand[] = [
   jobAbort,
 ]
 
+/** Queries answered from dispatcher state (`ctx.jobs`); always registered. */
+export const BUILTIN_QUERIES: readonly QueryDef[] = [jobGet, jobList]
+
 /** Domain commands and queries of the app; added by their features. */
 export const APP_COMMANDS: readonly AnyCommand[] = [
   ...LIBRARY_COMMANDS,
   projectSave,
   ...DESIGN_COMMANDS,
   ...PLAN_COMMANDS,
+  toolpathGenerateJob,
 ]
 export const APP_QUERIES: readonly QueryDef[] = [
   ...LIBRARY_QUERIES,
   ...FEEDS_SPEEDS_QUERIES,
   ...DESIGN_QUERIES,
   ...PLAN_QUERIES,
+  toolpathGet,
 ]
 /** Document hooks of the app (docs/architecture/commands.md#document-hooks). */
 export const APP_HOOKS: readonly DocumentHook[] = [draftPlanAutoRebuild]
@@ -45,7 +51,7 @@ export const APP_HOOKS: readonly DocumentHook[] = [draftPlanAutoRebuild]
 export interface Registry {
   command(name: string): Option<AnyCommand>
   query(name: string): Option<QueryDef>
-  /** Built-ins first, then the given commands, in registration order. */
+  /** Built-ins first, then the given commands (queries likewise), in registration order. */
   readonly commands: readonly AnyCommand[]
   readonly queries: readonly QueryDef[]
   /** Run after every successful document command, in this order (commands.md#document-hooks). */
@@ -59,7 +65,7 @@ export function createRegistry(defs: {
   readonly hooks?: readonly DocumentHook[]
 }): AppResult<Registry> {
   const commands = [...BUILTIN_COMMANDS, ...(defs.commands ?? [])]
-  const queries = [...(defs.queries ?? [])]
+  const queries = [...BUILTIN_QUERIES, ...(defs.queries ?? [])]
   const issues: Issue[] = []
   const seen = new Set<string>()
   for (const d of [...commands, ...queries]) {

@@ -3,7 +3,7 @@
  * `stock − ∪ (removal − retained)` in one batch union, map output triangles to surface ids and
  * run the evaluation checks (errors here; geometry warnings and pieces in `checks.ts`).
  * Doc: docs/architecture/geometry.md#building-the-solids, #surface-ids-in-meshes,
- * #evaluation-checks
+ * #evaluation-checks; steps: docs/architecture/workers.md#abort-and-pause
  */
 import { ctx, Err, fail, Ok, type AppResult } from '../../shared/result'
 import { boxOf, geometryChecks, type ComposedOperation } from './checks'
@@ -16,6 +16,7 @@ import {
   type PlacedMesh,
 } from './operations'
 import type { Solid, SolidMesh, SolidPort } from './solid-port'
+import { noSteps, type Steps } from '../workers/steps'
 
 /** Plain data, transferable to the renderer (typed-array buffers are transferred). */
 export interface PartEvaluation {
@@ -37,9 +38,22 @@ export interface PartEvaluation {
 
 const WHERE = 'evaluatePart'
 
+/**
+ * Operations per batch union before it is split into chunks: on the stress case (30 pockets +
+ * 120 drills) one union took ≈ 145 ms, chunks of 25 ≈ 24 ms each (`npm run perf`), keeping every
+ * step under 50 ms (docs/architecture/workers.md#abort-and-pause).
+ */
+export const UNION_CHUNK = 25
+
+/**
+ * `steps.step()` runs after each operation's solids, after each union chunk, the union, the
+ * subtraction and `toMesh`, and inside the checks; an abort returns `op.aborted` (the arena
+ * frees everything).
+ */
 export function evaluatePart(
   input: PartGeometryInput,
   solids: SolidPort,
+  steps: Steps = noSteps,
 ): AppResult<PartEvaluation> {
   const started = performance.now()
   const stock = stockSolids(input.stock)
@@ -60,17 +74,42 @@ export function evaluatePart(
       return composeOperation(op, id, solids).map((solid) => ({ id, solid }))
     })
 
+  // manifold-3d evaluates booleans lazily: `status()` forces each stage, so the work lands
+  // between the steps it belongs to (docs/architecture/workers.md#abort-and-pause)
+  const force = (solid: Solid): AppResult<Solid> => solids.status(solid).map(() => solid)
   const composed: ComposedOperation[] = []
+  const chunks = Math.ceil(ops.length / UNION_CHUNK)
+  const total = ops.length + (chunks > 1 ? chunks : 0) + 3
+  let done = 0
+  const step = (label: string) => steps.step({ done: ++done, total, label })
   const built = build(stockSolidsValue).andThen((stockSolid) => {
     for (const op of ops) {
-      const s = build(op).mapErr(ctx(WHERE, { operation: op.id }))
+      const s = build(op)
+        .andThen(({ id, solid }) => force(solid).map(() => ({ id, solid })))
+        .mapErr(ctx(WHERE, { operation: op.id }))
       if (s.isErr()) return Err(s.unwrapErr())
       const { id, solid } = s.unwrap()
       composed.push({ op, originalId: id, solid, box: boxOf(op.removal) })
+      const st = step(op.id)
+      if (st.isErr()) return Err(st.unwrapErr())
+    }
+    // one batch union, in chunks of UNION_CHUNK when larger (each chunk is one step)
+    let tools = composed.map((c) => c.solid)
+    if (chunks > 1) {
+      const unions: Solid[] = []
+      for (let k = 0; k < chunks; k++) {
+        const u = solids.union(tools.slice(k * UNION_CHUNK, (k + 1) * UNION_CHUNK)).andThen(force)
+        if (u.isErr()) return Err(u.unwrapErr())
+        unions.push(u.unwrap())
+        const st = step(`union ${k + 1}/${chunks}`)
+        if (st.isErr()) return Err(st.unwrapErr())
+      }
+      tools = unions
     }
     return solids
-      .union(composed.map((c) => c.solid))
-      .andThen((all) => solids.subtract(stockSolid.solid, all))
+      .union(tools)
+      .andThen(force)
+      .andThen((all) => step('union').andThen(() => solids.subtract(stockSolid.solid, all)))
   })
   if (built.isErr()) return Err(built.unwrapErr())
   const part = built.unwrap()
@@ -85,8 +124,11 @@ export function evaluatePart(
       where: WHERE,
     })
   }
+  const subtracted = step('subtract')
+  if (subtracted.isErr()) return Err(subtracted.unwrapErr())
   return solids
     .toMesh(part)
+    .andThen((mesh) => step('mesh').map(() => mesh))
     .andThen((mesh) => labelMesh(mesh, [stockSolidsValue, ...ops], tables))
     .andThen((labelled) =>
       solids.volume(part).andThen((volume) =>
@@ -99,6 +141,7 @@ export function evaluatePart(
             references: input.references ?? [],
           },
           solids,
+          steps,
         ).map((checks): PartEvaluation => ({
           ...labelled,
           volume,

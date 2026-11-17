@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { Ok } from '../../shared/result'
+import { fail, Ok, Some, type Option } from '../../shared/result'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
 import { newProjectDoc } from '../project/document'
 import type { ActionEvent } from './action-log'
@@ -8,7 +8,7 @@ import { getProject, renameProject } from './commands.fixture'
 import type { JobProgress } from './context'
 import { defineCommand } from './define'
 import { createDispatcher, type DispatcherOptions } from './dispatcher'
-import type { WorkerTask } from './jobs'
+import { createInProcessWorkers, jobGet, jobList, type WorkerTask } from './jobs'
 import { createRegistry } from './registry'
 import { agentSource, fakeClock, fakeIds, uiSource } from './testing'
 
@@ -33,6 +33,10 @@ function stepper() {
 
 const double: WorkerTask<number, number> = {
   name: 'test.double',
+  lane: 'toolpath',
+  input: z.number(),
+  output: z.number(),
+  timeoutMs: 1000,
   run: async (n) => Ok(n * 2),
 }
 
@@ -230,5 +234,158 @@ describe('jobs', () => {
       }),
       'command.conflict',
     )
+  })
+})
+
+describe('job.get and job.list', () => {
+  const info = (d: ReturnType<typeof setup>['d'], jobId: string) =>
+    expectOk(d.query('job.get', { jobId }, agentSource())).value
+
+  it('job.get reports a running job with progress and start revision, then its outcome', async () => {
+    const { d, s, start } = setup()
+    expectOk(await d.dispatch('project.name.update', { name: 'Plate' }, ui))
+    const job = await start(2)
+    await s.step()
+    expect(info(d, job.id)).toEqual({
+      jobId: job.id,
+      name: 'plan.toolpath.generate',
+      state: 'running',
+      progress: { done: 1, total: 2 },
+      startRevision: 1,
+    })
+    await s.step()
+    await job.result
+    expect(info(d, job.id)).toMatchObject({
+      state: 'finished',
+      progress: { done: 2, total: 2 },
+      outcome: { ok: true, value: { name: 'Plate', doubled: 4 } },
+    })
+  })
+
+  it('an aborted job reports its error outcome as wire data', async () => {
+    const { d, s, start, control } = setup()
+    const job = await start(3)
+    await control('abort', job.id)
+    await s.step() // the handler reaches its checkpoint, which throws
+    await job.result
+    const got = info(d, job.id) as { outcome: { ok: boolean; error: { code: string } } }
+    expect(got.outcome.ok).toBe(false)
+    expect(got.outcome.error.code).toBe('op.aborted')
+  })
+
+  it('unknown ids are input.malformed (rule unknownJob)', () => {
+    const { d } = setup()
+    const e = expectErrCode(d.query('job.get', { jobId: 'job-x' }, ui), 'input.malformed')
+    expect(e.issues[0]).toMatchObject({ path: ['jobId'], rule: 'unknownJob' })
+  })
+
+  it('job.list lists running and retained finished jobs, oldest first', async () => {
+    const { d, s, start } = setup()
+    expect(expectOk(d.query('job.list', {}, ui)).value).toEqual({ jobs: [] })
+    const first = await start(1)
+    await s.step()
+    await first.result
+    const second = await start(1)
+    const { jobs } = expectOk(d.query('job.list', {}, ui)).value as {
+      jobs: { jobId: string; state: string }[]
+    }
+    expect(jobs.map((j) => [j.jobId, j.state])).toEqual([
+      [first.id, 'finished'],
+      [second.id, 'running'],
+    ])
+    await s.step()
+    await second.result
+  })
+
+  it('job queries need a dispatcher (no job directory → internal.unexpected)', () => {
+    const doc = newProjectDoc({ name: 'x', unitSystem: 'mm' })
+    const ctx = { source: ui, services: { workers: createInProcessWorkers() } }
+    expectErrCode(jobGet.run(doc, { jobId: 'job-1' }, ctx), 'internal.unexpected')
+    expectErrCode(jobList.run(doc, {}, ctx), 'internal.unexpected')
+  })
+})
+
+describe('createInProcessWorkers', () => {
+  const ctl = () => ({ signal: new AbortController().signal, progress: () => {} })
+  const task = <I, O>(over: Partial<WorkerTask<I, O>> & Pick<WorkerTask<I, O>, 'run'>) =>
+    ({
+      name: 'test.task',
+      lane: 'toolpath',
+      input: z.unknown(),
+      output: z.unknown(),
+      timeoutMs: 1000,
+      ...over,
+    }) as WorkerTask<I, O>
+
+  it('checks the output with the task schema: a mismatch is internal.unexpected', async () => {
+    const t = task<number, number>({ output: z.number(), run: () => Ok('nope' as never) })
+    expectErrCode(await createInProcessWorkers().run(t, 1, ctl()), 'internal.unexpected')
+  })
+
+  it('clones the input like the real boundary: a model instance fails the input schema', async () => {
+    class Model {
+      constructor(readonly value: Option<number>) {}
+      double() {
+        return this.value.map((v) => v * 2)
+      }
+    }
+    const t = task<Model, number>({
+      input: z.object({ value: z.number() }) as never,
+      run: (m) => Ok((m as unknown as { value: number }).value),
+    })
+    expectErrCode(
+      await createInProcessWorkers().run(t, new Model(Some(2)), ctl()),
+      'input.malformed',
+    )
+    // clone: false passes the very same object through
+    const m = new Model(Some(2))
+    const raw = task<Model, Model>({ run: (x) => Ok(x) })
+    expect(expectOk(await createInProcessWorkers({ clone: false }).run(raw, m, ctl()))).toBe(m)
+  })
+
+  it('cloned errors keep their code; an aborted signal is op.aborted before running', async () => {
+    const t = task<null, null>({ run: () => fail('plan.check', 'no fit', { where: 'x' }) })
+    const e = expectErrCode(await createInProcessWorkers().run(t, null, ctl()), 'plan.check')
+    expect(e.frames[0]?.where).toBe('x')
+    const ac = new AbortController()
+    ac.abort()
+    let ran = false
+    const never = task<null, null>({
+      run: () => {
+        ran = true
+        return Ok(null)
+      },
+    })
+    expectErrCode(
+      await createInProcessWorkers().run(never, null, { signal: ac.signal, progress: () => {} }),
+      'op.aborted',
+    )
+    expect(ran).toBe(false)
+  })
+
+  it('a geometry task without a solids loader fails with internal.unexpected', async () => {
+    const t = task<null, null>({
+      lane: 'geometry',
+      run: async (_i, c) => (await c.solids()).map(() => null),
+    })
+    expectErrCode(await createInProcessWorkers().run(t, null, ctl()), 'internal.unexpected')
+  })
+
+  it('steps report progress and abort through the signal', async () => {
+    const ticks: JobProgress[] = []
+    const ac = new AbortController()
+    const t = task<null, number>({
+      run: (_i, c) => {
+        expectOk(c.steps.step({ done: 1, total: 2 }))
+        ac.abort()
+        return c.steps.step({ done: 2, total: 2 }).map(() => 2)
+      },
+    })
+    const r = await createInProcessWorkers().run(t, null, {
+      signal: ac.signal,
+      progress: (p) => ticks.push(p),
+    })
+    expectErrCode(r, 'op.aborted')
+    expect(ticks).toEqual([{ done: 1, total: 2 }])
   })
 })
