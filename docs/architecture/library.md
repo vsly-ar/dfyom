@@ -1,6 +1,6 @@
 # Library: stock, tools and machines
 
-Status: accepted · Storage rule: [persistence.md](persistence.md#library-references) · Values: [quantities.md](quantities.md) · Models: [error-handling/models.md](../conventions/error-handling/models.md) · Terms: [glossary.md](../glossary.md) · Task: [v0.1 plan](../plans/v0.1.md) 1.7 (models: 2.4)
+Status: implemented · Storage rule: [persistence.md](persistence.md#library-references) · Values: [quantities.md](quantities.md) · Models: [error-handling/models.md](../conventions/error-handling/models.md) · Terms: [glossary.md](../glossary.md) · Task: [v0.1 plan](../plans/v0.1.md) 1.7 (models: 2.4)
 
 The library holds the user's **stock**, **tools** and **machines**. It is global app data shared by all projects; a project uses an item only through a **snapshot** ([persistence.md](persistence.md#library-references)). Workholding joins the library later. Every dimensional field is a [quantity](quantities.md) of the kind given below; "v0.1 = yes" means required (an optional field is `Option`).
 
@@ -113,15 +113,33 @@ The snapshot record and rule are owned by [persistence.md](persistence.md#librar
 - Commands: `library.{stock,tool,machine}.{add,update,remove}`; queries `.get` and `.list` ([naming](commands.md#naming)). They are `effect` commands ([kinds](commands.md#command-definition)): written to disk at once, **not undoable**, no history entry, still logged in the action log.
 - `remove` asks for confirmation: its args schema requires `confirm: true` (`z.literal(true)`), so a call without it fails with `input.malformed`. The UI sets it after a confirmation dialog; agents and CLI pass it explicitly. Projects keep their snapshots of a removed item.
 
-## Files (planned)
+## Implementation decisions (task 2.4)
 
-| File                                            | Contents                                                |
-| ----------------------------------------------- | ------------------------------------------------------- |
-| `src/core/library/item.ts`                      | Common fields, `LibraryItemKind`, `MaterialClass`       |
-| `src/core/library/stock.ts`, `stock.dto.ts`     | `Stock` model and Zod DTO schema                        |
-| `src/core/library/tool.ts`, `tool.dto.ts`       | `Tool` model (per-type invariants), `CuttingPreset`     |
-| `src/core/library/machine.ts`, `machine.dto.ts` | `Machine` model and DTO                                 |
-| `src/core/library/snapshot.ts`                  | `Snapshot` model and DTO, `takeSnapshot`, changed-check |
-| `src/core/library/storage.ts`                   | `LibraryStorage` port (`list`, `get`, `put`, `remove`)  |
-| `src/core/library/commands.ts`                  | Library commands and queries                            |
-| `src/main/library/fs-storage.ts`                | Filesystem implementation of the port                   |
+Where this doc was silent, the implementation chose conservatively:
+
+- **Ids** are file names, so they match `[a-z0-9_-]{1,120}` – lowercase, so case-insensitive file systems (APFS, NTFS) cannot alias two ids (generated as `<kind>-<uuid>`); anything else is `input.malformed` before a path is built.
+- **Per-type fields:** `cornerRadius` on a non-bull-nose tool and `pointAngle` on a non-drill are invariant issues (`notAllowed`), not silently dropped; `Tool.effectiveCornerRadius` derives 0 / DC/2. `fluteCount` is a `scalar` quantity that must be a whole number ≥ 1; `acceleration` is a `scalar` in mm/s² (all three axes or none). `presets` is always written (`[]` when empty).
+- **Preset rules:** each `CuttingPreset` checks its own fields; `stepover ≤ diameter` and unique names are checked by the tool, only once all presets are valid ([composite models](../conventions/error-handling/models.md#composite-models)).
+- **Revisions:** `update` requires the `revision` the caller read; `add` fails with `command.conflict` if the id exists; `remove` checks `revision` when given and may omit it only to delete an item whose revision cannot be read (otherwise `command.conflict`). An unknown id is `input.malformed` (rule `unknownItem`); updating an unloadable item is refused (`unreadableItem`). Command args carry `values` without `kind`; results are the stored item DTO.
+- **Snapshot status** has a fourth value, `libraryUnreadable` (the item file exists but does not load, so nothing can be compared). "Update from library" (`refreshSnapshot`) keeps the snapshot id and sets `takenAt` to now.
+- **"Used item changed" notice** is data only: `Library.subscribe` emits each change, `usedItemNotices(snapshots, library.lookup)` lists the affected snapshots. A query joins once `ProjectDoc` holds snapshots (tasks 2.5/2.13).
+- **Library service:** `Library` loads all items once and keeps them in memory, so `.get`/`.list` queries and the snapshot check are synchronous; writes go through the port, are serialized, and a conflict reloads the item. It reaches handlers as `ctx.services.library` (queries get `ctx.services` too – [commands.md](commands.md#command-definition)). Library queries set `readsDocument: false`, so they do not count as a project read for the [stale-write baseline](commands.md#stale-writes).
+- **Cross-instance writes:** read → revision check → rename (or unlink) runs under a per-item lock file `<id>.json.lock` created with `wx`; a held lock is retried (~2 s) and then reported as `command.conflict`, a lock older than 30 s is treated as left by a crashed instance and broken. After the rename the directory is fsynced (skipped on Windows). Opening the library sweeps stale `*.tmp-<uuid>` files (older than 10 min) and stale locks.
+- **Files:** stable key order is the model's order (meta first), not alphabetical. A manifest with another `schemaVersion` fails with `persist.migration`, a foreign or broken one with `input.malformed`; neither is reset ([pre-alpha rule](../conventions/error-handling/migrations.md#pre-alpha-exception-no-data-preservation-yet)).
+
+## Files
+
+| File                                            | Contents                                                                       |
+| ----------------------------------------------- | ------------------------------------------------------------------------------ |
+| `src/core/library/item.ts`                      | Common fields, `LibraryItemKind`, `MaterialClass`, model helpers               |
+| `src/core/library/stock.ts`, `stock.dto.ts`     | `Stock` model and Zod DTO schema                                               |
+| `src/core/library/tool.ts`, `tool.dto.ts`       | `Tool` model (per-type invariants), `CuttingPreset`                            |
+| `src/core/library/machine.ts`, `machine.dto.ts` | `Machine` model and DTO                                                        |
+| `src/core/library/library-item.ts`              | `LibraryItem` (meta + values), item/values schemas, `parseLibraryItem`         |
+| `src/core/library/snapshot.ts`                  | `Snapshot` model and DTO, `takeSnapshot`, `refreshSnapshot`, status, notices   |
+| `src/core/library/storage.ts`                   | `LibraryStorage` port (`list`, `get`, `put`, `remove`) and its revision checks |
+| `src/core/library/memory-storage.ts`            | In-memory port for tests and headless use                                      |
+| `src/core/library/storage.contract.ts`          | Contract tests every port implementation runs                                  |
+| `src/core/library/library.ts`                   | `Library` service: cache, serialized writes, change events                     |
+| `src/core/library/commands.ts`                  | Library commands and queries                                                   |
+| `src/main/library/fs-storage.ts`                | Filesystem implementation of the port                                          |

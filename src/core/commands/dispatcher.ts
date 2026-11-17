@@ -202,9 +202,9 @@ class ProjectDispatcher implements Dispatcher {
     const args = parseWith(def.args, rawArgs, name)
     if (args.isErr()) return args
     const revision = this.rev
-    const value = def.run(this.current, args.unwrap(), { source })
+    const value = def.run(this.current, args.unwrap(), { source, services: this.services })
     if (value.isErr()) return Err(value.unwrapErr())
-    this.recordBaseline(source, revision)
+    if (def.readsDocument !== false) this.recordBaseline(source, revision)
     return Ok({ value: value.unwrap(), revision })
   }
 
