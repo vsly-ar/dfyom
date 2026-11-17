@@ -115,6 +115,17 @@ export const ERROR_CODES = {
     userMessage: 'The connection to the machine is closed or lost.',
     retryable: true,
   },
+  // Plans (task 2.13): docs/modes/plan-v0.1.md#commands-and-queries-v01
+  'plan.status': {
+    severity: 'warn',
+    userMessage: "This is not possible in the plan's current status.",
+    retryable: false,
+  },
+  'plan.order': {
+    severity: 'warn',
+    userMessage: 'An operation would come before the operation whose surface it starts from.',
+    retryable: false,
+  },
   // Plan mode (task 2.10): docs/modes/plan-v0.1.md#toolpath-generators-task-210
   'plan.check': {
     severity: 'warn',

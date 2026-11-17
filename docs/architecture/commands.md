@@ -8,25 +8,25 @@ Every state change or privileged action is a **command**; every read an agent ca
 
 The code is the contract; each file's header links back here. No adapters yet (IPC/MCP/CLI: v0.1 tasks 3.x).
 
-| File                                    | Contents                                                                                              |
-| --------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `src/core/commands/define.ts`           | `DocumentCommand`, `EffectCommand`, `JobCommand`, `BuiltinCommand`, `QueryDef`, `defineCommand`, …    |
-| `src/core/commands/context.ts`          | `CommandContext`, `JobContext`, `Source`, `IdGenerator`, `Clock`, `Services` (ports)                  |
-| `src/core/commands/registry.ts`         | Registry of all commands and queries; name checks; `APP_COMMANDS`/`APP_QUERIES`                       |
-| `src/core/commands/dispatcher.ts`       | Per-project queue and pipeline ([below](#dispatcher-pipeline)); `dispatch`, `query`                   |
-| `src/core/commands/args.ts`             | `parseArgs`: args shape check that rejects unknown keys ([pipeline](#dispatcher-pipeline))            |
-| `src/core/commands/history.ts`          | Immer setup, patch execution, undo/redo stacks; `history.undo`/`history.redo`                         |
-| `src/core/commands/action-log.ts`       | Event types, ring buffer, subscriptions                                                               |
-| `src/core/commands/jobs.ts`             | `JobHandle`, progress, pause/resume/abort, `WorkerPort` (+ in-process stub); `job.*` control commands |
-| `src/core/commands/permission.ts`       | `PermissionPolicy` port and the default policy                                                        |
-| `src/core/commands/json-schema.ts`      | Tool descriptors from Zod                                                                             |
-| `src/core/commands/testing.ts`          | Test helpers ([Testing](#testing))                                                                    |
-| `src/core/commands/commands.fixture.ts` | Test-only commands used by the command-layer tests                                                    |
-| `src/core/project/document.ts`          | `ProjectDoc` – the state document commands act on: `{ name, unitSystem, parts, snapshots }`           |
+| File                                    | Contents                                                                                                    |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `src/core/commands/define.ts`           | `DocumentCommand`, `EffectCommand`, `JobCommand`, `BuiltinCommand`, `QueryDef`, `DocumentHook`, …           |
+| `src/core/commands/context.ts`          | `CommandContext`, `JobContext`, `Source`, `IdGenerator`, `Clock`, `Services` (ports)                        |
+| `src/core/commands/registry.ts`         | Registry of all commands, queries and document hooks; name checks; `APP_COMMANDS`/`APP_QUERIES`/`APP_HOOKS` |
+| `src/core/commands/dispatcher.ts`       | Per-project queue and pipeline ([below](#dispatcher-pipeline)); `dispatch`, `query`                         |
+| `src/core/commands/args.ts`             | `parseArgs`: args shape check that rejects unknown keys ([pipeline](#dispatcher-pipeline))                  |
+| `src/core/commands/history.ts`          | Immer setup, patch execution, undo/redo stacks; `history.undo`/`history.redo`                               |
+| `src/core/commands/action-log.ts`       | Event types, ring buffer, subscriptions                                                                     |
+| `src/core/commands/jobs.ts`             | `JobHandle`, progress, pause/resume/abort, `WorkerPort` (+ in-process stub); `job.*` control commands       |
+| `src/core/commands/permission.ts`       | `PermissionPolicy` port and the default policy                                                              |
+| `src/core/commands/json-schema.ts`      | Tool descriptors from Zod                                                                                   |
+| `src/core/commands/testing.ts`          | Test helpers ([Testing](#testing))                                                                          |
+| `src/core/commands/commands.fixture.ts` | Test-only commands used by the command-layer tests                                                          |
+| `src/core/project/document.ts`          | `ProjectDoc` – the state document commands act on: `{ name, unitSystem, parts, snapshots, plans }`          |
 
 ## Naming
 
-- `<area>.<object>.<verb>`, lowercase, camelCase within a segment: `design.pocket.add`, `plan.operation.move`, `run.job.start`. Area-level actions have two segments, `<area>.<verb>`: `history.undo`, `job.abort`. Names are unique across commands and queries (`NAME_PATTERN` in `registry.ts`).
+- `<area>.<object>.<verb>`, lowercase, camelCase within a segment: `design.pocket.add`, `plan.operation.move`, `run.job.start`. Area-level actions have two segments, `<area>.<verb>`: `history.undo`, `job.abort`. An object inside another may add one segment, `<area>.<object>.<object>.<verb>`: `plan.design.operation.update` (an operation of a plan's design snapshot). Names are unique across commands and queries (`NAME_PATTERN` in `registry.ts`).
 - Areas: `project`, `design`, `plan`, `run`, `library`, `feedsSpeeds` (calculator, [feeds-speeds.md](feeds-speeds.md#api)), `history`, `job`, `app`.
 - Command verbs: `add`, `update`, `remove`, `move`, `apply`, `generate`, `start`, … Query verbs: `get`, `list`, `find`, `preview`, `suggest`.
 - The name is the stable id used by UI, agents, CLI, logs and `EntryPoint.name` ([boundaries.md](../conventions/error-handling/boundaries.md#entry-points-ui-agent-cli-automation)). Transport-specific renaming (e.g. `.` → `_` for clients that reject dots) lives in the MCP adapter.
@@ -113,7 +113,7 @@ Rules:
 
 **Unknown keys** in args are rejected for every command and query (also by `runCommand`): Zod strips them, so a mistyped optional key (`dept` for `depth`) would silently take the default. Each key of the raw args must survive in the parsed value; one issue per unknown key, path = the key's path (`['shape', 'radius']`), rule `unrecognized_keys`. Reported once the shape check passes.
 
-Execute `document`: `createDraft(doc)` → `run` → on `Err` drop the draft (state, history and revision unchanged: **no partial patches**) → on `Ok` `finishDraft` with patches; empty patches = no-op, no history entry; otherwise commit, `revision++`, push history entry, clear redo stack, publish patches.
+Execute `document`: `createDraft(doc)` → `run` → the [document hooks](#document-hooks) on the same draft → on `Err` (of the handler or a hook) drop the draft (state, history and revision unchanged: **no partial patches**) → on `Ok` `finishDraft` with patches; empty patches = no-op, no history entry; otherwise commit, `revision++`, push history entry, clear redo stack, publish patches.
 
 `CommandOutcome` is `{ value, revision }`: the handler's result and the revision after the command; a job's `value` is `{ jobId }`. Steps 1–2 fail before queueing but are still logged (step 7). A rejected or failing command never blocks the queue.
 
@@ -127,6 +127,16 @@ Robustness rules (all tested in `dispatcher.test.ts`):
 Error codes `command.unknown` (also for unknown queries), `command.conflict` (retryable) and `permission.denied` are in [`ERROR_CODES`](../../src/shared/errors/codes.ts).
 
 The default `PermissionPolicy` (`permission.ts`) is conservative until [run.md#safety](../modes/run.md#safety) is specified: UI sources are allowed, every other source kind is denied. The port is injected per dispatcher (`createDispatcher({ policy })`) and may be async.
+
+## Document hooks
+
+A **document hook** (`DocumentHook` in `define.ts`) runs after every successful `document` command, on the same draft and before the commit, so its changes join the command's patches: one commit, one history entry, one undo step. Hooks let a module keep derived document state in step with commands it does not own, without changing those commands' handlers.
+
+- Registered in the registry (`createRegistry({ hooks })`; the app's are `APP_HOOKS`) and run in that order by the dispatcher; `runCommand` runs them only when passed.
+- Same rules as a document handler: synchronous, no dispatch, only synchronous library reads. A hook decides from the command's name and args whether it applies.
+- An `Err` of a hook (or a throw → `internal.unexpected`) fails the whole command with the hook's error (context `hook <name>`): the document stays unchanged.
+- Undo and redo replay the patches, so hooks never run for them.
+- v0.1: `plan.draftAutoRebuild` rebuilds the `draft` plans of the part after a `design.*` command; it never returns `Err` (a plan that cannot follow is skipped and reported), so design commands behave the same with or without plans ([plan-v0.1.md](../modes/plan-v0.1.md#implementation-task-213)).
 
 ## Undo / redo
 

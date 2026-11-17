@@ -345,7 +345,7 @@ class ProjectDispatcher implements Dispatcher {
   }
 
   private runDocument(def: DocumentCommand, args: unknown, ctx: CommandContext) {
-    const ran = executeDocumentCommand(this.current, def, args, ctx)
+    const ran = executeDocumentCommand(this.current, def, args, ctx, this.registry.hooks)
     if (ran.result.isErr())
       return this.logged(def.name, args, ctx.source, Err(ran.result.unwrapErr()))
     const value = ran.result.unwrap()

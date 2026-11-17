@@ -68,6 +68,22 @@ export interface BuiltinCommand<S extends z.ZodType = z.ZodType, R = unknown> ex
 
 export type AnyCommand = DocumentCommand | EffectCommand | JobCommand | BuiltinCommand
 
+/**
+ * Runs on the same draft after every successful `document` command and before the commit, so
+ * its changes join the command's patches (one undo step). For derived follow-ups owned by
+ * another module, e.g. the auto-rebuild of `draft` plans after design commands
+ * (docs/architecture/commands.md#document-hooks). Same rules as a document handler: synchronous,
+ * no dispatch; an `Err` fails the whole command.
+ */
+export interface DocumentHook {
+  readonly name: string
+  after(
+    draft: Draft<ProjectDoc>,
+    command: { readonly name: string; readonly args: unknown },
+    ctx: CommandContext,
+  ): AppResult<void>
+}
+
 export interface QueryDef<S extends z.ZodType = z.ZodType, R = unknown> {
   /** e.g. `design.pocket.get`, `plan.operation.list`. */
   readonly name: string

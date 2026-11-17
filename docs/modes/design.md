@@ -138,16 +138,16 @@ Names follow [commands.md](../architecture/commands.md#naming); all are `documen
 
 Code in `src/core/design/`, each file's header links here:
 
-| File                | Contents                                                                                                                    |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `part.dto.ts`       | Part and operation DTOs (Zod), stored in `ProjectDoc.parts` (record `parts/<id>.json`)                                      |
-| `operation.ts`      | Operations with `Quantity` values, DTO ↔ model, field kinds, defaults, `effectiveTolerance`                                 |
-| `surfaces.ts`       | `SurfaceTable` (analytic z of horizontal surfaces), the reference resolver, `checkReferences`, recalculation                |
-| `validate.ts`       | The constraints of the tables above (`model.invariant`)                                                                     |
-| `geometry-input.ts` | `toGeometryInput(part, stock)`: the pure mapper to the geometry input (`src/core/geometry/model.ts`)                        |
-| `load.ts`           | `loadPart(doc, partId)`, `partGeometryInput(doc, partId)`                                                                   |
-| `commands.ts`       | The commands and queries above (`DESIGN_COMMANDS`, `DESIGN_QUERIES`)                                                        |
-| `warnings.ts`       | Tools → `DfmTool`, `partWarnings` (`parameterChecks` of a part), `DfmWarningSchema` ([below](#dfm-warnings-task-28-wiring)) |
+| File                | Contents                                                                                                                                                               |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `part.dto.ts`       | Part and operation DTOs (Zod), stored in `ProjectDoc.parts` (record `parts/<id>.json`)                                                                                 |
+| `operation.ts`      | Operations with `Quantity` values, DTO ↔ model, field kinds, defaults, `effectiveTolerance`                                                                            |
+| `surfaces.ts`       | `SurfaceTable` (analytic z of horizontal surfaces), the reference resolver, `checkReferences`, recalculation                                                           |
+| `validate.ts`       | The constraints of the tables above (`model.invariant`)                                                                                                                |
+| `geometry-input.ts` | `toGeometryInput(part, stock)`: the pure mapper to the geometry input (`src/core/geometry/model.ts`)                                                                   |
+| `load.ts`           | `loadPart(doc, partId)`, `partGeometryInput(doc, partId)`                                                                                                              |
+| `commands.ts`       | The commands and queries above (`DESIGN_COMMANDS`, `DESIGN_QUERIES`); `updateOperation`, reused for plan-only edits ([plan-v0.1.md](plan-v0.1.md#plans-are-snapshots)) |
+| `warnings.ts`       | Tools → `DfmTool`, `partWarnings` (`parameterChecks` of a part), `DfmWarningSchema` ([below](#dfm-warnings-task-28-wiring))                                            |
 
 Decisions made with task 2.5, where this doc left room:
 
