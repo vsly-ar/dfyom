@@ -1,0 +1,38 @@
+toolpath op-facing tool em10 S18000
+stats cut 278 rapid 273.8101 s 22.168
+pass rough
+  rapid 4 26 10
+  rapid 4 26 2
+  line 4 26 -0.5 F300
+  line 4 -6 -0.5 F1200
+  rapid 4 -6 2
+  rapid 11.3333 26 2
+  line 11.3333 26 -0.5 F300
+  line 11.3333 -6 -0.5 F1200
+  rapid 11.3333 -6 2
+  rapid 18.6667 26 2
+  line 18.6667 26 -0.5 F300
+  line 18.6667 -6 -0.5 F1200
+  rapid 18.6667 -6 2
+  rapid 26 26 2
+  line 26 26 -0.5 F300
+  line 26 -6 -0.5 F1200
+  rapid 26 -6 2
+pass rough
+  rapid 4 26 2
+  line 4 26 -1 F300
+  line 4 -6 -1 F1200
+  rapid 4 -6 2
+  rapid 11.3333 26 2
+  line 11.3333 26 -1 F300
+  line 11.3333 -6 -1 F1200
+  rapid 11.3333 -6 2
+  rapid 18.6667 26 2
+  line 18.6667 26 -1 F300
+  line 18.6667 -6 -1 F1200
+  rapid 18.6667 -6 2
+  rapid 26 26 2
+  line 26 26 -1 F300
+  line 26 -6 -1 F1200
+  rapid 26 -6 2
+  rapid 26 -6 10

@@ -62,13 +62,13 @@ A project has **several plans**. Each plan is a self-contained, runnable "versio
 
 `plan.tool.suggest` filters the tool library by the [design's tool requirement](design.md#generalized-tools) and the checks below, then ranks by: has a preset for the stock's material class → already used in this plan (fewer tool changes) → largest diameter. `plan.create` and `plan.rebuild` assign the first suggestion to new plan operations; none → "no tool" and generation fails for it. `stickout` (length, per plan operation) defaults to the tool's `stickout`, else its `fluteLength`; > 0, < `overallLength`.
 
-| Operation | Tool type                        | Checks (failing = `plan.check` error)                                                                                        |
-| --------- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Facing    | `flatEndMill`                    | Stepdown ≤ `fluteLength`.                                                                                                    |
-| Pocket    | `flatEndMill`, `bullNoseEndMill` | Radius ≤ `cornerRadius`; `floorRadius` > 0 needs a bull nose with RE = `floorRadius` within tolerance; depth ≤ stickout.     |
-| Drilling  | `drill`                          | DC = `diameter` within tolerance; `drillPoint`: SIG = `pointAngle`; `flat` bottom not possible; depth + tip ≤ `fluteLength`. |
-| Drilling  | `flatEndMill` (helical boring)   | `diameter`/2 < DC < `diameter` (no core is left); `bottom` is `flat` or `through`; depth ≤ stickout.                         |
-| Profile   | `flatEndMill`                    | DC ≤ `slotWidth`; thickness + `breakthrough` ≤ `fluteLength` and ≤ stickout.                                                 |
+| Operation | Tool type                        | Checks (failing = `plan.check` error)                                                                                                    |
+| --------- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Facing    | `flatEndMill`                    | Stepdown ≤ `fluteLength`.                                                                                                                |
+| Pocket    | `flatEndMill`, `bullNoseEndMill` | Radius ≤ `cornerRadius`; `floorRadius` > 0 needs a bull nose with RE = `floorRadius` within 0.01 mm; depth ≤ stickout.                   |
+| Drilling  | `drill`                          | DC = `diameter` within tolerance; `drillPoint`: SIG = `pointAngle` within 0.5°; `flat` bottom not possible; depth + tip ≤ `fluteLength`. |
+| Drilling  | `flatEndMill` (helical boring)   | `diameter`/2 < DC < `diameter` (no core is left); `bottom` is `flat` or `through`; depth ≤ stickout.                                     |
+| Profile   | `flatEndMill`                    | DC ≤ `slotWidth`; thickness + `breakthrough` ≤ `fluteLength` and ≤ stickout.                                                             |
 
 Floor fillets are made only by a matching bull-nose end mill in v0.1; ball end mills with 3D passes are later.
 
@@ -98,15 +98,15 @@ The tool starts and ends outside the stock, so facing enters from the side (no r
 
 Concentric offset rings from the center outwards; the last ring follows the pocket wall. Adaptive clearing is later.
 
-| Parameter         | Kind   | Default             | Constraints                                                                |
-| ----------------- | ------ | ------------------- | -------------------------------------------------------------------------- |
-| `stepover`        | length | preset, else 0.4 D  | 0 < s ≤ 0.9 D                                                              |
-| `stepdown`        | length | preset, else 0.25 D | 0 < s ≤ `fluteLength`                                                      |
-| `entry`           | –      | `helix`             | `helix`, `ramp` or `plunge`; falls back in this order when it does not fit |
-| `helixDiameter`   | length | 0.8 D               | 0 < h; h + D ≤ narrowest pocket size                                       |
-| `rampAngle`       | angle  | 3°                  | 0.5°–30°; also the helix pitch angle                                       |
-| `finishAllowance` | length | 0.2 mm / 0.008″     | ≥ 0; 0 = no finishing pass; radial, walls only                             |
-| `finishStepdown`  | length | pocket depth        | 0 < s ≤ `fluteLength`                                                      |
+| Parameter         | Kind   | Default             | Constraints                                                                 |
+| ----------------- | ------ | ------------------- | --------------------------------------------------------------------------- |
+| `stepover`        | length | preset, else 0.4 D  | 0 < s ≤ 0.9 D                                                               |
+| `stepdown`        | length | preset, else 0.25 D | 0 < s ≤ `fluteLength`                                                       |
+| `entry`           | –      | `helix`             | `helix`, `ramp` or `plunge`; falls back in this order when it does not fit  |
+| `helixDiameter`   | length | 0.8 D               | 0 < h; used as min(h, D); that + D + 2 × `finishAllowance` ≤ narrowest size |
+| `rampAngle`       | angle  | 3°                  | 0.5°–30°; also the helix pitch angle                                        |
+| `finishAllowance` | length | 0.2 mm / 0.008″     | ≥ 0; 0 = no finishing pass; radial, walls only                              |
+| `finishStepdown`  | length | pocket depth        | 0 < s ≤ `fluteLength`                                                       |
 
 The floor is cut to size by the last roughing level; the finishing pass follows the wall contour at full radial size. A bull-nose tool with RE = `floorRadius` leaves the floor fillet in the same passes.
 
@@ -118,6 +118,7 @@ The floor is cut to size by the last roughing level; the finishing pass follows 
 | `peckDepth`     | length | DC                                      | > 0; `peck`/`chipBreak` only                                             |
 | `chipBreakBack` | length | 0.5 mm / 0.02″                          | > 0; `chipBreak` only                                                    |
 | `helixPitch`    | length | preset stepdown, else 0.25 DC           | > 0; `helix` only                                                        |
+| `rampAngle`     | angle  | 3°                                      | 0.5°–30°; `helix` only: steepest helix slope                             |
 | `breakthrough`  | length | 0.5 mm / 0.02″                          | ≥ 0; `through` only                                                      |
 
 Drill tip Z = hole depth (to full diameter) + tip length from SIG, plus `breakthrough` for `through`. Holes in one plan operation are visited in nearest-neighbour order from the previous position. `helix` ends with a full circle at the final depth to clean the wall.
@@ -156,6 +157,22 @@ A `Toolpath` is `{ planOperationId, tool (snapshot id), spindleSpeed, passes[], 
 
 `drill` keeps the cycle semantic; the export expands it to rapid/feed moves (GRBL 1.1 has no canned cycles G81–G83; grblHAL has them – later). `estimatedSeconds` ignores acceleration in v0.1 and uses `maxFeedRate` for rapids.
 
+## Toolpath generators (task 2.10)
+
+Implemented in [`src/core/toolpath/`](../../src/core/toolpath/): pure, headless functions, one per operation kind, `generateFacing | generatePocket | generateDrilling | generateProfile(input) → AppResult<Toolpath>`. The contract lives in `model.ts`.
+
+- **Input** (`GeneratorInput`): `planOperationId`; `tool` (`ToolpathTool`: snapshot id, type, `diameter`, effective `cornerRadius`, `fluteLength`, drill `pointAngle`); `cutting` (resolved [feeds and speeds](#feeds-and-speeds): `spindleSpeed`, `feedRate`, `plungeRate`, `stepdown`, `stepover`; drilling only the first three); `heights` (the setup's `clearanceHeight`, `retractHeight`); `stock`; `operation` (the snapshot operation as geometry's `OperationGeometry`, float64 mm); `strategy` (resolved [strategy values](#pass-strategies-v01) without stepdown/stepover); optional `maxFeedRate` per axis.
+- **Errors:** invalid numbers and strategy constraints → `model.invariant`; a tool that cannot make the operation (wider than the pocket, slot or opening; drill ≠ hole; drill with `flat` bottom; drill SIG ≠ `pointAngle` beyond 0.5°; helix tool outside `diameter`/2 < DC < `diameter`; cycle/tool mismatch; no flat bottom; `floorRadius` > 0 without a bull nose of RE = `floorRadius` within 0.01 mm) → `plan.check`. The rest of the [check table](#tool-assignment-and-checks) (flute length, stickout, machine limits) is task 2.13's `checks.ts`. **Fit tolerance:** a tool up to 0.01 mm (`TOOL_FIT_TOLERANCE`, as the DFM tool checks) wider than a pocket's narrowest size, an opening or a slot is accepted; it overcuts the opposite wall by at most that much.
+- **Common rules:** every toolpath starts with a horizontal rapid at clearance (`clearanceHeight` above Z0) and ends with a rapid up to it; inside an operation rapids run horizontally only on the retract plane (`on` + `retractHeight`; facing and profile: Z0 + `retractHeight`). Levels are equal steps of at most `stepdown`, the last one exactly at the bottom; one `rough` pass per level, then one `finish` pass. Arcs come exact from `contourElements` and sweep at most 180° (full circles are split). Lifts and plunges feed at `plungeRate`, everything with XY motion at `feedRate`. `stats` skip the first move (the position before it is unknown); rapids are timed at the slowest axis (|Δ| ÷ `maxFeedRate` per axis), not at all without a machine copy. `expandDrill` (in `stats.ts`) is the grbl.md drill expansion, shared with the export.
+- **Facing:** rows over the stock, spaced ≤ min(`stepover`, flat diameter); the first and last rows put the tool's flat edge `overshoot` past the stock edge, each row runs from tool-fully-outside to tool-fully-outside, so plunges and zigzag steps happen outside the stock. With M3 climb milling keeps the uncut material on the right: rows along X run −X, rows along Y run +Y.
+- **Pocket:** rings start at the middle of `wall[0]` (circle: the front) and run counter-clockwise for climb. Ring offsets go from R + `finishAllowance` (clamped to the inradius) inwards in equal steps ≤ min(`stepover`, 2·flat radius for circles, √2·flat radius for rectangles, whose inner rings have sharp corners); the innermost lies within half a step of the collapse offset, so the center is covered. Each level: retract, re-enter at the pocket center from the previous level's Z, cut the rings from the innermost outwards, linked by straight moves. Entry fallback, keeping the finishing allowance (a = R + `finishAllowance`, clamped): the helix diameter is min(`helixDiameter`, D), so its bore leaves no post at the center and the link to the innermost ring never cuts at full width; `helix` fits when that + 2a ≤ the narrowest size (full turns from the front point, pitch angle ≤ `rampAngle`, then one flat circle); `ramp` fits when the long size − 2a ≥ D (zigzag of that length along the long axis, then one flat leg back to clean the wedge); else `plunge` at the center. Finishing: the wall ring at offset R in levels of `finishStepdown`, straight lead-in and lead-out from the roughed ring; only when the clamped allowance is > 0.
+- **Drilling:** one hole per call. Drill: one `drill` move (`top` = `on`, `bottom` = tip Z, `retract` = `on` + `retractHeight`, `feed` = `plungeRate`). Helical boring: circle radius ρ = (`diameter` − DC)/2 around the hole, from the front point; each turn descends at most min(`helixPitch`, 2πρ·tan(`rampAngle`)), and the helix feed is capped so its vertical speed is ≤ `plungeRate`; then one flat circle at the bottom, to the center, rapid out. Below ρ = 0.1 mm (`HELIX_MIN_RADIUS`; a Ø6 tool in a Ø6.2 hole at 3° would need about 30 turns per mm) the tool plunges straight down at `plungeRate` in steps of `helixPitch` instead. `through` holes end `breakthrough` below the stock bottom.
+- **Profile:** slot passes are distances from the shape: the part side at R + `finishAllowance` (clamped), then away from the part in equal steps ≤ `stepover` (inside rectangles ≤ √2·R) up to `slotWidth` − R. At each level the passes run from the offcut (slug) side to the part side, so breakthrough frees the offcut with no pass beside it afterwards. An inside slot's far pass runs round the slug (the slug offset by R, rounded corners); an inside slot that covers the opening is cleared like a pocket, from the center outwards, without tabs; if its only ring collapses to a point (tool ≈ opening) every level is a straight plunge at `plungeRate` at the center, as boring. Climb runs clockwise outside and counter-clockwise inside; all passes run the same way. Every level starts half a tab spacing after the first tab (no tabs: the middle of `wall[0]`): retract, plunge through air to the previous level, ramp along the first (offcut-side) pass by Δz ÷ tan(`rampAngle`) (lapping as often as needed), one full lap at the level, then the other passes, linked along the shape normal. Finishing: the part-side ring at the final depth in one level, lead-in and lead-out from the part-side rough pass.
+- **Tabs:** the tool lifts wherever its disk overlaps a nominal tab band – geometry's `offsetBand` across exactly the slot, so the lift points match the tab ends of the evaluated part, including the bent end faces of [geometry.md](../architecture/geometry.md#offset-loft). There Z = max(level, tab top): vertical lift at `feedRate`, vertical drop at `plungeRate`, ramps clamped. Boundaries are found by sampling (≤ min(R/4, 0.5 mm)) and bisection, kept on the safe side.
+- **Tests:** generic properties on every generator (`testing/rules.ts`: starts and ends at clearance, arcs continuous and ≤ 180°, no plunge faster than `plungeRate`, ramps ≤ `rampAngle`, rapids only on the retract plane, every feed move within the removal region, the deepest cut exactly at the target depth, stepdown per level; also on every test-part toolpath), stepover per strategy, roughing never enters a pocket's finishing allowance, tabs probed up to the full tool radius (− 1 µm) with an independent oracle, 30 random pockets and 40 random profiles, golden files (`__golden__/*.txt`, update with `vitest -u`), and a heightmap simulation of the [geometry test part](../architecture/geometry.md#testing) compared cell by cell with its analytic removal (no gouge anywhere; flat areas exact).
+
+**Wired later:** task 2.13 resolves the inputs (strategy schemas, defaults and fallbacks in `strategy.ts`, the full checks, cutting values via presets and the calculator, the tool and machine copies → `ToolpathTool` and `maxFeedRate`) and orders a plan operation's holes (one call per hole, nearest neighbour); task 2.9 runs the generators as the `plan.toolpath.generate` job (`generate.ts`: input hash, cache, `WorkerPort`, progress) and serves `plan.toolpath.get`.
+
 ## Commands and queries (v0.1)
 
 Names follow [commands.md](../architecture/commands.md#naming); `document` unless noted. Quantities are passed as entered. Every command except `plan.create` checks the [status](#plan-status).
@@ -179,22 +196,27 @@ Names follow [commands.md](../architecture/commands.md#naming); `document` unles
 
 - Design commands of the part rebuild every `draft` plan of that part in the same command (one undo step).
 - Queries: `plan.list { includeArchived? }`, `plan.get`, `plan.operation.list`, `plan.stale.list { planId }` (stale operations and library copies), `plan.tool.suggest { planId, planOperationId }` (ranked tools with reasons), `plan.toolpath.get { planId, planOperationId }` (moves for preview; stale flag), `plan.warning.list`.
-- New error codes (task 2.10): `plan.check` (tool, feeds or machine check failed; issues name operation, field and rule), `plan.order`, `plan.status`.
+- New error codes: `plan.check` (tool, feeds or machine check failed; issues name operation, field and rule; registered with the generators in task 2.10), `plan.order`, `plan.status` (registered with the plan commands, task 2.13).
 
 ## Export boundary (tasks 1.10 and 2.11)
 
 Export (`effect` command, task 2.11) turns the ordered `Toolpath[]` of one setup, the setup and the plan's machine copy (`programUnits`, `spindle.control`, `toolChanger`) into a `MachiningProgram` ([grbl.md](../architecture/grbl.md#input-boundary)): it expands `drill` moves into rapid/feed blocks, converts arc centers to `I`/`J` offsets (arcs and helices stay G2/G3) and adds tool-change and spindle blocks. `postGrbl` then writes the text; it owns the gCode text and its defaults (e.g. spindle dwell after `M3`, [grbl.md](../architecture/grbl.md#output-dialect)); plan mode never emits text.
 
-## Files (planned)
+## Files
 
-| File                                                    | Contents                                                           |
-| ------------------------------------------------------- | ------------------------------------------------------------------ |
-| `src/core/plan/plan.ts`, `plan.dto.ts`                  | `Plan`, `PlanStatus`, `Setup`, `PlanOperation` models and Zod DTOs |
-| `src/core/plan/snapshot.ts`, `status.ts`                | Design snapshot, rebuild, stale detection; status transitions      |
-| `src/core/plan/strategy.ts`                             | Strategy parameter schemas, defaults and fallbacks per operation   |
-| `src/core/plan/checks.ts`, `suggest.ts`, `order.ts`     | Tool/machine/feeds checks, tool ranking, default order and checks  |
-| `src/core/plan/commands.ts`                             | Commands and queries above                                         |
-| `src/core/toolpath/model.ts`                            | `Toolpath`, `Pass`, `Move` (the contract above)                    |
-| `src/core/geometry/contour.ts`                          | Analytic offsets of rounded rectangles and circles                 |
-| `src/core/toolpath/{facing,pocket,drilling,profile}.ts` | Generators per strategy; tabs in `profile.ts`                      |
-| `src/core/toolpath/generate.ts`, `stats.ts`             | Job handler, input hash and cache, length/time estimates           |
+Toolpath files exist since task 2.10; `src/core/plan/` and `generate.ts` are planned (2.13, 2.9).
+
+| File                                                    | Contents                                                                   |
+| ------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `src/core/plan/plan.ts`, `plan.dto.ts`                  | `Plan`, `PlanStatus`, `Setup`, `PlanOperation` models and Zod DTOs         |
+| `src/core/plan/snapshot.ts`, `status.ts`                | Design snapshot, rebuild, stale detection; status transitions              |
+| `src/core/plan/strategy.ts`                             | Strategy parameter schemas, defaults and fallbacks per operation           |
+| `src/core/plan/checks.ts`, `suggest.ts`, `order.ts`     | Tool/machine/feeds checks, tool ranking, default order and checks          |
+| `src/core/plan/commands.ts`                             | Commands and queries above                                                 |
+| `src/core/toolpath/model.ts`                            | `Toolpath`, `Pass`, `Move` (the contract above) and the generator inputs   |
+| `src/core/geometry/contour.ts`                          | Analytic offsets of rounded rectangles and circles                         |
+| `src/core/toolpath/{facing,pocket,drilling,profile}.ts` | Generators per strategy                                                    |
+| `src/core/toolpath/path.ts`, `tabs.ts`, `common.ts`     | Rings with exact arcs, the move builder; tab bands and lifts; input checks |
+| `src/core/toolpath/stats.ts`                            | Length/time estimates, drill-cycle expansion                               |
+| `src/core/toolpath/testing/`                            | Fixtures, property rules, heightmap simulation, golden-file rendering      |
+| `src/core/toolpath/generate.ts`                         | Job handler, input hash and cache (planned, 2.9)                           |

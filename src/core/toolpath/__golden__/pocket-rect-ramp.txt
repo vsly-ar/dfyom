@@ -1,0 +1,52 @@
+toolpath op-pocket1 tool em6 S18000
+stats cut 395.0424 rapid 38.9365 s 22.8637
+pass rough
+  rapid 18.2 20 10
+  rapid 18.2 20 2
+  line 18.2 20 0 F300
+  line 41.8 20 -1 F1200
+  line 18.2 20 -1 F1200
+  line 30 20 -1 F1200
+  line 30 18.8 -1 F1200
+  line 41.2 18.8 -1 F1200
+  line 41.2 21.2 -1 F1200
+  line 18.8 21.2 -1 F1200
+  line 18.8 18.8 -1 F1200
+  line 30 18.8 -1 F1200
+  line 30 18.2 -1 F1200
+  line 41.8 18.2 -1 F1200
+  line 41.8 21.8 -1 F1200
+  line 18.2 21.8 -1 F1200
+  line 18.2 18.2 -1 F1200
+  line 30 18.2 -1 F1200
+  rapid 30 18.2 2
+pass rough
+  rapid 18.2 20 2
+  line 18.2 20 -1 F300
+  line 41.8 20 -2 F1200
+  line 18.2 20 -2 F1200
+  line 30 20 -2 F1200
+  line 30 18.8 -2 F1200
+  line 41.2 18.8 -2 F1200
+  line 41.2 21.2 -2 F1200
+  line 18.8 21.2 -2 F1200
+  line 18.8 18.8 -2 F1200
+  line 30 18.8 -2 F1200
+  line 30 18.2 -2 F1200
+  line 41.8 18.2 -2 F1200
+  line 41.8 21.8 -2 F1200
+  line 18.2 21.8 -2 F1200
+  line 18.2 18.2 -2 F1200
+  line 30 18.2 -2 F1200
+  rapid 30 18.2 2
+pass finish
+  line 30 18.2 -2 F300
+  line 30 18 -2 F1200
+  line 42 18 -2 F1200
+  line 42 22 -2 F1200
+  line 18 22 -2 F1200
+  line 18 18 -2 F1200
+  line 30 18 -2 F1200
+  line 30 18.2 -2 F1200
+  rapid 30 18.2 2
+  rapid 30 18.2 10
