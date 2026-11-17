@@ -1,5 +1,6 @@
 // Spec: docs/architecture/feeds-speeds.md (task 2.12). Material numbers come from the synthetic
-// TEST_DATA fixture, so these tests check the calculator's logic, not cutting data.
+// TEST_DATA fixture, so these tests check the calculator's logic, not cutting data – except the
+// golden cases on the shipped table, which check the curated rows against their cited charts.
 import { describe, expect, it } from 'vitest'
 import { parseWith } from '../../shared/parse'
 import { None, Some, type Option } from '../../shared/result'
@@ -74,16 +75,93 @@ describe('suggestCutting: data lookup', () => {
       expect(codes(s)).toEqual(['feeds.noData'])
     }
   })
+})
 
-  it('the shipped (empty, pending curation) table gives feeds.noData, never invented numbers', () => {
-    const s = suggestCutting({
+// Golden cases on the SHIPPED table (task 2.12): each result must lie within the cited chart's
+// printed range. Chart values are inch units; doc: docs/architecture/feeds-speeds.md#material-data-v01
+describe('shipped material table: golden cases against the cited charts', () => {
+  const IN = 25.4
+  const hobbyVfd = limits({
+    minSpeed: 6000,
+    maxSpeed: 24_000,
+    maxFeedXY: 10_000,
+    maxFeedZ: 5000,
+    rigidity: 'hobby',
+  })
+  const shipped = (over: Partial<CuttingInput>) =>
+    suggestCutting({
       tool: tool(),
       materialClass: 'aluminum',
       engagement: SLOT,
-      machine: None,
+      machine: hobbyVfd,
+      ...over,
     })
-    expect(codes(s)).toEqual(['feeds.noData'])
-    expect(MATERIAL_DATA).toHaveLength(0)
+
+  it('6 mm 2F carbide flat slotting MDF, hobby: Onsrud 52-200 / Amana 1/8" chip load at 18,000 rpm', () => {
+    const s = shipped({ materialClass: 'sheetGood' })
+    expect(codes(s)).toEqual(['feeds.powerSkipped'])
+    expect(value(s.spindleSpeed)).toBe(18_000) // Amana: CNC operating spindle speed 18,000 RPM
+    const fzIn = s.display.unwrap().fz / IN
+    expect(fzIn).toBeCloseTo(0.0055, 9) // .005–.007 at rangePos 0.25
+    expect(fzIn).toBeGreaterThanOrEqual(0.005) // Onsrud MDF 52-200 1/8": .005–.007; Amana MDF 1/8": same
+    expect(fzIn).toBeLessThanOrEqual(0.008) // ≤ the 1/4" maximum (.006–.008) of both charts
+    const vfIpm = value(s.feedRate) / IN
+    expect(vfIpm).toBeGreaterThanOrEqual(190) // Amana MDF 1/8" feed rate 190–260 IPM
+    expect(vfIpm).toBeLessThanOrEqual(260)
+    expect(value(s.plungeRate)).toBeCloseTo(value(s.feedRate) / 2, 9) // Amana ramp down = IPM / flutes
+    expect(value(s.stepdown)).toBeCloseTo(6 * 1 * 0.5, 9) // 1 x D (Onsrud, Amana) × hobby apFactor
+  })
+
+  it('6 mm 2F carbide flat slotting 6061 aluminium, hobby: Harvey Tool SFM and 1/8" chip load', () => {
+    const s = shipped({})
+    expect(codes(s)).toEqual(['feeds.powerSkipped'])
+    const d = s.display.unwrap()
+    const vcSfm = d.vc / 0.3048
+    expect(vcSfm).toBeCloseTo(537.5, 6) // 500–650 SFM at rangePos 0.25
+    expect(vcSfm).toBeGreaterThanOrEqual(500) // Harvey guide, Aluminum 440/356/380: 500–1000 SFM
+    expect(vcSfm).toBeLessThanOrEqual(1000) // Harvey SF_13900 slotting, wrought: 1000 SFM
+    expect(value(s.spindleSpeed)).toBeCloseTo((537.5 * 0.3048 * 1000) / (Math.PI * 6), 6)
+    expect(d.fz / IN).toBeCloseTo(0.001, 12) // Harvey guide, aluminium 1/8": .001 IPT
+    expect(d.fz / IN).toBeLessThanOrEqual(0.00151) // Harvey SF_13900 slotting 0.125": .00151
+    expect(value(s.stepdown)).toBeCloseTo(6 * 0.5 * 0.5, 9) // SF_13900 slot axial .50 x Dia × hobby
+  })
+
+  it('1/4" 2F carbide flat slotting hardwood, prosumer: Onsrud / Amana 1/4" chip load and feed', () => {
+    const s = shipped({
+      materialClass: 'hardwood',
+      tool: tool({ diameter: len('6.35') }),
+      machine: limits({ maxSpeed: 24_000, rigidity: 'prosumer' }),
+    })
+    expect(value(s.spindleSpeed)).toBe(18_000)
+    const fzIn = s.display.unwrap().fz / IN
+    expect(fzIn).toBeCloseTo(0.006, 9) // Onsrud hard wood 52-200 1/4": .005–.007; Amana: same
+    const vfIpm = value(s.feedRate) / IN
+    expect(vfIpm).toBeGreaterThanOrEqual(190) // Amana hardwood 1/4" feed rate 190–260 IPM
+    expect(vfIpm).toBeLessThanOrEqual(260)
+    expect(value(s.stepdown)).toBeCloseTo(6.35 * 0.75, 9)
+  })
+
+  it('HSS, drills and tools ≤ 3 mm have no data (feeds.noData → strategy/preset fallback)', () => {
+    const drill = tool({ type: 'drill', diameter: len('5'), pointAngle: deg('118') })
+    for (const s of [
+      shipped({ tool: tool({ toolMaterial: 'hss' }) }),
+      shipped({ tool: drill, engagement: { kind: 'drill' } }),
+      shipped({ tool: tool({ diameter: len('3') }), materialClass: 'softwood' }),
+    ])
+      expect(codes(s)).toEqual(['feeds.noData'])
+  })
+
+  it('ships carbide rows only, one per material class except other', () => {
+    expect(MATERIAL_DATA.every((r) => r.toolMaterial === 'carbide')).toBe(true)
+    expect(MATERIAL_DATA.map((r) => r.materialClass)).toEqual([
+      'softwood',
+      'hardwood',
+      'sheetGood',
+      'plastic',
+      'aluminum',
+      'brass',
+      'steel',
+    ])
   })
 })
 

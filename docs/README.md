@@ -22,7 +22,7 @@ The docs are the **source of truth**. Code implements what is documented here; w
 | Architecture | [architecture/quantities.md](architecture/quantities.md) – units, tolerances, expressions (value objects)                                | implemented |
 | Architecture | [architecture/geometry.md](architecture/geometry.md) – removal-based geometry, cutting-operation framework, layers                       | accepted    |
 | Architecture | [architecture/library.md](architecture/library.md) – stock, tool and machine library; snapshots                                          | implemented |
-| Architecture | [architecture/feeds-speeds.md](architecture/feeds-speeds.md) – feeds-and-speeds calculator (surface speed, chip thinning, power)         | accepted    |
+| Architecture | [architecture/feeds-speeds.md](architecture/feeds-speeds.md) – feeds-and-speeds calculator (surface speed, chip thinning, power)         | implemented |
 | Architecture | [architecture/grbl.md](architecture/grbl.md) – GRBL post-processor and virtual machine (emulator)                                        | accepted    |
 | Conventions  | [conventions/error-handling/](conventions/error-handling/README.md) – Result/Option, AppError, invariant models, Zod parsing, migrations | implemented |
 | Conventions  | [conventions/logging.md](conventions/logging.md) – structured logs                                                                       | implemented |
