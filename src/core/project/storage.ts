@@ -21,6 +21,25 @@ export interface SaveOutcome {
   readonly warnings: readonly string[]
 }
 
+export interface SaveOptions {
+  /** Save As: a `.dfyom` path; omit to save to the current file. */
+  readonly target?: string
+  /** Required to replace an existing file that is not this project's file. */
+  readonly confirm?: boolean
+}
+
+/** Project folder key: `<project id>` or `<project id>~<n>` – never a path. */
+export const PROJECT_KEY = /^[A-Za-z0-9_-]{1,128}(~\d{1,6})?$/
+
+export function isProjectKey(key: string): boolean {
+  return PROJECT_KEY.test(key)
+}
+
+/** `.dfyom`, case-insensitive. */
+export function isProjectFileName(path: string): boolean {
+  return /\.dfyom$/i.test(path)
+}
+
 /** One open project's persistence; injected as `ctx.services.project`. */
 export interface ProjectSession {
   /** Project folder key (`<id>` or `<id>~2`, …). */
@@ -34,7 +53,7 @@ export interface ProjectSession {
   /** Writes pending changes to the working folder now. */
   flush(): AsyncAppResult<void>
   /** Flush, build, verify and replace; `target` = Save As. */
-  save(doc: ProjectDoc, target?: string): AsyncAppResult<SaveOutcome>
+  save(doc: ProjectDoc, opts?: SaveOptions): AsyncAppResult<SaveOutcome>
 }
 
 export interface OpenedProject {
@@ -81,7 +100,10 @@ export interface ProjectStorage {
 // App-level operations (no project dispatcher exists yet when they run)
 
 export const RecoverArgsSchema = z.object({
-  key: z.string().min(1).describe('Project folder key from project.recovery.list'),
+  key: z
+    .string()
+    .regex(PROJECT_KEY, 'not a project folder key')
+    .describe('Project folder key from project.recovery.list'),
   action: z.enum(['restore', 'discard']).describe('Restore the unsaved changes or discard them'),
   confirm: z
     .boolean()

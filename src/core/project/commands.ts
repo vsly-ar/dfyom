@@ -4,6 +4,7 @@
 import { z } from 'zod'
 import { fail } from '../../shared/result'
 import { defineCommand } from '../commands/define'
+import { isProjectFileName } from './storage'
 
 const SaveOutcomeSchema = z.object({
   filePath: z.string(),
@@ -24,8 +25,13 @@ export const projectSave = defineCommand({
     target: z
       .string()
       .min(1)
+      .refine(isProjectFileName, 'must be a .dfyom file')
       .optional()
       .describe('Absolute path of a new project file (Save As); omit to save to the current file'),
+    confirm: z
+      .boolean()
+      .default(false)
+      .describe('Must be true to replace an existing file that is not this project'),
   }),
   result: SaveOutcomeSchema,
   async run(doc, args, ctx) {
@@ -39,6 +45,11 @@ export const projectSave = defineCommand({
           { path: ['target'], rule: 'required', message: 'choose a file for the new project' },
         ],
       })
-    return session.save(doc, args.target)
+    return session.save(
+      doc,
+      args.target === undefined
+        ? { confirm: args.confirm }
+        : { target: args.target, confirm: args.confirm },
+    )
   },
 })

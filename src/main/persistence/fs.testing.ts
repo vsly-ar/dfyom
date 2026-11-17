@@ -65,6 +65,8 @@ export function faultFs(
     'readdir',
     'stat',
     'copyFile',
+    'link',
+    'realpath',
   ]
   const fs = Object.fromEntries(ops.map((op) => [op, wrap(op)])) as unknown as PersistFs
   return Object.defineProperties(fs, {

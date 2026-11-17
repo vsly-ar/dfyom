@@ -3,7 +3,7 @@
  * Doc: docs/architecture/persistence.md
  */
 import { randomUUID } from 'node:crypto'
-import { resolve } from 'node:path'
+import { resolve, sep } from 'node:path'
 import type { Patch } from 'immer'
 import type { Clock } from '../../core/commands/context'
 import type { ProjectDoc } from '../../core/project/document'
@@ -15,22 +15,25 @@ import type {
   ProjectStorage,
   RecoverableProject,
   RecoveryAction,
+  SaveOptions,
   SaveOutcome,
 } from '../../core/project/storage'
+import { isProjectFileName, isProjectKey } from '../../core/project/storage'
 import type { AppError } from '../../shared/errors/app-error'
 import type { Logger } from '../../shared/logging'
 import { Err, fail, Ok, tryAsync, type AppResult, type AsyncAppResult } from '../../shared/result'
 import { loadArchive, readArchive, sha256, type LoadedArchive } from './archive'
-import { nodeFs, type PersistFs } from './fs'
+import { canonicalPath, nodeFs, samePath, type PersistFs } from './fs'
 import {
   acquireLock,
   isPidAlive as realIsPidAlive,
   LOCK_HEARTBEAT_MS,
   type Lock,
   type LockDeps,
+  type LockObservations,
   type LockOwner,
 } from './lock'
-import { candidateKey, projectPaths, type ProjectPaths } from './paths'
+import { candidateKey, projectPaths, projectsRoot, type ProjectPaths } from './paths'
 import { loadWork, scanRecoverable } from './recovery'
 import { applyRetention } from './retention'
 import { addToHistory, writeVerifiedArchive } from './save'
@@ -64,6 +67,7 @@ class MainProjectStorage implements ProjectStorage {
   private readonly clock: Clock
   private readonly log: Logger
   private readonly sessions = new Map<string, MainSession>()
+  private readonly observed: LockObservations = new Map()
 
   constructor(private readonly o: StorageOptions) {
     this.fs = o.fs ?? nodeFs
@@ -79,6 +83,7 @@ class MainProjectStorage implements ProjectStorage {
       clock: this.clock,
       isPidAlive: this.o.isPidAlive ?? realIsPidAlive,
       log: this.log,
+      observed: this.observed,
     }
   }
 
@@ -122,8 +127,15 @@ class MainProjectStorage implements ProjectStorage {
   }
 
   async open(filePath: string): AsyncAppResult<OpenOutcome> {
-    const path = resolve(filePath)
     const where = 'storage.open'
+    // One file, one folder and lock: symlinks, `..` and letter case must not open it twice.
+    const canonical = await tryAsync(
+      () => canonicalPath(this.fs, resolve(filePath)),
+      'persist.io',
+      'resolving the project file path failed',
+    )
+    if (canonical.isErr()) return Err(canonical.unwrapErr().withContext(where, { file: filePath }))
+    const path = canonical.unwrap()
     const bytes = await tryAsync(
       () => this.fs.readFile(path),
       'persist.io',
@@ -149,6 +161,7 @@ class MainProjectStorage implements ProjectStorage {
       archive,
       sha256(bytes.unwrap()),
       lock.unwrap(),
+      state,
     )
     return opened.map((project) => ({ kind: 'opened', project }) as const)
   }
@@ -177,7 +190,8 @@ class MainProjectStorage implements ProjectStorage {
         if (!this.sessions.has(paths.key)) return Ok({ paths, state: undefined })
         continue
       }
-      if (s.unwrap().filePath === filePath) return Ok({ paths, state: s.unwrap() })
+      const known = s.unwrap().filePath
+      if (known !== null && samePath(known, filePath)) return Ok({ paths, state: s.unwrap() })
     }
     return fail('persist.io', 'no free project folder', {
       where: 'storage.folderFor',
@@ -185,28 +199,37 @@ class MainProjectStorage implements ProjectStorage {
     })
   }
 
-  /** Unpacks a verified archive into a fresh `work/` and starts the session. */
+  /**
+   * Unpacks a verified archive into a fresh `work/` and starts the session. With a previous
+   * state of this folder, the revision starts above every revision it handed out (discarded
+   * changes included), so a revision number never names two different documents.
+   */
   private async openArchive(
     paths: ProjectPaths,
     filePath: string,
     archive: LoadedArchive,
     sha: string,
     lock: Lock,
+    prior: ProjectState | undefined,
   ): AsyncAppResult<OpenedProject> {
     const { manifest } = archive
+    const revision =
+      prior === undefined
+        ? manifest.revision
+        : Math.max(manifest.revision, prior.workingRevision) + 1
     const state: ProjectState = {
       schemaVersion: PROJECT_SCHEMA_VERSION,
       projectId: manifest.projectId,
       filePath,
       dirty: false,
-      workingRevision: manifest.revision,
+      workingRevision: revision,
       savedRevision: manifest.revision,
       savedSha256: sha,
     }
     const opened = await this.start(paths, archive.files, state, archive.doc, lock)
     if (opened.isOk())
       this.log.info(
-        { project: manifest.projectId, key: paths.key, rev: manifest.revision },
+        { project: manifest.projectId, key: paths.key, rev: revision },
         'project opened',
       )
     return opened
@@ -250,6 +273,12 @@ class MainProjectStorage implements ProjectStorage {
 
   async recover(key: string, action: RecoveryAction): AsyncAppResult<OpenedProject | undefined> {
     const where = `storage.recover.${action}`
+    const root = resolve(projectsRoot(this.o.appData))
+    if (
+      !isProjectKey(key) ||
+      !resolve(projectPaths(this.o.appData, key).folder).startsWith(root + sep)
+    )
+      return fail('input.malformed', 'not a project folder key', { where, data: { key } })
     if (this.sessions.has(key))
       return fail('persist.locked', 'the project is open', { where, data: { key } })
     const paths = projectPaths(this.o.appData, key)
@@ -270,9 +299,14 @@ class MainProjectStorage implements ProjectStorage {
       const work = await loadWork(this.fs, paths)
       if (work.isErr()) return abort(work.unwrapErr())
       const { doc, files } = work.unwrap()
-      const opened = await this.start(paths, files, s, doc, lock, false)
+      // Commits after the last flush were lost with their revisions: start above them.
+      const restored = { ...s, workingRevision: s.workingRevision + 1 }
+      const opened = await this.start(paths, files, restored, doc, lock, false)
       if (opened.isOk())
-        this.log.info({ project: s.projectId, key, rev: s.workingRevision }, 'project restored')
+        this.log.info(
+          { project: s.projectId, key, rev: restored.workingRevision },
+          'project restored',
+        )
       return opened
     }
 
@@ -306,6 +340,7 @@ class MainProjectStorage implements ProjectStorage {
       archive.unwrap(),
       sha256(bytes.unwrap()),
       lock,
+      s,
     )
     if (opened.isOk()) this.log.info({ project: s.projectId, key }, 'unsaved changes discarded')
     return opened
@@ -404,13 +439,14 @@ class MainSession implements ProjectSession {
     return this.wf.flush()
   }
 
-  async save(doc: ProjectDoc, target?: string): AsyncAppResult<SaveOutcome> {
+  async save(doc: ProjectDoc, opts: SaveOptions = {}): AsyncAppResult<SaveOutcome> {
     const { fs, clock, log, o } = this.storage.deps
     const where = 'project.save'
     const current = this.wf.state.filePath
-    const file = target === undefined ? current : resolve(target)
-    if (file === null)
-      return fail('input.malformed', 'an untitled project needs a target file', { where })
+    const target = await this.resolveTarget(opts)
+    if (target.isErr()) return Err(target.unwrapErr().withContext(where, { key: this.key }))
+    const file = target.unwrap()
+    const isCurrent = current !== null && samePath(file, current)
     const started = clock.now()
     // 1. Flush the working folder.
     const flushed = await this.flush()
@@ -420,12 +456,16 @@ class MainSession implements ProjectSession {
       log.warn({ project: this.projectId, err: e.toJSON() }, message)
       warnings.push(message)
     }
-    // History: keep the opened file before the first replace, unless it is in saves/ already.
-    if (!this.historyChecked && file === current) {
+    if (!isCurrent) {
+      // Another file is replaced only with confirm and after a copy into the history.
+      const guarded = await this.guardForeignTarget(file, opts.confirm === true)
+      if (guarded.isErr()) return Err(guarded.unwrapErr().withContext(where, { key: this.key }))
+    } else if (!this.historyChecked) {
+      // Keep the opened file before the first replace, unless it is in saves/ already.
       const kept = await this.keepOpenedFile(file)
       if (kept.isErr()) warn(kept.unwrapErr(), 'previous version not added to the save history')
     }
-    this.historyChecked = true
+    if (isCurrent) this.historyChecked = true
     // 2.–4. Build, verify, replace.
     const files = docToFiles(doc)
     if (files.isErr()) return Err(files.unwrapErr().withContext(where))
@@ -470,6 +510,59 @@ class MainSession implements ProjectSession {
       'project saved',
     )
     return Ok({ filePath: file, revision, savedAt, sha256: archive.sha256, warnings })
+  }
+
+  /** Canonical target: the current file, or a `.dfyom` Save As path. */
+  private async resolveTarget(opts: SaveOptions): AsyncAppResult<string> {
+    const current = this.wf.state.filePath
+    if (opts.target === undefined)
+      return current === null
+        ? fail('input.malformed', 'an untitled project needs a target file', {
+            issues: [{ path: ['target'], rule: 'required', message: 'choose a file' }],
+          })
+        : Ok(current)
+    if (!isProjectFileName(opts.target))
+      return fail('input.malformed', 'the target must be a .dfyom file', {
+        issues: [{ path: ['target'], rule: 'extension', message: 'must end with .dfyom' }],
+      })
+    const target = opts.target
+    return tryAsync(
+      () => canonicalPath(this.storage.deps.fs, resolve(target)),
+      'persist.io',
+      'resolving the target path failed',
+    )
+  }
+
+  /**
+   * An existing file that is not this project's: needs `confirm`, must be a DFYOM archive (any
+   * other file is never replaced) and is copied into this project's history first.
+   */
+  private async guardForeignTarget(file: string, confirm: boolean): AsyncAppResult<void> {
+    const { fs } = this.storage.deps
+    const exists = await tryAsync(() => fs.stat(file), 'persist.io', 'stat failed')
+    if (exists.isErr()) return Err(exists.unwrapErr())
+    if (exists.unwrap() === undefined) return Ok(undefined)
+    if (!confirm)
+      return fail('input.malformed', 'the target exists; confirm to replace it', {
+        data: { target: file },
+        issues: [{ path: ['confirm'], rule: 'confirmOverwrite', message: 'set confirm: true' }],
+      })
+    const bytes = await tryAsync(() => fs.readFile(file), 'persist.io', 'reading the target failed')
+    if (bytes.isErr()) return Err(bytes.unwrapErr())
+    const read = readArchive(bytes.unwrap())
+    if (read.isErr())
+      return fail('input.malformed', 'refusing to replace a file that is not a DFYOM project', {
+        data: { target: file },
+        cause: read.unwrapErr(),
+      })
+    const added = await addToHistory({
+      fs,
+      saves: this.paths.saves,
+      source: file,
+      manifest: read.unwrap().manifest,
+      onlyIfNew: true,
+    })
+    return added.map(() => undefined)
   }
 
   private async keepOpenedFile(file: string): AsyncAppResult<void> {

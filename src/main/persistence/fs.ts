@@ -7,16 +7,18 @@
 import { constants } from 'node:fs'
 import {
   copyFile,
+  link,
   mkdir,
   open,
   readdir,
   readFile,
+  realpath,
   rename,
   rm,
   stat,
   writeFile,
 } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { tryAsync, type AsyncAppResult } from '../../shared/result'
 
 export interface PersistFs {
@@ -35,10 +37,15 @@ export interface PersistFs {
   stat(path: string): Promise<{ readonly size: number; readonly isDirectory: boolean } | undefined>
   /** Copy-on-write clone where the file system supports it, else a plain copy. */
   copyFile(from: string, to: string): Promise<void>
+  /** Hard link; fails with EEXIST if `to` exists (an atomic create-if-absent with content). */
+  link(from: string, to: string): Promise<void>
+  /** Resolves symlinks and `..`; ENOENT if the path does not exist. */
+  realpath(path: string): Promise<string>
 }
 
-async function fsyncPath(path: string): Promise<void> {
-  const h = await open(path, 'r')
+/** Files are opened `r+`: Windows refuses to flush a read-only handle (EPERM). */
+async function fsyncPath(path: string, flags: 'r' | 'r+'): Promise<void> {
+  const h = await open(path, flags)
   try {
     await h.sync()
   } finally {
@@ -49,9 +56,9 @@ async function fsyncPath(path: string): Promise<void> {
 export const nodeFs: PersistFs = {
   readFile: (p) => readFile(p),
   writeFile: (p, data, opts) => writeFile(p, data, { flag: opts?.exclusive === true ? 'wx' : 'w' }),
-  fsync: fsyncPath,
+  fsync: (p) => fsyncPath(p, 'r+'),
   fsyncDir: async (p) => {
-    if (process.platform !== 'win32') await fsyncPath(p)
+    if (process.platform !== 'win32') await fsyncPath(p, 'r')
   },
   rename: (a, b) => rename(a, b),
   rm: (p) => rm(p, { recursive: true, force: true }),
@@ -69,6 +76,28 @@ export const nodeFs: PersistFs = {
     }
   },
   copyFile: (a, b) => copyFile(a, b, constants.COPYFILE_FICLONE),
+  link: (a, b) => link(a, b),
+  realpath: (p) => realpath(p),
+}
+
+/** Volumes are treated as case-insensitive on macOS and Windows (their defaults). */
+export function foldPath(p: string, platform: NodeJS.Platform = process.platform): string {
+  return platform === 'darwin' || platform === 'win32' ? p.normalize('NFC').toLowerCase() : p
+}
+
+/** Real path of `p`; for a file that does not exist yet, of its folder plus the name. */
+export async function canonicalPath(fs: PersistFs, p: string): Promise<string> {
+  try {
+    return await fs.realpath(p)
+  } catch (e) {
+    if (errnoCode(e) !== 'ENOENT') throw e
+    return join(await fs.realpath(dirname(p)), basename(p))
+  }
+}
+
+/** Same file system entry, given two canonical paths. */
+export function samePath(a: string, b: string): boolean {
+  return foldPath(a) === foldPath(b)
 }
 
 export function errnoCode(e: unknown): string | undefined {

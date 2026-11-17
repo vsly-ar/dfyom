@@ -60,11 +60,11 @@ Decided pending task 1.7 (it may refine fields, not the rule):
 ## Open
 
 1. Read and verify the archive in memory (zip-slip, manifest, entry set, sizes, hashes, load pipeline); nothing is written yet, so a bad file changes nothing.
-2. Resolve the project folder: the one whose `state.json` names this file, else the first free `<id>`, `<id>~2`, …; an unreadable folder is skipped, never reused. Take the [lock](#lock) or fail with `persist.locked`.
+2. Resolve the file's canonical path (`realpath`: symlinks and `..` resolved; compared case-folded on macOS and Windows, whose volumes are case-insensitive by default), so one file always maps to one folder and lock. Resolve the project folder: the one whose `state.json` names this file, else the first free `<id>`, `<id>~2`, …; an unreadable folder is skipped, never reused. Take the [lock](#lock) or fail with `persist.locked`.
 3. If `state.json` says `dirty: true` → release the lock and return **recovery** ([below](#crash-recovery)) instead of opening.
 4. Otherwise unpack into a new folder, swap it in as `work/`, then write `state.json`. Zip-slip: entry names must be relative forward-slash paths without `.`/`..`/empty segments or drive letters, and every write is checked to stay inside `work/`.
 5. Each document went through the load pipeline in step 1 ([migrations.md](../conventions/error-handling/migrations.md#rules-once-data-is-preserved)): `parseWith` → `Model.create`.
-6. Start the dispatcher with `revision` from the manifest (`DispatcherOptions.revision`) and an empty undo history; `attachSession` feeds its commits to the working folder.
+6. Start the dispatcher with an empty undo history at `revision` (`DispatcherOptions.revision`): the manifest's revision for a new folder; otherwise `max(manifest revision, previous working revision) + 1`, so revisions of discarded changes are never reused for other content. `attachSession` feeds its commits to the working folder.
 
 ## Working folder writes
 
@@ -85,7 +85,7 @@ There is no other autosave: the project file changes only on an explicit save.
 5. Copy the new archive into `saves/` (copy-on-write clone where supported) and apply the retention limits. The first save of a session also adds the file being replaced (if it is a valid archive whose hash is not in `saves/` yet) – before step 2, since the rename replaces it.
 6. Update `state.json`: `dirty: false`, saved revision and archive sha256.
 
-Any failure before the rename in step 4 deletes the temp file, leaves the project file untouched and returns an `AppError` (`persist.verify` for a failed verification). Once the rename succeeded the save has happened: a failed directory fsync or a failure in steps 5–6 is logged and returned in the result's `warnings`. "Save As" is the same sequence with a new target; the project id and folder stay.
+Any failure before the rename in step 4 deletes the temp file, leaves the project file untouched and returns an `AppError` (`persist.verify` for a failed verification). Once the rename succeeded the save has happened: a failed directory fsync or a failure in steps 5–6 is logged and returned in the result's `warnings`. "Save As" is the same sequence with a new target; the project id and folder stay. A target must end in `.dfyom`. An existing target that is not this project's file is replaced only with `confirm: true`, only if it is a valid DFYOM archive (any other file is never replaced), and only after it was copied into this project's `saves/`.
 
 ## Save-history retention
 
@@ -93,17 +93,21 @@ Fixed in v0.1 (no settings): keep at most **20 saves** and **200 MB per project*
 
 ## Lock
 
-- Create `lock.json` with exclusive create (`wx`); refresh `heartbeatAt` every 30 s; delete on close.
-- An existing lock is **stale** if its PID is not alive on this host, or `heartbeatAt` is older than 2 min. A lock file that does not parse (crash while creating it) is stale too. A stale lock is replaced by write-temp-and-rename and read back: if another instance won the race, `persist.locked`. The takeover is logged (`warn`).
+- Create `lock.json` exclusively: write a temp file, fsync, then hard-link it to `lock.json` (fails if one exists – exclusive like `wx`, but never visible half-written); refresh `heartbeatAt` every 30 s; delete on close.
+- Takeover, refresh and release are compare-and-swaps: rename `lock.json` aside to a unique name (only one rename of the same file succeeds; the loser gets `ENOENT` and retries), check what was moved, then link the new lock – or put the old one back with a link that fails if someone created a lock meanwhile. So two instances never both hold the lock; a refresh racing a takeover can lose the lock (the heartbeat reports it).
+- An existing lock is **stale**:
+  - same host (same clock): `heartbeatAt` is older than 2 min, or its PID is not alive **and** `heartbeatAt` is older than one interval (30 s). The second condition guards PID namespaces (Flatpak, Snap, containers) that share the host name but not the PIDs.
+  - other host: clocks may differ, so only once this instance has seen the same `heartbeatAt` unchanged for 2 min of its own (local) time; a first attempt is refused and a retry after 2 min succeeds.
+  - A lock file that does not parse (corrupt) is stale too. The takeover is logged (`warn`).
 - A live lock → `persist.locked` with the holder's instance id and start time – also when the same instance opens the same file twice.
 - A heartbeat that finds another instance's lock (ours went stale, e.g. while the computer slept) stops and raises a persistent warning. Close deletes the lock only if it is still ours.
 
 ## Crash recovery
 
 - On app start, and on open, list project folders with `dirty: true` and no live lock, including never-saved (untitled) projects.
-- **Restore**: load `work/` through the load pipeline and continue as a dirty project at its working revision (undo history empty). **Discard**: replace `work/` with the archive's content and open it (untitled projects: delete the project folder and open nothing). Discard loads the project file first; if it does not load, nothing is deleted and its error is returned.
+- **Restore**: load `work/` through the load pipeline and continue as a dirty project at its working revision + 1 (commits after the last flush were lost with their revisions; undo history empty). **Discard**: replace `work/` with the archive's content and open it (untitled projects: delete the project folder and open nothing). Discard loads the project file first; if it does not load, nothing is deleted and its error is returned.
 - If `work/` does not load (inconsistent after a crash mid-flush, or a schema change), recovery fails with its `AppError` and keeps `work/`; the user can discard, or open the last save or a file from `saves/`.
-- Recovery runs before a project dispatcher exists, so it is not a registry command: `src/core/project/storage.ts` defines the app-level operations `project.recovery.list` (`listRecovery`) and `project.recovery.resolve` (`resolveRecovery`, args `{ key, action: 'restore' | 'discard', confirm }`). Discarding needs `confirm: true` for every adapter (UI, MCP, CLI); adapters wire them in their tasks.
+- Recovery runs before a project dispatcher exists, so it is not a registry command: `src/core/project/storage.ts` defines the app-level operations `project.recovery.list` (`listRecovery`) and `project.recovery.resolve` (`resolveRecovery`, args `{ key, action: 'restore' | 'discard', confirm }`). Discarding needs `confirm: true` for every adapter (UI, MCP, CLI); adapters wire them in their tasks. `key` must match `^[A-Za-z0-9_-]{1,128}(~\d{1,6})?$` (checked in the schema and again in `recover`, which also asserts the folder is inside `<appData>/projects/`), so a key can never address another folder.
 - Closing a project with unsaved changes keeps `work/` dirty, so it is offered for recovery next time; an unchanged untitled project's folder is deleted on close.
 
 ## Schema version (pre-alpha)

@@ -1,4 +1,5 @@
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { realpathSync } from 'node:fs'
+import { mkdir, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { renameProject } from '../../core/commands/commands.fixture'
@@ -20,7 +21,7 @@ import { expectErrCode, expectOk } from '../../shared/testing/result'
 import { buildArchive, loadArchive, sha256 } from './archive'
 import { nodeFs } from './fs'
 import { faultFs, useTempDir } from './fs.testing'
-import { LOCK_STALE_MS, type LockOwner } from './lock'
+import { LOCK_HEARTBEAT_MS, LOCK_STALE_MS, type LockOwner } from './lock'
 import { projectPaths } from './paths'
 import { readState } from './working-folder'
 import { createProjectStorage, type StorageOptions } from './storage'
@@ -31,7 +32,8 @@ const v1 = newProjectDoc({ name: 'Version 1', unitSystem: 'mm' })
 const A: LockOwner = { instanceId: 'inst-a', pid: 100, host: 'h' }
 const B: LockOwner = { instanceId: 'inst-b', pid: 200, host: 'h' }
 const appData = () => join(tmp.dir, 'appdata')
-const file = () => join(tmp.dir, 'docs', 'bracket.dfyom')
+/** Canonical (macOS temp dirs are behind a /var → /private/var symlink). */
+const file = () => join(realpathSync(tmp.dir), 'docs', 'bracket.dfyom')
 
 function storage(owner = A, over: Partial<StorageOptions> = {}) {
   let n = 0
@@ -107,7 +109,14 @@ describe('open', () => {
   it('opens a project whose lock is stale (holder dead)', async () => {
     await projectFile()
     opened(expectOk(await storage(A).open(file())))
-    const p = opened(expectOk(await storage(B, { isPidAlive: (pid) => pid !== 100 }).open(file())))
+    const p = opened(
+      expectOk(
+        await storage(B, {
+          isPidAlive: (pid) => pid !== 100,
+          clock: fakeClock(T0 + LOCK_HEARTBEAT_MS + 1),
+        }).open(file()),
+      ),
+    )
     expect(p.doc).toEqual(v1)
   })
 
@@ -137,6 +146,50 @@ describe('open', () => {
     await writeFile(file(), bytes)
     expectErrCode(await storage().open(file()), 'persist.migration')
     expect(new Uint8Array(await readFile(file()))).toEqual(bytes)
+  })
+})
+
+describe('one file, one folder and lock', () => {
+  it('another spelling of the same file (symlinked folder) hits the same lock', async () => {
+    await projectFile()
+    opened(expectOk(await storage(A).open(file())))
+    const link = join(tmp.dir, 'docs-link')
+    await symlink(join(tmp.dir, 'docs'), link)
+    expectErrCode(await storage(B).open(join(link, 'bracket.dfyom')), 'persist.locked')
+    expectErrCode(
+      await storage(B).open(join(tmp.dir, 'docs', '..', 'docs', 'bracket.dfyom')),
+      'persist.locked',
+    )
+  })
+
+  it.runIf(process.platform === 'darwin' || process.platform === 'win32')(
+    'a different letter case of the same file hits the same lock',
+    async () => {
+      await projectFile()
+      opened(expectOk(await storage(A).open(file())))
+      expectErrCode(await storage(B).open(join(tmp.dir, 'docs', 'BRACKET.dfyom')), 'persist.locked')
+    },
+  )
+})
+
+describe('revisions', () => {
+  it('a reopened project starts above every revision handed out before', async () => {
+    await projectFile(4)
+    const s = storage()
+    const p = opened(expectOk(await s.open(file())))
+    const d = run(p)
+    expectOk(await d.dispatch('project.name.update', { name: 'A' }, uiSource()))
+    expectOk(await d.dispatch('project.name.update', { name: 'B' }, uiSource()))
+    expectOk(await p.session.flush())
+    expectOk(await s.close(p.session.key))
+    // Discard the unsaved revisions 5 and 6: the next session must not reuse them.
+    const r = expectOk(
+      await resolveRecovery(s, { key: 'project-x', action: 'discard', confirm: true }),
+    )
+    expect(r?.doc).toEqual(v1)
+    expect(r?.revision).toBe(7)
+    expectOk(await s.close('project-x'))
+    expect(opened(expectOk(await s.open(file()))).revision).toBe(8)
   })
 })
 
@@ -182,10 +235,54 @@ describe('edit, flush and save', () => {
     const d = run(p)
     expectErrCode(await d.dispatch('project.save', {}, uiSource()), 'input.malformed')
     await mkdir(join(tmp.dir, 'docs'))
-    const target = join(tmp.dir, 'docs', 'new.dfyom')
+    const target = join(realpathSync(tmp.dir), 'docs', 'new.dfyom')
     expectOk(await d.dispatch('project.save', { target }, uiSource()))
     expect(p.session.filePath).toBe(target)
     expect(expectOk(loadArchive(await readFile(target))).doc.name).toBe('New')
+  })
+
+  it('Save As refuses targets that are not .dfyom files', async () => {
+    await projectFile()
+    const p = opened(expectOk(await storage().open(file())))
+    const notes = join(tmp.dir, 'docs', 'notes.txt')
+    await writeFile(notes, 'my notes')
+    expectErrCode(await p.session.save(p.doc, { target: notes, confirm: true }), 'input.malformed')
+    expect(await readFile(notes, 'utf8')).toBe('my notes')
+  })
+
+  it('replacing an existing file of another project needs confirm and keeps a copy in history', async () => {
+    await projectFile()
+    const p = opened(expectOk(await storage().open(file())))
+    const other = join(tmp.dir, 'docs', 'other.dfyom')
+    const otherBytes = buildArchive(
+      expectOk(docToFiles(newProjectDoc({ name: 'Other', unitSystem: 'mm' }))),
+      { projectId: 'project-o', appVersion: '0', savedAt: '2026-11-15T08:00:00.000Z', revision: 9 },
+    ).bytes
+    await writeFile(other, otherBytes)
+    const e = expectErrCode(await p.session.save(p.doc, { target: other }), 'input.malformed')
+    expect(e.issues[0]?.path).toEqual(['confirm'])
+    expect(new Uint8Array(await readFile(other))).toEqual(otherBytes)
+    expectOk(await p.session.save(p.doc, { target: other, confirm: true }))
+    expect(expectOk(loadArchive(await readFile(other))).doc).toEqual(v1)
+    const saves = await readdir(projectPaths(appData(), 'project-x').saves)
+    expect(saves).toContain('2026-11-15T08-00-00.000Z-r9.dfyom')
+  })
+
+  it('never replaces an existing file that is not a DFYOM archive, even with confirm', async () => {
+    await projectFile()
+    const p = opened(expectOk(await storage().open(file())))
+    const fake = join(tmp.dir, 'docs', 'fake.dfyom')
+    await writeFile(fake, 'not a zip')
+    expectErrCode(await p.session.save(p.doc, { target: fake, confirm: true }), 'input.malformed')
+    expect(await readFile(fake, 'utf8')).toBe('not a zip')
+  })
+
+  it('saving under another spelling of the own file needs no confirm', async () => {
+    await projectFile()
+    const p = opened(expectOk(await storage().open(file())))
+    expectOk(
+      await p.session.save(p.doc, { target: join(tmp.dir, 'docs', '..', 'docs', 'bracket.dfyom') }),
+    )
   })
 
   it('a failing save step leaves the project file untouched and the project dirty', async () => {
@@ -229,7 +326,10 @@ describe('edit, flush and save', () => {
       const now = expectOk(loadArchive(await readFile(file())))
       expect(['Version 1', 'Version 2']).toContain(now.doc.name)
       // "Restart": a new instance; the dead one's lock is stale.
-      const s2 = storage(B, { isPidAlive: (pid) => pid !== 100 })
+      const s2 = storage(B, {
+        isPidAlive: (pid) => pid !== 100,
+        clock: fakeClock(T0 + LOCK_HEARTBEAT_MS + 1),
+      })
       const rec = expectOk(await s2.listRecoverable())
       if (rec.length > 0) {
         const r = expectOk(await resolveRecovery(s2, { key: 'project-x', action: 'restore' }))
@@ -243,9 +343,11 @@ describe('edit, flush and save', () => {
       }
       expectOk(await s2.close('project-x'))
       await writeFile(file(), before)
+      // Same history each round, so every round has the same number of steps.
+      await rm(projectPaths(appData(), 'project-x').saves, { recursive: true, force: true })
       if (!crashed) break
     }
-  })
+  }, 60_000)
 })
 
 describe('crash recovery', () => {
@@ -257,7 +359,8 @@ describe('crash recovery', () => {
     expectOk(await p.session.flush())
     // No close: the instance "dies" holding its lock.
   }
-  const restarted = () => storage(B, { isPidAlive: (pid) => pid !== 100 })
+  const restarted = () =>
+    storage(B, { isPidAlive: (pid) => pid !== 100, clock: fakeClock(T0 + LOCK_HEARTBEAT_MS + 1) })
 
   it('lists dirty projects without a live lock, including untitled ones', async () => {
     await crashWithChanges()
@@ -309,7 +412,7 @@ describe('crash recovery', () => {
     await crashWithChanges()
     const r = expectOk(await resolveRecovery(restarted(), { key: 'project-x', action: 'restore' }))
     expect(r?.doc.name).toBe('Unsaved')
-    expect(r?.revision).toBe(5)
+    expect(r?.revision).toBe(6)
     expect(r?.session.dirty).toBe(true)
   })
 
@@ -351,6 +454,28 @@ describe('crash recovery', () => {
     expect(await readFile(join(paths.work, 'project.json'), 'utf8')).toBe('{"name": 1}')
     // The lock was released again, so discarding is still possible.
     expectOk(await resolveRecovery(s, { key: 'project-x', action: 'discard', confirm: true }))
+  })
+
+  it('a key that is not a project folder name never touches the disk (path traversal)', async () => {
+    const victim = join(tmp.dir, 'victim')
+    await mkdir(victim)
+    await writeFile(
+      join(victim, 'state.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        projectId: 'v',
+        filePath: null,
+        dirty: true,
+        workingRevision: 1,
+        savedRevision: null,
+        savedSha256: null,
+      }),
+    )
+    await mkdir(join(appData(), 'projects'), { recursive: true })
+    const s = storage()
+    for (const key of ['../../victim', '../victim', '..'])
+      expectErrCode(await s.recover(key, 'discard'), 'input.malformed')
+    expect((await readdir(victim)).sort()).toEqual(['state.json'])
   })
 
   it('recovery of a project locked by a live instance is refused', async () => {

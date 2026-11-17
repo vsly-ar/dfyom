@@ -11,17 +11,19 @@ import { newProjectDoc, type ProjectDoc } from './document'
 import { projectSave } from './commands'
 import {
   attachSession,
+  isProjectKey,
   resolveRecovery,
   type ProjectSession,
   type ProjectStorage,
   type RecoveryAction,
+  type SaveOptions,
 } from './storage'
 
 const doc = newProjectDoc({ name: 'Bracket', unitSystem: 'mm' })
 
 function fakeSession(filePath: string | null = '/p/a.dfyom') {
   const changes: { patches: readonly Patch[]; doc: ProjectDoc; revision: number }[] = []
-  const saves: { doc: ProjectDoc; target: string | undefined }[] = []
+  const saves: { doc: ProjectDoc; opts: SaveOptions }[] = []
   const session: ProjectSession = {
     key: 'project-1',
     projectId: 'project-1',
@@ -29,8 +31,9 @@ function fakeSession(filePath: string | null = '/p/a.dfyom') {
     dirty: false,
     changed: (patches, d, revision) => void changes.push({ patches, doc: d, revision }),
     flush: async () => Ok(undefined),
-    save: async (d, target) => {
-      saves.push({ doc: d, target })
+    save: async (d, opts = {}) => {
+      const target = opts.target
+      saves.push({ doc: d, opts })
       return Ok({
         filePath: target ?? filePath ?? '',
         revision: 7,
@@ -55,6 +58,17 @@ function fakeStorage() {
 }
 
 describe('resolveRecovery', () => {
+  it('rejects keys that are not project folder names (path traversal)', async () => {
+    const { storage, calls } = fakeStorage()
+    for (const key of ['../../victim', '..', 'a/b', 'a\\b', '', 'p~', 'p~x', '.hidden'])
+      expectErrCode(
+        await resolveRecovery(storage, { key, action: 'discard', confirm: true }),
+        'input.malformed',
+      )
+    expect(calls).toEqual([])
+    expect(isProjectKey('project-1~2')).toBe(true)
+  })
+
   it('restores without confirmation', async () => {
     const { storage, calls } = fakeStorage()
     expectOk(await resolveRecovery(storage, { key: 'k', action: 'restore' }))
@@ -117,10 +131,20 @@ describe('project.save', () => {
       revision: 7,
     })
     expectOk(await d.dispatch('project.save', { target: '/q/b.dfyom' }, uiSource()))
+    expectOk(await d.dispatch('project.save', { target: '/q/c.DFYOM', confirm: true }, uiSource()))
     expect(saves).toEqual([
-      { doc, target: undefined },
-      { doc, target: '/q/b.dfyom' },
+      { doc, opts: { confirm: false } },
+      { doc, opts: { target: '/q/b.dfyom', confirm: false } },
+      { doc, opts: { target: '/q/c.DFYOM', confirm: true } },
     ])
+  })
+
+  it('refuses a target that is not a .dfyom file', async () => {
+    const { session, saves } = fakeSession()
+    const d = dispatcher(session)
+    for (const target of ['/q/notes.txt', '/q/dfyom', '/q/a.dfyom.bak'])
+      expectErrCode(await d.dispatch('project.save', { target }, uiSource()), 'input.malformed')
+    expect(saves).toEqual([])
   })
 
   it('an untitled project needs a target', async () => {
