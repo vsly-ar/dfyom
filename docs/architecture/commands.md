@@ -14,6 +14,7 @@ The code is the contract; each file's header links back here. No adapters yet (I
 | `src/core/commands/context.ts`          | `CommandContext`, `JobContext`, `Source`, `IdGenerator`, `Clock`, `Services` (ports)                  |
 | `src/core/commands/registry.ts`         | Registry of all commands and queries; name checks; `APP_COMMANDS`/`APP_QUERIES`                       |
 | `src/core/commands/dispatcher.ts`       | Per-project queue and pipeline ([below](#dispatcher-pipeline)); `dispatch`, `query`                   |
+| `src/core/commands/args.ts`             | `parseArgs`: args shape check that rejects unknown keys ([pipeline](#dispatcher-pipeline))            |
 | `src/core/commands/history.ts`          | Immer setup, patch execution, undo/redo stacks; `history.undo`/`history.redo`                         |
 | `src/core/commands/action-log.ts`       | Event types, ring buffer, subscriptions                                                               |
 | `src/core/commands/jobs.ts`             | `JobHandle`, progress, pause/resume/abort, `WorkerPort` (+ in-process stub); `job.*` control commands |
@@ -21,7 +22,7 @@ The code is the contract; each file's header links back here. No adapters yet (I
 | `src/core/commands/json-schema.ts`      | Tool descriptors from Zod                                                                             |
 | `src/core/commands/testing.ts`          | Test helpers ([Testing](#testing))                                                                    |
 | `src/core/commands/commands.fixture.ts` | Test-only commands used by the command-layer tests                                                    |
-| `src/core/project/document.ts`          | `ProjectDoc` – the state document commands act on (v0.1: `{ name, unitSystem }` only so far)          |
+| `src/core/project/document.ts`          | `ProjectDoc` – the state document commands act on: `{ name, unitSystem, parts, snapshots }`           |
 
 ## Naming
 
@@ -82,7 +83,7 @@ The sketch above is abridged; `define.ts` and `context.ts` are the contract. Dif
 Rules:
 
 - `undoable` is not a flag: it follows from `kind` (`document` = undoable, others = not).
-- A `document` handler is **synchronous** and pure apart from the draft and `ctx.ids`/`ctx.clock`. It never awaits, never calls services, never dispatches.
+- A `document` handler is **synchronous** and pure apart from the draft and `ctx.ids`/`ctx.clock`. It never awaits, never dispatches, and calls no services except synchronous reads of the library (`services.library.lookup`) to take a snapshot ([library.md](library.md#snapshots)); redo replays patches, so the read is not repeated.
 - Shared domain logic is called as plain functions from `src/core/<domain>`, not via nested dispatch. One command = one undo step.
 - Args use the [quantity](quantities.md) DTOs as entered (e.g. `"1/16\""`); models are built inside the handler with `Model.create()` and their `AppError`s returned unchanged.
 - `effect` and `job` handlers read the immutable `ProjectDoc` snapshot current at start; a job that must change the document does so with one follow-up document command ([Jobs](#long-running-commands-jobs)).
@@ -103,12 +104,14 @@ Rules:
 | #   | Step                                                                                                   | Failure              |
 | --- | ------------------------------------------------------------------------------------------------------ | -------------------- |
 | 1   | Look up `name` in the registry                                                                         | `command.unknown`    |
-| 2   | `parseWith(def.args, rawArgs, name)`                                                                   | `input.malformed`    |
+| 2   | `parseArgs(def.args, rawArgs, name)` (`args.ts`): Zod shape check, then unknown keys at any depth      | `input.malformed`    |
 | 3   | Enqueue on the project's FIFO queue ([Concurrency](#concurrency))                                      | –                    |
 | 4   | Revision check ([Stale writes](#stale-writes))                                                         | `command.conflict`   |
 | 5   | If `def.machine`: `policy.check(def, args, source)` – rules in [run.md#safety](../modes/run.md#safety) | `permission.denied`  |
 | 6   | Execute by kind (below); stray throws → `internal.unexpected`                                          | handler's `AppError` |
 | 7   | Emit one action-log event (success **and** failure)                                                    | –                    |
+
+**Unknown keys** in args are rejected for every command and query (also by `runCommand`): Zod strips them, so a mistyped optional key (`dept` for `depth`) would silently take the default. Each key of the raw args must survive in the parsed value; one issue per unknown key, path = the key's path (`['shape', 'radius']`), rule `unrecognized_keys`. Reported once the shape check passes.
 
 Execute `document`: `createDraft(doc)` → `run` → on `Err` drop the draft (state, history and revision unchanged: **no partial patches**) → on `Ok` `finishDraft` with patches; empty patches = no-op, no history entry; otherwise commit, `revision++`, push history entry, clear redo stack, publish patches.
 

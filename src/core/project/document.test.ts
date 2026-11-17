@@ -3,9 +3,9 @@ import { expectErrCode, expectOk } from '../../shared/testing/result'
 import { newProjectDoc, parseProjectDoc } from './document'
 
 describe('ProjectDoc', () => {
-  it('starts as a plain JSON DTO with a name and unit system', () => {
+  it('starts as a plain JSON DTO with a name, unit system and empty collections', () => {
     const doc = newProjectDoc({ name: 'Bracket', unitSystem: 'inch' })
-    expect(doc).toEqual({ name: 'Bracket', unitSystem: 'inch' })
+    expect(doc).toEqual({ name: 'Bracket', unitSystem: 'inch', parts: {}, snapshots: {} })
     expect(JSON.parse(JSON.stringify(doc))).toEqual(doc)
   })
 
@@ -14,9 +14,12 @@ describe('ProjectDoc', () => {
   })
 
   it('parses untrusted data by shape', () => {
+    // record collections default to empty
     expect(expectOk(parseProjectDoc({ name: 'A', unitSystem: 'mm' }, 'load'))).toEqual({
       name: 'A',
       unitSystem: 'mm',
+      parts: {},
+      snapshots: {},
     })
     const e = expectErrCode(
       parseProjectDoc({ name: 'A', unitSystem: 'cm' }, 'load'),

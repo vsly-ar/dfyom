@@ -10,7 +10,7 @@
  */
 import { enablePatches, freeze, Immer, isDraft, type Patch } from 'immer'
 import { z } from 'zod'
-import { parseWith } from '../../shared/parse'
+import { parseArgs } from './args'
 import { Err, fail, tryCatch, type AppResult } from '../../shared/result'
 import type { ProjectDoc } from '../project/document'
 import type { CommandContext, Source } from './context'
@@ -84,7 +84,7 @@ export function parseAndExecute<S extends z.ZodType, R>(
   rawArgs: unknown,
   ctx: CommandContext,
 ): DocumentRun<R> {
-  const args = parseWith(def.args, rawArgs, def.name)
+  const args = parseArgs(def.args, rawArgs, def.name)
   if (args.isErr())
     return { result: Err(args.unwrapErr()), next: doc, patches: [], inversePatches: [] }
   return executeDocumentCommand(doc, def, args.unwrap(), ctx)

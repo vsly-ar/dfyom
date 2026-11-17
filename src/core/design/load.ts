@@ -1,0 +1,52 @@
+/**
+ * Loading a part and its stock snapshot from the project document (or a command's draft).
+ * Doc: docs/modes/design.md#implementation-task-25
+ */
+import { Err, fail, Ok, type AppResult } from '../../shared/result'
+import type { PartGeometryInput } from '../geometry/model'
+import { Snapshot } from '../library/snapshot'
+import { Stock } from '../library/stock'
+import type { ProjectDoc, UnitSystem } from '../project/document'
+import { toGeometryInput } from './geometry-input'
+import { partFromDTO, type Part } from './operation'
+import type { PartDTO } from './part.dto'
+
+export interface LoadedPart {
+  readonly dto: PartDTO
+  readonly part: Part
+  readonly stock: Stock
+  readonly units: UnitSystem
+}
+
+export function unknownPart(partId: string, where: string): AppResult<never> {
+  return fail('input.malformed', `part ${partId} does not exist`, {
+    issues: [{ path: ['partId'], rule: 'unknownPart', message: 'no such part' }],
+    where,
+  })
+}
+
+/** The part with its operations and stock as models; a broken record is `input.malformed`. */
+export function loadPart(doc: ProjectDoc, partId: string, where: string): AppResult<LoadedPart> {
+  const dto = Object.hasOwn(doc.parts, partId) ? doc.parts[partId] : undefined
+  if (dto === undefined) return unknownPart(partId, where)
+  const part = partFromDTO(dto)
+  if (part.isErr()) return Err(part.unwrapErr().prefixIssues('parts', partId).withContext(where))
+  const snap = Object.hasOwn(doc.snapshots, dto.stock) ? doc.snapshots[dto.stock] : undefined
+  if (snap === undefined || snap.kind !== 'stock')
+    return fail('input.malformed', `stock snapshot ${dto.stock} of part ${partId} is missing`, {
+      where,
+      data: { partId, snapshotId: dto.stock },
+    })
+  const stock = Snapshot.fromDTO(snap).andThen((s) =>
+    s.values instanceof Stock
+      ? Ok(s.values)
+      : fail('input.malformed', 'part stock is not a stock snapshot', { where }),
+  )
+  if (stock.isErr()) return Err(stock.unwrapErr())
+  return Ok({ dto, part: part.unwrap(), stock: stock.unwrap(), units: doc.unitSystem })
+}
+
+/** The geometry input of a part of the document (for evaluation, task 2.8/2.9). */
+export function partGeometryInput(doc: ProjectDoc, partId: string): AppResult<PartGeometryInput> {
+  return loadPart(doc, partId, 'partGeometryInput').andThen((l) => toGeometryInput(l.part, l.stock))
+}
