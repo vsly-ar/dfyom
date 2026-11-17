@@ -80,7 +80,7 @@ export function exportGrbl(input: ExportInput, opts: PostOptions): AppResult<Grb
     lines,
     text: `${lines.join('\n')}\n`,
     stats: programStats(program, machine, opts),
-    warnings: machineChecks(input, program, machine),
+    warnings: machineChecks(input, program, machine, opts.firstToolLoaded !== false),
   }))
 }
 
@@ -97,6 +97,25 @@ export function toMachiningProgram(
     return fail('model.invariant', 'nothing to export', {
       where: 'toMachiningProgram',
       issues: [{ path: ['operations'], rule: 'empty', message: 'no toolpaths to export' }],
+    })
+  // Clearance: above the stock top and above every toolpath (tool changes and the footer
+  // retract to it; a lower one would move down there).
+  const clearanceZ = input.setup.clearanceHeight
+  let top = -Infinity
+  for (const op of input.operations)
+    for (const pass of op.toolpath.passes)
+      for (const m of pass.moves) top = Math.max(top, m.kind === 'drill' ? m.retract : m.to[2])
+  if (!(clearanceZ > 0) || top > clearanceZ + EPS)
+    return fail('model.invariant', 'the clearance height is too low', {
+      where: 'toMachiningProgram',
+      issues: [
+        {
+          path: ['setup', 'clearanceHeight'],
+          rule: 'clearance',
+          message: 'must be > 0 and at least the highest toolpath Z',
+          params: { clearanceHeight: clearanceZ, top },
+        },
+      ],
     })
   const units = machine.programUnits
   const peckClearance = units === 'in' ? 0.02 * MM_PER_INCH : PECK_CLEARANCE
@@ -140,7 +159,7 @@ export function toMachiningProgram(
     setupName: input.setup.name,
     units,
     spindleControl: machine.spindle.control,
-    clearanceZ: input.setup.clearanceHeight,
+    clearanceZ,
     blocks,
   })
 }
@@ -296,6 +315,7 @@ export function machineChecks(
   input: ExportInput,
   p: MachiningProgram,
   machine: Machine,
+  firstToolLoaded = true,
 ): PlanWarning[] {
   const out: PlanWarning[] = []
   const warn = (w: Omit<PlanWarning, 'code' | 'severity'>) =>
@@ -364,17 +384,34 @@ export function machineChecks(
     })
 
   // Extent and soft limits.
+  // The Z soft limits use the Z zero `workZero` was taken with: it holds until the first tool
+  // change that pauses (the user re-zeroes Z for the new tool's length).
   const lo = [Infinity, Infinity, p.clearanceZ]
   const hi = [-Infinity, -Infinity, p.clearanceZ]
-  walk(p, true, (from, b) => {
-    const pts = b.kind === 'arc' && known(from) ? arcBounds(from, b) : [b.to]
-    for (const q of pts)
-      q.forEach((v, k) => {
-        if (Number.isNaN(v)) return
-        lo[k] = Math.min(lo[k]!, v)
-        hi[k] = Math.max(hi[k]!, v)
-      })
-  })
+  const zLo = [firstToolLoaded ? p.clearanceZ : Infinity]
+  const zHi = [firstToolLoaded ? p.clearanceZ : -Infinity]
+  let zeroKnown = firstToolLoaded
+  let tools = 0
+  walk(
+    p,
+    firstToolLoaded,
+    (from, b) => {
+      const pts = b.kind === 'arc' && known(from) ? arcBounds(from, b) : [b.to]
+      for (const q of pts)
+        q.forEach((v, k) => {
+          if (Number.isNaN(v)) return
+          lo[k] = Math.min(lo[k]!, v)
+          hi[k] = Math.max(hi[k]!, v)
+          if (k === 2 && zeroKnown) {
+            zLo[0] = Math.min(zLo[0]!, v)
+            zHi[0] = Math.max(zHi[0]!, v)
+          }
+        })
+    },
+    (b) => {
+      if (b.kind === 'toolChange' && ++tools > 1) zeroKnown = false
+    },
+  )
   AXES.forEach((axis, k) => {
     const travel = machine.travel[axis].canonical
     const size = hi[k]! - lo[k]!
@@ -388,8 +425,9 @@ export function machineChecks(
       })
     const zero = input.workZero?.[k]
     if (zero === undefined) return
-    const from = zero + lo[k]!
-    const to = zero + hi[k]!
+    const from = zero + (k === 2 ? zLo[0]! : lo[k]!)
+    const to = zero + (k === 2 ? zHi[0]! : hi[k]!)
+    if (!Number.isFinite(from - to)) return
     if (from < -travel - EPS || to > EPS)
       warn({
         field: 'machine',

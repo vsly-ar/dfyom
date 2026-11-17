@@ -36,8 +36,12 @@ const MIN_ARC_CHORD_UNITS = 10
 /** GRBL's arc target check (gc_execute_line, error:33), mm. */
 const ARC_RADIUS_ERROR = 0.005
 const ARC_RADIUS_ERROR_REL = 0.001
-/** Max distance (mm) along the arc between the intended end and the one GRBL computes. */
+/**
+ * Max distance (mm) along the arc between the intended end and the one GRBL computes, beyond
+ * rounding (plus 4 resolution steps): catches wrap-arounds and direction flips only.
+ */
 const ARC_SWEEP_TOLERANCE = 0.005
+const ARC_SWEEP_STEPS = 4
 
 type Motion = 'G0' | 'G1' | 'G2' | 'G3'
 
@@ -66,11 +70,15 @@ export function postGrbl(program: MachiningProgram, opts: PostOptions): AppResul
 function validate(p: MachiningProgram, opts: PostOptions): Issue[] {
   const issues: Issue[] = []
   const perMm = p.units === 'in' ? 1 / MM_PER_INCH : 1
-  /** `decimals`: the value must stay > 0 when written with that many decimals. */
-  const num = (path: (string | number)[], v: number, decimals?: number) => {
-    if (!Number.isFinite(v) || Math.abs(v * perMm) > MAX_ABS_VALUE)
+  /**
+   * `v` as written is `v × scale` (lengths and feeds: `perMm`; rpm: 1). `decimals`: the written
+   * value must stay > 0 with that many decimals.
+   */
+  const num = (path: (string | number)[], v: number, scale = perMm, decimals?: number) => {
+    const w = v * scale
+    if (!Number.isFinite(w) || Math.abs(w) > MAX_ABS_VALUE)
       issues.push({ path, message: `must be finite and within ±${MAX_ABS_VALUE}`, rule: 'range' })
-    else if (decimals !== undefined && !(v > 0 && formatNumber(v, decimals) !== '0'))
+    else if (decimals !== undefined && !(w > 0 && formatNumber(w, decimals) !== '0'))
       issues.push({ path, message: 'must be > 0 when written', rule: 'positive' })
   }
   num(['clearanceZ'], p.clearanceZ)
@@ -83,7 +91,7 @@ function validate(p: MachiningProgram, opts: PostOptions): Issue[] {
     if (b.kind === 'rapid' || b.kind === 'feed' || b.kind === 'arc')
       b.to.forEach((v, a) => num([...at, 'to', a], v))
     if (b.kind === 'feed' || b.kind === 'arc') {
-      num([...at, 'feed'], b.feed * perMm, 1)
+      num([...at, 'feed'], b.feed, perMm, 1)
       if (!spindleOn)
         issues.push({ path: at, message: 'feed move with the spindle off', rule: 'spindleOff' })
     }
@@ -94,10 +102,11 @@ function validate(p: MachiningProgram, opts: PostOptions): Issue[] {
         issues.push({ path: at, message: 'arc without a radius', rule: 'arcRadius' })
     }
     if (b.kind === 'spindle') {
-      if (b.rpm !== 'off') num([...at, 'rpm'], b.rpm, 0)
+      if (b.rpm !== 'off') num([...at, 'rpm'], b.rpm, 1, 0)
       spindleOn = b.rpm !== 'off'
     }
     if (b.kind === 'toolChange') {
+      num([...at, 'tool', 'diameter'], b.tool.diameter)
       if (!Number.isInteger(b.number) || b.number < 1)
         issues.push({ path: [...at, 'number'], message: 'must be 1, 2, …', rule: 'integer' })
       spindleOn = false
@@ -159,14 +168,22 @@ class Writer {
       this.comment(`Tool ${b.number}: ${b.tool.name}, dia ${d} ${p.units}`)
     }
     this.comment(`Generator: ${this.opts.generator}`)
-    this.lines.push(`G90 G94 G17 ${p.units === 'in' ? 'G20' : 'G21'}`)
-    this.lines.push('G54')
+    this.modes()
     this.clearance()
+  }
+
+  private modes(): void {
+    this.lines.push(`G90 G94 G17 ${this.p.units === 'in' ? 'G20' : 'G21'}`)
+    this.lines.push('G54')
   }
 
   private footer(): void {
     this.clearance(false)
     this.lines.push('M5')
+    if (this.p.spindleControl === 'manual') {
+      this.comment('Stop the spindle')
+      this.lines.push('M0')
+    }
     this.lines.push('M30')
   }
 
@@ -194,6 +211,8 @@ class Writer {
     if (!first) {
       this.lines.push('M5')
       this.clearance(false)
+      // Before the marker: the marker line must be followed directly by M0 (sender rule).
+      if (this.p.spindleControl === 'manual') this.comment('Stop the spindle')
     }
     this.lines.push(toolChangeMarker(number, name))
     if (first && this.opts.firstToolLoaded !== false) return
@@ -204,6 +223,8 @@ class Writer {
     this.pos.fill(undefined)
     this.motion = undefined
     this.feed = undefined
+    // ... and may have left other modes (MDI in G91, another WCS): state them again.
+    this.modes()
     this.clearance()
   }
 
@@ -247,7 +268,7 @@ class Writer {
         message: 'arc from an unknown position',
         rule: 'arcStart',
       })
-      return
+      return this.skip(b.to)
     }
     const u = this.units
     const cx = x0 + b.i
@@ -294,18 +315,18 @@ class Writer {
         message: `arc ends ${best.delta} mm off its radius`,
         rule: 'arcRadius',
       })
-      return
+      return this.skip(b.to)
     }
     if (!full) {
       const want = sweep(x0 - cx, y0 - cy, b.to[0] - cx, b.to[1] - cy, b.cw)
       const got = sweep(sx - ci, sy - cj, ex - ci, ey - cj, b.cw)
-      if (Math.abs(want - got) * r0 > ARC_SWEEP_TOLERANCE) {
+      if (Math.abs(want - got) * r0 > ARC_SWEEP_TOLERANCE + ARC_SWEEP_STEPS * res * toMm) {
         this.issues.push({
           path: ['blocks', k],
           message: 'arc sweep changes when written',
           rule: 'arcSweep',
         })
-        return
+        return this.skip(b.to)
       }
     }
     // An arc needs an axis word in the plane (GRBL error:32): full circles write X and Y.
@@ -347,6 +368,14 @@ class Writer {
       if (v === undefined) return
       this.text[k] = next[k]
       this.pos[k] = v
+    })
+  }
+
+  /** After a failed block: continue from its end, so later blocks are checked on their own. */
+  private skip(to: Vec3): void {
+    to.forEach((v, k) => {
+      this.pos[k] = v
+      this.text[k] = this.coord(v)
     })
   }
 

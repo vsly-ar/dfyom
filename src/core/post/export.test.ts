@@ -124,6 +124,22 @@ describe('toMachiningProgram', () => {
   it('fails without toolpaths', () => {
     expectErrCode(toMachiningProgram(exportInput([]), testMachine()), 'model.invariant')
   })
+
+  it('requires a clearance above Z0 and above every toolpath', () => {
+    const op = [operation(square('a'), endMill(6))]
+    const rules = (clearanceHeight: number) =>
+      expectErrCode(
+        toMachiningProgram(
+          exportInput(op, testMachine(), { setup: { name: 'S', clearanceHeight } }),
+          testMachine(),
+        ),
+        'model.invariant',
+      ).issues.map((i) => i.rule)
+    expect(rules(0)).toContain('clearance')
+    expect(rules(-5)).toContain('clearance')
+    // the toolpath rapids at Z 10: a clearance of 5 lies below it
+    expect(rules(5)).toEqual(['clearance'])
+  })
 })
 
 describe('exportGrbl', () => {
@@ -187,6 +203,16 @@ describe('exportGrbl', () => {
       ])
       const sl = z.warnings.find((w) => w.rule === 'softLimit' && w.params['axis'] === 'z')!
       expect(sl.params['max']).toBe(5) // clearance 10 above a work zero 5 below the top
+    })
+
+    it('Z soft limits only for the first tool (later tools re-zero Z)', () => {
+      const m = testMachine({ travel: { x: len('800'), y: len('800'), z: len('25') } })
+      // facing (first tool) spans -11.5..-1 in MPos; the drills reach about -33 after re-zeroing
+      const e = expectOk(exportGrbl({ ...testPartExport(m), workZero: [-200, -200, -11] }, OPTS))
+      const found = rules(e.warnings.filter((w) => w.rule !== 'maxFeedRate'))
+      expect(found).toEqual(['travel z'])
+      const high = expectOk(exportGrbl({ ...testPartExport(m), workZero: [-200, -200, -5] }, OPTS))
+      expect(rules(high.warnings)).toContain('softLimit z')
     })
 
     it('arc bulges count for the extent', () => {

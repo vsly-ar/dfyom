@@ -202,13 +202,18 @@ function expectIntendedMotion(p: MachiningProgram, lines: readonly string[]): vo
   for (const b of p.blocks) {
     if (b.kind === 'toolChange') last = undefined
     if (!('to' in b)) continue
-    if (key(b.to) !== last) want.push({ b, from })
+    // a full circle (end = start in X and Y) is written although its end is unchanged
+    const full =
+      b.kind === 'arc' && from !== undefined && b.to[0] === from[0] && b.to[1] === from[1]
+    if (key(b.to) !== last || full) want.push({ b, from })
     last = key(b.to)
     from = b.to
   }
   // Text: lines that move (forced clearance lines usually do not).
   const got = reparse(lines).filter(
-    (g) => g.moves.length > 0 && !near(g.moves.at(-1)!.target, g.start, 1e-9),
+    (g) =>
+      g.moves.length > 1 || // an arc's chords (full circles end where they start)
+      (g.moves.length > 0 && !near(g.moves.at(-1)!.target, g.start, 1e-9)),
   )
   // The header's G0 Z, and the footer's retract when the program did not end at clearance.
   expect(got[0]!.line).toMatch(/^G0 Z/)
@@ -383,6 +388,8 @@ describe('postGrbl', () => {
       'M5',
       '(DFYOM TOOL CHANGE 2: T2)',
       'M0',
+      'G90 G94 G17 G21',
+      'G54',
       'G0 Z10',
       'M3 S10000',
       'G4 P3',
@@ -405,6 +412,8 @@ describe('postGrbl', () => {
     expect(body(lines)).toEqual([
       '(DFYOM TOOL CHANGE 1: T1)',
       'M0',
+      'G90 G94 G17 G21',
+      'G54',
       'G0 Z10',
       'M3 S10000',
       'X1 Y2',
@@ -596,5 +605,112 @@ describe('properties over 40 random toolpaths (mm and inch)', () => {
     expectDialect(e.lines, 'mm')
     expectIntendedMotion(e.program, e.lines)
     expect(e.lines.some((l) => /G8[0-9]/.test(l))).toBe(false)
+  })
+})
+
+// ── Review fixes (2.11) ─────────────────────────────────────────────────────────────────
+
+describe('review fixes', () => {
+  const inch = (blocks: Block[]) => program(blocks, { units: 'in' })
+
+  it('a valid 162° inch arc (r 8.1 mm) exports: the sweep check only catches real flips', () => {
+    const start: Vec3 = [54.51629515558574, 13.796223078180835, -1]
+    const blocks: Block[] = [
+      tool(),
+      spin(),
+      rapid(start[0], start[1], 10),
+      feed(start[0], start[1], -1),
+      {
+        kind: 'arc',
+        to: [45.40368169291071, 0.6060198625175692, -1],
+        i: -5.5869,
+        j: -5.8831,
+        cw: true,
+        feed: 500,
+      },
+    ]
+    const lines = expectOk(postGrblLines(inch(blocks), OPTS))
+    expectIntendedMotion(inch(blocks), lines)
+  })
+
+  it('inch fuzz: 300 random toolpaths export and re-parse as intended', () => {
+    const machine = testMachine({ programUnits: 'in' })
+    for (let seed = 1000; seed < 1300; seed++) {
+      const r = exportGrbl(
+        exportInput([operation(randomToolpath(seed), endMill(6))], machine),
+        OPTS,
+      )
+      expect(r.isOk(), `seed ${seed}: ${r.isErr() ? r.unwrapErr().message : ''}`).toBe(true)
+      expectIntendedMotion(r.unwrap().program, r.unwrap().lines)
+    }
+  })
+
+  it('reports only the bad arc, not every arc after it', () => {
+    const blocks: Block[] = [
+      tool(),
+      spin(),
+      rapid(0, 0, 0),
+      { kind: 'arc', to: [4, 0, 0], i: 1, j: 0, cw: true, feed: 100 }, // not on its circle
+      { kind: 'arc', to: [8, 0, 0], i: 2, j: 0, cw: true, feed: 100 }, // fine from (4, 0)
+      { kind: 'arc', to: [4, 0, 0], i: -2, j: 0, cw: true, feed: 100 },
+    ]
+    const e = expectErrCode(postGrbl(program(blocks), OPTS), 'model.invariant')
+    expect(e.issues.map((i) => i.path)).toEqual([['blocks', 3]])
+  })
+
+  it('a non-finite or huge tool diameter is an Err, not a throw', () => {
+    for (const diameter of [Number.NaN, Number.POSITIVE_INFINITY, 1e22]) {
+      const blocks: Block[] = [{ kind: 'toolChange', number: 1, tool: { name: 'T', diameter } }]
+      const e = expectErrCode(postGrbl(program(blocks), OPTS), 'model.invariant')
+      expect(e.issues.map((i) => i.rule)).toEqual(['range'])
+    }
+  })
+
+  it('inch limits: S is not scaled, F is scaled once', () => {
+    const rules = (blocks: Block[]) => {
+      const r = postGrbl(inch(blocks), OPTS)
+      return r.isOk() ? [] : r.unwrapErr().issues.map((i) => i.rule)
+    }
+    expect(rules([tool(), spin(200_000)])).toEqual(['range'])
+    // 2 000 000 mm/min = 78 740 in/min: writable; 3 000 000 = 118 110 in/min: not
+    expect(rules([tool(), spin(), rapid(0, 0, 0), feed(1, 0, 0, 2_000_000)])).toEqual([])
+    expect(rules([tool(), spin(), rapid(0, 0, 0), feed(1, 0, 0, 3_000_000)])).toEqual(['range'])
+  })
+
+  it('manual spindle: asks to stop the spindle before a tool change and before the end', () => {
+    const blocks: Block[] = [tool(1), spin(), rapid(1, 2, 10), tool(2), spin(), rapid(1, 2, 10)]
+    const lines = expectOk(postGrblLines(program(blocks, { spindleControl: 'manual' }), OPTS))
+    const k = lines.indexOf('(DFYOM TOOL CHANGE 2: T2)')
+    expect(lines.slice(k - 1, k + 2)).toEqual([
+      '(Stop the spindle)',
+      '(DFYOM TOOL CHANGE 2: T2)',
+      'M0',
+    ])
+    expect(lines.slice(-4)).toEqual(['M5', '(Stop the spindle)', 'M0', 'M30'])
+    // gcode spindles get neither
+    const g = expectOk(postGrblLines(program(blocks), OPTS))
+    expect(g.filter((l) => l === '(Stop the spindle)')).toEqual([])
+  })
+
+  it('after a tool change M0: modes and G54 again before the retract', () => {
+    const blocks: Block[] = [tool(1), spin(), rapid(1, 2, 10), tool(2), spin(), rapid(1, 2, 10)]
+    const lines = expectOk(postGrblLines(program(blocks), OPTS))
+    const k = lines.indexOf('(DFYOM TOOL CHANGE 2: T2)')
+    expect(lines.slice(k + 1, k + 5)).toEqual(['M0', 'G90 G94 G17 G21', 'G54', 'G0 Z10'])
+  })
+
+  it('the motion check catches a wrong arc direction, also for full circles', () => {
+    const blocks: Block[] = [
+      tool(),
+      spin(),
+      rapid(10, 0, 10),
+      feed(10, 0, 0),
+      { kind: 'arc', to: [10, 0, 0], i: -10, j: 0, cw: true, feed: 500 },
+    ]
+    const lines = expectOk(postGrblLines(program(blocks), OPTS))
+    expectIntendedMotion(program(blocks), lines)
+    const wrong = lines.map((l) => l.replace(/^G2 /, 'G3 '))
+    expect(wrong).not.toEqual(lines)
+    expect(() => expectIntendedMotion(program(blocks), wrong)).toThrow()
   })
 })

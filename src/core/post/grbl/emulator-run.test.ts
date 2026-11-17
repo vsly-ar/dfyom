@@ -113,7 +113,12 @@ describe('test part on the virtual machine', () => {
     expect(markers).toHaveLength(6)
     // the first tool's marker is informational (no M0 follows it)
     for (const k of markers.slice(1))
-      expect(texts.slice(k + 1, k + 3)).toEqual(['G0 Z10', expect.stringMatching(/^M3 S\d+$/)])
+      expect(texts.slice(k + 1, k + 5)).toEqual([
+        'G90 G94 G17 G21',
+        'G54',
+        'G0 Z10',
+        expect.stringMatching(/^M3 S\d+$/),
+      ])
   })
 
   it('pauses at M0 for other senders and resumes with ~', () => {
@@ -152,7 +157,8 @@ describe('test part on the virtual machine', () => {
   })
 
   it('a program that leaves the soft limits alarms, and the export check predicts it', () => {
-    const small = testMachine({ travel: { x: len('800'), y: len('800'), z: len('60') } })
+    // the facing (first tool, Z zero as given) reaches Z -0.5 → MPos -50.5, below -50
+    const small = testMachine({ travel: { x: len('800'), y: len('800'), z: len('50') } })
     const es = exported(small)
     expect(es.warnings.some((w) => w.rule === 'softLimit' && w.params['axis'] === 'z')).toBe(true)
     const r = run(small, es.lines, 'dfyom')

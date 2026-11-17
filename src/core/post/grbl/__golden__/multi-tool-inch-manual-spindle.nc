@@ -25,8 +25,11 @@ G0 Z0.0787
 Z0.3937
 (op-drill1)
 M5
+(Stop the spindle)
 (DFYOM TOOL CHANGE 2: 6 mm drill)
 M0
+G90 G94 G17 G20
+G54
 G0 Z0.3937
 M3 S3000
 (Set spindle to 3000 rpm)
@@ -56,8 +59,11 @@ G0 Z0.0787
 Z0.3937
 (op-profile1)
 M5
+(Stop the spindle)
 (DFYOM TOOL CHANGE 3: 6 mm flat end mill)
 M0
+G90 G94 G17 G20
+G54
 G0 Z0.3937
 M3 S18000
 (Set spindle to 18000 rpm)
@@ -161,4 +167,6 @@ G1 X1.5823
 G0 Z0.0787
 Z0.3937
 M5
+(Stop the spindle)
+M0
 M30
