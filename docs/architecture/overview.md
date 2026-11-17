@@ -26,7 +26,7 @@ Build: `electron-vite` (`electron.vite.config.ts`) – outputs to `out/{main,pre
 
 ## Threading
 
-Heavy operations (toolpath generation, simulation, optimization) run off the UI thread ([ADR 0008](../decisions/0008-threading-split-by-job.md): Web Workers / `worker_threads` for computation, a utility process for machine I/O) and must provide:
+Heavy operations (toolpath generation, simulation, optimization) run off the UI thread ([ADR 0016](../decisions/0016-compute-workers-in-dispatcher-process.md): `worker_threads` in the dispatcher's process for computation, a utility process for machine I/O; design in [workers.md](workers.md)) and must provide:
 
 - progress observability and UI indication,
 - pause / abort,

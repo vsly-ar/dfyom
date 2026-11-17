@@ -1,6 +1,6 @@
 # 0008 – Heavy work in workers, machine I/O in a utility process
 
-Status: accepted · Date: 2026-11-16
+Status: superseded by [ADR 0016](0016-compute-workers-in-dispatcher-process.md) · Date: 2026-11-16
 
 ## Context
 
