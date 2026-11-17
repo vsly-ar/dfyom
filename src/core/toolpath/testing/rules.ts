@@ -12,6 +12,10 @@ export interface PathRules {
   /** Rapids move horizontally only at or above this Z. */
   readonly retractZ: number
   readonly clearanceZ: number
+  /** The operation's final depth: the deepest feed move must reach exactly this Z. */
+  readonly targetZ: number
+  /** Also require every descent's vertical speed to be ≤ the plunge rate. */
+  readonly verticalAtMostPlunge?: boolean
   /** Does the tool with its tip at `p` stay within the removal region (with tolerance)? */
   readonly contains: (p: Vec3) => boolean
 }
@@ -33,6 +37,7 @@ export function violations(tp: Toolpath, rules: PathRules, step = 0.2): string[]
     out.push('first move is not a rapid at clearance')
   if (last?.kind !== 'rapid' || Math.abs(last.to[2] - rules.clearanceZ) > 1e-9)
     out.push('last move is not a rapid to clearance')
+  let deepest = Infinity
   const tan = rules.rampAngle === undefined ? 0 : Math.tan((rules.rampAngle * Math.PI) / 180)
   const check = (m: FlatMove, from: Vec3, inDrill: boolean) => {
     const where = `${m.kind} to ${fmt(m.to)}`
@@ -53,6 +58,12 @@ export function violations(tp: Toolpath, rules: PathRules, step = 0.2): string[]
       if (sweep > Math.PI + 1e-9) out.push(`arc over 180°: ${where}`)
       horizontal = r0 * sweep
     } else horizontal = Math.hypot(m.to[0] - from[0], m.to[1] - from[1])
+    deepest = Math.min(deepest, m.to[2])
+    if (dz < -1e-9 && rules.verticalAtMostPlunge === true) {
+      const length = Math.hypot(horizontal, dz)
+      if ((m.feed * -dz) / length > rules.plungeRate + 1e-9)
+        out.push(`descends faster than the plunge rate: ${where}`)
+    }
     if (dz < -1e-9 && m.feed > rules.plungeRate + 1e-9) {
       if (horizontal < 1e-6) out.push(`plunge faster than plunge rate: ${where}`)
       else if (-dz / horizontal > tan + 1e-9) out.push(`ramp too steep: ${where}`)
@@ -76,6 +87,8 @@ export function violations(tp: Toolpath, rules: PathRules, step = 0.2): string[]
     }
     pos = m.kind === 'drill' ? [m.at[0], m.at[1], m.retract] : m.to
   }
+  if (Math.abs(deepest - rules.targetZ) > 1e-9)
+    out.push(`deepest cut at ${deepest}, not at the target depth ${rules.targetZ}`)
   return out
 }
 
@@ -104,4 +117,14 @@ export function stepsWithin(levelsZ: readonly number[], top: number, stepdown: n
     prev = z
   }
   return true
+}
+
+/** Distinct end Z of all feed moves (incl. plunges), highest first. */
+export function feedDepths(tp: Toolpath): number[] {
+  const zs: number[] = []
+  for (const p of tp.passes)
+    for (const m of p.moves)
+      if ((m.kind === 'line' || m.kind === 'arc') && !zs.some((z) => Math.abs(z - m.to[2]) < 1e-6))
+        zs.push(m.to[2])
+  return zs.sort((a, b) => b - a)
 }

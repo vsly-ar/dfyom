@@ -75,6 +75,23 @@ export function generatePocket(input: PocketInput): AppResult<Toolpath> {
     issues.rule('check', 'tool', 'noFlat', 'the tool has no flat bottom to clear a floor', {
       cornerRadius: tool.cornerRadius,
     })
+  if (
+    op.floorRadius > EPSILON &&
+    !(
+      tool.cornerRadius > EPSILON &&
+      Math.abs(tool.cornerRadius - op.floorRadius) <= TOOL_FIT_TOLERANCE
+    )
+  )
+    issues.rule(
+      'check',
+      'tool.cornerRadius',
+      'floorRadiusTool',
+      'the floor fillet needs a bull-nose end mill with RE = floorRadius',
+      {
+        cornerRadius: tool.cornerRadius,
+        floorRadius: op.floorRadius,
+      },
+    )
   const ok = issues.result('generatePocket', input.planOperationId)
   if (ok.isErr()) return Err(ok.unwrapErr())
 
@@ -89,13 +106,14 @@ export function generatePocket(input: PocketInput): AppResult<Toolpath> {
   const tan = Math.tan((st.rampAngle * Math.PI) / 180)
   const feed = cutting.feedRate
 
-  // entry: helix → ramp → plunge, whichever fits first (from the requested one on)
-  const helixRadius = st.helixDiameter / 2
-  const helixFits = st.helixDiameter + tool.diameter <= 2 * m + EPSILON
+  // Entry: helix → ramp → plunge, whichever fits first (from the requested one on), keeping the
+  // finishing allowance. The helix is at most D wide, so its bore leaves no post at the center.
+  const helixRadius = Math.min(st.helixDiameter, tool.diameter) / 2
+  const helixFits = 2 * helixRadius + 2 * outermost <= 2 * m + EPSILON
   const longX = contour.kind === 'circle' || contour.length >= contour.width
   const longSize =
     contour.kind === 'circle' ? 2 * contour.radius : Math.max(contour.length, contour.width)
-  const rampLength = longSize - tool.diameter
+  const rampLength = longSize - 2 * outermost
   const rampFits = rampLength >= tool.diameter - EPSILON
   const order = ['helix', 'ramp', 'plunge'] as const
   const entry = order

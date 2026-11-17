@@ -149,7 +149,14 @@ export type DrillingStrategy = { readonly breakthrough: number } & (
   | { readonly cycle: 'simple' }
   | { readonly cycle: 'peck'; readonly peckDepth: number }
   | { readonly cycle: 'chipBreak'; readonly peckDepth: number; readonly chipBreakBack: number }
-  | { readonly cycle: 'helix'; readonly helixPitch: number; readonly direction: CutDirection }
+  | {
+      readonly cycle: 'helix'
+      /** Max descent per turn (mm). */
+      readonly helixPitch: number
+      /** Max helix slope (degrees; default as the pocket's `rampAngle`, 3°). */
+      readonly rampAngle: number
+      readonly direction: CutDirection
+    }
 )
 
 export interface ProfileStrategy {

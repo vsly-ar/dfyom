@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
+import { offsetContour } from '../geometry/contour'
 import { CHORD_TOLERANCE, type Contour } from '../geometry/model'
 import type { PocketOperation, ToolpathTool } from './model'
 import { generatePocket, inradius, ringOffsets } from './pocket'
 import { bullNose, endMill, pocketInput } from './testing/fixtures'
-import { Heightmap, insideDistance, render, steps } from './testing/oracles'
+import { Heightmap, insideDistance, render, samples, steps, toolSurface } from './testing/oracles'
 import { cuttingLevels, stepsWithin, violations } from './testing/rules'
 
 const stock = { length: 60, width: 40, thickness: 20 }
@@ -53,11 +54,19 @@ function checkPocket(op: PocketOperation, tool: ToolpathTool, over = {}) {
       rampAngle: input.strategy.rampAngle,
       retractZ: op.onZ + 2,
       clearanceZ: 10,
+      targetZ: floor,
       contains: (p) =>
         p[2] > op.onZ + 1e-9 ||
         (p[2] >= floor - 1e-9 && insideDistance(op.shape.contour, c, [p[0], p[1]]) >= R - 1e-9),
     }),
   ).toEqual([])
+  // roughing leaves the finishing allowance on the walls (clamped to the inradius)
+  const keep = Math.min(R + input.strategy.finishAllowance, inradius(op.shape.contour)) - 1e-9
+  const roughIntoAllowance = steps(tp)
+    .filter((s) => tp.passes[s.pass]!.kind === 'rough' && s.move.kind !== 'rapid')
+    .flatMap((s) => samples(s, 0.1))
+    .filter((p) => p[2] < op.onZ - 1e-9 && insideDistance(op.shape.contour, c, [p[0], p[1]]) < keep)
+  expect(roughIntoAllowance.slice(0, 3)).toEqual([])
   const rough = cuttingLevels(tp, 'rough')
   expect(rough.at(-1)).toBeCloseTo(floor, 12)
   expect(stepsWithin(rough, op.onZ, input.cutting.stepdown)).toBe(true)
@@ -67,6 +76,9 @@ function checkPocket(op: PocketOperation, tool: ToolpathTool, over = {}) {
   map.sweep(tool, tp, 0.1)
   const problems: string[] = []
   let interior = 0
+  // a corner radius below the tool radius leaves the tool radius there: compare with what the
+  // tool reaches from the contour inset by R
+  const inset = offsetContour(op.shape.contour, Math.min(R, inradius(op.shape.contour))).unwrap()
   for (let i = 0; i < map.nx; i++)
     for (let j = 0; j < map.ny; j++) {
       const p = map.center(i, j)
@@ -74,12 +86,16 @@ function checkPocket(op: PocketOperation, tool: ToolpathTool, over = {}) {
       const h = Math.min(map.z[j * map.nx + i]!, op.onZ)
       const e = expectedHeight(op, d)
       if (h < e - 1e-6) problems.push(`gouge at ${p}: ${h} < ${e}`)
-      if (d > op.floorRadius + 0.05) {
+      // the tool swept over the inset at the floor: what a round (bull-nose) tool can reach
+      const reach = floor + toolSurface(tool, Math.max(0, -insideDistance(inset, c, p)))
+      if (!Number.isFinite(reach)) continue
+      const target = Math.max(e, reach)
+      if (d > op.floorRadius + 0.05 && target === floor) {
         interior++
         if (Math.abs(h - floor) > 1e-6) problems.push(`left at ${p}: ${h}`)
       }
       // the wall is cut to size; in the fillet zone the bull nose matches the fillet
-      if (d >= 0.05 && h > e + 0.02) problems.push(`wall at ${p} (d ${d}): ${h} > ${e}`)
+      if (d >= 0.05 && h > target + 0.02) problems.push(`wall at ${p} (d ${d}): ${h} > ${target}`)
     }
   expect(problems.slice(0, 5)).toEqual([])
   expect(interior).toBeGreaterThan(0)
@@ -127,7 +143,12 @@ describe('generatePocket', () => {
       const contour: Contour =
         rnd() < 0.3
           ? { kind: 'circle', radius: D / 2 + 0.5 + rnd() * 12 }
-          : rect(D + 1 + rnd() * 30, D + 1 + rnd() * 20, Math.max(D / 2, f) + rnd() * 3)
+          : rect(
+              D + 1 + rnd() * 30,
+              D + 1 + rnd() * 20,
+              // some corners below the tool radius (the tool leaves its radius there)
+              rnd() < 0.3 ? f + rnd() * (D / 2) : Math.max(D / 2, f) + rnd() * 3,
+            )
       const fixed: Contour =
         contour.kind === 'rectangle'
           ? {
@@ -140,7 +161,7 @@ describe('generatePocket', () => {
           : contour
       const tool = f > 0 ? bullNose(D, f) : endMill(D)
       const entry = (['helix', 'ramp', 'plunge'] as const)[n % 3]!
-      const base = pocketInput(stock, pocket(fixed, 1 + rnd() * 6, f), tool)
+      const base = pocketInput(stock, pocket(fixed, f + 1 + rnd() * 6, f), tool)
       checkPocket(pocket(fixed, base.operation.depth, f), tool, {
         strategy: {
           ...base.strategy,
@@ -166,6 +187,65 @@ describe('generatePocket', () => {
     expect(entryOf(rect(20, 12, 3))).toBe('helix') // 4.8 + 6 ≤ 12
     expect(entryOf(rect(20, 10, 3))).toBe('ramp') // 20 − 6 ≥ 6
     expect(entryOf(rect(10, 10, 3))).toBe('plunge')
+  })
+
+  it('golden: rectangle, ramp entry', async () => {
+    const op = pocket(rect(30, 10, 3), 2)
+    const base = pocketInput(stock, op, endMill(6))
+    const input = { ...base, strategy: { ...base.strategy, entry: 'ramp' as const } }
+    await expect(render(generatePocket(input).unwrap())).toMatchFileSnapshot(
+      '__golden__/pocket-rect-ramp.txt',
+    )
+  })
+
+  it('ramp and helix entries respect the finishing allowance', () => {
+    const op = pocket(rect(30, 12, 3), 3)
+    for (const entry of ['ramp', 'helix'] as const) {
+      const base = pocketInput(stock, op, endMill(6))
+      checkPocket(op, endMill(6), { strategy: { ...base.strategy, entry, finishAllowance: 0.5 } })
+    }
+  })
+
+  it('clamps the helix to the tool diameter: no center post, no full-width link', () => {
+    const op = pocket(rect(40, 30, 4), 2)
+    const tool = endMill(6)
+    const base = pocketInput(stock, op, tool)
+    const tp = generatePocket({
+      ...base,
+      strategy: { ...base.strategy, helixDiameter: 12, finishAllowance: 0 },
+    }).unwrap()
+    const all = steps(tp).filter((s) => s.pass === 0)
+    const helixEnd = all.findLastIndex((s) => s.move.kind === 'arc' && s.move.to[2] < s.from[2])
+    const entry = all.slice(0, helixEnd + 3) // helix, the flat circle (two halves)
+    const link = all[helixEnd + 3]!
+    expect(link.move.kind).toBe('line')
+    const map = new Heightmap(stock.length, stock.width, 0.1)
+    for (const s of entry)
+      if (s.move.kind !== 'rapid') for (const p of samples(s, 0.05)) map.stamp(tool, p)
+    const z = link.move.to[2]
+    const at = (p: readonly number[]) =>
+      map.z[Math.floor(p[1]! / 0.1) * map.nx + Math.floor(p[0]! / 0.1)]!
+    // the entry clears the center
+    expect(at([30, 20])).toBeCloseTo(z, 9)
+    // along the link at least one side of the tool is already cut
+    const [dx, dy] = [link.move.to[0] - link.from[0], link.move.to[1] - link.from[1]]
+    const len = Math.hypot(dx, dy)
+    for (const p of samples(link, 0.1)) {
+      const side = (k: number): number[] => [
+        p[0] + (k * 2.9 * -dy) / len,
+        p[1] + (k * 2.9 * dx) / len,
+      ]
+      expect(Math.min(at(side(1)), at(side(-1)))).toBeLessThanOrEqual(z + 1e-9)
+    }
+  })
+
+  it('rejects a tool that cannot make the floor fillet', () => {
+    const op = pocket(rect(40, 25, 4), 8, 2, -0.5)
+    const rule = (tool: ToolpathTool) =>
+      generatePocket(pocketInput(stock, op, tool)).unwrapErr().issues[0]!.rule
+    expect(rule(endMill(6))).toBe('floorRadiusTool')
+    expect(rule(bullNose(6, 1.5))).toBe('floorRadiusTool')
+    expect(generatePocket(pocketInput(stock, op, bullNose(6, 2.005))).isOk()).toBe(true)
   })
 
   it('rejects a tool wider than the pocket and invalid strategy values', () => {

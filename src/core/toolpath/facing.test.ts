@@ -37,6 +37,7 @@ describe('generateFacing', () => {
             plungeRate: input.cutting.plungeRate,
             retractZ: 2,
             clearanceZ: 10,
+            targetZ: -1.3,
             contains: (p) => p[2] >= -1.3 - 1e-9,
           }),
         ).toEqual([])

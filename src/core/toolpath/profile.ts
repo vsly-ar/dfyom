@@ -88,7 +88,9 @@ export function generateProfile(input: ProfileInput): AppResult<Toolpath> {
     bands.length === 0 ? pieces : liftOverTabs(pieces, hits, tabTop, Math.min(R / 4, 0.5))
   const liftZ = (p: Vec2, z: number) => (z < tabTop && bands.length > 0 && hits(p) ? tabTop : z)
 
-  // slot passes as distances from the shape into the slot: part side first
+  // Slot passes as distances from the shape into the slot, cut from the offcut/slug side to the
+  // part side, so breakthrough frees the offcut with no pass beside it afterwards (a covering
+  // inside slot: from the center outwards, as a pocket).
   const far = Math.max(R, sw - R)
   const first = Math.min(R + st.finishAllowance, covers ? m : far)
   const spacing = Math.min(
@@ -96,8 +98,8 @@ export function generateProfile(input: ProfileInput): AppResult<Toolpath> {
     !outside && shape.kind === 'rectangle' ? Math.SQRT2 * R : 2 * R,
   )
   const distances = covers
-    ? ringOffsets(first, m, spacing).reverse()
-    : rowPositions(first, Math.max(first, far), spacing)
+    ? ringOffsets(first, m, spacing)
+    : rowPositions(first, Math.max(first, far), spacing).reverse()
   /** The ring at `d`; an inside slot's far ring goes round the slug (its offset by R). */
   const ringContour = (d: number): Contour | undefined => {
     if (outside) return offsetContour(shape, -d).into()
@@ -146,7 +148,10 @@ export function generateProfile(input: ProfileInput): AppResult<Toolpath> {
     const p0 = ring0.length > 0 ? segPoint(ring0[0]!, 0) : c
     if (b.position === undefined) b.rapid(at(p0, heights.clearanceHeight))
     b.rapid(at(p0, retract))
-    if (st.entry === 'ramp' && previous - z > EPSILON) {
+    if (ring0.length === 0) {
+      // the ring collapsed to a point (tool ≈ opening): plunge straight down, as boring
+      b.line(at(p0, liftZ(p0, z)), cutting.plungeRate)
+    } else if (st.entry === 'ramp' && previous - z > EPSILON) {
       b.line(at(p0, liftZ(p0, previous)), cutting.plungeRate)
       const { walked, lap } = walkRing(ring0, (previous - z) / tan)
       emit(lift(slope(walked, previous, z)))
@@ -165,11 +170,11 @@ export function generateProfile(input: ProfileInput): AppResult<Toolpath> {
     previous = z
   }
 
-  // finishing: the part-side ring at full depth, lead-in/out from the first rough ring
-  if (distances[0]! - R > EPSILON) {
+  // finishing: the part-side ring at full depth, lead-in/out from the part-side rough ring
+  if (first - R > EPSILON) {
     b.pass('finish')
     const wall = ring(R, start)
-    const leadRing = ring(distances[0]!, start)
+    const leadRing = ring(first, start)
     const lead = leadRing.length > 0 ? segPoint(leadRing[0]!, 0) : c
     b.rapid(at(lead, retract))
     b.line(at(lead, liftZ(lead, bottom)), cutting.plungeRate)

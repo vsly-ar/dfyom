@@ -4,10 +4,16 @@
  */
 import { EPSILON, type Vec2, type Vec3 } from '../geometry/model'
 import { Err, Ok, type AppResult } from '../../shared/result'
-import { commonIssues, toolpath } from './common'
+import { commonIssues, levels, toolpath } from './common'
 import type { DrillingInput, Toolpath } from './model'
 import { flat, MoveBuilder, slope, type Seg } from './path'
 import { TOOL_FIT_TOLERANCE } from './pocket'
+
+/** Drill point angle (SIG) and the hole's `pointAngle` count as equal within this (degrees). */
+export const POINT_ANGLE_TOLERANCE = 0.5
+
+/** Smallest helical-boring radius (mm); below it the end mill plunges straight down. */
+export const HELIX_MIN_RADIUS = 0.1
 
 /** Length of a drill's conical tip: radius / tan(SIG / 2). */
 export function tipLength(diameter: number, pointAngle: number): number {
@@ -23,7 +29,13 @@ export function generateDrilling(input: DrillingInput): AppResult<Toolpath> {
   if (st.cycle === 'peck' || st.cycle === 'chipBreak')
     issues.positive('strategy.peckDepth', st.peckDepth)
   if (st.cycle === 'chipBreak') issues.positive('strategy.chipBreakBack', st.chipBreakBack)
-  if (st.cycle === 'helix') issues.positive('strategy.helixPitch', st.helixPitch)
+  if (st.cycle === 'helix') {
+    issues.positive('strategy.helixPitch', st.helixPitch)
+    if (!(st.rampAngle >= 0.5 && st.rampAngle <= 30))
+      issues.rule('invariant', 'strategy.rampAngle', 'range', 'rampAngle must be 0.5°–30°', {
+        rampAngle: st.rampAngle,
+      })
+  }
 
   const isDrill = tool.type === 'drill'
   if (st.cycle === 'helix') {
@@ -87,6 +99,22 @@ export function generateDrilling(input: DrillingInput): AppResult<Toolpath> {
         },
       )
   }
+  if (
+    isDrill &&
+    op.bottom.kind === 'drillPoint' &&
+    tool.pointAngle !== undefined &&
+    Math.abs(tool.pointAngle - op.bottom.pointAngle) > POINT_ANGLE_TOLERANCE
+  )
+    issues.rule(
+      'check',
+      'tool.pointAngle',
+      'pointAngle',
+      'the drill point angle differs from the hole bottom',
+      {
+        pointAngle: tool.pointAngle,
+        bottom: op.bottom.pointAngle,
+      },
+    )
   const ok = issues.result('generateDrilling', input.planOperationId)
   if (ok.isErr()) return Err(ok.unwrapErr())
 
@@ -117,7 +145,10 @@ export function generateDrilling(input: DrillingInput): AppResult<Toolpath> {
     return Ok(toolpath(input, b.build()))
   }
 
-  // helical boring: helix of radius ρ down to `full`, a full circle there, back to the center
+  // Helical boring: helix of radius ρ down to `full`, a full circle there, back to the center.
+  // Each turn descends at most helixPitch and at most at rampAngle; the feed is capped so the
+  // descent is never faster than the plunge rate. Below HELIX_MIN_RADIUS the helix would need
+  // hundreds of turns: plunge straight down instead, in steps of helixPitch.
   const radius = (op.diameter - tool.diameter) / 2
   const start: Vec2 = [c[0], c[1] - radius]
   const circle: Seg = {
@@ -127,12 +158,20 @@ export function generateDrilling(input: DrillingInput): AppResult<Toolpath> {
     start: -Math.PI / 2,
     sweep: st.direction === 'climb' ? 2 * Math.PI : -2 * Math.PI,
   }
-  const turns = Math.max(1, Math.ceil((op.onZ - full) / st.helixPitch - 1e-9))
+  const turn = 2 * Math.PI * radius
   b.pass('rough')
   b.rapid(at(start, heights.clearanceHeight))
   b.rapid(at(start, retract))
   b.line(at(start, op.onZ), cutting.plungeRate)
-  for (const s of slope(Array<Seg>(turns).fill(circle), op.onZ, full)) b.seg(s, cutting.feedRate)
+  if (radius < HELIX_MIN_RADIUS) {
+    for (const z of levels(op.onZ, full, st.helixPitch)) b.line(at(start, z), cutting.plungeRate)
+  } else {
+    const pitch = Math.min(st.helixPitch, turn * Math.tan((st.rampAngle * Math.PI) / 180))
+    const turns = Math.max(1, Math.ceil((op.onZ - full) / pitch - 1e-9))
+    const drop = (op.onZ - full) / turns
+    const feed = Math.min(cutting.feedRate, (cutting.plungeRate * Math.hypot(turn, drop)) / drop)
+    for (const s of slope(Array<Seg>(turns).fill(circle), op.onZ, full)) b.seg(s, feed)
+  }
   for (const s of flat([circle], full)) b.seg(s, cutting.feedRate)
   b.line(at(c, full), cutting.feedRate)
   b.rapid(at(c, heights.clearanceHeight))

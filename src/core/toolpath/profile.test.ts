@@ -6,7 +6,7 @@ import type { ProfileOperation, ToolpathTool } from './model'
 import { generateProfile } from './profile'
 import { endMill, profileInput } from './testing/fixtures'
 import { Heightmap, insideDistance, render, samples, steps } from './testing/oracles'
-import { cuttingLevels, stepsWithin, violations } from './testing/rules'
+import { cuttingLevels, feedDepths, stepsWithin, violations } from './testing/rules'
 
 const stock = { length: 60, width: 40, thickness: 6 }
 const rect = (length: number, width: number, cornerRadius: number): Contour => ({
@@ -80,6 +80,7 @@ function checkProfile(op: ProfileOperation, tool: ToolpathTool, over = {}) {
       rampAngle: input.strategy.rampAngle,
       retractZ: 2,
       clearanceZ: 10,
+      targetZ: bottom,
       contains,
     }),
   ).toEqual([])
@@ -87,13 +88,13 @@ function checkProfile(op: ProfileOperation, tool: ToolpathTool, over = {}) {
   expect(rough.at(-1)).toBeCloseTo(bottom, 12)
   expect(stepsWithin(rough, 0, input.cutting.stepdown)).toBe(true)
 
-  // tabs: no cut below the tab top touches a tab (probes inside the tool, chord tolerance off)
+  // tabs: no cut below the tab top touches a tab (probes up to the tool radius − 1 µm)
   const tabTop = -T + op.tabs.thickness
   const probes: Vec2[] = [[0, 0]]
-  for (const r of [0.5, 0.98])
-    for (let k = 0; k < 16; k++) {
-      const a = (k * Math.PI) / 8
-      probes.push([(R - 0.011) * r * Math.cos(a), (R - 0.011) * r * Math.sin(a)])
+  for (const r of [0.5, 1])
+    for (let k = 0; k < 32; k++) {
+      const a = (k * Math.PI) / 16
+      probes.push([(R - 0.001) * r * Math.cos(a), (R - 0.001) * r * Math.sin(a)])
     }
   const bad: string[] = []
   for (const s of steps(tp)) {
@@ -261,6 +262,85 @@ describe('generateProfile', () => {
     expect(turn('outside', 'climb')).toBe('cw')
     expect(turn('inside', 'climb')).toBe('ccw')
     expect(turn('outside', 'conventional')).toBe('ccw')
+  })
+
+  it('golden: outside rectangle, 4 tabs, two slot passes', async () => {
+    const op = profile(rect(30, 20, 3), 'outside', 8, { count: 4, width: 4, thickness: 1.5 })
+    const input = profileInput({ length: 60, width: 40, thickness: 3 }, op, endMill(6), {
+      cutting: { spindleSpeed: 18000, feedRate: 1200, plungeRate: 300, stepdown: 1.5, stepover: 2 },
+    })
+    await expect(render(generateProfile(input).unwrap())).toMatchFileSnapshot(
+      '__golden__/profile-outside-4-tabs.txt',
+    )
+  })
+
+  /** Radii (from the shape center) of the arcs at the last level, in cutting order. */
+  const lastLevelRadii = (op: ProfileOperation, tool: ToolpathTool) => {
+    const tp = generateProfile(profileInput(stock, op, tool)).unwrap()
+    const rough = tp.passes.filter((p) => p.kind === 'rough').at(-1)!
+    const radii: number[] = []
+    for (const m of rough.moves)
+      if (m.kind === 'arc' && m.to[2] === -6.5) {
+        const r = Math.hypot(m.to[0] - 30, m.to[1] - 20)
+        if (radii.length === 0 || Math.abs(radii.at(-1)! - r) > 1e-6) radii.push(r)
+      }
+    return radii
+  }
+
+  it('an inside slot that covers the opening is cleared from the center outwards', () => {
+    const op = profile({ kind: 'circle', radius: 10 }, 'inside', 10, {
+      count: 0,
+      width: 1,
+      thickness: 1,
+    })
+    const radii = lastLevelRadii(op, endMill(6))
+    expect(radii.length).toBeGreaterThan(2)
+    for (let i = 1; i < radii.length; i++) expect(radii[i]!).toBeGreaterThan(radii[i - 1]!)
+    checkProfile(op, endMill(6))
+  })
+
+  it('multi-pass slots cut the offcut side first and the part side last', () => {
+    const outside = lastLevelRadii(
+      profile({ kind: 'circle', radius: 8 }, 'outside', 10),
+      endMill(4),
+    )
+    expect(outside.length).toBeGreaterThan(1)
+    for (let i = 1; i < outside.length; i++) expect(outside[i]!).toBeLessThan(outside[i - 1]!)
+    const inside = lastLevelRadii(profile({ kind: 'circle', radius: 15 }, 'inside', 10), endMill(4))
+    expect(inside.length).toBeGreaterThan(1)
+    for (let i = 1; i < inside.length; i++) expect(inside[i]!).toBeGreaterThan(inside[i - 1]!)
+  })
+
+  it('a hole the size of the tool is plunged level by level to full depth', () => {
+    for (const [radius, finishAllowance] of [
+      [3, 0.2],
+      [3, 0],
+      [2.995, 0],
+    ] as const)
+      for (const entry of ['ramp', 'plunge'] as const) {
+        const op = profile({ kind: 'circle', radius }, 'inside', 6, {
+          count: 0,
+          width: 1,
+          thickness: 1,
+        })
+        const base = profileInput(stock, op, endMill(6))
+        const tp = generateProfile({
+          ...base,
+          strategy: { ...base.strategy, entry, finishAllowance },
+        }).unwrap()
+        expect(
+          violations(tp, {
+            feedRate: 1200,
+            plungeRate: 300,
+            retractZ: 2,
+            clearanceZ: 10,
+            targetZ: -6.5,
+            contains: (p) =>
+              p[2] > 1e-9 || (p[2] >= -6.5 - 1e-9 && Math.hypot(p[0] - 30, p[1] - 20) <= 1e-9),
+          }),
+        ).toEqual([])
+        expect(stepsWithin(feedDepths(tp), 0, base.cutting.stepdown)).toBe(true)
+      }
   })
 
   it('rejects a tool wider than the slot', () => {
