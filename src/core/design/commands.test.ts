@@ -43,6 +43,7 @@ describe('design commands: registry', () => {
       'design.part.list',
       'design.part.get',
       'design.operation.list',
+      'design.warning.list',
     ])
   })
 })
@@ -123,7 +124,7 @@ describe('operations: add with defaults, update, undo/redo', () => {
   it('facing: default depth 0.5 mm, id facing1, name "Facing 1"', async () => {
     const s = await designSetup()
     const r = await expectUndoRedo(s, 'design.facing.add', { partId: s.partId })
-    expect(r).toEqual({ operationId: 'facing1' })
+    expect(r).toEqual({ operationId: 'facing1', warnings: [] })
     expect(s.op('facing1')).toMatchObject({ kind: 'facing', name: 'Facing 1' })
     expect(s.op('facing1')).toMatchObject({ depth: { source: '0.5 mm', defaultUnit: 'mm' } })
     await expectUndoRedo(s, 'design.facing.update', {
@@ -190,7 +191,7 @@ describe('operations: add with defaults, update, undo/redo', () => {
       center: ['10', '10'],
       diameter: '6',
     })
-    expect(r).toEqual({ operationId: 'drill1' })
+    expect(r).toEqual({ operationId: 'drill1', warnings: [] })
     expect(s.op('drill1')).toEqual(expect.objectContaining({ bottom: 'through', on: 'stock.top' }))
     expect(s.op('drill1')).not.toHaveProperty('depth')
     const id = { partId: s.partId, operationId: 'drill1' }

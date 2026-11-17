@@ -1,6 +1,6 @@
 /**
- * Design part → geometry input: quantities to canonical float64 mm/degrees, `on` to `onZ`.
- * Pure; the geometry types are owned by src/core/geometry/model.ts.
+ * Design part → geometry input: quantities to canonical float64 mm/degrees, `on` to `onZ`,
+ * `on` and expression references to `references` (for `dfm.surfaceMissing`). Pure; the geometry types are owned by src/core/geometry/model.ts.
  * Doc: docs/modes/design.md#implementation-task-25, docs/architecture/geometry.md#evaluation-rules
  */
 import { Err, fail, Ok, type AppResult } from '../../shared/result'
@@ -9,10 +9,11 @@ import type {
   OperationGeometry,
   PartGeometryInput,
   Shape as ShapeGeometry,
+  SurfaceReference,
 } from '../geometry/model'
 import type { Stock } from '../library/stock'
 import type { Operation, Part, Point, Shape } from './operation'
-import { SurfaceTable } from './surfaces'
+import { operationReferences, SurfaceTable } from './surfaces'
 
 const vec2 = (p: Point) => [p[0].canonical, p[1].canonical] as const
 
@@ -36,10 +37,21 @@ function shapeGeometry(s: Shape): ShapeGeometry {
 export function toGeometryInput(part: Part, stock: Stock): AppResult<PartGeometryInput> {
   const table = SurfaceTable.build(part.operations, stock)
   const operations: OperationGeometry[] = []
+  const references: SurfaceReference[] = []
   for (const [i, op] of part.operations.entries()) {
     const g = operationGeometry(op, i, table)
     if (g.isErr()) return Err(g.unwrapErr())
     operations.push(g.unwrap())
+    const refs = operationReferences(op)
+    if (refs.isErr()) return Err(refs.unwrapErr().withContext('toGeometryInput'))
+    // one entry per (parameter, surface): `z` and `z.max` of one surface are one reference
+    const seen = new Set<string>()
+    for (const r of refs.unwrap()) {
+      const key = `${r.param}\0${r.surface}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      references.push({ operation: op.id, parameter: r.param, surface: r.surface })
+    }
   }
   return Ok({
     stock: {
@@ -48,6 +60,7 @@ export function toGeometryInput(part: Part, stock: Stock): AppResult<PartGeometr
       thickness: stock.thickness.canonical,
     },
     operations,
+    references,
   })
 }
 
