@@ -120,9 +120,10 @@ export const ERROR_CODES = {
     userMessage: 'An operation would come before the operation whose surface it starts from.',
     retryable: false,
   },
+  // Plan mode (task 2.10): docs/modes/plan-v0.1.md#toolpath-generators-task-210
   'plan.check': {
     severity: 'warn',
-    userMessage: 'A tool, feed or machine check of the plan failed.',
+    userMessage: 'The tool or the cutting values do not fit this operation.',
     retryable: false,
   },
   'internal.unexpected': {
