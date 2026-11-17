@@ -1,6 +1,6 @@
 # GRBL post-processor and virtual machine
 
-Status: accepted · Decision: [ADR 0013](../decisions/0013-grbl-first-controller.md) · Processes: [ADR 0008](../decisions/0008-threading-split-by-job.md) · Machine model: [library.md](library.md#machine) · Terms: [glossary.md](../glossary.md) · Tasks: [v0.1 plan](../plans/v0.1.md) 1.10 (post: 2.11, virtual machine: 3.8, streaming: 3.9)
+Status: implemented (post 2.11, virtual machine 3.8; sender 3.9 pending) · Decision: [ADR 0013](../decisions/0013-grbl-first-controller.md) · Processes: [ADR 0008](../decisions/0008-threading-split-by-job.md) · Machine model: [library.md](library.md#machine) · Terms: [glossary.md](../glossary.md) · Tasks: [v0.1 plan](../plans/v0.1.md) 1.10 (post: 2.11, virtual machine: 3.8, streaming: 3.9)
 
 Primary sources (GRBL 1.1, gnea/grbl): [Interface](https://github.com/gnea/grbl/wiki/Grbl-v1.1-Interface) · [Commands](https://github.com/gnea/grbl/wiki/Grbl-v1.1-Commands) · [Configuration](https://github.com/gnea/grbl/wiki/Grbl-v1.1-Configuration) · [Jogging](https://github.com/gnea/grbl/wiki/Grbl-v1.1-Jogging) · [error codes](https://github.com/gnea/grbl/blob/master/doc/csv/error_codes_en_US.csv) · [alarm codes](https://github.com/gnea/grbl/blob/master/doc/csv/alarm_codes_en_US.csv) · [config.h](https://github.com/gnea/grbl/blob/master/grbl/config.h) (buffer sizes). Facts below come from these; DFYOM rules are marked as such.
 
@@ -8,10 +8,21 @@ Primary sources (GRBL 1.1, gnea/grbl): [Interface](https://github.com/gnea/grbl/
 
 ### Input boundary
 
-Two pure steps in `src/core`, both inside the export `effect` command (task 2.11):
+Two pure, synchronous steps in `src/core/post/`, composed by `exportGrbl` (the export `effect` command calls it, see [Implementation](#implementation-task-211)):
 
-1. **Export** (`toMachiningProgram`) takes plan mode's [export boundary](../modes/plan-v0.1.md#export-boundary-tasks-110-and-211): the ordered `Toolpath[]` of one setup ([toolpath data model](../modes/plan-v0.1.md#toolpath-data-model), float64 mm in the setup's WCS), the setup and the machine snapshot. It expands `drill` moves, converts arc centers to `I`/`J` offsets and inserts tool-change and spindle blocks.
-2. **Post** (`postGrbl(program: MachiningProgram, opts: PostOptions): AppResult<string>`) turns that program into gCode text. It never sees design, geometry or the plan.
+1. **Export** (`toMachiningProgram(input, machine): AppResult<MachiningProgram>`) takes plan mode's [export boundary](../modes/plan-v0.1.md#export-boundary-tasks-110-and-211): the ordered `Toolpath[]` of one setup ([toolpath data model](../modes/plan-v0.1.md#toolpath-data-model), float64 mm in the setup's WCS), each with its tool copy (`ProgramTool`: name, diameter) and a label, the setup (name, `clearanceHeight`) and the machine snapshot. It expands `drill` moves, converts arc centers to `I`/`J` offsets and inserts tool-change and spindle blocks.
+2. **Post** (`postGrbl(program: MachiningProgram, opts: PostOptions): AppResult<string>`; `postGrblLines` returns the lines) turns that program into gCode text. It never sees design, geometry or the plan.
+
+```ts
+// src/core/post/export.ts
+exportGrbl(input: ExportInput, opts: PostOptions): AppResult<GrblExport>
+ExportInput = { name, setup: { name, clearanceHeight }, operations: { toolpath, tool, label }[],
+                machine: Option<Machine>, workZero?: Vec3 }
+GrblExport  = { program, lines, text, stats, warnings }   // warnings: plan.machine findings
+PostOptions = { generator: string, spinUpSeconds?: number /* 3 */, firstToolLoaded?: boolean /* true */ }
+```
+
+`lines` are the gCode lines without line ends (what a sender streams, progress `total`), `text` the file (LF, final newline). `stats` = `{ cutLength, rapidLength, estimatedSeconds, dwellSeconds, toolChanges }`: lengths and time as the [toolpath stats](../modes/plan-v0.1.md#toolpath-generators-task-210) (no acceleration, rapids at the slowest axis) over the whole program incl. the moves between operations, plus the spin-up dwells; moves from an unknown position (program start, after a tool change's `M0`) are not counted. One file per setup, i.e. one per plan in v0.1.
 
 | `MachiningProgram` field  | Content                                                                                                                                                                |
 | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -20,26 +31,42 @@ Two pure steps in `src/core`, both inside the export `effect` command (task 2.11
 | `clearanceZ`              | Stock top in the WCS + `clearanceHeight`: rapids between operations, tool changes, start and end.                                                                      |
 | `blocks`                  | `toolChange` (tool snapshot: name, diameter), `spindle` (rpm or off), `rapid { to }`, `feed { to, feed }`, `arc { to, i, j, cw, feed }` (Z change = helix), `comment`. |
 
-**Drill expansion** (GRBL 1.1 has no `G81–G83`): `simple` = rapid to `retract`, feed to `bottom`, rapid to `retract`; `peck` = feed by `peck`, rapid up to `retract`, rapid back to 0.5 mm / 0.02″ above the last depth, repeat; `chipBreak` = after each peck rapid up by `back` only.
+**Drill expansion** (GRBL 1.1 has no `G81–G83`): `simple` = rapid to `retract`, feed to `bottom`, rapid to `retract`; `peck` = feed by `peck`, rapid up to `retract`, rapid back to 0.5 mm / 0.02″ above the last depth, repeat; `chipBreak` = after each peck rapid up by `back` only. Implemented once, as `expandDrill` in `src/core/toolpath/stats.ts`; the export passes 0.508 mm (0.02″) for inch programs.
+
+**Tools and spindle blocks:** a `toolChange` block whenever the toolpath's tool copy (`Toolpath.tool`) differs from the previous one, tools numbered 1, 2, … by first use (a tool used again keeps its number); a `spindle` block after every tool change and whenever the speed changes; a `comment` block with the operation's label before each operation.
 
 ### Output dialect
 
-| Item           | Emitted                                                                                                                  | Why                                                                      |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------ |
-| Motion         | `G0`, `G1`, `G2`/`G3` with `I`/`J` (never `R`)                                                                           | IJK is unambiguous for near-180° arcs; all in GRBL's supported list.     |
-| Modes          | `G17`, `G21`/`G20`, `G90`, `G94`, `G54`                                                                                  | Explicit state; never rely on controller defaults.                       |
-| Spindle        | `M3 S<rpm>`, `M5`; spin-up `G4 P<s>` after `M3` (`opts.spinUpSeconds`, default 3)                                        | GRBL does not wait for spindle speed. `M4` (CCW) not emitted.            |
-| Pause          | `M0` preceded by a comment with the message                                                                              | GRBL pauses in `Hold:0`; `~` resumes.                                    |
-| Tool change    | No `M6`, no `T` word: `M5`, `G0 Z<clearanceZ>`, marker comment `(DFYOM TOOL CHANGE n: name)`, `M0`, then `M3 S…` + dwell | `M6` is not in GRBL 1.1's supported list; GRBL has no tool table or ATC. |
-| Manual spindle | `spindle.control = 'manual'`: `M0` with "Set spindle to N rpm" before cutting; `S` still emitted                         | [library.md](library.md#machine).                                        |
-| Never emitted  | `G28`/`G30`, `G53`, `G92`, `G43.1`, coolant, `N` line numbers, `%`                                                       | Depend on stored or machine state the export cannot know; not needed.    |
+| Item           | Emitted                                                                                                                                      | Why                                                                      |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Motion         | `G0`, `G1`, `G2`/`G3` with `I`/`J` (never `R`)                                                                                               | IJK is unambiguous for near-180° arcs; all in GRBL's supported list.     |
+| Modes          | `G17`, `G21`/`G20`, `G90`, `G94`, `G54`                                                                                                      | Explicit state; never rely on controller defaults.                       |
+| Spindle        | `M3 S<rpm>`, `M5`; spin-up `G4 P<s>` after `M3` (`opts.spinUpSeconds`, default 3)                                                            | GRBL does not wait for spindle speed. `M4` (CCW) not emitted.            |
+| Pause          | `M0` preceded by a comment with the message                                                                                                  | GRBL pauses in `Hold:0`; `~` resumes.                                    |
+| Tool change    | No `M6`, no `T` word: `M5`, `G0 Z<clearanceZ>`, marker comment `(DFYOM TOOL CHANGE n: name)`, `M0`, `G0 Z<clearanceZ>`, then `M3 S…` + dwell | `M6` is not in GRBL 1.1's supported list; GRBL has no tool table or ATC. |
+| Manual spindle | `spindle.control = 'manual'`: `M3 S<rpm>`, `(Set spindle to N rpm)`, `M0` before cutting; no dwell                                           | [library.md](library.md#machine).                                        |
+| Never emitted  | `G28`/`G30`, `G53`, `G92`, `G43.1`, coolant, `N` line numbers, `%`                                                                           | Depend on stored or machine state the export cannot know; not needed.    |
 
-- **Modal suppression:** a word is emitted only when it changes (motion code, unchanged axis words, `F`). The first `G1`/`G2`/`G3` after any `F` change always carries `F` (GRBL has no default feed: `error:22`). An arc needs at least one axis word in the plane (GRBL `error:32` otherwise): when both `X` and `Y` are unchanged (full circles and helices), the post re-emits at least one of them.
-- **Header:** comment lines (program, setup, units, tools in order of use, generator string from `opts`), then `G90 G94 G17 G21|G20`, `G54`, `G0 Z<clearanceZ>`.
-- **First tool:** treated like a tool change without the `M0` when `opts.firstToolLoaded` (default true).
+- **Modal suppression:** a word is emitted only when it changes (motion code, unchanged axis words, `F`). "Unchanged" compares the written text, so a move whose every axis word is unchanged after rounding is dropped (its `F` stays pending for the next feed move). The first `G1`/`G2`/`G3` after any `F` change always carries `F` (GRBL has no default feed: `error:22`). An arc needs at least one axis word in the plane (GRBL `error:32` otherwise): a full circle in the program (end = start in X and Y) writes both `X` and `Y`. `I` and `J` are always written.
+- **Arcs as GRBL reads them:** `I`/`J` = center − the _written_ start, so GRBL's center is the intended one within rounding. Toolpath arcs sweep at most 180°, so an arc whose written chord is under 10 resolution steps (0.01 mm, 0.001″) is written as `G1`: GRBL would read near-equal ends as a full circle. If GRBL's end-on-circle check (`error:33`: 0.005 mm and 0.1 % of the radius) would fail after rounding (possible with 4 inch decimals at radii under ~5 mm), the post takes the neighbouring `I`/`J` (± one step) closest to the end; an arc that still fails, or whose sweep as GRBL computes it moves the end by more than 0.005 mm, fails the export with `model.invariant`.
+- **Header:** comment lines (`Program:`, `Setup:`, `Units:`, `Tool n: name, dia D mm|in` in order of use, `Generator:` from `opts`), then `G90 G94 G17 G21|G20`, `G54`, `G0 Z<clearanceZ>`.
+- **First tool:** treated like a tool change without the `M0` when `opts.firstToolLoaded` (default true): the marker comment (informational: no `M0` follows, so no sender stops), `M3 S…`, dwell. With `firstToolLoaded: false` it pauses like any tool change.
+- **After a tool change's `M0`** the user has jogged and re-zeroed Z, so the post forgets the position, motion code and `F`: it writes `G0 Z<clearanceZ>` (in the new WCS, before the spindle starts) and the next move carries `X`, `Y` and `F` again. The retracts before a tool change and in the footer are suppressed like any move when Z is already at clearance (toolpaths end there); the header's and the post-`M0` retract are always written.
+- **Validation:** non-finite values or magnitudes over 99 999 (in text units), a feed that rounds to 0, an `S` that rounds to 0, a feed move with the spindle off, an arc without a radius or from an unknown position, and `spinUpSeconds` outside 0–3600 fail with `model.invariant` (issues name the block).
 - **Tool change in DFYOM:** one file per setup. GRBL accepts no jog or zeroing while paused by `M0` (it reads no lines in Hold:0), so DFYOM's sender stops streaming before the marker comment, waits for Idle, guides the user (jog, change tool, zero Z with `G10 L20 P1 Z0`), sends the marker, skips the `M0` and continues. Other senders pause at `M0`.
 - **Marker rule for the sender (task 3.9):** a tool change is a whole line matching exactly `(DFYOM TOOL CHANGE n: name)` (`n` digits, `name` without parentheses) whose next line is exactly `M0`. Anything else (a malformed marker, a marker inside a longer line, a next line other than `M0`) is streamed unchanged, so GRBL's plain `M0` pause applies. `TestStreamer` in `src/core/run/grbl/emulator.fixture.ts` implements this rule.
 - **Footer:** `G0 Z<clearanceZ>`, `M5`, `M30`. No park move: the safe XY position is machine-specific and unknown in v0.1.
+
+### Export checks
+
+`exportGrbl` fails with **`post.noMachine`** when the plan has no machine copy. Every other machine check is a warning (`plan.machine` findings in the shape of `plan.warning.list`, [plan-v0.1.md](../modes/plan-v0.1.md#plan-record)); the program is still written:
+
+| Rule           | Check                                                                                                                                                                                                          |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maxFeedRate`  | Per operation, the worst move: its speed along each axis (feed × that axis' share of the direction; an arc counts its full XY speed on X and Y) ≤ the axis' `maxFeedRate` – where GRBL starts to slow it down. |
+| `spindleRange` | Each operation's spindle speed within `spindle.minSpeed..maxSpeed` (GRBL clamps silently).                                                                                                                     |
+| `travel`       | The program's extent per axis (all visited points incl. arc bulges and `clearanceZ`) ≤ the travel; the work zero on the table is unknown.                                                                      |
+| `softLimit`    | Only with `workZero` (MPos of the work zero, e.g. from a connected controller): every point in machine coordinates within [−travel, 0] (GRBL's default homing direction, as the virtual machine).              |
 
 ### Numbers, lines and comments
 
@@ -50,7 +77,17 @@ Two pure steps in `src/core`, both inside the export `effect` command (task 2.11
 
 ### Determinism and tests
 
-Same input and options → byte-identical output: LF line endings, final newline, no dates, no app version (the generator string is passed in; tests use a fixed one), fixed word order `G … X Y Z I J F S P`. Golden files: `src/core/post/grbl/__golden__/*.nc`, one per v0.1 operation plus a multi-tool program; update with `vitest -u`. Each golden file is also streamed through the virtual machine in tests (no `error:` lines, ends `Idle`).
+Same input and options → byte-identical output: LF line endings, final newline, no dates, no app version (the generator string is passed in; tests use a fixed one), fixed word order `G M X Y Z I J F S P`. Golden files: `src/core/post/grbl/__golden__/*.nc` (`facing`, `pocket-circle-helix`, `drilling-peck-chipBreak`, `profile-tabs`, `multi-tool`, `multi-tool-inch-manual-spindle`); update with `vitest -u`. Each golden file is also streamed through the virtual machine in tests (no `error:` lines, ends `Idle`).
+
+- **Properties** (`post.test.ts`, on the golden programs, the test part and 40 random toolpaths per unit with tiny, 180° and helical arcs): every line ≤ 70 bytes of printable ASCII, every word in its precision (no `-0`, exponent or trailing zero), fixed word order, nothing from the never-emitted list (no `G81`–`G83`), every arc line with an in-plane axis word; and the text re-parsed with the virtual machine's `parseBlock` makes exactly the intended moves (targets within half a resolution step, rapid/feed mode, feed, arc circle, direction and sweep), so modal suppression never loses state.
+- **End to end** (`emulator-run.test.ts`): the [geometry test part](geometry.md#testing)'s program (5 tools, the drill twice) streamed with character counting through the virtual machine after `$H` and a `G54` 750/750/50 mm into the table: no `error:` and no alarm, no protocol violation, the final position as programmed (mm and inch); with the DFYOM tool-change rule the sender stops at all 5 markers, the test jogs and re-zeroes Z, and each resumes with `G0 Z<clearanceZ>` before `M3`; another sender's run pauses at each `M0` (Hold:0) and resumes with `~`; a machine with too little Z travel gets the `softLimit` warning and `ALARM:2`.
+- **Time:** with 400/400/200 mm/s² acceleration the virtual machine needs 623.2 s for the test part (without the tool-change pauses) against 586.9 s estimated (`stats.estimatedSeconds`, incl. 18 s of dwells): **ratio 1.06** (1.10 against the sum of the toolpath estimates, 568.0 s, which leave out dwells and the moves between operations). The test asserts 1 < ratio < 1.5.
+
+### Implementation (task 2.11)
+
+- **No command yet.** Toolpaths are derived data generated and cached by the 2.9 job (`plan.toolpath.generate`, which also owns the `PlanOperationInput` → `GeneratorInput` mapping), so the `plan.export` effect command comes with task 2.9: it regenerates stale toolpaths, maps the plan's tool copies to `ProgramTool` (name, diameter) and operation names to labels, calls `exportGrbl` and writes `text`. The pure post is complete and tested without it.
+- **One file per plan:** v0.1 plans have one setup, so "one file per setup" is one per plan; DFYOM's sender guides the tool changes inside it.
+- **Error code** `post.noMachine` (registered with the post). Machine checks reuse `plan.machine`.
 
 ## Virtual machine (task 3.8)
 
@@ -126,11 +163,12 @@ Hard limits and limit pins, probing (`G38.x`, `$#` PRB), `G28`/`G30`/`G92`/`G93`
 
 ## Files
 
-Implemented (task 3.8): `src/core/run/clock.ts`, `transport.ts`, `grbl/emulator/*.ts` (`emulator.ts` state machine, `gcode.ts` parser subset, `planner.ts` and `profile.ts` timing, `settings.ts`, `trace.ts`), `grbl/virtual-transport.ts`; `grbl/emulator.fixture.ts` holds a test-only streamer. The others are planned.
+Implemented (task 3.8): `src/core/run/clock.ts`, `transport.ts`, `grbl/emulator/*.ts` (`emulator.ts` state machine, `gcode.ts` parser subset, `planner.ts` and `profile.ts` timing, `settings.ts`, `trace.ts`), `grbl/virtual-transport.ts`; `grbl/emulator.fixture.ts` holds a test-only streamer. Implemented (task 2.11): `src/core/post/program.ts`, `export.ts`, `grbl/post.ts`, `grbl/format.ts`; `post.fixture.ts` holds test inputs. The others are planned.
 
 | File                                       | Contents                                                      |
 | ------------------------------------------ | ------------------------------------------------------------- |
 | `src/core/post/program.ts`                 | `MachiningProgram` and block types (the plan → post contract) |
+| `src/core/post/export.ts`                  | `exportGrbl`, `toMachiningProgram`, export checks, stats      |
 | `src/core/post/grbl/post.ts`, `format.ts`  | `postGrbl`, number and comment formatting                     |
 | `src/core/run/clock.ts`                    | `Clock` port and `VirtualClock`                               |
 | `src/core/run/transport.ts`                | `ControllerTransport` port                                    |
