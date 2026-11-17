@@ -77,7 +77,7 @@ interface JobContext extends CommandContext {
 }
 ```
 
-The sketch above is abridged; `define.ts` and `context.ts` are the contract. Differences there: `run`/`title` are method signatures (so typed definitions fit the registry's `AnyCommand`), and a fourth kind, `builtin`, marks commands the dispatcher executes itself (`history.undo`/`history.redo`, `job.pause`/`job.resume`/`job.abort`). `Services` has only the `workers` port so far; the file-system and machine ports arrive with persistence (task 3.1) and run mode (task 3.9).
+The sketch above is abridged; `define.ts` and `context.ts` are the contract. Differences there: `run`/`title` are method signatures (so typed definitions fit the registry's `AnyCommand`), and a fourth kind, `builtin`, marks commands the dispatcher executes itself (`history.undo`/`history.redo`, `job.pause`/`job.resume`/`job.abort`). `Services` has the `workers` port, the optional `library` service ([library.md](library.md#storage)) and the optional `project` session ([persistence.md](persistence.md#files), used by `project.save`); queries receive `services` too. The machine port arrives with run mode (task 3.9).
 
 Rules:
 
@@ -217,6 +217,7 @@ interface QueryDef<S extends z.ZodType, R> {
 ### Stale writes
 
 - A **source** is a per-session identity: `{ kind: EntryPoint['kind'], id }` – `'ui' | 'agent' | 'cli' | 'automation' | 'system'` (one window, MCP session, CLI invocation or script run). The dispatcher records each source's last read revision (any query result) and last own commit.
+- Only queries whose result depends on `ProjectDoc` count as a read: a query with `readsDocument: false` (e.g. `library.*.get`/`.list`, which read app data) records no baseline.
 - `expectedRevision` is optional. If given, it must equal the current `revision` – for every source and every command kind. A matching `expectedRevision` is an explicit baseline: no prior read is needed.
 - Without it, a command from any non-UI source (agent, CLI, automation, system) that can change `ProjectDoc` – a `document` command, `history.undo` or `history.redo` – is accepted only if every revision since that source's last read or last own commit was made by that same source (no baseline yet = rejected). Otherwise → `command.conflict`, whose message tells the agent to re-query and retry. Since own commits advance the baseline, this is implemented as "baseline = current revision".
 - `effect`, `job` and `job.*` commands do not write the document and are not subject to the baseline rule (machine commands are gated by the permission policy instead).

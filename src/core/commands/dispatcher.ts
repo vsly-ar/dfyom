@@ -74,6 +74,8 @@ export interface DispatcherOptions {
   readonly registry: Registry
   /** Initial document (opening or resetting a project starts an empty history). */
   readonly doc: ProjectDoc
+  /** Revision of `doc` (an opened project starts at its manifest's revision; default 0). */
+  readonly revision?: number
   readonly services?: Services
   readonly ids?: IdGenerator
   readonly clock?: Clock
@@ -150,6 +152,7 @@ class ProjectDispatcher implements Dispatcher {
   constructor(o: DispatcherOptions) {
     this.registry = o.registry
     this.current = freeze(o.doc, true)
+    this.rev = o.revision ?? 0
     this.services = o.services ?? { workers: inProcessWorkers }
     this.ids = o.ids ?? systemIds
     this.clock = o.clock ?? systemClock
@@ -202,9 +205,9 @@ class ProjectDispatcher implements Dispatcher {
     const args = parseWith(def.args, rawArgs, name)
     if (args.isErr()) return args
     const revision = this.rev
-    const value = def.run(this.current, args.unwrap(), { source })
+    const value = def.run(this.current, args.unwrap(), { source, services: this.services })
     if (value.isErr()) return Err(value.unwrapErr())
-    this.recordBaseline(source, revision)
+    if (def.readsDocument !== false) this.recordBaseline(source, revision)
     return Ok({ value: value.unwrap(), revision })
   }
 
