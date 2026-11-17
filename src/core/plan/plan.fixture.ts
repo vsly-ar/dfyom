@@ -4,7 +4,10 @@ import { expect } from 'vitest'
 import type { AppError } from '../../shared/errors/app-error'
 import type { ErrorCode } from '../../shared/errors/codes'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
-import { uiSource } from '../commands/testing'
+import type { DocumentCommand } from '../commands/define'
+import { applyDocPatches } from '../commands/history'
+import { inProcessWorkers } from '../commands/jobs'
+import { runCommand, uiSource } from '../commands/testing'
 import { buildTestPart, designSetup, type DesignSetup } from '../design/design.fixture'
 import {
   deg,
@@ -15,6 +18,7 @@ import {
   num,
   rpm,
 } from '../library/library.fixture'
+import { draftPlanAutoRebuild, PLAN_COMMANDS } from './commands'
 import type { PlanDTO } from './plan.dto'
 
 const ui = uiSource()
@@ -114,4 +118,61 @@ export async function planSetup(opts: { part?: boolean } = {}): Promise<PlanSetu
     },
     failWith: async (name, args, code) => expectErrCode(await s.d.dispatch(name, args, ui), code),
   }
+}
+
+export const opsOf = (p: PlanDTO) => p.setups[0]!.operations
+export const designIds = (p: PlanDTO) => opsOf(p).map((o) => o.designOperationIds.join('+'))
+export const src = (q: unknown) => (q as { source: string }).source
+
+export interface Stale {
+  partRemoved: boolean
+  partChanged: string[]
+  rebuildBlocked: string | null
+  operations: {
+    operationId: string
+    changedInDesign: boolean
+    removedFromDesign: boolean
+    editedInPlan: boolean
+  }[]
+  libraryCopies: {
+    snapshotId: string
+    kind: string
+    status: string
+    blocked: string | null
+  }[]
+}
+export const stale = (s: PlanSetup, planId: string) =>
+  s.query('plan.stale.list', { planId }) as Stale
+
+/**
+ * Patch laws of a document command run without a dispatcher, with the setup's library and the
+ * app's document hooks: apply(next, inverse) ≡ before and apply(before, patches) ≡ next.
+ */
+export function expectPatchLaw(s: PlanSetup, def: DocumentCommand, args: object): void {
+  const before = s.d.doc
+  const r = runCommand(
+    before,
+    def,
+    args,
+    { services: { workers: inProcessWorkers, library: s.library } },
+    [draftPlanAutoRebuild],
+  )
+  expect(r.result.isOk(), `${def.name} failed`).toBe(true)
+  expect(expectOk(applyDocPatches(r.next, r.inversePatches)), `inverse of ${def.name}`).toEqual(
+    before,
+  )
+  expect(expectOk(applyDocPatches(before, r.patches)), `patches of ${def.name}`).toEqual(r.next)
+}
+
+/** Runs a plan command; patch laws hold, undo restores the document before and redo the one after. */
+export async function expectUndoRedo(s: PlanSetup, name: string, args: object): Promise<unknown> {
+  const before = s.d.doc
+  expectPatchLaw(s, PLAN_COMMANDS.find((c) => c.name === name) as DocumentCommand, args)
+  const value = await s.run(name, args)
+  const after = s.d.doc
+  await s.undo()
+  expect(s.d.doc, `undo of ${name}`).toEqual(before)
+  await s.redo()
+  expect(s.d.doc, `redo of ${name}`).toEqual(after)
+  return value
 }

@@ -7,7 +7,6 @@ import { fail, Ok, type AppResult } from '../../shared/result'
 import type { PartDTO } from '../design/part.dto'
 import type { LibraryItemKind } from '../library/item'
 import {
-  deepEqual,
   Snapshot,
   snapshotStatus,
   type ItemLookup,
@@ -17,6 +16,7 @@ import {
 import type { ProjectDoc } from '../project/document'
 import { stableJson } from '../project/layout'
 import type { DesignSnapshotDTO, PlanDTO } from './plan.dto'
+import { libraryUpdateBlocker, rebuildBlocker, sameValue } from './validity'
 
 /** Hash of a part DTO (the design snapshot's `hash`). */
 export const hashPart = (part: PartDTO): string => hashJson(part)
@@ -84,6 +84,8 @@ export interface LibraryCopyStale {
   readonly kind: LibraryItemKind
   readonly libraryItemId: string
   readonly status: Exclude<SnapshotStatus, 'current'>
+  /** Why re-importing this changed copy cannot be applied (the part must fit a new stock). */
+  readonly blocked: string | null
 }
 
 export interface PlanStale {
@@ -92,6 +94,10 @@ export interface PlanStale {
   readonly libraryCopies: readonly LibraryCopyStale[]
   /** The part itself is gone from the design. */
   readonly partRemoved: boolean
+  /** Part-level fields (not operations) that differ from the design, e.g. `generalTolerance`. */
+  readonly partChanged: readonly string[]
+  /** A `draft` plan that could not follow the design: why (rebuild blocked by its stock copy). */
+  readonly rebuildBlocked: string | null
 }
 
 /**
@@ -112,9 +118,9 @@ export function planStale(
     const now = current?.operations.find((o) => o.id === op.id)
     const s: OperationStale = {
       operationId: op.id,
-      changedInDesign: now !== undefined && !deepEqual(taken, now),
+      changedInDesign: now !== undefined && !sameValue(taken, now),
       removedFromDesign: now === undefined,
-      editedInPlan: !deepEqual(taken, op),
+      editedInPlan: !sameValue(taken, op),
     }
     if (s.changedInDesign || s.removedFromDesign || s.editedInPlan) operations.push(s)
   }
@@ -124,15 +130,42 @@ export function planStale(
       const snap = Snapshot.fromDTO(dto)
       if (snap.isErr()) continue
       const status = snapshotStatus(snap.unwrap(), lookup)
-      if (status !== 'current')
-        libraryCopies.push({
-          snapshotId: dto.id,
-          kind: dto.kind,
-          libraryItemId: dto.libraryItemId,
-          status,
-        })
+      if (status === 'current') continue
+      const found = lookup(dto.kind, dto.libraryItemId)
+      const blocked =
+        status === 'libraryChanged' && found.state === 'found'
+          ? libraryUpdateBlocker(plan, dto, found.item)
+          : undefined
+      libraryCopies.push({
+        snapshotId: dto.id,
+        kind: dto.kind,
+        libraryItemId: dto.libraryItemId,
+        status,
+        blocked: blocked ?? null,
+      })
     }
-  return { operations, libraryCopies, partRemoved: current === undefined }
+  const partChanged =
+    current === undefined
+      ? []
+      : [...new Set([...Object.keys(plan.design.taken), ...Object.keys(current)])]
+          .filter((k) => k !== 'operations' && k !== 'id')
+          .filter(
+            (k) =>
+              !sameValue(
+                (plan.design.taken as Record<string, unknown>)[k],
+                (current as Record<string, unknown>)[k],
+              ),
+          )
+          .sort()
+  const rebuildBlocked =
+    plan.status === 'draft' && designChanged(plan, doc) ? (rebuildBlocker(plan, doc) ?? null) : null
+  return {
+    operations,
+    libraryCopies,
+    partRemoved: current === undefined,
+    partChanged,
+    rebuildBlocked,
+  }
 }
 
 /**
@@ -143,10 +176,10 @@ export function designChanged(plan: PlanDTO, doc: ProjectDoc): boolean {
   const part = Object.hasOwn(doc.parts, plan.design.partId)
     ? doc.parts[plan.design.partId]
     : undefined
-  return part !== undefined && !deepEqual(plan.design.taken, part)
+  return part !== undefined && !sameValue(plan.design.taken, part)
 }
 
-/** Whether any operation carries plan-only edits. */
+/** Whether any operation carries plan-only edits (compared by value). */
 export function hasPlanEdits(plan: PlanDTO): boolean {
-  return !deepEqual(plan.design.taken, plan.design.part)
+  return !sameValue(plan.design.taken, plan.design.part)
 }

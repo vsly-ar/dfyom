@@ -13,6 +13,7 @@ import { Quantity } from '../quantity/quantity'
 import { feedFindings, stockFindings, toolFindings, type PlanWarning } from './checks'
 import { pickPreset, resolveFeeds, type Overrides, type ResolvedFeeds } from './feeds'
 import { orderFindings } from './order'
+import { checkPartFits } from './validity'
 import { designOperations, type LoadedPlan } from './plan'
 import { FEED_FIELDS, type PlanOperationDTO } from './plan.dto'
 import {
@@ -181,6 +182,22 @@ export function planFindings(plan: LoadedPlan, data?: readonly MaterialRow[]): P
   for (const op of plan.setup.operations)
     out.push(...evaluateOperation(plan, op, undefined, data).findings)
   out.push(...orderFindings(plan.setup.operations, plan.part))
+  const stock = plan.dto.snapshots.find((x) => x.id === plan.dto.design.part.stock)
+  if (stock !== undefined) {
+    const fits = checkPartFits(plan.dto.design.part, stock, 'plan.warning.list')
+    if (fits.isErr())
+      for (const issue of fits.unwrapErr().issues.length > 0
+        ? fits.unwrapErr().issues
+        : [{ path: [], message: fits.unwrapErr().message }])
+        out.push({
+          code: 'plan.check',
+          severity: 'error',
+          message: `the part does not fit the plan's stock copy: ${issue.message}`,
+          field: ['design', ...issue.path].join('.'),
+          rule: 'stockFit',
+          params: {},
+        })
+  }
   plan.machine.map((m) => {
     const clearance = Quantity.fromDTO(plan.setup.clearanceHeight).mapOr(0, (q) => q.canonical)
     for (const f of stockFindings(plan.stock, clearance, m))

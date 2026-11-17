@@ -93,6 +93,24 @@ export function defaultOrder(planOps: readonly PlanOperationDTO[], part: Part): 
   return out
 }
 
+/**
+ * The list with every `on` dependency satisfied, otherwise in its current order: a stable
+ * topological order by list position (the dependency rule of `defaultOrder`), so a rebuild keeps
+ * the user's order where it can and re-checks kept operations too.
+ */
+export function repairOrder(planOps: readonly PlanOperationDTO[], part: Part): PlanOperationDTO[] {
+  const done = new Set<string>()
+  const out: PlanOperationDTO[] = []
+  let rest = infos(planOps, part)
+  while (rest.length > 0) {
+    const next = rest.find((x) => [...x.deps].every((d) => done.has(d))) ?? rest[0]!
+    out.push(next.op)
+    done.add(next.op.id)
+    rest = rest.filter((x) => x !== next)
+  }
+  return out
+}
+
 /** True if the point lies inside the shape's bounds (v0.1: axis-aligned rectangles, circles). */
 function inside(shape: Shape, x: number, y: number): boolean {
   const cx = shape.center[0].canonical

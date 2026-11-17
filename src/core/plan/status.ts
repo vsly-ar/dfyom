@@ -10,7 +10,7 @@ export const TRANSITIONS: Readonly<Record<PlanStatus, readonly PlanStatus[]>> = 
   draft: ['settledDesign', 'archived'],
   settledDesign: ['draft', 'finalized', 'archived'],
   finalized: ['settledDesign', 'inUse', 'archived'],
-  inUse: ['finalized', 'archived'],
+  inUse: ['archived'],
   archived: [],
 }
 
@@ -18,8 +18,8 @@ const EDITABLE: readonly PlanStatus[] = ['draft', 'settledDesign']
 
 /**
  * Statuses in which each plan command (except `plan.create` and `plan.status.set`) is allowed.
- * `finalized` and `inUse` are read-only except their status; an `inUse` plan is changed through
- * `plan.duplicate`. A plan can be duplicated in any status and removed in any but `inUse`.
+ * `finalized` and `inUse` are read-only except their status; an `inUse` plan never steps back
+ * (only archive, and un-archive returns it to `inUse`): it is changed through `plan.duplicate`. A plan can be duplicated in any status and removed in any but `inUse`.
  */
 export const ALLOWED: Readonly<Record<string, readonly PlanStatus[]>> = {
   'plan.duplicate': ['draft', 'settledDesign', 'finalized', 'inUse', 'archived'],

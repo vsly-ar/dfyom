@@ -44,8 +44,12 @@ export interface PlanOperationInput {
   readonly feeds: ResolvedFeeds
   readonly strategy: ResolvedStrategy
   readonly machine: Option<Machine>
+  /** The operation before it in the machining order (where the tool starts); none for the first. */
+  readonly previousPlanOperationId?: string
   /**
-   * Hash of every input (the plan's part, plan operation, used copies, setup): a changed
+   * Hash of every input, chained over the machining order (position and every earlier
+   * operation, since an operation starts where the previous one ended), plus the plan's part,
+   * plan operation, used copies, setup): a changed
    * input marks a cached toolpath stale.
    */
   readonly inputHash: string
@@ -95,15 +99,29 @@ export function planOperationInputs(
     retractHeight: length(plan.setup.retractHeight),
   }
   const out: PlanOperationInput[] = []
-  for (const op of plan.setup.operations) {
-    if (!wanted(op.id)) continue
+  // Chained over the machining order: an operation starts where the previous one ended, so its
+  // hash covers its position and everything before it.
+  let chain = ''
+  let previous: string | undefined
+  plan.setup.operations.forEach((op, index) => {
+    const used = plan.dto.snapshots.filter(
+      (s) => s.id === op.tool || s.id === plan.dto.design.part.stock || s.id === plan.dto.machine,
+    )
+    chain = hashJson({
+      previous: chain,
+      index,
+      // the whole part: `on` surfaces and formulas depend on other operations
+      part: plan.dto.design.part,
+      planOperation: op,
+      snapshots: used,
+      setup: { ...plan.setup, operations: undefined },
+    })
+    const previousPlanOperationId = previous
+    previous = op.id
+    if (!wanted(op.id)) return
     const e = evaluateOperation(plan, op)
     // no error findings: tool, stickout and feeds are present
     const toolSnapshotId = op.tool!
-    const used = plan.dto.snapshots.filter(
-      (s) =>
-        s.id === toolSnapshotId || s.id === plan.dto.design.part.stock || s.id === plan.dto.machine,
-    )
     out.push({
       planId,
       planOperationId: op.id,
@@ -118,14 +136,9 @@ export function planOperationInputs(
       feeds: e.feeds.unwrap(),
       strategy: e.strategy,
       machine: plan.machine,
-      inputHash: hashJson({
-        // the whole part: `on` surfaces and formulas depend on other operations
-        part: plan.dto.design.part,
-        planOperation: op,
-        snapshots: used,
-        setup: { ...plan.setup, operations: undefined },
-      }),
+      ...(previousPlanOperationId === undefined ? {} : { previousPlanOperationId }),
+      inputHash: chain,
     })
-  }
+  })
   return Ok(out)
 }

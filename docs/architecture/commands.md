@@ -136,7 +136,7 @@ A **document hook** (`DocumentHook` in `define.ts`) runs after every successful 
 - Same rules as a document handler: synchronous, no dispatch, only synchronous library reads. A hook decides from the command's name and args whether it applies.
 - An `Err` of a hook (or a throw → `internal.unexpected`) fails the whole command with the hook's error (context `hook <name>`): the document stays unchanged.
 - Undo and redo replay the patches, so hooks never run for them.
-- v0.1: `plan.draftAutoRebuild` rebuilds every `draft` plan after a `design.*` command ([plan-v0.1.md](../modes/plan-v0.1.md#implementation-task-213)).
+- v0.1: `plan.draftAutoRebuild` rebuilds the `draft` plans of the part after a `design.*` command; it never returns `Err` (a plan that cannot follow is skipped and reported), so design commands behave the same with or without plans ([plan-v0.1.md](../modes/plan-v0.1.md#implementation-task-213)).
 
 ## Undo / redo
 

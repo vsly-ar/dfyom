@@ -2,55 +2,26 @@
 import { describe, expect, it } from 'vitest'
 import { expectOk } from '../../shared/testing/result'
 import { createRegistry } from '../commands/registry'
-import { inProcessWorkers } from '../commands/jobs'
-import { applyDocPatches } from '../commands/history'
-import { runCommand, uiSource } from '../commands/testing'
-import type { DocumentCommand } from '../commands/define'
+import { uiSource } from '../commands/testing'
 import { docToFiles, loadProjectFiles } from '../project/layout'
 import { len } from '../library/library.fixture'
 import { draftPlanAutoRebuild, PLAN_COMMANDS, PLAN_QUERIES } from './commands'
 import { draftLibraryUpdates, followLibraryChanges } from './follow'
-import type { PlanDTO, PlanStatus } from './plan.dto'
-import { flat6, planSetup, type PlanSetup } from './plan.fixture'
+import type { PlanStatus } from './plan.dto'
+import {
+  designIds,
+  expectUndoRedo,
+  flat6,
+  opsOf,
+  planSetup,
+  src,
+  stale,
+  type PlanSetup,
+} from './plan.fixture'
 import { TRANSITIONS } from './status'
 
 const ui = uiSource()
 const STATUSES: PlanStatus[] = ['draft', 'settledDesign', 'finalized', 'inUse', 'archived']
-const opsOf = (p: PlanDTO) => p.setups[0]!.operations
-const designIds = (p: PlanDTO) => opsOf(p).map((o) => o.designOperationIds.join('+'))
-const src = (q: unknown) => (q as { source: string }).source
-
-type Stale = {
-  partRemoved: boolean
-  operations: {
-    operationId: string
-    changedInDesign: boolean
-    removedFromDesign: boolean
-    editedInPlan: boolean
-  }[]
-  libraryCopies: { snapshotId: string; kind: string; status: string }[]
-}
-const stale = (s: PlanSetup, planId: string) => s.query('plan.stale.list', { planId }) as Stale
-
-/** Runs a command; undo restores the document before, redo the one after (patch laws too). */
-async function expectUndoRedo(s: PlanSetup, name: string, args: object): Promise<unknown> {
-  const before = s.d.doc
-  const value = await s.run(name, args)
-  const after = s.d.doc
-  const def = PLAN_COMMANDS.find((c) => c.name === name) as DocumentCommand
-  // patch laws without a dispatcher (same library service): apply(next, inverse) ≡ before
-  const r = runCommand(before, def, args, {
-    services: { workers: inProcessWorkers, library: s.library },
-  })
-  expect(r.result.isOk(), `${name} failed`).toBe(true)
-  expect(expectOk(applyDocPatches(r.next, r.inversePatches))).toEqual(before)
-  expect(expectOk(applyDocPatches(before, r.patches))).toEqual(r.next)
-  await s.undo()
-  expect(s.d.doc).toEqual(before)
-  await s.redo()
-  expect(s.d.doc).toEqual(after)
-  return value
-}
 
 describe('plan commands: registry', () => {
   it('registers the plan commands as document commands and the queries', () => {
@@ -453,7 +424,7 @@ describe('library copies', () => {
       { planId: draft, snapshotId: expect.any(String) },
     ])
     const depth = s.d.history.undoable.length
-    expect(expectOk(await followLibraryChanges(s.d, lookup))).toBe(1)
+    expect(expectOk(await followLibraryChanges(s.d, lookup))).toEqual({ updated: 1, failed: [] })
     expect(s.d.history.undoable.length).toBe(depth + 1)
     expect(s.d.history.undoable.at(-1)?.source.kind).toBe('system')
     expect(stale(s, draft).libraryCopies).toEqual([])

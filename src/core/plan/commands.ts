@@ -33,7 +33,7 @@ import type { ProjectDoc, UnitSystem } from '../project/document'
 import { Quantity } from '../quantity/quantity'
 import type { ParseContext } from '../quantity/parse'
 import { assignTool, createPlan, duplicatePlan, rebuildPlan, type BuildContext } from './build'
-import { PlanWarningSchema } from './checks'
+import { PlanWarningSchema, type PlanWarning } from './checks'
 import { evaluateOperation, planFindings } from './evaluate'
 import { orderFindings } from './order'
 import { findPlanDTO, findPlanOperation, loadPlan, loadPlanDTO, type LoadedPlan } from './plan'
@@ -114,9 +114,44 @@ function loadedFor(
 
 const plainCopy = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T
 
-/** Replaces a plan record when it changed (no patch for an equal value). */
+type Json = Record<string, unknown> | unknown[]
+const isObj = (v: unknown): v is Json => typeof v === 'object' && v !== null
+
+/**
+ * Writes `value` into `target` (a draft) changing only what differs, so patches name the changed
+ * fields and operations, not the whole record.
+ */
+function writeDiff(target: Json, value: Json): void {
+  if (Array.isArray(target) && Array.isArray(value)) {
+    value.forEach((v, i) => {
+      if (i >= target.length) target.push(v)
+      else if (!deepEqual(target[i], v)) {
+        const t = target[i]
+        if (isObj(t) && isObj(v) && Array.isArray(t) === Array.isArray(v)) writeDiff(t, v)
+        else target[i] = v
+      }
+    })
+    if (target.length > value.length) target.splice(value.length)
+    return
+  }
+  const t = target as Record<string, unknown>
+  const v = value as Record<string, unknown>
+  for (const key of Object.keys(t))
+    if (!Object.hasOwn(v, key) || v[key] === undefined) delete t[key]
+  for (const [key, next] of Object.entries(v)) {
+    if (next === undefined || deepEqual(t[key], next)) continue
+    const cur = t[key]
+    if (isObj(cur) && isObj(next) && Array.isArray(cur) === Array.isArray(next))
+      writeDiff(cur, next)
+    else t[key] = next
+  }
+}
+
+/** Writes a plan record, changing only what differs (no patch for an equal value). */
 function writePlan(draft: Draft<ProjectDoc>, plan: PlanDTO): void {
-  if (!deepEqual(draft.plans[plan.id], plan)) draft.plans[plan.id] = plan
+  const current = draft.plans[plan.id]
+  if (current === undefined) draft.plans[plan.id] = plan
+  else writeDiff(current as unknown as Json, plan as unknown as Json)
 }
 
 function invalid(issues: Issue[], where: string): AppResult<never> {
@@ -334,10 +369,20 @@ const libraryItemUpdate = defineCommand({
   args: z.object({
     ...PlanArg,
     snapshotId: z.string().min(1).describe("Id of the copy in the plan's snapshots"),
+    followOnly: z
+      .literal(true)
+      .optional()
+      .describe('Automatic follow of a draft plan: a no-op unless the plan is still a draft'),
   }),
-  result: Empty,
+  result: z.object({ updated: z.boolean().describe('False when nothing changed') }),
   run(draft, args, ctx) {
     const where = 'plan.libraryItem.update'
+    if (args.followOnly === true) {
+      // re-checked inside the command: the status may have changed since the follow read it
+      const current = findPlanDTO(draft as ProjectDoc, args.planId, where)
+      if (current.isErr()) return current
+      if (current.unwrap().status !== 'draft') return Ok({ updated: false })
+    }
     const found = planFor(draft, args.planId, where)
     if (found.isErr()) return found
     const plan = plainCopy(found.unwrap())
@@ -354,7 +399,7 @@ const libraryItemUpdate = defineCommand({
       refreshSnapshot(s, item.unwrap(), nowIso(ctx)),
     )
     if (refreshed.isErr()) return Err(refreshed.unwrapErr().withContext(where))
-    if (deepEqual(refreshed.unwrap().values.toDTO(), dto.values)) return Ok({})
+    if (deepEqual(refreshed.unwrap().values.toDTO(), dto.values)) return Ok({ updated: false })
     plan.snapshots[index] = refreshed.unwrap().toDTO()
     if (dto.kind === 'stock') {
       // the plan's part must stay valid with the new stock
@@ -367,7 +412,7 @@ const libraryItemUpdate = defineCommand({
       if (ok.isErr()) return Err(ok.unwrapErr().withContext(where))
     }
     writePlan(draft, plan)
-    return Ok({})
+    return Ok({ updated: true })
   },
 })
 
@@ -732,13 +777,18 @@ export const draftPlanAutoRebuild: DocumentHook = {
   name: 'plan.draftAutoRebuild',
   after(draft, command, ctx) {
     if (!command.name.startsWith('design.')) return Ok(undefined)
+    const args = command.args as { partId?: unknown }
+    const partId = typeof args.partId === 'string' ? args.partId : undefined
     for (const id of Object.keys(draft.plans)) {
       const plan = draft.plans[id]!
-      if (plan.status !== 'draft' || !designChanged(plan as PlanDTO, draft as ProjectDoc)) continue
+      if (plan.status !== 'draft') continue
+      if (partId !== undefined && plan.design.partId !== partId) continue
+      if (!designChanged(plan as PlanDTO, draft as ProjectDoc)) continue
+      // A plan is downstream of the design: a draft that cannot follow (its stock copy no longer
+      // fits, or a broken record) is left as it was and reported by plan.stale.list and
+      // plan.warning.list; the design command never fails because of it.
       const rebuilt = rebuild(draft, plainCopy(plan as PlanDTO), ctx, 'plan.draftAutoRebuild')
-      if (rebuilt.isErr())
-        return Err(rebuilt.unwrapErr().withContext('plan.draftAutoRebuild', { planId: id }))
-      writePlan(draft, rebuilt.unwrap())
+      if (rebuilt.isOk()) writePlan(draft, rebuilt.unwrap())
     }
     return Ok(undefined)
   },
@@ -863,6 +913,10 @@ const staleList = defineQuery({
   args: z.object(PlanArg),
   result: z.object({
     partRemoved: z.boolean(),
+    partChanged: z
+      .array(z.string())
+      .describe('Part-level fields that differ from the design, e.g. generalTolerance'),
+    rebuildBlocked: z.string().nullable().describe('A draft that could not follow the design: why'),
     operations: z.array(
       z.object({
         operationId: OperationIdSchema,
@@ -877,6 +931,10 @@ const staleList = defineQuery({
         kind: z.enum(['stock', 'tool', 'machine']),
         libraryItemId: z.string(),
         status: z.enum(['libraryChanged', 'libraryRemoved', 'libraryUnreadable']),
+        blocked: z
+          .string()
+          .nullable()
+          .describe("Why re-importing this copy can't be applied (it stays a notice)"),
       }),
     ),
   }),
@@ -885,6 +943,8 @@ const staleList = defineQuery({
       const s = planStale(plan, doc, ctx.services.library?.lookup)
       return {
         partRemoved: s.partRemoved,
+        partChanged: [...s.partChanged],
+        rebuildBlocked: s.rebuildBlocked,
         operations: [...s.operations],
         libraryCopies: [...s.libraryCopies],
       }
@@ -931,10 +991,42 @@ const warningList = defineQuery({
     'List the checks of a plan: tool, feeds and order errors (they block toolpaths), machine and calculator warnings.',
   args: z.object(PlanArg),
   result: z.object({ warnings: z.array(PlanWarningSchema) }),
-  run(doc, args) {
-    return loadPlan(doc, args.planId, 'plan.warning.list').map((plan) => ({
-      warnings: planFindings(plan).map((w) => ({ ...w, params: { ...w.params } })),
-    }))
+  run(doc, args, ctx) {
+    const where = 'plan.warning.list'
+    const dto = findPlanDTO(doc, args.planId, where)
+    if (dto.isErr()) return dto
+    const loaded = loadPlanDTO(dto.unwrap(), doc.unitSystem, where)
+    const findings: PlanWarning[] = loaded.isOk()
+      ? planFindings(loaded.unwrap())
+      : [
+          {
+            code: 'plan.broken',
+            severity: 'error',
+            message: `the plan record does not load: ${loaded.unwrapErr().message}`,
+            rule: 'load',
+            params: {},
+          },
+        ]
+    const stale = planStale(dto.unwrap(), doc, ctx.services.library?.lookup)
+    for (const c of stale.libraryCopies)
+      if (c.blocked !== null)
+        findings.push({
+          code: 'plan.libraryBlocked',
+          severity: 'warning',
+          message: c.blocked,
+          field: `snapshots.${c.snapshotId}`,
+          rule: 'partFits',
+          params: { snapshotId: c.snapshotId, libraryItemId: c.libraryItemId },
+        })
+    if (stale.rebuildBlocked !== null)
+      findings.push({
+        code: 'plan.rebuildBlocked',
+        severity: 'warning',
+        message: stale.rebuildBlocked,
+        rule: 'partFits',
+        params: {},
+      })
+    return Ok({ warnings: findings.map((w) => ({ ...w, params: { ...w.params } })) })
   },
 })
 

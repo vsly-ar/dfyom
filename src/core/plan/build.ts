@@ -3,7 +3,7 @@
  * reuse, duplicate. Pure functions over plain DTOs; the commands write the result.
  * Doc: docs/modes/plan-v0.1.md#plans-are-snapshots, docs/modes/plan-v0.1.md#plan-record
  */
-import { Err, Ok, type AppResult } from '../../shared/result'
+import { Err, fail, Ok, type AppResult } from '../../shared/result'
 import type { IdGenerator } from '../commands/context'
 import { fieldContext, partFromDTO, type Operation, type Part } from '../design/operation'
 import { NAME_MAX } from '../library/item'
@@ -11,11 +11,12 @@ import type { LibraryItem } from '../library/library-item'
 import { deepEqual, takeSnapshot } from '../library/snapshot'
 import type { ProjectDoc, UnitSystem } from '../project/document'
 import { Quantity } from '../quantity/quantity'
-import { defaultOrder } from './order'
+import { defaultOrder, repairOrder } from './order'
 import { loadPlanDTO } from './plan'
 import { lengthDTO, type LengthDTO, type PlanDTO, type PlanOperationDTO } from './plan.dto'
 import { takeDesignSnapshot } from './snapshot'
 import { suggestTools } from './suggest'
+import { checkPartFits } from './validity'
 
 export interface BuildContext {
   readonly ids: IdGenerator
@@ -181,7 +182,9 @@ const RANK: Record<Operation['kind'], number> = { facing: 0, drilling: 1, pocket
  * design operation id keep tool, preset, overrides and strategy; ones whose operations are gone
  * are dropped; a drilling group whose holes no longer match splits (the split-off ones keep the
  * settings); new design operations get new plan operations with a suggested tool, placed by
- * the default group order. Plan-only edits are discarded (the command checks the flag).
+ * the default group order; then the whole order is repaired so every `on` dependency holds. The
+ * rebuilt part must fit the plan's own stock copy (else `model.invariant`, the plan unchanged).
+ * Plan-only edits are discarded (the command checks the flag).
  */
 export function rebuildPlan(
   current: PlanDTO,
@@ -234,8 +237,14 @@ export function rebuildPlan(
     }
     list.splice(at, 0, p)
   }
-  setup.operations = list
+  setup.operations = repairOrder(list, part.unwrap())
   pruneSnapshots(plan)
+  // the design fits the design's stock; the plan's own stock copy may differ
+  const stockCopy = plan.snapshots.find((x) => x.id === plan.design.part.stock)
+  if (stockCopy === undefined)
+    return fail('input.malformed', `plan ${plan.id}: the stock copy is missing`, { where })
+  const fits = checkPartFits(plan.design.part, stockCopy, where)
+  if (fits.isErr()) return Err(fits.unwrapErr().withContext(where, { planId: plan.id }))
   const assigned = suggestAndAssign(
     plan,
     fresh.map((p) => p.id),
