@@ -11,11 +11,11 @@ Status: draft · Principle: [principles.md §2](../principles.md#2-testability)
 | End-to-end      | _TBD_ (Playwright for Electron)                                        | Whole app, driven like a user **and** like an agent ([llm-api.md](../architecture/llm-api.md)).                  |
 | Virtual machine | GRBL emulator ([ADR 0013](../decisions/0013-grbl-first-controller.md)) | Simulated CNC controller + simulated devices; run-mode tests without hardware ([modes/run.md](../modes/run.md)). |
 | Real machine    | _TBD_                                                                  | LLM-controlled runs on real hardware with minimal developer involvement; opt-in only.                            |
-| Performance     | _TBD_                                                                  | Benchmarks for heavy operations with budgets.                                                                    |
+| Performance     | Vitest, `*.perf.ts` (`vitest.perf.config.mts`, `npm run perf`)         | Benchmarks for heavy operations with budgets; not in `npm run check` (flaky timings).                            |
 
 ## Commands
 
-- `npm test` – all unit tests once; `npm run test:watch` – watch mode.
+- `npm test` – all unit tests once; `npm run test:watch` – watch mode; `npm run perf` – performance budgets (e.g. [geometry](../architecture/geometry.md#performance-budgets-v01)).
 - `npm run lint` – ESLint incl. layer import boundaries ([ADR 0015](../decisions/0015-eslint-with-typescript6-api.md)); `npm run lint:fix` applies safe fixes.
 - `npm run format` / `npm run format:check` – Prettier (owns formatting; ESLint does not).
 - `npm run check` – `typecheck` + `lint` + `format:check` + `test`. Run before committing.
