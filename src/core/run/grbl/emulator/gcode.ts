@@ -35,6 +35,7 @@ export const STATUS = {
   arcRadiusError: 34,
   noOffsetsInPlane: 35,
   unusedWords: 36,
+  maxValueExceeded: 38,
 } as const
 
 export type StatusCode = (typeof STATUS)[keyof typeof STATUS]
@@ -102,6 +103,7 @@ export interface JogBlock {
 }
 
 const MM_PER_INCH = 25.4
+const MAX_TOOL_NUMBER = 255
 const AXES = ['X', 'Y', 'Z'] as const
 const VALUE_LETTERS = new Set('FIJKLNPRSTXYZ')
 
@@ -163,11 +165,13 @@ function readWords(line: string): Result<Words, StatusCode> {
     if (letter === 'G') {
       const group = G_GROUPS.get(int)
       if (group === undefined) return Err(STATUS.unsupportedCommand)
-      if (mantissa !== 0) return Err(STATUS.commandValueNotInteger)
+      // GRBL order: the axis-command conflict is checked in the case, the mantissa after it.
       if (group === 'motion' || int === 10) {
         if (axisCommand !== undefined) return Err(STATUS.axisCommandConflict)
         axisCommand = group === 'motion' ? 'motion' : 'nonModal'
       }
+      if (group === 'distance' && mantissa !== 0) return Err(STATUS.unsupportedCommand) // G90.1/G91.1
+      if (mantissa !== 0) return Err(STATUS.commandValueNotInteger)
       if (g.has(group)) return Err(STATUS.modalGroupViolation)
       g.set(group, int)
     } else if (letter === 'M') {
@@ -180,6 +184,7 @@ function readWords(line: string): Result<Words, StatusCode> {
       if (!VALUE_LETTERS.has(letter)) return Err(STATUS.unsupportedCommand)
       if (values.has(letter)) return Err(STATUS.wordRepeated)
       if ('FNPST'.includes(letter) && value < 0) return Err(STATUS.negativeValue)
+      if (letter === 'T' && value > MAX_TOOL_NUMBER) return Err(STATUS.maxValueExceeded)
       values.set(letter, value)
     }
   }
@@ -239,10 +244,13 @@ export function parseBlock(
   let wco = state.wco
   if (nonModal === 10) {
     if (axisWords.length === 0) return Err(STATUS.noAxisWords)
-    if (!has('P') || !has('L')) return Err(STATUS.valueWordMissing)
-    const l = val('L')
+    // GRBL needs P or L; a missing one is 0 (P0 = the active system, G54 here).
+    if (!has('P') && !has('L')) return Err(STATUS.valueWordMissing)
+    const l = Math.trunc(val('L') ?? 0)
     const p = Math.trunc(val('P') ?? 0)
-    if ((l !== 2 && l !== 20) || (p !== 0 && p !== 1)) return Err(STATUS.unsupportedCommand)
+    if (l !== 2 && l !== 20) return Err(STATUS.unsupportedCommand)
+    if (l === 2 && has('R')) return Err(STATUS.unsupportedCommand) // G10 L2 R: rotation
+    if (p !== 0 && p !== 1) return Err(STATUS.unsupportedCommand) // G55–G59 not emulated
     used.add('P').add('L')
     const next: [number, number, number] = [wco[0], wco[1], wco[2]]
     AXES.forEach((a, i) => {
@@ -282,7 +290,9 @@ export function parseBlock(
         const arc = arcMoves(state.position, target, motion === 2, w, toMm, feed, opts.arcTolerance)
         if (arc.isErr()) return Err(arc.unwrapErr())
         moves = arc.unwrap()
-        used.add('I').add('J').add('K').add('R')
+        // Radius mode consumes only R; offset mode consumes I, J and K.
+        if (has('R')) used.add('R')
+        else used.add('I').add('J').add('K')
       }
     }
   }

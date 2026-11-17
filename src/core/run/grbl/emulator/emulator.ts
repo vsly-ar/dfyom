@@ -19,21 +19,15 @@ import {
 import { Planner, type Vec3 } from './planner'
 import { holdProfile, sampleProfile, trapezoid, type Profile } from './profile'
 import { Settings, type SettingValues } from './settings'
-import {
-  emptyTrace,
-  type MutableTrace,
-  type Trace,
-  type TraceLine,
-  type ViolationKind,
-} from './trace'
+import { emptyTrace, type MutableTrace, type Trace, type ViolationKind } from './trace'
 
-/** RX_BUFFER_SIZE; the ring buffer holds one byte less. */
+/** RX_BUFFER_SIZE: all of it usable (GRBL's ring has RX_BUFFER_SIZE + 1 slots). */
 export const RX_BUFFER_SIZE = 128
 /** LINE_BUFFER_SIZE. */
 export const LINE_BUFFER_SIZE = 80
 export const BANNER = "Grbl 1.1h ['$' for help]"
 const VERSION = '[VER:1.1h.20190830:]'
-const OPTIONS = '[OPT:VZ,15,128]'
+const OPTIONS = '[OPT:V,15,128]'
 const HELP = '[HLP:$$ $# $G $I $N $x=val $Nx=line $J=line $SLP $C $X $H ~ ! ? ctrl-x]'
 /** SAFETY_DOOR_SPINDLE_DELAY, ms. */
 const DOOR_SPINDLE_DELAY = 4000
@@ -67,7 +61,11 @@ type Stop = 'hold' | 'jogCancel' | 'softLimit' | 'door'
 type Step = Action | { readonly kind: 'jog'; readonly target: Vec3; readonly feed: number }
 
 interface Current {
-  readonly steps: Step[]
+  readonly steps: readonly Step[]
+  /** Next step to execute. */
+  next: number
+  /** Index of the last motion step (for the line's end time). */
+  readonly lastMove: number
   readonly line: number
 }
 
@@ -77,6 +75,14 @@ interface Exec {
 }
 
 const zero: Vec3 = [0, 0, 0]
+
+function current(steps: readonly Step[], line: number): Current {
+  let lastMove = -1
+  steps.forEach((s, i) => {
+    if (s.kind === 'move' || s.kind === 'jog') lastMove = i
+  })
+  return { steps, next: 0, lastMove, line }
+}
 const add = (a: Vec3, u: Vec3, s: number): Vec3 => [
   a[0] + u[0] * s,
   a[1] + u[1] * s,
@@ -118,7 +124,9 @@ export class GrblEmulator {
   private dwellRemaining: number | undefined
   private homingEndsAt: number | undefined
   private restoreEndsAt: number | undefined
+  /** Door pin open (test hook); `0x84` alone has no pin, so the door counts as closed. */
   private doorAjar = false
+  private doorAfterJog = false
 
   private spindle: { dir: SpindleDir; rpm: number } = { dir: 'off', rpm: 0 }
   private spindleSuspended = false
@@ -224,9 +232,13 @@ export class GrblEmulator {
     }
   }
 
-  /** Test hook: close the safety door opened by `0x84`; `~` then resumes. */
-  closeDoor(): void {
-    this.doorAjar = false
+  /**
+   * Test hook for a door switch (GRBL's safety-door pin): opening triggers the door like
+   * `0x84` and keeps it in Door:1 once stopped; closing allows `~` to resume (Door:0).
+   */
+  setDoorPin(open: boolean): void {
+    this.doorAjar = open
+    if (open) this.door()
     this.noteState()
   }
 
@@ -247,7 +259,7 @@ export class GrblEmulator {
       if (this.rxMidLine) this.violation('nonAscii', `0x${b.toString(16)}`)
       return this.extended(b)
     }
-    if (this.rx.length >= RX_BUFFER_SIZE - 1) {
+    if (this.rx.length >= RX_BUFFER_SIZE) {
       return this.violation('rxOverflow', `0x${b.toString(16)}`)
     }
     this.rx.push(b)
@@ -270,8 +282,8 @@ export class GrblEmulator {
   private blocked(): boolean {
     return (
       this.critical ||
-      this.stopping !== undefined ||
-      this.state === 'Hold' ||
+      (this.stopping !== undefined && this.stopping !== 'hold') ||
+      (this.state === 'Hold' && this.holdComplete) ||
       this.state === 'Door' ||
       this.state === 'Home' ||
       this.dwellEndsAt !== undefined
@@ -303,14 +315,13 @@ export class GrblEmulator {
   private executeLine(): void {
     const text = this.lineChars
     const overflow = this.lineOverflow
-    const index = this.rec.lines.length
-    const entry: TraceLine = { text: this.lineRaw, receivedAt: this.now }
+    const index = this.tracing ? this.rec.lines.length : -1
     if (this.lineRawLength > LINE_BUFFER_SIZE) this.violation('lineTooLong', this.lineRaw)
+    if (this.tracing) this.rec.lines.push({ text: this.lineRaw, receivedAt: this.now })
     this.lineChars = ''
     this.lineRaw = ''
     this.lineRawLength = 0
     this.lineComment = this.lineSemicolon = this.lineOverflow = false
-    this.rec.lines.push(entry) // always: indices identify lines for motion timing
     if (overflow) return this.respond(index, STATUS.overflow)
     if (text === '') return this.respond(index, 0)
     if (text.startsWith('$')) return this.system(index, text)
@@ -320,7 +331,7 @@ export class GrblEmulator {
     if (parsed.isErr()) return this.respond(index, parsed.unwrapErr())
     const block = parsed.unwrap()
     this.parser = block.state
-    this.current = { steps: [...block.actions], line: index }
+    this.current = current(block.actions, index)
   }
 
   private respond(line: number, status: StatusCode | 0): void {
@@ -335,7 +346,7 @@ export class GrblEmulator {
 
   /** Executes the next step of the current line; false when it has to wait. */
   private step(cur: Current): boolean {
-    const s = cur.steps[0]
+    const s = cur.steps[cur.next]
     if (s === undefined) {
       this.current = undefined
       this.respond(cur.line, 0)
@@ -347,13 +358,13 @@ export class GrblEmulator {
         return false
       }
       if (this.state === 'Check') {
-        cur.steps.shift()
+        cur.next++
         return true
       }
       if (this.planner.free === 0) return false
       const last = this.planner.blocks[this.planner.blocks.length - 1]
       const start = last ? last.target : this.position()
-      const lastOfLine = !cur.steps.slice(1).some((x) => x.kind === 'move' || x.kind === 'jog')
+      const lastOfLine = cur.next === cur.lastMove
       const added = this.planner.add(start, {
         target: s.target,
         rapid: s.kind === 'move' && s.rapid,
@@ -362,7 +373,7 @@ export class GrblEmulator {
         line: cur.line,
         lastOfLine,
       })
-      cur.steps.shift()
+      cur.next++
       if (added) {
         if (this.exec) this.replan()
         else this.startMotion()
@@ -371,7 +382,7 @@ export class GrblEmulator {
     }
     // Every other step synchronizes with the planner first (protocol_buffer_synchronize).
     if (this.planner.blocks.length > 0) return false
-    cur.steps.shift()
+    cur.next++
     const check = this.state === 'Check'
     switch (s.kind) {
       case 'spindle':
@@ -395,7 +406,10 @@ export class GrblEmulator {
         }
         return true
       case 'programEnd':
-        if (!check) this.spindle = { dir: 'off', rpm: this.spindle.rpm }
+        if (!check) {
+          this.spindle = { dir: 'off', rpm: this.spindle.rpm }
+          this.restoreOverrides()
+        }
         this.emit('[MSG:Pgm End]')
         return true
     }
@@ -502,7 +516,11 @@ export class GrblEmulator {
       this.planner.clear()
       this.parser = { ...this.parser, position: this.mpos }
     }
-    if (reason === 'jogCancel') this.state = 'Idle'
+    if (reason === 'jogCancel') {
+      this.state = this.doorAfterJog ? 'Door' : 'Idle'
+      if (this.doorAfterJog) this.spindleSuspended = true
+      this.doorAfterJog = false
+    }
     if (reason === 'door') this.spindleSuspended = true
     this.sample()
     if (reason === 'softLimit') return this.criticalAlarm(2)
@@ -551,8 +569,9 @@ export class GrblEmulator {
     }
     if (this.homingEndsAt !== undefined && this.homingEndsAt <= t) {
       this.homingEndsAt = undefined
-      this.mpos = zero
-      this.parser = { ...this.parser, position: zero }
+      const pulloff = -this.settings.get(27)
+      this.mpos = [pulloff, pulloff, pulloff]
+      this.parser = { ...this.parser, position: this.mpos }
       this.state = 'Idle'
       this.sample()
       return this.run()
@@ -616,6 +635,13 @@ export class GrblEmulator {
     this.run()
   }
 
+  private restoreOverrides(): void {
+    this.ov = { feed: 100, rapid: 100, spindle: 100 }
+    this.planner.overrides = { feed: 100, rapid: 100 }
+    this.planner.recalculate()
+    this.reportOv = 0
+  }
+
   private restoreSpindle(): void {
     this.spindleStopOverride = false
     if (this.spindle.dir !== 'off') this.emit('[MSG:Restoring spindle]')
@@ -625,7 +651,12 @@ export class GrblEmulator {
     if (this.critical || this.stopping === 'softLimit') return
     if (['Alarm', 'Check', 'Home'].includes(this.state)) return
     this.emit('[MSG:Check Door]')
-    this.doorAjar = true
+    if (this.state === 'Jog') {
+      // GRBL blocks the door until the jog cancel completes, then enters Door.
+      this.doorAfterJog = true
+      if (!this.stopping) this.beginStop('jogCancel')
+      return
+    }
     if (this.restoreEndsAt !== undefined) {
       this.restoreEndsAt = undefined
       this.spindleSuspended = true
@@ -734,11 +765,10 @@ export class GrblEmulator {
     this.lineRawLength = 0
     this.lineComment = this.lineSemicolon = this.lineOverflow = false
     this.dwellEndsAt = this.dwellRemaining = this.homingEndsAt = this.restoreEndsAt = undefined
-    this.doorAjar = false
+    this.doorAfterJog = false
     this.spindle = { dir: 'off', rpm: 0 }
     this.spindleSuspended = this.spindleStopOverride = false
-    this.ov = { feed: 100, rapid: 100, spindle: 100 }
-    this.planner.overrides = { feed: 100, rapid: 100 }
+    this.restoreOverrides()
     this.reportWco = this.reportOv = 0
     this.parser = initialParserState(this.mpos, this.wco)
     if (this.state !== 'Alarm') this.state = 'Idle'
@@ -831,7 +861,7 @@ export class GrblEmulator {
       return this.respond(line, STATUS.travelExceeded)
     }
     this.parser = { ...this.parser, position: jog.target }
-    this.current = { steps: [{ kind: 'jog', target: jog.target, feed: jog.feed }], line }
+    this.current = current([{ kind: 'jog', target: jog.target, feed: jog.feed }], line)
   }
 
   /** `$H`: Z cycle, then XY, each seeking at `$25` plus locate and pull-off at `$24`/`$27`. */
@@ -843,7 +873,7 @@ export class GrblEmulator {
       Math.abs(p[2]) / seek + locate + Math.max(Math.abs(p[0]), Math.abs(p[1])) / seek + locate
     this.state = 'Home'
     this.homingEndsAt = this.now + minutes * 60_000
-    this.current = { steps: [], line }
+    this.current = current([], line)
   }
 
   // ── Reports ─────────────────────────────────────────────────────────────────────────────
@@ -942,6 +972,7 @@ export class GrblEmulator {
   }
 
   private violation(kind: ViolationKind, detail: string): void {
+    if (!this.tracing) return
     this.rec.violations.push({ t: this.now, kind, detail })
   }
 

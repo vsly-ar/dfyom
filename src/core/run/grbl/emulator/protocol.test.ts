@@ -77,7 +77,13 @@ describe('lines and responses', () => {
     ['G0 X1 G10 L20 P1 X0', 24],
     ['G10 L20 P1', 26],
     ['G4', 28],
-    ['G10 L20 X1', 28],
+    ['G10 X1', 28],
+    ['G10 P1 X1', 20],
+    ['G10 L2 P1 R1 X0', 20],
+    ['G2 X10 R5 I5 F100', 36],
+    ['G0 G1.5 X1', 24],
+    ['G91.1', 20],
+    ['T300', 38],
     ['F-1', 4],
     ['S-1', 4],
     ['G53 G2 X1 Y1 I1 F100', 30],
@@ -113,6 +119,7 @@ describe('lines and responses', () => {
       'G90',
       'G53 G0 Z0',
       'G10 L2 P1 X0',
+      'G10 L20 X0',
       'M3 S1000',
       'M4',
       'M5',
@@ -186,7 +193,7 @@ describe('$ commands', () => {
     expect(settings).toContain('$120=100.000')
     expect(settings.at(-1)).toBe('ok')
     expect(send(emu, '$G\n')).toEqual(['[GC:G0 G54 G17 G21 G90 G94 M5 M9 T0 F0 S0]', 'ok'])
-    expect(send(emu, '$I\n')).toEqual(['[VER:1.1h.20190830:]', '[OPT:VZ,15,128]', 'ok'])
+    expect(send(emu, '$I\n')).toEqual(['[VER:1.1h.20190830:]', '[OPT:V,15,128]', 'ok'])
     send(emu, 'G10 L2 P1 X-1.5\n')
     const params = send(emu, '$#\n')
     expect(params[0]).toBe('[G54:-1.500,0.000,0.000]')
@@ -250,7 +257,7 @@ describe('$ commands', () => {
 })
 
 describe('homing, alarms and reset', () => {
-  it('homes with $H: Home state, ok when done, MPos 0,0,0', () => {
+  it('homes with $H: Home state, ok when done, MPos −$27 per axis', () => {
     const emu = emulator({ homing: true })
     emu.readOutput()
     expect(send(emu, '$H\n')).toEqual([])
@@ -261,8 +268,9 @@ describe('homing, alarms and reset', () => {
     expect(outLines(emu)).toEqual([])
     emu.advanceTo(9600)
     expect(outLines(emu)).toEqual(['ok', 'ok'])
-    expect(emu.status().state).toBe('Run')
-    expect(emu.trace.transitions.map((t) => t.to)).toEqual(['Home', 'Idle', 'Run'])
+    expect(emu.trace.samples.find((x) => x.state === 'Idle')?.mpos).toEqual([-1, -1, -1])
+    expect(emu.status().state).toBe('Idle') // G0 X-1 from X-1: nothing to do
+    expect(emu.trace.transitions.map((t) => t.to)).toEqual(['Home', 'Idle'])
   })
 
   it('soft reset during motion raises ALARM:3 and locks', () => {
@@ -316,16 +324,16 @@ describe('homing, alarms and reset', () => {
     settle(emu)
     emu.readOutput()
     expect(send(emu, 'G1 X-100 F3000\n')).toEqual(['ok'])
-    emu.advance(500) // at 50 mm/s after 12.5 mm
+    emu.advance(500) // at 50 mm/s after 12.5 mm, from the homed X−1
     expect(send(emu, 'G1 X-100 Y-2000\n')).toEqual([])
     expect(emu.status().state).toBe('Hold:1')
     settle(emu)
     expect(outLines(emu)).toEqual(['ALARM:2', '[MSG:Reset to continue]'])
     // Stopped after another 12.5 mm of deceleration; ALARM:2 keeps the position.
-    expect(emu.status().mpos[0]).toBeCloseTo(-25, 6)
+    expect(emu.status().mpos[0]).toBeCloseTo(-26, 6)
     expect(emu.status().state).toBe('Alarm')
     send(emu, '\x18')
-    expect(emu.status().mpos[0]).toBeCloseTo(-25, 6)
+    expect(emu.status().mpos[0]).toBeCloseTo(-26, 6)
   })
 
   it('soft limit check covers check mode', () => {
@@ -343,8 +351,18 @@ describe('realtime bytes and buffers', () => {
     send(emu, `G1 X100 F60\n`)
     // The planner is not full, so lines run as they arrive; a line without EOL fills RX.
     send(emu, `(${'x'.repeat(140)}`)
-    expect(emu.status().rxFree).toBe(1)
-    expect(emu.trace.violations.filter((v) => v.kind === 'rxOverflow')).toHaveLength(14)
+    expect(emu.status().rxFree).toBe(0)
+    expect(emu.trace.violations.filter((v) => v.kind === 'rxOverflow')).toHaveLength(13)
+  })
+
+  it('uses all 128 RX bytes (the GRBL ring buffer has one spare slot)', () => {
+    const emu = emulator()
+    emu.readOutput()
+    send(emu, '!') // suspended: lines stay in RX
+    send(emu, `(${'x'.repeat(126)}\n`)
+    expect(emu.status().rxFree).toBe(0)
+    expect(emu.trace.violations).toEqual([])
+    expect(send(emu, '~')).toEqual(['ok'])
   })
 
   it('records non-ASCII bytes inside a line and acts on realtime bytes in comments', () => {
@@ -394,5 +412,45 @@ describe('realtime bytes and buffers', () => {
     send(emu, '$10=0\n')
     expect(statusOf(emu)).toContain('WPos:0.000,0.000,0.000')
     expect(bytes('A')).toEqual(Uint8Array.of(65))
+  })
+})
+
+describe('GRBL source fidelity', () => {
+  it('M2/M30 restore the feed, rapid and spindle overrides', () => {
+    const emu = emulator()
+    send(emu, '\x91\x96\x9a')
+    send(emu, 'M30\n')
+    statusOf(emu)
+    expect(statusOf(emu)).toContain('|Ov:100,100,100')
+  })
+
+  it('keeps reading and planning lines while decelerating in Hold:1', () => {
+    const emu = emulator()
+    emu.readOutput()
+    send(emu, 'G1 X100 F3000\n')
+    emu.advance(1000)
+    send(emu, '!')
+    expect(emu.status().state).toBe('Hold:1')
+    expect(send(emu, 'G1 X200\n')).toEqual(['ok'])
+    expect(emu.status().plannerFree).toBe(13)
+    settle(emu)
+    expect(emu.status().state).toBe('Hold:0')
+    expect(send(emu, 'G1 X300\n')).toEqual([]) // suspended once stopped
+    send(emu, '~')
+    settle(emu)
+    expect(emu.status().mpos).toEqual([300, 0, 0])
+  })
+
+  it('records nothing with trace: false', () => {
+    const emu = emulator({ trace: false })
+    send(emu, `G1 X10 F600\n(Ã)\nG0X${'1'.repeat(80)}\n`)
+    settle(emu)
+    expect(emu.trace).toEqual({
+      lines: [],
+      samples: [],
+      responses: [],
+      transitions: [],
+      violations: [],
+    })
   })
 })

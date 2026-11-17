@@ -273,6 +273,15 @@ describe('emulated timing', () => {
     expect(moves.at(-1)).toMatchObject({ target: [10, 10, 0] })
   })
 
+  it('executes an arc of ~22 000 chords in linear time', () => {
+    const emu = emulator({ settings: { 12: 0.001, 120: 1e6, 121: 1e6 }, trace: false })
+    const start = Date.now()
+    send(emu, 'G2 X0 Y0 I100000 J0 F6000\n')
+    settle(emu, 1e12)
+    expect(Date.now() - start).toBeLessThan(2000)
+    expect(emu.status()).toMatchObject({ state: 'Idle', plannerFree: 15 })
+  })
+
   it('times a helix by its chord path and planner', () => {
     const emu = emulator({ settings: { 120: 100_000, 121: 100_000, 122: 100_000 } })
     send(emu, 'G2 X0 Y0 Z-1 I5 J0 F600\n')

@@ -54,9 +54,25 @@ export function statusOf(emu: GrblEmulator): string {
   return s
 }
 
+/** DFYOM tool-change marker, matched against a whole line (grbl.md#output-dialect). */
+const MARKER = /^\(DFYOM TOOL CHANGE (\d+): ([^()]*)\)$/
+
+export interface StreamerOptions {
+  readonly mode?: 'charCount' | 'sendResponse'
+  /** Stop sending and feed-hold on the first `error:N`, as GrblSender will. */
+  readonly stopOnError?: boolean
+  /**
+   * `dfyom`: apply the tool-change rule (stop before a marker line followed by exactly `M0`,
+   * wait for `resumeToolChange()`, send the marker, skip the `M0`). Default `pause`: stream as
+   * other senders do and let GRBL pause at `M0`.
+   */
+  readonly toolChange?: 'dfyom' | 'pause'
+}
+
 /**
  * Minimal sender over VirtualGrblTransport: character counting against the RX buffer (or
- * send-response), counting `ok`/`error:N` acknowledgements. Time only moves in `runUntil`.
+ * send-response), counting `ok`/`error:N` acknowledgements. Time only moves in `runUntil`
+ * (responses are delivered on the clock too).
  */
 export class TestStreamer {
   readonly clock = new VirtualClock()
@@ -64,22 +80,47 @@ export class TestStreamer {
   readonly received: string[] = []
   readonly errors: string[] = []
   acked = 0
-  private buffer = ''
-  private readonly queue: string[] = []
-  private readonly inflight: number[] = []
   /** Most bytes ever unacknowledged at once. */
   maxInflight = 0
+  /** Set while the DFYOM tool-change rule holds the stream. */
+  toolChange: { readonly tool: number; readonly name: string } | undefined
+  stopped = false
+  private buffer = ''
+  private readonly queue: string[] = []
+  private head = 0
+  private readonly urgent: string[] = []
+  private readonly inflight: number[] = []
+  private inHead = 0
+  private used = 0
+  private readonly mode: 'charCount' | 'sendResponse'
 
   constructor(
     readonly emu: GrblEmulator,
-    readonly mode: 'charCount' | 'sendResponse' = 'charCount',
+    private readonly options: StreamerOptions = {},
   ) {
+    this.mode = options.mode ?? 'charCount'
     this.transport = new VirtualGrblTransport(emu, this.clock)
     this.transport.onData((b) => this.onData(b))
   }
 
   send(lines: readonly string[]): void {
-    this.queue.push(...lines)
+    for (const l of lines) this.queue.push(l)
+    this.fill()
+  }
+
+  /** Lines sent ahead of the program, also while a tool change holds it (jog, zeroing). */
+  manual(lines: readonly string[]): void {
+    for (const l of lines) this.urgent.push(l)
+    this.fill()
+  }
+
+  /** Ends the guided tool change: sends the marker line, skips its `M0`, continues. */
+  resumeToolChange(): void {
+    const marker = this.queue[this.head]
+    if (this.toolChange === undefined || marker === undefined) return
+    this.toolChange = undefined
+    this.head += 2
+    this.urgent.push(marker)
     this.fill()
   }
 
@@ -88,12 +129,22 @@ export class TestStreamer {
     void this.transport.write(Uint8Array.of(b))
   }
 
-  get idle(): boolean {
-    return this.queue.length === 0 && this.inflight.length === 0
+  get inflightLines(): number {
+    return this.inflight.length - this.inHead
   }
 
-  get queued(): number {
-    return this.queue.length
+  get idle(): boolean {
+    return this.head >= this.queue.length && this.urgent.length === 0 && this.inflightLines === 0
+  }
+
+  /** The tool-change rule holds the stream and the machine has finished everything before it. */
+  get toolChangeReady(): boolean {
+    return (
+      this.toolChange !== undefined &&
+      this.urgent.length === 0 &&
+      this.inflightLines === 0 &&
+      this.emu.status().state === 'Idle'
+    )
   }
 
   /** Advances virtual time event by event until `done()`; false if nothing more is scheduled. */
@@ -111,36 +162,60 @@ export class TestStreamer {
   status(): string {
     const before = this.received.length
     this.realtime('?')
+    this.clock.advance(0)
     const s = this.received.slice(before).find((l) => l.startsWith('<'))
     if (s === undefined) throw new Error('no status report')
     return s
   }
 
+  private next(): string | undefined {
+    if (this.urgent.length > 0) return this.urgent[0]
+    if (this.toolChange !== undefined) return undefined
+    const line = this.queue[this.head]
+    if (line === undefined) return undefined
+    const m = this.options.toolChange === 'dfyom' ? MARKER.exec(line) : null
+    if (m && this.queue[this.head + 1] === 'M0') {
+      this.toolChange = { tool: Number(m[1]), name: m[2] ?? '' }
+      return undefined
+    }
+    return line
+  }
+
   private fill(): void {
-    for (let line = this.queue[0]; line !== undefined; line = this.queue[0]) {
+    if (this.stopped) return
+    for (let line = this.next(); line !== undefined; line = this.next()) {
       const n = line.length + 1
-      const used = this.inflight.reduce((a, b) => a + b, 0)
       const fits =
-        this.mode === 'charCount' ? used + n <= RX_BUFFER_SIZE - 1 : this.inflight.length === 0
+        this.mode === 'charCount' ? this.used + n <= RX_BUFFER_SIZE : this.inflightLines === 0
       if (!fits) return
-      this.queue.shift()
+      if (this.urgent.length > 0) this.urgent.shift()
+      else this.head++
       this.inflight.push(n)
-      this.maxInflight = Math.max(this.maxInflight, used + n)
+      this.used += n
+      this.maxInflight = Math.max(this.maxInflight, this.used)
       void this.transport.write(bytes(`${line}\n`))
     }
   }
 
   private onData(data: Uint8Array): void {
-    this.buffer += String.fromCharCode(...data)
-    const parts = this.buffer.split('\r\n')
+    let text = this.buffer
+    for (const b of data) text += String.fromCharCode(b)
+    const parts = text.split('\r\n')
     this.buffer = parts.pop() ?? ''
     for (const l of parts) {
       if (l === '') continue
       this.received.push(l)
       if (l === 'ok' || l.startsWith('error:')) {
-        this.inflight.shift()
+        this.used -= this.inflight[this.inHead] ?? 0
+        this.inHead++
         this.acked++
-        if (l !== 'ok') this.errors.push(l)
+        if (l !== 'ok') {
+          this.errors.push(l)
+          if (this.options.stopOnError && !this.stopped) {
+            this.stopped = true
+            this.realtime('!')
+          }
+        }
       }
     }
     this.fill()
