@@ -74,3 +74,17 @@ export function faultFs(
     crashed: { get: () => crashed },
   }) as FaultFs
 }
+
+/** Waits 0–`maxMs` ms (random) before every call: interleaves concurrent races in tests. */
+export function jitterFs(maxMs = 3, base: PersistFs = nodeFs): PersistFs {
+  const wait = () => new Promise((r) => setTimeout(r, Math.random() * maxMs))
+  return Object.fromEntries(
+    Object.entries(base).map(([op, fn]) => [
+      op,
+      async (...args: unknown[]) => {
+        await wait()
+        return (fn as (...a: unknown[]) => unknown)(...args)
+      },
+    ]),
+  ) as unknown as PersistFs
+}

@@ -1,11 +1,11 @@
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { fakeClock } from '../../core/commands/testing'
 import { noopLogger, type Logger } from '../../shared/logging'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
 import { nodeFs } from './fs'
-import { faultFs, useTempDir } from './fs.testing'
+import { faultFs, jitterFs, useTempDir } from './fs.testing'
 import {
   acquireLock,
   inspectLock,
@@ -121,7 +121,7 @@ describe('acquireLock', () => {
 
   it('two instances taking over the same stale lock at once: exactly one wins', async () => {
     await mkdir(join(tmp.dir, 'p'))
-    for (let round = 0; round < 20; round++) {
+    for (let round = 0; round < 100; round++) {
       await writeFile(
         lockPath(),
         JSON.stringify({
@@ -132,29 +132,33 @@ describe('acquireLock', () => {
           heartbeatAt: '2026-11-17T09:00:00.000Z',
         }),
       )
-      const owners = ['x', 'y', 'z'].map((id, i) => ({
+      const owners = ['w', 'x', 'y', 'z'].map((id, i) => ({
         instanceId: id,
         pid: 300 + i,
         host: 'host-1',
       }))
-      const results = await Promise.all(owners.map((o) => acquireLock(deps(o))))
+      const results = await Promise.all(
+        owners.map((o) => acquireLock({ ...deps(o), fs: jitterFs() })),
+      )
       const winners = results.filter((r) => r.isOk())
       expect(winners.length, `round ${round}`).toBe(1)
       for (const r of results) if (r.isErr()) expect(r.unwrapErr().code).toBe('persist.locked')
       expect((await readLock()).instanceId).toBe(winners[0]?.unwrap().owner.instanceId)
     }
-  })
+  }, 60_000)
 
   it('a refresh racing a takeover leaves exactly one holder', async () => {
     await mkdir(join(tmp.dir, 'p'))
-    for (let round = 0; round < 20; round++) {
+    for (let round = 0; round < 100; round++) {
       // The holder was suspended past the stale limit and refreshes just as `me` takes over.
       const clock = fakeClock(T0)
-      const holder = expectOk(await acquireLock(deps(other, () => true, clock)))
+      const holder = expectOk(
+        await acquireLock({ ...deps(other, () => true, clock), fs: jitterFs() }),
+      )
       clock.advance(LOCK_STALE_MS + 1)
       const [refreshed, taken] = await Promise.all([
         holder.refresh(),
-        acquireLock(deps(me, () => true, clock)),
+        acquireLock({ ...deps(me, () => true, clock), fs: jitterFs() }),
       ])
       expect(refreshed.isOk() && taken.isOk(), `round ${round}`).toBe(false)
       const file = await readLock()
@@ -164,6 +168,32 @@ describe('acquireLock', () => {
       else expectOk(await holder.release())
       expect((await inspectLock(deps(me))).unwrap()).toEqual({ state: 'none' })
     }
+  }, 60_000)
+
+  it('a takeover mutex left by a crashed instance is broken only once it is old', async () => {
+    await mkdir(join(tmp.dir, 'p'))
+    expectOk(await acquireLock(deps(other)))
+    const mutex = `${lockPath()}.takeover`
+    await writeFile(mutex, JSON.stringify({ token: 't', at: new Date().toISOString() }))
+    const late = fakeClock(T0 + LOCK_STALE_MS + 1)
+    // Busy mutex: the takeover backs off with persist.locked and changes nothing.
+    expectErrCode(await acquireLock(deps(me, () => true, late)), 'persist.locked')
+    expect((await readLock()).instanceId).toBe('inst-b')
+    expect((await readdir(join(tmp.dir, 'p'))).sort()).toEqual(['lock.json', 'lock.json.takeover'])
+    // Old enough: broken, then the takeover proceeds and the mutex is gone afterwards.
+    expectOk(await acquireLock({ ...deps(me, () => true, late), mutexStaleMs: 0 }))
+    expect((await readLock()).instanceId).toBe('inst-a')
+    expect((await readdir(join(tmp.dir, 'p'))).sort()).toEqual(['lock.json'])
+  })
+
+  it('a refresh that finds the mutex busy is retried later, not reported as a lost lock', async () => {
+    await mkdir(join(tmp.dir, 'p'))
+    const lock = expectOk(await acquireLock(deps(other)))
+    const mutex = `${lockPath()}.takeover`
+    await writeFile(mutex, JSON.stringify({ token: 't', at: new Date().toISOString() }))
+    expectErrCode(await lock.refresh(), 'persist.io')
+    await rm(mutex)
+    expectOk(await lock.refresh())
   })
 
   it('takes over a lock whose heartbeat is older than 2 minutes', async () => {

@@ -94,7 +94,11 @@ Fixed in v0.1 (no settings): keep at most **20 saves** and **200 MB per project*
 ## Lock
 
 - Create `lock.json` exclusively: write a temp file, fsync, then hard-link it to `lock.json` (fails if one exists – exclusive like `wx`, but never visible half-written); refresh `heartbeatAt` every 30 s; delete on close.
-- Takeover, refresh and release are compare-and-swaps: rename `lock.json` aside to a unique name (only one rename of the same file succeeds; the loser gets `ENOENT` and retries), check what was moved, then link the new lock – or put the old one back with a link that fails if someone created a lock meanwhile. So two instances never both hold the lock; a refresh racing a takeover can lose the lock (the heartbeat reports it).
+- Creating is lock-free (the link fails if a lock exists). Only a holder of the **takeover mutex** `lock.json.takeover` ever removes or replaces `lock.json`; the mutex is created the same exclusive way and holds a unique token. Under it, each operation re-reads `lock.json` and then acts:
+  - takeover: if it is still the same stale lock, unlink it and link ours (if absent);
+  - refresh: if it is ours, write a temp file and rename it over `lock.json` (atomic replace); otherwise `persist.locked`;
+  - release: if it is ours, unlink it.
+- A busy mutex is retried briefly; then a takeover returns `persist.locked` and a refresh tries again at the next heartbeat. A mutex older than 10 s (wall time) was left by a crashed instance and is broken (logged); two instances breaking the same dead mutex at once is a remaining tiny race (plan known issues).
 - An existing lock is **stale**:
   - same host (same clock): `heartbeatAt` is older than 2 min, or its PID is not alive **and** `heartbeatAt` is older than one interval (30 s). The second condition guards PID namespaces (Flatpak, Snap, containers) that share the host name but not the PIDs.
   - other host: clocks may differ, so only once this instance has seen the same `heartbeatAt` unchanged for 2 min of its own (local) time; a first attempt is refused and a retry after 2 min succeeds.

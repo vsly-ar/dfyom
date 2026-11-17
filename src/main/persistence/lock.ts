@@ -2,12 +2,11 @@
  * Project lock: exclusive create, heartbeat, stale detection and takeover.
  * Doc: docs/architecture/persistence.md#lock
  *
- * Every change is a compare-and-swap on the file system:
- * - create: write a temp file, then hard-link it to `lock.json` (fails if one exists), so a lock
- *   is never visible half-written;
- * - takeover, refresh, release: first rename `lock.json` aside to a unique name (only one rename
- *   of the same file succeeds), check what was moved, then link the new lock (or put the old one
- *   back with a link that fails if someone else created a lock meanwhile).
+ * - Create: write a temp file, then hard-link it to `lock.json` (fails if one exists), so a lock
+ *   is never visible half-written. Lock-free: only mutex holders ever remove a `lock.json`.
+ * - Takeover, refresh and release run only while holding the mutex `lock.json.takeover`
+ *   (created the same exclusive way, with a unique token). Inside it they re-read `lock.json`
+ *   and act only if it is still the stale lock (takeover) or ours (refresh, release).
  */
 import { randomBytes } from 'node:crypto'
 import { z } from 'zod'
@@ -23,7 +22,7 @@ import {
   type AppResult,
   type AsyncAppResult,
 } from '../../shared/result'
-import { errnoCode, type PersistFs } from './fs'
+import { errnoCode, renameWithRetry, type PersistFs } from './fs'
 
 export const LOCK_HEARTBEAT_MS = 30_000
 export const LOCK_STALE_MS = 2 * 60_000
@@ -57,6 +56,8 @@ export interface LockDeps {
   readonly log: Logger
   /** Kept for the life of the instance, so a foreign host's lock can age in local time. */
   readonly observed: LockObservations
+  /** Age after which a takeover mutex counts as left by a crashed instance (default 10 s). */
+  readonly mutexStaleMs?: number
 }
 
 export type LockState =
@@ -141,12 +142,17 @@ const lockedError = (info: LockInfo | undefined, path: string, where = 'lock.acq
         : { holder: info.instanceId, startedAt: info.startedAt, host: info.host, path },
   })
 
-const unique = (path: string, tag: string) => `${path}.${randomBytes(4).toString('hex')}.${tag}`
+/** A mutex older than this was left by a crashed instance and is broken. */
+export const LOCK_MUTEX_STALE_MS = 10_000
+const MUTEX_ATTEMPTS = 20
 
-/** Temp file with the lock's content (fsynced), ready to be linked into place. */
-async function prepare(fs: PersistFs, path: string, info: LockInfo): Promise<string> {
+const unique = (path: string, tag: string) => `${path}.${randomBytes(4).toString('hex')}.${tag}`
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+/** Temp file with `text` (fsynced), ready to be linked or renamed into place. */
+async function prepare(fs: PersistFs, path: string, text: string): Promise<string> {
   const tmp = unique(path, 'tmp')
-  await fs.writeFile(tmp, stableJson(info))
+  await fs.writeFile(tmp, text)
   await fs.fsync(tmp)
   return tmp
 }
@@ -162,15 +168,65 @@ async function linkIfAbsent(fs: PersistFs, from: string, to: string): Promise<bo
   }
 }
 
-/** Renames the lock aside; `undefined` if there was none (someone else moved it first). */
-async function moveAside(fs: PersistFs, path: string): Promise<string | undefined> {
-  const aside = unique(path, 'aside')
+const MutexSchema = z.object({ token: z.string(), at: z.iso.datetime() })
+
+async function readMutex(
+  fs: PersistFs,
+  path: string,
+): Promise<z.output<typeof MutexSchema> | 'missing' | undefined> {
+  let bytes: Uint8Array
   try {
-    await fs.rename(path, aside)
-    return aside
+    bytes = await fs.readFile(path)
   } catch (e) {
-    if (errnoCode(e) === 'ENOENT') return undefined
+    if (errnoCode(e) === 'ENOENT') return 'missing'
     throw e
+  }
+  const parsed = tryCatch(
+    () => MutexSchema.parse(JSON.parse(new TextDecoder().decode(bytes))),
+    'input.malformed',
+    'bad mutex',
+  )
+  return parsed.isOk() ? parsed.unwrap() : undefined
+}
+
+/**
+ * Runs `body` while holding `<lock>.takeover`; `'busy'` if another instance holds it after brief
+ * retries. Its age is judged by wall time (it only guards sections of a few file operations).
+ */
+async function withMutex<T>(d: LockDeps, body: () => Promise<T>): Promise<T | 'busy'> {
+  const { fs } = d
+  const mutex = `${d.path}.takeover`
+  const token = randomBytes(8).toString('hex')
+  const tmp = await prepare(fs, mutex, stableJson({ token, at: new Date().toISOString() }))
+  let held = false
+  try {
+    for (let attempt = 1; attempt <= MUTEX_ATTEMPTS && !held; attempt++) {
+      if (await linkIfAbsent(fs, tmp, mutex)) {
+        held = true
+        break
+      }
+      const other = await readMutex(fs, mutex)
+      if (other === 'missing') continue
+      if (
+        other === undefined ||
+        Date.now() - Date.parse(other.at) > (d.mutexStaleMs ?? LOCK_MUTEX_STALE_MS)
+      ) {
+        // Left by a crashed instance. Two instances breaking it at once is a known tiny race.
+        d.log.warn({ path: mutex }, 'stale lock mutex broken')
+        await fs.rm(mutex)
+        continue
+      }
+      await sleep(2 + Math.random() * 8)
+    }
+  } finally {
+    await fs.rm(tmp).catch(() => undefined)
+  }
+  if (!held) return 'busy'
+  try {
+    return await body()
+  } finally {
+    const current = await readMutex(fs, mutex).catch(() => undefined)
+    if (typeof current === 'object' && current.token === token) await fs.rm(mutex)
   }
 }
 
@@ -179,31 +235,30 @@ const sameLock = (a: LockInfo | 'missing' | undefined, b: LockInfo | undefined):
     ? a.instanceId === b.instanceId && a.heartbeatAt === b.heartbeatAt
     : a === undefined && b === undefined
 
-/** Exclusive create; a stale lock is moved aside and replaced, and the takeover is logged. */
+/** Exclusive create; a stale lock is replaced under the mutex, and the takeover is logged. */
 export async function acquireLock(d: LockDeps): AsyncAppResult<Lock> {
   const now = new Date(d.clock.now()).toISOString()
   const info: LockInfo = { ...d.owner, startedAt: now, heartbeatAt: now }
   let tmp: string | undefined
   const ran = await tryAsync(
     async (): Promise<AppResult<Lock>> => {
-      tmp = await prepare(d.fs, d.path, info)
+      const created = await prepare(d.fs, d.path, stableJson(info))
+      tmp = created
       for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-        if (await linkIfAbsent(d.fs, tmp, d.path)) return Ok(new HeldLock(d, info))
+        if (await linkIfAbsent(d.fs, created, d.path)) return Ok(new HeldLock(d, info))
         const existing = await inspectLock(d)
         if (existing.isErr()) return Err(existing.unwrapErr())
         const s = existing.unwrap()
         if (s.state === 'live') return lockedError(s.info, d.path)
         if (s.state === 'none') continue
-        const aside = await moveAside(d.fs, d.path)
-        if (aside === undefined) continue // another instance moved it first
-        const moved = await readInfoAt(d.fs, aside)
-        if (!sameLock(moved, s.info)) {
-          // Refreshed or replaced since we looked: put it back unless a new lock exists.
-          await linkIfAbsent(d.fs, aside, d.path)
-          await d.fs.rm(aside)
-          continue
-        }
-        await d.fs.rm(aside)
+        const took = await withMutex(d, async () => {
+          // Still the same stale lock? Then nobody else took it over meanwhile.
+          if (!sameLock(await readInfoAt(d.fs, d.path), s.info)) return false
+          await d.fs.rm(d.path)
+          return linkIfAbsent(d.fs, created, d.path)
+        })
+        if (took === 'busy') return lockedError(s.info, d.path)
+        if (!took) continue
         d.log.warn(
           {
             path: d.path,
@@ -219,6 +274,7 @@ export async function acquireLock(d: LockDeps): AsyncAppResult<Lock> {
           },
           'stale lock taken over',
         )
+        return Ok(new HeldLock(d, info))
       }
       return lockedError(undefined, d.path)
     },
@@ -246,35 +302,39 @@ class HeldLock implements Lock {
     return typeof i === 'object' && i.instanceId === this.d.owner.instanceId
   }
 
+  /** Under the mutex: atomic replace (temp + rename) if the lock is still ours. */
   async refresh(): AsyncAppResult<void> {
     const { fs, path } = this.d
     const next = { ...this.info, heartbeatAt: new Date(this.d.clock.now()).toISOString() }
-    let tmp: string | undefined
     const ran = await tryAsync(
-      async (): Promise<AppResult<void>> => {
-        tmp = await prepare(fs, path, next)
-        const aside = await moveAside(fs, path)
-        const moved = aside === undefined ? 'missing' : await readInfoAt(fs, aside)
-        if (aside !== undefined && !this.ours(moved)) {
-          await linkIfAbsent(fs, aside, path)
-          await fs.rm(aside)
-          return lockedError(typeof moved === 'object' ? moved : undefined, path, 'lock.refresh')
-        }
-        // Ours (or gone: nobody holds it): link the new lock unless someone created one.
-        const linked = await linkIfAbsent(fs, tmp, path)
-        if (aside !== undefined) await fs.rm(aside)
-        if (!linked) {
-          const holder = await readInfoAt(fs, path)
-          return lockedError(typeof holder === 'object' ? holder : undefined, path, 'lock.refresh')
-        }
-        this.info = next
-        return Ok(undefined)
-      },
+      () =>
+        withMutex(this.d, async (): Promise<AppResult<void>> => {
+          const current = await readInfoAt(fs, path)
+          if (!this.ours(current))
+            return lockedError(
+              typeof current === 'object' ? current : undefined,
+              path,
+              'lock.refresh',
+            )
+          const tmp = await prepare(fs, path, stableJson(next))
+          try {
+            await renameWithRetry(fs, tmp, path)
+          } catch (e) {
+            await fs.rm(tmp).catch(() => undefined)
+            throw e
+          }
+          this.info = next
+          return Ok(undefined)
+        }),
       'persist.io',
       'refreshing the lock failed',
     )
-    if (tmp !== undefined) await fs.rm(tmp).catch(() => undefined)
-    return ran.isOk() ? ran.unwrap() : Err(ran.unwrapErr().withContext('lock.refresh', { path }))
+    if (ran.isErr()) return Err(ran.unwrapErr().withContext('lock.refresh', { path }))
+    const r = ran.unwrap()
+    // Busy: not lost; the next heartbeat tries again.
+    return r === 'busy'
+      ? fail('persist.io', 'the lock mutex is busy', { where: 'lock.refresh', data: { path } })
+      : r
   }
 
   startHeartbeat(onLost: (e: AppResult<never>) => void, intervalMs = LOCK_HEARTBEAT_MS): void {
@@ -295,18 +355,21 @@ class HeldLock implements Lock {
     this.timer = undefined
   }
 
+  /** Under the mutex: deletes the lock if it is still ours. */
   async release(): AsyncAppResult<void> {
     this.stop()
     const { fs, path } = this.d
-    return tryAsync(
-      async () => {
-        const aside = await moveAside(fs, path)
-        if (aside === undefined) return
-        if (!this.ours(await readInfoAt(fs, aside))) await linkIfAbsent(fs, aside, path)
-        await fs.rm(aside)
-      },
+    const ran = await tryAsync(
+      () =>
+        withMutex(this.d, async () => {
+          if (this.ours(await readInfoAt(fs, path))) await fs.rm(path)
+        }),
       'persist.io',
       'releasing the lock failed',
     )
+    if (ran.isErr()) return Err(ran.unwrapErr().withContext('lock.release', { path }))
+    return ran.unwrap() === 'busy'
+      ? fail('persist.io', 'the lock mutex is busy', { where: 'lock.release', data: { path } })
+      : Ok(undefined)
   }
 }

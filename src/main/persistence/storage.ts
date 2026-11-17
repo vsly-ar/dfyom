@@ -597,6 +597,8 @@ class MainSession implements ProjectSession {
         { project: this.projectId, err: flushed.unwrapErr().toJSON() },
         'flush on close failed',
       )
+    // Release first: only a lock holder (under the takeover mutex) may delete lock.json.
+    const released = await this.lock.release()
     const tidy = await tryAsync(
       () => this.storage.afterClose(this.paths, this.wf.state),
       'persist.io',
@@ -607,7 +609,6 @@ class MainSession implements ProjectSession {
         { project: this.projectId, err: tidy.unwrapErr().toJSON() },
         'project folder cleanup failed',
       )
-    const released = await this.lock.release()
     log.info({ project: this.projectId, key: this.key, dirty: this.dirty }, 'project closed')
     return flushed.isErr() ? flushed : released
   }
