@@ -74,7 +74,7 @@ Floor fillets are made only by a matching bull-nose end mill in v0.1; ball end m
 
 ## Feeds and speeds
 
-- Each of `spindleSpeed`, `feedRate`, `plungeRate`, `stepdown`, `stepover` resolves as: per-operation **override** → **tool preset** ([library.md](../architecture/library.md#feeds-and-speeds-presets)) → **calculator suggestion** ([feeds-speeds.md](../architecture/feeds-speeds.md), stub: surface speed, chip thinning, power) → strategy fallback (stepdown/stepover only, tables below). Nothing resolved → `plan.check` error naming the field.
+- Each of `spindleSpeed`, `feedRate`, `plungeRate`, `stepdown`, `stepover` resolves as: per-operation **override** → **tool preset** ([library.md](../architecture/library.md#feeds-and-speeds-presets)) → **calculator suggestion** ([feeds-speeds.md](../architecture/feeds-speeds.md): surface speed, chip thinning, power) → strategy fallback (stepdown/stepover only, tables below). Nothing resolved → `plan.check` error naming the field.
 - `presetName` default: the preset whose `materialClass` equals the stock's, else one without `materialClass`, else none. The UI shows which source each value came from.
 - Chip load (feed ÷ (rpm × flutes)) is derived and shown next to the values, not stored. Ramps and helices feed at `feedRate`; straight plunges and drilling at `plungeRate`.
 

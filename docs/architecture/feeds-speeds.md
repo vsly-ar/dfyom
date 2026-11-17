@@ -1,6 +1,6 @@
 # Feeds-and-speeds calculator
 
-Status: accepted · Used by: [plan-v0.1.md](../modes/plan-v0.1.md#feeds-and-speeds) · Presets: [library.md](library.md#feeds-and-speeds-presets) · Values: [quantities.md](quantities.md) · Terms: [glossary.md](../glossary.md) · Task: [v0.1 plan](../plans/v0.1.md) 1.15 (code: 2.12)
+Status: accepted · Code: [`src/core/feeds-speeds/`](../../src/core/feeds-speeds/suggest.ts) · Used by: [plan-v0.1.md](../modes/plan-v0.1.md#feeds-and-speeds) · Presets: [library.md](library.md#feeds-and-speeds-presets) · Values: [quantities.md](quantities.md) · Terms: [glossary.md](../glossary.md) · Task: [v0.1 plan](../plans/v0.1.md) 1.15 (code: 2.12)
 
 The calculator is the third step of the [resolution order](../modes/plan-v0.1.md#feeds-and-speeds) (override → tool preset → **calculator** → strategy fallback). It suggests `spindleSpeed`, `feedRate`, `plungeRate`, `stepdown` and `stepover` for one plan operation from the tool, the stock's material class, the strategy's engagement and the machine, and explains every number ([principles §5](../principles.md#5-user-friendly-beginner-friendly-highly-graphical)).
 
@@ -47,6 +47,7 @@ Symbols follow Sandvik Coromant (ISO): `vc` surface speed, `D` tool diameter, `z
 | `feeds.rubbing`         | actual `fz` < data minimum after clamping                                | warn: chips too thin, tool rubs and heats                                  |
 | `feeds.powerExceeded`   | `Pc > Pavail` (F7 vs. [machine check](#hobby-machine-realism))           | calculator-owned `stepdown` reduced to fit; else warn only                 |
 | `feeds.noData`          | `materialClass = other`, `toolMaterial` unset/`other`, `D` outside bands | no suggestion (`None`); fallback or `plan.check` error as today            |
+| `feeds.powerSkipped`    | milling without `spindle.power` (or without a machine)                   | info only: power check skipped; `Pc` still shown                           |
 
 All warnings join `plan.warning.list`; none is an error. Plan-mode machine checks are unchanged ([plan record](../modes/plan-v0.1.md#plan-record)).
 
@@ -110,19 +111,19 @@ suggestCutting(input: CuttingInput): CuttingSuggestion // total, pure; missing d
 - Query `feedsSpeeds.suggest { toolLibraryItemId, materialClass, engagement, machineLibraryItemId? }` exposes it to MCP/CLI ([LLM-first](../principles.md#1-llm-first)) for "what-if" use outside a plan.
 - Plan mode maps its strategy to `engagement` in `src/core/plan/feeds.ts` (resolution order and table above).
 
-## Files (planned)
+## Files
 
-| File                                | Contents                                                     |
-| ----------------------------------- | ------------------------------------------------------------ |
-| `src/core/feeds-speeds/formulas.ts` | F1–F9 as pure functions on float64 canonical units           |
-| `src/core/feeds-speeds/data.ts`     | Material table with per-row sources                          |
-| `src/core/feeds-speeds/suggest.ts`  | `suggestCutting`: data lookup, clamps, power check, warnings |
-| `src/core/feeds-speeds/commands.ts` | `feedsSpeeds.suggest` query                                  |
-| `src/core/plan/feeds.ts`            | Strategy → engagement; resolution order; `source` per field  |
+| File                                                                           | Contents                                                                      |
+| ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
+| [`src/core/feeds-speeds/formulas.ts`](../../src/core/feeds-speeds/formulas.ts) | F1–F9 as pure functions on float64 canonical units                            |
+| [`src/core/feeds-speeds/data.ts`](../../src/core/feeds-speeds/data.ts)         | Material table with per-row sources, rigidity factors, data lint              |
+| [`src/core/feeds-speeds/suggest.ts`](../../src/core/feeds-speeds/suggest.ts)   | `suggestCutting`, `machineLimits`: data lookup, clamps, power check, warnings |
+| [`src/core/feeds-speeds/commands.ts`](../../src/core/feeds-speeds/commands.ts) | `feedsSpeeds.suggest` query                                                   |
+| `src/core/plan/feeds.ts` (task 2.13)                                           | Strategy → engagement; resolution order; `source` per field                   |
 
 ## Testing
 
-- **Golden numbers** from published examples, each test citing its source: Kennametal KDMB ball nose D 0.312″, `ap` 0.047″ → `De` 0.223″ [K1]; Sandvik formula sheet examples for `n`, `vf`, `Pc` [S1]; RCTF at `ae/D` = 0.075 → ×1.90 [MD].
+- **Golden numbers** from published examples, each test citing its source: Kennametal KDMB ball nose D 0.312″, `ap` 0.047″ → `De` 0.223″ [K1]; Sandvik formula sheet examples for `n`, `vf`, `Pc` [S1]; RCTF at `ae/D` = 0.075 → ×1.90 [MD]. The [S1] sheet states formulas only (no worked examples), so those tests check hand-computed values against its formulas, and F7 against its `Pc = ae·ap·vf·kc / (60·10⁶)` form.
 - **Properties:** `n` within machine range after clamping; `vf ≤ maxFeedRate`; RCTF = 1 at `ae ≥ D/2` and capped at 3; `De = D` when `ap ≥ RE`; power check monotonic in `ap`.
 - **Data lint:** every row has a source, ranges are ordered, bands cover 0–25 mm without gaps.
 
@@ -133,9 +134,23 @@ suggestCutting(input: CuttingInput): CuttingSuggestion // total, pure; missing d
 - [K1] Kennametal KDMB ball nose working-diameter table ([product page](https://www.kennametal.com/us/en/products/p.2878444.html)); [HT1] Harvey Performance, [Ball nose effective diameter](https://www.harveyperformance.com/in-the-loupe/in-the-loupe-tv-ball-nose-end-mills-effective-diameter/); [HT2] Harvey Tool speeds-and-feeds charts per tool.
 - [MD] Machining Doctor, [Chip thinning calculator](https://www.machiningdoctor.com/calculators/chip-thinning-calculator/).
 
+## Implementation decisions (task 2.12)
+
+Where this doc was silent, the implementation chose:
+
+- **Material table empty.** This doc names the sources but no values, and no value may be invented, so `MATERIAL_DATA` ships empty: every call returns `feeds.noData` and plan mode falls back until the cited rows are curated ([v0.1 plan](../plans/v0.1.md) known issues). Each row lists `sources: { ref, fields }[]`; the data lint fails any value no source backs unless the row lists it in `estimated`. Tests use a synthetic fixture (`data.fixture.ts`).
+- **Engagement** is a discriminated union: `slot { ap? }`, `stepover { ae, ap? }`, `helix { ap }` (pitch), `drill {}`; lengths are mm numbers. `ap` given = resolved stepdown (override/preset): it is used, no `stepdown` is suggested, and a power excess only warns. A drill engagement needs a `drill` tool and vice versa, else `feeds.noData`.
+- **Chip-thinning cap:** the product RCTF × ACTF is capped at ×3 (so each factor is too). `ae` above `D` counts as `D`.
+- **Drills** use the row's `vc` (one `vc` per `materialClass × toolMaterial`), F8 for `feedRate` = `plungeRate`, clamped to `maxFeedRate.z` (rpm lowered to keep `fn` while ≥ `minSpeed`); no power check (F6/F7 are milling formulas).
+- **Plunge rate** (F9) is clamped to `maxFeedRate.z` with `feeds.feedClamped`.
+- **Power reduction** scales the calculator-owned `ap` by `Pavail / Pc` (× 0.999) until `Pc ≤ Pavail` (≤ 30 iterations; Pc is near-linear in `ap`).
+- **Output values** are float64 numbers in canonical units (`rpm`, `mm/min`, `mm`), not quantities: "Save as preset" (with the plan UI) turns them into quantities. Derivation steps are `{ step, formula, inputs, result, unit, sources? }` with `step` = `F1`…`F9`, `data`, `rigidity`, `fluteLength`, `power`, `rpmClamp`, `feedClamp` or `cap`; clamp and cap steps appear only when they apply. Display values: `dCalc`, actual `vc`, actual `fz` (drills: `fn`), `chipThinning`, `Q`, `Pc`, `spindleLoad` (Q/Pc `None` for drills).
+- **Query** `feedsSpeeds.suggest` returns `None` as `null`; `feedsSpeeds` is a command-layer area ([commands.md](commands.md#naming)). Without a machine there are no clamps, the lowest rigidity applies and the power check is skipped.
+- **Plan integration** (`src/core/plan/feeds.ts`: strategy → engagement, resolution order, `source` per field) lands with the plan model (task 2.13).
+
 ## Changes to other docs (applied with task 2.12)
 
-Those docs are being changed elsewhere; apply these edits together with the calculator code:
+Applied together with the calculator code:
 
 - [library.md § Machine](library.md#machine): add `spindle.power` (kind `power`, optional, > 0; rated output power, for the power check) and `rigidity` (enum `extrusion | hobby | prosumer | benchMill | rigidMill`, optional; [presets](#machine-rigidity-presets)).
 - [quantities.md § Kinds and units](quantities.md#kinds-and-units): add kind `power`, canonical `W`, spellings `W`, `kW`, `hp` (1 hp = 745.69987158227022 W, mechanical), bare-number default `W`; persisted unit ids `W kW hp`.

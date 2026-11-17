@@ -11,6 +11,7 @@ import { Tolerance } from './tolerance'
 const LENGTH_MM: ParseContext = { kind: 'length', defaultUnit: 'mm' }
 const LENGTH_IN: ParseContext = { kind: 'length', defaultUnit: 'in' }
 const SCALAR: ParseContext = { kind: 'scalar', defaultUnit: '1' }
+const POWER: ParseContext = { kind: 'power', defaultUnit: 'W' }
 
 const parse = (source: string, ctx: ParseContext = LENGTH_MM): Quantity =>
   expectOk(Quantity.parse(source, ctx))
@@ -67,6 +68,11 @@ describe('Quantity.parse: exact values', () => {
       ['10 IPM', '254', { kind: 'feedRate', defaultUnit: 'mm/min' }],
       ['18000 rpm', '18000', { kind: 'spindleSpeed', defaultUnit: 'rpm' }],
       ['50%', '1/2', SCALAR],
+      ['800 W', '800', POWER],
+      ['2.2 kW', '2200', POWER],
+      ['2.2 KW', '2200', POWER],
+      ['1 hp', '37284993579113511/50000000000000', POWER], // mechanical hp, exact
+      ['1 HP', '37284993579113511/50000000000000', POWER],
     ]
     for (const [source, value, ctx] of cases) expect(exact(source, ctx), source).toBe(value)
   })
@@ -75,6 +81,12 @@ describe('Quantity.parse: exact values', () => {
     expect(exact('2', LENGTH_IN)).toBe('254/5')
     expect(exact('10', { kind: 'feedRate', defaultUnit: 'in/min' })).toBe('254')
     expect(parse('2', LENGTH_IN).defaultUnit).toBe('in')
+    expect(exact('1500', POWER)).toBe('1500')
+  })
+
+  it('rejects a unit of another kind in a power field', () => {
+    expectErrCode(Quantity.parse('1 rpm', POWER), 'quantity.unit')
+    expectErrCode(Quantity.parse('1 kW', LENGTH_MM), 'quantity.unit')
   })
 
   it('accepts signs including the unicode minus (U+2212)', () => {

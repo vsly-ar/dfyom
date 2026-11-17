@@ -20,7 +20,7 @@ import {
   quantityFromDTO,
   toOption,
 } from './item'
-import type { MachineValuesDTO } from './machine.dto'
+import type { MachineValuesDTO, Rigidity } from './machine.dto'
 import type { QuantityDTO } from '../quantity/quantity.dto'
 
 export interface Axes<T> {
@@ -33,6 +33,8 @@ export interface Spindle {
   readonly control: 'gcode' | 'manual'
   readonly maxSpeed: Quantity
   readonly minSpeed: Option<Quantity>
+  /** Rated output power (kind `power`); None skips the feeds-and-speeds power check. */
+  readonly power: Option<Quantity>
 }
 
 export interface MachineProps {
@@ -46,6 +48,8 @@ export interface MachineProps {
   readonly spindle: Spindle
   readonly programUnits: 'mm' | 'in'
   readonly toolChanger: 'none'
+  /** Feeds-and-speeds rigidity preset; None = lowest (`extrusion`). */
+  readonly rigidity: Option<Rigidity>
 }
 
 const AXES = ['x', 'y', 'z'] as const
@@ -67,6 +71,7 @@ export class Machine implements MachineProps {
     readonly spindle: Spindle,
     readonly programUnits: 'mm' | 'in',
     readonly toolChanger: 'none',
+    readonly rigidity: Option<Rigidity>,
   ) {
     invariants('Machine', (c) => {
       checkNameAndNotes(c, name, notes)
@@ -90,6 +95,8 @@ export class Machine implements MachineProps {
             )
         }
       }
+      if (spindle.power.isSome())
+        checkPositive(c, ['spindle', 'power'], spindle.power.unwrap(), 'power')
     })
     Object.freeze(travel)
     Object.freeze(maxFeedRate)
@@ -113,6 +120,7 @@ export class Machine implements MachineProps {
           { ...p.spindle },
           p.programUnits,
           p.toolChanger,
+          p.rigidity,
         ),
     )
   }
@@ -128,6 +136,7 @@ export class Machine implements MachineProps {
           : axesFromDTO(dto.acceleration, 'acceleration').map((a) => Some(a)),
       maxSpeed: quantityFromDTO(dto.spindle.maxSpeed, 'spindle', 'maxSpeed'),
       minSpeed: optionalQuantityFromDTO(dto.spindle.minSpeed, 'spindle', 'minSpeed'),
+      power: optionalQuantityFromDTO(dto.spindle.power, 'spindle', 'power'),
     }).andThen((q) =>
       Machine.create({
         name: dto.name,
@@ -136,9 +145,15 @@ export class Machine implements MachineProps {
         travel: q.travel,
         maxFeedRate: q.maxFeedRate,
         acceleration: q.acceleration,
-        spindle: { control: dto.spindle.control, maxSpeed: q.maxSpeed, minSpeed: q.minSpeed },
+        spindle: {
+          control: dto.spindle.control,
+          maxSpeed: q.maxSpeed,
+          minSpeed: q.minSpeed,
+          power: q.power,
+        },
         programUnits: dto.programUnits,
         toolChanger: dto.toolChanger,
+        rigidity: toOption(dto.rigidity),
       }),
     )
   }
@@ -161,9 +176,11 @@ export class Machine implements MachineProps {
         control: this.spindle.control,
         maxSpeed: this.spindle.maxSpeed.toDTO(),
         ...optionalQuantityDTO('minSpeed', this.spindle.minSpeed),
+        ...optionalQuantityDTO('power', this.spindle.power),
       },
       programUnits: this.programUnits,
       toolChanger: this.toolChanger,
+      ...optionalField('rigidity', this.rigidity),
     } as MachineValuesDTO
   }
 

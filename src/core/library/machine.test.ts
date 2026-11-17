@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { parseWith } from '../../shared/parse'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
-import { feed, len, machineValues, num, rpm } from './library.fixture'
+import { feed, len, machineValues, num, rpm, watt } from './library.fixture'
 import { Machine } from './machine'
 import { MachineValuesDtoSchema } from './machine.dto'
 
@@ -58,5 +58,24 @@ describe('Machine', () => {
     expectErrCode(load({ ...machineValues(), controller: 'marlin' }), 'input.malformed')
     expectErrCode(load({ ...machineValues(), toolChanger: 'carousel' }), 'input.malformed')
     expectErrCode(load({ ...machineValues(), programUnits: 'cm' }), 'input.malformed')
+  })
+
+  it('round-trips the optional spindle power and rigidity preset', () => {
+    const full = {
+      ...machineValues(),
+      spindle: { control: 'gcode' as const, maxSpeed: rpm('24000'), power: watt('2.2 kW') },
+      rigidity: 'prosumer' as const,
+    }
+    const m = expectOk(load(full))
+    expect(m.spindle.power.unwrap().canonical).toBe(2200)
+    expect(m.rigidity.unwrap()).toBe('prosumer')
+    expect(m.toDTO()).toEqual(full)
+    expect(expectOk(load(machineValues())).rigidity.isNone()).toBe(true)
+  })
+
+  it('spindle power must be > 0; rigidity must be a preset', () => {
+    const spindle = { control: 'gcode', maxSpeed: rpm('24000'), power: watt('0') }
+    expect(issues({ ...machineValues(), spindle })).toEqual([['spindle.power', 'positive']])
+    expectErrCode(load({ ...machineValues(), rigidity: 'granite' }), 'input.malformed')
   })
 })

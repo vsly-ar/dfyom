@@ -78,17 +78,19 @@ Chip load is derived and displayed, not stored (it is not a v0.1 quantity kind �
 
 v0.1: a 3-axis router or mill on a GRBL-family controller ([ADR 0013](../decisions/0013-grbl-first-controller.md)). Limit fields mirror GRBL `$` settings ([GRBL v1.1 configuration](https://github.com/gnea/grbl/wiki/Grbl-v1.1-Configuration)), so they can be imported from `$$` output later and configure the virtual machine.
 
-| Field                | Kind / type                    | v0.1 | Invariants        | Why                                                                                                          |
-| -------------------- | ------------------------------ | ---- | ----------------- | ------------------------------------------------------------------------------------------------------------ |
-| `controller`         | `'grbl'`                       | yes  | –                 | Selects post-processor and streaming protocol; grblHAL/FluidNC use the same value.                           |
-| `travel.x/y/z`       | length ×3 (`$130–$132`)        | yes  | > 0               | **Work envelope** = travel box; plan checks that stock and toolpaths fit; `machine.travel.z` in expressions. |
-| `maxFeedRate.x/y/z`  | feedRate ×3 (`$110–$112`)      | yes  | > 0               | Feed rates above it are flagged; GRBL also rapids (G0) at it, so it drives run-time estimates.               |
-| `acceleration.x/y/z` | scalar ×3, mm/s² (`$120–$122`) | no   | > 0               | Better time estimates; virtual machine timing.                                                               |
-| `spindle.control`    | `'gcode' \| 'manual'`          | yes  | –                 | `manual` (trim router dial): export pauses (M0) and asks the user to set the speed; S words informative.     |
-| `spindle.maxSpeed`   | spindleSpeed (`$30`)           | yes  | > 0               | GRBL clamps S above `$30` silently, so plan flags it.                                                        |
-| `spindle.minSpeed`   | spindleSpeed (`$31`)           | no   | ≥ 0, < `maxSpeed` | Flags presets below the spindle's range.                                                                     |
-| `programUnits`       | `'mm' \| 'in'`                 | yes  | –                 | G21/G20 in exported gCode. GRBL settings are always mm; `$13` changes only reports.                          |
-| `toolChanger`        | `'none'`                       | yes  | –                 | Manual tool change: export stops (M0), the user changes the tool and re-zeros Z.                             |
+| Field                | Kind / type                                                          | v0.1 | Invariants        | Why                                                                                                                      |
+| -------------------- | -------------------------------------------------------------------- | ---- | ----------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `controller`         | `'grbl'`                                                             | yes  | –                 | Selects post-processor and streaming protocol; grblHAL/FluidNC use the same value.                                       |
+| `travel.x/y/z`       | length ×3 (`$130–$132`)                                              | yes  | > 0               | **Work envelope** = travel box; plan checks that stock and toolpaths fit; `machine.travel.z` in expressions.             |
+| `maxFeedRate.x/y/z`  | feedRate ×3 (`$110–$112`)                                            | yes  | > 0               | Feed rates above it are flagged; GRBL also rapids (G0) at it, so it drives run-time estimates.                           |
+| `acceleration.x/y/z` | scalar ×3, mm/s² (`$120–$122`)                                       | no   | > 0               | Better time estimates; virtual machine timing.                                                                           |
+| `spindle.control`    | `'gcode' \| 'manual'`                                                | yes  | –                 | `manual` (trim router dial): export pauses (M0) and asks the user to set the speed; S words informative.                 |
+| `spindle.maxSpeed`   | spindleSpeed (`$30`)                                                 | yes  | > 0               | GRBL clamps S above `$30` silently, so plan flags it.                                                                    |
+| `spindle.minSpeed`   | spindleSpeed (`$31`)                                                 | no   | ≥ 0, < `maxSpeed` | Flags presets below the spindle's range.                                                                                 |
+| `spindle.power`      | power                                                                | no   | > 0               | Rated output power, for the [feeds-and-speeds power check](feeds-speeds.md#hobby-machine-realism); none = check skipped. |
+| `rigidity`           | `'extrusion' \| 'hobby' \| 'prosumer' \| 'benchMill' \| 'rigidMill'` | no   | –                 | [Rigidity preset](feeds-speeds.md#machine-rigidity-presets) for suggested depth and feeds; none = `extrusion` (lowest).  |
+| `programUnits`       | `'mm' \| 'in'`                                                       | yes  | –                 | G21/G20 in exported gCode. GRBL settings are always mm; `$13` changes only reports.                                      |
+| `toolChanger`        | `'none'`                                                             | yes  | –                 | Manual tool change: export stops (M0), the user changes the tool and re-zeros Z.                                         |
 
 Axes are fixed X/Y/Z in v0.1; 4th/5th axis, homing direction, tool length sensor and tool table come later.
 
@@ -134,7 +136,7 @@ Where this doc was silent, the implementation chose conservatively:
 | `src/core/library/item.ts`                      | Common fields, `LibraryItemKind`, `MaterialClass`, model helpers               |
 | `src/core/library/stock.ts`, `stock.dto.ts`     | `Stock` model and Zod DTO schema                                               |
 | `src/core/library/tool.ts`, `tool.dto.ts`       | `Tool` model (per-type invariants), `CuttingPreset`                            |
-| `src/core/library/machine.ts`, `machine.dto.ts` | `Machine` model and DTO                                                        |
+| `src/core/library/machine.ts`, `machine.dto.ts` | `Machine` model and DTO, `RIGIDITY_PRESETS`                                    |
 | `src/core/library/library-item.ts`              | `LibraryItem` (meta + values), item/values schemas, `parseLibraryItem`         |
 | `src/core/library/snapshot.ts`                  | `Snapshot` model and DTO, `takeSnapshot`, `refreshSnapshot`, status, notices   |
 | `src/core/library/storage.ts`                   | `LibraryStorage` port (`list`, `get`, `put`, `remove`) and its revision checks |

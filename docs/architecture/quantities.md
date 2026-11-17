@@ -37,9 +37,10 @@ Display precision belongs to the **field** only (e.g. a length field shows 3 dec
 | `angle`        | deg       | `deg`/`°`                                                     | deg                 |
 | `feedRate`     | mm/min    | `mm/min`; `in/min`/`ipm`                                      | project unit /min   |
 | `spindleSpeed` | rpm       | `rpm`                                                         | rpm                 |
+| `power`        | W         | `W`, `kW`; `hp` (mechanical, 1 hp = 745.69987158227022 W)     | W                   |
 | `scalar`       | 1         | none, `%` (= 1/100)                                           | none                |
 
-Persisted unit ids (`defaultUnit`) are `mm cm m um in ft deg mm/min in/min rpm 1 %`; `1` is the dimensionless unit (a bare `scalar`). `µ` is the micro sign U+00B5. Implementation: [`units.ts`](../../src/core/quantity/units.ts).
+Persisted unit ids (`defaultUnit`) are `mm cm m um in ft deg mm/min in/min rpm W kW hp 1 %`; `1` is the dimensionless unit (a bare `scalar`). `µ` is the micro sign U+00B5. Implementation: [`units.ts`](../../src/core/quantity/units.ts).
 
 - A unit of another kind is an error (`mm/min` in a length field). Counts (tabs, passes) are `scalar` fields with an integer field rule.
 - Not in v0.1: `rad` (π is not rational), DMS angles, compound feet-inch (`1' 6"`), surface speed, chip load, time.
@@ -158,7 +159,7 @@ const RationalDtoSchema = z.object({
   den: z.string().regex(/^\d+$/),
 }) // bigint strings
 export const QuantityDtoSchema = z.object({
-  kind: z.enum(['length', 'angle', 'feedRate', 'spindleSpeed', 'scalar']),
+  kind: z.enum(['length', 'angle', 'feedRate', 'spindleSpeed', 'power', 'scalar']),
   source: z.string().min(1).max(256), // display only
   defaultUnit: z.enum(UNIT_IDS), // bare-number unit at entry, used when the source is re-parsed after an edit
   exact: RationalDtoSchema, // canonical unit; the value

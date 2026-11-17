@@ -171,7 +171,7 @@ class Evaluator {
 
 /**
  * Unit of a bare number that adopts `kind`: the field's default unit if of that kind; the only
- * unit of angle/spindle speed/scalar; for length and feed rate the unit system the field's
+ * unit of angle/spindle speed/power/scalar; for length and feed rate the unit system the field's
  * default unit implies (mm or inch). None when the field does not tell the unit system.
  */
 function bareUnit(kind: QuantityKind, fieldUnit: UnitId): Option<UnitId> {
@@ -183,6 +183,8 @@ function bareUnit(kind: QuantityKind, fieldUnit: UnitId): Option<UnitId> {
       return Some('deg')
     case 'spindleSpeed':
       return Some('rpm')
+    case 'power':
+      return Some('W')
     case 'scalar':
       return Some('1')
     case 'length':
