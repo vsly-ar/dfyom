@@ -19,6 +19,7 @@ import {
   type Contour,
   type Level,
   type OperationGeometry,
+  type Shape,
   type StockGeometry,
   type Vec3,
 } from './model'
@@ -46,6 +47,36 @@ export interface OperationSolids {
   readonly cut: readonly PlacedMesh[]
   /** Retained regions (tabs); fillets are built into their loft instead. */
   readonly retained: readonly PlacedMesh[]
+  /** Nominal retained regions (no overshoot) for the `dfm.retainedRemoved` check. */
+  readonly nominal: readonly NominalRegion[]
+}
+
+/**
+ * A retained region at its nominal size: a tab across exactly the slot, or a floor fillet's
+ * zone (the prism `zf..zf + f` minus the pocket's own removal, when `minusRemoval`).
+ */
+export interface NominalRegion {
+  /** Region role, e.g. `tab[0]`, `floorFillet`. */
+  readonly region: string
+  /** The operation parameter that makes it, e.g. `tabs`, `floorRadius`. */
+  readonly parameter: string
+  readonly mesh: PlacedMesh
+  readonly minusRemoval: boolean
+  /** Removals whose bounds lie inside this shape (XY, part frame) cannot reach the region. */
+  readonly clearInside?: Shape
+}
+
+/** Half the narrowest size: the largest inward offset a contour allows. */
+export function inradius(c: Contour): number {
+  return c.kind === 'circle' ? c.radius : Math.min(c.length, c.width) / 2
+}
+
+/**
+ * An `inside` profile whose slot covers the whole opening (the inset left inside the slot is
+ * within the chord tolerance): no offcut, so no tabs are built.
+ */
+export function slotCoversOpening(op: Extract<OperationGeometry, { kind: 'profile' }>): boolean {
+  return op.side === 'inside' && inradius(op.shape.contour) - op.slotWidth <= CHORD_TOLERANCE
 }
 
 /** Surface table under construction: role → index. */
@@ -107,6 +138,7 @@ export function stockSolids(stock: StockGeometry): AppResult<OperationSolids> {
     removal: [{ mesh, at: [stock.length / 2, stock.width / 2, 0] }],
     cut: [],
     retained: [],
+    nominal: [],
   }))
 }
 
@@ -134,13 +166,19 @@ function build(op: OperationGeometry, stock: StockGeometry): AppResult<Operation
 const result = (
   id: string,
   table: Table,
-  parts: { removal: PlacedMesh[]; cut?: PlacedMesh[]; retained?: PlacedMesh[] },
+  parts: {
+    removal: PlacedMesh[]
+    cut?: PlacedMesh[]
+    retained?: PlacedMesh[]
+    nominal?: NominalRegion[]
+  },
 ): OperationSolids => ({
   id,
   surfaces: table.surfaces,
   removal: parts.removal,
   cut: parts.cut ?? [],
   retained: parts.retained ?? [],
+  nominal: parts.nominal ?? [],
 })
 
 function facing(
@@ -186,12 +224,40 @@ function pocket(op: Extract<OperationGeometry, { kind: 'pocket' }>): AppResult<O
   const role = contourRoles(table, op.shape.contour)
   const fillet = op.floorRadius > EPSILON ? table.add('floorFillet') : AIR
   const zf = op.onZ - op.depth
-  return offsetLoft(op.shape.contour, pocketLevels(zf, op.floorRadius), {
+  const at: Vec3 = [op.shape.center[0], op.shape.center[1], 0]
+  const removal = offsetLoft(op.shape.contour, pocketLevels(zf, op.floorRadius), {
     band: (k, l) => (k === 0 ? role(l) : fillet),
     top: AIR,
     bottom: floor,
-  }).map((mesh) =>
-    result(op.id, table, { removal: [{ mesh, at: [op.shape.center[0], op.shape.center[1], 0] }] }),
+  })
+  if (removal.isErr() || op.floorRadius <= EPSILON)
+    return removal.map((mesh) => result(op.id, table, { removal: [{ mesh, at }] }))
+  // nominal fillet zone: the prism zf..zf + f minus this loft (same flattening at offset 0)
+  const zone = offsetLoft(
+    op.shape.contour,
+    [
+      { offset: 0, z: zf + op.floorRadius },
+      { offset: 0, z: zf },
+    ],
+    { band: () => AIR, top: AIR, bottom: AIR },
+  )
+  // the zone lies between the contour and its inset by f: removals inside the inset miss it
+  const inset = offsetContour(op.shape.contour, op.floorRadius)
+  return zone.map((z) =>
+    result(op.id, table, {
+      removal: [{ mesh: removal.unwrap(), at }],
+      nominal: [
+        {
+          region: 'floorFillet',
+          parameter: 'floorRadius',
+          mesh: { mesh: z, at },
+          minusRemoval: true,
+          ...(inset.isSome() && {
+            clearInside: { center: op.shape.center, contour: inset.unwrap() },
+          }),
+        },
+      ],
+    }),
   )
 }
 
@@ -225,11 +291,6 @@ function drilling(
   }).map((mesh) =>
     result(op.id, table, { removal: [{ mesh, at: [op.center[0], op.center[1], 0] }] }),
   )
-}
-
-/** Half the narrowest size: the largest inward offset a contour allows. */
-function inradius(c: Contour): number {
-  return c.kind === 'circle' ? c.radius : Math.min(c.length, c.width) / 2
 }
 
 /** Arc length (from the start of wall[0]) of the first tab: the middle of wall[0]; circle: front. */
@@ -269,7 +330,7 @@ function profile(
 
   // inside profile whose slot covers the opening (an inset within the chord tolerance counts):
   // no offcut, and nothing for tabs to hold
-  const covers = !outside && inradius(shape) - s <= CHORD_TOLERANCE
+  const covers = slotCoversOpening(op)
   const tabCount = covers ? 0 : op.tabs.count
   const offset = (d: number): AppResult<Contour> =>
     offsetContour(shape, d).okOr(
@@ -311,22 +372,39 @@ function profile(
   const inner = outside ? Math.min(OVERSHOOT, room / 2) : s + Math.min(OVERSHOOT, (room - s) / 2)
   const outer = outside ? -s - OVERSHOOT : -OVERSHOOT
   const retained: PlacedMesh[] = []
+  const nominal: NominalRegion[] = []
   for (let i = 0; i < tabCount; i++) {
     const c = firstTab(shape) + (i * P) / tabCount
+    const along = { from: c - op.tabs.width / 2, to: c + op.tabs.width / 2 }
     const band = offsetBand(
       shape,
-      {
-        from: c - op.tabs.width / 2,
-        to: c + op.tabs.width / 2,
-        inner,
-        outer,
-        bottom: -T - 2 * OVERSHOOT,
-        top: -T + op.tabs.thickness,
-      },
+      { ...along, inner, outer, bottom: -T - 2 * OVERSHOOT, top: -T + op.tabs.thickness },
       { top: tabTable[i]!.top, bottom: AIR, side: AIR, end: tabTable[i]!.end },
     )
-    if (band.isErr()) return Err(band.unwrapErr().withContext('tab', { index: i }))
-    retained.push({ mesh: band.unwrap(), at })
+    // nominal tab: exactly across the slot, from the stock bottom to the tab top
+    const exact = offsetBand(
+      shape,
+      {
+        ...along,
+        inner: outside ? 0 : s,
+        outer: outside ? -s : 0,
+        bottom: -T,
+        top: -T + op.tabs.thickness,
+      },
+      { top: AIR, bottom: AIR, side: AIR, end: [AIR, AIR] },
+    )
+    const both = band.andThen((b) => exact.map((e) => [b, e] as const))
+    if (both.isErr()) return Err(both.unwrapErr().withContext('tab', { index: i }))
+    const [b, e] = both.unwrap()
+    retained.push({ mesh: b, at })
+    nominal.push({
+      region: `tab[${i}]`,
+      parameter: 'tabs',
+      mesh: { mesh: e, at },
+      minusRemoval: false,
+    })
   }
-  return Ok(result(op.id, table, { removal: [{ mesh: removal.unwrap(), at }], cut, retained }))
+  return Ok(
+    result(op.id, table, { removal: [{ mesh: removal.unwrap(), at }], cut, retained, nominal }),
+  )
 }

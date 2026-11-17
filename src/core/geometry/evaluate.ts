@@ -1,12 +1,13 @@
 /**
  * 2.5D part evaluation: build every operation's labelled solids, compose
- * `stock − ∪ (removal − retained)` in one batch union, and map output triangles to surface ids.
- * Doc: docs/architecture/geometry.md#building-the-solids, #surface-ids-in-meshes
- *
- * Geometry warnings (`loosePiece`, `retainedRemoved`, `surfaceMissing`) are task 2.8 (`checks.ts`).
+ * `stock − ∪ (removal − retained)` in one batch union, map output triangles to surface ids and
+ * run the evaluation checks (errors here; geometry warnings and pieces in `checks.ts`).
+ * Doc: docs/architecture/geometry.md#building-the-solids, #surface-ids-in-meshes,
+ * #evaluation-checks
  */
 import { ctx, Err, fail, Ok, type AppResult } from '../../shared/result'
-import type { PartGeometryInput, SurfaceId } from './model'
+import { boxOf, geometryChecks, type ComposedOperation } from './checks'
+import type { DfmWarning, PartGeometryInput, SurfaceId } from './model'
 import {
   AIR,
   operationSolids,
@@ -27,6 +28,10 @@ export interface PartEvaluation {
   readonly surfaces: readonly SurfaceId[]
   /** Volume of the part including any loose pieces (mm³). */
   readonly volume: number
+  /** Pieces of volume > ε_V: 1 when the part and every offcut hang together. */
+  readonly pieces: number
+  /** Geometry warnings in check order: `dfm.loosePiece`, `dfm.retainedRemoved`, `dfm.surfaceMissing`. */
+  readonly warnings: readonly DfmWarning[]
   readonly stats: { readonly ms: number; readonly triangles: number }
 }
 
@@ -49,23 +54,26 @@ export function evaluatePart(
 
   // one original id per operation (and the stock): (original id, face id) → surface
   const tables = new Map<number, OperationSolids>()
-  const build = (op: OperationSolids): AppResult<Solid> =>
+  const build = (op: OperationSolids): AppResult<{ id: number; solid: Solid }> =>
     solids.reserveOriginalId().andThen((id) => {
       tables.set(id, op)
-      return composeOperation(op, id, solids)
+      return composeOperation(op, id, solids).map((solid) => ({ id, solid }))
     })
 
-  const composed = build(stockSolidsValue).andThen((stockSolid) => {
-    const removals: Solid[] = []
+  const composed: ComposedOperation[] = []
+  const built = build(stockSolidsValue).andThen((stockSolid) => {
     for (const op of ops) {
       const s = build(op).mapErr(ctx(WHERE, { operation: op.id }))
       if (s.isErr()) return Err(s.unwrapErr())
-      removals.push(s.unwrap())
+      const { id, solid } = s.unwrap()
+      composed.push({ op, originalId: id, solid, box: boxOf(op.removal) })
     }
-    return solids.union(removals).andThen((all) => solids.subtract(stockSolid, all))
+    return solids
+      .union(composed.map((c) => c.solid))
+      .andThen((all) => solids.subtract(stockSolid.solid, all))
   })
-  if (composed.isErr()) return Err(composed.unwrapErr())
-  const part = composed.unwrap()
+  if (built.isErr()) return Err(built.unwrapErr())
+  const part = built.unwrap()
 
   const status = solids.status(part)
   if (status.isErr()) return Err(status.unwrapErr())
@@ -81,14 +89,27 @@ export function evaluatePart(
     .toMesh(part)
     .andThen((mesh) => labelMesh(mesh, [stockSolidsValue, ...ops], tables))
     .andThen((labelled) =>
-      solids.volume(part).map((volume): PartEvaluation => ({
-        ...labelled,
-        volume,
-        stats: {
-          ms: performance.now() - started,
-          triangles: labelled.indices.length / 3,
-        },
-      })),
+      solids.volume(part).andThen((volume) =>
+        geometryChecks(
+          {
+            part,
+            operations: composed,
+            tables,
+            surfaces: labelled.surfaces,
+            references: input.references ?? [],
+          },
+          solids,
+        ).map((checks): PartEvaluation => ({
+          ...labelled,
+          volume,
+          pieces: checks.pieces,
+          warnings: checks.warnings,
+          stats: {
+            ms: performance.now() - started,
+            triangles: labelled.indices.length / 3,
+          },
+        })),
+      ),
     )
 }
 
