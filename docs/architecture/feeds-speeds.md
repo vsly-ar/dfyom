@@ -1,6 +1,6 @@
 # Feeds-and-speeds calculator
 
-Status: accepted · Code: [`src/core/feeds-speeds/`](../../src/core/feeds-speeds/suggest.ts) · Used by: [plan-v0.1.md](../modes/plan-v0.1.md#feeds-and-speeds) · Presets: [library.md](library.md#feeds-and-speeds-presets) · Values: [quantities.md](quantities.md) · Terms: [glossary.md](../glossary.md) · Task: [v0.1 plan](../plans/v0.1.md) 1.15 (code: 2.12)
+Status: implemented · Code: [`src/core/feeds-speeds/`](../../src/core/feeds-speeds/suggest.ts) · Used by: [plan-v0.1.md](../modes/plan-v0.1.md#feeds-and-speeds) · Presets: [library.md](library.md#feeds-and-speeds-presets) · Values: [quantities.md](quantities.md) · Terms: [glossary.md](../glossary.md) · Task: [v0.1 plan](../plans/v0.1.md) 1.15 (code: 2.12)
 
 The calculator is the third step of the [resolution order](../modes/plan-v0.1.md#feeds-and-speeds) (override → tool preset → **calculator** → strategy fallback). It suggests `spindleSpeed`, `feedRate`, `plungeRate`, `stepdown` and `stepover` for one plan operation from the tool, the stock's material class, the strategy's engagement and the machine, and explains every number ([principles §5](../principles.md#5-user-friendly-beginner-friendly-highly-graphical)).
 
@@ -10,15 +10,15 @@ Symbols follow Sandvik Coromant (ISO): `vc` surface speed, `D` tool diameter, `z
 
 | #   | Quantity                    | Formula                                                                                     | Source                     |
 | --- | --------------------------- | ------------------------------------------------------------------------------------------- | -------------------------- |
-| F1  | Spindle speed               | `n = vc·1000 / (π·Dcalc)`; `Dcalc` = `D`, or `De` (F4)                                      | [S1], [MH]                 |
+| F1  | Spindle speed               | `n = vc·1000 / (π·Dcalc)`; `Dcalc` = `D`, or `De` (F4); router rows give `n` directly       | [S1], [MH], [AM1]          |
 | F2  | Feed rate                   | `vf = n · z · fz_prog`                                                                      | [S1], [MH]                 |
 | F3  | Radial chip thinning (RCTF) | `ae < D/2`: `fz_prog = fz / (2·√((ae/D)(1 − ae/D)))`; otherwise `fz_prog = fz`              | [MD], [S1] (`hex`)         |
 | F4  | Effective diameter          | `ap < RE`: `De = D − 2·RE + 2·√(ap(2·RE − ap))`; ball: `RE = D/2` gives `De = 2√(ap(D−ap))` | [K1], [HT1]                |
 | F5  | Axial chip thinning (ACTF)  | `ap < RE`: `fz_prog = fz / sin κ`, `cos κ = (RE − ap)/RE`; flat end mill: none (`κ = 90°`)  | [S1] (`hex = fz·sin κ`)    |
 | F6  | Material removal rate       | `Q = ae · ap · vf` (mm³/min)                                                                | [S1], [MH]                 |
-| F7  | Cutting power               | `Pc = Q · u / 60 000` (kW, `u` in W·s/mm³); `u = Kp · 2.73` from Machinery's Handbook `Kp`  | [S1] (`kc`), [MH], [AD]    |
+| F7  | Cutting power               | `Pc = Q · u / 60 000` (kW, `u` in W·s/mm³); `u = Kp · 2.73` from unit horsepower `Kp`       | [S1] (`kc`), [MMS], [AD]   |
 | F8  | Drilling feed               | `vf = fn · n`; `fn` from the data table per material × diameter band                        | [S2]                       |
-| F9  | Plunge rate (end mill)      | `plungeRate = kPlunge · vf` (data, e.g. 0.5 wood/plastic, 0.3 metals); drills use F8        | heuristic, to be confirmed |
+| F9  | Plunge rate (end mill)      | `plungeRate = kPlunge · vf` (data: 0.5 wood/plastic, 0.25 metals); drills use F8            | [AM1] ramp-down, estimated |
 
 - F3 and F5 multiply when both apply. Both are capped at ×3 to avoid runaway feeds at tiny engagement ([MD]).
 - **Adaptive/HSM:** large chip-thinning gains with deep `ap` and small constant `ae` assume constant tool engagement ([glossary: adaptive clearing](../glossary.md)). v0.1 offset pocketing has full-width engagement in its first ring and in corners, so it gets **no RCTF credit** (see [Engagement](#engagement-per-strategy)).
@@ -67,14 +67,52 @@ Stepdown suggestion: `ap = apSlot(material) × D × rigidityFactor`, ≤ `fluteL
 
 Curated, versioned TypeScript data in `src/core/feeds-speeds/data.ts` (code, not user data; no `schemaVersion`). Plain numbers in canonical units, since they are constants, not entered quantities.
 
-| Key                                           | Values                                                                        |
-| --------------------------------------------- | ----------------------------------------------------------------------------- |
-| `materialClass × toolMaterial`                | `vc` range (m/min); `apSlot` (× D); `kPlunge`; `u` (W·s/mm³); `source` (URLs) |
-| `… × diameter band` (≤ 3, ≤ 6, ≤ 12, ≤ 25 mm) | `fz` range (mm) for end mills; `fn` range (mm/rev) for drills                 |
+| Key                                           | Values                                                                                                          |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `materialClass × toolMaterial`                | `vc` range (m/min) or `n` range (rpm, router charts); `apSlot` (× D); `kPlunge`; `u` (W·s/mm³); `source` (URLs) |
+| `… × diameter band` (≤ 3, ≤ 6, ≤ 12, ≤ 25 mm) | `fz` range (mm) for end mills; `fn` range (mm/rev) for drills                                                   |
 
 - Every row cites its source; a lint test fails on a row without one. Ranges, not points: the [rigidity preset](#machine-rigidity-presets) picks the position within each range.
-- **Multi-vendor:** each row combines several public vendor charts. Metals from ([HT2], [S1], [MH] `Kp`); wood, sheet goods and plastics from router-bit chip-load charts (e.g. Onsrud, Amana). Unit power for wood/plastic is poorly published: start with a conservative estimate, marked `estimated` in `source`.
+- **Multi-vendor:** each row combines several public vendor charts. Metals from Harvey Tool ([HT3], [HT4]) and unit power [MMS]; wood, sheet goods and plastics from router-bit chip-load charts ([ON], [AM1], [AM2]). Unit power for wood/plastic is poorly published: a conservative estimate, marked `estimated` ([Material data (v0.1)](#material-data-v01)).
 - **User override in v0.1 = presets.** Users do not edit the table; they adjust a suggestion and save it as a [preset](library.md#feeds-and-speeds-presets), which wins in the resolution order.
+
+### Material data (v0.1)
+
+**Scope: carbide end mills only** (flat, bull-nose, ball; one row per material class applies to all three). There are **no HSS rows and no drill `fn` bands** yet: those calls return `feeds.noData` and plan mode falls back to the tool preset or the strategy fallback ([resolution order](../modes/plan-v0.1.md#feeds-and-speeds)). Every value is in [`data.ts`](../../src/core/feeds-speeds/data.ts) with its source and the exact table in the row's `sources`.
+
+**Rules used to turn charts into rows:**
+
+- **Conservative envelope.** Where several sources (or several printed grades of one class) give values, the row range is `[lowest printed minimum, lowest printed maximum]`; a single printed value counts as `min = max`. This is the "take the conservative value" rule; it makes some ranges a single point.
+- **Representative diameter per band.** Charts print values per nominal inch diameter. Each band uses the smallest chart diameter inside it: ≤ 6 mm ← 1/8″ (3.175 mm), ≤ 12 mm ← 1/4″ (6.35 mm), ≤ 25 mm ← 1/2″ (12.7 mm). Chip load grows with `D`, so larger tools in the band get a lower-than-printed chip load; tools from 6 to 6.35 mm get the 1/4″ value (≤ 6 % larger diameter). The **≤ 3 mm band is empty**: its smallest chart diameter (1/16″ or less) would over-feed sub-millimetre tools, so tools ≤ 3 mm get `feeds.noData`.
+- **Speed: `vc` or `n`.** Machining charts (Harvey Tool) give a surface speed, so metal rows have `vc` and use F1. Router-bit charts give no surface speed but a fixed spindle speed (Amana: "CNC Operating Spindle Speed: 18,000 RPM"), so wood, sheet-good and plastic rows set `n` instead and skip F1 (F4 then only affects the actual `vc` shown). The row type allows exactly one of the two; the data lint checks it.
+- Chart units are inch: chip load in IPT (× 25.4 → mm), speed in SFM (× 0.3048 → m/min).
+
+| Class     | Speed            | `fz` ≤ 6 mm (1/8″) | `fz` ≤ 12 mm (1/4″) | `fz` ≤ 25 mm (1/2″) | `apSlot` | `kPlunge`¹ | `u` (W·s/mm³) | Sources                                    |
+| --------- | ---------------- | ------------------ | ------------------- | ------------------- | -------- | ---------- | ------------- | ------------------------------------------ |
+| softwood  | `n` 18 000 rpm   | .005–.007″         | .007–.009″          | .009–.011″          | 1        | 0.5        | 0.6825¹       | [ON] Soft Wood 52-200/57-200, [AM1]        |
+| hardwood  | `n` 18 000 rpm   | .003–.005″         | .005–.007″          | .007–.009″          | 1        | 0.5        | 0.6825¹       | [ON] Hard Wood 52-200/57-200, [AM1]        |
+| sheetGood | `n` 18 000 rpm   | .005–.007″         | .006–.008″          | .008–.010″          | 1        | 0.5        | 0.6825¹       | [ON] MDF, Soft/Hard Plywood 52-200, [AM1]  |
+| plastic   | `n` 18 000 rpm   | .002–.004″         | .003–.005″          | .006–.008″          | 1        | 0.5        | 0.6825¹       | [ON] Soft/Hard Plastic 52-200B/BL, [AM1–2] |
+| aluminum  | `vc` 500–650 SFM | .001″              | .002″               | .004″               | 0.5      | 0.25       | 0.6825 (0.25) | [HT3], [HT4], [MMS]                        |
+| brass     | `vc` 500 SFM     | .001″              | .002″               | .003″               | 0.5      | 0.25       | 1.365 (0.50)  | [HT3], [HT4], [MMS]                        |
+| steel     | `vc` 100–150 SFM | .00048″            | .00095″             | .0019″              | 0.5      | 0.25       | 5.46 (2.00)   | [HT3], [HT4], [MMS]                        |
+
+¹ Estimated (row's `estimated` list); reasoning below. `u` in brackets: unit horsepower (hp per in³/min) from [MMS], × 2.73 (F7).
+
+**Where each number comes from:**
+
+- **Wood and sheet goods:** chip loads from the Onsrud 52-200/57-200 rows (2-flute up/down spiral, the general-purpose series the charts recommend for single pass) and the Amana 2-flute spiral ball nose chart; both agree at 1/8″, 1/4″ and 1/2″ except softwood 1/8″ (Onsrud .006–.008, Amana .005–.007 → .005–.007). MDF, soft plywood and hard plywood print the same 52-200 values. `apSlot = 1`: both charts state "Depth of cut 1 x D" for the printed chip load. `n`: [AM1].
+- **Plastic** (soft and hard): Onsrud 52-200B/BL rows of both plastic charts and the Amana charts. At 1/4″ the Amana plastics ball nose chart prints .003–.005 against .004–.006 elsewhere → .003–.005. Harvey's general table lists much lower chip loads for plastics at 200–600 SFM; that is a machining-centre regime, and this doc assigns plastics to router-bit charts, so it is not used. Onsrud warns that too low a chip load in plastic causes rewelding; raise the feed (preset) if chips melt.
+- **Aluminium, brass, steel:** [HT3] (general table, 1/8″, 1/4″, 1/2″) and [HT4] (2-flute square end mill product chart, "Slotting" rows at 0.125″, 0.250″, 0.500″). Per diameter the lower printed chip load wins: [HT3] everywhere except steel 1/8″ ([HT4] .00048 < .0005). `vc`: aluminium rows 500–1000 / 800–1500 SFM [HT3] and 1000 (wrought), 750/700/650 (castings up to 12 % Si) SFM [HT4] → 500–650; brass 600–1000 / 800–1500 [HT3] and 500 [HT4] → 500; steel 100–300 (10XX/11XX/13XX) and 100–150 (23XX/31XX) [HT3] and 600 / 200 [HT4] → 100–150. `apSlot = 0.5`: [HT4] slotting axial depth ".50 x Dia" (Onsrud's aluminium router chart allows 1 x D; the lower value wins). Aluminium castings with more than 12 % Si ([HT4] 475 SFM) are not covered.
+- **Steel scope:** the steel row uses Harvey's carbon and low-alloy rows only (10xx–15xx, 2xxx–9xxx alloy steels). Stainless, tool and high-strength steels have much lower chip loads in [HT3] and are **not** covered: choose material class `other` for them (known issue in the [v0.1 plan](../plans/v0.1.md)).
+- **Unit power `u` (metals):** Machinery's Handbook `Kp` tables are not freely available, so `u` comes from [MMS] Table I "Unit Horsepower" (horsepower at the machine per in³/min, so it already includes losses and is ≥ the handbook's cutter `Kp`; F7 then also applies `η`, so `Pc` is overestimated, never under). Aluminium 0.25; brass "Hard" 0.50 (higher than "Soft" 0.33); steel 2.00 ("400 BHN", the first printed value at or above the 279–344 HBn hardness of [HT4]'s steel rows).
+
+**Estimates (`estimated`):**
+
+- **`u` for wood, sheet goods and plastic = 0.25 × 2.73 = 0.6825 W·s/mm³**, the [MMS] aluminium value. No public chart gives unit power for these materials; wood, MDF and thermoplastics are far weaker than aluminium alloys, so aluminium's unit power is an upper bound and the power check errs towards a shallower stepdown.
+- **`kPlunge`:** Amana's charts give "Ramp Down: Feed Rate IPM / # of flutes", i.e. `plungeRate = vf / z`. One row cannot hold `z`, so router rows use 0.5 (the rule for the 2-flute bits the chip loads are printed for; a 1-flute bit gets half the Amana value) and metal rows 0.25 (the rule for 4 flutes; conservative for `z ≤ 4`). Tools with more flutes than that plunge faster than the Amana rule (known issue; F9 could use `1/z` later).
+
+**Gaps:** HSS end mills (all classes), drills (`fn` and drill `vc`), tools ≤ 3 mm and > 25 mm, stainless/tool steels, high-silicon aluminium castings and material class `other` → `feeds.noData`.
 
 ## Live vs. saved
 
@@ -90,7 +128,7 @@ Curated, versioned TypeScript data in `src/core/feeds-speeds/data.ts` (code, not
 
 ### Machine rigidity presets
 
-`machine.rigidity` is one of five presets (lowest = default). `apFactor` multiplies `apSlot` for the suggested stepdown; `rangePos` is the position within every `vc`, `fz` and `fn` range (0 = low end, 1 = high end). Calibrating a machine's own factors by test cuts in Run mode is later (not v0.1).
+`machine.rigidity` is one of five presets (lowest = default). `apFactor` multiplies `apSlot` for the suggested stepdown; `rangePos` is the position within every `vc`, `n`, `fz` and `fn` range (0 = low end, 1 = high end). Calibrating a machine's own factors by test cuts in Run mode is later (not v0.1).
 
 | Preset      | `apFactor` | `rangePos` | Example                                                                       |
 | ----------- | ---------- | ---------- | ----------------------------------------------------------------------------- |
@@ -125,7 +163,8 @@ suggestCutting(input: CuttingInput): CuttingSuggestion // total, pure; missing d
 
 - **Golden numbers** from published examples, each test citing its source: Kennametal KDMB ball nose D 0.312″, `ap` 0.047″ → `De` 0.223″ [K1]; Sandvik formula sheet examples for `n`, `vf`, `Pc` [S1]; RCTF at `ae/D` = 0.075 → ×1.90 [MD]. The [S1] sheet states formulas only (no worked examples), so those tests check hand-computed values against its formulas, and F7 against its `Pc = ae·ap·vf·kc / (60·10⁶)` form.
 - **Properties:** `n` within machine range after clamping; `vf ≤ maxFeedRate`; RCTF = 1 at `ae ≥ D/2` and capped at 3; `De = D` when `ap ≥ RE`; power check monotonic in `ap`.
-- **Data lint:** every row has a source, ranges are ordered, bands cover 0–25 mm without gaps.
+- **Data lint:** every row has a source, ranges are ordered, bands cover 0–25 mm without gaps, exactly one of `vc` and `n`.
+- **Shipped-table golden cases:** 6 mm 2F carbide slotting MDF and 6061 on the `hobby` preset, 1/4″ slotting hardwood on `prosumer`: `fz`, `vc`/`n`, feed and stepdown lie within the cited chart's printed range ([ON], [AM1], [HT3], [HT4]).
 
 ## Sources
 
@@ -133,12 +172,17 @@ suggestCutting(input: CuttingInput): CuttingSuggestion // total, pure; missing d
 - [MH] Machinery's Handbook, power constant `Kp` (unit horsepower) and speed/feed formulas; [AD] Autodesk, [Unit horsepower or specific cutting force](https://help.autodesk.com/cloudhelp/2018/ENU/FCAM/files/GUID-AD4A06B2-6972-4F93-9D7A-E2825783D69D.htm).
 - [K1] Kennametal KDMB ball nose working-diameter table ([product page](https://www.kennametal.com/us/en/products/p.2878444.html)); [HT1] Harvey Performance, [Ball nose effective diameter](https://www.harveyperformance.com/in-the-loupe/in-the-loupe-tv-ball-nose-end-mills-effective-diameter/); [HT2] Harvey Tool speeds-and-feeds charts per tool.
 - [MD] Machining Doctor, [Chip thinning calculator](https://www.machiningdoctor.com/calculators/chip-thinning-calculator/).
+- [HT3] Harvey Tool, [General Machining Guidelines](https://www.harveytool.com/resources/general-machining-guidelines), tables "Carbide End Mills – Non-Ferrous" and "– Iron, Steel, Stainless" (SFM, chip load by diameter). [HT4] Harvey Tool, [Speeds & Feeds, Miniature End Mills – Square – Stub & Standard, 2 Flutes, series 139xx/502xx](https://harveyperformance.widen.net/content/pnhfzhydtu/pdf/SF_13900.pdf) ("Slotting" rows; one of the [HT2] charts).
+- [ON] LMT Onsrud, [Cutting Data Recommendations](https://onsrud.com/forms/cutting-data-recommendations.asp) per material (catalog pp. 114–121): [Soft Wood](https://onsrud.com/images/Soft%20Wood.pdf), [Hard Wood](https://onsrud.com/images/Hard%20Wood.pdf), [MDF](https://onsrud.com/images/MDF.pdf), [Soft Plywood](https://onsrud.com/images/Soft%20Plywood.pdf), [Hard Plywood](https://onsrud.com/images/Hard%20Plywood.pdf), [Soft Plastic](https://onsrud.com/images/Soft%20Plastic.pdf), [Hard Plastic](https://onsrud.com/images/Hard%20Plastic.pdf); also [Aluminum](https://onsrud.com/images/Aluminum.pdf) (compared, not used).
+- [AM1] Amana Tool, [2 Flute Solid Carbide CNC Spiral Ball Nose Router Bits speed chart](https://www.amanatool.com/pub/media/productattachments/Spiral-Ball-Nose-Speed-Chart-v6.pdf); [AM2] Amana Tool, [2 & 4 Flute Solid Carbide Spiral Ball Nose for Plastics](https://www.amanatool.com/pub/media/productattachments/Spiral-Ball-Nose-for-Plastics-Speed_Chart-v7.pdf).
+- [MMS] Modern Machine Shop, [Start With The Right Speeds And Feeds](https://www.mmsonline.com/articles/start-with-the-right-speeds-and-feeds), Table I "Unit Horsepower" (used instead of [MH] `Kp`, whose tables are not freely available).
 
 ## Implementation decisions (task 2.12)
 
 Where this doc was silent, the implementation chose:
 
-- **Material table empty.** This doc names the sources but no values, and no value may be invented, so `MATERIAL_DATA` ships empty: every call returns `feeds.noData` and plan mode falls back until the cited rows are curated ([v0.1 plan](../plans/v0.1.md) known issues). Each row lists `sources: { ref, fields }[]`; the data lint fails any value no source backs unless the row lists it in `estimated`. Tests use a synthetic fixture (`data.fixture.ts`).
+- **Material table: carbide only** ([Material data (v0.1)](#material-data-v01)). Each row lists `sources: { ref, fields }[]`; the data lint fails any value no source backs unless the row lists it in `estimated`. Logic tests use a synthetic fixture (`data.fixture.ts`); golden tests check the shipped rows against their cited charts (`suggest.test.ts`).
+- **Row speed `vc` or `n`** (type extension): `vc` became optional and `n` (rpm range) was added; exactly one is set. With `n` the speed derivation is a `data` step for `n` instead of F1.
 - **Engagement** is a discriminated union: `slot { ap? }`, `stepover { ae, ap? }`, `helix { ap }` (pitch), `drill {}`; lengths are mm numbers. `ap` given = resolved stepdown (override/preset): it is used, no `stepdown` is suggested, and a power excess only warns. A drill engagement needs a `drill` tool and vice versa, else `feeds.noData`.
 - **Chip-thinning cap:** the product RCTF × ACTF is capped at ×3 (so each factor is too). `ae` above `D` counts as `D`.
 - **Drills** use the row's `vc` (one `vc` per `materialClass × toolMaterial`), F8 for `feedRate` = `plungeRate`, clamped to `maxFeedRate.z` (rpm lowered to keep `fn` while ≥ `minSpeed`); no power check (F6/F7 are milling formulas).
