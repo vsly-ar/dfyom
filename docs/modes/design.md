@@ -97,7 +97,7 @@ Through cut along a closed shape (cutout), holding the cut-out piece with **tabs
 | `tabs.width`     | length | 6 mm / 1/4″  | > 0; all tabs fit on the perimeter                                                                                                               | –                                                                                               |
 | `tabs.thickness` | length | 2 mm / 1/16″ | > 0; < stock thickness                                                                                                                           | Evaluation finds a loose piece ([`decompose()`](../architecture/geometry.md#evaluation-rules)). |
 
-The removal region is a slot of `slotWidth` beside the shape (outside it for `outside`, inside for `inside`), through the stock bottom; tabs are its retained regions, measured up from `stock.bottom`. An `inside` profile whose slot covers the whole opening (`slotWidth` ≥ half the narrowest size, within the 0.01 mm chord tolerance) cuts the opening out completely: there is no offcut and no tabs are built (a DFM warning comes with task 2.8; [geometry.md](../architecture/geometry.md#building-the-solids)). Surfaces: `profile1.wall[i]`, `profile1.corner[i]` (as for a pocket), `profile1.tab[i].top`, `profile1.tab[i].end[0|1]`. Tool requirement: end mill with diameter ≤ `slotWidth` and enough flute length for the stock thickness.
+The removal region is a slot of `slotWidth` beside the shape (outside it for `outside`, inside for `inside`), through the stock bottom; tabs are its retained regions, measured up from `stock.bottom`. An `inside` profile whose slot covers the whole opening (`slotWidth` ≥ half the narrowest size, within the 0.01 mm chord tolerance) cuts the opening out completely: there is no offcut and no tabs are built (DFM warning `dfm.tabsUnused` when `tabs.count` > 0; [geometry.md](../architecture/geometry.md#building-the-solids)). Surfaces: `profile1.wall[i]`, `profile1.corner[i]` (as for a pocket), `profile1.tab[i].top`, `profile1.tab[i].end[0|1]`. Tool requirement: end mill with diameter ≤ `slotWidth` and enough flute length for the stock thickness.
 
 ## Ordering and composition
 
@@ -110,7 +110,7 @@ The removal region is a slot of `slotWidth` beside the shape (outside it for `ou
 
 ## DFM checks
 
-- Derived on every evaluation, never stored: constraint checks (sync, in the command) and geometry checks (worker, [evaluation rules](../architecture/geometry.md#evaluation-rules)).
+- Derived on every evaluation, never stored: constraint checks (sync, in the command) and geometry checks (worker, [evaluation rules](../architecture/geometry.md#evaluation-rules)). Codes, rules and the warning shape: [geometry.md](../architecture/geometry.md#evaluation-checks) (geometry) and [parameter and tool checks](../architecture/geometry.md#parameter-and-tool-checks) (`parameterChecks`, called by the commands).
 - Tool checks compare against the whole **tool library** ([library.md](../architecture/library.md#tool): flat, bull-nose and ball end mills, drills), not a chosen machine. With an empty library only geometric checks run.
 - Library edits are non-undoable effect commands outside the project document, so they trigger a re-check but never change the part.
 - Each warning names the operation and parameter and suggests a value (e.g. "use cornerRadius ≥ 3.2 mm").

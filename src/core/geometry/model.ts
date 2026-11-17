@@ -93,8 +93,67 @@ export type OperationGeometry =
       readonly tabs: { readonly count: number; readonly width: number; readonly thickness: number }
     }
 
+/**
+ * A surface an operation parameter refers to (`on`, or a reference in an expression), so
+ * evaluation can warn when the surface no longer exists (`dfm.surfaceMissing`).
+ */
+export interface SurfaceReference {
+  /** Id of the referencing operation. */
+  readonly operation: string
+  /** Its parameter, e.g. `on`, `depth`. */
+  readonly parameter: string
+  readonly surface: SurfaceId
+}
+
 /** Stock size plus operations, all in canonical float64 mm. */
 export interface PartGeometryInput {
   readonly stock: StockGeometry
   readonly operations: readonly OperationGeometry[]
+  /** Surfaces referenced by operation parameters; absent = none. */
+  readonly references?: readonly SurfaceReference[]
+}
+
+/**
+ * DFM warning codes (docs/modes/design.md#dfm-checks). Geometry checks run in the evaluation
+ * (`checks.ts`); parameter and tool checks are synchronous (`dfm.ts`).
+ */
+export type DfmWarningCode =
+  // geometry checks (evaluation): docs/architecture/geometry.md#evaluation-checks
+  | 'dfm.loosePiece'
+  | 'dfm.retainedRemoved'
+  | 'dfm.surfaceMissing'
+  // parameter and tool checks: docs/modes/design.md#operations-v01
+  | 'dfm.facingDeep'
+  | 'dfm.pocketNoToolFits'
+  | 'dfm.pocketDeepNarrow'
+  | 'dfm.cornerSharp'
+  | 'dfm.cornerTooSmall'
+  | 'dfm.floorRadiusNoTool'
+  | 'dfm.holeOutsideStock'
+  | 'dfm.holeNoTool'
+  | 'dfm.holeDeep'
+  | 'dfm.slotLeavesStock'
+  | 'dfm.slotNoTool'
+  | 'dfm.tabsNone'
+  | 'dfm.tabsUnused'
+
+/** A suggested value for the warning's parameter (mm; formatted in the project unit system). */
+export interface DfmSuggestion {
+  readonly relation: 'atLeast' | 'atMost'
+  readonly value: number
+}
+
+/** One DFM warning: never blocks, derived on every evaluation, never stored. */
+export interface DfmWarning {
+  readonly code: DfmWarningCode
+  /** `warning`: likely a problem; `info`: worth knowing (e.g. needs pecking). */
+  readonly severity: 'warning' | 'info'
+  /** English text with values in mm; the UI may re-render it from `code` + `params`. */
+  readonly message: string
+  /** Id of the operation the warning is about. */
+  readonly operation: string
+  /** Its parameter (`tabs`, `shape.cornerRadius`, …), when one is to blame. */
+  readonly parameter?: string
+  readonly params: Readonly<Record<string, number | string | boolean | readonly string[]>>
+  readonly suggestion?: DfmSuggestion
 }
