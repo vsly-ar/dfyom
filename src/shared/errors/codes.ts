@@ -109,6 +109,12 @@ export const ERROR_CODES = {
     userMessage: 'Later operations refer to this operation. Change or remove them first.',
     retryable: false,
   },
+  // Plan mode (task 2.10): docs/modes/plan-v0.1.md#toolpath-generators-task-210
+  'plan.check': {
+    severity: 'warn',
+    userMessage: 'The tool or the cutting values do not fit this operation.',
+    retryable: false,
+  },
   'internal.unexpected': {
     severity: 'error',
     userMessage: 'Something went wrong. This is a bug.',
