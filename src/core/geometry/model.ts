@@ -117,27 +117,29 @@ export interface PartGeometryInput {
  * DFM warning codes (docs/modes/design.md#dfm-checks). Geometry checks run in the evaluation
  * (`checks.ts`); parameter and tool checks are synchronous (`dfm.ts`).
  */
-export type DfmWarningCode =
+export const DFM_WARNING_CODES = [
   // geometry checks (evaluation): docs/architecture/geometry.md#evaluation-checks
-  | 'dfm.loosePiece'
-  | 'dfm.retainedRemoved'
-  | 'dfm.surfaceMissing'
+  'dfm.loosePiece',
+  'dfm.retainedRemoved',
+  'dfm.surfaceMissing',
   // parameter and tool checks: docs/modes/design.md#operations-v01
-  | 'dfm.facingDeep'
-  | 'dfm.pocketNoToolFits'
-  | 'dfm.pocketDeepNarrow'
-  | 'dfm.cornerSharp'
-  | 'dfm.cornerTooSmall'
-  | 'dfm.floorRadiusNoTool'
-  | 'dfm.holeOutsideStock'
-  | 'dfm.holeNoTool'
-  | 'dfm.holeDeep'
-  | 'dfm.slotLeavesStock'
-  | 'dfm.slotOpensStock'
-  | 'dfm.slotNoTool'
-  | 'dfm.tabsNone'
-  | 'dfm.tabsUnused'
-  | 'dfm.tabsThin'
+  'dfm.facingDeep',
+  'dfm.pocketNoToolFits',
+  'dfm.pocketDeepNarrow',
+  'dfm.cornerSharp',
+  'dfm.cornerTooSmall',
+  'dfm.floorRadiusNoTool',
+  'dfm.holeOutsideStock',
+  'dfm.holeNoTool',
+  'dfm.holeDeep',
+  'dfm.slotLeavesStock',
+  'dfm.slotOpensStock',
+  'dfm.slotNoTool',
+  'dfm.tabsNone',
+  'dfm.tabsUnused',
+  'dfm.tabsThin',
+] as const
+export type DfmWarningCode = (typeof DFM_WARNING_CODES)[number]
 
 /** A suggested value for the warning's parameter (mm; formatted in the project unit system). */
 export interface DfmSuggestion {

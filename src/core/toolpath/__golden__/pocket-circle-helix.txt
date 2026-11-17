@@ -1,0 +1,49 @@
+toolpath op-pocket1 tool em6 S18000
+stats cut 255.5657 rapid 31.9 s 16.1521
+pass rough
+  rapid 30 17.6 10
+  rapid 30 17.6 2
+  line 30 17.6 0 F300
+  arc 30 22.4 -0.375 c 30 20 ccw F1200
+  arc 30 17.6 -0.75 c 30 20 ccw F1200
+  arc 30 22.4 -1.125 c 30 20 ccw F1200
+  arc 30 17.6 -1.5 c 30 20 ccw F1200
+  arc 30 22.4 -1.5 c 30 20 ccw F1200
+  arc 30 17.6 -1.5 c 30 20 ccw F1200
+  line 30 18.8 -1.5 F1200
+  arc 30 21.2 -1.5 c 30 20 ccw F1200
+  arc 30 18.8 -1.5 c 30 20 ccw F1200
+  line 30 17 -1.5 F1200
+  arc 30 23 -1.5 c 30 20 ccw F1200
+  arc 30 17 -1.5 c 30 20 ccw F1200
+  line 30 15.2 -1.5 F1200
+  arc 30 24.8 -1.5 c 30 20 ccw F1200
+  arc 30 15.2 -1.5 c 30 20 ccw F1200
+  rapid 30 15.2 2
+pass rough
+  rapid 30 17.6 2
+  line 30 17.6 -1.5 F300
+  arc 30 22.4 -1.875 c 30 20 ccw F1200
+  arc 30 17.6 -2.25 c 30 20 ccw F1200
+  arc 30 22.4 -2.625 c 30 20 ccw F1200
+  arc 30 17.6 -3 c 30 20 ccw F1200
+  arc 30 22.4 -3 c 30 20 ccw F1200
+  arc 30 17.6 -3 c 30 20 ccw F1200
+  line 30 18.8 -3 F1200
+  arc 30 21.2 -3 c 30 20 ccw F1200
+  arc 30 18.8 -3 c 30 20 ccw F1200
+  line 30 17 -3 F1200
+  arc 30 23 -3 c 30 20 ccw F1200
+  arc 30 17 -3 c 30 20 ccw F1200
+  line 30 15.2 -3 F1200
+  arc 30 24.8 -3 c 30 20 ccw F1200
+  arc 30 15.2 -3 c 30 20 ccw F1200
+  rapid 30 15.2 2
+pass finish
+  line 30 15.2 -3 F300
+  line 30 15 -3 F1200
+  arc 30 25 -3 c 30 20 ccw F1200
+  arc 30 15 -3 c 30 20 ccw F1200
+  line 30 15.2 -3 F1200
+  rapid 30 15.2 2
+  rapid 30 15.2 10

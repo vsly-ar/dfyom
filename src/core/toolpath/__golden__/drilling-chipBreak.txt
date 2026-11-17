@@ -1,0 +1,7 @@
+toolpath op-drill1 tool dr6 S3000
+stats cut 14.8026 rapid 31.8026 s 7.8292
+pass drill
+  rapid 15 15 10
+  rapid 15 15 1.5
+  drill 15 15 top -0.5 bottom -12.3026 chipBreak peck 4 back 0.5 retract 1.5 F150
+  rapid 15 15 10
