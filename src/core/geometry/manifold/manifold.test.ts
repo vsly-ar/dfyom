@@ -115,6 +115,34 @@ describe('withSolids', () => {
     expect(kernel.liveObjects()).toBe(0)
   })
 
+  it('frees the library object of a rejected mesh (heap stays flat)', async () => {
+    const hosted = expectOk(await loadManifold(nodeManifoldSource()))
+    const ring = offsetLoft(
+      { kind: 'rectangle', length: 1, width: 1, cornerRadius: 0 },
+      [
+        { offset: 0, z: 1 },
+        { offset: 0, z: 0 },
+      ],
+      { band: () => 1, top: 2, bottom: 3 },
+    ).unwrap()
+    const torn: LabelledMesh = {
+      positions: ring.positions,
+      triangles: ring.triangles.slice(3),
+      faces: ring.faces.slice(1),
+    }
+    const failOnce = () =>
+      expectErrCode(
+        hosted.withSolids((s) => s.fromMesh(torn, expectOk(s.reserveOriginalId()))),
+        'geometry.evaluation',
+      )
+    for (let i = 0; i < 50; i++) failOnce()
+    const warm = hosted.heapBytes().unwrap()
+    // ~190 B leaked per call before the fix: 40 000 calls outgrow the free heap (≈ 7 MB)
+    for (let i = 0; i < 40000; i++) failOnce()
+    expect(hosted.heapBytes().unwrap() - warm).toBeLessThan(2 ** 20)
+    expect(hosted.liveObjects()).toBe(0)
+  })
+
   it('rejects a solid used outside its arena', () => {
     const leaked = expectOk(
       kernel.withSolids((s) => s.fromMesh(box(1, 1, 1), expectOk(s.reserveOriginalId()))),

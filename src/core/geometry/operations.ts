@@ -2,6 +2,7 @@
  * Per operation: removal, cut and retained labelled meshes plus its surface table.
  * Doc: docs/architecture/geometry.md#building-the-solids
  */
+import { AppError } from '../../shared/errors/app-error'
 import { ctx, Err, Ok, type AppResult } from '../../shared/result'
 import {
   arcSegments,
@@ -12,6 +13,7 @@ import {
 } from './contour'
 import { offsetBand, offsetLoft, type LabelledMesh } from './loft'
 import {
+  CHORD_TOLERANCE,
   EPSILON,
   OVERSHOOT,
   type Contour,
@@ -265,10 +267,24 @@ function profile(
       cut ? 'circumscribed' : 'inscribed',
     )
 
-  // inside profile whose slot covers the opening: no offcut, and nothing for tabs to hold
-  const inset = outside ? undefined : offsetContour(shape, s)
-  const covers = !outside && inradius(shape) - s <= EPSILON
+  // inside profile whose slot covers the opening (an inset within the chord tolerance counts):
+  // no offcut, and nothing for tabs to hold
+  const covers = !outside && inradius(shape) - s <= CHORD_TOLERANCE
   const tabCount = covers ? 0 : op.tabs.count
+  const offset = (d: number): AppResult<Contour> =>
+    offsetContour(shape, d).okOr(
+      new AppError('geometry.evaluation', 'profile offset passes the shape center', {
+        issues: [
+          {
+            path: ['slotWidth'],
+            rule: 'loftInvalid',
+            message: 'offset passes the shape center',
+            params: { offset: d },
+          },
+        ],
+        where: 'operationSolids',
+      }),
+    )
 
   const tabTable = Array.from({ length: tabCount }, (_, i) => ({
     top: table.add(`tab[${i}].top`),
@@ -276,7 +292,7 @@ function profile(
   }))
 
   const removal = outside
-    ? prism(offsetContour(shape, -s).unwrap(), removalLevels, () => offcut, false)
+    ? offset(-s).andThen((c) => prism(c, removalLevels, () => offcut, false))
     : prism(shape, removalLevels, role, false)
   if (removal.isErr()) return Err(removal.unwrapErr())
 
@@ -284,7 +300,7 @@ function profile(
   if (outside || !covers) {
     const kept = outside
       ? prism(shape, cutLevels, role, true)
-      : prism(inset!.unwrap(), cutLevels, () => offcut, true)
+      : offset(s).andThen((c) => prism(c, cutLevels, () => offcut, true))
     if (kept.isErr()) return Err(kept.unwrapErr())
     cut.push({ mesh: kept.unwrap(), at })
   }

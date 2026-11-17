@@ -114,14 +114,28 @@ function elementPoint(e: ContourElement, u: number): Vec2 {
 }
 
 /**
- * Chords per arc so the sagitta stays ≤ `tolerance`: n = ⌈θ / (2·acos(1 − t/r))⌉ ≥ 1.
- * The same bound holds for circumscribed polygons (r/cos(α/2) − r ≈ sagitta).
+ * Segments per arc so the flattening stays within `tolerance` of the arc:
+ * - inscribed (sagitta r(1 − cos(α/2)) ≤ t): n = ⌈θ / (2·acos(1 − t/r))⌉;
+ * - circumscribed (vertex excess r(1/cos(α/2) − 1) ≤ t): n = ⌈θ / (2·acos(r / (r + t)))⌉,
+ *   slightly more segments than inscribed.
+ * n ≥ 1; a closed circle needs at least 3 (inscribed) or 4 (circumscribed) so that even a
+ * circle below the tolerance stays a polygon of about its size.
  */
-export function arcSegments(radius: number, sweep: number, tolerance = CHORD_TOLERANCE): number {
-  if (radius <= tolerance) return 1
-  const step = 2 * Math.acos(Math.min(1, Math.max(-1, 1 - tolerance / radius)))
-  // tiny slack: an exact multiple must not round up to one extra chord
-  return Math.max(1, Math.ceil(sweep / step - 1e-9))
+export function arcSegments(
+  radius: number,
+  sweep: number,
+  tolerance = CHORD_TOLERANCE,
+  mode: FlattenMode = 'inscribed',
+): number {
+  const closed = sweep >= 2 * Math.PI - 1e-12
+  const minimum = closed ? (mode === 'inscribed' ? 3 : 4) : 1
+  if (radius <= 0) return minimum
+  const half =
+    mode === 'inscribed'
+      ? Math.acos(Math.max(-1, 1 - tolerance / radius))
+      : Math.acos(radius / (radius + tolerance))
+  // tiny slack: an exact multiple must not round up to one extra segment
+  return Math.max(minimum, Math.ceil(sweep / (2 * half) - 1e-9))
 }
 
 /**
@@ -149,7 +163,7 @@ export function parameterize(
   const segments = contourElements(contour).map((e) => {
     if (e.kind === 'line') return 0
     const radius = Math.max(0, ...offsets.map((o) => e.radius - o))
-    return arcSegments(radius, e.sweep, tolerance)
+    return arcSegments(radius, e.sweep, tolerance, mode)
   })
   return { contour, mode, segments }
 }
@@ -198,11 +212,86 @@ export function flattenRing(p: Parameterization, offset: number): Option<readonl
   })
 }
 
+/** A point on a contour with its inward unit normal and the element it lies on. */
+export interface ContourFrame {
+  readonly point: Vec2
+  readonly normal: Vec2
+  /** Index into `contourElements(c)`. */
+  readonly element: number
+  /** Distance along that element from its start, and its length. */
+  readonly along: number
+  readonly length: number
+}
+
+/**
+ * Frame at arc length `s` from the start of `wall[0]` (wraps). At a sharp corner (a zero-length
+ * arc) the preceding wall's end is used. A contour of zero perimeter has no frame.
+ */
+export function contourFrame(c: Contour, s: number): Option<ContourFrame> {
+  const els = contourElements(c)
+  const lengths = els.map(elementLength)
+  const total = lengths.reduce((a, b) => a + b, 0)
+  if (total <= 0) return None
+  const u = ((s % total) + total) % total
+  let acc = 0
+  let last = -1
+  for (let i = 0; i < els.length; i++) {
+    const len = lengths[i]!
+    if (len > 0) last = i
+    if (len > 0 && u <= acc + len + 1e-12) return Some(frameOn(els[i]!, i, u - acc, len))
+    acc += len
+  }
+  return Some(frameOn(els[last]!, last, lengths[last]!, lengths[last]!))
+}
+
+function frameOn(e: ContourElement, element: number, at: number, length: number): ContourFrame {
+  const along = Math.min(length, Math.max(0, at))
+  const f = along / length
+  const point = elementPoint(e, f)
+  if (e.kind === 'line') {
+    const dx = (e.to[0] - e.from[0]) / length
+    const dy = (e.to[1] - e.from[1]) / length
+    // left of the direction is inward on a counter-clockwise contour
+    return { point, normal: [-dy, dx], element, along, length }
+  }
+  const a = e.start + e.sweep * f
+  return { point, normal: [-Math.cos(a), -Math.sin(a)], element, along, length }
+}
+
+/** Arc length (from the start of `wall[0]`) of the contour point nearest to `q`. */
+export function contourParam(c: Contour, q: Vec2): number {
+  let best = Infinity
+  let param = 0
+  let acc = 0
+  for (const e of contourElements(c)) {
+    const len = elementLength(e)
+    let f: number
+    if (e.kind === 'line') {
+      const dx = e.to[0] - e.from[0]
+      const dy = e.to[1] - e.from[1]
+      const l2 = dx * dx + dy * dy
+      f = l2 === 0 ? 0 : ((q[0] - e.from[0]) * dx + (q[1] - e.from[1]) * dy) / l2
+    } else {
+      let a = Math.atan2(q[1] - e.center[1], q[0] - e.center[0]) - e.start
+      a = ((a % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)
+      f = e.sweep === 0 ? 0 : a / e.sweep
+    }
+    f = Math.min(1, Math.max(0, f))
+    const p = elementPoint(e, f)
+    const d = Math.hypot(p[0] - q[0], p[1] - q[1])
+    if (d < best - 1e-12) {
+      best = d
+      param = acc + f * len
+    }
+    acc += len
+  }
+  return param
+}
+
 /**
  * Open sub-path of the contour offset by `offset`, between arc lengths `from` < `to` measured
  * along the un-offset contour from the start of `wall[0]` (wraps past the perimeter). Points
- * correspond across offsets (same element parameters), so the sub-paths of two offsets bound a
- * band whose end faces are normal to the contour. Inscribed flattening.
+ * correspond across offsets by element parameter. Inscribed flattening.
  */
 export function flattenPath(
   p: Parameterization,

@@ -6,7 +6,13 @@ import { CHORD_TOLERANCE, type OperationGeometry, type PartGeometryInput } from 
 import type { SolidKernel } from './solid-port'
 import { signedVolume } from './testing/mesh-oracles'
 import { nodeManifoldSource } from './testing/node-wasm'
-import { TEST_PART_SURFACES, TEST_STOCK, testPart, testPartVolume } from './testing/test-part'
+import {
+  TEST_PART_SURFACES,
+  TEST_STOCK,
+  testPart,
+  testPartChordBound,
+  testPartVolume,
+} from './testing/test-part'
 
 let kernel: SolidKernel
 
@@ -40,7 +46,9 @@ describe('evaluatePart: test part', () => {
     expect(e.surfaces).not.toContain('stock.top')
     const exact = testPartVolume({ cornerRadius: r })
     expect(e.volume).toBeGreaterThanOrEqual(exact)
-    expect(e.volume).toBeLessThanOrEqual(exact * 1.0005)
+    // within the chord-error bound (≈ 24 mm³): a missing drill-point cone (17 mm³) or one tab
+    // 0.1 mm too tall (5 mm³ above the measured 20.7) fails
+    expect(e.volume - exact).toBeLessThanOrEqual(testPartChordBound({ cornerRadius: r }))
     expect(
       signedVolume({ positions: Float64Array.from(e.positions), triangles: e.indices }),
     ).toBeCloseTo(e.volume, 1)
@@ -78,6 +86,17 @@ describe('evaluatePart: test part', () => {
     }
     for (const c of centroids(e, 'profile1.tab[0].end[0]')) expect(c[0]).toBeCloseTo(46, 4)
     for (const c of centroids(e, 'profile1.tab[0].end[1]')) expect(c[0]).toBeCloseTo(54, 4)
+    // drill-point cones reach their tip: 12.5 deep + 3 / tan(59°)
+    const tip = -12.5 - 3 / Math.tan((59 * Math.PI) / 180)
+    for (const id of ['drill3.bottom', 'drill4.bottom']) {
+      const s = e.surfaces.indexOf(id)
+      let lowest = Infinity
+      for (let t = 0; t < e.triangleSurface.length; t++)
+        if (e.triangleSurface[t] === s)
+          for (let k = 0; k < 3; k++)
+            lowest = Math.min(lowest, e.positions[3 * e.indices[3 * t + k]! + 2]!)
+      expect(lowest, id).toBeCloseTo(tip, 4)
+    }
   })
 
   it('splits vertices at surface boundaries', () => {
@@ -173,6 +192,71 @@ describe('evaluatePart: edge cases', () => {
     )
     for (const id of ['profile1.wall[0]', 'profile1.tab[2].top', 'profile1.tab[0].end[1]'])
       expect(e.surfaces).toContain(id)
+  })
+
+  it('evaluates tabs over corners of every size on both profile sides', () => {
+    for (const side of ['outside', 'inside'] as const)
+      for (const cornerRadius of [0, 0.5, 2, 5, 9.5])
+        for (const [count, width] of [
+          [3, 5],
+          [5, 5],
+          [7, 5],
+          [9, 5],
+          [6, 2],
+          [4, 9],
+          [11, 3],
+        ] as const) {
+          const input = withOp({
+            kind: 'profile',
+            id: 'profile1',
+            shape: {
+              center: [50, 30],
+              contour: { kind: 'rectangle', length: 40, width: 20, cornerRadius },
+            },
+            side,
+            slotWidth: 4,
+            tabs: { count, width, thickness: 2 },
+          })
+          const r = kernel.withSolids((s) => evaluatePart(input, s))
+          expect(
+            r.isOk(),
+            JSON.stringify({
+              side,
+              cornerRadius,
+              count,
+              width,
+              e: r.isErr() && r.unwrapErr().toJSON(),
+            }),
+          ).toBe(true)
+        }
+  })
+
+  it('evaluates circles at and below the chord tolerance', () => {
+    const profile = (side: 'outside' | 'inside', radius: number, slotWidth: number) =>
+      withOp({
+        kind: 'profile',
+        id: 'profile1',
+        shape: { center: [50, 30], contour: { kind: 'circle', radius } },
+        side,
+        slotWidth,
+        tabs: { count: 1, width: Math.min(1, radius), thickness: 2 },
+      })
+    const inputs: PartGeometryInput[] = [
+      withOp({
+        kind: 'drilling',
+        id: 'drill1',
+        onZ: 0,
+        center: [20, 20],
+        diameter: 0.02,
+        bottom: { kind: 'through' },
+      }),
+      profile('outside', 0.01, 3),
+      profile('inside', 3, 2.995), // inset r 0.005 ≤ chord tolerance: the slot covers it
+    ]
+    for (const input of inputs) evaluate(input)
+    expect(evaluate(inputs[0]!).surfaces).toContain('drill1.wall')
+    expect(evaluate(inputs[1]!).surfaces).toContain('profile1.wall[0]')
+    expect(evaluate(inputs[2]!).surfaces.some((s) => s.includes('tab'))).toBe(false)
   })
 
   it('profiles inside where the slot covers the whole opening (no offcut, no tabs)', () => {

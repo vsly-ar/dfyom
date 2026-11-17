@@ -41,9 +41,49 @@ describe('arcSegments', () => {
     }
   })
 
-  it('is at least 1, also for a zero or tiny radius', () => {
+  it('is at least 1 for an open arc, also for a zero or tiny radius', () => {
     expect(arcSegments(0, Math.PI / 2)).toBe(1)
     expect(arcSegments(0.001, Math.PI / 2)).toBe(1)
+  })
+
+  it('keeps closed circles a polygon: ≥ 3 chords inscribed, ≥ 4 circumscribed', () => {
+    for (const r of [0.001, 0.005, 0.01, 0.02]) {
+      expect(arcSegments(r, 2 * Math.PI)).toBeGreaterThanOrEqual(3)
+      expect(arcSegments(r, 2 * Math.PI, CHORD_TOLERANCE, 'circumscribed')).toBeGreaterThanOrEqual(
+        4,
+      )
+    }
+  })
+
+  it('keeps both flattenings within the tolerance over a sweep of radii', () => {
+    const radii = Array.from({ length: 400 }, (_, i) => 0.001 * 1.03 ** i) // 0.001 … ~130 mm
+    for (const r of radii)
+      for (const sweep of [Math.PI / 2, 2 * Math.PI]) {
+        const ni = arcSegments(r, sweep)
+        expect(r * (1 - Math.cos(sweep / ni / 2)), `inscribed r=${r}`).toBeLessThanOrEqual(
+          CHORD_TOLERANCE + 1e-12,
+        )
+        const nc = arcSegments(r, sweep, CHORD_TOLERANCE, 'circumscribed')
+        expect(r * (1 / Math.cos(sweep / nc / 2) - 1), `circumscribed r=${r}`).toBeLessThanOrEqual(
+          CHORD_TOLERANCE + 1e-12,
+        )
+      }
+  })
+
+  it('flattens circumscribed corners and circles no further than the tolerance out', () => {
+    for (const r of [0.02, 0.024, 0.03, 0.034, 0.5, 4]) {
+      for (const c of [rect(10, 8, r), { kind: 'circle', radius: r } as const]) {
+        const ring = flattenRing(parameterize(c, [0], 'circumscribed'), 0).unwrap()
+        for (const s of ring) {
+          const d =
+            c.kind === 'circle'
+              ? Math.hypot(...s.point) - r
+              : sdRoundedRect(s.point, c as Extract<Contour, { kind: 'rectangle' }>)
+          expect(d, `r=${r} ${c.kind}`).toBeLessThanOrEqual(CHORD_TOLERANCE + 1e-9)
+          expect(d).toBeGreaterThanOrEqual(-1e-9)
+        }
+      }
+    }
   })
 })
 

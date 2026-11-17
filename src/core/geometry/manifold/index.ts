@@ -3,8 +3,7 @@
  * manifold-3d or calls `.delete()`.
  * Doc: docs/architecture/geometry.md#wasm-lifetime-and-ownership
  */
-import Module, { type Manifold, type ManifoldToplevel } from 'manifold-3d'
-import { AppError } from '../../../shared/errors/app-error'
+import Module, { type Manifold, type ManifoldToplevel, type Mesh } from 'manifold-3d'
 import {
   Err,
   fail,
@@ -59,10 +58,6 @@ interface EmscriptenOptions {
 
 const WHERE = 'manifold'
 
-function geometryError(message: string, cause: unknown): AppError {
-  return new AppError('geometry.evaluation', message, { cause, where: WHERE })
-}
-
 /** Load and initialize one manifold-3d module (once per worker, lazily on the first task). */
 export async function loadManifold(source: ManifoldWasmSource = {}): AsyncAppResult<SolidKernel> {
   let memory: WasmMemory | undefined
@@ -107,13 +102,31 @@ class Arena {
   readonly owned: Manifold[] = []
 }
 
+/**
+ * The library's own Manifold constructor. In manifold-3d 3.5.4, `Manifold.ofMesh` and
+ * `new Manifold(mesh)` wrap it, check `status()` and throw without deleting the object, which
+ * leaks WASM memory for every rejected mesh. The raw constructor returns the object whatever
+ * its status, so the arena can free it.
+ */
+type RawManifoldCtor = new (mesh: Mesh) => Manifold
+
+function rawConstructor(wasm: ManifoldToplevel): RawManifoldCtor {
+  const probe = wasm.Manifold.cube(1)
+  const ctor = (Object.getPrototypeOf(probe) as { constructor: RawManifoldCtor }).constructor
+  probe.delete()
+  return ctor
+}
+
 class ManifoldKernel implements SolidKernel {
   private live = 0
+  private readonly RawManifold: RawManifoldCtor
 
   constructor(
     private readonly wasm: ManifoldToplevel,
     private readonly memory: () => WasmMemory | undefined,
-  ) {}
+  ) {
+    this.RawManifold = rawConstructor(wasm)
+  }
 
   liveObjects(): number {
     return this.live
@@ -137,7 +150,8 @@ class ManifoldKernel implements SolidKernel {
   }
 
   private port(arena: Arena): SolidPort {
-    const { wasm } = this
+    const { wasm, RawManifold } = this
+    const rawManifold = (mesh: Mesh): Manifold => new RawManifold(mesh)
     const own = (m: Manifold): Solid => {
       arena.owned.push(m)
       this.live++
@@ -170,8 +184,8 @@ class ManifoldKernel implements SolidKernel {
     return {
       reserveOriginalId: () => call('reserveIDs', () => wasm.Manifold.reserveIDs(1)),
       fromMesh: (mesh: LabelledMesh, originalId: number) =>
-        call('ofMesh', () => {
-          const m = wasm.Manifold.ofMesh(
+        call('ofMesh', () =>
+          rawManifold(
             new wasm.Mesh({
               numProp: 3,
               vertProperties: Float32Array.from(mesh.positions),
@@ -179,13 +193,17 @@ class ManifoldKernel implements SolidKernel {
               faceID: mesh.faces,
               runOriginalID: new Uint32Array([originalId]),
             }),
-          )
+          ),
+        ).andThen((m) => {
+          // the solid is owned before its status is read, so the arena frees it either way
+          const solid = own(m)
           const status = m.status()
-          if (status !== 'NoError') {
-            m.delete()
-            throw geometryError(`mesh is not a valid solid: ${status}`, undefined)
-          }
-          return own(m)
+          return status === 'NoError'
+            ? Ok(solid)
+            : fail('geometry.evaluation', `mesh is not a valid solid: ${status}`, {
+                issues: [{ path: [], rule: 'status', message: status, params: { status } }],
+                where: WHERE,
+              })
         }),
       union: (solids) =>
         all(solids).andThen((ms) => call('union', () => own(wasm.Manifold.union(ms)))),

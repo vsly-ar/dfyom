@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
 import type { ContourLabel } from './contour'
-import { offsetBand, offsetLoft, type LoftLabels } from './loft'
-import { CHORD_TOLERANCE, type Contour, type Level } from './model'
+import { offsetBand, offsetLoft, type LabelledMesh, type LoftLabels } from './loft'
+import { CHORD_TOLERANCE, type Contour, type Level, type Vec2 } from './model'
 import { circlePocketVolume, drillVolume, pocketVolume } from './testing/analytic'
 import { faceCounts, openEdges, roundedRectArea, signedVolume } from './testing/mesh-oracles'
 
@@ -196,5 +196,129 @@ describe('offsetBand', () => {
       expect(openEdges(mesh)).toBe(0)
       expect(signedVolume(mesh)).toBeGreaterThan(0)
     }
+  })
+
+  /**
+   * Shape point and inward normal of a centered L × W rectangle with corner radius r at arc
+   * length s from the start of wall[0] (wall[0], corner[1], wall[1]): an independent oracle.
+   */
+  function frame(L: number, W: number, r: number, s: number): { p: Vec2; n: Vec2 } {
+    const wall = L - 2 * r
+    if (s <= wall) return { p: [-L / 2 + r + s, -W / 2], n: [0, 1] }
+    const arc = (Math.PI / 2) * r
+    if (s >= wall + arc) return { p: [L / 2, -W / 2 + r + (s - wall - arc)], n: [-1, 0] }
+    const theta = -Math.PI / 2 + (s - wall) / r
+    const c: Vec2 = [L / 2 - r, -W / 2 + r]
+    return {
+      p: [c[0] + r * Math.cos(theta), c[1] + r * Math.sin(theta)],
+      n: [-Math.cos(theta), -Math.sin(theta)],
+    }
+  }
+
+  function segmentDistance(q: Vec2, a: Vec2, b: Vec2): number {
+    const [dx, dy] = [b[0] - a[0], b[1] - a[1]]
+    const l2 = dx * dx + dy * dy
+    const f =
+      l2 === 0 ? 0 : Math.min(1, Math.max(0, ((q[0] - a[0]) * dx + (q[1] - a[1]) * dy) / l2))
+    return Math.hypot(a[0] + f * dx - q[0], a[1] + f * dy - q[1])
+  }
+
+  /** Signed (CCW > 0) and absolute area of the triangles labelled `face`, seen from above. */
+  function capAreas(mesh: LabelledMesh, face: number): [number, number] {
+    let signed = 0
+    let absolute = 0
+    const p = mesh.positions
+    for (let t = 0; t < mesh.faces.length; t++) {
+      if (mesh.faces[t] !== face) continue
+      const a = 3 * mesh.triangles[3 * t]!
+      const b = 3 * mesh.triangles[3 * t + 1]!
+      const c = 3 * mesh.triangles[3 * t + 2]!
+      const area =
+        ((p[b]! - p[a]!) * (p[c + 1]! - p[a + 1]!) - (p[c]! - p[a]!) * (p[b + 1]! - p[a + 1]!)) / 2
+      signed += area
+      absolute += Math.abs(area)
+    }
+    return [signed, absolute]
+  }
+
+  it.each([
+    ['outside', 0.5],
+    ['outside', 2],
+    ['outside', 5],
+    ['inside', 0.5],
+    ['inside', 2],
+    ['inside', 5],
+  ] as const)(
+    'puts end faces on the shape normal, bent onto the corner bisector (%s, R%d)',
+    (side, r) => {
+      const [L, W, slot] = [40, 20, 4]
+      const inner = side === 'outside' ? 1 : slot + 1
+      const outer = side === 'outside' ? -slot - 1 : -1
+      const arc = (Math.PI / 2) * r
+      const at = L - 2 * r + 0.2 * arc // 20 % into corner[1]
+      const tabs: [number, number][] = [
+        [at - 6, at], // ends in the corner
+        [at, at + 1], // starts in the corner
+      ]
+      for (const [from, to] of tabs) {
+        const mesh = expectOk(
+          offsetBand(rect(L, W, r), { from, to, inner, outer, bottom: -22, top: -17 }, labels),
+        )
+        expect(openEdges(mesh)).toBe(0)
+        const [signed, absolute] = capAreas(mesh, TOP)
+        expect(signed).toBeGreaterThan(0)
+        expect(absolute).toBeCloseTo(signed, 9)
+        expect(signedVolume(mesh)).toBeCloseTo(signed * 5, 6)
+        const ends: [number, number][] = [
+          [5, from],
+          [6, to],
+        ]
+        for (const [face, s] of ends) {
+          const { p, n } = frame(L, W, r, s)
+          // depth where the normal meets corner[1]'s medial axis (centre, then 45° bisector)
+          const wall0 = L - 2 * r
+          const toCorner = s <= wall0 ? wall0 - s : s >= wall0 + arc ? s - wall0 - arc : 0
+          const m = Math.min(inner, r + toCorner)
+          const bend: Vec2 = [p[0] + n[0] * m, p[1] + n[1] * m]
+          const insetCorner: Vec2 = [L / 2 - inner, -W / 2 + inner]
+          const along: number[] = []
+          for (let t = 0; t < mesh.faces.length; t++) {
+            if (mesh.faces[t] !== face) continue
+            for (let k = 0; k < 3; k++) {
+              const v = 3 * mesh.triangles[3 * t + k]!
+              const q: Vec2 = [mesh.positions[v]!, mesh.positions[v + 1]!]
+              const dx = q[0] - p[0]
+              const dy = q[1] - p[1]
+              const onNormal = Math.abs(dx * n[1] - dy * n[0]) < 1e-9
+              const onBisector = segmentDistance(q, bend, insetCorner) < 1e-9
+              expect(onNormal || (m < inner && onBisector), `end face off at s=${s}`).toBe(true)
+              if (onNormal) along.push(dx * n[0] + dy * n[1])
+            }
+          }
+          expect(Math.min(...along)).toBeCloseTo(outer, 9)
+          expect(Math.max(...along)).toBeCloseTo(m, 9)
+        }
+      }
+    },
+  )
+
+  it('ends a tab inside one corner where its end faces meet (the arc centre)', () => {
+    // tab within corner[1] of R2 (centre (18, −8)), reaching 5 deep: the end faces meet
+    const r = 2
+    const start = 40 - 2 * r
+    const mesh = expectOk(
+      offsetBand(
+        rect(40, 20, r),
+        { from: start + 0.5, to: start + 2.5, inner: 5, outer: -1, bottom: -22, top: -17 },
+        labels,
+      ),
+    )
+    expect(openEdges(mesh)).toBe(0)
+    const [signed, absolute] = capAreas(mesh, TOP)
+    expect(absolute).toBeCloseTo(signed, 9)
+    let nearest = Infinity
+    for (let v = 0; v < mesh.positions.length; v += 3)
+      nearest = Math.min(nearest, Math.hypot(mesh.positions[v]! - 18, mesh.positions[v + 1]! + 8))
+    expect(nearest).toBeLessThan(1e-9)
   })
 })

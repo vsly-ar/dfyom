@@ -87,6 +87,28 @@ export function testPartVolume(options: TestPartOptions = {}): number {
   )
 }
 
+/**
+ * Upper bound of the volume the 0.01 mm chord tolerance may add to `testPart(options)` (mm³):
+ * a flattened arc of length ℓ with sagitta ≤ t moves less than 0.7·ℓ·t of area (a circular
+ * segment has c·h·2/3 for small angles; 0.7 leaves margin), a circumscribed one less than
+ * 0.4·ℓ·t; times the height it is swept over. Independent of the mesh code.
+ */
+export function testPartChordBound(options: TestPartOptions = {}): number {
+  const t = 0.01
+  const r = options.cornerRadius ?? 4
+  const f = options.floorRadius ?? 2
+  const below = TEST_STOCK.thickness + FACED
+  const quarterArcs = (radius: number) => 2 * Math.PI * radius // four quarter arcs
+  const inscribed =
+    quarterArcs(r) * 8 + // pocket corners over the pocket depth
+    (Math.PI / 2) * f * (2 * (40 - 2 * r) + 2 * (25 - 2 * r) + quarterArcs(r)) + // fillet profile
+    quarterArcs(3) * (below + 12 + 2 * 12) + // drill walls
+    2 * (2 * Math.PI * 3 * 2) + // two drill-point cones (height 1.8 < 2)
+    quarterArcs(11) * below // profile outer prism (R11)
+  const circumscribed = quarterArcs(5) * below // profile inner prism (R5), kept side
+  return 0.7 * t * inscribed + 0.4 * t * circumscribed
+}
+
 /** Every design.md surface id of the test part that must have triangles (stock.top is faced away). */
 export const TEST_PART_SURFACES: readonly string[] = [
   'stock.bottom',

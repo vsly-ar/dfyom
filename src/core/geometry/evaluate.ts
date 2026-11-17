@@ -39,6 +39,7 @@ export function evaluatePart(
   const started = performance.now()
   const stock = stockSolids(input.stock)
   if (stock.isErr()) return Err(stock.unwrapErr())
+  const stockSolidsValue = stock.unwrap()
   const ops: OperationSolids[] = []
   for (const op of input.operations) {
     const r = operationSolids(op, input.stock)
@@ -54,7 +55,7 @@ export function evaluatePart(
       return composeOperation(op, id, solids)
     })
 
-  const composed = build(stock.unwrap()).andThen((stockSolid) => {
+  const composed = build(stockSolidsValue).andThen((stockSolid) => {
     const removals: Solid[] = []
     for (const op of ops) {
       const s = build(op).mapErr(ctx(WHERE, { operation: op.id }))
@@ -68,16 +69,17 @@ export function evaluatePart(
 
   const status = solids.status(part)
   if (status.isErr()) return Err(status.unwrapErr())
-  if (status.unwrap() !== 'NoError') {
-    const message = `part solid has status ${status.unwrap()}`
+  const partStatus = status.unwrap()
+  if (partStatus !== 'NoError') {
+    const message = `part solid has status ${partStatus}`
     return fail('geometry.evaluation', message, {
-      issues: [{ path: [], rule: 'status', message, params: { status: status.unwrap() } }],
+      issues: [{ path: [], rule: 'status', message, params: { status: partStatus } }],
       where: WHERE,
     })
   }
   return solids
     .toMesh(part)
-    .andThen((mesh) => labelMesh(mesh, [stock.unwrap(), ...ops], tables))
+    .andThen((mesh) => labelMesh(mesh, [stockSolidsValue, ...ops], tables))
     .andThen((labelled) =>
       solids.volume(part).map((volume): PartEvaluation => ({
         ...labelled,
