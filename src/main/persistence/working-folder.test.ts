@@ -2,13 +2,16 @@ import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { newProjectDoc } from '../../core/project/document'
-import { docToFiles, stableJson, type ProjectLayout } from '../../core/project/layout'
+import { docToFiles, fileContent, type ProjectLayout } from '../../core/project/layout'
 import { noopLogger } from '../../shared/logging'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
 import { nodeFs } from './fs'
 import { faultFs, useTempDir } from './fs.testing'
 import { projectPaths } from './paths'
 import { readState, readWork, unpack, WorkingFolder, type ProjectState } from './working-folder'
+
+/** `project.json` as written: the document without its record collections. */
+const projectJson = (d: object) => fileContent(d, 'project.json').unwrap()
 
 const tmp = useTempDir()
 const doc = newProjectDoc({ name: 'Bracket', unitSystem: 'mm' })
@@ -31,10 +34,10 @@ describe('unpack / readWork / readState', () => {
   it('writes the documents into a fresh work/ and state.json last', async () => {
     const fs = faultFs(() => undefined)
     expectOk(await unpack(fs, paths(), expectOk(docToFiles(doc)), state))
-    expect(await read(join(paths().work, 'project.json'))).toBe(stableJson(doc))
+    expect(await read(join(paths().work, 'project.json'))).toBe(projectJson(doc))
     expect(JSON.parse(await read(paths().state))).toEqual(state)
     expect(fs.calls.at(-4)).toMatch(/^writeFile .*state\.json\.tmp$/)
-    expect(expectOk(await readWork(nodeFs, paths())).get('project.json')).toBe(stableJson(doc))
+    expect(expectOk(await readWork(nodeFs, paths())).get('project.json')).toBe(projectJson(doc))
     expect(expectOk(await readState(nodeFs, paths())).unwrap()).toEqual(state)
   })
 
@@ -63,7 +66,7 @@ describe('unpack / readWork / readState', () => {
       // updated (not dirty, so the next open unpacks again) – never a dirty, broken mix.
       expect(st.dirty).toBe(false)
       if (work.isOk() && st.workingRevision === 3)
-        expect([stableJson(doc), stableJson(other)]).toContain(work.unwrap().get('project.json'))
+        expect([projectJson(doc), projectJson(other)]).toContain(work.unwrap().get('project.json'))
     }
   })
 
@@ -104,7 +107,7 @@ describe('WorkingFolder', () => {
     const next = newProjectDoc({ name: 'Renamed', unitSystem: 'mm' })
     wf.changed([{ op: 'replace', path: ['name'], value: 'Renamed' }], next, 4)
     expectOk(await wf.flush())
-    expect(await read(join(paths().work, 'project.json'))).toBe(stableJson(next))
+    expect(await read(join(paths().work, 'project.json'))).toBe(projectJson(next))
     expect(JSON.parse(await read(paths().state))).toMatchObject({ dirty: true, workingRevision: 4 })
     expect(wf.state.dirty).toBe(true)
   })
@@ -139,7 +142,7 @@ describe('WorkingFolder', () => {
     await vi.waitFor(async () =>
       expect(JSON.parse(await read(paths().state))).toMatchObject({ workingRevision: 4 }),
     )
-    expect(await read(join(paths().work, 'project.json'))).toBe(stableJson(next))
+    expect(await read(join(paths().work, 'project.json'))).toBe(projectJson(next))
   })
 
   it('a failed write is reported as a warning, keeps the old file and is retried by the next flush', async () => {
@@ -160,11 +163,11 @@ describe('WorkingFolder', () => {
     wf.changed([{ op: 'replace', path: ['name'], value: 'Renamed' }], next, 4)
     expectErrCode(await wf.flush(), 'persist.io')
     expect(warnings).toEqual(['unsaved changes are not protected'])
-    expect(await read(join(paths().work, 'project.json'))).toBe(stableJson(doc))
+    expect(await read(join(paths().work, 'project.json'))).toBe(projectJson(doc))
     expect(JSON.parse(await read(paths().state))).toMatchObject({ dirty: false })
     failing = false
     expectOk(await wf.flush())
-    expect(await read(join(paths().work, 'project.json'))).toBe(stableJson(next))
+    expect(await read(join(paths().work, 'project.json'))).toBe(projectJson(next))
   })
 
   it('a crash at any step of a flush leaves every work/ file complete (old or new)', async () => {
@@ -175,10 +178,10 @@ describe('WorkingFolder', () => {
       wf.changed([{ op: 'replace', path: ['name'], value: 'Renamed' }], next, 4)
       await wf.flush()
       const work = expectOk(await readWork(nodeFs, paths()))
-      expect([stableJson(doc), stableJson(next)]).toContain(work.get('project.json'))
+      expect([projectJson(doc), projectJson(next)]).toContain(work.get('project.json'))
       const st = expectOk(await readState(nodeFs, paths())).unwrap()
       // state.json is written last: dirty only once the documents are on disk.
-      if (st.dirty) expect(work.get('project.json')).toBe(stableJson(next))
+      if (st.dirty) expect(work.get('project.json')).toBe(projectJson(next))
       if (!fs.crashed) break
     }
   })

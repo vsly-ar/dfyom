@@ -1,9 +1,12 @@
 import { strToU8, unzipSync, zipSync } from 'fflate'
 import { describe, expect, it } from 'vitest'
 import { newProjectDoc } from '../../core/project/document'
-import { docToFiles, stableJson } from '../../core/project/layout'
+import { docToFiles, fileContent, stableJson } from '../../core/project/layout'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
 import { buildArchive, isSafeEntryName, loadArchive, readArchive, sha256 } from './archive'
+
+/** `project.json` as written: the document without its record collections. */
+const projectJson = (d: object) => fileContent(d, 'project.json').unwrap()
 
 const doc = newProjectDoc({ name: 'Bracket', unitSystem: 'mm' })
 const info = {
@@ -56,7 +59,7 @@ describe('readArchive / loadArchive', () => {
     const r = expectOk(loadArchive(built().bytes))
     expect(r.doc).toEqual(doc)
     expect(r.manifest.revision).toBe(4)
-    expect(r.files.get('project.json')).toBe(stableJson(doc))
+    expect(r.files.get('project.json')).toBe(projectJson(doc))
   })
 
   it('rejects data that is not a zip', () => {

@@ -103,6 +103,12 @@ export const ERROR_CODES = {
     userMessage: 'The part geometry could not be computed. This is a bug.',
     retryable: false,
   },
+  // Design (task 2.5): docs/modes/design.md#commands-and-queries-v01
+  'design.referenced': {
+    severity: 'warn',
+    userMessage: 'Later operations refer to this operation. Change or remove them first.',
+    retryable: false,
+  },
   'internal.unexpected': {
     severity: 'error',
     userMessage: 'Something went wrong. This is a bug.',

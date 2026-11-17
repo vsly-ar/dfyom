@@ -130,8 +130,38 @@ Names follow [commands.md](../architecture/commands.md#naming); all are `documen
 
 - v0.1: `design.part.add` fails with `model.invariant` when the project already has a part; `design.drilling.add` adds one hole.
 - `remove` and `move` are shared by all operation types. Both fail with `design.referenced` (new error code, task 2.5) if a later operation would reference a removed or later surface; the error lists the dependants.
-- Queries: `design.part.get`, `design.operation.list`, `design.warning.list` (DFM warnings of the last evaluation).
-- Arg schemas and the operation DTO union live in `src/core/design/` (planned, task 2.5) and link back here.
+- Queries: `design.part.list` (ids and names, so an agent can find the part after reopening), `design.part.get`, `design.operation.list`, `design.warning.list` (DFM warnings of the last evaluation; task 2.8).
+- Arg schemas and the operation DTO union live in `src/core/design/` and link back here ([Implementation](#implementation-task-25)).
+
+## Implementation (task 2.5)
+
+Code in `src/core/design/`, each file's header links here:
+
+| File                | Contents                                                                                                     |
+| ------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `part.dto.ts`       | Part and operation DTOs (Zod), stored in `ProjectDoc.parts` (record `parts/<id>.json`)                       |
+| `operation.ts`      | Operations with `Quantity` values, DTO ↔ model, field kinds, defaults, `effectiveTolerance`                  |
+| `surfaces.ts`       | `SurfaceTable` (analytic z of horizontal surfaces), the reference resolver, `checkReferences`, recalculation |
+| `validate.ts`       | The constraints of the tables above (`model.invariant`)                                                      |
+| `geometry-input.ts` | `toGeometryInput(part, stock)`: the pure mapper to the geometry input (`src/core/geometry/model.ts`)         |
+| `load.ts`           | `loadPart(doc, partId)`, `partGeometryInput(doc, partId)`                                                    |
+| `commands.ts`       | The commands and queries above (`DESIGN_COMMANDS`, `DESIGN_QUERIES`)                                         |
+
+Decisions made with task 2.5, where this doc left room:
+
+- **DTOs.** Operations are a union on `kind` (`facing`, `pocket`, `drilling`, `profile`); every parameter is a quantity DTO, `center` a pair `[x, y]` of lengths. The stock snapshot lives in `ProjectDoc.snapshots` (`snapshots/<id>.json`); the part's `stock` is its id.
+- **Ids** are the kind prefix (`facing`, `pocket`, `drill`, `profile` – `drill` as in the surface ids) plus 1 + the highest number of that prefix in the part, so removing the last one frees its number. The default `name` is `Pocket 2` etc.
+- **`on`** exists on pockets and drillings only: facing always starts from `stock.top`, and a profile is a through cut whose tabs are measured from `stock.bottom`. Valid targets: `stock.top`, the `floor` of an earlier facing or pocket, and existing tab tops of an earlier profile (`profile1.tab[0].top`). A wrong target of the edited operation is `model.invariant` (rule `onSurface`, params list the allowed ids).
+- **Expression references** in design are `<surface>.z`, `.z.min` and `.z.max` of the horizontal planar surfaces of the stock and earlier operations: `stock.top`, `stock.bottom`, `facingN.floor`, `pocketN.floor`, `drillN.bottom` (flat only). Tab tops are reachable only through `on`: bracketed ids are not expression names. z comes from the analytic model (`on.z − depth`, tab top `−thickness + tabs.thickness`) with the explicit tolerances propagated worst-case; `.min`/`.max` are its limits, untoleranced. Design never names a tool or machine, so `tool.*` and `machine.*` are unknown references here (plan mode resolves them); project variables are not specified yet.
+- **Recalculation.** The dependency graph has a node per surface `.z` (depends on its `on` surface and its operation's parameters, `pocket1#params`) and per expression parameter (`pocket2#depth`). After an update, `affectedBy(<op>#params)` gives the dependants, re-evaluated in that order in the same command (one undo step).
+- **Check order of an edit:** quantity errors (`quantity.*`, `expression.*`, issue path = parameter) → the edited operation's constraints (`model.invariant`, every invalid field at once) → references of all operations (`design.referenced`) → recalculation → constraints of the other operations (`model.invariant`, paths `operations.<id>.<param>`). Any failure leaves the document unchanged.
+- **`design.referenced`** has one issue per broken reference (path `operations.<id>.<param>`, params `{ operationId, reference }`) and lists the dependants in its data. It also stops an update that removes a referenced surface (fewer tabs, a profile side change, a drill bottom that is no longer flat).
+- **Drilling:** a `depth` for `through` or a `pointAngle` for another bottom than `drillPoint` is invalid (rule `notForBottom`); changing `bottom` drops the unused ones and `drillPoint` defaults the angle to 118°. "Bottom above `stock.bottom`" uses the full-diameter depth.
+- **Profile:** "all tabs fit" is `count × width < perimeter` of the shape; the corner radius rule of a pocket applies to the profile shape too.
+- **Updates** replace `shape` as a whole (an omitted `cornerRadius` takes the default); `tabs` merges field by field.
+- **General tolerance** is `{ length?, angle? }`, each a deviation ≥ 0 (`"0.1 mm"` = ±0.1 mm), `null` clears it. `effectiveTolerance` walks operation → part; the project scope comes with project settings.
+- **`design.part.add`** reads the library synchronously (`services.library.lookup`) to take the snapshot ([commands.md](../architecture/commands.md#command-definition)).
+- **Not in 2.5:** DFM warnings and `design.warning.list` (task 2.8). Constraints are only the hard parameter errors of the tables above.
 
 ## Retained regions: tabs and fillets
 

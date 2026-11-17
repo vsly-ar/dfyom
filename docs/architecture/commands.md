@@ -21,7 +21,7 @@ The code is the contract; each file's header links back here. No adapters yet (I
 | `src/core/commands/json-schema.ts`      | Tool descriptors from Zod                                                                             |
 | `src/core/commands/testing.ts`          | Test helpers ([Testing](#testing))                                                                    |
 | `src/core/commands/commands.fixture.ts` | Test-only commands used by the command-layer tests                                                    |
-| `src/core/project/document.ts`          | `ProjectDoc` – the state document commands act on (v0.1: `{ name, unitSystem }` only so far)          |
+| `src/core/project/document.ts`          | `ProjectDoc` – the state document commands act on: `{ name, unitSystem, parts, snapshots }`           |
 
 ## Naming
 
@@ -82,7 +82,7 @@ The sketch above is abridged; `define.ts` and `context.ts` are the contract. Dif
 Rules:
 
 - `undoable` is not a flag: it follows from `kind` (`document` = undoable, others = not).
-- A `document` handler is **synchronous** and pure apart from the draft and `ctx.ids`/`ctx.clock`. It never awaits, never calls services, never dispatches.
+- A `document` handler is **synchronous** and pure apart from the draft and `ctx.ids`/`ctx.clock`. It never awaits, never dispatches, and calls no services except synchronous reads of the library (`services.library.lookup`) to take a snapshot ([library.md](library.md#snapshots)); redo replays patches, so the read is not repeated.
 - Shared domain logic is called as plain functions from `src/core/<domain>`, not via nested dispatch. One command = one undo step.
 - Args use the [quantity](quantities.md) DTOs as entered (e.g. `"1/16\""`); models are built inside the handler with `Model.create()` and their `AppError`s returned unchanged.
 - `effect` and `job` handlers read the immutable `ProjectDoc` snapshot current at start; a job that must change the document does so with one follow-up document command ([Jobs](#long-running-commands-jobs)).

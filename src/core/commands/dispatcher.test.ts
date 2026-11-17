@@ -52,7 +52,7 @@ describe('dispatch: document commands', () => {
     const { d, events } = setup()
     const out = expectOk(await rename(d, 'Plate'))
     expect(out).toEqual({ value: { name: 'Plate' }, revision: 1 })
-    expect(d.doc).toEqual({ name: 'Plate', unitSystem: 'mm' })
+    expect(d.doc).toEqual({ name: 'Plate', unitSystem: 'mm', parts: {}, snapshots: {} })
     expect(d.revision).toBe(1)
     expect(d.history.undoable).toHaveLength(1)
     expect(d.history.undoable[0]).toMatchObject({
