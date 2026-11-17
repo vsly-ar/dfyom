@@ -32,6 +32,19 @@ describe('material data lint', () => {
     expect(lintMaterialData([estimated])).toEqual([])
   })
 
+  it('needs exactly one speed: vc (F1) or the router chart spindle speed n', () => {
+    const { vc: _, ...noVc } = testRow()
+    const router = { ...noVc, n: { min: 18_000, max: 18_000 } }
+    expect(lintMaterialData([{ ...router, sources: [{ ref: 'x', fields: ['vc'] }] }])).toContain(
+      'aluminum×carbide: n has no source and is not estimated',
+    )
+    const both = testRow({ n: { min: 18_000, max: 18_000 } })
+    expect(lintMaterialData([both])).toEqual([
+      'aluminum×carbide: n has no source and is not estimated',
+      'aluminum×carbide: exactly one of vc and n must be set',
+    ])
+  })
+
   it('fails unordered ranges, gaps in the bands and duplicate rows', () => {
     const bad = testRow({ vc: { min: 300, max: 100 }, bands: testRow().bands.slice(1) })
     expect(lintMaterialData([bad, testRow()])).toEqual([

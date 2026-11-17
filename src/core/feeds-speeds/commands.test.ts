@@ -31,24 +31,30 @@ async function setup() {
 }
 
 describe('feedsSpeeds.suggest', () => {
-  it('is registered and answers for a library tool and machine (noData until the table is curated)', async () => {
+  it('is registered and answers for a library tool and machine (carbide data; HSS → noData)', async () => {
     const { d, add } = await setup()
-    const toolId = await add('tool', { ...omitKind(flatEndMillValues()), toolMaterial: 'carbide' })
-    const machineId = await add('machine', omitKind(machineValues()))
-    const r = expectOk(
-      d.query(
-        'feedsSpeeds.suggest',
-        {
-          toolLibraryItemId: toolId,
-          materialClass: 'aluminum',
-          engagement: { kind: 'slot' },
-          machineLibraryItemId: machineId,
-        },
-        agent,
-      ),
-    ).value as { spindleSpeed: unknown; warnings: { code: string }[] }
-    expect(r.spindleSpeed).toBeNull()
-    expect(r.warnings.map((w) => w.code)).toEqual(['feeds.noData'])
+    const ask = async (toolMaterial: string) => {
+      const toolId = await add('tool', { ...omitKind(flatEndMillValues()), toolMaterial })
+      const machineId = await add('machine', omitKind(machineValues()))
+      return expectOk(
+        d.query(
+          'feedsSpeeds.suggest',
+          {
+            toolLibraryItemId: toolId,
+            materialClass: 'aluminum',
+            engagement: { kind: 'slot' },
+            machineLibraryItemId: machineId,
+          },
+          agent,
+        ),
+      ).value as { spindleSpeed: { value: number } | null; warnings: { code: string }[] }
+    }
+    const carbide = await ask('carbide')
+    expect(carbide.spindleSpeed?.value).toBeGreaterThan(0)
+    expect(carbide.warnings.map((w) => w.code)).toEqual(['feeds.powerSkipped'])
+    const hss = await ask('hss')
+    expect(hss.spindleSpeed).toBeNull()
+    expect(hss.warnings.map((w) => w.code)).toEqual(['feeds.noData'])
   })
 
   it('unknown tool or machine id is input.malformed', async () => {

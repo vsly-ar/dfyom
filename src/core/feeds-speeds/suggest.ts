@@ -17,6 +17,7 @@ import {
   MATERIAL_DATA,
   pick,
   RIGIDITY_FACTORS,
+  speedOf,
   type BandData,
   type MaterialRow,
   type Range,
@@ -183,6 +184,9 @@ export function suggestCutting(
       materialClass,
       toolMaterial,
     })
+  const speed = speedOf(row)
+  if (speed === undefined)
+    return noData(`no speed data for ${toolMaterial} in ${materialClass}`, { materialClass })
   const D = tool.diameter.canonical
   const band = bandOf(row, D)
   const range = band === undefined ? undefined : isDrill ? band.fn : band.fz
@@ -190,13 +194,15 @@ export function suggestCutting(
     return noData(`no ${isDrill ? 'fn' : 'fz'} data for a ${D} mm tool`, { diameter: D })
 
   const rigidity = input.machine.mapOr(DEFAULT_RIGIDITY, (m) => m.rigidity)
-  const c: Ctx = { input, row, band, range, rigidity, D }
+  const c: Ctx = { input, row, speed, band, range, rigidity, D }
   return engagement.kind === 'drill' ? drill(c) : mill(c, engagement)
 }
 
 interface Ctx {
   readonly input: CuttingInput
   readonly row: MaterialRow
+  /** Row speed: surface speed `vc` (F1) or chart spindle speed `n`. */
+  readonly speed: { readonly field: 'vc' | 'n'; readonly range: Range }
   readonly band: BandData
   /** `fz` (end mill) or `fn` (drill) range of the band. */
   readonly range: Range
@@ -274,26 +280,19 @@ function millAt(
   const RE = tool.effectiveCornerRadius.toNumber()
   const z = tool.fluteCount.canonical
 
-  // Spindle speed: F4 → F1 → clamp.
-  const nSteps: DerivationStep[] = [dataStep(row, 'vc', pick(row.vc, pos), 'm/min', row.vc)]
-  const vc = pick(row.vc, pos)
+  // Spindle speed: F4 → F1 (or the chart's n) → clamp.
   const dCalc = effectiveDiameter(D, RE, ap)
-  if (RE > 0)
-    nSteps.push({
-      step: 'F4',
-      formula: 'De = D − 2·RE + 2·√(ap·(2·RE − ap)) if ap < RE, else D',
-      inputs: { D, RE, ap },
-      result: dCalc,
-      unit: 'mm',
-    })
-  const n0 = spindleSpeed(vc, dCalc)
-  nSteps.push({
-    step: 'F1',
-    formula: 'n = vc·1000 / (π·Dcalc)',
-    inputs: { vc, Dcalc: dCalc },
-    result: n0,
-    unit: 'rpm',
-  })
+  const f4: DerivationStep | undefined =
+    RE > 0
+      ? {
+          step: 'F4',
+          formula: 'De = D − 2·RE + 2·√(ap·(2·RE − ap)) if ap < RE, else D',
+          inputs: { D, RE, ap },
+          result: dCalc,
+          unit: 'mm',
+        }
+      : undefined
+  const { n0, steps: nSteps } = dataSpeed(c, pos, dCalc, f4)
   let n = clampRpm(n0, machine, nSteps, warnings)
 
   // Chip load: F3 × F5, capped.
@@ -451,18 +450,7 @@ function drill(c: Ctx): CuttingSuggestion {
   const { D, row } = c
   const warnings: CuttingWarning[] = []
   const pos = RIGIDITY_FACTORS[c.rigidity].rangePos
-  const vc = pick(row.vc, pos)
-  const n0 = spindleSpeed(vc, D)
-  const nSteps: DerivationStep[] = [
-    dataStep(row, 'vc', vc, 'm/min', row.vc),
-    {
-      step: 'F1',
-      formula: 'n = vc·1000 / (π·D)',
-      inputs: { vc, Dcalc: D },
-      result: n0,
-      unit: 'rpm',
-    },
-  ]
+  const { n0, steps: nSteps } = dataSpeed(c, pos, D, undefined)
   let n = clampRpm(n0, machine, nSteps, warnings)
   const fn = pick(c.range, pos)
   const vf0 = drillFeed(fn, n)
@@ -525,6 +513,32 @@ function drill(c: Ctx): CuttingSuggestion {
     }),
     warnings,
   }
+}
+
+/**
+ * Spindle speed before clamping: F1 from the row's `vc` at `dCalc` (after the F4 step, if any),
+ * or the chart spindle speed `n` (router-bit charts; F4 then only affects the actual vc shown).
+ */
+function dataSpeed(
+  c: Ctx,
+  pos: number,
+  dCalc: number,
+  f4: DerivationStep | undefined,
+): { n0: number; steps: DerivationStep[] } {
+  const { field, range } = c.speed
+  const value = pick(range, pos)
+  if (field === 'n') return { n0: value, steps: [dataStep(c.row, 'n', value, 'rpm', range)] }
+  const n0 = spindleSpeed(value, dCalc)
+  const steps = [dataStep(c.row, 'vc', value, 'm/min', range)]
+  if (f4 !== undefined) steps.push(f4)
+  steps.push({
+    step: 'F1',
+    formula: 'n = vc·1000 / (π·Dcalc)',
+    inputs: { vc: value, Dcalc: dCalc },
+    result: n0,
+    unit: 'rpm',
+  })
+  return { n0, steps }
 }
 
 function clampRpm(
@@ -590,7 +604,7 @@ const clampStep = (
 
 function dataStep(
   row: MaterialRow,
-  field: 'vc' | 'fz' | 'fn' | 'apSlot' | 'kPlunge',
+  field: 'vc' | 'n' | 'fz' | 'fn' | 'apSlot' | 'kPlunge',
   result: number,
   unit: string,
   range?: Range,
