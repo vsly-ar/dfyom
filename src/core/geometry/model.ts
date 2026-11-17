@@ -133,9 +133,11 @@ export type DfmWarningCode =
   | 'dfm.holeNoTool'
   | 'dfm.holeDeep'
   | 'dfm.slotLeavesStock'
+  | 'dfm.slotOpensStock'
   | 'dfm.slotNoTool'
   | 'dfm.tabsNone'
   | 'dfm.tabsUnused'
+  | 'dfm.tabsThin'
 
 /** A suggested value for the warning's parameter (mm; formatted in the project unit system). */
 export interface DfmSuggestion {

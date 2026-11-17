@@ -181,15 +181,35 @@ describe('parameterChecks', () => {
     ])
   })
 
-  it('profile: the slot leaves the stock (stock margin < slot width)', () => {
+  it('profile: the slot leaves the stock on every side (stock margin < slot width)', () => {
     expect(codes(run(profile({ shape: rect(88, 48, 5) })))).toEqual([]) // margin 6
     expect(run(profile({ shape: rect(94, 54, 5) }))).toEqual([
       expect.objectContaining({
         code: 'dfm.slotLeavesStock',
+        severity: 'warning',
         parameter: 'shape',
         params: expect.objectContaining({ margin: 3, slotWidth: 6 }),
       }),
     ])
+  })
+
+  it('profile: the slot leaves the stock on some sides only – the frame still holds', () => {
+    // 60 × 56 in 100 × 60: front and back margins 2, left and right 20 (evaluates to 1 piece)
+    expect(run(profile({ shape: rect(60, 56, 5) }))).toEqual([
+      expect.objectContaining({
+        code: 'dfm.slotOpensStock',
+        severity: 'info',
+        parameter: 'shape',
+        params: expect.objectContaining({
+          sides: ['stock.side[0]', 'stock.side[2]'],
+          slotWidth: 6,
+        }),
+      }),
+    ])
+    // three sides short: still held by the fourth
+    const three = run(profile({ shape: { ...rect(94, 56, 5), center: [53, 30] } }))
+    expect(codes(three)).toEqual(['dfm.slotOpensStock'])
+    expect(three[0]!.params['sides']).toEqual(['stock.side[0]', 'stock.side[1]', 'stock.side[2]'])
     // inside profiles cut an opening inside the part: no margin rule
     expect(codes(run(profile({ side: 'inside', shape: rect(94, 54, 5) })))).toEqual([])
   })
@@ -214,6 +234,56 @@ describe('parameterChecks', () => {
         suggestion: { relation: 'atLeast', value: 3 },
       }),
     ])
+  })
+
+  it('profile: tabs thinner or narrower than 1 mm (metric) or 1/32″ (inch)', () => {
+    const tabs = (thickness: number, width: number) =>
+      profile({ tabs: { count: 4, width, thickness } })
+    expect(codes(run(tabs(1, 1)))).toEqual([])
+    expect(run(tabs(0.9, 8))).toEqual([
+      expect.objectContaining({
+        code: 'dfm.tabsThin',
+        severity: 'warning',
+        parameter: 'tabs.thickness',
+        suggestion: { relation: 'atLeast', value: 1 },
+      }),
+    ])
+    expect(run(tabs(3, 0.001))).toEqual([
+      expect.objectContaining({ code: 'dfm.tabsThin', parameter: 'tabs.width' }),
+    ])
+    const inch = { ...metric, unitSystem: 'inch' as const }
+    expect(codes(run(tabs(0.8, 8), inch))).toEqual([])
+    expect(codes(run(tabs(0.79, 8), inch))).toEqual(['dfm.tabsThin'])
+    // no tabs built: nothing to check
+    expect(codes(run(profile({ tabs: { count: 0, width: 0.5, thickness: 0.5 } })))).toEqual([
+      'dfm.tabsNone',
+    ])
+  })
+
+  it('uses the tool match tolerance (0.01 mm) in every end-mill size rule', () => {
+    // pocket narrowest size 2.995 with a Ø3 end mill: fits within the tolerance
+    expect(codes(run(pocket({ shape: rect(10, 2.995, 1.4975), depth: 2 })))).toEqual([])
+    expect(codes(run(pocket({ shape: rect(40, 25, 1.495) })))).toEqual([])
+    expect(codes(run(pocket({ shape: rect(40, 25, 1.485) })))).toEqual(['dfm.cornerTooSmall'])
+    expect(codes(run(profile({ slotWidth: 2.995 })))).toEqual([])
+    expect(codes(run(profile({ slotWidth: 2.985 })))).toEqual(['dfm.slotNoTool'])
+    // helical boring needs an end mill smaller than the hole by more than the tolerance
+    const flats: readonly DfmTool[] = [{ type: 'flatEndMill', diameter: 3 }]
+    const only3 = { ...metric, tools: flats }
+    expect(codes(run(drill({ diameter: 3.005 }), only3))).toEqual(['dfm.holeNoTool'])
+    expect(codes(run(drill({ diameter: 3.02 }), only3))).toEqual([])
+  })
+
+  it('drilling: a flat bottom by helical boring needs a flat end mill; through takes any', () => {
+    const rounded = {
+      ...metric,
+      tools: [
+        { type: 'ballEndMill', diameter: 4 },
+        { type: 'bullNoseEndMill', diameter: 4, cornerRadius: 0.5 },
+      ] as const,
+    }
+    expect(codes(run(drill({ diameter: 5 }), rounded))).toEqual(['dfm.holeNoTool'])
+    expect(codes(run(drill({ diameter: 5, bottom: { kind: 'through' } }), rounded))).toEqual([])
   })
 
   it('profile: no tabs – the piece comes loose', () => {

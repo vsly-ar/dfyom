@@ -190,6 +190,88 @@ describe('evaluatePart: pieces', () => {
     expect(e.pieces).toBe(1)
     expect(e.warnings).toEqual([])
   })
+
+  it('keeps one piece when the slot leaves the stock on two sides only (dfm.slotOpensStock)', () => {
+    // 60 × 56 in 100 × 60: front and back margins 2 < slot 6; the frame's ends hold the tabs
+    const e = evaluate(
+      part(
+        profile({
+          shape: {
+            center: [50, 30],
+            contour: { kind: 'rectangle', length: 60, width: 56, cornerRadius: 5 },
+          },
+        }),
+      ),
+    )
+    expect(e.pieces).toBe(1)
+    expect(e.warnings).toEqual([])
+  })
+
+  it('flags the untabbed part, not the held part plus frame (two outside profiles)', () => {
+    // profile1 is held by tabs, so its part and the frame are one piece carrying offcut
+    // triangles; profile2's part has no tabs and falls free
+    const e = evaluate(
+      part(
+        profile({
+          shape: {
+            center: [70, 30],
+            contour: { kind: 'rectangle', length: 40, width: 30, cornerRadius: 3 },
+          },
+        }),
+        profile({
+          id: 'profile2',
+          shape: {
+            center: [20, 30],
+            contour: { kind: 'rectangle', length: 20, width: 20, cornerRadius: 0 },
+          },
+          tabs: { count: 0, width: 8, thickness: 3 },
+        }),
+      ),
+    )
+    expect(e.pieces).toBe(2)
+    const loose = only(e, 'dfm.loosePiece')
+    expect(loose).toHaveLength(1)
+    expect(loose[0]).toMatchObject({
+      operation: 'profile2',
+      params: { offcut: false, operations: ['profile2'] },
+    })
+    expect(loose[0]!.params['volume'] as number).toBeCloseTo(20 * 20 * 20, -1)
+  })
+
+  it('flags the frame, not the part held to its tabbed opening slug', () => {
+    // the part carries profile2's offcut (the slug, held by tabs); the frame is the waste
+    const e = evaluate({
+      stock: { length: 200, width: 200, thickness: 20 },
+      operations: [
+        profile({
+          shape: {
+            center: [100, 100],
+            contour: { kind: 'rectangle', length: 40, width: 40, cornerRadius: 3 },
+          },
+          tabs: { count: 0, width: 8, thickness: 3 },
+        }),
+        profile({
+          id: 'profile2',
+          side: 'inside',
+          shape: {
+            center: [100, 100],
+            contour: { kind: 'rectangle', length: 20, width: 20, cornerRadius: 3 },
+          },
+          slotWidth: 3,
+          tabs: { count: 4, width: 3, thickness: 2 },
+        }),
+      ],
+    })
+    expect(e.pieces).toBe(2)
+    const loose = only(e, 'dfm.loosePiece')
+    expect(loose).toHaveLength(1)
+    expect(loose[0]).toMatchObject({
+      operation: 'profile1',
+      params: { offcut: true, operations: ['profile1'] },
+    })
+    const frame = (200 * 200 - (52 * 52 - (4 - Math.PI) * 81)) * 20
+    expect(loose[0]!.params['volume'] as number).toBeCloseTo(frame, -2)
+  })
 })
 
 describe('evaluatePart: retainedRemoved', () => {
@@ -218,6 +300,8 @@ describe('evaluatePart: retainedRemoved', () => {
       parameter: 'tabs',
       params: { by: 'pocket2', regions: ['tab[0]'] },
     })
+    // tab 8 × 6 cut from its top (−17) down to the pocket floor (−19.5)
+    expect(w[0]!.params['volume'] as number).toBeCloseTo(8 * 6 * 2.5, 2)
     expect(e.pieces).toBe(1) // the other three tabs still hold
   })
 
@@ -243,6 +327,31 @@ describe('evaluatePart: retainedRemoved', () => {
       parameter: 'floorRadius',
       params: { by: 'pocket2', regions: ['floorFillet'] },
     })
+    // the fillet zone (f² − πf²/4 per length) along 10 mm of wall[1]; the inscribed fillet
+    // keeps up to ≈ 0.7 · (π/2 · 2) · 0.01 mm² per length more
+    const exact = 10 * (4 - Math.PI)
+    const v = w[0]!.params['volume'] as number
+    expect(v).toBeGreaterThanOrEqual(exact - 1e-6)
+    expect(v).toBeLessThanOrEqual(exact + 0.25)
+  })
+
+  it('reports pockets merged on purpose one way only: the later one removes', () => {
+    // two filleted pockets overlapping: each cuts the other's fillet zone
+    const e = evaluate(
+      part(
+        pocket(),
+        pocket({
+          id: 'pocket2',
+          shape: {
+            center: [75, 30],
+            contour: { kind: 'rectangle', length: 20, width: 15, cornerRadius: 4 },
+          },
+        }),
+      ),
+    )
+    const w = only(e, 'dfm.retainedRemoved')
+    expect(w).toHaveLength(1)
+    expect(w[0]).toMatchObject({ operation: 'pocket1', params: { by: 'pocket2' } })
   })
 
   it('does not warn for a pocket inside another pocket clear of its fillet', () => {
@@ -311,20 +420,28 @@ describe('evaluatePart: seeded random parts keep a valid status', () => {
     }
   }
 
-  it('evaluates 30 random parts: pieces and loose-piece warnings agree', () => {
+  it('evaluates 40 random parts: the flagged piece is the waste, never the part', () => {
     const rand = rng(28_2026)
     const between = (lo: number, hi: number) => lo + (hi - lo) * rand()
-    for (let i = 0; i < 30; i++) {
-      const count = Math.floor(between(0, 5))
+    const roundedArea = (l: number, w: number, r: number) => l * w - (4 - Math.PI) * r * r
+    for (let i = 0; i < 40; i++) {
+      const count = Math.floor(between(0, 4))
+      const side = rand() < 0.5 ? 'outside' : 'inside'
+      const facingDepth = between(0.1, 2)
+      const r = between(0, 10)
+      const s = between(1, 6)
+      // an opening held by tabs inside the part (outside profiles only): the part piece then
+      // carries offcut triangles too
+      const opening = side === 'outside' && rand() < 0.6
       const input = part(
-        { kind: 'facing', id: 'facing1', depth: between(0.1, 2) },
+        { kind: 'facing', id: 'facing1', depth: facingDepth },
         pocket({
           onZ: -2,
           shape: {
-            center: [between(35, 65), between(25, 35)],
+            center: [between(50, 65), between(25, 35)],
             contour: {
               kind: 'rectangle',
-              length: between(5, 30),
+              length: between(5, 20),
               width: between(5, 15),
               cornerRadius: 2,
             },
@@ -335,20 +452,51 @@ describe('evaluatePart: seeded random parts keep a valid status', () => {
         profile({
           shape: {
             center: [50, 30],
-            contour: { kind: 'rectangle', length: 70, width: 40, cornerRadius: between(0, 10) },
+            contour: { kind: 'rectangle', length: 70, width: 40, cornerRadius: r },
           },
-          side: rand() < 0.5 ? 'outside' : 'inside',
-          slotWidth: between(1, 6),
+          side,
+          slotWidth: s,
           tabs: { count, width: between(2, 8), thickness: between(1, 5) },
         }),
+        ...(opening
+          ? [
+              profile({
+                id: 'profile2',
+                side: 'inside',
+                shape: {
+                  center: [27, 30],
+                  contour: { kind: 'rectangle', length: 6, width: 6, cornerRadius: 1 },
+                },
+                slotWidth: 1.5,
+                tabs: { count: 2, width: 1.5, thickness: 2 },
+              }),
+            ]
+          : []),
       )
-      const r = kernel.withSolids((s) => evaluatePart(input, s))
-      expect(r.isOk(), JSON.stringify({ i, input, err: r.isErr() && r.unwrapErr().toJSON() })).toBe(
-        true,
-      )
-      const e = r.unwrap()
-      expect(e.pieces, JSON.stringify({ i, input })).toBe(count === 0 ? 2 : 1)
-      expect(only(e, 'dfm.loosePiece')).toHaveLength(e.pieces - 1)
+      const res = kernel.withSolids((sp) => evaluatePart(input, sp))
+      const at = JSON.stringify({ i, input, err: res.isErr() && res.unwrapErr().toJSON() })
+      expect(res.isOk(), at).toBe(true)
+      const e = res.unwrap()
+      expect(e.pieces, at).toBe(count === 0 ? 2 : 1)
+      const loose = only(e, 'dfm.loosePiece')
+      expect(loose, at).toHaveLength(e.pieces - 1)
+      if (count > 0) continue
+      const [w] = loose
+      expect(w, at).toMatchObject({ operation: 'profile1', params: { offcut: true } })
+      expect(w!.params['operations'], at).toContain('profile1')
+      expect(w!.params['operations'], at).not.toContain('profile2')
+      const height = 20 - facingDepth
+      const volume = w!.params['volume'] as number
+      if (side === 'outside') {
+        // the frame: stock minus the slot's outer edge
+        const frame = (100 * 60 - roundedArea(70 + 2 * s, 40 + 2 * s, r + s)) * height
+        expect(Math.abs(volume - frame) / frame, at).toBeLessThan(0.005)
+      } else {
+        // the slug: inset by the slot, less the pocket inside it
+        const slug = roundedArea(70 - 2 * s, 40 - 2 * s, Math.max(0, r - s)) * height
+        expect(volume, at).toBeLessThanOrEqual(slug * 1.001)
+        expect(volume, at).toBeGreaterThan(slug - 20 * 15 * 12)
+      }
     }
     expect(kernel.liveObjects()).toBe(0)
   })

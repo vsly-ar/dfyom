@@ -40,6 +40,8 @@ export const TOOL_MATCH_TOLERANCE = 0.01
 const FACING_DEEP = { metric: 3, inch: 25.4 / 8 } as const
 const POCKET_DEPTH_RATIO = 4
 const HOLE_DEPTH_RATIO = 5
+/** Smallest tab thickness and width (mm): 1 mm / 1/32″. */
+const TAB_MIN = { metric: 1, inch: 25.4 / 32 } as const
 
 type Op<K extends OperationGeometry['kind']> = Extract<OperationGeometry, { kind: K }>
 
@@ -99,7 +101,7 @@ export function parameterChecks(
       case 'drilling':
         return drilling(op, input.stock, lib)
       case 'profile':
-        return profile(op, input.stock, lib)
+        return profile(op, input.stock, lib, options.unitSystem)
     }
   })
 }
@@ -140,7 +142,7 @@ function corners(op: Op<'pocket'> | Op<'profile'>, lib: Library): DfmWarning[] {
         suggestion === undefined ? {} : { suggestion },
       ),
     ]
-  if (min !== undefined && c.cornerRadius < min - EPSILON)
+  if (min !== undefined && c.cornerRadius < min - TOOL_MATCH_TOLERANCE)
     return [
       warning(
         'dfm.cornerTooSmall',
@@ -158,7 +160,7 @@ function corners(op: Op<'pocket'> | Op<'profile'>, lib: Library): DfmWarning[] {
 function pocket(op: Op<'pocket'>, lib: Library): DfmWarning[] {
   const out: DfmWarning[] = []
   const size = narrowest(op)
-  if (lib.minEndMill !== undefined && size < lib.minEndMill - EPSILON)
+  if (lib.minEndMill !== undefined && size < lib.minEndMill - TOOL_MATCH_TOLERANCE)
     out.push(
       warning(
         'dfm.pocketNoToolFits',
@@ -234,11 +236,13 @@ function drilling(op: Op<'drilling'>, stock: StockGeometry, lib: Library): DfmWa
     const drill = lib.tools.some(
       (t) => t.type === 'drill' && Math.abs(t.diameter - op.diameter) <= TOOL_MATCH_TOLERANCE,
     )
-    // helical boring with a smaller end mill makes flat and through holes, not a drill point
-    const bore =
-      op.bottom.kind !== 'drillPoint' &&
-      lib.minEndMill !== undefined &&
-      lib.minEndMill < op.diameter - EPSILON
+    // helical boring with a smaller end mill makes through holes (any end mill) and flat
+    // bottoms (a flat end mill only), never a drill point
+    const boring = (t: DfmTool): boolean =>
+      t.diameter < op.diameter - TOOL_MATCH_TOLERANCE &&
+      (op.bottom.kind === 'through' ? t.type !== 'drill' : t.type === 'flatEndMill')
+    const bore = op.bottom.kind !== 'drillPoint' && lib.tools.some(boring)
+    const borer = { through: ' and no end mill', flat: ' and no flat end mill', drillPoint: '' }
     if (!drill && !bore)
       out.push(
         warning(
@@ -246,7 +250,7 @@ function drilling(op: Op<'drilling'>, stock: StockGeometry, lib: Library): DfmWa
           op,
           'diameter',
           `no drill of Ø${mm(op.diameter)}` +
-            (op.bottom.kind === 'drillPoint' ? '' : ' and no end mill smaller than it') +
+            (op.bottom.kind === 'drillPoint' ? '' : `${borer[op.bottom.kind]} smaller than it`) +
             ' in the library',
           { diameter: op.diameter },
         ),
@@ -270,32 +274,58 @@ function drilling(op: Op<'drilling'>, stock: StockGeometry, lib: Library): DfmWa
   return out
 }
 
-function profile(op: Op<'profile'>, stock: StockGeometry, lib: Library): DfmWarning[] {
-  const out: DfmWarning[] = []
+/** Stock sides by surface id, with the profile shape's distance to each (the stock margin). */
+function margins(op: Op<'profile'>, stock: StockGeometry): [string, number][] {
   const c = op.shape.contour
+  const [hx, hy] = c.kind === 'circle' ? [c.radius, c.radius] : [c.length / 2, c.width / 2]
+  const [x, y] = op.shape.center
+  return [
+    ['stock.side[0]', y - hy], // front, y = 0
+    ['stock.side[1]', stock.length - x - hx], // right
+    ['stock.side[2]', stock.width - y - hy], // back
+    ['stock.side[3]', x - hx], // left, x = 0
+  ]
+}
+
+function profile(
+  op: Op<'profile'>,
+  stock: StockGeometry,
+  lib: Library,
+  unitSystem: 'metric' | 'inch',
+): DfmWarning[] {
+  const out: DfmWarning[] = []
   const covers = slotCoversOpening(op)
   if (op.side === 'outside') {
-    const half = c.kind === 'circle' ? [c.radius, c.radius] : [c.length / 2, c.width / 2]
-    const [x, y] = op.shape.center
-    const margin = Math.min(
-      x - half[0]!,
-      stock.length - x - half[0]!,
-      y - half[1]!,
-      stock.width - y - half[1]!,
-    )
-    if (margin < op.slotWidth - EPSILON)
+    const all = margins(op, stock)
+    const short = all.filter(([, m]) => m < op.slotWidth - EPSILON)
+    const margin = Math.min(...all.map(([, m]) => m))
+    const sides = short.map(([s]) => s)
+    if (short.length === all.length)
+      // the frame falls apart: nothing is left for the tabs to hold on to
       out.push(
         warning(
           'dfm.slotLeavesStock',
           op,
           'shape',
-          `the slot leaves the stock: stock margin ${mm(margin)} < slot width ` +
-            `${mm(op.slotWidth)}, so the tabs hold nothing`,
-          { margin, slotWidth: op.slotWidth },
+          `the slot leaves the stock on every side (stock margin ${mm(margin)} < slot width ` +
+            `${mm(op.slotWidth)}), so the tabs hold nothing`,
+          { margin, slotWidth: op.slotWidth, sides },
+        ),
+      )
+    else if (short.length > 0)
+      out.push(
+        warning(
+          'dfm.slotOpensStock',
+          op,
+          'shape',
+          `the slot runs out of the stock at ${sides.join(', ')} (stock margin ${mm(margin)} < ` +
+            `slot width ${mm(op.slotWidth)}); the frame still holds the tabs on the other sides`,
+          { margin, slotWidth: op.slotWidth, sides },
+          { severity: 'info' },
         ),
       )
   } else out.push(...corners(op, lib))
-  if (lib.minEndMill !== undefined && op.slotWidth < lib.minEndMill - EPSILON)
+  if (lib.minEndMill !== undefined && op.slotWidth < lib.minEndMill - TOOL_MATCH_TOLERANCE)
     out.push(
       warning(
         'dfm.slotNoTool',
@@ -330,5 +360,24 @@ function profile(op: Op<'profile'>, stock: StockGeometry, lib: Library): DfmWarn
         { suggestion: atLeast(1) },
       ),
     )
+  if (!covers && op.tabs.count > 0) {
+    // connectivity is topological: a hair-thin tab still "holds" in the evaluation
+    const limit = TAB_MIN[unitSystem]
+    for (const [parameter, value] of [
+      ['tabs.thickness', op.tabs.thickness],
+      ['tabs.width', op.tabs.width],
+    ] as const)
+      if (value < limit - EPSILON)
+        out.push(
+          warning(
+            'dfm.tabsThin',
+            op,
+            parameter,
+            `${parameter} ${mm(value)} is too small to hold the piece – use at least ${mm(limit)}`,
+            { [parameter.slice(5)]: value, limit },
+            { suggestion: atLeast(limit) },
+          ),
+        )
+  }
   return out
 }

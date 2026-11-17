@@ -19,6 +19,7 @@ import {
   type Contour,
   type Level,
   type OperationGeometry,
+  type Shape,
   type StockGeometry,
   type Vec3,
 } from './model'
@@ -61,6 +62,8 @@ export interface NominalRegion {
   readonly parameter: string
   readonly mesh: PlacedMesh
   readonly minusRemoval: boolean
+  /** Removals whose bounds lie inside this shape (XY, part frame) cannot reach the region. */
+  readonly clearInside?: Shape
 }
 
 /** Half the narrowest size: the largest inward offset a contour allows. */
@@ -238,6 +241,8 @@ function pocket(op: Extract<OperationGeometry, { kind: 'pocket' }>): AppResult<O
     ],
     { band: () => AIR, top: AIR, bottom: AIR },
   )
+  // the zone lies between the contour and its inset by f: removals inside the inset miss it
+  const inset = offsetContour(op.shape.contour, op.floorRadius)
   return zone.map((z) =>
     result(op.id, table, {
       removal: [{ mesh: removal.unwrap(), at }],
@@ -247,6 +252,9 @@ function pocket(op: Extract<OperationGeometry, { kind: 'pocket' }>): AppResult<O
           parameter: 'floorRadius',
           mesh: { mesh: z, at },
           minusRemoval: true,
+          ...(inset.isSome() && {
+            clearInside: { center: op.shape.center, contour: inset.unwrap() },
+          }),
         },
       ],
     }),

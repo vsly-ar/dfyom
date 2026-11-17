@@ -93,9 +93,13 @@ interface Piece {
   readonly offcut: boolean
 }
 
+/** Profiles are the only operations with an `offcut` surface. */
+const isProfile = (op: OperationSolids): boolean => op.surfaces.includes('offcut')
+
 /**
- * `decompose()` into pieces > ε_V. The part is the largest piece not bounded by an `offcut`
- * surface (the largest piece if all are); every other piece gets `dfm.loosePiece`.
+ * `decompose()` into pieces > ε_V. A piece is waste when it is bounded by a profile's `offcut`
+ * surface and by no profile's shape side (wall, corner, tab). The part is the largest piece
+ * that is not waste (the largest piece if all are); every other piece gets `dfm.loosePiece`.
  */
 function loosePieces(
   input: CheckInput,
@@ -118,15 +122,20 @@ function loosePieces(
     if (mesh.isErr()) return Err(mesh.unwrapErr())
     const m = mesh.unwrap()
     const bounding = new Set<OperationSolids>()
-    let offcut = false
+    let offcutSide = false
+    let shapeSide = false
     for (let t = 0; t < m.triangleFace.length; t++) {
       const op = input.tables.get(m.triangleOriginal[t]!)
       if (op === undefined || !order.has(op)) continue // the stock
       bounding.add(op)
-      if (op.surfaces[m.triangleFace[t]!] === 'offcut') offcut = true
+      if (!isProfile(op)) continue
+      const role = op.surfaces[m.triangleFace[t]!]!
+      if (role === 'offcut') offcutSide = true
+      else shapeSide = true // wall, corner or tab: the part's side of a profile
     }
     const operations = [...bounding].sort((a, b) => order.get(a)! - order.get(b)!).map((o) => o.id)
-    pieces.push({ solid, volume, operations, offcut })
+    // tabs join a held part to its offcut, so a piece with both sides is never waste
+    pieces.push({ solid, volume, operations, offcut: offcutSide && !shapeSide })
   }
   const largest = (ps: readonly Piece[]): Piece | undefined =>
     ps.reduce<Piece | undefined>(
@@ -135,12 +144,11 @@ function loosePieces(
     )
   const part = largest(pieces.filter((p) => !p.offcut)) ?? largest(pieces)!
 
-  const kindOf = new Map(input.operations.map((c) => [c.op.id, c.op.surfaces.includes('offcut')]))
+  const profiles = new Set(input.operations.filter((c) => isProfile(c.op)).map((c) => c.op.id))
   const warnings = pieces
     .filter((p) => p !== part)
     .map((p): DfmWarning => {
-      const operation =
-        p.operations.find((id) => kindOf.get(id) === true) ?? p.operations[0] ?? 'stock'
+      const operation = p.operations.find((id) => profiles.has(id)) ?? p.operations[0] ?? 'stock'
       const what = p.offcut ? 'an offcut' : 'a piece of the part'
       return {
         code: 'dfm.loosePiece',
@@ -161,15 +169,16 @@ function loosePieces(
  * (retaining operation, removing operation). Boxes skip pairs that cannot meet.
  */
 function retainedRemoved(input: CheckInput, solids: SolidPort): AppResult<DfmWarning[]> {
-  const warnings: DfmWarning[] = []
+  type Hit = { regions: string[]; parameter: string; volume: number }
+  const all = new Map<ComposedOperation, Map<ComposedOperation, Hit>>()
   for (const a of input.operations) {
-    const hits = new Map<
-      ComposedOperation,
-      { regions: string[]; parameter: string; volume: number }
-    >()
+    const hits = new Map<ComposedOperation, Hit>()
+    all.set(a, hits)
     for (const region of a.op.nominal) {
       const box = boxOf([region.mesh])
-      const others = input.operations.filter((b) => b !== a && overlaps(box, b.box))
+      const others = input.operations.filter(
+        (b) => b !== a && overlaps(box, b.box) && !clearOf(region, b.box),
+      )
       if (others.length === 0) continue
       const solid = placed(region, a.originalId, solids)
       if (solid.isErr()) return Err(solid.unwrapErr())
@@ -188,7 +197,14 @@ function retainedRemoved(input: CheckInput, solids: SolidPort): AppResult<DfmWar
         hits.set(b, hit)
       }
     }
-    for (const [b, hit] of hits)
+  }
+  // operations that cut each other's retained regions (pockets merged on purpose): report
+  // only the later one in design order as the remover
+  const rank = new Map(input.operations.map((c, i) => [c, i]))
+  const warnings: DfmWarning[] = []
+  for (const [a, hits] of all)
+    for (const [b, hit] of hits) {
+      if (all.get(b)?.has(a) === true && rank.get(b)! < rank.get(a)!) continue
       warnings.push({
         code: 'dfm.retainedRemoved',
         severity: 'warning',
@@ -199,8 +215,31 @@ function retainedRemoved(input: CheckInput, solids: SolidPort): AppResult<DfmWar
         parameter: hit.parameter,
         params: { by: b.op.id, regions: hit.regions, volume: hit.volume },
       })
-  }
+    }
   return Ok(warnings)
+}
+
+/**
+ * A removal whose bounds lie, in XY, inside the region's `clearInside` shape (a pocket contour
+ * inset by its fillet radius) cannot reach the region: no booleans needed.
+ */
+function clearOf(region: NominalRegion, box: Box): boolean {
+  const shape = region.clearInside
+  if (shape === undefined) return false
+  const inside = (x: number, y: number): boolean => {
+    const dx = Math.abs(x - shape.center[0])
+    const dy = Math.abs(y - shape.center[1])
+    const c = shape.contour
+    if (c.kind === 'circle') return Math.hypot(dx, dy) <= c.radius
+    const hx = c.length / 2
+    const hy = c.width / 2
+    if (dx > hx || dy > hy) return false
+    const cx = hx - c.cornerRadius
+    const cy = hy - c.cornerRadius
+    return dx <= cx || dy <= cy || Math.hypot(dx - cx, dy - cy) <= c.cornerRadius
+  }
+  // the shape is convex: the box is inside when its four corners are
+  return [box.min[0], box.max[0]].every((x) => [box.min[1], box.max[1]].every((y) => inside(x, y)))
 }
 
 function placed(region: NominalRegion, originalId: number, solids: SolidPort): AppResult<Solid> {
