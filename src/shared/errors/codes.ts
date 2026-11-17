@@ -132,6 +132,12 @@ export const ERROR_CODES = {
     userMessage: 'The tool or the cutting values do not fit this operation.',
     retryable: false,
   },
+  // Post-processor (task 2.11): docs/architecture/grbl.md#export-checks
+  'post.noMachine': {
+    severity: 'warn',
+    userMessage: 'Choose a machine for this plan before exporting gCode.',
+    retryable: false,
+  },
   'internal.unexpected': {
     severity: 'error',
     userMessage: 'Something went wrong. This is a bug.',

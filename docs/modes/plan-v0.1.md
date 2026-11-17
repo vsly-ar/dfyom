@@ -201,7 +201,7 @@ Names follow [commands.md](../architecture/commands.md#naming); `document` unles
 
 ## Export boundary (tasks 1.10 and 2.11)
 
-Export (`effect` command, task 2.11) turns the ordered `Toolpath[]` of one setup, the setup and the plan's machine copy (`programUnits`, `spindle.control`, `toolChanger`) into a `MachiningProgram` ([grbl.md](../architecture/grbl.md#input-boundary)): it expands `drill` moves into rapid/feed blocks, converts arc centers to `I`/`J` offsets (arcs and helices stay G2/G3) and adds tool-change and spindle blocks. `postGrbl` then writes the text; it owns the gCode text and its defaults (e.g. spindle dwell after `M3`, [grbl.md](../architecture/grbl.md#output-dialect)); plan mode never emits text.
+Export (`effect` command, task 2.11) turns the ordered `Toolpath[]` of one setup, the setup and the plan's machine copy (`programUnits`, `spindle.control`, `toolChanger`) into a `MachiningProgram` ([grbl.md](../architecture/grbl.md#input-boundary)): it expands `drill` moves into rapid/feed blocks, converts arc centers to `I`/`J` offsets (arcs and helices stay G2/G3) and adds tool-change and spindle blocks. `postGrbl` then writes the text; it owns the gCode text and its defaults (e.g. spindle dwell after `M3`, [grbl.md](../architecture/grbl.md#output-dialect)); plan mode never emits text. Implemented (task 2.11) as the pure `exportGrbl` in `src/core/post/export.ts`, with the [export checks](../architecture/grbl.md#export-checks) (machine required, feed rates, spindle range, travel, soft limits); the `plan.export` command that feeds it the plan's generated toolpaths comes with the 2.9 job ([grbl.md](../architecture/grbl.md#implementation-task-211)).
 
 ## Files
 
