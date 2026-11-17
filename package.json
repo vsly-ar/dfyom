@@ -44,6 +44,7 @@
     "vitest": "^5.1.0"
   },
   "dependencies": {
+    "fflate": "^0.8.3",
     "immer": "^11.2.10",
     "oxide.ts": "1.1.0",
     "pino": "^10.4.0",
