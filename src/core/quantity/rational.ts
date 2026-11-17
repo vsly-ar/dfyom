@@ -61,6 +61,15 @@ export class Rational {
     return new Rational(this.num * o.num, this.den * o.den)
   }
 
+  sub(o: Rational): Rational {
+    return this.add(o.neg())
+  }
+
+  /** this ÷ o. Fails with `model.invariant` (rule `denominatorNonZero`) when o = 0. */
+  div(o: Rational): AppResult<Rational> {
+    return Rational.create(this.num * o.den, this.den * o.num)
+  }
+
   neg(): Rational {
     return new Rational(-this.num, this.den)
   }

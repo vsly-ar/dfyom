@@ -10,7 +10,14 @@ import type { ErrorCode } from '../../shared/errors/codes'
 import { fail, None, Ok, Some, type AppResult, type Option } from '../../shared/result'
 import { Rational } from './rational'
 import type { ToleranceProps } from './tolerance'
-import { spellingsOf, unitFromSpelling, UNITS, type QuantityKind, type UnitId } from './units'
+import {
+  spellingsOf,
+  unitFromSpelling,
+  UNIT_IDS,
+  UNITS,
+  type QuantityKind,
+  type UnitId,
+} from './units'
 
 /** What the field supplies: its kind and the unit a bare number means (e.g. the project unit). */
 export interface ParseContext {
@@ -29,19 +36,26 @@ export const MAX_SOURCE_LENGTH = 256
 
 const UNIT_LETTER = /^[A-Za-zµ]$/
 const UNIT_SYMBOLS = new Set(['"', '″', "'", '′', '°', '%'])
-const SIGNS = new Set(['+', '-', '−'])
-const PLUS_MINUS = ['+/-', '+-', '±'] as const
+export const SIGNS: ReadonlySet<string> = new Set(['+', '-', '−'])
+export const PLUS_MINUS = ['+/-', '+-', '±'] as const
 const HYPHENATED_MIXED = /^[-−]\d+\/\d+/
 
-const isWs = (ch: string | undefined): boolean => ch === ' ' || ch === '\t' || ch === ' '
-const isDigit = (ch: string | undefined): boolean => ch !== undefined && ch >= '0' && ch <= '9'
+export const isWs = (ch: string | undefined): boolean => ch === ' ' || ch === '\t' || ch === ' '
+export const isDigit = (ch: string | undefined): boolean =>
+  ch !== undefined && ch >= '0' && ch <= '9'
 const isUnitLetter = (ch: string | undefined): boolean => ch !== undefined && UNIT_LETTER.test(ch)
 
 type Params = { readonly offset: number; readonly expected: readonly string[] } & Readonly<
   Record<string, unknown>
 >
 
-function reject(code: ErrorCode, rule: string, message: string, params: Params): AppResult<never> {
+/** A `quantity.syntax` / `quantity.unit` error with one issue at path `[]` (see header). */
+export function reject(
+  code: ErrorCode,
+  rule: string,
+  message: string,
+  params: Params,
+): AppResult<never> {
   return fail(code, message, {
     issues: [{ path: [], rule, message, params }],
     where: 'parseLiteral',
@@ -50,24 +64,41 @@ function reject(code: ErrorCode, rule: string, message: string, params: Params):
 
 /** Parse a literal for a field. Pure; does not construct the Quantity model. */
 export function parseLiteral(source: string, ctx: ParseContext): AppResult<ParsedLiteral> {
-  return new LiteralParser(source, ctx).literal()
+  return new LiteralScanner(source, ctx.kind).literal(ctx.defaultUnit)
 }
 
-interface Magnitude {
+/** `quantity.syntax` "expected …, found …" at `pos`. */
+export function unexpectedAt(
+  src: string,
+  pos: number,
+  expected: readonly string[],
+): AppResult<never> {
+  const found = pos >= src.length ? 'end of input' : `"${src[pos]}"`
+  return reject('quantity.syntax', 'syntax', `expected ${expected.join(' or ')}, found ${found}`, {
+    offset: pos,
+    expected,
+  })
+}
+
+export interface Magnitude {
   readonly value: Rational
   /** Unit as written, if any. */
   readonly unit: Option<UnitId>
 }
 
-class LiteralParser {
-  private pos = 0
-
+/**
+ * Scanner for the literal grammar, also used token-wise by the expression parser
+ * (src/core/expression/parse.ts). `kind: 'any'` accepts units of every kind (numbers inside
+ * expressions); a kind restricts units to that kind (a field's literal or trailing tolerance).
+ */
+export class LiteralScanner {
   constructor(
     private readonly src: string,
-    private readonly ctx: ParseContext,
+    private readonly kind: QuantityKind | 'any',
+    public pos = 0,
   ) {}
 
-  literal(): AppResult<ParsedLiteral> {
+  literal(defaultUnit: UnitId): AppResult<ParsedLiteral> {
     if (this.src.length > MAX_SOURCE_LENGTH)
       return reject('quantity.syntax', 'maxLength', `longer than ${MAX_SOURCE_LENGTH} characters`, {
         offset: MAX_SOURCE_LENGTH,
@@ -78,7 +109,7 @@ class LiteralParser {
     const v = this.quantityValue()
     if (v.isErr()) return v
     const { value, unit } = v.unwrap()
-    const valueUnit = unit.unwrapOr(this.ctx.defaultUnit)
+    const valueUnit = unit.unwrapOr(defaultUnit)
     this.skipWs()
     const exact = value.mul(UNITS[valueUnit].factor)
     if (this.atEnd()) return Ok({ exact, tolerance: None })
@@ -88,6 +119,20 @@ class LiteralParser {
     this.skipWs()
     if (!this.atEnd()) return this.unexpected(['end'])
     return Ok({ exact, tolerance: Some(tol.unwrap()) })
+  }
+
+  /** `magnitude, [ ws, unit ]` at `pos`: one number token of an expression. */
+  numberToken(): AppResult<Magnitude> {
+    return this.magnitudeWithUnit(true)
+  }
+
+  /** A tolerance at `pos` that runs to the end of the source (trailing ws allowed). */
+  trailingTolerance(valueUnit: UnitId): AppResult<ToleranceProps> {
+    const tol = this.tolerance(valueUnit, false)
+    if (tol.isErr()) return tol
+    this.skipWs()
+    if (!this.atEnd()) return this.unexpected(['end'])
+    return tol
   }
 
   // tolerance = pm, ws, dev | sign, dev, ws, "/", ws, [ sign ], dev
@@ -232,13 +277,17 @@ class LiteralParser {
     else if (isUnitLetter(this.peek())) {
       this.letters()
       if (this.peek() === '/' && isUnitLetter(this.src[this.pos + 1])) {
+        const save = this.pos
         this.pos++
         this.letters()
+        // In expressions `10 mm/D` is a division: keep "/" only if it forms a known unit.
+        if (this.kind === 'any' && unitFromSpelling(this.src.slice(start, this.pos)).isNone())
+          this.pos = save
       }
     } else return Ok(None)
 
     const spelling = this.src.slice(start, this.pos)
-    const expected = spellingsOf(this.ctx.kind)
+    const expected = this.kind === 'any' ? allSpellings() : spellingsOf(this.kind)
     const id = unitFromSpelling(spelling)
     if (id.isNone())
       return reject('quantity.unit', 'unknownUnit', `unknown unit "${spelling}"`, {
@@ -247,11 +296,11 @@ class LiteralParser {
         actual: spelling,
       })
     const unit = id.unwrap()
-    if (UNITS[unit].kind !== this.ctx.kind)
+    if (this.kind !== 'any' && UNITS[unit].kind !== this.kind)
       return reject(
         'quantity.unit',
         'unitKind',
-        `"${spelling}" is a ${UNITS[unit].kind} unit, expected ${this.ctx.kind}`,
+        `"${spelling}" is a ${UNITS[unit].kind} unit, expected ${this.kind}`,
         { offset: start, expected, actual: spelling },
       )
     return Ok(Some(unit))
@@ -287,17 +336,12 @@ class LiteralParser {
   }
 
   private unexpected(expected: readonly string[]): AppResult<never> {
-    const found = this.atEnd() ? 'end of input' : `"${this.peek()}"`
-    return reject(
-      'quantity.syntax',
-      'syntax',
-      `expected ${expected.join(' or ')}, found ${found}`,
-      {
-        offset: this.pos,
-        expected,
-      },
-    )
+    return unexpectedAt(this.src, this.pos, expected)
   }
+}
+
+function allSpellings(): string[] {
+  return UNIT_IDS.flatMap((id) => UNITS[id].spellings)
 }
 
 function decimal(whole: string, frac: string): Rational {
