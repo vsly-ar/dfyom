@@ -1,0 +1,190 @@
+/**
+ * Evaluation of a plan: per plan operation its tool, preset, stickout, resolved strategy and
+ * feeds, and every finding of `plan.warning.list`. Derived on every call, never stored.
+ * Doc: docs/modes/plan-v0.1.md (Tool assignment and checks, Feeds and speeds, Pass strategies)
+ */
+import { None, Option, Some } from '../../shared/result'
+import type { Operation } from '../design/operation'
+import type { OperationKind } from '../design/part.dto'
+import { machineLimits } from '../feeds-speeds/suggest'
+import type { MaterialRow } from '../feeds-speeds/data'
+import type { CuttingPreset, Tool } from '../library/tool'
+import { Quantity } from '../quantity/quantity'
+import { feedFindings, stockFindings, toolFindings, type PlanWarning } from './checks'
+import { pickPreset, resolveFeeds, type Overrides, type ResolvedFeeds } from './feeds'
+import { orderFindings } from './order'
+import { designOperations, type LoadedPlan } from './plan'
+import { FEED_FIELDS, type PlanOperationDTO } from './plan.dto'
+import {
+  resolveStrategy,
+  strategyIssues,
+  type ResolvedStrategy,
+  type StrategyContext,
+} from './strategy'
+
+export interface OperationEvaluation {
+  readonly planOperation: PlanOperationDTO
+  readonly kind: OperationKind
+  readonly ops: readonly Operation[]
+  readonly tool: Option<Tool>
+  readonly preset: Option<CuttingPreset>
+  /** Resolved stickout (mm): the plan's, else the tool's stickout, else its flute length. */
+  readonly stickout: Option<number>
+  readonly strategy: ResolvedStrategy
+  readonly feeds: Option<ResolvedFeeds>
+  readonly findings: readonly PlanWarning[]
+}
+
+export function overridesOf(op: PlanOperationDTO): Overrides {
+  const out: Partial<Record<(typeof FEED_FIELDS)[number], Quantity>> = {}
+  for (const f of FEED_FIELDS) {
+    const dto = op.overrides[f]
+    if (dto === undefined) continue
+    const q = Quantity.fromDTO(dto)
+    if (q.isOk()) out[f] = q.unwrap()
+  }
+  return out
+}
+
+export function stickoutOf(op: PlanOperationDTO, tool: Tool): number {
+  if (op.stickout !== undefined) {
+    const q = Quantity.fromDTO(op.stickout)
+    if (q.isOk()) return q.unwrap().canonical
+  }
+  return tool.stickout.mapOr(tool.fluteLength.canonical, (q) => q.canonical)
+}
+
+/** Evaluates one plan operation with `tool` (its own, or a candidate for `plan.tool.suggest`). */
+export function evaluateOperation(
+  plan: LoadedPlan,
+  op: PlanOperationDTO,
+  candidate?: Tool,
+  data?: readonly MaterialRow[],
+): OperationEvaluation {
+  const ops = designOperations(plan, op)
+  const kind: OperationKind = ops[0]?.kind ?? 'facing'
+  const tool: Option<Tool> =
+    candidate !== undefined
+      ? Some(candidate)
+      : op.tool === undefined
+        ? None
+        : Option.nonNull(plan.tools.get(op.tool))
+  const materialClass = plan.stock.material.class
+  const preset = tool.andThen((t) =>
+    pickPreset(t, materialClass, candidate === undefined ? op.presetName : undefined),
+  )
+  const sctx: StrategyContext = {
+    ops,
+    allOps: plan.part.operations,
+    stock: plan.stock,
+    units: plan.units,
+    tool,
+    preset,
+  }
+  const strategy = resolveStrategy(kind, op.strategy, sctx)
+  const findings: PlanWarning[] = []
+  const push = (
+    f: Omit<PlanWarning, 'code' | 'severity' | 'planOperationId'>,
+    code: PlanWarning['code'] = 'plan.check',
+    severity: PlanWarning['severity'] = 'error',
+  ) => findings.push({ ...f, code, severity, planOperationId: op.id })
+  if (tool.isNone()) {
+    push({ field: 'tool', rule: 'noTool', message: 'no tool assigned', params: {} })
+    return {
+      planOperation: op,
+      kind,
+      ops,
+      tool,
+      preset,
+      stickout: None,
+      strategy,
+      feeds: None,
+      findings,
+    }
+  }
+  const t = tool.unwrap()
+  if (candidate === undefined && op.presetName !== undefined && preset.isNone())
+    push({
+      field: 'presetName',
+      rule: 'unknownPreset',
+      message: `the tool has no preset "${op.presetName}"`,
+      params: { presetName: op.presetName },
+    })
+  for (const issue of strategyIssues(kind, op.strategy, strategy, sctx))
+    push({
+      field: issue.path.join('.'),
+      rule: issue.rule,
+      message: issue.message,
+      params: {},
+    })
+  const feeds = resolveFeeds(
+    {
+      kind,
+      tool: t,
+      preset,
+      overrides: overridesOf(op),
+      materialClass,
+      machine: plan.machine.map(machineLimits),
+      ...(kind === 'facing' && ops[0]?.kind === 'facing'
+        ? { facingDepth: ops[0].depth.canonical }
+        : {}),
+      ...(strategy.kind === 'drilling' ? { helixPitch: strategy.helixPitch } : {}),
+    },
+    data,
+  )
+  for (const field of feeds.applicable)
+    if (feeds.fields[field].isNone())
+      push({
+        field,
+        rule: 'unresolved',
+        message: `${field}: no override, preset or calculator value`,
+        params: {},
+      })
+  const stickout = stickoutOf(op, t)
+  const stepdown = feeds.fields.stepdown.map((v) => v.value)
+  for (const f of toolFindings({
+    ops,
+    part: plan.part,
+    stock: plan.stock,
+    tool: t,
+    stickout,
+    ...(stepdown.isSome() ? { stepdown: stepdown.unwrap() } : {}),
+    strategy,
+  }))
+    push(f)
+  plan.machine.map((m) => feedFindings(feeds, m).forEach((f) => push(f, 'plan.machine', 'warning')))
+  for (const w of feeds.warnings)
+    findings.push({
+      code: w.code,
+      severity: w.severity,
+      message: w.message,
+      planOperationId: op.id,
+      rule: w.code,
+      params: w.params,
+    })
+  return {
+    planOperation: op,
+    kind,
+    ops,
+    tool,
+    preset,
+    stickout: Some(stickout),
+    strategy,
+    feeds: Some(feeds),
+    findings,
+  }
+}
+
+/** Every finding of the plan: per operation, then order, then machine (stock vs. travel). */
+export function planFindings(plan: LoadedPlan, data?: readonly MaterialRow[]): PlanWarning[] {
+  const out: PlanWarning[] = []
+  for (const op of plan.setup.operations)
+    out.push(...evaluateOperation(plan, op, undefined, data).findings)
+  out.push(...orderFindings(plan.setup.operations, plan.part))
+  plan.machine.map((m) => {
+    const clearance = Quantity.fromDTO(plan.setup.clearanceHeight).mapOr(0, (q) => q.canonical)
+    for (const f of stockFindings(plan.stock, clearance, m))
+      out.push({ ...f, code: 'plan.machine', severity: 'warning' })
+  })
+  return out
+}

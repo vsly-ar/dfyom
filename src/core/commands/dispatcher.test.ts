@@ -14,7 +14,7 @@ import {
   setUnitSystem,
 } from './commands.fixture'
 import type { Source } from './context'
-import type { AnyCommand } from './define'
+import type { AnyCommand, DocumentHook } from './define'
 import { createDispatcher, type DispatcherOptions } from './dispatcher'
 import { applyDocPatches } from './history'
 import { createAppRegistry, createRegistry } from './registry'
@@ -53,7 +53,7 @@ describe('dispatch: document commands', () => {
     const { d, events } = setup()
     const out = expectOk(await rename(d, 'Plate'))
     expect(out).toEqual({ value: { name: 'Plate' }, revision: 1 })
-    expect(d.doc).toEqual({ name: 'Plate', unitSystem: 'mm', parts: {}, snapshots: {} })
+    expect(d.doc).toEqual({ name: 'Plate', unitSystem: 'mm', parts: {}, snapshots: {}, plans: {} })
     expect(d.revision).toBe(1)
     expect(d.history.undoable).toHaveLength(1)
     expect(d.history.undoable[0]).toMatchObject({
@@ -486,5 +486,49 @@ describe('action log replay', () => {
       { name: 'B' },
       { name: 'C' },
     ])
+  })
+})
+
+describe('document hooks', () => {
+  // Appends the unit system to the name after every rename; fails on an "x" name.
+  const suffix: DocumentHook = {
+    name: 'suffix',
+    after(draft, command) {
+      if (command.name !== 'project.name.update') return Ok(undefined)
+      if (draft.name === 'x') return fail('model.invariant', 'no x', { where: 'suffix' })
+      draft.name = `${draft.name} (${draft.unitSystem})`
+      return Ok(undefined)
+    },
+  }
+  const hooked = () =>
+    createDispatcher({
+      registry: expectOk(
+        createRegistry({ commands: [renameProject, setUnitSystem], hooks: [suffix] }),
+      ),
+      doc: initial,
+    })
+
+  it('joins the hook changes to the command: one commit, one undo step', async () => {
+    const d = hooked()
+    expectOk(await d.dispatch('project.name.update', { name: 'A' }, ui))
+    expect(d.doc.name).toBe('A (mm)')
+    expect(d.revision).toBe(1)
+    expect(d.history.undoable).toHaveLength(1)
+    expectOk(await d.dispatch('project.unitSystem.update', { unitSystem: 'inch' }, ui))
+    expect(d.doc.name).toBe('A (mm)') // other commands: the hook does nothing
+    expectOk(await d.dispatch('history.undo', {}, ui))
+    expectOk(await d.dispatch('history.undo', {}, ui))
+    expect(d.doc).toEqual(initial)
+  })
+
+  it('a failing hook fails the command and leaves the document unchanged', async () => {
+    const d = hooked()
+    const e = expectErrCode(
+      await d.dispatch('project.name.update', { name: 'x' }, ui),
+      'model.invariant',
+    )
+    expect(e.frames.map((f) => f.where)).toContain('hook suffix')
+    expect(d.doc).toEqual(initial)
+    expect(d.revision).toBe(0)
   })
 })

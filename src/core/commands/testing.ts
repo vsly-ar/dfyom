@@ -2,7 +2,7 @@
 import { expect } from 'vitest'
 import type { ProjectDoc } from '../project/document'
 import type { Clock, CommandContext, IdGenerator, Source } from './context'
-import type { DocumentCommand } from './define'
+import type { DocumentCommand, DocumentHook } from './define'
 import { applyDocPatches, parseAndExecute, type DocumentRun } from './history'
 import { inProcessWorkers } from './jobs'
 
@@ -37,14 +37,24 @@ export function testContext(over: Partial<CommandContext> = {}): CommandContext 
   }
 }
 
-/** Runs a document command without a dispatcher (raw args are parsed with the command's schema). */
+/**
+ * Runs a document command without a dispatcher (raw args are parsed with the command's schema).
+ * Document hooks run only when passed.
+ */
 export function runCommand<R>(
   doc: ProjectDoc,
   def: DocumentCommand<never, R> | DocumentCommand,
   rawArgs: unknown,
   ctx: Partial<CommandContext> = {},
+  hooks: readonly DocumentHook[] = [],
 ): DocumentRun<R> {
-  return parseAndExecute(doc, def as DocumentCommand, rawArgs, testContext(ctx)) as DocumentRun<R>
+  return parseAndExecute(
+    doc,
+    def as DocumentCommand,
+    rawArgs,
+    testContext(ctx),
+    hooks,
+  ) as DocumentRun<R>
 }
 
 /** Undo law: `apply(next, inverse) ≡ doc` and `apply(doc, patches) ≡ next`; the command must succeed. */

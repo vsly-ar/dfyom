@@ -109,6 +109,22 @@ export const ERROR_CODES = {
     userMessage: 'Later operations refer to this operation. Change or remove them first.',
     retryable: false,
   },
+  // Plans (task 2.13): docs/modes/plan-v0.1.md#commands-and-queries-v01
+  'plan.status': {
+    severity: 'warn',
+    userMessage: "This is not possible in the plan's current status.",
+    retryable: false,
+  },
+  'plan.order': {
+    severity: 'warn',
+    userMessage: 'An operation would come before the operation whose surface it starts from.',
+    retryable: false,
+  },
+  'plan.check': {
+    severity: 'warn',
+    userMessage: 'A tool, feed or machine check of the plan failed.',
+    retryable: false,
+  },
   'internal.unexpected': {
     severity: 'error',
     userMessage: 'Something went wrong. This is a bug.',

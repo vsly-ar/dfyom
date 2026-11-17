@@ -14,7 +14,7 @@ import { parseArgs } from './args'
 import { Err, fail, tryCatch, type AppResult } from '../../shared/result'
 import type { ProjectDoc } from '../project/document'
 import type { CommandContext, Source } from './context'
-import type { BuiltinCommand, DocumentCommand } from './define'
+import type { BuiltinCommand, DocumentCommand, DocumentHook } from './define'
 
 enablePatches()
 const immer = new Immer({ autoFreeze: true })
@@ -30,17 +30,31 @@ export interface DocumentRun<R> {
 }
 
 /**
- * Runs a document handler on a draft. `Err` (or a stray throw → `internal.unexpected`) drops the
- * draft: no partial patches. Args must already be parsed.
+ * Runs a document handler on a draft, then the document hooks on the same draft. `Err` (or a
+ * stray throw → `internal.unexpected`) of either drops the draft: no partial patches. Args must
+ * already be parsed.
  */
 export function executeDocumentCommand<S extends z.ZodType, R>(
   doc: ProjectDoc,
   def: DocumentCommand<S, R>,
   args: z.output<S>,
   ctx: CommandContext,
+  hooks: readonly DocumentHook[] = [],
 ): DocumentRun<R> {
   const draft = immer.createDraft(doc)
-  const ran = tryCatch(() => def.run(draft, args, ctx), 'internal.unexpected', `${def.name} threw`)
+  const ran = tryCatch(
+    () => {
+      const r = def.run(draft, args, ctx)
+      if (r.isErr()) return r
+      for (const hook of hooks) {
+        const h = hook.after(draft, { name: def.name, args }, ctx)
+        if (h.isErr()) return Err(h.unwrapErr().withContext(`hook ${hook.name}`))
+      }
+      return r
+    },
+    'internal.unexpected',
+    `${def.name} threw`,
+  )
   const result = ran.isOk() ? ran.unwrap() : Err(ran.unwrapErr())
   if (result.isErr()) return { result, next: doc, patches: [], inversePatches: [] }
   // Draft proxies are revoked by finishDraft: a result holding one would poison the log.
@@ -83,11 +97,12 @@ export function parseAndExecute<S extends z.ZodType, R>(
   def: DocumentCommand<S, R>,
   rawArgs: unknown,
   ctx: CommandContext,
+  hooks: readonly DocumentHook[] = [],
 ): DocumentRun<R> {
   const args = parseArgs(def.args, rawArgs, def.name)
   if (args.isErr())
     return { result: Err(args.unwrapErr()), next: doc, patches: [], inversePatches: [] }
-  return executeDocumentCommand(doc, def, args.unwrap(), ctx)
+  return executeDocumentCommand(doc, def, args.unwrap(), ctx, hooks)
 }
 
 /** Applies patches to a (frozen) document; a patch that does not fit is a bug. */

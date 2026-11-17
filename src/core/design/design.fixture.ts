@@ -28,6 +28,7 @@ export const testStock = (thickness = '20') => ({
 
 export interface DesignSetup {
   readonly d: Dispatcher
+  readonly library: Library
   readonly partId: string
   /** Dispatch a command that must succeed; returns its value. */
   run(name: string, args: object): Promise<unknown>
@@ -61,6 +62,7 @@ export async function designSetup(
   const part = () => d.doc.parts[partId]!
   return {
     d,
+    library,
     partId,
     run,
     fail: async (name, args, code) => expectErrCode(await d.dispatch(name, args, ui), code),

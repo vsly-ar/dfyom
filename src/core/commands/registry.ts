@@ -7,14 +7,15 @@ import { fail, None, Ok, Some, type AppResult, type Option } from '../../shared/
 import { DESIGN_COMMANDS, DESIGN_QUERIES } from '../design/commands'
 import { FEEDS_SPEEDS_QUERIES } from '../feeds-speeds/commands'
 import { LIBRARY_COMMANDS, LIBRARY_QUERIES } from '../library/commands'
-import type { AnyCommand, QueryDef } from './define'
+import { draftPlanAutoRebuild, PLAN_COMMANDS, PLAN_QUERIES } from '../plan/commands'
+import type { AnyCommand, DocumentHook, QueryDef } from './define'
 import { projectSave } from '../project/commands'
 import { historyRedo, historyUndo } from './history'
 import { jobAbort, jobPause, jobResume } from './jobs'
 
 /** `<area>.<object>.<verb>` (or `<area>.<verb>` for area-level actions such as `history.undo`). */
 export const NAME_PATTERN =
-  /^(project|design|plan|run|library|feedsSpeeds|history|job|app)(\.[a-z][a-zA-Z0-9]*){1,2}$/
+  /^(project|design|plan|run|library|feedsSpeeds|history|job|app)(\.[a-z][a-zA-Z0-9]*){1,3}$/
 
 /** Commands executed by the dispatcher itself; always registered. */
 export const BUILTIN_COMMANDS: readonly AnyCommand[] = [
@@ -30,12 +31,16 @@ export const APP_COMMANDS: readonly AnyCommand[] = [
   ...LIBRARY_COMMANDS,
   projectSave,
   ...DESIGN_COMMANDS,
+  ...PLAN_COMMANDS,
 ]
 export const APP_QUERIES: readonly QueryDef[] = [
   ...LIBRARY_QUERIES,
   ...FEEDS_SPEEDS_QUERIES,
   ...DESIGN_QUERIES,
+  ...PLAN_QUERIES,
 ]
+/** Document hooks of the app (docs/architecture/commands.md#document-hooks). */
+export const APP_HOOKS: readonly DocumentHook[] = [draftPlanAutoRebuild]
 
 export interface Registry {
   command(name: string): Option<AnyCommand>
@@ -43,12 +48,15 @@ export interface Registry {
   /** Built-ins first, then the given commands, in registration order. */
   readonly commands: readonly AnyCommand[]
   readonly queries: readonly QueryDef[]
+  /** Run after every successful document command, in this order (commands.md#document-hooks). */
+  readonly hooks: readonly DocumentHook[]
 }
 
 /** Builds a registry (built-ins included). Invalid definitions are bugs → `internal.unexpected`. */
 export function createRegistry(defs: {
   readonly commands?: readonly AnyCommand[]
   readonly queries?: readonly QueryDef[]
+  readonly hooks?: readonly DocumentHook[]
 }): AppResult<Registry> {
   const commands = [...BUILTIN_COMMANDS, ...(defs.commands ?? [])]
   const queries = [...(defs.queries ?? [])]
@@ -79,10 +87,11 @@ export function createRegistry(defs: {
     query: (name) => lookup(byQuery, name),
     commands,
     queries,
+    hooks: [...(defs.hooks ?? [])],
   })
 }
 
 /** The app's registry: built-ins plus `APP_COMMANDS` / `APP_QUERIES`. */
 export function createAppRegistry(): AppResult<Registry> {
-  return createRegistry({ commands: APP_COMMANDS, queries: APP_QUERIES })
+  return createRegistry({ commands: APP_COMMANDS, queries: APP_QUERIES, hooks: APP_HOOKS })
 }

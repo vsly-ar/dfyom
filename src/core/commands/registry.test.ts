@@ -55,7 +55,8 @@ describe('registry', () => {
     ['library.tool.list', true],
     ['design.pocket', true],
     ['design.Pocket.add', false],
-    ['design.pocket.add.more', false],
+    ['plan.design.operation.update', true],
+    ['design.pocket.add.more.x', false],
     ['design.pocket_x.add', false],
   ])('name %s valid: %s', (name, ok) => {
     expect(NAME_PATTERN.test(name)).toBe(ok)

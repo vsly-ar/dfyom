@@ -1,6 +1,6 @@
 # Plan mode v0.1: one setup, tools, passes, toolpaths
 
-Status: accepted · Vision: [plan.md](plan.md) · Design input: [design.md](design.md#operations-v01) · Library: [library.md](../architecture/library.md) · Post: [grbl.md](../architecture/grbl.md) · Terms: [glossary.md](../glossary.md) · Task: [v0.1 plan](../plans/v0.1.md) 1.9 (code: 2.10)
+Status: accepted · core implemented ([task 2.13](#implementation-task-213); toolpaths 2.10, job 2.9) · Vision: [plan.md](plan.md) · Design input: [design.md](design.md#operations-v01) · Library: [library.md](../architecture/library.md) · Post: [grbl.md](../architecture/grbl.md) · Terms: [glossary.md](../glossary.md) · Task: [v0.1 plan](../plans/v0.1.md) 1.9 (code: 2.10)
 
 Plan mode for [roadmap v0.1](../roadmap.md#v01--25d-basics-to-the-virtual-machine): self-contained plans with their own design snapshot, one setup on one machine, one concrete tool per operation, basic passes, toolpaths as a job. gCode is out of scope: the [export boundary](#export-boundary-tasks-110-and-211) hands toolpaths to the GRBL post-processor.
 
@@ -8,12 +8,12 @@ Plan mode for [roadmap v0.1](../roadmap.md#v01--25d-basics-to-the-virtual-machin
 
 A project has **several plans**. Each plan is a self-contained, runnable "version of the project": a tuned plan may make many finished parts, so later design or library edits never change it silently.
 
-- **Design snapshot:** `plan.create` copies the part and its operations into the plan: `design = { partId, sourceRevision, hash, part }` (`hash` of the part DTO; `part` as in [design.md](design.md#part-and-stock-v01)). The plan reads only this copy, never the current design.
+- **Design snapshot:** `plan.create` copies the part and its operations into the plan: `design = { partId, takenAt, hash, taken, part }` (`taken`: the part as copied, `hash` of its DTO; `part`: the plan's version with [plan-only edits](#plans-are-snapshots); both as in [design.md](design.md#part-and-stock-v01)). The plan reads only `part`, never the current design.
 - **Library copies:** the plan holds its own snapshots ([persistence.md](../architecture/persistence.md#library-references)) of every library item it uses: stock (copied from the part's stock snapshot), machine and tools. Workholding joins later.
 - **Stale indicators** (derived on every evaluation, never stored): per operation `changedInDesign`, `removedFromDesign` (deep compare with the current design) and `editedInPlan`; per library copy `libraryChanged` or `libraryRemoved` (deep compare with the current library item, as in [library.md](../architecture/library.md#snapshots)). A stale plan stays valid and runnable.
 - **Rebuild is deliberate:** `plan.rebuild` replaces the design snapshot with the current design. Plan operations are matched by design operation id and keep tool, preset, overrides and strategy; operations gone from the design are dropped; new design operations get plan operations with a [suggested tool](#tool-assignment-and-checks). Plans never add operations outside a rebuild and never suggest doing so.
-- **Library updates are per item:** `plan.libraryItem.update` replaces one copy's values from the library. `draft` plans follow library changes automatically: the app dispatches that command (source `system`, one undo step each) for every changed copy.
-- **Plan-only edits:** in `settledDesign` the design snapshot can be edited for this plan only (`plan.design.operation.update`, same parameter schemas as `design.*.update`); the operation is then `editedInPlan`, and a rebuild discards such edits only with `discardPlanEdits: true`.
+- **Library updates are per item:** `plan.libraryItem.update` replaces one copy's values from the library. `draft` plans follow library changes automatically: the app dispatches that command (source `system`, one undo step each) for every changed copy (`followLibraryChanges`, [Implementation](#implementation-task-213)).
+- **Plan-only edits:** in `settledDesign` the design snapshot can be edited for this plan only (`plan.design.operation.update`, same parameter schemas as `design.*.update`); the operation is then `editedInPlan` (its `part` version differs from `taken`), and a rebuild discards such edits only with `discardPlanEdits: true`; without it a rebuild (and `settledDesign → draft`) fails with `input.malformed` (issue `discardPlanEdits`, rule `planEdits`).
 
 ### Plan status
 
@@ -25,7 +25,7 @@ A project has **several plans**. Each plan is a self-contained, runnable "versio
 | `inUse`         | In production                         | As `finalized`; change it via `plan.duplicate`                                             | `finalized`, `archived`              |
 | `archived`      | Retired                               | Read-only; hidden in `plan.list` unless `includeArchived`; no export                       | the status before archiving²         |
 
-¹ Rebuilds from the current design; with plan edits it requires `discardPlanEdits: true`. Commands not allowed in the current status fail with `plan.status` (issue names status and command). `plan.create` and `plan.duplicate` start in `draft` and `settledDesign` respectively.
+¹ Rebuilds from the current design; with plan edits it requires `discardPlanEdits: true`. Commands not allowed in the current status fail with `plan.status` (issue names status and command); setting the current status is a no-op. Per-command statuses: [Implementation](#implementation-task-213). `plan.create` and `plan.duplicate` start in `draft` and `settledDesign` respectively.
 
 ² Archiving stores `statusBeforeArchive`; un-archiving (`plan.status.set` without `status`) restores it and clears the field. An `inUse` plan is changed only through `plan.duplicate`.
 
@@ -177,24 +177,49 @@ Names follow [commands.md](../architecture/commands.md#naming); `document` unles
 | `plan.tool.assign`             | `{ planId, planOperationId, toolLibraryItemId }` – plan copy; resets `presetName`       | `{}`                  |
 | `plan.toolpath.generate`       | `{ planId, planOperationIds? }` – `job`                                                 | `{ jobId }`           |
 
-- Design commands of the part rebuild every `draft` plan of that part in the same command (one undo step).
+- Design commands of the part rebuild every `draft` plan of that part in the same command (one undo step), through a [document hook](../architecture/commands.md#document-hooks).
 - Queries: `plan.list { includeArchived? }`, `plan.get`, `plan.operation.list`, `plan.stale.list { planId }` (stale operations and library copies), `plan.tool.suggest { planId, planOperationId }` (ranked tools with reasons), `plan.toolpath.get { planId, planOperationId }` (moves for preview; stale flag), `plan.warning.list`.
-- New error codes (task 2.10): `plan.check` (tool, feeds or machine check failed; issues name operation, field and rule), `plan.order`, `plan.status`.
+- New error codes (registered with task 2.13): `plan.check` (tool, feeds or machine check failed; issues name operation, field and rule), `plan.order`, `plan.status`. `plan.toolpath.generate` and `plan.toolpath.get` come with tasks 2.9/2.10 on the [seam](#implementation-task-213).
 
 ## Export boundary (tasks 1.10 and 2.11)
 
 Export (`effect` command, task 2.11) turns the ordered `Toolpath[]` of one setup, the setup and the plan's machine copy (`programUnits`, `spindle.control`, `toolChanger`) into a `MachiningProgram` ([grbl.md](../architecture/grbl.md#input-boundary)): it expands `drill` moves into rapid/feed blocks, converts arc centers to `I`/`J` offsets (arcs and helices stay G2/G3) and adds tool-change and spindle blocks. `postGrbl` then writes the text; it owns the gCode text and its defaults (e.g. spindle dwell after `M3`, [grbl.md](../architecture/grbl.md#output-dialect)); plan mode never emits text.
 
-## Files (planned)
+## Files
 
-| File                                                    | Contents                                                           |
-| ------------------------------------------------------- | ------------------------------------------------------------------ |
-| `src/core/plan/plan.ts`, `plan.dto.ts`                  | `Plan`, `PlanStatus`, `Setup`, `PlanOperation` models and Zod DTOs |
-| `src/core/plan/snapshot.ts`, `status.ts`                | Design snapshot, rebuild, stale detection; status transitions      |
-| `src/core/plan/strategy.ts`                             | Strategy parameter schemas, defaults and fallbacks per operation   |
-| `src/core/plan/checks.ts`, `suggest.ts`, `order.ts`     | Tool/machine/feeds checks, tool ranking, default order and checks  |
-| `src/core/plan/commands.ts`                             | Commands and queries above                                         |
-| `src/core/toolpath/model.ts`                            | `Toolpath`, `Pass`, `Move` (the contract above)                    |
-| `src/core/geometry/contour.ts`                          | Analytic offsets of rounded rectangles and circles                 |
-| `src/core/toolpath/{facing,pocket,drilling,profile}.ts` | Generators per strategy; tabs in `profile.ts`                      |
-| `src/core/toolpath/generate.ts`, `stats.ts`             | Job handler, input hash and cache, length/time estimates           |
+| File                                                    | Contents                                                                   |
+| ------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `src/core/plan/plan.dto.ts`, `plan.ts`                  | Plan, setup, plan operation DTOs (Zod); `loadPlan` (models of the copies)  |
+| `src/core/plan/snapshot.ts`, `status.ts`                | Design snapshot, hash, stale detection; status transitions and permissions |
+| `src/core/plan/build.ts`                                | Create, rebuild, tool assignment with copy reuse, duplicate                |
+| `src/core/plan/strategy.ts`                             | Strategy parameters per kind, parsing, defaults, constraints               |
+| `src/core/plan/feeds.ts`                                | Strategy → engagement, the resolution order, `source` per field, presets   |
+| `src/core/plan/checks.ts`, `suggest.ts`, `order.ts`     | Tool/machine checks, tool ranking, default order and order checks          |
+| `src/core/plan/evaluate.ts`                             | Per-operation evaluation and `plan.warning.list` findings                  |
+| `src/core/plan/commands.ts`                             | Commands and queries above; the draft auto-rebuild hook                    |
+| `src/core/plan/follow.ts`                               | `followLibraryChanges`: draft plans follow the library                     |
+| `src/core/plan/inputs.ts`                               | Seam to toolpaths: `planOperationInputs`, `ToolpathGenerator`              |
+| `src/core/toolpath/model.ts`                            | `Toolpath`, `Pass`, `Move` (the contract above; task 2.10)                 |
+| `src/core/geometry/contour.ts`                          | Analytic offsets of rounded rectangles and circles (task 2.10)             |
+| `src/core/toolpath/{facing,pocket,drilling,profile}.ts` | Generators per strategy; tabs in `profile.ts` (task 2.10)                  |
+| `src/core/toolpath/generate.ts`, `stats.ts`             | Job handler, input hash and cache, length/time estimates (tasks 2.9/2.10)  |
+
+## Implementation (task 2.13)
+
+Plans live in `ProjectDoc.plans` (record `plans/<id>.json`, registered in `PROJECT_LAYOUT`). Decisions made with the implementation, where this doc left room:
+
+- **`takenAt` instead of `sourceRevision`.** The dispatcher's revision is outside `ProjectDoc` by design (it never appears in patches), so a document handler cannot read it. The snapshot records `takenAt` (like library snapshots); staleness is a deep compare anyway, `hash` serves caches.
+- **`taken` and `part`.** The snapshot keeps the part as copied (`taken`) next to the plan's version (`part`), so `changedInDesign` (`taken` vs. design), `removedFromDesign` and `editedInPlan` (`part` vs. `taken`) stay derived. New design operations are never reported (`plan.stale.list` has no "added" entry).
+- **Stock copy.** The plan's stock copy keeps the id of the part's stock snapshot, so `part.stock` resolves in the plan's own `snapshots`. It is a library copy: `plan.libraryItem.update` re-imports it (the plan's part is re-validated against the new stock, `model.invariant` if it no longer fits); a rebuild replaces it only when the part references another stock snapshot.
+- **Statuses per command.** `plan.update`, `plan.rebuild`, `plan.libraryItem.update`, `plan.machine.set`, `plan.setup.update`, `plan.operation.update`/`.move`, `plan.tool.assign`: `draft` and `settledDesign`. `plan.design.operation.update`: `settledDesign`. `plan.duplicate`: every status. `plan.remove` (`confirm: true`): every status but `inUse` (archive it first). An archived plan can also be set to its `statusBeforeArchive` explicitly; an archived plan without one restores `draft`. Any transition into `draft` rebuilds when the design changed.
+- **Draft auto-rebuild** is the document hook `plan.draftAutoRebuild` ([commands.md](../architecture/commands.md#document-hooks)): after every `design.*` command it rebuilds each `draft` plan whose `taken` differs from the part, on the same draft. Design command handlers are unchanged; a failing rebuild (a broken plan record) fails the design command rather than leaving a hidden stale draft.
+- **Draft library follow.** Library edits are effect commands outside `ProjectDoc`, so no hook sees them. `followLibraryChanges(dispatcher, library.lookup)` (follow.ts) dispatches `plan.libraryItem.update` (source `system`, with `expectedRevision`) for every `libraryChanged` copy of a `draft` plan; the main process calls it on a library change event (task 3.x). Removed or unreadable items stay notices.
+- **Rebuild matching.** Plan operations keep id, tool, stickout, preset, overrides and strategy. A drilling group whose holes no longer share diameter, bottom, depth and point angle splits; the split-off groups copy the settings. New design operations get new plan operations (equal new holes share one) with the first suggestion, inserted after the last operation of the same or an earlier group and after the operations whose surfaces they start from.
+- **Grouping key** of holes also includes `pointAngle` (a drill makes one point angle).
+- **Default order** is a stable topological order: group, then tool (first appearance in the group), then design order, never before an `on` dependency (a drilling on a pocket floor follows the pocket).
+- **Strategy storage.** `strategy` stores only the parameters the user set (sparse; omitted = default at evaluation, so defaults follow the tool). `stepover`/`stepdown` are feeds fields: they are `overrides`, not strategy parameters. Args take values as entered; `null` resets to the default; a key of another kind is `input.malformed` (rule `notForKind`).
+- **Constraint checks.** `plan.operation.update` checks overrides, stickout and strategy against the current tool (`model.invariant`). Tool-dependent rules can break later (another tool); `plan.warning.list` then reports them as `plan.check` errors.
+- **Feeds** (`feeds.ts`): `stepover` resolves override → preset → strategy fallback (the calculator never suggests one in v0.1) and feeds the facing engagement; `stepdown` override → preset → calculator → fallback. Drilling resolves only `spindleSpeed`, `feedRate`, `plungeRate`; an end mill bores with `helix` engagement (`ap` = resolved `helixPitch`). Calculator warnings join only when the calculator supplies or misses a field. Results carry `source` per field (`override`, `preset`, `calculator`, `strategy`) and, for the calculator, its derivation.
+- **`plan.warning.list`** returns `{ code, severity, message, planOperationId?, field?, rule, params }`: `plan.check` and `plan.order` with severity `error` (they fail generation), `plan.loosePiece` and `plan.machine` warnings, and the calculator's `feeds.*` codes. "Inside its shape" for the loose-piece warning tests the operation's centre (facing always counts).
+- **Tool suggestion** filters by the tool checks (type, size, reach, flute length) with each candidate's default stickout and preset; missing feeds do not disqualify a tool. Ties after the three ranks go by library id.
+- **Seam to toolpaths (2.9/2.10).** `planOperationInputs(doc, planId, planOperationIds?)` (inputs.ts) returns per plan operation everything a generator needs (snapshot operations, part, stock, setup heights in mm, tool copy and its id, stickout, resolved feeds and strategy, machine) plus `inputHash` (hash of the plan's part, the plan operation, the used copies and the setup) for the toolpath cache; error findings fail it with `plan.check`/`plan.order`. Generators implement `ToolpathGenerator<Toolpath>`; `plan.toolpath.generate` and `plan.toolpath.get` are added with them.

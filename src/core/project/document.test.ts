@@ -5,7 +5,13 @@ import { newProjectDoc, parseProjectDoc } from './document'
 describe('ProjectDoc', () => {
   it('starts as a plain JSON DTO with a name, unit system and empty collections', () => {
     const doc = newProjectDoc({ name: 'Bracket', unitSystem: 'inch' })
-    expect(doc).toEqual({ name: 'Bracket', unitSystem: 'inch', parts: {}, snapshots: {} })
+    expect(doc).toEqual({
+      name: 'Bracket',
+      unitSystem: 'inch',
+      parts: {},
+      snapshots: {},
+      plans: {},
+    })
     expect(JSON.parse(JSON.stringify(doc))).toEqual(doc)
   })
 
@@ -20,6 +26,7 @@ describe('ProjectDoc', () => {
       unitSystem: 'mm',
       parts: {},
       snapshots: {},
+      plans: {},
     })
     const e = expectErrCode(
       parseProjectDoc({ name: 'A', unitSystem: 'cm' }, 'load'),
