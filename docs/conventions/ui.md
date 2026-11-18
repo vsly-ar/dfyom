@@ -2,7 +2,56 @@
 
 Status: draft · Principle: [principles.md §5](../principles.md#5-user-friendly-beginner-friendly-highly-graphical) · Decisions: [ADR 0012 Radix + own styles](../decisions/0012-radix-primitives-own-styles.md), [ADR 0010 react-three-fiber](../decisions/0010-react-three-fiber-viewport.md) · Terms: [glossary.md](../glossary.md) · Task: [v0.1 plan](../plans/v0.1.md) 1.11 (blocks 3.3–3.7, 3.12)
 
-How the renderer looks and behaves: design tokens, components, layout, interaction, run-mode safety, accessibility, copy, testing. Rules are imperative; numbered **[open questions](#open-questions)** at the end must be answered before task 3.3 starts. Where a rule depends on an open question, it states the recommended answer and links the question.
+How the renderer looks and behaves: design tokens, components, layout, interaction, run-mode safety, accessibility, copy, testing. Rules are imperative. The user's answers to the open questions are recorded as [decisions](#decisions); concrete token values and the palette come from the [design system](#design-system) step (task 1.16), approved by the user before task 3.3.
+
+## Decisions
+
+Settled with the user (task 1.11); the sections below specify them. The doc stays `draft` until the [design system](#design-system) is approved.
+
+1. **Theme:** follow the OS, with a Light / Dark / System setting ([tokens](#design-tokens)).
+2. **Design system first:** tokens, palette and a components preview are defined in a separate step and approved by the user before any UI is built (task 1.16, [design system](#design-system)). Look: modern, friendly, approachable, with a consistent palette.
+3. **Colour scales:** Radix Colors (MIT) 12-step scales, adapted to the chosen palette.
+4. **CSS:** CSS Modules + CSS custom properties.
+5. **Icons:** Lucide (ISC) + own CNC icons ([icons](#icons)).
+6. **Renderer state:** Zustand (MIT) for per-window UI state (selection, mode, panels, pick mode); `useSyncExternalStore` over the document replica.
+7. **i18n:** English only in v0.1, strings centralised in `messages/`, errors and warnings rendered from code + params, no library ([internationalization](#internationalization)).
+8. **Typography:** system fonts at 14 px base with tabular numerals ([type](#type)).
+9. **Control sizes:** 44 px in run mode, 32 px elsewhere ([sizes](#spacing-radii-sizes)).
+10. **Viewport mouse:** selectable presets as a setting; default left-drag orbit, right-drag pan, wheel zoom to cursor; a Fusion 360-style preset and others where cheap ([selection and picking](#selection-and-picking)).
+11. **Confirmations and run safety:** undo instead of confirm for document edits; a pre-flight dialog before every run, the virtual machine included; hold, stop and reset are never confirmed; `Escape` = feed hold while streaming; no single-key resume ([confirmations](#confirmations), [run safety](#run-mode-safety-ui)).
+12. **Window chrome:** native title bar and native application menu.
+13. **Panels:** `react-resizable-panels` (MIT).
+14. **Testing:** Vitest + Testing Library + jsdom + axe-core, plus a dev-only gallery screen screenshotted by the Playwright smoke test ([testing](#testing)).
+15. **Outdated evaluation:** keep the last mesh, draw the edited operation's outline live, tint the mesh and show "Updating…" only after 300 ms ([evaluation status](#evaluation-status-pending-outdated-failed)).
+16. **Reference autocomplete** in the quantity input (3.4): a simple list of valid references (earlier surfaces, tool parameters).
+
+## Design system
+
+Task 1.16 of the [v0.1 plan](../plans/v0.1.md): a well-organised, systematic design system – token values for every group below, the palette in both themes, and a components preview (the gallery) – **approved by the user before task 3.3**. Nothing in the UI picks a colour, size or spacing ad hoc; every value is a token from this step.
+
+**Base colours (from the user):**
+
+| Role                   | Value                 |
+| ---------------------- | --------------------- |
+| Dark theme background  | Jet `#272d2d`         |
+| Light theme background | Ghost White `#f6f8ff` |
+
+**Accent: pending** (the user chooses from four palette options):
+
+| Option | Accent                | Clash to resolve                                                   |
+| ------ | --------------------- | ------------------------------------------------------------------ |
+| A      | Vivid green `#23ce6b` | Same hue as the green "running" machine state (`--safety-moving`). |
+| B      | Sage green `#4eba7a`  | Same hue family as `--safety-moving`.                              |
+| C      | Orange-red            | Close to the Stop / alarm red (`--safety-stop`, `--safety-alarm`). |
+| D      | Amber / yellowish     | Close to feed hold (`--safety-hold`) and `--color-warning`.        |
+
+**Clash rules** (apply whichever accent is chosen):
+
+- The accent never fills a machine-state badge or the stop control; safety tokens stay reserved ([colour](#colour)).
+- Where the accent shares a hue with a safety colour, the design system separates them by lightness/saturation and by usage: the accent appears on interactive controls (buttons, selection, focus), safety colours only in the machine state badge, the stop control and run dialogs.
+- Every machine state also has a **label and a shape** ([run safety](#run-mode-safety-ui)), so no state depends on telling two hues apart.
+- With an amber accent, `--color-warning` and `--safety-hold` must remain distinguishable from primary buttons (e.g. warnings always with the triangle icon and a subtle background, never a filled accent-like surface).
+- The design system's contrast test covers the accent on both backgrounds (text on accent, accent on background).
 
 ## Where things live
 
@@ -20,10 +69,10 @@ The renderer holds a read replica of `ProjectDoc` kept current by the patch stre
 
 ## Design tokens
 
-Tokens are **CSS custom properties** on `:root` in `tokens.css` (CSS approach: [Q3](#open-questions)). Two tiers:
+Tokens are **CSS custom properties** on `:root` in `tokens.css`, consumed by CSS Modules ([decision 4](#decisions)). Values come from the [design system](#design-system); this section fixes names and structure. Two tiers:
 
-- **Primitive** scales (`--gray-1` … `--gray-12`, `--blue-*`, `--amber-*`, `--red-*`, `--green-*`): 12-step light/dark scales; recommended source Radix Colors ([Q2](#open-questions)). Only `tokens.css` uses primitives.
-- **Semantic** tokens (below): the only tokens components use. A theme is a set of semantic values: `:root[data-theme='light']` and `:root[data-theme='dark']`; `system` maps to one of them from `prefers-color-scheme` ([Q1](#open-questions)).
+- **Primitive** scales (`--gray-1` … `--gray-12`, `--blue-*`, `--amber-*`, `--red-*`, `--green-*`): 12-step light/dark scales from Radix Colors, adapted to the chosen palette ([decision 3](#decisions)). Only `tokens.css` uses primitives.
+- **Semantic** tokens (below): the only tokens components use. A theme is a set of semantic values: `:root[data-theme='light']` and `:root[data-theme='dark']`; `system` maps to one of them from `prefers-color-scheme`; the setting offers Light / Dark / System, default System ([decision 1](#decisions)).
 
 Units: `rem` for type and spacing (so Electron zoom scales the UI), `px` only for hairlines (1 px borders). The viewport reads its colours with a `useToken('--viewport-…')` hook (`getComputedStyle`, re-read on theme change), so there is one source of truth for three.js too.
 
@@ -47,7 +96,7 @@ Rules:
 
 ### Type
 
-System font stacks with `font-variant-numeric: tabular-nums` on every numeric display (recommended, [Q7](#open-questions)): `--font-ui` (system-ui), `--font-mono` (ui-monospace) for gCode, ids in formulas and the [DRO](../glossary.md).
+System font stacks with `font-variant-numeric: tabular-nums` on every numeric display ([decision 8](#decisions)): `--font-ui` (system-ui), `--font-mono` (ui-monospace) for gCode, ids in formulas and the [DRO](../glossary.md).
 
 | Token              | Size / line height     | Use                                   |
 | ------------------ | ---------------------- | ------------------------------------- |
@@ -64,7 +113,7 @@ Weights: `--weight-regular` 400, `--weight-medium` 500 (labels, buttons), `--wei
 
 - Spacing on a 4 px grid: `--space-1` 0.25 rem, `-2` 0.5, `-3` 0.75, `-4` 1, `-6` 1.5, `-8` 2 rem. Component padding uses `-2`/`-3`; between panel sections `-4`.
 - Radii: `--radius-sm` 4 px (inputs, buttons), `--radius-md` 6 px (popovers, cards), `--radius-lg` 10 px (dialogs), `--radius-full` (pills, status chips).
-- Control heights: `--control-sm` 1.5 rem (dense tables), `--control-md` 2 rem (default), `--control-lg` 2.75 rem (run-mode controls). Pointer targets are ≥ 24 × 24 px everywhere (WCAG 2.2 target size) and ≥ 44 × 44 px in run mode, which may be used on a shop touchscreen.
+- Control heights: `--control-sm` 1.5 rem (dense tables), `--control-md` 2 rem (default), `--control-lg` 2.75 rem (run-mode controls). Default controls are 32 px high (`--control-md` 2 rem); pointer targets are ≥ 24 × 24 px everywhere (WCAG 2.2 target size) and ≥ 44 × 44 px in run mode ([decision 9](#decisions)), which may be used on a shop touchscreen.
 
 ### Elevation
 
@@ -130,7 +179,7 @@ Per [ADR 0012](../decisions/0012-radix-primitives-own-styles.md): Radix primitiv
 | `JobIndicator`, `JobList`                                                                                 | 3.3      | [Jobs and progress](#jobs-and-progress).                                                                                     |
 | `UndoRedo`                                                                                                | 3.3      | [Undo and redo](#undo-and-redo).                                                                                             |
 | `EmptyState`                                                                                              | 3.3      | Explains the next step with one primary action.                                                                              |
-| `Panel`, `PanelGroup`                                                                                     | 3.3      | Resizable, collapsible shell regions ([Q12](#open-questions)).                                                               |
+| `Panel`, `PanelGroup`                                                                                     | 3.3      | Resizable, collapsible shell regions (`react-resizable-panels`, [decision 13](#decisions)).                                  |
 | `OperationList`                                                                                           | 3.6      | Design order; move up/down by buttons and `Alt+↑/↓` (drag later).                                                            |
 | `ParamIllustration`                                                                                       | 3.6      | Dynamic SVG per operation drawn from the entered values; highlights the focused parameter.                                   |
 | `Viewport`, `ViewPresets`                                                                                 | 3.5      | One persistent canvas; the mode decides the scene ([selection](#selection-and-picking)).                                     |
@@ -162,7 +211,7 @@ A dev-only **gallery** screen renders every `ui/` component in every variant and
 - **Inspector (right):** parameters of the selection, its warnings, the `ParamIllustration`, recommended ranges. In run mode: DRO, run progress, run controls.
 - **Status bar:** [evaluation status](#evaluation-status-pending-outdated-failed), [jobs](#jobs-and-progress), warning count (opens the warning list), unit system, save state, agent connection.
 - Side panels are resizable and collapsible; layout is per window, kept in app preferences, never in the project. Minimum window 1024 × 640; below 1280 px wide the inspector overlays the viewport instead of shrinking it.
-- **Window chrome:** native title bar and native application menu (File, Edit, View, Help) with accelerators that dispatch the same commands as the buttons (recommended, [Q11](#open-questions)).
+- **Window chrome:** native title bar and native application menu (File, Edit, View, Help) with accelerators that dispatch the same commands as the buttons ([decision 12](#decisions)).
 
 ### Mode switching
 
@@ -193,7 +242,7 @@ Every dimensional field is a `QuantityInput` over the [quantity model](../archit
 - **Steppers:** `↑`/`↓` step a plain literal by the field's step in the source's unit (`Shift` ×10, `Alt` ×0.1); disabled for expressions. No spinner buttons.
 - **Tolerance:** typed in the same field. An untoleranced field shows the inherited general tolerance as muted text with its scope ("±0.1 mm from part").
 - **Recommended range:** where a check or the calculator knows one, the field shows it as a hint ("recommended ≥ 3.2 mm") and a `Term`-style tooltip explains what it depends on and what it affects (principle §5); a [DFM suggestion](#warnings-and-dfm) offers "Apply".
-- **References:** typing a letter offers an autocomplete list of valid references (surfaces of earlier operations, tool parameters) ([Q15](#open-questions)); a reference that becomes unknown later marks the field with `expression.reference`.
+- **References:** typing a letter offers an autocomplete list of valid references (surfaces of earlier operations, tool parameters) ([decision 16](#decisions)); a reference that becomes unknown later marks the field with `expression.reference`.
 - **Precision:** display precision belongs to the field ([quantities.md](../architecture/quantities.md#value)); the decimal separator is always `.`.
 
 ### Errors
@@ -217,7 +266,16 @@ How an `AppError` reaching the UI boundary ([boundaries.md](../conventions/error
 - Click in the viewport selects the operation (or plan operation) owning the clicked surface; the navigator row and inspector follow. Selecting a row selects in the viewport. Hover highlights (`--viewport-hover`) before click. `Escape` clears the selection. Multi-select is later.
 - **Pick mode** for surface references (`on`, references in formulas): the field's pick button (or `P` while focused) enters pick mode – crosshair cursor, eligible surfaces (horizontal surfaces of the stock and earlier operations, [design.md](../modes/design.md#positioning-v01)) highlighted, others dimmed, a banner "Pick a surface for _On_ · Esc to cancel". Click picks and returns focus to the field. The same field always offers a dropdown of the eligible surface ids, so picking never needs the mouse.
 - Picked and referenced surfaces are named by their surface id and the operation name (`pocket1.floor` · "Pocket 1 floor").
-- Camera: orbit, pan, zoom to cursor; view presets Top / Front / Right / Iso and "Fit" in a floating viewport toolbar with keys `1`–`4`, `F` while the viewport has focus. Mouse mapping: [Q9](#open-questions).
+- Camera: orbit, pan, zoom to cursor; view presets Top / Front / Right / Iso and "Fit" in a floating viewport toolbar with keys `1`–`4`, `F` while the viewport has focus. Mouse mapping is a setting with presets ([decision 10](#decisions)):
+
+  | Preset     | Orbit               | Pan                 | Zoom             |
+  | ---------- | ------------------- | ------------------- | ---------------- |
+  | Default    | Left-drag           | Right-drag          | Wheel, to cursor |
+  | Fusion 360 | Shift + middle-drag | Middle-drag         | Wheel, to cursor |
+  | Blender    | Middle-drag         | Shift + middle-drag | Wheel, to cursor |
+
+  Left-click always selects (a click is a press and release without drag). Trackpad gestures (two-finger pan, pinch zoom) work in every preset. More presets only where they are a mapping table entry.
+
 - The viewport is focusable (`tabindex=0`, labelled region); arrow keys orbit, `Shift`+arrows pan, `+`/`−` zoom.
 
 ### Undo and redo
@@ -238,7 +296,7 @@ Design evaluation is automatic with a 200 ms trailing debounce ([workers.md](../
 | `pending`    | Keeps the last mesh; the edited operation's shape is drawn live as an outline from the field values (cheap, no worker). After `--delay-indicator`, the mesh is tinted `--viewport-outdated`. | "Updating…" chip after `--delay-indicator`; geometry warnings marked "checks pending". |
 | `failed`     | Keeps the last mesh, tinted outdated, with an error marker at the failing operation.                                                                                                         | Error chip with `userMessage`; clicking selects the operation and focuses the field.   |
 
-- A drag or held key never flickers: nothing changes until 200 ms after the last change, and the indicator delay hides evaluations that finish in time ([Q14](#open-questions)).
+- A drag or held key never flickers: nothing changes until 200 ms after the last change, and the indicator delay hides evaluations that finish in time ([decision 15](#decisions)).
 - Parameter warnings come with every command result and show at once; geometry warnings appear when the evaluation is `done`.
 
 ### Jobs and progress
@@ -261,15 +319,15 @@ Warnings never block ([design.md](../modes/design.md#dfm-checks), [plan-v0.1.md]
 
 ### Confirmations
 
-Recommended policy ([Q10](#open-questions)): **undo instead of confirm** for document edits; confirm only what cannot be undone.
+Policy ([decision 11](#decisions)): **undo instead of confirm** for document edits; confirm only what cannot be undone.
 
-| Action                                                                           | Confirmation                                                                                                              |
-| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| Document edits incl. removing operations                                         | None; undo toast.                                                                                                         |
-| `plan.remove`, library item delete, discard recovery, close with unsaved changes | `ConfirmDialog` naming the item and the consequence; the destructive button names the action ("Remove plan"), never "OK". |
-| `run.job.start`                                                                  | Pre-flight dialog: plan, machine copy, work zero, tools in order, soft-limit check result, time scale.                    |
-| `run.machine.unlock` (`$X`)                                                      | Confirm: "Position is not known until homed."                                                                             |
-| Feed hold, stop, `run.machine.reset`                                             | **Never** confirmed.                                                                                                      |
+| Action                                                                           | Confirmation                                                                                                                                          |
+| -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Document edits incl. removing operations                                         | None; undo toast.                                                                                                                                     |
+| `plan.remove`, library item delete, discard recovery, close with unsaved changes | `ConfirmDialog` naming the item and the consequence; the destructive button names the action ("Remove plan"), never "OK".                             |
+| `run.job.start`                                                                  | Pre-flight dialog before every run, the virtual machine included: plan, machine copy, work zero, tools in order, soft-limit check result, time scale. |
+| `run.machine.unlock` (`$X`)                                                      | Confirm: "Position is not known until homed."                                                                                                         |
+| Feed hold, stop, `run.machine.reset`                                             | **Never** confirmed.                                                                                                                                  |
 
 `ConfirmDialog` focuses the safe choice (Cancel) first, except the run pre-flight, which focuses "Start run" only after the checks pass.
 
@@ -278,7 +336,7 @@ Recommended policy ([Q10](#open-questions)): **undo instead of confirm** for doc
 The v0.1 rules in [run-v0.1.md](../modes/run-v0.1.md#safety-v01) cover the virtual machine; the real-machine safety spec ([run.md](../modes/run.md#safety)) will extend this section before any serial connection exists.
 
 - **Always-visible stop:** while a connection is open, the top bar shows the `MachineStateBadge` and a `StopControl` in every mode, above every overlay (`--z-safety`), never inside a scroll area or collapsible panel. Stop = `job.abort` (controlled stop: hold, then reset, [run-v0.1.md](../modes/run-v0.1.md#stop-errors-and-alarms)); colour `--safety-stop`, label "Stop", ≥ 44 px, keyboard reachable, no confirmation. While streaming, a "Feed hold" button sits next to it; "Resume" appears only while held. The immediate `run.machine.reset` lives in run mode's controls as "Reset (immediate)".
-- **Shortcuts:** recommended in [Q10](#open-questions): `Escape` triggers feed hold whenever a job is streaming, wherever the focus is (it also closes the top overlay); resume and continue are never bound to a single key.
+- **Shortcuts** ([decision 11](#decisions)): `Escape` triggers feed hold whenever a job is streaming, wherever the focus is (it also closes the top overlay); resume and continue are never bound to a single key.
 - **Machine state colours and shapes** (GRBL states, [grbl.md](../architecture/grbl.md#state-machine), and run phases):
 
 | State / phase                                          | Token              | Badge                                                  |
@@ -324,7 +382,7 @@ Target: **WCAG 2.2 AA** for all non-3D UI; the 3D viewport has a non-visual equi
 
 ## Internationalization
 
-Recommended for v0.1 ([Q6](#open-questions)): **English only, i18n-ready structure, no i18n library.**
+Decided for v0.1 ([decision 7](#decisions)): **English only, i18n-ready structure, no i18n library.**
 
 - All user-facing strings live in `messages/` modules (per feature), never inline in JSX; sentences are whole template functions with typed params, never concatenated fragments.
 - Error and warning text is derived from `code` + `rule` + `params` ([error handling decision 4](error-handling/README.md#decisions)), so a later locale needs only a new catalogue.
@@ -333,7 +391,7 @@ Recommended for v0.1 ([Q6](#open-questions)): **English only, i18n-ready structu
 
 ## Icons
 
-- Recommended set: **Lucide** (`lucide-react`, ISC licence, GPL-3.0-compatible per [ADR 0014](../decisions/0014-gpl-3-or-later-license.md)) for generic icons ([Q4](#open-questions)).
+- Set: **Lucide** (`lucide-react`, ISC licence, GPL-3.0-compatible per [ADR 0014](../decisions/0014-gpl-3-or-later-license.md)) for generic icons ([decision 5](#decisions)).
 - Own icons for CNC concepts the set lacks (facing, pocket, drilling, profile, tabs, tool types, machine states, work zero) in `ui/icons/`, drawn on the same 24 px grid and stroke width.
 - Sizes `--icon-sm` 16 px (inline, status bar), `--icon-md` 20 px (buttons), `--icon-lg` 24 px (run controls). Icons inherit `currentColor`.
 - An icon never stands alone without an accessible name; icon-only buttons have a tooltip.
@@ -342,29 +400,9 @@ Recommended for v0.1 ([Q6](#open-questions)): **English only, i18n-ready structu
 
 Extends [testing.md](testing.md) (component and end-to-end rows).
 
-- **Component tests** (recommended, [Q13](#open-questions)): Vitest + Testing Library (`@testing-library/react`, `user-event`) in jsdom, colocated `*.test.tsx`. Query by role and accessible name (this doubles as an accessibility check); `data-testid` only for the canvas. Each `ui/` component and app component gets an axe check (`axe-core`, MPL-2.0).
+- **Component tests** ([decision 14](#decisions)): Vitest + Testing Library (`@testing-library/react`, `user-event`) in jsdom, colocated `*.test.tsx`. Query by role and accessible name (this doubles as an accessibility check); `data-testid` only for the canvas. Each `ui/` component and app component gets an axe check (`axe-core`, MPL-2.0).
 - What to test: `QuantityInput` behaviour per rule above (echo, timing, commit/revert, hints, steppers); error mapping from `AppError` fixtures; confirmation policy; keyboard paths (mode switch, F6, feed hold); stop control visible in every mode with an open connection.
 - **Viewport:** WebGL does not run in jsdom. Keep picking, highlighting and scene building in pure functions (unit-tested); the canvas is covered by the end-to-end tests.
 - **Tokens:** a unit test parses `tokens.css` and checks that both themes define every semantic token and that the listed contrast pairs meet AA.
 - **Smoke test (task 0.9):** Playwright for Electron launches the built app, checks the window opens without console errors, switches the three modes, opens the gallery in both themes for screenshot comparison, and loads the packaged worker chunk ([v0.1 plan known issue](../plans/v0.1.md#known-issues-and-risks)).
 - **End-to-end (task 3.11):** the exit-criteria flow driven through the UI by roles and labels, mirrored by the headless MCP flow.
-
-## Open questions
-
-Each lists the **recommended** answer first, then alternatives with trade-offs. Ask them as multiple choice.
-
-1. **Default theme.** (a) **Follow the OS, with a Light / Dark / System setting** – respects user choice, no extra decision for beginners. (b) Dark by default – common in CAD/CAM, the viewport stands out, but harder to read in bright shops. (c) Light by default – best in bright workshops and for printing screenshots; viewport may look flat.
-2. **Colour primitives.** (a) **Radix Colors (MIT)** – 12-step light/dark scales designed for the contrast targets, fits Radix. (b) Own palette – full brand control, but contrast work and dark variants are ours. (c) Open Color (MIT) – simple, but no dark-mode pairing.
-3. **CSS approach.** (a) **CSS Modules + CSS custom properties** – built into Vite, zero runtime, scoped class names, works with the CSP; tokens are not type-checked. (b) vanilla-extract – type-safe tokens and themes in TS, zero runtime; adds a Vite plugin and a TS-in-CSS learning curve. (c) Plain global CSS with tokens and BEM – simplest, but no scoping. (d) Tailwind – fast to write, but fights the "own styles from tokens" idea of ADR 0012 and clutters JSX.
-4. **Icon set** (licence must be GPL-3.0-compatible). (a) **Lucide (ISC)** + own CNC icons – large, consistent stroke style, tree-shakable React package. (b) Phosphor (MIT) – several weights, slightly more stylised. (c) Tabler (MIT) – very large set, thinner style. (d) Material Symbols (Apache-2.0) – huge, but a recognisably Google look.
-5. **Renderer state management.** (a) **Zustand (MIT)** for per-window UI state (selection, mode, panels, pick mode) and `useSyncExternalStore` over the document replica – tiny, and r3f components can read state without re-rendering the canvas. (b) React context + `useReducer` only – no dependency, but re-render churn in the viewport. (c) Redux Toolkit – devtools and structure, more boilerplate. (d) Jotai – fine-grained atoms, less obvious for a shared replica.
-6. **Internationalization.** (a) **English only in v0.1, strings centralised in `messages/` and errors rendered from code + params, no library** – cheap now, mechanical later. (b) Adopt i18next or FormatJS now – ready for translators, but extra work on every string before any locale exists. (c) Inline strings – fastest now, costly extraction later.
-7. **Typography.** (a) **System fonts (system-ui, ui-monospace) at 14 px base, tabular numerals** – native look, no bundled assets. (b) Same at 13 px – denser, closer to pro CAD, harder for beginners. (c) Bundle Inter + JetBrains Mono (OFL-1.1) – identical look on every OS, ~0.5 MB more.
-8. **Run-mode control size.** (a) **44 px controls in run mode, 32 px elsewhere** – usable on a shop touchscreen or with gloves. (b) 32 px everywhere – consistent, but small for shop use. (c) A user "touch mode" setting – flexible, more to test.
-9. **Viewport mouse mapping.** (a) **Left-click select, left-drag orbit, right-drag pan, wheel zoom to cursor** – common in hobby CAM and slicers, one-handed. (b) Fusion 360 style (middle-drag pan, Shift+middle orbit) – familiar to Fusion users, needs a middle button. (c) Selectable presets in settings – best for everyone, more work; could follow (a) later.
-10. **Confirmations and run shortcuts.** (a) **Undo instead of confirm for document edits; confirm only irreversible actions and run start (pre-flight dialog, also on the virtual machine); never confirm hold/stop/reset; `Escape` = feed hold while streaming, no single-key resume.** (b) Same, but skip the pre-flight dialog on the virtual machine – faster testing, but users don't learn the real flow. (c) Also confirm operation removal – familiar, but confirmation fatigue. (d) `Space` toggles hold/resume as in many senders – convenient, but an accidental key press restarts motion.
-11. **Window chrome.** (a) **Native title bar and native app menu** – OS conventions, accessibility and shortcuts for free. (b) Frameless window with our own title bar and menu – more space and a uniform look, but platform quirks and more a11y work.
-12. **Resizable panels.** (a) **`react-resizable-panels` (MIT)** – keyboard-accessible splitters, persisted sizes. (b) Fixed widths with collapse only – simplest, less flexible on small screens. (c) Own splitter – no dependency, a11y work is ours.
-13. **Component test setup and workbench.** (a) **Vitest + Testing Library + jsdom + axe-core, plus a dev-only gallery screen (screenshots in the Playwright smoke test)** – no new tool, reuses Vitest. (b) Vitest browser mode (real Chromium via Playwright) – real layout and WebGL, slower and heavier in CI. (c) Add Storybook (MIT) – rich workbench, but a large extra toolchain to maintain.
-14. **Outdated evaluation display.** (a) **Keep the last mesh, draw the edited operation's outline live, tint the mesh and show "Updating…" only after 300 ms** – no flicker, immediate feedback. (b) Tint the mesh on every edit at once – honest, but flickers on every change. (c) Hide the mesh while pending – clearly "not current", but jarring.
-15. **Reference autocomplete in the quantity input (3.4).** (a) **Yes, a simple list of valid references (earlier surfaces, tool parameters) as you type** – discoverable, avoids `unknownReference`. (b) Later; v0.1 relies on pick mode and the dropdown – less work in 3.4, formulas harder to discover.
