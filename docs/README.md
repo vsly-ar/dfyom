@@ -15,6 +15,7 @@ The docs are the **source of truth**. Code implements what is documented here; w
 | Modes        | [modes/plan.md](modes/plan.md) – setups, toolpaths, optimization, gCode export                                                                                                 | draft       |
 | Modes        | [modes/plan-v0.1.md](modes/plan-v0.1.md) – v0.1 plan subset: plan snapshots and status, one setup, tools, pass strategies, toolpaths (core 2.13, toolpaths 2.10, job 2.9 done) | accepted    |
 | Modes        | [modes/run.md](modes/run.md) – machine control, sensors, automation                                                                                                            | draft       |
+| Modes        | [modes/run-v0.1.md](modes/run-v0.1.md) – v0.1 run subset: sender, clocks, utility process, run commands and job, progress (task 3.9)                                           | accepted    |
 | Architecture | [architecture/overview.md](architecture/overview.md) – processes, source layout, threading                                                                                     | draft       |
 | Architecture | [architecture/llm-api.md](architecture/llm-api.md) – LLM/agent access, headless, multi-instance                                                                                | stub        |
 | Architecture | [architecture/commands.md](architecture/commands.md) – shared command layer for UI, agents, CLI                                                                                | implemented |
