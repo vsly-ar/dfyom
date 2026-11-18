@@ -147,11 +147,12 @@ interface ControllerTransport {
 ```
 
 - `GrblSender` (`src/core/run/grbl/sender.ts`, headless) owns the protocol: line framing, **character counting** against the 128-byte RX buffer, `?` polling (5 Hz), mapping `job.pause`/`job.resume`/`job.abort` to `!`/`~`/`!`+`0x18`, and `error:N`/`ALARM:N` to `AppError`s (planned codes `machine.error`, `machine.alarm`, `machine.connection`). On the first `error:N` it stops sending and feed-holds. Send-response mode is a sender option for debugging.
-- Implementations: `VirtualGrblTransport` (wraps the emulator and a `Clock`, schedules the emulator's next event, delivers output by a clock timer at the current time, never inside `write()`, so a sender can book a line after awaiting `write()` as over serial; in-process in tests and headless tests, in the utility process in the app) and `SerialTransport` (`serialport`, utility process only, [ADR 0008](../decisions/0008-threading-split-by-job.md)).
-- **v0.1 connects to the virtual machine only.** `SerialTransport` is written and unit-tested (against a fake port) but cannot be selected until [run.md#safety](../modes/run.md#safety) is accepted.
+- Implementations: `VirtualGrblTransport` (wraps the emulator and a `Clock`, schedules the emulator's next event, delivers output by a clock timer at the current time, never inside `write()`, so a sender can book a line after awaiting `write()` as over serial; in-process in unit tests, in the machine host elsewhere: a utility process in the app, a `worker_threads` worker headless). `SerialTransport` (`serialport`, utility process only) comes with the real-machine milestone.
+- **v0.1 connects to the virtual machine only** ([run-v0.1.md decision 1](../modes/run-v0.1.md#decisions)). `SerialTransport` is not written in v0.1; it comes with the real-machine milestone and cannot be selected until [run.md#safety](../modes/run.md#safety) is accepted.
 - Run commands (`run.connection.open { target: 'virtual' }`, `run.job.start` as a `job`, [commands.md](commands.md#long-running-commands-jobs)) are `machine: true`.
 - **Permission rule** (for the `PermissionPolicy`, [commands.md](commands.md#dispatcher-pipeline) step 5): a machine command whose connection is virtual is allowed for every source (UI, agent, CLI, automation, system), since no real machine is affected; on a real connection the strict policy stays (only UI sources until [run.md#safety](../modes/run.md#safety) says otherwise). This makes the headless MCP exit criterion possible.
 - Progress: `done` = lines acknowledged with `ok`, `total` = program lines; the position from status reports drives the 3D view.
+- Run-mode design for task 3.9 (sender behaviour, clocks, machine host and protocol, run commands and job, safety): [run-v0.1.md](../modes/run-v0.1.md).
 
 ### Observability for tests
 
@@ -176,4 +177,4 @@ Implemented (task 3.8): `src/core/run/clock.ts`, `transport.ts`, `grbl/emulator/
 | `src/core/run/grbl/emulator/*.ts`          | Parser subset, planner/timing, state machine, trace           |
 | `src/core/run/grbl/virtual-transport.ts`   | `VirtualGrblTransport`                                        |
 | `src/main/machine/utility.ts`              | Utility-process entry hosting sender and transports           |
-| `src/main/machine/serial-transport.ts`     | `SerialTransport` (Node `serialport`)                         |
+| `src/main/machine/serial-transport.ts`     | `SerialTransport` (Node `serialport`; after v0.1)             |
