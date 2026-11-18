@@ -1,8 +1,28 @@
 # LLM / agent API
 
-Status: draft · Task: 1.6 of the [v0.1 plan](../plans/v0.1.md#1-docs-and-decisions-accepted-before-implementation) (implementation: 3.10, end-to-end: 3.11) · Principle: [principles.md §1](../principles.md#1-llm-first) · Decision: [ADR 0011](../decisions/0011-mcp-and-cli-agent-api.md) · Commands: [commands.md](commands.md)
+Status: accepted · Task: 1.6 of the [v0.1 plan](../plans/v0.1.md#1-docs-and-decisions-accepted-before-implementation) (implementation: 3.10, end-to-end: 3.11) · Principle: [principles.md §1](../principles.md#1-llm-first) · Decision: [ADR 0011](../decisions/0011-mcp-and-cli-agent-api.md) · Commands: [commands.md](commands.md)
 
-How agents reach DFYOM: an **MCP server** (stdio for a headless instance, local HTTP for attaching to a running app) and a **CLI**, both thin adapters over the [command layer](commands.md). This doc maps commands, queries, jobs, errors and the action log onto MCP and the CLI, and defines agent sessions, project binding, coexistence with the GUI and safety. Recommendations marked **(Q n)** wait for a decision in [Open questions](#open-questions); do not implement 3.10 before they are answered.
+How agents reach DFYOM: an **MCP server** (stdio for a headless instance, local HTTP for attaching to a running app) and a **CLI**, both thin adapters over the [command layer](commands.md). This doc maps commands, queries, jobs, errors and the action log onto MCP and the CLI, and defines agent sessions, project binding, coexistence with the GUI and safety. The [decisions](#decisions) were settled with the user; the sections after them specify them.
+
+## Decisions
+
+Settled with the user when this doc was accepted; the sections below specify them.
+
+1. **One MCP tool per command and query**, input schemas with shared `$ref` definitions, a size-budget test and an `--areas` filter ([Exposure](#exposure-commands-and-queries-as-mcp-tools)).
+2. **Output schemas are not listed** in `tools/list`; they are served by `dfyom://schema/{name}` and `dfyom tools` ([Schemas](#schemas)).
+3. **App-scope dispatcher** (same pipeline, empty document) holding `library.*`, `feedsSpeeds.*` and the new `project.*` lifecycle commands ([App scope](#app-scope-and-project-scope)).
+4. **One bound project per session** (`project.bind`; open, create and restore bind) ([Sessions](#sessions-and-sources)).
+5. **Explicit attach** to the instance that owns a project: local HTTP or `dfyom mcp --connect`; a headless open of a locked project fails with a connect hint ([Coexistence](#coexistence-with-a-running-gui)).
+6. **Agent-opened projects in the GUI** open a window and stay open after the session ends ([Sessions](#sessions-and-sources)).
+7. **Local HTTP is on by default**, with every protection: `127.0.0.1` only, a bearer token in an owner-only discovery file, `Host`/`Origin` checks, a visible "agent connected" indicator, and a setting to turn it off ([Local HTTP](#local-http)).
+8. **Jobs:** job tools return `{ jobId }`; `job.wait` blocks with a timeout and MCP progress; the CLI waits by default ([Jobs](#jobs)).
+9. **User actions reach agents** as a digest line in every tool result plus `project.log.list`; the subscribable log resource is an extra ([Action log](#action-log-and-user-actions)).
+10. **Undo:** the shared linear history under the stale-write rule, plus a `history.list` query ([Undo](#undo-and-history)).
+11. **Real machines** (not v0.1, input to [run.md#safety](../modes/run.md#safety)): an explicit grant by the user at the GUI, per agent session and connection, revoked on disconnect, never for headless instances ([Permissions](#permissions)).
+12. **`expectedRevision`** is a reserved optional top-level arg of every project-scope command, stripped by the adapter ([Schemas](#schemas)).
+13. **CLI:** `dfyom <name> <json>` one-shot (open → call → save on change → close), `dfyom batch` (JSON lines), `dfyom mcp`, `dfyom tools` ([CLI](#cli)).
+14. **No job follow-up commands in v0.1**; adapters never dispatch them. When a job needs one, its definition declares it and the dispatcher dispatches it with `startRevision` ([Jobs](#jobs)).
+15. **Headless runtime:** the CLI/MCP entry is a separate build output with no Electron import, run by the app's own binary with `ELECTRON_RUN_AS_NODE` when packaged (the `runAsNode` fuse stays enabled) and by `node` in tests ([Processes](#processes-and-hosting)).
 
 ## Requirements
 
@@ -26,18 +46,18 @@ How agents reach DFYOM: an **MCP server** (stdio for a headless instance, local 
 
 ## Processes and hosting
 
-| Mode         | Process                                                  | Transport                           | Projects                                                           |
-| ------------ | -------------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------ |
-| GUI          | Electron main ([overview.md](overview.md#ipc))           | IPC (renderer), local HTTP (opt.)   | Opened by the user or by an attached agent                         |
-| Headless MCP | `dfyom mcp`: Node process, no Electron import (**Q 15**) | stdio                               | Opened by the agent; closed when the session ends                  |
-| Bridge       | `dfyom mcp --connect [instance]`                         | stdio ↔ local HTTP of a running app | The running app's ([Coexistence](#coexistence-with-a-running-gui)) |
-| CLI          | `dfyom <name> …`, `dfyom batch` (same Node entry)        | argv / stdin / stdout               | One per invocation ([CLI](#cli))                                   |
+| Mode         | Process                                                                   | Transport                                  | Projects                                                           |
+| ------------ | ------------------------------------------------------------------------- | ------------------------------------------ | ------------------------------------------------------------------ |
+| GUI          | Electron main ([overview.md](overview.md#ipc))                            | IPC (renderer), local HTTP (on by default) | Opened by the user or by an attached agent                         |
+| Headless MCP | `dfyom mcp`: Node process, no Electron import ([decision 15](#decisions)) | stdio                                      | Opened by the agent; closed when the session ends                  |
+| Bridge       | `dfyom mcp --connect [instance]`                                          | stdio ↔ local HTTP of a running app        | The running app's ([Coexistence](#coexistence-with-a-running-gui)) |
+| CLI          | `dfyom <name> …`, `dfyom batch` (same Node entry)                         | argv / stdin / stdout                      | One per invocation ([CLI](#cli))                                   |
 
 All modes run the same **app host** (`src/main/host/`, no Electron import – like `src/main/persistence/`): the [project storage](persistence.md#files), the [library](library.md#storage), the [worker pool](workers.md#hosting), the machine host ([run-v0.1.md](../modes/run-v0.1.md#processes): utility process in the app, `worker_threads` headless), the app-scope dispatcher and one project runtime per open project (dispatcher, `EvaluationScheduler`, `ToolpathCache`, `ExportFiles`, geometry prewarm – the wiring [workers.md](workers.md#implementation-task-29) leaves to "whoever opens a project"). The GUI adds windows and IPC on top; MCP and CLI add their framing. Stdout carries only protocol or CLI output ([logging.md rule 6](../conventions/logging.md#rules)).
 
 ### App scope and project scope
 
-Today every command runs on a project dispatcher, so the library is unusable without an open project and project lifecycle is not a command (plan known issues: "app-level dispatcher", "no project opens via IPC/MCP/CLI"). Recommended **(Q 3)**:
+Today every command runs on a project dispatcher, so the library is unusable without an open project and project lifecycle is not a command (plan known issues: "app-level dispatcher", "no project opens via IPC/MCP/CLI"). Therefore ([decision 3](#decisions)):
 
 - An **app-scope dispatcher** per instance: the same `createDispatcher` pipeline (lookup, `parseArgs`, FIFO, permission, one action-log event per call) over an empty `ProjectDoc` and an app registry. It holds `library.*`, `feedsSpeeds.*` and the project lifecycle below; these move out of `APP_COMMANDS`/`APP_QUERIES`. Names stay unique across both registries (registry test).
 - **Project lifecycle commands** (all `effect`, app scope; handlers call the app host through a new `services.host` port):
@@ -76,10 +96,10 @@ A few tools are not registry entries because they depend on the session, not on 
 
 ### Schemas
 
-- `inputSchema` = `toolDescriptor(def).inputSchema` from [`json-schema.ts`](../../src/core/commands/json-schema.ts) ([commands.md](commands.md#json-schema-for-agent-tools)), plus the reserved optional key `expectedRevision` (integer) on every command of project scope **(Q 12)**. The adapter removes it before `dispatch(…, { expectedRevision })`; a registry test asserts no command arg is named `expectedRevision`.
-- **Output schemas are not listed** in `tools/list` **(Q 2)**: they are 80 % of the size (470 K of 585 K chars; `plan.get` alone 148 K). They are served by the `dfyom://schema/{name}` resource and `dfyom tools --json`.
+- `inputSchema` = `toolDescriptor(def).inputSchema` from [`json-schema.ts`](../../src/core/commands/json-schema.ts) ([commands.md](commands.md#json-schema-for-agent-tools)), plus the reserved optional key `expectedRevision` (integer) on every command of project scope ([decision 12](#decisions)). The adapter removes it before `dispatch(…, { expectedRevision })`; a registry test asserts no command arg is named `expectedRevision`.
+- **Output schemas are not listed** in `tools/list` ([decision 2](#decisions)): they are 80 % of the size (470 K of 585 K chars; `plan.get` alone 148 K). They are served by the `dfyom://schema/{name}` resource and `dfyom tools --json`.
 - Size: input schemas of all 63 entries are about 111 K chars (~28 K tokens), dominated by `library.{tool,machine}.{add,update}` (~13 K each, repeated quantity sub-schemas). 3.10 generates with shared definitions (`$defs`/`$ref` for reused schemas) and a test enforces a budget on the serialized `tools/list` (target: under 60 K chars), so growth is noticed when a command is added. Clients with deferred tool loading handle the rest.
-- **Granularity (Q 1):** recommended one tool per command/query (structural parity, client-side validation, no extra round trip). Server option `--areas design,plan,…` (MCP) restricts the list for small-context models; session tools and `history`/`job` are always listed.
+- **Granularity:** ([decision 1](#decisions)) one tool per command/query (structural parity, client-side validation, no extra round trip). Server option `--areas design,plan,…` (MCP) restricts the list for small-context models; session tools and `history`/`job` are always listed.
 
 ### Annotations and server instructions
 
@@ -110,13 +130,13 @@ Every tool call goes through `atBoundary` with `EntryPoint { kind: 'agent', name
 ### Jobs
 
 - A `job` command's tool returns `{ jobId }` at once, as the dispatcher does ([commands.md](commands.md#long-running-commands-jobs)). `job_get`, `job_list`, `job_pause`, `job_resume`, `job_abort` are the registry entries.
-- **`job.wait` (Q 8)** blocks until the job finishes or `timeoutSeconds` passes and returns the `job.get` value. If the call carries `_meta.progressToken`, the server sends `notifications/progress` from `JobHandle.onProgress` (`progress` = `done`, `total`, `message` = `label`; already throttled by the dispatcher). Cancelling the MCP request (`notifications/cancelled`) ends the wait, **not** the job (`job_abort` does that).
+- **`job.wait`** ([decision 8](#decisions)) blocks until the job finishes or `timeoutSeconds` passes and returns the `job.get` value. If the call carries `_meta.progressToken`, the server sends `notifications/progress` from `JobHandle.onProgress` (`progress` = `done`, `total`, `message` = `label`; already throttled by the dispatcher). Cancelling the MCP request (`notifications/cancelled`) ends the wait, **not** the job (`job_abort` does that).
 - A job's completion is also an action-log `job` event, so it shows up in the [digest](#action-log-and-user-actions) of the agent's next call.
-- **Follow-up document commands (Q 14):** no v0.1 job needs one (toolpaths are derived, [plan-v0.1.md](../modes/plan-v0.1.md); evaluation and runs change no document). Adapters never dispatch follow-ups; this closes the plan known issue for v0.1.
+- **Follow-up document commands:** ([decision 14](#decisions)) no v0.1 job needs one (toolpaths are derived, [plan-v0.1.md](../modes/plan-v0.1.md); evaluation and runs change no document). Adapters never dispatch follow-ups; this closes the plan known issue for v0.1.
 
 ### Action log and user actions
 
-The [action log](commands.md#action-log) is how an agent sees what the user and other agents did. Most MCP clients do not show server notifications to the model, so the primary channel is pull plus piggyback **(Q 9)**:
+The [action log](commands.md#action-log) is how an agent sees what the user and other agents did. Most MCP clients do not show server notifications to the model, so the primary channel is pull plus piggyback ([decision 9](#decisions)):
 
 - **Digest:** each session keeps a cursor (last seen `seq`). Every tool result of a bound session ends with one text line (and `_meta["dfyom/actions"]`) summarizing events **by other sources** since the cursor, e.g. `Since your last call: 3 actions by ui:win-1 (design.pocket.update ×2, history.undo), revision 41 → 44.` Then the cursor advances. Patches are never included.
 - **Pull:** `project.log.list { afterSeq }` returns the events (args summarized, `withPatches: false`); a `gap` means the ring buffer dropped events and the agent should re-query what it needs.
@@ -133,12 +153,13 @@ The [action log](commands.md#action-log) is how an agent sees what the user and 
 ## Sessions and sources
 
 - **Source:** each MCP session is one [source](commands.md#stale-writes) `{ kind: 'agent', id }`: `stdio-<n>` or `http-<n>` (per `Mcp-Session-Id`), unique per instance. The client's `clientInfo.name` is logged with it and shown in the GUI ("Claude Code · http-2"). A CLI invocation or `dfyom batch` run is `{ kind: 'cli', id: 'cli-<pid>' }`. A `--connect` bridge keeps its client's identity (the HTTP session is the source).
-- **Binding (Q 4):** a session is bound to at most one project; project-scope tools run on the bound project's dispatcher and fail with `input.malformed` (rule `noProject`, hint: open, create or bind) when none is bound. App-scope tools work unbound. Several projects = several sessions (cheap over HTTP; one headless process per project over stdio).
+- **Binding:** ([decision 4](#decisions)) a session is bound to at most one project; project-scope tools run on the bound project's dispatcher and fail with `input.malformed` (rule `noProject`, hint: open, create or bind) when none is bound. App-scope tools work unbound. Several projects = several sessions (cheap over HTTP; one headless process per project over stdio).
+- **Concurrency:** the adapters never serialize a session's calls; every call goes straight to `dispatch`/`query`, so ordering is the project queue's ([commands.md](commands.md#concurrency)). **Urgent** commands – `run.machine.reset`, `run.machine.jogCancel` and `job.pause`/`job.resume`/`job.abort` – skip that queue ([run-v0.1.md](../modes/run-v0.1.md#safety-v01)), so an agent can stop a run or a job while another call (its own `job.wait`, or an effect waiting for the machine) is still pending. Their tool descriptions say "Runs immediately, even while other commands wait." The CLI reaches them on a running instance with `--connect`.
 - **Stale writes** apply per source unchanged: an agent edits after a query or with `expectedRevision`; a user's edit in between gives `command.conflict` ([commands.md](commands.md#stale-writes)).
 - **Lifecycle:**
   - Headless stdio: the process is the instance. On end of stdin: abort running jobs, close every project it opened (unsaved changes stay recoverable, as on `project.close { confirm: true }`), flush logs, terminate workers, exit 0.
   - HTTP session end (DELETE, or 30 min idle): unbind; projects stay open. Its running jobs keep running (they belong to the dispatcher).
-  - Agent-opened projects in the GUI instance open a window and stay open after the session ends **(Q 6)**.
+  - Agent-opened projects in the GUI instance open a window and stay open after the session ends ([decision 6](#decisions)).
 
 ### Coexistence with a running GUI
 
@@ -147,7 +168,7 @@ One project has exactly one owner instance: the [lock](persistence.md#lock) hold
 | Situation                                                   | Behaviour                                                                                                                                                         |
 | ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Agent wants the project the user has open                   | Attach to that GUI: HTTP directly, or stdio via `dfyom mcp --connect`; then `project.list` / `project.bind`. Same dispatcher, queue, history and log as the user. |
-| Headless `dfyom mcp` opens a file locked by a live instance | `persist.locked` as today; `data` adds the holder's instance id and, if it serves HTTP, the hint `dfyom mcp --connect <instance>` **(Q 5)**.                      |
+| Headless `dfyom mcp` opens a file locked by a live instance | `persist.locked` as today; `data` adds the holder's instance id and, if it serves HTTP, the hint `dfyom mcp --connect <instance>` ([decision 5](#decisions)).     |
 | GUI opens a file a headless instance holds                  | `persist.locked`; the GUI shows which agent instance holds it.                                                                                                    |
 | Several GUIs / headless instances                           | Independent; each owns different projects; the library is shared ([library.md](library.md#storage), cross-instance revision check).                               |
 
@@ -157,30 +178,38 @@ One project has exactly one owner instance: the [lock](persistence.md#lock) hold
 
 ### Permissions
 
-- The dispatcher's `PermissionPolicy` stays the single gate ([commands.md](commands.md#dispatcher-pipeline) step 5); adapters add none. v0.1 rule: machine commands on the virtual connection are allowed for every source; any other target denies non-UI sources ([grbl.md](grbl.md#transport-and-sender), [run-v0.1.md](../modes/run-v0.1.md#safety-v01)). Only virtual exists in v0.1.
-- Real machines are decided with [run.md#safety](../modes/run.md#safety) before any serial connection exists **(Q 11)**; recommended direction: an explicit grant by the user at the GUI, per agent session and connection, revoked on disconnect, never available to headless instances.
+- The dispatcher's `PermissionPolicy` stays the single gate ([commands.md](commands.md#dispatcher-pipeline) step 5); adapters add none. The default policy **denies by default**: UI sources are allowed; agent and CLI sources only on a connection the machine host reported as virtual, or to open a virtual connection when none is open. Unknown or real targets, a connection still opening and a missing machine port are denied ([commands.md](commands.md#dispatcher-pipeline), [grbl.md](grbl.md#transport-and-sender), [run-v0.1.md](../modes/run-v0.1.md#safety-v01)). Only virtual exists in v0.1, so an agent opens the virtual connection itself (`run_connection_open { target: 'virtual' }`) before any other `run.*` command.
+- Real machines are specified in [run.md#safety](../modes/run.md#safety) before any serial connection exists; the direction for agents ([decision 11](#decisions)) is an explicit grant by the user at the GUI, per agent session and connection, revoked on disconnect, never available to headless instances.
 - Destructive non-machine commands already need `confirm: true` in their args (library `remove`, recovery `discard`, replacing files in `project.save`/`plan.export`, `project.close` with unsaved changes). For agents `confirm: true` asserts the user agreed; the primer says so; it is logged with the source.
 - No path sandbox in v0.1: a local agent already has the user's file access. HTTP hardening (below) keeps web pages out.
 
 ### Local HTTP
 
-Recommended **(Q 7)**:
+**On by default** in the GUI ([decision 7](#decisions)), with all of the protections below; none of them can be turned off.
 
-- **Off by default.** Enabled by an app setting or `--mcp-http[=port]`; the GUI shows a visible "agents can connect" indicator and the attached sessions.
+- **Setting:** "Allow local agents to connect" (app setting, default on; the settings store comes with the UI shell, task 3.3). Turning it off stops the server at once, ends every HTTP session (their running jobs keep running in their dispatchers) and deletes the discovery file; turning it on starts a new server with a new token. `--mcp-http=off|<port>` overrides the setting for one run. A headless `dfyom mcp` instance serves stdio only, HTTP only with `--mcp-http`.
+- **Indicator:** while at least one agent session is attached, every window shows a visible "agent connected" indicator naming the sessions (client name and source id, [Sessions](#sessions-and-sources)); it links to the setting.
 - Binds `127.0.0.1` only (never `0.0.0.0`/`::`); port random unless given. Streamable HTTP at `/mcp` (not the deprecated HTTP+SSE transport).
 - **Bearer token:** 256 random bits per instance start, in the discovery file; every request needs `Authorization: Bearer <token>` (else 401). Compared in constant time; redacted in logs ([logging.md](../conventions/logging.md#redaction) already covers `authorization`, `token`).
 - **DNS-rebinding guard:** reject requests whose `Host` is not `127.0.0.1:<port>`/`localhost:<port>`, and any request with an `Origin` header (browsers) – 403.
 - Limits: request body 4 MB; at most 16 concurrent sessions.
 
+**What on-by-default means for a fresh install.** The first launch, with no configuration, starts the server on a random loopback port and writes the discovery file with a new token. From then on:
+
+- Any program running **as the same OS user** can read the discovery file and drive the app with the full tool set: open, edit, save and export projects, edit the shared library, and run the virtual machine. This is the same trust a local agent already has through the user's files (it could edit project files or run the CLI); the indicator makes an attached session visible.
+- **Other OS users** on the computer cannot read the owner-only file and get 401. **Other computers** cannot reach a loopback socket. **Web pages** in a browser are rejected by the `Origin`/`Host` checks, including DNS rebinding.
+- **No real machine** can be driven: v0.1 has only the virtual machine, and the permission policy denies agents on anything else ([Permissions](#permissions)). Before real machines exist, the explicit per-session grant ([decision 11](#decisions)) is what keeps an on-by-default endpoint from reaching hardware; real-machine work must re-check this default with [run.md#safety](../modes/run.md#safety).
+- Users who do not want agents turn the setting off once; it stays off.
+
 ### Undo and history
 
-- Agents use `history_undo`/`history_redo` on the one linear, shared history ([commands.md](commands.md#undo--redo)) **(Q 10)**. The stale-write rule makes an agent's undo safe by default: without a fresh read it may undo only while nobody else committed, i.e. its own step; after a query it undoes the top entry, whoever made it.
+- Agents use `history_undo`/`history_redo` on the one linear, shared history ([commands.md](commands.md#undo--redo)) ([decision 10](#decisions)). The stale-write rule makes an agent's undo safe by default: without a fresh read it may undo only while nobody else committed, i.e. its own step; after a query it undoes the top entry, whoever made it.
 - `history.list` shows whose step is on top before undoing; undo/redo events name the entry in the log and the digest.
 - Library edits (`effect`) are not undoable; the tool description says so.
 
 ## CLI
 
-The CLI reuses the session core: same names (dotted registry names), same descriptors, same `ResultWire`, same session tools. Only framing differs. Recommended **(Q 13)**:
+The CLI reuses the session core: same names (dotted registry names), same descriptors, same `ResultWire`, same session tools. Only framing differs. Decided ([decision 13](#decisions)):
 
 | Form                                                 | Behaviour                                                                                                                                                                                                                                                                                                                                           |
 | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -216,29 +245,9 @@ Per [testing.md](../conventions/testing.md); everything runs in `npm run check` 
 | -------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Mapping (core) | 3.10 | Name mapping bijective for every registry name; `tools/list` equals both registries plus session tools ([commands.md](commands.md#testing): parity is structural); annotation derivation; size budget; no `expectedRevision` arg.                                                                                                                             |
 | Results (core) | 3.10 | Each outcome kind and an `AppError` with issues map to the documented `CallToolResult`; exit code for every `ERROR_CODES` key.                                                                                                                                                                                                                                |
-| Session (core) | 3.10 | Binding and `noProject`; digest of other sources' events and cursor advance; `gap`; `job.wait` finish, timeout and cancellation (fake clock, in-process workers); stale-write conflict between a UI and an agent source.                                                                                                                                      |
+| Session (core) | 3.10 | Binding and `noProject`; digest of other sources' events and cursor advance; `gap`; `job.wait` finish, timeout and cancellation (fake clock, in-process workers); stale-write conflict between a UI and an agent source; `job_abort` succeeds while the same session's `job_wait` is pending (urgent path).                                                   |
 | MCP server     | 3.10 | SDK client ↔ server over the SDK's in-memory transport: list, call, errors, progress notifications, resource subscribe/updated.                                                                                                                                                                                                                               |
-| HTTP           | 3.10 | Real loopback server: 401 without/with a wrong token, 403 on foreign `Host` or any `Origin`, bound address is `127.0.0.1`, two sessions = two sources, discovery file permissions and cleanup.                                                                                                                                                                |
+| HTTP           | 3.10 | Real loopback server: 401 without/with a wrong token, 403 on foreign `Host` or any `Origin`, bound address is `127.0.0.1`, two sessions = two sources, discovery file permissions and cleanup; on by default, and turning the setting off stops the server, ends sessions and deletes the file.                                                               |
 | Coexistence    | 3.10 | Two hosts in one test with temp data dirs: second open → `persist.locked` with the connect hint; `--connect` bridge reaches the first host's dispatcher; same-instance re-open returns `alreadyOpen`.                                                                                                                                                         |
 | CLI            | 3.10 | Spawn the built CLI with `--data-dir` (temp): one-shot save/`--no-save`, `batch` across lines, exit codes, stdout holds only results (no log lines).                                                                                                                                                                                                          |
 | End to end     | 3.11 | The [exit criterion](../plans/v0.1.md#exit-criteria) headless: an SDK client spawns `dfyom mcp` (built output, temp data dir) and runs create → design ops → plan → export (gCode compared with the golden file) → virtual run at `max` with `job_wait` and `run_job_continue` → save → close → reopen → compare. A CLI `batch` variant runs the same script. |
-
-## Open questions
-
-Each starts with the recommendation. Answer before 3.10.
-
-1. **Tool granularity.** (a) **Recommended:** one MCP tool per command/query, input schemas with `$ref` reuse, a size-budget test and an `--areas` filter – structural parity, client-side validation, one call per action; ~28 K tokens today. (b) Three generic tools (`dfyom_call`, `dfyom_query`, `dfyom_describe`) – tiny, constant list, but every action needs a schema lookup first, no client-side validation, weaker models struggle. (c) One tool per area with an `action` discriminator – ~8 tools but the same schema size in large unions that clients handle poorly. (d) Hybrid: 1:1 for queries and frequent commands, generic call for the rest – smaller, but parity is no longer uniform.
-2. **Output schemas.** (a) **Recommended:** not in `tools/list`; served by `dfyom://schema/{name}` and `dfyom tools` – saves 80 % of the size; results still carry `structuredContent`. (b) Include them – clients can validate results, but +470 K chars. (c) Include only below a size threshold – inconsistent per tool.
-3. **App scope.** (a) **Recommended:** an app-scope dispatcher (same pipeline, empty doc) holding `library.*`, `feedsSpeeds.*` and new `project.*` lifecycle commands – one pipeline for logging, parsing and permission; closes two known issues. (b) App-host methods outside the command layer, wrapped by adapters – less change, but no action log, no parity check, adapters gain logic. (c) Keep library on project dispatchers and require an open project – no change, but no library use without a project.
-4. **Project targeting.** (a) **Recommended:** one bound project per session (`project.bind`; open/create bind) – schemas unchanged, matches per-source stale-write state. (b) A `project` key arg on every project-scope tool – multi-project sessions, but every schema grows and every call must repeat it. (c) Binding plus an optional override key – flexible, more surface.
-5. **Same project in GUI and a headless agent.** (a) **Recommended:** explicit attach – the GUI serves HTTP, stdio clients use `dfyom mcp --connect`; a headless open of a locked project fails with a connect hint. (b) Automatic forwarding when the lock holder serves HTTP – convenient, but a "headless" session silently edits the user's open project. (c) Read-only open of locked projects – already "much later" in persistence.md; no edits.
-6. **Projects opened by an agent in the GUI instance.** (a) **Recommended:** open a window and stay open after the session ends – the user sees what the agent works on and owns closing. (b) Hidden until the user opens them – less intrusive, but invisible edits. (c) Close when the session ends – tidy, but loses the user's view and makes recovery prompts likely.
-7. **Local HTTP enablement and auth.** (a) **Recommended:** off by default (setting or `--mcp-http`), loopback only, bearer token in an owner-only discovery file, `Host`/`Origin` checks, visible indicator. (b) On by default with the same checks – zero setup, larger exposure while unused. (c) Additionally ask the user in the GUI to approve each new session – strongest, but blocks unattended attach and tests need a bypass.
-8. **Waiting for jobs.** (a) **Recommended:** job tools return `{ jobId }`; `job.wait` with timeout and MCP progress; CLI waits by default. (b) Job tools block until done (progress via `progressToken`) – one call, but long runs hit client request timeouts and hold a slot. (c) Polling `job.get` only – simplest server, many wasted calls and tokens. (d) MCP Tasks (experimental in the 2025-11-25 spec) – the protocol-native answer, but little client support yet; revisit later.
-9. **Delivering user actions to agents.** (a) **Recommended:** a digest line in every tool result plus `project.log.list`, with the subscribable log resource as an extra – works in every client. (b) Resource subscription only – protocol-clean, but most clients never show the update to the model. (c) Custom server notifications – richest, invisible to the model in today's clients.
-10. **Agent undo.** (a) **Recommended:** the shared linear history under the stale-write rule, plus a `history.list` query – no new semantics; an agent undoes its own step unless it re-read first. (b) Per-source undo ("undo my last step") – intuitive for multi-agent work, but needs selective undo over a linear history (conflicting patches); a large change. (c) Deny `history.*` to agents while a UI is attached – safe, loses parity.
-11. **Machine permissions for agents beyond virtual** (not blocking 3.10; feeds [run.md#safety](../modes/run.md#safety)). (a) **Recommended direction:** per-session, per-connection grant by the user at the GUI, revoked on disconnect, never headless. (b) Never – agents act on real machines only through user-approved automation scripts. (c) Allowed with `confirm: true` args – an agent sets it itself, so it confirms nothing.
-12. **Where `expectedRevision` goes.** (a) **Recommended:** a reserved optional top-level arg merged into each project command's schema, stripped by the adapter – flat args, same JSON as the CLI. (b) Wrapper `{ args, expectedRevision }` – no reserved name, one more nesting level on every call. (c) Not exposed – agents rely on the read baseline only; no way to pin a revision.
-13. **CLI shape.** (a) **Recommended:** `dfyom <name> <json>` one-shot (open → call → save on change → close), `dfyom batch` JSON lines, `dfyom mcp`, `dfyom tools` – scriptable, reuses the session core. (b) Per-field flags generated from JSON Schema (`--depth "3 mm"`) – friendlier for people, awkward for nested args; can be added later. (c) CLI only as a client of a running instance (daemon) – keeps undo across calls, needs an instance running.
-14. **Job follow-up commands** (plan known issue). (a) **Recommended:** none in v0.1; adapters never dispatch follow-ups; when a job needs one, its definition declares it and the dispatcher dispatches it with `startRevision`. (b) Keep "the caller dispatches" – agents must remember it; easy to get wrong.
-15. **Headless runtime.** (a) **Recommended:** the CLI/MCP entry is a separate build output with no Electron import, run by the app's own binary with `ELECTRON_RUN_AS_NODE` (packaged) or `node` (tests) – one Node, same native ABI; needs the `runAsNode` fuse left enabled. (b) A separate Node runtime shipped with the app – fuse can be disabled, larger download. (c) The Electron app started with `--headless` and no window – utility process available, but slow start and heavier for CI.
