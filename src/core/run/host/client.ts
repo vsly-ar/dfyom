@@ -1,0 +1,361 @@
+/**
+ * Main's side of the machine host: spawns it on connect, sends requests and matches replies by
+ * `requestId`, mirrors the latest status, forwards job progress and phases, and fails what is
+ * pending when the host exits. Implements the `MachineService` port.
+ * Doc: docs/modes/run-v0.1.md#machine-host-and-protocol
+ */
+import { AppError } from '../../../shared/errors/app-error'
+import { noopLogger, type Logger, type LogLevel } from '../../../shared/logging'
+import { parseWith } from '../../../shared/parse'
+import {
+  Err,
+  fail,
+  fromWire,
+  Ok,
+  type AppResult,
+  type AsyncAppResult,
+} from '../../../shared/result'
+import type { TimeScale } from '../clock'
+import type { RunSummary, SenderProgram } from '../grbl/sender'
+import {
+  closedStatus,
+  type JobListener,
+  type MachineService,
+  type RunningJob,
+  type RunStatus,
+} from '../service'
+import {
+  ControllerInfoSchema,
+  HostMessage,
+  PROTOCOL_VERSION,
+  RunSummarySchema,
+  type ConnectedInfo,
+  type HostStatus,
+  type JobControlAction,
+  type MachineAction,
+  type MainMessage,
+  type VirtualTarget,
+} from './protocol'
+
+/** A running host process or thread, as main sees it. */
+export interface MachineHostHandle {
+  post(message: unknown): void
+  /** Ends the host; `exit` follows. */
+  terminate(): void
+}
+
+export interface MachineHostEvents {
+  message(message: unknown): void
+  /** The host is gone (crash, kill or after `disconnect`); `code` as the platform reports it. */
+  exit(code: number | null): void
+}
+
+/** Spawns a host: Electron utility process, `worker_threads` worker or in-process (tests). */
+export type MachineHostFactory = (events: MachineHostEvents) => MachineHostHandle
+
+export interface MachineClientOptions {
+  readonly factory: MachineHostFactory
+  readonly logLevel: LogLevel
+  readonly log?: Logger
+  /** Receives the host's log batches (`createForwardReceiver`, origin `utility`). */
+  readonly onLog?: (batch: readonly unknown[]) => void
+  /** Epoch ms for `job.startedAt` (default `Date.now`). */
+  readonly now?: () => number
+}
+
+interface Host {
+  readonly handle: MachineHostHandle
+  readonly ready: Promise<AppResult<void>>
+  readonly resolveReady: (r: AppResult<void>) => void
+  /** Exit expected (after `disconnect` or `close`): not logged as a crash. */
+  expectExit: boolean
+}
+
+interface Job {
+  readonly jobId: string
+  readonly listener: JobListener
+  readonly startedAt: string
+  readonly end: (r: AppResult<RunSummary>) => void
+}
+
+const WHERE = 'MachineClient'
+
+export class MachineClient implements MachineService {
+  private host: Host | undefined
+  private readonly pending = new Map<string, (r: AppResult<unknown>) => void>()
+  private seq = 0
+  private conn: { state: 'connecting' | 'open'; machineKey: string } | undefined
+  private hostStatus: HostStatus | undefined
+  private job: Job | undefined
+  private timeScale: TimeScale = 1
+  private readonly listeners = new Set<(s: RunStatus) => void>()
+  private readonly log: Logger
+  private readonly now: () => number
+
+  constructor(private readonly opts: MachineClientOptions) {
+    this.log = (opts.log ?? noopLogger).child({ scope: 'run.client' })
+    this.now = opts.now ?? (() => Date.now())
+  }
+
+  get target(): 'virtual' | undefined {
+    return this.conn === undefined ? undefined : 'virtual'
+  }
+
+  get machineKey(): string | undefined {
+    return this.conn?.machineKey
+  }
+
+  status(): RunStatus {
+    const conn = this.conn
+    const h = this.hostStatus
+    if (conn === undefined || h === undefined) {
+      const s = closedStatus(this.timeScale)
+      return conn === undefined
+        ? s
+        : {
+            ...s,
+            state: 'Connecting',
+            connection: { ...s.connection, state: conn.state, target: 'virtual' },
+          }
+    }
+    const { job, timeScale, ...rest } = h
+    return {
+      ...rest,
+      connection: { state: conn.state, target: 'virtual', timeScale },
+      ...(job === undefined || this.job?.jobId !== job.jobId
+        ? {}
+        : { job: { ...job, startedAt: this.job.startedAt } }),
+    }
+  }
+
+  onStatus(listener: (s: RunStatus) => void): () => void {
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
+  }
+
+  async connect(target: VirtualTarget, machineKey: string): AsyncAppResult<ConnectedInfo> {
+    if (this.conn !== undefined)
+      return fail('run.busy', 'a machine connection is already open', { where: `${WHERE}.connect` })
+    this.conn = { state: 'connecting', machineKey }
+    this.timeScale = target.timeScale
+    this.notify()
+    const host = this.spawn()
+    const ready = await host.ready
+    if (ready.isErr()) return this.connectFailed(ready.unwrapErr())
+    const r = await this.request({ type: 'connect', requestId: '', target })
+    const info = r.andThen((v) => parseWith(ControllerInfoSchema, v, `${WHERE}.connect`))
+    if (info.isErr()) return this.connectFailed(info.unwrapErr())
+    this.conn = { state: 'open', machineKey }
+    this.log.info({ target: 'virtual', version: info.unwrap().version }, 'connected')
+    this.notify()
+    return info
+  }
+
+  async disconnect(): AsyncAppResult<void> {
+    const host = this.host
+    if (host === undefined || this.conn === undefined) return Ok(undefined)
+    if (this.job !== undefined)
+      return fail('run.busy', `job ${this.job.jobId} is running`, { where: `${WHERE}.disconnect` })
+    host.expectExit = true
+    const sent = await this.request({ type: 'disconnect', requestId: '' })
+    // the host may exit before its reply is read: gone is disconnected too
+    const r = sent.isErr() && sent.unwrapErr().code === 'machine.connection' ? Ok(undefined) : sent
+    this.conn = undefined
+    this.hostStatus = undefined
+    host.handle.terminate()
+    this.log.info('disconnected')
+    this.notify()
+    return r.map(() => undefined)
+  }
+
+  async machine(action: MachineAction): AsyncAppResult<unknown> {
+    if (this.conn?.state !== 'open') return this.notConnected()
+    return this.request({ type: 'machine', requestId: '', action })
+  }
+
+  async startJob(
+    jobId: string,
+    program: SenderProgram,
+    listener: JobListener,
+  ): AsyncAppResult<RunningJob> {
+    if (this.conn?.state !== 'open') return this.notConnected()
+    if (this.job !== undefined)
+      return fail('run.busy', `job ${this.job.jobId} is running`, { where: `${WHERE}.startJob` })
+    let end: (r: AppResult<RunSummary>) => void = () => {}
+    const ended = new Promise<AppResult<RunSummary>>((resolve) => (end = resolve))
+    const job: Job = { jobId, listener, startedAt: new Date(this.now()).toISOString(), end }
+    this.job = job
+    const r = await this.request({
+      type: 'jobStart',
+      requestId: '',
+      jobId,
+      program: { lines: [...program.lines], sections: program.sections.map((s) => ({ ...s })) },
+    })
+    if (r.isErr()) {
+      if (this.job === job) this.job = undefined
+      return Err(r.unwrapErr())
+    }
+    return Ok({ ended })
+  }
+
+  async controlJob(jobId: string, action: JobControlAction): AsyncAppResult<void> {
+    if (this.conn?.state !== 'open') return this.notConnected()
+    return (await this.request({ type: 'jobControl', requestId: '', jobId, action })).map(
+      () => undefined,
+    )
+  }
+
+  async setTimeScale(scale: TimeScale): AsyncAppResult<void> {
+    if (this.conn?.state !== 'open') return this.notConnected()
+    const r = await this.request({ type: 'timeScale', requestId: '', scale })
+    if (r.isOk()) this.timeScale = scale
+    return r.map(() => undefined)
+  }
+
+  /** App quit or headless exit: ends the host without waiting. */
+  close(): void {
+    const host = this.host
+    if (host === undefined) return
+    host.expectExit = true
+    host.handle.terminate()
+  }
+
+  // ── host lifecycle ────────────────────────────────────────────────────────────────────────
+
+  private spawn(): Host {
+    if (this.host !== undefined) return this.host
+    let resolveReady: (r: AppResult<void>) => void = () => {}
+    const ready = new Promise<AppResult<void>>((r) => (resolveReady = r))
+    const events = {
+      message: (m: unknown) => this.onMessage(host, m),
+      exit: (code: number | null) => this.onExit(host, code),
+    }
+    const host: Host = {
+      handle: this.opts.factory(events),
+      ready,
+      resolveReady,
+      expectExit: false,
+    }
+    this.host = host
+    host.handle.post({ type: 'init', protocol: PROTOCOL_VERSION, logLevel: this.opts.logLevel })
+    return host
+  }
+
+  private onMessage(host: Host, raw: unknown): void {
+    if (host !== this.host) return
+    const parsed = parseWith(HostMessage, raw, `${WHERE}.message`)
+    if (parsed.isErr()) {
+      this.log.warn({ err: parsed.unwrapErr().toJSON() }, 'malformed message from the machine host')
+      return
+    }
+    const m = parsed.unwrap()
+    switch (m.type) {
+      case 'ready':
+        if (m.protocol !== PROTOCOL_VERSION)
+          host.resolveReady(
+            fail(
+              'internal.unexpected',
+              `machine host protocol ${m.protocol}, expected ${PROTOCOL_VERSION}`,
+              {
+                where: WHERE,
+              },
+            ),
+          )
+        else host.resolveReady(Ok(undefined))
+        return
+      case 'reply': {
+        const resolve = this.pending.get(m.requestId)
+        this.pending.delete(m.requestId)
+        resolve?.(fromWire(m.result))
+        return
+      }
+      case 'status':
+        this.hostStatus = m.status
+        this.notify()
+        return
+      case 'progress':
+        if (this.job?.jobId === m.jobId)
+          this.job.listener.progress({ done: m.done, total: m.total, label: m.label })
+        return
+      case 'phase':
+        if (this.job?.jobId === m.jobId)
+          this.job.listener.phase({
+            phase: m.phase,
+            ...(m.toolChange === undefined ? {} : { toolChange: m.toolChange }),
+            ...(m.message === undefined ? {} : { message: m.message }),
+          })
+        return
+      case 'jobEnd': {
+        const job = this.job
+        if (job?.jobId !== m.jobId) return
+        this.job = undefined
+        const r = fromWire(m.result).andThen((v) =>
+          parseWith(RunSummarySchema, v, `${WHERE}.jobEnd`),
+        )
+        job.end(r)
+        this.notify()
+        return
+      }
+      case 'event':
+        if (m.kind === 'alarm' || m.kind === 'connectionLost')
+          this.log.warn({ kind: m.kind, ...m.data }, 'machine event')
+        else this.log.debug({ kind: m.kind, ...m.data }, 'machine event')
+        return
+      case 'log':
+        this.opts.onLog?.(m.batch)
+        return
+    }
+  }
+
+  private onExit(host: Host, code: number | null): void {
+    if (host !== this.host) return
+    this.host = undefined
+    const e = new AppError('machine.connection', 'the machine host exited', {
+      where: WHERE,
+      data: { exitCode: code },
+    })
+    if (!host.expectExit && this.conn !== undefined)
+      this.log.error({ err: e.toJSON() }, 'machine host exited unexpectedly')
+    host.resolveReady(Err(e))
+    for (const resolve of this.pending.values()) resolve(Err(e))
+    this.pending.clear()
+    const job = this.job
+    this.job = undefined
+    job?.end(Err(e))
+    this.conn = undefined
+    this.hostStatus = undefined
+    this.notify()
+  }
+
+  private request(m: MainMessage & { requestId: string }): AsyncAppResult<unknown> {
+    const host = this.host
+    if (host === undefined) return Promise.resolve(this.notConnected())
+    const requestId = `r${++this.seq}`
+    return new Promise((resolve) => {
+      this.pending.set(requestId, resolve)
+      host.handle.post({ ...m, requestId })
+    })
+  }
+
+  private connectFailed(e: AppError): AppResult<never> {
+    const host = this.host
+    this.conn = undefined
+    this.hostStatus = undefined
+    if (host !== undefined) {
+      host.expectExit = true
+      host.handle.terminate()
+    }
+    this.notify()
+    return Err(e.withContext(`${WHERE}.connect`))
+  }
+
+  private notConnected(): AppResult<never> {
+    return fail('run.notConnected', 'no machine connection', { where: WHERE })
+  }
+
+  private notify(): void {
+    if (this.listeners.size === 0) return
+    const s = this.status()
+    for (const l of [...this.listeners]) l(s)
+  }
+}

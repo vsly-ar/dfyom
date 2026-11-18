@@ -11,6 +11,7 @@ import type { EvaluationService } from '../design/evaluation'
 import type { ToolpathCache } from '../toolpath/cache'
 import type { ExportFiles } from '../post/plan-export'
 import type { JobHandle, WorkerPort } from './jobs'
+import type { MachineService } from '../run/service'
 import type { Option } from '../../shared/result'
 
 /**
@@ -48,7 +49,7 @@ export interface Timers {
 }
 
 /**
- * Injected service ports. The machine port arrives with run mode (task 3.9).
+ * Injected service ports.
  */
 export interface Services {
   readonly workers: WorkerPort
@@ -63,6 +64,11 @@ export interface Services {
   readonly library?: Library
   /** Persistence of the open project (docs/architecture/persistence.md); absent in tests. */
   readonly project?: ProjectSession
+  /**
+   * The machine connection of the app instance (docs/modes/run-v0.1.md#commands-and-queries);
+   * absent = run commands fail with `run.notConnected`.
+   */
+  readonly machine?: MachineService
   /** Writes exported gCode files (docs/architecture/grbl.md#plan-export-command); absent = `plan.export` fails. */
   readonly exportFiles?: ExportFiles
 }
@@ -89,6 +95,8 @@ export interface PauseState {
 }
 
 export interface JobContext extends CommandContext {
+  /** The dispatcher's id of this job (what `{ jobId }` returned). */
+  readonly jobId: string
   readonly signal: AbortSignal
   readonly progress: (p: JobProgress) => void
   /** Resolves when the job is not paused; rejects with an `AbortError` once aborted. */

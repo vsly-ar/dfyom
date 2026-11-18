@@ -78,7 +78,7 @@ interface JobContext extends CommandContext {
 }
 ```
 
-The sketch above is abridged; `define.ts` and `context.ts` are the contract. Differences there: `run`/`title` are method signatures (so typed definitions fit the registry's `AnyCommand`), and a fourth kind, `builtin`, marks commands the dispatcher executes itself (`history.undo`/`history.redo`, `job.pause`/`job.resume`/`job.abort`). `Services` has the `workers` port, the optional `library` service ([library.md](library.md#storage)), the optional `project` session ([persistence.md](persistence.md#files), used by `project.save`) and the optional `exportFiles` port (atomic gCode file writes, used by `plan.export`, [grbl.md](grbl.md#plan-export-command)); queries receive `services` too. The machine port arrives with run mode (task 3.9).
+The sketch above is abridged; `define.ts` and `context.ts` are the contract. Differences there: `run`/`title` are method signatures (so typed definitions fit the registry's `AnyCommand`), and a fourth kind, `builtin`, marks commands the dispatcher executes itself (`history.undo`/`history.redo`, `job.pause`/`job.resume`/`job.abort`). `Services` has the `workers` port, the optional `library` service ([library.md](library.md#storage)), the optional `project` session ([persistence.md](persistence.md#files), used by `project.save`) and the optional `exportFiles` port (atomic gCode file writes, used by `plan.export`, [grbl.md](grbl.md#plan-export-command)); queries receive `services` too. The optional `machine` port is the app instance's machine connection (`MachineService`, [run-v0.1.md](../modes/run-v0.1.md#commands-and-queries)); absent, run commands fail with `run.notConnected`. `JobContext` also carries the dispatcher's `jobId`.
 
 Rules:
 
@@ -126,7 +126,7 @@ Robustness rules (all tested in `dispatcher.test.ts`):
 
 Error codes `command.unknown` (also for unknown queries), `command.conflict` (retryable) and `permission.denied` are in [`ERROR_CODES`](../../src/shared/errors/codes.ts).
 
-The default `PermissionPolicy` (`permission.ts`) is conservative until [run.md#safety](../modes/run.md#safety) is specified: UI sources are allowed, every other source kind is denied. The port is injected per dispatcher (`createDispatcher({ policy })`) and may be async.
+The default `PermissionPolicy` (`permission.ts`) is conservative until [run.md#safety](../modes/run.md#safety) is specified: UI sources are allowed; every other source kind only on the virtual machine (or with no connection, where nothing can be affected), the [rule in grbl.md](grbl.md#transport-and-sender); without a machine port every non-UI source is denied. `check` receives the dispatcher's `services` to see the connection. The port is injected per dispatcher (`createDispatcher({ policy })`) and may be async.
 
 ## Document hooks
 

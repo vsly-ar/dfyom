@@ -329,6 +329,7 @@ export class JobRun<R = unknown> implements JobHandle<R> {
     }
     const jobCtx: JobContext = {
       ...ctx,
+      jobId: opts.id,
       signal: this.controller.signal,
       progress: (p) => this.report(p, ctx.clock.now()),
       checkpoint: () => this.checkpoint(),

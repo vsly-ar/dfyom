@@ -283,7 +283,7 @@ class ProjectDispatcher implements Dispatcher {
     // 5. Permission
     if (def.machine) {
       const allowed = await tryAsync(
-        async () => this.policy.check(def, args, source),
+        async () => this.policy.check(def, args, source, this.services),
         'internal.unexpected',
         'permission policy threw',
       )

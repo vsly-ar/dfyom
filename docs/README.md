@@ -15,7 +15,7 @@ The docs are the **source of truth**. Code implements what is documented here; w
 | Modes        | [modes/plan.md](modes/plan.md) – setups, toolpaths, optimization, gCode export                                                                                                 | draft       |
 | Modes        | [modes/plan-v0.1.md](modes/plan-v0.1.md) – v0.1 plan subset: plan snapshots and status, one setup, tools, pass strategies, toolpaths (core 2.13, toolpaths 2.10, job 2.9 done) | accepted    |
 | Modes        | [modes/run.md](modes/run.md) – machine control, sensors, automation                                                                                                            | draft       |
-| Modes        | [modes/run-v0.1.md](modes/run-v0.1.md) – v0.1 run subset: sender, clocks, utility process, run commands and job, progress (task 3.9)                                           | accepted    |
+| Modes        | [modes/run-v0.1.md](modes/run-v0.1.md) – v0.1 run subset: sender, clocks, utility process, run commands and job, progress (task 3.9 done; UI 3.12)                             | implemented |
 | Architecture | [architecture/overview.md](architecture/overview.md) – processes, source layout, threading                                                                                     | draft       |
 | Architecture | [architecture/llm-api.md](architecture/llm-api.md) – LLM/agent access, headless, multi-instance                                                                                | stub        |
 | Architecture | [architecture/commands.md](architecture/commands.md) – shared command layer for UI, agents, CLI                                                                                | implemented |
@@ -25,7 +25,7 @@ The docs are the **source of truth**. Code implements what is documented here; w
 | Architecture | [architecture/library.md](architecture/library.md) – stock, tool and machine library; snapshots                                                                                | implemented |
 | Architecture | [architecture/feeds-speeds.md](architecture/feeds-speeds.md) – feeds-and-speeds calculator (surface speed, chip thinning, power)                                               | implemented |
 | Architecture | [architecture/workers.md](architecture/workers.md) – worker hosting, protocol, abort, automatic evaluation, toolpath job and cache                                             | implemented |
-| Architecture | [architecture/grbl.md](architecture/grbl.md) – GRBL post-processor and virtual machine (post and emulator implemented; sender pending, 3.9)                                    | implemented |
+| Architecture | [architecture/grbl.md](architecture/grbl.md) – GRBL post-processor, virtual machine and sender (post 2.11, emulator 3.8, sender 3.9)                                           | implemented |
 | Conventions  | [conventions/error-handling/](conventions/error-handling/README.md) – Result/Option, AppError, invariant models, Zod parsing, migrations                                       | implemented |
 | Conventions  | [conventions/logging.md](conventions/logging.md) – structured logs                                                                                                             | implemented |
 | Conventions  | [conventions/testing.md](conventions/testing.md) – unit → virtual machine → real machine                                                                                       | draft       |

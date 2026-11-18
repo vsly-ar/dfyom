@@ -76,6 +76,8 @@ Names are fixed here; add a row before using a new cross-cutting top-level field
 
 Only the main process (or the headless/CLI process) writes the file; every other process forwards. Renderers forward every entry at or above the instance level, so the file is the one place to look. Renderers also write to the DevTools console in unpackaged runs only.
 
+Compute workers and the machine host (a utility process in the app, a `worker_threads` worker headless) forward through their message protocol (`log` messages, [workers.md](../architecture/workers.md#logging-from-workers), [run-v0.1.md](../modes/run-v0.1.md#logging)); main writes them with origin `worker` or `utility`.
+
 - **Sender side** (`createLogForwarder`): batches entries (≤ 100 ms or 50 entries) and drops beyond 1 000 entries/s per process, logging one `warn` (`dropped`) when the second ends.
 - **Main side** (`createForwardReceiver`): the sender is untrusted (a compromised renderer), so main enforces its own limits and does not rely on the sender's.
   - IPC is accepted only from a window's main frame (`event.senderFrame` is `event.sender.mainFrame`); main sets `proc` and `win` from the sender.

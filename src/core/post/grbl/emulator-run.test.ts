@@ -1,74 +1,79 @@
 /**
- * End to end: the test part's GRBL program streamed through the virtual machine (task 3.8) with
- * character counting. Doc: docs/architecture/grbl.md#determinism-and-tests
+ * End to end: the test part's GRBL program streamed by GrblSender (task 3.9) through the virtual
+ * machine (task 3.8) with character counting. Doc: docs/architecture/grbl.md#determinism-and-tests
  */
 import { describe, expect, it } from 'vitest'
 import { expectOk } from '../../../shared/testing/result'
 import { GrblEmulator } from '../../run/grbl/emulator/emulator'
 import { machineSettings } from '../../run/grbl/emulator/settings'
-import { TestStreamer } from '../../run/grbl/emulator.fixture'
+import type { RunSummary } from '../../run/grbl/sender'
+import { connected, drive, HOUR, start, until, type Rig } from '../../run/grbl/sender.fixture'
 import type { Machine } from '../../library/machine'
 import { len } from '../../library/library.fixture'
 import type { Vec3 } from '../../toolpath/model'
 import { exportGrbl, type GrblExport } from '../export'
 import { OPTS, testMachine, testPartExport } from '../post.fixture'
 
-/** G54 in machine coordinates: the test part sits inside the soft limits [−travel, 0]. */
+/** G54 in machine coordinates: the test part sits inside the soft limits [-travel, 0]. */
 const WORK_ZERO: Vec3 = [-750, -750, -50]
-const HOUR = 3_600_000
 
 interface Run {
-  readonly streamer: TestStreamer
+  readonly rig: Rig
   readonly emu: GrblEmulator
   /** Tool numbers announced by the markers the sender stopped at. */
   readonly toolChanges: number[]
-  /** Program time without homing, setup and tool-change pauses (s). */
-  readonly seconds: number
+  /** The run's summary when it succeeded (`seconds`: without the waits for the user). */
+  readonly result: RunSummary | undefined
+  /** The error code when it failed. */
+  readonly error: string | undefined
 }
 
 function exported(machine: Machine): GrblExport {
   return expectOk(exportGrbl({ ...testPartExport(machine), workZero: WORK_ZERO }, OPTS))
 }
 
-/** Homes, sets G54 and streams `lines`; tool changes jog, re-zero Z where it was and resume. */
-function run(machine: Machine, lines: readonly string[], toolChange: 'dfyom' | 'pause'): Run {
-  const emu = expectOk(GrblEmulator.create({ settings: machineSettings(machine) }))
-  const s = new TestStreamer(emu, { toolChange, stopOnError: true })
-  const idle = () => s.idle && emu.status().state === 'Idle'
-  /** Manual lines done while the program is held. */
-  const settled = () => s.inflightLines === 0 && emu.status().state === 'Idle'
-  s.manual(['$H'])
-  expect(s.runUntil(idle, HOUR)).toBe(true)
-  s.manual([`G10 L2 P1 X${WORK_ZERO[0]} Y${WORK_ZERO[1]} Z${WORK_ZERO[2]}`])
-  expect(s.runUntil(idle, HOUR)).toBe(true)
+/** Another sender's program: the markers become plain comments, so GRBL pauses at each `M0`. */
+const withoutMarkers = (lines: readonly string[]) =>
+  lines.map((l) => (l.startsWith('(DFYOM TOOL CHANGE') ? l.replace('DFYOM', 'OTHER') : l))
 
-  const start = s.clock.now()
-  let paused = 0
+/**
+ * Homes, sets G54 and streams `lines` with GrblSender; at each tool change it jogs, re-zeroes Z
+ * where it was and continues; at each plain `M0` it continues.
+ */
+async function run(machine: Machine, lines: readonly string[]): Promise<Run> {
+  const emu = expectOk(GrblEmulator.create({ settings: machineSettings(machine) }))
+  const r = await connected(emu)
+  const { sender, clock } = r
+  expectOk(await drive(clock, sender.command('$H')))
+  const g54 = `G10 L2 P1 X${WORK_ZERO[0]} Y${WORK_ZERO[1]} Z${WORK_ZERO[2]}`
+  expectOk(await drive(clock, sender.command(g54)))
   const toolChanges: number[] = []
-  s.send(lines)
+  let result: RunSummary | undefined
+  let error: string | undefined
+  let finished = false
+  void start(r, lines).then((res) => {
+    finished = true
+    if (res.isOk()) result = res.unwrap()
+    else error = res.unwrapErr().code
+  })
+  const waiting = () => sender.phase === 'toolChange' || sender.phase === 'programPause'
   for (;;) {
-    const held = () => emu.status().state === 'Hold:0'
-    const alarm = () => s.received.some((l) => l.startsWith('ALARM'))
-    expect(s.runUntil(() => s.toolChangeReady || held() || idle() || alarm(), HOUR)).toBe(true)
-    if (alarm() || idle()) break
-    const t0 = s.clock.now()
-    if (held()) {
-      // Another sender: GRBL pauses at M0, the user resumes.
-      s.realtime('~')
-    } else {
-      toolChanges.push(s.toolChange?.tool ?? -1)
-      // The user jogs away and down, zeroes the new tool's Z there (same offset), resumes.
-      s.manual(['$J=G21 G91 X20 Y-10 Z-5 F2000'])
-      expect(s.runUntil(settled, HOUR)).toBe(true)
-      // in program units (G10 has no units of its own)
-      const z = (emu.status().mpos[2] - WORK_ZERO[2]) / (machine.programUnits === 'in' ? 25.4 : 1)
-      s.manual([`G10 L20 P1 Z${z.toFixed(4)}`])
-      expect(s.runUntil(settled, HOUR)).toBe(true)
-      s.resumeToolChange()
+    expect(await until(clock, () => finished || waiting(), HOUR)).toBe(true)
+    if (finished) break
+    if (sender.phase === 'programPause') {
+      expectOk(sender.continueProgram())
+      continue
     }
-    paused += s.clock.now() - t0
+    toolChanges.push(r.phases.at(-1)?.toolChange?.n ?? -1)
+    // The user jogs away and down, zeroes the new tool's Z there (same offset), resumes.
+    expectOk(await drive(clock, sender.command('$J=G21 G91 X20 Y-10 Z-5 F2000')))
+    expect(await until(clock, () => emu.status().state === 'Idle')).toBe(true)
+    // in program units (G10 has no units of its own)
+    const z = (emu.status().mpos[2] - WORK_ZERO[2]) / (machine.programUnits === 'in' ? 25.4 : 1)
+    expectOk(await drive(clock, sender.command(`G10 L20 P1 Z${z.toFixed(4)}`)))
+    expectOk(sender.continueProgram())
   }
-  return { streamer: s, emu, toolChanges, seconds: (s.clock.now() - start - paused) / 1000 }
+  return { rig: r, emu, toolChanges, result, error }
 }
 
 /** The last programmed position (work coordinates) after the footer's retract. */
@@ -81,10 +86,10 @@ function finalWorkPosition(e: GrblExport): Vec3 {
 }
 
 function expectClean(r: Run): void {
-  expect(r.streamer.errors).toEqual([])
-  expect(r.streamer.received.filter((l) => l.startsWith('ALARM'))).toEqual([])
+  expect(r.error).toBeUndefined()
+  const bad = r.rig.io.received.filter((l) => l.startsWith('error') || l.startsWith('ALARM'))
+  expect(bad).toEqual([])
   expect(r.emu.trace.violations).toEqual([])
-  expect(r.streamer.stopped).toBe(false)
   expect(r.emu.status().state).toBe('Idle')
 }
 
@@ -96,10 +101,11 @@ describe('test part on the virtual machine', () => {
     expect(e.warnings).toEqual([])
   })
 
-  it('streams with DFYOM tool changes: no errors or alarms, ends at the last position', () => {
-    const r = run(machine, e.lines, 'dfyom')
+  it('streams with DFYOM tool changes: no errors or alarms, ends at the last position', async () => {
+    const r = await run(machine, e.lines)
     expectClean(r)
     expect(r.toolChanges).toEqual([2, 3, 4, 3, 5])
+    expect(r.result).toMatchObject({ lines: e.lines.length, toolChanges: 5, pauses: 0 })
     const [x, y, z] = finalWorkPosition(e)
     const mpos = r.emu.status().mpos
     expect(mpos[0]).toBeCloseTo(WORK_ZERO[0] + x, 3)
@@ -119,33 +125,35 @@ describe('test part on the virtual machine', () => {
       ])
   })
 
-  it('pauses at M0 for other senders and resumes with ~', () => {
-    const r = run(machine, e.lines, 'pause')
+  it('pauses at M0 for other senders and resumes with ~', async () => {
+    const r = await run(machine, withoutMarkers(e.lines))
     expectClean(r)
+    expect(r.result).toMatchObject({ toolChanges: 0, pauses: 5 })
     expect(r.emu.trace.transitions.filter((t) => t.to === 'Hold:0')).toHaveLength(5)
     const [x, y] = finalWorkPosition(e)
     expect(r.emu.status().mpos[0]).toBeCloseTo(WORK_ZERO[0] + x, 3)
     expect(r.emu.status().mpos[1]).toBeCloseTo(WORK_ZERO[1] + y, 3)
   })
 
-  it('runs within a sensible ratio of the estimate (acceleration only adds time)', () => {
-    const r = run(machine, e.lines, 'dfyom')
+  it('runs within a sensible ratio of the estimate (acceleration only adds time)', async () => {
+    const r = await run(machine, e.lines)
     const toolpaths = testPartExport(machine).operations.reduce(
       (t, o) => t + o.toolpath.stats.estimatedSeconds,
       0,
     )
-    const ratio = r.seconds / e.stats.estimatedSeconds
+    const seconds = r.result?.seconds ?? 0
+    const ratio = seconds / e.stats.estimatedSeconds
     // grbl.md#determinism-and-tests records the numbers: 626.6 s vs 591.4 s (572.5 s), 1.06
     expect(ratio).toBeGreaterThan(1)
     expect(ratio).toBeLessThan(1.5)
-    expect(r.seconds / toolpaths).toBeLessThan(1.5)
+    expect(seconds / toolpaths).toBeLessThan(1.5)
   })
 
-  it('an inch program ends at the same position (within the 4-decimal inch resolution)', () => {
+  it('an inch program ends at the same position (within the 4-decimal inch resolution)', async () => {
     const inch = testMachine({ programUnits: 'in' })
     const ei = exported(inch)
     expect(ei.lines).toContain('G90 G94 G17 G20')
-    const r = run(inch, ei.lines, 'dfyom')
+    const r = await run(inch, ei.lines)
     expectClean(r)
     const [x, y, z] = finalWorkPosition(e)
     const mpos = r.emu.status().mpos
@@ -154,12 +162,13 @@ describe('test part on the virtual machine', () => {
     expect(Math.abs(mpos[2] - WORK_ZERO[2] - z)).toBeLessThan(0.002)
   })
 
-  it('a program that leaves the soft limits alarms, and the export check predicts it', () => {
+  it('a program that leaves the soft limits alarms, and the export check predicts it', async () => {
     // the facing (first tool, Z zero as given) reaches Z -0.5 → MPos -50.5, below -50
     const small = testMachine({ travel: { x: len('800'), y: len('800'), z: len('50') } })
     const es = exported(small)
     expect(es.warnings.some((w) => w.rule === 'softLimit' && w.params['axis'] === 'z')).toBe(true)
-    const r = run(small, es.lines, 'dfyom')
-    expect(r.streamer.received.some((l) => l === 'ALARM:2')).toBe(true)
+    const r = await run(small, es.lines)
+    expect(r.rig.io.received).toContain('ALARM:2')
+    expect(r.error).toBe('machine.alarm')
   })
 })

@@ -12,7 +12,7 @@ import {
 } from '../../run/grbl/emulator/gcode'
 import { GrblEmulator } from '../../run/grbl/emulator/emulator'
 import { machineSettings } from '../../run/grbl/emulator/settings'
-import { TestStreamer } from '../../run/grbl/emulator.fixture'
+import { connected, drive, until } from '../../run/grbl/sender.fixture'
 import { rpm } from '../../library/library.fixture'
 import type { Machine } from '../../library/machine'
 import { generateDrilling } from '../../toolpath/drilling'
@@ -287,23 +287,24 @@ function expectDialect(lines: readonly string[], units: 'mm' | 'in'): void {
 }
 
 /** Streams `lines` through the virtual machine (no homing, so no soft limits). */
-function streamed(lines: readonly string[], machine: Machine): TestStreamer {
+/** Streams `lines` with GrblSender, continuing every tool change and `M0` pause at once. */
+async function streamed(lines: readonly string[], machine: Machine): Promise<void> {
   const emu = expectOk(GrblEmulator.create({ settings: machineSettings(machine), homing: false }))
-  const s = new TestStreamer(emu, { stopOnError: true })
-  s.send(lines)
+  const r = await connected(emu)
+  let finished = false
+  const run = r.sender.run({ lines, sections: [] }).then((res) => {
+    finished = true
+    return res
+  })
+  const waiting = () => r.sender.phase === 'toolChange' || r.sender.phase === 'programPause'
   for (;;) {
-    expect(
-      s.runUntil(
-        () => (s.idle && emu.status().state === 'Idle') || emu.status().state === 'Hold:0',
-        3_600_000,
-      ),
-    ).toBe(true)
-    if (emu.status().state !== 'Hold:0') break
-    s.realtime('~')
+    expect(await until(r.clock, () => finished || waiting(), 3_600_000)).toBe(true)
+    if (finished) break
+    expectOk(r.sender.continueProgram())
   }
-  expect(s.errors).toEqual([])
+  expectOk(await drive(r.clock, run))
+  expect(r.io.received.filter((l) => l.startsWith('error'))).toEqual([])
   expect(emu.trace.violations).toEqual([])
-  return s
 }
 
 // ── Golden files ────────────────────────────────────────────────────────────────────────
@@ -327,7 +328,7 @@ describe('golden files (also streamed through the virtual machine)', () => {
       await expect(e.text).toMatchFileSnapshot(`__golden__/${name}.nc`)
       expectDialect(e.lines, machine.programUnits)
       expectIntendedMotion(e.program, e.lines)
-      streamed(e.lines, machine)
+      await streamed(e.lines, machine)
     })
 })
 
@@ -590,13 +591,13 @@ function randomToolpath(seed: number): Toolpath {
 
 describe('properties over 40 random toolpaths (mm and inch)', () => {
   for (const units of ['mm', 'in'] as const)
-    it(`${units}: dialect, intended motion after suppression, runs on the virtual machine`, () => {
+    it(`${units}: dialect, intended motion after suppression, runs on the virtual machine`, async () => {
       const machine = testMachine({ programUnits: units })
       for (let seed = 1; seed <= 40; seed++) {
         const e = exportOf([operation(randomToolpath(seed), endMill(6))], machine)
         expectDialect(e.lines, units)
         expectIntendedMotion(e.program, e.lines)
-        if (seed % 8 === 0) streamed(e.lines, machine)
+        if (seed % 8 === 0) await streamed(e.lines, machine)
       }
     })
 

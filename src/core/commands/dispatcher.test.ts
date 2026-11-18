@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
-import { Ok, fail } from '../../shared/result'
+import { Ok, fail, type AppResult } from '../../shared/result'
 import { newProjectDoc, type ProjectDoc } from '../project/document'
 import type { ActionEvent } from './action-log'
 import {
@@ -13,7 +13,9 @@ import {
   renameProject,
   setUnitSystem,
 } from './commands.fixture'
-import type { Source } from './context'
+import type { Services, Source } from './context'
+import { inProcessWorkers } from './jobs'
+import { defaultPermissionPolicy } from './permission'
 import type { AnyCommand, DocumentHook } from './define'
 import { createDispatcher, type DispatcherOptions } from './dispatcher'
 import { applyDocPatches } from './history'
@@ -398,11 +400,33 @@ describe('permission policy for machine commands', () => {
     expectErrCode(await d.dispatch('run.machine.jog', { dxMm: 1 }, agent), 'permission.denied')
   })
 
+  it('default policy: other sources allowed on the virtual machine, not on another target', () => {
+    const machine = (target: 'virtual' | undefined) =>
+      ({ target }) as unknown as NonNullable<Services['machine']>
+    const services = (m?: NonNullable<Services['machine']>): Services => ({
+      workers: inProcessWorkers,
+      ...(m === undefined ? {} : { machine: m }),
+    })
+    const check = (args: unknown, s: Services) =>
+      defaultPermissionPolicy.check(jogMachine, args, agent, s) as AppResult<void>
+    expectOk(check({}, services(machine('virtual'))))
+    // no connection: nothing to affect (the command answers run.notConnected)
+    expectOk(check({}, services(machine(undefined))))
+    expectOk(check({ target: 'virtual' }, services(machine(undefined))))
+    expectErrCode(check({ target: 'serial' }, services(machine(undefined))), 'permission.denied')
+    expectErrCode(
+      check({}, services({ target: 'serial' } as unknown as NonNullable<Services['machine']>)),
+      'permission.denied',
+    )
+    // no machine port in this process: strict
+    expectErrCode(check({}, services()), 'permission.denied')
+  })
+
   it('uses the injected policy with the parsed args and source', async () => {
     const check = vi.fn(() => fail('permission.denied', 'no'))
     const { d, events } = setup([], { policy: { check } })
     expectErrCode(await d.dispatch('run.machine.jog', { dxMm: 2 }, ui), 'permission.denied')
-    expect(check).toHaveBeenCalledWith(jogMachine, { dxMm: 2 }, ui)
+    expect(check).toHaveBeenCalledWith(jogMachine, { dxMm: 2 }, ui, expect.anything())
     expect(events).toHaveLength(1)
     expectOk(await rename(d, 'A')) // non-machine commands skip the policy
     expect(check).toHaveBeenCalledTimes(1)

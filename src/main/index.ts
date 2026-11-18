@@ -6,6 +6,9 @@ import { RENDERER_LOG_LEVEL_ARG, type Logger, type LogLevel } from '../shared/lo
 import { startLogging } from './logging/electron'
 import { resolveAppData } from './persistence/paths'
 import { createProjectStorage } from './persistence/storage'
+import { MACHINE_UTILITY_ENTRY_PATH } from './machine/bundled'
+import { pushRunStatus, utilityHostFactory } from './machine/electron'
+import { createMachineClient } from './machine/spawn'
 import { WORKER_ENTRY_PATH } from './workers/bundled'
 import { createNodeWorkerPool } from './workers/node'
 
@@ -47,6 +50,18 @@ void app.whenReady().then(async () => {
     forward,
   })
   app.on('will-quit', () => workers.terminate())
+  // The app instance's one machine connection (docs/modes/run-v0.1.md#processes): the host runs in
+  // a utility process started by run.connection.open; it becomes `services.machine` of every
+  // project dispatcher once project IPC exists (tasks 3.x). Its status is pushed to renderers.
+  const machine = createMachineClient({
+    factory: utilityHostFactory(MACHINE_UTILITY_ENTRY_PATH),
+    log,
+    logLevel: level,
+    forward,
+    proc: 'utility',
+  })
+  machine.onStatus(pushRunStatus)
+  app.on('will-quit', () => machine.close())
   // Persistence smoke check until project IPC exists (tasks 3.3+): scan for recoverable projects.
   const storage = createProjectStorage({
     appData: resolveAppData(process.argv, app.getPath('userData')) ?? app.getPath('userData'),
