@@ -6,23 +6,23 @@ Every state change or privileged action is a **command**; every read an agent ca
 
 ## Files
 
-The code is the contract; each file's header links back here. No adapters yet (IPC/MCP/CLI: v0.1 tasks 3.x).
+The code is the contract; each file's header links back here. Adapters: IPC, MCP and CLI over the shared session core ([llm-api.md](llm-api.md), task 3.10).
 
-| File                                    | Contents                                                                                                    |
-| --------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `src/core/commands/define.ts`           | `DocumentCommand`, `EffectCommand`, `JobCommand`, `BuiltinCommand`, `QueryDef`, `DocumentHook`, …           |
-| `src/core/commands/context.ts`          | `CommandContext`, `JobContext`, `Source`, `IdGenerator`, `Clock`, `Services` (ports)                        |
-| `src/core/commands/registry.ts`         | Registry of all commands, queries and document hooks; name checks; `APP_COMMANDS`/`APP_QUERIES`/`APP_HOOKS` |
-| `src/core/commands/dispatcher.ts`       | Per-project queue and pipeline ([below](#dispatcher-pipeline)); `dispatch`, `query`                         |
-| `src/core/commands/args.ts`             | `parseArgs`: args shape check that rejects unknown keys ([pipeline](#dispatcher-pipeline))                  |
-| `src/core/commands/history.ts`          | Immer setup, patch execution, undo/redo stacks; `history.undo`/`history.redo`                               |
-| `src/core/commands/action-log.ts`       | Event types, ring buffer, subscriptions                                                                     |
-| `src/core/commands/jobs.ts`             | `JobHandle`, progress, pause/resume/abort, `WorkerPort` (+ in-process stub); `job.*` control commands       |
-| `src/core/commands/permission.ts`       | `PermissionPolicy` port and the default policy                                                              |
-| `src/core/commands/json-schema.ts`      | Tool descriptors from Zod                                                                                   |
-| `src/core/commands/testing.ts`          | Test helpers ([Testing](#testing))                                                                          |
-| `src/core/commands/commands.fixture.ts` | Test-only commands used by the command-layer tests                                                          |
-| `src/core/project/document.ts`          | `ProjectDoc` – the state document commands act on: `{ name, unitSystem, parts, snapshots, plans }`          |
+| File                                    | Contents                                                                                                                               |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/core/commands/define.ts`           | `DocumentCommand`, `EffectCommand`, `JobCommand`, `BuiltinCommand`, `QueryDef`, `DocumentHook`, …                                      |
+| `src/core/commands/context.ts`          | `CommandContext`, `JobContext`, `Source`, `IdGenerator`, `Clock`, `Services` (ports)                                                   |
+| `src/core/commands/registry.ts`         | Registries of both scopes ([llm-api.md](llm-api.md#app-scope-and-project-scope)): `PROJECT_*`, `APP_SCOPE_*`, `APP_HOOKS`; name checks |
+| `src/core/commands/dispatcher.ts`       | Per-project queue and pipeline ([below](#dispatcher-pipeline)); `dispatch`, `query`                                                    |
+| `src/core/commands/args.ts`             | `parseArgs`: args shape check that rejects unknown keys ([pipeline](#dispatcher-pipeline))                                             |
+| `src/core/commands/history.ts`          | Immer setup, patch execution, undo/redo stacks; `history.undo`/`history.redo`                                                          |
+| `src/core/commands/action-log.ts`       | Event types, ring buffer, subscriptions                                                                                                |
+| `src/core/commands/jobs.ts`             | `JobHandle`, progress, pause/resume/abort, `WorkerPort` (+ in-process stub); `job.*` control commands                                  |
+| `src/core/commands/permission.ts`       | `PermissionPolicy` port and the default policy                                                                                         |
+| `src/core/commands/json-schema.ts`      | Tool descriptors from Zod                                                                                                              |
+| `src/core/commands/testing.ts`          | Test helpers ([Testing](#testing))                                                                                                     |
+| `src/core/commands/commands.fixture.ts` | Test-only commands used by the command-layer tests                                                                                     |
+| `src/core/project/document.ts`          | `ProjectDoc` – the state document commands act on: `{ name, unitSystem, parts, snapshots, plans }`                                     |
 
 ## Naming
 
@@ -78,7 +78,7 @@ interface JobContext extends CommandContext {
 }
 ```
 
-The sketch above is abridged; `define.ts` and `context.ts` are the contract. Differences there: `run`/`title` are method signatures (so typed definitions fit the registry's `AnyCommand`), and a fourth kind, `builtin`, marks commands the dispatcher executes itself (`history.undo`/`history.redo`, `job.pause`/`job.resume`/`job.abort`). `Services` has the `workers` port, the optional `library` service ([library.md](library.md#storage)), the optional `project` session ([persistence.md](persistence.md#files), used by `project.save`) and the optional `exportFiles` port (atomic gCode file writes, used by `plan.export`, [grbl.md](grbl.md#plan-export-command)); queries receive `services` too. The optional `machine` port is the app instance's machine connection (`MachineService`, [run-v0.1.md](../modes/run-v0.1.md#commands-and-queries)); absent, run commands fail with `run.notConnected`. `JobContext` also carries the dispatcher's `jobId`.
+The sketch above is abridged; `define.ts` and `context.ts` are the contract. Differences there: `run`/`title` are method signatures (so typed definitions fit the registry's `AnyCommand`), and a fourth kind, `builtin`, marks commands the dispatcher executes itself (`history.undo`/`history.redo`, `job.pause`/`job.resume`/`job.abort`). `Services` has the `workers` port, the optional `library` service ([library.md](library.md#storage)), the optional `project` session ([persistence.md](persistence.md#files), used by `project.save`) and the optional `exportFiles` port (atomic gCode file writes, used by `plan.export`, [grbl.md](grbl.md#plan-export-command)) and the optional `host` port of the app-scope dispatcher (the `project.*` lifecycle, [llm-api.md](llm-api.md#app-scope-and-project-scope)); queries receive `services` too. The optional `machine` port is the app instance's machine connection (`MachineService`, [run-v0.1.md](../modes/run-v0.1.md#commands-and-queries)); absent, run commands fail with `run.notConnected`. `JobContext` also carries the dispatcher's `jobId`.
 
 Rules:
 
@@ -216,7 +216,7 @@ interface QueryDef<S extends z.ZodType, R> {
 
 - `dispatch` of a `job` returns `{ jobId }` once started; the queue is released immediately.
 - `JobHandle`: `state`, `progress` (throttled stream, separate from Results – [boundaries.md](../conventions/error-handling/boundaries.md#async-workers-cancellation)), `result: AsyncAppResult<R>`.
-- Control: `job.pause`, `job.resume`, `job.abort` commands (agent-callable, logged). Abort → `op.aborted`. Work runs in compute workers ([ADR 0016](../decisions/0016-compute-workers-in-dispatcher-process.md), [workers.md](workers.md)) or the utility process. Queries `job.get { jobId }` and `job.list` read jobs (state, progress, start revision, outcome).
+- Control: `job.pause`, `job.resume`, `job.abort` commands (agent-callable, logged). The built-in query `history.list` shows the undo/redo stacks (who made each step). Abort → `op.aborted`. Work runs in compute workers ([ADR 0016](../decisions/0016-compute-workers-in-dispatcher-process.md), [workers.md](workers.md)) or the utility process. Queries `job.get { jobId }` and `job.list` read jobs (state, progress, start revision, outcome).
 - Undo: a job is not undoable. If its result changes `ProjectDoc`, it is applied by one `document` command at the end (one undo step), dispatched with `expectedRevision` = revision at job start → `command.conflict` if the inputs changed meanwhile. The handle exposes that revision as `startRevision`; in v0.1 the caller (adapter or script) dispatches the follow-up.
 - Pausing takes effect at the handler's next `ctx.checkpoint()`. Aborting rejects every pending and later checkpoint with an `AbortError` (a handler may await several checkpoints concurrently; resume and abort wake them all); a job that ends after an abort always yields `op.aborted`. Controlling a finished job is a no-op that reports `{ state: 'finished' }`; an unknown `jobId` → `input.malformed` (issue rule `unknownJob`).
 - The dispatcher retains the newest 100 finished jobs (`maxFinishedJobs`); older ones are evicted, after which `job(id)` returns `None` and `job.*` answers like an unknown id. The `finished` log event keeps the outcome.
@@ -236,6 +236,7 @@ interface QueryDef<S extends z.ZodType, R> {
 - Without it, a command from any non-UI source (agent, CLI, automation, system) that can change `ProjectDoc` – a `document` command, `history.undo` or `history.redo` – is accepted only if every revision since that source's last read or last own commit was made by that same source (no baseline yet = rejected). Otherwise → `command.conflict`, whose message tells the agent to re-query and retry. Since own commits advance the baseline, this is implemented as "baseline = current revision".
 - `effect`, `job` and `job.*` commands do not write the document and are not subject to the baseline rule (machine commands are gated by the permission policy instead).
 - UI-source commands are never rejected by this check.
+- Binding a session to a project (`project.open`, `create`, `recovery.resolve`, `bind`, whose results carry the revision) counts as a read: the session core calls `Dispatcher.markRead(source)` ([llm-api.md](llm-api.md#implementation-task-310)).
 
 ## JSON Schema for agent tools
 
@@ -252,7 +253,7 @@ Per [testing.md](../conventions/testing.md):
 - Other helpers: `fakeIds()`, `fakeClock()`, `uiSource()`, `agentSource()`, `testContext()`.
 - Registry test: unique names, naming convention, non-empty `summary`, every schema converts to JSON Schema.
 - Dispatcher tests with fake services, ids and clock: `Err` leaves doc/history/revision unchanged; one log event per dispatch; permission denial; FIFO order; `command.conflict`.
-- Adapter tests: the MCP tool list equals the registry (parity is structural).
+- Adapter tests: the MCP tool list equals both registries plus the session tools (parity is structural, `src/core/agent/tools.test.ts`).
 
 ## Open questions
 

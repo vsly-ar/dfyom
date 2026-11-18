@@ -75,6 +75,13 @@ export const ERROR_CODES = {
     userMessage: 'The saved file could not be verified; the previous file was kept.',
     retryable: true,
   },
+  // Agent API (task 3.10): docs/architecture/llm-api.md#app-scope-and-project-scope
+  'persist.recovery': {
+    severity: 'info',
+    userMessage:
+      'This project has unsaved changes from an earlier session. Restore or discard them first.',
+    retryable: false,
+  },
   'op.aborted': { severity: 'info', userMessage: 'The operation was cancelled.', retryable: true },
   // Workers (task 2.9): docs/architecture/workers.md#worker-death-timeouts-and-restart
   'op.timeout': {

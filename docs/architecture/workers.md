@@ -313,7 +313,7 @@ Decisions and findings of the implementation, where this doc left room or proved
 - **`Timers` port** (`set`/`clear`, `systemTimers`) lives in `src/core/commands/context.ts` next to `Clock`.
 - **manifold-3d import.** The package exports `.` for `import` only, which the CJS main build cannot `require`; `src/core/geometry/manifold` imports `manifold-3d/manifold.js` (exported without conditions) instead.
 - **Production chunk smoke test.** `node.test.ts` also runs the electron-vite CJS worker chunk from `out/main` when `npm run build` produced one newer than the sources; otherwise it is skipped (CI runs `npm run check` without a build).
-- **Not wired yet:** no project is opened through IPC/MCP/CLI before tasks 3.x, so the app creates the pool at start (workers spawn lazily, `terminate()` on quit) but no dispatcher gets an `EvaluationScheduler` or `ToolpathCache` and nothing prewarms the geometry worker; whoever opens a project wires `createEvaluationScheduler({ workers }).attach(dispatcher)`, `createToolpathCache()` and `prewarm('geometry')`.
+- **Wired in 3.10:** the app host ([llm-api.md](llm-api.md#processes-and-hosting)) gives every project runtime `createEvaluationScheduler({ workers }).attach(dispatcher)`, `createToolpathCache()` and `createExportFiles()`, and the first project open calls `prewarm('geometry')`; app quit and CLI exit `terminate()` the pool.
 
 ### Measured (`npm run perf`, Apple M1 Pro class)
 

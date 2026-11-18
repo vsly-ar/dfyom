@@ -17,7 +17,7 @@ The docs are the **source of truth**. Code implements what is documented here; w
 | Modes        | [modes/run.md](modes/run.md) – machine control, sensors, automation                                                                                                            | draft       |
 | Modes        | [modes/run-v0.1.md](modes/run-v0.1.md) – v0.1 run subset: sender, clocks, utility process, run commands and job, progress (task 3.9 done; UI 3.12)                             | implemented |
 | Architecture | [architecture/overview.md](architecture/overview.md) – processes, source layout, threading                                                                                     | draft       |
-| Architecture | [architecture/llm-api.md](architecture/llm-api.md) – MCP/CLI mapping: tools, results, jobs, sessions, GUI coexistence, safety (task 3.10)                                      | accepted    |
+| Architecture | [architecture/llm-api.md](architecture/llm-api.md) – MCP/CLI mapping: tools, results, jobs, sessions, GUI coexistence, safety (task 3.10 done; 3.11)                           | implemented |
 | Architecture | [architecture/commands.md](architecture/commands.md) – shared command layer for UI, agents, CLI                                                                                | implemented |
 | Architecture | [architecture/persistence.md](architecture/persistence.md) – project archive, working folder, save/recovery                                                                    | implemented |
 | Architecture | [architecture/quantities.md](architecture/quantities.md) – units, tolerances, expressions (value objects)                                                                      | implemented |

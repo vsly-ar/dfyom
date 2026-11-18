@@ -13,7 +13,8 @@ import { projectSave } from '../project/commands'
 import { toolpathGenerateJob, toolpathGet } from '../toolpath/generate'
 import { planExport } from '../post/plan-export'
 import { RUN_COMMANDS, RUN_QUERIES } from '../run/commands'
-import { historyRedo, historyUndo } from './history'
+import { LIFECYCLE_COMMANDS, LIFECYCLE_QUERIES } from '../project/lifecycle'
+import { historyList, historyRedo, historyUndo } from './history'
 import { jobAbort, jobGet, jobList, jobPause, jobResume } from './jobs'
 
 /** `<area>.<object>.<verb>` (or `<area>.<verb>` for area-level actions such as `history.undo`). */
@@ -29,12 +30,14 @@ export const BUILTIN_COMMANDS: readonly AnyCommand[] = [
   jobAbort,
 ]
 
-/** Queries answered from dispatcher state (`ctx.jobs`); always registered. */
-export const BUILTIN_QUERIES: readonly QueryDef[] = [jobGet, jobList]
+/** Queries answered from dispatcher state (`ctx.jobs`, `ctx.history`); always registered. */
+export const BUILTIN_QUERIES: readonly QueryDef[] = [jobGet, jobList, historyList]
 
-/** Domain commands and queries of the app; added by their features. */
-export const APP_COMMANDS: readonly AnyCommand[] = [
-  ...LIBRARY_COMMANDS,
+/**
+ * Project scope: commands and queries of one open project (its dispatcher); added by their
+ * features. Doc: docs/architecture/llm-api.md#app-scope-and-project-scope
+ */
+export const PROJECT_COMMANDS: readonly AnyCommand[] = [
   projectSave,
   ...DESIGN_COMMANDS,
   ...PLAN_COMMANDS,
@@ -42,13 +45,22 @@ export const APP_COMMANDS: readonly AnyCommand[] = [
   planExport,
   ...RUN_COMMANDS,
 ]
-export const APP_QUERIES: readonly QueryDef[] = [
-  ...LIBRARY_QUERIES,
-  ...FEEDS_SPEEDS_QUERIES,
+export const PROJECT_QUERIES: readonly QueryDef[] = [
   ...DESIGN_QUERIES,
   ...PLAN_QUERIES,
   toolpathGet,
   ...RUN_QUERIES,
+]
+
+/** App scope: the instance's app-scope dispatcher (empty document); usable without a project. */
+export const APP_SCOPE_COMMANDS: readonly AnyCommand[] = [
+  ...LIBRARY_COMMANDS,
+  ...LIFECYCLE_COMMANDS,
+]
+export const APP_SCOPE_QUERIES: readonly QueryDef[] = [
+  ...LIBRARY_QUERIES,
+  ...FEEDS_SPEEDS_QUERIES,
+  ...LIFECYCLE_QUERIES,
 ]
 /** Document hooks of the app (docs/architecture/commands.md#document-hooks). */
 export const APP_HOOKS: readonly DocumentHook[] = [draftPlanAutoRebuild]
@@ -68,9 +80,12 @@ export function createRegistry(defs: {
   readonly commands?: readonly AnyCommand[]
   readonly queries?: readonly QueryDef[]
   readonly hooks?: readonly DocumentHook[]
+  /** Register the built-ins (default true; the app-scope registry has none: no history, no jobs). */
+  readonly builtins?: boolean
 }): AppResult<Registry> {
-  const commands = [...BUILTIN_COMMANDS, ...(defs.commands ?? [])]
-  const queries = [...BUILTIN_QUERIES, ...(defs.queries ?? [])]
+  const builtins = defs.builtins !== false
+  const commands = [...(builtins ? BUILTIN_COMMANDS : []), ...(defs.commands ?? [])]
+  const queries = [...(builtins ? BUILTIN_QUERIES : []), ...(defs.queries ?? [])]
   const issues: Issue[] = []
   const seen = new Set<string>()
   for (const d of [...commands, ...queries]) {
@@ -102,7 +117,29 @@ export function createRegistry(defs: {
   })
 }
 
-/** The app's registry: built-ins plus `APP_COMMANDS` / `APP_QUERIES`. */
+/** Registry of a project dispatcher: built-ins plus `PROJECT_COMMANDS` / `PROJECT_QUERIES`. */
+export function createProjectRegistry(): AppResult<Registry> {
+  return createRegistry({ commands: PROJECT_COMMANDS, queries: PROJECT_QUERIES, hooks: APP_HOOKS })
+}
+
+/** Registry of the app-scope dispatcher: library, feeds and speeds, project lifecycle; no built-ins. */
+export function createAppScopeRegistry(): AppResult<Registry> {
+  return createRegistry({
+    commands: APP_SCOPE_COMMANDS,
+    queries: APP_SCOPE_QUERIES,
+    builtins: false,
+  })
+}
+
+/**
+ * Project scope plus the library and feeds-and-speeds entries on one dispatcher, for tests that
+ * add library items and use them in a project without an app host. Not used by the app (it runs
+ * the two scopes on separate dispatchers); the project lifecycle needs a host and is left out.
+ */
 export function createAppRegistry(): AppResult<Registry> {
-  return createRegistry({ commands: APP_COMMANDS, queries: APP_QUERIES, hooks: APP_HOOKS })
+  return createRegistry({
+    commands: [...PROJECT_COMMANDS, ...LIBRARY_COMMANDS],
+    queries: [...PROJECT_QUERIES, ...LIBRARY_QUERIES, ...FEEDS_SPEEDS_QUERIES],
+    hooks: APP_HOOKS,
+  })
 }

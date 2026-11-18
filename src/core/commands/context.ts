@@ -11,6 +11,8 @@ import type { EvaluationService } from '../design/evaluation'
 import type { ToolpathCache } from '../toolpath/cache'
 import type { ExportFiles } from '../post/plan-export'
 import type { JobHandle, WorkerPort } from './jobs'
+import type { HistoryEntry } from './history'
+import type { HostPort } from '../project/lifecycle'
 import type { MachineService } from '../run/service'
 import type { Option } from '../../shared/result'
 
@@ -71,6 +73,11 @@ export interface Services {
   readonly machine?: MachineService
   /** Writes exported gCode files (docs/architecture/grbl.md#plan-export-command); absent = `plan.export` fails. */
   readonly exportFiles?: ExportFiles
+  /**
+   * The app host, for the app-scope `project.*` lifecycle commands
+   * (docs/architecture/llm-api.md#app-scope-and-project-scope); absent = they fail.
+   */
+  readonly host?: HostPort
 }
 
 export interface CommandContext {
@@ -116,6 +123,16 @@ export interface QueryContext {
   readonly services: Services
   /** Set by the dispatcher; absent when a query runs without one (tests). */
   readonly jobs?: JobDirectory
+  /** The dispatcher's undo/redo stacks (`history.list`); absent without a dispatcher. */
+  readonly history?: HistoryView
+}
+
+/** Read-only view of a dispatcher's linear history (docs/architecture/commands.md#undo--redo). */
+export interface HistoryView {
+  /** Oldest first; the last entry is undone next. */
+  readonly undoable: readonly HistoryEntry[]
+  /** Oldest first; the last entry is redone next. */
+  readonly redoable: readonly HistoryEntry[]
 }
 
 export const systemIds: IdGenerator = { next: (prefix) => `${prefix}-${crypto.randomUUID()}` }

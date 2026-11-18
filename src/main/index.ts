@@ -1,18 +1,22 @@
 // Electron main process entry. Process model: docs/architecture/overview.md
+// The app host (projects, library, dispatchers) is shared with the headless CLI/MCP entry
+// (src/main/cli); the GUI adds windows, project IPC and local HTTP (docs/architecture/llm-api.md).
 import { app, BrowserWindow } from 'electron'
-import { hostname } from 'node:os'
 import { join } from 'node:path'
 import { RENDERER_LOG_LEVEL_ARG, type Logger, type LogLevel } from '../shared/logging'
+import { createAppHost } from './host/app-host'
+import { registerProjectIpc, type WindowSessions } from './ipc'
 import { startLogging } from './logging/electron'
-import { resolveAppData } from './persistence/paths'
-import { createProjectStorage } from './persistence/storage'
 import { MACHINE_UTILITY_ENTRY_PATH } from './machine/bundled'
 import { pushRunStatus, utilityHostFactory } from './machine/electron'
 import { createMachineClient } from './machine/spawn'
+import { createLocalHttpControl, localHttpSetting } from './mcp/http'
+import { createExportFiles } from './persistence/export-file'
+import { resolveAppData } from './persistence/paths'
 import { WORKER_ENTRY_PATH } from './workers/bundled'
 import { createNodeWorkerPool } from './workers/node'
 
-function createMainWindow(log: Logger, level: LogLevel): void {
+function createMainWindow(log: Logger, level: LogLevel): BrowserWindow {
   const win = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -37,22 +41,22 @@ function createMainWindow(log: Logger, level: LogLevel): void {
   } else {
     void win.loadFile(join(__dirname, '../renderer/index.html'))
   }
+  return win
 }
 
 void app.whenReady().then(async () => {
-  const { log, level, instance, forward } = await startLogging()
+  const { log, level, instance, forward, report } = await startLogging()
   // The app-wide compute pool (docs/architecture/workers.md#lanes-and-pool). Workers spawn lazily;
-  // the geometry worker is prewarmed when the first project opens (project IPC, tasks 3.x).
+  // the host prewarms the geometry worker when the first project opens.
   const workers = createNodeWorkerPool({
     entryPath: WORKER_ENTRY_PATH,
     log,
     logLevel: level,
     forward,
   })
-  app.on('will-quit', () => workers.terminate())
   // The app instance's one machine connection (docs/modes/run-v0.1.md#processes): the host runs in
-  // a utility process started by run.connection.open; it becomes `services.machine` of every
-  // project dispatcher once project IPC exists (tasks 3.x). Its status is pushed to renderers.
+  // a utility process started by run.connection.open; it is `services.machine` of every project
+  // dispatcher. Its status is pushed to renderers.
   const machine = createMachineClient({
     factory: utilityHostFactory(MACHINE_UTILITY_ENTRY_PATH),
     log,
@@ -61,32 +65,70 @@ void app.whenReady().then(async () => {
     proc: 'utility',
   })
   machine.onStatus(pushRunStatus)
-  // Quit ends the connection under control first: the host stops a running job (hold, reset:
-  // spindle off, buffers flushed) and closes the controller; at most 3 s, then the host is killed.
-  let machineClosed = false
-  app.on('will-quit', (event) => {
-    if (machineClosed) return
-    event.preventDefault()
-    void machine.shutdown(3000).finally(() => {
-      machineClosed = true
-      app.quit()
-    })
-  })
-  // Persistence smoke check until project IPC exists (tasks 3.3+): scan for recoverable projects.
-  const storage = createProjectStorage({
+  const created = await createAppHost({
     appData: resolveAppData(process.argv, app.getPath('userData')) ?? app.getPath('userData'),
     appVersion: app.getVersion(),
-    owner: { instanceId: instance, pid: process.pid, host: hostname() },
+    instanceId: instance,
     log,
+    report,
+    workers,
+    machine,
+    exportFiles: createExportFiles(),
   })
-  void storage.listRecoverable().then((r) => {
+  if (created.isErr()) {
+    report(created.unwrapErr(), { kind: 'system', name: 'app.start' })
+    app.exit(1)
+    return
+  }
+  const host = created.unwrap()
+  void host.listRecovery().then((r) => {
     if (r.isOk()) log.info({ count: r.unwrap().length }, 'recoverable projects found')
     else log.warn({ err: r.unwrapErr().toJSON() }, 'recovery scan failed')
   })
-  const windows = log.child({ scope: 'windows' })
-  createMainWindow(windows, level)
+
+  // Local HTTP for agents: on by default, loopback only, token, Host/Origin checks
+  // (docs/architecture/llm-api.md#local-http). The setting is persisted with the settings store
+  // (task 3.3); until then `--mcp-http=off|<port>` and the IPC switch apply to one run.
+  const httpSetting = localHttpSetting(process.argv)
+  const http = createLocalHttpControl({
+    host,
+    appVersion: app.getVersion(),
+    log,
+    machine,
+    ...(httpSetting.port === undefined ? {} : { port: httpSetting.port }),
+  })
+  if (httpSetting.enabled)
+    void http.setEnabled(true).then((r) => {
+      if (r.isErr()) report(r.unwrapErr(), { kind: 'system', name: 'mcp.http' })
+    })
+
+  const windowLog = log.child({ scope: 'windows' })
+  const sessions: WindowSessions = registerProjectIpc(host, http)
+  const openWindow = (key?: string) => sessions.attach(createMainWindow(windowLog, level), key)
+  // A project an agent opens gets its own window, which stays open after the session ends.
+  host.onProjectOpened((key, source) => {
+    if (source.kind === 'agent') openWindow(key)
+  })
+  openWindow()
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createMainWindow(windows, level)
+    if (BrowserWindow.getAllWindows().length === 0) openWindow()
+  })
+
+  // Quit: end agent sessions, close projects (unsaved changes stay recoverable), then the machine
+  // connection under control (the host stops a running job: hold, reset; at most 3 s) and workers.
+  let stopped = false
+  app.on('will-quit', (event) => {
+    if (stopped) return
+    event.preventDefault()
+    void (async () => {
+      await http.setEnabled(false)
+      await host.shutdown()
+      await machine.shutdown(3000)
+      workers.terminate()
+    })().finally(() => {
+      stopped = true
+      app.quit()
+    })
   })
 })
 

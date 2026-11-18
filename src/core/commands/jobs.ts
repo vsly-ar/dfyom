@@ -198,7 +198,7 @@ const JobProgressSchema = z.object({
   label: z.string().optional(),
 })
 
-const JobInfoSchema = z.object({
+export const JobInfoSchema = z.object({
   jobId: z.string(),
   name: z.string().describe('The job command'),
   state: z.enum(JOB_STATES),

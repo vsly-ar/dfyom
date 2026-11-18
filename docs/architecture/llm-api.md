@@ -1,6 +1,6 @@
 # LLM / agent API
 
-Status: accepted · Task: 1.6 of the [v0.1 plan](../plans/v0.1.md#1-docs-and-decisions-accepted-before-implementation) (implementation: 3.10, end-to-end: 3.11) · Principle: [principles.md §1](../principles.md#1-llm-first) · Decision: [ADR 0011](../decisions/0011-mcp-and-cli-agent-api.md) · Commands: [commands.md](commands.md)
+Status: implemented ([below](#implementation-task-310)) · Task: 1.6 of the [v0.1 plan](../plans/v0.1.md#1-docs-and-decisions-accepted-before-implementation) (implementation: 3.10, end-to-end: 3.11) · Principle: [principles.md §1](../principles.md#1-llm-first) · Decision: [ADR 0011](../decisions/0011-mcp-and-cli-agent-api.md) · Commands: [commands.md](commands.md)
 
 How agents reach DFYOM: an **MCP server** (stdio for a headless instance, local HTTP for attaching to a running app) and a **CLI**, both thin adapters over the [command layer](commands.md). This doc maps commands, queries, jobs, errors and the action log onto MCP and the CLI, and defines agent sessions, project binding, coexistence with the GUI and safety. The [decisions](#decisions) were settled with the user; the sections after them specify them.
 
@@ -68,7 +68,7 @@ Today every command runs on a project dispatcher, so the library is unusable wit
 | `project.open`             | `{ file }`                 | `{ key, revision, alreadyOpen }`. A file already open **in this instance** returns its key instead of `persist.locked` (the storage rule is unchanged; the host checks its open map first). Recovery case → `persist.recovery` (new code, added to `ERROR_CODES` in 3.10) with the key in `data`. |
 | `project.close`            | `{ key, confirm?: true }`  | Unsaved changes need `confirm: true` (else `input.malformed`, rule `unsavedChanges`); the working folder then stays recoverable ([persistence.md](persistence.md#crash-recovery)). `run.busy` while a run job runs.                                                                               |
 | `project.list`             | `{}` (query)               | Open projects: `key`, file, name, `dirty`, `revision`, bound sources.                                                                                                                                                                                                                             |
-| `project.recovery.list`    | `{}` (query)               | Wraps `listRecovery` ([persistence.md](persistence.md#crash-recovery)).                                                                                                                                                                                                                           |
+| `project.recovery.list`    | `{}` (read-only effect)    | Wraps `listRecovery` ([persistence.md](persistence.md#crash-recovery)); an effect, since queries are synchronous ([implementation](#implementation-task-310)).                                                                                                                                    |
 | `project.recovery.resolve` | `{ key, action, confirm }` | Wraps `resolveRecovery`; `restore` opens the project.                                                                                                                                                                                                                                             |
 
 ### Session tools
@@ -222,20 +222,25 @@ The CLI reuses the session core: same names (dotted registry names), same descri
 - Output: value as pretty JSON on stdout; errors as `code: message` plus issues on stderr; logs `warn`+ on stderr only.
 - **Exit codes** (the mapping [boundaries.md](../conventions/error-handling/boundaries.md#entry-points-ui-agent-cli-automation) leaves to this doc): `0` ok · `1` `internal.unexpected` · `2` usage, `command.unknown`, `input.malformed` and other input/model codes (`quantity.*`, `expression.*`, `model.invariant`) · `3` retryable conflicts (`command.conflict`, `persist.locked`) · `4` `permission.denied` · `5` `op.aborted`, `op.timeout` · `6` any other `AppError` (domain, persistence, machine). Mapping by code in `src/core/agent/exit-codes.ts`; a test covers every `ERROR_CODES` key.
 
-## Files (planned)
+## Files
 
-| File                            | Contents                                                                                            |
-| ------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `src/core/agent/session.ts`     | `AgentSession`: source, binding, log cursor, routing (app/project scope, session tools), digest     |
-| `src/core/agent/tools.ts`       | Name mapping, descriptors with `expectedRevision`, annotations, `--areas` filter, size budget       |
-| `src/core/agent/results.ts`     | `CallToolResult` mapping of outcomes and `AppError`                                                 |
-| `src/core/agent/primer.ts`      | Server instructions text                                                                            |
-| `src/core/agent/exit-codes.ts`  | CLI exit codes by error code                                                                        |
-| `src/core/project/lifecycle.ts` | `project.create/open/close/list/recovery.*` app-scope commands; `HostPort`                          |
-| `src/main/host/`                | App host: storage, library, workers, machine host, app dispatcher, project runtimes; discovery file |
-| `src/main/mcp/server.ts`        | MCP `Server` wiring: tools, resources, progress, cancellation                                       |
-| `src/main/mcp/http.ts`          | Streamable HTTP on loopback: token, Host/Origin checks, session ids                                 |
-| `src/main/cli/index.ts`         | CLI entry: argument parsing, one-shot, `batch`, `mcp`, `tools`, `--connect` bridge                  |
+| File                            | Contents                                                                                                   |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `src/core/agent/session.ts`     | `AgentSession`: source, binding, log cursor, routing (app/project scope, session tools), digest            |
+| `src/core/agent/tools.ts`       | Name mapping, descriptors with `expectedRevision`, annotations, `--areas` filter, size budget              |
+| `src/core/agent/results.ts`     | `CallToolResult` mapping of outcomes and `AppError`                                                        |
+| `src/core/agent/primer.ts`      | Server instructions text                                                                                   |
+| `src/core/agent/exit-codes.ts`  | CLI exit codes by error code                                                                               |
+| `src/core/project/lifecycle.ts` | `project.create/open/close/list/recovery.*` app-scope commands; `HostPort`                                 |
+| `src/main/host/app-host.ts`     | App host: storage, library, app dispatcher, project runtimes (scheduler, toolpath cache, export), sessions |
+| `src/main/host/discovery.ts`    | Discovery files of instances serving HTTP (`<appData>/instances/`)                                         |
+| `src/main/mcp/server.ts`        | MCP `Server` wiring: tools, resources, progress, cancellation                                              |
+| `src/main/mcp/http.ts`          | Streamable HTTP on loopback: token, Host/Origin checks, session ids; the on/off switch                     |
+| `src/main/mcp/bridge.ts`        | `--connect`: stdio ↔ HTTP of a running instance                                                            |
+| `src/main/cli/main.ts`          | CLI: argument parsing, one-shot, `batch`, `mcp`, `tools`, `--connect`                                      |
+| `src/main/cli/runtime.ts`       | Headless runtime: CLI logging, worker pool, machine host (`worker_threads`), app host                      |
+| `src/main/cli/index.ts`         | Build entry `out/main/cli.js` (no Electron import)                                                         |
+| `src/main/ipc.ts`               | GUI: one session per window (`ui:win-<id>`), project IPC, indicator state, local HTTP switch               |
 
 ## Testing
 
@@ -251,3 +256,23 @@ Per [testing.md](../conventions/testing.md); everything runs in `npm run check` 
 | Coexistence    | 3.10 | Two hosts in one test with temp data dirs: second open → `persist.locked` with the connect hint; `--connect` bridge reaches the first host's dispatcher; same-instance re-open returns `alreadyOpen`.                                                                                                                                                         |
 | CLI            | 3.10 | Spawn the built CLI with `--data-dir` (temp): one-shot save/`--no-save`, `batch` across lines, exit codes, stdout holds only results (no log lines).                                                                                                                                                                                                          |
 | End to end     | 3.11 | The [exit criterion](../plans/v0.1.md#exit-criteria) headless: an SDK client spawns `dfyom mcp` (built output, temp data dir) and runs create → design ops → plan → export (gCode compared with the golden file) → virtual run at `max` with `job_wait` and `run_job_continue` → save → close → reopen → compare. A CLI `batch` variant runs the same script. |
+
+## Implementation (task 3.10)
+
+Decisions and findings of the implementation, where this doc left room or proved wrong:
+
+- **Size budget.** `tools/list` of all 85 tools is 76.6 K characters (about 19 K tokens) after sharing repeated sub-schemas in `$defs` (whole nodes, or nodes without their `description`, which then stays beside the `$ref`) and dropping `$schema`; `expectedRevision` has no description (the primer explains it once). The 60 K target is not reachable without dropping field descriptions, so the budget test (`TOOLS_LIST_BUDGET_CHARS`) is 80 K, to be raised deliberately. `--areas` and clients with deferred tool loading remain the answer for small contexts.
+- **`project.recovery.list` is a read-only effect.** Queries are synchronous and the recovery scan is not, so it is an `effect` with the new optional `EffectCommand.readOnly` flag: its tool says "Read-only." and has `readOnlyHint`. It holds the app-scope queue like any effect.
+- **`history.list` is a built-in query** (`BUILTIN_QUERIES`, `QueryContext.history`), so the UI has it too; it is listed with the project-scope tools.
+- **Registries.** `createProjectRegistry()` (built-ins plus `PROJECT_COMMANDS`/`PROJECT_QUERIES`) and `createAppScopeRegistry()` (library, feeds and speeds, lifecycle; no built-ins, so names stay unique across both). `createAppRegistry()` remains as a combined registry for core tests that use library items without a host; `APP_COMMANDS`/`APP_QUERIES` are gone.
+- **Binding is a read.** `project.open`, `create`, `recovery.resolve` and `bind` return the revision, so binding records it as the source's stale-write baseline (`Dispatcher.markRead`, [commands.md](commands.md#stale-writes)). Without this a CLI one-shot (a new source per process) could never edit without `--expected-revision`. A change by someone else after the bind still gives `command.conflict`.
+- **Dirty.** The storage's `dirty` flag follows the debounced working-folder flush, so the host also counts any revision after the last save (`project.list`, the `unsavedChanges` rule of `project.close`).
+- **`job.wait` progress** first sends the job's latest progress (a wait on a job past its last tick, or finished, still reports one), then the throttled ticks.
+- **Errors for agents** omit `stack` from `AppErrorData`.
+- **`persist.locked` hint**: a context frame `project.open` with `{ holder, connect? }`; `connect` only when the holder's discovery file is live.
+- **End of stdin** waits until the calls in flight have answered, then shuts down (abort jobs, close projects, machine host `shutdown`, workers `terminate`) and exits 0.
+- **CLI details.** `--new <name>` creates an untitled project; it is saved only with the added option `--save-as <file>`, otherwise its changes are discarded at the end. `--no-save` closes, then discards through `project.recovery.resolve { action: 'discard' }` (the file is unchanged). `batch` answers each line with `{ ok: true, value, revision }` or `{ ok: false, error, retryable }` and exits with the first failing line's code (0 if none). The default `--data-dir` is Electron's `userData` path computed without Electron (`defaultAppData`), so the CLI and the app share projects, the library and discovery files. A `--connect` one-shot reaches a running instance over HTTP; with `--project` it opens (or re-uses) the file there and never saves or closes it. Error lines of severity `warn`+ also appear on stderr as JSON log entries (the `warn`+ copy of the log), next to the `code: message` line.
+- **Headless build.** electron-vite builds `out/main/cli.js` as a second main entry; it shares chunks with `index.js`, none of which imports Electron. The packaged `dfyom` launcher (the app binary with `ELECTRON_RUN_AS_NODE`) comes with the installer; until then `node out/main/cli.js`. Tests bundle `src/main/cli/test-entry.ts` (worker entries from `DFYOM_TEST_*`) in the Vitest global setup into `node_modules/.cache`, so its external dependencies resolve.
+- **GUI.** Each window is an `AgentSession` with source `ui:win-<id>` (`window.dfyom.call`, `project.onEvent` with patches, `agents.*` in [preload-api.ts](../../src/shared/preload-api.ts)). A project an agent opens gets a new window bound to it. Left to the UI shell (task 3.3): rendering the indicator (main pushes `dfyom:agents.sessions` and answers `agents.list`), persisting the setting (the IPC switch and `--mcp-http` act for one run) and closing a project when its last window closes.
+- **Library follow.** The host calls `followLibraryChanges` for every open project after a library change ([plan-v0.1.md](../modes/plan-v0.1.md#implementation-task-213)).
+- **Tests.** `src/core/agent/*.test.ts` (mapping, results, exit codes, session), `src/main/mcp/server.test.ts` (in-memory transport), `http.test.ts` (real loopback), `src/main/host/*.test.ts` (host, coexistence and the `--connect` bridge), `src/main/cli/cli.test.ts` (spawned CLI) and `src/main/cli/mcp-flow.test.ts`: an SDK client spawns `dfyom mcp` and runs create → design → plan → toolpaths → export → virtual run with tool changes → save → close → reopen; 3.11 adds the golden-file comparison and the CLI `batch` variant.
