@@ -92,10 +92,8 @@ describe('test part on the virtual machine', () => {
   const machine = testMachine()
   const e = exported(machine)
 
-  it('exports with only the tab-lift warning (Z feed above the Z max rate)', () => {
-    expect(e.warnings.map((w) => [w.planOperationId, w.rule, w.params['axis']])).toEqual([
-      ['op-profile1', 'maxFeedRate', 'z'],
-    ])
+  it('exports without warnings (tab lifts feed at the plunge rate, within the Z max rate)', () => {
+    expect(e.warnings).toEqual([])
   })
 
   it('streams with DFYOM tool changes: no errors or alarms, ends at the last position', () => {
@@ -137,7 +135,7 @@ describe('test part on the virtual machine', () => {
       0,
     )
     const ratio = r.seconds / e.stats.estimatedSeconds
-    // grbl.md#determinism-and-tests records the numbers: 623.2 s vs 586.9 s (568.0 s), 1.06
+    // grbl.md#determinism-and-tests records the numbers: 626.6 s vs 591.4 s (572.5 s), 1.06
     expect(ratio).toBeGreaterThan(1)
     expect(ratio).toBeLessThan(1.5)
     expect(r.seconds / toolpaths).toBeLessThan(1.5)

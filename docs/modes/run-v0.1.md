@@ -173,7 +173,7 @@ All `run.*` commands are `machine: true`; the [permission rule](../architecture/
 `run.job.start { planId }` ([decision 4](#decisions)):
 
 1. **Checks** (fail before sending): connected, no other job (`run.busy`), state `Idle` and homed (`run.state`), plan exists and not `archived` ([decision 5](#decisions)), the plan's machine copy equals the connected one (`run.state`, rule `machineMismatch`, [decision 6](#decisions)).
-2. **Program:** the same internal export path as `plan.export` (regenerates stale toolpaths through the toolpath job, [workers.md](../architecture/workers.md#toolpath-cache); `exportGrbl` with the generator string) with `workZero` = the connected G54. `sections` come from the program's operation comments and tool changes, so the label reads `pocket1 · tool 2: 6 mm end mill`.
+2. **Program:** the same internal export path as `plan.export`, `exportPlan(doc, planId, services, { workZero, signal, progress })` ([grbl.md](../architecture/grbl.md#plan-export-command): regenerates missing or stale toolpaths on the toolpath lane, [workers.md](../architecture/workers.md#toolpath-cache); `exportGrbl` with the generator string) with `workZero` = the connected G54. `sections` come from the program's operation comments and tool changes, so the label reads `pocket1 · tool 2: 6 mm end mill`.
 3. **Soft limits:** any `softLimit` finding fails the job with `run.softLimit` (findings in `data`) ([decision 8](#decisions)); other `plan.machine` warnings go into the job's progress label at start and into `RunSummary.warnings`.
 4. **Stream:** `jobStart` to the host; progress, phase and status flow back; tool changes wait for `run.job.continue` ([decision 9](#decisions)).
 5. **End:** `jobEnd` resolves the job: `Ok(RunSummary)`, `machine.*`, or `op.aborted` after a stop. No follow-up document command (a run changes no document in v0.1; marking a plan `inUse` stays manual).
@@ -194,7 +194,7 @@ All `run.*` commands are `machine: true`; the [permission rule](../architecture/
 ### Work zero and the soft-limit check
 
 - The host reads G54 with `$#` after connect, after `$H`, after every `run.workZero.set` and after a reset; `homed` is true after a successful `$H` in this connection (or a virtual machine started with `homing: false`), false after `ALARM:2/3/6`.
-- **`plan.export`** passes `workZero` = G54 when a connection is open, `homed`, and the connected machine equals the plan's machine copy; its result states whether the soft-limit check ran (`softLimitChecked`). Otherwise it exports without it, as today ([grbl.md](../architecture/grbl.md#export-checks)). Closes the known issue "export soft-limit check needs the work zero".
+- **`plan.export`** (built in 2.9/2.11 without it, `softLimitChecked: false`) passes `workZero` = G54 when a connection is open, `homed`, and the connected machine equals the plan's machine copy; its result states whether the soft-limit check ran (`softLimitChecked`). Otherwise it exports without it, as today ([grbl.md](../architecture/grbl.md#export-checks)). Closes the known issue "export soft-limit check needs the work zero".
 - `run.job.start` always runs the check (step 3 of the [run job](#run-job)).
 
 ### Logging

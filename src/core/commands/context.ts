@@ -9,6 +9,7 @@ import type { Library } from '../library/library'
 import type { ProjectSession } from '../project/storage'
 import type { EvaluationService } from '../design/evaluation'
 import type { ToolpathCache } from '../toolpath/cache'
+import type { ExportFiles } from '../post/plan-export'
 import type { JobHandle, WorkerPort } from './jobs'
 import type { Option } from '../../shared/result'
 
@@ -62,6 +63,8 @@ export interface Services {
   readonly library?: Library
   /** Persistence of the open project (docs/architecture/persistence.md); absent in tests. */
   readonly project?: ProjectSession
+  /** Writes exported gCode files (docs/architecture/grbl.md#plan-export-command); absent = `plan.export` fails. */
+  readonly exportFiles?: ExportFiles
 }
 
 export interface CommandContext {

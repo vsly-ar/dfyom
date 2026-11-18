@@ -129,12 +129,15 @@ export function generateProfile(input: ProfileInput, steps: Steps = noSteps): Ap
   const xy = (p: Vec3): Vec2 => [p[0], p[1]]
 
   const b = new MoveBuilder()
-  /** Pieces in order, with vertical moves between them: up at feed, down at the plunge rate. */
+  /**
+   * Pieces in order, with vertical moves between them (lifts over tabs and drops after them) at
+   * the plunge rate: a purely vertical move never exceeds it (the Z axis is the slowest).
+   */
   const emit = (pieces: readonly Seg3[]) => {
     for (const piece of pieces) {
       const pos = b.position!
       if (Math.abs(pos[2] - piece.z0) > EPSILON)
-        b.line([pos[0], pos[1], piece.z0], piece.z0 > pos[2] ? feed : cutting.plungeRate)
+        b.line([pos[0], pos[1], piece.z0], cutting.plungeRate)
       b.seg(piece, feed)
     }
   }

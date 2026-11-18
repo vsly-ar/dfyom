@@ -7,14 +7,17 @@
 import { z } from 'zod'
 import type { AppError } from '../../shared/errors/app-error'
 import { AppErrorDataSchema } from '../../shared/errors/schema'
-import { fail, Ok, tryAsync, type AppResult } from '../../shared/result'
+import { fail, Ok, tryAsync, type AppResult, type AsyncAppResult } from '../../shared/result'
 import type { QueryContext } from '../commands/context'
+import type { WorkerControl, WorkerPort } from '../commands/jobs'
+import type { PlanOperationInput } from '../plan/inputs'
 import { defineCommand, defineQuery } from '../commands/define'
 import { planOperationInputs } from '../plan/inputs'
 import { PlanIdSchema, PlanRecordIdSchema } from '../plan/plan.dto'
 import { toolpathGenerate } from '../workers/tasks'
 import type { ToolpathCache } from './cache'
 import { toGeneratorInputs } from './inputs'
+import type { Toolpath } from './model'
 import { ToolpathSchema } from './schemas'
 
 const ErrorSchema = AppErrorDataSchema
@@ -28,7 +31,10 @@ const OperationOutcome = z.object({
 })
 type OperationOutcome = z.output<typeof OperationOutcome>
 
-function cacheOf(services: QueryContext['services'], where: string): AppResult<ToolpathCache> {
+export function cacheOf(
+  services: QueryContext['services'],
+  where: string,
+): AppResult<ToolpathCache> {
   return services.toolpaths === undefined
     ? fail('internal.unexpected', 'no toolpath cache configured', { where })
     : Ok(services.toolpaths)
@@ -39,6 +45,29 @@ const failed = (planOperationId: string, e: AppError): OperationOutcome => ({
   status: 'failed',
   error: e.toJSON(),
 })
+
+/**
+ * The current toolpath of one plan operation: the cache entry for its `inputHash`, else
+ * generated on the `toolpath` lane and stored. Shared by the job and the export.
+ */
+export async function ensureToolpath(
+  cache: ToolpathCache,
+  workers: WorkerPort,
+  input: PlanOperationInput,
+  ctl: WorkerControl,
+): AsyncAppResult<{ toolpath: Toolpath; status: 'generated' | 'cached' }> {
+  const hit = cache.get(input.inputHash)
+  if (hit !== undefined) {
+    cache.remember(input.planId, input.planOperationId, input.inputHash)
+    return Ok({ toolpath: hit, status: 'cached' })
+  }
+  const request = toGeneratorInputs(input)
+  if (request.isErr()) return request
+  const tp = await workers.run(toolpathGenerate, request.unwrap(), ctl)
+  if (tp.isErr()) return tp
+  cache.set(input.planId, input.planOperationId, input.inputHash, tp.unwrap())
+  return Ok({ toolpath: tp.unwrap(), status: 'generated' })
+}
 
 export const toolpathGenerateJob = defineCommand({
   kind: 'job',
@@ -73,19 +102,7 @@ export const toolpathGenerateJob = defineCommand({
       const cp = await tryAsync(() => ctx.checkpoint(), 'op.aborted', 'checkpoint')
       if (cp.isErr()) return abortedJob()
       ctx.progress({ done: i, total, label: id })
-      const hit = cache.unwrap().get(input.inputHash)
-      if (hit !== undefined) {
-        cache.unwrap().remember(args.planId, id, input.inputHash)
-        operations.push({ planOperationId: id, status: 'cached' })
-        completed.push(id)
-        continue
-      }
-      const request = toGeneratorInputs(input)
-      if (request.isErr()) {
-        operations.push(failed(id, request.unwrapErr()))
-        continue
-      }
-      const tp = await ctx.services.workers.run(toolpathGenerate, request.unwrap(), {
+      const tp = await ensureToolpath(cache.unwrap(), ctx.services.workers, input, {
         // no `pause`: a paused job parks between plan operations (`ctx.checkpoint()`), never
         // the single toolpath worker, which other jobs share
         signal: ctx.signal,
@@ -97,8 +114,7 @@ export const toolpathGenerateJob = defineCommand({
         operations.push(failed(id, tp.unwrapErr()))
         continue
       }
-      cache.unwrap().set(args.planId, id, input.inputHash, tp.unwrap())
-      operations.push({ planOperationId: id, status: 'generated' })
+      operations.push({ planOperationId: id, status: tp.unwrap().status })
       completed.push(id)
     }
     ctx.progress({ done: total, total })

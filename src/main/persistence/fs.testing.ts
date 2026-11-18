@@ -64,6 +64,8 @@ export function faultFs(
     'mkdir',
     'readdir',
     'stat',
+    'lstat',
+    'unlink',
     'copyFile',
     'link',
     'realpath',

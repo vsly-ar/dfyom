@@ -8,6 +8,7 @@ import { constants } from 'node:fs'
 import {
   copyFile,
   link,
+  lstat,
   mkdir,
   open,
   readdir,
@@ -16,6 +17,7 @@ import {
   rename,
   rm,
   stat,
+  unlink,
   writeFile,
 } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
@@ -35,6 +37,15 @@ export interface PersistFs {
   readdir(path: string): Promise<string[]>
   /** `undefined` if the path does not exist. */
   stat(path: string): Promise<{ readonly size: number; readonly isDirectory: boolean } | undefined>
+  /** Like `stat` without following a symlink; `undefined` if nothing is there. */
+  lstat(
+    path: string,
+  ): Promise<
+    | { readonly size: number; readonly isDirectory: boolean; readonly isSymbolicLink: boolean }
+    | undefined
+  >
+  /** Removes one file (never a folder); missing is fine. */
+  unlink(path: string): Promise<void>
   /** Copy-on-write clone where the file system supports it, else a plain copy. */
   copyFile(from: string, to: string): Promise<void>
   /** Hard link; fails with EEXIST if `to` exists (an atomic create-if-absent with content). */
@@ -73,6 +84,22 @@ export const nodeFs: PersistFs = {
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code === 'ENOENT') return undefined
       throw e
+    }
+  },
+  lstat: async (p) => {
+    try {
+      const s = await lstat(p)
+      return { size: s.size, isDirectory: s.isDirectory(), isSymbolicLink: s.isSymbolicLink() }
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+      throw e
+    }
+  },
+  unlink: async (p) => {
+    try {
+      await unlink(p)
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e
     }
   },
   copyFile: (a, b) => copyFile(a, b, constants.COPYFILE_FICLONE),
