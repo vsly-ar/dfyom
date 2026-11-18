@@ -1,17 +1,253 @@
 # LLM / agent API
 
-Status: stub · Principle: [principles.md §1](../principles.md#1-llm-first)
+Status: accepted · Task: 1.6 of the [v0.1 plan](../plans/v0.1.md#1-docs-and-decisions-accepted-before-implementation) (implementation: 3.10, end-to-end: 3.11) · Principle: [principles.md §1](../principles.md#1-llm-first) · Decision: [ADR 0011](../decisions/0011-mcp-and-cli-agent-api.md) · Commands: [commands.md](commands.md)
 
-Transports: MCP server (stdio + local HTTP) and CLI – [ADR 0011](../decisions/0011-mcp-and-cli-agent-api.md).
+How agents reach DFYOM: an **MCP server** (stdio for a headless instance, local HTTP for attaching to a running app) and a **CLI**, both thin adapters over the [command layer](commands.md). This doc maps commands, queries, jobs, errors and the action log onto MCP and the CLI, and defines agent sessions, project binding, coexistence with the GUI and safety. The [decisions](#decisions) were settled with the user; the sections after them specify them.
 
-## Requirements (to be designed)
+## Decisions
 
-- Parity: every user action is available to agents (likely via one command layer – [overview.md#ipc](overview.md#ipc)).
-- Headless operation (no window) and **multiple app instances**.
-- Multi-agent workflows.
-- When a window is visible with an agent attached, user actions are streamed to the agent.
-- Run mode: agent-authored automation scripts (JS/TS/Python/Lua) and live agent supervision with hooks and periodic checks ([modes/run.md](../modes/run.md)).
+Settled with the user when this doc was accepted; the sections below specify them.
 
-## Open questions
+1. **One MCP tool per command and query**, input schemas with shared `$ref` definitions, a size-budget test and an `--areas` filter ([Exposure](#exposure-commands-and-queries-as-mcp-tools)).
+2. **Output schemas are not listed** in `tools/list`; they are served by `dfyom://schema/{name}` and `dfyom tools` ([Schemas](#schemas)).
+3. **App-scope dispatcher** (same pipeline, empty document) holding `library.*`, `feedsSpeeds.*` and the new `project.*` lifecycle commands ([App scope](#app-scope-and-project-scope)).
+4. **One bound project per session** (`project.bind`; open, create and restore bind) ([Sessions](#sessions-and-sources)).
+5. **Explicit attach** to the instance that owns a project: local HTTP or `dfyom mcp --connect`; a headless open of a locked project fails with a connect hint ([Coexistence](#coexistence-with-a-running-gui)).
+6. **Agent-opened projects in the GUI** open a window and stay open after the session ends ([Sessions](#sessions-and-sources)).
+7. **Local HTTP is on by default**, with every protection: `127.0.0.1` only, a bearer token in an owner-only discovery file, `Host`/`Origin` checks, a visible "agent connected" indicator, and a setting to turn it off ([Local HTTP](#local-http)).
+8. **Jobs:** job tools return `{ jobId }`; `job.wait` blocks with a timeout and MCP progress; the CLI waits by default ([Jobs](#jobs)).
+9. **User actions reach agents** as a digest line in every tool result plus `project.log.list`; the subscribable log resource is an extra ([Action log](#action-log-and-user-actions)).
+10. **Undo:** the shared linear history under the stale-write rule, plus a `history.list` query ([Undo](#undo-and-history)).
+11. **Real machines** (not v0.1, input to [run.md#safety](../modes/run.md#safety)): an explicit grant by the user at the GUI, per agent session and connection, revoked on disconnect, never for headless instances ([Permissions](#permissions)).
+12. **`expectedRevision`** is a reserved optional top-level arg of every project-scope command, stripped by the adapter ([Schemas](#schemas)).
+13. **CLI:** `dfyom <name> <json>` one-shot (open → call → save on change → close), `dfyom batch` (JSON lines), `dfyom mcp`, `dfyom tools` ([CLI](#cli)).
+14. **No job follow-up commands in v0.1**; adapters never dispatch them. When a job needs one, its definition declares it and the dispatcher dispatches it with `startRevision` ([Jobs](#jobs)).
+15. **Headless runtime:** the CLI/MCP entry is a separate build output with no Electron import, run by the app's own binary with `ELECTRON_RUN_AS_NODE` when packaged (the `runAsNode` fuse stays enabled) and by `node` in tests ([Processes](#processes-and-hosting)).
 
-- Permission model for actions that affect a real machine.
+## Requirements
+
+- **Parity:** every user action is available to agents; the tool list is derived from the registry, never hand-written ([ADR 0005](../decisions/0005-shared-command-layer.md)).
+- **Headless** operation (no window) and **multiple app instances** on one computer.
+- **Multi-agent** workflows: several agents (and the user) on one project at once.
+- An agent attached to a visible window **receives the user's actions**.
+- Later (not v0.1): agent-authored run-mode automation scripts and live run supervision ([modes/run.md](../modes/run.md)).
+
+## v0.1 scope
+
+| In v0.1                                                                          | Later                                                                    |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| MCP over stdio (headless instance) and Streamable HTTP on loopback (running app) | Remote (non-loopback) access, OAuth                                      |
+| One tool per registry command and query; a few session tools (below)             | MCP prompts; MCP Tasks for jobs; automation-script tools                 |
+| Results and `AppError` as structured tool results                                | Streaming large results (meshes are not exposed at all)                  |
+| Jobs: `job.wait` with MCP progress; polling with `job.get`                       | Push of job completion to the model without a pending call               |
+| Action-log digest in tool results, `project.log.list`, subscribable log resource | Patch streams to agents (replicas only)                                  |
+| Permission: the v0.1 virtual-machine rule ([Safety](#safety))                    | Real-machine grants for agents ([run.md#safety](../modes/run.md#safety)) |
+| CLI: one-shot calls, JSON-lines batch, `dfyom mcp`, `dfyom tools`                | Generated per-field flags, shell completion                              |
+
+## Processes and hosting
+
+| Mode         | Process                                                                   | Transport                                  | Projects                                                           |
+| ------------ | ------------------------------------------------------------------------- | ------------------------------------------ | ------------------------------------------------------------------ |
+| GUI          | Electron main ([overview.md](overview.md#ipc))                            | IPC (renderer), local HTTP (on by default) | Opened by the user or by an attached agent                         |
+| Headless MCP | `dfyom mcp`: Node process, no Electron import ([decision 15](#decisions)) | stdio                                      | Opened by the agent; closed when the session ends                  |
+| Bridge       | `dfyom mcp --connect [instance]`                                          | stdio ↔ local HTTP of a running app        | The running app's ([Coexistence](#coexistence-with-a-running-gui)) |
+| CLI          | `dfyom <name> …`, `dfyom batch` (same Node entry)                         | argv / stdin / stdout                      | One per invocation ([CLI](#cli))                                   |
+
+All modes run the same **app host** (`src/main/host/`, no Electron import – like `src/main/persistence/`): the [project storage](persistence.md#files), the [library](library.md#storage), the [worker pool](workers.md#hosting), the machine host ([run-v0.1.md](../modes/run-v0.1.md#processes): utility process in the app, `worker_threads` headless), the app-scope dispatcher and one project runtime per open project (dispatcher, `EvaluationScheduler`, `ToolpathCache`, `ExportFiles`, geometry prewarm – the wiring [workers.md](workers.md#implementation-task-29) leaves to "whoever opens a project"). The GUI adds windows and IPC on top; MCP and CLI add their framing. Stdout carries only protocol or CLI output ([logging.md rule 6](../conventions/logging.md#rules)).
+
+### App scope and project scope
+
+Today every command runs on a project dispatcher, so the library is unusable without an open project and project lifecycle is not a command (plan known issues: "app-level dispatcher", "no project opens via IPC/MCP/CLI"). Therefore ([decision 3](#decisions)):
+
+- An **app-scope dispatcher** per instance: the same `createDispatcher` pipeline (lookup, `parseArgs`, FIFO, permission, one action-log event per call) over an empty `ProjectDoc` and an app registry. It holds `library.*`, `feedsSpeeds.*` and the project lifecycle below; these move out of `APP_COMMANDS`/`APP_QUERIES`. Names stay unique across both registries (registry test).
+- **Project lifecycle commands** (all `effect`, app scope; handlers call the app host through a new `services.host` port):
+
+| Name                       | Args                       | Result / notes                                                                                                                                                                                                                                                                                    |
+| -------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `project.create`           | `{ name, unitSystem }`     | `{ key, revision }`; untitled until `project.save { target }`.                                                                                                                                                                                                                                    |
+| `project.open`             | `{ file }`                 | `{ key, revision, alreadyOpen }`. A file already open **in this instance** returns its key instead of `persist.locked` (the storage rule is unchanged; the host checks its open map first). Recovery case → `persist.recovery` (new code, added to `ERROR_CODES` in 3.10) with the key in `data`. |
+| `project.close`            | `{ key, confirm?: true }`  | Unsaved changes need `confirm: true` (else `input.malformed`, rule `unsavedChanges`); the working folder then stays recoverable ([persistence.md](persistence.md#crash-recovery)). `run.busy` while a run job runs.                                                                               |
+| `project.list`             | `{}` (query)               | Open projects: `key`, file, name, `dirty`, `revision`, bound sources.                                                                                                                                                                                                                             |
+| `project.recovery.list`    | `{}` (query)               | Wraps `listRecovery` ([persistence.md](persistence.md#crash-recovery)).                                                                                                                                                                                                                           |
+| `project.recovery.resolve` | `{ key, action, confirm }` | Wraps `resolveRecovery`; `restore` opens the project.                                                                                                                                                                                                                                             |
+
+### Session tools
+
+A few tools are not registry entries because they depend on the session, not on a dispatcher. They live in the shared session core (`src/core/agent/`), so MCP and CLI offer the same set, and they follow the [naming](commands.md#naming) rules:
+
+| Name               | Args                                       | Result                                                                                                                     |
+| ------------------ | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `project.bind`     | `{ key }`                                  | Binds the session to an open project (`project.open`/`create`/`recovery.resolve` bind automatically).                      |
+| `project.log.list` | `{ afterSeq?, sources?, names?, limit? }`  | Action-log events of the bound project ([Action log](#action-log-and-user-actions)); `gap: true` if evicted.               |
+| `job.wait`         | `{ jobId, timeoutSeconds?: 30 }` (max 300) | The `job.get` value once finished, or the current one on timeout (`timedOut: true`) ([Jobs](#jobs)).                       |
+| `history.list`     | `{ limit? }`                               | Undo/redo stack: `seq`, `title`, `source`, revisions ([Undo](#undo-and-history)). A builtin query, `readsDocument: false`. |
+
+## Exposure: commands and queries as MCP tools
+
+### Which
+
+- **Every** command and query of both registries is a tool, plus the session tools. Nothing is hidden from agents; [Safety](#safety) gates what may run. Test fixtures (`commands.fixture.ts`) are never registered. Measured on 2026-11-18: 63 registry entries (43 commands, 20 queries); about 85 with run mode (3.9) and the tools above.
+- Queries are **tools**, not MCP resources: models call tools; resources are application-driven in most clients. Resources are used only for streams and catalogs ([Resources](#resources)).
+
+### Names
+
+- MCP name = registry name with `.` → `_`: `design.pocket.add` → `design_pocket_add`. Registry names contain no `_` (`NAME_PATTERN`), so the mapping is bijective; it is the only transport-specific renaming ([commands.md](commands.md#naming)). Underscored names fit every common client and LLM tool-name rule (`^[a-zA-Z0-9_-]{1,64}$`); the server name `dfyom` is the client's prefix.
+- No tool `title` (`CommandMeta.title` needs args). `description` = `summary` plus the kind line: "Undoable." / "Not undoable; writes app data." / "Starts a job; returns { jobId }, wait with job_wait." / "Affects a machine."
+
+### Schemas
+
+- `inputSchema` = `toolDescriptor(def).inputSchema` from [`json-schema.ts`](../../src/core/commands/json-schema.ts) ([commands.md](commands.md#json-schema-for-agent-tools)), plus the reserved optional key `expectedRevision` (integer) on every command of project scope ([decision 12](#decisions)). The adapter removes it before `dispatch(…, { expectedRevision })`; a registry test asserts no command arg is named `expectedRevision`.
+- **Output schemas are not listed** in `tools/list` ([decision 2](#decisions)): they are 80 % of the size (470 K of 585 K chars; `plan.get` alone 148 K). They are served by the `dfyom://schema/{name}` resource and `dfyom tools --json`.
+- Size: input schemas of all 63 entries are about 111 K chars (~28 K tokens), dominated by `library.{tool,machine}.{add,update}` (~13 K each, repeated quantity sub-schemas). 3.10 generates with shared definitions (`$defs`/`$ref` for reused schemas) and a test enforces a budget on the serialized `tools/list` (target: under 60 K chars), so growth is noticed when a command is added. Clients with deferred tool loading handle the rest.
+- **Granularity:** ([decision 1](#decisions)) one tool per command/query (structural parity, client-side validation, no extra round trip). Server option `--areas design,plan,…` (MCP) restricts the list for small-context models; session tools and `history`/`job` are always listed.
+
+### Annotations and server instructions
+
+- MCP tool annotations are derived, never hand-set: query → `readOnlyHint: true`; `document` → `destructiveHint: false` (undoable); `effect`/`job` → `destructiveHint: true` when the args require `confirm` or the command is `machine`, else `false`; `machine: true` → `openWorldHint: true`; queries and `job.wait` → `idempotentHint: true`.
+- The `initialize` result's `instructions` is a short primer generated from one source file (`src/core/agent/primer.ts`, linking here): open or create a project first; quantities are strings as entered (`"6 mm"`, `"1/4\""`, [quantities.md](quantities.md)); query before editing or pass `expectedRevision`; job tools return a `jobId`, wait with `job_wait`; `confirm: true` means the user agreed.
+
+### Library
+
+The adapter uses the SDK's **low-level `Server`** of `@modelcontextprotocol/sdk` (MIT, GPL-compatible) with our JSON Schemas and own Zod parsing (`parseArgs`), not `McpServer.registerTool` with Zod shapes: it avoids coupling our Zod 4 schemas to the SDK's Zod version and keeps `parseArgs`' unknown-key rule.
+
+## Data flow
+
+### Results
+
+Every tool call goes through `atBoundary` with `EntryPoint { kind: 'agent', name }` ([boundaries.md](../conventions/error-handling/boundaries.md#entry-points-ui-agent-cli-automation)) and returns a `CallToolResult`:
+
+| Outcome         | `isError` | `structuredContent`                      | `content` (text, for clients without structured output)         |
+| --------------- | --------- | ---------------------------------------- | --------------------------------------------------------------- |
+| Command `Ok`    | `false`   | `{ value, revision }` (`CommandOutcome`) | Same JSON, then the [digest](#action-log-and-user-actions) line |
+| Query `Ok`      | `false`   | `{ value, revision }` (`QueryOutcome`)   | Same                                                            |
+| Job started     | `false`   | `{ value: { jobId }, revision }`         | Same, plus "wait with job_wait"                                 |
+| `Err(AppError)` | `true`    | `{ error: AppErrorData, retryable }`     | `code: message` and the issues, one per line                    |
+
+- Errors are **tool execution errors** (`isError: true`), never JSON-RPC errors, so the model sees `code`, `issues` with `params` and frames and can self-correct ([app-error.md](../conventions/error-handling/app-error.md#serialization)). `retryable` comes from `ERROR_CODES`. JSON-RPC errors are only for protocol faults (unknown tool name, malformed request) – an unknown tool cannot be a known command, since the list equals the registry.
+- `command.conflict` text says to re-query and retry ([commands.md](commands.md#stale-writes)); `permission.denied` names the command and source kind.
+- Results are `ResultWire` DTOs; no truncation in v0.1 (meshes are not exposed, [workers.md](workers.md#jobs-for-agents)).
+
+### Jobs
+
+- A `job` command's tool returns `{ jobId }` at once, as the dispatcher does ([commands.md](commands.md#long-running-commands-jobs)). `job_get`, `job_list`, `job_pause`, `job_resume`, `job_abort` are the registry entries.
+- **`job.wait`** ([decision 8](#decisions)) blocks until the job finishes or `timeoutSeconds` passes and returns the `job.get` value. If the call carries `_meta.progressToken`, the server sends `notifications/progress` from `JobHandle.onProgress` (`progress` = `done`, `total`, `message` = `label`; already throttled by the dispatcher). Cancelling the MCP request (`notifications/cancelled`) ends the wait, **not** the job (`job_abort` does that).
+- A job's completion is also an action-log `job` event, so it shows up in the [digest](#action-log-and-user-actions) of the agent's next call.
+- **Follow-up document commands:** ([decision 14](#decisions)) no v0.1 job needs one (toolpaths are derived, [plan-v0.1.md](../modes/plan-v0.1.md); evaluation and runs change no document). Adapters never dispatch follow-ups; this closes the plan known issue for v0.1.
+
+### Action log and user actions
+
+The [action log](commands.md#action-log) is how an agent sees what the user and other agents did. Most MCP clients do not show server notifications to the model, so the primary channel is pull plus piggyback ([decision 9](#decisions)):
+
+- **Digest:** each session keeps a cursor (last seen `seq`). Every tool result of a bound session ends with one text line (and `_meta["dfyom/actions"]`) summarizing events **by other sources** since the cursor, e.g. `Since your last call: 3 actions by ui:win-1 (design.pocket.update ×2, history.undo), revision 41 → 44.` Then the cursor advances. Patches are never included.
+- **Pull:** `project.log.list { afterSeq }` returns the events (args summarized, `withPatches: false`); a `gap` means the ring buffer dropped events and the agent should re-query what it needs.
+- **Push (optional):** resource `dfyom://project/{key}/log` supports `resources/subscribe`; the server sends `notifications/resources/updated` (debounced 250 ms) and the client reads the resource with `?after=<seq>`. For clients and harnesses that act on notifications.
+
+### Resources
+
+| URI                         | Content                                                  | Subscribable                   |
+| --------------------------- | -------------------------------------------------------- | ------------------------------ |
+| `dfyom://project/{key}/log` | Action-log events after `?after=`                        | yes                            |
+| `dfyom://run/status`        | `RunStatus` ([run-v0.1.md](../modes/run-v0.1.md#status)) | yes, updates throttled to 1 Hz |
+| `dfyom://schema/{name}`     | Full descriptor incl. `outputSchema`                     | no                             |
+
+## Sessions and sources
+
+- **Source:** each MCP session is one [source](commands.md#stale-writes) `{ kind: 'agent', id }`: `stdio-<n>` or `http-<n>` (per `Mcp-Session-Id`), unique per instance. The client's `clientInfo.name` is logged with it and shown in the GUI ("Claude Code · http-2"). A CLI invocation or `dfyom batch` run is `{ kind: 'cli', id: 'cli-<pid>' }`. A `--connect` bridge keeps its client's identity (the HTTP session is the source).
+- **Binding:** ([decision 4](#decisions)) a session is bound to at most one project; project-scope tools run on the bound project's dispatcher and fail with `input.malformed` (rule `noProject`, hint: open, create or bind) when none is bound. App-scope tools work unbound. Several projects = several sessions (cheap over HTTP; one headless process per project over stdio).
+- **Concurrency:** the adapters never serialize a session's calls; every call goes straight to `dispatch`/`query`, so ordering is the project queue's ([commands.md](commands.md#concurrency)). **Urgent** commands – `run.machine.reset`, `run.machine.jogCancel` and `job.pause`/`job.resume`/`job.abort` – skip that queue ([run-v0.1.md](../modes/run-v0.1.md#safety-v01)), so an agent can stop a run or a job while another call (its own `job.wait`, or an effect waiting for the machine) is still pending. Their tool descriptions say "Runs immediately, even while other commands wait." The CLI reaches them on a running instance with `--connect`.
+- **Stale writes** apply per source unchanged: an agent edits after a query or with `expectedRevision`; a user's edit in between gives `command.conflict` ([commands.md](commands.md#stale-writes)).
+- **Lifecycle:**
+  - Headless stdio: the process is the instance. On end of stdin: abort running jobs, close every project it opened (unsaved changes stay recoverable, as on `project.close { confirm: true }`), flush logs, terminate workers, exit 0.
+  - HTTP session end (DELETE, or 30 min idle): unbind; projects stay open. Its running jobs keep running (they belong to the dispatcher).
+  - Agent-opened projects in the GUI instance open a window and stay open after the session ends ([decision 6](#decisions)).
+
+### Coexistence with a running GUI
+
+One project has exactly one owner instance: the [lock](persistence.md#lock) holder, whose dispatcher is the only authoritative `ProjectDoc` ([commands.md](commands.md#project-state)). There is no shared-file editing between instances.
+
+| Situation                                                   | Behaviour                                                                                                                                                         |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Agent wants the project the user has open                   | Attach to that GUI: HTTP directly, or stdio via `dfyom mcp --connect`; then `project.list` / `project.bind`. Same dispatcher, queue, history and log as the user. |
+| Headless `dfyom mcp` opens a file locked by a live instance | `persist.locked` as today; `data` adds the holder's instance id and, if it serves HTTP, the hint `dfyom mcp --connect <instance>` ([decision 5](#decisions)).     |
+| GUI opens a file a headless instance holds                  | `persist.locked`; the GUI shows which agent instance holds it.                                                                                                    |
+| Several GUIs / headless instances                           | Independent; each owns different projects; the library is shared ([library.md](library.md#storage), cross-instance revision check).                               |
+
+**Discovery:** an instance serving HTTP writes `<appData>/instances/<instanceId>.json` `{ instanceId, pid, port, token, startedAt, appVersion }` (owner-only permissions: mode `0600`; Windows: user-profile ACL) and deletes it on quit; stale files (dead PID) are ignored and removed. `--connect` without an id picks the only live instance, else fails listing them. The lock's instance id names the file.
+
+## Safety
+
+### Permissions
+
+- The dispatcher's `PermissionPolicy` stays the single gate ([commands.md](commands.md#dispatcher-pipeline) step 5); adapters add none. The default policy **denies by default**: UI sources are allowed; agent and CLI sources only on a connection the machine host reported as virtual, or to open a virtual connection when none is open. Unknown or real targets, a connection still opening and a missing machine port are denied ([commands.md](commands.md#dispatcher-pipeline), [grbl.md](grbl.md#transport-and-sender), [run-v0.1.md](../modes/run-v0.1.md#safety-v01)). Only virtual exists in v0.1, so an agent opens the virtual connection itself (`run_connection_open { target: 'virtual' }`) before any other `run.*` command.
+- Real machines are specified in [run.md#safety](../modes/run.md#safety) before any serial connection exists; the direction for agents ([decision 11](#decisions)) is an explicit grant by the user at the GUI, per agent session and connection, revoked on disconnect, never available to headless instances.
+- Destructive non-machine commands already need `confirm: true` in their args (library `remove`, recovery `discard`, replacing files in `project.save`/`plan.export`, `project.close` with unsaved changes). For agents `confirm: true` asserts the user agreed; the primer says so; it is logged with the source.
+- No path sandbox in v0.1: a local agent already has the user's file access. HTTP hardening (below) keeps web pages out.
+
+### Local HTTP
+
+**On by default** in the GUI ([decision 7](#decisions)), with all of the protections below; none of them can be turned off.
+
+- **Setting:** "Allow local agents to connect" (app setting, default on; the settings store comes with the UI shell, task 3.3). Turning it off stops the server at once, ends every HTTP session (their running jobs keep running in their dispatchers) and deletes the discovery file; turning it on starts a new server with a new token. `--mcp-http=off|<port>` overrides the setting for one run. A headless `dfyom mcp` instance serves stdio only, HTTP only with `--mcp-http`.
+- **Indicator:** while at least one agent session is attached, every window shows a visible "agent connected" indicator naming the sessions (client name and source id, [Sessions](#sessions-and-sources)); it links to the setting.
+- Binds `127.0.0.1` only (never `0.0.0.0`/`::`); port random unless given. Streamable HTTP at `/mcp` (not the deprecated HTTP+SSE transport).
+- **Bearer token:** 256 random bits per instance start, in the discovery file; every request needs `Authorization: Bearer <token>` (else 401). Compared in constant time; redacted in logs ([logging.md](../conventions/logging.md#redaction) already covers `authorization`, `token`).
+- **DNS-rebinding guard:** reject requests whose `Host` is not `127.0.0.1:<port>`/`localhost:<port>`, and any request with an `Origin` header (browsers) – 403.
+- Limits: request body 4 MB; at most 16 concurrent sessions.
+
+**What on-by-default means for a fresh install.** The first launch, with no configuration, starts the server on a random loopback port and writes the discovery file with a new token. From then on:
+
+- Any program running **as the same OS user** can read the discovery file and drive the app with the full tool set: open, edit, save and export projects, edit the shared library, and run the virtual machine. This is the same trust a local agent already has through the user's files (it could edit project files or run the CLI); the indicator makes an attached session visible.
+- **Other OS users** on the computer cannot read the owner-only file and get 401. **Other computers** cannot reach a loopback socket. **Web pages** in a browser are rejected by the `Origin`/`Host` checks, including DNS rebinding.
+- **No real machine** can be driven: v0.1 has only the virtual machine, and the permission policy denies agents on anything else ([Permissions](#permissions)). Before real machines exist, the explicit per-session grant ([decision 11](#decisions)) is what keeps an on-by-default endpoint from reaching hardware; real-machine work must re-check this default with [run.md#safety](../modes/run.md#safety).
+- Users who do not want agents turn the setting off once; it stays off.
+
+### Undo and history
+
+- Agents use `history_undo`/`history_redo` on the one linear, shared history ([commands.md](commands.md#undo--redo)) ([decision 10](#decisions)). The stale-write rule makes an agent's undo safe by default: without a fresh read it may undo only while nobody else committed, i.e. its own step; after a query it undoes the top entry, whoever made it.
+- `history.list` shows whose step is on top before undoing; undo/redo events name the entry in the log and the digest.
+- Library edits (`effect`) are not undoable; the tool description says so.
+
+## CLI
+
+The CLI reuses the session core: same names (dotted registry names), same descriptors, same `ResultWire`, same session tools. Only framing differs. Decided ([decision 13](#decisions)):
+
+| Form                                                 | Behaviour                                                                                                                                                                                                                                                                                                                                           |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dfyom <name> [<json> \| @file.json \| -] [options]` | One call. Names contain a dot, so they never collide with subcommands. Project scope needs `--project <file>` (or `--new <name>`): open → call → if the document changed, save (default) or `--no-save` (discard) → close. A job is always waited for, since the process owns it; `--no-wait` (print the `jobId`) is allowed only with `--connect`. |
+| `dfyom batch [--project <file>]`                     | One session over JSON lines: each stdin line `{ "name", "args", "expectedRevision"? }`, each stdout line a result. Undo, jobs and revisions work across lines; `job.wait` too.                                                                                                                                                                      |
+| `dfyom mcp [--areas …] [--connect [instance]]`       | Stdio MCP server, or bridge to a running instance.                                                                                                                                                                                                                                                                                                  |
+| `dfyom tools [--json] [<name>]`                      | Lists names and summaries, or one descriptor with input and output schema.                                                                                                                                                                                                                                                                          |
+
+- Options: `--data-dir` ([persistence.md](persistence.md#files-and-folders)), `--log-level` ([logging.md](../conventions/logging.md#levels)), `--json` (print the `ResultWire` instead of the value), `--expected-revision`, `--connect`, `--confirm` (sets `confirm: true` only if the args schema has it).
+- Output: value as pretty JSON on stdout; errors as `code: message` plus issues on stderr; logs `warn`+ on stderr only.
+- **Exit codes** (the mapping [boundaries.md](../conventions/error-handling/boundaries.md#entry-points-ui-agent-cli-automation) leaves to this doc): `0` ok · `1` `internal.unexpected` · `2` usage, `command.unknown`, `input.malformed` and other input/model codes (`quantity.*`, `expression.*`, `model.invariant`) · `3` retryable conflicts (`command.conflict`, `persist.locked`) · `4` `permission.denied` · `5` `op.aborted`, `op.timeout` · `6` any other `AppError` (domain, persistence, machine). Mapping by code in `src/core/agent/exit-codes.ts`; a test covers every `ERROR_CODES` key.
+
+## Files (planned)
+
+| File                            | Contents                                                                                            |
+| ------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `src/core/agent/session.ts`     | `AgentSession`: source, binding, log cursor, routing (app/project scope, session tools), digest     |
+| `src/core/agent/tools.ts`       | Name mapping, descriptors with `expectedRevision`, annotations, `--areas` filter, size budget       |
+| `src/core/agent/results.ts`     | `CallToolResult` mapping of outcomes and `AppError`                                                 |
+| `src/core/agent/primer.ts`      | Server instructions text                                                                            |
+| `src/core/agent/exit-codes.ts`  | CLI exit codes by error code                                                                        |
+| `src/core/project/lifecycle.ts` | `project.create/open/close/list/recovery.*` app-scope commands; `HostPort`                          |
+| `src/main/host/`                | App host: storage, library, workers, machine host, app dispatcher, project runtimes; discovery file |
+| `src/main/mcp/server.ts`        | MCP `Server` wiring: tools, resources, progress, cancellation                                       |
+| `src/main/mcp/http.ts`          | Streamable HTTP on loopback: token, Host/Origin checks, session ids                                 |
+| `src/main/cli/index.ts`         | CLI entry: argument parsing, one-shot, `batch`, `mcp`, `tools`, `--connect` bridge                  |
+
+## Testing
+
+Per [testing.md](../conventions/testing.md); everything runs in `npm run check` without manual steps.
+
+| Layer          | Task | What                                                                                                                                                                                                                                                                                                                                                          |
+| -------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Mapping (core) | 3.10 | Name mapping bijective for every registry name; `tools/list` equals both registries plus session tools ([commands.md](commands.md#testing): parity is structural); annotation derivation; size budget; no `expectedRevision` arg.                                                                                                                             |
+| Results (core) | 3.10 | Each outcome kind and an `AppError` with issues map to the documented `CallToolResult`; exit code for every `ERROR_CODES` key.                                                                                                                                                                                                                                |
+| Session (core) | 3.10 | Binding and `noProject`; digest of other sources' events and cursor advance; `gap`; `job.wait` finish, timeout and cancellation (fake clock, in-process workers); stale-write conflict between a UI and an agent source; `job_abort` succeeds while the same session's `job_wait` is pending (urgent path).                                                   |
+| MCP server     | 3.10 | SDK client ↔ server over the SDK's in-memory transport: list, call, errors, progress notifications, resource subscribe/updated.                                                                                                                                                                                                                               |
+| HTTP           | 3.10 | Real loopback server: 401 without/with a wrong token, 403 on foreign `Host` or any `Origin`, bound address is `127.0.0.1`, two sessions = two sources, discovery file permissions and cleanup; on by default, and turning the setting off stops the server, ends sessions and deletes the file.                                                               |
+| Coexistence    | 3.10 | Two hosts in one test with temp data dirs: second open → `persist.locked` with the connect hint; `--connect` bridge reaches the first host's dispatcher; same-instance re-open returns `alreadyOpen`.                                                                                                                                                         |
+| CLI            | 3.10 | Spawn the built CLI with `--data-dir` (temp): one-shot save/`--no-save`, `batch` across lines, exit codes, stdout holds only results (no log lines).                                                                                                                                                                                                          |
+| End to end     | 3.11 | The [exit criterion](../plans/v0.1.md#exit-criteria) headless: an SDK client spawns `dfyom mcp` (built output, temp data dir) and runs create → design ops → plan → export (gCode compared with the golden file) → virtual run at `max` with `job_wait` and `run_job_continue` → save → close → reopen → compare. A CLI `batch` variant runs the same script. |
