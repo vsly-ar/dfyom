@@ -37,7 +37,7 @@ Use [`oxide.ts`](https://www.npmjs.com/package/oxide.ts) `Option<T>` / `Result<T
 - Tooltips: short, helpful, using **real data**. Wiki help: more detailed, may or may not use real data.
 - Show **recommended value ranges** and calculators based on real data, explaining what a value depends on and what it affects.
 
-→ UI guidelines doc: _to be written_
+→ [conventions/ui.md](conventions/ui.md)
 
 ## 6. Performance and stability
 

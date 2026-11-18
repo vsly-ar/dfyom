@@ -7,8 +7,8 @@ Status: draft · Principle: [principles.md §2](../principles.md#2-testability)
 | Layer           | Tool                                                                   | Scope                                                                                                            |
 | --------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | Unit            | Vitest (`vitest.config.mts`)                                           | `src/core`, `src/shared`, `scripts`. Colocated `*.test.ts` next to the code.                                     |
-| Component / UI  | _TBD_ (Vitest + Testing Library or Playwright)                         | Renderer components, tooltips, previews.                                                                         |
-| End-to-end      | _TBD_ (Playwright for Electron)                                        | Whole app, driven like a user **and** like an agent ([llm-api.md](../architecture/llm-api.md)).                  |
+| Component / UI  | _TBD_ – proposal in [ui.md](ui.md#testing)                             | Renderer components, tooltips, previews.                                                                         |
+| End-to-end      | _TBD_ (Playwright for Electron, [ui.md](ui.md#testing))                | Whole app, driven like a user **and** like an agent ([llm-api.md](../architecture/llm-api.md)).                  |
 | Virtual machine | GRBL emulator ([ADR 0013](../decisions/0013-grbl-first-controller.md)) | Simulated CNC controller + simulated devices; run-mode tests without hardware ([modes/run.md](../modes/run.md)). |
 | Real machine    | _TBD_                                                                  | LLM-controlled runs on real hardware with minimal developer involvement; opt-in only.                            |
 | Performance     | Vitest, `*.perf.ts` (`vitest.perf.config.mts`, `npm run perf`)         | Benchmarks for heavy operations with budgets; not in `npm run check` (flaky timings).                            |

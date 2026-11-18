@@ -28,6 +28,7 @@ The docs are the **source of truth**. Code implements what is documented here; w
 | Architecture | [architecture/grbl.md](architecture/grbl.md) – GRBL post-processor and virtual machine (post and emulator implemented; sender pending, 3.9)                                    | implemented |
 | Conventions  | [conventions/error-handling/](conventions/error-handling/README.md) – Result/Option, AppError, invariant models, Zod parsing, migrations                                       | implemented |
 | Conventions  | [conventions/logging.md](conventions/logging.md) – structured logs                                                                                                             | implemented |
+| Conventions  | [conventions/ui.md](conventions/ui.md) – UI guidelines: tokens, components, layout, interaction, run safety, a11y                                                              | draft       |
 | Conventions  | [conventions/testing.md](conventions/testing.md) – unit → virtual machine → real machine                                                                                       | draft       |
 | Conventions  | [conventions/versioning.md](conventions/versioning.md) – automatic version bump                                                                                                | implemented |
 | Conventions  | [conventions/documentation.md](conventions/documentation.md) – how docs are written                                                                                            | accepted    |
