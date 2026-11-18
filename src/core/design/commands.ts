@@ -59,6 +59,12 @@ import {
 } from './part.dto'
 import { checkReferences, recalculate, STOCK_TOP, SurfaceTable } from './surfaces'
 import { checkOperations, operationIssues } from './validate'
+import {
+  EvaluationErrorSchema,
+  EvaluationStatusSchema,
+  partEvaluate,
+  warningsWithEvaluation,
+} from './evaluation'
 import { DfmWarningSchema, libraryTools, partWarnings } from './warnings'
 
 // ── arg schemas ───────────────────────────────────────────────────────────────────────────
@@ -751,9 +757,13 @@ const operationList = defineQuery({
 const warningList = defineQuery({
   name: 'design.warning.list',
   summary:
-    'List the DFM parameter and tool warnings of a part, checked now against the whole tool library.',
+    "List a part's DFM warnings: parameter and tool checks now against the whole tool library, plus the geometry warnings once its evaluation is done.",
   args: z.object(PartArg),
-  result: z.object({ warnings: Warnings }),
+  result: z.object({
+    warnings: z.array(DfmWarningSchema).describe('In design order; geometry ones only when done'),
+    evaluation: EvaluationStatusSchema,
+    error: EvaluationErrorSchema.optional(),
+  }),
   run(doc, args, ctx) {
     const where = 'design.warning.list'
     const library = ctx.services.library
@@ -762,8 +772,9 @@ const warningList = defineQuery({
     const loaded = loadPart(doc, args.partId, where)
     if (loaded.isErr()) return loaded
     const { part, stock, units } = loaded.unwrap()
+    const state = ctx.services.evaluations?.state(doc, args.partId) ?? { status: 'pending' }
     return partWarnings(part, stock, units, libraryTools(library))
-      .map((warnings) => ({ warnings }))
+      .map((warnings) => warningsWithEvaluation(doc, args.partId, warnings, state))
       .mapErr((e) => e.withContext(where))
   },
 })
@@ -836,6 +847,7 @@ export const DESIGN_COMMANDS: readonly AnyCommand[] = [
   ...kindCommands(profileSpec),
   operationRemove,
   operationMove,
+  partEvaluate,
 ]
 
 export const DESIGN_QUERIES: readonly QueryDef[] = [partList, partGet, operationList, warningList]

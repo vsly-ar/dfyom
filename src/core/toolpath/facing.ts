@@ -4,7 +4,8 @@
  */
 import { EPSILON, type Vec2 } from '../geometry/model'
 import { Err, Ok, type AppResult } from '../../shared/result'
-import { commonIssues, levels, toolpath } from './common'
+import { noSteps, type Steps } from '../workers/steps'
+import { commonIssues, levels, passSteps, toolpath } from './common'
 import type { FacingInput, Toolpath } from './model'
 import { MoveBuilder } from './path'
 
@@ -15,7 +16,8 @@ export function rowPositions(a: number, b: number, step: number): number[] {
   return Array.from({ length: n }, (_, i) => a + ((b - a) * i) / (n - 1))
 }
 
-export function generateFacing(input: FacingInput): AppResult<Toolpath> {
+/** `steps.step()` before every level. */
+export function generateFacing(input: FacingInput, steps: Steps = noSteps): AppResult<Toolpath> {
   const { tool, cutting, heights, stock, operation: op, strategy: st } = input
   const issues = commonIssues(input)
   issues.positive('operation.depth', op.depth)
@@ -63,7 +65,11 @@ export function generateFacing(input: FacingInput): AppResult<Toolpath> {
   const retract = heights.retractHeight
   const b = new MoveBuilder()
   const at = (u: number, v: number, z: number): [number, number, number] => [...xy(u, v), z]
-  for (const z of levels(0, -op.depth, cutting.stepdown)) {
+  const zs = levels(0, -op.depth, cutting.stepdown)
+  const pass = passSteps(steps, zs.length)
+  for (const [k, z] of zs.entries()) {
+    const step = pass(k)
+    if (step.isErr()) return Err(step.unwrapErr())
     b.pass('rough')
     if (b.position === undefined) b.rapid(at(rowStart(0), rows[0]!, heights.clearanceHeight))
     b.rapid(at(rowStart(0), rows[0]!, retract))

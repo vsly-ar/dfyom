@@ -17,6 +17,7 @@ import {
 } from './model'
 import type { NominalRegion, OperationSolids, PlacedMesh } from './operations'
 import type { Solid, SolidPort } from './solid-port'
+import { noSteps, type Steps } from '../workers/steps'
 
 /** Axis-aligned box in the part frame. */
 export interface Box {
@@ -53,10 +54,15 @@ export interface CheckResult {
 
 const mm3 = (v: number): string => `${v.toFixed(1)} mm³`
 
-export function geometryChecks(input: CheckInput, solids: SolidPort): AppResult<CheckResult> {
-  const pieces = loosePieces(input, solids)
+/** `steps.step()` after each piece's `toMesh` and each `retainedRemoved` pair. */
+export function geometryChecks(
+  input: CheckInput,
+  solids: SolidPort,
+  steps: Steps = noSteps,
+): AppResult<CheckResult> {
+  const pieces = loosePieces(input, solids, steps)
   if (pieces.isErr()) return Err(pieces.unwrapErr())
-  const removed = retainedRemoved(input, solids)
+  const removed = retainedRemoved(input, solids, steps)
   if (removed.isErr()) return Err(removed.unwrapErr())
   const { count, warnings } = pieces.unwrap()
   return Ok({
@@ -104,6 +110,7 @@ const isProfile = (op: OperationSolids): boolean => op.surfaces.includes('offcut
 function loosePieces(
   input: CheckInput,
   solids: SolidPort,
+  steps: Steps,
 ): AppResult<{ count: number; warnings: DfmWarning[] }> {
   const parts = solids.decompose(input.part)
   if (parts.isErr()) return Err(parts.unwrapErr())
@@ -120,6 +127,8 @@ function loosePieces(
   for (const { solid, volume } of sized) {
     const mesh = solids.toMesh(solid)
     if (mesh.isErr()) return Err(mesh.unwrapErr())
+    const step = steps.step()
+    if (step.isErr()) return Err(step.unwrapErr())
     const m = mesh.unwrap()
     const bounding = new Set<OperationSolids>()
     let offcutSide = false
@@ -168,7 +177,11 @@ function loosePieces(
  * Nominal retained region ∩ another operation's net solid > ε_V; one warning per
  * (retaining operation, removing operation). Boxes skip pairs that cannot meet.
  */
-function retainedRemoved(input: CheckInput, solids: SolidPort): AppResult<DfmWarning[]> {
+function retainedRemoved(
+  input: CheckInput,
+  solids: SolidPort,
+  steps: Steps,
+): AppResult<DfmWarning[]> {
   type Hit = { regions: string[]; parameter: string; volume: number }
   const all = new Map<ComposedOperation, Map<ComposedOperation, Hit>>()
   for (const a of input.operations) {
@@ -190,6 +203,8 @@ function retainedRemoved(input: CheckInput, solids: SolidPort): AppResult<DfmWar
           solids,
         )
         if (v.isErr()) return Err(v.unwrapErr())
+        const step = steps.step()
+        if (step.isErr()) return Err(step.unwrapErr())
         if (v.unwrap() <= EPSILON_VOLUME) continue
         const hit = hits.get(b) ?? { regions: [], parameter: region.parameter, volume: 0 }
         hit.regions.push(region.region)

@@ -4,10 +4,10 @@
  * The geometry checks come from the evaluation (worker, task 2.9).
  * Doc: docs/modes/design.md#dfm-warnings-task-28-wiring
  */
-import { z } from 'zod'
 import type { AppResult } from '../../shared/result'
 import { parameterChecks, type DfmTool } from '../geometry/dfm'
-import { DFM_WARNING_CODES, type DfmWarning } from '../geometry/model'
+import type { DfmWarning } from '../geometry/model'
+import { DfmWarningSchema } from '../geometry/schemas'
 import type { Library } from '../library/library'
 import type { Stock } from '../library/stock'
 import { Tool } from '../library/tool'
@@ -15,24 +15,8 @@ import type { UnitSystem } from '../project/document'
 import { toGeometryInput } from './geometry-input'
 import type { Part } from './operation'
 
-/** `DfmWarning` (src/core/geometry/model.ts) as a result schema; values in mm. */
-export const DfmWarningSchema = z
-  .object({
-    code: z.enum(DFM_WARNING_CODES),
-    severity: z.enum(['warning', 'info']),
-    message: z.string().describe('English, values in mm'),
-    operation: z.string().describe('Id of the operation the warning is about'),
-    parameter: z.string().optional().describe('Its parameter to change, e.g. shape.cornerRadius'),
-    params: z.record(
-      z.string(),
-      z.union([z.number(), z.string(), z.boolean(), z.array(z.string()).readonly()]),
-    ),
-    suggestion: z
-      .object({ relation: z.enum(['atLeast', 'atMost']), value: z.number() })
-      .optional()
-      .describe('Suggested value of the parameter (mm)'),
-  })
-  .describe('A DFM warning: never blocks, derived, never stored')
+/** `DfmWarning` as a result schema (defined with the other boundary schemas). */
+export { DfmWarningSchema }
 
 /** A library tool reduced to what the DFM rules need (canonical mm). */
 export function dfmTool(tool: Tool): DfmTool {

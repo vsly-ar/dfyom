@@ -4,7 +4,8 @@
  */
 import { EPSILON, type Contour, type Vec2, type Vec3 } from '../geometry/model'
 import { Err, Ok, type AppResult } from '../../shared/result'
-import { commonIssues, levels, toolpath } from './common'
+import { noSteps, type Steps } from '../workers/steps'
+import { commonIssues, levels, passSteps, toolpath } from './common'
 import { rowPositions } from './facing'
 import type { PocketInput, Toolpath } from './model'
 import { flat, MoveBuilder, offsetRing, segPoint, slope, type Seg } from './path'
@@ -39,7 +40,8 @@ export function ringOffsets(outermost: number, m: number, spacing: number): numb
   return rowPositions(outermost, Math.max(outermost, m - spacing / 2), spacing).reverse()
 }
 
-export function generatePocket(input: PocketInput): AppResult<Toolpath> {
+/** `steps.step()` before every roughing level and every finishing level. */
+export function generatePocket(input: PocketInput, steps: Steps = noSteps): AppResult<Toolpath> {
   const { tool, cutting, heights, operation: op, strategy: st } = input
   const contour = op.shape.contour
   const c = op.shape.center
@@ -127,8 +129,14 @@ export function generatePocket(input: PocketInput): AppResult<Toolpath> {
   const at = (p: Vec2, z: number): Vec3 => [p[0], p[1], z]
 
   const b = new MoveBuilder()
+  const finishing = outermost - wall > EPSILON
+  const roughZ = levels(op.onZ, floor, cutting.stepdown)
+  const finishZ = finishing ? levels(op.onZ, floor, st.finishStepdown) : []
+  const pass = passSteps(steps, roughZ.length + finishZ.length)
   let previous = op.onZ
-  for (const z of levels(op.onZ, floor, cutting.stepdown)) {
+  for (const [k, z] of roughZ.entries()) {
+    const step = pass(k)
+    if (step.isErr()) return Err(step.unwrapErr())
     b.pass('rough')
     if (b.position === undefined) b.rapid(at(entryStart, heights.clearanceHeight))
     b.rapid(at(entryStart, retract))
@@ -170,14 +178,16 @@ export function generatePocket(input: PocketInput): AppResult<Toolpath> {
   }
 
   // finishing: the wall ring at full size, lead-in and lead-out from the roughed ring
-  if (outermost - wall > EPSILON) {
+  if (finishing) {
     b.pass('finish')
     const wallRing = ring(wall)
     const lead = ring(outermost)
     const leadPoint = lead.length > 0 ? segPoint(lead[0]!, 0) : c
     const wallStart = wallRing.length > 0 ? segPoint(wallRing[0]!, 0) : c
     b.rapid(at(leadPoint, retract))
-    for (const z of levels(op.onZ, floor, st.finishStepdown)) {
+    for (const [k, z] of finishZ.entries()) {
+      const step = pass(roughZ.length + k)
+      if (step.isErr()) return Err(step.unwrapErr())
       b.line(at(leadPoint, z), cutting.plungeRate)
       b.line(at(wallStart, z), feed)
       for (const s of flat(wallRing, z)) b.seg(s, feed)

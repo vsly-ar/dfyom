@@ -76,6 +76,12 @@ export const ERROR_CODES = {
     retryable: true,
   },
   'op.aborted': { severity: 'info', userMessage: 'The operation was cancelled.', retryable: true },
+  // Workers (task 2.9): docs/architecture/workers.md#worker-death-timeouts-and-restart
+  'op.timeout': {
+    severity: 'warn',
+    userMessage: 'The computation took too long and was stopped.',
+    retryable: false,
+  },
   // Command layer: docs/architecture/commands.md#dispatcher-pipeline
   'command.unknown': {
     severity: 'warn',

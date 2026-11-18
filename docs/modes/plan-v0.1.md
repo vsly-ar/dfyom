@@ -119,7 +119,7 @@ The floor is cut to size by the last roughing level; the finishing pass follows 
 | `peckDepth`     | length | DC                                      | > 0; `peck`/`chipBreak` only                                             |
 | `chipBreakBack` | length | 0.5 mm / 0.02″                          | > 0; `chipBreak` only                                                    |
 | `helixPitch`    | length | preset stepdown, else 0.25 DC           | > 0; `helix` only                                                        |
-| `rampAngle`     | angle  | 3°                                      | 0.5°–30°; `helix` only: steepest helix slope                             |
+| `rampAngle`     | angle  | 3°                                      | 0.5°–30°; `helix` only: steepest helix slope (direction always climb)    |
 | `breakthrough`  | length | 0.5 mm / 0.02″                          | ≥ 0; `through` only                                                      |
 
 Drill tip Z = hole depth (to full diameter) + tip length from SIG, plus `breakthrough` for `through`. Holes in one plan operation are visited in nearest-neighbour order from the previous position. `helix` ends with a full circle at the final depth to clean the wall.
@@ -139,7 +139,7 @@ The first pass runs on the part side of the slot (tool edge on the shape); a slo
 
 ## Toolpath generation (job)
 
-- `plan.toolpath.generate { planId, planOperationIds? }` is a `job` command ([commands.md](../architecture/commands.md#long-running-commands-jobs)); generators run through the `WorkerPort` ([ADR 0008](../decisions/0008-threading-split-by-job.md)), one checkpoint and progress tick per plan operation and level.
+- `plan.toolpath.generate { planId, planOperationIds? }` is a `job` command ([commands.md](../architecture/commands.md#long-running-commands-jobs)); generators run through the `WorkerPort` on the `toolpath` worker lane ([workers.md](../architecture/workers.md#toolpath-cache)), one checkpoint per plan operation and one step per level, pass and hole. A failed plan operation does not stop the job: the result lists each one as `generated`, `cached` or `failed`.
 - Toolpaths are **derived data**: not in `ProjectDoc`, not persisted, so the job needs no follow-up document command. They are cached per plan operation under a hash of all inputs (the plan's snapshot operation, plan operation, library copies and setup); a changed input marks the toolpath stale. Export regenerates stale toolpaths.
 - v0.1 shapes are axis-aligned rectangles and circles, so every offset (tool radius, rings, allowance) is again a rounded rectangle or a circle: generators compute them **analytically with exact arcs**. `clipper2-ts` enters with general shapes; `cavalier-contours-js` is not needed in v0.1 ([geometry.md](../architecture/geometry.md#layers)).
 
@@ -172,7 +172,7 @@ Implemented in [`src/core/toolpath/`](../../src/core/toolpath/): pure, headless 
 - **Tabs:** the tool lifts wherever its disk overlaps a nominal tab band – geometry's `offsetBand` across exactly the slot, so the lift points match the tab ends of the evaluated part, including the bent end faces of [geometry.md](../architecture/geometry.md#offset-loft). There Z = max(level, tab top): vertical lift at `feedRate`, vertical drop at `plungeRate`, ramps clamped. Boundaries are found by sampling (≤ min(R/4, 0.5 mm)) and bisection, kept on the safe side.
 - **Tests:** generic properties on every generator (`testing/rules.ts`: starts and ends at clearance, arcs continuous and ≤ 180°, no plunge faster than `plungeRate`, ramps ≤ `rampAngle`, rapids only on the retract plane, every feed move within the removal region, the deepest cut exactly at the target depth, stepdown per level; also on every test-part toolpath), stepover per strategy, roughing never enters a pocket's finishing allowance, tabs probed up to the full tool radius (− 1 µm) with an independent oracle, 30 random pockets and 40 random profiles, golden files (`__golden__/*.txt`, update with `vitest -u`), and a heightmap simulation of the [geometry test part](../architecture/geometry.md#testing) compared cell by cell with its analytic removal (no gouge anywhere; flat areas exact).
 
-**Wired later:** task 2.13 resolves the inputs (strategy schemas, defaults and fallbacks in `strategy.ts`, the full checks, cutting values via presets and the calculator, the tool and machine copies → `ToolpathTool` and `maxFeedRate`) and orders a plan operation's holes (one call per hole, nearest neighbour); task 2.9 runs the generators as the `plan.toolpath.generate` job (`generate.ts`: input hash, cache, `WorkerPort`, progress) and serves `plan.toolpath.get`.
+**Wired later:** task 2.13 resolves the inputs (strategy schemas, defaults and fallbacks in `strategy.ts`, the full checks, cutting values via presets and the calculator, the tool and machine copies → `ToolpathTool` and `maxFeedRate`) and orders a plan operation's holes (one call per hole, nearest neighbour); task 2.9 maps the inputs (`toGeneratorInputs`, [workers.md](../architecture/workers.md#plan-operation-to-generator-input)), runs the generators as the `plan.toolpath.generate` job (`generate.ts`: cache by input hash, `WorkerPort`, progress) and serves `plan.toolpath.get`.
 
 ## Commands and queries (v0.1)
 
@@ -205,25 +205,25 @@ Export (`effect` command, task 2.11) turns the ordered `Toolpath[]` of one setup
 
 ## Files
 
-| File                                                    | Contents                                                                   |
-| ------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `src/core/plan/plan.dto.ts`, `plan.ts`                  | Plan, setup, plan operation DTOs (Zod); `loadPlan` (models of the copies)  |
-| `src/core/plan/snapshot.ts`, `status.ts`                | Design snapshot, hash, stale detection; status transitions and permissions |
-| `src/core/plan/build.ts`                                | Create, rebuild, tool assignment with copy reuse, duplicate                |
-| `src/core/plan/strategy.ts`                             | Strategy parameters per kind, parsing, defaults, constraints               |
-| `src/core/plan/feeds.ts`                                | Strategy → engagement, the resolution order, `source` per field, presets   |
-| `src/core/plan/checks.ts`, `suggest.ts`, `order.ts`     | Tool/machine checks, tool ranking, default order and order checks          |
-| `src/core/plan/evaluate.ts`                             | Per-operation evaluation and `plan.warning.list` findings                  |
-| `src/core/plan/commands.ts`                             | Commands and queries above; the draft auto-rebuild hook                    |
-| `src/core/plan/follow.ts`                               | `followLibraryChanges`: draft plans follow the library                     |
-| `src/core/plan/inputs.ts`                               | Seam to toolpaths: `planOperationInputs`, `ToolpathGenerator`              |
-| `src/core/toolpath/model.ts`                            | `Toolpath`, `Pass`, `Move` (the contract above) and the generator inputs   |
-| `src/core/geometry/contour.ts`                          | Analytic offsets of rounded rectangles and circles                         |
-| `src/core/toolpath/{facing,pocket,drilling,profile}.ts` | Generators per strategy                                                    |
-| `src/core/toolpath/path.ts`, `tabs.ts`, `common.ts`     | Rings with exact arcs, the move builder; tab bands and lifts; input checks |
-| `src/core/toolpath/stats.ts`                            | Length/time estimates, drill-cycle expansion                               |
-| `src/core/toolpath/testing/`                            | Fixtures, property rules, heightmap simulation, golden-file rendering      |
-| `src/core/toolpath/generate.ts`                         | Job handler, input hash and cache (planned, 2.9)                           |
+| File                                                    | Contents                                                                                                   |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `src/core/plan/plan.dto.ts`, `plan.ts`                  | Plan, setup, plan operation DTOs (Zod); `loadPlan` (models of the copies)                                  |
+| `src/core/plan/snapshot.ts`, `status.ts`                | Design snapshot, hash, stale detection; status transitions and permissions                                 |
+| `src/core/plan/build.ts`                                | Create, rebuild, tool assignment with copy reuse, duplicate                                                |
+| `src/core/plan/strategy.ts`                             | Strategy parameters per kind, parsing, defaults, constraints                                               |
+| `src/core/plan/feeds.ts`                                | Strategy → engagement, the resolution order, `source` per field, presets                                   |
+| `src/core/plan/checks.ts`, `suggest.ts`, `order.ts`     | Tool/machine checks, tool ranking, default order and order checks                                          |
+| `src/core/plan/evaluate.ts`                             | Per-operation evaluation and `plan.warning.list` findings                                                  |
+| `src/core/plan/commands.ts`                             | Commands and queries above; the draft auto-rebuild hook                                                    |
+| `src/core/plan/follow.ts`                               | `followLibraryChanges`: draft plans follow the library                                                     |
+| `src/core/plan/inputs.ts`                               | Seam to toolpaths: `planOperationInputs`                                                                   |
+| `src/core/toolpath/model.ts`                            | `Toolpath`, `Pass`, `Move` (the contract above) and the generator inputs                                   |
+| `src/core/geometry/contour.ts`                          | Analytic offsets of rounded rectangles and circles                                                         |
+| `src/core/toolpath/{facing,pocket,drilling,profile}.ts` | Generators per strategy                                                                                    |
+| `src/core/toolpath/path.ts`, `tabs.ts`, `common.ts`     | Rings with exact arcs, the move builder; tab bands and lifts; input checks                                 |
+| `src/core/toolpath/stats.ts`                            | Length/time estimates, drill-cycle expansion                                                               |
+| `src/core/toolpath/testing/`                            | Fixtures, property rules, heightmap simulation, golden-file rendering                                      |
+| `src/core/toolpath/generate.ts`                         | `plan.toolpath.generate` job and `plan.toolpath.get` (2.9); `cache.ts`, `inputs.ts` (mapper), `request.ts` |
 
 ## Implementation (task 2.13)
 
@@ -244,4 +244,4 @@ Plans live in `ProjectDoc.plans` (record `plans/<id>.json`, registered in `PROJE
 - **Feeds** (`feeds.ts`): `stepover` resolves override → preset → strategy fallback (the calculator never suggests one in v0.1) and feeds the facing engagement; `stepdown` override → preset → calculator → fallback. Drilling resolves only `spindleSpeed`, `feedRate`, `plungeRate`; an end mill bores with `helix` engagement (`ap` = resolved `helixPitch`). Calculator warnings join only when the calculator supplies or misses a field. Results carry `source` per field (`override`, `preset`, `calculator`, `strategy`) and, for the calculator, its derivation.
 - **`plan.warning.list`** returns `{ code, severity, message, planOperationId?, field?, rule, params }`: `plan.check` (incl. rule `stockFit`: the part does not fit the plan's stock copy), `plan.order` and `plan.broken` with severity `error` (they fail generation), `plan.libraryBlocked` and `plan.rebuildBlocked` warnings, `plan.loosePiece` and `plan.machine` warnings, and the calculator's `feeds.*` codes. "Inside its shape" for the loose-piece warning tests the operation's centre (facing always counts).
 - **Tool suggestion** filters by the tool checks (type, size, reach, flute length) with each candidate's default stickout and preset; missing feeds do not disqualify a tool. Ties after the three ranks go by library id.
-- **Seam to toolpaths (2.9/2.10).** `planOperationInputs(doc, planId, planOperationIds?)` (inputs.ts) returns per plan operation everything a generator needs (snapshot operations, part, stock, setup heights in mm, tool copy and its id, stickout, resolved feeds and strategy, machine) plus `previousPlanOperationId` (where the tool starts) and `inputHash` for the toolpath cache: chained over the machining order (position and the hash of the operation before), with the plan's part, the plan operation, the used copies and the setup; error findings fail it with `plan.check`/`plan.order`. Generators implement `ToolpathGenerator<Toolpath>`; `plan.toolpath.generate` and `plan.toolpath.get` are added with them.
+- **Seam to toolpaths (2.9/2.10).** `planOperationInputs(doc, planId, planOperationIds?)` (inputs.ts) returns per plan operation everything a generator needs (snapshot operations, part, stock, setup heights in mm, tool copy and its id, stickout, resolved feeds and strategy, machine) plus `previousPlanOperationId` (where the tool starts) and `inputHash` for the toolpath cache: chained over the machining order (position and the hash of the operation before), with the plan's part, the plan operation, the used copies and the setup; error findings fail it with `plan.check`/`plan.order`. `toGeneratorInputs` (task 2.9) maps each to the generators' plain inputs; `plan.toolpath.generate` and `plan.toolpath.get` run and serve them ([workers.md](../architecture/workers.md#toolpath-cache)).

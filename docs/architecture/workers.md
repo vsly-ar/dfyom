@@ -1,6 +1,6 @@
 # Workers
 
-Status: accepted · Task: 2.9 of the [v0.1 plan](../plans/v0.1.md#2-core-srccore-headless) · Decision: [ADR 0016](../decisions/0016-compute-workers-in-dispatcher-process.md) · Jobs: [commands.md](commands.md#long-running-commands-jobs) · Errors: [boundaries.md](../conventions/error-handling/boundaries.md#async-workers-cancellation)
+Status: implemented ([below](#implementation-task-29)) · Task: 2.9 of the [v0.1 plan](../plans/v0.1.md#2-core-srccore-headless) · Decision: [ADR 0016](../decisions/0016-compute-workers-in-dispatcher-process.md) · Jobs: [commands.md](commands.md#long-running-commands-jobs) · Errors: [boundaries.md](../conventions/error-handling/boundaries.md#async-workers-cancellation)
 
 How heavy, pure computation (part evaluation, toolpath generation) leaves the thread that owns the project: which process hosts the workers, the message protocol, WASM lifetime, abort and pause, automatic evaluation after design edits, the plan-to-generator mapping, the toolpath cache, failure handling, agent visibility, logging, testing and budgets. Machine I/O is out of scope (utility process, [run.md](../modes/run.md)).
 
@@ -112,7 +112,7 @@ One protocol for both worker kinds, defined as Zod discriminated unions on `type
 
 | `type`       | Fields                                                                         | Notes                                                                                                                                                                                                   |
 | ------------ | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ready`      | `workerId`, `initMs`, `heapBytes?`                                             | After `init` (and WASM load, if prewarmed).                                                                                                                                                             |
+| `ready`      | `protocol`, `workerId`, `initMs`, `heapBytes?`                                 | After `init` (and WASM load, if prewarmed). `protocol` is checked by the host.                                                                                                                          |
 | `progress`   | `id`, `done`, `total?`, `label?`                                               | From `Steps.step(p)`; throttled in the worker to one per 50 ms plus the final tick; the job throttles again (`JobRun`).                                                                                 |
 | `checkpoint` | `id`, `state: 'paused' \| 'running'`, `label?`                                 | The worker parked at a step (or left it): confirms that a pause took effect and where ("pocket1: level 3/8").                                                                                           |
 | `log`        | `batch` (`LogRecord[]`)                                                        | From `createLogForwarder` ([Logging](#logging-from-workers)).                                                                                                                                           |
@@ -153,7 +153,7 @@ Extends [geometry.md](geometry.md#wasm-lifetime-and-ownership):
   - Evaluation: after each operation's solids are built, after the union, after the subtraction, after `toMesh`, after each check (each piece's `toMesh`, each `retainedRemoved` pair). The batch union is the one large WASM call; if `npm run perf` shows it above 50 ms on the stress case (30 pockets + 120 drills, 232 ms in total), it is split into chunked unions with a step between chunks.
   - Toolpaths: per level (step-down) and per pass inside each generator, per hole for drilling; the job checkpoints per plan operation in the host ([plan-v0.1.md](../modes/plan-v0.1.md#toolpath-generation-job)).
 - **Abort.** `signal` aborts → host writes 2 to `control` → the next `step()` returns `Err(op.aborted)`; the task returns it, `withSolids` frees the arena on that `Err`. The host **resolves the run at once** with `op.aborted` and does not wait for the worker; the lane stays busy until the worker's `result` arrives (at most one step later) or the [abort grace](#worker-death-timeouts-and-restart) ends in `terminate()`.
-- **Pause.** Only jobs pause (automatic evaluations have no `PauseState`). `job.pause` → host writes 1 → the worker parks at the next step (`checkpoint` `paused`). `job.resume` writes 0 and notifies. Abort while parked wakes it with `op.aborted`. The job's own `ctx.checkpoint()` between operations keeps working as today.
+- **Pause.** Only jobs pause (automatic evaluations have no `PauseState`). `job.pause` → host writes 1 → the worker parks at the next step (`checkpoint` `paused`). `job.resume` writes 0 and notifies. Abort while parked wakes it with `op.aborted`. The job's own `ctx.checkpoint()` between operations keeps working as today. `plan.toolpath.generate` passes no `PauseState`: the `toolpath` lane has one worker shared by every job and project, so a paused toolpath job finishes its current plan operation and parks in `ctx.checkpoint()` instead of parking the worker ([implementation](#implementation-task-29)).
 - **Partial results are never published.**
   - Evaluation: an aborted evaluation yields nothing; the previous result stays in the [store](#abort-on-a-newer-revision-and-stale-results).
   - Toolpaths: every plan operation is its own task, so operations finished before the abort are complete and stay in the [cache](#toolpath-cache); the aborted operation's finished levels are dropped. The job ends in `op.aborted` with `data.completed` (plan operation ids).
@@ -174,10 +174,10 @@ A per-dispatcher `EvaluationScheduler` (`src/core/design/evaluation.ts`, headles
 
 - **A newer revision aborts the running evaluation** of that part as soon as the change arrives (unchanged from [geometry.md](geometry.md#worker-and-renderer)), and starts the debounce again. At most one evaluation per part runs; nothing queues behind it. Since the next evaluation waits 200 ms anyway and the worker is free again within one step (≤ 50 ms), the abort never delays it.
 - An evaluation is also aborted when its part is removed, its project closes, or it [times out](#worker-death-timeouts-and-restart).
-- Every request is tagged `{ partId, revision, inputHash }`. The result store accepts a result only if its `revision` is newer than the stored one (rejects out-of-order and post-restart stragglers, e.g. a result that finished just before its abort was seen), and drops results for removed parts.
+- Every request is tagged `{ partId, revision, inputHash }`. The result store accepts a result only if its `revision` is newer than the stored one or its `inputHash` is the part's current one (rejects out-of-order and post-restart stragglers for older inputs, e.g. a result that finished just before its abort was seen), and drops results for removed parts.
 - **Current** means: the stored result's `inputHash` equals the hash of the part in the current document. Results are keyed by hash, not revision, so edits to other parts or plans never make a part's evaluation stale.
 - A small per-part LRU (8 results by hash) makes undo/redo back to an evaluated state an instant `done` without a worker run (still after the debounce, so a burst of undos stays quiet).
-- Deterministic errors (`geometry.evaluation`, input errors) are stored as `failed` for that hash and not retried; a crash or timeout is retried once on a fresh worker, then stored as `failed`.
+- Deterministic errors (`geometry.evaluation`, input errors) are stored as `failed` for that hash and not retried. A transient failure – a crash, a timeout, an abort the scheduler did not ask for (e.g. the pool closed), including "worker lane unavailable" during a crash-loop backoff – is retried once (on a fresh worker after `internal.unexpected`, which recycles the geometry worker; after `op.timeout` only if the grace ended in `terminate()`), then shown as `failed` for the current input but never cached by hash: `design.part.evaluate` runs it again.
 
 ### `evaluation` status
 
@@ -274,19 +274,58 @@ Reference as in [geometry.md](geometry.md#performance-budgets-v01) (Apple M1 Pro
 | WASM heap growth over 1 000 evaluations through a worker               | ≤ 10 MB after warm-up (as geometry)                    |
 | Toolpath generation, all operations of the test part                   | ≤ 500 ms                                               |
 
-## Files (planned)
+## Files
 
-| File                                   | Contents                                                                  |
-| -------------------------------------- | ------------------------------------------------------------------------- |
-| `src/core/commands/jobs.ts`            | `WorkerTask`, `WorkerControl`, `WorkerPort`, `inProcessWorkers` (changed) |
-| `src/core/commands/jobs.ts` (queries)  | `job.get`, `job.list`                                                     |
-| `src/core/workers/protocol.ts`         | Message schemas, `PROTOCOL_VERSION`                                       |
-| `src/core/workers/steps.ts`            | `Steps`, `noSteps`, shared-buffer and signal-backed implementations       |
-| `src/core/workers/tasks.ts`            | `WORKER_TASKS`: `geometry.evaluate`, `toolpath.generate`                  |
-| `src/core/workers/worker-loop.ts`      | Environment-neutral worker side over an `Endpoint`                        |
-| `src/core/workers/pool.ts`             | Host side: lanes, queues, timeouts, recycling; implements `WorkerPort`    |
-| `src/core/design/evaluation.ts`        | `EvaluationScheduler`, result store, `design.part.evaluate`               |
-| `src/core/toolpath/inputs.ts`          | `toGeneratorInputs` (plan operation → generator inputs)                   |
-| `src/core/toolpath/generate.ts`        | `plan.toolpath.generate` job, `plan.toolpath.get`                         |
-| `src/core/toolpath/cache.ts`           | `ToolpathCache`                                                           |
-| `src/main/workers/entry.ts`, `node.ts` | `worker_threads` entry and `WorkerFactory`, WASM bytes, log forwarding    |
+| File                                                                 | Contents                                                                                                                                |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/core/commands/jobs.ts`                                          | `WorkerTask`, `WorkerControl`, `WorkerPort`, `inProcessWorkers` (changed)                                                               |
+| `src/core/commands/jobs.ts` (queries)                                | `job.get`, `job.list`                                                                                                                   |
+| `src/core/workers/protocol.ts`                                       | Message schemas, `PROTOCOL_VERSION`                                                                                                     |
+| `src/core/workers/steps.ts`                                          | `Steps`, `noSteps`, shared-buffer and signal-backed implementations                                                                     |
+| `src/core/workers/tasks.ts`                                          | `WORKER_TASKS`: `geometry.evaluate`, `toolpath.generate`                                                                                |
+| `src/core/workers/worker-loop.ts`                                    | Environment-neutral worker side over an `Endpoint`                                                                                      |
+| `src/core/workers/pool.ts`                                           | Host side: lanes, queues, timeouts, recycling; implements `WorkerPort`                                                                  |
+| `src/core/design/evaluation.ts`                                      | `EvaluationScheduler`, result store, `design.part.evaluate`                                                                             |
+| `src/core/toolpath/inputs.ts`                                        | `toGeneratorInputs` (plan operation → generator inputs)                                                                                 |
+| `src/core/toolpath/generate.ts`                                      | `plan.toolpath.generate` job, `plan.toolpath.get`                                                                                       |
+| `src/core/toolpath/cache.ts`                                         | `ToolpathCache`                                                                                                                         |
+| `src/core/toolpath/request.ts`                                       | `GeneratorRequest` (schema) and `generateRequest` (runs it in the worker, joins drilling holes)                                         |
+| `src/core/geometry/schemas.ts`, `src/core/toolpath/schemas.ts`       | Zod schemas of the boundary data (`PartGeometryInput`, `PartEvaluation`, `DfmWarning`, generator inputs, `Toolpath` and its spot check) |
+| `src/shared/errors/schema.ts`                                        | `AppErrorDataSchema`, `ResultWireSchema` (protocol, job outcomes, failed results)                                                       |
+| `src/main/workers/entry.ts`, `port.ts`, `bundled.ts`                 | `worker_threads` entry (`parentPort` → `Endpoint`, uncaught errors logged), its bundled path (`?modulePath`)                            |
+| `src/main/workers/node.ts`                                           | `nodeWorkerFactory`, `readManifoldWasm`, `createNodeWorkerPool` (log forwarding)                                                        |
+| `src/main/workers/test-entry.ts`, `test-tasks.ts`, `global-setup.ts` | Test worker entry with fixture tasks, bundled for Vitest by the global setup                                                            |
+| `src/main/workers/workers.perf.ts`                                   | The [budgets](#performance-budgets) through real workers                                                                                |
+
+## Implementation (task 2.9)
+
+Decisions and findings of the implementation, where this doc left room or proved wrong:
+
+- **Lazy booleans.** manifold-3d evaluates booleans lazily: the steps after `union`/`subtract` were free and the whole cost landed in the next `status()`. `evaluatePart` now forces each stage (`status()` on every operation's solid, each union chunk, the union and the subtraction), so the work happens between the steps it belongs to.
+- **Chunked union.** On the stress case the batch union took ≈ 145 ms in one call, so it is split into chunks of `UNION_CHUNK` = 25 operations (≈ 24 ms each, one step per chunk), then one union of the chunks (≈ 17 ms). Total stress evaluation 249 ms (was 232 ms). The final subtraction (≈ 44 ms) is one WASM call and cannot be split further; it is the longest step and close to the 50 ms rule on slower machines.
+- **Full output check.** The full Zod check of a toolpath costs ≤ 0.2 ms per plan operation (503 moves), far under 5 ms, so the host checks every move; `ToolpathSpotSchema` (envelope plus first/last move per pass) exists for larger toolpaths but is unused.
+- **`ready` carries `protocol`** (the table above), so the host can detect a mismatched worker build.
+- **Scheduler details.** On `attach` (project open) every part is due at once, without debounce, in document order; a second `attach` behaves as `close()` then `attach()` (running evaluations aborted, waiters answered `op.aborted`, results dropped). `state(doc, partId)` reads the result by the hash of the part in that document, but a cached result of the current input is shown only once its debounce has elapsed (or `design.part.evaluate` skipped it): a drag back over an evaluated value stays `pending` until the edits stop plus 200 ms, then it is `done` from the cache without a worker run. At most one evaluation is requested at a time, so a part that becomes due later but was edited more recently goes first. Transient failures follow the rule [above](#abort-on-a-newer-revision-and-stale-results); joined waiters are always answered. A result for the current input is stored whatever its revision, so a re-attach to another dispatcher's numbering cannot leave a part `pending`.
+- **Toolpath cache key** also covers the project's unit system: strategy defaults depend on it (overshoot 1 mm vs 0.04", …).
+- **`design.part.evaluate`** returns `{ evaluation: 'done' | 'failed', warnings, error? }` (a failed evaluation is an `Ok` job result carrying the error, like `design.warning.list`); it fails with `internal.unexpected` without an evaluation service.
+- **`plan.toolpath.generate`** returns `{ operations: [{ planOperationId, status: 'generated' | 'cached' | 'failed', error? }] }`; `plan.toolpath.get` fails with `input.malformed` for an unknown plan or plan operation.
+- **Drilling `helix` direction** is resolved as `climb` and not settable in v0.1 (the drilling strategy table has no `direction`); `rampAngle` became a drilling strategy key (helix only), as the table says.
+- **`Timers` port** (`set`/`clear`, `systemTimers`) lives in `src/core/commands/context.ts` next to `Clock`.
+- **manifold-3d import.** The package exports `.` for `import` only, which the CJS main build cannot `require`; `src/core/geometry/manifold` imports `manifold-3d/manifold.js` (exported without conditions) instead.
+- **Production chunk smoke test.** `node.test.ts` also runs the electron-vite CJS worker chunk from `out/main` when `npm run build` produced one newer than the sources; otherwise it is skipped (CI runs `npm run check` without a build).
+- **Not wired yet:** no project is opened through IPC/MCP/CLI before tasks 3.x, so the app creates the pool at start (workers spawn lazily, `terminate()` on quit) but no dispatcher gets an `EvaluationScheduler` or `ToolpathCache` and nothing prewarms the geometry worker; whoever opens a project wires `createEvaluationScheduler({ workers }).attach(dispatcher)`, `createToolpathCache()` and `prewarm('geometry')`.
+
+### Measured (`npm run perf`, Apple M1 Pro class)
+
+| Measure                                                                    | Result                                                         | Budget              |
+| -------------------------------------------------------------------------- | -------------------------------------------------------------- | ------------------- |
+| Worker overhead per evaluation (post, Zod, clone, transfer)                | 0.23 ms median, 0.31 ms p95 (wall 17.5 ms, task 17.2 ms)       | ≤ 5 ms              |
+| Main-thread output check per evaluation                                    | 0.01 ms median                                                 | ≤ 2 ms              |
+| Last edit → current evaluation (warm, test part, every sample a new input) | 224 ms median, 227 ms max                                      | ≤ 250 ms            |
+| Longest step, test part / stress case                                      | 7 ms / 44 ms (the final subtraction)                           | ≤ 50 ms             |
+| Abort: run resolved / worker free                                          | ≤ 0.4 ms / 9–15 ms median, ≤ 22 ms max (stress case)           | immediate / ≤ 50 ms |
+| Worker spawn + WASM init                                                   | 44 ms median (in-worker init 11 ms)                            | ≤ 300 ms            |
+| Progress messages                                                          | ≤ 20 per second in the worker (≤ 21 in any second at the host) | ≤ 20 per second     |
+| Toolpath output check per plan operation                                   | ≤ 0.17 ms (pocket, 503 moves)                                  | ≤ 5 ms              |
+| WASM heap over 1 000 evaluations through a worker                          | 16 MB after warm-up, 0 MB growth, 0 live objects               | ≤ 10 MB             |
+| Toolpaths of all test-part operations through the worker                   | 5 ms                                                           | ≤ 500 ms            |

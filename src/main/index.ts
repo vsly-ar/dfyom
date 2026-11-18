@@ -6,6 +6,8 @@ import { RENDERER_LOG_LEVEL_ARG, type Logger, type LogLevel } from '../shared/lo
 import { startLogging } from './logging/electron'
 import { resolveAppData } from './persistence/paths'
 import { createProjectStorage } from './persistence/storage'
+import { WORKER_ENTRY_PATH } from './workers/bundled'
+import { createNodeWorkerPool } from './workers/node'
 
 function createMainWindow(log: Logger, level: LogLevel): void {
   const win = new BrowserWindow({
@@ -35,7 +37,16 @@ function createMainWindow(log: Logger, level: LogLevel): void {
 }
 
 void app.whenReady().then(async () => {
-  const { log, level, instance } = await startLogging()
+  const { log, level, instance, forward } = await startLogging()
+  // The app-wide compute pool (docs/architecture/workers.md#lanes-and-pool). Workers spawn lazily;
+  // the geometry worker is prewarmed when the first project opens (project IPC, tasks 3.x).
+  const workers = createNodeWorkerPool({
+    entryPath: WORKER_ENTRY_PATH,
+    log,
+    logLevel: level,
+    forward,
+  })
+  app.on('will-quit', () => workers.terminate())
   // Persistence smoke check until project IPC exists (tasks 3.3+): scan for recoverable projects.
   const storage = createProjectStorage({
     appData: resolveAppData(process.argv, app.getPath('userData')) ?? app.getPath('userData'),

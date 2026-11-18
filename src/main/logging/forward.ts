@@ -1,4 +1,5 @@
-// Writes entries forwarded by renderers (and later the utility process) through the root logger.
+// Writes entries forwarded by renderers, compute workers (and later the utility process) through
+// the root logger.
 // The sender is untrusted: everything here is bounded. Doc: docs/conventions/logging.md#forwarding
 import type pino from 'pino'
 import { z } from 'zod'
@@ -15,6 +16,8 @@ const batchSchema = z
 export interface ForwardOrigin {
   readonly proc: 'renderer' | 'utility' | 'worker'
   readonly win?: number
+  /** Worker id (`geometry-1`), so entries and drop summaries name the worker. */
+  readonly worker?: string
 }
 
 export type ForwardReceiver = (batch: unknown, origin: ForwardOrigin) => Promise<void>
@@ -98,10 +101,13 @@ export function createForwardReceiver(
   }
   const senders = new Map<string, Sender>()
   const senderFor = (origin: ForwardOrigin): Sender => {
-    const key = `${origin.proc}:${origin.win ?? ''}`
+    const key = `${origin.proc}:${origin.win ?? ''}:${origin.worker ?? ''}`
     let s = senders.get(key)
     if (s === undefined) {
-      const bindings = origin.win === undefined ? { proc: origin.proc } : { ...origin }
+      const bindings =
+        origin.win === undefined && origin.worker === undefined
+          ? { proc: origin.proc }
+          : { ...origin }
       s = { log: logging.base.child(bindings), tokens: limits.burst, last: now(), dropped: 0 }
       senders.set(key, s)
     }
@@ -127,7 +133,11 @@ export function createForwardReceiver(
       return
     }
     await atBoundary(
-      { kind: 'system', name: 'logging.forward', args: { proc: origin.proc, win: origin.win } },
+      {
+        kind: 'system',
+        name: 'logging.forward',
+        args: { proc: origin.proc, win: origin.win, worker: origin.worker },
+      },
       () => {
         const parsed = parseWith(batchSchema, batch, 'logging.forward')
         if (parsed.isErr()) s.tokens -= 1

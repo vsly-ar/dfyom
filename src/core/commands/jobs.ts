@@ -1,38 +1,163 @@
 /**
- * Long-running commands: job handles, progress, pause/resume/abort, and the worker port.
- * Doc: docs/architecture/commands.md#long-running-commands-jobs
+ * Long-running commands: job handles, progress, pause/resume/abort, the job queries and the
+ * worker port. Docs: docs/architecture/commands.md#long-running-commands-jobs,
+ * docs/architecture/workers.md#contract-changes
  */
 import { z } from 'zod'
-import { Err, fail, tryAsync, type AppResult, type AsyncAppResult } from '../../shared/result'
+import { AppError } from '../../shared/errors/app-error'
+import { ResultWireSchema } from '../../shared/errors/schema'
+import { noopLogger, type Logger } from '../../shared/logging'
+import { parseWith } from '../../shared/parse'
+import {
+  Err,
+  fail,
+  fromWire,
+  Ok,
+  toWire,
+  tryAsync,
+  tryCatch,
+  type AppResult,
+  type AsyncAppResult,
+} from '../../shared/result'
+import type { SolidKernel } from '../geometry/solid-port'
 import type { ProjectDoc } from '../project/document'
-import type { CommandContext, JobContext, JobProgress, Source } from './context'
-import type { BuiltinCommand, JobCommand } from './define'
+import { aborted, signalSteps, type Steps } from '../workers/steps'
+import type {
+  CommandContext,
+  JobContext,
+  JobDirectory,
+  JobProgress,
+  PauseState,
+  QueryContext,
+  Source,
+} from './context'
+import { defineQuery, type BuiltinCommand, type JobCommand } from './define'
 
-/** Controls passed to a worker task. */
+/** Worker lanes, one worker each (docs/architecture/workers.md#lanes-and-pool). */
+export const LANES = ['geometry', 'toolpath'] as const
+export type Lane = (typeof LANES)[number]
+
+/** Host side, passed by the job handler (a `JobContext` fits). */
 export interface WorkerControl {
   readonly signal: AbortSignal
   readonly progress: (p: JobProgress) => void
+  /** Absent for automatic evaluations: they never pause. */
+  readonly pause?: PauseState
 }
 
-/** A unit of heavy work that a worker can run; `name` identifies it across threads. */
-export interface WorkerTask<I, O> {
-  readonly name: string
-  run(input: I, ctl: WorkerControl): AsyncAppResult<O>
+/** Inside the worker (or inline in the fake). */
+export interface TaskControl {
+  /** Abort and pause between steps, progress per step. */
+  readonly steps: Steps
+  readonly log: Logger
+  /** The solid kernel, loaded once per worker (geometry lane only). */
+  readonly solids: () => AsyncAppResult<SolidKernel>
 }
 
 /**
- * Where job handlers send heavy work. Abstract on purpose: task 2.9 provides Web Worker /
- * `worker_threads` implementations (ADR 0008); until then `inProcessWorkers` runs tasks inline.
+ * A unit of heavy work that a worker can run. Only `name` crosses the thread: the worker looks
+ * the task up in its registry (`WORKER_TASKS`, src/core/workers/tasks.ts).
+ */
+export interface WorkerTask<I, O> {
+  /** e.g. `geometry.evaluate`, `toolpath.generate`. */
+  readonly name: string
+  readonly lane: Lane
+  /** Checked in the worker. */
+  readonly input: z.ZodType<I>
+  /** Checked in the host. */
+  readonly output: z.ZodType<O>
+  /** Wall-clock limit, excluding paused time → `op.timeout`. */
+  readonly timeoutMs: number
+  /** Typed arrays of an output to transfer instead of clone (each must own its whole buffer). */
+  readonly transfer?: (output: O) => readonly TransferView[]
+  run(input: I, ctl: TaskControl): AppResult<O> | AsyncAppResult<O>
+}
+
+/** A typed array whose buffer is transferred (worker → host). */
+export interface TransferView {
+  readonly buffer: ArrayBufferLike
+  readonly byteOffset: number
+  readonly byteLength: number
+}
+
+/** Any task, for registries (`run` only ever gets input its own schema parsed). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type AnyWorkerTask = WorkerTask<any, any>
+
+/**
+ * Where job handlers send heavy work: the worker pool (src/core/workers/pool.ts) in the app and
+ * CLI, the in-process fake in tests. Resolves `op.aborted` as soon as `signal` aborts.
  */
 export interface WorkerPort {
   run<I, O>(task: WorkerTask<I, O>, input: I, ctl: WorkerControl): AsyncAppResult<O>
 }
 
-/** In-process stub of the worker port (tests, and the app until task 2.9). */
-export const inProcessWorkers: WorkerPort = {
-  run: <I, O>(task: WorkerTask<I, O>, input: I, ctl: WorkerControl): Promise<AppResult<O>> =>
-    task.run(input, ctl),
+export interface InProcessOptions {
+  /**
+   * Send input and output through `structuredClone` and the task's schemas, as the real
+   * boundary does (default true), so cloning and schema bugs show up without threads.
+   */
+  readonly clone?: boolean
+  /** Loads the solid kernel for geometry tasks, once (default: fails – no WASM in the fake). */
+  readonly solids?: () => AsyncAppResult<SolidKernel>
+  readonly log?: Logger
 }
+
+/**
+ * The worker port without threads: runs `task.run` inline with `Steps` backed by the
+ * `AbortSignal` (pause is a no-op inside a task). Doc: docs/architecture/workers.md#testing
+ */
+export function createInProcessWorkers(opts: InProcessOptions = {}): WorkerPort {
+  const clone = opts.clone ?? true
+  let kernel: AsyncAppResult<SolidKernel> | undefined
+  const solids = (): AsyncAppResult<SolidKernel> =>
+    (kernel ??=
+      opts.solids?.() ??
+      Promise.resolve(fail('internal.unexpected', 'no solid kernel in the in-process fake')))
+  return {
+    async run<I, O>(task: WorkerTask<I, O>, input: I, ctl: WorkerControl): AsyncAppResult<O> {
+      const where = `worker ${task.name}`
+      if (ctl.signal.aborted) return aborted(where)
+      let arg: I = input
+      if (clone) {
+        const cloned = tryCatch(() => structuredClone(input), 'internal.unexpected', 'uncloneable')
+        if (cloned.isErr()) return Err(cloned.unwrapErr().withContext(where))
+        const parsed = parseWith(task.input, cloned.unwrap(), where)
+        if (parsed.isErr()) return Err(parsed.unwrapErr())
+        arg = parsed.unwrap()
+      }
+      const control: TaskControl = {
+        steps: signalSteps(ctl.signal, ctl.progress),
+        log: (opts.log ?? noopLogger).child({ task: task.name }),
+        solids,
+      }
+      const ran = await tryAsync(
+        async () => task.run(arg, control),
+        'internal.unexpected',
+        `${task.name} threw`,
+      )
+      const result: AppResult<O> = ran.isOk() ? ran.unwrap() : Err(ran.unwrapErr())
+      if (!clone) return result
+      if (result.isErr()) return fromWire<O>(structuredClone(toWire(result)))
+      const out = tryCatch(
+        () => structuredClone(result.unwrap()),
+        'internal.unexpected',
+        'uncloneable',
+      )
+      if (out.isErr()) return Err(out.unwrapErr().withContext(where))
+      return parseWith(task.output, out.unwrap(), where).mapErr(
+        (e) =>
+          new AppError('internal.unexpected', `${task.name}: malformed output`, {
+            issues: e.issues,
+            where,
+          }),
+      )
+    },
+  }
+}
+
+/** In-process worker port with the default options (tests; no solid kernel). */
+export const inProcessWorkers: WorkerPort = createInProcessWorkers()
 
 export const JOB_STATES = ['running', 'paused', 'finished'] as const
 export type JobState = (typeof JOB_STATES)[number]
@@ -63,6 +188,74 @@ export const jobAbort = control(
   'Abort job',
 )
 
+// ── job queries (docs/architecture/workers.md#jobs-for-agents) ──────────────────────────────
+
+const JobProgressSchema = z.object({
+  done: z.number(),
+  total: z.number().optional(),
+  label: z.string().optional(),
+})
+
+const JobInfoSchema = z.object({
+  jobId: z.string(),
+  name: z.string().describe('The job command'),
+  state: z.enum(JOB_STATES),
+  progress: JobProgressSchema.optional(),
+  startRevision: z.number().describe('Revision when the job started'),
+  outcome: ResultWireSchema.optional().describe(
+    'Only once finished: { ok: true, value } or { ok: false, error }',
+  ),
+})
+
+function jobInfo(j: JobHandle): z.output<typeof JobInfoSchema> {
+  const outcome = j.outcome
+  return {
+    jobId: j.id,
+    name: j.name,
+    state: j.state,
+    ...(j.progress === undefined ? {} : { progress: j.progress }),
+    startRevision: j.startRevision,
+    ...(outcome === undefined ? {} : { outcome: toWire(outcome) }),
+  }
+}
+
+function jobsOf(ctx: QueryContext, where: string): AppResult<JobDirectory> {
+  return ctx.jobs === undefined
+    ? fail('internal.unexpected', 'no job directory (query run outside a dispatcher)', { where })
+    : Ok(ctx.jobs)
+}
+
+export const jobGet = defineQuery({
+  name: 'job.get',
+  summary: 'Get a job: state, progress, start revision and, once finished, its outcome.',
+  args: JobControlArgs,
+  result: JobInfoSchema,
+  readsDocument: false,
+  run(_doc, args, ctx) {
+    const where = 'job.get'
+    return jobsOf(ctx, where).andThen((jobs) => {
+      const j = jobs.get(args.jobId)
+      return j.isSome()
+        ? Ok(jobInfo(j.unwrap()))
+        : fail('input.malformed', `no job ${args.jobId}`, {
+            issues: [{ path: ['jobId'], rule: 'unknownJob', message: 'no such job' }],
+            where,
+          })
+    })
+  },
+})
+
+export const jobList = defineQuery({
+  name: 'job.list',
+  summary: 'List the running jobs and the retained finished ones, oldest first.',
+  args: z.object({}),
+  result: z.object({ jobs: z.array(JobInfoSchema) }),
+  readsDocument: false,
+  run(_doc, _args, ctx) {
+    return jobsOf(ctx, 'job.list').map((jobs) => ({ jobs: jobs.list().map(jobInfo) }))
+  },
+})
+
 /** Read-only view of a started job. */
 export interface JobHandle<R = unknown> {
   readonly id: string
@@ -78,6 +271,8 @@ export interface JobHandle<R = unknown> {
   onProgress(listener: (p: JobProgress) => void): () => void
   /** Settles when the job finishes; aborted jobs end in `op.aborted`. */
   readonly result: AsyncAppResult<R>
+  /** The result once finished (readable synchronously, for `job.get`). */
+  readonly outcome: AppResult<R> | undefined
 }
 
 export type JobLifecycle = 'started' | 'paused' | 'resumed' | 'finished'
@@ -98,9 +293,11 @@ export class JobRun<R = unknown> implements JobHandle<R> {
   readonly startRevision: number
   readonly result: AsyncAppResult<R>
   private currentState: JobState = 'running'
+  private finalOutcome: AppResult<R> | undefined
   private latest: JobProgress | undefined
   private lastEmitMs = Number.NEGATIVE_INFINITY
   private readonly listeners = new Set<(p: JobProgress) => void>()
+  private readonly pauseListeners = new Set<(paused: boolean) => void>()
   private readonly controller = new AbortController()
   /** Every checkpoint currently parked (a job may await several at once). */
   private waiters: (() => void)[] = []
@@ -118,11 +315,24 @@ export class JobRun<R = unknown> implements JobHandle<R> {
     this.source = ctx.source
     this.startRevision = opts.startRevision
     const started = new Promise<void>((resolve) => (this.begin = resolve))
+    const isPaused = () => this.currentState === 'paused'
+    const pause: PauseState = {
+      get paused() {
+        return isPaused()
+      },
+      onChange: (listener) => {
+        this.pauseListeners.add(listener)
+        return () => {
+          this.pauseListeners.delete(listener)
+        }
+      },
+    }
     const jobCtx: JobContext = {
       ...ctx,
       signal: this.controller.signal,
       progress: (p) => this.report(p, ctx.clock.now()),
       checkpoint: () => this.checkpoint(),
+      pause,
     }
     this.result = started.then(() => this.execute(doc, args, jobCtx))
   }
@@ -133,6 +343,10 @@ export class JobRun<R = unknown> implements JobHandle<R> {
 
   get progress(): JobProgress | undefined {
     return this.latest
+  }
+
+  get outcome(): AppResult<R> | undefined {
+    return this.finalOutcome
   }
 
   onProgress(listener: (p: JobProgress) => void): () => void {
@@ -151,12 +365,14 @@ export class JobRun<R = unknown> implements JobHandle<R> {
     if (this.currentState !== 'running') return
     this.currentState = 'paused'
     this.opts.onLifecycle('paused')
+    this.notifyPause(true)
   }
 
   resume(): void {
     if (this.currentState !== 'paused') return
     this.currentState = 'running'
     this.opts.onLifecycle('resumed')
+    this.notifyPause(false)
     this.wakeUp()
   }
 
@@ -164,6 +380,10 @@ export class JobRun<R = unknown> implements JobHandle<R> {
     if (this.currentState === 'finished') return
     this.controller.abort()
     this.wakeUp()
+  }
+
+  private notifyPause(paused: boolean): void {
+    for (const l of [...this.pauseListeners]) l(paused)
   }
 
   private wakeUp(): void {
@@ -201,6 +421,8 @@ export class JobRun<R = unknown> implements JobHandle<R> {
         data: { jobId: this.id },
       })
     this.currentState = 'finished'
+    this.finalOutcome = result
+    this.pauseListeners.clear()
     this.opts.onLifecycle('finished', result)
     return result
   }

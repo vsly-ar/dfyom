@@ -35,6 +35,7 @@ import {
   type Clock,
   type CommandContext,
   type IdGenerator,
+  type JobDirectory,
   type Services,
   type Source,
 } from './context'
@@ -148,6 +149,10 @@ class ProjectDispatcher implements Dispatcher {
   /** Per source: the later of its last read revision and its last own commit. */
   private readonly baseline = new Map<string, number>()
   private tail: Promise<unknown> = Promise.resolve()
+  private readonly jobDirectory: JobDirectory = {
+    get: (jobId) => this.job(jobId),
+    list: () => [...this.jobs.values()],
+  }
 
   constructor(o: DispatcherOptions) {
     this.registry = o.registry
@@ -205,7 +210,11 @@ class ProjectDispatcher implements Dispatcher {
     const args = parseArgs(def.args, rawArgs, name)
     if (args.isErr()) return args
     const revision = this.rev
-    const value = def.run(this.current, args.unwrap(), { source, services: this.services })
+    const value = def.run(this.current, args.unwrap(), {
+      source,
+      services: this.services,
+      jobs: this.jobDirectory,
+    })
     if (value.isErr()) return Err(value.unwrapErr())
     if (def.readsDocument !== false) this.recordBaseline(source, revision)
     return Ok({ value: value.unwrap(), revision })

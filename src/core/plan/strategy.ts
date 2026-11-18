@@ -30,7 +30,7 @@ export type StrategyKey = keyof StrategyDTO
 export const STRATEGY_KEYS: Readonly<Record<OperationKind, readonly StrategyKey[]>> = {
   facing: ['direction', 'pattern', 'axis', 'overshoot'],
   pocket: ['direction', 'entry', 'helixDiameter', 'rampAngle', 'finishAllowance', 'finishStepdown'],
-  drilling: ['cycle', 'peckDepth', 'chipBreakBack', 'helixPitch', 'breakthrough'],
+  drilling: ['cycle', 'peckDepth', 'chipBreakBack', 'helixPitch', 'rampAngle', 'breakthrough'],
   profile: ['direction', 'entry', 'rampAngle', 'breakthrough', 'finishAllowance'],
 }
 
@@ -60,7 +60,7 @@ export const StrategyArgSchema = z
       'Pocket: helix (default), ramp or plunge; profile: ramp (default) or plunge',
     ),
     helixDiameter: clear(Src).describe('Pocket: default 0.8 D'),
-    rampAngle: clear(Src).describe('Pocket/profile: 0.5°–30°, default 3°'),
+    rampAngle: clear(Src).describe('Pocket/profile/drilling (helix): 0.5°–30°, default 3°'),
     finishAllowance: clear(Src).describe('Pocket/profile: default 0.2 mm / 0.008"; 0 = none'),
     finishStepdown: clear(Src).describe('Pocket: default the pocket depth'),
     cycle: clear(z.enum(DRILL_CYCLES)).describe(
@@ -153,6 +153,10 @@ export type ResolvedStrategy =
       readonly peckDepth: number
       readonly chipBreakBack: number
       readonly helixPitch: number
+      /** Steepest helix slope (`helix` only), as the pocket's. */
+      readonly rampAngle: number
+      /** Helix direction (`helix` only); not settable in v0.1, always `climb`. */
+      readonly direction: Direction
       readonly breakthrough: number
     }
   | {
@@ -237,6 +241,8 @@ export function resolveStrategy(
         peckDepth: mm(s.peckDepth).unwrapOr(D),
         chipBreakBack: mm(s.chipBreakBack).unwrapOr(DEF.chipBreakBack[u]),
         helixPitch: mm(s.helixPitch).unwrapOr(presetStepdown.unwrapOr(0.25 * D)),
+        rampAngle,
+        direction: 'climb',
         breakthrough,
       }
     }

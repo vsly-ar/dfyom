@@ -3,7 +3,9 @@
  * manifold-3d or calls `.delete()`.
  * Doc: docs/architecture/geometry.md#wasm-lifetime-and-ownership
  */
-import Module, { type Manifold, type ManifoldToplevel, type Mesh } from 'manifold-3d'
+// The glue file, not the package root: `.` is exported for `import` only, and the CJS main build
+// (compute worker chunk, docs/architecture/workers.md#lanes-and-pool) `require`s it.
+import Module, { type Manifold, type ManifoldToplevel, type Mesh } from 'manifold-3d/manifold.js'
 import {
   Err,
   fail,

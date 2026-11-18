@@ -7,14 +7,16 @@ import { contourParam, offsetContour, perimeter } from '../geometry/contour'
 import { EPSILON, type Contour, type Vec2, type Vec3 } from '../geometry/model'
 import { slotCoversOpening } from '../geometry/operations'
 import { Err, Ok, type AppResult } from '../../shared/result'
-import { commonIssues, levels, toolpath } from './common'
+import { noSteps, type Steps } from '../workers/steps'
+import { commonIssues, levels, passSteps, toolpath } from './common'
 import { rowPositions } from './facing'
 import type { ProfileInput, Toolpath } from './model'
 import { flat, MoveBuilder, ringSegs, segPoint, slope, walkRing, type Seg, type Seg3 } from './path'
 import { inradius, ringOffsets, TOOL_FIT_TOLERANCE, wallMiddle } from './pocket'
 import { diskHitsBands, liftOverTabs, tabBands } from './tabs'
 
-export function generateProfile(input: ProfileInput): AppResult<Toolpath> {
+/** `steps.step()` before every level and before the finishing pass. */
+export function generateProfile(input: ProfileInput, steps: Steps = noSteps): AppResult<Toolpath> {
   const { tool, cutting, heights, stock, operation: op, strategy: st } = input
   const shape = op.shape.contour
   const c = op.shape.center
@@ -141,8 +143,13 @@ export function generateProfile(input: ProfileInput): AppResult<Toolpath> {
     return [{ seg: { kind: 'line', from, to: p }, z0: z, z1: z }]
   }
 
+  const finishing = first - R > EPSILON
+  const zs = levels(0, bottom, cutting.stepdown)
+  const pass = passSteps(steps, zs.length + (finishing ? 1 : 0))
   let previous = 0
-  for (const z of levels(0, bottom, cutting.stepdown)) {
+  for (const [k, z] of zs.entries()) {
+    const step = pass(k)
+    if (step.isErr()) return Err(step.unwrapErr())
     b.pass('rough')
     const ring0 = ring(distances[0]!, start)
     const p0 = ring0.length > 0 ? segPoint(ring0[0]!, 0) : c
@@ -171,7 +178,9 @@ export function generateProfile(input: ProfileInput): AppResult<Toolpath> {
   }
 
   // finishing: the part-side ring at full depth, lead-in/out from the part-side rough ring
-  if (first - R > EPSILON) {
+  if (finishing) {
+    const step = pass(zs.length)
+    if (step.isErr()) return Err(step.unwrapErr())
     b.pass('finish')
     const wall = ring(R, start)
     const leadRing = ring(first, start)
