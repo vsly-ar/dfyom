@@ -65,9 +65,13 @@ interface HttpSession {
 
 const digest = (s: string) => createHash('sha256').update(s).digest()
 
-function deny(res: ServerResponse, status: number, message: string): void {
+function deny(res: ServerResponse, status: number, message: string, close = false): void {
   res
-    .writeHead(status, { 'content-type': 'application/json' })
+    .writeHead(status, {
+      'content-type': 'application/json',
+      // the rest of an oversized body is never read: the connection cannot be reused
+      ...(close ? { connection: 'close' } : {}),
+    })
     .end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32000, message }, id: null }))
 }
 
@@ -95,6 +99,7 @@ export async function startMcpHttp(o: McpHttpOptions): AsyncAppResult<McpHttpSer
   const token = randomBytes(32).toString('base64url')
   const tokenDigest = digest(token)
   const sessions = new Map<string, HttpSession>()
+  let initializing = 0
   const listed = filterAreas(o.host.tools, o.areas)
   let port = 0
 
@@ -124,8 +129,13 @@ export async function startMcpHttp(o: McpHttpOptions): AsyncAppResult<McpHttpSer
     let body: unknown
     if (req.method === 'POST') {
       const read = await readBody(req)
-      if (!read.ok)
-        return deny(res, read.status, read.status === 413 ? 'body too large' : 'malformed JSON')
+      if (!read.ok) {
+        if (read.status === 413) {
+          res.once('finish', () => req.destroy())
+          return deny(res, 413, 'body too large', true)
+        }
+        return deny(res, read.status, 'malformed JSON')
+      }
       body = read.body
     }
     const sid = req.headers['mcp-session-id']
@@ -137,7 +147,18 @@ export async function startMcpHttp(o: McpHttpOptions): AsyncAppResult<McpHttpSer
     }
     if (req.method !== 'POST' || !isInitializeRequest(body))
       return deny(res, 400, 'no session: send initialize first')
-    if (sessions.size >= MAX_SESSIONS) return deny(res, 503, 'too many sessions')
+    // Initializations in progress count too: concurrent initializes cannot pass the limit.
+    if (sessions.size + initializing >= MAX_SESSIONS) return deny(res, 503, 'too many sessions')
+    initializing += 1
+    try {
+      await initialize(req, res, body)
+    } finally {
+      initializing -= 1
+    }
+  }
+
+  /** A new MCP session; a rejected initialize (e.g. 406) ends its host session at once. */
+  const initialize = async (req: IncomingMessage, res: ServerResponse, body: unknown) => {
     const source = { kind: 'agent' as const, id: o.host.nextSourceId('http') }
     const session = o.host.openSession(source)
     const server = createMcpServer({
@@ -159,7 +180,9 @@ export async function startMcpHttp(o: McpHttpOptions): AsyncAppResult<McpHttpSer
       if (id !== undefined) sessions.delete(id)
     }
     await server.connect(transport)
-    return transport.handleRequest(req, res, body)
+    await transport.handleRequest(req, res, body)
+    const id = transport.sessionId
+    if (id === undefined || !sessions.has(id)) await server.close().catch(() => undefined)
   }
 
   const http: HttpServer = createServer((req, res) => {

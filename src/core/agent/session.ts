@@ -117,6 +117,8 @@ export const SESSION_TOOLS: readonly SessionToolDef[] = [
       'Bind this session to an open project; project tools then act on it. project.open, project.create and project.recovery.resolve bind automatically.',
     args: z.object({ key: KeyArg }),
     result: z.object({ key: z.string(), revision: z.number().int() }),
+    // changes which project the session's tools act on: not read-only
+    annotations: { destructiveHint: false, idempotentHint: true },
   },
   {
     name: 'project.log.list',
@@ -187,6 +189,11 @@ export class AgentSession {
   readonly source: Source
   private clientName: string | undefined
   private key: string | undefined
+  /** The runtime the session is bound to (identity: a reopened project is another one). */
+  private dispatcher: Dispatcher | undefined
+  /** Key of a bound project whose runtime ended, for the `noProject` message. */
+  private lostKey: string | undefined
+  private readonly waits = new Set<AbortController>()
   private cursor = 0
   private cursorRevision = 0
   private readonly report: ErrorReporter
@@ -214,16 +221,23 @@ export class AgentSession {
     if (!this.ended) this.host.sessionChanged(this.info())
   }
 
-  /** The bound project's key (undefined when none, or when it was closed meanwhile). */
+  /** The bound project's key (undefined when none, or when its runtime ended meanwhile). */
   get boundKey(): string | undefined {
-    if (this.key !== undefined && this.host.project(this.key).isNone()) this.unbind()
-    return this.key
+    return this.bound().isSome() ? this.key : undefined
   }
 
-  /** The bound project's dispatcher. */
+  /**
+   * The bound project's dispatcher. The binding is to one runtime, not to a key: a project that
+   * was closed (and maybe reopened under the same key) unbinds the session, whose digest cursor
+   * and stale-write baseline belonged to the old runtime.
+   */
   bound(): Option<Dispatcher> {
-    const key = this.boundKey
-    return key === undefined ? None : this.host.project(key)
+    if (this.key === undefined) return None
+    const d = this.host.project(this.key)
+    if (d.isSome() && d.unwrap() === this.dispatcher) return d
+    this.lostKey = this.key
+    this.unbind()
+    return None
   }
 
   info(): SessionInfo {
@@ -241,7 +255,10 @@ export class AgentSession {
     this.host.sessionChanged(this.info(), true)
   }
 
-  /** Binds to an open project; the digest starts at its current log position. */
+  /**
+   * Binds to an open project; the digest starts at its current log position. Not a read: an
+   * edit needs a query or `expectedRevision` first (docs/architecture/llm-api.md#undo-and-history).
+   */
   bind(key: string): AppResult<CommandOutcome> {
     const d = this.host.project(key)
     if (d.isNone())
@@ -251,16 +268,32 @@ export class AgentSession {
       })
     const dispatcher = d.unwrap()
     this.key = key
+    this.dispatcher = dispatcher
+    this.lostKey = undefined
     this.cursor = dispatcher.log.lastSeq
-    // The bind result reports the revision: a read, like a query (stale-write baseline).
-    this.cursorRevision = dispatcher.markRead(this.source)
+    this.cursorRevision = dispatcher.revision
     this.host.sessionChanged(this.info())
     return Ok({ value: { key, revision: dispatcher.revision }, revision: dispatcher.revision })
   }
 
   private unbind(): void {
     this.key = undefined
+    this.dispatcher = undefined
     this.host.sessionChanged(this.info())
+  }
+
+  /**
+   * Ends every pending `job.wait` of this session now (`op.aborted`; the jobs keep running):
+   * shutting down must not wait for their timeouts.
+   */
+  abortWaits(): void {
+    for (const c of this.waits) c.abort()
+  }
+
+  private lostMessage(): string | undefined {
+    return this.lostKey === undefined
+      ? undefined
+      : `the project bound to this session (${this.lostKey}) was closed; open or bind it again`
   }
 
   /** Kind of a tool by name, for result framing (`job` → "wait with job_wait"). */
@@ -302,7 +335,7 @@ export class AgentSession {
     if (!isCommand && project.query(name).isNone())
       return fail('command.unknown', `unknown tool ${name}`, { where: 'AgentSession' })
     const bound = this.bound()
-    if (bound.isNone()) return noProject(name)
+    if (bound.isNone()) return noProject(name, this.lostMessage())
     const d = bound.unwrap()
     if (!isCommand) return d.query(name, rawArgs, this.source)
     const split = splitExpectedRevision(rawArgs)
@@ -323,7 +356,11 @@ export class AgentSession {
     r: AppResult<CommandOutcome>,
   ): AppResult<CommandOutcome> {
     if (r.isErr()) return r
-    const value = r.unwrap().value as { key?: unknown } | null
+    const value = r.unwrap().value as {
+      key?: unknown
+      revision?: unknown
+      alreadyOpen?: unknown
+    } | null
     const key = value?.key
     if (
       (name === 'project.open' ||
@@ -333,6 +370,10 @@ export class AgentSession {
     ) {
       const bound = this.bind(key)
       if (bound.isErr()) return Err(bound.unwrapErr())
+      // This call started the runtime and its result showed the document at `revision`: a read.
+      // A project that was already open (someone else's) is not: query before editing.
+      if (value?.alreadyOpen !== true && typeof value?.revision === 'number')
+        this.dispatcher?.markRead(this.source, value.revision)
     }
     if (
       name === 'project.close' &&
@@ -356,7 +397,7 @@ export class AgentSession {
     const args = parsed.unwrap() as Record<string, unknown>
     if (name === 'project.bind') return this.bind(args['key'] as string)
     const bound = this.bound()
-    if (bound.isNone()) return noProject(name)
+    if (bound.isNone()) return noProject(name, this.lostMessage())
     const d = bound.unwrap()
     if (name === 'project.log.list')
       return Ok({ value: logList(d, args as unknown as LogQuery), revision: d.revision })
@@ -380,16 +421,19 @@ export class AgentSession {
     const offProgress =
       opts.onProgress === undefined ? undefined : handle.onProgress(opts.onProgress)
     let timer: unknown
-    let onAbort: (() => void) | undefined
+    const own = new AbortController()
+    this.waits.add(own)
+    const onAbort = () => own.abort()
+    opts.signal?.addEventListener('abort', onAbort, { once: true })
     const waited = await new Promise<'done' | 'timeout' | 'cancelled'>((resolve) => {
       if (opts.signal?.aborted === true) return resolve('cancelled')
       timer = this.timers.set(() => resolve('timeout'), args.timeoutSeconds * 1000)
-      onAbort = () => resolve('cancelled')
-      opts.signal?.addEventListener('abort', onAbort, { once: true })
+      own.signal.addEventListener('abort', () => resolve('cancelled'), { once: true })
       void handle.result.then(() => resolve('done'))
     })
     this.timers.clear(timer)
-    if (onAbort !== undefined) opts.signal?.removeEventListener('abort', onAbort)
+    this.waits.delete(own)
+    opts.signal?.removeEventListener('abort', onAbort)
     offProgress?.()
     if (waited === 'cancelled')
       return fail('op.aborted', 'the wait was cancelled; the job keeps running', {

@@ -131,6 +131,10 @@ describe('agent tools', () => {
       readOnlyHint: true,
       idempotentHint: true,
     })
+    expect(tool(tools, 'project.bind').annotations).toEqual({
+      destructiveHint: false,
+      idempotentHint: true,
+    })
   })
 
   it('--areas keeps the listed areas, the session tools and history/job', () => {
@@ -159,7 +163,7 @@ describe('agent tools', () => {
 
   it('compact schemas are equivalent to the generated ones', () => {
     const { app, project } = registries()
-    for (const def of [...app.commands, ...project.commands, ...project.queries]) {
+    for (const def of [...app.commands, ...app.queries, ...project.commands, ...project.queries]) {
       const d = expectOk(toolDescriptor(def))
       for (const s of [d.inputSchema, d.outputSchema]) {
         const { $schema: _, ...plain } = s

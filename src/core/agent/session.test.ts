@@ -66,8 +66,9 @@ function setup(opts: { logCapacity?: number } = {}) {
   )
   const projects = new Map<string, Dispatcher>()
   const sessions: { info: SessionInfo; ended: boolean }[] = []
-  const newProject = (name: string) => {
-    const key = `p${projects.size + 1}`
+  const byFile = new Map<string, string>()
+  let n = 0
+  const newProject = (name: string, key = `p${++n}`) => {
     projects.set(
       key,
       createDispatcher({
@@ -83,7 +84,14 @@ function setup(opts: { logCapacity?: number } = {}) {
   }
   const hostPort: HostPort = {
     create: async (init) => Ok({ key: newProject(init.name), revision: 0 }),
-    open: async (file) => Ok({ key: newProject(file), revision: 0, alreadyOpen: false }),
+    open: async (file) => {
+      const known = byFile.get(file)
+      if (known !== undefined && projects.has(known))
+        return Ok({ key: known, revision: projects.get(known)!.revision, alreadyOpen: true })
+      const key = newProject(file)
+      byFile.set(file, key)
+      return Ok({ key, revision: 0, alreadyOpen: false })
+    },
     close: async (key) => {
       projects.delete(key)
       return Ok(undefined)
@@ -299,5 +307,63 @@ describe('agent session', () => {
     }
     expect(r.state).toBe('finished')
     expect(r.outcome.error.code).toBe('op.aborted')
+  })
+})
+
+describe('agent session: reads and runtimes', () => {
+  it('a project this call opened or created is a read; bind and alreadyOpen are not', async () => {
+    const t = setup()
+    const a = t.session()
+    t.value((await a.call('project.open', { file: 'f.dfyom' })).result)
+    // opened by this call: an edit needs no query first
+    expectOk((await a.call('project.name.update', { name: 'mine' })).result)
+    const d = t.projects.get('p1')!
+    expectOk(await d.dispatch('project.name.update', { name: 'user' }, ui))
+    // another agent binds, or opens the same file (already open): neither is a read
+    const b = t.session(agentSource('http-2'))
+    t.value((await b.call('project.bind', { key: 'p1' })).result)
+    expectErrCode((await b.call('history.undo', {})).result, 'command.conflict')
+    const c = t.session(agentSource('http-3'))
+    expect(t.value((await c.call('project.open', { file: 'f.dfyom' })).result)).toMatchObject({
+      alreadyOpen: true,
+    })
+    expectErrCode((await c.call('history.undo', {})).result, 'command.conflict')
+    // re-binding does not clear the conflict; a query does
+    t.value((await b.call('project.bind', { key: 'p1' })).result)
+    expectErrCode((await b.call('history.undo', {})).result, 'command.conflict')
+    expectOk((await b.call('history.list', {})).result) // reads no document
+    expectErrCode((await b.call('history.undo', {})).result, 'command.conflict')
+    expectOk((await b.call('project.doc.get', {})).result)
+    expectOk((await b.call('history.undo', {})).result)
+  })
+
+  it('a project closed and reopened under the same key unbinds the session', async () => {
+    const t = setup()
+    const a = t.session()
+    t.value((await a.call('project.create', { name: 'A', unitSystem: 'mm' })).result)
+    t.newProject('A again', 'p1') // same key, new runtime
+    expect(a.boundKey).toBeUndefined()
+    const r = await a.call('project.doc.get', {})
+    const e = expectErrCode(r.result, 'input.malformed')
+    expect(e.message).toContain('(p1) was closed')
+    expect(r.digest).toBeUndefined()
+    t.value((await a.call('project.bind', { key: 'p1' })).result)
+    expect(t.value((await a.call('project.doc.get', {})).result)).toMatchObject({ name: 'A again' })
+  })
+
+  it('abortWaits ends pending job.wait calls (op.aborted); the job keeps running', async () => {
+    const t = setup()
+    const s = t.session()
+    t.value((await s.call('project.create', { name: 'A', unitSystem: 'mm' })).result)
+    const { jobId } = t.value((await s.call('plan.toolpath.generate', {})).result) as {
+      jobId: string
+    }
+    const wait = s.call('job.wait', { jobId, timeoutSeconds: 300 })
+    await settle()
+    s.abortWaits()
+    expectErrCode((await wait).result, 'op.aborted')
+    expect(t.timers.pending).toBe(0)
+    expect(t.projects.get('p1')!.job(jobId).unwrap().state).toBe('running')
+    t.job.open()
   })
 })

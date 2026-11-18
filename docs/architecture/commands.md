@@ -236,7 +236,8 @@ interface QueryDef<S extends z.ZodType, R> {
 - Without it, a command from any non-UI source (agent, CLI, automation, system) that can change `ProjectDoc` – a `document` command, `history.undo` or `history.redo` – is accepted only if every revision since that source's last read or last own commit was made by that same source (no baseline yet = rejected). Otherwise → `command.conflict`, whose message tells the agent to re-query and retry. Since own commits advance the baseline, this is implemented as "baseline = current revision".
 - `effect`, `job` and `job.*` commands do not write the document and are not subject to the baseline rule (machine commands are gated by the permission policy instead).
 - UI-source commands are never rejected by this check.
-- Binding a session to a project (`project.open`, `create`, `recovery.resolve`, `bind`, whose results carry the revision) counts as a read: the session core calls `Dispatcher.markRead(source)` ([llm-api.md](llm-api.md#implementation-task-310)).
+- A session whose `project.open`, `create` or `recovery.resolve` started the project's runtime has read it at the returned revision: the session core calls `Dispatcher.markRead(source, revision)`. Binding to a project someone else opened (`project.bind`, `alreadyOpen`) is not a read ([llm-api.md](llm-api.md#implementation-task-310)).
+- `suspend()` refuses new non-urgent dispatches (`input.malformed`, rule `projectClosing`) and resolves when the queue has drained; `resume()` undoes it (project close).
 
 ## JSON Schema for agent tools
 

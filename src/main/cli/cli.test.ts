@@ -2,11 +2,12 @@
 // exit codes, tools, and stdout holding only results (no log lines).
 // Spec: docs/architecture/llm-api.md#testing (CLI), #cli
 import { spawn } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterAll, describe, expect, inject, it } from 'vitest'
 import { testStock } from '../../core/design/design.fixture'
 import { tempDir } from '../host/host.fixture'
+import { INITIALIZE, INITIALIZED, spawnCli, toolCall } from './cli.fixture'
 
 const t = tempDir('dfyom-cli-')
 afterAll(() => t.cleanup())
@@ -166,5 +167,66 @@ describe('dfyom CLI', { timeout: 60_000 }, () => {
     const r = await cli(['mcp'])
     expect(r.code).toBe(0)
     expect(r.stdout).toBe('')
+  })
+
+  it('stderr carries the code: message line only; --log-level adds the log copy', async () => {
+    const plain = await cli(['nope.x.y'])
+    expect(plain.stderr).toBe('command.unknown: unknown tool nope.x.y; see dfyom tools\n')
+    const logged = await cli(['design.part.list', '--log-level', 'warn'])
+    expect(logged.stderr).toMatch(/"level":40/)
+    expect(logged.stderr).toContain('input.malformed: design.part.list: no project is bound')
+  })
+
+  it('dfyom mcp answers a call still in flight when stdin ends', async () => {
+    const p = spawnCli(['mcp'], t.dir)
+    p.send(INITIALIZE)
+    expect((await p.next())['id']).toBe(1)
+    p.send(INITIALIZED)
+    p.send(toolCall(2, 'project_create', { name: 'Late', unitSystem: 'mm' }))
+    p.end()
+    const answer = (await p.next()) as { id: number; result: { isError: boolean } }
+    expect(answer).toMatchObject({ id: 2, result: { isError: false } })
+    expect((await p.exited).code).toBe(0) // the unchanged untitled project is removed
+  })
+
+  /** Projects of the data dir that still hold a lock file (a dead lock = a crashed instance). */
+  const locks = () =>
+    existsSync(join(t.dir, 'projects'))
+      ? readdirSync(join(t.dir, 'projects')).filter((k) =>
+          existsSync(join(t.dir, 'projects', k, 'lock.json')),
+        )
+      : []
+
+  it('batch: unsaved projects are named on stderr and the exit code is 6', async () => {
+    const lines = [
+      { name: 'project.create', args: { name: 'Unsaved', unitSystem: 'mm' } },
+      { name: 'design.part.add', args: { name: 'P', stockLibraryItemId: stock } },
+    ].map((l) => JSON.stringify(l))
+    const r = await cli(['batch'], lines.join('\n'))
+    expect(
+      r.stdout
+        .trim()
+        .split('\n')
+        .map((l) => (JSON.parse(l) as { ok: boolean }).ok),
+    ).toEqual([true, true])
+    expect(r.code).toBe(6)
+    expect(r.stderr).toMatch(/^unsaved changes kept for recovery: Unsaved \(/m)
+    expect(locks()).toEqual([])
+  })
+
+  it('SIGTERM shuts down under control: locks released, unsaved changes recoverable, 143', async () => {
+    const p = spawnCli(['batch'], t.dir)
+    p.send({ name: 'project.create', args: { name: 'Signalled', unitSystem: 'mm' } })
+    expect((await p.next())['ok']).toBe(true)
+    p.send({ name: 'design.part.add', args: { name: 'P', stockLibraryItemId: stock } })
+    expect((await p.next())['ok']).toBe(true)
+    expect(locks()).toHaveLength(1)
+    p.kill('SIGTERM')
+    const exit = await p.exited
+    expect(exit.code).toBe(143)
+    expect(exit.stderr).toMatch(/unsaved changes kept for recovery: Signalled/)
+    expect(locks()).toEqual([])
+    const listed = (await ok(['project.recovery.list'])) as { projects: unknown[] }
+    expect(listed.projects.length).toBeGreaterThanOrEqual(2)
   })
 })

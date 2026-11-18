@@ -12,7 +12,7 @@ import type { AppHost } from '../host/app-host'
 import { buildSmallPlan, tempDir, testHost } from '../host/host.fixture'
 import { createMcpServer } from './server'
 
-const cleanups: (() => Promise<void> | void)[] = []
+const cleanups: (() => unknown)[] = []
 afterEach(async () => {
   for (const c of cleanups.splice(0).reverse()) await c()
 })

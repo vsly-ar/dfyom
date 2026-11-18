@@ -12,13 +12,22 @@ import {
   type CallReply,
   type LocalHttpState,
 } from '../shared/preload-api'
+import type { Dispatcher } from '../core/commands/dispatcher'
 import type { AppHost } from './host/app-host'
 import type { LocalHttpControl } from './mcp/http'
 
 interface WindowSession {
+  readonly win: BrowserWindow
   readonly session: AgentSession
-  boundKey: string | undefined
+  /** The runtime whose log the window follows (identity: a reopened project is another). */
+  following: Dispatcher | undefined
   unsubscribe: (() => void) | undefined
+}
+
+const NOT_A_WINDOW: CallReply = {
+  ok: false,
+  error: { code: 'input.malformed', message: 'not a DFYOM window', issues: [], frames: [] },
+  retryable: false,
 }
 
 function reply(r: AppResult<{ value: unknown; revision: number }>): CallReply {
@@ -45,19 +54,25 @@ export interface WindowSessions {
 export function registerProjectIpc(host: AppHost, http: LocalHttpControl): WindowSessions {
   const byContents = new Map<number, WindowSession>()
 
-  /** Re-subscribes the window to its project's action log when its binding changed. */
-  const follow = (win: BrowserWindow, ws: WindowSession) => {
-    const key = ws.session.boundKey
-    if (key === ws.boundKey) return
+  /**
+   * Re-subscribes the window to its project's action log when its bound runtime changed (bound,
+   * unbound, or the project was closed: the session unbinds from a runtime that ended).
+   */
+  const follow = (ws: WindowSession) => {
+    const bound = ws.session.bound()
+    const d = bound.isSome() ? bound.unwrap() : undefined
+    if (d === ws.following) return
     ws.unsubscribe?.()
     ws.unsubscribe = undefined
-    ws.boundKey = key
-    const d = key === undefined ? undefined : host.project(key)
-    if (d === undefined || d.isNone()) return
-    ws.unsubscribe = d.unwrap().log.subscribe({ withPatches: true }, (e) => {
-      if (!win.isDestroyed()) win.webContents.send(IPC.projectEvent, e)
+    ws.following = d
+    if (d === undefined) return
+    ws.unsubscribe = d.log.subscribe({ withPatches: true }, (e) => {
+      if (!ws.win.isDestroyed()) ws.win.webContents.send(IPC.projectEvent, e)
     })
   }
+  host.onProjectsChanged(() => {
+    for (const ws of byContents.values()) follow(ws)
+  })
 
   /** Only a known window's main frame may call (no subframes, no navigated-away frames). */
   const sessionOf = (event: IpcMainInvokeEvent): WindowSession | undefined => {
@@ -70,23 +85,22 @@ export function registerProjectIpc(host: AppHost, http: LocalHttpControl): Windo
 
   ipcMain.handle(IPC.call, async (event, name: unknown, args: unknown): Promise<CallReply> => {
     const ws = sessionOf(event)
-    const win = BrowserWindow.fromWebContents(event.sender)
-    if (ws === undefined || win === null || typeof name !== 'string')
-      return {
-        ok: false,
-        error: { code: 'input.malformed', message: 'not a DFYOM window', issues: [], frames: [] },
-        retryable: false,
-      }
+    if (ws === undefined || typeof name !== 'string') return NOT_A_WINDOW
     const r = await ws.session.call(name, args ?? {})
-    follow(win, ws)
+    follow(ws)
     return reply(r.result)
   })
 
-  ipcMain.handle(IPC.agentsList, () => agentSessions(host.sessions()))
-  ipcMain.handle(IPC.localHttpGet, (): LocalHttpState =>
-    http.server === undefined ? { enabled: false } : { enabled: true, port: http.server.port },
+  // Same sender check for every handler: only a DFYOM window's main frame.
+  ipcMain.handle(IPC.agentsList, (event) =>
+    sessionOf(event) === undefined ? [] : agentSessions(host.sessions()),
   )
-  ipcMain.handle(IPC.localHttpSet, async (_event, enabled: unknown): Promise<CallReply> => {
+  ipcMain.handle(IPC.localHttpGet, (event): LocalHttpState => {
+    if (sessionOf(event) === undefined || http.server === undefined) return { enabled: false }
+    return { enabled: true, port: http.server.port }
+  })
+  ipcMain.handle(IPC.localHttpSet, async (event, enabled: unknown): Promise<CallReply> => {
+    if (sessionOf(event) === undefined) return NOT_A_WINDOW
     const r = await http.setEnabled(enabled === true)
     return reply(r.map(() => ({ value: {}, revision: 0 })))
   })
@@ -100,11 +114,11 @@ export function registerProjectIpc(host: AppHost, http: LocalHttpControl): Windo
   return {
     attach(win, key) {
       const session = host.openSession({ kind: 'ui', id: `win-${win.id}` })
-      const ws: WindowSession = { session, boundKey: undefined, unsubscribe: undefined }
+      const ws: WindowSession = { win, session, following: undefined, unsubscribe: undefined }
       if (key !== undefined) session.bind(key)
       const contentsId = win.webContents.id
       byContents.set(contentsId, ws)
-      follow(win, ws)
+      follow(ws)
       win.on('closed', () => {
         ws.unsubscribe?.()
         session.end()

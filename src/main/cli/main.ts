@@ -14,6 +14,7 @@ import { agentError, errorText } from '../../core/agent/results'
 import { SESSION_TOOLS, type AgentSession } from '../../core/agent/session'
 import { buildAgentTools, filterAreas, toMcpName, type AgentTool } from '../../core/agent/tools'
 import type { CommandOutcome } from '../../core/commands/dispatcher'
+import type { OpenProjectInfo } from '../../core/project/lifecycle'
 import { createAppScopeRegistry, createProjectRegistry } from '../../core/commands/registry'
 import { AppError, type AppErrorData } from '../../shared/errors/app-error'
 import { Err, fail, fromWire, Ok, type AppResult, type ResultWire } from '../../shared/result'
@@ -192,14 +193,15 @@ async function mcpCommand(c: Ctx): Promise<number> {
       logging.flushSync()
       return exitCodeOf(found.unwrapErr().code)
     }
-    await runBridge({
+    const clean = await runBridge({
       instance: found.unwrap(),
       stdin: c.io.stdin,
       stdout: c.io.stdout,
       log: logging.log,
     })
     logging.flushSync()
-    return EXIT.ok
+    if (!clean) c.io.stderr.write('external.failure: the DFYOM instance failed or went away\n')
+    return clean ? EXIT.ok : EXIT.other
   }
   const h = await headless(c)
   if (h === undefined) return EXIT.internal
@@ -235,16 +237,29 @@ async function mcpCommand(c: Ctx): Promise<number> {
   })
   await server.connect(new StdioServerTransport(c.io.stdin, c.io.stdout))
   await ended
-  // End of stdin: answer the calls in flight, then abort running jobs, close every project
-  // (unsaved changes stay recoverable) and exit 0.
+  // End of stdin: answer the calls in flight (pending job.wait calls end at once, their jobs
+  // are aborted below), then abort running jobs, close every project (unsaved changes stay
+  // recoverable, reported on stderr with a non-zero exit) and exit.
   const tick = () => new Promise((resolve) => setImmediate(resolve))
   await tick() // the requests read last start their handlers
+  session.abortWaits()
   await whenIdle(server)
   await tick() // their responses are written
   await server.close().catch(() => undefined)
   await http?.stop()
-  await h.shutdown()
-  return EXIT.ok
+  return unsavedExit(c, await h.shutdown(), EXIT.ok)
+}
+
+/**
+ * Projects closed with unsaved changes (kept for recovery) are named on stderr; the run then
+ * exits with `EXIT.other` unless it already failed (docs/architecture/llm-api.md#cli).
+ */
+function unsavedExit(c: Ctx, unsaved: readonly OpenProjectInfo[], code: number): number {
+  for (const p of unsaved)
+    c.io.stderr.write(
+      `unsaved changes kept for recovery: ${p.name} (${p.key}${p.file === null ? '' : `, ${p.file}`}); see project.recovery.list\n`,
+    )
+  return unsaved.length > 0 && code === EXIT.ok ? EXIT.other : code
 }
 
 async function headless(c: Ctx): Promise<Headless | undefined> {
@@ -254,6 +269,7 @@ async function headless(c: Ctx): Promise<Headless | undefined> {
     argv: logArgs(c.p),
     env: c.io.env,
     exit: c.io.exit,
+    onUnsaved: (unsaved) => void unsavedExit(c, unsaved, EXIT.ok),
   })
   if (h.isErr()) {
     c.printError(h.unwrapErr())
@@ -424,8 +440,7 @@ async function oneShot(c: Ctx, name: string, rest: readonly string[]): Promise<n
   }
   s.end()
   const code = report(c, result)
-  await h.shutdown()
-  return code
+  return unsavedExit(c, await h.shutdown(), code)
 }
 
 async function connectedOneShot(
@@ -449,9 +464,17 @@ async function connectedOneShot(
     )
   }
   const call = async (name: string, a: Record<string, unknown>): Promise<AppResult<unknown>> => {
-    const r = await client.callTool({ name: toMcpName(name), arguments: a }, undefined, {
-      timeout: 3_600_000,
-    })
+    let r: Awaited<ReturnType<typeof client.callTool>>
+    try {
+      r = await client.callTool({ name: toMcpName(name), arguments: a }, undefined, {
+        timeout: 3_600_000,
+      })
+    } catch (cause) {
+      return fail('external.failure', `the instance did not answer ${name}`, {
+        where: 'cli.connect',
+        data: { cause: String(cause) },
+      })
+    }
     const sc = r.structuredContent as { value?: unknown; error?: AppErrorData } | undefined
     if (r.isError === true)
       return Err(
@@ -461,6 +484,22 @@ async function connectedOneShot(
       )
     return Ok(sc?.value)
   }
+  let result: AppResult<unknown>
+  try {
+    result = await connectedCalls(c, tool, args, call)
+  } finally {
+    await transport.terminateSession().catch(() => undefined)
+    await client.close().catch(() => undefined)
+  }
+  return report(c, result)
+}
+
+async function connectedCalls(
+  c: Ctx,
+  tool: AgentTool,
+  args: Record<string, unknown>,
+  call: (name: string, a: Record<string, unknown>) => Promise<AppResult<unknown>>,
+): Promise<AppResult<unknown>> {
   let result: AppResult<unknown> = Ok(undefined)
   const file = str(c.p, '--project')
   if (file !== undefined) result = await call('project.open', { file })
@@ -480,9 +519,7 @@ async function connectedOneShot(
       }
     }
   }
-  await transport.terminateSession().catch(() => undefined)
-  await client.close().catch(() => undefined)
-  return report(c, result)
+  return result
 }
 
 async function batchCommand(c: Ctx): Promise<number> {
@@ -530,8 +567,7 @@ async function batchCommand(c: Ctx): Promise<number> {
     }
   }
   s.end()
-  await h.shutdown()
-  return code
+  return unsavedExit(c, await h.shutdown(), code)
 }
 
 function parseLine(

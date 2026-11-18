@@ -1,11 +1,12 @@
 // Local HTTP on a real loopback server: token, Host/Origin checks, sessions, discovery file,
 // on by default and the setting.
 // Spec: docs/architecture/llm-api.md#testing (HTTP), #local-http
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs'
+import { join } from 'node:path'
 import { request } from 'node:http'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { afterEach, describe, expect, it } from 'vitest'
-import { expectOk } from '../../shared/testing/result'
+import { expectErrCode, expectOk } from '../../shared/testing/result'
 import { noopLogger } from '../../shared/logging'
 import type { AppHost } from '../host/app-host'
 import { InstanceRecordSchema, listInstances } from '../host/discovery'
@@ -13,23 +14,35 @@ import { tempDir, testHost } from '../host/host.fixture'
 import { connectTransport } from './bridge'
 import {
   createLocalHttpControl,
+  IDLE_MS,
   LOOPBACK,
+  MAX_BODY_BYTES,
+  MAX_SESSIONS,
   localHttpSetting,
   startMcpHttp,
   type McpHttpServer,
 } from './http'
 
-const cleanups: (() => Promise<void> | void)[] = []
+const cleanups: (() => unknown)[] = []
 afterEach(async () => {
   for (const c of cleanups.splice(0).reverse()) await c()
 })
 
-async function setup(): Promise<{ host: AppHost; server: McpHttpServer; dir: string }> {
+async function setup(
+  o: { now?: () => number } = {},
+): Promise<{ host: AppHost; server: McpHttpServer; dir: string }> {
   const t = tempDir()
   cleanups.push(t.cleanup)
   const host = await testHost(t.dir)
   cleanups.push(() => host.shutdown())
-  const server = expectOk(await startMcpHttp({ host, appVersion: '0.0.0', log: noopLogger }))
+  const server = expectOk(
+    await startMcpHttp({
+      host,
+      appVersion: '0.0.0',
+      log: noopLogger,
+      ...(o.now === undefined ? {} : { now: o.now }),
+    }),
+  )
   cleanups.push(() => server.stop())
   return { host, server, dir: t.dir }
 }
@@ -183,5 +196,62 @@ describe('local HTTP', () => {
     // on again: a new token
     expectOk(await control.setEnabled(true))
     expect(control.server!.token).not.toBe(server.token)
+  })
+
+  it('refuses bodies over 4 MB (413) and closes that connection; the server stays usable', async () => {
+    const { server } = await setup()
+    const ok = { host: `127.0.0.1:${server.port}`, authorization: `Bearer ${server.token}` }
+    expect(await post(server.port, ok, { pad: ' '.repeat(MAX_BODY_BYTES) })).toBe(413)
+    expect(await post(server.port, ok)).toBe(200)
+  })
+
+  it('a rejected initialize (406: no event-stream accept) leaves no session behind', async () => {
+    const { host, server } = await setup()
+    const headers = {
+      host: `127.0.0.1:${server.port}`,
+      authorization: `Bearer ${server.token}`,
+      accept: 'application/json',
+    }
+    for (let i = 0; i < 3; i++) expect(await post(server.port, headers)).toBe(406)
+    expect(host.sessions()).toEqual([])
+    expect(server.sessionCount()).toBe(0)
+  })
+
+  it(`allows at most ${MAX_SESSIONS} sessions, also under concurrent initializes (503)`, async () => {
+    const { host, server } = await setup()
+    const ok = { host: `127.0.0.1:${server.port}`, authorization: `Bearer ${server.token}` }
+    const codes = await Promise.all(
+      Array.from({ length: MAX_SESSIONS + 8 }, () => post(server.port, ok)),
+    )
+    expect(codes.filter((c) => c === 200)).toHaveLength(MAX_SESSIONS)
+    expect(codes.filter((c) => c === 503)).toHaveLength(8)
+    expect(server.sessionCount()).toBe(MAX_SESSIONS)
+    expect(host.sessions()).toHaveLength(MAX_SESSIONS)
+  })
+
+  it('ends sessions idle for 30 minutes', async () => {
+    let t = 0
+    const { host, server } = await setup({ now: () => t })
+    const ok = { host: `127.0.0.1:${server.port}`, authorization: `Bearer ${server.token}` }
+    expect(await post(server.port, ok)).toBe(200)
+    t = IDLE_MS - 1
+    server.sweepIdle()
+    expect(server.sessionCount()).toBe(1)
+    t = IDLE_MS + 1
+    server.sweepIdle()
+    await expect.poll(() => server.sessionCount()).toBe(0)
+    await expect.poll(() => host.sessions()).toEqual([])
+  })
+
+  it('refuses an instances folder other users can read', async () => {
+    if (process.platform === 'win32') return
+    const t = tempDir()
+    cleanups.push(t.cleanup)
+    mkdirSync(join(t.dir, 'instances'), { mode: 0o755 })
+    chmodSync(join(t.dir, 'instances'), 0o755)
+    const host = await testHost(t.dir)
+    cleanups.push(() => host.shutdown())
+    const r = await startMcpHttp({ host, appVersion: '0', log: noopLogger })
+    expect(expectErrCode(r, 'persist.io').message).toContain('accessible by other users')
   })
 })

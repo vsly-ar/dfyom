@@ -118,8 +118,13 @@ export interface AppHost extends SessionHost, HostPort {
   onSessions(listener: (sessions: readonly SessionInfo[]) => void): () => void
   /** Called after a project was opened, created or restored, with the source that did it. */
   onProjectOpened(listener: (key: string, source: Source) => void): () => void
-  /** Stdin end, app quit: abort jobs and close every project (unsaved changes stay recoverable). */
-  shutdown(): Promise<void>
+  /** Called after a project runtime started or stopped (windows re-follow their project). */
+  onProjectsChanged(listener: () => void): () => void
+  /**
+   * Stdin end, app quit: abort jobs and close every project (unsaved changes stay recoverable).
+   * Returns the projects that had unsaved changes.
+   */
+  shutdown(): Promise<readonly OpenProjectInfo[]>
 }
 
 /** Opens the library (`<appData>/library`) unless given, and builds the host. */
@@ -154,7 +159,8 @@ class Host implements AppHost {
   private readonly counters = new Map<string, number>()
   private readonly log: Logger
   private prewarmed = false
-  private closing = false
+  private closing: Promise<readonly OpenProjectInfo[]> | undefined
+  private readonly changeListeners = new Set<() => void>()
 
   constructor(
     private readonly o: AppHostOptions,
@@ -323,11 +329,25 @@ class Host implements AppHost {
         where,
         issues: [{ path: ['key'], rule: 'unknownProject', message: 'see project.list' }],
       })
+    const refused = this.refuseClose(rt, confirm)
+    if (refused !== undefined) return refused
+    // Refuse new dispatches and drain the queue, then check again: an edit queued meanwhile
+    // must not slip past the unsaved-changes confirmation.
+    await rt.dispatcher.suspend()
+    const late = this.refuseClose(rt, confirm)
+    if (late !== undefined) {
+      rt.dispatcher.resume()
+      return late
+    }
+    return this.stop(rt)
+  }
+
+  private refuseClose(rt: ProjectRuntime, confirm: boolean) {
     const busy = checkNoRunJob(rt.dispatcher.jobs)
     if (busy.isErr()) return busy
     if (isDirty(rt) && !confirm)
       return fail('input.malformed', 'the project has unsaved changes', {
-        where,
+        where: 'project.close',
         issues: [
           {
             path: ['confirm'],
@@ -336,7 +356,7 @@ class Host implements AppHost {
           },
         ],
       })
-    return this.stop(rt)
+    return undefined
   }
 
   list(): readonly OpenProjectInfo[] {
@@ -426,11 +446,13 @@ class Host implements AppHost {
       'project runtime started',
     )
     for (const l of [...this.openListeners]) l(session.key, source)
+    for (const l of [...this.changeListeners]) l()
     return { key: session.key, revision: dispatcher.revision }
   }
 
   /** Aborts the project's jobs, stops evaluations, releases storage (unsaved stays recoverable). */
   private async stop(rt: ProjectRuntime): AsyncAppResult<void> {
+    await rt.dispatcher.suspend() // queued commands finish (and are flushed) first
     this.runtimes.delete(rt.key)
     const running = rt.dispatcher.jobs.list().filter((j) => j.state !== 'finished')
     for (const j of running) await rt.dispatcher.dispatch('job.abort', { jobId: j.id }, HOST_SOURCE)
@@ -446,16 +468,26 @@ class Host implements AppHost {
           ...(s.client === undefined ? {} : { client: s.client }),
         })
     this.notifySessions()
+    for (const l of [...this.changeListeners]) l()
     this.log.info({ key: rt.key }, 'project runtime stopped')
     return closed
   }
 
-  async shutdown(): Promise<void> {
-    if (this.closing) return
-    this.closing = true
-    for (const rt of [...this.runtimes.values()]) {
-      const r = await this.stop(rt)
-      if (r.isErr()) this.o.report(r.unwrapErr(), { kind: 'system', name: 'host.shutdown' })
-    }
+  async shutdown(): Promise<readonly OpenProjectInfo[]> {
+    if (this.closing !== undefined) return this.closing
+    this.closing = (async () => {
+      const unsaved = this.list().filter((p) => p.dirty)
+      for (const rt of [...this.runtimes.values()]) {
+        const r = await this.stop(rt)
+        if (r.isErr()) this.o.report(r.unwrapErr(), { kind: 'system', name: 'host.shutdown' })
+      }
+      return unsaved
+    })()
+    return this.closing
+  }
+
+  onProjectsChanged(listener: () => void): () => void {
+    this.changeListeners.add(listener)
+    return () => void this.changeListeners.delete(listener)
   }
 }

@@ -4,7 +4,8 @@
  * user profile's ACL), deleted on quit; stale files (dead PID) are ignored and removed.
  * Doc: docs/architecture/llm-api.md#coexistence-with-a-running-gui
  */
-import { chmod, mkdir, readdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
+import { chmod, lstat, mkdir, readdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { z } from 'zod'
 import { fail, Ok, tryAsync, type AppResult, type AsyncAppResult } from '../../shared/result'
@@ -29,22 +30,49 @@ function recordPath(appData: string, instanceId: string): string {
   return join(instancesDir(appData), `${instanceId}.json`)
 }
 
-/** Writes the record atomically with mode 0600 (folder 0700). */
+/** The current user's id; `undefined` on Windows (the user profile's ACL protects the folder). */
+const currentUid = (): number | undefined => process.getuid?.()
+
+/**
+ * The folder must be a real directory (not a symlink) owned by this user and closed to others:
+ * otherwise another local user could read or plant tokens. Returns why not, or `undefined`.
+ */
+export async function checkInstancesDir(dir: string): Promise<string | undefined> {
+  const st = await lstat(dir)
+  if (!st.isDirectory()) return 'not a directory (or a symlink)'
+  const uid = currentUid()
+  if (uid === undefined) return undefined
+  if (st.uid !== uid) return 'owned by another user'
+  if ((st.mode & 0o077) !== 0) return 'accessible by other users'
+  return undefined
+}
+
+/** Writes the record atomically with mode 0600 (folder 0700, checked). */
 export async function writeDiscovery(appData: string, rec: InstanceRecord): AsyncAppResult<string> {
   const dir = instancesDir(appData)
   const path = recordPath(appData, rec.instanceId)
-  return tryAsync(
+  const written = await tryAsync(
     async () => {
       await mkdir(dir, { recursive: true, mode: 0o700 })
-      const tmp = `${path}.tmp-${process.pid}`
-      await writeFile(tmp, JSON.stringify(rec, null, 2), { mode: 0o600 })
+      const unsafe = await checkInstancesDir(dir)
+      if (unsafe !== undefined) return unsafe
+      const tmp = `${path}.tmp-${randomUUID()}`
+      await writeFile(tmp, JSON.stringify(rec, null, 2), { mode: 0o600, flag: 'wx' })
       await chmod(tmp, 0o600) // the umask may have widened it
       await rename(tmp, path)
-      return path
+      return undefined
     },
     'persist.io',
     'writing the discovery file failed',
   )
+  if (written.isErr()) return written
+  const unsafe = written.unwrap()
+  if (unsafe !== undefined)
+    return fail('persist.io', `the instances folder is unsafe: ${unsafe}`, {
+      where: 'writeDiscovery',
+      data: { dir },
+    })
+  return Ok(path)
 }
 
 /** Deletes the record; a missing file is fine. */
@@ -73,6 +101,10 @@ export async function listInstances(
     const path = join(instancesDir(appData), name)
     let parsed: z.ZodSafeParseResult<InstanceRecord>
     try {
+      // Only regular files of this user (a planted file could redirect the token elsewhere).
+      const st = await lstat(path)
+      const uid = currentUid()
+      if (!st.isFile() || (uid !== undefined && st.uid !== uid)) continue
       parsed = InstanceRecordSchema.safeParse(JSON.parse(await readFile(path, 'utf8')))
     } catch {
       continue

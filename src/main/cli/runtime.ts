@@ -13,11 +13,14 @@ import pino from 'pino'
 import { version } from '../../../package.json'
 import {
   createLogReporter,
+  flagValue,
+  LOG_LEVEL_FLAG,
   LOG_LEVEL_ENV,
   resolveLogLevel,
   type Logger,
 } from '../../shared/logging'
 import type { ErrorReporter } from '../../shared/boundary'
+import type { OpenProjectInfo } from '../../core/project/lifecycle'
 import { Err, Ok, type AsyncAppResult } from '../../shared/result'
 import type { MachineClient } from '../../core/run/host/client'
 import { createAppHost, type AppHost } from '../host/app-host'
@@ -45,8 +48,12 @@ export interface HeadlessOptions {
   readonly entries: WorkerEntries
   readonly argv: readonly string[]
   readonly env: NodeJS.ProcessEnv
-  /** Exits the process on an uncaught error (after logging it at `fatal`). */
+  /** Exits the process on an uncaught error (after logging it at `fatal`) or a signal. */
   readonly exit: (code: number) => void
+  /** Where SIGINT/SIGTERM are handled (default `process`). */
+  readonly signals?: Pick<NodeJS.Process, 'once'>
+  /** Told which projects kept unsaved changes when a signal ended the run. */
+  readonly onUnsaved?: (projects: readonly OpenProjectInfo[]) => void
 }
 
 export interface Headless {
@@ -54,11 +61,23 @@ export interface Headless {
   readonly log: Logger
   readonly report: ErrorReporter
   readonly machine: MachineClient
-  /** Abort jobs, close projects (unsaved stays recoverable), stop the machine host and workers, flush logs. */
-  shutdown(): Promise<void>
+  /**
+   * Abort jobs, close projects (unsaved changes stay recoverable), stop the machine host and
+   * workers, flush logs. Returns the projects that had unsaved changes.
+   */
+  shutdown(): Promise<readonly OpenProjectInfo[]>
 }
 
-/** CLI logging: `<data-dir>/logs/`, origin `cli`, a `warn`+ copy on stderr (never stdout). */
+/** Signals that end a headless run under control (exit code 128 + n). */
+export const SIGNALS = { SIGINT: 2, SIGTERM: 15 } as const
+/** A shutdown after a signal gets this long, then the process exits anyway. */
+export const SIGNAL_SHUTDOWN_MS = 10_000
+
+/**
+ * CLI logging: `<data-dir>/logs/`, origin `cli`. Stderr gets a copy only with `--log-level`
+ * (at that level): user-facing errors are printed as `code: message` lines instead
+ * (docs/conventions/logging.md). Never stdout.
+ */
 export async function startCliLogging(
   dataDir: string,
   o: Pick<HeadlessOptions, 'argv' | 'env'>,
@@ -69,11 +88,11 @@ export async function startCliLogging(
   let logging: MainLogging
   try {
     await mkdir(join(dataDir, 'logs'), { recursive: true })
+    const toStderr = flagValue(o.argv, LOG_LEVEL_FLAG) !== undefined
     logging = await createMainLogging({
       ...common,
       dir: join(dataDir, 'logs'),
-      extraStream: pino.destination({ fd: 2, sync: true }),
-      extraLevel: 'warn',
+      ...(toStderr ? { extraStream: pino.destination({ fd: 2, sync: true }) } : {}),
     })
   } catch {
     logging = createStderrLogging({ ...common, level: 'warn' })
@@ -119,20 +138,29 @@ export async function startHeadless(o: HeadlessOptions): AsyncAppResult<Headless
     return Err(host.unwrapErr())
   }
   log.info({ dataDir: o.dataDir, logLevel: level.level }, 'headless instance started')
-  let down: Promise<void> | undefined
-  return Ok({
-    host: host.unwrap(),
-    log,
-    report,
-    machine,
-    shutdown: () =>
-      (down ??= (async () => {
-        await host.unwrap().shutdown()
-        // The host stops a running job under control (hold, reset), then disconnects.
-        await machine.shutdown(3000)
-        workers.terminate()
-        log.info('headless instance stopped')
-        logging.flushSync()
-      })()),
-  })
+  let down: Promise<readonly OpenProjectInfo[]> | undefined
+  const shutdown = () =>
+    (down ??= (async () => {
+      const unsaved = await host.unwrap().shutdown()
+      // The host stops a running job under control (hold, reset), then disconnects.
+      await machine.shutdown(3000)
+      workers.terminate()
+      log.info('headless instance stopped')
+      logging.flushSync()
+      return unsaved
+    })())
+  // An MCP client ends a stdio server with SIGTERM after closing stdin; Ctrl-C sends SIGINT.
+  // Both shut down under control (locks released, machine stopped), bounded by a deadline.
+  const signals = o.signals ?? process
+  for (const [name, n] of Object.entries(SIGNALS))
+    signals.once(name as NodeJS.Signals, () => {
+      log.warn({ signal: name }, 'signal received, shutting down')
+      const deadline = setTimeout(() => o.exit(128 + n), SIGNAL_SHUTDOWN_MS)
+      void shutdown().then((unsaved) => {
+        clearTimeout(deadline)
+        o.onUnsaved?.(unsaved)
+        o.exit(128 + n)
+      })
+    })
+  return Ok({ host: host.unwrap(), log, report, machine, shutdown })
 }

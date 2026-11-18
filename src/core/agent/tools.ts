@@ -47,6 +47,8 @@ export interface SessionToolDef {
   readonly summary: string
   readonly args: z.ZodType
   readonly result: z.ZodType
+  /** Default: read-only and idempotent (waits and reads); `project.bind` changes the session. */
+  readonly annotations?: ToolAnnotations
 }
 
 /** Areas always listed, whatever `--areas` says (with the session tools). */
@@ -149,7 +151,7 @@ function sessionTool(def: SessionToolDef): AgentTool {
     description: def.summary,
     inputSchema: compactSchema(z.toJSONSchema(def.args, { io: 'input' }) as JsonObject),
     outputSchema: compactSchema(z.toJSONSchema(def.result, { io: 'output' }) as JsonObject),
-    annotations: { readOnlyHint: true, idempotentHint: true },
+    annotations: def.annotations ?? { readOnlyHint: true, idempotentHint: true },
   }
 }
 

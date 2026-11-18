@@ -8,7 +8,7 @@ import type { Source } from '../../core/commands/context'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
 import { buildSmallPlan, tempDir, testHost } from './host.fixture'
 
-const cleanups: (() => Promise<void> | void)[] = []
+const cleanups: (() => unknown)[] = []
 afterEach(async () => {
   for (const c of cleanups.splice(0).reverse()) await c()
 })
@@ -105,11 +105,40 @@ describe('app host', () => {
     await call('project.create', { name: 'A', unitSystem: 'mm' })
     await buildSmallPlan(call)
     expect(host.list()).toHaveLength(2)
-    await host.shutdown()
+    const unsaved = await host.shutdown()
+    expect(unsaved.map((p) => p.name)).toEqual(['Small'])
     expect(host.list()).toEqual([])
     const again = await testHost(dir)
     cleanups.push(() => again.shutdown())
     const r = expectOk(await again.listRecovery())
     expect(r).toHaveLength(1) // the unchanged untitled project was removed, the edited one kept
+  })
+
+  it('an edit queued while project.close runs cannot bypass the unsaved-changes confirmation', async () => {
+    const { host, call, dir } = await setup()
+    const ids = await buildSmallPlan(call)
+    await call('project.save', { target: join(dir, 'race.dfyom') })
+    const d = host.project(ids.key).unwrap()
+    const ui = { kind: 'ui' as const, id: 'w' }
+    const closing = host.app.dispatch('project.close', { key: ids.key }, ui)
+    const edit = d.dispatch('design.part.update', { partId: ids.partId, name: 'Racy' }, ui)
+    const [closed, edited] = await Promise.all([closing, edit])
+    expectOk(edited)
+    expect(expectErrCode(closed, 'input.malformed').issues[0]?.rule).toBe('unsavedChanges')
+    // the refused close resumed the project; a confirmed close works
+    expectOk(await d.dispatch('design.part.update', { partId: ids.partId, name: 'After' }, ui))
+    expectOk(await host.app.dispatch('project.close', { key: ids.key, confirm: true }, ui))
+    expect(host.list()).toEqual([])
+  })
+
+  it('reports runtime changes (windows re-follow their project)', async () => {
+    const { host, call } = await setup()
+    let changes = 0
+    host.onProjectsChanged(() => changes++)
+    const { key } = (await call('project.create', { name: 'C', unitSystem: 'mm' })) as {
+      key: string
+    }
+    await call('project.close', { key })
+    expect(changes).toBe(2)
   })
 })
