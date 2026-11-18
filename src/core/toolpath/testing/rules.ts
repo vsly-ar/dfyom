@@ -25,8 +25,8 @@ const fmt = (p: readonly number[]) => p.map((n) => n.toFixed(3)).join(',')
 /**
  * Generic toolpath properties; returns violations (empty = fine): starts and ends with a rapid
  * at clearance, arcs continuous (start and end on one circle) and ≤ 180°, no plunge or vertical
- * lift faster than the plunge rate, ramps no steeper than the ramp angle, rapids horizontal only above the
- * retract plane, feeds ≤ the feed rate, every feed move within the removal region.
+ * lift (or rising move's Z speed) above the plunge rate, ramps no steeper than the ramp angle,
+ * rapids horizontal only above the retract plane, feeds ≤ the feed rate, every feed move within the removal region.
  */
 export function violations(tp: Toolpath, rules: PathRules, step = 0.2): string[] {
   const out: string[] = []
@@ -64,9 +64,14 @@ export function violations(tp: Toolpath, rules: PathRules, step = 0.2): string[]
       if ((m.feed * -dz) / length > rules.plungeRate + 1e-9)
         out.push(`descends faster than the plunge rate: ${where}`)
     }
-    // a purely vertical feed move, up or down, never exceeds the plunge rate (Z max feed)
-    if (dz > 1e-9 && horizontal < 1e-6 && m.feed > rules.plungeRate + 1e-9)
-      out.push(`lift faster than plunge rate: ${where}`)
+    // rising: the Z component of any feed move (purely vertical or not) ≤ the plunge rate
+    if (dz > 1e-9) {
+      const length = Math.hypot(horizontal, dz)
+      if (horizontal < 1e-6 && m.feed > rules.plungeRate + 1e-9)
+        out.push(`lift faster than plunge rate: ${where}`)
+      else if ((m.feed * dz) / length > rules.plungeRate + 1e-9)
+        out.push(`rises faster than the plunge rate: ${where}`)
+    }
     if (dz < -1e-9 && m.feed > rules.plungeRate + 1e-9) {
       if (horizontal < 1e-6) out.push(`plunge faster than plunge rate: ${where}`)
       else if (-dz / horizontal > tan + 1e-9) out.push(`ramp too steep: ${where}`)

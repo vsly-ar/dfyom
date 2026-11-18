@@ -24,9 +24,10 @@ export const PROGRAM_GENERATOR = 'DFYOM'
 /** gCode file extensions `plan.export` writes (case-insensitive). */
 export const GCODE_EXTENSIONS = ['.nc', '.gcode', '.ngc'] as const
 
+/** The file name (last segment, `/` or `\\` separated) has a stem and a gCode extension. */
 export function isGcodeFileName(path: string): boolean {
-  const lower = path.toLowerCase()
-  return GCODE_EXTENSIONS.some((ext) => lower.endsWith(ext) && lower.length > ext.length)
+  const name = (path.split(/[\\/]/).at(-1) ?? '').toLowerCase()
+  return GCODE_EXTENSIONS.some((ext) => name.endsWith(ext) && name.length > ext.length)
 }
 
 /**
@@ -90,6 +91,12 @@ export async function exportPlan(
   const inputs = planOperationInputs(doc, planId)
   if (inputs.isErr()) return inputs
   const all = inputs.unwrap()
+  if (all.length === 0)
+    return fail('plan.check', `plan ${planId} has no operations to export`, {
+      where,
+      data: { planId },
+      issues: [{ path: ['planId'], rule: 'empty', message: 'the plan has no operations' }],
+    })
   const total = all.length
   const operations: ExportOperation[] = []
   const regenerated: string[] = []
@@ -117,18 +124,16 @@ export async function exportPlan(
   const exported = exportGrbl(
     {
       name: plan.dto.name,
-      setup: { name: plan.setup.name, clearanceHeight: all[0]?.setup.clearanceHeight ?? 0 },
+      setup: { name: plan.setup.name, clearanceHeight: all[0]!.setup.clearanceHeight },
       operations,
       machine: plan.machine,
       ...(opts.workZero === undefined ? {} : { workZero: opts.workZero }),
     },
     { generator: opts.generator ?? PROGRAM_GENERATOR },
   )
-  return exported.map((e) => ({
-    ...e,
-    regenerated,
-    softLimitChecked: opts.workZero !== undefined,
-  }))
+  return exported
+    .map((e) => ({ ...e, regenerated, softLimitChecked: opts.workZero !== undefined }))
+    .mapErr((e) => e.withContext(where, { planId }))
 }
 
 const ProgramStatsSchema = z.object({
@@ -178,7 +183,8 @@ export const planExport = defineCommand({
     if (exported.isErr()) return exported
     const e = exported.unwrap()
     const written = await files.write(args.target, e.text, { confirm: args.confirm })
-    if (written.isErr()) return written
+    if (written.isErr())
+      return Err(written.unwrapErr().withContext('plan.export', { planId: args.planId }))
     return Ok({
       filePath: written.unwrap().filePath,
       lines: e.lines.length,

@@ -9,6 +9,7 @@ import { createAppRegistry } from '../commands/registry'
 import { fakeIds, uiSource } from '../commands/testing'
 import { planSetup, type PlanSetup } from '../plan/plan.fixture'
 import { createToolpathCache, type ToolpathCache } from '../toolpath/cache'
+import type { Toolpath } from '../toolpath/model'
 import type { GeneratorRequest } from '../toolpath/request'
 import { exportPlan, type ExportFiles, type PlanExport } from './plan-export'
 
@@ -65,10 +66,12 @@ async function setup(
     hook?: (request: GeneratorRequest) => unknown
     services?: Partial<Services>
     machine?: boolean
+    part?: boolean
+    port?: WorkerPort
     writeError?: () => AsyncAppResult<{ filePath: string }>
   } = {},
 ): Promise<Setup> {
-  const s = await planSetup()
+  const s = await planSetup(opts.part === false ? { part: false } : {})
   const planId = await s.create(opts.machine === false ? {} : { machineLibraryItemId: s.machineId })
   const ops = s.plan(planId).setups[0]!.operations
   for (const op of ops.filter((o) => o.tool === ops[1]!.tool))
@@ -77,7 +80,9 @@ async function setup(
       planOperationId: op.id,
       overrides: { spindleSpeed: '3000', feedRate: '150', plungeRate: '150' },
     })
-  const { port, runs } = countingPort(opts.hook)
+  const counting = countingPort(opts.hook)
+  const port = opts.port ?? counting.port
+  const runs = counting.runs
   const { files, written } = memoryFiles(opts.writeError)
   const cache = createToolpathCache()
   const d = createDispatcher({
@@ -212,19 +217,70 @@ describe('plan.export', () => {
     await ok()
   })
 
-  it('rejects a target without a gCode extension and unknown plans', async () => {
+  it('rejects a target without a gCode file name and unknown plans', async () => {
     const t = await setup()
-    expectErrCode(await t.exportCmd({ target: '/out/plan.txt' }), 'input.malformed')
-    expectErrCode(await t.exportCmd({ planId: 'plan-x' }), 'input.malformed')
-    for (const target of ['/out/a.NC', '/out/a.gcode', '/out/a.ngc'])
+    for (const target of ['/out/plan.txt', '/o/.nc', '/o.nc/', 'C:\\o\\.gcode', '/out/a.nc/x'])
+      expect(
+        expectErrCode(await t.exportCmd({ target }), 'input.malformed').issues[0]?.path,
+        target,
+      ).toEqual(['target'])
+    // a well-formed id that does not exist reaches the plan lookup
+    const e = expectErrCode(await t.exportCmd({ planId: 'plan-missing' }), 'input.malformed')
+    expect(e.issues[0]?.rule).toBe('unknownPlan')
+    for (const target of ['/out/a.NC', '/out/a.gcode', '/out/a.ngc', 'C:\\o\\b.nc'])
       expectOk(await t.exportCmd({ target, confirm: true }))
+  })
+
+  it('changes neither the revision nor the undo history', async () => {
+    const t = await setup()
+    const before = { revision: t.d.revision, history: t.d.history, doc: t.d.doc }
+    expectOk(await t.exportCmd())
+    expect(t.d.revision).toBe(before.revision)
+    expect(t.d.doc).toBe(before.doc)
+    expect(t.d.history.undoable).toEqual(before.history.undoable)
+    expect(t.d.history.redoable).toEqual(before.history.redoable)
+  })
+
+  it('fails a plan without operations with plan.check (rule empty) before writing', async () => {
+    const t = await setup({ part: false })
+    expect(t.order).toEqual([])
+    const e = expectErrCode(await t.exportCmd(), 'plan.check')
+    expect(e.issues[0]).toMatchObject({ rule: 'empty' })
+    expect(e.frames.some((f) => f.data?.['planId'] === t.planId)).toBe(true)
+    expect(t.written).toEqual([])
+  })
+
+  it('post-stage errors carry the plan.export context with the plan id', async () => {
+    // a generator result the post cannot write (a non-finite feed)
+    const inner = createInProcessWorkers()
+    const port: WorkerPort = {
+      async run(task, input, ctl) {
+        const r = await inner.run(task, input, ctl)
+        return r.map((tp) => {
+          const t = tp as Toolpath
+          const moves = t.passes[0]!.moves.map((m) =>
+            m.kind === 'line' ? { ...m, feed: Number.NaN } : m,
+          )
+          return { ...t, passes: [{ ...t.passes[0]!, moves }, ...t.passes.slice(1)] }
+        }) as never
+      },
+    }
+    const t = await setup({ port })
+    const e = expectErrCode(await t.exportCmd(), 'model.invariant')
+    expect(e.frames.some((f) => f.where === 'plan.export' && f.data?.['planId'] === t.planId)).toBe(
+      true,
+    )
+    expect(t.written).toEqual([])
   })
 
   it('passes a write failure through', async () => {
     const t = await setup({
       writeError: () => Promise.resolve(fail('persist.io', 'disk full', { where: 'test' })),
     })
-    expectErrCode(await t.exportCmd(), 'persist.io')
+    const e = expectErrCode(await t.exportCmd(), 'persist.io')
+    expect(e.frames.some((f) => f.where === 'plan.export' && f.data?.['planId'] === t.planId)).toBe(
+      true,
+    )
   })
 
   it('fails with internal.unexpected without a file writer or a toolpath cache', async () => {
