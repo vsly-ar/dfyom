@@ -8,7 +8,7 @@ Primary sources (GRBL 1.1, gnea/grbl): [Interface](https://github.com/gnea/grbl/
 
 ### Input boundary
 
-Two pure, synchronous steps in `src/core/post/`, composed by `exportGrbl` (the export `effect` command calls it, see [Implementation](#implementation-task-211)):
+Two pure, synchronous steps in `src/core/post/`, composed by `exportGrbl` (the [`plan.export` command](#plan-export-command) calls it):
 
 1. **Export** (`toMachiningProgram(input, machine): AppResult<MachiningProgram>`) takes plan mode's [export boundary](../modes/plan-v0.1.md#export-boundary-tasks-110-and-211): the ordered `Toolpath[]` of one setup ([toolpath data model](../modes/plan-v0.1.md#toolpath-data-model), float64 mm in the setup's WCS), each with its tool copy (`ProgramTool`: name, diameter) and a label, the setup (name, `clearanceHeight`) and the machine snapshot. It expands `drill` moves, converts arc centers to `I`/`J` offsets and inserts tool-change and spindle blocks.
 2. **Post** (`postGrbl(program: MachiningProgram, opts: PostOptions): AppResult<string>`; `postGrblLines` returns the lines) turns that program into gCode text. It never sees design, geometry or the plan.
@@ -81,13 +81,34 @@ Same input and options → byte-identical output: LF line endings, final newline
 
 - **Properties** (`post.test.ts`, on the golden programs, the test part and 40 random toolpaths per unit with tiny, 180° and helical arcs): every line ≤ 70 bytes of printable ASCII, every word in its precision (no `-0`, exponent or trailing zero), fixed word order, nothing from the never-emitted list (no `G81`–`G83`), every arc line with an in-plane axis word; and the text re-parsed with the virtual machine's `parseBlock` makes exactly the intended moves (targets within half a resolution step, rapid/feed mode, feed, arc circle, direction and sweep), so modal suppression never loses state.
 - **End to end** (`emulator-run.test.ts`): the [geometry test part](geometry.md#testing)'s program (5 tools, the drill twice) streamed with character counting through the virtual machine after `$H` and a `G54` 750/750/50 mm into the table: no `error:` and no alarm, no protocol violation, the final position as programmed (mm and inch); with the DFYOM tool-change rule the sender stops at all 5 markers, the test jogs and re-zeroes Z, and each resumes with the modes, `G54` and `G0 Z<clearanceZ>` before `M3`; another sender's run pauses at each `M0` (Hold:0) and resumes with `~`; a machine with too little Z travel for the first tool gets the `softLimit` warning and `ALARM:2`.
-- **Time:** with 400/400/200 mm/s² acceleration the virtual machine needs 623.2 s for the test part (without the tool-change pauses) against 586.9 s estimated (`stats.estimatedSeconds`, incl. 18 s of dwells): **ratio 1.06** (1.10 against the sum of the toolpath estimates, 568.0 s, which leave out dwells and the moves between operations). The test asserts 1 < ratio < 1.5.
+- **Time:** with 400/400/200 mm/s² acceleration the virtual machine needs 626.6 s for the test part (without the tool-change pauses) against 591.4 s estimated (`stats.estimatedSeconds`, incl. 18 s of dwells): **ratio 1.06** (1.09 against the sum of the toolpath estimates, 572.5 s, which leave out dwells and the moves between operations). The test asserts 1 < ratio < 1.5.
 
 ### Implementation (task 2.11)
 
-- **No command yet.** Toolpaths are derived data generated and cached by the 2.9 job (`plan.toolpath.generate`, which also owns the `PlanOperationInput` → `GeneratorInput` mapping), so the `plan.export` effect command comes with task 2.9: it regenerates stale toolpaths, maps the plan's tool copies to `ProgramTool` (name, diameter) and operation names to labels, calls `exportGrbl` and writes `text`. The pure post is complete and tested without it.
 - **One file per plan:** v0.1 plans have one setup, so "one file per setup" is one per plan; DFYOM's sender guides the tool changes inside it.
 - **Error code** `post.noMachine` (registered with the post). Machine checks reuse `plan.machine`.
+
+### Plan export command
+
+`src/core/post/plan-export.ts`. The command is a thin wrapper around `exportPlan`, the export path run mode (task 3.9) shares ([run-v0.1.md](../modes/run-v0.1.md#run-job)):
+
+```ts
+exportPlan(doc: ProjectDoc, planId: string, services: Pick<Services, 'workers' | 'toolpaths'>,
+           opts?: { workZero?: Vec3, generator?: string /* 'DFYOM' */, signal?: AbortSignal,
+                    progress?: (p: JobProgress) => void }): AsyncAppResult<PlanExport>
+PlanExport = GrblExport & { regenerated: string[], softLimitChecked: boolean }
+
+plan.export { planId, target, confirm = false }   // effect command
+  → { filePath, lines /* count */, stats, warnings /* plan.machine */, softLimitChecked, regenerated }
+```
+
+1. **Checks before any generator runs:** the plan exists, its status allows export (every status but `archived`: `plan.status`), it has a machine copy (`post.noMachine`), and `planOperationInputs` has no error findings (`plan.check`/`plan.order`).
+2. **Toolpaths:** for each plan operation in machining order, the [toolpath cache](workers.md#toolpath-cache) entry for its current `inputHash`; a missing or stale one is generated on the `toolpath` lane and cached (`ensureToolpath`, shared with `plan.toolpath.generate`), so export never uses a stale toolpath. Unlike the job, the first generator error fails the export (a program without one of its operations is not a valid program); the error's context names the plan operation, and toolpaths generated before it stay cached. `regenerated` lists the generated ones.
+3. **Mapping:** plan name and setup name for the header; per operation the tool copy's name and diameter (`ProgramTool`) and as label the names of the design operations it machines (joined with `, `); `clearanceHeight` from the setup. The generator string is `DFYOM` without a version, so the same plan gives the same file.
+4. **Write** (command only): `text` goes to `target` through the `ExportFiles` port (`services.exportFiles`; `src/main/persistence/export-file.ts` writes atomically with `writeFileAtomic`, [persistence.md](persistence.md#working-folder-writes)), so `src/core` stays headless. `target` is an absolute path ending in `.nc`, `.gcode` or `.ngc` (any case); an existing file is replaced only with `confirm: true` (`input.malformed`, rule `confirmOverwrite`, as Save As), a folder never. Nothing is written when the export fails.
+
+- **Effect, not job:** export holds the project queue like `project.save`, so the program matches one revision; regenerating the test part's toolpaths takes well under a second ([workers.md](workers.md#performance-budgets)). Effects are not subject to the stale-write baseline ([commands.md](commands.md#stale-writes)) and change no document (toolpaths are derived data).
+- **Soft limits:** `plan.export` passes no `workZero` until run mode supplies the connected G54 ([run-v0.1.md](../modes/run-v0.1.md#work-zero-and-the-soft-limit-check)); `softLimitChecked` says whether the check ran. The result does not carry the text: the file is the output (agents and run mode use `exportPlan`).
 
 ## Virtual machine (task 3.8)
 

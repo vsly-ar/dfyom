@@ -3,7 +3,7 @@
  * checks and program stats. Doc: docs/architecture/grbl.md#input-boundary and #export-checks;
  * boundary: docs/modes/plan-v0.1.md#export-boundary-tasks-110-and-211
  *
- * Pure and synchronous. The `plan.export` command (task 2.9) maps a plan's generated toolpaths
+ * Pure and synchronous. `exportPlan` (plan-export.ts, behind `plan.export`) maps a plan's toolpaths
  * and copies to `ExportInput` and calls `exportGrbl`.
  */
 import type { Machine } from '../library/machine'

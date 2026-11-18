@@ -78,7 +78,7 @@ interface JobContext extends CommandContext {
 }
 ```
 
-The sketch above is abridged; `define.ts` and `context.ts` are the contract. Differences there: `run`/`title` are method signatures (so typed definitions fit the registry's `AnyCommand`), and a fourth kind, `builtin`, marks commands the dispatcher executes itself (`history.undo`/`history.redo`, `job.pause`/`job.resume`/`job.abort`). `Services` has the `workers` port, the optional `library` service ([library.md](library.md#storage)) and the optional `project` session ([persistence.md](persistence.md#files), used by `project.save`); queries receive `services` too. The machine port arrives with run mode (task 3.9).
+The sketch above is abridged; `define.ts` and `context.ts` are the contract. Differences there: `run`/`title` are method signatures (so typed definitions fit the registry's `AnyCommand`), and a fourth kind, `builtin`, marks commands the dispatcher executes itself (`history.undo`/`history.redo`, `job.pause`/`job.resume`/`job.abort`). `Services` has the `workers` port, the optional `library` service ([library.md](library.md#storage)) the optional `project` session ([persistence.md](persistence.md#files), used by `project.save`) and the optional `exportFiles` port (atomic gCode file writes, used by `plan.export`, [grbl.md](grbl.md#plan-export-command)); queries receive `services` too. The machine port arrives with run mode (task 3.9).
 
 Rules:
 
