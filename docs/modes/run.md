@@ -4,7 +4,7 @@ Status: draft · Terms: [glossary.md](../glossary.md)
 
 **Goal:** interact with the CNC machine. The baseline is running gCode; the mode goes far beyond that by integrating external devices.
 
-The v0.1 subset (streaming to the virtual machine, utility process, run commands, progress) is specified in [run-v0.1.md](run-v0.1.md) (draft).
+The v0.1 subset (streaming to the virtual machine, utility process, run commands, progress) is specified in [run-v0.1.md](run-v0.1.md).
 
 ## Devices
 
