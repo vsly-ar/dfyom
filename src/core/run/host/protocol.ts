@@ -43,6 +43,8 @@ export const RunSummarySchema = z.object({
 })
 
 export const ControllerInfoSchema = z.object({
+  /** What the host connected to (reported by the host, never assumed by main). */
+  target: z.literal('virtual'),
   version: z.string(),
   settings: z.record(z.string(), Num),
   workZero: Vec3Schema,
@@ -74,6 +76,8 @@ export const HostStatusSchema = z.object({
       /** 1-based line being executed (last acknowledged + 1). */
       line: z.number().int(),
       toolChange: ToolChangeSchema.exactOptional(),
+      /** In `programPause`: which pause (1-based) `run.job.continue` ends. */
+      pause: z.number().int().exactOptional(),
       elapsedSeconds: Num,
     })
     .exactOptional(),
@@ -89,6 +93,8 @@ export const VirtualTargetSchema = z.object({
   /** `$22`: start in Alarm and require `$H`. */
   homing: z.boolean(),
   timeScale: TimeScaleSchema,
+  /** Identity of the machine copy emulated (decision 6); a job must name the same. */
+  machineKey: z.string().max(200),
   /** Home at `max` speed, then set G54 to this MPos (docs/modes/run-v0.1.md decision 7). */
   prepare: z.object({ workZero: Vec3Schema }).exactOptional(),
 })
@@ -135,8 +141,27 @@ export const MainMessage = z.discriminatedUnion('type', [
   request('connect', { target: VirtualTargetSchema }),
   request('disconnect', {}),
   request('machine', { action: MachineActionSchema }),
-  request('jobStart', { jobId: Id, program: SenderProgramSchema }),
-  request('jobControl', { jobId: Id, action: z.enum(JOB_CONTROLS) }),
+  request('jobStart', {
+    jobId: Id,
+    program: SenderProgramSchema,
+    /** What main checked the program against; the host re-checks it before streaming. */
+    expect: z.object({
+      workZero: Vec3Schema,
+      machineKey: z.string().max(200),
+      target: z.literal('virtual'),
+    }),
+  }),
+  request('jobControl', {
+    jobId: Id,
+    action: z.enum(JOB_CONTROLS),
+    /** `continue`: the wait it ends (a retried continue never skips the next one). */
+    expect: z
+      .object({
+        toolChange: z.number().int().exactOptional(),
+        pause: z.number().int().exactOptional(),
+      })
+      .exactOptional(),
+  }),
   request('timeScale', { scale: TimeScaleSchema }),
 ])
 export type MainMessage = z.output<typeof MainMessage>

@@ -68,6 +68,7 @@ interface Job {
 }
 
 interface Connection {
+  readonly machineKey: string
   readonly clock: ScaledClock
   readonly sender: GrblSender
   homed: boolean
@@ -131,6 +132,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     if (conn === undefined) return undefined
     const s = conn.sender.status
     const job = conn.job
+    const wait = conn.sender.wait
     return {
       state: s?.state ?? 'Unknown',
       homed: conn.homed,
@@ -151,6 +153,9 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
               phase: job.phase,
               line: conn.sender.line ?? 0,
               ...(job.toolChange === undefined ? {} : { toolChange: job.toolChange }),
+              ...(job.phase === 'programPause' && wait !== undefined && 'pause' in wait
+                ? { pause: wait.pause }
+                : {}),
               elapsedSeconds: (conn.clock.now() - job.startedAt) / 1000,
             },
           }),
@@ -190,6 +195,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
       return Err(info.unwrapErr())
     }
     const c: Connection = {
+      machineKey: target.machineKey,
       clock,
       sender,
       homed: !target.homing,
@@ -212,7 +218,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
       if (prepared.isErr()) return Err(prepared.unwrapErr())
     }
     status.now()
-    return Ok({ ...info.unwrap(), workZero: c.workZero, homed: c.homed })
+    return Ok({ ...info.unwrap(), target: 'virtual', workZero: c.workZero, homed: c.homed })
   }
 
   /** Decision 7: home at `max` speed, then G54 at the given MPos. */
@@ -303,21 +309,58 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     }
   }
 
-  function jobStart(
+  /**
+   * Starts streaming after re-checking what main checked the program against: the target, the
+   * machine copy and the G54 (read again with `$#`), on a status report taken now. The job is
+   * registered first, so no jog or work-zero change slips in between.
+   */
+  async function jobStart(
     jobId: string,
     program: { lines: string[]; sections: { fromLine: number; label: string }[] },
-  ): AppResult<void> {
+    expect: { workZero: Vec3; machineKey: string; target: 'virtual' },
+  ): Promise<AppResult<void>> {
+    const where = 'machineHost.jobStart'
     const c = conn
     if (c === undefined) return notConnected()
-    if (c.job !== undefined)
-      return fail('run.busy', `job ${c.job.jobId} is running`, { where: 'machineHost.jobStart' })
-    const state = machineState(c)
-    if (state !== 'Idle') return stateError(`the machine is ${state}, not Idle`, state)
-    if (!c.homed) return stateError('the machine is not homed', state)
-    const pf = preflight(program.lines, 'machineHost.jobStart')
+    if (c.job !== undefined) return fail('run.busy', `job ${c.job.jobId} is running`, { where })
+    const pf = preflight(program.lines, where)
     if (pf.isErr()) return pf
     const job: Job = { jobId, phase: 'streaming', startedAt: c.clock.now() }
     c.job = job
+    const refuse = (r: AppResult<never>): AppResult<void> => {
+      if (c.job === job) c.job = undefined
+      status.now()
+      return r
+    }
+    const mismatch = (rule: string, message: string, data: Record<string, unknown>) =>
+      fail('run.state', message, {
+        where,
+        data: { state: machineState(c), ...data },
+        issues: [{ path: ['expect'], rule, message }],
+      })
+    if (expect.target !== 'virtual')
+      return refuse(mismatch('targetMismatch', 'the job was checked for another target', {}))
+    if (expect.machineKey !== c.machineKey)
+      return refuse(
+        mismatch('machineMismatch', 'the job was exported for another machine copy', {}),
+      )
+    const fresh = await c.sender.freshStatus()
+    if (fresh === undefined)
+      return refuse(fail('machine.connection', 'no status report before the start', { where }))
+    if (fresh.state !== 'Idle')
+      return refuse(stateError(`the machine is ${fresh.state}, not Idle`, fresh.state))
+    if (!c.homed) return refuse(stateError('the machine is not homed', fresh.state))
+    const wz = await readWorkZero(c)
+    if (wz.isErr()) return refuse(Err(wz.unwrapErr()))
+    if (wz.unwrap().some((v, i) => Math.abs(v - (expect.workZero[i] ?? Number.NaN)) > 5e-4))
+      return refuse(
+        mismatch('workZeroChanged', 'the work zero changed after the program was checked', {
+          expected: [...expect.workZero],
+          actual: [...wz.unwrap()],
+        }),
+      )
+    if (c.job !== job || conn !== c)
+      return refuse(fail('run.busy', 'the start was overtaken', { where }))
     log.info({ jobId, lines: program.lines.length }, 'job started')
     void c.sender
       .run(program, {
@@ -362,6 +405,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
   async function jobControl(
     jobId: string,
     action: 'hold' | 'resume' | 'continue' | 'stop',
+    expect: { toolChange?: number; pause?: number } | undefined,
   ): Promise<AppResult<void>> {
     const c = conn
     if (c === undefined) return notConnected()
@@ -375,8 +419,29 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         return c.sender.hold()
       case 'resume':
         return c.sender.resume()
-      case 'continue':
+      case 'continue': {
+        const wait = c.sender.wait
+        const named =
+          wait === undefined
+            ? undefined
+            : 'toolChange' in wait
+              ? expect?.toolChange === wait.toolChange
+              : expect?.pause === wait.pause
+        if (named !== true)
+          return fail(
+            'run.state',
+            wait === undefined
+              ? 'the run does not wait at a tool change or pause'
+              : `the run waits at ${'toolChange' in wait ? `tool change ${wait.toolChange}` : `pause ${wait.pause}`}, not the one given`,
+            {
+              where: 'machineHost.continue',
+              data: { state: machineState(c), ...(c.job.phase ? { phase: c.job.phase } : {}) },
+            },
+          )
+        // decide on a report taken now: a jog or G10 just acknowledged may still be moving
+        await c.sender.freshStatus()
         return c.sender.continueProgram()
+      }
       case 'stop':
         void c.sender.stop()
         return Ok(undefined)
@@ -425,7 +490,14 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
       case 'connectionLost':
         log.warn({ reason: e.reason }, 'connection lost')
         post({ type: 'event', kind: 'connectionLost', data: { reason: e.reason } })
-        break
+        // the connection is gone: main closes it and starts a fresh host on the next open
+        if (conn === c) {
+          conn = undefined
+          status.cancel()
+          c.clock.dispose()
+          void c.sender.close()
+        }
+        return
     }
     status.now()
   }
@@ -441,9 +513,9 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
       case 'machine':
         return machine(m.action)
       case 'jobStart':
-        return jobStart(m.jobId, m.program)
+        return jobStart(m.jobId, m.program, m.expect)
       case 'jobControl':
-        return jobControl(m.jobId, m.action)
+        return jobControl(m.jobId, m.action, m.expect)
       case 'timeScale': {
         const c = conn
         if (c === undefined) return notConnected()

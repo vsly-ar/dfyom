@@ -30,6 +30,10 @@ export class CountingTransport implements ControllerTransport {
   /** Every line received, in order. */
   readonly received: string[] = []
   readonly written: string[] = []
+  /** Single-byte writes (real-time commands), in order. */
+  readonly realtime: number[] = []
+  /** Called after each write reached the controller, before any reply is delivered. */
+  afterWrite: ((bytes: Uint8Array) => void) | undefined
   private used = 0
   private readonly sizes: number[] = []
   private rx = ''
@@ -40,13 +44,16 @@ export class CountingTransport implements ControllerTransport {
 
   write(bytes: Uint8Array): AsyncAppResult<void> {
     const t = text(bytes)
+    if (bytes.length === 1 && !t.endsWith('\n')) this.realtime.push(bytes[0] ?? 0)
     if (t.endsWith('\n')) {
       this.written.push(t.slice(0, -1))
       this.sizes.push(bytes.length)
       this.used += bytes.length
       this.maxInflight = Math.max(this.maxInflight, this.used)
     }
-    return this.inner.write(bytes)
+    const r = this.inner.write(bytes)
+    this.afterWrite?.(bytes)
+    return r
   }
 
   onData(listener: (bytes: Uint8Array) => void): () => void {
@@ -207,7 +214,18 @@ export function answerHandshake(t: ScriptedTransport, version = '1.1h.20190830')
     else if (w === '$$\n') t.reply('$10=1\r\n$13=0\r\n$130=800.000\r\nok\r\n')
     else if (w === '$#\n') t.reply('[G54:0.000,0.000,0.000]\r\nok\r\n')
     else if (w === '$G\n') t.reply('[GC:G0 G54 G17 G21 G90 G94 M5 M9 T0 F0 S0]\r\nok\r\n')
-    else if (w === '?') t.reply('<Idle|MPos:0.000,0.000,0.000|FS:0,0>\r\n')
+    else if (w === '?') t.reply('<Idle|MPos:0.000,0.000,0.000|FS:0,0|WCO:0.000,0.000,0.000>\r\n')
+  }
+}
+
+/** Replies to every `?` with `report` (e.g. none after a critical alarm: `undefined`). */
+export function answerStatus(t: ScriptedTransport, report: () => string | undefined): void {
+  const handshake = t.onWrite
+  t.onWrite = (w) => {
+    if (w === '?') {
+      const r = report()
+      if (r !== undefined) t.reply(`${r}\r\n`)
+    } else handshake?.(w)
   }
 }
 

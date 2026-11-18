@@ -46,16 +46,14 @@ describe('machine host in worker_threads', { timeout: 60_000 }, () => {
     const { c, logs } = client()
     const e = expectOk(exportGrbl({ ...testPartExport(), workZero: WORK_ZERO }, OPTS))
     const info = expectOk(
-      await c.connect(
-        {
-          kind: 'virtual',
-          settings: settings(),
-          homing: true,
-          timeScale: 'max',
-          prepare: { workZero: WORK_ZERO },
-        },
-        'key',
-      ),
+      await c.connect({
+        kind: 'virtual',
+        settings: settings(),
+        homing: true,
+        timeScale: 'max',
+        machineKey: 'key',
+        prepare: { workZero: WORK_ZERO },
+      }),
     )
     expect(info).toMatchObject({ homed: true, workZero: WORK_ZERO })
     const phases: string[] = []
@@ -67,9 +65,11 @@ describe('machine host in worker_threads', { timeout: 60_000 }, () => {
           progress: () => {},
           phase: (p) => {
             phases.push(p.phase)
-            if (p.phase === 'toolChange') void c.controlJob('job-1', 'continue')
+            if (p.phase === 'toolChange' && p.toolChange !== undefined)
+              void c.controlJob('job-1', 'continue', { toolChange: p.toolChange.n })
           },
         },
+        { workZero: WORK_ZERO, machineKey: 'key' },
       ),
     )
     const wallStart = performance.now()
@@ -97,10 +97,13 @@ describe('machine host in worker_threads', { timeout: 60_000 }, () => {
   it('a host crash fails the job with machine.connection; the next connect starts a fresh host', async () => {
     const { c, handles } = client()
     expectOk(
-      await c.connect(
-        { kind: 'virtual', settings: settings(), homing: false, timeScale: 1 },
-        'key',
-      ),
+      await c.connect({
+        kind: 'virtual',
+        settings: settings(),
+        homing: false,
+        timeScale: 1,
+        machineKey: 'key',
+      }),
     )
     const started = expectOk(
       await c.startJob(
@@ -110,16 +113,20 @@ describe('machine host in worker_threads', { timeout: 60_000 }, () => {
           progress: () => {},
           phase: () => {},
         },
+        { workZero: [0, 0, 0], machineKey: 'key' },
       ),
     )
     handles[0]!.terminate() // as if the host crashed
     expectErrCode(await started.ended, 'machine.connection')
     expect(c.status().connection.state).toBe('closed')
     expectOk(
-      await c.connect(
-        { kind: 'virtual', settings: settings(), homing: false, timeScale: 1 },
-        'key',
-      ),
+      await c.connect({
+        kind: 'virtual',
+        settings: settings(),
+        homing: false,
+        timeScale: 1,
+        machineKey: 'key',
+      }),
     )
     expect(handles).toHaveLength(2)
   })

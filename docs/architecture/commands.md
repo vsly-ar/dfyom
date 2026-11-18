@@ -126,7 +126,7 @@ Robustness rules (all tested in `dispatcher.test.ts`):
 
 Error codes `command.unknown` (also for unknown queries), `command.conflict` (retryable) and `permission.denied` are in [`ERROR_CODES`](../../src/shared/errors/codes.ts).
 
-The default `PermissionPolicy` (`permission.ts`) is conservative until [run.md#safety](../modes/run.md#safety) is specified: UI sources are allowed; every other source kind only on the virtual machine (or with no connection, where nothing can be affected), the [rule in grbl.md](grbl.md#transport-and-sender); without a machine port every non-UI source is denied. `check` receives the dispatcher's `services` to see the connection. The port is injected per dispatcher (`createDispatcher({ policy })`) and may be async.
+The default `PermissionPolicy` (`permission.ts`) is conservative until [run.md#safety](../modes/run.md#safety) is specified: UI sources are allowed; every other source kind only on a connection the host reported as virtual, or to open a virtual one (the [rule in grbl.md](grbl.md#transport-and-sender)); anything else is denied. `check` receives the dispatcher's `services` to see the connection. The port is injected per dispatcher (`createDispatcher({ policy })`) and may be async.
 
 ## Document hooks
 
@@ -226,6 +226,7 @@ interface QueryDef<S extends z.ZodType, R> {
 
 - One FIFO queue per project serializes all commands from all sources (UI windows, agents, CLI, scripts). Document commands are synchronous, so each runs atomically.
 - `effect` commands hold the queue until done (save must see a stable doc); `job` commands do not.
+- **Urgent** commands (`urgent: true`; never document writers) skip the queue and run at once, even while an effect waits for the machine: `run.machine.reset`, `run.machine.jogCancel` and the `job.pause` / `job.resume` / `job.abort` controls ([run-v0.1.md](../modes/run-v0.1.md#safety-v01)).
 
 ### Stale writes
 

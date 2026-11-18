@@ -16,7 +16,7 @@ import {
 import type { Services, Source } from './context'
 import { inProcessWorkers } from './jobs'
 import { defaultPermissionPolicy } from './permission'
-import type { AnyCommand, DocumentHook } from './define'
+import { defineCommand, type AnyCommand, type DocumentHook } from './define'
 import { createDispatcher, type DispatcherOptions } from './dispatcher'
 import { applyDocPatches } from './history'
 import { createAppRegistry, createRegistry } from './registry'
@@ -392,6 +392,47 @@ describe('stale writes', () => {
   })
 })
 
+describe('urgent commands', () => {
+  it('skip the FIFO queue: they run while an effect holds it', async () => {
+    let release: () => void = () => {}
+    const blocking = defineCommand({
+      kind: 'effect',
+      name: 'run.machine.wait',
+      summary: 'Wait for a reply that does not come.',
+      title: () => 'Wait',
+      machine: false,
+      args: z.object({}),
+      result: z.object({}),
+      run: () => new Promise<AppResult<Record<string, never>>>((r) => (release = () => r(Ok({})))),
+    })
+    const urgent = defineCommand({
+      kind: 'effect',
+      name: 'run.machine.halt',
+      summary: 'Act at once.',
+      title: () => 'Halt',
+      machine: false,
+      urgent: true,
+      args: z.object({}),
+      result: z.object({ at: z.string() }),
+      run: async () => Ok({ at: 'now' }),
+    })
+    const { d } = setup([blocking, urgent])
+    const held = d.dispatch('run.machine.wait', {}, ui)
+    const queued = d.dispatch('project.name.update', { name: 'B' }, ui)
+    let done = false
+    const halted = d.dispatch('run.machine.halt', {}, ui).then((r) => ((done = true), r))
+    await new Promise((r) => setTimeout(r, 10))
+    expect(done).toBe(true)
+    expect(expectOk(await halted).value).toEqual({ at: 'now' })
+    // job controls are urgent too
+    expect(d.job('none').isNone()).toBe(true)
+    expectErrCode(await d.dispatch('job.abort', { jobId: 'none' }, ui), 'input.malformed')
+    release()
+    expectOk(await held)
+    expectOk(await queued)
+  })
+})
+
 describe('permission policy for machine commands', () => {
   it('default policy: UI allowed, other sources denied', async () => {
     const { d } = setup()
@@ -400,26 +441,39 @@ describe('permission policy for machine commands', () => {
     expectErrCode(await d.dispatch('run.machine.jog', { dxMm: 1 }, agent), 'permission.denied')
   })
 
-  it('default policy: other sources allowed on the virtual machine, not on another target', () => {
-    const machine = (target: 'virtual' | undefined) =>
-      ({ target }) as unknown as NonNullable<Services['machine']>
+  it('default policy: other sources only on the virtual machine (deny by default)', () => {
+    const machine = (target: string | undefined, state = 'closed') =>
+      ({
+        target,
+        status: () => ({ connection: { state } }),
+      }) as unknown as NonNullable<Services['machine']>
     const services = (m?: NonNullable<Services['machine']>): Services => ({
       workers: inProcessWorkers,
       ...(m === undefined ? {} : { machine: m }),
     })
-    const check = (args: unknown, s: Services) =>
-      defaultPermissionPolicy.check(jogMachine, args, agent, s) as AppResult<void>
-    expectOk(check({}, services(machine('virtual'))))
-    // no connection: nothing to affect (the command answers run.notConnected)
-    expectOk(check({}, services(machine(undefined))))
-    expectOk(check({ target: 'virtual' }, services(machine(undefined))))
-    expectErrCode(check({ target: 'serial' }, services(machine(undefined))), 'permission.denied')
+    const open = { ...jogMachine, name: 'run.connection.open' }
+    const check = (def: AnyCommand, args: unknown, s: Services) =>
+      defaultPermissionPolicy.check(def, args, agent, s) as AppResult<void>
+    // the target as the host reported it
+    expectOk(check(jogMachine, {}, services(machine('virtual', 'open'))))
+    expectErrCode(check(jogMachine, {}, services(machine('serial', 'open'))), 'permission.denied')
+    // no connection: only opening a virtual one; any other command or target is denied
+    expectOk(check(open, { target: 'virtual' }, services(machine(undefined))))
     expectErrCode(
-      check({}, services({ target: 'serial' } as unknown as NonNullable<Services['machine']>)),
+      check(open, { target: 'serial' }, services(machine(undefined))),
+      'permission.denied',
+    )
+    expectErrCode(
+      check(jogMachine, { target: 'virtual' }, services(machine(undefined))),
+      'permission.denied',
+    )
+    // still connecting: the target is not known yet
+    expectErrCode(
+      check(open, { target: 'virtual' }, services(machine(undefined, 'connecting'))),
       'permission.denied',
     )
     // no machine port in this process: strict
-    expectErrCode(check({}, services()), 'permission.denied')
+    expectErrCode(check(jogMachine, {}, services()), 'permission.denied')
   })
 
   it('uses the injected policy with the parsed args and source', async () => {

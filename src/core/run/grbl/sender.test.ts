@@ -210,6 +210,7 @@ describe('tool changes and pauses', () => {
     await until(r.clock, () => r.sender.status?.state === 'Idle' && r.emu.status().state === 'Idle')
     expectOk(await drive(r.clock, r.sender.command('G10 L20 P1 Z0')))
     expect(expectOk(await drive(r.clock, r.sender.readWorkZero()))[2]).toBeCloseTo(-2, 9)
+    await drive(r.clock, r.sender.freshStatus())
     expectOk(r.sender.continueProgram())
     const sum = expectOk(await drive(r.clock, p))
     expect(sum).toMatchObject({ lines: lines.length, toolChanges: 1 })
@@ -317,12 +318,17 @@ describe('hold, resume and stop', () => {
 })
 
 describe('errors, alarms and the connection', () => {
-  it('error:N stops the run before later lines execute: machine.error with the line', async () => {
+  it('error:N holds and resets at once: machine.error with the line', async () => {
+    // The emulator applies `!` the instant it arrives, so here no later line starts. On real GRBL
+    // lines already planned may begin before the hold decelerates (docs/modes/run-v0.1.md).
     const r = await connected(machine())
     const p = start(r, ['G0 X1', 'G81 X1 Y1 Z-1 R1 F100', 'G0 X2'])
     const e = expectErrCode(await drive(r.clock, p), 'machine.error')
     expect(e.toJSON().frames[0]?.data).toMatchObject({ code: 20, line: 2 })
     expect(r.events).toContainEqual(expect.objectContaining({ kind: 'error', code: 20, line: 2 }))
+    // `!`, then the reset that flushes GRBL's buffers
+    expect(r.io.realtime.lastIndexOf(0x18)).toBeGreaterThan(r.io.realtime.indexOf(0x21))
+    expect(r.io.realtime.indexOf(0x21)).toBeGreaterThanOrEqual(0)
     const later = r.emu.trace.lines.find((l) => l.text === 'G0 X2')
     expect(later?.startedAt).toBeUndefined()
     settle(r.emu)

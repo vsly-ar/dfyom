@@ -18,7 +18,7 @@ import type { GrblExport } from '../post/export'
 import { exportPlan } from '../post/plan-export'
 import type { SenderProgram } from './grbl/sender'
 import { RunSummarySchema } from './host/protocol'
-import type { MachineService } from './service'
+import type { MachineService, RunningJob } from './service'
 
 const MARKER = /^\(DFYOM TOOL CHANGE (\d+): ([^()]*)\)$/
 
@@ -119,6 +119,34 @@ async function runJob(
         },
       ],
     })
+  // From here to the stream the connection is held for this job: no jog or work-zero change
+  // slips in between the soft-limit check and the start (the host re-checks the G54 anyway).
+  const reserved = m.reserve(ctx.jobId)
+  if (reserved.isErr()) return reserved
+  const started = await checkAndStart(doc, planId, ctx, m, status.workZero, key.unwrap() ?? '')
+  m.release(ctx.jobId)
+  if (started.isErr()) return started
+  const { running, warnings } = started.unwrap()
+  const unbind = bindJobControl(m, ctx)
+  if (ctx.pause.paused) void m.controlJob(ctx.jobId, 'hold')
+  // 5. end
+  const ended = await running.ended
+  unbind()
+  if (ended.isErr()) return Err(ended.unwrapErr().withContext(where, { planId }))
+  return Ok({ ...ended.unwrap(), warnings })
+}
+
+/** Steps 2–4 while the connection is reserved for the job. */
+async function checkAndStart(
+  doc: ProjectDoc,
+  planId: string,
+  ctx: JobContext,
+  m: MachineService,
+  workZero: readonly [number, number, number],
+  machineKey: string,
+): AsyncAppResult<{ running: RunningJob; warnings: PlanWarning[] }> {
+  const where = 'run.job.start'
+  const status = { workZero }
   // 2. program, exported with the live G54
   const exported = await exportPlan(doc, planId, ctx.services, {
     workZero: status.workZero,
@@ -140,6 +168,7 @@ async function runJob(
   // 4. stream
   const prefix = warnings.length > 0 ? `${warnings.length} machine warning(s) · ` : ''
   const total = e.lines.length
+  // the host refuses if the G54, the machine copy or the target changed since the check
   const started = await m.startJob(
     ctx.jobId,
     { lines: e.lines, sections: programSections(e) },
@@ -147,16 +176,11 @@ async function runJob(
       progress: (p) => ctx.progress({ done: p.done, total: p.total, label: `${prefix}${p.label}` }),
       phase: () => {},
     },
+    { workZero, machineKey },
   )
   if (started.isErr()) return Err(started.unwrapErr().withContext(where, { planId }))
   ctx.progress({ done: 0, total, label: `${prefix}started` })
-  const unbind = bindJobControl(m, ctx)
-  if (ctx.pause.paused) void m.controlJob(ctx.jobId, 'hold')
-  // 5. end
-  const ended = await started.unwrap().ended
-  unbind()
-  if (ended.isErr()) return Err(ended.unwrapErr().withContext(where, { planId }))
-  return Ok({ ...ended.unwrap(), warnings })
+  return Ok({ running: started.unwrap(), warnings })
 }
 
 export const runJobStart = defineCommand({

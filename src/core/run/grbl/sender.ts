@@ -142,6 +142,13 @@ export interface SenderOptions {
   readonly statusTimeoutMs?: number
   /** Clock time a controlled stop waits for `Hold:0` before the reset (default 5 s). */
   readonly holdTimeoutMs?: number
+  /** Clock time a command may wait for its reply (default 10 s; `$H` 10 min) → `machine.connection`. */
+  readonly commandTimeoutMs?: number
+  /**
+   * Clock time the machine may report `Idle` while a line waits for its `ok` (default 5 s, plus
+   * the dwells in flight) before the `ok` counts as lost → `machine.connection`.
+   */
+  readonly ackTimeoutMs?: number
   readonly log?: Logger
 }
 
@@ -149,6 +156,9 @@ interface PendingCommand {
   readonly line: string
   readonly replies: GrblLine[]
   readonly resolve: (r: AppResult<readonly GrblLine[]>) => void
+  /** Answered (or failed by an alarm, a timeout, a reset): later replies only free its bytes. */
+  settled: boolean
+  cancelTimeout?: (() => void) | undefined
 }
 
 type Sent =
@@ -179,6 +189,19 @@ interface ActiveRun {
   /** The error the run ends with once the stop sequence is through (`undefined`: stopped). */
   failure?: AppError
   label: string
+  /** `continueProgram()` at a tool change: send the marker (and skip its `M0`) when it fits. */
+  sendMarker?: boolean
+  /** `hold()` while waiting at a tool change or pause: `continueProgram()` waits for `resume()`. */
+  holdAfterWait?: boolean
+}
+
+/** Which wait `continueProgram()` would end: tool change `n`, or the `n`-th program pause. */
+export type RunWait = { readonly toolChange: number } | { readonly pause: number }
+
+const DWELL = /G0*4(?![0-9.])[^P]*P\s*([0-9.]+)/i
+const dwellMs = (line: string | undefined): number => {
+  const m = line === undefined ? null : DWELL.exec(line.replace(/\([^)]*\)/g, ''))
+  return m ? Number(m[1]) * 1000 || 0 : 0
 }
 
 type Waiter = (ok: boolean) => void
@@ -258,8 +281,18 @@ export class GrblSender {
   private pollOutstandingSince: number | undefined
   private cancelPoll: (() => void) | undefined
   private cancelWatchdog: (() => void) | undefined
-  /** After ALARM:2 GRBL sends nothing (not even status) until a reset. */
+  /** After ALARM:1/2 GRBL sends nothing (not even status) until a reset. */
   private critical = false
+  /** Reports requested after this ordinal follow our last `~` (earlier ones may say Hold). */
+  private resumeMark: number | undefined
+  /** The last command acknowledgement: the state is known only from reports requested after it. */
+  private motionMark = 0
+  /** Reports requested after this ordinal follow the last line booked or acknowledged. */
+  private ackMark = 0
+  private idleWithLineSince: number | undefined
+  /** G54 changed: positions wait for a report with `WCO` (WCO = G54 + G92 + TLO). */
+  private wcoPending = true
+  private lastG54: Vec3 | undefined
 
   /** Stop sequence: waiting for `Hold:0` after `!` (report ordinal must exceed the mark). */
   private holdMark: number | undefined
@@ -305,6 +338,15 @@ export class GrblSender {
     return this.run_ === undefined
       ? undefined
       : Math.min(this.run_.done + 1, this.run_.program.lines.length)
+  }
+
+  /** What `continueProgram()` would end, if the run waits. */
+  get wait(): RunWait | undefined {
+    const run = this.run_
+    if (run?.phase === 'toolChange' && run.toolChange !== undefined)
+      return { toolChange: run.toolChange.n }
+    if (run?.phase === 'programPause') return { pause: run.pauses + 1 }
+    return undefined
   }
 
   /**
@@ -398,7 +440,10 @@ export class GrblSender {
       return fail('machine.connection', 'no G54 in the $# report', {
         where: 'GrblSender.readWorkZero',
       })
-    this.wco = g54
+    // WCO is G54 + G92 + TLO: take it from the next report with `WCO`, which GRBL sends after a change
+    if (this.lastG54 === undefined || g54.some((v, i) => v !== this.lastG54?.[i]))
+      this.wcoPending = true
+    this.lastG54 = g54
     return Ok(g54)
   }
 
@@ -415,7 +460,7 @@ export class GrblSender {
         resolve(undefined)
       }, this.opts.statusTimeoutMs ?? 2000)
       const off = this.onStatus((s) => {
-        if (this.reportsSeen <= mark) return
+        if (this.reportsSeen <= mark || this.wcoPending) return
         off()
         cancel()
         resolve(s)
@@ -469,9 +514,16 @@ export class GrblSender {
     })
   }
 
-  /** Feed hold (`!`) while streaming. */
+  /**
+   * Feed hold (`!`) while streaming. While a tool change or pause waits, nothing moves: the hold
+   * is kept, and `continueProgram()` is refused until `resume()`.
+   */
   hold(): AppResult<void> {
     const run = this.run_
+    if (run !== undefined && (run.phase === 'toolChange' || run.phase === 'programPause')) {
+      run.holdAfterWait = true
+      return Ok(undefined)
+    }
     if (run?.phase !== 'streaming') return this.phaseError('hold')
     this.writeBytes(Uint8Array.of(REALTIME.hold))
     this.setPhase(run, 'held')
@@ -481,8 +533,12 @@ export class GrblSender {
   /** Cycle start (`~`) after `hold()`. */
   resume(): AppResult<void> {
     const run = this.run_
+    if (run?.holdAfterWait === true && run.phase !== 'held') {
+      run.holdAfterWait = false
+      return Ok(undefined)
+    }
     if (run?.phase !== 'held') return this.phaseError('resume')
-    this.writeBytes(Uint8Array.of(REALTIME.resume))
+    this.cycleStart()
     this.setPhase(run, 'streaming')
     this.fill()
     return Ok(undefined)
@@ -491,13 +547,21 @@ export class GrblSender {
   /** Leaves `toolChange` (sends the marker, skips its `M0`) or `programPause` (`~`). */
   continueProgram(): AppResult<void> {
     const run = this.run_
+    if (run?.holdAfterWait === true && (run.phase === 'toolChange' || run.phase === 'programPause'))
+      return fail('run.state', 'the run is paused: resume it first', {
+        where: 'GrblSender.continue',
+        data: { phase: run.phase, paused: true },
+      })
     if (run?.phase === 'toolChange') {
-      const marker = run.program.lines[run.next] ?? ''
+      // the user may have jogged or zeroed: continue only once all of it is done and acknowledged
+      if (!this.idleNow() || this.inflight.length > 0 || this.commands.length > 0)
+        return fail('run.state', 'wait until the machine is Idle and every command is done', {
+          where: 'GrblSender.continue',
+          data: { state: this.latest?.state ?? 'Unknown', phase: run.phase },
+        })
       run.toolChanges++
       run.toolChange = undefined
-      this.book({ bytes: marker.length + 1, kind: 'program', index: run.next }, marker)
-      run.next += 2
-      run.done++ // the skipped M0
+      run.sendMarker = true
       this.setPhase(run, 'streaming')
       this.fill()
       return Ok(undefined)
@@ -505,11 +569,22 @@ export class GrblSender {
     if (run?.phase === 'programPause') {
       run.pauses++
       run.message = undefined
-      this.writeBytes(Uint8Array.of(REALTIME.resume))
+      this.cycleStart()
       this.setPhase(run, 'streaming')
       return Ok(undefined)
     }
     return this.phaseError('continue')
+  }
+
+  /** `~`; reports requested before it may still say Hold. */
+  private cycleStart(): void {
+    this.writeBytes(Uint8Array.of(REALTIME.resume))
+    this.resumeMark = this.pollsWritten
+  }
+
+  /** The last report says Idle and was requested after the last command's acknowledgement. */
+  private idleNow(): boolean {
+    return this.latest?.state === 'Idle' && this.reportsSeen > this.motionMark
   }
 
   /**
@@ -519,16 +594,26 @@ export class GrblSender {
    */
   stop(): AsyncAppResult<void> {
     const run = this.run_
-    if (run === undefined || run.phase === 'stopping') return Promise.resolve(Ok(undefined))
+    if (run === undefined) return Promise.resolve(Ok(undefined))
     return new Promise((resolve) => {
       run.onEnd.push(() => resolve(Ok(undefined)))
-      this.stopSequence(run, undefined)
+      // a stop already under way: wait for it to reach the reset and end
+      if (run.phase !== 'stopping') this.stopSequence(run, undefined)
     })
   }
 
-  /** Stops polling, fails what is pending and closes the transport. */
+  /**
+   * Stops polling, fails what is pending and closes the transport. During a run the controller is
+   * reset first (`0x18`: motion and spindle stop, GRBL's buffers are flushed).
+   */
   async close(): AsyncAppResult<void> {
     const run = this.run_
+    if (run !== undefined && this.connected) {
+      this.expectingReset = true
+      const reset = await this.transport.write(Uint8Array.of(REALTIME.reset))
+      if (reset.isErr())
+        this.log.warn({ err: reset.unwrapErr().toJSON() }, 'reset before close failed')
+    }
     if (run !== undefined)
       this.finish(
         run,
@@ -556,12 +641,36 @@ export class GrblSender {
           data: { phase: run.phase },
         }),
       )
+    // after a sent reset, commands wait for the banner
+    if (this.critical && !this.expectingReset)
+      return Promise.resolve(
+        fail('run.state', 'the controller is in a critical alarm: reset it first', {
+          where,
+          data: { state: 'Alarm' },
+        }),
+      )
     const pf = preflight([line], where)
     if (pf.isErr()) return Promise.resolve(Err(pf.unwrapErr()))
     return new Promise((resolve) => {
-      this.commands.push({ line, replies: [], resolve })
+      const cmd: PendingCommand = { line, replies: [], resolve, settled: false }
+      const ms = line === '$H' ? 600_000 : (this.opts.commandTimeoutMs ?? 10_000)
+      cmd.cancelTimeout = this.clock.schedule(this.clock.now() + ms, () => {
+        cmd.cancelTimeout = undefined
+        if (cmd.settled) return
+        this.log.warn({ command: line, ms }, 'no reply to a command')
+        this.connectionLost(`no reply to ${line}`)
+      })
+      this.commands.push(cmd)
       this.fill()
     })
+  }
+
+  private settle(cmd: PendingCommand, r: AppResult<readonly GrblLine[]>): void {
+    if (cmd.settled) return
+    cmd.settled = true
+    cmd.cancelTimeout?.()
+    cmd.cancelTimeout = undefined
+    cmd.resolve(r)
   }
 
   private fits(bytes: number): boolean {
@@ -585,6 +694,15 @@ export class GrblSender {
       const run = this.run_
       if (run?.phase !== 'streaming' || run.pendingToolChange !== undefined) return
       const lines = run.program.lines
+      if (run.sendMarker === true) {
+        const marker = lines[run.next] ?? ''
+        if (!this.fits(marker.length + 1)) return
+        this.book({ bytes: marker.length + 1, kind: 'program', index: run.next }, marker)
+        run.sendMarker = false
+        run.next += 2
+        run.done++ // the skipped M0
+        continue
+      }
       const line = lines[run.next]
       if (line === undefined) return
       const m = MARKER.exec(line)
@@ -603,6 +721,8 @@ export class GrblSender {
 
   /** Books the line against the RX buffer, then writes it (an answer can only follow). */
   private book(sent: Sent, line: string): void {
+    this.ackMark = this.pollsWritten
+    this.idleWithLineSince = undefined
     this.inflight.push(sent)
     this.used += sent.bytes
     if (sent.kind === 'program' && this.log.isLevelEnabled('trace'))
@@ -638,6 +758,7 @@ export class GrblSender {
       case 'banner':
         return this.onBanner()
       case 'message':
+        if (l.text === 'Reset to continue') this.critical = true
         this.emit({ kind: 'message', text: l.text })
         this.collect(l)
         return
@@ -659,10 +780,14 @@ export class GrblSender {
       return
     }
     this.used -= sent.bytes
+    this.ackMark = this.pollsWritten
+    this.idleWithLineSince = undefined
     if (sent.kind === 'command') {
-      if (l.kind === 'ok') sent.cmd.resolve(Ok(sent.cmd.replies))
+      this.motionMark = this.pollsWritten
+      if (l.kind === 'ok') this.settle(sent.cmd, Ok(sent.cmd.replies))
       else
-        sent.cmd.resolve(
+        this.settle(
+          sent.cmd,
           fail('machine.error', `error:${l.code} ${errorText(l.code)}`, {
             where: 'GrblSender.command',
             data: { code: l.code, text: errorText(l.code), command: sent.cmd.line },
@@ -699,7 +824,10 @@ export class GrblSender {
     this.reportsSeen++
     this.pollOutstandingSince = undefined
     const p = positions(report, this.wco, this.inches)
-    if (report.wco !== undefined && p !== undefined) this.wco = p.wco
+    if (report.wco !== undefined && p !== undefined) {
+      this.wco = p.wco
+      this.wcoPending = false
+    }
     const prev = this.latest
     const k = this.inches ? 25.4 : 1
     this.latest = {
@@ -712,7 +840,31 @@ export class GrblSender {
       ...(report.buffer === undefined ? {} : { buffer: report.buffer }),
     }
     for (const l of [...this.statusListeners]) l(this.latest)
+    if (this.lostAcknowledgement(report)) return
     this.afterStatus(report)
+  }
+
+  /**
+   * Idle (in reports requested after the last line went out or was acknowledged) while a line
+   * waits for its `ok`: GRBL has executed it, so the `ok` was lost. Dwells in flight extend the
+   * allowance (GRBL reports Idle while it dwells).
+   */
+  private lostAcknowledgement(report: StatusReport): boolean {
+    const waiting = this.inflight.some((x) => x.kind === 'program' || !x.cmd.settled)
+    if (report.state !== 'Idle' || !waiting || this.reportsSeen <= this.ackMark) {
+      this.idleWithLineSince = undefined
+      return false
+    }
+    const now = this.clock.now()
+    this.idleWithLineSince ??= now
+    let allowance = this.opts.ackTimeoutMs ?? 5000
+    const lines = this.run_?.program.lines
+    for (const x of this.inflight)
+      allowance += dwellMs(x.kind === 'program' ? lines?.[x.index] : x.cmd.line)
+    if (now - this.idleWithLineSince <= allowance) return false
+    this.log.warn({ ms: now - this.idleWithLineSince }, 'acknowledgement missing')
+    this.connectionLost('acknowledgement missing')
+    return true
   }
 
   private afterStatus(report: StatusReport): void {
@@ -723,11 +875,14 @@ export class GrblSender {
     // the next regular poll brings the next report.
     if (run.phase === 'stopping') {
       // motion has stopped after our `!` (a report requested after it)
-      if (this.holdMark !== undefined && this.reportsSeen > this.holdMark)
+      const commandsDone = !this.inflight.some((x) => x.kind === 'command' && !x.cmd.settled)
+      if (this.holdMark !== undefined && this.reportsSeen > this.holdMark && commandsDone)
         if (state === 'Hold:0' || state === 'Idle' || report.state === 'Alarm') this.sendReset()
       return
     }
     if (run.phase === 'streaming' && state === 'Hold:0') {
+      // a report requested before our `~` still shows the hold we just left
+      if (this.resumeMark !== undefined && this.reportsSeen <= this.resumeMark) return
       const oldest = this.inflight[0]
       if (oldest?.kind === 'program' && isProgramPause(run.program.lines[oldest.index])) {
         run.message = commentText(run.program.lines[oldest.index - 1]) ?? 'Program paused (M0)'
@@ -750,8 +905,17 @@ export class GrblSender {
 
   private onAlarm(code: number): void {
     const text = alarmText(code)
-    if (code === 2) this.critical = true
+    // GRBL 1.1: hard and soft limits are critical (`[MSG:Reset to continue]`, nothing until a reset)
+    if (code === 1 || code === 2) this.critical = true
     this.emit({ kind: 'alarm', code, text })
+    const e = new AppError('machine.alarm', `ALARM:${code} ${text}`, {
+      where: 'GrblSender.command',
+      data: { code, text },
+    })
+    // commands not sent yet never run; in a critical alarm GRBL answers none in flight either
+    for (const c of this.commands.splice(0)) this.settle(c, Err(e))
+    if (this.critical)
+      for (const x of this.inflight) if (x.kind === 'command') this.settle(x.cmd, Err(e))
     const run = this.run_
     if (run === undefined) return
     if (run.phase === 'stopping') {
@@ -783,6 +947,8 @@ export class GrblSender {
     this.used = 0
     this.pollOutstandingSince = undefined
     this.reportsSeen = this.pollsWritten
+    this.resumeMark = undefined
+    this.idleWithLineSince = undefined
     const waiter = this.bannerWaiter
     this.bannerWaiter = undefined
     if (waiter !== undefined) {
@@ -832,11 +998,13 @@ export class GrblSender {
     const wasToolChange = run.phase === 'toolChange'
     this.setPhase(run, 'stopping')
     this.freshMark = undefined
-    if (wasToolChange || this.critical) {
+    if (this.critical) {
       this.sendReset()
       return
     }
-    this.writeBytes(Uint8Array.of(REALTIME.hold))
+    // a reset during motion loses the position (ALARM:3): at a tool change the user may be
+    // jogging, so cancel the jog; otherwise feed-hold. Reset once a later report shows it stopped.
+    this.writeBytes(Uint8Array.of(wasToolChange ? REALTIME.jogCancel : REALTIME.hold))
     this.holdMark = this.pollsWritten
     this.requestStatus()
     this.cancelHoldTimeout = this.clock.schedule(
@@ -1022,7 +1190,7 @@ export class GrblSender {
       }
     const rest = this.inflight.filter((s) => s.kind !== 'command')
     this.inflight.splice(0, this.inflight.length, ...rest)
-    for (const c of pending) c.resolve(Err(e))
+    for (const c of pending) this.settle(c, Err(e))
   }
 
   private disposeIo(): void {

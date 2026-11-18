@@ -71,6 +71,8 @@ async function run(machine: Machine, lines: readonly string[]): Promise<Run> {
     // in program units (G10 has no units of its own)
     const z = (emu.status().mpos[2] - WORK_ZERO[2]) / (machine.programUnits === 'in' ? 25.4 : 1)
     expectOk(await drive(clock, sender.command(`G10 L20 P1 Z${z.toFixed(4)}`)))
+    // continue only on a report taken after the last command (GrblSender refuses a stale Idle)
+    await drive(clock, sender.freshStatus())
     expectOk(sender.continueProgram())
   }
   return { rig: r, emu, toolChanges, result, error }

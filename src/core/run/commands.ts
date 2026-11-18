@@ -107,16 +107,14 @@ export const runConnectionOpen = defineCommand({
     const settings = Object.fromEntries(
       Object.entries(machineSettings(machine.unwrap())).map(([k, v]) => [k, v]),
     )
-    const info = await m.connect(
-      {
-        kind: 'virtual',
-        settings,
-        homing: args.homing,
-        timeScale: args.timeScale,
-        ...(prepare === undefined ? {} : { prepare }),
-      },
-      key.unwrap() ?? '',
-    )
+    const info = await m.connect({
+      kind: 'virtual',
+      settings,
+      homing: args.homing,
+      timeScale: args.timeScale,
+      machineKey: key.unwrap() ?? '',
+      ...(prepare === undefined ? {} : { prepare }),
+    })
     return info.mapErr((e) => e.withContext(where, { planId: args.planId }))
   },
 })
@@ -199,6 +197,7 @@ export const runMachineJogCancel = defineCommand({
   summary: 'Cancel a running jog (0x85).',
   title: () => 'Stop jog',
   machine: true,
+  urgent: true,
   args: Empty,
   result: Done,
   run: async (_doc, _args, ctx) =>
@@ -239,6 +238,7 @@ export const runMachineReset = defineCommand({
     'Reset the controller at once (0x18): the emergency path; a running job fails, motion in progress raises ALARM:3.',
   title: () => 'Reset machine',
   machine: true,
+  urgent: true,
   args: Empty,
   result: Done,
   run: async (_doc, _args, ctx) =>
@@ -252,7 +252,24 @@ export const runJobContinue = defineCommand({
     'Continue a run waiting at a tool change (after the new tool is zeroed) or at an M0 pause.',
   title: () => 'Continue run',
   machine: true,
-  args: z.object({ jobId: z.string().min(1).describe('Id returned by run.job.start') }),
+  args: z
+    .object({
+      jobId: z.string().min(1).describe('Id returned by run.job.start'),
+      toolChange: z
+        .number()
+        .int()
+        .optional()
+        .describe('At a tool change: its number, from run.status.get job.toolChange.n'),
+      pause: z
+        .number()
+        .int()
+        .optional()
+        .describe('At a program pause (M0): its number, from run.status.get job.pause'),
+    })
+    .refine(
+      (a) => (a.toolChange === undefined) !== (a.pause === undefined),
+      'name the wait to end: toolChange or pause',
+    ),
   result: Done,
   async run(_doc, args, ctx) {
     const where = 'run.job.continue'
@@ -264,7 +281,10 @@ export const runJobContinue = defineCommand({
         where,
         data: { state: m.unwrap().status().state, ...(job ? { phase: job.phase } : {}) },
       })
-    return (await m.unwrap().controlJob(args.jobId, 'continue')).map(() => ({}))
+    // the host checks the named wait against the one it is at (a retried continue skips nothing)
+    const expect =
+      args.toolChange !== undefined ? { toolChange: args.toolChange } : { pause: args.pause ?? 0 }
+    return (await m.unwrap().controlJob(args.jobId, 'continue', expect)).map(() => ({}))
   },
 })
 

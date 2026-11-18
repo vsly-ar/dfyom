@@ -80,9 +80,14 @@ describe('run commands', { timeout: 60_000 }, () => {
   it('fail with run.notConnected without a connection or a machine port', async () => {
     const t = await setup()
     expect(t.status().connection.state).toBe('closed')
-    expectErrCode(await t.run('run.machine.unlock', {}), 'run.notConnected')
-    const { result } = await t.job('run.job.start', { planId: t.planId })
-    expectErrCode(await result, 'run.notConnected')
+    expectErrCode(await t.run('run.machine.unlock', {}, ui), 'run.notConnected')
+    // with no connection, agents may only open a virtual one (deny by default)
+    expectErrCode(await t.run('run.machine.unlock', {}), 'permission.denied')
+    expectErrCode(await t.run('run.job.start', { planId: t.planId }), 'permission.denied')
+    const { jobId } = expectOk(await t.run('run.job.start', { planId: t.planId }, ui)) as {
+      jobId: string
+    }
+    expectErrCode(await t.d.job(jobId).unwrap().result, 'run.notConnected')
     const bare = await setup({ machine: false })
     // without a machine port agents are denied (strict policy); the UI gets run.notConnected
     expectErrCode(await bare.open(), 'permission.denied')
@@ -119,6 +124,15 @@ describe('run commands', { timeout: 60_000 }, () => {
       const job = t.status().job!
       waits.push(job.phase)
       expect(job).toMatchObject({ jobId, startedAt: expect.any(String) })
+      if (job.phase === 'toolChange' && waits.length === 1) {
+        // job.pause while waiting: continue is refused until job.resume
+        expectOk(await t.run('job.pause', { jobId }))
+        const n = job.toolChange!.n
+        expectErrCode(await t.run('run.job.continue', { jobId, toolChange: n }), 'run.state')
+        expectOk(await t.run('job.resume', { jobId }))
+        // a continue for another tool change is refused (a retried continue skips nothing)
+        expectErrCode(await t.run('run.job.continue', { jobId, toolChange: n + 1 }), 'run.state')
+      }
       if (job.phase === 'toolChange') {
         // touch off 1 mm lower; the new tool has the same length: Z keeps its offset
         const before = t.status().workZero
@@ -130,7 +144,9 @@ describe('run commands', { timeout: 60_000 }, () => {
         const set = expectOk(await t.run('run.workZero.set', { axes: ['z'], values: [0, 0, z] }))
         expect((set as { workZero: number[] }).workZero[2]).toBeCloseTo(before[2], 3)
       }
-      expectOk(await t.run('run.job.continue', { jobId }))
+      const which =
+        job.phase === 'toolChange' ? { toolChange: job.toolChange!.n } : { pause: job.pause! }
+      expectOk(await t.run('run.job.continue', { jobId, ...which }))
       await waitFor(() => finished || t.status().job?.phase === 'streaming')
     }
     const summary = expectOk(await result) as { lines: number; toolChanges: number; pauses: number }
@@ -210,7 +226,7 @@ describe('run commands', { timeout: 60_000 }, () => {
     const { jobId, result } = await t.job('run.job.start', { planId: t.planId })
     expect(await waitFor(() => t.status().job?.phase === 'streaming')).toBe(true)
     expectErrCode(await t.run('run.connection.close', {}), 'run.busy')
-    expectErrCode(await t.run('run.job.continue', { jobId }), 'run.state')
+    expectErrCode(await t.run('run.job.continue', { jobId, toolChange: 1 }), 'run.state')
     expect(
       checkNoRunJob({ get: () => t.d.job(jobId), list: () => [t.d.job(jobId).unwrap()] }).isErr(),
     ).toBe(true)
@@ -238,5 +254,80 @@ describe('run commands', { timeout: 60_000 }, () => {
     expect(t.status().connection.state).toBe('closed')
     // a fresh host on the next open
     expectOk(await t.open())
+  })
+
+  it('a work zero moved during the export never streams: refused, or the job refuses', async () => {
+    const t = await setup()
+    expectOk(await t.open({ prepare: true }))
+    const before = t.status().workZero
+    const { jobId, result } = await t.job('run.job.start', { planId: t.planId })
+    const moved = await t.run('run.workZero.set', { axes: ['z'], values: [0, 0, -150] })
+    if (moved.isOk()) {
+      // the change got in before the reservation: the host's re-check refuses the start
+      expectErrCode(await result, 'run.state')
+      return
+    }
+    expectErrCode(moved, 'run.busy')
+    // the job streams with the G54 it was checked with
+    expect(await waitFor(() => t.status().job !== undefined)).toBe(true)
+    expect(t.status().workZero).toEqual(before)
+    expectOk(await t.run('job.abort', { jobId }))
+    expectErrCode(await result, 'op.aborted')
+  })
+
+  it('app quit (shutdown) stops a running job with the reset, then ends the host', async () => {
+    const t = await setup()
+    expectOk(await t.open({ prepare: true, timeScale: 1 }))
+    const { result } = await t.job('run.job.start', { planId: t.planId })
+    expect(await waitFor(() => t.status().job?.phase === 'streaming')).toBe(true)
+    await t.client.shutdown(3000)
+    expectErrCode(await result, 'op.aborted')
+    expect(t.status().connection.state).toBe('closed')
+  })
+})
+
+describe('machine client', () => {
+  it('a lost connection closes it; the next open starts a fresh host', async () => {
+    let spawned = 0
+    const client = new MachineClient({
+      logLevel: 'warn',
+      factory: (events) => {
+        spawned++
+        return {
+          post: (raw) => {
+            const m = raw as { type: string; requestId?: string }
+            const send = (x: unknown) => queueMicrotask(() => events.message(x))
+            if (m.type === 'init') send({ type: 'ready', protocol: 1 })
+            if (m.type === 'connect') {
+              send({
+                type: 'reply',
+                requestId: m.requestId,
+                result: {
+                  ok: true,
+                  value: {
+                    target: 'virtual',
+                    version: '1.1h',
+                    settings: {},
+                    workZero: [0, 0, 0],
+                    modes: [],
+                    homed: true,
+                  },
+                },
+              })
+              send({ type: 'event', kind: 'connectionLost', data: { reason: 'cable' } })
+            }
+          },
+          terminate: () => queueMicrotask(() => events.exit(null)),
+        }
+      },
+    })
+    clients.push(client)
+    const target = { kind: 'virtual' as const, settings: {}, homing: true, timeScale: 1 as const }
+    expectOk(await client.connect({ ...target, machineKey: 'k' }))
+    await waitFor(() => client.status().connection.state === 'closed', 1000)
+    expect(client.status().connection.state).toBe('closed')
+    expect(client.target).toBeUndefined()
+    expectOk(await client.connect({ ...target, machineKey: 'k' }))
+    expect(spawned).toBe(2)
   })
 })

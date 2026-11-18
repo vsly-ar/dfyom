@@ -172,6 +172,8 @@ const control = (name: string, summary: string, title: string): JobControl => ({
   summary,
   title: () => title,
   machine: false,
+  // a stop must never wait behind an effect that waits for the machine
+  urgent: true,
   args: JobControlArgs,
   result: JobControlResult,
 })

@@ -16,6 +16,7 @@ import {
   type AsyncAppResult,
 } from '../../../shared/result'
 import type { TimeScale } from '../clock'
+import type { Vec3 } from '../../toolpath/model'
 import type { RunSummary, SenderProgram } from '../grbl/sender'
 import {
   closedStatus,
@@ -84,7 +85,10 @@ export class MachineClient implements MachineService {
   private host: Host | undefined
   private readonly pending = new Map<string, (r: AppResult<unknown>) => void>()
   private seq = 0
-  private conn: { state: 'connecting' | 'open'; machineKey: string } | undefined
+  private conn:
+    { state: 'connecting' | 'open'; machineKey: string; target?: 'virtual' | undefined } | undefined
+  /** Job that checks and exports before it streams: machine actions wait (run.busy). */
+  private reserved: string | undefined
   private hostStatus: HostStatus | undefined
   private job: Job | undefined
   private timeScale: TimeScale = 1
@@ -97,8 +101,9 @@ export class MachineClient implements MachineService {
     this.now = opts.now ?? (() => Date.now())
   }
 
+  /** As the host reported it on connect; undefined while connecting or closed. */
   get target(): 'virtual' | undefined {
-    return this.conn === undefined ? undefined : 'virtual'
+    return this.conn?.state === 'open' ? this.conn.target : undefined
   }
 
   get machineKey(): string | undefined {
@@ -115,13 +120,17 @@ export class MachineClient implements MachineService {
         : {
             ...s,
             state: 'Connecting',
-            connection: { ...s.connection, state: conn.state, target: 'virtual' },
+            connection: { ...s.connection, state: conn.state },
           }
     }
     const { job, timeScale, ...rest } = h
     return {
       ...rest,
-      connection: { state: conn.state, target: 'virtual', timeScale },
+      connection: {
+        state: conn.state,
+        ...(conn.target === undefined ? {} : { target: conn.target }),
+        timeScale,
+      },
       ...(job === undefined || this.job?.jobId !== job.jobId
         ? {}
         : { job: { ...job, startedAt: this.job.startedAt } }),
@@ -133,7 +142,8 @@ export class MachineClient implements MachineService {
     return () => this.listeners.delete(listener)
   }
 
-  async connect(target: VirtualTarget, machineKey: string): AsyncAppResult<ConnectedInfo> {
+  async connect(target: VirtualTarget): AsyncAppResult<ConnectedInfo> {
+    const machineKey = target.machineKey
     if (this.conn !== undefined)
       return fail('run.busy', 'a machine connection is already open', { where: `${WHERE}.connect` })
     this.conn = { state: 'connecting', machineKey }
@@ -145,7 +155,7 @@ export class MachineClient implements MachineService {
     const r = await this.request({ type: 'connect', requestId: '', target })
     const info = r.andThen((v) => parseWith(ControllerInfoSchema, v, `${WHERE}.connect`))
     if (info.isErr()) return this.connectFailed(info.unwrapErr())
-    this.conn = { state: 'open', machineKey }
+    this.conn = { state: 'open', machineKey, target: info.unwrap().target }
     this.log.info({ target: 'virtual', version: info.unwrap().version }, 'connected')
     this.notify()
     return info
@@ -170,17 +180,39 @@ export class MachineClient implements MachineService {
 
   async machine(action: MachineAction): AsyncAppResult<unknown> {
     if (this.conn?.state !== 'open') return this.notConnected()
+    // the emergency paths always pass; anything else waits while a job checks its program
+    if (this.reserved !== undefined && action.kind !== 'reset' && action.kind !== 'jogCancel')
+      return fail('run.busy', `job ${this.reserved} is starting`, {
+        where: `${WHERE}.machine`,
+        data: { jobId: this.reserved },
+      })
     return this.request({ type: 'machine', requestId: '', action })
+  }
+
+  reserve(jobId: string): AppResult<void> {
+    if (this.conn?.state !== 'open') return this.notConnected()
+    const holder = this.job?.jobId ?? this.reserved
+    if (holder !== undefined && holder !== jobId)
+      return fail('run.busy', `job ${holder} is running`, { where: `${WHERE}.reserve` })
+    this.reserved = jobId
+    return Ok(undefined)
+  }
+
+  release(jobId: string): void {
+    if (this.reserved === jobId) this.reserved = undefined
   }
 
   async startJob(
     jobId: string,
     program: SenderProgram,
     listener: JobListener,
+    expect: { readonly workZero: Vec3; readonly machineKey: string },
   ): AsyncAppResult<RunningJob> {
-    if (this.conn?.state !== 'open') return this.notConnected()
-    if (this.job !== undefined)
-      return fail('run.busy', `job ${this.job.jobId} is running`, { where: `${WHERE}.startJob` })
+    if (this.conn?.state !== 'open' || this.conn.target === undefined) return this.notConnected()
+    if (this.job !== undefined || (this.reserved !== undefined && this.reserved !== jobId))
+      return fail('run.busy', `job ${this.job?.jobId ?? this.reserved} is running`, {
+        where: `${WHERE}.startJob`,
+      })
     let end: (r: AppResult<RunSummary>) => void = () => {}
     const ended = new Promise<AppResult<RunSummary>>((resolve) => (end = resolve))
     const job: Job = { jobId, listener, startedAt: new Date(this.now()).toISOString(), end }
@@ -190,7 +222,13 @@ export class MachineClient implements MachineService {
       requestId: '',
       jobId,
       program: { lines: [...program.lines], sections: program.sections.map((s) => ({ ...s })) },
+      expect: {
+        workZero: [...expect.workZero] as unknown as Vec3,
+        machineKey: expect.machineKey,
+        target: this.conn.target,
+      },
     })
+    this.release(jobId)
     if (r.isErr()) {
       if (this.job === job) this.job = undefined
       return Err(r.unwrapErr())
@@ -198,11 +236,20 @@ export class MachineClient implements MachineService {
     return Ok({ ended })
   }
 
-  async controlJob(jobId: string, action: JobControlAction): AsyncAppResult<void> {
+  async controlJob(
+    jobId: string,
+    action: JobControlAction,
+    expect?: { readonly toolChange?: number; readonly pause?: number },
+  ): AsyncAppResult<void> {
     if (this.conn?.state !== 'open') return this.notConnected()
-    return (await this.request({ type: 'jobControl', requestId: '', jobId, action })).map(
-      () => undefined,
-    )
+    const r = await this.request({
+      type: 'jobControl',
+      requestId: '',
+      jobId,
+      action,
+      ...(expect === undefined ? {} : { expect: { ...expect } }),
+    })
+    return r.map(() => undefined)
   }
 
   async setTimeScale(scale: TimeScale): AsyncAppResult<void> {
@@ -212,7 +259,26 @@ export class MachineClient implements MachineService {
     return r.map(() => undefined)
   }
 
-  /** App quit or headless exit: ends the host without waiting. */
+  /**
+   * App quit or headless exit: a controlled end first (the host stops a running job with hold and
+   * reset, then closes the controller), bounded by `timeoutMs`; then the host is ended.
+   */
+  async shutdown(timeoutMs = 3000): Promise<void> {
+    const host = this.host
+    if (host === undefined) return
+    host.expectExit = true
+    if (this.conn?.state === 'open') {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      await Promise.race([
+        this.request({ type: 'disconnect', requestId: '' }),
+        new Promise((r) => (timer = setTimeout(r, timeoutMs))),
+      ])
+      clearTimeout(timer)
+    }
+    if (this.host === host) host.handle.terminate()
+  }
+
+  /** Ends the host at once, without a controlled stop (tests; a host that does not answer). */
   close(): void {
     const host = this.host
     if (host === undefined) return
@@ -297,8 +363,18 @@ export class MachineClient implements MachineService {
         return
       }
       case 'event':
-        if (m.kind === 'alarm' || m.kind === 'connectionLost')
-          this.log.warn({ kind: m.kind, ...m.data }, 'machine event')
+        if (m.kind === 'connectionLost') {
+          // the host has dropped the connection: closed here too, and a fresh host next time
+          this.log.warn({ ...m.data }, 'machine connection lost')
+          host.expectExit = true
+          this.conn = undefined
+          this.hostStatus = undefined
+          this.reserved = undefined
+          host.handle.terminate()
+          this.notify()
+          return
+        }
+        if (m.kind === 'alarm') this.log.warn({ kind: m.kind, ...m.data }, 'machine event')
         else this.log.debug({ kind: m.kind, ...m.data }, 'machine event')
         return
       case 'log':
@@ -324,6 +400,7 @@ export class MachineClient implements MachineService {
     job?.end(Err(e))
     this.conn = undefined
     this.hostStatus = undefined
+    this.reserved = undefined
     this.notify()
   }
 

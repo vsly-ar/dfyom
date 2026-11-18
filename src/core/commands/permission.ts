@@ -17,29 +17,32 @@ export interface PermissionPolicy {
   ): AppResult<void> | AsyncAppResult<void>
 }
 
+/** The command opening a connection; its `target` arg is the only one the policy reads. */
+const OPEN_CONNECTION = 'run.connection.open'
+
 /**
- * The connection target a machine command affects: the open connection's, or for opening one
- * the requested `target`; `none` without a connection; undefined without a machine port.
+ * Whether a non-UI source may run `def`: on an open connection whose host reported it virtual,
+ * or to open a virtual connection when none is open. Everything else is denied by default:
+ * an unknown or real target, a connection still opening, no machine port.
  */
-function affectedTarget(args: unknown, services: Services | undefined): string | undefined {
+function virtualOnly(def: AnyCommand, args: unknown, services: Services | undefined): boolean {
   const machine = services?.machine
-  if (machine === undefined) return undefined
-  if (machine.target !== undefined) return machine.target
-  const requested = (args as { target?: unknown } | null)?.target
-  return typeof requested === 'string' ? requested : 'none'
+  if (machine === undefined) return false
+  if (machine.target !== undefined) return machine.target === 'virtual'
+  if (def.name !== OPEN_CONNECTION || machine.status().connection.state !== 'closed') return false
+  return (args as { target?: unknown } | null)?.target === 'virtual'
 }
 
 /**
  * Conservative default until run-mode safety is specified: UI sources (a person at the app) may
  * run machine commands; other sources (agents, CLI, automation, system) only on the virtual
- * machine, or with no connection (nothing to affect; the command answers `run.notConnected`).
- * Docs: docs/architecture/grbl.md#transport-and-sender, docs/modes/run-v0.1.md#safety-v01
+ * machine (deny by default). Docs: docs/architecture/grbl.md#transport-and-sender,
+ * docs/modes/run-v0.1.md#safety-v01
  */
 export const defaultPermissionPolicy: PermissionPolicy = {
   check(def, args, source, services) {
     if (source.kind === 'ui') return Ok(undefined)
-    const target = affectedTarget(args, services)
-    if (target === 'virtual' || target === 'none') return Ok(undefined)
+    if (virtualOnly(def, args, services)) return Ok(undefined)
     return fail(
       'permission.denied',
       `${source.kind} sources may not run machine command ${def.name}`,

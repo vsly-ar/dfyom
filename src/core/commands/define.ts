@@ -22,6 +22,12 @@ interface CommandMeta<A> {
   title(args: A): string
   /** Affects a real machine → permission check. */
   readonly machine: boolean
+  /**
+   * Skips the project's FIFO queue: runs at once even while an effect holds it (the emergency
+   * paths: `run.machine.reset`, jog cancel; the `job.*` controls). Only for commands that touch
+   * no document. Doc: docs/architecture/commands.md#concurrency
+   */
+  readonly urgent?: boolean
 }
 
 /** Sync, undoable, changes `ProjectDoc` only. Never awaits, calls services or dispatches. */

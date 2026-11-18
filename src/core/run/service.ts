@@ -33,6 +33,8 @@ export const RunStatusSchema = HostStatusSchema.omit({ job: true, timeScale: tru
       phase: z.enum(RUN_PHASES),
       line: z.number().int(),
       toolChange: ToolChangeSchema.exactOptional(),
+      /** In `programPause`: the pause's number, for `run.job.continue { pause }`. */
+      pause: z.number().int().exactOptional(),
       /** ISO time, main's clock. */
       startedAt: z.string(),
       elapsedSeconds: z.number(),
@@ -76,12 +78,32 @@ export interface MachineService {
   readonly machineKey: string | undefined
   status(): RunStatus
   onStatus(listener: (s: RunStatus) => void): () => void
-  connect(target: VirtualTarget, machineKey: string): AsyncAppResult<ConnectedInfo>
+  /** `target.machineKey` names the machine copy emulated (decision 6). */
+  connect(target: VirtualTarget): AsyncAppResult<ConnectedInfo>
   disconnect(): AsyncAppResult<void>
-  /** `setWorkZero` and `home` answer the new G54 (`Vec3`), the others nothing. */
+  /** `setWorkZero` answers the new G54 (`Vec3`), the others nothing. */
   machine(action: MachineAction): AsyncAppResult<unknown>
-  /** Answers once streaming started (pre-flight and state checks passed). */
-  startJob(jobId: string, program: SenderProgram, listener: JobListener): AsyncAppResult<RunningJob>
-  controlJob(jobId: string, action: JobControlAction): AsyncAppResult<void>
+  /**
+   * Holds the connection for a job from its checks to its stream: machine actions other than
+   * reset and jog cancel answer `run.busy` meanwhile. `startJob` ends it; `release` on failure.
+   */
+  reserve(jobId: string): AppResult<void>
+  release(jobId: string): void
+  /**
+   * Answers once streaming started. The host re-checks `expect` (the G54 the program was
+   * checked with, the machine copy, the target) on a fresh report and refuses on any change.
+   */
+  startJob(
+    jobId: string,
+    program: SenderProgram,
+    listener: JobListener,
+    expect: { readonly workZero: readonly [number, number, number]; readonly machineKey: string },
+  ): AsyncAppResult<RunningJob>
+  /** `continue` names the wait it ends (`toolChange` n or `pause` n). */
+  controlJob(
+    jobId: string,
+    action: JobControlAction,
+    expect?: { readonly toolChange?: number; readonly pause?: number },
+  ): AsyncAppResult<void>
   setTimeScale(scale: TimeScale): AsyncAppResult<void>
 }

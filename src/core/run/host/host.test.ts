@@ -9,6 +9,7 @@ import { FAST } from '../grbl/emulator.fixture'
 import { runMachineHost } from './host'
 import { HostMessage, MainMessage, PROTOCOL_VERSION, type ConnectedInfo } from './protocol'
 
+const KEY = 'machine-key-1'
 const SETTINGS = Object.fromEntries(Object.entries(FAST).map(([k, v]) => [k, v]))
 
 function harness(throttleMs = 100) {
@@ -36,7 +37,19 @@ function harness(throttleMs = 100) {
   }
   const request = async (m: Record<string, unknown>): Promise<AppResult<unknown>> => {
     const requestId = `q${++seq}`
-    send({ ...m, requestId })
+    // a job start checks what main checked: the G54 it exported with, the machine copy, the target
+    const last = out.filter((x) => x.type === 'status').at(-1)
+    const expected =
+      m['type'] === 'jobStart' && m['expect'] === undefined
+        ? {
+            expect: {
+              workZero: last?.type === 'status' ? last.status.workZero : [0, 0, 0],
+              machineKey: KEY,
+              target: 'virtual',
+            },
+          }
+        : {}
+    send({ ...m, ...expected, requestId })
     const found = () => out.find((x) => x.type === 'reply' && x.requestId === requestId)
     expect(await pump(() => found() !== undefined)).toBe(true)
     const r = found()
@@ -57,7 +70,14 @@ async function connectedHost(
   h.send({ type: 'init', protocol: PROTOCOL_VERSION, logLevel: 'info' })
   const r = await h.request({
     type: 'connect',
-    target: { kind: 'virtual', settings: SETTINGS, homing: true, timeScale: 'max', ...target },
+    target: {
+      kind: 'virtual',
+      settings: SETTINGS,
+      homing: true,
+      timeScale: 'max',
+      machineKey: KEY,
+      ...target,
+    },
   })
   return expectOk(r) as ConnectedInfo
 }
@@ -71,13 +91,31 @@ describe('protocol schemas', () => {
       {
         type: 'connect',
         requestId: 'a',
-        target: { kind: 'virtual', settings: { '110': 5000 }, homing: true, timeScale: 1 },
+        target: {
+          kind: 'virtual',
+          settings: { '110': 5000 },
+          homing: true,
+          timeScale: 1,
+          machineKey: 'k',
+        },
       },
       { type: 'disconnect', requestId: 'a' },
       { type: 'machine', requestId: 'a', action: { kind: 'jog', by: [1, 0, 0], feed: 500 } },
       { type: 'machine', requestId: 'a', action: { kind: 'setWorkZero', axes: ['z'] } },
-      { type: 'jobStart', requestId: 'a', jobId: 'j', program: { lines: ['G0 X1'], sections: [] } },
-      { type: 'jobControl', requestId: 'a', jobId: 'j', action: 'continue' },
+      {
+        type: 'jobStart',
+        requestId: 'a',
+        jobId: 'j',
+        program: { lines: ['G0 X1'], sections: [] },
+        expect: { workZero: [0, 0, 0], machineKey: 'k', target: 'virtual' },
+      },
+      {
+        type: 'jobControl',
+        requestId: 'a',
+        jobId: 'j',
+        action: 'continue',
+        expect: { toolChange: 2 },
+      },
       { type: 'timeScale', requestId: 'a', scale: 'max' },
     ]
     for (const m of ok) expectOk(parseWith(MainMessage, m, 'test'))
@@ -135,7 +173,7 @@ describe('machine host', () => {
     expectErrCode(
       await h.request({
         type: 'connect',
-        target: { kind: 'virtual', settings: {}, homing: true, timeScale: 1 },
+        target: { kind: 'virtual', settings: {}, homing: true, timeScale: 1, machineKey: KEY },
       }),
       'run.busy',
     )
@@ -224,7 +262,23 @@ describe('machine host', () => {
       await h.request({ type: 'jobControl', jobId: 'j1', action: 'resume' }),
       'run.state',
     )
-    expectOk(await h.request({ type: 'jobControl', jobId: 'j1', action: 'continue' }))
+    expectErrCode(
+      await h.request({
+        type: 'jobControl',
+        jobId: 'j1',
+        action: 'continue',
+        expect: { toolChange: 3 },
+      }),
+      'run.state',
+    )
+    expectOk(
+      await h.request({
+        type: 'jobControl',
+        jobId: 'j1',
+        action: 'continue',
+        expect: { toolChange: 2 },
+      }),
+    )
     expect(await h.pump(() => h.of('jobEnd').length > 0)).toBe(true)
     const end = h.of('jobEnd')[0]!
     expect(expectOk(fromWire(end.result))).toMatchObject({ lines: lines.length, toolChanges: 1 })
@@ -310,5 +364,62 @@ describe('machine host', () => {
     const pending = h.w.pending
     h.w.advance(10_000)
     expect(h.w.pending).toBeLessThanOrEqual(pending)
+  })
+
+  it('a job start re-checks the G54, the machine copy and the target', async () => {
+    const h = harness()
+    await connectedHost(h, { prepare: { workZero: [-500, -500, -50] } })
+    const program = { lines: ['G21 G90', 'G0 X1'], sections: [] }
+    const start = (expect: Record<string, unknown>) =>
+      h.request({
+        type: 'jobStart',
+        jobId: 'j1',
+        program,
+        expect: { workZero: [-500, -500, -50], machineKey: KEY, target: 'virtual', ...expect },
+      })
+    const moved = expectErrCode(await start({ workZero: [-500, -500, 100] }), 'run.state')
+    expect(moved.issues[0]?.rule).toBe('workZeroChanged')
+    const other = expectErrCode(await start({ machineKey: 'another' }), 'run.state')
+    expect(other.issues[0]?.rule).toBe('machineMismatch')
+    expectOk(await start({}))
+  })
+
+  it('a job start right after a jog sees the jog (no stale Idle)', async () => {
+    const h = harness()
+    await connectedHost(h, { timeScale: 1, prepare: { workZero: [-500, -500, -50] } })
+    expectOk(
+      await h.request({ type: 'machine', action: { kind: 'jog', by: [-10, 0, 0], feed: 600 } }),
+    )
+    const r = await h.request({
+      type: 'jobStart',
+      jobId: 'j1',
+      program: { lines: ['G0 X-1'], sections: [] },
+    })
+    expectErrCode(r, 'run.state')
+  })
+
+  it('after a critical alarm commands fail at once and the reset gets through', async () => {
+    const h = harness()
+    await connectedHost(h, { prepare: { workZero: [-500, -500, -50] } })
+    expectOk(
+      await h.request({
+        type: 'jobStart',
+        jobId: 'j1',
+        program: { lines: ['G53 G0 X10'], sections: [] },
+      }),
+    )
+    expect(await h.pump(() => h.of('jobEnd').length > 0)).toBe(true)
+    expectErrCode(fromWire(h.of('jobEnd')[0]!.result), 'machine.alarm')
+    const set = await h.request({ type: 'machine', action: { kind: 'setWorkZero', axes: ['z'] } })
+    expectErrCode(set, 'run.state')
+    expectOk(await h.request({ type: 'machine', action: { kind: 'reset' } }))
+    await h.pump(() => lastStatus(h)?.state === 'Alarm' && lastStatus(h)?.alarm?.code === 2)
+    expectOk(await h.request({ type: 'machine', action: { kind: 'unlock' } }))
+  })
+
+  it('reports its true target', async () => {
+    const h = harness()
+    const info = (await connectedHost(h)) as ConnectedInfo & { target?: string }
+    expect(info.target).toBe('virtual')
   })
 })

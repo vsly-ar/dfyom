@@ -262,6 +262,8 @@ class ProjectDispatcher implements Dispatcher {
     if (parsed.isErr()) return this.logged(name, rawArgs, source, Err(parsed.unwrapErr()))
     // Frozen once: the same args go to the handler, the history entry and the log.
     const args: unknown = freeze(parsed.unwrap(), true)
+    // Urgent commands (emergency paths, job controls; never document writers) skip the queue
+    if (def.urgent === true && !writesDocument(def)) return this.execute(def, args, source, opts)
     // 3. Enqueue (FIFO; a failing step never breaks the chain)
     const run = this.tail.then(() => this.execute(def, args, source, opts))
     this.tail = run.then(

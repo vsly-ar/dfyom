@@ -61,7 +61,17 @@ void app.whenReady().then(async () => {
     proc: 'utility',
   })
   machine.onStatus(pushRunStatus)
-  app.on('will-quit', () => machine.close())
+  // Quit ends the connection under control first: the host stops a running job (hold, reset:
+  // spindle off, buffers flushed) and closes the controller; at most 3 s, then the host is killed.
+  let machineClosed = false
+  app.on('will-quit', (event) => {
+    if (machineClosed) return
+    event.preventDefault()
+    void machine.shutdown(3000).finally(() => {
+      machineClosed = true
+      app.quit()
+    })
+  })
   // Persistence smoke check until project IPC exists (tasks 3.3+): scan for recoverable projects.
   const storage = createProjectStorage({
     appData: resolveAppData(process.argv, app.getPath('userData')) ?? app.getPath('userData'),
