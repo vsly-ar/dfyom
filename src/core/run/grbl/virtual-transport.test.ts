@@ -1,32 +1,14 @@
-// The virtual machine behind ControllerTransport, driven by a test streamer in virtual time.
+// The virtual machine behind ControllerTransport in virtual time, and GRBL protocol facts the
+// sender relies on. Streaming itself: sender.test.ts.
 // Spec: docs/architecture/grbl.md#transport-and-sender, #state-machine
 import { describe, expect, it } from 'vitest'
 import { expectErrCode, expectOk } from '../../../shared/testing/result'
 import { VirtualClock } from '../clock'
-import { RX_BUFFER_SIZE } from './emulator/emulator'
-import { bytes, emulator, send, settle, TestStreamer } from './emulator.fixture'
+import type { GrblEmulator } from './emulator/emulator'
+import { bytes, emulator, outLines, send, settle } from './emulator.fixture'
 import { VirtualGrblTransport } from './virtual-transport'
 
 const BANNER = "Grbl 1.1h ['$' for help]"
-
-/** A program shaped like the post-processor's output (grbl.md#output-dialect). */
-function program(): string[] {
-  const lines = [
-    '(DFYOM test program)',
-    '(Setup 1, mm)',
-    'G90 G94 G17 G21',
-    'G54',
-    'G0 Z5',
-    'M3 S12000',
-    'G4 P3',
-  ]
-  for (let i = 0; i < 40; i++) {
-    lines.push(`G1 X${(i % 2) * 20} Y${i} Z-1 F1200`)
-    lines.push(`G2 X${(i % 2) * 20 + 2} Y${i + 1} I1 J0.5`)
-  }
-  lines.push('G0 Z5', 'M5', 'M30')
-  return lines
-}
 
 describe('VirtualGrblTransport', () => {
   it('delivers the banner, then answers writes; a closed transport fails', async () => {
@@ -61,92 +43,36 @@ describe('VirtualGrblTransport', () => {
     clock.advance(0)
     expect(events).toEqual(['written', 'booked', 'data:ok'])
   })
-
-  it('streams a program with character counting: no errors, no RX overflow, buffer used', () => {
-    const s = new TestStreamer(emulator())
-    const lines = program()
-    s.send(lines)
-    expect(s.runUntil(() => s.idle)).toBe(true)
-    expect(s.errors).toEqual([])
-    expect(s.acked).toBe(lines.length)
-    // The emulator records any byte it had to drop; the streamer did fill most of the buffer.
-    expect(s.emu.trace.violations).toEqual([])
-    expect(s.maxInflight).toBeGreaterThan(RX_BUFFER_SIZE - 30)
-    expect(s.received).toContain('[MSG:Pgm End]')
-    settle(s.emu)
-    expect(s.status()).toMatch(/^<Idle\|MPos:22\.000,40\.000,5\.000\|/)
-  })
-
-  it('fills the planner (Bf:0) while streaming and empties it at the end', () => {
-    const s = new TestStreamer(emulator({ settings: { 10: 3 } }))
-    s.send(program())
-    s.runUntil(() => s.clock.now() >= 10_000)
-    expect(s.status()).toMatch(/\|Bf:0,\d+\|/)
-    s.runUntil(() => s.idle)
-    expect(s.status()).toMatch(/\|Bf:15,128\|/)
-  })
-
-  it('send-response gives the same motion and timing as character counting', () => {
-    const a = new TestStreamer(emulator(), { mode: 'sendResponse' })
-    a.send(program())
-    a.runUntil(() => a.idle)
-    const b = new TestStreamer(emulator())
-    b.send(program())
-    b.runUntil(() => b.idle)
-    expect(a.errors).toEqual([])
-    expect(a.emu.status().mpos).toEqual(b.emu.status().mpos)
-    expect(a.maxInflight).toBeLessThanOrEqual(Math.max(...program().map((l) => l.length + 1)))
-    const timing = (s: TestStreamer) =>
-      s.emu.trace.lines.map((l) => [l.text, l.startedAt ?? null, l.endedAt ?? null])
-    expect(timing(a)).toEqual(timing(b))
-  })
-
-  it('stops sending and feed-holds at the first error', () => {
-    const s = new TestStreamer(emulator(), { mode: 'sendResponse', stopOnError: true })
-    s.send(['G0 X1', 'G81 X1 Y1 Z-1 R1 F100', 'G0 X2'])
-    s.runUntil(() => s.stopped)
-    s.runUntil(() => false, 60_000)
-    expect(s.errors).toEqual(['error:20'])
-    expect(s.emu.trace.lines.map((l) => [l.text, l.response])).toEqual([
-      ['G0 X1', 'ok'],
-      ['G81 X1 Y1 Z-1 R1 F100', 'error:20'],
-    ])
-    expect(s.emu.status().state).toBe('Hold:0')
-  })
-
-  it('streams 100 000 lines in well under 5 s', () => {
-    const s = new TestStreamer(emulator({ trace: false }))
-    const lines: string[] = []
-    for (let i = 0; i < 100_000; i++) lines.push(`G1 X${i % 2 ? 10 : 0} Y${(i % 1000) / 10} F6000`)
-    const start = Date.now()
-    s.send(lines)
-    expect(s.runUntil(() => s.idle, 1e12)).toBe(true)
-    expect(Date.now() - start).toBeLessThan(5000)
-    expect(s.acked).toBe(100_000)
-    expect(s.errors).toEqual([])
-  })
 })
 
-describe('guided tool change', () => {
+/** Runs events until `done()` (the machine alone, no sender). */
+function stepUntil(emu: GrblEmulator, done: () => boolean): void {
+  for (let t = emu.nextEventAt(); !done() && t !== undefined; t = emu.nextEventAt())
+    emu.advanceTo(t)
+}
+
+describe('M0 pause (what other senders get; GrblSender stops before a tool change instead)', () => {
   const head = ['G21 G90', 'M3 S12000', 'G4 P3', 'G1 X10 F600']
   const marker = '(DFYOM TOOL CHANGE 2: 3 mm flat)'
   const change = ['M5', 'G0 Z5', marker, 'M0', 'M3 S10000', 'G4 P3']
   const tail = ['G1 X20 F600', 'M5', 'M30']
 
-  it('other senders: M0 pauses in Hold:0 with the spindle off; ~ resumes', () => {
-    const s = new TestStreamer(emulator({ settings: { 30: 24000 } }))
-    s.send([...head, ...change, ...tail])
-    s.runUntil(() => s.emu.status().state === 'Hold:0')
-    const m0 = s.emu.trace.lines.findIndex((l) => l.text === 'M0')
-    expect(s.emu.trace.lines[m0 - 1]).toMatchObject({ text: marker, response: 'ok' })
-    expect(s.emu.trace.lines[m0]?.response).toBeUndefined() // M0's ok comes after ~
-    expect(s.emu.status()).toMatchObject({ spindleSpeed: 0, mpos: [10, 0, 5] })
-    expect(s.runUntil(() => s.idle, 60_000)).toBe(false) // stays paused
-    const resumeAt = s.clock.now()
-    s.realtime('~')
-    s.runUntil(() => s.idle)
-    expect(s.errors).toEqual([])
-    const lines = s.emu.trace.lines
+  it('M0 pauses in Hold:0 with the spindle off; ~ resumes', () => {
+    const emu = emulator({ settings: { 30: 24000 } })
+    outLines(emu)
+    const out = send(emu, [...head, ...change, ...tail].map((l) => `${l}\n`).join(''))
+    stepUntil(emu, () => emu.status().state === 'Hold:0')
+    const m0 = emu.trace.lines.findIndex((l) => l.text === 'M0')
+    expect(emu.trace.lines[m0 - 1]).toMatchObject({ text: marker, response: 'ok' })
+    expect(emu.trace.lines[m0]?.response).toBeUndefined() // M0's ok comes after ~
+    expect(emu.status()).toMatchObject({ spindleSpeed: 0, mpos: [10, 0, 5] })
+    emu.advance(60_000) // stays paused
+    expect(emu.status().state).toBe('Hold:0')
+    const resumeAt = emu.time
+    send(emu, '~')
+    settle(emu)
+    expect([...out, ...outLines(emu)].filter((l) => l.startsWith('error'))).toEqual([])
+    const lines = emu.trace.lines
     expect(lines[m0]?.ackedAt).toBe(resumeAt)
     const dwell = lines[m0 + 2]
     expect(dwell).toMatchObject({ text: 'G4 P3', startedAt: resumeAt, endedAt: resumeAt + 3000 })
@@ -154,56 +80,15 @@ describe('guided tool change', () => {
   })
 
   it('GRBL does not jog while paused by M0: the jog waits unanswered in RX', () => {
-    const s = new TestStreamer(emulator())
-    s.send(['G0 Z5', 'M0'])
-    s.runUntil(() => s.emu.status().state === 'Hold:0')
-    const before = s.received.length
-    s.manual(['$J=G91 X5 F300'])
-    s.runUntil(() => false, 10_000)
-    expect(s.received.slice(before)).toEqual([])
-    expect(s.emu.status()).toMatchObject({ state: 'Hold:0', mpos: [0, 0, 5] })
-  })
-
-  it('DFYOM sender: stops before the marker, jogs, zeroes Z with G10 L20, skips M0', () => {
-    const s = new TestStreamer(emulator({ settings: { 30: 24000 } }), { toolChange: 'dfyom' })
-    s.send([...head, ...change, ...tail])
-    expect(s.runUntil(() => s.toolChangeReady)).toBe(true)
-    expect(s.toolChange).toEqual({ tool: 2, name: '3 mm flat' })
-    expect(s.emu.status()).toMatchObject({ spindleSpeed: 0, mpos: [10, 0, 5] })
-    // Guide the user: jog down to the new tool's touch-off and zero Z there.
-    s.manual(['$J=G91 G21 Z-7 F300'])
-    s.runUntil(() => s.emu.status().state === 'Jog')
-    s.runUntil(() => s.inflightLines === 0 && s.emu.status().state === 'Idle')
-    expect(s.emu.status().mpos[2]).toBeCloseTo(-2, 9)
-    s.manual(['G10 L20 P1 Z0'])
-    s.runUntil(() => s.inflightLines === 0)
-    expect(s.emu.status().wco).toEqual([0, 0, -2])
-    s.resumeToolChange()
-    s.runUntil(() => s.idle)
-    expect(s.errors).toEqual([])
-    const texts = s.emu.trace.lines.map((l) => l.text)
-    expect(texts).toContain(marker)
-    expect(texts).not.toContain('M0')
-    settle(s.emu)
-    expect(s.emu.status().mpos).toEqual([20, 0, -2]) // cut at the new Z0
-    // The jog did not change the modal state: still G90.
-    expect(send(s.emu, '$G\n')[0]).toMatch(/G90 G94/)
-  })
-
-  it.each([
-    ['a malformed marker', ['(DFYOM TOOL CHANGE 2 3 mm flat)', 'M0']],
-    ['a marker not followed by exactly M0', [marker, 'M0 (pause)']],
-    ['a marker inside a longer line', [`G0 Z5 ${marker}`, 'M0']],
-  ])('DFYOM sender falls back to the plain M0 pause for %s', (_name, lines) => {
-    const s = new TestStreamer(emulator(), { toolChange: 'dfyom' })
-    s.send(['G0 Z5', ...lines, 'G0 X1'])
-    s.runUntil(() => s.emu.status().state === 'Hold:0')
-    expect(s.toolChange).toBeUndefined()
-    s.realtime('~')
-    s.runUntil(() => s.idle)
-    expect(s.errors).toEqual([])
-    settle(s.emu)
-    expect(s.emu.status().mpos).toEqual([1, 0, 5])
+    const emu = emulator()
+    outLines(emu)
+    send(emu, 'G0 Z5\nM0\n')
+    stepUntil(emu, () => emu.status().state === 'Hold:0')
+    outLines(emu)
+    expect(send(emu, '$J=G91 X5 F300\n')).toEqual([])
+    emu.advance(10_000)
+    expect(outLines(emu)).toEqual([])
+    expect(emu.status()).toMatchObject({ state: 'Hold:0', mpos: [0, 0, 5] })
   })
 })
 

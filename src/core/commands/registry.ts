@@ -12,6 +12,7 @@ import type { AnyCommand, DocumentHook, QueryDef } from './define'
 import { projectSave } from '../project/commands'
 import { toolpathGenerateJob, toolpathGet } from '../toolpath/generate'
 import { planExport } from '../post/plan-export'
+import { RUN_COMMANDS, RUN_QUERIES } from '../run/commands'
 import { historyRedo, historyUndo } from './history'
 import { jobAbort, jobGet, jobList, jobPause, jobResume } from './jobs'
 
@@ -39,6 +40,7 @@ export const APP_COMMANDS: readonly AnyCommand[] = [
   ...PLAN_COMMANDS,
   toolpathGenerateJob,
   planExport,
+  ...RUN_COMMANDS,
 ]
 export const APP_QUERIES: readonly QueryDef[] = [
   ...LIBRARY_QUERIES,
@@ -46,6 +48,7 @@ export const APP_QUERIES: readonly QueryDef[] = [
   ...DESIGN_QUERIES,
   ...PLAN_QUERIES,
   toolpathGet,
+  ...RUN_QUERIES,
 ]
 /** Document hooks of the app (docs/architecture/commands.md#document-hooks). */
 export const APP_HOOKS: readonly DocumentHook[] = [draftPlanAutoRebuild]

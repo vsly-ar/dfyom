@@ -34,6 +34,8 @@ export const ALLOWED: Readonly<Record<string, readonly PlanStatus[]>> = {
   'plan.operation.move': EDITABLE,
   'plan.tool.assign': EDITABLE,
   'plan.export': ['draft', 'settledDesign', 'finalized', 'inUse'],
+  // virtual machine only in v0.1; real machines will need finalized/inUse (docs/modes/run-v0.1.md decision 5)
+  'run.job.start': ['draft', 'settledDesign', 'finalized', 'inUse'],
 }
 
 /** `plan.status` naming the status and the command. */

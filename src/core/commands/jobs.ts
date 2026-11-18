@@ -172,6 +172,8 @@ const control = (name: string, summary: string, title: string): JobControl => ({
   summary,
   title: () => title,
   machine: false,
+  // a stop must never wait behind an effect that waits for the machine
+  urgent: true,
   args: JobControlArgs,
   result: JobControlResult,
 })
@@ -329,6 +331,7 @@ export class JobRun<R = unknown> implements JobHandle<R> {
     }
     const jobCtx: JobContext = {
       ...ctx,
+      jobId: opts.id,
       signal: this.controller.signal,
       progress: (p) => this.report(p, ctx.clock.now()),
       checkpoint: () => this.checkpoint(),

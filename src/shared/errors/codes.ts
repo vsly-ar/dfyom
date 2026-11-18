@@ -121,6 +121,43 @@ export const ERROR_CODES = {
     userMessage: 'The connection to the machine is closed or lost.',
     retryable: true,
   },
+  // Run mode (task 3.9): docs/modes/run-v0.1.md#stop-errors-and-alarms
+  'machine.error': {
+    severity: 'warn',
+    userMessage: 'The machine rejected a line of the program; the run was stopped.',
+    retryable: false,
+  },
+  'machine.alarm': {
+    severity: 'warn',
+    userMessage: 'The machine raised an alarm and stopped.',
+    retryable: false,
+  },
+  'run.notConnected': {
+    severity: 'info',
+    userMessage: 'Connect to a machine first.',
+    retryable: false,
+  },
+  'run.busy': {
+    severity: 'info',
+    userMessage: 'The machine is busy with another connection or run.',
+    retryable: true,
+  },
+  'run.state': {
+    severity: 'info',
+    userMessage: "This is not possible in the machine's current state.",
+    retryable: true,
+  },
+  'run.program': {
+    severity: 'error',
+    userMessage: 'The program contains lines the machine cannot receive.',
+    retryable: false,
+  },
+  'run.softLimit': {
+    severity: 'warn',
+    userMessage:
+      'The program would leave the machine travel at the current work zero. Move the work zero.',
+    retryable: false,
+  },
   // Plans (task 2.13): docs/modes/plan-v0.1.md#commands-and-queries-v01
   'plan.status': {
     severity: 'warn',

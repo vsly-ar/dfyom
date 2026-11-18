@@ -5,7 +5,11 @@
  * Keep this surface small and typed; every capability added here must also be
  * reachable by LLM agents (docs/architecture/llm-api.md).
  */
+import type { RunStatus } from '../core/run/service'
 import type { LogLevel, LogRecord } from './logging'
+
+/** Main → renderer push of the machine status (docs/modes/run-v0.1.md#status). */
+export const RUN_STATUS_IPC_CHANNEL = 'dfyom:run.status'
 
 export interface PreloadApi {
   readonly versions: {
@@ -22,6 +26,14 @@ export interface PreloadApi {
     readonly level: LogLevel
     /** Fire-and-forget; main validates the batch and writes it to the log file. */
     send(batch: readonly LogRecord[]): void
+  }
+  /**
+   * Run mode (docs/modes/run-v0.1.md#status): the machine status main mirrors, pushed on every
+   * change. Agents read the same with the `run.status.get` query.
+   */
+  readonly run: {
+    /** Returns the unsubscribe function. */
+    onStatus(listener: (status: RunStatus) => void): () => void
   }
 }
 

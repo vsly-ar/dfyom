@@ -17,6 +17,7 @@ import type { ProjectDoc } from '../project/document'
 import { cacheOf, ensureToolpath } from '../toolpath/generate'
 import type { Vec3 } from '../toolpath/model'
 import { exportGrbl, type ExportOperation, type GrblExport } from './export'
+import { machineKeyOf } from '../run/machine-key'
 
 /** The generator string of exported programs' header (no version: same input, same file). */
 export const PROGRAM_GENERATOR = 'DFYOM'
@@ -136,6 +137,23 @@ export async function exportPlan(
     .mapErr((e) => e.withContext(where, { planId }))
 }
 
+/**
+ * The connected controller's G54 when it can check this plan's soft limits: a connection is open,
+ * homed, and emulates the plan's machine copy (docs/modes/run-v0.1.md#work-zero-and-the-soft-limit-check).
+ */
+export function connectedWorkZero(
+  doc: ProjectDoc,
+  planId: string,
+  services: Pick<Services, 'machine'>,
+): Vec3 | undefined {
+  const m = services.machine
+  if (m?.target === undefined || m.machineKey === undefined) return undefined
+  const status = m.status()
+  if (status.connection.state !== 'open' || !status.homed) return undefined
+  const key = machineKeyOf(doc, planId, 'plan.export')
+  return key.isOk() && key.unwrap() === m.machineKey ? status.workZero : undefined
+}
+
 const ProgramStatsSchema = z.object({
   cutLength: z.number().describe('mm'),
   rapidLength: z.number().describe('mm'),
@@ -178,8 +196,13 @@ export const planExport = defineCommand({
     const files = ctx.services.exportFiles
     if (files === undefined)
       return fail('internal.unexpected', 'no export file service', { where: 'plan.export' })
-    // run mode (task 3.9) passes the connected G54 here: docs/modes/run-v0.1.md#work-zero-and-the-soft-limit-check
-    const exported = await exportPlan(doc, args.planId, ctx.services)
+    const workZero = connectedWorkZero(doc, args.planId, ctx.services)
+    const exported = await exportPlan(
+      doc,
+      args.planId,
+      ctx.services,
+      workZero === undefined ? {} : { workZero },
+    )
     if (exported.isErr()) return exported
     const e = exported.unwrap()
     const written = await files.write(args.target, e.text, { confirm: args.confirm })

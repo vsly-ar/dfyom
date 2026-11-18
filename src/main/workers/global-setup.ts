@@ -1,4 +1,5 @@
-// Vitest global setup: bundles the test worker entry with Vite's build API into a temp `.mjs`,
+// Vitest global setup: bundles the test worker entry and the machine host entry with Vite's build
+// API into temp `.mjs` files,
 // because a worker thread cannot load the TypeScript sources directly. Tests read its path with
 // `inject('workerEntry')`. Doc: docs/architecture/workers.md#testing
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -11,6 +12,8 @@ import type { TestProject } from 'vitest/node'
 declare module 'vitest' {
   export interface ProvidedContext {
     workerEntry: string
+    /** The machine host's `worker_threads` entry (src/main/machine/node-worker.ts). */
+    machineEntry: string
   }
 }
 
@@ -36,6 +39,20 @@ export default async function setup(project: TestProject): Promise<() => void> {
       },
     },
   })
+  await build({
+    configFile: false,
+    logLevel: 'warn',
+    ssr: { noExternal: true },
+    build: {
+      ssr: resolve(import.meta.dirname, '../machine/node-worker.ts'),
+      outDir,
+      emptyOutDir: false,
+      minify: false,
+      target: 'node22',
+      rollupOptions: { output: { format: 'es', entryFileNames: 'machine-entry.mjs' } },
+    },
+  })
   project.provide('workerEntry', join(outDir, 'test-entry.mjs'))
+  project.provide('machineEntry', join(outDir, 'machine-entry.mjs'))
   return () => rmSync(outDir, { recursive: true, force: true })
 }
