@@ -121,6 +121,21 @@ export interface Dispatcher {
     readonly redoable: readonly HistoryEntry[]
   }
   job(jobId: string): Option<JobHandle>
+  /** Running and retained finished jobs (`checkNoRunJob`, closing a project aborts them). */
+  readonly jobs: JobDirectory
+  /**
+   * Records `revision` as `source`'s read (stale-write baseline): an adapter showed the source
+   * the document at that revision, e.g. the result of a `project.open` that started this
+   * project's runtime (docs/architecture/commands.md#stale-writes).
+   */
+  markRead(source: Source, revision: number): void
+  /**
+   * Closing: refuses every new non-urgent dispatch (`input.malformed`, rule `projectClosing`) and
+   * resolves once the queue has drained; `resume()` accepts dispatches again (the close was
+   * refused). Urgent commands (job controls) still run, so a close can abort jobs.
+   */
+  suspend(): Promise<void>
+  resume(): void
 }
 
 /** Commands that can change `ProjectDoc` are subject to the stale-write rule. */
@@ -143,15 +158,16 @@ class ProjectDispatcher implements Dispatcher {
   private readonly progressIntervalMs: number
   private readonly actionLog: WritableActionLog
   private readonly undo: History
-  private readonly jobs = new Map<string, JobRun>()
+  private readonly runs = new Map<string, JobRun>()
   private readonly finishedJobs: string[] = []
   private readonly maxFinishedJobs: number
   /** Per source: the later of its last read revision and its last own commit. */
   private readonly baseline = new Map<string, number>()
   private tail: Promise<unknown> = Promise.resolve()
+  private suspended = false
   private readonly jobDirectory: JobDirectory = {
     get: (jobId) => this.job(jobId),
-    list: () => [...this.jobs.values()],
+    list: () => [...this.runs.values()],
   }
 
   constructor(o: DispatcherOptions) {
@@ -188,8 +204,25 @@ class ProjectDispatcher implements Dispatcher {
     return { undoable: this.undo.undoable, redoable: this.undo.redoable }
   }
 
+  get jobs(): JobDirectory {
+    return this.jobDirectory
+  }
+
+  markRead(source: Source, revision: number): void {
+    this.recordBaseline(source, revision)
+  }
+
+  async suspend(): Promise<void> {
+    this.suspended = true
+    await this.tail
+  }
+
+  resume(): void {
+    this.suspended = false
+  }
+
   job(jobId: string): Option<JobHandle> {
-    const j = this.jobs.get(jobId)
+    const j = this.runs.get(jobId)
     return j === undefined ? None : Some(j)
   }
 
@@ -214,6 +247,7 @@ class ProjectDispatcher implements Dispatcher {
       source,
       services: this.services,
       jobs: this.jobDirectory,
+      history: this.history,
     })
     if (value.isErr()) return Err(value.unwrapErr())
     if (def.readsDocument !== false) this.recordBaseline(source, revision)
@@ -264,6 +298,16 @@ class ProjectDispatcher implements Dispatcher {
     const args: unknown = freeze(parsed.unwrap(), true)
     // Urgent commands (emergency paths, job controls; never document writers) skip the queue
     if (def.urgent === true && !writesDocument(def)) return this.execute(def, args, source, opts)
+    if (this.suspended)
+      return this.logged(
+        name,
+        args,
+        source,
+        fail('input.malformed', 'the project is closing', {
+          where: 'dispatch',
+          issues: [{ path: [], rule: 'projectClosing', message: 'the project is being closed' }],
+        }),
+      )
     // 3. Enqueue (FIFO; a failing step never breaks the chain)
     const run = this.tail.then(() => this.execute(def, args, source, opts))
     this.tail = run.then(
@@ -434,7 +478,7 @@ class ProjectDispatcher implements Dispatcher {
     }
     // job.pause / job.resume / job.abort
     const { jobId } = args as { jobId: string }
-    const job = this.jobs.get(jobId)
+    const job = this.runs.get(jobId)
     if (job === undefined)
       return this.logged(
         def.name,
@@ -486,7 +530,7 @@ class ProjectDispatcher implements Dispatcher {
         if (state === 'finished') this.retireJob(jobId)
       },
     })
-    this.jobs.set(jobId, job)
+    this.runs.set(jobId, job)
     const out = this.logged(
       def.name,
       args,
@@ -502,7 +546,7 @@ class ProjectDispatcher implements Dispatcher {
     this.finishedJobs.push(jobId)
     while (this.finishedJobs.length > this.maxFinishedJobs) {
       const old = this.finishedJobs.shift()
-      if (old !== undefined) this.jobs.delete(old)
+      if (old !== undefined) this.runs.delete(old)
     }
   }
 

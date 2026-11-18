@@ -45,6 +45,12 @@ export interface EffectCommand<S extends z.ZodType = z.ZodType, R = unknown> ext
   z.output<S>
 > {
   readonly kind: 'effect'
+  /**
+   * Changes nothing: an asynchronous read of app data that cannot be a (synchronous) query, e.g.
+   * `project.recovery.list`. Agent tools describe it as read-only
+   * (docs/architecture/llm-api.md#annotations-and-server-instructions).
+   */
+  readonly readOnly?: boolean
   readonly args: S
   readonly result: z.ZodType<R>
   run(doc: ProjectDoc, args: z.output<S>, ctx: CommandContext): AsyncAppResult<R>

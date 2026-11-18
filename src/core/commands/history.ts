@@ -11,10 +11,10 @@
 import { enablePatches, freeze, Immer, isDraft, type Patch } from 'immer'
 import { z } from 'zod'
 import { parseArgs } from './args'
-import { Err, fail, tryCatch, type AppResult } from '../../shared/result'
+import { Err, fail, Ok, tryCatch, type AppResult } from '../../shared/result'
 import type { ProjectDoc } from '../project/document'
 import type { CommandContext, Source } from './context'
-import type { BuiltinCommand, DocumentCommand, DocumentHook } from './define'
+import { defineQuery, type BuiltinCommand, type DocumentCommand, type DocumentHook } from './define'
 
 enablePatches()
 const immer = new Immer({ autoFreeze: true })
@@ -245,3 +245,56 @@ export const historyRedo: HistoryStep = {
   args: NoArgs,
   result: HistoryStepResult,
 }
+
+const HistoryItemSchema = z.object({
+  seq: z.number().int().describe('Action-log seq of the command that made the step'),
+  command: z.string(),
+  title: z.string(),
+  source: z.object({ kind: z.string(), id: z.string() }).describe('Who made the step'),
+  revisionBefore: z.number().int(),
+  revisionAfter: z.number().int(),
+  at: z.string(),
+})
+
+const historyItem = (e: HistoryEntry): z.output<typeof HistoryItemSchema> => ({
+  seq: e.seq,
+  command: e.command,
+  title: e.title,
+  source: { kind: e.source.kind, id: e.source.id },
+  revisionBefore: e.revisionBefore,
+  revisionAfter: e.revisionAfter,
+  at: e.at,
+})
+
+/**
+ * `history.list`: the undo and redo stacks, top first, so an agent sees whose step it would undo
+ * (docs/architecture/llm-api.md#undo-and-history). Reads dispatcher state, not the document.
+ */
+export const historyList = defineQuery({
+  name: 'history.list',
+  summary: 'List the undo and redo stacks, next step first, with who made each step.',
+  args: z.object({
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(500)
+      .default(20)
+      .describe('Max entries per stack (default 20)'),
+  }),
+  result: z.object({
+    undo: z.array(HistoryItemSchema).describe('history.undo undoes the first entry'),
+    redo: z.array(HistoryItemSchema).describe('history.redo redoes the first entry'),
+  }),
+  readsDocument: false,
+  run(_doc, args, ctx) {
+    const h = ctx.history
+    if (h === undefined)
+      return fail('internal.unexpected', 'no history (query run outside a dispatcher)', {
+        where: 'history.list',
+      })
+    const top = (entries: readonly HistoryEntry[]) =>
+      [...entries].reverse().slice(0, args.limit).map(historyItem)
+    return Ok({ undo: top(h.undoable), redo: top(h.redoable) })
+  },
+})

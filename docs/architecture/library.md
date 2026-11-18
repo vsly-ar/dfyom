@@ -105,6 +105,8 @@ The snapshot record and rule are owned by [persistence.md](persistence.md#librar
 
 ## Storage
 
+The app host opens the library once per instance (`Library.open` over `<appData>/library`) and passes it as `services.library` to the app-scope dispatcher, which runs the `library.*` commands without an open project, and to every project dispatcher (snapshots) ([llm-api.md](llm-api.md#app-scope-and-project-scope), task 3.10).
+
 | Item     | Path                                                 | Content                                                  |
 | -------- | ---------------------------------------------------- | -------------------------------------------------------- |
 | Manifest | `<appData>/library/library.json`                     | `{ format: 'dfyom-library', schemaVersion: 1 }`          |

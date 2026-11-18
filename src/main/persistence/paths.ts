@@ -4,6 +4,7 @@
  *
  * Electron's `userData` is passed in by the caller, so nothing here imports Electron.
  */
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 export const DATA_DIR_FLAG = '--data-dir'
@@ -19,6 +20,25 @@ export function resolveAppData(
     if (a === DATA_DIR_FLAG && argv[i + 1] !== undefined) return argv[i + 1]
   }
   return electronUserData
+}
+
+/** The app's folder name under the OS app-data folder (Electron's `userData` uses the product name). */
+export const APP_FOLDER = 'DFYOM'
+
+/**
+ * Electron's default `userData` without Electron, so the CLI and the app share projects, the
+ * library and discovery files: macOS `~/Library/Application Support/DFYOM`, Windows
+ * `%APPDATA%\DFYOM`, Linux `$XDG_CONFIG_HOME/DFYOM` (default `~/.config/DFYOM`).
+ */
+export function defaultAppData(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+  home: string = homedir(),
+): string {
+  if (platform === 'darwin') return join(home, 'Library', 'Application Support', APP_FOLDER)
+  if (platform === 'win32')
+    return join(env['APPDATA'] ?? join(home, 'AppData', 'Roaming'), APP_FOLDER)
+  return join(env['XDG_CONFIG_HOME'] ?? join(home, '.config'), APP_FOLDER)
 }
 
 export interface ProjectPaths {

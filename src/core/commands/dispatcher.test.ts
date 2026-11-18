@@ -610,3 +610,27 @@ describe('document hooks', () => {
     expect(d.revision).toBe(0)
   })
 })
+
+describe('closing and reads', () => {
+  it('suspend drains the queue and refuses new dispatches; resume accepts them again', async () => {
+    const { d } = setup()
+    const queued = rename(d, 'Queued')
+    const drained = d.suspend()
+    const refused = expectErrCode(await rename(d, 'Late'), 'input.malformed')
+    expect(refused.issues[0]?.rule).toBe('projectClosing')
+    await drained
+    expectOk(await queued)
+    expect(d.doc.name).toBe('Queued')
+    d.resume()
+    expectOk(await rename(d, 'Again'))
+  })
+
+  it('markRead records a revision the source was shown as its baseline', async () => {
+    const { d } = setup()
+    expectOk(await rename(d, 'One'))
+    d.markRead(agent, 0) // shown revision 0, now at 1: still stale
+    expectErrCode(await rename(d, 'X', agent), 'command.conflict')
+    d.markRead(agent, d.revision)
+    expectOk(await rename(d, 'X', agent))
+  })
+})

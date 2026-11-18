@@ -16,7 +16,7 @@ Status: draft
 
 Enforced by `npm run lint` (import boundaries) and the two tsconfigs (no DOM / no Node globals in `src/core`, `src/shared`) – see [ADR 0015](../decisions/0015-eslint-with-typescript6-api.md).
 
-Build: `electron-vite` (`electron.vite.config.ts`) – outputs to `out/{main,preload,renderer}`.
+Build: `electron-vite` (`electron.vite.config.ts`) – outputs to `out/{main,preload,renderer}`; `out/main/cli.js` is the headless CLI/MCP entry without Electron ([llm-api.md](llm-api.md#processes-and-hosting)).
 
 ## IPC
 

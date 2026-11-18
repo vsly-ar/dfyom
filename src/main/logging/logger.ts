@@ -66,6 +66,8 @@ export interface MainLoggerOptions {
   readonly startedAt?: Date
   /** Extra stream for terminal output (pino-pretty on stderr in dev). Never stdout. */
   readonly extraStream?: pino.DestinationStream
+  /** Minimum level of `extraStream` (default `level`; the CLI copies only `warn`+ to stderr). */
+  readonly extraLevel?: LogLevel
   readonly rotateBytes?: number
 }
 
@@ -99,7 +101,7 @@ export async function createMainLogging(options: MainLoggerOptions): Promise<Mai
       ? stream
       : pino.multistream([
           { stream, level: options.level },
-          { stream: options.extraStream, level: options.level },
+          { stream: options.extraStream, level: options.extraLevel ?? options.level },
         ])
   const base = pino(opts, destination)
   const log = base.child({ proc: options.proc })
