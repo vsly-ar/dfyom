@@ -180,6 +180,33 @@ describe('plan.toolpath.generate', () => {
     expect(t.get(t.order[0]!).stale).toBe(false)
   })
 
+  it('pause takes effect between plan operations; the toolpath worker is never parked', async () => {
+    const paused: boolean[] = []
+    let release: () => void = () => {}
+    const gate = new Promise<void>((r) => (release = r))
+    const inner = createInProcessWorkers()
+    const runs: string[] = []
+    const port: WorkerPort = {
+      async run(task, input, ctl) {
+        runs.push((input as GeneratorRequest).inputs[0]!.planOperationId)
+        paused.push(ctl.pause !== undefined)
+        if (runs.length === 1) await gate
+        return inner.run(task, input, ctl)
+      },
+    }
+    const t = await setup({ port })
+    const jobId = await t.start()
+    await new Promise((r) => setTimeout(r, 0))
+    expectOk(await t.d.dispatch('job.pause', { jobId }, ui))
+    release()
+    for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0))
+    expect(runs).toHaveLength(1) // finished its operation, parked between operations
+    expect(paused).toEqual([false]) // no PauseState reaches the worker
+    expectOk(await t.d.dispatch('job.resume', { jobId }, ui))
+    expectOk(await t.d.job(jobId).unwrap().result)
+    expect(runs).toHaveLength(t.order.length)
+  })
+
   it('plan.check findings fail the job before any worker runs', async () => {
     const { port, runs } = countingPort()
     const t = await setup({ port, resolve: false })

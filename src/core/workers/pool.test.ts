@@ -284,6 +284,19 @@ describe('worker pool', () => {
     expect(expectOk(await b.promise)).toBe(2)
   })
 
+  it.each(['error', 'messageerror'] as const)(
+    'a worker that emits %s is terminated, not just dropped',
+    async () => {
+      const s = setup()
+      const a = s.start(tp, 1)
+      const w = s.workers[0]!
+      s.ready(w)
+      w.events.error(new Error('boom'))
+      expectErrCode(await a.promise, 'internal.unexpected')
+      expect(w.terminated).toBe(true)
+    },
+  )
+
   it('3 crashes in 60 s stop the lane for 30 s', async () => {
     const s = setup()
     for (let i = 0; i < 3; i++) {

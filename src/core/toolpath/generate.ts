@@ -86,8 +86,9 @@ export const toolpathGenerateJob = defineCommand({
         continue
       }
       const tp = await ctx.services.workers.run(toolpathGenerate, request.unwrap(), {
+        // no `pause`: a paused job parks between plan operations (`ctx.checkpoint()`), never
+        // the single toolpath worker, which other jobs share
         signal: ctx.signal,
-        pause: ctx.pause,
         progress: (p) =>
           ctx.progress({ done: i, total, label: p.label === undefined ? id : `${id}: ${p.label}` }),
       })

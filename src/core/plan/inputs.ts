@@ -110,6 +110,8 @@ export function planOperationInputs(
       planOperation: op,
       snapshots: used,
       setup: { ...plan.setup, operations: undefined },
+      // strategy defaults depend on the unit system (e.g. overshoot 1 mm vs 0.04")
+      units: plan.units,
     })
     const previousPlanOperationId = previous
     previous = op.id

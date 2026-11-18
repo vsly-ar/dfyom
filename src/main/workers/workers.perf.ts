@@ -268,7 +268,8 @@ it('last edit → current evaluation in the host ≤ 250 ms (warm, test part)', 
   }
   await waitDone()
   const times: number[] = []
-  const depths = ['7', '7.5', '8', '6.5', '6', '8', '7']
+  // distinct, never evaluated before: every sample is a worker run, no cache hit
+  const depths = ['7.1', '7.2', '7.3', '6.9', '6.8', '7.4', '7.6']
   for (const depth of depths) {
     await s.run('design.pocket.update', { partId: s.partId, operationId: 'pocket1', depth })
     const t0 = performance.now()

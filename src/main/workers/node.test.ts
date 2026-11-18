@@ -1,5 +1,7 @@
 // Real `worker_threads` through the pool: the bundled test entry (global-setup.ts) with the
 // production tasks and fixtures. Spec: docs/architecture/workers.md#testing
+import { existsSync, readdirSync, statSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, inject, it } from 'vitest'
 import type { PauseState } from '../../core/commands/context'
 import type { JobProgress } from '../../core/commands/context'
@@ -88,10 +90,16 @@ describe('worker_threads host', { timeout: 20_000 }, () => {
       ctl({ signal: ac.signal, progress: (t) => ticks.push(t) }),
     )
     while (ticks.length === 0) await sleep(5)
-    const t0 = performance.now()
+    // ordering, not wall clock (budgets are in workers.perf.ts): the run settles within the
+    // abort's own microtasks, before any further worker message (a macrotask) is handled
+    let settled = false
+    void run.then(() => (settled = true))
+    const before = ticks.length
     ac.abort()
+    for (let i = 0; i < 3; i++) await Promise.resolve()
+    expect(settled).toBe(true)
+    expect(ticks.length).toBe(before) // no progress delivered after the abort
     expectErrCode(await run, 'op.aborted')
-    expect(performance.now() - t0).toBeLessThan(5)
     // the lane frees within one step: the next task runs on the same worker
     expectOk(await p.run(testLoop, { steps: 1, stepMs: 0 }, ctl()))
     expect(p.lastStats('toolpath')!.workerId).toBe('toolpath-1')
@@ -167,4 +175,42 @@ describe('worker_threads host', { timeout: 20_000 }, () => {
     expect(last.stats.liveObjects).toBe(0)
     expect(last.workerId).toBe('geometry-1')
   })
+})
+
+/**
+ * The production electron-vite chunk (CJS, dependencies externalized), when `npm run build` has
+ * produced one that is newer than the sources; otherwise skipped.
+ */
+function builtWorkerChunk(): string | undefined {
+  const root = resolve(import.meta.dirname, '../../..')
+  const dir = join(root, 'out/main/chunks')
+  const name = existsSync(dir) ? readdirSync(dir).find((f) => /^entry-.*\.js$/.test(f)) : undefined
+  if (name === undefined) return undefined
+  const chunk = join(dir, name)
+  const newest = (d: string): number =>
+    Math.max(
+      0,
+      ...readdirSync(d, { withFileTypes: true }).map((e) =>
+        e.isDirectory() ? newest(join(d, e.name)) : statSync(join(d, e.name)).mtimeMs,
+      ),
+    )
+  const sources = Math.max(
+    ...['src/core', 'src/main', 'src/shared'].map((d) => newest(join(root, d))),
+  )
+  return statSync(chunk).mtimeMs >= sources ? chunk : undefined
+}
+
+const built = builtWorkerChunk()
+
+describe('production worker chunk (out/main, after npm run build)', { timeout: 20_000 }, () => {
+  it.skipIf(built === undefined)(
+    'evaluates the test part through the built CJS chunk',
+    async () => {
+      const p = createWorkerPool({ factory: nodeWorkerFactory(built!), wasm: readManifoldWasm })
+      pools.push(p)
+      const e = expectOk(await p.run(geometryEvaluate, testPart(), ctl()))
+      expect(e.positions).toBeInstanceOf(Float32Array)
+      expect(p.lastStats('geometry')!.stats.liveObjects).toBe(0)
+    },
+  )
 })

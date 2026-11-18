@@ -48,5 +48,11 @@ describe('planOperationInputs (seam for 2.9/2.10)', () => {
     const changed = expectOk(planOperationInputs(s.d.doc, planId, [facing.planOperationId]))
     expect(changed[0]!.inputHash).not.toBe(facing.inputHash)
     expect(changed[0]!.strategy).toMatchObject({ overshoot: 2 })
+    // strategy defaults depend on the unit system (overshoot 1 mm vs 0.04"): so does the hash
+    const inch = expectOk(
+      planOperationInputs({ ...s.d.doc, unitSystem: 'inch' }, planId, [facing.planOperationId]),
+    )
+    const mm = expectOk(planOperationInputs(s.d.doc, planId, [facing.planOperationId]))
+    expect(inch[0]!.inputHash).not.toBe(mm[0]!.inputHash)
   })
 })

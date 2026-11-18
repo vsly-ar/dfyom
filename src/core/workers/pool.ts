@@ -399,11 +399,9 @@ export function createWorkerPool(opts: PoolOptions): WorkerPool {
     crash = !slot.killed,
   ): void {
     const wasLive = slot.state !== 'dead' || slot.killed
-    if (!slot.killed) {
-      slot.state = 'dead'
-      timers.clear(slot.spawnTimer)
-      if (lane.slot === slot) lane.slot = undefined
-    }
+    // an `error`/`messageerror` worker may still be alive (ref'd, holding its heap): terminate
+    // it; terminating an exited worker is harmless
+    if (!slot.killed) kill(lane, slot)
     const a = lane.active
     if (a !== undefined && a.slot === slot) {
       timers.clear(a.timer)

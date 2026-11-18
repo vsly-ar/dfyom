@@ -104,6 +104,14 @@ interface PartEntry {
   urgent: boolean
   attempt: number
   running: Request | undefined
+  /**
+   * The current input's debounce has elapsed (or was skipped): only then is a cached result
+   * shown (docs/architecture/workers.md#triggers-and-debounce: nothing is requested or shown
+   * until edits stop plus 200 ms).
+   */
+  quiet: boolean
+  /** A transient failure (crash, timeout, unrequested abort) of the current input: shown, never cached. */
+  transient: { readonly hash: string; readonly error: AppError } | undefined
   /** Revision of the newest accepted result. */
   storedRevision: number
   readonly lru: Map<string, AppResult<PartEvaluation>>
@@ -166,6 +174,8 @@ export function createEvaluationScheduler(opts: SchedulerOptions): EvaluationSch
         urgent: false,
         attempt: 1,
         running: undefined,
+        quiet: false,
+        transient: undefined,
         storedRevision: -1,
         lru: new Map(),
         waiters: [],
@@ -177,6 +187,10 @@ export function createEvaluationScheduler(opts: SchedulerOptions): EvaluationSch
 
   function stateOf(e: PartEntry | undefined, c: Computed): PartEvaluationState {
     if (!c.ok) return { status: 'failed', error: c.error }
+    const isCurrent = e?.current?.ok === true && e.current.hash === c.hash
+    if (isCurrent && !e.quiet) return { status: 'pending', inputHash: c.hash }
+    if (isCurrent && e.transient?.hash === c.hash)
+      return { status: 'failed', inputHash: c.hash, error: e.transient.error }
     const r = e?.lru.get(c.hash)
     if (r === undefined) return { status: 'pending', inputHash: c.hash }
     return r.isOk()
@@ -227,6 +241,8 @@ export function createEvaluationScheduler(opts: SchedulerOptions): EvaluationSch
     e.current = c
     e.lastEdit = clock.now()
     e.attempt = 1
+    e.quiet = !debounce
+    e.transient = undefined
     timers.clear(e.timer)
     e.timer = undefined
     e.due = false
@@ -246,18 +262,13 @@ export function createEvaluationScheduler(opts: SchedulerOptions): EvaluationSch
       (w) => w.hash !== c.hash,
       () => abortedErr(`part ${partId} changed; evaluate again`),
     )
-    if (e.lru.has(c.hash) && e.waiters.length > 0)
-      resolveWaiters(
-        e,
-        () => true,
-        () => Ok(stateOf(e, c)),
-      )
     if (!debounce) {
       e.due = true
       return
     }
     e.timer = timers.set(() => {
       e.timer = undefined
+      e.quiet = true
       e.due = true
       schedule()
     }, debounceMs)
@@ -322,31 +333,40 @@ export function createEvaluationScheduler(opts: SchedulerOptions): EvaluationSch
   function finished(e: PartEntry, req: Request, r: AppResult<PartEvaluation>): void {
     if (inFlight === e) inFlight = undefined
     if (e.running === req) e.running = undefined
-    const alive = parts.get(e.id) === e
-    if (
-      !alive ||
-      req.controller.signal.aborted ||
-      (r.isErr() && r.unwrapErr().code === 'op.aborted')
-    ) {
+    // aborted by us (newer revision, removed part, close): nothing to store or answer
+    if (parts.get(e.id) !== e || req.controller.signal.aborted) {
       schedule()
       return
     }
-    const code = r.isErr() ? r.unwrapErr().code : undefined
     const current = e.current?.ok === true && e.current.hash === req.hash
-    if ((code === 'internal.unexpected' || code === 'op.timeout') && req.attempt === 1 && current) {
-      // a crash or timeout: once more on a fresh worker
-      log.debug({ partId: e.id, code }, 'evaluation retried')
-      e.attempt = 2
-      e.due = true
+    const code = r.isErr() ? r.unwrapErr().code : undefined
+    // a crash, a timeout or an abort nobody asked for (e.g. the pool closed): not the input's fault
+    if (code === 'internal.unexpected' || code === 'op.timeout' || code === 'op.aborted') {
+      if (req.attempt === 1 && current) {
+        log.debug({ partId: e.id, code }, 'evaluation retried')
+        e.attempt = 2
+        e.due = true
+      } else if (current) {
+        // shown as failed, never cached by hash: design.part.evaluate runs it again
+        e.transient = { hash: req.hash, error: r.unwrapErr() }
+        const c = e.current!
+        resolveWaiters(
+          e,
+          (w) => w.hash === req.hash,
+          () => Ok(stateOf(e, c)),
+        )
+      }
       schedule()
       return
     }
-    if (req.revision <= e.storedRevision) {
+    // a straggler for an older input (out of order): dropped; a result for the current input
+    // is valid whatever its revision (e.g. after a re-attach)
+    if (req.revision <= e.storedRevision && !current) {
       log.debug({ partId: e.id, revision: req.revision }, 'out-of-order evaluation result dropped')
       schedule()
       return
     }
-    e.storedRevision = req.revision
+    e.storedRevision = Math.max(e.storedRevision, req.revision)
     e.lru.delete(req.hash)
     e.lru.set(req.hash, r)
     while (e.lru.size > lruSize) e.lru.delete(e.lru.keys().next().value!)
@@ -378,9 +398,18 @@ export function createEvaluationScheduler(opts: SchedulerOptions): EvaluationSch
     schedule()
   }
 
+  function close(): void {
+    unsubscribe?.()
+    unsubscribe = undefined
+    source = undefined
+    for (const partId of [...parts.keys()]) remove(partId)
+    inFlight = undefined
+  }
+
   return {
     attach(s) {
-      unsubscribe?.()
+      // a second attach starts over, as close() then attach()
+      if (source !== undefined) close()
       source = s
       unsubscribe = s.log.subscribe({ withPatches: true }, (e) =>
         onCommit('patches' in e ? e.patches : undefined),
@@ -388,13 +417,7 @@ export function createEvaluationScheduler(opts: SchedulerOptions): EvaluationSch
       for (const partId of Object.keys(s.doc.parts)) changed(s.doc, partId, false)
       schedule()
     },
-    close() {
-      unsubscribe?.()
-      unsubscribe = undefined
-      source = undefined
-      for (const partId of [...parts.keys()]) remove(partId)
-      inFlight = undefined
-    },
+    close,
     state(doc, partId) {
       return stateOf(parts.get(partId), compute(doc, partId))
     },
@@ -408,6 +431,12 @@ export function createEvaluationScheduler(opts: SchedulerOptions): EvaluationSch
       const e = entry(partId)
       if (e.current === undefined) changed(doc, partId, false)
       const c = e.current!
+      // skips the debounce; a transient failure is run again
+      e.quiet = true
+      if (c.ok && e.transient?.hash === c.hash) {
+        e.transient = undefined
+        e.attempt = 1
+      }
       const now = stateOf(e, c)
       if (now.status !== 'pending') return Promise.resolve(Ok(now))
       return new Promise((resolve) => {

@@ -160,17 +160,30 @@ export function runWorkerLoop(endpoint: Endpoint, opts: WorkerLoopOptions): { lo
       }
     }
     let transfer: ArrayBuffer[] = []
-    if (result.isOk() && task?.transfer !== undefined) {
-      const views = task.transfer(result.unwrap())
-      const owned = ownedBuffers(views)
+    const transferFn = task?.transfer
+    if (result.isOk() && transferFn !== undefined) {
+      const value = result.unwrap()
+      const owned = tryCatch(
+        () => transferFn(value),
+        'internal.unexpected',
+        `${m.task}: transfer list failed`,
+      ).andThen(ownedBuffers)
       if (owned.isErr()) result = Err(owned.unwrapErr())
       else transfer = owned.unwrap()
     }
     const stats: ResultStats = { ms: now() - started }
-    if (loaded !== undefined) {
-      const heap = loaded.heapBytes()
-      if (heap.isSome()) stats.heapBytes = heap.unwrap()
-      stats.liveObjects = loaded.liveObjects()
+    const kernel = loaded
+    if (kernel !== undefined) {
+      const measured = tryCatch(
+        () => ({ heap: kernel.heapBytes(), live: kernel.liveObjects() }),
+        'internal.unexpected',
+        'heap stats failed',
+      )
+      if (measured.isOk()) {
+        const { heap, live } = measured.unwrap()
+        if (heap.isSome()) stats.heapBytes = heap.unwrap()
+        stats.liveObjects = live
+      }
     }
     const sent = tryCatch(
       () => post({ type: 'result', id: m.id, result: toWire(result), stats }, transfer),
@@ -200,7 +213,13 @@ export function runWorkerLoop(endpoint: Endpoint, opts: WorkerLoopOptions): { lo
       return
     }
     const m = parsed.unwrap()
-    queue = queue.then(() => (m.type === 'init' ? init(m) : run(m)))
+    // a rejected step is logged and never stops the loop
+    queue = queue
+      .then(() => (m.type === 'init' ? init(m) : run(m)))
+      .catch((err: unknown) => {
+        log.error({ err, scope: 'workers' }, 'worker loop step failed')
+        forwarder?.flush()
+      })
   })
   return { log: () => log }
 }

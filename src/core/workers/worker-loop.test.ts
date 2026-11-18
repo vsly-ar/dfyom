@@ -223,6 +223,25 @@ describe('worker loop', () => {
     expect(w.lastResult()).toMatchObject({ id: 'r2', result: { ok: true } })
   })
 
+  it('a throwing transfer is internal.unexpected and the loop keeps serving', async () => {
+    const badTransfer: WorkerTask<null, { a: Float32Array }> = {
+      ...owned,
+      name: 'test.badTransfer',
+      transfer: () => {
+        throw new Error('transfer bug')
+      },
+    }
+    const w = setup([badTransfer])
+    await w.init()
+    await w.run('test.badTransfer', null)
+    expect(w.lastResult().result).toMatchObject({
+      ok: false,
+      error: { code: 'internal.unexpected' },
+    })
+    await w.run('test.echo', { n: 1 })
+    expect(w.lastResult()).toMatchObject({ id: 'r2', result: { ok: true } })
+  })
+
   it('solids are only available in the geometry lane', async () => {
     const w = setup()
     await w.init('toolpath')

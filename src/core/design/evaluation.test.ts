@@ -231,19 +231,70 @@ describe('automatic evaluation', () => {
     expect(facingDepth(s.runs[1]!)).toBe(1)
   })
 
-  it('undo back to an evaluated input is done without a worker run', async () => {
+  it('undo back to an evaluated input is done after the debounce, without a worker run', async () => {
     const s = await setup()
     await finish(s.runs[0]!)
     await s.setDepth('1')
     s.timers.advance(200)
     await finish(s.runs[1]!)
     expectOk(await s.d.dispatch('history.undo', {}, ui))
-    expect(s.status()).toBe('done')
+    expect(s.status()).toBe('pending') // nothing shown until edits stop + 200 ms
     s.timers.advance(200)
+    expect(s.status()).toBe('done')
     expectOk(await s.d.dispatch('history.redo', {}, ui))
+    expect(s.status()).toBe('pending')
     s.timers.advance(200)
     expect(s.status()).toBe('done')
     expect(s.runs).toHaveLength(2)
+  })
+
+  it('a drag back over an evaluated value shows nothing until the edits stop', async () => {
+    const s = await setup()
+    await finish(s.runs[0]!) // depth 0.5 evaluated
+    await s.setDepth('0.6')
+    s.timers.advance(100)
+    await s.setDepth('0.5') // back to a cached input mid-drag
+    expect(s.status()).toBe('pending')
+    s.timers.advance(199)
+    expect(s.status()).toBe('pending')
+    s.timers.advance(1)
+    expect(s.status()).toBe('done')
+    expect(s.runs).toHaveLength(1)
+  })
+
+  it.each([
+    ['internal.unexpected', 'worker lane unavailable'],
+    ['op.timeout', 'took too long'],
+    ['op.aborted', 'the worker pool was closed'],
+  ] as const)(
+    'a transient %s is not cached by hash: design.part.evaluate runs it again',
+    async (code, message) => {
+      const s = await setup()
+      const waiter = s.scheduler.evaluate(s.partId, new AbortController().signal)
+      await finish(s.runs[0]!, fail(code, message))
+      expect(s.runs).toHaveLength(2) // retried once
+      await finish(s.runs[1]!, fail(code, message))
+      const first = expectOk(await waiter) // joined waiters are answered, never left hanging
+      expect(first).toMatchObject({ status: 'failed', error: { code } })
+      expect(s.scheduler.state(s.d.doc, s.partId)).toMatchObject({ status: 'failed' })
+      const again = s.scheduler.evaluate(s.partId, new AbortController().signal)
+      await settle()
+      expect(s.runs).toHaveLength(3)
+      await finish(s.runs[2]!)
+      expect(expectOk(await again).status).toBe('done')
+    },
+  )
+
+  it('a second attach is a close then an attach: waiters end, the part is evaluated again', async () => {
+    const s = await setup()
+    const waiter = s.scheduler.evaluate(s.partId, new AbortController().signal)
+    s.scheduler.attach(s.d)
+    expectErrCode(await waiter, 'op.aborted')
+    expect(s.runs[0]!.signal.aborted).toBe(true)
+    await settle()
+    expect(s.runs).toHaveLength(2)
+    await finish(s.runs[1]!)
+    expect(s.status()).toBe('done')
   })
 
   it('a deterministic error is stored as failed and not retried', async () => {
@@ -356,6 +407,26 @@ describe('several parts (hand-made source; v0.1 projects have one part)', () => 
     expectErrCode(await waiting, 'op.aborted')
     await settle()
     expect(fake.runs).toHaveLength(1)
+  })
+
+  it('a result for the current input is stored even if its revision is not newer', async () => {
+    const { base, v } = await versions()
+    const clock = fakeClock(0)
+    const timers = manualTimers(clock)
+    const fake = fakePort()
+    const sch = createEvaluationScheduler({ workers: fake.port, timers, clock })
+    const h = handSource(base, { a: as(v[0]!, 'a') })
+    h.src.revision = 20
+    sch.attach(h.src)
+    await finish(fake.runs[0]!) // stored at revision 20
+    h.src.revision = 5 // e.g. another dispatcher's numbering after a re-attach
+    h.commit({ a: as(v[1]!, 'a') }, 'a', 'replace')
+    const waiter = sch.evaluate('a', new AbortController().signal)
+    await settle()
+    expect(fake.runs).toHaveLength(2)
+    await finish(fake.runs[1]!)
+    expect(sch.state(h.src.doc, 'a').status).toBe('done')
+    expect(expectOk(await waiter).status).toBe('done')
   })
 
   it('an input that cannot be built is failed without a worker run', async () => {
