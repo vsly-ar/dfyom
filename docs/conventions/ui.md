@@ -1,22 +1,22 @@
 # UI guidelines
 
-Status: draft · Principle: [principles.md §5](../principles.md#5-user-friendly-beginner-friendly-highly-graphical) · Decisions: [ADR 0012 Radix + own styles](../decisions/0012-radix-primitives-own-styles.md), [ADR 0010 react-three-fiber](../decisions/0010-react-three-fiber-viewport.md) · Terms: [glossary.md](../glossary.md) · Task: [v0.1 plan](../plans/v0.1.md) 1.11 (blocks 3.3–3.7, 3.12)
+Status: accepted · Principle: [principles.md §5](../principles.md#5-user-friendly-beginner-friendly-highly-graphical) · Decisions: [ADR 0012 Radix + own styles](../decisions/0012-radix-primitives-own-styles.md), [ADR 0010 react-three-fiber](../decisions/0010-react-three-fiber-viewport.md) · Terms: [glossary.md](../glossary.md) · Task: [v0.1 plan](../plans/v0.1.md) 1.11 (blocks 3.3–3.7, 3.12)
 
-How the renderer looks and behaves: design tokens, components, layout, interaction, run-mode safety, accessibility, copy, testing. Rules are imperative. The user's answers to the open questions are recorded as [decisions](#decisions); concrete token values and the palette come from the [design system](#design-system) step (task 1.16), approved by the user before task 3.3.
+How the renderer looks and behaves: design tokens, components, layout, interaction, run-mode safety, accessibility, copy, testing. Rules are imperative. The user's answers to the open questions are recorded as [decisions](#decisions); concrete token values, the palette and the component looks come from the approved [design system](#design-system) (task 1.16).
 
 ## Decisions
 
-Settled with the user (task 1.11); the sections below specify them. The doc stays `draft` until the [design system](#design-system) is approved.
+Settled with the user (tasks 1.11 and 1.16); the sections below specify them.
 
 1. **Theme:** follow the OS, with a Light / Dark / System setting ([tokens](#design-tokens)).
-2. **Design system first:** tokens, palette and a components preview are defined in a separate step and approved by the user before any UI is built (task 1.16, [design system](#design-system)). Look: modern, friendly, approachable, with a consistent palette.
+2. **Design system first:** tokens, palette and a components preview were defined in a separate step and approved by the user before any UI is built (task 1.16, [design system](#design-system)). Look: a strict, serious desktop CAD-style tool, not a web page ([decision 17](#decisions)).
 3. **Colour scales:** Radix Colors (MIT) 12-step scales, adapted to the chosen palette.
 4. **CSS:** CSS Modules + CSS custom properties.
 5. **Icons:** Lucide (ISC) + own CNC icons ([icons](#icons)).
 6. **Renderer state:** Zustand (MIT) for per-window UI state (selection, mode, panels, pick mode); `useSyncExternalStore` over the document replica.
 7. **i18n:** English only in v0.1, strings centralised in `messages/`, errors and warnings rendered from code + params, no library ([internationalization](#internationalization)).
-8. **Typography:** system fonts at 14 px base with tabular numerals ([type](#type)).
-9. **Control sizes:** 44 px in run mode, 32 px elsewhere ([sizes](#spacing-radii-sizes)).
+8. **Typography:** system fonts at 13 px base with tabular numerals ([type](#type); 14 px before the design system).
+9. **Control sizes:** 44 px in run mode, 28 px elsewhere ([sizes](#spacing-radii-sizes); 32 px before the design system).
 10. **Viewport mouse:** selectable presets as a setting; default left-drag orbit, right-drag pan, wheel zoom to cursor; a Fusion 360-style preset and others where cheap ([selection and picking](#selection-and-picking)).
 11. **Confirmations and run safety:** undo instead of confirm for document edits; a pre-flight dialog before every run, the virtual machine included; hold, stop and reset are never confirmed; `Escape` = feed hold while streaming; no single-key resume ([confirmations](#confirmations), [run safety](#run-mode-safety-ui)).
 12. **Window chrome:** native title bar and native application menu.
@@ -24,34 +24,24 @@ Settled with the user (task 1.11); the sections below specify them. The doc stay
 14. **Testing:** Vitest + Testing Library + jsdom + axe-core, plus a dev-only gallery screen screenshotted by the Playwright smoke test ([testing](#testing)).
 15. **Outdated evaluation:** keep the last mesh, draw the edited operation's outline live, tint the mesh and show "Updating…" only after 300 ms ([evaluation status](#evaluation-status-pending-outdated-failed)).
 16. **Reference autocomplete** in the quantity input (3.4): a simple list of valid references (earlier surfaces, tool parameters).
+17. **Desktop look:** native title bar with the document name only, no logo or app name inside the window; toolbars, panels and a status bar; dense, not cramped.
+18. **Accent Amber `#f5b700`, used sparingly:** on icons or parts of icons, selection, toggles and active states (switch, checkbox, segmented thumb, active mode); never a large fill. Accent icons use the saturated amber (`--accent-icon`) in both themes.
+19. **No coloured primary button:** primary keeps the neutral surface and differs by a semibold label, a stronger outline and an amber icon; every primary button has an icon. Stop is the only filled control.
+20. **Running is amber:** the running machine state takes the accent (play icon, a dot circling the badge edge), departing from IEC 60204-1 green on purpose; feed hold and warnings are orange; tool change is blue with an in-progress animation ([run safety](#run-mode-safety-ui)).
+21. **Three severities:** soft warning (neutral, dismissible), hard warning (orange, not dismissible), error (red, impossible value, blocks Generate) ([warnings](#warnings-and-dfm)).
+22. **Graphical fields:** every field has an illustration icon whose measured part is an amber line ([field](#field)).
+23. **Mode switcher** is its own component, separate from tabs; its place in the window is decided with the window layout (3.3).
+24. **Rich motion:** indicators slide, toolpaths draw in, selections pulse; every animation explains something and turns off with reduced motion ([motion](#motion)).
 
 ## Design system
 
-Task 1.16 of the [v0.1 plan](../plans/v0.1.md): a well-organised, systematic design system – token values for every group below, the palette in both themes, and a components preview (the gallery) – **approved by the user before task 3.3**. Nothing in the UI picks a colour, size or spacing ad hoc; every value is a token from this step.
+Task 1.16, **approved by the user on 2026-11-20**. The reference is [ui-design-system.html](ui-design-system.html) (open it in a browser): principles, palette in both themes, every semantic token with its value, type, space, motion, icons, the component gallery in light and dark, and an example app shell. Nothing in the UI picks a colour, size or spacing ad hoc; every value is a token from that page, copied into `tokens.css` in task 3.3. Where this doc and the page differ on a value, the page wins; the rules stay here.
 
-**Base colours (from the user):**
-
-| Role                   | Value                 |
-| ---------------------- | --------------------- |
-| Dark theme background  | Jet `#272d2d`         |
-| Light theme background | Ghost White `#f6f8ff` |
-
-**Accent: pending** (the user chooses from four palette options):
-
-| Option | Accent                | Clash to resolve                                                   |
-| ------ | --------------------- | ------------------------------------------------------------------ |
-| A      | Vivid green `#23ce6b` | Same hue as the green "running" machine state (`--safety-moving`). |
-| B      | Sage green `#4eba7a`  | Same hue family as `--safety-moving`.                              |
-| C      | Orange-red            | Close to the Stop / alarm red (`--safety-stop`, `--safety-alarm`). |
-| D      | Amber / yellowish     | Close to feed hold (`--safety-hold`) and `--color-warning`.        |
-
-**Clash rules** (apply whichever accent is chosen):
-
-- The accent never fills a machine-state badge or the stop control; safety tokens stay reserved ([colour](#colour)).
-- Where the accent shares a hue with a safety colour, the design system separates them by lightness/saturation and by usage: the accent appears on interactive controls (buttons, selection, focus), safety colours only in the machine state badge, the stop control and run dialogs.
-- Every machine state also has a **label and a shape** ([run safety](#run-mode-safety-ui)), so no state depends on telling two hues apart.
-- With an amber accent, `--color-warning` and `--safety-hold` must remain distinguishable from primary buttons (e.g. warnings always with the triangle icon and a subtle background, never a filled accent-like surface).
-- The design system's contrast test covers the accent on both backgrounds (text on accent, accent on background).
+- **Base colours (from the user):** dark theme background Jet `#272d2d`, light theme background Ghost White `#f6f8ff`; neutrals lean slightly towards them.
+- **Accent:** Amber `#f5b700` (option D of four). It shares a hue with feed hold and warnings, so they are separated by hue (both orange, `#c96a00` / `#f2993a` for warnings), by usage (the accent never fills a badge, a warning or a button) and by shape (triangle for warnings, pause bars for hold).
+- Safety tokens stay reserved for the machine state badge, the stop control and run dialogs. Every machine state has a **label and a shape** ([run safety](#run-mode-safety-ui)), so no state depends on telling two hues apart.
+- The App shell section of the page is an illustration, not a layout decision; the window layout is designed in 3.3 against [layout](#layout).
+- The segmented control's selected thumb stays amber with dark text (`--text-on-accent`).
 
 ## Where things live
 
@@ -69,68 +59,71 @@ The renderer holds a read replica of `ProjectDoc` kept current by the patch stre
 
 ## Design tokens
 
-Tokens are **CSS custom properties** on `:root` in `tokens.css`, consumed by CSS Modules ([decision 4](#decisions)). Values come from the [design system](#design-system); this section fixes names and structure. Two tiers:
+Tokens are **CSS custom properties** on `:root` in `tokens.css`, consumed by CSS Modules ([decision 4](#decisions)). Values come from the [design system](#design-system); this section fixes names and structure.
 
-- **Primitive** scales (`--gray-1` … `--gray-12`, `--blue-*`, `--amber-*`, `--red-*`, `--green-*`): 12-step light/dark scales from Radix Colors, adapted to the chosen palette ([decision 3](#decisions)). Only `tokens.css` uses primitives.
-- **Semantic** tokens (below): the only tokens components use. A theme is a set of semantic values: `:root[data-theme='light']` and `:root[data-theme='dark']`; `system` maps to one of them from `prefers-color-scheme`; the setting offers Light / Dark / System, default System ([decision 1](#decisions)).
+- **Semantic** tokens (below) are the only tokens components use. The design system sets them directly; Radix Colors scales ([decision 3](#decisions)) were the starting point for the neutrals and feedback hues, and primitives (`--gray-*`, …) are added to `tokens.css` only if a value is needed by several semantic tokens.
+- A theme is a set of semantic values: light on `:root`, dark under `:root[data-theme='dark']` and under `prefers-color-scheme: dark` unless `data-theme='light'` is set; the setting offers Light / Dark / System, default System ([decision 1](#decisions)). Classes `.t-light` / `.t-dark` scope a theme to a subtree (the gallery).
 
 Units: `rem` for type and spacing (so Electron zoom scales the UI), `px` only for hairlines (1 px borders). The viewport reads its colours with a `useToken('--viewport-…')` hook (`getComputedStyle`, re-read on theme change), so there is one source of truth for three.js too.
 
 ### Colour
 
-| Token group       | Tokens                                                                                                                                                                                                                                                                    | Use                                                                                                  |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| Surfaces          | `--color-bg`, `--color-surface`, `--color-surface-raised`, `--color-overlay`                                                                                                                                                                                              | App background, panels, popovers/menus, dialog scrim.                                                |
-| Text              | `--color-text`, `--color-text-muted`, `--color-text-disabled`, `--color-text-on-accent`                                                                                                                                                                                   | Body, secondary (units, ids, hints), disabled, text on filled buttons.                               |
-| Lines             | `--color-border`, `--color-border-strong`, `--color-focus`                                                                                                                                                                                                                | Separators, input outlines, focus ring.                                                              |
-| Accent            | `--color-accent`, `--color-accent-hover`, `--color-accent-subtle`                                                                                                                                                                                                         | Primary action, selected mode, selection in lists.                                                   |
-| Feedback          | `--color-info`, `--color-success`, `--color-warning`, `--color-danger` (+ `-subtle` backgrounds)                                                                                                                                                                          | DFM `info`/`warning`, done, invalid field, destructive actions. Never for machine state.             |
-| Safety (reserved) | `--safety-stop`, `--safety-alarm`, `--safety-hold`, `--safety-moving`, `--safety-action`, `--safety-idle`, `--safety-offline` (+ `-fg`)                                                                                                                                   | Machine state and the stop control only ([run safety](#run-mode-safety-ui)). Never reused elsewhere. |
-| Viewport          | `--viewport-bg`, `--viewport-grid`, `--viewport-stock`, `--viewport-part`, `--viewport-removal`, `--viewport-hover`, `--viewport-selected`, `--viewport-outdated`, `--viewport-rapid`, `--viewport-feed`, `--viewport-plunge`, `--viewport-tool`, `--viewport-axis-x/y/z` | 3D scene. Axis colours follow the CAD convention X red, Y green, Z blue.                             |
+| Token group       | Tokens                                                                                                                                                                                                                                                                          | Use                                                                                                                     |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Surfaces          | `--bg-app`, `--bg-chrome`, `--bg-viewport`, `--bg-field`, `--bg-control`, `--bg-raised`, `--bg-hover`, `--bg-active`, `--bg-overlay`                                                                                                                                            | App background, toolbars/panels/status bar, viewport, inputs, buttons, popovers, hover and pressed tints, dialog scrim. |
+| Text              | `--text`, `--text-muted`, `--text-faint`, `--text-on-accent`, `--text-on-solid`, `--text-accent`                                                                                                                                                                                | Body, secondary (units, ids, hints), placeholders and disabled, on amber, on solid colours, amber-toned text.           |
+| Lines             | `--border`, `--border-control`, `--focus`                                                                                                                                                                                                                                       | Separators, input and button outlines, focus ring.                                                                      |
+| Accent            | `--accent`, `--accent-hover`, `--accent-border`, `--accent-subtle`, `--accent-icon`, `--accent-icon-edge`                                                                                                                                                                       | Toggles, selection, active mode; accent icon parts (the edge is a hairline filter in light only).                       |
+| Feedback          | `--info`, `--success`, `--warning`, `--danger` (+ `-subtle` backgrounds)                                                                                                                                                                                                        | Hard warnings, done, errors and destructive actions ([severities](#warnings-and-dfm)). Never for machine state.         |
+| Safety (reserved) | `--safety-stop`, `--safety-alarm`, `--safety-hold`, `--safety-moving` (+ `-edge`), `--safety-action`, `--safety-idle`, `--safety-offline` (+ `-fg`)                                                                                                                             | Machine state and the stop control only ([run safety](#run-mode-safety-ui)). Never reused elsewhere.                    |
+| Viewport          | `--vp-grid`, `--vp-grid-major`, `--vp-stock`, `--vp-part`, `--vp-edge`, `--vp-removal`, `--vp-selected`, `--vp-selected-halo`, `--vp-feed`, `--vp-rapid`, `--vp-tool`, `--vp-axis-x/y/z`; background `--bg-viewport`; `--vp-hover`, `--vp-outdated`, `--vp-plunge` added in 3.5 | 3D scene. Axis colours follow the CAD convention X red, Y green, Z blue.                                                |
 
 Rules:
 
 - Text contrast ≥ 4.5:1, large text and UI component boundaries (inputs, focus ring, icons that carry meaning) ≥ 3:1, in both themes ([accessibility](#accessibility)). Each theme's token values are checked by a unit test that computes the contrast pairs.
 - Colour never carries meaning alone: every status also has a label or icon (and shape for machine states).
-- Safety colours follow the IEC 60204-1 indicator meanings: red = emergency/alarm, amber = abnormal/attention, blue = action required from the user, green = normal operation, grey = neutral/off.
+- Safety colours follow the IEC 60204-1 indicator meanings (red = emergency/alarm, orange/amber = abnormal/attention, blue = action required, grey = neutral/off) with one deliberate exception: running uses the amber accent instead of green ([decision 20](#decisions)).
+- The accent appears as a line, an icon part, a thumb or a check, never as a large fill; `--accent-calm*` from the page is for proposal callouts in docs only.
 
 ### Type
 
 System font stacks with `font-variant-numeric: tabular-nums` on every numeric display ([decision 8](#decisions)): `--font-ui` (system-ui), `--font-mono` (ui-monospace) for gCode, ids in formulas and the [DRO](../glossary.md).
 
-| Token              | Size / line height     | Use                                   |
-| ------------------ | ---------------------- | ------------------------------------- |
-| `--text-xs`        | 0.75 rem / 1rem        | Badges, unit suffixes, status bar     |
-| `--text-sm`        | 0.8125 rem / 1.125 rem | Hints, inline messages, tooltips      |
-| `--text-md` (base) | 0.875 rem / 1.25 rem   | Body, inputs, buttons (14 px at 100%) |
-| `--text-lg`        | 1 rem / 1.5 rem        | Panel and dialog titles               |
-| `--text-xl`        | 1.25 rem / 1.75 rem    | Empty-state titles, run progress      |
-| `--text-dro`       | 1.75 rem / 2 rem, mono | DRO axis values                       |
+| Token (+ `--lh-*`) | Size / line height | Use                               |
+| ------------------ | ------------------ | --------------------------------- |
+| `--text-xs`        | 11 / 14 px         | Badges, unit suffixes, status bar |
+| `--text-sm`        | 12 / 16 px         | Hints, inline messages, tooltips  |
+| `--text-md` (base) | 13 / 18 px         | Body, inputs, buttons             |
+| `--text-lg`        | 15 / 20 px         | Panel and dialog titles           |
+| `--text-xl`        | 20 / 26 px         | Empty-state titles, run progress  |
+| `--text-dro`       | 24 / 28 px, mono   | DRO axis values                   |
+
+Sizes are written in `rem` in `tokens.css`; the table shows them at 100 % zoom.
 
 Weights: `--weight-regular` 400, `--weight-medium` 500 (labels, buttons), `--weight-bold` 600 (titles). No italics for emphasis in messages.
 
 ### Spacing, radii, sizes
 
-- Spacing on a 4 px grid: `--space-1` 0.25 rem, `-2` 0.5, `-3` 0.75, `-4` 1, `-6` 1.5, `-8` 2 rem. Component padding uses `-2`/`-3`; between panel sections `-4`.
-- Radii: `--radius-sm` 4 px (inputs, buttons), `--radius-md` 6 px (popovers, cards), `--radius-lg` 10 px (dialogs), `--radius-full` (pills, status chips).
-- Control heights: `--control-sm` 1.5 rem (dense tables), `--control-md` 2 rem (default), `--control-lg` 2.75 rem (run-mode controls). Default controls are 32 px high (`--control-md` 2 rem); pointer targets are ≥ 24 × 24 px everywhere (WCAG 2.2 target size) and ≥ 44 × 44 px in run mode ([decision 9](#decisions)), which may be used on a shop touchscreen.
+- Spacing on a 4 px grid: `--space-0-5` 0.125 rem, `--space-1` 0.25 rem, `-2` 0.5, `-3` 0.75, `-4` 1, `-5` 1.25, `-6` 1.5, `-8` 2 rem. Component padding uses `-2`/`-3`; between panel sections `-4`.
+- Radii: `--radius-xs` 3 px (chips inside controls), `--radius-sm` 5 px (inputs, buttons), `--radius-md` 7 px (popovers, cards), `--radius-lg` 10 px (dialogs), `--radius-full` (pills, status chips).
+- Control heights: `--control-sm` 1.5 rem (dense tables), `--control-md` 1.75 rem (default, 28 px), `--control-lg` 2.75 rem (run-mode controls). Pointer targets are ≥ 24 × 24 px everywhere (WCAG 2.2 target size) and ≥ 44 × 44 px in run mode ([decision 9](#decisions)), which may be used on a shop touchscreen.
 
 ### Elevation
 
-| Token           | Use                                | Light                | Dark                                               |
-| --------------- | ---------------------------------- | -------------------- | -------------------------------------------------- |
-| `--elevation-0` | Panels (flat, bordered)            | none                 | none                                               |
-| `--elevation-1` | Floating viewport toolbars, toasts | small shadow         | lighter surface + border                           |
-| `--elevation-2` | Popovers, menus, tooltips          | medium shadow        | `--color-surface-raised` + `--color-border-strong` |
-| `--elevation-3` | Dialogs                            | large shadow + scrim | raised surface + scrim                             |
+| Token        | Use                                       | Light        | Dark                        |
+| ------------ | ----------------------------------------- | ------------ | --------------------------- |
+| (none)       | Panels and toolbars (flat, bordered)      | none         | none                        |
+| `--shadow-1` | Floating viewport toolbars, toasts        | small shadow | small shadow + `--border`   |
+| `--shadow-2` | Popovers, menus, tooltips (`--bg-raised`) | medium       | medium + `--border-control` |
+| `--shadow-3` | Dialogs, over `--bg-overlay`              | large        | large                       |
 
 Z-order follows elevation (`--z-toolbar`, `--z-popover`, `--z-dialog`, `--z-toast`); the [global stop control](#run-mode-safety-ui) sits above dialogs (`--z-safety`), so no overlay ever hides it.
 
 ### Motion
 
-- Durations `--motion-fast` 100 ms (hover, press), `--motion-base` 150 ms (popovers, panels), `--motion-slow` 250 ms (dialogs, camera view changes); easing `--ease-standard` `cubic-bezier(0.2, 0, 0, 1)`.
-- `--delay-indicator` 300 ms: spinners, "Updating…" chips and progress for short work appear only after this delay, so fast work never flickers.
-- Motion explains a change (where a panel came from, what moved); nothing loops except progress and the "machine moving" indicator.
+- Durations `--motion-instant` 80 ms (press), `--motion-fast` 120 ms (hover, colour), `--motion-base` 180 ms (popovers, panels, the field support area pulling out), `--motion-slow` 280 ms (dialogs, segmented thumb, camera view changes), `--motion-emphasis` 450 ms (selection pulse), `--motion-draw` 900 ms (toolpaths drawing in). Easing `--ease-standard` `cubic-bezier(0.2, 0, 0, 1)`, `--ease-emphasized` `cubic-bezier(0.2, 0.8, 0.2, 1)` for things that arrive, `--ease-exit` `cubic-bezier(0.4, 0, 1, 1)` for things that leave.
+- `--delay-tooltip` 450 ms. `--delay-indicator` 300 ms: spinners, "Updating…" chips and progress for short work appear only after this delay, so fast work never flickers.
+- Motion explains a change (where a panel came from, what moved, what is selected). Only ongoing processes loop: progress, the running badge's circling dot and the tool-change badge's swap icon and light sweep.
 - `prefers-reduced-motion: reduce` (and the matching app setting) sets every duration to 0 and replaces camera animations with cuts; progress bars and the moving indicator stay, without animation of their own beyond the value change.
 
 ## Components
@@ -154,7 +147,8 @@ Per [ADR 0012](../decisions/0012-radix-primitives-own-styles.md): Radix primitiv
 | Component                                                       | Radix primitive                   | Used for                                                 |
 | --------------------------------------------------------------- | --------------------------------- | -------------------------------------------------------- |
 | `Button`, `IconButton`                                          | – (`Slot`)                        | All actions                                              |
-| `SegmentedControl`                                              | `ToggleGroup`                     | Mode switcher, view presets, unit-system toggle          |
+| `SegmentedControl`                                              | `ToggleGroup`                     | Inspector sections, strategy choices, unit-system toggle |
+| `ModeSwitcher`                                                  | `ToggleGroup`                     | Design / Plan / Run ([decision 23](#decisions))          |
 | `Tabs`                                                          | `Tabs`                            | Inspector sections where needed                          |
 | `Dialog`, `ConfirmDialog`                                       | `Dialog`, `AlertDialog`           | Tool change, export, [confirmations](#confirmations)     |
 | `Popover`, `Tooltip`, `HoverCard`                               | `Popover`, `Tooltip`, `HoverCard` | Pickers, short help, [term](#copy-and-terminology) cards |
@@ -170,7 +164,7 @@ Per [ADR 0012](../decisions/0012-radix-primitives-own-styles.md): Radix primitiv
 
 | Component                                                                                                 | Task     | Notes                                                                                                                        |
 | --------------------------------------------------------------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `Field`                                                                                                   | 3.3      | Label (+ `Term`), control, hint, recommended range, inline message; wires `aria-describedby`.                                |
+| `Field`                                                                                                   | 3.3      | [Field](#field): illustration, label (+ `Term`), lock, control, support area; wires `aria-describedby`.                      |
 | `QuantityInput`                                                                                           | 3.4      | [Quantity input rules](#quantity-and-expression-input).                                                                      |
 | `Term`                                                                                                    | 3.3      | Glossary term with tooltip and "Learn more" link to the wiki ([copy](#copy-and-terminology)).                                |
 | `StatusChip`                                                                                              | 3.3      | Plan status, stale badge, evaluation status, machine state (with safety tokens).                                             |
@@ -186,15 +180,35 @@ Per [ADR 0012](../decisions/0012-radix-primitives-own-styles.md): Radix primitiv
 | `PlanPicker`, `ToolPicker`, `FeedsSpeedsCard`, `ExportDialog`                                             | 3.7      | Tool suggestions with reasons; feeds-and-speeds derivation as formulas ([feeds-speeds.md](../architecture/feeds-speeds.md)). |
 | `StopControl`, `MachineStateBadge`, `Dro`, `JogPad`, `RunProgress`, `ToolChangeDialog`, `ConnectionPanel` | 3.12     | [Run-mode safety UI](#run-mode-safety-ui).                                                                                   |
 
-A dev-only **gallery** screen renders every `ui/` component in every variant and state in both themes; it is the manual review surface and the target of the screenshot test ([testing](#testing)).
+A dev-only **gallery** screen renders every `ui/` component in every variant and state in both themes, side by side as in the [design system](#design-system) page; it is the manual review surface and the target of the screenshot test ([testing](#testing)).
+
+### Buttons
+
+- Variants: default, primary, ghost, danger; sizes sm/md. All share the neutral surface (`--bg-control`, `--border-control`).
+- **Primary** ([decision 19](#decisions)): semibold label, `--border-control` outline that warms towards amber on hover, and an icon in `--accent-icon`. At most one primary per panel or dialog.
+- Danger uses `--danger` for the label and icon, never a red fill. Stop is the only filled control ([run safety](#run-mode-safety-ui)).
+- Toggles (switch, checkbox, segmented thumb, pressed icon button) use the accent: amber thumb or check, or the amber part of the icon.
+
+### Field
+
+The `Field` component (3.3, quantity behaviour in 3.4) is a grid: label column (illustration + label), a lock column, the input, and a support area under the input.
+
+- **Illustration** (`--icon-xl` 28 px, viewBox 20, 1 px grey drawing): draws the feature and makes the measured part itself one amber line (1.4 px, butt caps, on the same centreline as the drawing; 1.6 px while focused). No dimension arrows. Length runs end to end along the slot, width across its middle, depth the wall, stepdown the riser, corner radius the arc, chamfer the face, feed the travel line. At rest the icon is at 35 % saturation and animates to full saturation on focus. Fields without a value input (checkbox, switch, button) stay fully saturated; read-only fields are fully desaturated at reduced opacity.
+- **Lock** sits between label and input, outside the input; it toggles whether the value follows the recommendation.
+- **Pencil** inside the input, on a tinted round background, opens the adjust popover (step buttons .001–100 and the recommended value); amber-tinted when a fix is available.
+- **Support area:** one group under the input that looks pulled out from under it (no top corners, inset from the input's rounding, a small shadow from the input, slides in with `--motion-base`). It holds the echo ([quantity input](#quantity-and-expression-input)), the highest-severity status with its fix button ("Use 3.00"), and further notes collapsed ("1 dismissed · Show"). Its background follows the severity ([warnings](#warnings-and-dfm)). Read-only fields show it dimmed with a dashed border.
+- Narrow panels: the input column narrows before the label column; below 260 px the support buttons wrap under the text.
 
 ## Layout
 
 ### App shell
 
+Starting point for the window layout, which is designed in task 3.3; the shell in the [design system](#design-system) page is an illustration only.
+
 ```text
-┌ Top bar ─────────────────────────────────────────────────────────────────────┐
-│ Project name ● │ [Design | Plan | Run] │ Undo Redo │ … │ Machine state  [STOP] │
+┌ Native title bar: project name, unsaved state ───────────────────────────────┐
+├ Main toolbar ─────────────────────────────────────────────────────────────────┤
+│ Undo Redo │ mode tools │ Mode switcher (place: 3.3) │ Machine state  [STOP]  │
 ├ Left panel ──────┬ Viewport ──────────────────────────────┬ Inspector ────────┤
 │ Mode navigator   │ 3D scene, view presets, overlays       │ Selected item:    │
 │ (operations,     │                                        │ fields, warnings, │
@@ -205,7 +219,8 @@ A dev-only **gallery** screen renders every `ui/` component in every variant and
 └───────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Top bar:** project name with an unsaved-changes dot, mode switcher, undo/redo, and – whenever a machine connection is open – the machine state badge and the [stop control](#run-mode-safety-ui), in every mode.
+- **Title bar:** native, the project name and unsaved state only; no logo or app name ([decision 17](#decisions)).
+- **Main toolbar:** undo/redo, the mode's tools, the [mode switcher](#mode-switching), and – whenever a machine connection is open – the machine state badge and the [stop control](#run-mode-safety-ui), in every mode.
 - **Left panel (navigator):** what the mode is made of. Design: part, stock, operations in design order. Plan: plan picker, plan status, setup, plan operations in machining order. Run: connection, homing, jog, work zero.
 - **Viewport:** centre, always present; one react-three-fiber canvas kept alive across modes (no WebGL context churn); the mode decides the scene.
 - **Inspector (right):** parameters of the selection, its warnings, the `ParamIllustration`, recommended ranges. In run mode: DRO, run progress, run controls.
@@ -215,7 +230,7 @@ A dev-only **gallery** screen renders every `ui/` component in every variant and
 
 ### Mode switching
 
-- Modes are a three-way `SegmentedControl` in the top bar, `Ctrl/Cmd+1/2/3`. The mode is per window.
+- Modes are a three-way `ModeSwitcher` (its own component, [decision 23](#decisions)) in the main toolbar, `Ctrl/Cmd+1/2/3`. The mode is per window.
 - Switching is instant and never blocked: jobs, evaluation and a run keep going. Each mode keeps its own selection and camera.
 - A mode without its input shows an `EmptyState` instead of disabled controls: Plan without a part ("Design a part first", button to Design); Run without a plan ("Create a plan to run", button to Plan).
 - Agents never switch the user's mode or steal focus; their edits appear in place ([undo](#undo-and-redo)).
@@ -224,7 +239,7 @@ A dev-only **gallery** screen renders every `ui/` component in every variant and
 
 - The inspector edits exactly one item: the selection. No selection → part (Design), plan (Plan), connection (Run) summary.
 - Fields are grouped by what the user thinks about (Shape, Depth, Corners, Tabs), in the order of the [mode doc's](../modes/design.md#operations-v01) parameter tables; rarely changed groups start collapsed.
-- Read-only states (a `finalized` plan, an `inUse` plan) show values as text with a lock icon and the reason as a tooltip with the way out ("Finalized plans are read-only. Set the status to settled design to edit, or duplicate the plan."), not disabled grey inputs.
+- Read-only states (a `finalized` plan, an `inUse` plan) show read-only fields (desaturated illustration, dimmed support area, [field](#field)) with a lock icon and the reason as a tooltip with the way out ("Finalized plans are read-only. Set the status to settled design to edit, or duplicate the plan."), not disabled grey inputs.
 - Plan stale badges ([plan-v0.1.md](../modes/plan-v0.1.md#plans-are-snapshots)) appear on the affected row and in the plan header with the rebuild / library-update action next to them.
 
 ## Interaction
@@ -249,14 +264,14 @@ Every dimensional field is a `QuantityInput` over the [quantity model](../archit
 
 How an `AppError` reaching the UI boundary ([boundaries.md](../conventions/error-handling/boundaries.md#entry-points-ui-agent-cli-automation)) is shown:
 
-| Situation                                    | Display                                                                                                                                 |
-| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `issues` with a `path` matching a field      | Inline under that field (`--color-danger`, icon, `aria-invalid`, `aria-describedby`); focus moves to the first invalid field on submit. |
-| `issues` without a matching field            | Summary at the top of the form/inspector.                                                                                               |
-| `severity` `info` (incl. `op.aborted`)       | Neutral toast or nothing; cancellation is never shown as a failure.                                                                     |
-| `severity` `warn` / `error`, no field        | Inline banner in the panel that started the action, with `userMessage` and a retry button if `retryable`.                               |
-| `severity` `fatal`, `machine.*` during a run | Blocking dialog (run errors: [run safety](#run-mode-safety-ui)).                                                                        |
-| `command.conflict`                           | Not shown for UI sources (never rejected); for queued agent actions see the agent indicator.                                            |
+| Situation                                    | Display                                                                                                                                      |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `issues` with a `path` matching a field      | Inline in the field's support area (`--danger`, icon, `aria-invalid`, `aria-describedby`); focus moves to the first invalid field on submit. |
+| `issues` without a matching field            | Summary at the top of the form/inspector.                                                                                                    |
+| `severity` `info` (incl. `op.aborted`)       | Neutral toast or nothing; cancellation is never shown as a failure.                                                                          |
+| `severity` `warn` / `error`, no field        | Inline banner in the panel that started the action, with `userMessage` and a retry button if `retryable`.                                    |
+| `severity` `fatal`, `machine.*` during a run | Blocking dialog (run errors: [run safety](#run-mode-safety-ui)).                                                                             |
+| `command.conflict`                           | Not shown for UI sources (never rejected); for queued agent actions see the agent indicator.                                                 |
 
 - Message text: the catalogue in `messages/` maps `code` (and issue `rule`) to a friendly sentence with `params` formatted in the project unit system; fallback is the registry's `userMessage` ([codes.ts](../../src/shared/errors/codes.ts)). The developer-facing `message` and the frames are only in an "Details" expander with a "Copy details" button (for bug reports).
 - Every message says what happened, why if known, and what to do next.
@@ -280,7 +295,7 @@ How an `AppError` reaching the UI boundary ([boundaries.md](../conventions/error
 
 ### Undo and redo
 
-- Undo/redo buttons in the top bar and `Ctrl/Cmd+Z`, `Ctrl/Cmd+Shift+Z` (also `Ctrl+Y` on Windows/Linux) dispatch `history.undo` / `history.redo` ([commands.md](../architecture/commands.md#undo--redo)). While focus is in a text field, the shortcuts act on the text, not the history.
+- Undo/redo buttons in the main toolbar and `Ctrl/Cmd+Z`, `Ctrl/Cmd+Shift+Z` (also `Ctrl+Y` on Windows/Linux) dispatch `history.undo` / `history.redo` ([commands.md](../architecture/commands.md#undo--redo)). While focus is in a text field, the shortcuts act on the text, not the history.
 - Tooltips name the step: "Undo Add pocket (Pocket 2)". The history is shared by all sources; when the top step is not the user's own, the tooltip says whose ("Undo Add pocket – by agent").
 - After undo/redo the affected item is selected and briefly highlighted (`--motion-slow`, none under reduced motion) so the user sees what changed.
 - Removing something shows a toast "Removed Pocket 2 · Undo" instead of a confirmation ([confirmations](#confirmations)).
@@ -305,14 +320,23 @@ Design evaluation is automatic with a 200 ms trailing debounce ([workers.md](../
 - Progress is determinate when `total` is known, indeterminate otherwise; both appear only after `--delay-indicator`.
 - Work tied to an item shows progress at the item too (toolpath generation on the plan operation row).
 - Cancel is always available and immediate in the UI; the outcome `op.aborted` is shown neutrally ("Cancelled").
-- The run job is shown in run mode and in the top bar, not only in the job list ([run safety](#run-mode-safety-ui)).
+- The run job is shown in run mode and in the main toolbar, not only in the job list ([run safety](#run-mode-safety-ui)).
 
 ### Warnings and DFM
 
 Warnings never block ([design.md](../modes/design.md#dfm-checks), [plan-v0.1.md](../modes/plan-v0.1.md#plan-record), [feeds-speeds.md](../architecture/feeds-speeds.md)).
 
 - **Where:** next to the blamed parameter in the inspector (`parameter`), as a badge on the navigator row (`operation`), as a marker at the operation in the viewport, and in the warning list (status bar count).
-- **Severity:** `warning` uses `--color-warning` and a triangle icon; `info` uses `--color-info` and an "i" icon. Never `--color-danger` (that means invalid).
+- **Severity** ([decision 21](#decisions)):
+
+  | Tier         | Meaning                                               | Look                                                     | Dismiss                                |
+  | ------------ | ----------------------------------------------------- | -------------------------------------------------------- | -------------------------------------- |
+  | Soft warning | Outside a recommendation; safe to ignore              | Neutral background, `--border-control` bar, "i" icon     | `×`; collapses to "1 dismissed · Show" |
+  | Hard warning | Likely bad result or risk (tool can't cut the radius) | `--warning-subtle` background, `--warning` triangle icon | No                                     |
+  | Error        | Impossible value; blocks Generate                     | `--danger-subtle`, `--danger`, `aria-invalid`            | No; fixed or reverted                  |
+
+  Core `info` maps to soft, `warning` to hard (the mapping per check code lives in the message catalogue). Warnings never block; only errors do.
+
 - **Text:** re-rendered from `code` + `params` in the project unit system through the message catalogue; the core's English `message` (mm values) is the fallback. This closes the plan's known issue on DFM messages for inch projects.
 - **Suggestion:** a `suggestion` becomes a button "Apply ≥ 3.2 mm" that dispatches the update command (one undo step).
 - Every warning links its terms (`Term`) and, where useful, shows a small illustration of the problem (e.g. a corner radius smaller than the tool).
@@ -335,18 +359,18 @@ Policy ([decision 11](#decisions)): **undo instead of confirm** for document edi
 
 The v0.1 rules in [run-v0.1.md](../modes/run-v0.1.md#safety-v01) cover the virtual machine; the real-machine safety spec ([run.md](../modes/run.md#safety)) will extend this section before any serial connection exists.
 
-- **Always-visible stop:** while a connection is open, the top bar shows the `MachineStateBadge` and a `StopControl` in every mode, above every overlay (`--z-safety`), never inside a scroll area or collapsible panel. Stop = `job.abort` (controlled stop: hold, then reset, [run-v0.1.md](../modes/run-v0.1.md#stop-errors-and-alarms)); colour `--safety-stop`, label "Stop", ≥ 44 px, keyboard reachable, no confirmation. While streaming, a "Feed hold" button sits next to it; "Resume" appears only while held. The immediate `run.machine.reset` lives in run mode's controls as "Reset (immediate)".
+- **Always-visible stop:** while a connection is open, the main toolbar shows the `MachineStateBadge` and a `StopControl` in every mode, above every overlay (`--z-safety`), never inside a scroll area or collapsible panel. Stop = `job.abort` (controlled stop: hold, then reset, [run-v0.1.md](../modes/run-v0.1.md#stop-errors-and-alarms)); colour `--safety-stop`, label "Stop", ≥ 44 px, keyboard reachable, no confirmation. While streaming, a "Feed hold" button sits next to it; "Resume" appears only while held. The immediate `run.machine.reset` lives in run mode's controls as "Reset (immediate)".
 - **Shortcuts** ([decision 11](#decisions)): `Escape` triggers feed hold whenever a job is streaming, wherever the focus is (it also closes the top overlay); resume and continue are never bound to a single key.
 - **Machine state colours and shapes** (GRBL states, [grbl.md](../architecture/grbl.md#state-machine), and run phases):
 
-| State / phase                                          | Token              | Badge                                                  |
-| ------------------------------------------------------ | ------------------ | ------------------------------------------------------ |
-| Disconnected                                           | `--safety-offline` | Grey, hollow circle, "Not connected"                   |
-| Idle (homed)                                           | `--safety-idle`    | Neutral, filled circle, "Idle"                         |
-| Run, Jog, Home (`streaming`)                           | `--safety-moving`  | Green, animated ring, "Running" / "Jogging" / "Homing" |
-| Hold, Door, `programPause`                             | `--safety-hold`    | Amber, pause bars, "Feed hold" / "Paused (M0)"         |
-| `toolChange`                                           | `--safety-action`  | Blue, hand icon, "Tool change: action needed"          |
-| Alarm, `failed` (`machine.alarm`/`error`/`connection`) | `--safety-alarm`   | Red, octagon, "Alarm 2: soft limit"                    |
+| State / phase                                          | Token              | Badge                                                                                                                   |
+| ------------------------------------------------------ | ------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| Disconnected                                           | `--safety-offline` | Grey, hollow circle, "Not connected"                                                                                    |
+| Idle (homed)                                           | `--safety-idle`    | Neutral, filled circle, "Idle"                                                                                          |
+| Run, Jog, Home (`streaming`)                           | `--safety-moving`  | Amber, play icon, a dot circling the badge edge (static outline under reduced motion), "Running" / "Jogging" / "Homing" |
+| Hold, Door, `programPause`                             | `--safety-hold`    | Orange, striped pause bars, "Feed hold" / "Paused (M0)"                                                                 |
+| `toolChange`                                           | `--safety-action`  | Blue, rotating swap icon and a light band sweeping across (static under reduced motion), "Tool change"                  |
+| Alarm, `failed` (`machine.alarm`/`error`/`connection`) | `--safety-alarm`   | Red, octagon, "Alarm 2: soft limit"                                                                                     |
 
 - **Virtual machine label:** a persistent "Virtual machine · 10×" chip next to the badge, so nobody mistakes a simulation for a real machine or vice versa.
 - **Errors during a run** open a blocking dialog with GRBL's message, the line number, what DFYOM did (held and reset), and what to do next (home again, check work zero); also announced assertively to screen readers.
@@ -359,12 +383,12 @@ The v0.1 rules in [run-v0.1.md](../modes/run-v0.1.md#safety-v01) cover the virtu
 
 Target: **WCAG 2.2 AA** for all non-3D UI; the 3D viewport has a non-visual equivalent for every task.
 
-- **Keyboard:** every action is reachable by keyboard; tab order follows the visual order; `F6`/`Shift+F6` cycle shell regions (top bar, navigator, viewport, inspector, status bar); `?` opens the shortcut list. Shortcuts never fire while typing in a field, except feed hold.
-- **Focus:** visible `:focus-visible` ring (2 px `--color-focus`, 2 px offset, ≥ 3:1 against both neighbours); focus returns to the trigger when a popover or dialog closes; never `outline: none` without a replacement.
+- **Keyboard:** every action is reachable by keyboard; tab order follows the visual order; `F6`/`Shift+F6` cycle shell regions (main toolbar, navigator, viewport, inspector, status bar); `?` opens the shortcut list. Shortcuts never fire while typing in a field, except feed hold.
+- **Focus:** visible `:focus-visible` ring (2 px `--focus`, 2 px offset, ≥ 3:1 against both neighbours); focus returns to the trigger when a popover or dialog closes; never `outline: none` without a replacement.
 - **Contrast:** as in [colour](#colour); checked by the token unit test and axe in component tests.
 - **Reduced motion:** as in [motion](#motion); also an app setting independent of the OS.
 - **Screen readers:**
-  - Landmarks: `banner` (top bar), `navigation` (mode switcher, navigator), `main` (viewport region with an `aria-label` and a text summary: "Part with 4 operations, 2 warnings"), `complementary` (inspector), `contentinfo` (status bar).
+  - Landmarks: `banner` (main toolbar), `navigation` (mode switcher, navigator), `main` (viewport region with an `aria-label` and a text summary: "Part with 4 operations, 2 warnings"), `complementary` (inspector), `contentinfo` (status bar).
   - The navigator list is the accessible way to select; picking always has the dropdown alternative.
   - Live regions: polite for evaluation status, job completion and toasts; assertive for alarms, run failures and tool-change waits.
   - Fields: label, unit, hint, recommended range and error wired with `aria-describedby`; `aria-invalid` when invalid.
@@ -392,8 +416,9 @@ Decided for v0.1 ([decision 7](#decisions)): **English only, i18n-ready structur
 ## Icons
 
 - Set: **Lucide** (`lucide-react`, ISC licence, GPL-3.0-compatible per [ADR 0014](../decisions/0014-gpl-3-or-later-license.md)) for generic icons ([decision 5](#decisions)).
-- Own icons for CNC concepts the set lacks (facing, pocket, drilling, profile, tabs, tool types, machine states, work zero) in `ui/icons/`, drawn on the same 24 px grid and stroke width.
-- Sizes `--icon-sm` 16 px (inline, status bar), `--icon-md` 20 px (buttons), `--icon-lg` 24 px (run controls). Icons inherit `currentColor`.
+- Own icons for CNC concepts the set lacks (facing, pocket, drilling, profile, tabs, tool types, machine states, work zero) in `ui/icons/`, drawn on the same 24 px grid, `--icon-stroke` 1.35 px at 16 px. Each own tool icon has one accent detail (corner handles, a profile's dashed offset, the drill's crosshair) that turns amber only while the tool is active; generic Lucide icons stay monochrome.
+- Field illustrations are their own set ([field](#field)).
+- Sizes `--icon-sm` 14 px (inline, status bar), `--icon-md` 16 px (buttons, toolbars), `--icon-lg` 20 px (run controls), `--icon-xl` 28 px (field illustrations, empty states). Icons inherit `currentColor`; accent parts use `--accent-icon` with `--accent-icon-edge`.
 - An icon never stands alone without an accessible name; icon-only buttons have a tooltip.
 
 ## Testing

@@ -2,3 +2,4 @@ out/
 dist/
 coverage/
 package-lock.json
+docs/conventions/ui-design-system.html

@@ -1,0 +1,1249 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Approved design system (task 1.16), the reference for docs/conventions/ui.md and src/renderer/src/ui/tokens.css. Open it in a browser. -->
+<title>dfyom Design System</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: a spec document (sticky section index + content) whose component gallery renders every specimen twice, light and dark side by side.
+   Tokens below are the proposal for src/renderer/src/ui/tokens.css: .t-light / .t-dark scope a theme to a subtree; :root follows the viewer. */
+:root, .t-light {
+  /* surfaces */
+  --bg-app: #f6f8ff; --bg-chrome: #eceff7; --bg-viewport: #e4e8f2; --bg-field: #ffffff; --bg-control: #ffffff; --bg-raised: #ffffff;
+  --bg-hover: rgb(28 33 33 / 0.06); --bg-active: rgb(28 33 33 / 0.1); --bg-overlay: rgb(28 33 33 / 0.32);
+  /* text */
+  --text: #1c2121; --text-muted: #5b6462; --text-faint: #868f8d; --text-on-accent: #1c2121; --text-on-solid: #ffffff; --text-accent: #8a6400;
+  /* lines */
+  --border: #dde2ec; --border-control: #848d9b; --focus: #a87a00;
+  /* accent: Amber */
+  --accent: #f5b700; --accent-hover: #e6aa00; --accent-border: #a87a00; --accent-subtle: #fff2c9; --accent-icon: #f5b700; --accent-icon-edge: drop-shadow(0 0 0.4px rgb(60 40 0 / 0.75));
+  --accent-calm: #fff6dc; --accent-calm-hover: #ffefc0; --accent-calm-border: #e9c96a;
+  /* feedback (never machine state) */
+  --danger: #c9363a; --danger-subtle: #fdecec; --warning: #c96a00; --warning-subtle: #fff0e3;
+  --success: #1f7d49; --success-subtle: #e6f5ec; --info: #2f6fc0; --info-subtle: #e8f0fb;
+  /* safety (machine state and stop only) */
+  --safety-stop: #d0302f; --safety-stop-fg: #ffffff; --safety-alarm: #d0302f; --safety-alarm-fg: #ffffff;
+  --safety-hold: #e8741c; --safety-hold-fg: #1c2121; --safety-moving: #f5b700; --safety-moving-edge: #c48f00; --safety-moving-fg: #1c2121;
+  --safety-action: #2f6fc0; --safety-action-fg: #ffffff; --safety-idle: #5b6462; --safety-offline: #868f8d;
+  /* viewport */
+  --vp-grid: #d7dde9; --vp-grid-major: #c5ccdb; --vp-stock: #868f8d; --vp-part: #f9faff; --vp-edge: #39423f; --vp-removal: #d3d9e5;
+  --vp-selected: #f2b200; --vp-selected-halo: rgb(150 105 0 / 0.45); --vp-feed: #5b6462; --vp-rapid: #868f8d; --vp-tool: #1c2121;
+  --vp-axis-x: #d0605f; --vp-axis-y: #4f9d6c; --vp-axis-z: #4a7fc8;
+  /* elevation */
+  --shadow-1: 0 1px 2px rgb(20 25 40 / 0.08), 0 2px 8px rgb(20 25 40 / 0.06);
+  --shadow-2: 0 2px 6px rgb(20 25 40 / 0.1), 0 8px 24px rgb(20 25 40 / 0.12);
+  --shadow-3: 0 4px 12px rgb(20 25 40 / 0.12), 0 24px 64px rgb(20 25 40 / 0.2);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg-app: #272d2d; --bg-chrome: #2e3535; --bg-viewport: #1e2323; --bg-field: #212727; --bg-control: #353d3d; --bg-raised: #353d3d;
+    --bg-hover: rgb(233 237 243 / 0.07); --bg-active: rgb(233 237 243 / 0.11); --bg-overlay: rgb(0 0 0 / 0.5);
+    --text: #e9edf3; --text-muted: #a2acaa; --text-faint: #7a8482; --text-on-accent: #1c2121; --text-on-solid: #ffffff; --text-accent: #ffcf4d;
+    --border: #3a4343; --border-control: #6d7878; --focus: #f5b700;
+    --accent: #f5b700; --accent-hover: #ffc61a; --accent-border: #f5b700; --accent-subtle: #3b3213; --accent-icon: #f5b700; --accent-icon-edge: none;
+    --accent-calm: #3a3216; --accent-calm-hover: #463b17; --accent-calm-border: #6e5a1c;
+    --danger: #ef6366; --danger-subtle: #45272a; --warning: #f2993a; --warning-subtle: #42331c;
+    --success: #4cc387; --success-subtle: #233d30; --info: #6aa9ea; --info-subtle: #23344a;
+    --safety-stop: #d9373c; --safety-stop-fg: #ffffff; --safety-alarm: #d9373c; --safety-alarm-fg: #ffffff;
+    --safety-hold: #f28b3c; --safety-hold-fg: #1c2121; --safety-moving: #f5b700; --safety-moving-edge: #f5b700; --safety-moving-fg: #e9edf3;
+    --safety-action: #5ea2e6; --safety-action-fg: #1c2121; --safety-idle: #a2acaa; --safety-offline: #7a8482;
+    --vp-grid: #283030; --vp-grid-major: #323b3b; --vp-stock: #7a8482; --vp-part: #2b3232; --vp-edge: #d5dbe3; --vp-removal: #191d1d;
+    --vp-selected: #f5b700; --vp-selected-halo: rgb(0 0 0 / 0.6); --vp-feed: #b8c1c0; --vp-rapid: #7a8482; --vp-tool: #e9edf3;
+    --vp-axis-x: #e07574; --vp-axis-y: #62b580; --vp-axis-z: #6c9ee0;
+    --shadow-1: 0 1px 2px rgb(0 0 0 / 0.3); --shadow-2: 0 4px 16px rgb(0 0 0 / 0.4); --shadow-3: 0 16px 48px rgb(0 0 0 / 0.55);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"], .t-dark {
+  --bg-app: #272d2d; --bg-chrome: #2e3535; --bg-viewport: #1e2323; --bg-field: #212727; --bg-control: #353d3d; --bg-raised: #353d3d;
+  --bg-hover: rgb(233 237 243 / 0.07); --bg-active: rgb(233 237 243 / 0.11); --bg-overlay: rgb(0 0 0 / 0.5);
+  --text: #e9edf3; --text-muted: #a2acaa; --text-faint: #7a8482; --text-on-accent: #1c2121; --text-on-solid: #ffffff; --text-accent: #ffcf4d;
+  --border: #3a4343; --border-control: #6d7878; --focus: #f5b700;
+  --accent: #f5b700; --accent-hover: #ffc61a; --accent-border: #f5b700; --accent-subtle: #3b3213; --accent-icon: #f5b700; --accent-icon-edge: none;
+  --accent-calm: #3a3216; --accent-calm-hover: #463b17; --accent-calm-border: #6e5a1c;
+  --danger: #ef6366; --danger-subtle: #45272a; --warning: #f2993a; --warning-subtle: #42331c;
+  --success: #4cc387; --success-subtle: #233d30; --info: #6aa9ea; --info-subtle: #23344a;
+  --safety-stop: #d9373c; --safety-stop-fg: #ffffff; --safety-alarm: #d9373c; --safety-alarm-fg: #ffffff;
+  --safety-hold: #f28b3c; --safety-hold-fg: #1c2121; --safety-moving: #f5b700; --safety-moving-edge: #f5b700; --safety-moving-fg: #e9edf3;
+  --safety-action: #5ea2e6; --safety-action-fg: #1c2121; --safety-idle: #a2acaa; --safety-offline: #7a8482;
+  --vp-grid: #283030; --vp-grid-major: #323b3b; --vp-stock: #7a8482; --vp-part: #2b3232; --vp-edge: #d5dbe3; --vp-removal: #191d1d;
+  --vp-selected: #f5b700; --vp-selected-halo: rgb(0 0 0 / 0.6); --vp-feed: #b8c1c0; --vp-rapid: #7a8482; --vp-tool: #e9edf3;
+  --vp-axis-x: #e07574; --vp-axis-y: #62b580; --vp-axis-z: #6c9ee0;
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.3); --shadow-2: 0 4px 16px rgb(0 0 0 / 0.4); --shadow-3: 0 16px 48px rgb(0 0 0 / 0.55);
+  color-scheme: dark;
+}
+:root {
+  /* type: system fonts (decision 8) */
+  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+  --text-xs: 0.6875rem; --lh-xs: 0.875rem;  /* 11/14 */
+  --text-sm: 0.75rem; --lh-sm: 1rem;        /* 12/16 */
+  --text-md: 0.8125rem; --lh-md: 1.125rem;  /* 13/18 base */
+  --text-lg: 0.9375rem; --lh-lg: 1.25rem;   /* 15/20 */
+  --text-xl: 1.25rem; --lh-xl: 1.625rem;    /* 20/26 */
+  --text-dro: 1.5rem; --lh-dro: 1.75rem;    /* 24/28 mono */
+  --weight-regular: 400; --weight-medium: 500; --weight-bold: 600;
+  /* space (4 px grid) */
+  --space-0-5: 0.125rem; --space-1: 0.25rem; --space-2: 0.5rem; --space-3: 0.75rem; --space-4: 1rem; --space-5: 1.25rem; --space-6: 1.5rem; --space-8: 2rem;
+  --radius-xs: 3px; --radius-sm: 5px; --radius-md: 7px; --radius-lg: 10px; --radius-full: 999px;
+  --control-sm: 1.5rem; --control-md: 1.75rem; --control-lg: 2.75rem;
+  --icon-sm: 14px; --icon-md: 16px; --icon-lg: 20px; --icon-xl: 28px; --icon-stroke: 1.35px;
+  /* motion */
+  --motion-instant: 80ms; --motion-fast: 120ms; --motion-base: 180ms; --motion-slow: 280ms; --motion-emphasis: 450ms; --motion-draw: 900ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1); --ease-emphasized: cubic-bezier(0.2, 0.8, 0.2, 1); --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --delay-tooltip: 450ms; --delay-indicator: 300ms;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg-app); color: var(--text); font: var(--text-md)/var(--lh-md) var(--font-ui); -webkit-font-smoothing: antialiased; }
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* ---------- document ---------- */
+.doc { max-width: 1320px; margin: 0 auto; padding-block: 28px 80px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; grid-template-columns: 168px minmax(0, 1fr); gap: 40px; }
+.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 20px); align-self: start; display: grid; gap: 2px; font-size: var(--text-sm); }
+.toc a { color: var(--text-muted); text-decoration: none; padding: 3px 8px; border-radius: var(--radius-sm); transition: background var(--motion-fast), color var(--motion-fast); }
+.toc a:hover { background: var(--bg-hover); color: var(--text); }
+.toc a.on { color: var(--text); background: var(--bg-active); }
+.toc .eyebrow { padding: 0 8px 6px; }
+main { display: grid; gap: 56px; min-width: 0; }
+section { display: grid; gap: 18px; scroll-margin-top: 20px; min-width: 0; }
+h1 { margin: 0; font: 600 1.75rem/1.2 var(--font-ui); letter-spacing: -0.02em; text-wrap: balance; }
+h2 { margin: 0; font: 600 1.25rem/1.3 var(--font-ui); letter-spacing: -0.01em; text-wrap: balance; }
+h3 { margin: 0; font: 600 var(--text-md)/var(--lh-md) var(--font-ui); }
+p { margin: 0; max-width: 74ch; }
+.muted { color: var(--text-muted); }
+.eyebrow { font: 600 0.65625rem/1 var(--font-ui); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-faint); }
+.head { display: flex; flex-wrap: wrap; gap: 16px 32px; align-items: end; justify-content: space-between; }
+.head .meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: var(--radius-full); border: 1px solid var(--border); background: var(--bg-field); font-size: var(--text-sm); color: var(--text-muted); }
+.pill i { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 1px var(--accent-border); }
+.principles { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
+.principles div { padding: 12px 14px; border-left: 2px solid var(--border); display: grid; gap: 4px; }
+.principles b { font-weight: 600; }
+.principles span { color: var(--text-muted); }
+.sub { display: grid; gap: 10px; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-field); }
+table { border-collapse: collapse; width: 100%; font-size: var(--text-sm); }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; white-space: nowrap; }
+th { font-weight: 600; color: var(--text-muted); background: var(--bg-chrome); position: sticky; top: 0; }
+tr:last-child td { border-bottom: 0; }
+td.wrap { white-space: normal; min-width: 220px; color: var(--text-muted); }
+td code, .code { font: var(--text-xs)/1.3 var(--font-mono); }
+.sw { display: inline-flex; align-items: center; gap: 6px; font: var(--text-xs) var(--font-mono); }
+.sw i { width: 22px; height: 16px; border-radius: 3px; box-shadow: inset 0 0 0 1px rgb(128 128 128 / 0.35); display: inline-block; }
+.ok-t { color: var(--success); font-weight: 600; } .bad-t { color: var(--danger); font-weight: 600; }
+
+/* scales */
+.scales { display: grid; gap: 10px; }
+.scale { display: grid; grid-template-columns: 96px repeat(12, minmax(0, 1fr)); gap: 3px; align-items: stretch; }
+.scale .nm { font-size: var(--text-sm); color: var(--text-muted); align-self: center; }
+.scale div[data-hex] { height: 40px; border-radius: 4px; position: relative; box-shadow: inset 0 0 0 1px rgb(128 128 128 / 0.25); }
+.scale div[data-hex]::after { content: attr(data-step); position: absolute; left: 4px; bottom: 2px; font: 9px var(--font-mono); opacity: 0.7; }
+.scale div[data-hex]:hover::before { content: attr(data-hex); position: absolute; left: 50%; top: -22px; transform: translateX(-50%); background: var(--text); color: var(--bg-app); font: 10px var(--font-mono); padding: 2px 5px; border-radius: 3px; white-space: nowrap; z-index: 3; }
+.steps-key { display: grid; grid-template-columns: 96px repeat(12, minmax(0, 1fr)); gap: 3px; font-size: 10px; color: var(--text-faint); }
+.steps-key span { text-align: center; }
+
+/* specimen blocks */
+.duo { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
+.pane { background: var(--bg-app); color: var(--text); padding: 18px; display: grid; gap: 18px; align-content: start; min-width: 0; }
+.pane.t-dark { border-left: 1px solid #3a4343; }
+.pane > .eyebrow { justify-self: start; }
+.spec-row { display: grid; gap: 8px; }
+.spec-row > .lbl { font-size: var(--text-xs); color: var(--text-faint); }
+.line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+/* type specimens */
+.typerow { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 16px; align-items: baseline; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.typerow:last-child { border-bottom: 0; }
+.typerow code { color: var(--text-muted); }
+
+/* spacing visual */
+.spacing { display: grid; gap: 6px; }
+.spacing div { display: grid; grid-template-columns: 110px 60px minmax(0, 1fr); gap: 10px; align-items: center; font-size: var(--text-sm); }
+.spacing i { height: 10px; background: var(--accent-subtle); box-shadow: inset 0 0 0 1px var(--accent-border); border-radius: 2px; }
+.radii { display: flex; flex-wrap: wrap; gap: 12px; }
+.radii div { width: 84px; height: 56px; border: 1.5px solid var(--border-control); background: var(--bg-field); display: grid; place-items: center; font: var(--text-xs) var(--font-mono); color: var(--text-muted); }
+.sizes { display: flex; flex-wrap: wrap; gap: 16px; align-items: end; }
+.sizes div { display: grid; gap: 6px; justify-items: center; font-size: var(--text-xs); color: var(--text-muted); }
+.sizes i { display: block; border: 1px dashed var(--border-control); border-radius: var(--radius-sm); background: var(--bg-field); }
+.elev { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.elev div { height: 84px; border-radius: var(--radius-md); background: var(--bg-raised); border: 1px solid var(--border); display: grid; align-content: end; padding: 10px; font-size: var(--text-xs); color: var(--text-muted); }
+.elev div b { color: var(--text); font: 500 var(--text-sm) var(--font-ui); }
+
+/* ---------- components ---------- */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: var(--control-md); padding: 0 10px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-control); color: var(--text); font-weight: var(--weight-medium); cursor: pointer; white-space: nowrap; box-shadow: 0 1px 0 rgb(0 0 0 / 0.03);
+  transition: background var(--motion-fast) var(--ease-standard), border-color var(--motion-fast), transform var(--motion-instant); }
+.btn:hover { background: color-mix(in oklab, var(--bg-control), var(--text) 5%); border-color: color-mix(in oklab, var(--border), var(--text) 12%); }
+.btn:active { transform: translateY(0.5px); background: color-mix(in oklab, var(--bg-control), var(--text) 9%); }
+.btn svg { width: var(--icon-md); height: var(--icon-md); }
+.btn[data-variant="primary"] { border-color: var(--border-control); font-weight: 600; }
+.btn[data-variant="primary"] svg { color: var(--accent-icon); filter: var(--accent-icon-edge); stroke-width: 1.6px; }
+.btn[data-variant="primary"]:hover { border-color: color-mix(in oklab, var(--accent-icon) 55%, var(--border-control)); }
+.btn[data-variant="ghost"] { background: transparent; border-color: transparent; box-shadow: none; color: var(--text-muted); }
+.btn[data-variant="ghost"]:hover { background: var(--bg-hover); color: var(--text); }
+.btn[data-variant="danger"] { color: var(--danger); }
+.btn[data-variant="danger"]:hover { background: var(--danger-subtle); border-color: color-mix(in oklab, var(--danger) 40%, var(--border)); }
+.btn[data-size="sm"] { height: var(--control-sm); padding: 0 8px; font-size: var(--text-sm); }
+.btn[data-size="lg"] { height: var(--control-lg); padding: 0 16px; font-size: var(--text-lg); }
+.btn[data-size="lg"] svg { width: var(--icon-lg); height: var(--icon-lg); }
+.btn:disabled { opacity: 1; color: var(--text-faint); background: transparent; border-color: var(--border); cursor: not-allowed; box-shadow: none; }
+.btn.stop { background: var(--safety-stop); border-color: transparent; color: var(--safety-stop-fg); font-weight: 600; }
+.btn.stop:hover { background: color-mix(in oklab, var(--safety-stop), #000 12%); }
+.btn .ico-hold { color: var(--safety-hold); }
+
+svg.i { width: var(--icon-md); height: var(--icon-md); fill: none; stroke: currentColor; stroke-width: var(--icon-stroke); stroke-linecap: round; stroke-linejoin: round; flex: none; overflow: visible; }
+svg.i .f { fill: currentColor; stroke: none; }
+svg.i .hi { transition: stroke var(--motion-base), fill var(--motion-base); }
+/* accent icon details: saturated amber; light theme adds a faint dark edge so thin strokes hold on pale grounds */
+.ib[aria-pressed="true"] .hi, .modesw button[aria-selected="true"] svg .hi, .empty .hi, .qa.fix svg .hi { filter: var(--accent-icon-edge); stroke-width: 1.6px; }
+
+.toolbar { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px; padding: 3px; border-radius: var(--radius-md); background: var(--bg-chrome); border: 1px solid var(--border); position: relative; }
+.vsep { width: 1px; height: 18px; background: var(--border); }
+.toolbar .sep { width: 1px; height: 18px; background: var(--border); margin: 0 4px; }
+.ib { position: relative; width: var(--control-md); height: var(--control-md); display: inline-grid; place-items: center; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-muted); cursor: pointer; transition: background var(--motion-fast), color var(--motion-fast); }
+.ib:hover { background: var(--bg-hover); color: var(--text); }
+.ib[aria-pressed="true"] { background: var(--bg-active); color: var(--text); box-shadow: inset 0 0 0 1px var(--border); }
+.ib[aria-pressed="true"] .hi { stroke: var(--accent-icon); }
+.ib[aria-pressed="true"] .hi.f { fill: var(--accent-icon); }
+.ib:disabled { color: var(--text-faint); opacity: 0.6; cursor: not-allowed; background: transparent; }
+.ib.lg { width: var(--control-lg); height: var(--control-lg); }
+
+.modes { display: inline-flex; position: relative; border-bottom: 1px solid var(--border); }
+.modes button { border: 0; background: transparent; padding: 6px 14px 8px; color: var(--text-muted); font-weight: var(--weight-medium); cursor: pointer; transition: color var(--motion-fast); }
+.modes button:hover { color: var(--text); }
+.modes button[aria-selected="true"] { color: var(--text); }
+.modes .ind { position: absolute; left: 0; bottom: -1px; height: 2px; border-radius: 2px; background: var(--accent); box-shadow: 0 0 0 0.5px var(--accent-border); transition: transform var(--motion-emphasis) var(--ease-emphasized), width var(--motion-emphasis) var(--ease-emphasized); }
+
+.seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: var(--radius-sm); background: var(--bg-active); position: relative; }
+.seg button { position: relative; z-index: 1; border: 0; background: transparent; color: var(--text-muted); height: calc(var(--control-md) - 4px); padding: 0 10px; border-radius: 4px; cursor: pointer; font-size: var(--text-sm); font-weight: var(--weight-medium); transition: color var(--motion-fast); }
+.seg button:hover { color: var(--text); }
+.seg button[aria-pressed="true"] { color: var(--text-on-accent); }
+.seg .thumb { position: absolute; top: 2px; left: 0; height: calc(100% - 4px); border-radius: 4px; background: var(--accent); box-shadow: 0 1px 2px rgb(0 0 0 / 0.14), inset 0 0 0 1px var(--accent-border); transition: transform var(--motion-slow) var(--ease-emphasized), width var(--motion-slow) var(--ease-emphasized); }
+
+.switch { width: 28px; height: 16px; border-radius: 8px; border: 0; padding: 0; background: var(--border-control); position: relative; cursor: pointer; flex: none; transition: background var(--motion-base), box-shadow var(--motion-base); }
+.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / 0.3); transition: transform var(--motion-slow) var(--ease-emphasized), width var(--motion-fast); }
+.switch:active::after { width: 15px; }
+.switch[aria-checked="true"] { background: var(--accent); box-shadow: inset 0 0 0 1px var(--accent-border); }
+.switch[aria-checked="true"]::after { transform: translateX(12px); }
+.switch[aria-checked="true"]:active::after { transform: translateX(9px); }
+.check { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; min-height: 24px; }
+.check input { appearance: none; margin: 0; width: 14px; height: 14px; border-radius: var(--radius-xs); border: 1.5px solid var(--border-control); background: var(--bg-field); display: grid; place-items: center; cursor: pointer; transition: background var(--motion-base), border-color var(--motion-base); }
+.check input::after { content: ""; width: 7px; height: 4px; border: solid var(--text-on-accent); border-width: 0 0 1.6px 1.6px; transform: rotate(-45deg) scale(0); margin-top: -2px; transition: transform var(--motion-slow) var(--ease-emphasized); }
+.check input:checked { background: var(--accent); border-color: var(--accent-border); }
+.check input:checked::after { transform: rotate(-45deg) scale(1); }
+.check input:indeterminate { background: var(--accent); border-color: var(--accent-border); }
+.check input:indeterminate::after { width: 7px; height: 0; border-width: 0 0 1.6px 0; transform: none; margin-top: 0; }
+.check input[type="radio"] { border-radius: 50%; }
+.check input[type="radio"]::after { width: 6px; height: 6px; border: 0; border-radius: 50%; background: var(--text-on-accent); margin: 0; transform: scale(0); }
+.check input[type="radio"]:checked::after { transform: scale(1); }
+.range { width: 160px; accent-color: var(--accent); margin: 0; }
+
+.field { display: grid; grid-template-columns: 124px 20px minmax(0, 1fr); gap: 4px 6px; align-items: start; position: relative; }
+.field > label { color: var(--text-muted); min-height: var(--control-md); display: flex; align-items: center; gap: 7px; }
+svg.fi { width: var(--icon-xl); height: var(--icon-xl); color: var(--text-faint); stroke-width: 1px; filter: saturate(0.35); transition: color var(--motion-slow), filter var(--motion-emphasis) var(--ease-emphasized); }
+svg.fi .hi { stroke: var(--accent-icon); stroke-width: 1.4px; stroke-linecap: butt; transition: stroke-width var(--motion-emphasis) var(--ease-emphasized); }
+.field.nv svg.fi { filter: none; color: var(--text-muted); }
+.field:has(> .qi.ro) svg.fi { filter: saturate(0); opacity: 0.75; }
+.field > :is(.check, .switch) { grid-column: 3; align-self: center; }
+.field > .check { min-height: var(--control-md); }
+.field > .switch { margin-top: 6px; align-self: start; }
+svg.fi .ext { stroke-dasharray: 1.5 1.5; opacity: 0.7; }
+.field.is-focus svg.fi, .field:focus-within svg.fi { color: var(--text-muted); filter: saturate(1); }
+.field.is-focus svg.fi .hi, .field:focus-within svg.fi .hi { stroke-width: 1.6px; }
+.qa { width: 20px; height: 20px; flex: none; border: 0; padding: 0; margin-left: 4px; border-radius: var(--radius-xs); background: transparent; color: var(--text-faint); display: grid; place-items: center; cursor: pointer; transition: background var(--motion-fast), color var(--motion-fast); }
+.qa:hover { background: var(--bg-hover); color: var(--text); }
+.qa svg { width: var(--icon-sm); height: var(--icon-sm); }
+.qa[aria-pressed="true"], .qa[aria-expanded="true"] { color: var(--text); background: var(--bg-active); }
+.qa.fix { color: var(--accent-border); }
+.qa.fix svg .hi { fill: var(--accent-icon); stroke: var(--accent-icon); }
+.field > label { grid-column: 1; }
+.field > .qa.lock { grid-column: 2; grid-row: 1; align-self: start; margin: 4px 0 0; }
+.field > :is(.qi, .fs) { grid-column: 3; }
+.qa.pen { background: var(--bg-active); border-radius: var(--radius-xs); color: var(--text-muted); }
+.qa.pen:hover { background: color-mix(in oklab, var(--text) 16%, transparent); color: var(--text); }
+.qa.pen[aria-expanded="true"] { background: color-mix(in oklab, var(--text) 18%, transparent); color: var(--text); }
+.qa.pen.fix { background: color-mix(in oklab, var(--accent) 24%, transparent); }
+.qa.pen.fix:hover { background: color-mix(in oklab, var(--accent) 36%, transparent); }
+.qi:has(> .qa.pen) { padding-right: 4px; }
+.qi .u + .qa { margin-left: 8px; }
+.field > .qi { position: relative; z-index: 1; }
+.fs { grid-column: 3; display: grid; gap: 1px; margin: -5px var(--radius-sm) 0; padding: 5px 8px 4px 10px; border: 1px solid var(--border); border-top: 0; border-radius: 0 0 var(--radius-sm) var(--radius-sm); background: var(--bg-chrome); box-shadow: inset 2px 0 0 var(--border), inset 0 7px 6px -6px rgb(0 0 0 / 0.22); transform-origin: top; animation: pull var(--motion-slow) var(--ease-emphasized); transition: background var(--motion-base), box-shadow var(--motion-base); }
+.fs.warn { background: var(--warning-subtle); box-shadow: inset 2px 0 0 var(--warning), inset 0 7px 6px -6px rgb(0 0 0 / 0.22); }
+.fs.err { background: color-mix(in oklab, var(--danger) 7%, var(--bg-chrome)); box-shadow: inset 2px 0 0 var(--danger), inset 0 7px 6px -6px rgb(0 0 0 / 0.22); }
+@keyframes pull { from { clip-path: inset(0 0 100% 0); transform: translateY(-6px); } to { clip-path: inset(0); transform: none; } }
+@media (prefers-reduced-motion: reduce) { .fs { animation: none; } }
+.fs-i .btn { white-space: nowrap; }
+.qi.ro ~ .fs { opacity: 0.6; background: transparent; border-style: dashed; box-shadow: inset 0 7px 6px -6px rgb(0 0 0 / 0.12); }
+.fs { container-type: inline-size; }
+@container (max-width: 260px) { .fs-i:has(> .btn, > .fs-act) { grid-template-columns: 14px minmax(0, 1fr); padding-bottom: 4px; } .fs-i > :is(.btn, .fs-act) { grid-column: 2; justify-self: start; } }
+[hidden] { display: none !important; }
+.fs-i { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 6px; align-items: center; min-height: 22px; font-size: var(--text-sm); line-height: var(--lh-sm); color: var(--text-muted); }
+.fs-i > svg { width: var(--icon-sm); height: var(--icon-sm); color: var(--text-faint); }
+.fs-i.warn { color: var(--text); } .fs-i.warn > svg { color: var(--warning); }
+.fs.soft { box-shadow: inset 2px 0 0 var(--border-control), inset 0 7px 6px -6px rgb(0 0 0 / 0.22); }
+.fs-i.soft { color: var(--text); } .fs-i.soft > svg { color: var(--text-muted); }
+.fs-act { display: inline-flex; gap: 2px; align-items: center; } .fs-act .qa { margin-left: 2px; }
+.fs-undo { gap: 6px; } .fs-undo svg { width: 12px; height: 12px; }
+.fs-i.err { color: var(--danger); } .fs-i.err > svg { color: var(--danger); }
+.fs-i.echo { font: var(--text-xs)/var(--lh-xs) var(--font-mono); }
+.fs-i.info > svg { color: var(--info); }
+.fs-more { justify-self: start; border: 0; padding: 2px 0; background: transparent; color: var(--text-muted); font-size: var(--text-xs); cursor: pointer; display: inline-flex; gap: 4px; align-items: center; }
+.fs-more:hover { color: var(--text); }
+.fs-more svg { width: 10px; height: 10px; transition: transform var(--motion-base) var(--ease-emphasized); }
+.fs-more[aria-expanded="true"] svg { transform: rotate(180deg); }
+.fs-extra { display: grid; gap: 1px; animation: enter var(--motion-slow) var(--ease-emphasized); }
+.stepper { position: absolute; right: 0; top: calc(var(--control-md) + 4px); z-index: 6; width: 268px; max-width: 100%; padding: 10px; border-radius: var(--radius-md); background: var(--bg-raised); border: 1px solid var(--border); box-shadow: var(--shadow-2); display: grid; gap: 10px; transform-origin: top right; animation: pop var(--motion-base) var(--ease-emphasized); }
+.stepper .ttl { display: flex; justify-content: space-between; align-items: center; font-weight: 600; }
+.stepper .ttl span { font: var(--text-xs) var(--font-mono); color: var(--text-faint); font-weight: 400; }
+.stepper .seg { display: flex; }
+.stepper .seg button { flex: 1; padding: 0 2px; font: var(--text-xs) var(--font-mono); }
+.stepper .adj { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.stepper .adj .btn { width: var(--control-md); padding: 0; font: 600 var(--text-lg) var(--font-ui); }
+.stepper .v { text-align: center; font: 500 var(--text-lg)/1 var(--font-mono); font-variant-numeric: tabular-nums; }
+.stepper .v small { font-size: var(--text-xs); color: var(--text-faint); margin-left: 4px; }
+.stepper .rec { display: grid; gap: 6px; padding-top: 10px; border-top: 1px solid var(--border); font-size: var(--text-sm); color: var(--text-muted); }
+.stepper .rec b { color: var(--text); font-weight: 500; }
+.modesw { display: inline-flex; position: relative; gap: 2px; }
+.modesw button { display: inline-flex; align-items: center; gap: 6px; height: var(--control-md); padding: 0 12px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-muted); font-weight: var(--weight-medium); cursor: pointer; transition: color var(--motion-fast), background var(--motion-fast); }
+.modesw button:hover { color: var(--text); background: var(--bg-hover); }
+.modesw button[aria-selected="true"] { color: var(--text); }
+.modesw button[aria-selected="true"] svg .hi { stroke: var(--accent-icon); }
+.modesw .ind { position: absolute; left: 0; bottom: -4px; height: 2px; border-radius: 2px; background: var(--accent); box-shadow: 0 0 0 0.5px var(--accent-border); transition: transform var(--motion-emphasis) var(--ease-emphasized), width var(--motion-emphasis) var(--ease-emphasized); }
+.term { text-decoration: underline dotted var(--text-faint); text-underline-offset: 3px; cursor: help; }
+.qi { display: flex; align-items: center; height: var(--control-md); padding: 0 8px; border-radius: var(--radius-sm); border: 1px solid var(--border-control); background: var(--bg-field); font: var(--text-md) var(--font-mono); font-variant-numeric: tabular-nums; transition: border-color var(--motion-fast), box-shadow var(--motion-base); min-width: 0; }
+.qi:hover { border-color: color-mix(in oklab, var(--border-control), var(--text) 25%); }
+.qi.focus { border-color: var(--focus); box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 22%, transparent); }
+.qi.err { border-color: var(--danger); }
+.qi.ro { border-style: dashed; background: transparent; color: var(--text-muted); }
+.qi .src { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qi .val { margin-left: 8px; color: var(--text-faint); }
+.qi .u { margin-left: auto; padding-left: 8px; color: var(--text-faint); font-size: var(--text-sm); }
+.qi .caret { width: 1px; height: 14px; background: var(--text); margin-left: 1px; animation: caret 1s steps(1) infinite; }
+@keyframes caret { 50% { opacity: 0; } }
+.qi.sel { font-family: var(--font-ui); }
+.underline-err { text-decoration: underline wavy var(--danger); text-underline-offset: 3px; }
+
+.tree { display: grid; gap: 1px; width: 100%; max-width: 280px; }
+.ti { display: flex; align-items: center; gap: 7px; height: 26px; padding: 0 8px; border-radius: var(--radius-sm); cursor: pointer; border: 0; background: transparent; width: 100%; text-align: left; transition: background var(--motion-base); position: relative; }
+.ti:hover, .ti.hov { background: var(--bg-hover); }
+.ti[aria-selected="true"] { background: var(--accent-subtle); }
+.ti svg.i { width: var(--icon-sm); height: var(--icon-sm); color: var(--text-muted); }
+.ti[aria-selected="true"] svg.i.lead { color: var(--accent-icon); filter: var(--accent-icon-edge); }
+.ti .meta { margin-left: auto; font: var(--text-xs) var(--font-mono); color: var(--text-faint); }
+.ti .w { color: var(--warning); }
+.ti.agent::before { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1px var(--info); animation: agentflash 2.4s var(--ease-standard) infinite; }
+@keyframes agentflash { 0%, 60% { opacity: 1; } 100% { opacity: 0; } }
+.tag { font: 500 10px/1 var(--font-ui); padding: 2px 5px; border-radius: var(--radius-full); background: var(--info-subtle); color: var(--info); }
+
+.chip { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: var(--radius-full); font-size: var(--text-sm); font-weight: var(--weight-medium); background: var(--bg-active); color: var(--text); white-space: nowrap; }
+.chip svg.i { width: 12px; height: 12px; }
+.chip.success svg { color: var(--success); }
+.chip.warning svg { color: var(--warning); }
+.chip.danger { background: var(--danger-subtle); color: var(--danger); }
+.chip.muted { color: var(--text-muted); }
+.spin { animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.mstate { display: inline-flex; align-items: center; gap: 7px; height: 26px; padding: 0 10px 0 8px; border-radius: var(--radius-full); font-weight: 600; font-size: var(--text-sm); border: 1px solid var(--border); background: var(--bg-field); white-space: nowrap; }
+.mstate svg { width: 12px; height: 12px; flex: none; }
+.mstate.offline { color: var(--text-muted); } .mstate.offline svg { color: var(--safety-offline); }
+.mstate.idle svg { color: var(--safety-idle); }
+.mstate.moving { position: relative; background: var(--accent-subtle); color: var(--safety-moving-fg); border-color: transparent; }
+.mstate.moving > svg:first-child { color: var(--accent-icon); filter: var(--accent-icon-edge); }
+.mstate.moving .orbit { position: absolute; inset: -1px; width: calc(100% + 2px); height: calc(100% + 2px); overflow: visible; pointer-events: none; }
+.mstate.moving .orbit rect { x: 0.75px; y: 0.75px; width: calc(100% - 1.5px); height: calc(100% - 1.5px); rx: 13px; fill: none; }
+.mstate.moving .orbit .track { stroke: var(--safety-moving-edge); stroke-width: 1.5; }
+.mstate.moving .orbit .dot { stroke: var(--safety-moving); stroke-width: 4; stroke-linecap: round; stroke-dasharray: 0.001 0.999; animation: orbit 2.2s linear infinite; filter: drop-shadow(0 0 2px var(--safety-moving)); }
+@keyframes orbit { to { stroke-dashoffset: -1; } }
+@media (prefers-reduced-motion: reduce) { .mstate.moving .orbit .dot { display: none; } }
+.mstate.hold { background: var(--safety-hold); color: var(--safety-hold-fg); border-color: transparent; background-image: repeating-linear-gradient(-45deg, transparent 0 6px, rgb(0 0 0 / 0.08) 6px 12px); }
+.mstate.action { position: relative; overflow: hidden; isolation: isolate; background: var(--safety-action); color: var(--safety-action-fg); border-color: transparent; }
+/* in progress: a light band sweeps across while the swap icon turns; distinct from Running's orbiting dot */
+.mstate.action::after { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(100deg, transparent 30%, rgb(255 255 255 / 0.28) 50%, transparent 70%); background-size: 250% 100%; animation: sweep 1.8s var(--ease-standard) infinite; }
+.mstate.action .swap { animation: swap 1.8s var(--ease-emphasized) infinite; }
+@keyframes sweep { from { background-position: 100% 0; } to { background-position: -150% 0; } }
+@keyframes swap { 0%, 30% { transform: rotate(0); } 70%, 100% { transform: rotate(180deg); } }
+@media (prefers-reduced-motion: reduce) { .mstate.action::after, .mstate.action .swap { animation: none; } .mstate.action::after { display: none; } }
+.mstate.alarm { background: var(--safety-alarm); color: var(--safety-alarm-fg); border-color: transparent; }
+.mstate .ring { animation: ring 1.4s var(--ease-standard) infinite; transform-origin: 6px 6px; }
+@keyframes ring { 0% { transform: scale(0.6); opacity: 1; } 100% { transform: scale(1.25); opacity: 0; } }
+.vchip { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: var(--radius-sm); border: 1px dashed var(--border-control); font: var(--text-xs) var(--font-mono); color: var(--text-muted); }
+
+.dro { display: grid; gap: 0; padding: 6px 10px; border-radius: var(--radius-md); background: var(--bg-field); border: 1px solid var(--border); min-width: 210px; }
+.dro div { display: flex; align-items: baseline; gap: 8px; }
+.dro b { width: 14px; color: var(--text-faint); font-weight: 600; }
+.dro span { margin-left: auto; font: 500 var(--text-dro)/var(--lh-dro) var(--font-mono); font-variant-numeric: tabular-nums; }
+.dro small { width: 22px; color: var(--text-faint); font: var(--text-xs) var(--font-mono); }
+
+.warn:is(.w, .n, .s) { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 4px 8px; padding: 8px 10px; border-radius: var(--radius-sm); max-width: 420px; }
+.warn.w { background: var(--warning-subtle); }
+.warn.w > svg { color: var(--warning); }
+.warn.n { background: var(--info-subtle); }
+.warn.s { background: var(--bg-chrome); box-shadow: inset 0 0 0 1px var(--border); }
+.warn.s > svg { color: var(--text-muted); }
+.warn.n > svg { color: var(--info); }
+.warn:is(.w, .n, .s) > svg { margin-top: 1px; }
+.warn:is(.w, .n, .s) .act { grid-column: 2; display: flex; gap: 6px; margin-top: 4px; }
+.banner { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--danger-subtle); max-width: 420px; }
+.banner svg { color: var(--danger); margin-top: 1px; }
+.banner .t { display: grid; gap: 2px; }
+.banner a { color: var(--text-muted); font-size: var(--text-sm); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+
+.prog { height: 4px; width: 220px; border-radius: 2px; background: var(--bg-active); overflow: hidden; position: relative; }
+.prog i { position: absolute; inset: 0 auto 0 0; width: 62%; background: var(--accent); border-radius: 2px; }
+.prog.ind i { width: 30%; animation: indet 1.4s var(--ease-standard) infinite; }
+@keyframes indet { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+
+.overlay-demo { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+.tooltip { display: inline-flex; gap: 10px; align-items: center; padding: 4px 8px; border-radius: var(--radius-sm); background: var(--text); color: var(--bg-app); font-size: var(--text-sm); font-weight: 500; box-shadow: var(--shadow-2); }
+.tooltip kbd { font: var(--text-xs) var(--font-mono); opacity: 0.7; }
+.menu { width: 210px; padding: 4px; border-radius: var(--radius-md); background: var(--bg-raised); border: 1px solid var(--border); box-shadow: var(--shadow-2); display: grid; gap: 1px; }
+.menu button { display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 8px; border: 0; border-radius: 4px; background: transparent; cursor: pointer; text-align: left; }
+.menu button:hover, .menu button.hl { background: var(--bg-hover); }
+.menu button kbd { margin-left: auto; font: var(--text-xs) var(--font-mono); color: var(--text-faint); }
+.menu button.dz { color: var(--danger); }
+.menu hr { border: 0; border-top: 1px solid var(--border); margin: 3px 0; }
+.toast { display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 12px; border-radius: var(--radius-md); background: var(--bg-raised); border: 1px solid var(--border); box-shadow: var(--shadow-2); }
+.dialog { width: 340px; max-width: 100%; border-radius: var(--radius-lg); background: var(--bg-raised); border: 1px solid var(--border); box-shadow: var(--shadow-3); display: grid; }
+.dialog .dh { padding: 14px 16px 6px; font: 600 var(--text-lg)/var(--lh-lg) var(--font-ui); }
+.dialog .db { padding: 0 16px 14px; color: var(--text-muted); }
+.dialog .df { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border); background: var(--bg-chrome); border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
+.empty { display: grid; justify-items: center; gap: 8px; padding: 20px; text-align: center; border: 1px dashed var(--border); border-radius: var(--radius-md); max-width: 320px; }
+.empty svg.i { width: 28px; height: 28px; color: var(--text-faint); }
+.empty .hi { stroke: var(--accent-icon); }
+.empty h4 { margin: 0; font: 600 var(--text-lg)/var(--lh-lg) var(--font-ui); }
+.empty p { color: var(--text-muted); }
+
+/* icons sheet */
+.icons { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 6px; }
+.icons figure { margin: 0; display: grid; justify-items: center; gap: 6px; padding: 10px 4px; border-radius: var(--radius-sm); font-size: var(--text-xs); color: var(--text-muted); }
+.icons figure .ib { pointer-events: none; }
+.icon-states { display: flex; flex-wrap: wrap; gap: 20px; align-items: center; }
+.icon-states div { display: grid; justify-items: center; gap: 6px; font-size: var(--text-xs); color: var(--text-muted); }
+
+/* motion demos */
+.motion { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+.mcard { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-field); padding: 12px; display: grid; gap: 10px; align-content: start; }
+.mcard .stage { height: 96px; border-radius: var(--radius-sm); background: var(--bg-viewport); display: grid; place-items: center; position: relative; overflow: hidden; }
+.mcard .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.mcard code { font: var(--text-xs) var(--font-mono); color: var(--text-muted); }
+.mcard p { color: var(--text-muted); font-size: var(--text-sm); }
+.draw-demo path { fill: none; stroke: var(--vp-selected); stroke-width: 2; filter: drop-shadow(0 0 1px var(--vp-selected-halo)); stroke-linecap: round; stroke-dasharray: 1 1; }
+.draw-demo.go path { animation: drawin var(--motion-draw) var(--ease-emphasized) both; }
+.draw-demo .feed { stroke: var(--vp-feed); opacity: 0.5; stroke-dasharray: none; }
+@keyframes drawin { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+.pulse-demo rect.part { fill: var(--vp-part); stroke: var(--vp-selected); stroke-width: 2.5; filter: drop-shadow(0 0 1px var(--vp-selected-halo)); }
+.pulse-demo rect.ring { fill: none; stroke: var(--vp-selected); opacity: 0; }
+.pulse-demo.go rect.ring { animation: pulse 700ms var(--ease-emphasized); }
+@keyframes pulse { 0% { opacity: 0.7; stroke-width: 7; } 100% { opacity: 0; stroke-width: 1; } }
+.enter-demo .card { width: 150px; padding: 8px; border-radius: var(--radius-sm); background: var(--bg-app); border: 1px solid var(--border); display: grid; gap: 4px; }
+.enter-demo .card i { height: 6px; border-radius: 3px; background: var(--border); }
+.enter-demo .card i:first-child { width: 50%; background: var(--text-faint); }
+.enter-demo.go .card { animation: enter var(--motion-slow) var(--ease-emphasized); }
+@keyframes enter { from { opacity: 0; transform: translateX(8px); } to { opacity: 1; transform: none; } }
+.pop-demo .menu { transform-origin: top left; }
+.pop-demo.go .menu { animation: pop var(--motion-base) var(--ease-emphasized); }
+@keyframes pop { from { opacity: 0; transform: scale(0.96) translateY(-4px); } to { opacity: 1; transform: none; } }
+.pop-demo .menu { width: 150px; }
+.timing { display: grid; gap: 4px; }
+.timing div { display: grid; grid-template-columns: 140px 56px minmax(0, 1fr); gap: 10px; align-items: center; font-size: var(--text-sm); }
+.timing i { height: 6px; border-radius: 3px; background: var(--text-faint); opacity: 0.6; }
+
+/* ---------- shell mock ---------- */
+.window { border-radius: var(--radius-lg); overflow: hidden; border: 1px solid var(--border); background: var(--bg-chrome); box-shadow: var(--shadow-3); user-select: none; }
+.titlebar { height: 30px; display: grid; grid-template-columns: 70px minmax(0, 1fr) 70px; align-items: center; padding-inline: 12px; }
+.lights { display: flex; gap: 8px; } .lights i { width: 11px; height: 11px; border-radius: 50%; background: var(--border-control); opacity: 0.6; }
+.titlebar .t { text-align: center; color: var(--text-muted); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.titlebar .t b { color: var(--text); font-weight: 500; }
+.wbar { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 6px 10px; padding: 0 8px 6px; border-bottom: 1px solid var(--border); }
+.wbar .toolbar { background: transparent; border: 0; padding: 0; justify-self: start; }
+.wbar .right { justify-self: end; display: flex; gap: 8px; align-items: center; }
+.wspace { display: grid; grid-template-columns: 210px minmax(0, 1fr) 320px; height: 400px; }
+.wpanel { background: var(--bg-app); display: flex; flex-direction: column; min-width: 0; }
+.wpanel .field { grid-template-columns: minmax(0, 1fr) 0 156px; gap: 4px 4px; }
+.wpanel.r .pb { padding: 12px 12px 12px 10px; gap: 20px; }
+.wpanel.l { border-right: 1px solid var(--border); } .wpanel.r { border-left: 1px solid var(--border); }
+.ph { display: flex; align-items: center; height: 30px; padding: 0 10px; border-bottom: 1px solid var(--border); }
+.ph .eyebrow { color: var(--text-muted); }
+.ph .c { margin-left: auto; font: var(--text-xs) var(--font-mono); color: var(--text-faint); }
+.pb { padding: 6px; display: grid; gap: 12px; align-content: start; overflow: auto; }
+.vp { position: relative; background: var(--bg-viewport); overflow: hidden; min-width: 0; }
+.vp svg.scene { position: absolute; inset: 0; width: 100%; height: 100%; }
+.g-min { stroke: var(--vp-grid); stroke-width: 0.6; fill: none; } .g-maj { stroke: var(--vp-grid-major); stroke-width: 0.8; fill: none; }
+.s-stock { fill: none; stroke: var(--vp-stock); stroke-dasharray: 4 4; }
+.s-part { fill: var(--vp-part); stroke: var(--vp-edge); stroke-width: 1.4; }
+.s-cut { fill: var(--vp-removal); stroke: var(--vp-edge); stroke-width: 1.4; }
+.s-sel { stroke: var(--vp-selected); stroke-width: 2.5; filter: drop-shadow(0 0 1px var(--vp-selected-halo)); }
+.s-tp { fill: none; stroke: var(--vp-feed); stroke-width: 1.3; opacity: 0.6; }
+.s-tp.sel { stroke: var(--vp-selected); opacity: 1; stroke-width: 2; filter: drop-shadow(0 0 1px var(--vp-selected-halo)); }
+.s-rapid { fill: none; stroke: var(--vp-rapid); stroke-dasharray: 3 4; }
+.vp .float { position: absolute; top: 8px; right: 8px; display: grid; gap: 2px; padding: 2px; border-radius: var(--radius-md); background: color-mix(in oklab, var(--bg-raised) 88%, transparent); border: 1px solid var(--border); box-shadow: var(--shadow-1); backdrop-filter: blur(6px); }
+.vp .lab { position: absolute; left: 10px; top: 8px; padding: 3px 8px; border-radius: 4px; background: color-mix(in oklab, var(--bg-raised) 88%, transparent); border: 1px solid var(--border); font: var(--text-xs) var(--font-mono); color: var(--text-muted); }
+.vp .lab b { font-family: var(--font-ui); color: var(--text); font-weight: 500; margin-right: 6px; }
+.rowsw { display: flex; align-items: center; justify-content: space-between; min-height: 26px; padding-inline: 4px; }
+.status { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 16px; min-height: 24px; padding: 3px 10px; border-top: 1px solid var(--border); font-size: var(--text-xs); color: var(--text-muted); }
+.status .d { display: inline-flex; align-items: center; gap: 6px; }
+.status .d::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+.status .sp { flex: 1; }
+
+.callouts { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px 24px; }
+.callouts div { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 8px; color: var(--text-muted); font-size: var(--text-sm); }
+.callouts b { color: var(--text); font-weight: 600; }
+.callouts .n { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font: 600 10px var(--font-ui); background: var(--bg-active); color: var(--text); }
+
+.decide { display: grid; gap: 10px; padding: 14px 16px; border-radius: var(--radius-md); border: 1px solid var(--accent-calm-border); background: var(--accent-calm); }
+.decide ol { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
+.decide b { font-weight: 600; }
+.rules2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.rules2 ul { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 4px; color: var(--text-muted); }
+.rules2 li b { color: var(--text); font-weight: 500; }
+
+@media (max-width: 1100px) {
+  .doc { grid-template-columns: minmax(0, 1fr); }
+  .toc { position: static; display: flex; flex-wrap: wrap; }
+  .toc .eyebrow { display: none; }
+  .wspace { grid-template-columns: 180px minmax(0, 1fr) 220px; }
+}
+@media (max-width: 860px) {
+  .duo { grid-template-columns: minmax(0, 1fr); }
+  .pane.t-dark { border-left: 0; border-top: 1px solid #3a4343; }
+  .elev { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .wspace { grid-template-columns: minmax(0, 1fr); height: auto; }
+  .wbar { grid-template-columns: minmax(0, 1fr); justify-items: center; }
+  .wbar .toolbar, .wbar .right { justify-self: center; }
+  .vp { height: 260px; order: -1; }
+  .wpanel.l, .wpanel.r { border: 0; border-top: 1px solid var(--border); }
+  .rules2 { grid-template-columns: minmax(0, 1fr); }
+  .scale, .steps-key { grid-template-columns: 64px repeat(12, minmax(0, 1fr)); }
+}
+@media (max-width: 520px) {
+  .typerow { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .field, .wpanel .field { grid-template-columns: 20px minmax(0, 1fr); }
+  .field > label { grid-column: 1 / -1; }
+  .field > .qa.lock { grid-column: 1; grid-row: 2; }
+  .field > :is(.qi, .fs) { grid-column: 2; }
+  .scale div[data-hex] { height: 28px; }
+  .scale div[data-hex]::after { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0s !important; animation-iteration-count: 1 !important; transition-duration: 0s !important; }
+}
+</style>
+
+<div class="doc">
+  <nav class="toc" aria-label="Sections" id="toc">
+    <span class="eyebrow">Design system</span>
+    <a href="#principles">Principles</a>
+    <a href="#colour">Colour</a>
+    <a href="#tokens">Semantic tokens</a>
+    <a href="#type">Type</a>
+    <a href="#layout-tokens">Space &amp; size</a>
+    <a href="#motion">Motion</a>
+    <a href="#icons">Icons</a>
+    <a href="#components">Components</a>
+    <a href="#shell">App shell</a>
+    <a href="#decide">To decide</a>
+  </nav>
+  <main>
+    <header class="head">
+      <div style="display:grid;gap:8px">
+        <h1>dfyom design system</h1>
+        <p class="muted">Task 1.16 proposal for approval. Every colour, size and timing the app uses comes from the tokens on this page; components never pick values of their own. Specimens render in both themes side by side.</p>
+      </div>
+      <div class="meta">
+        <span class="pill"><i></i>Accent: Amber #f5b700</span>
+        <div class="seg" role="group" aria-label="Page theme" id="theme-seg">
+          <span class="thumb"></span>
+          <button type="button" id="th-auto" data-theme-set="auto" aria-pressed="true">Follow OS</button>
+          <button type="button" id="th-light" data-theme-set="light" aria-pressed="false">Light</button>
+          <button type="button" id="th-dark" data-theme-set="dark" aria-pressed="false">Dark</button>
+        </div>
+      </div>
+    </header>
+
+    <section id="principles">
+      <h2>Principles</h2>
+      <div class="principles">
+        <div><b>A desktop tool</b><span>Native title bar with the document name only. Toolbars, panels and a status bar. No branding inside the window.</span></div>
+        <div><b>Colour is a signal</b><span>Neutral by default. Amber marks what is on, selected, active or being cut. Never a large fill.</span></div>
+        <div><b>Running is amber</b><span>A running machine is the most dangerous state and needs attention, so it takes the accent. Red, orange and blue machine states stay reserved.</span></div>
+        <div><b>Highly graphical</b><span>Fields carry an illustration of what they measure; the measured part turns amber while you edit it.</span></div>
+        <div><b>Dense, not cramped</b><span>13 px text, 28 px controls on a 4 px grid. Beginners get clarity through labels, terms and hints, not fewer controls.</span></div>
+        <div><b>Motion explains</b><span>Indicators slide, toolpaths draw in, selections pulse. Every animation has a reason and turns off with reduced motion.</span></div>
+      </div>
+    </section>
+
+    <section id="colour">
+      <h2>Colour</h2>
+      <p class="muted">Two tiers. Primitive 12-step scales (Radix Colors steps, adapted) exist only inside <span class="code">tokens.css</span>; components use the semantic tokens below. Hover a step for its value.</p>
+      <div class="sub">
+        <span class="eyebrow">Neutrals: Ghost White to Jet, slightly cool</span>
+        <div class="scales" id="sc-neutral"></div>
+      </div>
+      <div class="sub">
+        <span class="eyebrow">Amber accent</span>
+        <div class="scales" id="sc-amber"></div>
+      </div>
+      <div class="sub">
+        <span class="eyebrow">Status hues (steps 3 · 9 · 11 shown in the token table)</span>
+        <div class="steps-key"><span></span><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span><span>11</span><span>12</span></div>
+        <p class="muted" style="font-size:var(--text-sm)">Steps: 1–2 backgrounds · 3–5 component fills (hover, active) · 6–8 borders · 9–10 solid fills · 11 low-contrast text · 12 high-contrast text.</p>
+      </div>
+      <div class="rules2">
+        <div><span class="eyebrow">Amber is used for</span>
+          <ul>
+            <li><b>Active states:</b> switch, checkbox, radio, the selected segment, slider fill, progress, current mode underline.</li>
+            <li><b>One detail of the active tool's icon</b>, and of the focused field's illustration.</li>
+            <li><b>Running:</b> the machine state while the machine moves, and the cut in the viewport.</li>
+            <li><b>A suggested fix:</b> the field's pencil turns amber.</li>
+            <li><b>Selection:</b> a pale tint behind normal text; the selected shape and toolpath in the viewport.</li>
+            <li><b>The suggested action</b> in a panel: calm tint, amber-brown label.</li>
+            <li><b>Focus ring.</b></li>
+          </ul>
+        </div>
+        <div><span class="eyebrow">Amber is never used for</span>
+          <ul>
+            <li>Window chrome, panel or toolbar backgrounds, body text.</li>
+            <li>Solid button fills, including the suggested action.</li>
+            <li>Warnings, Feed hold, Alarm or Tool change (orange, red and blue).</li>
+            <li>Decoration: dividers, headings, logos, illustrations.</li>
+          </ul>
+        </div>
+      </div>
+      <p class="muted">In the light theme, pure amber is too pale for thin lines and text on Ghost White (1.7:1). Icon details stay saturated (<span class="code">--accent-icon</span>, pure amber) with a slightly heavier stroke and a faint dark edge; text uses <span class="code">--text-accent</span> (5:1); solid amber fills get a 1 px deeper edge. The viewport keeps a clean amber line (2.5 px) and gets its edge from a soft dark halo instead of a darker colour. The dark theme uses pure amber throughout.</p>
+    </section>
+
+    <section id="tokens">
+      <h2>Semantic tokens</h2>
+      <p class="muted">The only colours components use. Contrast is computed live from the values on this page; the same pairs become the token unit test.</p>
+      <div class="table-wrap"><table id="tok-table"><thead><tr><th>Token</th><th>Light</th><th>Dark</th><th>Use</th></tr></thead><tbody></tbody></table></div>
+      <div class="table-wrap"><table id="cr-table"><thead><tr><th>Contrast pair</th><th>Needs</th><th>Light</th><th>Dark</th></tr></thead><tbody></tbody></table></div>
+    </section>
+
+    <section id="type">
+      <h2>Type</h2>
+      <p class="muted">System fonts (SF Pro on macOS, Segoe UI on Windows), so the app feels native. Tabular numerals on every number. Sentence case. Uppercase only for the small section labels.</p>
+      <div>
+        <div class="typerow"><span><b>Section label</b><br><code class="code">10.5/12 · 600 · +8%</code></span><span class="eyebrow" style="color:var(--text-muted)">Operation · Pocket slot</span></div>
+        <div class="typerow"><span><b>--text-xs</b><br><code class="code">11/14</code></span><span style="font-size:var(--text-xs)">Status bar, unit suffixes, badges · <span class="mono">X 62.00 Y 41.00</span></span></div>
+        <div class="typerow"><span><b>--text-sm</b><br><code class="code">12/16</code></span><span style="font-size:var(--text-sm)">Hints, tooltips, tree metadata: recommended ≥ 3.2 mm for 6061</span></div>
+        <div class="typerow"><span><b>--text-md</b> base<br><code class="code">13/18</code></span><span>Body, inputs, buttons, tree rows: Stepdown 1.50 mm per pass</span></div>
+        <div class="typerow"><span><b>--text-lg</b><br><code class="code">15/20 · 600</code></span><span style="font:600 var(--text-lg)/var(--lh-lg) var(--font-ui)">Dialog and panel titles: Start run on Virtual GRBL</span></div>
+        <div class="typerow"><span><b>--text-xl</b><br><code class="code">20/26 · 600</code></span><span style="font:600 var(--text-xl)/var(--lh-xl) var(--font-ui)">Design a part first</span></div>
+        <div class="typerow"><span><b>--text-dro</b><br><code class="code">24/28 mono</code></span><span style="font:500 var(--text-dro)/var(--lh-dro) var(--font-mono)">X 103.417  Y −0.250</span></div>
+        <div class="typerow"><span><b>Mono</b><br><code class="code">--font-mono</code></span><span class="mono" style="font-size:var(--text-sm)">G1 X60.000 Y55.000 F900 (DFYOM TOOL CHANGE 2: 6 mm drill)</span></div>
+      </div>
+    </section>
+
+    <section id="layout-tokens">
+      <h2>Space, size, radius, elevation</h2>
+      <div class="rules2">
+        <div class="sub"><span class="eyebrow">Spacing, 4 px grid</span>
+          <div class="spacing" id="spacing"></div>
+        </div>
+        <div class="sub"><span class="eyebrow">Control heights</span>
+          <div class="sizes">
+            <div><i style="width:60px;height:24px"></i>sm · 24<br>dense tables</div>
+            <div><i style="width:60px;height:28px"></i>md · 28<br>default</div>
+            <div><i style="width:60px;height:44px"></i>lg · 44<br>run mode</div>
+          </div>
+          <span class="eyebrow" style="margin-top:8px">Fixed rows</span>
+          <p class="muted" style="font-size:var(--text-sm)">Toolbar 36 · panel header 30 · tree row 26 · property row 28 · status bar 24 · icons 14 / 16 / 20.</p>
+        </div>
+      </div>
+      <div class="sub"><span class="eyebrow">Radius: small and consistent</span>
+        <div class="radii">
+          <div style="border-radius:var(--radius-xs)">xs · 3</div>
+          <div style="border-radius:var(--radius-sm)">sm · 5</div>
+          <div style="border-radius:var(--radius-md)">md · 7</div>
+          <div style="border-radius:var(--radius-lg)">lg · 10</div>
+          <div style="border-radius:var(--radius-full)">full</div>
+        </div>
+        <p class="muted" style="font-size:var(--text-sm)">xs checkboxes · sm buttons, inputs, rows · md menus, floating toolbars · lg dialogs, the window · full chips and machine state.</p>
+      </div>
+      <div class="sub"><span class="eyebrow">Elevation</span>
+        <div class="elev">
+          <div><b>0 · Panels</b>flat, separated by 1 px lines</div>
+          <div style="box-shadow:var(--shadow-1)"><b>1 · Floating</b>viewport toolbars, toasts</div>
+          <div style="box-shadow:var(--shadow-2)"><b>2 · Popovers</b>menus, tooltips, pickers</div>
+          <div style="box-shadow:var(--shadow-3)"><b>3 · Dialogs</b>with a scrim; Stop stays above</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="motion">
+      <h2>Motion</h2>
+      <p class="muted">Fast and physical: things slide to where they belong and settle without bounce. Click a card to replay. With reduced motion (OS or app setting), every duration is 0 and camera moves become cuts.</p>
+      <div class="timing" id="timing"></div>
+      <div class="motion">
+        <div class="mcard" data-demo="modes"><div class="stage"><div class="modesw" data-modesw="design" data-demo-tabs style="padding-bottom:4px"></div></div><div class="row"><b>Indicator slide</b><code>emphasis 450 · emphasized</code></div><p>Mode underline, active tool, segmented thumb.</p></div>
+        <div class="mcard" data-demo="draw"><div class="stage"><svg class="draw-demo" viewBox="0 0 200 90" width="200" height="90"><rect class="feed" x="30" y="15" width="140" height="60" rx="12" fill="none"/><path pathLength="1" d="M42 9H158A18 18 0 0 1 176 27V63A18 18 0 0 1 158 81H42A18 18 0 0 1 24 63V27A18 18 0 0 1 42 9Z"/></svg></div><div class="row"><b>Toolpath draw-in</b><code>draw 900 · emphasized</code></div><p>When toolpaths are generated or Plan opens.</p></div>
+        <div class="mcard" data-demo="pulse"><div class="stage"><svg class="pulse-demo" viewBox="0 0 200 90" width="200" height="90"><rect class="part" x="50" y="20" width="100" height="50" rx="8"/><rect class="ring" x="50" y="20" width="100" height="50" rx="8"/></svg></div><div class="row"><b>Selection pulse</b><code>700 · emphasized</code></div><p>Selecting in the tree, after undo, after an agent edit.</p></div>
+        <div class="mcard" data-demo="enter"><div class="stage"><div class="enter-demo"><div class="card"><i></i><i></i><i></i></div></div></div><div class="row"><b>Inspector enter</b><code>slow 280 · emphasized</code></div><p>Panel content changes with the selection.</p></div>
+        <div class="mcard" data-demo="pop"><div class="stage" style="place-items:start;padding:14px"><div class="pop-demo"><div class="menu"><button type="button" tabindex="-1">Duplicate</button><button type="button" class="hl" tabindex="-1">Rename</button><button type="button" class="dz" tabindex="-1">Remove</button></div></div></div><div class="row"><b>Popover open</b><code>base 180 · emphasized</code></div><p>Menus and pickers scale in from their trigger; close with exit 120.</p></div>
+        <div class="mcard" data-demo="switch"><div class="stage"><div class="line"><button type="button" class="switch" aria-checked="false" aria-label="Demo switch" tabindex="-1"></button><label class="check"><input type="checkbox" tabindex="-1" aria-label="Demo checkbox"></label><div class="seg"><span class="thumb"></span><button type="button" aria-pressed="true" tabindex="-1">mm</button><button type="button" aria-pressed="false" tabindex="-1">in</button></div></div></div><div class="row"><b>Toggles</b><code>slow 280 · emphasized</code></div><p>Knob stretches on press, check mark scales in.</p></div>
+      </div>
+    </section>
+
+    <section id="icons">
+      <h2>Icons</h2>
+      <p class="muted">Lucide for generic actions; own CNC icons on the same 24 px grid with a 1.35 px stroke at 16 px. Own tool icons have one <b>accent detail</b> (corner handles, the dashed offset of a profile, the drill's crosshair) that turns amber only while the tool is active. Generic Lucide icons stay monochrome. <b>Field illustrations</b> (28 px, thinner 1.4 px lines) draw the feature in grey and make the measured edge itself the amber line: the wall for depth, the riser for stepdown, the arc for a corner radius, the face for a chamfer. No dimension arrows.</p>
+      <div class="icon-states">
+        <div><span class="ib" aria-hidden="true"><svg class="i" viewBox="0 0 16 16"><rect x="4.5" y="4.5" width="7" height="7" rx="1"/><rect class="hi" x="2" y="2" width="12" height="12" rx="3" stroke-dasharray="2 2"/></svg></span>Rest</div>
+        <div><span class="ib" aria-hidden="true" style="background:var(--bg-hover);color:var(--text)"><svg class="i" viewBox="0 0 16 16"><rect x="4.5" y="4.5" width="7" height="7" rx="1"/><rect class="hi" x="2" y="2" width="12" height="12" rx="3" stroke-dasharray="2 2"/></svg></span>Hover</div>
+        <div><span class="ib" aria-pressed="true" aria-hidden="true"><svg class="i" viewBox="0 0 16 16"><rect x="4.5" y="4.5" width="7" height="7" rx="1"/><rect class="hi" x="2" y="2" width="12" height="12" rx="3" stroke-dasharray="2 2"/></svg></span>Active</div>
+        <div><span class="ib" aria-hidden="true" style="color:var(--text-faint);opacity:.6"><svg class="i" viewBox="0 0 16 16"><rect x="4.5" y="4.5" width="7" height="7" rx="1"/><rect class="hi" x="2" y="2" width="12" height="12" rx="3" stroke-dasharray="2 2"/></svg></span>Disabled</div>
+      </div>
+      <div class="icons" id="icon-sheet"></div>
+    </section>
+
+    <section id="components">
+      <h2>Components</h2>
+      <p class="muted">The v0.1 inventory from the UI guidelines, each in its states. Light on the left, dark on the right; both are live.</p>
+      <div class="duo" id="gallery"></div>
+    </section>
+
+    <section id="shell">
+      <h2>App shell · example</h2>
+      <p class="muted"><b>For illustration only.</b> One possible Design mode window, showing the tokens and components above working together. It is not a layout spec: the window layout is decided with the mode work later, and approving the design system does not fix it. Try the pencil on Width.</p>
+      <div class="window" id="shell-win">
+        <div class="titlebar"><div class="lights" aria-hidden="true"><i></i><i></i><i></i></div><div class="t"><b>Bracket</b> — Edited</div><div></div></div>
+        <div class="wbar">
+          <div class="toolbar" id="shell-tools"></div>
+          <div class="modesw" role="tablist" aria-label="Mode" data-modesw="design" id="shell-modes"></div>
+          <div class="right"></div>
+        </div>
+        <div class="wspace">
+          <aside class="wpanel l"><div class="ph"><span class="eyebrow">Features</span><span class="c">5</span></div><div class="pb"><div class="tree" id="shell-tree"></div></div></aside>
+          <div class="vp">
+            <svg class="scene" viewBox="0 0 480 320" preserveAspectRatio="xMidYMid meet" aria-label="Viewport, top view of the bracket">
+              <defs><pattern id="sh-min" x="30" y="295" width="15" height="15" patternUnits="userSpaceOnUse"><path class="g-min" d="M15 0H0V15"/></pattern><pattern id="sh-maj" x="30" y="295" width="75" height="75" patternUnits="userSpaceOnUse"><rect width="75" height="75" fill="url(#sh-min)"/><path class="g-maj" d="M75 0H0V75"/></pattern></defs>
+              <rect x="-200" y="-200" width="880" height="720" fill="url(#sh-maj)"/>
+              <rect class="s-stock" x="30" y="25" width="420" height="270"/>
+              <rect id="sh-outer" class="s-part" x="60" y="55" width="360" height="210" rx="18"/>
+              <rect id="sh-slot" class="s-cut s-sel" x="165" y="142" width="150" height="36" rx="18" style="fill:color-mix(in oklab, var(--vp-selected) 14%, var(--vp-removal))"/>
+              <g id="sh-holes" class="s-cut"><circle cx="90" cy="85" r="9"/><circle cx="390" cy="85" r="9"/><circle cx="90" cy="235" r="9"/><circle cx="390" cy="235" r="9"/></g>
+              <path d="M30 295H58M54 291.5L58 295L54 298.5" stroke="var(--vp-axis-x)" stroke-width="1.5" fill="none"/>
+              <path d="M30 295V267M26.5 271L30 267L33.5 271" stroke="var(--vp-axis-y)" stroke-width="1.5" fill="none"/>
+            </svg>
+            <div class="lab"><b>Slot</b>50 × 12 × 3 mm</div>
+            <div class="float" id="shell-float"></div>
+          </div>
+          <aside class="wpanel r"><div class="ph"><span class="eyebrow">Properties</span></div>
+            <div class="pb">
+              <div style="display:grid;gap:10px"><span class="eyebrow" style="padding:0 2px">Slot</span>
+                <div class="field" data-step="1" data-dec="2" data-name="Length"><label><svg class="i fi" data-fi="length" viewBox="0 0 20 20"></svg>Length</label><div class="qi"><span class="src">50.00</span><span class="u">mm</span><button type="button" class="qa pen" aria-label="Adjust Length" aria-expanded="false"></button></div></div>
+                <div class="field is-focus" data-step="0.1" data-dec="2" data-name="Width" data-rec="12.50" data-rec-text="≥ 12.50 mm keeps 3 mm corners with the 6 mm tool"><label><svg class="i fi" data-fi="width" viewBox="0 0 20 20"></svg><span class="term">Width</span></label><div class="qi focus"><span class="src">12.00</span><span class="caret"></span><span class="u">mm</span><button type="button" class="qa pen fix" aria-label="Adjust Width" aria-expanded="false"></button></div>
+                  <div class="fs soft"><div class="fs-i echo"><span></span><span>= 12.000 mm</span><span></span></div><div class="fs-i soft"><svg class="i" data-ic="warn" viewBox="0 0 16 16"></svg><span>Near the 6 mm tool</span><span class="fs-act"><button type="button" class="btn" data-size="sm" data-variant="primary" data-apply><svg class="i" viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7"/></svg>Use 12.50</button><button type="button" class="qa" data-dismiss aria-label="Dismiss warning" title="Dismiss"><svg class="i" viewBox="0 0 16 16"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg></button></span></div></div></div>
+                <div class="field" data-step="0.1" data-dec="2" data-name="Depth"><label><svg class="i fi" data-fi="depth" viewBox="0 0 20 20"></svg>Depth</label><div class="qi"><span class="src">3.00</span><span class="u">mm</span><button type="button" class="qa pen" aria-label="Adjust Depth" aria-expanded="false"></button></div></div>
+              </div>
+              <div style="display:grid;gap:4px"><span class="eyebrow" style="padding:0 2px 4px">Display</span>
+                <div class="rowsw"><span>Show dimensions</span><button type="button" class="switch" aria-checked="true" aria-label="Show dimensions"></button></div>
+                <div class="rowsw"><span>Snap to grid</span><button type="button" class="switch" aria-checked="false" aria-label="Snap to grid"></button></div>
+              </div>
+            </div>
+          </aside>
+        </div>
+        <div class="status"><span class="d">Up to date</span><span>Bracket · 3 features</span><span>1 warning</span><span class="sp"></span><span class="mono">X 62.00  Y 41.00</span><span>mm</span><span>Saved</span></div>
+      </div>
+      <div class="callouts">
+        <div><span class="n">1</span><span><b>No app name or logo</b> in the window chrome: the native title bar shows the document name and edit state.</span></div>
+        <div><span class="n">2</span><span><b>Status lives in the status bar</b> (evaluation state, counts, cursor position, units), not in the toolbar. The toolbar arrangement here is one option.</span></div>
+        <div><span class="n">3</span><span><b>Amber marks the active things</b>: mode, tool, selected row and slot, the focused field's dimension, and the pencil offering a fix.</span></div>
+        <div><span class="n">4</span><span><b>Everything about a field stays with it</b>: echo, warning with its fix, notes, in one group under the input.</span></div>
+      </div>
+    </section>
+
+    <section id="decide">
+      <h2>Changes to earlier decisions</h2>
+      <div class="decide">
+        <p>This proposal changes things recorded in the UI guidelines. Approving the design system approves these too:</p>
+        <ol>
+          <li><b>Denser UI</b> (you chose it): base text 13 px instead of 14 px, default controls 28 px instead of 32 px (decisions 8 and 9). Run mode keeps 44 px.</li>
+          <li><b>Warnings and Feed hold are orange</b> (you chose it), with the triangle and the striped pause-bar shapes.</li>
+          <li><b>Running is amber, not green</b>: play icon and a dot circling the badge edge; a static outline under reduced motion. This departs from the IEC 60204-1 green-for-normal convention on purpose.</li>
+          <li><b>No coloured primary button.</b> Primary keeps the neutral surface and is set apart by a semibold label, a stronger outline and an amber icon; Stop is the only filled control.</li>
+          <li><b>Mode switcher</b> is its own component, separate from ordinary tabs. Where it sits is left to the window layout work.</li>
+          <li><b>Three severities, not two.</b> Soft warning (neutral, dismissible; stays as a small marker), hard warning (orange, can't be dismissed), error (red, impossible value, blocks Generate). Orange moves slightly towards yellow to separate from red.</li>
+          <li><b>Field component</b> grows: illustration icon, a lock just before the input, a tinted pencil inside it (adjust popover with steps .001–100 and the recommended value), and one support group under it (echo, highest-severity status with its fix, collapsed extra notes).</li>
+        </ol>
+      </div>
+    </section>
+  </main>
+</div>
+
+<template id="gallery-tpl">
+  <span class="eyebrow">LABEL</span>
+  <div class="spec-row"><span class="lbl">Button · default, primary (neutral, semibold, amber icon), ghost, danger, disabled</span>
+    <div class="line">
+      <button type="button" class="btn">Export G-code…</button>
+      <button type="button" class="btn" data-variant="primary"><svg class="i" viewBox="0 0 16 16"><path d="M2.5 12.5V5l3.5 6V5l3.5 6V5l3.5 6"/></svg>Generate toolpaths</button>
+      <button type="button" class="btn" data-variant="ghost">Cancel</button>
+      <button type="button" class="btn" data-variant="danger">Remove plan</button>
+      <button type="button" class="btn" disabled>Simulate</button>
+    </div>
+    <div class="line">
+      <button type="button" class="btn" data-size="sm">Small</button>
+      <button type="button" class="btn"><svg class="i" viewBox="0 0 16 16"><path d="M8 2.5v8M4.5 7L8 10.5 11.5 7M3 13.5h10"/></svg>With icon</button>
+    </div>
+  </div>
+  <div class="spec-row"><span class="lbl">Toolbar · icon buttons with tooltip, active tool shows its accent detail</span>
+    <div class="toolbar" data-toolbar></div>
+  </div>
+  <div class="spec-row"><span class="lbl">Mode switcher · own component, centred in the main toolbar</span>
+    <div class="line"><div class="modesw" role="tablist" aria-label="Mode" data-modesw="plan"></div></div>
+  </div>
+  <div class="spec-row"><span class="lbl">Tabs (inspector sections) · segmented control</span>
+    <div class="line" style="gap:16px">
+      <div class="modes" role="tablist" aria-label="Section" data-modes><button type="button" role="tab" aria-selected="true">Shape</button><button type="button" role="tab" aria-selected="false">Depth</button><button type="button" role="tab" aria-selected="false">Tabs</button><span class="ind"></span></div>
+      <div class="seg" data-seg><span class="thumb"></span><button type="button" aria-pressed="true">Climb</button><button type="button" aria-pressed="false">Conventional</button></div>
+    </div>
+  </div>
+  <div class="spec-row"><span class="lbl">Switch · checkbox · radio · slider</span>
+    <div class="line" style="gap:14px">
+      <button type="button" class="switch" role="switch" aria-checked="false" aria-label="Tabs"></button>
+      <button type="button" class="switch" role="switch" aria-checked="true" aria-label="Finish pass"></button>
+      <label class="check"><input type="checkbox">Peck</label>
+      <label class="check"><input type="checkbox" checked>Chip break</label>
+      <label class="check"><input type="checkbox" data-mixed>Mixed</label>
+      <label class="check"><input type="radio" name="RADIO" checked>Outside</label>
+      <label class="check"><input type="radio" name="RADIO">Inside</label>
+      <input class="range" type="range" min="1" max="100" value="10" aria-label="Time scale">
+    </div>
+  </div>
+  <div class="spec-row"><span class="lbl">Field · illustration icon (one amber line is the dimension; partly desaturated at rest, full on focus, grey when read-only, always full on fields without a value input), lock, input with adjust (pencil), support area under the input</span>
+    <div style="display:grid;gap:12px;max-width:520px">
+      <div class="field" data-step="0.1" data-dec="2" data-name="Stepdown" data-rec="1.20" data-rec-text="≤ 1.20 mm for 6061 with a 6 mm cutter">
+        <label><svg class="i fi" data-fi="stepdown" viewBox="0 0 20 20"></svg><span class="term" title="Depth removed in each pass">Stepdown</span></label>
+        <button type="button" class="qa lock" aria-label="Lock value" aria-pressed="false"></button><div class="qi"><span class="src">1.50</span><span class="u">mm</span><button type="button" class="qa pen fix" aria-label="Adjust Stepdown" aria-expanded="false"></button></div>
+        <div class="fs soft">
+          <div class="fs-i soft"><svg class="i" data-ic="warn" viewBox="0 0 16 16"></svg><span>Above the suggested 1.20 mm</span><span class="fs-act"><button type="button" class="btn" data-size="sm" data-variant="primary" data-apply><svg class="i" viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7"/></svg>Use 1.20</button><button type="button" class="qa" data-dismiss aria-label="Dismiss warning" title="Dismiss"><svg class="i" viewBox="0 0 16 16"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg></button></span></div>
+          <button type="button" class="fs-more" aria-expanded="false">2 more<svg class="i" data-ic="chev" viewBox="0 0 16 16"></svg></button>
+          <div class="fs-extra" hidden>
+            <div class="fs-i"><svg class="i" data-ic="rec" viewBox="0 0 16 16"></svg><span>Recommended 0.60–1.20 mm, 10–20 % of tool Ø</span><span></span></div>
+            <div class="fs-i info"><svg class="i" data-ic="info" viewBox="0 0 16 16"></svg><span>Changed by agent 2 min ago</span><span></span></div>
+          </div>
+        </div>
+      </div>
+      <div class="field" data-step="0.1" data-dec="2" data-name="Corner radius" data-rec="3.00" data-rec-text="≥ 3.00 mm, the radius of the 6 mm tool">
+        <label><svg class="i fi" data-fi="corner" viewBox="0 0 20 20"></svg>Corner R</label>
+        <button type="button" class="qa lock" aria-label="Lock value" aria-pressed="false"></button><div class="qi"><span class="src">1.50</span><span class="u">mm</span><button type="button" class="qa pen fix" aria-label="Adjust Corner radius" aria-expanded="false"></button></div>
+        <div class="fs warn"><div class="fs-i warn"><svg class="i" data-ic="warn" viewBox="0 0 16 16"></svg><span>Smaller than the 6 mm tool can cut</span><button type="button" class="btn" data-size="sm" data-variant="primary" data-apply><svg class="i" viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7"/></svg>Use 3.00</button></div></div>
+      </div>
+      <div class="field" data-step="1" data-dec="0" data-name="Chamfer angle">
+        <label><svg class="i fi" data-fi="chamfer" viewBox="0 0 20 20"></svg>Chamfer</label>
+        <button type="button" class="qa lock" aria-label="Lock value" aria-pressed="false"></button><div class="qi"><span class="src">45</span><span class="u">°</span><button type="button" class="qa pen" aria-label="Adjust Chamfer angle" aria-expanded="false"></button></div>
+      </div>
+      <div class="field is-focus" data-step="0.01" data-dec="3" data-name="Width">
+        <label><svg class="i fi" data-fi="width" viewBox="0 0 20 20"></svg>Width</label>
+        <button type="button" class="qa lock" aria-label="Lock value" aria-pressed="false"></button><div class="qi focus"><span class="src">1/16"</span><span class="caret"></span><span class="u">mm</span><button type="button" class="qa pen" aria-label="Adjust Width" aria-expanded="false"></button></div>
+        <div class="fs"><div class="fs-i echo"><span></span><span>= 1.588 mm · ±0.1 mm from part</span><span></span></div></div>
+      </div>
+      <div class="field" data-step="0.1" data-dec="2" data-name="Depth">
+        <label><svg class="i fi" data-fi="depth" viewBox="0 0 20 20"></svg>Depth</label>
+        <button type="button" class="qa lock" aria-label="Lock value" aria-pressed="false"></button><div class="qi err"><span class="src">3<span class="underline-err">..</span>5</span><span class="u">mm</span><button type="button" class="qa pen" aria-label="Adjust Depth" aria-expanded="false"></button></div>
+        <div class="fs err"><div class="fs-i err"><svg class="i" data-ic="err" viewBox="0 0 16 16"></svg><span>Two decimal points</span><button type="button" class="btn" data-size="sm">Use 3.5</button></div></div>
+      </div>
+      <div class="field">
+        <label><svg class="i fi" data-fi="tool" viewBox="0 0 20 20"></svg>Tool</label>
+        <div class="qi sel"><span class="src">T1 · Ø6 flat end mill 2F</span><span class="u"><svg class="i" data-ic="chev" viewBox="0 0 16 16" style="width:12px;height:12px"></svg></span></div>
+      </div>
+      <div class="field">
+        <label><svg class="i fi" data-fi="feed" viewBox="0 0 20 20"></svg>Feed</label>
+        <button type="button" class="qa lock" aria-label="Unlock value" aria-pressed="true"></button><div class="qi ro"><span class="src">900</span><span class="u">mm/min</span></div>
+        <div class="fs"><div class="fs-i"><svg class="i" data-ic="lock" viewBox="0 0 16 16"></svg><span>Finalized plans are read-only</span><span></span></div></div>
+      </div>
+      <div class="field nv">
+        <label><svg class="i fi" data-fi="tabs" viewBox="0 0 20 20"></svg>Tabs</label>
+        <label class="check"><input type="checkbox" checked>Leave 4 tabs</label>
+      </div>
+    </div>
+  </div>
+  <div class="spec-row"><span class="lbl">Tree rows · rest, hover, selected, warning, changed by agent</span>
+    <div class="tree" role="listbox" aria-label="Operations">
+      <button type="button" class="ti" role="option" aria-selected="false"><svg class="i lead" viewBox="0 0 16 16"><circle cx="8" cy="8" r="3.5"/><path d="M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3"/></svg>Drill holes<span class="meta">T2</span></button>
+      <button type="button" class="ti hov" role="option" aria-selected="false"><svg class="i lead" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path d="M5 6h6M5 8h6M5 10h6"/></svg>Pocket slot<span class="meta">T1</span></button>
+      <button type="button" class="ti" role="option" aria-selected="true"><svg class="i lead" viewBox="0 0 16 16"><rect x="4.5" y="4.5" width="7" height="7" rx="1"/><rect x="2" y="2" width="12" height="12" rx="3" stroke-dasharray="2 2"/></svg>Profile outside<svg class="i w" viewBox="0 0 16 16"><path d="M8 2l6.3 11H1.7z"/><path d="M8 6.5v3M8 11.5v.2"/></svg><span class="meta">T1</span></button>
+      <button type="button" class="ti agent" role="option" aria-selected="false"><svg class="i lead" viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path d="M5 6h6M5 8h6M5 10h6"/></svg>Pocket 2<span class="tag">agent</span><span class="meta">T1</span></button>
+    </div>
+  </div>
+  <div class="spec-row"><span class="lbl">Status chips · evaluation and plan state</span>
+    <div class="line">
+      <span class="chip success"><svg class="i" viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7"/></svg>Up to date</span>
+      <span class="chip muted"><svg class="i spin" viewBox="0 0 16 16"><path d="M8 2a6 6 0 1 0 6 6"/></svg>Updating…</span>
+      <span class="chip warning"><svg class="i" viewBox="0 0 16 16"><path d="M8 2l6.3 11H1.7z"/><path d="M8 6.5v3M8 11.5v.2"/></svg>Stale: tool changed</span>
+      <span class="chip danger"><svg class="i" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M8 5v3.5M8 10.8v.2"/></svg>Evaluation failed</span>
+    </div>
+  </div>
+  <div class="spec-row"><span class="lbl">Machine state · each with a shape and a label; Running is amber with a dot circling its edge</span>
+    <div class="line">
+      <span class="mstate offline"><svg viewBox="0 0 12 12"><circle cx="6" cy="6" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>Not connected</span>
+      <span class="mstate idle"><svg viewBox="0 0 12 12"><circle cx="6" cy="6" r="4.5" fill="currentColor"/></svg>Idle</span>
+      <span class="mstate moving"><svg viewBox="0 0 12 12"><path d="M3.5 2l6.5 4-6.5 4z" fill="currentColor"/></svg>Running<svg class="orbit" aria-hidden="true"><rect class="track" pathLength="1"/><rect class="dot" pathLength="1"/></svg></span>
+      <span class="mstate hold"><svg viewBox="0 0 12 12"><rect x="2.5" y="2" width="2.5" height="8" rx=".5" fill="currentColor"/><rect x="7" y="2" width="2.5" height="8" rx=".5" fill="currentColor"/></svg>Feed hold</span>
+      <span class="mstate action"><svg class="swap" viewBox="0 0 12 12"><path d="M2.2 5A4 4 0 0 1 9.4 3.4M9.8 7A4 4 0 0 1 2.6 8.6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M9.9 1.6v2.2H7.7M2.1 10.4V8.2h2.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Tool change</span>
+      <span class="mstate alarm"><svg viewBox="0 0 12 12"><path d="M4 1h4l3 3v4l-3 3H4L1 8V4z" fill="currentColor"/><path d="M6 3.5v3M6 8.2v.3" stroke="var(--safety-alarm)" stroke-width="1.4" stroke-linecap="round"/></svg>Alarm 2: soft limit</span>
+      <span class="vchip">Virtual machine · 10×</span>
+    </div>
+  </div>
+  <div class="spec-row"><span class="lbl">Run controls · 44 px · Stop is never confirmed</span>
+    <div class="line">
+      <button type="button" class="btn stop" data-size="lg"><svg class="i" viewBox="0 0 16 16"><rect class="f" x="3.5" y="3.5" width="9" height="9" rx="1"/></svg>Stop</button>
+      <button type="button" class="btn" data-size="lg"><svg class="i ico-hold" viewBox="0 0 16 16"><path d="M6 3.5v9M10 3.5v9" stroke-width="2"/></svg>Feed hold</button>
+      <button type="button" class="btn" data-size="lg" data-variant="primary"><svg class="i" viewBox="0 0 16 16"><path d="M5 3.3l8 4.7-8 4.7z"/></svg>Resume</button>
+    </div>
+    <div class="line" style="align-items:flex-start;gap:16px">
+      <div class="dro" aria-label="Work position"><div><b>X</b><span>103.417</span><small>mm</small></div><div><b>Y</b><span>-0.250</span><small>mm</small></div><div><b>Z</b><span>-1.500</span><small>mm</small></div></div>
+      <div style="display:grid;gap:8px"><span style="font-size:var(--text-sm);color:var(--text-muted)">Progress · determinate, indeterminate</span><div class="prog"><i></i></div><div class="prog ind"><i></i></div><span class="mono" style="font-size:var(--text-xs);color:var(--text-muted)">Line 1 884 / 3 020 · 04:12 left</span></div>
+    </div>
+  </div>
+  <div class="spec-row"><span class="lbl">Warnings and errors · soft warning (neutral, dismissible), hard warning (orange, not safe to ignore), info (blue), error (red, only for impossible values; blocks Generate)</span>
+    <div class="warn s"><svg class="i" viewBox="0 0 16 16"><path d="M8 2l6.3 11H1.7z"/><path d="M8 6.5v3M8 11.5v.2"/></svg><span>Stepdown 1.50 mm is above the 1.20 mm suggested for 6061.</span><div class="act"><button type="button" class="btn" data-size="sm">Use 1.20</button><button type="button" class="btn" data-size="sm" data-variant="ghost">Dismiss</button></div></div>
+    <div class="warn w"><svg class="i" viewBox="0 0 16 16"><path d="M8 2l6.3 11H1.7z"/><path d="M8 6.5v3M8 11.5v.2"/></svg><span>Corner radius 1.5 mm is smaller than the 6 mm tool can cut.</span><div class="act"><button type="button" class="btn" data-size="sm">Apply ≥ 3 mm</button><button type="button" class="btn" data-size="sm" data-variant="ghost">Explain</button></div></div>
+    <div class="warn n"><svg class="i" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M8 7.2v4M8 4.8v.2"/></svg><span>4 tabs hold the part. Cut them by hand after the job.</span></div>
+    <div class="banner"><svg class="i" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M8 5v3.5M8 10.8v.2"/></svg><div class="t"><span>Export failed: the folder is read-only. Choose another folder.</span><a>Details</a></div></div>
+  </div>
+  <div class="spec-row"><span class="lbl">Overlays · tooltip, menu, toast, confirm dialog</span>
+    <div class="overlay-demo">
+      <span class="tooltip">Rectangle <kbd>R</kbd></span>
+      <div class="menu" role="menu"><button type="button" role="menuitem">Duplicate<kbd>⌘D</kbd></button><button type="button" role="menuitem" class="hl">Rename<kbd>F2</kbd></button><hr><button type="button" role="menuitem" class="dz">Remove<kbd>⌫</kbd></button></div>
+      <div class="toast"><span>Removed Pocket 2</span><button type="button" class="btn" data-size="sm" data-variant="ghost">Undo</button></div>
+      <div class="dialog" role="dialog" aria-label="Remove plan"><div class="dh">Remove plan "Roughing"?</div><div class="db">Its toolpaths and export settings are deleted. This cannot be undone.</div><div class="df"><button type="button" class="btn">Cancel</button><button type="button" class="btn" data-variant="danger">Remove plan</button></div></div>
+    </div>
+  </div>
+  <div class="spec-row"><span class="lbl">Empty state · one sentence, one action</span>
+    <div class="empty"><svg class="i" viewBox="0 0 16 16"><rect x="2.5" y="3.5" width="11" height="9" rx="2"/><path class="hi" d="M5.5 8h5M8 5.5v5"/></svg><h4>Design a part first</h4><p>Plans are made from a part. Add a part in Design.</p><button type="button" class="btn" data-variant="primary"><svg class="i" viewBox="0 0 16 16"><path d="M3 8h9.5M9 4.5L12.5 8 9 11.5"/></svg>Go to Design</button></div>
+  </div>
+</template>
+
+<script>
+(() => {
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ---------- scales ---------- */
+const SCALES = {
+  neutral: {
+    light: ['#fbfcff', '#f6f8ff', '#eceff7', '#e4e8f2', '#dde2ec', '#d4dae6', '#c3cad8', '#a4acbb', '#868f8d', '#79827f', '#5b6462', '#1c2121'],
+    dark: ['#1e2323', '#272d2d', '#2e3535', '#353d3d', '#3a4343', '#414b4b', '#4c5757', '#5f6b6b', '#7a8482', '#8a9492', '#a2acaa', '#e9edf3'],
+  },
+  amber: {
+    light: ['#fffdf5', '#fff8e1', '#fff2c9', '#ffeab0', '#fbde8a', '#f1cd66', '#e9c96a', '#a87a00', '#f5b700', '#e6aa00', '#8a6400', '#3d2c00'],
+    dark: ['#1d1a10', '#241f10', '#3b3213', '#463b17', '#53451a', '#5f501d', '#6e5a1c', '#9b7a1c', '#f5b700', '#ffc61a', '#ffcf4d', '#ffe9b0'],
+  },
+};
+function scaleRows(id, s) {
+  $('#' + id).innerHTML = ['light', 'dark'].map(t => `<div class="scale"><span class="nm">${t === 'light' ? 'Light' : 'Dark'}</span>${s[t].map((h, i) => `<div data-hex="${h}" data-step="${i + 1}" style="background:${h};color:${i < 8 ? (t === 'light' ? '#1c2121' : '#e9edf3') : (i === 8 ? '#1c2121' : (t === 'light' ? '#fff' : '#1c2121'))}"></div>`).join('')}</div>`).join('');
+}
+scaleRows('sc-neutral', SCALES.neutral);
+scaleRows('sc-amber', SCALES.amber);
+
+/* ---------- token table ---------- */
+const TOK = [
+  ['Surfaces'],
+  ['--bg-app', 'Panels, page background (Ghost White / Jet)'],
+  ['--bg-chrome', 'Toolbar, status bar, panel headers'],
+  ['--bg-viewport', 'Viewport background'],
+  ['--bg-field', 'Inputs, wells, DRO'],
+  ['--bg-control', 'Buttons'],
+  ['--bg-raised', 'Menus, popovers, dialogs'],
+  ['Text'],
+  ['--text', 'Body, values'],
+  ['--text-muted', 'Labels, secondary'],
+  ['--text-faint', 'Units, metadata, placeholders, disabled (never essential text)'],
+  ['--text-accent', 'Label of the suggested action'],
+  ['--text-on-accent', 'Check marks on amber'],
+  ['Lines'],
+  ['--border', 'Separators, panel edges, button outlines'],
+  ['--border-control', 'Input, checkbox and switch outlines (3:1)'],
+  ['--focus', 'Focus ring'],
+  ['Accent'],
+  ['--accent', 'Solid amber: switch, checkbox, slider, progress, mode underline'],
+  ['--accent-border', 'Edge of amber fills'],
+  ['--accent-icon', 'Active, focused and selected icon details (saturated amber; faint dark edge in light theme)'],
+  ['--accent-subtle', 'Selected row'],
+  ['--accent-calm', 'Proposal callouts background (not buttons)'],
+  ['--accent-calm-border', 'Proposal callouts outline'],
+  ['Feedback'],
+  ['--danger', 'Invalid field, failed, destructive action'],
+  ['--warning', 'Hard warnings: not safe to ignore (orange). Soft warnings use neutral text and icon colours'],
+  ['--success', 'Up to date, done'],
+  ['--info', 'Info notes, agent activity'],
+  ['Safety (reserved)'],
+  ['--safety-stop', 'Stop control'],
+  ['--safety-alarm', 'Alarm state'],
+  ['--safety-hold', 'Feed hold, paused (orange + stripes)'],
+  ['--safety-moving', 'Running, jogging, homing (amber, with play icon and orbiting dot)'],
+  ['--safety-action', 'Tool change in progress (manual or ATC): sweeping band, turning swap icon'],
+  ['--safety-idle', 'Idle'],
+  ['--safety-offline', 'Not connected'],
+  ['Viewport'],
+  ['--vp-part', 'Part faces'],
+  ['--vp-edge', 'Part edges'],
+  ['--vp-selected', 'Selected geometry and toolpath'],
+  ['--vp-feed', 'Unselected toolpaths'],
+  ['--vp-rapid', 'Rapid moves, dashed'],
+  ['--vp-axis-x', 'X axis (CAD red)'],
+  ['--vp-axis-y', 'Y axis (CAD green)'],
+  ['--vp-axis-z', 'Z axis (CAD blue)'],
+];
+const probeL = document.createElement('div'); probeL.className = 't-light'; probeL.hidden = true;
+const probeD = document.createElement('div'); probeD.className = 't-dark'; probeD.hidden = true;
+document.body.append(probeL, probeD);
+const val = (el, t) => getComputedStyle(el).getPropertyValue(t).trim();
+const sw = h => `<span class="sw"><i style="background:${h}"></i>${h}</span>`;
+$('#tok-table tbody').innerHTML = TOK.map(r => r.length === 1
+  ? `<tr><td colspan="4" class="eyebrow" style="background:var(--bg-chrome);padding-top:8px">${r[0]}</td></tr>`
+  : `<tr><td><code>${r[0]}</code></td><td>${sw(val(probeL, r[0]))}</td><td>${sw(val(probeD, r[0]))}</td><td class="wrap">${r[1]}</td></tr>`).join('');
+
+function lum(h) {
+  h = h.replace('#', ''); const c = [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16) / 255).map(v => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+  return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+}
+const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+const PAIRS = [
+  ['--text', '--bg-app', 4.5], ['--text-muted', '--bg-app', 4.5], ['--text-muted', '--bg-chrome', 4.5], ['--text-faint', '--bg-app', 3],
+  ['--text-accent', '--bg-app', 4.5], ['--text', '--accent-subtle', 4.5], ['--text-on-accent', '--accent', 4.5],
+  ['--accent-border', '--bg-field', 3], ['--border-control', '--bg-field', 3], ['--border-control', '--bg-app', 3], ['--focus', '--bg-app', 3],
+  ['--text-accent', '--accent-subtle', 4.5], ['--danger', '--bg-field', 4.5], ['--warning', '--bg-app', 3], ['--success', '--bg-app', 4.5], ['--info', '--bg-app', 4.5],
+  ['--safety-stop-fg', '--safety-stop', 4.5], ['--safety-hold-fg', '--safety-hold', 4.5], ['--safety-action-fg', '--safety-action', 4.5],
+];
+$('#cr-table tbody').innerHTML = PAIRS.map(([f, b, need]) => {
+  const cell = el => { const r = ratio(val(el, f), val(el, b)); return `<td class="mono ${r >= need ? 'ok-t' : 'bad-t'}">${r.toFixed(2)} ${r >= need ? '✓' : '✗'}</td>`; };
+  return `<tr><td><code>${f}</code> on <code>${b}</code></td><td class="mono">${need}:1</td>${cell(probeL)}${cell(probeD)}</tr>`;
+}).join('');
+
+/* ---------- spacing & timing ---------- */
+$('#spacing').innerHTML = [['--space-0-5', 2], ['--space-1', 4], ['--space-2', 8], ['--space-3', 12], ['--space-4', 16], ['--space-5', 20], ['--space-6', 24], ['--space-8', 32]]
+  .map(([n, px]) => `<div><code class="code">${n}</code><span class="mono" style="color:var(--text-muted)">${px} px</span><i style="width:${px * 4}px;max-width:100%"></i></div>`).join('');
+$('#timing').innerHTML = [['--motion-instant', 80, 'press'], ['--motion-fast', 120, 'hover, colour'], ['--motion-base', 180, 'popovers, tooltips'], ['--motion-slow', 280, 'dialogs, panels, toggles'], ['--motion-emphasis', 450, 'indicators, camera'], ['--motion-draw', 900, 'toolpath draw-in'], ['--delay-indicator', 300, 'before spinners appear'], ['--delay-tooltip', 450, 'before tooltips appear']]
+  .map(([n, ms, use]) => `<div><code class="code">${n}</code><span class="mono" style="color:var(--text-muted)">${ms} ms</span><span style="display:flex;gap:8px;align-items:center;min-width:0"><i style="width:${ms / 4}px;flex:none"></i><span class="muted" style="font-size:var(--text-xs);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${use}</span></span></div>`).join('');
+
+/* ---------- icons ---------- */
+const I = {
+  select: ['Select', '<path d="M3.5 2.5l8.5 5-3.8 1L6.2 12z"/><path class="hi" d="M8.4 8.6l2.6 4"/>'],
+  rect: ['Rectangle', '<rect x="2.5" y="4" width="11" height="8" rx=".5"/><path class="hi" d="M1.5 3h2v2h-2zM12.5 11h2v2h-2z"/>'],
+  circle: ['Circle', '<circle cx="8" cy="8" r="5.5"/><path class="hi" d="M8 8l3.9-3.9"/><circle class="hi f" cx="8" cy="8" r="1"/>'],
+  line: ['Polyline', '<path d="M2.5 12.5L7 4.5l6.5 4"/><circle class="hi" cx="7" cy="4.5" r="1.3"/><circle class="hi" cx="2.5" cy="12.5" r="1.3"/><circle class="hi" cx="13.5" cy="8.5" r="1.3"/>'],
+  measure: ['Measure', '<path d="M2 11.5L11.5 2 14 4.5 4.5 14z"/><path class="hi" d="M5 8.5l1.3 1.3M7 6.5l1 1M9 4.5l1.3 1.3"/>'],
+  facing: ['Facing', '<rect x="2" y="9" width="12" height="4.5" rx="1"/><path class="hi" d="M2 6.5h12M2 4h12"/>'],
+  profile: ['Profile', '<rect x="4.5" y="4.5" width="7" height="7" rx="1"/><rect class="hi" x="2" y="2" width="12" height="12" rx="3" stroke-dasharray="2 2"/>'],
+  pocket: ['Pocket', '<rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path class="hi" d="M5 6h6M5 8h6M5 10h6"/>'],
+  drill: ['Drill', '<circle cx="8" cy="8" r="3.5"/><path class="hi" d="M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3"/>'],
+  tabs: ['Tabs', '<path d="M1.5 10h4v-2h5v2h4"/><path class="hi" d="M5.5 10V8h5v2"/>'],
+  endmill: ['End mill', '<path d="M6 1.5h4v5H6zM6 6.5l-.5 8h5l-.5-8"/><path class="hi" d="M5.5 14.5h5"/>'],
+  simulate: ['Simulate', '<path d="M5 3.3l8 4.7-8 4.7z"/><path class="hi" d="M2.5 5v6"/>'],
+  jog: ['Jog', '<rect x="6" y="6" width="4" height="4" rx="1"/><path class="hi" d="M8 1.5v3M6.5 3L8 1.5 9.5 3M8 14.5v-3M6.5 13L8 14.5 9.5 13M1.5 8h3M3 6.5L1.5 8 3 9.5M14.5 8h-3M13 6.5L14.5 8 13 9.5"/>'],
+  zero: ['Work zero', '<path d="M2 14V2M2 14h12"/><circle class="hi" cx="2" cy="14" r="1.6"/><path d="M6 10l3-3"/>'],
+  probe: ['Probe Z', '<path d="M8 2v7M5.5 6.5L8 9l2.5-2.5"/><path class="hi" d="M2.5 13.5h11"/>'],
+  fit: ['Fit', '<path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/><rect class="hi" x="5.5" y="5.5" width="5" height="5" rx=".5"/>'],
+  iso: ['Isometric', '<path d="M8 2l5.5 3v6L8 14l-5.5-3V5z"/><path class="hi" d="M8 8l5.5-3M8 8L2.5 5M8 8v6"/>'],
+  grid: ['Grid', '<rect x="2.5" y="2.5" width="11" height="11" rx="1"/><path class="hi" d="M6.2 2.5v11M9.8 2.5v11M2.5 6.2h11M2.5 9.8h11"/>'],
+  undo: ['Undo (Lucide)', '<path d="M5 3.5L2.5 6 5 8.5"/><path d="M2.5 6H10a3.5 3.5 0 010 7H7"/>'],
+  redo: ['Redo (Lucide)', '<path d="M11 3.5L13.5 6 11 8.5"/><path d="M13.5 6H6a3.5 3.5 0 000 7h3"/>'],
+};
+const ico = k => `<svg class="i" viewBox="0 0 16 16" aria-hidden="true">${I[k][1]}</svg>`;
+$('#icon-sheet').innerHTML = Object.keys(I).map(k => `<figure><span class="ib" aria-pressed="${k === 'pocket' || k === 'iso'}">${ico(k)}</span>${I[k][0]}</figure>`).join('');
+
+/* ---------- indicators ---------- */
+function placeInd(container) {
+  const ind = $('.ind', container), b = $('[aria-selected="true"]', container);
+  if (!ind || !b) return;
+  ind.style.width = (b.offsetWidth - 20) + 'px';
+  ind.style.transform = `translateX(${b.offsetLeft + 10}px)`;
+}
+function placeThumb(seg) {
+  const t = $('.thumb', seg), b = $('[aria-pressed="true"]', seg);
+  if (!t || !b) return;
+  t.style.width = b.offsetWidth + 'px';
+  t.style.transform = `translateX(${b.offsetLeft}px)`;
+}
+function wireModes(c) {
+  c.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; $$('button', c).forEach(x => x.setAttribute('aria-selected', String(x === b))); placeInd(c); });
+}
+function wireSeg(s, onChange) {
+  s.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; $$('button', s).forEach(x => x.setAttribute('aria-pressed', String(x === b))); placeThumb(s); onChange && onChange(b); });
+}
+function wireToolbar(tb, keys) {
+  tb.innerHTML = '';
+  keys.forEach((grp, gi) => {
+    if (gi) tb.insertAdjacentHTML('beforeend', '<span class="sep"></span>');
+    grp.forEach(([k, key, on]) => tb.insertAdjacentHTML('beforeend', `<button type="button" class="ib" data-k="${k}" title="${I[k][0].replace(' (Lucide)', '')}  ${key}" aria-label="${I[k][0].replace(' (Lucide)', '')}" aria-pressed="${!!on}">${ico(k)}</button>`));
+  });
+  tb.addEventListener('click', e => {
+    const b = e.target.closest('.ib'); if (!b || b.disabled || ['undo', 'redo'].includes(b.dataset.k)) return;
+    const grp = ['fit', 'iso', 'grid'].includes(b.dataset.k) ? null : $$('.ib', tb).filter(x => !['undo', 'redo', 'grid', 'fit', 'iso'].includes(x.dataset.k));
+    if (grp) grp.forEach(x => x.setAttribute('aria-pressed', String(x === b))); else b.setAttribute('aria-pressed', String(b.getAttribute('aria-pressed') !== 'true'));
+  });
+}
+
+/* ---------- small icons, field illustrations, mode switcher ---------- */
+const SM = {
+  warn: '<path d="M8 2l6.3 11H1.7z"/><path d="M8 6.5v3M8 11.5v.2"/>',
+  err: '<circle cx="8" cy="8" r="6"/><path d="M8 5v3.5M8 10.8v.2"/>',
+  info: '<circle cx="8" cy="8" r="6"/><path d="M8 7.2v4M8 4.8v.2"/>',
+  rec: '<circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="8" r="2"/>',
+  lock: '<rect x="3.5" y="7" width="9" height="6.5" rx="1.2"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/>',
+  unlock: '<rect x="3.5" y="7" width="9" height="6.5" rx="1.2"/><path d="M5.5 7V5a2.5 2.5 0 0 1 4.9-.7"/>',
+  pen: '<path d="M11 2.5l2.5 2.5-7.5 7.5H3.5V10z"/><path class="hi" d="M9.5 4l2.5 2.5"/>',
+  chev: '<path d="M4 6l4 4 4-4"/>',
+};
+const FI = {
+  // Field illustrations: thin grey drawing of the whole feature; the amber line overlays the measured part on the same centreline (butt caps, so joins line up). No arrows.
+  length: '<rect x="2" y="6" width="16" height="8" rx="4"/><path class="hi" d="M2 10H18"/>',
+  width: '<rect x="2" y="6" width="16" height="8" rx="4"/><path class="hi" d="M10 6V14"/>',
+  depth: '<path d="M2 6H6V14H14V6H18"/><path class="hi" d="M6 6V14"/>',
+  stepdown: '<path d="M2 5H7V9H12V13H18"/><path class="hi" d="M7 5V9"/>',
+  corner: '<path d="M3 3V10A7 7 0 0 0 10 17H17"/><path class="hi" d="M3 10A7 7 0 0 0 10 17"/>',
+  chamfer: '<path d="M3 3V11L9 17H17"/><path class="hi" d="M3 11L9 17"/>',
+  tool: '<path d="M8 2h4v6H8zM8 8l-.5 9h5L12 8"/><path class="hi" d="M8.6 10.5l2.9-1.4M8.4 13.5l3.3-1.6"/>',
+  feed: '<circle cx="6.5" cy="10" r="3.5"/><path d="M2 15.5H6.5"/><path class="hi" d="M6.5 15.5H18"/>',
+  tabs: '<path d="M2 7H18M2 13H18"/><path class="hi" d="M6 13H8M12 13H14"/>',
+};
+const MODES = [['design', 'Design', '<path d="M2.5 13.5h11"/><path d="M4 11l6.5-6.5 2 2L6 13H4z"/><path class="hi" d="M10.5 4.5l1-1 2 2-1 1"/>'],
+  ['plan', 'Plan', '<path d="M2.5 4h3M2.5 8h3M2.5 12h3"/><path class="hi" d="M8.5 3.5h5v4.5h-5v4.5h5"/>'],
+  ['run', 'Run', '<circle cx="8" cy="8" r="6"/><path class="hi" d="M6.5 5.3l4 2.7-4 2.7z"/>']];
+function decorate(root) {
+  $$('svg[data-ic]', root).forEach(s => { s.innerHTML = SM[s.dataset.ic]; s.setAttribute('aria-hidden', 'true'); });
+  $$('svg[data-fi]', root).forEach(s => { s.innerHTML = FI[s.dataset.fi]; s.setAttribute('aria-hidden', 'true'); });
+  $$('.qa.pen', root).forEach(b => { b.innerHTML = `<svg class="i" viewBox="0 0 16 16">${SM.pen}</svg>`; });
+  $$('.qa.lock', root).forEach(b => { b.innerHTML = `<svg class="i" viewBox="0 0 16 16">${SM[b.getAttribute('aria-pressed') === 'true' ? 'lock' : 'unlock']}</svg>`; });
+  $$('[data-modesw]', root).forEach(m => {
+    const tab = m.hasAttribute('data-demo-tabs') ? ' tabindex="-1"' : '';
+    m.innerHTML = MODES.map(([k, l, p]) => `<button type="button" role="tab"${tab} data-mode="${k}" aria-selected="${k === m.dataset.modesw}"><svg class="i" viewBox="0 0 16 16" aria-hidden="true">${p}</svg>${l}</button>`).join('') + '<span class="ind"></span>';
+  });
+}
+document.addEventListener('click', e => {
+  const lock = e.target.closest('.qa.lock');
+  if (lock) { const on = lock.getAttribute('aria-pressed') !== 'true'; lock.setAttribute('aria-pressed', String(on)); lock.setAttribute('aria-label', on ? 'Unlock value' : 'Lock value'); lock.innerHTML = `<svg class="i" viewBox="0 0 16 16">${SM[on ? 'lock' : 'unlock']}</svg>`; return; }
+  const dis = e.target.closest('[data-dismiss]');
+  if (dis) { const it = dis.closest('.fs-i'), fs = it.closest('.fs'); it.hidden = true; fs.classList.remove('soft'); const r = document.createElement('button'); r.type = 'button'; r.className = 'fs-more fs-undo'; r.innerHTML = `<svg class="i" viewBox="0 0 16 16">${SM.warn}</svg>1 dismissed · Show`; it.after(r); return; }
+  const undo = e.target.closest('.fs-undo');
+  if (undo) { const it = undo.previousElementSibling; it.hidden = false; it.closest('.fs').classList.add('soft'); undo.remove(); return; }
+  const more = e.target.closest('.fs-more');
+  if (more) { const ex = more.nextElementSibling; const open = more.getAttribute('aria-expanded') !== 'true'; more.setAttribute('aria-expanded', String(open)); ex.hidden = !open; more.firstChild.textContent = open ? 'Fewer' : (ex.children.length + ' more'); return; }
+  const apply = e.target.closest('[data-apply]');
+  if (apply) { applyRec(apply.closest('.field')); return; }
+  const pen = e.target.closest('.qa.pen');
+  if (pen) { const f = pen.closest('.field'); const open = $('.stepper', f); closeSteppers(); if (!open) openStepper(f, pen); return; }
+  if (!e.target.closest('.stepper')) closeSteppers();
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeSteppers(true); });
+function closeSteppers(refocus) {
+  $$('.stepper').forEach(s => { const f = s.closest('.field'), pen = $('.qa.pen', f); pen.setAttribute('aria-expanded', 'false'); s.remove(); if (refocus) pen.focus(); });
+}
+function fieldVal(f) { return parseFloat($('.qi .src', f).textContent) || 0; }
+function setVal(f, v) { const dec = +(f.dataset.dec || 2); $('.qi .src', f).textContent = Math.max(0, v).toFixed(dec); const sv = $('.stepper .v span', f); if (sv) sv.textContent = Math.max(0, v).toFixed(dec); }
+function applyRec(f) {
+  setVal(f, parseFloat(f.dataset.rec));
+  const pen = $('.qa.pen', f); if (pen) pen.classList.remove('fix');
+  const w = $('.fs-i.warn, .fs-i.soft', f); if (w) w.remove(); $('.fs-undo', f)?.remove();
+  const fs = $('.fs', f); if (fs) { fs.classList.remove('warn', 'soft'); if (!fs.querySelector('.fs-i, .fs-more')) fs.remove(); }
+  delete f.dataset.rec; closeSteppers();
+}
+function openStepper(f, pen) {
+  const steps = ['0.001', '0.01', '0.1', '1', '10', '100'];
+  const cur = f.dataset.step || '0.1';
+  const unit = $('.qi .u', f)?.textContent || '';
+  const s = document.createElement('div');
+  s.className = 'stepper'; s.setAttribute('role', 'dialog'); s.setAttribute('aria-label', 'Adjust ' + f.dataset.name);
+  s.innerHTML = `<div class="ttl">Adjust ${f.dataset.name}<span>↑ ↓ · ⇧ ×10</span></div>
+    <div class="seg" role="group" aria-label="Step"><span class="thumb"></span>${steps.map(st => `<button type="button" aria-pressed="${st === cur}" data-st="${st}">${st.replace(/^0\./, '.')}</button>`).join('')}</div>
+    <div class="adj"><button type="button" class="btn" data-d="-1" aria-label="Decrease">−</button><div class="v"><span>${fieldVal(f).toFixed(+(f.dataset.dec || 2))}</span><small>${unit}</small></div><button type="button" class="btn" data-d="1" aria-label="Increase">+</button></div>
+    ${f.dataset.rec ? `<div class="rec"><span>Recommended <b>${f.dataset.recText}</b></span><button type="button" class="btn" data-size="sm" data-variant="primary" data-apply><svg class="i" viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7"/></svg>Use ${f.dataset.rec} ${unit}</button></div>` : ''}`;
+  f.appendChild(s); pen.setAttribute('aria-expanded', 'true');
+  const seg = $('.seg', s); placeThumbNow(seg);
+  wireSeg(seg, b => { f.dataset.step = b.dataset.st; });
+  s.addEventListener('click', e => { const b = e.target.closest('[data-d]'); if (b) setVal(f, fieldVal(f) + (+b.dataset.d) * parseFloat(f.dataset.step || '0.1')); });
+  $('[data-d="1"]', s).focus();
+}
+function placeThumbNow(seg) { const t = $('.thumb', seg); t.style.transition = 'none'; placeThumb(seg); requestAnimationFrame(() => { t.style.transition = ''; }); }
+
+/* ---------- gallery ---------- */
+const tpl = $('#gallery-tpl');
+['light', 'dark'].forEach((t, i) => {
+  const pane = document.createElement('div');
+  pane.className = 'pane t-' + t;
+  pane.appendChild(tpl.content.cloneNode(true));
+  $('.eyebrow', pane).textContent = t === 'light' ? 'Light · Ghost White' : 'Dark · Jet';
+  $$('input[name="RADIO"]', pane).forEach(r => { r.name = 'side-' + t; });
+  $$('input, button, [role]', pane).forEach((el, n) => { if (el.tagName === 'INPUT') el.id = `g-${t}-${n}`; });
+  $('#gallery').appendChild(pane);
+  decorate(pane);
+  wireModes($('[data-modesw]', pane));
+  wireToolbar($('[data-toolbar]', pane), [[['select', 'V'], ['rect', 'R', true], ['circle', 'C'], ['line', 'L']], [['profile', 'P'], ['pocket', 'K'], ['drill', 'D']], [['undo', '⌘Z'], ['redo', '⇧⌘Z']]]);
+  $$('[data-toolbar] .ib', pane).slice(-1)[0].disabled = true;
+  wireModes($('[data-modes]', pane));
+  wireSeg($('[data-seg]', pane));
+  const mixed = $('[data-mixed]', pane); mixed.indeterminate = true;
+});
+$$('.switch').filter(s => !s.closest('.mcard')).forEach(s => s.addEventListener('click', () => s.setAttribute('aria-checked', String(s.getAttribute('aria-checked') !== 'true'))));
+$$('.tree').forEach(tree => tree.addEventListener('click', e => {
+  const b = e.target.closest('.ti'); if (!b) return;
+  $$('.ti', tree).forEach(x => { x.setAttribute('aria-selected', String(x === b)); x.classList.remove('hov'); });
+}));
+
+/* ---------- motion demos ---------- */
+function replay(card) {
+  const d = card.dataset.demo;
+  if (d === 'modes') {
+    const m = $('.modesw', card), bs = $$('button', m), i = bs.findIndex(b => b.getAttribute('aria-selected') === 'true');
+    bs.forEach((b, j) => b.setAttribute('aria-selected', String(j === (i + 1) % 3))); placeInd(m); return;
+  }
+  if (d === 'switch') {
+    const s = $('.switch', card), c = $('input', card), seg = $('.seg', card);
+    const on = s.getAttribute('aria-checked') !== 'true'; s.setAttribute('aria-checked', String(on)); c.checked = on;
+    $$('button', seg).forEach((b, j) => b.setAttribute('aria-pressed', String(on ? j === 1 : j === 0))); placeThumb(seg); return;
+  }
+  const el = $({ draw: '.draw-demo', pulse: '.pulse-demo', enter: '.enter-demo', pop: '.pop-demo' }[d], card);
+  el.classList.remove('go'); void el.getBoundingClientRect(); el.classList.add('go');
+}
+$$('.mcard').forEach(c => { c.tabIndex = 0; c.setAttribute('role', 'button'); c.setAttribute('aria-label', 'Replay ' + $('b', c).textContent);
+  c.addEventListener('click', () => replay(c)); c.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); replay(c); } }); });
+
+/* ---------- shell ---------- */
+wireToolbar($('#shell-tools'), [[['select', 'V', true], ['measure', 'M']], [['rect', 'R'], ['circle', 'C'], ['line', 'L']], [['undo', '⌘Z'], ['redo', '⇧⌘Z']]]);
+wireToolbar($('#shell-float'), [[['fit', 'F'], ['iso', '0'], ['grid', 'G', true]]]);
+$('#shell-float').querySelectorAll('.sep').forEach(s => s.remove());
+decorate(document.querySelector('#motion')); decorate($('#shell-win'));
+wireModes($('#shell-modes'));
+const tree = [['stock', 'Stock', '140×90×6', '<path d="M2.5 5.5L8 3l5.5 2.5v5L8 13l-5.5-2.5z"/><path d="M2.5 5.5L8 8l5.5-2.5M8 8v5"/>'], ['part', 'Bracket', '', '<rect x="2.5" y="3.5" width="11" height="9" rx="2"/>'], ['outer', 'Outer profile', '120×70', I.rect[1]], ['slot', 'Slot', '50×12', '<rect x="2" y="5.5" width="12" height="5" rx="2.5"/>'], ['holes', 'Holes', '4×Ø6', '<circle cx="5" cy="5" r="1.8"/><circle cx="11" cy="5" r="1.8"/><circle cx="5" cy="11" r="1.8"/><circle cx="11" cy="11" r="1.8"/>']];
+$('#shell-tree').innerHTML = tree.map(([k, l, m, p], i) => `<button type="button" class="ti" role="option" data-k="${k}" aria-selected="${k === 'slot'}" style="${i > 1 ? 'padding-left:26px' : ''}${k === 'part' ? ';font-weight:600' : ''}"><svg class="i lead" viewBox="0 0 16 16">${p}</svg>${l}${m ? `<span class="meta">${m}</span>` : ''}</button>`).join('');
+$('#shell-tree').addEventListener('click', e => {
+  const b = e.target.closest('.ti'); if (!b) return;
+  const map = { outer: ['sh-outer'], slot: ['sh-slot'], holes: ['sh-holes'], part: ['sh-outer', 'sh-slot', 'sh-holes'], stock: [] };
+  ['sh-outer', 'sh-slot', 'sh-holes'].forEach(id => { const el = $('#' + id); el.classList.toggle('s-sel', map[b.dataset.k].includes(id)); el.style.fill = ''; });
+  const lbl = { stock: ['Stock', '140 × 90 × 6 mm'], part: ['Bracket', '120 × 70 mm'], outer: ['Outer profile', '120 × 70 mm'], slot: ['Slot', '50 × 12 × 3 mm'], holes: ['Holes', '4 × Ø6 mm'] }[b.dataset.k];
+  $('#shell-win .lab').innerHTML = `<b>${lbl[0]}</b>${lbl[1]}`;
+});
+
+/* ---------- theme ---------- */
+const themeSeg = $('#theme-seg');
+wireSeg(themeSeg, b => {
+  const v = b.dataset.themeSet;
+  if (v === 'auto') document.documentElement.removeAttribute('data-theme'); else document.documentElement.setAttribute('data-theme', v);
+  try { localStorage.setItem('dfyom-ds-theme', v); } catch (e) {}
+});
+try { const v = localStorage.getItem('dfyom-ds-theme'); if (v && v !== 'auto') $(`[data-theme-set="${v}"]`).click(); } catch (e) {}
+
+/* ---------- toc ---------- */
+const links = $$('#toc a');
+if ('IntersectionObserver' in window) {
+  const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) links.forEach(a => a.classList.toggle('on', a.getAttribute('href') === '#' + e.target.id)); }), { rootMargin: '-20% 0px -70% 0px' });
+  $$('main section').forEach(s => io.observe(s));
+}
+
+function layoutAll() { $$('.modes, .modesw').forEach(placeInd); $$('.seg').forEach(placeThumb); }
+const noAnim = () => { $$('.modes .ind, .modesw .ind, .seg .thumb').forEach(x => x.style.transition = 'none'); layoutAll(); requestAnimationFrame(() => $$('.modes .ind, .seg .thumb').forEach(x => x.style.transition = '')); };
+noAnim();
+addEventListener('resize', noAnim);
+if (document.fonts) document.fonts.ready.then(noAnim);
+if (!reduce) setTimeout(() => $$('.mcard').forEach(c => { if (['draw', 'pulse', 'enter', 'pop'].includes(c.dataset.demo)) replay(c); }), 600);
+})();
+</script>
