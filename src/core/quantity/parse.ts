@@ -29,6 +29,19 @@ export interface ParseContext {
 export interface ParsedLiteral {
   readonly exact: Rational
   readonly tolerance: Option<ToleranceProps>
+  /** The nominal as written, for the input field (steppers, unit suffix; task 3.4). */
+  readonly nominal: LiteralNominal
+}
+
+/** Where the signed number of a literal's value sits in the source and what it says. */
+export interface LiteralNominal {
+  /** Offsets of the signed number in the source (`start` at the sign, `end` before the unit). */
+  readonly start: number
+  readonly end: number
+  /** Signed value in the written unit (not converted). */
+  readonly value: Rational
+  /** Unit written after the number; None = the field's bare-number default. */
+  readonly unit: Option<UnitId>
 }
 
 /** Maximum source length in UTF-16 code units (`string.length`). */
@@ -84,6 +97,8 @@ export interface Magnitude {
   readonly value: Rational
   /** Unit as written, if any. */
   readonly unit: Option<UnitId>
+  /** Offset just after the number (before any unit). */
+  readonly end: number
 }
 
 /**
@@ -106,19 +121,21 @@ export class LiteralScanner {
         max: MAX_SOURCE_LENGTH,
       })
     this.skipWs()
+    const start = this.pos
     const v = this.quantityValue()
     if (v.isErr()) return v
-    const { value, unit } = v.unwrap()
+    const { value, unit, end } = v.unwrap()
+    const nominal: LiteralNominal = { start, end, value, unit }
     const valueUnit = unit.unwrapOr(defaultUnit)
     this.skipWs()
     const exact = value.mul(UNITS[valueUnit].factor)
-    if (this.atEnd()) return Ok({ exact, tolerance: None })
+    if (this.atEnd()) return Ok({ exact, tolerance: None, nominal })
 
     const tol = this.tolerance(valueUnit, unit.isNone())
     if (tol.isErr()) return tol
     this.skipWs()
     if (!this.atEnd()) return this.unexpected(['end'])
-    return Ok({ exact, tolerance: Some(tol.unwrap()) })
+    return Ok({ exact, tolerance: Some(tol.unwrap()), nominal })
   }
 
   /** `magnitude, [ ws, unit ]` at `pos`: one number token of an expression. */
@@ -195,19 +212,19 @@ export class LiteralScanner {
     const negative = SIGNS.has(this.peek() ?? '') ? this.sign() : false
     const m = this.magnitudeWithUnit(true)
     if (m.isErr()) return m
-    const { value, unit } = m.unwrap()
-    return Ok({ value: negative ? value.neg() : value, unit })
+    const { value, unit, end } = m.unwrap()
+    return Ok({ value: negative ? value.neg() : value, unit, end })
   }
 
   private magnitudeWithUnit(fraction: boolean): AppResult<Magnitude> {
     const m = this.magnitude(fraction)
     if (m.isErr()) return m
-    const save = this.pos
+    const end = this.pos
     this.skipWs()
     const unit = this.unit()
     if (unit.isErr()) return unit
-    if (unit.unwrap().isNone()) this.pos = save
-    return Ok({ value: m.unwrap(), unit: unit.unwrap() })
+    if (unit.unwrap().isNone()) this.pos = end
+    return Ok({ value: m.unwrap(), unit: unit.unwrap(), end })
   }
 
   // magnitude = mixed | fraction | decimal. `fraction: false` reads `1/…` as the integer 1.

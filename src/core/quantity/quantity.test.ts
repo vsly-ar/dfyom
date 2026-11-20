@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { parseWith } from '../../shared/parse'
 import { None, Some } from '../../shared/result'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
+import { parseLiteral } from './parse'
 import { Quantity, type ParseContext } from './quantity'
 import { QuantityDtoSchema, type QuantityDTO } from './quantity.dto'
 import { Rational } from './rational'
@@ -319,6 +320,38 @@ describe('Rational', () => {
     expect(rat(0n, 7n).toDTO()).toEqual({ num: '0', den: '1' })
     const e = expectErrCode(Rational.create(1n, 0n), 'model.invariant')
     expect(e.issues[0]?.rule).toBe('denominatorNonZero')
+  })
+
+  it('formats exactly at a fixed precision, rounding half away from zero', () => {
+    expect(rat(127n, 80n).toFixed(3)).toBe('1.588') // 1.5875
+    expect(rat(-127n, 80n).toFixed(3)).toBe('-1.588')
+    expect(rat(1n, 3n).toFixed(4)).toBe('0.3333')
+    expect(rat(-1n, 10000n).toFixed(3)).toBe('0.000') // no -0
+    expect(rat(25n).toFixed(0)).toBe('25')
+    expect(rat(1n, 20n).toFixed(1)).toBe('0.1')
+  })
+
+  it('finds the fewest decimal digits that write a value exactly', () => {
+    expect(rat(1n, 16n).decimalDigits(6).unwrapOr(-1)).toBe(4)
+    expect(rat(3n).decimalDigits(6).unwrapOr(-1)).toBe(0)
+    expect(rat(1n, 3n).decimalDigits(6).isNone()).toBe(true)
+  })
+})
+
+describe('parseLiteral: nominal as written (input field, task 3.4)', () => {
+  const nominal = (source: string, ctx: ParseContext = LENGTH_MM) =>
+    expectOk(parseLiteral(source, ctx)).nominal
+
+  it('spans the signed number without the unit and keeps the written unit', () => {
+    const n = nominal(' -1 1/2" ±0.01')
+    expect([n.start, n.end]).toEqual([1, 7])
+    expect(n.value.toString()).toBe('-3/2')
+    expect(n.unit.isSome() && n.unit.unwrap()).toBe('in')
+  })
+
+  it('has no unit for a bare number', () => {
+    const n = nominal('3.5 +0.1/-0.05')
+    expect([n.start, n.end, n.unit.isNone()]).toEqual([0, 3, true])
   })
 })
 
