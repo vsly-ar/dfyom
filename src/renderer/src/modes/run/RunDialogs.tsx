@@ -1,0 +1,271 @@
+// Run dialogs, mounted with the machine toolbar so they work in every mode: the pre-flight dialog
+// before every run, the tool-change and program-pause dialogs (dismissable to the inspector), and
+// the blocking failure dialog; tool-change waits and alarms are announced assertively.
+// Doc: docs/conventions/ui.md#confirmations, #run-mode-safety-ui
+import { Play } from 'lucide-react'
+import { useId } from 'react'
+import type { ProjectDoc } from '../../../../core/project/document'
+import type { AppErrorData } from '../../../../shared/errors/app-error'
+import { runMessages } from '../../messages/run'
+import { Button, Dialog, DialogClose, ErrorMessage } from '../../ui'
+import { useReplica } from '../../shell/ShellContext'
+import { JogPad } from './JogPad'
+import { activeJob, formatLength, runGates } from './machine-state'
+import { planRunInfo } from './plan-info'
+import { useRun, useRunStore, waitKey } from './run-store'
+import { WorkZeroButtons } from './RunNavigator'
+import styles from './Run.module.css'
+
+export function RunDialogs(): React.JSX.Element {
+  const replica = useReplica()
+  const doc = replica.status === 'open' ? replica.doc : undefined
+  return (
+    <>
+      {doc ? <PreflightDialog doc={doc} /> : null}
+      <WaitDialog units={doc?.unitSystem ?? 'mm'} />
+      <FailureDialog />
+      <Announcer />
+    </>
+  )
+}
+
+function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
+  const store = useRunStore()
+  const open = useRun((s) => s.preflightOpen)
+  const status = useRun((s) => s.status)
+  const planId = useRun((s) => s.planId)
+  const timeScale = status.connection.timeScale
+  const whyId = useId()
+  const m = runMessages.preflight
+  const plan = planId === undefined ? undefined : doc.plans[planId]
+  const info = plan ? planRunInfo(plan) : undefined
+  const gate = runGates(status, { planChosen: plan !== undefined }).start
+  const units = doc.unitSystem
+  const a = store.getState()
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={a.setPreflightOpen}
+      title={m.title}
+      description={m.description}
+      footer={
+        <>
+          <DialogClose>
+            <Button>{m.cancel}</Button>
+          </DialogClose>
+          <Button
+            variant="primary"
+            icon={<Play aria-hidden="true" />}
+            disabled={gate !== null}
+            {...(gate === null ? { autoFocus: true } : { 'aria-describedby': whyId })}
+            onClick={() => void a.startRun()}
+          >
+            {m.start}
+          </Button>
+        </>
+      }
+    >
+      <dl className={styles['facts']}>
+        <dt>{m.plan}</dt>
+        <dd>{info?.name ?? '–'}</dd>
+        <dt>{m.machine}</dt>
+        <dd>{info?.machine ?? '–'}</dd>
+        <dt>{m.target}</dt>
+        <dd>{m.virtualTarget(runMessages.timeScale(timeScale))}</dd>
+        <dt>{m.workZero}</dt>
+        <dd className={styles['mono']}>
+          {status.workZero.map((v) => formatLength(v, units)).join(' · ')}{' '}
+          {runMessages.dro.units[units]}
+        </dd>
+        <dt>{m.tools}</dt>
+        <dd>
+          {info === undefined || info.tools.length === 0 ? (
+            m.noTools
+          ) : (
+            <ol className={styles['tools']}>
+              {info.tools.map((t, i) => (
+                <li key={`${i}-${t}`}>{t}</li>
+              ))}
+            </ol>
+          )}
+        </dd>
+        <dt>{m.softLimits}</dt>
+        <dd>{m.softLimitsText}</dd>
+      </dl>
+      {gate === null ? null : (
+        <p id={whyId} className={styles['why']}>
+          {gate}
+        </p>
+      )}
+    </Dialog>
+  )
+}
+
+/** Tool change or program pause: instructions, jog and Z zero inside; Continue is the primary. */
+function WaitDialog({ units }: { units: ProjectDoc['unitSystem'] }): React.JSX.Element | null {
+  const store = useRunStore()
+  const status = useRun((s) => s.status)
+  const dismissed = useRun((s) => s.dismissedWait)
+  const jogStep = useRun((s) => s.jogStep)
+  const pending = useRun((s) => s.pending)
+  const progress = useRun((s) => s.progress)
+  const ids = { jog: useId(), zero: useId() }
+  const key = waitKey(status)
+  const job = activeJob(status)
+  const a = store.getState()
+  if (key === undefined || job === undefined) return null
+  const open = dismissed !== key
+  const later = () => a.dismissWait(key)
+  const continuing = pending.includes('run.job.continue')
+  const gates = runGates(status, { planChosen: true })
+
+  if (job.phase === 'toolChange' && job.toolChange) {
+    const tc = job.toolChange
+    const m = runMessages.toolChange
+    return (
+      <Dialog
+        open={open}
+        onOpenChange={(o) => (o ? a.dismissWait(undefined) : later())}
+        title={m.title(tc.n)}
+        description={m.description(tc.name)}
+        footer={
+          <>
+            <Button variant="ghost" onClick={later}>
+              {m.later}
+            </Button>
+            <Button
+              variant="primary"
+              icon={<Play aria-hidden="true" />}
+              disabled={continuing}
+              onClick={() => void a.continueWait()}
+            >
+              {m.continue}
+            </Button>
+          </>
+        }
+      >
+        <ol className={styles['steps']}>
+          {m.steps(tc.name).map((s) => (
+            <li key={s}>{s}</li>
+          ))}
+        </ol>
+        <JogPad
+          units={units}
+          step={jogStep}
+          onStep={a.setJogStep}
+          onJog={(axis, mm, feed) => void a.jog(axis, mm, feed)}
+          onCancel={() => void a.jogCancel()}
+          disabledReason={gates.jog}
+          reasonId={ids.jog}
+        />
+        <WorkZeroButtons
+          only="z"
+          gate={gates.workZero}
+          reasonId={ids.zero}
+          onZero={(axes) => void a.setWorkZero(axes)}
+        />
+      </Dialog>
+    )
+  }
+
+  const m = runMessages.pause
+  const message = pauseMessage(progress?.label)
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => (o ? a.dismissWait(undefined) : later())}
+      title={m.title(job.pause ?? 0)}
+      description={m.description(message)}
+      footer={
+        <>
+          <Button variant="ghost" onClick={later}>
+            {m.later}
+          </Button>
+          <Button
+            variant="primary"
+            icon={<Play aria-hidden="true" />}
+            disabled={continuing}
+            onClick={() => void a.continueWait()}
+          >
+            {m.continue}
+          </Button>
+        </>
+      }
+    />
+  )
+}
+
+/** The M0 message: the progress label while the run waits (docs/modes/run-v0.1.md#progress). */
+export function pauseMessage(label: string | undefined): string {
+  return label === undefined || label === '' ? runMessages.state.paused : label
+}
+
+/** Data of a `machine.*` failure: GRBL's code, the 1-based line and GRBL's message. */
+function failureData(error: AppErrorData): { code?: number; line?: number; text?: string } {
+  for (const f of error.frames) {
+    const d = f.data as { code?: unknown; line?: unknown; text?: unknown } | undefined
+    if (d && (typeof d.code === 'number' || typeof d.line === 'number'))
+      return {
+        ...(typeof d.code === 'number' ? { code: d.code } : {}),
+        ...(typeof d.line === 'number' ? { line: d.line } : {}),
+        ...(typeof d.text === 'string' ? { text: d.text } : {}),
+      }
+  }
+  return {}
+}
+
+/** Blocking dialog for a failed run (ui.md#errors: `machine.*` during a run). */
+function FailureDialog(): React.JSX.Element | null {
+  const store = useRunStore()
+  const ended = useRun((s) => s.ended)
+  const open = useRun((s) => s.failureOpen)
+  const status = useRun((s) => s.status)
+  if (ended?.kind !== 'failed') return null
+  const m = runMessages.failure
+  const { error } = ended
+  const data = failureData(error)
+  const alarm = error.code === 'machine.alarm'
+  const lostPosition = alarm || !status.homed
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) store.getState().closeFailure()
+      }}
+      title={alarm ? m.alarmTitle(data.code) : m.title}
+      footer={
+        <DialogClose>
+          <Button>{m.close}</Button>
+        </DialogClose>
+      }
+    >
+      <div role="alert" className={styles['failure']}>
+        {data.text ? <p>{data.text}</p> : null}
+        <ErrorMessage error={error} />
+        {data.line === undefined ? null : <p>{m.line(data.line)}</p>}
+        {error.code === 'machine.error' || alarm ? <p>{m.didHold}</p> : null}
+        <p>{lostPosition ? m.nextHome : m.nextCheck}</p>
+      </div>
+    </Dialog>
+  )
+}
+
+/** Assertive announcements: tool-change and pause waits, alarms (ui.md#accessibility). */
+function Announcer(): React.JSX.Element {
+  const status = useRun((s) => s.status)
+  const progress = useRun((s) => s.progress)
+  const job = activeJob(status)
+  const text =
+    job?.phase === 'toolChange' && job.toolChange
+      ? runMessages.toolChange.announce(job.toolChange.n, job.toolChange.name)
+      : job?.phase === 'programPause'
+        ? runMessages.pause.announce(pauseMessage(progress?.label))
+        : status.alarm
+          ? `${runMessages.state.alarm(status.alarm.code)}. ${status.alarm.text}`
+          : ''
+  return (
+    <div aria-live="assertive" className={styles['srOnly']}>
+      {text}
+    </div>
+  )
+}

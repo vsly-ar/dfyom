@@ -23,6 +23,7 @@ import {
   type SurfaceTarget,
   type ViewportMesh,
 } from './mesh'
+import { RunLayer, type RunScene } from './RunLayer'
 
 export interface SceneProps {
   mesh: ViewportMesh | null
@@ -31,6 +32,8 @@ export interface SceneProps {
   palette: Palette
   surfaceState: SurfaceState
   controlsRef: Ref<CameraControlsImpl>
+  /** Run mode layer (task 3.12). */
+  run?: RunScene | null
   onHover: (target: SurfaceTarget | undefined) => void
   onClick: (target: SurfaceTarget, event: ThreeEvent<MouseEvent>) => void
 }
@@ -59,6 +62,7 @@ export function Scene(props: SceneProps): React.JSX.Element {
       {stock ? <StockOutline box={stock} colour={palette.stock} /> : null}
       {bounds ? <Floor bounds={bounds} palette={palette} /> : null}
       <Axes bounds={bounds} palette={palette} />
+      {props.run ? <RunLayer run={props.run} palette={palette} /> : null}
     </>
   )
 }

@@ -21,6 +21,10 @@ export const PALETTE_TOKENS = {
   axisX: '--vp-axis-x',
   axisY: '--vp-axis-y',
   axisZ: '--vp-axis-z',
+  // run scene (task 3.12): toolpath playback and the tool marker
+  feed: '--vp-feed',
+  rapid: '--vp-rapid',
+  tool: '--vp-tool',
 } as const
 
 export type PaletteKey = keyof typeof PALETTE_TOKENS

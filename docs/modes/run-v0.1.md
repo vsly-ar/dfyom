@@ -1,6 +1,6 @@
 # Run mode v0.1: streaming to the virtual machine
 
-Status: implemented ([below](#implementation-task-39); UI: task 3.12) · Vision: [run.md](run.md) · Protocol, emulator, post: [grbl.md](../architecture/grbl.md) · Decisions: [ADR 0013](../decisions/0013-grbl-first-controller.md), [ADR 0016](../decisions/0016-compute-workers-in-dispatcher-process.md) · Jobs: [commands.md](../architecture/commands.md#long-running-commands-jobs) · Task: [v0.1 plan](../plans/v0.1.md) 3.9
+Status: implemented ([below](#implementation-task-39); UI: [task 3.12](#implementation-task-312-run-mode-ui)) · Vision: [run.md](run.md) · Protocol, emulator, post: [grbl.md](../architecture/grbl.md) · Decisions: [ADR 0013](../decisions/0013-grbl-first-controller.md), [ADR 0016](../decisions/0016-compute-workers-in-dispatcher-process.md) · Jobs: [commands.md](../architecture/commands.md#long-running-commands-jobs) · Task: [v0.1 plan](../plans/v0.1.md) 3.9, 3.12
 
 Run mode for [roadmap v0.1](../roadmap.md#v01--25d-basics-to-the-virtual-machine): connect to the **virtual machine** (the GRBL emulator, task 3.8), home it, set the work zero, stream a plan's gCode with GRBL's character-counting protocol, guide tool changes, pause, resume and stop, and report progress to the UI and to agents. The machine I/O runs in a utility process. Facts about GRBL and the emulator live in [grbl.md](../architecture/grbl.md); this doc specifies DFYOM's side.
 
@@ -19,7 +19,7 @@ Settled with the user when this doc was accepted; the sections below specify the
 9. **Guided wait at every tool change**, also on the virtual machine; agents and tests call `run.job.continue`.
 10. **Emulator trace off** in the app and headless (`trace: false`); a capped ring buffer comes with a later debug view.
 11. **No extra controls in v0.1:** no overrides, no raw gCode or `$` lines.
-12. **Run-mode UI is task 3.12**, after the UI shell (3.3) and viewport (3.5); 3.9 delivers core, host, commands and the IPC status push.
+12. **Run-mode UI is task 3.12**, after the UI shell (3.3) and viewport (3.5); 3.9 delivers core, host, commands and the IPC status push ([implementation](#implementation-task-312-run-mode-ui)).
 
 ## v0.1 cut
 
@@ -144,7 +144,7 @@ SenderProgram = { lines: readonly string[]; sections: readonly { fromLine: numbe
 
 - The program's lines travel once, in `jobStart` (a few hundred KB at most for v0.1 parts); the host streams without main, so main's event loop (Zod, workers' messages) never starves the sender.
 - **Host exit** (crash or kill) while connected: main fails the job with `machine.connection`, marks the connection `closed`, logs `error`; no automatic reconnect (a controller's state after a host crash is unknown). The next `run.connection.open` starts a fresh host.
-- `disconnect` stops a running job first (hold, then reset; a stop already under way is awaited) and closes the transport; `GrblSender.close()` during a run sends `0x18` before closing. **App quit** sends `disconnect` through `MachineClient.shutdown(3000)` and kills the host only after it answered or 3 s passed; a confirmation before quitting during a run comes with the UI (3.12). A headless process (3.10) calls the same `shutdown` before it exits.
+- `disconnect` stops a running job first (hold, then reset; a stop already under way is awaited) and closes the transport; `GrblSender.close()` during a run sends `0x18` before closing. **App quit** sends `disconnect` through `MachineClient.shutdown(3000)` and kills the host only after it answered or 3 s passed; quitting during a run asks first (3.12: a native message box "A run is in progress" with Cancel / "Stop run and quit"; `src/main/index.ts`, `before-quit`). A headless process (3.10) calls the same `shutdown` before it exits.
 
 ## Commands and queries
 
@@ -284,3 +284,19 @@ An independent review found real-machine safety gaps; each was fixed test-first 
 - **Continue:** only Idle (a report requested after the last command) with nothing in flight or queued; the marker goes through the RX budget; `run.job.continue` names the tool change or pause.
 - **Stale `Hold:0` after `~`:** reports requested before the last cycle start are ignored for the hold/pause decision. `job.pause` during a wait keeps the run paused: continue is refused until `job.resume`.
 - **ALARM:1** is critical like `ALARM:2`; a **lost `ok`** fails the connection; **WCO** comes from reports with `WCO` only (G54 + G92 + TLO), never seeded with G54; an **uncaught error** ends a worker-thread host like the utility process (`fatal`, exit); a **lost connection** closes it in main.
+
+## Implementation (task 3.12: run-mode UI)
+
+The renderer side of this doc; the rules are in [ui.md](../conventions/ui.md#run-mode-safety-ui). Code: `src/renderer/src/modes/run/`, `ui/StopControl/`, the viewport's run layer (`viewport/RunLayer.tsx`, `viewport/toolpath-lines.ts`), strings in `messages/run.ts`.
+
+- **No new IPC or commands.** The UI uses the `run.*` commands, `job.pause/resume/abort` and the status push `window.dfyom.run.onStatus` (seeded by `run.status.get`) through the window's session. Progress (`done`/`total`/`label`) is read with `job.get` every 250 ms while the run job runs (`RUN_PROGRESS_POLL_MS`), since progress ticks are not pushed; elapsed time and the phase come from the pushed status. The finished job's `outcome` gives how the run ended (summary, `op.aborted` = stopped, `machine.*` = failure dialog). A run started elsewhere (another window, an agent) is followed from the status too.
+- **Run store** (`run-store.ts`, Zustand, one per window bridge): the status, the chosen plan, time scale and jog step, the followed job, its progress and end, the open dialogs and the last refused action (shown with `ErrorMessage` in the navigator).
+- **Connection:** the navigator picks the plan (every status but `archived`, decision 5; the first by default) and the time scale (1×, 10×, 100×, Max; changed live with `run.timeScale.set` once connected), then `run.connection.open { target: 'virtual', planId, timeScale }` without `prepare`: the realistic flow (Alarm → Home → jog → work zero, decision 7).
+- **Jog:** relative step jogs (`run.machine.jog { by }`); steps 0.1/1/10/100 mm (0.001–1 in for inch projects); feeds 2000 mm/min in XY and 500 mm/min in Z (`JOG_FEED`, GRBL caps them at the axis' max rate); "Stop jog" sends jog cancel.
+- **Work zero:** "Zero X", "Zero Y", "Zero Z", "Zero X Y Z" at the current position (`run.workZero.set { axes }`); the tool-change dialog offers "Set Z zero here".
+- **Control gates** (`machine-state.ts`, `runGates`) mirror the host's `run.state` rules so a disabled control says why before the click ("Home the machine first.", "Not while a run is going.", after a critical alarm "Reset the machine first …"); the host still decides.
+- **Stop without a run job** (decision taken here, see the plan's known issues): with a run job Stop is `job.abort`; without one, a jog is cancelled (`run.machine.jogCancel`) and a homing cycle, which GRBL can only stop by a reset, is reset (`run.machine.reset`, raising `ALARM:6`); in any other state nothing moves and nothing is sent.
+- **Pre-flight** shows plan, machine copy, target and time scale, the live G54, the tools in machining order and the soft-limit rule; the soft-limit check itself runs at `run.job.start` (a refusal shows as `run.softLimit` in the navigator's banner), since no command checks without exporting.
+- **Waits:** the tool-change dialog ("Tool change n") and the program-pause dialog ("Program pause n", the `M0` message from the progress label) open on every new wait, can be put off with "Later" (the inspector then offers "Show instructions"), and continue with `run.job.continue` naming the wait.
+- **Quit during a run** asks in main (`before-quit`): Cancel, or "Stop run and quit" (the normal quit then stops the run with hold and reset, as before).
+- **Tests:** `modes/run/RunMode.test.tsx` (the shell against the fake bridge with a scripted machine: connect, badge and chip, Stop in every mode, gates, jog and work zero, unlock confirmation, pre-flight focus, progress, `Escape` feed hold, resume, stop, tool-change dialog, failure dialog), `machine-state.test.ts`, `viewport/toolpath-lines.test.ts`, `ui/StopControl`; end to end `e2e/run.e2e.ts` ([testing.md](../conventions/testing.md#app-playwright-for-electron)).

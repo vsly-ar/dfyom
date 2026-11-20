@@ -8,6 +8,7 @@ import type { ProjectDoc } from '../../../core/project/document'
 import { shellMessages } from '../messages/shell'
 import { EmptyState, PanelHeader } from '../ui'
 import styles from './ModePanels.module.css'
+import { RunInspector, RunNavigator } from './run'
 
 const m = shellMessages.empty
 
@@ -27,6 +28,14 @@ const NavigatorIcon = (
 
 export function ModeNavigator({ mode, doc, onMode }: ModePanelProps): React.JSX.Element {
   const title = shellMessages.modes[mode]
+  // run mode UI (3.12) once there is a plan to run
+  if (mode === 'run' && doc !== undefined && Object.keys(doc.plans).length > 0)
+    return (
+      <>
+        <PanelHeader title={title} />
+        <RunNavigator doc={doc} />
+      </>
+    )
   const body = (() => {
     if (doc === undefined) return <EmptyState icon={NavigatorIcon} {...m.noProject} />
     const parts = Object.values(doc.parts)
@@ -80,6 +89,8 @@ export function ModeNavigator({ mode, doc, onMode }: ModePanelProps): React.JSX.
 }
 
 export function ModeInspector({ mode, doc }: Omit<ModePanelProps, 'onMode'>): React.JSX.Element {
+  if (mode === 'run' && doc !== undefined && Object.keys(doc.plans).length > 0)
+    return <RunInspector doc={doc} />
   return (
     <>
       <PanelHeader title={shellMessages.regions.inspector} />

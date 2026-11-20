@@ -1,7 +1,7 @@
 // Electron main process entry. Process model: docs/architecture/overview.md
 // The app host (projects, library, dispatchers) is shared with the headless CLI/MCP entry
 // (src/main/cli); the GUI adds windows, project IPC and local HTTP (docs/architecture/llm-api.md).
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, dialog } from 'electron'
 import { join, resolve } from 'node:path'
 import { RENDERER_LOG_LEVEL_ARG, type Logger, type LogLevel } from '../shared/logging'
 import { SETTINGS_ARG } from '../shared/preload-api'
@@ -144,6 +144,30 @@ void app.whenReady().then(async () => {
   openWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) openWindow()
+  })
+
+  // Quitting during a run asks first (docs/modes/run-v0.1.md#machine-host-and-protocol); quitting
+  // anyway stops the run under control below (hold, then reset), never by just closing the port.
+  let quitConfirmed = false
+  app.on('before-quit', (event) => {
+    const job = machine.status().job
+    if (quitConfirmed || job === undefined || ['done', 'failed', 'stopped'].includes(job.phase))
+      return
+    event.preventDefault()
+    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+    const options = {
+      type: 'warning' as const,
+      message: 'A run is in progress',
+      detail: 'Quitting stops the run: DFYOM holds the feed, then resets the machine.',
+      buttons: ['Cancel', 'Stop run and quit'],
+      defaultId: 0,
+      cancelId: 0,
+    }
+    void (win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options)).then((r) => {
+      if (r.response !== 1) return
+      quitConfirmed = true
+      app.quit()
+    })
   })
 
   // Quit: end agent sessions, close projects (unsaved changes stay recoverable), then the machine

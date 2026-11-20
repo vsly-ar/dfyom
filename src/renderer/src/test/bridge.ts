@@ -54,6 +54,8 @@ export interface FakeBridge extends PreloadApi {
   emitSessions(sessions: readonly AgentSessionInfo[]): void
   emitSettings(settings: AppSettings): void
   emitCloseRequest(request: WindowCloseRequest): void
+  /** Push a machine status, as main does on every change (run mode). */
+  emitRunStatus(status: RunStatus): void
   setLocalHttp(state: LocalHttpState): void
 }
 
@@ -186,6 +188,7 @@ export function createFakeBridge(initial: AppSettings = DEFAULT_SETTINGS): FakeB
     },
     emitSettings: settings.emit,
     emitCloseRequest: closeRequests.emit,
+    emitRunStatus: runStatus.emit,
     setLocalHttp(s) {
       localHttp = s
     },
