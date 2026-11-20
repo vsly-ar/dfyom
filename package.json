@@ -1,7 +1,7 @@
 {
   "name": "dfyom",
   "productName": "DFYOM",
-  "version": "0.0.34",
+  "version": "0.0.35",
   "private": true,
   "description": "Design For Your Own Manufacturing – design, plan and run parts on your own CNC machines.",
   "main": "./out/main/index.js",
@@ -18,6 +18,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "perf": "vitest run --config vitest.perf.config.mts",
+    "e2e": "node node_modules/electron/install.js && electron-vite build && playwright test",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
@@ -26,6 +27,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.65.1",
     "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

@@ -102,7 +102,7 @@ Compute workers and the machine host (a utility process in the app, a `worker_th
 
 ## Files and rotation
 
-- Folder: Electron `app.getPath('logs')` (macOS `~/Library/Logs/DFYOM/`, Windows `%APPDATA%\DFYOM\logs\`, Linux `~/.config/DFYOM/logs/`), or `<data-dir>/logs/` headless.
+- Folder: Electron `app.getPath('logs')` (macOS `~/Library/Logs/DFYOM/`, Windows `%APPDATA%\DFYOM\logs\`, Linux `~/.config/DFYOM/logs/`), or `<data-dir>/logs/` headless and in the app started with `--data-dir`.
 - File: `<startedAt>-<instance>.<n>.log` (`startedAt` in UTC as `2026-11-16T10-20-30Z`; `n` = 1, 2, … per rotation, numbered by pino-roll), JSON lines, one series per instance; rotated with **pino-roll** (MIT) by size; rotate at **10 MB**; at startup and on rotation delete own log files older than **14 days** (by modification time), then oldest first until they total ≤ **200 MB** (fixed in v0.1).
 - Retention only considers regular files (checked with `lstat`, so no symlinks or folders) whose name matches the pattern above with a UUID instance id; anything else in the folder is neither deleted nor counted. It never deletes the file being written, nor any file modified in the last **10 minutes**, so another running instance's open file survives.
 - If the folder can't be opened, the process logs to stderr only and logs that at `error`.

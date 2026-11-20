@@ -2,7 +2,7 @@
 // The app host (projects, library, dispatchers) is shared with the headless CLI/MCP entry
 // (src/main/cli); the GUI adds windows, project IPC and local HTTP (docs/architecture/llm-api.md).
 import { app, BrowserWindow } from 'electron'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { RENDERER_LOG_LEVEL_ARG, type Logger, type LogLevel } from '../shared/logging'
 import { createAppHost } from './host/app-host'
 import { registerProjectIpc, type WindowSessions } from './ipc'
@@ -44,6 +44,15 @@ function createMainWindow(log: Logger, level: LogLevel): BrowserWindow {
   return win
 }
 
+// `--data-dir` (docs/architecture/persistence.md#files-and-folders) moves all app data: Electron's
+// `userData` (Chromium profile) and the log folder too, so one flag isolates a run (the end-to-end
+// tests use it). Must be set before `ready`.
+const dataDir = resolveAppData(process.argv)
+if (dataDir !== undefined) {
+  app.setPath('userData', resolve(dataDir))
+  app.setAppLogsPath(join(resolve(dataDir), 'logs'))
+}
+
 void app.whenReady().then(async () => {
   const { log, level, instance, forward, report } = await startLogging()
   // The app-wide compute pool (docs/architecture/workers.md#lanes-and-pool). Workers spawn lazily;
@@ -66,7 +75,7 @@ void app.whenReady().then(async () => {
   })
   machine.onStatus(pushRunStatus)
   const created = await createAppHost({
-    appData: resolveAppData(process.argv, app.getPath('userData')) ?? app.getPath('userData'),
+    appData: app.getPath('userData'),
     appVersion: app.getVersion(),
     instanceId: instance,
     log,
