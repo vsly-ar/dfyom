@@ -4,14 +4,14 @@ Status: draft · Principle: [principles.md §2](../principles.md#2-testability)
 
 ## Layers
 
-| Layer           | Tool                                                                                                       | Scope                                                                                                                          |
-| --------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| Unit            | Vitest (`vitest.config.mts`)                                                                               | `src/core`, `src/shared`, `scripts`. Colocated `*.test.ts` next to the code.                                                   |
-| Component / UI  | _TBD_ – proposal in [ui.md](ui.md#testing)                                                                 | Renderer components, tooltips, previews.                                                                                       |
-| End-to-end      | Vitest, spawned bundled CLI (headless); _TBD_ for the UI (Playwright for Electron, [ui.md](ui.md#testing)) | Whole app, driven like a user **and** like an agent ([llm-api.md](../architecture/llm-api.md)); see [End-to-end](#end-to-end). |
-| Virtual machine | GRBL emulator ([ADR 0013](../decisions/0013-grbl-first-controller.md))                                     | Simulated CNC controller + simulated devices; run-mode tests without hardware ([modes/run.md](../modes/run.md)).               |
-| Real machine    | _TBD_                                                                                                      | LLM-controlled runs on real hardware with minimal developer involvement; opt-in only.                                          |
-| Performance     | Vitest, `*.perf.ts` (`vitest.perf.config.mts`, `npm run perf`)                                             | Benchmarks for heavy operations with budgets; not in `npm run check` (flaky timings).                                          |
+| Layer           | Tool                                                                                                        | Scope                                                                                                                          |
+| --------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Unit            | Vitest (`vitest.config.mts`)                                                                                | `src/core`, `src/shared`, `scripts`. Colocated `*.test.ts` next to the code.                                                   |
+| Component / UI  | _TBD_ – proposal in [ui.md](ui.md#testing)                                                                  | Renderer components, tooltips, previews.                                                                                       |
+| End-to-end      | Vitest, spawned bundled CLI (headless); Playwright for Electron (`e2e/*.e2e.ts`, `npm run e2e`) for the app | Whole app, driven like a user **and** like an agent ([llm-api.md](../architecture/llm-api.md)); see [End-to-end](#end-to-end). |
+| Virtual machine | GRBL emulator ([ADR 0013](../decisions/0013-grbl-first-controller.md))                                      | Simulated CNC controller + simulated devices; run-mode tests without hardware ([modes/run.md](../modes/run.md)).               |
+| Real machine    | _TBD_                                                                                                       | LLM-controlled runs on real hardware with minimal developer involvement; opt-in only.                                          |
+| Performance     | Vitest, `*.perf.ts` (`vitest.perf.config.mts`, `npm run perf`)                                              | Benchmarks for heavy operations with budgets; not in `npm run check` (flaky timings).                                          |
 
 ## Commands
 
@@ -19,6 +19,7 @@ Status: draft · Principle: [principles.md §2](../principles.md#2-testability)
 - `npm run lint` – ESLint incl. layer import boundaries ([ADR 0015](../decisions/0015-eslint-with-typescript6-api.md)); `npm run lint:fix` applies safe fixes.
 - `npm run format` / `npm run format:check` – Prettier (owns formatting; ESLint does not).
 - `npm run check` – `typecheck` + `lint` + `format:check` + `test`. Run before committing.
+- `npm run e2e` – builds the app (`electron-vite build`) and runs the Playwright-for-Electron tests ([app tests](#app-playwright-for-electron)); not part of `check` or CI. Run it after changes to main, preload, the renderer entry, workers or the build.
 - **CI** ([`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)) runs `npm ci` + `npm run check` on every push and pull request to `main`, with Node from `.nvmrc`.
 
 ## End-to-end
@@ -39,7 +40,16 @@ The [v0.1 exit criteria](../plans/v0.1.md#exit-criteria) as tests (task 3.11). *
 
 - **Golden file.** After an intended change to the post or a generator, update it with `npx vitest run src/main/cli/exit-criteria -u` and review the diff with the change. Under `CI=true` a missing golden file fails instead of being written.
 - **Deterministic and fast.** No wall-clock assertions: the virtual machine runs at `max`, and `job.wait` is polled with a short timeout only to continue tool changes promptly. Each variant takes about 1 s, so both run in `npm test` (and CI); no separate script.
-- **UI flow (pending):** the same criteria in the app via Playwright for Electron, after the UI shell (3.3), design (3.6), plan (3.7) and run (3.12) UIs.
+- **UI flow (pending):** the same criteria in the app via Playwright for Electron ([below](#app-playwright-for-electron)), after the UI shell (3.3), design (3.6), plan (3.7) and run (3.12) UIs.
+
+### App (Playwright for Electron)
+
+`@playwright/test` with its `_electron` launcher drives the built app (`out/main/index.js`); no browsers are downloaded. Config: `playwright.config.ts` (tests `e2e/**/*.e2e.ts`, one worker, artifacts in `node_modules/.cache/playwright`). Vitest does not pick these files up (its globs are `src/**/*.test.*` and `scripts/**`); `tsconfig.node.json` type-checks them and ESLint lints them as usual.
+
+- **Fixture** (`e2e/app.fixture.ts`): launches the app with a fresh temp `--data-dir`, which in the app also moves Electron's `userData` (Chromium profile) and the log folder ([persistence.md](../architecture/persistence.md#files-and-folders)), so a run never touches the developer's projects, library or logs; collects console errors and uncaught exceptions of every window from creation on; closes the app (normal quit path) and deletes the folder.
+- **Smoke test, task 0.9** (`e2e/smoke.e2e.ts`): the first window opens and is shown, its title is `DFYOM`, `#root` has rendered content, no renderer errors, `userData` and the logs are in the temp folder; and, through the window's preload bridge (`window.dfyom.call`, as the UI calls it), a part with a pocket evaluates to `done`, which runs the production worker chunk (`out/main`) in the packaged layout. Selectors rely only on the title, `#root` and the bridge, so they survive UI rewrites; later UI tests query by role and label ([ui.md](ui.md#testing)).
+- **Electron binary.** npm 11 blocks dependency install scripts not listed in `allowScripts`, so `npm ci` does not download Electron; `npm run e2e` runs `node node_modules/electron/install.js` first (a no-op once installed).
+- **Not in CI (yet).** CI sets `ELECTRON_SKIP_BINARY_DOWNLOAD` and runs only `check`; launching Electron on the Linux runner needs a display (`xvfb-run`) and Chromium sandbox setup that is not verified yet. About 5 s locally (build included); run before merging changes to the app process wiring. Tracked in the [v0.1 plan](../plans/v0.1.md#known-issues-and-risks).
 
 ## Docs lint
 

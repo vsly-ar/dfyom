@@ -19,7 +19,7 @@ The archive holds no undo history and no action log in v0.1.
 
 ## Files and folders
 
-`<appData>` is Electron's `userData` in the app, or `--data-dir` in headless/CLI runs (injected, so persistence code does not import Electron).
+`<appData>` is Electron's `userData` in the app, or `--data-dir` in headless/CLI runs (injected, so persistence code does not import Electron). The app accepts `--data-dir` too: it then uses it as Electron's `userData` and `<data-dir>/logs/` as the log folder, set before startup, so one flag isolates a run (the [app end-to-end tests](../conventions/testing.md#app-playwright-for-electron) use it).
 
 | Item           | Path                                                 | Content                                                                                           |
 | -------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------- |

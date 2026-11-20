@@ -10,6 +10,8 @@
     "electron.vite.config.ts",
     "vitest.config.mts",
     "vitest.perf.config.mts",
+    "playwright.config.ts",
+    "e2e/**/*",
     "src/main/**/*",
     "src/preload/**/*",
     "src/core/**/*",

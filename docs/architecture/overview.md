@@ -12,6 +12,7 @@ Status: draft
 | `src/preload/`  | Preload (sandboxed)                            | Typed bridge exposing `window.dfyom`; contract in `src/shared/preload-api.ts`.                           |
 | `src/renderer/` | Renderer (React)                               | UI only; calls core directly for pure logic, and the bridge for privileged work.                         |
 | `scripts/`      | Node (dev tooling)                             | Repo tooling, e.g. [version bump](../conventions/versioning.md).                                         |
+| `e2e/`          | Node (Playwright)                              | End-to-end tests of the built app ([testing.md](../conventions/testing.md#app-playwright-for-electron)). |
 | `docs/`         | –                                              | Source of truth ([README](../README.md)).                                                                |
 
 Enforced by `npm run lint` (import boundaries) and the two tsconfigs (no DOM / no Node globals in `src/core`, `src/shared`) – see [ADR 0015](../decisions/0015-eslint-with-typescript6-api.md).
