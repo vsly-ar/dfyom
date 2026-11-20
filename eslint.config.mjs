@@ -49,6 +49,15 @@ const layers = {
   },
 }
 
+/**
+ * Radix is wrapped once, in src/renderer/src/ui/; screens and every other layer use those
+ * components (docs/conventions/ui.md#radix-wrapping-pattern).
+ */
+const radixImports = {
+  group: ['radix-ui', 'radix-ui/*', '@radix-ui/*'],
+  message: 'Only src/renderer/src/ui/ imports Radix; use the ui/ components.',
+}
+
 /** Electron and Node-only modules; `src/core` and `src/shared` must run anywhere. */
 const nodeOnlyImports = {
   paths: ['electron', ...builtinModules.filter((m) => !m.startsWith('_'))].map((name) => ({
@@ -65,6 +74,7 @@ const nodeOnlyImports = {
       group: ['node:*'],
       message: 'Node built-in: keep src/core and src/shared environment-neutral.',
     },
+    radixImports,
   ],
 }
 
@@ -98,6 +108,11 @@ export default defineConfig(
     files: ['src/renderer/**'],
     plugins: { layers },
     rules: { 'layers/no-import-from': ['error', ['src/main', 'src/preload']] },
+  },
+  {
+    files: ['src/main/**', 'src/preload/**', 'src/renderer/**', 'scripts/**'],
+    ignores: ['src/renderer/src/ui/**'],
+    rules: { 'no-restricted-imports': ['error', { patterns: [radixImports] }] },
   },
   {
     files: ['src/renderer/**/*.tsx'],

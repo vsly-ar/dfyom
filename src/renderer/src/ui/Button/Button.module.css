@@ -1,0 +1,106 @@
+/* Button. Doc: docs/conventions/ui.md#buttons; look: ui-design-system.html (.btn) */
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: var(--control-md);
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-control);
+  color: var(--text);
+  font-weight: var(--weight-medium);
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 1px 0 rgb(0 0 0 / 0.03);
+  transition:
+    background var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast),
+    transform var(--motion-instant);
+}
+
+.button:hover {
+  background: color-mix(in oklab, var(--bg-control), var(--text) 5%);
+  border-color: color-mix(in oklab, var(--border), var(--text) 12%);
+}
+
+.button:active {
+  transform: translateY(0.5px);
+  background: color-mix(in oklab, var(--bg-control), var(--text) 9%);
+}
+
+.button svg {
+  width: var(--icon-md);
+  height: var(--icon-md);
+  flex: none;
+}
+
+.button[data-variant='primary'] {
+  border-color: var(--border-control);
+  font-weight: var(--weight-bold);
+}
+
+.button[data-variant='primary'] svg {
+  color: var(--accent-icon);
+  filter: var(--accent-icon-edge);
+  stroke-width: 1.6px;
+}
+
+.button[data-variant='primary']:hover {
+  border-color: color-mix(in oklab, var(--accent-icon) 55%, var(--border-control));
+}
+
+.button[data-variant='ghost'] {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+}
+
+.button[data-variant='ghost']:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.button[data-variant='danger'] {
+  color: var(--danger);
+}
+
+.button[data-variant='danger']:hover {
+  background: var(--danger-subtle);
+  border-color: color-mix(in oklab, var(--danger) 40%, var(--border));
+}
+
+.button[data-size='sm'] {
+  height: var(--control-sm);
+  padding: 0 8px;
+  font-size: var(--text-sm);
+}
+
+.button[data-size='lg'] {
+  height: var(--control-lg);
+  padding: 0 16px;
+  font-size: var(--text-lg);
+}
+
+.button[data-size='lg'] svg {
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+}
+
+.button:disabled,
+.button[aria-disabled='true'] {
+  color: var(--text-faint);
+  background: transparent;
+  border-color: var(--border);
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+.button:disabled svg {
+  color: inherit;
+  filter: none;
+}

@@ -1,0 +1,84 @@
+/* Menu. Look: ui-design-system.html (.menu). Doc: docs/conventions/ui.md#elevation */
+.content {
+  z-index: var(--z-popover);
+  min-width: 210px;
+  padding: 4px;
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-2);
+  display: grid;
+  gap: 1px;
+  transform-origin: var(--radix-dropdown-menu-content-transform-origin);
+  animation: pop var(--motion-base) var(--ease-emphasized);
+}
+
+.content[data-state='closed'] {
+  animation: fade var(--motion-fast) var(--ease-exit) forwards;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  outline: none;
+  user-select: none;
+}
+
+.item svg {
+  width: var(--icon-md);
+  height: var(--icon-md);
+  color: var(--text-muted);
+}
+
+.item[data-highlighted] {
+  background: var(--bg-hover);
+}
+
+.item[data-danger],
+.item[data-danger] svg {
+  color: var(--danger);
+}
+
+.item[data-disabled] {
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+
+.text {
+  flex: 1;
+}
+
+.kbd {
+  margin-left: auto;
+  font: var(--text-xs) var(--font-mono);
+  color: var(--text-faint);
+}
+
+.separator {
+  height: 1px;
+  margin: 3px 0;
+  background: var(--border);
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fade {
+  to {
+    opacity: 0;
+  }
+}

@@ -13,6 +13,7 @@
     "src/main/**/*",
     "src/preload/**/*",
     "src/core/**/*",
-    "src/shared/**/*"
+    "src/shared/**/*",
+    "src/renderer/src/ui/tokens.test.ts"
   ]
 }

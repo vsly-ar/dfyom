@@ -1,0 +1,42 @@
+/* EmptyState. Look: ui-design-system.html (.empty). Doc: docs/conventions/ui.md#mode-switching */
+.root {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 20px;
+  text-align: center;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  max-width: 320px;
+}
+
+.icon {
+  display: inline-flex;
+  color: var(--text-faint);
+}
+
+.icon svg {
+  width: var(--icon-xl);
+  height: var(--icon-xl);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: var(--icon-stroke);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.icon [data-accent] {
+  stroke: var(--accent-icon);
+  filter: var(--accent-icon-edge);
+  stroke-width: 1.6px;
+}
+
+.title {
+  margin: 0;
+  font: var(--weight-bold) var(--text-lg) / var(--lh-lg) var(--font-ui);
+}
+
+.description {
+  margin: 0;
+  color: var(--text-muted);
+}

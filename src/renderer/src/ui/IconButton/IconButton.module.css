@@ -1,0 +1,63 @@
+/* IconButton. Doc: docs/conventions/ui.md#buttons; look: ui-design-system.html (.ib) */
+.button {
+  position: relative;
+  width: var(--control-md);
+  height: var(--control-md);
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition:
+    background var(--motion-fast),
+    color var(--motion-fast);
+}
+
+.button:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.button svg {
+  width: var(--icon-md);
+  height: var(--icon-md);
+}
+
+.button[aria-pressed='true'] {
+  background: var(--bg-active);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+/* the accent detail of own icons (ui/icons/tool) turns amber while the tool is active */
+.button[aria-pressed='true'] [data-accent] {
+  stroke: var(--accent-icon);
+  filter: var(--accent-icon-edge);
+  stroke-width: 1.6px;
+}
+
+.button[aria-pressed='true'] [data-accent][data-fill] {
+  fill: var(--accent-icon);
+  stroke: none;
+}
+
+.button:disabled {
+  color: var(--text-faint);
+  opacity: 0.6;
+  cursor: not-allowed;
+  background: transparent;
+}
+
+.button[data-size='lg'] {
+  width: var(--control-lg);
+  height: var(--control-lg);
+}
+
+.button[data-size='lg'] svg {
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+}

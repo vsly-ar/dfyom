@@ -1,0 +1,43 @@
+/* Tooltip. Doc: docs/conventions/ui.md#radix-wrapping-pattern; look: ui-design-system.html (.tooltip) */
+.content {
+  z-index: var(--z-popover);
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--text);
+  color: var(--bg-app);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  font-weight: var(--weight-medium);
+  box-shadow: var(--shadow-2);
+  transform-origin: var(--radix-tooltip-content-transform-origin);
+  animation: pop var(--motion-base) var(--ease-emphasized);
+}
+
+.content[data-state='closed'] {
+  animation: fade var(--motion-fast) var(--ease-exit) forwards;
+}
+
+.kbd {
+  font: var(--text-xs) var(--font-mono);
+  opacity: 0.7;
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fade {
+  to {
+    opacity: 0;
+  }
+}

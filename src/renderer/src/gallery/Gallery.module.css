@@ -1,0 +1,178 @@
+/* Dev-only gallery layout (mirrors the design system page's specimen panes). */
+.page {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 24px 16px 64px;
+  display: grid;
+  gap: 20px;
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 32px;
+  align-items: end;
+  justify-content: space-between;
+}
+
+.h1 {
+  margin: 0;
+  font: 600 1.25rem/1.3 var(--font-ui);
+}
+
+.muted {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  max-width: 74ch;
+}
+
+.duo {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.pane {
+  padding: 18px;
+  display: grid;
+  gap: 22px;
+  align-content: start;
+  min-width: 0;
+}
+
+.pane + .pane {
+  border-left: 1px solid #3a4343;
+}
+
+@media (max-width: 860px) {
+  .duo {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .pane + .pane {
+    border-left: 0;
+    border-top: 1px solid #3a4343;
+  }
+}
+
+.eyebrow {
+  font: 600 0.65625rem/1 var(--font-ui);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.row {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.lbl {
+  margin: 0;
+  font: var(--weight-regular) var(--text-xs) / var(--lh-xs) var(--font-ui);
+  color: var(--text-faint);
+}
+
+.line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.group {
+  display: contents;
+}
+
+.narrow {
+  display: grid;
+  max-width: 260px;
+}
+
+.stack {
+  display: grid;
+  gap: 8px;
+}
+
+.selects {
+  display: grid;
+  gap: 8px;
+  max-width: 260px;
+}
+
+.fields {
+  display: grid;
+  gap: 12px;
+  max-width: 520px;
+}
+
+.overlays {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+/* contains the overlays' fixed positioning (a transform makes it their containing block) */
+.stage {
+  position: relative;
+  transform: translateZ(0);
+  min-height: 96px;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  background: var(--bg-viewport);
+  overflow: hidden;
+}
+
+.stage[data-tall] {
+  min-height: 200px;
+}
+
+.icons {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 6px;
+}
+
+.figure {
+  margin: 0;
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 8px 4px;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.iconCell {
+  width: var(--control-md);
+  height: var(--control-md);
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+}
+
+.iconCell[data-active] {
+  background: var(--bg-active);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.iconCell[data-active] [data-accent] {
+  stroke: var(--accent-icon);
+  filter: var(--accent-icon-edge);
+  stroke-width: 1.6px;
+}
+
+.iconCell[data-active] [data-accent][data-fill] {
+  fill: var(--accent-icon);
+  stroke: none;
+}
+
+.fieldCell {
+  display: inline-flex;
+  color: var(--text-muted);
+}

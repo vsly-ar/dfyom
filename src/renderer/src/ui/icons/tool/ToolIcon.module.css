@@ -1,0 +1,23 @@
+/* Own tool icons. Doc: docs/conventions/ui.md#icons */
+.icon {
+  width: var(--icon-md);
+  height: var(--icon-md);
+  flex: none;
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: var(--icon-stroke);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.icon [data-fill] {
+  fill: currentColor;
+  stroke: none;
+}
+
+.icon [data-accent] {
+  transition:
+    stroke var(--motion-base),
+    fill var(--motion-base);
+}

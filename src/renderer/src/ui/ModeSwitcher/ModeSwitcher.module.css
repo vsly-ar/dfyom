@@ -1,0 +1,68 @@
+/* ModeSwitcher. Look: ui-design-system.html (.modesw). Doc: docs/conventions/ui.md#mode-switching */
+.root {
+  display: inline-flex;
+  position: relative;
+  gap: 2px;
+  padding-bottom: 4px;
+}
+
+.item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--control-md);
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  transition:
+    color var(--motion-fast),
+    background var(--motion-fast);
+}
+
+.item:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.item[data-state='on'] {
+  color: var(--text);
+}
+
+.icon {
+  width: var(--icon-md);
+  height: var(--icon-md);
+  flex: none;
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: var(--icon-stroke);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.icon [data-accent] {
+  transition: stroke var(--motion-base);
+}
+
+.item[data-state='on'] .icon [data-accent] {
+  stroke: var(--accent-icon);
+  filter: var(--accent-icon-edge);
+  stroke-width: 1.6px;
+}
+
+.indicator {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 0 0.5px var(--accent-border);
+  transition:
+    transform var(--motion-emphasis) var(--ease-emphasized),
+    width var(--motion-emphasis) var(--ease-emphasized);
+}

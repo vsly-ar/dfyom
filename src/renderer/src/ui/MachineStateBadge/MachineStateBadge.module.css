@@ -1,0 +1,166 @@
+/* MachineStateBadge. Look: ui-design-system.html (.mstate). Doc: docs/conventions/ui.md#run-mode-safety-ui */
+.badge {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 26px;
+  padding: 0 10px 0 8px;
+  border-radius: var(--radius-full);
+  font-weight: var(--weight-bold);
+  font-size: var(--text-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-field);
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.shape {
+  width: 12px;
+  height: 12px;
+  flex: none;
+}
+
+.badge[data-state='offline'] {
+  color: var(--text-muted);
+}
+.badge[data-state='offline'] .shape {
+  color: var(--safety-offline);
+}
+
+.badge[data-state='idle'] .shape {
+  color: var(--safety-idle);
+}
+
+/* Running: amber, play icon, a dot circling the edge (static outline under reduced motion) */
+.badge[data-state='moving'] {
+  background: var(--accent-subtle);
+  color: var(--safety-moving-fg);
+  border-color: transparent;
+}
+.badge[data-state='moving'] .shape {
+  color: var(--accent-icon);
+  filter: var(--accent-icon-edge);
+}
+
+.orbit {
+  position: absolute;
+  inset: -1px;
+  width: calc(100% + 2px);
+  height: calc(100% + 2px);
+  overflow: visible;
+  pointer-events: none;
+}
+
+.orbit rect {
+  x: 0.75px;
+  y: 0.75px;
+  width: calc(100% - 1.5px);
+  height: calc(100% - 1.5px);
+  rx: 13px;
+  fill: none;
+}
+
+.track {
+  stroke: var(--safety-moving-edge);
+  stroke-width: 1.5;
+}
+
+.dot {
+  stroke: var(--safety-moving);
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-dasharray: 0.001 0.999;
+  animation: orbit 2.2s linear infinite;
+  filter: drop-shadow(0 0 2px var(--safety-moving));
+}
+
+@keyframes orbit {
+  to {
+    stroke-dashoffset: -1;
+  }
+}
+
+/* Feed hold: orange with stripes, pause bars */
+.badge[data-state='hold'] {
+  background: var(--safety-hold);
+  color: var(--safety-hold-fg);
+  border-color: transparent;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent 0 6px,
+    rgb(0 0 0 / 0.08) 6px 12px
+  );
+}
+
+/* Tool change: blue, a light band sweeps across while the swap icon turns */
+.badge[data-state='action'] {
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--safety-action);
+  color: var(--safety-action-fg);
+  border-color: transparent;
+}
+.badge[data-state='action']::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(
+    100deg,
+    transparent 30%,
+    rgb(255 255 255 / 0.28) 50%,
+    transparent 70%
+  );
+  background-size: 250% 100%;
+  animation: sweep 1.8s var(--ease-standard) infinite;
+}
+.badge[data-state='action'] .shape {
+  animation: swap 1.8s var(--ease-emphasized) infinite;
+}
+
+@keyframes sweep {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -150% 0;
+  }
+}
+
+@keyframes swap {
+  0%,
+  30% {
+    transform: rotate(0);
+  }
+  70%,
+  100% {
+    transform: rotate(180deg);
+  }
+}
+
+/* Alarm: red octagon */
+.badge[data-state='alarm'] {
+  background: var(--safety-alarm);
+  color: var(--safety-alarm-fg);
+  border-color: transparent;
+}
+
+/* reduced motion (OS or app setting): static badges */
+.badge[data-motion='reduce'][data-state='action']::after {
+  display: none;
+}
+.badge[data-motion='reduce'] .shape {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dot {
+    display: none;
+  }
+  .badge[data-state='action']::after {
+    display: none;
+  }
+  .badge .shape {
+    animation: none;
+  }
+}

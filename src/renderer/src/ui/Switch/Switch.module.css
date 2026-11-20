@@ -1,0 +1,70 @@
+/* Switch. Look: ui-design-system.html (.switch, .rowsw). Doc: docs/conventions/ui.md#buttons */
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 26px;
+}
+
+.label {
+  cursor: pointer;
+}
+
+.track {
+  flex: none;
+  position: relative;
+  width: 28px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: var(--border-control);
+  cursor: pointer;
+  transition:
+    background var(--motion-base),
+    box-shadow var(--motion-base);
+}
+
+/* 24 px pointer target (WCAG 2.2) around the 16 px track */
+.track::before {
+  content: '';
+  position: absolute;
+  inset: -4px -2px;
+}
+
+.track[data-state='checked'] {
+  background: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent-border);
+}
+
+.thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.3);
+  transition:
+    transform var(--motion-slow) var(--ease-emphasized),
+    width var(--motion-fast);
+}
+
+.track:active .thumb {
+  width: 15px;
+}
+
+.thumb[data-state='checked'] {
+  transform: translateX(12px);
+}
+
+.track:active .thumb[data-state='checked'] {
+  transform: translateX(9px);
+}
+
+.track[data-disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
