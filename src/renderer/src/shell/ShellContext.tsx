@@ -3,23 +3,32 @@
 import { createContext, useContext, useEffect, useSyncExternalStore, type ReactNode } from 'react'
 import { useStore } from 'zustand'
 import type { PreloadApi } from '../../../shared/preload-api'
+import { createEvaluations, type Evaluations, type PartEvaluationEntry } from '../state/evaluations'
 import { createReplica, type Replica, type ReplicaState } from '../state/replica'
 import { createSettingsStore, type SettingsState, type SettingsStore } from '../state/settings'
 import { createUiStore, type UiState, type UiStore } from '../state/ui-store'
+import { createProjectFiles, type ProjectFiles } from './project/files'
 
 export interface Shell {
   readonly bridge: PreloadApi
   readonly replica: Replica
   readonly settings: SettingsStore
   readonly ui: UiStore
+  /** Part evaluations of the bound project (mesh and status, task 3.6). */
+  readonly evaluations: Evaluations
+  /** New / Open / Save and their dialogs (task 3.6). */
+  readonly files: ProjectFiles
 }
 
 export function createShell(bridge: PreloadApi): Shell {
+  const replica = createReplica(bridge)
   return {
     bridge,
-    replica: createReplica(bridge),
+    replica,
     settings: createSettingsStore(bridge),
     ui: createUiStore(),
+    evaluations: createEvaluations(bridge, replica),
+    files: createProjectFiles({ bridge, replica }),
   }
 }
 
@@ -36,9 +45,11 @@ export function ShellProvider({
   useEffect(() => {
     const stopReplica = shell.replica.start()
     const stopSettings = shell.settings.start()
+    const stopEvaluations = shell.evaluations.start()
     return () => {
       stopReplica()
       stopSettings()
+      stopEvaluations()
     }
   }, [shell])
   return <ShellContext.Provider value={shell}>{children}</ShellContext.Provider>
@@ -61,4 +72,11 @@ export function useSettings<T>(selector: (s: SettingsState) => T): T {
 
 export function useUi<T>(selector: (s: UiState) => T): T {
   return useStore(useShell().ui, selector)
+}
+
+/** A part's evaluation (status and last good mesh), or undefined before the window knows it. */
+export function usePartEvaluation(partId: string | undefined): PartEvaluationEntry | undefined {
+  const { evaluations } = useShell()
+  const all = useSyncExternalStore(evaluations.subscribe, evaluations.getState)
+  return partId === undefined ? undefined : all.get(partId)
 }

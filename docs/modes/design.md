@@ -1,6 +1,6 @@
 # Design mode
 
-Status: implemented (v0.1 sections; remaining: design UI 3.6) · Library: [library.md](../architecture/library.md) · Terms: [glossary.md](../glossary.md) · Geometry: [geometry.md](../architecture/geometry.md) · Values: [quantities.md](../architecture/quantities.md) · Commands: [commands.md](../architecture/commands.md)
+Status: implemented (v0.1 sections, design UI task 3.6) · Library: [library.md](../architecture/library.md) · Terms: [glossary.md](../glossary.md) · Geometry: [geometry.md](../architecture/geometry.md) · Values: [quantities.md](../architecture/quantities.md) · Commands: [commands.md](../architecture/commands.md)
 
 **Goal:** design parts that can be manufactured on the user's existing machines (DFM-first).
 
@@ -172,6 +172,15 @@ Decisions made with task 2.5, where this doc left room:
 - **`design.warning.list { partId } → { warnings }`** returns the same list for the current document and the current library, so it also reflects library edits, which never change the document. It fails with `input.malformed` for an unknown part and `internal.unexpected` without a library service (like `design.part.add`).
 - **Geometry warnings** (`dfm.loosePiece`, `dfm.retainedRemoved`, `dfm.surfaceMissing`) come from the part's evaluation, which runs automatically on the geometry worker after design edits ([workers.md](../architecture/workers.md#automatic-evaluation-after-design-edits)); neither the commands nor this query run it. The mapper fills `PartGeometryInput.references` from `on` and the expression references (one entry per operation, parameter and surface) for `dfm.surfaceMissing`.
 - **Merging (task 2.9):** `design.warning.list` appends the warnings of the evaluation of the part's current input (by input hash) to the parameter warnings, ordered by operation (design order), parameter warnings first within an operation (`mergeWarnings` in `evaluation.ts`). The two code sets are disjoint, so nothing is deduplicated. The result also says whether that evaluation is current: `evaluation: 'done' | 'pending' | 'failed'` (with `error` when failed; geometry warnings only when `done`), so an agent knows when they are still missing; `design.part.evaluate` waits for them. Command results keep the synchronous warnings only: they never wait for the worker.
+
+## Design UI (task 3.6)
+
+How the design mode screens use the commands above; UI rules in [ui.md](../conventions/ui.md#design-mode-task-36), code in `src/renderer/src/modes/design/`.
+
+- **Stock setup:** a project without a part shows the stock setup in the navigator: part name, then a new block (length, width, thickness, material name and class; added to the stock library with `library.stock.add`) or a block from the library, and "Create part" (`design.part.add`, which takes the snapshot).
+- **Operation navigator:** the part (selecting it selects nothing: the inspector shows the part), its stock, and the operations in design order. "Add operation" (or, while empty, one button per kind) dispatches `design.<kind>.add` with values that fit the stock (facing: defaults; pocket: a third of the stock in the middle, depth a quarter of the thickness; drilling: a 6 mm / 1/4″ through hole at a quarter of the length and a third of the width; profile: an outside rectangle 4 slot widths smaller than the stock) and selects the new operation, so the user edits it at once. Move up/down (`design.operation.move`, buttons and `Alt+↑/↓`; a move that breaks a reference fails with `design.referenced` and changes nothing), remove (`design.operation.remove`, undo toast).
+- **Inspector:** one `QuantityInput` per parameter in the groups of the tables above; a commit is one `design.<kind>.update` with that parameter (a shape or drilling center as a whole, tabs field by field), so one undo step. `on` is a list of the eligible surfaces with a pick button; formula fields offer `<surface>.z` of the stock and earlier operations and pick them in the viewport. Shape kind, drill bottom (a depth of 1 × diameter is added when leaving `through`) and profile side are segmented controls or lists, each one command.
+- **Warnings:** `design.warning.list` after every revision and evaluation change, shown at the parameter (with "Apply" for a suggestion), as a row badge, in the part summary and in the status bar list.
 
 ## Retained regions: tabs and fillets
 

@@ -1,9 +1,21 @@
 import { act, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import type { ReactNode } from 'react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { App } from '../App'
 import { createFakeBridge, fixtureDispatcher, type FakeBridge } from '../test/bridge'
 import { expectNoAxeViolations, renderUi } from '../test/render'
 import { createShell, ShellProvider } from './ShellContext'
+
+// WebGL does not run in jsdom: the canvas and the scene are stubbed (ui.md#testing)
+vi.mock('@react-three/fiber', () => ({
+  Canvas: ({ children: _c, ...rest }: { children: ReactNode; 'data-testid'?: string }) => (
+    <div data-testid={rest['data-testid']} />
+  ),
+}))
+vi.mock('../viewport/Scene', () => ({
+  Scene: () => null,
+  CameraControlsImpl: { ACTION: { NONE: 0, ROTATE: 1, TRUCK: 2, DOLLY: 16 } },
+}))
 
 function renderShell(bridge: FakeBridge = createFakeBridge()) {
   const shell = createShell(bridge)
@@ -30,7 +42,11 @@ describe('AppShell', () => {
     expect(screen.getByRole('banner', { name: 'Main toolbar' })).toBeInTheDocument()
     expect(screen.getByRole('navigation', { name: 'Modes' })).toBeInTheDocument()
     expect(screen.getByRole('navigation', { name: 'Navigator' })).toBeInTheDocument()
-    expect(screen.getByRole('main', { name: 'Viewport' })).toHaveTextContent('3D viewport')
+    expect(
+      within(screen.getByRole('main', { name: 'Viewport' })).getByRole('region', {
+        name: '3D viewport',
+      }),
+    ).toBeInTheDocument()
     const status = screen.getByRole('contentinfo', { name: 'Status bar' })
     expect(await within(status).findByText('No project')).toBeInTheDocument()
     expect(await screen.findByRole('heading', { name: 'No project open' })).toBeInTheDocument()
@@ -241,7 +257,7 @@ describe('AppShell', () => {
       document.activeElement as HTMLElement,
     )
     await user.keyboard('{F6}')
-    expect(screen.getByRole('main')).toHaveFocus()
+    expect(screen.getByRole('region', { name: '3D viewport' })).toHaveFocus()
     await user.keyboard('{Shift>}{F6}{/Shift}')
     expect(screen.getByRole('navigation', { name: 'Navigator' })).toContainElement(
       document.activeElement as HTMLElement,

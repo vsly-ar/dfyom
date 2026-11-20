@@ -31,7 +31,11 @@ import {
   createProjectRegistry,
   type Registry,
 } from '../../core/commands/registry'
-import { createEvaluationScheduler, type EvaluationScheduler } from '../../core/design/evaluation'
+import {
+  createEvaluationScheduler,
+  type EvaluationScheduler,
+  type PartEvaluationState,
+} from '../../core/design/evaluation'
 import { Library } from '../../core/library/library'
 import { followLibraryChanges } from '../../core/plan/follow'
 import type { ExportFiles } from '../../core/post/plan-export'
@@ -120,6 +124,13 @@ export interface AppHost extends SessionHost, HostPort {
   onProjectOpened(listener: (key: string, source: Source) => void): () => void
   /** Called after a project runtime started or stopped (windows re-follow their project). */
   onProjectsChanged(listener: () => void): () => void
+  /**
+   * A part's evaluation in the project's current document, for the window mesh push (renderer
+   * only, not an agent capability: docs/architecture/overview.md#ipc). Undefined without the project.
+   */
+  evaluation(key: string, partId: string): PartEvaluationState | undefined
+  /** The project's part evaluations may have changed (`evaluation` reads them). Returns the unsubscribe. */
+  onEvaluation(key: string, listener: (partId: string) => void): () => void
   /**
    * Stdin end, app quit: abort jobs and close every project (unsaved changes stay recoverable).
    * Returns the projects that had unsaved changes.
@@ -484,6 +495,17 @@ class Host implements AppHost {
       return unsaved
     })()
     return this.closing
+  }
+
+  evaluation(key: string, partId: string): PartEvaluationState | undefined {
+    const rt = this.runtimes.get(key)
+    if (rt === undefined || !Object.hasOwn(rt.dispatcher.doc.parts, partId)) return undefined
+    return rt.scheduler.state(rt.dispatcher.doc, partId)
+  }
+
+  onEvaluation(key: string, listener: (partId: string) => void): () => void {
+    const rt = this.runtimes.get(key)
+    return rt === undefined ? () => {} : rt.scheduler.onChange(listener)
   }
 
   onProjectsChanged(listener: () => void): () => void {

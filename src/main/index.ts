@@ -13,6 +13,7 @@ import { MACHINE_UTILITY_ENTRY_PATH } from './machine/bundled'
 import { pushRunStatus, utilityHostFactory } from './machine/electron'
 import { createMachineClient } from './machine/spawn'
 import { createLocalHttpControl, localHttpSetting } from './mcp/http'
+import { installAppMenu } from './menu'
 import { createExportFiles } from './persistence/export-file'
 import { resolveAppData } from './persistence/paths'
 import { createSettingsStore, loadSettings } from './settings/store'
@@ -133,6 +134,7 @@ void app.whenReady().then(async () => {
     if (next.allowLocalAgents !== previous.allowLocalAgents) switchHttp(next.allowLocalAgents)
   })
 
+  installAppMenu()
   const windowLog = log.child({ scope: 'windows' })
   const sessions: WindowSessions = registerProjectIpc(host, http, settings)
   const openWindow = (key?: string) =>

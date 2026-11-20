@@ -8,6 +8,8 @@ import {
   type AgentSessionInfo,
   type CallReply,
   type LocalHttpState,
+  type MenuAction,
+  type PartEvaluationView,
   type PreloadApi,
   type ProjectSnapshot,
   type WindowCloseRequest,
@@ -64,6 +66,19 @@ const api: PreloadApi = {
     initial: initialSettings(),
     update: (patch) => ipcRenderer.invoke(IPC.settingsUpdate, patch) as Promise<CallReply>,
     onChange: (listener) => on<AppSettings>(IPC.settingsChanged, listener),
+  },
+  evaluation: {
+    get: (partId) =>
+      ipcRenderer.invoke(IPC.evaluationGet, partId) as Promise<PartEvaluationView | null>,
+    onChange: (listener) => on<PartEvaluationView>(IPC.evaluationChanged, listener),
+  },
+  files: {
+    chooseOpen: () => ipcRenderer.invoke(IPC.fileChooseOpen) as Promise<string | null>,
+    chooseSave: (defaultName) =>
+      ipcRenderer.invoke(IPC.fileChooseSave, defaultName) as Promise<string | null>,
+  },
+  menu: {
+    onAction: (listener) => on<MenuAction>(IPC.menuAction, listener),
   },
   window: {
     onCloseRequest: (listener) => on<WindowCloseRequest>(IPC.windowCloseRequest, listener),

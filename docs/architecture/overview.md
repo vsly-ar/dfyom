@@ -23,7 +23,7 @@ Build: `electron-vite` (`electron.vite.config.ts`) – outputs to `out/{main,pre
 
 - Renderer has `contextIsolation`, `sandbox` and no Node integration.
 - All privileged capabilities go through a small typed preload API (contract: `src/shared/preload-api.ts`).
-- Every capability exposed to the UI must also be reachable by agents ([llm-api.md](llm-api.md)) – ideally both are thin adapters over the same command layer in `src/core`. Window plumbing is not a capability: the replica snapshot and patch stream, the window's close handshake and the GUI settings (which include agents' own access, so agents must not change them) are IPC only ([ui.md](../conventions/ui.md#shell-state)).
+- Every capability exposed to the UI must also be reachable by agents ([llm-api.md](llm-api.md)) – ideally both are thin adapters over the same command layer in `src/core`. Window plumbing is not a capability: the replica snapshot and patch stream, the window's close handshake, the GUI settings (which include agents' own access, so agents must not change them), the part evaluation push for the viewport ([workers.md](workers.md#evaluation-status)), the native file dialogs (the window then calls `project.open` / `project.save` with the path, as an agent does) and the native menu's actions are IPC only ([ui.md](../conventions/ui.md#shell-state)).
 
 ## Threading
 

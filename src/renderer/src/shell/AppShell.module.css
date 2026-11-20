@@ -96,28 +96,49 @@
   }
 }
 
-.viewportSlot {
+.viewportCanvas {
   position: absolute;
   inset: 0;
-  display: grid;
-  place-content: center;
-  justify-items: center;
-  gap: var(--space-1);
-  color: var(--text-faint);
-  background-image:
-    linear-gradient(var(--vp-grid) 1px, transparent 1px),
-    linear-gradient(90deg, var(--vp-grid) 1px, transparent 1px);
-  background-size: 1.5rem 1.5rem;
-  background-position: center;
 }
 
-.viewportLabel {
+/* Keyboard shortcut list (ShortcutsDialog) */
+.shortcuts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: var(--space-4);
+}
+
+.shortcutGroup {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
   font-weight: var(--weight-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
   color: var(--text-muted);
 }
 
-.viewportNote {
+.shortcutList {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+}
+
+.shortcutRow {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr);
+  gap: var(--space-2);
   font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+}
+
+.shortcutRow dd {
+  margin: 0;
+}
+
+.shortcutRow kbd {
+  font: var(--text-xs) / var(--lh-xs) var(--font-mono);
+  color: var(--text);
 }
 
 /* Status bar */

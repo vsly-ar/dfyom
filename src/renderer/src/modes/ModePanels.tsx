@@ -1,12 +1,19 @@
-// The navigator and inspector content per mode. Until the mode UIs exist (design 3.6, plan 3.7,
-// run 3.12) they are empty states: a mode without its input says so and offers the way there
-// (Plan without a part → Design; Run without a plan → Plan). Mode screens use ui/ only.
-// Doc: docs/conventions/ui.md#mode-switching, #panels-and-inspectors
+// The navigator, inspector, viewport scene and status-bar part per mode. Without a project every
+// mode shows the start panel (New / Open, recovery). Design is built (3.6, modes/design/); plan
+// (3.7) and run (3.12) are empty states until theirs exist: a mode without its input says so and
+// offers the way there (Plan without a part → Design; Run without a plan → Plan). Mode screens
+// use ui/ only. Doc: docs/conventions/ui.md#mode-switching, #panels-and-inspectors
 import { ArrowRight } from 'lucide-react'
 import type { AppMode } from '../../../core/modes'
 import type { ProjectDoc } from '../../../core/project/document'
 import { shellMessages } from '../messages/shell'
+import { StartPanel } from '../shell/project/StartPanel'
 import { EmptyState, PanelHeader } from '../ui'
+import { DesignInspector } from './design/DesignInspector'
+import { DesignNavigator } from './design/DesignNavigator'
+import { DesignStatus } from './design/DesignStatus'
+import { designPart } from './design/model'
+import { useDesignScene, type SceneProps } from './design/useDesignScene'
 import styles from './ModePanels.module.css'
 
 const m = shellMessages.empty
@@ -28,17 +35,11 @@ const NavigatorIcon = (
 export function ModeNavigator({ mode, doc, onMode }: ModePanelProps): React.JSX.Element {
   const title = shellMessages.modes[mode]
   const body = (() => {
-    if (doc === undefined) return <EmptyState icon={NavigatorIcon} {...m.noProject} />
+    if (doc === undefined) return <StartPanel />
     const parts = Object.values(doc.parts)
     switch (mode) {
-      case 'design': {
-        const part = parts[0]
-        return part === undefined ? (
-          <EmptyState icon={NavigatorIcon} {...m.design.noPart} />
-        ) : (
-          <EmptyState icon={NavigatorIcon} {...m.design.part(part.name)} />
-        )
-      }
+      case 'design':
+        return <DesignNavigator part={designPart(doc)} units={doc.unitSystem} />
       case 'plan':
         return parts.length === 0 ? (
           <EmptyState
@@ -80,6 +81,7 @@ export function ModeNavigator({ mode, doc, onMode }: ModePanelProps): React.JSX.
 }
 
 export function ModeInspector({ mode, doc }: Omit<ModePanelProps, 'onMode'>): React.JSX.Element {
+  if (mode === 'design' && doc !== undefined) return <DesignInspector part={designPart(doc)} />
   return (
     <>
       <PanelHeader title={shellMessages.regions.inspector} />
@@ -88,4 +90,23 @@ export function ModeInspector({ mode, doc }: Omit<ModePanelProps, 'onMode'>): Re
       </div>
     </>
   )
+}
+
+/** The mode's part of the status bar (design: evaluation status and warning count). */
+export function ModeStatus({
+  mode,
+  doc,
+}: Omit<ModePanelProps, 'onMode'>): React.JSX.Element | null {
+  if (doc === undefined) return null
+  return mode === 'design' ? <DesignStatus /> : null
+}
+
+/**
+ * The scene of the one shared viewport per mode (ui.md#app-shell: one canvas, the mode decides
+ * the scene). Plan (3.7) and run (3.12) show the design part until their scenes exist.
+ */
+export function useModeScene(mode: AppMode): SceneProps {
+  const design = useDesignScene()
+  if (mode === 'design') return design
+  return { mesh: design.mesh, stock: design.stock ?? null, status: design.status ?? 'done' }
 }

@@ -100,4 +100,14 @@ describe('surface colours', () => {
     expect(b).toBeCloseTo(1, 9)
     expect(c).toBeCloseTo(0.214, 3)
   })
+
+  it('pulses a new selection from MIX.pulse back to MIX.selected', () => {
+    const at = (pulse: number) =>
+      surfaceColour('pocket1.floor', { selectedOperation: 'pocket1', pulse }, palette)
+    expect(at(1)).toEqual(mix(palette.part, palette.selected, MIX.pulse))
+    expect(at(0)).toEqual(mix(palette.part, palette.selected, MIX.selected))
+    expect(at(0.5)[0]).toBeCloseTo(
+      mix(palette.part, palette.selected, (MIX.pulse + MIX.selected) / 2)[0],
+    )
+  })
 })

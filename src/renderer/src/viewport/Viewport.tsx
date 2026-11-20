@@ -32,6 +32,7 @@ import {
   unionBox,
   type Box,
   type SurfaceTarget,
+  type Vec3,
   type ViewportMesh,
 } from './mesh'
 import { CameraControlsImpl, Scene } from './Scene'
@@ -55,8 +56,15 @@ export interface ViewportProps {
   stock?: Box | null
   /** Evaluation status (ui.md#evaluation-status-pending-outdated-failed). */
   status?: EvaluationStatus
-  /** Operation (or `stock`) shown as selected. */
+  /** Operation (or `stock`) shown as selected; a new selection pulses (`--motion-emphasis`). */
   selectedOperation?: string | null
+  /**
+   * Live outline of the edited operation while its evaluation is pending (closed loops in the
+   * part frame, from the field values; ui.md#evaluation-status-pending-outdated-failed).
+   */
+  outline?: readonly (readonly Vec3[])[] | null
+  /** Error marker at the failing operation (evaluation `failed`). */
+  marker?: Vec3 | null
   /** Click on a surface → its target; click on empty space or Escape → `null`. */
   onSelect?: (target: SurfaceTarget | null) => void
   /** Pointer hover over a surface (for a navigator row highlight); `null` when it leaves. */
@@ -81,6 +89,30 @@ const ACTIONS: Record<CameraAction, CameraControlsImpl['mouseButtons']['left']> 
   none: CameraControlsImpl.ACTION.NONE,
 }
 
+/** `--motion-emphasis` (tokens.css): the selection pulse. */
+export const PULSE_MS = 450
+
+/** 1 when `key` changes to a value, easing out to 0 over `PULSE_MS`; 0 under reduced motion. */
+function usePulse(key: string | null, reduced: boolean): number {
+  const [pulse, setPulse] = useState(0)
+  useEffect(() => {
+    if (key === null || reduced || typeof requestAnimationFrame === 'undefined') return
+    let frame = 0
+    const start = performance.now()
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / PULSE_MS)
+      setPulse((1 - t) ** 2) // eases out: fades fast at first, then settles
+      if (t < 1) frame = requestAnimationFrame(tick)
+    }
+    frame = requestAnimationFrame(tick)
+    return () => {
+      cancelAnimationFrame(frame)
+      setPulse(0)
+    }
+  }, [key, reduced])
+  return pulse
+}
+
 /** True `delay` ms after `on` became true (false at once when it turns false). */
 function useDelayed(on: boolean, delay: number): boolean {
   const [late, setLate] = useState(false)
@@ -100,6 +132,8 @@ export function Viewport({
   stock = null,
   status = 'done',
   selectedOperation = null,
+  outline = null,
+  marker = null,
   onSelect,
   onHover,
   pick = null,
@@ -119,14 +153,16 @@ export function Viewport({
   const [hovered, setHovered] = useState<SurfaceTarget | undefined>(undefined)
 
   const outdated = useDelayed(status === 'pending', DELAY_INDICATOR_MS) || status === 'failed'
+  const pulse = usePulse(selectedOperation, reducedMotion)
   const surfaceState = useMemo<SurfaceState>(
     () => ({
       selectedOperation,
       hovered: hovered?.surface ?? null,
       pickEligible: pick?.eligible ?? null,
       outdated,
+      pulse,
     }),
-    [selectedOperation, hovered, pick, outdated],
+    [selectedOperation, hovered, pick, outdated, pulse],
   )
   const bounds = useMemo(
     () => unionBox(mesh ? meshBounds(mesh) : undefined, stock ?? undefined),
@@ -262,6 +298,8 @@ export function Viewport({
           bounds={bounds}
           palette={palette}
           surfaceState={surfaceState}
+          outline={status === 'pending' ? outline : null}
+          marker={status === 'failed' ? marker : null}
           controlsRef={controls}
           onHover={hover}
           onClick={(target, e) => {

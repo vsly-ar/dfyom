@@ -63,9 +63,13 @@ function apply(s: OpenReplica, e: ActionEvent): OpenReplica | undefined {
     doc = next.unwrap()
   }
   const saved = e.type === 'command' && e.name === 'project.save' && e.outcome.ok
+  // a save (Save as included) names the file it wrote
+  const outcome = saved && e.outcome.ok ? (e.outcome.value as { filePath?: unknown }) : undefined
+  const file = typeof outcome?.filePath === 'string' ? outcome.filePath : s.file
   return {
     ...s,
     doc,
+    file,
     revision: e.revision,
     seq: e.seq,
     savedRevision: saved ? e.revision : s.savedRevision,
