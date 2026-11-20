@@ -1,0 +1,132 @@
+// Viewport colours: parse the `--vp-*` token values and colour surfaces by selection, hover, pick
+// mode and evaluation status. Pure. Doc: docs/conventions/ui.md#colour, #selection-and-picking,
+// #evaluation-status-pending-outdated-failed
+import type { SurfaceId } from '../../../core/geometry/model'
+import { surfaceOwner, triangleCount, type ViewportMesh } from './mesh'
+
+/** sRGB, each channel 0..1. */
+export type Rgb = readonly [number, number, number]
+
+/** The tokens the viewport reads (ui.md#colour, viewport row). */
+export const PALETTE_TOKENS = {
+  background: '--bg-viewport',
+  part: '--vp-part',
+  stock: '--vp-stock',
+  edge: '--vp-edge',
+  selected: '--vp-selected',
+  hover: '--vp-hover',
+  outdated: '--vp-outdated',
+  grid: '--vp-grid',
+  gridMajor: '--vp-grid-major',
+  axisX: '--vp-axis-x',
+  axisY: '--vp-axis-y',
+  axisZ: '--vp-axis-z',
+} as const
+
+export type PaletteKey = keyof typeof PALETTE_TOKENS
+export type Palette = Readonly<Record<PaletteKey, Rgb>>
+
+/** Used for a token that is missing or unparsable (visible on purpose: a token bug, not a theme). */
+export const FALLBACK: Rgb = [1, 0, 1]
+
+/**
+ * Parses the colour forms `tokens.css` uses: `#rgb`, `#rrggbb` (`#rgba` / `#rrggbbaa`, alpha
+ * ignored) and `rgb()` / `rgba()` with comma or space syntax. `undefined` for anything else.
+ */
+export function parseColour(value: string): Rgb | undefined {
+  const s = value.trim().toLowerCase()
+  const hex = /^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/.exec(s)?.[1]
+  if (hex) {
+    const full = hex.length <= 4 ? [...hex].map((c) => c + c).join('') : hex
+    return [0, 2, 4].map((i) => parseInt(full.slice(i, i + 2), 16) / 255) as unknown as Rgb
+  }
+  const fn = /^rgba?\(([^)]*)\)$/.exec(s)?.[1]
+  if (fn === undefined) return undefined
+  const parts = fn
+    .split(/[\s,/]+/)
+    .filter(Boolean)
+    .slice(0, 3)
+  if (parts.length < 3) return undefined
+  const channels = parts.map((c) => (c.endsWith('%') ? (parseFloat(c) / 100) * 255 : parseFloat(c)))
+  if (channels.some((c) => !Number.isFinite(c))) return undefined
+  return channels.map((c) => Math.min(1, Math.max(0, c / 255))) as unknown as Rgb
+}
+
+/** Token values (as `getComputedStyle` returns them) → palette; missing ones become `FALLBACK`. */
+export function paletteFrom(values: Readonly<Record<string, string>>): Palette {
+  const out = {} as Record<PaletteKey, Rgb>
+  for (const key of Object.keys(PALETTE_TOKENS) as PaletteKey[]) {
+    out[key] = parseColour(values[PALETTE_TOKENS[key]] ?? '') ?? FALLBACK
+  }
+  return out
+}
+
+export function mix(a: Rgb, b: Rgb, t: number): Rgb {
+  return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
+}
+
+/** sRGB → linear (three.js vertex colours and lighting work in linear). */
+export function toLinear(c: Rgb): Rgb {
+  const f = (x: number): number => (x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4)
+  return [f(c[0]), f(c[1]), f(c[2])]
+}
+
+/**
+ * How much of `--vp-selected` tints a surface. Selection is a light tint plus an amber outline
+ * (the accent is never a large fill, ui.md decision 18); pick mode tints eligible surfaces lightly
+ * and the hovered eligible one strongly, and dims the rest towards the background.
+ */
+export const MIX = { selected: 0.25, pickEligible: 0.12, pickHover: 0.4, pickDimmed: 0.6 } as const
+
+export interface SurfaceState {
+  /** Operation (or `stock`) whose surfaces are selected. */
+  readonly selectedOperation?: string | null | undefined
+  /** Surface under the pointer. */
+  readonly hovered?: SurfaceId | null | undefined
+  /** Pick mode: the eligible surfaces; `null`/absent outside pick mode. */
+  readonly pickEligible?: ReadonlySet<SurfaceId> | null | undefined
+  /** `pending` after the indicator delay, or `failed`: the last mesh is tinted outdated. */
+  readonly outdated?: boolean | undefined
+}
+
+/**
+ * One surface's colour (sRGB). Outside pick mode, hover previews what a click selects: every
+ * surface of the hovered surface's operation. In pick mode, hover is per surface and only on
+ * eligible ones.
+ */
+export function surfaceColour(surface: SurfaceId, state: SurfaceState, palette: Palette): Rgb {
+  const base = state.outdated ? palette.outdated : palette.part
+  const owner = surfaceOwner(surface)
+  if (state.pickEligible) {
+    if (!state.pickEligible.has(surface)) return mix(base, palette.background, MIX.pickDimmed)
+    if (state.hovered === surface) return mix(base, palette.selected, MIX.pickHover)
+    return mix(base, palette.selected, MIX.pickEligible)
+  }
+  if (state.selectedOperation != null && owner === state.selectedOperation) {
+    return mix(base, palette.selected, MIX.selected)
+  }
+  if (state.hovered != null && surfaceOwner(state.hovered) === owner) return palette.hover
+  return base
+}
+
+/** Linear vertex colours for the non-indexed render geometry (9 floats per triangle). */
+export function vertexColours(
+  mesh: ViewportMesh,
+  state: SurfaceState,
+  palette: Palette,
+  out: Float32Array = new Float32Array(triangleCount(mesh) * 9),
+): Float32Array {
+  const perSurface = mesh.surfaces.map((s) => toLinear(surfaceColour(s, state, palette)))
+  const n = triangleCount(mesh)
+  for (let t = 0; t < n; t++) {
+    const c = perSurface[mesh.triangleSurface[t]!] ?? toLinear(FALLBACK)
+    for (let k = 0; k < 3; k++) out.set(c, 9 * t + 3 * k)
+  }
+  return out
+}
+
+/** Whether a surface is drawn with the selection outline. */
+export function isOutlined(surface: SurfaceId, state: SurfaceState): boolean {
+  if (state.pickEligible) return state.hovered === surface && state.pickEligible.has(surface)
+  return state.selectedOperation != null && surfaceOwner(surface) === state.selectedOperation
+}

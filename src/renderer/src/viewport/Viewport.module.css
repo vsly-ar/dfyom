@@ -1,0 +1,59 @@
+/* 3D viewport. Look: ui-design-system.html (.vp). Doc: docs/conventions/ui.md#selection-and-picking */
+.viewport {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-viewport);
+  outline-offset: -2px;
+}
+
+.canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.viewport[data-hover] canvas {
+  cursor: pointer;
+}
+
+.viewport[data-picking] canvas {
+  cursor: crosshair;
+}
+
+.toolbar {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+}
+
+.banner {
+  position: absolute;
+  top: var(--space-2);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--z-toolbar);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--accent-border);
+  background: color-mix(in oklab, var(--bg-raised) 92%, transparent);
+  box-shadow: var(--shadow-1);
+  color: var(--text);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}

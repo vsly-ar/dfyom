@@ -72,7 +72,9 @@ const SEMANTIC = [
   ...['grid', 'grid-major', 'stock', 'part', 'edge', 'removal', 'selected', 'selected-halo'].map(
     (s) => `--vp-${s}`,
   ),
-  ...['feed', 'rapid', 'tool', 'axis-x', 'axis-y', 'axis-z'].map((s) => `--vp-${s}`),
+  ...['feed', 'rapid', 'tool', 'axis-x', 'axis-y', 'axis-z', 'hover', 'outdated'].map(
+    (s) => `--vp-${s}`,
+  ),
   '--shadow-1',
   '--shadow-2',
   '--shadow-3',
