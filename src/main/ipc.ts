@@ -1,7 +1,9 @@
 // Project and agent IPC of the GUI: every window is a session of the app host (source
 // `ui:win-<id>`), so windows open, edit and save projects through the same routing as MCP.
-// Doc: docs/architecture/llm-api.md#processes-and-hosting · contract: src/shared/preload-api.ts
-import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron'
+// Also the replica snapshot, the settings and closing a project with its last window.
+// Doc: docs/architecture/llm-api.md#processes-and-hosting, docs/conventions/ui.md#app-shell
+// Contract: src/shared/preload-api.ts
+import { app, BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { agentError } from '../core/agent/results'
 import type { AgentSession, SessionInfo } from '../core/agent/session'
 import { sourceKey } from '../core/commands/context'
@@ -11,10 +13,14 @@ import {
   type AgentSessionInfo,
   type CallReply,
   type LocalHttpState,
+  type ProjectSnapshot,
+  type WindowCloseRequest,
 } from '../shared/preload-api'
 import type { Dispatcher } from '../core/commands/dispatcher'
 import type { AppHost } from './host/app-host'
 import type { LocalHttpControl } from './mcp/http'
+import type { SettingsStore } from './settings/store'
+import { closeNeedsProject } from './window-close'
 
 interface WindowSession {
   readonly win: BrowserWindow
@@ -22,6 +28,10 @@ interface WindowSession {
   /** The runtime whose log the window follows (identity: a reopened project is another). */
   following: Dispatcher | undefined
   unsubscribe: (() => void) | undefined
+  /** Its project was closed (or it has none to close): the next `close` goes through. */
+  closeApproved: boolean
+  /** A project close for this window is in flight. */
+  closing: boolean
 }
 
 const NOT_A_WINDOW: CallReply = {
@@ -51,8 +61,17 @@ export interface WindowSessions {
   attach(win: BrowserWindow, key?: string): void
 }
 
-export function registerProjectIpc(host: AppHost, http: LocalHttpControl): WindowSessions {
+export function registerProjectIpc(
+  host: AppHost,
+  http: LocalHttpControl,
+  settings: SettingsStore,
+): WindowSessions {
   const byContents = new Map<number, WindowSession>()
+  // App quit closes every project itself (host.shutdown, unsaved changes stay recoverable).
+  let quitting = false
+  app.on('before-quit', () => {
+    quitting = true
+  })
 
   /**
    * Re-subscribes the window to its project's action log when its bound runtime changed (bound,
@@ -65,10 +84,13 @@ export function registerProjectIpc(host: AppHost, http: LocalHttpControl): Windo
     ws.unsubscribe?.()
     ws.unsubscribe = undefined
     ws.following = d
-    if (d === undefined) return
-    ws.unsubscribe = d.log.subscribe({ withPatches: true }, (e) => {
-      if (!ws.win.isDestroyed()) ws.win.webContents.send(IPC.projectEvent, e)
-    })
+    if (d !== undefined)
+      ws.unsubscribe = d.log.subscribe({ withPatches: true }, (e) => {
+        if (!ws.win.isDestroyed()) ws.win.webContents.send(IPC.projectEvent, e)
+      })
+    // after subscribing: the snapshot the window takes now is followed by every later event
+    if (!ws.win.isDestroyed())
+      ws.win.webContents.send(IPC.projectBound, ws.session.boundKey ?? null)
   }
   host.onProjectsChanged(() => {
     for (const ws of byContents.values()) follow(ws)
@@ -99,10 +121,71 @@ export function registerProjectIpc(host: AppHost, http: LocalHttpControl): Windo
     if (sessionOf(event) === undefined || http.server === undefined) return { enabled: false }
     return { enabled: true, port: http.server.port }
   })
-  ipcMain.handle(IPC.localHttpSet, async (event, enabled: unknown): Promise<CallReply> => {
+  ipcMain.handle(IPC.projectSnapshot, (event): ProjectSnapshot | null => {
+    const ws = sessionOf(event)
+    if (ws === undefined) return null
+    follow(ws)
+    const bound = ws.session.bound()
+    const key = ws.session.boundKey
+    if (bound.isNone() || key === undefined) return null
+    const d = bound.unwrap()
+    const info = host.list().find((p) => p.key === key)
+    return {
+      key,
+      doc: d.doc,
+      revision: d.revision,
+      seq: d.log.lastSeq,
+      file: info?.file ?? null,
+      dirty: info?.dirty ?? false,
+    }
+  })
+
+  ipcMain.handle(IPC.settingsUpdate, (event, patch: unknown): CallReply => {
     if (sessionOf(event) === undefined) return NOT_A_WINDOW
-    const r = await http.setEnabled(enabled === true)
-    return reply(r.map(() => ({ value: {}, revision: 0 })))
+    return reply(settings.update(patch).map((value) => ({ value, revision: 0 })))
+  })
+  settings.onChange((next) => {
+    for (const win of BrowserWindow.getAllWindows())
+      if (!win.isDestroyed()) win.webContents.send(IPC.settingsChanged, next)
+  })
+
+  /**
+   * Closes the window's project (if this is its last window), then the window. A refusal is sent
+   * to the window: unsaved changes ask for confirmation, other errors (a run) are shown.
+   */
+  const closeWindow = async (ws: WindowSession, confirm: boolean): Promise<CallReply> => {
+    const key = closeNeedsProject(ws.session.boundKey, otherKeys(ws))
+    if (key === undefined) {
+      ws.closeApproved = true
+      ws.win.close()
+      return { ok: true, value: {}, revision: 0 }
+    }
+    ws.closing = true
+    const r = await ws.session.call('project.close', { key, confirm })
+    ws.closing = false
+    const out = reply(r.result)
+    if (out.ok) {
+      ws.closeApproved = true
+      if (!ws.win.isDestroyed()) ws.win.close()
+      return out
+    }
+    if (!ws.win.isDestroyed()) {
+      const unsaved = out.error.issues.some((i) => i.rule === 'unsavedChanges')
+      const name = host.list().find((p) => p.key === key)?.name ?? key
+      const request: WindowCloseRequest = unsaved
+        ? { kind: 'unsavedChanges', name }
+        : { kind: 'refused', error: out.error }
+      ws.win.webContents.send(IPC.windowCloseRequest, request)
+    }
+    return out
+  }
+  const otherKeys = (ws: WindowSession): (string | undefined)[] =>
+    [...byContents.values()].filter((o) => o !== ws).map((o) => o.session.boundKey)
+
+  ipcMain.handle(IPC.windowClose, async (event, confirm: unknown): Promise<CallReply> => {
+    const ws = sessionOf(event)
+    if (ws === undefined) return NOT_A_WINDOW
+    return closeWindow(ws, confirm === true)
   })
 
   host.onSessions((sessions) => {
@@ -114,11 +197,25 @@ export function registerProjectIpc(host: AppHost, http: LocalHttpControl): Windo
   return {
     attach(win, key) {
       const session = host.openSession({ kind: 'ui', id: `win-${win.id}` })
-      const ws: WindowSession = { win, session, following: undefined, unsubscribe: undefined }
+      const ws: WindowSession = {
+        win,
+        session,
+        following: undefined,
+        unsubscribe: undefined,
+        closeApproved: false,
+        closing: false,
+      }
       if (key !== undefined) session.bind(key)
       const contentsId = win.webContents.id
       byContents.set(contentsId, ws)
       follow(ws)
+      // Closing the last window of a project closes the project (docs/conventions/ui.md#app-shell).
+      win.on('close', (event) => {
+        if (quitting || ws.closeApproved) return
+        if (closeNeedsProject(ws.session.boundKey, otherKeys(ws)) === undefined) return
+        event.preventDefault()
+        if (!ws.closing) void closeWindow(ws, false)
+      })
       win.on('closed', () => {
         ws.unsubscribe?.()
         session.end()

@@ -6,9 +6,11 @@
  * reachable by LLM agents (docs/architecture/llm-api.md).
  */
 import type { ActionEvent } from '../core/commands/action-log'
+import type { ProjectDoc } from '../core/project/document'
 import type { RunStatus } from '../core/run/service'
 import type { AppErrorData } from './errors/app-error'
 import type { LogLevel, LogRecord } from './logging'
+import type { AppSettings, AppSettingsPatch } from './settings'
 
 /** Main → renderer push of the machine status (docs/modes/run-v0.1.md#status). */
 export const RUN_STATUS_IPC_CHANNEL = 'dfyom:run.status'
@@ -26,10 +28,24 @@ export const IPC = {
   agentSessions: 'dfyom:agents.sessions',
   /** Renderer → main (invoke): the attached agent sessions. */
   agentsList: 'dfyom:agents.list',
-  /** Renderer → main (invoke): local HTTP state / switch it (the setting, task 3.3 persists it). */
+  /** Renderer → main (invoke): local HTTP state (switched by the `allowLocalAgents` setting). */
   localHttpGet: 'dfyom:agents.localHttp.get',
-  localHttpSet: 'dfyom:agents.localHttp.set',
+  /** Renderer → main (invoke): the bound project's document for the replica, or null. */
+  projectSnapshot: 'dfyom:project.snapshot',
+  /** Main → renderer: the window's bound project runtime changed (key, or null): re-snapshot. */
+  projectBound: 'dfyom:project.bound',
+  /** Renderer → main (invoke): apply a settings patch (docs/conventions/ui.md#settings). */
+  settingsUpdate: 'dfyom:settings.update',
+  /** Main → renderer: the settings changed (any window, or main). */
+  settingsChanged: 'dfyom:settings.changed',
+  /** Main → renderer: closing the window would close its project and needs the user. */
+  windowCloseRequest: 'dfyom:window.closeRequest',
+  /** Renderer → main (invoke): close the window and its project (`confirm` for unsaved changes). */
+  windowClose: 'dfyom:window.close',
 } as const
+
+/** Window argument (`webPreferences.additionalArguments`): the settings at window creation. */
+export const SETTINGS_ARG = '--dfyom-settings'
 
 /** The result of `call`: the `CommandOutcome`/`QueryOutcome`, or the error as agents see it. */
 export type CallReply =
@@ -50,6 +66,29 @@ export interface LocalHttpState {
   readonly enabled: boolean
   readonly port?: number
 }
+
+/**
+ * The bound project as the replica starts from it (docs/conventions/ui.md#document-replica):
+ * the document at `revision`, and the action-log `seq` it includes; later events follow.
+ */
+export interface ProjectSnapshot {
+  readonly key: string
+  readonly doc: ProjectDoc
+  readonly revision: number
+  readonly seq: number
+  /** `null` until an untitled project is saved. */
+  readonly file: string | null
+  /** Unsaved changes at `revision`. */
+  readonly dirty: boolean
+}
+
+/**
+ * Closing the last window of a project closes the project; main asks the window when that is
+ * refused: unsaved changes (`unsavedChanges`, confirm to close) or another error (e.g. a run).
+ */
+export type WindowCloseRequest =
+  | { readonly kind: 'unsavedChanges'; readonly name: string }
+  | { readonly kind: 'refused'; readonly error: AppErrorData }
 
 export interface PreloadApi {
   readonly versions: {
@@ -83,13 +122,33 @@ export interface PreloadApi {
   readonly project: {
     /** Action-log events of the window's bound project, patches included (replica). */
     onEvent(listener: (event: ActionEvent) => void): () => void
+    /** The bound project's document (replica start), or null when the window has none. */
+    snapshot(): Promise<ProjectSnapshot | null>
+    /** The window's bound project changed (bound, closed, reopened): take a new snapshot. */
+    onBound(listener: (key: string | null) => void): () => void
   }
-  /** The "agent connected" indicator and the local HTTP setting (UI: task 3.3). */
+  /** The "agent connected" indicator and the local HTTP state (setting: `settings`). */
   readonly agents: {
     list(): Promise<readonly AgentSessionInfo[]>
     onSessions(listener: (sessions: readonly AgentSessionInfo[]) => void): () => void
     localHttp(): Promise<LocalHttpState>
-    setLocalHttp(enabled: boolean): Promise<CallReply>
+  }
+  /**
+   * App settings (docs/conventions/ui.md#settings): GUI preferences owned by main, mirrored by
+   * every window. Not an agent capability: agents must not change their own access.
+   */
+  readonly settings: {
+    /** The settings when the window was created (applied before the first render). */
+    readonly initial: AppSettings | undefined
+    /** Applies a patch; the reply's value is the new settings. */
+    update(patch: AppSettingsPatch): Promise<CallReply>
+    onChange(listener: (settings: AppSettings) => void): () => void
+  }
+  /** This window's lifecycle (closing a project with its last window). */
+  readonly window: {
+    onCloseRequest(listener: (request: WindowCloseRequest) => void): () => void
+    /** Closes the window and its project; `confirm` closes with unsaved changes (recoverable). */
+    close(confirm: boolean): Promise<CallReply>
   }
 }
 

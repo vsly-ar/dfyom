@@ -1,0 +1,259 @@
+import { act, screen, waitFor, within } from '@testing-library/react'
+import { afterEach, describe, expect, it } from 'vitest'
+import { App } from '../App'
+import { createFakeBridge, fixtureDispatcher, type FakeBridge } from '../test/bridge'
+import { expectNoAxeViolations, renderUi } from '../test/render'
+import { createShell, ShellProvider } from './ShellContext'
+
+function renderShell(bridge: FakeBridge = createFakeBridge()) {
+  const shell = createShell(bridge)
+  return {
+    bridge,
+    shell,
+    ...renderUi(
+      <ShellProvider shell={shell}>
+        <App />
+      </ShellProvider>,
+    ),
+  }
+}
+
+afterEach(() => {
+  delete document.documentElement.dataset['theme']
+  delete document.documentElement.dataset['motion']
+  document.title = ''
+})
+
+describe('AppShell', () => {
+  it('lays out the landmarks: toolbar, modes, navigator, viewport, status bar', async () => {
+    renderShell()
+    expect(screen.getByRole('banner', { name: 'Main toolbar' })).toBeInTheDocument()
+    expect(screen.getByRole('navigation', { name: 'Modes' })).toBeInTheDocument()
+    expect(screen.getByRole('navigation', { name: 'Navigator' })).toBeInTheDocument()
+    expect(screen.getByRole('main', { name: 'Viewport' })).toHaveTextContent('3D viewport')
+    const status = screen.getByRole('contentinfo', { name: 'Status bar' })
+    expect(await within(status).findByText('No project')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'No project open' })).toBeInTheDocument()
+    expect(document.title).toBe('DFYOM')
+  })
+
+  it('switches modes by the switcher and by Ctrl/Cmd+1/2/3, not while typing', async () => {
+    const { user } = renderShell()
+    const mode = (name: string) => screen.getByRole('radio', { name })
+    await user.click(mode('Plan'))
+    expect(mode('Plan')).toBeChecked()
+    expect(screen.getByRole('heading', { name: 'Plan', level: 2 })).toBeInTheDocument()
+    await user.keyboard('{Control>}3{/Control}')
+    expect(mode('Run')).toBeChecked()
+    await user.keyboard('{Control>}1{/Control}')
+    expect(mode('Design')).toBeChecked()
+
+    const input = document.createElement('input')
+    document.body.append(input)
+    input.focus()
+    await user.keyboard('{Control>}2{/Control}')
+    expect(mode('Design')).toBeChecked()
+    input.remove()
+  })
+
+  it('shows the bound project: title, save state, unit system; edits arrive by the replica', async () => {
+    const bridge = createFakeBridge()
+    const d = fixtureDispatcher('Bracket')
+    bridge.bind(d, 'p1', { file: '/p/bracket.dfyom' })
+    const { user } = renderShell(bridge)
+    const status = screen.getByRole('contentinfo', { name: 'Status bar' })
+    expect(await within(status).findByText('Saved')).toBeInTheDocument()
+    expect(within(status).getByText('Unit system: millimetres')).toBeInTheDocument()
+    expect(document.title).toBe('Bracket')
+
+    // an edit (any source) reaches the window through the patch stream
+    await act(async () => {
+      await bridge.call('project.name.update', { name: 'Plate' })
+    })
+    await waitFor(() => expect(document.title).toBe('Plate — Edited'))
+    expect(within(status).getByText('Unsaved changes')).toBeInTheDocument()
+
+    // undo names the step, then reverts it through history.undo
+    const undo = await screen.findByRole('button', { name: 'Undo Rename project' })
+    await user.click(undo)
+    // undo is a commit too: the revision moved past the save, so still edited
+    await waitFor(() => expect(document.title).toBe('Bracket — Edited'))
+    expect(await screen.findByRole('button', { name: 'Redo Rename project' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeDisabled()
+
+    // shortcuts dispatch the same commands
+    await user.keyboard('{Control>}{Shift>}z{/Shift}{/Control}')
+    await waitFor(() => expect(document.title).toBe('Plate — Edited'))
+    await user.keyboard('{Control>}z{/Control}')
+    await waitFor(() => expect(document.title).toBe('Bracket — Edited'))
+  })
+
+  it('names the agent when the top step is not the user’s', async () => {
+    const bridge = createFakeBridge()
+    const d = fixtureDispatcher()
+    bridge.bind(d)
+    renderShell(bridge)
+    await act(async () => {
+      const agent = { kind: 'agent', id: 'http-1' } as const
+      const r = await d.dispatch('project.name.update', { name: 'X' }, agent, {
+        expectedRevision: d.revision,
+      })
+      expect(r.isOk()).toBe(true)
+    })
+    expect(
+      await screen.findByRole('button', { name: 'Undo Rename project – by agent' }),
+    ).toBeInTheDocument()
+  })
+
+  it('sends a mode without its input to the mode that makes it', async () => {
+    const bridge = createFakeBridge()
+    bridge.bind(fixtureDispatcher())
+    const { user } = renderShell(bridge)
+    await user.click(screen.getByRole('radio', { name: 'Run' }))
+    await user.click(await screen.findByRole('button', { name: 'Go to Plan' }))
+    expect(screen.getByRole('radio', { name: 'Plan' })).toBeChecked()
+    await user.click(screen.getByRole('button', { name: 'Go to Design' }))
+    expect(screen.getByRole('radio', { name: 'Design' })).toBeChecked()
+  })
+
+  it('applies and persists the settings: theme, reduced motion, local agents', async () => {
+    const { user, bridge } = renderShell()
+    await user.click(screen.getByRole('button', { name: 'Settings' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Settings' })
+    await user.click(within(dialog).getByRole('radio', { name: 'Dark' }))
+    expect(document.documentElement.dataset['theme']).toBe('dark')
+    await user.click(within(dialog).getByRole('switch', { name: 'Reduce motion' }))
+    expect(document.documentElement.dataset['motion']).toBe('reduce')
+    const agents = within(dialog).getByRole('switch', { name: 'Allow local agents to connect' })
+    expect(agents).toBeChecked()
+    expect(agents).toHaveAccessibleDescription(/port 41234/)
+    await user.click(agents)
+    expect(bridge.settingsPatches).toEqual([
+      { theme: 'dark' },
+      { reduceMotion: true },
+      { allowLocalAgents: false },
+    ])
+    await user.click(within(dialog).getByRole('radio', { name: 'System' }))
+    expect(document.documentElement.dataset['theme']).toBeUndefined()
+  })
+
+  it('follows settings changed in another window', async () => {
+    const { bridge } = renderShell()
+    act(() =>
+      bridge.emitSettings({
+        theme: 'light',
+        reduceMotion: false,
+        allowLocalAgents: true,
+        layouts: {},
+      }),
+    )
+    await waitFor(() => expect(document.documentElement.dataset['theme']).toBe('light'))
+  })
+
+  it('shows connected agents in the status bar and links to the setting', async () => {
+    const { user, bridge } = renderShell()
+    expect(screen.queryByRole('button', { name: /agent/i })).toBeNull()
+    act(() =>
+      bridge.emitSessions([
+        { source: 'agent:http-2', client: 'Claude Code', key: 'p1' },
+        { source: 'agent:stdio-1' },
+      ]),
+    )
+    await user.click(await screen.findByRole('button', { name: '2 agents connected' }))
+    const pop = await screen.findByRole('dialog', { name: 'Connected agents' })
+    expect(within(pop).getByText('Claude Code')).toBeInTheDocument()
+    expect(within(pop).getByText('agent:http-2')).toBeInTheDocument()
+    expect(within(pop).getByText('Unknown client')).toBeInTheDocument()
+    await user.click(within(pop).getByRole('button', { name: 'Agent settings' }))
+    expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeInTheDocument()
+  })
+
+  it('confirms closing a project with unsaved changes with its last window', async () => {
+    const { user, bridge } = renderShell()
+    act(() => bridge.emitCloseRequest({ kind: 'unsavedChanges', name: 'Bracket' }))
+    const dialog = await screen.findByRole('alertdialog', {
+      name: 'Close “Bracket” with unsaved changes?',
+    })
+    // the safe choice is focused first
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toHaveFocus()
+    await user.click(within(dialog).getByRole('button', { name: 'Close without saving' }))
+    expect(bridge.closeCalls).toEqual([true])
+  })
+
+  it('shows why a project cannot be closed', async () => {
+    const { bridge } = renderShell()
+    act(() =>
+      bridge.emitCloseRequest({
+        kind: 'refused',
+        error: { code: 'run.busy', message: 'a run job is running', issues: [], frames: [] },
+      }),
+    )
+    const dialog = await screen.findByRole('dialog', { name: 'The project cannot be closed now' })
+    expect(dialog).toHaveTextContent('The machine is busy with another connection or run.')
+    expect(bridge.closeCalls).toEqual([])
+  })
+
+  it('shows running jobs in the status bar after the indicator delay', async () => {
+    const bridge = createFakeBridge()
+    bridge.bind(fixtureDispatcher())
+    let state: 'running' | 'finished' = 'running'
+    bridge.handle('job.list', () => ({
+      ok: true,
+      revision: 0,
+      value: {
+        jobs: [
+          {
+            jobId: 'j1',
+            name: 'design.part.evaluate',
+            state,
+            startRevision: 0,
+            progress: { done: 1, total: 4 },
+          },
+        ],
+      },
+    }))
+    bridge.handle('job.abort', () => {
+      state = 'finished'
+      return { ok: true, revision: 0, value: { state: 'finished' } }
+    })
+    const { user } = renderShell(bridge)
+    const trigger = await screen.findByRole('button', { name: 'Evaluate part' }, { timeout: 2000 })
+    await user.click(trigger)
+    await user.click(await screen.findByRole('button', { name: 'Cancel Evaluate part' }))
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Evaluate part' })).toBeNull())
+    expect(bridge.calls.map((c) => c.name)).toContain('job.abort')
+  })
+
+  it('opens the inspector over the viewport in a narrow window', async () => {
+    const { user } = renderShell()
+    expect(screen.queryByRole('complementary', { name: 'Inspector' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Inspector' }))
+    expect(screen.getByRole('complementary', { name: 'Inspector' })).toBeInTheDocument()
+  })
+
+  it('moves between regions with F6', async () => {
+    const { user } = renderShell()
+    await screen.findByRole('heading', { name: 'No project open' })
+    await user.keyboard('{F6}')
+    expect(screen.getByRole('banner')).toContainElement(document.activeElement as HTMLElement)
+    await user.keyboard('{F6}')
+    expect(screen.getByRole('navigation', { name: 'Navigator' })).toContainElement(
+      document.activeElement as HTMLElement,
+    )
+    await user.keyboard('{F6}')
+    expect(screen.getByRole('main')).toHaveFocus()
+    await user.keyboard('{Shift>}{F6}{/Shift}')
+    expect(screen.getByRole('navigation', { name: 'Navigator' })).toContainElement(
+      document.activeElement as HTMLElement,
+    )
+  })
+
+  it('has no axe violations, with a project and an agent', async () => {
+    const bridge = createFakeBridge()
+    bridge.bind(fixtureDispatcher())
+    renderShell(bridge)
+    act(() => bridge.emitSessions([{ source: 'agent:http-2', client: 'Claude Code' }]))
+    await screen.findByRole('button', { name: 'Agent connected' })
+    await expectNoAxeViolations()
+  })
+})

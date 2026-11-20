@@ -4,6 +4,8 @@
 import { app, BrowserWindow } from 'electron'
 import { join, resolve } from 'node:path'
 import { RENDERER_LOG_LEVEL_ARG, type Logger, type LogLevel } from '../shared/logging'
+import { SETTINGS_ARG } from '../shared/preload-api'
+import type { AppSettings } from '../shared/settings'
 import { createAppHost } from './host/app-host'
 import { registerProjectIpc, type WindowSessions } from './ipc'
 import { startLogging } from './logging/electron'
@@ -13,13 +15,17 @@ import { createMachineClient } from './machine/spawn'
 import { createLocalHttpControl, localHttpSetting } from './mcp/http'
 import { createExportFiles } from './persistence/export-file'
 import { resolveAppData } from './persistence/paths'
+import { createSettingsStore, loadSettings } from './settings/store'
 import { WORKER_ENTRY_PATH } from './workers/bundled'
 import { createNodeWorkerPool } from './workers/node'
 
-function createMainWindow(log: Logger, level: LogLevel): BrowserWindow {
+function createMainWindow(log: Logger, level: LogLevel, settings: AppSettings): BrowserWindow {
   const win = new BrowserWindow({
     width: 1440,
     height: 900,
+    // docs/conventions/ui.md#app-shell
+    minWidth: 1024,
+    minHeight: 640,
     show: false,
     title: 'DFYOM',
     webPreferences: {
@@ -27,8 +33,12 @@ function createMainWindow(log: Logger, level: LogLevel): BrowserWindow {
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
-      // Read by the preload: renderers forward entries at the instance level.
-      additionalArguments: [`${RENDERER_LOG_LEVEL_ARG}=${level}`],
+      // Read by the preload: renderers forward entries at the instance level, and apply the
+      // settings (theme, motion, layout) before the first render.
+      additionalArguments: [
+        `${RENDERER_LOG_LEVEL_ARG}=${level}`,
+        `${SETTINGS_ARG}=${encodeURIComponent(JSON.stringify(settings))}`,
+      ],
     },
   })
   log.debug({ win: win.id }, 'window created')
@@ -95,10 +105,18 @@ void app.whenReady().then(async () => {
     else log.warn({ err: r.unwrapErr().toJSON() }, 'recovery scan failed')
   })
 
+  // App settings (docs/conventions/ui.md#settings), before anything that depends on them.
+  const appData = app.getPath('userData')
+  const settings = createSettingsStore({
+    appData,
+    initial: await loadSettings(appData, log),
+    log: log.child({ scope: 'settings' }),
+  })
+
   // Local HTTP for agents: on by default, loopback only, token, Host/Origin checks
-  // (docs/architecture/llm-api.md#local-http). The setting is persisted with the settings store
-  // (task 3.3); until then `--mcp-http=off|<port>` and the IPC switch apply to one run.
-  const httpSetting = localHttpSetting(process.argv)
+  // (docs/architecture/llm-api.md#local-http). The "Allow local agents to connect" setting
+  // switches it; `--mcp-http=off|<port>` overrides the setting at start for one run.
+  const httpSetting = localHttpSetting(process.argv, settings.get().allowLocalAgents)
   const http = createLocalHttpControl({
     host,
     appVersion: app.getVersion(),
@@ -106,14 +124,19 @@ void app.whenReady().then(async () => {
     machine,
     ...(httpSetting.port === undefined ? {} : { port: httpSetting.port }),
   })
-  if (httpSetting.enabled)
-    void http.setEnabled(true).then((r) => {
+  const switchHttp = (enabled: boolean) =>
+    void http.setEnabled(enabled).then((r) => {
       if (r.isErr()) report(r.unwrapErr(), { kind: 'system', name: 'mcp.http' })
     })
+  if (httpSetting.enabled) switchHttp(true)
+  settings.onChange((next, previous) => {
+    if (next.allowLocalAgents !== previous.allowLocalAgents) switchHttp(next.allowLocalAgents)
+  })
 
   const windowLog = log.child({ scope: 'windows' })
-  const sessions: WindowSessions = registerProjectIpc(host, http)
-  const openWindow = (key?: string) => sessions.attach(createMainWindow(windowLog, level), key)
+  const sessions: WindowSessions = registerProjectIpc(host, http, settings)
+  const openWindow = (key?: string) =>
+    sessions.attach(createMainWindow(windowLog, level, settings.get()), key)
   // A project an agent opens gets its own window, which stays open after the session ends.
   host.onProjectOpened((key, source) => {
     if (source.kind === 'agent') openWindow(key)
@@ -131,6 +154,7 @@ void app.whenReady().then(async () => {
     event.preventDefault()
     void (async () => {
       await http.setEnabled(false)
+      await settings.flush()
       await host.shutdown()
       await machine.shutdown(3000)
       workers.terminate()

@@ -1,0 +1,7 @@
+/* Term. Look: ui-design-system.html (.term). Doc: docs/conventions/ui.md#copy-and-terminology */
+.term {
+  text-decoration: underline dotted var(--text-faint);
+  text-underline-offset: 3px;
+  cursor: help;
+  border-radius: var(--radius-xs);
+}
