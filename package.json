@@ -1,7 +1,7 @@
 {
   "name": "dfyom",
   "productName": "DFYOM",
-  "version": "0.0.36",
+  "version": "0.0.37",
   "private": true,
   "description": "Design For Your Own Manufacturing – design, plan and run parts on your own CNC machines.",
   "main": "./out/main/index.js",
@@ -35,6 +35,7 @@
     "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "@types/three": "0.187.0",
     "@vitejs/plugin-react": "^6.3.0",
     "axe-core": "^4.14.1",
     "electron": "^45.3.3",
@@ -54,6 +55,8 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",
+    "@react-three/drei": "10.7.9",
+    "@react-three/fiber": "9.8.2",
     "fflate": "^0.8.3",
     "immer": "^11.2.10",
     "lucide-react": "^1.77.0",
@@ -64,6 +67,7 @@
     "radix-ui": "^1.8.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
+    "three": "0.187.0",
     "zod": "^4.6.7"
   },
   "allowScripts": {

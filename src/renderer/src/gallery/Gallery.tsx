@@ -40,6 +40,7 @@ import {
   type ToolIconName,
 } from '../ui'
 import styles from './Gallery.module.css'
+import { ViewportDemo } from './ViewportDemo'
 
 const noop = (): void => {}
 
@@ -109,6 +110,9 @@ function Specimens({ title }: { title: string }): React.JSX.Element {
       <span className={styles['eyebrow']}>{title}</span>
       <Buttons />
       <Toolbars />
+      <Row label="Viewport · sample part, click to select, pick mode, evaluation status">
+        <ViewportDemo />
+      </Row>
       <Row label="Mode switcher · own component">
         <ModeDemo />
       </Row>

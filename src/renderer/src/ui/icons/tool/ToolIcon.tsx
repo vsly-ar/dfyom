@@ -165,6 +165,34 @@ const ICONS = {
       </>
     ),
   },
+  // View presets (task 3.5): the cube of `iso` with the viewed face as the accent part.
+  top: {
+    label: 'Top',
+    body: (
+      <>
+        <path d="M8 2l5.5 3v6L8 14l-5.5-3V5zM8 8v6" />
+        <path data-accent="" d="M2.5 5L8 8l5.5-3L8 2z" />
+      </>
+    ),
+  },
+  front: {
+    label: 'Front',
+    body: (
+      <>
+        <path d="M8 2l5.5 3v6L8 14l-5.5-3V5zM8 8l5.5-3" />
+        <path data-accent="" d="M2.5 5L8 8v6l-5.5-3z" />
+      </>
+    ),
+  },
+  right: {
+    label: 'Right',
+    body: (
+      <>
+        <path d="M8 2l5.5 3v6L8 14l-5.5-3V5zM8 8L2.5 5" />
+        <path data-accent="" d="M13.5 5L8 8v6l5.5-3z" />
+      </>
+    ),
+  },
   grid: {
     label: 'Grid',
     body: (

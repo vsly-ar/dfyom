@@ -176,3 +176,15 @@
   display: inline-flex;
   color: var(--text-muted);
 }
+
+.viewportDemo {
+  display: grid;
+  gap: 8px;
+}
+
+.viewportStage {
+  height: 340px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
