@@ -1,6 +1,6 @@
 # UI guidelines
 
-Status: accepted · Principle: [principles.md §5](../principles.md#5-user-friendly-beginner-friendly-highly-graphical) · Decisions: [ADR 0012 Radix + own styles](../decisions/0012-radix-primitives-own-styles.md), [ADR 0010 react-three-fiber](../decisions/0010-react-three-fiber-viewport.md) · Terms: [glossary.md](../glossary.md) · Task: [v0.1 plan](../plans/v0.1.md) 1.11 (blocks 3.3–3.7, 3.12)
+Status: accepted · Principle: [principles.md §5](../principles.md#5-user-friendly-beginner-friendly-highly-graphical) · Decisions: [ADR 0012 Radix + own styles](../decisions/0012-radix-primitives-own-styles.md), [ADR 0010 react-three-fiber](../decisions/0010-react-three-fiber-viewport.md), [ADR 0017 APCA contrast](../decisions/0017-apca-contrast-for-design-tokens.md) · Terms: [glossary.md](../glossary.md) · Task: [v0.1 plan](../plans/v0.1.md) 1.11 (blocks 3.3–3.7, 3.12)
 
 How the renderer looks and behaves: design tokens, components, layout, interaction, run-mode safety, accessibility, copy, testing. Rules are imperative. The user's answers to the open questions are recorded as [decisions](#decisions); concrete token values, the palette and the component looks come from the approved [design system](#design-system) (task 1.16).
 
@@ -32,6 +32,7 @@ Settled with the user (tasks 1.11 and 1.16); the sections below specify them.
 22. **Graphical fields:** every field has an illustration icon whose measured part is an amber line ([field](#field)).
 23. **Mode switcher** is its own component, separate from tabs; its place in the window is decided with the window layout (3.3).
 24. **Rich motion:** indicators slide, toolpaths draw in, selections pulse; every animation explains something and turns off with reduced motion ([motion](#motion)).
+25. **Contrast by APCA:** colour contrast is checked with APCA Lc targets per role instead of WCAG 2 contrast ratios ([colour](#colour), [ADR 0017](../decisions/0017-apca-contrast-for-design-tokens.md)).
 
 ## Design system
 
@@ -86,7 +87,18 @@ Units: `rem` for type and spacing (so Electron zoom scales the UI), `px` only fo
 
 Rules:
 
-- Text contrast ≥ 4.5:1, large text and UI component boundaries (inputs, focus ring, icons that carry meaning) ≥ 3:1, in both themes ([accessibility](#accessibility)). Each theme's token values are checked by a unit test that computes the contrast pairs.
+- Contrast is measured with **APCA** (APCA-W3 0.0.98G-4g), not WCAG 2 ratios ([decision 25](#decisions), [ADR 0017](../decisions/0017-apca-contrast-for-design-tokens.md)): the lightness contrast `Lc` of a foreground on its background (order matters; negative for light on dark) must reach the target of its role, in both themes ([accessibility](#accessibility)). Targets follow the APCA Bronze levels at the sizes and weights we use; our 10–13 px text is below Bronze's font minimums, so they are floors:
+
+  | Role  | \|Lc\| ≥ | Used for                                                                             |
+  | ----- | -------- | ------------------------------------------------------------------------------------ |
+  | read  | 75       | Text read for content at 11–13 px, regular (400): body, values, labels, notes, menus |
+  | label | 60       | Text at 10–13 px, medium/bold (500–600): button labels, chips, badges, tooltips      |
+  | spot  | 30       | Non-content text: placeholders, unit suffixes, metadata, disabled (`--text-faint`)   |
+  | icon  | 45       | Outline pictograms with fine detail (1.5 px stroke, 12–16 px)                        |
+  | mark  | 30       | 1–2 px control outlines, focus ring, solid indicators ≥ 5.5 px                       |
+
+  Heading-size text (≥ 24 px bold) would take Lc 45; no token pair is used only at that size. The pairs, their roles and current misses are listed in `src/renderer/src/ui/tokens.test.ts` (`PAIRS`), which computes them from `tokens.css`.
+
 - Colour never carries meaning alone: every status also has a label or icon (and shape for machine states).
 - Safety colours follow the IEC 60204-1 indicator meanings (red = emergency/alarm, orange/amber = abnormal/attention, blue = action required, grey = neutral/off) with one deliberate exception: running uses the amber accent instead of green ([decision 20](#decisions)).
 - The accent appears as a line, an icon part, a thumb or a check, never as a large fill; `--accent-calm*` from the page is for proposal callouts in docs only.
@@ -388,10 +400,10 @@ The v0.1 rules in [run-v0.1.md](../modes/run-v0.1.md#safety-v01) cover the virtu
 
 ## Accessibility
 
-Target: **WCAG 2.2 AA** for all non-3D UI; the 3D viewport has a non-visual equivalent for every task.
+Target: **WCAG 2.2 AA** for all non-3D UI, except that colour contrast (1.4.3, 1.4.6, 1.4.11) is measured with APCA ([colour](#colour)); the 3D viewport has a non-visual equivalent for every task.
 
 - **Keyboard:** every action is reachable by keyboard; tab order follows the visual order; `F6`/`Shift+F6` cycle shell regions (main toolbar, navigator, viewport, inspector, status bar); `?` opens the shortcut list. Shortcuts never fire while typing in a field, except feed hold.
-- **Focus:** visible `:focus-visible` ring (2 px `--focus`, 2 px offset, ≥ 3:1 against both neighbours); focus returns to the trigger when a popover or dialog closes; never `outline: none` without a replacement.
+- **Focus:** visible `:focus-visible` ring (2 px `--focus`, 2 px offset, Lc ≥ 30 against both neighbours); focus returns to the trigger when a popover or dialog closes; never `outline: none` without a replacement.
 - **Contrast:** as in [colour](#colour); checked by the token unit test and axe in component tests.
 - **Reduced motion:** as in [motion](#motion); also an app setting independent of the OS.
 - **Screen readers:**
@@ -437,6 +449,6 @@ Extends [testing.md](testing.md) (component and end-to-end rows).
 - **Gallery:** in a dev build, open `#gallery` (DevTools console: `location.hash = 'gallery'`). It renders every `ui/` component light and dark side by side, overlays open in place, with switches for the window theme and reduced motion.
 - What to test: `QuantityInput` behaviour per rule above (echo, timing, commit/revert, hints, steppers); error mapping from `AppError` fixtures; confirmation policy; keyboard paths (mode switch, F6, feed hold); stop control visible in every mode with an open connection.
 - **Viewport:** WebGL does not run in jsdom. Keep picking, highlighting and scene building in pure functions (unit-tested); the canvas is covered by the end-to-end tests.
-- **Tokens:** `ui/tokens.test.ts` parses `tokens.css` and checks that both themes define every semantic token, the two dark blocks agree, type and spacing are in `rem`, reduced motion zeroes every duration, and the listed contrast pairs meet AA. Pairs the approved page draws below AA are pinned with `it.fails` and listed in the [plan's known issues](../plans/v0.1.md#known-issues-and-risks) until decided.
+- **Tokens:** `ui/tokens.test.ts` parses `tokens.css` and checks that both themes define every semantic token, the two dark blocks agree, type and spacing are in `rem`, reduced motion zeroes every duration, and the listed contrast pairs reach their APCA Lc target per role ([colour](#colour)); `ui/apca.ts` implements the APCA formula, checked against its published reference values. Pairs below their target are pinned with `it.fails` and listed in the [plan's known issues](../plans/v0.1.md#known-issues-and-risks) until decided.
 - **Smoke test (task 0.9, done):** Playwright for Electron launches the built app, checks the window opens without console errors and runs the packaged worker chunk ([testing.md](testing.md#app-playwright-for-electron)). With the UI shell (3.3): switch the three modes and open the gallery in both themes for screenshot comparison.
 - **End-to-end (task 3.11):** the exit-criteria flow driven through the UI by roles and labels, mirrored by the headless MCP flow.
