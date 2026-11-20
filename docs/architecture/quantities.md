@@ -73,7 +73,7 @@ unit      = (* spellings from the table above *) ;
 - `pm` is ASCII `+/-`/`+-` or `±` only (`+/−` with U+2212 is rejected).
 - `/` starts a `fraction` only when a digit follows it directly; otherwise it is the deviation separator: `+0/-0.05`, `+1/−0.05`, `+0.1/0`.
 - In a deviation pair, an upper deviation `digits/digits` is read as a fraction when the rest still forms a pair (`+1/16"/-0`, `+1/2/0`); otherwise it is an integer followed by the separator (`+1/0` = +1/0, not a zero denominator). `+1/2` therefore means upper +1, lower +2 (rejected: `order` invariant). Spaces around the separator (`+1 / 0`) are always unambiguous.
-- Implementation: [`parse.ts`](../../src/core/quantity/parse.ts) (`parseLiteral`), used by `Quantity.parse`.
+- Implementation: [`parse.ts`](../../src/core/quantity/parse.ts) (`parseLiteral`), used by `Quantity.parse`. `ParsedLiteral.nominal` reports the signed number as written (offsets, value in the written unit, written unit) for the input field's steppers and unit suffix (task 3.4); `Rational.toFixed` / `decimalDigits` format exact values for display.
 
 ## Tolerance
 

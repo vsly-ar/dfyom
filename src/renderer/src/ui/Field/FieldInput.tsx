@@ -8,8 +8,13 @@ import styles from './Field.module.css'
 export interface FieldInputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'className'> {
   /** Muted unit suffix of a bare number ("mm"). */
   unit?: string
-  /** A `FieldAdjustButton` inside the box. */
+  /** A `FieldAdjustButton` (and other quick actions) inside the box. */
   adjust?: ReactNode
+  /**
+   * Decoration drawn over the text, aligned with it (same font, `aria-hidden`): QuantityInput's
+   * error underline and the muted computed value after the source.
+   */
+  overlay?: ReactNode
   /** Layout only; appended to the box's class. */
   className?: string | undefined
   ref?: Ref<HTMLInputElement>
@@ -18,17 +23,28 @@ export interface FieldInputProps extends Omit<InputHTMLAttributes<HTMLInputEleme
 export function FieldInput({
   unit,
   adjust,
+  overlay,
   className,
   type = 'text',
   ...rest
 }: FieldInputProps): React.JSX.Element {
+  const input = <input {...rest} type={type} className={styles['input']} spellCheck={false} />
   return (
     <span
       className={[styles['box'], className].filter(Boolean).join(' ')}
       data-invalid={rest['aria-invalid'] === true || rest['aria-invalid'] === 'true' || undefined}
       data-readonly={rest.readOnly || undefined}
     >
-      <input {...rest} type={type} className={styles['input']} spellCheck={false} />
+      {overlay === undefined ? (
+        input
+      ) : (
+        <span className={styles['slot']}>
+          {input}
+          <span className={styles['overlay']} aria-hidden="true">
+            {overlay}
+          </span>
+        </span>
+      )}
       {unit ? (
         <span className={styles['unit']} aria-hidden="true">
           {unit}

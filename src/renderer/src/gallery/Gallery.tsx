@@ -3,7 +3,13 @@
 // (App.tsx loads it only in dev builds, at #gallery). Doc: docs/conventions/ui.md#inventory-v01
 import { ArrowRight, Download, Play, Redo2, Square, Undo2 } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
+import type { ReferenceResolver } from '../../../core/expression/evaluate'
+import { quantityFromSource } from '../../../core/expression/quantity'
 import type { AppMode } from '../../../core/modes'
+import type { Quantity } from '../../../core/quantity/quantity'
+import { Rational } from '../../../core/quantity/rational'
+import type { QuantityKind, UnitId } from '../../../core/quantity/units'
+import { None, Some, type Option } from '../../../shared/result'
 import {
   Button,
   Checkbox,
@@ -22,6 +28,7 @@ import {
   Popover,
   PortalContainer,
   Progress,
+  QuantityInput,
   SegmentedControl,
   Select,
   StatusChip,
@@ -149,6 +156,7 @@ function Specimens({ title }: { title: string }): React.JSX.Element {
         </div>
       </Row>
       <Fields />
+      <QuantityFields />
       <Row label="Status chips · evaluation and plan state">
         <div className={styles['line']}>
           <StatusChip tone="success">Up to date</StatusChip>
@@ -431,6 +439,103 @@ function Fields(): React.JSX.Element {
         <Field label="Tabs" illustration={<FieldIcon name="tabs" />} kind="toggle">
           <Checkbox label="Leave 4 tabs" defaultChecked />
         </Field>
+      </div>
+    </Row>
+  )
+}
+
+// QuantityInput specimens: a tiny stand-in for the design's surfaces (pocket1) and the tool.
+const GALLERY_REFS: ReadonlyMap<string, Quantity> = new Map([
+  ['pocket1.floor.z', galleryQuantity('-6 ±0.05')],
+  ['pocket1.depth', galleryQuantity('6')],
+  ['tool.diameter', galleryQuantity('6')],
+])
+const GALLERY_RESOLVER: ReferenceResolver = { resolve: resolveGalleryRef }
+
+function resolveGalleryRef(name: string): Option<Quantity> {
+  const v = GALLERY_REFS.get(name)
+  return v ? Some(v) : None
+}
+const GALLERY_REFERENCES = [
+  { id: 'pocket1.floor.z', label: 'Pocket 1 floor' },
+  { id: 'pocket1.depth', label: 'Pocket 1 depth' },
+  { id: 'tool.diameter', label: 'T1 · Ø6 flat end mill' },
+]
+
+function galleryQuantity(
+  source: string,
+  kind: QuantityKind = 'length',
+  defaultUnit: UnitId = 'mm',
+): Quantity {
+  return quantityFromSource(source, { kind, defaultUnit }, { resolve: resolveGalleryRef }).unwrap()
+}
+
+/** A stored value that follows its commits, like the document replica. */
+function useStored(source: string, kind?: QuantityKind, unit?: UnitId) {
+  const [value, setValue] = useState(() => galleryQuantity(source, kind, unit))
+  return { value, onCommit: setValue }
+}
+
+function QuantityFields(): React.JSX.Element {
+  const width = useStored('1/16"')
+  const depth = useStored('3.00')
+  const on = useStored('pocket1.floor.z - 2')
+  const tolerance = useStored('10 +0.1/-0.05')
+  const feed = useStored('900', 'feedRate', 'mm/min')
+  const [picking, setPicking] = useState(false)
+  return (
+    <Row label="Quantity input · source as typed, computed value when unfocused, echo while typing, errors with a fix, steppers, references and pick">
+      <div className={styles['fields']}>
+        <QuantityInput
+          label="Width"
+          kind="length"
+          defaultUnit="mm"
+          illustration={<FieldIcon name="width" />}
+          inheritedTolerance={{ deviation: Rational.create(1n, 10n).unwrap(), scope: 'part' }}
+          recommended={{ source: '2.00', text: '≥ 2.00 mm for the 2 mm tool' }}
+          {...width}
+        />
+        <QuantityInput
+          label="Depth"
+          kind="length"
+          defaultUnit="mm"
+          step="0.1"
+          illustration={<FieldIcon name="depth" />}
+          {...depth}
+        />
+        <QuantityInput
+          label="Floor"
+          kind="length"
+          defaultUnit="mm"
+          illustration={<FieldIcon name="depth" />}
+          resolver={GALLERY_RESOLVER}
+          references={GALLERY_REFERENCES}
+          picking={picking}
+          onPick={(insert) => {
+            // stand-in for viewport pick mode: picks pocket1.floor.z after a moment
+            setPicking(true)
+            setTimeout(() => {
+              insert('pocket1.floor.z')
+              setPicking(false)
+            }, 900)
+          }}
+          {...on}
+        />
+        <QuantityInput
+          label="Length"
+          kind="length"
+          defaultUnit="mm"
+          illustration={<FieldIcon name="length" />}
+          {...tolerance}
+        />
+        <QuantityInput
+          label="Feed"
+          kind="feedRate"
+          defaultUnit="mm/min"
+          illustration={<FieldIcon name="feed" />}
+          readOnly
+          {...feed}
+        />
       </div>
     </Row>
   )

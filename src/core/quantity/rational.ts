@@ -6,7 +6,7 @@
  * gives the nearest float64 (round half to even) for geometry and toolpaths.
  */
 import { construct, invariants } from '../../shared/model'
-import type { AppResult } from '../../shared/result'
+import { None, Some, type AppResult, type Option } from '../../shared/result'
 
 /** Persisted form: bigint as decimal strings (docs/architecture/quantities.md#persistence-dto). */
 export interface RationalDTO {
@@ -91,6 +91,28 @@ export class Rational {
 
   toString(): string {
     return this.den === 1n ? this.num.toString() : `${this.num}/${this.den}`
+  }
+
+  /**
+   * Decimal with exactly `digits` (≥ 0, integer) fraction digits, rounded half away from zero,
+   * computed exactly (no float). For display at field precision; `-0` is never produced.
+   */
+  toFixed(digits: number): string {
+    const scale = 10n ** BigInt(digits)
+    const negative = this.num < 0n
+    const scaled = (negative ? -this.num : this.num) * scale
+    let q = scaled / this.den
+    if ((scaled % this.den) * 2n >= this.den) q++
+    const s = q.toString().padStart(digits + 1, '0')
+    const body = digits > 0 ? `${s.slice(0, -digits)}.${s.slice(-digits)}` : s
+    return negative && q !== 0n ? `-${body}` : body
+  }
+
+  /** Fewest fraction digits (≤ `max`) that write this value exactly; None if it needs more. */
+  decimalDigits(max: number): Option<number> {
+    for (let d = 0; d <= max; d++)
+      if ((this.num * 10n ** BigInt(d)) % this.den === 0n) return Some(d)
+    return None
   }
 }
 

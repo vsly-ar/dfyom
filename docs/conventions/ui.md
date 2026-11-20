@@ -279,6 +279,16 @@ Every dimensional field is a `QuantityInput` over the [quantity model](../archit
 - **References:** typing a letter offers an autocomplete list of valid references (surfaces of earlier operations, tool parameters) ([decision 16](#decisions)); a reference that becomes unknown later marks the field with `expression.reference`.
 - **Precision:** display precision belongs to the field ([quantities.md](../architecture/quantities.md#value)); the decimal separator is always `.`.
 
+Implementation (task 3.4): [`ui/QuantityInput/`](../../src/renderer/src/ui/QuantityInput/QuantityInput.tsx) renders a `Field` and reads the text only through the core (`quantityFromSource`, `parseLiteral`; pure helpers in `reading.ts`); messages and labels in [`messages/quantity.ts`](../../src/renderer/src/messages/quantity.ts). Props: kind, bare-number default unit (also the display unit), stored `Quantity`, `onCommit`, optional resolver, references, field rules (`validate`), precision, step, inherited tolerance, recommended value, pick hook. Refinements decided while building it:
+
+- **Echo** shows only while focused and only for a reading that is not an error (a stale echo never sits next to an error). The inherited general tolerance is part of the echo ("= 1.588 mm · ±0.100 mm from part"), not shown at rest. Deviations show with their sign at field precision ("upper +0.100, lower −0.050"); a formula names its references ("(from pocket1.floor.z)").
+- **Computed value at rest:** for an expression, or a literal whose written unit is not the display unit; the unit suffix hides when a unit is typed or the computed value shows.
+- **Error marks** are drawn by a text overlay of the input (wavy `--danger` underline from `offset` to the next space; at the end of the text a short stub). A stored formula that no longer reads (reference gone) is marked at once, without typing.
+- **Fixes** are verified with the core before they are offered, and applying one commits it. Known ambiguities get fixes: a trailing `+n/d` / `-n/d` that fails `order` ("“+1/2” reads as a tolerance (upper +1, lower +2)…", fix `10 + 1/2`, `D - 1/2`); Greek mu U+03BC (fix: micro sign); `hyphenatedMixedNumber` and `ambiguousDivision` hints (first variant).
+- **Steppers** change the text only; Enter/blur commits. They replace the number between the core's nominal offsets, so unit and tolerance stay as typed (`1.50 ±0.05` → `1.60 ±0.05`; `1/16"` + 0.1 → `0.1625"`). The pencil's adjust popover (step .001–100, −/+, recommended "Use …") also edits the text; closing it commits once (one undo step per popover session).
+- **References:** the list opens while typing a name, or with `Ctrl+Space` (and `↓` when the text is not steppable); `↑`/`↓` move, `Enter` inserts, `Escape` closes the list without reverting. Options show the id and the human name.
+- **Pick hook:** `onPick(insert)`; the shortcut is `Alt+P` (a bare `P` would type into the field). `insert(reference)` puts the reference at the last caret/selection, refocuses the field and does not commit.
+
 ### Errors
 
 How an `AppError` reaching the UI boundary ([boundaries.md](../conventions/error-handling/boundaries.md#entry-points-ui-agent-cli-automation)) is shown:
@@ -298,7 +308,7 @@ How an `AppError` reaching the UI boundary ([boundaries.md](../conventions/error
 ### Selection and picking
 
 - Click in the viewport selects the operation (or plan operation) owning the clicked surface; the navigator row and inspector follow. Selecting a row selects in the viewport. Hover highlights (`--viewport-hover`) before click. `Escape` clears the selection. Multi-select is later.
-- **Pick mode** for surface references (`on`, references in formulas): the field's pick button (or `P` while focused) enters pick mode – crosshair cursor, eligible surfaces (horizontal surfaces of the stock and earlier operations, [design.md](../modes/design.md#positioning-v01)) highlighted, others dimmed, a banner "Pick a surface for _On_ · Esc to cancel". Click picks and returns focus to the field. The same field always offers a dropdown of the eligible surface ids, so picking never needs the mouse.
+- **Pick mode** for surface references (`on`, references in formulas): the field's pick button (or `Alt+P` while focused; a bare `P` types) enters pick mode – crosshair cursor, eligible surfaces (horizontal surfaces of the stock and earlier operations, [design.md](../modes/design.md#positioning-v01)) highlighted, others dimmed, a banner "Pick a surface for _On_ · Esc to cancel". Click picks and returns focus to the field. The same field always offers a dropdown of the eligible surface ids, so picking never needs the mouse.
 - Picked and referenced surfaces are named by their surface id and the operation name (`pocket1.floor` · "Pocket 1 floor").
 - Camera: orbit, pan, zoom to cursor; view presets Top / Front / Right / Iso and "Fit" in a floating viewport toolbar with keys `1`–`4`, `F` while the viewport has focus. Mouse mapping is a setting with presets ([decision 10](#decisions)):
 

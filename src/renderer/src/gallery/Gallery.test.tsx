@@ -10,5 +10,6 @@ describe('Gallery (dev only)', () => {
     expect(document.querySelectorAll('.t-light, .t-dark')).toHaveLength(2)
     expect(screen.getAllByRole('radiogroup', { name: 'Mode' })).toHaveLength(2)
     expect(await screen.findAllByRole('menu')).toHaveLength(2)
+    expect(screen.getAllByRole('combobox', { name: 'Floor' })).toHaveLength(2) // QuantityInput
   })
 })

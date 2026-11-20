@@ -31,6 +31,16 @@ export { ModeSwitcher, type ModeSwitcherProps } from './ModeSwitcher/ModeSwitche
 export { useReducedMotion } from './motion'
 export { Popover, type PopoverProps } from './Popover/Popover'
 export { Progress, type ProgressProps } from './Progress/Progress'
+export {
+  ECHO_DELAY_MS,
+  ERROR_DELAY_MS,
+  QuantityInput,
+  STEP_SIZES,
+  type QuantityInputProps,
+  type ReferenceOption,
+  type StepSize,
+} from './QuantityInput/QuantityInput'
+export type { InheritedTolerance } from './QuantityInput/reading'
 export { SegmentedControl, type SegmentedControlProps } from './SegmentedControl/SegmentedControl'
 export { Select, type SelectOption, type SelectProps } from './Select/Select'
 export { StatusChip, type StatusChipProps, type StatusTone } from './StatusChip/StatusChip'

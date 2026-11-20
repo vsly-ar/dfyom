@@ -59,6 +59,11 @@
   align-items: center;
 }
 
+/* a focused field's popups (QuantityInput's reference list) paint above the fields below */
+.field:focus-within .control {
+  z-index: 2;
+}
+
 .control > * {
   flex: 1 1 auto;
   min-width: 0;
@@ -203,6 +208,26 @@
   font: inherit;
   font-variant-numeric: tabular-nums;
   color: inherit;
+}
+
+/* text overlay (FieldInput `overlay`): same font and origin as the input text, clipped to it */
+.slot {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  overflow: hidden;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  white-space: pre;
+  pointer-events: none;
+  color: transparent;
 }
 
 /* the box draws the focus indication (border + ring) */
