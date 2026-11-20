@@ -5,6 +5,7 @@ export { Checkbox, type CheckboxProps, type CheckedState } from './Checkbox/Chec
 export { ConfirmDialog, type ConfirmDialogProps } from './ConfirmDialog/ConfirmDialog'
 export { Dialog, DialogClose, type DialogProps } from './Dialog/Dialog'
 export { EmptyState, type EmptyStateProps } from './EmptyState/EmptyState'
+export { ErrorMessage, errorDetails, type ErrorMessageProps } from './ErrorMessage/ErrorMessage'
 export {
   Field,
   type FieldControlProps,
@@ -20,6 +21,14 @@ export {
 } from './Field/FieldInput'
 export { IconButton, type IconButtonProps } from './IconButton/IconButton'
 export { FIELD_ICON_NAMES, FieldIcon, type FieldIconName } from './icons/field/FieldIcon'
+export {
+  INDICATOR_DELAY_MS,
+  JobIndicator,
+  JobList,
+  type JobIndicatorProps,
+  type JobListProps,
+  type JobView,
+} from './JobIndicator/JobIndicator'
 export { TOOL_ICON_NAMES, ToolIcon, toolIconLabel, type ToolIconName } from './icons/tool/ToolIcon'
 export {
   MachineStateBadge,
@@ -29,6 +38,18 @@ export {
 export { Menu, type MenuEntry, type MenuProps } from './Menu/Menu'
 export { ModeSwitcher, type ModeSwitcherProps } from './ModeSwitcher/ModeSwitcher'
 export { useReducedMotion } from './motion'
+export {
+  Panel,
+  PanelGroup,
+  PanelHeader,
+  PanelResizeHandle,
+  usePanelRef,
+  type PanelGroupLayout,
+  type PanelGroupProps,
+  type PanelHandle,
+  type PanelHeaderProps,
+  type PanelProps,
+} from './Panel/Panel'
 export { Popover, type PopoverProps } from './Popover/Popover'
 export { Progress, type ProgressProps } from './Progress/Progress'
 export {
@@ -45,9 +66,12 @@ export { SegmentedControl, type SegmentedControlProps } from './SegmentedControl
 export { Select, type SelectOption, type SelectProps } from './Select/Select'
 export { StatusChip, type StatusChipProps, type StatusTone } from './StatusChip/StatusChip'
 export { Switch, type SwitchProps } from './Switch/Switch'
+export { Tabs, type TabItem, type TabsProps } from './Tabs/Tabs'
+export { Term, type TermProps } from './Term/Term'
 export { Toast, ToastRegion, type ToastProps } from './Toast/Toast'
 export { Toolbar, ToolbarButton, ToolbarSeparator, type ToolbarProps } from './Toolbar/Toolbar'
 export { Tooltip, type TooltipProps } from './Tooltip/Tooltip'
+export { UndoRedo, type UndoRedoProps } from './UndoRedo/UndoRedo'
 export {
   PortalContainer,
   ThemeScope,

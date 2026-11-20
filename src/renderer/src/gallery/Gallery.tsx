@@ -2,7 +2,7 @@
 // like the design system page. The manual review surface and the screenshot target; never shipped
 // (App.tsx loads it only in dev builds, at #gallery). Doc: docs/conventions/ui.md#inventory-v01
 import { ArrowRight, Download, Play, Redo2, Square, Undo2 } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
+import { useId, useState, type ReactNode } from 'react'
 import type { ReferenceResolver } from '../../../core/expression/evaluate'
 import { quantityFromSource } from '../../../core/expression/quantity'
 import type { AppMode } from '../../../core/modes'
@@ -16,15 +16,22 @@ import {
   ConfirmDialog,
   Dialog,
   EmptyState,
+  ErrorMessage,
   Field,
   FIELD_ICON_NAMES,
   FieldAdjustButton,
   FieldIcon,
   FieldInput,
   IconButton,
+  JobIndicator,
+  JobList,
   MachineStateBadge,
   Menu,
   ModeSwitcher,
+  Panel,
+  PanelGroup,
+  PanelHeader,
+  PanelResizeHandle,
   Popover,
   PortalContainer,
   Progress,
@@ -33,6 +40,8 @@ import {
   Select,
   StatusChip,
   Switch,
+  Tabs,
+  Term,
   ThemeScope,
   Toast,
   ToastRegion,
@@ -43,7 +52,9 @@ import {
   ToolIcon,
   toolIconLabel,
   Tooltip,
+  UndoRedo,
   type FieldMessage,
+  type JobView,
   type ToolIconName,
 } from '../ui'
 import styles from './Gallery.module.css'
@@ -186,6 +197,7 @@ function Specimens({ title }: { title: string }): React.JSX.Element {
           <Progress label="Toolpath generation" value={null} />
         </div>
       </Row>
+      <ShellParts />
       <Overlays />
       <Row label="Empty state · one sentence, one action">
         <EmptyState
@@ -304,6 +316,83 @@ function Toolbars(): React.JSX.Element {
         <IconButton label="Run controls (large)" size="lg" icon={<ToolIcon name="simulate" />} />
       </div>
     </Row>
+  )
+}
+
+const JOBS: JobView[] = [
+  { id: 'j1', label: 'Evaluate part', state: 'running' },
+  { id: 'j2', label: 'Generate toolpaths', state: 'paused', progress: { done: 3, total: 4 } },
+]
+
+/** Shell components (3.3b): tabs, term, undo/redo, panels, jobs, errors. */
+function ShellParts(): React.JSX.Element {
+  // ids become DOM ids: unique per theme pane
+  const uid = useId()
+  return (
+    <>
+      <Row label="Tabs · inspector sections, sliding underline">
+        <Tabs
+          label="Pocket sections"
+          items={[
+            { value: 'shape', label: 'Shape', content: <p className={styles['muted']}>Shape</p> },
+            { value: 'depth', label: 'Depth', content: <p className={styles['muted']}>Depth</p> },
+            { value: 'tabs', label: 'Tabs', content: null, disabled: true },
+          ]}
+        />
+      </Row>
+      <Row label="Term · dotted underline, definition on hover and focus">
+        <p className={styles['muted']}>
+          Each pass cuts one{' '}
+          <Term definition="Stepdown: 1.5 mm per pass for this pocket">stepdown</Term> deeper.
+        </p>
+      </Row>
+      <Row label="Undo / redo · named step, whose step">
+        <Toolbar label="Edit">
+          <UndoRedo
+            undo="Add pocket – by agent"
+            redo={null}
+            onUndo={noop}
+            onRedo={noop}
+            undoShortcut="⌘Z"
+            redoShortcut="⇧⌘Z"
+          />
+        </Toolbar>
+      </Row>
+      <Row label="Panels · resizable, collapsible; drag or focus the hairline">
+        <div className={styles['panels']}>
+          <PanelGroup id={`${uid}-panels`}>
+            <Panel id={`${uid}-left`} defaultSize="35" minSize="20" collapsible>
+              <PanelHeader title="Operations" meta="5" />
+            </Panel>
+            <PanelResizeHandle label="Resize operations" />
+            <Panel id={`${uid}-right`}>
+              <PanelHeader title="Properties" />
+            </Panel>
+          </PanelGroup>
+        </div>
+      </Row>
+      <Row label="Jobs · status bar indicator (after 300 ms) and the job list">
+        <div className={styles['stack']}>
+          <JobIndicator jobs={JOBS} onPause={noop} onResume={noop} onCancel={noop} />
+          <JobList jobs={JOBS} onPause={noop} onResume={noop} onCancel={noop} />
+        </div>
+      </Row>
+      <Row label="Error message · error, warning, cancelled (neutral)">
+        <div className={styles['stack']}>
+          <ErrorMessage
+            error={{ code: 'persist.io', message: 'EACCES', issues: [], frames: [] }}
+            message="Export failed: the folder is read-only. Choose another folder."
+            onRetry={noop}
+          />
+          <ErrorMessage
+            error={{ code: 'op.timeout', message: 'worker timed out', issues: [], frames: [] }}
+          />
+          <ErrorMessage
+            error={{ code: 'op.aborted', message: 'aborted', issues: [], frames: [] }}
+          />
+        </div>
+      </Row>
+    </>
   )
 }
 

@@ -1,7 +1,7 @@
 {
   "name": "dfyom",
   "productName": "DFYOM",
-  "version": "0.0.38",
+  "version": "0.0.39",
   "private": true,
   "description": "Design For Your Own Manufacturing – design, plan and run parts on your own CNC machines.",
   "main": "./out/main/index.js",
@@ -67,8 +67,10 @@
     "radix-ui": "^1.8.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
+    "react-resizable-panels": "^4.24.1",
     "three": "0.187.0",
-    "zod": "^4.6.7"
+    "zod": "^4.6.7",
+    "zustand": "^5.1.0"
   },
   "allowScripts": {
     "fsevents": false

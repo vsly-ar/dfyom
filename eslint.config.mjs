@@ -50,12 +50,12 @@ const layers = {
 }
 
 /**
- * Radix is wrapped once, in src/renderer/src/ui/; screens and every other layer use those
- * components (docs/conventions/ui.md#radix-wrapping-pattern).
+ * Radix and react-resizable-panels are wrapped once, in src/renderer/src/ui/; screens and every
+ * other layer use those components (docs/conventions/ui.md#radix-wrapping-pattern).
  */
 const radixImports = {
-  group: ['radix-ui', 'radix-ui/*', '@radix-ui/*'],
-  message: 'Only src/renderer/src/ui/ imports Radix; use the ui/ components.',
+  group: ['radix-ui', 'radix-ui/*', '@radix-ui/*', 'react-resizable-panels'],
+  message: 'Only src/renderer/src/ui/ imports Radix and react-resizable-panels; use ui/.',
 }
 
 /** Electron and Node-only modules; `src/core` and `src/shared` must run anywhere. */

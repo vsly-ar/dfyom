@@ -1,0 +1,101 @@
+/* JobIndicator, JobList. Look: ui-design-system.html (.status, .prog). Doc: docs/conventions/ui.md#jobs-and-progress */
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 1.25rem;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    color var(--motion-fast),
+    background var(--motion-fast);
+}
+
+.trigger:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.spinner {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  animation: spin 0.9s linear infinite;
+}
+
+.mini {
+  position: relative;
+  width: 3rem;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--bg-active);
+  overflow: hidden;
+}
+
+.miniBar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 2px;
+  background: var(--accent);
+  transition: width var(--motion-base) var(--ease-standard);
+}
+
+.mini[data-indeterminate] .miniBar {
+  width: 35%;
+  animation: indeterminate 1.4s var(--ease-standard) infinite;
+}
+
+.list {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 16rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+}
+
+.label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.controls {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.bar {
+  grid-column: 1 / -1;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes indeterminate {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}

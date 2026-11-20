@@ -30,7 +30,7 @@ Settled with the user (tasks 1.11 and 1.16); the sections below specify them.
 20. **Running is amber:** the running machine state takes the accent (play icon, a dot circling the badge edge), departing from IEC 60204-1 green on purpose; feed hold and warnings are orange; tool change is blue with an in-progress animation ([run safety](#run-mode-safety-ui)).
 21. **Three severities:** soft warning (neutral, dismissible), hard warning (orange, not dismissible), error (red, impossible value, blocks Generate) ([warnings](#warnings-and-dfm)).
 22. **Graphical fields:** every field has an illustration icon whose measured part is an amber line ([field](#field)).
-23. **Mode switcher** is its own component, separate from tabs; its place in the window is decided with the window layout (3.3).
+23. **Mode switcher** is its own component, separate from tabs; it sits in the centre of the main toolbar (3.3b, [app shell](#app-shell)).
 24. **Rich motion:** indicators slide, toolpaths draw in, selections pulse; every animation explains something and turns off with reduced motion ([motion](#motion)).
 25. **Contrast by APCA:** colour contrast is checked with APCA Lc targets per role instead of WCAG 2 contrast ratios ([colour](#colour), [ADR 0017](../decisions/0017-apca-contrast-for-design-tokens.md)).
 
@@ -56,9 +56,10 @@ Task 1.16, **approved by the user on 2026-11-20**. The reference is [ui-design-s
 | `src/renderer/src/ui/icons/`                | Own icons: `tool/` (CNC tool and view icons), `field/` (field illustrations) ([icons](#icons)). |
 | `src/renderer/src/ui/motion.ts`             | `useReducedMotion()`: OS preference or `data-motion='reduce'` on the root ([motion](#motion)).  |
 | `src/renderer/src/gallery/`                 | Dev-only component gallery at `#gallery` ([testing](#testing)); not in production builds.       |
-| `src/renderer/src/test/`                    | Component test setup and helpers (`renderUi`, `expectNoAxeViolations`, `setReducedMotion`).     |
-| `src/renderer/src/shell/`                   | App shell: mode switcher, regions, status bar, global run control ([layout](#layout)).          |
-| `src/renderer/src/modes/{design,plan,run}/` | Mode screens; use `ui/` components only, never Radix directly.                                  |
+| `src/renderer/src/test/`                    | Test setup and helpers (`renderUi`, `expectNoAxeViolations`, `setReducedMotion`, fake bridge).  |
+| `src/renderer/src/shell/`                   | App shell: regions, toolbar, status bar, dialogs, shortcuts, `ViewportSlot` ([layout](#layout)) |
+| `src/renderer/src/state/`                   | Per-window state: [replica](#document-replica), [settings](#settings) mirror, Zustand UI store. |
+| `src/renderer/src/modes/{design,plan,run}/` | Mode screens; `ui/` components only. Until 3.6/3.7/3.12: empty states in `ModePanels.tsx`.      |
 | `src/renderer/src/viewport/`                | The react-three-fiber canvas and scenes (task 3.5).                                             |
 | `src/renderer/src/messages/`                | User-facing strings and the error/warning message catalogue ([copy](#copy-and-terminology)).    |
 
@@ -185,11 +186,11 @@ Per [ADR 0012](../decisions/0012-radix-primitives-own-styles.md): Radix primitiv
 | --------------------------------------------------------------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------- |
 | `Field`                                                                                                   | 3.3      | [Field](#field): illustration, label (+ `Term`), lock, control, support area; wires `aria-describedby`.                      |
 | `QuantityInput`                                                                                           | 3.4      | [Quantity input rules](#quantity-and-expression-input).                                                                      |
-| `Term`                                                                                                    | 3.3      | Glossary term with tooltip and "Learn more" link to the wiki ([copy](#copy-and-terminology)).                                |
+| `Term`                                                                                                    | 3.3      | Glossary term with tooltip and "Learn more" (with the wiki panel) ([copy](#copy-and-terminology)).                           |
 | `StatusChip`                                                                                              | 3.3      | Plan status, stale badge, evaluation status, machine state (with safety tokens).                                             |
 | `WarningList`, `WarningItem`                                                                              | 3.6, 3.7 | DFM, feeds-and-speeds and machine-check warnings ([warnings](#warnings-and-dfm)).                                            |
-| `ErrorMessage`, `ErrorDetails`                                                                            | 3.3      | [AppError display](#errors).                                                                                                 |
-| `JobIndicator`, `JobList`                                                                                 | 3.3      | [Jobs and progress](#jobs-and-progress).                                                                                     |
+| `ErrorMessage`, `ErrorDetails`                                                                            | 3.3      | [AppError display](#errors); details: the "Details" expander with "Copy details".                                            |
+| `JobIndicator`, `JobList`                                                                                 | 3.3      | [Jobs and progress](#jobs-and-progress); `JobList` opens in the indicator's popover.                                         |
 | `UndoRedo`                                                                                                | 3.3      | [Undo and redo](#undo-and-redo).                                                                                             |
 | `EmptyState`                                                                                              | 3.3      | Explains the next step with one primary action.                                                                              |
 | `Panel`, `PanelGroup`                                                                                     | 3.3      | Resizable, collapsible shell regions (`react-resizable-panels`, [decision 13](#decisions)).                                  |
@@ -222,7 +223,7 @@ The `Field` component (3.3, quantity behaviour in 3.4) is a grid: label column (
 
 ### App shell
 
-Starting point for the window layout, which is designed in task 3.3; the shell in the [design system](#design-system) page is an illustration only.
+The window layout (task 3.3b, `shell/AppShell.tsx`): the sketch was the starting point, the bullets after it are what is built. The shell in the [design system](#design-system) page is an illustration only.
 
 ```text
 ┌ Native title bar: project name, unsaved state ───────────────────────────────┐
@@ -245,11 +246,23 @@ Starting point for the window layout, which is designed in task 3.3; the shell i
 - **Inspector (right):** parameters of the selection, its warnings, the `ParamIllustration`, recommended ranges. In run mode: DRO, run progress, run controls.
 - **Status bar:** [evaluation status](#evaluation-status-pending-outdated-failed), [jobs](#jobs-and-progress), warning count (opens the warning list), unit system, save state, agent connection.
 - Side panels are resizable and collapsible; layout is per window, kept in app preferences, never in the project. Minimum window 1024 × 640; below 1280 px wide the inspector overlays the viewport instead of shrinking it.
-- **Window chrome:** native title bar and native application menu (File, Edit, View, Help) with accelerators that dispatch the same commands as the buttons ([decision 12](#decisions)).
+- **Window chrome:** native title bar and native application menu (File, Edit, View, Help) with accelerators that dispatch the same commands as the buttons ([decision 12](#decisions)). The menu is not built yet (Electron's default menu; [plan known issues](../plans/v0.1.md#known-issues-and-risks)).
+
+As built (3.3b):
+
+- **Main toolbar** (`banner`): a three-column grid. Start: `UndoRedo` (then the mode's tools, from 3.6). Centre: the `ModeSwitcher` in a `navigation` landmark named "Modes". End: panel toggles "Navigator" and "Inspector" (pressed while shown) and "Settings"; the machine state badge and stop control join here with 3.12.
+- **Panels** (`Panel`, `PanelGroup` on react-resizable-panels): navigator 16 rem (min 12 rem, max 40 %), viewport (min 20 rem), inspector 20 rem (min 15 rem, max 45 %). Side panels keep their pixel size when the window resizes, collapse when dragged below their minimum or by their toggle, and resize by keyboard on the focused hairline separator. One panel group for every width, so the viewport is never remounted.
+- **Layout persistence:** after the user resizes or toggles, the group's layout is saved (debounced 400 ms) in the [settings](#settings) under `layouts['shell-wide']` or `layouts['shell-narrow']`; a new window starts from it. The layout at mount is not written back.
+- **Narrow windows** (below 1280 px, `WIDE_QUERY`): the inspector is not a panel but an overlay at the viewport's right edge (`--shadow-2`, slides in), closed until its toggle opens it.
+- **Viewport slot:** `shell/ViewportSlot.tsx` is the placeholder in the `main` landmark (named "Viewport") until task 3.5; swapping it for `<Viewport />` is a one-line change in `AppShell`.
+- **Title bar:** the document title is the project name, with " — Edited" while there are unsaved changes; "DFYOM" without a project.
+- **Status bar** (`contentinfo`): save state ("No project", "Not saved yet" for an untitled project, "Unsaved changes", "Saved"), the `JobIndicator`, the unit system, the agent indicator. Evaluation status and the warning count join with 3.6.
+- **Agent indicator:** while agent sessions are attached, "Agent connected" / "n agents connected" in the status bar (in a polite live region); its popover names each session (client name or "Unknown client", source id, bound project) and links to the settings ([llm-api.md](../architecture/llm-api.md#local-http)).
+- **Closing a project with its last window:** closing a window bound to a project that no other window shows closes the project first (`project.close` through the window's session; agents bound to it lose it). Main asks the window when the close is refused: unsaved changes → `ConfirmDialog` "Close “name” with unsaved changes?" with "Close without saving" (the changes stay recoverable); any other refusal (a run is going) → a dialog with the `ErrorMessage`. Quitting the app does not ask: `host.shutdown` closes every project and unsaved changes stay recoverable. Decision logic: `src/main/window-close.ts`.
 
 ### Mode switching
 
-- Modes are a three-way `ModeSwitcher` (its own component, [decision 23](#decisions)) in the main toolbar, `Ctrl/Cmd+1/2/3`. The mode is per window.
+- Modes are a three-way `ModeSwitcher` (its own component, [decision 23](#decisions)) in the centre of the main toolbar, `Ctrl/Cmd+1/2/3`. The mode is per window (Zustand UI store).
 - Switching is instant and never blocked: jobs, evaluation and a run keep going. Each mode keeps its own selection and camera.
 - A mode without its input shows an `EmptyState` instead of disabled controls: Plan without a part ("Design a part first", button to Design); Run without a plan ("Create a plan to run", button to Plan).
 - Agents never switch the user's mode or steal focus; their edits appear in place ([undo](#undo-and-redo)).
@@ -260,6 +273,32 @@ Starting point for the window layout, which is designed in task 3.3; the shell i
 - Fields are grouped by what the user thinks about (Shape, Depth, Corners, Tabs), in the order of the [mode doc's](../modes/design.md#operations-v01) parameter tables; rarely changed groups start collapsed.
 - Read-only states (a `finalized` plan, an `inUse` plan) show read-only fields (desaturated illustration, dimmed support area, [field](#field)) with a lock icon and the reason as a tooltip with the way out ("Finalized plans are read-only. Set the status to settled design to edit, or duplicate the plan."), not disabled grey inputs.
 - Plan stale badges ([plan-v0.1.md](../modes/plan-v0.1.md#plans-are-snapshots)) appear on the affected row and in the plan header with the rebuild / library-update action next to them.
+
+## Shell state
+
+### Document replica
+
+`state/replica.ts`, the read side of [commands.md project state](../architecture/commands.md#project-state):
+
+- At start and whenever main pushes `project.bound` (the window's bound runtime changed: bound, closed, reopened), the window takes a snapshot (`window.dfyom.project.snapshot()`: key, document, revision, the action-log `seq` it includes, file, unsaved flag), then applies the `project.onEvent` patch stream in `seq` order. Events that arrive while a snapshot is on its way wait and are applied after it (those it already includes are skipped).
+- A gap in `seq` or a patch that does not apply starts a new snapshot (resync). Main subscribes to the log before it pushes `bound`, so a snapshot taken after the push misses nothing.
+- Unsaved changes: revision ≠ the revision of the last successful `project.save` event (the snapshot's `dirty` flag seeds it). Undo and redo are commits, so they count as changes, as in the host.
+- The UI reads it with `useSyncExternalStore` (`useReplica()`), never edits it, and sends every change as a command (`window.dfyom.call`). Undo/redo names come from `history.list` after each revision; jobs from `job.list` on job events, polled every 500 ms while one runs (progress ticks are not in the action log).
+
+### Settings
+
+App settings (`src/shared/settings.ts`): GUI preferences of the app instance, owned by main (`src/main/settings/store.ts`), persisted in `<appData>/settings.json`, mirrored by every window (`state/settings.ts`). Not part of any project, and not reachable by agents ("Allow local agents to connect" guards their own access).
+
+| Setting                       | Values                        | Effect                                                                                                                                                                |
+| ----------------------------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Theme                         | System (default), Light, Dark | `data-theme` on the root; none for System, so `prefers-color-scheme` applies ([tokens](#design-tokens)).                                                              |
+| Reduce motion                 | off (default), on             | `data-motion='reduce'` on the root; the OS preference applies as well ([motion](#motion)).                                                                            |
+| Allow local agents to connect | on (default), off             | Starts or stops the local HTTP server at once ([llm-api.md](../architecture/llm-api.md#local-http)); `--mcp-http=off` or `=<port>` overrides it at start for one run. |
+| Panel layouts                 | per panel group id            | Last layout of the shell's panels ([app shell](#app-shell)).                                                                                                          |
+
+- The settings dialog (toolbar "Settings", or "Agent settings" in the agent indicator) applies changes at once and optimistically; main validates the patch (unknown fields and wrong values are refused, the window then returns to main's settings), writes the file atomically and pushes the new settings to every window.
+- A window gets the settings at creation as a window argument (`--dfyom-settings`), so theme and motion are applied before the first render (no flash).
+- A missing field takes its default; an unreadable or invalid file gives the defaults with a warning in the log and is replaced on the next change. Settings are preferences, not user data, so this needs no confirmation and no migration.
 
 ## Interaction
 
@@ -471,5 +510,6 @@ Extends [testing.md](testing.md) (component and end-to-end rows).
 - What to test: `QuantityInput` behaviour per rule above (echo, timing, commit/revert, hints, steppers); error mapping from `AppError` fixtures; confirmation policy; keyboard paths (mode switch, F6, feed hold); stop control visible in every mode with an open connection.
 - **Viewport:** WebGL does not run in jsdom. Keep picking, highlighting and scene building in pure functions (unit-tested); the canvas is covered by the end-to-end tests.
 - **Tokens:** `ui/tokens.test.ts` parses `tokens.css` and checks that both themes define every semantic token, the two dark blocks agree, type and spacing are in `rem`, reduced motion zeroes every duration, and the listed contrast pairs reach their APCA Lc target per role ([colour](#colour)); `ui/apca.ts` implements the APCA formula, checked against its published reference values. Pairs below their target are pinned with `it.fails` and listed in the [plan's known issues](../plans/v0.1.md#known-issues-and-risks) until decided.
-- **Smoke test (task 0.9, done):** Playwright for Electron launches the built app, checks the window opens without console errors and runs the packaged worker chunk ([testing.md](testing.md#app-playwright-for-electron)). With the UI shell (3.3): switch the three modes and open the gallery in both themes for screenshot comparison.
+- **Shell tests:** `shell/AppShell.test.tsx` renders `App` against the fake bridge (`test/bridge.ts`), which can bind a real core dispatcher on the fixture commands, so the replica, undo/redo and `history.list` run against the command layer; `state/replica.test.ts` covers snapshot, buffering, gaps and the save state.
+- **Smoke test (task 0.9, extended in 3.3b):** Playwright for Electron launches the built app, checks the window opens without console errors and runs the packaged worker chunk ([testing.md](testing.md#app-playwright-for-electron)); switches the three modes (click and `Ctrl/Cmd+3/1`), sets the theme to Dark and Light and checks `data-theme`, the body colour and `settings.json`; and closes an edited project's last window (Cancel, then "Close without saving"). The gallery is dev-only, so the production build the tests run has none to screenshot ([plan known issues](../plans/v0.1.md#known-issues-and-risks)).
 - **End-to-end (task 3.11):** the exit-criteria flow driven through the UI by roles and labels, mirrored by the headless MCP flow.

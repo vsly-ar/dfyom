@@ -1,5 +1,7 @@
-import { lazy, Suspense, useState, useSyncExternalStore } from 'react'
-import { APP_MODES, type AppMode } from '../../core/modes'
+import { lazy, Suspense, useEffect, useSyncExternalStore } from 'react'
+import { AppShell } from './shell/AppShell'
+import { useSettings } from './shell/ShellContext'
+import { applySettings } from './state/settings'
 
 // Dev-only component gallery at #gallery (docs/conventions/ui.md#inventory-v01). The DEV check is
 // replaced at build time, so production bundles neither contain nor load it.
@@ -12,10 +14,11 @@ function subscribeHash(onChange: () => void): () => void {
   return () => window.removeEventListener('hashchange', onChange)
 }
 
-// Placeholder shell (window layout: task 3.3b). Mode specs: docs/modes/
+/** The window: the app shell, or the dev-only gallery at #gallery. Settings apply to the root. */
 export function App(): React.JSX.Element {
   const hash = useSyncExternalStore(subscribeHash, () => window.location.hash)
-  const [mode, setMode] = useState<AppMode>('design')
+  const settings = useSettings((s) => s.settings)
+  useEffect(() => applySettings(settings), [settings])
 
   if (Gallery && hash === '#gallery') {
     return (
@@ -24,24 +27,5 @@ export function App(): React.JSX.Element {
       </Suspense>
     )
   }
-
-  const { electron, chrome, node } = window.dfyom.versions
-  return (
-    <main style={{ fontFamily: 'system-ui, sans-serif', padding: 24 }}>
-      <h1>DFYOM</h1>
-      <nav style={{ display: 'flex', gap: 8 }}>
-        {APP_MODES.map((m) => (
-          <button key={m} onClick={() => setMode(m)} aria-pressed={m === mode}>
-            {m}
-          </button>
-        ))}
-      </nav>
-      <p>
-        Current mode: <strong>{mode}</strong>
-      </p>
-      <footer style={{ opacity: 0.6, fontSize: 12 }}>
-        Electron {electron} · Chromium {chrome} · Node {node}
-      </footer>
-    </main>
-  )
+  return <AppShell />
 }

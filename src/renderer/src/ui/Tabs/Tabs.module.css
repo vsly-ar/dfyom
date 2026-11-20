@@ -1,0 +1,65 @@
+/* Tabs. Look: ui-design-system.html (.modes as tabs, .modesw underline). Doc: docs/conventions/ui.md#inventory-v01 */
+.root {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.list {
+  position: relative;
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tab {
+  height: var(--control-md);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    color var(--motion-fast),
+    background var(--motion-fast);
+}
+
+.tab:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.tab[data-state='active'] {
+  color: var(--text);
+}
+
+.tab[data-disabled] {
+  color: var(--text-faint);
+  cursor: not-allowed;
+  background: transparent;
+}
+
+.indicator {
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 0 0.5px var(--accent-border);
+  transition:
+    transform var(--motion-emphasis) var(--ease-emphasized),
+    width var(--motion-emphasis) var(--ease-emphasized);
+}
+
+.panel {
+  min-width: 0;
+}
+
+.panel:focus-visible {
+  outline-offset: 4px;
+}

@@ -1,12 +1,44 @@
 // Smoke tests (task 0.9): the built app starts, renders its first window without errors, runs
-// the bundled compute worker, and quits. Selectors rely only on the window title, `#root` and the
-// preload bridge (`window.dfyom`), so they survive UI rewrites.
+// the bundled compute worker, and quits. With the UI shell (3.3b): the three modes switch, the
+// theme setting applies and persists, and closing an edited project's last window asks first.
+// UI selectors are roles and accessible names (docs/conventions/ui.md#testing).
 // Doc: docs/conventions/testing.md#end-to-end
-import { readdir } from 'node:fs/promises'
+import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { CallReply, PreloadApi } from '../src/shared/preload-api'
 import { len } from '../src/core/library/library.fixture'
 import { expect, test } from './app.fixture'
+import type { Page } from '@playwright/test'
+
+/** One call through the window's bridge, as the UI makes it (docs/architecture/llm-api.md). */
+async function bridgeCall<T>(page: Page, name: string, args: object = {}): Promise<T> {
+  // Runs in the renderer; this tsconfig has no DOM lib, hence `globalThis`.
+  const r = await page.evaluate(
+    ([n, a]) => (globalThis as unknown as { dfyom: PreloadApi }).dfyom.call(n, a),
+    [name, args] as const,
+  )
+  expect(r.ok, `${name}: ${JSON.stringify(r)}`).toBe(true)
+  return (r as Extract<CallReply, { ok: true }>).value as T
+}
+
+/** A project with a part: unsaved changes. */
+async function editedProject(page: Page, name: string): Promise<{ partId: string }> {
+  const stock = await bridgeCall<{ id: string }>(page, 'library.stock.add', {
+    values: {
+      name: `${name} block`,
+      shape: 'block',
+      length: len('100'),
+      width: len('60'),
+      thickness: len('20'),
+      material: { name: '6061-T6', class: 'aluminum' },
+    },
+  })
+  await bridgeCall(page, 'project.create', { name, unitSystem: 'mm' })
+  return bridgeCall<{ partId: string }>(page, 'design.part.add', {
+    name,
+    stockLibraryItemId: stock.id,
+  })
+}
 
 test('app opens its window, renders without console errors and quits', async ({ dfyom }) => {
   const { app, dataDir, rendererErrors } = dfyom
@@ -29,32 +61,9 @@ test('app opens its window, renders without console errors and quits', async ({ 
 test('the bundled geometry worker evaluates a part', async ({ dfyom }) => {
   const page = await dfyom.app.firstWindow()
   await page.waitForLoadState('domcontentloaded')
-  // The window's bridge, as the UI calls it (docs/architecture/llm-api.md).
-  const call = async <T>(name: string, args: object = {}): Promise<T> => {
-    // Runs in the renderer; this tsconfig has no DOM lib, hence `globalThis`.
-    const r = await page.evaluate(
-      ([n, a]) => (globalThis as unknown as { dfyom: PreloadApi }).dfyom.call(n, a),
-      [name, args] as const,
-    )
-    expect(r.ok, `${name}: ${JSON.stringify(r)}`).toBe(true)
-    return (r as Extract<CallReply, { ok: true }>).value as T
-  }
+  const call = <T>(name: string, args: object = {}) => bridgeCall<T>(page, name, args)
 
-  const stock = await call<{ id: string }>('library.stock.add', {
-    values: {
-      name: 'Smoke block',
-      shape: 'block',
-      length: len('100'),
-      width: len('60'),
-      thickness: len('20'),
-      material: { name: '6061-T6', class: 'aluminum' },
-    },
-  })
-  await call('project.create', { name: 'Smoke', unitSystem: 'mm' })
-  const { partId } = await call<{ partId: string }>('design.part.add', {
-    name: 'Smoke',
-    stockLibraryItemId: stock.id,
-  })
+  const { partId } = await editedProject(page, 'Smoke')
   await call('design.pocket.add', {
     partId,
     shape: { kind: 'rectangle', center: ['50', '30'], length: '40', width: '25' },
@@ -69,5 +78,65 @@ test('the bundled geometry worker evaluates a part', async ({ dfyom }) => {
     state: 'finished',
     outcome: { ok: true, value: { evaluation: 'done' } },
   })
+  expect(dfyom.rendererErrors).toEqual([])
+})
+
+test('the shell switches the three modes and applies the theme setting', async ({ dfyom }) => {
+  const page = await dfyom.app.firstWindow()
+  const mode = (name: string) => page.getByRole('radio', { name })
+  await expect(mode('Design')).toBeChecked()
+  await expect(page.getByRole('main', { name: 'Viewport' })).toBeVisible()
+
+  await mode('Plan').click()
+  await expect(mode('Plan')).toBeChecked()
+  await expect(page.getByRole('heading', { name: 'Plan', level: 2 })).toBeVisible()
+  await page.keyboard.press('ControlOrMeta+3')
+  await expect(mode('Run')).toBeChecked()
+  await expect(page.getByRole('heading', { name: 'Run', level: 2 })).toBeVisible()
+  await page.keyboard.press('ControlOrMeta+1')
+  await expect(mode('Design')).toBeChecked()
+
+  await page.getByRole('button', { name: 'Settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Settings' })
+  await settings.getByRole('radio', { name: 'Dark' }).click()
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+  // the tokens follow: Jet background
+  await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(39, 45, 45)')
+  await settings.getByRole('radio', { name: 'Light' }).click()
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
+  await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(246, 248, 255)')
+  // kept in app data for the next start
+  await expect
+    .poll(async () => {
+      const text = await readFile(join(dfyom.dataDir, 'settings.json'), 'utf8').catch(() => '{}')
+      return (JSON.parse(text) as { theme?: string }).theme
+    })
+    .toBe('light')
+  expect(dfyom.rendererErrors).toEqual([])
+})
+
+test('closing the last window of an edited project asks first', async ({ dfyom }) => {
+  const page = await dfyom.app.firstWindow()
+  await editedProject(page, 'Bracket')
+  // the replica follows the project: title with the edit state
+  await expect(page).toHaveTitle('Bracket — Edited')
+  const closeWindow = () =>
+    dfyom.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.close())
+
+  await closeWindow()
+  const dialog = page.getByRole('alertdialog', { name: 'Close “Bracket” with unsaved changes?' })
+  await expect(dialog).toBeVisible()
+  await dialog.getByRole('button', { name: 'Cancel' }).click()
+  await expect(dialog).toBeHidden()
+  expect(
+    await dfyom.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length),
+  ).toBe(1)
+
+  await closeWindow()
+  await expect(dialog).toBeVisible()
+  await Promise.all([
+    page.waitForEvent('close'),
+    dialog.getByRole('button', { name: 'Close without saving' }).click(),
+  ])
   expect(dfyom.rendererErrors).toEqual([])
 })

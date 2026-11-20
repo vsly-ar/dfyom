@@ -188,3 +188,15 @@
   overflow: hidden;
   border: 1px solid var(--border);
 }
+
+.panels {
+  height: 7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-app);
+  overflow: hidden;
+}
+
+.panels > * {
+  height: 100%;
+}
