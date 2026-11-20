@@ -1,0 +1,37 @@
+/* Toolbar. Look: ui-design-system.html (.toolbar, .vp .float). Doc: docs/conventions/ui.md#layout */
+.toolbar {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--radius-md);
+  background: var(--bg-chrome);
+  border: 1px solid var(--border);
+  position: relative;
+}
+
+.toolbar[data-orientation='vertical'] {
+  flex-direction: column;
+}
+
+.toolbar[data-floating] {
+  z-index: var(--z-toolbar);
+  padding: 2px;
+  background: color-mix(in oklab, var(--bg-raised) 88%, transparent);
+  box-shadow: var(--shadow-1);
+  backdrop-filter: blur(6px);
+}
+
+.separator {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--border);
+}
+
+.toolbar[data-orientation='vertical'] .separator {
+  width: 18px;
+  height: 1px;
+  margin: 4px 0;
+}

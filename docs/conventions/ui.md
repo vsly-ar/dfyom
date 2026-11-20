@@ -45,15 +45,21 @@ Task 1.16, **approved by the user on 2026-11-20**. The reference is [ui-design-s
 
 ## Where things live
 
-| Path (planned)                              | Holds                                                                                        |
-| ------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `src/renderer/src/ui/tokens.css`            | All design tokens as CSS custom properties, light and dark ([tokens](#design-tokens)).       |
-| `src/renderer/src/ui/<Name>/`               | One component per folder: `<Name>.tsx`, `<Name>.module.css`, `<Name>.test.tsx`.              |
-| `src/renderer/src/ui/icons/`                | Own CNC icons as React components ([icons](#icons)).                                         |
-| `src/renderer/src/shell/`                   | App shell: mode switcher, regions, status bar, global run control ([layout](#layout)).       |
-| `src/renderer/src/modes/{design,plan,run}/` | Mode screens; use `ui/` components only, never Radix directly.                               |
-| `src/renderer/src/viewport/`                | The react-three-fiber canvas and scenes (task 3.5).                                          |
-| `src/renderer/src/messages/`                | User-facing strings and the error/warning message catalogue ([copy](#copy-and-terminology)). |
+| Path                                        | Holds                                                                                           |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `src/renderer/src/ui/tokens.css`            | All design tokens as CSS custom properties, light and dark ([tokens](#design-tokens)).          |
+| `src/renderer/src/ui/base.css`              | The only other global CSS: box sizing, body font and colours, focus ring, reduced motion.       |
+| `src/renderer/src/ui/<Name>/`               | One component per folder: `<Name>.tsx`, `<Name>.module.css`, `<Name>.test.tsx`.                 |
+| `src/renderer/src/ui/index.ts`              | The library's public API; screens import from `ui/`, never from Radix.                          |
+| `src/renderer/src/ui/UiProvider/`           | `UiProvider` (tooltip timing), `ThemeScope` and the portal container overlays render into.      |
+| `src/renderer/src/ui/icons/`                | Own icons: `tool/` (CNC tool and view icons), `field/` (field illustrations) ([icons](#icons)). |
+| `src/renderer/src/ui/motion.ts`             | `useReducedMotion()`: OS preference or `data-motion='reduce'` on the root ([motion](#motion)).  |
+| `src/renderer/src/gallery/`                 | Dev-only component gallery at `#gallery` ([testing](#testing)); not in production builds.       |
+| `src/renderer/src/test/`                    | Component test setup and helpers (`renderUi`, `expectNoAxeViolations`, `setReducedMotion`).     |
+| `src/renderer/src/shell/`                   | App shell: mode switcher, regions, status bar, global run control ([layout](#layout)).          |
+| `src/renderer/src/modes/{design,plan,run}/` | Mode screens; use `ui/` components only, never Radix directly.                                  |
+| `src/renderer/src/viewport/`                | The react-three-fiber canvas and scenes (task 3.5).                                             |
+| `src/renderer/src/messages/`                | User-facing strings and the error/warning message catalogue ([copy](#copy-and-terminology)).    |
 
 The renderer holds a read replica of `ProjectDoc` kept current by the patch stream and sends every change as a command over IPC ([commands.md](../architecture/commands.md#project-state)). Selection, camera, panel layout and mode are per-window UI state, never in the document or undo history.
 
@@ -124,7 +130,7 @@ Z-order follows elevation (`--z-toolbar`, `--z-popover`, `--z-dialog`, `--z-toas
 - Durations `--motion-instant` 80 ms (press), `--motion-fast` 120 ms (hover, colour), `--motion-base` 180 ms (popovers, panels, the field support area pulling out), `--motion-slow` 280 ms (dialogs, segmented thumb, camera view changes), `--motion-emphasis` 450 ms (selection pulse), `--motion-draw` 900 ms (toolpaths drawing in). Easing `--ease-standard` `cubic-bezier(0.2, 0, 0, 1)`, `--ease-emphasized` `cubic-bezier(0.2, 0.8, 0.2, 1)` for things that arrive, `--ease-exit` `cubic-bezier(0.4, 0, 1, 1)` for things that leave.
 - `--delay-tooltip` 450 ms. `--delay-indicator` 300 ms: spinners, "Updating…" chips and progress for short work appear only after this delay, so fast work never flickers.
 - Motion explains a change (where a panel came from, what moved, what is selected). Only ongoing processes loop: progress, the running badge's circling dot and the tool-change badge's swap icon and light sweep.
-- `prefers-reduced-motion: reduce` (and the matching app setting) sets every duration to 0 and replaces camera animations with cuts; progress bars and the moving indicator stay, without animation of their own beyond the value change.
+- `prefers-reduced-motion: reduce` (and the matching app setting, `data-motion='reduce'` on the root) sets every duration to 0 and replaces camera animations with cuts; progress bars and the moving indicator stay, without animation of their own beyond the value change. Looping indicators render a static fallback via `useReducedMotion()` (the running badge drops its circling dot, the tool-change badge its sweep).
 
 ## Components
 
@@ -133,10 +139,11 @@ Z-order follows elevation (`--z-toolbar`, `--z-popover`, `--z-dialog`, `--z-toas
 Per [ADR 0012](../decisions/0012-radix-primitives-own-styles.md): Radix primitives, copied-in wrappers in the shadcn/ui style (we own the code; no shadcn dependency), our tokens.
 
 - Only `src/renderer/src/ui/` imports Radix (`radix-ui` package); an ESLint `no-restricted-imports` rule enforces it like the other [layer boundaries](../decisions/0015-eslint-with-typescript6-api.md). Mode screens use `ui/` components.
-- Each wrapper exposes a **small, typed API**: our variants (`variant: 'primary' | 'secondary' | 'ghost' | 'danger'`, `size: 'sm' | 'md' | 'lg'`) as props, rendered as `data-variant` / `data-size` attributes and styled in the CSS module. No `className` overrides from screens except layout (margin, grid placement) through a `className` prop that the wrapper appends.
+- Each wrapper exposes a **small, typed API**: our variants (`variant: 'default' | 'primary' | 'ghost' | 'danger'`, `size: 'sm' | 'md' | 'lg'`) as props, rendered as `data-variant` / `data-size` attributes and styled in the CSS module. No `className` overrides from screens except layout (margin, grid placement) through a `className` prop that the wrapper appends.
 - Style interaction states with Radix's data attributes (`[data-state='open']`, `[data-highlighted]`, `[data-disabled]`) and `:focus-visible`, never with JS-computed classes.
 - Keep Radix's accessibility behaviour (focus trap, roving focus, `aria-*`); never re-implement it. Keep `asChild` where composition needs it (e.g. a `Tooltip` around an `IconButton`).
-- Portals render into the app root element so they inherit the theme attribute.
+- Portals render into `document.body` by default, which inherits the root's `data-theme`; inside a `ThemeScope` (`.t-light` / `.t-dark`) they render into the scope, so they keep its theme.
+- CSS module classes are read with brackets (`styles['button']`): the renderer keeps `noPropertyAccessFromIndexSignature`.
 - Every icon-only control has an accessible name (`aria-label`) and a tooltip with the same text plus its shortcut.
 - Header comment of every wrapper links back to this doc.
 
@@ -426,8 +433,10 @@ Decided for v0.1 ([decision 7](#decisions)): **English only, i18n-ready structur
 Extends [testing.md](testing.md) (component and end-to-end rows).
 
 - **Component tests** ([decision 14](#decisions)): Vitest + Testing Library (`@testing-library/react`, `user-event`) in jsdom, colocated `*.test.tsx`. Query by role and accessible name (this doubles as an accessibility check); `data-testid` only for the canvas. Each `ui/` component and app component gets an axe check (`axe-core`, MPL-2.0).
+  - `vitest.config.mts` has two projects: `node` (every `*.test.ts`) and `ui` (`src/renderer/**/*.test.tsx`, jsdom, setup `src/renderer/src/test/setup.ts` with jest-dom matchers and the browser APIs Radix needs). Render with `renderUi()` (inside `UiProvider`, with a `user`), check with `expectNoAxeViolations()` (contrast is off in jsdom; the token test covers it), emulate reduced motion with `setReducedMotion()`.
+- **Gallery:** in a dev build, open `#gallery` (DevTools console: `location.hash = 'gallery'`). It renders every `ui/` component light and dark side by side, overlays open in place, with switches for the window theme and reduced motion.
 - What to test: `QuantityInput` behaviour per rule above (echo, timing, commit/revert, hints, steppers); error mapping from `AppError` fixtures; confirmation policy; keyboard paths (mode switch, F6, feed hold); stop control visible in every mode with an open connection.
 - **Viewport:** WebGL does not run in jsdom. Keep picking, highlighting and scene building in pure functions (unit-tested); the canvas is covered by the end-to-end tests.
-- **Tokens:** a unit test parses `tokens.css` and checks that both themes define every semantic token and that the listed contrast pairs meet AA.
+- **Tokens:** `ui/tokens.test.ts` parses `tokens.css` and checks that both themes define every semantic token, the two dark blocks agree, type and spacing are in `rem`, reduced motion zeroes every duration, and the listed contrast pairs meet AA. Pairs the approved page draws below AA are pinned with `it.fails` and listed in the [plan's known issues](../plans/v0.1.md#known-issues-and-risks) until decided.
 - **Smoke test (task 0.9, done):** Playwright for Electron launches the built app, checks the window opens without console errors and runs the packaged worker chunk ([testing.md](testing.md#app-playwright-for-electron)). With the UI shell (3.3): switch the three modes and open the gallery in both themes for screenshot comparison.
 - **End-to-end (task 3.11):** the exit-criteria flow driven through the UI by roles and labels, mirrored by the headless MCP flow.

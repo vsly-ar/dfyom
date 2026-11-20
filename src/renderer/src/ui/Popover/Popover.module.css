@@ -1,0 +1,41 @@
+/* Popover. Look: ui-design-system.html (.stepper surface). Doc: docs/conventions/ui.md#elevation */
+.content {
+  z-index: var(--z-popover);
+  min-width: 200px;
+  max-width: min(320px, calc(100vw - 16px));
+  padding: 10px;
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-2);
+  display: grid;
+  gap: 10px;
+  transform-origin: var(--radix-popover-content-transform-origin);
+  animation: pop var(--motion-base) var(--ease-emphasized);
+}
+
+.content[data-state='closed'] {
+  animation: fade var(--motion-fast) var(--ease-exit) forwards;
+}
+
+.title {
+  font-weight: var(--weight-bold);
+}
+
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fade {
+  to {
+    opacity: 0;
+  }
+}

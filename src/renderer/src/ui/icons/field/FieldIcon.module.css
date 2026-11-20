@@ -1,0 +1,20 @@
+/* Field illustrations: grey drawing, amber measured line. The Field sets colour and saturation
+   (35 % at rest, full on focus). Doc: docs/conventions/ui.md#field */
+.icon {
+  width: var(--icon-xl);
+  height: var(--icon-xl);
+  flex: none;
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.icon [data-accent] {
+  stroke: var(--accent-icon);
+  stroke-width: 1.4px;
+  stroke-linecap: butt;
+  transition: stroke-width var(--motion-emphasis) var(--ease-emphasized);
+}

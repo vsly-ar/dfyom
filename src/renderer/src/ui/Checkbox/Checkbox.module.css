@@ -1,0 +1,77 @@
+/* Checkbox. Look: ui-design-system.html (.check). Doc: docs/conventions/ui.md#buttons */
+.root {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+}
+
+.box {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  padding: 0;
+  border-radius: var(--radius-xs);
+  border: 1.5px solid var(--border-control);
+  background: var(--bg-field);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition:
+    background var(--motion-base),
+    border-color var(--motion-base);
+}
+
+/* enlarge the pointer target to 24 × 24 px (WCAG 2.2 target size) without changing the look */
+.box {
+  position: relative;
+}
+.box::before {
+  content: '';
+  position: absolute;
+  inset: -5px;
+}
+
+.box[data-state='checked'],
+.box[data-state='indeterminate'] {
+  background: var(--accent);
+  border-color: var(--accent-border);
+}
+
+.indicator {
+  display: block;
+  width: 7px;
+  height: 4px;
+  margin-top: -2px;
+  border: solid var(--text-on-accent);
+  border-width: 0 0 1.6px 1.6px;
+  transform: rotate(-45deg) scale(0);
+  transition: transform var(--motion-slow) var(--ease-emphasized);
+}
+
+.indicator[data-state='checked'] {
+  transform: rotate(-45deg) scale(1);
+}
+
+.indicator[data-state='indeterminate'] {
+  width: 7px;
+  height: 0;
+  margin-top: 0;
+  border-width: 0 0 1.6px 0;
+  transform: none;
+}
+
+.box[data-disabled] {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.label {
+  cursor: pointer;
+}
+
+.box[data-disabled] + .label {
+  color: var(--text-faint);
+  cursor: not-allowed;
+}

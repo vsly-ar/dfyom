@@ -1,0 +1,304 @@
+/*
+ * Design tokens: the only values components use. Values copied from the approved design system
+ * (docs/conventions/ui-design-system.html); names, structure and rules: docs/conventions/ui.md#design-tokens.
+ *
+ * Themes: light on :root, dark under :root[data-theme='dark'] and, unless data-theme='light' is
+ * set, under prefers-color-scheme: dark. .t-light / .t-dark scope a theme to a subtree (gallery).
+ * The two dark blocks must stay identical; tokens.test.ts checks it, and the contrast pairs.
+ */
+
+:root,
+.t-light {
+  /* surfaces */
+  --bg-app: #f6f8ff;
+  --bg-chrome: #eceff7;
+  --bg-viewport: #e4e8f2;
+  --bg-field: #ffffff;
+  --bg-control: #ffffff;
+  --bg-raised: #ffffff;
+  --bg-hover: rgb(28 33 33 / 0.06);
+  --bg-active: rgb(28 33 33 / 0.1);
+  --bg-overlay: rgb(28 33 33 / 0.32);
+  /* text */
+  --text: #1c2121;
+  --text-muted: #5b6462;
+  --text-faint: #868f8d;
+  --text-on-accent: #1c2121;
+  --text-on-solid: #ffffff;
+  --text-accent: #8a6400;
+  /* lines */
+  --border: #dde2ec;
+  --border-control: #848d9b;
+  --focus: #a87a00;
+  /* accent: Amber */
+  --accent: #f5b700;
+  --accent-hover: #e6aa00;
+  --accent-border: #a87a00;
+  --accent-subtle: #fff2c9;
+  --accent-icon: #f5b700;
+  --accent-icon-edge: drop-shadow(0 0 0.4px rgb(60 40 0 / 0.75));
+  /* feedback (never machine state) */
+  --danger: #c9363a;
+  --danger-subtle: #fdecec;
+  --warning: #c96a00;
+  --warning-subtle: #fff0e3;
+  --success: #1f7d49;
+  --success-subtle: #e6f5ec;
+  --info: #2f6fc0;
+  --info-subtle: #e8f0fb;
+  /* safety (machine state and stop only) */
+  --safety-stop: #d0302f;
+  --safety-stop-fg: #ffffff;
+  --safety-alarm: #d0302f;
+  --safety-alarm-fg: #ffffff;
+  --safety-hold: #e8741c;
+  --safety-hold-fg: #1c2121;
+  --safety-moving: #f5b700;
+  --safety-moving-edge: #c48f00;
+  --safety-moving-fg: #1c2121;
+  --safety-action: #2f6fc0;
+  --safety-action-fg: #ffffff;
+  --safety-idle: #5b6462;
+  --safety-offline: #868f8d;
+  /* viewport */
+  --vp-grid: #d7dde9;
+  --vp-grid-major: #c5ccdb;
+  --vp-stock: #868f8d;
+  --vp-part: #f9faff;
+  --vp-edge: #39423f;
+  --vp-removal: #d3d9e5;
+  --vp-selected: #f2b200;
+  --vp-selected-halo: rgb(150 105 0 / 0.45);
+  --vp-feed: #5b6462;
+  --vp-rapid: #868f8d;
+  --vp-tool: #1c2121;
+  --vp-axis-x: #d0605f;
+  --vp-axis-y: #4f9d6c;
+  --vp-axis-z: #4a7fc8;
+  /* elevation */
+  --shadow-1: 0 1px 2px rgb(20 25 40 / 0.08), 0 2px 8px rgb(20 25 40 / 0.06);
+  --shadow-2: 0 2px 6px rgb(20 25 40 / 0.1), 0 8px 24px rgb(20 25 40 / 0.12);
+  --shadow-3: 0 4px 12px rgb(20 25 40 / 0.12), 0 24px 64px rgb(20 25 40 / 0.2);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg-app: #272d2d;
+    --bg-chrome: #2e3535;
+    --bg-viewport: #1e2323;
+    --bg-field: #212727;
+    --bg-control: #353d3d;
+    --bg-raised: #353d3d;
+    --bg-hover: rgb(233 237 243 / 0.07);
+    --bg-active: rgb(233 237 243 / 0.11);
+    --bg-overlay: rgb(0 0 0 / 0.5);
+    --text: #e9edf3;
+    --text-muted: #a2acaa;
+    --text-faint: #7a8482;
+    --text-on-accent: #1c2121;
+    --text-on-solid: #ffffff;
+    --text-accent: #ffcf4d;
+    --border: #3a4343;
+    --border-control: #6d7878;
+    --focus: #f5b700;
+    --accent: #f5b700;
+    --accent-hover: #ffc61a;
+    --accent-border: #f5b700;
+    --accent-subtle: #3b3213;
+    --accent-icon: #f5b700;
+    --accent-icon-edge: none;
+    --danger: #ef6366;
+    --danger-subtle: #45272a;
+    --warning: #f2993a;
+    --warning-subtle: #42331c;
+    --success: #4cc387;
+    --success-subtle: #233d30;
+    --info: #6aa9ea;
+    --info-subtle: #23344a;
+    --safety-stop: #d9373c;
+    --safety-stop-fg: #ffffff;
+    --safety-alarm: #d9373c;
+    --safety-alarm-fg: #ffffff;
+    --safety-hold: #f28b3c;
+    --safety-hold-fg: #1c2121;
+    --safety-moving: #f5b700;
+    --safety-moving-edge: #f5b700;
+    --safety-moving-fg: #e9edf3;
+    --safety-action: #5ea2e6;
+    --safety-action-fg: #1c2121;
+    --safety-idle: #a2acaa;
+    --safety-offline: #7a8482;
+    --vp-grid: #283030;
+    --vp-grid-major: #323b3b;
+    --vp-stock: #7a8482;
+    --vp-part: #2b3232;
+    --vp-edge: #d5dbe3;
+    --vp-removal: #191d1d;
+    --vp-selected: #f5b700;
+    --vp-selected-halo: rgb(0 0 0 / 0.6);
+    --vp-feed: #b8c1c0;
+    --vp-rapid: #7a8482;
+    --vp-tool: #e9edf3;
+    --vp-axis-x: #e07574;
+    --vp-axis-y: #62b580;
+    --vp-axis-z: #6c9ee0;
+    --shadow-1: 0 1px 2px rgb(0 0 0 / 0.3);
+    --shadow-2: 0 4px 16px rgb(0 0 0 / 0.4);
+    --shadow-3: 0 16px 48px rgb(0 0 0 / 0.55);
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme='dark'],
+.t-dark {
+  --bg-app: #272d2d;
+  --bg-chrome: #2e3535;
+  --bg-viewport: #1e2323;
+  --bg-field: #212727;
+  --bg-control: #353d3d;
+  --bg-raised: #353d3d;
+  --bg-hover: rgb(233 237 243 / 0.07);
+  --bg-active: rgb(233 237 243 / 0.11);
+  --bg-overlay: rgb(0 0 0 / 0.5);
+  --text: #e9edf3;
+  --text-muted: #a2acaa;
+  --text-faint: #7a8482;
+  --text-on-accent: #1c2121;
+  --text-on-solid: #ffffff;
+  --text-accent: #ffcf4d;
+  --border: #3a4343;
+  --border-control: #6d7878;
+  --focus: #f5b700;
+  --accent: #f5b700;
+  --accent-hover: #ffc61a;
+  --accent-border: #f5b700;
+  --accent-subtle: #3b3213;
+  --accent-icon: #f5b700;
+  --accent-icon-edge: none;
+  --danger: #ef6366;
+  --danger-subtle: #45272a;
+  --warning: #f2993a;
+  --warning-subtle: #42331c;
+  --success: #4cc387;
+  --success-subtle: #233d30;
+  --info: #6aa9ea;
+  --info-subtle: #23344a;
+  --safety-stop: #d9373c;
+  --safety-stop-fg: #ffffff;
+  --safety-alarm: #d9373c;
+  --safety-alarm-fg: #ffffff;
+  --safety-hold: #f28b3c;
+  --safety-hold-fg: #1c2121;
+  --safety-moving: #f5b700;
+  --safety-moving-edge: #f5b700;
+  --safety-moving-fg: #e9edf3;
+  --safety-action: #5ea2e6;
+  --safety-action-fg: #1c2121;
+  --safety-idle: #a2acaa;
+  --safety-offline: #7a8482;
+  --vp-grid: #283030;
+  --vp-grid-major: #323b3b;
+  --vp-stock: #7a8482;
+  --vp-part: #2b3232;
+  --vp-edge: #d5dbe3;
+  --vp-removal: #191d1d;
+  --vp-selected: #f5b700;
+  --vp-selected-halo: rgb(0 0 0 / 0.6);
+  --vp-feed: #b8c1c0;
+  --vp-rapid: #7a8482;
+  --vp-tool: #e9edf3;
+  --vp-axis-x: #e07574;
+  --vp-axis-y: #62b580;
+  --vp-axis-z: #6c9ee0;
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-2: 0 4px 16px rgb(0 0 0 / 0.4);
+  --shadow-3: 0 16px 48px rgb(0 0 0 / 0.55);
+  color-scheme: dark;
+}
+
+/* Theme-independent tokens: type, space, radii, sizes, icons, z-order, motion. */
+:root {
+  /* type: system fonts (decision 8) */
+  --font-ui: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
+  --text-xs: 0.6875rem; /* 11/14 */
+  --lh-xs: 0.875rem;
+  --text-sm: 0.75rem; /* 12/16 */
+  --lh-sm: 1rem;
+  --text-md: 0.8125rem; /* 13/18 base */
+  --lh-md: 1.125rem;
+  --text-lg: 0.9375rem; /* 15/20 */
+  --lh-lg: 1.25rem;
+  --text-xl: 1.25rem; /* 20/26 */
+  --lh-xl: 1.625rem;
+  --text-dro: 1.5rem; /* 24/28 mono */
+  --lh-dro: 1.75rem;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-bold: 600;
+  /* space (4 px grid) */
+  --space-0-5: 0.125rem;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  /* radii */
+  --radius-xs: 3px;
+  --radius-sm: 5px;
+  --radius-md: 7px;
+  --radius-lg: 10px;
+  --radius-full: 999px;
+  /* control heights */
+  --control-sm: 1.5rem;
+  --control-md: 1.75rem;
+  --control-lg: 2.75rem;
+  /* icons */
+  --icon-sm: 14px;
+  --icon-md: 16px;
+  --icon-lg: 20px;
+  --icon-xl: 28px;
+  --icon-stroke: 1.35px;
+  /* z-order follows elevation; the stop control sits above dialogs (ui.md#elevation) */
+  --z-toolbar: 10;
+  --z-popover: 100;
+  --z-dialog: 200;
+  --z-toast: 300;
+  --z-safety: 400;
+  /* motion */
+  --motion-instant: 80ms;
+  --motion-fast: 120ms;
+  --motion-base: 180ms;
+  --motion-slow: 280ms;
+  --motion-emphasis: 450ms;
+  --motion-draw: 900ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --delay-tooltip: 450ms;
+  --delay-indicator: 300ms;
+}
+
+/* Reduced motion (OS, or the app setting via data-motion='reduce'): every duration is 0 (ui.md#motion). */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-instant: 0ms;
+    --motion-fast: 0ms;
+    --motion-base: 0ms;
+    --motion-slow: 0ms;
+    --motion-emphasis: 0ms;
+    --motion-draw: 0ms;
+  }
+}
+
+:root[data-motion='reduce'] {
+  --motion-instant: 0ms;
+  --motion-fast: 0ms;
+  --motion-base: 0ms;
+  --motion-slow: 0ms;
+  --motion-emphasis: 0ms;
+  --motion-draw: 0ms;
+}

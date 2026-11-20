@@ -1,0 +1,60 @@
+/* Global base styles: the only global CSS besides tokens.css. Doc: docs/conventions/ui.md */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--bg-app);
+  color: var(--text);
+  font: var(--text-md) / var(--lh-md) var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* a theme scope (.t-light / .t-dark) paints its own surface and text */
+.t-light,
+.t-dark {
+  background: var(--bg-app);
+  color: var(--text);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+/* Reduced motion: tokens.css zeroes the durations; this also stops third-party and keyframe loops
+   (ui.md#motion). Looping indicators render a static fallback (useReducedMotion). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0s !important;
+  }
+}
+
+:root[data-motion='reduce'] *,
+:root[data-motion='reduce'] *::before,
+:root[data-motion='reduce'] *::after {
+  animation-duration: 0s !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0s !important;
+}

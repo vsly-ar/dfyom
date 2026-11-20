@@ -1,0 +1,59 @@
+/* SegmentedControl. Look: ui-design-system.html (.seg). Doc: docs/conventions/ui.md#buttons (toggles) */
+.root {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-active);
+  position: relative;
+}
+
+.item {
+  position: relative;
+  z-index: 1;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  height: calc(var(--control-md) - 4px);
+  padding: 0 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  transition: color var(--motion-fast);
+}
+
+.item:hover {
+  color: var(--text);
+}
+
+.item[data-state='on'] {
+  color: var(--text-on-accent);
+}
+
+.item[data-disabled] {
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+
+.root[data-size='sm'] .item {
+  height: calc(var(--control-sm) - 4px);
+  padding: 0 8px;
+  font-size: var(--text-xs);
+}
+
+.thumb {
+  position: absolute;
+  top: 2px;
+  left: 0;
+  height: calc(100% - 4px);
+  border-radius: 4px;
+  background: var(--accent);
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.14),
+    inset 0 0 0 1px var(--accent-border);
+  transition:
+    transform var(--motion-slow) var(--ease-emphasized),
+    width var(--motion-slow) var(--ease-emphasized);
+}
