@@ -622,7 +622,7 @@ svg.fi .ext { stroke-dasharray: 1.5 1.5; opacity: 0.7; }
       <h2>Semantic tokens</h2>
       <p class="muted">The only colours components use. Contrast is computed live from the values on this page; the same pairs become the token unit test.</p>
       <div class="table-wrap"><table id="tok-table"><thead><tr><th>Token</th><th>Light</th><th>Dark</th><th>Use</th></tr></thead><tbody></tbody></table></div>
-      <div class="table-wrap"><table id="cr-table"><thead><tr><th>Contrast pair</th><th>Needs</th><th>Light</th><th>Dark</th></tr></thead><tbody></tbody></table></div>
+      <div class="table-wrap"><table id="cr-table"><thead><tr><th>Contrast pair (APCA)</th><th>Needs |Lc|</th><th>Light</th><th>Dark</th></tr></thead><tbody></tbody></table></div>
     </section>
 
     <section id="type">
@@ -961,7 +961,7 @@ const TOK = [
   ['--text-on-accent', 'Check marks on amber'],
   ['Lines'],
   ['--border', 'Separators, panel edges, button outlines'],
-  ['--border-control', 'Input, checkbox and switch outlines (3:1)'],
+  ['--border-control', 'Input, checkbox and switch outlines (Lc 30)'],
   ['--focus', 'Focus ring'],
   ['Accent'],
   ['--accent', 'Solid amber: switch, checkbox, slider, progress, mode underline'],
@@ -1002,21 +1002,24 @@ $('#tok-table tbody').innerHTML = TOK.map(r => r.length === 1
   ? `<tr><td colspan="4" class="eyebrow" style="background:var(--bg-chrome);padding-top:8px">${r[0]}</td></tr>`
   : `<tr><td><code>${r[0]}</code></td><td>${sw(val(probeL, r[0]))}</td><td>${sw(val(probeD, r[0]))}</td><td class="wrap">${r[1]}</td></tr>`).join('');
 
-function lum(h) {
-  h = h.replace('#', ''); const c = [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16) / 255).map(v => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
-  return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+/* APCA-W3 0.0.98G-4g lightness contrast, text on background (signed); same formula as src/renderer/src/ui/apca.ts (ui.md#colour) */
+function apcaY(h) {
+  h = h.replace('#', ''); const c = [0, 2, 4].map(i => (parseInt(h.slice(i, i + 2), 16) / 255) ** 2.4);
+  const y = 0.2126729 * c[0] + 0.7151522 * c[1] + 0.072175 * c[2]; return y > 0.022 ? y : y + (0.022 - y) ** 1.414;
 }
-const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+const lc = (t, b) => { const [ty, by] = [apcaY(t), apcaY(b)]; if (Math.abs(by - ty) < 0.0005) return 0;
+  const s = by > ty ? (by ** 0.56 - ty ** 0.57) * 1.14 : (by ** 0.65 - ty ** 0.62) * 1.14;
+  return Math.abs(s) < 0.1 ? 0 : (s > 0 ? s - 0.027 : s + 0.027) * 100; };
 const PAIRS = [
-  ['--text', '--bg-app', 4.5], ['--text-muted', '--bg-app', 4.5], ['--text-muted', '--bg-chrome', 4.5], ['--text-faint', '--bg-app', 3],
-  ['--text-accent', '--bg-app', 4.5], ['--text', '--accent-subtle', 4.5], ['--text-on-accent', '--accent', 4.5],
-  ['--accent-border', '--bg-field', 3], ['--border-control', '--bg-field', 3], ['--border-control', '--bg-app', 3], ['--focus', '--bg-app', 3],
-  ['--text-accent', '--accent-subtle', 4.5], ['--danger', '--bg-field', 4.5], ['--warning', '--bg-app', 3], ['--success', '--bg-app', 4.5], ['--info', '--bg-app', 4.5],
-  ['--safety-stop-fg', '--safety-stop', 4.5], ['--safety-hold-fg', '--safety-hold', 4.5], ['--safety-action-fg', '--safety-action', 4.5],
+  ['--text', '--bg-app', 75], ['--text-muted', '--bg-app', 75], ['--text-muted', '--bg-chrome', 75], ['--text-faint', '--bg-app', 30],
+  ['--text-accent', '--bg-app', 60], ['--text', '--accent-subtle', 75], ['--text-on-accent', '--accent', 60],
+  ['--accent-border', '--bg-field', 30], ['--border-control', '--bg-field', 30], ['--border-control', '--bg-app', 30], ['--focus', '--bg-app', 30],
+  ['--text-accent', '--accent-subtle', 60], ['--danger', '--bg-field', 30], ['--warning', '--bg-app', 45], ['--success', '--bg-app', 45], ['--info', '--bg-app', 45],
+  ['--safety-stop-fg', '--safety-stop', 60], ['--safety-hold-fg', '--safety-hold', 60], ['--safety-action-fg', '--safety-action', 60],
 ];
 $('#cr-table tbody').innerHTML = PAIRS.map(([f, b, need]) => {
-  const cell = el => { const r = ratio(val(el, f), val(el, b)); return `<td class="mono ${r >= need ? 'ok-t' : 'bad-t'}">${r.toFixed(2)} ${r >= need ? '✓' : '✗'}</td>`; };
-  return `<tr><td><code>${f}</code> on <code>${b}</code></td><td class="mono">${need}:1</td>${cell(probeL)}${cell(probeD)}</tr>`;
+  const cell = el => { const r = lc(val(el, f), val(el, b)); const ok = Math.abs(r) >= need; return `<td class="mono ${ok ? 'ok-t' : 'bad-t'}">${r.toFixed(1)} ${ok ? '✓' : '✗'}</td>`; };
+  return `<tr><td><code>${f}</code> on <code>${b}</code></td><td class="mono">Lc ${need}</td>${cell(probeL)}${cell(probeD)}</tr>`;
 }).join('');
 
 /* ---------- spacing & timing ---------- */

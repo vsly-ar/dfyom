@@ -1,7 +1,8 @@
 // Token checks: both themes define every semantic colour token, the two dark blocks agree, and
-// the contrast pairs meet ui.md's thresholds in both themes. Rules: docs/conventions/ui.md#colour
+// the contrast pairs meet their APCA Lc targets per role in both themes. Rules: docs/conventions/ui.md#colour
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { apcaLc } from './apca'
 
 // Runs in the node test project and is typechecked by tsconfig.node.json (it reads the file).
 const CSS = readFileSync(new URL('./tokens.css', import.meta.url), 'utf8')
@@ -104,85 +105,112 @@ function MOTION_DURATIONS(): string[] {
   return ['instant', 'fast', 'base', 'slow', 'emphasis', 'draw'].map((s) => `--motion-${s}`)
 }
 
-function luminance(hex: string): number {
-  const m = /^#([0-9a-f]{6})$/i.exec(hex)
-  if (!m?.[1]) throw new Error(`not an opaque #rrggbb colour: ${hex}`)
-  const h = m[1]
-  const [r, g, b] = [0, 2, 4].map((i) => {
-    const v = parseInt(h.slice(i, i + 2), 16) / 255
-    return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4
-  }) as [number, number, number]
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b
-}
-
-function contrast(theme: Map<string, string>, fg: string, bg: string): number {
-  const a = luminance(theme.get(fg) ?? '')
-  const b = luminance(theme.get(bg) ?? '')
-  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
-}
-
-const TEXT = 4.5
-const UI = 3
+/**
+ * APCA roles and minimum |Lc| (APCA readability criterion, "Bronze simple mode" levels, applied
+ * to the sizes and weights the components use; ui.md#colour). Our text is 10–13 px, smaller than
+ * the font minimums Bronze attaches to these levels, so the targets are floors, not comfort levels.
+ */
+const ROLES = {
+  /** Text read for content at 11–13 px, regular weight (400): body, values, labels, notes. */
+  read: 75,
+  /** Text at 10–13 px, medium/bold (500–600): button labels, chips, badges, tooltips. */
+  label: 60,
+  /** Non-content "spot" text: placeholders, unit suffixes, metadata, disabled. */
+  spot: 30,
+  /** Outline pictograms with fine detail (1.5 px stroke, 12–16 px icons). */
+  icon: 45,
+  /** Semantic marks: 1–2 px control outlines, focus ring, solid indicators ≥ 5.5 px. */
+  mark: 30,
+} as const
+type Role = keyof typeof ROLES
+type Theme = 'light' | 'dark'
 
 /**
- * Pairs the components actually draw, with ui.md's thresholds: text ≥ 4.5:1; UI boundaries,
- * focus ring and meaningful icons ≥ 3:1. `--text-faint` is for units, metadata and disabled
- * text only (never essential), so it is held to 3:1 like the page does.
+ * Pairs the components and the approved page draw: foreground (text or mark) on background,
+ * in that order (APCA is polarity-aware), with the role that sets the target. `below` pins pairs
+ * that miss the target in a theme (Lc noted; colours left as approved; v0.1 plan known issues):
+ * they run as `it.fails`, so fixing a colour turns the test red until the entry is removed.
  */
-const PAIRS: [fg: string, bg: string, min: number, where: string][] = [
-  ['--text', '--bg-app', TEXT, 'body text'],
-  ['--text', '--bg-chrome', TEXT, 'toolbar, status bar, support area'],
-  ['--text', '--bg-field', TEXT, 'input values'],
-  ['--text', '--bg-raised', TEXT, 'menus, popovers, dialogs'],
-  ['--text', '--bg-control', TEXT, 'button labels'],
-  ['--text', '--accent-subtle', TEXT, 'selected row'],
-  ['--text', '--warning-subtle', TEXT, 'hard warning text'],
-  ['--text', '--danger-subtle', TEXT, 'error banner text'],
-  ['--bg-app', '--text', TEXT, 'tooltip (inverted)'],
-  ['--text-muted', '--bg-app', TEXT, 'labels, secondary text'],
-  ['--text-muted', '--bg-chrome', TEXT, 'support area notes, status bar'],
-  ['--text-muted', '--bg-field', TEXT, 'read-only values'],
-  ['--text-muted', '--bg-raised', TEXT, 'dialog body'],
-  ['--text-muted', '--bg-control', TEXT, 'ghost buttons, toolbar icons on controls'],
-  ['--text-faint', '--bg-app', UI, 'metadata (non-essential)'],
-  ['--text-faint', '--bg-field', UI, 'unit suffix, placeholder'],
-  ['--text-accent', '--bg-app', TEXT, 'amber-toned text'],
-  ['--text-accent', '--accent-subtle', TEXT, 'amber-toned text on selection'],
-  ['--text-on-accent', '--accent', TEXT, 'segmented thumb label, check mark'],
-  ['--accent-border', '--bg-field', UI, 'edge of amber fills'],
-  ['--border-control', '--bg-field', UI, 'input, checkbox outline'],
-  ['--border-control', '--bg-app', UI, 'switch track, button outline'],
-  ['--focus', '--bg-app', UI, 'focus ring'],
-  ['--focus', '--bg-field', UI, 'focus ring'],
-  ['--focus', '--bg-chrome', UI, 'focus ring in toolbars'],
-  ['--focus', '--bg-raised', UI, 'focus ring in dialogs'],
-  ['--danger', '--bg-field', TEXT, 'invalid field text'],
-  ['--warning', '--bg-app', UI, 'warning icon'],
-  ['--warning', '--warning-subtle', UI, 'hard warning icon'],
-  ['--success', '--bg-app', TEXT, 'done'],
-  ['--info', '--bg-app', TEXT, 'info'],
-  ['--safety-stop-fg', '--safety-stop', TEXT, 'Stop label'],
-  ['--safety-alarm-fg', '--safety-alarm', TEXT, 'Alarm badge'],
-  ['--safety-hold-fg', '--safety-hold', TEXT, 'Feed hold badge'],
-  ['--safety-action-fg', '--safety-action', TEXT, 'Tool change badge'],
-  ['--safety-moving-fg', '--accent-subtle', TEXT, 'Running badge'],
-  ['--safety-idle', '--bg-field', UI, 'Idle badge dot'],
-  ['--safety-offline', '--bg-field', UI, 'Not connected badge ring'],
+const PAIRS: [
+  fg: string,
+  bg: string,
+  role: Role,
+  where: string,
+  below?: Partial<Record<Theme, number>>,
+][] = [
+  ['--text', '--bg-app', 'read', 'body text'],
+  ['--text', '--bg-chrome', 'read', 'toolbar, status bar, support area'],
+  ['--text', '--bg-field', 'read', 'input values'],
+  ['--text', '--bg-raised', 'read', 'menus, popovers, dialogs'],
+  ['--text', '--bg-control', 'label', 'button labels (13 px / 500)'],
+  ['--text', '--accent-subtle', 'read', 'selected row'],
+  ['--text', '--warning-subtle', 'read', 'hard warning text (12 px)'],
+  ['--text', '--danger-subtle', 'read', 'error banner text'],
+  ['--bg-app', '--text', 'label', 'tooltip, inverted (12 px / 500)'],
+  ['--text-muted', '--bg-app', 'read', 'labels, secondary text', { dark: -51.9 }],
+  [
+    '--text-muted',
+    '--bg-chrome',
+    'read',
+    'support area notes (12 px), status bar',
+    { light: 70.9, dark: -50.1 },
+  ],
+  ['--text-muted', '--bg-field', 'read', 'read-only values', { dark: -53.1 }],
+  ['--text-muted', '--bg-raised', 'read', 'dialog body', { dark: -47.8 }],
+  [
+    '--text-muted',
+    '--bg-control',
+    'label',
+    'ghost buttons, segmented items (500)',
+    { dark: -47.8 },
+  ],
+  ['--text-faint', '--bg-app', 'spot', 'metadata (non-essential)'],
+  ['--text-faint', '--bg-field', 'spot', 'unit suffix, placeholder'],
+  ['--text-accent', '--bg-app', 'label', 'label of the suggested action'],
+  ['--text-accent', '--accent-subtle', 'label', 'suggested action on selection'],
+  ['--text-on-accent', '--accent', 'label', 'segmented thumb label (12 px / 500), check mark'],
+  ['--accent-border', '--bg-field', 'mark', 'edge of amber fills'],
+  ['--border-control', '--bg-field', 'mark', 'input, checkbox outline', { dark: -26.9 }],
+  ['--border-control', '--bg-app', 'mark', 'switch track, button outline', { dark: -25.8 }],
+  ['--border-control', '--bg-chrome', 'mark', 'control outlines in toolbars', { dark: -24.0 }],
+  ['--focus', '--bg-app', 'mark', 'focus ring (2 px)'],
+  ['--focus', '--bg-field', 'mark', 'focus ring'],
+  ['--focus', '--bg-chrome', 'mark', 'focus ring in toolbars'],
+  ['--focus', '--bg-raised', 'mark', 'focus ring in dialogs'],
+  ['--danger', '--bg-field', 'mark', 'invalid field outline'],
+  ['--warning', '--bg-app', 'icon', 'warning icon'],
+  ['--warning', '--warning-subtle', 'icon', 'hard warning icon'],
+  ['--success', '--bg-app', 'icon', 'done icon (status chip)'],
+  ['--info', '--bg-app', 'icon', 'info icon'],
+  ['--safety-stop-fg', '--safety-stop', 'label', 'Stop label'],
+  ['--safety-alarm-fg', '--safety-alarm', 'label', 'Alarm badge (12 px / 600)'],
+  ['--safety-hold-fg', '--safety-hold', 'label', 'Feed hold badge', { light: 44.9, dark: 53.2 }],
+  ['--safety-action-fg', '--safety-action', 'label', 'Tool change badge', { dark: 49.1 }],
+  ['--safety-moving-fg', '--accent-subtle', 'label', 'Running badge'],
+  ['--safety-idle', '--bg-field', 'mark', 'Idle badge dot (solid)'],
+  ['--safety-offline', '--bg-field', 'icon', 'Not connected badge ring (1.5 px)', { dark: -32.6 }],
+  ['--danger', '--bg-control', 'label', 'danger button label (13 px / 500)', { dark: -35.5 }],
+  ['--danger', '--bg-raised', 'read', 'danger menu item', { light: 74.2, dark: -35.5 }],
+  ['--danger', '--danger-subtle', 'label', 'danger chip (12 px / 500)', { dark: -38.7 }],
+  [
+    '--danger',
+    '--bg-chrome',
+    'read',
+    'field error text in the support area (12 px)',
+    { light: 64.7, dark: -37.8 },
+  ],
+  ['--info', '--info-subtle', 'label', 'agent tag (10 px / 500)', { dark: -47.5 }],
 ]
 
-/**
- * Pairs the approved page draws that miss the threshold (reported to the user, colours left
- * unchanged pending a decision; v0.1 plan known issues). `it.fails`: when a colour is fixed,
- * this turns red; move the pair to PAIRS.
- */
-const BELOW: [fg: string, bg: string, min: number, theme: 'light' | 'dark', where: string][] = [
-  ['--danger', '--bg-control', TEXT, 'dark', 'danger button label (3.52)'],
-  ['--danger', '--bg-raised', TEXT, 'dark', 'danger menu item (3.52)'],
-  ['--danger', '--danger-subtle', TEXT, 'dark', 'danger chip (4.22)'],
-  ['--danger', '--bg-chrome', TEXT, 'light', 'field error text in the support area (4.48)'],
-  ['--danger', '--bg-chrome', TEXT, 'dark', 'field error text in the support area (3.96)'],
-  ['--info', '--info-subtle', TEXT, 'light', 'agent tag (4.40)'],
-]
+const themes = { light, dark }
+const lc = (theme: Theme, fg: string, bg: string): number =>
+  apcaLc(themes[theme].get(fg) ?? '', themes[theme].get(bg) ?? '')
+const cases = (pinned: boolean) =>
+  PAIRS.flatMap(([fg, bg, role, where, below]) =>
+    (['light', 'dark'] as const)
+      .filter((t) => (below?.[t] !== undefined) === pinned)
+      .map((t) => [fg, bg, t, role, ROLES[role], where] as const),
+  )
 
 describe('tokens.css', () => {
   it.each([
@@ -221,18 +249,41 @@ describe('tokens.css', () => {
     )
   })
 
-  describe.each([
-    ['light', light],
-    ['dark', dark],
-  ] as const)('contrast, %s theme', (_name, theme) => {
-    it.each(PAIRS)('%s on %s ≥ %s:1 (%s)', (fg, bg, min) => {
-      expect(contrast(theme, fg, bg)).toBeGreaterThanOrEqual(min)
+  describe('APCA contrast (Lc), ui.md#colour', () => {
+    it.each(cases(false))('%s on %s, %s: |Lc| ≥ %s target %s (%s)', (fg, bg, theme, _r, min) => {
+      expect(Math.abs(lc(theme, fg, bg))).toBeGreaterThanOrEqual(min)
+    })
+
+    it.fails.each(cases(true))(
+      'below target (reported): %s on %s, %s: |Lc| ≥ %s target %s (%s)',
+      (fg, bg, theme, _r, min) => {
+        expect(Math.abs(lc(theme, fg, bg))).toBeGreaterThanOrEqual(min)
+      },
+    )
+
+    it('notes the current Lc of every pinned pair', () => {
+      const noted = PAIRS.flatMap(([fg, bg, , , below]) =>
+        Object.entries(below ?? {}).map(([t, v]) => [fg, bg, t, v]),
+      )
+      const actual = noted.map(([fg, bg, t]) => [
+        fg,
+        bg,
+        t,
+        Math.round(lc(t as Theme, fg as string, bg as string) * 10) / 10,
+      ])
+      expect(actual).toEqual(noted)
     })
   })
+})
 
-  describe('contrast pairs below the threshold on the approved page (reported)', () => {
-    it.fails.each(BELOW)('%s on %s ≥ %s:1 in %s (%s)', (fg, bg, min, theme) => {
-      expect(contrast(theme === 'light' ? light : dark, fg, bg)).toBeGreaterThanOrEqual(min)
-    })
+describe('apcaLc (APCA-W3 0.0.98G-4g reference values)', () => {
+  it.each([
+    ['#888888', '#ffffff', 63.056],
+    ['#ffffff', '#888888', -68.541],
+    ['#000000', '#ffffff', 106.041],
+    ['#ffffff', '#000000', -107.885],
+    ['#777777', '#777777', 0],
+  ])('%s on %s → Lc %s', (text, bg, expected) => {
+    expect(apcaLc(text, bg)).toBeCloseTo(expected, 2)
   })
 })
