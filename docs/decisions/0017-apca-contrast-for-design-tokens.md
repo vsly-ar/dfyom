@@ -17,6 +17,7 @@ The formula is implemented in our own small test helper (`src/renderer/src/ui/ap
 ## Consequences
 
 - The UI no longer claims WCAG 2.2 AA conformance for contrast (1.4.3, 1.4.6, 1.4.11); the rest of WCAG 2.2 AA still applies ([ui.md accessibility](../conventions/ui.md#accessibility)).
-- APCA is stricter than WCAG 2 for light-on-dark text and small text: re-evaluating the approved tokens fails more pairs in the dark theme (secondary text, control outlines, danger text, safety badges) and Feed hold in both themes. They are pinned with `it.fails` and tracked in the [v0.1 plan known issues](../plans/v0.1.md#known-issues-and-risks); colour values change only after the user decides.
+- APCA is stricter than WCAG 2 for light-on-dark text and small text: re-evaluating the approved tokens fails more pairs in the dark theme (secondary text, control outlines, danger text, safety badges) and Feed hold in both themes. They were first pinned with `it.fails` and tracked in the [v0.1 plan known issues](../plans/v0.1.md#known-issues-and-risks) until the user decided.
+- Update 2026-11-21: the user decided to adjust the token values (lightness only, hue kept) so every pair meets its target; the changed values are listed in [ui.md design system](../conventions/ui.md#design-system) and the design page changelog, and the test has no pinned pairs.
 - APCA is still a draft and may change before WCAG 3; a new constant set means updating `apca.ts` and the role targets together.
 - Our text is below the font minimums Bronze attaches to its levels, so the targets are floors, not comfort levels.

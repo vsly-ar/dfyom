@@ -16,6 +16,17 @@ import { createLocalHttpControl, localHttpSetting } from './mcp/http'
 import { installAppMenu } from './menu'
 import { createExportFiles } from './persistence/export-file'
 import { resolveAppData } from './persistence/paths'
+import {
+  quitSteps,
+  runIsActive,
+  saveAllLetsQuit,
+  saveFailedDialog,
+  STOP_RUN_DIALOG,
+  stopRunConfirmed,
+  unsavedChangesDialog,
+  unsavedChoice,
+  type QuitDialog,
+} from './quit'
 import { createSettingsStore, loadSettings } from './settings/store'
 import { WORKER_ENTRY_PATH } from './workers/bundled'
 import { createNodeWorkerPool } from './workers/node'
@@ -155,31 +166,56 @@ void app.whenReady().then(async () => {
     if (BrowserWindow.getAllWindows().length === 0) openWindow()
   })
 
-  // Quitting during a run asks first (docs/modes/run-v0.1.md#machine-host-and-protocol); quitting
-  // anyway stops the run under control below (hold, then reset), never by just closing the port.
+  // Quitting asks first (docs/conventions/ui.md#confirmations): during a run whether to stop it
+  // (docs/modes/run-v0.1.md#machine-host-and-protocol; quitting anyway stops it under control
+  // below: hold, then reset, never by just closing the port), then one confirmation for every
+  // project with unsaved changes. Each question is asked only if still needed when its turn comes.
+  // Paths that skip `before-quit` (app.exit after a failed start or a crash) never ask; the
+  // headless CLI has its own entry (src/main/cli).
   let quitConfirmed = false
-  app.on('before-quit', (event) => {
-    const job = machine.status().job
-    if (quitConfirmed || job === undefined || ['done', 'failed', 'stopped'].includes(job.phase))
-      return
-    event.preventDefault()
+  let asking = false
+  const unsavedProjects = () => host.list().filter((p) => p.dirty)
+  const ask = (options: QuitDialog) => {
     const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
-    const options = {
-      type: 'warning' as const,
-      message: 'A run is in progress',
-      detail: 'Quitting stops the run: DFYOM holds the feed, then resets the machine.',
-      buttons: ['Cancel', 'Stop run and quit'],
-      defaultId: 0,
-      cancelId: 0,
-    }
-    void (win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options)).then((r) => {
-      if (r.response !== 1) return
-      quitConfirmed = true
-      app.quit()
+    return (win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options)).then(
+      (r) => r.response,
+    )
+  }
+  const confirmQuit = async (): Promise<boolean> => {
+    if (runIsActive(machine.status().job?.phase) && !stopRunConfirmed(await ask(STOP_RUN_DIALOG)))
+      return false
+    const unsaved = unsavedProjects()
+    if (unsaved.length === 0) return true
+    const choice = unsavedChoice(await ask(unsavedChangesDialog(unsaved.map((p) => p.name))))
+    if (choice !== 'saveAll') return choice === 'discard'
+    const saved = await sessions.saveAll(unsavedProjects())
+    if (saved.kind === 'failed') await ask(saveFailedDialog(saved.name, saved.message))
+    return saveAllLetsQuit(saved)
+  }
+  app.on('before-quit', (event) => {
+    const steps = quitSteps({
+      runActive: runIsActive(machine.status().job?.phase),
+      unsaved: unsavedProjects(),
     })
+    if (quitConfirmed || steps.length === 0) {
+      sessions.markQuitting()
+      return
+    }
+    event.preventDefault()
+    if (asking) return
+    asking = true
+    void confirmQuit()
+      .then((ok) => {
+        if (!ok) return
+        quitConfirmed = true
+        app.quit()
+      })
+      .finally(() => {
+        asking = false
+      })
   })
 
-  // Quit: end agent sessions, close projects (unsaved changes stay recoverable), then the machine
+  // Quit: end agent sessions, close projects (unsaved changes not saved above stay recoverable), then the machine
   // connection under control (the host stops a running job: hold, reset; at most 3 s) and workers.
   let stopped = false
   app.on('will-quit', (event) => {

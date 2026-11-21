@@ -47,7 +47,51 @@ export async function launchApp(
   }
   app.on('window', watch)
   app.windows().forEach(watch)
+  await stubMessageBoxes(app)
   return { app, rendererErrors }
+}
+
+/** What the stubbed native message boxes were asked (main process global, see stubMessageBoxes). */
+interface MessageBoxStub {
+  /** Label of the button to press; a box without it presses its first "…quit…" button, else Cancel. */
+  answer: string | undefined
+  readonly asked: { message: string; detail?: string; buttons: string[] }[]
+}
+
+/**
+ * Native message boxes (the quit confirmations, src/main/index.ts) cannot be driven by Playwright
+ * and would show on screen, so every launch replaces them: by default they answer with the quit
+ * button ("Quit without saving", "Stop run and quit"), so closing the app at the end of a test
+ * never waits. `answerMessageBoxes` picks another button; `askedMessageBoxes` lists the questions.
+ */
+async function stubMessageBoxes(app: ElectronApplication): Promise<void> {
+  await app.evaluate(({ dialog }) => {
+    const stub: MessageBoxStub = { answer: undefined, asked: [] }
+    ;(globalThis as unknown as { dfyomMessageBoxes: MessageBoxStub }).dfyomMessageBoxes = stub
+    dialog.showMessageBox = ((...args: unknown[]) => {
+      const o = args[args.length - 1] as Electron.MessageBoxOptions
+      const buttons = o.buttons ?? ['OK']
+      stub.asked.push({ message: o.message, ...(o.detail ? { detail: o.detail } : {}), buttons })
+      let response = stub.answer === undefined ? -1 : buttons.indexOf(stub.answer)
+      if (response < 0) response = buttons.findIndex((b) => /quit/i.test(b))
+      if (response < 0) response = o.cancelId ?? 0
+      return Promise.resolve({ response, checkboxChecked: false })
+    }) as typeof dialog.showMessageBox
+  })
+}
+
+/** The next native message boxes press the button labelled `label`. */
+export async function answerMessageBoxes(app: ElectronApplication, label: string): Promise<void> {
+  await app.evaluate((_e, l) => {
+    ;(globalThis as unknown as { dfyomMessageBoxes: MessageBoxStub }).dfyomMessageBoxes.answer = l
+  }, label)
+}
+
+/** The native message boxes asked so far (message, detail, buttons). */
+export function askedMessageBoxes(app: ElectronApplication): Promise<MessageBoxStub['asked']> {
+  return app.evaluate(
+    () => (globalThis as unknown as { dfyomMessageBoxes: MessageBoxStub }).dfyomMessageBoxes.asked,
+  )
 }
 
 export const test = base.extend<{ dfyom: AppFixture }>({
