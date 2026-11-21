@@ -4,6 +4,7 @@ out/
 dist/
 release/
 coverage/
+playwright-report/
 *.tsbuildinfo
 
 # local tooling caches

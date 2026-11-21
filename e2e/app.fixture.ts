@@ -1,6 +1,6 @@
 // Launches the built app (out/main/index.js) isolated from the developer's app data.
 // Doc: docs/conventions/testing.md#end-to-end
-import { mkdtemp, realpath, rm } from 'node:fs/promises'
+import { cp, mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -17,6 +17,9 @@ export interface AppFixture {
   /** Console errors and uncaught exceptions of every window, collected from creation on. */
   readonly rendererErrors: readonly string[]
 }
+
+/** Record a Playwright trace of every launch (CI, or DFYOM_E2E_TRACE=1); kept only for a failed test. */
+const TRACE = !!process.env['CI'] || process.env['DFYOM_E2E_TRACE'] === '1'
 
 /**
  * Launches the built app on `dataDir` and collects its windows' console errors. The fixture uses
@@ -48,6 +51,7 @@ export async function launchApp(
   app.on('window', watch)
   app.windows().forEach(watch)
   await stubMessageBoxes(app)
+  if (TRACE) await app.context().tracing.start({ screenshots: true, snapshots: true })
   return { app, rendererErrors }
 }
 
@@ -97,12 +101,30 @@ export function askedMessageBoxes(app: ElectronApplication): Promise<MessageBoxS
 export const test = base.extend<{ dfyom: AppFixture }>({
   // Playwright requires the destructuring pattern for fixture dependencies, even when empty.
   // eslint-disable-next-line no-empty-pattern
-  dfyom: async ({}, use) => {
+  dfyom: async ({}, use, testInfo) => {
     const dataDir = await realpath(await mkdtemp(join(tmpdir(), 'dfyom-e2e-')))
     const { app, rendererErrors } = await launchApp(dataDir)
     try {
       await use({ app, dataDir, rendererErrors })
     } finally {
+      const failed = testInfo.status !== testInfo.expectedStatus
+      // A trace survives only while the app runs: a test that already closed it has none.
+      if (TRACE && failed && app.windows().length > 0) {
+        const path = testInfo.outputPath('trace.zip')
+        const stopped = await app
+          .context()
+          .tracing.stop({ path })
+          .then(() => true)
+          .catch(() => false)
+        if (stopped)
+          testInfo.attachments.push({ name: 'trace', path, contentType: 'application/zip' })
+      }
+      if (failed) {
+        // the app's logs (main, workers, machine host) next to the trace, before the folder goes
+        await cp(join(dataDir, 'logs'), testInfo.outputPath('logs'), { recursive: true }).catch(
+          () => undefined,
+        )
+      }
       await app.close()
       await rm(dataDir, { recursive: true, force: true })
     }

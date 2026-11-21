@@ -28,3 +28,32 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+
+  # Playwright-for-Electron tests of the built app: docs/conventions/testing.md#ci-e2e-job
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      # Electron downloads its binary on first use into ~/.cache/electron.
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/electron
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+      # `npm run e2e` builds (electron-vite) and runs Playwright under a virtual display, larger
+      # than xvfb's default 1280×1024 so the 1440 × 900 window fits and new windows cascade.
+      - run: xvfb-run -a --server-args="-screen 0 1920x1080x24" npm run e2e
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-e2e
+          path: |
+            node_modules/.cache/playwright
+            playwright-report
+          retention-days: 7
+          if-no-files-found: ignore

@@ -9,5 +9,6 @@ export default defineConfig({
   workers: 1,
   timeout: 60_000,
   forbidOnly: !!process.env['CI'],
-  reporter: process.env['CI'] ? 'github' : 'list',
+  // CI also writes the HTML report (playwright-report/), uploaded with the traces when the job fails.
+  reporter: process.env['CI'] ? [['github'], ['html', { open: 'never' }]] : 'list',
 })
