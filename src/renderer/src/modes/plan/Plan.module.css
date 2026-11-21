@@ -396,3 +396,62 @@
 .statusIcon[data-error] {
   color: var(--danger);
 }
+
+/* "Show calculation" under the feeds fields (v0.2, ui.md#plan-mode-task-37: Calculation) */
+.calc {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+}
+
+.calcBody {
+  display: grid;
+  gap: var(--space-3);
+  justify-self: stretch;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.calcList {
+  display: grid;
+  gap: var(--space-0-5);
+  margin: 0;
+}
+
+.calcRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+}
+
+.calcRow dt {
+  color: var(--text-muted);
+}
+
+.calcRow dd {
+  margin: 0;
+  text-align: end;
+}
+
+.calcField {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.calcValue {
+  margin: 0;
+}
+
+.steps {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding-left: var(--space-4);
+}
+
+.formula {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}

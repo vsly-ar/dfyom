@@ -52,6 +52,7 @@ describe('plan commands: registry', () => {
       'plan.list',
       'plan.get',
       'plan.operation.list',
+      'plan.operation.feeds.get',
       'plan.stale.list',
       'plan.tool.suggest',
       'plan.warning.list',

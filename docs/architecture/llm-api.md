@@ -124,6 +124,7 @@ Every tool call goes through `atBoundary` with `EntryPoint { kind: 'agent', name
 
 - Errors are **tool execution errors** (`isError: true`), never JSON-RPC errors, so the model sees `code`, `issues` with `params` and frames and can self-correct ([app-error.md](../conventions/error-handling/app-error.md#serialization)). `retryable` comes from `ERROR_CODES`. JSON-RPC errors are only for protocol faults (unknown tool name, malformed request) – an unknown tool cannot be a known command, since the list equals the registry.
 - `command.conflict` text says to re-query and retry ([commands.md](commands.md#stale-writes)); `permission.denied` names the command and source kind.
+- **Explanations are data:** the calculator's derivation (formula, inputs and result per step) comes back verbatim, from `feedsSpeeds.suggest` outside a plan and `plan.operation.feeds.get` for a plan operation (with the values at use), so an agent can explain a number the same way the inspector's "Show calculation" does ([plan-v0.1.md](../modes/plan-v0.1.md#feeds-explanation-v02)).
 - Results are `ResultWire` DTOs; no truncation in v0.1 (meshes are not exposed, [workers.md](workers.md#jobs-for-agents)).
 
 ### Jobs

@@ -15,6 +15,7 @@ import { TEST_DATA } from './data.fixture'
 import { availablePower, rctf } from './formulas'
 import {
   checkCutting,
+  cuttingAt,
   machineLimits,
   noDataFor,
   suggestCutting,
@@ -579,5 +580,56 @@ describe('checkCutting', () => {
 
   it('no data → no warnings', () => {
     expect(check({ materialClass: 'other' }, { n: 1000, vf: 1, ap: 1 })).toEqual([])
+  })
+})
+
+describe('cuttingAt', () => {
+  const input = (over: Partial<CuttingInput> = {}): CuttingInput => ({
+    tool: tool(),
+    materialClass: 'aluminum',
+    engagement: SLOT,
+    machine: None,
+    ...over,
+  })
+
+  it('slot: vc from n and D, chip load without thinning, Q = D·ap·vf, Pc = Q·u/60000', () => {
+    const d = cuttingAt(input(), { n: 10_000, vf: 1000, ap: 2 }, TEST_DATA).unwrap()
+    expect(d.dCalc).toBe(6)
+    expect(d.vc).toBeCloseTo((Math.PI * 6 * 10_000) / 1000, 9)
+    expect(d.chipThinning).toBe(1)
+    expect(d.fz).toBeCloseTo(1000 / (10_000 * 2), 12)
+    expect(d.Q.unwrap()).toBeCloseTo(6 * 2 * 1000, 9)
+    expect(d.Pc.unwrap()).toBeCloseTo((12_000 * 0.6) / 60_000, 12)
+    expect(d.spindleLoad).toEqual(None) // no machine power
+  })
+
+  it('facing at the used stepover credits chip thinning; spindle load against Pavail', () => {
+    const machine = limits({ power: Some(1000), maxSpeed: 20_000 })
+    const d = cuttingAt(
+      input({ engagement: { kind: 'stepover', ae: 4.5 }, machine }),
+      { n: 10_000, vf: 1000, ap: 1, ae: 0.6 },
+      TEST_DATA,
+    ).unwrap()
+    expect(d.chipThinning).toBeCloseTo(rctf(0.6, 6), 12)
+    expect(d.fz).toBeCloseTo(1000 / (10_000 * 2 * rctf(0.6, 6)), 12)
+    const pc = (0.6 * 1 * 1000 * 0.6) / 60_000
+    expect(d.spindleLoad.unwrap()).toBeCloseTo((pc / availablePower(1000, 10_000, 20_000)) * 100, 9)
+  })
+
+  it('drill: fn = vf / n, no power values', () => {
+    const drill = tool({ type: 'drill', diameter: len('5'), pointAngle: deg('118') })
+    const d = cuttingAt(
+      input({ tool: drill, engagement: { kind: 'drill' } }),
+      { n: 2000, vf: 200 },
+      TEST_DATA,
+    ).unwrap()
+    expect(d.fz).toBeCloseTo(0.1, 12)
+    expect(d.Q).toEqual(None)
+    expect(d.Pc).toEqual(None)
+  })
+
+  it('no data or no speed: None', () => {
+    expect(cuttingAt(input({ materialClass: 'other' }), { n: 1, vf: 1 }, TEST_DATA)).toEqual(None)
+    expect(cuttingAt(input(), { n: 0, vf: 1 }, TEST_DATA)).toEqual(None)
   })
 })

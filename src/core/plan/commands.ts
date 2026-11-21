@@ -50,6 +50,9 @@ import {
   type PlanOperationDTO,
 } from './plan.dto'
 import { designChanged, hasPlanEdits, planStale } from './snapshot'
+import { StepSchema, stepToDTO } from '../feeds-speeds/commands'
+import { DEFAULT_RIGIDITY } from '../feeds-speeds/data'
+import { machineLimits } from '../feeds-speeds/suggest'
 import { checkAllowed, nextStatus } from './status'
 import { applyStrategyArgs, StrategyArgSchema, strategyIssues, resolveStrategy } from './strategy'
 import { suggestTools } from './suggest'
@@ -1056,6 +1059,119 @@ const operationList = defineQuery({
   },
 })
 
+const Num = z.number()
+const FeedExplained = z
+  .object({
+    value: Num,
+    unit: z.string(),
+    source: z.enum(['override', 'preset', 'calculator', 'strategy']),
+    derivation: z.array(StepSchema).nullable().describe('calculator source only'),
+  })
+  .nullable()
+const operationFeedsGet = defineQuery({
+  name: 'plan.operation.feeds.get',
+  summary:
+    "Explain a plan operation's feeds and speeds: calculator inputs, each field's source and derivation (formulas), and surface speed, chip thinning, power and spindle load at the values used.",
+  args: z.object(PlanOpArg),
+  result: z.object({
+    auto: AutoDTO,
+    inputs: z
+      .object({
+        materialClass: z.string(),
+        toolMaterial: z.string().nullable(),
+        diameter: Num.describe('mm'),
+        fluteCount: Num,
+        cornerRadius: Num.describe('Effective corner radius, mm'),
+        engagement: z.object({
+          kind: z.enum(['slot', 'stepover', 'helix', 'drill']),
+          ae: Num.optional().describe('Stepover, mm'),
+          ap: Num.optional().describe('Helix pitch, mm'),
+        }),
+        rigidity: z.string().describe('Machine rigidity (default without a machine)'),
+        spindlePower: Num.nullable().describe('W; null: power check skipped'),
+      })
+      .nullable()
+      .describe('null without a tool'),
+    fields: z.object(
+      Object.fromEntries(FEED_FIELDS.map((f) => [f, FeedExplained])) as Record<
+        FeedField,
+        typeof FeedExplained
+      >,
+    ),
+    used: z
+      .object({
+        dCalc: Num.describe('mm'),
+        vc: Num.describe('Surface speed, m/min'),
+        fz: Num.describe('Chip load after chip thinning, mm (drills: mm/rev)'),
+        chipThinning: Num,
+        Q: Num.nullable().describe('mm³/min'),
+        Pc: Num.nullable().describe('kW'),
+        spindleLoad: Num.nullable().describe('%'),
+      })
+      .nullable()
+      .describe('At the values used; null without calculator data'),
+  }),
+  run(doc, args) {
+    const where = 'plan.operation.feeds.get'
+    const loaded = loadPlan(doc, args.planId, where)
+    if (loaded.isErr()) return loaded
+    const plan = loaded.unwrap()
+    const index = findPlanOperation(plan, args.planOperationId, where)
+    if (index.isErr()) return index
+    const e = evaluateOperation(plan, plan.setup.operations[index.unwrap()]!)
+    const auto = e.feeds.mapOr<z.output<typeof AutoDTO>>(e.autoRequested ? 'on' : 'off', (r) =>
+      typeof r.auto === 'string' ? r.auto : { unavailable: r.auto.unavailable },
+    )
+    const machine = plan.machine.map(machineLimits)
+    const inputs = e.tool.isNone()
+      ? null
+      : (() => {
+          const t = e.tool.unwrap()
+          const g = e.feeds.unwrap().engagement
+          return {
+            materialClass: plan.stock.material.class,
+            toolMaterial: t.toolMaterial.mapOr<string | null>(null, (m) => m),
+            diameter: t.diameter.canonical,
+            fluteCount: t.fluteCount.canonical,
+            cornerRadius: t.effectiveCornerRadius.toNumber(),
+            engagement:
+              g.kind === 'stepover'
+                ? { kind: g.kind, ae: g.ae }
+                : g.kind === 'helix'
+                  ? { kind: g.kind, ap: g.ap }
+                  : { kind: g.kind },
+            rigidity: machine.mapOr<string>(DEFAULT_RIGIDITY, (m) => m.rigidity),
+            spindlePower: machine.andThen((m) => m.power).unwrapOr(null as unknown as number),
+          }
+        })()
+    const fields = Object.fromEntries(
+      FEED_FIELDS.map((f) => [
+        f,
+        e.feeds.mapOr(null, (r) =>
+          r.fields[f].mapOr(null, (v) => ({
+            value: v.value,
+            unit: v.unit,
+            source: v.source,
+            derivation: v.derivation === undefined ? null : v.derivation.map(stepToDTO),
+          })),
+        ),
+      ]),
+    ) as Record<FeedField, z.output<typeof FeedExplained>>
+    const used = e.feeds
+      .andThen((r) => r.used)
+      .mapOr(null, (d) => ({
+        dCalc: d.dCalc,
+        vc: d.vc,
+        fz: d.fz,
+        chipThinning: d.chipThinning,
+        Q: d.Q.unwrapOr(null as unknown as number),
+        Pc: d.Pc.unwrapOr(null as unknown as number),
+        spindleLoad: d.spindleLoad.unwrapOr(null as unknown as number),
+      }))
+    return Ok({ auto, inputs, fields, used })
+  },
+})
+
 const staleList = defineQuery({
   name: 'plan.stale.list',
   summary:
@@ -1200,6 +1316,7 @@ export const PLAN_QUERIES: readonly QueryDef[] = [
   planList,
   planGet,
   operationList,
+  operationFeedsGet,
   staleList,
   toolSuggest,
   warningList,

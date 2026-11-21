@@ -16,8 +16,10 @@ import type { CuttingPreset, Tool } from '../library/tool'
 import type { Quantity } from '../quantity/quantity'
 import {
   checkCutting,
+  cuttingAt,
   noDataFor,
   suggestCutting,
+  type CuttingDisplay,
   type CuttingInput,
   type CuttingSuggestion,
   type CuttingWarning,
@@ -99,6 +101,11 @@ export interface ResolvedFeeds {
   readonly locks: Readonly<Record<FeedField, LockState>>
   /** Derived, never stored: feed ÷ (rpm × flutes), mm. */
   readonly chipLoad: Option<number>
+  /**
+   * Derived at the values that will be used (entered ones included): surface speed, chip load
+   * after chip thinning, Q, Pc, spindle load. None without calculator data or speed and feed.
+   */
+  readonly used: Option<CuttingDisplay>
   /** Calculator warnings, inactive locks and the final-value check. */
   readonly warnings: readonly FeedWarning[]
 }
@@ -385,6 +392,7 @@ export function resolveFeeds(i: FeedsInput, data?: readonly MaterialRow[]): Reso
 
   // Final-value check on the values that will be used, entered ones included.
   const value = (f: FeedField) => fields[f].map((r) => r.value)
+  let used: Option<CuttingDisplay> = None
   if (noData.isNone() && value('spindleSpeed').isSome() && value('feedRate').isSome()) {
     const ap = value('stepdown')
     const ae = value('stepover')
@@ -397,6 +405,7 @@ export function resolveFeeds(i: FeedsInput, data?: readonly MaterialRow[]): Reso
     const checked =
       data === undefined ? checkCutting(base, values) : checkCutting(base, values, data)
     warnings.push(...checked)
+    used = data === undefined ? cuttingAt(base, values) : cuttingAt(base, values, data)
   }
 
   const flutes = i.tool.fluteCount.canonical
@@ -413,6 +422,7 @@ export function resolveFeeds(i: FeedsInput, data?: readonly MaterialRow[]): Reso
     recommended,
     locks,
     chipLoad,
+    used,
     warnings,
   }
 }

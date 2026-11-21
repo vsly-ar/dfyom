@@ -6,6 +6,7 @@
 import type { OperationKind } from '../../../../core/design/part.dto'
 import type { PlanWarning } from '../../../../core/plan/checks'
 import type { FeedField, PlanDTO, PlanStatus } from '../../../../core/plan/plan.dto'
+import { STRATEGY_KEYS, type StrategyKey } from '../../../../core/plan/strategy'
 import { ALLOWED, TRANSITIONS } from '../../../../core/plan/status'
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
 import { Quantity } from '../../../../core/quantity/quantity'
@@ -116,6 +117,8 @@ export interface PlanOperationView {
   readonly stickout: number | null
   readonly feeds: Readonly<Record<FeedField, FeedView | null>>
   readonly chipLoad: number | null
+  /** Resolved strategy parameters (mm, °), defaults included. */
+  readonly strategy: Readonly<Record<string, number | string>>
 }
 
 /** `plan.stale.list`. */
@@ -240,4 +243,66 @@ export function feedFields(kind: OperationKind): readonly FeedField[] {
   return kind === 'drilling'
     ? ['spindleSpeed', 'feedRate', 'plungeRate']
     : ['spindleSpeed', 'feedRate', 'plungeRate', 'stepdown', 'stepover']
+}
+
+// ── strategy ──────────────────────────────────────────────────────────────────────────────
+
+/** Strategy parameters entered as an angle (°); the other quantities are lengths. */
+export const ANGLE_KEYS: ReadonlySet<StrategyKey> = new Set(['rampAngle'])
+/** Strategy parameters that are a choice of a few values. */
+export const CHOICE_KEYS: ReadonlySet<StrategyKey> = new Set([
+  'direction',
+  'pattern',
+  'axis',
+  'entry',
+  'cycle',
+])
+
+/** A resolved strategy length (mm) or angle (°) as a quantity in the project units. */
+export function strategyQuantity(
+  key: StrategyKey,
+  value: number,
+  units: UnitSystem,
+): Quantity | undefined {
+  const angle = ANGLE_KEYS.has(key)
+  const unit: UnitId = angle ? 'deg' : units === 'mm' ? 'mm' : 'in'
+  const text = angle
+    ? `${trim(value, 2)}°`
+    : `${trim(units === 'mm' ? value : value / 25.4, units === 'mm' ? 3 : 4)} ${unit}`
+  const q = Quantity.parse(text, { kind: angle ? 'angle' : 'length', defaultUnit: unit })
+  return q.isOk() ? q.unwrap() : undefined
+}
+
+/**
+ * The strategy parameters the inspector shows for a kind, in table order, given the resolved
+ * values (docs/conventions/ui.md#plan-mode-task-37: only parameters that apply). `through`: a
+ * drilling through the stock (breakthrough applies).
+ */
+export function shownStrategyKeys(
+  kind: OperationKind,
+  resolved: Readonly<Record<string, number | string>>,
+  through: boolean,
+): StrategyKey[] {
+  const entry = resolved['entry']
+  const cycle = resolved['cycle']
+  const applies = (key: StrategyKey): boolean => {
+    switch (kind) {
+      case 'pocket':
+        if (key === 'helixDiameter') return entry === 'helix'
+        if (key === 'rampAngle') return entry !== 'plunge'
+        if (key === 'finishStepdown') return Number(resolved['finishAllowance'] ?? 0) > 0
+        return true
+      case 'profile':
+        return key !== 'rampAngle' || entry === 'ramp'
+      case 'drilling':
+        if (key === 'peckDepth') return cycle === 'peck' || cycle === 'chipBreak'
+        if (key === 'chipBreakBack') return cycle === 'chipBreak'
+        if (key === 'helixPitch' || key === 'rampAngle') return cycle === 'helix'
+        if (key === 'breakthrough') return through
+        return true
+      case 'facing':
+        return true
+    }
+  }
+  return STRATEGY_KEYS[kind].filter(applies)
 }
