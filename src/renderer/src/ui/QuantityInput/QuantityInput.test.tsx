@@ -475,6 +475,7 @@ function GestureHarness({
   onCancel,
   late = false,
   cancelFails = false,
+  rejects = false,
   withCancel = true,
   ...props
 }: Partial<QuantityInputBaseProps> & {
@@ -482,6 +483,8 @@ function GestureHarness({
   onCancel?: (gesture: string) => void
   late?: boolean
   cancelFails?: boolean
+  /** Every step's command fails: nothing lands, so the gesture has no entry to undo. */
+  rejects?: boolean
   withCancel?: boolean
 }): React.JSX.Element {
   const [value, setValue] = useState<Quantity | undefined>(q('3.00'))
@@ -499,6 +502,7 @@ function GestureHarness({
       {...props}
       onCommit={(v, gesture) => {
         onCommit(v, gesture)
+        if (rejects) return
         if (gesture !== undefined && before?.gesture !== gesture) setBefore({ gesture, value })
         land(v)
       }}
@@ -579,6 +583,26 @@ describe('QuantityInput: adjust popover (live gesture)', () => {
     await user.keyboard('{Escape}')
     expect(await screen.findByText(/Escape could not revert it/)).toBeInTheDocument()
     expect(input).toHaveValue('4.00')
+  })
+
+  it('Escape after steps that all failed restores the opening value without a "Kept" note', async () => {
+    const { user, input, open, steps, onCancel } = gestureSetup({ rejects: true })
+    await open()
+    await user.click(screen.getByRole('button', { name: 'Increase' }))
+    expect(steps()).toHaveLength(1)
+    await user.keyboard('{Escape}')
+    expect(onCancel).toHaveBeenCalled()
+    await waitFor(() => expect(input).toHaveValue('3.00'))
+    await act(() => Promise.resolve())
+    expect(screen.queryByText(/Escape could not revert it/)).toBeNull()
+  })
+
+  it('the popover hint names only keys that act in the popover', async () => {
+    const { open } = gestureSetup()
+    await open()
+    const dialog = screen.getByRole('dialog', { name: 'Adjust Width' })
+    expect(dialog).toHaveTextContent('Esc reverts')
+    expect(dialog).not.toHaveTextContent('↑')
   })
 
   it('without onCancelGesture, Escape commits the opening value again in the same gesture', async () => {

@@ -16,6 +16,7 @@ Status: draft · Principle: [principles.md §2](../principles.md#2-testability)
 ## Commands
 
 - `npm test` – all unit tests once; `npm run test:watch` – watch mode; `npm run perf` – performance budgets (e.g. [geometry](../architecture/geometry.md#performance-budgets-v01)).
+- **Timeouts.** Vitest's 5 s default stays global. A genuinely heavy test (seeded property loops, heap checks, long multi-step UI flows, spawned processes) sets `{ timeout }` on its `it` or `describe` with a comment saying why; parallel `npm test` load can make a 1–2 s test take several times as long. Never raise a timeout to hide a slow or racy test.
 - `npm run lint` – ESLint incl. layer import boundaries ([ADR 0015](../decisions/0015-eslint-with-typescript6-api.md)); `npm run lint:fix` applies safe fixes.
 - `npm run format` / `npm run format:check` – Prettier (owns formatting; ESLint does not).
 - `npm run check` – `typecheck` + `lint` + `format:check` + `test`. Run before committing.

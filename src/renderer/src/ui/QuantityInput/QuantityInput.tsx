@@ -147,6 +147,8 @@ interface AdjustSession {
   readonly id: string
   /** The text when the popover opened: Escape restores it. */
   readonly opening: string
+  /** The stored value when the popover opened: unchanged after a failed cancel = nothing landed. */
+  readonly openingStored: string
   /** A step was committed with this gesture. */
   stepped: boolean
   /** The popover is closing by Escape (cancel, not keep). */
@@ -203,7 +205,7 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
   const [adjustOpen, setAdjustOpen] = useState(false)
   /** An Escape cancel is in flight (its revert has not arrived yet). */
   const [cancelling, setCancelling] = useState(false)
-  /** "Kept the adjusted value" after an Escape that could not revert. */
+  /** "Kept the adjusted value" after an Escape that could not revert a step that landed. */
   const [kept, setKept] = useState(false)
   const [list, setList] = useState<ListState | null>(null)
 
@@ -369,7 +371,13 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
   }
 
   function openAdjust(): void {
-    session.current = { id: newGestureId(), opening: text, stepped: false, escaped: false }
+    session.current = {
+      id: newGestureId(),
+      opening: text,
+      openingStored: stored,
+      stepped: false,
+      escaped: false,
+    }
     setKept(false)
     setAdjustOpen(true)
   }
@@ -403,8 +411,16 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
     void onCancelGesture(s.id).then((reverted) => {
       setCancelling(false)
       if (reverted) return
+      // nothing to undo and the stored value never moved: every step failed (the command was
+      // rejected), so the value already is the one from before the popover – no "Kept" note
+      const nothingLanded = storedRef.current === s.openingStored
+      if (nothingLanded && s.opening !== s.openingStored) {
+        setDraft(s.opening)
+        setCommitted(null)
+        return
+      }
       revert()
-      setKept(true)
+      if (!nothingLanded) setKept(true)
     })
   }
 
@@ -575,7 +591,7 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
         title={
           <span className={styles['title']}>
             {quantityText.adjust(label)}
-            <span>{quantityText.stepKeys()}</span>
+            <span>{quantityText.adjustHint()}</span>
           </span>
         }
         open={adjustOpen}

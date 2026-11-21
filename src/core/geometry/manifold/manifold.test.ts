@@ -115,38 +115,44 @@ describe('withSolids', () => {
     expect(kernel.liveObjects()).toBe(0)
   })
 
-  it('frees the library object of a rejected mesh (heap stays flat)', async () => {
-    const hosted = expectOk(await loadManifold(nodeManifoldSource()))
-    const ring = offsetLoft(
-      { kind: 'rectangle', length: 1, width: 1, cornerRadius: 0 },
-      [
-        { offset: 0, z: 1 },
-        { offset: 0, z: 0 },
-      ],
-      { band: () => 1, top: 2, bottom: 3 },
-    ).unwrap()
-    const torn: LabelledMesh = {
-      positions: ring.positions,
-      triangles: ring.triangles.slice(3),
-      faces: ring.faces.slice(1),
-    }
-    const reject = () => hosted.withSolids((s) => s.fromMesh(torn, expectOk(s.reserveOriginalId())))
-    expectErrCode(reject(), 'geometry.evaluation')
-    for (let i = 0; i < 50; i++) reject()
-    const warm = hosted.heapBytes().unwrap()
-    // heapBytes is the linear memory size, which only moves when the free heap (≈ 7 MB of the
-    // initial 16 MB) runs out: ~190 B leaked per call before the fix, so 40 000 calls are needed
-    // to show a leak. A plain check per call (≈ 14 µs; expect() costs about as much again) keeps
-    // the loop well under a second.
-    let wrong = 0
-    for (let i = 0; i < 40000; i++) {
-      const r = reject()
-      if (!r.isErr() || r.unwrapErr().code !== 'geometry.evaluation') wrong++
-    }
-    expect(wrong).toBe(0)
-    expect(hosted.heapBytes().unwrap() - warm).toBeLessThan(2 ** 20)
-    expect(hosted.liveObjects()).toBe(0)
-  })
+  // 40 000 WASM calls: ~1 s alone, several under a parallel `npm test` (docs/conventions/testing.md#commands)
+  it(
+    'frees the library object of a rejected mesh (heap stays flat)',
+    { timeout: 20_000 },
+    async () => {
+      const hosted = expectOk(await loadManifold(nodeManifoldSource()))
+      const ring = offsetLoft(
+        { kind: 'rectangle', length: 1, width: 1, cornerRadius: 0 },
+        [
+          { offset: 0, z: 1 },
+          { offset: 0, z: 0 },
+        ],
+        { band: () => 1, top: 2, bottom: 3 },
+      ).unwrap()
+      const torn: LabelledMesh = {
+        positions: ring.positions,
+        triangles: ring.triangles.slice(3),
+        faces: ring.faces.slice(1),
+      }
+      const reject = () =>
+        hosted.withSolids((s) => s.fromMesh(torn, expectOk(s.reserveOriginalId())))
+      expectErrCode(reject(), 'geometry.evaluation')
+      for (let i = 0; i < 50; i++) reject()
+      const warm = hosted.heapBytes().unwrap()
+      // heapBytes is the linear memory size, which only moves when the free heap (≈ 7 MB of the
+      // initial 16 MB) runs out: ~190 B leaked per call before the fix, so 40 000 calls are needed
+      // to show a leak. A plain check per call (≈ 14 µs; expect() costs about as much again) keeps
+      // the loop well under a second.
+      let wrong = 0
+      for (let i = 0; i < 40000; i++) {
+        const r = reject()
+        if (!r.isErr() || r.unwrapErr().code !== 'geometry.evaluation') wrong++
+      }
+      expect(wrong).toBe(0)
+      expect(hosted.heapBytes().unwrap() - warm).toBeLessThan(2 ** 20)
+      expect(hosted.liveObjects()).toBe(0)
+    },
+  )
 
   it('rejects a solid used outside its arena', () => {
     const leaked = expectOk(

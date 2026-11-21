@@ -1231,7 +1231,7 @@ function openStepper(f, pen) {
   const unit = $('.qi .u', f)?.textContent || '';
   const s = document.createElement('div');
   s.className = 'stepper'; s.setAttribute('role', 'dialog'); s.setAttribute('aria-label', 'Adjust ' + f.dataset.name);
-  s.innerHTML = `<div class="ttl">Adjust ${f.dataset.name}<span>↑ ↓ · ⇧ ×10</span></div>
+  s.innerHTML = `<div class="ttl">Adjust ${f.dataset.name}<span>Esc reverts</span></div>
     <div class="seg" role="group" aria-label="Step"><span class="thumb"></span>${steps.map(st => `<button type="button" aria-pressed="${st === cur}" data-st="${st}">${st.replace(/^0\./, '.')}</button>`).join('')}</div>
     <div class="adj"><button type="button" class="btn" data-d="-1" aria-label="Decrease">−</button><div class="v"><span>${fieldVal(f).toFixed(+(f.dataset.dec || 2))}</span><small>${unit}</small></div><button type="button" class="btn" data-d="1" aria-label="Increase">+</button></div>
     ${f.dataset.rec ? `<div class="rec"><span>Recommended <b>${f.dataset.recText}</b></span><button type="button" class="btn" data-size="sm" data-variant="primary" data-apply><svg class="i" viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7"/></svg>Use ${f.dataset.rec} ${unit}</button></div>` : ''}`;
