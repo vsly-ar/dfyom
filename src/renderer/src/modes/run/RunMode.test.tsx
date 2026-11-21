@@ -114,6 +114,12 @@ async function renderRun() {
 
 const machineGroup = () => screen.queryByRole('group', { name: 'Machine' })
 
+/** Presses Tab until `target` has the focus (the dialog traps it, so Tab wraps); fails if never. */
+async function tabTo(t: Awaited<ReturnType<typeof renderRun>>, target: HTMLElement) {
+  for (let i = 0; i < 30 && document.activeElement !== target; i++) await t.user.tab()
+  expect(target).toHaveFocus()
+}
+
 async function connectAndHome(t: Awaited<ReturnType<typeof renderRun>>) {
   await t.user.click(within(t.nav()).getByRole('button', { name: 'Connect to virtual machine' }))
   await screen.findByRole('group', { name: 'Machine' })
@@ -252,6 +258,63 @@ describe('Run mode', () => {
     expect(within(machineGroup()!).getByText('Alarm 2: soft limit')).toBeInTheDocument()
     await t.user.click(within(dialog).getByRole('button', { name: 'Close' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
+
+  it('every run dialog carries its own Stop, reachable by keyboard while the dialog is modal', async () => {
+    const t = await renderRun()
+    await connectAndHome(t)
+
+    // pre-flight: Stop leads the footer; with a jog under way it cancels the jog
+    await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
+    const inspector = screen.getByRole('complementary', { name: 'Inspector' })
+    await t.user.click(within(inspector).getByRole('button', { name: 'Start run' }))
+    const preflight = screen.getByRole('dialog', { name: 'Start run?' })
+    expect(within(preflight).getByRole('button', { name: 'Start run' })).toHaveFocus()
+    t.machine.push({ state: 'Jog' })
+    await tabTo(t, within(preflight).getByRole('button', { name: 'Stop' }))
+    await t.user.keyboard('{Enter}')
+    expect(t.callsOf('run.machine.jogCancel')).toHaveLength(1)
+    await expectNoAxeViolations()
+    await t.user.click(within(preflight).getByRole('button', { name: 'Cancel' }))
+    t.machine.push({ state: 'Idle' })
+
+    // program pause: Later has the first focus (never Stop or Continue); Stop aborts the run
+    t.machine.push({ state: 'Hold:0', ...t.machine.job('programPause', { pause: 1 }) })
+    const pause = await screen.findByRole('dialog', { name: /Program pause/ })
+    expect(within(pause).getByRole('button', { name: 'Later' })).toHaveFocus()
+    await tabTo(t, within(pause).getByRole('button', { name: 'Stop' }))
+    await t.user.keyboard('{Enter}')
+    expect(t.callsOf('job.abort')).toEqual([{ jobId: 'run-1' }])
+    await expectNoAxeViolations()
+
+    // tool change: the same Stop, pressed with Space
+    t.machine.push({
+      state: 'Idle',
+      ...t.machine.job('toolChange', { toolChange: { n: 2, name: 'Drill 6' } }),
+    })
+    const change = await screen.findByRole('dialog', { name: 'Tool change 2' })
+    await tabTo(t, within(change).getByRole('button', { name: 'Stop' }))
+    await t.user.keyboard(' ')
+    expect(t.callsOf('job.abort')).toEqual([{ jobId: 'run-1' }, { jobId: 'run-1' }])
+  })
+
+  it('the failure dialog carries Stop too and focuses Close first', async () => {
+    const t = await renderRun()
+    await connectAndHome(t)
+    t.machine.push({ state: 'Run', ...t.machine.job('streaming') })
+    t.machine.outcome = {
+      ok: false,
+      error: { code: 'machine.error', message: 'error:20', issues: [], frames: [] },
+    }
+    t.machine.push({ state: 'Idle' })
+    const dialog = await screen.findByRole(
+      'dialog',
+      { name: /stopped with an error/ },
+      { timeout: 2000 },
+    )
+    expect(within(dialog).getByRole('button', { name: 'Close' })).toHaveFocus()
+    await tabTo(t, within(dialog).getByRole('button', { name: 'Stop' }))
+    await expectNoAxeViolations()
   })
 
   it('stop without a run cancels a jog', async () => {

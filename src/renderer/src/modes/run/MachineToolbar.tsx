@@ -6,10 +6,11 @@
 import { Pause, Play } from 'lucide-react'
 import { useEffect } from 'react'
 import { runMessages } from '../../messages/run'
-import { Button, MachineStateBadge, StopControl, Tooltip } from '../../ui'
+import { Button, MachineStateBadge, Tooltip } from '../../ui'
 import { activeJob, machineView } from './machine-state'
 import { useRun, useRunStore } from './run-store'
 import { RunDialogs } from './RunDialogs'
+import { RunStop } from './RunStop'
 import styles from './Run.module.css'
 
 const m = runMessages.controls
@@ -68,7 +69,7 @@ export function MachineToolbar(): React.JSX.Element {
               {m.resume}
             </Button>
           ) : null}
-          <StopControl label={m.stop} onStop={() => void store.getState().stop()} />
+          <RunStop />
         </div>
       ) : null}
       <RunDialogs />

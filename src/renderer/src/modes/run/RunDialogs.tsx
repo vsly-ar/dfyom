@@ -1,6 +1,7 @@
 // Run dialogs, mounted with the machine toolbar so they work in every mode: the pre-flight dialog
 // before every run, the tool-change and program-pause dialogs (dismissable to the inspector), and
-// the blocking failure dialog; tool-change waits and alarms are announced assertively.
+// the blocking failure dialog; tool-change waits and alarms are announced assertively. Each
+// carries its own Stop (RunDialogFooter), reachable by keyboard and screen readers while modal.
 // Doc: docs/conventions/ui.md#confirmations, #run-mode-safety-ui
 import { Play } from 'lucide-react'
 import { useId } from 'react'
@@ -14,6 +15,7 @@ import { activeJob, formatLength, runGates } from './machine-state'
 import { planRunInfo } from './plan-info'
 import { useRun, useRunStore, waitKey } from './run-store'
 import { WorkZeroButtons } from './RunNavigator'
+import { RunDialogFooter } from './RunStop'
 import styles from './Run.module.css'
 
 export function RunDialogs(): React.JSX.Element {
@@ -49,9 +51,9 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
       title={m.title}
       description={m.description}
       footer={
-        <>
+        <RunDialogFooter>
           <DialogClose>
-            <Button>{m.cancel}</Button>
+            <Button {...(gate === null ? {} : { autoFocus: true })}>{m.cancel}</Button>
           </DialogClose>
           <Button
             variant="primary"
@@ -62,7 +64,7 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
           >
             {m.start}
           </Button>
-        </>
+        </RunDialogFooter>
       }
     >
       <dl className={styles['facts']}>
@@ -129,7 +131,7 @@ function WaitDialog({ units }: { units: ProjectDoc['unitSystem'] }): React.JSX.E
         title={m.title(tc.n)}
         description={m.description(tc.name)}
         footer={
-          <>
+          <RunDialogFooter>
             <Button variant="ghost" onClick={later}>
               {m.later}
             </Button>
@@ -141,7 +143,7 @@ function WaitDialog({ units }: { units: ProjectDoc['unitSystem'] }): React.JSX.E
             >
               {m.continue}
             </Button>
-          </>
+          </RunDialogFooter>
         }
       >
         <ol className={styles['steps']}>
@@ -177,8 +179,9 @@ function WaitDialog({ units }: { units: ProjectDoc['unitSystem'] }): React.JSX.E
       title={m.title(job.pause ?? 0)}
       description={m.description(message)}
       footer={
-        <>
-          <Button variant="ghost" onClick={later}>
+        <RunDialogFooter>
+          {/* the safe first focus: neither Stop nor Continue (no single-key continue) */}
+          <Button variant="ghost" autoFocus onClick={later}>
             {m.later}
           </Button>
           <Button
@@ -189,7 +192,7 @@ function WaitDialog({ units }: { units: ProjectDoc['unitSystem'] }): React.JSX.E
           >
             {m.continue}
           </Button>
-        </>
+        </RunDialogFooter>
       }
     />
   )
@@ -234,9 +237,11 @@ function FailureDialog(): React.JSX.Element | null {
       }}
       title={alarm ? m.alarmTitle(data.code) : m.title}
       footer={
-        <DialogClose>
-          <Button>{m.close}</Button>
-        </DialogClose>
+        <RunDialogFooter>
+          <DialogClose>
+            <Button autoFocus>{m.close}</Button>
+          </DialogClose>
+        </RunDialogFooter>
       }
     >
       <div role="alert" className={styles['failure']}>
