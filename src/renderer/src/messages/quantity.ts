@@ -82,6 +82,8 @@ export const quantityText = {
 
   fix: (source: string): string => `Use ${source}`,
   adjust: (label: string): string => `Adjust ${label}`,
+  adjustKept: (): string =>
+    'Kept the adjusted value: the project changed after it, so Escape could not revert it.',
   pick: (label: string): string => `Pick ${label} in the viewport`,
   references: (label: string): string => `References for ${label}`,
   step: (): string => 'Step',

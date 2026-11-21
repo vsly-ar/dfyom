@@ -15,7 +15,7 @@ The code is the contract; each file's header links back here. Adapters: IPC, MCP
 | `src/core/commands/registry.ts`         | Registries of both scopes ([llm-api.md](llm-api.md#app-scope-and-project-scope)): `PROJECT_*`, `APP_SCOPE_*`, `APP_HOOKS`; name checks |
 | `src/core/commands/dispatcher.ts`       | Per-project queue and pipeline ([below](#dispatcher-pipeline)); `dispatch`, `query`                                                    |
 | `src/core/commands/args.ts`             | `parseArgs`: args shape check that rejects unknown keys ([pipeline](#dispatcher-pipeline))                                             |
-| `src/core/commands/history.ts`          | Immer setup, patch execution, undo/redo stacks; `history.undo`/`history.redo`                                                          |
+| `src/core/commands/history.ts`          | Immer setup, patch execution, undo/redo stacks, gesture merging; `history.undo`/`history.redo`                                         |
 | `src/core/commands/action-log.ts`       | Event types, ring buffer, subscriptions                                                                                                |
 | `src/core/commands/jobs.ts`             | `JobHandle`, progress, pause/resume/abort, `WorkerPort` (+ in-process stub); `job.*` control commands                                  |
 | `src/core/commands/permission.ts`       | `PermissionPolicy` port and the default policy                                                                                         |
@@ -99,7 +99,7 @@ Rules:
 
 ## Dispatcher pipeline
 
-`dispatch(name, rawArgs, source, opts?: { expectedRevision?: number }): AsyncAppResult<CommandOutcome>` – adapters call it inside `atBoundary`.
+`dispatch(name, rawArgs, source, opts?: { expectedRevision?: number; gesture?: string }): AsyncAppResult<CommandOutcome>` – adapters call it inside `atBoundary`. `gesture` marks a step of a live edit ([Gestures](#gestures-live-edits)); only the UI adapter passes it.
 
 | #   | Step                                                                                                   | Failure              |
 | --- | ------------------------------------------------------------------------------------------------------ | -------------------- |
@@ -113,7 +113,7 @@ Rules:
 
 **Unknown keys** in args are rejected for every command and query (also by `runCommand`): Zod strips them, so a mistyped optional key (`dept` for `depth`) would silently take the default. Each key of the raw args must survive in the parsed value; one issue per unknown key, path = the key's path (`['shape', 'radius']`), rule `unrecognized_keys`. Reported once the shape check passes.
 
-Execute `document`: `createDraft(doc)` → `run` → the [document hooks](#document-hooks) on the same draft → on `Err` (of the handler or a hook) drop the draft (state, history and revision unchanged: **no partial patches**) → on `Ok` `finishDraft` with patches; empty patches = no-op, no history entry; otherwise commit, `revision++`, push history entry, clear redo stack, publish patches.
+Execute `document`: `createDraft(doc)` → `run` → the [document hooks](#document-hooks) on the same draft → on `Err` (of the handler or a hook) drop the draft (state, history and revision unchanged: **no partial patches**) → on `Ok` `finishDraft` with patches; empty patches = no-op, no history entry; otherwise commit, `revision++`, push history entry (or merge it into the top one, [Gestures](#gestures-live-edits)), clear redo stack, publish patches.
 
 `CommandOutcome` is `{ value, revision }`: the handler's result and the revision after the command; a job's `value` is `{ jobId }`. Steps 1–2 fail before queueing but are still logged (step 7). A rejected or failing command never blocks the queue.
 
@@ -141,13 +141,24 @@ A **document hook** (`DocumentHook` in `define.ts`) runs after every successful 
 ## Undo / redo
 
 - One **linear** history per project, shared by all sources: anyone undoes the top entry, whoever made it; the `undo`/`redo` event and the entry show whose step it was. `history.undo` / `history.redo` are commands (logged, agent-callable) that create no entry of their own.
-- Entry: `{ seq, command, args, source, title, patches, inversePatches, revisionBefore, revisionAfter, at }`.
+- Entry: `{ seq, command, args, source, title, patches, inversePatches, revisionBefore, revisionAfter, at, gesture? }`.
 - Undo applies the top entry's `inversePatches`; redo re-applies `patches` – handlers are never re-run, so generated ids and timestamps stay stable.
-- Any new document commit clears the redo stack. No coalescing: gestures already produce one command each.
+- Any new document commit clears the redo stack. Most gestures produce one command each; a live edit that commits several steps is merged into one entry ([Gestures](#gestures-live-edits)).
 - `effect`/`job` commands never touch history. Opening or resetting a project starts an empty history.
 - Undo history is kept **in memory only** in v0.1, capped by count/size (defaults: 500 entries, 50 M chars of JSON counting args, patches and inverse patches; oldest dropped first, the newest entry is always kept); it is lost on close or crash.
 - The entry `seq` is the action-log `seq` of the command event that created it.
 - Undo/redo with nothing to do returns `Ok({ entrySeq: null })` and is logged as a plain `command` event; a real step returns `{ entrySeq }` and is logged as an `undo`/`redo` event.
+
+### Gestures (live edits)
+
+A **gesture** is one user interaction that commits several steps live, e.g. the −/+ buttons of a field's adjust popover ([ui.md](../conventions/ui.md#quantity-and-expression-input)): the model, viewport, warnings and plans follow every step, yet the session is one undo step. Decided 2026-11-21 (D9).
+
+- The UI gives each gesture a unique id and dispatches every step with `opts.gesture`. The id lives only in the UI: the dispatcher keeps no gesture state beyond the history entry, so a gesture "ends" simply by no longer being used.
+- **Every step is a full commit:** `revision++`, one action-log `command` event (carrying `gesture`), patches published, [hooks](#document-hooks) run. Evaluation, replicas and agents follow each step.
+- **Merging:** a commit is merged into the top undo entry when that entry has the same `gesture`, the same source and the same command, and nothing was committed since (`entry.revisionAfter === revision`; any other commit, undo or redo – from any source – ends the merge). Merging appends the step's patches, prepends its inverse patches, takes the step's `args`, `title`, `revisionAfter` and `at`, and keeps the entry's `seq` and `revisionBefore`. Otherwise the step pushes a new entry as usual.
+- The redo stack is cleared by every step. The size accounting adds each step's size to the merged entry (args counted per step, an over-estimate), and the cap applies to it like to any entry.
+- **Cancel:** `history.undo { gesture }` undoes the top entry only if it belongs to that gesture and to the calling source, and **discards** it (it never reaches the redo stack, so a cancelled preview cannot be redone). Logged as an `undo` event like any undo. If the top entry is anything else (someone committed after the gesture, or it was undone), it does nothing and returns `{ entrySeq: null }`; the UI keeps the value and says so, it never forces the revert.
+- Stale writes are unchanged: steps and cancels follow the [rule](#stale-writes) of their source (UI sources are never rejected).
 
 ## Action log
 
@@ -169,6 +180,7 @@ type ActionEvent = EventBase &
         args: unknown
         outcome: ResultWire<unknown>
         patches?: readonly Patch[]
+        gesture?: string // a live-edit step (Gestures above)
       }
     | { type: 'undo' | 'redo'; entrySeq: number; patches?: readonly Patch[] } // patches applied (undo: inverse)
     | {

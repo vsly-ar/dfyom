@@ -126,6 +126,8 @@ export interface HistoryEntry {
   readonly revisionBefore: number
   readonly revisionAfter: number
   readonly at: string
+  /** Live-edit gesture whose steps were merged into this entry (commands.md#gestures-live-edits). */
+  readonly gesture?: string
 }
 
 export interface HistoryLimits {
@@ -168,6 +170,32 @@ export class History {
     this.totalSize += size
     this.redoStack = []
     this.trim()
+  }
+
+  /**
+   * A gesture step merged into the top entry (`mergeTop`'s caller checked it may merge): patches
+   * appended, inverse patches prepended; args, title, revisionAfter and at from the step; seq and
+   * revisionBefore kept. Clears redo like `push`; the step's size is added to the entry.
+   */
+  mergeTop(step: HistoryEntry, size: number): void {
+    const top = this.undoStack.pop()
+    if (top === undefined) return this.push(step, size)
+    const e = top.entry
+    const merged: HistoryEntry = {
+      ...step,
+      seq: e.seq,
+      revisionBefore: e.revisionBefore,
+      patches: freeze([...e.patches, ...step.patches], true),
+      inversePatches: freeze([...step.inversePatches, ...e.inversePatches], true),
+    }
+    this.totalSize -= top.size
+    this.push(merged, top.size + size)
+  }
+
+  /** Drops the top undo entry without keeping it for redo (a cancelled gesture). */
+  discardTop(): void {
+    const top = this.undoStack.pop()
+    if (top !== undefined) this.totalSize -= top.size
   }
 
   private trim(): void {
@@ -224,15 +252,25 @@ const HistoryStepResult = z
   })
   .describe('History step result')
 const NoArgs = z.object({})
+const UndoArgs = z.object({
+  gesture: z
+    .string()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe(
+      "UI only: cancel this live-edit gesture – undo only the caller's top entry of it and discard it (no redo)",
+    ),
+})
 type HistoryStep = BuiltinCommand<typeof NoArgs, z.output<typeof HistoryStepResult>>
 
-export const historyUndo: HistoryStep = {
+export const historyUndo: BuiltinCommand<typeof UndoArgs, z.output<typeof HistoryStepResult>> = {
   kind: 'builtin',
   name: 'history.undo',
   summary: 'Undo the most recent document change, whoever made it.',
   title: () => 'Undo',
   machine: false,
-  args: NoArgs,
+  args: UndoArgs,
   result: HistoryStepResult,
 }
 

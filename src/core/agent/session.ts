@@ -72,6 +72,11 @@ export interface CallOptions {
   readonly signal?: AbortSignal
   /** Progress of the job a `job.wait` waits for (dispatcher-throttled ticks). */
   readonly onProgress?: (p: JobProgress) => void
+  /**
+   * A step of a live-edit gesture (UI adapter only; docs/architecture/commands.md#gestures-live-edits):
+   * passed to a project-scope command's dispatch.
+   */
+  readonly gesture?: string
 }
 
 export interface SessionOptions {
@@ -341,12 +346,10 @@ export class AgentSession {
     const split = splitExpectedRevision(rawArgs)
     if (split.isErr()) return split
     const { args, expectedRevision } = split.unwrap()
-    return d.dispatch(
-      name,
-      args,
-      this.source,
-      expectedRevision === undefined ? {} : { expectedRevision },
-    )
+    return d.dispatch(name, args, this.source, {
+      ...(expectedRevision === undefined ? {} : { expectedRevision }),
+      ...(opts.gesture === undefined ? {} : { gesture: opts.gesture }),
+    })
   }
 
   /** open/create/restore bind the session; closing the bound project unbinds it. */

@@ -56,6 +56,11 @@ import type { Registry } from './registry'
 export interface DispatchOptions {
   /** If given, must equal the current revision (else `command.conflict`). */
   readonly expectedRevision?: number
+  /**
+   * A step of a live-edit gesture (UI only): merged into the top undo entry when it is the same
+   * gesture, source and command with nothing committed since (commands.md#gestures-live-edits).
+   */
+  readonly gesture?: string
 }
 
 /** Ok result of a dispatch. A job's `value` is `{ jobId }`. */
@@ -345,7 +350,7 @@ class ProjectDispatcher implements Dispatcher {
     }
     switch (def.kind) {
       case 'document':
-        return this.runDocument(def, args, ctx)
+        return this.runDocument(def, args, ctx, opts.gesture)
       case 'effect': {
         const ran = await tryAsync(
           () => def.run(this.current, args, ctx),
@@ -399,7 +404,12 @@ class ProjectDispatcher implements Dispatcher {
     return new Date(this.clock.now()).toISOString()
   }
 
-  private runDocument(def: DocumentCommand, args: unknown, ctx: CommandContext) {
+  private runDocument(
+    def: DocumentCommand,
+    args: unknown,
+    ctx: CommandContext,
+    gesture: string | undefined,
+  ) {
     const ran = executeDocumentCommand(this.current, def, args, ctx, this.registry.hooks)
     if (ran.result.isErr())
       return this.logged(def.name, args, ctx.source, Err(ran.result.unwrapErr()))
@@ -419,6 +429,7 @@ class ProjectDispatcher implements Dispatcher {
     const { title, size } = prepared.unwrap()
     const source = freeze({ kind: ctx.source.kind, id: ctx.source.id }, true)
     const revisionBefore = this.rev
+    const merges = gesture !== undefined && this.continuesGesture(gesture, source, def.name)
     this.commit(ran.next, source)
     const outcome = Ok({ value, revision: this.rev })
     const event = this.emit(source, {
@@ -427,23 +438,36 @@ class ProjectDispatcher implements Dispatcher {
       args: summarizeArgs(args),
       outcome: toWire(Ok(value)),
       patches: ran.patches,
+      ...(gesture === undefined ? {} : { gesture }),
     })
-    this.undo.push(
-      {
-        seq: event.seq,
-        command: def.name,
-        args,
-        source,
-        title,
-        patches: ran.patches,
-        inversePatches: ran.inversePatches,
-        revisionBefore,
-        revisionAfter: this.rev,
-        at: event.at,
-      },
-      size,
-    )
+    const entry: HistoryEntry = {
+      seq: event.seq,
+      command: def.name,
+      args,
+      source,
+      title,
+      patches: ran.patches,
+      inversePatches: ran.inversePatches,
+      revisionBefore,
+      revisionAfter: this.rev,
+      at: event.at,
+      ...(gesture === undefined ? {} : { gesture }),
+    }
+    if (merges) this.undo.mergeTop(entry, size)
+    else this.undo.push(entry, size)
     return outcome
+  }
+
+  /** The top undo entry is this gesture's, by this source and command, with nothing committed since. */
+  private continuesGesture(gesture: string, source: Source, command: string): boolean {
+    const top = this.undo.peekUndo()
+    return (
+      top !== undefined &&
+      top.gesture === gesture &&
+      top.command === command &&
+      sourceKey(top.source) === sourceKey(source) &&
+      top.revisionAfter === this.rev
+    )
   }
 
   private commit(next: ProjectDoc, source: Source): void {
@@ -459,7 +483,14 @@ class ProjectDispatcher implements Dispatcher {
   ): AppResult<CommandOutcome> {
     if (def.name === 'history.undo' || def.name === 'history.redo') {
       const isUndo = def.name === 'history.undo'
-      const entry = isUndo ? this.undo.peekUndo() : this.undo.peekRedo()
+      const gesture = isUndo ? (args as { gesture?: string }).gesture : undefined
+      const top = isUndo ? this.undo.peekUndo() : this.undo.peekRedo()
+      // a gesture cancel only reverts the caller's own top entry of that gesture
+      const entry =
+        gesture === undefined ||
+        (top?.gesture === gesture && sourceKey(top.source) === sourceKey(source))
+          ? top
+          : undefined
       if (entry === undefined)
         return this.logged(
           def.name,
@@ -471,7 +502,8 @@ class ProjectDispatcher implements Dispatcher {
       const applied = applyDocPatches(this.current, patches)
       if (applied.isErr()) return this.logged(def.name, args, source, Err(applied.unwrapErr()))
       this.commit(applied.unwrap(), source)
-      if (isUndo) this.undo.markUndone()
+      if (gesture !== undefined) this.undo.discardTop()
+      else if (isUndo) this.undo.markUndone()
       else this.undo.markRedone()
       this.emit(source, { type: isUndo ? 'undo' : 'redo', entrySeq: entry.seq, patches })
       return Ok({ value: { entrySeq: entry.seq }, revision: this.rev })

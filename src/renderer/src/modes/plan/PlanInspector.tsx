@@ -48,6 +48,7 @@ import {
 import { FeedsCalculation } from './FeedsCalculation'
 import { fieldMessages } from './fieldMessages'
 import { NewToolDialog } from './NewToolDialog'
+import { useCancelGesture } from '../../shell/hooks'
 import { usePlanCommand, usePlanData } from './plan-store'
 import styles from './Plan.module.css'
 import { shownStrategyFields, StrategyGroup } from './StrategyGroup'
@@ -263,6 +264,7 @@ function OperationInspector({
   findings: readonly PlanWarning[]
 }): React.JSX.Element {
   const call = usePlanCommand()
+  const cancelGesture = useCancelGesture()
   const [failed, setFailed] = useState<AppErrorData | undefined>(undefined)
   const suggestions = useSuggestions(plan.id, op.id)
   const readOnly = !editable(plan)
@@ -270,11 +272,17 @@ function OperationInspector({
   const kind = view?.kind
   const fields = kind === undefined ? [] : feedFields(kind)
 
-  const send = async (cmd: string, args: object) => {
-    const r = await call(cmd, { planId: plan.id, planOperationId: op.id, ...args })
+  const send = async (cmd: string, args: object, gesture?: string) => {
+    const r = await call(
+      cmd,
+      { planId: plan.id, planOperationId: op.id, ...args },
+      gesture === undefined ? undefined : { gesture },
+    )
     setFailed(r.ok ? undefined : r.error)
   }
-  const update = (args: object) => void send('plan.operation.update', args)
+  /** `gesture` for a live adjust-popover step (one undo step per popover session). */
+  const update = (args: object, gesture?: string) =>
+    void send('plan.operation.update', args, gesture)
 
   // tool picker: the ranked suggestions, plus the current tool when it is not among them
   const current = view?.tool ?? null
@@ -401,7 +409,8 @@ function OperationInspector({
                     ]
                   : []),
               ]}
-              onCommit={(q) => update({ stickout: q.source })}
+              onCommit={(q, gesture) => update({ stickout: q.source }, gesture)}
+              onCancelGesture={cancelGesture}
             />
           ) : null}
           {current !== null ? (
@@ -440,6 +449,7 @@ function OperationInspector({
             readOnly={readOnly}
             findings={findings}
             onUpdate={update}
+            onCancelGesture={cancelGesture}
           />
         ) : null}
 
@@ -455,7 +465,8 @@ function OperationInspector({
                 units={units}
                 readOnly={readOnly}
                 findings={findings}
-                onSet={(source) => update({ overrides: { [f]: source } })}
+                onSet={(source, gesture) => update({ overrides: { [f]: source } }, gesture)}
+                onCancelGesture={cancelGesture}
                 onLock={(locked) => update({ locks: { [f]: locked } })}
               />
             ))}
@@ -496,6 +507,7 @@ function FeedField({
   findings,
   onSet,
   onLock,
+  onCancelGesture,
 }: {
   field: FeedField
   op: PlanOperationDTO
@@ -503,8 +515,9 @@ function FeedField({
   units: UnitSystem
   readOnly: boolean
   findings: readonly PlanWarning[]
-  onSet: (source: string | null) => void
+  onSet: (source: string | null, gesture?: string) => void
   onLock: (locked: boolean) => void
+  onCancelGesture: (gesture: string) => Promise<boolean>
 }): React.JSX.Element {
   const override = op.overrides[field]
   const resolved = view.feeds[field]
@@ -580,7 +593,8 @@ function FeedField({
             },
           }
         : {})}
-      onCommit={(q) => onSet(q.source)}
+      onCommit={(q, gesture) => onSet(q.source, gesture)}
+      onCancelGesture={onCancelGesture}
     />
   )
 }

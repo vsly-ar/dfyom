@@ -3,8 +3,10 @@
 // when the text alone does not show it,
 // shows errors in place (underline, catalogue message, verified fix), commits a valid value on
 // Enter/blur (one `onCommit` = one command = one undo step), reverts on Escape and never commits
-// an invalid value. An optional field (`optional`) commits an emptied field as unset. Steppers (↑/↓, adjust popover), reference autocomplete and the pick button
-// hook (pick mode itself belongs to the viewport) live here too.
+// an invalid value. An optional field (`optional`) commits an emptied field as unset. Steppers
+// (↑/↓, adjust popover), reference autocomplete and the pick button hook (pick mode itself belongs
+// to the viewport) live here too. The adjust popover is a live gesture: each step commits with the
+// session's gesture id (one undo step per session), Escape cancels it, a click outside keeps it.
 // Doc: docs/conventions/ui.md#quantity-and-expression-input, #field, #selection-and-picking;
 // grammar and errors: docs/architecture/quantities.md
 import { Check, Crosshair } from 'lucide-react'
@@ -73,13 +75,17 @@ export interface ReferenceOption {
 export type QuantityCommitProps =
   | {
       optional?: false
-      /** A valid, changed value on Enter, blur, a fix or the adjust popover: dispatch one command. */
-      onCommit: (value: Quantity) => void
+      /**
+       * A valid, changed value on Enter, blur, a fix or a step of the adjust popover: dispatch one
+       * command. `gesture` is set for adjust-popover steps: pass it to the dispatch so the session
+       * stays one undo step (docs/architecture/commands.md#gestures-live-edits).
+       */
+      onCommit: (value: Quantity, gesture?: string) => void
     }
   | {
       optional: true
       /** As above; `undefined` when a stored value was emptied (unset). */
-      onCommit: (value: Quantity | undefined) => void
+      onCommit: (value: Quantity | undefined, gesture?: string) => void
     }
 
 export type QuantityInputProps = QuantityInputBaseProps & QuantityCommitProps
@@ -107,6 +113,13 @@ export interface QuantityInputBaseProps {
   /** Recommended value: the pencil turns amber and the popover offers "Use …". */
   recommended?: { source: string; text: ReactNode }
   /**
+   * Escape in the adjust popover after live steps: revert the gesture's commits (a command caller
+   * dispatches `history.undo { gesture }`). Resolves false when they were not reverted (the field
+   * keeps the value and says so). Without it the field commits the opening value again with the
+   * same gesture (local form state).
+   */
+  onCancelGesture?: (gesture: string) => Promise<boolean>
+  /**
    * Pick button (and Alt+P): enter pick mode for a surface reference. Call `insert` with the
    * picked reference; it goes in at the caret (replacing the selection) and focus returns.
    */
@@ -129,6 +142,24 @@ interface ListState {
   active: number
 }
 
+/** One adjust-popover session (a live gesture, ui.md#quantity-and-expression-input). */
+interface AdjustSession {
+  readonly id: string
+  /** The text when the popover opened: Escape restores it. */
+  readonly opening: string
+  /** A step was committed with this gesture. */
+  stepped: boolean
+  /** The popover is closing by Escape (cancel, not keep). */
+  escaped: boolean
+}
+
+let gestureCounter = 0
+/** Unique per window (and across reloads): the dispatcher merges by gesture id and source. */
+export function newGestureId(): string {
+  gestureCounter += 1
+  return `adjust-${Date.now().toString(36)}-${gestureCounter}`
+}
+
 const MAX_OPTIONS = 50
 const TEN = Rational.int(10n)
 const TENTH = stepRational('0.1')
@@ -146,6 +177,7 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
     step = '1',
     inheritedTolerance,
     recommended,
+    onCancelGesture,
     onPick,
     picking = false,
     illustration,
@@ -169,6 +201,10 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
   const [echoText, setEchoText] = useState(stored)
   const [stepSize, setStepSize] = useState<StepSize>(step)
   const [adjustOpen, setAdjustOpen] = useState(false)
+  /** An Escape cancel is in flight (its revert has not arrived yet). */
+  const [cancelling, setCancelling] = useState(false)
+  /** "Kept the adjusted value" after an Escape that could not revert. */
+  const [kept, setKept] = useState(false)
   const [list, setList] = useState<ListState | null>(null)
 
   const inputRef = useRef<HTMLInputElement>(null)
@@ -176,12 +212,15 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
   const pendingCaret = useRef<number | null>(null)
   const lastSelection = useRef<[number, number] | null>(null)
   const storedRef = useRef(stored)
+  const session = useRef<AdjustSession | null>(null)
 
   // The stored value changed (commit landed, undo, agent edit): follow it unless the user is
-  // typing something else.
+  // typing something else. During an adjust session (and its cancel) earlier steps land while a
+  // later one is shown: wait for the last committed value instead of flicking back.
   if (stored !== seen) {
     setSeen(stored)
-    if (draft !== null && (draft === committed || !focused)) {
+    const stepsInFlight = (adjustOpen || cancelling) && committed !== null && stored !== committed
+    if (draft !== null && !stepsInFlight && (draft === committed || !focused)) {
       setDraft(null)
       setCommitted(null)
       setErrorsShown(false)
@@ -231,6 +270,7 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
 
   function edit(next: string, caret: number | null): void {
     setDraft(next)
+    setKept(false)
     setErrorsShown(false)
     updateList(next, caret)
   }
@@ -255,10 +295,15 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
     setList(null)
   }
 
-  /** Commit `source` if it reads and differs from what is stored; false if invalid. */
-  function commitSource(source: string): boolean {
+  /**
+   * Commit `source` if it reads and differs from what is stored; false if invalid. `gesture`:
+   * a step of the adjust session with that id.
+   */
+  function commitSource(source: string, gesture?: string): boolean {
     if (readOnly) return true
-    if (value !== undefined && source === stored) {
+    // a step back to the stored value while a later step is still landing must still commit
+    const landing = gesture !== undefined && committed !== null && committed !== stored
+    if (value !== undefined && source === stored && !landing) {
       setDraft(null)
       setCommitted(null)
       setErrorsShown(false)
@@ -274,7 +319,8 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
       setCommitted(source)
       setErrorsShown(false)
       setEchoText(source)
-      if (props.optional) props.onCommit(undefined)
+      if (props.optional) props.onCommit(undefined, gesture)
+      markStepped(gesture)
       return true
     }
     const r = readSource(source, ctx, resolver, validate)
@@ -287,8 +333,14 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
     setCommitted(source)
     setErrorsShown(false)
     setEchoText(source)
-    props.onCommit(r.unwrap().quantity)
+    setKept(false)
+    props.onCommit(r.unwrap().quantity, gesture)
+    markStepped(gesture)
     return true
+  }
+
+  function markStepped(gesture: string | undefined): void {
+    if (gesture !== undefined && session.current?.id === gesture) session.current.stepped = true
   }
 
   const commit = (): boolean => (draft === null ? true : commitSource(draft))
@@ -302,15 +354,58 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
 
   const steppable = stepSource(text, ctx, Rational.ONE, prec).isSome()
 
-  function stepBy(direction: 1 | -1, multiplier: Rational = Rational.ONE): boolean {
+  /** ↑/↓ in the field change the text only; a popover step (`live`) commits it with the gesture. */
+  function stepBy(direction: 1 | -1, multiplier: Rational = Rational.ONE, live = false): boolean {
     const delta = stepRational(stepSize)
       .mul(multiplier)
       .mul(Rational.int(BigInt(direction)))
     const next = stepSource(text, ctx, delta, prec)
     if (next.isNone()) return false
+    const gesture = live ? session.current?.id : undefined
+    if (gesture !== undefined) return commitSource(next.unwrap(), gesture)
     setDraft(next.unwrap())
     setErrorsShown(false)
     return true
+  }
+
+  function openAdjust(): void {
+    session.current = { id: newGestureId(), opening: text, stepped: false, escaped: false }
+    setKept(false)
+    setAdjustOpen(true)
+  }
+
+  /**
+   * The popover closed. A click outside (or "Use …") keeps the live value; Escape cancels the
+   * session: nothing committed → just revert the text; else the caller undoes the gesture
+   * (`onCancelGesture`) or, without one, the opening value is committed again.
+   */
+  function closeAdjust(commitPending = true): void {
+    setAdjustOpen(false)
+    const s = session.current
+    session.current = null
+    if (s === null || !s.escaped) {
+      if (commitPending) commit()
+      return
+    }
+    if (!s.stepped) {
+      revert()
+      return
+    }
+    if (onCancelGesture === undefined) {
+      if (s.opening !== text) commitSource(s.opening, s.id)
+      return
+    }
+    // show the opening value at once; the revert lands with the undo's patches
+    setDraft(s.opening)
+    setCommitted(s.opening)
+    setErrorsShown(false)
+    setCancelling(true)
+    void onCancelGesture(s.id).then((reverted) => {
+      setCancelling(false)
+      if (reverted) return
+      revert()
+      setKept(true)
+    })
   }
 
   function insert(reference: string): void {
@@ -484,9 +579,9 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
           </span>
         }
         open={adjustOpen}
-        onOpenChange={(open) => {
-          setAdjustOpen(open)
-          if (!open) commit()
+        onOpenChange={(open) => (open ? openAdjust() : closeAdjust())}
+        onEscapeKeyDown={() => {
+          if (session.current) session.current.escaped = true
         }}
         content={
           <>
@@ -501,7 +596,7 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
               <Button
                 aria-label={quantityText.decrease()}
                 disabled={!steppable}
-                onClick={() => stepBy(-1)}
+                onClick={() => stepBy(-1, Rational.ONE, true)}
               >
                 −
               </Button>
@@ -512,7 +607,7 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
               <Button
                 aria-label={quantityText.increase()}
                 disabled={!steppable}
-                onClick={() => stepBy(1)}
+                onClick={() => stepBy(1, Rational.ONE, true)}
               >
                 +
               </Button>
@@ -529,8 +624,8 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
                   icon={<Check aria-hidden="true" />}
                   disabled={!fixAvailable}
                   onClick={() => {
-                    commitSource(recommended.source)
-                    setAdjustOpen(false)
+                    commitSource(recommended.source, session.current?.id)
+                    closeAdjust(false)
                   }}
                 >
                   {quantityText.fix(recommended.source)}
@@ -563,7 +658,19 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
       illustration={illustration}
       {...(lock ? { lock } : {})}
       {...(echo !== undefined ? { echo } : {})}
-      messages={errorMessage ? [...messages, errorMessage] : messages}
+      messages={[
+        ...messages,
+        ...(errorMessage ? [errorMessage] : []),
+        ...(kept
+          ? [
+              {
+                id: 'quantity.adjustKept',
+                severity: 'info' as const,
+                text: quantityText.adjustKept(),
+              },
+            ]
+          : []),
+      ]}
       readOnly={readOnly}
       className={className}
     >

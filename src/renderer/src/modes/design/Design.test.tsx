@@ -10,6 +10,7 @@ import type { Dispatcher } from '../../../../core/commands/dispatcher'
 import type { PartDTO } from '../../../../core/design/part.dto'
 import { App } from '../../App'
 import { createShell, ShellProvider } from '../../shell/ShellContext'
+import { expectOk } from '../../../../shared/testing/result'
 import { createFakeBridge, designDispatcher, type FakeBridge } from '../../test/bridge'
 import { expectNoAxeViolations, findToastAction, renderUi } from '../../test/render'
 
@@ -130,6 +131,50 @@ describe('design mode', () => {
     expect(row).toHaveAttribute('aria-pressed', 'false')
     expect(within(inspector()).getByRole('heading', { name: 'Part' })).toBeInTheDocument()
     await expectNoAxeViolations()
+  })
+
+  it('adjust popover steps update the document live as one undo step; Escape reverts it', async () => {
+    const { user, part, bridge, d } = await renderDesign()
+    await user.click(await within(navigator()).findByRole('button', { name: 'Add pocket' }))
+    await within(navigator()).findByRole('button', { name: /^Pocket 1/ })
+    const depthOf = () => (part().operations[0] as { depth: { source: string } }).depth.source
+    const start = depthOf()
+    const entries = d.history.undoable.length
+    const adjust = () => within(inspector()).getByRole('button', { name: 'Adjust Depth' })
+
+    await user.click(adjust())
+    await screen.findByRole('dialog', { name: 'Adjust Depth' })
+    await user.click(screen.getByRole('button', { name: 'Increase' }))
+    await waitFor(() => expect(depthOf()).not.toBe(start)) // live: the document follows each step
+    const first = depthOf()
+    await user.click(screen.getByRole('button', { name: 'Increase' }))
+    await waitFor(() => expect(depthOf()).not.toBe(first))
+    const steps = bridge.calls.filter((c) => c.name === 'design.pocket.update')
+    expect(steps).toHaveLength(2)
+    expect(steps[0]!.gesture).toEqual(expect.any(String))
+    expect(steps[1]!.gesture).toBe(steps[0]!.gesture)
+    expect(d.history.undoable).toHaveLength(entries + 1) // one undo step for the session
+
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(depthOf()).toBe(start))
+    expect(d.history.undoable).toHaveLength(entries)
+    expect(d.history.redoable).toHaveLength(0) // a cancelled preview cannot be redone
+    expect(bridge.calls.filter((c) => c.name === 'history.undo')).toEqual([
+      { name: 'history.undo', args: { gesture: steps[0]!.gesture } },
+    ])
+
+    // a click outside keeps the value: one undo step reverts the whole session
+    await user.click(adjust())
+    await screen.findByRole('dialog', { name: 'Adjust Depth' })
+    await user.click(screen.getByRole('button', { name: 'Increase' }))
+    await user.click(screen.getByRole('button', { name: 'Increase' }))
+    await user.click(within(inspector()).getByRole('heading', { name: 'Pocket 1' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    const kept = depthOf()
+    expect(kept).not.toBe(start)
+    expect(d.history.undoable).toHaveLength(entries + 1)
+    expectOk(await d.dispatch('history.undo', {}, { kind: 'ui', id: 'test' }))
+    expect(depthOf()).toBe(start)
   })
 
   it('shows a command error at its field and keeps the document unchanged', async () => {

@@ -111,6 +111,15 @@ export type CallReply =
   | { readonly ok: true; readonly value: unknown; readonly revision: number }
   | { readonly ok: false; readonly error: AppErrorData; readonly retryable: boolean }
 
+/** Options of `call`. */
+export interface CallOpts {
+  /**
+   * A step of a live-edit gesture (the field's adjust popover): merged into one undo step with the
+   * earlier steps of the same id (docs/architecture/commands.md#gestures-live-edits).
+   */
+  readonly gesture?: string
+}
+
 /** An attached agent session, for the "agent connected" indicator. */
 export interface AgentSessionInfo {
   /** `agent:http-2` */
@@ -183,7 +192,7 @@ export interface PreloadApi {
    * One command, query or session tool by registry name, through this window's session (the same
    * routing and results as MCP: `project.open` binds the window, project tools act on it).
    */
-  call(name: string, args?: unknown): Promise<CallReply>
+  call(name: string, args?: unknown, opts?: CallOpts): Promise<CallReply>
   readonly project: {
     /** Action-log events of the window's bound project, patches included (replica). */
     onEvent(listener: (event: ActionEvent) => void): () => void

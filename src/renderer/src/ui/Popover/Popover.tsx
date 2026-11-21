@@ -19,6 +19,8 @@ export interface PopoverProps {
   open?: boolean
   defaultOpen?: boolean
   onOpenChange?: (open: boolean) => void
+  /** Escape is closing it (called before `onOpenChange(false)`), e.g. to cancel instead of keep. */
+  onEscapeKeyDown?: () => void
   /** Non-modal by default: the rest of the window stays usable. */
   modal?: boolean
 }
@@ -33,6 +35,7 @@ export function Popover({
   open,
   defaultOpen,
   onOpenChange,
+  onEscapeKeyDown,
   modal = false,
 }: PopoverProps): React.JSX.Element {
   const container = usePortalContainer()
@@ -52,6 +55,7 @@ export function Popover({
           align={align}
           sideOffset={4}
           collisionPadding={8}
+          {...(onEscapeKeyDown ? { onEscapeKeyDown: () => onEscapeKeyDown() } : {})}
         >
           {title ? <div className={styles['title']}>{title}</div> : null}
           {content}

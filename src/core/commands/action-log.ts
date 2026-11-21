@@ -26,6 +26,8 @@ export type ActionEventBody =
       readonly args: unknown
       readonly outcome: ResultWire<unknown>
       readonly patches?: readonly Patch[]
+      /** A step of a live-edit gesture (commands.md#gestures-live-edits). */
+      readonly gesture?: string
     }
   | {
       readonly type: 'undo' | 'redo'

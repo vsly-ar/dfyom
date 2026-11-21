@@ -51,7 +51,7 @@ const api: PreloadApi = {
   run: {
     onStatus: (listener) => on<RunStatus>(RUN_STATUS_IPC_CHANNEL, listener),
   },
-  call: (name, args) => ipcRenderer.invoke(IPC.call, name, args) as Promise<CallReply>,
+  call: (name, args, opts) => ipcRenderer.invoke(IPC.call, name, args, opts) as Promise<CallReply>,
   project: {
     onEvent: (listener) => on<ActionEvent>(IPC.projectEvent, listener),
     snapshot: () => ipcRenderer.invoke(IPC.projectSnapshot) as Promise<ProjectSnapshot | null>,
