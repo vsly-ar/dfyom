@@ -123,6 +123,17 @@
   background: var(--bg-active);
 }
 
+/* disabled with a reason (aria-disabled, still focusable): no hover, dimmed */
+.lock[aria-disabled='true'] {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.lock[aria-disabled='true']:hover {
+  background: transparent;
+  color: var(--text-faint);
+}
+
 .quick {
   margin-left: 2px;
 }

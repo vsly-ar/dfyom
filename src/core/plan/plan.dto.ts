@@ -63,7 +63,9 @@ export const OverridesDtoSchema = z
     stepdown: length().optional(),
     stepover: length().optional(),
   })
-  .describe('Per-operation feeds-and-speeds overrides; they win over preset and calculator')
+  .describe(
+    'Per-operation feeds-and-speeds values entered by the user; they win over preset and calculator',
+  )
 export type OverridesDTO = z.output<typeof OverridesDtoSchema>
 
 export const DIRECTIONS = ['climb', 'conventional'] as const
@@ -107,6 +109,14 @@ export const PlanOperationDtoSchema = z.object({
   tool: z.string().min(1).optional().describe("Id of the tool copy in the plan's snapshots"),
   stickout: length().optional().describe("Default: the tool's stickout, else its flute length"),
   presetName: z.string().min(1).max(PRESET_NAME_MAX).optional().describe('Default: by material'),
+  auto: z
+    .literal(true)
+    .optional()
+    .describe('Auto mode chosen: feeds from the calculator (excludes presetName)'),
+  locked: z
+    .array(z.enum(FEED_FIELDS))
+    .optional()
+    .describe('Locked feeds fields (auto mode only): the other recommendations follow them'),
   overrides: OverridesDtoSchema,
   strategy: StrategyDtoSchema,
 })

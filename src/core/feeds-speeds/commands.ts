@@ -15,6 +15,7 @@ import {
   type CuttingSuggestion,
   type DerivationStep,
   type Engagement,
+  type LockedInputs,
   type Suggested,
 } from './suggest'
 
@@ -22,19 +23,26 @@ const mm = () => z.number().positive().finite()
 
 export const EngagementSchema = z
   .discriminatedUnion('kind', [
-    z.object({
-      kind: z.literal('slot'),
-      ap: mm().optional().describe('Stepdown in mm; omit to get a suggestion'),
-    }),
+    z.object({ kind: z.literal('slot') }),
     z.object({
       kind: z.literal('stepover'),
       ae: mm().describe('Stepover (radial engagement) in mm'),
-      ap: mm().optional().describe('Stepdown in mm; omit to get a suggestion'),
     }),
     z.object({ kind: z.literal('helix'), ap: mm().describe('Helix pitch in mm') }),
     z.object({ kind: z.literal('drill') }),
   ])
   .describe('Tool engagement: slot (pocket, profile), stepover (facing), helix, drill')
+
+export const LockedSchema = z
+  .object({
+    spindleSpeed: z.number().positive().finite().optional().describe('rpm'),
+    feedRate: z.number().positive().finite().optional().describe('mm/min'),
+    stepdown: mm().optional().describe('mm (milling, not helix)'),
+    stepover: mm().optional().describe('mm (stepover engagement only)'),
+  })
+  .describe(
+    'Locked values: fixed inputs the other fields are recommended around (docs: Locked inputs)',
+  )
 
 const StepSchema = z.object({
   step: z.string(),
@@ -112,6 +120,15 @@ export function suggestionToDTO(s: CuttingSuggestion): SuggestionResultDTO {
   }
 }
 
+function lockedInputs(l: z.output<typeof LockedSchema>): LockedInputs {
+  return {
+    ...(l.spindleSpeed === undefined ? {} : { n: l.spindleSpeed }),
+    ...(l.feedRate === undefined ? {} : { vf: l.feedRate }),
+    ...(l.stepdown === undefined ? {} : { ap: l.stepdown }),
+    ...(l.stepover === undefined ? {} : { ae: l.stepover }),
+  }
+}
+
 function lookup<K extends 'tool' | 'machine'>(
   library: Library,
   kind: K,
@@ -130,12 +147,13 @@ function lookup<K extends 'tool' | 'machine'>(
 export const feedsSpeedsSuggest = defineQuery({
   name: 'feedsSpeeds.suggest',
   summary:
-    'Suggest spindle speed, feed, plunge rate and stepdown for a library tool in a material class, with the derivation of every number and warnings.',
+    'Suggest spindle speed, feed, plunge rate and stepdown for a library tool in a material class, optionally around locked values, with the derivation of every number and warnings.',
   readsDocument: false,
   args: z.object({
     toolLibraryItemId: ItemIdSchema,
     materialClass: MaterialClassSchema,
     engagement: EngagementSchema,
+    locked: LockedSchema.optional(),
     machineLibraryItemId: ItemIdSchema.optional().describe(
       'Machine for clamps, power check and rigidity; omit for unclamped values',
     ),
@@ -160,6 +178,7 @@ export const feedsSpeedsSuggest = defineQuery({
       materialClass: args.materialClass,
       engagement: args.engagement as Engagement,
       machine: machine.map(machineLimits),
+      locked: lockedInputs(args.locked ?? {}),
     })
     return Ok(suggestionToDTO(s))
   },

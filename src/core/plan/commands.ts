@@ -35,6 +35,7 @@ import type { ParseContext } from '../quantity/parse'
 import { assignTool, createPlan, duplicatePlan, rebuildPlan, type BuildContext } from './build'
 import { PlanWarningSchema, type PlanWarning } from './checks'
 import { evaluateOperation, planFindings } from './evaluate'
+import { feedModeIssues, type LockState } from './feeds'
 import { orderFindings } from './order'
 import { findPlanDTO, findPlanOperation, loadPlan, loadPlanDTO, type LoadedPlan } from './plan'
 import {
@@ -192,6 +193,42 @@ const parseContexts = (units: UnitSystem): Record<FeedField, ParseContext> => ({
   stepdown: fieldContext('length', units),
   stepover: fieldContext('length', units),
 })
+
+/**
+ * A resolved value (canonical) as the text of an entered quantity in the project units, rounded
+ * to the field's display precision (rpm whole, feeds 0.1 mm/min or 0.01 in/min, lengths 0.001 mm
+ * or 0.0001 in): what a lock pins when nothing is entered.
+ */
+function pinnedSource(field: FeedField, value: number, units: UnitSystem): string {
+  const trim = (n: number, d: number) =>
+    n
+      .toFixed(d)
+      .replace(/(\.\d*?)0+$/, '$1')
+      .replace(/\.$/, '')
+  if (field === 'spindleSpeed') return `${trim(value, 0)} rpm`
+  const feed = field === 'feedRate' || field === 'plungeRate'
+  if (units === 'mm') return feed ? `${trim(value, 1)} mm/min` : `${trim(value, 3)} mm`
+  return feed ? `${trim(value / 25.4, 2)} in/min` : `${trim(value / 25.4, 4)} in`
+}
+
+/** `plan.operation.update` lock refusal: model.invariant, rule lockUnavailable (docs: Impossible locks). */
+function lockUnavailable(
+  field: FeedField,
+  reason: string,
+  message: string,
+  where: string,
+): AppResult<never> {
+  return fail('model.invariant', `${field} can't be locked: ${message}`, {
+    issues: [{ path: ['locks', field], rule: 'lockUnavailable', message, params: { reason } }],
+    where,
+  })
+}
+
+function unlock(op: PlanOperationDTO, field: FeedField): void {
+  if (op.locked === undefined) return
+  op.locked = op.locked.filter((f) => f !== field)
+  if (op.locked.length === 0) delete op.locked
+}
 
 // ── plan lifecycle ────────────────────────────────────────────────────────────────────────
 
@@ -542,12 +579,23 @@ const operationUpdate = defineCommand({
   kind: 'document',
   name: 'plan.operation.update',
   summary:
-    'Change preset, stickout, feeds-and-speeds overrides or strategy parameters of a plan operation.',
+    'Change preset or auto mode, stickout, entered feeds-and-speeds values, their locks, or strategy parameters of a plan operation.',
   title: () => 'Update plan operation',
   machine: false,
   args: z.object({
     ...PlanOpArg,
-    presetName: z.string().min(1).nullable().optional().describe('Tool preset; null = default'),
+    presetName: z
+      .string()
+      .min(1)
+      .nullable()
+      .optional()
+      .describe('Tool preset (leaves auto mode, clears locks); null = default'),
+    auto: z
+      .boolean()
+      .optional()
+      .describe(
+        'true: auto mode, feeds from the calculator (clears presetName); false: back to the default (clears locks)',
+      ),
     stickout: Src.nullable().optional().describe("null = the tool's stickout, else flute length"),
     overrides: z
       .object(
@@ -557,7 +605,18 @@ const operationUpdate = defineCommand({
         >,
       )
       .optional()
-      .describe('Feeds-and-speeds overrides as entered; null removes one'),
+      .describe('Feeds-and-speeds values as entered; null removes one (and its lock)'),
+    locks: z
+      .object(
+        Object.fromEntries(FEED_FIELDS.map((f) => [f, z.boolean().optional()])) as Record<
+          FeedField,
+          z.ZodOptional<z.ZodBoolean>
+        >,
+      )
+      .optional()
+      .describe(
+        'Auto mode only. true locks a field (the other recommendations follow it; pins the shown value when none is entered); false unlocks it and keeps the value',
+      ),
     strategy: StrategyArgSchema.optional(),
   }),
   result: Empty,
@@ -574,6 +633,19 @@ const operationUpdate = defineCommand({
     const tool = op.tool === undefined ? undefined : plan.tools.get(op.tool)
     const issues: Issue[] = []
     const parsed: AppResult<unknown>[] = []
+    if (args.auto === true && typeof args.presetName === 'string')
+      return fail('input.malformed', 'auto mode and a cutting preset exclude each other', {
+        issues: [{ path: ['auto'], rule: 'autoAndPreset', message: 'pass auto or presetName' }],
+        where,
+      })
+    if (args.auto === true) {
+      op.auto = true
+      delete op.presetName
+    } else if (args.auto === false) {
+      // leaving auto mode clears the locks; entered values stay
+      delete op.auto
+      delete op.locked
+    }
     if (args.presetName === null) delete op.presetName
     else if (args.presetName !== undefined) {
       if (tool === undefined || !tool.presets.some((p) => p.name === args.presetName))
@@ -582,6 +654,8 @@ const operationUpdate = defineCommand({
           where,
         })
       op.presetName = args.presetName
+      delete op.auto
+      delete op.locked
     }
     if (args.stickout === null) delete op.stickout
     else if (args.stickout !== undefined) {
@@ -607,6 +681,7 @@ const operationUpdate = defineCommand({
       if (src === undefined) continue
       if (src === null) {
         delete op.overrides[field]
+        unlock(op, field)
         continue
       }
       if (kind === 'drilling' && (field === 'stepdown' || field === 'stepover')) {
@@ -666,6 +741,36 @@ const operationUpdate = defineCommand({
       )
     }
     if (issues.length > 0) return invalid(issues, where)
+    if (args.locks !== undefined) {
+      const locks = args.locks
+      for (const f of FEED_FIELDS) if (locks[f] === false) unlock(op, f)
+      for (const f of FEED_FIELDS) {
+        if (locks[f] !== true || op.locked?.includes(f) === true) continue
+        // the lock state of the operation as it is now (earlier locks of this call included)
+        const feeds = evaluateOperation(plan, op).feeds
+        if (feeds.isNone()) return lockUnavailable(f, 'noTool', 'no tool is assigned', where)
+        const r = feeds.unwrap()
+        const state = r.locks[f]
+        if (state.state === 'unavailable')
+          return lockUnavailable(f, state.rule, state.reason, where)
+        if (state.state === 'hidden') {
+          if (r.auto === 'off')
+            return lockUnavailable(f, 'autoOff', 'locks exist only in auto mode', where)
+          if (r.auto !== 'on') return lockUnavailable(f, 'noData', r.auto.unavailable, where)
+          return lockUnavailable(f, 'notLockable', 'nothing else depends on this field', where)
+        }
+        if (op.overrides[f] === undefined) {
+          const value = r.fields[f].unwrap().value
+          const q = Quantity.parse(pinnedSource(f, value, units), contexts[f])
+          if (q.isErr()) return Err(q.unwrapErr().withContext(where))
+          op.overrides[f] = q.unwrap().toDTO() as never // kind fixed by parseContexts
+        }
+        op.auto = true // the default auto mode becomes a choice
+        op.locked = [...(op.locked ?? []), f]
+      }
+    }
+    const modeIssues = feedModeIssues(op, kind)
+    if (modeIssues.length > 0) return invalid(modeIssues, where)
     const target = draft.plans[args.planId]!.setups[0]!.operations
     if (!deepEqual(target[index.unwrap()], op)) target[index.unwrap()] = op
     return Ok({})
@@ -834,8 +939,36 @@ const FeedValue = z
     value: z.number(),
     unit: z.string(),
     source: z.enum(['override', 'preset', 'calculator', 'strategy']),
+    locked: z.boolean().describe('Locked: the other recommendations follow this value'),
+    recommended: z
+      .object({ value: z.number(), unit: z.string() })
+      .nullable()
+      .describe('Auto mode: what the field would be without its entered value'),
+    lock: z
+      .discriminatedUnion('state', [
+        z.object({ state: z.literal('hidden') }),
+        z.object({ state: z.literal('available') }),
+        z.object({
+          state: z.literal('unavailable'),
+          rule: z
+            .string()
+            .describe('invalid, spindleRange, feedLimit, toolLength, stepoverAboveTool, power'),
+          reason: z.string(),
+        }),
+      ])
+      .describe('hidden outside auto mode and on fields nothing depends on'),
   })
   .nullable()
+
+const AutoDTO = z.union([
+  z.enum(['on', 'off']),
+  z.object({ unavailable: z.string().describe('Why: no calculator data for the tool and stock') }),
+])
+
+const lockDTO = (l: LockState) =>
+  l.state === 'unavailable'
+    ? { state: l.state, rule: l.rule, reason: l.reason }
+    : { state: l.state }
 
 const operationList = defineQuery({
   name: 'plan.operation.list',
@@ -851,7 +984,13 @@ const operationList = defineQuery({
         tool: z
           .object({ snapshotId: z.string(), libraryItemId: z.string(), name: z.string() })
           .nullable(),
-        presetName: z.string().nullable().describe('The preset in use (default or chosen)'),
+        presetName: z
+          .string()
+          .nullable()
+          .describe('The preset in use (default or chosen); null in auto mode'),
+        auto: AutoDTO.describe(
+          'Auto mode (calculator): on, off (a preset is used) or unavailable (no data) with the reason',
+        ),
         stickout: z.number().nullable().describe('mm'),
         feeds: z.object(
           Object.fromEntries(FEED_FIELDS.map((f) => [f, FeedValue])) as Record<
@@ -877,11 +1016,21 @@ const operationList = defineQuery({
         const feeds = Object.fromEntries(
           FEED_FIELDS.map((f) => [
             f,
-            e.feeds
-              .andThen((r) => r.fields[f])
-              .mapOr(null, (v) => ({ value: v.value, unit: v.unit, source: v.source })),
+            e.feeds.mapOr(null, (r) =>
+              r.fields[f].mapOr(null, (v) => ({
+                value: v.value,
+                unit: v.unit,
+                source: v.source,
+                locked: r.locked.includes(f),
+                recommended: r.recommended[f].mapOr(null, (value) => ({ value, unit: v.unit })),
+                lock: lockDTO(r.locks[f]),
+              })),
+            ),
           ]),
         ) as Record<FeedField, z.output<typeof FeedValue>>
+        const auto = e.feeds.mapOr<z.output<typeof AutoDTO>>(e.autoRequested ? 'on' : 'off', (r) =>
+          typeof r.auto === 'string' ? r.auto : { unavailable: r.auto.unavailable },
+        )
         const { kind: _, ...strategy } = e.strategy
         return {
           id: op.id,
@@ -896,6 +1045,7 @@ const operationList = defineQuery({
                   name: e.tool.unwrap().name,
                 },
           presetName: e.preset.mapOr(null, (p) => p.name),
+          auto,
           stickout: e.stickout.unwrapOr(null as unknown as number),
           feeds,
           chipLoad: e.feeds.andThen((f) => f.chipLoad).unwrapOr(null as unknown as number),

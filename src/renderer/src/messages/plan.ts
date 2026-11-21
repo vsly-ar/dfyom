@@ -142,8 +142,14 @@ export const planMessages = {
     otherTool: (name: string) => `${name} (current)`,
     stickout: 'Stickout',
     preset: 'Cutting preset',
-    presetDefault: (name: string | null) =>
-      name === null ? 'Default (none for this material)' : `Default (${name})`,
+    presetDefault: (name: string | null, auto: boolean) =>
+      name !== null
+        ? `Default (${name})`
+        : auto
+          ? 'Default (auto)'
+          : 'Default (none for this material)',
+    presetAuto: 'Auto (calculator)',
+    autoUnavailable: (reason: string) => `Auto (calculator) is unavailable. ${reason}`,
     noPresets: 'The tool has no cutting presets.',
     machines: (names: string) => `Machines: ${names}`,
     chipLoad: (mm: string) => `Chip load ${mm} per tooth`,
@@ -156,13 +162,18 @@ export const planMessages = {
     } satisfies Record<FeedField, string>,
     source: (source: FeedSource, preset: string | null) =>
       ({
-        override: 'Set by you; unlock to use the recommended value.',
+        override: 'Entered by you.',
         preset: preset === null ? 'From the tool’s cutting preset.' : `From preset “${preset}”.`,
-        calculator: 'Suggested by the feeds-and-speeds calculator.',
+        calculator: 'Recommended by the calculator.',
         strategy: 'Strategy default.',
       })[source],
+    entered: (recommended: string) => `Entered by you. Recommended ${recommended}.`,
+    useRecommended: (value: string) => `Use ${value}`,
+    locked: 'Locked: the other values follow it.',
+    reset: 'Reset',
+    useToolDefault: 'Use tool default',
+    unlock: 'Unlock',
     unresolved: 'No value: enter one, or add a cutting preset to the tool.',
-    lockedHint: 'Locked: your value overrides the recommendation.',
   },
 
   warnings: {

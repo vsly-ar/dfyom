@@ -1,9 +1,9 @@
-// Field: illustration + label, lock, the control, and one support area under the control that
+// Field: illustration + label, lock (only while a recommendation mode is on), the control, and one support area under the control that
 // looks pulled out from under it (echo, the highest-severity status with its fix, further notes
 // collapsed; a dismissed soft warning collapses to "1 dismissed · Show"). Wires the control's
 // id, aria-describedby and aria-invalid. Structure only: the quantity behaviour is QuantityInput
 // (task 3.4). Doc: docs/conventions/ui.md#field, severities: ui.md#warnings-and-dfm (decision 21)
-import { Check, ChevronDown, CircleAlert, Info, TriangleAlert, X } from 'lucide-react'
+import { Check, ChevronDown, CircleAlert, Info, LockKeyhole, TriangleAlert, X } from 'lucide-react'
 import {
   cloneElement,
   isValidElement,
@@ -50,12 +50,26 @@ export interface FieldControlProps {
   readOnly?: boolean
 }
 
+export interface FieldLock {
+  locked: boolean
+  onLockedChange: (locked: boolean) => void
+  /** Why the lock can't be pressed now (invalid value, machine limit, …). */
+  disabledReason?: string | undefined
+  /** Accessible name; defaults to "Lock <label>" for a text label, else "Lock value". */
+  name?: string | undefined
+}
+
 export interface FieldProps {
   label: ReactNode
   /** A `FieldIcon` (ui/icons/field); the measured part is the amber line. */
   illustration?: ReactNode
-  /** Whether the value follows the recommendation; renders the lock between label and control. */
-  lock?: { locked: boolean; onLockedChange: (locked: boolean) => void }
+  /**
+   * The lock between label and control: pressed = the other recommendations follow this value.
+   * Omit it to hide the lock (no recommendation mode, or nothing depends on the field).
+   * `disabledReason` makes it `aria-disabled` (still focusable), with the reason as its tooltip
+   * and as visible text in the support area (docs/conventions/ui.md#field).
+   */
+  lock?: FieldLock
   /** How the input is read, while typing ("= 1.588 mm"). */
   echo?: ReactNode
   messages?: readonly FieldMessage[]
@@ -85,6 +99,9 @@ export function Field({
   const echoId = `${base}-echo`
   const statusId = `${base}-status`
   const moreId = `${base}-more`
+  const lockReasonId = `${base}-lock-reason`
+  const lockName = lock?.name ?? (typeof label === 'string' ? `Lock ${label}` : 'Lock value')
+  const lockDisabled = lock?.disabledReason !== undefined
 
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(new Set())
   const [expanded, setExpanded] = useState(false)
@@ -125,7 +142,11 @@ export function Field({
     : children
 
   const hasSupport =
-    echo !== undefined || primary !== undefined || dismissedCount > 0 || rest.length > 0
+    echo !== undefined ||
+    primary !== undefined ||
+    dismissedCount > 0 ||
+    rest.length > 0 ||
+    lockDisabled
 
   return (
     <div
@@ -139,13 +160,16 @@ export function Field({
         {label}
       </label>
       {lock ? (
-        <Tooltip content="Lock value">
+        <Tooltip content={lock.disabledReason ?? lockName}>
           <button
             type="button"
             className={styles['lock']}
-            aria-label="Lock value"
+            aria-label={lockName}
             aria-pressed={lock.locked}
-            onClick={() => lock.onLockedChange(!lock.locked)}
+            {...(lockDisabled ? { 'aria-disabled': true, 'aria-describedby': lockReasonId } : {})}
+            onClick={() => {
+              if (!lockDisabled) lock.onLockedChange(!lock.locked)
+            }}
           >
             <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
               <rect x="3.5" y="7" width="9" height="6.5" rx="1.2" />
@@ -206,6 +230,13 @@ export function Field({
                   </Tooltip>
                 ) : null}
               </span>
+            </div>
+          ) : null}
+          {lock?.disabledReason !== undefined ? (
+            <div className={styles['item']} data-severity="note">
+              <LockKeyhole aria-hidden="true" />
+              <span id={lockReasonId}>{lock.disabledReason}</span>
+              <span />
             </div>
           ) : null}
           {dismissedCount > 0 ? (

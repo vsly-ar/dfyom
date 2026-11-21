@@ -28,9 +28,11 @@ export const PLAN_WARNING_CODES = [
   'feeds.rpmBelowMachine',
   'feeds.feedClamped',
   'feeds.rubbing',
+  'feeds.chipLoadHigh',
   'feeds.powerExceeded',
   'feeds.powerSkipped',
   'feeds.noData',
+  'feeds.lockInactive',
 ] as const
 export type PlanWarningCode = (typeof PLAN_WARNING_CODES)[number]
 

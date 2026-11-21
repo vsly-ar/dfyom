@@ -5,7 +5,7 @@
  *
  * Float64 throughout (see formulas.ts); values are in canonical units (rpm, mm/min, mm).
  */
-import { None, Some, type Option } from '../../shared/result'
+import { None, Option, Some } from '../../shared/result'
 import type { MaterialClass } from '../library/item'
 import type { Machine } from '../library/machine'
 import type { Rigidity } from '../library/machine.dto'
@@ -40,14 +40,26 @@ import {
 
 /**
  * How the tool engages the material (docs/architecture/feeds-speeds.md#engagement-per-strategy).
- * Lengths in mm. `ap` is the resolved stepdown (override or preset); omitted for `slot` and
- * `stepover`, the calculator suggests it. `helix.ap` is the helix pitch.
+ * Lengths in mm. `stepover.ae` is the strategy's stepover, `helix.ap` the helix pitch. The
+ * stepdown is the calculator's unless locked (`CuttingInput.locked.ap`).
  */
 export type Engagement =
-  | { readonly kind: 'slot'; readonly ap?: number }
-  | { readonly kind: 'stepover'; readonly ae: number; readonly ap?: number }
+  | { readonly kind: 'slot' }
+  | { readonly kind: 'stepover'; readonly ae: number }
   | { readonly kind: 'helix'; readonly ap: number }
   | { readonly kind: 'drill' }
+
+/**
+ * Locked values: fixed inputs the calculator recommends every other field around, in canonical
+ * units (rpm, mm/min, mm). `ap` is a locked stepdown (milling, not helix), `ae` a locked facing
+ * stepover (`stepover` engagement only). Doc: docs/architecture/feeds-speeds.md#locked-inputs
+ */
+export interface LockedInputs {
+  readonly n?: number
+  readonly vf?: number
+  readonly ap?: number
+  readonly ae?: number
+}
 
 /** Machine values the calculator uses, in canonical units (rpm, mm/min, W). */
 export interface MachineLimits {
@@ -76,6 +88,8 @@ export interface CuttingInput {
   readonly materialClass: MaterialClass
   readonly engagement: Engagement
   readonly machine: Option<MachineLimits>
+  /** Locked inputs; omitted = none. */
+  readonly locked?: LockedInputs
 }
 
 export type StepId =
@@ -86,6 +100,7 @@ export type StepId =
   | 'rpmClamp'
   | 'feedClamp'
   | 'cap'
+  | 'locked'
   | 'F1'
   | 'F2'
   | 'F3'
@@ -117,6 +132,7 @@ export type CuttingWarningCode =
   | 'feeds.rpmBelowMachine'
   | 'feeds.feedClamped'
   | 'feeds.rubbing'
+  | 'feeds.chipLoadHigh'
   | 'feeds.powerExceeded'
   | 'feeds.powerSkipped'
   | 'feeds.noData'
@@ -167,35 +183,55 @@ export function suggestCutting(
   input: CuttingInput,
   data: readonly MaterialRow[] = MATERIAL_DATA,
 ): CuttingSuggestion {
+  const found = contextOf(input, data)
+  if ('noData' in found) return found.noData
+  const { engagement } = input
+  return engagement.kind === 'drill' ? drill(found.ctx) : mill(found.ctx, engagement)
+}
+
+/** The `feeds.noData` warning when the calculator has no data for this input, else None. */
+export function noDataFor(
+  input: CuttingInput,
+  data: readonly MaterialRow[] = MATERIAL_DATA,
+): Option<CuttingWarning> {
+  const found = contextOf(input, data)
+  return 'noData' in found ? Option.nonNull(found.noData.warnings[0]) : None
+}
+
+type Lookup = { readonly ctx: Ctx } | { readonly noData: CuttingSuggestion }
+
+function contextOf(input: CuttingInput, data: readonly MaterialRow[]): Lookup {
   const { tool, materialClass, engagement } = input
   const isDrill = tool.type === 'drill'
+  const none = (reason: string, params: Record<string, number | string>): Lookup => ({
+    noData: noData(reason, params),
+  })
   if (isDrill !== (engagement.kind === 'drill'))
-    return noData(`engagement "${engagement.kind}" does not fit a ${tool.type}`, {
+    return none(`engagement "${engagement.kind}" does not fit a ${tool.type}`, {
       engagement: engagement.kind,
       toolType: tool.type,
     })
-  if (materialClass === 'other') return noData('no data for material class "other"', {})
+  if (materialClass === 'other') return none('no data for material class "other"', {})
   const toolMaterial = tool.toolMaterial.unwrapOr('other')
   if (toolMaterial === 'other')
-    return noData('tool material is not set (carbide or HSS needed)', { toolMaterial })
+    return none('tool material is not set (carbide or HSS needed)', { toolMaterial })
   const row = findRow(data, materialClass, toolMaterial)
   if (row === undefined)
-    return noData(`no data for ${toolMaterial} in ${materialClass}`, {
+    return none(`no data for ${toolMaterial} in ${materialClass}`, {
       materialClass,
       toolMaterial,
     })
   const speed = speedOf(row)
   if (speed === undefined)
-    return noData(`no speed data for ${toolMaterial} in ${materialClass}`, { materialClass })
+    return none(`no speed data for ${toolMaterial} in ${materialClass}`, { materialClass })
   const D = tool.diameter.canonical
   const band = bandOf(row, D)
   const range = band === undefined ? undefined : isDrill ? band.fn : band.fz
   if (band === undefined || range === undefined)
-    return noData(`no ${isDrill ? 'fn' : 'fz'} data for a ${D} mm tool`, { diameter: D })
-
+    return none(`no ${isDrill ? 'fn' : 'fz'} data for a ${D} mm tool`, { diameter: D })
   const rigidity = input.machine.mapOr(DEFAULT_RIGIDITY, (m) => m.rigidity)
-  const c: Ctx = { input, row, speed, band, range, rigidity, D }
-  return engagement.kind === 'drill' ? drill(c) : mill(c, engagement)
+  const locked = input.locked ?? {}
+  return { ctx: { input, row, speed, band, range, rigidity, D, locked } }
 }
 
 interface Ctx {
@@ -208,6 +244,7 @@ interface Ctx {
   readonly range: Range
   readonly rigidity: Rigidity
   readonly D: number
+  readonly locked: LockedInputs
 }
 
 type MillEngagement = Exclude<Engagement, { kind: 'drill' }>
@@ -215,8 +252,11 @@ type MillEngagement = Exclude<Engagement, { kind: 'drill' }>
 function mill(c: Ctx, e: MillEngagement): CuttingSuggestion {
   const { tool } = c.input
   const factors = RIGIDITY_FACTORS[c.rigidity]
-  const given = e.ap
-  if (given !== undefined) return millAt(c, e, given, None).suggestion
+  // Pocket and profile engage as a slot whatever the stepover; facing uses a locked stepover.
+  const ae = e.kind === 'stepover' ? Math.min(c.locked.ae ?? e.ae, c.D) : c.D
+  // A fixed stepdown (locked, or the helix pitch) is used, not suggested.
+  const fixed = e.kind === 'helix' ? e.ap : c.locked.ap
+  if (fixed !== undefined) return millAt(c, ae, fixed, None).suggestion
 
   // Calculator-owned stepdown: apSlot × D × apFactor, ≤ fluteLength; reduced to fit the power.
   const fluteLength = tool.fluteLength.canonical
@@ -242,12 +282,12 @@ function mill(c: Ctx, e: MillEngagement): CuttingSuggestion {
       unit: 'mm',
     })
   }
-  let result = millAt(c, e, ap, Some(apSteps))
+  let result = millAt(c, ae, ap, Some(apSteps))
   if (!result.exceeded) return result.suggestion
   const first = result.pc
   for (let i = 0; i < MAX_POWER_ITERATIONS && result.exceeded; i++) {
     ap = ap * (result.pAvail / result.pc) * 0.999
-    result = millAt(c, e, ap, Some(apSteps))
+    result = millAt(c, ae, ap, Some(apSteps))
   }
   const reduced: DerivationStep = {
     step: 'power',
@@ -256,7 +296,7 @@ function mill(c: Ctx, e: MillEngagement): CuttingSuggestion {
     result: ap,
     unit: 'mm',
   }
-  return millAt(c, e, ap, Some([...apSteps, reduced]), true).suggestion
+  return millAt(c, ae, ap, Some([...apSteps, reduced]), true).suggestion
 }
 
 interface MillResult {
@@ -266,37 +306,26 @@ interface MillResult {
   readonly exceeded: boolean
 }
 
+/**
+ * One milling evaluation at stepdown `ap` (`apSteps` Some = calculator-owned). Locked `n`/`vf`
+ * replace their recommendation (docs/architecture/feeds-speeds.md#locked-inputs). With a fixed
+ * stepdown, a power excess reduces an unlocked feed (n kept, fz drops); a locked one only warns.
+ */
 function millAt(
   c: Ctx,
-  e: MillEngagement,
+  ae: number,
   ap: number,
   apSteps: Option<DerivationStep[]>,
   powerReduced = false,
 ): MillResult {
-  const { tool, machine } = c.input
-  const { D, row } = c
+  const { tool, machine, engagement } = c.input
+  const { D, row, locked: L } = c
   const warnings: CuttingWarning[] = []
   const pos = RIGIDITY_FACTORS[c.rigidity].rangePos
   const RE = tool.effectiveCornerRadius.toNumber()
   const z = tool.fluteCount.canonical
 
-  // Spindle speed: F4 → F1 (or the chart's n) → clamp.
-  const dCalc = effectiveDiameter(D, RE, ap)
-  const f4: DerivationStep | undefined =
-    RE > 0
-      ? {
-          step: 'F4',
-          formula: 'De = D − 2·RE + 2·√(ap·(2·RE − ap)) if ap < RE, else D',
-          inputs: { D, RE, ap },
-          result: dCalc,
-          unit: 'mm',
-        }
-      : undefined
-  const { n0, steps: nSteps } = dataSpeed(c, pos, dCalc, f4)
-  let n = clampRpm(n0, machine, nSteps, warnings)
-
   // Chip load: F3 × F5, capped.
-  const ae = e.kind === 'stepover' ? Math.min(e.ae, D) : D
   const fz = pick(c.range, pos)
   const radial = rctf(ae, D)
   const axial = actf(RE, ap)
@@ -306,7 +335,7 @@ function millAt(
     {
       step: 'F3',
       formula: 'RCTF = 1 / (2·√((ae/D)·(1 − ae/D))) if ae < D/2, else 1',
-      inputs: { ae, D, engagement: e.kind },
+      inputs: { ae, D, engagement: engagement.kind },
       result: radial,
       unit: '×',
     },
@@ -328,53 +357,125 @@ function millAt(
     })
   const fzProg = fz * k
 
-  // Feed rate: F2 → clamp (n lowered to keep fz while n ≥ minSpeed).
-  const vf0 = feedRate(n, z, fzProg)
-  const vfSteps: DerivationStep[] = [
-    {
-      step: 'F2',
-      formula: 'vf = n · z · fz · RCTF · ACTF',
-      inputs: { n, z, fz, factor: k },
-      result: vf0,
-      unit: 'mm/min',
-    },
-  ]
-  let vf = vf0
-  if (machine.isSome() && vf0 > machine.unwrap().maxFeedXY) {
-    const m = machine.unwrap()
-    vf = m.maxFeedXY
-    const keep = vf / (z * fzProg)
-    n = Math.max(keep, m.minSpeed)
+  // Spindle speed: locked; or following a locked feed (data chip load); or F4 → F1 → clamp.
+  const dCalc = effectiveDiameter(D, RE, ap)
+  let n: number
+  let nSteps: DerivationStep[]
+  if (L.n !== undefined) {
+    n = L.n
+    nSteps = [lockedStep('n', L.n, 'rpm')]
+  } else if (L.vf !== undefined) {
+    const n0 = L.vf / (z * fzProg)
+    nSteps = [
+      {
+        step: 'F2',
+        formula: 'n = vf / (z · fz · RCTF · ACTF)',
+        inputs: { vf: L.vf, z, fz, factor: k },
+        result: n0,
+        unit: 'rpm',
+      },
+    ]
+    n = clampToSpindle(n0, machine, nSteps)
+  } else {
+    const f4: DerivationStep | undefined =
+      RE > 0
+        ? {
+            step: 'F4',
+            formula: 'De = D − 2·RE + 2·√(ap·(2·RE − ap)) if ap < RE, else D',
+            inputs: { D, RE, ap },
+            result: dCalc,
+            unit: 'mm',
+          }
+        : undefined
+    const speed = dataSpeed(c, pos, dCalc, f4)
+    nSteps = speed.steps
+    n = clampRpm(speed.n0, machine, nSteps, warnings)
+  }
+
+  // Feed rate: locked; or F2 → clamp (an unlocked n is lowered to keep fz while ≥ minSpeed).
+  let vf: number
+  let vfSteps: DerivationStep[]
+  if (L.vf !== undefined) {
+    vf = L.vf
+    vfSteps = [lockedStep('vf', L.vf, 'mm/min')]
+  } else {
+    const vf0 = feedRate(n, z, fzProg)
+    vfSteps = [
+      {
+        step: 'F2',
+        formula: 'vf = n · z · fz · RCTF · ACTF',
+        inputs: { n, z, fz, factor: k },
+        result: vf0,
+        unit: 'mm/min',
+      },
+    ]
+    vf = vf0
+    if (machine.isSome() && vf0 > machine.unwrap().maxFeedXY) {
+      const m = machine.unwrap()
+      vf = m.maxFeedXY
+      if (L.n === undefined) {
+        const keep = vf / (z * fzProg)
+        n = Math.max(keep, m.minSpeed)
+        vfSteps.push({
+          step: 'feedClamp',
+          formula: 'vf = min(maxFeedRate.x, .y); n = vf / (z · fz_prog), ≥ minSpeed',
+          inputs: { vf: vf0, maxFeedXY: m.maxFeedXY, nKeepingFz: keep, minSpeed: m.minSpeed },
+          result: vf,
+          unit: 'mm/min',
+        })
+        nSteps.push({
+          step: 'feedClamp',
+          formula: 'n = vf / (z · fz_prog), ≥ minSpeed',
+          inputs: { vf, z, fzProg, minSpeed: m.minSpeed },
+          result: n,
+          unit: 'rpm',
+        })
+      } else {
+        vfSteps.push({
+          step: 'feedClamp',
+          formula: 'vf = min(maxFeedRate.x, .y); n locked, fz drops',
+          inputs: { vf: vf0, maxFeedXY: m.maxFeedXY },
+          result: vf,
+          unit: 'mm/min',
+        })
+      }
+      warnings.push(
+        warn('feeds.feedClamped', 'Feed rate limited to the machine maximum (X/Y).', {
+          suggested: vf0,
+          maxFeedRate: m.maxFeedXY,
+          spindleSpeed: n,
+        }),
+      )
+    }
+  }
+
+  // Power: F6, F7 against Pavail; with a fixed stepdown an unlocked feed absorbs an excess.
+  const power = machine.andThen((m) => m.power)
+  const pAvail = power.isSome()
+    ? availablePower(power.unwrap(), n, machine.unwrap().maxSpeed)
+    : Infinity
+  let Q = materialRemovalRate(ae, ap, vf)
+  let pc = cuttingPower(Q, row.u)
+  let exceeded = pc > pAvail * (1 + EPS)
+  let feedReduced = false
+  if (exceeded && apSteps.isNone() && L.vf === undefined) {
+    const before = vf
+    vf = vf * (pAvail / pc) * 0.999
     vfSteps.push({
-      step: 'feedClamp',
-      formula: 'vf = min(maxFeedRate.x, .y); n = vf / (z · fz_prog), ≥ minSpeed',
-      inputs: { vf: vf0, maxFeedXY: m.maxFeedXY, nKeepingFz: keep, minSpeed: m.minSpeed },
+      step: 'power',
+      formula: 'vf reduced until Pc ≤ Pavail (n kept)',
+      inputs: { vf: before, PcBefore: pc, Pavail: pAvail },
       result: vf,
       unit: 'mm/min',
     })
-    nSteps.push({
-      step: 'feedClamp',
-      formula: 'n = vf / (z · fz_prog), ≥ minSpeed',
-      inputs: { vf, z, fzProg, minSpeed: m.minSpeed },
-      result: n,
-      unit: 'rpm',
-    })
-    warnings.push(
-      warn('feeds.feedClamped', 'Feed rate limited to the machine maximum (X/Y).', {
-        suggested: vf0,
-        maxFeedRate: m.maxFeedXY,
-        spindleSpeed: n,
-      }),
-    )
+    Q = materialRemovalRate(ae, ap, vf)
+    pc = cuttingPower(Q, row.u)
+    exceeded = false
+    feedReduced = true
   }
+
   const fzActual = vf / (n * z * k)
-  if (fzActual < c.range.min * (1 - EPS))
-    warnings.push(
-      warn('feeds.rubbing', 'Chips are thinner than the data minimum: the tool rubs and heats.', {
-        chipLoad: fzActual,
-        minimum: c.range.min,
-      }),
-    )
+  warnings.push(...chipLoadWarnings(fzActual, c.range, false))
 
   // Plunge: F9 → clamp to Z.
   const pr0 = plungeRate(row.kPlunge, vf)
@@ -390,31 +491,24 @@ function millAt(
   ]
   const pr = clampZ(pr0, machine, prSteps, warnings)
 
-  // Power: F6, F7 against Pavail.
-  const Q = materialRemovalRate(ae, ap, vf)
-  const pc = cuttingPower(Q, row.u)
-  let pAvail = Infinity
   let spindleLoad: Option<number> = None
-  const power = machine.andThen((m) => m.power)
-  if (power.isSome()) {
-    pAvail = availablePower(power.unwrap(), n, machine.unwrap().maxSpeed)
-    spindleLoad = Some((pc / pAvail) * 100)
-  } else {
+  if (power.isSome()) spindleLoad = Some((pc / pAvail) * 100)
+  else
     warnings.push({
       code: 'feeds.powerSkipped',
       severity: 'info',
       message: 'Machine spindle power is not set, so the power check is skipped.',
       params: {},
     })
-  }
-  const exceeded = pc > pAvail * (1 + EPS)
-  if (exceeded || powerReduced)
+  if (exceeded || powerReduced || feedReduced)
     warnings.push(
       warn(
         'feeds.powerExceeded',
-        apSteps.isSome()
+        powerReduced
           ? 'Cutting power exceeds the spindle: suggested stepdown reduced to fit.'
-          : 'Cutting power exceeds the spindle: reduce stepdown or stepover.',
+          : feedReduced
+            ? 'Cutting power exceeds the spindle: suggested feed rate reduced to fit.'
+            : 'Cutting power exceeds the spindle: reduce stepdown or stepover.',
         { cuttingPower: pc, availablePower: pAvail },
       ),
     )
@@ -447,53 +541,79 @@ function millAt(
 /** Drilling: F1 with the drill diameter, F8, plungeRate = feedRate; no power check. */
 function drill(c: Ctx): CuttingSuggestion {
   const { machine } = c.input
-  const { D, row } = c
+  const { D, row, locked: L } = c
   const warnings: CuttingWarning[] = []
   const pos = RIGIDITY_FACTORS[c.rigidity].rangePos
-  const { n0, steps: nSteps } = dataSpeed(c, pos, D, undefined)
-  let n = clampRpm(n0, machine, nSteps, warnings)
   const fn = pick(c.range, pos)
-  const vf0 = drillFeed(fn, n)
-  const vfSteps: DerivationStep[] = [
-    dataStep(row, 'fn', fn, 'mm/rev', c.range),
-    { step: 'F8', formula: 'vf = fn · n', inputs: { fn, n }, result: vf0, unit: 'mm/min' },
-  ]
-  let vf = vf0
-  if (machine.isSome() && vf0 > machine.unwrap().maxFeedZ) {
-    const m = machine.unwrap()
-    vf = m.maxFeedZ
-    const keep = vf / fn
-    n = Math.max(keep, m.minSpeed)
-    vfSteps.push({
-      step: 'feedClamp',
-      formula: 'vf = maxFeedRate.z; n = vf / fn, ≥ minSpeed',
-      inputs: { vf: vf0, maxFeedZ: m.maxFeedZ, nKeepingFn: keep, minSpeed: m.minSpeed },
-      result: vf,
-      unit: 'mm/min',
-    })
-    nSteps.push({
-      step: 'feedClamp',
-      formula: 'n = vf / fn, ≥ minSpeed',
-      inputs: { vf, fn, minSpeed: m.minSpeed },
-      result: n,
-      unit: 'rpm',
-    })
-    warnings.push(
-      warn('feeds.feedClamped', 'Drilling feed limited to the machine maximum (Z).', {
-        suggested: vf0,
-        maxFeedRate: m.maxFeedZ,
-        spindleSpeed: n,
-      }),
-    )
+  let n: number
+  let nSteps: DerivationStep[]
+  if (L.n !== undefined) {
+    n = L.n
+    nSteps = [lockedStep('n', L.n, 'rpm')]
+  } else if (L.vf !== undefined) {
+    const n0 = L.vf / fn
+    nSteps = [
+      dataStep(row, 'fn', fn, 'mm/rev', c.range),
+      { step: 'F8', formula: 'n = vf / fn', inputs: { vf: L.vf, fn }, result: n0, unit: 'rpm' },
+    ]
+    n = clampToSpindle(n0, machine, nSteps)
+  } else {
+    const speed = dataSpeed(c, pos, D, undefined)
+    nSteps = speed.steps
+    n = clampRpm(speed.n0, machine, nSteps, warnings)
+  }
+  let vf: number
+  let vfSteps: DerivationStep[]
+  if (L.vf !== undefined) {
+    vf = L.vf
+    vfSteps = [lockedStep('vf', L.vf, 'mm/min')]
+  } else {
+    const vf0 = drillFeed(fn, n)
+    vfSteps = [
+      dataStep(row, 'fn', fn, 'mm/rev', c.range),
+      { step: 'F8', formula: 'vf = fn · n', inputs: { fn, n }, result: vf0, unit: 'mm/min' },
+    ]
+    vf = vf0
+    if (machine.isSome() && vf0 > machine.unwrap().maxFeedZ) {
+      const m = machine.unwrap()
+      vf = m.maxFeedZ
+      if (L.n === undefined) {
+        const keep = vf / fn
+        n = Math.max(keep, m.minSpeed)
+        vfSteps.push({
+          step: 'feedClamp',
+          formula: 'vf = maxFeedRate.z; n = vf / fn, ≥ minSpeed',
+          inputs: { vf: vf0, maxFeedZ: m.maxFeedZ, nKeepingFn: keep, minSpeed: m.minSpeed },
+          result: vf,
+          unit: 'mm/min',
+        })
+        nSteps.push({
+          step: 'feedClamp',
+          formula: 'n = vf / fn, ≥ minSpeed',
+          inputs: { vf, fn, minSpeed: m.minSpeed },
+          result: n,
+          unit: 'rpm',
+        })
+      } else {
+        vfSteps.push({
+          step: 'feedClamp',
+          formula: 'vf = maxFeedRate.z; n locked, fn drops',
+          inputs: { vf: vf0, maxFeedZ: m.maxFeedZ },
+          result: vf,
+          unit: 'mm/min',
+        })
+      }
+      warnings.push(
+        warn('feeds.feedClamped', 'Drilling feed limited to the machine maximum (Z).', {
+          suggested: vf0,
+          maxFeedRate: m.maxFeedZ,
+          spindleSpeed: n,
+        }),
+      )
+    }
   }
   const fnActual = vf / n
-  if (fnActual < c.range.min * (1 - EPS))
-    warnings.push(
-      warn('feeds.rubbing', 'Feed per revolution is below the data minimum: the drill rubs.', {
-        feedPerRev: fnActual,
-        minimum: c.range.min,
-      }),
-    )
+  warnings.push(...chipLoadWarnings(fnActual, c.range, true))
   const derivation = [...nSteps, ...vfSteps]
   const feed: Suggested = { value: vf, unit: 'mm/min', derivation }
   return {
@@ -513,6 +633,124 @@ function drill(c: Ctx): CuttingSuggestion {
     }),
     warnings,
   }
+}
+
+/** `feeds.rubbing` below the data range, `feeds.chipLoadHigh` above it. */
+function chipLoadWarnings(actual: number, range: Range, isDrill: boolean): CuttingWarning[] {
+  if (actual < range.min * (1 - EPS))
+    return [
+      isDrill
+        ? warn('feeds.rubbing', 'Feed per revolution is below the data minimum: the drill rubs.', {
+            feedPerRev: actual,
+            minimum: range.min,
+          })
+        : warn(
+            'feeds.rubbing',
+            'Chips are thinner than the data minimum: the tool rubs and heats.',
+            {
+              chipLoad: actual,
+              minimum: range.min,
+            },
+          ),
+    ]
+  if (actual > range.max * (1 + EPS))
+    return [
+      isDrill
+        ? warn(
+            'feeds.chipLoadHigh',
+            'Feed per revolution is above the data maximum: the drill may break.',
+            { feedPerRev: actual, maximum: range.max },
+          )
+        : warn(
+            'feeds.chipLoadHigh',
+            'Chips are thicker than the data maximum: the tool may break or chatter.',
+            { chipLoad: actual, maximum: range.max },
+          ),
+    ]
+  return []
+}
+
+/** The values that will be run (canonical units); `ap`/`ae` omitted when not milling. */
+export interface CuttingValues {
+  readonly n: number
+  readonly vf: number
+  readonly ap?: number
+  readonly ae?: number
+}
+
+/** A final-value warning on the field to change. */
+export interface CheckWarning extends CuttingWarning {
+  readonly field: 'feedRate' | 'stepdown'
+}
+
+/**
+ * Final-value check (docs/architecture/feeds-speeds.md#final-value-check): chip load against
+ * the data range and cutting power, on the values that will be used, entered ones included.
+ * `input.locked` is ignored. No data → no warnings (the calculator reports `feeds.noData`).
+ * Spindle range and feed limits are the plan's machine checks (`plan.machine`).
+ */
+export function checkCutting(
+  input: CuttingInput,
+  values: CuttingValues,
+  data: readonly MaterialRow[] = MATERIAL_DATA,
+): readonly CheckWarning[] {
+  const found = contextOf(input, data)
+  if ('noData' in found || !(values.n > 0) || !(values.vf > 0)) return []
+  const c = found.ctx
+  const { tool, machine, engagement: e } = input
+  const on =
+    (field: CheckWarning['field']) =>
+    (w: CuttingWarning): CheckWarning => ({ ...w, field })
+  if (e.kind === 'drill')
+    return chipLoadWarnings(values.vf / values.n, c.range, true).map(on('feedRate'))
+  const D = c.D
+  const ae = e.kind === 'stepover' ? Math.min(values.ae ?? e.ae, D) : D
+  const ap = e.kind === 'helix' ? e.ap : values.ap
+  const RE = tool.effectiveCornerRadius.toNumber()
+  const z = tool.fluteCount.canonical
+  const k = chipThinning(rctf(ae, D), ap === undefined ? 1 : actf(RE, ap))
+  const out: CheckWarning[] = chipLoadWarnings(values.vf / (values.n * z * k), c.range, false).map(
+    on('feedRate'),
+  )
+  const power = machine.andThen((m) => m.power)
+  if (ap !== undefined && power.isSome()) {
+    const pAvail = availablePower(power.unwrap(), values.n, machine.unwrap().maxSpeed)
+    const pc = cuttingPower(materialRemovalRate(ae, ap, values.vf), c.row.u)
+    if (pc > pAvail * (1 + EPS))
+      out.push({
+        ...warn(
+          'feeds.powerExceeded',
+          'Cutting power exceeds the spindle: reduce stepdown, stepover or feed.',
+          { cuttingPower: pc, availablePower: pAvail },
+        ),
+        field: e.kind === 'helix' ? 'feedRate' : 'stepdown',
+      })
+  }
+  return out
+}
+
+const lockedStep = (field: 'n' | 'vf', value: number, unit: string): DerivationStep => ({
+  step: 'locked',
+  formula: `${field} locked by the user`,
+  inputs: { [field]: value },
+  result: value,
+  unit,
+})
+
+/** Clamp to the spindle range without the calculator's rpm warnings (a locked feed's n). */
+function clampToSpindle(
+  n0: number,
+  machine: Option<MachineLimits>,
+  steps: DerivationStep[],
+): number {
+  if (machine.isNone()) return n0
+  const { minSpeed, maxSpeed } = machine.unwrap()
+  const n = Math.min(maxSpeed, Math.max(minSpeed, n0))
+  if (n !== n0)
+    steps.push(
+      clampStep('rpmClamp', 'minSpeed ≤ n ≤ maxSpeed', { n: n0, minSpeed, maxSpeed }, n, 'rpm'),
+    )
+  return n
 }
 
 /**

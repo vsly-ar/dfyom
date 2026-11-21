@@ -1,6 +1,6 @@
 // Plan mode against the fake bridge bound to a real project runtime (core plan fixture: the test
 // part, four library tools and a machine): create a plan, the operation list in machining order,
-// the tool picker, feeds and speeds with their source and overrides (lock), stale notices with
+// the tool picker, feeds and speeds with their source, auto mode and locks, stale notices with
 // rebuild, read-only statuses, toolpath generation and the export (job, toolpaths and the export
 // itself are scripted: the fixture runtime has no toolpath cache or file port). The viewport
 // canvas is stubbed. Doc: docs/conventions/ui.md#plan-mode-task-37, #testing
@@ -71,7 +71,7 @@ describe('Plan mode', () => {
     await expectNoAxeViolations()
   })
 
-  it('shows feeds and speeds with their source; a typed value is an override, unlocking resets it', async () => {
+  it('shows feeds and speeds with their source; a preset has no locks, an entered value resets', async () => {
     const t = await renderPlan()
     await waitFor(() => expect(t.rows().length).toBeGreaterThan(0))
     await t.user.click(t.rows()[0]!)
@@ -83,6 +83,8 @@ describe('Plan mode', () => {
     // the tool picker offers the ranked suggestions and names why
     expect(within(insp).getByRole('combobox', { name: 'Tool' })).toHaveTextContent('Flat 6')
     expect(within(insp).getByRole('list', { name: 'Why this tool' })).toBeInTheDocument()
+    // a preset means fixed values: no locks (stickout has none either)
+    expect(within(insp).queryByRole('button', { name: /^Lock / })).toBeNull()
 
     await t.user.clear(feed)
     await t.user.type(feed, '600{Enter}')
@@ -91,17 +93,70 @@ describe('Plan mode', () => {
         expect.objectContaining({ overrides: { feedRate: '600' } }),
       ),
     )
-    await within(insp).findByText('Set by you; unlock to use the recommended value.')
+    await within(insp).findByText('Entered by you.')
     const op = t.s.plan(t.planId()).setups[0]!.operations[0]!
     expect(op.overrides.feedRate?.source).toBe('600')
-    // the field's lock is pressed while overridden; unlocking removes the override
-    const locks = within(insp).getAllByRole('button', { name: 'Lock value' })
-    const pressed = locks.filter((l) => l.getAttribute('aria-pressed') === 'true')
-    expect(pressed).toHaveLength(1)
-    await t.user.click(pressed[0]!)
+    await t.user.click(within(insp).getByRole('button', { name: 'Reset' }))
     await waitFor(() =>
       expect(t.s.plan(t.planId()).setups[0]!.operations[0]!.overrides.feedRate).toBeUndefined(),
     )
+    await expectNoAxeViolations()
+  })
+
+  it('auto mode: the preset control switches to the calculator; locks pin, follow and unlock to entered', async () => {
+    const t = await renderPlan()
+    await waitFor(() => expect(t.rows().length).toBeGreaterThan(0))
+    await t.user.click(t.rows()[0]!)
+    const insp = t.inspector()
+    await within(insp).findByRole('heading', { name: 'Facing 1' })
+    await t.user.click(within(insp).getByRole('combobox', { name: 'Cutting preset' }))
+    await t.user.click(await screen.findByRole('option', { name: 'Auto (calculator)' }))
+    await waitFor(() =>
+      expect(t.callsOf('plan.operation.update')).toContainEqual(
+        expect.objectContaining({ auto: true }),
+      ),
+    )
+    const spindleLock = await within(insp).findByRole('button', { name: 'Lock Spindle speed' })
+    expect(spindleLock).toHaveAttribute('aria-pressed', 'false')
+    // facing: speed, feed, stepdown and stepover can be locked; plunge rate can't
+    for (const name of ['Lock Feed rate', 'Lock Stepdown', 'Lock Stepover'])
+      expect(within(insp).getByRole('button', { name })).toBeInTheDocument()
+    expect(within(insp).queryByRole('button', { name: 'Lock Plunge rate' })).toBeNull()
+    expect(within(insp).getAllByText('Recommended by the calculator.').length).toBeGreaterThan(0)
+
+    // locking pins the shown value
+    await t.user.click(spindleLock)
+    await waitFor(() =>
+      expect(t.callsOf('plan.operation.update')).toContainEqual(
+        expect.objectContaining({ locks: { spindleSpeed: true } }),
+      ),
+    )
+    await waitFor(() =>
+      expect(within(insp).getByRole('button', { name: 'Lock Spindle speed' })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      ),
+    )
+    await within(insp).findByText('Locked: the other values follow it.')
+    expect(t.s.plan(t.planId()).setups[0]!.operations[0]!.locked).toEqual(['spindleSpeed'])
+
+    // unlocking keeps the value as entered, with the way back to the recommendation
+    await t.user.click(within(insp).getByRole('button', { name: 'Lock Spindle speed' }))
+    await within(insp).findByText(/^Entered by you\. Recommended \d+ rpm\.$/)
+    await t.user.click(within(insp).getByRole('button', { name: /^Use \d+ rpm$/ }))
+    await waitFor(() =>
+      expect(t.s.plan(t.planId()).setups[0]!.operations[0]!.overrides.spindleSpeed).toBeUndefined(),
+    )
+
+    // a value above the machine's spindle: the lock is disabled with the reason shown
+    const speed = within(insp).getByLabelText('Spindle speed', { selector: 'input' })
+    await t.user.clear(speed)
+    await t.user.type(speed, '40000{Enter}')
+    const reason = "40000 rpm is above this machine's 30000 rpm."
+    await within(insp).findByText(reason)
+    const disabled = within(insp).getByRole('button', { name: 'Lock Spindle speed' })
+    expect(disabled).toHaveAttribute('aria-disabled', 'true')
+    expect(disabled).toHaveAccessibleDescription(reason)
     await expectNoAxeViolations()
   })
 
@@ -128,6 +183,9 @@ describe('Plan mode', () => {
     await assign(/^Drill 6/, t.s.tools.drill6)
     // no preset and no calculator data: the fields say so; Generate is blocked
     await within(insp).findAllByText(/No value: enter one/)
+    // auto mode is unavailable, with the reason; no locks
+    await within(insp).findByText(/^Auto \(calculator\) is unavailable\. No feeds-and-speeds data/)
+    expect(within(insp).queryByRole('button', { name: /^Lock / })).toBeNull()
     expect(within(t.nav()).getByRole('button', { name: 'Generate toolpaths' })).toBeDisabled()
     for (const [label, value] of [
       ['Spindle speed', '3000'],

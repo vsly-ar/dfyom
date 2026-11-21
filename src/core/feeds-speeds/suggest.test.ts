@@ -14,7 +14,9 @@ import { MATERIAL_DATA } from './data'
 import { TEST_DATA } from './data.fixture'
 import { availablePower, rctf } from './formulas'
 import {
+  checkCutting,
   machineLimits,
+  noDataFor,
   suggestCutting,
   type CuttingInput,
   type CuttingSuggestion,
@@ -214,14 +216,14 @@ describe('suggestCutting: engagement and chip thinning', () => {
   })
 
   it('a given stepdown (override/preset) is used and not re-suggested', () => {
-    const s = suggest({ engagement: { kind: 'slot', ap: 1.2 } })
+    const s = suggest({ locked: { ap: 1.2 } })
     expect(s.stepdown.isNone()).toBe(true)
     expect(s.display.unwrap().Q.unwrap()).toBeCloseTo(6 * 1.2 * value(s.feedRate), 6) // F6, slot ae = D
   })
 
   it('ball nose at ap < RE: n from the effective diameter (F4) and axial thinning (F5)', () => {
     const ball = tool({ type: 'ballEndMill' })
-    const s = suggest({ tool: ball, engagement: { kind: 'slot', ap: 1 } })
+    const s = suggest({ tool: ball, locked: { ap: 1 } })
     const De = 2 * Math.sqrt(1 * (6 - 1))
     expect(s.display.unwrap().dCalc).toBeCloseTo(De, 9)
     expect(value(s.spindleSpeed)).toBeCloseTo((100 * 1000) / (Math.PI * De), 6)
@@ -348,11 +350,23 @@ describe('suggestCutting: power check', () => {
     expect(s.stepdown.unwrap().derivation.map((d) => d.step)).toContain('power')
   })
 
-  it('exceeded with a given stepdown: warn only', () => {
+  it('exceeded with a locked stepdown: the unlocked feed is reduced to fit (n kept)', () => {
     const m = limits({ power: Some(100), maxSpeed: 24_000 })
-    const s = suggest({ machine: m, engagement: { kind: 'slot', ap: 5 } })
+    const free = suggest({ machine: limits({ maxSpeed: 24_000 }), locked: { ap: 5 } })
+    const s = suggest({ machine: m, locked: { ap: 5 } })
+    expect(value(s.spindleSpeed)).toBeCloseTo(value(free.spindleSpeed), 9)
+    expect(value(s.feedRate)).toBeLessThan(value(free.feedRate))
+    expect(s.display.unwrap().spindleLoad.unwrap()).toBeLessThanOrEqual(100)
+    expect(codes(s)).toEqual(expect.arrayContaining(['feeds.powerExceeded', 'feeds.rubbing']))
+    expect(s.feedRate.unwrap().derivation.map((d) => d.step)).toContain('power')
+  })
+
+  it('exceeded with locked stepdown and feed: warn only', () => {
+    const m = limits({ power: Some(100), maxSpeed: 24_000 })
+    const s = suggest({ machine: m, locked: { ap: 5, vf: 600 } })
+    expect(value(s.feedRate)).toBe(600)
     expect(s.display.unwrap().spindleLoad.unwrap()).toBeGreaterThan(100)
-    expect(codes(s)).toEqual(['feeds.powerExceeded'])
+    expect(codes(s)).toContain('feeds.powerExceeded')
   })
 
   it('property: Pc is monotonic in ap', () => {
@@ -361,7 +375,7 @@ describe('suggestCutting: power check', () => {
       for (let ap = 0.1; ap <= 6; ap += 0.1) {
         const s = suggest({
           tool: tool({ type }),
-          engagement: { kind: 'slot', ap },
+          locked: { ap },
           machine: limits({ maxSpeed: 24_000 }),
         })
         const pc = s.display.unwrap().Pc.unwrap()
@@ -434,5 +448,136 @@ describe('machineLimits', () => {
       rigidity: 'extrusion',
     })
     expect(power.unwrap()).toBe(1500)
+  })
+})
+
+// docs/architecture/feeds-speeds.md#locked-inputs (task 3.14)
+describe('suggestCutting: locked inputs', () => {
+  const n0 = (100 * 1000) / (Math.PI * 6) // F1 at vc.min, D 6
+  it('locked n replaces F1 and the rpm clamp; vf follows it with the data chip load', () => {
+    const s = suggest({ locked: { n: 5000 }, machine: limits({ maxSpeed: 4000 }) })
+    expect(value(s.spindleSpeed)).toBe(5000)
+    expect(s.spindleSpeed.unwrap().derivation.map((d) => d.step)).toEqual(['locked'])
+    expect(value(s.feedRate)).toBeCloseTo(5000 * 2 * 0.02, 6)
+    expect(codes(s)).not.toContain('feeds.rpmAboveMachine')
+  })
+
+  it('locked n with a feed above the machine: vf clamped, n stays, fz drops (rubbing)', () => {
+    const s = suggest({ locked: { n: 5000 }, machine: limits({ maxFeedXY: 100 }) })
+    expect(value(s.spindleSpeed)).toBe(5000)
+    expect(value(s.feedRate)).toBe(100)
+    expect(s.display.unwrap().fz).toBeCloseTo(100 / (5000 * 2), 9)
+    expect(codes(s)).toEqual(expect.arrayContaining(['feeds.feedClamped', 'feeds.rubbing']))
+  })
+
+  it('locked vf: n = vf / (z·fz) from the data chip load', () => {
+    const s = suggest({ locked: { vf: 400 } })
+    expect(value(s.feedRate)).toBe(400)
+    expect(value(s.spindleSpeed)).toBeCloseTo(400 / (2 * 0.02), 6)
+    expect(s.display.unwrap().fz).toBeCloseTo(0.02, 9)
+    expect(value(s.plungeRate)).toBeCloseTo(0.3 * 400, 6) // F9 follows the locked feed
+  })
+
+  it('locked vf with n clamped to the spindle range: fz follows (chipLoadHigh / rubbing)', () => {
+    const high = suggest({ locked: { vf: 4000 }, machine: limits({ maxSpeed: 10_000 }) })
+    expect(value(high.spindleSpeed)).toBe(10_000)
+    expect(high.display.unwrap().fz).toBeCloseTo(4000 / (10_000 * 2), 9)
+    expect(codes(high)).toContain('feeds.chipLoadHigh')
+    expect(codes(high)).not.toContain('feeds.rpmAboveMachine')
+    const low = suggest({ locked: { vf: 100 }, machine: limits({ minSpeed: 10_000 }) })
+    expect(value(low.spindleSpeed)).toBe(10_000)
+    expect(codes(low)).toContain('feeds.rubbing')
+  })
+
+  it('locked n and vf: chip load is derived and only warns', () => {
+    const s = suggest({ locked: { n: 1000, vf: 1000 } })
+    expect(value(s.spindleSpeed)).toBe(1000)
+    expect(value(s.feedRate)).toBe(1000)
+    expect(s.display.unwrap().fz).toBeCloseTo(0.5, 9)
+    expect(codes(s)).toContain('feeds.chipLoadHigh')
+  })
+
+  it('locked ap: used for F4–F7, no stepdown suggested', () => {
+    const s = suggest({ locked: { ap: 2 } })
+    expect(s.stepdown.isNone()).toBe(true)
+    expect(value(s.spindleSpeed)).toBeCloseTo(n0, 6)
+    expect(s.display.unwrap().Q.unwrap()).toBeCloseTo(6 * 2 * value(s.feedRate), 6)
+  })
+
+  it('locked ae (facing): the engagement uses it instead of the strategy stepover', () => {
+    const s = suggest({ engagement: { kind: 'stepover', ae: 4.5 }, locked: { ae: 0.45 } })
+    expect(s.display.unwrap().chipThinning).toBeCloseTo(rctf(0.45, 6), 9)
+    // a slot ignores ae
+    expect(suggest({ locked: { ae: 0.45 } }).display.unwrap().chipThinning).toBe(1)
+  })
+
+  it('drilling: locked n → vf = fn·n; locked vf → n = vf / fn, clamped (fn follows)', () => {
+    const drill = tool({ type: 'drill', diameter: len('5'), pointAngle: deg('118') })
+    const e: Engagement = { kind: 'drill' }
+    const byN = suggest({ tool: drill, engagement: e, locked: { n: 2000 } })
+    expect(value(byN.feedRate)).toBeCloseTo(0.05 * 2000, 6)
+    const byVf = suggest({ tool: drill, engagement: e, locked: { vf: 200 } })
+    expect(value(byVf.spindleSpeed)).toBeCloseTo(200 / 0.05, 6)
+    const clamped = suggest({
+      tool: drill,
+      engagement: e,
+      locked: { vf: 2000 },
+      machine: limits({ maxSpeed: 5000 }),
+    })
+    expect(value(clamped.spindleSpeed)).toBe(5000)
+    expect(codes(clamped)).toContain('feeds.chipLoadHigh')
+  })
+})
+
+describe('noDataFor', () => {
+  it('returns the feeds.noData warning only when there is no data', () => {
+    const input = { tool: tool(), materialClass: 'aluminum' as const, engagement: SLOT }
+    expect(noDataFor({ ...input, machine: None }, TEST_DATA).isNone()).toBe(true)
+    expect(
+      noDataFor({ ...input, materialClass: 'other', machine: None }, TEST_DATA).unwrap().code,
+    ).toBe('feeds.noData')
+  })
+})
+
+// docs/architecture/feeds-speeds.md#final-value-check (task 3.14)
+describe('checkCutting', () => {
+  const input = (over: Partial<CuttingInput> = {}): CuttingInput => ({
+    tool: tool(),
+    materialClass: 'aluminum',
+    engagement: SLOT,
+    machine: None,
+    ...over,
+  })
+  const check = (over: Partial<CuttingInput>, values: Parameters<typeof checkCutting>[1]) =>
+    checkCutting(input(over), values, TEST_DATA).map((w) => [w.code, w.field])
+
+  it('chip load inside the data range: no warning', () => {
+    expect(check({}, { n: 1000, vf: 1000 * 2 * 0.04, ap: 1 })).toEqual([])
+  })
+
+  it('chip load below / above the data range warns on the feed', () => {
+    expect(check({}, { n: 1000, vf: 10, ap: 1 })).toEqual([['feeds.rubbing', 'feedRate']])
+    expect(check({}, { n: 1000, vf: 1000, ap: 1 })).toEqual([['feeds.chipLoadHigh', 'feedRate']])
+  })
+
+  it('chip thinning at the final facing stepover is credited', () => {
+    // fz 0.07 is above the 0.06 max at ae = D, but within it after RCTF at ae = 0.45
+    const facing = { engagement: { kind: 'stepover', ae: 4.5 } as Engagement }
+    expect(check(facing, { n: 1000, vf: 140, ap: 1, ae: 6 })).toEqual([
+      ['feeds.chipLoadHigh', 'feedRate'],
+    ])
+    expect(check(facing, { n: 1000, vf: 140, ap: 1, ae: 0.45 })).toEqual([])
+  })
+
+  it('power at the final values warns on the stepdown', () => {
+    const machine = limits({ power: Some(100), maxSpeed: 24_000 })
+    expect(check({ machine }, { n: 24_000, vf: 2000, ap: 5 })).toEqual([
+      ['feeds.powerExceeded', 'stepdown'],
+    ])
+    expect(check({ machine }, { n: 24_000, vf: 2000, ap: 0.05 })).toEqual([])
+  })
+
+  it('no data → no warnings', () => {
+    expect(check({ materialClass: 'other' }, { n: 1000, vf: 1, ap: 1 })).toEqual([])
   })
 })

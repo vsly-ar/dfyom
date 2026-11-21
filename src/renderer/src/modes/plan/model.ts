@@ -49,6 +49,29 @@ export function snapshotName(plan: PlanDTO, snapshotId: string | undefined): str
   return typeof v?.name === 'string' ? v.name : undefined
 }
 
+/**
+ * The preset the default rule picks for a tool copy (as `pickPreset` in core/plan/feeds.ts):
+ * the one for the stock's material class, else one without a class, else none (auto mode).
+ */
+export function defaultPresetName(
+  plan: PlanDTO,
+  toolSnapshotId: string | undefined,
+): string | null {
+  const presets =
+    (
+      plan.snapshots.find((s) => s.id === toolSnapshotId)?.values as
+        { presets?: { name: string; materialClass?: string }[] } | undefined
+    )?.presets ?? []
+  const stock = plan.snapshots.find((s) => s.id === plan.design.part.stock)?.values as
+    { material?: { class?: string } } | undefined
+  const cls = stock?.material?.class
+  return (
+    presets.find((p) => p.materialClass !== undefined && p.materialClass === cls)?.name ??
+    presets.find((p) => p.materialClass === undefined)?.name ??
+    null
+  )
+}
+
 /** A plan operation's name: the names of the design operations it machines. */
 export function planOperationName(plan: PlanDTO, designOperationIds: readonly string[]): string {
   const ops = plan.design.part.operations
@@ -64,6 +87,23 @@ export function planOperationKind(
 
 // ── queries ───────────────────────────────────────────────────────────────────────────────
 
+/** Lock of a feeds field (docs/modes/plan-v0.1.md#locks-and-auto-mode). */
+export type LockView =
+  | { readonly state: 'hidden' }
+  | { readonly state: 'available' }
+  | { readonly state: 'unavailable'; readonly rule: string; readonly reason: string }
+
+/** One feeds field of `plan.operation.list`. */
+export interface FeedView {
+  readonly value: number
+  readonly unit: string
+  readonly source: FeedSource
+  readonly locked: boolean
+  /** Auto mode: the value without the field's own entry. */
+  readonly recommended: { readonly value: number; readonly unit: string } | null
+  readonly lock: LockView
+}
+
 /** One row of `plan.operation.list`. */
 export interface PlanOperationView {
   readonly id: string
@@ -71,10 +111,10 @@ export interface PlanOperationView {
   readonly designOperationIds: readonly string[]
   readonly tool: { snapshotId: string; libraryItemId: string; name: string } | null
   readonly presetName: string | null
+  /** Auto mode (calculator): on, off (a preset is used), or unavailable with the reason. */
+  readonly auto: 'on' | 'off' | { readonly unavailable: string }
   readonly stickout: number | null
-  readonly feeds: Readonly<
-    Record<FeedField, { value: number; unit: string; source: FeedSource } | null>
-  >
+  readonly feeds: Readonly<Record<FeedField, FeedView | null>>
   readonly chipLoad: number | null
 }
 

@@ -34,6 +34,7 @@ import {
 } from '../../ui'
 import { defaultUnit, quantityOf } from '../design/model'
 import {
+  defaultPresetName,
   editable,
   feedFields,
   feedQuantity,
@@ -256,6 +257,7 @@ const FEED_ICON: Record<FeedField, FieldIconName> = {
 }
 
 const DEFAULT_PRESET = '__default'
+const AUTO = '__auto'
 const SHOWN_FIELDS = new Set<string>(['tool', 'stickout', 'presetName'])
 
 function OperationInspector({
@@ -306,7 +308,21 @@ function OperationInspector({
   const presets = (
     (toolCopy?.values as { presets?: { name: string }[] } | undefined)?.presets ?? []
   ).map((p) => p.name)
-  const defaultPreset = op.presetName === undefined ? (view?.presetName ?? null) : null
+  const defaultPreset = defaultPresetName(plan, op.tool)
+  const autoUnavailable =
+    view !== undefined && typeof view.auto === 'object' ? view.auto.unavailable : undefined
+  const presetMessages: FieldMessage[] = [
+    ...fieldMessages(findings, 'presetName'),
+    ...(autoUnavailable !== undefined
+      ? [
+          {
+            id: 'autoUnavailable',
+            severity: 'note' as const,
+            text: t.autoUnavailable(autoUnavailable),
+          },
+        ]
+      : []),
+  ]
 
   const lengthUnit = defaultUnit('length', units)
   const stickoutValue: Quantity | undefined =
@@ -372,29 +388,51 @@ function OperationInspector({
               value={stickoutValue}
               illustration={<FieldIcon name="depth" />}
               readOnly={readOnly}
-              messages={fieldMessages(findings, 'stickout')}
-              lock={{
-                locked: op.stickout !== undefined,
-                onLockedChange: (locked) =>
-                  update({ stickout: locked ? (stickoutValue?.source ?? null) : null }),
-              }}
+              messages={[
+                ...fieldMessages(findings, 'stickout'),
+                ...(op.stickout !== undefined
+                  ? [
+                      {
+                        id: 'stickout.entered',
+                        severity: 'note' as const,
+                        text: t.source('override', null),
+                        ...(readOnly
+                          ? {}
+                          : {
+                              fix: {
+                                label: t.useToolDefault,
+                                onApply: () => update({ stickout: null }),
+                              },
+                            }),
+                      },
+                    ]
+                  : []),
+              ]}
               onCommit={(q) => update({ stickout: q.source })}
             />
           ) : null}
           {current !== null ? (
-            <Field
-              label={t.preset}
-              messages={fieldMessages(findings, 'presetName')}
-              readOnly={readOnly}
-            >
+            <Field label={t.preset} messages={presetMessages} readOnly={readOnly}>
               <Select
                 options={[
-                  { value: DEFAULT_PRESET, label: t.presetDefault(defaultPreset) },
+                  {
+                    value: DEFAULT_PRESET,
+                    label: t.presetDefault(defaultPreset, autoUnavailable === undefined),
+                  },
+                  { value: AUTO, label: t.presetAuto, disabled: autoUnavailable !== undefined },
                   ...presets.map((p) => ({ value: p, label: p })),
                 ]}
-                value={op.presetName ?? DEFAULT_PRESET}
+                value={op.auto === true ? AUTO : (op.presetName ?? DEFAULT_PRESET)}
                 disabled={readOnly}
-                onValueChange={(v) => update({ presetName: v === DEFAULT_PRESET ? null : v })}
+                onValueChange={(v) =>
+                  update(
+                    v === AUTO
+                      ? { auto: true }
+                      : v === DEFAULT_PRESET
+                        ? { presetName: null, auto: false }
+                        : { presetName: v },
+                  )
+                }
               />
             </Field>
           ) : null}
@@ -413,6 +451,7 @@ function OperationInspector({
                 readOnly={readOnly}
                 findings={findings}
                 onSet={(source) => update({ overrides: { [f]: source } })}
+                onLock={(locked) => update({ locks: { [f]: locked } })}
               />
             ))}
             {view.chipLoad !== null ? (
@@ -432,7 +471,11 @@ function OperationInspector({
   )
 }
 
-/** One feeds-and-speeds field: the resolved value with its source; the lock pins an override. */
+/**
+ * One feeds-and-speeds field: the resolved value and where it comes from. In auto mode a field
+ * is Recommended, Entered (with "Use <recommendation>") or Locked; the lock is shown only where
+ * the list offers one (docs/modes/plan-v0.1.md#locks-and-auto-mode). Typing never locks.
+ */
 function FeedField({
   field,
   op,
@@ -441,6 +484,7 @@ function FeedField({
   readOnly,
   findings,
   onSet,
+  onLock,
 }: {
   field: FeedField
   op: PlanOperationDTO
@@ -449,6 +493,7 @@ function FeedField({
   readOnly: boolean
   findings: readonly PlanWarning[]
   onSet: (source: string | null) => void
+  onLock: (locked: boolean) => void
 }): React.JSX.Element {
   const override = op.overrides[field]
   const resolved = view.feeds[field]
@@ -459,12 +504,51 @@ function FeedField({
         ? feedQuantity(field, resolved.value, units)
         : undefined
   const source = override !== undefined ? 'override' : resolved?.source
-  const messages: FieldMessage[] = [
-    ...fieldMessages(findings, field),
-    source !== undefined
-      ? { id: 'source', severity: 'note', text: t.source(source, view.presetName) }
-      : { id: 'source', severity: 'note', text: t.unresolved },
-  ]
+  const locked = resolved?.locked ?? false
+  const recommended =
+    resolved?.recommended != null
+      ? feedQuantity(field, resolved.recommended.value, units)?.source
+      : undefined
+  const sourceMessage = (): FieldMessage => {
+    if (source === undefined) return { id: 'source', severity: 'note', text: t.unresolved }
+    if (locked) return { id: 'source', severity: 'note', text: t.locked }
+    if (source !== 'override')
+      return { id: 'source', severity: 'note', text: t.source(source, view.presetName) }
+    // entered: back to the recommendation (auto mode) or to the preset/strategy value
+    const clear = () => onSet(null)
+    return recommended !== undefined
+      ? {
+          id: 'source',
+          severity: 'note',
+          text: t.entered(recommended),
+          ...(readOnly ? {} : { fix: { label: t.useRecommended(recommended), onApply: clear } }),
+        }
+      : {
+          id: 'source',
+          severity: 'note',
+          text: t.source('override', view.presetName),
+          ...(readOnly ? {} : { fix: { label: t.reset, onApply: clear } }),
+        }
+  }
+  const fromFindings: FieldMessage[] = fieldMessages(findings, field).map((m) =>
+    m.id.startsWith('feeds.lockInactive:') && !readOnly
+      ? { ...m, fix: { label: t.unlock, onApply: () => onLock(false) } }
+      : m,
+  )
+  const note = sourceMessage()
+  // Only the top message shows its fix: a warning about the entered value (chip load, power)
+  // carries the way back ("Use …", "Reset") when it has no fix of its own.
+  const host = note.fix
+    ? fromFindings.findIndex((m) => m.fix === undefined && m.severity !== 'error')
+    : -1
+  const messages: FieldMessage[] =
+    host < 0
+      ? [...fromFindings, note]
+      : [
+          ...fromFindings.map((m, i) => (i === host ? { ...m, fix: note.fix! } : m)),
+          { id: note.id, severity: note.severity, text: note.text },
+        ]
+  const lock = resolved?.lock
   return (
     <QuantityInput
       label={t.feeds[field]}
@@ -474,10 +558,17 @@ function FeedField({
       illustration={<FieldIcon name={FEED_ICON[field]} />}
       readOnly={readOnly}
       messages={messages}
-      lock={{
-        locked: override !== undefined,
-        onLockedChange: (locked) => onSet(locked ? (value?.source ?? null) : null),
-      }}
+      {...(lock !== undefined && lock.state !== 'hidden' && !readOnly
+        ? {
+            lock: {
+              locked,
+              onLockedChange: onLock,
+              name: `Lock ${t.feeds[field]}`,
+              // a pressed lock can always be released; only pressing it can be refused
+              disabledReason: lock.state === 'unavailable' && !locked ? lock.reason : undefined,
+            },
+          }
+        : {})}
       onCommit={(q) => onSet(q.source)}
     />
   )

@@ -84,7 +84,7 @@ describe('feedsSpeeds.suggest', () => {
       'input.malformed',
     )
     expectErrCode(
-      d.query('feedsSpeeds.suggest', { ...args, engagement: { kind: 'slot', ap: -1 } }, agent),
+      d.query('feedsSpeeds.suggest', { ...args, locked: { stepdown: -1 } }, agent),
       'input.malformed',
     )
   })
