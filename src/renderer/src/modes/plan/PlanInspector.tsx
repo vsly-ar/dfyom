@@ -44,6 +44,7 @@ import {
   snapshotName,
   type PlanOperationView,
 } from './model'
+import { NewToolDialog } from './NewToolDialog'
 import { usePlanCommand, usePlanData } from './plan-store'
 import styles from './Plan.module.css'
 import { findingsOf, useChosenPlan, usePlanSelection } from './usePlan'
@@ -342,6 +343,20 @@ function OperationInspector({
               }}
             />
           </Field>
+          {!readOnly ? (
+            <NewToolDialog
+              units={units}
+              operationKind={kind}
+              onAdded={async (id) => {
+                const r = await call('plan.tool.assign', {
+                  planId: plan.id,
+                  planOperationId: op.id,
+                  toolLibraryItemId: id,
+                })
+                return r.ok ? undefined : r.error
+              }}
+            />
+          ) : null}
           {chosen !== undefined && chosen.reasons.length > 0 ? (
             <ul className={styles['reasons']} aria-label={t.reasons}>
               {chosen.reasons.map((r) => (

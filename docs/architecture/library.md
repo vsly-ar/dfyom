@@ -115,6 +115,7 @@ The app host opens the library once per instance (`Library.open` over `<appData>
 - Writes are atomic per file (temp + fsync + rename), like the [working folder](persistence.md#working-folder-writes). Every instance shares the folder; a write whose `revision` differs from the file on disk fails with `command.conflict`.
 - An item that does not load is listed with its error and never deleted or overwritten automatically ([pre-alpha rule](../conventions/error-handling/migrations.md#pre-alpha-exception-no-data-preservation-yet)).
 - Commands: `library.{stock,tool,machine}.{add,update,remove}`; queries `.get` and `.list` ([naming](commands.md#naming)). They are `effect` commands ([kinds](commands.md#command-definition)): written to disk at once, **not undoable**, no history entry, still logged in the action log.
+- **UI (v0.1):** the stock setup adds a block ([design.md](../modes/design.md#workflow)); plan mode's "New tool…" and "New machine…" forms add a tool or machine with the fields v0.1 needs ([ui.md](../conventions/ui.md#plan-mode-task-37)). Editing and removing items needs the library editor (later milestone).
 - `remove` asks for confirmation: its args schema requires `confirm: true` (`z.literal(true)`), so a call without it fails with `input.malformed`. The UI sets it after a confirmation dialog; agents and CLI pass it explicitly. Projects keep their snapshots of a removed item.
 
 ## Implementation decisions (task 2.4)

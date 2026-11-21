@@ -1,6 +1,7 @@
 /* Menu. Look: ui-design-system.html (.menu). Doc: docs/conventions/ui.md#elevation */
 .content {
-  z-index: var(--z-popover);
+  /* above dialogs: it can open inside one (ui.md#elevation) */
+  z-index: calc(var(--z-dialog) + 1);
   min-width: 210px;
   padding: 4px;
   border-radius: var(--radius-md);

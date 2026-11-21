@@ -67,7 +67,7 @@ export const planMessages = {
     title: 'Machine',
     label: 'Machine',
     placeholder: 'Choose a machine',
-    empty: 'The machine library is empty. Add a machine to the library to export gCode.',
+    empty: 'The machine library is empty. Add a machine to export gCode.',
   },
 
   setup: {
@@ -136,7 +136,7 @@ export const planMessages = {
     groups: { tool: 'Tool', feeds: 'Feeds and speeds' },
     tool: 'Tool',
     toolPlaceholder: 'Choose a tool',
-    noSuggestion: 'No library tool can make this operation. Add a fitting tool to the library.',
+    noSuggestion: 'No library tool can make this operation. Add a fitting one with “New tool…”.',
     suggestion: (name: string, diameter: string) => `${name} · Ø ${diameter}`,
     reasons: 'Why this tool',
     otherTool: (name: string) => `${name} (current)`,

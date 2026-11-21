@@ -45,6 +45,7 @@ import {
 } from '../../ui'
 import { defaultUnit, quantityOf } from '../design/model'
 import { ExportDialog } from './ExportDialog'
+import { NewMachineDialog } from './NewMachineDialog'
 import {
   allows,
   designStale,
@@ -93,7 +94,8 @@ export function PlanNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
   const [plan, choose] = useChosenPlan(doc)
   const call = usePlanCommand()
   const [error, setError] = useState<AppErrorData | undefined>(undefined)
-  const machines = useLibraryItems('machine')
+  const [machinesAdded, setMachinesAdded] = useState(0)
+  const machines = useLibraryItems('machine', machinesAdded)
   const part = Object.values(doc.parts)[0]
 
   const create = async () => {
@@ -121,6 +123,18 @@ export function PlanNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
               onClick: () => void create(),
             }}
           />
+          {machines?.length === 0 ? (
+            <>
+              <p className={styles['why']}>{m.machine.empty}</p>
+              <NewMachineDialog
+                units={doc.unitSystem}
+                onAdded={async () => {
+                  setMachinesAdded((n) => n + 1)
+                  return undefined
+                }}
+              />
+            </>
+          ) : null}
           {error ? <ErrorMessage error={error} /> : null}
         </div>
       </div>
@@ -222,7 +236,7 @@ function PlanView({
         <StaleNotices plan={plan} data={data} send={send} />
       </Section>
 
-      <MachineSection plan={plan} send={send} />
+      <MachineSection plan={plan} send={send} units={doc.unitSystem} />
       <SetupSection doc={doc} plan={plan} />
       <OperationList plan={plan} data={data} />
       <ToolpathSection plan={plan} data={data} />
@@ -314,10 +328,14 @@ function StaleNotices({
 function MachineSection({
   plan,
   send,
+  units,
 }: {
   plan: PlanDTO
   send: (name: string, args: object) => Promise<unknown>
+  units: ProjectDoc['unitSystem']
 }): React.JSX.Element {
+  const call = usePlanCommand()
+  const canSet = allows(plan, 'plan.machine.set')
   const machines = useLibraryItems('machine', plan.machine)
   const copy = plan.snapshots.find((s) => s.id === plan.machine)
   const options = (machines ?? []).map((i) => ({ value: i.id, label: i.name }))
@@ -336,10 +354,19 @@ function MachineSection({
           placeholder={m.machine.placeholder}
           options={options}
           {...(copy === undefined ? {} : { value: copy.libraryItemId })}
-          disabled={!allows(plan, 'plan.machine.set')}
+          disabled={!canSet}
           onValueChange={(id) => void send('plan.machine.set', { machineLibraryItemId: id })}
         />
       )}
+      {canSet ? (
+        <NewMachineDialog
+          units={units}
+          onAdded={async (id) => {
+            const r = await call('plan.machine.set', { planId: plan.id, machineLibraryItemId: id })
+            return r.ok ? undefined : r.error
+          }}
+        />
+      ) : null}
     </Section>
   )
 }
