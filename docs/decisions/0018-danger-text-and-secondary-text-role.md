@@ -18,6 +18,8 @@ The user decided: **split tokens**.
 - **`--danger-text`** is the colour for red text and meets the text targets (read 75, label 60); in dark it may stay pale. **`--danger`** is a saturated red again, close to the approved values, for outlines, the viewport error marker, the danger button's hover border, and icons; its pairs take the mark (30) and icon (45) targets. Components use `--danger-text` wherever red is a text colour (including icons that inherit the text colour inside the same element).
 - A **secondary** text role at **Lc 60** covers `--text-muted` (11–13 px secondary text). Body copy that people must read uses `--text` (read, Lc 75). `--text-muted` comes back close to its approved values so the hierarchy shows again.
 
+**Review (2026-11-21):** the user accepted the resulting values as is: `--danger` saturated with red text on `--danger-text`, `--text-muted` as secondary text at Lc 60, the classification below (short descriptions and read-only values stay `--text-muted`; the plan navigator's error count stays `--danger`), and the new `--vp-plunge`.
+
 Values and Lc per pair: [ui.md design system](../conventions/ui.md#design-system) and the design page changelog; the pairs are in `src/renderer/src/ui/tokens.test.ts`.
 
 ## Consequences

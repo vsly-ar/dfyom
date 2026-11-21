@@ -18,6 +18,14 @@ Docs to accept first: [quantities](architecture/quantities.md), [geometry](archi
 
 Out of scope: multiple setups, optimization, simulation beyond previews, carving, real machines.
 
+## Next milestone (v0.2)
+
+Goal and full scope not decided yet. Decided items, in priority order:
+
+1. **Strategy editing in the plan inspector** (high priority, deferred from v0.1 on 2026-11-21): strategy parameters (direction, entry, cycle, allowances …), plan-only edits of the design snapshot, and the feeds calculator's derivation shown in the feeds card. Agents and the CLI already have the commands. With plan-only edits, the plan scene draws the plan's snapshot part instead of the design's current mesh. Known-issue rows in [plans/v0.1.md](plans/v0.1.md#known-issues-and-risks).
+
 ## Later (unordered)
 
 Multiple setups and stock repositioning; optimization; simulation and collision checks; vector carving and engraving; real-machine control with the safety spec; sensors and automation.
+
+Low priority: plan warnings, feeds messages and lock reasons in the project's unit system through a message catalogue, as DFM warnings already are (deferred from v0.1 on 2026-11-21; today they are English with canonical units, [plan-v0.1.md](modes/plan-v0.1.md#implementation-task-314)).
