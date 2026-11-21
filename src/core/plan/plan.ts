@@ -10,6 +10,7 @@ import { Snapshot, type SnapshotDTO } from '../library/snapshot'
 import { Stock } from '../library/stock'
 import { Tool } from '../library/tool'
 import type { ProjectDoc, UnitSystem } from '../project/document'
+import { feedModeIssues } from './feeds'
 import type { PlanDTO, PlanOperationDTO, SetupDTO } from './plan.dto'
 
 export interface LoadedPlan {
@@ -74,9 +75,18 @@ export function loadPlanDTO(
   }
   const setup = plan.setups[0]
   if (setup === undefined) return broken(plan, 'the plan has no setup', where)
-  for (const op of setup.operations)
+  for (const op of setup.operations) {
     if (op.tool !== undefined && !tools.has(op.tool))
       return broken(plan, `the tool copy of ${op.id} is missing`, where)
+    const kind = part.unwrap().operations.find((o) => o.id === op.designOperationIds[0])?.kind
+    const issues = kind === undefined ? [] : feedModeIssues(op, kind)
+    if (issues.length > 0)
+      return fail('model.invariant', `plan ${plan.id}: ${op.id} has invalid locks`, {
+        issues: issues.map((i) => ({ ...i, path: ['setups', 0, 'operations', op.id, ...i.path] })),
+        where,
+        data: { planId: plan.id },
+      })
+  }
   return Ok({ dto: plan, part: part.unwrap(), stock, units, tools, machine, setup })
 }
 

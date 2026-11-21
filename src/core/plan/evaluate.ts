@@ -11,7 +11,13 @@ import type { MaterialRow } from '../feeds-speeds/data'
 import type { CuttingPreset, Tool } from '../library/tool'
 import { Quantity } from '../quantity/quantity'
 import { feedFindings, stockFindings, toolFindings, type PlanWarning } from './checks'
-import { pickPreset, resolveFeeds, type Overrides, type ResolvedFeeds } from './feeds'
+import {
+  calculatorNoData,
+  pickPreset,
+  resolveFeeds,
+  type Overrides,
+  type ResolvedFeeds,
+} from './feeds'
 import { orderFindings } from './order'
 import { checkPartFits } from './validity'
 import { designOperations, type LoadedPlan } from './plan'
@@ -28,7 +34,10 @@ export interface OperationEvaluation {
   readonly kind: OperationKind
   readonly ops: readonly Operation[]
   readonly tool: Option<Tool>
+  /** The preset in use: None in auto mode. */
   readonly preset: Option<CuttingPreset>
+  /** Auto mode requested: chosen, or the default because the tool has no preset. */
+  readonly autoRequested: boolean
   /** Resolved stickout (mm): the plan's, else the tool's stickout, else its flute length. */
   readonly stickout: Option<number>
   readonly strategy: ResolvedStrategy
@@ -71,9 +80,17 @@ export function evaluateOperation(
         ? None
         : Option.nonNull(plan.tools.get(op.tool))
   const materialClass = plan.stock.material.class
-  const preset = tool.andThen((t) =>
-    pickPreset(t, materialClass, candidate === undefined ? op.presetName : undefined),
-  )
+  const machine = plan.machine.map(machineLimits)
+  const chosen = candidate === undefined ? op.presetName : undefined
+  const named = tool.andThen((t) => pickPreset(t, materialClass, chosen))
+  // Auto mode: chosen, or the default without a preset; on only with calculator data.
+  const autoRequested = op.auto === true || (chosen === undefined && named.isNone())
+  const autoOn =
+    autoRequested &&
+    tool.mapOr(false, (t) =>
+      calculatorNoData({ kind, tool: t, materialClass, machine }, data).isNone(),
+    )
+  const preset: Option<CuttingPreset> = autoOn ? None : named
   const sctx: StrategyContext = {
     ops,
     allOps: plan.part.operations,
@@ -97,6 +114,7 @@ export function evaluateOperation(
       ops,
       tool,
       preset,
+      autoRequested,
       stickout: None,
       strategy,
       feeds: None,
@@ -118,6 +136,7 @@ export function evaluateOperation(
       message: issue.message,
       params: {},
     })
+  const stickout = stickoutOf(op, t)
   const feeds = resolveFeeds(
     {
       kind,
@@ -125,7 +144,10 @@ export function evaluateOperation(
       preset,
       overrides: overridesOf(op),
       materialClass,
-      machine: plan.machine.map(machineLimits),
+      machine,
+      auto: autoRequested,
+      locked: op.locked ?? [],
+      stickout,
       ...(kind === 'facing' && ops[0]?.kind === 'facing'
         ? { facingDepth: ops[0].depth.canonical }
         : {}),
@@ -138,10 +160,9 @@ export function evaluateOperation(
       push({
         field,
         rule: 'unresolved',
-        message: `${field}: no override, preset or calculator value`,
+        message: `${field}: no entered, preset or calculator value`,
         params: {},
       })
-  const stickout = stickoutOf(op, t)
   const stepdown = feeds.fields.stepdown.map((v) => v.value)
   for (const f of toolFindings({
     ops,
@@ -160,7 +181,8 @@ export function evaluateOperation(
       severity: w.severity,
       message: w.message,
       planOperationId: op.id,
-      rule: w.code,
+      ...(w.field === undefined ? {} : { field: w.field }),
+      rule: w.rule ?? w.code,
       params: w.params,
     })
   return {
@@ -169,6 +191,7 @@ export function evaluateOperation(
     ops,
     tool,
     preset,
+    autoRequested,
     stickout: Some(stickout),
     strategy,
     feeds: Some(feeds),

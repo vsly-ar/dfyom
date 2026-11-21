@@ -119,7 +119,7 @@ describe('Field', () => {
     expect(screen.queryByRole('button', { name: /dismissed/ })).toBeNull()
   })
 
-  it('toggles the lock (aria-pressed)', async () => {
+  it('toggles the lock (aria-pressed) under a constant name', async () => {
     function Locked(): React.JSX.Element {
       const [locked, setLocked] = useState(false)
       return (
@@ -129,10 +129,43 @@ describe('Field', () => {
       )
     }
     const { user } = renderUi(<Locked />)
-    const lock = screen.getByRole('button', { name: 'Lock value' })
+    const lock = screen.getByRole('button', { name: 'Lock Feed' })
     expect(lock).toHaveAttribute('aria-pressed', 'false')
     await user.click(lock)
-    expect(lock).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Lock Feed' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+  })
+
+  it('hides the lock without the lock prop', () => {
+    renderUi(
+      <Field label="Corner R">
+        <input />
+      </Field>,
+    )
+    expect(screen.queryByRole('button', { name: /lock/i })).toBeNull()
+  })
+
+  it('a lock with a disabled reason is aria-disabled, focusable, and shows the reason', async () => {
+    const onLockedChange = vi.fn()
+    const reason = "24000 rpm is above this machine's 18000 rpm."
+    const { user } = renderUi(
+      <Field label="Spindle speed" lock={{ locked: false, onLockedChange, disabledReason: reason }}>
+        <input />
+      </Field>,
+    )
+    const lock = screen.getByRole('button', { name: 'Lock Spindle speed' })
+    expect(lock).toHaveAttribute('aria-disabled', 'true')
+    expect(lock).not.toBeDisabled()
+    expect(lock).toHaveAccessibleDescription(reason)
+    expect(screen.getByText(reason)).toBeVisible()
+    await user.tab() // the lock comes before the input
+    expect(lock).toHaveFocus()
+    await user.click(lock)
+    await user.keyboard('{Enter}')
+    expect(onLockedChange).not.toHaveBeenCalled()
+    await expectNoAxeViolations()
   })
 
   it('passes readOnly to a value control', () => {

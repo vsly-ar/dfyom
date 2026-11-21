@@ -432,7 +432,6 @@ const TOOLS = [
 ] as const
 
 function Fields(): React.JSX.Element {
-  const [locked, setLocked] = useState(true)
   const lockOff = { locked: false, onLockedChange: noop }
   const stepdown: FieldMessage[] = [
     {
@@ -445,7 +444,7 @@ function Fields(): React.JSX.Element {
     { id: 'agent', severity: 'info', text: 'Changed by agent 2 min ago' },
   ]
   return (
-    <Row label="Field · illustration (35 % saturation at rest, full on focus), lock, input with pencil, support area under the input">
+    <Row label="Field · illustration (35 % saturation at rest, full on focus), lock (feeds fields in auto mode only; disabled with its reason), input with pencil, support area under the input">
       <div className={styles['fields']}>
         <Field
           label="Stepdown"
@@ -462,7 +461,6 @@ function Fields(): React.JSX.Element {
         <Field
           label="Corner R"
           illustration={<FieldIcon name="corner" />}
-          lock={lockOff}
           messages={[
             {
               id: 'corner.tool',
@@ -478,7 +476,7 @@ function Fields(): React.JSX.Element {
             adjust={<FieldAdjustButton label="Adjust Corner radius" fix />}
           />
         </Field>
-        <Field label="Chamfer" illustration={<FieldIcon name="chamfer" />} lock={lockOff}>
+        <Field label="Chamfer" illustration={<FieldIcon name="chamfer" />}>
           <FieldInput
             defaultValue="45"
             unit="°"
@@ -488,7 +486,6 @@ function Fields(): React.JSX.Element {
         <Field
           label="Width"
           illustration={<FieldIcon name="width" />}
-          lock={lockOff}
           echo="= 1.588 mm · ±0.1 mm from part"
         >
           <FieldInput
@@ -500,7 +497,6 @@ function Fields(): React.JSX.Element {
         <Field
           label="Depth"
           illustration={<FieldIcon name="depth" />}
-          lock={lockOff}
           messages={[
             {
               id: 'parse',
@@ -516,13 +512,23 @@ function Fields(): React.JSX.Element {
             adjust={<FieldAdjustButton label="Adjust Depth" />}
           />
         </Field>
+        <Field
+          label="Spindle speed"
+          illustration={<FieldIcon name="corner" />}
+          lock={{
+            locked: false,
+            onLockedChange: noop,
+            disabledReason: "24000 rpm is above this machine's 18000 rpm.",
+          }}
+        >
+          <FieldInput defaultValue="24000" unit="rpm" />
+        </Field>
         <Field label="Tool" illustration={<FieldIcon name="tool" />}>
           <Select options={TOOLS} defaultValue="t1" />
         </Field>
         <Field
           label="Feed"
           illustration={<FieldIcon name="feed" />}
-          lock={{ locked, onLockedChange: setLocked }}
           readOnly
           messages={[
             {

@@ -1,8 +1,8 @@
 # Feeds-and-speeds calculator
 
-Status: implemented (locked inputs: [draft](#locked-inputs-draft)) · Code: [`src/core/feeds-speeds/`](../../src/core/feeds-speeds/suggest.ts) · Used by: [plan-v0.1.md](../modes/plan-v0.1.md#feeds-and-speeds) · Presets: [library.md](library.md#feeds-and-speeds-presets) · Values: [quantities.md](quantities.md) · Terms: [glossary.md](../glossary.md) · Task: [v0.1 plan](../plans/v0.1.md) 1.15 (code: 2.12)
+Status: implemented (locked inputs and final-value check: task 3.14) · Code: [`src/core/feeds-speeds/`](../../src/core/feeds-speeds/suggest.ts) · Used by: [plan-v0.1.md](../modes/plan-v0.1.md#feeds-and-speeds) · Presets: [library.md](library.md#feeds-and-speeds-presets) · Values: [quantities.md](quantities.md) · Terms: [glossary.md](../glossary.md) · Task: [v0.1 plan](../plans/v0.1.md) 1.15 (code: 2.12)
 
-The calculator is the third step of the [resolution order](../modes/plan-v0.1.md#feeds-and-speeds) (override → tool preset → **calculator** → strategy fallback). It suggests `spindleSpeed`, `feedRate`, `plungeRate`, `stepdown` and `stepover` for one plan operation from the tool, the stock's material class, the strategy's engagement and the machine, and explains every number ([principles §5](../principles.md#5-user-friendly-beginner-friendly-highly-graphical)).
+The calculator recommends the feeds of a plan operation in [auto mode](../modes/plan-v0.1.md#locks-and-auto-mode) (entered value → **calculator** → strategy fallback; outside auto mode a tool preset gives fixed values). It suggests `spindleSpeed`, `feedRate`, `plungeRate`, `stepdown` and `stepover` for one plan operation from the tool, the stock's material class, the strategy's engagement and the machine, and explains every number ([principles §5](../principles.md#5-user-friendly-beginner-friendly-highly-graphical)).
 
 ## Formulas
 
@@ -30,26 +30,28 @@ Symbols follow Sandvik Coromant (ISO): `vc` surface speed, `D` tool diameter, `z
 | ---------- | ---------------------------------------------------------------------------------- | ----------------------------------------- |
 | Tool       | plan's tool copy: `type`, `diameter`, `cornerRadius`, `fluteCount`, `toolMaterial` | F1–F5, F9; data row and diameter band     |
 | Material   | stock `material.class` ([library](library.md#stock))                               | data row                                  |
-| Engagement | strategy + resolved `stepover`/`stepdown` (override or preset win, see below)      | F3–F7                                     |
+| Engagement | strategy + locked `stepdown`/facing `stepover` ([Locked inputs](#locked-inputs))   | F3–F7                                     |
 | Machine    | `spindle.minSpeed/maxSpeed`, `maxFeedRate.x/y/z`, `spindle.power`¹, `rigidity`¹    | clamps, power check, conservative factors |
 
 ¹ New optional machine fields ([Changes to other docs](#changes-to-other-docs-applied-with-task-212)). Without `spindle.power` the power check is skipped (info); without `rigidity` the lowest preset applies.
 
-**Order** (replaced by [Locked inputs](#locked-inputs-draft) once accepted): `stepdown` and `stepover` are resolved first (override → preset → calculator → strategy fallback); `n`, `vf` and `plungeRate` are then computed for the **resolved** engagement, so a user stepover still gets chip thinning and a power check.
+**Order:** locked values are inputs, everything else is recommended around them ([Locked inputs](#locked-inputs)); entered (unlocked) values are not inputs, and the [final-value check](#final-value-check) sees them. (Until task 3.14 every resolved stepdown/stepover override fed the calculator.)
 
 **Output** `CuttingSuggestion`: each of the five fields is `Option<{ value, derivation }>`; `derivation` lists formula id, inputs and result per step (rendered as formulas and tooltips in the UI, returned verbatim to agents). Derived display values: `vc` actual, `fz` actual, `Q`, `Pc`, spindle load %. Plus `warnings[]`.
 
-| Warning code            | When                                                                     | Effect                                                                     |
-| ----------------------- | ------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
-| `feeds.rpmAboveMachine` | `n > spindle.maxSpeed` (small tools, aluminum)                           | `n` = max; `vf` keeps `fz` (F2), actual `vc` shown lower                   |
-| `feeds.rpmBelowMachine` | `n < spindle.minSpeed` (large tools, steel, router spindles)             | `n` = min; actual `vc` too high → heat/wear warning; `fz` kept             |
-| `feeds.feedClamped`     | `vf > min(maxFeedRate.x, .y)`                                            | `vf` = max; `n` lowered to keep `fz` while `n ≥ minSpeed`, else `fz` drops |
-| `feeds.rubbing`         | actual `fz` < data minimum after clamping                                | warn: chips too thin, tool rubs and heats                                  |
-| `feeds.powerExceeded`   | `Pc > Pavail` (F7 vs. [machine check](#hobby-machine-realism))           | calculator-owned `stepdown` reduced to fit; else warn only                 |
-| `feeds.noData`          | `materialClass = other`, `toolMaterial` unset/`other`, `D` outside bands | no suggestion (`None`); fallback or `plan.check` error as today            |
-| `feeds.powerSkipped`    | milling without `spindle.power` (or without a machine)                   | info only: power check skipped; `Pc` still shown                           |
+| Warning code            | When                                                                     | Effect                                                                       |
+| ----------------------- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| `feeds.rpmAboveMachine` | `n > spindle.maxSpeed` (small tools, aluminum)                           | `n` = max; `vf` keeps `fz` (F2), actual `vc` shown lower                     |
+| `feeds.rpmBelowMachine` | `n < spindle.minSpeed` (large tools, steel, router spindles)             | `n` = min; actual `vc` too high → heat/wear warning; `fz` kept               |
+| `feeds.feedClamped`     | `vf > min(maxFeedRate.x, .y)`                                            | `vf` = max; `n` lowered to keep `fz` while `n ≥ minSpeed`, else `fz` drops   |
+| `feeds.rubbing`         | actual `fz` < data minimum after clamping                                | warn: chips too thin, tool rubs and heats                                    |
+| `feeds.chipLoadHigh`    | actual `fz` > data maximum (only with a locked or entered feed or speed) | warn: chips too thick, the tool may break or chatter                         |
+| `feeds.powerExceeded`   | `Pc > Pavail` (F7 vs. [machine check](#hobby-machine-realism))           | calculator-owned `stepdown` reduced to fit; else an unlocked feed; else warn |
+| `feeds.noData`          | `materialClass = other`, `toolMaterial` unset/`other`, `D` outside bands | no suggestion (`None`); fallback or `plan.check` error as today              |
+| `feeds.powerSkipped`    | milling without `spindle.power` (or without a machine)                   | info only: power check skipped; `Pc` still shown                             |
+| `feeds.lockInactive`    | a stored lock breaks an [impossible-lock](#impossible-locks) rule now    | the lock is ignored (plan mode adds it, with `field` and the rule)           |
 
-All warnings join `plan.warning.list`; none is an error. Plan-mode machine checks are unchanged ([plan record](../modes/plan-v0.1.md#plan-record)).
+All warnings join `plan.warning.list` (chip load and power from the [final-value check](#final-value-check)); none is an error. Plan-mode machine checks are unchanged ([plan record](../modes/plan-v0.1.md#plan-record)).
 
 ## Engagement per strategy
 
@@ -61,7 +63,7 @@ All warnings join `plan.warning.list`; none is an error. Plan-mode machine check
 | Drilling (drill) | –                   | –            | F1 with drill `vc`, F8, `plungeRate = vf`; peck parameters are strategy-owned.      |
 | Drilling (helix) | `D` (slot)          | `helixPitch` | Treated as a slot on a helix.                                                       |
 
-Stepdown suggestion: `ap = apSlot(material) × D × rigidityFactor`, ≤ `fluteLength`; stepover suggestion is left to the strategy fallback in v0.1 (the strategies fix engagement, not the calculator).
+Stepdown suggestion: `ap = apSlot(material) × D × rigidityFactor`, ≤ `fluteLength` (none when the stepdown is locked); stepover suggestion is left to the strategy fallback in v0.1 (the strategies fix engagement, not the calculator).
 
 ## Material data
 
@@ -114,13 +116,13 @@ Curated, versioned TypeScript data in `src/core/feeds-speeds/data.ts` (code, not
 
 **Gaps:** HSS end mills (all classes), drills (`fn` and drill `vc`), tools ≤ 3 mm and > 25 mm, stainless/tool steels, high-silicon aluminium castings and material class `other` → `feeds.noData`.
 
-## Locked inputs (draft)
+## Locked inputs
 
-Status: **draft**, not implemented: waits for the open questions in [plan-v0.1.md § Locks and auto mode](../modes/plan-v0.1.md#locks-and-auto-mode-draft), which owns when locks exist and what an entered value is. This section is how the calculator uses locked values. Once accepted it replaces the **Order** paragraph in [Inputs and outputs](#inputs-and-outputs) and the "`ap` given" rule in [Implementation decisions](#implementation-decisions-task-212).
+Accepted 2026-11-21, implemented in task 3.14. [plan-v0.1.md § Locks and auto mode](../modes/plan-v0.1.md#locks-and-auto-mode) owns when locks exist and what an entered value is; this section is how the calculator uses locked values.
 
-A **locked** value is a fixed input: the calculator recommends every unlocked field around it, so locking the spindle speed makes the feed follow it. An **entered** (typed, unlocked) value is not an input: it replaces only its own field's value, and the recommendation of the other fields stays what it would be without it. The [final-value check](#final-value-check-draft) still sees it.
+A **locked** value is a fixed input: the calculator recommends every unlocked field around it, so locking the spindle speed makes the feed follow it. An **entered** (typed, unlocked) value is not an input: it replaces only its own field's value, and the recommendation of the other fields stays what it would be without it. The [final-value check](#final-value-check) still sees it.
 
-`CuttingInput` gains `locked: { n?, vf?, ap?, ae? }` (canonical numbers). `engagement` then carries only the kind and the strategy's `ae` (no `ap`); a locked stepdown is `locked.ap`, a locked facing stepover `locked.ae`. `plungeRate` is never an input (nothing depends on it), so it has no lock.
+`CuttingInput` has `locked?: { n?, vf?, ap?, ae? }` (canonical numbers). `engagement` then carries only the kind and the strategy's `ae` (no `ap`); a locked stepdown is `locked.ap`, a locked facing stepover `locked.ae`. `plungeRate` is never an input (nothing depends on it), so it has no lock.
 
 | Locked        | Unlocked fields are recommended as                                                                                                                                                                                                                                                   |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -132,9 +134,9 @@ A **locked** value is a fixed input: the calculator recommends every unlocked fi
 | `ae` (facing) | The facing engagement uses it (F3, F6). Pocket and profile engage as a slot whatever the stepover, so their stepover has no lock.                                                                                                                                                    |
 | drilling      | `n` locked: `vf = fn·n` (F8), clamped to `maxFeedRate.z`. `vf` locked: `n = vf / fn`, clamped to the spindle range (then `fn` follows: `feeds.rubbing` / `feeds.chipLoadHigh`). `plungeRate = vf`.                                                                                   |
 
-Power fit order with several unlocked fields: `ap` first (keep chip load, reduce depth: [rigidity](#hobby-machine-realism)), then `vf`.
+Power fit order with several unlocked fields: `ap` first (keep chip load, reduce depth: [rigidity](#hobby-machine-realism)), then `vf`. The helix pitch (a strategy value) counts as a fixed `ap`. With a locked `vf` and an unlocked `n`, `n` follows the data chip load and is clamped without the `feeds.rpm*Machine` warnings (the chip load warnings say what the clamp did); a locked `n` replaces the rpm clamp (derivation step `locked`), and an over-limit feed is clamped with `n` kept.
 
-### Impossible locks (draft)
+### Impossible locks
 
 A lock is **unavailable** (the plan refuses it; the UI shows the lock disabled with the reason) when the value breaks a hard limit or leaves the locked set no way to meet one:
 
@@ -148,11 +150,12 @@ A lock is **unavailable** (the plan refuses it; the UI shows the lock disabled w
 | `power`             | With this lock every input of F7 is locked (`n`, `vf`, `ap`, facing `ae`) and `Pc > Pavail`: no unlocked field can absorb it | "With spindle speed, feed and stepdown locked the cut needs 1.4 kW of 0.8 kW." |
 
 - Combinations of individually valid locks are otherwise **allowed**: they can only move the chip load or the power, which are recommendations, not limits, so they warn (`feeds.rubbing`, `feeds.chipLoadHigh`, `feeds.powerExceeded`). Without `spindle.power` the `power` rule is skipped; without a machine only `invalid`, `toolLength` and `stepoverAboveTool` apply.
-- A stored lock that later breaks a rule (other tool, machine or stock) stays stored but is **inactive**: the recommendation ignores it, and `plan.warning.list` reports `feeds.lockInactive` (warning) on the field with the same reason; the UI offers "Unlock".
+- A stored lock that later breaks a rule (other tool, machine, stock or stickout) stays stored but is **inactive**: the recommendation ignores it, and `plan.warning.list` reports `feeds.lockInactive` (warning) on the field, rule = the lock rule, with the same reason; the UI offers "Unlock". The `power` rule only refuses new locks (a stored set has no single lock to blame; the final-value check warns).
+- Code: `lockIssue` (single-lock rules) and `powerLockIssue` in [`locks.ts`](../../src/core/feeds-speeds/locks.ts); plan mode applies them in `src/core/plan/feeds.ts`.
 
-### Final-value check (draft)
+### Final-value check
 
-Because entered values are not inputs, the calculator's own warnings describe its recommendation, not what will run. After resolution `checkCutting(final values)` re-runs the coupling checks on the values that will be used: spindle range, feed limits, chip load against the data range (`feeds.rubbing`, `feeds.chipLoadHigh`) and power at the final `ae`, `ap`, `vf`. These warnings (each with `field`) replace the calculator's in `plan.warning.list`; the calculator's warnings stay in its derivation.
+Because entered values are not inputs, the calculator's own warnings describe its recommendation, not what will run. After resolution `checkCutting(input, final values)` re-runs the coupling checks on the values that will be used: chip load against the data range at the final engagement (`feeds.rubbing`, `feeds.chipLoadHigh`, `field: feedRate`) and power at the final `ae`, `ap`, `vf` (`feeds.powerExceeded`, `field: stepdown`; helix: `feedRate`). It runs in auto and preset mode whenever there is data. These warnings replace the calculator's `feeds.rubbing`, `feeds.chipLoadHigh` and `feeds.powerExceeded` in `plan.warning.list`; the calculator's warnings stay in its derivation. Spindle range and feed limits of the final values are plan mode's existing machine checks (`plan.machine`), not repeated here.
 
 ## Live vs. saved
 
@@ -183,21 +186,24 @@ Because entered values are not inputs, the calculator's own warnings describe it
 ```ts
 // src/core/feeds-speeds/suggest.ts
 suggestCutting(input: CuttingInput): CuttingSuggestion // total, pure; missing data → None fields + warning
+checkCutting(input: CuttingInput, values: CuttingValues): CheckWarning[] // final-value check
+noDataFor(input: CuttingInput): Option<CuttingWarning> // feeds.noData, or None when there is data
 ```
 
-- `CuttingInput = { tool, materialClass, engagement: { kind: 'slot' | 'stepover' | 'drill' | 'helix', ae?, ap? }, machine: Option<MachineLimits> }`. Inputs are already-valid models, so the function cannot fail; unsupported combinations return `None` fields with `feeds.noData`.
-- Query `feedsSpeeds.suggest { toolLibraryItemId, materialClass, engagement, machineLibraryItemId? }` exposes it to MCP/CLI ([LLM-first](../principles.md#1-llm-first)) for "what-if" use outside a plan.
+- `CuttingInput = { tool, materialClass, engagement, machine: Option<MachineLimits>, locked? }` with `engagement` `slot {}`, `stepover { ae }` (the strategy's stepover), `helix { ap }` (pitch) or `drill {}`. Inputs are already-valid models, so the function cannot fail; unsupported combinations return `None` fields with `feeds.noData`.
+- Query `feedsSpeeds.suggest { toolLibraryItemId, materialClass, engagement, locked?: { spindleSpeed?, feedRate?, stepdown?, stepover? }, machineLibraryItemId? }` exposes it to MCP/CLI ([LLM-first](../principles.md#1-llm-first)) for "what-if" use outside a plan.
 - Plan mode maps its strategy to `engagement` in `src/core/plan/feeds.ts` (resolution order and table above).
 
 ## Files
 
-| File                                                                           | Contents                                                                      |
-| ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- |
-| [`src/core/feeds-speeds/formulas.ts`](../../src/core/feeds-speeds/formulas.ts) | F1–F9 as pure functions on float64 canonical units                            |
-| [`src/core/feeds-speeds/data.ts`](../../src/core/feeds-speeds/data.ts)         | Material table with per-row sources, rigidity factors, data lint              |
-| [`src/core/feeds-speeds/suggest.ts`](../../src/core/feeds-speeds/suggest.ts)   | `suggestCutting`, `machineLimits`: data lookup, clamps, power check, warnings |
-| [`src/core/feeds-speeds/commands.ts`](../../src/core/feeds-speeds/commands.ts) | `feedsSpeeds.suggest` query                                                   |
-| `src/core/plan/feeds.ts` (task 2.13)                                           | Strategy → engagement; resolution order; `source` per field                   |
+| File                                                                           | Contents                                                                                                     |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| [`src/core/feeds-speeds/formulas.ts`](../../src/core/feeds-speeds/formulas.ts) | F1–F9 as pure functions on float64 canonical units                                                           |
+| [`src/core/feeds-speeds/data.ts`](../../src/core/feeds-speeds/data.ts)         | Material table with per-row sources, rigidity factors, data lint                                             |
+| [`src/core/feeds-speeds/suggest.ts`](../../src/core/feeds-speeds/suggest.ts)   | `suggestCutting`, `machineLimits`: data lookup, locked inputs, clamps, power check, warnings; `checkCutting` |
+| [`src/core/feeds-speeds/locks.ts`](../../src/core/feeds-speeds/locks.ts)       | Impossible-lock rules                                                                                        |
+| [`src/core/feeds-speeds/commands.ts`](../../src/core/feeds-speeds/commands.ts) | `feedsSpeeds.suggest` query                                                                                  |
+| `src/core/plan/feeds.ts` (tasks 2.13, 3.14)                                    | Strategy → engagement; auto mode, presets, locks; `source` per field                                         |
 
 ## Testing
 
@@ -223,7 +229,7 @@ Where this doc was silent, the implementation chose:
 
 - **Material table: carbide only** ([Material data (v0.1)](#material-data-v01)). Each row lists `sources: { ref, fields }[]`; the data lint fails any value no source backs unless the row lists it in `estimated`. Logic tests use a synthetic fixture (`data.fixture.ts`); golden tests check the shipped rows against their cited charts (`suggest.test.ts`).
 - **Row speed `vc` or `n`** (type extension): `vc` became optional and `n` (rpm range) was added; exactly one is set. With `n` the speed derivation is a `data` step for `n` instead of F1.
-- **Engagement** is a discriminated union: `slot { ap? }`, `stepover { ae, ap? }`, `helix { ap }` (pitch), `drill {}`; lengths are mm numbers. `ap` given = resolved stepdown (override/preset): it is used, no `stepdown` is suggested, and a power excess only warns. A drill engagement needs a `drill` tool and vice versa, else `feeds.noData`.
+- **Engagement** is a discriminated union: `slot {}`, `stepover { ae }`, `helix { ap }` (pitch), `drill {}`; lengths are mm numbers. A fixed stepdown is `locked.ap` since task 3.14 (it was `ap` on the engagement, with a power excess that only warned; see [Locked inputs](#locked-inputs)). A drill engagement needs a `drill` tool and vice versa, else `feeds.noData`.
 - **Chip-thinning cap:** the product RCTF × ACTF is capped at ×3 (so each factor is too). `ae` above `D` counts as `D`.
 - **Drills** use the row's `vc` (one `vc` per `materialClass × toolMaterial`), F8 for `feedRate` = `plungeRate`, clamped to `maxFeedRate.z` (rpm lowered to keep `fn` while ≥ `minSpeed`); no power check (F6/F7 are milling formulas).
 - **Plunge rate** (F9) is clamped to `maxFeedRate.z` with `feeds.feedClamped`.

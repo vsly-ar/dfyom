@@ -266,6 +266,7 @@ svg.fi .ext { stroke-dasharray: 1.5 1.5; opacity: 0.7; }
 .qa.fix svg .hi { fill: var(--accent-icon); stroke: var(--accent-icon); }
 .field > label { grid-column: 1; }
 .field > .qa.lock { grid-column: 2; grid-row: 1; align-self: start; margin: 4px 0 0; }
+.qa.lock[aria-disabled="true"], .qa.lock[aria-disabled="true"]:hover { cursor: not-allowed; opacity: 0.45; background: transparent; color: var(--text-faint); }
 .field > :is(.qi, .fs) { grid-column: 3; }
 .qa.pen { background: var(--bg-active); border-radius: var(--radius-xs); color: var(--text-muted); }
 .qa.pen:hover { background: color-mix(in oklab, var(--text) 16%, transparent); color: var(--text); }
@@ -801,6 +802,7 @@ svg.fi .ext { stroke-dasharray: 1.5 1.5; opacity: 0.7; }
         <li><b>2026-11-21 · Viewport states</b> <span class="new-badge">New since approval</span>: <span class="code">--vp-hover</span> (light #f8edcc, dark #3f4136), <span class="code">--vp-outdated</span> (light #d6dae3, dark #232828) and the selection tint (25 % amber + amber outline), added in task 3.5, approved as a deviation from the original design (<a href="#vp-additions">specimen</a>).</li>
         <li><b>2026-11-21 · After the APCA pass: split danger, secondary text</b> (<a href="../decisions/0018-danger-text-and-secondary-text-role.md">ADR 0018</a>): the APCA pass had turned dark <span class="code">--danger</span> pale pink and dark <span class="code">--text-muted</span> nearly as bright as <span class="code">--text</span>. Red text now uses the new <span class="code">--danger-text</span> <span class="new-badge">New since approval</span> (light #a6051d, dark #ffcecb, the APCA-pass values), and <span class="code">--danger</span> is a saturated red again for outlines, the viewport error marker and icons: light back to approved #c9363a, dark #ffcecb → #ff7475 (approved #ef6366; lightened just enough for the icon target). <span class="code">--text-muted</span> takes a new <i>secondary</i> role at Lc 60: light back to approved #5b6462, dark #d1dcda → #b9c4c1 (approved #a2acaa). Marked “Revised after the APCA pass” in the token table.</li>
         <li><b>2026-11-21 · Plunge colour</b> <span class="new-badge">New since approval</span>: <span class="code">--vp-plunge</span> (light #835bae, dark #a886cf), a muted violet for plunges in the toolpath preview (task 3.7), distinct in hue from feeds and rapids (neutral greys), the selection (amber) and the axes; Lc ≥ 30 on the viewport background and the part.</li>
+        <li><b>2026-11-21 · Lock rule</b> <span class="changed-badge">Changed since approval</span>: a lock appears only on a field with a recommendation mode while it is on (plan feeds fields in auto mode, task 3.14), so the design fields (Corner R, Chamfer, Width, Depth) and the read-only field lost theirs. A lock that can't be pressed is <span class="code">aria-disabled</span> (still focusable) with its reason as tooltip and as visible text (Spindle speed specimen); its name stays "Lock &lt;field&gt;" whether pressed or not (<a href="ui.md#field">ui.md § Field</a>).</li>
       </ol>
     </section>
   </main>
@@ -845,11 +847,11 @@ svg.fi .ext { stroke-dasharray: 1.5 1.5; opacity: 0.7; }
       <input class="range" type="range" min="1" max="100" value="10" aria-label="Time scale">
     </div>
   </div>
-  <div class="spec-row"><span class="lbl">Field · illustration icon (one amber line is the dimension; partly desaturated at rest, full on focus, grey when read-only, always full on fields without a value input), lock, input with adjust (pencil), support area under the input</span>
+  <div class="spec-row"><span class="lbl">Field · illustration icon (one amber line is the dimension; partly desaturated at rest, full on focus, grey when read-only, always full on fields without a value input), lock (only on feeds fields in auto mode; disabled with its reason as tooltip and visible text), input with adjust (pencil), support area under the input</span>
     <div style="display:grid;gap:12px;max-width:520px">
       <div class="field" data-step="0.1" data-dec="2" data-name="Stepdown" data-rec="1.20" data-rec-text="≤ 1.20 mm for 6061 with a 6 mm cutter">
         <label><svg class="i fi" data-fi="stepdown" viewBox="0 0 20 20"></svg><span class="term" title="Depth removed in each pass">Stepdown</span></label>
-        <button type="button" class="qa lock" aria-label="Lock value" aria-pressed="false"></button><div class="qi"><span class="src">1.50</span><span class="u">mm</span><button type="button" class="qa pen fix" aria-label="Adjust Stepdown" aria-expanded="false"></button></div>
+        <button type="button" class="qa lock" aria-label="Lock Stepdown" aria-pressed="false"></button><div class="qi"><span class="src">1.50</span><span class="u">mm</span><button type="button" class="qa pen fix" aria-label="Adjust Stepdown" aria-expanded="false"></button></div>
         <div class="fs soft">
           <div class="fs-i soft"><svg class="i" data-ic="warn" viewBox="0 0 16 16"></svg><span>Above the suggested 1.20 mm</span><span class="fs-act"><button type="button" class="btn" data-size="sm" data-variant="primary" data-apply><svg class="i" viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7"/></svg>Use 1.20</button><button type="button" class="qa" data-dismiss aria-label="Dismiss warning" title="Dismiss"><svg class="i" viewBox="0 0 16 16"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg></button></span></div>
           <button type="button" class="fs-more" aria-expanded="false">2 more<svg class="i" data-ic="chev" viewBox="0 0 16 16"></svg></button>
@@ -861,22 +863,27 @@ svg.fi .ext { stroke-dasharray: 1.5 1.5; opacity: 0.7; }
       </div>
       <div class="field" data-step="0.1" data-dec="2" data-name="Corner radius" data-rec="3.00" data-rec-text="≥ 3.00 mm, the radius of the 6 mm tool">
         <label><svg class="i fi" data-fi="corner" viewBox="0 0 20 20"></svg>Corner R</label>
-        <button type="button" class="qa lock" aria-label="Lock value" aria-pressed="false"></button><div class="qi"><span class="src">1.50</span><span class="u">mm</span><button type="button" class="qa pen fix" aria-label="Adjust Corner radius" aria-expanded="false"></button></div>
+        <div class="qi"><span class="src">1.50</span><span class="u">mm</span><button type="button" class="qa pen fix" aria-label="Adjust Corner radius" aria-expanded="false"></button></div>
         <div class="fs warn"><div class="fs-i warn"><svg class="i" data-ic="warn" viewBox="0 0 16 16"></svg><span>Smaller than the 6 mm tool can cut</span><button type="button" class="btn" data-size="sm" data-variant="primary" data-apply><svg class="i" viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7"/></svg>Use 3.00</button></div></div>
       </div>
       <div class="field" data-step="1" data-dec="0" data-name="Chamfer angle">
         <label><svg class="i fi" data-fi="chamfer" viewBox="0 0 20 20"></svg>Chamfer</label>
-        <button type="button" class="qa lock" aria-label="Lock value" aria-pressed="false"></button><div class="qi"><span class="src">45</span><span class="u">°</span><button type="button" class="qa pen" aria-label="Adjust Chamfer angle" aria-expanded="false"></button></div>
+        <div class="qi"><span class="src">45</span><span class="u">°</span><button type="button" class="qa pen" aria-label="Adjust Chamfer angle" aria-expanded="false"></button></div>
       </div>
       <div class="field is-focus" data-step="0.01" data-dec="3" data-name="Width">
         <label><svg class="i fi" data-fi="width" viewBox="0 0 20 20"></svg>Width</label>
-        <button type="button" class="qa lock" aria-label="Lock value" aria-pressed="false"></button><div class="qi focus"><span class="src">1/16"</span><span class="caret"></span><span class="u">mm</span><button type="button" class="qa pen" aria-label="Adjust Width" aria-expanded="false"></button></div>
+        <div class="qi focus"><span class="src">1/16"</span><span class="caret"></span><span class="u">mm</span><button type="button" class="qa pen" aria-label="Adjust Width" aria-expanded="false"></button></div>
         <div class="fs"><div class="fs-i echo"><span></span><span>= 1.588 mm · ±0.1 mm from part</span><span></span></div></div>
       </div>
       <div class="field" data-step="0.1" data-dec="2" data-name="Depth">
         <label><svg class="i fi" data-fi="depth" viewBox="0 0 20 20"></svg>Depth</label>
-        <button type="button" class="qa lock" aria-label="Lock value" aria-pressed="false"></button><div class="qi err"><span class="src">3<span class="underline-err">..</span>5</span><span class="u">mm</span><button type="button" class="qa pen" aria-label="Adjust Depth" aria-expanded="false"></button></div>
+        <div class="qi err"><span class="src">3<span class="underline-err">..</span>5</span><span class="u">mm</span><button type="button" class="qa pen" aria-label="Adjust Depth" aria-expanded="false"></button></div>
         <div class="fs err"><div class="fs-i err"><svg class="i" data-ic="err" viewBox="0 0 16 16"></svg><span>Two decimal points</span><button type="button" class="btn" data-size="sm">Use 3.5</button></div></div>
+      </div>
+      <div class="field">
+        <label><svg class="i fi" data-fi="corner" viewBox="0 0 20 20"></svg>Spindle speed</label>
+        <button type="button" class="qa lock" aria-label="Lock Spindle speed" aria-pressed="false" aria-disabled="true" aria-describedby="lock-reason-demo" title="24000 rpm is above this machine's 18000 rpm."></button><div class="qi"><span class="src">24000</span><span class="u">rpm</span></div>
+        <div class="fs"><div class="fs-i"><svg class="i" data-ic="lock" viewBox="0 0 16 16"></svg><span id="lock-reason-demo">24000 rpm is above this machine's 18000 rpm.</span><span></span></div></div>
       </div>
       <div class="field">
         <label><svg class="i fi" data-fi="tool" viewBox="0 0 20 20"></svg>Tool</label>
@@ -884,7 +891,7 @@ svg.fi .ext { stroke-dasharray: 1.5 1.5; opacity: 0.7; }
       </div>
       <div class="field">
         <label><svg class="i fi" data-fi="feed" viewBox="0 0 20 20"></svg>Feed</label>
-        <button type="button" class="qa lock" aria-label="Unlock value" aria-pressed="true"></button><div class="qi ro"><span class="src">900</span><span class="u">mm/min</span></div>
+        <div class="qi ro"><span class="src">900</span><span class="u">mm/min</span></div>
         <div class="fs"><div class="fs-i"><svg class="i" data-ic="lock" viewBox="0 0 16 16"></svg><span>Finalized plans are read-only</span><span></span></div></div>
       </div>
       <div class="field nv">
@@ -1176,7 +1183,7 @@ function decorate(root) {
 }
 document.addEventListener('click', e => {
   const lock = e.target.closest('.qa.lock');
-  if (lock) { const on = lock.getAttribute('aria-pressed') !== 'true'; lock.setAttribute('aria-pressed', String(on)); lock.setAttribute('aria-label', on ? 'Unlock value' : 'Lock value'); lock.innerHTML = `<svg class="i" viewBox="0 0 16 16">${SM[on ? 'lock' : 'unlock']}</svg>`; return; }
+  if (lock) { if (lock.getAttribute('aria-disabled') === 'true') return; const on = lock.getAttribute('aria-pressed') !== 'true'; lock.setAttribute('aria-pressed', String(on)); lock.innerHTML = `<svg class="i" viewBox="0 0 16 16">${SM[on ? 'lock' : 'unlock']}</svg>`; return; }
   const dis = e.target.closest('[data-dismiss]');
   if (dis) { const it = dis.closest('.fs-i'), fs = it.closest('.fs'); it.hidden = true; fs.classList.remove('soft'); const r = document.createElement('button'); r.type = 'button'; r.className = 'fs-more fs-undo'; r.innerHTML = `<svg class="i" viewBox="0 0 16 16">${SM.warn}</svg>1 dismissed · Show`; it.after(r); return; }
   const undo = e.target.closest('.fs-undo');
