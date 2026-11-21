@@ -130,15 +130,20 @@ describe('withSolids', () => {
       triangles: ring.triangles.slice(3),
       faces: ring.faces.slice(1),
     }
-    const failOnce = () =>
-      expectErrCode(
-        hosted.withSolids((s) => s.fromMesh(torn, expectOk(s.reserveOriginalId()))),
-        'geometry.evaluation',
-      )
-    for (let i = 0; i < 50; i++) failOnce()
+    const reject = () => hosted.withSolids((s) => s.fromMesh(torn, expectOk(s.reserveOriginalId())))
+    expectErrCode(reject(), 'geometry.evaluation')
+    for (let i = 0; i < 50; i++) reject()
     const warm = hosted.heapBytes().unwrap()
-    // ~190 B leaked per call before the fix: 40 000 calls outgrow the free heap (≈ 7 MB)
-    for (let i = 0; i < 40000; i++) failOnce()
+    // heapBytes is the linear memory size, which only moves when the free heap (≈ 7 MB of the
+    // initial 16 MB) runs out: ~190 B leaked per call before the fix, so 40 000 calls are needed
+    // to show a leak. A plain check per call (≈ 14 µs; expect() costs about as much again) keeps
+    // the loop well under a second.
+    let wrong = 0
+    for (let i = 0; i < 40000; i++) {
+      const r = reject()
+      if (!r.isErr() || r.unwrapErr().code !== 'geometry.evaluation') wrong++
+    }
+    expect(wrong).toBe(0)
     expect(hosted.heapBytes().unwrap() - warm).toBeLessThan(2 ** 20)
     expect(hosted.liveObjects()).toBe(0)
   })

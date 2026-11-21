@@ -15,6 +15,8 @@ export function expectOk<T>(r: AppResult<T>): T {
 export function expectErrCode<T>(r: AppResult<T>, code: ErrorCode): AppError {
   if (r.isOk()) expect.fail(`expected Err(${code}), got Ok(${JSON.stringify(r.unwrap())})`)
   const e = r.unwrapErr()
-  expect(e.code, JSON.stringify(e.toJSON(), null, 2)).toBe(code)
+  // serialise the error data only on a mismatch: doing it per call made loops of thousands of
+  // assertions (the manifold heap test) spend most of their time here
+  expect(e.code, e.code === code ? undefined : JSON.stringify(e.toJSON(), null, 2)).toBe(code)
   return e
 }

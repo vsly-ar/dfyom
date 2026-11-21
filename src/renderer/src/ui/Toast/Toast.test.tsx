@@ -1,6 +1,6 @@
 import { screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { expectNoAxeViolations, renderUi } from '../../test/render'
+import { expectNoAxeViolations, findToastAction, renderUi } from '../../test/render'
 import { Toast, ToastRegion } from './Toast'
 
 describe('Toast', () => {
@@ -18,7 +18,7 @@ describe('Toast', () => {
     )
     // Radix fills a polite live region on the next frame
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Removed Pocket 2'))
-    await user.click(screen.getByRole('button', { name: 'Undo' }))
+    await user.click(await findToastAction('Undo'))
     expect(onUndo).toHaveBeenCalledOnce()
     expect(screen.queryByText('Removed Pocket 2')).toBeNull()
   })
