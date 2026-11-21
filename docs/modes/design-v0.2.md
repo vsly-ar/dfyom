@@ -13,14 +13,14 @@ Do not implement this doc before the user confirms it ([README.md](../README.md#
 
 These are still open. This doc does not decide them; sections that touch them say so.
 
-| #   | Question                                                                                                                                  | Touches here                                                                                                                                   |
-| --- | ----------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| Q12 | Shapes model: named line/arc shapes, `inside` / `outside` / centreline                                                                    | `shape` stays the v0.1 rectangle or circle, now placed in the [face frame](#face-frame). Surface ids of general shapes are not specified here. |
-| Q13 | Positioning anchors: 9-point vs centre / front-left                                                                                       | Positions stay **centres** in the face frame until Q13 is decided.                                                                             |
-| Q14 | Split into v0.2 (faces, setups, anchors, tools) and v0.3 (shapes)?                                                                        | None; this doc is written so it works with either split.                                                                                       |
-| Q15 | Multi-setup without workholding or in-process stock?                                                                                      | DFM ignores clamping and material removed by earlier setups ([access checks](#dfm-access-checks)); Plan side in plan-v0.2.md.                  |
-| Q16 | Free-form fillets                                                                                                                         | None; floor fillets stay as in v0.1.                                                                                                           |
-| Q17 | Project-wide **apply**: Enter (or an "Apply" button with the pending count) runs the deferred follow-up work of all pending edits at once | The [auto tool choice](#auto-choice) runs on apply. Placeholder: [§ Apply](#apply-q17-open).                                                   |
+| #   | Question                                                                                                                                  | Touches here                                                                                                                                           |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Q12 | Shapes model: named line/arc shapes, `inside` / `outside` / centreline                                                                    | `shape` stays the v0.1 rectangle or circle, now placed in the [face frame](#face-frame). Surface ids of general shapes are not specified here.         |
+| Q13 | Positioning anchors: 9-point vs centre / front-left                                                                                       | Positions stay **centres** in the face frame until Q13 is decided.                                                                                     |
+| Q14 | Split into v0.2 (faces, setups, anchors, tools) and v0.3 (shapes)?                                                                        | None; this doc is written so it works with either split.                                                                                               |
+| Q15 | Multi-setup without workholding or in-process stock?                                                                                      | DFM ignores clamping and material removed by earlier setups ([access checks](#dfm-access-checks)); Plan side in plan-v0.2.md.                          |
+| Q16 | Free-form fillets                                                                                                                         | None; floor fillets stay as in v0.1.                                                                                                                   |
+| Q17 | Project-wide **apply**: Enter (or an "Apply" button with the pending count) runs the deferred follow-up work of all pending edits at once | Decided as D13 (2026-11-21), draft in [apply.md](../architecture/apply.md). The [auto tool choice](#auto-choice) runs on Apply: [§ Apply](#apply-d13). |
 
 ## Faces and face targets
 
@@ -124,7 +124,7 @@ DesignTool = { kind: 'generalized', type, diameter, cornerRadius? }
 - **Generalized tool:** a tool [`type`](../architecture/library.md#tool) (`flatEndMill`, `bullNoseEndMill`, `ballEndMill`, `drill`) and a `diameter` quantity; `cornerRadius` only for a bull nose (0 < RE < DC/2). No lengths, no flute count, no presets: "a 1/4″ flat end mill". A generalized drill's point angle is the operation's `pointAngle`. A user without the tool can still design with it.
 - **Specific tool:** a tool from the library, held like the part's stock as a **tool snapshot** in `ProjectDoc.snapshots` ([persistence.md § Library references](../architecture/persistence.md#library-references)): the design never references a library item directly, so the project opens unchanged elsewhere. Library edits never change it; only an explicit, undoable command may ([question J](#questions-raised-by-this-draft)).
 - **`toolLocked`:** set by any user choice ([locks](#tool-lock)). Absent = auto.
-- Both fields are optional in the DTO: absent `tool` means "auto, nothing chosen yet" (a v0.1 project); the next commit on that operation chooses one. No `schemaVersion` change.
+- Both fields are optional in the DTO: absent `tool` means "auto, nothing chosen yet" (a v0.1 project); the next Apply chooses one (opening marks it pending, [apply.md § Opening](../architecture/apply.md#opening-and-recovery)). No `schemaVersion` change.
 
 ### Fit: when a tool can make the operation
 
@@ -142,7 +142,7 @@ DesignTool = { kind: 'generalized', type, diameter, cornerRadius? }
 
 While the field is **not locked**, the tool is chosen automatically:
 
-1. **When:** **on apply (Enter)** after editing, for every operation with pending edits (`design.<kind>.add`, `design.<kind>.update`, `design.operation.tool.unlock`). Typing and live steps do not trigger it. How apply works (edits committing live, derived work deferred, one undo step or not) is open: [§ Apply](#apply-q17-open) (Q17). Until Q17 is decided, read "apply" as the commit of the edit: inside the same command and undo step.
+1. **When:** **on Apply** (Enter, Cmd/Ctrl+Enter or the Apply button), for every unlocked operation with pending changes (from `design.<kind>.add`, `design.<kind>.update`, `design.operation.tool.unlock`). Typing, blur and live gesture steps do not trigger it; agents auto-apply per call. It is the first apply hook, `design.toolAutoChoice`, in Apply's own undo step ([§ Apply](#apply-d13)).
 2. **Keep if it fits:** an unlocked tool that still fits is kept (no churn while editing).
 3. **Otherwise choose:** the first library tool that fits, ranked by: has a preset for the stock's material class → largest diameter (fewer passes) → library id. Its snapshot is taken in the same command.
 4. **No library tool fits:** the largest generalized tool of the [standard size series](#standard-sizes) that fits (bull nose: RE = `floorRadius`; drill: DC = `diameter`).
@@ -160,7 +160,7 @@ Modelled on the feeds locks of [plan-v0.1.md § Locks and auto mode](plan-v0.1.m
 
 | State  | Stored                        | Behaviour                                                                                                                                                 | Shown                                     |
 | ------ | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
-| Auto   | `tool` (or nothing yet)       | [Auto choice](#auto-choice) on every apply.                                                                                                               | "Chosen automatically." Lock not pressed. |
+| Auto   | `tool` (or nothing yet)       | [Auto choice](#auto-choice) on every Apply.                                                                                                               | "Chosen automatically." Lock not pressed. |
 | Locked | `tool` and `toolLocked: true` | Never changed automatically. If it stops fitting, `dfm.toolUnfit` warns at the `tool` field with the fitting alternative; the parameters stay as entered. | "Chosen by you." Lock pressed.            |
 
 - **Any user choice locks:** picking a generalized or specific tool, or pressing the lock of an auto-chosen tool (pins it as it is).
@@ -188,13 +188,13 @@ Names follow [commands.md § Naming](../architecture/commands.md#naming); all ar
 | Command / query                  | Args                                                                                                                             | Result                                        |
 | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
 | `design.<kind>.add`              | as v0.1, plus `on?` for every kind and `tool?` (a given tool is locked)                                                          | `{ operationId, tool, toolLocked, warnings }` |
-| `design.<kind>.update`           | as v0.1, plus `on?`                                                                                                              | `{ toolChange?, warnings }`                   |
+| `design.<kind>.update`           | as v0.1, plus `on?`                                                                                                              | `{ warnings }` (tool changes: on Apply)       |
 | `design.operation.tool.set`      | `{ partId, operationId, tool }` – `tool` is a generalized tool or `{ toolLibraryItemId }` (snapshot taken in the command); locks | `{ warnings }`                                |
 | `design.operation.tool.lock`     | `{ partId, operationId }` – pins the current tool                                                                                | `{ warnings }`                                |
-| `design.operation.tool.unlock`   | `{ partId, operationId }` – runs the auto choice                                                                                 | `{ toolChange?, warnings }`                   |
+| `design.operation.tool.unlock`   | `{ partId, operationId }` – the auto choice runs on Apply                                                                        | `{ warnings }`                                |
 | `design.tool.candidates` (query) | `{ partId, operationId }`                                                                                                        | `{ fitting[], generalized, current }`         |
 
-- `toolChange` = `{ from, to, reason }` whenever the auto choice replaced the tool, so an agent sees the swap in the result of its edit (reason: the failed fit rule of the old tool).
+- `toolChange` = `{ partId, operationId, from, to, reason }` whenever the auto choice replaced the tool (reason: the failed fit rule of the old tool). It is in the Apply's result (`ApplyOutcome.toolChanges`); an agent's edit auto-applies, so it sees the swap in the `applied` part of its call's result ([apply.md § Agents](../architecture/apply.md#agents-mcp-and-cli)).
 - `design.tool.candidates` lists the fitting library tools in auto-choice order with reasons, the generalized tool auto would pick, and the current tool with its fit result. It is the "makeable with" list of the inspector and the agent's way to pick a tool.
 - A specific tool whose library item changed shows as stale and never updates silently. Design has no "update from library" command yet (not for the stock either); [question J](#questions-raised-by-this-draft).
 - Errors: a library item that is not a tool or does not exist → `input.malformed`; a generalized tool with invalid values → `model.invariant` (rule per field). A tool that does not fit is **not** an error (a warning).
@@ -207,9 +207,14 @@ UI rules go to [ui.md](../conventions/ui.md) when this doc is accepted. Sketch:
 - **`on`:** the pick mode highlights every face target of the operation kind ([ui.md § Selection and picking](../conventions/ui.md#selection-and-picking)), sides and bottom included, with a normal glyph; the dropdown groups targets by direction ("Top", "Right side", …).
 - **Tool field** in each operation's inspector, first group after `on`: a combobox with the generalized tool (type + size) and the fitting library tools from `design.tool.candidates`, the lock button of [ui.md § Field](../conventions/ui.md#field), and "Chosen automatically: the 6 mm end mill didn't fit the 2 mm corner" after an auto change.
 
-## Apply (Q17, open)
+## Apply (D13)
 
-Placeholder. The project-wide apply concept (Q17) is open and is specified here once decided. This doc only relies on it for the moment the [auto tool choice](#auto-choice) runs.
+Q17 is decided as D13 (2026-11-21) and specified, as a draft, in [apply.md](../architecture/apply.md). In short, for this doc:
+
+- Edits commit live (one undo step each; the mesh, parameter checks and live outline follow); the [auto tool choice](#auto-choice) is **deferred** to Apply: Enter in a field, Cmd/Ctrl+Enter, or the "Apply N" button. Blur and Tab commit only.
+- Apply runs the auto choice for every unlocked operation with pending changes, then the draft plans follow ([plan-v0.2.md](plan-v0.2.md#tool-resolution-from-the-design-tool-field)), as one undoable entry "Apply N changes"; undoing it restores the old tools and leaves the edits pending.
+- Until Apply, `dfm.toolUnfit` and `dfm.toolNotInLibrary` of an unlocked tool with pending changes show as "may change on Apply"; against a locked tool they are final.
+- Agents auto-apply per call by default (`apply: false` batches); the swap comes back as `applied.toolChanges`.
 
 ## Questions raised by this draft
 
@@ -224,6 +229,6 @@ Each with options and the draft's recommendation; the user answers before `accep
 | E   | Facing and profile `on` beyond stock faces            | (a) stock faces only in v0.2; (b) a profile from a floor (through opening in a pocket floor), a facing of a floor                  | (a): keeps through-cut and tab rules unchanged; (b) later                                           |
 | F   | `tool.*` in design expressions                        | (a) unknown in v0.2; (b) allowed for locked tools only                                                                             | (a): (b) still changes geometry on a library edit and breaks the result-first rule                  |
 | G   | Changing `on` to another direction                    | (a) keep the `[u, v]` numbers; (b) keep the point in the part frame where possible; (c) reset to the face centre                   | (a): predictable, and the access checks warn                                                        |
-| H   | Auto choice during adjust-popover steps               | (a) every committed step, as every command; (b) skip gesture steps and choose on apply                                             | Superseded by Q17 (apply): (b) if apply is adopted, else (a)                                        |
+| H   | Auto choice during adjust-popover steps               | (a) every committed step, as every command; (b) skip gesture steps and choose on apply                                             | Settled by D13: (b), [apply.md](../architecture/apply.md#adjust-popover)                            |
 | I   | Generalized drill and point angle                     | (a) a generalized drill takes the operation's `pointAngle`; (b) it stores its own                                                  | (a): the operation already states the result                                                        |
 | J   | Updating a specific tool's snapshot from the library  | (a) a new `design.snapshot.update { snapshotId }` for tool and stock snapshots; (b) re-pick the tool (`design.operation.tool.set`) | (a): one explicit, undoable path for every design snapshot, as plans have `plan.libraryItem.update` |

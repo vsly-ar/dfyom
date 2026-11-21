@@ -137,6 +137,7 @@ A **document hook** (`DocumentHook` in `define.ts`) runs after every successful 
 - An `Err` of a hook (or a throw → `internal.unexpected`) fails the whole command with the hook's error (context `hook <name>`): the document stays unchanged.
 - Undo and redo replay the patches, so hooks never run for them.
 - v0.1: `plan.draftAutoRebuild` rebuilds the `draft` plans of the part after a `design.*` command; it never returns `Err` (a plan that cannot follow is skipped and reported), so design commands behave the same with or without plans ([plan-v0.1.md](../modes/plan-v0.1.md#implementation-task-213)).
+- **Draft (D13):** decision-making derived work moves from document hooks to **apply hooks**, run once by `project.apply` over all pending changes; `plan.draftAutoRebuild` becomes the apply hook `plan.draftFollow` ([apply.md](apply.md#apply-hooks)).
 
 ## Undo / redo
 
@@ -148,6 +149,7 @@ A **document hook** (`DocumentHook` in `define.ts`) runs after every successful 
 - Undo history is kept **in memory only** in v0.1, capped by count/size (defaults: 500 entries, 50 M chars of JSON counting args, patches and inverse patches; oldest dropped first, the newest entry is always kept); it is lost on close or crash.
 - The entry `seq` is the action-log `seq` of the command event that created it.
 - Undo/redo with nothing to do returns `Ok({ entrySeq: null })` and is logged as a plain `command` event; a real step returns `{ entrySeq }` and is logged as an `undo`/`redo` event.
+- **Draft (D13):** `project.apply` adds its own entry ("Apply N changes") and an apply marker that moves with undo/redo and defines the pending changes ([apply.md § Baseline and undo](apply.md#baseline-and-undo)).
 
 ### Gestures (live edits)
 
@@ -274,3 +276,4 @@ Not blocking v0.1.
 
 - **Persisting undo history** (working folder for crash recovery, or the archive for undo after reopening) – revisit after v0.1.
 - **Batch command** (`project.batch`, several commands as one undo step) – not in v0.1; add if agents need it.
+- **Apply** (D13, draft): `project.apply`, the `apply`/`applyFirst` dispatch options and pending changes – [apply.md](apply.md).

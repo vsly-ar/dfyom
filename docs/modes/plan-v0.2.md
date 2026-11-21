@@ -1,6 +1,6 @@
 # Plan mode v0.2: setups from face directions, tools from design
 
-Status: draft (follows from user decisions D10 and D11 of 2026-11-21; the details below await confirmation) · Vision: [plan.md](plan.md) · v0.1 subset: [plan-v0.1.md](plan-v0.1.md) · Design input: [design-v0.2.md](design-v0.2.md) · Terms: [glossary.md](../glossary.md)
+Status: draft (follows from user decisions D10 and D11 of 2026-11-21; the details below await confirmation) · Vision: [plan.md](plan.md) · v0.1 subset: [plan-v0.1.md](plan-v0.1.md) · Design input: [design-v0.2.md](design-v0.2.md) · Apply (D13): [apply.md](../architecture/apply.md) · Terms: [glossary.md](../glossary.md)
 
 Plan consequences of [design-v0.2.md](design-v0.2.md): several setups, one per approach direction, and tool assignment from the design's tool field. Everything not mentioned here stays as in [plan-v0.1.md](plan-v0.1.md). Do not implement before the user confirms it.
 
@@ -57,8 +57,16 @@ The design's [tool field](design-v0.2.md#operation-tool) is an input to Plan's [
 
 - **A locked tool failing in a plan warns, it never swaps.** The user resolves it explicitly: assign another tool in the plan (`plan.tool.assign`, a deliberate plan decision), change the machine, extend the stickout, or change the design. The fix list in `plan.warning.list` offers these.
 - **Plan assignment wins inside the plan.** `plan.tool.assign` marks the plan operation `toolSource: 'plan'` (new optional field, no `schemaVersion` change); create and rebuild set `toolSource: 'design'`. A rebuild re-resolves the tool only for `toolSource: 'design'` operations whose design tool field changed (by value) since the snapshot; `plan` ones keep their tool and show the stale flag `designToolChanged` in `plan.stale.list`. Whether a later design lock should override a plan assignment is [question M](#questions-raised-by-this-draft).
-- **Draft plans** follow the design tool field through the auto-rebuild like any design change; a locked specific tool that fails reports `plan.designToolFailed`, never a blocked rebuild.
+- **Draft plans** follow the design tool field through the rebuild like any design change, on Apply ([below](#draft-plans-follow-on-apply)); a locked specific tool that fails reports `plan.designToolFailed`, never a blocked rebuild.
 - `plan.tool.suggest` gains a reason per candidate for the design tool (`matchesDesign`, `designTool`), so the UI and agents see why a tool ranks first.
+
+## Draft plans follow on Apply
+
+User decision D13 (2026-11-21), draft in [apply.md](../architecture/apply.md): the draft auto-rebuild no longer runs on every `design.*` commit. It becomes the apply hook `plan.draftFollow`, which runs once per Apply after the design's tool choice, so setups and tools are derived from the confirmed design, not from every keystroke or popover step.
+
+- Between an edit and Apply, a `draft` plan shows "Design changes not applied yet" instead of a stale notice, its checks and toolpaths marked outdated ([apply.md § Stale derived results](../architecture/apply.md#stale-derived-results)).
+- `plan.create`, `plan.rebuild` and `plan.status.set` into `draft` apply first ([implicit apply](../architecture/apply.md#implicit-apply)).
+- Draft library follow moving into Apply as well is [apply.md question 5](../architecture/apply.md#open-questions); keeping stale toolpaths current on Apply is question 4.
 
 ## Questions raised by this draft
 
