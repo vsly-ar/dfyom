@@ -341,7 +341,7 @@
 
 .item[data-severity='error'],
 .item[data-severity='error'] > svg {
-  color: var(--danger);
+  color: var(--danger-text);
 }
 
 .item[data-severity='info'] > svg {

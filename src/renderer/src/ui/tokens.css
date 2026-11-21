@@ -1,7 +1,8 @@
 /*
  * Design tokens: the only values components use. Values copied from the approved design system
  * (docs/conventions/ui-design-system.html); names, structure and rules: docs/conventions/ui.md#design-tokens.
- * Ten values were adjusted for APCA after approval (ui.md#colour lists them with the old values).
+ * Values adjusted for APCA after approval, the split --danger / --danger-text and the new --vp-plunge
+ * are listed with their old values in ui.md#design-system.
  *
  * Themes: light on :root, dark under :root[data-theme='dark'] and, unless data-theme='light' is
  * set, under prefers-color-scheme: dark. .t-light / .t-dark scope a theme to a subtree (gallery).
@@ -22,7 +23,7 @@
   --bg-overlay: rgb(28 33 33 / 0.32);
   /* text */
   --text: #1c2121;
-  --text-muted: #515957;
+  --text-muted: #5b6462;
   --text-faint: #868f8d;
   --text-on-accent: #1c2121;
   --text-on-solid: #ffffff;
@@ -39,7 +40,8 @@
   --accent-icon: #f5b700;
   --accent-icon-edge: drop-shadow(0 0 0.4px rgb(60 40 0 / 0.75));
   /* feedback (never machine state) */
-  --danger: #a6051d;
+  --danger: #c9363a;
+  --danger-text: #a6051d;
   --danger-subtle: #fdecec;
   --warning: #c96a00;
   --warning-subtle: #fff0e3;
@@ -74,6 +76,7 @@
   --vp-outdated: #d6dae3;
   --vp-feed: #5b6462;
   --vp-rapid: #868f8d;
+  --vp-plunge: #835bae;
   --vp-tool: #1c2121;
   --vp-axis-x: #d0605f;
   --vp-axis-y: #4f9d6c;
@@ -97,7 +100,7 @@
     --bg-active: rgb(233 237 243 / 0.11);
     --bg-overlay: rgb(0 0 0 / 0.5);
     --text: #e9edf3;
-    --text-muted: #d1dcda;
+    --text-muted: #b9c4c1;
     --text-faint: #7a8482;
     --text-on-accent: #1c2121;
     --text-on-solid: #ffffff;
@@ -111,7 +114,8 @@
     --accent-subtle: #3b3213;
     --accent-icon: #f5b700;
     --accent-icon-edge: none;
-    --danger: #ffcecb;
+    --danger: #ff7475;
+    --danger-text: #ffcecb;
     --danger-subtle: #45272a;
     --warning: #f2993a;
     --warning-subtle: #42331c;
@@ -144,6 +148,7 @@
     --vp-outdated: #232828;
     --vp-feed: #b8c1c0;
     --vp-rapid: #7a8482;
+    --vp-plunge: #a886cf;
     --vp-tool: #e9edf3;
     --vp-axis-x: #e07574;
     --vp-axis-y: #62b580;
@@ -167,7 +172,7 @@
   --bg-active: rgb(233 237 243 / 0.11);
   --bg-overlay: rgb(0 0 0 / 0.5);
   --text: #e9edf3;
-  --text-muted: #d1dcda;
+  --text-muted: #b9c4c1;
   --text-faint: #7a8482;
   --text-on-accent: #1c2121;
   --text-on-solid: #ffffff;
@@ -181,7 +186,8 @@
   --accent-subtle: #3b3213;
   --accent-icon: #f5b700;
   --accent-icon-edge: none;
-  --danger: #ffcecb;
+  --danger: #ff7475;
+  --danger-text: #ffcecb;
   --danger-subtle: #45272a;
   --warning: #f2993a;
   --warning-subtle: #42331c;
@@ -214,6 +220,7 @@
   --vp-outdated: #232828;
   --vp-feed: #b8c1c0;
   --vp-rapid: #7a8482;
+  --vp-plunge: #a886cf;
   --vp-tool: #e9edf3;
   --vp-axis-x: #e07574;
   --vp-axis-y: #62b580;

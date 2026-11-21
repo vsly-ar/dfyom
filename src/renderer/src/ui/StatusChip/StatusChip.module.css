@@ -29,7 +29,7 @@
 
 .chip[data-tone='danger'] {
   background: var(--danger-subtle);
-  color: var(--danger);
+  color: var(--danger-text);
 }
 
 .chip[data-tone='busy'] {

@@ -62,6 +62,7 @@ const SEMANTIC = [
   '--accent-icon',
   '--accent-icon-edge',
   ...['info', 'success', 'warning', 'danger'].flatMap((f) => [`--${f}`, `--${f}-subtle`]),
+  '--danger-text',
   ...['stop', 'alarm', 'hold', 'moving', 'action'].flatMap((s) => [
     `--safety-${s}`,
     `--safety-${s}-fg`,
@@ -72,7 +73,7 @@ const SEMANTIC = [
   ...['grid', 'grid-major', 'stock', 'part', 'edge', 'removal', 'selected', 'selected-halo'].map(
     (s) => `--vp-${s}`,
   ),
-  ...['feed', 'rapid', 'tool', 'axis-x', 'axis-y', 'axis-z', 'hover', 'outdated'].map(
+  ...['feed', 'rapid', 'plunge', 'tool', 'axis-x', 'axis-y', 'axis-z', 'hover', 'outdated'].map(
     (s) => `--vp-${s}`,
   ),
   '--shadow-1',
@@ -115,6 +116,12 @@ function MOTION_DURATIONS(): string[] {
 const ROLES = {
   /** Text read for content at 11–13 px, regular weight (400): body, values, labels, notes. */
   read: 75,
+  /**
+   * Secondary text at 11–13 px (`--text-muted`): field labels, hints, notes, ids, dialog and
+   * empty-state descriptions under a title. Below body text on purpose, so the hierarchy shows
+   * (ADR 0018); body copy uses `--text`.
+   */
+  secondary: 60,
   /** Text at 10–13 px, medium/bold (500–600): button labels, chips, badges, tooltips. */
   label: 60,
   /** Non-content "spot" text: placeholders, unit suffixes, metadata, disabled. */
@@ -142,10 +149,10 @@ const PAIRS: [fg: string, bg: string, role: Role, where: string][] = [
   ['--text', '--warning-subtle', 'read', 'hard warning text (12 px)'],
   ['--text', '--danger-subtle', 'read', 'error banner text'],
   ['--bg-app', '--text', 'label', 'tooltip, inverted (12 px / 500)'],
-  ['--text-muted', '--bg-app', 'read', 'labels, secondary text'],
-  ['--text-muted', '--bg-chrome', 'read', 'support area notes (12 px), status bar'],
-  ['--text-muted', '--bg-field', 'read', 'read-only values'],
-  ['--text-muted', '--bg-raised', 'read', 'dialog body'],
+  ['--text-muted', '--bg-app', 'secondary', 'labels, secondary text'],
+  ['--text-muted', '--bg-chrome', 'secondary', 'support area notes (12 px), status bar'],
+  ['--text-muted', '--bg-field', 'secondary', 'read-only values'],
+  ['--text-muted', '--bg-raised', 'secondary', 'dialog description under its title'],
   ['--text-muted', '--bg-control', 'label', 'ghost buttons, segmented items (500)'],
   ['--text-faint', '--bg-app', 'spot', 'metadata (non-essential)'],
   ['--text-faint', '--bg-field', 'spot', 'unit suffix, placeholder'],
@@ -172,10 +179,14 @@ const PAIRS: [fg: string, bg: string, role: Role, where: string][] = [
   ['--safety-moving-fg', '--accent-subtle', 'label', 'Running badge'],
   ['--safety-idle', '--bg-field', 'mark', 'Idle badge dot (solid)'],
   ['--safety-offline', '--bg-field', 'icon', 'Not connected badge ring (1.5 px)'],
-  ['--danger', '--bg-control', 'label', 'danger button label (13 px / 500)'],
-  ['--danger', '--bg-raised', 'read', 'danger menu item'],
-  ['--danger', '--danger-subtle', 'label', 'danger chip (12 px / 500)'],
-  ['--danger', '--bg-chrome', 'read', 'field error text in the support area (12 px)'],
+  // red text takes --danger-text; --danger stays saturated for outlines, markers and icons (ADR 0018)
+  ['--danger-text', '--bg-control', 'label', 'danger button label (13 px / 500)'],
+  ['--danger-text', '--danger-subtle', 'label', 'danger button label on hover, danger chip'],
+  ['--danger-text', '--bg-raised', 'read', 'danger menu item'],
+  ['--danger-text', '--bg-chrome', 'read', 'field error text in the support area (12 px)'],
+  ['--danger', '--bg-app', 'icon', 'failed operation icon in the navigator'],
+  ['--danger', '--bg-chrome', 'icon', 'error icon in the status bar'],
+  ['--danger', '--danger-subtle', 'icon', 'error banner and error-tier list icon'],
   ['--info', '--info-subtle', 'label', 'agent tag (10 px / 500)'],
   // viewport lines (1–2 px) on what they are drawn over; grid and surface tints are area fills
   // kept deliberately quiet, with no target (ui.md#colour)
@@ -188,6 +199,8 @@ const PAIRS: [fg: string, bg: string, role: Role, where: string][] = [
   ['--vp-feed', '--bg-viewport', 'mark', 'feed moves'],
   ['--vp-feed', '--vp-part', 'mark', 'feed moves over the part'],
   ['--vp-rapid', '--bg-viewport', 'mark', 'rapid moves'],
+  ['--vp-plunge', '--bg-viewport', 'mark', 'plunges'],
+  ['--vp-plunge', '--vp-part', 'mark', 'plunges over the part'],
   ['--vp-tool', '--bg-viewport', 'mark', 'tool marker'],
   ['--vp-axis-x', '--bg-viewport', 'mark', 'X axis'],
   ['--vp-axis-y', '--bg-viewport', 'mark', 'Y axis'],
@@ -237,6 +250,12 @@ describe('tokens.css', () => {
     expect(MOTION_DURATIONS().map((t) => reduced.get(t))).toEqual(
       MOTION_DURATIONS().map(() => '0ms'),
     )
+  })
+
+  it.each(['light', 'dark'] as const)('%s: plunges differ from feeds and rapids', (t) => {
+    const v = (name: string): string | undefined => themes[t].get(name)
+    expect(v('--vp-plunge')).not.toBe(v('--vp-feed'))
+    expect(v('--vp-plunge')).not.toBe(v('--vp-rapid'))
   })
 
   describe('APCA contrast (Lc), ui.md#colour', () => {

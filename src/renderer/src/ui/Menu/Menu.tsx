@@ -1,4 +1,4 @@
-// Menu: row and viewport actions in a dropdown, with shortcuts; destructive items in --danger.
+// Menu: row and viewport actions in a dropdown, with shortcuts; destructive items in --danger-text.
 // Doc: docs/conventions/ui.md#radix-wrapping-pattern, #inventory-v01
 import { DropdownMenu } from 'radix-ui'
 import type { ReactElement, ReactNode } from 'react'
