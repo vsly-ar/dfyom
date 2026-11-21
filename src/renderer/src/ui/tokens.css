@@ -276,10 +276,10 @@
   --icon-lg: 20px;
   --icon-xl: 28px;
   --icon-stroke: 1.35px;
-  /* z-order follows elevation; the stop control sits above dialogs (ui.md#elevation) */
+  /* z-order follows elevation; popovers and the stop control sit above dialogs (ui.md#elevation) */
   --z-toolbar: 10;
-  --z-popover: 100;
   --z-dialog: 200;
+  --z-popover: 250; /* above dialogs: popovers open inside them */
   --z-toast: 300;
   --z-safety: 400;
   /* motion */

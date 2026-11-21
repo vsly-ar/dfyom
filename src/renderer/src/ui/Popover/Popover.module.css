@@ -1,7 +1,7 @@
 /* Popover. Look: ui-design-system.html (.stepper surface). Doc: docs/conventions/ui.md#elevation */
 .content {
   /* above dialogs: it can open inside one (ui.md#elevation) */
-  z-index: calc(var(--z-dialog) + 1);
+  z-index: var(--z-popover);
   min-width: 200px;
   max-width: min(320px, calc(100vw - 16px));
   padding: 10px;

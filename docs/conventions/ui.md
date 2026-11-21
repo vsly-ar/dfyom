@@ -141,7 +141,7 @@ Weights: `--weight-regular` 400, `--weight-medium` 500 (labels, buttons), `--wei
 | `--shadow-2` | Popovers, menus, tooltips (`--bg-raised`) | medium       | medium + `--border-control` |
 | `--shadow-3` | Dialogs, over `--bg-overlay`              | large        | large                       |
 
-Z-order follows elevation (`--z-toolbar`, `--z-popover`, `--z-dialog`, `--z-toast`); the [global stop control](#run-mode-safety-ui) sits above dialogs (`--z-safety`), so no overlay ever hides it. Exception (2026-11-21): popovers, menus, tooltips and `Select` lists render at `calc(var(--z-dialog) + 1)`, since they can open inside a dialog (the "New tool" form's selects); a modal dialog makes everything outside it inert, so no outside popover is open with it. Swapping the token values (`--z-popover` above `--z-dialog`) belongs to the token work ([known issue](../plans/v0.1.md#known-issues-and-risks)).
+Z-order follows elevation (`--z-toolbar`, `--z-dialog`, `--z-popover`, `--z-toast`); popovers, menus, tooltips and `Select` lists sit above dialogs because they can open inside one (the "New tool" form's selects), and a modal dialog makes everything outside it inert, so no outside popover is open with it. The [global stop control](#run-mode-safety-ui) sits above dialogs (`--z-safety`), so no overlay ever hides it.
 
 ### Motion
 
