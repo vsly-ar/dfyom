@@ -64,7 +64,8 @@
 }
 
 .content {
-  z-index: var(--z-popover);
+  /* above dialogs: it can open inside one (ui.md#elevation) */
+  z-index: calc(var(--z-dialog) + 1);
   min-width: var(--radix-select-trigger-width);
   max-height: var(--radix-select-content-available-height);
   padding: 4px;

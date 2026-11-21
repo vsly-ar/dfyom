@@ -1,23 +1,15 @@
 // The v0.1 exit criteria's UI flow (task 3.11), through the UI only: create a project with a
 // rectangular stock; add facing, pocket (inside corner radius, floor fillet), drilling and profile
-// with tabs; plan one setup (tools from the library, drill feeds entered by hand); generate the
-// toolpaths and export GRBL gCode; run it on the virtual machine at max speed with progress shown,
-// through every tool change and program pause; save, close the app, reopen it and open the project.
-// The tool and machine library is app data from before the project (there is no library UI in
-// v0.1): it is filled through the window's bridge first, like an agent would. The native file
-// dialogs are stubbed in the main process. Selectors are roles and accessible names.
+// with tabs; plan one setup (the machine and the tools added through plan mode's "New machine…"
+// and "New tool…" forms into the empty library of a fresh install, drill feeds entered by hand);
+// generate the toolpaths and export GRBL gCode; run it on the virtual machine at max speed with
+// progress shown, through every tool change and program pause; save, close the app, reopen it and
+// open the project. The native file dialogs are stubbed in the main process. Selectors are roles
+// and accessible names.
 // Docs: docs/plans/v0.1.md#exit-criteria, docs/conventions/testing.md#end-to-end
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ElectronApplication, Locator, Page } from '@playwright/test'
-import {
-  deg,
-  flatEndMillValues,
-  len,
-  machineValues,
-  num,
-} from '../src/core/library/library.fixture'
-import type { CallReply, PreloadApi } from '../src/shared/preload-api'
 import { expect, launchApp, test } from './app.fixture'
 
 /** The OS dialogs answer `project` for the project file and `gcode` for the export. */
@@ -37,46 +29,6 @@ async function stubFileDialogs(
   }, files)
 }
 
-// The plan fixture's tools (src/core/plan/plan.fixture.ts imports Vitest, so not shared here)
-const { kind: _tool, ...flat } = flatEndMillValues()
-const flat6 = {
-  ...flat,
-  name: 'Flat 6',
-  fluteLength: len('25'),
-  overallLength: len('60'),
-  toolMaterial: 'carbide',
-}
-const TOOLS = [
-  flat6,
-  { ...flat6, name: 'Flat 4', diameter: len('4'), presets: [] },
-  { ...flat6, name: 'Bull 6', type: 'bullNoseEndMill', cornerRadius: len('2') },
-  {
-    name: 'Drill 6',
-    type: 'drill',
-    diameter: len('6'),
-    fluteLength: len('30'),
-    overallLength: len('66'),
-    fluteCount: num('2'),
-    pointAngle: deg('118'),
-    presets: [],
-  },
-]
-
-/** Fills the library (app data, no project needed) through the window's bridge. */
-async function fillLibrary(page: Page): Promise<void> {
-  const call = async (name: string, args: object) => {
-    const r = await page.evaluate(
-      ([n, a]) => (globalThis as unknown as { dfyom: PreloadApi }).dfyom.call(n, a),
-      [name, args] as const,
-    )
-    expect(r.ok, `${name}: ${JSON.stringify(r)}`).toBe(true)
-    return (r as Extract<CallReply, { ok: true }>).value
-  }
-  for (const values of TOOLS) await call('library.tool.add', { values })
-  const { kind: _, ...machine } = machineValues()
-  await call('library.machine.add', { values: machine })
-}
-
 /** Types a value into a field and commits it (Enter = one command), then leaves the field. */
 async function setField(scope: Locator, label: string, value: string): Promise<void> {
   // the input only: a group may share its label ("Depth")
@@ -85,6 +37,23 @@ async function setField(scope: Locator, label: string, value: string): Promise<v
   await field.press('Enter')
   // leave the field: its echo collapses on blur, which would move the next click's target
   await field.blur()
+}
+
+/** Adds a tool through the inspector's "New tool…" form; it is assigned to the selected operation. */
+async function newTool(
+  page: Page,
+  inspector: Locator,
+  fields: { type?: string; values: readonly (readonly [string, string])[] },
+): Promise<void> {
+  await inspector.getByRole('button', { name: 'New tool…' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New tool' })
+  if (fields.type !== undefined) {
+    await dialog.getByRole('combobox', { name: 'Type' }).click()
+    await page.getByRole('option', { name: fields.type }).click()
+  }
+  for (const [label, value] of fields.values) await setField(dialog, label, value)
+  await dialog.getByRole('button', { name: 'Add tool' }).click()
+  await expect(dialog).toBeHidden()
 }
 
 async function addFromMenu(page: Page, label: string): Promise<void> {
@@ -114,7 +83,6 @@ test('exit criteria through the UI: design, plan, export, run, save, close and r
   const page = await dfyom.app.firstWindow()
   await page.waitForLoadState('domcontentloaded')
   await stubFileDialogs(dfyom.app, files)
-  await fillLibrary(page)
   const navigator = page.getByRole('navigation', { name: 'Navigator' })
   const inspector = page.getByRole('complementary', { name: 'Inspector' })
   const status = page.getByRole('contentinfo', { name: 'Status bar' })
@@ -163,20 +131,61 @@ test('exit criteria through the UI: design, plan, export, run, save, close and r
   // ── Plan one setup ───────────────────────────────────────────────────────────────────────
   await page.keyboard.press('ControlOrMeta+2')
   await expect(page.getByRole('radio', { name: 'Plan' })).toBeChecked()
+  // a fresh install: the machine library is empty, so the machine is added first
+  await expect(navigator.getByText('The machine library is empty.', { exact: false })).toBeVisible()
+  await navigator.getByRole('button', { name: 'New machine…' }).click()
+  const newMachine = page.getByRole('dialog', { name: 'New machine' })
+  await newMachine.getByRole('textbox', { name: 'Name' }).fill('Shapeoko')
+  for (const [label, value] of [
+    ['Travel X', '800'],
+    ['Travel Y', '800'],
+    ['Travel Z', '100'],
+    ['Max feed rate X', '5000'],
+    ['Max feed rate Y', '5000'],
+    ['Max feed rate Z', '1000'],
+    ['Max spindle speed', '30000'],
+  ] as const)
+    await setField(newMachine, label, value)
+  await newMachine.getByRole('button', { name: 'Add machine' }).click()
+  await expect(newMachine).toBeHidden()
   await navigator.getByRole('button', { name: 'Create plan' }).click()
-  await expect(planRows(page)).toHaveText([
-    /^Facing 1Flat 6/,
-    /^Drilling 1/,
-    /^Pocket 1Bull 6/,
-    /^Profile 1Flat 6/,
-  ])
+  await expect(planRows(page)).toHaveCount(4)
   await expect(navigator.getByRole('combobox', { name: 'Machine' })).toHaveText('Shapeoko')
 
-  // the drilling: the drill from the picker, and its feeds by hand (no preset, no calculator data)
+  // the tools: each added from its operation's "New tool…" (and assigned), the profile reuses Flat 6
+  const lengths = [
+    ['Flute length', '25'],
+    ['Overall length', '60'],
+  ] as const
+  await planRows(page).nth(0).click()
+  await expect(inspector.getByRole('heading', { name: 'Facing 1' })).toBeVisible()
+  await newTool(page, inspector, { values: [['Diameter', '6'], ...lengths] })
+  await expect(planRows(page).nth(0)).toHaveText(/^Facing 1Flat 6/)
+  await planRows(page).nth(2).click()
+  await expect(inspector.getByRole('heading', { name: 'Pocket 1' })).toBeVisible()
+  // the floor fillet needs a bull nose with a matching corner radius (plan-v0.1.md)
+  await newTool(page, inspector, {
+    type: 'Bull nose end mill',
+    values: [['Diameter', '6'], ['Corner radius', '2'], ...lengths],
+  })
+  await expect(planRows(page).nth(2)).toHaveText(/^Pocket 1Bull 6/)
+  await planRows(page).nth(3).click()
+  await expect(inspector.getByRole('heading', { name: 'Profile 1' })).toBeVisible()
+  await inspector.getByRole('combobox', { name: 'Tool' }).click()
+  await page.getByRole('option', { name: /^Flat 6/ }).click()
+  await expect(planRows(page).nth(3)).toHaveText(/^Profile 1Flat 6/)
+
+  // the drilling: a new drill (the form suggests one), and its feeds by hand (no calculator data)
   await planRows(page).nth(1).click()
   await expect(inspector.getByRole('heading', { name: 'Drilling 1' })).toBeVisible()
-  await inspector.getByRole('combobox', { name: 'Tool' }).click()
-  await page.getByRole('option', { name: /^Drill 6/ }).click()
+  await newTool(page, inspector, {
+    values: [
+      ['Diameter', '6'],
+      ['Flute length', '30'],
+      ['Overall length', '66'],
+      ['Point angle', '118'],
+    ],
+  })
   await expect(planRows(page).nth(1)).toHaveText(/^Drilling 1Drill 6/)
   await setField(inspector, 'Spindle speed', '3000')
   await setField(inspector, 'Feed rate', '150')
@@ -234,7 +243,10 @@ test('exit criteria through the UI: design, plan, export, run, save, close and r
   ])
   await preflight.getByRole('button', { name: 'Start run' }).click()
 
-  await expect(inspector.getByRole('progressbar', { name: 'Run progress' })).toBeVisible()
+  // on screen, even when the first program pause's modal already hides it from the a11y tree
+  await expect(
+    inspector.getByRole('progressbar', { name: 'Run progress', includeHidden: true }),
+  ).toBeVisible()
   const complete = inspector.getByText(/^Run complete: \d+ lines in/)
   const toolChanges: string[] = []
   for (;;) {

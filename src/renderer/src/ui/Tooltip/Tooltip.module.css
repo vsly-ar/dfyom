@@ -1,6 +1,7 @@
 /* Tooltip. Doc: docs/conventions/ui.md#radix-wrapping-pattern; look: ui-design-system.html (.tooltip) */
 .content {
-  z-index: var(--z-popover);
+  /* above dialogs: it can open inside one (ui.md#elevation) */
+  z-index: calc(var(--z-dialog) + 1);
   display: inline-flex;
   gap: 10px;
   align-items: center;
