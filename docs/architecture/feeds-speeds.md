@@ -1,6 +1,6 @@
 # Feeds-and-speeds calculator
 
-Status: implemented · Code: [`src/core/feeds-speeds/`](../../src/core/feeds-speeds/suggest.ts) · Used by: [plan-v0.1.md](../modes/plan-v0.1.md#feeds-and-speeds) · Presets: [library.md](library.md#feeds-and-speeds-presets) · Values: [quantities.md](quantities.md) · Terms: [glossary.md](../glossary.md) · Task: [v0.1 plan](../plans/v0.1.md) 1.15 (code: 2.12)
+Status: implemented (locked inputs: [draft](#locked-inputs-draft)) · Code: [`src/core/feeds-speeds/`](../../src/core/feeds-speeds/suggest.ts) · Used by: [plan-v0.1.md](../modes/plan-v0.1.md#feeds-and-speeds) · Presets: [library.md](library.md#feeds-and-speeds-presets) · Values: [quantities.md](quantities.md) · Terms: [glossary.md](../glossary.md) · Task: [v0.1 plan](../plans/v0.1.md) 1.15 (code: 2.12)
 
 The calculator is the third step of the [resolution order](../modes/plan-v0.1.md#feeds-and-speeds) (override → tool preset → **calculator** → strategy fallback). It suggests `spindleSpeed`, `feedRate`, `plungeRate`, `stepdown` and `stepover` for one plan operation from the tool, the stock's material class, the strategy's engagement and the machine, and explains every number ([principles §5](../principles.md#5-user-friendly-beginner-friendly-highly-graphical)).
 
@@ -35,7 +35,7 @@ Symbols follow Sandvik Coromant (ISO): `vc` surface speed, `D` tool diameter, `z
 
 ¹ New optional machine fields ([Changes to other docs](#changes-to-other-docs-applied-with-task-212)). Without `spindle.power` the power check is skipped (info); without `rigidity` the lowest preset applies.
 
-**Order:** `stepdown` and `stepover` are resolved first (override → preset → calculator → strategy fallback); `n`, `vf` and `plungeRate` are then computed for the **resolved** engagement, so a user stepover still gets chip thinning and a power check.
+**Order** (replaced by [Locked inputs](#locked-inputs-draft) once accepted): `stepdown` and `stepover` are resolved first (override → preset → calculator → strategy fallback); `n`, `vf` and `plungeRate` are then computed for the **resolved** engagement, so a user stepover still gets chip thinning and a power check.
 
 **Output** `CuttingSuggestion`: each of the five fields is `Option<{ value, derivation }>`; `derivation` lists formula id, inputs and result per step (rendered as formulas and tooltips in the UI, returned verbatim to agents). Derived display values: `vc` actual, `fz` actual, `Q`, `Pc`, spindle load %. Plus `warnings[]`.
 
@@ -113,6 +113,46 @@ Curated, versioned TypeScript data in `src/core/feeds-speeds/data.ts` (code, not
 - **`kPlunge`:** Amana's charts give "Ramp Down: Feed Rate IPM / # of flutes", i.e. `plungeRate = vf / z`. One row cannot hold `z`, so router rows use 0.5 (the rule for the 2-flute bits the chip loads are printed for; a 1-flute bit gets half the Amana value) and metal rows 0.25 (the rule for 4 flutes; conservative for `z ≤ 4`). Tools with more flutes than that plunge faster than the Amana rule (known issue; F9 could use `1/z` later).
 
 **Gaps:** HSS end mills (all classes), drills (`fn` and drill `vc`), tools ≤ 3 mm and > 25 mm, stainless/tool steels, high-silicon aluminium castings and material class `other` → `feeds.noData`.
+
+## Locked inputs (draft)
+
+Status: **draft**, not implemented: waits for the open questions in [plan-v0.1.md § Locks and auto mode](../modes/plan-v0.1.md#locks-and-auto-mode-draft), which owns when locks exist and what an entered value is. This section is how the calculator uses locked values. Once accepted it replaces the **Order** paragraph in [Inputs and outputs](#inputs-and-outputs) and the "`ap` given" rule in [Implementation decisions](#implementation-decisions-task-212).
+
+A **locked** value is a fixed input: the calculator recommends every unlocked field around it, so locking the spindle speed makes the feed follow it. An **entered** (typed, unlocked) value is not an input: it replaces only its own field's value, and the recommendation of the other fields stays what it would be without it. The [final-value check](#final-value-check-draft) still sees it.
+
+`CuttingInput` gains `locked: { n?, vf?, ap?, ae? }` (canonical numbers). `engagement` then carries only the kind and the strategy's `ae` (no `ap`); a locked stepdown is `locked.ap`, a locked facing stepover `locked.ae`. `plungeRate` is never an input (nothing depends on it), so it has no lock.
+
+| Locked        | Unlocked fields are recommended as                                                                                                                                                                                                                                                   |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| none          | As today: `n` from F1 or the chart, clamped; `vf` from F2, clamped (`n` lowered to keep `fz`); `ap` = `apSlot·D·apFactor`, reduced to fit the power; plunge F9.                                                                                                                      |
+| `n`           | `n` replaces F1/the chart and the rpm clamp (derivation step `locked`). `vf = n·z·fz_prog` (F2); above `maxFeedXY` it is clamped and `fz` drops (`n` stays): `feeds.feedClamped`, maybe `feeds.rubbing`. `ap` fits the power at this `n` (`Pavail` depends on `n`).                  |
+| `vf`          | `n = vf / (z·fz_prog)`: the data chip load is the anchor (router rows: replaces the chart `n`), clamped to `[minSpeed, maxSpeed]`; when clamped, `fz` follows from `vf`: `feeds.rubbing` below the data range, **`feeds.chipLoadHigh`** (new warning) above it. `ap` fits the power. |
+| `n` + `vf`    | Chip load is derived, `fz = vf / (n·z·k)`, with `feeds.rubbing` / `feeds.chipLoadHigh` outside the data range. `ap` fits the power.                                                                                                                                                  |
+| `ap`          | `n`, `vf` as for the other locks. Power exceeded: an unlocked `vf` is reduced to fit (`n` kept, `fz` drops, maybe `feeds.rubbing`); a locked `vf` only warns (`feeds.powerExceeded`). Replaces today's "given `ap` only warns".                                                      |
+| `ae` (facing) | The facing engagement uses it (F3, F6). Pocket and profile engage as a slot whatever the stepover, so their stepover has no lock.                                                                                                                                                    |
+| drilling      | `n` locked: `vf = fn·n` (F8), clamped to `maxFeedRate.z`. `vf` locked: `n = vf / fn`, clamped to the spindle range (then `fn` follows: `feeds.rubbing` / `feeds.chipLoadHigh`). `plungeRate = vf`.                                                                                   |
+
+Power fit order with several unlocked fields: `ap` first (keep chip load, reduce depth: [rigidity](#hobby-machine-realism)), then `vf`.
+
+### Impossible locks (draft)
+
+A lock is **unavailable** (the plan refuses it; the UI shows the lock disabled with the reason) when the value breaks a hard limit or leaves the locked set no way to meet one:
+
+| Rule                | When                                                                                                                         | Reason shown (example)                                                         |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `invalid`           | No valid value: the input has an error, or the field has no value                                                            | "Enter a valid value to lock it."                                              |
+| `spindleRange`      | `n` outside `[spindle.minSpeed, spindle.maxSpeed]` of the plan's machine copy                                                | "24 000 rpm is above this machine's 18 000 rpm."                               |
+| `feedLimit`         | `vf > min(maxFeedRate.x, .y)` (drilling: `> maxFeedRate.z`)                                                                  | "6 000 mm/min is above this machine's 5 000 mm/min (X/Y)."                     |
+| `toolLength`        | `ap > fluteLength` or `ap > stickout`                                                                                        | "Stepdown 30 mm is deeper than the flute length (22 mm)."                      |
+| `stepoverAboveTool` | facing `ae > D`                                                                                                              | "A stepover above the tool diameter leaves ridges."                            |
+| `power`             | With this lock every input of F7 is locked (`n`, `vf`, `ap`, facing `ae`) and `Pc > Pavail`: no unlocked field can absorb it | "With spindle speed, feed and stepdown locked the cut needs 1.4 kW of 0.8 kW." |
+
+- Combinations of individually valid locks are otherwise **allowed**: they can only move the chip load or the power, which are recommendations, not limits, so they warn (`feeds.rubbing`, `feeds.chipLoadHigh`, `feeds.powerExceeded`). Without `spindle.power` the `power` rule is skipped; without a machine only `invalid`, `toolLength` and `stepoverAboveTool` apply.
+- A stored lock that later breaks a rule (other tool, machine or stock) stays stored but is **inactive**: the recommendation ignores it, and `plan.warning.list` reports `feeds.lockInactive` (warning) on the field with the same reason; the UI offers "Unlock".
+
+### Final-value check (draft)
+
+Because entered values are not inputs, the calculator's own warnings describe its recommendation, not what will run. After resolution `checkCutting(final values)` re-runs the coupling checks on the values that will be used: spindle range, feed limits, chip load against the data range (`feeds.rubbing`, `feeds.chipLoadHigh`) and power at the final `ae`, `ap`, `vf`. These warnings (each with `field`) replace the calculator's in `plan.warning.list`; the calculator's warnings stay in its derivation.
 
 ## Live vs. saved
 
