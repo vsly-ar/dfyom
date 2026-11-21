@@ -9,7 +9,7 @@ The docs are the **source of truth**. Code implements what is documented here; w
 | Product      | [vision.md](vision.md) – what DFYOM is and who it is for                                                                                                                       | accepted    |
 | Product      | [principles.md](principles.md) – non-negotiable core principles                                                                                                                | accepted    |
 | Product      | [roadmap.md](roadmap.md) – milestones as vertical slices                                                                                                                       | accepted    |
-| Product      | [plans/v0.1.md](plans/v0.1.md) – v0.1 tasks and status (living document)                                                                                                       | accepted    |
+| Product      | [plans/v0.1.md](plans/v0.1.md) – v0.1 tasks and status (living document)                                                                                                       | implemented |
 | Product      | [glossary.md](glossary.md) – domain terms (industry standard)                                                                                                                  | draft       |
 | Modes        | [modes/design.md](modes/design.md) – DFM-first part design; v0.1 operations (remaining: design UI 3.6)                                                                         | implemented |
 | Modes        | [modes/plan.md](modes/plan.md) – setups, toolpaths, optimization, gCode export                                                                                                 | draft       |

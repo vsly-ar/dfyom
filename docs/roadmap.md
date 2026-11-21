@@ -6,6 +6,8 @@ Milestones are vertical slices through all three modes. A milestone lists the do
 
 ## v0.1 – 2.5D basics to the virtual machine
 
+**Done 2026-11-21.**
+
 **Goal:** prove the whole pipeline with the simplest geometry. Tasks and status: [plans/v0.1.md](plans/v0.1.md).
 
 1. **Design:** rectangular stock from a library; facing, pocket (with inside corner radius), drilling, profile with tabs; values are [quantities](architecture/quantities.md).
