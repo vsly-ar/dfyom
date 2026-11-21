@@ -42,7 +42,7 @@
 
 .item[data-danger],
 .item[data-danger] svg {
-  color: var(--danger);
+  color: var(--danger-text);
 }
 
 .item[data-disabled] {

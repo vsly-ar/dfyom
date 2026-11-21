@@ -27,7 +27,7 @@ export const PALETTE_TOKENS = {
   feed: '--vp-feed',
   rapid: '--vp-rapid',
   tool: '--vp-tool',
-  /** Plunges in the toolpath preview (task 3.7); `--vp-feed` until the token exists. */
+  /** Plunges in the toolpath preview (task 3.7); falls back to `--vp-feed` if the token is missing. */
   plunge: '--vp-plunge',
 } as const
 

@@ -65,7 +65,7 @@
 }
 
 .button[data-variant='danger'] {
-  color: var(--danger);
+  color: var(--danger-text);
 }
 
 .button[data-variant='danger']:hover {

@@ -1,6 +1,6 @@
 # 0017 – APCA instead of WCAG 2 contrast ratios for the design tokens
 
-Status: accepted · Date: 2026-11-20
+Status: accepted, amended by [ADR 0018](0018-danger-text-and-secondary-text-role.md) · Date: 2026-11-20
 
 ## Context
 

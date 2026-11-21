@@ -13,14 +13,14 @@
   --bg-app: #f6f8ff; --bg-chrome: #eceff7; --bg-viewport: #e4e8f2; --bg-field: #ffffff; --bg-control: #ffffff; --bg-raised: #ffffff;
   --bg-hover: rgb(28 33 33 / 0.06); --bg-active: rgb(28 33 33 / 0.1); --bg-overlay: rgb(28 33 33 / 0.32);
   /* text */
-  --text: #1c2121; --text-muted: #515957; --text-faint: #868f8d; --text-on-accent: #1c2121; --text-on-solid: #ffffff; --text-accent: #8a6400;
+  --text: #1c2121; --text-muted: #5b6462; --text-faint: #868f8d; --text-on-accent: #1c2121; --text-on-solid: #ffffff; --text-accent: #8a6400;
   /* lines */
   --border: #dde2ec; --border-control: #848d9b; --focus: #a87a00;
   /* accent: Amber */
   --accent: #f5b700; --accent-hover: #e6aa00; --accent-border: #a87a00; --accent-subtle: #fff2c9; --accent-icon: #f5b700; --accent-icon-edge: drop-shadow(0 0 0.4px rgb(60 40 0 / 0.75));
   --accent-calm: #fff6dc; --accent-calm-hover: #ffefc0; --accent-calm-border: #e9c96a;
   /* feedback (never machine state) */
-  --danger: #a6051d; --danger-subtle: #fdecec; --warning: #c96a00; --warning-subtle: #fff0e3;
+  --danger: #c9363a; /* split after the APCA pass */ --danger-text: #a6051d; --danger-subtle: #fdecec; --warning: #c96a00; --warning-subtle: #fff0e3;
   --success: #1f7d49; --success-subtle: #e6f5ec; --info: #2f6fc0; --info-subtle: #e8f0fb;
   /* safety (machine state and stop only) */
   --safety-stop: #d0302f; --safety-stop-fg: #ffffff; --safety-alarm: #d0302f; --safety-alarm-fg: #ffffff;
@@ -29,7 +29,7 @@
   /* viewport */
   --vp-grid: #d7dde9; --vp-grid-major: #c5ccdb; --vp-stock: #868f8d; --vp-part: #f9faff; --vp-edge: #39423f; --vp-removal: #d3d9e5;
   --vp-selected: #f2b200; --vp-selected-halo: rgb(150 105 0 / 0.45); --vp-feed: #5b6462; --vp-rapid: #868f8d; --vp-tool: #1c2121;
-  /* new since approval (3.5, approved 2026-11-21) */ --vp-hover: #f8edcc; --vp-outdated: #d6dae3;
+  /* new since approval (3.5, approved 2026-11-21) */ --vp-hover: #f8edcc; --vp-outdated: #d6dae3; /* new since approval (3.7) */ --vp-plunge: #835bae;
   --vp-axis-x: #d0605f; --vp-axis-y: #4f9d6c; --vp-axis-z: #4a7fc8;
   /* elevation */
   --shadow-1: 0 1px 2px rgb(20 25 40 / 0.08), 0 2px 8px rgb(20 25 40 / 0.06);
@@ -41,18 +41,18 @@
   :root:not([data-theme="light"]) {
     --bg-app: #272d2d; --bg-chrome: #2e3535; --bg-viewport: #1e2323; --bg-field: #212727; --bg-control: #353d3d; --bg-raised: #353d3d;
     --bg-hover: rgb(233 237 243 / 0.07); --bg-active: rgb(233 237 243 / 0.11); --bg-overlay: rgb(0 0 0 / 0.5);
-    --text: #e9edf3; --text-muted: #d1dcda; --text-faint: #7a8482; --text-on-accent: #1c2121; --text-on-solid: #ffffff; --text-accent: #ffcf4d;
+    --text: #e9edf3; --text-muted: #b9c4c1; --text-faint: #7a8482; --text-on-accent: #1c2121; --text-on-solid: #ffffff; --text-accent: #ffcf4d;
     --border: #3a4343; --border-control: #7a8686; --focus: #f5b700;
     --accent: #f5b700; --accent-hover: #ffc61a; --accent-border: #f5b700; --accent-subtle: #3b3213; --accent-icon: #f5b700; --accent-icon-edge: none;
     --accent-calm: #3a3216; --accent-calm-hover: #463b17; --accent-calm-border: #6e5a1c;
-    --danger: #ffcecb; --danger-subtle: #45272a; --warning: #f2993a; --warning-subtle: #42331c;
+    --danger: #ff7475; /* split after the APCA pass */ --danger-text: #ffcecb; --danger-subtle: #45272a; --warning: #f2993a; --warning-subtle: #42331c;
     --success: #4cc387; --success-subtle: #233d30; --info: #85c1ff; --info-subtle: #23344a;
     --safety-stop: #d9373c; --safety-stop-fg: #ffffff; --safety-alarm: #d9373c; --safety-alarm-fg: #ffffff;
     --safety-hold: #ff9a50; --safety-hold-fg: #1c2121; --safety-moving: #f5b700; --safety-moving-edge: #f5b700; --safety-moving-fg: #e9edf3;
     --safety-action: #74b8fe; --safety-action-fg: #1c2121; --safety-idle: #a2acaa; --safety-offline: #939e9c;
     --vp-grid: #283030; --vp-grid-major: #323b3b; --vp-stock: #7a8482; --vp-part: #2b3232; --vp-edge: #d5dbe3; --vp-removal: #191d1d;
     --vp-selected: #f5b700; --vp-selected-halo: rgb(0 0 0 / 0.6); --vp-feed: #b8c1c0; --vp-rapid: #7a8482; --vp-tool: #e9edf3;
-    /* new since approval (3.5, approved 2026-11-21) */ --vp-hover: #3f4136; --vp-outdated: #232828;
+    /* new since approval (3.5, approved 2026-11-21) */ --vp-hover: #3f4136; --vp-outdated: #232828; /* new since approval (3.7) */ --vp-plunge: #a886cf;
     --vp-axis-x: #e07574; --vp-axis-y: #62b580; --vp-axis-z: #6c9ee0;
     --shadow-1: 0 1px 2px rgb(0 0 0 / 0.3); --shadow-2: 0 4px 16px rgb(0 0 0 / 0.4); --shadow-3: 0 16px 48px rgb(0 0 0 / 0.55);
     color-scheme: dark;
@@ -61,18 +61,18 @@
 :root[data-theme="dark"], .t-dark {
   --bg-app: #272d2d; --bg-chrome: #2e3535; --bg-viewport: #1e2323; --bg-field: #212727; --bg-control: #353d3d; --bg-raised: #353d3d;
   --bg-hover: rgb(233 237 243 / 0.07); --bg-active: rgb(233 237 243 / 0.11); --bg-overlay: rgb(0 0 0 / 0.5);
-  --text: #e9edf3; --text-muted: #d1dcda; --text-faint: #7a8482; --text-on-accent: #1c2121; --text-on-solid: #ffffff; --text-accent: #ffcf4d;
+  --text: #e9edf3; --text-muted: #b9c4c1; --text-faint: #7a8482; --text-on-accent: #1c2121; --text-on-solid: #ffffff; --text-accent: #ffcf4d;
   --border: #3a4343; --border-control: #7a8686; --focus: #f5b700;
   --accent: #f5b700; --accent-hover: #ffc61a; --accent-border: #f5b700; --accent-subtle: #3b3213; --accent-icon: #f5b700; --accent-icon-edge: none;
   --accent-calm: #3a3216; --accent-calm-hover: #463b17; --accent-calm-border: #6e5a1c;
-  --danger: #ffcecb; --danger-subtle: #45272a; --warning: #f2993a; --warning-subtle: #42331c;
+  --danger: #ff7475; /* split after the APCA pass */ --danger-text: #ffcecb; --danger-subtle: #45272a; --warning: #f2993a; --warning-subtle: #42331c;
   --success: #4cc387; --success-subtle: #233d30; --info: #85c1ff; --info-subtle: #23344a;
   --safety-stop: #d9373c; --safety-stop-fg: #ffffff; --safety-alarm: #d9373c; --safety-alarm-fg: #ffffff;
   --safety-hold: #ff9a50; --safety-hold-fg: #1c2121; --safety-moving: #f5b700; --safety-moving-edge: #f5b700; --safety-moving-fg: #e9edf3;
   --safety-action: #74b8fe; --safety-action-fg: #1c2121; --safety-idle: #a2acaa; --safety-offline: #939e9c;
   --vp-grid: #283030; --vp-grid-major: #323b3b; --vp-stock: #7a8482; --vp-part: #2b3232; --vp-edge: #d5dbe3; --vp-removal: #191d1d;
   --vp-selected: #f5b700; --vp-selected-halo: rgb(0 0 0 / 0.6); --vp-feed: #b8c1c0; --vp-rapid: #7a8482; --vp-tool: #e9edf3;
-  /* new since approval (3.5, approved 2026-11-21) */ --vp-hover: #3f4136; --vp-outdated: #232828;
+  /* new since approval (3.5, approved 2026-11-21) */ --vp-hover: #3f4136; --vp-outdated: #232828; /* new since approval (3.7) */ --vp-plunge: #a886cf;
   --vp-axis-x: #e07574; --vp-axis-y: #62b580; --vp-axis-z: #6c9ee0;
   --shadow-1: 0 1px 2px rgb(0 0 0 / 0.3); --shadow-2: 0 4px 16px rgb(0 0 0 / 0.4); --shadow-3: 0 16px 48px rgb(0 0 0 / 0.55);
   color-scheme: dark;
@@ -139,7 +139,7 @@ td.wrap { white-space: normal; min-width: 220px; color: var(--text-muted); }
 td code, .code { font: var(--text-xs)/1.3 var(--font-mono); }
 .sw { display: inline-flex; align-items: center; gap: 6px; font: var(--text-xs) var(--font-mono); }
 .sw i { width: 22px; height: 16px; border-radius: 3px; box-shadow: inset 0 0 0 1px rgb(128 128 128 / 0.35); display: inline-block; }
-.ok-t { color: var(--success); font-weight: 600; } .bad-t { color: var(--danger); font-weight: 600; }
+.ok-t { color: var(--success); font-weight: 600; } .bad-t { color: var(--danger-text); font-weight: 600; }
 
 /* scales */
 .scales { display: grid; gap: 10px; }
@@ -189,7 +189,7 @@ td code, .code { font: var(--text-xs)/1.3 var(--font-mono); }
 .btn[data-variant="primary"]:hover { border-color: color-mix(in oklab, var(--accent-icon) 55%, var(--border-control)); }
 .btn[data-variant="ghost"] { background: transparent; border-color: transparent; box-shadow: none; color: var(--text-muted); }
 .btn[data-variant="ghost"]:hover { background: var(--bg-hover); color: var(--text); }
-.btn[data-variant="danger"] { color: var(--danger); }
+.btn[data-variant="danger"] { color: var(--danger-text); }
 .btn[data-variant="danger"]:hover { background: var(--danger-subtle); border-color: color-mix(in oklab, var(--danger) 40%, var(--border)); }
 .btn[data-size="sm"] { height: var(--control-sm); padding: 0 8px; font-size: var(--text-sm); }
 .btn[data-size="lg"] { height: var(--control-lg); padding: 0 16px; font-size: var(--text-lg); }
@@ -292,7 +292,7 @@ svg.fi .ext { stroke-dasharray: 1.5 1.5; opacity: 0.7; }
 .fs-i.soft { color: var(--text); } .fs-i.soft > svg { color: var(--text-muted); }
 .fs-act { display: inline-flex; gap: 2px; align-items: center; } .fs-act .qa { margin-left: 2px; }
 .fs-undo { gap: 6px; } .fs-undo svg { width: 12px; height: 12px; }
-.fs-i.err { color: var(--danger); } .fs-i.err > svg { color: var(--danger); }
+.fs-i.err { color: var(--danger-text); } .fs-i.err > svg { color: var(--danger-text); }
 .fs-i.echo { font: var(--text-xs)/var(--lh-xs) var(--font-mono); }
 .fs-i.info > svg { color: var(--info); }
 .fs-more { justify-self: start; border: 0; padding: 2px 0; background: transparent; color: var(--text-muted); font-size: var(--text-xs); cursor: pointer; display: inline-flex; gap: 4px; align-items: center; }
@@ -347,7 +347,7 @@ svg.fi .ext { stroke-dasharray: 1.5 1.5; opacity: 0.7; }
 .chip svg.i { width: 12px; height: 12px; }
 .chip.success svg { color: var(--success); }
 .chip.warning svg { color: var(--warning); }
-.chip.danger { background: var(--danger-subtle); color: var(--danger); }
+.chip.danger { background: var(--danger-subtle); color: var(--danger-text); }
 .chip.muted { color: var(--text-muted); }
 .spin { animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -409,7 +409,7 @@ svg.fi .ext { stroke-dasharray: 1.5 1.5; opacity: 0.7; }
 .menu button { display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 8px; border: 0; border-radius: 4px; background: transparent; cursor: pointer; text-align: left; }
 .menu button:hover, .menu button.hl { background: var(--bg-hover); }
 .menu button kbd { margin-left: auto; font: var(--text-xs) var(--font-mono); color: var(--text-faint); }
-.menu button.dz { color: var(--danger); }
+.menu button.dz { color: var(--danger-text); }
 .menu hr { border: 0; border-top: 1px solid var(--border); margin: 3px 0; }
 .toast { display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 12px; border-radius: var(--radius-md); background: var(--bg-raised); border: 1px solid var(--border); box-shadow: var(--shadow-2); }
 .dialog { width: 340px; max-width: 100%; border-radius: var(--radius-lg); background: var(--bg-raised); border: 1px solid var(--border); box-shadow: var(--shadow-3); display: grid; }
@@ -799,6 +799,8 @@ svg.fi .ext { stroke-dasharray: 1.5 1.5; opacity: 0.7; }
       <ol class="changelog">
         <li><b>2026-11-21 · APCA contrast</b> (<a href="../decisions/0017-apca-contrast-for-design-tokens.md">ADR 0017</a>): ten values changed in OKLCH lightness only (hue kept; chroma kept except where sRGB cannot reach it), so every contrast pair meets its APCA role target. Light: <span class="code">--text-muted</span> #5b6462 → #515957, <span class="code">--danger</span> #c9363a → #a6051d, <span class="code">--safety-hold</span> #e8741c → #ff9a5c. Dark: <span class="code">--text-muted</span> #a2acaa → #d1dcda, <span class="code">--border-control</span> #6d7878 → #7a8686, <span class="code">--danger</span> #ef6366 → #ffcecb, <span class="code">--info</span> #6aa9ea → #85c1ff, <span class="code">--safety-hold</span> #f28b3c → #ff9a50, <span class="code">--safety-action</span> #5ea2e6 → #74b8fe, <span class="code">--safety-offline</span> #7a8482 → #939e9c. Marked “Changed for APCA” in the token table.</li>
         <li><b>2026-11-21 · Viewport states</b> <span class="new-badge">New since approval</span>: <span class="code">--vp-hover</span> (light #f8edcc, dark #3f4136), <span class="code">--vp-outdated</span> (light #d6dae3, dark #232828) and the selection tint (25 % amber + amber outline), added in task 3.5, approved as a deviation from the original design (<a href="#vp-additions">specimen</a>).</li>
+        <li><b>2026-11-21 · After the APCA pass: split danger, secondary text</b> (<a href="../decisions/0018-danger-text-and-secondary-text-role.md">ADR 0018</a>): the APCA pass had turned dark <span class="code">--danger</span> pale pink and dark <span class="code">--text-muted</span> nearly as bright as <span class="code">--text</span>. Red text now uses the new <span class="code">--danger-text</span> <span class="new-badge">New since approval</span> (light #a6051d, dark #ffcecb, the APCA-pass values), and <span class="code">--danger</span> is a saturated red again for outlines, the viewport error marker and icons: light back to approved #c9363a, dark #ffcecb → #ff7475 (approved #ef6366; lightened just enough for the icon target). <span class="code">--text-muted</span> takes a new <i>secondary</i> role at Lc 60: light back to approved #5b6462, dark #d1dcda → #b9c4c1 (approved #a2acaa). Marked “Revised after the APCA pass” in the token table.</li>
+        <li><b>2026-11-21 · Plunge colour</b> <span class="new-badge">New since approval</span>: <span class="code">--vp-plunge</span> (light #835bae, dark #a886cf), a muted violet for plunges in the toolpath preview (task 3.7), distinct in hue from feeds and rapids (neutral greys), the selection (amber) and the axes; Lc ≥ 30 on the viewport background and the part.</li>
       </ol>
     </section>
   </main>
@@ -982,7 +984,7 @@ const TOK = [
   ['--bg-raised', 'Menus, popovers, dialogs'],
   ['Text'],
   ['--text', 'Body, values'],
-  ['--text-muted', 'Labels, secondary'],
+  ['--text-muted', 'Labels, hints, notes, metadata: secondary text (Lc 60), never body copy'],
   ['--text-faint', 'Units, metadata, placeholders, disabled (never essential text)'],
   ['--text-accent', 'Label of the suggested action'],
   ['--text-on-accent', 'Check marks on amber'],
@@ -998,7 +1000,8 @@ const TOK = [
   ['--accent-calm', 'Proposal callouts background (not buttons)'],
   ['--accent-calm-border', 'Proposal callouts outline'],
   ['Feedback'],
-  ['--danger', 'Invalid field, failed, destructive action'],
+  ['--danger', 'Saturated red, not for text: invalid field outline, error marker, failed and error icons'],
+  ['--danger-text', 'Red text: danger button and menu item, danger chip, field error text', 'new'],
   ['--warning', 'Hard warnings: not safe to ignore (orange). Soft warnings use neutral text and icon colours'],
   ['--success', 'Up to date, done'],
   ['--info', 'Info notes, agent activity'],
@@ -1016,6 +1019,7 @@ const TOK = [
   ['--vp-selected', 'Selected geometry and toolpath'],
   ['--vp-feed', 'Unselected toolpaths'],
   ['--vp-rapid', 'Rapid moves, dashed'],
+  ['--vp-plunge', 'Plunges (feeds straight down) in the toolpath preview', 'new'],
   ['--vp-hover', 'Hovered operation (what a click selects)', 'new'],
   ['--vp-outdated', 'Part while an evaluation is pending or failed', 'new'],
   ['--vp-axis-x', 'X axis (CAD red)'],
@@ -1028,9 +1032,16 @@ document.body.append(probeL, probeD);
 const val = (el, t) => getComputedStyle(el).getPropertyValue(t).trim();
 const sw = h => `<span class="sw"><i style="background:${h}"></i>${h}</span>`;
 /* Values changed for APCA after approval (changelog 2026-11-21): token → [old light, old dark]; null = unchanged. */
-const APCA_CHANGED = {'--text-muted': ['#5b6462', '#a2acaa'], '--danger': ['#c9363a', '#ef6366'], '--safety-hold': ['#e8741c', '#f28b3c'], '--border-control': [null, '#6d7878'], '--info': [null, '#6aa9ea'], '--safety-action': [null, '#5ea2e6'], '--safety-offline': [null, '#7a8482']};
+const APCA_CHANGED = {'--safety-hold': ['#e8741c', '#f28b3c'], '--border-control': [null, '#6d7878'], '--info': [null, '#6aa9ea'], '--safety-action': [null, '#5ea2e6'], '--safety-offline': [null, '#7a8482']};
+/* Revised after the APCA pass (changelog 2026-11-21, split tokens): light back to the approved value, dark between approved and APCA-pass values. */
+const APCA_REVISED = {
+  '--text-muted': 'light back to approved #5b6462; dark #d1dcda → #b9c4c1 (approved #a2acaa)',
+  '--danger': 'light back to approved #c9363a; dark #ffcecb → #ff7475 (approved #ef6366); red text moved to --danger-text',
+};
 const tokNote = (name, flag) => {
   if (flag === 'new') return ' <span class="new-badge">New since approval</span>';
+  const r = APCA_REVISED[name];
+  if (r) return ` <span class="changed-badge" title="Changed for APCA, then revised after the APCA pass on 2026-11-21">Revised after the APCA pass · ${r}</span>`;
   const c = APCA_CHANGED[name]; if (!c) return '';
   const was = [c[0] && `light ${c[0]}`, c[1] && `dark ${c[1]}`].filter(Boolean).join(', ');
   return ` <span class="changed-badge" title="Changed for APCA on 2026-11-21">Changed for APCA · was ${was}</span>`;
@@ -1048,13 +1059,15 @@ const lc = (t, b) => { const [ty, by] = [apcaY(t), apcaY(b)]; if (Math.abs(by - 
   const s = by > ty ? (by ** 0.56 - ty ** 0.57) * 1.14 : (by ** 0.65 - ty ** 0.62) * 1.14;
   return Math.abs(s) < 0.1 ? 0 : (s > 0 ? s - 0.027 : s + 0.027) * 100; };
 const PAIRS = [
-  ['--text', '--bg-app', 75], ['--text-muted', '--bg-app', 75], ['--text-muted', '--bg-chrome', 75], ['--text-faint', '--bg-app', 30],
+  ['--text', '--bg-app', 75], ['--text-muted', '--bg-app', 60], ['--text-muted', '--bg-chrome', 60], ['--text-faint', '--bg-app', 30],
   ['--text-accent', '--bg-app', 60], ['--text', '--accent-subtle', 75], ['--text-on-accent', '--accent', 60],
   ['--accent-border', '--bg-field', 30], ['--border-control', '--bg-field', 30], ['--border-control', '--bg-app', 30], ['--focus', '--bg-app', 30],
   ['--text-accent', '--accent-subtle', 60], ['--danger', '--bg-field', 30], ['--warning', '--bg-app', 45], ['--success', '--bg-app', 45], ['--info', '--bg-app', 45],
   ['--safety-stop-fg', '--safety-stop', 60], ['--safety-hold-fg', '--safety-hold', 60], ['--safety-action-fg', '--safety-action', 60],
-  ['--text-muted', '--bg-raised', 75], ['--border-control', '--bg-chrome', 30], ['--safety-offline', '--bg-field', 45], ['--danger', '--bg-raised', 75],
-  ['--danger', '--bg-chrome', 75], ['--danger', '--danger-subtle', 60], ['--info', '--info-subtle', 60],
+  ['--text-muted', '--bg-raised', 60], ['--border-control', '--bg-chrome', 30], ['--safety-offline', '--bg-field', 45], ['--danger-text', '--bg-raised', 75],
+  ['--danger-text', '--bg-chrome', 75], ['--danger-text', '--danger-subtle', 60], ['--danger-text', '--bg-control', 60], ['--danger', '--danger-subtle', 45],
+  ['--danger', '--bg-chrome', 45], ['--danger', '--bg-viewport', 30], ['--info', '--info-subtle', 60],
+  ['--vp-feed', '--bg-viewport', 30], ['--vp-rapid', '--bg-viewport', 30], ['--vp-plunge', '--bg-viewport', 30], ['--vp-plunge', '--vp-part', 30],
 ];
 $('#cr-table tbody').innerHTML = PAIRS.map(([f, b, need]) => {
   const cell = el => { const r = lc(val(el, f), val(el, b)); const ok = Math.abs(r) >= need; return `<td class="mono ${ok ? 'ok-t' : 'bad-t'}">${r.toFixed(1)} ${ok ? '✓' : '✗'}</td>`; };
