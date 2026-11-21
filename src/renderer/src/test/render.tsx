@@ -1,6 +1,6 @@
 // Component test helpers: render inside the app's UI providers, and an axe-core check.
 // Doc: docs/conventions/ui.md#testing
-import { render, type RenderResult } from '@testing-library/react'
+import { render, screen, waitFor, within, type RenderResult } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import axe from 'axe-core'
 import type { ReactElement } from 'react'
@@ -27,4 +27,20 @@ export async function expectNoAxeViolations(root: Element = document.body): Prom
     (v) => `${v.id}: ${v.help} (${v.nodes.map((n) => n.html).join(', ')})`,
   )
   expect(summary).toEqual([])
+}
+
+/**
+ * Finds a toast's action button once it can take a click. Radix renders the toast into the
+ * viewport first and lifts the viewport's `pointer-events: none` one render later (its toast
+ * count is updated from an effect), so a click right after the toast text appears can hit the
+ * blocked viewport under load.
+ */
+export async function findToastAction(name: string): Promise<HTMLElement> {
+  const region = await screen.findByRole('region', { name: /^Notifications/ })
+  const button = await within(region).findByRole('button', { name })
+  await waitFor(() => {
+    for (let e: Element | null = button; e !== null; e = e.parentElement)
+      expect(getComputedStyle(e).pointerEvents).not.toBe('none')
+  })
+  return button
 }

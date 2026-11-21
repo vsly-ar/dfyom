@@ -11,7 +11,7 @@ import type { PartDTO } from '../../../../core/design/part.dto'
 import { App } from '../../App'
 import { createShell, ShellProvider } from '../../shell/ShellContext'
 import { createFakeBridge, designDispatcher, type FakeBridge } from '../../test/bridge'
-import { expectNoAxeViolations, renderUi } from '../../test/render'
+import { expectNoAxeViolations, findToastAction, renderUi } from '../../test/render'
 
 vi.mock('@react-three/fiber', () => ({
   Canvas: ({ children: _c, ...rest }: { children: ReactNode; 'data-testid'?: string }) => (
@@ -175,7 +175,7 @@ describe('design mode', () => {
     await user.click(within(navigator()).getByRole('button', { name: 'Remove Facing 1' }))
     await waitFor(() => expect(part().operations.map((o) => o.id)).toEqual(['profile1']))
     expect(await screen.findByText('Removed Facing 1')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Undo' }))
+    await user.click(await findToastAction('Undo'))
     await waitFor(() => expect(part().operations.map((o) => o.id)).toEqual(['facing1', 'profile1']))
   })
 
