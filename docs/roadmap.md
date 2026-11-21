@@ -25,6 +25,8 @@ Out of scope: multiple setups, optimization, simulation beyond previews, carving
 Goal and full scope not decided yet. Decided items, in priority order:
 
 1. **Strategy editing in the plan inspector** (high priority, deferred from v0.1 on 2026-11-21): strategy parameters (direction, entry, cycle, allowances …), plan-only edits of the design snapshot, and the feeds calculator's derivation shown in the feeds card. Agents and the CLI already have the commands. With plan-only edits, the plan scene draws the plan's snapshot part instead of the design's current mesh. Known-issue rows in [plans/v0.1.md](plans/v0.1.md#known-issues-and-risks).
+   - [x] Phase 1 (done 2026-11-21): strategy parameters in the inspector's Strategy group and the calculator's derivation ("Show calculation", `plan.operation.feeds.get`), [ui.md](conventions/ui.md#plan-mode-task-37).
+   - [ ] Phase 2: plan-only edits of the design snapshot and drawing the plan's snapshot part in the plan scene (needs a design doc first).
 
 ## Later (unordered)
 

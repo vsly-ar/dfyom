@@ -2,6 +2,7 @@
 // docs/glossary.md. Doc: docs/conventions/ui.md#internationalization, #plan-mode-task-37
 import type { OperationKind } from '../../../core/design/part.dto'
 import type { FeedField, PlanStatus } from '../../../core/plan/plan.dto'
+import type { StrategyKey } from '../../../core/plan/strategy'
 import type { WarningTier } from '../ui'
 
 export type FeedSource = 'override' | 'preset' | 'calculator' | 'strategy'
@@ -133,7 +134,7 @@ export const planMessages = {
     noSelection: 'Select a plan operation to choose its tool and feeds and speeds.',
     summary: (n: number) => plural(n, 'operation', 'operations'),
     commandFailed: 'The change was not applied.',
-    groups: { tool: 'Tool', feeds: 'Feeds and speeds' },
+    groups: { tool: 'Tool', strategy: 'Strategy', feeds: 'Feeds and speeds' },
     tool: 'Tool',
     toolPlaceholder: 'Choose a tool',
     noSuggestion: 'No library tool can make this operation. Add a fitting one with “New tool…”.',
@@ -174,6 +175,71 @@ export const planMessages = {
     useToolDefault: 'Use tool default',
     unlock: 'Unlock',
     unresolved: 'No value: enter one, or add a cutting preset to the tool.',
+    strategy: {
+      labels: {
+        direction: 'Cut direction',
+        pattern: 'Pattern',
+        axis: 'Rows along',
+        overshoot: 'Overshoot',
+        entry: 'Entry',
+        helixDiameter: 'Helix diameter',
+        rampAngle: 'Ramp angle',
+        finishAllowance: 'Finishing allowance',
+        finishStepdown: 'Finish stepdown',
+        cycle: 'Cycle',
+        peckDepth: 'Peck depth',
+        chipBreakBack: 'Chip-break retract',
+        helixPitch: 'Helix pitch',
+        breakthrough: 'Breakthrough',
+      } satisfies Record<StrategyKey, string>,
+      choices: {
+        direction: { climb: 'Climb', conventional: 'Conventional' },
+        pattern: { zigzag: 'Zigzag', oneWay: 'One way' },
+        axis: { x: 'X', y: 'Y' },
+        entry: { helix: 'Helix', ramp: 'Ramp', plunge: 'Plunge' },
+        cycle: { simple: 'Simple', peck: 'Peck', chipBreak: 'Chip break', helix: 'Helical boring' },
+      } as Record<string, Record<string, string>>,
+      notForTool: (label: string) => `${label} (doesn’t fit the tool)`,
+      default: 'Default.',
+      entered: 'Entered by you.',
+      useDefault: 'Use default',
+    },
+    calc: {
+      show: 'Show calculation',
+      hide: 'Hide calculation',
+      title: 'Calculation',
+      loading: 'Calculating…',
+      failed: 'The calculation could not be read.',
+      inputs: 'Inputs',
+      material: 'Material',
+      toolMaterial: 'Tool material',
+      notSet: 'not set',
+      diameter: 'Diameter',
+      flutes: 'Flutes',
+      cornerRadius: 'Corner radius',
+      engagement: 'Engagement',
+      engagements: {
+        slot: 'Slot (full width)',
+        stepover: (ae: string) => `Stepover ${ae}`,
+        helix: (ap: string) => `Helix, pitch ${ap}`,
+        drill: 'Drilling',
+      },
+      rigidity: 'Machine rigidity',
+      spindlePower: 'Spindle power',
+      noPower: 'not set: power check skipped',
+      fields: 'Values and derivation',
+      fieldValue: (label: string, value: string) => `${label}: ${value}`,
+      steps: (label: string) => `How ${label.toLowerCase()} is calculated`,
+      used: 'At the values used',
+      surfaceSpeed: 'Surface speed',
+      effectiveDiameter: 'Effective diameter',
+      chipLoad: 'Chip load after chip thinning',
+      chipThinning: 'Chip thinning',
+      removalRate: 'Material removal rate',
+      cuttingPower: 'Cutting power',
+      spindleLoad: 'Spindle load',
+      noData: (reason: string) => `No calculator data: ${reason}`,
+    },
   },
 
   warnings: {

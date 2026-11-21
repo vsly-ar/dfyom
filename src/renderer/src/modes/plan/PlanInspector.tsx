@@ -1,9 +1,10 @@
 // Plan inspector (task 3.7): without a selection the plan (name, status, machine, all checks with a
 // link to their operation); a selected plan operation: the tool picker (library tools that pass
 // the checks, ranked, with their reasons: `plan.tool.suggest`), stickout and cutting preset, and
-// the feeds-and-speeds card: one QuantityInput per field showing the resolved value and where it
-// came from (preset, calculator, strategy default, or the user's override); the lock pins a value
-// as an override, unlocking returns to the recommendation. Commits are one command each; checks
+// the strategy group (StrategyGroup.tsx, v0.2), the feeds-and-speeds card: one QuantityInput per
+// field showing the resolved value and where it came from (preset, calculator, strategy default,
+// or the user's override); the lock pins a value as an override, unlocking returns to the
+// recommendation; "Show calculation" (FeedsCalculation.tsx). Commits are one command each; checks
 // show at their field, the rest under the fields. Read-only (desaturated, with the reason) in
 // finalized, in-use and archived plans. Doc: docs/conventions/ui.md#plan-mode-task-37,
 // docs/modes/plan-v0.1.md#tool-assignment-and-checks, #feeds-and-speeds
@@ -27,7 +28,6 @@ import {
   WarningList,
   type FieldIconName,
   type FieldMessage,
-  type FieldSeverity,
   type WarningListLabels,
   type WarningTier,
   type WarningView,
@@ -45,9 +45,12 @@ import {
   snapshotName,
   type PlanOperationView,
 } from './model'
+import { FeedsCalculation } from './FeedsCalculation'
+import { fieldMessages } from './fieldMessages'
 import { NewToolDialog } from './NewToolDialog'
 import { usePlanCommand, usePlanData } from './plan-store'
 import styles from './Plan.module.css'
+import { shownStrategyFields, StrategyGroup } from './StrategyGroup'
 import { findingsOf, useChosenPlan, usePlanSelection } from './usePlan'
 
 const m = planMessages
@@ -63,11 +66,6 @@ export const planWarningLabels: WarningListLabels = {
 }
 
 const TIER: Record<PlanWarning['severity'], WarningTier> = {
-  error: 'error',
-  warning: 'hard',
-  info: 'soft',
-}
-const SEVERITY: Record<PlanWarning['severity'], FieldSeverity> = {
   error: 'error',
   warning: 'hard',
   info: 'soft',
@@ -89,15 +87,6 @@ export function planWarningView(
     ...(op !== undefined && onSelect ? { onSelect: () => onSelect(op.id) } : {}),
   }
 }
-
-const fieldMessages = (findings: readonly PlanWarning[], field: string): FieldMessage[] =>
-  findings
-    .filter((w) => w.field === field)
-    .map((w, i) => ({
-      id: `${w.code}:${w.rule}:${i}`,
-      severity: SEVERITY[w.severity],
-      text: sentence(w.message),
-    }))
 
 export function PlanInspector({ doc }: { doc: ProjectDoc }): React.JSX.Element {
   const [plan] = useChosenPlan(doc)
@@ -332,10 +321,14 @@ function OperationInspector({
         ? feedQuantity('stepdown', view.stickout, units)
         : undefined
 
+  const strategyFields =
+    current !== null && view !== undefined ? shownStrategyFields(plan, view) : new Set<string>()
   const rest = findings.filter(
     (w) =>
       w.field === undefined ||
-      (!SHOWN_FIELDS.has(w.field) && !fields.includes(w.field as FeedField)),
+      (!SHOWN_FIELDS.has(w.field) &&
+        !strategyFields.has(w.field) &&
+        !fields.includes(w.field as FeedField)),
   )
 
   return (
@@ -439,6 +432,18 @@ function OperationInspector({
         </section>
 
         {current !== null && view !== undefined ? (
+          <StrategyGroup
+            plan={plan}
+            op={op}
+            view={view}
+            units={units}
+            readOnly={readOnly}
+            findings={findings}
+            onUpdate={update}
+          />
+        ) : null}
+
+        {current !== null && view !== undefined ? (
           <section className={styles['group']} aria-label={t.groups.feeds}>
             <h3 className={styles['groupTitle']}>{t.groups.feeds}</h3>
             {fields.map((f) => (
@@ -457,6 +462,12 @@ function OperationInspector({
             {view.chipLoad !== null ? (
               <p className={styles['muted']}>{t.chipLoad(lengthText(view.chipLoad, units))}</p>
             ) : null}
+            <FeedsCalculation
+              planId={plan.id}
+              planOperationId={op.id}
+              fields={fields}
+              presetName={view.presetName}
+            />
           </section>
         ) : null}
 

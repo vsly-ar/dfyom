@@ -44,7 +44,8 @@ export const LockedSchema = z
     'Locked values: fixed inputs the other fields are recommended around (docs: Locked inputs)',
   )
 
-const StepSchema = z.object({
+/** One derivation step as JSON (also `plan.operation.feeds.get`). */
+export const StepSchema = z.object({
   step: z.string(),
   formula: z.string(),
   inputs: z.record(z.string(), z.union([z.number(), z.string()])),
@@ -89,7 +90,7 @@ const orNull = <T>(o: Option<T>): T | null => (o.isSome() ? o.unwrap() : null)
 type StepDTO = z.output<typeof StepSchema>
 type FieldDTO = z.output<typeof FieldSchema>
 
-const stepToDTO = ({ sources, inputs, ...rest }: DerivationStep): StepDTO => ({
+export const stepToDTO = ({ sources, inputs, ...rest }: DerivationStep): StepDTO => ({
   ...rest,
   inputs: { ...inputs },
   ...(sources === undefined ? {} : { sources: [...sources] }),

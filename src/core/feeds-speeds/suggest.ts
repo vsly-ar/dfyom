@@ -729,6 +729,54 @@ export function checkCutting(
   return out
 }
 
+/**
+ * The derived display values (surface speed, chip load after chip thinning, Q, Pc, spindle load)
+ * at the values that will be used, entered ones included, as `checkCutting` sees them
+ * (docs/architecture/feeds-speeds.md#final-value-check). None without data or without positive
+ * `n` and `vf`. Q and Pc need a stepdown (milling only); spindle load the machine's power.
+ */
+export function cuttingAt(
+  input: CuttingInput,
+  values: CuttingValues,
+  data: readonly MaterialRow[] = MATERIAL_DATA,
+): Option<CuttingDisplay> {
+  const found = contextOf(input, data)
+  if ('noData' in found || !(values.n > 0) || !(values.vf > 0)) return None
+  const c = found.ctx
+  const { tool, machine, engagement: e } = input
+  const D = c.D
+  if (e.kind === 'drill')
+    return Some({
+      dCalc: D,
+      vc: surfaceSpeed(values.n, D),
+      fz: values.vf / values.n,
+      chipThinning: 1,
+      Q: None,
+      Pc: None,
+      spindleLoad: None,
+    })
+  const ae = e.kind === 'stepover' ? Math.min(values.ae ?? e.ae, D) : D
+  const ap = e.kind === 'helix' ? e.ap : values.ap
+  const RE = tool.effectiveCornerRadius.toNumber()
+  const z = tool.fluteCount.canonical
+  const k = chipThinning(rctf(ae, D), ap === undefined ? 1 : actf(RE, ap))
+  const dCalc = ap === undefined ? D : effectiveDiameter(D, RE, ap)
+  const Q: Option<number> = ap === undefined ? None : Some(materialRemovalRate(ae, ap, values.vf))
+  const Pc: Option<number> = Q.map((q) => cuttingPower(q, c.row.u))
+  const spindleLoad: Option<number> = machine.andThen((m) =>
+    Pc.andThen((pc) => m.power.map((p) => (pc / availablePower(p, values.n, m.maxSpeed)) * 100)),
+  )
+  return Some({
+    dCalc,
+    vc: surfaceSpeed(values.n, dCalc),
+    fz: values.vf / (values.n * z * k),
+    chipThinning: k,
+    Q,
+    Pc,
+    spindleLoad,
+  })
+}
+
 const lockedStep = (field: 'n' | 'vf', value: number, unit: string): DerivationStep => ({
   step: 'locked',
   formula: `${field} locked by the user`,
