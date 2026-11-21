@@ -1,6 +1,6 @@
 // Spec: docs/conventions/ui.md#quantity-and-expression-input (task 3.4); grammar edge cases from
 // the plan's known issues (`+1/2` deviation pair, `D -1/2`, Greek mu).
-import { act, screen } from '@testing-library/react'
+import { act, screen, waitFor } from '@testing-library/react'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import type { ReferenceResolver } from '../../../../core/expression/evaluate'
@@ -9,7 +9,7 @@ import { Quantity, type ParseContext } from '../../../../core/quantity/quantity'
 import { Rational } from '../../../../core/quantity/rational'
 import { fail, None, Ok, Some } from '../../../../shared/result'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
-import { QuantityInput, type QuantityInputBaseProps } from './QuantityInput'
+import { ECHO_DELAY_MS, QuantityInput, type QuantityInputBaseProps } from './QuantityInput'
 
 const MM: ParseContext = { kind: 'length', defaultUnit: 'mm' }
 
@@ -108,8 +108,21 @@ describe('QuantityInput: echo while typing', () => {
     await retype(user, input, '25.4 +0.1/-0.05')
     expect(await screen.findByText('= 25.400 mm, upper +0.100, lower −0.050')).toBeInTheDocument()
 
-    await retype(user, input, '10 ±0.05')
-    expect(await screen.findByText('= 10.000 mm ±0.050')).toBeInTheDocument()
+    await retype(user, input, '10 ± 1/64')
+    expect(await screen.findByText('= 10.000 mm ±0.016')).toBeInTheDocument()
+  })
+
+  it('shows no echo for a plain number with or without the field unit', async () => {
+    const { user, input } = setup()
+    for (const source of ['15', '15 mm', '15mm', '10 ±0.05']) {
+      await retype(user, input, source)
+      await act(() => new Promise((r) => setTimeout(r, ECHO_DELAY_MS + 50)))
+      expect(screen.queryByText(/^= /)).not.toBeInTheDocument()
+      expect(input).not.toHaveAccessibleDescription()
+    }
+    // a unit other than the display unit still echoes the conversion
+    await retype(user, input, '0.5 in')
+    expect(await screen.findByText('= 12.700 mm')).toBeInTheDocument()
   })
 
   it('names the references a formula reads', async () => {
@@ -123,7 +136,50 @@ describe('QuantityInput: echo while typing', () => {
       inheritedTolerance: { deviation: Rational.create(1n, 10n).unwrap(), scope: 'part' },
     })
     await user.click(input)
-    expect(await screen.findByText('= 3.000 mm · ±0.100 mm from part')).toBeInTheDocument()
+    // a plain value: the inherited tolerance alone, not the value again
+    expect(await screen.findByText('±0.100 mm from part')).toBeInTheDocument()
+    await retype(user, input, '1/8"')
+    expect(await screen.findByText('= 3.175 mm · ±0.100 mm from part')).toBeInTheDocument()
+  })
+})
+
+describe('QuantityInput: echo collapse after a click', () => {
+  function WithButton({ onClick }: { onClick: () => void }): React.JSX.Element {
+    return (
+      <>
+        <Harness initial="3" />
+        <button type="button" onClick={onClick}>
+          Next
+        </button>
+      </>
+    )
+  }
+
+  it('keeps the echo while the pointer that blurred the field is down, collapses after the click', async () => {
+    const onClick = vi.fn()
+    const { user } = renderUi(<WithButton onClick={onClick} />)
+    const input = screen.getByRole('textbox', { name: 'Width' })
+    await retype(user, input, '1/16"')
+    expect(await screen.findByText('= 1.588 mm')).toBeInTheDocument()
+
+    const next = screen.getByRole('button', { name: 'Next' })
+    await user.pointer({ keys: '[MouseLeft>]', target: next })
+    expect(input).not.toHaveFocus()
+    // the support area still holds its height: whatever was under the pointer stays there
+    await act(() => new Promise((r) => setTimeout(r, 50)))
+    expect(screen.getByText('= 1.588 mm')).toBeInTheDocument()
+
+    await user.pointer({ keys: '[/MouseLeft]', target: next })
+    expect(onClick).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(screen.queryByText('= 1.588 mm')).not.toBeInTheDocument())
+  })
+
+  it('collapses at once when the field is left with the keyboard', async () => {
+    const { user, input } = setup()
+    await retype(user, input, '1/16"')
+    expect(await screen.findByText('= 1.588 mm')).toBeInTheDocument()
+    await user.tab()
+    await waitFor(() => expect(screen.queryByText('= 1.588 mm')).not.toBeInTheDocument())
   })
 })
 

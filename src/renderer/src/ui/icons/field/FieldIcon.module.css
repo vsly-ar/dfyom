@@ -1,5 +1,5 @@
 /* Field illustrations: grey drawing, amber measured line. The Field sets colour and saturation
-   (35 % at rest, full on focus). Doc: docs/conventions/ui.md#field */
+   (full in every state, grey when read-only or disabled). Doc: docs/conventions/ui.md#field */
 .icon {
   width: var(--icon-xl);
   height: var(--icon-xl);

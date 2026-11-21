@@ -444,7 +444,7 @@ function Fields(): React.JSX.Element {
     { id: 'agent', severity: 'info', text: 'Changed by agent 2 min ago' },
   ]
   return (
-    <Row label="Field · illustration (35 % saturation at rest, full on focus), lock (feeds fields in auto mode only; disabled with its reason), input with pencil, support area under the input">
+    <Row label="Field · illustration (full colour focused or not, grey when read-only), lock (feeds fields in auto mode only; disabled with its reason), input with pencil, support area under the input">
       <div className={styles['fields']}>
         <Field
           label="Stepdown"

@@ -152,6 +152,48 @@ export function describeReading(
   return text
 }
 
+/** The inherited general tolerance alone ("±0.100 mm from part"), for a plain value's echo. */
+export function describeInherited(
+  r: Reading,
+  unit: UnitId,
+  precision: number,
+  inherited?: InheritedTolerance,
+): string | undefined {
+  if (r.quantity.tolerance.isSome() || !inherited) return undefined
+  return quantityText.inherited({
+    tolerance: `±${formatValue(inherited.deviation, unit, precision)}`,
+    scope: inherited.scope,
+  })
+}
+
+const DECIMAL = String.raw`(?:\d+(?:\.\d*)?|\.\d+)`
+const PLUS_MINUS_RE = String.raw`(?:±|\+\/-|\+-)`
+
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')
+}
+
+/**
+ * Whether the echo ("= 15.000 mm") tells the user something the text does not: false for a plain
+ * decimal number with no unit or the display unit's own spelling (`15`, `15 mm`, `15mm`,
+ * `0.5 in` in an inch field), also with a symmetric decimal tolerance in that unit (`10 ±0.05`).
+ * True for an expression or reference, a fraction or mixed number, a unit other than the display
+ * unit, an asymmetric tolerance (which deviation is upper) and anything else the pattern does not
+ * cover. Doc: docs/conventions/ui.md#quantity-and-expression-input
+ */
+export function echoAddsInformation(r: Reading, source: string, displayUnit: UnitId): boolean {
+  if (r.nominal.isNone()) return true
+  const unit = r.nominal.unwrap().unit
+  if (unit.isSome() && unit.unwrap() !== displayUnit) return true
+  const spellings = UNITS[displayUnit].spellings.map(escapeRe)
+  const u = spellings.length > 0 ? String.raw`(?:\s*(?:${spellings.join('|')}))?` : ''
+  const plain = new RegExp(
+    String.raw`^\s*[+\-−]?${DECIMAL}${u}(?:\s*${PLUS_MINUS_RE}\s*${DECIMAL}${u})?\s*$`,
+    'i',
+  )
+  return !plain.test(source)
+}
+
 /** The general tolerance an untoleranced value inherits (resolved by the design model). */
 export interface InheritedTolerance {
   /** ± deviation, canonical unit. */

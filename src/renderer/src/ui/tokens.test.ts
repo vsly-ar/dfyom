@@ -168,6 +168,9 @@ const PAIRS: [fg: string, bg: string, role: Role, where: string][] = [
   ['--focus', '--bg-chrome', 'mark', 'focus ring in toolbars'],
   ['--focus', '--bg-raised', 'mark', 'focus ring in dialogs'],
   ['--danger', '--bg-field', 'mark', 'invalid field outline'],
+  // field illustrations keep full colour focused or not (user, 2026-11-21; ui.md#field)
+  ['--text-muted', '--bg-app', 'icon', 'field illustration drawing (1 px, 28 px icon)'],
+  ['--text-muted', '--bg-chrome', 'icon', 'field illustration drawing in the inspector'],
   ['--warning', '--bg-app', 'icon', 'warning icon'],
   ['--warning', '--warning-subtle', 'icon', 'hard warning icon'],
   ['--success', '--bg-app', 'icon', 'done icon (status chip)'],

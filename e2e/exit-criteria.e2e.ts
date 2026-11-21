@@ -35,7 +35,7 @@ async function setField(scope: Locator, label: string, value: string): Promise<v
   const field = scope.getByLabel(label, { exact: true }).and(scope.locator('input'))
   await field.fill(value)
   await field.press('Enter')
-  // leave the field: its echo collapses on blur, which would move the next click's target
+  // leave the field (the echo now holds until a click lands, ui.md#field; kept so the commit is settled)
   await field.blur()
 }
 

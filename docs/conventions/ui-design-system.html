@@ -248,15 +248,13 @@ svg.i .hi { transition: stroke var(--motion-base), fill var(--motion-base); }
 
 .field { display: grid; grid-template-columns: 124px 20px minmax(0, 1fr); gap: 4px 6px; align-items: start; position: relative; }
 .field > label { color: var(--text-muted); min-height: var(--control-md); display: flex; align-items: center; gap: 7px; }
-svg.fi { width: var(--icon-xl); height: var(--icon-xl); color: var(--text-faint); stroke-width: 1px; filter: saturate(0.35); transition: color var(--motion-slow), filter var(--motion-emphasis) var(--ease-emphasized); }
+svg.fi { width: var(--icon-xl); height: var(--icon-xl); color: var(--text-muted); stroke-width: 1px; transition: color var(--motion-slow), filter var(--motion-emphasis) var(--ease-emphasized), opacity var(--motion-slow); }
 svg.fi .hi { stroke: var(--accent-icon); stroke-width: 1.4px; stroke-linecap: butt; transition: stroke-width var(--motion-emphasis) var(--ease-emphasized); }
-.field.nv svg.fi { filter: none; color: var(--text-muted); }
-.field:has(> .qi.ro) svg.fi { filter: saturate(0); opacity: 0.75; }
+.field:has(> .qi.ro) svg.fi, .field:has(:disabled) svg.fi { filter: saturate(0); opacity: 0.75; }
 .field > :is(.check, .switch) { grid-column: 3; align-self: center; }
 .field > .check { min-height: var(--control-md); }
 .field > .switch { margin-top: 6px; align-self: start; }
 svg.fi .ext { stroke-dasharray: 1.5 1.5; opacity: 0.7; }
-.field.is-focus svg.fi, .field:focus-within svg.fi { color: var(--text-muted); filter: saturate(1); }
 .field.is-focus svg.fi .hi, .field:focus-within svg.fi .hi { stroke-width: 1.6px; }
 .qa { width: 20px; height: 20px; flex: none; border: 0; padding: 0; margin-left: 4px; border-radius: var(--radius-xs); background: transparent; color: var(--text-faint); display: grid; place-items: center; cursor: pointer; transition: background var(--motion-fast), color var(--motion-fast); }
 .qa:hover { background: var(--bg-hover); color: var(--text); }
@@ -281,6 +279,9 @@ svg.fi .ext { stroke-dasharray: 1.5 1.5; opacity: 0.7; }
 .fs.err { background: color-mix(in oklab, var(--danger) 7%, var(--bg-chrome)); box-shadow: inset 2px 0 0 var(--danger), inset 0 7px 6px -6px rgb(0 0 0 / 0.22); }
 @keyframes pull { from { clip-path: inset(0 0 100% 0); transform: translateY(-6px); } to { clip-path: inset(0); transform: none; } }
 @media (prefers-reduced-motion: reduce) { .fs { animation: none; } }
+/* narrow field lists (container below 20rem: navigator, default inspector): label above the input */
+.fields-narrow { container-type: inline-size; width: 16rem; padding: 10px; border: 1px dashed var(--border); border-radius: var(--radius-sm); display: grid; gap: 10px; }
+@container (max-width: 20rem) { .field { grid-template-columns: auto minmax(0, 1fr); } .field > label { grid-column: 1 / -1; } .field > .qa.lock { grid-column: 1; grid-row: 2; } .field > .qi { grid-column: 2; grid-row: 2; } .field > .fs { grid-column: 2; grid-row: 3; } }
 .fs-i .btn { white-space: nowrap; }
 .qi.ro ~ .fs { opacity: 0.6; background: transparent; border-style: dashed; box-shadow: inset 0 7px 6px -6px rgb(0 0 0 / 0.12); }
 .fs { container-type: inline-size; }
@@ -759,7 +760,7 @@ svg.fi .ext { stroke-dasharray: 1.5 1.5; opacity: 0.7; }
               <div style="display:grid;gap:10px"><span class="eyebrow" style="padding:0 2px">Slot</span>
                 <div class="field" data-step="1" data-dec="2" data-name="Length"><label><svg class="i fi" data-fi="length" viewBox="0 0 20 20"></svg>Length</label><div class="qi"><span class="src">50.00</span><span class="u">mm</span><button type="button" class="qa pen" aria-label="Adjust Length" aria-expanded="false"></button></div></div>
                 <div class="field is-focus" data-step="0.1" data-dec="2" data-name="Width" data-rec="12.50" data-rec-text="≥ 12.50 mm keeps 3 mm corners with the 6 mm tool"><label><svg class="i fi" data-fi="width" viewBox="0 0 20 20"></svg><span class="term">Width</span></label><div class="qi focus"><span class="src">12.00</span><span class="caret"></span><span class="u">mm</span><button type="button" class="qa pen fix" aria-label="Adjust Width" aria-expanded="false"></button></div>
-                  <div class="fs soft"><div class="fs-i echo"><span></span><span>= 12.000 mm</span><span></span></div><div class="fs-i soft"><svg class="i" data-ic="warn" viewBox="0 0 16 16"></svg><span>Near the 6 mm tool</span><span class="fs-act"><button type="button" class="btn" data-size="sm" data-variant="primary" data-apply><svg class="i" viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7"/></svg>Use 12.50</button><button type="button" class="qa" data-dismiss aria-label="Dismiss warning" title="Dismiss"><svg class="i" viewBox="0 0 16 16"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg></button></span></div></div></div>
+                  <div class="fs soft"><div class="fs-i soft"><svg class="i" data-ic="warn" viewBox="0 0 16 16"></svg><span>Near the 6 mm tool</span><span class="fs-act"><button type="button" class="btn" data-size="sm" data-variant="primary" data-apply><svg class="i" viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7"/></svg>Use 12.50</button><button type="button" class="qa" data-dismiss aria-label="Dismiss warning" title="Dismiss"><svg class="i" viewBox="0 0 16 16"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg></button></span></div></div></div>
                 <div class="field" data-step="0.1" data-dec="2" data-name="Depth"><label><svg class="i fi" data-fi="depth" viewBox="0 0 20 20"></svg>Depth</label><div class="qi"><span class="src">3.00</span><span class="u">mm</span><button type="button" class="qa pen" aria-label="Adjust Depth" aria-expanded="false"></button></div></div>
               </div>
               <div style="display:grid;gap:4px"><span class="eyebrow" style="padding:0 2px 4px">Display</span>
@@ -803,6 +804,7 @@ svg.fi .ext { stroke-dasharray: 1.5 1.5; opacity: 0.7; }
         <li><b>2026-11-21 · After the APCA pass: split danger, secondary text</b> (<a href="../decisions/0018-danger-text-and-secondary-text-role.md">ADR 0018</a>): the APCA pass had turned dark <span class="code">--danger</span> pale pink and dark <span class="code">--text-muted</span> nearly as bright as <span class="code">--text</span>. Red text now uses the new <span class="code">--danger-text</span> <span class="new-badge">New since approval</span> (light #a6051d, dark #ffcecb, the APCA-pass values), and <span class="code">--danger</span> is a saturated red again for outlines, the viewport error marker and icons: light back to approved #c9363a, dark #ffcecb → #ff7475 (approved #ef6366; lightened just enough for the icon target). <span class="code">--text-muted</span> takes a new <i>secondary</i> role at Lc 60: light back to approved #5b6462, dark #d1dcda → #b9c4c1 (approved #a2acaa). Marked “Revised after the APCA pass” in the token table.</li>
         <li><b>2026-11-21 · Plunge colour</b> <span class="new-badge">New since approval</span>: <span class="code">--vp-plunge</span> (light #835bae, dark #a886cf), a muted violet for plunges in the toolpath preview (task 3.7), distinct in hue from feeds and rapids (neutral greys), the selection (amber) and the axes; Lc ≥ 30 on the viewport background and the part.</li>
         <li><b>2026-11-21 · Lock rule</b> <span class="changed-badge">Changed since approval</span>: a lock appears only on a field with a recommendation mode while it is on (plan feeds fields in auto mode, task 3.14), so the design fields (Corner R, Chamfer, Width, Depth) and the read-only field lost theirs. A lock that can't be pressed is <span class="code">aria-disabled</span> (still focusable) with its reason as tooltip and as visible text (Spindle speed specimen); its name stays "Lock &lt;field&gt;" whether pressed or not (<a href="ui.md#field">ui.md § Field</a>).</li>
+        <li><b>2026-11-21 · Fields: icons, echo, narrow layout</b> (decided by the user): field illustrations keep full colour and saturation whether the field is focused or not <span class="changed-badge">Changed since approval</span> (was 35 % at rest); focus still thickens the amber line, read-only and disabled fields stay grey. The echo shows only when it adds something to the typed text (expression, reference, fraction, another unit, asymmetric tolerance): a plain "15" or "15 mm" in an mm field shows none, a plain value with an inherited tolerance shows only that tolerance <span class="changed-badge">Changed since approval</span>. When a field loses focus to a click, its echo stays until the click has landed, then collapses with <span class="code">--motion-base</span> (instant with reduced motion). Narrow field lists (below 20 rem) put the label above the input <span class="new-badge">New since approval</span> (<a href="#gallery">specimen in the gallery</a>).</li>
       </ol>
     </section>
   </main>
@@ -847,7 +849,7 @@ svg.fi .ext { stroke-dasharray: 1.5 1.5; opacity: 0.7; }
       <input class="range" type="range" min="1" max="100" value="10" aria-label="Time scale">
     </div>
   </div>
-  <div class="spec-row"><span class="lbl">Field · illustration icon (one amber line is the dimension; partly desaturated at rest, full on focus, grey when read-only, always full on fields without a value input), lock (only on feeds fields in auto mode; disabled with its reason as tooltip and visible text), input with adjust (pencil), support area under the input</span>
+  <div class="spec-row"><span class="lbl">Field · illustration icon (one amber line is the dimension; full colour focused or not <span class="changed-badge">Changed since approval</span>, grey when read-only or disabled), lock (only on feeds fields in auto mode; disabled with its reason as tooltip and visible text), input with adjust (pencil), support area under the input</span>
     <div style="display:grid;gap:12px;max-width:520px">
       <div class="field" data-step="0.1" data-dec="2" data-name="Stepdown" data-rec="1.20" data-rec-text="≤ 1.20 mm for 6061 with a 6 mm cutter">
         <label><svg class="i fi" data-fi="stepdown" viewBox="0 0 20 20"></svg><span class="term" title="Depth removed in each pass">Stepdown</span></label>
@@ -897,6 +899,19 @@ svg.fi .ext { stroke-dasharray: 1.5 1.5; opacity: 0.7; }
       <div class="field nv">
         <label><svg class="i fi" data-fi="tabs" viewBox="0 0 20 20"></svg>Tabs</label>
         <label class="check"><input type="checkbox" checked>Leave 4 tabs</label>
+      </div>
+    </div>
+  </div>
+  <div class="spec-row"><span class="lbl">Field · narrow container <span class="new-badge">New since approval</span> (field list below 20 rem, e.g. the 16 rem navigator or a default-width inspector): the label goes above the input; the lock and the input share the next row</span>
+    <div class="fields-narrow">
+      <div class="field" data-step="0.1" data-dec="2" data-name="Stepdown">
+        <label><svg class="i fi" data-fi="stepdown" viewBox="0 0 20 20"></svg>Stepdown</label>
+        <button type="button" class="qa lock" aria-label="Lock Stepdown" aria-pressed="true"></button><div class="qi"><span class="src">1.20</span><span class="u">mm</span><button type="button" class="qa pen" aria-label="Adjust Stepdown" aria-expanded="false"></button></div>
+      </div>
+      <div class="field is-focus" data-step="0.01" data-dec="3" data-name="Depth">
+        <label><svg class="i fi" data-fi="depth" viewBox="0 0 20 20"></svg>Depth</label>
+        <div class="qi focus"><span class="src">D/2</span><span class="caret"></span><span class="u">mm</span><button type="button" class="qa pen" aria-label="Adjust Depth" aria-expanded="false"></button></div>
+        <div class="fs"><div class="fs-i echo"><span></span><span>= 3.000 mm (from D)</span><span></span></div></div>
       </div>
     </div>
   </div>
