@@ -1,5 +1,5 @@
 // Dev-only gallery: every ui/ component in every variant and state, light and dark side by side
-// like the design system page. The manual review surface and the screenshot target; never shipped
+// like the design system page. The manual review surface (not screenshotted by e2e); never shipped
 // (App.tsx loads it only in dev builds, at #gallery). Doc: docs/conventions/ui.md#inventory-v01
 import { ArrowRight, Download, Play, Redo2, Square, Undo2 } from 'lucide-react'
 import { useId, useState, type ReactNode } from 'react'

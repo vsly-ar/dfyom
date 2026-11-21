@@ -1,6 +1,7 @@
 /*
  * Design tokens: the only values components use. Values copied from the approved design system
  * (docs/conventions/ui-design-system.html); names, structure and rules: docs/conventions/ui.md#design-tokens.
+ * Ten values were adjusted for APCA after approval (ui.md#colour lists them with the old values).
  *
  * Themes: light on :root, dark under :root[data-theme='dark'] and, unless data-theme='light' is
  * set, under prefers-color-scheme: dark. .t-light / .t-dark scope a theme to a subtree (gallery).
@@ -21,7 +22,7 @@
   --bg-overlay: rgb(28 33 33 / 0.32);
   /* text */
   --text: #1c2121;
-  --text-muted: #5b6462;
+  --text-muted: #515957;
   --text-faint: #868f8d;
   --text-on-accent: #1c2121;
   --text-on-solid: #ffffff;
@@ -38,7 +39,7 @@
   --accent-icon: #f5b700;
   --accent-icon-edge: drop-shadow(0 0 0.4px rgb(60 40 0 / 0.75));
   /* feedback (never machine state) */
-  --danger: #c9363a;
+  --danger: #a6051d;
   --danger-subtle: #fdecec;
   --warning: #c96a00;
   --warning-subtle: #fff0e3;
@@ -51,7 +52,7 @@
   --safety-stop-fg: #ffffff;
   --safety-alarm: #d0302f;
   --safety-alarm-fg: #ffffff;
-  --safety-hold: #e8741c;
+  --safety-hold: #ff9a5c;
   --safety-hold-fg: #1c2121;
   --safety-moving: #f5b700;
   --safety-moving-edge: #c48f00;
@@ -96,13 +97,13 @@
     --bg-active: rgb(233 237 243 / 0.11);
     --bg-overlay: rgb(0 0 0 / 0.5);
     --text: #e9edf3;
-    --text-muted: #a2acaa;
+    --text-muted: #d1dcda;
     --text-faint: #7a8482;
     --text-on-accent: #1c2121;
     --text-on-solid: #ffffff;
     --text-accent: #ffcf4d;
     --border: #3a4343;
-    --border-control: #6d7878;
+    --border-control: #7a8686;
     --focus: #f5b700;
     --accent: #f5b700;
     --accent-hover: #ffc61a;
@@ -110,27 +111,27 @@
     --accent-subtle: #3b3213;
     --accent-icon: #f5b700;
     --accent-icon-edge: none;
-    --danger: #ef6366;
+    --danger: #ffcecb;
     --danger-subtle: #45272a;
     --warning: #f2993a;
     --warning-subtle: #42331c;
     --success: #4cc387;
     --success-subtle: #233d30;
-    --info: #6aa9ea;
+    --info: #85c1ff;
     --info-subtle: #23344a;
     --safety-stop: #d9373c;
     --safety-stop-fg: #ffffff;
     --safety-alarm: #d9373c;
     --safety-alarm-fg: #ffffff;
-    --safety-hold: #f28b3c;
+    --safety-hold: #ff9a50;
     --safety-hold-fg: #1c2121;
     --safety-moving: #f5b700;
     --safety-moving-edge: #f5b700;
     --safety-moving-fg: #e9edf3;
-    --safety-action: #5ea2e6;
+    --safety-action: #74b8fe;
     --safety-action-fg: #1c2121;
     --safety-idle: #a2acaa;
-    --safety-offline: #7a8482;
+    --safety-offline: #939e9c;
     --vp-grid: #283030;
     --vp-grid-major: #323b3b;
     --vp-stock: #7a8482;
@@ -166,13 +167,13 @@
   --bg-active: rgb(233 237 243 / 0.11);
   --bg-overlay: rgb(0 0 0 / 0.5);
   --text: #e9edf3;
-  --text-muted: #a2acaa;
+  --text-muted: #d1dcda;
   --text-faint: #7a8482;
   --text-on-accent: #1c2121;
   --text-on-solid: #ffffff;
   --text-accent: #ffcf4d;
   --border: #3a4343;
-  --border-control: #6d7878;
+  --border-control: #7a8686;
   --focus: #f5b700;
   --accent: #f5b700;
   --accent-hover: #ffc61a;
@@ -180,27 +181,27 @@
   --accent-subtle: #3b3213;
   --accent-icon: #f5b700;
   --accent-icon-edge: none;
-  --danger: #ef6366;
+  --danger: #ffcecb;
   --danger-subtle: #45272a;
   --warning: #f2993a;
   --warning-subtle: #42331c;
   --success: #4cc387;
   --success-subtle: #233d30;
-  --info: #6aa9ea;
+  --info: #85c1ff;
   --info-subtle: #23344a;
   --safety-stop: #d9373c;
   --safety-stop-fg: #ffffff;
   --safety-alarm: #d9373c;
   --safety-alarm-fg: #ffffff;
-  --safety-hold: #f28b3c;
+  --safety-hold: #ff9a50;
   --safety-hold-fg: #1c2121;
   --safety-moving: #f5b700;
   --safety-moving-edge: #f5b700;
   --safety-moving-fg: #e9edf3;
-  --safety-action: #5ea2e6;
+  --safety-action: #74b8fe;
   --safety-action-fg: #1c2121;
   --safety-idle: #a2acaa;
-  --safety-offline: #7a8482;
+  --safety-offline: #939e9c;
   --vp-grid: #283030;
   --vp-grid-major: #323b3b;
   --vp-stock: #7a8482;

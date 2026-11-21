@@ -1,13 +1,14 @@
 // Smoke tests (task 0.9): the built app starts, renders its first window without errors, runs
 // the bundled compute worker, and quits. With the UI shell (3.3b): the three modes switch, the
 // theme setting applies and persists, and closing an edited project's last window asks first.
+// Quitting with unsaved changes asks once for every project (Cancel, Quit without saving, Save all).
 // UI selectors are roles and accessible names (docs/conventions/ui.md#testing).
 // Doc: docs/conventions/testing.md#end-to-end
-import { readdir, readFile } from 'node:fs/promises'
+import { readdir, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { CallReply, PreloadApi } from '../src/shared/preload-api'
 import { len } from '../src/core/library/library.fixture'
-import { expect, test } from './app.fixture'
+import { answerMessageBoxes, askedMessageBoxes, expect, test } from './app.fixture'
 import type { Page } from '@playwright/test'
 
 /** One call through the window's bridge, as the UI makes it (docs/architecture/llm-api.md). */
@@ -145,5 +146,59 @@ test('closing the last window of an edited project asks first', async ({ dfyom }
     page.waitForEvent('close'),
     dialog.getByRole('button', { name: 'Close without saving' }).click(),
   ])
+  expect(dfyom.rendererErrors).toEqual([])
+})
+
+test('quitting with an edited project asks first: Cancel keeps it, Quit without saving quits', async ({
+  dfyom,
+}) => {
+  const { app } = dfyom
+  const page = await app.firstWindow()
+  await editedProject(page, 'Bracket')
+  await expect(page).toHaveTitle('Bracket — Edited')
+  const quit = () => app.evaluate(({ app: a }) => a.quit())
+
+  await answerMessageBoxes(app, 'Cancel')
+  await quit()
+  await expect.poll(() => askedMessageBoxes(app)).toHaveLength(1)
+  expect((await askedMessageBoxes(app))[0]).toMatchObject({
+    message: 'Quit with unsaved changes in “Bracket”?',
+    buttons: ['Save all', 'Quit without saving', 'Cancel'],
+  })
+  // still running, project still open and edited; closing the window still asks (not "quitting")
+  await expect(page).toHaveTitle('Bracket — Edited')
+  expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(1)
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.close())
+  const closeDialog = page.getByRole('alertdialog', {
+    name: 'Close “Bracket” with unsaved changes?',
+  })
+  await expect(closeDialog).toBeVisible()
+  await closeDialog.getByRole('button', { name: 'Cancel' }).click()
+
+  await answerMessageBoxes(app, 'Quit without saving')
+  // the app may exit before the evaluate returns
+  await Promise.all([app.waitForEvent('close'), quit().catch(() => undefined)])
+  expect(dfyom.rendererErrors).toEqual([])
+})
+
+test('quitting with Save all saves an untitled project through the save dialog', async ({
+  dfyom,
+}) => {
+  const { app, dataDir } = dfyom
+  const page = await app.firstWindow()
+  await editedProject(page, 'Lid')
+  await expect(page).toHaveTitle('Lid — Edited')
+  const file = join(dataDir, 'Lid.dfyom')
+  await app.evaluate(({ dialog }, path) => {
+    dialog.showSaveDialog = (() =>
+      Promise.resolve({ canceled: false, filePath: path })) as typeof dialog.showSaveDialog
+  }, file)
+
+  await answerMessageBoxes(app, 'Save all')
+  await Promise.all([
+    app.waitForEvent('close'),
+    app.evaluate(({ app: a }) => a.quit()).catch(() => undefined),
+  ])
+  expect((await stat(file)).size).toBeGreaterThan(0)
   expect(dfyom.rendererErrors).toEqual([])
 })

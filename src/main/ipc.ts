@@ -3,7 +3,7 @@
 // Also the replica snapshot, the settings and closing a project with its last window.
 // Doc: docs/architecture/llm-api.md#processes-and-hosting, docs/conventions/ui.md#app-shell
 // Contract: src/shared/preload-api.ts
-import { app, BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron'
+import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { agentError } from '../core/agent/results'
 import type { AgentSession, SessionInfo } from '../core/agent/session'
 import { sourceKey } from '../core/commands/context'
@@ -17,11 +17,13 @@ import {
   type WindowCloseRequest,
 } from '../shared/preload-api'
 import type { Dispatcher } from '../core/commands/dispatcher'
+import type { OpenProjectInfo } from '../core/project/lifecycle'
 import { evaluationView, followEvaluations } from './evaluation-push'
 import { chooseOpenFile, chooseSaveFile } from './file-dialogs'
 import type { AppHost } from './host/app-host'
 import type { LocalHttpControl } from './mcp/http'
 import type { SettingsStore } from './settings/store'
+import type { SaveAllOutcome } from './quit'
 import { closeNeedsProject } from './window-close'
 
 interface WindowSession {
@@ -63,6 +65,17 @@ function agentSessions(sessions: readonly SessionInfo[]): AgentSessionInfo[] {
 export interface WindowSessions {
   /** Makes `win` a session, bound to `key` if given; ended when the window closes. */
   attach(win: BrowserWindow, key?: string): void
+  /**
+   * The app quits now (every quit question answered, src/main/index.ts): windows close without
+   * closing their project first; host.shutdown closes them (unsaved changes stay recoverable).
+   */
+  markQuitting(): void
+  /**
+   * "Save all" on quit (docs/conventions/ui.md#confirmations): saves each project to its file; an
+   * untitled one asks for a file with the save dialog (on its window). Stops at the first
+   * cancelled dialog or failed save.
+   */
+  saveAll(projects: readonly OpenProjectInfo[]): Promise<SaveAllOutcome>
 }
 
 export function registerProjectIpc(
@@ -71,11 +84,9 @@ export function registerProjectIpc(
   settings: SettingsStore,
 ): WindowSessions {
   const byContents = new Map<number, WindowSession>()
-  // App quit closes every project itself (host.shutdown, unsaved changes stay recoverable).
+  // App quit closes every project itself (host.shutdown, unsaved changes stay recoverable); set
+  // only once the quit questions are answered, so a cancelled quit leaves window closing as it was.
   let quitting = false
-  app.on('before-quit', () => {
-    quitting = true
-  })
 
   /**
    * Re-subscribes the window to its project's action log when its bound runtime changed (bound,
@@ -221,7 +232,38 @@ export function registerProjectIpc(
       if (!win.isDestroyed()) win.webContents.send(IPC.agentSessions, agents)
   })
 
+  const windowOf = (key: string): BrowserWindow | null =>
+    [...byContents.values()].find((ws) => ws.session.boundKey === key && !ws.win.isDestroyed())
+      ?.win ??
+    BrowserWindow.getFocusedWindow() ??
+    null
+
   return {
+    markQuitting() {
+      quitting = true
+    },
+    async saveAll(projects) {
+      // its own session, so no window's binding changes; the save reaches the windows' replicas
+      // through the project log like any other session's save
+      const session = host.openSession({ kind: 'ui', id: 'quit' })
+      try {
+        for (const p of projects) {
+          let args: { target?: string; confirm?: boolean } = {}
+          if (p.file === null) {
+            const target = await chooseSaveFile(windowOf(p.key), p.name)
+            if (target === null) return { kind: 'cancelled' }
+            // the OS dialog already asked before replacing a file (ui.md#project-files)
+            args = { target, confirm: true }
+          }
+          const bound = session.bind(p.key)
+          const r = bound.isErr() ? bound : (await session.call('project.save', args)).result
+          if (r.isErr()) return { kind: 'failed', name: p.name, message: r.unwrapErr().message }
+        }
+        return { kind: 'saved' }
+      } finally {
+        session.end()
+      }
+    },
     attach(win, key) {
       const session = host.openSession({ kind: 'ui', id: `win-${win.id}` })
       const ws: WindowSession = {

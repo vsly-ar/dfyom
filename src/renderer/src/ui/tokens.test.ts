@@ -129,17 +129,10 @@ type Theme = 'light' | 'dark'
 
 /**
  * Pairs the components and the approved page draw: foreground (text or mark) on background,
- * in that order (APCA is polarity-aware), with the role that sets the target. `below` pins pairs
- * that miss the target in a theme (Lc noted; colours left as approved; v0.1 plan known issues):
- * they run as `it.fails`, so fixing a colour turns the test red until the entry is removed.
+ * in that order (APCA is polarity-aware), with the role that sets the target. Every pair meets
+ * its target in both themes (tokens adjusted for APCA: ui.md#colour).
  */
-const PAIRS: [
-  fg: string,
-  bg: string,
-  role: Role,
-  where: string,
-  below?: Partial<Record<Theme, number>>,
-][] = [
+const PAIRS: [fg: string, bg: string, role: Role, where: string][] = [
   ['--text', '--bg-app', 'read', 'body text'],
   ['--text', '--bg-chrome', 'read', 'toolbar, status bar, support area'],
   ['--text', '--bg-field', 'read', 'input values'],
@@ -149,32 +142,20 @@ const PAIRS: [
   ['--text', '--warning-subtle', 'read', 'hard warning text (12 px)'],
   ['--text', '--danger-subtle', 'read', 'error banner text'],
   ['--bg-app', '--text', 'label', 'tooltip, inverted (12 px / 500)'],
-  ['--text-muted', '--bg-app', 'read', 'labels, secondary text', { dark: -51.9 }],
-  [
-    '--text-muted',
-    '--bg-chrome',
-    'read',
-    'support area notes (12 px), status bar',
-    { light: 70.9, dark: -50.1 },
-  ],
-  ['--text-muted', '--bg-field', 'read', 'read-only values', { dark: -53.1 }],
-  ['--text-muted', '--bg-raised', 'read', 'dialog body', { dark: -47.8 }],
-  [
-    '--text-muted',
-    '--bg-control',
-    'label',
-    'ghost buttons, segmented items (500)',
-    { dark: -47.8 },
-  ],
+  ['--text-muted', '--bg-app', 'read', 'labels, secondary text'],
+  ['--text-muted', '--bg-chrome', 'read', 'support area notes (12 px), status bar'],
+  ['--text-muted', '--bg-field', 'read', 'read-only values'],
+  ['--text-muted', '--bg-raised', 'read', 'dialog body'],
+  ['--text-muted', '--bg-control', 'label', 'ghost buttons, segmented items (500)'],
   ['--text-faint', '--bg-app', 'spot', 'metadata (non-essential)'],
   ['--text-faint', '--bg-field', 'spot', 'unit suffix, placeholder'],
   ['--text-accent', '--bg-app', 'label', 'label of the suggested action'],
   ['--text-accent', '--accent-subtle', 'label', 'suggested action on selection'],
   ['--text-on-accent', '--accent', 'label', 'segmented thumb label (12 px / 500), check mark'],
   ['--accent-border', '--bg-field', 'mark', 'edge of amber fills'],
-  ['--border-control', '--bg-field', 'mark', 'input, checkbox outline', { dark: -26.9 }],
-  ['--border-control', '--bg-app', 'mark', 'switch track, button outline', { dark: -25.8 }],
-  ['--border-control', '--bg-chrome', 'mark', 'control outlines in toolbars', { dark: -24.0 }],
+  ['--border-control', '--bg-field', 'mark', 'input, checkbox outline'],
+  ['--border-control', '--bg-app', 'mark', 'switch track, button outline'],
+  ['--border-control', '--bg-chrome', 'mark', 'control outlines in toolbars'],
   ['--focus', '--bg-app', 'mark', 'focus ring (2 px)'],
   ['--focus', '--bg-field', 'mark', 'focus ring'],
   ['--focus', '--bg-chrome', 'mark', 'focus ring in toolbars'],
@@ -186,33 +167,40 @@ const PAIRS: [
   ['--info', '--bg-app', 'icon', 'info icon'],
   ['--safety-stop-fg', '--safety-stop', 'label', 'Stop label'],
   ['--safety-alarm-fg', '--safety-alarm', 'label', 'Alarm badge (12 px / 600)'],
-  ['--safety-hold-fg', '--safety-hold', 'label', 'Feed hold badge', { light: 44.9, dark: 53.2 }],
-  ['--safety-action-fg', '--safety-action', 'label', 'Tool change badge', { dark: 49.1 }],
+  ['--safety-hold-fg', '--safety-hold', 'label', 'Feed hold badge'],
+  ['--safety-action-fg', '--safety-action', 'label', 'Tool change badge'],
   ['--safety-moving-fg', '--accent-subtle', 'label', 'Running badge'],
   ['--safety-idle', '--bg-field', 'mark', 'Idle badge dot (solid)'],
-  ['--safety-offline', '--bg-field', 'icon', 'Not connected badge ring (1.5 px)', { dark: -32.6 }],
-  ['--danger', '--bg-control', 'label', 'danger button label (13 px / 500)', { dark: -35.5 }],
-  ['--danger', '--bg-raised', 'read', 'danger menu item', { light: 74.2, dark: -35.5 }],
-  ['--danger', '--danger-subtle', 'label', 'danger chip (12 px / 500)', { dark: -38.7 }],
-  [
-    '--danger',
-    '--bg-chrome',
-    'read',
-    'field error text in the support area (12 px)',
-    { light: 64.7, dark: -37.8 },
-  ],
-  ['--info', '--info-subtle', 'label', 'agent tag (10 px / 500)', { dark: -47.5 }],
+  ['--safety-offline', '--bg-field', 'icon', 'Not connected badge ring (1.5 px)'],
+  ['--danger', '--bg-control', 'label', 'danger button label (13 px / 500)'],
+  ['--danger', '--bg-raised', 'read', 'danger menu item'],
+  ['--danger', '--danger-subtle', 'label', 'danger chip (12 px / 500)'],
+  ['--danger', '--bg-chrome', 'read', 'field error text in the support area (12 px)'],
+  ['--info', '--info-subtle', 'label', 'agent tag (10 px / 500)'],
+  // viewport lines (1–2 px) on what they are drawn over; grid and surface tints are area fills
+  // kept deliberately quiet, with no target (ui.md#colour)
+  ['--vp-edge', '--vp-part', 'mark', 'feature edges on the part'],
+  ['--vp-edge', '--vp-hover', 'mark', 'feature edges on a hovered operation'],
+  ['--vp-edge', '--vp-outdated', 'mark', 'feature edges on an outdated part'],
+  ['--vp-edge', '--vp-removal', 'mark', 'feature edges on removed material'],
+  ['--vp-selected', '--vp-part', 'mark', 'selection outline on the part'],
+  ['--vp-stock', '--bg-viewport', 'mark', 'stock outline (dashed)'],
+  ['--vp-feed', '--bg-viewport', 'mark', 'feed moves'],
+  ['--vp-feed', '--vp-part', 'mark', 'feed moves over the part'],
+  ['--vp-rapid', '--bg-viewport', 'mark', 'rapid moves'],
+  ['--vp-tool', '--bg-viewport', 'mark', 'tool marker'],
+  ['--vp-axis-x', '--bg-viewport', 'mark', 'X axis'],
+  ['--vp-axis-y', '--bg-viewport', 'mark', 'Y axis'],
+  ['--vp-axis-z', '--bg-viewport', 'mark', 'Z axis'],
+  ['--danger', '--bg-viewport', 'mark', 'error marker in the viewport'],
 ]
 
 const themes = { light, dark }
 const lc = (theme: Theme, fg: string, bg: string): number =>
   apcaLc(themes[theme].get(fg) ?? '', themes[theme].get(bg) ?? '')
-const cases = (pinned: boolean) =>
-  PAIRS.flatMap(([fg, bg, role, where, below]) =>
-    (['light', 'dark'] as const)
-      .filter((t) => (below?.[t] !== undefined) === pinned)
-      .map((t) => [fg, bg, t, role, ROLES[role], where] as const),
-  )
+const cases = PAIRS.flatMap(([fg, bg, role, where]) =>
+  (['light', 'dark'] as const).map((t) => [fg, bg, t, role, ROLES[role], where] as const),
+)
 
 describe('tokens.css', () => {
   it.each([
@@ -252,28 +240,8 @@ describe('tokens.css', () => {
   })
 
   describe('APCA contrast (Lc), ui.md#colour', () => {
-    it.each(cases(false))('%s on %s, %s: |Lc| ≥ %s target %s (%s)', (fg, bg, theme, _r, min) => {
+    it.each(cases)('%s on %s, %s: |Lc| ≥ %s target %s (%s)', (fg, bg, theme, _r, min) => {
       expect(Math.abs(lc(theme, fg, bg))).toBeGreaterThanOrEqual(min)
-    })
-
-    it.fails.each(cases(true))(
-      'below target (reported): %s on %s, %s: |Lc| ≥ %s target %s (%s)',
-      (fg, bg, theme, _r, min) => {
-        expect(Math.abs(lc(theme, fg, bg))).toBeGreaterThanOrEqual(min)
-      },
-    )
-
-    it('notes the current Lc of every pinned pair', () => {
-      const noted = PAIRS.flatMap(([fg, bg, , , below]) =>
-        Object.entries(below ?? {}).map(([t, v]) => [fg, bg, t, v]),
-      )
-      const actual = noted.map(([fg, bg, t]) => [
-        fg,
-        bg,
-        t,
-        Math.round(lc(t as Theme, fg as string, bg as string) * 10) / 10,
-      ])
-      expect(actual).toEqual(noted)
     })
   })
 })
