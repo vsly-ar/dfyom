@@ -18,32 +18,23 @@
   gap: 7px;
 }
 
-/* illustration: 35 % saturation at rest, full on focus; grey when read-only; always full on
-   fields without a value input */
+/* illustration: full colour and saturation focused or not (user, 2026-11-21); focus only thickens
+   the amber line; grey (desaturated, dimmed) when read-only or disabled */
 .illustration {
   display: inline-flex;
-  color: var(--text-faint);
-  filter: saturate(0.35);
+  color: var(--text-muted);
   transition:
     color var(--motion-slow),
-    filter var(--motion-emphasis) var(--ease-emphasized);
-}
-
-.field:focus-within .illustration {
-  color: var(--text-muted);
-  filter: saturate(1);
+    filter var(--motion-emphasis) var(--ease-emphasized),
+    opacity var(--motion-slow);
 }
 
 .field:focus-within .illustration [data-accent] {
   stroke-width: 1.6px;
 }
 
-.field[data-kind='toggle'] .illustration {
-  filter: none;
-  color: var(--text-muted);
-}
-
-.field[data-readonly] .illustration {
+.field[data-readonly] .illustration,
+.field:has(.control :disabled) .illustration {
   filter: saturate(0);
   opacity: 0.75;
 }

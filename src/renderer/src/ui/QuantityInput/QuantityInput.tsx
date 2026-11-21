@@ -1,5 +1,6 @@
 // QuantityInput: every dimensional field (task 3.4). A Field whose input keeps the source as typed
-// (`1/16"`, `D/2 ±0.01`), reads it with the core parser/evaluator, echoes the reading while typing,
+// (`1/16"`, `D/2 ±0.01`), reads it with the core parser/evaluator, echoes the reading while typing
+// when the text alone does not show it,
 // shows errors in place (underline, catalogue message, verified fix), commits a valid value on
 // Enter/blur (one `onCommit` = one command = one undo step), reverts on Escape and never commits
 // an invalid value. An optional field (`optional`) commits an emptied field as unset. Steppers (↑/↓, adjust popover), reference autocomplete and the pick button
@@ -32,7 +33,9 @@ import { SegmentedControl } from '../SegmentedControl/SegmentedControl'
 import { Tooltip } from '../Tooltip/Tooltip'
 import {
   defaultPrecision,
+  describeInherited,
   describeReading,
+  echoAddsInformation,
   explainError,
   formatValue,
   NO_REFERENCES,
@@ -407,9 +410,13 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
       }
     : undefined
 
+  // the echo only when it adds something to the text (expression, fraction, other unit,
+  // asymmetric tolerance); a plain value shows at most its inherited tolerance
   const echo =
     focused && !readOnly && explained === undefined && echoReading.isOk()
-      ? describeReading(echoReading.unwrap(), defaultUnit, prec, inheritedTolerance)
+      ? echoAddsInformation(echoReading.unwrap(), echoText, defaultUnit)
+        ? describeReading(echoReading.unwrap(), defaultUnit, prec, inheritedTolerance)
+        : describeInherited(echoReading.unwrap(), defaultUnit, prec, inheritedTolerance)
       : undefined
 
   const showComputed =

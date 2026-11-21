@@ -9,6 +9,7 @@ import {
   isValidElement,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactElement,
@@ -17,6 +18,7 @@ import {
 import { Button } from '../Button/Button'
 import { Tooltip } from '../Tooltip/Tooltip'
 import styles from './Field.module.css'
+import { afterPointerRelease, trackPointer } from './pointerRelease'
 
 /** Support-area tiers: error blocks Generate; hard and soft warn (soft can be dismissed). */
 export type FieldSeverity = 'error' | 'hard' | 'soft' | 'info' | 'note'
@@ -116,6 +118,53 @@ export function Field({
     ;(next === 'show' ? showRef : dismissRef).current?.focus()
   })
 
+  // The echo outlives its prop until the click that blurred the field has landed, then the
+  // support area collapses with a short ease (ui.md#field: support area collapse).
+  const [shownEcho, setShownEcho] = useState<ReactNode>(echo)
+  const [echoLeaving, setEchoLeaving] = useState(false)
+  if (echo !== undefined && (shownEcho !== echo || echoLeaving)) {
+    setShownEcho(echo)
+    setEchoLeaving(false)
+  }
+  const shown = echo ?? shownEcho
+  const fieldRef = useRef<HTMLDivElement>(null)
+  const supportRef = useRef<HTMLDivElement>(null)
+  const echoRef = useRef<HTMLDivElement>(null)
+  useEffect(trackPointer, [])
+  useEffect(() => {
+    if (echo !== undefined || shownEcho === undefined || echoLeaving) return
+    // still focused (the echo gave way to an error): no layout to protect, and a stale echo
+    // never sits next to an error, so it goes at once
+    const focused = fieldRef.current?.contains(document.activeElement) ?? false
+    if (focused) return void Promise.resolve().then(() => setShownEcho(undefined))
+    return afterPointerRelease(() => setEchoLeaving(true))
+  }, [echo, shownEcho, echoLeaving])
+  useLayoutEffect(() => {
+    if (!echoLeaving) return
+    const done = (): void => {
+      setShownEcho(undefined)
+      setEchoLeaving(false)
+    }
+    // the whole support area when the echo is all it holds, else the echo line alone
+    const support = supportRef.current
+    const echoOnly = support !== null && support.childElementCount === 1
+    const animations = echoOnly
+      ? collapse(support, fieldRef.current)
+      : collapse(echoRef.current, null)
+    if (animations.length === 0) return done()
+    let live = true
+    void Promise.all(animations.map((a) => a.finished)).then(
+      () => {
+        if (live) done()
+      },
+      () => {},
+    )
+    return () => {
+      live = false
+      for (const a of animations) a.cancel()
+    }
+  }, [echoLeaving])
+
   const visible = messages
     .filter((m) => !(m.severity === 'soft' && dismissed.has(m.id)))
     .toSorted((a, b) => RANK[a.severity] - RANK[b.severity])
@@ -126,7 +175,7 @@ export function Field({
 
   const describedBy = [
     children.props['aria-describedby'],
-    echo !== undefined ? echoId : undefined,
+    shown !== undefined ? echoId : undefined,
     primary ? statusId : undefined,
   ]
     .filter(Boolean)
@@ -141,18 +190,15 @@ export function Field({
       })
     : children
 
-  const hasSupport =
-    echo !== undefined ||
-    primary !== undefined ||
-    dismissedCount > 0 ||
-    rest.length > 0 ||
-    lockDisabled
+  const hasOthers = primary !== undefined || dismissedCount > 0 || rest.length > 0 || lockDisabled
+  const hasSupport = shown !== undefined || hasOthers
 
   return (
     <div
       data-kind={kind}
       data-readonly={readOnly || undefined}
       data-invalid={invalid || undefined}
+      ref={fieldRef}
       className={[styles['field'], className].filter(Boolean).join(' ')}
     >
       <label htmlFor={controlId} className={styles['label']}>
@@ -182,11 +228,11 @@ export function Field({
       ) : null}
       <div className={styles['control']}>{control}</div>
       {hasSupport ? (
-        <div className={styles['support']} data-tier={tier}>
-          {echo !== undefined ? (
-            <div id={echoId} className={styles['item']} data-severity="echo">
+        <div ref={supportRef} className={styles['support']} data-tier={tier}>
+          {shown !== undefined ? (
+            <div ref={echoRef} id={echoId} className={styles['item']} data-severity="echo">
               <span />
-              <span>{echo}</span>
+              <span>{shown}</span>
               <span />
             </div>
           ) : null}
@@ -280,4 +326,48 @@ export function Field({
       ) : null}
     </div>
   )
+}
+
+/** Motion token in ms from the root style; 0 when reduced motion zeroes it or it is unset. */
+function motionMs(name: string): number {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  const n = Number.parseFloat(v)
+  return Number.isFinite(n) ? (v.endsWith('ms') ? n : n * 1000) : 0
+}
+
+/**
+ * Collapse `el` to zero height (and the field's row gap above it) with --motion-base and
+ * --ease-standard. No animations when motion is reduced or the platform has no Web Animations.
+ */
+function collapse(el: HTMLElement | null, field: HTMLElement | null): Animation[] {
+  if (!el || typeof el.animate !== 'function') return []
+  const duration = motionMs('--motion-base')
+  if (duration <= 0) return []
+  const easing =
+    getComputedStyle(document.documentElement).getPropertyValue('--ease-standard').trim() ||
+    'ease-out'
+  const style = getComputedStyle(el)
+  const timing: KeyframeAnimationOptions = { duration, easing, fill: 'forwards' }
+  const from: Keyframe = {
+    height: `${el.getBoundingClientRect().height}px`,
+    minHeight: '0px',
+    paddingTop: style.paddingTop,
+    paddingBottom: style.paddingBottom,
+    opacity: 1,
+    overflow: 'hidden',
+  }
+  const to: Keyframe = {
+    height: '0px',
+    minHeight: '0px',
+    paddingTop: '0px',
+    paddingBottom: '0px',
+    opacity: 0,
+    overflow: 'hidden',
+  }
+  const animations = [el.animate([from, to], timing)]
+  if (field) {
+    const gap = getComputedStyle(field).rowGap
+    animations.push(field.animate([{ rowGap: gap }, { rowGap: '0px' }], timing))
+  }
+  return animations
 }
