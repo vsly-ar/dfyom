@@ -142,6 +142,10 @@ The [action log](commands.md#action-log) is how an agent sees what the user and 
 - **Pull:** `project.log.list { afterSeq }` returns the events (args summarized, `withPatches: false`); a `gap` means the ring buffer dropped events and the agent should re-query what it needs.
 - **Push (optional):** resource `dfyom://project/{key}/log` supports `resources/subscribe`; the server sends `notifications/resources/updated` (debounced 250 ms) and the client reads the resource with `?after=<seq>`. For clients and harnesses that act on notifications.
 
+### Apply (draft, D13)
+
+Agent, CLI and automation calls **auto-apply** by default: a document command is followed by `project.apply` in the same queue turn, and the result gains `applied` (tool changes, plan updates, job ids). The reserved key `apply: false` batches several edits for one `project_apply`; `project.pending.get` lists what is pending. Specified in [apply.md § Agents, MCP and CLI](apply.md#agents-mcp-and-cli).
+
 ### Resources
 
 | URI                         | Content                                                  | Subscribable                   |

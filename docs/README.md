@@ -21,6 +21,7 @@ The docs are the **source of truth**. Code implements what is documented here; w
 | Architecture | [architecture/overview.md](architecture/overview.md) – processes, source layout, threading                                                                                     | draft       |
 | Architecture | [architecture/llm-api.md](architecture/llm-api.md) – MCP/CLI mapping: tools, results, jobs, sessions, GUI coexistence, safety (task 3.10 done; 3.11)                           | implemented |
 | Architecture | [architecture/commands.md](architecture/commands.md) – shared command layer for UI, agents, CLI                                                                                | implemented |
+| Architecture | [architecture/apply.md](architecture/apply.md) – Apply (D13): edits commit live, tool choice, draft plans and toolpaths wait for Enter or the Apply button; pending changes    | draft       |
 | Architecture | [architecture/persistence.md](architecture/persistence.md) – project archive, working folder, save/recovery                                                                    | implemented |
 | Architecture | [architecture/quantities.md](architecture/quantities.md) – units, tolerances, expressions (value objects)                                                                      | implemented |
 | Architecture | [architecture/geometry.md](architecture/geometry.md) – removal-based geometry, cutting-operation framework, layers; non-top faces (v0.2) draft                                 | implemented |

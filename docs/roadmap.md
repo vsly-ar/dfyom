@@ -29,6 +29,8 @@ Goal and full scope not decided yet. Decided items, in priority order:
    - [ ] Phase 2: plan-only edits of the design snapshot and drawing the plan's snapshot part in the plan scene (needs a design doc first).
 2. **Faces, setups and tools in Design** (user decisions D10 and D11, 2026-11-21): operations target any ±X/±Y/±Z face, Plan derives one setup per direction, and each design operation has a tool field (generalized or specific, auto-chosen unless locked). Drafts awaiting confirmation: [design-v0.2.md](modes/design-v0.2.md), [plan-v0.2.md](modes/plan-v0.2.md), [geometry.md § Non-top faces](architecture/geometry.md#non-top-faces-v02-draft). Still open: shapes model (Q12), anchors (Q13), v0.2/v0.3 split (Q14), multi-setup without workholding or in-process stock (Q15), free-form fillets (Q16).
 
+3. **Apply** (user decision D13, 2026-11-21): edits commit live; tool choice, draft plans following and toolpath regeneration wait for Enter in a field, Cmd/Ctrl+Enter or a top-right "Apply N" button with an explanatory tooltip; save and export apply first; agents auto-apply per call. Draft awaiting confirmation: [apply.md](architecture/apply.md) (open questions there). Settles Q17 of design-v0.2.
+
 ## Later (unordered)
 
 Multiple setups and stock repositioning; optimization; simulation and collision checks; vector carving and engraving; real-machine control with the safety spec; sensors and automation.
