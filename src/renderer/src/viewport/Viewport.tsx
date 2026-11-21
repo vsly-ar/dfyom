@@ -38,6 +38,7 @@ import {
 import type { RunScene } from './RunLayer'
 import { CameraControlsImpl, Scene } from './Scene'
 import { linesBounds } from './toolpath-lines'
+import { classifyWheel, type WheelHistory } from './wheel'
 import { useTokens } from './useTokens'
 import styles from './Viewport.module.css'
 
@@ -226,6 +227,43 @@ export function Viewport({
     c.mouseButtons.wheel = CameraControlsImpl.ACTION.DOLLY
   }
   useEffect(() => applyButtons(false))
+
+  // Wheel: a trackpad scroll pans, a pinch or a mouse wheel dollies to the cursor (wheel.ts).
+  // Classified in the capture phase, before camera-controls' own listener on the canvas reads
+  // `mouseButtons.wheel`. camera-controls turns any `ctrlKey` wheel (a pinch) into a field-of-view
+  // zoom, which Fit does not undo, so a pinch is re-sent without `ctrlKey` and dollies instead.
+  const wheelHistory = useRef<WheelHistory | null>(null)
+  useEffect(() => {
+    const region = regionRef.current
+    if (!region) return
+    const resent = new WeakSet<Event>()
+    const onWheel = (e: WheelEvent): void => {
+      const c = controls.current
+      if (!c || resent.has(e)) return
+      const gesture = classifyWheel(e, wheelHistory.current, e.timeStamp)
+      wheelHistory.current = { gesture, time: e.timeStamp }
+      c.mouseButtons.wheel =
+        gesture === 'pan' ? CameraControlsImpl.ACTION.TRUCK : CameraControlsImpl.ACTION.DOLLY
+      if (!e.ctrlKey || !e.target) return
+      e.preventDefault()
+      e.stopPropagation()
+      const copy = new WheelEvent('wheel', {
+        bubbles: true,
+        cancelable: true,
+        clientX: e.clientX,
+        clientY: e.clientY,
+        screenX: e.screenX,
+        screenY: e.screenY,
+        deltaX: e.deltaX,
+        deltaY: e.deltaY,
+        deltaMode: e.deltaMode,
+      })
+      resent.add(copy)
+      e.target.dispatchEvent(copy)
+    }
+    region.addEventListener('wheel', onWheel, { capture: true, passive: false })
+    return () => region.removeEventListener('wheel', onWheel, { capture: true })
+  }, [])
 
   // Escape cancels pick mode wherever focus is (the field that started it keeps focus).
   useEffect(() => {

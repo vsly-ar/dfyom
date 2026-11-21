@@ -96,7 +96,8 @@ export interface ButtonMap {
 
 /**
  * The mapping table of ui.md: what a drag with each button does, given whether Shift is held.
- * The wheel always zooms to the cursor; a left click (no drag) always selects.
+ * Wheel events are not in the table (same in every preset, see wheel.ts); a left click (no drag)
+ * always selects.
  */
 export function mouseButtons(preset: MousePreset, shift: boolean): ButtonMap {
   switch (preset) {
