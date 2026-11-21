@@ -9,7 +9,7 @@ import { Quantity, type ParseContext } from '../../../../core/quantity/quantity'
 import { Rational } from '../../../../core/quantity/rational'
 import { fail, None, Ok, Some } from '../../../../shared/result'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
-import { QuantityInput, type QuantityInputProps } from './QuantityInput'
+import { QuantityInput, type QuantityInputBaseProps } from './QuantityInput'
 
 const MM: ParseContext = { kind: 'length', defaultUnit: 'mm' }
 
@@ -28,13 +28,21 @@ const resolver: ReferenceResolver = {
   },
 }
 
-type HarnessProps = Partial<QuantityInputProps> & { initial?: string }
+type HarnessProps = Partial<QuantityInputBaseProps> & {
+  initial?: string | undefined
+  optional?: boolean
+  onCommit?: (v: Quantity | undefined) => void
+}
 
 /** Stores what it commits, like the document replica after a command. */
-function Harness({ initial, onCommit, ...props }: HarnessProps): React.JSX.Element {
+function Harness({ initial, optional, onCommit, ...props }: HarnessProps): React.JSX.Element {
   const [value, setValue] = useState<Quantity | undefined>(
     initial === undefined ? undefined : q(initial, resolver),
   )
+  const commit = (v: Quantity | undefined): void => {
+    onCommit?.(v)
+    setValue(v)
+  }
   return (
     <QuantityInput
       label="Width"
@@ -42,17 +50,14 @@ function Harness({ initial, onCommit, ...props }: HarnessProps): React.JSX.Eleme
       defaultUnit="mm"
       resolver={resolver}
       value={value}
-      onCommit={(v) => {
-        onCommit?.(v)
-        setValue(v)
-      }}
       {...props}
+      {...(optional === true ? { optional, onCommit: commit } : { onCommit: commit })}
     />
   )
 }
 
 function setup(props: HarnessProps = {}) {
-  const onCommit = vi.fn<(v: Quantity) => void>()
+  const onCommit = vi.fn<(v: Quantity | undefined) => void>()
   const r = renderUi(<Harness initial="3.00" onCommit={onCommit} {...props} />)
   const input = screen.getByRole(props.references ? 'combobox' : 'textbox', { name: 'Width' })
   return { ...r, onCommit, input: input as HTMLInputElement }
@@ -69,7 +74,7 @@ async function retype(
 }
 
 const committed = (fn: ReturnType<typeof setup>['onCommit']): string[] =>
-  fn.mock.calls.map(([v]) => `${v.source} = ${v.exact.toString()}`)
+  fn.mock.calls.map(([v]) => (v === undefined ? 'unset' : `${v.source} = ${v.exact.toString()}`))
 
 describe('QuantityInput: display', () => {
   it('shows the stored source, labelled, with the bare-number unit as a muted suffix', async () => {
@@ -309,6 +314,72 @@ describe('QuantityInput: hints for ambiguous input (known issues)', () => {
     await retype(user, input, '')
     await user.keyboard('{Enter}')
     expect(input).toHaveAccessibleDescription('Enter a value.')
+  })
+})
+
+describe('QuantityInput: optional (empty = unset)', () => {
+  it('without the option, an emptied field is an error and never commits', async () => {
+    const { user, input, onCommit } = setup()
+    await retype(user, input, '')
+    await user.keyboard('{Enter}')
+    await user.tab()
+    expect(onCommit).not.toHaveBeenCalled()
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+    expect(input).toHaveAccessibleDescription('Enter a value.')
+  })
+
+  it('commits an emptied field as unset on Enter, once, and shows it empty', async () => {
+    const { user, input, onCommit } = setup({ optional: true })
+    await retype(user, input, '')
+    await user.keyboard('{Enter}')
+    await user.tab()
+    expect(committed(onCommit)).toEqual(['unset'])
+    expect(input).toHaveValue('')
+    expect(input).not.toHaveAttribute('aria-invalid')
+  })
+
+  it('treats spaces as empty and commits unset on blur', async () => {
+    const { user, input, onCommit } = setup({ optional: true })
+    await retype(user, input, '   ')
+    await user.tab()
+    expect(committed(onCommit)).toEqual(['unset'])
+    expect(input).not.toHaveAttribute('aria-invalid')
+  })
+
+  it('never marks an empty optional field, even after the error pause', async () => {
+    const { user, input } = setup({ optional: true })
+    await retype(user, input, '')
+    await act(() => new Promise((r) => setTimeout(r, 700)))
+    expect(input).not.toHaveAttribute('aria-invalid')
+    expect(screen.queryByText('Enter a value.')).toBeNull()
+    await expectNoAxeViolations()
+  })
+
+  it('commits nothing for a field that was empty and stays empty; a value typed later commits', async () => {
+    const { user, input, onCommit } = setup({ optional: true, initial: undefined })
+    expect(input).toHaveValue('')
+    await user.click(input)
+    await user.keyboard('{Enter}')
+    await user.tab()
+    expect(onCommit).not.toHaveBeenCalled()
+    await retype(user, input, '5')
+    await user.tab()
+    await retype(user, input, '')
+    await user.tab()
+    expect(committed(onCommit)).toEqual(['5 = 5', 'unset'])
+  })
+
+  it('still rejects invalid text and reverts on Escape', async () => {
+    const { user, input, onCommit } = setup({ optional: true })
+    await retype(user, input, '3..5')
+    await user.keyboard('{Enter}')
+    expect(onCommit).not.toHaveBeenCalled()
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+    await retype(user, input, '')
+    await user.keyboard('{Escape}')
+    expect(input).toHaveValue('3.00')
+    await user.tab()
+    expect(onCommit).not.toHaveBeenCalled()
   })
 })
 

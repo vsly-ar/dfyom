@@ -2,7 +2,8 @@
 // dialog with the v0.1 machine fields (library.md#machine: name, travel and max feed rate per
 // axis, spindle control, max and min speed, power, rigidity, gCode units; GRBL controller and
 // manual tool change are fixed) that adds the machine with `library.machine.add` and hands its id
-// to `onAdded`. The core validates; its issues show at their field, the rest above the fields.
+// to `onAdded`. Min speed and power are optional: emptying them unsets them (QuantityInput
+// `optional`). The core validates; its issues show at their field, the rest above the fields.
 // Doc: docs/conventions/ui.md#plan-mode-task-37
 import { Cpu, Plus } from 'lucide-react'
 import { useId, useState } from 'react'
@@ -23,6 +24,7 @@ import {
   SegmentedControl,
   Select,
   type FieldIconName,
+  type QuantityCommitProps,
 } from '../../ui'
 import {
   AXES,
@@ -98,7 +100,7 @@ export function NewMachineDialog({
     kind: QuantityKind,
     value: Quantity | undefined,
     icon: FieldIconName,
-    commit: (v: Quantity) => void,
+    commit: QuantityCommitProps,
     note?: string,
   ) => (
     <QuantityInput
@@ -114,7 +116,7 @@ export function NewMachineDialog({
           ? []
           : [{ id: `${key}-note`, severity: 'note' as const, text: note }]),
       ]}
-      onCommit={commit}
+      {...commit}
     />
   )
   const axes = (
@@ -123,9 +125,9 @@ export function NewMachineDialog({
     label: (a: string) => string,
   ) =>
     AXES.map((a) =>
-      quantity(`${field}.${a}`, label(a.toUpperCase()), kind, form[field][a], AXIS_ICON[a], (v) =>
-        set({ [field]: { ...form[field], [a]: v } }),
-      ),
+      quantity(`${field}.${a}`, label(a.toUpperCase()), kind, form[field][a], AXIS_ICON[a], {
+        onCommit: (v: Quantity) => set({ [field]: { ...form[field], [a]: v } }),
+      }),
     )
 
   return (
@@ -177,16 +179,16 @@ export function NewMachineDialog({
                 onValueChange={(control) => set({ control })}
               />
             </div>
-            {quantity('spindle.maxSpeed', m.maxSpeed, 'spindleSpeed', form.maxSpeed, 'feed', (v) =>
-              set({ maxSpeed: v }),
-            )}
+            {quantity('spindle.maxSpeed', m.maxSpeed, 'spindleSpeed', form.maxSpeed, 'feed', {
+              onCommit: (v: Quantity) => set({ maxSpeed: v }),
+            })}
             {quantity(
               'spindle.minSpeed',
               m.minSpeed,
               'spindleSpeed',
               form.minSpeed,
               'feed',
-              (v) => set({ minSpeed: v }),
+              { optional: true, onCommit: (v) => set({ minSpeed: v }) },
               m.minSpeedNote,
             )}
             {quantity(
@@ -195,7 +197,7 @@ export function NewMachineDialog({
               'power',
               form.power,
               'tool',
-              (v) => set({ power: v }),
+              { optional: true, onCommit: (v) => set({ power: v }) },
               m.powerNote,
             )}
           </Group>

@@ -57,6 +57,7 @@ export {
   ERROR_DELAY_MS,
   QuantityInput,
   STEP_SIZES,
+  type QuantityCommitProps,
   type QuantityInputProps,
   type ReferenceOption,
   type StepSize,

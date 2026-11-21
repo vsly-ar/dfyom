@@ -2,7 +2,7 @@
 // (`1/16"`, `D/2 ±0.01`), reads it with the core parser/evaluator, echoes the reading while typing,
 // shows errors in place (underline, catalogue message, verified fix), commits a valid value on
 // Enter/blur (one `onCommit` = one command = one undo step), reverts on Escape and never commits
-// an invalid value. Steppers (↑/↓, adjust popover), reference autocomplete and the pick button
+// an invalid value. An optional field (`optional`) commits an emptied field as unset. Steppers (↑/↓, adjust popover), reference autocomplete and the pick button
 // hook (pick mode itself belongs to the viewport) live here too.
 // Doc: docs/conventions/ui.md#quantity-and-expression-input, #field, #selection-and-picking;
 // grammar and errors: docs/architecture/quantities.md
@@ -62,7 +62,26 @@ export interface ReferenceOption {
   label?: string
 }
 
-export interface QuantityInputProps {
+/**
+ * How a QuantityInput commits. Required (the default): an empty field is an error like any other
+ * invalid text. Optional: emptying the field (blank or spaces) and committing it commits unset
+ * (`undefined`) instead; an empty optional field is never marked.
+ */
+export type QuantityCommitProps =
+  | {
+      optional?: false
+      /** A valid, changed value on Enter, blur, a fix or the adjust popover: dispatch one command. */
+      onCommit: (value: Quantity) => void
+    }
+  | {
+      optional: true
+      /** As above; `undefined` when a stored value was emptied (unset). */
+      onCommit: (value: Quantity | undefined) => void
+    }
+
+export type QuantityInputProps = QuantityInputBaseProps & QuantityCommitProps
+
+export interface QuantityInputBaseProps {
   label: string
   /** The field's quantity kind (length, angle, …). */
   kind: QuantityKind
@@ -70,8 +89,6 @@ export interface QuantityInputProps {
   defaultUnit: UnitId
   /** The stored value; undefined = empty. */
   value: Quantity | undefined
-  /** A valid, changed value on Enter, blur, a fix or the adjust popover: dispatch one command. */
-  onCommit: (value: Quantity) => void
   /** Resolves references in formulas; none by default. */
   resolver?: ReferenceResolver
   /** Offered while typing a name (and with Ctrl+Space / ↓ in a formula). */
@@ -113,27 +130,27 @@ const MAX_OPTIONS = 50
 const TEN = Rational.int(10n)
 const TENTH = stepRational('0.1')
 
-export function QuantityInput({
-  label,
-  kind,
-  defaultUnit,
-  value,
-  onCommit,
-  resolver = NO_REFERENCES,
-  references = [],
-  validate,
-  precision,
-  step = '1',
-  inheritedTolerance,
-  recommended,
-  onPick,
-  picking = false,
-  illustration,
-  lock,
-  messages = [],
-  readOnly = false,
-  className,
-}: QuantityInputProps): React.JSX.Element {
+export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
+  const {
+    label,
+    kind,
+    defaultUnit,
+    value,
+    resolver = NO_REFERENCES,
+    references = [],
+    validate,
+    precision,
+    step = '1',
+    inheritedTolerance,
+    recommended,
+    onPick,
+    picking = false,
+    illustration,
+    lock,
+    messages = [],
+    readOnly = false,
+    className,
+  } = props
   const ctx: ParseContext = useMemo(() => ({ kind, defaultUnit }), [kind, defaultUnit])
   const prec = precision ?? defaultPrecision(defaultUnit)
   const stored = value?.source ?? ''
@@ -169,6 +186,8 @@ export function QuantityInput({
   }
 
   const text = draft ?? stored
+  /** Empty text of an optional field: unset, not an error. */
+  const isUnset = (s: string): boolean => props.optional === true && s.trim() === ''
   const reads = (s: string): boolean => readSource(s, ctx, resolver, validate).isOk()
   const reading = useMemo(
     () => readSource(text, ctx, resolver, validate),
@@ -243,6 +262,18 @@ export function QuantityInput({
       return true
     }
     if (source === committed) return true
+    if (isUnset(source)) {
+      if (value === undefined) {
+        revert()
+        return true
+      }
+      setDraft(source)
+      setCommitted(source)
+      setErrorsShown(false)
+      setEchoText(source)
+      if (props.optional) props.onCommit(undefined)
+      return true
+    }
     const r = readSource(source, ctx, resolver, validate)
     if (r.isErr()) {
       setDraft(source)
@@ -253,7 +284,7 @@ export function QuantityInput({
     setCommitted(source)
     setErrorsShown(false)
     setEchoText(source)
-    onCommit(r.unwrap().quantity)
+    props.onCommit(r.unwrap().quantity)
     return true
   }
 
@@ -353,7 +384,7 @@ export function QuantityInput({
   // that became unknown) is marked too
   const storedInvalid = draft === null && value !== undefined && reading.isErr()
   const explained =
-    reading.isErr() && (errorsShown || storedInvalid)
+    reading.isErr() && (errorsShown || storedInvalid) && !isUnset(text)
       ? explainError(reading.unwrapErr(), text, ctx, reads)
       : undefined
   const fixSource = explained?.fix

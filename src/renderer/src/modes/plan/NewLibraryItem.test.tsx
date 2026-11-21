@@ -128,6 +128,33 @@ describe('New machine', () => {
       { planId: t.planId(), machineLibraryItemId: expect.any(String) },
     ])
   })
+
+  it('saves an optional field emptied after typing as unset (known issue, 3.13)', async () => {
+    const t = await renderPlan()
+    await t.user.click(await within(t.nav()).findByRole('button', { name: 'New machine…' }))
+    const dialog = await screen.findByRole('dialog', { name: 'New machine' })
+    await fill(t, dialog, 'Min spindle speed', '8000')
+    await fill(t, dialog, 'Spindle power', '800')
+    const power = within(dialog).getByLabelText('Spindle power', { selector: 'input' })
+    await t.user.clear(power)
+    await t.user.type(power, '{Enter}')
+    expect(power).toHaveValue('')
+    expect(power).not.toHaveAttribute('aria-invalid')
+    const minSpeed = within(dialog).getByLabelText('Min spindle speed', { selector: 'input' })
+    await t.user.clear(minSpeed)
+    await t.user.tab()
+    expect(minSpeed).toHaveValue('')
+    expect(minSpeed).not.toHaveAttribute('aria-invalid')
+    await t.user.click(within(dialog).getByRole('button', { name: 'Add machine' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+
+    const [added] = t.callsOf('library.machine.add') as {
+      values: { spindle: Record<string, unknown> }
+    }[]
+    expect(added!.values.spindle).toMatchObject({ maxSpeed: { source: '30000' } })
+    expect(added!.values.spindle).not.toHaveProperty('minSpeed')
+    expect(added!.values.spindle).not.toHaveProperty('power')
+  })
 })
 
 describe('New tool', () => {
