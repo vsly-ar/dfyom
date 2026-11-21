@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AppMode } from '../../../core/modes'
 import { shellMessages as m } from '../messages/shell'
 import { ModeInspector, ModeNavigator } from '../modes/ModePanels'
+import { MachineToolbar } from '../modes/run'
 import {
   ModeSwitcher,
   Panel,
@@ -119,6 +120,7 @@ export function AppShell(): React.JSX.Element {
           <ModeSwitcher value={mode} onValueChange={onMode} />
         </nav>
         <div className={styles['toolbarEnd']}>
+          <MachineToolbar />
           <Toolbar label="Window">
             <ToolbarButton
               label={m.toggles.navigator}

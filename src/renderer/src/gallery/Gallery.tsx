@@ -26,6 +26,7 @@ import {
   JobIndicator,
   JobList,
   MachineStateBadge,
+  StopControl,
   Menu,
   ModeSwitcher,
   Panel,
@@ -189,6 +190,11 @@ function Specimens({ title }: { title: string }): React.JSX.Element {
           <MachineStateBadge state="hold" />
           <MachineStateBadge state="action" />
           <MachineStateBadge state="alarm" label="Alarm 2: soft limit" />
+        </div>
+      </Row>
+      <Row label="Stop control · 44 px, the only filled control, never confirmed">
+        <div className={styles['line']}>
+          <StopControl onStop={() => {}} />
         </div>
       </Row>
       <Row label="Progress · determinate, indeterminate">

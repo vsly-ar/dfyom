@@ -35,7 +35,9 @@ import {
   type Vec3,
   type ViewportMesh,
 } from './mesh'
+import type { RunScene } from './RunLayer'
 import { CameraControlsImpl, Scene } from './Scene'
+import { linesBounds } from './toolpath-lines'
 import { useTokens } from './useTokens'
 import styles from './Viewport.module.css'
 
@@ -76,6 +78,8 @@ export interface ViewportProps {
   onPickCancel?: () => void
   /** Mouse mapping setting (ui.md decision 10). */
   mousePreset?: MousePreset
+  /** Run mode (task 3.12): toolpath playback, tool marker at `wpos`, work zero; `null` = none. */
+  run?: RunScene | null
   /** Accessible text summary; defaults to the operation count and status. */
   summary?: string
   className?: string | undefined
@@ -140,6 +144,7 @@ export function Viewport({
   onPick,
   onPickCancel,
   mousePreset = 'default',
+  run = null,
   summary,
   className,
 }: ViewportProps): React.JSX.Element {
@@ -164,9 +169,14 @@ export function Viewport({
     }),
     [selectedOperation, hovered, pick, outdated, pulse],
   )
+  const runLines = run?.lines ?? null
   const bounds = useMemo(
-    () => unionBox(mesh ? meshBounds(mesh) : undefined, stock ?? undefined),
-    [mesh, stock],
+    () =>
+      unionBox(
+        unionBox(mesh ? meshBounds(mesh) : undefined, stock ?? undefined),
+        runLines ? linesBounds(runLines) : undefined,
+      ),
+    [mesh, stock, runLines],
   )
 
   const hoveredRef = useRef<SurfaceTarget | undefined>(undefined)
@@ -301,6 +311,7 @@ export function Viewport({
           outline={status === 'pending' ? outline : null}
           marker={status === 'failed' ? marker : null}
           controlsRef={controls}
+          run={run}
           onHover={hover}
           onClick={(target, e) => {
             if (!isClick(down.current, { x: e.nativeEvent.clientX, y: e.nativeEvent.clientY }))

@@ -24,6 +24,7 @@ import {
   type Vec3,
   type ViewportMesh,
 } from './mesh'
+import { RunLayer, type RunScene } from './RunLayer'
 
 export interface SceneProps {
   mesh: ViewportMesh | null
@@ -36,6 +37,8 @@ export interface SceneProps {
   /** Error marker (failed evaluation). */
   marker?: Vec3 | null
   controlsRef: Ref<CameraControlsImpl>
+  /** Run mode layer (task 3.12). */
+  run?: RunScene | null
   onHover: (target: SurfaceTarget | undefined) => void
   onClick: (target: SurfaceTarget, event: ThreeEvent<MouseEvent>) => void
 }
@@ -66,6 +69,7 @@ export function Scene(props: SceneProps): React.JSX.Element {
       {marker ? <ErrorMarker at={marker} bounds={bounds} colour={palette.danger} /> : null}
       {bounds ? <Floor bounds={bounds} palette={palette} /> : null}
       <Axes bounds={bounds} palette={palette} />
+      {props.run ? <RunLayer run={props.run} palette={palette} /> : null}
     </>
   )
 }

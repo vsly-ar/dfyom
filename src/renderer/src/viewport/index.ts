@@ -3,3 +3,5 @@ export { Viewport, DELAY_INDICATOR_MS, type PickRequest, type ViewportProps } fr
 export { MOUSE_PRESETS, VIEW_PRESETS, type MousePreset, type ViewPreset } from './camera'
 export { surfaceOwner, type Box, type SurfaceTarget, type Vec3, type ViewportMesh } from './mesh'
 export { useToken, useTokens } from './useTokens'
+export { RunLayer, segmentColours, type RunScene } from './RunLayer'
+export { advancePlayback, linesBounds, toolpathLines, type ToolpathLines } from './toolpath-lines'

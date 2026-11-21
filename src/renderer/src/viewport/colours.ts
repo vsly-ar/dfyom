@@ -23,6 +23,10 @@ export const PALETTE_TOKENS = {
   axisZ: '--vp-axis-z',
   /** The error marker at a failing operation (task 3.6). */
   danger: '--danger',
+  // run scene (task 3.12): toolpath playback and the tool marker
+  feed: '--vp-feed',
+  rapid: '--vp-rapid',
+  tool: '--vp-tool',
 } as const
 
 export type PaletteKey = keyof typeof PALETTE_TOKENS
