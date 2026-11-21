@@ -31,6 +31,11 @@
   background: var(--warning-subtle);
 }
 
+.item[data-tier='error'] {
+  border-left-color: var(--danger);
+  background: var(--danger-subtle);
+}
+
 .icon {
   width: var(--icon-sm);
   height: var(--icon-sm);
@@ -40,6 +45,10 @@
 
 .item[data-tier='hard'] .icon {
   color: var(--warning);
+}
+
+.item[data-tier='error'] .icon {
+  color: var(--danger);
 }
 
 .body {

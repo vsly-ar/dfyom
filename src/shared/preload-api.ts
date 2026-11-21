@@ -52,6 +52,8 @@ export const IPC = {
   fileChooseOpen: 'dfyom:file.chooseOpen',
   /** Renderer → main (invoke): the native "Save project" dialog; the chosen path or null. */
   fileChooseSave: 'dfyom:file.chooseSave',
+  /** Renderer → main (invoke): the native "Export gCode" dialog; the chosen path or null (3.7). */
+  fileChooseExport: 'dfyom:file.chooseExport',
   /** Main → renderer: a native application menu item was chosen (`MenuAction`). */
   menuAction: 'dfyom:menu.action',
 } as const
@@ -208,13 +210,16 @@ export interface PreloadApi {
     onChange(listener: (view: PartEvaluationView) => void): () => void
   }
   /**
-   * Native file dialogs for New / Open / Save (docs/conventions/ui.md#project-files). The renderer
-   * then calls `project.open` / `project.save` with the path, as an agent passes one.
+   * Native file dialogs for New / Open / Save (docs/conventions/ui.md#project-files) and the gCode
+   * export (task 3.7). The renderer then calls `project.open` / `project.save` / `plan.export`
+   * with the path, as an agent passes one.
    */
   readonly files: {
     chooseOpen(): Promise<string | null>
     /** `defaultName` without extension; the path ends in `.dfyom`. */
     chooseSave(defaultName: string): Promise<string | null>
+    /** `defaultName` without extension; the path ends in `.nc`, `.gcode` or `.ngc`. */
+    chooseExport(defaultName: string): Promise<string | null>
   }
   /** The native application menu's items for this window. */
   readonly menu: {

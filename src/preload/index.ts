@@ -76,6 +76,8 @@ const api: PreloadApi = {
     chooseOpen: () => ipcRenderer.invoke(IPC.fileChooseOpen) as Promise<string | null>,
     chooseSave: (defaultName) =>
       ipcRenderer.invoke(IPC.fileChooseSave, defaultName) as Promise<string | null>,
+    chooseExport: (defaultName) =>
+      ipcRenderer.invoke(IPC.fileChooseExport, defaultName) as Promise<string | null>,
   },
   menu: {
     onAction: (listener) => on<MenuAction>(IPC.menuAction, listener),

@@ -1,0 +1,280 @@
+// Plan mode against the fake bridge bound to a real project runtime (core plan fixture: the test
+// part, four library tools and a machine): create a plan, the operation list in machining order,
+// the tool picker, feeds and speeds with their source and overrides (lock), stale notices with
+// rebuild, read-only statuses, toolpath generation and the export (job, toolpaths and the export
+// itself are scripted: the fixture runtime has no toolpath cache or file port). The viewport
+// canvas is stubbed. Doc: docs/conventions/ui.md#plan-mode-task-37, #testing
+import { screen, waitFor, within } from '@testing-library/react'
+import type { ReactNode } from 'react'
+import { describe, expect, it, vi } from 'vitest'
+import { planSetup, type PlanSetup } from '../../../../core/plan/plan.fixture'
+import type { CallReply } from '../../../../shared/preload-api'
+import { App } from '../../App'
+import { createShell, ShellProvider } from '../../shell/ShellContext'
+import { createFakeBridge } from '../../test/bridge'
+import { expectNoAxeViolations, renderUi } from '../../test/render'
+
+vi.mock('@react-three/fiber', () => ({
+  Canvas: ({ children: _c, ...rest }: { children: ReactNode; 'data-testid'?: string }) => (
+    <div data-testid={rest['data-testid']} />
+  ),
+}))
+vi.mock('../../viewport/Scene', () => ({
+  Scene: () => null,
+  CameraControlsImpl: { ACTION: { NONE: 0, ROTATE: 1, TRUCK: 2, DOLLY: 16 } },
+}))
+
+const ok = (value: unknown = {}): CallReply => ({ ok: true, value, revision: 0 })
+
+async function renderPlan(opts: { plan?: boolean; setup?: (s: PlanSetup) => Promise<void> } = {}) {
+  const s = await planSetup()
+  if (opts.plan !== false) await s.create({ machineLibraryItemId: s.machineId })
+  await opts.setup?.(s)
+  const bridge = createFakeBridge()
+  bridge.bind(s.d)
+  const shell = createShell(bridge)
+  shell.ui.getState().setMode('plan')
+  const r = renderUi(
+    <ShellProvider shell={shell}>
+      <App />
+    </ShellProvider>,
+  )
+  // test windows are narrow: the inspector is an overlay, opened by its toggle
+  await r.user.click(screen.getByRole('button', { name: 'Inspector' }))
+  const nav = () => screen.getByRole('navigation', { name: 'Navigator' })
+  const inspector = () => screen.getByRole('complementary', { name: 'Inspector' })
+  const callsOf = (name: string) => bridge.calls.filter((c) => c.name === name).map((c) => c.args)
+  const rows = () =>
+    within(nav())
+      .getByRole('list', { name: 'Plan operations in machining order' })
+      .querySelectorAll(':scope > li > button')
+  const planId = () => Object.keys(s.d.doc.plans)[0]!
+  return { ...r, s, bridge, nav, inspector, callsOf, rows, planId }
+}
+
+describe('Plan mode', () => {
+  it('creates a plan of the part with the machine and lists its operations in machining order', async () => {
+    const t = await renderPlan({ plan: false })
+    await t.user.click(await within(t.nav()).findByRole('button', { name: 'Create plan' }))
+    await waitFor(() => expect(t.rows().length).toBeGreaterThan(0))
+    expect(t.callsOf('plan.create')).toEqual([
+      { partId: t.s.partId, machineLibraryItemId: t.s.machineId },
+    ])
+    // facing, drillings, pocket, profile (default order); tools named on the rows
+    const names = [...t.rows()].map((b) => b.textContent ?? '')
+    expect(names[0]).toMatch(/^Facing 1Flat 6/)
+    expect(names.at(-1)).toMatch(/^Profile 1/)
+    expect(within(t.nav()).getByRole('combobox', { name: 'Machine' })).toHaveTextContent('Shapeoko')
+    expect(within(t.nav()).getByRole('combobox', { name: 'Plan status' })).toHaveTextContent(
+      'Draft',
+    )
+    await expectNoAxeViolations()
+  })
+
+  it('shows feeds and speeds with their source; a typed value is an override, unlocking resets it', async () => {
+    const t = await renderPlan()
+    await waitFor(() => expect(t.rows().length).toBeGreaterThan(0))
+    await t.user.click(t.rows()[0]!)
+    const insp = t.inspector()
+    await within(insp).findByRole('heading', { name: 'Facing 1' })
+    const feed = await within(insp).findByLabelText('Feed rate', { selector: 'input' })
+    expect(feed).toHaveValue('800 mm/min')
+    expect(within(insp).getAllByText('From preset “Alu finish”.').length).toBeGreaterThan(0)
+    // the tool picker offers the ranked suggestions and names why
+    expect(within(insp).getByRole('combobox', { name: 'Tool' })).toHaveTextContent('Flat 6')
+    expect(within(insp).getByRole('list', { name: 'Why this tool' })).toBeInTheDocument()
+
+    await t.user.clear(feed)
+    await t.user.type(feed, '600{Enter}')
+    await waitFor(() =>
+      expect(t.callsOf('plan.operation.update')).toContainEqual(
+        expect.objectContaining({ overrides: { feedRate: '600' } }),
+      ),
+    )
+    await within(insp).findByText('Set by you; unlock to use the recommended value.')
+    const op = t.s.plan(t.planId()).setups[0]!.operations[0]!
+    expect(op.overrides.feedRate?.source).toBe('600')
+    // the field's lock is pressed while overridden; unlocking removes the override
+    const locks = within(insp).getAllByRole('button', { name: 'Lock value' })
+    const pressed = locks.filter((l) => l.getAttribute('aria-pressed') === 'true')
+    expect(pressed).toHaveLength(1)
+    await t.user.click(pressed[0]!)
+    await waitFor(() =>
+      expect(t.s.plan(t.planId()).setups[0]!.operations[0]!.overrides.feedRate).toBeUndefined(),
+    )
+    await expectNoAxeViolations()
+  })
+
+  it('assigns a tool from the picker; a drill without cutting data shows errors until overridden', async () => {
+    const t = await renderPlan()
+    await waitFor(() => expect(t.rows().length).toBeGreaterThan(0))
+    const drillRow = [...t.rows()].find((b) => /^Drilling 1/.test(b.textContent ?? ''))!
+    await t.user.click(drillRow)
+    const insp = t.inspector()
+    const assign = async (option: RegExp, id: string) => {
+      await t.user.click(await within(insp).findByRole('combobox', { name: 'Tool' }))
+      await t.user.click(await screen.findByRole('option', { name: option }))
+      await waitFor(() =>
+        expect(t.callsOf('plan.tool.assign')).toContainEqual(
+          expect.objectContaining({ toolLibraryItemId: id }),
+        ),
+      )
+    }
+    // helical boring with the 4 mm end mill, then back to the drill
+    await assign(/^Flat 4/, t.s.tools.flat4)
+    await waitFor(() =>
+      expect(within(insp).getByRole('combobox', { name: 'Tool' })).toHaveTextContent(/^Flat 4/),
+    )
+    await assign(/^Drill 6/, t.s.tools.drill6)
+    // no preset and no calculator data: the fields say so; Generate is blocked
+    await within(insp).findAllByText(/No value: enter one/)
+    expect(within(t.nav()).getByRole('button', { name: 'Generate toolpaths' })).toBeDisabled()
+    for (const [label, value] of [
+      ['Spindle speed', '3000'],
+      ['Feed rate', '150'],
+      ['Plunge rate', '150'],
+    ] as const) {
+      const input = within(insp).getByLabelText(label, { selector: 'input' })
+      await t.user.type(input, `${value}{Enter}`)
+      await waitFor(() =>
+        expect(t.callsOf('plan.operation.update')).toContainEqual(
+          expect.objectContaining({
+            overrides: {
+              [label === 'Spindle speed'
+                ? 'spindleSpeed'
+                : label === 'Feed rate'
+                  ? 'feedRate'
+                  : 'plungeRate']: value,
+            },
+          }),
+        ),
+      )
+    }
+  })
+
+  it('generates toolpaths as a job and exports gCode through the save dialog, with the warnings', async () => {
+    const t = await renderPlan({
+      setup: async (s) => {
+        const planId = Object.keys(s.d.doc.plans)[0]!
+        for (const op of s.d.doc.plans[planId]!.setups[0]!.operations.filter(
+          (o) =>
+            s.d.doc.plans[planId]!.snapshots.find((x) => x.id === o.tool)?.values['name'] ===
+            'Drill 6',
+        ))
+          await s.run('plan.operation.update', {
+            planId,
+            planOperationId: op.id,
+            overrides: { spindleSpeed: '3000', feedRate: '150', plungeRate: '150' },
+          })
+      },
+    })
+    let generated = false
+    t.bridge.handle('plan.toolpath.generate', () => ok({ jobId: 'job-1' }))
+    t.bridge.handle('job.get', () => {
+      generated = true
+      return ok({
+        state: 'finished',
+        progress: { done: 7, total: 7 },
+        outcome: { ok: true, value: { operations: [] } },
+      })
+    })
+    t.bridge.handle('plan.toolpath.get', () =>
+      ok({
+        toolpath: generated
+          ? {
+              planOperationId: 'x',
+              tool: 't',
+              spindleSpeed: 1000,
+              passes: [
+                {
+                  kind: 'rough',
+                  moves: [
+                    { kind: 'rapid', to: [0, 0, 5] },
+                    { kind: 'line', to: [0, 0, -1], feed: 100 },
+                  ],
+                },
+              ],
+              stats: { cutLength: 1, rapidLength: 0, estimatedSeconds: 1 },
+            }
+          : null,
+        stale: false,
+      }),
+    )
+    await waitFor(() => expect(t.rows().length).toBeGreaterThan(0))
+    const generate = within(t.nav()).getByRole('button', { name: 'Generate toolpaths' })
+    await waitFor(() => expect(generate).toBeEnabled())
+    await t.user.click(generate)
+    await within(t.nav()).findByText('All toolpaths up to date.')
+    expect(t.callsOf('plan.toolpath.generate')).toEqual([{ planId: t.planId() }])
+
+    t.bridge.setFileChoice({ export: '/out/Plan 1.nc' })
+    t.bridge.handle('plan.export', () =>
+      ok({
+        filePath: '/out/Plan 1.nc',
+        lines: 1234,
+        stats: { estimatedSeconds: 725, toolChanges: 2 },
+        warnings: [
+          {
+            code: 'plan.machine',
+            severity: 'warning',
+            message: 'feed 1200 mm/min exceeds the Z max feed rate 1000 mm/min',
+            rule: 'maxFeedRate',
+            params: {},
+          },
+        ],
+        softLimitChecked: false,
+        regenerated: [],
+      }),
+    )
+    await t.user.click(within(t.nav()).getByRole('button', { name: 'Export gCode…' }))
+    const dialog = await screen.findByRole('dialog', { name: 'gCode exported' })
+    expect(t.bridge.exportDialogNames).toEqual(['Plan 1'])
+    expect(t.callsOf('plan.export')).toEqual([
+      { planId: t.planId(), target: '/out/Plan 1.nc', confirm: true },
+    ])
+    expect(within(dialog).getByText('1234 lines')).toBeInTheDocument()
+    expect(within(dialog).getByText('About 12 min 5 s without tool changes')).toBeInTheDocument()
+    expect(within(dialog).getByRole('list', { name: 'Export warnings' })).toHaveTextContent(
+      'Feed 1200 mm/min exceeds the Z max feed rate 1000 mm/min.',
+    )
+    await expectNoAxeViolations()
+    await t.user.click(within(dialog).getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
+
+  it('offers a rebuild when a settled plan’s design changed', async () => {
+    const t = await renderPlan({
+      setup: async (s) => {
+        const planId = Object.keys(s.d.doc.plans)[0]!
+        await s.toStatus(planId, 'settledDesign')
+        const facing = s.part().operations.find((o) => o.kind === 'facing')!
+        await s.run('design.facing.update', {
+          partId: s.partId,
+          operationId: facing.id,
+          depth: '1',
+        })
+      },
+    })
+    const banner = await within(t.nav()).findByText('The design changed since this plan was made.')
+    expect(banner).toBeInTheDocument()
+    expect(within(t.nav()).getAllByText('Changed in design').length).toBeGreaterThan(0)
+    await t.user.click(within(t.nav()).getByRole('button', { name: 'Rebuild plan' }))
+    await waitFor(() =>
+      expect(
+        within(t.nav()).queryByText('The design changed since this plan was made.'),
+      ).toBeNull(),
+    )
+    expect(t.callsOf('plan.rebuild')).toEqual([{ planId: t.planId() }])
+  })
+
+  it('shows a finalized plan read-only with the way out', async () => {
+    const t = await renderPlan({
+      setup: async (s) => s.toStatus(Object.keys(s.d.doc.plans)[0]!, 'finalized'),
+    })
+    await within(t.nav()).findByText(/Finalized plans are read-only/)
+    expect(
+      within(t.nav()).getByLabelText('Clearance height', { selector: 'input' }),
+    ).toHaveAttribute('readonly')
+    expect(within(t.nav()).queryByRole('button', { name: /^Move / })).toBeNull()
+  })
+})

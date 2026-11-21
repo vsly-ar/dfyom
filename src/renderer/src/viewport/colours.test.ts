@@ -37,6 +37,13 @@ describe('parseColour', () => {
     expect(p.selected).toEqual(FALLBACK)
     expect(Object.keys(p)).toEqual(Object.keys(PALETTE_TOKENS))
   })
+
+  it('draws plunges in the feed colour until --vp-plunge exists', () => {
+    expect(paletteFrom({ '--vp-feed': '#ffffff' }).plunge).toEqual([1, 1, 1])
+    expect(paletteFrom({ '--vp-feed': '#ffffff', '--vp-plunge': '#000000' }).plunge).toEqual([
+      0, 0, 0,
+    ])
+  })
 })
 
 const palette = Object.fromEntries(

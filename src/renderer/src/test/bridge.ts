@@ -83,8 +83,13 @@ export interface FakeBridge extends PreloadApi {
   emitEvaluation(view: PartEvaluationView): void
   emitMenu(action: MenuAction): void
   /** Answers of the native file dialogs (null = cancelled, the default). */
-  setFileChoice(choice: { open?: string | null; save?: string | null }): void
+  setFileChoice(choice: {
+    open?: string | null
+    save?: string | null
+    export?: string | null
+  }): void
   readonly saveDialogNames: string[]
+  readonly exportDialogNames: string[]
 }
 
 export function errorReply(error: AppErrorData, retryable = false): CallReply {
@@ -129,7 +134,12 @@ export function createFakeBridge(initial: AppSettings = DEFAULT_SETTINGS): FakeB
   const menu = channel<MenuAction>()
   const evaluations = new Map<string, PartEvaluationView>()
   const saveDialogNames: string[] = []
-  let fileChoice: { open: string | null; save: string | null } = { open: null, save: null }
+  const exportDialogNames: string[] = []
+  let fileChoice: { open: string | null; save: string | null; export: string | null } = {
+    open: null,
+    save: null,
+    export: null,
+  }
   const handlers = new Map<string, Handler>()
   const calls: { name: string; args: unknown }[] = []
   const settingsPatches: unknown[] = []
@@ -204,9 +214,14 @@ export function createFakeBridge(initial: AppSettings = DEFAULT_SETTINGS): FakeB
         saveDialogNames.push(name)
         return Promise.resolve(fileChoice.save)
       },
+      chooseExport: (name) => {
+        exportDialogNames.push(name)
+        return Promise.resolve(fileChoice.export)
+      },
     },
     menu: { onAction: menu.on },
     saveDialogNames,
+    exportDialogNames,
     emitEvaluation(view) {
       evaluations.set(view.partId, view)
       evaluationPush.emit(view)

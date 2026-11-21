@@ -8,23 +8,30 @@ import type { Box } from './mesh'
 export interface ToolpathLines {
   /** Segment endpoints: 6 floats per segment. */
   readonly positions: Float32Array
-  /** 1 for a rapid segment, 0 for a feed. */
-  readonly rapid: Uint8Array
+  /** Per segment: `SEGMENT.feed`, `.rapid` or `.plunge` (a feed straight down, task 3.7). */
+  readonly kind: Uint8Array
   readonly segments: number
 }
+
+/** Segment kinds of `ToolpathLines.kind`: drawn `--vp-feed`, `--vp-rapid`, `--vp-plunge`. */
+export const SEGMENT = { feed: 0, rapid: 1, plunge: 2 } as const
 
 /** Arcs are drawn as chords of at most this angle (chord error r·(1 − cos 1.5°) ≈ 0.03 % of r). */
 const ARC_STEP_RAD = (3 * Math.PI) / 180
 
-/** Flattens toolpaths (in machining order) into segments; drill cycles go down and up once. */
+/**
+ * Flattens toolpaths (in machining order) into segments; drill cycles go down and up once. A feed
+ * straight down (no XY motion) is a plunge.
+ */
 export function toolpathLines(toolpaths: readonly Toolpath[]): ToolpathLines {
   const pos: number[] = []
-  const rapid: number[] = []
+  const kind: number[] = []
   let at: Vec3 | undefined
   const seg = (to: Vec3, isRapid: boolean) => {
     if (at !== undefined) {
       pos.push(at[0], at[1], at[2], to[0], to[1], to[2])
-      rapid.push(isRapid ? 1 : 0)
+      const down = to[2] < at[2] && to[0] === at[0] && to[1] === at[1]
+      kind.push(isRapid ? SEGMENT.rapid : down ? SEGMENT.plunge : SEGMENT.feed)
     }
     at = to
   }
@@ -67,7 +74,7 @@ export function toolpathLines(toolpaths: readonly Toolpath[]): ToolpathLines {
           }
         }
       }
-  return { positions: new Float32Array(pos), rapid: Uint8Array.from(rapid), segments: rapid.length }
+  return { positions: new Float32Array(pos), kind: Uint8Array.from(kind), segments: kind.length }
 }
 
 export function linesBounds(lines: ToolpathLines): Box | undefined {

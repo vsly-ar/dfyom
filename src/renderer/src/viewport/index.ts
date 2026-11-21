@@ -4,4 +4,10 @@ export { MOUSE_PRESETS, VIEW_PRESETS, type MousePreset, type ViewPreset } from '
 export { surfaceOwner, type Box, type SurfaceTarget, type Vec3, type ViewportMesh } from './mesh'
 export { useToken, useTokens } from './useTokens'
 export { RunLayer, segmentColours, type RunScene } from './RunLayer'
-export { advancePlayback, linesBounds, toolpathLines, type ToolpathLines } from './toolpath-lines'
+export {
+  advancePlayback,
+  linesBounds,
+  SEGMENT,
+  toolpathLines,
+  type ToolpathLines,
+} from './toolpath-lines'

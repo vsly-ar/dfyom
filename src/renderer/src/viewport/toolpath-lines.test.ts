@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Toolpath } from '../../../core/toolpath/model'
 import { mix, toLinear, type Rgb } from './colours'
 import { DONE_DIM, segmentColours } from './RunLayer'
-import { advancePlayback, linesBounds, toolpathLines } from './toolpath-lines'
+import { advancePlayback, linesBounds, SEGMENT, toolpathLines } from './toolpath-lines'
 
 const tp = (moves: Toolpath['passes'][number]['moves']): Toolpath => ({
   planOperationId: 'op1',
@@ -26,7 +26,7 @@ describe('toolpathLines', () => {
     ])
     expect(l.segments).toBe(2)
     expect(seg(l, 0)).toEqual([0, 0, 5, 0, 0, -1])
-    expect(Array.from(l.rapid)).toEqual([0, 0])
+    expect(Array.from(l.kind)).toEqual([SEGMENT.plunge, SEGMENT.feed])
     expect(linesBounds(l)).toEqual({ min: [0, 0, -1], max: [10, 0, 5] })
   })
 
@@ -55,7 +55,7 @@ describe('toolpathLines', () => {
     ])
     expect(l.segments).toBe(3)
     expect(seg(l, 1)).toEqual([5, 5, 2, 5, 5, -8])
-    expect(Array.from(l.rapid)).toEqual([1, 0, 1])
+    expect(Array.from(l.kind)).toEqual([SEGMENT.rapid, SEGMENT.plunge, SEGMENT.rapid])
   })
 })
 
@@ -89,15 +89,17 @@ describe('segmentColours', () => {
   const palette = {
     feed: [0.2, 0.2, 0.2] as Rgb,
     rapid: [0.5, 0.5, 0.5] as Rgb,
+    plunge: [0.1, 0.3, 0.6] as Rgb,
     background: [1, 1, 1] as Rgb,
   }
-  it('dims done segments towards the background, rapids and feeds apart', () => {
+  it('dims done segments towards the background; rapids, plunges and feeds apart', () => {
     const l = toolpathLines([
       tp([
         { kind: 'rapid', to: [0, 0, 5] },
         { kind: 'rapid', to: [0, 0, 1] },
         { kind: 'line', to: [0, 0, 0], feed: 100 },
         { kind: 'line', to: [1, 0, 0], feed: 100 },
+        { kind: 'line', to: [1, 0, -1], feed: 100 },
       ]),
     ])
     const c = segmentColours(l, 2, palette)
@@ -105,7 +107,8 @@ describe('segmentColours', () => {
     const close = (a: number[], b: readonly number[]) =>
       a.forEach((v, k) => expect(v).toBeCloseTo(b[k]!, 5))
     close(at(0), toLinear(mix(palette.rapid, palette.background, DONE_DIM)))
-    close(at(1), toLinear(mix(palette.feed, palette.background, DONE_DIM)))
+    close(at(1), toLinear(mix(palette.plunge, palette.background, DONE_DIM)))
     close(at(2), toLinear(palette.feed))
+    close(at(3), toLinear(palette.plunge))
   })
 })

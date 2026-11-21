@@ -94,7 +94,8 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
 /** Parameters whose value is a count, not a length (suggestions are plain numbers). */
 const COUNT_PARAMETERS = new Set(['tabs.count'])
 
-export type WarningTier = 'soft' | 'hard'
+/** DFM warnings are soft or hard; the error tier is for plan errors (task 3.7). */
+export type WarningTier = 'soft' | 'hard' | 'error'
 
 export const dfmMessages = {
   /** The warning's sentence in the project unit system (fallback: the core's English text). */
@@ -106,7 +107,7 @@ export const dfmMessages = {
     }
     return render === undefined ? w.message : render(w.params, L, name)
   },
-  tier: (w: DfmWarning): WarningTier => (w.severity === 'info' ? 'soft' : 'hard'),
+  tier: (w: DfmWarning): 'soft' | 'hard' => (w.severity === 'info' ? 'soft' : 'hard'),
   /**
    * The value a suggestion applies, as a source for the parameter, rounded so it satisfies the
    * suggestion; undefined when it cannot be applied to one field.
@@ -130,5 +131,5 @@ export const dfmMessages = {
   show: 'Show',
   hide: 'Hide',
   count: (n: number) => (n === 1 ? '1 warning' : `${n} warnings`),
-  severity: { soft: 'Note', hard: 'Warning' } satisfies Record<WarningTier, string>,
+  severity: { soft: 'Note', hard: 'Warning', error: 'Error' } satisfies Record<WarningTier, string>,
 } as const
