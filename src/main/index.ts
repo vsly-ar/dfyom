@@ -20,6 +20,11 @@ import { createSettingsStore, loadSettings } from './settings/store'
 import { WORKER_ENTRY_PATH } from './workers/bundled'
 import { createNodeWorkerPool } from './workers/node'
 
+// End-to-end tests run the app with its windows never shown (docs/conventions/testing.md#app-playwright-for-electron),
+// so a test run does not cover the developer's screen or take focus. Ignored in packaged builds.
+const hideWindows = !app.isPackaged && process.env['DFYOM_HIDE_WINDOWS'] === '1'
+if (hideWindows && process.platform === 'darwin') app.setActivationPolicy('accessory')
+
 function createMainWindow(log: Logger, level: LogLevel, settings: AppSettings): BrowserWindow {
   const win = new BrowserWindow({
     width: 1440,
@@ -34,6 +39,8 @@ function createMainWindow(log: Logger, level: LogLevel, settings: AppSettings): 
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
+      // a hidden test window must keep rendering and running timers at full rate
+      backgroundThrottling: !hideWindows,
       // Read by the preload: renderers forward entries at the instance level, and apply the
       // settings (theme, motion, layout) before the first render.
       additionalArguments: [
@@ -44,7 +51,7 @@ function createMainWindow(log: Logger, level: LogLevel, settings: AppSettings): 
   })
   log.debug({ win: win.id }, 'window created')
 
-  win.once('ready-to-show', () => win.show())
+  if (!hideWindows) win.once('ready-to-show', () => win.show())
 
   const devServerUrl = process.env['ELECTRON_RENDERER_URL']
   if (!app.isPackaged && devServerUrl) {

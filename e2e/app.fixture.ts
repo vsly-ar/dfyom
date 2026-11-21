@@ -32,6 +32,8 @@ export async function launchApp(
         e[1] !== undefined && e[0] !== 'ELECTRON_RENDERER_URL' && e[0] !== 'ELECTRON_RUN_AS_NODE',
     ),
   )
+  // Windows stay hidden (no pop-ups, no focus stealing); DFYOM_E2E_SHOW=1 shows them for debugging.
+  if (process.env['DFYOM_E2E_SHOW'] !== '1') env['DFYOM_HIDE_WINDOWS'] = '1'
   const app = await electron.launch({ args: ['out/main/index.js', `--data-dir=${dataDir}`], env })
   const rendererErrors: string[] = []
   const watched = new WeakSet<Page>()

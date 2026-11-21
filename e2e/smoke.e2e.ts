@@ -47,10 +47,17 @@ test('app opens its window, renders without console errors and quits', async ({ 
   await page.waitForLoadState('domcontentloaded')
   await expect(page).toHaveTitle('DFYOM')
   await expect(page.locator('#root > *').first()).toBeAttached()
-  // Main-process view: the window was shown (ready-to-show fired).
+  // Main-process view: the window finished loading; it stays hidden in tests unless DFYOM_E2E_SHOW=1.
   await expect
-    .poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isVisible()))
-    .toBe(true)
+    .poll(() =>
+      app.evaluate(({ BrowserWindow }) =>
+        BrowserWindow.getAllWindows()[0]?.webContents.isLoading(),
+      ),
+    )
+    .toBe(false)
+  expect(
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.isVisible()),
+  ).toBe(process.env['DFYOM_E2E_SHOW'] === '1')
   expect(rendererErrors).toEqual([])
 
   // Isolation: Electron's userData and the logs are in the temp data dir, not the developer's.
