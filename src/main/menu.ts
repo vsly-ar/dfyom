@@ -2,31 +2,37 @@
 // that act on a project or the shell are sent to the focused window (`IPC.menuAction`), which
 // runs them like the matching button or key, so menu, toolbar and shortcuts dispatch the same
 // commands. Text editing (cut, copy, paste, select all) and window items use Electron's roles.
-// Doc: docs/conventions/ui.md#app-shell, #keyboard-shortcuts
+// Without any window (macOS), New / Open open an empty window; other items do nothing.
+// Doc: docs/conventions/ui.md#app-shell, #keyboard-shortcuts, #project-files
 import { app, BrowserWindow, Menu, type MenuItemConstructorOptions } from 'electron'
 import { IPC, type MenuAction } from '../shared/preload-api'
 
-function send(action: MenuAction): void {
+/** Menu actions that open an empty window when there is none (its start panel offers both). */
+const WITHOUT_WINDOW: readonly MenuAction[] = ['project.new', 'project.open']
+
+/** Sends `action` to the focused (else first) window; without one, New / Open call `noWindow`. */
+export function sendMenuAction(action: MenuAction, noWindow: () => void): void {
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
   if (win !== undefined && !win.isDestroyed()) win.webContents.send(IPC.menuAction, action)
+  else if (WITHOUT_WINDOW.includes(action)) noWindow()
 }
-
-const item = (
-  label: string,
-  action: MenuAction,
-  accelerator?: string,
-): MenuItemConstructorOptions => ({
-  label,
-  click: () => send(action),
-  ...(accelerator === undefined ? {} : { accelerator }),
-})
 
 /** The menu template; `dev` adds reload and the developer tools. */
 export function menuTemplate(
   platform: NodeJS.Platform,
   dev: boolean,
+  noWindow: () => void = () => {},
 ): MenuItemConstructorOptions[] {
   const mac = platform === 'darwin'
+  const item = (
+    label: string,
+    action: MenuAction,
+    accelerator?: string,
+  ): MenuItemConstructorOptions => ({
+    label,
+    click: () => sendMenuAction(action, noWindow),
+    ...(accelerator === undefined ? {} : { accelerator }),
+  })
   const template: MenuItemConstructorOptions[] = []
   if (mac) template.push({ role: 'appMenu' })
   template.push(
@@ -88,6 +94,9 @@ export function menuTemplate(
   return template
 }
 
-export function installAppMenu(): void {
-  Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplate(process.platform, !app.isPackaged)))
+/** `noWindow` opens an empty window (New / Open chosen while no window is open). */
+export function installAppMenu(noWindow: () => void): void {
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate(menuTemplate(process.platform, !app.isPackaged, noWindow)),
+  )
 }

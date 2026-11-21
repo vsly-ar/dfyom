@@ -1,13 +1,13 @@
 // Electron main process entry. Process model: docs/architecture/overview.md
 // The app host (projects, library, dispatchers) is shared with the headless CLI/MCP entry
 // (src/main/cli); the GUI adds windows, project IPC and local HTTP (docs/architecture/llm-api.md).
-import { app, BrowserWindow, dialog } from 'electron'
+import { app, BrowserWindow, dialog, screen } from 'electron'
 import { join, resolve } from 'node:path'
 import { RENDERER_LOG_LEVEL_ARG, type Logger, type LogLevel } from '../shared/logging'
 import { SETTINGS_ARG } from '../shared/preload-api'
 import type { AppSettings } from '../shared/settings'
 import { createAppHost } from './host/app-host'
-import { registerProjectIpc, type WindowSessions } from './ipc'
+import { registerProjectIpc, type WindowFactory, type WindowSessions } from './ipc'
 import { startLogging } from './logging/electron'
 import { MACHINE_UTILITY_ENTRY_PATH } from './machine/bundled'
 import { pushRunStatus, utilityHostFactory } from './machine/electron'
@@ -28,6 +28,7 @@ import {
   type QuitDialog,
 } from './quit'
 import { createSettingsStore, loadSettings } from './settings/store'
+import { cascadeBounds } from './window-open'
 import { WORKER_ENTRY_PATH } from './workers/bundled'
 import { createNodeWorkerPool } from './workers/node'
 
@@ -36,10 +37,28 @@ import { createNodeWorkerPool } from './workers/node'
 const hideWindows = !app.isPackaged && process.env['DFYOM_HIDE_WINDOWS'] === '1'
 if (hideWindows && process.platform === 'darwin') app.setActivationPolicy('accessory')
 
-function createMainWindow(log: Logger, level: LogLevel, settings: AppSettings): BrowserWindow {
+/** Windows that fired `ready-to-show` (true) or not yet (false). */
+const ready = new WeakMap<BrowserWindow, boolean>()
+
+/**
+ * A main window, not shown yet (`windowFactory` shows it). Cascaded from `from` with its size
+ * (docs/conventions/ui.md#project-files); the default size, centred, without one.
+ */
+function createMainWindow(
+  log: Logger,
+  level: LogLevel,
+  settings: AppSettings,
+  from: BrowserWindow | undefined,
+): BrowserWindow {
+  const source = from === undefined || from.isDestroyed() ? undefined : from.getBounds()
+  const bounds =
+    source === undefined
+      ? undefined
+      : cascadeBounds(source, screen.getDisplayMatching(source).workArea)
   const win = new BrowserWindow({
     width: 1440,
     height: 900,
+    ...bounds,
     // docs/conventions/ui.md#app-shell
     minWidth: 1024,
     minHeight: 640,
@@ -60,9 +79,9 @@ function createMainWindow(log: Logger, level: LogLevel, settings: AppSettings): 
       ],
     },
   })
-  log.debug({ win: win.id }, 'window created')
-
-  if (!hideWindows) win.once('ready-to-show', () => win.show())
+  log.debug({ win: win.id, from: from?.id }, 'window created')
+  ready.set(win, false)
+  win.once('ready-to-show', () => ready.set(win, true))
 
   const devServerUrl = process.env['ELECTRON_RENDERER_URL']
   if (!app.isPackaged && devServerUrl) {
@@ -71,6 +90,23 @@ function createMainWindow(log: Logger, level: LogLevel, settings: AppSettings): 
     void win.loadFile(join(__dirname, '../renderer/index.html'))
   }
   return win
+}
+
+/** Creates, shows and focuses windows; hidden test runs never show or focus one. */
+function windowFactory(log: Logger, level: LogLevel, settings: () => AppSettings): WindowFactory {
+  return {
+    create: (from) => createMainWindow(log, level, settings(), from),
+    reveal(win) {
+      if (hideWindows || win.isDestroyed()) return
+      if (ready.get(win) === true) win.show()
+      else win.once('ready-to-show', () => win.show())
+    },
+    focus(win) {
+      if (hideWindows || win.isDestroyed()) return
+      if (win.isMinimized()) win.restore()
+      win.focus()
+    },
+  }
 }
 
 // `--data-dir` (docs/architecture/persistence.md#files-and-folders) moves all app data: Electron's
@@ -152,18 +188,18 @@ void app.whenReady().then(async () => {
     if (next.allowLocalAgents !== previous.allowLocalAgents) switchHttp(next.allowLocalAgents)
   })
 
-  installAppMenu()
-  const windowLog = log.child({ scope: 'windows' })
-  const sessions: WindowSessions = registerProjectIpc(host, http, settings)
-  const openWindow = (key?: string) =>
-    sessions.attach(createMainWindow(windowLog, level, settings.get()), key)
-  // A project an agent opens gets its own window, which stays open after the session ends.
+  const windows = windowFactory(log.child({ scope: 'windows' }), level, () => settings.get())
+  const sessions: WindowSessions = registerProjectIpc(host, http, settings, windows)
+  // New / Open without any window (macOS): an empty window, whose start panel offers both.
+  installAppMenu(() => sessions.open())
+  // A project an agent opens gets its own window, which stays open after the session ends; the
+  // user's New / Open choose their window in ipc.ts (docs/conventions/ui.md#project-files).
   host.onProjectOpened((key, source) => {
-    if (source.kind === 'agent') openWindow(key)
+    if (source.kind === 'agent') sessions.open(key)
   })
-  openWindow()
+  sessions.open()
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) openWindow()
+    if (BrowserWindow.getAllWindows().length === 0) sessions.open()
   })
 
   // Quitting asks first (docs/conventions/ui.md#confirmations): during a run whether to stop it
