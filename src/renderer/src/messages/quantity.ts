@@ -89,7 +89,8 @@ export const quantityText = {
   step: (): string => 'Step',
   decrease: (): string => 'Decrease',
   increase: (): string => 'Increase',
-  stepKeys: (): string => '↑ ↓ · ⇧ ×10 · ⌥ ×0.1',
+  /** Adjust popover title hint: only keys that act in the popover (the field's ↑ ↓ do not). */
+  adjustHint: (): string => 'Esc reverts',
   stepsNeedNumber: (): string => 'Steps change plain numbers, not formulas.',
   recommended: (): string => 'Recommended',
   /** Inherited general tolerance of an untoleranced value: "±0.100 mm from part". */
