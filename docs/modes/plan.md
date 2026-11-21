@@ -4,7 +4,7 @@ Status: draft · Terms: [glossary.md](../glossary.md)
 
 **Goal:** turn designed parts into a concrete, optimized, simulated manufacturing process using concrete machines and tools.
 
-The v0.1 subset (one setup, tool assignment, pass strategies, toolpaths) is specified in [plan-v0.1.md](plan-v0.1.md).
+The v0.1 subset (one setup, tool assignment, pass strategies, toolpaths) is specified in [plan-v0.1.md](plan-v0.1.md). v0.2 (draft: one setup per approach direction, tools resolved from the design's tool field) is in [plan-v0.2.md](plan-v0.2.md).
 
 ## Scope
 

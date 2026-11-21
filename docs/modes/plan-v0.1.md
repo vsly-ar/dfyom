@@ -61,7 +61,7 @@ A project has **several plans**. Each plan is a self-contained, runnable "versio
 
 ## Tool assignment and checks
 
-`plan.tool.suggest` filters the tool library by the [design's tool requirement](design.md#generalized-tools) and the checks below, then ranks by: has a preset for the stock's material class → already used in this plan (fewer tool changes) → largest diameter. `plan.create` and `plan.rebuild` assign the first suggestion to new plan operations; none → "no tool" and generation fails for it. `stickout` (length, per plan operation) defaults to the tool's `stickout`, else its `fluteLength`; > 0, < `overallLength`.
+`plan.tool.suggest` filters the tool library by the [design's tool requirement](design.md#generalized-tools) (v0.2, draft: also the design's tool field, [plan-v0.2.md](plan-v0.2.md#tool-resolution-from-the-design-tool-field)) and the checks below, then ranks by: has a preset for the stock's material class → already used in this plan (fewer tool changes) → largest diameter. `plan.create` and `plan.rebuild` assign the first suggestion to new plan operations; none → "no tool" and generation fails for it. `stickout` (length, per plan operation) defaults to the tool's `stickout`, else its `fluteLength`; > 0, < `overallLength`.
 
 | Operation | Tool type                        | Checks (failing = `plan.check` error)                                                                                                    |
 | --------- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |

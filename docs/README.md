@@ -12,8 +12,10 @@ The docs are the **source of truth**. Code implements what is documented here; w
 | Product      | [plans/v0.1.md](plans/v0.1.md) – v0.1 tasks and status (living document)                                                                                                       | implemented |
 | Product      | [glossary.md](glossary.md) – domain terms (industry standard)                                                                                                                  | draft       |
 | Modes        | [modes/design.md](modes/design.md) – DFM-first part design; v0.1 operations (remaining: design UI 3.6)                                                                         | implemented |
+| Modes        | [modes/design-v0.2.md](modes/design-v0.2.md) – v0.2: face targets (±X/±Y/±Z faces, face frames) and the operation tool field (D10, D11)                                        | draft       |
 | Modes        | [modes/plan.md](modes/plan.md) – setups, toolpaths, optimization, gCode export                                                                                                 | draft       |
 | Modes        | [modes/plan-v0.1.md](modes/plan-v0.1.md) – v0.1 plan subset: plan snapshots and status, one setup, tools, pass strategies, toolpaths (core 2.13, toolpaths 2.10, job 2.9 done) | accepted    |
+| Modes        | [modes/plan-v0.2.md](modes/plan-v0.2.md) – v0.2: setups from face directions, tool resolution from the design tool field                                                       | draft       |
 | Modes        | [modes/run.md](modes/run.md) – machine control, sensors, automation                                                                                                            | draft       |
 | Modes        | [modes/run-v0.1.md](modes/run-v0.1.md) – v0.1 run subset: sender, clocks, utility process, run commands and job, progress (task 3.9 done; UI 3.12)                             | implemented |
 | Architecture | [architecture/overview.md](architecture/overview.md) – processes, source layout, threading                                                                                     | draft       |
@@ -21,7 +23,7 @@ The docs are the **source of truth**. Code implements what is documented here; w
 | Architecture | [architecture/commands.md](architecture/commands.md) – shared command layer for UI, agents, CLI                                                                                | implemented |
 | Architecture | [architecture/persistence.md](architecture/persistence.md) – project archive, working folder, save/recovery                                                                    | implemented |
 | Architecture | [architecture/quantities.md](architecture/quantities.md) – units, tolerances, expressions (value objects)                                                                      | implemented |
-| Architecture | [architecture/geometry.md](architecture/geometry.md) – removal-based geometry, cutting-operation framework, layers                                                             | implemented |
+| Architecture | [architecture/geometry.md](architecture/geometry.md) – removal-based geometry, cutting-operation framework, layers; non-top faces (v0.2) draft                                 | implemented |
 | Architecture | [architecture/library.md](architecture/library.md) – stock, tool and machine library; snapshots                                                                                | implemented |
 | Architecture | [architecture/feeds-speeds.md](architecture/feeds-speeds.md) – feeds-and-speeds calculator (surface speed, chip thinning, power)                                               | implemented |
 | Architecture | [architecture/workers.md](architecture/workers.md) – worker hosting, protocol, abort, automatic evaluation, toolpath job and cache                                             | implemented |

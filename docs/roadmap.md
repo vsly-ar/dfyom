@@ -27,6 +27,7 @@ Goal and full scope not decided yet. Decided items, in priority order:
 1. **Strategy editing in the plan inspector** (high priority, deferred from v0.1 on 2026-11-21): strategy parameters (direction, entry, cycle, allowances …), plan-only edits of the design snapshot, and the feeds calculator's derivation shown in the feeds card. Agents and the CLI already have the commands. With plan-only edits, the plan scene draws the plan's snapshot part instead of the design's current mesh. Known-issue rows in [plans/v0.1.md](plans/v0.1.md#known-issues-and-risks).
    - [x] Phase 1 (done 2026-11-21): strategy parameters in the inspector's Strategy group and the calculator's derivation ("Show calculation", `plan.operation.feeds.get`), [ui.md](conventions/ui.md#plan-mode-task-37).
    - [ ] Phase 2: plan-only edits of the design snapshot and drawing the plan's snapshot part in the plan scene (needs a design doc first).
+2. **Faces, setups and tools in Design** (user decisions D10 and D11, 2026-11-21): operations target any ±X/±Y/±Z face, Plan derives one setup per direction, and each design operation has a tool field (generalized or specific, auto-chosen unless locked). Drafts awaiting confirmation: [design-v0.2.md](modes/design-v0.2.md), [plan-v0.2.md](modes/plan-v0.2.md), [geometry.md § Non-top faces](architecture/geometry.md#non-top-faces-v02-draft). Still open: shapes model (Q12), anchors (Q13), v0.2/v0.3 split (Q14), multi-setup without workholding or in-process stock (Q15), free-form fillets (Q16).
 
 ## Later (unordered)
 
