@@ -1,14 +1,15 @@
 // WarningList and WarningItem: DFM (and later feeds-and-speeds, machine-check) warnings with their
-// tier (soft: neutral, "i", dismissible; hard: orange triangle, not dismissible), an optional
+// tier (soft: neutral, "i", dismissible; hard: orange triangle, not dismissible; error: red, an
+// impossible value that blocks generation, task 3.7), an optional
 // fix button ("Apply ≥ 3.2 mm") and a way to the blamed item. Warnings never block.
 // Doc: docs/conventions/ui.md#warnings-and-dfm, #inventory-v01
-import { Info, TriangleAlert, X } from 'lucide-react'
+import { CircleAlert, Info, TriangleAlert, X } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Button } from '../Button/Button'
 import { IconButton } from '../IconButton/IconButton'
 import styles from './WarningList.module.css'
 
-export type WarningTier = 'soft' | 'hard'
+export type WarningTier = 'soft' | 'hard' | 'error'
 
 export interface WarningView {
   /** Stable id (code + operation + parameter), so a dismissal survives re-renders. */
@@ -51,7 +52,7 @@ export function WarningItem({
   labels: WarningListLabels
   onDismiss?: (() => void) | undefined
 }): React.JSX.Element {
-  const Icon = item.tier === 'hard' ? TriangleAlert : Info
+  const Icon = item.tier === 'error' ? CircleAlert : item.tier === 'hard' ? TriangleAlert : Info
   return (
     <li className={styles['item']} data-tier={item.tier}>
       <Icon aria-hidden="true" className={styles['icon']} />

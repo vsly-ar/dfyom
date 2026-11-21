@@ -9,7 +9,7 @@ const labels: WarningListLabels = {
   dismissed: (n) => `${n} dismissed`,
   show: 'Show',
   hide: 'Hide',
-  tier: { soft: 'Note', hard: 'Warning' },
+  tier: { soft: 'Note', hard: 'Warning', error: 'Error' },
 }
 
 describe('WarningList', () => {
@@ -29,6 +29,7 @@ describe('WarningList', () => {
             fix: { label: 'Apply ≥ 3.2 mm', onApply },
           },
           { id: 'b', tier: 'soft', text: 'Needs pecking.' },
+          { id: 'c', tier: 'error', text: 'No tool assigned.' },
         ]}
       />,
     )
@@ -38,6 +39,7 @@ describe('WarningList', () => {
     expect(onApply).toHaveBeenCalledOnce()
     await user.click(screen.getByRole('button', { name: 'Pocket 1' }))
     expect(onSelect).toHaveBeenCalledOnce()
+    expect(list).toHaveTextContent('Error: No tool assigned.')
     // only soft warnings can be dismissed
     expect(screen.getAllByRole('button', { name: 'Dismiss' })).toHaveLength(1)
     await expectNoAxeViolations()

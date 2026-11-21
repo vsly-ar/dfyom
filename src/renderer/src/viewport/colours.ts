@@ -27,7 +27,14 @@ export const PALETTE_TOKENS = {
   feed: '--vp-feed',
   rapid: '--vp-rapid',
   tool: '--vp-tool',
+  /** Plunges in the toolpath preview (task 3.7); `--vp-feed` until the token exists. */
+  plunge: '--vp-plunge',
 } as const
+
+/** Tokens that may be missing: they take another palette entry instead of `FALLBACK`. */
+const OPTIONAL: Partial<Record<keyof typeof PALETTE_TOKENS, keyof typeof PALETTE_TOKENS>> = {
+  plunge: 'feed',
+}
 
 export type PaletteKey = keyof typeof PALETTE_TOKENS
 export type Palette = Readonly<Record<PaletteKey, Rgb>>
@@ -64,6 +71,8 @@ export function paletteFrom(values: Readonly<Record<string, string>>): Palette {
   for (const key of Object.keys(PALETTE_TOKENS) as PaletteKey[]) {
     out[key] = parseColour(values[PALETTE_TOKENS[key]] ?? '') ?? FALLBACK
   }
+  for (const [key, instead] of Object.entries(OPTIONAL) as [PaletteKey, PaletteKey][])
+    if (parseColour(values[PALETTE_TOKENS[key]] ?? '') === undefined) out[key] = out[instead]
   return out
 }
 

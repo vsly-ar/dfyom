@@ -1,12 +1,12 @@
-// Run scene layer (task 3.12): the toolpath played back (feeds `--vp-feed`, rapids `--vp-rapid`,
-// the done part dimmed towards the background), the tool marker at the work position (`wpos`)
+// Run scene layer (task 3.12; plan mode's toolpaths too, 3.7): the toolpath played back (feeds
+// `--vp-feed`, rapids `--vp-rapid`, plunges `--vp-plunge`, the done part dimmed towards the background), the tool marker at the work position (`wpos`)
 // and the work zero marker at the WCS origin (= the part origin). Props only.
 // Doc: docs/conventions/ui.md#viewport-task-35 (run scene), #run-mode-safety-ui
 import { useThree } from '@react-three/fiber'
 import { useEffect, useLayoutEffect, useMemo } from 'react'
 import { BufferAttribute, BufferGeometry, Color, SRGBColorSpace } from 'three'
 import { mix, toLinear, type Palette, type Rgb } from './colours'
-import type { ToolpathLines } from './toolpath-lines'
+import { SEGMENT, type ToolpathLines } from './toolpath-lines'
 
 /** What the run scene shows (`Viewport` prop `run`). */
 export interface RunScene {
@@ -29,18 +29,15 @@ const colour = (c: Rgb) => new Color().setRGB(c[0], c[1], c[2], SRGBColorSpace)
 export function segmentColours(
   lines: ToolpathLines,
   done: number,
-  palette: Pick<Palette, 'feed' | 'rapid' | 'background'>,
+  palette: Pick<Palette, 'feed' | 'rapid' | 'plunge' | 'background'>,
   out: Float32Array = new Float32Array(lines.segments * 6),
 ): Float32Array {
-  const c = {
-    feed: toLinear(palette.feed),
-    rapid: toLinear(palette.rapid),
-    feedDone: toLinear(mix(palette.feed, palette.background, DONE_DIM)),
-    rapidDone: toLinear(mix(palette.rapid, palette.background, DONE_DIM)),
-  }
+  const base = [palette.feed, palette.rapid, palette.plunge] as const
+  const live = base.map(toLinear)
+  const dim = base.map((c) => toLinear(mix(c, palette.background, DONE_DIM)))
   for (let i = 0; i < lines.segments; i++) {
-    const rapid = lines.rapid[i] === 1
-    const v = i < done ? (rapid ? c.rapidDone : c.feedDone) : rapid ? c.rapid : c.feed
+    const k = lines.kind[i] ?? SEGMENT.feed
+    const v = (i < done ? dim : live)[k] ?? live[SEGMENT.feed]!
     out.set(v, 6 * i)
     out.set(v, 6 * i + 3)
   }

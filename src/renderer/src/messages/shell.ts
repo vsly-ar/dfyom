@@ -107,11 +107,7 @@ export const shellMessages = {
         description: 'Plans are made from a part. Add a part in Design.',
         action: 'Go to Design',
       },
-      ready: {
-        title: 'Plan the part',
-        description: 'Plans, setups and toolpaths come with the plan UI (task 3.7).',
-      },
-      inspector: 'Select a plan operation to edit it (task 3.7).',
+      inspector: 'Design a part to plan it.',
     },
     run: {
       noPlan: {

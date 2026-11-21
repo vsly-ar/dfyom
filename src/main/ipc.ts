@@ -18,7 +18,7 @@ import {
 } from '../shared/preload-api'
 import type { Dispatcher } from '../core/commands/dispatcher'
 import { evaluationView, followEvaluations } from './evaluation-push'
-import { chooseOpenFile, chooseSaveFile } from './file-dialogs'
+import { chooseExportFile, chooseOpenFile, chooseSaveFile } from './file-dialogs'
 import type { AppHost } from './host/app-host'
 import type { LocalHttpControl } from './mcp/http'
 import type { SettingsStore } from './settings/store'
@@ -165,6 +165,10 @@ export function registerProjectIpc(
   ipcMain.handle(IPC.fileChooseSave, (event, name: unknown) => {
     const ws = sessionOf(event)
     return ws === undefined ? null : chooseSaveFile(ws.win, typeof name === 'string' ? name : '')
+  })
+  ipcMain.handle(IPC.fileChooseExport, (event, name: unknown) => {
+    const ws = sessionOf(event)
+    return ws === undefined ? null : chooseExportFile(ws.win, typeof name === 'string' ? name : '')
   })
 
   ipcMain.handle(IPC.settingsUpdate, (event, patch: unknown): CallReply => {
