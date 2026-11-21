@@ -66,6 +66,7 @@ import {
   usePlanStore,
   type PlanData,
 } from './plan-store'
+import { useCancelGesture } from '../../shell/hooks'
 import styles from './Plan.module.css'
 import { findingsOf, useChosenPlan, useLibraryItems, usePlanSelection } from './usePlan'
 
@@ -377,8 +378,17 @@ function SetupSection({ doc, plan }: { doc: ProjectDoc; plan: PlanDTO }): React.
   const [errors, setErrors] = useState<readonly Issue[]>([])
   const units = doc.unitSystem
   const readOnly = !allows(plan, 'plan.setup.update')
-  const commit = async (key: 'clearanceHeight' | 'retractHeight', source: string) => {
-    const r = await call('plan.setup.update', { planId: plan.id, setupId: setup.id, [key]: source })
+  const cancelGesture = useCancelGesture()
+  const commit = async (
+    key: 'clearanceHeight' | 'retractHeight',
+    source: string,
+    gesture: string | undefined,
+  ) => {
+    const r = await call(
+      'plan.setup.update',
+      { planId: plan.id, setupId: setup.id, [key]: source },
+      gesture === undefined ? undefined : { gesture },
+    )
     setErrors(r.ok ? [] : r.error.issues)
   }
   const messages = (key: string): FieldMessage[] =>
@@ -398,7 +408,8 @@ function SetupSection({ doc, plan }: { doc: ProjectDoc; plan: PlanDTO }): React.
         illustration={<FieldIcon name="depth" />}
         readOnly={readOnly}
         messages={messages('clearanceHeight')}
-        onCommit={(q) => void commit('clearanceHeight', q.source)}
+        onCommit={(q, gesture) => void commit('clearanceHeight', q.source, gesture)}
+        onCancelGesture={cancelGesture}
       />
       <QuantityInput
         label={m.setup.retractHeight}
@@ -408,7 +419,8 @@ function SetupSection({ doc, plan }: { doc: ProjectDoc; plan: PlanDTO }): React.
         illustration={<FieldIcon name="depth" />}
         readOnly={readOnly}
         messages={messages('retractHeight')}
-        onCommit={(q) => void commit('retractHeight', q.source)}
+        onCommit={(q, gesture) => void commit('retractHeight', q.source, gesture)}
+        onCancelGesture={cancelGesture}
       />
     </Section>
   )

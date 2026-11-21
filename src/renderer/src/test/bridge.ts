@@ -66,7 +66,7 @@ export const WINDOW_SOURCE: Source = { kind: 'ui', id: 'win-1' }
 type Handler = (args: unknown) => CallReply | Promise<CallReply>
 
 export interface FakeBridge extends PreloadApi {
-  readonly calls: { readonly name: string; readonly args: unknown }[]
+  readonly calls: { readonly name: string; readonly args: unknown; readonly gesture?: string }[]
   readonly settingsPatches: unknown[]
   readonly closeCalls: boolean[]
   /** Replace the reply of one call name. */
@@ -141,7 +141,7 @@ export function createFakeBridge(initial: AppSettings = DEFAULT_SETTINGS): FakeB
     export: null,
   }
   const handlers = new Map<string, Handler>()
-  const calls: { name: string; args: unknown }[] = []
+  const calls: { name: string; args: unknown; gesture?: string }[] = []
   const settingsPatches: unknown[] = []
   const closeCalls: boolean[] = []
   let project:
@@ -157,8 +157,9 @@ export function createFakeBridge(initial: AppSettings = DEFAULT_SETTINGS): FakeB
     versions: { electron: 'test', chrome: 'test', node: 'test' },
     log: { level: 'info', send: () => {} },
     run: { onStatus: runStatus.on },
-    async call(name, args) {
-      calls.push({ name, args })
+    async call(name, args, opts) {
+      const gesture = opts?.gesture
+      calls.push({ name, args, ...(gesture === undefined ? {} : { gesture }) })
       const h = handlers.get(name)
       if (h) return h(args ?? {})
       if (project === undefined) return NO_PROJECT
@@ -166,7 +167,9 @@ export function createFakeBridge(initial: AppSettings = DEFAULT_SETTINGS): FakeB
       // queries first (as the session routes them); an unknown query is a command
       const q = d.query(name, args ?? {}, WINDOW_SOURCE)
       if (q.isOk() || q.unwrapErr().code !== 'command.unknown') return toReply(Promise.resolve(q))
-      return toReply(d.dispatch(name, args ?? {}, WINDOW_SOURCE))
+      return toReply(
+        d.dispatch(name, args ?? {}, WINDOW_SOURCE, gesture === undefined ? {} : { gesture }),
+      )
     },
     project: {
       onEvent: events.on,

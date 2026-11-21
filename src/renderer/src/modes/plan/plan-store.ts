@@ -3,12 +3,13 @@
 // inspector, status bar and viewport, toolpath generation (a job, followed with `job.get`) and
 // the gCode export. Every change is a command over the bridge. One store per bridge.
 // Doc: docs/conventions/ui.md#plan-mode-task-37, docs/modes/plan-v0.1.md#commands-and-queries-v01
-import { useCallback, useEffect } from 'react'
+import { useEffect } from 'react'
 import { useStore } from 'zustand'
 import { createStore, type StoreApi } from 'zustand/vanilla'
 import type { PlanWarning } from '../../../../core/plan/checks'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import type { CallReply, PreloadApi } from '../../../../shared/preload-api'
+import { useCall } from '../../shell/hooks'
 import { useReplica, useShell } from '../../shell/ShellContext'
 import type { PlanOperationView, PlanStale, ToolpathEntry } from './model'
 
@@ -215,8 +216,5 @@ export function usePlanData(planId: string | undefined): PlanData | undefined {
   return data !== undefined && data.planId === planId ? data : undefined
 }
 
-/** Sends one command through the window's session (one gesture = one command = one undo step). */
-export function usePlanCommand(): (name: string, args: object) => Promise<CallReply> {
-  const { bridge } = useShell()
-  return useCallback((name, args) => bridge.call(name, args), [bridge])
-}
+/** Sends one command through the window's session (`useCall`: one gesture = one undo step). */
+export const usePlanCommand = useCall

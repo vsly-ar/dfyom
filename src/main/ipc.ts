@@ -50,6 +50,12 @@ const NOT_A_WINDOW: CallReply = {
   retryable: false,
 }
 
+/** The `gesture` of `call`'s options, if a short string (anything else is ignored). */
+function gestureOf(opts: unknown): string | undefined {
+  const g = isPlainObject(opts) ? opts['gesture'] : undefined
+  return typeof g === 'string' && g.length > 0 && g.length <= 200 ? g : undefined
+}
+
 function reply(r: AppResult<{ value: unknown; revision: number }>): CallReply {
   if (r.isOk()) return { ok: true, ...r.unwrap() }
   return { ok: false, ...agentError(r.unwrapErr()) }
@@ -155,13 +161,17 @@ export function registerProjectIpc(
     return byContents.get(event.sender.id)
   }
 
-  ipcMain.handle(IPC.call, async (event, name: unknown, args: unknown): Promise<CallReply> => {
-    const ws = sessionOf(event)
-    if (ws === undefined || typeof name !== 'string') return NOT_A_WINDOW
-    const r = await ws.session.call(name, args ?? {})
-    follow(ws)
-    return reply(r.result)
-  })
+  ipcMain.handle(
+    IPC.call,
+    async (event, name: unknown, args: unknown, opts: unknown): Promise<CallReply> => {
+      const ws = sessionOf(event)
+      if (ws === undefined || typeof name !== 'string') return NOT_A_WINDOW
+      const gesture = gestureOf(opts)
+      const r = await ws.session.call(name, args ?? {}, gesture === undefined ? {} : { gesture })
+      follow(ws)
+      return reply(r.result)
+    },
+  )
 
   // Same sender check for every handler: only a DFYOM window's main frame.
   ipcMain.handle(IPC.agentsList, (event) =>

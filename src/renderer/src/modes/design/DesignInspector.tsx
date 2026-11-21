@@ -16,6 +16,7 @@ import type { QuantityKind } from '../../../../core/quantity/units'
 import type { AppErrorData, Issue } from '../../../../shared/errors/app-error'
 import { designMessages } from '../../messages/design'
 import { dfmMessages } from '../../messages/dfm'
+import { useCancelGesture } from '../../shell/hooks'
 import { useUi } from '../../shell/ShellContext'
 import {
   ErrorMessage,
@@ -135,8 +136,13 @@ function PartInspector({
   const [error, setError] = useState<AppErrorData | undefined>(undefined)
   const stock = part.loaded?.stock
   const tolerance = part.dto.generalTolerance?.length
-  const updatePart = async (args: object) => {
-    const r = await call('design.part.update', { partId: part.dto.id, ...args })
+  const cancelGesture = useCancelGesture()
+  const updatePart = async (args: object, gesture?: string) => {
+    const r = await call(
+      'design.part.update',
+      { partId: part.dto.id, ...args },
+      gesture === undefined ? undefined : { gesture },
+    )
     setError(r.ok ? undefined : r.error)
   }
   const apply = (w: DfmWarning, source: string) => void applyWarning(call, part, w, source)
@@ -161,7 +167,10 @@ function PartInspector({
           kind="length"
           defaultUnit={defaultUnit('length', part.units)}
           value={tolerance === undefined ? undefined : quantityOf(tolerance)}
-          onCommit={(q) => void updatePart({ generalTolerance: { length: q.source } })}
+          onCommit={(q, gesture) =>
+            void updatePart({ generalTolerance: { length: q.source } }, gesture)
+          }
+          onCancelGesture={cancelGesture}
         />
         {error ? <ErrorMessage error={error} /> : null}
         <EvaluationLine status={evaluation?.status} />
@@ -260,7 +269,9 @@ interface OperationContext {
   readonly units: UnitSystem
   readonly warnings: readonly DfmWarning[]
   readonly errors: readonly FieldError[]
-  commit(path: string, source: string): void
+  /** One update command; `gesture` for a live adjust-popover step. */
+  commit(path: string, source: string, gesture?: string): void
+  cancelGesture(gesture: string): Promise<boolean>
 }
 
 const QUANTITY_KIND: Record<FieldKind, QuantityKind> = {
@@ -279,17 +290,22 @@ function OperationInspector({
   warnings: DesignWarnings
 }): React.JSX.Element {
   const call = useCommand()
+  const cancelGesture = useCancelGesture()
   const [errors, setErrors] = useState<readonly FieldError[]>([])
   const [summary, setSummary] = useState<AppErrorData | undefined>(undefined)
   const index = part.dto.operations.indexOf(op)
   const opWarnings = warnings.warnings.filter((w) => w.operation === op.id)
 
-  const send = async (args: Record<string, unknown>, path: string | undefined) => {
-    const r = await call(`design.${op.kind}.update`, {
-      partId: part.dto.id,
-      operationId: op.id,
-      ...args,
-    })
+  const send = async (
+    args: Record<string, unknown>,
+    path: string | undefined,
+    gesture?: string,
+  ) => {
+    const r = await call(
+      `design.${op.kind}.update`,
+      { partId: part.dto.id, operationId: op.id, ...args },
+      gesture === undefined ? undefined : { gesture },
+    )
     if (r.ok) {
       setErrors([])
       setSummary(undefined)
@@ -315,7 +331,8 @@ function OperationInspector({
     units: part.units,
     warnings: opWarnings,
     errors,
-    commit: (path, source) => void send(updateArgs(op, path, source), path),
+    commit: (path, source, gesture) => void send(updateArgs(op, path, source), path, gesture),
+    cancelGesture,
   }
   const unplaced = opWarnings.filter((w) => warningPath(w, op) === undefined)
 
@@ -588,7 +605,8 @@ function ParamField({
       kind={QUANTITY_KIND[kind]}
       defaultUnit={defaultUnit(kind, ctx.units)}
       value={quantityAt(op, path)}
-      onCommit={(q) => ctx.commit(path, q.source)}
+      onCommit={(q, gesture) => ctx.commit(path, q.source, gesture)}
+      onCancelGesture={ctx.cancelGesture}
       illustration={<FieldIcon name={icon} />}
       messages={messages}
       references={references}

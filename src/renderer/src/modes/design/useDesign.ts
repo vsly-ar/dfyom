@@ -6,7 +6,8 @@ import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react'
 import type { EvaluationStatus } from '../../../../core/design/evaluation'
 import type { DfmWarning } from '../../../../core/geometry/model'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
-import type { CallReply, PreloadApi } from '../../../../shared/preload-api'
+import type { PreloadApi } from '../../../../shared/preload-api'
+import { useCall } from '../../shell/hooks'
 import { useReplica, useShell, usePartEvaluation, useUi } from '../../shell/ShellContext'
 import type { PartEvaluationEntry } from '../../state/evaluations'
 import { designPart, type DesignPart } from './model'
@@ -86,11 +87,8 @@ export function useDesignEvaluation(part: DesignPart | undefined): PartEvaluatio
   return usePartEvaluation(part?.dto.id)
 }
 
-/** Sends one command through the window's session (one gesture = one command = one undo step). */
-export function useCommand(): (name: string, args: object) => Promise<CallReply> {
-  const { bridge } = useShell()
-  return useCallback((name, args) => bridge.call(name, args), [bridge])
-}
+/** Sends one command through the window's session (`useCall`: one gesture = one undo step). */
+export const useCommand = useCall
 
 /** The design selection (an operation id or null) and its setter. */
 export function useDesignSelection(): [string | null, (id: string | null) => void] {

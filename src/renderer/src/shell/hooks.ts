@@ -1,7 +1,7 @@
 // Shell hooks over the bridge and the replica: undo/redo steps, jobs, agent sessions, the window
 // title. Doc: docs/conventions/ui.md#undo-and-redo, #jobs-and-progress, #app-shell
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
-import type { AgentSessionInfo } from '../../../shared/preload-api'
+import type { AgentSessionInfo, CallOpts, CallReply } from '../../../shared/preload-api'
 import { shellMessages as m } from '../messages/shell'
 import { isDirty } from '../state/replica'
 import type { JobView } from '../ui'
@@ -54,6 +54,35 @@ export function useHistorySteps(): HistorySteps {
     [bridge, key],
   )
   return key === undefined ? { undo: null, redo: null, step } : { ...steps, step }
+}
+
+/**
+ * Sends one command through the window's session (one gesture = one undo step; `opts.gesture` for
+ * the steps of a live edit, docs/architecture/commands.md#gestures-live-edits).
+ */
+export function useCall(): (name: string, args: object, opts?: CallOpts) => Promise<CallReply> {
+  const { bridge } = useShell()
+  return useCallback(
+    (name, args, opts) =>
+      opts === undefined ? bridge.call(name, args) : bridge.call(name, args, opts),
+    [bridge],
+  )
+}
+
+/**
+ * Cancels a live edit (Escape in a field's adjust popover): `history.undo { gesture }` reverts and
+ * discards the gesture's entry if it is still on top. Resolves false when nothing was reverted
+ * (someone committed after it), so the field keeps the value and says so.
+ */
+export function useCancelGesture(): (gesture: string) => Promise<boolean> {
+  const { bridge } = useShell()
+  return useCallback(
+    async (gesture) => {
+      const r = await bridge.call('history.undo', { gesture })
+      return r.ok && (r.value as { entrySeq?: unknown }).entrySeq !== null
+    },
+    [bridge],
+  )
 }
 
 /** Polling interval of `job.list` while a job runs (progress ticks are not in the action log). */

@@ -319,6 +319,123 @@ describe('undo / redo', () => {
   })
 })
 
+describe('gestures (live edits)', () => {
+  const step = (d: ReturnType<typeof setup>['d'], name: string, gesture: string, source = ui) =>
+    d.dispatch('project.name.update', { name }, source, { gesture })
+
+  it('steps of one gesture are full commits merged into one undo entry', async () => {
+    const { d, events } = setup()
+    expectOk(await rename(d, 'Start'))
+    for (const n of ['A', 'B', 'C']) expectOk(await step(d, n, 'g1'))
+    expect(d.revision).toBe(4)
+    expect(events.map((e) => [e.type, e.revision, 'gesture' in e ? e.gesture : undefined])).toEqual(
+      [
+        ['command', 1, undefined],
+        ['command', 2, 'g1'],
+        ['command', 3, 'g1'],
+        ['command', 4, 'g1'],
+      ],
+    )
+    expect(d.history.undoable).toHaveLength(2)
+    expect(d.history.undoable[1]).toMatchObject({
+      seq: 2,
+      gesture: 'g1',
+      args: { name: 'C' },
+      revisionBefore: 1,
+      revisionAfter: 4,
+    })
+    // one undo restores the state before the gesture; redo replays the whole gesture
+    expect(expectOk(await d.dispatch('history.undo', {}, ui)).value).toEqual({ entrySeq: 2 })
+    expect(d.doc.name).toBe('Start')
+    expectOk(await d.dispatch('history.redo', {}, ui))
+    expect(d.doc.name).toBe('C')
+  })
+
+  it('a different gesture, command or source, or a commit in between, starts a new entry', async () => {
+    const { d } = setup()
+    expectOk(await step(d, 'A', 'g1'))
+    expectOk(await step(d, 'B', 'g2'))
+    expectOk(
+      await d.dispatch('project.unitSystem.update', { unitSystem: 'inch' }, ui, { gesture: 'g2' }),
+    )
+    expectOk(d.query('project.doc.get', {}, agent))
+    expectOk(await step(d, 'C', 'g2', agent))
+    expectOk(await step(d, 'D', 'g3'))
+    expectOk(d.query('project.doc.get', {}, agent))
+    expectOk(await rename(d, 'E', agent)) // interleaved commit by another source
+    expectOk(await step(d, 'F', 'g3'))
+    expect(d.history.undoable.map((e) => e.gesture ?? '-')).toEqual([
+      'g1',
+      'g2',
+      'g2',
+      'g2',
+      'g3',
+      '-',
+      'g3',
+    ])
+  })
+
+  it('an undo between steps ends the merge; every step clears redo', async () => {
+    const { d } = setup()
+    expectOk(await rename(d, 'X'))
+    expectOk(await d.dispatch('history.undo', {}, ui))
+    expectOk(await step(d, 'A', 'g1'))
+    expect(d.history.redoable).toEqual([])
+    expectOk(await d.dispatch('history.undo', {}, ui))
+    expectOk(await d.dispatch('history.redo', {}, ui))
+    expectOk(await step(d, 'B', 'g1'))
+    expect(d.history.undoable).toHaveLength(2)
+  })
+
+  it('cancel: undoes the gesture entry and discards it (no redo), logged as an undo', async () => {
+    const { d, events } = setup()
+    expectOk(await rename(d, 'Start'))
+    for (const n of ['A', 'B']) expectOk(await step(d, n, 'g1'))
+    const out = expectOk(await d.dispatch('history.undo', { gesture: 'g1' }, ui))
+    expect(out).toEqual({ value: { entrySeq: 2 }, revision: 4 })
+    expect(d.doc.name).toBe('Start')
+    expect(d.history.undoable.map((e) => e.args)).toEqual([{ name: 'Start' }])
+    expect(d.history.redoable).toEqual([])
+    expect(events.at(-1)).toMatchObject({ type: 'undo', entrySeq: 2 })
+  })
+
+  it("cancel does nothing when the gesture entry is not on top or not the caller's", async () => {
+    const { d } = setup()
+    expectOk(await step(d, 'A', 'g1'))
+    expectOk(d.query('project.doc.get', {}, agent))
+    expectOk(await d.dispatch('history.undo', {}, agent)) // undone by someone else: on redo now
+    expectOk(await step(d, 'B', 'g2'))
+    expectOk(await rename(d, 'C', ui)) // committed after the gesture
+    const before = d.revision
+    for (const [g, src] of [
+      ['g1', ui],
+      ['g2', ui],
+      ['nope', ui],
+    ] as const)
+      expect(expectOk(await d.dispatch('history.undo', { gesture: g }, src)).value).toEqual({
+        entrySeq: null,
+      })
+    expect(d.revision).toBe(before)
+    expect(d.doc.name).toBe('C')
+    // another source cannot cancel the UI's gesture
+    const { d: d2 } = setup()
+    expectOk(await step(d2, 'A', 'g1'))
+    expectOk(d2.query('project.doc.get', {}, agent))
+    expect(expectOk(await d2.dispatch('history.undo', { gesture: 'g1' }, agent)).value).toEqual({
+      entrySeq: null,
+    })
+    expect(d2.doc.name).toBe('A')
+  })
+
+  it('the history size cap applies to the merged entry', async () => {
+    const { d } = setup([], { historyLimits: { maxEntries: 10, maxChars: 400 } })
+    expectOk(await rename(d, 'first'))
+    for (let i = 0; i < 6; i++) expectOk(await step(d, `name-${i}`, 'g1'))
+    // the merged entry grew past the budget: older entries dropped, the newest is always kept
+    expect(d.history.undoable.map((e) => e.gesture)).toEqual(['g1'])
+  })
+})
+
 describe('stale writes', () => {
   it('UI-source commands are never rejected by the check', async () => {
     const { d } = setup()

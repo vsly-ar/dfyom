@@ -463,25 +463,166 @@ describe('QuantityInput: steppers', () => {
     await user.keyboard('{ArrowUp}')
     expect(input).toHaveValue('D / 2')
   })
+})
 
-  it('steps and offers the recommended value in the adjust popover; closing commits once', async () => {
-    const { user, input, onCommit } = setup({
-      recommended: { source: '12.50', text: '≥ 12.50 mm keeps 3 mm corners' },
-    })
-    await user.click(screen.getByRole('button', { name: 'Adjust Width' }))
-    const dialog = await screen.findByRole('dialog', { name: 'Adjust Width' })
-    expect(dialog).toBeInTheDocument()
+/**
+ * Stores what it commits like the replica after a command (optionally a tick later, like the IPC
+ * round trip) and cancels a gesture like `history.undo { gesture }`: back to the value before its
+ * first step, unless `cancelFails` (someone committed after it).
+ */
+function GestureHarness({
+  onCommit,
+  onCancel,
+  late = false,
+  cancelFails = false,
+  withCancel = true,
+  ...props
+}: Partial<QuantityInputBaseProps> & {
+  onCommit: (v: Quantity, gesture: string | undefined) => void
+  onCancel?: (gesture: string) => void
+  late?: boolean
+  cancelFails?: boolean
+  withCancel?: boolean
+}): React.JSX.Element {
+  const [value, setValue] = useState<Quantity | undefined>(q('3.00'))
+  const [before, setBefore] = useState<{ gesture: string; value: Quantity | undefined } | null>(
+    null,
+  )
+  const land = (v: Quantity | undefined) =>
+    late ? void Promise.resolve().then(() => setValue(v)) : setValue(v)
+  return (
+    <QuantityInput
+      label="Width"
+      kind="length"
+      defaultUnit="mm"
+      value={value}
+      {...props}
+      onCommit={(v, gesture) => {
+        onCommit(v, gesture)
+        if (gesture !== undefined && before?.gesture !== gesture) setBefore({ gesture, value })
+        land(v)
+      }}
+      {...(withCancel
+        ? {
+            onCancelGesture: (gesture: string) => {
+              onCancel?.(gesture)
+              if (cancelFails || before?.gesture !== gesture) return Promise.resolve(false)
+              land(before.value)
+              return Promise.resolve(true)
+            },
+          }
+        : {})}
+    />
+  )
+}
+
+function gestureSetup(props: Partial<React.ComponentProps<typeof GestureHarness>> = {}) {
+  const onCommit = vi.fn<(v: Quantity, gesture: string | undefined) => void>()
+  const onCancel = vi.fn<(gesture: string) => void>()
+  const r = renderUi(<GestureHarness onCommit={onCommit} onCancel={onCancel} {...props} />)
+  const input = screen.getByRole('textbox', { name: 'Width' }) as HTMLInputElement
+  const open = async () => {
+    await r.user.click(screen.getByRole('button', { name: 'Adjust Width' }))
+    await screen.findByRole('dialog', { name: 'Adjust Width' })
+  }
+  const steps = () => onCommit.mock.calls.map(([v, g]) => [v.source, g])
+  return { ...r, input, onCommit, onCancel, open, steps }
+}
+
+describe('QuantityInput: adjust popover (live gesture)', () => {
+  it('commits every step live with one gesture id; a click outside keeps the value', async () => {
+    const { user, input, open, steps, onCancel } = gestureSetup()
+    await open()
     await user.click(screen.getByRole('radio', { name: '10' }))
     await user.click(screen.getByRole('button', { name: 'Increase' }))
     await user.click(screen.getByRole('button', { name: 'Increase' }))
     expect(input).toHaveValue('23.00')
     await expectNoAxeViolations()
-    await user.keyboard('{Escape}')
-    expect(committed(onCommit)).toEqual(['23.00 = 23'])
+    const id = steps()[0]?.[1]
+    expect(id).toEqual(expect.any(String))
+    expect(steps()).toEqual([
+      ['13.00', id],
+      ['23.00', id],
+    ])
+    await user.click(document.body)
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(steps()).toHaveLength(2)
+    expect(onCancel).not.toHaveBeenCalled()
+    expect(input).toHaveValue('23.00')
+  })
 
-    await user.click(screen.getByRole('button', { name: 'Adjust Width' }))
+  it('Escape cancels the gesture and restores the value from before the popover', async () => {
+    const { user, input, open, steps, onCancel } = gestureSetup()
+    await open()
+    await user.click(screen.getByRole('button', { name: 'Increase' }))
+    await user.click(screen.getByRole('button', { name: 'Increase' }))
+    expect(input).toHaveValue('5.00')
+    await user.keyboard('{Escape}')
+    expect(onCancel).toHaveBeenCalledWith(steps()[0]?.[1])
+    await waitFor(() => expect(input).toHaveValue('3.00'))
+    expect(steps()).toHaveLength(2) // the revert is the cancel, not another commit
+  })
+
+  it('Escape without a step commits and cancels nothing', async () => {
+    const { user, input, open, onCommit, onCancel } = gestureSetup()
+    await open()
+    await user.keyboard('{Escape}')
+    expect(onCommit).not.toHaveBeenCalled()
+    expect(onCancel).not.toHaveBeenCalled()
+    expect(input).toHaveValue('3.00')
+  })
+
+  it('a cancel that cannot revert keeps the value and says so', async () => {
+    const { user, input, open } = gestureSetup({ cancelFails: true })
+    await open()
+    await user.click(screen.getByRole('button', { name: 'Increase' }))
+    await user.keyboard('{Escape}')
+    expect(await screen.findByText(/Escape could not revert it/)).toBeInTheDocument()
+    expect(input).toHaveValue('4.00')
+  })
+
+  it('without onCancelGesture, Escape commits the opening value again in the same gesture', async () => {
+    const { user, input, open, steps } = gestureSetup({ withCancel: false })
+    await open()
+    await user.click(screen.getByRole('button', { name: 'Increase' }))
+    await user.keyboard('{Escape}')
+    const id = steps()[0]?.[1]
+    expect(steps()).toEqual([
+      ['4.00', id],
+      ['3.00', id],
+    ])
+    expect(input).toHaveValue('3.00')
+  })
+
+  it('rapid steps that land late are all committed, none lost or repeated', async () => {
+    const { user, input, open, steps } = gestureSetup({ late: true })
+    await open()
+    const plus = screen.getByRole('button', { name: 'Increase' })
+    const minus = screen.getByRole('button', { name: 'Decrease' })
+    await user.click(plus)
+    await user.click(plus)
+    await user.click(minus)
+    await user.click(minus)
+    await waitFor(() => expect(input).toHaveValue('3.00'))
+    expect(steps().map(([v]) => v)).toEqual(['4.00', '5.00', '4.00', '3.00'])
+  })
+
+  it('each session is a new gesture; "Use …" commits in the session and closes it', async () => {
+    const { user, open, steps } = gestureSetup({
+      recommended: { source: '12.50', text: '≥ 12.50 mm keeps 3 mm corners' },
+    })
+    await open()
+    await user.click(screen.getByRole('button', { name: 'Increase' }))
+    await user.click(document.body)
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await open()
+    await user.click(screen.getByRole('button', { name: 'Increase' }))
     await user.click(await screen.findByRole('button', { name: 'Use 12.50' }))
-    expect(committed(onCommit)).toEqual(['23.00 = 23', '12.50 = 25/2'])
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    const [a, b, c] = steps().map(([, g]) => g)
+    expect(steps().map(([v]) => v)).toEqual(['4.00', '5.00', '12.50'])
+    expect(a).not.toEqual(b)
+    expect(c).toEqual(b)
   })
 })
 

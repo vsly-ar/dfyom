@@ -83,6 +83,7 @@ export function StrategyGroup({
   readOnly,
   findings,
   onUpdate,
+  onCancelGesture,
 }: {
   plan: PlanDTO
   op: PlanOperationDTO
@@ -90,9 +91,13 @@ export function StrategyGroup({
   units: UnitSystem
   readOnly: boolean
   findings: readonly PlanWarning[]
-  onUpdate: (args: object) => void
+  /** One `plan.operation.update`; `gesture` for a live adjust-popover step. */
+  onUpdate: (args: object, gesture?: string) => void
+  /** Escape in a field's adjust popover (QuantityInput `onCancelGesture`). */
+  onCancelGesture: (gesture: string) => Promise<boolean>
 }): React.JSX.Element {
-  const set = (key: StrategyKey, value: string | null) => onUpdate({ strategy: { [key]: value } })
+  const set = (key: StrategyKey, value: string | null, gesture?: string) =>
+    onUpdate({ strategy: { [key]: value } }, gesture)
   const keys = shownStrategyKeys(view.kind, view.strategy, isThrough(plan, view))
   const toolType = (
     plan.snapshots.find((x) => x.id === op.tool)?.values as { type?: string } | undefined
@@ -147,7 +152,8 @@ export function StrategyGroup({
             units={units}
             readOnly={readOnly}
             findings={fieldMessages(findings, `strategy.${key}`)}
-            onSet={(v) => set(key, v)}
+            onSet={(v, gesture) => set(key, v, gesture)}
+            onCancelGesture={onCancelGesture}
           />
         )
       })}
@@ -208,6 +214,7 @@ function StrategyQuantity({
   readOnly,
   findings,
   onSet,
+  onCancelGesture,
 }: {
   strategyKey: StrategyKey
   label: string
@@ -216,7 +223,8 @@ function StrategyQuantity({
   units: UnitSystem
   readOnly: boolean
   findings: FieldMessage[]
-  onSet: (source: string | null) => void
+  onSet: (source: string | null, gesture?: string) => void
+  onCancelGesture: (gesture: string) => Promise<boolean>
 }): React.JSX.Element {
   const angle = ANGLE_KEYS.has(strategyKey)
   const value =
@@ -251,7 +259,8 @@ function StrategyQuantity({
       illustration={<FieldIcon name={ICON[strategyKey] ?? 'length'} />}
       readOnly={readOnly}
       messages={messages}
-      onCommit={(q) => onSet(q.source)}
+      onCommit={(q, gesture) => onSet(q.source, gesture)}
+      onCancelGesture={onCancelGesture}
     />
   )
 }
