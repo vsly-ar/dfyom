@@ -60,6 +60,12 @@ export interface EvaluationScheduler extends EvaluationService {
   attach(source: EvaluationSource): void
   /** Project closed: abort everything, drop all results. */
   close(): void
+  /**
+   * Called with a part id whenever its state may have changed (edit, debounce over, result,
+   * removal); read it with `state`. For pushing evaluations to windows (renderer mesh push,
+   * docs/architecture/workers.md#evaluation-status). Returns the unsubscribe.
+   */
+  onChange(listener: (partId: string) => void): () => void
 }
 
 export interface SchedulerOptions {
@@ -148,6 +154,10 @@ export function createEvaluationScheduler(opts: SchedulerOptions): EvaluationSch
   let unsubscribe: (() => void) | undefined
   /** At most one evaluation requested at a time, so a newly due part can go first. */
   let inFlight: PartEntry | undefined
+  const listeners = new Set<(partId: string) => void>()
+  const notify = (partId: string): void => {
+    for (const l of [...listeners]) l(partId)
+  }
 
   function compute(doc: ProjectDoc, partId: string): Computed {
     let perDoc = computedByDoc.get(doc)
@@ -229,11 +239,18 @@ export function createEvaluationScheduler(opts: SchedulerOptions): EvaluationSch
       () => abortedErr(`part ${partId} was removed`),
     )
     parts.delete(partId)
+    notify(partId)
   }
 
   /** A commit may have changed the part's input. */
   function changed(doc: ProjectDoc, partId: string, debounce: boolean): void {
     if (!Object.hasOwn(doc.parts, partId)) return remove(partId)
+    const before = parts.get(partId)?.current
+    update(doc, partId, debounce)
+    if (parts.get(partId)?.current !== before) notify(partId)
+  }
+
+  function update(doc: ProjectDoc, partId: string, debounce: boolean): void {
     const e = entry(partId)
     const c = compute(doc, partId)
     const prev = e.current
@@ -271,6 +288,7 @@ export function createEvaluationScheduler(opts: SchedulerOptions): EvaluationSch
       e.quiet = true
       e.due = true
       schedule()
+      notify(e.id) // a cached result of this input shows now
     }, debounceMs)
   }
 
@@ -355,6 +373,7 @@ export function createEvaluationScheduler(opts: SchedulerOptions): EvaluationSch
           (w) => w.hash === req.hash,
           () => Ok(stateOf(e, c)),
         )
+        notify(e.id)
       }
       schedule()
       return
@@ -386,6 +405,7 @@ export function createEvaluationScheduler(opts: SchedulerOptions): EvaluationSch
         (w) => w.hash === req.hash,
         () => Ok(stateOf(e, c)),
       )
+    notify(e.id)
     schedule()
   }
 
@@ -418,6 +438,10 @@ export function createEvaluationScheduler(opts: SchedulerOptions): EvaluationSch
       schedule()
     },
     close,
+    onChange(listener) {
+      listeners.add(listener)
+      return () => void listeners.delete(listener)
+    },
     state(doc, partId) {
       return stateOf(parts.get(partId), compute(doc, partId))
     },
@@ -438,7 +462,10 @@ export function createEvaluationScheduler(opts: SchedulerOptions): EvaluationSch
         e.attempt = 1
       }
       const now = stateOf(e, c)
-      if (now.status !== 'pending') return Promise.resolve(Ok(now))
+      if (now.status !== 'pending') {
+        notify(partId) // skipping the debounce may show a cached result
+        return Promise.resolve(Ok(now))
+      }
       return new Promise((resolve) => {
         const w: Waiter = {
           hash: (c as Extract<Computed, { ok: true }>).hash,

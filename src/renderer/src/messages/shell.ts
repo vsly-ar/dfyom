@@ -98,21 +98,8 @@ export const shellMessages = {
   },
 
   empty: {
-    noProject: {
-      title: 'No project open',
-      description:
-        'Open or create a project to start. Project files come with the design UI (task 3.6).',
-    },
     design: {
-      noPart: {
-        title: 'No part yet',
-        description: 'Adding a part and its operations comes with the design UI (task 3.6).',
-      },
-      part: (name: string) => ({
-        title: name,
-        description: 'Operations and their parameters come with the design UI (task 3.6).',
-      }),
-      inspector: 'Select an operation to edit its parameters (task 3.6).',
+      inspector: 'Select an operation to edit its parameters.',
     },
     plan: {
       noPart: {
@@ -138,11 +125,5 @@ export const shellMessages = {
       },
       inspector: 'DRO, run progress and run controls appear here (task 3.12).',
     },
-  },
-
-  viewport: {
-    placeholder: '3D viewport',
-    placeholderNote: 'The react-three-fiber viewport comes with task 3.5.',
-    summary: (mode: AppMode) => `${shellMessages.modes[mode]} scene`,
   },
 }

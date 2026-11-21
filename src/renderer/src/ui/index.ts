@@ -73,6 +73,14 @@ export { Toolbar, ToolbarButton, ToolbarSeparator, type ToolbarProps } from './T
 export { Tooltip, type TooltipProps } from './Tooltip/Tooltip'
 export { UndoRedo, type UndoRedoProps } from './UndoRedo/UndoRedo'
 export {
+  WarningItem,
+  WarningList,
+  type WarningListLabels,
+  type WarningListProps,
+  type WarningTier,
+  type WarningView,
+} from './WarningList/WarningList'
+export {
   PortalContainer,
   ThemeScope,
   TOOLTIP_DELAY_MS,

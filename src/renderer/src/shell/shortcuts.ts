@@ -4,6 +4,7 @@
 // #accessibility
 import { useEffect, useRef } from 'react'
 import { APP_MODES, type AppMode } from '../../../core/modes'
+import { noteKeyAction } from './key-echo'
 
 export const IS_MAC =
   typeof navigator !== 'undefined' &&
@@ -74,13 +75,16 @@ export function useShellShortcuts(handlers: ShellShortcutHandlers): void {
       const mode = APP_MODES[Number(e.key) - 1]
       if (/^[1-3]$/.test(e.key) && mode !== undefined && !e.shiftKey) {
         e.preventDefault()
+        noteKeyAction(`mode.${mode}`)
         h.onMode(mode)
       } else if (e.key.toLowerCase() === 'z') {
         e.preventDefault()
+        noteKeyAction(e.shiftKey ? 'edit.redo' : 'edit.undo')
         if (e.shiftKey) h.onRedo()
         else h.onUndo()
       } else if (!IS_MAC && e.key.toLowerCase() === 'y' && !e.shiftKey) {
         e.preventDefault()
+        noteKeyAction('edit.redo')
         h.onRedo()
       }
     }

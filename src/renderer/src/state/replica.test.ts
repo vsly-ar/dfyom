@@ -114,6 +114,12 @@ describe('document replica', () => {
     expect(isDirty(s)).toBe(true)
     emit(save(s.seq + 1, s.revision))
     expect(isDirty(open(replica.getState()))).toBe(false)
+    // Save as names the new file
+    emit({
+      ...save(s.seq + 2, s.revision),
+      outcome: { ok: true, value: { filePath: '/p/b.dfyom' } },
+    })
+    expect(open(replica.getState()).file).toBe('/p/b.dfyom')
   })
 })
 

@@ -1,6 +1,7 @@
-// Status bar: save state, jobs, unit system, agent connection. Evaluation status and the warning
-// count join with the design UI (3.6). Doc: docs/conventions/ui.md#app-shell
+// Status bar: save state, the mode's status (design: evaluation status and warning count, 3.6),
+// jobs, unit system, agent connection. Doc: docs/conventions/ui.md#app-shell
 import { shellMessages } from '../messages/shell'
+import { ModeStatus } from '../modes/ModePanels'
 import { isDirty } from '../state/replica'
 import { JobIndicator } from '../ui'
 import { AgentIndicator } from './AgentIndicator'
@@ -15,6 +16,7 @@ export function StatusBar(): React.JSX.Element {
   const jobs = useJobs()
   const sessions = useAgentSessions()
   const openSettings = useUi((s) => s.setSettingsOpen)
+  const mode = useUi((s) => s.mode)
   const open = replica.status === 'open' ? replica : undefined
   const save =
     open === undefined
@@ -29,6 +31,7 @@ export function StatusBar(): React.JSX.Element {
       <span className={styles['statusItem']} data-tone={open && isDirty(open) ? 'dirty' : 'clean'}>
         {save}
       </span>
+      <ModeStatus mode={mode} doc={open?.doc} />
       <JobIndicator
         jobs={jobs.jobs}
         onPause={jobs.pause}

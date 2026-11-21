@@ -46,22 +46,22 @@ Task 1.16, **approved by the user on 2026-11-20**. The reference is [ui-design-s
 
 ## Where things live
 
-| Path                                        | Holds                                                                                           |
-| ------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `src/renderer/src/ui/tokens.css`            | All design tokens as CSS custom properties, light and dark ([tokens](#design-tokens)).          |
-| `src/renderer/src/ui/base.css`              | The only other global CSS: box sizing, body font and colours, focus ring, reduced motion.       |
-| `src/renderer/src/ui/<Name>/`               | One component per folder: `<Name>.tsx`, `<Name>.module.css`, `<Name>.test.tsx`.                 |
-| `src/renderer/src/ui/index.ts`              | The library's public API; screens import from `ui/`, never from Radix.                          |
-| `src/renderer/src/ui/UiProvider/`           | `UiProvider` (tooltip timing), `ThemeScope` and the portal container overlays render into.      |
-| `src/renderer/src/ui/icons/`                | Own icons: `tool/` (CNC tool and view icons), `field/` (field illustrations) ([icons](#icons)). |
-| `src/renderer/src/ui/motion.ts`             | `useReducedMotion()`: OS preference or `data-motion='reduce'` on the root ([motion](#motion)).  |
-| `src/renderer/src/gallery/`                 | Dev-only component gallery at `#gallery` ([testing](#testing)); not in production builds.       |
-| `src/renderer/src/test/`                    | Test setup and helpers (`renderUi`, `expectNoAxeViolations`, `setReducedMotion`, fake bridge).  |
-| `src/renderer/src/shell/`                   | App shell: regions, toolbar, status bar, dialogs, shortcuts, `ViewportSlot` ([layout](#layout)) |
-| `src/renderer/src/state/`                   | Per-window state: [replica](#document-replica), [settings](#settings) mirror, Zustand UI store. |
-| `src/renderer/src/modes/{design,plan,run}/` | Mode screens; `ui/` components only. Until 3.6/3.7/3.12: empty states in `ModePanels.tsx`.      |
-| `src/renderer/src/viewport/`                | The react-three-fiber canvas and scenes (task 3.5).                                             |
-| `src/renderer/src/messages/`                | User-facing strings and the error/warning message catalogue ([copy](#copy-and-terminology)).    |
+| Path                                        | Holds                                                                                                                                                                         |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/renderer/src/ui/tokens.css`            | All design tokens as CSS custom properties, light and dark ([tokens](#design-tokens)).                                                                                        |
+| `src/renderer/src/ui/base.css`              | The only other global CSS: box sizing, body font and colours, focus ring, reduced motion.                                                                                     |
+| `src/renderer/src/ui/<Name>/`               | One component per folder: `<Name>.tsx`, `<Name>.module.css`, `<Name>.test.tsx`.                                                                                               |
+| `src/renderer/src/ui/index.ts`              | The library's public API; screens import from `ui/`, never from Radix.                                                                                                        |
+| `src/renderer/src/ui/UiProvider/`           | `UiProvider` (tooltip timing), `ThemeScope` and the portal container overlays render into.                                                                                    |
+| `src/renderer/src/ui/icons/`                | Own icons: `tool/` (CNC tool and view icons), `field/` (field illustrations) ([icons](#icons)).                                                                               |
+| `src/renderer/src/ui/motion.ts`             | `useReducedMotion()`: OS preference or `data-motion='reduce'` on the root ([motion](#motion)).                                                                                |
+| `src/renderer/src/gallery/`                 | Dev-only component gallery at `#gallery` ([testing](#testing)); not in production builds.                                                                                     |
+| `src/renderer/src/test/`                    | Test setup and helpers (`renderUi`, `expectNoAxeViolations`, `setReducedMotion`, fake bridge).                                                                                |
+| `src/renderer/src/shell/`                   | App shell: regions, toolbar, status bar, dialogs, shortcuts, `ShellViewport` ([layout](#layout)), `project/` ([project files](#project-files))                                |
+| `src/renderer/src/state/`                   | Per-window state: [replica](#document-replica), [settings](#settings) mirror, Zustand UI store (mode, selection per mode, pick mode), part evaluations (`evaluations.ts`).    |
+| `src/renderer/src/modes/{design,plan,run}/` | Mode screens; `ui/` components only. `ModePanels.tsx` routes navigator, inspector, status-bar part and viewport scene per mode; plan and run are empty states until 3.7/3.12. |
+| `src/renderer/src/viewport/`                | The react-three-fiber canvas and scenes (task 3.5).                                                                                                                           |
+| `src/renderer/src/messages/`                | User-facing strings and the error/warning message catalogue ([copy](#copy-and-terminology)).                                                                                  |
 
 The renderer holds a read replica of `ProjectDoc` kept current by the patch stream and sends every change as a command over IPC ([commands.md](../architecture/commands.md#project-state)). Selection, camera, panel layout and mode are per-window UI state, never in the document or undo history.
 
@@ -217,7 +217,7 @@ The `Field` component (3.3, quantity behaviour in 3.4) is a grid: label column (
 - **Lock** sits between label and input, outside the input; it toggles whether the value follows the recommendation.
 - **Pencil** inside the input, on a tinted round background, opens the adjust popover (step buttons .001–100 and the recommended value); amber-tinted when a fix is available.
 - **Support area:** one group under the input that looks pulled out from under it (no top corners, inset from the input's rounding, a small shadow from the input, slides in with `--motion-base`). It holds the echo ([quantity input](#quantity-and-expression-input)), the highest-severity status with its fix button ("Use 3.00"), and further notes collapsed ("1 dismissed · Show"). Its background follows the severity ([warnings](#warnings-and-dfm)). Read-only fields show it dimmed with a dashed border.
-- Narrow panels: the input column narrows before the label column; below 260 px the support buttons wrap under the text.
+- Narrow panels: the input column narrows before the label column; below 260 px the support buttons wrap under the text. Field lists in a container (`container-type: inline-size`) narrower than 20 rem put the label above the input (decided in 3.6: in the 16 rem navigator and the 20 rem inspector the 124 px label column left the input no room).
 
 ## Layout
 
@@ -246,7 +246,7 @@ The window layout (task 3.3b, `shell/AppShell.tsx`): the sketch was the starting
 - **Inspector (right):** parameters of the selection, its warnings, the `ParamIllustration`, recommended ranges. In run mode: DRO, run progress, run controls.
 - **Status bar:** [evaluation status](#evaluation-status-pending-outdated-failed), [jobs](#jobs-and-progress), warning count (opens the warning list), unit system, save state, agent connection.
 - Side panels are resizable and collapsible; layout is per window, kept in app preferences, never in the project. Minimum window 1024 × 640; below 1280 px wide the inspector overlays the viewport instead of shrinking it.
-- **Window chrome:** native title bar and native application menu (File, Edit, View, Help) with accelerators that dispatch the same commands as the buttons ([decision 12](#decisions)). The menu is not built yet (Electron's default menu; [plan known issues](../plans/v0.1.md#known-issues-and-risks)).
+- **Window chrome:** native title bar and native application menu (File, Edit, View, Help) with accelerators that dispatch the same commands as the buttons ([decision 12](#decisions); built in 3.6, [keyboard shortcuts](#keyboard-shortcuts)).
 
 As built (3.3b):
 
@@ -254,9 +254,9 @@ As built (3.3b):
 - **Panels** (`Panel`, `PanelGroup` on react-resizable-panels): navigator 16 rem (min 12 rem, max 40 %), viewport (min 20 rem), inspector 20 rem (min 15 rem, max 45 %). Side panels keep their pixel size when the window resizes, collapse when dragged below their minimum or by their toggle, and resize by keyboard on the focused hairline separator. One panel group for every width, so the viewport is never remounted.
 - **Layout persistence:** after the user resizes or toggles, the group's layout is saved (debounced 400 ms) in the [settings](#settings) under `layouts['shell-wide']` or `layouts['shell-narrow']`; a new window starts from it. The layout at mount is not written back.
 - **Narrow windows** (below 1280 px, `WIDE_QUERY`): the inspector is not a panel but an overlay at the viewport's right edge (`--shadow-2`, slides in), closed until its toggle opens it.
-- **Viewport slot:** `shell/ViewportSlot.tsx` is the placeholder in the `main` landmark (named "Viewport") until task 3.5; swapping it for `<Viewport />` is a one-line change in `AppShell`.
+- **Viewport:** `shell/ShellViewport.tsx` renders the one `Viewport` in the `main` landmark (named "Viewport"); `useModeScene(mode)` (`modes/ModePanels.tsx`) gives the scene props, so the canvas stays mounted across modes (3.6; it replaced the 3.3b `ViewportSlot`). Plan and run show the design part until their scenes exist.
 - **Title bar:** the document title is the project name, with " — Edited" while there are unsaved changes; "DFYOM" without a project.
-- **Status bar** (`contentinfo`): save state ("No project", "Not saved yet" for an untitled project, "Unsaved changes", "Saved"), the `JobIndicator`, the unit system, the agent indicator. Evaluation status and the warning count join with 3.6.
+- **Status bar** (`contentinfo`): save state ("No project", "Not saved yet" for an untitled project, "Unsaved changes", "Saved"), the mode's part (design, 3.6: the [evaluation status](#evaluation-status-pending-outdated-failed) in a polite live region and the warning count, which opens the warning list), the `JobIndicator`, the unit system, the agent indicator.
 - **Agent indicator:** while agent sessions are attached, "Agent connected" / "n agents connected" in the status bar (in a polite live region); its popover names each session (client name or "Unknown client", source id, bound project) and links to the settings ([llm-api.md](../architecture/llm-api.md#local-http)).
 - **Closing a project with its last window:** closing a window bound to a project that no other window shows closes the project first (`project.close` through the window's session; agents bound to it lose it). Main asks the window when the close is refused: unsaved changes → `ConfirmDialog` "Close “name” with unsaved changes?" with "Close without saving" (the changes stay recoverable); any other refusal (a run is going) → a dialog with the `ErrorMessage`. Quitting the app does not ask: `host.shutdown` closes every project and unsaved changes stay recoverable. Decision logic: `src/main/window-close.ts`.
 
@@ -273,6 +273,23 @@ As built (3.3b):
 - Fields are grouped by what the user thinks about (Shape, Depth, Corners, Tabs), in the order of the [mode doc's](../modes/design.md#operations-v01) parameter tables; rarely changed groups start collapsed.
 - Read-only states (a `finalized` plan, an `inUse` plan) show read-only fields (desaturated illustration, dimmed support area, [field](#field)) with a lock icon and the reason as a tooltip with the way out ("Finalized plans are read-only. Set the status to settled design to edit, or duplicate the plan."), not disabled grey inputs.
 - Plan stale badges ([plan-v0.1.md](../modes/plan-v0.1.md#plans-are-snapshots)) appear on the affected row and in the plan header with the rebuild / library-update action next to them.
+
+### Project files
+
+New / Open / Save in the window (task 3.6; `shell/project/`, shared by every mode). The window calls the app-scope commands agents call (`project.create`, `project.open`, `project.save`, `project.recovery.*`); only the native file dialogs (`window.dfyom.files`) are window plumbing.
+
+- **Without a project** the navigator shows the start panel in every mode: "New project" (dialog: name, unit system), "Open project", and the projects with unsaved changes from an earlier session ([persistence.md](../architecture/persistence.md#crash-recovery)), each with Restore and Discard (confirmed).
+- **New / Open in a window with a project replace it** (decided in 3.6; one project per window): unsaved changes are confirmed first ("Close “name” with unsaved changes?"); after the new project is bound, the old one is closed with `confirm` (its changes stay recoverable) unless another window or agent session is bound to it (`project.list`).
+- **Save** writes to the project file; an untitled project goes to **Save as**: the native save dialog (default name from the project, `.dfyom` added), then `project.save { target, confirm: true }` – the OS dialog already asked before replacing a file. The replica takes the new file from the save's outcome (`filePath`).
+- **Recovery prompt:** `project.open` answering `persist.recovery` opens "Restore unsaved changes?" with "Restore changes" (primary) and "Discard changes" (danger, confirmed): `project.recovery.resolve`.
+- **Foreign lock:** `persist.locked` opens "The project is open elsewhere" with the error, "Try again", and "Retry in 2 min" (a countdown, then it opens again by itself): a lock of a stopped instance on another computer can be taken over after 2 minutes ([persistence.md](../architecture/persistence.md#lock)).
+- Other failures show the `ErrorMessage` in a dialog ("The project could not be opened / saved / created").
+
+### Keyboard shortcuts
+
+- The native menu (`src/main/menu.ts`): File (New project… `Ctrl/Cmd+N`, Open project… `Ctrl/Cmd+O`, Save `Ctrl/Cmd+S`, Save as… `Ctrl/Cmd+Shift+S`, Close window or Quit), Edit (Undo, Redo, cut, copy, paste, select all), View (Design / Plan / Run `Ctrl/Cmd+1/2/3`, Navigator, Inspector, zoom, full screen; reload and developer tools in development), Window, Help (Keyboard shortcuts). Items are sent to the focused window (`menu.onAction`), which runs the same handler as the button or key (`shell/useAppCommands.ts`).
+- The window handles the same keys itself (so they work whichever sees a key first); a menu action within 300 ms of the same key handled by the window is its accelerator echo and is skipped (`shell/key-echo.ts`). Menu Undo/Redo in a text field edit the text (`document.execCommand`), elsewhere the history.
+- `?` (not in a text field) and Help → Keyboard shortcuts open the shortcut list (`ShortcutsDialog`), grouped as project, edit, modes and panels, viewport, design navigator, fields.
 
 ## Shell state
 
@@ -361,6 +378,18 @@ How an `AppError` reaching the UI boundary ([boundaries.md](../conventions/error
 
 - The viewport is focusable (`tabindex=0`, labelled region); arrow keys orbit, `Shift`+arrows pan, `+`/`−` zoom.
 
+### Design mode (task 3.6)
+
+`src/renderer/src/modes/design/` ([design.md](../modes/design.md#design-ui-task-36)):
+
+- **Navigator** (`DesignNavigator`): stock setup without a part; otherwise the part (a button that clears the selection), its stock, and the operations (the `OperationList` inline: an ordered list of rows, each a toggle button – icon, name, id, warning badge, failed marker – with move up / move down / remove icon buttons that overlay the row's end while it is hovered, focused or selected). `Alt+↑/↓` on a row moves it, `↑/↓` move the focus. Removing shows the toast "Removed Pocket 2 · Undo".
+- **Inspector** (`DesignInspector`): no selection → the part (name, stock, general tolerance, evaluation status, all warnings with "Apply" and a link to their operation); a selected operation → name, then its groups. A command error's issues show at their field (`aria-invalid`), the rest as an `ErrorMessage` at the top ("The change was not applied."); the field keeps the rejected text until fixed or reverted.
+- **Selection** is per mode in the UI store; a navigator row, a viewport click (the owning operation; stock surfaces clear it) and a warning's link all set it; the inspector follows. `Escape` in the viewport clears it.
+- **Pick mode:** the `on` field's crosshair button and `QuantityInput.onPick` (`Alt+P`) put a pick request in the UI store (owner field, banner label, eligible surfaces: `on` targets, or every horizontal surface before the operation for formulas); the viewport shows it and a click calls back (`on` commits the surface; a formula gets `<surface>.z` inserted). `Escape` cancels.
+- **Scene** (`useDesignScene`): last good mesh, stock box, status, selection; while `pending`, the selected operation's shape as dashed amber loops at its top and floor (`outline.ts`, from the document's values, which are the committed field values); when `failed`, a `--danger` ring above the failing operation (named by the error's issue paths or frame data, else the selection, else the last operation); the summary "Part with 4 operations, 2 warnings, updating."
+- **Selection pulse:** a new selection's tint starts at `MIX.pulse` (0.6) and eases to `MIX.selected` over `--motion-emphasis`; none under reduced motion.
+- **Warnings** come from `design.warning.list`, re-read once per revision and evaluation change and shared by navigator, inspector, status bar and viewport; text from the DFM catalogue (`messages/dfm.ts`).
+
 ### Viewport (task 3.5)
 
 `src/renderer/src/viewport/` exports `Viewport`, the one react-three-fiber canvas ([ADR 0010](../decisions/0010-react-three-fiber-viewport.md)); the shell (3.3b) mounts it in its viewport slot and keeps it alive across modes. Dependencies, exact versions: `three` 0.187.0, `@react-three/fiber` 9.8.2, `@react-three/drei` 10.7.9 (camera controls: `camera-controls`), all MIT; drei's transitive dependencies are MIT, ISC, BSD-3-Clause and Apache-2.0, all GPL-3.0-compatible ([ADR 0014](../decisions/0014-gpl-3-or-later-license.md)).
@@ -392,6 +421,7 @@ Design evaluation is automatic with a 200 ms trailing debounce ([workers.md](../
 
 - A drag or held key never flickers: nothing changes until 200 ms after the last change, and the indicator delay hides evaluations that finish in time ([decision 15](#decisions)).
 - Parameter warnings come with every command result and show at once; geometry warnings appear when the evaluation is `done`.
+- As built (3.6): the window gets each part's status and mesh from main's evaluation push ([workers.md](../architecture/workers.md#evaluation-status)); the status bar shows "Updating…" after `--delay-indicator`, and "Evaluation failed at Pocket 1" as a danger chip that selects the operation; while pending, the warning lists note "Geometry checks pending."; the live outline is drawn for the selected operation.
 
 ### Jobs and progress
 
@@ -416,7 +446,7 @@ Warnings never block ([design.md](../modes/design.md#dfm-checks), [plan-v0.1.md]
 
   Core `info` maps to soft, `warning` to hard (the mapping per check code lives in the message catalogue). Warnings never block; only errors do.
 
-- **Text:** re-rendered from `code` + `params` in the project unit system through the message catalogue; the core's English `message` (mm values) is the fallback. This closes the plan's known issue on DFM messages for inch projects.
+- **Text:** re-rendered from `code` + `params` in the project unit system through the message catalogue; the core's English `message` (mm values) is the fallback. This closes the plan's known issue on DFM messages for inch projects. As built (3.6): `messages/dfm.ts`, lengths at 2 decimals in mm and 3 in inches; a suggestion's value is rounded so it still satisfies the check (≥ up, ≤ down); suggestions on a whole shape or center show without "Apply". `ui/WarningList` renders the lists (soft: "i", dismissible, "n dismissed · Show"; hard: triangle).
 - **Suggestion:** a `suggestion` becomes a button "Apply ≥ 3.2 mm" that dispatches the update command (one undo step).
 - Every warning links its terms (`Term`) and, where useful, shows a small illustration of the problem (e.g. a corner radius smaller than the tool).
 

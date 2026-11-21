@@ -1,0 +1,272 @@
+/* Design mode: navigator, stock setup, inspector, status (task 3.6). Tokens only. */
+.navigator,
+.inspector {
+  display: grid;
+  align-content: start;
+  min-height: 0;
+}
+
+.partHeader {
+  display: grid;
+  gap: var(--space-0-5);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.partName {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: var(--weight-bold);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.partName[aria-pressed='true'] {
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+
+.muted,
+.note {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-muted);
+}
+
+.note {
+  padding: var(--space-3);
+}
+
+.caption {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.choice {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.setup {
+  /* fields stack their label above the input when the navigator is narrow (Field) */
+  container-type: inline-size;
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+}
+
+.setupTitle {
+  margin: 0;
+  font-size: var(--text-lg);
+  line-height: var(--lh-lg);
+  font-weight: var(--weight-bold);
+}
+
+.emptyOps {
+  display: grid;
+  gap: var(--space-3);
+  justify-items: center;
+  padding: var(--space-3);
+}
+
+.addRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  justify-content: center;
+}
+
+.ops {
+  display: grid;
+  margin: 0;
+  padding: var(--space-1) 0;
+  list-style: none;
+}
+
+.op {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  border-left: 2px solid transparent;
+  transition: background-color var(--motion-fast) var(--ease-standard);
+}
+
+.op:hover {
+  background: var(--bg-hover);
+}
+
+.op[data-selected] {
+  border-left-color: var(--accent);
+  background: var(--accent-subtle);
+}
+
+.opSelect {
+  display: grid;
+  grid-template-columns: var(--icon-md) minmax(0, 1fr) auto auto auto;
+  gap: var(--space-2);
+  align-items: center;
+  min-height: var(--control-md);
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.opSelect > svg {
+  width: var(--icon-md);
+  height: var(--icon-md);
+}
+
+.opName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.opId {
+  font: var(--text-xs) / var(--lh-xs) var(--font-mono);
+  color: var(--text-muted);
+}
+
+.opBadge,
+.opFailed {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.opBadge {
+  color: var(--warning);
+}
+
+.opFailed {
+  color: var(--danger);
+}
+
+.opBadge svg,
+.opFailed svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+
+.opActions {
+  /* over the row's end while hovered, focused or selected, so names keep the full width */
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  display: inline-flex;
+  padding: 0 var(--space-1);
+  background: var(--bg-chrome);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--motion-fast) var(--ease-standard);
+}
+
+.op:hover .opActions,
+.op:focus-within .opActions,
+.op[data-selected] .opActions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.op[data-selected] .opActions {
+  background: var(--accent-subtle);
+}
+
+.fields {
+  container-type: inline-size;
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+}
+
+.group {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.groupTitle {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  font-weight: var(--weight-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.warnings {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.onRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-1);
+  align-items: start;
+}
+
+.pickButton {
+  margin-top: var(--space-0-5);
+}
+
+.statusSlot {
+  display: inline-flex;
+  align-items: center;
+}
+
+.statusChipButton {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-1);
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.statusChipButton:hover {
+  background: var(--bg-hover);
+}
+
+.statusIcon {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  color: var(--text-faint);
+}
+
+.statusIcon[data-on] {
+  color: var(--warning);
+}
+
+.statusWarnings {
+  width: min(26rem, 80vw);
+  max-height: 50vh;
+  overflow: auto;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

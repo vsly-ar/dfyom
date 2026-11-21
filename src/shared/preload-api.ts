@@ -6,6 +6,8 @@
  * reachable by LLM agents (docs/architecture/llm-api.md).
  */
 import type { ActionEvent } from '../core/commands/action-log'
+import type { EvaluationStatus } from '../core/design/evaluation'
+import type { PartEvaluation } from '../core/geometry/evaluate'
 import type { ProjectDoc } from '../core/project/document'
 import type { RunStatus } from '../core/run/service'
 import type { AppErrorData } from './errors/app-error'
@@ -42,7 +44,60 @@ export const IPC = {
   windowCloseRequest: 'dfyom:window.closeRequest',
   /** Renderer → main (invoke): close the window and its project (`confirm` for unsaved changes). */
   windowClose: 'dfyom:window.close',
+  /** Renderer → main (invoke): a part's evaluation (mesh included when done), or null. */
+  evaluationGet: 'dfyom:evaluation.get',
+  /** Main → renderer: a part evaluation of the window's project changed (`PartEvaluationView`). */
+  evaluationChanged: 'dfyom:evaluation.changed',
+  /** Renderer → main (invoke): the native "Open project" dialog; the chosen path or null. */
+  fileChooseOpen: 'dfyom:file.chooseOpen',
+  /** Renderer → main (invoke): the native "Save project" dialog; the chosen path or null. */
+  fileChooseSave: 'dfyom:file.chooseSave',
+  /** Main → renderer: a native application menu item was chosen (`MenuAction`). */
+  menuAction: 'dfyom:menu.action',
 } as const
+
+/** The mesh of a done evaluation as the viewport draws it (copied by IPC, ≤ about 1 MB). */
+export type EvaluationMesh = Pick<
+  PartEvaluation,
+  'positions' | 'indices' | 'triangleSurface' | 'surfaces'
+>
+
+/**
+ * A part's evaluation as a window shows it (docs/architecture/workers.md#evaluation-status):
+ * window plumbing like the replica, not an agent capability (agents read `design.warning.list`).
+ */
+export interface PartEvaluationView {
+  /** The project key, so a window drops pushes of a project it no longer shows. */
+  readonly key: string
+  readonly partId: string
+  readonly status: EvaluationStatus
+  /** Hash of the part's geometry input the status is for. */
+  readonly inputHash?: string
+  /** `done` only. */
+  readonly mesh?: EvaluationMesh
+  /** `failed` only. */
+  readonly error?: AppErrorData
+}
+
+/**
+ * Native application menu items (docs/conventions/ui.md#app-shell, decision 12); main sends the
+ * chosen one to the focused window, which runs it like the matching button or shortcut.
+ */
+export const MENU_ACTIONS = [
+  'project.new',
+  'project.open',
+  'project.save',
+  'project.saveAs',
+  'edit.undo',
+  'edit.redo',
+  'mode.design',
+  'mode.plan',
+  'mode.run',
+  'view.navigator',
+  'view.inspector',
+  'help.shortcuts',
+] as const
+export type MenuAction = (typeof MENU_ACTIONS)[number]
 
 /** Window argument (`webPreferences.additionalArguments`): the settings at window creation. */
 export const SETTINGS_ARG = '--dfyom-settings'
@@ -143,6 +198,27 @@ export interface PreloadApi {
     /** Applies a patch; the reply's value is the new settings. */
     update(patch: AppSettingsPatch): Promise<CallReply>
     onChange(listener: (settings: AppSettings) => void): () => void
+  }
+  /**
+   * Part evaluations of the window's project for the viewport (renderer mesh push and query;
+   * docs/architecture/workers.md#transferred-vs-cloned). Window plumbing, not for agents.
+   */
+  readonly evaluation: {
+    get(partId: string): Promise<PartEvaluationView | null>
+    onChange(listener: (view: PartEvaluationView) => void): () => void
+  }
+  /**
+   * Native file dialogs for New / Open / Save (docs/conventions/ui.md#project-files). The renderer
+   * then calls `project.open` / `project.save` with the path, as an agent passes one.
+   */
+  readonly files: {
+    chooseOpen(): Promise<string | null>
+    /** `defaultName` without extension; the path ends in `.dfyom`. */
+    chooseSave(defaultName: string): Promise<string | null>
+  }
+  /** The native application menu's items for this window. */
+  readonly menu: {
+    onAction(listener: (action: MenuAction) => void): () => void
   }
   /** This window's lifecycle (closing a project with its last window). */
   readonly window: {

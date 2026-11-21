@@ -419,3 +419,26 @@
     transform: none;
   }
 }
+
+/* Narrow containers (a field list with `container-type: inline-size` below 20rem, e.g. the
+   navigator and a default-width inspector): the label goes above the input, not beside it. */
+@container (max-width: 20rem) {
+  .field {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .label {
+    grid-column: 1 / -1;
+  }
+  .lock {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .control {
+    grid-column: 2;
+    grid-row: 2;
+  }
+  .support {
+    grid-column: 2;
+    grid-row: 3;
+  }
+}

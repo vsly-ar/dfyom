@@ -17,6 +17,8 @@ import {
   type WindowCloseRequest,
 } from '../shared/preload-api'
 import type { Dispatcher } from '../core/commands/dispatcher'
+import { evaluationView, followEvaluations } from './evaluation-push'
+import { chooseOpenFile, chooseSaveFile } from './file-dialogs'
 import type { AppHost } from './host/app-host'
 import type { LocalHttpControl } from './mcp/http'
 import type { SettingsStore } from './settings/store'
@@ -28,6 +30,8 @@ interface WindowSession {
   /** The runtime whose log the window follows (identity: a reopened project is another). */
   following: Dispatcher | undefined
   unsubscribe: (() => void) | undefined
+  /** Stops the part evaluation push of the followed project (task 3.6). */
+  unfollowEvaluations: (() => void) | undefined
   /** Its project was closed (or it has none to close): the next `close` goes through. */
   closeApproved: boolean
   /** A project close for this window is in flight. */
@@ -83,10 +87,17 @@ export function registerProjectIpc(
     if (d === ws.following) return
     ws.unsubscribe?.()
     ws.unsubscribe = undefined
+    ws.unfollowEvaluations?.()
+    ws.unfollowEvaluations = undefined
     ws.following = d
     if (d !== undefined)
       ws.unsubscribe = d.log.subscribe({ withPatches: true }, (e) => {
         if (!ws.win.isDestroyed()) ws.win.webContents.send(IPC.projectEvent, e)
+      })
+    const key = ws.session.boundKey
+    if (d !== undefined && key !== undefined)
+      ws.unfollowEvaluations = followEvaluations(host, key, (view) => {
+        if (!ws.win.isDestroyed()) ws.win.webContents.send(IPC.evaluationChanged, view)
       })
     // after subscribing: the snapshot the window takes now is followed by every later event
     if (!ws.win.isDestroyed())
@@ -138,6 +149,22 @@ export function registerProjectIpc(
       file: info?.file ?? null,
       dirty: info?.dirty ?? false,
     }
+  })
+
+  // Part evaluations for the viewport (renderer only) and the native file dialogs (task 3.6).
+  ipcMain.handle(IPC.evaluationGet, (event, partId: unknown) => {
+    const ws = sessionOf(event)
+    const key = ws?.session.boundKey
+    if (key === undefined || typeof partId !== 'string') return null
+    return evaluationView(host, key, partId)
+  })
+  ipcMain.handle(IPC.fileChooseOpen, (event) => {
+    const ws = sessionOf(event)
+    return ws === undefined ? null : chooseOpenFile(ws.win)
+  })
+  ipcMain.handle(IPC.fileChooseSave, (event, name: unknown) => {
+    const ws = sessionOf(event)
+    return ws === undefined ? null : chooseSaveFile(ws.win, typeof name === 'string' ? name : '')
   })
 
   ipcMain.handle(IPC.settingsUpdate, (event, patch: unknown): CallReply => {
@@ -202,6 +229,7 @@ export function registerProjectIpc(
         session,
         following: undefined,
         unsubscribe: undefined,
+        unfollowEvaluations: undefined,
         closeApproved: false,
         closing: false,
       }
@@ -218,6 +246,7 @@ export function registerProjectIpc(
       })
       win.on('closed', () => {
         ws.unsubscribe?.()
+        ws.unfollowEvaluations?.()
         session.end()
         byContents.delete(contentsId)
       })

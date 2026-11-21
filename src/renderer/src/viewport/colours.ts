@@ -21,6 +21,8 @@ export const PALETTE_TOKENS = {
   axisX: '--vp-axis-x',
   axisY: '--vp-axis-y',
   axisZ: '--vp-axis-z',
+  /** The error marker at a failing operation (task 3.6). */
+  danger: '--danger',
 } as const
 
 export type PaletteKey = keyof typeof PALETTE_TOKENS
@@ -76,7 +78,14 @@ export function toLinear(c: Rgb): Rgb {
  * (the accent is never a large fill, ui.md decision 18); pick mode tints eligible surfaces lightly
  * and the hovered eligible one strongly, and dims the rest towards the background.
  */
-export const MIX = { selected: 0.25, pickEligible: 0.12, pickHover: 0.4, pickDimmed: 0.6 } as const
+export const MIX = {
+  selected: 0.25,
+  pickEligible: 0.12,
+  pickHover: 0.4,
+  pickDimmed: 0.6,
+  /** Start of the selection pulse (`--motion-emphasis`), easing back to `selected`. */
+  pulse: 0.6,
+} as const
 
 export interface SurfaceState {
   /** Operation (or `stock`) whose surfaces are selected. */
@@ -87,6 +96,8 @@ export interface SurfaceState {
   readonly pickEligible?: ReadonlySet<SurfaceId> | null | undefined
   /** `pending` after the indicator delay, or `failed`: the last mesh is tinted outdated. */
   readonly outdated?: boolean | undefined
+  /** Selection pulse, 1 at a new selection easing to 0 (ui.md decision 24); 0 = none. */
+  readonly pulse?: number | undefined
 }
 
 /**
@@ -103,7 +114,8 @@ export function surfaceColour(surface: SurfaceId, state: SurfaceState, palette: 
     return mix(base, palette.selected, MIX.pickEligible)
   }
   if (state.selectedOperation != null && owner === state.selectedOperation) {
-    return mix(base, palette.selected, MIX.selected)
+    const p = Math.min(1, Math.max(0, state.pulse ?? 0))
+    return mix(base, palette.selected, MIX.selected + p * (MIX.pulse - MIX.selected))
   }
   if (state.hovered != null && surfaceOwner(state.hovered) === owner) return palette.hover
   return base

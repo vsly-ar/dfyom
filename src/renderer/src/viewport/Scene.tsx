@@ -21,6 +21,7 @@ import {
   triangleCount,
   type Box,
   type SurfaceTarget,
+  type Vec3,
   type ViewportMesh,
 } from './mesh'
 
@@ -30,6 +31,10 @@ export interface SceneProps {
   bounds: Box | undefined
   palette: Palette
   surfaceState: SurfaceState
+  /** Live outline of the edited operation (pending evaluation). */
+  outline?: readonly (readonly Vec3[])[] | null
+  /** Error marker (failed evaluation). */
+  marker?: Vec3 | null
   controlsRef: Ref<CameraControlsImpl>
   onHover: (target: SurfaceTarget | undefined) => void
   onClick: (target: SurfaceTarget, event: ThreeEvent<MouseEvent>) => void
@@ -43,7 +48,7 @@ function colour(c: Rgb): Color {
 }
 
 export function Scene(props: SceneProps): React.JSX.Element {
-  const { mesh, stock, bounds, palette, controlsRef } = props
+  const { mesh, stock, bounds, palette, controlsRef, outline, marker } = props
   return (
     <>
       <CameraControls
@@ -57,6 +62,8 @@ export function Scene(props: SceneProps): React.JSX.Element {
       <Lights bounds={bounds} />
       {mesh && triangleCount(mesh) > 0 ? <PartMesh {...props} mesh={mesh} /> : null}
       {stock ? <StockOutline box={stock} colour={palette.stock} /> : null}
+      {outline ? <LiveOutline loops={outline} colour={palette.selected} /> : null}
+      {marker ? <ErrorMarker at={marker} bounds={bounds} colour={palette.danger} /> : null}
       {bounds ? <Floor bounds={bounds} palette={palette} /> : null}
       <Axes bounds={bounds} palette={palette} />
     </>
@@ -229,6 +236,82 @@ function StockOutline({ box, colour: c }: { box: Box; colour: Rgb }): React.JSX.
       gapSize={3}
       raycast={noRaycast}
     />
+  )
+}
+
+/** The edited operation's shape while its evaluation is pending: dashed amber loops. */
+function LiveOutline({
+  loops,
+  colour: c,
+}: {
+  loops: readonly (readonly Vec3[])[]
+  colour: Rgb
+}): React.JSX.Element {
+  const invalidate = useThree((s) => s.invalidate)
+  useEffect(() => invalidate(), [loops, invalidate])
+  return (
+    <group>
+      {loops
+        .filter((l) => l.length >= 2)
+        .map((l, i) => (
+          <Line
+            key={i}
+            points={[...l, l[0]!].map((p) => [p[0], p[1], p[2]] as [number, number, number])}
+            color={colour(c)}
+            lineWidth={2}
+            dashed
+            dashSize={2}
+            gapSize={1.5}
+            depthTest={false}
+            renderOrder={2}
+            raycast={noRaycast}
+          />
+        ))}
+    </group>
+  )
+}
+
+/** A ring with a stem above the failing operation, in `--danger` (always on top). */
+function ErrorMarker({
+  at,
+  bounds,
+  colour: c,
+}: {
+  at: Vec3
+  bounds: Box | undefined
+  colour: Rgb
+}): React.JSX.Element {
+  const invalidate = useThree((s) => s.invalidate)
+  useEffect(() => invalidate(), [at, invalidate])
+  const span = bounds ? Math.max(...bounds.max.map((m, i) => m - bounds.min[i]!)) : 50
+  const r = Math.max(1.5, span * 0.03)
+  const top = at[2] + 3 * r
+  const ring = Array.from({ length: 33 }, (_, i): [number, number, number] => {
+    const a = (i / 32) * 2 * Math.PI
+    return [at[0] + r * Math.cos(a), at[1] + r * Math.sin(a), top]
+  })
+  return (
+    <group>
+      <Line
+        points={ring}
+        color={colour(c)}
+        lineWidth={3}
+        depthTest={false}
+        renderOrder={3}
+        raycast={noRaycast}
+      />
+      <Line
+        points={[
+          [at[0], at[1], at[2]],
+          [at[0], at[1], top - r],
+        ]}
+        color={colour(c)}
+        lineWidth={2}
+        depthTest={false}
+        renderOrder={3}
+        raycast={noRaycast}
+      />
+    </group>
   )
 }
 

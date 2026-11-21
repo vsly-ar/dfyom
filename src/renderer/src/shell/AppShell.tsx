@@ -27,7 +27,10 @@ import { SettingsDialog } from './SettingsDialog'
 import { useReplica, useSettings, useShell, useUi } from './ShellContext'
 import { REGION_ATTR, shortcutLabel, useShellShortcuts } from './shortcuts'
 import { StatusBar } from './StatusBar'
-import { ViewportSlot } from './ViewportSlot'
+import { ProjectDialogs } from './project/ProjectDialogs'
+import { ShellViewport } from './ShellViewport'
+import { ShortcutsDialog } from './ShortcutsDialog'
+import { useAppCommands } from './useAppCommands'
 
 /** Below this width the inspector overlays the viewport (ui.md#app-shell). */
 export const WIDE_QUERY = '(min-width: 1280px)'
@@ -86,6 +89,14 @@ export function AppShell(): React.JSX.Element {
   }
 
   const onMode = (next: AppMode) => setMode(next)
+  // native menu items and the file shortcuts (task 3.6)
+  useAppCommands({
+    onMode: setMode,
+    onUndo: () => history.step('undo'),
+    onRedo: () => history.step('redo'),
+    onToggleNavigator: () => toggle(navigator, navOpen),
+    onToggleInspector: () => (wide ? toggle(inspector, inspectorOpen) : setOverlayOpen((o) => !o)),
+  })
   const inspectorShown = wide ? inspectorOpen : overlayOpen
   const inspectorContent = <ModeInspector mode={mode} doc={doc} />
 
@@ -156,7 +167,7 @@ export function AppShell(): React.JSX.Element {
           <PanelResizeHandle label={m.resize.navigator} />
           <Panel id="viewport" minSize="20rem">
             <main aria-label={m.regions.viewport} className={styles['viewport']} {...region}>
-              <ViewportSlot mode={mode} />
+              <ShellViewport mode={mode} />
             </main>
           </Panel>
           {wide ? (
@@ -201,6 +212,8 @@ export function AppShell(): React.JSX.Element {
 
       <SettingsDialog />
       <CloseProjectDialog />
+      <ProjectDialogs />
+      <ShortcutsDialog />
     </div>
   )
 }

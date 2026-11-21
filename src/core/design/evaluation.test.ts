@@ -194,6 +194,28 @@ describe('automatic evaluation', () => {
     expect(s.status()).toBe('done')
   })
 
+  it('tells listeners when a part may have changed state (window mesh push)', async () => {
+    const s = await setup()
+    const seen: string[] = []
+    const off = s.scheduler.onChange((partId) =>
+      seen.push(`${partId}:${s.scheduler.state(s.d.doc, partId).status}`),
+    )
+    await finish(s.runs[0]!)
+    expect(seen).toEqual([`${s.partId}:done`])
+    await s.setDepth('1')
+    expect(seen.at(-1)).toBe(`${s.partId}:pending`)
+    s.timers.advance(200)
+    await finish(s.runs[1]!)
+    expect(seen.at(-1)).toBe(`${s.partId}:done`)
+    // a rename keeps the input: no notification
+    const n = seen.length
+    await s.run('design.part.update', { partId: s.partId, name: 'Renamed' })
+    expect(seen).toHaveLength(n)
+    off()
+    await s.setDepth('2')
+    expect(seen).toHaveLength(n)
+  })
+
   it('a newer revision aborts the running evaluation at once and debounces again', async () => {
     const s = await setup()
     await finish(s.runs[0]!)

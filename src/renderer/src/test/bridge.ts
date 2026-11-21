@@ -5,9 +5,12 @@ import type { ActionEvent } from '../../../core/commands/action-log'
 import { FIXTURE_DOCUMENT_COMMANDS } from '../../../core/commands/commands.fixture'
 import type { Source } from '../../../core/commands/context'
 import { createDispatcher, type Dispatcher } from '../../../core/commands/dispatcher'
-import { createRegistry } from '../../../core/commands/registry'
+import { inProcessWorkers } from '../../../core/commands/jobs'
+import { createAppRegistry, createRegistry } from '../../../core/commands/registry'
+import { Library } from '../../../core/library/library'
+import { createMemoryLibraryStorage } from '../../../core/library/memory-storage'
 import { fakeIds } from '../../../core/commands/testing'
-import { newProjectDoc } from '../../../core/project/document'
+import { newProjectDoc, type UnitSystem } from '../../../core/project/document'
 import type { RunStatus } from '../../../core/run/service'
 import { agentError } from '../../../core/agent/results'
 import type { AppErrorData } from '../../../shared/errors/app-error'
@@ -15,6 +18,8 @@ import type {
   AgentSessionInfo,
   CallReply,
   LocalHttpState,
+  MenuAction,
+  PartEvaluationView,
   PreloadApi,
   ProjectSnapshot,
   WindowCloseRequest,
@@ -36,8 +41,25 @@ export function fixtureDispatcher(name = 'Bracket'): Dispatcher {
   })
 }
 
-/** Queries the fake routes to `Dispatcher.query`; everything else is dispatched. */
-const QUERIES = new Set(['history.list', 'job.list', 'job.get'])
+/**
+ * A project runtime with the real project registry (design, library, plan …) and an in-memory
+ * library, without an evaluation service: evaluations are pushed by the test (`emitEvaluation`).
+ */
+export async function designDispatcher(
+  name = 'Bracket',
+  unitSystem: UnitSystem = 'mm',
+): Promise<Dispatcher> {
+  const library = await Library.open(createMemoryLibraryStorage())
+  const registry = createAppRegistry()
+  if (library.isErr()) throw library.unwrapErr()
+  if (registry.isErr()) throw registry.unwrapErr()
+  return createDispatcher({
+    registry: registry.unwrap(),
+    doc: newProjectDoc({ name, unitSystem }),
+    ids: fakeIds(),
+    services: { workers: inProcessWorkers, library: library.unwrap() },
+  })
+}
 
 export const WINDOW_SOURCE: Source = { kind: 'ui', id: 'win-1' }
 
@@ -55,6 +77,12 @@ export interface FakeBridge extends PreloadApi {
   emitSettings(settings: AppSettings): void
   emitCloseRequest(request: WindowCloseRequest): void
   setLocalHttp(state: LocalHttpState): void
+  /** Push a part evaluation (main's mesh push); `get` answers the last one per part. */
+  emitEvaluation(view: PartEvaluationView): void
+  emitMenu(action: MenuAction): void
+  /** Answers of the native file dialogs (null = cancelled, the default). */
+  setFileChoice(choice: { open?: string | null; save?: string | null }): void
+  readonly saveDialogNames: string[]
 }
 
 export function errorReply(error: AppErrorData, retryable = false): CallReply {
@@ -95,6 +123,11 @@ export function createFakeBridge(initial: AppSettings = DEFAULT_SETTINGS): FakeB
   const settings = channel<AppSettings>()
   const closeRequests = channel<WindowCloseRequest>()
   const runStatus = channel<RunStatus>()
+  const evaluationPush = channel<PartEvaluationView>()
+  const menu = channel<MenuAction>()
+  const evaluations = new Map<string, PartEvaluationView>()
+  const saveDialogNames: string[] = []
+  let fileChoice: { open: string | null; save: string | null } = { open: null, save: null }
   const handlers = new Map<string, Handler>()
   const calls: { name: string; args: unknown }[] = []
   const settingsPatches: unknown[] = []
@@ -118,8 +151,9 @@ export function createFakeBridge(initial: AppSettings = DEFAULT_SETTINGS): FakeB
       if (h) return h(args ?? {})
       if (project === undefined) return NO_PROJECT
       const d = project.d
-      if (QUERIES.has(name))
-        return toReply(Promise.resolve(d.query(name, args ?? {}, WINDOW_SOURCE)))
+      // queries first (as the session routes them); an unknown query is a command
+      const q = d.query(name, args ?? {}, WINDOW_SOURCE)
+      if (q.isOk() || q.unwrapErr().code !== 'command.unknown') return toReply(Promise.resolve(q))
       return toReply(d.dispatch(name, args ?? {}, WINDOW_SOURCE))
     },
     project: {
@@ -157,6 +191,27 @@ export function createFakeBridge(initial: AppSettings = DEFAULT_SETTINGS): FakeB
         return Promise.resolve({ ok: true, value: current, revision: 0 })
       },
       onChange: settings.on,
+    },
+    evaluation: {
+      get: (partId) => Promise.resolve(evaluations.get(partId) ?? null),
+      onChange: evaluationPush.on,
+    },
+    files: {
+      chooseOpen: () => Promise.resolve(fileChoice.open),
+      chooseSave: (name) => {
+        saveDialogNames.push(name)
+        return Promise.resolve(fileChoice.save)
+      },
+    },
+    menu: { onAction: menu.on },
+    saveDialogNames,
+    emitEvaluation(view) {
+      evaluations.set(view.partId, view)
+      evaluationPush.emit(view)
+    },
+    emitMenu: menu.emit,
+    setFileChoice(choice) {
+      fileChoice = { ...fileChoice, ...choice }
     },
     window: {
       onCloseRequest: closeRequests.on,
