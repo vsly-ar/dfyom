@@ -243,9 +243,12 @@ test('exit criteria through the UI: design, plan, export, run, save, close and r
   ])
   await preflight.getByRole('button', { name: 'Start run' }).click()
 
-  // on screen, even when the first program pause's modal already hides it from the a11y tree
+  // on screen, even when the first program pause's modal already hides it (and the inspector
+  // around it) from the a11y tree
   await expect(
-    inspector.getByRole('progressbar', { name: 'Run progress', includeHidden: true }),
+    page
+      .getByRole('complementary', { name: 'Inspector', includeHidden: true })
+      .getByRole('progressbar', { name: 'Run progress', includeHidden: true }),
   ).toBeVisible()
   const complete = inspector.getByText(/^Run complete: \d+ lines in/)
   const toolChanges: string[] = []

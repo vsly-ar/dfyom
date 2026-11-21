@@ -79,7 +79,9 @@ const nodeOnlyImports = {
 }
 
 export default defineConfig(
-  { ignores: ['out/', 'dist/', 'release/', 'coverage/', 'graft/', '.claude/'] },
+  {
+    ignores: ['out/', 'dist/', 'release/', 'coverage/', 'playwright-report/', 'graft/', '.claude/'],
+  },
   js.configs.recommended,
   tseslint.configs.recommended,
   {
