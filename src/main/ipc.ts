@@ -1,7 +1,9 @@
 // Project and agent IPC of the GUI: every window is a session of the app host (source
 // `ui:win-<id>`), so windows open, edit and save projects through the same routing as MCP.
-// Also the replica snapshot, the settings and closing a project with its last window.
-// Doc: docs/architecture/llm-api.md#processes-and-hosting, docs/conventions/ui.md#app-shell
+// Also the replica snapshot, the settings, closing a project with its last window and the window
+// choice for New / Open (one window per project).
+// Doc: docs/architecture/llm-api.md#processes-and-hosting, docs/conventions/ui.md#app-shell,
+// docs/conventions/ui.md#project-files
 // Contract: src/shared/preload-api.ts
 import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { agentError } from '../core/agent/results'
@@ -13,6 +15,7 @@ import {
   type AgentSessionInfo,
   type CallReply,
   type LocalHttpState,
+  type OpenedWindow,
   type ProjectSnapshot,
   type WindowCloseRequest,
 } from '../shared/preload-api'
@@ -25,6 +28,7 @@ import type { LocalHttpControl } from './mcp/http'
 import type { SettingsStore } from './settings/store'
 import type { SaveAllOutcome } from './quit'
 import { closeNeedsProject } from './window-close'
+import { isOpeningCommand, openTarget } from './window-open'
 
 interface WindowSession {
   readonly win: BrowserWindow
@@ -62,9 +66,32 @@ function agentSessions(sessions: readonly SessionInfo[]): AgentSessionInfo[] {
     }))
 }
 
+/** Window creation, owned by src/main/index.ts (size, preload, hidden test runs). */
+export interface WindowFactory {
+  /** A new window, not shown yet; cascaded from `from` (docs/conventions/ui.md#project-files). */
+  create(from?: BrowserWindow): BrowserWindow
+  /** Shows the window once it is ready to show (never in hidden test runs). */
+  reveal(win: BrowserWindow): void
+  /** Brings the window to the front (not in hidden test runs). */
+  focus(win: BrowserWindow): void
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+/** A successful opening reply with the window that shows the project. */
+function inWindow(r: CallReply, window: OpenedWindow): CallReply {
+  if (!r.ok) return r
+  return { ...r, value: { ...(isPlainObject(r.value) ? r.value : {}), window } }
+}
+
 export interface WindowSessions {
-  /** Makes `win` a session, bound to `key` if given; ended when the window closes. */
-  attach(win: BrowserWindow, key?: string): void
+  /**
+   * A new window as a session, bound to `key` if given, shown when ready; ended when the window
+   * closes. Cascaded from the focused window.
+   */
+  open(key?: string): void
   /**
    * The app quits now (every quit question answered, src/main/index.ts): windows close without
    * closing their project first; host.shutdown closes them (unsaved changes stay recoverable).
@@ -82,6 +109,7 @@ export function registerProjectIpc(
   host: AppHost,
   http: LocalHttpControl,
   settings: SettingsStore,
+  windows: WindowFactory,
 ): WindowSessions {
   const byContents = new Map<number, WindowSession>()
   // App quit closes every project itself (host.shutdown, unsaved changes stay recoverable); set
@@ -236,6 +264,105 @@ export function registerProjectIpc(
       if (!win.isDestroyed()) win.webContents.send(IPC.agentSessions, agents)
   })
 
+  /** Makes `win` a session, bound to `key` if given; ended when the window closes. */
+  const attach = (win: BrowserWindow, key?: string): WindowSession => {
+    const session = host.openSession({ kind: 'ui', id: `win-${win.id}` })
+    const ws: WindowSession = {
+      win,
+      session,
+      following: undefined,
+      unsubscribe: undefined,
+      unfollowEvaluations: undefined,
+      closeApproved: false,
+      closing: false,
+    }
+    if (key !== undefined) session.bind(key)
+    const contentsId = win.webContents.id
+    byContents.set(contentsId, ws)
+    follow(ws)
+    // Closing the last window of a project closes the project (docs/conventions/ui.md#app-shell).
+    win.on('close', (event) => {
+      if (quitting || ws.closeApproved) return
+      if (closeNeedsProject(ws.session.boundKey, otherKeys(ws)) === undefined) return
+      event.preventDefault()
+      if (!ws.closing) void closeWindow(ws, false)
+    })
+    win.on('closed', () => {
+      ws.unsubscribe?.()
+      ws.unfollowEvaluations?.()
+      session.end()
+      byContents.delete(contentsId)
+    })
+    return ws
+  }
+
+  /** A window bound to `key`, other than `except`, if any. */
+  const showing = (key: string, except?: WindowSession): WindowSession | undefined =>
+    [...byContents.values()].find(
+      (o) => o !== except && o.session.boundKey === key && !o.win.isDestroyed(),
+    )
+
+  const focused = (target: WindowSession, asking: WindowSession, key: string): CallReply => {
+    windows.focus(target.win)
+    return {
+      ok: true,
+      value: { key, alreadyOpen: true, window: target === asking ? 'this' : 'other' },
+      revision: target.session
+        .bound()
+        .map((d) => d.revision)
+        .unwrapOr(0),
+    }
+  }
+
+  // New / Open / Restore (docs/conventions/ui.md#project-files): one window per project. The
+  // command runs through the session of the window that will show the project, so it binds that
+  // window exactly as `call` binds the asking one.
+  ipcMain.handle(
+    IPC.windowOpenProject,
+    async (event, name: unknown, args: unknown): Promise<CallReply> => {
+      const ws = sessionOf(event)
+      if (ws === undefined || !isOpeningCommand(name)) return NOT_A_WINDOW
+      const a = isPlainObject(args) ? args : {}
+      const file = name === 'project.open' && typeof a['file'] === 'string' ? a['file'] : undefined
+      const target = openTarget({
+        name,
+        senderKey: ws.session.boundKey,
+        openKey: file === undefined ? undefined : await host.openKey(file),
+        windowKeys: [...byContents.values()].map((o) => o.session.boundKey),
+        bindsNone: name === 'project.recovery.resolve' && a['action'] === 'discard',
+      })
+      let kind = target.kind
+      if (target.kind === 'focus') {
+        const other = showing(target.key)
+        if (other !== undefined) return focused(other, ws, target.key)
+        kind = ws.session.boundKey === undefined ? 'here' : 'newWindow' // closed meanwhile
+      }
+      if (kind !== 'newWindow') {
+        const r = await ws.session.call(name, args ?? {})
+        follow(ws)
+        return inWindow(reply(r.result), 'this')
+      }
+      // Hidden until the command succeeded: a refusal (recovery, lock, error) closes it unseen and
+      // the asking window shows the answer.
+      const win = windows.create(ws.win)
+      const created = attach(win, undefined)
+      const r = await created.session.call(name, args ?? {})
+      follow(created)
+      const out = reply(r.result)
+      const key = created.session.boundKey
+      const other = key === undefined ? undefined : showing(key, created)
+      if (!out.ok || key === undefined || other !== undefined) {
+        created.closeApproved = true
+        win.destroy()
+        // opened meanwhile by another window (the check above raced with it)
+        if (out.ok && key !== undefined && other !== undefined) return focused(other, ws, key)
+        return out
+      }
+      windows.reveal(win)
+      return inWindow(out, 'new')
+    },
+  )
+
   const windowOf = (key: string): BrowserWindow | null =>
     [...byContents.values()].find((ws) => ws.session.boundKey === key && !ws.win.isDestroyed())
       ?.win ??
@@ -268,34 +395,10 @@ export function registerProjectIpc(
         session.end()
       }
     },
-    attach(win, key) {
-      const session = host.openSession({ kind: 'ui', id: `win-${win.id}` })
-      const ws: WindowSession = {
-        win,
-        session,
-        following: undefined,
-        unsubscribe: undefined,
-        unfollowEvaluations: undefined,
-        closeApproved: false,
-        closing: false,
-      }
-      if (key !== undefined) session.bind(key)
-      const contentsId = win.webContents.id
-      byContents.set(contentsId, ws)
-      follow(ws)
-      // Closing the last window of a project closes the project (docs/conventions/ui.md#app-shell).
-      win.on('close', (event) => {
-        if (quitting || ws.closeApproved) return
-        if (closeNeedsProject(ws.session.boundKey, otherKeys(ws)) === undefined) return
-        event.preventDefault()
-        if (!ws.closing) void closeWindow(ws, false)
-      })
-      win.on('closed', () => {
-        ws.unsubscribe?.()
-        ws.unfollowEvaluations?.()
-        session.end()
-        byContents.delete(contentsId)
-      })
+    open(key) {
+      const win = windows.create(BrowserWindow.getFocusedWindow() ?? undefined)
+      attach(win, key)
+      windows.reveal(win)
     },
   }
 }

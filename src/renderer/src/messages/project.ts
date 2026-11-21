@@ -22,7 +22,6 @@ export const projectMessages = {
     unitNames: { mm: 'Millimetres', inch: 'Inches' } satisfies Record<UnitSystem, string>,
     create: 'Create project',
     cancel: 'Cancel',
-    replaceNote: (name: string) => `“${name}” closes; its unsaved changes stay recoverable.`,
   },
   save: 'Save',
   saveAs: 'Save as',
@@ -53,12 +52,6 @@ export const projectMessages = {
     save: 'The project could not be saved',
     create: 'The project could not be created',
     close: 'Back to the project',
-  },
-  unsaved: {
-    title: (name: string) => `Close “${name}” with unsaved changes?`,
-    description:
-      'The changes are not in the project file. They stay recoverable: DFYOM offers to restore them when you open the project again.',
-    confirm: 'Close without saving',
   },
   shortcuts: {
     title: 'Keyboard shortcuts',

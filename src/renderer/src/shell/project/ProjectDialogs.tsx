@@ -1,5 +1,5 @@
-// The project file dialogs (task 3.6): new project, unsaved changes before replacing the
-// window's project, the recovery prompt, a foreign lock ("Retry in 2 min") and errors.
+// The project file dialogs (task 3.6): new project, the recovery prompt, a foreign lock ("Retry in
+// 2 min") and errors.
 // Doc: docs/conventions/ui.md#project-files, #confirmations
 import { FilePlus, RotateCcw } from 'lucide-react'
 import { useEffect, useState } from 'react'
@@ -31,20 +31,6 @@ export function ProjectDialogs(): React.JSX.Element | null {
   switch (dialog.kind) {
     case 'new':
       return <NewProjectDialog onOpenChange={onOpenChange} />
-    case 'unsaved':
-      return (
-        <ConfirmDialog
-          open
-          onOpenChange={onOpenChange}
-          title={m.unsaved.title(dialog.name)}
-          description={m.unsaved.description}
-          confirmLabel={m.unsaved.confirm}
-          onConfirm={() => {
-            closeDialog()
-            dialog.then()
-          }}
-        />
-      )
     case 'recovery':
       return <RecoveryDialog keyName={dialog.key} file={dialog.file} onOpenChange={onOpenChange} />
     case 'locked':

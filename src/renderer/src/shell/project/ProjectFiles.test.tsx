@@ -1,6 +1,7 @@
 // Project files in the window: New / Open / Save through the app-scope commands, the native
-// dialogs (faked), the recovery prompt, a foreign lock, unsaved changes before replacing the
-// project, the menu and the shortcut list. Doc: docs/conventions/ui.md#project-files
+// dialogs (faked), the recovery prompt, a foreign lock, New / Open with a project open (main picks
+// the window: src/main/window-open.ts), the menu and the shortcut list.
+// Doc: docs/conventions/ui.md#project-files
 import { act, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
@@ -144,17 +145,44 @@ describe('project files', () => {
     expect(bridge.saveDialogNames).toEqual(['Bracket'])
   })
 
-  it('asks before replacing a project with unsaved changes; the menu runs the same', async () => {
+  it('New with a project open asks nothing and creates through the window choice (menu too)', async () => {
     const bridge = createFakeBridge()
     bridge.bind(fixtureDispatcher('Bracket'), 'p1', { dirty: true, file: '/p/b.dfyom' })
+    // main runs it in a new window: this one keeps its project
+    bridge.handle('project.create', () => ok({ key: 'p2', revision: 0, window: 'new' }))
+    const openProject = vi.spyOn(bridge.window, 'openProject')
     const { user } = renderApp(bridge)
     await screen.findByText('Unsaved changes')
     act(() => bridge.emitMenu('project.new'))
-    const confirm = await screen.findByRole('alertdialog', {
-      name: 'Close “Bracket” with unsaved changes?',
+    const dialog = await screen.findByRole('dialog', { name: 'New project' })
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: 'Create project' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(openProject).toHaveBeenCalledWith('project.create', {
+      name: 'Untitled',
+      unitSystem: 'mm',
     })
-    await user.click(within(confirm).getByRole('button', { name: 'Close without saving' }))
-    expect(await screen.findByRole('dialog', { name: 'New project' })).toBeInTheDocument()
+    expect(bridge.calls.map((c) => c.name)).not.toContain('project.close')
+    expect(document.title).toBe('Bracket — Edited')
+  })
+
+  it('Open with a project open goes through the window choice without closing it', async () => {
+    const bridge = createFakeBridge()
+    bridge.bind(fixtureDispatcher('Bracket'), 'p1', { dirty: true, file: '/p/b.dfyom' })
+    bridge.setFileChoice({ open: '/p/other.dfyom' })
+    bridge.handle('project.open', () =>
+      ok({ key: 'p2', revision: 0, alreadyOpen: false, window: 'new' }),
+    )
+    const openProject = vi.spyOn(bridge.window, 'openProject')
+    renderApp(bridge)
+    await screen.findByText('Unsaved changes')
+    act(() => bridge.emitMenu('project.open'))
+    await waitFor(() =>
+      expect(openProject).toHaveBeenCalledWith('project.open', { file: '/p/other.dfyom' }),
+    )
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    expect(bridge.calls.map((c) => c.name)).not.toContain('project.close')
+    expect(document.title).toBe('Bracket — Edited')
   })
 
   it('lists the keyboard shortcuts (Help menu and ?)', async () => {

@@ -141,4 +141,24 @@ describe('app host', () => {
     await call('project.close', { key })
     expect(changes).toBe(2)
   })
+
+  it('openKey finds a file open in this instance; reopening it reports no second opener', async () => {
+    const { host, call, dir } = await setup()
+    const { key } = (await call('project.create', { name: 'K', unitSystem: 'mm' })) as {
+      key: string
+    }
+    const file = join(dir, 'k.dfyom')
+    expect(await host.openKey(file)).toBeUndefined() // not saved there yet
+    await call('project.save', { target: file })
+    expect(await host.openKey(file)).toBe(key)
+    expect(await host.openKey(join(dir, '.', 'k.dfyom'))).toBe(key)
+    expect(await host.openKey(join(dir, 'missing.dfyom'))).toBeUndefined()
+    const opened: string[] = []
+    host.onProjectOpened((k) => opened.push(k))
+    const other = host.openSession({ kind: 'ui', id: 'win-2' })
+    const again = expectOk((await other.call('project.open', { file })).result).value
+    expect(again).toMatchObject({ key, alreadyOpen: true })
+    expect(opened).toEqual([]) // no second window for an agent's or window's reopen
+    other.end()
+  })
 })

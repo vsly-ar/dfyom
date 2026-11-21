@@ -202,3 +202,73 @@ test('quitting with Save all saves an untitled project through the save dialog',
   expect((await stat(file)).size).toBeGreaterThan(0)
   expect(dfyom.rendererErrors).toEqual([])
 })
+
+test('New / Open with a project open use a new window; an open file is not opened twice', async ({
+  dfyom,
+}) => {
+  const { app, dataDir } = dfyom
+  const page = await app.firstWindow()
+  const windowCount = () =>
+    app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)
+  const fileA = join(dataDir, 'A.dfyom')
+  await bridgeCall(page, 'project.create', { name: 'A', unitSystem: 'mm' })
+  await bridgeCall(page, 'project.save', { target: fileA })
+  await expect(page).toHaveTitle('A')
+
+  // New (shortcut) in a window with a project: no question, a new window with the new project
+  await page.keyboard.press('ControlOrMeta+n')
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  await dialog.getByRole('textbox', { name: 'Project name' }).fill('B')
+  const [pageB] = await Promise.all([
+    app.waitForEvent('window'),
+    dialog.getByRole('button', { name: 'Create project' }).click(),
+  ])
+  await expect(pageB).toHaveTitle('B')
+  await expect(page).toHaveTitle('A')
+  expect(await windowCount()).toBe(2)
+  // cascaded from the asking window with its size; still hidden in tests
+  const bounds = await app.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()
+      .sort((a, b) => a.id - b.id)
+      .map((w) => ({ ...w.getBounds(), visible: w.isVisible() })),
+  )
+  const first = bounds[0]
+  expect(first).toBeDefined()
+  expect(bounds[1]).toEqual({
+    x: (first?.x ?? 0) + 22,
+    y: (first?.y ?? 0) + 22,
+    width: first?.width,
+    height: first?.height,
+    visible: false,
+  })
+
+  // Open (shortcut) of the file this window shows: nothing new opens
+  await app.evaluate(({ dialog: d }, path) => {
+    d.showOpenDialog = (() =>
+      Promise.resolve({ canceled: false, filePaths: [path] })) as typeof d.showOpenDialog
+  }, fileA)
+  await page.keyboard.press('ControlOrMeta+o')
+  // from the other window: A's window comes to the front instead of a duplicate
+  const reply = await pageB.evaluate(
+    (file) =>
+      (globalThis as unknown as { dfyom: PreloadApi }).dfyom.window.openProject('project.open', {
+        file,
+      }),
+    fileA,
+  )
+  expect(reply).toMatchObject({ ok: true, value: { window: 'other', alreadyOpen: true } })
+  expect(await windowCount()).toBe(2)
+  // a refused open closes its new window unseen; the asking window gets the error
+  const refused = await pageB.evaluate(
+    (file) =>
+      (globalThis as unknown as { dfyom: PreloadApi }).dfyom.window.openProject('project.open', {
+        file,
+      }),
+    join(dataDir, 'missing.dfyom'),
+  )
+  expect(refused.ok).toBe(false)
+  await expect.poll(windowCount).toBe(2)
+  await expect(pageB).toHaveTitle('B')
+  await expect(page).toHaveTitle('A')
+  expect(dfyom.rendererErrors).toEqual([])
+})

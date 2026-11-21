@@ -122,6 +122,11 @@ export interface AppHost extends SessionHost, HostPort {
   onSessions(listener: (sessions: readonly SessionInfo[]) => void): () => void
   /** Called after a project was opened, created or restored, with the source that did it. */
   onProjectOpened(listener: (key: string, source: Source) => void): () => void
+  /**
+   * The key of `file` if it is already open in this instance, else undefined (the GUI's window
+   * choice for Open: docs/conventions/ui.md#project-files).
+   */
+  openKey(file: string): Promise<string | undefined>
   /** Called after a project runtime started or stopped (windows re-follow their project). */
   onProjectsChanged(listener: () => void): () => void
   /**
@@ -303,6 +308,10 @@ class Host implements AppHost {
       )
     }
     return Ok({ ...this.start(outcome.project, source), alreadyOpen: false })
+  }
+
+  async openKey(file: string): Promise<string | undefined> {
+    return (await this.findOpen(file))?.key
   }
 
   /** A file already open in this instance (the storage would answer `persist.locked`). */

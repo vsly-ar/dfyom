@@ -150,7 +150,7 @@ export function createFakeBridge(initial: AppSettings = DEFAULT_SETTINGS): FakeB
   let localHttp: LocalHttpState = { enabled: true, port: 41234 }
   let current = initial
 
-  return {
+  const bridge: FakeBridge = {
     calls,
     settingsPatches,
     closeCalls,
@@ -231,6 +231,10 @@ export function createFakeBridge(initial: AppSettings = DEFAULT_SETTINGS): FakeB
       fileChoice = { ...fileChoice, ...choice }
     },
     window: {
+      // as if main picked this window (it has no project); tests check the calls
+      openProject(name, args) {
+        return bridge.call(name, args)
+      },
       onCloseRequest: closeRequests.on,
       close(confirm) {
         closeCalls.push(confirm)
@@ -263,4 +267,5 @@ export function createFakeBridge(initial: AppSettings = DEFAULT_SETTINGS): FakeB
       localHttp = s
     },
   }
+  return bridge
 }

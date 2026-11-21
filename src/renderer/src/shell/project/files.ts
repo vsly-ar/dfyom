@@ -1,23 +1,22 @@
 // Project files in the window (task 3.6): New / Open / Save / Save as, the recovery prompt and a
 // foreign lock ("Retry in 2 min"). The window calls the same app-scope commands as agents
 // (`project.create`, `project.open`, `project.save`, `project.recovery.*`); only the native file
-// dialogs are window plumbing. Opening or creating replaces the window's project: unsaved changes
-// are confirmed first, and the old project is closed once nobody else shows it (its changes stay
-// recoverable). Used by every mode. Doc: docs/conventions/ui.md#project-files,
+// dialogs are window plumbing. Opening, creating and restoring go through `window.openProject`,
+// which runs the command in the window that should show the project: this one when it has none,
+// the one already showing the file, else a new window (nothing here is replaced or closed). Used
+// by every mode. Doc: docs/conventions/ui.md#project-files,
 // docs/architecture/persistence.md#open, #crash-recovery, #lock
 import { createStore, type StoreApi } from 'zustand/vanilla'
 import type { UnitSystem } from '../../../../core/project/document'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import type { CallReply, PreloadApi } from '../../../../shared/preload-api'
-import { isDirty, type ReplicaState } from '../../state/replica'
+import type { ReplicaState } from '../../state/replica'
 
 /** A lock of another computer's instance can be taken over after this long (persistence.md#lock). */
 export const LOCK_RETRY_MS = 2 * 60 * 1000
 
 export type FilesDialog =
   | { readonly kind: 'new' }
-  /** The window's project has unsaved changes: confirm before replacing it. */
-  | { readonly kind: 'unsaved'; readonly name: string; readonly then: () => void }
   | { readonly kind: 'recovery'; readonly key: string; readonly file: string | null }
   | {
       readonly kind: 'locked'
@@ -43,7 +42,7 @@ export interface FilesState {
   /** Projects with unsaved changes of an earlier session (start screen). */
   readonly recoverable: readonly RecoverableView[]
   closeDialog(): void
-  /** "New project…": the new-project dialog (after the unsaved check). */
+  /** "New project…": the new-project dialog. */
   newProject(): void
   create(name: string, unitSystem: UnitSystem): Promise<void>
   /** "Open project…": the native dialog, then `openFile`. */
@@ -61,7 +60,9 @@ export interface FilesState {
 export type ProjectFiles = StoreApi<FilesState>
 
 interface Deps {
-  readonly bridge: Pick<PreloadApi, 'call' | 'files'>
+  readonly bridge: Pick<PreloadApi, 'call' | 'files'> & {
+    readonly window: Pick<PreloadApi['window'], 'openProject'>
+  }
   readonly replica: { getState(): ReplicaState }
   readonly now?: () => number
 }
@@ -74,44 +75,22 @@ export function createProjectFiles({ bridge, replica, now = Date.now }: Deps): P
   let retryTimer: ReturnType<typeof setTimeout> | undefined
 
   const store = createStore<FilesState>()((set, get) => {
-    /** Runs `fn` after confirming the current project's unsaved changes (if any). */
-    const afterUnsaved = (fn: () => void) => {
-      const r = replica.getState()
-      if (r.status === 'open' && isDirty(r))
-        set({ dialog: { kind: 'unsaved', name: r.doc.name, then: fn } })
-      else fn()
-    }
-
-    /** After the window moved to another project: close the old one unless someone else shows it. */
-    const closeOld = async (oldKey: string | undefined, newKey: string | null | undefined) => {
-      if (oldKey === undefined || oldKey === newKey) return
-      const listed = await bridge.call('project.list', {})
-      if (!listed.ok) return
-      const projects = (listed.value as { projects: { key: string; sources: unknown[] }[] })
-        .projects
-      const old = projects.find((p) => p.key === oldKey)
-      if (old !== undefined && old.sources.length === 0)
-        await bridge.call('project.close', { key: oldKey, confirm: true })
-    }
-
     const currentKey = (): string | undefined => {
       const r = replica.getState()
       return r.status === 'open' ? r.key : undefined
     }
 
-    /** One opening call; maps recovery and lock answers to their dialogs. */
+    /** One opening call (in the window main picks); maps recovery and lock answers to their dialogs. */
     const opening = async (
       kind: 'open' | 'create' | 'recover',
       file: string | null,
       call: () => Promise<CallReply>,
     ) => {
-      const old = currentKey()
       set({ busy: true })
       const r = await call()
       set({ busy: false })
       if (r.ok) {
         set({ dialog: null })
-        await closeOld(old, (r.value as { key?: string | null }).key)
         void get().refreshRecoverable()
         return
       }
@@ -151,18 +130,20 @@ export function createProjectFiles({ bridge, replica, now = Date.now }: Deps): P
         set({ dialog: null })
       },
       newProject() {
-        afterUnsaved(() => set({ dialog: { kind: 'new' } }))
+        set({ dialog: { kind: 'new' } })
       },
       create(name, unitSystem) {
-        return opening('create', null, () => bridge.call('project.create', { name, unitSystem }))
+        return opening('create', null, () =>
+          bridge.window.openProject('project.create', { name, unitSystem }),
+        )
       },
       async open() {
         const file = await bridge.files.chooseOpen()
         if (file === null) return
-        afterUnsaved(() => void get().openFile(file))
+        await get().openFile(file)
       },
       openFile(file) {
-        return opening('open', file, () => bridge.call('project.open', { file }))
+        return opening('open', file, () => bridge.window.openProject('project.open', { file }))
       },
       async save() {
         const r = replica.getState()
@@ -181,7 +162,7 @@ export function createProjectFiles({ bridge, replica, now = Date.now }: Deps): P
         const d = get().dialog
         const file = d?.kind === 'recovery' ? d.file : null
         return opening('recover', file, () =>
-          bridge.call('project.recovery.resolve', {
+          bridge.window.openProject('project.recovery.resolve', {
             key,
             action,
             ...(action === 'discard' ? { confirm: true } : {}),

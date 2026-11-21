@@ -44,6 +44,8 @@ export const IPC = {
   windowCloseRequest: 'dfyom:window.closeRequest',
   /** Renderer → main (invoke): close the window and its project (`confirm` for unsaved changes). */
   windowClose: 'dfyom:window.close',
+  /** Renderer → main (invoke): run an opening command in the window that should show it. */
+  windowOpenProject: 'dfyom:window.openProject',
   /** Renderer → main (invoke): a part's evaluation (mesh included when done), or null. */
   evaluationGet: 'dfyom:evaluation.get',
   /** Main → renderer: a part evaluation of the window's project changed (`PartEvaluationView`). */
@@ -147,6 +149,12 @@ export type WindowCloseRequest =
   | { readonly kind: 'unsavedChanges'; readonly name: string }
   | { readonly kind: 'refused'; readonly error: AppErrorData }
 
+/**
+ * Which window shows the project after `window.openProject` (docs/conventions/ui.md#project-files):
+ * the asking window, another window already showing it (brought to the front), or a new window.
+ */
+export type OpenedWindow = 'this' | 'other' | 'new'
+
 export interface PreloadApi {
   readonly versions: {
     readonly electron: string
@@ -230,6 +238,16 @@ export interface PreloadApi {
     onCloseRequest(listener: (request: WindowCloseRequest) => void): () => void
     /** Closes the window and its project; `confirm` closes with unsaved changes (recoverable). */
     close(confirm: boolean): Promise<CallReply>
+    /**
+     * New / Open / Restore (docs/conventions/ui.md#project-files): runs `project.open`,
+     * `project.create` or `project.recovery.resolve` in the window that should show the project
+     * (this one when it has none, the one already showing the file, else a new window). The
+     * reply is the command's; on success its value also has `window: OpenedWindow`.
+     */
+    openProject(
+      name: 'project.open' | 'project.create' | 'project.recovery.resolve',
+      args: unknown,
+    ): Promise<CallReply>
   }
 }
 

@@ -85,6 +85,8 @@ const api: PreloadApi = {
   window: {
     onCloseRequest: (listener) => on<WindowCloseRequest>(IPC.windowCloseRequest, listener),
     close: (confirm) => ipcRenderer.invoke(IPC.windowClose, confirm) as Promise<CallReply>,
+    openProject: (name, args) =>
+      ipcRenderer.invoke(IPC.windowOpenProject, name, args) as Promise<CallReply>,
   },
 }
 
