@@ -267,7 +267,7 @@ Export (`effect` command, task 2.11) turns the ordered `Toolpath[]` of one setup
 
 ## Implementation (task 3.14)
 
-[Locks and auto mode](#locks-and-auto-mode) in `src/core/feeds-speeds/` (`suggest.ts`: `locked` inputs, `checkCutting`, `noDataFor`; `locks.ts`: impossible-lock rules), `src/core/plan/feeds.ts` (auto mode, lock states, recommendations, invariants), `plan.operation.update`/`.list` and the plan inspector. Decisions made with the implementation, where the docs left room:
+[Locks and auto mode](#locks-and-auto-mode) in `src/core/feeds-speeds/` (`suggest.ts`: `locked` inputs, `checkCutting`, `noDataFor`; `locks.ts`: impossible-lock rules), `src/core/plan/feeds.ts` (auto mode, lock states, recommendations, invariants), `plan.operation.update`/`.list` and the plan inspector. Decisions made with the implementation, where the docs left room; all eight confirmed by the user (2026-11-21):
 
 - **When auto mode is on.** Requested = `auto: true`, or no `presetName` and no default preset for the stock's material class. On = requested and the calculator has data; `presetName` in `plan.operation.list` is then null. Requested but without data: the default preset applies (if any), stored locks stay stored and each reports `feeds.lockInactive` (rule `noData`); `feeds.noData` itself is reported only when a field is left without a value (as before).
 - **Preset mode has no calculator.** Outside auto mode a field is entered → preset → strategy fallback; a preset without stepdown now gets the strategy stepdown, not the calculator's (a preset means fixed values).
@@ -276,7 +276,7 @@ Export (`effect` command, task 2.11) turns the ordered `Toolpath[]` of one setup
 - **Fixed stepdown and power.** With a locked stepdown (or the helix pitch, which is a strategy value), a power excess reduces an unlocked feed (n kept, chip load drops); with the feed locked too it only warns. This replaces the old "given `ap` only warns" rule.
 - **Final-value check** (`checkCutting`) covers chip load (`feeds.rubbing`, `feeds.chipLoadHigh`, on `feedRate`) and power (`feeds.powerExceeded`, on `stepdown`; helix: `feedRate`) on the used values, in auto and preset mode, whenever the calculator has data. Spindle range and feed limits on the used values stay the existing `plan.machine` checks (no duplicate warning). In `plan.warning.list` the calculator's own `feeds.rubbing`, `feeds.chipLoadHigh` and `feeds.powerExceeded` are replaced by the check's; its other warnings (rpm clamps, feed clamp, power skipped) join as before when it supplies a value.
 - **Pinned values** are rounded to the field's display precision in the project units (rpm whole, 0.1 mm/min or 0.01 in/min, 0.001 mm or 0.0001 in) and stored as entered text, like a typed value.
-- **Lock reasons** are English with canonical units (rpm, mm/min, mm, kW), like the other plan messages (project units in messages are an open item in the [v0.1 plan](../plans/v0.1.md)).
+- **Lock reasons** are English with canonical units (rpm, mm/min, mm, kW), like the other plan messages (project units in messages are deferred past v0.1, low priority: [roadmap](../roadmap.md#later-unordered)).
 
 ## Implementation (task 2.13)
 
