@@ -16,7 +16,14 @@ import {
   type Option,
 } from '../../shared/result'
 import { AppError } from '../../shared/errors/app-error'
-import { buildArchive, loadArchive, sha256, type ArchiveInfo, type BuiltArchive } from './archive'
+import {
+  hashFile,
+  loadArchive,
+  writeArchive,
+  type ArchiveAsset,
+  type ArchiveInfo,
+  type WrittenArchive,
+} from './archive'
 import { renameWithRetry, type PersistFs } from './fs'
 import { isSaveFileName, saveFileName } from './retention'
 
@@ -27,42 +34,44 @@ export interface WriteArchiveOptions {
   /** The project file to create or replace. */
   readonly target: string
   readonly files: FileMap
+  /** Assets to store (`assets/<sha256>.stl` and the working-folder file). */
+  readonly assets?: readonly ArchiveAsset[]
   readonly info: ArchiveInfo
   readonly log: Logger
 }
 
 /**
- * Builds `<target>.tmp-<random>` next to the target, fsyncs it, verifies it from disk (entry set,
- * sizes, hashes, full load pipeline) and renames it over the target. Any failure before the
- * rename deletes the temp file and leaves the target untouched.
+ * Streams `<target>.tmp-<random>` next to the target, fsyncs it, verifies it by streaming it
+ * back from disk (entry set, sizes, hashes incl. assets, full load pipeline) and renames it over
+ * the target. Any failure before the rename deletes the temp file and leaves the target untouched.
  */
-export async function writeVerifiedArchive(o: WriteArchiveOptions): AsyncAppResult<BuiltArchive> {
+export async function writeVerifiedArchive(o: WriteArchiveOptions): AsyncAppResult<WrittenArchive> {
   const where = 'save.writeArchive'
   const data = { target: o.target }
-  const built = buildArchive(o.files, o.info)
   const tmp = `${o.target}.tmp-${randomBytes(4).toString('hex')}`
   const cleanup = async () => {
     await o.fs.rm(tmp).catch(() => undefined)
   }
 
-  const written = await tryAsync(
-    async () => {
-      await o.fs.writeFile(tmp, built.bytes)
-      await o.fs.fsync(tmp)
-      return o.fs.readFile(tmp)
-    },
-    'persist.io',
-    'writing the temp archive failed',
-  )
-  if (written.isErr()) {
+  const written = await writeArchive(o.fs, tmp, o.files, o.assets ?? [], o.info)
+  const synced = written.isErr()
+    ? written
+    : await tryAsync(() => o.fs.fsync(tmp), 'persist.io', 'fsync of the temp archive failed')
+  if (written.isErr() || synced.isErr()) {
     await cleanup()
-    return Err(written.unwrapErr().withContext(where, data))
+    const e = written.isErr() ? written.unwrapErr() : synced.unwrapErr()
+    return Err(e.withContext(where, data))
   }
-  const onDisk = written.unwrap()
-  const loaded = loadArchive(onDisk)
+  const built = written.unwrap()
+  const loaded = await loadArchive(o.fs, tmp)
+  if (loaded.isErr() && loaded.unwrapErr().code === 'persist.io') {
+    // Reading it back failed: an I/O error, not a failed verification.
+    await cleanup()
+    return Err(loaded.unwrapErr().withContext(where, data))
+  }
   const verifyError = loaded.isErr()
     ? loaded.unwrapErr()
-    : sha256(onDisk) !== built.sha256 ||
+    : loaded.unwrap().sha256 !== built.sha256 ||
         JSON.stringify(loaded.unwrap().manifest) !== JSON.stringify(built.manifest)
       ? new AppError('input.malformed', 'archive on disk differs from the one built')
       : undefined
@@ -88,13 +97,13 @@ export async function writeVerifiedArchive(o: WriteArchiveOptions): AsyncAppResu
   }
   // After the rename the save has happened: later problems are warnings, not failures.
   const dir = dirname(o.target)
-  const synced = await tryAsync(
+  const dirSynced = await tryAsync(
     () => o.fs.fsyncDir(dir),
     'persist.io',
     'fsync of the folder failed',
   )
-  if (synced.isErr())
-    o.log.warn({ err: synced.unwrapErr().toJSON() }, 'project folder fsync failed')
+  if (dirSynced.isErr())
+    o.log.warn({ err: dirSynced.unwrapErr().toJSON() }, 'project folder fsync failed')
   await removeStaleTemps(o.fs, o.target, o.log)
   return Ok(built)
 }
@@ -130,10 +139,13 @@ export async function addToHistory(o: {
     async () => {
       await o.fs.mkdir(o.saves)
       if (o.onlyIfNew) {
-        const hash = sha256(await o.fs.readFile(o.source))
-        for (const name of await o.fs.readdir(o.saves))
-          if (isSaveFileName(name) && sha256(await o.fs.readFile(join(o.saves, name))) === hash)
-            return None
+        const { sha256: hash, size } = await hashFile(o.fs, o.source)
+        for (const name of await o.fs.readdir(o.saves)) {
+          if (!isSaveFileName(name)) continue
+          const file = join(o.saves, name)
+          if ((await o.fs.stat(file))?.size !== size) continue
+          if ((await hashFile(o.fs, file)).sha256 === hash) return None
+        }
       }
       const name = saveFileName(o.manifest.savedAt, o.manifest.revision)
       const tmp = join(o.saves, `${name}.tmp`)

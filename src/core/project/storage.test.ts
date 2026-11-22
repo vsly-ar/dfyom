@@ -1,8 +1,9 @@
 import type { Patch } from 'immer'
 import { describe, expect, it } from 'vitest'
-import { Ok } from '../../shared/result'
+import { fail, Ok } from '../../shared/result'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
 import { renameProject } from '../commands/commands.fixture'
+import type { HistoryView } from '../commands/context'
 import { createDispatcher } from '../commands/dispatcher'
 import { inProcessWorkers } from '../commands/jobs'
 import { createAppRegistry, createRegistry } from '../commands/registry'
@@ -24,6 +25,7 @@ const doc = newProjectDoc({ name: 'Bracket', unitSystem: 'mm' })
 function fakeSession(filePath: string | null = '/p/a.dfyom') {
   const changes: { patches: readonly Patch[]; doc: ProjectDoc; revision: number }[] = []
   const saves: { doc: ProjectDoc; opts: SaveOptions }[] = []
+  const histories: (() => HistoryView)[] = []
   const session: ProjectSession = {
     key: 'project-1',
     projectId: 'project-1',
@@ -42,8 +44,11 @@ function fakeSession(filePath: string | null = '/p/a.dfyom') {
         warnings: [],
       })
     },
+    importAsset: async () => fail('persist.io', 'not in this fake'),
+    assetFile: () => fail('persist.io', 'not in this fake'),
+    useHistory: (h) => void histories.push(h),
   }
-  return { session, changes, saves }
+  return { session, changes, saves, histories }
 }
 
 function fakeStorage() {
@@ -90,7 +95,7 @@ describe('resolveRecovery', () => {
 
 describe('attachSession', () => {
   it('feeds commits, undo and redo with their patches and revision to the session', async () => {
-    const { session, changes } = fakeSession()
+    const { session, changes, histories } = fakeSession()
     const d = createDispatcher({
       registry: expectOk(createRegistry({ commands: [renameProject] })),
       doc,
@@ -105,6 +110,8 @@ describe('attachSession', () => {
       [7, 'Bracket'],
     ])
     expect(changes[0]?.patches).toEqual([{ op: 'replace', path: ['name'], value: 'B2' }])
+    // The session sees the live undo history (save keeps the assets its entries name).
+    expect(histories[0]?.().redoable.map((e) => e.command)).toEqual(['project.name.update'])
   })
 })
 

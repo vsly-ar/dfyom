@@ -5,7 +5,8 @@ import { newProjectDoc } from '../../core/project/document'
 import { docToFiles } from '../../core/project/layout'
 import { noopLogger } from '../../shared/logging'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
-import { buildArchive, loadArchive, sha256 } from './archive'
+import { sha256 } from './archive'
+import { buildArchive, loadArchiveBytes as loadArchive } from './archive.testing'
 import { nodeFs, type PersistFs } from './fs'
 import { faultFs, useTempDir } from './fs.testing'
 import { addToHistory, writeVerifiedArchive } from './save'
@@ -22,7 +23,7 @@ const info = (revision: number) => ({
 const target = () => join(tmp.dir, 'docs', 'bracket.dfyom')
 
 async function original(): Promise<Uint8Array> {
-  const a = buildArchive(expectOk(docToFiles(v1)), info(1))
+  const a = await buildArchive(expectOk(docToFiles(v1)), info(1))
   await mkdir(join(tmp.dir, 'docs'), { recursive: true })
   await writeFile(target(), a.bytes)
   return a.bytes
@@ -45,27 +46,28 @@ describe('writeVerifiedArchive', () => {
     const built = expectOk(await write(nodeFs))
     const bytes = await readFile(target())
     expect(sha256(bytes)).toBe(built.sha256)
-    expect(expectOk(loadArchive(bytes)).doc).toEqual(v2)
+    expect(expectOk(await loadArchive(bytes)).doc).toEqual(v2)
     expect(await siblings()).toEqual(['bracket.dfyom'])
   })
 
   it('creates a new target (Save As / first save)', async () => {
     await mkdir(join(tmp.dir, 'docs'))
     expectOk(await write(nodeFs))
-    expect(expectOk(loadArchive(await readFile(target()))).doc).toEqual(v2)
+    expect(expectOk(await loadArchive(await readFile(target()))).doc).toEqual(v2)
   })
 
   it('builds the temp archive in the target directory, verifies it, then renames', async () => {
     await original()
     const fs = faultFs(() => undefined)
     expectOk(await write(fs))
-    const steps = fs.calls.map((c) =>
-      c.replace(/\.tmp-[0-9a-f]+/, '.tmp-X').replace(join(tmp.dir, 'docs'), 'D'),
-    )
-    expect(steps.slice(0, 5)).toEqual([
+    const steps = fs.calls
+      .map((c) => c.replace(/\.tmp-[0-9a-f]+/, '.tmp-X').replace(join(tmp.dir, 'docs'), 'D'))
+      .filter((c, i, all) => c !== all[i - 1])
+    expect(steps.slice(0, 6)).toEqual([
       'writeFile D/bracket.dfyom.tmp-X',
+      'appendFile D/bracket.dfyom.tmp-X',
       'fsync D/bracket.dfyom.tmp-X',
-      'readFile D/bracket.dfyom.tmp-X',
+      'readRange D/bracket.dfyom.tmp-X',
       'rename D/bracket.dfyom.tmp-X',
       'fsyncDir D',
     ])
@@ -75,14 +77,8 @@ describe('writeVerifiedArchive', () => {
     const before = await original()
     const corrupting: PersistFs = {
       ...nodeFs,
-      writeFile: (p, d, o) =>
-        nodeFs.writeFile(
-          p,
-          p.includes('.tmp-') && typeof d !== 'string'
-            ? d.map((b, i) => (i === 40 ? b ^ 0xff : b))
-            : d,
-          o,
-        ),
+      appendFile: (p, d) =>
+        nodeFs.appendFile(p, p.includes('.tmp-') ? d.map((b, i) => (i === 40 ? b ^ 0xff : b)) : d),
     }
     expectErrCode(await write(corrupting), 'persist.verify')
     expect(new Uint8Array(await readFile(target()))).toEqual(before)
@@ -91,7 +87,7 @@ describe('writeVerifiedArchive', () => {
 
   it('an I/O failure at any step before the rename keeps the target and removes the temp file', async () => {
     const before = await original()
-    for (const op of ['writeFile', 'fsync', 'readFile', 'rename'] as const) {
+    for (const op of ['writeFile', 'appendFile', 'fsync', 'readRange', 'rename'] as const) {
       const fs = faultFs((o) => (o === op ? 'fail' : undefined))
       expectErrCode(await write(fs), 'persist.io')
       expect(new Uint8Array(await readFile(target())), op).toEqual(before)
@@ -108,7 +104,7 @@ describe('writeVerifiedArchive', () => {
       if (!fs.crashed) break
       crashes++
       const now = new Uint8Array(await readFile(target()))
-      const loaded = expectOk(loadArchive(now))
+      const loaded = expectOk(await loadArchive(now))
       if (sha256(now) === sha256(before)) expect(loaded.doc).toEqual(v1)
       else expect(loaded.doc).toEqual(v2)
       // Killed before the rename completed: the call failed and the original is intact.
@@ -141,7 +137,7 @@ describe('addToHistory', () => {
         fs: nodeFs,
         saves,
         source: target(),
-        manifest: expectOk(loadArchive(bytes)).manifest,
+        manifest: expectOk(await loadArchive(bytes)).manifest,
         onlyIfNew: true,
       }),
     )
@@ -151,7 +147,7 @@ describe('addToHistory', () => {
         fs: nodeFs,
         saves,
         source: target(),
-        manifest: expectOk(loadArchive(bytes)).manifest,
+        manifest: expectOk(await loadArchive(bytes)).manifest,
         onlyIfNew: true,
       }),
     )

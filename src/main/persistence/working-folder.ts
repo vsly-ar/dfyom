@@ -6,6 +6,7 @@ import { randomBytes } from 'node:crypto'
 import { dirname, join, resolve, sep } from 'node:path'
 import type { Patch } from 'immer'
 import { z } from 'zod'
+import { ASSET_DIR } from '../../core/project/assets'
 import type { ProjectDoc } from '../../core/project/document'
 import {
   checkSchemaVersion,
@@ -99,7 +100,8 @@ function inside(work: string, path: string): AppResult<string> {
 }
 
 /**
- * Writes `files` into a new folder, swaps it in as `work/`, then writes `state` (last).
+ * Writes `files` into a new folder (and lets `fill` add more, e.g. assets streamed from the
+ * archive; it throws to abort), swaps it in as `work/`, then writes `state` (last).
  * A crash leaves either the old or the new `work/` with the old state.
  */
 export async function unpack(
@@ -107,6 +109,7 @@ export async function unpack(
   paths: ProjectPaths,
   files: FileMap,
   state: ProjectState,
+  fill?: (fresh: string) => Promise<void>,
 ): AsyncAppResult<void> {
   const fresh = `${paths.work}.new-${rand()}`
   const old = `${paths.work}.old-${rand()}`
@@ -123,6 +126,7 @@ export async function unpack(
         await fs.writeFile(full.unwrap(), text)
         await fs.fsync(full.unwrap())
       }
+      if (fill !== undefined) await fill(fresh)
       await fs.fsyncDir(fresh)
       const hadWork = (await fs.stat(paths.work)) !== undefined
       if (hadWork) await renameWithRetry(fs, paths.work, old)
@@ -141,7 +145,10 @@ export async function unpack(
   return Ok(undefined)
 }
 
-/** All documents in `work/` (`<name>` and `<dir>/<name>`); leftover `*.tmp` files are ignored. */
+/**
+ * All documents in `work/` (`<name>` and `<dir>/<name>`); leftover `*.tmp` files are ignored, and
+ * so is `assets/` (binary files, never documents).
+ */
 export async function readWork(fs: PersistFs, paths: ProjectPaths): AsyncAppResult<FileMap> {
   const decoder = new TextDecoder('utf-8', { fatal: true })
   const ran = await tryAsync(
@@ -151,7 +158,7 @@ export async function readWork(fs: PersistFs, paths: ProjectPaths): AsyncAppResu
         files.set(rel, decoder.decode(await fs.readFile(join(paths.work, rel))))
       }
       for (const name of (await fs.readdir(paths.work)).sort()) {
-        if (name.endsWith('.tmp')) continue
+        if (name.endsWith('.tmp') || name === ASSET_DIR) continue
         const st = await fs.stat(join(paths.work, name))
         if (st?.isDirectory !== true) {
           await add(name)

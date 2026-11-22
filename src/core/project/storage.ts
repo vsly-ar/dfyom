@@ -8,8 +8,10 @@
 import type { Patch } from 'immer'
 import { z } from 'zod'
 import { parseWith } from '../../shared/parse'
-import { Err, fail, type AsyncAppResult } from '../../shared/result'
+import { Err, fail, type AppResult, type AsyncAppResult } from '../../shared/result'
+import type { HistoryView } from '../commands/context'
 import type { Dispatcher } from '../commands/dispatcher'
+import type { AssetRef } from './assets'
 import type { ProjectDoc } from './document'
 
 export interface SaveOutcome {
@@ -54,6 +56,16 @@ export interface ProjectSession {
   flush(): AsyncAppResult<void>
   /** Flush, build, verify and replace; `target` = Save As. */
   save(doc: ProjectDoc, opts?: SaveOptions): AsyncAppResult<SaveOutcome>
+  /**
+   * Copies a local file into the working folder's `assets/` (hashed while copying, atomic);
+   * the same content is stored once. Records then name the returned path
+   * (docs/architecture/persistence.md#assets-and-references-v02).
+   */
+  importAsset(source: string): AsyncAppResult<AssetRef>
+  /** Absolute path of a stored asset (`assets/<sha256>.stl`), e.g. for the parser to read. */
+  assetFile(path: string): AppResult<string>
+  /** The dispatcher's undo/redo stacks: save keeps the assets their entries name. */
+  useHistory(history: () => HistoryView): void
 }
 
 export interface OpenedProject {
@@ -137,10 +149,11 @@ export async function resolveRecovery(
 }
 
 /**
- * Feeds every commit (command, undo, redo) of a dispatcher to the session's working folder.
- * Returns the unsubscribe function.
+ * Feeds every commit (command, undo, redo) of a dispatcher to the session's working folder and
+ * lets the session see the undo history (assets kept by save). Returns the unsubscribe function.
  */
 export function attachSession(dispatcher: Dispatcher, session: ProjectSession): () => void {
+  session.useHistory(() => dispatcher.history)
   return dispatcher.log.subscribe({ withPatches: true }, (e) => {
     if ('patches' in e && e.patches !== undefined && e.patches.length > 0)
       session.changed(e.patches, dispatcher.doc, e.revision)

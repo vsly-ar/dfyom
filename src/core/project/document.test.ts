@@ -11,6 +11,7 @@ describe('ProjectDoc', () => {
       parts: {},
       snapshots: {},
       plans: {},
+      references: {},
     })
     expect(JSON.parse(JSON.stringify(doc))).toEqual(doc)
   })
@@ -27,6 +28,7 @@ describe('ProjectDoc', () => {
       parts: {},
       snapshots: {},
       plans: {},
+      references: {},
     })
     const e = expectErrCode(
       parseProjectDoc({ name: 'A', unitSystem: 'cm' }, 'load'),
