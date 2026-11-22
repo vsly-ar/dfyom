@@ -28,8 +28,12 @@ export interface FieldMessage {
   id: string
   severity: FieldSeverity
   text: ReactNode
-  /** One-click fix ("Use 3.00"), dispatched as one command by the caller. */
-  fix?: { label: string; onApply: () => void }
+  /**
+   * One-click fix ("Use 3.00"), dispatched as one command by the caller. A warning's fix shows a
+   * check (it settles the value); `icon` replaces it for a fix that adds something (a plus for
+   * "Add to library").
+   */
+  fix?: { label: string; onApply: () => void; icon?: ReactNode }
   /** Replaces the severity's icon (e.g. a lock for read-only notes). */
   icon?: ReactNode
 }
@@ -252,7 +256,7 @@ export function Field({
                     <Button
                       size="sm"
                       variant="primary"
-                      icon={<Check aria-hidden="true" />}
+                      icon={primary.fix.icon ?? <Check aria-hidden="true" />}
                       onClick={primary.fix.onApply}
                     >
                       {primary.fix.label}

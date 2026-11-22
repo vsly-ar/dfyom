@@ -1,8 +1,9 @@
 // Run mode navigator (ui.md#app-shell: "Run: connection, homing, jog, work zero"): the plan to run
 // and, when it has several, the setup (one program per setup, task E2), the virtual machine connection and its time scale, homing and unlock (confirmed), the jog pad
-// and the work zero. Disabled controls say why. Doc: docs/conventions/ui.md#run-mode-safety-ui,
+// and the work zero. Disabled controls say why: once, in one notice above the homing, jog and
+// work-zero sections (one reason usually disables them all), each control described by its line. Doc: docs/conventions/ui.md#run-mode-safety-ui,
 // docs/modes/run-v0.1.md#commands-and-queries
-import { Crosshair, House, Plug, Unplug } from 'lucide-react'
+import { Crosshair, House, Info, Plug, Unplug } from 'lucide-react'
 import { useEffect, useId, useState } from 'react'
 import type { ProjectDoc } from '../../../../core/project/document'
 import type { TimeScale } from '../../../../core/run/clock'
@@ -40,6 +41,25 @@ function Why({ id, reason }: { id: string; reason: string | null }) {
   )
 }
 
+/**
+ * The distinct reasons the navigator's controls are disabled, each shown once (UX audit: the same
+ * "Connect … first" under every section read as noise); a control's `aria-describedby` is its line.
+ */
+function WhyNotice({ reasons }: { reasons: readonly { id: string; text: string }[] }) {
+  return reasons.length === 0 ? null : (
+    <div className={styles['notice']}>
+      <Info aria-hidden="true" />
+      <div>
+        {reasons.map((r) => (
+          <p key={r.id} id={r.id} className={styles['why']}>
+            {r.text}
+          </p>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export function RunNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
   const store = useRunStore()
   const status = useRun((s) => s.status)
@@ -50,7 +70,7 @@ export function RunNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
   const pending = useRun((s) => s.pending)
   const actionError = useRun((s) => s.actionError)
   const [unlockOpen, setUnlockOpen] = useState(false)
-  const ids = { home: useId(), jog: useId(), zero: useId(), connect: useId() }
+  const whyBase = useId()
   const a = store.getState()
 
   const plans = runnablePlans(doc)
@@ -67,6 +87,19 @@ export function RunNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
   const liveScale = connected ? status.connection.timeScale : timeScale
   const units = doc.unitSystem
   const busy = (name: string) => pending.includes(name)
+  // one line per distinct reason (home, jog, work zero, disconnect), in that order
+  const gated = [gates.home, gates.jog, gates.workZero, connected ? gates.disconnect : null]
+  const reasons = [...new Set(gated.filter((r) => r !== null))].map((text, i) => ({
+    id: `${whyBase}-${i}`,
+    text,
+  }))
+  const reasonId = (r: string | null) => reasons.find((x) => x.text === r)?.id ?? ''
+  const ids = {
+    home: reasonId(gates.home),
+    jog: reasonId(gates.jog),
+    zero: reasonId(gates.workZero),
+    connect: reasonId(gates.disconnect),
+  }
 
   return (
     <div className={styles['panel']}>
@@ -120,7 +153,6 @@ export function RunNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
             >
               {m.disconnect}
             </Button>
-            <Why id={ids.connect} reason={gates.disconnect} />
           </>
         ) : (
           <>
@@ -142,6 +174,8 @@ export function RunNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
           </>
         )}
       </Section>
+
+      <WhyNotice reasons={reasons} />
 
       <Section title={m.homing}>
         <div className={styles['buttons']}>
@@ -167,7 +201,6 @@ export function RunNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
             </StatusChip>
           ) : null}
         </div>
-        <Why id={ids.home} reason={gates.home} />
         <ConfirmDialog
           open={unlockOpen}
           onOpenChange={setUnlockOpen}
@@ -187,6 +220,7 @@ export function RunNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
           onCancel={() => void a.jogCancel()}
           disabledReason={gates.jog}
           reasonId={ids.jog}
+          reasonShown={false}
         />
       </Section>
 
@@ -194,6 +228,7 @@ export function RunNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
         <WorkZeroButtons
           gate={gates.workZero}
           reasonId={ids.zero}
+          reasonShown={false}
           onZero={(axes) => void a.setWorkZero(axes)}
         />
         {connected ? (
@@ -214,9 +249,13 @@ export function WorkZeroButtons({
   reasonId,
   onZero,
   only,
+  reasonShown = true,
 }: {
   gate: string | null
+  /** id of the reason text, for `aria-describedby`. */
   reasonId: string
+  /** false: the reason is shown elsewhere (the navigator's notice) under `reasonId`. */
+  reasonShown?: boolean
   onZero: (axes: readonly Axis[]) => void
   only?: Axis
 }): React.JSX.Element {
@@ -249,7 +288,7 @@ export function WorkZeroButtons({
           </Button>
         ) : null}
       </div>
-      <Why id={reasonId} reason={gate} />
+      {reasonShown ? <Why id={reasonId} reason={gate} /> : null}
     </>
   )
 }

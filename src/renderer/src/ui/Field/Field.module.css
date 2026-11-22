@@ -449,4 +449,9 @@
     grid-column: 2;
     grid-row: 3;
   }
+  /* without a lock the input and its support area start at the label's edge (no empty lock
+     column indenting them by the column gap) */
+  .field:not(:has(> .lock)) :is(.control, .support) {
+    grid-column: 1 / -1;
+  }
 }

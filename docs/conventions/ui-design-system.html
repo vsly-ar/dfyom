@@ -281,7 +281,7 @@ svg.fi .ext { stroke-dasharray: 1.5 1.5; opacity: 0.7; }
 @media (prefers-reduced-motion: reduce) { .fs { animation: none; } }
 /* narrow field lists (container below 20rem: navigator, default inspector): label above the input */
 .fields-narrow { container-type: inline-size; width: 16rem; padding: 10px; border: 1px dashed var(--border); border-radius: var(--radius-sm); display: grid; gap: 10px; }
-@container (max-width: 20rem) { .field { grid-template-columns: auto minmax(0, 1fr); } .field > label { grid-column: 1 / -1; } .field > .qa.lock { grid-column: 1; grid-row: 2; } .field > .qi { grid-column: 2; grid-row: 2; } .field > .fs { grid-column: 2; grid-row: 3; } }
+@container (max-width: 20rem) { .field { grid-template-columns: auto minmax(0, 1fr); } .field > label { grid-column: 1 / -1; } .field > .qa.lock { grid-column: 1; grid-row: 2; } .field > .qi { grid-column: 2; grid-row: 2; } .field > .fs { grid-column: 2; grid-row: 3; } .field:not(:has(> .qa.lock)) > :is(.qi, .fs) { grid-column: 1 / -1; } }
 .fs-i .btn { white-space: nowrap; }
 .qi.ro ~ .fs { opacity: 0.6; background: transparent; border-style: dashed; box-shadow: inset 0 7px 6px -6px rgb(0 0 0 / 0.12); }
 .fs { container-type: inline-size; }
@@ -541,6 +541,7 @@ svg.fi .ext { stroke-dasharray: 1.5 1.5; opacity: 0.7; }
   .field > label { grid-column: 1 / -1; }
   .field > .qa.lock { grid-column: 1; grid-row: 2; }
   .field > :is(.qi, .fs) { grid-column: 2; }
+  .field:not(:has(> .qa.lock)) > :is(.qi, .fs) { grid-column: 1 / -1; }
   .scale div[data-hex] { height: 28px; }
   .scale div[data-hex]::after { display: none; }
 }
