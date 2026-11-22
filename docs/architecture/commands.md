@@ -87,6 +87,16 @@ Rules:
 - Shared domain logic is called as plain functions from `src/core/<domain>`, not via nested dispatch. One command = one undo step.
 - Args use the [quantity](quantities.md) DTOs as entered (e.g. `"1/16\""`); models are built inside the handler with `Model.create()` and their `AppError`s returned unchanged.
 - `effect` and `job` handlers read the immutable `ProjectDoc` snapshot current at start; a job that must change the document does so with one follow-up document command ([Jobs](#long-running-commands-jobs)).
+- A document command whose input must first be read from outside (a file) declares a [`prepare`](#prepared-input) step; `run` itself stays synchronous.
+
+### Prepared input
+
+Added with plan task R2 for `design.reference.import` ([reference-model.md](../modes/reference-model.md#commands-and-queries)): one gesture ("import this STL") must be one undoable command for UI, MCP and CLI alike, but its input is a file to copy and parse first.
+
+- `DocumentCommand.prepare?(doc, args, ctx): AsyncAppResult<P>` runs in the command's queue turn after the revision and permission checks and right before the draft, so no other command can change the document in between. Its value is passed to `run(draft, args, ctx, prepared)`.
+- `prepare` may await and call services (`ctx.services.project.importAsset`, `ctx.services.workers.run`, …); it never touches the document. Its side effects must be harmless if the command then fails or is undone: e.g. a content-addressed asset copy, which [persistence](persistence.md#assets-and-references-v02) cleans up when nothing references it.
+- An `Err` (or throw → `internal.unexpected`) of `prepare` fails the command like a handler error: no draft, no commit, one logged failure. Undo and redo replay patches, so `prepare` never runs for them; `runCommand` (tests) does not run it — test such commands through a dispatcher.
+- It holds the project queue while it runs (like an effect), so it is for work of about a second (the STL parse, [budget](../modes/reference-model.md#performance)), not for jobs.
 
 ## Project state
 

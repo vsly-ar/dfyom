@@ -22,12 +22,13 @@ Settled with the user when this doc was accepted; the sections below specify the
 
 ## What runs on a worker
 
-| Task name           | Pure function (in `src/core`)                                                                                               | Needs WASM | Caller                                                                                                                          |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `geometry.evaluate` | `kernel.withSolids((s) => evaluatePart(input, s, steps))` ([geometry.md](geometry.md#worker-and-renderer))                  | yes        | [Automatic evaluation](#automatic-evaluation-after-design-edits), `design.part.evaluate`                                        |
-| `toolpath.generate` | `generateFacing` / `generatePocket` / `generateDrilling` / `generateProfile` on the `GeneratorInput`s of one plan operation | no         | `plan.toolpath.generate` job ([plan-v0.1.md](../modes/plan-v0.1.md#toolpath-generation-job)), export regenerating stale entries |
-| test-only tasks     | Fixtures that loop steps, throw, exit or hang ([Testing](#testing)); registered only in the test worker entry               | no         | Tests                                                                                                                           |
-| later               | Simulation, optimization, carving ([overview.md](overview.md#threading)); each gets a task name and its own row             | –          | –                                                                                                                               |
+| Task name            | Pure function (in `src/core`)                                                                                                                                                           | Needs WASM | Caller                                                                                                                          |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `geometry.evaluate`  | `kernel.withSolids((s) => evaluatePart(input, s, steps))` ([geometry.md](geometry.md#worker-and-renderer))                                                                              | yes        | [Automatic evaluation](#automatic-evaluation-after-design-edits), `design.part.evaluate`                                        |
+| `toolpath.generate`  | `generateFacing` / `generatePocket` / `generateDrilling` / `generateProfile` on the `GeneratorInput`s of one plan operation                                                             | no         | `plan.toolpath.generate` job ([plan-v0.1.md](../modes/plan-v0.1.md#toolpath-generation-job)), export regenerating stale entries |
+| `reference.parseStl` | `createStlParser(size)` fed the file's chunks ([reference-model.md](../modes/reference-model.md#stl-parser-task-r2)); reads through [file access](#file-access), returns only a summary | no         | `design.reference.import` (its `prepare` step)                                                                                  |
+| test-only tasks      | Fixtures that loop steps, throw, exit or hang ([Testing](#testing)); registered only in the test worker entry                                                                           | no         | Tests                                                                                                                           |
+| later                | Simulation, optimization, carving ([overview.md](overview.md#threading)); each gets a task name and its own row                                                                         | –          | –                                                                                                                               |
 
 Everything the main thread does around a task stays cheap: building inputs (`toGeometryInput`, `planOperationInputs`, the [generator mapping](#plan-operation-to-generator-input)), hashing, cache lookups, posting messages.
 
@@ -134,6 +135,14 @@ One protocol for both worker kinds, defined as Zod discriminated unions on `type
 | Mesh host → renderer                                                             | Copied by Electron IPC (it cannot transfer `ArrayBuffer`s); ≤ about 1 MB at the 20 000-triangle budget                                                    |
 
 Toolpath moves are cloned as objects in v0.1; packing them into typed arrays is a later optimization if the [budgets](#performance-budgets) say so.
+
+## File access
+
+Added with plan task R2 (STL import). A task that must read a local file gets it through `TaskControl.files` (`FileSource` in `src/core/commands/jobs.ts`), so the code in `src/core` stays free of Node imports:
+
+- `files.open(path)` → `{ size, chunks }`: the size first (so a parser can refuse an oversized file before reading), then the bytes as an async stream. A path that is not a readable regular file is `input.malformed` (rule `unreadableFile`); an I/O error during iteration throws and the task maps it (`persist.io`).
+- Hosts inject it: the Node worker host (`src/main/workers/files.ts`) uses `node:fs` read streams in 1 MB chunks; the in-process fake takes `files` in `createInProcessWorkers` (tests use `memoryFiles`); without one, `noFiles` fails `internal.unexpected`.
+- Read-only. The task reads files the main process chose (e.g. a project asset it just stored), never paths from the renderer. One `steps.step()` per chunk keeps abort and the [50 ms step rule](#abort-and-pause).
 
 ## WASM lifetime
 

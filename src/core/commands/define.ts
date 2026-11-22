@@ -42,13 +42,24 @@ interface CommandMeta<A> {
 type ArgsPredicate<A> = { check(args: A): boolean }['check']
 
 /** Sync, undoable, changes `ProjectDoc` only. Never awaits, calls services or dispatches. */
-export interface DocumentCommand<S extends z.ZodType = z.ZodType, R = unknown> extends CommandMeta<
-  z.output<S>
-> {
+export interface DocumentCommand<
+  S extends z.ZodType = z.ZodType,
+  R = unknown,
+  P = unknown,
+> extends CommandMeta<z.output<S>> {
   readonly kind: 'document'
   readonly args: S
   readonly result: z.ZodType<R>
-  run(draft: Draft<ProjectDoc>, args: z.output<S>, ctx: CommandContext): AppResult<R>
+  /**
+   * Optional asynchronous input step, run in the command's queue turn right before the draft (so
+   * the document cannot change in between): reads files, runs worker tasks or stores project
+   * assets through `ctx.services`. Its value is `run`'s `prepared`. It never touches the
+   * document, and its side effects must be harmless if the command then fails (e.g. a
+   * content-addressed asset copy). Undo and redo replay patches, so it never runs for them.
+   * Doc: docs/architecture/commands.md#prepared-input
+   */
+  prepare?(doc: ProjectDoc, args: z.output<S>, ctx: CommandContext): AsyncAppResult<P>
+  run(draft: Draft<ProjectDoc>, args: z.output<S>, ctx: CommandContext, prepared: P): AppResult<R>
 }
 
 /** Async, not undoable, never touches `ProjectDoc` (save, export, jog). Holds the queue. */

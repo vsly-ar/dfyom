@@ -52,6 +52,58 @@ export interface TaskControl {
   readonly log: Logger
   /** The solid kernel, loaded once per worker (geometry lane only). */
   readonly solids: () => AsyncAppResult<SolidKernel>
+  /** Read-only access to local files (e.g. a project asset to parse); injected by the host. */
+  readonly files: FileSource
+}
+
+/** A local file opened for reading: its size and its bytes as a stream of chunks. */
+export interface OpenedFile {
+  readonly size: number
+  /** Chunks in order; iteration throws on an I/O error (the task maps it). */
+  readonly chunks: AsyncIterable<Uint8Array>
+}
+
+/**
+ * Streamed, read-only file access for worker tasks, so core code parses files without Node
+ * imports. Doc: docs/architecture/workers.md#file-access
+ */
+export interface FileSource {
+  /** `input.malformed` (rule `unreadableFile`) if the path is not a readable regular file. */
+  open(path: string): AsyncAppResult<OpenedFile>
+}
+
+/** No file access (the default of hosts that inject none). */
+export const noFiles: FileSource = {
+  open: (path) =>
+    Promise.resolve(
+      fail('internal.unexpected', 'no file access in this worker host', {
+        where: 'files.open',
+        data: { path },
+      }),
+    ),
+}
+
+/** Files served from memory, keyed by path (tests). */
+export function memoryFiles(
+  files: ReadonlyMap<string, Uint8Array>,
+  chunkBytes = 64 * 1024,
+): FileSource {
+  return {
+    open(path) {
+      const bytes = files.get(path)
+      if (bytes === undefined)
+        return Promise.resolve(
+          fail('input.malformed', `cannot read ${path}`, {
+            where: 'files.open',
+            issues: [{ path: ['path'], rule: 'unreadableFile', message: 'no such file' }],
+          }),
+        )
+      async function* chunks(): AsyncIterable<Uint8Array> {
+        for (let i = 0; i < bytes!.length; i += chunkBytes) yield bytes!.subarray(i, i + chunkBytes)
+      }
+      return Promise.resolve(Ok({ size: bytes.length, chunks: chunks() }))
+    },
+  }
 }
 
 /**
@@ -100,6 +152,8 @@ export interface InProcessOptions {
   readonly clone?: boolean
   /** Loads the solid kernel for geometry tasks, once (default: fails – no WASM in the fake). */
   readonly solids?: () => AsyncAppResult<SolidKernel>
+  /** File access of tasks (default: none). */
+  readonly files?: FileSource
   readonly log?: Logger
 }
 
@@ -130,6 +184,7 @@ export function createInProcessWorkers(opts: InProcessOptions = {}): WorkerPort 
         steps: signalSteps(ctl.signal, ctl.progress),
         log: (opts.log ?? noopLogger).child({ task: task.name }),
         solids,
+        files: opts.files ?? noFiles,
       }
       const ran = await tryAsync(
         async () => task.run(arg, control),

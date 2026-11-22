@@ -469,7 +469,19 @@ class ProjectDispatcher implements Dispatcher {
     const ctx = this.context(source)
     switch (def.kind) {
       case 'document': {
-        const done = this.runDocument(def, args, ctx, opts.gesture)
+        let prepared: unknown
+        if (def.prepare !== undefined) {
+          const prepare = def.prepare.bind(def)
+          const ran = await tryAsync(
+            () => prepare(this.current, args, ctx),
+            'internal.unexpected',
+            `${def.name}: prepare threw`,
+          )
+          const r = ran.isOk() ? ran.unwrap() : Err(ran.unwrapErr())
+          if (r.isErr()) return this.logged(def.name, args, source, Err(r.unwrapErr()))
+          prepared = r.unwrap()
+        }
+        const done = this.runDocument(def, args, ctx, opts.gesture, prepared)
         if (opts.apply !== true || done.isErr()) return done
         return Ok(this.autoApply(done.unwrap(), source))
       }
@@ -670,8 +682,9 @@ class ProjectDispatcher implements Dispatcher {
     args: unknown,
     ctx: CommandContext,
     gesture: string | undefined,
+    input?: unknown,
   ): AppResult<CommandOutcome> {
-    const ran = executeDocumentCommand(this.current, def, args, ctx, this.registry.hooks)
+    const ran = executeDocumentCommand(this.current, def, args, ctx, this.registry.hooks, input)
     if (ran.result.isErr())
       return this.logged(def.name, args, ctx.source, Err(ran.result.unwrapErr()))
     const value = ran.result.unwrap()

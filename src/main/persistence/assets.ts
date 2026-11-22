@@ -23,16 +23,37 @@ export function assetFileIn(work: string, path: string): AppResult<string> {
     : fail('input.malformed', 'not an asset path', { where: 'assets.file', data: { path } })
 }
 
+function refused(source: string, rule: string, message: string, params?: Record<string, number>) {
+  return fail('input.malformed', `${source}: ${message}`, {
+    where: 'assets.import',
+    issues: [{ path: ['path'], rule, message, ...(params === undefined ? {} : { params }) }],
+  })
+}
+
+/** Thrown inside the copy when the file grew past the limit while copying. */
+class TooLarge extends Error {}
+
 /**
  * Copies `source` into `<work>/assets/<sha256>.<format>`: streamed into a temp file (hashing on
- * the way), fsynced, renamed. Importing the same content again stores it once.
+ * the way), fsynced, renamed. Importing the same content again stores it once. A source that is
+ * not a readable regular file or exceeds `maxBytes` is `input.malformed` and nothing is stored.
  */
 export async function importAssetFile(
   fs: PersistFs,
   work: string,
   source: string,
-  format: AssetFormat = 'stl',
+  opts: { readonly format?: AssetFormat; readonly maxBytes?: number } = {},
 ): AsyncAppResult<AssetRef> {
+  const format = opts.format ?? 'stl'
+  const maxBytes = opts.maxBytes ?? Number.POSITIVE_INFINITY
+  const info = await fs.stat(source).catch(() => undefined)
+  if (info === undefined || info.isDirectory)
+    return refused(source, 'unreadableFile', info === undefined ? 'no such file' : 'is a folder')
+  if (info.size > maxBytes)
+    return refused(source, 'tooLarge', `larger than ${maxBytes} bytes`, {
+      limit: maxBytes,
+      actual: info.size,
+    })
   const dir = join(work, ASSET_DIR)
   const tmp = join(dir, `import-${randomBytes(4).toString('hex')}.tmp`)
   const r = await tryAsync(
@@ -44,6 +65,7 @@ export async function importAssetFile(
       for await (const chunk of chunks(fs, source)) {
         hash.update(chunk)
         size += chunk.length
+        if (size > maxBytes) throw new TooLarge()
         await fs.appendFile(tmp, chunk)
       }
       await fs.fsync(tmp)
@@ -59,6 +81,8 @@ export async function importAssetFile(
   )
   if (r.isErr()) {
     await fs.unlink(tmp).catch(() => undefined)
+    if (r.unwrapErr().cause instanceof TooLarge)
+      return refused(source, 'tooLarge', `larger than ${maxBytes} bytes`, { limit: maxBytes })
     return r.mapErr((e) => e.withContext('assets.import', { source }))
   }
   return r

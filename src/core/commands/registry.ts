@@ -5,6 +5,7 @@
 import type { Issue } from '../../shared/errors/app-error'
 import { fail, None, Ok, Some, type AppResult, type Option } from '../../shared/result'
 import { DESIGN_COMMANDS, DESIGN_QUERIES } from '../design/commands'
+import { REFERENCE_COMMANDS, REFERENCE_QUERIES } from '../design/reference-commands'
 import { FEEDS_SPEEDS_QUERIES } from '../feeds-speeds/commands'
 import { LIBRARY_COMMANDS, LIBRARY_QUERIES } from '../library/commands'
 import { draftPlanAutoRebuild, PLAN_COMMANDS, PLAN_QUERIES } from '../plan/commands'
@@ -54,6 +55,7 @@ export const BUILTIN_QUERIES: readonly QueryDef[] = [
 export const PROJECT_COMMANDS: readonly AnyCommand[] = [
   projectSave,
   ...DESIGN_COMMANDS,
+  ...REFERENCE_COMMANDS,
   ...PLAN_COMMANDS,
   toolpathGenerateJob,
   planExport,
@@ -61,6 +63,7 @@ export const PROJECT_COMMANDS: readonly AnyCommand[] = [
 ]
 export const PROJECT_QUERIES: readonly QueryDef[] = [
   ...DESIGN_QUERIES,
+  ...REFERENCE_QUERIES,
   ...PLAN_QUERIES,
   toolpathGet,
   ...RUN_QUERIES,

@@ -455,9 +455,9 @@ class MainSession implements ProjectSession {
     return this.wf.flush()
   }
 
-  importAsset(source: string): AsyncAppResult<AssetRef> {
+  importAsset(source: string, opts: { readonly maxBytes?: number } = {}): AsyncAppResult<AssetRef> {
     const { fs, log } = this.storage.deps
-    return importAssetFile(fs, this.paths.work, source).then((r) => {
+    return importAssetFile(fs, this.paths.work, source, opts).then((r) => {
       if (r.isOk())
         log.info(
           { project: this.projectId, asset: r.unwrap().path, size: r.unwrap().size },

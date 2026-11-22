@@ -18,6 +18,18 @@ export const ASSET_PATH = /^assets\/[0-9a-f]{64}\.stl$/
 
 export type AssetFormat = 'stl'
 
+/**
+ * Largest asset a project stores: the import limit, and the per-asset limit when an archive is
+ * read. Doc: docs/architecture/persistence.md#assets-and-references-v02
+ */
+export const MAX_ASSET_BYTES = 512 * 1024 * 1024
+
+/**
+ * All assets of an archive together, counted while reading (the assets' zip-bomb guard; the
+ * documents keep their own 512 MB guard). Below 4 GiB, so archives never need Zip64.
+ */
+export const MAX_ASSETS_TOTAL_BYTES = 2 * 1024 * 1024 * 1024
+
 export function isAssetName(name: string): boolean {
   return ASSET_NAME.test(name)
 }

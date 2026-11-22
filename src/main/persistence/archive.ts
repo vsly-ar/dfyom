@@ -11,7 +11,13 @@
 import { createHash, type Hash } from 'node:crypto'
 import { join } from 'node:path'
 import { Unzip, UnzipInflate, Zip, ZipDeflate, type UnzipFile } from 'fflate'
-import { ASSET_DIR, isAssetPath, referencedAssets } from '../../core/project/assets'
+import {
+  ASSET_DIR,
+  isAssetPath,
+  MAX_ASSET_BYTES,
+  MAX_ASSETS_TOTAL_BYTES,
+  referencedAssets,
+} from '../../core/project/assets'
 import type { ProjectDoc } from '../../core/project/document'
 import {
   isLayoutPath,
@@ -34,7 +40,12 @@ import {
 } from '../../shared/result'
 import type { PersistFs } from './fs'
 
-/** Uncompressed size limit of an archive (zip-bomb guard), counted while inflating. */
+/**
+ * Uncompressed size limit of an archive's documents (zip-bomb guard), counted while inflating.
+ * Documents are collected in memory; assets are streamed to disk and have their own limits
+ * (`MAX_ASSET_BYTES` each, `MAX_ASSETS_TOTAL_BYTES` together), so an asset near the import
+ * limit never makes a project unopenable (docs/architecture/persistence.md#assets-and-references-v02).
+ */
 export const MAX_ARCHIVE_BYTES = 512 * 1024 * 1024
 
 /** Read and write granularity of streamed files. */
@@ -224,7 +235,12 @@ export interface ReadArchive {
 }
 
 export interface ReadOptions {
+  /** Documents together (default `MAX_ARCHIVE_BYTES`). */
   readonly maxBytes?: number
+  /** One asset (default `MAX_ASSET_BYTES`). */
+  readonly maxAssetBytes?: number
+  /** All assets together (default `MAX_ASSETS_TOTAL_BYTES`). */
+  readonly maxAssetsBytes?: number
   /**
    * Unpack: write the asset entries `want` accepts to `<dir>/assets/` (and fsync them). Without
    * it, assets are only hashed. On failure, files already written stay: `dir` is a scratch
@@ -277,10 +293,13 @@ interface ReadEntries {
 
 async function readEntries(fs: PersistFs, path: string, opts: ReadOptions): Promise<ReadEntries> {
   const maxBytes = opts.maxBytes ?? MAX_ARCHIVE_BYTES
+  const maxAssetBytes = opts.maxAssetBytes ?? MAX_ASSET_BYTES
+  const maxAssetsBytes = opts.maxAssetsBytes ?? MAX_ASSETS_TOTAL_BYTES
   const extract = opts.extract
   const entries = new Map<string, Entry>()
   let failure: AppError | undefined
   let total = 0
+  let assetsTotal = 0
   // Asset writes are queued by the (synchronous) inflate callbacks and awaited per input chunk.
   let writes: Promise<void> = Promise.resolve()
   const queue = (op: () => Promise<void>) => {
@@ -316,8 +335,16 @@ async function readEntries(fs: PersistFs, path: string, opts: ReadOptions): Prom
     file.ondata = (err, data, final) => {
       if (failure !== undefined) return
       if (err !== null) return fail(malformed('not a valid zip archive', { path: name }), file)
-      total += data.length
-      if (total > maxBytes) return fail(malformed('archive is too large', { maxBytes }), file)
+      if (asset) {
+        assetsTotal += data.length
+        if (entry.size + data.length > maxAssetBytes)
+          return fail(malformed('archive asset is too large', { path: name, maxAssetBytes }), file)
+        if (assetsTotal > maxAssetsBytes)
+          return fail(malformed('archive assets are too large', { maxAssetsBytes }), file)
+      } else {
+        total += data.length
+        if (total > maxBytes) return fail(malformed('archive is too large', { maxBytes }), file)
+      }
       entry.hash.update(data)
       entry.size += data.length
       entry.parts?.push(data)
