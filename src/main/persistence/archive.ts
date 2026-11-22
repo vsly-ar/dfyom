@@ -4,13 +4,14 @@
  * docs/architecture/persistence.md#files-and-folders
  *
  * Zip library: fflate (MIT, GPL-3.0-or-later compatible, no native code), streaming API
- * (`Zip`/`ZipDeflate`, `Unzip`/`UnzipInflate`). The archive is never built or read in memory:
- * files go through in `CHUNK_BYTES` pieces. Documents (small JSON) are collected for the load
+ * (`Zip`/`ZipDeflate` to write, `Inflate` to read). Reading takes each entry's place and size from
+ * the central directory, not fflate's `Unzip` (see `readCentralDirectory`). The archive is never
+ * built or read in memory: files go through in `CHUNK_BYTES` pieces. Documents (small JSON) are collected for the load
  * pipeline; assets are only hashed (verify) or written to a folder (unpack) while streaming.
  */
 import { createHash, type Hash } from 'node:crypto'
 import { join } from 'node:path'
-import { Unzip, UnzipInflate, Zip, ZipDeflate, type UnzipFile } from 'fflate'
+import { Inflate, Zip, ZipDeflate } from 'fflate'
 import {
   ASSET_DIR,
   isAssetPath,
@@ -291,6 +292,158 @@ interface ReadEntries {
   readonly size: number
 }
 
+/** A central directory record: what the reader trusts for an entry's place and size. */
+interface CentralEntry {
+  readonly name: string
+  readonly compression: number
+  readonly compressedSize: number
+  readonly size: number
+  readonly offset: number
+}
+
+const SIG_LOCAL = 0x04034b50
+const SIG_CENTRAL = 0x02014b50
+const SIG_END = 0x06054b50
+const END_BYTES = 22
+const MAX_COMMENT = 0xffff
+/** The central directory is held in memory: under a hundred bytes per entry. */
+const MAX_CENTRAL_BYTES = 64 * 1024 * 1024
+
+const notZip = (data?: Record<string, unknown>) => malformed('not a valid zip archive', data)
+
+const view = (b: Uint8Array) => new DataView(b.buffer, b.byteOffset, b.byteLength)
+
+/**
+ * The central directory, found from the end-of-central-directory record at the end of the file.
+ * Entry places and sizes come from here, never from scanning the data: fflate's streaming
+ * `Unzip` finds the end of an entry with a data descriptor (every entry `Zip` writes) by
+ * searching for the next zip signature, so those 4 bytes inside an asset's stored (incompressible)
+ * data cut the entry short and made the project unopenable (backlog B17). Zip64 is not supported
+ * (the asset limits keep archives below 4 GiB).
+ */
+async function readCentralDirectory(
+  fs: PersistFs,
+  path: string,
+  fileSize: number,
+): Promise<CentralEntry[]> {
+  const tailBytes = Math.min(fileSize, END_BYTES + MAX_COMMENT)
+  if (tailBytes < END_BYTES) throw notZip()
+  const tailStart = fileSize - tailBytes
+  const tail = await fs.readRange(path, tailStart, tailBytes)
+  const tv = view(tail)
+  let end = -1
+  for (let at = tail.length - END_BYTES; at >= 0; at--) {
+    const commentBytes = tv.getUint16(at + 20, true)
+    if (tv.getUint32(at, true) === SIG_END && at + END_BYTES + commentBytes === tail.length) {
+      end = at
+      break
+    }
+  }
+  if (end < 0) throw notZip()
+  if (tv.getUint16(end + 4, true) !== 0 || tv.getUint16(end + 6, true) !== 0)
+    throw malformed('multi-disk zip archives are not supported')
+  const count = tv.getUint16(end + 10, true)
+  const cdSize = tv.getUint32(end + 12, true)
+  const cdOffset = tv.getUint32(end + 16, true)
+  if (count !== tv.getUint16(end + 8, true) || count === 0xffff || cdOffset === 0xffffffff)
+    throw malformed('zip64 archives are not supported')
+  if (cdSize > MAX_CENTRAL_BYTES || cdOffset + cdSize > tailStart + end) throw notZip()
+  const cd = await fs.readRange(path, cdOffset, cdSize)
+  if (cd.length !== cdSize) throw notZip()
+  const cv = view(cd)
+  const decoder = new TextDecoder('utf-8', { fatal: true })
+  const out: CentralEntry[] = []
+  let at = 0
+  for (let i = 0; i < count; i++) {
+    if (at + 46 > cd.length || cv.getUint32(at, true) !== SIG_CENTRAL) throw notZip()
+    const flags = cv.getUint16(at + 8, true)
+    const nameBytes = cv.getUint16(at + 28, true)
+    const next = at + 46 + nameBytes + cv.getUint16(at + 30, true) + cv.getUint16(at + 32, true)
+    if (next > cd.length) throw notZip()
+    if ((flags & 1) !== 0) throw malformed('encrypted zip entries are not supported')
+    const name = tryCatch(
+      () => decoder.decode(cd.subarray(at + 46, at + 46 + nameBytes)),
+      'input.malformed',
+      'zip entry name is not UTF-8',
+    )
+    if (name.isErr()) throw name.unwrapErr()
+    out.push({
+      name: name.unwrap(),
+      compression: cv.getUint16(at + 10, true),
+      compressedSize: cv.getUint32(at + 20, true),
+      size: cv.getUint32(at + 24, true),
+      offset: cv.getUint32(at + 42, true),
+    })
+    at = next
+  }
+  return out
+}
+
+/** Reads a file front to back once in `CHUNK_BYTES` reads, hashing every byte. */
+class SequentialReader {
+  pos = 0
+  private buffered: Uint8Array = new Uint8Array(0)
+  private readonly source: AsyncGenerator<Uint8Array>
+  private readonly hash: Hash = createHash('sha256')
+
+  constructor(fs: PersistFs, path: string) {
+    this.source = chunks(fs, path)
+  }
+
+  /** Up to `max` next bytes (a view into the read chunk); empty at the end of the file. */
+  private async next(max: number): Promise<Uint8Array> {
+    if (this.buffered.length === 0) {
+      const r = await this.source.next()
+      if (r.done === true) return new Uint8Array(0)
+      this.hash.update(r.value)
+      this.buffered = r.value
+    }
+    const piece = this.buffered.subarray(0, max)
+    this.buffered = this.buffered.subarray(piece.length)
+    this.pos += piece.length
+    return piece
+  }
+
+  /** Exactly `n` bytes in pieces of at most `max`; the file ending first is malformed. */
+  async *take(n: number, max = PUSH_BYTES): AsyncGenerator<Uint8Array> {
+    for (let left = n; left > 0;) {
+      const piece = await this.next(Math.min(left, max))
+      if (piece.length === 0) throw notZip()
+      left -= piece.length
+      yield piece
+    }
+  }
+
+  async bytes(n: number): Promise<Uint8Array> {
+    const parts: Uint8Array[] = []
+    for await (const p of this.take(n)) parts.push(p)
+    return join8(parts)
+  }
+
+  async skip(n: number): Promise<void> {
+    for await (const _ of this.take(n, CHUNK_BYTES)) void _
+  }
+
+  /** Reads to the end; the file's sha256 and size. */
+  async finish(): Promise<{ readonly sha256: string; readonly size: number }> {
+    while ((await this.next(CHUNK_BYTES)).length > 0);
+    return { sha256: this.hash.digest('hex'), size: this.pos }
+  }
+}
+
+/** Inflate errors (corrupt or cut-short deflate data) are a malformed archive. */
+function pushInflate(inflate: Inflate, data: Uint8Array, final: boolean, path: string): void {
+  try {
+    inflate.push(data, final)
+  } catch {
+    throw notZip({ path })
+  }
+}
+
+/**
+ * Entries in file order, each read for exactly its central-directory compressed size and
+ * inflated in `PUSH_BYTES` slices; the whole file is read once (and hashed) front to back.
+ */
 async function readEntries(fs: PersistFs, path: string, opts: ReadOptions): Promise<ReadEntries> {
   const maxBytes = opts.maxBytes ?? MAX_ARCHIVE_BYTES
   const maxAssetBytes = opts.maxAssetBytes ?? MAX_ASSET_BYTES
@@ -300,50 +453,78 @@ async function readEntries(fs: PersistFs, path: string, opts: ReadOptions): Prom
   let failure: AppError | undefined
   let total = 0
   let assetsTotal = 0
-  // Asset writes are queued by the (synchronous) inflate callbacks and awaited per input chunk.
+  // Asset writes are queued by the (synchronous) inflate callbacks and awaited per input slice.
   let writes: Promise<void> = Promise.resolve()
   const queue = (op: () => Promise<void>) => {
     writes = writes.then(op)
   }
-  const fail = (e: AppError, file?: UnzipFile) => {
-    failure ??= e
-    file?.terminate()
+  const settle = async () => {
+    await writes
+    if (failure !== undefined) throw failure
   }
 
-  const unzip = new Unzip((file) => {
-    if (failure !== undefined) return
-    const name = file.name
-    if (!isSafeEntryName(name))
-      return fail(malformed('unsafe entry name (zip-slip)', { entry: name }))
-    if (entries.has(name)) return fail(malformed('archive lists an entry twice', { path: name }))
+  const stat = await fs.stat(path)
+  // A missing path or a folder: the read reports the file system's own error.
+  if (stat === undefined || stat.isDirectory) await fs.readRange(path, 0, 1)
+  if (stat === undefined || stat.isDirectory) throw notZip()
+  const central = await readCentralDirectory(fs, path, stat.size)
+
+  for (const c of central) {
+    const name = c.name
+    if (!isSafeEntryName(name)) throw malformed('unsafe entry name (zip-slip)', { entry: name })
+    if (entries.has(name)) throw malformed('archive lists an entry twice', { path: name })
     const asset = name.startsWith(`${ASSET_DIR}/`)
-    if (asset && !isAssetPath(name))
-      return fail(malformed('unexpected file in assets/', { path: name }))
+    if (asset && !isAssetPath(name)) throw malformed('unexpected file in assets/', { path: name })
     if (!asset && name !== MANIFEST_FILE && !isLayoutPath(name))
-      return fail(malformed('archive entry not listed in the manifest', { path: name }))
+      throw malformed('archive entry not listed in the manifest', { path: name })
+    if (c.compression !== 0 && c.compression !== 8)
+      throw malformed('unsupported compression', { path: name })
     const target = asset && extract?.want(name) === true ? join(extract.dir, name) : undefined
-    const entry: Entry = {
+    entries.set(name, {
       name,
       hash: createHash('sha256'),
       size: 0,
       done: false,
       ...(asset ? {} : { parts: [] }),
       ...(target === undefined ? {} : { target }),
-    }
-    entries.set(name, entry)
+    })
+  }
+
+  if (extract !== undefined) await fs.mkdir(join(extract.dir, ASSET_DIR))
+  const reader = new SequentialReader(fs, path)
+  for (const c of [...central].sort((a, b) => a.offset - b.offset)) {
+    const entry = entries.get(c.name)
+    if (entry === undefined) throw notZip()
+    const { name, target } = entry
+    const asset = entry.parts === undefined
+    if (c.offset < reader.pos) throw notZip({ path: name })
+    await reader.skip(c.offset - reader.pos)
+    const header = view(await reader.bytes(30))
+    if (header.getUint32(0, true) !== SIG_LOCAL || header.getUint16(8, true) !== c.compression)
+      throw notZip({ path: name })
+    const localName = await reader.bytes(header.getUint16(26, true))
+    if (new TextDecoder().decode(localName) !== name) throw notZip({ path: name })
+    await reader.skip(header.getUint16(28, true))
+
     if (target !== undefined) queue(() => fs.writeFile(target, new Uint8Array(0)))
-    file.ondata = (err, data, final) => {
+    const ondata = (data: Uint8Array, final: boolean): void => {
       if (failure !== undefined) return
-      if (err !== null) return fail(malformed('not a valid zip archive', { path: name }), file)
       if (asset) {
         assetsTotal += data.length
-        if (entry.size + data.length > maxAssetBytes)
-          return fail(malformed('archive asset is too large', { path: name, maxAssetBytes }), file)
-        if (assetsTotal > maxAssetsBytes)
-          return fail(malformed('archive assets are too large', { maxAssetsBytes }), file)
+        if (entry.size + data.length > maxAssetBytes) {
+          failure = malformed('archive asset is too large', { path: name, maxAssetBytes })
+          return
+        }
+        if (assetsTotal > maxAssetsBytes) {
+          failure = malformed('archive assets are too large', { maxAssetsBytes })
+          return
+        }
       } else {
         total += data.length
-        if (total > maxBytes) return fail(malformed('archive is too large', { maxBytes }), file)
+        if (total > maxBytes) {
+          failure = malformed('archive is too large', { maxBytes })
+          return
+        }
       }
       entry.hash.update(data)
       entry.size += data.length
@@ -354,45 +535,28 @@ async function readEntries(fs: PersistFs, path: string, opts: ReadOptions): Prom
         if (target !== undefined) queue(() => fs.fsync(target))
       }
     }
-    try {
-      file.start()
-    } catch {
-      fail(malformed('unsupported compression', { path: name }), file)
-    }
-  })
-  unzip.register(UnzipInflate)
-
-  if (extract !== undefined) await fs.mkdir(join(extract.dir, ASSET_DIR))
-  const archiveHash = createHash('sha256')
-  let size = 0
-  let sawAny = false
-  for await (const chunk of chunks(fs, path)) {
-    sawAny = true
-    archiveHash.update(chunk)
-    size += chunk.length
-    const last = chunk.length < CHUNK_BYTES
+    // Stored pieces are views into a read chunk: copy what is kept or written later.
+    const inflate = c.compression === 8 ? new Inflate(ondata) : undefined
+    const feed = (piece: Uint8Array, final: boolean) =>
+      inflate === undefined
+        ? ondata(piece.slice(), final)
+        : pushInflate(inflate, piece, final, name)
     // Small pushes bound what one push inflates (deflate expands up to ~1000×) before the size
     // guard sees it, and how many asset writes queue up.
-    for (let at = 0; at < chunk.length; at += PUSH_BYTES) {
-      try {
-        unzip.push(chunk.subarray(at, at + PUSH_BYTES), last && at + PUSH_BYTES >= chunk.length)
-      } catch {
-        fail(malformed('not a valid zip archive'))
-      }
-      await writes
-      if (failure !== undefined) throw failure
+    if (c.compressedSize === 0) feed(new Uint8Array(0), true)
+    let left = c.compressedSize
+    for await (const piece of reader.take(c.compressedSize)) {
+      left -= piece.length
+      feed(piece, left === 0)
+      await settle()
     }
+    await settle()
+    if (entry.size !== c.size)
+      throw malformed('archive entry does not match the central directory', { path: name })
   }
-  if (!sawAny || size % CHUNK_BYTES === 0) {
-    try {
-      unzip.push(new Uint8Array(0), true)
-    } catch {
-      fail(malformed('not a valid zip archive'))
-    }
-  }
-  await writes
-  if (failure !== undefined) throw failure
-  return { entries, sha256: archiveHash.digest('hex'), size }
+  const whole = await reader.finish()
+  await settle()
+  return { entries, ...whole }
 }
 
 function checkEntries(r: ReadEntries): AppResult<ReadArchive> {

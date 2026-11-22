@@ -124,18 +124,22 @@ describe('generatePocket', () => {
     )
   })
 
-  it('clears a circle and a rounded rectangle exactly (flat end mill)', () => {
+  // three pockets checked on a heightmap: ~1 s alone, several times that
+  // under a loaded parallel `npm test` (docs/conventions/testing.md#commands)
+  it('clears a circle and a rounded rectangle exactly (flat end mill)', { timeout: 60_000 }, () => {
     checkPocket(pocket({ kind: 'circle', radius: 9 }, 5), endMill(6))
     checkPocket(pocket(rect(40, 25, 4), 8, 0, -0.5), endMill(6))
     checkPocket(pocket(rect(25, 40, 3), 4), endMill(6))
   })
 
-  it('leaves the floor fillet with a matching bull nose', () => {
+  // two pockets checked on a heightmap: ~1 s alone, several times that
+  // under a loaded parallel `npm test` (docs/conventions/testing.md#commands)
+  it('leaves the floor fillet with a matching bull nose', { timeout: 60_000 }, () => {
     checkPocket(pocket(rect(40, 25, 4), 8, 2, -0.5), bullNose(6, 2))
     checkPocket(pocket({ kind: 'circle', radius: 10 }, 4, 1), bullNose(8, 1))
   })
 
-  it('30 seeded random pockets keep every property', { timeout: 20_000 }, () => {
+  it('30 seeded random pockets keep every property', { timeout: 60_000 }, () => {
     const rnd = random(7)
     for (let n = 0; n < 30; n++) {
       const D = [3, 4, 6, 8][Math.floor(rnd() * 4)]!

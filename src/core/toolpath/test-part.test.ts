@@ -65,7 +65,7 @@ describe('test part: toolpaths remove what the geometry removes', () => {
       expect(violations(tp, rules), tp.planOperationId).toEqual([])
   })
 
-  it('matches the analytic removal on a 0.25 mm heightmap', { timeout: 20_000 }, () => {
+  it('matches the analytic removal on a 0.25 mm heightmap', { timeout: 60_000 }, () => {
     const ops = testPart().operations
     const profile = ops.find((o): o is ProfileOperation => o.kind === 'profile')!
     const map = new Heightmap(TEST_STOCK.length, TEST_STOCK.width, 0.25)

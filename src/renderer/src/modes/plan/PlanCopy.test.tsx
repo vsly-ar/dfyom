@@ -58,7 +58,7 @@ async function renderPlan(setup?: (s: PlanSetup, planId: string) => Promise<void
   return { ...r, s, planId, bridge, nav, inspector, callsOf, facingCopy }
 }
 
-describe('Plan-only edits', { timeout: 20_000 }, () => {
+describe('Plan-only edits', () => {
   it('edits the plan copy in a settled plan, shows "Edited in plan" and reverts to design', async () => {
     const t = await renderPlan((s, planId) => s.toStatus(planId, 'settledDesign'))
     const group = await t.facingCopy()

@@ -408,7 +408,9 @@ describe('evaluatePart: surfaceMissing', () => {
   })
 })
 
-describe('evaluatePart: seeded random parts keep a valid status', () => {
+// 40 seeded parts: ~1 s alone, several times that under a loaded parallel `npm test`
+// (docs/conventions/testing.md#commands)
+describe('evaluatePart: seeded random parts keep a valid status', { timeout: 60_000 }, () => {
   /** mulberry32 */
   function rng(seed: number): () => number {
     let a = seed

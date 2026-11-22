@@ -56,7 +56,7 @@ async function fill(t: T, scope: HTMLElement, label: string, value: string) {
 
 // multi-step form flows (~2 s each alone, more under a parallel `npm test`,
 // docs/conventions/testing.md#commands)
-describe('New machine', { timeout: 20_000 }, () => {
+describe('New machine', () => {
   it('adds a machine from the empty state of an empty library, then creates the plan with it', async () => {
     const t = await renderPlan({
       plan: false,

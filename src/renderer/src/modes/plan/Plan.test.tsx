@@ -54,7 +54,7 @@ async function renderPlan(opts: { plan?: boolean; setup?: (s: PlanSetup) => Prom
 
 // multi-step user flows through the whole mode (~2 s each alone, more under a parallel `npm test`,
 // docs/conventions/testing.md#commands)
-describe('Plan mode', { timeout: 20_000 }, () => {
+describe('Plan mode', () => {
   it('creates a plan of the part with the machine and lists its operations in machining order', async () => {
     const t = await renderPlan({ plan: false })
     await t.user.click(await within(t.nav()).findByRole('button', { name: 'Create plan' }))

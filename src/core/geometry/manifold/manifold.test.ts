@@ -154,7 +154,7 @@ describe('withSolids', () => {
   // 40 000 WASM calls: ~1 s alone, several under a parallel `npm test` (docs/conventions/testing.md#commands)
   it(
     'frees the library object of a rejected mesh (heap stays flat)',
-    { timeout: 20_000 },
+    { timeout: 60_000 },
     async () => {
       const hosted = expectOk(await loadManifold(nodeManifoldSource()))
       const ring = offsetLoft(

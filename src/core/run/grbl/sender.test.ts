@@ -143,7 +143,9 @@ describe('streaming', () => {
     expect(labels).toEqual(['pocket1', 'drill'])
   })
 
-  it('streams a long program (20 000 lines) without errors', async () => {
+  // 20 000 lines through the emulator: ~1 s alone, several times that
+  // under a loaded parallel `npm test` (docs/conventions/testing.md#commands)
+  it('streams a long program (20 000 lines) without errors', { timeout: 60_000 }, async () => {
     const r = await connected(machine({ trace: false }))
     const lines: string[] = []
     for (let i = 0; i < 20_000; i++) lines.push(`G1 X${i % 2 ? 10 : 0} Y${(i % 1000) / 10} F6000`)

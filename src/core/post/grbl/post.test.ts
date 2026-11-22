@@ -635,7 +635,7 @@ describe('review fixes', () => {
   })
 
   // 300 seeded programs: ~1 s alone, several under a parallel `npm test` (docs/conventions/testing.md#commands)
-  it('inch fuzz: 300 random toolpaths export and re-parse as intended', { timeout: 20_000 }, () => {
+  it('inch fuzz: 300 random toolpaths export and re-parse as intended', { timeout: 60_000 }, () => {
     const machine = testMachine({ programUnits: 'in' })
     for (let seed = 1000; seed < 1300; seed++) {
       const r = exportGrbl(

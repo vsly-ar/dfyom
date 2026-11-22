@@ -96,7 +96,7 @@ async function openMenu(
   await t.user.keyboard('{Enter}')
 }
 
-describe('Setup panel', { timeout: 20_000 }, () => {
+describe('Setup panel', () => {
   it('lists the setups in machining order with direction, WCS corner and rotation, operations nested', async () => {
     const t = await renderSetups()
     const [bottom, top] = t.setupRows()

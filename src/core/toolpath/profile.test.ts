@@ -157,7 +157,9 @@ describe('generateProfile', () => {
     )
   })
 
-  it('cuts outside and inside slots with tabs left at their height', () => {
+  // profiles checked on a heightmap: ~1 s alone, several times that
+  // under a loaded parallel `npm test` (docs/conventions/testing.md#commands)
+  it('cuts outside and inside slots with tabs left at their height', { timeout: 60_000 }, () => {
     checkProfile(profile(rect(30, 20, 3), 'outside', 6), endMill(6))
     checkProfile(profile(rect(30, 20, 3), 'outside', 10), endMill(4))
     checkProfile(profile(rect(30, 24, 4), 'inside', 6), endMill(6))
@@ -208,7 +210,7 @@ describe('generateProfile', () => {
     expect(tabCells).toBeGreaterThan(100)
   })
 
-  it('40 seeded random profiles keep every property', { timeout: 20_000 }, () => {
+  it('40 seeded random profiles keep every property', { timeout: 60_000 }, () => {
     const rnd = random(11)
     let checked = 0
     for (let n = 0; n < 40; n++) {
