@@ -10,7 +10,7 @@ import { createAppRegistry } from '../commands/registry'
 import { fakeClock, fakeIds, uiSource } from '../commands/testing'
 import { DESIGN_COMMANDS } from '../design/commands'
 import { testStock } from '../design/design.fixture'
-import { len } from '../library/library.fixture'
+import { len, libraryInput } from '../library/library.fixture'
 import type { ProjectDoc } from '../project/document'
 import { PLAN_COMMANDS, PLAN_QUERIES } from './commands'
 import { followLibraryChanges } from './follow'
@@ -47,7 +47,7 @@ async function changeTool(s: PlanSetup) {
   await s.run('library.tool.update', {
     id: s.tools.flat6,
     revision: item.revision,
-    values: { ...flat6(), name: 'Flat 6 reground', diameter: len('5.9') },
+    values: { ...libraryInput(flat6()), name: 'Flat 6 reground', diameter: '5.9' },
   })
 }
 

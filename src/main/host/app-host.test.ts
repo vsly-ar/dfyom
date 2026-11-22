@@ -3,7 +3,7 @@
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { flat6 } from '../../core/plan/plan.fixture'
-import { len } from '../../core/library/library.fixture'
+import { libraryInput } from '../../core/library/library.fixture'
 import type { Source } from '../../core/commands/context'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
 import { buildSmallPlan, tempDir, testHost } from './host.fixture'
@@ -92,7 +92,7 @@ describe('app host', () => {
     await call('library.tool.update', {
       id: tool.id,
       revision: tool.revision,
-      values: { ...flat6(), overallLength: len('70') },
+      values: { ...libraryInput(flat6()), overallLength: '70' },
     })
     const d = host.project(ids.key).unwrap()
     await expect

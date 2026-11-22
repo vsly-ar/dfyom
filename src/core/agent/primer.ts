@@ -5,7 +5,7 @@
 export const PRIMER = [
   'DFYOM designs, plans and runs parts on CNC machines (docs/architecture/llm-api.md).',
   '- Open or create a project first (project_open, project_create, or project_bind with a key from project_list); project tools act on the bound project. Library and feeds-and-speeds tools work without one.',
-  '- Quantities are strings as entered, with units: "6 mm", "1/4\\"", "0.5" (project units); library item values take quantity objects (see the tool schema).',
+  '- Quantities are strings as entered, with units: "6 mm", "1/4\\"", "0.5" (project units; library tools: their units arg, default mm). Library results store each as an object whose source is the string.',
   '- Reserved args, not listed in the tool schemas: every project tool that changes something accepts expectedRevision; edit tools described as "Undoable." also accept apply.',
   '- Query before editing, or pass expectedRevision (integer, the revision of your last result): a change by someone else in between fails with command.conflict; re-query and retry.',
   '- Edits apply automatically: the follow-up work (tool choice, draft plans, toolpaths) runs after each edit and comes back as applied in the result. Pass apply: false (boolean) to batch several edits, then project_apply once; project_pending_get lists what is not applied.',

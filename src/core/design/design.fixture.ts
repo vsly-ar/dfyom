@@ -9,20 +9,22 @@ import { inProcessWorkers } from '../commands/jobs'
 import { createAppRegistry } from '../commands/registry'
 import { fakeClock, fakeIds, uiSource } from '../commands/testing'
 import { Library } from '../library/library'
-import { len } from '../library/library.fixture'
 import { createMemoryLibraryStorage } from '../library/memory-storage'
 import { newProjectDoc, type UnitSystem } from '../project/document'
 import type { OperationDTO, PartDTO } from './part.dto'
 
 const ui = uiSource()
 
-/** The geometry test part's stock: 100 × 60 × 20 (docs/architecture/geometry.md#testing). */
+/**
+ * The geometry test part's stock: 100 × 60 × 20 (docs/architecture/geometry.md#testing), as
+ * `library.stock.add` input (quantity strings, bare numbers in mm).
+ */
 export const testStock = (thickness = '20') => ({
   name: 'Test block',
   shape: 'block' as const,
-  length: len('100'),
-  width: len('60'),
-  thickness: len(thickness),
+  length: '100',
+  width: '60',
+  thickness,
   material: { name: '6061-T6', class: 'aluminum' as const },
 })
 

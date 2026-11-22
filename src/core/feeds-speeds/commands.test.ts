@@ -8,12 +8,11 @@ import { createAppRegistry } from '../commands/registry'
 import { agentSource, fakeClock, fakeIds } from '../commands/testing'
 import { newProjectDoc } from '../project/document'
 import { Library } from '../library/library'
-import { flatEndMillValues, machineValues } from '../library/library.fixture'
+import { flatEndMillValues, libraryInput, machineValues } from '../library/library.fixture'
 import { createMemoryLibraryStorage } from '../library/memory-storage'
 import { suggestionToDTO } from './commands'
 
 const agent = agentSource()
-const omitKind = <T extends { kind: string }>({ kind: _, ...rest }: T) => rest
 
 async function setup() {
   const library = expectOk(await Library.open(createMemoryLibraryStorage()))
@@ -34,8 +33,8 @@ describe('feedsSpeeds.suggest', () => {
   it('is registered and answers for a library tool and machine (carbide data; HSS → noData)', async () => {
     const { d, add } = await setup()
     const ask = async (toolMaterial: string) => {
-      const toolId = await add('tool', { ...omitKind(flatEndMillValues()), toolMaterial })
-      const machineId = await add('machine', omitKind(machineValues()))
+      const toolId = await add('tool', { ...libraryInput(flatEndMillValues()), toolMaterial })
+      const machineId = await add('machine', libraryInput(machineValues()))
       return expectOk(
         d.query(
           'feedsSpeeds.suggest',
@@ -64,7 +63,7 @@ describe('feedsSpeeds.suggest', () => {
       d.query('feedsSpeeds.suggest', { ...args, toolLibraryItemId: 'nope' }, agent),
       'input.malformed',
     )
-    const toolId = await add('tool', omitKind(flatEndMillValues()))
+    const toolId = await add('tool', libraryInput(flatEndMillValues()))
     expectErrCode(
       d.query(
         'feedsSpeeds.suggest',
@@ -77,7 +76,7 @@ describe('feedsSpeeds.suggest', () => {
 
   it('rejects a malformed engagement', async () => {
     const { d, add } = await setup()
-    const toolId = await add('tool', omitKind(flatEndMillValues()))
+    const toolId = await add('tool', libraryInput(flatEndMillValues()))
     const args = { toolLibraryItemId: toolId, materialClass: 'aluminum' }
     expectErrCode(
       d.query('feedsSpeeds.suggest', { ...args, engagement: { kind: 'stepover' } }, agent),

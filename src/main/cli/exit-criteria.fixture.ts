@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect } from 'vitest'
 import { testStock } from '../../core/design/design.fixture'
-import { machineValues } from '../../core/library/library.fixture'
+import { libraryInput, machineValues } from '../../core/library/library.fixture'
 import { bull6, drill6, flat4, flat6 } from '../../core/plan/plan.fixture'
 
 /**
@@ -97,8 +97,9 @@ export async function exitCriteriaFlow(call: Call, dir: string): Promise<FlowRes
 
   // ── Library (app scope, no project needed) ────────────────────────────────────────────────
   const stock = (await ok<{ id: string }>('library.stock.add', { values: testStock() })).value.id
-  for (const t of [flat6(), flat4(), bull6(), drill6()]) await ok('library.tool.add', { values: t })
-  const { kind: _k, ...m } = machineValues()
+  for (const t of [flat6(), flat4(), bull6(), drill6()])
+    await ok('library.tool.add', { values: libraryInput(t) })
+  const m = libraryInput(machineValues())
   const machine = (await ok<{ id: string }>('library.machine.add', { values: m })).value.id
 
   // ── Criterion: create a project with a rectangular stock ──────────────────────────────────

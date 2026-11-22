@@ -1,6 +1,7 @@
 // Pure helpers of the "New tool" and "New machine" forms (plan mode's pickers): defaults per
 // project unit system, the `library.tool.add` / `library.machine.add` values built from the
-// form, and a command error's issues per form field. The core validates (Tool / Machine models);
+// form (quantities as entered; the command gets the project's `units` for bare numbers), and a
+// command error's issues per form field. The core validates (Tool / Machine models);
 // the form only shapes what was entered. Doc: docs/conventions/ui.md#plan-mode-task-37,
 // docs/architecture/library.md#tool, #machine
 import type { Rigidity } from '../../../../core/library/machine.dto'
@@ -8,27 +9,12 @@ import type { ToolMaterial, ToolType } from '../../../../core/library/tool.dto'
 import type { OperationKind } from '../../../../core/design/part.dto'
 import type { UnitSystem } from '../../../../core/project/document'
 import { Quantity } from '../../../../core/quantity/quantity'
-import type { QuantityKind, UnitId } from '../../../../core/quantity/units'
+import type { QuantityKind } from '../../../../core/quantity/units'
+import { libraryUnit } from '../../../../core/library/values-input'
 import type { Issue } from '../../../../shared/errors/app-error'
 import { libraryMessages } from '../../messages/library'
 
-/** Bare-number unit of a library field in a project with this unit system. */
-export function libraryUnit(kind: QuantityKind, units: UnitSystem): UnitId {
-  switch (kind) {
-    case 'length':
-      return units === 'mm' ? 'mm' : 'in'
-    case 'feedRate':
-      return units === 'mm' ? 'mm/min' : 'in/min'
-    case 'spindleSpeed':
-      return 'rpm'
-    case 'power':
-      return 'W'
-    case 'angle':
-      return 'deg'
-    case 'scalar':
-      return '1'
-  }
-}
+export { libraryUnit }
 
 /** A quantity from a default source (a programming error if it does not parse). */
 export function q(kind: QuantityKind, source: string, units: UnitSystem): Quantity {
@@ -88,12 +74,12 @@ export function toolValues(f: ToolForm): Record<string, unknown> {
   return {
     name: f.name === null || f.name.trim() === '' ? toolName(f) : f.name.trim(),
     type: f.type,
-    diameter: f.diameter.toDTO(),
-    ...(f.type === 'bullNoseEndMill' ? { cornerRadius: f.cornerRadius.toDTO() } : {}),
-    fluteLength: f.fluteLength.toDTO(),
-    overallLength: f.overallLength.toDTO(),
-    fluteCount: f.fluteCount.toDTO(),
-    ...(f.type === 'drill' ? { pointAngle: f.pointAngle.toDTO() } : {}),
+    diameter: f.diameter.source,
+    ...(f.type === 'bullNoseEndMill' ? { cornerRadius: f.cornerRadius.source } : {}),
+    fluteLength: f.fluteLength.source,
+    overallLength: f.overallLength.source,
+    fluteCount: f.fluteCount.source,
+    ...(f.type === 'drill' ? { pointAngle: f.pointAngle.source } : {}),
     toolMaterial: f.toolMaterial,
     presets: [],
   }
@@ -136,10 +122,10 @@ export function defaultMachineForm(units: UnitSystem): MachineForm {
   }
 }
 
-const axesDTO = (a: Readonly<Record<Axis, Quantity>>) => ({
-  x: a.x.toDTO(),
-  y: a.y.toDTO(),
-  z: a.z.toDTO(),
+const axesInput = (a: Readonly<Record<Axis, Quantity>>) => ({
+  x: a.x.source,
+  y: a.y.source,
+  z: a.z.source,
 })
 
 /** `library.machine.add` values (controller GRBL, manual tool change: the only v0.1 choices). */
@@ -147,13 +133,13 @@ export function machineValues(f: MachineForm): Record<string, unknown> {
   return {
     name: f.name.trim(),
     controller: 'grbl',
-    travel: axesDTO(f.travel),
-    maxFeedRate: axesDTO(f.maxFeedRate),
+    travel: axesInput(f.travel),
+    maxFeedRate: axesInput(f.maxFeedRate),
     spindle: {
       control: f.control,
-      maxSpeed: f.maxSpeed.toDTO(),
-      ...(f.minSpeed === undefined ? {} : { minSpeed: f.minSpeed.toDTO() }),
-      ...(f.power === undefined ? {} : { power: f.power.toDTO() }),
+      maxSpeed: f.maxSpeed.source,
+      ...(f.minSpeed === undefined ? {} : { minSpeed: f.minSpeed.source }),
+      ...(f.power === undefined ? {} : { power: f.power.source }),
     },
     rigidity: f.rigidity,
     programUnits: f.programUnits,

@@ -14,6 +14,7 @@ import {
   feed,
   flatEndMillValues,
   len,
+  libraryInput,
   machineValues,
   num,
   rpm,
@@ -84,7 +85,7 @@ export async function planSetup(opts: { part?: boolean } = {}): Promise<PlanSetu
   const s = await designSetup()
   if (opts.part !== false) await buildTestPart(s)
   const add = async (kind: string, values: object) =>
-    ((await s.run(`library.${kind}.add`, { values })) as { id: string }).id
+    ((await s.run(`library.${kind}.add`, { values: libraryInput(values) })) as { id: string }).id
   const tools = {
     flat6: await add('tool', flat6()),
     flat4: await add('tool', flat4()),

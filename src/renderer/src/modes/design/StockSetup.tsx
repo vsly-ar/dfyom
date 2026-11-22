@@ -77,11 +77,12 @@ export function StockSetup({ units }: { units: UnitSystem }): React.JSX.Element 
         values: {
           name: m.defaultName(l.source, w.source, t.source),
           shape: 'block',
-          length: l.toDTO(),
-          width: w.toDTO(),
-          thickness: t.toDTO(),
+          length: l.source,
+          width: w.source,
+          thickness: t.source,
           material: { name: material.trim() || m.classes[materialClass], class: materialClass },
         },
+        units, // bare numbers as the fields read them (library.md#command-input)
       })
       if (!added.ok) {
         setBusy(false)

@@ -7,8 +7,7 @@ import { createDispatcher } from '../commands/dispatcher'
 import { createInProcessWorkers } from '../commands/jobs'
 import { createAppRegistry } from '../commands/registry'
 import { agentSource, fakeIds, uiSource } from '../commands/testing'
-import { len } from '../library/library.fixture'
-import { machineValues } from '../library/library.fixture'
+import { libraryInput, machineValues } from '../library/library.fixture'
 import { planSetup, type PlanSetup } from '../plan/plan.fixture'
 import { createToolpathCache } from '../toolpath/cache'
 import { systemTimerHost } from './clock'
@@ -177,10 +176,10 @@ describe('run commands', { timeout: 60_000 }, () => {
       0,
     )
     // a plan with another machine copy
-    const { kind: _, ...other } = machineValues()
+    const other = libraryInput(machineValues()) as { travel: object }
     const otherId = (
       (await t.s.run('library.machine.add', {
-        values: { ...other, name: 'Other', travel: { ...other.travel, z: len('90') } },
+        values: { ...other, name: 'Other', travel: { ...other.travel, z: '90' } },
       })) as { id: string }
     ).id
     const plan2 = await t.s.create({ machineLibraryItemId: otherId })

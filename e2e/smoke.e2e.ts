@@ -7,7 +7,6 @@
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { CallReply, PreloadApi } from '../src/shared/preload-api'
-import { len } from '../src/core/library/library.fixture'
 import { answerMessageBoxes, askedMessageBoxes, expect, test } from './app.fixture'
 import type { Page } from '@playwright/test'
 
@@ -28,9 +27,9 @@ async function editedProject(page: Page, name: string): Promise<{ partId: string
     values: {
       name: `${name} block`,
       shape: 'block',
-      length: len('100'),
-      width: len('60'),
-      thickness: len('20'),
+      length: '100',
+      width: '60',
+      thickness: '20',
       material: { name: '6061-T6', class: 'aluminum' },
     },
   })

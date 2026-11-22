@@ -7,7 +7,7 @@ import { fakeClock, fakeIds, uiSource } from '../commands/testing'
 import type { DfmWarning } from '../geometry/model'
 import { Library } from '../library/library'
 import { parseValues } from '../library/library-item'
-import { deg, flatEndMillValues, len, stockValues } from '../library/library.fixture'
+import { deg, flatEndMillValues, len, libraryInput, stockValues } from '../library/library.fixture'
 import { createMemoryLibraryStorage } from '../library/memory-storage'
 import type { ToolType } from '../library/tool.dto'
 import { designSetup, type DesignSetup } from './design.fixture'
@@ -29,7 +29,7 @@ function toolValues(type: ToolType, diameter: string, extra: object = {}) {
 }
 
 const addTool = (s: DesignSetup, type: ToolType, diameter: string, extra: object = {}) =>
-  s.run('library.tool.add', { values: toolValues(type, diameter, extra) })
+  s.run('library.tool.add', { values: libraryInput(toolValues(type, diameter, extra)) })
 
 const warningList = (s: DesignSetup, partId = s.partId) =>
   expectOk(s.d.query('design.warning.list', { partId }, ui)).value as { warnings: DfmWarning[] }
