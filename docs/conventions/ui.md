@@ -1,6 +1,6 @@
 # UI guidelines
 
-Status: accepted · Principle: [principles.md §5](../principles.md#5-user-friendly-beginner-friendly-highly-graphical) · Decisions: [ADR 0012 Radix + own styles](../decisions/0012-radix-primitives-own-styles.md), [ADR 0010 react-three-fiber](../decisions/0010-react-three-fiber-viewport.md), [ADR 0017 APCA contrast](../decisions/0017-apca-contrast-for-design-tokens.md), [ADR 0018 red text token, secondary text](../decisions/0018-danger-text-and-secondary-text-role.md) · Terms: [glossary.md](../glossary.md) · Task: [v0.1 plan](../plans/v0.1.md) 1.11 (blocks 3.3–3.7, 3.12); v0.2 amendments: [plans/v0.2.md](../plans/v0.2.md) 1.5; v0.3 amendment ([shapes](#shapes-v03)): [plans/v0.3.md](../plans/v0.3.md) 1.5
+Status: accepted · Principle: [principles.md §5](../principles.md#5-user-friendly-beginner-friendly-highly-graphical) · Decisions: [ADR 0012 Radix + own styles](../decisions/0012-radix-primitives-own-styles.md), [ADR 0010 react-three-fiber](../decisions/0010-react-three-fiber-viewport.md), [ADR 0017 APCA contrast](../decisions/0017-apca-contrast-for-design-tokens.md), [ADR 0018 red text token, secondary text](../decisions/0018-danger-text-and-secondary-text-role.md) · Terms: [glossary.md](../glossary.md) · Task: [v0.1 plan](../plans/v0.1.md) 1.11 (blocks 3.3–3.7, 3.12); v0.2 amendments: [plans/v0.2.md](../plans/v0.2.md) 1.5; v0.3 amendment ([shapes](#shapes-v03)): [plans/v0.3.md](../plans/v0.3.md) 1.5; v0.4 amendment ([features](#features-v04), draft): [plans/v0.4.md](../plans/v0.4.md) 1.4
 
 How the renderer looks and behaves: design tokens, components, layout, interaction, run-mode safety, accessibility, copy, testing. Rules are imperative. The user's answers to the open questions are recorded as [decisions](#decisions); concrete token values, the palette and the component looks come from the approved [design system](#design-system) (task 1.16).
 
@@ -651,6 +651,145 @@ Code: `viewport/` (the pure `snap.ts`, `SnapGlyph`, `MeasureTool` with `Dimensio
 - **Measure in the 3D viewport:** "Measure" in the view toolbar (not in Run) and `D` on the region. Clicks raycast the part and the shown references (the ghost stays unpickable for selection; the measure raycasts meshes tagged `userData.measure`), snapping to the hit triangle's vertices and the stock corners within 8 px. The dimension line draws on top, the chip shows the distance with ΔX, ΔY, ΔZ on a second line in project units (drei's `Html` overlays render outside the app's providers, so no tooltip there); the measure button joins Fit and Views in the view toolbar, which hides while the Shape Editor covers the canvas; a drag still orbits; selection clicks are off while measuring; pick mode wins over it.
 - **Review fixes (U3):** in a narrow inspector (a container query on the table, below 34rem) the segment table puts each segment on two lines (type, end X, end Y; radius, direction, large arc, fillet; # spans both) with smaller mono numbers, so 4 integer digits and 3 decimals show without horizontal scroll; wider inspectors keep one line. A shape row's "Used by n" fades while the row's actions show (hover, focus, selected), as the operation id does, instead of running under the delete button.
 - **Not built:** point-to-edge distances (the rules mention them; point to point covered the review cases), and snapping in the 3D viewport beyond the measure tool (the viewport has no other drags).
+
+### Features (v0.4)
+
+**Status: draft – visuals approved in the L2 review.** Task 1.4 of [plans/v0.4.md](../plans/v0.4.md#1-docs-and-decisions-accepted-before-implementation) (D34), built in U1–U4 and L1 ([§ 5](../plans/v0.4.md#5-feature-ui)). Behaviour lives in [features.md](../modes/features.md) (the feature model A1–A6, [Clones](../modes/features.md#clones), its [UI sketch](../modes/features.md#ui-sketch)) and [design-v0.4.md](../modes/design-v0.4.md) (hole, fastener table, chamfer, chamfer mill, Clones bounds; its [UI summary](../modes/design-v0.4.md#ui-summary) is the intent); how F1 stores features is in [design-v0.4.md § Implementation (F1)](../modes/design-v0.4.md#implementation-f1). These are the UI rules. The **behaviour rules below are firm**; the **visual specifics** (indents, glyph shapes, label placement, motion timings, the section drawing's look) follow the approved [Shapes visuals (D33)](#shapes-v03) and existing tokens and are proposals until the L2 review approves them as built, as L3 did for v0.3.
+
+**Rules for the whole feature UI:**
+
+- **Same patterns as Shapes:** numbers first (every canvas action has a field), one commit is one command and one undo step, a drag or a run of keys is one [gesture](../architecture/commands.md#gestures-live-edits), the drawing style and the token-only colours of [Shapes (v0.3)](#shapes-v03). No new token.
+- **A feature is edited in one place:** its inspector. Owned operations and clone instances are shown, selectable and explained, never edited geometrically ([A4, A5](../modes/features.md#expansion-and-owned-operations), D26). Every read-only place names the feature and links to it.
+- **Amber stays sparse** ([D33](../plans/v0.3.md#confirmed-decisions)): selection, the focused dimension of a drawing, the focused path row's segment of the clone path, the active icon part. Never a feature fill, a skipped ghost or a row background.
+- **Motion explains structure:** a feature row expands with its children sliding down (`--motion-base`); a selection pulses every owned operation together (`--motion-emphasis`, one pulse); the clone path draws from the source along its rows when the Clones feature is selected (`--motion-slow`); a skip fades the instance to its ghost (`--motion-fast`); section drawings morph between values (`--motion-base`). Reduced motion cuts all of them; nothing loops.
+
+#### Feature rows and Add
+
+- **Feature row** in the operation list (`FeatureRow`, in `OperationList`), at its block's place in the design order: a disclosure chevron, the feature icon (the [hole type](#icons-v04) or Clones), the name, a read-out in secondary text ("M3 · counterbore", "Ø 6 · simple", "×6" for Clones: instances, skipped ones excluded), the rolled-up badge and the failed marker. Its owned operations nest below it, **collapsed by default**; the expanded state is per window and per feature while the window is open (not persisted, no command).
+- **Rolled-up badge:** errors and hard warnings of the feature's own fields and of every owned operation, counted as [warnings and DFM](#warnings-and-dfm) counts them (soft notes never count). A finding that repeats on several clone instances counts once and lists as "on 6 clones" in the warning list. The failed marker shows when any owned operation fails to evaluate; the error then names the owned operation and its feature ("Evaluation failed at Hole 1 · counterbore").
+- **Owned rows** sit one indent step in (the setup panel's 8 px step, [setup panel](#design-and-plan-controls-v02)) with a thin `--border-subtle` guide line along the block. They show the kind icon and the role name: the stored name with its "<feature name> · " prefix dropped while it starts with it ("counterbore", not "Hole 1 · counterbore"; the accessible name keeps the full name), the id secondary, and their own badge. They have **no move or remove actions** and reserve no action slot.
+- **Moving and removing:** a feature row has the operation row's move up, move down (`Alt+↑/↓`, `design.feature.move`) and remove (`design.feature.remove`, toast "Removed Hole 1 and its 2 operations · Undo"); a move steps over a whole neighbouring block, never into it (`insideFeature`), and so does moving a plain operation. `Alt+↑/↓` on an owned row moves its feature, with focus kept on the owned row. Remove refused by `design.referenced` is `aria-disabled` with the reason as tooltip and visible text, as a used shape ("Hole 1 · counterbore floor is used by Drilling 5.").
+- **Keyboard:** `↑/↓` move over the visible rows; `→` expands a collapsed feature row, or moves into its first child; `←` collapses, or moves from a child to its feature row. The chevron is part of the row's toggle (`aria-expanded` on the row), not a separate tab stop.
+- **Add** ("Add operation" becomes **"Add"**, one `Menu`, [design.md](../modes/design.md#design-ui-task-36) defaults): group **Operations** (Facing, Pocket, Profile, Drilling, Chamfer) and group **Features** (Hole, then Make Clones…). The Shapes group keeps its own "Add shape" menu ([U1](#implementation-u1)).
+  - **Hole** adds `design.hole.add` with the core defaults (simple, 6 mm / ¼″ through, placed as a new drilling) and selects the feature, so the inspector's fastener picker is the next thing the user sees.
+  - **Chamfer** adds `design.chamfer.add` on the selected drilling or circular pocket, else on the last one in design order; with none in the part it is `aria-disabled` with "Add a drilling or a circular pocket first: a chamfer breaks its edge."
+  - **Make Clones…** is enabled when the selection is a feature (not Clones) or an operation that can be a source ([design-v0.4.md § Clones in v0.4](../modes/design-v0.4.md#clones-in-v04)); else `aria-disabled` with the reason ("Select a hole, pocket, drilling, chamfer or inside profile to clone.", or the source rule's reason: "A facing can't be cloned." / "An outside profile can't be cloned: that would be a copy of the part."). It is also in the row menu and the inspector header of such an item.
+
+#### Owned operations and clone instances
+
+- **Owned operation inspector** (`OwnedOperationNote` over the usual `OperationFields`): the header names the operation with a breadcrumb "Hole 1 › counterbore" (each crumb selects), then a note "Edited through **Hole 1**" whose link selects the feature and focuses the field that drives the first geometric field shown. The geometric fields are read-only ([panels](#panels-and-inspectors): desaturated illustration, dimmed support area, lock icon with "Part of Hole 1: change it in the hole."). Editable here: name, general tolerance and the [tool field](#design-and-plan-controls-v02) with its lock (A4). No remove, move or Convert to shape.
+- **Findings on an owned operation** show at its read-only fields without a "Use …" button; a finding with a fix shows "Fix in Hole 1" instead, which selects the feature and focuses the mapped field, where the fix button is (F3 maps issue paths to feature fields; an unmapped finding lists under the feature's fields with a link to its operation).
+- **Clone instance** (the instance number is the selected thing, not one of its operations): the inspector shows "Clone 3 of Clones 1" with the breadcrumb "Clones 1 › Clone 3", its position read-only ("u 9.00 mm, v 15.59 mm", from `design.clones.preview`), a **Skip this clone** button (`design.clones.update`, one undo step; the inspector then shows the skipped spot with "Restore"), and one collapsed read-only group per source operation ("Pocket 2 · 3"), each with "Clone of **Pocket 2**" linking to the source. The tool shows read-only with "Follows Pocket 2's tool." and no lock ([C3](../modes/features.md#open-questions-clones)).
+
+#### Clones in the navigator
+
+- The **Clones row** ("Clones 1", "×6", badge) nests two groups, both indented one step: **Source** (expanded; the source feature row or the source operation rows, editable as before; they move with the Clones block, not on their own) and **Clones** (collapsed; one row per instance number from 2, never per operation).
+- **Instance rows:** "Clone 3" with its position in secondary text ("9.00, 15.59"); a skipped number keeps its row, muted, with "Skipped" instead of the position, so numbering reads stable (D30). The row's action slot has **Skip** or **Restore** (the keyboard path for click-to-skip). Up to 100 instances (D36) the list renders in full; it scrolls inside the navigator and does not virtualize.
+
+#### Hole inspector
+
+`HoleInspector` (U2), groups in order (rarely changed ones collapsed, [panels](#panels-and-inspectors)):
+
+1. **Name**, then **On** and **Position** as a drilling's (the face picker and `[u, v]`; no anchor picker, the position is the hole's centre).
+2. **Type:** a `SegmentedControl` Simple / Counterbore / Countersink, each with its [hole type icon](#icons-v04). Changing type is one `design.hole.update`; a disappearing role blocked by `design.referenced` shows the error at the control with the referencing operation named.
+3. **Fastener:** **Size** (`Select`: "Custom" first, then M1.6 … M12 from `design.fastener.list`), **Purpose** (`SegmentedControl` Clearance / Tap drill; Tap drill disabled for counterbore and countersink with the reason "A tap drill hole is a simple hole: change the type to Simple first."), **Fit** (`SegmentedControl` Close / Normal / Loose, shown for Clearance only; hidden values keep their stored value, as plan strategy parameters). Under them, one secondary line names the sources of the filled sizes ("ISO 273 normal · ISO 4762 head · DIN 974-1 counterbore"), each standard a `Term`.
+   - **Refill:** choosing a size, purpose or fit refills every size field in the same command (one undo step, design-v0.4 [§ Parameters](../modes/design-v0.4.md#parameters)). When that overwrote sizes the user had entered, a toast says so: "Sizes set from M4 (2 entered sizes replaced) · Undo". No confirmation ([decision 11](#decisions)).
+   - **Custom sizes:** a size that differs from the named row keeps the fastener, says "(custom)" after its value in the read-out ("M3 · counterbore Ø 7 (custom)"), and carries the soft note `dfm.holeCustomSize` at its field ("ISO for M3: 6.5 mm.") with the fix "Use 6.5 mm".
+4. **Sizes:** the [section illustration](#section-illustration), then the type's fields as `QuantityInput`s with their Field illustrations: Diameter, Bottom (Through / Flat / Drill point, as drilling) and Depth (blind only); counterbore Ø and depth (counterbore); countersink Ø and angle (countersink). **Head sink** sits in a collapsed "Defaults" group under them ("How far the head sits below the face when sizes are filled from the table."), since it only matters on refill. Invariant errors show at their field (`model.invariant`, `countersinkTooDeep` at countersink Ø with depth named).
+5. **Tools:** one [tool field](#design-and-plan-controls-v02) per owned operation, labelled by role ("Counterbore", "Drill", "Countersink"), each with its own lock (A4), so the user picks tools without opening the owned rows.
+
+Tests (U2): component tests for the refill, custom marking, the disabled purpose with its reason, the Tools group against the fake bridge with a real design runtime.
+
+#### Section illustration
+
+A dimensioned-looking **section** of the feature, drawn from the entered values (principle 5), above the size fields of the hole and the chamfer inspector.
+
+- **What it draws:** the cut through the axis at true proportions (one uniform scale fitted to the inspector width, about 120 px high): the face line, the stock below it (to its bottom for a through hole, else cut by a break line under the deepest point), the bore, the counterbore step or the countersink cone, the drill point when chosen. With a fastener chosen, the screw's head and shank silhouette in `--text-faint` dashes shows how it sits (head sink, clearance) – a picture of the fit, not geometry.
+- **Field style, larger:** drawing in `--text-muted` 1 px lines, the cut material in a quiet hatch of `--vp-edge`, no fills in the accent. The **focused field's measured part is the amber line** ([field](#field) rule: no dimension arrows), and its value sits beside it in a small chip (`--text` on `--bg-raised`). Hovering a part of the drawing highlights its field's label (`--vp-hover`), and clicking it focuses that field.
+- **Values:** resolved quantities (an expression draws its current value). While a value is invalid the last valid drawing stays and the offending part is drawn in `--danger` with the error marker, as the [Shape Editor's live outline](#shape-editor). Changes morph over `--motion-base` (a cut with reduced motion).
+- **Reusable as a `sketch` view:** the drawing is a pure function of the values (`holeSection(values, units) → primitives`, unit-tested) rendered by one component (`SketchView`) that takes primitives and the highlighted part, with no knowledge of `Field` or the inspector. The later Field info views spec (D30 Q11, [plans/v0.4.md § Not in v0.4](../plans/v0.4.md#not-in-v04-and-why)) can host it as its first `sketch` view without changes; the chamfer's section uses the same component.
+- **Accessibility:** `role="img"` with a label built from the values ("Section: Ø 3.4 mm through; counterbore Ø 6.5 mm, 3.2 mm deep; M3 head 0.2 mm below the face."); not a live region (the fields announce their own changes).
+
+#### Chamfer inspector
+
+`ChamferInspector` (U4): **Edge** (a `Select` of the earlier drillings and circular pockets, "Drilling 2 · Ø 3.4 mm", with pick mode that highlights their mouths as rings; `edgeOf`), **Diameter**, **Angle** (`QuantityInput` in °, 60°–120°), the derived **Depth** read-only ("0.75 mm, from diameter and angle"), the [section illustration](#section-illustration) of the edge with its cone, and the tool field. While pending, the live outline draws the two rings (chamfer Ø at the face, the edge Ø at depth) dashed amber, as other operations' outlines. `dfm.chamferNoTool` shows at the tool field with "New tool…" prefilled with a chamfer mill of that angle. A countersink's chamfer is an owned operation and shows read-only ([above](#owned-operations-and-clone-instances)).
+
+#### Chamfer mill in the Library window
+
+U4, in the [Library window](ui-library-window.md) and the quick "New tool…" dialogs (which reuse its form, L4):
+
+- **Type** "Chamfer mill" with the [chamfer mill icon](#icons-v04); one type for chamfer mills and V-bits (H-F), with "V-bit" in the type's hint and as a search alias.
+- **Geometry fields:** Diameter (DC), Included angle (°, default 90°), Tip diameter (0 = pointed; placeholder "0: pointed"), Flute length (the cutting edge), Overall length, then flutes and material as for other types. Name suggestion "Chamfer 90° Ø12" until one is typed.
+- **Tool drawing** (`ToolDrawing`): the side view with the conical tip; the focused field's dimension is amber (DC across the top of the cone, the angle as an arc between the flanks, the tip as the flat at the bottom, LCF along the flank, OAL), named in the image label ("Tool drawing: included angle highlighted").
+- **Item list:** an "Angle" column, empty for the other types (an empty cell, not a dash, as the segment table); the tool picker and tool field show "90° chamfer mill Ø 12" (generalized) or the tool's name beside the icon.
+
+#### Clones
+
+`ClonesInspector` and `ClonesDraft` (U3):
+
+- **Make Clones…** opens a **draft** in the inspector ("New Clones", per window, no command and no undo step until it is made): the **Source** list (the selected item, plus every operation that sits on its surfaces, e.g. a drilling on a pocket's floor, offered as checkboxes and checked by default), the rows editor with one first row, the read-out, and **Make clones** (primary, Clones icon) / **Cancel** (`Escape`). The viewport shows the instances as ghosts from `design.clones.preview` (re-asked at most every 100 ms while typing). Make clones sends `design.clones.add` (one undo step) and selects the new feature; a refusal keeps the draft open with the issues at their fields.
+- **First row:** an `offset` of 1 clone along `u` by the source's footprint width plus a gap of the source tool's diameter (at least 3 mm / ⅛″), so the first ghost sits beside the source, never on it.
+- **Rows editor** (`CloneRowList`): an ordered list in path order; each row shows the kind icon, a summary ("Arc · 5 positions · R 18 mm") and move up, move down (`Alt+↑/↓`), remove (drag reorder later, as elsewhere). The selected row expands to its fields:
+
+  | Row      | Fields (all `QuantityInput`s, project units, ° for angles)                                        |
+  | -------- | ------------------------------------------------------------------------------------------------- |
+  | `grid`   | Columns, rows, spacing u, spacing v                                                               |
+  | `offset` | Count, step u, step v                                                                             |
+  | `polar`  | Count, angle per step, distance per step                                                          |
+  | `arc`    | Radius, centre angle (from the reference point), sweep (±360°), step angle                        |
+  | `point`  | u, v (absolute: a jump)                                                                           |
+  | `along`  | Shape (`Select` of named paths), start offset, Spacing / Count (`SegmentedControl`) and its value |
+
+  Under the fields, a **row diagram** (the same `SketchView` renderer, a plan view): the reference point as an open circle, this row's positions as dots, an arc's centre as a cross, the row's skipped positions dashed; it follows the values live. Under the diagram, **Skipped** lists the row's skipped positions as removable chips ("4 ×").
+
+- **Add row** (`Menu`): Grid, Offset, Polar, Arc, Point, Along, each with its row icon. Along is disabled without a named path shape ("Add a path shape first: Along places clones along it."), and absent until F6 is built.
+- **Read-out** at the top of the rows group, from the preview: "1 + 5 clones = 6 instances · 0 skipped" (singular forms "1 clone", "1 instance"), announced politely when it changes. Over the limit of **100 instances per Clones feature** (D36) the core refuses; the read-out shows the error ("112 instances: Clones are limited to 100. Remove or skip 12.") and the field of the row that crossed it carries it too. Above the evaluation budget the info note `dfm.clonesHeavy` sits under the read-out (as `dfm.shapeHeavy`).
+- **Source group** in the Clones inspector: the source items as links (they are edited in their own inspector), "Add to source…" (a menu of eligible operations on the Clones' face, `design.clones.update { source }`) and remove per item (disabled for the last: "Remove the Clones instead: a Clones needs a source.").
+- **Warnings** on the Clones feature (`dfm.cloneOutsideStock` with the fix "Skip them", one command skipping every listed position; `dfm.cloneDuplicate`; the soft `dfm.cloneOverlap`) show under the read-out and mark their positions in the viewport.
+
+#### Clone path in the viewport
+
+While the Clones feature (or one of its rows) is selected, and during the draft:
+
+- **Path:** the reference chain as a thin `--vp-edge` line from the source through every position in path order (straight between `offset`, `grid` and `point` positions; along the arc for `arc`; along the shape for `along`), with an arc's centre as a small cross and its construction arc dashed. The **focused row's segment is amber**, the rest neutral.
+- **Positions:** a marker per position (7 px, the [handle](#shape-editor) look: neutral at rest, `--vp-hover` hovered) with its **instance number** in a small chip (`--text` on `--bg-raised`); the source is "1" with a ring. Numbers hide where markers sit closer than 24 px on screen and show on hover. Positions outside the stock get the warning triangle beside the number.
+- **Skipped positions** draw the source's footprint as a dashed `--vp-edge` ghost at the reference ghost's opacity, the number muted. Draft ghosts are the same, solid-lined.
+- **Click to skip:** with the Clones feature selected, a click on a marker (a ≥ 24 px target) toggles its skip (`design.clones.update`, one undo step, announced "Clone 4 skipped." / "Clone 4 restored."); the source marker is not a target ("The source can't be skipped." as its tooltip). Hover shows a chip "Clone 4 · click to skip" or "Skipped · click to restore".
+- **Keyboard:** from the focused viewport, `Tab` cycles the markers in number order (out of the app's tab order, as tab markers); each is named "Clone 4 at u 9.00 mm, v 15.59 mm" (", skipped"), and `Space` toggles its skip.
+
+#### Feature selection in the viewport
+
+- **Selecting a feature** tints every owned operation with the selection colour and pulses them together; hovering a feature row tints them with `--vp-hover`. A Clones selection tints the source and every instance, and shows the [clone path](#clone-path-in-the-viewport).
+- **Clicking a surface** selects its owned operation; a **second click** on the same feature's surface selects the feature ([features.md § UI](../modes/features.md#ui-sketch)). On a clone instance the first click selects the instance (all its operations tinted), the second its Clones feature. The inspector's breadcrumb is the non-pointer path to the same steps.
+- **Selecting an instance** draws its operations tinted and the source's outline thin and dashed (`--vp-edge`), so "a copy of that" reads. The viewport summary names the state ("Clones 1: 6 instances, 1 skipped. Selected: clone 3 of Pocket 2.").
+
+#### Icons (v0.4)
+
+Drawn in L1 to the [icon rules](#icons) (16 px grid, one accent part, grey at rest), in `iconSet.ts` (provenance `b22`); the [design-system page](ui-design-system.html#icons)'s sheet follows through its sync script.
+
+| Icon                                 | Drawing (view) and accent part                                                                                                                                       |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hole-simple`                        | Section (front): a straight bore through a plate line; accent: the bore walls                                                                                        |
+| `hole-counterbore`                   | Section: the bore with a wider step at the mouth; accent: the step. Also the "Hole" entry in Add                                                                     |
+| `hole-countersink`                   | Section: the bore with a cone at the mouth; accent: the cone flanks                                                                                                  |
+| `chamfer`                            | Section of an edge with a 45° bevel; accent: the bevel. Distinct from the countersink by having no bore                                                              |
+| `chamfer-mill`                       | The drawn `v-bit` side view wired as the `chamferMill` tool type (B22-6 a); accent: the conical tip (B22-4 a)                                                        |
+| `clones`                             | A rounded square (the source) and two dashed copies along a dotted path; accent: the path. Also Make Clones…                                                         |
+| Row kinds (`row-grid` … `row-along`) | Dots (≤ 1.8 px, the fill exception) in the row's layout: a 3 × 2 grid, a line, a ray, an arc round a cross, a jump arrow to a dot, dots on a curve; accent: the dots |
+| `groove` (B22 follow-up)             | Redrawn for 16 px: the bent slot closed by a round cap at its visible end and 1 px wider, so it reads as a slot, not a signal glyph; accent: the centreline          |
+| `pick` (B22 follow-up)               | Redrawn: a pointer arrow touching a small face (parallelogram), no crosshair, so it no longer resembles drilling; accent: the face                                   |
+| `disconnect` (B22 follow-up)         | Redrawn: the plug and its prongs drawn apart with a gap, no strike-through line; fewer strokes at 16 px; no accent (generic action)                                  |
+
+Each new or redrawn icon is reviewed at 16 px and 20 px in light and dark beside its label in L2; row-kind icons may fall back to the label alone if they don't read at 16 px.
+
+#### Accessibility (feature UI)
+
+- **Names:** a feature row is named "Hole 1, M3 counterbore, 2 operations, 1 warning, collapsed"; an owned row "Hole 1 · counterbore, edited through Hole 1"; an instance row "Clone 4, skipped". Read-only fields are `aria-readonly` with the reason in `aria-describedby`.
+- **Non-pointer paths:** every viewport action has a navigator or inspector path: selection steps (breadcrumb), skipping (instance rows, the Skip button, the row's Skipped chips), edge picking (the Edge select), the section illustration's click-to-focus (the fields themselves).
+- **Live regions:** polite for the clones read-out, skip toggles and the refill toast; nothing assertive.
+- Each new component gets an axe check; the nested rows, the rows editor and the marker keys get keyboard tests.
+
+Tests, written with U1–U4: component tests for `FeatureRow` (nesting, roll-up, moves over blocks), the owned and instance inspectors, `HoleInspector`, `ChamferInspector`, `CloneRowList` and `ClonesDraft`; unit tests for `holeSection` and the clone-path drawing maths (pure functions in `viewport/`); the e2e golden path in hidden windows is X2.
 
 ### Viewport (task 3.5)
 
