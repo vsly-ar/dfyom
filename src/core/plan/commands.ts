@@ -90,7 +90,13 @@ function libraryTools(services: Services): LibraryItem[] {
 }
 
 function buildContext(ctx: CommandContext, units: UnitSystem): BuildContext {
-  return { ids: ctx.ids, now: nowIso(ctx), units, tools: libraryTools(ctx.services) }
+  return {
+    ids: ctx.ids,
+    now: nowIso(ctx),
+    units,
+    tools: libraryTools(ctx.services),
+    ...(ctx.services.region2d === undefined ? {} : { region2d: ctx.services.region2d }),
+  }
 }
 
 /** A library item by id (synchronous read, docs/architecture/commands.md#command-definition). */
@@ -1086,7 +1092,8 @@ export const planDraftFollow: ApplyHook = {
         } else reasons.push(`rebuildBlocked: ${rebuilt.unwrapErr().message}`)
       }
       if (items.size > 0 && lookup !== undefined)
-        for (const c of planStale(plan, draft as ProjectDoc, lookup).libraryCopies) {
+        for (const c of planStale(plan, draft as ProjectDoc, lookup, ctx.services.region2d)
+          .libraryCopies) {
           if (c.status !== 'libraryChanged' || !items.has(c.libraryItemId)) continue
           const r =
             c.blocked === null
@@ -1414,7 +1421,7 @@ const staleList = defineQuery({
   }),
   run(doc, args, ctx) {
     return findPlanDTO(doc, args.planId, 'plan.stale.list').map((plan) => {
-      const s = planStale(plan, doc, ctx.services.library?.lookup)
+      const s = planStale(plan, doc, ctx.services.library?.lookup, ctx.services.region2d)
       return {
         pendingApply: planPendingApply(plan, ctx.apply?.pending() ?? []),
         partRemoved: s.partRemoved,
@@ -1454,7 +1461,12 @@ const toolSuggest = defineQuery({
     if (index.isErr()) return index
     const op = index.unwrap().op
     return Ok({
-      tools: suggestTools(loaded.unwrap(), op, libraryTools(ctx.services)).map((t) => ({
+      tools: suggestTools(
+        loaded.unwrap(),
+        op,
+        libraryTools(ctx.services),
+        ctx.services.region2d,
+      ).map((t) => ({
         ...t,
         reasons: [...t.reasons],
       })),
@@ -1484,7 +1496,7 @@ const warningList = defineQuery({
           ...(ctx.services.region2d === undefined
             ? []
             : shapeFindings(loaded.unwrap(), ctx.services.region2d)),
-          ...designToolFindings(loaded.unwrap(), libraryTools(ctx.services)),
+          ...designToolFindings(loaded.unwrap(), libraryTools(ctx.services), ctx.services.region2d),
         ]
       : [
           {
@@ -1495,7 +1507,7 @@ const warningList = defineQuery({
             params: {},
           },
         ]
-    const stale = planStale(dto.unwrap(), doc, ctx.services.library?.lookup)
+    const stale = planStale(dto.unwrap(), doc, ctx.services.library?.lookup, ctx.services.region2d)
     for (const c of stale.libraryCopies)
       if (c.blocked !== null)
         findings.push({

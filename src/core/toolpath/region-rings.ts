@@ -273,7 +273,13 @@ export function deepestPoint(
   while (hi - lo > 1e-4) {
     const mid = (lo + hi) / 2
     const r = port.offset(region, mid)
-    if (r.isErr()) return Err(r.unwrapErr())
+    // An offset just before the region collapses can come back invalid from the 2D library
+    // (T3: "an offset hole lies in no outer loop" on a turned gear); bisect on as if empty, so
+    // `radius` stays a lower bound and the entry only gets more careful.
+    if (r.isErr()) {
+      hi = mid
+      continue
+    }
     const got = r.unwrap()
     if (got.pieces.length > 0) {
       lo = mid

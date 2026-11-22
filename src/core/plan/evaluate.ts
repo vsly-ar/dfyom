@@ -21,6 +21,7 @@ import {
 import { orderFindings } from './order'
 import { setupFindings, setupStockSize } from './setups'
 import { checkPartFits } from './validity'
+import { shapeToolFindings } from './shape-checks'
 import type { Region2dPort } from '../geometry/2d/port'
 import { designOperations, type LoadedPlan } from './plan'
 import { FEED_FIELDS, type PlanOperationDTO } from './plan.dto'
@@ -66,12 +67,16 @@ export function stickoutOf(op: PlanOperationDTO, tool: Tool): number {
   return tool.stickout.mapOr(tool.fluteLength.canonical, (q) => q.canonical)
 }
 
-/** Evaluates one plan operation with `tool` (its own, or a candidate for `plan.tool.suggest`). */
+/**
+ * Evaluates one plan operation with `tool` (its own, or a candidate for `plan.tool.suggest`).
+ * With the 2D port the tool checks of general shapes run too (`shapeToolFindings`).
+ */
 export function evaluateOperation(
   plan: LoadedPlan,
   op: PlanOperationDTO,
   candidate?: Tool,
   data?: readonly MaterialRow[],
+  port?: Region2dPort,
 ): OperationEvaluation {
   const ops = designOperations(plan, op)
   const kind: OperationKind = ops[0]?.kind ?? 'facing'
@@ -176,6 +181,18 @@ export function evaluateOperation(
     strategy,
   }))
     push(f)
+  if (port !== undefined)
+    for (const { severity, ...f } of shapeToolFindings(
+      {
+        ops,
+        part: plan.part,
+        tool: t,
+        strategy,
+        helixSet: op.strategy.helixDiameter !== undefined,
+      },
+      port,
+    ))
+      push(f, 'plan.check', severity)
   plan.machine.map((m) => feedFindings(feeds, m).forEach((f) => push(f, 'plan.machine', 'warning')))
   for (const w of feeds.warnings)
     findings.push({
@@ -215,8 +232,8 @@ export function planFindings(
 ): PlanWarning[] {
   const out: PlanWarning[] = []
   for (const op of plan.operations)
-    out.push(...evaluateOperation(plan, op, undefined, data).findings)
-  out.push(...orderFindings(plan.operations, plan.part))
+    out.push(...evaluateOperation(plan, op, undefined, data, port).findings)
+  out.push(...orderFindings(plan.operations, plan.part, port))
   out.push(...setupFindings(plan.setups, plan.part))
   const stock = plan.dto.snapshots.find((x) => x.id === plan.dto.design.part.stock)
   if (stock !== undefined) {
