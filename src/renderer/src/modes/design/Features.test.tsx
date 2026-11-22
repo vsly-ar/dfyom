@@ -200,7 +200,10 @@ describe('feature UI (U1)', () => {
       expect(within(navigator()).getByRole('button', { name: /^Hole 1 · drill/ })).toHaveFocus(),
     )
     // moving the pocket up steps over the whole block
-    await user.click(within(navigator()).getByRole('button', { name: 'Move Pocket 1 up' }))
+    within(navigator())
+      .getByRole('button', { name: /^Pocket 1/ })
+      .focus()
+    await user.keyboard('{Alt>}{ArrowUp}{/Alt}')
     await waitFor(() => expect(part().operations[0]!.id).toBe('pocket1'))
 
     await user.click(within(navigator()).getByRole('button', { name: 'Remove Hole 1' }))

@@ -87,6 +87,16 @@ export {
   type StepSize,
 } from './QuantityInput/QuantityInput'
 export type { InheritedTolerance } from './QuantityInput/reading'
+export {
+  DRAG_THRESHOLD_PX,
+  DragGrip,
+  ReorderStatus,
+  useReorder,
+  type Reorder,
+  type ReorderItemProps,
+  type ReorderOptions,
+} from './Reorder/Reorder'
+export { dropGap, dropIndex, movedFrom, moveItem } from './Reorder/drop'
 export { SegmentedControl, type SegmentedControlProps } from './SegmentedControl/SegmentedControl'
 export { groupOptions, Select, type SelectOption, type SelectProps } from './Select/Select'
 export { StatusChip, type StatusChipProps, type StatusTone } from './StatusChip/StatusChip'

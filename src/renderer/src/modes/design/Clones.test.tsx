@@ -13,6 +13,7 @@ import { App } from '../../App'
 import { createShell, ShellProvider } from '../../shell/ShellContext'
 import { createFakeBridge, designDispatcher, type FakeBridge } from '../../test/bridge'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
+import { dragTo, gripOf, layOutRows } from '../../test/reorder'
 
 vi.mock('@react-three/fiber', () => ({
   Canvas: ({ children: _c, ...rest }: { children: ReactNode; 'data-testid'?: string }) => (
@@ -116,6 +117,33 @@ describe('Clones UI (U3)', () => {
     )
     expect(part().features ?? []).toHaveLength(0)
     expect(d.revision).toBe(revision)
+  })
+
+  it('rows reorder by their grip and Alt+↑/↓, announced; no move buttons (D45)', async () => {
+    const { user } = await openDraft()
+    await user.click(within(inspector()).getByRole('button', { name: 'Add row' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Grid' }))
+    const rows = within(inspector()).getByRole('list', { name: 'Rows in path order' })
+    const names = () =>
+      within(rows)
+        .getAllByRole('button', { name: /^Row \d: / })
+        .map((b) => /^Row \d: (\w+)/.exec(b.getAttribute('aria-label') ?? '')?.[1])
+    await waitFor(() => expect(names()).toEqual(['Offset', 'Grid']))
+    expect(within(rows).queryByRole('button', { name: /^Move row/ })).toBeNull()
+    const restore = layOutRows()
+    try {
+      dragTo(gripOf(within(rows).getByRole('button', { name: /^Row 2: Grid/ })), 2)
+      await waitFor(() => expect(names()).toEqual(['Grid', 'Offset']))
+      expect(screen.getByText('Moved row 2 to position 1 of 2.')).toBeInTheDocument()
+    } finally {
+      restore()
+    }
+    within(rows)
+      .getByRole('button', { name: /^Row 1: Grid/ })
+      .focus()
+    await user.keyboard('{Alt>}{ArrowDown}{/Alt}')
+    await waitFor(() => expect(names()).toEqual(['Offset', 'Grid']))
+    expect(screen.getByText('Moved row 1 to position 2 of 2.')).toBeInTheDocument()
   })
 
   it('a grid row, Make clones, then skip from an instance row and restore from the chip', async () => {

@@ -206,6 +206,26 @@ describe('clonePath', () => {
       expect(clonePath(at(5, 5), [point(5, 5)]).duplicates).toEqual([2])
     })
 
+    it('a 2 × 2 grid draws 1, 2, 3, 4: each point of the line is the next instance (D45)', () => {
+      const p = clonePath(at(0, 0), [grid(2, 2, 10, 10)])
+      const r = p.rows[0]!
+      const numberIn =
+        (path: typeof p) =>
+        (q: { u: number; v: number }): number | undefined =>
+          path.instances.find((x) => x.at.u === q.u && x.at.v === q.v)?.number
+      const numberAt = numberIn(p)
+      // the line's points up to the last number, in order: the instance numbers 1…4
+      expect(r.line.slice(0, 4).map(numberAt)).toEqual([1, 2, 3, 4])
+      // then back along the last grid row to the zigzag end (instance 3), where a next row starts
+      expect(r.line.at(-1)).toEqual(r.end)
+      expect(numberAt(r.end)).toBe(3)
+      // an odd number of rows ends on the last number: nothing to add
+      const oddPath = clonePath(at(0, 0), [grid(2, 3, 10, 10)])
+      const odd = oddPath.rows[0]!
+      expect(odd.line.map(numberIn(oddPath))).toEqual([1, 2, 3, 4, 5, 6])
+      expect(odd.end).toEqual(at(10, 20))
+    })
+
     it('rows chain: each starts where the one before ended', () => {
       const p = clonePath(at(0, 0), [offset(2, 10, 0, [1]), polar(1, 90, 5)])
       expect(p.rows[0]).toMatchObject({ start: at(0, 0), end: at(20, 0) })
@@ -213,9 +233,20 @@ describe('clonePath', () => {
       expect(p.rows[1]!.line).toHaveLength(2)
     })
 
-    it("a grid's line runs in zigzag; points stay row by row", () => {
+    it("a grid's line visits its points in number order, then goes on to its end", () => {
+      // D45: the drawn path follows the numbers (row by row); the reference point still ends on
+      // the zigzag-last cell, so the line goes on to it
       const r = clonePath(at(0, 0), [grid(3, 2, 10, 10, [2])]).rows[0]!
-      expect(r.line).toEqual([at(0, 0), at(10, 0), at(20, 0), at(20, 10), at(10, 10), at(0, 10)])
+      expect(r.end).toEqual(at(0, 10))
+      expect(r.line).toEqual([
+        at(0, 0),
+        at(10, 0),
+        at(20, 0),
+        at(0, 10),
+        at(10, 10),
+        at(20, 10),
+        at(0, 10),
+      ])
       expect(r.points.map((p) => [p.kind, p.number])).toEqual([
         ['clone', 2],
         ['clone', 3],

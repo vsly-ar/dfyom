@@ -3,29 +3,42 @@
 // badge, failed marker). A hole's owned operations nest one indent step in; a Clones row nests
 // its Source (the nested operations or source feature, editable as before) and its Clones (one
 // row per instance number from 2, skipped ones muted). Feature rows are collapsed by default (per
-// window, ui store `expandedFeatures`). Plain rows and feature rows move by buttons and Alt+↑/↓
-// over whole neighbouring spans and remove with an undo toast; owned and nested rows have no
-// actions (Alt+↑/↓ there moves the outer feature). ↑/↓ walk the visible rows, → expands or
-// enters, ← collapses or goes to the parent row.
+// window, ui store `expandedFeatures`). Plain rows and feature rows reorder by dragging their grip
+// (D45) and by Alt+↑/↓, over whole neighbouring spans, and remove with an undo toast; a refused
+// move says why under the list and every move is announced. Owned and nested rows have no actions
+// (Alt+↑/↓ there moves the outer feature). ↑/↓ walk the visible rows, → expands or enters, ←
+// collapses or goes to the parent row.
 // Doc: docs/conventions/ui.md#feature-rows-and-add, #clones-in-the-navigator,
-// #panels-and-inspectors, #confirmations; docs/modes/design.md#ordering-and-composition
-import { useEffect, useRef, type KeyboardEvent } from 'react'
+// #reordering-lists-d45, #panels-and-inspectors, #confirmations;
+// docs/modes/design.md#ordering-and-composition
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import type { FeatureDTO } from '../../../../core/design/feature.dto'
 import type { OperationDTO } from '../../../../core/design/part.dto'
 import type { UnitSystem } from '../../../../core/project/document'
 import type { DfmWarning } from '../../../../core/geometry/model'
 import { designMessages } from '../../messages/design'
 import { useUi } from '../../shell/ShellContext'
-import { Button, Icon, IconButton, type IconName } from '../../ui'
+import {
+  Button,
+  DragGrip,
+  Icon,
+  IconButton,
+  ReorderStatus,
+  useReorder,
+  type IconName,
+  type Reorder,
+} from '../../ui'
 import styles from './Design.module.css'
 import {
   cloneInstances,
   featureReadout,
   featureRemoveBlocked,
   operationUnits,
+  moveRefusal,
   rolledUpCount,
   roleLabel,
-  unitMoveIndex,
+  unitDropIndex,
+  unitDropRefusal,
   type CloneInstanceRow,
   type FeatureUnit,
   type OperationUnit,
@@ -37,6 +50,7 @@ import { instanceId } from './clones-view'
 
 const m = designMessages
 const f = m.features
+const r = m.reorder
 const c = f.clones
 
 const ICON: Record<OperationDTO['kind'], IconName> = {
@@ -166,15 +180,50 @@ export function OperationList({
   )
   const focusRow = (id: string) => rows.current.get(id)?.focus()
 
-  /** Moves a unit one step over its neighbour; `keep` is the row that keeps focus. */
-  const move = async (unit: OperationUnit, by: -1 | 1, keep: string = unit.id) => {
-    const toIndex = unitMoveIndex(units, unit.id, by)
-    if (toIndex === undefined) return
-    const r =
+  const [refusal, setRefusal] = useState<string | undefined>(undefined)
+  const [announcement, setAnnouncement] = useState('')
+  const unitName = (u: OperationUnit) => (u.kind === 'feature' ? u.feature.name : u.op.name)
+
+  /** Moves a unit to unit position `to`; `keep` is the row that keeps focus. False: refused. */
+  const moveTo = async (unit: OperationUnit, to: number, keep: string = unit.id) => {
+    const toIndex = unitDropIndex(units, unit.id, to)
+    if (toIndex === undefined) return false
+    const res =
       unit.kind === 'feature'
         ? await call('design.feature.move', { partId, featureId: unit.id, toIndex })
         : await call('design.operation.move', { partId, operationId: unit.id, toIndex })
-    if (r.ok) focusRow(keep)
+    if (!res.ok) {
+      const why = moveRefusal(part, res.error)
+      setRefusal(why)
+      setAnnouncement(why)
+      return false
+    }
+    setRefusal(undefined)
+    setAnnouncement(r.moved(unitName(unit), to + 1, units.length))
+    focusRow(keep)
+    return true
+  }
+  const reorder = useReorder({
+    count: units.length,
+    order: units.map((u) => u.id).join(' '),
+    refusal: (from, to) => {
+      const e = unitDropRefusal(part, units, units[from]!.id, to)
+      return e === undefined ? undefined : moveRefusal(part, e)
+    },
+    onMove: (from, to) => moveTo(units[from]!, to),
+    onRefused: (why) => {
+      setRefusal(why)
+      setAnnouncement(why)
+    },
+  })
+  const { attachList } = reorder
+  /** Alt+↑/↓: one step over the neighbouring unit, gliding; a refusal shakes the row. */
+  const move = async (unit: OperationUnit, by: -1 | 1, keep: string = unit.id) => {
+    const from = units.indexOf(unit)
+    const to = from + by
+    if (to < 0 || to >= units.length) return
+    reorder.glide(from, to)
+    if (!(await moveTo(unit, to, keep))) reorder.shake(from)
   }
   const remove = async (unit: OperationUnit) => {
     if (unit.kind === 'feature') {
@@ -238,28 +287,35 @@ export function OperationList({
   }
 
   return (
-    <ol className={styles['ops']} aria-label={m.navigator.listLabel}>
-      {units.map((unit, i) => {
-        const actions = {
-          first: i === 0,
-          last: i === units.length - 1,
-          onMove: (by: -1 | 1) => void move(unit, by),
-          onRemove: () => void remove(unit),
-        }
-        return unit.kind === 'operation' ? (
-          <OperationRow key={unit.id} ctx={ctx} op={unit.op} actions={actions} />
-        ) : (
-          <FeatureRow key={unit.id} ctx={ctx} unit={unit} actions={actions} />
-        )
-      })}
-    </ol>
+    <>
+      <ol
+        ref={attachList}
+        className={`${styles['ops']} ${reorder.listClass}`}
+        aria-label={m.navigator.listLabel}
+        {...reorder.listProps}
+      >
+        {units.map((unit, i) => {
+          const actions: RowActions = {
+            item: reorder.itemProps(i),
+            grip: units.length > 1 ? reorder.gripProps(i) : undefined,
+            onRemove: () => void remove(unit),
+          }
+          return unit.kind === 'operation' ? (
+            <OperationRow key={unit.id} ctx={ctx} op={unit.op} actions={actions} />
+          ) : (
+            <FeatureRow key={unit.id} ctx={ctx} unit={unit} actions={actions} />
+          )
+        })}
+      </ol>
+      <ReorderStatus refusal={reorder.refusal ?? refusal} announcement={announcement} />
+    </>
   )
 }
 
 interface RowActions {
-  readonly first: boolean
-  readonly last: boolean
-  onMove(by: -1 | 1): void
+  /** The row's reorder props (its `<li>`) and its grip's. */
+  readonly item: ReturnType<Reorder['itemProps']>
+  readonly grip: ReturnType<Reorder['gripProps']> | undefined
   onRemove(): void
 }
 
@@ -297,20 +353,7 @@ function MoveRemove({
 }): React.JSX.Element {
   return (
     <span className={styles['opActions']}>
-      <IconButton
-        label={m.navigator.moveUp(name)}
-        icon={<Icon name="arrow-up" />}
-        shortcut="Alt+↑"
-        disabled={actions.first}
-        onClick={() => actions.onMove(-1)}
-      />
-      <IconButton
-        label={m.navigator.moveDown(name)}
-        icon={<Icon name="arrow-down" />}
-        shortcut="Alt+↓"
-        disabled={actions.last}
-        onClick={() => actions.onMove(1)}
-      />
+      {actions.grip ? <DragGrip title={r.grip} {...actions.grip} /> : null}
       <IconButton
         label={m.navigator.remove(name)}
         icon={<Icon name="delete" />}
@@ -338,6 +381,7 @@ function OperationRow({
   const n = rolledUpCount({ kind: 'operation', id: op.id, op, start: 0, end: 1 }, ctx.warnings)
   return (
     <li
+      {...actions?.item}
       className={styles['op']}
       data-nested={actions === undefined ? '' : undefined}
       data-selected={ctx.selected === op.id ? '' : undefined}
@@ -397,6 +441,7 @@ function FeatureRow({
   })
   return (
     <li
+      {...actions?.item}
       className={styles['featureItem']}
       data-nested={actions === undefined ? '' : undefined}
       data-open={open || undefined}

@@ -54,8 +54,6 @@ export const shapeMessages = {
       string
     >,
     firstAdds: 'The first item always adds.',
-    moveUp: (label: string) => `Move ${label} up`,
-    moveDown: (label: string) => `Move ${label} down`,
     removeItem: (label: string) => `Remove ${label}`,
     lastItem: 'A shape needs at least one item.',
     itemLabel: (kind: ShapeItemKind, n: number) => `${KIND[kind]} ${n}`,
