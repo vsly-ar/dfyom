@@ -7,12 +7,28 @@
 
 export type SketchPoint = readonly [number, number]
 
-/** How a line is drawn: outline, the face, a break, a fastener silhouette, a centre line. */
+/**
+ * How a line is drawn: outline, the face, a break, a fastener silhouette, a centre line. A break
+ * is only for a drawing split to show a far part at scale; stock that just runs on beyond the
+ * drawing fades out instead (`fade`, D45).
+ */
 export type SketchLineStyle = 'edge' | 'break' | 'silhouette' | 'axis'
 
 export type SketchPrimitive =
   /** Cut material: a closed polygon filled with the quiet hatch, no outline of its own. */
   | { readonly kind: 'material'; readonly points: readonly SketchPoint[] }
+  /**
+   * Where the stock runs on beyond the drawing (D45, instead of a break line): everything drawn
+   * before it in the band x0…x1 fades from fully visible at `from` to the background at `to`
+   * (y values; `to` > `from` fades downwards). Measures, drawn last, stay on top.
+   */
+  | {
+      readonly kind: 'fade'
+      readonly x0: number
+      readonly x1: number
+      readonly from: number
+      readonly to: number
+    }
   /** A polyline (closed when `closed`). */
   | {
       readonly kind: 'line'

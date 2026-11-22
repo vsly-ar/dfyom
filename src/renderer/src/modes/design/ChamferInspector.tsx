@@ -1,23 +1,37 @@
-// The chamfer inspector (v0.4 task U4): the `chamfer` kind's groups inside OperationFields, so the
-// Design inspector, a countersink's read-only owned chamfer and the plan copy share it. Edge (a
-// Select of the earlier drillings, circle pockets and inside circle profiles, "Drilling 2 · Ø 3.4 mm", with pick mode
-// tinting their surfaces in the viewport; `edgeOf`), then the section illustration of the edge with
-// its cone above Diameter, Angle (60°–120°) and the derived Depth (read-only, "from diameter and
-// angle"), then the tool field (where `dfm.chamferNoTool` shows with "New tool…", ToolField).
+// The chamfer inspector (v0.4 task U4, D45): the `chamfer` kind's groups inside OperationFields, so
+// the Design inspector, a countersink's read-only owned chamfer and the plan copy share it. Edge (a
+// Select of the earlier drillings, circle pockets and inside circle profiles, "Drilling 2 · Ø 3.4
+// mm", with pick mode tinting their surfaces in the viewport; `edgeOf`), then the section
+// illustration of the edge with its cone above Width (the stored size, "1.5 × 45°"), Depth (the
+// alternative: a commit sends `depth` and the core turns it into the width through the angle),
+// Angle (60°–120°) and the derived Diameter at the face (read-only, "from the edge and the
+// width"), then the tool field (where `dfm.chamferNoTool` shows with "New tool…", ToolField).
 // The focused field's measured part is amber in the section; hovering a part of the section
 // highlights its field's label and clicking it focuses the field. Each commit is one
-// `design.chamfer.update` (one undo step); a new edge re-defaults the diameter in the core.
+// `design.chamfer.update` (one undo step); a new edge keeps the width.
 // Doc: docs/conventions/ui.md#chamfer-inspector, #section-illustration;
-// docs/modes/design-v0.4.md#implementation-c2
+// docs/modes/design-v0.4.md#chamfer-operation-v04-circular-edges
 import { useRef, useState } from 'react'
 import type { OperationDTO } from '../../../../core/design/part.dto'
 import { chamferMessages } from '../../messages/chamfer'
 import { dfmMessages, lengthSource } from '../../messages/dfm'
 import { useUi } from '../../shell/ShellContext'
-import { Field, FieldIcon, FieldInput, Icon, IconButton, Select, type FieldMessage } from '../../ui'
+import { fieldContext } from '../../../../core/design/operation'
+import { Quantity } from '../../../../core/quantity/quantity'
+import {
+  Field,
+  FieldIcon,
+  FieldInput,
+  Icon,
+  IconButton,
+  QuantityInput,
+  Select,
+  type FieldMessage,
+} from '../../ui'
 import { chamferSection, coneDepth, type ChamferPart } from '../../viewport/chamfer-section'
 import { SketchView } from '../../viewport/SketchView'
-import { chamferSectionValues, edgeOptions } from './chamfer-view'
+import { chamferDiameter, chamferSectionValues, edgeOptions } from './chamfer-view'
+import { defaultUnit } from './model'
 import styles from './Design.module.css'
 import own from './ChamferInspector.module.css'
 import { Group, ParamField, warningPath, type OperationFieldsContext } from './OperationFields'
@@ -31,10 +45,10 @@ type ChamferDTO = Extract<OperationDTO, { kind: 'chamfer' }>
 function invalidParts(ctx: OperationFieldsContext): Set<string> {
   const parts = new Set<string>()
   for (const e of ctx.errors)
-    if (['diameter', 'angle', 'edgeOf'].includes(e.path)) parts.add(e.path)
+    if (['width', 'depth', 'angle', 'edgeOf'].includes(e.path)) parts.add(e.path)
   for (const w of ctx.warnings) {
     const at = warningPath(w, ctx.op)
-    if (at === 'diameter' && dfmMessages.tier(w) !== 'soft') parts.add('diameter')
+    if (at === 'width' && dfmMessages.tier(w) !== 'soft') parts.add('width')
   }
   return parts
 }
@@ -93,36 +107,71 @@ export function ChamferInspector({
           </div>
         ) : null}
         {target(
-          'diameter',
-          <ParamField ctx={ctx} path="diameter" label={t.diameter} kind="length" icon="width" />,
+          'width',
+          <ParamField ctx={ctx} path="width" label={t.width} kind="length" icon="length" />,
         )}
+        {target('depth', <DepthField ctx={ctx} />)}
         {target(
           'angle',
           <ParamField ctx={ctx} path="angle" label={t.angle} kind="angle" icon="chamfer" />,
         )}
-        {target('depth', <DepthField ctx={ctx} />)}
+        {target('diameter', <DiameterField ctx={ctx} />)}
       </Group>
       {tool}
     </>
   )
 }
 
-/** The derived depth: read-only text from diameter, angle and the edge's diameter. */
+/**
+ * Depth, the alternative size (D45): shows the depth the width and angle give; a commit sends
+ * `depth` and the core stores the width it gives through the angle (one undo step).
+ */
 function DepthField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Element | null {
   const op = ctx.op
   if (op.kind !== 'chamfer') return null
   const v = chamferSectionValues(ctx.part, op)
   const depth = v === undefined ? undefined : coneDepth(v)
+  const parsed =
+    depth === undefined || !Number.isFinite(depth)
+      ? undefined
+      : Quantity.parse(lengthSource(depth, ctx.units), fieldContext('length', ctx.units))
+  const value = parsed?.isOk() === true ? parsed.unwrap() : undefined
+  const messages: FieldMessage[] = [
+    ...ctx.errors
+      .filter((e) => e.path === 'depth')
+      .map((e, i): FieldMessage => ({ id: `error-${i}`, severity: 'error', text: e.text })),
+    { id: 'derived', severity: 'note', text: t.depthNote },
+  ]
+  return (
+    <QuantityInput
+      label={t.depth}
+      kind="length"
+      defaultUnit={defaultUnit('length', ctx.units)}
+      value={value}
+      onCommit={(q, gesture) => ctx.send({ depth: q.source }, 'depth', gesture)}
+      onCancelGesture={ctx.cancelGesture}
+      illustration={<FieldIcon name="depth" />}
+      messages={messages}
+      readOnly={ctx.readOnly}
+    />
+  )
+}
+
+/** The diameter at the face: read-only, the edge's Ø + 2 × width. */
+function DiameterField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Element | null {
+  const op = ctx.op
+  if (op.kind !== 'chamfer') return null
+  const d = chamferDiameter(ctx.part.dto, op, ctx.units)
   return (
     <Field
-      label={t.depth}
-      illustration={<FieldIcon name="depth" />}
+      label={t.diameter}
+      illustration={<FieldIcon name="width" />}
       readOnly
-      messages={[{ id: 'derived', severity: 'note', text: t.depthNote }]}
+      messages={[{ id: 'derived', severity: 'note', text: t.diameterNote }]}
     >
       <FieldInput
         readOnly
-        value={depth === undefined || !Number.isFinite(depth) ? '' : lengthSource(depth, ctx.units)}
+        value={d === undefined ? '' : `Ø ${lengthSource(d.canonical, ctx.units)}`}
       />
     </Field>
   )

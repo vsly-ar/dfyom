@@ -44,7 +44,7 @@ async function setup(chamferArgs: object = {}) {
     cm60: await add(libraryInput(chamferMill('12', { angle: deg('60') }))),
     short: await add(libraryInput(chamferMill('6.5', { tipDiameter: len('6') }))),
   }
-  // a 7 mm chamfer (default: edge + 1 mm) on the 6 mm through hole drill1 (top face, under the
+  // a 7 mm chamfer (default width 0.5 mm: edge + 1 mm) on the 6 mm through hole drill1 (top face, under the
   // 0.5 mm facing)
   await s.run('design.chamfer.add', { partId: s.partId, edgeOf: 'drill1', ...chamferArgs })
   await s.run('project.apply', {})
@@ -110,8 +110,8 @@ describe('chamfer plan operations', () => {
   })
 
   it('a smaller mill contours one ring at the chamfer depth', async () => {
-    // a 10 mm chamfer: F10's De = 0 + 2 · 2 · tan 45° = 4 mm
-    const t = await setup({ diameter: '10' })
+    // a 10 mm chamfer (2 mm wide): F10's De = 0 + 2 · 2 · tan 45° = 4 mm
+    const t = await setup({ width: '2' })
     await t.assign(t.tools.cm6)
     expect(t.errors()).toEqual([])
     expect(t.view().strategy).toMatchObject({ entry: 'contour' })

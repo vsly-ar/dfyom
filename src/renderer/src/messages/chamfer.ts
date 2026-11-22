@@ -9,15 +9,19 @@ export const chamferMessages = {
   pickEdgeField: 'Edge',
   /** The edge operation is gone or not round any more (the command refuses such an edge). */
   edgeMissing: (id: string) => `${id} (not a drilling, circular pocket or circular opening)`,
-  diameter: 'Diameter',
+  /** D45: the chamfer's size is its width at the face ("1.5 × 45°"); depth is the alternative. */
+  width: 'Width',
   angle: 'Angle',
   depth: 'Depth',
-  depthNote: 'From diameter and angle.',
+  depthNote: 'Or enter the depth: the width follows through the angle.',
+  diameter: 'Diameter',
+  diameterNote: 'From the edge and the width.',
   /** Add menu: no drilling, circular pocket or circular opening in the part (ui.md § Feature rows and Add). */
   noEdge:
     'Add a drilling, a circular pocket or a circular opening first: a chamfer breaks its edge.',
   /** The section illustration's accessible name, built from the values. */
   sectionLabel: (p: {
+    width: string
     diameter: string
     angle: string
     depth: string
@@ -25,7 +29,7 @@ export const chamferMessages = {
     edgeDiameter: string
     edgeBottom: string
   }) =>
-    `Section: chamfer Ø ${p.diameter} at ${p.angle}, ${p.depth} deep, on ${p.edgeName} Ø ${p.edgeDiameter} ${p.edgeBottom}.`,
+    `Section: chamfer ${p.width} wide at ${p.angle} (Ø ${p.diameter}), ${p.depth} deep, on ${p.edgeName} Ø ${p.edgeDiameter} ${p.edgeBottom}.`,
   edgeThrough: 'through',
   edgeDeep: (depth: string) => `${depth} deep`,
 } as const

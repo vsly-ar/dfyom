@@ -271,7 +271,7 @@ export function toolFindings(i: ToolCheckInput): Finding[] {
           },
           {
             edgeDiameter: cut.edgeDiameter,
-            diameter: op.diameter.canonical,
+            diameter: cut.diameter,
             angle: op.angle.canonical,
             ...(op.stepdown.isSome() ? { stepdown: op.stepdown.unwrap().canonical } : {}),
           },

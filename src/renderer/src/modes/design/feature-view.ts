@@ -442,10 +442,16 @@ const mmOf = (q: unknown): number | undefined => {
 }
 
 /** A footprint width (mm) of an operation along u, or undefined when it has none to read. */
-function widthOf(op: OperationDTO): number | undefined {
+function widthOf(op: OperationDTO, ops: readonly OperationDTO[]): number | undefined {
   if (op.kind === 'drilling') return mmOf(op.diameter)
   if (op.kind === 'facing') return undefined
-  if (op.kind === 'chamfer') return mmOf(op.diameter)
+  if (op.kind === 'chamfer') {
+    // D45: edge Ø + 2 × width
+    const edge = ops.find((o) => o.id === op.edgeOf)
+    const edgeD = edge === undefined ? undefined : widthOf(edge, ops)
+    const w = mmOf(op.width)
+    return edgeD === undefined || w === undefined ? undefined : edgeD + 2 * w
+  }
   const shape = op.shape
   return shape.kind === 'circle'
     ? mmOf(shape.diameter)
@@ -482,7 +488,9 @@ export function clonesSource(
     const taken = nestedIn(feature.id)
     if (taken !== undefined) return no(c.taken(feature.name, taken.feature.name))
     const owned = part.dto.operations.filter((o) => o.featureId === feature.id)
-    const widths = owned.map(widthOf).filter((w): w is number => w !== undefined)
+    const widths = owned
+      .map((o) => widthOf(o, part.dto.operations))
+      .filter((w): w is number => w !== undefined)
     return { ok: true, source: { featureId: feature.id }, width: Math.max(0, ...widths) }
   }
   if (op === undefined) return no(c.select)
@@ -490,5 +498,9 @@ export function clonesSource(
   if (op.kind === 'profile' && op.side === 'outside') return no(c.outside)
   const taken = nestedIn(op.id)
   if (taken !== undefined) return no(c.taken(op.name, taken.feature.name))
-  return { ok: true, source: { operationIds: [op.id] }, width: widthOf(op) ?? 0 }
+  return {
+    ok: true,
+    source: { operationIds: [op.id] },
+    width: widthOf(op, part.dto.operations) ?? 0,
+  }
 }

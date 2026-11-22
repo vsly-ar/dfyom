@@ -92,7 +92,7 @@ function drillKey(op: Operation, direction: Direction): string | undefined {
 }
 
 /**
- * Chamfers of one face direction with equal angle, diameter and edge diameter and an equal design
+ * Chamfers of one face direction with equal angle, width and edge diameter and an equal design
  * tool field share one plan operation, as equal holes do (plan-v0.4.md P-B): the generator cuts
  * them in nearest-neighbour order with one tool. `all` finds the edge.
  */
@@ -111,7 +111,7 @@ function chamferKey(
     'chamfer',
     direction,
     q(op.angle),
-    q(op.diameter),
+    q(op.width),
     q(edgeDiameter),
     op.tool.mapOr('-', (t) => stableJson(designToolToDTO(t))),
     op.toolLocked ? 'locked' : 'auto',

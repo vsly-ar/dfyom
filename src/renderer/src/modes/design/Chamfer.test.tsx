@@ -1,8 +1,9 @@
 // The chamfer UI in design mode (v0.4 task U4) against the fake bridge bound to a real project
 // runtime: the Add menu's Chamfer (disabled with its reason without an edge; on the selected
 // drilling, circle pocket or inside circle profile, else the last one), the chamfer inspector (Edge with its options,
-// Diameter, Angle, the derived Depth, the section illustration with the focused field's part, one
-// update per commit, a new edge re-defaulting the diameter), `dfm.chamferNoTool` at the tool field
+// Width, Depth as the alternative input, Angle, the read-only Diameter (D45), the section
+// illustration with the focused field's part, one update per commit, a new edge keeping the
+// width), `dfm.chamferNoTool` at the tool field
 // with "New tool…" prefilled with a chamfer mill of that angle, and a countersink's owned chamfer
 // shown read-only. The canvas is stubbed. Doc: docs/conventions/ui.md#chamfer-inspector
 import { screen, waitFor, within } from '@testing-library/react'
@@ -148,19 +149,32 @@ describe('chamfer UI (U4)', () => {
     await waitFor(() => expect(chamfer()).toBeDefined())
     expect(chamfer().edgeOf).toBe(part().operations[0]!.id)
     expect(await within(inspector()).findByRole('heading', { name: 'Chamfer 1' })).toBeVisible()
-    // Edge, Diameter (edge Ø + 1 mm), Angle (90°), the derived Depth
+    // Edge, Width (0.5 mm: edge Ø + 1 mm), Depth, Angle (90°), the derived Diameter (D45)
     const edge = within(inspector()).getByRole('combobox', { name: 'Edge' })
     expect(edge).toHaveTextContent('Drilling 1 · Ø 3.4 mm')
-    expect(input('Diameter').value).toMatch(/^4\.4/)
+    expect(input('Width').value).toMatch(/^0\.5/)
+    expect(input('Depth').value).toMatch(/^0\.5/)
+    expect(input('Depth')).not.toHaveAttribute('readonly')
     expect(input('Angle').value).toMatch(/^90/)
-    expect(input('Depth')).toHaveValue('0.5 mm')
-    expect(input('Depth')).toHaveAttribute('readonly')
+    expect(input('Diameter')).toHaveValue('Ø 4.4 mm')
+    expect(input('Diameter')).toHaveAttribute('readonly')
     expect(
       within(inspector()).getByRole('img', {
-        name: 'Section: chamfer Ø 4.4 mm at 90°, 0.5 mm deep, on Drilling 1 Ø 3.4 mm through.',
+        name: 'Section: chamfer 0.5 mm wide at 90° (Ø 4.4 mm), 0.5 mm deep, on Drilling 1 Ø 3.4 mm through.',
       }),
     ).toBeInTheDocument()
     await expectNoAxeViolations()
+
+    // the width is the stored size: one update per commit, the diameter follows
+    await user.clear(input('Width'))
+    await user.type(input('Width'), '1{Enter}')
+    await waitFor(() => expect(chamfer().width.source).toMatch(/^1/))
+    await waitFor(() => expect(input('Diameter')).toHaveValue('Ø 5.4 mm'))
+    // the depth is the alternative: the core turns it into the width through the angle
+    await user.clear(input('Depth'))
+    await user.type(input('Depth'), '0.8{Enter}')
+    await waitFor(() => expect(chamfer().width.source).toMatch(/^0\.8/))
+    await waitFor(() => expect(input('Diameter')).toHaveValue('Ø 5 mm'))
 
     // the focused field's part is the amber line of the section
     await user.click(input('Angle'))
@@ -171,9 +185,11 @@ describe('chamfer UI (U4)', () => {
     await user.clear(input('Angle'))
     await user.type(input('Angle'), '60{Enter}')
     await waitFor(() => expect(chamfer().angle.source).toBe('60'))
-    await waitFor(() => expect(input('Depth').value).not.toBe('0.5 mm'))
+    // the width stays; the depth follows the angle
+    expect(chamfer().width.source).toMatch(/^0\.8/)
+    await waitFor(() => expect(input('Depth').value).not.toMatch(/^0\.8/))
 
-    // the edge list: the earlier drilling and circle pocket; a new edge re-defaults the diameter
+    // the edge list: the earlier drilling and circle pocket; a new edge keeps the width
     edge.focus()
     await user.keyboard('{Enter}')
     const list = await screen.findByRole('listbox')
@@ -184,7 +200,8 @@ describe('chamfer UI (U4)', () => {
     ).toEqual(['Drilling 1 · Ø 3.4 mm', 'Pocket 1 · Ø 10 mm'])
     await user.click(within(list).getByRole('option', { name: 'Pocket 1 · Ø 10 mm' }))
     await waitFor(() => expect(chamfer().edgeOf).toBe(part().operations[1]!.id))
-    expect(chamfer().diameter.source).toMatch(/^11/)
+    expect(chamfer().width.source).toMatch(/^0\.8/)
+    await waitFor(() => expect(input('Diameter')).toHaveValue('Ø 11.6 mm'))
   })
 
   it('shows dfm.chamferNoTool at the tool field with "New tool…" prefilled with a chamfer mill', async () => {
@@ -244,6 +261,8 @@ describe('chamfer UI (U4)', () => {
       }),
     )
     expect(within(inspector()).getByRole('combobox', { name: 'Edge' })).toBeDisabled()
+    expect(input('Width')).toHaveAttribute('readonly')
+    expect(input('Depth')).toHaveAttribute('readonly')
     expect(input('Diameter')).toHaveAttribute('readonly')
     expect(input('Angle')).toHaveAttribute('readonly')
     expect(within(inspector()).getByRole('img', { name: /^Section: chamfer/ })).toBeInTheDocument()

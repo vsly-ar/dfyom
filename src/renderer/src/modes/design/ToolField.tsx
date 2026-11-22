@@ -29,6 +29,7 @@ import { toolChangeKey } from '../../state/pending'
 import type { ToolType } from '../../../../core/library/tool.dto'
 import { TOOL_TYPE_ICON } from '../../library/toolTypeIcon'
 import { Field, FieldIcon, Icon, Select, type FieldMessage, type SelectOption } from '../../ui'
+import { chamferDiameter } from './chamfer-view'
 import styles from './Design.module.css'
 import { pendingApply, quantityAt, type DesignPart } from './model'
 import { useCommand } from './useDesign'
@@ -278,12 +279,19 @@ function listedOptions(
  * The generalized tool a new library tool starts from (type, diameter, corner radius, a chamfer
  * mill's angle; L4). A chamfer without one: a chamfer mill of its angle and diameter (U4).
  */
-export function prefill(g: DesignToolDTO | null, op?: OperationDTO): ToolPrefill | undefined {
+export function prefill(
+  g: DesignToolDTO | null,
+  op?: OperationDTO,
+  part?: Pick<DesignPart, 'dto' | 'units'>,
+): ToolPrefill | undefined {
   if (g === null || g.kind !== 'generalized') {
-    if (op?.kind !== 'chamfer') return undefined
+    if (op?.kind !== 'chamfer' || part === undefined) return undefined
+    // D45: the chamfer's diameter at the face, derived from its edge and width
+    const diameter = chamferDiameter(part.dto, op, part.units)
+    if (diameter === undefined) return undefined
     return {
       type: 'chamferMill',
-      diameter: op.diameter as ToolPrefill['diameter'],
+      diameter: diameter.toDTO() as ToolPrefill['diameter'],
       angle: op.angle as NonNullable<ToolPrefill['angle']>,
     }
   }
@@ -467,6 +475,7 @@ export function ToolField({
         prefill={prefill(
           candidates?.generalized ?? (op.tool?.kind === 'generalized' ? op.tool : null),
           op,
+          part,
         )}
         description={libraryMessages.tool.designDescription}
         trigger={null}

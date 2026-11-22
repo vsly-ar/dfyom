@@ -591,10 +591,11 @@ function chamfer(
       warning(
         'dfm.chamferTooDeep',
         op,
-        'diameter',
+        'width',
         `the chamfer is ${mm(depth)} deep, ${op.edgeOf} only ${mm(edgeDepth)}`,
         { depth, edgeDepth, edgeOf: op.edgeOf },
-        { suggestion: atMost(op.edgeDiameter + 2 * edgeDepth * tan) },
+        // the widest chamfer that stays above the edge's bottom (D45: sized by width)
+        { suggestion: atMost(edgeDepth * tan) },
       ),
     )
   }

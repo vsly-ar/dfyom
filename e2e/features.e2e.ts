@@ -5,7 +5,7 @@
 // marker in the viewport, the instance inspector) with Source and Clones groups under the Clones
 // row; the hole inspector (U2) sets type and fastener, draws the section and offers the
 // custom-size fix and a stepped countersink (F7). Task U4: Add → Chamfer on a drilling opens the chamfer inspector (Edge,
-// Diameter, Angle, Depth and the section). Windows stay hidden
+// Width, Depth, Angle, the read-only Diameter and the section, D45). Windows stay hidden
 // (app.fixture.ts). With DFYOM_RENDERS=1 it also writes the light and dark review renders to
 // design/features/renders/ (ui.md § Features (v0.4), visuals reviewed in L2).
 // Docs: docs/conventions/ui.md#features-v04, docs/modes/features.md
@@ -240,22 +240,30 @@ test('chamfer: add a drilling, add a chamfer from Add, edit it in its inspector'
   await item.click()
   await expect(inspector.getByRole('heading', { name: 'Chamfer 1' })).toBeVisible()
   await expect(inspector.getByRole('combobox', { name: 'Edge' })).toContainText('Drilling 1 · Ø')
-  await expect(inspector.getByRole('img', { name: /^Section: chamfer Ø/ })).toBeVisible()
-  const depth = inspector.getByLabel('Depth', { exact: true }).and(inspector.locator('input'))
-  await expect(depth).toHaveAttribute('readonly', '')
+  await expect(inspector.getByRole('img', { name: /^Section: chamfer 0\.5 mm wide/ })).toBeVisible()
+  const field = (label: string) =>
+    inspector.getByLabel(label, { exact: true }).and(inspector.locator('input'))
+  const depth = field('Depth')
+  // D45: sized by width; depth is the alternative input, the diameter read-only
+  await expect(field('Diameter')).toHaveAttribute('readonly', '')
+  await expect(depth).not.toHaveAttribute('readonly', '')
+  await setField(inspector, 'Depth', '0.8')
+  await expect(field('Width')).toHaveValue(/^0\.8/)
   const before = await depth.inputValue()
 
-  // a new angle: one update, the derived depth follows
+  // a new angle: one update, the width stays and the depth follows
   await setField(inspector, 'Angle', '60')
   await expect(depth).not.toHaveValue(before)
+  await expect(field('Width')).toHaveValue(/^0\.8/)
   await expect(inspector.getByRole('img', { name: /at 60°/ })).toBeVisible()
-  // the focused field's part is amber in the section (the review render)
-  const focusDiameter = async () => {
-    await inspector.getByLabel('Diameter', { exact: true }).and(inspector.locator('input')).focus()
-    await expect(page.locator('[data-part="diameter"]')).toHaveAttribute('data-state', 'active')
+  // the focused field's part is amber in the section (the review render); the deep bore fades out
+  await expect(page.locator('[data-fade]')).toHaveCount(1)
+  const focusWidth = async () => {
+    await field('Width').focus()
+    await expect(page.locator('[data-part="width"]')).toHaveAttribute('data-state', 'active')
   }
-  await focusDiameter()
-  await render(page, 'chamfer-inspector', 'u4', focusDiameter)
+  await focusWidth()
+  await render(page, 'chamfer-inspector', 'u4', focusWidth)
 
   expect(dfyom.rendererErrors).toEqual([])
 })

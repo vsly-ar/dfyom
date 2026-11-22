@@ -8,6 +8,7 @@ import { collect, fail, None, Ok, Some, type AppResult, type Option } from '../.
 import { quantityFromDTO } from '../library/item'
 import type { ParseContext } from '../quantity/parse'
 import type { Quantity } from '../quantity/quantity'
+import type { Rational } from '../quantity/rational'
 import type { QuantityDTO } from '../quantity/quantity.dto'
 import { Tolerance } from '../quantity/tolerance'
 import type { UnitSystem } from '../project/document'
@@ -153,8 +154,13 @@ export interface Chamfer extends Common {
   readonly kind: 'chamfer'
   /** Id of the earlier drilling, circle pocket or inside circle profile whose mouth it bevels. */
   readonly edgeOf: string
-  /** In the face plane; > the edge's diameter. */
-  readonly diameter: Quantity
+  /**
+   * The chamfer's size (D45): its horizontal leg at the face, from the edge to the chamfer's
+   * outer rim (> 0); "1.5 × 45°" is width 1.5 at 90°. Stored rather than the diameter, so the
+   * chamfer keeps its width when the edge's diameter changes; diameter = edge Ø + 2 × width
+   * (`chamferDiameter`), depth = width / tan(angle / 2).
+   */
+  readonly width: Quantity
   /** Included angle. */
   readonly angle: Quantity
   /**
@@ -178,6 +184,15 @@ export function circularEdgeDiameter(op: Operation | undefined): Quantity | unde
   )
     return op.shape.diameter
   return undefined
+}
+
+/**
+ * A chamfer's diameter in the face plane, mm exact: the edge's Ø + 2 × `width` (D45,
+ * design-v0.4.md § Chamfer operation); undefined when the edge is not a circular edge.
+ */
+export function chamferDiameter(c: Chamfer, edge: Operation | undefined): Rational | undefined {
+  const edgeD = circularEdgeDiameter(edge)
+  return edgeD?.exact.add(c.width.exact.add(c.width.exact))
 }
 
 export interface Part {
@@ -238,9 +253,9 @@ export const DEFAULTS = {
   headSink: { mm: '0.2 mm', inch: '0.008"' },
   // stepped countersink terrace height (design-v0.4.md#stepped-countersink-f7-d41)
   csStepdown: { mm: '1 mm', inch: '1/32"' },
-  // chamfer operation (design-v0.4.md#chamfer-operation-v04-circular-edges): diameter = edge Ø + this
+  // chamfer operation (design-v0.4.md#chamfer-operation-v04-circular-edges): width (D45)
   chamferAngle: { mm: '90°', inch: '90°' },
-  chamferWidening: { mm: '1 mm', inch: '1/32"' },
+  chamferWidth: { mm: '0.5 mm', inch: '1/64"' },
 } as const satisfies Record<string, Record<UnitSystem, string>>
 
 /**
@@ -290,7 +305,7 @@ export function quantityParams(op: Operation): { path: string; value: Quantity }
         op.tabs.positions.unwrap().forEach((p, i) => add(`tabs.positions.${i}`, p))
       break
     case 'chamfer':
-      add('diameter', op.diameter)
+      add('width', op.width)
       add('angle', op.angle)
       addOpt('stepdown', op.stepdown)
       break
@@ -521,15 +536,15 @@ export function operationFromDTO(dto: OperationDTO): AppResult<Operation> {
       )
     }
     case 'chamfer': {
-      const diameter = q(dto.diameter, 'diameter')
+      const width = q(dto.width, 'width')
       const angle = q(dto.angle, 'angle')
       const stepdown = dto.stepdown === undefined ? Ok(undefined) : q(dto.stepdown, 'stepdown')
-      return collect<Quantity | undefined>([diameter, angle, stepdown]).map(([d, a, s]) => ({
+      return collect<Quantity | undefined>([width, angle, stepdown]).map(([w, a, s]) => ({
         ...base,
         kind: 'chamfer',
         on: dto.on,
         edgeOf: dto.edgeOf,
-        diameter: d!,
+        width: w!,
         angle: a!,
         stepdown: s === undefined ? None : Some(s),
       }))
@@ -641,7 +656,7 @@ export function operationToDTO(op: Operation): OperationDTO {
         ...base,
         on: op.on,
         edgeOf: op.edgeOf,
-        diameter: op.diameter.toDTO(),
+        width: op.width.toDTO(),
         angle: op.angle.toDTO(),
         ...(op.stepdown.isSome() ? { stepdown: op.stepdown.unwrap().toDTO() } : {}),
       } as OperationDTO

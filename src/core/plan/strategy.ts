@@ -8,7 +8,7 @@
 import { z } from 'zod'
 import type { Issue } from '../../shared/errors/app-error'
 import { collect, fail, None, type AppResult, type Option } from '../../shared/result'
-import { fieldContext, isGeneralShape, type Operation } from '../design/operation'
+import { chamferDiameter, fieldContext, isGeneralShape, type Operation } from '../design/operation'
 import type { OperationKind } from '../design/part.dto'
 import { chamferEdge } from '../design/geometry-input'
 import { SurfaceTable } from '../design/surfaces'
@@ -327,7 +327,14 @@ function steppedTerraces(
   const edge = chamferEdge(allOps, op.edgeOf)
   if (edge === undefined || op.stepdown.isNone()) return undefined
   return chamferTerraces(
-    { edgeDiameter: edge.diameter, diameter: op.diameter.canonical, angle: op.angle.canonical },
+    {
+      edgeDiameter: edge.diameter,
+      diameter: chamferDiameter(
+        op,
+        allOps.find((o) => o.id === op.edgeOf),
+      )!.toNumber(),
+      angle: op.angle.canonical,
+    },
     op.stepdown.unwrap().canonical,
   )
 }
@@ -335,6 +342,8 @@ function steppedTerraces(
 /** A chamfer's cuts with `tool` (mm below its face); undefined when the edge is not round. */
 export interface ChamferCuts {
   readonly edgeDiameter: number
+  /** The chamfer's diameter at the face: edge Ø + 2 × width (D45). */
+  readonly diameter: number
   /** DC covers the chamfer Ø (within 0.01 mm): it can be plunged. */
   readonly plungeFits: boolean
   /** Plunged tip: where the tool cone has the chamfer's Ø at the face. */
@@ -354,7 +363,7 @@ export function chamferCuts(
   const edgeOp = allOps.find((o) => o.id === op.edgeOf)
   const edge = chamferEdge(allOps, op.edgeOf)
   if (edge === undefined || edgeOp === undefined) return undefined
-  const D = op.diameter.canonical
+  const D = chamferDiameter(op, edgeOp)!.toNumber()
   const angle = op.angle.canonical
   const edgeDepth =
     edgeOp.kind === 'drilling'
@@ -366,6 +375,7 @@ export function chamferCuts(
         : Infinity // an inside circle profile cuts through
   return {
     edgeDiameter: edge.diameter,
+    diameter: D,
     plungeFits: tool.diameter.canonical + FIT_TOL >= D,
     plungeDepth: chamferDepth({ edgeDiameter: tool.tipDiameterMm, diameter: D, angle }),
     contourDepth: chamferDepth({ edgeDiameter: edge.diameter, diameter: D, angle }),
@@ -456,7 +466,7 @@ export function strategyIssues(
         if (!cut.plungeFits)
           bad('entry', 'plungeSize', 'a plunge needs a tool diameter ≥ the chamfer diameter', {
             diameter: t.diameter.canonical,
-            chamfer: op.diameter.canonical,
+            chamfer: cut.diameter,
           })
         else if (cut.plungeDepth > cut.edgeDepth + EPS)
           bad('entry', 'plungeDepth', "the plunged tip would go below the edge's bottom", {

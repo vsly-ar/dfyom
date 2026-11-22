@@ -637,8 +637,10 @@ function footprint(
       grow(op.center[0].canonical, op.center[1].canonical, r, r)
     } else if (op.kind === 'chamfer') {
       const edge = chamferEdge(src, op.edgeOf)
-      if (edge !== undefined)
-        grow(...edge.center, op.diameter.canonical / 2, op.diameter.canonical / 2)
+      if (edge !== undefined) {
+        const r = edge.diameter / 2 + op.width.canonical
+        grow(...edge.center, r, r)
+      }
     } else if (op.kind !== 'facing') shapeBox(op.shape)
   return box
 }

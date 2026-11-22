@@ -305,7 +305,7 @@ export async function exitCriteriaV04Flow(rawCall: Call, dir: string): Promise<F
     await ok<AddResult>('design.chamfer.add', {
       partId,
       edgeOf: cutout.operationId,
-      diameter: `${CUTOUT.chamfer}`,
+      width: `${CUTOUT.chamferWidth}`,
     })
   ).value
   const bolt = (
@@ -430,12 +430,15 @@ export async function exitCriteriaV04Flow(rawCall: Call, dir: string): Promise<F
   )
   const chamfers = ops.filter((o) => o.kind === 'chamfer' && o.id !== cutoutChamfer.operationId)
   const cs = countersinkSizes(SCREWS.fastener)
-  expect(chamfers.map((o) => mm(o['diameter'] as Exact))).toEqual(Array(4).fill(cs.csDiameter))
+  // D45: a chamfer stores its width, (csDiameter − Ø) / 2 for a countersink
+  expect(chamfers.map((o) => mm(o['width'] as Exact))).toEqual(
+    Array(4).fill(expect.closeTo((cs.csDiameter - cs.diameter) / 2, 9)),
+  )
   expect(byId.get(cutoutChamfer.operationId)).toMatchObject({
     kind: 'chamfer',
     edgeOf: cutout.operationId,
   })
-  expect(mm(byId.get(cutoutChamfer.operationId)!['diameter'] as Exact)).toBe(CUTOUT.chamfer)
+  expect(mm(byId.get(cutoutChamfer.operationId)!['width'] as Exact)).toBe(CUTOUT.chamferWidth)
   const features = (await ok<FeatureList>('design.feature.list', { partId })).value
   // the instances keep their ids through the edit
   expect(ownedOf(features, boltClones.featureId)).toEqual(boltOps)

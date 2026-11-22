@@ -1,6 +1,7 @@
-// The chamfer operation (v0.4 C2): add/update with defaults, refusals, the edge following
-// (`on`, references), DFM (too deep, no tool), Clones of a drilling with its chamfer, and a
-// chamfer as an owned operation of a feature (F4 countersink = drilling + chamfer).
+// The chamfer operation (v0.4 C2, sized by width since D45): add/update with defaults, width or
+// depth, refusals, the edge following (`on`, references, a new edge keeps the width), DFM (too
+// deep, no tool), Clones of a drilling with its chamfer, and a chamfer as an owned operation of
+// a feature (F4 countersink = drilling + chamfer).
 // Spec: docs/modes/design-v0.4.md#chamfer-operation-v04-circular-edges,
 // docs/modes/design-v0.4.md#implementation-c2
 import { describe, expect, it } from 'vitest'
@@ -48,7 +49,7 @@ const chamfer = (s: DesignSetup, extra: object = {}) =>
   }>
 
 describe('design.chamfer.add / update', () => {
-  it('defaults: edge Ø + 1 mm, 90°, on the edge face; undoable', async () => {
+  it('defaults: width 0.5 mm (edge Ø + 1 mm), 90°, on the edge face; undoable', async () => {
     const s = await designSetup()
     await drill(s)
     const out = await chamfer(s)
@@ -60,17 +61,42 @@ describe('design.chamfer.add / update', () => {
       edgeOf: 'drill1',
       name: 'Chamfer 1',
     })
-    expect(exact(c['diameter'])).toBe(7)
+    expect(exact(c['width'])).toBe(0.5)
+    expect(c['diameter']).toBeUndefined()
     expect(c['angle']).toMatchObject({ source: '90°' })
     await s.undo()
     expect(s.part().operations.map((o) => o.id)).toEqual(['drill1'])
   })
 
-  it('inch parts widen by 1/32"', async () => {
+  it('inch parts default to 1/64" wide', async () => {
     const s = await designSetup({ units: 'inch' })
     await drill(s, { diameter: '1/4"' })
     await chamfer(s)
-    expect(exact(s.op('chamfer1')['diameter' as never])).toBeCloseTo((1 / 4 + 1 / 32) * 25.4, 9)
+    expect(exact(s.op('chamfer1')['width' as never])).toBeCloseTo(25.4 / 64, 9)
+  })
+
+  it('a depth instead of the width: the width follows through the angle', async () => {
+    const s = await designSetup()
+    await drill(s)
+    await chamfer(s, { depth: '1.5' })
+    // 90°: as wide as deep, exact
+    expect(s.op('chamfer1')['width' as never]).toMatchObject({
+      exact: { num: '3', den: '2' },
+    })
+    await s.run('design.chamfer.update', {
+      partId: s.partId,
+      operationId: 'chamfer1',
+      angle: '60',
+      depth: '2',
+    })
+    // width = depth × tan(30°), kept to 1 µm
+    expect(exact(s.op('chamfer1')['width' as never])).toBeCloseTo(2 * Math.tan(Math.PI / 6), 6)
+    const e = await s.fail(
+      'design.chamfer.update',
+      { partId: s.partId, operationId: 'chamfer1', width: '1', depth: '1' },
+      'model.invariant',
+    )
+    expect(e.issues.map((i) => i.rule)).toContain('notWithWidth')
   })
 
   it('a circle pocket is an edge too; the chamfer sits on its face', async () => {
@@ -81,7 +107,7 @@ describe('design.chamfer.add / update', () => {
       shape: { kind: 'circle', center: ['50', '30'], diameter: '12' },
       depth: '4',
     })
-    await chamfer(s, { edgeOf: 'pocket1', diameter: '14', angle: '60' })
+    await chamfer(s, { edgeOf: 'pocket1', width: '1', angle: '60' })
     expect(s.op('chamfer1')).toMatchObject({ on: 'facing1.floor', angle: { source: '60' } })
   })
 
@@ -96,7 +122,7 @@ describe('design.chamfer.add / update', () => {
       tabs: { count: '0' },
     })
     await chamfer(s, { edgeOf: 'profile1' })
-    expect(exact(s.op('chamfer1')['diameter' as never])).toBe(23)
+    expect(exact(s.op('chamfer1')['width' as never])).toBe(0.5)
     expect(s.op('chamfer1')).toMatchObject({ on: 'stock.top', edgeOf: 'profile1' })
     // through: the cone never reaches a bottom
     expect(warnings(s).map((w) => w.code)).not.toContain('dfm.chamferTooDeep')
@@ -114,7 +140,7 @@ describe('design.chamfer.add / update', () => {
     expect(e.issues.map((i) => i.rule)).toContain('chamferEdge')
   })
 
-  it('refuses a missing or non-circular edge, a small diameter and an angle out of range', async () => {
+  it('refuses a missing or non-circular edge, a width of 0 and an angle out of range', async () => {
     const s = await designSetup()
     await drill(s)
     await s.run('design.pocket.add', {
@@ -145,11 +171,11 @@ describe('design.chamfer.add / update', () => {
       rule(
         await s.fail(
           'design.chamfer.add',
-          { partId: s.partId, edgeOf: 'drill1', diameter: '5' },
+          { partId: s.partId, edgeOf: 'drill1', width: '0' },
           'model.invariant',
         ),
       ),
-    ).toContain('greaterThanEdge')
+    ).toContain('positive')
     expect(
       rule(
         await s.fail(
@@ -162,19 +188,25 @@ describe('design.chamfer.add / update', () => {
     expect(s.part().operations).toHaveLength(2)
   })
 
-  it('update: a new edge re-defaults the diameter; angle changes keep it', async () => {
+  it('update: the width stays when the angle, the edge or the edge Ø changes', async () => {
     const s = await designSetup()
     await drill(s)
     await drill(s, { center: ['60', '30'], diameter: '10' })
-    await chamfer(s, { diameter: '8' })
+    await chamfer(s, { width: '1' })
     await s.run('design.chamfer.update', { partId: s.partId, operationId: 'chamfer1', angle: '82' })
-    expect(exact(s.op('chamfer1')['diameter' as never])).toBe(8)
+    expect(exact(s.op('chamfer1')['width' as never])).toBe(1)
     await s.run('design.chamfer.update', {
       partId: s.partId,
       operationId: 'chamfer1',
       edgeOf: 'drill2',
     })
-    expect(exact(s.op('chamfer1')['diameter' as never])).toBe(11)
+    expect(exact(s.op('chamfer1')['width' as never])).toBe(1)
+    await s.run('design.drilling.update', {
+      partId: s.partId,
+      operationId: 'drill2',
+      diameter: '12',
+    })
+    expect(exact(s.op('chamfer1')['width' as never])).toBe(1)
   })
 
   it('follows its edge: moving the edge to another face moves the chamfer', async () => {
@@ -214,16 +246,18 @@ describe('design.chamfer.add / update', () => {
 })
 
 describe('chamfer DFM', () => {
-  it('dfm.chamferTooDeep when the cone reaches past a blind edge, with a suggested Ø', async () => {
+  it('dfm.chamferTooDeep when the cone reaches past a blind edge, with a suggested width', async () => {
     const s = await designSetup()
     await drill(s, { bottom: 'flat', depth: '1' })
-    await chamfer(s, { diameter: '10' })
+    await chamfer(s, { width: '2' })
     const w = warnings(s).find((x) => x.code === 'dfm.chamferTooDeep')
-    expect(w).toMatchObject({ operation: 'chamfer1', parameter: 'diameter' })
+    expect(w).toMatchObject({ operation: 'chamfer1', parameter: 'width' })
+    // 90°: at most as wide as the edge is deep
+    expect(w?.suggestion).toMatchObject({ relation: 'atMost', value: expect.closeTo(1, 9) })
     await s.run('design.chamfer.update', {
       partId: s.partId,
       operationId: 'chamfer1',
-      diameter: '7',
+      width: '0.5',
     })
     expect(warnings(s).some((x) => x.code === 'dfm.chamferTooDeep')).toBe(false)
   })
@@ -275,13 +309,13 @@ describe('chamfer with Clones', () => {
       kind: 'chamfer',
       edgeOf: 'clones1_2_drill1',
     })
-    // the source follows: a new diameter reaches the instance
+    // the source follows: a new width reaches the instance
     await s.run('design.chamfer.update', {
       partId: s.partId,
       operationId: 'chamfer1',
-      diameter: '8',
+      width: '1',
     })
-    expect(exact(s.op('clones1_2_chamfer1')['diameter' as never])).toBe(8)
+    expect(exact(s.op('clones1_2_chamfer1')['width' as never])).toBe(1)
     // instances are read-only
     await s.fail(
       'design.chamfer.update',
@@ -383,7 +417,10 @@ const sinkSpec: FeatureCommandSpec<typeof sinkParams, Sink> = {
           kind: 'chamfer' as const,
           on: p.on,
           edgeOf: ctx.ownedId('drill'),
-          diameter: p.sinkDiameter,
+          width: Quantity.parse(
+            `${(p.sinkDiameter.canonical - p.diameter.canonical) / 2}`,
+            fieldContext('length', ctx.units),
+          ).unwrap(),
           angle: Quantity.parse('90°', fieldContext('angle', ctx.units)).unwrap(),
           stepdown: None,
         },
@@ -410,6 +447,6 @@ describe('chamfer as an owned operation', () => {
       featureRole: 'sink',
     })
     await s.run('design.sink.update', { partId: s.partId, featureId: 'sink1', sinkDiameter: '10' })
-    expect(exact(s.op('sink1_sink')['diameter' as never])).toBe(10)
+    expect(exact(s.op('sink1_sink')['width' as never])).toBe(2.5)
   })
 })

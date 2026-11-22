@@ -1,6 +1,6 @@
 // The hole inspector's section illustration (v0.4 U2), pure: the cut through the hole axis at true
 // proportions, drawn from the entered values – face, the stock below it (to its bottom for a
-// through hole, else cut by a break line under the deepest point), the bore, the counterbore step
+// through hole, else fading out under the deepest point, D45), the bore, the counterbore step
 // or the countersink cone (its terraces when stepped, F7), the drill point, and with a fastener the screw's head and shank as a
 // dashed silhouette (a picture of the fit, not geometry). One measured part per size field, for
 // SketchView to highlight. Values are mm (resolved quantities); `units` only formats the chips and
@@ -130,8 +130,8 @@ export function holeSection(values: HoleSectionValues, units: UnitSystem): Sketc
   const tip = values.bottom === 'drillPoint' ? r / Math.tan(rad(POINT_ANGLE / 2)) : 0
   const deepest = depth === undefined ? undefined : depth + tip
   const stock = ok(values.stockDepth) && values.stockDepth > boreTop ? values.stockDepth : undefined
-  // through: to the stock's bottom; blind: a break line under the deepest point (or the stock
-  // bottom when it is that close)
+  // through: to the stock's bottom; blind: fading out under the deepest point (or the stock
+  // bottom when it is that close); `broken` = the stock runs on beyond the drawing
   let bottomY: number
   let broken: boolean
   if (deepest === undefined) {
@@ -203,21 +203,10 @@ export function holeSection(values: HoleSectionValues, units: UnitSystem): Sketc
   const W = Math.max(outer * 1.7, outer + height * 0.9)
   const mirror = (pts: readonly SketchPoint[]) => pts.map(([x, y]): SketchPoint => [0 - x || 0, y])
   const primitives: SketchPrimitive[] = []
-  const zig = height * 0.06
-  const breakLine: SketchPoint[] = [
+  const bottomEdge: SketchPoint[] = [
     [W, bottomY],
-    [W * 0.55 + zig, bottomY],
-    [W * 0.55, bottomY - zig],
-    [W * 0.55 - zig, bottomY + zig],
-    [W * 0.55 - 2 * zig, bottomY],
     [-W, bottomY],
   ]
-  const bottomEdge: SketchPoint[] = broken
-    ? breakLine
-    : [
-        [W, bottomY],
-        [-W, bottomY],
-      ]
   if (depth === undefined) {
     // two pieces either side of the bore
     const piece = (side: 1 | -1): SketchPoint[] => {
@@ -229,15 +218,17 @@ export function holeSection(values: HoleSectionValues, units: UnitSystem): Sketc
     primitives.push({ kind: 'material', points: piece(-1) })
     primitives.push({ kind: 'line', style: 'edge', points: right })
     primitives.push({ kind: 'line', style: 'edge', points: mirror(right) })
-    for (const side of [1, -1] as const) {
-      const kept = bottomEdge.filter(([x]) => side * x >= r)
-      const clip: SketchPoint = [side * r, bottomY]
-      primitives.push({
-        kind: 'line',
-        style: broken ? 'break' : 'edge',
-        points: side === 1 ? [...kept, clip] : [clip, ...kept],
-      })
-    }
+    // the stock's bottom face; running on beyond the drawing, no line: it fades out (below)
+    if (!broken)
+      for (const side of [1, -1] as const) {
+        const kept = bottomEdge.filter(([x]) => side * x >= r)
+        const clip: SketchPoint = [side * r, bottomY]
+        primitives.push({
+          kind: 'line',
+          style: 'edge',
+          points: side === 1 ? [...kept, clip] : [clip, ...kept],
+        })
+      }
   } else {
     // one piece under and around the bore
     const profile = [...mirror(right), ...right.slice(0, -1).toReversed()]
@@ -246,7 +237,7 @@ export function holeSection(values: HoleSectionValues, units: UnitSystem): Sketc
       points: [[-W, 0], ...profile, [W, 0], ...bottomEdge],
     })
     primitives.push({ kind: 'line', style: 'edge', points: profile })
-    primitives.push({ kind: 'line', style: broken ? 'break' : 'edge', points: bottomEdge })
+    if (!broken) primitives.push({ kind: 'line', style: 'edge', points: bottomEdge })
   }
   // the face, either side of the mouth
   primitives.push({
@@ -270,10 +261,22 @@ export function holeSection(values: HoleSectionValues, units: UnitSystem): Sketc
     style: 'axis',
     points: [
       [0, top - height * 0.06],
-      [0, bottomY + height * 0.04],
+      [0, bottomY + (broken ? 0 : height * 0.04)],
     ],
   })
   for (const s of silhouette) primitives.push({ kind: 'line', style: 'silhouette', points: s })
+  // the stock runs on below the drawing: fade it out instead of a break line (D45), from below the
+  // deepest point (a blind hole) or the head's seat (a through hole cut short)
+  if (broken) {
+    const above = deepest ?? boreTop
+    primitives.push({
+      kind: 'fade',
+      x0: -W,
+      x1: W,
+      from: above + (bottomY - above) * (deepest === undefined ? 0.4 : 0.2),
+      to: bottomY,
+    })
+  }
 
   // ── measured parts ──
   const measure = (

@@ -25,6 +25,16 @@
   stroke: none;
 }
 
+/* stock running on beyond the drawing fades into the box's background (D45) */
+.fade {
+  stroke: none;
+  pointer-events: none;
+}
+
+.fadeStop {
+  stop-color: var(--sketch-bg, var(--bg-field));
+}
+
 .line {
   stroke: var(--text-muted);
   stroke-width: 1px;

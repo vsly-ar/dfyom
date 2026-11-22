@@ -374,8 +374,8 @@ describe('countersink (F4)', () => {
       featureId: 'hole1',
       featureRole: 'countersink',
     })
-    // csDiameter = dk 6.72 + 2 × headSink 0.2
-    expect(exact(cs['diameter'])).toBeCloseTo(7.12, 12)
+    // csDiameter = dk 6.72 + 2 × headSink 0.2; the chamfer stores its width (7.12 − 3.4) / 2
+    expect(exact(cs['width'])).toBeCloseTo(1.86, 12)
     expect(feature(s)).toMatchObject({
       type: 'countersink',
       csDiameter: { source: '7.12 mm' },
@@ -438,7 +438,8 @@ describe('countersink (F4)', () => {
     await s.run('design.hole.update', { partId: s.partId, featureId: 'hole1', type: 'countersink' })
     expect(ids(s)).toEqual(['hole1_drill', 'hole1_countersink'])
     expect(s.op('hole1_drill')).toMatchObject({ toolLocked: true, on: 'stock.top' })
-    expect(exact(opField(s, 'hole1_countersink', 'diameter'))).toBeCloseTo(9.36, 12)
+    // width = (csDiameter 9.36 − Ø 4.5) / 2
+    expect(exact(opField(s, 'hole1_countersink', 'width'))).toBeCloseTo(2.43, 12)
     const out = (await s.run('design.hole.update', {
       partId: s.partId,
       featureId: 'hole1',
@@ -475,10 +476,11 @@ describe('countersink (F4)', () => {
       diameter: '4',
       csDiameter: 'pocket1.floor.z - stock.bottom.z - 7',
     })
-    expect(exact(opField(s, 'hole1_countersink', 'diameter'))).toBe(8)
+    // width = (csDiameter − Ø 4) / 2
+    expect(exact(opField(s, 'hole1_countersink', 'width'))).toBe(2)
     await s.run('design.pocket.update', { partId: s.partId, operationId: 'pocket1', depth: '6' })
     expect(exact(feature(s)['csDiameter'])).toBe(7)
-    expect(exact(opField(s, 'hole1_countersink', 'diameter'))).toBe(7)
+    expect(exact(opField(s, 'hole1_countersink', 'width'))).toBe(1.5)
     // a recalculation that breaks the countersink fails at its field
     const e = await s.fail(
       'design.pocket.update',
