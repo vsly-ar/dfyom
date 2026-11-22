@@ -605,7 +605,9 @@ const ResolvedSchema = z
     smallestInsideRadius: z
       .number()
       .optional()
-      .describe('Smallest corner radius a tool meets inside the region (0 = sharp); mm'),
+      .describe(
+        'Smallest inside corner radius with the region cut as a pocket (0 = sharp corner); mm',
+      ),
   })
   .describe('The shape resolved in its frame')
 const IssueSchema = z.object({
