@@ -13,6 +13,7 @@ import {
 } from '../design/tool-commands'
 import { REFERENCE_COMMANDS, REFERENCE_QUERIES } from '../design/reference-commands'
 import { SHAPE_COMMANDS, SHAPE_QUERIES } from '../design/shape-commands'
+import { FASTENER_QUERIES } from '../design/fastener/commands'
 import { FEEDS_SPEEDS_QUERIES } from '../feeds-speeds/commands'
 import { LIBRARY_COMMANDS, LIBRARY_QUERIES } from '../library/commands'
 import { PLAN_COMMANDS, PLAN_QUERIES, planDraftFollow } from '../plan/commands'
@@ -92,6 +93,7 @@ export const APP_SCOPE_COMMANDS: readonly AnyCommand[] = [
 export const APP_SCOPE_QUERIES: readonly QueryDef[] = [
   ...LIBRARY_QUERIES,
   ...FEEDS_SPEEDS_QUERIES,
+  ...FASTENER_QUERIES,
   ...LIFECYCLE_QUERIES,
 ]
 /**
@@ -232,14 +234,14 @@ export function createAppScopeRegistry(): AppResult<Registry> {
 }
 
 /**
- * Project scope plus the library and feeds-and-speeds entries on one dispatcher, for tests that
+ * Project scope plus the library, feeds-and-speeds and fastener entries on one dispatcher, for tests that
  * add library items and use them in a project without an app host. Not used by the app (it runs
  * the two scopes on separate dispatchers); the project lifecycle needs a host and is left out.
  */
 export function createAppRegistry(): AppResult<Registry> {
   return createRegistry({
     commands: [...PROJECT_COMMANDS, ...LIBRARY_COMMANDS],
-    queries: [...PROJECT_QUERIES, ...LIBRARY_QUERIES, ...FEEDS_SPEEDS_QUERIES],
+    queries: [...PROJECT_QUERIES, ...LIBRARY_QUERIES, ...FEEDS_SPEEDS_QUERIES, ...FASTENER_QUERIES],
     ...APPLY_DEFS,
   })
 }
