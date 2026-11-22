@@ -79,7 +79,7 @@ export interface FakeBridge extends PreloadApi {
   /** Push a machine status, as main does on every change (run mode). */
   emitRunStatus(status: RunStatus): void
   setLocalHttp(state: LocalHttpState): void
-  /** Push a part evaluation (main's mesh push); `get` answers the last one per part. */
+  /** Push a part evaluation (main's mesh push); `get` / `getPlan` answer the last one per subject. */
   emitEvaluation(view: PartEvaluationView): void
   emitMenu(action: MenuAction): void
   /** Answers of the native file dialogs (null = cancelled, the default). */
@@ -209,6 +209,7 @@ export function createFakeBridge(initial: AppSettings = DEFAULT_SETTINGS): FakeB
     },
     evaluation: {
       get: (partId) => Promise.resolve(evaluations.get(partId) ?? null),
+      getPlan: (planId) => Promise.resolve(evaluations.get(`plan:${planId}`) ?? null),
       onChange: evaluationPush.on,
     },
     files: {
@@ -226,7 +227,7 @@ export function createFakeBridge(initial: AppSettings = DEFAULT_SETTINGS): FakeB
     saveDialogNames,
     exportDialogNames,
     emitEvaluation(view) {
-      evaluations.set(view.partId, view)
+      evaluations.set(view.planId === undefined ? view.partId : `plan:${view.planId}`, view)
       evaluationPush.emit(view)
     },
     emitMenu: menu.emit,

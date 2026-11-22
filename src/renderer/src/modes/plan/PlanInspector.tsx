@@ -1,7 +1,8 @@
 // Plan inspector (task 3.7): without a selection the plan (name, status, machine, all checks with a
 // link to their operation); a selected plan operation: the tool picker (library tools that pass
 // the checks, ranked, with their reasons: `plan.tool.suggest`), stickout and cutting preset, and
-// the strategy group (StrategyGroup.tsx, v0.2), the feeds-and-speeds card: one QuantityInput per
+// "Part (plan copy)" (PlanCopyGroup.tsx, plan-only edits, v0.2), the strategy group
+// (StrategyGroup.tsx, v0.2), the feeds-and-speeds card: one QuantityInput per
 // field showing the resolved value and where it came from (preset, calculator, strategy default,
 // or the user's override); the lock pins a value as an override, unlocking returns to the
 // recommendation; "Show calculation" (FeedsCalculation.tsx). Commits are one command each; checks
@@ -48,6 +49,7 @@ import {
 import { FeedsCalculation } from './FeedsCalculation'
 import { fieldMessages } from './fieldMessages'
 import { NewToolDialog } from './NewToolDialog'
+import { PlanCopyGroup } from './PlanCopyGroup'
 import { useCancelGesture } from '../../shell/hooks'
 import { usePlanCommand, usePlanData } from './plan-store'
 import styles from './Plan.module.css'
@@ -108,6 +110,7 @@ export function PlanInspector({ doc }: { doc: ProjectDoc }): React.JSX.Element {
     <OperationInspector
       key={op.id}
       plan={plan}
+      doc={doc}
       op={op}
       view={view}
       units={doc.unitSystem}
@@ -251,12 +254,14 @@ const AUTO = '__auto'
 const SHOWN_FIELDS = new Set<string>(['tool', 'stickout', 'presetName'])
 
 function OperationInspector({
+  doc,
   plan,
   op,
   view,
   units,
   findings,
 }: {
+  doc: ProjectDoc
   plan: PlanDTO
   op: PlanOperationDTO
   view: PlanOperationView | undefined
@@ -439,6 +444,8 @@ function OperationInspector({
             </Field>
           ) : null}
         </section>
+
+        <PlanCopyGroup doc={doc} plan={plan} op={op} />
 
         {current !== null && view !== undefined ? (
           <StrategyGroup

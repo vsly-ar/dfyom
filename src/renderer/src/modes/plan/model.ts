@@ -4,6 +4,9 @@
 // Commands do the checking; this only builds what the UI shows and sends.
 // Doc: docs/modes/plan-v0.1.md#commands-and-queries-v01, docs/conventions/ui.md#plan-mode-task-37
 import type { OperationKind } from '../../../../core/design/part.dto'
+import { SurfaceTable } from '../../../../core/design/surfaces'
+import { loadPlanDTO } from '../../../../core/plan/plan'
+import { sameValue } from '../../../../core/plan/validity'
 import type { PlanWarning } from '../../../../core/plan/checks'
 import type { FeedField, PlanDTO, PlanStatus } from '../../../../core/plan/plan.dto'
 import { STRATEGY_KEYS, type StrategyKey } from '../../../../core/plan/strategy'
@@ -14,6 +17,7 @@ import type { QuantityKind, UnitId } from '../../../../core/quantity/units'
 import type { Toolpath } from '../../../../core/toolpath/model'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import type { FeedSource, ToolpathState } from '../../messages/plan'
+import type { DesignPart } from '../design/model'
 
 /** Plans the picker offers: every plan of the project, archived ones last. */
 export function pickerPlans(doc: ProjectDoc): PlanDTO[] {
@@ -36,6 +40,60 @@ export const allows = (plan: PlanDTO, command: string): boolean =>
 
 /** Plan edits (tool, feeds, setup, order) are allowed in draft and settled design only. */
 export const editable = (plan: PlanDTO): boolean => allows(plan, 'plan.operation.update')
+
+// ── the plan's part (plan copy, snapshot scene) ───────────────────────────────────────────
+
+const partCache = new WeakMap<PlanDTO, DesignPart>()
+
+/**
+ * The plan's part as the shared Design field components read it: its design snapshot with the
+ * plan-only edits, on the plan's stock copy (docs/modes/plan-v0.2.md#plan-only-edits-and-the-snapshot-scene).
+ * Memoized per plan record (records are immutable; `doc` is not read by the field components).
+ */
+export function planPart(doc: ProjectDoc, plan: PlanDTO): DesignPart {
+  const hit = partCache.get(plan)
+  if (hit !== undefined) return hit
+  const r = loadPlanDTO(plan, doc.unitSystem, 'plan UI')
+  const loaded = r.isOk()
+    ? {
+        dto: plan.design.part,
+        part: r.unwrap().part,
+        stock: r.unwrap().stock,
+        units: doc.unitSystem,
+      }
+    : undefined
+  const part: DesignPart = {
+    doc,
+    units: doc.unitSystem,
+    dto: plan.design.part,
+    loaded,
+    table:
+      loaded === undefined ? undefined : SurfaceTable.build(loaded.part.operations, loaded.stock),
+  }
+  partCache.set(plan, part)
+  return part
+}
+
+const editedCache = new WeakMap<PlanDTO, ReadonlySet<string>>()
+
+/**
+ * Design operations of the plan's part that differ from the design as taken (plan-only edits),
+ * memoized per plan record (a stable set for the viewport tint).
+ */
+export function editedOperations(plan: PlanDTO): ReadonlySet<string> {
+  const hit = editedCache.get(plan)
+  if (hit !== undefined) return hit
+  const out = new Set<string>()
+  for (const op of plan.design.part.operations) {
+    const taken = plan.design.taken.operations.find((o) => o.id === op.id)
+    if (!sameValue(taken, op)) out.add(op.id)
+  }
+  editedCache.set(plan, out)
+  return out
+}
+
+/** How many plan-only edits a rebuild would discard (the confirmation names it). */
+export const planEditCount = (plan: PlanDTO): number => editedOperations(plan).size
 
 /** The statuses the picker offers: the current one and its transitions. */
 export function statusChoices(plan: PlanDTO): PlanStatus[] {

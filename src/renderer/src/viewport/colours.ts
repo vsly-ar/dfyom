@@ -23,6 +23,8 @@ export const PALETTE_TOKENS = {
   axisZ: '--vp-axis-z',
   /** The error marker at a failing operation (task 3.6). */
   danger: '--danger',
+  /** Tint of operations edited in the plan (snapshot scene, task E3b). */
+  info: '--info',
   // run scene (task 3.12): toolpath playback and the tool marker
   feed: '--vp-feed',
   rapid: '--vp-rapid',
@@ -98,6 +100,8 @@ export const MIX = {
   pickDimmed: 0.6,
   /** Start of the selection pulse (`--motion-emphasis`), easing back to `selected`. */
   pulse: 0.6,
+  /** Operations edited in the plan (`--info`, a light tint: never the accent or a warning). */
+  tinted: 0.3,
 } as const
 
 export interface SurfaceState {
@@ -111,6 +115,8 @@ export interface SurfaceState {
   readonly outdated?: boolean | undefined
   /** Selection pulse, 1 at a new selection easing to 0 (ui.md decision 24); 0 = none. */
   readonly pulse?: number | undefined
+  /** Operations tinted `--info`: edited in the plan (plan scene, task E3b). */
+  readonly tinted?: ReadonlySet<string> | null | undefined
 }
 
 /**
@@ -131,6 +137,7 @@ export function surfaceColour(surface: SurfaceId, state: SurfaceState, palette: 
     return mix(base, palette.selected, MIX.selected + p * (MIX.pulse - MIX.selected))
   }
   if (state.hovered != null && surfaceOwner(state.hovered) === owner) return palette.hover
+  if (state.tinted?.has(owner)) return mix(base, palette.info, MIX.tinted)
   return base
 }
 

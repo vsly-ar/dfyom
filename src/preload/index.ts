@@ -70,6 +70,8 @@ const api: PreloadApi = {
   evaluation: {
     get: (partId) =>
       ipcRenderer.invoke(IPC.evaluationGet, partId) as Promise<PartEvaluationView | null>,
+    getPlan: (planId) =>
+      ipcRenderer.invoke(IPC.evaluationPlanGet, planId) as Promise<PartEvaluationView | null>,
     onChange: (listener) => on<PartEvaluationView>(IPC.evaluationChanged, listener),
   },
   files: {

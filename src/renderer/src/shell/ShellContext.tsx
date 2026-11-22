@@ -3,7 +3,12 @@
 import { createContext, useContext, useEffect, useSyncExternalStore, type ReactNode } from 'react'
 import { useStore } from 'zustand'
 import type { PreloadApi } from '../../../shared/preload-api'
-import { createEvaluations, type Evaluations, type PartEvaluationEntry } from '../state/evaluations'
+import {
+  createEvaluations,
+  planSubject,
+  type Evaluations,
+  type PartEvaluationEntry,
+} from '../state/evaluations'
 import { createReplica, type Replica, type ReplicaState } from '../state/replica'
 import { createSettingsStore, type SettingsState, type SettingsStore } from '../state/settings'
 import { createUiStore, type UiState, type UiStore } from '../state/ui-store'
@@ -79,4 +84,11 @@ export function usePartEvaluation(partId: string | undefined): PartEvaluationEnt
   const { evaluations } = useShell()
   const all = useSyncExternalStore(evaluations.subscribe, evaluations.getState)
   return partId === undefined ? undefined : all.get(partId)
+}
+
+/** The evaluation of a plan's part (snapshot scene, task E3b), or undefined before it is known. */
+export function usePlanEvaluation(planId: string | undefined): PartEvaluationEntry | undefined {
+  const { evaluations } = useShell()
+  const all = useSyncExternalStore(evaluations.subscribe, evaluations.getState)
+  return planId === undefined ? undefined : all.get(planSubject(planId))
 }

@@ -1,49 +1,38 @@
-// Design inspector (task 3.6): the selected operation's parameters, grouped as in the parameter
-// tables of design.md (Shape, Position, Depth, Corners, Hole, Slot, Tabs), each a QuantityInput
-// whose commit is one design command (one undo step); `on` and formula references can be picked
+// Design inspector (task 3.6): the selected operation's parameters (OperationFields.tsx, shared
+// with the plan copy), grouped as in the parameter tables of design.md (Shape, Position, Depth,
+// Corners, Hole, Slot, Tabs), each a QuantityInput whose commit is one design command (one undo
+// step); `on` and formula references can be picked
 // in the viewport (pick mode) or chosen from a list. Without a selection: the part (name, stock,
 // general tolerance) and all its warnings. Command errors show at their field (or at the top);
 // DFM warnings at the blamed parameter, with "Apply" for a suggestion.
 // Doc: docs/conventions/ui.md#panels-and-inspectors, #quantity-and-expression-input,
 // #selection-and-picking, #errors, #warnings-and-dfm; docs/modes/design.md#operations-v01
-import { Crosshair } from 'lucide-react'
 import { useState } from 'react'
-import type { FieldKind } from '../../../../core/design/operation'
 import type { OperationDTO } from '../../../../core/design/part.dto'
 import type { DfmWarning } from '../../../../core/geometry/model'
-import type { UnitSystem } from '../../../../core/project/document'
-import type { QuantityKind } from '../../../../core/quantity/units'
-import type { AppErrorData, Issue } from '../../../../shared/errors/app-error'
+import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { designMessages } from '../../messages/design'
 import { dfmMessages } from '../../messages/dfm'
 import { useCancelGesture } from '../../shell/hooks'
-import { useUi } from '../../shell/ShellContext'
 import {
   ErrorMessage,
   Field,
-  FieldIcon,
   FieldInput,
-  IconButton,
   PanelHeader,
   QuantityInput,
-  SegmentedControl,
-  Select,
   StatusChip,
   WarningList,
-  type FieldIconName,
-  type FieldMessage,
   type WarningView,
 } from '../../ui'
 import styles from './Design.module.css'
+import { defaultUnit, quantityOf, updateArgs, type DesignPart } from './model'
 import {
-  defaultUnit,
-  quantityAt,
-  quantityOf,
-  shapeKindArgs,
-  surfaceChoices,
-  updateArgs,
-  type DesignPart,
-} from './model'
+  OperationFields,
+  placeErrors,
+  warningPath,
+  type FieldError,
+  type OperationFieldsContext,
+} from './OperationFields'
 import {
   useCommand,
   useDesignEvaluation,
@@ -62,19 +51,6 @@ export const warningLabels = {
   show: dfmMessages.show,
   hide: dfmMessages.hide,
   tier: dfmMessages.severity,
-}
-
-const sentence = (s: string) => (s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1))
-
-/** The field a warning is shown at (a shape or center warning at its first field). */
-function warningPath(w: DfmWarning, op: OperationDTO): string | undefined {
-  const p = w.parameter
-  if (p === undefined) return undefined
-  if (p === 'center') return 'center.0'
-  if (p === 'tabs') return 'tabs.count'
-  if (p === 'shape' && 'shape' in op)
-    return op.shape.kind === 'circle' ? 'shape.diameter' : 'shape.length'
-  return p
 }
 
 /** View of one DFM warning for the warning lists. */
@@ -257,29 +233,6 @@ function NameField({
 
 // ── operation ─────────────────────────────────────────────────────────────────────────────
 
-interface FieldError {
-  readonly path: string
-  readonly text: string
-}
-
-interface OperationContext {
-  readonly part: DesignPart
-  readonly op: OperationDTO
-  readonly index: number
-  readonly units: UnitSystem
-  readonly warnings: readonly DfmWarning[]
-  readonly errors: readonly FieldError[]
-  /** One update command; `gesture` for a live adjust-popover step. */
-  commit(path: string, source: string, gesture?: string): void
-  cancelGesture(gesture: string): Promise<boolean>
-}
-
-const QUANTITY_KIND: Record<FieldKind, QuantityKind> = {
-  length: 'length',
-  angle: 'angle',
-  scalar: 'scalar',
-}
-
 function OperationInspector({
   part,
   op,
@@ -293,7 +246,6 @@ function OperationInspector({
   const cancelGesture = useCancelGesture()
   const [errors, setErrors] = useState<readonly FieldError[]>([])
   const [summary, setSummary] = useState<AppErrorData | undefined>(undefined)
-  const index = part.dto.operations.indexOf(op)
   const opWarnings = warnings.warnings.filter((w) => w.operation === op.id)
 
   const send = async (
@@ -306,32 +258,19 @@ function OperationInspector({
       { partId: part.dto.id, operationId: op.id, ...args },
       gesture === undefined ? undefined : { gesture },
     )
-    if (r.ok) {
-      setErrors([])
-      setSummary(undefined)
-      return
-    }
-    // issues at a field of this operation show there; the rest at the top (ui.md#errors)
-    const mine: FieldError[] = []
-    const rest: Issue[] = []
-    for (const issue of r.error.issues) {
-      const p = issue.path.join('.')
-      const at = p.length > 0 && !p.startsWith('operations.') ? p : path
-      if (at !== undefined && issue.path[0] !== 'operations')
-        mine.push({ path: at, text: sentence(issue.message) })
-      else rest.push(issue)
-    }
-    setErrors(mine)
-    setSummary(mine.length === 0 || rest.length > 0 ? r.error : undefined)
+    const placed = r.ok ? undefined : placeErrors(r.error, path)
+    setErrors(placed?.errors ?? [])
+    setSummary(placed?.summary)
   }
-  const ctx: OperationContext = {
+  const ctx: OperationFieldsContext = {
     part,
     op,
-    index,
     units: part.units,
     warnings: opWarnings,
     errors,
-    commit: (path, source, gesture) => void send(updateArgs(op, path, source), path, gesture),
+    readOnly: false,
+    pickable: true,
+    send: (args, path, gesture) => void send(args, path, gesture),
     cancelGesture,
   }
   const unplaced = opWarnings.filter((w) => warningPath(w, op) === undefined)
@@ -342,134 +281,7 @@ function OperationInspector({
       <div className={styles['fields']}>
         {summary ? <ErrorMessage error={summary} message={t.commandFailed} /> : null}
         <NameField label={t.name} name={op.name} onCommit={(name) => void send({ name }, 'name')} />
-        {op.kind === 'facing' ? (
-          <Group title={t.groups.depth}>
-            <ParamField ctx={ctx} path="depth" label={t.depth} kind="length" icon="depth" />
-          </Group>
-        ) : null}
-        {op.kind === 'pocket' ? (
-          <>
-            <ShapeGroup ctx={ctx} send={send} />
-            <Group title={t.groups.depth}>
-              <OnField ctx={ctx} />
-              <ParamField ctx={ctx} path="depth" label={t.depth} kind="length" icon="depth" />
-            </Group>
-            <Group title={t.groups.corners}>
-              {op.shape.kind === 'rectangle' ? (
-                <ParamField
-                  ctx={ctx}
-                  path="shape.cornerRadius"
-                  label={t.cornerRadius}
-                  kind="length"
-                  icon="corner"
-                />
-              ) : null}
-              <ParamField
-                ctx={ctx}
-                path="floorRadius"
-                label={t.floorRadius}
-                kind="length"
-                icon="corner"
-              />
-            </Group>
-          </>
-        ) : null}
-        {op.kind === 'drilling' ? (
-          <>
-            <Group title={t.groups.position}>
-              <ParamField ctx={ctx} path="center.0" label={t.centerX} kind="length" icon="length" />
-              <ParamField ctx={ctx} path="center.1" label={t.centerY} kind="length" icon="width" />
-              <OnField ctx={ctx} />
-            </Group>
-            <Group title={t.groups.hole}>
-              <ParamField ctx={ctx} path="diameter" label={t.diameter} kind="length" icon="width" />
-              <Field label={t.bottom}>
-                <Select
-                  options={(['through', 'flat', 'drillPoint'] as const).map((b) => ({
-                    value: b,
-                    label: t.bottoms[b],
-                  }))}
-                  value={op.bottom}
-                  onValueChange={(bottom) =>
-                    void send(
-                      {
-                        bottom,
-                        ...(bottom !== 'through' && op.depth === undefined
-                          ? { depth: op.diameter.source }
-                          : {}),
-                      },
-                      'bottom',
-                    )
-                  }
-                />
-              </Field>
-              {op.bottom !== 'through' ? (
-                <ParamField ctx={ctx} path="depth" label={t.depth} kind="length" icon="depth" />
-              ) : null}
-              {op.bottom === 'drillPoint' ? (
-                <ParamField
-                  ctx={ctx}
-                  path="pointAngle"
-                  label={t.pointAngle}
-                  kind="angle"
-                  icon="chamfer"
-                />
-              ) : null}
-            </Group>
-          </>
-        ) : null}
-        {op.kind === 'profile' ? (
-          <>
-            <ShapeGroup ctx={ctx} send={send}>
-              <div className={styles['choice']}>
-                <span className={styles['caption']} aria-hidden="true">
-                  {t.side}
-                </span>
-                <SegmentedControl<'outside' | 'inside'>
-                  label={t.side}
-                  options={(['outside', 'inside'] as const).map((s) => ({
-                    value: s,
-                    label: t.sides[s],
-                  }))}
-                  value={op.side}
-                  onValueChange={(side) => void send({ side }, 'side')}
-                />
-              </div>
-            </ShapeGroup>
-            <Group title={t.groups.slot}>
-              <ParamField
-                ctx={ctx}
-                path="slotWidth"
-                label={t.slotWidth}
-                kind="length"
-                icon="width"
-              />
-            </Group>
-            <Group title={t.groups.tabs}>
-              <ParamField
-                ctx={ctx}
-                path="tabs.count"
-                label={t.tabsCount}
-                kind="scalar"
-                icon="tabs"
-              />
-              <ParamField
-                ctx={ctx}
-                path="tabs.width"
-                label={t.tabsWidth}
-                kind="length"
-                icon="length"
-              />
-              <ParamField
-                ctx={ctx}
-                path="tabs.thickness"
-                label={t.tabsThickness}
-                kind="length"
-                icon="depth"
-              />
-            </Group>
-          </>
-        ) : null}
+        <OperationFields ctx={ctx} />
         {unplaced.length > 0 ? (
           <WarningList
             labels={warningLabels}
@@ -477,205 +289,6 @@ function OperationInspector({
           />
         ) : null}
       </div>
-    </div>
-  )
-}
-
-function Group({
-  title,
-  children,
-}: {
-  title: string
-  children: React.ReactNode
-}): React.JSX.Element {
-  return (
-    <section className={styles['group']} aria-label={title}>
-      <h3 className={styles['groupTitle']}>{title}</h3>
-      {children}
-    </section>
-  )
-}
-
-function ShapeGroup({
-  ctx,
-  send,
-  children,
-}: {
-  ctx: OperationContext
-  send: (args: Record<string, unknown>, path: string) => Promise<void>
-  children?: React.ReactNode
-}): React.JSX.Element | null {
-  const op = ctx.op
-  if (!('shape' in op)) return null
-  const shape = op.shape
-  return (
-    <Group title={t.groups.shape}>
-      {children}
-      <div className={styles['choice']}>
-        <span className={styles['caption']} aria-hidden="true">
-          {t.shapeKind}
-        </span>
-        <SegmentedControl<'rectangle' | 'circle'>
-          label={t.shapeKind}
-          options={(['rectangle', 'circle'] as const).map((k) => ({
-            value: k,
-            label: t.shapes[k],
-          }))}
-          value={shape.kind}
-          onValueChange={(kind) => {
-            if (kind !== shape.kind) void send({ shape: shapeKindArgs(shape, kind) }, 'shape')
-          }}
-        />
-      </div>
-      <ParamField ctx={ctx} path="shape.center.0" label={t.centerX} kind="length" icon="length" />
-      <ParamField ctx={ctx} path="shape.center.1" label={t.centerY} kind="length" icon="width" />
-      {shape.kind === 'rectangle' ? (
-        <>
-          <ParamField ctx={ctx} path="shape.length" label={t.length} kind="length" icon="length" />
-          <ParamField ctx={ctx} path="shape.width" label={t.width} kind="length" icon="width" />
-        </>
-      ) : (
-        <ParamField ctx={ctx} path="shape.diameter" label={t.diameter} kind="length" icon="width" />
-      )}
-      {op.kind === 'profile' && shape.kind === 'rectangle' ? (
-        <ParamField
-          ctx={ctx}
-          path="shape.cornerRadius"
-          label={t.cornerRadius}
-          kind="length"
-          icon="corner"
-        />
-      ) : null}
-    </Group>
-  )
-}
-
-/** One quantity parameter: stored value, commit = one update command, warnings and errors here. */
-function ParamField({
-  ctx,
-  path,
-  label,
-  kind,
-  icon,
-}: {
-  ctx: OperationContext
-  path: string
-  label: string
-  kind: FieldKind
-  icon: FieldIconName
-}): React.JSX.Element {
-  const pick = useUi((s) => s.pick)
-  const setPick = useUi((s) => s.setPick)
-  const { part, op, index } = ctx
-  const table = part.table
-  const references = table
-    ? surfaceChoices(part.dto, table, index, false).map((c) => ({
-        id: `${c.id}.z`,
-        label: c.label,
-      }))
-    : []
-  const name = (id: string) => part.dto.operations.find((o) => o.id === id)?.name ?? id
-  const messages: FieldMessage[] = [
-    ...ctx.errors
-      .filter((e) => e.path === path)
-      .map((e, i): FieldMessage => ({ id: `error-${i}`, severity: 'error', text: e.text })),
-    ...ctx.warnings
-      .filter((w) => warningPath(w, op) === path)
-      .map((w): FieldMessage => {
-        const source = dfmMessages.suggestionSource(w, part.units)
-        return {
-          id: `${w.code}:${w.parameter ?? ''}`,
-          severity: dfmMessages.tier(w),
-          text: dfmMessages.text(w, part.units, name),
-          ...(source !== undefined && w.suggestion && w.parameter === path
-            ? {
-                fix: {
-                  label: dfmMessages.apply(w.suggestion.relation, source),
-                  onApply: () => ctx.commit(path, source),
-                },
-              }
-            : {}),
-        }
-      }),
-  ]
-  const fieldId = `${op.id}:${path}`
-  return (
-    <QuantityInput
-      label={label}
-      kind={QUANTITY_KIND[kind]}
-      defaultUnit={defaultUnit(kind, ctx.units)}
-      value={quantityAt(op, path)}
-      onCommit={(q, gesture) => ctx.commit(path, q.source, gesture)}
-      onCancelGesture={ctx.cancelGesture}
-      illustration={<FieldIcon name={icon} />}
-      messages={messages}
-      references={references}
-      picking={pick?.owner === fieldId}
-      {...(table ? { resolver: table.resolver(index) } : {})}
-      {...(table && kind === 'length'
-        ? {
-            onPick: (insert: (reference: string) => void) => {
-              setPick({
-                owner: fieldId,
-                field: label,
-                eligible: new Set(references.map((r) => r.id.slice(0, -2))),
-                onPick: (surface) => insert(`${surface}.z`),
-              })
-            },
-          }
-        : {})}
-    />
-  )
-}
-
-/** `on`: the surface the operation starts from – a list of eligible surfaces, or pick it. */
-function OnField({ ctx }: { ctx: OperationContext }): React.JSX.Element | null {
-  const pick = useUi((s) => s.pick)
-  const setPick = useUi((s) => s.setPick)
-  const { part, op, index } = ctx
-  // the `on` of a facing or profile (a stock face) gets its control with face picking (task F1)
-  if ((op.kind !== 'pocket' && op.kind !== 'drilling') || part.table === undefined) return null
-  const choices = surfaceChoices(part.dto, part.table, index, true)
-  const owner = `${op.id}:on`
-  const picking = pick?.owner === owner
-  const messages: FieldMessage[] = [
-    ...ctx.errors
-      .filter((e) => e.path === 'on')
-      .map((e, i): FieldMessage => ({ id: `error-${i}`, severity: 'error', text: e.text })),
-    ...ctx.warnings
-      .filter((w) => w.parameter === 'on')
-      .map((w): FieldMessage => ({
-        id: w.code,
-        severity: dfmMessages.tier(w),
-        text: dfmMessages.text(w, part.units, (id) => id),
-      })),
-  ]
-  return (
-    <div className={styles['onRow']}>
-      <Field label={t.on} messages={messages}>
-        <Select
-          options={choices.map((c) => ({ value: c.id, label: t.surface(c.id, c.label) }))}
-          value={op.on}
-          onValueChange={(on) => ctx.commit('on', on)}
-        />
-      </Field>
-      <IconButton
-        label={t.pickOn}
-        shortcut="Alt+P"
-        icon={<Crosshair aria-hidden="true" />}
-        pressed={picking}
-        className={styles['pickButton']}
-        onClick={() =>
-          picking
-            ? setPick(null)
-            : setPick({
-                owner,
-                field: t.on,
-                eligible: new Set(choices.map((c) => c.id)),
-                onPick: (surface) => ctx.commit('on', surface),
-              })
-        }
-      />
     </div>
   )
 }

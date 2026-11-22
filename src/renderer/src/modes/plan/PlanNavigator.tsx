@@ -1,6 +1,7 @@
 // Plan navigator (task 3.7; ui.md#app-shell: "Plan: plan picker, plan status, setup, plan
 // operations in machining order"): create a plan of the part; pick, duplicate or remove plans
-// (remove confirmed); the plan's status and its stale notices with rebuild / update from library;
+// (remove confirmed); the plan's status and its stale notices with rebuild / update from library
+// (a rebuild or back to draft that discards plan-only edits is confirmed, naming their count);
 // the machine; the setup's work zero and safe heights; the plan operations in machining order
 // (select, move by buttons and Alt+↑/↓, tool, checks, toolpath state and stale badges); toolpath
 // generation and the gCode export. Doc: docs/conventions/ui.md#plan-mode-task-37,
@@ -52,6 +53,7 @@ import {
   editable,
   isError,
   pickerPlans,
+  planEditCount,
   planOperationKind,
   planOperationName,
   rowStale,
@@ -158,6 +160,9 @@ function PlanView({
   const data = usePlanData(plan.id)
   const [error, setError] = useState<AppErrorData | undefined>(undefined)
   const [removeOpen, setRemoveOpen] = useState(false)
+  /** A rebuild (or back to draft) that would discard plan-only edits, waiting for the user. */
+  const [discard, setDiscard] = useState<'rebuild' | 'draft' | null>(null)
+  const edits = planEditCount(plan)
   const plans = pickerPlans(doc)
   const canEdit = editable(plan)
 
@@ -221,7 +226,8 @@ function PlanView({
             value={plan.status}
             onValueChange={(s) => {
               if (s === plan.status) return
-              void send('plan.status.set', s === 'unarchive' ? {} : { status: s })
+              if (s === 'draft' && edits > 0) setDiscard('draft')
+              else void send('plan.status.set', s === 'unarchive' ? {} : { status: s })
             }}
           />
           <StatusChip tone={plan.status === 'draft' ? 'neutral' : 'success'}>
@@ -234,7 +240,12 @@ function PlanView({
           </p>
         ) : null}
         {error ? <ErrorMessage error={error} message={m.inspector.commandFailed} /> : null}
-        <StaleNotices plan={plan} data={data} send={send} />
+        <StaleNotices
+          plan={plan}
+          data={data}
+          send={send}
+          onRebuild={() => (edits > 0 ? setDiscard('rebuild') : void send('plan.rebuild', {}))}
+        />
       </Section>
 
       <MachineSection plan={plan} send={send} units={doc.unitSystem} />
@@ -252,6 +263,22 @@ function PlanView({
         destructive
         onConfirm={() => void send('plan.remove', { confirm: true })}
       />
+      <ConfirmDialog
+        open={discard !== null}
+        onOpenChange={(open) => {
+          if (!open) setDiscard(null)
+        }}
+        title={discard === 'draft' ? m.stale.discardDraftTitle(edits) : m.stale.discardTitle(edits)}
+        description={m.stale.discardDescription}
+        confirmLabel={discard === 'draft' ? m.stale.discardDraftAction : m.stale.rebuild}
+        cancelLabel={m.stale.discardCancel}
+        destructive
+        onConfirm={() =>
+          void (discard === 'draft'
+            ? send('plan.status.set', { status: 'draft', discardPlanEdits: true })
+            : send('plan.rebuild', { discardPlanEdits: true }))
+        }
+      />
       <ExportDialog />
     </div>
   )
@@ -263,10 +290,13 @@ function StaleNotices({
   plan,
   data,
   send,
+  onRebuild,
 }: {
   plan: PlanDTO
   data: PlanData | undefined
   send: (name: string, args: object) => Promise<unknown>
+  /** Rebuild, confirmed first when it discards plan-only edits. */
+  onRebuild: () => void
 }): React.JSX.Element | null {
   const stale = data?.stale
   if (stale === undefined) return null
@@ -281,11 +311,7 @@ function StaleNotices({
         <>
           <span>{stale.partRemoved ? m.stale.partRemoved : m.stale.design}</span>
           {canRebuild && !stale.partRemoved ? (
-            <Button
-              size="sm"
-              icon={<RefreshCw aria-hidden="true" />}
-              onClick={() => void send('plan.rebuild', {})}
-            >
+            <Button size="sm" icon={<RefreshCw aria-hidden="true" />} onClick={onRebuild}>
               {m.stale.rebuild}
             </Button>
           ) : null}

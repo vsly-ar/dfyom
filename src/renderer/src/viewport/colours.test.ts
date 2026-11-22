@@ -68,6 +68,20 @@ describe('surface colours', () => {
     )
   })
 
+  it('tints operations edited in the plan lightly; selection and hover stay on top', () => {
+    const tinted = new Set(['pocket1'])
+    expect(surfaceColour('pocket1.floor', { tinted }, palette)).toEqual(
+      mix(palette.part, palette.info, MIX.tinted),
+    )
+    expect(surfaceColour('drill1.wall', { tinted }, palette)).toEqual(palette.part)
+    expect(
+      surfaceColour('pocket1.floor', { tinted, selectedOperation: 'pocket1' }, palette),
+    ).toEqual(mix(palette.part, palette.selected, MIX.selected))
+    expect(surfaceColour('pocket1.floor', { tinted, hovered: 'pocket1.wall' }, palette)).toEqual(
+      palette.hover,
+    )
+  })
+
   it('outdated replaces the base colour', () => {
     expect(surfaceColour('stock.top', { outdated: true }, palette)).toEqual(palette.outdated)
   })
