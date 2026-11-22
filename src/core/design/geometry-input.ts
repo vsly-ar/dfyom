@@ -20,6 +20,7 @@ import { placeShape } from './placement'
 import { requirePort } from './shape'
 import { operationReferences, SurfaceTable } from './surfaces'
 import { shapeCentre } from './anchor'
+import { instanceOf, stepOf } from './feature'
 
 const vec2 = (p: Point) => [p[0].canonical, p[1].canonical] as const
 
@@ -98,7 +99,30 @@ export function toGeometryInput(
     },
     operations,
     references,
+    ...cloneGroups(part.operations),
   })
+}
+
+/**
+ * Per repeated source operation (an owned role `<n>_<source id>` with n ≥ 2, Clones), the source
+ * id and its instances' ids in design order; left out when there are none, so inputs without
+ * Clones stay byte-identical. Evaluation subtracts them in clone layers
+ * (docs/architecture/geometry.md#clone-layers).
+ */
+function cloneGroups(ops: readonly Operation[]): { cloneGroups?: string[][] } {
+  const ids = new Set(ops.map((o) => o.id))
+  const groups = new Map<string, string[]>()
+  for (const op of ops) {
+    if (op.owner.isNone()) continue
+    const { featureId, role } = op.owner.unwrap()
+    if (instanceOf(role) < 2) continue
+    const source = stepOf(role)
+    const key = `${featureId}\0${source}`
+    let g = groups.get(key)
+    if (g === undefined) groups.set(key, (g = ids.has(source) ? [source] : []))
+    g.push(op.id)
+  }
+  return groups.size === 0 ? {} : { cloneGroups: [...groups.values()] }
 }
 
 function operationGeometry(

@@ -138,6 +138,7 @@ export const PartGeometryInputSchema: z.ZodType<PartGeometryInput> = z.object({
     .array(z.object({ operation: z.string(), parameter: z.string(), surface: z.string() }))
     .readonly()
     .exactOptional(),
+  cloneGroups: z.array(z.array(z.string()).readonly()).readonly().exactOptional(),
 })
 
 /** `DfmWarning` (model.ts); values in mm. Also the result schema of the design commands. */

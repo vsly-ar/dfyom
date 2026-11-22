@@ -113,4 +113,48 @@ describe('design → geometry input', () => {
       },
     ])
   })
+
+  it('groups each Clones source operation with its instances (clone layers): same part as ungrouped', async () => {
+    const s = await designSetup()
+    const partId = s.partId
+    await s.run('design.facing.add', { partId, depth: '0.5' })
+    await s.run('design.hole.add', {
+      partId,
+      center: ['15', '15'],
+      fastener: 'M3',
+      type: 'counterbore',
+    })
+    await s.run('design.clones.add', {
+      partId,
+      source: { featureId: 'hole1' },
+      rows: [{ kind: 'grid', du: '20', dv: '15', cols: 4, rows: 3 }],
+    })
+    await s.run('design.pocket.add', {
+      partId,
+      shape: { kind: 'rectangle', center: ['90', '30'], length: '10', width: '40' },
+      depth: '2',
+    })
+    const input = expectOk(partGeometryInput(s.d.doc, partId))
+    const instances = (step: string) =>
+      Array.from({ length: 11 }, (_, i) => `clones1_${i + 2}_hole1_${step}`)
+    expect(input.cloneGroups).toEqual([
+      ['hole1_counterbore', ...instances('counterbore')],
+      ['hole1_drill', ...instances('drill')],
+    ])
+    const { cloneGroups: _, ...plain } = input
+    const evaluate = (i: typeof input) =>
+      expectOk(kernel.withSolids((solids) => evaluatePart(i, solids)))
+    const grouped = evaluate(input)
+    const ungrouped = evaluate(plain)
+    expect(grouped.volume).toBeCloseTo(ungrouped.volume, 6)
+    expect(grouped.stats.triangles).toBe(ungrouped.stats.triangles)
+    expect(grouped.surfaces).toEqual(ungrouped.surfaces)
+    expect(grouped.warnings).toEqual(ungrouped.warnings)
+  })
+
+  it('leaves `cloneGroups` out without Clones (inputs byte-identical)', async () => {
+    const s = await designSetup()
+    await buildTestPart(s)
+    expect(expectOk(partGeometryInput(s.d.doc, s.partId))).not.toHaveProperty('cloneGroups')
+  })
 })

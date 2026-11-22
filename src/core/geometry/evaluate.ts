@@ -49,6 +49,13 @@ const WHERE = 'evaluatePart'
 export const UNION_CHUNK = 25
 
 /**
+ * Most clone operations in one clone layer: instances of one source never overlap, so a layer
+ * of 100 is still a compose, and one step stays near 100 ms at 100 counterbored holes (spike S6,
+ * docs/research/s6-clone-budgets.md#levers; docs/architecture/geometry.md#clone-layers).
+ */
+export const CLONE_LAYER = 100
+
+/**
  * Subtraction layers (docs/architecture/geometry.md#building-the-solids): each tool joins the
  * first layer that has room (`chunk`) and none of whose tools' bounds it overlaps, else opens a
  * new one. Tools of one layer are pairwise disjoint, so their batch union is a cheap compose and
@@ -73,11 +80,34 @@ export function subtractionLayers<T extends { readonly box: Box }>(
 }
 
 /**
+ * The tools of the clone groups (`PartGeometryInput.cloneGroups`), group by group (a source
+ * operation, then its instances), and the other tools in operation order. Ids not in `tools`
+ * are skipped; an id in two groups counts once.
+ */
+export function cloneOrder<T extends { readonly op: { readonly id: string } }>(
+  tools: readonly T[],
+  groups: readonly (readonly string[])[] = [],
+): { clones: T[]; rest: T[] } {
+  const byId = new Map(tools.map((t) => [t.op.id, t]))
+  const clones: T[] = []
+  const taken = new Set<T>()
+  for (const id of groups.flat()) {
+    const t = byId.get(id)
+    if (t === undefined || taken.has(t)) continue
+    taken.add(t)
+    clones.push(t)
+  }
+  return { clones, rest: tools.filter((t) => !taken.has(t)) }
+}
+
+/**
  * `region2d` builds general shapes (v0.3: named, rotated, `on`, blind, tab positions); without it
  * such an operation fails with `internal.unexpected` (a host bug, `needsRegion2d`). `cache`
  * reuses operations built by earlier evaluations whose input is unchanged (`operation-cache.ts`).
  * `steps.step()` runs after each operation's solids, after each subtraction layer and `toMesh`,
- * and inside the checks; an abort returns `op.aborted` (the arena frees everything).
+ * and inside the checks; an abort returns `op.aborted` (the arena frees everything). With
+ * `cloneGroups`, their tools are subtracted first in clone layers (`CLONE_LAYER`) and, with a
+ * cache, the part after them is kept (docs/architecture/geometry.md#clone-layers).
  */
 export function evaluatePart(
   input: PartGeometryInput,
@@ -129,10 +159,32 @@ export function evaluatePart(
 
   const composed = new Map<OperationSolids, ComposedOperation>()
   const placed = ops.map((op) => ({ op, box: boxOf(op.removal) }))
-  const layers = subtractionLayers(placed)
-  const total = ops.length + layers.length + 1
+  // clone groups first (their own layers, the kept part after them), then the rest
+  const { clones, rest } = cloneOrder(placed, input.cloneGroups)
+  const cloneLayers = subtractionLayers(clones, CLONE_LAYER)
+  const layers = subtractionLayers(rest)
+  const total = ops.length + cloneLayers.length + layers.length + 1
   let done = 0
-  const step = (label: string) => steps.step({ done: ++done, total, label })
+  const step = (label: string, n = 1) => steps.step({ done: (done += n), total, label })
+  const subtractLayers = (
+    from: Solid,
+    ls: readonly (readonly { op: OperationSolids }[])[],
+    first: number,
+  ): AppResult<Solid> => {
+    let part = from
+    for (const [k, layer] of ls.entries()) {
+      const tools = layer.map((t) => composed.get(t.op)!.solid)
+      const next = (tools.length === 1 ? Ok(tools[0]!) : solids.union(tools))
+        .andThen((tool) => solids.subtract(part, tool))
+        .andThen(force)
+      if (next.isErr()) return Err(next.unwrapErr())
+      part = next.unwrap()
+      const all = cloneLayers.length + layers.length
+      const st = step(`subtract ${first + k + 1}/${all}`)
+      if (st.isErr()) return Err(st.unwrapErr())
+    }
+    return Ok(part)
+  }
   const built = build(stockSolidsValue).andThen((stockSolid) => {
     for (const { op, box } of placed) {
       const s = build(op).mapErr(ctx(WHERE, { operation: op.id }))
@@ -142,19 +194,31 @@ export function evaluatePart(
       const st = step(op.id)
       if (st.isErr()) return Err(st.unwrapErr())
     }
-    // stock − layer₁ − layer₂ − …, one step per layer
-    let part = stockSolid.solid
-    for (const [k, layer] of layers.entries()) {
-      const tools = layer.map((t) => composed.get(t.op)!.solid)
-      const next = (tools.length === 1 ? Ok(tools[0]!) : solids.union(tools))
-        .andThen((tool) => solids.subtract(part, tool))
-        .andThen(force)
-      if (next.isErr()) return Err(next.unwrapErr())
-      part = next.unwrap()
-      const st = step(`subtract ${k + 1}/${layers.length}`)
-      if (st.isErr()) return Err(st.unwrapErr())
+    // stock − clone layers: kept across evaluations, keyed by the original ids of the stock and
+    // the clone operations (a kept or rebuilt operation solid has its own id, so equal ids mean
+    // equal inputs); an edit elsewhere then subtracts only the other layers
+    const prefix = (): AppResult<{ solid: Solid; originalId: number }> =>
+      subtractLayers(stockSolid.solid, cloneLayers, 0).map((solid) => ({
+        solid,
+        originalId: stockSolid.id,
+      }))
+    let cloned: AppResult<Solid>
+    if (cloneLayers.length === 0) cloned = Ok(stockSolid.solid)
+    else if (cache === undefined) cloned = prefix().map((p) => p.solid)
+    else {
+      const ids = clones.map((t) => composed.get(t.op)!.originalId).join(',')
+      let made = false
+      cloned = solids
+        .kept(`clone layers ${stockSolid.id}|${ids}`, () => {
+          made = true
+          return prefix()
+        })
+        .andThen((p) =>
+          made ? Ok(p.solid) : step('clone layers', cloneLayers.length).map(() => p.solid),
+        )
     }
-    return Ok(part)
+    // − layer₁ − layer₂ − …, one step per layer
+    return cloned.andThen((part) => subtractLayers(part, layers, cloneLayers.length))
   })
   if (built.isErr()) return Err(built.unwrapErr())
   const part = built.unwrap()

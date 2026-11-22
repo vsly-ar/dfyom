@@ -218,6 +218,13 @@ export interface PartGeometryInput {
   readonly operations: readonly OperationGeometry[]
   /** Surfaces referenced by operation parameters; absent = none. */
   readonly references?: readonly SurfaceReference[]
+  /**
+   * Clone groups (v0.4 Clones): per repeated source operation, its id and its instances' ids
+   * (`toGeometryInput`). Evaluation subtracts them in clone layers before the other operations
+   * and keeps the part after them (docs/architecture/geometry.md#clone-layers); absent = none.
+   * Grouping changes only the work, never the solid.
+   */
+  readonly cloneGroups?: readonly (readonly string[])[]
 }
 
 /**
