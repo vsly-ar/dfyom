@@ -7,6 +7,8 @@
 import { changedFields, movedIds, type PendingChange } from '../commands/apply'
 import type { Services } from '../commands/context'
 import type { PendingSource } from '../commands/define'
+import type { ProjectDoc } from '../project/document'
+import { planOperationInputs } from './inputs'
 import type { PlanDTO } from './plan.dto'
 import { designChanged, planStale } from './snapshot'
 import { rebuildBlocker, sameValue } from './validity'
@@ -117,7 +119,22 @@ function planInputDiff(after: PlanDTO, before: PlanDTO): PendingChange[] {
   return out
 }
 
-/** Changed plan inputs (operation tool, feeds, strategy, setup, machine) of kept-current plans. */
+/**
+ * Whether every toolpath of the plan is current (its inputs are all cached): Apply has nothing to
+ * regenerate. False when the inputs cannot be derived (error findings) or without a cache.
+ */
+function toolpathsCurrent(doc: ProjectDoc, planId: string, services: Services): boolean {
+  const cache = services.toolpaths
+  if (cache === undefined) return false
+  const inputs = planOperationInputs(doc, planId)
+  return inputs.isOk() && inputs.unwrap().every((i) => cache.has(i.inputHash))
+}
+
+/**
+ * Changed plan inputs (operation tool, feeds, strategy, setup, machine) of kept-current plans
+ * whose toolpaths are not all current: an explicit "Generate toolpaths" after plan edits leaves
+ * nothing for Apply, even though the baseline predates those edits (found by X2).
+ */
 export const planInputPending: PendingSource = {
   name: 'plan.inputs',
   changes(doc, baseline, _design, ctx) {
@@ -126,7 +143,9 @@ export const planInputPending: PendingSource = {
     for (const [id, after] of Object.entries(doc.plans)) {
       const before = Object.hasOwn(baseline.plans, id) ? baseline.plans[id] : undefined
       if (before === undefined || before === after || !keptCurrent(after, ctx.services)) continue
-      out.push(...planInputDiff(after, before))
+      const diff = planInputDiff(after, before)
+      if (diff.length === 0 || toolpathsCurrent(doc, id, ctx.services)) continue
+      out.push(...diff)
     }
     return out
   },
