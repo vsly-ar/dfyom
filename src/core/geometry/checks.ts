@@ -99,7 +99,8 @@ function boxIn(t: Placement, box: Box): Box {
   }
 }
 
-const overlaps = (a: Box, b: Box): boolean =>
+/** The boxes share more than ε along every axis. */
+export const boxesOverlap = (a: Box, b: Box): boolean =>
   [0, 1, 2].every((k) => Math.min(a.max[k]!, b.max[k]!) - Math.max(a.min[k]!, b.min[k]!) > EPSILON)
 
 interface Piece {
@@ -202,7 +203,7 @@ function retainedRemoved(
     for (const region of a.op.nominal) {
       const box = boxOf([region.mesh])
       const others = input.operations.filter(
-        (b) => b !== a && overlaps(box, b.box) && !clearOf(region, a.op, b),
+        (b) => b !== a && boxesOverlap(box, b.box) && !clearOf(region, a.op, b),
       )
       if (others.length === 0) continue
       const solid = placed(region, a.originalId, solids)

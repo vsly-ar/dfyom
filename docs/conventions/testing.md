@@ -11,7 +11,7 @@ Status: draft · Principle: [principles.md §2](../principles.md#2-testability)
 | End-to-end      | Vitest, spawned bundled CLI (headless); Playwright for Electron (`e2e/*.e2e.ts`, `npm run e2e`) for the app | Whole app, driven like a user **and** like an agent ([llm-api.md](../architecture/llm-api.md)); see [End-to-end](#end-to-end). |
 | Virtual machine | GRBL emulator ([ADR 0013](../decisions/0013-grbl-first-controller.md))                                      | Simulated CNC controller + simulated devices; run-mode tests without hardware ([modes/run.md](../modes/run.md)).               |
 | Real machine    | _TBD_                                                                                                       | LLM-controlled runs on real hardware with minimal developer involvement; opt-in only.                                          |
-| Performance     | Vitest, `*.perf.ts` (`vitest.perf.config.mts`, `npm run perf`)                                              | Benchmarks for heavy operations with budgets; not in `npm run check` (flaky timings).                                          |
+| Performance     | Vitest, `*.perf.ts` (`vitest.perf.config.mts`, `npm run perf`)                                              | Benchmarks for heavy operations with budgets; not in `npm run check` (flaky timings); files run one at a time.                 |
 
 ## Commands
 

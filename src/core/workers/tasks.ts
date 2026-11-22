@@ -9,12 +9,23 @@ import { createStlParser, STL_LIMITS, StlPositions, type StlSummary } from '../d
 import { svgImportTask } from '../import/svg/task'
 import { evaluatePart, type PartEvaluation } from '../geometry/evaluate'
 import type { PartGeometryInput } from '../geometry/model'
+import { OperationCache } from '../geometry/operation-cache'
 import { needsRegion2d } from '../geometry/operations'
 import type { Region2dPort } from '../geometry/2d/port'
 import { PartEvaluationSchema, PartGeometryInputSchema } from '../geometry/schemas'
 import type { Toolpath } from '../toolpath/model'
 import { generateRequest, GeneratorRequestSchema, type GeneratorRequest } from '../toolpath/request'
 import { ToolpathSchema } from '../toolpath/schemas'
+
+/** Operations built by earlier evaluations in this worker (unchanged ones are not rebuilt). */
+const operationCache = new OperationCache()
+
+/**
+ * Triangles of the solids the geometry worker's kernel keeps across evaluations (unchanged
+ * operations' solids, `SolidPort.kept`): ≈ 20–30 MB of WASM heap
+ * (docs/architecture/geometry.md#wasm-lifetime-and-ownership).
+ */
+export const KEPT_TRIANGLES = 150_000
 
 /** `evaluatePart` in the geometry lane, inside one `withSolids` arena. */
 export const geometryEvaluate: WorkerTask<PartGeometryInput, PartEvaluation> = {
@@ -34,7 +45,9 @@ export const geometryEvaluate: WorkerTask<PartGeometryInput, PartEvaluation> = {
       if (port.isErr()) return Err(port.unwrapErr())
       region2d = port.unwrap()
     }
-    return kernel.unwrap().withSolids((s) => evaluatePart(input, s, ctl.steps, region2d))
+    const solids = kernel.unwrap()
+    solids.keepSolids(KEPT_TRIANGLES)
+    return solids.withSolids((s) => evaluatePart(input, s, ctl.steps, region2d, operationCache))
   },
 }
 
