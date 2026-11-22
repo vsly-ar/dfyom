@@ -39,6 +39,8 @@ const params = {
   depth: Src.describe('From the face; not for through'),
   cbDiameter: Src.describe('counterbore; default from fastener'),
   cbDepth: Src.describe('counterbore; default head height + headSink'),
+  csDiameter: Src.describe('countersink; default head Ø + 2 × headSink'),
+  csAngle: Src.describe('countersink; default 90°'),
   headSink: Src.describe('Head below the face, for table defaults; default 0.2 mm'),
 }
 
@@ -51,7 +53,9 @@ const spec: FeatureCommandSpec<typeof params, Hole> = {
   /**
    * Choosing `fastener`, `purpose` or `fit` (and the add) refills every size not given in the
    * same command; a head that appears (type change) takes the table's sizes; without a fastener
-   * its sizes are required. Explicit sizes always win (design-v0.4.md § Parameters).
+   * its sizes are required (but `csAngle`: 90°). A new `headSink` alone refills only the sizes
+   * that derive from it (`cbDepth`, `csDiameter`) and still equal the table's value for the old
+   * one. Explicit sizes always win (design-v0.4.md § Parameters).
    */
   build(a: Args, prev, { f, id, name, on }): Hole {
     const units = f.units
@@ -74,35 +78,60 @@ const spec: FeatureCommandSpec<typeof params, Hole> = {
       a.purpose !== undefined ||
       a.fit !== undefined
     const row = fastener.isSome() ? fastenerRow(fastener.unwrap()) : undefined
-    let table: HoleTableSizes | undefined
-    if (row !== undefined && headSink !== undefined) {
-      const t = holeTableSizes(row, purpose, fit, headSink, units)
-      table = t.isOk() ? t.unwrap() : undefined
+    const tableOf = (sink: Quantity | undefined): HoleTableSizes | undefined => {
+      if (row === undefined || sink === undefined) return undefined
+      const t = holeTableSizes(row, purpose, fit, sink, units)
+      return t.isOk() ? t.unwrap() : undefined
     }
+    const table = tableOf(headSink)
+    // the table as the previous headSink gave it: sizes still equal to it follow a new headSink
+    const before =
+      prev !== undefined && a.headSink !== undefined && !refill ? tableOf(prev.headSink) : undefined
     const size = (
-      path: 'diameter' | 'cbDiameter' | 'cbDepth',
+      path: 'diameter' | 'cbDiameter' | 'cbDepth' | 'csDiameter' | 'csAngle',
       old: Quantity | undefined,
       fallback?: string,
     ): Quantity => {
+      const kind = path === 'csAngle' ? 'angle' : 'length'
       const src = a[path]
-      if (src !== undefined) return f.q(path, 'length', src)
+      if (src !== undefined) return f.q(path, kind, src)
       if (table !== undefined && (refill || old === undefined)) return table[path]
+      const derived = path === 'cbDepth' || path === 'csDiameter'
+      if (derived && table !== undefined && before !== undefined && old?.equals(before[path]))
+        return table[path]
       if (old !== undefined) return old
-      if (fallback !== undefined) return f.q(path, 'length', fallback)
+      if (fallback !== undefined) return f.q(path, kind, fallback)
       return f.issue(path, 'required', `is required for a ${type} hole without a fastener`)
     }
     const prevHead = prev?.head
+    const notFor = (keys: readonly ('cbDiameter' | 'cbDepth' | 'csDiameter' | 'csAngle')[]) => {
+      for (const k of keys)
+        if (a[k] !== undefined)
+          f.issue(
+            k,
+            'notForType',
+            `is only used with type ${k.startsWith('cb') ? 'counterbore' : 'countersink'}`,
+          )
+    }
     let head: HoleHead
     if (type === 'counterbore') {
       const old = prevHead?.type === 'counterbore' ? prevHead : undefined
+      notFor(['csDiameter', 'csAngle'])
       head = {
         type,
         cbDiameter: size('cbDiameter', old?.cbDiameter),
         cbDepth: size('cbDepth', old?.cbDepth),
       }
+    } else if (type === 'countersink') {
+      const old = prevHead?.type === 'countersink' ? prevHead : undefined
+      notFor(['cbDiameter', 'cbDepth'])
+      head = {
+        type,
+        csDiameter: size('csDiameter', old?.csDiameter),
+        csAngle: size('csAngle', old?.csAngle, DEFAULTS.chamferAngle[units]),
+      }
     } else {
-      for (const k of ['cbDiameter', 'cbDepth'] as const)
-        if (a[k] !== undefined) f.issue(k, 'notForType', 'is only used with type counterbore')
+      notFor(['cbDiameter', 'cbDepth', 'csDiameter', 'csAngle'])
       head = { type }
     }
     const bottom = a.bottom ?? prev?.bottom ?? 'through'

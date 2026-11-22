@@ -118,8 +118,10 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
     `The shape reaches ${L(p['by'])} outside the stock face at the ${list(((p['sides'] as readonly string[] | undefined) ?? []).map((s) => SIDE[s] ?? s))}.`,
   'dfm.shapeHeavy': (p) =>
     `This shape has ${num(p['chords'])} segments after flattening, so the part updates more slowly.`,
-  'dfm.holeCustomSize': (p, L) =>
-    `${HOLE_FIELD[String(p['field'])] ?? 'A size'} ${L(p['value'])} differs from the ${typeof p['fastener'] === 'string' ? `${p['fastener']} ` : ''}table value ${L(p['table'])} (custom).`,
+  'dfm.holeCustomSize': (p, L) => {
+    const v = (x: unknown) => (p['field'] === 'csAngle' ? `${num(x)}°` : L(x))
+    return `${HOLE_FIELD[String(p['field'])] ?? 'A size'} ${v(p['value'])} differs from the ${typeof p['fastener'] === 'string' ? `${p['fastener']} ` : ''}table value ${v(p['table'])} (custom).`
+  },
   // v0.4 Clones (features.md § Checks and DFM)
   'dfm.cloneOutsideStock': (p) =>
     `${num(p['count'])} clones lie outside the stock (${numbers(p)}): skip them or shorten a row.`,
@@ -140,6 +142,8 @@ const HOLE_FIELD: Readonly<Record<string, string>> = {
   diameter: 'Hole Ø',
   cbDiameter: 'Counterbore Ø',
   cbDepth: 'Counterbore depth',
+  csDiameter: 'Countersink Ø',
+  csAngle: 'Countersink angle',
 }
 
 /** What a tool type rule asks for (`params.needs` of `dfm.toolUnfit`). */

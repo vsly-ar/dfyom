@@ -96,6 +96,8 @@ export const designMessages = {
       through: 'Through',
       cbDiameter: 'Counterbore Ø',
       cbDepth: 'Counterbore depth',
+      csDiameter: 'Countersink Ø',
+      csAngle: 'Countersink angle',
       headSink: 'Head sink',
       center: 'Position',
       on: 'On',
