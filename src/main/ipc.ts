@@ -22,7 +22,12 @@ import {
 import type { Dispatcher } from '../core/commands/dispatcher'
 import type { OpenProjectInfo } from '../core/project/lifecycle'
 import { evaluationView, followEvaluations, planEvaluationView } from './evaluation-push'
-import { chooseExportFile, chooseOpenFile, chooseSaveFile } from './file-dialogs'
+import {
+  chooseExportFile,
+  chooseOpenFile,
+  chooseSaveFile,
+  type DialogFolders,
+} from './file-dialogs'
 import type { AppHost } from './host/app-host'
 import type { LocalHttpControl } from './mcp/http'
 import type { SettingsStore } from './settings/store'
@@ -116,6 +121,7 @@ export function registerProjectIpc(
   http: LocalHttpControl,
   settings: SettingsStore,
   windows: WindowFactory,
+  folders: DialogFolders,
 ): WindowSessions {
   const byContents = new Map<number, WindowSession>()
   // App quit closes every project itself (host.shutdown, unsaved changes stay recoverable); set
@@ -215,15 +221,19 @@ export function registerProjectIpc(
   })
   ipcMain.handle(IPC.fileChooseOpen, (event) => {
     const ws = sessionOf(event)
-    return ws === undefined ? null : chooseOpenFile(ws.win)
+    return ws === undefined ? null : chooseOpenFile(ws.win, folders)
   })
   ipcMain.handle(IPC.fileChooseSave, (event, name: unknown) => {
     const ws = sessionOf(event)
-    return ws === undefined ? null : chooseSaveFile(ws.win, typeof name === 'string' ? name : '')
+    return ws === undefined
+      ? null
+      : chooseSaveFile(ws.win, folders, typeof name === 'string' ? name : '')
   })
   ipcMain.handle(IPC.fileChooseExport, (event, name: unknown) => {
     const ws = sessionOf(event)
-    return ws === undefined ? null : chooseExportFile(ws.win, typeof name === 'string' ? name : '')
+    return ws === undefined
+      ? null
+      : chooseExportFile(ws.win, folders, typeof name === 'string' ? name : '')
   })
 
   ipcMain.handle(IPC.settingsUpdate, (event, patch: unknown): CallReply => {
@@ -397,7 +407,7 @@ export function registerProjectIpc(
         for (const p of projects) {
           let args: { target?: string; confirm?: boolean } = {}
           if (p.file === null) {
-            const target = await chooseSaveFile(windowOf(p.key), p.name)
+            const target = await chooseSaveFile(windowOf(p.key), folders, p.name)
             if (target === null) return { kind: 'cancelled' }
             // the OS dialog already asked before replacing a file (ui.md#project-files)
             args = { target, confirm: true }

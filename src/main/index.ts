@@ -27,8 +27,9 @@ import {
   unsavedChoice,
   type QuitDialog,
 } from './quit'
+import { createAppStateStore, loadAppState, type AppStateStore } from './settings/app-state'
 import { createSettingsStore, loadSettings } from './settings/store'
-import { cascadeBounds } from './window-open'
+import { APP_NAME, windowStart, windowTitle, type WindowStart } from './window-state'
 import { WORKER_ENTRY_PATH } from './workers/bundled'
 import { createNodeWorkerPool } from './workers/node'
 
@@ -39,31 +40,38 @@ if (hideWindows && process.platform === 'darwin') app.setActivationPolicy('acces
 
 /** Windows that fired `ready-to-show` (true) or not yet (false). */
 const ready = new WeakMap<BrowserWindow, boolean>()
+/** How each window starts; maximized / full screen apply when it is shown (never in hidden runs). */
+const starts = new WeakMap<BrowserWindow, WindowStart>()
 
 /**
  * A main window, not shown yet (`windowFactory` shows it). Cascaded from `from` with its size
- * (docs/conventions/ui.md#project-files); the default size, centred, without one.
+ * (docs/conventions/ui.md#project-files); without one, the remembered last window
+ * (#remembered-window-state-and-dialog-folders), else the default size, centred.
  */
 function createMainWindow(
   log: Logger,
   level: LogLevel,
   settings: AppSettings,
+  appState: AppStateStore,
   from: BrowserWindow | undefined,
 ): BrowserWindow {
-  const source = from === undefined || from.isDestroyed() ? undefined : from.getBounds()
-  const bounds =
-    source === undefined
-      ? undefined
-      : cascadeBounds(source, screen.getDisplayMatching(source).workArea)
+  const start = windowStart({
+    source: from === undefined || from.isDestroyed() ? undefined : from.getNormalBounds(),
+    saved: appState.get().window,
+    othersOpen: BrowserWindow.getAllWindows().length > 0,
+    workAreas: screen.getAllDisplays().map((d) => d.workArea),
+    primary: screen.getPrimaryDisplay().workArea,
+  })
+  const version = app.getVersion()
   const win = new BrowserWindow({
     width: 1440,
     height: 900,
-    ...bounds,
+    ...start.bounds,
     // docs/conventions/ui.md#app-shell
     minWidth: 1024,
     minHeight: 640,
     show: false,
-    title: 'DFYOM',
+    title: windowTitle(APP_NAME, version),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -81,7 +89,29 @@ function createMainWindow(
   })
   log.debug({ win: win.id, from: from?.id }, 'window created')
   ready.set(win, false)
+  starts.set(win, start)
   win.once('ready-to-show', () => ready.set(win, true))
+  // The native title adds the app name and version to the document title (ui.md#app-shell).
+  win.on('page-title-updated', (event, title) => {
+    event.preventDefault()
+    win.setTitle(windowTitle(title, version))
+  })
+  // The last moved, resized or closed window is remembered for the next launch.
+  const remember = () => {
+    if (win.isDestroyed() || win.isMinimized()) return
+    appState.setWindow({
+      bounds: win.getNormalBounds(),
+      maximized: win.isMaximized(),
+      fullScreen: win.isFullScreen(),
+    })
+  }
+  win.on('resize', remember)
+  win.on('move', remember)
+  win.on('maximize', remember)
+  win.on('unmaximize', remember)
+  win.on('enter-full-screen', remember)
+  win.on('leave-full-screen', remember)
+  win.on('close', remember)
 
   const devServerUrl = process.env['ELECTRON_RENDERER_URL']
   if (!app.isPackaged && devServerUrl) {
@@ -93,13 +123,24 @@ function createMainWindow(
 }
 
 /** Creates, shows and focuses windows; hidden test runs never show or focus one. */
-function windowFactory(log: Logger, level: LogLevel, settings: () => AppSettings): WindowFactory {
+function windowFactory(
+  log: Logger,
+  level: LogLevel,
+  settings: () => AppSettings,
+  appState: AppStateStore,
+): WindowFactory {
+  const show = (win: BrowserWindow) => {
+    win.show()
+    const start = starts.get(win)
+    if (start?.maximized === true) win.maximize()
+    if (start?.fullScreen === true) win.setFullScreen(true)
+  }
   return {
-    create: (from) => createMainWindow(log, level, settings(), from),
+    create: (from) => createMainWindow(log, level, settings(), appState, from),
     reveal(win) {
       if (hideWindows || win.isDestroyed()) return
-      if (ready.get(win) === true) win.show()
-      else win.once('ready-to-show', () => win.show())
+      if (ready.get(win) === true) show(win)
+      else win.once('ready-to-show', () => show(win))
     },
     focus(win) {
       if (hideWindows || win.isDestroyed()) return
@@ -108,6 +149,13 @@ function windowFactory(log: Logger, level: LogLevel, settings: () => AppSettings
     },
   }
 }
+
+// The app's name in the Dock, app menu and task switcher, and the default `userData` folder name;
+// `productName` gives the same when run as `electron .`, but not when run on a built file
+// (`electron out/main/index.js`, the end-to-end tests). In development the macOS bundle name
+// still says "Electron" unless `npm run dev` renamed it (scripts/dev-app-name.mjs).
+// Doc: docs/conventions/ui.md#app-name-and-icon. Must be set before `ready`.
+app.setName(APP_NAME)
 
 // `--data-dir` (docs/architecture/persistence.md#files-and-folders) moves all app data: Electron's
 // `userData` (Chromium profile) and the log folder too, so one flag isolates a run (the end-to-end
@@ -167,6 +215,12 @@ void app.whenReady().then(async () => {
     initial: await loadSettings(appData, log),
     log: log.child({ scope: 'settings' }),
   })
+  // Remembered window bounds and dialog folders (docs/conventions/ui.md#remembered-window-state-and-dialog-folders).
+  const appState = createAppStateStore({
+    appData,
+    initial: await loadAppState(appData, log),
+    log: log.child({ scope: 'app-state' }),
+  })
 
   // Local HTTP for agents: on by default, loopback only, token, Host/Origin checks
   // (docs/architecture/llm-api.md#local-http). The "Allow local agents to connect" setting
@@ -188,8 +242,13 @@ void app.whenReady().then(async () => {
     if (next.allowLocalAgents !== previous.allowLocalAgents) switchHttp(next.allowLocalAgents)
   })
 
-  const windows = windowFactory(log.child({ scope: 'windows' }), level, () => settings.get())
-  const sessions: WindowSessions = registerProjectIpc(host, http, settings, windows)
+  const windows = windowFactory(
+    log.child({ scope: 'windows' }),
+    level,
+    () => settings.get(),
+    appState,
+  )
+  const sessions: WindowSessions = registerProjectIpc(host, http, settings, windows, appState)
   // New / Open without any window (macOS): an empty window, whose start panel offers both.
   installAppMenu(() => sessions.open())
   // A project an agent opens gets its own window, which stays open after the session ends; the
@@ -260,6 +319,7 @@ void app.whenReady().then(async () => {
     void (async () => {
       await http.setEnabled(false)
       await settings.flush()
+      await appState.flush()
       await host.shutdown()
       await machine.shutdown(3000)
       workers.terminate()

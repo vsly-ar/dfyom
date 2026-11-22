@@ -2,12 +2,13 @@
 // the bundled compute worker, and quits. With the UI shell (3.3b): the three modes switch, the
 // theme setting applies and persists, and closing an edited project's last window asks first.
 // Quitting with unsaved changes asks once for every project (Cancel, Quit without saving, Save all).
+// The native title carries the version; window bounds and dialog folders survive a restart.
 // UI selectors are roles and accessible names (docs/conventions/ui.md#testing).
 // Doc: docs/conventions/testing.md#end-to-end
-import { readdir, readFile, stat } from 'node:fs/promises'
+import { mkdir, readdir, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { CallReply, PreloadApi } from '../src/shared/preload-api'
-import { answerMessageBoxes, askedMessageBoxes, expect, test } from './app.fixture'
+import { answerMessageBoxes, askedMessageBoxes, expect, launchApp, test } from './app.fixture'
 import type { Page } from '@playwright/test'
 
 /** One call through the window's bridge, as the UI makes it (docs/architecture/llm-api.md). */
@@ -200,6 +201,82 @@ test('quitting with Save all saves an untitled project through the save dialog',
   ])
   expect((await stat(file)).size).toBeGreaterThan(0)
   expect(dfyom.rendererErrors).toEqual([])
+})
+
+test('the native title has the version; window bounds and the project folder survive a restart', async ({
+  dfyom,
+}) => {
+  const { app, dataDir } = dfyom
+  const page = await app.firstWindow()
+  const nativeTitle = (a: typeof app) =>
+    a.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.getTitle())
+  await expect(page).toHaveTitle('DFYOM')
+  await expect.poll(() => nativeTitle(app)).toMatch(/^DFYOM \d+\.\d+\.\d+/)
+
+  // still hidden: setBounds does not show the window
+  const bounds = await app.evaluate(({ BrowserWindow, screen }) => {
+    const win = BrowserWindow.getAllWindows()[0]!
+    const wa = screen.getPrimaryDisplay().workArea
+    win.setBounds({ x: wa.x + 40, y: wa.y + 30, width: 1200, height: 760 })
+    return win.getNormalBounds()
+  })
+  await editedProject(page, 'Lid')
+  await expect.poll(() => nativeTitle(app)).toMatch(/^Lid — Edited — DFYOM \d/)
+
+  const folder = join(dataDir, 'parts')
+  await mkdir(folder)
+  await app.evaluate(
+    ({ dialog }, path) => {
+      dialog.showSaveDialog = (() =>
+        Promise.resolve({ canceled: false, filePath: path })) as typeof dialog.showSaveDialog
+    },
+    join(folder, 'Lid.dfyom'),
+  )
+  await page.keyboard.press('ControlOrMeta+s')
+  await expect(page).toHaveTitle('Lid')
+  await expect
+    .poll(
+      async () =>
+        JSON.parse(
+          await readFile(join(dataDir, 'app-state.json'), 'utf8').catch(() => '{}'),
+        ) as unknown,
+    )
+    .toEqual({
+      window: { bounds, maximized: false, fullScreen: false },
+      dialogFolders: { project: folder },
+    })
+  await app.close()
+
+  const second = await launchApp(dataDir)
+  try {
+    const page2 = await second.app.firstWindow()
+    expect(
+      await second.app.evaluate(({ BrowserWindow }) =>
+        BrowserWindow.getAllWindows()[0]?.getNormalBounds(),
+      ),
+    ).toEqual(bounds)
+    await second.app.evaluate(({ dialog }) => {
+      const g = globalThis as unknown as { openDefaultPath?: string | undefined }
+      dialog.showOpenDialog = ((...args: unknown[]) => {
+        g.openDefaultPath = (args.at(-1) as { defaultPath?: string }).defaultPath
+        return Promise.resolve({ canceled: true, filePaths: [] })
+      }) as typeof dialog.showOpenDialog
+    })
+    await page2
+      .getByRole('navigation', { name: 'Navigator' })
+      .getByRole('button', { name: 'Open project' })
+      .click()
+    await expect
+      .poll(() =>
+        second.app.evaluate(
+          () => (globalThis as unknown as { openDefaultPath?: string }).openDefaultPath,
+        ),
+      )
+      .toBe(folder)
+    expect(second.rendererErrors).toEqual([])
+  } finally {
+    await second.app.close()
+  }
 })
 
 test('New / Open with a project open use a new window; an open file is not opened twice', async ({
