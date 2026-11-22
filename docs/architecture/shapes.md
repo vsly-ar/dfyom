@@ -1,6 +1,6 @@
 # Shapes: 2D layer, geometry and import
 
-Status: accepted (v0.3; user decision D29 of 2026-11-22, [Decisions](#decisions-d29); follows [ADR 0019](../decisions/0019-2d-geometry-library.md), accepted); the [2D model, port and hosts](#implementation-k1) are implemented (task K1) · Design side: [design-v0.3.md](../modes/design-v0.3.md) · Toolpaths: [plan-v0.3.md](../modes/plan-v0.3.md) · Geometry base: [geometry.md](geometry.md) · Spike: [plans/v0.2.md § 7](../plans/v0.2.md#7-spike-for-v03), harness [`spikes/2d/`](../../spikes/2d/harness.ts) · Tasks: [plans/v0.3.md](../plans/v0.3.md) · Terms: [glossary.md](../glossary.md)
+Status: accepted (v0.3; user decision D29 of 2026-11-22, [Decisions](#decisions-d29); follows [ADR 0019](../decisions/0019-2d-geometry-library.md), accepted); the [2D model, port and hosts](#implementation-k1) are implemented (task K1), the [SVG import core](#implementation-i1-core) too (task I1, without `design.shape.import`) · Design side: [design-v0.3.md](../modes/design-v0.3.md) · Toolpaths: [plan-v0.3.md](../modes/plan-v0.3.md) · Geometry base: [geometry.md](geometry.md) · Spike: [plans/v0.2.md § 7](../plans/v0.2.md#7-spike-for-v03), harness [`spikes/2d/`](../../spikes/2d/harness.ts) · Tasks: [plans/v0.3.md](../plans/v0.3.md) · Terms: [glossary.md](../glossary.md)
 
 What `src/core` needs so shapes of lines and arcs flow through geometry, DFM and toolpaths. It extends the [layers](geometry.md#layers) of geometry.md: the "2D" row becomes CavalierContours behind a port; the analytic model stays the source of truth ([ADR 0007](../decisions/0007-layered-geometry-without-brep-kernel.md) holds: still 2.5D per direction).
 
@@ -116,7 +116,46 @@ Each fitted curve gives ≥ 2 elements (B: ≈ 7–8 per cubic, 27–33 µs per 
 
 ## SVG import
 
-`src/core/import/svg.ts`, pure: an XML tokenizer of the SVG subset (no DOM; `src/core` stays headless), transforms flattened into the element coordinates, units from `width`/`height`/`viewBox`, `fill-rule` to booleans, the [import report](../modes/design-v0.3.md#svg-import) as data. Limits (refused with `input.malformed`, rule `svgLimit`): 10 MB file, 20 000 elements after fitting. The spike corpus (`spikes/2d/corpus/`) seeds the tests.
+`src/core/import/svg/`, pure and headless: an XML tokenizer of the SVG subset (no DOM, no dependency; `src/core` stays headless), transforms flattened into the element coordinates, units from `width`/`height`/`viewBox`, `fill-rule` to booleans, [arc fitting](#arc-fitting), the [import report](../modes/design-v0.3.md#svg-import) as data. Limits (refused with `input.malformed`, rule `svgLimit`): 10 MB file (UTF-8 bytes), 20 000 elements after fitting (refused before fitting already when the source has more segments), element nesting 256. The spike corpus (`spikes/2d/corpus/`, copied to `__fixtures__/`) and the exit drawing seed the tests.
+
+### Implementation (I1 core)
+
+The seam for `design.shape.import` (K2): the command reads the file in the prepared input, calls
+
+```ts
+importSvg(text: string, options?: { unit?: SvgUnit; split?: SvgSplit }): AppResult<SvgImport>
+// SvgImport = { shapes: SvgShape[], report: SvgImportReport }
+// SvgShape  = { name, source: { element }, items: ({ kind: 'loop', op: 'add' | 'subtract', loop } | { kind: 'path', path })[] }
+```
+
+and turns each `SvgShape` into a shape definition (`path` items from the [2D model](#2d-model) elements; `source: { file, element }`). Loops come by decreasing |area|, outer loops counter-clockwise, holes clockwise, never crossing, so folding them in order by `op` gives the filled area; a shape with an open path has exactly that one item. Elements are chained exactly (shared end points), arcs ≤ 180°, none shorter than `MIN_ELEMENT_LENGTH`, so they pass the 2D port's checks unchanged.
+
+| File           | Holds                                                                                                                                                                  |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `xml.ts`       | Tokenizer: elements, quoted attributes, predefined and DOCTYPE entities (Illustrator's `&ns_svg;`), comments, CDATA; `svgSyntax` with the line, `svgLimit` for nesting |
+| `path-data.ts` | Path data (SVG 2 grammar, compact numbers and arc flags) → subpaths of lines, cubics (quadratics elevated) and elliptical arcs in an affine-closed form                |
+| `transform.ts` | The `transform` attribute and composition                                                                                                                              |
+| `units.ts`     | Lengths, the root viewport and `preserveAspectRatio` → the user unit → shape frame matrix                                                                              |
+| `curves.ts`    | Segments as parametric curves with cusps and break points; ellipses canonicalised by a 2×2 SVD (circular → exact arc)                                                  |
+| `fit.ts`       | Biarc fitting, approach B (ported from `spikes/biarc/fit.ts`)                                                                                                          |
+| `chain.ts`     | One subpath → one chain: fitted, joined exactly, closed when its ends meet, short elements merged                                                                      |
+| `intersect.ts` | Line/arc intersections and overlaps                                                                                                                                    |
+| `fill.ts`      | Fill classification and repair (below)                                                                                                                                 |
+| `import.ts`    | Element walk, styles, basic shapes, grouping, report, limits, `importSvg`                                                                                              |
+| `testing/`     | S5's independent oracle (two-sided deviation, kinks) for the tests                                                                                                     |
+
+Rules:
+
+- **Shape frame:** mm, x right, y up; the origin is the bottom-left corner of the viewport (SVG's y runs down), or y is mirrored about 0 when the file has no height. The root map and every `transform` (matrices, skew and reflections included) are applied to the segments **before** fitting, so the 0.01 mm holds in mm on the part; an ellipse stays an ellipse under any affine map, and a circle that stays a circle stays exact.
+- **Units:** absolute `width`/`height` units (`mm`, `cm`, `in`, `pt`, `pc`, `Q`) give the size; bare numbers and `px` take the `unit` option (`px96` default, `px72`, `mm`, `in`) and the report says the unit was assumed. A missing width or height follows the `viewBox` aspect; no size at all makes the `viewBox` user units the option's unit. Lengths inside the drawing may carry units (96 user units per inch, as CSS).
+- **Elements:** `path`, `rect` (rounded corners as quarter ellipses; circular when `rx = ry`), `circle`, `ellipse`, `line`, `polyline`, `polygon`; `g`, `a` and `switch` (its first child) group. Text, images, `use`, nested `svg` and unknown elements are counted as skipped; definitions (`defs`, `symbol`, gradients, clip paths, markers, …) and other namespaces (editor metadata) are ignored silently; `display: none` and `visibility: hidden` elements are skipped as `hidden`. `clip-path`, `mask` and `<style>` sheets are ignored with a warning (the geometry comes in unclipped; only `style` attributes and presentation attributes are read).
+- **Recoverable input** follows SVG's error handling and warns: path data is imported up to its first error (`pathData`), a shape with an invalid attribute is skipped (`attributeInvalid`), a malformed `transform` is ignored (`transformInvalid`). Malformed XML, a non-`svg` root (`svgNotSvg`), a bad `viewBox` or size (`svgViewport`) and a drawing with nothing to import (`svgEmpty`) are errors. The importer never throws (a fuzz test truncates and garbles files).
+- **Fill:** `fill` colours, `fill="none"` and strokes are ignored: every closed subpath is an area, its element's `fill-rule` (attribute, `style` or inherited) decides which areas are holes, and the elements of one shape combine **even-odd** (a loop drawn as its own element inside another becomes a hole, as CAM drawings mark holes). A loop with the same fill on both sides is dropped. Loops that cross, touch inside an element or overlap (self-intersections included) are **repaired**: split at their intersections, the edges between filled and unfilled kept and chained again with the filled side on the left (taking the sharpest left turn at a vertex, so pieces touching at a point stay separate). Counted as `loopsRepaired` with a warning.
+- **Subpaths:** a closed subpath (`Z`, or ends within the 0.01 mm chord tolerance: `gapsClosed`) is a loop, else an open path. Open paths are shapes of their own, named "‹name› path n".
+- **Grouping** (`split`): `element` (default) one shape per top-level element (a top-level group with everything in it), `file` one shape, `loop` one shape per outer loop with the holes directly inside it. Names: `inkscape:label`, else `id`, else "Path 2", "Group 3"; `source.element` is `#id`, else `tag[n]`.
+- **Report** (`SvgImportReport`): viewport size, bounds, unit and whether assumed, elements imported and skipped by tag, Béziers and elliptical arcs fitted, max deviation (in-fit estimate), corners kept at cusps, micro corners and tiny segments merged, loops repaired and dropped, gaps closed, loop / open path / line / arc counts, warnings (`rule`, message, element).
+
+Measured: the exit drawing imports as its two shapes with 156 arcs and 3 lines, max deviation 0.0093 mm (in-fit estimate; the oracle agrees within 0.01 mm both ways), every S5 corpus case gives S5's element counts.
 
 ## Performance
 
@@ -129,6 +168,8 @@ Budgets on the Apple M1 Pro class reference, measured by `npm run perf`:
 | Pocket toolpath of the spike's star (200 + 2 islands)             | ≤ 500 ms | 20 rings 1.1 ms                          |
 
 The port's share, measured by `src/core/geometry/2d/region2d.perf.ts` (K1, 2026-11-22): sync load 1.7 ms; a 206-element shape folded from items and normalised 0.75 ms plus one tool's checks (offset, opening, difference) 1.2 ms – together ≈ 2 ms of the 3 ms budget, the rest is left for `resolveShape` (K2); the star's 15 pocket rings 1.5 ms; a union with a 2000-element star 12.5 ms.
+
+SVG import (`src/core/import/svg/svg.perf.ts`, I1, 2026-11-22, Node, loaded machine): 2000 random G1 cubics in one path → 14 144 elements in ≈ 200–300 ms (fitting ≈ 40 µs per cubic as S5, the rest the fill check of the 14 k-element loop); a 9.8 MB file of 2400 rounded rectangles (19 200 elements, at the limit) ≈ 0.5 s; 60 overlapping circles repaired into 2 loops ≈ 11 ms. Import runs once per command in the prepared input, so no budget row; the perf test guards 0.5 / 1.5 / 0.5 s.
 
 Evaluation cost follows **chords** (flattened segments at the chord tolerance), not elements: with [tiles](#geometry-for-shape-operations), ≈ 16 µs per chord (triangulate ≈ 3.6, `fromMesh` ≈ 3.2, booleans ≈ 8), so the 50 ms budget holds ≈ 3 000 chords per evaluation ([S3](../../spikes/prisms/results.md#cost-median-of-15-part-placement)). Single 500-element pockets take 15–39 ms; 2000-element shapes (5 000–7 000 chords) take 47–115 ms tiled (82–169 ms untiled) and do not fit: they run under a documented limit ([Decisions](#decisions-d29)).
 
