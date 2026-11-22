@@ -8,5 +8,8 @@ export default defineConfig({
     // bundles the test worker entry for the real worker_threads tests (docs/architecture/workers.md#testing)
     globalSetup: ['src/main/workers/global-setup.ts'],
     testTimeout: 300_000,
+    // one file at a time: perf files running side by side skew each other's timings (the 3 ms
+    // shape budgets failed that way on a loaded machine)
+    fileParallelism: false,
   },
 })
