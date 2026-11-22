@@ -228,7 +228,7 @@ describe('Library window', () => {
       tab: 'tool',
     })
     await waitFor(() => expect(row(/Flat 6/)).toHaveAttribute('aria-selected', 'true'))
-    expect(row(/Flat 6/)).toHaveTextContent('Used in this project')
+    expect(row(/Flat 6/)).toHaveTextContent('Used')
     const units = screen.getByRole('radiogroup', { name: 'Units' })
     expect(within(units).getByRole('radio', { name: 'in' })).toHaveAttribute('aria-checked', 'true')
     // a source entered in mm reads with its unit in the inch window

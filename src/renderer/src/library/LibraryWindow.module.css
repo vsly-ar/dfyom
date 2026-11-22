@@ -209,12 +209,12 @@
 
 .headRow[data-kind='tool'],
 .row[data-kind='tool'] {
-  grid-template-columns: minmax(140px, 2.4fr) repeat(4, minmax(48px, 0.8fr)) minmax(44px, 0.6fr);
+  grid-template-columns: minmax(220px, 2.4fr) repeat(4, minmax(48px, 0.8fr)) minmax(44px, 0.6fr);
 }
 
 .headRow[data-kind='machine'],
 .row[data-kind='machine'] {
-  grid-template-columns: minmax(140px, 2fr) minmax(60px, 0.7fr) minmax(110px, 1.4fr) minmax(
+  grid-template-columns: minmax(180px, 2fr) minmax(60px, 0.7fr) minmax(110px, 1.4fr) minmax(
       90px,
       1fr
     );
@@ -222,7 +222,7 @@
 
 .headRow[data-kind='stock'],
 .row[data-kind='stock'] {
-  grid-template-columns: minmax(140px, 2fr) minmax(50px, 0.6fr) minmax(120px, 1.5fr) minmax(
+  grid-template-columns: minmax(180px, 2fr) minmax(50px, 0.6fr) minmax(120px, 1.5fr) minmax(
       80px,
       1fr
     );
@@ -319,14 +319,24 @@
   align-items: center;
   gap: 6px;
   min-width: 0;
+  overflow: hidden;
 }
 
+/* the name ellipsizes (full name in its tooltip); the chips beside it keep their size, and the name
+   column's minimum width reserves room for the name beside both chips (as the plan setup rows
+   reserve their action slot), so they never squeeze it to nothing */
 .name {
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: var(--weight-medium);
+}
+
+.chip {
+  display: inline-flex;
+  flex: none;
 }
 
 .typeIcon {
@@ -400,6 +410,8 @@
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
+  /* as tall with the "Unsaved" chip as without, so the fields never jump */
+  min-height: calc(var(--control-md) + var(--space-3) + var(--space-2));
   padding: var(--space-3) var(--space-4) var(--space-2);
 }
 
@@ -437,9 +449,20 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
+  /* a field focused or scrolled into view stops clear of the heading above and the actions below */
+  scroll-padding-block: var(--space-4);
+  border-top: 1px solid transparent;
+  transition: border-color var(--motion-fast);
+}
+
+/* once scrolled, a hairline marks where the fields pass under the editor heading */
+.fieldsScroll[data-scrolled] {
+  border-top-color: var(--border);
 }
 
 .formBody {
+  /* wider labels than the inspector's: "Max spindle speed" and "Acceleration X" on one line */
+  --field-label-width: 156px;
   container-type: inline-size;
   display: grid;
   gap: var(--space-4);
