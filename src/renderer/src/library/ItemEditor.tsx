@@ -1,7 +1,7 @@
 // The Library window's item editor: every field of the selected item's kind (ToolFields /
 // MachineFields / StockFields, `full`), validated as typed by the core models (L3), the draft's
 // "Unsaved" state, a conflict note with Reload / Overwrite, and the actions Duplicate, Remove…,
-// Revert and Save. Doc: docs/conventions/ui-library-window.md#layout, #behaviour-with-projects
+// Import $$… (machines), Revert and Save. Doc: docs/conventions/ui-library-window.md#layout, #behaviour-with-projects
 import { Copy, RotateCcw, Save, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { LibraryItemKind } from '../../../core/library/item'
@@ -16,6 +16,7 @@ import {
   type StockDraft,
   type ToolDraft,
 } from './form'
+import { GrblImportDialog } from './GrblImportDialog'
 import { issueMessages } from './LibraryForm'
 import type { LibraryStore } from './library-store'
 import { MACHINE_FIELDS, MachineFields } from './MachineFields'
@@ -166,6 +167,14 @@ export function ItemEditor({
             </Button>
           }
         />
+        {d.kind === 'machine' ? (
+          <GrblImportDialog
+            id={d.id}
+            revision={d.revision}
+            disabled={d.id === null || dirty || s.saving}
+            onImported={() => s.reload()}
+          />
+        ) : null}
         <span className={styles['spacer']} />
         <Button
           size="sm"

@@ -90,6 +90,22 @@ describe('library forms', () => {
     expect(draftIssues(m)).toEqual([])
   })
 
+  it('needs all three steps-per-mm axes or none; $11/$12 must be positive', () => {
+    const m = defaultMachineValues('mm')
+    const partial = { ...m, stepsPerMm: { z: qdto('scalar', '400', 'mm') } }
+    expect(issuesAt(draftIssues(partial), 'stepsPerMm')).toHaveLength(1)
+    const s = qdto('scalar', '40', 'mm')
+    const full = {
+      ...m,
+      stepsPerMm: { x: s, y: s, z: s },
+      junctionDeviation: qdto('length', '0', 'mm'),
+      arcTolerance: qdto('length', '0.002', 'mm'),
+    }
+    expect(draftIssues(full).map((i) => [i.path.join('.'), i.rule])).toEqual([
+      ['junctionDeviation', 'positive'],
+    ])
+  })
+
   it('keeps a stored item in its own unit system (L5)', () => {
     const inch = { ...defaultToolValues('inch'), name: 'Flat 1/4' }
     const input = commandInput(inch, { units: 'mm', base: inch })

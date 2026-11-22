@@ -1,5 +1,6 @@
 /**
- * Library commands `library.{stock,tool,machine}.{add,update,remove}` and queries `.get`/`.list`.
+ * Library commands `library.{stock,tool,machine}.{add,update,remove}` and queries `.get`/`.list`;
+ * the GRBL `$$` import `library.machine.settings.{preview,import}` (library.md#grbl--import).
  * Doc: docs/architecture/library.md#storage, docs/architecture/commands.md
  *
  * `effect` commands: written to disk at once, not undoable, no history entry, still logged.
@@ -13,7 +14,9 @@ import { defineCommand, defineQuery, type AnyCommand, type QueryDef } from '../c
 import { ItemIdSchema, ItemMetaDtoSchema, type LibraryItemKind } from './item'
 import type { Library } from './library'
 import { valuesFromDTO, type ItemValuesDTO, type LibraryItemDTO } from './library-item'
-import { MachineValuesDtoSchema } from './machine.dto'
+import { applySettingsChanges, machineSettingsDiff, type SettingsDiff } from './grbl-import'
+import { MachineValuesDtoSchema, type MachineValuesDTO } from './machine.dto'
+import { parseSettingsText } from '../run/grbl/settings'
 import { StockValuesDtoSchema } from './stock.dto'
 import { ToolValuesDtoSchema } from './tool.dto'
 import { valuesFromInput, valuesInputSchema } from './values-input'
@@ -182,7 +185,141 @@ function forKind(kind: LibraryItemKind): { commands: AnyCommand[]; queries: Quer
   return { commands: [add, update, remove], queries: [get, list] }
 }
 
+// ── GRBL `$$` import (library.md#grbl--import) ──────────────────────────────────────────
+
+const SETTINGS_TEXT = z
+  .string()
+  .min(1)
+  .max(100_000)
+  .describe('GRBL `$$` output as pasted from any sender; other lines are ignored')
+
+const ChangeSchema = z.object({
+  setting: z.string().describe('e.g. $110'),
+  field: z.string().describe('Machine field path, e.g. maxFeedRate.x'),
+  value: z.number().describe('As GRBL printed it (mm, mm/min, mm/s², rpm)'),
+  from: z.string().nullable().describe('Stored value with unit; null = not set'),
+  to: z.string().describe('Value to store, with unit'),
+  together: z.array(z.string()).optional().describe('Accept these settings together'),
+})
+
+const DiffSchema = z.object({
+  read: z.number().int().describe('Settings found in the text'),
+  changes: z.array(ChangeSchema),
+  unchanged: z.array(z.string()),
+  skipped: z.array(
+    z.object({
+      setting: z.string(),
+      field: z.string(),
+      value: z.number(),
+      rule: z
+        .enum(['softLimitsOff', 'manualSpindle', 'notPositive', 'allAxes'])
+        .describe(
+          'softLimitsOff: travel needs $20=1; manualSpindle: $30/$31 need a gcode spindle; allAxes: all three axes or none',
+        ),
+    }),
+  ),
+  ignored: z.array(z.number().int()).describe('Settings DFYOM does not use'),
+})
+
+const publicDiff = (d: SettingsDiff): z.output<typeof DiffSchema> => ({
+  ...d,
+  changes: d.changes.map(({ quantity: _q, together, ...c }) =>
+    together === undefined ? c : { ...c, together: [...together] },
+  ),
+  unchanged: [...d.unchanged],
+  skipped: [...d.skipped],
+  ignored: [...d.ignored],
+})
+
+/** The machine and the diff of `text` against it. */
+function settingsDiff(
+  services: Services,
+  id: string,
+  text: string,
+  where: string,
+): AppResult<{ lib: Library; values: MachineValuesDTO; diff: SettingsDiff }> {
+  const lib = libraryOf(services, where)
+  if (lib.isErr()) return Err(lib.unwrapErr())
+  const found = lib.unwrap().lookup('machine', id)
+  if (found.state !== 'found')
+    return fail('input.malformed', `machine ${id} does not exist or does not load`, {
+      issues: [
+        {
+          path: ['id'],
+          rule: found.state === 'missing' ? 'unknownItem' : 'unreadableItem',
+          message: found.state === 'missing' ? 'no such library item' : 'item file does not load',
+        },
+      ],
+      where,
+    })
+  const parsed = parseSettingsText(text)
+  if (parsed.settings.size === 0)
+    return fail('input.malformed', 'no GRBL settings ($n=value lines) in the text', {
+      issues: [{ path: ['text'], rule: 'noSettings', message: 'no $n=value lines found' }],
+      where,
+    })
+  const values = found.item.values.toDTO() as MachineValuesDTO
+  return Ok({ lib: lib.unwrap(), values, diff: machineSettingsDiff(values, parsed.settings) })
+}
+
+const settingsPreview = defineQuery({
+  name: 'library.machine.settings.preview',
+  summary:
+    'Compare pasted GRBL $$ output with a library machine: changes, unchanged, skipped and why, ignored settings. Never writes to GRBL.',
+  readsDocument: false,
+  args: z.object({ id: ItemIdSchema, text: SETTINGS_TEXT }),
+  result: DiffSchema,
+  run(_doc, args, ctx) {
+    return settingsDiff(ctx.services, args.id, args.text, 'library.machine.settings.preview').map(
+      (r) => publicDiff(r.diff),
+    )
+  },
+})
+
+const settingsImport = defineCommand({
+  kind: 'effect',
+  name: 'library.machine.settings.import',
+  summary:
+    'Apply the accepted changes of pasted GRBL $$ output to a library machine (see library.machine.settings.preview; not undoable, never writes to GRBL).',
+  title: () => 'Import GRBL settings into library machine',
+  machine: false,
+  args: z.object({
+    id: ItemIdSchema,
+    revision: z.number().int().min(1).describe('Revision you read; stale → command.conflict'),
+    text: SETTINGS_TEXT,
+    accept: z
+      .array(z.string())
+      .min(1)
+      .describe('Settings to apply, from the preview changes (e.g. ["$110", "$111"])'),
+  }),
+  result: z.object({ item: ITEM_RESULTS.machine, applied: z.array(z.string()) }),
+  async run(_doc, args, ctx) {
+    const where = 'library.machine.settings.import'
+    const r = settingsDiff(ctx.services, args.id, args.text, where)
+    if (r.isErr()) return Err(r.unwrapErr())
+    const { lib, values, diff } = r.unwrap()
+    const next = applySettingsChanges(values, diff, args.accept)
+      .andThen((v) => valuesFromDTO(v).mapErr((e) => e.prefixIssues('values')))
+      .mapErr((e) => e.withContext(where))
+    if (next.isErr()) return Err(next.unwrapErr())
+    const item = await lib.update(
+      args.id,
+      args.revision,
+      next.unwrap(),
+      new Date(ctx.clock.now()).toISOString(),
+    )
+    const applied = diff.changes.map((c) => c.setting).filter((s) => args.accept.includes(s))
+    return item.map((i) => ({ item: i.toDTO() as z.output<typeof ITEM_RESULTS.machine>, applied }))
+  },
+})
+
 const ALL = (['stock', 'tool', 'machine'] as const).map(forKind)
 
-export const LIBRARY_COMMANDS: readonly AnyCommand[] = ALL.flatMap((k) => k.commands)
-export const LIBRARY_QUERIES: readonly QueryDef[] = ALL.flatMap((k) => k.queries)
+export const LIBRARY_COMMANDS: readonly AnyCommand[] = [
+  ...ALL.flatMap((k) => k.commands),
+  settingsImport,
+]
+export const LIBRARY_QUERIES: readonly QueryDef[] = [
+  ...ALL.flatMap((k) => k.queries),
+  settingsPreview,
+]

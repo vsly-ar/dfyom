@@ -62,7 +62,7 @@ The user confirmed each recommendation (D27).
 2. **Draft and Save, or live commit per field?** Recommendation: draft and Save (L3), because library writes are not undoable and are shared by every project.
 3. **Keep the quick "New tool…" / "New machine…" dialogs, and add "New tool…" to the Design tool field?** Recommendation: yes to both (L4), sharing one form component with the window.
 4. **Toolbar placement and shortcut:** recommendation: "Library" before "Settings" in the end column, Window → Library, `Ctrl/Cmd+Shift+L` (L2).
-5. **Import in scope?** Fusion tool library JSON, FreeCAD tool bits and GRBL `$$` for machines. Recommendation: later, as separate backlog items; the window gets an "Import…" slot in its `⋯` menu when they come.
+5. **Import in scope?** Fusion tool library JSON, FreeCAD tool bits and GRBL `$$` for machines. Recommendation: later, as separate backlog items; the window gets an "Import…" slot in its `⋯` menu when they come. GRBL `$$` was approved on 2026-11-22 (D30) and is built as "Import $$…" in the machine editor (see [Implementation](#implementation-task-l1)).
 
 ## Implementation (task L1)
 
@@ -76,7 +76,9 @@ The user confirmed each recommendation (D27).
 - **Tool drawing:** `ToolDrawing.tsx` (flat, ball, bull nose, drill); the dimension of the focused field is amber and named in the image label ("Tool drawing: LCF highlighted"). Presets show the derived chip load (feed ÷ (speed × flutes)) per row.
 - **Quick dialogs (L4):** `NewToolDialog` / `NewMachineDialog` use the window's field components (`variant="quick"`); the design tool field's "New tool…" and the `dfm.toolNotInLibrary` fix "Add to library" open `NewToolDialog` prefilled from the generalized tool, and the added tool is locked with `design.operation.tool.set`.
 - **Run safety:** the window shows the run mode's `MachineToolbar` (state badge, Stop); its Stop (`job.abort`) is sent to the window's own session, and when that has no run, main aborts the run of the window whose project runs it (`abortElsewhere` in `src/main/ipc.ts`).
-- **Not built:** the toolbar's `⋯` menu (it only holds Import, a later backlog item).
+- **Import $$… (D30):** the machine editor's action bar has "Import $$…" (Lucide `clipboard-paste`), enabled for a saved machine without unsaved changes (else its tooltip says to save first). The dialog has two steps: a monospace text area for the pasted `$$` output and "Compare" (`library.machine.settings.preview`); then the diff: one checkbox row per change ("Max feed rate X · $110 · 3000 mm/min → 5000 mm/min", all ticked), rows of a `together` group tick together, followed by what was skipped with the reason, the unchanged count and the ignored settings. "Apply N changes" sends `library.machine.settings.import` with the ticked settings and shows the stored machine; "Back" returns to the text. It never writes to GRBL ([library.md § GRBL `$$` import](../architecture/library.md#grbl--import)).
+- **Motion and drive fields:** the full machine form adds the group "Motion planning" (junction deviation `$11`, arc tolerance `$12`) and "Steps per mm" (X/Y/Z, all three or none, like acceleration).
+- **Not built:** the toolbar's `⋯` menu (it would hold the other imports, later backlog items).
 
 | File                                                                    | Contents                                                                 |
 | ----------------------------------------------------------------------- | ------------------------------------------------------------------------ |
@@ -90,4 +92,5 @@ The user confirmed each recommendation (D27).
 | `src/renderer/src/library/{Tool,Machine,Stock}Fields.tsx`, `fields.tsx` | The forms shared by the window and the quick dialogs                     |
 | `src/renderer/src/library/form.ts`                                      | Defaults, names, clean-up and command input of drafts                    |
 | `src/renderer/src/library/ToolDrawing.tsx`, `PresetTable.tsx`           | Tool drawing; presets list with chip load                                |
+| `src/renderer/src/library/GrblImportDialog.tsx`                         | "Import $$…": paste, diff with checkboxes, apply                         |
 | `src/renderer/src/library/LibraryLink.tsx`                              | "Edit in library" / "Open library" context links                         |

@@ -4,6 +4,7 @@
  * Source: https://github.com/gnea/grbl/wiki/Grbl-v1.1-Interface
  */
 import type { Vec3 } from '../../toolpath/model'
+import { parseSettingLine } from './settings'
 
 const MM_PER_INCH = 25.4
 
@@ -23,7 +24,6 @@ export type GrblLine =
   | { readonly kind: 'other'; readonly text: string }
 
 const BANNER = /^Grbl (\S+) \['\$' for help\]$/
-const SETTING = /^\$(\d+)=(-?\d+(?:\.\d+)?)$/
 const FEEDBACK = /^\[([A-Z0-9]+):(.*)\]$/
 
 export function parseLine(line: string): GrblLine {
@@ -43,8 +43,8 @@ export function parseLine(line: string): GrblLine {
     const text = m[2] ?? ''
     return tag === 'MSG' ? { kind: 'message', text } : { kind: 'feedback', tag, text }
   }
-  m = SETTING.exec(line)
-  if (m) return { kind: 'setting', n: Number(m[1]), value: Number(m[2]) }
+  const setting = parseSettingLine(line)
+  if (setting.isSome()) return { kind: 'setting', ...setting.unwrap() }
   m = BANNER.exec(line)
   if (m) return { kind: 'banner', version: m[1] ?? '' }
   return { kind: 'other', text: line }

@@ -30,6 +30,15 @@ export const MachineValuesDtoSchema = z.object({
   acceleration: axes(quantityDto('scalar'))
     .optional()
     .describe('Scalar values in mm/s² ($120–$122)'),
+  junctionDeviation: quantityDto('length')
+    .optional()
+    .describe('$11: GRBL cornering model; unset = 0.010 mm'),
+  arcTolerance: quantityDto('length')
+    .optional()
+    .describe('$12: arc chord tolerance; unset = 0.002 mm'),
+  stepsPerMm: axes(quantityDto('scalar'))
+    .optional()
+    .describe('Scalar values in steps/mm ($100–$102); all three axes or none'),
   spindle: z.object({
     control: z.enum(['gcode', 'manual']).describe('manual: export pauses for a dial router'),
     maxSpeed: quantityDto('spindleSpeed').describe('$30'),
