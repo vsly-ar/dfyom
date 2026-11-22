@@ -216,7 +216,7 @@ export type OperationGeometry = FacePlacement &
         readonly angle: number
         /**
          * Stepped (F7): terraces of at most this height by a flat end mill; absent = a chamfer
-         * mill (docs/modes/design-v0.4.md#stepped-countersink-f7-d41). The solid stays the cone.
+         * mill (docs/modes/design-v0.4.md#stepped-countersink-f7-d41). The solid is then the terraces.
          */
         readonly stepdown?: number
       }

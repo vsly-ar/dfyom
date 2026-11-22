@@ -185,6 +185,55 @@ describe('hole inspector (U2)', () => {
     )
   })
 
+  it('stepped countersink: method, stepdown, the note, terraces in the section, shared tool (F7)', async () => {
+    const { user, radio, hole1, field, setField } = await renderHole({
+      fastener: 'M3',
+      type: 'countersink',
+    })
+    expect(radio('Countersink method', 'Chamfer mill')).toHaveAttribute('aria-checked', 'true')
+    expect(within(insp()).queryByLabelText('Stepdown', { selector: 'input' })).toBeNull()
+    await user.click(radio('Countersink method', 'Stepped'))
+    await waitFor(() => expect(hole1()['csMethod']).toBe('stepped'))
+    expect(src(hole1()['csStepdown'])).toBe('1 mm')
+    expect(await within(insp()).findByLabelText('Stepdown', { selector: 'input' })).toHaveValue(
+      '1 mm',
+    )
+    await waitFor(() =>
+      expect(section()).toHaveAccessibleName(
+        'Section: Ø 3.4 mm through; countersink Ø 7.12 mm, 90°, stepped in 2 steps of 0.93 mm; M3 head 0.2 mm below the face.',
+      ),
+    )
+    // the info note at the method control
+    expect(await within(insp()).findByText(/^Stepped countersink: 2 steps of/)).toBeInTheDocument()
+    // the countersink takes the drill's end mill (Apply has not chosen tools yet)
+    const tools = within(insp()).getByRole('region', { name: 'Tools' })
+    expect(
+      within(tools).getByText("Takes the drill's end mill on Apply: one tool, no tool change."),
+    ).toBeInTheDocument()
+    await expectNoAxeViolations()
+
+    await setField('Stepdown', '0.5')
+    await waitFor(() => expect(src(hole1()['csStepdown'])).toBe('0.5'))
+    await waitFor(() => expect(section()).toHaveAccessibleName(/stepped in 4 steps of 0\.465 mm/))
+    // focusing the stepdown highlights the first terrace's height
+    await user.click(field('Stepdown'))
+    await waitFor(() =>
+      expect(section().querySelector('[data-part="csStepdown"]')).toHaveAttribute(
+        'data-state',
+        'active',
+      ),
+    )
+
+    // back to a chamfer mill: the stepdown goes with the method
+    await user.click(radio('Countersink method', 'Chamfer mill'))
+    await waitFor(() => expect(hole1()['csMethod']).toBeUndefined())
+    expect(hole1()['csStepdown']).toBeUndefined()
+    await waitFor(() =>
+      expect(within(insp()).queryByLabelText('Stepdown', { selector: 'input' })).toBeNull(),
+    )
+    expect(within(tools).queryByText(/tool change/)).toBeNull()
+  })
+
   it('a tap drill hole becoming a counterbore turns into a clearance hole', async () => {
     const { user, radio, hole1 } = await renderHole({ fastener: 'M3', purpose: 'tapDrill' })
     expect(within(insp()).queryByRole('radiogroup', { name: 'Fit' })).toBeNull()

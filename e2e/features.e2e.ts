@@ -4,7 +4,7 @@
 // opens the Clones draft (U3: read-out, a 2 x 2 grid row, Make clones, skip clone 3 by clicking its
 // marker in the viewport, the instance inspector) with Source and Clones groups under the Clones
 // row; the hole inspector (U2) sets type and fastener, draws the section and offers the
-// custom-size fix. Task U4: Add → Chamfer on a drilling opens the chamfer inspector (Edge,
+// custom-size fix and a stepped countersink (F7). Task U4: Add → Chamfer on a drilling opens the chamfer inspector (Edge,
 // Diameter, Angle, Depth and the section). Windows stay hidden
 // (app.fixture.ts). With DFYOM_RENDERS=1 it also writes the light and dark review renders to
 // design/features/renders/ (ui.md § Features (v0.4), visuals reviewed in L2).
@@ -159,6 +159,14 @@ test('features: add a hole, expand its row, the owned inspector is read-only, Ma
       .and(inspector.locator('input'))
       .focus(),
   )
+  // stepped (F7): terraces by the hole's end mill, the stepdown field, the shared tool
+  await inspector.getByRole('radio', { name: 'Stepped' }).click()
+  await expect(section).toHaveAccessibleName(/stepped in 2 steps of 0\.93 mm/)
+  await expect(tools.getByText(/no tool change/)).toBeVisible()
+  const stepdown = inspector.getByLabel('Stepdown', { exact: true }).and(inspector.locator('input'))
+  await stepdown.focus()
+  await expect(section.locator('[data-part="csStepdown"]')).toHaveAttribute('data-state', 'active')
+  await render(page, 'stepped', 'u2', () => stepdown.focus())
 
   // ── Make Clones… of the selected hole (U3: the draft, then a grid, skip by click) ───────
   await navigator.getByRole('button', { name: 'Add', exact: true }).click()

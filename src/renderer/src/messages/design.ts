@@ -196,6 +196,17 @@ export const designMessages = {
       csDiameter: 'Countersink Ø',
       csAngle: 'Countersink angle',
       headSink: 'Head sink',
+      // stepped countersink (F7, D41)
+      csMethod: 'Countersink method',
+      csMethods: { chamfer: 'Chamfer mill', stepped: 'Stepped' } as Record<string, string>,
+      csStepdown: 'Stepdown',
+      /** Under the countersink's tool field when stepped (ui.md § Hole inspector). */
+      sharedTool: {
+        same: 'Same end mill as the drill: one tool, no tool change.',
+        pending: "Takes the drill's end mill on Apply: one tool, no tool change.",
+        other:
+          'Stepped with its own end mill: the plan changes tools between bore and countersink.',
+      },
       center: 'Position',
       on: 'On',
       // the hole inspector (U2, ui.md § Hole inspector)

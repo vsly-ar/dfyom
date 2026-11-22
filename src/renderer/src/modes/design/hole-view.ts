@@ -21,10 +21,19 @@ import { quantityOf, type DesignPart } from './model'
 export type HoleType = HoleSectionType
 export type HolePurpose = 'clearance' | 'tapDrill'
 export type HoleFit = 'close' | 'normal' | 'loose'
+/** How a countersink is cut (F7, D41): a chamfer mill, or terraces by the hole's end mill. */
+export type CsMethod = 'chamfer' | 'stepped'
 
 /** The size fields of the hole record (quantities). */
 export type HoleSizeField =
-  'diameter' | 'depth' | 'cbDiameter' | 'cbDepth' | 'csDiameter' | 'csAngle' | 'headSink'
+  | 'diameter'
+  | 'depth'
+  | 'cbDiameter'
+  | 'cbDepth'
+  | 'csDiameter'
+  | 'csAngle'
+  | 'csStepdown'
+  | 'headSink'
 
 /** The stored hole as the inspector reads it (the record is flat, design-v0.4.md § F3). */
 export interface HoleRecord {
@@ -36,6 +45,8 @@ export interface HoleRecord {
   readonly purpose: HolePurpose
   readonly fit: HoleFit
   readonly bottom: HoleSectionBottom
+  /** Countersink only meaningful; stored `stepped` with `csStepdown` (F7). */
+  readonly csMethod: CsMethod
   readonly center: readonly [QuantityDTO, QuantityDTO]
   readonly sizes: Partial<Record<HoleSizeField, QuantityDTO>>
 }
@@ -47,6 +58,7 @@ const SIZE_FIELDS: readonly HoleSizeField[] = [
   'cbDepth',
   'csDiameter',
   'csAngle',
+  'csStepdown',
   'headSink',
 ]
 
@@ -63,12 +75,16 @@ export function holeRecord(feature: FeatureDTO): HoleRecord {
     purpose: (d['purpose'] as HolePurpose | undefined) ?? 'clearance',
     fit: (d['fit'] as HoleFit | undefined) ?? 'normal',
     bottom: (d['bottom'] as HoleSectionBottom | undefined) ?? 'through',
+    csMethod: d['csMethod'] === 'stepped' ? 'stepped' : 'chamfer',
     center: d['center'] as [QuantityDTO, QuantityDTO],
     sizes,
   }
 }
 
-/** The size fields shown for a type and bottom, in the inspector's order (head sink apart). */
+/**
+ * The size fields shown for a type and bottom, in the inspector's order (head sink apart, and the
+ * stepped countersink's stepdown, which follows its method control).
+ */
 export function sizeFields(h: Pick<HoleRecord, 'type' | 'bottom'>): HoleSizeField[] {
   const fields: HoleSizeField[] = ['diameter']
   if (h.bottom !== 'through') fields.push('depth')
@@ -157,6 +173,7 @@ export function sectionValues(
     cbDepth: mm(h.sizes.cbDepth),
     csDiameter: mm(h.sizes.csDiameter),
     csAngle: mm(h.sizes.csAngle),
+    csStepdown: h.csMethod === 'stepped' ? mm(h.sizes.csStepdown) : undefined,
     headSink: mm(h.sizes.headSink) ?? 0,
     stockDepth: stockBelow(part, h.on),
     fastener,
@@ -285,4 +302,22 @@ export function blindDepth(h: HoleRecord): number {
           Math.tan(((mm(h.sizes.csAngle) ?? 90) * Math.PI) / 360)
         : 0
   return step + Math.max(d, 1)
+}
+
+/**
+ * What the Tools group says under a stepped countersink's tool field (F7, D41): the hole's end
+ * mill cuts it (`same`), it takes that tool on Apply (`pending`: a role has no tool yet), or it
+ * has its own end mill and the plan changes tools (`other`, a locked choice). Undefined unless
+ * the hole is a stepped countersink.
+ */
+export function sharedToolNote<T extends { featureRole?: string | undefined; tool?: unknown }>(
+  h: Pick<HoleRecord, 'type' | 'csMethod'>,
+  owned: readonly T[],
+  same: (a: NonNullable<T['tool']>, b: NonNullable<T['tool']>) => boolean,
+): 'same' | 'pending' | 'other' | undefined {
+  if (h.type !== 'countersink' || h.csMethod !== 'stepped') return undefined
+  const cs = owned.find((o) => o.featureRole === 'countersink')?.tool
+  const drill = owned.find((o) => o.featureRole === 'drill')?.tool
+  if (cs == null || drill == null) return 'pending'
+  return same(cs, drill) ? 'same' : 'other'
 }

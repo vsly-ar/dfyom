@@ -1,11 +1,13 @@
 // The stepped chamfer (v0.4 F7, D41): terraces by a flat end mill. The heightmap oracle checks
 // the cut against the cone: every top step corner lies on it, no stock is left inside it (the
 // screw head seats), and the cut goes past it by at most one terrace and never outside the
-// terraces or the chamfer Ø; path rules, rings, refusals and a golden.
+// terraces or the chamfer Ø; the swept volume is the evaluated solid's (the terrace sum); path
+// rules, rings, refusals and a golden.
 // Spec: docs/modes/plan-v0.4.md#stepped-chamfer-f7,
 // docs/modes/design-v0.4.md#stepped-countersink-f7-d41
 import { describe, expect, it } from 'vitest'
 import { chamferTerraces } from '../geometry/model'
+import { terraceVolume } from '../geometry/testing/analytic'
 import { generateChamfer, terraceRings } from './chamfer'
 import type { ChamferInput, ChamferOperation } from './model'
 import { chamferInput, endMill } from './testing/fixtures'
@@ -67,12 +69,14 @@ function checkTerraces(input: ChamferInput, tol = 0.01): void {
     return z
   }
   const wrong: string[] = []
+  let removed = 0
   for (let i = 0; i < map.nx; i++)
     for (let j = 0; j < map.ny; j++) {
       const [x, y] = map.center(i, j)
       const rho = Math.hypot(x - op.center[0], y - op.center[1])
       if (rho < op.edgeDiameter / 2) continue
       const h = map.z[j * map.nx + i]!
+      removed += (op.onZ - h) * map.cell ** 2
       const at = `${x.toFixed(3)},${y.toFixed(3)}`
       if (rho >= op.diameter / 2) {
         if (h < op.onZ - 1e-9) wrong.push(`cut outside the chamfer at ${at}: ${h}`)
@@ -85,6 +89,10 @@ function checkTerraces(input: ChamferInput, tol = 0.01): void {
       if (h < cone(rho) - t.height - 1e-9) wrong.push(`more than a terrace past at ${at}: ${h}`)
     }
   expect(wrong.slice(0, 3)).toEqual([])
+  // the cut is the evaluated solid's terraces (geometry/operations.ts): the swept volume outside
+  // the hole matches the analytic terrace sum the solid is tested against (evaluate.test.ts)
+  const exact = terraceVolume(op.edgeDiameter, op.diameter, op.angle, op.stepdown!)
+  expect(Math.abs(removed - exact)).toBeLessThan(0.02 * exact)
   // every top step corner lies on the cone: just outside each wall the stock stands at the
   // cone's height there (the level of the terrace above)
   t.radii.forEach((r, k) => {
