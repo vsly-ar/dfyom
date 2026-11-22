@@ -101,6 +101,13 @@ export const StrategyDtoSchema = z
   .describe('Pass strategy parameters set for this operation; omitted ones take defaults')
 export type StrategyDTO = z.output<typeof StrategyDtoSchema>
 
+/**
+ * Where a plan operation's tool comes from (docs/modes/plan-v0.2.md#tool-resolution-from-the-design-tool-field):
+ * absent on records taken before task E4, treated as `plan` (never swapped by a rebuild).
+ */
+export const TOOL_SOURCES = ['design', 'plan'] as const
+export type ToolSource = (typeof TOOL_SOURCES)[number]
+
 export const PlanOperationDtoSchema = z.object({
   id: PlanRecordIdSchema.describe('Plan operation id'),
   designOperationIds: z
@@ -108,6 +115,16 @@ export const PlanOperationDtoSchema = z.object({
     .min(1)
     .describe('Operations of the design snapshot it machines (drillings may share one)'),
   tool: z.string().min(1).optional().describe("Id of the tool copy in the plan's snapshots"),
+  toolSource: z
+    .enum(TOOL_SOURCES)
+    .optional()
+    .describe(
+      'design: resolved from the design tool field (re-resolved when it changes); plan: plan.tool.assign (kept)',
+    ),
+  designToolChanged: z
+    .literal(true)
+    .optional()
+    .describe("A rebuild kept this plan-assigned tool although the design's tool field changed"),
   stickout: length().optional().describe("Default: the tool's stickout, else its flute length"),
   presetName: z.string().min(1).max(PRESET_NAME_MAX).optional().describe('Default: by material'),
   auto: z

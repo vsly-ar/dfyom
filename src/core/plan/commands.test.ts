@@ -239,12 +239,14 @@ describe('snapshot independence and stale detection', () => {
         changedInDesign: true,
         removedFromDesign: false,
         editedInPlan: false,
+        designToolChanged: false,
       },
       {
         operationId: 'profile1',
         changedInDesign: false,
         removedFromDesign: true,
         editedInPlan: false,
+        designToolChanged: false,
       },
     ])
     // the new hole is never reported or added
@@ -388,6 +390,7 @@ describe('plan.design.operation.update (plan-only edits)', () => {
         changedInDesign: false,
         removedFromDesign: false,
         editedInPlan: true,
+        designToolChanged: false,
       },
     ])
     for (const [name, args] of [
@@ -766,7 +769,11 @@ describe('queries', () => {
       }[]
     }
     expect(r.tools.map((t) => t.toolLibraryItemId)).toEqual([s.tools.flat6, s.tools.flat4])
-    expect(r.tools[0]?.reasons[0]).toBe('has a preset for aluminum')
+    // the design's auto choice picked Flat 6: it ranks first for that reason too
+    expect(r.tools[0]?.reasons.slice(0, 2)).toEqual([
+      "the design's tool",
+      'has a preset for aluminum',
+    ])
     const drill1 = opsOf(s.plan(planId)).find((o) => o.designOperationIds[0] === 'drill1')!.id
     const d = s.query('plan.tool.suggest', { planId, planOperationId: drill1 }) as {
       tools: { toolLibraryItemId: string }[]

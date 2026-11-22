@@ -1,4 +1,4 @@
-toolpath planOp-20 tool snapshot-24 S18000
+toolpath planOp-20 tool snapshot-9 S18000
 stats cut 2218.5 rapid 18.5 s 168.06
 pass rough
   rapid 58 104 10
@@ -46,7 +46,7 @@ pass rough
   rapid 2 104 2
   rapid 2 104 10
 
-toolpath planOp-21 tool snapshot-24 S18000
+toolpath planOp-21 tool snapshot-9 S18000
 stats cut 397.8551 rapid 48.0684 s 35.1923
 pass rough
   rapid 30 43.2 10
