@@ -108,6 +108,24 @@ export interface UiState {
    */
   readonly sectionDepth: number | null
   setSectionDepth(mm: number | null): void
+  /**
+   * Feature rows expanded in the navigator (v0.4 task U1): per window and per feature while the
+   * window is open, collapsed by default; no command, never saved.
+   */
+  readonly expandedFeatures: ReadonlySet<string>
+  setFeatureExpanded(featureId: string, expanded: boolean): void
+  /**
+   * A feature field to focus once its inspector shows (task U1: "Edited through Hole 1" and
+   * "Fix in Hole 1" select the feature, then its inspector focuses `field` and clears this).
+   */
+  readonly featureFocus: FeatureFocus | null
+  setFeatureFocus(focus: FeatureFocus | null): void
+}
+
+/** Which feature field the feature inspector should focus (a dotted field path, `cbDiameter`). */
+export interface FeatureFocus {
+  readonly featureId: string
+  readonly field: string
 }
 
 /** The last import's report and the shapes it created (ui.md#import-report: "Later access"). */
@@ -162,5 +180,16 @@ export function createUiStore(initial: Partial<Pick<UiState, 'mode'>> = {}): UiS
     setSnapOn: (snapOn) => set({ snapOn }),
     sectionDepth: null,
     setSectionDepth: (sectionDepth) => set({ sectionDepth }),
+    expandedFeatures: new Set(),
+    setFeatureExpanded: (id, expanded) =>
+      set((s) => {
+        if (s.expandedFeatures.has(id) === expanded) return {}
+        const next = new Set(s.expandedFeatures)
+        if (expanded) next.add(id)
+        else next.delete(id)
+        return { expandedFeatures: next }
+      }),
+    featureFocus: null,
+    setFeatureFocus: (featureFocus) => set({ featureFocus }),
   }))
 }

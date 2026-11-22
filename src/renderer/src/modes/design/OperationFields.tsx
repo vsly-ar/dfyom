@@ -74,6 +74,11 @@ export interface OperationFieldsContext {
   cancelGesture(gesture: string): Promise<boolean>
   /** The shape picker's design-only actions (task U2): New shape…, Edit shape, Convert, fixes. */
   readonly shapeActions?: ShapeActions | undefined
+  /**
+   * Read-only fields of an owned operation (v0.4 task U1): a finding with a suggestion offers this
+   * fix instead of "Use …" ("Fix in Hole 1": select the feature, focus the mapped field).
+   */
+  readonly fixElsewhere?: ((w: DfmWarning) => { label: string; onApply: () => void }) | undefined
 }
 
 /**
@@ -593,7 +598,9 @@ function ParamField({
                   onApply: () => commit(ctx, path, source),
                 },
               }
-            : {}),
+            : w.suggestion && ctx.readOnly && ctx.fixElsewhere
+              ? { fix: ctx.fixElsewhere(w) }
+              : {}),
         }
       }),
   ]

@@ -55,6 +55,47 @@
   flex: 1;
 }
 
+/* a disabled item with its reason (task U1): two lines, the reason in secondary text */
+.item[data-reason] {
+  align-items: flex-start;
+  height: auto;
+  min-height: 26px;
+  padding-block: 5px;
+}
+
+.item[data-reason] svg {
+  color: var(--text-faint);
+}
+
+.reason {
+  display: block;
+  max-width: 260px;
+  margin-top: 2px;
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  color: var(--text-muted);
+  white-space: normal;
+}
+
+.group {
+  display: grid;
+  gap: 1px;
+}
+
+.group + .group {
+  margin-top: 3px;
+  padding-top: 3px;
+  border-top: 1px solid var(--border);
+}
+
+.label {
+  padding: 4px 8px 2px;
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  font-weight: var(--weight-medium);
+  color: var(--text-muted);
+}
+
 .kbd {
   margin-left: auto;
   font: var(--text-xs) var(--font-mono);

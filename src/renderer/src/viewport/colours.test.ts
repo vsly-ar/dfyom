@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   FALLBACK,
   isOutlined,
+  isSelectedOwner,
   mix,
   MIX,
   paletteFrom,
@@ -130,5 +131,16 @@ describe('surface colours', () => {
     expect(at(0.5)[0]).toBeCloseTo(
       mix(palette.part, palette.selected, (MIX.pulse + MIX.selected) / 2)[0],
     )
+  })
+})
+
+describe('feature selection (v0.4 task U1)', () => {
+  it('a selected feature selects every owned operation, not one with a similar id', () => {
+    expect(isSelectedOwner('hole1_drill', 'hole1')).toBe(true)
+    expect(isSelectedOwner('hole1_counterbore', 'hole1')).toBe(true)
+    expect(isSelectedOwner('hole1', 'hole1')).toBe(true)
+    expect(isSelectedOwner('hole12_drill', 'hole1')).toBe(false)
+    expect(isSelectedOwner('pocket1', 'hole1')).toBe(false)
+    expect(isSelectedOwner('hole1_drill', null)).toBe(false)
   })
 })

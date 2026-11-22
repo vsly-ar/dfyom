@@ -75,7 +75,7 @@ test('shapes on operations: import SVG, pick a named shape, drag a tab, undo', a
   await setField(inspector, 'Position Y', '40')
 
   // ── a profile's tab marker dragged along the loop ────────────────────────────────────────
-  await navigator.getByRole('button', { name: 'Add operation' }).click()
+  await navigator.getByRole('button', { name: 'Add', exact: true }).click()
   await page.getByRole('menuitem', { name: 'Add profile' }).click()
   await expect(inspector.getByRole('heading', { name: 'Profile 1' })).toBeVisible()
   await setField(inspector, 'Tab count', '2')

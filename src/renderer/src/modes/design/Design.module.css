@@ -215,6 +215,188 @@
   opacity: 0;
 }
 
+/* feature rows (v0.4 task U1, ui.md#feature-rows-and-add; visuals draft until L2): the chevron
+   sits in the row's left gutter so the feature icon lines up with plain operation icons; owned
+   rows sit one 8 px step in, along a thin guide line, and slide down when the row opens */
+.featureItem {
+  display: grid;
+}
+
+.featureSelect {
+  position: relative;
+  grid-template-columns: var(--icon-md) minmax(0, 1fr) auto auto;
+}
+
+.chevron {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  display: inline-grid;
+  place-items: center;
+  width: var(--space-3);
+  height: var(--control-md);
+  color: var(--text-muted);
+  transform: translateY(-50%);
+}
+
+.chevron > svg {
+  width: 10px;
+  height: 10px;
+  transform: rotate(-90deg);
+  transition: transform var(--motion-base) var(--ease-standard);
+}
+
+.chevron[data-open] > svg {
+  transform: none;
+}
+
+.featureSelect:hover .chevron {
+  color: var(--text);
+}
+
+.featureText {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  min-width: 0;
+}
+
+.featureReadout {
+  overflow: hidden;
+  flex-shrink: 1;
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ownedWrap {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--motion-base) var(--ease-standard);
+}
+
+.ownedWrap[data-open] {
+  grid-template-rows: 1fr;
+}
+
+.owned {
+  position: relative;
+  display: grid;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.ownedList,
+.instances {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* the guide line along the block, under the feature icon's left edge */
+.owned::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: var(--space-1);
+  left: calc(var(--space-3) + 2px + var(--space-1));
+  width: 1px;
+  background: var(--border);
+}
+
+/* owned and nested rows: one 8 px step in */
+.op[data-owned] .opSelect,
+.op[data-nested] .opSelect,
+.featureItem[data-nested] > .op > .opSelect {
+  padding-left: calc(var(--space-3) + var(--space-2));
+}
+
+.op[data-owned] .opSelect,
+.op[data-nested] .opSelect {
+  grid-template-columns: var(--icon-md) minmax(0, 1fr) auto auto auto;
+}
+
+.featureItem[data-nested] .chevron {
+  left: var(--space-2);
+}
+
+/* a nested feature's own children: one more step */
+.featureItem[data-nested] .owned .op[data-owned] .opSelect {
+  padding-left: calc(var(--space-3) + 2 * var(--space-2));
+}
+
+/* Clones groups (Source, Clones) */
+.subgroupTitle {
+  margin: 0;
+  padding: var(--space-1) var(--space-3) 0 calc(var(--space-3) + var(--space-2));
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  font-weight: var(--weight-medium);
+  color: var(--text-muted);
+}
+
+.subgroupToggle {
+  display: flex;
+  gap: var(--space-1);
+  align-items: center;
+  min-height: var(--control-sm);
+  padding: var(--space-1) var(--space-3) var(--space-1) calc(var(--space-3) + var(--space-2));
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  font-weight: var(--weight-medium);
+  color: var(--text-muted);
+  text-align: left;
+  cursor: pointer;
+}
+
+.subgroupToggle:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.chevronInline {
+  display: inline-grid;
+  place-items: center;
+}
+
+.chevronInline > svg {
+  width: 10px;
+  height: 10px;
+  transform: rotate(-90deg);
+  transition: transform var(--motion-base) var(--ease-standard);
+}
+
+.chevronInline[data-open] > svg {
+  transform: none;
+}
+
+.instance {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  min-height: var(--control-sm);
+  padding: var(--space-0-5) var(--space-3) var(--space-0-5)
+    calc(var(--space-3) + var(--space-2) + var(--icon-md) + var(--space-2));
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text);
+}
+
+.instance[data-muted] {
+  color: var(--text-muted);
+}
+
+.ownedId {
+  font: var(--text-xs) / var(--lh-xs) var(--font-mono);
+  color: var(--text-muted);
+}
+
 /* reference models (task R3): a group between the part and the operations */
 .references {
   display: grid;
@@ -833,4 +1015,121 @@
 
 .tabRemove {
   margin-bottom: var(--space-0-5);
+}
+
+/* owned-operation and feature inspectors (v0.4 task U1; visuals draft until L2) */
+.breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  align-items: center;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+}
+
+.crumb,
+.inlineLink {
+  display: inline-flex;
+  gap: var(--space-1);
+  align-items: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--text);
+  text-decoration: underline;
+  text-decoration-color: var(--border-control);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.crumb[aria-current='page'] {
+  color: var(--text);
+  text-decoration: none;
+  font-weight: var(--weight-medium);
+}
+
+.crumb:hover,
+.inlineLink:hover {
+  text-decoration-color: currentColor;
+}
+
+.crumbSep {
+  color: var(--text-faint);
+}
+
+.ownedNote {
+  display: grid;
+  grid-template-columns: var(--icon-sm) minmax(0, 1fr);
+  gap: var(--space-2);
+  align-items: start;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+}
+
+.ownedNote > svg {
+  margin-top: 2px;
+}
+
+.ownedNoteText {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text);
+}
+
+.featureFacts {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+}
+
+.featureFact {
+  display: grid;
+  grid-template-columns: minmax(0, 9rem) minmax(0, 1fr);
+  gap: var(--space-2);
+  padding: var(--space-0-5) var(--space-1);
+  border-radius: var(--radius-sm);
+  outline: none;
+}
+
+.featureFact dt {
+  color: var(--text-muted);
+}
+
+.featureFact dd {
+  margin: 0;
+}
+
+/* the field "Edited through" / "Fix in" points at */
+.featureFact:focus-visible,
+.featureFact:focus {
+  box-shadow: inset 2px 0 0 var(--accent);
+  background: var(--accent-subtle);
+}
+
+.featureLinks {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-sm);
+}
+
+/* the owned note's read-only reason: the fields' description, not shown twice */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }

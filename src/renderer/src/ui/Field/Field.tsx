@@ -6,7 +6,9 @@
 import { Icon } from '../icons/Icon'
 import {
   cloneElement,
+  createContext,
   isValidElement,
+  useContext,
   useEffect,
   useId,
   useLayoutEffect,
@@ -19,6 +21,23 @@ import { Button } from '../Button/Button'
 import { Tooltip } from '../Tooltip/Tooltip'
 import styles from './Field.module.css'
 import { afterPointerRelease, trackPointer } from './pointerRelease'
+
+/**
+ * The id of an element saying why the fields inside are read-only ("Part of Hole 1: change it in
+ * the hole.", task U1): every read-only `Field` below adds it to its control's
+ * `aria-describedby` (ui.md § Accessibility (feature UI)). One note for a whole group of fields.
+ */
+const ReadOnlyReasonContext = createContext<string | undefined>(undefined)
+
+export function ReadOnlyReason({
+  id,
+  children,
+}: {
+  id: string
+  children: ReactNode
+}): React.JSX.Element {
+  return <ReadOnlyReasonContext.Provider value={id}>{children}</ReadOnlyReasonContext.Provider>
+}
 
 /** Support-area tiers: error blocks Generate; hard and soft warn (soft can be dismissed). */
 export type FieldSeverity = 'error' | 'hard' | 'soft' | 'info' | 'note'
@@ -101,6 +120,7 @@ export function Field({
   className,
 }: FieldProps): React.JSX.Element {
   const base = useId()
+  const readOnlyReason = useContext(ReadOnlyReasonContext)
   const controlId = children.props.id ?? `${base}-control`
   const echoId = `${base}-echo`
   const statusId = `${base}-status`
@@ -181,6 +201,7 @@ export function Field({
     children.props['aria-describedby'],
     shown !== undefined ? echoId : undefined,
     primary ? statusId : undefined,
+    readOnly ? readOnlyReason : undefined,
   ]
     .filter(Boolean)
     .join(' ')

@@ -150,7 +150,7 @@ export function surfaceColour(surface: SurfaceId, state: SurfaceState, palette: 
     if (state.hovered === surface) return mix(base, palette.selected, MIX.pickHover)
     return mix(base, palette.selected, MIX.pickEligible)
   }
-  if (state.selectedOperation != null && owner === state.selectedOperation) {
+  if (isSelectedOwner(owner, state.selectedOperation)) {
     const p = Math.min(1, Math.max(0, state.pulse ?? 0))
     return mix(base, palette.selected, MIX.selected + p * (MIX.pulse - MIX.selected))
   }
@@ -178,5 +178,14 @@ export function vertexColours(
 /** Whether a surface is drawn with the selection outline. */
 export function isOutlined(surface: SurfaceId, state: SurfaceState): boolean {
   if (state.pickEligible) return state.hovered === surface && state.pickEligible.has(surface)
-  return state.selectedOperation != null && surfaceOwner(surface) === state.selectedOperation
+  return isSelectedOwner(surfaceOwner(surface), state.selectedOperation)
+}
+
+/**
+ * Whether a surface's operation is selected: the operation itself, or a selected feature's owned
+ * operation (`<featureId>_<role>`, v0.4 task U1: a feature selection tints and pulses every owned
+ * operation together; feature prefixes are never operation prefixes).
+ */
+export function isSelectedOwner(owner: string, selected: string | null | undefined): boolean {
+  return selected != null && (owner === selected || owner.startsWith(`${selected}_`))
 }

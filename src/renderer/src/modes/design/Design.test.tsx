@@ -59,7 +59,7 @@ async function renderDesign(withPart = true) {
   // test windows are narrow: the inspector is an overlay, opened by its toggle
   await r.user.click(screen.getByRole('button', { name: 'Inspector' }))
   const addFromMenu = async (label: string) => {
-    within(navigator()).getByRole('button', { name: 'Add operation' }).focus()
+    within(navigator()).getByRole('button', { name: 'Add' }).focus()
     await r.user.keyboard('{Enter}')
     await r.user.click(await screen.findByRole('menuitem', { name: label }))
   }

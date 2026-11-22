@@ -95,7 +95,7 @@ test('face picking and anchors: on by direction, side-face fields, anchor picker
     .click()
   await settings.getByRole('button', { name: 'Done' }).click()
   await expect(settings).toBeHidden()
-  await navigator.getByRole('button', { name: 'Add operation' }).click()
+  await navigator.getByRole('button', { name: 'Add', exact: true }).click()
   await page.getByRole('menuitem', { name: 'Add pocket' }).click()
   await expect(inspector.getByRole('heading', { name: 'Pocket 2' })).toBeVisible()
   await expect(
