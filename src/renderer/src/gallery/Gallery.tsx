@@ -27,6 +27,8 @@ import {
   JobList,
   MachineStateBadge,
   StopControl,
+  AnchorPicker,
+  type AnchorValue,
   Menu,
   ModeSwitcher,
   Panel,
@@ -58,6 +60,7 @@ import {
   type JobView,
   type ToolIconName,
 } from '../ui'
+import { designMessages } from '../messages/design'
 import styles from './Gallery.module.css'
 import { ViewportDemo } from './ViewportDemo'
 
@@ -134,6 +137,20 @@ function Specimens({ title }: { title: string }): React.JSX.Element {
       </Row>
       <Row label="Mode switcher · own component">
         <ModeDemo />
+      </Row>
+      <Row label="Anchor picker · 3 × 3 points, sliding amber dot (task F2)">
+        <div className={styles['line']}>
+          <AnchorDemo />
+          <AnchorPicker
+            label="Anchor (disabled)"
+            value={{ u: 'max', v: 'max' }}
+            shape="circle"
+            disabled
+            caption="Remove the formula to change the anchor."
+            pointLabel={(p) => `${p.v} ${p.u}`}
+            onValueChange={noop}
+          />
+        </div>
       </Row>
       <Row label="Segmented control · amber thumb, dark text">
         <div className={styles['line']}>
@@ -405,6 +422,19 @@ function ShellParts(): React.JSX.Element {
 function ModeDemo(): React.JSX.Element {
   const [mode, setMode] = useState<AppMode>('plan')
   return <ModeSwitcher value={mode} onValueChange={setMode} />
+}
+
+function AnchorDemo(): React.JSX.Element {
+  const [anchor, setAnchor] = useState<AnchorValue>({ u: 'min', v: 'min' })
+  return (
+    <AnchorPicker
+      label="Anchor"
+      value={anchor}
+      caption={designMessages.anchorPoint('+z', anchor)}
+      pointLabel={(p) => designMessages.anchorPoint('+z', p)}
+      onValueChange={setAnchor}
+    />
+  )
 }
 
 function SegmentedDemo(): React.JSX.Element {

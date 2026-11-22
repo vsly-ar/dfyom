@@ -20,10 +20,18 @@ import {
   surfaceAtFace,
   triangleCount,
   type Box,
+  type SurfaceGlyph,
   type SurfaceTarget,
   type Vec3,
   type ViewportMesh,
 } from './mesh'
+import {
+  AnchorMarker,
+  FrameAxes,
+  PickGlyphs,
+  type AnchorOverlay,
+  type FrameOverlay,
+} from './Overlays'
 import { RunLayer, type RunScene } from './RunLayer'
 
 export interface SceneProps {
@@ -36,6 +44,14 @@ export interface SceneProps {
   outline?: readonly (readonly Vec3[])[] | null
   /** Error marker (failed evaluation). */
   marker?: Vec3 | null
+  /** Pick mode's normal glyphs and the hovered eligible surface (task F1). */
+  glyphs?: readonly SurfaceGlyph[] | null
+  hovered?: string | null
+  /** Face-frame axes of the selected operation's face (task F1). */
+  frame?: FrameOverlay | null
+  /** Anchor marker of the selected feature (task F2). */
+  anchor?: AnchorOverlay | null
+  reducedMotion?: boolean
   controlsRef: Ref<CameraControlsImpl>
   /** Run mode layer (task 3.12). */
   run?: RunScene | null
@@ -51,7 +67,9 @@ function colour(c: Rgb): Color {
 }
 
 export function Scene(props: SceneProps): React.JSX.Element {
-  const { mesh, stock, bounds, palette, controlsRef, outline, marker } = props
+  const { mesh, stock, bounds, palette, controlsRef, outline, marker, glyphs, frame, anchor } =
+    props
+  const span = bounds ? Math.max(...bounds.max.map((m, i) => m - bounds.min[i]!)) : 50
   return (
     <>
       <CameraControls
@@ -67,6 +85,23 @@ export function Scene(props: SceneProps): React.JSX.Element {
       {stock ? <StockOutline box={stock} colour={palette.stock} /> : null}
       {outline ? <LiveOutline loops={outline} colour={palette.selected} /> : null}
       {marker ? <ErrorMarker at={marker} bounds={bounds} colour={palette.danger} /> : null}
+      {glyphs && glyphs.length > 0 ? (
+        <PickGlyphs
+          glyphs={glyphs}
+          hovered={props.hovered ?? null}
+          size={Math.min(30, Math.max(4, span * 0.08))}
+          palette={palette}
+          reducedMotion={props.reducedMotion ?? false}
+        />
+      ) : null}
+      {frame ? <FrameAxes frame={frame} palette={palette} /> : null}
+      {anchor ? (
+        <AnchorMarker
+          anchor={anchor}
+          size={Math.min(6, Math.max(1, span * 0.015))}
+          palette={palette}
+        />
+      ) : null}
       {bounds ? <Floor bounds={bounds} palette={palette} /> : null}
       <Axes bounds={bounds} palette={palette} />
       {props.run ? <RunLayer run={props.run} palette={palette} /> : null}

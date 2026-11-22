@@ -57,3 +57,14 @@
   white-space: nowrap;
   border: 0;
 }
+
+/* face-frame axis labels (task F1): placed by drei's Html at the axis tips */
+.axisLabel {
+  pointer-events: none;
+  user-select: none;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
+}

@@ -122,7 +122,7 @@ The face model is in core: directions, frames and the local stock in [`src/core/
 - A facing's or profile's `on` is not an operation reference (it is a stock face, always there, and a facing removes it), so it never raises `dfm.surfaceMissing` or `design.referenced`.
 - `dfm.reach` runs against the library until the [tool field](#operation-tool) exists (task A4): the longest reach (`stickout`, else `fluteLength`) of the library tools whose type and size fit the operation; a pocket or flat/point hole is measured to its floor (`depth − onZ`), a through hole and a profile by the stock extent along `n`. Since A4 it reads the operation's own tool ([§ Implementation (task A4)](#implementation-task-a4)); an operation without one yet (before its first Apply) keeps this library reading.
 - `dfm.setups` is attached to the first operation of the second direction (the one that adds a setup), parameter `on`, `params: { count, directions }` (`top`, `bottom`, `front`, `right`, `back`, `left`, in order of first use).
-- Until F1 the Design UI offers only top-facing `on` targets and `.z` formula names (±z), and draws outlines in the face frame's z; geometry evaluates every direction (A1b), toolpaths reject other directions until C3 ([geometry.md](../architecture/geometry.md#non-top-faces-v02)).
+- Until F1 the Design UI offered only top-facing `on` targets and `.z` formula names (±z); since F1 it offers every direction ([§ Implementation (tasks F1, F2)](#implementation-tasks-f1-f2)). Geometry evaluates every direction (A1b), toolpaths since C3 ([geometry.md](../architecture/geometry.md#non-top-faces-v02)).
 
 ## Placement anchors
 
@@ -147,6 +147,20 @@ Code: `ANCHOR_POINTS`, `AnchorDtoSchema` and the optional `anchor` on both shape
 - **`anchorExpression` per axis:** only a coordinate that has to move fails (`model.invariant`, issue path `anchor`, `params.parameter` = `shape.center.0` / `.1`); changing only `v` keeps a formula in `u`. Every failing axis is reported at once.
 - **Default anchor:** `defaultAnchor` in the app settings (default centre; validated by main like every setting), for the window to pass as `anchor` on add (F2). Core never reads it: agents pass `anchor` or get the centre.
 - Drillings take no `anchor` (an unknown arg, `input.malformed`).
+
+### Implementation (tasks F1, F2)
+
+The Design UI for faces and anchors, in `src/renderer/src/modes/design/` (rules: [ui.md § Design and plan controls (v0.2)](../conventions/ui.md#design-and-plan-controls-v02)). Choices made with the implementation:
+
+- **`on` everywhere:** `onChoices` lists the face targets of the kind (facing and profile: the six stock faces; pocket and drilling: every `onTarget` surface before the operation), sorted by direction in the order Top, Bottom, Front, Right, Back, Left, rendered as `Select` groups ("Top", "Bottom", "Front side", …). Pick mode's eligible set is the same list. Facings get `on` in their Depth group, profiles at the top of their Shape group. Stock sides are named "Stock right side" etc.
+- **Formula references** list every direction's face by its part-frame name (`stock.side[1].x`, `pocket2.floor.x`, [§ Formula names](#formula-names)); picking a surface for a formula inserts that name.
+- **Field labels follow the face frame:** on the top face the position and size fields read X and Y (u and v are the part axes there), on every other face u and v ("Position u", "Length (u)"). A pocket's or profile's position is "Position X/u" (it gives the anchor point, not always the centre); a drilling keeps "Center".
+- **Scene in the face frame:** the live outline, the error marker, the face-frame axes and the anchor marker are computed in `[u, v, w]` of the `on` face's frame (`outline.ts`: `operationFace`, `operationOutline`, `markerPoint`, `frameAxes`, `anchorPoint`) and placed with the core's `faceFrame` / `toPartFrame`. The axes start at the frame origin at the face's level, 0.6 × the shorter side of the face rectangle long, labelled `u` / `v`. The anchor marker shows for pockets and profiles (their anchor point) and drillings (their centre).
+- **Normal glyphs** are placed from the mesh, not the model (`viewport/mesh.ts` `surfaceGlyphs`): area-weighted centroid of the surface's triangles, moved to the nearest triangle centre when it falls in a hole (a stock top around a pocket), along the mean normal. So the viewport stays props-driven: it draws a glyph for every eligible surface of the pick request. Glyphs grow in over `--motion-base` (none under reduced motion); a face turned away hides its glyph behind the part and stays reachable in the dropdown.
+- **Anchor picker:** `ui/AnchorPicker`, a WAI-ARIA radio group written in `ui/` (not Radix: Radix's radio group moves linearly, the 3 × 3 grid needs up/down by rows). Arrow keys move in the grid and choose (one `anchor` update each, one undo step each), Home/End the corners. Point names follow the face seen from outside: top "Front/Back", bottom "Back/Front" (rolled over X), sides "Bottom/Top"; "left/right" along u. Disabled (focusable, `aria-disabled`, reason as the field's note) while either coordinate is a formula, which is stricter than the core's per-axis rule but matches ui.md.
+- **Default anchor:** the settings dialog's "Default anchor" (named from above) is passed as `anchor` on every pocket and profile add; `addArgs` places the new shape at the same centre whatever the anchor (the position is the anchor point of the round centre and size).
+- **Shape toggle:** rectangle ↔ circle keeps `center` and sends no `anchor`, so the core keeps the operation's anchor and its point (A2); a front-left rectangle becomes a circle in the same corner, like a size edit.
+- **Text summary:** the viewport's description names the selected operation, its face and anchor ("Selected: Pocket 1 on Stock right side, face axes u and v shown, anchor Centre.").
 
 ## Operation tool
 

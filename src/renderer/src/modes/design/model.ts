@@ -6,12 +6,20 @@
 import { loadPart, type LoadedPart } from '../../../../core/design/load'
 import { fieldContext, type FieldKind } from '../../../../core/design/operation'
 import type {
+  AnchorDTO,
   OperationDTO,
   OperationKind,
   PartDTO,
   ShapeDTO,
 } from '../../../../core/design/part.dto'
-import { SurfaceTable, type SurfaceEntry } from '../../../../core/design/surfaces'
+import { isExpression } from '../../../../core/design/anchor'
+import {
+  coordinateName,
+  STOCK_FACES,
+  SurfaceTable,
+  type SurfaceEntry,
+} from '../../../../core/design/surfaces'
+import { DIRECTIONS, type Direction } from '../../../../core/geometry/face'
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
 import { Quantity } from '../../../../core/quantity/quantity'
 import type { QuantityDTO } from '../../../../core/quantity/quantity.dto'
@@ -125,7 +133,12 @@ export function updateArgs(
   return { [head]: source }
 }
 
-/** Rectangle ↔ circle: the new shape keeps the center and takes its size from the old one. */
+/**
+ * Rectangle ↔ circle: the new shape keeps the center and takes its size from the old one. Its
+ * `center` is the anchor point and an update's shape keeps the operation's anchor
+ * (design-v0.2.md#implementation-task-a2), so the anchor point stays where it was: a front-left
+ * anchored rectangle becomes a circle in the same front-left corner, as a size edit would.
+ */
 export function shapeKindArgs(shape: ShapeDTO, kind: ShapeDTO['kind']): Record<string, unknown> {
   const center = [src(shape.center[0]), src(shape.center[1])]
   if (kind === 'circle')
@@ -140,10 +153,19 @@ export function shapeKindArgs(shape: ShapeDTO, kind: ShapeDTO['kind']): Record<s
 
 // ── new operations ────────────────────────────────────────────────────────────────────────
 
+/** A round length in the unit system, as a number in its unit: whole millimetres, quarter inches. */
+function roundValue(mm: number, units: UnitSystem): number {
+  return units === 'mm'
+    ? Math.max(1, Math.round(mm))
+    : Math.max(0.25, Math.round((mm / 25.4) * 4) / 4)
+}
+
+const lengthSource = (n: number, units: UnitSystem): string =>
+  units === 'mm' ? `${+n.toFixed(4)} mm` : `${+n.toFixed(4)}"`
+
 /** A round length in the unit system: whole millimetres, quarter inches. */
 export function roundLength(mm: number, units: UnitSystem): string {
-  if (units === 'mm') return `${Math.max(1, Math.round(mm))} mm`
-  return `${Math.max(0.25, Math.round((mm / 25.4) * 4) / 4)}"`
+  return lengthSource(roundValue(mm, units), units)
 }
 
 const SMALL: Record<UnitSystem, { slot: number; hole: string }> = {
@@ -151,15 +173,46 @@ const SMALL: Record<UnitSystem, { slot: number; hole: string }> = {
   inch: { slot: 6.35, hole: '1/4"' },
 }
 
+const ANCHOR_SIGN = { min: -1, centre: 0, max: 1 } as const
+
+/**
+ * A new shape around the round centre `[cx, cy]` (mm) with the round size `[sx, sy]` (mm),
+ * positioned by `anchor`: its `center` is the anchor point, so the shape lands in the same place
+ * whatever the default anchor is.
+ */
+function anchoredRectangle(
+  c: readonly [number, number],
+  size: readonly [number, number],
+  anchor: AnchorDTO,
+  units: UnitSystem,
+): Record<string, unknown> {
+  const [cx, cy] = c.map((v) => roundValue(v, units)) as [number, number]
+  const [sx, sy] = size.map((v) => roundValue(v, units)) as [number, number]
+  return {
+    kind: 'rectangle',
+    center: [
+      lengthSource(cx + (ANCHOR_SIGN[anchor.u] * sx) / 2, units),
+      lengthSource(cy + (ANCHOR_SIGN[anchor.v] * sy) / 2, units),
+    ],
+    length: lengthSource(sx, units),
+    width: lengthSource(sy, units),
+  }
+}
+
+const CENTRE: AnchorDTO = { u: 'centre', v: 'centre' }
+
 /**
  * Args of a new operation inside the stock (`length` × `width` × `thickness`, mm): facing takes
  * the defaults; a pocket in the middle, a through hole off its corner, an outside profile around
- * them. The user edits them in the inspector right after.
+ * them. A pocket or profile is placed by `anchor` (the default-anchor setting, which the window
+ * passes as `anchor`, design-v0.2.md#placement-anchors). The user edits them in the inspector
+ * right after.
  */
 export function addArgs(
   kind: OperationKind,
   stock: { length: number; width: number; thickness: number },
   units: UnitSystem,
+  anchor: AnchorDTO = CENTRE,
 ): Record<string, unknown> {
   const L = (mm: number) => roundLength(mm, units)
   const { length: x, width: y, thickness: t } = stock
@@ -168,12 +221,8 @@ export function addArgs(
       return {}
     case 'pocket':
       return {
-        shape: {
-          kind: 'rectangle',
-          center: [L(x / 2), L(y / 2)],
-          length: L(x / 3),
-          width: L(y / 3),
-        },
+        shape: anchoredRectangle([x / 2, y / 2], [x / 3, y / 3], anchor, units),
+        anchor,
         depth: L(t / 4),
       }
     case 'drilling':
@@ -181,12 +230,13 @@ export function addArgs(
     case 'profile': {
       const inset = 4 * SMALL[units].slot
       return {
-        shape: {
-          kind: 'rectangle',
-          center: [L(x / 2), L(y / 2)],
-          length: L(x > 2 * inset ? x - inset : x / 2),
-          width: L(y > 2 * inset ? y - inset : y / 2),
-        },
+        shape: anchoredRectangle(
+          [x / 2, y / 2],
+          [x > 2 * inset ? x - inset : x / 2, y > 2 * inset ? y - inset : y / 2],
+          anchor,
+          units,
+        ),
+        anchor,
       }
     }
   }
@@ -198,6 +248,9 @@ export interface SurfaceChoice {
   readonly id: string
   /** "Facing 1 floor", "Stock top". */
   readonly label: string
+  readonly direction: Direction
+  /** The direction's group in the `on` dropdown ("Top", "Right side"). */
+  readonly group: string
 }
 
 /** Human name of a surface id from the part's operation names. */
@@ -214,25 +267,72 @@ export function surfaceLabel(part: PartDTO, id: string): string {
   return m.surfaceLabel(name, roleText)
 }
 
-/** Horizontal surfaces an operation at `index` may use: `on` targets only, or all (formulas). */
-export function surfaceChoices(
+const choice = (part: PartDTO, e: SurfaceEntry): SurfaceChoice => ({
+  id: e.id,
+  label: surfaceLabel(part, e.id),
+  direction: e.direction,
+  group: m.inspector.directions[e.direction],
+})
+
+const byDirection = (a: SurfaceChoice, b: SurfaceChoice) =>
+  DIRECTIONS.indexOf(a.direction) - DIRECTIONS.indexOf(b.direction)
+
+/**
+ * The face targets an operation of `kind` at `index` may start from (design-v0.2.md#face-targets):
+ * a facing or profile any stock face, a pocket or drilling also the floors and tab tops of earlier
+ * operations, in every direction. Grouped by direction in the order Top, Bottom, Front, Right,
+ * Back, Left (ui.md#design-and-plan-controls-v02), stock face first, then in design order.
+ */
+export function onChoices(
   part: PartDTO,
   table: SurfaceTable,
   index: number,
-  onTargets: boolean,
+  kind: OperationKind,
 ): SurfaceChoice[] {
-  return (
-    table
-      .before(index)
-      // until face picking (task F1) groups faces by direction: `on` offers top-facing surfaces,
-      // formulas the `.z` names (±z)
-      .filter((e: SurfaceEntry) =>
-        onTargets
-          ? e.onTarget && e.direction === '+z'
-          : e.direction === '+z' || e.direction === '-z',
-      )
-      .map((e) => ({ id: e.id, label: surfaceLabel(part, e.id) }))
-  )
+  const stockOnly = kind === 'facing' || kind === 'profile'
+  return table
+    .before(index)
+    .filter((e) => (stockOnly ? STOCK_FACES.includes(e.id) : e.onTarget))
+    .map((e) => choice(part, e))
+    .toSorted(byDirection)
+}
+
+export interface ReferenceChoice {
+  /** The formula name: the part-frame coordinate on the face's normal axis (`stock.side[1].x`). */
+  readonly id: string
+  readonly surface: string
+  readonly label: string
+}
+
+/** Face positions a formula of an operation at `index` may reference, every direction. */
+export function referenceChoices(
+  part: PartDTO,
+  table: SurfaceTable,
+  index: number,
+): ReferenceChoice[] {
+  return table
+    .before(index)
+    .toSorted((a, b) => DIRECTIONS.indexOf(a.direction) - DIRECTIONS.indexOf(b.direction))
+    .map((e) => ({ id: coordinateName(e), surface: e.id, label: surfaceLabel(part, e.id) }))
+}
+
+/** The direction of a surface (the stock top when unknown). */
+export function surfaceDirection(table: SurfaceTable | undefined, id: string): Direction {
+  return table?.get(id).mapOr<Direction>('+z', (e) => e.direction) ?? '+z'
+}
+
+/**
+ * Names of the face frame's axes in field labels: X and Y on the top face (where they are the
+ * part axes), `u` and `v` elsewhere (design-v0.2.md#face-frame).
+ */
+export function axisNames(direction: Direction): { u: string; v: string } {
+  return direction === '+z' ? { u: 'X', v: 'Y' } : { u: 'u', v: 'v' }
+}
+
+/** True if a stored coordinate is a formula (the anchor picker is then disabled). */
+export function isFormula(dto: QuantityDTO): boolean {
+  const q = quantityOf(dto)
+  return q !== undefined && isExpression(q)
 }
 
 /** The operation an evaluation error names (an issue path or frame data), if any. */

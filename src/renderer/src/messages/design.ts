@@ -1,7 +1,8 @@
 // User-facing strings of design mode (task 3.6). Labels follow the parameter tables of
 // docs/modes/design.md; terms from docs/glossary.md. Doc: docs/conventions/ui.md#internationalization
 import type { EvaluationStatus } from '../../../core/design/evaluation'
-import type { OperationKind } from '../../../core/design/part.dto'
+import type { AnchorDTO, OperationKind } from '../../../core/design/part.dto'
+import type { Direction } from '../../../core/geometry/face'
 import type { MaterialClass } from '../../../core/library/item'
 
 export const designMessages = {
@@ -96,11 +97,32 @@ export const designMessages = {
     centerY: 'Center Y',
     length: 'Length (X)',
     width: 'Width (Y)',
+    /**
+     * Position and size labels in the face frame: the top face reads X and Y (its `u` and `v`),
+     * every other face `u` and `v` (design-v0.2.md#face-frame). `point` is "Center" for a
+     * drilling (a hole is a point), "Position" for an anchored shape.
+     */
+    position: (point: 'Center' | 'Position', axis: string) => `${point} ${axis}`,
+    lengthAlong: (axis: string) => `Length (${axis})`,
+    widthAlong: (axis: string) => `Width (${axis})`,
+    anchor: 'Anchor',
+    anchorFormula: 'Remove the formula to change the anchor.',
     diameter: 'Diameter',
     cornerRadius: 'Corner radius',
     depth: 'Depth',
     floorRadius: 'Floor fillet radius',
     on: 'On',
+    /** `on` dropdown groups, in the order of ui.md#design-and-plan-controls-v02. */
+    directions: {
+      '+z': 'Top',
+      '-z': 'Bottom',
+      '-y': 'Front side',
+      '+x': 'Right side',
+      '+y': 'Back side',
+      '-x': 'Left side',
+    } satisfies Record<Direction, string>,
+    /** Face-frame axis labels in the viewport. */
+    frameAxes: { u: 'u', v: 'v' },
     pickOn: 'Pick the surface in the viewport',
     bottom: 'Bottom',
     bottoms: { through: 'Through', flat: 'Flat', drillPoint: 'Drill point' },
@@ -122,6 +144,29 @@ export const designMessages = {
     bottom: 'bottom',
     floor: 'floor',
     tabTop: (i: number) => `tab ${i + 1} top`,
+    'side[0]': 'front side',
+    'side[1]': 'right side',
+    'side[2]': 'back side',
+    'side[3]': 'left side',
+  },
+
+  /**
+   * Names of the nine anchor points, seen from outside the face (ui.md: "Front left", "Centre").
+   * `v` reads front/back on the top and bottom (the bottom is rolled over X, so its low `v` is
+   * the back), bottom/top on the sides; `u` reads left/right.
+   */
+  anchorPoint: (direction: Direction, a: AnchorDTO): string => {
+    const vNames: Record<'min' | 'max', string> =
+      direction === '+z'
+        ? { min: 'Front', max: 'Back' }
+        : direction === '-z'
+          ? { min: 'Back', max: 'Front' }
+          : { min: 'Bottom', max: 'Top' }
+    const uNames = { min: 'left', max: 'right' }
+    if (a.u === 'centre' && a.v === 'centre') return 'Centre'
+    if (a.v === 'centre') return `Centre ${uNames[a.u as 'min' | 'max']}`
+    if (a.u === 'centre') return `${vNames[a.v]} centre`
+    return `${vNames[a.v]} ${uNames[a.u]}`
   },
   stockName: 'Stock',
 
@@ -133,6 +178,12 @@ export const designMessages = {
       s === 'pending' ? 'Updating…' : s === 'failed' ? 'Evaluation failed' : 'Part up to date',
     failedAt: (name: string) => `Evaluation failed at ${name}`,
   },
+
+  /** The selected operation in the viewport's text summary (face frame and anchor shown). */
+  selectionSummary: (p: { name: string; on: string; anchor: string | undefined }) =>
+    `Selected: ${p.name} on ${p.on}, face axes u and v shown${
+      p.anchor === undefined ? '' : `, anchor ${p.anchor}`
+    }.`,
 
   viewportSummary: (p: { operations: number; warnings: number; status: EvaluationStatus }) => {
     const ops = p.operations === 1 ? '1 operation' : `${p.operations} operations`

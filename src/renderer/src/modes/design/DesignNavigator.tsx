@@ -9,7 +9,7 @@ import { useRef, useState, type KeyboardEvent } from 'react'
 import type { OperationDTO, OperationKind } from '../../../../core/design/part.dto'
 import type { UnitSystem } from '../../../../core/project/document'
 import { designMessages } from '../../messages/design'
-import { useShell } from '../../shell/ShellContext'
+import { useSettings, useShell } from '../../shell/ShellContext'
 import {
   Button,
   EmptyState,
@@ -66,6 +66,8 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
   const { warnings } = useDesignWarnings(part)
   const evaluation = useDesignEvaluation(part)
   const [removed, setRemoved] = useState<string | undefined>(undefined)
+  // the default-anchor setting places new pockets and profiles (design-v0.2.md#placement-anchors)
+  const defaultAnchor = useSettings((s) => s.settings.defaultAnchor)
   const rows = useRef(new Map<string, HTMLButtonElement>())
   const ops = part.dto.operations
   const ids = ops.map((o) => o.id)
@@ -81,7 +83,7 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
       : { length: 100, width: 60, thickness: 20 }
     const r = await call(`design.${kind}.add`, {
       partId: part.dto.id,
-      ...addArgs(kind, dims, part.units),
+      ...addArgs(kind, dims, part.units, defaultAnchor),
     })
     if (r.ok) select((r.value as { operationId: string }).operationId)
   }

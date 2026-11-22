@@ -96,6 +96,26 @@
   user-select: none;
 }
 
+.group {
+  display: grid;
+  gap: 1px;
+}
+
+.group + .group {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.label {
+  padding: 2px 8px;
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  font-weight: var(--weight-medium);
+  color: var(--text-muted);
+  user-select: none;
+}
+
 .item[data-highlighted] {
   background: var(--bg-hover);
 }

@@ -227,13 +227,161 @@ describe('design mode', () => {
       within(inspector()).getByRole('button', { name: 'Pick the surface in the viewport' }),
     )
     const pick = shell.ui.getState().pick
-    expect(pick?.eligible).toEqual(new Set(['stock.top', 'facing1.floor']))
+    // every face target, sides and bottom included (task F1)
+    expect(pick?.eligible).toEqual(
+      new Set([
+        'stock.top',
+        'facing1.floor',
+        'stock.bottom',
+        'stock.side[0]',
+        'stock.side[1]',
+        'stock.side[2]',
+        'stock.side[3]',
+      ]),
+    )
     expect(screen.getByRole('status')).toHaveTextContent('Pick a surface for On')
     act(() => {
       pick!.onPick('stock.top')
       shell.ui.getState().setPick(null)
     })
     await waitFor(() => expect(part().operations[1]).toMatchObject({ on: 'stock.top' }))
+  })
+
+  it('groups the on targets by direction; a side face reads its fields in u and v', async () => {
+    const { user, part, bridge } = await renderDesign()
+    await user.click(await within(navigator()).findByRole('button', { name: 'Add pocket' }))
+    await within(inspector()).findByRole('heading', { name: 'Pocket 1' })
+    // on the top face the position reads X and Y
+    expect(within(inspector()).getByLabelText('Position X', { selector: 'input' })).toBeVisible()
+    const on = within(inspector()).getByRole('combobox', { name: 'On' })
+    on.focus()
+    await user.keyboard('{Enter}')
+    const list = await screen.findByRole('listbox')
+    const groups = within(list).getAllByRole('group')
+    expect(groups.map((g) => g.firstElementChild?.textContent)).toEqual([
+      'Top',
+      'Bottom',
+      'Front side',
+      'Right side',
+      'Back side',
+      'Left side',
+    ])
+    await user.click(within(groups[3]!).getByRole('option', { name: /Stock right side/ }))
+    await waitFor(() => expect(part().operations[0]).toMatchObject({ on: 'stock.side[1]' }))
+    expect(
+      bridge.calls.filter((c) => c.name === 'design.pocket.update').at(-1)!.args,
+    ).toMatchObject({ on: 'stock.side[1]' })
+    // the face frame's axes name the fields on a side face (design-v0.2.md#face-frame)
+    expect(
+      await within(inspector()).findByLabelText('Position u', { selector: 'input' }),
+    ).toBeVisible()
+    expect(within(inspector()).getByLabelText('Length (u)', { selector: 'input' })).toBeVisible()
+    expect(within(inspector()).getByLabelText('Width (v)', { selector: 'input' })).toBeVisible()
+    // the viewport's text summary says which face and anchor are shown
+    expect(screen.getByRole('region', { name: '3D viewport' })).toHaveAccessibleDescription(
+      /Selected: Pocket 1 on Stock right side, face axes u and v shown, anchor Centre\./,
+    )
+    await expectNoAxeViolations()
+  })
+
+  it('offers a stock-face on for facings and profiles', async () => {
+    const { user, part, addFromMenu } = await renderDesign()
+    await user.click(await within(navigator()).findByRole('button', { name: 'Add facing' }))
+    await within(inspector()).findByRole('heading', { name: 'Facing 1' })
+    expect(within(inspector()).getByRole('combobox', { name: 'On' })).toHaveTextContent(
+      'Stock top · stock.top',
+    )
+    await addFromMenu('Add profile')
+    await within(inspector()).findByRole('heading', { name: 'Profile 1' })
+    const on = within(inspector()).getByRole('combobox', { name: 'On' })
+    on.focus()
+    await user.keyboard('{Enter}')
+    const options = within(await screen.findByRole('listbox')).getAllByRole('option')
+    expect(options.map((o) => o.textContent)).toEqual([
+      'Stock top · stock.top',
+      'Stock bottom · stock.bottom',
+      'Stock front side · stock.side[0]',
+      'Stock right side · stock.side[1]',
+      'Stock back side · stock.side[2]',
+      'Stock left side · stock.side[3]',
+    ])
+    await user.click(options[1]!)
+    await waitFor(() => expect(part().operations[1]).toMatchObject({ on: 'stock.bottom' }))
+  })
+
+  it('re-anchors with the anchor picker without moving the feature, as one undo step', async () => {
+    const { user, part, bridge, d } = await renderDesign()
+    await user.click(await within(navigator()).findByRole('button', { name: 'Add pocket' }))
+    await within(inspector()).findByRole('heading', { name: 'Pocket 1' })
+    const anchor = within(inspector()).getByRole('radiogroup', { name: 'Anchor' })
+    expect(within(anchor).getByRole('radio', { name: 'Centre' })).toBeChecked()
+    const entries = d.history.undoable.length
+    await user.click(within(anchor).getByRole('radio', { name: 'Front left' }))
+    await waitFor(() =>
+      expect(part().operations[0]).toMatchObject({ shape: { anchor: { u: 'min', v: 'min' } } }),
+    )
+    expect(bridge.calls.filter((c) => c.name === 'design.pocket.update').at(-1)!.args).toEqual({
+      partId: part().id,
+      operationId: 'pocket1',
+      anchor: { u: 'min', v: 'min' },
+    })
+    expect(d.history.undoable).toHaveLength(entries + 1)
+    // the pocket (50, 30), 33 × 20 stays: the position now gives its front-left corner
+    expect(within(inspector()).getByLabelText('Position X', { selector: 'input' })).toHaveValue(
+      '33.5 mm',
+    )
+    expect(within(inspector()).getByLabelText('Position Y', { selector: 'input' })).toHaveValue(
+      '20 mm',
+    )
+    expect(within(anchor).getByRole('radio', { name: 'Front left' })).toBeChecked()
+    expect(within(anchor).getByRole('radio', { name: 'Front left' })).toHaveFocus()
+    // arrow keys move the choice in the grid
+    await user.keyboard('{ArrowRight}')
+    await waitFor(() =>
+      expect(part().operations[0]).toMatchObject({ shape: { anchor: { u: 'centre', v: 'min' } } }),
+    )
+    await expectNoAxeViolations()
+  })
+
+  it('disables the anchor picker while the position is a formula, with the reason', async () => {
+    const { user, part, bridge } = await renderDesign()
+    await user.click(await within(navigator()).findByRole('button', { name: 'Add pocket' }))
+    await within(inspector()).findByRole('heading', { name: 'Pocket 1' })
+    const x = within(inspector()).getByLabelText('Position X', { selector: 'input' })
+    await retype(user, x, '25 * 2{Enter}')
+    await waitFor(() =>
+      expect(part().operations[0]).toMatchObject({
+        shape: { center: [{ source: '25 * 2' }, {}] },
+      }),
+    )
+    const anchor = within(inspector()).getByRole('radiogroup', { name: 'Anchor' })
+    expect(anchor).toHaveAttribute('aria-disabled', 'true')
+    expect(
+      within(inspector()).getByText('Remove the formula to change the anchor.'),
+    ).toBeInTheDocument()
+    expect(anchor).toHaveAccessibleDescription(/Remove the formula to change the anchor/)
+    const before = bridge.calls.length
+    await user.click(within(anchor).getByRole('radio', { name: 'Back right' }))
+    expect(bridge.calls.length).toBe(before)
+  })
+
+  it('places a new pocket by the default-anchor setting', async () => {
+    const { user, part, shell } = await renderDesign()
+    act(() => shell.settings.getState().update({ defaultAnchor: { u: 'max', v: 'max' } }))
+    await user.click(await within(navigator()).findByRole('button', { name: 'Add pocket' }))
+    await within(inspector()).findByRole('heading', { name: 'Pocket 1' })
+    // still centred at (50, 30): its back-right corner is the position
+    expect(part().operations[0]).toMatchObject({
+      shape: {
+        anchor: { u: 'max', v: 'max' },
+        center: [{ source: '66.5 mm' }, { source: '40 mm' }],
+      },
+    })
+    expect(
+      within(within(inspector()).getByRole('radiogroup', { name: 'Anchor' })).getByRole('radio', {
+        name: 'Back right',
+      }),
+    ).toBeChecked()
   })
 
   it('selection follows the viewport, and evaluation status reaches the status bar', async () => {

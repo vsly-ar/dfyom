@@ -1,14 +1,17 @@
 // The design scene of the shared viewport (task 3.6): the part's last good mesh and the stock,
 // the evaluation status (outdated tint after 300 ms), the selection (synced with navigator and
-// inspector), the live outline of the selected operation while pending, the error marker at the
-// failing operation, and pick mode for the inspector's fields.
-// Doc: docs/conventions/ui.md#selection-and-picking, #evaluation-status-pending-outdated-failed
+// inspector), the live outline of the selected operation while pending (in its face frame), the
+// error marker at the failing operation, pick mode for the inspector's fields (normal glyphs on
+// every eligible face), and for the selected operation its face-frame axes (task F1) and anchor
+// marker (task F2).
+// Doc: docs/conventions/ui.md#selection-and-picking, #evaluation-status-pending-outdated-failed,
+// #design-and-plan-controls-v02
 import { useMemo } from 'react'
 import { useUi } from '../../shell/ShellContext'
 import { designMessages } from '../../messages/design'
 import type { ViewportProps } from '../../viewport'
-import { failingOperation } from './model'
-import { operationAnchor, operationOutline } from './outline'
+import { failingOperation, surfaceLabel } from './model'
+import { anchorPoint, frameAxes, markerPoint, operationFace, operationOutline } from './outline'
 import {
   useDesignEvaluation,
   useDesignPart,
@@ -38,11 +41,28 @@ export function useDesignScene(): SceneProps {
   }, [part])
 
   const ops = part?.loaded?.part.operations
-  const outline = useMemo(() => {
-    const op = ops?.find((o) => o.id === selected)
-    if (op === undefined || part?.loaded === undefined || part.table === undefined) return null
-    return operationOutline(op, part.loaded.stock, part.table)
-  }, [ops, selected, part])
+  const selectedOp = ops?.find((o) => o.id === selected)
+  const overlays = useMemo(() => {
+    if (selectedOp === undefined || part?.loaded === undefined || part.table === undefined)
+      return null
+    const s = part.loaded.stock
+    const table = part.table
+    const axes = frameAxes(selectedOp, s, table)
+    const face = operationFace(selectedOp, s, table)
+    return {
+      outline: operationOutline(selectedOp, s, table),
+      frame: { ...axes, labels: designMessages.inspector.frameAxes },
+      anchor: anchorPoint(selectedOp, s, table),
+      describe: designMessages.selectionSummary({
+        name: selectedOp.name,
+        on: surfaceLabel(part.dto, selectedOp.on),
+        anchor:
+          selectedOp.kind === 'pocket' || selectedOp.kind === 'profile'
+            ? designMessages.anchorPoint(face.direction, selectedOp.shape.anchor)
+            : undefined,
+      }),
+    }
+  }, [selectedOp, part])
 
   const marker = useMemo(() => {
     if (status !== 'failed' || ops === undefined || part?.loaded === undefined || !part.table)
@@ -51,7 +71,7 @@ export function useDesignScene(): SceneProps {
     const at =
       (evaluation?.error && failingOperation(evaluation.error, ids)) ?? selected ?? ids.at(-1)
     const op = ops.find((o) => o.id === at)
-    return op === undefined ? null : operationAnchor(op, part.loaded.stock, part.table)
+    return op === undefined ? null : markerPoint(op, part.loaded.stock, part.table)
   }, [status, ops, part, evaluation, selected])
 
   return {
@@ -59,16 +79,23 @@ export function useDesignScene(): SceneProps {
     stock,
     status,
     selectedOperation: selected,
-    outline,
+    outline: overlays?.outline ?? null,
     marker,
+    frame: overlays?.frame ?? null,
+    anchor: overlays?.anchor ?? null,
     ...(part === undefined
       ? {}
       : {
-          summary: designMessages.viewportSummary({
-            operations: part.dto.operations.length,
-            warnings: warnings.length,
-            status,
-          }),
+          summary: [
+            designMessages.viewportSummary({
+              operations: part.dto.operations.length,
+              warnings: warnings.length,
+              status,
+            }),
+            overlays?.describe,
+          ]
+            .filter(Boolean)
+            .join(' '),
         }),
     onSelect: (target) =>
       select(target === null || target.operation === 'stock' ? null : target.operation),
