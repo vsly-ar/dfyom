@@ -147,9 +147,9 @@ UI rules: [ui.md § Reference ghost](../conventions/ui.md#reference-ghost-v02). 
 
 ## Later
 
-| Item                                      | When  | Notes                                                                                             |
-| ----------------------------------------- | ----- | ------------------------------------------------------------------------------------------------- |
-| STEP import                               | later | `occt-import-js` (LGPL-2.1); tessellated for display, B-rep kept for measure, snap and recreation |
-| Measure and snap to the reference         | later | With v0.3 shapes; uses the anchors                                                                |
-| Assisted recreation and deviation view    | later | Spike recognition on real parts first                                                             |
-| Golden-path reference cycle e2e + UX pass | later | v0.2 has a first version ([plan task X2](../plans/v0.2.md#6-acceptance))                          |
+| Item                                      | When  | Notes                                                                                                                                                       |
+| ----------------------------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| STEP import                               | later | `occt-import-js` (LGPL-2.1); tessellated for display, B-rep kept for measure, snap and recreation                                                           |
+| Measure and snap to the reference         | later | With v0.3 shapes; uses the anchors                                                                                                                          |
+| Assisted recreation and deviation view    | later | Spike recognition on real parts first; queries and the deviation check drafted in [reference-query.md](reference-query.md) and [deviation.md](deviation.md) |
+| Golden-path reference cycle e2e + UX pass | later | v0.2 has a first version ([plan task X2](../plans/v0.2.md#6-acceptance))                                                                                    |

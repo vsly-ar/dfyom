@@ -46,7 +46,7 @@ An ordered list of **items**. Each item is a primitive or a path, combined with 
 - **Booleans:** `op` is `add` (union), `subtract` (difference) or `intersect`; the first item is always `add`. Booleans need closed items; a shape with an open path has exactly one item.
 - **Corner fillets** on paths and polygons round a vertex with a tangent arc (industry "fillet"); a radius too large for its neighbours is `model.invariant`, rule `filletTooLarge`.
 - **Invariants** (`model.invariant`, path `shapes.<id>.items.<n>.<param>`): sizes > 0; an `arc` radius ≥ half its chord (`arcRadius`); segments longer than ε (`segmentTooShort`); a closed path that crosses itself (`shapeSelfIntersects`, [shapes.md](../architecture/shapes.md#validity)); a result with no area (`shapeEmpty`).
-- **Later:** offset items (an outline grown by a distance), mirror, ellipse as a primitive, text, a shape library across projects.
+- **Later:** offset items (an outline grown by a distance; drafted in [design-llm-first.md](design-llm-first.md#offset-item)), mirror, ellipse as a primitive, text, a shape library across projects.
 
 ### Constraints
 
