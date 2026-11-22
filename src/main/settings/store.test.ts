@@ -36,6 +36,7 @@ describe('settings store', () => {
       layouts: { shell: { navigator: 20, viewport: 80 }, other: { a: 100 } },
       defaultAnchor: { u: 'centre', v: 'centre' },
       libraryUnits: 'mm',
+      snapGrid: { mm: 1, inch: 1 / 16 },
     })
 
     await writeFile(join(tmp.dir, SETTINGS_FILE), JSON.stringify({ reduceMotion: true }))

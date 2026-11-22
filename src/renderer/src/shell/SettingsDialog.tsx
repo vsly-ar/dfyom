@@ -1,17 +1,41 @@
 // Settings dialog: theme (Light / Dark / System), reduced motion, "Allow local agents to connect",
-// the default placement anchor of new pockets and profiles (task F2).
+// the default placement anchor of new pockets and profiles (task F2), the snap grid per unit
+// system (task U3).
 // Changes apply at once to every window and persist (main's settings store).
 // Doc: docs/conventions/ui.md#settings
 import { useEffect, useId, useState } from 'react'
 import type { LocalHttpState } from '../../../shared/preload-api'
 import { THEMES, type ThemeSetting } from '../../../shared/settings'
+import { Quantity } from '../../../core/quantity/quantity'
+import type { UnitId } from '../../../core/quantity/units'
+import { fail, Ok, type AppResult } from '../../../shared/result'
 import { designMessages } from '../messages/design'
 import { shellMessages } from '../messages/shell'
-import { AnchorPicker, Button, Dialog, DialogClose, SegmentedControl, Switch } from '../ui'
+import {
+  AnchorPicker,
+  Button,
+  Dialog,
+  DialogClose,
+  QuantityInput,
+  SegmentedControl,
+  Switch,
+} from '../ui'
 import styles from './AppShell.module.css'
 import { useSettings, useShell, useUi } from './ShellContext'
 
 const m = shellMessages.settingsDialog
+
+/** The stored grid step (a number in `unit`) as a field value. */
+const gridValue = (n: number, unit: UnitId): Quantity | undefined => {
+  const q = Quantity.parse(String(+n.toPrecision(10)), { kind: 'length', defaultUnit: unit })
+  return q.isOk() ? q.unwrap() : undefined
+}
+const positive = (q: Quantity): AppResult<Quantity> =>
+  q.canonical > 0
+    ? Ok(q)
+    : fail('model.invariant', 'must be positive', {
+        issues: [{ path: ['exact'], rule: 'positive', message: m.snapGridPositive }],
+      })
 
 export function SettingsDialog(): React.JSX.Element {
   const { bridge } = useShell()
@@ -23,6 +47,7 @@ export function SettingsDialog(): React.JSX.Element {
   const motionHint = useId()
   const agentsHint = useId()
   const anchorHint = useId()
+  const gridHint = useId()
 
   // the server's state follows the setting asynchronously: re-read it when either changes
   useEffect(() => {
@@ -102,6 +127,34 @@ export function SettingsDialog(): React.JSX.Element {
           />
           <p id={anchorHint} className={styles['settingHint']}>
             {m.defaultAnchorHint}
+          </p>
+        </div>
+        <div className={styles['settingRow']} role="group" aria-label={m.snapGrid}>
+          <span className={styles['settingLabel']} aria-hidden="true">
+            {m.snapGrid}
+          </span>
+          <div className={styles['settingPair']}>
+            <QuantityInput
+              label={m.snapGridMm}
+              kind="length"
+              defaultUnit="mm"
+              value={gridValue(settings.snapGrid.mm, 'mm')}
+              validate={positive}
+              onCommit={(q) => update({ snapGrid: { ...settings.snapGrid, mm: q.canonical } })}
+            />
+            <QuantityInput
+              label={m.snapGridInch}
+              kind="length"
+              defaultUnit="in"
+              value={gridValue(settings.snapGrid.inch, 'in')}
+              validate={positive}
+              onCommit={(q) =>
+                update({ snapGrid: { ...settings.snapGrid, inch: q.canonical / 25.4 } })
+              }
+            />
+          </div>
+          <p id={gridHint} className={styles['settingHint']}>
+            {m.snapGridHint}
           </p>
         </div>
       </div>

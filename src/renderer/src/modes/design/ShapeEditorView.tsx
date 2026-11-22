@@ -4,7 +4,8 @@
 // preview); an invalid state keeps the last valid outline and marks its issue. Without the port
 // (still loading, failed, tests) the outline is the one `design.shape.get` resolved. With an
 // operation using the shape, the view is face-on (task U2): the shape placed as the first such
-// operation places it, on that face's stock rectangle and axes.
+// operation places it, on that face's stock rectangle and axes. Task U3: snapping (the window's
+// "Snap" toggle and the snap grid setting) and the reference section on that face.
 // Doc: docs/conventions/ui.md#shape-editor, docs/architecture/shapes.md#where-the-2d-layer-runs
 import { useMemo, useState } from 'react'
 import { resolveShape, type ResolvedShape, type ShapeSummary } from '../../../../core/design/shape'
@@ -13,12 +14,14 @@ import { chainBounds } from '../../../../core/geometry/2d/model'
 import type { Issue } from '../../../../shared/errors/app-error'
 import { designMessages } from '../../messages/design'
 import { shapeMessages } from '../../messages/shape'
-import { useRegion2d, useUi } from '../../shell/ShellContext'
+import { useRegion2d, useSettings, useUi } from '../../shell/ShellContext'
+import { snapGridMm } from '../../viewport/snap'
 import { ShapeView, type FaceContext, type FlatDrawing } from '../../viewport/ShapeView'
 import type { DesignPart } from './model'
 import { axisNames } from './model'
 import { shapePlacement } from './operation-shape'
-import { operationFace } from './outline'
+import { operationFace, type OperationFace } from './outline'
+import { useReferenceSection } from './useReferenceSection'
 import { badMark, type ShapeHandle } from '../../viewport/shape-handles'
 import {
   anyFormula,
@@ -72,7 +75,7 @@ export function faceContext(
   part: DesignPart | undefined,
   shapeId: string,
   port: Parameters<typeof shapePlacement>[0] | undefined,
-): { context: FaceContext; face: string } | null {
+): { context: FaceContext; face: string; on: OperationFace } | null {
   const loaded = part?.loaded
   if (loaded === undefined || part?.table === undefined || port === undefined) return null
   const op = loaded.part.operations.find(
@@ -94,6 +97,7 @@ export function faceContext(
       axes: [names.u.toLowerCase(), names.v.toLowerCase()],
     },
     face: f.direction === '+z' || f.direction === '-z' ? `${d} face` : d,
+    on: f,
   }
 }
 
@@ -163,6 +167,10 @@ function ShapeEditorView({
         : (info?.issues ?? [])
   const bad = firstBad(issues, items)
   const onFace = useMemo(() => faceContext(part, shapeId, port), [part, shapeId, port])
+  const snapOn = useUi((s) => s.snapOn)
+  const setSnapOn = useUi((s) => s.setSnapOn)
+  const gridSetting = useSettings((s) => s.settings.snapGrid)
+  const section = useReferenceSection(part, onFace?.on)
 
   if (part === undefined || shape === undefined) return null
   const sel = Math.min(selectedItem, shape.items.length - 1)
@@ -197,6 +205,8 @@ function ShapeEditorView({
       onExit={() => select(null)}
       summary={summary}
       insetRight={insetRight}
+      snap={{ grid: snapGridMm(gridSetting, part.units), on: snapOn, onToggle: setSnapOn }}
+      section={section}
     />
   )
 }

@@ -36,6 +36,11 @@ const fields = {
    * chosen there (docs/conventions/ui-library-window.md, L5).
    */
   libraryUnits: UnitSystemSchema,
+  /**
+   * Snap grid step per unit system, each in its own unit (mm, inch): the Shape Editor and the tab
+   * markers snap to it in projects of that system (task U3, docs/conventions/ui.md#snap-and-measure).
+   */
+  snapGrid: z.object({ mm: z.number().positive().finite(), inch: z.number().positive().finite() }),
 }
 
 /** The settings file; a missing field takes its default (new settings need no migration). */
@@ -46,6 +51,7 @@ export const AppSettingsSchema = z.object({
   layouts: fields.layouts.default({}),
   defaultAnchor: fields.defaultAnchor.default({ u: 'centre', v: 'centre' }),
   libraryUnits: fields.libraryUnits.default('mm'),
+  snapGrid: fields.snapGrid.default({ mm: 1, inch: 1 / 16 }),
 })
 
 export type AppSettings = Readonly<z.output<typeof AppSettingsSchema>>
@@ -68,5 +74,6 @@ export function mergeSettings(
     layouts: { ...current.layouts, ...(patch.layouts ?? {}) },
     defaultAnchor: patch.defaultAnchor ?? current.defaultAnchor,
     libraryUnits: patch.libraryUnits ?? current.libraryUnits,
+    snapGrid: patch.snapGrid ?? current.snapGrid,
   }
 }

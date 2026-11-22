@@ -13,6 +13,7 @@ import {
   type PreloadApi,
   type ProjectSnapshot,
   type ReferenceMeshReply,
+  type ReferenceSectionReply,
   type WindowCloseRequest,
   WINDOW_KIND_ARG,
   type LibraryCloseRequest,
@@ -92,6 +93,8 @@ const api: PreloadApi = {
   reference: {
     mesh: (referenceId) =>
       ipcRenderer.invoke(IPC.referenceMesh, referenceId) as Promise<ReferenceMeshReply>,
+    section: (request) =>
+      ipcRenderer.invoke(IPC.referenceSection, request) as Promise<ReferenceSectionReply>,
   },
   library: {
     open: (target) => ipcRenderer.invoke(IPC.libraryOpen, target ?? {}) as Promise<void>,

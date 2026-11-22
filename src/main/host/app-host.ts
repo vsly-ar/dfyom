@@ -51,11 +51,20 @@ import {
 import { checkNoRunJob } from '../../core/run/commands'
 import type { MachineService } from '../../core/run/service'
 import { createToolpathCache } from '../../core/toolpath/cache'
-import { stlMesh, type StlMesh } from '../../core/workers/tasks'
+import { referenceSection, stlMesh, type StlMesh } from '../../core/workers/tasks'
 import type { ErrorReporter } from '../../shared/boundary'
 import type { AppError } from '../../shared/errors/app-error'
 import type { Logger } from '../../shared/logging'
-import { Err, fail, None, Ok, Some, type AsyncAppResult, type Option } from '../../shared/result'
+import {
+  Err,
+  fail,
+  None,
+  Ok,
+  Some,
+  type AppResult,
+  type AsyncAppResult,
+  type Option,
+} from '../../shared/result'
 import { createFsLibraryStorage } from '../library/fs-storage'
 import { canonicalPath, nodeFs, samePath } from '../persistence/fs'
 import { createProjectStorage } from '../persistence/storage'
@@ -157,6 +166,13 @@ export interface AppHost extends SessionHost, HostPort {
    * `unknownReference`) without the project or the reference.
    */
   referenceMesh(key: string, referenceId: string): AsyncAppResult<StlMesh>
+  /** A reference's section by `w = level` after `matrix` (source → face frame), in the worker (U3). */
+  referenceSection(
+    key: string,
+    referenceId: string,
+    matrix: readonly number[],
+    level: number,
+  ): AsyncAppResult<{ segments: Float32Array }>
   /**
    * Stdin end, app quit: abort jobs and close every project (unsaved changes stay recoverable).
    * Returns the projects that had unsaved changes.
@@ -546,6 +562,41 @@ class Host implements AppHost {
 
   async referenceMesh(key: string, referenceId: string): AsyncAppResult<StlMesh> {
     const where = 'reference.mesh'
+    const found = this.referenceFile(key, referenceId, where)
+    if (found.isErr()) return Err(found.unwrapErr())
+    const { file, triangles } = found.unwrap()
+    const r = await this.o.workers.run(
+      stlMesh,
+      { path: file, triangles },
+      { signal: new AbortController().signal, progress: () => undefined },
+    )
+    return r.isErr() ? Err(r.unwrapErr().withContext(where, { referenceId })) : r
+  }
+
+  async referenceSection(
+    key: string,
+    referenceId: string,
+    matrix: readonly number[],
+    level: number,
+  ): AsyncAppResult<{ segments: Float32Array }> {
+    const where = 'reference.section'
+    const found = this.referenceFile(key, referenceId, where)
+    if (found.isErr()) return Err(found.unwrapErr())
+    const { file, triangles } = found.unwrap()
+    const r = await this.o.workers.run(
+      referenceSection,
+      { path: file, triangles, matrix: [...matrix], level },
+      { signal: new AbortController().signal, progress: () => undefined },
+    )
+    return r.isErr() ? Err(r.unwrapErr().withContext(where, { referenceId })) : r
+  }
+
+  /** The stored STL of a reference of the project `key`, and its triangle count. */
+  private referenceFile(
+    key: string,
+    referenceId: string,
+    where: string,
+  ): AppResult<{ file: string; triangles: number }> {
     const rt = this.runtimes.get(key)
     const refs = rt?.dispatcher.doc.references
     const ref =
@@ -557,12 +608,7 @@ class Host implements AppHost {
       })
     const file = rt.session.assetFile(ref.asset.path)
     if (file.isErr()) return Err(file.unwrapErr().withContext(where))
-    const r = await this.o.workers.run(
-      stlMesh,
-      { path: file.unwrap(), triangles: ref.asset.triangles },
-      { signal: new AbortController().signal, progress: () => undefined },
-    )
-    return r.isErr() ? Err(r.unwrapErr().withContext(where, { referenceId })) : r
+    return Ok({ file: file.unwrap(), triangles: ref.asset.triangles })
   }
 
   onProjectsChanged(listener: () => void): () => void {

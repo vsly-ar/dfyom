@@ -1,6 +1,7 @@
 // The segment table of a path item (task U1): a dense keyboard grid, one row per segment – #, type
 // (Line, Arc, Tangent arc), end X and Y, radius, CW/CCW, large arc and the fillet at the end vertex;
-// a cell that does not apply to the type is empty. Arrows move between cells (roving focus),
+// a cell that does not apply to the type is empty. In a narrow inspector each segment takes two
+// lines (type, X, Y; radius, direction, large arc, fillet) so realistic numbers fit unscrolled. Arrows move between cells (roving focus),
 // Enter edits a cell and Enter commits it (back to the cell), Escape leaves the cell's control,
 // Alt+↑/↓ moves a row, Delete on # removes it with an undo toast (the navigator's). Every cell is a QuantityInput
 // (or a choice); every commit is one `design.shape.item.update` of the segment (or fillet) list.
@@ -209,28 +210,28 @@ export function SegmentTable({
         >
           <thead>
             <tr role="row">
-              <th role="columnheader" scope="col">
+              <th role="columnheader" scope="col" data-column="number">
                 {t.number}
               </th>
-              <th role="columnheader" scope="col">
+              <th role="columnheader" scope="col" data-column="type">
                 {t.type}
               </th>
-              <th role="columnheader" scope="col">
+              <th role="columnheader" scope="col" data-column="x">
                 {t.x}
               </th>
-              <th role="columnheader" scope="col">
+              <th role="columnheader" scope="col" data-column="y">
                 {t.y}
               </th>
-              <th role="columnheader" scope="col">
+              <th role="columnheader" scope="col" data-column="radius">
                 {t.radius}
               </th>
-              <th role="columnheader" scope="col">
+              <th role="columnheader" scope="col" data-column="direction">
                 {t.direction}
               </th>
-              <th role="columnheader" scope="col">
-                {t.large}
+              <th role="columnheader" scope="col" data-column="large" aria-label={t.large}>
+                {t.largeShort}
               </th>
-              <th role="columnheader" scope="col">
+              <th role="columnheader" scope="col" data-column="fillet">
                 {t.fillet}
               </th>
             </tr>

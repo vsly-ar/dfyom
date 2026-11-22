@@ -37,6 +37,7 @@ export function useDesignScene(): SceneProps {
   const [selected, select] = useDesignSelection()
   const pick = useUi((s) => s.pick)
   const rotationGuide = useUi((s) => s.rotationGuide)
+  const snapOn = useUi((s) => s.snapOn)
   const setPick = useUi((s) => s.setPick)
   const status = evaluation?.status ?? 'pending'
   const references = useDesignReferences(part)
@@ -54,6 +55,7 @@ export function useDesignScene(): SceneProps {
           {
             id: ref.id,
             positions: mesh.positions,
+            edges: mesh.edges,
             matrix,
             box: {
               min: [box.min.x, box.min.y, box.min.z] as const,
@@ -153,6 +155,8 @@ export function useDesignScene(): SceneProps {
     tabs,
     guide: overlays?.guide ? [overlays.guide] : null,
     ghosts,
+    snap: snapOn,
+    ...(part === undefined ? {} : { units: part.units }),
     ...(part === undefined
       ? {}
       : {

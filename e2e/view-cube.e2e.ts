@@ -45,9 +45,9 @@ test('view cube: keys, a click on an edge, the Views menu, a drag', async ({ dfy
   const cx = box.x + box.width - MARGIN - BOX / 2
   const cy = box.y + MARGIN + BOX / 2
 
-  // the toolbar under the cube keeps Fit and adds Views; no Top/Front/Right/Iso buttons
+  // the toolbar under the cube keeps Fit and adds Views (and Measure, U3); no Top/Front/Right/Iso
   const toolbar = viewport.getByRole('toolbar', { name: 'View' })
-  await expect(toolbar.getByRole('button')).toHaveText(['', ''])
+  await expect(toolbar.getByRole('button')).toHaveText(['', '', ''])
   await expect(toolbar.getByRole('button', { name: 'Fit' })).toBeVisible()
 
   await viewport.focus()

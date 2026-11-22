@@ -4,7 +4,8 @@
  */
 import { z } from 'zod'
 import { Err, tryAsync, type AppResult } from '../../shared/result'
-import type { AnyWorkerTask, WorkerTask } from '../commands/jobs'
+import type { AnyWorkerTask, TaskControl, WorkerTask } from '../commands/jobs'
+import { FEATURE_EDGE_DEG, featureEdges, meshSection } from '../design/mesh-section'
 import { createStlParser, STL_LIMITS, StlPositions, type StlSummary } from '../design/stl'
 import { svgImportTask } from '../import/svg/task'
 import { evaluatePart, type PartEvaluation } from '../geometry/evaluate'
@@ -105,51 +106,110 @@ export const stlParse: WorkerTask<{ path: string }, StlSummary> = {
   },
 }
 
-/** The triangles of an STL for the reference ghost: 9 float32 per triangle, source units. */
+/**
+ * The triangles of an STL for the reference ghost: 9 float32 per triangle, source units, and its
+ * feature edges (6 float32 per segment, source units; task U3 moved them off the renderer thread).
+ */
 export interface StlMesh {
   readonly positions: Float32Array
+  readonly edges: Float32Array
 }
+
+/** Reads a stored reference's triangles with the streamed parser, one step per chunk. */
+async function readStlPositions(
+  path: string,
+  triangles: number,
+  ctl: TaskControl,
+  where: string,
+): Promise<AppResult<Float32Array>> {
+  const opened = await ctl.files.open(path)
+  if (opened.isErr()) return opened
+  const { size, chunks } = opened.unwrap()
+  const keep = new StlPositions(triangles)
+  const created = createStlParser(size, STL_LIMITS, keep.add)
+  if (created.isErr()) return created
+  const parser = created.unwrap()
+  const read = await tryAsync(
+    async (): Promise<AppResult<Float32Array>> => {
+      let done = 0
+      for await (const chunk of chunks) {
+        const step = ctl.steps.step({ done, total: size, label: 'Reading STL' })
+        if (step.isErr()) return step
+        const pushed = parser.push(chunk)
+        if (pushed.isErr()) return pushed
+        done += chunk.length
+      }
+      return parser.finish().map(() => keep.positions())
+    },
+    'persist.io',
+    'reading the STL file failed',
+  )
+  return read.isOk() ? read.unwrap() : Err(read.unwrapErr().withContext(where))
+}
+
+const StlReadSchema = z.object({
+  path: z.string().min(1),
+  triangles: z.number().int().positive().max(STL_LIMITS.maxTriangles),
+})
 
 /**
  * Reads a stored reference's triangles for the viewport ghost (task R3,
  * docs/modes/reference-model.md#ghost-mesh-task-r3): the same streamed parser as `stlParse`, with
- * a sink that keeps every triangle. `triangles` (the record's count) sizes the buffer once; the
- * positions are transferred to the host, never cloned.
+ * a sink that keeps every triangle. `triangles` (the record's count) sizes the buffer once. The
+ * feature edges (`featureEdges`) are found here too (U3), so the renderer thread does not; both
+ * buffers are transferred to the host, never cloned.
  */
 export const stlMesh: WorkerTask<{ path: string; triangles: number }, StlMesh> = {
   name: 'reference.meshStl',
   lane: 'geometry',
-  input: z.object({
-    path: z.string().min(1),
-    triangles: z.number().int().positive().max(STL_LIMITS.maxTriangles),
-  }),
-  output: z.object({ positions: z.instanceof(Float32Array) }),
+  input: StlReadSchema,
+  output: z.object({ positions: z.instanceof(Float32Array), edges: z.instanceof(Float32Array) }),
   timeoutMs: 120_000,
-  transfer: (m) => [m.positions],
+  transfer: (m) => [m.positions, m.edges],
   async run({ path, triangles }, ctl) {
-    const opened = await ctl.files.open(path)
-    if (opened.isErr()) return opened
-    const { size, chunks } = opened.unwrap()
-    const keep = new StlPositions(triangles)
-    const created = createStlParser(size, STL_LIMITS, keep.add)
-    if (created.isErr()) return created
-    const parser = created.unwrap()
-    const read = await tryAsync(
-      async (): Promise<AppResult<StlMesh>> => {
-        let done = 0
-        for await (const chunk of chunks) {
-          const step = ctl.steps.step({ done, total: size, label: 'Reading STL' })
-          if (step.isErr()) return step
-          const pushed = parser.push(chunk)
-          if (pushed.isErr()) return pushed
-          done += chunk.length
-        }
-        return parser.finish().map(() => ({ positions: keep.positions() }))
-      },
-      'persist.io',
-      'reading the STL file failed',
-    )
-    return read.isOk() ? read.unwrap() : Err(read.unwrapErr().withContext('reference.meshStl'))
+    const read = await readStlPositions(path, triangles, ctl, 'reference.meshStl')
+    if (read.isErr()) return read
+    const positions = read.unwrap()
+    return featureEdges(positions, FEATURE_EDGE_DEG, ctl.steps).map((edges) => ({
+      positions,
+      edges,
+    }))
+  },
+}
+
+/** The last mesh a section was cut from, kept in the worker: a new depth does not read again. */
+let sectionMesh: { readonly path: string; readonly positions: Float32Array } | undefined
+
+export interface SectionInput {
+  readonly path: string
+  readonly triangles: number
+  /** Column-major 4 × 4: source units → the face frame (mm), the plane normal third. */
+  readonly matrix: readonly number[]
+  /** The plane's height in the face frame (mm): the face's level minus the section depth. */
+  readonly level: number
+}
+
+/**
+ * The reference section (task U3, docs/modes/design-v0.3.md#measure-and-snap): a stored
+ * reference's mesh cut by a face-parallel plane, as segments in the face frame (mm). The mesh is
+ * read once per file and kept for the next depth; only the segments leave the worker.
+ */
+export const referenceSection: WorkerTask<SectionInput, { segments: Float32Array }> = {
+  name: 'reference.section',
+  lane: 'geometry',
+  input: StlReadSchema.extend({ matrix: z.array(z.number()).length(16), level: z.number() }),
+  output: z.object({ segments: z.instanceof(Float32Array) }),
+  timeoutMs: 120_000,
+  transfer: (r) => [r.segments],
+  async run({ path, triangles, matrix, level }, ctl) {
+    if (sectionMesh?.path !== path) {
+      const read = await readStlPositions(path, triangles, ctl, 'reference.section')
+      if (read.isErr()) return read
+      sectionMesh = { path, positions: read.unwrap() }
+    }
+    return meshSection(sectionMesh.positions, matrix, level, ctl.steps).map((segments) => ({
+      segments,
+    }))
   },
 }
 
@@ -158,5 +218,6 @@ export const WORKER_TASKS: readonly AnyWorkerTask[] = [
   toolpathGenerate,
   stlParse,
   stlMesh,
+  referenceSection,
   svgImportTask,
 ]

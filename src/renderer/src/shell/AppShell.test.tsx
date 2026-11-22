@@ -169,6 +169,7 @@ describe('AppShell', () => {
         layouts: {},
         defaultAnchor: { u: 'centre', v: 'centre' },
         libraryUnits: 'mm',
+        snapGrid: { mm: 1, inch: 1 / 16 },
       }),
     )
     await waitFor(() => expect(document.documentElement.dataset['theme']).toBe('light'))

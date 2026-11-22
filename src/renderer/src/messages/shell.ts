@@ -79,6 +79,12 @@ export const shellMessages = {
     defaultAnchor: 'Default anchor',
     defaultAnchorHint:
       'Which point of a new pocket or profile its position gives, seen from above. Agents choose their own.',
+    snapGrid: 'Snap grid',
+    snapGridMm: 'Snap grid in mm projects',
+    snapGridInch: 'Snap grid in inch projects',
+    snapGridHint:
+      'Handles and tab markers snap to grid points this far apart when nothing nearer is in reach.',
+    snapGridPositive: 'Must be greater than 0.',
     done: 'Done',
   },
 

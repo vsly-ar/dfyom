@@ -1,7 +1,8 @@
 // A reference model's ghost (task R3): the STL's triangles drawn translucent and neutral after the
-// part (`--vp-stock` at low opacity, `--vp-edge` feature edges), placed by a matrix the caller
-// computes (R2's placed-box convention), never pickable: clicks pass through to the part. One
-// geometry per mesh: placement edits only change the matrix. Fades in when it appears.
+// part (`--vp-stock` at low opacity, `--vp-edge` feature edges found by the worker, U3), placed by
+// a matrix the caller computes (R2's placed-box convention), never pickable: clicks pass through
+// to the part (the measure tool raycasts it on purpose, `userData.measure`). One geometry per
+// mesh: placement edits only change the matrix. Fades in when it appears.
 // Doc: docs/conventions/ui.md#reference-ghost-v02, docs/modes/reference-model.md#display
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
@@ -9,31 +10,26 @@ import {
   BufferAttribute,
   BufferGeometry,
   Color,
-  EdgesGeometry,
   Matrix4,
   SRGBColorSpace,
   type LineBasicMaterial,
   type MeshStandardMaterial,
 } from 'three'
 import type { Rgb } from './colours'
-import { CREASE_ANGLE_DEG } from './mesh'
 
 /** A reference as the viewport draws it. */
 export interface ReferenceGhostView {
   readonly id: string
   /** 9 float32 per triangle, source units (the STL as read). */
   readonly positions: Float32Array
+  /** Feature edges (6 float32 per segment, source units), found by the worker (U3). */
+  readonly edges: Float32Array
   /** Column-major 4 × 4 model matrix: source units → part frame (mm). */
   readonly matrix: readonly number[]
 }
 
 /** Opacity of the ghost's faces and edges (translucent: the part and stock stay readable). */
 export const GHOST_OPACITY = { faces: 0.2, edges: 0.45 } as const
-/**
- * Feature edges are found on meshes up to this many triangles; larger ones show faces only, since
- * `EdgesGeometry` runs on the renderer thread (measured in task R3, reference-model.md).
- */
-export const GHOST_EDGE_LIMIT = 150_000
 /** `--motion-slow` (tokens.css): the ghost fades in. */
 const FADE_MS = 320
 
@@ -53,7 +49,7 @@ export function ReferenceGhost({
   reducedMotion: boolean
 }): React.JSX.Element {
   const invalidate = useThree((s) => s.invalidate)
-  const { positions } = ghost
+  const { positions, edges: edgePositions } = ghost
   const geometry = useMemo(() => {
     const g = new BufferGeometry()
     g.setAttribute('position', new BufferAttribute(positions, 3))
@@ -62,13 +58,12 @@ export function ReferenceGhost({
     return g
   }, [positions])
   useEffect(() => () => geometry.dispose(), [geometry])
-  const edges = useMemo(
-    () =>
-      positions.length / 9 <= GHOST_EDGE_LIMIT
-        ? new EdgesGeometry(geometry, CREASE_ANGLE_DEG)
-        : null,
-    [geometry, positions],
-  )
+  const edges = useMemo(() => {
+    if (edgePositions.length === 0) return null
+    const g = new BufferGeometry()
+    g.setAttribute('position', new BufferAttribute(edgePositions, 3))
+    return g
+  }, [edgePositions])
   useEffect(() => () => edges?.dispose(), [edges])
 
   const matrix = useMemo(() => new Matrix4().fromArray([...ghost.matrix]), [ghost.matrix])
@@ -92,7 +87,12 @@ export function ReferenceGhost({
 
   return (
     <group matrixAutoUpdate={false} matrix={matrix}>
-      <mesh geometry={geometry} raycast={noRaycast} renderOrder={4}>
+      <mesh
+        geometry={geometry}
+        raycast={noRaycast}
+        renderOrder={4}
+        userData={{ measure: 'reference' }}
+      >
         <meshStandardMaterial
           ref={faces}
           color={face}

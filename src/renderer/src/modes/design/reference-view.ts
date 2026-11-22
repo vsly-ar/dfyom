@@ -115,3 +115,55 @@ export function sourceSize(bounds: Box): string {
     bounds.max.z - bounds.min.z,
   )}`
 }
+
+// ── the reference section (task U3) ───────────────────────────────────────────────────────
+
+/** A face frame (local → part frame: `origin + u·x + v·y + n·z`). */
+interface FrameLike {
+  readonly origin: readonly [number, number, number]
+  readonly u: readonly [number, number, number]
+  readonly v: readonly [number, number, number]
+  readonly n: readonly [number, number, number]
+}
+
+/**
+ * The section task's matrix (column-major 4 × 4): the ghost's matrix (source units → part frame)
+ * followed by part frame → face frame, so the face normal is the third axis
+ * (docs/modes/design-v0.3.md#implementation-u3).
+ */
+export function sectionMatrix(ghost: readonly number[], frame: FrameLike): number[] {
+  const axes = [frame.u, frame.v, frame.n]
+  const o = frame.origin
+  const out = new Array<number>(16).fill(0)
+  for (let r = 0; r < 3; r++) {
+    const a = axes[r]!
+    for (let c = 0; c < 4; c++) {
+      // row r of F⁻¹ times column c of G (G's bottom row is 0 0 0 1)
+      let v = a[0] * ghost[c * 4]! + a[1] * ghost[c * 4 + 1]! + a[2] * ghost[c * 4 + 2]!
+      if (c === 3) v -= a[0] * o[0] + a[1] * o[1] + a[2] * o[2]
+      out[c * 4 + r] = v
+    }
+  }
+  out[15] = 1
+  return out
+}
+
+/**
+ * The section depth (mm below the face at `w = faceW`) that cuts the placed reference box at its
+ * middle along the face normal, at least 0: "mid-wall height" of a reference fitted to the stock.
+ */
+export function middleDepth(box: Box, frame: FrameLike, faceW: number): number {
+  let lo = Infinity
+  let hi = -Infinity
+  for (const x of [box.min.x, box.max.x])
+    for (const y of [box.min.y, box.max.y])
+      for (const z of [box.min.z, box.max.z]) {
+        const w =
+          frame.n[0] * (x - frame.origin[0]) +
+          frame.n[1] * (y - frame.origin[1]) +
+          frame.n[2] * (z - frame.origin[2])
+        lo = Math.min(lo, w)
+        hi = Math.max(hi, w)
+      }
+  return Math.max(0, faceW - (lo + hi) / 2)
+}

@@ -431,6 +431,15 @@
   line-height: var(--lh-xs);
   color: var(--text-muted);
   white-space: nowrap;
+  transition: opacity var(--motion-fast) var(--ease-standard);
+}
+
+/* the row's actions cover its end while hovered, focused or selected: the count fades with them
+   showing (the reason under a used row still names the operations) */
+.op:hover .shapeUse,
+.op:focus-within .shapeUse,
+.op[data-selected] .shapeUse {
+  opacity: 0;
 }
 
 .shapeReason {
@@ -560,6 +569,7 @@
 }
 
 .segScroll {
+  container-type: inline-size;
   overflow-x: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -644,6 +654,109 @@
   display: flex;
   justify-content: center;
   padding-top: var(--space-1);
+}
+
+/* A narrow table (the default inspector width) puts each segment on two lines, so 4 integer
+   digits and 3 decimals fit every number cell without scrolling (U3 review): # spans both lines;
+   type, X, Y on the first; radius, direction, large arc, fillet under them. The roles stay those
+   of the grid (explicit ARIA roles), arrows still move in column order. */
+@container (max-width: 34rem) {
+  .segTable,
+  .segTable thead,
+  .segTable tbody {
+    display: block;
+  }
+
+  .segTable tr {
+    display: grid;
+    grid-template-columns: 1.25rem minmax(0, 1fr) minmax(0, 1fr) 1.75rem minmax(0, 1fr);
+    grid-template-areas:
+      'number type x x y'
+      'number radius direction large fillet';
+    gap: 2px;
+    padding: 2px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .segTable tbody tr:last-child {
+    border-bottom: 0;
+  }
+
+  .segTable th,
+  .segTable td {
+    display: block;
+    min-width: 0;
+    padding: 0;
+  }
+
+  .segTable th {
+    border-bottom: 0;
+    padding: 0 3px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .segTable [data-column='number'] {
+    grid-area: number;
+  }
+
+  .segTable [data-column='type'] {
+    grid-area: type;
+  }
+
+  .segTable [data-column='x'] {
+    grid-area: x;
+  }
+
+  .segTable [data-column='y'] {
+    grid-area: y;
+  }
+
+  .segTable [data-column='radius'] {
+    grid-area: radius;
+  }
+
+  .segTable [data-column='direction'] {
+    grid-area: direction;
+  }
+
+  .segTable [data-column='large'] {
+    grid-area: large;
+  }
+
+  .segTable [data-column='fillet'] {
+    grid-area: fillet;
+  }
+
+  .segCell[data-column] {
+    min-width: 0;
+  }
+
+  .segSelect {
+    min-width: 0;
+    width: 100%;
+  }
+
+  /* the dense number boxes: smaller mono text and padding, the full value visible */
+  .segCell div:has(> input) {
+    padding: 0 3px;
+    font-size: var(--text-xs);
+  }
+
+  .segCheck {
+    padding-top: 2px;
+  }
+
+  /* CCW / CW in the direction track: tighter items, no spill onto the large-arc box */
+  .segCell[data-column='direction'] button[type] {
+    padding: 0 3px;
+  }
+
+  .segTable th[data-column='large'] {
+    padding: 0;
+    overflow: visible;
+    text-overflow: clip;
+  }
 }
 
 /* ── shape picker, placement and tab positions (task U2) ─────────────────────────────────── */

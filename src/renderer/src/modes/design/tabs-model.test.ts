@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Loop } from '../../../../core/geometry/2d/model'
 import { chainLength } from '../../../../core/geometry/2d/measure'
-import { clampTab, distanceAlong, newTabPosition, type ProfileTabs } from './tabs-model'
+import { clampTab, distanceAlong, newTabPosition, snapAlong, type ProfileTabs } from './tabs-model'
 import { slotAcross, tabQuad } from './useTabMarkers'
 
 // a 40 × 20 rectangle, counter-clockwise from the origin (length 120)
@@ -68,5 +68,31 @@ describe('tabs model', () => {
     expect(Math.max(...xs)).toBeCloseTo(24)
     expect(Math.min(...ys)).toBeLessThan(-6)
     expect(Math.max(...ys)).toBeGreaterThan(0)
+  })
+})
+
+describe('tab snapping (U3)', () => {
+  it('snaps a dragged tab to a corner or a side middle within the pixel tolerance', () => {
+    const t = tabs()
+    // 0.5 mm from the corner (40, 0) at 10 px/mm: the corner, 40 mm along
+    expect(snapAlong(t, [39.6, -0.4], { pxPerMm: 10, grid: null })).toEqual({
+      s: 40,
+      snap: { at: [40, 0], kind: 'end' },
+    })
+    // near the middle of the right side (40, 10): 50 mm along
+    const mid = snapAlong(t, [40.4, 10.4], { pxPerMm: 10, grid: null })
+    expect(mid.snap?.kind).toBe('midpoint')
+    expect(mid.s).toBeCloseTo(50)
+    // zoomed in, the same offset is 50 px away: free
+    expect(snapAlong(t, [39.6, -0.4], { pxPerMm: 100, grid: null }).snap).toBeNull()
+  })
+
+  it('falls back to the grid along the loop, in inch too', () => {
+    const t = tabs()
+    const g = 25.4 / 16
+    const r = snapAlong(t, [12.1, 0], { pxPerMm: 4, grid: g })
+    expect(r.snap?.kind).toBe('grid')
+    expect(r.s / g).toBeCloseTo(8, 9) // 8/16 in = 12.7 mm
+    expect(r.snap?.at[0]).toBeCloseTo(12.7)
   })
 })
