@@ -185,7 +185,7 @@ All `run.*` commands are `machine: true`; the [permission rule](../architecture/
 
 ### Progress
 
-`done` = lines acknowledged, `total` = program lines ([grbl.md](../architecture/grbl.md#transport-and-sender)); `label` = current section, or `Tool change 2: 6 mm end mill` / the `M0` message while waiting. Through `ctx.progress`, so the job's throttled progress stream reaches the UI, `job.get` and MCP like any job. Elapsed time is in `RunStatus`; a remaining-time estimate is later.
+While the job exports the program (step 2 of the [run job](#run-job)) progress is indeterminate: `done` 0, no `total`, `label` `Export: …`. From the stream on (a `started` tick, sent before `jobStart` so it never follows a host tick): `done` = lines acknowledged, `total` = program lines ([grbl.md](../architecture/grbl.md#transport-and-sender)); `label` = current section, or `Tool change 2: 6 mm end mill` / the `M0` message while waiting. Through `ctx.progress`, so the job's throttled progress stream reaches the UI, `job.get` and MCP like any job. Elapsed time is in `RunStatus`; a remaining-time estimate is later.
 
 ### Status
 

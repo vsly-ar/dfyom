@@ -167,7 +167,9 @@ async function checkAndStart(
     return fail('op.aborted', 'the run was aborted before it started', { where })
   // 4. stream
   const prefix = warnings.length > 0 ? `${warnings.length} machine warning(s) · ` : ''
-  const total = e.lines.length
+  // before the stream starts: the host's progress ticks may arrive before startJob resolves,
+  // and this tick must not overwrite them (done never goes back)
+  ctx.progress({ done: 0, total: e.lines.length, label: `${prefix}started` })
   // the host refuses if the G54, the machine copy or the target changed since the check
   const started = await m.startJob(
     ctx.jobId,
@@ -179,7 +181,6 @@ async function checkAndStart(
     { workZero, machineKey },
   )
   if (started.isErr()) return Err(started.unwrapErr().withContext(where, { planId }))
-  ctx.progress({ done: 0, total, label: `${prefix}started` })
   return Ok({ running: started.unwrap(), warnings })
 }
 
