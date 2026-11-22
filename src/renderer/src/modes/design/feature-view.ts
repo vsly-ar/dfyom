@@ -11,6 +11,8 @@ import type { OperationDTO, PartDTO } from '../../../../core/design/part.dto'
 import type { DfmWarning } from '../../../../core/geometry/model'
 import { checkReferences, surfaceOfReference } from '../../../../core/design/surfaces'
 import type { QuantityDTO } from '../../../../core/quantity/quantity.dto'
+import type { AppErrorData } from '../../../../shared/errors/app-error'
+import { ERROR_CODES } from '../../../../shared/errors/codes'
 import { designMessages } from '../../messages/design'
 import { dfmMessages } from '../../messages/dfm'
 import { pendingApply, quantityOf, surfaceLabel, type DesignPart } from './model'
@@ -163,6 +165,75 @@ export function unitMoveIndex(
   const next = units[i + by]
   if (unit === undefined || next === undefined) return undefined
   return by < 0 ? next.start : unit.start + (next.end - next.start)
+}
+
+/**
+ * Where unit `id` lands in the operation list when it is moved to unit position `to` (D45: a drop;
+ * the start index `design.operation.move` / `design.feature.move` take): the operations of the
+ * units before it in the new order. Undefined for an unknown unit, an index out of range or no move.
+ */
+export function unitDropIndex(
+  units: readonly OperationUnit[],
+  id: string,
+  to: number,
+): number | undefined {
+  const from = units.findIndex((u) => u.id === id)
+  if (from < 0 || to < 0 || to >= units.length || to === from) return undefined
+  const rest = units.filter((u) => u.id !== id)
+  return rest.slice(0, to).reduce((n, u) => n + (u.end - u.start), 0)
+}
+
+/**
+ * Why moving unit `id` to unit position `to` is refused, as the move command would refuse it (a
+ * reference to a surface no longer before its user, a chamfer before its edge: the core's
+ * `checkReferences` on the reordered operations); undefined = allowed or unknown.
+ */
+export function unitDropRefusal(
+  part: Pick<DesignPart, 'dto' | 'loaded'>,
+  units: readonly OperationUnit[],
+  id: string,
+  to: number,
+): AppErrorData | undefined {
+  const l = part.loaded
+  const unit = units.find((u) => u.id === id)
+  const at = unitDropIndex(units, id, to)
+  if (l === undefined || unit === undefined || at === undefined) return undefined
+  const ops = l.part.operations
+  const block = ops.slice(unit.start, unit.end)
+  const rest = [...ops.slice(0, unit.start), ...ops.slice(unit.end)]
+  const next = [...rest.slice(0, at), ...block, ...rest.slice(at)]
+  const r = checkReferences(next, l.stock)
+  return r.isOk() ? undefined : r.unwrapErr().toJSON()
+}
+
+/**
+ * A refused move as the operation list says it (D45: the same text for a drop and Alt+↑/↓): who
+ * needs which surface or edge before it, the feature a position is inside, or the code's message.
+ */
+export function moveRefusal(part: Pick<DesignPart, 'dto'>, error: AppErrorData): string {
+  const t = designMessages.reorder
+  const nameOf = (id: string) => {
+    const op = part.dto.operations.find((o) => o.id === id)
+    const owner = op === undefined ? undefined : ownerFeature(part.dto, op)
+    return owner?.name ?? op?.name ?? id
+  }
+  const issue = error.issues?.[0]
+  if (error.code === 'design.referenced' && issue !== undefined) {
+    const user = String(issue.params?.['operationId'] ?? '')
+    const reference = String(issue.params?.['reference'] ?? '')
+    if (user.length > 0 && reference.length > 0) {
+      const edge = part.dto.operations.find((o) => o.id === reference)
+      return edge !== undefined
+        ? t.edgeFirst(nameOf(user), nameOf(reference))
+        : t.surfaceFirst(nameOf(user), reference)
+    }
+  }
+  if (issue?.rule === 'insideFeature') {
+    const featureId = String(issue.params?.['featureId'] ?? '')
+    const feature = part.dto.features?.find((f) => f.id === featureId)
+    return t.insideFeature(feature?.name ?? featureId)
+  }
+  return t.refused(ERROR_CODES[error.code]?.userMessage ?? error.message)
 }
 
 /** The feature an operation belongs to, if any. */

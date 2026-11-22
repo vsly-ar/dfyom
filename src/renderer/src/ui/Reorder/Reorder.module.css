@@ -1,0 +1,140 @@
+/* Drag to reorder (D45, ui.md#reordering-lists-d45): the grip, the lifted row, the drop indicator
+   line, the refusal shake and the status line under the list. */
+
+.list > [data-reorder-item] {
+  position: relative;
+}
+
+.list[data-dragging] {
+  user-select: none;
+}
+
+.list[data-dragging],
+.list[data-dragging] * {
+  cursor: grabbing;
+}
+
+.list[data-dragging][data-refused],
+.list[data-dragging][data-refused] * {
+  cursor: not-allowed;
+}
+
+/* the lifted row follows the pointer (inline transform), above its neighbours */
+.list > [data-reorder-item][data-dragging] {
+  z-index: 2;
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-2);
+  opacity: 0.96;
+}
+
+/* the drop indicator: a 2 px line in the middle of the gap the row lands in */
+.list > [data-reorder-item][data-drop]::after {
+  content: '';
+  position: absolute;
+  z-index: 3;
+  right: 0;
+  left: 0;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  pointer-events: none;
+  animation: indicator-in var(--motion-fast) var(--ease-emphasized);
+}
+
+.list > [data-reorder-item][data-drop='before']::after {
+  top: calc(var(--reorder-gap, 0px) / -2 - 1px);
+}
+
+.list > [data-reorder-item][data-drop='after']::after {
+  bottom: calc(var(--reorder-gap, 0px) / -2 - 1px);
+}
+
+.list > [data-reorder-item][data-drop][data-drop-refused]::after {
+  background: var(--danger);
+}
+
+/* a refused drop: a short shake (`translate`, so it never fights the glide's `transform`) */
+.list > [data-reorder-item][data-shake] {
+  animation: shake var(--motion-slow) var(--ease-standard);
+}
+
+@keyframes indicator-in {
+  from {
+    opacity: 0;
+    transform: scaleX(0.6);
+  }
+}
+
+@keyframes shake {
+  20% {
+    translate: -4px 0;
+  }
+  45% {
+    translate: 3px 0;
+  }
+  70% {
+    translate: -2px 0;
+  }
+}
+
+/* the dotted grip: 2 × 3 dots, a pointer convenience (the row's Alt+↑/↓ is the keyboard path) */
+.grip {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: var(--control-sm);
+  height: var(--control-sm);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: grab;
+  touch-action: none;
+  transition: color var(--motion-fast) var(--ease-standard);
+}
+
+.grip::before {
+  content: '';
+  width: 8px;
+  height: 14px;
+  background-image: radial-gradient(circle, currentColor 1.1px, transparent 1.4px);
+  background-size: 4px 5px;
+  background-position: 0 0;
+}
+
+.grip:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.grip:active {
+  cursor: grabbing;
+}
+
+.status {
+  display: flex;
+  gap: var(--space-1);
+  align-items: flex-start;
+  margin: var(--space-1) var(--space-2) 0;
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  color: var(--text);
+}
+
+.status:empty {
+  display: none;
+}
+
+.status > svg {
+  flex: none;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  color: var(--warning);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

@@ -1,13 +1,13 @@
 // The Clones rows editor (v0.4 task U3, ui.md § Clones): the path rows in path order, each with
-// its kind icon, a summary ("Arc · 5 positions") and move up / move down (Alt+↑/↓) / remove; the
+// its kind icon, a summary ("Arc · 5 positions"), its drag grip (D45; Alt+↑/↓) and remove; the
 // selected row expands to its fields (QuantityInputs in project units, ° for angles; counts as
 // whole numbers) and its Skipped chips (restore by number). Add row (Grid, Offset, Polar, Arc,
 // Point, Along – Along disabled without a one-item path shape) appends a row placed a step from
 // the last position. Shared by the draft (local rows) and the Clones inspector (each change one
 // `design.clones.update`); the caller decides what a change does. The selected row's segment of
 // the clone path is amber (ui store `clonesRow`).
-// Doc: docs/conventions/ui.md#clones
-import { type KeyboardEvent } from 'react'
+// Doc: docs/conventions/ui.md#clones, #reordering-lists-d45
+import { useState, type KeyboardEvent } from 'react'
 import type { CloneRowKind } from '../../../../core/design/clones/clones'
 import { fieldContext } from '../../../../core/design/operation'
 import { quantityFromSource } from '../../../../core/expression/quantity'
@@ -20,9 +20,13 @@ import { designMessages } from '../../messages/design'
 import { useUi } from '../../shell/ShellContext'
 import {
   Button,
+  DragGrip,
   Icon,
   IconButton,
   Menu,
+  moveItem,
+  ReorderStatus,
+  useReorder,
   QuantityInput,
   SegmentedControl,
   Select,
@@ -46,6 +50,7 @@ import {
 import type { FieldError } from './OperationFields'
 
 const c = designMessages.features.clones
+const r = designMessages.reorder
 
 /** The label of a row field (offset and polar name their steps differently from a grid). */
 function fieldLabel(kind: CloneRowKind, key: string): string {
@@ -132,13 +137,26 @@ export function CloneRowList({
       `rows.${i}.${key}`,
       gesture,
     )
+  const [announcement, setAnnouncement] = useState('')
+  /** Row `i` to index `to`: one change; the moved row is selected. */
+  const moveTo = (i: number, to: number) => {
+    if (to < 0 || to >= rows.length || to === i) return false
+    change(moveItem(rows, i, to), 'rows')
+    select(to)
+    setAnnouncement(r.moved(c.rowNamed(i), to + 1, rows.length))
+    return true
+  }
+  const reorder = useReorder({
+    count: rows.length,
+    order: JSON.stringify(rows),
+    onMove: moveTo,
+  })
+  const { attachList } = reorder
   const move = (i: number, by: -1 | 1) => {
-    const j = i + by
-    if (j < 0 || j >= rows.length) return
-    const next = [...rows]
-    ;[next[i], next[j]] = [next[j]!, next[i]!]
-    change(next, 'rows')
-    select(j)
+    const to = i + by
+    if (to < 0 || to >= rows.length) return
+    reorder.glide(i, to)
+    moveTo(i, to)
   }
   const remove = (i: number) => {
     if (rows.length <= 1) return
@@ -309,7 +327,12 @@ export function CloneRowList({
 
   return (
     <div className={styles['cloneRows']}>
-      <ol className={styles['cloneRowList']} aria-label={c.rowList}>
+      <ol
+        ref={attachList}
+        className={`${styles['cloneRowList']} ${reorder.listClass}`}
+        aria-label={c.rowList}
+        {...reorder.listProps}
+      >
         {rows.map((row, i) => {
           const open = i === selected
           const kind = c.kinds[row.kind] ?? row.kind
@@ -318,6 +341,7 @@ export function CloneRowList({
           return (
             <li
               key={i}
+              {...reorder.itemProps(i)}
               className={styles['cloneRow']}
               data-open={open || undefined}
               data-invalid={rowErrors || undefined}
@@ -338,20 +362,7 @@ export function CloneRowList({
                   </span>
                 </button>
                 <span className={styles['cloneRowActions']}>
-                  <IconButton
-                    label={c.moveUp(i)}
-                    icon={<Icon name="arrow-up" />}
-                    shortcut="Alt+↑"
-                    disabled={i === 0}
-                    onClick={() => move(i, -1)}
-                  />
-                  <IconButton
-                    label={c.moveDown(i)}
-                    icon={<Icon name="arrow-down" />}
-                    shortcut="Alt+↓"
-                    disabled={i === rows.length - 1}
-                    onClick={() => move(i, 1)}
-                  />
+                  {rows.length > 1 ? <DragGrip title={r.grip} {...reorder.gripProps(i)} /> : null}
                   <IconButton
                     label={c.remove(i)}
                     icon={<Icon name="delete" />}
@@ -388,6 +399,7 @@ export function CloneRowList({
           )
         })}
       </ol>
+      <ReorderStatus refusal={undefined} announcement={announcement} />
       <Menu
         label={c.addRow}
         items={ROW_KINDS.map((k) => ({

@@ -1,9 +1,10 @@
 // The Shape Editor's inspector (task U1): the shape's name, the item list (`ShapeItemList`: op,
-// kind and label, move and remove), the selected item's fields (every commit one
+// kind and label, drag grip (D45; Alt+↑/↓) and remove), the selected item's fields (every commit one
 // `design.shape.item.update`, issues at their field), the path's segment table and the summary
 // from `design.shape.get` (area, size, smallest inside radius). Item values come from the replica;
 // the summary and the shape's users from the query.
-// Doc: docs/conventions/ui.md#shape-editor, docs/modes/design-v0.3.md#shape-definition
+// Doc: docs/conventions/ui.md#shape-editor, #reordering-lists-d45,
+// docs/modes/design-v0.3.md#shape-definition
 import { useState } from 'react'
 import type {
   ShapeDTO,
@@ -14,21 +15,26 @@ import type {
 import type { QuantityDTO } from '../../../../core/quantity/quantity.dto'
 import type { QuantityKind } from '../../../../core/quantity/units'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
+import { designMessages } from '../../messages/design'
 import { shapeMessages } from '../../messages/shape'
 import { useCancelGesture } from '../../shell/hooks'
 import { useRegion2d, useShell, useUi } from '../../shell/ShellContext'
 import { chainBounds } from '../../../../core/geometry/2d/model'
 import {
+  DragGrip,
   Icon,
   ErrorMessage,
   Field,
   FieldIcon,
   IconButton,
   Menu,
+  moveItem,
   PanelHeader,
   QuantityInput,
+  ReorderStatus,
   SegmentedControl,
   Switch,
+  useReorder,
   type FieldIconName,
   type FieldMessage,
 } from '../../ui'
@@ -125,17 +131,16 @@ export function ShapeInspector({
     })
     setTop(r.ok ? undefined : r.error)
     if (r.ok && select !== undefined) selectItem(select)
+    return r.ok
   }
   const sources = () => shape.items.map((i) => itemSources(i) as unknown)
-  const move = (n: number, by: -1 | 1) => {
-    const to = n + by
-    if (to < 0 || to >= shape.items.length) return
-    const list = sources()
-    const [it] = list.splice(n, 1)
-    list.splice(to, 0, it)
+  /** Item `n` to index `to` (a drop or Alt+↑/↓): one `design.shape.update`; false: refused. */
+  const move = async (n: number, to: number) => {
+    if (to < 0 || to >= shape.items.length || to === n) return false
+    const list = moveItem(sources(), n, to)
     // the first item always adds: one moved to the top becomes add, the one it displaces keeps its op
     ;(list[0] as { op: ShapeOp }).op = 'add'
-    void sendItems(list, to)
+    return sendItems(list, to)
   }
   const remove = (n: number) => {
     if (shape.items.length <= 1) return
@@ -288,72 +293,94 @@ export function ShapeItemList({
   units: DesignPart['units']
   onSelect(n: number): void
   onOp(n: number, op: ShapeOp): void
-  onMove(n: number, by: -1 | 1): void
+  /** Item `n` to index `to`; resolves false when refused. */
+  onMove(n: number, to: number): Promise<boolean>
   onRemove(n: number): void
 }): React.JSX.Element {
   const count = shape.items.length
+  const [announcement, setAnnouncement] = useState('')
+  const moveTo = async (n: number, to: number) => {
+    const label = t.itemLabel(shape.items[n]!.kind, n + 1)
+    const ok = await onMove(n, to)
+    if (ok) setAnnouncement(designMessages.reorder.moved(label, to + 1, count))
+    return ok
+  }
+  const reorder = useReorder({
+    count,
+    order: JSON.stringify(shape.items),
+    onMove: moveTo,
+  })
+  const { attachList } = reorder
+  const step = (n: number, by: -1 | 1) => {
+    const to = n + by
+    if (to < 0 || to >= count) return
+    reorder.glide(n, to)
+    void moveTo(n, to).then((ok) => (ok ? undefined : reorder.shake(n)))
+  }
   return (
-    <ol className={styles['items']} aria-label={t.itemsLabel}>
-      {shape.items.map((item, n) => {
-        const label = t.itemLabel(item.kind, n + 1)
-        return (
-          <li key={n} className={styles['item']} data-selected={n === selected ? '' : undefined}>
-            <button
-              type="button"
-              className={styles['itemSelect']}
-              aria-pressed={n === selected}
-              aria-label={`${label}: ${itemSummaryText(item, units)}`}
-              aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
-              onClick={() => onSelect(n)}
-              onKeyDown={(e) => {
-                if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
-                  e.preventDefault()
-                  onMove(n, e.key === 'ArrowUp' ? -1 : 1)
-                }
-              }}
+    <>
+      <ol
+        ref={attachList}
+        className={`${styles['items']} ${reorder.listClass}`}
+        aria-label={t.itemsLabel}
+        {...reorder.listProps}
+      >
+        {shape.items.map((item, n) => {
+          const label = t.itemLabel(item.kind, n + 1)
+          return (
+            <li
+              key={n}
+              {...reorder.itemProps(n)}
+              className={styles['item']}
+              data-selected={n === selected ? '' : undefined}
             >
-              <ShapeKindIcon kind={item.kind} />
-              <span className={styles['opName']}>{itemSummaryText(item, units)}</span>
-            </button>
-            <SegmentedControl
-              label={`${t.op}: ${label}`}
-              size="sm"
-              className={styles['itemOp']}
-              options={(['add', 'subtract', 'intersect'] as const).map((op) => ({
-                value: op,
-                label: t.ops[op],
-                disabled: n === 0 && op !== 'add',
-              }))}
-              value={item.op}
-              disabled={n === 0}
-              onValueChange={(op) => onOp(n, op)}
-            />
-            <span className={styles['itemActions']}>
-              <IconButton
-                label={t.moveUp(label)}
-                icon={<Icon name="arrow-up" />}
-                shortcut="Alt+↑"
+              <button
+                type="button"
+                className={styles['itemSelect']}
+                aria-pressed={n === selected}
+                aria-label={`${label}: ${itemSummaryText(item, units)}`}
+                aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+                onClick={() => onSelect(n)}
+                onKeyDown={(e) => {
+                  if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+                    e.preventDefault()
+                    step(n, e.key === 'ArrowUp' ? -1 : 1)
+                  }
+                }}
+              >
+                <ShapeKindIcon kind={item.kind} />
+                <span className={styles['opName']}>{itemSummaryText(item, units)}</span>
+              </button>
+              <SegmentedControl
+                label={`${t.op}: ${label}`}
+                size="sm"
+                className={styles['itemOp']}
+                options={(['add', 'subtract', 'intersect'] as const).map((op) => ({
+                  value: op,
+                  label: t.ops[op],
+                  disabled: n === 0 && op !== 'add',
+                }))}
+                value={item.op}
                 disabled={n === 0}
-                onClick={() => onMove(n, -1)}
+                onValueChange={(op) => onOp(n, op)}
               />
-              <IconButton
-                label={t.moveDown(label)}
-                icon={<Icon name="arrow-down" />}
-                shortcut="Alt+↓"
-                disabled={n === count - 1}
-                onClick={() => onMove(n, 1)}
-              />
-              <IconButton
-                label={count <= 1 ? `${t.removeItem(label)}. ${t.lastItem}` : t.removeItem(label)}
-                icon={<Icon name="delete" />}
-                disabled={count <= 1}
-                onClick={() => onRemove(n)}
-              />
-            </span>
-          </li>
-        )
-      })}
-    </ol>
+              <span className={styles['itemActions']}>
+                {count > 1 ? (
+                  <DragGrip title={designMessages.reorder.grip} {...reorder.gripProps(n)} />
+                ) : null}
+                <IconButton
+                  label={count <= 1 ? `${t.removeItem(label)}. ${t.lastItem}` : t.removeItem(label)}
+                  icon={<Icon name="delete" />}
+                  disabled={count <= 1}
+                  onClick={() => onRemove(n)}
+                />
+              </span>
+            </li>
+          )
+        })}
+      </ol>
+      <ReorderStatus refusal={undefined} announcement={announcement} />
+    </>
   )
 }
 

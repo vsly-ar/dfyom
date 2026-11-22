@@ -13,6 +13,7 @@ import { createShell, ShellProvider } from '../../shell/ShellContext'
 import { expectOk } from '../../../../shared/testing/result'
 import { createFakeBridge, designDispatcher, type FakeBridge } from '../../test/bridge'
 import { expectNoAxeViolations, findToastAction, renderUi } from '../../test/render'
+import { dragTo, gripOf, layOutRows } from '../../test/reorder'
 
 vi.mock('@react-three/fiber', () => ({
   Canvas: ({ children: _c, ...rest }: { children: ReactNode; 'data-testid'?: string }) => (
@@ -211,17 +212,20 @@ describe('design mode', () => {
     expect(row).toHaveTextContent('1 warning')
   })
 
-  it('moves operations up and down and removes one with an undo toast', async () => {
+  it('moves operations with Alt+↑/↓ (announced) and removes one with an undo toast', async () => {
     const { user, part, addFromMenu } = await renderDesign()
     await user.click(await within(navigator()).findByRole('button', { name: 'Add facing' }))
     await addFromMenu('Add profile')
     await waitFor(() => expect(part().operations.map((o) => o.id)).toEqual(['facing1', 'profile1']))
+    // D45: no move buttons, a drag grip instead
+    expect(within(navigator()).queryByRole('button', { name: /^Move / })).toBeNull()
 
-    await user.click(within(navigator()).getByRole('button', { name: 'Move Profile 1 up' }))
-    await waitFor(() => expect(part().operations.map((o) => o.id)).toEqual(['profile1', 'facing1']))
-    // Alt+↓ on the focused row moves it back
     const row = within(navigator()).getByRole('button', { name: /^Profile 1/ })
     row.focus()
+    await user.keyboard('{Alt>}{ArrowUp}{/Alt}')
+    await waitFor(() => expect(part().operations.map((o) => o.id)).toEqual(['profile1', 'facing1']))
+    expect(await screen.findByText('Moved Profile 1 to position 1 of 2.')).toBeInTheDocument()
+    // Alt+↓ on the focused row moves it back
     await user.keyboard('{Alt>}{ArrowDown}{/Alt}')
     await waitFor(() => expect(part().operations.map((o) => o.id)).toEqual(['facing1', 'profile1']))
 
@@ -230,6 +234,52 @@ describe('design mode', () => {
     expect(await screen.findByText('Removed Facing 1')).toBeInTheDocument()
     await user.click(await findToastAction('Undo'))
     await waitFor(() => expect(part().operations.map((o) => o.id)).toEqual(['facing1', 'profile1']))
+  })
+
+  it('drags a row by its grip; a drop the move refuses says why and changes nothing (D45)', async () => {
+    const { user, part, addFromMenu } = await renderDesign()
+    await user.click(await within(navigator()).findByRole('button', { name: 'Add facing' }))
+    // the pocket's default `on` is the facing's floor, so it can't go before the facing
+    await addFromMenu('Add pocket')
+    await addFromMenu('Add profile')
+    await waitFor(() =>
+      expect(part().operations.map((o) => o.id)).toEqual(['facing1', 'pocket1', 'profile1']),
+    )
+    const restore = layOutRows()
+    try {
+      const rowOf = (name: RegExp) => within(navigator()).getByRole('button', { name })
+      // the profile to the top: one design.operation.move, announced
+      dragTo(gripOf(rowOf(/^Profile 1/)), 5)
+      await waitFor(() =>
+        expect(part().operations.map((o) => o.id)).toEqual(['profile1', 'facing1', 'pocket1']),
+      )
+      expect(await screen.findByText('Moved Profile 1 to position 1 of 3.')).toBeInTheDocument()
+
+      // over the gap above the facing the indicator turns red and says why, before the drop
+      const pocket = rowOf(/^Pocket 1/)
+      dragTo(gripOf(pocket), 35, true)
+      const why = 'Not moved: Pocket 1 uses facing1.floor, which has to come before it.'
+      expect(within(navigator()).getByText(why)).toBeInTheDocument()
+      const facingItem = rowOf(/^Facing 1/).closest('[data-reorder-item]')!
+      expect(facingItem).toHaveAttribute('data-drop', 'before')
+      expect(facingItem).toHaveAttribute('data-drop-refused')
+      act(() => {
+        pocket.dispatchEvent(new Event('pointerup', { bubbles: true }))
+      })
+      // released there: nothing moves, the refusal stays under the list and is announced
+      expect(part().operations.map((o) => o.id)).toEqual(['profile1', 'facing1', 'pocket1'])
+      expect(within(navigator()).getAllByText(why)).toHaveLength(2)
+      expect(facingItem).not.toHaveAttribute('data-drop')
+
+      // Alt+↑ there gives the command's refusal, the same text
+      pocket.focus()
+      await user.keyboard('{Alt>}{ArrowUp}{/Alt}')
+      await waitFor(() => expect(within(navigator()).getAllByText(why).length).toBeGreaterThan(0))
+      expect(part().operations.map((o) => o.id)).toEqual(['profile1', 'facing1', 'pocket1'])
+      await expectNoAxeViolations()
+    } finally {
+      restore()
+    }
   })
 
   it('picks the on surface in the viewport (pick mode) or from the list', async () => {

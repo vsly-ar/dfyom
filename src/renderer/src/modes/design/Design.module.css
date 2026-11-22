@@ -1299,6 +1299,8 @@
 }
 
 .cloneRowList {
+  --reorder-gap: var(--space-1);
+
   display: grid;
   gap: var(--space-1);
   width: 100%;

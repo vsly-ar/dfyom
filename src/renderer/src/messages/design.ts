@@ -104,8 +104,7 @@ export const designMessages = {
       positions: (n: number) => (n === 1 ? '1 position' : `${n} positions`),
       rowName: (i: number, kind: string) => `Row ${i + 1}: ${kind}`,
       rowList: 'Rows in path order',
-      moveUp: (i: number) => `Move row ${i + 1} up`,
-      moveDown: (i: number) => `Move row ${i + 1} down`,
+      rowNamed: (i: number) => `row ${i + 1}`,
       remove: (i: number) => `Remove row ${i + 1}`,
       removeLast: 'A Clones needs at least one row.',
       fields: {
@@ -271,6 +270,20 @@ export const designMessages = {
     material_: (name: string) => `Material: ${name}`,
   },
 
+  /** Drag to reorder and Alt+↑/↓ in the design lists (D45, ui.md § Reordering lists). */
+  reorder: {
+    grip: 'Drag to reorder (Alt+↑/↓)',
+    /** "Moved Profile 1 to position 1 of 3." */
+    moved: (name: string, position: number, of: number) =>
+      `Moved ${name} to position ${position} of ${of}.`,
+    surfaceFirst: (user: string, reference: string) =>
+      `Not moved: ${user} uses ${reference}, which has to come before it.`,
+    edgeFirst: (chamfer: string, edge: string) =>
+      `Not moved: ${chamfer} chamfers an edge of ${edge}, which has to come before it.`,
+    insideFeature: (feature: string) => `Not moved: that position is inside ${feature}.`,
+    refused: (message: string) => `Not moved: ${message}`,
+  },
+
   navigator: {
     operations: 'Operations',
     listLabel: 'Operations in design order',
@@ -278,8 +291,6 @@ export const designMessages = {
       title: 'No operations yet',
       description: 'Add an operation to remove material from the stock, starting with facing.',
     },
-    moveUp: (name: string) => `Move ${name} up`,
-    moveDown: (name: string) => `Move ${name} down`,
     remove: (name: string) => `Remove ${name}`,
     actions: (name: string) => `Actions for ${name}`,
     warnings: (n: number) => (n === 1 ? '1 warning' : `${n} warnings`),
