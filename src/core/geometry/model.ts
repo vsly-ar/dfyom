@@ -217,6 +217,13 @@ export type OperationGeometry = FacePlacement &
       }
   )
 
+/** Chamfer mill angles match within this (degrees), design-v0.4.md § Chamfer operation. */
+export const CHAMFER_ANGLE_TOLERANCE = 0.5
+
+/** Slant length of a cone between two diameters at included angle `angle` (degrees). */
+export const coneSlant = (inner: number, outer: number, angle: number): number =>
+  (outer - inner) / 2 / Math.sin(((angle / 2) * Math.PI) / 180)
+
 /** Depth of a chamfer's cone below its face: (D − d) / 2 / tan(α / 2) (mm). */
 export function chamferDepth(
   c: Pick<Extract<OperationGeometry, { kind: 'chamfer' }>, 'edgeDiameter' | 'diameter' | 'angle'>,

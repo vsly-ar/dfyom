@@ -3,7 +3,8 @@
  * task's input) and running it. Doc: docs/architecture/workers.md#plan-operation-to-generator-input
  *
  * Built in the host by `toGeneratorInputs` (inputs.ts); run in the worker. Drilling holds one
- * input per hole, in visiting order; their toolpaths are joined into one. `regionPocket` and
+ * input per hole, in visiting order (chamfers, v0.4 T1, likewise one per chamfer); their toolpaths
+ * are joined into one. `regionPocket` and
  * `regionProfile` (v0.3 T1/T2 wiring) carry general shapes; their generators take the 2D port of
  * the worker (`TaskControl.region2d()`). Doc: docs/modes/plan-v0.3.md#wiring-t1-t2
  */
@@ -11,14 +12,25 @@ import { z } from 'zod'
 import { Err, fail, Ok, type AppResult } from '../../shared/result'
 import type { Region2dPort } from '../geometry/2d/port'
 import { noSteps, type Steps } from '../workers/steps'
+import { generateChamfer } from './chamfer'
 import { generateDrilling } from './drilling'
 import { generateFacing } from './facing'
-import type { DrillingInput, FacingInput, Pass, PocketInput, ProfileInput, Toolpath } from './model'
+import type {
+  ChamferInput,
+  DrillingInput,
+  FacingInput,
+  GeneratorInput,
+  Pass,
+  PocketInput,
+  ProfileInput,
+  Toolpath,
+} from './model'
 import { generatePocket } from './pocket'
 import { generateProfile } from './profile'
 import { generateRegionPocket, type RegionPocketInput } from './region-pocket'
 import { generateRegionProfile, type RegionProfileInput } from './region-profile'
 import {
+  ChamferInputSchema,
   DrillingInputSchema,
   FacingInputSchema,
   PocketInputSchema,
@@ -37,6 +49,7 @@ export type GeneratorRequest = (
   | { readonly kind: 'profile'; readonly inputs: readonly ProfileInput[] }
   | { readonly kind: 'regionPocket'; readonly inputs: readonly RegionPocketInput[] }
   | { readonly kind: 'regionProfile'; readonly inputs: readonly RegionProfileInput[] }
+  | { readonly kind: 'chamfer'; readonly inputs: readonly ChamferInput[] }
 ) & {
   /**
    * The setup's quarter turn (v0.2 task C3): the inputs are in the face frame, the toolpath is
@@ -62,6 +75,11 @@ export const GeneratorRequestSchema: z.ZodType<GeneratorRequest> = z.discriminat
   z.object({ kind: z.literal('profile'), inputs: one(ProfileInputSchema), wcs }),
   z.object({ kind: z.literal('regionPocket'), inputs: one(RegionPocketInputSchema), wcs }),
   z.object({ kind: z.literal('regionProfile'), inputs: one(RegionProfileInputSchema), wcs }),
+  z.object({
+    kind: z.literal('chamfer'),
+    inputs: z.array(ChamferInputSchema).min(1).readonly(),
+    wcs,
+  }),
 ])
 
 /** The 2D port of the worker, loaded on first use; the region generators need it. */
@@ -99,7 +117,9 @@ function generateLocal(
     case 'profile':
       return generateProfile(request.inputs[0]!, steps)
     case 'drilling':
-      return generateHoles(request.inputs, steps)
+      return joined(request.inputs, generateDrilling, 'hole', steps)
+    case 'chamfer':
+      return joined(request.inputs, generateChamfer, 'chamfer', steps)
     case 'regionPocket': {
       const input = request.inputs[0]!
       return region2d().andThen((port) => generateRegionPocket(input, port, steps))
@@ -112,25 +132,28 @@ function generateLocal(
 }
 
 /**
- * One drilling toolpath per hole, joined: passes concatenated (each hole starts and ends at
+ * One toolpath per hole (or chamfer), joined: passes concatenated (each starts and ends at
  * clearance), stats recomputed over all of them.
  */
-function generateHoles(inputs: readonly DrillingInput[], steps: Steps): AppResult<Toolpath> {
+function joined<I extends GeneratorInput<unknown, unknown, { spindleSpeed: number }>>(
+  inputs: readonly I[],
+  generate: (input: I, steps: Steps) => AppResult<Toolpath>,
+  what: 'hole' | 'chamfer',
+  steps: Steps,
+): AppResult<Toolpath> {
   const first = inputs[0]
   if (first === undefined)
-    return fail('internal.unexpected', 'drilling request without holes', {
-      where: 'generateRequest',
-    })
+    return fail('internal.unexpected', `request without a ${what}`, { where: 'generateRequest' })
   const passes: Pass[] = []
   for (const [i, input] of inputs.entries()) {
     const step = steps.step({
       done: i,
       total: inputs.length,
-      label: `hole ${i + 1}/${inputs.length}`,
+      label: `${what} ${i + 1}/${inputs.length}`,
     })
     if (step.isErr()) return Err(step.unwrapErr())
-    const tp = generateDrilling(input, steps)
-    if (tp.isErr()) return Err(tp.unwrapErr().withContext('generateRequest', { hole: i }))
+    const tp = generate(input, steps)
+    if (tp.isErr()) return Err(tp.unwrapErr().withContext('generateRequest', { [what]: i }))
     passes.push(...tp.unwrap().passes)
   }
   return Ok({

@@ -1,6 +1,7 @@
 /** Tools and inputs for toolpath tests (strategy defaults of plan-v0.1.md, metric). */
 import type { StockGeometry } from '../../geometry/model'
 import type {
+  ChamferInput,
   CuttingParams,
   DrillingInput,
   FacingInput,
@@ -32,6 +33,17 @@ export const drill = (diameter: number, pointAngle = 118): ToolpathTool => ({
   cornerRadius: 0,
   fluteLength: 40,
   pointAngle,
+})
+
+/** A chamfer mill: DC, included angle, tip diameter (0 = pointed). */
+export const chamferMill = (diameter: number, angle = 90, tipDiameter = 0): ToolpathTool => ({
+  id: `cm${diameter}`,
+  type: 'chamferMill',
+  diameter,
+  cornerRadius: 0,
+  fluteLength: 10,
+  angle,
+  tipDiameter,
 })
 
 export const cutting = (tool: ToolpathTool, over: Partial<CuttingParams> = {}): CuttingParams => ({
@@ -130,5 +142,23 @@ export function profileInput(
     },
     maxFeedRate: RATES,
     ...over,
+  }
+}
+
+export function chamferInput(
+  stock: StockGeometry,
+  operation: ChamferInput['operation'],
+  tool: ToolpathTool,
+  strategy: Partial<ChamferInput['strategy']> = {},
+): ChamferInput {
+  return {
+    planOperationId: `op-${operation.id}`,
+    tool,
+    cutting: { spindleSpeed: 16000, feedRate: 800, plungeRate: 200 },
+    heights: HEIGHTS,
+    stock,
+    operation,
+    strategy: { entry: 'contour', rampAngle: 3, direction: 'climb', ...strategy },
+    maxFeedRate: RATES,
   }
 }

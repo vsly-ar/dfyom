@@ -15,7 +15,13 @@ import type { ProjectDoc, UnitSystem } from '../project/document'
 import { Quantity } from '../quantity/quantity'
 import type { Direction } from '../geometry/face'
 import type { Region2dPort } from '../geometry/2d/port'
-import { operationDirections, repairOrder, surfaceDirection } from './order'
+import {
+  edgeDependencies,
+  onDependencies,
+  operationDirections,
+  repairOrder,
+  surfaceDirection,
+} from './order'
 import { findPlanOperation, loadPlanDTO } from './plan'
 import {
   lengthDTO,
@@ -360,9 +366,11 @@ export function rebuildPlan(
     })
     for (const id of p.designOperationIds) {
       const o = byId.get(id)
-      const on = o?.kind === 'pocket' || o?.kind === 'drilling' ? o.on.split('.')[0] : undefined
-      const dep = on === undefined ? -1 : list.findIndex((q) => q.id === owner.get(on))
-      at = Math.max(at, dep + 1)
+      // its `on` surface's operation and a chamfer's edge (T1) come first
+      for (const d of o === undefined ? [] : [...onDependencies(o), ...edgeDependencies(o)]) {
+        const dep = list.findIndex((q) => q.id === owner.get(d))
+        at = Math.max(at, dep + 1)
+      }
     }
     list.splice(at, 0, p)
   }

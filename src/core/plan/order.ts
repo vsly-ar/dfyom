@@ -59,19 +59,26 @@ export function operationDirections(
   )
 }
 
-/** Design operations whose surface an operation starts from (`on`). */
-function onDependencies(op: Operation): string[] {
-  if (op.kind !== 'pocket' && op.kind !== 'drilling') return []
+/** Design operations whose surface an operation starts from (`on`); a chamfer's is its edge's. */
+export function onDependencies(op: Operation): string[] {
+  if (op.kind !== 'pocket' && op.kind !== 'drilling' && op.kind !== 'chamfer') return []
   const owner = ownerOf(op.on)
   return owner === undefined ? [] : [owner]
+}
+
+/** The design operation whose edge a chamfer bevels (plan-v0.4.md § Chamfer toolpath, T1). */
+export function edgeDependencies(op: Operation): string[] {
+  return op.kind === 'chamfer' ? [op.edgeOf] : []
 }
 
 interface Info {
   readonly op: PlanOperationDTO
   readonly rank: number
   readonly designIndex: number
-  /** Plan operations that must come first. */
+  /** Plan operations that must come first (`on` surfaces and chamfer edges). */
   readonly deps: ReadonlySet<string>
+  /** Of them, the plan operations cutting a chamfer's edge. */
+  readonly edgeDeps: ReadonlySet<string>
 }
 
 function infos(planOps: readonly PlanOperationDTO[], part: Part): Info[] {
@@ -84,16 +91,23 @@ function infos(planOps: readonly PlanOperationDTO[], part: Part): Info[] {
       return o === undefined ? [] : [o]
     })
     const deps = new Set<string>()
-    for (const o of ops)
+    const edgeDeps = new Set<string>()
+    for (const o of ops) {
       for (const d of onDependencies(o)) {
         const q = owner.get(d)
         if (q !== undefined && q !== p.id) deps.add(q)
       }
+      for (const d of edgeDependencies(o)) {
+        const q = owner.get(d)
+        if (q !== undefined && q !== p.id) edgeDeps.add(q)
+      }
+    }
     return {
       op: p,
       rank: RANK[ops[0]?.kind ?? 'profile'],
       designIndex: Math.min(...p.designOperationIds.map((d) => index.get(d) ?? Infinity)),
-      deps,
+      deps: new Set([...deps, ...edgeDeps]),
+      edgeDeps,
     }
   })
 }
@@ -226,14 +240,25 @@ export function orderFindings(
   list.forEach((x, i) => {
     for (const d of x.deps)
       if ((position.get(d) ?? -1) > i)
-        out.push({
-          code: 'plan.order',
-          severity: 'error',
-          message: `${x.op.id} starts from a surface of ${d}, which comes later`,
-          planOperationId: x.op.id,
-          rule: 'onBefore',
-          params: { dependsOn: d },
-        })
+        out.push(
+          x.edgeDeps.has(d)
+            ? {
+                code: 'plan.order',
+                severity: 'error',
+                message: `${x.op.id} chamfers the edge of ${d}, which comes later`,
+                planOperationId: x.op.id,
+                rule: 'edgeBefore',
+                params: { dependsOn: d },
+              }
+            : {
+                code: 'plan.order',
+                severity: 'error',
+                message: `${x.op.id} starts from a surface of ${d}, which comes later`,
+                planOperationId: x.op.id,
+                rule: 'onBefore',
+                params: { dependsOn: d },
+              },
+        )
   })
   planOps.forEach((p, i) => {
     const profiles = p.designOperationIds

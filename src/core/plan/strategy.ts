@@ -10,7 +10,9 @@ import type { Issue } from '../../shared/errors/app-error'
 import { collect, fail, None, type AppResult, type Option } from '../../shared/result'
 import { fieldContext, isGeneralShape, type Operation } from '../design/operation'
 import type { OperationKind } from '../design/part.dto'
+import { chamferEdge } from '../design/geometry-input'
 import { SurfaceTable } from '../design/surfaces'
+import { chamferDepth } from '../geometry/model'
 import type { Stock } from '../library/stock'
 import type { CuttingPreset, Tool } from '../library/tool'
 import type { UnitSystem } from '../project/document'
@@ -20,7 +22,7 @@ import {
   DRILL_CYCLES,
   FACING_AXES,
   FACING_PATTERNS,
-  POCKET_ENTRIES,
+  ENTRIES,
   type StrategyDTO,
 } from './plan.dto'
 
@@ -32,8 +34,8 @@ export const STRATEGY_KEYS: Readonly<Record<OperationKind, readonly StrategyKey[
   pocket: ['direction', 'entry', 'helixDiameter', 'rampAngle', 'finishAllowance', 'finishStepdown'],
   drilling: ['cycle', 'peckDepth', 'chipBreakBack', 'helixPitch', 'rampAngle', 'breakthrough'],
   profile: ['direction', 'entry', 'rampAngle', 'breakthrough', 'finishAllowance'],
-  // entry, dwell, rampAngle come with the chamfer generator (plan-v0.4.md, task T1)
-  chamfer: [],
+  // plan-v0.4.md § Chamfer toolpath; `dwell` is later (needs a dwell move, T1)
+  chamfer: ['entry', 'rampAngle'],
 }
 
 const LENGTH_KEYS = [
@@ -58,11 +60,13 @@ export const StrategyArgSchema = z
     pattern: clear(z.enum(FACING_PATTERNS)).describe('Facing: zigzag (default) or oneWay'),
     axis: clear(z.enum(FACING_AXES)).describe('Facing: x (default, along length) or y'),
     overshoot: clear(Src).describe('Facing: tool edge past the stock edge; default 1 mm / 0.04"'),
-    entry: clear(z.enum(POCKET_ENTRIES)).describe(
-      'Pocket: helix (default), ramp or plunge; profile: ramp (default) or plunge',
+    entry: clear(z.enum(ENTRIES)).describe(
+      'Pocket: helix (default), ramp or plunge; profile: ramp (default) or plunge; chamfer: plunge or contour (default: plunge when DC ≥ the chamfer Ø)',
     ),
     helixDiameter: clear(Src).describe('Pocket: default 0.8 D'),
-    rampAngle: clear(Src).describe('Pocket/profile/drilling (helix): 0.5°–30°, default 3°'),
+    rampAngle: clear(Src).describe(
+      'Pocket/profile/drilling (helix)/chamfer (contour): 0.5°–30°, default 3°',
+    ),
     finishAllowance: clear(Src).describe('Pocket/profile: default 0.2 mm / 0.008"; 0 = none'),
     finishStepdown: clear(Src).describe('Pocket: default the pocket depth'),
     cycle: clear(z.enum(DRILL_CYCLES)).describe(
@@ -133,8 +137,14 @@ const RAMP_ANGLE = 3
 type Direction = (typeof DIRECTIONS)[number]
 
 export type ResolvedStrategy =
-  /** v0.4: placeholder until the chamfer generator (task T1). */
-  | { readonly kind: 'chamfer' }
+  | {
+      readonly kind: 'chamfer'
+      /** `auto` (absent) resolved: plunge when DC covers the chamfer and the tip stays in the edge. */
+      readonly entry: 'plunge' | 'contour'
+      readonly rampAngle: number
+      /** The cut's depth below the tool tip (mm): F10's `depth` for the feeds (P-D). */
+      readonly cutDepth: number
+    }
   | {
       readonly kind: 'facing'
       readonly direction: Direction
@@ -229,7 +239,7 @@ export function resolveStrategy(
       return {
         kind,
         direction,
-        entry: s.entry ?? 'helix',
+        entry: s.entry === 'ramp' || s.entry === 'plunge' ? s.entry : 'helix',
         helixDiameter: mm(s.helixDiameter).unwrapOr(0.8 * D),
         rampAngle,
         finishAllowance,
@@ -261,8 +271,73 @@ export function resolveStrategy(
         breakthrough,
         finishAllowance,
       }
-    case 'chamfer':
-      return { kind }
+    case 'chamfer': {
+      const tool = c.tool.isSome() ? c.tool.unwrap() : undefined
+      const plunge = c.ops.every((op) => {
+        if (op.kind !== 'chamfer' || tool === undefined) return false
+        const cut = chamferCuts(op, c.allOps, c.stock, tool)
+        return cut !== undefined && cut.plungeFits && cut.plungeDepth <= cut.edgeDepth + EPS
+      })
+      const entry =
+        s.entry === 'plunge' || s.entry === 'contour' ? s.entry : plunge ? 'plunge' : 'contour'
+      const op = c.ops[0]
+      const cut =
+        op?.kind === 'chamfer' && tool !== undefined
+          ? chamferCuts(op, c.allOps, c.stock, tool)
+          : undefined
+      return {
+        kind,
+        entry,
+        rampAngle,
+        cutDepth: cut === undefined ? 0 : entry === 'plunge' ? cut.plungeDepth : cut.contourDepth,
+      }
+    }
+  }
+}
+
+/** Float slack for comparisons of derived float64 values. */
+const EPS = 1e-9
+/** Tool sizes compare within this (mm), as the fit rule (tool-fit.ts). */
+const FIT_TOL = 0.01
+
+/** A chamfer's cuts with `tool` (mm below its face); undefined when the edge is not round. */
+export interface ChamferCuts {
+  readonly edgeDiameter: number
+  /** DC covers the chamfer Ø (within 0.01 mm): it can be plunged. */
+  readonly plungeFits: boolean
+  /** Plunged tip: where the tool cone has the chamfer's Ø at the face. */
+  readonly plungeDepth: number
+  /** Contoured tip: the chamfer's own depth. */
+  readonly contourDepth: number
+  /** The edge's bottom (a pocket's or blind hole's depth; Infinity through). */
+  readonly edgeDepth: number
+}
+
+export function chamferCuts(
+  op: Extract<Operation, { kind: 'chamfer' }>,
+  allOps: readonly Operation[],
+  stock: Stock,
+  tool: Tool,
+): ChamferCuts | undefined {
+  const edgeOp = allOps.find((o) => o.id === op.edgeOf)
+  const edge = chamferEdge(allOps, op.edgeOf)
+  if (edge === undefined || edgeOp === undefined) return undefined
+  const D = op.diameter.canonical
+  const angle = op.angle.canonical
+  const edgeDepth =
+    edgeOp.kind === 'drilling'
+      ? edgeOp.bottom === 'through'
+        ? Infinity
+        : holeDepth(edgeOp, allOps, stock)
+      : edgeOp.kind === 'pocket'
+        ? edgeOp.depth.canonical
+        : Infinity
+  return {
+    edgeDiameter: edge.diameter,
+    plungeFits: tool.diameter.canonical + FIT_TOL >= D,
+    plungeDepth: chamferDepth({ edgeDiameter: tool.tipDiameterMm, diameter: D, angle }),
+    contourDepth: chamferDepth({ edgeDiameter: edge.diameter, diameter: D, angle }),
+    edgeDepth,
   }
 }
 
@@ -281,8 +356,12 @@ export function strategyIssues(
     issues.push({ path: ['strategy', key], rule, message, ...(params && { params }) })
   const set = (k: StrategyKey) => s[k] !== undefined
   const tool = c.tool
-  if (kind === 'profile' && s.entry === 'helix')
+  if (kind === 'profile' && (s.entry === 'helix' || s.entry === 'contour'))
     bad('entry', 'notForKind', 'a profile enters by ramp or plunge')
+  if (kind === 'pocket' && s.entry === 'contour')
+    bad('entry', 'notForKind', 'a pocket enters by helix, ramp or plunge')
+  if (kind === 'chamfer' && (s.entry === 'helix' || s.entry === 'ramp'))
+    bad('entry', 'notForKind', 'a chamfer is plunged or contoured')
   if ('rampAngle' in r && (r.rampAngle < 0.5 || r.rampAngle > 30))
     bad('rampAngle', 'range', 'must be 0.5° to 30°', { min: 0.5, max: 30 })
   if ('finishAllowance' in r && r.finishAllowance < 0)
@@ -334,5 +413,23 @@ export function strategyIssues(
         )
     })
   }
+  if (r.kind === 'chamfer' && s.entry === 'plunge')
+    tool.map((t) => {
+      for (const op of c.ops) {
+        if (op.kind !== 'chamfer') continue
+        const cut = chamferCuts(op, c.allOps, c.stock, t)
+        if (cut === undefined) continue
+        if (!cut.plungeFits)
+          bad('entry', 'plungeSize', 'a plunge needs a tool diameter ≥ the chamfer diameter', {
+            diameter: t.diameter.canonical,
+            chamfer: op.diameter.canonical,
+          })
+        else if (cut.plungeDepth > cut.edgeDepth + EPS)
+          bad('entry', 'plungeDepth', "the plunged tip would go below the edge's bottom", {
+            depth: cut.plungeDepth,
+            edgeDepth: cut.edgeDepth,
+          })
+      }
+    })
   return issues
 }

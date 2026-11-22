@@ -14,7 +14,8 @@ import type { Tool } from '../library/tool'
 import type { Quantity } from '../quantity/quantity'
 import type { ResolvedFeeds } from './feeds'
 import type { ResolvedStrategy } from './strategy'
-import { holeDepth } from './strategy'
+import { chamferCuts, holeDepth } from './strategy'
+import { chamferFit } from '../geometry/tool-fit'
 
 export const PLAN_WARNING_CODES = [
   'plan.check',
@@ -80,6 +81,14 @@ export const TOOL_TYPES_FOR: Readonly<Record<Operation['kind'], readonly ToolTyp
 
 /** Float slack for comparisons of derived float64 values. */
 const EPS = 1e-9
+
+/** A fit rule's values as finding params (numbers and strings only). */
+function numeric(values: Readonly<Record<string, unknown>>): Record<string, number | string> {
+  const out: Record<string, number | string> = {}
+  for (const [k, v] of Object.entries(values))
+    if (typeof v === 'number' || typeof v === 'string') out[k] = v
+  return out
+}
 
 /** |actual − nominal| within the nominal's effective tolerance (exact match without one). */
 function withinTolerance(actual: number, nominal: Quantity, op: Operation, part: Part): boolean {
@@ -240,10 +249,34 @@ export function toolFindings(i: ToolCheckInput): Finding[] {
           })
         break
       }
-      case 'chamfer':
-        // the generator and its checks (angle, tip, reach) come with task T1 (plan-v0.4.md)
-        add('tool', 'chamferToolpath', 'chamfer toolpaths are not generated yet (v0.4 task T1)')
+      case 'chamfer': {
+        // plan-v0.4.md § Tool checks for chamfer mills: the design's fit row (angle, tip, slant
+        // when contoured), then reach to the tip of the resolved entry
+        const cut = chamferCuts(op, part.operations, stock, tool)
+        if (cut === undefined) break
+        const unfit = chamferFit(
+          {
+            type: tool.type,
+            diameter: D,
+            ...(tool.angle.isSome() ? { angle: tool.angle.unwrap().canonical } : {}),
+            tipDiameter: tool.tipDiameterMm,
+          },
+          {
+            edgeDiameter: cut.edgeDiameter,
+            diameter: op.diameter.canonical,
+            angle: op.angle.canonical,
+          },
+        )
+        if (unfit !== undefined) add('tool', unfit.rule, unfit.detail, numeric(unfit.values))
+        const plunged = i.strategy.kind === 'chamfer' && i.strategy.entry === 'plunge'
+        const depth = belowTop(table, op.on) + (plunged ? cut.plungeDepth : cut.contourDepth)
+        if (depth > i.stickout + EPS)
+          add('stickout', 'reach', 'chamfer depth must be at most the stickout', {
+            depth,
+            stickout: i.stickout,
+          })
         break
+      }
     }
   }
   return out

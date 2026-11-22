@@ -9,7 +9,14 @@
  * docs/modes/design-v0.3.md#dfm-checks-for-shapes
  */
 import type { DfmTool } from './dfm'
-import { chamferDepth, EPSILON, type OperationGeometry, type StockGeometry } from './model'
+import {
+  CHAMFER_ANGLE_TOLERANCE,
+  chamferDepth,
+  coneSlant,
+  EPSILON,
+  type OperationGeometry,
+  type StockGeometry,
+} from './model'
 import { inradius } from './operations'
 import { FIT_SLACK, type ShapeMeasure } from './shape-measure'
 
@@ -245,12 +252,7 @@ export interface ChamferFitInput {
   readonly angle: number
 }
 
-/** Chamfer mill angles match within this (degrees), design-v0.4.md § Chamfer operation. */
-export const CHAMFER_ANGLE_TOLERANCE = 0.5
-
-/** Slant length of a cone between two diameters at included angle `angle` (degrees). */
-export const coneSlant = (inner: number, outer: number, angle: number): number =>
-  (outer - inner) / 2 / Math.sin(((angle / 2) * Math.PI) / 180)
+export { CHAMFER_ANGLE_TOLERANCE, coneSlant }
 
 /**
  * The fit row of a circular chamfer (design-v0.4.md § Chamfer operation, Fit): a `chamferMill`

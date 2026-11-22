@@ -15,6 +15,7 @@ import { machineSettings } from '../../run/grbl/emulator/settings'
 import { connected, drive, until } from '../../run/grbl/sender.fixture'
 import { rpm } from '../../library/library.fixture'
 import type { Machine } from '../../library/machine'
+import { generateChamfer } from '../../toolpath/chamfer'
 import { generateDrilling } from '../../toolpath/drilling'
 import { generateFacing } from '../../toolpath/facing'
 import type { Move, Toolpath, Vec3 } from '../../toolpath/model'
@@ -22,6 +23,8 @@ import { generatePocket } from '../../toolpath/pocket'
 import { generateProfile } from '../../toolpath/profile'
 import { arcSweep, toolpathStats } from '../../toolpath/stats'
 import {
+  chamferInput,
+  chamferMill,
   drill,
   drillingInput,
   endMill,
@@ -116,6 +119,35 @@ const profileOp = () => {
     generateProfile(profileInput({ length: 60, width: 40, thickness: 6 }, op, tool)).unwrap(),
     tool,
   )
+}
+
+/**
+ * Chamfers (v0.4 T1) on two holes of Ø `d` at the face: one contoured with a mill of DC = d, one
+ * plunged with a mill twice as wide; in mm or inch sizes (1 mm or 1/32" wider than the hole).
+ */
+const chamferOps = (inch = false): ExportOperation[] => {
+  const d = inch ? 25.4 / 4 : 6
+  const stock = { length: 40, width: 30, thickness: 10 }
+  const op = (id: string, x: number) =>
+    ({
+      kind: 'chamfer',
+      id,
+      onZ: 0,
+      center: [x, 15],
+      edgeOf: 'drill1',
+      edgeDiameter: d,
+      diameter: d + (inch ? 25.4 / 32 : 1),
+      angle: 90,
+    }) as const
+  const small = chamferMill(d)
+  const large = chamferMill(2 * d)
+  return [
+    operation(generateChamfer(chamferInput(stock, op('chamfer1', 10), small)).unwrap(), small),
+    operation(
+      generateChamfer(chamferInput(stock, op('chamfer2', 30), large, { entry: 'plunge' })).unwrap(),
+      large,
+    ),
+  ]
 }
 
 /** Facing, the two holes, the profile: three tools, the drill at another speed. */
@@ -316,6 +348,8 @@ describe('golden files (also streamed through the virtual machine)', () => {
     ['drilling-peck-chipBreak', drillOps],
     ['profile-tabs', () => [profileOp()]],
     ['multi-tool', multiToolOps],
+    ['chamfer', () => chamferOps()],
+    ['chamfer-inch', () => chamferOps(true), testMachine({ programUnits: 'in' })],
     [
       'multi-tool-inch-manual-spindle',
       multiToolOps,

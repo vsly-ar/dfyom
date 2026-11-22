@@ -17,6 +17,9 @@ import type { PlanOperationInput } from '../plan/inputs'
 import type { FeedField } from '../plan/plan.dto'
 import type {
   AxisRates,
+  ChamferInput,
+  ChamferOperation,
+  ChamferStrategy,
   CuttingParams,
   DrillingInput,
   DrillingStrategy,
@@ -132,8 +135,8 @@ export function regionProfileOperation(
 }
 
 /**
- * The generator request of one plan operation: one input, except drilling (one per hole,
- * nearest-neighbour order). Mapper bugs are `internal.unexpected`.
+ * The generator request of one plan operation: one input, except drilling and chamfers (one per
+ * hole or chamfer, nearest-neighbour order). Mapper bugs are `internal.unexpected`.
  */
 export function toGeneratorInputs(
   input: PlanOperationInput,
@@ -331,11 +334,30 @@ export function toGeneratorInputs(
         })),
       }))
     }
-    case 'chamfer':
-      // blocked by the plan check `chamferToolpath` until the chamfer generator (task T1)
-      return fail('internal.unexpected', 'chamfer toolpaths are not generated yet', {
-        where: WHERE,
-        data: { planOperationId: id },
-      })
+    case 'chamfer': {
+      const chamfers = ops.filter((o): o is ChamferOperation => o.kind === 'chamfer')
+      const visits = nearestNeighbourOrder(
+        chamfers.map((operation) => ({
+          operation,
+          center: wcs === undefined ? operation.center : toWcs(operation.center, wcs),
+        })),
+      )
+      // one ring in climb direction (plan-v0.4.md § Chamfer toolpath); entry resolved by the plan
+      const strategy: ChamferStrategy = {
+        entry: s.entry,
+        rampAngle: s.rampAngle,
+        direction: 'climb',
+      }
+      return cutting(input.feeds, ['spindleSpeed', 'feedRate', 'plungeRate'], id).map((c) => ({
+        kind: 'chamfer',
+        ...turned,
+        inputs: visits.map(({ operation }): ChamferInput => ({
+          ...base,
+          cutting: { spindleSpeed: c.spindleSpeed, feedRate: c.feedRate, plungeRate: c.plungeRate },
+          operation,
+          strategy,
+        })),
+      }))
+    }
   }
 }

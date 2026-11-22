@@ -264,7 +264,7 @@ export const planMessages = {
         direction: { climb: 'Climb', conventional: 'Conventional' },
         pattern: { zigzag: 'Zigzag', oneWay: 'One way' },
         axis: { x: 'X', y: 'Y' },
-        entry: { helix: 'Helix', ramp: 'Ramp', plunge: 'Plunge' },
+        entry: { helix: 'Helix', ramp: 'Ramp', plunge: 'Plunge', contour: 'Contour' },
         cycle: { simple: 'Simple', peck: 'Peck', chipBreak: 'Chip break', helix: 'Helical boring' },
       } as Record<string, Record<string, string>>,
       notForTool: (label: string) => `${label} (doesn’t fit the tool)`,
@@ -349,6 +349,10 @@ const CHECK: Readonly<Record<string, string>> = {
   drillPoint: 'cannot make a drill point',
   slotWidth: 'is wider than the slot',
   reach: 'does not reach the depth with its stickout',
+  // chamfer mills (v0.4 T1)
+  angle: 'does not match the chamfer angle',
+  tip: 'has a tip too wide for the edge',
+  slant: 'has too short a cutting edge for the chamfer',
 }
 
 const FIXES =

@@ -1,0 +1,12 @@
+toolpath op-chamfer1 tool cm6.35 S16000
+stats cut 45.0942 rapid 18.3969 s 4.9359
+pass finish
+  rapid 15 11.952 10
+  rapid 15 11.952 2
+  line 15 11.952 0 F200
+  arc 15 18.048 -0.1984 c 15 15 ccw F800
+  arc 15 11.952 -0.3969 c 15 15 ccw F800
+  arc 15 18.048 -0.3969 c 15 15 ccw F800
+  arc 15 11.952 -0.3969 c 15 15 ccw F800
+  arc 15 15 -0.3969 c 15 13.476 ccw F800
+  rapid 15 15 10
