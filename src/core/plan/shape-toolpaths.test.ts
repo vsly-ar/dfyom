@@ -10,9 +10,11 @@ import { createInProcessWorkers } from '../commands/jobs'
 import { uiSource } from '../commands/testing'
 import { ENCLOSURE_SECTIONS_SVG } from '../design/enclosure-sections.testing'
 import type { Loop } from '../geometry/2d/model'
+import { CORNER_MIN_TURN } from '../geometry/shape-measure'
 import { nodeRegion2d } from '../geometry/2d/testing/node-wasm'
 import { importSvg } from '../import/svg'
 import { exportPlan } from '../post/plan-export'
+import { streamProgram } from '../run/grbl/sender.fixture'
 import { createToolpathCache } from '../toolpath/cache'
 import { toGeneratorInputs } from '../toolpath/inputs'
 import type { Toolpath } from '../toolpath/model'
@@ -20,6 +22,7 @@ import { generateRequest } from '../toolpath/request'
 import { signalSteps } from '../workers/steps'
 import type { PlanWarning } from './checks'
 import { planOperationInputs } from './inputs'
+import { loadPlan } from './plan'
 import { planSetup, stale, type PlanSetup } from './plan.fixture'
 
 const region2d = nodeRegion2d()
@@ -278,50 +281,116 @@ function pathItem(loop: Loop) {
   }
 }
 
+/**
+ * Sharp inside corners of a pocket outline (as `insideCorners` of shape-measure counts them):
+ * vertices (0 = start, i = end of element i − 1) where the loop turns by more than
+ * `CORNER_MIN_TURN` towards its interior, so the tool leaves its radius there.
+ */
+function sharpInsideCorners(loop: Loop): number[] {
+  const els = loop.elements
+  const dir = (e: Loop['elements'][number], end: boolean): [number, number] => {
+    if (e.kind === 'line') return [e.b[0] - e.a[0], e.b[1] - e.a[1]]
+    const p = end ? e.b : e.a
+    const rx = p[0] - e.centre[0]
+    const ry = p[1] - e.centre[1]
+    return e.ccw ? [-ry, rx] : [ry, -rx]
+  }
+  // counter-clockwise loops (by the vertex polygon) turn left at the corners the tool cannot reach
+  let area = 0
+  for (const e of els) area += e.a[0] * e.b[1] - e.b[0] * e.a[1]
+  const out: number[] = []
+  els.forEach((e, i) => {
+    const a = dir(els[(i - 1 + els.length) % els.length]!, true)
+    const b = dir(e, false)
+    const cos = (a[0] * b[0] + a[1] * b[1]) / (Math.hypot(...a) * Math.hypot(...b))
+    const turn = Math.sign(a[0] * b[1] - a[1] * b[0])
+    if (cos < Math.cos(CORNER_MIN_TURN) && turn === Math.sign(area)) out.push(i)
+  })
+  return out
+}
+
+/**
+ * The X0 drawing as a part: outline (shape1) and cavity (shape2) imported, the cavity pocketed
+ * 4 mm and the outline profiled through with tabs; `fillet` rounds the cavity's sharp corners
+ * first through the Shape Editor's item command (D32), each by the largest of `FILLET_RADII` its
+ * neighbouring segments take (rule `filletTooLarge` otherwise).
+ */
+const FILLET_RADII = ['2', '1', '0.5', '0.25', '0.1']
+
+async function enclosurePlan(fillet = false) {
+  const svc = services()
+  const s = await planSetup({
+    part: false,
+    services: svc,
+    stock: {
+      name: 'Enclosure block',
+      shape: 'block',
+      length: '280',
+      width: '210',
+      thickness: '10',
+      material: { name: '6061-T6', class: 'aluminum' },
+    },
+  })
+  const proc = (
+    globalThis as unknown as {
+      process: { getBuiltinModule(id: 'node:fs'): { readFileSync(p: URL, e: 'utf8'): string } }
+    }
+  ).process
+  const svg = proc.getBuiltinModule('node:fs').readFileSync(ENCLOSURE_SECTIONS_SVG, 'utf8')
+  const shapes = expectOk(importSvg(svg)).shapes
+  const loops: Record<string, Loop> = {}
+  for (const name of ['outline', 'cavity']) {
+    const item = shapes.find((x) => x.name === name)!.items[0]!
+    if (item.kind !== 'loop') throw new Error('loop expected')
+    loops[name] = item.loop
+    await s.run('design.shape.add', { partId: s.partId, name, items: [pathItem(item.loop)] })
+  }
+  const sharp = sharpInsideCorners(loops['cavity']!)
+  const radii: string[] = []
+  if (fillet)
+    for (const vertex of sharp) {
+      const fillets = radii.map((radius, k) => ({ vertex: sharp[k]!, radius }))
+      for (const radius of FILLET_RADII) {
+        const r = await s.d.dispatch(
+          'design.shape.item.update',
+          {
+            partId: s.partId,
+            shapeId: 'shape2',
+            index: 0,
+            fillets: [...fillets, { vertex, radius }],
+          },
+          ui,
+        )
+        if (r.isOk()) {
+          radii.push(radius)
+          break
+        }
+        expect(r.unwrapErr().issues?.map((i) => i.rule)).toEqual(['filletTooLarge'])
+      }
+    }
+  const center = ['140', '105']
+  await s.run('design.pocket.add', {
+    partId: s.partId,
+    shape: { kind: 'named', shapeId: 'shape2', center },
+    depth: '4',
+  })
+  await s.run('design.profile.add', {
+    partId: s.partId,
+    shape: { kind: 'named', shapeId: 'shape1', center },
+    slotWidth: '8',
+    tabs: { count: '3', width: '8', thickness: '2' },
+  })
+  await s.run('project.apply', {})
+  const planId = await s.create({ machineLibraryItemId: s.machineId })
+  return { s, svc, planId, sharp, radii }
+}
+
 describe('the X0 enclosure drawing through plan export', () => {
   it(
     'imports outline and cavity, pockets the cavity, profiles the outline with tabs, exports',
     { timeout: 120_000 },
     async () => {
-      const svc = services()
-      const s = await planSetup({
-        part: false,
-        services: svc,
-        stock: {
-          name: 'Enclosure block',
-          shape: 'block',
-          length: '280',
-          width: '210',
-          thickness: '10',
-          material: { name: '6061-T6', class: 'aluminum' },
-        },
-      })
-      const proc = (
-        globalThis as unknown as {
-          process: { getBuiltinModule(id: 'node:fs'): { readFileSync(p: URL, e: 'utf8'): string } }
-        }
-      ).process
-      const svg = proc.getBuiltinModule('node:fs').readFileSync(ENCLOSURE_SECTIONS_SVG, 'utf8')
-      const shapes = expectOk(importSvg(svg)).shapes
-      for (const name of ['outline', 'cavity']) {
-        const item = shapes.find((x) => x.name === name)!.items[0]!
-        if (item.kind !== 'loop') throw new Error('loop expected')
-        await s.run('design.shape.add', { partId: s.partId, name, items: [pathItem(item.loop)] })
-      }
-      const center = ['140', '105']
-      await s.run('design.pocket.add', {
-        partId: s.partId,
-        shape: { kind: 'named', shapeId: 'shape2', center },
-        depth: '4',
-      })
-      await s.run('design.profile.add', {
-        partId: s.partId,
-        shape: { kind: 'named', shapeId: 'shape1', center },
-        slotWidth: '8',
-        tabs: { count: '3', width: '8', thickness: '2' },
-      })
-      await s.run('project.apply', {})
-      const planId = await s.create({ machineLibraryItemId: s.machineId })
+      const { s, svc, planId } = await enclosurePlan()
       const e = expectOk(await exportPlan(s.d.doc, planId, svc))
       expect(e.regenerated).toHaveLength(2)
       const sweeps = arcSweeps(e.lines)
@@ -334,6 +403,29 @@ describe('the X0 enclosure drawing through plan export', () => {
       })
       expect(Math.min(...zs)).toBeCloseTo(-10.5, 6)
       expect(zs).toContain(-4)
+    },
+  )
+
+  it(
+    'with the cavity corners filleted (D32): no sharp corner left; the program streams through the virtual machine',
+    { timeout: 120_000 },
+    async () => {
+      // the two sharp corners where the back wall meets its 2 mm step; one sits next to a
+      // 0.33 mm arc of the fitted wall, so it takes only a small fillet
+      const { s, svc, planId, sharp, radii } = await enclosurePlan(true)
+      expect(sharp).toHaveLength(2)
+      expect(radii).toHaveLength(2)
+      // the 6 mm tool still leaves its radius in the corners (a warning), but none is sharp
+      const smallest = Math.min(...radii.map(Number))
+      for (const w of warnings(s, planId).filter((x) => x.rule === 'cornerRadius'))
+        expect(w.params['cornerRadius']).toBeCloseTo(smallest, 6)
+      const e = expectOk(await exportPlan(s.d.doc, planId, svc))
+      expect(e.regenerated).toHaveLength(2)
+      const machine = loadPlan(s.d.doc, planId, 'test').unwrap().machine.unwrap()
+      const run = await streamProgram(e.lines, machine)
+      expect(run.lines).toBe(e.lines.length)
+      // cutting time at the program's feeds (aluminium, 6 mm tool): minutes, not seconds
+      expect(run.seconds).toBeGreaterThan(600)
     },
   )
 })

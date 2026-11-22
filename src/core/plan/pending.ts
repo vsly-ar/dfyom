@@ -217,7 +217,7 @@ export const planInputPending: PendingSource = {
  */
 export const draftPlanPending: PendingSource = {
   name: 'plan.draftFollow',
-  changes(doc, _baseline, design) {
+  changes(doc, _baseline, design, ctx) {
     const parts = new Set(design.flatMap((c) => (c.partId === undefined ? [] : [c.partId])))
     return Object.values(doc.plans)
       .filter(
@@ -225,7 +225,7 @@ export const draftPlanPending: PendingSource = {
           p.status === 'draft' &&
           !parts.has(p.design.partId) &&
           designChanged(p, doc) &&
-          rebuildBlocker(p, doc) === undefined,
+          rebuildBlocker(p, doc, ctx.services.region2d) === undefined,
       )
       .map((p) => ({
         kind: 'plan' as const,
@@ -250,7 +250,7 @@ export const libraryPending: PendingSource = {
     const out = new Map<string, PendingChange>()
     for (const plan of Object.values(doc.plans)) {
       if (plan.status !== 'draft') continue
-      for (const c of planStale(plan, doc, lookup).libraryCopies) {
+      for (const c of planStale(plan, doc, lookup, ctx.services.region2d).libraryCopies) {
         if (c.status !== 'libraryChanged' || c.blocked !== null || out.has(c.libraryItemId))
           continue
         const found = lookup(c.kind, c.libraryItemId)

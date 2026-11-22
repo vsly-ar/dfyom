@@ -1,0 +1,21 @@
+toolpath op-profile tool em6 S18000
+stats cut 247.9813 rapid 21 s 13.9591
+pass rough
+  rapid 15 15 10
+  rapid 15 15 2
+  line 15 15 0 F300
+  line 43.6217 15 -1.5 F1200
+  line 15 15 -1.5 F1200
+  line 45 15 -1.5 F1200
+  arc 55 25 -1.5 c 45 25 ccw F1200
+  line 55 45 -1.5 F1200
+pass rough
+  line 55 25 -2.5482 F1200
+  arc 51.5079 17.4074 -3 c 45 25 cw F1200
+  arc 55 25 -3 c 45 25 ccw F1200
+  line 55 45 -3 F1200
+  line 55 25 -3 F1200
+  arc 45 15 -3 c 45 25 cw F1200
+  line 15 15 -3 F1200
+  rapid 15 15 2
+  rapid 15 15 10

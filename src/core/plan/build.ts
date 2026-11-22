@@ -14,6 +14,7 @@ import { deepEqual, takeSnapshot } from '../library/snapshot'
 import type { ProjectDoc, UnitSystem } from '../project/document'
 import { Quantity } from '../quantity/quantity'
 import type { Direction } from '../geometry/face'
+import type { Region2dPort } from '../geometry/2d/port'
 import { operationDirections, repairOrder, surfaceDirection } from './order'
 import { findPlanOperation, loadPlanDTO } from './plan'
 import {
@@ -36,6 +37,11 @@ export interface BuildContext {
   readonly units: UnitSystem
   /** Readable tool items of the library (empty without a library: no tool is assigned). */
   readonly tools: readonly LibraryItem[]
+  /**
+   * The 2D port (`services.region2d`): tool resolution and the part check then run the checks of
+   * general shapes (width, `tabOutside`, …) as `plan.warning.list` does (v0.3 T3).
+   */
+  readonly region2d?: Region2dPort
 }
 
 /** Safe heights (docs/modes/plan-v0.1.md#setup-orientation-work-zero-safe-heights). */
@@ -181,7 +187,7 @@ function resolveAndAssign(
     const op = plan.setups[ref.unwrap().setup]!.operations[ref.unwrap().index]!
     op.toolSource = 'design'
     delete op.designToolChanged
-    const r = resolveTool(loaded.unwrap(), op, c.tools)
+    const r = resolveTool(loaded.unwrap(), op, c.tools, c.region2d)
     if (r.kind === 'copy') setTool(op, r.snapshotId)
     else if (r.kind === 'none') setTool(op, undefined)
     else if (
@@ -363,7 +369,7 @@ export function rebuildPlan(
   const stockCopy = plan.snapshots.find((x) => x.id === plan.design.part.stock)
   if (stockCopy === undefined)
     return fail('input.malformed', `plan ${plan.id}: the stock copy is missing`, { where })
-  const fits = checkPartFits(plan.design.part, stockCopy, where)
+  const fits = checkPartFits(plan.design.part, stockCopy, where, c.region2d)
   if (fits.isErr()) return Err(fits.unwrapErr().withContext(where, { planId: plan.id }))
   // re-resolve `design` tools whose design tool field changed; plan assignments stay, flagged
   const changed: string[] = []
