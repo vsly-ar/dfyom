@@ -208,6 +208,14 @@ export const libraryMessages = {
         stepover: 'Stepover',
         chipLoad: 'Chip load',
       },
+      /** Compact visible labels for the quantity cells; `columns` holds the full names. */
+      short: {
+        spindleSpeed: 'Speed',
+        feedRate: 'Feed',
+        plungeRate: 'Plunge',
+        stepdown: 'Stepdown',
+        stepover: 'Stepover',
+      },
       field: (preset: string, column: string) => `${column} of ${preset}`,
       chipLoad: (value: string) => value,
       chipLoadNone: '–',

@@ -546,48 +546,81 @@
   line-height: var(--lh-sm);
 }
 
-.tableScroll {
-  overflow-x: auto;
+/* one stacked block per preset, so all values fit the editor's width without sideways scrolling:
+   name, material, chip load and remove above the five cutting values */
+.presetList {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-block: 1px solid var(--border);
+}
+
+.preset {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr)) auto;
+  gap: var(--space-2);
+  padding-block: var(--space-2);
   min-width: 0;
 }
 
-.presetTable {
-  border-collapse: collapse;
-  font-size: var(--text-sm);
+.preset + .preset {
+  border-top: 1px solid var(--border);
 }
 
-.presetTable th {
-  padding: 0 4px 4px;
-  color: var(--text-muted);
-  font-weight: var(--weight-medium);
-  text-align: left;
+.pcell {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pcell[data-wide] {
+  grid-column: span 2;
+}
+
+.pcellLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  font-weight: var(--weight-medium);
 }
 
-.presetTable td {
-  padding: 2px 4px;
-  vertical-align: middle;
+.presetRemove {
+  grid-column: 6;
+  grid-row: 1;
+  align-self: end;
 }
 
-.qcell input,
-.cellName input {
-  min-width: 0;
+/* a narrow editor: two columns of values instead of five */
+@container (max-width: 460px) {
+  .preset {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  }
+
+  .pcell[data-wide] {
+    grid-column: span 1;
+  }
+
+  .presetRemove {
+    grid-column: 3;
+  }
 }
 
-.presetTable .qcell {
-  width: 124px;
-  overflow: visible;
-}
-
+.qcell,
+.cellName,
 .cellSelect {
-  width: 132px;
-}
-
-.cellName {
-  width: 112px;
+  width: 100%;
+  min-width: 0;
 }
 
 .derived {
+  display: flex;
+  align-items: center;
+  height: var(--control-md);
+  overflow: hidden;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   color: var(--text-muted);
