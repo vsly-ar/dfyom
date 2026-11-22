@@ -1,0 +1,125 @@
+/**
+ * Coverage oracle for pockets of regions (spike S4's three-way classification,
+ * docs/modes/plan-v0.3.md#tests): the toolpath heightmap (`Heightmap.sweep`) against the region
+ * and its tool-centre region C0 = offset(region, R). Each cell centre inside the region is
+ * **reachable** when within R − tol of C0 and must be at the floor, else it is **leftover**; the
+ * rest of the region is **rest** material and must stay; a cut more than tol outside the region
+ * (walls, islands) is a **gouge**. Test-only.
+ */
+import type { Vec2 } from '../../geometry/model'
+import { chainBounds, regionLoops, type Loop, type Region } from '../../geometry/2d/model'
+import { flattenLoop } from '../../geometry/2d/testing/oracles'
+import type { Toolpath, ToolpathTool } from '../model'
+import { Heightmap } from './oracles'
+
+export interface Coverage {
+  /** Reachable cells left above the floor (mm²). */
+  readonly leftover: number
+  /** Region cells the tool cannot reach, left uncut (mm²). */
+  readonly rest: number
+  /** Cells cut deeper than the stock top more than `tol` outside the region (mm²). */
+  readonly gouge: number
+  /** Region cells cut below the floor (mm²). */
+  readonly belowFloor: number
+}
+
+type Poly = Vec2[]
+
+/** Even-odd crossings of a row at height y, sorted. */
+function rowSpans(polys: readonly Poly[], y: number): number[] {
+  const xs: number[] = []
+  for (const pts of polys)
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      const a = pts[i]!
+      const b = pts[j]!
+      if (a[1] > y !== b[1] > y) xs.push(a[0] + ((y - a[1]) * (b[0] - a[0])) / (b[1] - a[1]))
+    }
+  return xs.sort((p, q) => p - q)
+}
+
+function inSpans(xs: readonly number[], x: number): boolean {
+  let n = 0
+  for (const v of xs) if (v < x) n++
+  return n % 2 === 1
+}
+
+function distToPolys(polys: readonly Poly[], p: Vec2): number {
+  let best = Infinity
+  for (const pts of polys)
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      const a = pts[j]!
+      const b = pts[i]!
+      const dx = b[0] - a[0]
+      const dy = b[1] - a[1]
+      const len2 = dx * dx + dy * dy
+      const t =
+        len2 === 0 ? 0 : Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2))
+      best = Math.min(best, Math.hypot(p[0] - a[0] - dx * t, p[1] - a[1] - dy * t))
+    }
+  return best
+}
+
+/**
+ * Sweeps the toolpath over `size` (from the origin) and classifies the cells. `floor` is the
+ * pocket's floor Z; the stock top is Z 0.
+ */
+export function regionCoverage(
+  region: Region,
+  c0: Region,
+  tp: Toolpath,
+  tool: ToolpathTool,
+  size: { length: number; width: number },
+  floor: number,
+  cell = 0.1,
+  tol = 0.01,
+): Coverage {
+  const hm = new Heightmap(size.length, size.width, cell)
+  hm.sweep(tool, tp, cell)
+  const regionPolys = regionLoops(region).map((l) => flattenLoop(l, 0.001))
+  const c0Polys = regionLoops(c0).map((l) => flattenLoop(l, 0.001))
+  const R = tool.diameter / 2
+  const area = cell * cell
+  let leftover = 0
+  let rest = 0
+  let gouge = 0
+  let belowFloor = 0
+  for (let j = 0; j < hm.ny; j++) {
+    const y = (j + 0.5) * cell
+    const spans = rowSpans(regionPolys, y)
+    const c0Spans = rowSpans(c0Polys, y)
+    for (let i = 0; i < hm.nx; i++) {
+      const h = hm.z[j * hm.nx + i]!
+      const p: Vec2 = [(i + 0.5) * cell, y]
+      if (inSpans(spans, p[0])) {
+        if (h < floor - 1e-6) belowFloor += area
+        if (h <= floor + 1e-6) continue
+        const d = inSpans(c0Spans, p[0]) ? 0 : distToPolys(c0Polys, p)
+        if (d <= R - tol) leftover += area
+        else rest += area
+      } else if (h < -1e-9 && distToPolys(regionPolys, p) > tol) gouge += area
+    }
+  }
+  return { leftover, rest, gouge, belowFloor }
+}
+
+/** Loops moved so their bounding box starts at (margin, margin), and the heightmap size. */
+export function placeLoops(
+  loops: readonly Loop[],
+  margin = 5,
+): { loops: Loop[]; size: { length: number; width: number } } {
+  const b = chainBounds(loops.flatMap((l) => l.elements))!
+  const dx = margin - b.min[0]
+  const dy = margin - b.min[1]
+  const mv = (p: Vec2): Vec2 => [p[0] + dx, p[1] + dy]
+  const moved = loops.map((l) => ({
+    elements: l.elements.map((e) =>
+      e.kind === 'line'
+        ? { kind: 'line' as const, a: mv(e.a), b: mv(e.b) }
+        : { kind: 'arc' as const, a: mv(e.a), b: mv(e.b), centre: mv(e.centre), ccw: e.ccw },
+    ),
+  }))
+  return {
+    loops: moved,
+    size: { length: b.max[0] - b.min[0] + 2 * margin, width: b.max[1] - b.min[1] + 2 * margin },
+  }
+}
