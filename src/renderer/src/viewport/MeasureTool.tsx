@@ -47,19 +47,36 @@ export function Dimension2d({
   )
 }
 
-/** The distance chip at screen point `at`; its tooltip lists the components along the axes. */
+/**
+ * The distance chip at screen point `at`; its tooltip lists the components along the axes. With
+ * `inline` (the 3D viewport, whose drei `Html` overlays render outside the app's providers, so no
+ * Tooltip there) the components are a second, muted line of the chip instead.
+ */
 export function MeasureChip({
   at,
   distance,
   parts,
   units,
+  inline = false,
 }: {
   at: readonly [number, number]
   distance: number
   /** Axis name and component (mm), e.g. `[['x', 12], ['y', 5]]`. */
   parts: readonly (readonly [string, number])[]
   units: UnitSystem
+  inline?: boolean
 }): React.JSX.Element {
+  if (inline)
+    return (
+      <span
+        className={styles['dimensionChip']}
+        style={{ transform: `translate(${at[0]}px, ${at[1]}px) translate(-50%, -100%)` }}
+        data-testid="measure-chip"
+      >
+        {mm.chip(distance, units)}
+        <span className={styles['dimensionDeltas']}>{mm.deltas(parts, units)}</span>
+      </span>
+    )
   return (
     <Tooltip content={mm.deltas(parts, units)} side="top">
       <span

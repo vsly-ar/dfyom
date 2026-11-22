@@ -109,3 +109,10 @@
   pointer-events: none;
   z-index: var(--z-toolbar);
 }
+
+/* the components under the distance (3D chip, `inline`) */
+.dimensionDeltas {
+  display: block;
+  font-weight: var(--weight-regular);
+  color: var(--text-muted);
+}

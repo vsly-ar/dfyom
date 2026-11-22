@@ -1,7 +1,7 @@
 // The 3D viewport's measure tool (task U3): while on, a click on the part, the stock or a shown
 // reference picks a point (snapped to the nearest vertex of the triangle under the pointer or a
 // stock corner within `SNAP_PX`, unless Alt is held or snapping is off); two points show a
-// dimension line (always on top) and the distance chip, whose tooltip adds ΔX, ΔY, ΔZ. A drag
+// dimension line (always on top) and the distance chip with ΔX, ΔY, ΔZ on a second line. A drag
 // still orbits. Nothing is stored. The reference ghost is not pickable for selection, so this
 // raycasts the meshes tagged `userData.measure` itself.
 // Doc: docs/conventions/ui.md#snap-and-measure
@@ -189,7 +189,8 @@ export function Measure3d({
         >
           <div className={styles['snapAnchor']}>
             <MeasureChip
-              at={[0, -16]}
+              at={[0, -10]}
+              inline
               distance={result.distance}
               parts={[
                 ['x', result.deltas[0]!],

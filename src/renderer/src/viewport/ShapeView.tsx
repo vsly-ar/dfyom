@@ -773,6 +773,7 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
       data-reduced={reduced ? '' : undefined}
       data-dragging={drag?.started ? '' : undefined}
       data-measuring={measuring ? '' : undefined}
+      data-shape-editor=""
       onKeyDown={onKeyDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}

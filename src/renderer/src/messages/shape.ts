@@ -127,6 +127,8 @@ export const shapeMessages = {
     radius: 'Radius',
     direction: 'Direction',
     large: 'Large arc',
+    /** The narrow column header of "Large arc" (its accessible name stays the long one). */
+    largeShort: 'Large',
     fillet: 'Fillet',
     types: { line: 'Line', arc: 'Arc', tangentArc: 'Tangent arc' },
     cw: 'CW',

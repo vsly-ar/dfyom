@@ -247,11 +247,12 @@
   justify-items: start;
 }
 
+/* the snap grid's two lengths (mm and inch projects), one field row each */
 .settingPair {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: var(--space-3);
+  gap: var(--space-2);
   width: 100%;
+  --field-label-width: 12rem;
 }
 
 .settingLabel {

@@ -119,10 +119,12 @@
 }
 
 .sectionPanel {
+  box-sizing: border-box;
+  width: 15rem;
+  /* the Field's label column, narrowed to "Section depth" */
+  --field-label-width: 5.75rem;
   margin-top: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  width: 168px;
-  margin-left: auto;
+  padding: var(--space-2) var(--space-3) var(--space-3);
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
   background: color-mix(in oklab, var(--bg-raised) 94%, transparent);
@@ -282,6 +284,9 @@
   position: absolute;
   top: var(--space-2);
   right: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
   transition: transform var(--motion-base) var(--ease-standard);
 }
 

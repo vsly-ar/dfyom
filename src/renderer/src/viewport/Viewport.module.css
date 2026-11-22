@@ -37,6 +37,11 @@
   transition: transform var(--motion-base) var(--ease-standard);
 }
 
+/* the Shape Editor covers the canvas (its sibling): its own toolbar replaces the view toolbar */
+.viewport:has(~ [data-shape-editor]) .cube {
+  visibility: hidden;
+}
+
 .cubeAnchor {
   display: block;
   width: 5.5rem;
@@ -44,6 +49,9 @@
 }
 
 .toolbar {
+  /* one row (Fit, Views, Measure: wider than the cube), flush with the cube's right edge */
+  align-self: flex-end;
+  width: max-content;
   margin-top: var(--space-1);
   pointer-events: auto;
 }
