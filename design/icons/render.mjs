@@ -36,7 +36,7 @@ h1{font-size:15px;font-weight:600;margin:0 0 4px}h2{font-size:11px;font-weight:6
 text-transform:uppercase;color:var(--text-muted);margin:20px 0 8px}p{margin:0;color:var(--text-muted)}
 .ic{color:var(--text-muted)}.ic [data-accent]{transition:none}
 .on [data-accent]{stroke:var(--accent-icon);filter:var(--accent-icon-edge)}
-.on [data-accent][fill]:not([fill=none]){fill:var(--accent-icon)}
+.on [data-accent][fill]:not([fill=none]){fill:var(--accent-icon);stroke:none}
 .off{opacity:.45}${extraCss}</style></head><body>${body}</body></html>`
 
 // ---------- B22 specimen ----------
@@ -108,7 +108,7 @@ function inContext(theme) {
     <div class="vp"><span>viewport</span></div>
     <aside class="insp"><h1>Pocket 1</h1><p class="sub">Pocket · Enclosure outline</p>
       <div class="toolpick">${ic('flat-end-mill', 'on', 20)}<div><b>T2 · Flat end mill 6 mm</b><p>2 flutes · carbide</p></div></div>
-      <div class="tools">${ic('flat-end-mill', 'on')}${ic('bull-nose-end-mill')}${ic('ball-end-mill')}${ic('v-bit')}${ic('drill', 'off')}</div>
+      <div class="tools">${ic('flat-end-mill', 'on')}${ic('bull-nose-end-mill')}${ic('ball-end-mill')}${ic('chamfer-mill')}${ic('drill', 'off')}</div>
       ${field('Depth', fillo('M2 6H6V14H14V6H18', 'M6 6V14'), '12 mm', true)}
       ${field('Stepdown', fillo('M2 5H7V9H12V13H18', 'M7 5V9'), '2 mm')}
       ${field('Corner radius', fillo('M3 3V10A7 7 0 0 0 10 17H17', 'M3 10A7 7 0 0 0 10 17'), '3.2 mm')}
@@ -135,6 +135,52 @@ function inContext(theme) {
   .field .illo{color:var(--text-muted)}.input{height:28px;display:flex;align-items:center;padding:0 8px;border:1px solid var(--border-control);border-radius:4px;background:var(--bg-field)}
   .field.focus .input{outline:2px solid var(--focus);outline-offset:-1px}.field.focus .illo path:last-child{stroke-width:1.6}
   .tabsrow{display:flex;align-items:center;gap:8px;margin-top:8px}`
+  return page(theme, body, css)
+}
+
+// ---------- L1 contact sheet (v0.4 icons and the B22 follow-ups) ----------
+// The drawings before the L1 redraw, for the side-by-side review only.
+const BEFORE = {
+  groove: [
+    { d: 'M2 4.5h6a5.5 5.5 0 0 1 5.5 5.5v4M2 9.5h6a.5.5 0 0 1 .5.5v4' },
+    { d: 'M2 7h6a3 3 0 0 1 3 3v4', a: true },
+  ],
+  pick: [
+    { circle: [8, 8, 4.5] },
+    { d: 'M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2' },
+    { circle: [8, 8, 1.2], a: true, fill: true },
+  ],
+  disconnect: [{ d: 'M6 1.5v3M10 1.5v3M8 11.5v3M4 4.5h8v2.5a4 4 0 0 1-8 0zM1.5 14.5l13-13' }],
+}
+const L1 = [
+  ['hole-simple', 'hole-counterbore', 'hole-countersink', 'chamfer', 'chamfer-mill', 'clones'],
+  ['row-grid', 'row-offset', 'row-polar', 'row-arc', 'row-point', 'row-along'],
+  ['groove', 'pick', 'drilling', 'disconnect', 'connect'],
+]
+function l1Sheet(theme) {
+  const sizes = (i) =>
+    [16, 20, 32]
+      .map(
+        (s) =>
+          `<span class="ic">${iconSvg(i, { size: s })}</span><span class="ic on">${iconSvg(i, { size: s })}</span>`,
+      )
+      .join('')
+  const row = (id) => {
+    const i = byId[id]
+    const before = BEFORE[id]
+      ? `<span class="was">was</span>${sizes({ id, parts: BEFORE[id] })}`
+      : ''
+    return `<div class="r"><span class="lab">${ic(id)}<span>${i.label}</span></span>
+      <span class="lab sel">${ic(id, 'on')}<span>${i.label}</span></span>${sizes(i)}${before}<code>${id}</code></div>`
+  }
+  const body = `<div class="sheet"><h1>L1 icons · contact sheet (${theme})</h1>
+  <p>Each row: 16 px beside its label at rest and selected · then 16 / 20 / 32 px, each at rest and active ·
+  redrawn icons also show the drawing they replace. Drilling and Connect are unchanged, shown for comparison.</p>
+  ${L1.map((g, n) => `<h2>${['Features', 'Clones row kinds', 'B22 follow-ups'][n]}</h2>${g.map(row).join('')}`).join('')}</div>`
+  const css = `.sheet{padding:20px 24px;width:900px}.r{display:flex;align-items:center;gap:12px;height:44px;border-bottom:1px solid var(--border)}
+  .lab{display:flex;flex:none;align-items:center;gap:8px;width:170px;height:28px;padding:0 8px;border-radius:4px;color:var(--text)}
+  .lab.sel{background:var(--accent-subtle)}.r>.ic{flex:none}.ic svg{display:block}.was{margin-left:12px;color:var(--text-faint);font-size:11px}
+  code{margin-left:auto;color:var(--text-faint);font-size:11px}`
   return page(theme, body, css)
 }
 
@@ -207,6 +253,11 @@ for (const theme of ['light', 'dark']) {
     width: 1120,
     height: 430,
     selector: '.app',
+  })
+  await shot(l1Sheet(theme), `l1-contact-${theme}.png`, {
+    width: 960,
+    height: 900,
+    selector: '.sheet',
   })
 }
 await browser.close()
