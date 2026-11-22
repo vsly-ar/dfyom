@@ -2,8 +2,11 @@
 // CLI, temp data dir) over stdio and runs the exit-criteria flow (exit-criteria.fixture.ts):
 // create → design → plan → toolpaths → export (golden gCode) → virtual run at `max` with tool
 // changes and progress → save → close → reopen; and the v0.2 flow (exit-criteria.v02.fixture.ts:
-// reference, three faces, a program per setup run in turn). Also checks the CI criterion.
-// Spec: docs/plans/v0.1.md#exit-criteria, docs/plans/v0.2.md#exit-criteria, docs/architecture/llm-api.md#testing,
+// reference, three faces, a program per setup run in turn); and the v0.3 flow
+// (exit-criteria.v03.fixture.ts: SVG shapes, Shape Editor commands, shape operations, two setups,
+// the deviation check). Also checks the CI criterion.
+// Spec: docs/plans/v0.1.md#exit-criteria, docs/plans/v0.2.md#exit-criteria,
+// docs/plans/v0.3.md#exit-criteria, docs/architecture/llm-api.md#testing,
 // docs/conventions/testing.md#end-to-end
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -15,13 +18,16 @@ import { afterAll, describe, expect, inject, it } from 'vitest'
 import { toMcpName } from '../../core/agent/tools'
 import { type CallResult, exitCriteriaFlow } from './exit-criteria.fixture'
 import { exitCriteriaV02Flow } from './exit-criteria.v02.fixture'
+import { exitCriteriaV03Flow } from './exit-criteria.v03.fixture'
 
 const dir = mkdtempSync(join(tmpdir(), 'dfyom-e2e-mcp-'))
 // the v0.2 flow in its own data dir: a fresh library, so its auto tool choice sees only its tools
 const dirV02 = mkdtempSync(join(tmpdir(), 'dfyom-e2e-mcp-v02-'))
+const dirV03 = mkdtempSync(join(tmpdir(), 'dfyom-e2e-mcp-v03-'))
 afterAll(() => {
   rmSync(dir, { recursive: true, force: true })
   rmSync(dirV02, { recursive: true, force: true })
+  rmSync(dirV03, { recursive: true, force: true })
 })
 
 interface ToolResult {
@@ -105,6 +111,21 @@ describe('exit criteria headless: dfyom mcp (stdio)', { timeout: 180_000 }, () =
       ]),
     )
     await exitCriteriaV02Flow(call, dirV02)
+    await client.close()
+    expect(stderr.join('')).toBe('')
+  })
+
+  it('runs the v0.3 flow (SVG shapes, Shape Editor, shape operations, two setups) through MCP tools', async () => {
+    const { client, call, stderr } = await connect(dirV03)
+    expect((await client.listTools()).tools.map((t) => t.name)).toEqual(
+      expect.arrayContaining([
+        'design_shape_import',
+        'design_shape_add',
+        'design_shape_item_update',
+        'design_shape_get',
+      ]),
+    )
+    await exitCriteriaV03Flow(call, dirV03)
     await client.close()
     expect(stderr.join('')).toBe('')
   })

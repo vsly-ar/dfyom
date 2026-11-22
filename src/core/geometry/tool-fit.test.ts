@@ -113,6 +113,10 @@ describe('toolFit: the fit table', () => {
     expect(rule(flat(6, 20.4), profile())).toBe('reach')
     expect(rule(flat(6, 20.5), profile())).toBe('fits')
     expect(toolFit(flat(6, 20.5), profile(), TEST_STOCK, 'inch')?.rule).toBe('reach')
+    // a blind `on` groove (v0.3): its depth, no breakthrough
+    const groove = profile({ side: 'on', depth: 3 })
+    expect(rule(flat(6, 3), groove)).toBe('fits')
+    expect(rule(flat(6, 2.9), groove)).toBe('reach')
   })
 })
 

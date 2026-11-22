@@ -259,9 +259,14 @@ export function setupStockSize(
   return { x: turned ? v : u, y: turned ? u : v, z: size(info.extent) }
 }
 
+/** A profile that cuts through (every v0.1/v0.2 profile; v0.3 `on` without `depth`). */
+const isThroughProfile = (op: Part['operations'][number] | undefined): boolean =>
+  op?.kind === 'profile' && op.depth.isNone()
+
 /**
  * `plan.cutoutBeforeSetup` (warning): a through profile in a setup before another setup; the part
- * (or the slug) is held only by its tabs while it is re-fixtured.
+ * (or the slug) is held only by its tabs while it is re-fixtured. A blind `on` groove (v0.3)
+ * frees nothing.
  */
 export function setupFindings(setups: readonly SetupDTO[], part: Part): PlanWarning[] {
   const out: PlanWarning[] = []
@@ -271,7 +276,7 @@ export function setupFindings(setups: readonly SetupDTO[], part: Part): PlanWarn
     if (next === undefined) return
     for (const op of s.operations)
       for (const d of op.designOperationIds)
-        if (byId.get(d)?.kind === 'profile')
+        if (isThroughProfile(byId.get(d)))
           out.push({
             code: 'plan.cutoutBeforeSetup',
             severity: 'warning',
