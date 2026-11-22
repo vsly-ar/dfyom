@@ -31,15 +31,24 @@ Small sizes (`renders/b21-small-sizes.png`): the `.icns` holds separate 16/32 px
 
 Approved in L3 (D33, 2026-11-22) with these answers: **B22-1 b** (user override) every generic icon redrawn in the own style too, Lucide removed; **B22-2 a** 16 px grid, 1.35 px stroke, round caps and joins; **B22-3 a** amber only when active or in a primary button, field drawings keep always-amber; **B22-4 a** tool side views told apart by the amber tip, always next to the tool name, 20 px in the tool picker; **B22-5 a** groove = bent slot; **B22-6 a** V-bit drawn but shown only with the V-bit tool type (kept in the source as `reserved`); **B22-7 b** (user override) the tabs drawing refined to read alone at 16 px (still a bridge on a cut line: the stock top, the cut floor on both sides and the tab standing between them).
 
-The rules live in [ui.md § Icons](../../docs/conventions/ui.md#icons). The single source is [`src/renderer/src/ui/icons/iconSet.ts`](../../src/renderer/src/ui/icons/iconSet.ts): the app's `<Icon>` renders it, `render.mjs` (through `b22/icons.mjs`) renders the specimen sheets and the SVG exports, `b22/sync-page.mjs` the design-system page's sheet. Groups: operations, tool types, drawing tools and shape kinds, modes and CNC actions, views, generic actions, status.
+The rules live in [ui.md § Icons](../../docs/conventions/ui.md#icons). The single source is [`src/renderer/src/ui/icons/iconSet.ts`](../../src/renderer/src/ui/icons/iconSet.ts): the app's `<Icon>` renders it, `render.mjs` (through `b22/icons.mjs`) renders the specimen sheets and the SVG exports, `b22/sync-page.mjs` the design-system page's sheet. Groups: operations, features (v0.4: hole types, chamfer, Clones and its row kinds), tool types, drawing tools and shape kinds, modes and CNC actions, views, generic actions, status.
 
 ### Review at 16 px (after wiring)
 
 - Flat, bull nose and ball end mill differ only in the bottom 2–3 px; they always sit next to the tool's name (tool field, tool picker at 20 px, library rows).
-- Groove reads as the slot bend at 20 px and above; at 16 px it is close to a "signal" glyph, but it only appears beside the operation's name.
+- Groove reads as the slot bend at 20 px and above; at 16 px it was close to a "signal" glyph. Redrawn in L1 (v0.4): 1 px wider, closed by a round cap at its visible end.
 - Fillet is drawn but not shown: fillets are shape-item fields with the `corner` field illustration, not an operation.
-- The pick (crosshair with a centre dot) and drilling (crosshair through the circle) are close; they never appear side by side.
-- Disconnect (the connect plug struck through) is the busiest drawing; it only appears in a labelled button.
+- The pick (crosshair with a centre dot) and drilling (crosshair through the circle) were close. Redrawn in L1: a pointer touching a small face, no crosshair.
+- Disconnect (the connect plug struck through) was the busiest drawing. Redrawn in L1: the prongs drawn apart from the plug, no strike-through.
+
+### L1 (v0.4): feature icons and the B22 follow-ups
+
+Drawn to the rules above for [ui.md § Icons (v0.4)](../../docs/conventions/ui.md#icons-v04), reviewed in L2. Contact sheet: `renders/l1-contact-{light,dark}.png` (each icon beside its label at rest and selected, then 16 / 20 / 32 px at rest and active, the replaced drawing beside each redraw); `render.mjs` writes it with the other renders.
+
+- Hole types are front sections (plate top and bottom faces either side of the bore), told apart by the amber part: the bore walls, the counterbore step, the countersink cone. Chamfer is an edge section with its bevel amber and no bore.
+- `chamfer-mill` is the former `v-bit` drawing, renamed to the name in ui.md (the `chamferMill` tool type's icon since C1).
+- Clones: the source square, two dashed copies and the dotted path between them (amber).
+- Row kinds (`row-grid`, `row-offset`, `row-polar`, `row-arc`, `row-point`, `row-along`): grid, arc, point and along read at 16 px; offset (three dots on a diagonal) and polar (the same with a ray from a small origin) are close at 16 px, so for L2: keep them or show the Add row menu's labels alone.
 
 ## Provenance and licence
 

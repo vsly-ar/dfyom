@@ -8,5 +8,5 @@ export const TOOL_TYPE_ICON = {
   bullNoseEndMill: 'bull-nose-end-mill',
   ballEndMill: 'ball-end-mill',
   drill: 'drill',
-  chamferMill: 'v-bit',
+  chamferMill: 'chamfer-mill',
 } as const satisfies Record<ToolType, IconName>

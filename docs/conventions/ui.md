@@ -765,7 +765,7 @@ While the Clones feature (or one of its rows) is selected, and during the draft:
 
 #### Icons (v0.4)
 
-Drawn in L1 to the [icon rules](#icons) (16 px grid, one accent part, grey at rest), in `iconSet.ts` (provenance `b22`); the [design-system page](ui-design-system.html#icons)'s sheet follows through its sync script.
+Drawn in L1 to the [icon rules](#icons) (16 px grid, one accent part, grey at rest), in `iconSet.ts` (group `feature`, provenance `b22`; contact sheet and review notes in [design/icons/](../../design/icons/README.md#l1-v04-feature-icons-and-the-b22-follow-ups)); the [design-system page](ui-design-system.html#icons)'s sheet follows through its sync script.
 
 | Icon                                 | Drawing (view) and accent part                                                                                                                                       |
 | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -773,7 +773,7 @@ Drawn in L1 to the [icon rules](#icons) (16 px grid, one accent part, grey at re
 | `hole-counterbore`                   | Section: the bore with a wider step at the mouth; accent: the step. Also the "Hole" entry in Add                                                                     |
 | `hole-countersink`                   | Section: the bore with a cone at the mouth; accent: the cone flanks                                                                                                  |
 | `chamfer`                            | Section of an edge with a 45° bevel; accent: the bevel. Distinct from the countersink by having no bore                                                              |
-| `chamfer-mill`                       | The drawn `v-bit` side view wired as the `chamferMill` tool type (B22-6 a); accent: the conical tip (B22-4 a)                                                        |
+| `chamfer-mill`                       | The drawn V-bit side view (formerly `v-bit`) wired as the `chamferMill` tool type (B22-6 a); accent: the conical tip (B22-4 a)                                       |
 | `clones`                             | A rounded square (the source) and two dashed copies along a dotted path; accent: the path. Also Make Clones…                                                         |
 | Row kinds (`row-grid` … `row-along`) | Dots (≤ 1.8 px, the fill exception) in the row's layout: a 3 × 2 grid, a line, a ray, an arc round a cross, a jump arrow to a dot, dots on a curve; accent: the dots |
 | `groove` (B22 follow-up)             | Redrawn for 16 px: the bent slot closed by a round cap at its visible end and 1 px wider, so it reads as a slot, not a signal glyph; accent: the centreline          |
@@ -954,7 +954,7 @@ Decided for v0.1 ([decision 7](#decisions)): **English only, i18n-ready structur
 
 Status: **approved in the L3 review** ([D33](../plans/v0.3.md#confirmed-decisions), 2026-11-22: B22-1 b, B22-2 a, B22-3 a, B22-4 a, B22-5 a, B22-6 a, B22-7 b). Sources, specimens and provenance: [design/icons/](../../design/icons/README.md).
 
-- **One own set, no icon library.** Every icon outside the [field illustrations](#field) is DFYOM's own drawing (GPL-3.0-or-later): operations, tool types, drawing tools and shape kinds, modes and CNC actions, views, generic actions (add, delete, undo, settings, chevrons, close, …) and status glyphs. Lucide is no longer used (B22-1 b; it was the generic set until v0.3).
+- **One own set, no icon library.** Every icon outside the [field illustrations](#field) is DFYOM's own drawing (GPL-3.0-or-later): operations, features ([v0.4](#icons-v04)), tool types, drawing tools and shape kinds, modes and CNC actions, views, generic actions (add, delete, undo, settings, chevrons, close, …) and status glyphs. Lucide is no longer used (B22-1 b; it was the generic set until v0.3).
 - **Single source:** [`ui/icons/iconSet.ts`](../../src/renderer/src/ui/icons/iconSet.ts), plain data (paths, the accent part, provenance). The app renders it with `<Icon name>` ([`ui/icons/Icon.tsx`](../../src/renderer/src/ui/icons/Icon.tsx)); `design/icons/render.mjs` renders the specimens and SVG exports from the same file; `design/icons/b22/sync-page.mjs` writes the [design-system page](ui-design-system.html#icons)'s icon sheet (a test fails while it is out of date). The [dev gallery](#testing) shows the whole set by group.
 - **Grid and stroke** (B22-2 a): a 16 px grid, `--icon-stroke` 1.35 px at 16 px, round caps and joins, rectangle corners `rx` 0.5–1.5, a 1.5 px margin, no fills except dots ≤ 1.8 px.
 - **One accent part per concept icon,** the part that tells it apart: an operation's passes, a tool's cutting end, a drawing tool's handles, the setup's up face, the G of gCode, the run triangle. Generic actions and status glyphs have none.

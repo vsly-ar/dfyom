@@ -19,7 +19,8 @@ export interface IconPart {
   readonly dash?: string
 }
 
-export type IconGroup = 'operation' | 'tool' | 'shape' | 'cnc' | 'view' | 'action' | 'status'
+export type IconGroup =
+  'operation' | 'feature' | 'tool' | 'shape' | 'cnc' | 'view' | 'action' | 'status'
 
 export interface IconDef {
   readonly label: string
@@ -36,6 +37,8 @@ export interface IconDef {
 
 const DOC = 'M3.5 1.5h6l3 3v10h-9zM9.5 1.5v3h3'
 const CUBE = 'M8 2l5.5 3v6L8 14l-5.5-3V5z'
+/** An accent dot of a Clones row-kind icon (the fill exception, r 1.3). */
+const dot = (cx: number, cy: number) => ({ circle: [cx, cy, 1.3], a: true, fill: true }) as const
 
 export const ICON_SET = {
   // ── operations (front or top views; the pass that tells the kind apart is the accent) ──────
@@ -57,13 +60,15 @@ export const ICON_SET = {
     src: 'approved',
     parts: [{ rect: [4.5, 4.5, 7, 7, 1] }, { rect: [2, 2, 12, 12, 3], a: true, dash: '2 2' }],
   },
+  // L1 (B22 follow-up): the bent slot 1 px wider and closed by a round cap at its visible end, so
+  // it reads as a slot at 16 px, not a signal glyph.
   groove: {
     label: 'Groove',
     group: 'operation',
     src: 'b22',
     parts: [
-      { d: 'M2 4.5h6a5.5 5.5 0 0 1 5.5 5.5v4M2 9.5h6a.5.5 0 0 1 .5.5v4' },
-      { d: 'M2 7h6a3 3 0 0 1 3 3v4', a: true },
+      { d: 'M1.5 3h5a6.5 6.5 0 0 1 6.5 6.5V11a3 3 0 0 1-6 0V9.5a.5.5 0 0 0-.5-.5h-5' },
+      { d: 'M1.5 6h5a3.5 3.5 0 0 1 3.5 3.5V11', a: true },
     ],
   },
   drilling: {
@@ -108,6 +113,110 @@ export const ICON_SET = {
       { d: 'M2.5 13.5V2.5h3.7v11h3.6v-11h3.7v11', a: true },
     ],
   },
+  // ── features (v0.4, L1; front sections and top views) ─────────────────────────────────────
+  // Hole sections: the plate's top and bottom face either side of the bore; the accent is the
+  // part that tells the hole type apart. Doc: docs/conventions/ui.md#icons-v04
+  'hole-simple': {
+    label: 'Simple hole',
+    group: 'feature',
+    src: 'b22',
+    parts: [{ d: 'M1.5 4H6M10 4h4.5M1.5 12H6M10 12h4.5' }, { d: 'M6 4v8M10 4v8', a: true }],
+  },
+  'hole-counterbore': {
+    label: 'Counterbore',
+    group: 'feature',
+    src: 'b22',
+    parts: [
+      { d: 'M1.5 3h2M12.5 3h2M1.5 13H6M10 13h4.5M6 7.5V13M10 7.5V13' },
+      { d: 'M3.5 3v4.5H6M12.5 3v4.5H10', a: true },
+    ],
+  },
+  'hole-countersink': {
+    label: 'Countersink',
+    group: 'feature',
+    src: 'b22',
+    parts: [
+      { d: 'M1.5 3h1M13.5 3h1M1.5 13H6M10 13h4.5M6 6.5V13M10 6.5V13' },
+      { d: 'M2.5 3L6 6.5M13.5 3L10 6.5', a: true },
+    ],
+  },
+  // an edge in section: top face, 45° bevel, side face; no bore (unlike the countersink)
+  chamfer: {
+    label: 'Chamfer',
+    group: 'feature',
+    src: 'b22',
+    parts: [{ d: 'M1.5 4.5H8M11.5 8v6.5' }, { d: 'M8 4.5l3.5 3.5', a: true }],
+  },
+  // the source (solid), two dashed copies, the dotted path between them
+  clones: {
+    label: 'Clones',
+    group: 'feature',
+    src: 'b22',
+    parts: [
+      { rect: [1.5, 1.5, 4, 4, 1] },
+      { rect: [10.5, 1.5, 4, 4, 1], dash: '1.4 1.1' },
+      { rect: [10.5, 10.5, 4, 4, 1], dash: '1.4 1.1' },
+      { d: 'M7 3.5h2M12.5 7v2', a: true, dash: '0 2' },
+    ],
+  },
+  // Clones path-row kinds (the Add row menu): dots in the row's layout; may fall back to the label
+  // alone if they don't read at 16 px (L2).
+  'row-grid': {
+    label: 'Grid',
+    group: 'feature',
+    src: 'b22',
+    parts: [
+      dot(3.5, 5.5),
+      dot(8, 5.5),
+      dot(12.5, 5.5),
+      dot(3.5, 10.5),
+      dot(8, 10.5),
+      dot(12.5, 10.5),
+    ],
+  },
+  'row-offset': {
+    label: 'Offset',
+    group: 'feature',
+    src: 'b22',
+    parts: [dot(3, 13), dot(8, 8), dot(13, 3)],
+  },
+  'row-polar': {
+    label: 'Polar',
+    group: 'feature',
+    src: 'b22',
+    parts: [
+      { d: 'M2.5 13.5l3-3' },
+      { circle: [2.5, 13.5, 1], fill: true },
+      dot(7.5, 8.5),
+      dot(10.5, 5.5),
+      dot(13.5, 2.5),
+    ],
+  },
+  'row-arc': {
+    label: 'Arc',
+    group: 'feature',
+    src: 'b22',
+    parts: [
+      { d: 'M5 6.8v2.4M3.8 8h2.4' },
+      dot(5, 2.5),
+      dot(8.9, 4.1),
+      dot(10.5, 8),
+      dot(8.9, 11.9),
+      dot(5, 13.5),
+    ],
+  },
+  'row-point': {
+    label: 'Point',
+    group: 'feature',
+    src: 'b22',
+    parts: [{ d: 'M2.5 12.5C3.5 6 8 4 11 4.5M9 2.5l2 2-2 2' }, dot(13.5, 4.5)],
+  },
+  'row-along': {
+    label: 'Along a shape',
+    group: 'feature',
+    src: 'b22',
+    parts: [{ d: 'M1.5 12C5 3 10 14 14.5 4' }, dot(3, 9), dot(8, 8.5), dot(12.8, 7)],
+  },
   // ── tool types (side views; the cutting end is the accent; always beside the tool's name) ──
   'flat-end-mill': {
     label: 'Flat end mill',
@@ -136,8 +245,8 @@ export const ICON_SET = {
     src: 'b22',
     parts: [{ d: 'M5 11V1.5h6V11M5 7l6-3M5 10.5l6-3' }, { d: 'M5 11l3 3.5 3-3.5', a: true }],
   },
-  'v-bit': {
-    label: 'V-bit',
+  'chamfer-mill': {
+    label: 'Chamfer mill',
     group: 'tool',
     src: 'b22',
     parts: [{ d: 'M6 7V1.5h4V7M3.5 7h9' }, { d: 'M3.5 7L8 14.5 12.5 7', a: true }],
@@ -255,15 +364,12 @@ export const ICON_SET = {
       { rect: [5, 5, 6, 6, 0.5], a: true },
     ],
   },
+  // L1 (B22 follow-up): a pointer touching a face, no crosshair, so it no longer resembles drilling
   pick: {
     label: 'Pick in the viewport',
     group: 'cnc',
-    src: 'redraw',
-    parts: [
-      { circle: [8, 8, 4.5] },
-      { d: 'M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2' },
-      { circle: [8, 8, 1.2], a: true, fill: true },
-    ],
+    src: 'b22',
+    parts: [{ d: 'M6.5 6.5l7 4.2-3.3.9-1.7 3.4z' }, { d: 'M3.5 2.5h8.5l-2 3.5H1.5z', a: true }],
   },
   setups: {
     label: 'Setups',
@@ -349,11 +455,12 @@ export const ICON_SET = {
     src: 'redraw',
     parts: [{ d: 'M6 1.5v3M10 1.5v3M8 11.5v3' }, { d: 'M4 4.5h8v2.5a4 4 0 0 1-8 0z', a: true }],
   },
+  // L1 (B22 follow-up): the plug and its prongs drawn apart, no strike-through (reads at 16 px)
   disconnect: {
     label: 'Disconnect',
     group: 'cnc',
-    src: 'redraw',
-    parts: [{ d: 'M6 1.5v3M10 1.5v3M8 11.5v3M4 4.5h8v2.5a4 4 0 0 1-8 0zM1.5 14.5l13-13' }],
+    src: 'b22',
+    parts: [{ d: 'M6 1.5v2.5M10 1.5v2.5M4.5 4h7M4 7h8v1a4 4 0 0 1-8 0zM8 12v2.5' }],
   },
   play: {
     label: 'Resume',

@@ -858,6 +858,7 @@ function Overlays(): React.JSX.Element {
 
 const ICON_GROUPS: [IconGroup, string][] = [
   ['operation', 'Operations'],
+  ['feature', 'Features and Clones row kinds'],
   ['tool', 'Tool types (20 px in the tool picker)'],
   ['shape', 'Drawing tools and shape kinds'],
   ['cnc', 'Modes and CNC actions'],

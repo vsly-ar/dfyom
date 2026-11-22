@@ -57,7 +57,8 @@ describe('own icon set (B22)', () => {
       const { group, parts } = ICON_SET[name]
       const accent = parts.some((p) => 'a' in p)
       if (group === 'status' || group === 'action') expect(accent, name).toBe(false)
-      if (group === 'operation' || group === 'tool') expect(accent, name).toBe(true)
+      if (group === 'operation' || group === 'feature' || group === 'tool')
+        expect(accent, name).toBe(true)
     }
   })
 
