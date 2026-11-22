@@ -39,6 +39,22 @@ export interface PartEvaluation {
 const WHERE = 'evaluatePart'
 
 /**
+ * Operations on faces other than the top are modelled (task A1) but not built yet: building in
+ * the face frame is task A1b (docs/architecture/geometry.md#non-top-faces-v02). Until then the
+ * evaluation fails with a clear issue on the operation's `on`.
+ */
+function nonTopFaceError(input: PartGeometryInput): AppResult<void> {
+  const op = input.operations.find((o) => o.direction !== undefined && o.direction !== '+z')
+  if (op === undefined) return Ok(undefined)
+  const message = `${op.id} is on a ${op.direction} face; geometry for faces other than the top is not built yet`
+  return fail('geometry.evaluation', message, {
+    issues: [{ path: ['operations', op.id, 'on'], rule: 'faceNotSupported', message }],
+    where: WHERE,
+    data: { operation: op.id, direction: op.direction! },
+  })
+}
+
+/**
  * Operations per batch union before it is split into chunks: on the stress case (30 pockets +
  * 120 drills) one union took ≈ 145 ms, chunks of 25 ≈ 24 ms each (`npm run perf`), keeping every
  * step under 50 ms (docs/architecture/workers.md#abort-and-pause).
@@ -56,6 +72,8 @@ export function evaluatePart(
   steps: Steps = noSteps,
 ): AppResult<PartEvaluation> {
   const started = performance.now()
+  const unsupported = nonTopFaceError(input)
+  if (unsupported.isErr()) return Err(unsupported.unwrapErr())
   const stock = stockSolids(input.stock)
   if (stock.isErr()) return Err(stock.unwrapErr())
   const stockSolidsValue = stock.unwrap()

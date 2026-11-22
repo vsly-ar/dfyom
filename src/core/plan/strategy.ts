@@ -192,8 +192,10 @@ export function holeDepth(
 ): number {
   if (op.bottom !== 'through' && op.depth.isSome()) return op.depth.unwrap().canonical
   const table = SurfaceTable.build(allOps, stock)
-  const top = table.get(op.on).mapOr(0, (e) => e.z.z.toNumber())
-  return top + stock.thickness.canonical
+  // the material below `on` along its normal (the stock thickness on the top face)
+  return table
+    .get(op.on)
+    .mapOr(stock.thickness.canonical, (e) => e.faceZ.add(table.extent(e.direction)).toNumber())
 }
 
 /** Every parameter with its default (docs/modes/plan-v0.1.md#pass-strategies-v01). */

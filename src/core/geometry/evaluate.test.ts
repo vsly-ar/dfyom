@@ -277,6 +277,19 @@ describe('evaluatePart: edge cases', () => {
     expect(e.volume).toBeCloseTo(100 * 60 * 20 - (200 - (4 - Math.PI) * 9) * 20, -1)
   })
 
+  it('fails with faceNotSupported for operations on faces other than the top (until task A1b)', () => {
+    const input = withOp({ ...pocket({ kind: 'circle', radius: 3 }, 2, 0), direction: '+x' })
+    const e = expectErrCode(
+      kernel.withSolids((s) => evaluatePart(input, s)),
+      'geometry.evaluation',
+    )
+    expect(e.issues[0]).toMatchObject({
+      rule: 'faceNotSupported',
+      path: ['operations', 'pocket1', 'on'],
+    })
+    expect(kernel.liveObjects()).toBe(0)
+  })
+
   it('fails with loftInvalid when floorRadius exceeds cornerRadius (a bug upstream)', () => {
     const e = kernel.withSolids((s) =>
       evaluatePart(

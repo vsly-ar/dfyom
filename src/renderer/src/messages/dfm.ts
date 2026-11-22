@@ -29,8 +29,10 @@ export function lengthSource(
 
 const num = (v: unknown): number => (typeof v === 'number' ? v : Number.NaN)
 
-/** "front", "right", … for stock side surface ids. */
+/** "front", "right", … for stock face surface ids. */
 const SIDE: Readonly<Record<string, string>> = {
+  'stock.top': 'top',
+  'stock.bottom': 'bottom',
   'stock.side[0]': 'front',
   'stock.side[1]': 'right',
   'stock.side[2]': 'back',
@@ -89,6 +91,10 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
     p['thickness'] !== undefined
       ? `Tabs ${L(p['thickness'])} thick are too thin to hold the piece.`
       : `Tabs ${L(p['width'])} wide are too narrow to hold the piece.`,
+  'dfm.reach': (p, L) =>
+    `No tool in the library reaches ${L(p['depth'])} deep from the stock face (longest ${L(p['reach'])}).`,
+  'dfm.setups': (p) =>
+    `The part needs ${num(p['count'])} setups (${list((p['directions'] as readonly string[] | undefined) ?? [])}).`,
 }
 
 /** Parameters whose value is a count, not a length (suggestions are plain numbers). */

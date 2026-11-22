@@ -100,6 +100,15 @@ describe('expressions: arithmetic', () => {
   it('accepts dotted references', () => {
     expect(exact('pocket1.floor.z.max - tool.diameter / 2')).toBe('-6')
   })
+
+  it('accepts indexed segments in references (stock.side[1].x, profile1.tab[0].top.z)', () => {
+    const r = refs({ 'stock.side[1].x': q('100'), 'profile1.tab[0].top.z': q('-18') })
+    expect(enter('stock.side[1].x - 5', LENGTH_MM, r).exact.toString()).toBe('95')
+    expect(enter('-profile1.tab[0].top.z', LENGTH_MM, r).exact.toString()).toBe('18')
+    expect(
+      expectOk(referencesOf(enter('stock.side[1].x + profile1.tab[0].top.z', LENGTH_MM, r))),
+    ).toEqual(['stock.side[1].x', 'profile1.tab[0].top.z'])
+  })
 })
 
 describe('expressions: dimensions', () => {

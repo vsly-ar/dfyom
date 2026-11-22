@@ -99,17 +99,26 @@ const ToleranceArg = z
   .describe('General tolerance (one ± per kind) for untoleranced values')
 const NameArg = z.string().min(1).max(NAME_MAX).describe('Display label')
 const OnArg = SurfaceIdSchema.describe(
-  'Surface it starts from: stock.top or an earlier floor / tab top; default: last facing floor',
+  'Face it starts from: a stock face (stock.top, stock.bottom, stock.side[0..3]) or an earlier ' +
+    'floor / tab top; positions are [u, v] in its face frame; default: last top facing floor',
+)
+const StockFaceArg = SurfaceIdSchema.describe(
+  'Stock face it starts from: stock.top (default), stock.bottom or stock.side[0..3]',
 )
 const PartArg = { partId: PartIdSchema }
 const OpArg = { partId: PartIdSchema, operationId: OperationIdSchema }
 const TabsArg = z.object({
   count: Src.optional().describe('Whole number ≥ 0; default 4'),
   width: Src.optional().describe('Default 6 mm / 1/4"'),
-  thickness: Src.optional().describe('Measured up from the stock bottom; default 2 mm / 1/16"'),
+  thickness: Src.optional().describe(
+    'Measured up from the opposite stock face (the bottom for stock.top); default 2 mm / 1/16"',
+  ),
 })
 
-const facingParams = { depth: Src.optional().describe('Default 0.5 mm / 1/64"') }
+const facingParams = {
+  on: StockFaceArg.optional(),
+  depth: Src.optional().describe('Default 0.5 mm / 1/64"'),
+}
 const pocketParams = {
   on: OnArg.optional(),
   shape: ShapeArg,
@@ -125,6 +134,7 @@ const drillingParams = {
   pointAngle: Src.optional().describe('drillPoint only; default 118°'),
 }
 const profileParams = {
+  on: StockFaceArg.optional(),
   shape: ShapeArg,
   side: z.enum(PROFILE_SIDES).optional().describe('outside (part outline, default) or inside'),
   slotWidth: Src.optional().describe('Default 6 mm / 1/4"'),
@@ -320,9 +330,9 @@ function nextNumber(part: Part, kind: OperationKind): number {
   return max + 1
 }
 
-/** design.md: the last facing's floor, else `stock.top`. */
+/** design.md: the last top facing's floor, else `stock.top`. */
 function defaultOn(ops: readonly Operation[]): string {
-  const facing = ops.findLast((o) => o.kind === 'facing')
+  const facing = ops.findLast((o) => o.kind === 'facing' && o.on === STOCK_TOP)
   return facing === undefined ? STOCK_TOP : `${facing.id}.floor`
 }
 
@@ -371,6 +381,7 @@ const facingSpec: KindSpec<typeof facingParams, Extract<Operation, { kind: 'faci
     id,
     name,
     generalTolerance: prev?.generalTolerance ?? NO_TOLERANCE,
+    on: a.on ?? prev?.on ?? STOCK_TOP,
     depth: f.pick('depth', 'length', a.depth, prev?.depth, 'facingDepth'),
   }),
 }
@@ -439,6 +450,7 @@ const profileSpec: KindSpec<typeof profileParams, Extract<Operation, { kind: 'pr
     id,
     name,
     generalTolerance: prev?.generalTolerance ?? NO_TOLERANCE,
+    on: a.on ?? prev?.on ?? STOCK_TOP,
     shape: a.shape !== undefined ? f.shape(a.shape) : prev!.shape,
     side: a.side ?? prev?.side ?? 'outside',
     slotWidth: f.pick('slotWidth', 'length', a.slotWidth, prev?.slotWidth, 'slotWidth'),

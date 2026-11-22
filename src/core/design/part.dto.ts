@@ -16,14 +16,17 @@ export const OperationIdSchema = z
   .regex(OPERATION_ID_PATTERN)
   .describe('Operation id, e.g. pocket1 (used in surface ids)')
 
-/** `stock.top`, `facing1.floor`, `profile1.tab[0].top`, … (docs/architecture/geometry.md). */
+/**
+ * `stock.top`, `stock.side[1]`, `facing1.floor`, `profile1.tab[0].top`, …
+ * (docs/architecture/geometry.md); a face target, docs/modes/design-v0.2.md#face-targets-generalised-on.
+ */
 export const SurfaceIdSchema = z
   .string()
   .min(1)
   .max(128)
   .describe('Surface id, e.g. stock.top or facing1.floor')
 
-/** Point `[x, y]` in the part frame. */
+/** Point `[u, v]` in the face frame of the operation's `on` (`[x, y]` on the top face). */
 export const PointDtoSchema = z.tuple([length(), length()])
 
 export const ShapeDtoSchema = z.discriminatedUnion('kind', [
@@ -55,7 +58,17 @@ export const DRILL_BOTTOMS = ['through', 'flat', 'drillPoint'] as const
 export type DrillBottomKind = (typeof DRILL_BOTTOMS)[number]
 export const PROFILE_SIDES = ['outside', 'inside'] as const
 
-export const FacingDtoSchema = z.object({ kind: z.literal('facing'), ...common, depth: length() })
+/** Absent on a facing or profile = `stock.top` (v0.1 records load unchanged). */
+const stockFaceOn = SurfaceIdSchema.optional().describe(
+  'Stock face it starts from; default stock.top',
+)
+
+export const FacingDtoSchema = z.object({
+  kind: z.literal('facing'),
+  ...common,
+  on: stockFaceOn,
+  depth: length(),
+})
 export const PocketDtoSchema = z.object({
   kind: z.literal('pocket'),
   ...common,
@@ -77,6 +90,7 @@ export const DrillingDtoSchema = z.object({
 export const ProfileDtoSchema = z.object({
   kind: z.literal('profile'),
   ...common,
+  on: stockFaceOn,
   shape: ShapeDtoSchema,
   side: z.enum(PROFILE_SIDES),
   slotWidth: length(),

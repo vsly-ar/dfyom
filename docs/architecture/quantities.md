@@ -98,7 +98,7 @@ Representation and resolution:
 A quantity may be a simple formula over references:
 
 - project variables (`wall_thickness`),
-- surfaces of operations, including their tolerance limits (`pocket1.floor.z`, `pocket1.floor.z.max`) – surface ids: [geometry.md](geometry.md#surfaces-and-stable-ids),
+- surfaces of operations, including their tolerance limits (`pocket1.floor.z`, `pocket1.floor.z.max`; on side faces `.x` / `.y`, e.g. `stock.side[1].x`, [design-v0.2.md](../modes/design-v0.2.md#formula-names)) – surface ids: [geometry.md](geometry.md#surfaces-and-stable-ids),
 - tool parameters (`tool.diameter`, `tool.flute_length`),
 - machine variables (`machine.travel.z`).
 
@@ -121,7 +121,8 @@ product    = unary, { ws, ( "*" | "×" | "/" | "÷" ), unary } ;
 unary      = ws, ( "-" | "−" ), unary | primary ;
 primary    = number | reference | "(", sum, ws, ")" ;
 number     = magnitude, [ ws, unit ] ;              (* literal grammar; unit of any kind *)
-reference  = name, { ".", name } ;  name = ( letter | "_" ), { letter | digit | "_" } ;
+reference  = segment, { ".", segment } ;  segment = name, [ "[", digit, { digit }, "]" ] ;
+name       = ( letter | "_" ), { letter | digit | "_" } ;
 ```
 
 Decisions made with task 2.2 (conservative where the rules above left room):

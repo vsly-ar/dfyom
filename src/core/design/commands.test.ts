@@ -356,9 +356,9 @@ describe('validation errors (model.invariant, design.md constraints)', () => {
       'aboveStockBottom',
     ],
     [
-      'pocket on the stock bottom',
-      'pocket',
-      { shape: rect('20', '10'), depth: '1', on: 'stock.bottom' },
+      'facing on a floor (stock faces only)',
+      'facing',
+      { depth: '1', on: 'pocket9.floor' },
       ['on'],
       'onSurface',
     ],

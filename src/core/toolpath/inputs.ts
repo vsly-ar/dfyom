@@ -111,6 +111,23 @@ export function toGeneratorInputs(input: PlanOperationInput): AppResult<Generato
         where: WHERE,
         data: { planOperationId: id },
       })
+    // toolpaths in the face frame and per setup are task C3 (docs/modes/plan-v0.2.md)
+    if (g.direction !== undefined && g.direction !== '+z')
+      return fail(
+        'plan.check',
+        `${op.id} is on a ${g.direction} face; toolpaths for faces other than the top are not generated yet`,
+        {
+          issues: [
+            {
+              path: ['operations', op.id, 'on'],
+              rule: 'faceNotSupported',
+              message: 'toolpaths for faces other than the top come with setups',
+            },
+          ],
+          where: WHERE,
+          data: { planOperationId: id, operation: op.id },
+        },
+      )
     ops.push(g)
   }
   const stock: StockGeometry = geometry.unwrap().stock

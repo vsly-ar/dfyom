@@ -6,6 +6,7 @@
  * (docs/architecture/quantities.md#value). The design layer resolves quantities, expressions
  * and `on` references before evaluation, so geometry never sees `Quantity` objects.
  */
+import type { Direction } from './face'
 
 /** Coincidence, collapse and zero-length threshold (mm). */
 export const EPSILON = 1e-6
@@ -64,34 +65,49 @@ export type DrillBottom =
   /** `pointAngle` in degrees; 180 is a flat bottom. */
   | { readonly kind: 'drillPoint'; readonly depth: number; readonly pointAngle: number }
 
+/**
+ * Where an operation is in v0.2 (docs/architecture/geometry.md#non-top-faces-v02): every
+ * position, `onZ` and the stock sizes are read in the face frame of `direction` (`u` → x, `v` → y,
+ * `n` → z, the stock face of the direction at z = 0). Absent = `+z`, the v0.1 part frame.
+ */
+interface FacePlacement {
+  readonly direction?: Direction
+}
+
 /** v0.1 operations resolved to float64 mm (docs/modes/design.md#operations-v01). */
-export type OperationGeometry =
-  | { readonly kind: 'facing'; readonly id: string; readonly depth: number }
-  | {
-      readonly kind: 'pocket'
-      readonly id: string
-      /** z of the `on` surface, from the analytic model. */
-      readonly onZ: number
-      readonly shape: Shape
-      readonly depth: number
-      readonly floorRadius: number
-    }
-  | {
-      readonly kind: 'drilling'
-      readonly id: string
-      readonly onZ: number
-      readonly center: Vec2
-      readonly diameter: number
-      readonly bottom: DrillBottom
-    }
-  | {
-      readonly kind: 'profile'
-      readonly id: string
-      readonly shape: Shape
-      readonly side: 'outside' | 'inside'
-      readonly slotWidth: number
-      readonly tabs: { readonly count: number; readonly width: number; readonly thickness: number }
-    }
+export type OperationGeometry = FacePlacement &
+  (
+    | { readonly kind: 'facing'; readonly id: string; readonly depth: number }
+    | {
+        readonly kind: 'pocket'
+        readonly id: string
+        /** z of the `on` surface in the face frame (≤ 0), from the analytic model. */
+        readonly onZ: number
+        readonly shape: Shape
+        readonly depth: number
+        readonly floorRadius: number
+      }
+    | {
+        readonly kind: 'drilling'
+        readonly id: string
+        readonly onZ: number
+        readonly center: Vec2
+        readonly diameter: number
+        readonly bottom: DrillBottom
+      }
+    | {
+        readonly kind: 'profile'
+        readonly id: string
+        readonly shape: Shape
+        readonly side: 'outside' | 'inside'
+        readonly slotWidth: number
+        readonly tabs: {
+          readonly count: number
+          readonly width: number
+          readonly thickness: number
+        }
+      }
+  )
 
 /**
  * A surface an operation parameter refers to (`on`, or a reference in an expression), so
@@ -138,6 +154,9 @@ export const DFM_WARNING_CODES = [
   'dfm.tabsNone',
   'dfm.tabsUnused',
   'dfm.tabsThin',
+  // face access checks (v0.2): docs/modes/design-v0.2.md#dfm-access-checks
+  'dfm.reach',
+  'dfm.setups',
 ] as const
 export type DfmWarningCode = (typeof DFM_WARNING_CODES)[number]
 

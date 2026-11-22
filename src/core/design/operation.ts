@@ -1,7 +1,8 @@
 /**
  * Operations and parts with `Quantity` values (the DTOs in part.dto.ts, loaded), plus their
  * fields: field kinds, defaults and parameter paths.
- * Doc: docs/modes/design.md#operations-v01, docs/modes/design.md#implementation-task-25
+ * Doc: docs/modes/design.md#operations-v01, docs/modes/design.md#implementation-task-25,
+ * docs/modes/design-v0.2.md#face-targets-generalised-on
  */
 import { collect, None, Ok, Some, type AppResult, type Option } from '../../shared/result'
 import { quantityFromDTO } from '../library/item'
@@ -40,7 +41,15 @@ interface Common {
   readonly id: string
   readonly name: string
   readonly generalTolerance: GeneralTolerance
+  /**
+   * Face target: the surface id it starts from (a stock face for a facing or profile). Its
+   * direction comes from the surface table; positions are `[u, v]` in its face frame.
+   */
+  readonly on: string
 }
+
+/** `on` of a facing or profile whose record has none (v0.1). */
+export const DEFAULT_STOCK_FACE = 'stock.top'
 
 export interface Facing extends Common {
   readonly kind: 'facing'
@@ -48,14 +57,12 @@ export interface Facing extends Common {
 }
 export interface Pocket extends Common {
   readonly kind: 'pocket'
-  readonly on: string
   readonly shape: Shape
   readonly depth: Quantity
   readonly floorRadius: Quantity
 }
 export interface Drilling extends Common {
   readonly kind: 'drilling'
-  readonly on: string
   readonly center: Point
   readonly diameter: Quantity
   readonly bottom: DrillBottomKind
@@ -272,7 +279,12 @@ export function operationFromDTO(dto: OperationDTO): AppResult<Operation> {
   const base = { id: dto.id, name: dto.name, generalTolerance: tol.unwrap() }
   switch (dto.kind) {
     case 'facing':
-      return q(dto.depth, 'depth').map((depth) => ({ ...base, kind: 'facing', depth }))
+      return q(dto.depth, 'depth').map((depth) => ({
+        ...base,
+        kind: 'facing',
+        on: dto.on ?? DEFAULT_STOCK_FACE,
+        depth,
+      }))
     case 'pocket': {
       const shape = shapeFromDTO(dto.shape)
       const depth = q(dto.depth, 'depth')
@@ -311,6 +323,7 @@ export function operationFromDTO(dto: OperationDTO): AppResult<Operation> {
       return collect<unknown>([shape, slotWidth, count, width, thickness]).map(() => ({
         ...base,
         kind: 'profile',
+        on: dto.on ?? DEFAULT_STOCK_FACE,
         shape: shape.unwrap(),
         side: dto.side,
         slotWidth: slotWidth.unwrap(),
@@ -335,13 +348,21 @@ function shapeToDTO(s: Shape): ShapeDTO {
   ) as ShapeDTO
 }
 
+/** A facing's or profile's `on`, left out when it is the default (records stay as in v0.1). */
+const stockFaceOn = (op: Operation) => (op.on === DEFAULT_STOCK_FACE ? {} : { on: op.on })
+
 /** Quantity kinds are guaranteed by the parameter's field, so the kind-specific DTO type holds. */
 export function operationToDTO(op: Operation): OperationDTO {
   const tol = generalToleranceToDTO(op.generalTolerance)
   const base = { id: op.id, name: op.name, ...(tol === undefined ? {} : { generalTolerance: tol }) }
   switch (op.kind) {
     case 'facing':
-      return { kind: 'facing', ...base, depth: op.depth.toDTO() } as OperationDTO
+      return {
+        kind: 'facing',
+        ...base,
+        ...stockFaceOn(op),
+        depth: op.depth.toDTO(),
+      } as OperationDTO
     case 'pocket':
       return {
         kind: 'pocket',
@@ -366,6 +387,7 @@ export function operationToDTO(op: Operation): OperationDTO {
       return {
         kind: 'profile',
         ...base,
+        ...stockFaceOn(op),
         shape: shapeToDTO(op.shape),
         side: op.side,
         slotWidth: op.slotWidth.toDTO(),

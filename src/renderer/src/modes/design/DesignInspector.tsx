@@ -633,7 +633,8 @@ function OnField({ ctx }: { ctx: OperationContext }): React.JSX.Element | null {
   const pick = useUi((s) => s.pick)
   const setPick = useUi((s) => s.setPick)
   const { part, op, index } = ctx
-  if (!('on' in op) || part.table === undefined) return null
+  // the `on` of a facing or profile (a stock face) gets its control with face picking (task F1)
+  if ((op.kind !== 'pocket' && op.kind !== 'drilling') || part.table === undefined) return null
   const choices = surfaceChoices(part.dto, part.table, index, true)
   const owner = `${op.id}:on`
   const picking = pick?.owner === owner

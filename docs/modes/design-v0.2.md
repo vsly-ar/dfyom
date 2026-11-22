@@ -114,6 +114,16 @@ New checks (codes to register with the implementation):
 
 Out of v0.2 DFM (Q15): workholding and clamping access, material already removed by an earlier setup, and thin walls between features from opposite faces (a geometry check later).
 
+### Implementation (task A1)
+
+The face model is in core: directions, frames and the local stock in [`src/core/geometry/face.ts`](../../src/core/geometry/face.ts) (ids `+z`, `-z`, `-y`, `+x`, `+y`, `-x` in ASCII); the surface table (`direction`, `level`, `faceZ`), resolver and graph in [`surfaces.ts`](../../src/core/design/surfaces.ts); `on` on every kind in [`operation.ts`](../../src/core/design/operation.ts) (a facing's or profile's `on` is written only when it is not `stock.top`, so v0.1 records stay byte-identical); the limits along `n` in [`validate.ts`](../../src/core/design/validate.ts); the access checks in [`dfm.ts`](../../src/core/geometry/dfm.ts). Choices made with the implementation:
+
+- The pocket and drilling default `on` is the last **top** facing's floor, else `stock.top` (a side facing never becomes the default).
+- A facing's or profile's `on` is not an operation reference (it is a stock face, always there, and a facing removes it), so it never raises `dfm.surfaceMissing` or `design.referenced`.
+- `dfm.reach` runs against the library until the [tool field](#operation-tool) exists (task A4): the longest reach (`stickout`, else `fluteLength`) of the library tools whose type and size fit the operation; a pocket or flat/point hole is measured to its floor (`depth − onZ`), a through hole and a profile by the stock extent along `n`. A4 switches it to the operation's own tool.
+- `dfm.setups` is attached to the first operation of the second direction (the one that adds a setup), parameter `on`, `params: { count, directions }` (`top`, `bottom`, `front`, `right`, `back`, `left`, in order of first use).
+- Until F1 the Design UI offers only top-facing `on` targets and `.z` formula names (±z), and draws outlines in the face frame's z; until A1b/C3 geometry and toolpaths reject other directions ([geometry.md](../architecture/geometry.md#non-top-faces-v02)).
+
 ## Placement anchors
 
 Q13: 9-point ([decision 2](#decisions)). Every positioned feature (pocket and profile `shape`, drilling `center`) states **which point of its bounding box** its position gives.

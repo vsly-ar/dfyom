@@ -24,6 +24,7 @@ export function dfmTool(tool: Tool): DfmTool {
     type: tool.type,
     diameter: tool.diameter.canonical,
     ...(tool.cornerRadius.isSome() && { cornerRadius: tool.cornerRadius.unwrap().canonical }),
+    reach: tool.stickout.mapOr(tool.fluteLength.canonical, (s) => s.canonical),
   }
 }
 

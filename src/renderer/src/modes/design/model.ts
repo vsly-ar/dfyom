@@ -221,10 +221,18 @@ export function surfaceChoices(
   index: number,
   onTargets: boolean,
 ): SurfaceChoice[] {
-  return table
-    .before(index)
-    .filter((e: SurfaceEntry) => !onTargets || e.onTarget)
-    .map((e) => ({ id: e.id, label: surfaceLabel(part, e.id) }))
+  return (
+    table
+      .before(index)
+      // until face picking (task F1) groups faces by direction: `on` offers top-facing surfaces,
+      // formulas the `.z` names (±z)
+      .filter((e: SurfaceEntry) =>
+        onTargets
+          ? e.onTarget && e.direction === '+z'
+          : e.direction === '+z' || e.direction === '-z',
+      )
+      .map((e) => ({ id: e.id, label: surfaceLabel(part, e.id) }))
+  )
 }
 
 /** The operation an evaluation error names (an issue path or frame data), if any. */
