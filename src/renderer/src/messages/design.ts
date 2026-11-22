@@ -152,6 +152,12 @@ export const designMessages = {
       rotationNone: '0°',
       mirror: 'Mirror (flip x)',
       roundCorners: (r: string) => `Round corners to ≥ ${r}`,
+      roundCornersFit: (r: string) => `Round corners to ${r} (largest that fits)`,
+      roundFitSmaller: (fit: string, tool: string) =>
+        `The corner takes at most ${fit}, less than the tool radius ${tool}: the warning stays.`,
+      roundAtLargest: (tool: string) =>
+        `The corner already has the largest radius that fits, less than the tool radius ${tool}: use a smaller tool or change the shape.`,
+      sideSetOn: 'Side set to On line: an open path is cut on the line.',
       noRoundFix: 'Round the corner in the Shape Editor: it is made where items meet.',
       roundTooLarge:
         'The fillet does not fit between the neighbouring segments: round the corner with a smaller radius in the Shape Editor.',

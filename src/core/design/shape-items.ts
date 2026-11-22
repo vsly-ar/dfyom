@@ -587,3 +587,59 @@ export function itemChain(
   }
   return { loop: area < 0 ? reverseLoop(loop) : loop, closed }
 }
+
+// ── largest corner radius ───────────────────────────────────────────────────────────────────
+
+/** Bisection stops when the bracket is this narrow (mm), well below any written radius. */
+const MAX_RADIUS_TOLERANCE = 1e-6
+/** The smallest radius tried: below it the arc is near the resolver's crossing tolerance (mm). */
+const MIN_RADIUS_TRIED = 1e-3
+
+/**
+ * The largest corner radius an item takes, so a fix can round a corner as far as it fits instead
+ * of being refused (`filletTooLarge`): a path's fillet at inner vertex `vertex` with its other
+ * fillets in place, a rectangle's or polygon's `cornerRadius` (all corners). Undefined when the
+ * item does not resolve with that corner sharp, the vertex is not an inner vertex, or the
+ * neighbours are tangent there (`filletNoCorner`). Found by bisection on the resolver itself, so
+ * fitted arcs, neighbouring fillets and self-crossings count as they do when the radius is set.
+ * Doc: docs/modes/design-v0.3.md#dfm-checks-for-shapes
+ */
+export function maxCornerRadius(item: ShapeItem<number>, vertex?: number): number | undefined {
+  if (item.kind === 'rectangle') {
+    const max = Math.min(item.length, item.width) / 2
+    return max > 0 ? max : undefined
+  }
+  let withRadius: (r: number) => ShapeItem<number>
+  if (item.kind === 'polygon') withRadius = (r) => ({ ...item, cornerRadius: r })
+  else if (item.kind === 'path') {
+    if (vertex === undefined) return undefined
+    const others = (item.fillets ?? []).filter((f) => f.vertex !== vertex)
+    withRadius = (r) => ({
+      ...item,
+      fillets: r > 0 ? [...others, { vertex, radius: r }] : others,
+    })
+  } else return undefined
+  const sharp = itemChain(withRadius(0), 0, [])
+  if (sharp === undefined) return undefined
+  const fits = (r: number): boolean | 'noCorner' => {
+    const issues: Issues = []
+    if (itemChain(withRadius(r), 0, issues) !== undefined && issues.length === 0) return true
+    return issues.some((i) => i.rule === 'filletNoCorner' || i.rule === 'filletVertex')
+      ? 'noCorner'
+      : false
+  }
+  // no radius beyond the chain's length over the tangent of a 1° half turn can fit
+  const length = sharp.loop.elements.reduce((s, e) => s + elementLength(e), 0)
+  let hi = length / Math.tan(0.5 * DEG)
+  const first = fits(MIN_RADIUS_TRIED)
+  if (first === 'noCorner') return undefined
+  if (first === false) return 0
+  if (fits(hi) === true) return hi
+  let lo = MIN_RADIUS_TRIED
+  for (let k = 0; k < 80 && hi - lo > MAX_RADIUS_TOLERANCE; k++) {
+    const mid = (lo + hi) / 2
+    if (fits(mid) === true) lo = mid
+    else hi = mid
+  }
+  return lo
+}
