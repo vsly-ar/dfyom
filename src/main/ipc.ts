@@ -21,7 +21,7 @@ import {
 } from '../shared/preload-api'
 import type { Dispatcher } from '../core/commands/dispatcher'
 import type { OpenProjectInfo } from '../core/project/lifecycle'
-import { evaluationView, followEvaluations } from './evaluation-push'
+import { evaluationView, followEvaluations, planEvaluationView } from './evaluation-push'
 import { chooseExportFile, chooseOpenFile, chooseSaveFile } from './file-dialogs'
 import type { AppHost } from './host/app-host'
 import type { LocalHttpControl } from './mcp/http'
@@ -206,6 +206,12 @@ export function registerProjectIpc(
     const key = ws?.session.boundKey
     if (key === undefined || typeof partId !== 'string') return null
     return evaluationView(host, key, partId)
+  })
+  ipcMain.handle(IPC.evaluationPlanGet, (event, planId: unknown) => {
+    const ws = sessionOf(event)
+    const key = ws?.session.boundKey
+    if (key === undefined || typeof planId !== 'string') return null
+    return planEvaluationView(host, key, planId)
   })
   ipcMain.handle(IPC.fileChooseOpen, (event) => {
     const ws = sessionOf(event)

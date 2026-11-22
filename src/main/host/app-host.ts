@@ -137,6 +137,17 @@ export interface AppHost extends SessionHost, HostPort {
   /** The project's part evaluations may have changed (`evaluation` reads them). Returns the unsubscribe. */
   onEvaluation(key: string, listener: (partId: string) => void): () => void
   /**
+   * The evaluation of a plan's part (its design snapshot with plan-only edits: the snapshot scene,
+   * docs/modes/plan-v0.2.md#plan-only-edits-and-the-snapshot-scene), with the part's id, for the
+   * window push. Undefined without the project or the plan.
+   */
+  planEvaluation(
+    key: string,
+    planId: string,
+  ): { readonly partId: string; readonly state: PartEvaluationState } | undefined
+  /** A plan's part evaluation may have changed (`planEvaluation` reads it). Returns the unsubscribe. */
+  onPlanEvaluation(key: string, listener: (planId: string) => void): () => void
+  /**
    * Stdin end, app quit: abort jobs and close every project (unsaved changes stay recoverable).
    * Returns the projects that had unsaved changes.
    */
@@ -515,6 +526,21 @@ class Host implements AppHost {
   onEvaluation(key: string, listener: (partId: string) => void): () => void {
     const rt = this.runtimes.get(key)
     return rt === undefined ? () => {} : rt.scheduler.onChange(listener)
+  }
+
+  planEvaluation(
+    key: string,
+    planId: string,
+  ): { readonly partId: string; readonly state: PartEvaluationState } | undefined {
+    const rt = this.runtimes.get(key)
+    const doc = rt?.dispatcher.doc
+    if (rt === undefined || doc === undefined || !Object.hasOwn(doc.plans, planId)) return undefined
+    return { partId: doc.plans[planId]!.design.partId, state: rt.scheduler.planState(doc, planId) }
+  }
+
+  onPlanEvaluation(key: string, listener: (planId: string) => void): () => void {
+    const rt = this.runtimes.get(key)
+    return rt === undefined ? () => {} : rt.scheduler.onPlanChange(listener)
   }
 
   onProjectsChanged(listener: () => void): () => void {

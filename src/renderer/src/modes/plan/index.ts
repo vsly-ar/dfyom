@@ -2,4 +2,4 @@
 export { PlanInspector } from './PlanInspector'
 export { PlanNavigator } from './PlanNavigator'
 export { PlanStatus } from './PlanStatus'
-export { usePlanScene } from './usePlanScene'
+export { usePlanPartScene, usePlanScene } from './usePlanScene'

@@ -68,6 +68,8 @@ export interface ViewportProps {
   outline?: readonly (readonly Vec3[])[] | null
   /** Error marker at the failing operation (evaluation `failed`). */
   marker?: Vec3 | null
+  /** Operations drawn with a light `--info` tint (edited in the plan: the plan scene, task E3b). */
+  tinted?: ReadonlySet<string> | null
   /** Click on a surface → its target; click on empty space or Escape → `null`. */
   onSelect?: (target: SurfaceTarget | null) => void
   /** Pointer hover over a surface (for a navigator row highlight); `null` when it leaves. */
@@ -139,6 +141,7 @@ export function Viewport({
   selectedOperation = null,
   outline = null,
   marker = null,
+  tinted = null,
   onSelect,
   onHover,
   pick = null,
@@ -167,8 +170,9 @@ export function Viewport({
       pickEligible: pick?.eligible ?? null,
       outdated,
       pulse,
+      tinted,
     }),
-    [selectedOperation, hovered, pick, outdated, pulse],
+    [selectedOperation, hovered, pick, outdated, pulse, tinted],
   )
   const runLines = run?.lines ?? null
   const bounds = useMemo(

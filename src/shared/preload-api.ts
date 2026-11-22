@@ -48,7 +48,12 @@ export const IPC = {
   windowOpenProject: 'dfyom:window.openProject',
   /** Renderer → main (invoke): a part's evaluation (mesh included when done), or null. */
   evaluationGet: 'dfyom:evaluation.get',
-  /** Main → renderer: a part evaluation of the window's project changed (`PartEvaluationView`). */
+  /** Renderer → main (invoke): a plan's part evaluation (snapshot scene, task E3b), or null. */
+  evaluationPlanGet: 'dfyom:evaluation.planGet',
+  /**
+   * Main → renderer: a part evaluation of the window's project changed (`PartEvaluationView`), a
+   * design part's or a plan's part's (`planId`).
+   */
   evaluationChanged: 'dfyom:evaluation.changed',
   /** Renderer → main (invoke): the native "Open project" dialog; the chosen path or null. */
   fileChooseOpen: 'dfyom:file.chooseOpen',
@@ -74,6 +79,12 @@ export interface PartEvaluationView {
   /** The project key, so a window drops pushes of a project it no longer shows. */
   readonly key: string
   readonly partId: string
+  /**
+   * Set for the evaluation of a plan's part (its design snapshot with plan-only edits, drawn by
+   * the plan scene: docs/modes/plan-v0.2.md#plan-only-edits-and-the-snapshot-scene); absent for
+   * the design's part.
+   */
+  readonly planId?: string
   readonly status: EvaluationStatus
   /** Hash of the part's geometry input the status is for. */
   readonly inputHash?: string
@@ -224,6 +235,8 @@ export interface PreloadApi {
    */
   readonly evaluation: {
     get(partId: string): Promise<PartEvaluationView | null>
+    /** The evaluation of the plan's part (snapshot scene), or null. */
+    getPlan(planId: string): Promise<PartEvaluationView | null>
     onChange(listener: (view: PartEvaluationView) => void): () => void
   }
   /**

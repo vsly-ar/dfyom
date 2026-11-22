@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest'
 import { newProjectDoc, type ProjectDoc } from '../../../core/project/document'
 import type { PartEvaluationView } from '../../../shared/preload-api'
-import { createEvaluations } from './evaluations'
+import { createEvaluations, planSubject } from './evaluations'
 import type { ReplicaState } from './replica'
 
 const settle = () => new Promise((r) => setTimeout(r, 0))
@@ -17,7 +17,12 @@ const mesh = {
 
 function docWithPart(): ProjectDoc {
   const doc = newProjectDoc({ name: 'B', unitSystem: 'mm' })
-  return { ...doc, parts: { part1: { id: 'part1', name: 'P', stock: 's', operations: [] } } }
+  return {
+    ...doc,
+    parts: { part1: { id: 'part1', name: 'P', stock: 's', operations: [] } },
+    // only the plan's key matters here
+    plans: { plan1: {} as ProjectDoc['plans'][string] },
+  }
 }
 
 function setup(answer: PartEvaluationView | null) {
@@ -31,6 +36,10 @@ function setup(answer: PartEvaluationView | null) {
         get: (partId) => {
           asked.push(partId)
           return Promise.resolve(answer)
+        },
+        getPlan: (planId) => {
+          asked.push(`plan ${planId}`)
+          return Promise.resolve(answer && { ...answer, planId })
         },
         onChange: (l) => {
           push.add(l)
@@ -71,8 +80,9 @@ describe('evaluations', () => {
     const s = setup({ key: 'p1', partId: 'part1', status: 'done', inputHash: 'h1', mesh })
     s.open('p1')
     await settle()
-    expect(s.asked).toEqual(['part1'])
+    expect(s.asked).toEqual(['part1', 'plan plan1'])
     expect(s.evaluations.getState().get('part1')).toMatchObject({ status: 'done', mesh })
+    expect(s.evaluations.getState().get(planSubject('plan1'))).toMatchObject({ status: 'done' })
 
     // pending and failed keep the last good mesh (shown outdated)
     s.push({ key: 'p1', partId: 'part1', status: 'pending', inputHash: 'h2' })
@@ -100,6 +110,19 @@ describe('evaluations', () => {
     s.open('p2')
     expect(s.evaluations.getState().size).toBe(0)
     await settle()
-    expect(s.asked).toEqual(['part1', 'part1'])
+    expect(s.asked).toEqual(['part1', 'plan plan1', 'part1', 'plan plan1'])
+  })
+
+  it("keeps a plan's part apart from the design part (snapshot scene)", () => {
+    const s = setup(null)
+    s.open('p1')
+    s.push({ key: 'p1', partId: 'part1', status: 'done', inputHash: 'h1', mesh })
+    s.push({ key: 'p1', partId: 'part1', planId: 'plan1', status: 'pending', inputHash: 'h2' })
+    expect(s.evaluations.getState().get('part1')?.status).toBe('done')
+    expect(s.evaluations.getState().get(planSubject('plan1'))).toMatchObject({
+      status: 'pending',
+      mesh: null,
+    })
+    s.stop()
   })
 })

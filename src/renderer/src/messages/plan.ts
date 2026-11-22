@@ -53,6 +53,14 @@ export const planMessages = {
     design: 'The design changed since this plan was made.',
     partRemoved: 'The part of this plan was removed from the design.',
     rebuild: 'Rebuild plan',
+    discardTitle: (n: number) =>
+      `Rebuild discards ${plural(n, 'plan-only edit', 'plan-only edits')}`,
+    discardDraftTitle: (n: number) =>
+      `Back to draft discards ${plural(n, 'plan-only edit', 'plan-only edits')}`,
+    discardDescription:
+      'The plan is rebuilt from the current design. Edits made to the part in this plan are lost. You can undo it.',
+    discardDraftAction: 'Back to draft',
+    discardCancel: 'Cancel',
     blocked: (why: string) => `The plan cannot follow the design: ${why}`,
     library: (kind: string, name: string) => `Library ${kind} “${name}” changed.`,
     libraryRemoved: (kind: string, name: string) => `Library ${kind} “${name}” was removed.`,
@@ -135,6 +143,14 @@ export const planMessages = {
     summary: (n: number) => plural(n, 'operation', 'operations'),
     commandFailed: 'The change was not applied.',
     groups: { tool: 'Tool', strategy: 'Strategy', feeds: 'Feeds and speeds' },
+    // plan-only edits (task E3b): docs/modes/plan-v0.2.md#plan-only-edits-and-the-snapshot-scene
+    planCopy: {
+      title: 'Part (plan copy)',
+      edited: 'Edited in plan',
+      revert: 'Revert to design',
+      draftHint: 'Settle the design to edit it for this plan only.',
+      settledHint: 'Changes here apply to this plan only, not to the design.',
+    },
     tool: 'Tool',
     toolPlaceholder: 'Choose a tool',
     noSuggestion: 'No library tool can make this operation. Add a fitting one with “New tool…”.',

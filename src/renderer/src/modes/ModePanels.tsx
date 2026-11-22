@@ -14,7 +14,7 @@ import { DesignStatus } from './design/DesignStatus'
 import { designPart } from './design/model'
 import { useDesignScene, type SceneProps } from './design/useDesignScene'
 import styles from './ModePanels.module.css'
-import { PlanInspector, PlanNavigator, PlanStatus, usePlanScene } from './plan'
+import { PlanInspector, PlanNavigator, PlanStatus, usePlanPartScene, usePlanScene } from './plan'
 import { RunInspector, RunNavigator, useRunScene } from './run'
 
 const m = shellMessages.empty
@@ -118,13 +118,17 @@ export function ModeStatus({
 /**
  * The scene of the one shared viewport per mode (ui.md#app-shell: one canvas, the mode decides
  * the scene). Run (3.12) adds its toolpath playback, tool marker and work zero (`run`); plan
- * (3.7) the plan's toolpaths and work zero on the same layer, without playback.
+ * (3.7) the plan's toolpaths and work zero on the same layer, without playback, over the plan's
+ * own part (snapshot scene, E3b).
  */
 export function useModeScene(mode: AppMode): SceneProps {
   const design = useDesignScene()
   const run = useRunScene(mode)
   const plan = usePlanScene(mode)
+  const planPart = usePlanPartScene(mode)
   if (mode === 'design') return design
   const base = { mesh: design.mesh, stock: design.stock ?? null, status: design.status ?? 'done' }
-  return mode === 'run' ? { ...base, run } : { ...base, run: plan }
+  if (mode === 'run') return { ...base, run }
+  // snapshot scene (E3b): the plan's own part on its stock copy, edited operations tinted
+  return planPart === null ? { ...base, run: plan } : { ...planPart, run: plan }
 }
