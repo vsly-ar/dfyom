@@ -391,7 +391,7 @@ function ParamField({
           ...(source !== undefined && w.suggestion && w.parameter === path && !ctx.readOnly
             ? {
                 fix: {
-                  label: dfmMessages.apply(w.suggestion.relation, source),
+                  label: dfmMessages.useValue(w.suggestion.relation, source),
                   onApply: () => commit(ctx, path, source),
                 },
               }

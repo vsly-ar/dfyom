@@ -16,6 +16,11 @@ export function shortcutLabel(key: string, opts: { shift?: boolean } = {}): stri
   return `Ctrl+${opts.shift ? 'Shift+' : ''}${key}`
 }
 
+/** Apply's shortcut text: "⌘↵" on macOS, "Ctrl+Enter" elsewhere (apply.md#tooltip). */
+export const APPLY_SHORTCUT = IS_MAC ? '⌘↵' : 'Ctrl+Enter'
+/** Apply's `aria-keyshortcuts`. */
+export const APPLY_KEY_SHORTCUTS = IS_MAC ? 'Meta+Enter' : 'Control+Enter'
+
 /** Typing targets: inputs, text areas, editable content and ARIA text boxes. */
 export function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false

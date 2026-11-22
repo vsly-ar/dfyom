@@ -1,8 +1,10 @@
 // Dialog: modal panel over the --bg-overlay scrim with a title, body and a footer of actions
 // (tool change, export). Focus is trapped and returns to the trigger. Confirmations use
-// ConfirmDialog. Doc: docs/conventions/ui.md#radix-wrapping-pattern, #elevation
+// ConfirmDialog. Enter in a field inside never applies, and Cmd/Ctrl+Enter is inactive while a
+// modal one is open (docs/architecture/apply.md#keyboard). Doc: docs/conventions/ui.md#radix-wrapping-pattern, #elevation
 import { Dialog as RadixDialog, VisuallyHidden } from 'radix-ui'
 import type { ReactElement, ReactNode } from 'react'
+import { ApplyScope, MODAL_ATTR } from '../ApplyButton/ApplyScope'
 import { usePortalContainer } from '../UiProvider/UiProvider'
 import styles from './Dialog.module.css'
 
@@ -49,6 +51,7 @@ export function Dialog({
         <RadixDialog.Content
           className={styles['content']}
           {...(description === undefined ? { 'aria-describedby': undefined } : {})}
+          {...(modal ? { [MODAL_ATTR]: '' } : {})}
         >
           <RadixDialog.Title className={styles['title']}>{title}</RadixDialog.Title>
           {description !== undefined ? (
@@ -62,7 +65,12 @@ export function Dialog({
               </RadixDialog.Description>
             )
           ) : null}
-          {children ? <div className={styles['body']}>{children}</div> : null}
+          {/* dialogs hold local form state: Enter in their fields never applies (apply.md#keyboard) */}
+          {children ? (
+            <ApplyScope onApply={null}>
+              <div className={styles['body']}>{children}</div>
+            </ApplyScope>
+          ) : null}
           {footer ? <div className={styles['footer']}>{footer}</div> : null}
         </RadixDialog.Content>
       </RadixDialog.Portal>

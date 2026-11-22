@@ -109,7 +109,9 @@ describe('design mode', () => {
     expect(within(inspector()).getByRole('heading', { name: 'Pocket 1' })).toBeInTheDocument()
 
     const depth = within(inspector()).getByLabelText('Depth', { selector: 'input' })
-    await retype(user, depth, '8{Enter}')
+    // Tab commits only (Enter would apply too: Apply.test.tsx)
+    await retype(user, depth, '8')
+    await user.tab()
     await waitFor(() => expect(part().operations[0]).toMatchObject({ depth: { source: '8' } }))
     const updates = bridge.calls.filter((c) => c.name === 'design.pocket.update')
     expect(updates).toHaveLength(1)

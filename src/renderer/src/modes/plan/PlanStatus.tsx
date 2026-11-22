@@ -5,6 +5,7 @@
 import { CircleAlert, TriangleAlert } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { ProjectDoc } from '../../../../core/project/document'
+import { applyMessages } from '../../messages/apply'
 import { planMessages } from '../../messages/plan'
 import { Popover, StatusChip, WarningList } from '../../ui'
 import { DELAY_INDICATOR_MS } from '../../viewport'
@@ -66,6 +67,7 @@ export function PlanStatus({ doc }: { doc: ProjectDoc }): React.JSX.Element | nu
                 ),
               )}
               empty={planMessages.warnings.none}
+              outdated={data?.pendingApply === true ? applyMessages.checksOutdated : undefined}
             />
           </div>
         }

@@ -15,6 +15,7 @@ import type { FeedField, PlanDTO, PlanOperationDTO } from '../../../../core/plan
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
 import type { Quantity } from '../../../../core/quantity/quantity'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
+import { applyMessages } from '../../messages/apply'
 import { planMessages, sentence } from '../../messages/plan'
 import { useReplica, useShell } from '../../shell/ShellContext'
 import {
@@ -24,6 +25,7 @@ import {
   FieldInput,
   PanelHeader,
   QuantityInput,
+  useApplyOnEnter,
   Select,
   StatusChip,
   WarningList,
@@ -105,7 +107,12 @@ export function PlanInspector({ doc }: { doc: ProjectDoc }): React.JSX.Element {
   const op = plan.setups[0]!.operations.find((o) => o.id === selected)
   const view = data?.operations?.find((o) => o.id === selected)
   return op === undefined ? (
-    <PlanSummary plan={plan} warnings={data?.warnings ?? []} error={data?.error} />
+    <PlanSummary
+      plan={plan}
+      warnings={data?.warnings ?? []}
+      error={data?.error}
+      outdated={data?.pendingApply === true}
+    />
   ) : (
     <OperationInspector
       key={op.id}
@@ -125,10 +132,13 @@ function PlanSummary({
   plan,
   warnings,
   error,
+  outdated,
 }: {
   plan: PlanDTO
   warnings: readonly PlanWarning[]
   error: AppErrorData | undefined
+  /** The plan's inputs wait for Apply: its checks are outdated (P3). */
+  outdated: boolean
 }): React.JSX.Element {
   const call = usePlanCommand()
   const [, select] = usePlanSelection()
@@ -164,6 +174,7 @@ function PlanSummary({
             labels={planWarningLabels}
             items={warnings.map((w, i) => planWarningView(w, plan, select, i))}
             empty={m.warnings.none}
+            outdated={outdated ? applyMessages.checksOutdated : undefined}
           />
         </section>
       </div>
@@ -189,6 +200,7 @@ function NameField({
     setSeen(name)
     setDraft(name)
   }
+  const applyOnEnter = useApplyOnEnter()
   const commit = () => {
     const v = draft.trim()
     if (v.length > 0 && v !== name) onCommit(v)
@@ -202,8 +214,10 @@ function NameField({
         onBlur={commit}
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
+            // commit and apply (apply.md#field-rule)
             e.preventDefault()
             commit()
+            applyOnEnter?.()
           } else if (e.key === 'Escape') {
             e.preventDefault()
             setDraft(name)

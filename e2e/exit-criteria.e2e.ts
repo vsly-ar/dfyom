@@ -29,7 +29,10 @@ async function stubFileDialogs(
   }, files)
 }
 
-/** Types a value into a field and commits it (Enter = one command), then leaves the field. */
+/**
+ * Types a value into a field and commits it with Enter (one command, then Apply: v0.2 field rule,
+ * docs/architecture/apply.md#ui), then leaves the field.
+ */
 async function setField(scope: Locator, label: string, value: string): Promise<void> {
   // the input only: a group may share its label ("Depth")
   const field = scope.getByLabel(label, { exact: true }).and(scope.locator('input'))
@@ -132,7 +135,16 @@ test('exit criteria through the UI: design, plan, export, run, save, close and r
   await addFromMenu(page, 'Add profile')
   await expect(inspector.getByRole('heading', { name: 'Profile 1' })).toBeVisible()
   await setField(inspector, 'Tab count', '4')
-  await setField(inspector, 'Tab thickness', '3')
+  // Tab commits only: the change waits for Apply in the toolbar (apply.md § Apply button)
+  const thickness = inspector
+    .getByLabel('Tab thickness', { exact: true })
+    .and(inspector.locator('input'))
+  await thickness.fill('3')
+  await thickness.press('Tab')
+  const apply = page.getByRole('button', { name: 'Apply 1 change', exact: true })
+  await expect(apply).toBeVisible()
+  await apply.click()
+  await expect(page.getByRole('button', { name: /^Apply \d+ change/ })).toHaveCount(0)
 
   await expect(designRows(page)).toHaveCount(4)
   await expect(status.getByText('Part up to date')).toBeAttached({ timeout: 30_000 })

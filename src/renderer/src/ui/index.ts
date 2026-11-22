@@ -1,5 +1,12 @@
 // The renderer's component library: screens import from here, never from Radix directly.
 // Doc: docs/conventions/ui.md#components
+export {
+  ApplyButton,
+  LIVE_DELAY_MS,
+  type ApplyButtonProps,
+  type ApplyButtonState,
+} from './ApplyButton/ApplyButton'
+export { ApplyScope, MODAL_ATTR, modalDialogOpen, useApplyOnEnter } from './ApplyButton/ApplyScope'
 export { Button, type ButtonProps, type ButtonSize, type ButtonVariant } from './Button/Button'
 export { Checkbox, type CheckboxProps, type CheckedState } from './Checkbox/Checkbox'
 export { ConfirmDialog, type ConfirmDialogProps } from './ConfirmDialog/ConfirmDialog'

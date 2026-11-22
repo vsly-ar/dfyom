@@ -1,11 +1,12 @@
 // Run scene layer (task 3.12; plan mode's toolpaths too, 3.7): the toolpath played back (feeds
-// `--vp-feed`, rapids `--vp-rapid`, plunges `--vp-plunge`, the done part dimmed towards the background), the tool marker at the work position (`wpos`)
+// `--vp-feed`, rapids `--vp-rapid`, plunges `--vp-plunge`, the done part and outdated toolpaths
+// dimmed towards the background), the tool marker at the work position (`wpos`)
 // and the work zero marker at the WCS origin (= the part origin). Props only.
 // Doc: docs/conventions/ui.md#viewport-task-35 (run scene), #run-mode-safety-ui
 import { useThree } from '@react-three/fiber'
 import { useEffect, useLayoutEffect, useMemo } from 'react'
 import { BufferAttribute, BufferGeometry, Color, SRGBColorSpace } from 'three'
-import { mix, toLinear, type Palette, type Rgb } from './colours'
+import { MIX, mix, toLinear, type Palette, type Rgb } from './colours'
 import { SEGMENT, type ToolpathLines } from './toolpath-lines'
 
 /** What the run scene shows (`Viewport` prop `run`). */
@@ -14,30 +15,46 @@ export interface RunScene {
   readonly lines: ToolpathLines | null
   /** Segments before this index are done (dimmed). */
   readonly done: number
+  /**
+   * Per toolpath (as `lines.starts`): outdated (stale or waiting for Apply), drawn dimmed towards
+   * the background (plan scene, task P3; apply.md#stale-derived-results). Absent: none.
+   */
+  readonly outdated?: readonly boolean[] | undefined
   /** Tool tip in work coordinates (mm), `null` without a connection. */
   readonly tool: readonly [number, number, number] | null
 }
 
 /** How far done segments fade towards the background. */
 export const DONE_DIM = 0.7
+/** How far outdated toolpaths fade towards the background (`MIX.outdated`). */
+export const OUTDATED_DIM = MIX.outdated
 
 const noRaycast = (): void => {}
 
 const colour = (c: Rgb) => new Color().setRGB(c[0], c[1], c[2], SRGBColorSpace)
 
-/** Linear vertex colours of the segments (2 vertices each), done ones dimmed. Pure. */
+/** Linear vertex colours of the segments (2 vertices each), done and outdated ones dimmed. Pure. */
 export function segmentColours(
   lines: ToolpathLines,
   done: number,
   palette: Pick<Palette, 'feed' | 'rapid' | 'plunge' | 'background'>,
   out: Float32Array = new Float32Array(lines.segments * 6),
+  outdated?: readonly boolean[],
 ): Float32Array {
   const base = [palette.feed, palette.rapid, palette.plunge] as const
   const live = base.map(toLinear)
   const dim = base.map((c) => toLinear(mix(c, palette.background, DONE_DIM)))
+  const old = base.map((c) => toLinear(mix(c, palette.background, OUTDATED_DIM)))
+  let path = -1
+  let next = 0
   for (let i = 0; i < lines.segments; i++) {
+    while (next < lines.starts.length && (lines.starts[next] ?? Infinity) <= i) {
+      path = next
+      next++
+    }
     const k = lines.kind[i] ?? SEGMENT.feed
-    const v = (i < done ? dim : live)[k] ?? live[SEGMENT.feed]!
+    const set = i < done ? dim : outdated?.[path] === true ? old : live
+    const v = set[k] ?? live[SEGMENT.feed]!
     out.set(v, 6 * i)
     out.set(v, 6 * i + 3)
   }
@@ -46,7 +63,7 @@ export function segmentColours(
 
 export function RunLayer({ run, palette }: { run: RunScene; palette: Palette }): React.JSX.Element {
   const invalidate = useThree((s) => s.invalidate)
-  const { lines, done, tool } = run
+  const { lines, done, tool, outdated } = run
   const geometry = useMemo(() => {
     if (lines === null || lines.segments === 0) return null
     const g = new BufferGeometry()
@@ -59,10 +76,10 @@ export function RunLayer({ run, palette }: { run: RunScene; palette: Palette }):
   useLayoutEffect(() => {
     if (geometry === null || lines === null) return
     const attr = geometry.getAttribute('color') as BufferAttribute
-    segmentColours(lines, done, palette, attr.array as Float32Array)
+    segmentColours(lines, done, palette, attr.array as Float32Array, outdated)
     attr.needsUpdate = true
     invalidate()
-  }, [geometry, lines, done, palette, invalidate])
+  }, [geometry, lines, done, outdated, palette, invalidate])
   useEffect(() => invalidate(), [tool, invalidate])
 
   const toolColour = useMemo(() => colour(palette.tool), [palette])

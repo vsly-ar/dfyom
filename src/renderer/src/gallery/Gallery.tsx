@@ -11,6 +11,8 @@ import { Rational } from '../../../core/quantity/rational'
 import type { QuantityKind, UnitId } from '../../../core/quantity/units'
 import { None, Some, type Option } from '../../../shared/result'
 import {
+  ApplyButton,
+  type ApplyButtonState,
   Button,
   Checkbox,
   ConfirmDialog,
@@ -375,6 +377,36 @@ function ShellParts(): React.JSX.Element {
               <PanelHeader title="Properties" />
             </Panel>
           </PanelGroup>
+        </div>
+      </Row>
+      <Row label="Apply · pending, applying (after 300 ms), failed, applied by agent">
+        <div className={styles['stack']}>
+          {(
+            [
+              { kind: 'pending', count: 3 },
+              { kind: 'applying', count: 1, progress: 0.4 },
+              {
+                kind: 'failed',
+                count: 2,
+                error: {
+                  code: 'internal.unexpected',
+                  message: 'hook threw',
+                  issues: [],
+                  frames: [],
+                },
+              },
+              { kind: 'appliedBy', by: 'agent' },
+            ] satisfies ApplyButtonState[]
+          ).map((state) => (
+            <ApplyButton
+              key={state.kind}
+              state={state}
+              list="Pocket 1: depth, corner radius · Drilling 2 added"
+              shortcut="⌘↵"
+              keyShortcuts="Meta+Enter"
+              onApply={noop}
+            />
+          ))}
         </div>
       </Row>
       <Row label="Jobs · status bar indicator (after 300 ms) and the job list">

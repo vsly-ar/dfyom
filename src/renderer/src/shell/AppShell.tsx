@@ -1,5 +1,5 @@
 // The window layout (task 3.3b): main toolbar (undo/redo and mode tools · mode switcher in the
-// centre · panel toggles and settings), navigator | viewport | inspector in resizable, collapsible
+// centre · Apply (P3), machine group, panel toggles and settings), navigator | viewport | inspector in resizable, collapsible
 // panels, status bar. Below 1280 px the inspector overlays the viewport instead of shrinking it.
 // Landmarks: banner, navigation (modes, navigator), main (viewport), complementary (inspector),
 // contentinfo (status bar); F6 cycles them. Doc: docs/conventions/ui.md#app-shell
@@ -10,6 +10,7 @@ import { shellMessages as m } from '../messages/shell'
 import { ModeInspector, ModeNavigator } from '../modes/ModePanels'
 import { MachineToolbar } from '../modes/run'
 import {
+  ApplyScope,
   ModeSwitcher,
   Panel,
   PanelGroup,
@@ -21,6 +22,7 @@ import {
   usePanelRef,
   type PanelGroupLayout,
 } from '../ui'
+import { ApplyControl } from './ApplyControl'
 import styles from './AppShell.module.css'
 import { CloseProjectDialog } from './CloseProjectDialog'
 import { useHistorySteps, useMediaQuery, useWindowTitle } from './hooks'
@@ -42,7 +44,7 @@ const LAYOUT_SAVE_MS = 400
 const region = { [REGION_ATTR]: '', tabIndex: -1 }
 
 export function AppShell(): React.JSX.Element {
-  const { settings } = useShell()
+  const { settings, pending } = useShell()
   const replica = useReplica()
   const doc = replica.status === 'open' ? replica.doc : undefined
   const mode = useUi((s) => s.mode)
@@ -90,6 +92,8 @@ export function AppShell(): React.JSX.Element {
   }
 
   const onMode = (next: AppMode) => setMode(next)
+  // Enter in a field, Cmd/Ctrl+Enter, Edit → Apply changes and the button (apply.md#ui)
+  const apply = useCallback(() => void pending.apply(), [pending])
   // native menu items and the file shortcuts (task 3.6)
   useAppCommands({
     onMode: setMode,
@@ -97,125 +101,132 @@ export function AppShell(): React.JSX.Element {
     onRedo: () => history.step('redo'),
     onToggleNavigator: () => toggle(navigator, navOpen),
     onToggleInspector: () => (wide ? toggle(inspector, inspectorOpen) : setOverlayOpen((o) => !o)),
+    onApply: apply,
   })
   const inspectorShown = wide ? inspectorOpen : overlayOpen
   const inspectorContent = <ModeInspector mode={mode} doc={doc} />
 
   return (
-    <div className={styles['shell']}>
-      <header className={styles['toolbar']} aria-label={m.regions.toolbar} {...region}>
-        <div className={styles['toolbarStart']}>
-          <Toolbar label="Edit">
-            <UndoRedo
-              undo={history.undo}
-              redo={history.redo}
-              onUndo={() => history.step('undo')}
-              onRedo={() => history.step('redo')}
-              undoShortcut={shortcutLabel('Z')}
-              redoShortcut={shortcutLabel('Z', { shift: true })}
-            />
-          </Toolbar>
-        </div>
-        <nav aria-label="Modes" className={styles['modes']}>
-          <ModeSwitcher value={mode} onValueChange={onMode} />
-        </nav>
-        <div className={styles['toolbarEnd']}>
-          <MachineToolbar />
-          <Toolbar label="Window">
-            <ToolbarButton
-              label={m.toggles.navigator}
-              icon={<PanelLeft aria-hidden="true" />}
-              pressed={navOpen}
-              onClick={() => toggle(navigator, navOpen)}
-            />
-            <ToolbarButton
-              label={m.toggles.inspector}
-              icon={<PanelRight aria-hidden="true" />}
-              pressed={inspectorShown}
-              onClick={() => (wide ? toggle(inspector, inspectorOpen) : setOverlayOpen((o) => !o))}
-            />
-            <ToolbarSeparator />
-            <ToolbarButton
-              label={m.settings}
-              icon={<Settings aria-hidden="true" />}
-              onClick={() => openSettings(true)}
-            />
-          </Toolbar>
-        </div>
-      </header>
+    <ApplyScope onApply={apply}>
+      <div className={styles['shell']}>
+        <header className={styles['toolbar']} aria-label={m.regions.toolbar} {...region}>
+          <div className={styles['toolbarStart']}>
+            <Toolbar label="Edit">
+              <UndoRedo
+                undo={history.undo}
+                redo={history.redo}
+                onUndo={() => history.step('undo')}
+                onRedo={() => history.step('redo')}
+                undoShortcut={shortcutLabel('Z')}
+                redoShortcut={shortcutLabel('Z', { shift: true })}
+              />
+            </Toolbar>
+          </div>
+          <nav aria-label="Modes" className={styles['modes']}>
+            <ModeSwitcher value={mode} onValueChange={onMode} />
+          </nav>
+          <div className={styles['toolbarEnd']}>
+            {/* first in the end column: appearing never moves the controls to its right */}
+            <ApplyControl />
+            <MachineToolbar />
+            <Toolbar label="Window">
+              <ToolbarButton
+                label={m.toggles.navigator}
+                icon={<PanelLeft aria-hidden="true" />}
+                pressed={navOpen}
+                onClick={() => toggle(navigator, navOpen)}
+              />
+              <ToolbarButton
+                label={m.toggles.inspector}
+                icon={<PanelRight aria-hidden="true" />}
+                pressed={inspectorShown}
+                onClick={() =>
+                  wide ? toggle(inspector, inspectorOpen) : setOverlayOpen((o) => !o)
+                }
+              />
+              <ToolbarSeparator />
+              <ToolbarButton
+                label={m.settings}
+                icon={<Settings aria-hidden="true" />}
+                onClick={() => openSettings(true)}
+              />
+            </Toolbar>
+          </div>
+        </header>
 
-      <div className={styles['workspace']}>
-        {/* one group across widths, so the viewport is never remounted (no WebGL churn) */}
-        <PanelGroup id="shell" defaultLayout={layouts[groupId]} onLayoutChanged={onLayoutChanged}>
-          <Panel
-            id="navigator"
-            defaultSize="16rem"
-            minSize="12rem"
-            maxSize="40%"
-            collapsible
-            fixedOnResize
-            panelRef={navigator}
-            onCollapsedChange={(c) => setNavOpen(!c)}
-          >
-            <nav
-              aria-label={m.regions.navigator}
-              className={styles['side']}
-              {...region}
-              {...(navOpen ? {} : { 'data-collapsed': '' })}
+        <div className={styles['workspace']}>
+          {/* one group across widths, so the viewport is never remounted (no WebGL churn) */}
+          <PanelGroup id="shell" defaultLayout={layouts[groupId]} onLayoutChanged={onLayoutChanged}>
+            <Panel
+              id="navigator"
+              defaultSize="16rem"
+              minSize="12rem"
+              maxSize="40%"
+              collapsible
+              fixedOnResize
+              panelRef={navigator}
+              onCollapsedChange={(c) => setNavOpen(!c)}
             >
-              <ModeNavigator mode={mode} doc={doc} onMode={onMode} />
-            </nav>
-          </Panel>
-          <PanelResizeHandle label={m.resize.navigator} />
-          <Panel id="viewport" minSize="20rem">
-            <main aria-label={m.regions.viewport} className={styles['viewport']} {...region}>
-              <ShellViewport mode={mode} />
-            </main>
-          </Panel>
-          {wide ? (
-            <>
-              <PanelResizeHandle label={m.resize.inspector} />
-              <Panel
-                id="inspector"
-                defaultSize="20rem"
-                minSize="15rem"
-                maxSize="45%"
-                collapsible
-                fixedOnResize
-                panelRef={inspector}
-                onCollapsedChange={(c) => setInspectorOpen(!c)}
+              <nav
+                aria-label={m.regions.navigator}
+                className={styles['side']}
+                {...region}
+                {...(navOpen ? {} : { 'data-collapsed': '' })}
               >
-                <aside
-                  aria-label={m.regions.inspector}
-                  className={styles['side']}
-                  {...region}
-                  {...(inspectorOpen ? {} : { 'data-collapsed': '' })}
+                <ModeNavigator mode={mode} doc={doc} onMode={onMode} />
+              </nav>
+            </Panel>
+            <PanelResizeHandle label={m.resize.navigator} />
+            <Panel id="viewport" minSize="20rem">
+              <main aria-label={m.regions.viewport} className={styles['viewport']} {...region}>
+                <ShellViewport mode={mode} />
+              </main>
+            </Panel>
+            {wide ? (
+              <>
+                <PanelResizeHandle label={m.resize.inspector} />
+                <Panel
+                  id="inspector"
+                  defaultSize="20rem"
+                  minSize="15rem"
+                  maxSize="45%"
+                  collapsible
+                  fixedOnResize
+                  panelRef={inspector}
+                  onCollapsedChange={(c) => setInspectorOpen(!c)}
                 >
-                  {inspectorContent}
-                </aside>
-              </Panel>
-            </>
+                  <aside
+                    aria-label={m.regions.inspector}
+                    className={styles['side']}
+                    {...region}
+                    {...(inspectorOpen ? {} : { 'data-collapsed': '' })}
+                  >
+                    {inspectorContent}
+                  </aside>
+                </Panel>
+              </>
+            ) : null}
+          </PanelGroup>
+          {!wide && overlayOpen ? (
+            <aside
+              aria-label={m.regions.inspector}
+              className={[styles['side'], styles['overlay']].join(' ')}
+              {...region}
+            >
+              {inspectorContent}
+            </aside>
           ) : null}
-        </PanelGroup>
-        {!wide && overlayOpen ? (
-          <aside
-            aria-label={m.regions.inspector}
-            className={[styles['side'], styles['overlay']].join(' ')}
-            {...region}
-          >
-            {inspectorContent}
-          </aside>
-        ) : null}
+        </div>
+
+        <footer className={styles['status']} aria-label={m.regions.statusBar} {...region}>
+          <StatusBar />
+        </footer>
+
+        <SettingsDialog />
+        <CloseProjectDialog />
+        <ProjectDialogs />
+        <ShortcutsDialog />
       </div>
-
-      <footer className={styles['status']} aria-label={m.regions.statusBar} {...region}>
-        <StatusBar />
-      </footer>
-
-      <SettingsDialog />
-      <CloseProjectDialog />
-      <ProjectDialogs />
-      <ShortcutsDialog />
-    </div>
+    </ApplyScope>
   )
 }

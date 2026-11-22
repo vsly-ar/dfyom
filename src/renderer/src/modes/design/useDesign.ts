@@ -1,14 +1,20 @@
 // Design mode hooks over the shell: the part from the replica, its warnings (`design.warning.list`,
-// re-read after each revision and evaluation change, shared by navigator, inspector, status bar
-// and viewport), its evaluation (mesh push) and the selection. Doc: docs/modes/design.md#dfm-checks,
-// docs/conventions/ui.md#evaluation-status-pending-outdated-failed
+// re-read after each revision, evaluation and pending change, shared by navigator, inspector,
+// status bar and viewport), its evaluation (mesh push) and the selection.
+// Doc: docs/modes/design.md#dfm-checks, docs/conventions/ui.md#evaluation-status-pending-outdated-failed
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react'
 import type { EvaluationStatus } from '../../../../core/design/evaluation'
 import type { DfmWarning } from '../../../../core/geometry/model'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import type { PreloadApi } from '../../../../shared/preload-api'
 import { useCall } from '../../shell/hooks'
-import { useReplica, useShell, usePartEvaluation, useUi } from '../../shell/ShellContext'
+import {
+  usePending,
+  useReplica,
+  useShell,
+  usePartEvaluation,
+  useUi,
+} from '../../shell/ShellContext'
 import type { PartEvaluationEntry } from '../../state/evaluations'
 import { designPart, type DesignPart } from './model'
 
@@ -72,10 +78,12 @@ export function useDesignWarnings(part: DesignPart | undefined): DesignWarnings 
   const value = useSyncExternalStore(store.subscribe, store.get)
   const key = replica.status === 'open' ? replica.key : ''
   const revision = replica.status === 'open' ? replica.revision : -1
+  // `pendingApply` flags change with the pending set, also by an Apply without a new revision
+  const pending = usePending().version
   const tag =
     part === undefined
       ? undefined
-      : `${key}:${part.dto.id}:${revision}:${evaluation?.status ?? '-'}:${evaluation?.inputHash ?? ''}`
+      : `${key}:${part.dto.id}:${revision}:${pending}:${evaluation?.status ?? '-'}:${evaluation?.inputHash ?? ''}`
   useEffect(() => {
     if (tag !== undefined && part !== undefined) store.want(tag, part.dto.id)
   }, [store, tag, part])

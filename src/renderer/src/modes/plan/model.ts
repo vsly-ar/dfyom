@@ -181,6 +181,8 @@ export interface PlanOperationView {
 
 /** `plan.stale.list`. */
 export interface PlanStale {
+  /** Its inputs have changes not applied yet: the plan updates on Apply (P2). */
+  readonly pendingApply?: boolean
   readonly partRemoved: boolean
   readonly partChanged: readonly string[]
   readonly rebuildBlocked: string | null
@@ -224,6 +226,8 @@ export function rowStale(
 export interface ToolpathEntry {
   readonly toolpath: Toolpath | null
   readonly stale: boolean
+  /** The plan's inputs have changes not applied yet (P2): outdated until Apply. */
+  readonly pendingApply?: boolean
 }
 
 export function toolpathState(
@@ -232,7 +236,7 @@ export function toolpathState(
 ): ToolpathState {
   if (failure !== undefined) return 'failed'
   if (entry === undefined || entry.toolpath === null) return 'none'
-  return entry.stale ? 'stale' : 'ready'
+  return entry.stale || entry.pendingApply === true ? 'stale' : 'ready'
 }
 
 /** Error findings block generation and export (plan-v0.1.md: `plan.check`, `plan.order`). */

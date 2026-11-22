@@ -55,6 +55,9 @@ export function menuTemplate(
         item('Undo', 'edit.undo', 'CmdOrCtrl+Z'),
         item('Redo', 'edit.redo', mac ? 'CmdOrCtrl+Shift+Z' : 'Ctrl+Y'),
         { type: 'separator' },
+        // the window applies the project's pending changes (docs/architecture/apply.md#keyboard)
+        item('Apply changes', 'project.apply', 'CmdOrCtrl+Enter'),
+        { type: 'separator' },
         { role: 'cut' },
         { role: 'copy' },
         { role: 'paste' },

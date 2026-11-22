@@ -7,7 +7,9 @@
 // (↑/↓, adjust popover), reference autocomplete and the pick button hook (pick mode itself belongs
 // to the viewport) live here too. The adjust popover is a live gesture: each step commits with the
 // session's gesture id (one undo step per session), Escape cancels it, a click outside keeps it.
-// Doc: docs/conventions/ui.md#quantity-and-expression-input, #field, #selection-and-picking;
+// v0.2 field rule (task P3): Enter commits and applies (the `ApplyScope`'s Apply), blur and Tab
+// commit only. Doc: docs/conventions/ui.md#quantity-and-expression-input, #field,
+// #selection-and-picking; docs/architecture/apply.md#field-rule;
 // grammar and errors: docs/architecture/quantities.md
 import { Check, Crosshair } from 'lucide-react'
 import {
@@ -27,6 +29,7 @@ import { Rational } from '../../../../core/quantity/rational'
 import type { QuantityKind, UnitId } from '../../../../core/quantity/units'
 import type { AppResult } from '../../../../shared/result'
 import { quantityText } from '../../messages/quantity'
+import { useApplyOnEnter } from '../ApplyButton/ApplyScope'
 import { Button } from '../Button/Button'
 import { Field, type FieldControlProps, type FieldMessage, type FieldProps } from '../Field/Field'
 import { FieldAdjustButton, FieldInput } from '../Field/FieldInput'
@@ -189,6 +192,7 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
     className,
   } = props
   const ctx: ParseContext = useMemo(() => ({ kind, defaultUnit }), [kind, defaultUnit])
+  const applyOnEnter = useApplyOnEnter()
   const prec = precision ?? defaultPrecision(defaultUnit)
   const stored = value?.source ?? ''
   const listId = `${useId()}-references`
@@ -473,8 +477,10 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
       return
     }
     if (e.key === 'Enter') {
+      // Enter (and Cmd/Ctrl+Enter) = commit and apply; an invalid value applies nothing
+      // (apply.md#field-rule); blur and Tab commit only
       e.preventDefault()
-      commit()
+      if (commit()) applyOnEnter?.()
       return
     }
     if (e.key === 'Escape') {

@@ -41,7 +41,7 @@ describe('dfm messages', () => {
       ),
     ).toBe('1')
     expect(dfmMessages.suggestionSource(w({ parameter: 'shape' }), 'mm')).toBeUndefined()
-    expect(dfmMessages.apply('atLeast', '3.18 mm')).toBe('Apply ≥ 3.18 mm')
+    expect(dfmMessages.useValue('atLeast', '3.18 mm')).toBe('Use ≥ 3.18 mm')
     expect(dfmMessages.tier(w({ severity: 'info' }))).toBe('soft')
     expect(lengthSource(25.4, 'inch')).toBe('1"')
   })

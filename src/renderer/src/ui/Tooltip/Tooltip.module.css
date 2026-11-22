@@ -21,6 +21,14 @@
   animation: fade var(--motion-fast) var(--ease-exit) forwards;
 }
 
+/* rich: several lines (title with its shortcut, explanation, list), e.g. the Apply button */
+.content[data-rich] {
+  display: block;
+  max-width: 22rem;
+  padding: 8px 10px;
+  font-weight: var(--weight-regular);
+}
+
 .kbd {
   font: var(--text-xs) var(--font-mono);
   opacity: 0.7;
