@@ -24,6 +24,7 @@ describe('app state store', () => {
     const store = createAppStateStore({ appData: tmp.dir, initial: EMPTY_APP_STATE, log })
     store.setWindow({ ...WINDOW, maximized: false })
     store.setWindow(WINDOW)
+    store.setLibraryWindow({ ...WINDOW, maximized: false })
     store.rememberDialogFolder('project', '/work/parts')
     store.rememberDialogFolder('reference-import', '/work/models')
     expect(store.dialogFolder('project')).toBe('/work/parts')
@@ -31,6 +32,7 @@ describe('app state store', () => {
     await store.flush()
     expect(await loadAppState(tmp.dir, log)).toEqual({
       window: WINDOW,
+      libraryWindow: { ...WINDOW, maximized: false },
       dialogFolders: { project: '/work/parts', 'reference-import': '/work/models' },
     })
   })

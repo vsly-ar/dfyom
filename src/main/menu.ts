@@ -1,4 +1,5 @@
-// The native application menu (ui.md decision 12): File, Edit, View, Help with accelerators. Items
+// The native application menu (ui.md decision 12): File, Edit, View, Window (with Library), Help
+// with accelerators. Items
 // that act on a project or the shell are sent to the focused window (`IPC.menuAction`), which
 // runs them like the matching button or key, so menu, toolbar and shortcuts dispatch the same
 // commands. Text editing (cut, copy, paste, select all) and window items use Electron's roles.
@@ -10,19 +11,42 @@ import { IPC, type MenuAction } from '../shared/preload-api'
 /** Menu actions that open an empty window when there is none (its start panel offers both). */
 const WITHOUT_WINDOW: readonly MenuAction[] = ['project.new', 'project.open']
 
-/** Sends `action` to the focused (else first) window; without one, New / Open call `noWindow`. */
-export function sendMenuAction(action: MenuAction, noWindow: () => void): void {
-  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+/** What the menu needs from the app (src/main/index.ts). */
+export interface MenuHooks {
+  /** New / Open chosen while no window is open: an empty window. */
+  readonly noWindow: () => void
+  /** Window → Library (docs/conventions/ui-library-window.md, L2). */
+  readonly openLibrary: () => void
+  /**
+   * The window that runs `action`: the focused one, except that the Library window passes the
+   * items it does not handle to a project window. Default: the focused, else the first window.
+   */
+  readonly target?: (action: MenuAction) => BrowserWindow | undefined
+}
+
+const focusedOrFirst = (): BrowserWindow | undefined =>
+  BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+
+/** Sends `action` to its target window; without one, New / Open call `noWindow`. */
+export function sendMenuAction(
+  action: MenuAction,
+  noWindow: () => void,
+  target: (action: MenuAction) => BrowserWindow | undefined = focusedOrFirst,
+): void {
+  const win = target(action)
   if (win !== undefined && !win.isDestroyed()) win.webContents.send(IPC.menuAction, action)
   else if (WITHOUT_WINDOW.includes(action)) noWindow()
 }
+
+const NO_HOOKS: MenuHooks = { noWindow: () => {}, openLibrary: () => {} }
 
 /** The menu template; `dev` adds reload and the developer tools. */
 export function menuTemplate(
   platform: NodeJS.Platform,
   dev: boolean,
-  noWindow: () => void = () => {},
+  hooks: MenuHooks = NO_HOOKS,
 ): MenuItemConstructorOptions[] {
+  const noWindow = hooks.noWindow
   const mac = platform === 'darwin'
   const item = (
     label: string,
@@ -30,7 +54,7 @@ export function menuTemplate(
     accelerator?: string,
   ): MenuItemConstructorOptions => ({
     label,
-    click: () => sendMenuAction(action, noWindow),
+    click: () => sendMenuAction(action, noWindow, hooks.target),
     ...(accelerator === undefined ? {} : { accelerator }),
   })
   const template: MenuItemConstructorOptions[] = []
@@ -88,7 +112,19 @@ export function menuTemplate(
           : []),
       ],
     },
-    { role: 'windowMenu' },
+    {
+      role: 'windowMenu',
+      submenu: [
+        { role: 'minimize' },
+        ...(mac ? ([{ role: 'zoom' }] satisfies MenuItemConstructorOptions[]) : []),
+        { type: 'separator' },
+        // the one Library window, from every window and without a project (L2)
+        { label: 'Library', accelerator: 'CmdOrCtrl+Shift+L', click: () => hooks.openLibrary() },
+        ...(mac
+          ? ([{ type: 'separator' }, { role: 'front' }] satisfies MenuItemConstructorOptions[])
+          : [{ role: 'close' } satisfies MenuItemConstructorOptions]),
+      ],
+    },
     {
       role: 'help',
       submenu: [item('Keyboard shortcuts', 'help.shortcuts')],
@@ -97,9 +133,8 @@ export function menuTemplate(
   return template
 }
 
-/** `noWindow` opens an empty window (New / Open chosen while no window is open). */
-export function installAppMenu(noWindow: () => void): void {
+export function installAppMenu(hooks: MenuHooks): void {
   Menu.setApplicationMenu(
-    Menu.buildFromTemplate(menuTemplate(process.platform, !app.isPackaged, noWindow)),
+    Menu.buildFromTemplate(menuTemplate(process.platform, !app.isPackaged, hooks)),
   )
 }

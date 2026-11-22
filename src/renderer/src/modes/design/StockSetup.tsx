@@ -9,7 +9,10 @@ import type { StockValuesDTO } from '../../../../core/library/stock.dto'
 import type { UnitSystem } from '../../../../core/project/document'
 import { Quantity } from '../../../../core/quantity/quantity'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
+import { LibraryLink } from '../../library/LibraryLink'
 import { designMessages } from '../../messages/design'
+import { libraryMessages } from '../../messages/library'
+import { useLibraryVersion } from '../../shell/ShellContext'
 import {
   ApplyScope,
   Button,
@@ -52,6 +55,8 @@ export function StockSetup({ units }: { units: UnitSystem }): React.JSX.Element 
   const [error, setError] = useState<AppErrorData | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const titleId = useId()
+  // re-read when the library changes (the Library window, an agent)
+  const libraryVersion = useLibraryVersion()
 
   useEffect(() => {
     let live = true
@@ -66,7 +71,7 @@ export function StockSetup({ units }: { units: UnitSystem }): React.JSX.Element 
     return () => {
       live = false
     }
-  }, [call])
+  }, [call, libraryVersion])
 
   const create = async () => {
     setBusy(true)
@@ -142,13 +147,21 @@ export function StockSetup({ units }: { units: UnitSystem }): React.JSX.Element 
           />
         </div>
         {source === 'library' ? (
-          <Field label={m.libraryItem}>
-            <Select
-              options={library.map((i) => ({ value: i.id, label: i.name }))}
-              value={itemId ?? ''}
-              onValueChange={setItemId}
-            />
-          </Field>
+          <>
+            <Field label={m.libraryItem}>
+              <Select
+                options={library.map((i) => ({ value: i.id, label: i.name }))}
+                value={itemId ?? ''}
+                onValueChange={setItemId}
+              />
+            </Field>
+            <div>
+              <LibraryLink
+                target={{ kind: 'stock', ...(itemId === undefined ? {} : { itemId }) }}
+                label={libraryMessages.links.open}
+              />
+            </div>
+          </>
         ) : (
           <>
             {sizeField(0, m.length, 'length')}
@@ -166,8 +179,10 @@ export function StockSetup({ units }: { units: UnitSystem }): React.JSX.Element 
             </Field>
           </>
         )}
-        {source === 'library' && library.length === 0 ? (
-          <p className={styles['muted']}>{m.noLibrary}</p>
+        {source !== 'library' ? (
+          <div>
+            <LibraryLink target={{ kind: 'stock' }} />
+          </div>
         ) : null}
         {error !== undefined ? <ErrorMessage error={error} /> : null}
         <Button

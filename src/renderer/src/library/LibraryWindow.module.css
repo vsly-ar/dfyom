@@ -1,0 +1,597 @@
+/* The Library window: toolbar, tabs, item list (grid) and item editor, the tool drawing and the
+   presets table. Neutral chrome, amber only for the primary action, the selected row's edge and
+   the focused dimension. Doc: docs/conventions/ui-library-window.md#layout */
+.window {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg-chrome);
+  color: var(--text);
+}
+
+/* ── toolbar ─────────────────────────────────────────────────────────────────────────── */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-1) var(--space-3);
+  min-height: calc(var(--control-md) + var(--space-2) * 2);
+}
+
+.search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: min(320px, 36vw);
+  height: var(--control-md);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  background: var(--bg-field);
+  color: var(--text-faint);
+  transition:
+    border-color var(--motion-fast),
+    box-shadow var(--motion-base);
+}
+
+.search:focus-within {
+  border-color: var(--focus);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 22%, transparent);
+}
+
+.search svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  flex: none;
+}
+
+.search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-md);
+}
+
+.search input:focus-visible {
+  outline: none;
+}
+
+.spacer {
+  flex: 1 1 auto;
+}
+
+.project {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.machine {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.machine:empty {
+  display: none;
+}
+
+/* ── tabs ────────────────────────────────────────────────────────────────────────────── */
+.tabsNav {
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.tabs {
+  display: flex;
+  gap: 2px;
+}
+
+.tab {
+  position: relative;
+  height: var(--control-md);
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  transition:
+    color var(--motion-fast),
+    background var(--motion-fast);
+}
+
+.tab:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.tab[aria-selected='true'] {
+  color: var(--text);
+}
+
+.tab[aria-selected='true']::after {
+  content: '';
+  position: absolute;
+  left: var(--space-2);
+  right: var(--space-2);
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 0 0.5px var(--accent-border);
+}
+
+.tab:focus-visible {
+  outline-offset: -2px;
+}
+
+/* ── main: list | editor ─────────────────────────────────────────────────────────────── */
+.main {
+  min-height: 0;
+  display: flex;
+}
+
+.panel {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(340px, 1fr) minmax(400px, 1.15fr);
+}
+
+.listRegion,
+.editorRegion {
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.listRegion {
+  border-right: 1px solid var(--border);
+  background: var(--bg-app);
+}
+
+.editorRegion {
+  background: var(--bg-app);
+}
+
+.listRegion:focus-visible,
+.editorRegion:focus-visible {
+  outline-offset: -2px;
+}
+
+/* ── item list ───────────────────────────────────────────────────────────────────────── */
+.listPane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.filters {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3) 0;
+}
+
+.typeFilter {
+  width: 180px;
+}
+
+.grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-2) 0;
+  font-size: var(--text-sm);
+}
+
+.headRow,
+.row {
+  display: grid;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+}
+
+.headRow[data-kind='tool'],
+.row[data-kind='tool'] {
+  grid-template-columns: minmax(140px, 2.4fr) repeat(4, minmax(48px, 0.8fr)) minmax(44px, 0.6fr);
+}
+
+.headRow[data-kind='machine'],
+.row[data-kind='machine'] {
+  grid-template-columns: minmax(140px, 2fr) minmax(60px, 0.7fr) minmax(110px, 1.4fr) minmax(
+      90px,
+      1fr
+    );
+}
+
+.headRow[data-kind='stock'],
+.row[data-kind='stock'] {
+  grid-template-columns: minmax(140px, 2fr) minmax(50px, 0.6fr) minmax(120px, 1.5fr) minmax(
+      80px,
+      1fr
+    );
+}
+
+.headRow {
+  position: sticky;
+  top: calc(var(--space-2) * -1);
+  z-index: 1;
+  height: var(--control-md);
+  background: var(--bg-app);
+  border-bottom: 1px solid var(--border);
+}
+
+.headCell {
+  min-width: 0;
+  display: flex;
+}
+
+.headCell[data-numeric] {
+  justify-content: flex-end;
+}
+
+.sortButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.sortButton:hover {
+  color: var(--text);
+}
+
+.sortButton svg {
+  width: 12px;
+  height: 12px;
+  flex: none;
+}
+
+.body {
+  display: grid;
+}
+
+.row {
+  position: relative;
+  min-height: 34px;
+  cursor: default;
+  border-bottom: 1px solid color-mix(in oklab, var(--border), transparent 50%);
+  transition: background var(--motion-fast);
+}
+
+.row:hover {
+  background: var(--bg-hover);
+}
+
+.row[aria-selected='true'] {
+  background: var(--bg-active);
+}
+
+.row[aria-selected='true']::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.row:focus-visible {
+  outline-offset: -2px;
+}
+
+.row[data-unreadable] {
+  color: var(--text-muted);
+  grid-template-columns: minmax(140px, 1fr) minmax(0, 2fr);
+  padding-block: var(--space-1);
+}
+
+.nameCell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: var(--weight-medium);
+}
+
+.typeIcon {
+  display: inline-flex;
+  color: var(--text-muted);
+  flex: none;
+}
+
+.typeIcon svg {
+  width: var(--icon-md);
+  height: var(--icon-md);
+}
+
+.cell {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+.cell[data-numeric] {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.errorCell {
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  color: var(--danger-text);
+}
+
+.emptyList {
+  padding: var(--space-4) var(--space-3);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.emptyList p {
+  margin: 0;
+}
+
+.status {
+  margin: 0;
+  padding: var(--space-1) var(--space-3);
+  border-top: 1px solid var(--border);
+  background: var(--bg-chrome);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+}
+
+/* ── editor ──────────────────────────────────────────────────────────────────────────── */
+.editor {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.noSelection {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+}
+
+.editorHead {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-3) var(--space-4) var(--space-2);
+}
+
+.editorTitle {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-lg);
+  line-height: var(--lh-lg);
+  font-weight: var(--weight-bold);
+}
+
+.conflict {
+  margin: 0 var(--space-4) var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-sm);
+  background: var(--warning-subtle);
+  display: grid;
+  gap: var(--space-2);
+}
+
+.conflict p {
+  margin: 0;
+}
+
+.conflictActions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.fieldsScroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.formBody {
+  container-type: inline-size;
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-4) var(--space-4);
+  max-width: 760px;
+}
+
+.editorActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-top: 1px solid var(--border);
+  background: var(--bg-chrome);
+}
+
+/* ── tool drawing ────────────────────────────────────────────────────────────────────── */
+.drawing {
+  width: 100%;
+  max-width: 240px;
+  height: auto;
+  overflow: visible;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.toolBody {
+  stroke: var(--text-muted);
+  stroke-width: 1.2px;
+  fill: color-mix(in oklab, var(--text-muted) 8%, transparent);
+}
+
+.flutes {
+  stroke: var(--text-faint);
+  stroke-width: 1px;
+}
+
+.collet {
+  stroke: var(--text-faint);
+  stroke-width: 1px;
+  stroke-dasharray: 3 3;
+}
+
+.dim {
+  stroke: var(--text-faint);
+  stroke-width: 1px;
+  transition: stroke var(--motion-base);
+}
+
+.dimText {
+  stroke: none;
+  fill: var(--text-faint);
+  font: var(--weight-medium) 12px var(--font-mono);
+  transition: fill var(--motion-base);
+}
+
+.dim[data-active] {
+  stroke: var(--accent-icon);
+  stroke-width: 1.8px;
+  filter: var(--accent-icon-edge);
+}
+
+.dim[data-active] .dimText {
+  fill: var(--text-accent);
+  font-weight: var(--weight-bold);
+}
+
+/* ── presets ─────────────────────────────────────────────────────────────────────────── */
+.presets {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.hint,
+.emptyNote {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+}
+
+.tableScroll {
+  overflow-x: auto;
+  min-width: 0;
+}
+
+.presetTable {
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.presetTable th {
+  padding: 0 4px 4px;
+  color: var(--text-muted);
+  font-weight: var(--weight-medium);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.presetTable td {
+  padding: 2px 4px;
+  vertical-align: middle;
+}
+
+.qcell input,
+.cellName input {
+  min-width: 0;
+}
+
+.presetTable .qcell {
+  width: 124px;
+  overflow: visible;
+}
+
+.cellSelect {
+  width: 132px;
+}
+
+.cellName {
+  width: 112px;
+}
+
+.derived {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.presetErrors {
+  margin: 0;
+  padding-left: var(--space-4);
+  color: var(--danger-text);
+  font-size: var(--text-sm);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (max-width: 960px) {
+  .panel {
+    grid-template-columns: minmax(280px, 1fr) minmax(360px, 1.2fr);
+  }
+  .project {
+    display: none;
+  }
+}

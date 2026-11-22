@@ -1,9 +1,9 @@
 // The window layout (task 3.3b): main toolbar (undo/redo and mode tools · mode switcher in the
 // centre · Apply (P3), machine group, panel toggles and settings), navigator | viewport | inspector in resizable, collapsible
-// panels, status bar. Below 1280 px the inspector overlays the viewport instead of shrinking it.
+// panels, the Library window and settings), status bar. Below 1280 px the inspector overlays the viewport instead of shrinking it.
 // Landmarks: banner, navigation (modes, navigator), main (viewport), complementary (inspector),
 // contentinfo (status bar); F6 cycles them. Doc: docs/conventions/ui.md#app-shell
-import { PanelLeft, PanelRight, Settings } from 'lucide-react'
+import { Library, PanelLeft, PanelRight, Settings } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AppMode } from '../../../core/modes'
 import { shellMessages as m } from '../messages/shell'
@@ -44,7 +44,7 @@ const LAYOUT_SAVE_MS = 400
 const region = { [REGION_ATTR]: '', tabIndex: -1 }
 
 export function AppShell(): React.JSX.Element {
-  const { settings, pending } = useShell()
+  const { settings, pending, bridge } = useShell()
   const replica = useReplica()
   const doc = replica.status === 'open' ? replica.doc : undefined
   const mode = useUi((s) => s.mode)
@@ -147,6 +147,13 @@ export function AppShell(): React.JSX.Element {
                 }
               />
               <ToolbarSeparator />
+              {/* the Library window (ui-library-window.md L2); Window → Library in the menu */}
+              <ToolbarButton
+                label={m.library}
+                shortcut={shortcutLabel('L', { shift: true })}
+                icon={<Library aria-hidden="true" />}
+                onClick={() => void bridge.library.open()}
+              />
               <ToolbarButton
                 label={m.settings}
                 icon={<Settings aria-hidden="true" />}

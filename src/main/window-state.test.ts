@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { visibleBounds, windowStart, windowTitle } from './window-state'
+import { libraryWindowStart, visibleBounds, windowStart, windowTitle } from './window-state'
 
 const primary = { x: 0, y: 25, width: 1920, height: 1055 }
 const right = { x: 1920, y: 0, width: 2560, height: 1440 }
@@ -59,6 +59,29 @@ describe('windowStart', () => {
 
   it('uses the default size, centred, without anything to start from', () => {
     expect(windowStart({ ...base, source: undefined, saved: undefined })).toEqual({
+      bounds: undefined,
+      maximized: false,
+      fullScreen: false,
+    })
+  })
+})
+
+describe('libraryWindowStart', () => {
+  it('restores its own remembered bounds made visible, maximized as it was', () => {
+    const saved = {
+      bounds: { x: 3800, y: 1000, width: 1440, height: 900 },
+      maximized: true,
+      fullScreen: false,
+    }
+    expect(libraryWindowStart(saved, [primary, right], primary)).toEqual({
+      bounds: { x: 3040, y: 540, width: 1440, height: 900 },
+      maximized: true,
+      fullScreen: false,
+    })
+  })
+
+  it('without a record: the default size, centred', () => {
+    expect(libraryWindowStart(undefined, [primary], primary)).toEqual({
       bounds: undefined,
       maximized: false,
       fullScreen: false,

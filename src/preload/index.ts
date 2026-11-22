@@ -14,7 +14,11 @@ import {
   type ProjectSnapshot,
   type ReferenceMeshReply,
   type WindowCloseRequest,
+  WINDOW_KIND_ARG,
+  type LibraryCloseRequest,
+  type LibraryContext,
 } from '../shared/preload-api'
+import type { LibraryChange } from '../core/library/library'
 import type { AppSettings } from '../shared/settings'
 import type { RunStatus } from '../core/run/service'
 import type { ActionEvent } from '../core/commands/action-log'
@@ -40,6 +44,7 @@ function initialSettings(): AppSettings | undefined {
 }
 
 const api: PreloadApi = {
+  windowKind: flagValue(process.argv, WINDOW_KIND_ARG) === 'library' ? 'library' : 'project',
   versions: {
     electron: process.versions.electron ?? '',
     chrome: process.versions.chrome ?? '',
@@ -86,6 +91,15 @@ const api: PreloadApi = {
   reference: {
     mesh: (referenceId) =>
       ipcRenderer.invoke(IPC.referenceMesh, referenceId) as Promise<ReferenceMeshReply>,
+  },
+  library: {
+    open: (target) => ipcRenderer.invoke(IPC.libraryOpen, target ?? {}) as Promise<void>,
+    onChanged: (listener) => on<LibraryChange>(IPC.libraryChanged, listener),
+    context: () => ipcRenderer.invoke(IPC.libraryContext) as Promise<LibraryContext>,
+    onContext: (listener) => on<LibraryContext>(IPC.libraryContextChanged, listener),
+    report: (state) => ipcRenderer.send(IPC.libraryState, state),
+    onCloseRequest: (listener) => on<LibraryCloseRequest>(IPC.libraryCloseRequest, listener),
+    close: (quit) => ipcRenderer.invoke(IPC.libraryClose, quit === true) as Promise<void>,
   },
   menu: {
     onAction: (listener) => on<MenuAction>(IPC.menuAction, listener),

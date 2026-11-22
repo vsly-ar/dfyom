@@ -4,7 +4,7 @@
 import { app, BrowserWindow, dialog, screen } from 'electron'
 import { join, resolve } from 'node:path'
 import { RENDERER_LOG_LEVEL_ARG, type Logger, type LogLevel } from '../shared/logging'
-import { SETTINGS_ARG } from '../shared/preload-api'
+import { SETTINGS_ARG, WINDOW_KIND_ARG, type WindowKind } from '../shared/preload-api'
 import type { AppSettings } from '../shared/settings'
 import { createAppHost } from './host/app-host'
 import { registerProjectIpc, type WindowFactory, type WindowSessions } from './ipc'
@@ -13,6 +13,7 @@ import { MACHINE_UTILITY_ENTRY_PATH } from './machine/bundled'
 import { pushRunStatus, utilityHostFactory } from './machine/electron'
 import { createMachineClient } from './machine/spawn'
 import { createLocalHttpControl, localHttpSetting } from './mcp/http'
+import { libraryHandlesMenuAction } from './library-context'
 import { installAppMenu } from './menu'
 import { createExportFiles } from './persistence/export-file'
 import { resolveAppData } from './persistence/paths'
@@ -29,7 +30,15 @@ import {
 } from './quit'
 import { createAppStateStore, loadAppState, type AppStateStore } from './settings/app-state'
 import { createSettingsStore, loadSettings } from './settings/store'
-import { APP_NAME, windowStart, windowTitle, type WindowStart } from './window-state'
+import { createLibraryWindows, type LibraryWindows } from './library-window'
+import {
+  APP_NAME,
+  LIBRARY_WINDOW_SIZE,
+  libraryWindowStart,
+  windowStart,
+  windowTitle,
+  type WindowStart,
+} from './window-state'
 import { WORKER_ENTRY_PATH } from './workers/bundled'
 import { createNodeWorkerPool } from './workers/node'
 
@@ -44,34 +53,40 @@ const ready = new WeakMap<BrowserWindow, boolean>()
 const starts = new WeakMap<BrowserWindow, WindowStart>()
 
 /**
- * A main window, not shown yet (`windowFactory` shows it). Cascaded from `from` with its size
- * (docs/conventions/ui.md#project-files); without one, the remembered last window
- * (#remembered-window-state-and-dialog-folders), else the default size, centred.
+ * A window, not shown yet (`windowFactory` shows it). A project window is cascaded from `from`
+ * with its size (docs/conventions/ui.md#project-files); without one, the remembered last window
+ * (#remembered-window-state-and-dialog-folders), else the default size, centred. The Library window
+ * (docs/conventions/ui-library-window.md) starts from its own remembered bounds.
  */
-function createMainWindow(
+function createAppWindow(
   log: Logger,
   level: LogLevel,
   settings: AppSettings,
   appState: AppStateStore,
+  kind: WindowKind,
   from: BrowserWindow | undefined,
 ): BrowserWindow {
-  const start = windowStart({
-    source: from === undefined || from.isDestroyed() ? undefined : from.getNormalBounds(),
-    saved: appState.get().window,
-    othersOpen: BrowserWindow.getAllWindows().length > 0,
-    workAreas: screen.getAllDisplays().map((d) => d.workArea),
-    primary: screen.getPrimaryDisplay().workArea,
-  })
+  const workAreas = screen.getAllDisplays().map((d) => d.workArea)
+  const primary = screen.getPrimaryDisplay().workArea
+  const library = kind === 'library'
+  const start = library
+    ? libraryWindowStart(appState.get().libraryWindow, workAreas, primary)
+    : windowStart({
+        source: from === undefined || from.isDestroyed() ? undefined : from.getNormalBounds(),
+        saved: appState.get().window,
+        othersOpen: BrowserWindow.getAllWindows().length > 0,
+        workAreas,
+        primary,
+      })
   const version = app.getVersion()
   const win = new BrowserWindow({
-    width: 1440,
-    height: 900,
+    ...(library ? LIBRARY_WINDOW_SIZE : { width: 1440, height: 900 }),
     ...start.bounds,
-    // docs/conventions/ui.md#app-shell
-    minWidth: 1024,
-    minHeight: 640,
+    // docs/conventions/ui.md#app-shell; the Library window's list and editor need less
+    minWidth: library ? 820 : 1024,
+    minHeight: library ? 520 : 640,
     show: false,
-    title: windowTitle(APP_NAME, version),
+    title: windowTitle(library ? 'Library' : APP_NAME, version),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -80,14 +95,15 @@ function createMainWindow(
       // a hidden test window must keep rendering and running timers at full rate
       backgroundThrottling: !hideWindows,
       // Read by the preload: renderers forward entries at the instance level, and apply the
-      // settings (theme, motion, layout) before the first render.
+      // settings (theme, motion, layout) before the first render; the window kind picks the screen.
       additionalArguments: [
         `${RENDERER_LOG_LEVEL_ARG}=${level}`,
         `${SETTINGS_ARG}=${encodeURIComponent(JSON.stringify(settings))}`,
+        `${WINDOW_KIND_ARG}=${kind}`,
       ],
     },
   })
-  log.debug({ win: win.id, from: from?.id }, 'window created')
+  log.debug({ win: win.id, kind, from: from?.id }, 'window created')
   ready.set(win, false)
   starts.set(win, start)
   win.once('ready-to-show', () => ready.set(win, true))
@@ -96,14 +112,17 @@ function createMainWindow(
     event.preventDefault()
     win.setTitle(windowTitle(title, version))
   })
-  // The last moved, resized or closed window is remembered for the next launch.
+  // The last moved, resized or closed window is remembered for the next launch; the Library
+  // window has its own record.
   const remember = () => {
     if (win.isDestroyed() || win.isMinimized()) return
-    appState.setWindow({
+    const state = {
       bounds: win.getNormalBounds(),
       maximized: win.isMaximized(),
       fullScreen: win.isFullScreen(),
-    })
+    }
+    if (library) appState.setLibraryWindow(state)
+    else appState.setWindow(state)
   }
   win.on('resize', remember)
   win.on('move', remember)
@@ -128,7 +147,8 @@ function windowFactory(
   level: LogLevel,
   settings: () => AppSettings,
   appState: AppStateStore,
-): WindowFactory {
+  isLibrary: (win: BrowserWindow) => boolean,
+): WindowFactory & { createLibrary(): BrowserWindow } {
   const show = (win: BrowserWindow) => {
     win.show()
     const start = starts.get(win)
@@ -136,7 +156,17 @@ function windowFactory(
     if (start?.fullScreen === true) win.setFullScreen(true)
   }
   return {
-    create: (from) => createMainWindow(log, level, settings(), appState, from),
+    // a project window never cascades from the Library window (another size and place)
+    create: (from) =>
+      createAppWindow(
+        log,
+        level,
+        settings(),
+        appState,
+        'project',
+        from !== undefined && isLibrary(from) ? undefined : from,
+      ),
+    createLibrary: () => createAppWindow(log, level, settings(), appState, 'library', undefined),
     reveal(win) {
       if (hideWindows || win.isDestroyed()) return
       if (ready.get(win) === true) show(win)
@@ -242,15 +272,49 @@ void app.whenReady().then(async () => {
     if (next.allowLocalAgents !== previous.allowLocalAgents) switchHttp(next.allowLocalAgents)
   })
 
+  // set below; the factory asks it which window is the Library window
+  const library: { current?: LibraryWindows } = {}
   const windows = windowFactory(
     log.child({ scope: 'windows' }),
     level,
     () => settings.get(),
     appState,
+    (win) => library.current?.isLibrary(win) === true,
   )
   const sessions: WindowSessions = registerProjectIpc(host, http, settings, windows, appState)
+  // The one Library window (docs/conventions/ui-library-window.md): created hidden, shown by the
+  // factory (never in hidden test runs).
+  const libraryWindows = createLibraryWindows(host, sessions, {
+    create: () => windows.createLibrary(),
+    reveal: (win) => windows.reveal(win),
+    focus: (win) => windows.focus(win),
+  })
+  library.current = libraryWindows
+  // The last focused project window: menu items the Library window does not handle go there.
+  let lastProjectWindow: BrowserWindow | undefined
+  app.on('browser-window-focus', (_e, win) => {
+    if (!libraryWindows.isLibrary(win)) lastProjectWindow = win
+  })
   // New / Open without any window (macOS): an empty window, whose start panel offers both.
-  installAppMenu(() => sessions.open())
+  installAppMenu({
+    noWindow: () => sessions.open(),
+    openLibrary: () => {
+      const focused = BrowserWindow.getFocusedWindow() ?? undefined
+      libraryWindows.open(
+        focused !== undefined && libraryWindows.isLibrary(focused) ? undefined : focused,
+      )
+    },
+    target: (action) => {
+      const focused = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+      if (focused === undefined || !libraryWindows.isLibrary(focused)) return focused
+      if (libraryHandlesMenuAction(action)) return focused
+      const project =
+        lastProjectWindow !== undefined && !lastProjectWindow.isDestroyed()
+          ? lastProjectWindow
+          : BrowserWindow.getAllWindows().find((w) => !libraryWindows.isLibrary(w))
+      return project
+    },
+  })
   // A project an agent opens gets its own window, which stays open after the session ends; the
   // user's New / Open choose their window in ipc.ts (docs/conventions/ui.md#project-files).
   host.onProjectOpened((key, source) => {
@@ -292,6 +356,11 @@ void app.whenReady().then(async () => {
       runActive: runIsActive(machine.status().job?.phase),
       unsaved: unsavedProjects(),
     })
+    // the Library window's unsaved draft first: it asks Save / Discard / Cancel and quits after
+    if (!quitConfirmed && !libraryWindows.readyToQuit()) {
+      event.preventDefault()
+      return
+    }
     if (quitConfirmed || steps.length === 0) {
       sessions.markQuitting()
       return

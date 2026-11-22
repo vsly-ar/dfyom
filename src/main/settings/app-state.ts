@@ -36,6 +36,8 @@ export type WindowState = Readonly<z.output<typeof WindowStateSchema>>
 /** Each field falls back on its own, so a bad window entry does not drop the dialog folders. */
 export const AppStateSchema = z.object({
   window: WindowStateSchema.optional().catch(undefined),
+  /** The Library window's own bounds (docs/conventions/ui-library-window.md, L1). */
+  libraryWindow: WindowStateSchema.optional().catch(undefined),
   dialogFolders: z.record(z.string(), z.string().min(1)).default({}).catch({}),
 })
 export type AppState = Readonly<z.output<typeof AppStateSchema>>
@@ -46,6 +48,8 @@ export interface AppStateStore {
   get(): AppState
   /** The last window's state (the most recently moved, resized or closed window). */
   setWindow(state: WindowState): void
+  /** The Library window's state (moved, resized or closed). */
+  setLibraryWindow(state: WindowState): void
   dialogFolder(kind: DialogKind): string | undefined
   rememberDialogFolder(kind: DialogKind, folder: string): void
   /** Writes a pending change now and resolves when every write has finished (tests, quit). */
@@ -112,6 +116,9 @@ export function createAppStateStore(o: {
     get: () => current,
     setWindow(state) {
       change({ ...current, window: state })
+    },
+    setLibraryWindow(state) {
+      change({ ...current, libraryWindow: state })
     },
     dialogFolder: (kind) => current.dialogFolders[kind],
     rememberDialogFolder(kind, folder) {

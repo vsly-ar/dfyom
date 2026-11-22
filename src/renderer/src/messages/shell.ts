@@ -25,6 +25,7 @@ export const shellMessages = {
     inspector: 'Inspector',
   },
   settings: 'Settings',
+  library: 'Library',
 
   modes: { design: 'Design', plan: 'Plan', run: 'Run' } satisfies Record<AppMode, string>,
 

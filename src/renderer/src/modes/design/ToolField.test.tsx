@@ -163,7 +163,7 @@ describe('tool field', () => {
     await user.click(combo())
     const list = await screen.findByRole('listbox')
     // the list re-reads the candidates when it opens (library edits change no revision)
-    await waitFor(() => expect(within(list).getAllByRole('group')).toHaveLength(2))
+    await waitFor(() => expect(within(list).getAllByRole('group')).toHaveLength(3))
     const groups = within(list).getAllByRole('group')
     expect(within(groups[0]!).getByText('Generalized tool')).toBeInTheDocument()
     const library = within(groups[1]!).getAllByRole('option')
@@ -199,6 +199,30 @@ describe('tool field', () => {
     await waitFor(() => expect(combo()).toHaveTextContent('4 mm flat end mill'))
     expect(op().toolLocked).toBe(true)
     expect(within(group()).queryByText(/Unlock it or pick another tool/)).toBeNull()
+  })
+})
+
+describe('tool field: new tool (L4)', () => {
+  it('adds a library tool prefilled from the generalized one and locks it', async () => {
+    const { user, d, combo, lock, apply, op } = await renderPocket()
+    await apply()
+    await waitFor(() => expect(combo()).toHaveTextContent('6 mm flat end mill'))
+    await user.click(combo())
+    const list = await screen.findByRole('listbox')
+    const options = within(list).getAllByRole('option')
+    expect(options.at(-1)).toHaveTextContent('New tool…')
+    await user.click(options.at(-1)!)
+    const dialog = await screen.findByRole('dialog', { name: 'New tool' })
+    // prefilled: type and diameter of the generalized tool, the suggested name from them
+    expect(within(dialog).getByRole('textbox', { name: 'Name' })).toHaveValue('Flat 6 mm')
+    expect(within(dialog).getByLabelText('Diameter', { selector: 'input' })).toHaveValue('6 mm')
+    await user.click(within(dialog).getByRole('button', { name: 'Add tool' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await waitFor(() => expect(op().tool).toMatchObject({ kind: 'specific' }))
+    expect(lock()).toHaveAttribute('aria-pressed', 'true')
+    const snap = d.doc.snapshots[(op().tool as { snapshotId: string }).snapshotId]!
+    expect((snap.values as { name: string }).name).toBe('Flat 6 mm')
+    await waitFor(() => expect(combo()).toHaveTextContent('Flat 6 mm'))
   })
 })
 

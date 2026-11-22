@@ -8,6 +8,7 @@
  */
 import { z } from 'zod'
 import { AnchorDtoSchema } from '../core/design/part.dto'
+import { UnitSystemSchema } from '../core/project/document'
 
 export const THEMES = ['system', 'light', 'dark'] as const
 export type ThemeSetting = (typeof THEMES)[number]
@@ -30,6 +31,11 @@ const fields = {
    * the window passes it as `anchor` (agents pass their own or get the centre).
    */
   defaultAnchor: AnchorDtoSchema,
+  /**
+   * Unit system of the Library window's forms when it was opened without a project: the last one
+   * chosen there (docs/conventions/ui-library-window.md, L5).
+   */
+  libraryUnits: UnitSystemSchema,
 }
 
 /** The settings file; a missing field takes its default (new settings need no migration). */
@@ -39,6 +45,7 @@ export const AppSettingsSchema = z.object({
   allowLocalAgents: fields.allowLocalAgents.default(true),
   layouts: fields.layouts.default({}),
   defaultAnchor: fields.defaultAnchor.default({ u: 'centre', v: 'centre' }),
+  libraryUnits: fields.libraryUnits.default('mm'),
 })
 
 export type AppSettings = Readonly<z.output<typeof AppSettingsSchema>>
@@ -60,5 +67,6 @@ export function mergeSettings(
     allowLocalAgents: patch.allowLocalAgents ?? current.allowLocalAgents,
     layouts: { ...current.layouts, ...(patch.layouts ?? {}) },
     defaultAnchor: patch.defaultAnchor ?? current.defaultAnchor,
+    libraryUnits: patch.libraryUnits ?? current.libraryUnits,
   }
 }

@@ -302,6 +302,18 @@
   line-height: var(--lh-sm);
 }
 
+/* "Edit in library" beside "New tool…" / "New machine…" (ui-library-window.md L2) */
+.libraryActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.libraryActions:empty {
+  display: none;
+}
+
 .why {
   margin: 0;
   font-size: var(--text-sm);

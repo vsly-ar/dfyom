@@ -51,7 +51,8 @@ import {
 } from './model'
 import { FeedsCalculation } from './FeedsCalculation'
 import { fieldMessages } from './fieldMessages'
-import { NewToolDialog } from './NewToolDialog'
+import { LibraryLink } from '../../library/LibraryLink'
+import { NewToolDialog } from '../../library/NewToolDialog'
 import { PlanCopyGroup } from './PlanCopyGroup'
 import { SetupInspector } from './SetupInspector'
 import { useCancelGesture } from '../../shell/hooks'
@@ -414,20 +415,25 @@ function OperationInspector({
               }}
             />
           </Field>
-          {!readOnly ? (
-            <NewToolDialog
-              units={units}
-              operationKind={kind}
-              onAdded={async (id) => {
-                const r = await call('plan.tool.assign', {
-                  planId: plan.id,
-                  planOperationId: op.id,
-                  toolLibraryItemId: id,
-                })
-                return r.ok ? undefined : r.error
-              }}
-            />
-          ) : null}
+          <div className={styles['libraryActions']}>
+            {current !== null ? (
+              <LibraryLink target={{ kind: 'tool', itemId: current.libraryItemId }} />
+            ) : null}
+            {!readOnly ? (
+              <NewToolDialog
+                units={units}
+                operationKind={kind}
+                onAdded={async (id) => {
+                  const r = await call('plan.tool.assign', {
+                    planId: plan.id,
+                    planOperationId: op.id,
+                    toolLibraryItemId: id,
+                  })
+                  return r.ok ? undefined : r.error
+                }}
+              />
+            ) : null}
+          </div>
           {chosen !== undefined && chosen.reasons.length > 0 ? (
             <ul className={styles['reasons']} aria-label={t.reasons}>
               {chosen.reasons.map((r) => (

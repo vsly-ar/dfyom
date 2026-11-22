@@ -64,6 +64,7 @@ export const projectMessages = {
       viewport: 'Viewport (while it has focus)',
       fields: 'Fields',
       design: 'Design navigator',
+      library: 'Library window',
     },
     what: {
       newProject: 'New project',
@@ -89,6 +90,9 @@ export const projectMessages = {
       step: 'Step the value (Shift ×10, Alt ×0.1)',
       pick: 'Pick a surface in the viewport',
       references: 'References',
+      openLibrary: 'Open the Library window (Window → Library)',
+      librarySave: 'Save the item being edited',
+      libraryList: 'Select an item in the list (Enter: edit it)',
     },
   },
 } as const

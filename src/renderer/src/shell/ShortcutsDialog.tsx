@@ -53,6 +53,14 @@ export const SHORTCUTS: readonly { group: keyof typeof m.groups; items: [string,
     items: [[`${alt}↑ ${alt}↓`, m.what.move]],
   },
   {
+    group: 'library',
+    items: [
+      [shortcutLabel('L', { shift: true }), m.what.openLibrary],
+      [`${shortcutLabel('S')} ${APPLY_SHORTCUT}`, m.what.librarySave],
+      ['↑ ↓', m.what.libraryList],
+    ],
+  },
+  {
     group: 'fields',
     items: [
       ['Enter', m.what.commit],

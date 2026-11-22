@@ -14,7 +14,7 @@ vi.mock('electron', () => ({
   },
 }))
 
-const { sendMenuAction } = await import('./menu')
+const { menuTemplate, sendMenuAction } = await import('./menu')
 
 describe('menu actions', () => {
   it('without a window, New and Open open an empty one; other items do nothing', () => {
@@ -34,5 +34,28 @@ describe('menu actions', () => {
     sendMenuAction('project.open', noWindow)
     expect(send).toHaveBeenCalledWith('dfyom:menu.action', 'project.open')
     expect(noWindow).not.toHaveBeenCalled()
+  })
+
+  it('goes to the window the target picks (the Library window passes items on)', () => {
+    const send = vi.fn()
+    const other = { isDestroyed: () => false, webContents: { send } }
+    windows.list = []
+    sendMenuAction('mode.plan', vi.fn(), () => other as never)
+    expect(send).toHaveBeenCalledWith('dfyom:menu.action', 'mode.plan')
+  })
+
+  it('Window → Library opens the Library window with Ctrl/Cmd+Shift+L', () => {
+    const openLibrary = vi.fn()
+    const template = menuTemplate('darwin', false, { noWindow: vi.fn(), openLibrary })
+    const windowMenu = template.find((m) => m.role === 'windowMenu')
+    const items = windowMenu?.submenu as {
+      label?: string
+      accelerator?: string
+      click?: () => void
+    }[]
+    const item = items.find((i) => i.label === 'Library')
+    expect(item?.accelerator).toBe('CmdOrCtrl+Shift+L')
+    item?.click?.()
+    expect(openLibrary).toHaveBeenCalledOnce()
   })
 })

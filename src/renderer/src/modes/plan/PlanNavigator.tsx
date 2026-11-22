@@ -38,7 +38,8 @@ import {
   StatusChip,
 } from '../../ui'
 import { ExportDialog } from './ExportDialog'
-import { NewMachineDialog } from './NewMachineDialog'
+import { LibraryLink } from '../../library/LibraryLink'
+import { NewMachineDialog } from '../../library/NewMachineDialog'
 import {
   allPlanOperations,
   allows,
@@ -389,15 +390,23 @@ function MachineSection({
           onValueChange={(id) => void send('plan.machine.set', { machineLibraryItemId: id })}
         />
       )}
-      {canSet ? (
-        <NewMachineDialog
-          units={units}
-          onAdded={async (id) => {
-            const r = await call('plan.machine.set', { planId: plan.id, machineLibraryItemId: id })
-            return r.ok ? undefined : r.error
-          }}
-        />
-      ) : null}
+      <div className={styles['libraryActions']}>
+        {copy !== undefined ? (
+          <LibraryLink target={{ kind: 'machine', itemId: copy.libraryItemId }} />
+        ) : null}
+        {canSet ? (
+          <NewMachineDialog
+            units={units}
+            onAdded={async (id) => {
+              const r = await call('plan.machine.set', {
+                planId: plan.id,
+                machineLibraryItemId: id,
+              })
+              return r.ok ? undefined : r.error
+            }}
+          />
+        ) : null}
+      </div>
     </Section>
   )
 }

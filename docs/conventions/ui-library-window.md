@@ -1,10 +1,10 @@
 # Library window: machines, tools and stock from every mode
 
-Status: accepted (backlog B24; the user confirmed the recommendations on 2026-11-22, D27; not built yet) · Data and commands: [library.md](../architecture/library.md) · UI rules: [ui.md](ui.md) · Apply: [apply.md](../architecture/apply.md) · Tool field: [design-v0.2.md § Operation tool](../modes/design-v0.2.md#operation-tool) · Terms: [glossary.md](../glossary.md)
+Status: implemented (backlog B24, task L1; the user confirmed the recommendations on 2026-11-22, D27) · Data and commands: [library.md](../architecture/library.md) · UI rules: [ui.md](ui.md) · Apply: [apply.md](../architecture/apply.md) · Tool field: [design-v0.2.md § Operation tool](../modes/design-v0.2.md#operation-tool) · Terms: [glossary.md](../glossary.md)
 
-The user's request (B24): machines, tools and stock libraries reachable from the toolbar in all modes; today tools are created through Plan's "New tool…". This doc drafts the UI; the data model, storage and commands stay as in [library.md](../architecture/library.md). Nothing here is implemented.
+The user's request (B24): machines, tools and stock libraries reachable from the toolbar in all modes; today tools are created through Plan's "New tool…". This doc specifies the UI; the data model, storage and commands stay as in [library.md](../architecture/library.md). What is built, and where it differs from the sketch, is in [Implementation](#implementation-task-l1).
 
-## Today
+## Before L1
 
 | Where                                                                                      | What it can do                                                                                                    |
 | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
@@ -16,7 +16,7 @@ The user's request (B24): machines, tools and stock libraries reachable from the
 
 The commands exist ([library.md § Storage](../architecture/library.md#storage)): `library.{stock,tool,machine}.{add,update,remove}` and `.get`/`.list`, effect commands (written at once, **not undoable**), run by the app-scope dispatcher with or without an open project. Agents already have full access; this is a UI gap only ([principle 1](../principles.md#1-llm-first) holds).
 
-## Decisions (assumed)
+## Decisions
 
 1. **L1 – One Library window per app instance.** A separate native window, not a dialog or a panel: the library is global app data shared by every project and window, it stays open beside a project in any mode (edit a tool while the plan inspector shows the effect), and it works without a project. Opening it again focuses the existing window. Its bounds are remembered like project windows ([ui.md § Remembered window state](ui.md#remembered-window-state-and-dialog-folders)); e2e launches it hidden like every window.
 2. **L2 – Entry points.** A "Library" button (icon + label, Lucide `library`) in the main toolbar's end column before "Settings", in Design, Plan and Run and in a window without a project; the native menu gets Window → Library (`Ctrl/Cmd+Shift+L`). Context links open the window on the right tab with an item selected: "Edit in library" beside a plan operation's tool and the plan's machine, "Open library" from the stock setup.
@@ -54,12 +54,39 @@ The commands exist ([library.md § Storage](../architecture/library.md#storage))
 
 Window landmarks: `banner` (toolbar), `navigation` (tabs), `main` (list and editor). The list is a `grid` with row selection by arrow keys; Enter moves focus into the editor; `F6` cycles toolbar, list and editor; every action has a keyboard path and is in the [shortcut list](ui.md#keyboard-shortcuts).
 
-## Questions for the user
+## Questions for the user (answered)
 
-Each with the recommendation this draft assumes.
+The user confirmed each recommendation (D27).
 
 1. **Separate window, modal dialog, or a panel in the project window?** Recommendation: a separate window (L1). A large modal dialog is cheaper to build but blocks the project while open; a panel competes with the navigator and inspector.
 2. **Draft and Save, or live commit per field?** Recommendation: draft and Save (L3), because library writes are not undoable and are shared by every project.
 3. **Keep the quick "New tool…" / "New machine…" dialogs, and add "New tool…" to the Design tool field?** Recommendation: yes to both (L4), sharing one form component with the window.
 4. **Toolbar placement and shortcut:** recommendation: "Library" before "Settings" in the end column, Window → Library, `Ctrl/Cmd+Shift+L` (L2).
 5. **Import in scope?** Fusion tool library JSON, FreeCAD tool bits and GRBL `$$` for machines. Recommendation: later, as separate backlog items; the window gets an "Import…" slot in its `⋯` menu when they come.
+
+## Implementation (task L1)
+
+- **Window:** the same renderer bundle with `--dfyom-window=library` (`App.tsx` routes on `bridge.windowKind`), made and tracked by `src/main/library-window.ts`; an unbound session (no project), so it calls only the app-scope `library.*` commands. Its bounds are remembered as `libraryWindow` in `app-state.json` ([ui.md § Remembered window state](ui.md#remembered-window-state-and-dialog-folders)); it never cascades a project window. Hidden test runs never show it (`DFYOM_HIDE_WINDOWS=1`, like every window).
+- **Context:** main gives the window the context of the window that opened it: project name, unit system, used item ids (`src/core/library/used.ts`: every snapshot's `libraryItemId`, the design's and each plan's), followed live; the target of a context link selects the tab and item. The last tab is kept for the app instance (not between runs).
+- **Units (L5):** the window's mm / in control overrides the project's unit system until the window is opened again from another window; with no project the `libraryUnits` [setting](ui.md#settings) applies, and switching writes it. Saved values keep their `source`; a stored item keeps its own unit system for bare numbers (`itemUnitSystem`), so a value in the other system is shown with its unit written out.
+- **Draft (L3):** one draft at a time (the selected item or a new one). Model issues show live under their fields; Save with issues moves focus to the first invalid field. Duplicate starts an unsaved new draft named "<name> copy". A library change from elsewhere refreshes a clean draft and marks a dirty one as conflicting ("changed elsewhere": Reload / Overwrite; "removed": Discard changes / Overwrite, which saves it as a new item). Closing the window or quitting with a draft asks the window first ("Save changes to X?").
+- **Toolbar button:** icon-only with its tooltip and shortcut, like Settings beside it (the end column holds icon buttons only), not icon + label as in L2.
+- **Tabs:** a custom tablist (left/right arrows) in the `navigation` landmark rather than `ui/Tabs`, so the banner / navigation / main split of [Accessibility](#accessibility) holds. `Ctrl/Cmd+Shift+L` is the native menu accelerator only.
+- **Tool drawing:** `ToolDrawing.tsx` (flat, ball, bull nose, drill); the dimension of the focused field is amber and named in the image label ("Tool drawing: LCF highlighted"). Presets show the derived chip load (feed ÷ (speed × flutes)) per row.
+- **Quick dialogs (L4):** `NewToolDialog` / `NewMachineDialog` use the window's field components (`variant="quick"`); the design tool field's "New tool…" and the `dfm.toolNotInLibrary` fix "Add to library" open `NewToolDialog` prefilled from the generalized tool, and the added tool is locked with `design.operation.tool.set`.
+- **Run safety:** the window shows the run mode's `MachineToolbar` (state badge, Stop); its Stop (`job.abort`) is sent to the window's own session, and when that has no run, main aborts the run of the window whose project runs it (`abortElsewhere` in `src/main/ipc.ts`).
+- **Not built:** the toolbar's `⋯` menu (it only holds Import, a later backlog item).
+
+| File                                                                    | Contents                                                                 |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `src/main/library-window.ts`                                            | The one window: open/focus, context, close and quit with a draft         |
+| `src/main/library-context.ts`                                           | Pure parts: project context, open targets, the renderer's reported state |
+| `src/core/library/used.ts`                                              | Library item ids a project uses                                          |
+| `src/renderer/src/library/library-store.ts`                             | Window state: tabs, listings, the draft, save, conflicts, prompts        |
+| `src/renderer/src/library/LibraryWindow.tsx`                            | Layout, keys (F6, Save), the save prompts                                |
+| `src/renderer/src/library/ItemTable.tsx`                                | The item grid: sort, search, type filter, chips, keys                    |
+| `src/renderer/src/library/ItemEditor.tsx`                               | Editor: forms, conflict alert, actions, Remove confirmation              |
+| `src/renderer/src/library/{Tool,Machine,Stock}Fields.tsx`, `fields.tsx` | The forms shared by the window and the quick dialogs                     |
+| `src/renderer/src/library/form.ts`                                      | Defaults, names, clean-up and command input of drafts                    |
+| `src/renderer/src/library/ToolDrawing.tsx`, `PresetTable.tsx`           | Tool drawing; presets table with chip load                               |
+| `src/renderer/src/library/LibraryLink.tsx`                              | "Edit in library" / "Open library" context links                         |

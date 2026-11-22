@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { PlanWarning } from '../../../../core/plan/checks'
 import type { PlanDTO, SetupDTO } from '../../../../core/plan/plan.dto'
 import type { ProjectDoc } from '../../../../core/project/document'
-import { useShell, useUi } from '../../shell/ShellContext'
+import { useLibraryVersion, useShell, useUi } from '../../shell/ShellContext'
 import { activeJob } from '../run/machine-state'
 import { useRunStore } from '../run/run-store'
 import { chosenPlan, currentSetup } from './model'
@@ -71,6 +71,7 @@ export function useLibraryItems(
   refresh: unknown = undefined,
 ): LibraryEntry[] | undefined {
   const { bridge } = useShell()
+  const library = useLibraryVersion()
   const [items, setItems] = useState<LibraryEntry[] | undefined>(undefined)
   useEffect(() => {
     let live = true
@@ -80,7 +81,7 @@ export function useLibraryItems(
     return () => {
       live = false
     }
-  }, [bridge, kind, refresh])
+  }, [bridge, kind, refresh, library])
   return items
 }
 
