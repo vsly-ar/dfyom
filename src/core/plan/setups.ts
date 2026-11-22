@@ -7,6 +7,7 @@ import { fail, Ok, type AppResult } from '../../shared/result'
 import type { IdGenerator } from '../commands/context'
 import type { Part } from '../design/operation'
 import { DIRECTION, DIRECTION_LABEL, type Direction } from '../geometry/face'
+import type { Region2dPort } from '../geometry/2d/port'
 import type { Stock } from '../library/stock'
 import type { PlanWarning } from './checks'
 import { defaultOrder, operationDirections, orderFindings } from './order'
@@ -57,12 +58,14 @@ export function defaultSetupIndex(setups: readonly SetupDTO[], direction: Direct
 
 /**
  * Setups of `plan.create`: one per direction in use, in the default setup order, each in the
- * default machining order. No operations: one `+z` setup.
+ * default machining order (`port`: general shapes in the freeing test). No operations: one `+z`
+ * setup.
  */
 export function deriveSetups(
   planOps: readonly PlanOperationDTO[],
   part: Part,
   make: (direction: Direction, setups: readonly SetupDTO[]) => SetupDTO,
+  port?: Region2dPort,
 ): SetupDTO[] {
   const dir = operationDirections(planOps, part)
   const setups: SetupDTO[] = []
@@ -70,7 +73,7 @@ export function deriveSetups(
     const ops = planOps.filter((p) => dir.get(p.id) === d)
     if (ops.length === 0) continue
     const s = make(d, setups)
-    s.operations = defaultOrder(ops, part)
+    s.operations = defaultOrder(ops, part, port)
     setups.push(s)
   }
   if (setups.length === 0) setups.push(make('+z', setups))

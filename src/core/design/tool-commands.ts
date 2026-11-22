@@ -28,7 +28,7 @@ import type { ProjectDoc } from '../project/document'
 import { findOperation, readOnlyOwned, refuseOwned, Warnings, withWarnings } from './commands'
 import { toGeometryInput } from './geometry-input'
 import { loadPart, type LoadedPart } from './load'
-import type { Operation } from './operation'
+import type { Operation, Part } from './operation'
 import {
   DesignToolDtoSchema,
   OperationIdSchema,
@@ -84,19 +84,28 @@ function choiceInputs(
 }
 
 /**
- * Unlocked stepped chamfers on the mouth of operation `index` (F7): they follow its tool when it
- * fits them (design-v0.4.md § Stepped countersink). Their indices.
+ * The operation whose tool `op`'s auto choice takes first when it fits: a stepped chamfer's edge
+ * (F7, design-v0.4.md § Stepped countersink) and a hole's counterbore's drill role
+ * (design-v0.4.md § Counterbore tool); none for others.
  */
-function steppedFollowers(loaded: LoadedPart, index: number): number[] {
+function leaderOf(part: Part, op: Operation): string | undefined {
+  if (op.kind === 'chamfer' && op.stepdown.isSome()) return op.edgeOf
+  if (op.kind !== 'pocket' || op.owner.isNone() || op.owner.unwrap().role !== 'counterbore')
+    return undefined
+  const featureId = op.owner.unwrap().featureId
+  return part.operations.find((o) =>
+    o.owner.mapOr(false, (w) => w.featureId === featureId && w.role === 'drill'),
+  )?.id
+}
+
+/**
+ * Unlocked operations following operation `index`'s tool when it fits them (`leaderOf`: stepped
+ * chamfers on its mouth, F7; the counterbore of its hole). Their indices.
+ */
+function toolFollowers(loaded: LoadedPart, index: number): number[] {
   const id = loaded.part.operations[index]!.id
   return loaded.part.operations.flatMap((o, k) =>
-    o.kind === 'chamfer' &&
-    o.stepdown.isSome() &&
-    o.edgeOf === id &&
-    !o.toolLocked &&
-    !readOnlyOwned(loaded, o.id)
-      ? [k]
-      : [],
+    leaderOf(loaded.part, o) === id && !o.toolLocked && !readOnlyOwned(loaded, o.id) ? [k] : [],
   )
 }
 
@@ -152,7 +161,7 @@ function opCommand(
         return refuseOwned(l, i, name).map(() => ({ warnings: [] }))
       const op = edit(draft, args, l, i, ctx)
       if (op.isErr()) return op
-      // the part as the edit left it (a tool set may also move stepped chamfers along, F7)
+      // the part as the edit left it (a tool set may also move followers along, `toolFollowers`)
       const after = loadPart(draft as ProjectDoc, args.partId, name)
       if (after.isErr()) return after
       return withWarnings({}, after.unwrap(), after.unwrap().part.operations, ctx, name)
@@ -170,8 +179,8 @@ const toolSet = opCommand(
     const tool = toolFromArg(args['tool'] as never, draft, loaded.units, ctx, where)
     if (tool.isErr()) return tool
     writeTool(draft, args.partId, i, tool.unwrap(), true)
-    // F7: unlocked stepped chamfers on this hole follow when the tool fits them (no tool change)
-    const followers = steppedFollowers(loaded, i)
+    // unlocked stepped chamfers (F7) and the counterbore of this hole follow when the tool fits
+    const followers = toolFollowers(loaded, i)
     if (followers.length > 0) {
       const inputs = choiceInputs(loaded, [], draft.snapshots, ctx.services.region2d)
       if (inputs.isErr()) return Err(inputs.unwrapErr().withContext(where))
@@ -373,19 +382,20 @@ export function autoChooseTools(
     const l = loaded.unwrap()
     const inputs = choiceInputs(l, library, draft.snapshots, ctx.services.region2d)
     if (inputs.isErr()) return Err(inputs.unwrapErr().withContext(where))
-    // tools written by this pass, by operation id (a stepped chamfer follows its edge's, F7)
+    // tools written by this pass, by operation id (a follower takes its leader's, `leaderOf`)
     const written = new Map<string, DesignTool>()
-    for (const [i, op] of l.part.operations.entries()) {
-      // F7: a stepped chamfer is chosen with its edge and takes the edge's tool when it fits
-      const edgeOf = op.kind === 'chamfer' && op.stepdown.isSome() ? op.edgeOf : undefined
-      const target = ids.has(op.id) || (edgeOf !== undefined && ids.has(edgeOf))
+    for (const i of leadersFirst(l.part)) {
+      const op = l.part.operations[i]!
+      // a follower is chosen with its leader and takes the leader's tool when it fits
+      const leader = leaderOf(l.part, op)
+      const target = ids.has(op.id) || (leader !== undefined && ids.has(leader))
       // Clones instances follow their source's tool (`design.clonesFollow` after this hook)
       if (op.toolLocked || !target || readOnlyOwned(l, op.id)) continue
       const input = inputs.unwrap()(i, op)
-      const edgeTool = edgeOf === undefined ? undefined : edgeToolOf(l, edgeOf, written)
+      const leaderTool = leader === undefined ? undefined : leaderToolOf(l, leader, written)
       const follow =
-        edgeTool !== undefined &&
-        resolveDesignTool(edgeTool, draft.snapshots).mapOr(
+        leaderTool !== undefined &&
+        resolveDesignTool(leaderTool, draft.snapshots).mapOr(
           false,
           (t) => fitOf(t, input) === undefined,
         )
@@ -393,7 +403,7 @@ export function autoChooseTools(
       if (choice !== undefined && (choice.kind === 'keep' || choice.kind === 'none')) continue
       let to: DesignTool
       if (choice === undefined) {
-        to = edgeTool!
+        to = leaderTool!
         if (op.tool.isSome() && deepEqual(designToolToDTO(op.tool.unwrap()), designToolToDTO(to)))
           continue
       } else if (choice.kind === 'library') {
@@ -407,7 +417,9 @@ export function autoChooseTools(
         from === null
           ? 'unset'
           : choice === undefined
-            ? 'followsEdge'
+            ? op.kind === 'chamfer'
+              ? 'followsEdge'
+              : 'followsHole'
             : old.isNone()
               ? 'unresolved'
               : (fitOf(old.unwrap(), input)?.rule ?? 'unfit')
@@ -419,16 +431,33 @@ export function autoChooseTools(
   return Ok(changes)
 }
 
-/** The tool of a stepped chamfer's edge operation: as this pass wrote it, else as stored. */
-function edgeToolOf(
+/**
+ * Operation indices in design order, except that a follower whose leader comes later (a
+ * counterbore before its hole's drill role) comes right after its leader (`leaderOf`).
+ */
+function leadersFirst(part: Part): number[] {
+  const at = new Map(part.operations.map((o, i) => [o.id, i]))
+  const waiting = new Map<number, number[]>()
+  const out: number[] = []
+  part.operations.forEach((op, i) => {
+    const leader = at.get(leaderOf(part, op) ?? '')
+    if (leader !== undefined && leader > i) waiting.set(leader, [...(waiting.get(leader) ?? []), i])
+    else out.push(i)
+    out.push(...(waiting.get(i) ?? []))
+  })
+  return out
+}
+
+/** The tool of a follower's leader operation: as this pass wrote it, else as stored. */
+function leaderToolOf(
   l: LoadedPart,
-  edgeOf: string,
+  leader: string,
   written: ReadonlyMap<string, DesignTool>,
 ): DesignTool | undefined {
-  const w = written.get(edgeOf)
+  const w = written.get(leader)
   if (w !== undefined) return w
-  const edge = l.part.operations.find((o) => o.id === edgeOf)
-  return edge !== undefined && edge.tool.isSome() ? edge.tool.unwrap() : undefined
+  const op = l.part.operations.find((o) => o.id === leader)
+  return op !== undefined && op.tool.isSome() ? op.tool.unwrap() : undefined
 }
 
 /**

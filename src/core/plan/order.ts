@@ -1,6 +1,6 @@
 /**
  * Machining order: the default order of plan operations and the order checks.
- * Doc: docs/modes/plan-v0.1.md#plan-operations-and-order
+ * Doc: docs/modes/plan-v0.1.md#plan-operations-and-order, docs/modes/plan-v0.4.md#machining-order-v2
  */
 import { isGeneralShape, type Operation, type Part, type Shape } from '../design/operation'
 import { shapeCentre } from '../design/anchor'
@@ -12,7 +12,7 @@ import type { Vec2 } from '../geometry/model'
 import type { PlanWarning } from './checks'
 import type { PlanOperationDTO } from './plan.dto'
 
-/** Default group order: facing, drilling, pockets, chamfers (after their edge), profiles (cutouts last). */
+/** Kind group order within a tool run: facing, drilling, pockets, chamfers, profiles. */
 const RANK: Record<OperationKind, number> = {
   facing: 0,
   drilling: 1,
@@ -120,51 +120,114 @@ function infos(planOps: readonly PlanOperationDTO[], part: Part): Info[] {
   })
 }
 
+/** The tool run of a plan operation: its tool copy; without a tool, a run of its own. */
+const runKey = (p: PlanOperationDTO): string => p.tool ?? `none:${p.id}`
+
+/** Order within a tool run: kind group, design order; an F7 follower right behind its edge. */
+function runSortKey(byId: ReadonlyMap<string, Info>): (x: Info) => number[] {
+  return (x) => {
+    const l = x.follows === undefined ? x : (byId.get(x.follows) ?? x)
+    return [l.rank, l.designIndex, l === x ? 0 : 1, x.designIndex]
+  }
+}
+
+function lessKey(a: readonly number[], b: readonly number[]): boolean {
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i]! < b[i]!
+  return false
+}
+
+/** Runs the search explores before it takes the first candidate (a deterministic bound). */
+const SEARCH_BUDGET = 5000
+
 /**
- * Default machining order: by group, then design order, with operations of one tool kept
- * adjacent within a group; a chamfer sharing its edge operation's tool comes right after that
- * operation (a stepped countersink, F7: no tool change between bore and terraces); an operation
- * never precedes one whose surface it starts from.
+ * Default machining order (plan-v0.4.md § Machining order v2): the fewest tool runs the
+ * dependencies allow (`on` surfaces, chamfer edges, and a through profile after the operations it
+ * frees, `freeingDependencies`). A run takes every operation of its tool as soon as it is ready,
+ * by kind group and design order (a chamfer sharing its edge operation's tool right behind it,
+ * F7); the tool of each next run is searched for the fewest runs, candidates tried in the order of
+ * their first ready operation, the first minimal order kept. `port`: the 2D port for general
+ * shapes in the freeing test (without it they free nothing).
  */
-export function defaultOrder(planOps: readonly PlanOperationDTO[], part: Part): PlanOperationDTO[] {
-  const all = infos(planOps, part).sort((a, b) => a.rank - b.rank || a.designIndex - b.designIndex)
+export function defaultOrder(
+  planOps: readonly PlanOperationDTO[],
+  part: Part,
+  port?: Region2dPort,
+): PlanOperationDTO[] {
+  const all = infos(planOps, part)
+  const freeing = freeingDependencies(planOps, part, port)
   const byId = new Map(all.map((x) => [x.op.id, x]))
-  // a follower takes its edge operation's place in the order, just behind it
-  const lead = (x: Info) => (x.follows === undefined ? x : (byId.get(x.follows) ?? x))
-  // tool order within a group: first appearance in design order (followers do not count)
-  const toolOrder = new Map<string, number>()
-  all.forEach((x, i) => {
-    if (lead(x) !== x) return
-    const key = `${x.rank}:${x.op.tool ?? `none-${x.op.id}`}`
-    if (!toolOrder.has(key)) toolOrder.set(key, i)
-  })
-  const sortKey = (x: Info) => {
-    const l = lead(x)
-    return [
-      l.rank,
-      toolOrder.get(`${l.rank}:${l.op.tool ?? `none-${l.op.id}`}`) ?? 0,
-      l.designIndex,
-      l === x ? 0 : 1,
-      x.designIndex,
-    ]
+  const at = new Map(all.map((x, i) => [x.op.id, i]))
+  const deps = all.map((x) =>
+    [...x.deps, ...(freeing.get(x.op.id) ?? [])].flatMap((d) => {
+      const i = at.get(d)
+      return i === undefined ? [] : [i]
+    }),
+  )
+  const keys = all.map(runSortKey(byId))
+  const tools = all.map((x) => runKey(x.op))
+  const n = all.length
+  const first = (ids: readonly number[]): number =>
+    ids.reduce((b, i) => (b < 0 || lessKey(keys[i]!, keys[b]!) ? i : b), -1)
+  // the operations that can come next (a dependency cycle cannot happen: references point to
+  // earlier design operations; if one did, the first remaining operation is taken anyway)
+  const nextOps = (done: readonly boolean[]): number[] => {
+    const ready: number[] = []
+    const rest: number[] = []
+    for (let i = 0; i < n; i++) {
+      if (done[i]) continue
+      rest.push(i)
+      if (deps[i]!.every((d) => done[d])) ready.push(i)
+    }
+    return ready.length > 0 || rest.length === 0 ? ready : [first(rest)]
   }
-  const less = (a: Info, b: Info) => {
-    const ka = sortKey(a)
-    const kb = sortKey(b)
-    for (let i = 0; i < ka.length; i++) if (ka[i] !== kb[i]) return ka[i]! < kb[i]!
-    return false
+  /** One run of `tool` from `done`: its operations in run order and the done set after it. */
+  const run = (done: readonly boolean[], tool: string): { seq: number[]; done: boolean[] } => {
+    const d = [...done]
+    const seq: number[] = []
+    for (;;) {
+      const next = first(nextOps(d).filter((i) => tools[i] === tool))
+      if (next < 0) return { seq, done: d }
+      d[next] = true
+      seq.push(next)
+    }
   }
-  const done = new Set<string>()
+  /** The candidate tools of the next run, by their first ready operation. */
+  const candidates = (done: readonly boolean[]): string[] => {
+    const ready = nextOps(done)
+    const out: string[] = []
+    for (const i of [...ready].sort((a, b) => (lessKey(keys[a]!, keys[b]!) ? -1 : 1)))
+      if (!out.includes(tools[i]!)) out.push(tools[i]!)
+    return out
+  }
+  const memo = new Map<string, { runs: number; tool: string | undefined }>()
+  const keyOf = (done: readonly boolean[]) => done.map((b) => (b ? '1' : '0')).join('')
+  let budget = SEARCH_BUDGET
+  const fewest = (done: readonly boolean[]): number => {
+    if (done.every(Boolean)) return 0
+    const key = keyOf(done)
+    const hit = memo.get(key)
+    if (hit !== undefined) return hit.runs
+    const cands = candidates(done)
+    let runs = Infinity
+    let tool: string | undefined
+    for (const t of budget > 0 ? cands : cands.slice(0, 1)) {
+      budget--
+      const r = 1 + fewest(run(done, t).done)
+      if (r < runs) {
+        runs = r
+        tool = t
+      }
+    }
+    memo.set(key, { runs, tool })
+    return runs
+  }
+  let done: boolean[] = all.map(() => false)
+  fewest(done)
   const out: PlanOperationDTO[] = []
-  let rest = all
-  while (rest.length > 0) {
-    const ready = rest.filter((x) => [...x.deps].every((d) => done.has(d)))
-    // a dependency cycle cannot happen (references point to earlier design operations)
-    const pool = ready.length > 0 ? ready : rest
-    const next = pool.reduce((best, x) => (less(x, best) ? x : best))
-    out.push(next.op)
-    done.add(next.op.id)
-    rest = rest.filter((x) => x !== next)
+  while (!done.every(Boolean)) {
+    const r = run(done, memo.get(keyOf(done))?.tool ?? candidates(done)[0]!)
+    for (const i of r.seq) out.push(all[i]!.op)
+    done = r.done
   }
   return out
 }
@@ -206,6 +269,75 @@ export function keepWithEdge(
     if (at <= 0 || at >= from) continue
     out.splice(from, 1)
     out.splice(at, 0, x.op)
+  }
+  return out
+}
+
+/**
+ * Rebuild placement of new plan operations once their tools are known (plan-v0.4.md § Machining
+ * order v2): each of `ids`, in list order, moves to the position of its valid range that adds the
+ * fewest tool changes (next to the operations already placed), the nearest to where it stood on
+ * ties. The range: after its dependencies
+ * (a freeing profile also after the operations it frees), before the operations depending on it
+ * and before a freeing profile enclosing it; the freeing bounds only when they leave room (a
+ * user's order that already cut the profile stays). The list must satisfy every dependency
+ * already (`repairOrder`); the placement keeps that.
+ */
+export function placeByTool(
+  planOps: readonly PlanOperationDTO[],
+  part: Part,
+  ids: ReadonlySet<string>,
+  port?: Region2dPort,
+): PlanOperationDTO[] {
+  const list = infos(planOps, part)
+  const freeing = freeingDependencies(planOps, part, port)
+  const out = [...planOps]
+  const pending = new Set(planOps.filter((p) => ids.has(p.id)).map((p) => p.id))
+  for (const x of list) {
+    if (!ids.has(x.op.id)) continue
+    const orig = out.indexOf(x.op)
+    out.splice(orig, 1)
+    const pos = (id: string) => out.findIndex((q) => q.id === id)
+    const after = (ds: Iterable<string>) => Math.max(0, ...[...ds].map((d) => pos(d) + 1))
+    let lo = after(x.deps)
+    let hi = out.length
+    for (const q of list)
+      if (q.deps.has(x.op.id) && pos(q.op.id) >= 0) hi = Math.min(hi, pos(q.op.id))
+    const softLo = Math.max(lo, after(freeing.get(x.op.id) ?? []))
+    let softHi = hi
+    for (const [profile, freed] of freeing) {
+      const k = pos(profile)
+      if (freed.has(x.op.id) && k >= softLo) softHi = Math.min(softHi, k)
+    }
+    if (softLo <= softHi) {
+      lo = softLo
+      hi = softHi
+    }
+    if (lo > hi) hi = lo
+    pending.delete(x.op.id)
+    const tool = runKey(x.op)
+    // the neighbours it would cut between, not counting new operations still to be placed
+    const neighbour = (k: number, step: 1 | -1): string | undefined => {
+      for (let j = k; j >= 0 && j < out.length; j += step)
+        if (!pending.has(out[j]!.id)) return runKey(out[j]!)
+      return undefined
+    }
+    const cost = (k: number) => {
+      const ta = neighbour(k - 1, -1)
+      const tb = neighbour(k, 1)
+      return (
+        Number(ta !== undefined && ta !== tool) +
+        Number(tb !== undefined && tb !== tool) -
+        Number(ta !== undefined && tb !== undefined && ta !== tb)
+      )
+    }
+    let best = Math.min(Math.max(orig, lo), hi)
+    for (let k = lo; k <= hi; k++) {
+      const c = cost(k)
+      const b = cost(best)
+      if (c < b || (c === b && Math.abs(k - orig) < Math.abs(best - orig))) best = k
+    }
+    out.splice(best, 0, x.op)
   }
   return out
 }
@@ -255,19 +387,106 @@ function inside(shape: Shape, part: Part, port: Region2dPort | undefined, p: Vec
   return b !== undefined && p[0] > b.min[0] && p[0] < b.max[0] && p[1] > b.min[1] && p[1] < b.max[1]
 }
 
-/** Where an operation lies: a hole's centre, a shape's bounding-box centre. */
+/** Where an operation lies: a hole's centre, a shape's bounding-box centre, a chamfer's edge's. */
 function centerOf(op: Operation, part: Part, port: Region2dPort | undefined): Vec2 | undefined {
   if (op.kind === 'drilling') return [op.center[0].canonical, op.center[1].canonical]
+  if (op.kind === 'chamfer') {
+    const edge = part.operations.find((o) => o.id === op.edgeOf)
+    return edge === undefined || edge.kind === 'chamfer' ? undefined : centerOf(edge, part, port)
+  }
   if (op.kind !== 'pocket' && op.kind !== 'profile') return undefined
   const b = shapeBox(op.shape, part, port)
   return b === undefined ? undefined : [(b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2]
 }
 
+type Profile = Extract<Operation, { kind: 'profile' }>
+
+/** A profile that cuts through the stock: `inside` or `outside`, or `on` without a depth. */
+export function isThroughProfile(op: Operation): op is Profile {
+  return op.kind === 'profile' && (op.side !== 'on' || op.depth.isNone())
+}
+
+const boxArea = (b: Box) => (b.max[0] - b.min[0]) * (b.max[1] - b.min[1])
+
+/**
+ * Whether a through profile frees `op` (plan-v0.4.md § Machining order v2): a facing always;
+ * another profile when its centre lies inside and its bounding box is smaller; any other operation
+ * when its centre lies inside (the loose-piece test). The face direction is the caller's.
+ */
+function frees(
+  profile: Profile,
+  op: Operation,
+  part: Part,
+  port: Region2dPort | undefined,
+): boolean {
+  if (op.id === profile.id) return false
+  if (op.kind === 'facing') return true
+  const c = centerOf(op, part, port)
+  if (c === undefined || !inside(profile.shape, part, port, c)) return false
+  if (op.kind !== 'profile') return true
+  const own = shapeBox(op.shape, part, port)
+  const outer = shapeBox(profile.shape, part, port)
+  return own !== undefined && outer !== undefined && boxArea(own) < boxArea(outer)
+}
+
+/** The through profiles of a plan operation. */
+function throughProfiles(p: PlanOperationDTO, byId: ReadonlyMap<string, Operation>): Profile[] {
+  return p.designOperationIds
+    .map((d) => byId.get(d))
+    .filter((o): o is Profile => o !== undefined && isThroughProfile(o))
+}
+
+/**
+ * The freeing dependencies of the default order: for each plan operation holding a through
+ * profile, the plan operations of its face direction it frees (`frees`), which come first. One
+ * that would close a cycle with the `on`/edge dependencies (or an earlier freeing one) is dropped.
+ */
+export function freeingDependencies(
+  planOps: readonly PlanOperationDTO[],
+  part: Part,
+  port?: Region2dPort,
+): Map<string, Set<string>> {
+  const byId = new Map(part.operations.map((o) => [o.id, o]))
+  const direction = operationDirections(planOps, part)
+  const graph = new Map(infos(planOps, part).map((x) => [x.op.id, new Set(x.deps)]))
+  const reaches = (from: string, to: string): boolean => {
+    const seen = new Set<string>()
+    const stack = [from]
+    while (stack.length > 0) {
+      const id = stack.pop()!
+      if (id === to) return true
+      if (seen.has(id)) continue
+      seen.add(id)
+      stack.push(...(graph.get(id) ?? []))
+    }
+    return false
+  }
+  const out = new Map<string, Set<string>>()
+  for (const p of planOps) {
+    const profiles = throughProfiles(p, byId)
+    if (profiles.length === 0) continue
+    const freed = new Set<string>()
+    for (const q of planOps) {
+      if (q.id === p.id || direction.get(q.id) !== direction.get(p.id)) continue
+      const inside = q.designOperationIds.some((d) => {
+        const o = byId.get(d)
+        return o !== undefined && profiles.some((f) => frees(f, o, part, port))
+      })
+      if (!inside || reaches(q.id, p.id)) continue
+      freed.add(q.id)
+      graph.get(p.id)?.add(q.id)
+    }
+    if (freed.size > 0) out.set(p.id, freed)
+  }
+  return out
+}
+
 /**
  * Order findings over the machining order of every setup: `plan.order` (error) when an operation
- * precedes one whose surface it starts from; `plan.loosePiece` (warning) when a profile comes
- * before an operation of the same face direction inside its shape (positions are face-frame;
- * general shapes by their placed bounding box, with the 2D port only).
+ * precedes one whose surface it starts from; `plan.loosePiece` (warning) when a through profile
+ * comes before an operation of the same face direction it frees (`frees`: inside its shape, a
+ * smaller profile too; positions are face-frame; general shapes by their placed bounding box,
+ * with the 2D port only).
  */
 export function orderFindings(
   planOps: readonly PlanOperationDTO[],
@@ -303,17 +522,12 @@ export function orderFindings(
         )
   })
   planOps.forEach((p, i) => {
-    const profiles = p.designOperationIds
-      .map((d) => byId.get(d))
-      .filter((o): o is Extract<Operation, { kind: 'profile' }> => o?.kind === 'profile')
-    for (const profile of profiles)
+    for (const profile of throughProfiles(p, byId))
       for (const later of planOps.slice(i + 1)) {
         if (direction.get(later.id) !== direction.get(p.id)) continue
         for (const d of later.designOperationIds) {
           const o = byId.get(d)
-          if (o === undefined || o.kind === 'profile') continue
-          const c = centerOf(o, part, port)
-          if (o.kind === 'facing' || (c !== undefined && inside(profile.shape, part, port, c))) {
+          if (o !== undefined && frees(profile, o, part, port)) {
             out.push({
               code: 'plan.loosePiece',
               severity: 'warning',
