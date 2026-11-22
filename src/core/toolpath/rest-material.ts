@@ -95,8 +95,6 @@ export function findRestMaterial(
   if (inner.isErr()) return Err(inner.unwrapErr())
   let opening: Region = { pieces: [] }
   if (inner.unwrap().pieces.length > 0) {
-    // exactly −R: growing by more fails in the port where the eroded region has concave arcs
-    // of radius R (they invert), see docs/modes/plan-v0.3.md § Implementation (T1)
     const o = port.offset(inner.unwrap(), -R)
     if (o.isErr()) return Err(o.unwrapErr())
     opening = o.unwrap()

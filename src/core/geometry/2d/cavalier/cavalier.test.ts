@@ -3,7 +3,16 @@
 import { describe, expect, it } from 'vitest'
 import { expectErrCode as expectErr } from '../../../../shared/testing/result'
 import type { Vec2 } from '../../model'
-import { arc, line, regionArea, regionLoops, signedArea, type Loop, type Region } from '../model'
+import {
+  arc,
+  line,
+  OFFSET_EPSILON,
+  regionArea,
+  regionLoops,
+  signedArea,
+  type Loop,
+  type Region,
+} from '../model'
 import {
   bowtieSquares,
   bulgeLoop,
@@ -18,7 +27,9 @@ import {
 } from '../testing/fixtures'
 import { nodeCavalierWasm, nodeRegion2d } from '../testing/node-wasm'
 import { crossings, maxOffsetError } from '../testing/oracles'
-import { loadRegion2d, loadRegion2dSync } from '.'
+import { Ok } from '../../../../shared/result'
+import { loadCavalierSync } from './binding'
+import { createCavalierPort, loadRegion2d, loadRegion2dSync } from '.'
 
 const port = nodeRegion2d()
 // 1 nm: near-tangent joins within the library epsilons deviate by |d| · 1e-7 (wave(1e-6))
@@ -148,6 +159,102 @@ describe('offset (spike S1 fixtures)', () => {
       count++
     }
     expect(count).toBeGreaterThan(5)
+  })
+
+  it('grows an eroded dumbbell by more than its concave arcs radius (they collapse)', () => {
+    // the eroded neck ends have concave arcs of radius 3 round the dumbbell's reflex corners;
+    // growing by more used to return nothing (plans/v0.3.md, found in T1)
+    const eroded = port.offset(norm(dumbbell(2)), 3).unwrap()
+    expect(eroded.pieces).toHaveLength(2)
+    const exact = offsetCase(eroded, -3, 2)
+    const past = offsetCase(eroded, -3.0001, 2)
+    expect(regionArea(past)).toBeGreaterThan(regionArea(exact))
+    expect(regionArea(offsetCase(eroded, -4, 2))).toBeGreaterThan(regionArea(past))
+  })
+
+  /**
+   * `d` = r + e past arcs of radius r: never empty, exact (offset oracle) from e = 0.1; closer
+   * to r the library's own epsilons apply (near-tangent joins, OFFSET_EPSILON = 1e-4).
+   */
+  function pastRadius(name: string, region: Region, d: number, e: number, loops?: number): void {
+    const out = port.offset(region, d).unwrap()
+    expect(out.pieces.length, name).toBeGreaterThan(0)
+    expectValid(out)
+    if (loops !== undefined) expect(regionLoops(out), name).toHaveLength(loops)
+    const tol = Math.abs(e) >= 0.1 ? ORACLE : 2 * OFFSET_EPSILON
+    expect(maxOffsetError(regionLoops(region), regionLoops(out), d), name).toBeLessThan(tol)
+  }
+  const JUST_PAST = [1e-6, 1e-5, 3e-5, 1e-4, 2e-4, 1e-3, 0.1, 1, 3]
+
+  it('openings and closings, offset just past their arcs radius', () => {
+    for (const h of [1, 2, 3, 4])
+      for (const R of [2.5, 3, 5, 6.35, 8]) {
+        const open = port.offset(norm(dumbbell(h)), R).unwrap()
+        // a closing of a dumbbell hole: growing the region shrinks the hole, rounding its corners
+        const closed = port.offset(norm(rect(-30, -30, 110, 60), hole(dumbbell(h))), -R).unwrap()
+        for (const e of JUST_PAST) {
+          pastRadius(`open h=${h} R=${R} e=${e}`, open, -(R + e), e)
+          pastRadius(`close h=${h} R=${R} e=${e}`, closed, R + e, e)
+        }
+      }
+  })
+
+  it('concave arcs with reflex ends, a concave fillet and convex corners, just past their radius', () => {
+    const Q = Math.tan(Math.PI / 8)
+    const bite = bulgeLoop([
+      [0, 0, 0],
+      [8, 0, -1],
+      [12, 0, 0],
+      [20, 0, 0],
+      [20, 20, 0],
+      [0, 20, 0],
+    ])
+    const bites = bulgeLoop([
+      [0, 0, 0],
+      [6, 0, -1],
+      [10, 0, -1],
+      [14, 0, 0],
+      [20, 0, 0],
+      [20, 20, 0],
+      [0, 20, 0],
+    ])
+    const filletL = bulgeLoop([
+      [0, 0, 0],
+      [20, 0, 0],
+      [20, 8, 0],
+      [10, 8, -Q],
+      [8, 10, 0],
+      [8, 20, 0],
+      [0, 20, 0],
+    ])
+    for (const [name, l] of [
+      ['bite', bite],
+      ['bites', bites],
+      ['filletL', filletL],
+    ] as const)
+      for (const e of [-1e-3, 0, ...JUST_PAST]) pastRadius(`${name} ${e}`, norm(l), -(2 + e), e, 1)
+    for (const e of [-1e-3, 0, ...JUST_PAST.filter((x) => x < 3)])
+      pastRadius(`rounded rect ${e}`, norm(rect(0, 0, 40, 30, 2)), 2 + e, e, 1)
+  })
+
+  it('a growth that loses a piece is redone in steps, and refused if it still does', () => {
+    const eroded = port.offset(norm(dumbbell(2)), 3).unwrap()
+    const real = loadCavalierSync(nodeCavalierWasm()).unwrap()
+    let calls = 0
+    // the library returning nothing for every growth
+    const failing = createCavalierPort({
+      ...real,
+      boolean: real.boolean.bind(real),
+      plineOffset: real.plineOffset.bind(real),
+      shapeOffset: (loops, d) => {
+        calls++
+        return d < 0 ? Ok([]) : real.shapeOffset(loops, d)
+      },
+    })
+    const err = expectErr(failing.offset(eroded, -4), 'geometry.evaluation')
+    expect(err.issues[0]?.rule).toBe('resultInvalid')
+    // once, then the first step (by the arcs' radius 3) already loses everything
+    expect(calls).toBe(2)
   })
 
   it('zero offset returns the region; a non-finite offset is refused', () => {

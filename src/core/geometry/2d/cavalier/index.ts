@@ -4,7 +4,16 @@
  */
 import { Err, Ok, type AppResult, type AsyncAppResult } from '../../../../shared/result'
 import { chainLength, chainPointAt, closestOnChains, regionContains } from '../measure'
-import { regionLoops, reverseLoop, signedArea, type Loop, type Path, type Region } from '../model'
+import {
+  arcRadius,
+  OFFSET_EPSILON,
+  regionLoops,
+  reverseLoop,
+  signedArea,
+  type Loop,
+  type Path,
+  type Region,
+} from '../model'
 import type { Region2dPort } from '../port'
 import {
   loopInside,
@@ -66,11 +75,48 @@ export function createCavalierPort(binding: CavalierBinding): Region2dPort {
       }))
   }
 
+  /**
+   * One library call; a growth that lost an input piece is redone in steps. The library drops an
+   * arc offset past zero radius and relies on its neighbours' offsets crossing; where they cross
+   * beyond their ends (an opening's concave arcs, round the reflex corner they came from), the
+   * loop came out empty. Doc: docs/architecture/shapes.md#implementation-k1
+   */
   function offset(region: Region, d: number): AppResult<Region> {
     const where = 'region2d.offset'
     if (!Number.isFinite(d))
       return Err(region2dError('offsetInvalid', 'the offset is not finite', where, { d }))
     if (d === 0 || region.pieces.length === 0) return Ok(region)
+    const once = offsetOnce(region, d, where)
+    if (once.isErr() || d > 0 || keepsPieces(region, once.unwrap())) return once
+    const stepped = offsetStepped(region, d, where)
+    if (stepped.isErr() || keepsPieces(region, stepped.unwrap())) return stepped
+    return Err(region2dError('resultInvalid', 'growing the region lost a piece', where, { d }))
+  }
+
+  /**
+   * Offsetting by exactly an arc's radius turns it into a corner, and offsets compose (dilations
+   * and erosions by discs add up), so stepping by the smallest collapsing radius first keeps every
+   * arc from collapsing in a call. A last step under `MIN_FINAL_STEP` is dropped: the library
+   * fails on such small offsets of the cusps the steps leave, and the error stays below its
+   * offset epsilon.
+   */
+  function offsetStepped(region: Region, d: number, where: string): AppResult<Region> {
+    const sign = Math.sign(d)
+    let left = Math.abs(d)
+    let cur = region
+    for (let i = 0; i < MAX_OFFSET_STEPS; i++) {
+      const r = smallestCollapsingRadius(cur, d > 0, left)
+      if (r === undefined) break
+      const step = offsetOnce(cur, sign * r, where)
+      if (step.isErr()) return step
+      cur = step.unwrap()
+      left -= r
+      if (cur.pieces.length === 0) return Ok(cur)
+    }
+    return left < MIN_FINAL_STEP ? Ok(cur) : offsetOnce(cur, sign * left, where)
+  }
+
+  function offsetOnce(region: Region, d: number, where: string): AppResult<Region> {
     const wires: WireLoop[] = []
     for (const p of region.pieces) {
       const outer = toWire(orient(p.outer, true).elements, true, where)
@@ -159,6 +205,56 @@ function doubledBack(w: WireLoop): WireLoop {
   for (let i = 0; i < n - 1; i++) v.push(w.v[3 * i]!, w.v[3 * i + 1]!, w.v[3 * i + 2]!)
   for (let i = n - 1; i >= 1; i--) v.push(w.v[3 * i]!, w.v[3 * i + 1]!, -w.v[3 * (i - 1) + 2]!)
   return { closed: true, v }
+}
+
+/**
+ * Offset steps before the rest goes in one call (each step removes every arc of the smallest
+ * collapsing radius, so this is the number of distinct radii; beyond it the library decides).
+ */
+const MAX_OFFSET_STEPS = 32
+/** Arcs of a smaller radius (mm) are left to the library (after a step they are corners). */
+const MIN_COLLAPSE_RADIUS = OFFSET_EPSILON
+/** An arc collapses when its radius is below the offset by more than this (mm); the library's is 1e-8. */
+const COLLAPSE_EPSILON = 1e-9
+/** A last offset step below this (mm) is dropped (`offsetStepped`). */
+const MIN_FINAL_STEP = OFFSET_EPSILON
+
+/**
+ * Whether a grown region still holds every piece of `input`: a growth contains its input, so
+ * a point of each outer loop must lie in it (the library's failure loses whole loops).
+ */
+function keepsPieces(input: Region, grown: Region): boolean {
+  return input.pieces.every((p) => {
+    const e = p.outer.elements[0]
+    return e === undefined || regionContains(grown, e.a)
+  })
+}
+
+/**
+ * The smallest radius of an arc that an offset by `left` (shrinking when `shrink`) takes past
+ * zero, if any. With the region's interior on the left of every loop (outer loops
+ * counter-clockwise, holes clockwise), shrinking reduces the counter-clockwise arcs' radii and
+ * growing the clockwise ones'.
+ */
+function smallestCollapsingRadius(
+  region: Region,
+  shrink: boolean,
+  left: number,
+): number | undefined {
+  let min: number | undefined
+  const visit = (l: Loop) => {
+    for (const e of l.elements) {
+      if (e.kind !== 'arc' || e.ccw !== shrink) continue
+      const r = arcRadius(e)
+      if (r > MIN_COLLAPSE_RADIUS && r < left - COLLAPSE_EPSILON && (min === undefined || r < min))
+        min = r
+    }
+  }
+  for (const p of region.pieces) {
+    visit(orient(p.outer, true))
+    for (const h of p.holes) visit(orient(h, false))
+  }
+  return min
 }
 
 /** Offset loops (counter-clockwise outer, clockwise holes) to pieces: each hole into the smallest outer around it. */
