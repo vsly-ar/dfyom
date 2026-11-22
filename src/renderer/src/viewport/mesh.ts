@@ -177,3 +177,91 @@ export function unionBox(a: Box | undefined, b: Box | undefined): Box | undefine
 export function meshOperations(mesh: ViewportMesh): string[] {
   return [...new Set(mesh.surfaces.map(surfaceOwner))]
 }
+
+/** Where a surface's normal glyph stands: a point on the surface and its outward unit normal. */
+export interface SurfaceGlyph {
+  readonly surface: SurfaceId
+  readonly at: Vec3
+  readonly normal: Vec3
+}
+
+/**
+ * Normal glyphs of the given (planar) surfaces for pick mode (ui.md#design-and-plan-controls-v02):
+ * each at the area-weighted centroid of its triangles when that lies on the surface, else at the
+ * centroid of the surface's triangle nearest to it (a stock top around a pocket is a ring, its
+ * centroid would sit over the hole); the normal is the area-weighted mean of the triangles'.
+ * Surfaces missing from the mesh get none. Mesh order.
+ */
+export function surfaceGlyphs(
+  mesh: ViewportMesh,
+  surfaces: ReadonlySet<SurfaceId>,
+): SurfaceGlyph[] {
+  const { positions: p, indices } = mesh
+  const wanted = new Map<number, number[]>()
+  mesh.surfaces.forEach((s, i) => {
+    if (surfaces.has(s)) wanted.set(i, [])
+  })
+  const n = triangleCount(mesh)
+  for (let t = 0; t < n; t++) wanted.get(mesh.triangleSurface[t]!)?.push(t)
+  const corner = (t: number, k: number): Vec3 => {
+    const v = indices[3 * t + k]! * 3
+    return [p[v]!, p[v + 1]!, p[v + 2]!]
+  }
+  const out: SurfaceGlyph[] = []
+  for (const [index, tris] of wanted) {
+    if (tris.length === 0) continue
+    let area = 0
+    const c = [0, 0, 0]
+    const nn = [0, 0, 0]
+    const centres: Vec3[] = []
+    for (const t of tris) {
+      const [a, b, d] = [corner(t, 0), corner(t, 1), corner(t, 2)]
+      const cr = cross(sub(b, a), sub(d, a))
+      const w = Math.hypot(...cr) / 2
+      const centre: Vec3 = [
+        (a[0] + b[0] + d[0]) / 3,
+        (a[1] + b[1] + d[1]) / 3,
+        (a[2] + b[2] + d[2]) / 3,
+      ]
+      centres.push(centre)
+      area += w
+      for (let k = 0; k < 3; k++) {
+        c[k]! += centre[k]! * w
+        nn[k]! += cr[k]!
+      }
+    }
+    const len = Math.hypot(nn[0]!, nn[1]!, nn[2]!)
+    if (area <= 0 || len === 0) continue
+    const centroid: Vec3 = [c[0]! / area, c[1]! / area, c[2]! / area]
+    const inside = tris.some((t) => inTriangle(centroid, corner(t, 0), corner(t, 1), corner(t, 2)))
+    const at = inside
+      ? centroid
+      : centres.reduce((best, x) => (dist2(x, centroid) < dist2(best, centroid) ? x : best))
+    out.push({
+      surface: mesh.surfaces[index]!,
+      at,
+      normal: [nn[0]! / len, nn[1]! / len, nn[2]! / len],
+    })
+  }
+  return out
+}
+
+const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+const cross = (a: Vec3, b: Vec3): Vec3 => [
+  a[1] * b[2] - a[2] * b[1],
+  a[2] * b[0] - a[0] * b[2],
+  a[0] * b[1] - a[1] * b[0],
+]
+const dot = (a: Vec3, b: Vec3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+const dist2 = (a: Vec3, b: Vec3): number => dot(sub(a, b), sub(a, b))
+
+/** True if `q` (in the triangle's plane) lies in the triangle `a b c` (edges included). */
+function inTriangle(q: Vec3, a: Vec3, b: Vec3, c: Vec3): boolean {
+  const nrm = cross(sub(b, a), sub(c, a))
+  const eps = -1e-9 * dot(nrm, nrm)
+  return (
+    dot(cross(sub(b, a), sub(q, a)), nrm) >= eps &&
+    dot(cross(sub(c, b), sub(q, b)), nrm) >= eps &&
+    dot(cross(sub(a, c), sub(q, c)), nrm) >= eps
+  )
+}

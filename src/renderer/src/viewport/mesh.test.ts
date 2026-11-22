@@ -4,6 +4,7 @@ import {
   meshBounds,
   meshOperations,
   surfaceAtFace,
+  surfaceGlyphs,
   surfaceOwner,
   unionBox,
   type ViewportMesh,
@@ -141,5 +142,34 @@ describe('sample mesh', () => {
         'drill2.bottom',
       ]),
     )
+  })
+})
+
+describe('surfaceGlyphs (pick mode normal glyphs)', () => {
+  it('stands at the centroid with the outward normal, only for the asked surfaces', () => {
+    const glyphs = surfaceGlyphs(tiny, new Set(['pocket1.floor', 'pocket9.floor']))
+    expect(glyphs).toHaveLength(1)
+    expect(glyphs[0]!.surface).toBe('pocket1.floor')
+    expect(glyphs[0]!.at.map((x) => +x.toFixed(6))).toEqual([0.5, 0.5, 0])
+    expect(glyphs[0]!.normal).toEqual([0, 0, 1])
+    const side = surfaceGlyphs(tiny, new Set(['profile1.tab[0].top']))[0]!
+    expect(side.normal.map((x) => +x.toFixed(6))).toEqual([1, 0, 0])
+  })
+
+  it('moves onto the surface when the centroid falls in a hole', () => {
+    // two triangles far apart: the centroid lies between them, off the surface
+    const split: ViewportMesh = {
+      // prettier-ignore
+      positions: new Float32Array([
+        0, 0, 0,  2, 0, 0,  0, 2, 0,
+        10, 0, 0,  11, 0, 0,  10, 1, 0,
+      ]),
+      indices: new Uint32Array([0, 1, 2, 3, 4, 5]),
+      triangleSurface: new Uint32Array([0, 0]),
+      surfaces: ['stock.top'],
+    }
+    const [g] = surfaceGlyphs(split, new Set(['stock.top']))
+    // the larger triangle's centre is nearer the area-weighted centroid
+    expect(g!.at.map((x) => +x.toFixed(6))).toEqual([0.666667, 0.666667, 0])
   })
 })

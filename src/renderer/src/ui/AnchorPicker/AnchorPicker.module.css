@@ -1,0 +1,119 @@
+/* AnchorPicker: 3 × 3 points over the feature's outline; the chosen one is a sliding amber dot.
+   Cells are 24 px (the pointer-target minimum). Doc: docs/conventions/ui.md#design-and-plan-controls-v02 */
+.root {
+  --cell: 1.5rem;
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: repeat(3, var(--cell));
+  grid-template-rows: repeat(3, var(--cell));
+  flex: none;
+}
+
+/* the bounding box (or circle) through the outer points' centres */
+.outline {
+  position: absolute;
+  inset: calc(var(--cell) / 2);
+  border: 1px solid var(--border-control);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.root[data-shape='circle'] .outline {
+  border-radius: var(--radius-full);
+}
+
+.point {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: var(--cell);
+  height: var(--cell);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  cursor: pointer;
+  transition: background-color var(--motion-fast);
+}
+
+.point:hover {
+  background: var(--bg-hover);
+}
+
+.point:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  border: 1.5px solid var(--text-muted);
+  background: var(--bg-field);
+  transition:
+    transform var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast);
+}
+
+.point:hover .dot {
+  transform: scale(1.2);
+  border-color: var(--text);
+}
+
+.point[aria-checked='true'] .dot {
+  border-color: transparent;
+  background: transparent;
+}
+
+/* one amber dot that slides to the chosen point */
+.thumb {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 11px;
+  height: 11px;
+  margin: calc((var(--cell) - 11px) / 2);
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-border);
+  transform: translate(calc(var(--col) * var(--cell)), calc(var(--row) * var(--cell)));
+  transition: transform var(--motion-base) var(--ease-emphasized);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.root[aria-disabled='true'] .point {
+  cursor: not-allowed;
+}
+
+.root[aria-disabled='true'] .point:hover {
+  background: transparent;
+}
+
+.root[aria-disabled='true'] .point:hover .dot {
+  transform: none;
+  border-color: var(--text-muted);
+}
+
+.root[aria-disabled='true'] .outline {
+  border-style: dashed;
+}
+
+.root[aria-disabled='true'] .thumb {
+  background: var(--text-faint);
+  box-shadow: none;
+}
+
+.withCaption {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.caption {
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}

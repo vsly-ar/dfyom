@@ -1,8 +1,8 @@
-import { screen } from '@testing-library/react'
+import { screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
 import { Field } from '../Field/Field'
-import { Select } from './Select'
+import { groupOptions, Select } from './Select'
 
 const TOOLS = [
   { value: 't1', label: 'T1 · Ø6 flat end mill 2F' },
@@ -31,6 +31,32 @@ describe('Select', () => {
     await user.keyboard('{ArrowDown}{Enter}')
     expect(onChange).toHaveBeenCalledWith('t2')
     expect(screen.getByRole('combobox', { name: 'Tool' })).toHaveTextContent('T2 · Ø3 drill')
+  })
+
+  it('lists options in labelled groups, in order of first use', async () => {
+    const options = [
+      { value: 'stock.top', label: 'Stock top', group: 'Top' },
+      { value: 'stock.side[1]', label: 'Stock right', group: 'Right side' },
+      { value: 'pocket1.floor', label: 'Pocket 1 floor', group: 'Top' },
+    ]
+    expect(groupOptions(options).map((g) => [g.group, g.options.map((o) => o.value)])).toEqual([
+      ['Top', ['stock.top', 'pocket1.floor']],
+      ['Right side', ['stock.side[1]']],
+    ])
+    const { user } = renderUi(<Select aria-label="On" options={options} defaultValue="stock.top" />)
+    await user.tab()
+    await user.keyboard('{Enter}')
+    const list = await screen.findByRole('listbox')
+    const groups = within(list).getAllByRole('group')
+    expect(
+      groups.map((g) =>
+        within(g)
+          .getAllByRole('option')
+          .map((o) => o.textContent),
+      ),
+    ).toEqual([['Stock top', 'Pocket 1 floor'], ['Stock right']])
+    expect(within(groups[1]!).getByText('Right side')).toBeInTheDocument()
+    await expectNoAxeViolations()
   })
 
   it('has no axe violations', async () => {

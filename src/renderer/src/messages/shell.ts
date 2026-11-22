@@ -75,6 +75,9 @@ export const shellMessages = {
       port === undefined
         ? 'Off: agents on this computer cannot connect to DFYOM.'
         : `Agents on this computer can connect (port ${port}). Turning it off disconnects them.`,
+    defaultAnchor: 'Default anchor',
+    defaultAnchorHint:
+      'Which point of a new pocket or profile its position gives, seen from above. Agents choose their own.',
     done: 'Done',
   },
 

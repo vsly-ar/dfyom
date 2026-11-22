@@ -1,5 +1,12 @@
 // The renderer's component library: screens import from here, never from Radix directly.
 // Doc: docs/conventions/ui.md#components
+export {
+  ANCHOR_GRID,
+  AnchorPicker,
+  type AnchorAxisPoint,
+  type AnchorPickerProps,
+  type AnchorValue,
+} from './AnchorPicker/AnchorPicker'
 export { Button, type ButtonProps, type ButtonSize, type ButtonVariant } from './Button/Button'
 export { Checkbox, type CheckboxProps, type CheckedState } from './Checkbox/Checkbox'
 export { ConfirmDialog, type ConfirmDialogProps } from './ConfirmDialog/ConfirmDialog'
@@ -64,7 +71,7 @@ export {
 } from './QuantityInput/QuantityInput'
 export type { InheritedTolerance } from './QuantityInput/reading'
 export { SegmentedControl, type SegmentedControlProps } from './SegmentedControl/SegmentedControl'
-export { Select, type SelectOption, type SelectProps } from './Select/Select'
+export { groupOptions, Select, type SelectOption, type SelectProps } from './Select/Select'
 export { StatusChip, type StatusChipProps, type StatusTone } from './StatusChip/StatusChip'
 export { StopControl, type StopControlProps } from './StopControl/StopControl'
 export { Switch, type SwitchProps } from './Switch/Switch'

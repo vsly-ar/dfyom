@@ -1,5 +1,6 @@
 // Select: one value from a list (strategy, tool). Looks like a Field input in the UI font with a
-// chevron; the list is a raised menu. Doc: docs/conventions/ui.md#inventory-v01
+// chevron; the list is a raised menu, optionally in labelled groups (`on` by face direction).
+// Doc: docs/conventions/ui.md#inventory-v01, #design-and-plan-controls-v02
 import { Check, ChevronDown } from 'lucide-react'
 import { Select as RadixSelect } from 'radix-ui'
 import type { Ref } from 'react'
@@ -10,6 +11,21 @@ export interface SelectOption<V extends string> {
   value: V
   label: string
   disabled?: boolean
+  /** Group heading; options with the same group are listed together, in order of first use. */
+  group?: string
+}
+
+/** Options by group, in order of first appearance (ungrouped ones under `undefined`). */
+export function groupOptions<O extends { group?: string }>(
+  options: readonly O[],
+): { group: string | undefined; options: O[] }[] {
+  const groups: { group: string | undefined; options: O[] }[] = []
+  for (const o of options) {
+    const g = groups.find((x) => x.group === o.group)
+    if (g) g.options.push(o)
+    else groups.push({ group: o.group, options: [o] })
+  }
+  return groups
 }
 
 export interface SelectProps<V extends string> {
@@ -27,6 +43,22 @@ export interface SelectProps<V extends string> {
   /** Layout only; appended to the trigger's class. */
   className?: string | undefined
   ref?: Ref<HTMLButtonElement>
+}
+
+function item<V extends string>(o: SelectOption<V>): React.JSX.Element {
+  return (
+    <RadixSelect.Item
+      key={o.value}
+      value={o.value}
+      disabled={o.disabled ?? false}
+      className={styles['item']}
+    >
+      <RadixSelect.ItemText>{o.label}</RadixSelect.ItemText>
+      <RadixSelect.ItemIndicator className={styles['indicator']}>
+        <Check aria-hidden="true" />
+      </RadixSelect.ItemIndicator>
+    </RadixSelect.Item>
+  )
 }
 
 export function Select<V extends string>({
@@ -63,19 +95,16 @@ export function Select<V extends string>({
       <RadixSelect.Portal container={container}>
         <RadixSelect.Content className={styles['content']} position="popper" sideOffset={4}>
           <RadixSelect.Viewport className={styles['viewport']}>
-            {options.map((o) => (
-              <RadixSelect.Item
-                key={o.value}
-                value={o.value}
-                disabled={o.disabled ?? false}
-                className={styles['item']}
-              >
-                <RadixSelect.ItemText>{o.label}</RadixSelect.ItemText>
-                <RadixSelect.ItemIndicator className={styles['indicator']}>
-                  <Check aria-hidden="true" />
-                </RadixSelect.ItemIndicator>
-              </RadixSelect.Item>
-            ))}
+            {groupOptions(options).map((g, i) =>
+              g.group === undefined ? (
+                g.options.map(item)
+              ) : (
+                <RadixSelect.Group key={`${i}:${g.group}`} className={styles['group']}>
+                  <RadixSelect.Label className={styles['label']}>{g.group}</RadixSelect.Label>
+                  {g.options.map(item)}
+                </RadixSelect.Group>
+              ),
+            )}
           </RadixSelect.Viewport>
         </RadixSelect.Content>
       </RadixSelect.Portal>

@@ -8,6 +8,7 @@
 import { Crosshair } from 'lucide-react'
 import type { FieldKind } from '../../../../core/design/operation'
 import type { OperationDTO } from '../../../../core/design/part.dto'
+import { STOCK_FACE } from '../../../../core/geometry/face'
 import type { DfmWarning } from '../../../../core/geometry/model'
 import type { UnitSystem } from '../../../../core/project/document'
 import type { QuantityKind } from '../../../../core/quantity/units'
@@ -16,6 +17,7 @@ import { designMessages } from '../../messages/design'
 import { dfmMessages } from '../../messages/dfm'
 import { useUi } from '../../shell/ShellContext'
 import {
+  AnchorPicker,
   Field,
   FieldIcon,
   IconButton,
@@ -27,10 +29,14 @@ import {
 } from '../../ui'
 import styles from './Design.module.css'
 import {
+  axisNames,
   defaultUnit,
+  isFormula,
+  onChoices,
   quantityAt,
+  referenceChoices,
   shapeKindArgs,
-  surfaceChoices,
+  surfaceDirection,
   updateArgs,
   type DesignPart,
 } from './model'
@@ -122,7 +128,10 @@ export function OperationFields({
     case 'facing':
       return g(
         t.groups.depth,
-        <ParamField ctx={ctx} path="depth" label={t.depth} kind="length" icon="depth" />,
+        <>
+          <OnField ctx={ctx} />
+          <ParamField ctx={ctx} path="depth" label={t.depth} kind="length" icon="depth" />
+        </>,
       )
     case 'pocket':
       return (
@@ -164,8 +173,20 @@ export function OperationFields({
           {g(
             t.groups.position,
             <>
-              <ParamField ctx={ctx} path="center.0" label={t.centerX} kind="length" icon="length" />
-              <ParamField ctx={ctx} path="center.1" label={t.centerY} kind="length" icon="width" />
+              <ParamField
+                ctx={ctx}
+                path="center.0"
+                label={t.position('Center', axes(ctx).u)}
+                kind="length"
+                icon="length"
+              />
+              <ParamField
+                ctx={ctx}
+                path="center.1"
+                label={t.position('Center', axes(ctx).v)}
+                kind="length"
+                icon="width"
+              />
               <OnField ctx={ctx} />
             </>,
           )}
@@ -214,6 +235,7 @@ export function OperationFields({
       return (
         <>
           <ShapeGroup ctx={ctx} level={level}>
+            <OnField ctx={ctx} />
             <div className={styles['choice']}>
               <span className={styles['caption']} aria-hidden="true">
                 {t.side}
@@ -303,6 +325,7 @@ function ShapeGroup({
   const op = ctx.op
   if (!('shape' in op)) return null
   const shape = op.shape
+  const names = axes(ctx)
   return (
     <Group title={t.groups.shape} level={level}>
       {children}
@@ -323,12 +346,37 @@ function ShapeGroup({
           }}
         />
       </div>
-      <ParamField ctx={ctx} path="shape.center.0" label={t.centerX} kind="length" icon="length" />
-      <ParamField ctx={ctx} path="shape.center.1" label={t.centerY} kind="length" icon="width" />
+      <AnchorField ctx={ctx} />
+      <ParamField
+        ctx={ctx}
+        path="shape.center.0"
+        label={t.position('Position', names.u)}
+        kind="length"
+        icon="length"
+      />
+      <ParamField
+        ctx={ctx}
+        path="shape.center.1"
+        label={t.position('Position', names.v)}
+        kind="length"
+        icon="width"
+      />
       {shape.kind === 'rectangle' ? (
         <>
-          <ParamField ctx={ctx} path="shape.length" label={t.length} kind="length" icon="length" />
-          <ParamField ctx={ctx} path="shape.width" label={t.width} kind="length" icon="width" />
+          <ParamField
+            ctx={ctx}
+            path="shape.length"
+            label={t.lengthAlong(names.u)}
+            kind="length"
+            icon="length"
+          />
+          <ParamField
+            ctx={ctx}
+            path="shape.width"
+            label={t.widthAlong(names.v)}
+            kind="length"
+            icon="width"
+          />
         </>
       ) : (
         <ParamField ctx={ctx} path="shape.diameter" label={t.diameter} kind="length" icon="width" />
@@ -350,6 +398,51 @@ function ShapeGroup({
 const indexOf = (ctx: OperationFieldsContext) =>
   ctx.part.dto.operations.findIndex((o) => o.id === ctx.op.id)
 
+/** Direction of the operation's `on` face. */
+const directionOf = (ctx: OperationFieldsContext) => surfaceDirection(ctx.part.table, onOf(ctx.op))
+
+/** The operation's `on` (absent on a facing or profile = the stock top, design-v0.2.md). */
+const onOf = (op: OperationDTO): string => op.on ?? STOCK_FACE['+z']
+
+/** Axis names of the operation's face frame in labels (X/Y on the top, u/v elsewhere). */
+const axes = (ctx: OperationFieldsContext) => axisNames(directionOf(ctx))
+
+/**
+ * The placement anchor (task F2): which of the nine points of the shape's bounding box the
+ * position fields give, beside them. Choosing re-anchors without moving the feature (one
+ * `anchor` update, one undo step). Disabled with its reason while a coordinate is a formula.
+ */
+function AnchorField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Element | null {
+  const { op } = ctx
+  if (!('shape' in op)) return null
+  const shape = op.shape
+  const direction = directionOf(ctx)
+  const value = shape.anchor ?? { u: 'centre' as const, v: 'centre' as const }
+  const formula = isFormula(shape.center[0]) || isFormula(shape.center[1])
+  const name = designMessages.anchorPoint
+  const messages: FieldMessage[] = [
+    ...ctx.errors
+      .filter((e) => e.path === 'anchor')
+      .map((e, i): FieldMessage => ({ id: `error-${i}`, severity: 'error', text: e.text })),
+    ...(formula && !ctx.readOnly
+      ? [{ id: 'formula', severity: 'note' as const, text: t.anchorFormula }]
+      : []),
+  ]
+  return (
+    <Field label={t.anchor} kind="toggle" messages={messages} readOnly={ctx.readOnly}>
+      <AnchorPicker
+        label={t.anchor}
+        value={value}
+        shape={shape.kind}
+        disabled={ctx.readOnly || formula}
+        caption={name(direction, value)}
+        pointLabel={(p) => name(direction, p)}
+        onValueChange={(anchor) => ctx.send({ anchor }, 'anchor')}
+      />
+    </Field>
+  )
+}
+
 /** One quantity parameter: stored value, commit = one update command, warnings and errors here. */
 function ParamField({
   ctx,
@@ -369,12 +462,8 @@ function ParamField({
   const { part, op } = ctx
   const index = indexOf(ctx)
   const table = part.table
-  const references = table
-    ? surfaceChoices(part.dto, table, index, false).map((c) => ({
-        id: `${c.id}.z`,
-        label: c.label,
-      }))
-    : []
+  const choices = table ? referenceChoices(part.dto, table, index) : []
+  const references = choices.map((c) => ({ id: c.id, label: c.label }))
   const name = (id: string) => part.dto.operations.find((o) => o.id === id)?.name ?? id
   const messages: FieldMessage[] = [
     ...ctx.errors
@@ -420,8 +509,11 @@ function ParamField({
               setPick({
                 owner: fieldId,
                 field: label,
-                eligible: new Set(references.map((r) => r.id.slice(0, -2))),
-                onPick: (surface) => insert(`${surface}.z`),
+                eligible: new Set(choices.map((c) => c.surface)),
+                onPick: (surface) => {
+                  const c = choices.find((x) => x.surface === surface)
+                  if (c) insert(c.id)
+                },
               })
             },
           }
@@ -430,14 +522,16 @@ function ParamField({
   )
 }
 
-/** `on`: the surface the operation starts from – a list of eligible surfaces, or pick it. */
+/**
+ * `on`: the face the operation starts from – a list of its face targets grouped by direction, or
+ * pick it in the viewport (every direction, with a normal glyph; task F1).
+ */
 function OnField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Element | null {
   const pick = useUi((s) => s.pick)
   const setPick = useUi((s) => s.setPick)
   const { part, op } = ctx
-  // the `on` of a facing or profile (a stock face) gets its control with face picking (task F1)
-  if ((op.kind !== 'pocket' && op.kind !== 'drilling') || part.table === undefined) return null
-  const choices = surfaceChoices(part.dto, part.table, indexOf(ctx), true)
+  if (part.table === undefined) return null
+  const choices = onChoices(part.dto, part.table, indexOf(ctx), op.kind)
   const owner = `${op.id}:on`
   const picking = pick?.owner === owner
   const messages: FieldMessage[] = [
@@ -456,8 +550,12 @@ function OnField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Element | 
     <div className={styles['onRow']}>
       <Field label={t.on} messages={messages} readOnly={ctx.readOnly}>
         <Select
-          options={choices.map((c) => ({ value: c.id, label: t.surface(c.id, c.label) }))}
-          value={op.on}
+          options={choices.map((c) => ({
+            value: c.id,
+            label: t.surface(c.id, c.label),
+            group: c.group,
+          }))}
+          value={onOf(op)}
           disabled={ctx.readOnly}
           onValueChange={(on) => commit(ctx, 'on', on)}
         />

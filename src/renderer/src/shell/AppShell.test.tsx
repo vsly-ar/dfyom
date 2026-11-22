@@ -151,6 +151,12 @@ describe('AppShell', () => {
     ])
     await user.click(within(dialog).getByRole('radio', { name: 'System' }))
     expect(document.documentElement.dataset['theme']).toBeUndefined()
+    // the default anchor of new pockets and profiles: nine points named from above (task F2)
+    const anchor = within(dialog).getByRole('radiogroup', { name: 'Default anchor' })
+    expect(within(anchor).getByRole('radio', { name: 'Centre' })).toBeChecked()
+    await user.click(within(anchor).getByRole('radio', { name: 'Front left' }))
+    expect(bridge.settingsPatches.at(-1)).toEqual({ defaultAnchor: { u: 'min', v: 'min' } })
+    expect(within(anchor).getByRole('radio', { name: 'Front left' })).toBeChecked()
   })
 
   it('follows settings changed in another window', async () => {

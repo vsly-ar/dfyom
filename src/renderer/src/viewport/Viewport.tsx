@@ -29,12 +29,14 @@ import { paletteFrom, PALETTE_TOKENS, type SurfaceState } from './colours'
 import {
   meshBounds,
   meshOperations,
+  surfaceGlyphs,
   unionBox,
   type Box,
   type SurfaceTarget,
   type Vec3,
   type ViewportMesh,
 } from './mesh'
+import type { AnchorOverlay, FrameOverlay } from './Overlays'
 import type { RunScene } from './RunLayer'
 import { CameraControlsImpl, Scene } from './Scene'
 import { linesBounds } from './toolpath-lines'
@@ -68,6 +70,10 @@ export interface ViewportProps {
   outline?: readonly (readonly Vec3[])[] | null
   /** Error marker at the failing operation (evaluation `failed`). */
   marker?: Vec3 | null
+  /** Face-frame axes of the selected operation's face (`u`, `v`, labelled; task F1). */
+  frame?: FrameOverlay | null
+  /** Anchor marker: the point the selected feature's position gives (task F2). */
+  anchor?: AnchorOverlay | null
   /** Operations drawn with a light `--info` tint (edited in the plan: the plan scene, task E3b). */
   tinted?: ReadonlySet<string> | null
   /** Click on a surface → its target; click on empty space or Escape → `null`. */
@@ -141,6 +147,8 @@ export function Viewport({
   selectedOperation = null,
   outline = null,
   marker = null,
+  frame = null,
+  anchor = null,
   tinted = null,
   onSelect,
   onHover,
@@ -182,6 +190,13 @@ export function Viewport({
         runLines ? linesBounds(runLines) : undefined,
       ),
     [mesh, stock, runLines],
+  )
+
+  // pick mode: a normal glyph on every eligible face (ui.md#design-and-plan-controls-v02)
+  const pickEligible = pick?.eligible
+  const glyphs = useMemo(
+    () => (mesh && pickEligible ? surfaceGlyphs(mesh, pickEligible) : null),
+    [mesh, pickEligible],
   )
 
   const hoveredRef = useRef<SurfaceTarget | undefined>(undefined)
@@ -352,6 +367,11 @@ export function Viewport({
           surfaceState={surfaceState}
           outline={status === 'pending' ? outline : null}
           marker={status === 'failed' ? marker : null}
+          glyphs={glyphs}
+          hovered={pick && hovered && pick.eligible.has(hovered.surface) ? hovered.surface : null}
+          frame={frame}
+          anchor={anchor}
+          reducedMotion={reducedMotion}
           controlsRef={controls}
           run={run}
           onHover={hover}

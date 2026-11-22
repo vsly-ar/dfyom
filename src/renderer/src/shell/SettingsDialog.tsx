@@ -1,11 +1,13 @@
-// Settings dialog: theme (Light / Dark / System), reduced motion, "Allow local agents to connect".
+// Settings dialog: theme (Light / Dark / System), reduced motion, "Allow local agents to connect",
+// the default placement anchor of new pockets and profiles (task F2).
 // Changes apply at once to every window and persist (main's settings store).
 // Doc: docs/conventions/ui.md#settings
 import { useEffect, useId, useState } from 'react'
 import type { LocalHttpState } from '../../../shared/preload-api'
 import { THEMES, type ThemeSetting } from '../../../shared/settings'
+import { designMessages } from '../messages/design'
 import { shellMessages } from '../messages/shell'
-import { Button, Dialog, DialogClose, SegmentedControl, Switch } from '../ui'
+import { AnchorPicker, Button, Dialog, DialogClose, SegmentedControl, Switch } from '../ui'
 import styles from './AppShell.module.css'
 import { useSettings, useShell, useUi } from './ShellContext'
 
@@ -20,6 +22,7 @@ export function SettingsDialog(): React.JSX.Element {
   const [http, setHttp] = useState<LocalHttpState | undefined>(undefined)
   const motionHint = useId()
   const agentsHint = useId()
+  const anchorHint = useId()
 
   // the server's state follows the setting asynchronously: re-read it when either changes
   useEffect(() => {
@@ -82,6 +85,23 @@ export function SettingsDialog(): React.JSX.Element {
           />
           <p id={agentsHint} className={styles['settingHint']}>
             {m.allowAgentsHint(http?.enabled === true ? http.port : undefined)}
+          </p>
+        </div>
+        <div className={styles['settingRow']}>
+          <span className={styles['settingLabel']} aria-hidden="true">
+            {m.defaultAnchor}
+          </span>
+          {/* named in the top face's frame: new operations start on the stock top */}
+          <AnchorPicker
+            label={m.defaultAnchor}
+            value={settings.defaultAnchor}
+            caption={designMessages.anchorPoint('+z', settings.defaultAnchor)}
+            pointLabel={(p) => designMessages.anchorPoint('+z', p)}
+            onValueChange={(defaultAnchor) => update({ defaultAnchor })}
+            aria-describedby={anchorHint}
+          />
+          <p id={anchorHint} className={styles['settingHint']}>
+            {m.defaultAnchorHint}
           </p>
         </div>
       </div>
