@@ -18,6 +18,8 @@ export interface PendingChangeView {
   readonly kind: 'design' | 'plan' | 'library'
   readonly partId?: string
   readonly operationId?: string
+  /** A named shape of the part (design keys of shapes). */
+  readonly shapeId?: string
   readonly planId?: string
   readonly field?: string
   /** "Pocket 1: depth", "Drilling 2 added" (core label). */

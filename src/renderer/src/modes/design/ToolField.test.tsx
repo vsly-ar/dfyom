@@ -8,7 +8,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import type { Dispatcher } from '../../../../core/commands/dispatcher'
-import type { OperationDTO } from '../../../../core/design/part.dto'
+import type { OperationDTO, PartDTO } from '../../../../core/design/part.dto'
 import { App } from '../../App'
 import { createShell, ShellProvider } from '../../shell/ShellContext'
 import type { ToolChangeView } from '../../state/pending'
@@ -269,10 +269,18 @@ describe('tool field helpers', () => {
       revision: 1,
       ...over,
     })
-    const pending = (over: object) => operationPending([c(over)], 'part1', 'drilling1')
+    const part = {
+      id: 'part1',
+      name: 'P',
+      stock: 's',
+      operations: [{ id: 'drilling1' }, { id: 'pocket1' }],
+    } as unknown as PartDTO
+    const pending = (over: object) => operationPending([c(over)], part, 'drilling1')
     expect(pending({ operationId: 'drilling1', field: 'diameter' })).toBe(true)
     expect(pending({ operationId: 'pocket1', field: 'depth' })).toBe(false)
     expect(pending({ field: 'stock' })).toBe(true)
     expect(pending({ field: 'name' })).toBe(false)
+    // a shape key: only the operations using the shape (none before v0.3 K3), never all
+    expect(pending({ shapeId: 'shape1', field: 'added' })).toBe(false)
   })
 })

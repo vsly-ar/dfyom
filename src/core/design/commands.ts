@@ -74,6 +74,7 @@ import { DfmWarningSchema, libraryTools, partWarnings } from './warnings'
 import { ToolArg, toolFromArg, type ToolArgs } from './tool-args'
 import { designToolToDTO, type DesignTool } from './tool'
 import { reanchor } from './anchor'
+import { designChangeTargets } from './shape-users'
 
 // ── arg schemas ───────────────────────────────────────────────────────────────────────────
 
@@ -848,14 +849,15 @@ const TOOL_RULES: ReadonlySet<string> = new Set(['dfm.toolUnfit', 'dfm.toolNotIn
 
 /**
  * Operations of a part whose tool Apply chooses again: unlocked, with a pending change (a new
- * part or a changed stock: all of them), as the `design.toolAutoChoice` hook targets them
- * (docs/architecture/apply.md#queries-for-pending-state).
+ * part or a changed stock: all of them; a shape: the operations using it), as the
+ * `design.toolAutoChoice` hook targets them (docs/architecture/apply.md#queries-for-pending-state).
  */
 function choosesAgain(
   part: {
     readonly operations: readonly {
       readonly id: string
       readonly toolLocked?: boolean | undefined
+      readonly shape?: unknown
     }[]
   },
   partId: string,
@@ -864,9 +866,7 @@ function choosesAgain(
   const out = new Set<string>()
   for (const c of pending) {
     if (c.kind !== 'design' || c.partId !== partId) continue
-    if (c.operationId !== undefined) out.add(c.operationId)
-    else if (c.field === 'stock' || c.field === 'added')
-      for (const op of part.operations) out.add(op.id)
+    for (const id of designChangeTargets(part, c)) out.add(id)
   }
   for (const op of part.operations) if (op.toolLocked === true) out.delete(op.id)
   return out

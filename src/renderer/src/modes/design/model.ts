@@ -10,7 +10,7 @@ import type {
   OperationDTO,
   OperationKind,
   PartDTO,
-  ShapeDTO,
+  OperationShapeDTO,
 } from '../../../../core/design/part.dto'
 import { isExpression } from '../../../../core/design/anchor'
 import {
@@ -93,7 +93,7 @@ export function defaultUnit(kind: FieldKind, units: UnitSystem): UnitId {
 const src = (q: QuantityDTO): string => q.source
 
 /** The command args of a shape (as entered), from its DTO. */
-export function shapeArgs(shape: ShapeDTO): Record<string, unknown> {
+export function shapeArgs(shape: OperationShapeDTO): Record<string, unknown> {
   const center = [src(shape.center[0]), src(shape.center[1])]
   return shape.kind === 'rectangle'
     ? {
@@ -140,7 +140,10 @@ export function updateArgs(
  * (design-v0.2.md#implementation-task-a2), so the anchor point stays where it was: a front-left
  * anchored rectangle becomes a circle in the same front-left corner, as a size edit would.
  */
-export function shapeKindArgs(shape: ShapeDTO, kind: ShapeDTO['kind']): Record<string, unknown> {
+export function shapeKindArgs(
+  shape: OperationShapeDTO,
+  kind: OperationShapeDTO['kind'],
+): Record<string, unknown> {
   const center = [src(shape.center[0]), src(shape.center[1])]
   if (kind === 'circle')
     return {
