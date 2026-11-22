@@ -134,6 +134,8 @@ describe('reference model UI', () => {
     const row = within(referenceGroup()).getByRole('button', { name: /^box/ })
     expect(row).toHaveAttribute('aria-pressed', 'true') // selected: the inspector follows
     expect(row).toHaveTextContent('12 triangles')
+    // the name is its own line (ellipsis with a tooltip in a narrow navigator), the count under it
+    expect(within(row).getByTitle('box')).toHaveTextContent(/^box$/)
     expect(within(inspector()).getByRole('heading', { name: 'box' })).toBeInTheDocument()
     expect(within(inspector()).getByText('STL · 12 triangles · 20 × 10 × 5')).toBeInTheDocument()
     expect(within(inspector()).getByText(/Unit guess: Read as mm/)).toBeInTheDocument()

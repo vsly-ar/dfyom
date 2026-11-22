@@ -122,10 +122,17 @@ describe('Setup panel', { timeout: 20_000 }, () => {
     await expectNoAxeViolations()
   })
 
-  it('reorders setups with the buttons and Alt+↑/↓; ↑/↓ move the focus over every row', async () => {
+  it('reorders setups from their menu and with Alt+↑/↓; ↑/↓ move the focus over every row', async () => {
     const t = await renderSetups()
     const [bottom, top] = t.plan().setups
-    await t.user.click(within(t.nav()).getByRole('button', { name: 'Move setup Bottom down' }))
+    // the row's only action button is its menu: nothing overlays the name or the subtitle
+    expect(within(t.nav()).queryByRole('button', { name: /^Move setup/ })).toBeNull()
+    await openMenu(t, within(t.nav()).getByRole('button', { name: 'Actions for setup Bottom' }))
+    expect(await screen.findByRole('menuitem', { name: /^Move up/ })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    )
+    await t.user.click(await screen.findByRole('menuitem', { name: /^Move down/ }))
     await waitFor(() => expect(t.plan().setups.map((s) => s.name)).toEqual(['Top', 'Bottom']))
     expect(t.callsOf('plan.setup.move')).toEqual([
       { planId: t.planId, setupId: bottom!.id, toIndex: 1 },

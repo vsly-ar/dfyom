@@ -186,6 +186,18 @@
   background: var(--accent-subtle);
 }
 
+/* the id is the first thing the actions cover: it fades with them showing, so no clipped
+   fragment ("p") peeks out beside the buttons (the inspector header still shows it) */
+.opId {
+  transition: opacity var(--motion-fast) var(--ease-standard);
+}
+
+.op:hover .opId,
+.op:focus-within .opId,
+.op[data-selected] .opId {
+  opacity: 0;
+}
+
 /* reference models (task R3): a group between the part and the operations */
 .references {
   display: grid;
@@ -203,9 +215,25 @@
   padding: 0 var(--space-3) var(--space-3);
 }
 
-/* room for the eye and remove buttons, which stay over the row's end */
+/* room for the eye and remove buttons, which stay over the row's end; the name over the count */
 .references .opSelect {
+  grid-template-columns: var(--icon-md) minmax(0, 1fr);
   padding-right: calc(2 * var(--control-md) + var(--space-2));
+}
+
+.referenceText {
+  display: grid;
+  min-width: 0;
+}
+
+.referenceMeta {
+  overflow: hidden;
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* a hidden reference keeps its row, muted (ui.md#reference-ghost-v02) */

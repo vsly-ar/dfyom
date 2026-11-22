@@ -115,15 +115,11 @@ function partChanges(doc: ProjectDoc, base: ProjectDoc, id: string): PendingChan
     field,
     label,
   })
-  if (before === undefined || after === undefined) {
-    const p = (after ?? before) as PartDTO
-    return [
-      design(
-        after === undefined ? 'removed' : 'added',
-        `${p.name} ${after === undefined ? 'removed' : 'added'}`,
-      ),
-    ]
-  }
+  // a new part is pending through its operations only (each an input of the tool choice): an
+  // empty part, alone or with a reference model, has no derived work (apply.md § What is pending)
+  if (before === undefined)
+    return (after as PartDTO).operations.map((op) => design('added', `${op.name} added`, op.id))
+  if (after === undefined) return [design('removed', `${before.name} removed`)]
   const out: PendingChange[] = []
   const fields = changedFields(after as unknown as Rec, before as unknown as Rec, PART_IGNORED)
   if (!stockSame(doc, base, after, before)) fields.unshift('stock')

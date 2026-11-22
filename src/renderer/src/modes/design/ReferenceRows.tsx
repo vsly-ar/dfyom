@@ -1,6 +1,6 @@
 // The navigator's "Reference" group (task R3), under the part and its stock: import an STL through
 // the native dialog (`design.reference.import` with the chosen absolute path, fitted centre + top),
-// one row per reference – select it (the inspector follows), the eye toggles its visibility in this
+// one row per reference (its name over the triangle count, each one line) – select it (the inspector follows), the eye toggles its visibility in this
 // window only (decision D17: no command, no undo step, never unsaved), remove with the navigator's
 // undo toast.
 // Doc: docs/modes/reference-model.md#display, docs/conventions/ui.md#reference-ghost-v02
@@ -100,9 +100,13 @@ export function ReferenceRows({
                 onClick={() => select(selected === ref.id ? null : ref.id)}
               >
                 <Box aria-hidden="true" />
-                <span className={styles['opName']}>{ref.name}</span>
-                <span className={styles['opId']}>
-                  {visible ? m.triangles(ref.asset.triangles) : m.hidden}
+                <span className={styles['referenceText']}>
+                  <span className={styles['opName']} title={ref.name}>
+                    {ref.name}
+                  </span>
+                  <span className={styles['referenceMeta']}>
+                    {visible ? m.triangles(ref.asset.triangles) : m.hidden}
+                  </span>
                 </span>
               </button>
               <span className={styles['referenceActions']}>
