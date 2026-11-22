@@ -2,7 +2,6 @@
 // the stock library or a new block (added to the library first) – and creates the part from it
 // (`design.part.add` takes a snapshot of the stock, design.md#part-and-stock-v01).
 // Doc: docs/modes/design.md#workflow, docs/architecture/library.md#stock
-import { Box } from 'lucide-react'
 import { useEffect, useId, useRef, useState } from 'react'
 import { MATERIAL_CLASSES, type MaterialClass } from '../../../../core/library/item'
 import type { StockValuesDTO } from '../../../../core/library/stock.dto'
@@ -16,6 +15,7 @@ import { designMessages } from '../../messages/design'
 import { libraryMessages } from '../../messages/library'
 import { useLibraryVersion } from '../../shell/ShellContext'
 import {
+  Icon,
   ApplyScope,
   Button,
   ErrorMessage,
@@ -224,7 +224,7 @@ export function StockSetup({ units }: { units: UnitSystem }): React.JSX.Element 
         <Button
           variant="primary"
           onClick={() => void create()}
-          icon={<Box aria-hidden="true" />}
+          icon={<Icon name="stock" />}
           disabled={busy || (source === 'library' && itemId === undefined)}
         >
           {m.create}

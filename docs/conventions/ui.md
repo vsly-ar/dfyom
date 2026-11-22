@@ -12,7 +12,7 @@ Settled with the user (tasks 1.11 and 1.16); the sections below specify them.
 2. **Design system first:** tokens, palette and a components preview were defined in a separate step and approved by the user before any UI is built (task 1.16, [design system](#design-system)). Look: a strict, serious desktop CAD-style tool, not a web page ([decision 17](#decisions)).
 3. **Colour scales:** Radix Colors (MIT) 12-step scales, adapted to the chosen palette.
 4. **CSS:** CSS Modules + CSS custom properties.
-5. **Icons:** Lucide (ISC) + own CNC icons ([icons](#icons)).
+5. **Icons:** own set only (B22, [D33](../plans/v0.3.md#confirmed-decisions), 2026-11-22; was Lucide (ISC) + own CNC icons) ([icons](#icons)).
 6. **Renderer state:** Zustand (MIT) for per-window UI state (selection, mode, panels, pick mode); `useSyncExternalStore` over the document replica.
 7. **i18n:** English only in v0.1, strings centralised in `messages/`, errors and warnings rendered from code + params, no library ([internationalization](#internationalization)).
 8. **Typography:** system fonts at 13 px base with tabular numerals ([type](#type); 14 px before the design system).
@@ -287,7 +287,7 @@ As built (3.3b):
 
 - **Main toolbar** (`banner`): a three-column grid. Start: `UndoRedo` (then the mode's tools, from 3.6). Centre: the `ModeSwitcher` in a `navigation` landmark named "Modes". End: while a machine connection is open, the machine group (3.12, `modes/run/MachineToolbar.tsx`, a `group` named "Machine": state badge in a polite live region, "Virtual machine · 10×" chip, "Feed hold" while streaming, "Resume" while held, Stop), then panel toggles "Navigator" and "Inspector" (pressed while shown) and "Settings". The machine group also mounts the run dialogs, so waits and failures show in every mode.
 - **Settings button:** icon-only, tooltip "Settings" with `Ctrl/Cmd+,` (the menu's Settings…, [keyboard shortcuts](#keyboard-shortcuts)).
-- **Library button** (v0.3, task L1): an icon button (Lucide `library`, tooltip "Library" with `Ctrl/Cmd+Shift+L`) in the end column before Settings, in every mode and without a project; it opens or focuses the [Library window](ui-library-window.md).
+- **Library button** (v0.3, task L1): an icon button (`library` icon, tooltip "Library" with `Ctrl/Cmd+Shift+L`) in the end column before Settings, in every mode and without a project; it opens or focuses the [Library window](ui-library-window.md).
 - **Panels** (`Panel`, `PanelGroup` on react-resizable-panels): navigator 16 rem (min 12 rem, max 40 %), viewport (min 20 rem), inspector 20 rem (min 15 rem, max 45 %). Side panels keep their pixel size when the window resizes, collapse when dragged below their minimum or by their toggle, and resize by keyboard on the focused hairline separator. One panel group for every width, so the viewport is never remounted.
 - **Layout persistence:** after the user resizes or toggles, the group's layout is saved (debounced 400 ms) in the [settings](#settings) under `layouts['shell-wide']` or `layouts['shell-narrow']`; a new window starts from it. The layout at mount is not written back.
 - **Narrow windows** (below 1280 px, `WIDE_QUERY`): the inspector is not a panel but an overlay at the viewport's right edge (`--shadow-2`, slides in), closed until its toggle opens it.
@@ -813,21 +813,23 @@ Decided for v0.1 ([decision 7](#decisions)): **English only, i18n-ready structur
 
 ## Icons
 
-- Set: **Lucide** (`lucide-react`, ISC licence, GPL-3.0-compatible per [ADR 0014](../decisions/0014-gpl-3-or-later-license.md)) for generic icons ([decision 5](#decisions)).
-- Own icons for CNC concepts the set lacks (facing, pocket, drilling, profile, tabs, tool types, machine states, work zero) in `ui/icons/`, drawn on the same 24 px grid, `--icon-stroke` 1.35 px at 16 px. Each own tool icon has one accent detail (corner handles, a profile's dashed offset, the drill's crosshair) that turns amber only while the tool is active; generic Lucide icons stay monochrome.
-- Field illustrations are their own set ([field](#field)).
-- Sizes `--icon-sm` 14 px (inline, status bar), `--icon-md` 16 px (buttons, toolbars), `--icon-lg` 20 px (run controls), `--icon-xl` 28 px (field illustrations, empty states). Icons inherit `currentColor`; accent parts use `--accent-icon` with `--accent-icon-edge`.
-- An icon never stands alone without an accessible name; icon-only buttons have a tooltip.
+Status: **approved in the L3 review** ([D33](../plans/v0.3.md#confirmed-decisions), 2026-11-22: B22-1 b, B22-2 a, B22-3 a, B22-4 a, B22-5 a, B22-6 a, B22-7 b). Sources, specimens and provenance: [design/icons/](../../design/icons/README.md).
+
+- **One own set, no icon library.** Every icon outside the [field illustrations](#field) is DFYOM's own drawing (GPL-3.0-or-later): operations, tool types, drawing tools and shape kinds, modes and CNC actions, views, generic actions (add, delete, undo, settings, chevrons, close, …) and status glyphs. Lucide is no longer used (B22-1 b; it was the generic set until v0.3).
+- **Single source:** [`ui/icons/iconSet.ts`](../../src/renderer/src/ui/icons/iconSet.ts), plain data (paths, the accent part, provenance). The app renders it with `<Icon name>` ([`ui/icons/Icon.tsx`](../../src/renderer/src/ui/icons/Icon.tsx)); `design/icons/render.mjs` renders the specimens and SVG exports from the same file; `design/icons/b22/sync-page.mjs` writes the [design-system page](ui-design-system.html#icons)'s icon sheet (a test fails while it is out of date). The [dev gallery](#testing) shows the whole set by group.
+- **Grid and stroke** (B22-2 a): a 16 px grid, `--icon-stroke` 1.35 px at 16 px, round caps and joins, rectangle corners `rx` 0.5–1.5, a 1.5 px margin, no fills except dots ≤ 1.8 px.
+- **One accent part per concept icon,** the part that tells it apart: an operation's passes, a tool's cutting end, a drawing tool's handles, the setup's up face, the G of gCode, the run triangle. Generic actions and status glyphs have none.
+- **Where amber shows** (B22-3 a): grey (`currentColor`) at rest; the accent part turns `--accent-icon` (with `--accent-icon-edge`) only while its control is active (pressed toggle, selected navigator or library row, the chosen option of a list, the current mode) and in a primary button. In a primary button an icon without an accent part turns amber whole ([decision 19](#decisions)). Disabled: the whole icon grey, no amber. Status icons take their status colour, never amber. Field illustrations keep their own rule ([field](#field): amber focused and unfocused).
+- **Tool types** (B22-4 a): side views told apart by the amber tip (flat, bull nose, ball end mill, drill), always next to the tool's name: the tool field (16 px before the value), the tool picker (20 px per option) and the library window's tool rows. The V-bit drawing stays in the source, unused until the V-bit tool type exists (B22-6 a).
+- **Operations:** facing, pocket, profile, drilling; a profile cut `on` its line shows the groove (a bent slot, B22-5 a); tabs are a bridge on the cut line, drawn tall enough to read alone at 16 px (B22-7 b).
+- **Sizes:** `--icon-sm` 14 px (inline, status bar), `--icon-md` 16 px (default: buttons, toolbars, rows), `--icon-lg` 20 px (run controls, the tool picker), `--icon-xl` 28 px (field illustrations, empty states); `<Icon size>` or the control's CSS sets it. Never below 14 px.
+- **Views:** tools from the side; operations, drawing tools and UI from the front or top.
+- **Accessibility:** icons are decorative (`aria-hidden`) by default; the control or the text beside it names them, and icon-only buttons have an accessible name and a tooltip (`IconButton`). An icon that carries meaning alone gets `label` (role `img` with that name).
+- **New icons** are drawn to these rules in `iconSet.ts` (provenance `redraw`/`b22`/`approved`), never copied from another set.
 
 ### Icon set proposal (v0.3, B22, draft)
 
-Status: **draft, pending user approval in L3**. Not built; specimens, sources, inventory and provenance in [design/icons/](../../design/icons/README.md) (`renders/b22-specimen-{light,dark}.png`, `b22-in-context-{light,dark}.png`). On approval it replaces the own-icon rules above and the icons move into `ui/icons/`.
-
-- **Scope:** one set for operations (facing, pocket, profile, groove (on), drilling, shape import, fillet, tabs), tool types (flat, bull nose, ball end mill, V-bit, drill) and the CNC-specific UI (measure, snap, setups, export gCode, run, reference model, work zero). Generic actions (settings, undo, redo, library, add, delete, alerts) stay Lucide.
-- **Grid and stroke:** own icons on a 16 px grid (the code's grid; the "24 px grid" above is corrected on approval) with `--icon-stroke` 1.35 px, round caps and joins, rectangle corners `rx` 0.5–1.5, a 1.5 px margin, no fills except small dots. Lucide keeps its 24 grid (1.33 px at 16 px).
-- **One accent part per icon,** the part that tells the concept apart: a tool's cutting end, facing's passes, pocket's raster, profile's offset, the setup's up face, the G of gCode, the run triangle.
-- **Where amber shows:** grey (`currentColor`) at rest; the accent part turns `--accent-icon` (with `--accent-icon-edge`) when its control is active (pressed toggle, selected row, current mode) and always in a primary button. Field illustrations keep their own rule ([field](#field): amber focused and unfocused). Disabled and read-only: the whole icon grey at 45 % opacity, no amber. Lucide icons are never amber except as the primary button's icon.
-- **Views:** tools from the side, operations and UI from the front or top. Sizes `--icon-md` 16 px by default, `--icon-lg` 20 px for run controls and the tool picker; tool icons always sit next to the tool's name (flat, bull nose and ball differ only in their tip at 16 px).
+Superseded: the proposal was approved in L3 ([D33](../plans/v0.3.md#confirmed-decisions)); the rules above apply. Its sources, specimens and review are in [design/icons/](../../design/icons/README.md). This heading stays only so older links resolve.
 
 ## Testing
 

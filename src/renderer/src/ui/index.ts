@@ -43,7 +43,16 @@ export {
   type JobListProps,
   type JobView,
 } from './JobIndicator/JobIndicator'
-export { TOOL_ICON_NAMES, ToolIcon, toolIconLabel, type ToolIconName } from './icons/tool/ToolIcon'
+export {
+  ICON_NAMES,
+  ICON_SET,
+  Icon,
+  iconLabel,
+  type IconGroup,
+  type IconName,
+  type IconProps,
+  type IconSize,
+} from './icons/Icon'
 export {
   MachineStateBadge,
   type MachineState,

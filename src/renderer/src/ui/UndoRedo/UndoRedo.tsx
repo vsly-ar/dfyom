@@ -1,7 +1,7 @@
 // UndoRedo: the main toolbar's undo and redo buttons; their names and tooltips name the step
 // ("Undo Add pocket – by agent"). Render inside a Toolbar (roving focus). The shell wires them to
 // `history.undo` / `history.redo` and the shortcuts. Doc: docs/conventions/ui.md#undo-and-redo
-import { Redo2, Undo2 } from 'lucide-react'
+import { Icon } from '../icons/Icon'
 import { ToolbarButton } from '../Toolbar/Toolbar'
 
 export interface UndoRedoProps {
@@ -27,14 +27,14 @@ export function UndoRedo({
     <>
       <ToolbarButton
         label={undo === null ? 'Undo' : `Undo ${undo}`}
-        icon={<Undo2 aria-hidden="true" />}
+        icon={<Icon name="undo" />}
         disabled={undo === null}
         onClick={onUndo}
         {...(undoShortcut ? { shortcut: undoShortcut } : {})}
       />
       <ToolbarButton
         label={redo === null ? 'Redo' : `Redo ${redo}`}
-        icon={<Redo2 aria-hidden="true" />}
+        icon={<Icon name="redo" />}
         disabled={redo === null}
         onClick={onRedo}
         {...(redoShortcut ? { shortcut: redoShortcut } : {})}

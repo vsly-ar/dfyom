@@ -3,14 +3,14 @@
 // the editor. A row the opening window's project uses has the "Used" chip (tooltip "Used in this project"), the
 // row being drafted shows "Unsaved", and a file that does not load is listed with its error and
 // cannot be selected for editing. Doc: docs/conventions/ui-library-window.md#layout, #accessibility
-import { ArrowDown, ArrowUp } from 'lucide-react'
 import { useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import type { LibraryItemKind } from '../../../core/library/item'
 import type { LibraryItemDTO } from '../../../core/library/library-item'
 import { TOOL_TYPES, type ToolType } from '../../../core/library/tool.dto'
 import type { QuantityDTO } from '../../../core/quantity/quantity.dto'
 import { libraryMessages } from '../messages/library'
-import { Select, StatusChip, ToolIcon } from '../ui'
+import { Icon, Select, StatusChip } from '../ui'
+import { TOOL_TYPE_ICON } from './toolTypeIcon'
 import { quantityOf, quantityText } from './form'
 import { NEW, type Listing } from './library-store'
 import styles from './LibraryWindow.module.css'
@@ -221,9 +221,9 @@ export function ItemTable({
               {c.label}
               {active ? (
                 sort.dir === 1 ? (
-                  <ArrowUp aria-hidden="true" />
+                  <Icon name="arrow-up" />
                 ) : (
-                  <ArrowDown aria-hidden="true" />
+                  <Icon name="arrow-down" />
                 )
               ) : null}
             </button>
@@ -307,7 +307,7 @@ export function ItemTable({
                         className={styles['typeIcon']}
                         title={libraryMessages.tool.types[i.type]}
                       >
-                        <ToolIcon name={i.type === 'drill' ? 'drill' : 'endmill'} />
+                        <Icon name={TOOL_TYPE_ICON[i.type]} />
                       </span>
                     ) : null}
                     {n === 0 ? (

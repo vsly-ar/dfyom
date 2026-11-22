@@ -62,13 +62,13 @@ function specimen(theme) {
           .join('')}</div>`,
     )
     .join('')}
-  <p class="foot">Provenance: approved = already in ui/icons · new = drawn for B22 · lucide = Lucide 1.77.0 (ISC), unchanged, monochrome by rule.</p></div>`
+  <p class="foot">Provenance: approved = approved before B22 · b22 = drawn for the proposal · redraw = drawn for B22-1 b in place of a former Lucide glyph. All own, GPL-3.0-or-later.</p></div>`
   const css = `.sheet{padding:24px 28px;width:1040px}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
   .cell{background:var(--bg-chrome);border:1px solid var(--border);border-radius:6px;padding:10px 12px}
   .row{display:flex;align-items:center;gap:14px;height:52px}.row svg{display:block}
   .lab{margin-top:6px;display:flex;justify-content:space-between;color:var(--text)}
   .src{font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.05em}
-  .src.new{color:var(--text-accent)}.big{margin-left:auto}.foot{margin-top:16px;font-size:11px}`
+  .src.b22,.src.redraw{color:var(--text-accent)}.big{margin-left:auto}.foot{margin-top:16px;font-size:11px}`
   return page(theme, body, css)
 }
 
@@ -108,7 +108,7 @@ function inContext(theme) {
     <div class="vp"><span>viewport</span></div>
     <aside class="insp"><h1>Pocket 1</h1><p class="sub">Pocket · Enclosure outline</p>
       <div class="toolpick">${ic('flat-end-mill', 'on', 20)}<div><b>T2 · Flat end mill 6 mm</b><p>2 flutes · carbide</p></div></div>
-      <div class="tools">${ic('flat-end-mill', 'on')}${ic('bull-nose')}${ic('ball-end-mill')}${ic('v-bit')}${ic('drill', 'off')}</div>
+      <div class="tools">${ic('flat-end-mill', 'on')}${ic('bull-nose-end-mill')}${ic('ball-end-mill')}${ic('v-bit')}${ic('drill', 'off')}</div>
       ${field('Depth', fillo('M2 6H6V14H14V6H18', 'M6 6V14'), '12 mm', true)}
       ${field('Stepdown', fillo('M2 5H7V9H12V13H18', 'M7 5V9'), '2 mm')}
       ${field('Corner radius', fillo('M3 3V10A7 7 0 0 0 10 17H17', 'M3 10A7 7 0 0 0 10 17'), '3.2 mm')}

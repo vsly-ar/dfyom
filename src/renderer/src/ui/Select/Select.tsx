@@ -3,7 +3,7 @@
 // options optionally with a second line (`description`: a tool's reasons, F5). `muted` shows a
 // value that is about to change (the tool field's "Chosen again on Apply").
 // Doc: docs/conventions/ui.md#inventory-v01, #design-and-plan-controls-v02
-import { Check, ChevronDown } from 'lucide-react'
+import { Icon } from '../icons/Icon'
 import { Select as RadixSelect } from 'radix-ui'
 import { useId, type Ref } from 'react'
 import { usePortalContainer } from '../UiProvider/UiProvider'
@@ -50,6 +50,8 @@ export interface SelectProps<V extends string> {
   disabled?: boolean
   /** The value shows muted (it is about to change); still operable. */
   muted?: boolean
+  /** A decorative icon before the value in the trigger (the tool field's tool type). */
+  valueIcon?: React.ReactNode
   /** Layout only; appended to the trigger's class. */
   className?: string | undefined
   ref?: Ref<HTMLButtonElement>
@@ -81,7 +83,7 @@ function SelectItem<V extends string>({
       ) : null}
       <ItemBody option={o} id={id} />
       <RadixSelect.ItemIndicator className={styles['indicator']}>
-        <Check aria-hidden="true" />
+        <Icon name="check" />
       </RadixSelect.ItemIndicator>
     </RadixSelect.Item>
   )
@@ -117,6 +119,7 @@ export function Select<V extends string>({
   placeholder,
   disabled = false,
   muted = false,
+  valueIcon,
   className,
   ref,
   ...aria
@@ -136,11 +139,16 @@ export function Select<V extends string>({
         data-muted={muted || undefined}
         className={[styles['trigger'], className].filter(Boolean).join(' ')}
       >
+        {valueIcon !== undefined ? (
+          <span className={styles['valueIcon']} aria-hidden="true">
+            {valueIcon}
+          </span>
+        ) : null}
         <span className={styles['value']}>
           <RadixSelect.Value {...(placeholder ? { placeholder } : {})} />
         </span>
         <RadixSelect.Icon className={styles['chevron']}>
-          <ChevronDown aria-hidden="true" />
+          <Icon name="chevron-down" />
         </RadixSelect.Icon>
       </RadixSelect.Trigger>
       <RadixSelect.Portal container={container}>

@@ -1,5 +1,5 @@
+import { Icon } from '../icons/Icon'
 import { screen } from '@testing-library/react'
-import { ArrowRight } from 'lucide-react'
 import { describe, expect, it, vi } from 'vitest'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
 import { EmptyState } from './EmptyState'
@@ -11,7 +11,7 @@ describe('EmptyState', () => {
       <EmptyState
         title="Design a part first"
         description="Plans are made from a part. Add a part in Design."
-        action={{ label: 'Go to Design', icon: <ArrowRight aria-hidden="true" />, onClick }}
+        action={{ label: 'Go to Design', icon: <Icon name="arrow-right" />, onClick }}
       />,
     )
     expect(

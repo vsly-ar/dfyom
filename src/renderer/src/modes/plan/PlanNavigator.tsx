@@ -7,18 +7,6 @@
 // machining order); toolpath generation and the gCode export (of the window's setup when the plan
 // has several). Doc: docs/conventions/ui.md#plan-mode-task-37,
 // docs/modes/plan-v0.1.md#commands-and-queries-v01
-import {
-  CheckCheck,
-  Copy,
-  Download,
-  History,
-  Lock,
-  MoreHorizontal,
-  Plus,
-  RefreshCw,
-  Trash2,
-  Waypoints,
-} from 'lucide-react'
 import { useId, useState } from 'react'
 import type { PlanDTO, PlanStatus } from '../../../../core/plan/plan.dto'
 import type { ProjectDoc } from '../../../../core/project/document'
@@ -27,6 +15,7 @@ import { applyMessages } from '../../messages/apply'
 import { planMessages, sentence } from '../../messages/plan'
 import { usePending, useShell } from '../../shell/ShellContext'
 import {
+  Icon,
   Button,
   ConfirmDialog,
   EmptyState,
@@ -35,6 +24,7 @@ import {
   Menu,
   Progress,
   Select,
+  type IconName,
 } from '../../ui'
 import { ExportDialog } from './ExportDialog'
 import { LibraryLink } from '../../library/LibraryLink'
@@ -65,11 +55,21 @@ import { useChosenPlan, useCurrentSetup, useLibraryItems } from './usePlan'
 
 const m = planMessages
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  icon,
+  children,
+}: {
+  title: string
+  /** The section's concept icon (B22), decorative. */
+  icon?: IconName
+  children: React.ReactNode
+}) {
   const id = useId()
   return (
     <section className={styles['section']} aria-labelledby={id}>
       <h3 id={id} className={styles['sectionTitle']}>
+        {icon !== undefined ? <Icon name={icon} size="sm" /> : null}
         {title}
       </h3>
       {children}
@@ -101,12 +101,12 @@ export function PlanNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
       <div className={styles['navigator']}>
         <div className={styles['emptyOps']}>
           <EmptyState
-            icon={<Waypoints aria-hidden="true" />}
+            icon={<Icon name="toolpath" />}
             title={m.empty.title}
             description={m.empty.description}
             action={{
               label: m.empty.action,
-              icon: <Plus aria-hidden="true" />,
+              icon: <Icon name="add" />,
               onClick: () => void create(),
             }}
           />
@@ -174,12 +174,12 @@ function PlanView({
             items={[
               {
                 label: m.picker.create,
-                icon: <Plus aria-hidden="true" />,
+                icon: <Icon name="add" />,
                 onSelect: () => void onCreate(),
               },
               {
                 label: m.picker.duplicate,
-                icon: <Copy aria-hidden="true" />,
+                icon: <Icon name="copy" />,
                 onSelect: () =>
                   void send('plan.duplicate', {}).then((r) => {
                     if (r.ok) choose((r.value as { planId: string }).planId)
@@ -188,14 +188,14 @@ function PlanView({
               'separator',
               {
                 label: m.picker.remove,
-                icon: <Trash2 aria-hidden="true" />,
+                icon: <Icon name="delete" />,
                 danger: true,
                 disabled: !allows(plan, 'plan.remove'),
                 onSelect: () => setRemoveOpen(true),
               },
             ]}
           >
-            <IconButton label={m.picker.actions} icon={<MoreHorizontal aria-hidden="true" />} />
+            <IconButton label={m.picker.actions} icon={<Icon name="more" />} />
           </Menu>
         </div>
         <div className={styles['pickerRow']}>
@@ -217,7 +217,7 @@ function PlanView({
         </div>
         {!canEdit ? (
           <p className={styles['why']}>
-            <Lock aria-hidden="true" width={12} height={12} /> {m.readOnly(plan.status)}
+            <Icon name="lock" size="sm" /> {m.readOnly(plan.status)}
           </p>
         ) : null}
         {error ? <ErrorMessage error={error} message={m.inspector.commandFailed} /> : null}
@@ -230,7 +230,7 @@ function PlanView({
       </Section>
 
       <MachineSection plan={plan} send={send} units={doc.unitSystem} />
-      <Section title={m.setup.title}>
+      <Section title={m.setup.title} icon="setups">
         <SetupList doc={doc} plan={plan} data={data} />
       </Section>
       <ToolpathSection plan={plan} data={data} />
@@ -299,7 +299,7 @@ function StaleNotices({
           </span>
           <Button
             size="sm"
-            icon={<CheckCheck aria-hidden="true" />}
+            icon={<Icon name="check-all" />}
             disabled={pending.sending}
             onClick={() => void applyStore.apply()}
           >
@@ -312,7 +312,7 @@ function StaleNotices({
         <>
           <span>{stale.partRemoved ? m.stale.partRemoved : m.stale.design}</span>
           {canRebuild && !stale.partRemoved ? (
-            <Button size="sm" icon={<RefreshCw aria-hidden="true" />} onClick={onRebuild}>
+            <Button size="sm" icon={<Icon name="refresh" />} onClick={onRebuild}>
               {m.stale.rebuild}
             </Button>
           ) : null}
@@ -338,7 +338,7 @@ function StaleNotices({
             allows(plan, 'plan.libraryItem.update') ? (
               <Button
                 size="sm"
-                icon={<History aria-hidden="true" />}
+                icon={<Icon name="history" />}
                 onClick={() => void send('plan.libraryItem.update', { snapshotId: c.snapshotId })}
               >
                 {m.stale.update}
@@ -373,7 +373,7 @@ function MachineSection({
       label: snapshotName(plan, copy.id) ?? copy.libraryItemId,
     })
   return (
-    <Section title={m.machine.title}>
+    <Section title={m.machine.title} icon="machine">
       {options.length === 0 && machines !== undefined ? (
         <p className={styles['why']}>{m.machine.empty}</p>
       ) : (
@@ -445,7 +445,7 @@ function ToolpathSection({
           : null
 
   return (
-    <Section title={m.toolpaths.title}>
+    <Section title={m.toolpaths.title} icon="toolpath">
       {data !== undefined ? (
         <p className={styles['why']} aria-live="polite">
           {busy ? m.toolpaths.generating : m.toolpaths.summary(ready, ops.length)}
@@ -464,7 +464,7 @@ function ToolpathSection({
       ) : null}
       <div className={styles['actions']}>
         <Button
-          icon={<RefreshCw aria-hidden="true" />}
+          icon={<Icon name="refresh" />}
           disabled={busy || generateWhy !== null}
           {...(generateWhy === null ? {} : { 'aria-describedby': ids.generate })}
           onClick={() => void store.getState().generate(plan.id)}
@@ -478,7 +478,7 @@ function ToolpathSection({
         ) : null}
         <Button
           variant="primary"
-          icon={<Download aria-hidden="true" />}
+          icon={<Icon name="export-gcode" />}
           disabled={exporting || busy || exportWhy !== null}
           {...(exportWhy === null ? {} : { 'aria-describedby': ids.export })}
           onClick={() =>

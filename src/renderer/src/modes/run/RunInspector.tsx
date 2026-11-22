@@ -3,11 +3,10 @@
 // pre-flight dialog), the wait the run is at, how the last run ended, and "Reset (immediate)".
 // Feed hold, resume and Stop live in the main toolbar (MachineToolbar).
 // Doc: docs/conventions/ui.md#run-mode-safety-ui, #jobs-and-progress
-import { Play, RotateCcw } from 'lucide-react'
 import { useId } from 'react'
 import type { ProjectDoc } from '../../../../core/project/document'
 import { runMessages } from '../../messages/run'
-import { Button, PanelHeader, Progress } from '../../ui'
+import { Icon, Button, PanelHeader, Progress } from '../../ui'
 import { Dro } from './Dro'
 import { planRunInfo } from './plan-info'
 import { pauseMessage } from './RunDialogs'
@@ -79,7 +78,7 @@ export function RunInspector({ doc }: { doc: ProjectDoc }): React.JSX.Element {
               <Button
                 size="lg"
                 variant="primary"
-                icon={<Play aria-hidden="true" />}
+                icon={<Icon name="run" />}
                 disabled={gates.start !== null || pending.includes('run.job.start')}
                 {...(gates.start === null ? {} : { 'aria-describedby': startWhy })}
                 onClick={() =>
@@ -103,7 +102,7 @@ export function RunInspector({ doc }: { doc: ProjectDoc }): React.JSX.Element {
             <Button
               size="lg"
               variant="danger"
-              icon={<RotateCcw aria-hidden="true" />}
+              icon={<Icon name="rotate-ccw" />}
               aria-describedby={resetWhy}
               onClick={() => void a.reset()}
             >

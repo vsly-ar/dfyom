@@ -6,7 +6,6 @@
 // and is not committed. A "Recommended" checkbox per preset makes it follow the calculator; typing
 // another followed value unticks it (patchPreset). Doc: docs/conventions/ui-library-window.md#layout,
 // #recommended-presets
-import { Plus, Trash2 } from 'lucide-react'
 import { useId, useState } from 'react'
 import { MATERIAL_CLASSES, type MaterialClass } from '../../../core/library/item'
 import type { CuttingPresetDTO } from '../../../core/library/tool.dto'
@@ -15,7 +14,7 @@ import { Quantity } from '../../../core/quantity/quantity'
 import type { QuantityDTO } from '../../../core/quantity/quantity.dto'
 import type { QuantityKind } from '../../../core/quantity/units'
 import { libraryMessages } from '../messages/library'
-import { Button, Checkbox, FieldInput, IconButton, Select, type FieldMessage } from '../ui'
+import { Icon, Button, Checkbox, FieldInput, IconButton, Select, type FieldMessage } from '../ui'
 import {
   displayQuantity,
   followState,
@@ -237,7 +236,7 @@ export function PresetTable({
                 <div className={styles['presetRemove']}>
                   <IconButton
                     label={m.remove(p.name)}
-                    icon={<Trash2 aria-hidden="true" />}
+                    icon={<Icon name="delete" />}
                     onClick={() => onChange(presets.filter((_, n) => n !== i))}
                   />
                 </div>
@@ -280,7 +279,7 @@ export function PresetTable({
         </ul>
       ) : null}
       <div>
-        <Button size="sm" icon={<Plus aria-hidden="true" />} onClick={add}>
+        <Button size="sm" icon={<Icon name="add" />} onClick={add}>
           {m.add}
         </Button>
       </div>

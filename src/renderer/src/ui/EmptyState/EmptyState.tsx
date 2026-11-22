@@ -6,7 +6,7 @@ import { Button } from '../Button/Button'
 import styles from './EmptyState.module.css'
 
 export interface EmptyStateProps {
-  /** A 16-grid icon (own or Lucide); its `data-accent` part is amber. */
+  /** An own 16-grid icon (ui/icons); its `data-accent` part is amber. */
   icon?: ReactNode
   title: string
   /** One sentence. */

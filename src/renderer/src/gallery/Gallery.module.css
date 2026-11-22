@@ -132,8 +132,26 @@
 
 .icons {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
   gap: 6px;
+}
+
+.iconGroup {
+  display: grid;
+  gap: 4px;
+  margin-bottom: var(--space-3);
+}
+
+.iconGroupTitle {
+  margin: 0;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--text-muted);
+}
+
+.iconStates {
+  display: flex;
+  gap: 2px;
 }
 
 .figure {

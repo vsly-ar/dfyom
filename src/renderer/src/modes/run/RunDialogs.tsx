@@ -4,12 +4,11 @@
 // the blocking failure dialog; tool-change waits and alarms are announced assertively. Each
 // carries its own Stop (RunDialogFooter), reachable by keyboard and screen readers while modal.
 // Doc: docs/conventions/ui.md#confirmations, #run-mode-safety-ui
-import { Play } from 'lucide-react'
 import { useId } from 'react'
 import type { ProjectDoc } from '../../../../core/project/document'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { runMessages } from '../../messages/run'
-import { Button, Dialog, DialogClose, ErrorMessage } from '../../ui'
+import { Icon, Button, Dialog, DialogClose, ErrorMessage } from '../../ui'
 import { useReplica } from '../../shell/ShellContext'
 import { JogPad } from './JogPad'
 import { activeJob, formatLength, runGates } from './machine-state'
@@ -61,7 +60,7 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
           </DialogClose>
           <Button
             variant="primary"
-            icon={<Play aria-hidden="true" />}
+            icon={<Icon name="run" />}
             disabled={gate !== null}
             {...(gate === null ? { autoFocus: true } : { 'aria-describedby': whyId })}
             onClick={() => void a.startRun(info?.setup.id)}
@@ -153,7 +152,7 @@ function WaitDialog({ units }: { units: ProjectDoc['unitSystem'] }): React.JSX.E
             </Button>
             <Button
               variant="primary"
-              icon={<Play aria-hidden="true" />}
+              icon={<Icon name="run" />}
               disabled={continuing}
               onClick={() => void a.continueWait()}
             >
@@ -202,7 +201,7 @@ function WaitDialog({ units }: { units: ProjectDoc['unitSystem'] }): React.JSX.E
           </Button>
           <Button
             variant="primary"
-            icon={<Play aria-hidden="true" />}
+            icon={<Icon name="run" />}
             disabled={continuing}
             onClick={() => void a.continueWait()}
           >

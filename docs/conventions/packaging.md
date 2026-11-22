@@ -43,7 +43,7 @@ How the app is packaged as `DFYOM.app` and installed for the developer. Local in
 
 What it covers, each with its licence, where it is used, its source and its licence and NOTICE files:
 
-- **Bundled packages:** every `node_modules` package Rolldown put into `out/**/*.js` (today the renderer's: React, Radix, three.js, drei, Lucide icons via `lucide-react`, …), read from the `// <module path>` comment above each module. A file without these comments (a minified build) fails the script, so the list cannot silently empty.
+- **Bundled packages:** every `node_modules` package Rolldown put into `out/**/*.js` (today the renderer's: React, Radix, three.js, drei, …; the icons are DFYOM's own, [ui.md § Icons](ui.md#icons)), read from the `// <module path>` comment above each module. A file without these comments (a minified build) fails the script, so the list cannot silently empty.
 - **Main-process runtime packages:** `MAIN_EXTERNALS` and their dependencies, the same closure electron-builder ships ([What goes in](#what-goes-in); `runtimeClosureDirs` in the config).
 - **Vendored assets** (`VENDORED` in the script): `cavalier_contours.wasm` with its crate notices (`vendor/cavalier-contours/THIRD-PARTY-NOTICES.txt`). Every directory under `vendor/` and every font file under `src/` or `vendor/` must be listed; a test ([`third-party-notices.test.mjs`](../../scripts/third-party-notices.test.mjs)) checks it. No fonts are shipped: the UI uses system font stacks.
 - **Libraries compiled into a package's binary** (`EMBEDDED`): Clipper2 (BSL-1.0) and the Emscripten runtime (MIT) in `manifold.wasm`.

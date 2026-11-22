@@ -2,11 +2,10 @@
 // `--delay-indicator`, an error chip that selects the failing operation) and the warning count,
 // which opens the warning list. Doc: docs/conventions/ui.md#evaluation-status-pending-outdated-failed,
 // #warnings-and-dfm, #app-shell
-import { TriangleAlert } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { designMessages } from '../../messages/design'
 import { dfmMessages } from '../../messages/dfm'
-import { Popover, StatusChip, WarningList } from '../../ui'
+import { Icon, Popover, StatusChip, WarningList } from '../../ui'
 import { DELAY_INDICATOR_MS } from '../../viewport'
 import { warningLabels, warningView } from './DesignInspector'
 import { pendingApply } from './model'
@@ -110,11 +109,7 @@ export function DesignStatus(): React.JSX.Element | null {
         }
       >
         <button type="button" className={styles['statusChipButton']}>
-          <TriangleAlert
-            aria-hidden="true"
-            className={styles['statusIcon']}
-            data-on={n > 0 || undefined}
-          />
+          <Icon name="warning" className={styles['statusIcon']} data-on={n > 0 || undefined} />
           {dfmMessages.count(n)}
         </button>
       </Popover>

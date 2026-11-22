@@ -5,14 +5,13 @@
 // draft the group is read-only with the hint to settle the design; finalized and later read-only.
 // Doc: docs/modes/plan-v0.2.md#plan-only-edits-and-the-snapshot-scene,
 // docs/conventions/ui.md#design-and-plan-controls-v02
-import { PencilLine, Undo2 } from 'lucide-react'
 import { useState } from 'react'
 import type { PlanDTO, PlanOperationDTO } from '../../../../core/plan/plan.dto'
 import type { ProjectDoc } from '../../../../core/project/document'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { planMessages } from '../../messages/plan'
 import { useCancelGesture } from '../../shell/hooks'
-import { Button, ErrorMessage, StatusChip } from '../../ui'
+import { Icon, Button, ErrorMessage, StatusChip } from '../../ui'
 import {
   OperationFields,
   placeErrors,
@@ -63,9 +62,7 @@ export function PlanCopyGroup({
     <section className={styles['group']} aria-label={t.title}>
       <div className={styles['groupHeader']}>
         <h3 className={styles['groupTitle']}>{t.title}</h3>
-        {edited ? (
-          <StatusChip icon={<PencilLine aria-hidden="true" />}>{t.edited}</StatusChip>
-        ) : null}
+        {edited ? <StatusChip icon={<Icon name="edit" />}>{t.edited}</StatusChip> : null}
       </div>
       {plan.status === 'draft' ? (
         <p className={styles['muted']}>{t.draftHint}</p>
@@ -75,7 +72,7 @@ export function PlanCopyGroup({
       {edited && canRevert ? (
         <Button
           size="sm"
-          icon={<Undo2 aria-hidden="true" />}
+          icon={<Icon name="undo" />}
           className={styles['revert']}
           onClick={() => void revert()}
         >

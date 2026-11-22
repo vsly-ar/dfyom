@@ -1,12 +1,12 @@
 // The project file dialogs (task 3.6): new project, the recovery prompt, a foreign lock ("Retry in
 // 2 min") and errors.
 // Doc: docs/conventions/ui.md#project-files, #confirmations
-import { FilePlus, RotateCcw } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useStore } from 'zustand'
 import type { UnitSystem } from '../../../../core/project/document'
 import { projectMessages as m } from '../../messages/project'
 import {
+  Icon,
   Button,
   ConfirmDialog,
   Dialog,
@@ -79,7 +79,7 @@ function NewProjectDialog({
           </DialogClose>
           <Button
             variant="primary"
-            icon={<FilePlus aria-hidden="true" />}
+            icon={<Icon name="file-new" />}
             disabled={busy}
             onClick={submit}
           >
@@ -161,7 +161,7 @@ function RecoveryDialog({
           </Button>
           <Button
             variant="primary"
-            icon={<RotateCcw aria-hidden="true" />}
+            icon={<Icon name="rotate-ccw" />}
             disabled={busy}
             onClick={() => void files.getState().recover(keyName, 'restore')}
           >
@@ -209,7 +209,7 @@ function LockedDialog({
           </Button>
           <Button
             variant="primary"
-            icon={<RotateCcw aria-hidden="true" />}
+            icon={<Icon name="rotate-ccw" />}
             disabled={busy}
             onClick={() => files.getState().retryLocked(false)}
           >

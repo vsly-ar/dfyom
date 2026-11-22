@@ -3,10 +3,9 @@
 // the Stop control (never confirmed, above every overlay). `Escape` holds the feed whenever a job
 // streams, wherever the focus is. Also mounts the run dialogs, so waits and failures show in any
 // mode. Doc: docs/conventions/ui.md#run-mode-safety-ui
-import { Pause, Play } from 'lucide-react'
 import { useEffect } from 'react'
 import { runMessages } from '../../messages/run'
-import { Button, MachineStateBadge, Tooltip } from '../../ui'
+import { Icon, Button, MachineStateBadge, Tooltip } from '../../ui'
 import { activeJob, machineView } from './machine-state'
 import { useRun, useRunStore } from './run-store'
 import { RunDialogs } from './RunDialogs'
@@ -52,7 +51,7 @@ export function MachineToolbar(): React.JSX.Element {
             <Tooltip content={m.feedHold} shortcut={m.feedHoldShortcut}>
               <Button
                 size="lg"
-                icon={<Pause aria-hidden="true" />}
+                icon={<Icon name="pause" />}
                 aria-keyshortcuts="Escape"
                 onClick={() => void store.getState().hold()}
               >
@@ -64,7 +63,7 @@ export function MachineToolbar(): React.JSX.Element {
             <Button
               size="lg"
               variant="primary"
-              icon={<Play aria-hidden="true" />}
+              icon={<Icon name="play" />}
               onClick={() => void store.getState().resume()}
             >
               {m.resume}

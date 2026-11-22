@@ -2,12 +2,11 @@
 // (after `--delay-indicator`), and the count of the plan's errors and warnings, which opens the
 // list (a subject selects its plan operation). Doc: docs/conventions/ui.md#plan-mode-task-37,
 // #warnings-and-dfm, #jobs-and-progress
-import { CircleAlert, TriangleAlert } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { ProjectDoc } from '../../../../core/project/document'
 import { applyMessages } from '../../messages/apply'
 import { planMessages } from '../../messages/plan'
-import { Popover, StatusChip, WarningList } from '../../ui'
+import { Icon, Popover, StatusChip, WarningList } from '../../ui'
 import { DELAY_INDICATOR_MS } from '../../viewport'
 import { isError, isWarning } from './model'
 import { usePlanData, usePlanState } from './plan-store'
@@ -75,13 +74,9 @@ export function PlanStatus({ doc }: { doc: ProjectDoc }): React.JSX.Element | nu
       >
         <button type="button" className={styles['statusChipButton']}>
           {errors > 0 ? (
-            <CircleAlert aria-hidden="true" className={styles['statusIcon']} data-error="" />
+            <Icon name="error" className={styles['statusIcon']} data-error="" />
           ) : (
-            <TriangleAlert
-              aria-hidden="true"
-              className={styles['statusIcon']}
-              data-on={hard > 0 || undefined}
-            />
+            <Icon name="warning" className={styles['statusIcon']} data-on={hard > 0 || undefined} />
           )}
           {planMessages.warnings.count(errors, hard)}
         </button>

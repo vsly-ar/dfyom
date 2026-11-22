@@ -718,7 +718,7 @@ svg.fi .ext { stroke-dasharray: 1.5 1.5; opacity: 0.7; }
 
     <section id="icons">
       <h2>Icons</h2>
-      <p class="muted">Lucide for generic actions; own CNC icons on the same 24 px grid with a 1.35 px stroke at 16 px. Own tool icons have one <b>accent detail</b> (corner handles, the dashed offset of a profile, the drill's crosshair) that turns amber only while the tool is active. Generic Lucide icons stay monochrome. <b>Field illustrations</b> (28 px, thinner 1.4 px lines) draw the feature in grey and make the measured edge itself the amber line: the wall for depth, the riser for stepdown, the arc for a corner radius, the face for a chamfer. No dimension arrows.</p>
+      <p class="muted"><span class="changed-badge">Changed since approval</span> One own set (B22, D33): every icon is DFYOM's own drawing on a 16 px grid with a 1.35 px stroke, round caps and joins; no icon library. Concept icons (operations, tool types, drawing tools, modes, CNC actions, views) have one <b>accent part</b> (an operation's passes, a tool's cutting end, the corner handles, the setup's up face) that turns amber only while the control is active or in a primary button; generic actions and status glyphs have none. The sheet below is generated from <span class="code">src/renderer/src/ui/icons/iconSet.ts</span>. <b>Field illustrations</b> (28 px, thinner 1.4 px lines) draw the feature in grey and make the measured edge itself the amber line: the wall for depth, the riser for stepdown, the arc for a corner radius, the face for a chamfer. No dimension arrows.</p>
       <div class="icon-states">
         <div><span class="ib" aria-hidden="true"><svg class="i" viewBox="0 0 16 16"><rect x="4.5" y="4.5" width="7" height="7" rx="1"/><rect class="hi" x="2" y="2" width="12" height="12" rx="3" stroke-dasharray="2 2"/></svg></span>Rest</div>
         <div><span class="ib" aria-hidden="true" style="background:var(--bg-hover);color:var(--text)"><svg class="i" viewBox="0 0 16 16"><rect x="4.5" y="4.5" width="7" height="7" rx="1"/><rect class="hi" x="2" y="2" width="12" height="12" rx="3" stroke-dasharray="2 2"/></svg></span>Hover</div>
@@ -843,6 +843,7 @@ svg.fi .ext { stroke-dasharray: 1.5 1.5; opacity: 0.7; }
         <li><b>2026-11-21 · Colours accepted</b>: the user reviewed the values after the APCA pass and accepted them as is: the split <span class="code">--danger</span> / <span class="code">--danger-text</span>, <span class="code">--text-muted</span> as secondary text at Lc 60 (<a href="../decisions/0018-danger-text-and-secondary-text-role.md">ADR 0018</a>) and <span class="code">--vp-plunge</span>.</li>
         <li><b>2026-11-21 · Fields: icons, echo, narrow layout</b> (decided by the user): field illustrations keep full colour and saturation whether the field is focused or not <span class="changed-badge">Changed since approval</span> (was 35 % at rest); focus still thickens the amber line, read-only and disabled fields stay grey. The echo shows only when it adds something to the typed text (expression, reference, fraction, another unit, asymmetric tolerance): a plain "15" or "15 mm" in an mm field shows none, a plain value with an inherited tolerance shows only that tolerance <span class="changed-badge">Changed since approval</span>. When a field loses focus to a click, its echo stays until the click has landed, then collapses with <span class="code">--motion-base</span> (instant with reduced motion). Narrow field lists (below 20 rem) put the label above the input <span class="new-badge">New since approval</span> (<a href="#gallery">specimen in the gallery</a>).</li>
         <li><b>2026-11-22 · Planned v0.2 components</b> <span class="planned-badge">Planned · not designed yet</span>: placeholders for the components the v0.2 docs add (<a href="#planned">list</a>); their specimens come with their tasks for approval.</li>
+        <li><b>2026-11-22 · Own icon set</b> <span class="changed-badge">Changed since approval</span> (B22, D33): Lucide is replaced by DFYOM's own drawings for every icon; 16 px grid (was described as 24), 1.35 px stroke; tool types as side views with an amber tip; amber only when active or in a primary button (<a href="#icons">sheet</a>, <a href="ui.md#icons">ui.md § Icons</a>).</li>
         <li><b>2026-11-22 · Planned v0.3 components</b> <span class="planned-badge">Planned · not designed yet</span>: placeholders for the Shape UI (<a href="#planned-v03">list</a>); specimens come with U1–U3 and are approved in L3.</li>
         <li><b>2026-11-22 · v0.3 Shape UI approved</b> (L3, D33): the Shape UI visuals, the library window, the view cube and the plan-edit tint approved as built; changes: a path with more than 20 segments shows only the selected segment's handles, the SVG import's split choice is a dropdown, measure is <span class="code">D</span>, a gap below the view cube.</li>
       </ol>
@@ -1143,28 +1144,103 @@ $('#timing').innerHTML = [['--motion-instant', 80, 'press'], ['--motion-fast', 1
   .map(([n, ms, use]) => `<div><code class="code">${n}</code><span class="mono" style="color:var(--text-muted)">${ms} ms</span><span style="display:flex;gap:8px;align-items:center;min-width:0"><i style="width:${ms / 4}px;flex:none"></i><span class="muted" style="font-size:var(--text-xs);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${use}</span></span></div>`).join('');
 
 /* ---------- icons ---------- */
+/* icons:begin, generated from src/renderer/src/ui/icons/iconSet.ts (B22, D33); checked by ui/icons/icons.test.tsx */
 const I = {
-  select: ['Select', '<path d="M3.5 2.5l8.5 5-3.8 1L6.2 12z"/><path class="hi" d="M8.4 8.6l2.6 4"/>'],
-  rect: ['Rectangle', '<rect x="2.5" y="4" width="11" height="8" rx=".5"/><path class="hi" d="M1.5 3h2v2h-2zM12.5 11h2v2h-2z"/>'],
-  circle: ['Circle', '<circle cx="8" cy="8" r="5.5"/><path class="hi" d="M8 8l3.9-3.9"/><circle class="hi f" cx="8" cy="8" r="1"/>'],
-  line: ['Polyline', '<path d="M2.5 12.5L7 4.5l6.5 4"/><circle class="hi" cx="7" cy="4.5" r="1.3"/><circle class="hi" cx="2.5" cy="12.5" r="1.3"/><circle class="hi" cx="13.5" cy="8.5" r="1.3"/>'],
-  measure: ['Measure', '<path d="M2 11.5L11.5 2 14 4.5 4.5 14z"/><path class="hi" d="M5 8.5l1.3 1.3M7 6.5l1 1M9 4.5l1.3 1.3"/>'],
-  facing: ['Facing', '<rect x="2" y="9" width="12" height="4.5" rx="1"/><path class="hi" d="M2 6.5h12M2 4h12"/>'],
-  profile: ['Profile', '<rect x="4.5" y="4.5" width="7" height="7" rx="1"/><rect class="hi" x="2" y="2" width="12" height="12" rx="3" stroke-dasharray="2 2"/>'],
-  pocket: ['Pocket', '<rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path class="hi" d="M5 6h6M5 8h6M5 10h6"/>'],
-  drill: ['Drill', '<circle cx="8" cy="8" r="3.5"/><path class="hi" d="M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3"/>'],
-  tabs: ['Tabs', '<path d="M1.5 10h4v-2h5v2h4"/><path class="hi" d="M5.5 10V8h5v2"/>'],
-  endmill: ['End mill', '<path d="M6 1.5h4v5H6zM6 6.5l-.5 8h5l-.5-8"/><path class="hi" d="M5.5 14.5h5"/>'],
-  simulate: ['Simulate', '<path d="M5 3.3l8 4.7-8 4.7z"/><path class="hi" d="M2.5 5v6"/>'],
-  jog: ['Jog', '<rect x="6" y="6" width="4" height="4" rx="1"/><path class="hi" d="M8 1.5v3M6.5 3L8 1.5 9.5 3M8 14.5v-3M6.5 13L8 14.5 9.5 13M1.5 8h3M3 6.5L1.5 8 3 9.5M14.5 8h-3M13 6.5L14.5 8 13 9.5"/>'],
-  zero: ['Work zero', '<path d="M2 14V2M2 14h12"/><circle class="hi" cx="2" cy="14" r="1.6"/><path d="M6 10l3-3"/>'],
-  probe: ['Probe Z', '<path d="M8 2v7M5.5 6.5L8 9l2.5-2.5"/><path class="hi" d="M2.5 13.5h11"/>'],
-  fit: ['Fit', '<path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/><rect class="hi" x="5.5" y="5.5" width="5" height="5" rx=".5"/>'],
-  iso: ['Isometric', '<path d="M8 2l5.5 3v6L8 14l-5.5-3V5z"/><path class="hi" d="M8 8l5.5-3M8 8L2.5 5M8 8v6"/>'],
-  grid: ['Grid', '<rect x="2.5" y="2.5" width="11" height="11" rx="1"/><path class="hi" d="M6.2 2.5v11M9.8 2.5v11M2.5 6.2h11M2.5 9.8h11"/>'],
-  undo: ['Undo (Lucide)', '<path d="M5 3.5L2.5 6 5 8.5"/><path d="M2.5 6H10a3.5 3.5 0 010 7H7"/>'],
-  redo: ['Redo (Lucide)', '<path d="M11 3.5L13.5 6 11 8.5"/><path d="M13.5 6H6a3.5 3.5 0 000 7h3"/>'],
+  'facing': ['Facing', '<rect x="2" y="9" width="12" height="4.5" rx="1"/><path class="hi" d="M2 6.5h12M2 4h12"/>'],
+  'pocket': ['Pocket', '<rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path class="hi" d="M5 6h6M5 8h6M5 10h6"/>'],
+  'profile': ['Profile', '<rect x="4.5" y="4.5" width="7" height="7" rx="1"/><rect class="hi" x="2" y="2" width="12" height="12" rx="3" stroke-dasharray="2 2"/>'],
+  'groove': ['Groove', '<path d="M2 4.5h6a5.5 5.5 0 0 1 5.5 5.5v4M2 9.5h6a.5.5 0 0 1 .5.5v4"/><path class="hi" d="M2 7h6a3 3 0 0 1 3 3v4"/>'],
+  'drilling': ['Drilling', '<circle cx="8" cy="8" r="3.5"/><path class="hi" d="M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3"/>'],
+  'shape-import': ['Import shape', '<path d="M3.5 1.5h6l3 3v10h-9zM9.5 1.5v3h3"/><path class="hi" d="M5.5 12.5C5.5 9 10.5 10 10.5 6.5"/>'],
+  'fillet': ['Fillet', '<path d="M2.5 14V8.5M8.5 2.5H14"/><path d="M2.5 8.5V2.5h6" stroke-dasharray="1 2"/><path class="hi" d="M2.5 8.5a6 6 0 0 1 6-6"/>'],
+  'tabs': ['Tabs', '<path d="M1.5 4h13M1.5 12h3.5M11 12h3.5"/><path class="hi" d="M5 12V8.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1V12"/>'],
+  'toolpath': ['Toolpath', '<circle class="f" cx="2.5" cy="13.5" r="1"/><path class="hi" d="M2.5 13.5V2.5h3.7v11h3.6v-11h3.7v11"/>'],
+  'flat-end-mill': ['Flat end mill', '<path d="M5 14.5V1.5h6v13M5 6h6M5 11l6-3"/><path class="hi" d="M5 14.5h6"/>'],
+  'bull-nose-end-mill': ['Bull nose end mill', '<path d="M5 12.5V1.5h6v11M5 6h6M5 11l6-3"/><path class="hi" d="M5 12.5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2"/>'],
+  'ball-end-mill': ['Ball end mill', '<path d="M5 11.5V1.5h6v10M5 6h6M5 10l6-3"/><path class="hi" d="M5 11.5a3 3 0 0 0 6 0"/>'],
+  'drill': ['Drill', '<path d="M5 11V1.5h6V11M5 7l6-3M5 10.5l6-3"/><path class="hi" d="M5 11l3 3.5 3-3.5"/>'],
+  'select': ['Select', '<path d="M3.5 2.5l8.5 5-3.8 1L6.2 12z"/><path class="hi" d="M8.4 8.6l2.6 4"/>'],
+  'rect': ['Rectangle', '<rect x="2.5" y="4" width="11" height="8" rx="0.5"/><path class="hi" d="M1.5 3h2v2h-2zM12.5 11h2v2h-2z"/>'],
+  'circle': ['Circle', '<circle cx="8" cy="8" r="5.5"/><path class="hi" d="M8 8l3.9-3.9"/><circle class="hi f" cx="8" cy="8" r="1"/>'],
+  'line': ['Polyline', '<path d="M2.5 12.5L7 4.5l6.5 4"/><circle class="hi" cx="7" cy="4.5" r="1.3"/><circle class="hi" cx="2.5" cy="12.5" r="1.3"/><circle class="hi" cx="13.5" cy="8.5" r="1.3"/>'],
+  'shapes': ['Shapes', '<circle cx="5.5" cy="5.5" r="3.5"/><rect class="hi" x="7.5" y="7.5" width="6" height="6" rx="1"/>'],
+  'kind-rectangle': ['Rectangle', '<rect x="2" y="4" width="12" height="8" rx="1"/>'],
+  'kind-circle': ['Circle', '<circle cx="8" cy="8" r="6"/>'],
+  'kind-obround': ['Obround', '<rect x="1.5" y="4.5" width="13" height="7" rx="3.5"/>'],
+  'kind-polygon': ['Polygon', '<path d="M4.8 2.5h6.4L14.4 8l-3.2 5.5H4.8L1.6 8z"/>'],
+  'kind-path': ['Path', '<path d="M2.5 12.5C3 5 7 4 8 8s5 3 5.5-4.5"/><circle class="f" cx="2.5" cy="12.5" r="0.9"/><circle class="f" cx="13.5" cy="3.5" r="0.9"/>'],
+  'design': ['Design', '<path d="M2.5 13.5h11M4 11l6.5-6.5 2 2L6 13H4z"/><path class="hi" d="M10.5 4.5l1-1 2 2-1 1"/>'],
+  'plan': ['Plan', '<path d="M2.5 4h3M2.5 8h3M2.5 12h3"/><path class="hi" d="M8.5 3.5h5v4.5h-5v4.5h5"/>'],
+  'measure': ['Measure', '<path d="M2 11.5L11.5 2 14 4.5 4.5 14z"/><path class="hi" d="M5 8.5l1.3 1.3M7 6.5l1 1M9 4.5l1.3 1.3"/>'],
+  'snap': ['Snap', '<circle class="f" cx="3" cy="3" r="0.9"/><circle class="f" cx="13" cy="3" r="0.9"/><circle class="f" cx="3" cy="13" r="0.9"/><circle class="f" cx="13" cy="13" r="0.9"/><circle class="f" cx="8" cy="8" r="0.9"/><rect class="hi" x="5" y="5" width="6" height="6" rx="0.5"/>'],
+  'pick': ['Pick in the viewport', '<circle cx="8" cy="8" r="4.5"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2"/><circle class="hi f" cx="8" cy="8" r="1.2"/>'],
+  'setups': ['Setups', '<path d="M8 1v3.5M6.5 3L8 4.5 9.5 3M3 8.5V12l5 2.5 5-2.5V8.5M8 11v3.5"/><path class="hi" d="M3 8.5L8 6l5 2.5L8 11z"/>'],
+  'stock': ['Stock', '<path d="M1.5 7.5L8 4.5l6.5 3v3L8 13.5l-6.5-3zM8 10.5v3"/><path class="hi" d="M1.5 7.5L8 10.5l6.5-3"/>'],
+  'reference': ['Reference model', '<path d="M8 2.5l6 11H2z"/><path class="hi" d="M5 8h6l-3 5.5z"/>'],
+  'export-gcode': ['Export gCode', '<path d="M3.5 1.5h6l3 3v10h-9zM9.5 1.5v3h3"/><path class="hi" d="M10.2 8.25A2.5 2.5 0 1 0 10.5 10H8.5"/>'],
+  'run': ['Run', '<circle cx="8" cy="8" r="6.5"/><path class="hi" d="M6.5 5.3l4 2.7-4 2.7z"/>'],
+  'simulate': ['Simulate', '<path d="M5 3.3l8 4.7-8 4.7z"/><path class="hi" d="M2.5 5v6"/>'],
+  'work-zero': ['Work zero', '<path d="M2 14V2M2 14h12M6 10l3-3"/><circle class="hi" cx="2" cy="14" r="1.6"/>'],
+  'jog': ['Jog', '<rect x="6" y="6" width="4" height="4" rx="1"/><path class="hi" d="M8 1.5v3M6.5 3L8 1.5 9.5 3M8 14.5v-3M6.5 13L8 14.5 9.5 13M1.5 8h3M3 6.5L1.5 8 3 9.5M14.5 8h-3M13 6.5L14.5 8 13 9.5"/>'],
+  'probe': ['Probe Z', '<path d="M8 2v7M5.5 6.5L8 9l2.5-2.5"/><path class="hi" d="M2.5 13.5h11"/>'],
+  'home': ['Home', '<path d="M1.5 7.5L8 2l6.5 5.5M3.5 6v7.5h9V6"/><path class="hi" d="M6.5 13.5V10h3v3.5"/>'],
+  'machine': ['Machine', '<path d="M1.5 14h13M3 14V2.5h10V14M3 5h10"/><path class="hi" d="M7 5v4.5l1 1.5 1-1.5V5"/>'],
+  'connect': ['Connect', '<path d="M6 1.5v3M10 1.5v3M8 11.5v3"/><path class="hi" d="M4 4.5h8v2.5a4 4 0 0 1-8 0z"/>'],
+  'disconnect': ['Disconnect', '<path d="M6 1.5v3M10 1.5v3M8 11.5v3M4 4.5h8v2.5a4 4 0 0 1-8 0zM1.5 14.5l13-13"/>'],
+  'play': ['Resume', '<path d="M4.5 2.8l8.5 5.2-8.5 5.2z"/>'],
+  'pause': ['Pause', '<path d="M5.5 3v10M10.5 3v10"/>'],
+  'fit': ['Fit', '<path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/><rect class="hi" x="5.5" y="5.5" width="5" height="5" rx="0.5"/>'],
+  'iso': ['Isometric', '<path d="M8 2l5.5 3v6L8 14l-5.5-3V5z"/><path class="hi" d="M8 8l5.5-3M8 8L2.5 5M8 8v6"/>'],
+  'top': ['Top', '<path d="M8 2l5.5 3v6L8 14l-5.5-3V5zM8 8v6"/><path class="hi" d="M2.5 5L8 8l5.5-3L8 2z"/>'],
+  'front': ['Front', '<path d="M8 2l5.5 3v6L8 14l-5.5-3V5zM8 8l5.5-3"/><path class="hi" d="M2.5 5L8 8v6l-5.5-3z"/>'],
+  'right': ['Right', '<path d="M8 2l5.5 3v6L8 14l-5.5-3V5zM8 8L2.5 5"/><path class="hi" d="M13.5 5L8 8v6l5.5-3z"/>'],
+  'grid': ['Grid', '<rect x="2.5" y="2.5" width="11" height="11" rx="1"/><path class="hi" d="M6.2 2.5v11M9.8 2.5v11M2.5 6.2h11M2.5 9.8h11"/>'],
+  'eye': ['Show', '<path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z"/><circle class="hi" cx="8" cy="8" r="2"/>'],
+  'eye-off': ['Hidden', '<path d="M6.3 3.7A6.6 6.6 0 0 1 8 3.5c4 0 6.5 4.5 6.5 4.5a12 12 0 0 1-1.6 2.2"/><path d="M10.5 11.9A5.9 5.9 0 0 1 8 12.5C4 12.5 1.5 8 1.5 8a12 12 0 0 1 2.6-3.1"/><path d="M2 2l12 12"/>'],
+  'panel-left': ['Left panel', '<rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M5.5 2.5v11"/>'],
+  'panel-right': ['Right panel', '<rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M10.5 2.5v11"/>'],
+  'add': ['Add', '<path d="M8 3v10M3 8h10"/>'],
+  'delete': ['Delete', '<path d="M2.5 4h11M6 4V2.5h4V4M3.8 4l.7 9.5h7l.7-9.5M6.6 6.8v4M9.4 6.8v4"/>'],
+  'close': ['Close', '<path d="M4 4l8 8M12 4l-8 8"/>'],
+  'check': ['Done', '<path d="M3 8.5l3.2 3.2L13 4.8"/>'],
+  'check-all': ['Apply all', '<path d="M1.5 8.5l3 3L11 5M8 11l.5.5L14.5 5"/>'],
+  'undo': ['Undo', '<path d="M5.5 9.5L2 6l3.5-3.5M2 6h7.75a3.75 3.75 0 0 1 0 7.5H7"/>'],
+  'redo': ['Redo', '<path d="M10.5 9.5L14 6l-3.5-3.5M14 6H6.25a3.75 3.75 0 0 0 0 7.5H9"/>'],
+  'rotate-ccw': ['Turn counter-clockwise', '<path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9L2.5 5.8M2.5 2.5v3.3h3.3"/>'],
+  'rotate-cw': ['Turn clockwise', '<path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9l1.6 1.7M13.5 2.5v3.3h-3.3"/>'],
+  'refresh': ['Regenerate', '<path d="M13.2 6.2A5.5 5.5 0 0 0 3.3 5M2.8 9.8a5.5 5.5 0 0 0 9.9 1.2M13.5 2.5v3.8H9.7M2.5 13.5V9.7h3.8"/>'],
+  'history': ['History', '<path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9L2.5 5.8M2.5 2.5v3.3h3.3M8 5v3l2 1.5"/>'],
+  'edit': ['Edit', '<path d="M10.5 2.5l3 3-8 8h-3v-3zM9 4l3 3"/>'],
+  'copy': ['Duplicate', '<rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"/>'],
+  'paste': ['Paste', '<path d="M5.5 3H4a1 1 0 0 0-1 1v9.5a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1h-1.5"/><rect x="5.5" y="1.5" width="5" height="3" rx="0.75"/><path d="M5.5 8h5M5.5 10.5h3.5"/>'],
+  'merge': ['Merge', '<path d="M3.5 2v2a4.5 4.5 0 0 0 4.5 4.5A4.5 4.5 0 0 0 12.5 4V2M8 8.5V14M6 12l2 2 2-2"/>'],
+  'split': ['Split', '<path d="M8 14.5V9L3.5 3.5M8 9l4.5-5.5M3.5 6.5v-3h3M9.5 3.5h3v3"/>'],
+  'move-to': ['Move to', '<path d="M3 2.5v5a2 2 0 0 0 2 2h8.5M10.5 6.5l3 3-3 3"/>'],
+  'more': ['More', '<circle class="f" cx="3.5" cy="8" r="1.1"/><circle class="f" cx="8" cy="8" r="1.1"/><circle class="f" cx="12.5" cy="8" r="1.1"/>'],
+  'search': ['Search', '<circle cx="7" cy="7" r="4.5"/><path d="M10.4 10.4l3.6 3.6"/>'],
+  'settings': ['Settings', '<path d="M6.65 3.29L7.11 1.66h1.78l.46 1.63 1.03.42 1.47-.82 1.26 1.26-.82 1.47.42 1.03 1.63.46v1.78l-1.63.46-.42 1.03.82 1.47-1.26 1.26-1.47-.82-1.03.42-.46 1.63H7.11l-.46-1.63-1.03-.42-1.47.82-1.26-1.26.82-1.47-.42-1.03-1.63-.46V7.11l1.63-.46.42-1.03-.82-1.47 1.26-1.26 1.47.82z"/><circle cx="8" cy="8" r="2.1"/>'],
+  'library': ['Library', '<path d="M1.5 14h13M2.5 14V2.5H5V14M5 14V4.5h2.5V14"/><path d="M8.6 5l2.4-.6 2.5 9-2.4.6z"/>'],
+  'save': ['Save', '<path d="M2.5 3.5a1 1 0 0 1 1-1H11l2.5 2.5v8.5a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z"/><path d="M5 13.5v-4h6v4M5.5 2.5V5h4"/>'],
+  'file-new': ['New project', '<path d="M3.5 1.5h6l3 3v10h-9zM9.5 1.5v3h3"/><path d="M8 7v5M5.5 9.5h5"/>'],
+  'open': ['Open', '<path d="M1.5 4a1 1 0 0 1 1-1H6l1.5 1.5h6a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z"/>'],
+  'import': ['Import', '<path d="M3.5 1.5h6l3 3v10h-9zM9.5 1.5v3h3"/><path d="M8 12.5V7M5.8 9.2L8 7l2.2 2.2"/>'],
+  'report': ['Report', '<path d="M3.5 1.5h6l3 3v10h-9zM9.5 1.5v3h3"/><path d="M5.5 8h5M5.5 10.5h5"/>'],
+  'download': ['Apply to the library', '<path d="M8 2v8M4.8 6.8L8 10l3.2-3.2M2.5 10.5v2a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-2"/>'],
+  'agent': ['Agent', '<rect x="2.5" y="5" width="11" height="8.5" rx="2"/><path d="M8 5V2.5"/><circle class="f" cx="6" cy="9.2" r="0.9"/><circle class="f" cx="10" cy="9.2" r="0.9"/>'],
+  'arrow-up': ['Move up', '<path d="M8 13V3M4 7l4-4 4 4"/>'],
+  'arrow-down': ['Move down', '<path d="M8 3v10M4 9l4 4 4-4"/>'],
+  'arrow-right': ['Go to', '<path d="M3 8h10M9 4l4 4-4 4"/>'],
+  'chevron-down': ['Open list', '<path d="M4 6l4 4 4-4"/>'],
+  'error': ['Error', '<circle cx="8" cy="8" r="6.5"/><path d="M8 4.7v3.9"/><circle class="f" cx="8" cy="11.2" r="0.9"/>'],
+  'warning': ['Warning', '<path d="M6.8 2.7a1.4 1.4 0 0 1 2.4 0l5.1 9a1.4 1.4 0 0 1-1.2 2.1H2.9a1.4 1.4 0 0 1-1.2-2.1z"/><path d="M8 6v3.3"/><circle class="f" cx="8" cy="11.6" r="0.85"/>'],
+  'info': ['Note', '<circle cx="8" cy="8" r="6.5"/><path d="M8 7.3v4"/><circle class="f" cx="8" cy="4.9" r="0.9"/>'],
+  'success': ['Done', '<circle cx="8" cy="8" r="6.5"/><path d="M5.2 8.2l2 2 3.6-3.8"/>'],
+  'not-started': ['Not started', '<circle cx="8" cy="8" r="6.5" stroke-dasharray="2.55 2.55"/>'],
+  'busy': ['Working', '<path d="M14.5 8A6.5 6.5 0 1 1 8 1.5"/>'],
+  'clock': ['Waiting', '<circle cx="8" cy="8" r="6.5"/><path d="M8 4.5V8l2.5 1.5"/>'],
+  'lock': ['Locked', '<rect x="3" y="7" width="10" height="7.5" rx="1.5"/><path d="M5.2 7V5a2.8 2.8 0 0 1 5.6 0v2M8 10v1.5"/>'],
 };
+/* icons:end */
 const ico = k => `<svg class="i" viewBox="0 0 16 16" aria-hidden="true">${I[k][1]}</svg>`;
 $('#icon-sheet').innerHTML = Object.keys(I).map(k => `<figure><span class="ib" aria-pressed="${k === 'pocket' || k === 'iso'}">${ico(k)}</span>${I[k][0]}</figure>`).join('');
 
@@ -1191,7 +1267,7 @@ function wireToolbar(tb, keys) {
   tb.innerHTML = '';
   keys.forEach((grp, gi) => {
     if (gi) tb.insertAdjacentHTML('beforeend', '<span class="sep"></span>');
-    grp.forEach(([k, key, on]) => tb.insertAdjacentHTML('beforeend', `<button type="button" class="ib" data-k="${k}" title="${I[k][0].replace(' (Lucide)', '')}  ${key}" aria-label="${I[k][0].replace(' (Lucide)', '')}" aria-pressed="${!!on}">${ico(k)}</button>`));
+    grp.forEach(([k, key, on]) => tb.insertAdjacentHTML('beforeend', `<button type="button" class="ib" data-k="${k}" title="${I[k][0]}  ${key}" aria-label="${I[k][0]}" aria-pressed="${!!on}">${ico(k)}</button>`));
   });
   tb.addEventListener('click', e => {
     const b = e.target.closest('.ib'); if (!b || b.disabled || ['undo', 'redo'].includes(b.dataset.k)) return;
@@ -1294,7 +1370,7 @@ const tpl = $('#gallery-tpl');
   $('#gallery').appendChild(pane);
   decorate(pane);
   wireModes($('[data-modesw]', pane));
-  wireToolbar($('[data-toolbar]', pane), [[['select', 'V'], ['rect', 'R', true], ['circle', 'C'], ['line', 'L']], [['profile', 'P'], ['pocket', 'K'], ['drill', 'D']], [['undo', '⌘Z'], ['redo', '⇧⌘Z']]]);
+  wireToolbar($('[data-toolbar]', pane), [[['select', 'V'], ['rect', 'R', true], ['circle', 'C'], ['line', 'L']], [['profile', 'P'], ['pocket', 'K'], ['drilling', 'D']], [['undo', '⌘Z'], ['redo', '⇧⌘Z']]]);
   $$('[data-toolbar] .ib', pane).slice(-1)[0].disabled = true;
   wireModes($('[data-modes]', pane));
   wireSeg($('[data-seg]', pane));

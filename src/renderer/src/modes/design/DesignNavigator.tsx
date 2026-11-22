@@ -5,7 +5,6 @@
 // evaluation. Between the part and the operations, the reference models (ReferenceRows.tsx, task
 // R3), then the named shapes (ShapeList.tsx, task U1). Doc: docs/conventions/ui.md#panels-and-inspectors, #confirmations, #undo-and-redo;
 // docs/modes/design.md#ordering-and-composition
-import { ArrowDown, ArrowUp, CircleAlert, Plus, Trash2, TriangleAlert } from 'lucide-react'
 import { useRef, type KeyboardEvent } from 'react'
 import type { OperationDTO, OperationKind } from '../../../../core/design/part.dto'
 import type { UnitSystem } from '../../../../core/project/document'
@@ -19,8 +18,8 @@ import {
   PanelHeader,
   Toast,
   ToastRegion,
-  ToolIcon,
-  type ToolIconName,
+  Icon,
+  type IconName,
 } from '../../ui'
 import styles from './Design.module.css'
 import { addArgs, failingOperation, type DesignPart } from './model'
@@ -31,11 +30,16 @@ import { useCommand, useDesignEvaluation, useDesignSelection, useDesignWarnings 
 
 const m = designMessages
 const KINDS: readonly OperationKind[] = ['facing', 'pocket', 'drilling', 'profile']
-const ICON: Record<OperationKind, ToolIconName> = {
+const ICON: Record<OperationKind, IconName> = {
   facing: 'facing',
   pocket: 'pocket',
-  drilling: 'drill',
+  drilling: 'drilling',
   profile: 'profile',
+}
+
+/** A profile cut on its line is a groove (B22-5: the bent slot). */
+export function operationIcon(op: OperationDTO): IconName {
+  return op.kind === 'profile' && op.side === 'on' ? 'groove' : ICON[op.kind]
 }
 
 export function DesignNavigator({
@@ -153,30 +157,25 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
             label={m.addOperation}
             items={KINDS.map((k) => ({
               label: m.add(k),
-              icon: <ToolIcon name={ICON[k]} />,
+              icon: <Icon name={ICON[k]} />,
               onSelect: () => void add(k),
             }))}
           >
-            <IconButton label={m.addOperation} icon={<Plus aria-hidden="true" />} />
+            <IconButton label={m.addOperation} icon={<Icon name="add" />} />
           </Menu>
         }
       />
       {ops.length === 0 ? (
         <div className={styles['emptyOps']}>
           <EmptyState
-            icon={<ToolIcon name="facing" />}
+            icon={<Icon name="facing" />}
             title={m.navigator.empty.title}
             description={m.navigator.empty.description}
             headingLevel={3}
           />
           <div className={styles['addRow']}>
             {KINDS.map((k) => (
-              <Button
-                key={k}
-                size="sm"
-                icon={<ToolIcon name={ICON[k]} />}
-                onClick={() => void add(k)}
-              >
+              <Button key={k} size="sm" icon={<Icon name={ICON[k]} />} onClick={() => void add(k)}>
                 {m.add(k)}
               </Button>
             ))}
@@ -205,18 +204,18 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
                   onClick={() => select(selected === op.id ? null : op.id)}
                   onKeyDown={(e) => onRowKey(e, op, i)}
                 >
-                  <ToolIcon name={ICON[op.kind]} />
+                  <Icon name={operationIcon(op)} />
                   <span className={styles['opName']}>{op.name}</span>
                   <span className={styles['opId']}>{op.id}</span>
                   {failed ? (
                     <span className={styles['opFailed']} title={m.navigator.failed}>
-                      <CircleAlert aria-hidden="true" />
+                      <Icon name="error" />
                       <span className={styles['srOnly']}>{m.navigator.failed}</span>
                     </span>
                   ) : null}
                   {n > 0 ? (
                     <span className={styles['opBadge']}>
-                      <TriangleAlert aria-hidden="true" />
+                      <Icon name="warning" />
                       <span aria-hidden="true">{n}</span>
                       <span className={styles['srOnly']}>{m.navigator.warnings(n)}</span>
                     </span>
@@ -225,21 +224,21 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
                 <span className={styles['opActions']}>
                   <IconButton
                     label={m.navigator.moveUp(op.name)}
-                    icon={<ArrowUp aria-hidden="true" />}
+                    icon={<Icon name="arrow-up" />}
                     shortcut="Alt+↑"
                     disabled={i === 0}
                     onClick={() => void move(op, -1)}
                   />
                   <IconButton
                     label={m.navigator.moveDown(op.name)}
-                    icon={<ArrowDown aria-hidden="true" />}
+                    icon={<Icon name="arrow-down" />}
                     shortcut="Alt+↓"
                     disabled={i === ops.length - 1}
                     onClick={() => void move(op, 1)}
                   />
                   <IconButton
                     label={m.navigator.remove(op.name)}
-                    icon={<Trash2 aria-hidden="true" />}
+                    icon={<Icon name="delete" />}
                     onClick={() => void remove(op)}
                   />
                 </span>

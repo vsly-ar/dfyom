@@ -2,12 +2,11 @@
 // MachineFields / StockFields, `full`), validated as typed by the core models (L3), the draft's
 // "Unsaved" state, a conflict note with Reload / Overwrite, and the actions Duplicate, Remove…,
 // Import $$… (machines), Revert and Save. Doc: docs/conventions/ui-library-window.md#layout, #behaviour-with-projects
-import { Copy, RotateCcw, Save, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { LibraryItemKind } from '../../../core/library/item'
 import { libraryMessages } from '../messages/library'
 import { sentence } from '../messages/plan'
-import { Button, ConfirmDialog, ErrorMessage, StatusChip } from '../ui'
+import { Icon, Button, ConfirmDialog, ErrorMessage, StatusChip } from '../ui'
 import { useStore } from 'zustand'
 import {
   draftIssues,
@@ -99,7 +98,7 @@ export function ItemEditor({
             <Button
               size="sm"
               variant="primary"
-              icon={<Save aria-hidden="true" />}
+              icon={<Icon name="save" />}
               onClick={() => void s.overwrite()}
             >
               {w.overwrite}
@@ -142,7 +141,7 @@ export function ItemEditor({
         <Button
           size="sm"
           variant="ghost"
-          icon={<Copy aria-hidden="true" />}
+          icon={<Icon name="copy" />}
           disabled={d.id === null}
           onClick={() => s.duplicate()}
         >
@@ -160,7 +159,7 @@ export function ItemEditor({
             <Button
               size="sm"
               variant="ghost"
-              icon={<Trash2 aria-hidden="true" />}
+              icon={<Icon name="delete" />}
               disabled={d.id === null}
             >
               {w.remove}
@@ -178,7 +177,7 @@ export function ItemEditor({
         <span className={styles['spacer']} />
         <Button
           size="sm"
-          icon={<RotateCcw aria-hidden="true" />}
+          icon={<Icon name="rotate-ccw" />}
           disabled={!dirty || s.saving}
           onClick={() => s.revert()}
         >
@@ -187,7 +186,7 @@ export function ItemEditor({
         <Button
           size="sm"
           variant="primary"
-          icon={<Save aria-hidden="true" />}
+          icon={<Icon name="save" />}
           disabled={!dirty || s.saving}
           onClick={() => void s.save()}
         >

@@ -5,7 +5,6 @@
 // `turn`, Fit sends `fit`); errors show at their field. Warnings: `exceedsStock` live, plus the
 // import's own notes in this window. Doc: docs/modes/reference-model.md#display,
 // docs/conventions/ui.md#panels-and-inspectors, #reference-ghost-v02
-import { RotateCcw, RotateCw } from 'lucide-react'
 import { useState } from 'react'
 import {
   FIT_Z,
@@ -21,6 +20,7 @@ import { referenceMessages } from '../../messages/reference'
 import { useCancelGesture } from '../../shell/hooks'
 import { useUi } from '../../shell/ShellContext'
 import {
+  Icon,
   AnchorPicker,
   Button,
   ErrorMessage,
@@ -174,12 +174,12 @@ export function ReferenceInspector({
               <span className={styles['turnButtons']}>
                 <IconButton
                   label={t.turn(axis, -1)}
-                  icon={<RotateCcw aria-hidden="true" />}
+                  icon={<Icon name="rotate-ccw" />}
                   onClick={() => void send({ turn: { axis, turns: -1 } }, `rotation.${axis}`)}
                 />
                 <IconButton
                   label={t.turn(axis, 1)}
-                  icon={<RotateCw aria-hidden="true" />}
+                  icon={<Icon name="rotate-cw" />}
                   onClick={() => void send({ turn: { axis, turns: 1 } }, `rotation.${axis}`)}
                 />
               </span>

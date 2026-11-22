@@ -3,14 +3,13 @@
 // (plan mode assigns it to the plan operation; design mode locks the operation's tool field). The
 // core validates; its issues show at their field, the rest above the fields.
 // Doc: docs/conventions/ui-library-window.md#context-links, docs/conventions/ui.md#plan-mode-task-37
-import { Plus, Wrench } from 'lucide-react'
 import { useState, type ReactElement } from 'react'
 import type { OperationKind } from '../../../core/design/part.dto'
 import type { UnitSystem } from '../../../core/project/document'
 import type { AppErrorData } from '../../../shared/errors/app-error'
 import { libraryMessages } from '../messages/library'
 import { useCall } from '../shell/hooks'
-import { Button, Dialog, DialogClose } from '../ui'
+import { Icon, Button, Dialog, DialogClose } from '../ui'
 import { commandInput, defaultToolValues, type ToolDraft, type ToolPrefill } from './form'
 import { LibraryFormBody, useLibraryForm } from './LibraryForm'
 import { TOOL_FIELDS, ToolFields } from './ToolFields'
@@ -78,7 +77,7 @@ export function NewToolDialog({
     })
 
   const defaultTrigger = (
-    <Button size="sm" icon={<Plus aria-hidden="true" />} disabled={disabled}>
+    <Button size="sm" icon={<Icon name="add" />} disabled={disabled}>
       {m.open}
     </Button>
   )
@@ -97,7 +96,7 @@ export function NewToolDialog({
           </DialogClose>
           <Button
             variant="primary"
-            icon={<Wrench aria-hidden="true" />}
+            icon={<Icon name="add" />}
             disabled={f.busy}
             onClick={() => void submit()}
           >

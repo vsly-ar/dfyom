@@ -1,17 +1,16 @@
-// Icons of the shape item kinds (task U1): lucide glyphs at the icon size of the rows they sit in.
+// Icons of the shape item kinds (task U1), at the icon size of the rows they sit in.
 // Doc: docs/conventions/ui.md#icons, #shape-editor
-import { Circle, Hexagon, Pill, RectangleHorizontal, Spline } from 'lucide-react'
 import type { ShapeItemKind } from '../../../../core/design/shape.dto'
+import { Icon, type IconName } from '../../ui'
 
 const ICONS = {
-  rectangle: RectangleHorizontal,
-  circle: Circle,
-  obround: Pill,
-  polygon: Hexagon,
-  path: Spline,
-} as const
+  rectangle: 'kind-rectangle',
+  circle: 'kind-circle',
+  obround: 'kind-obround',
+  polygon: 'kind-polygon',
+  path: 'kind-path',
+} as const satisfies Record<ShapeItemKind, IconName>
 
 export function ShapeKindIcon({ kind }: { kind: ShapeItemKind }): React.JSX.Element {
-  const Icon = ICONS[kind]
-  return <Icon aria-hidden="true" />
+  return <Icon name={ICONS[kind]} />
 }

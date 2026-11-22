@@ -5,7 +5,7 @@
 // a warning Apply may change shows a clock and its note ("May change on Apply …"); a list whose
 // checks wait for Apply is muted with an "Outdated" note, not hidden.
 // Doc: docs/conventions/ui.md#warnings-and-dfm, #inventory-v01
-import { CircleAlert, Clock, Info, TriangleAlert, X } from 'lucide-react'
+import { Icon, type IconName } from '../icons/Icon'
 import { useState, type ReactNode } from 'react'
 import { Button } from '../Button/Button'
 import { IconButton } from '../IconButton/IconButton'
@@ -61,21 +61,21 @@ export function WarningItem({
   labels: WarningListLabels
   onDismiss?: (() => void) | undefined
 }): React.JSX.Element {
-  const Icon =
+  const icon: IconName =
     item.pendingApply !== undefined
-      ? Clock
+      ? 'clock'
       : item.tier === 'error'
-        ? CircleAlert
+        ? 'error'
         : item.tier === 'hard'
-          ? TriangleAlert
-          : Info
+          ? 'warning'
+          : 'info'
   return (
     <li
       className={styles['item']}
       data-tier={item.tier}
       data-pending={item.pendingApply !== undefined || undefined}
     >
-      <Icon aria-hidden="true" className={styles['icon']} />
+      <Icon name={icon} className={styles['icon']} />
       <div className={styles['body']}>
         <span className={styles['srOnly']}>{labels.tier[item.tier]}: </span>
         {item.subject !== undefined ? (
@@ -100,7 +100,7 @@ export function WarningItem({
       {onDismiss ? (
         <IconButton
           label={labels.dismiss}
-          icon={<X aria-hidden="true" />}
+          icon={<Icon name="close" />}
           className={styles['dismiss']}
           onClick={onDismiss}
         />
@@ -128,7 +128,7 @@ export function WarningList({
     >
       {outdated !== undefined && (shown.length > 0 || hidden.length > 0) ? (
         <p className={styles['outdated']}>
-          <Clock aria-hidden="true" className={styles['outdatedIcon']} />
+          <Icon name="clock" className={styles['outdatedIcon']} />
           {outdated}
         </p>
       ) : null}
