@@ -21,6 +21,11 @@ export interface ExportOperation {
   readonly tool: ProgramTool
   /** Comment text before the operation, e.g. the operation's name. */
   readonly label: string
+  /**
+   * Position comments by design operation id (clone positions, plan-v0.4.md P-E): written before
+   * the passes naming that operation (`Pass.operationId`) whenever it changes.
+   */
+  readonly positions?: Readonly<Record<string, string>>
 }
 
 export interface ExportInput {
@@ -87,7 +92,7 @@ export function exportGrbl(input: ExportInput, opts: PostOptions): AppResult<Grb
 /**
  * Toolpaths → blocks: a tool change whenever the tool copy changes (tools numbered by first use),
  * a spindle block when the speed changes, the label comment, then the moves with drill cycles
- * expanded and arc centers as I/J offsets.
+ * expanded and arc centers as I/J offsets; a position comment before each clone position.
  */
 export function toMachiningProgram(
   input: ExportInput,
@@ -149,10 +154,15 @@ export function toMachiningProgram(
       rpm = tp.spindleSpeed
       blocks.push({ kind: 'spindle', rpm })
     }
-    for (const pass of tp.passes)
+    let position: string | undefined
+    for (const pass of tp.passes) {
+      const text = pass.operationId === undefined ? undefined : op.positions?.[pass.operationId]
+      if (text !== undefined && text !== position) blocks.push({ kind: 'comment', text })
+      position = text
       for (const m of pass.moves)
         if (m.kind === 'drill') expandDrill(m, peckClearance).forEach(push)
         else push(m)
+    }
   }
   return Ok({
     name: input.name,

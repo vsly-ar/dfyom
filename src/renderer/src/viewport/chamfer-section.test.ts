@@ -3,7 +3,8 @@
 // a cone cut at a shallow floor, one measured part per field, invalid parts and the label.
 // Doc: docs/conventions/ui.md#section-illustration
 import { describe, expect, it } from 'vitest'
-import { chamferSection, coneDepth, type SectionPrimitive } from './chamfer-section'
+import { chamferSection, coneDepth } from './chamfer-section'
+import type { SketchPrimitive } from './sketch'
 
 const base = {
   diameter: 4.4,
@@ -14,9 +15,9 @@ const base = {
   edgeName: 'Drilling 1',
 }
 
-const lines = (p: readonly SectionPrimitive[], style: string) =>
+const lines = (p: readonly SketchPrimitive[], style: string) =>
   p.filter((x) => x.kind === 'line' && x.style === style)
-const measure = (p: readonly SectionPrimitive[], part: string) => {
+const measure = (p: readonly SketchPrimitive[], part: string) => {
   const m = p.find((x) => x.kind === 'measure' && x.part === part)
   if (m?.kind !== 'measure') throw new Error(`no measure ${part}`)
   return m

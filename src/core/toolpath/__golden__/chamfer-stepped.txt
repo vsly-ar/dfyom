@@ -1,0 +1,23 @@
+toolpath op-hole1_countersink tool em2.5 S16000
+stats cut 82.5672 rapid 19.86 s 7.8341
+pass rough
+  rapid 15 12.69 10
+  rapid 15 12.69 2
+  line 15 12.69 0 F200
+  arc 15 17.31 -0.2325 c 15 15 ccw F800
+  arc 15 12.69 -0.465 c 15 15 ccw F800
+  arc 15 17.31 -0.6975 c 15 15 ccw F800
+  arc 15 12.69 -0.93 c 15 15 ccw F800
+  arc 15 17.31 -0.93 c 15 15 ccw F800
+  arc 15 12.69 -0.93 c 15 15 ccw F800
+  line 15 13.62 -0.93 F800
+  arc 15 16.38 -1.085 c 15 15 ccw F800
+  arc 15 13.62 -1.24 c 15 15 ccw F800
+  arc 15 16.38 -1.395 c 15 15 ccw F800
+  arc 15 13.62 -1.55 c 15 15 ccw F800
+  arc 15 16.38 -1.705 c 15 15 ccw F800
+  arc 15 13.62 -1.86 c 15 15 ccw F800
+  arc 15 16.38 -1.86 c 15 15 ccw F800
+  arc 15 13.62 -1.86 c 15 15 ccw F800
+  line 15 15 -1.86 F800
+  rapid 15 15 10

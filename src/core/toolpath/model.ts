@@ -64,6 +64,11 @@ export type PassKind = 'rough' | 'finish' | 'drill'
 export interface Pass {
   readonly kind: PassKind
   readonly moves: readonly Move[]
+  /**
+   * The design operation it cuts, in a joined toolpath (one input per hole or chamfer): the
+   * export writes clone position comments from it (plan-v0.4.md P-E). Absent elsewhere.
+   */
+  readonly operationId?: string
 }
 
 export interface ToolpathStats {
@@ -171,11 +176,13 @@ export type DrillingStrategy = { readonly breakthrough: number } & (
 
 /**
  * Chamfer (v0.4 T1): `plunge` at the centre (DC ≥ D) or `contour` on one ring at the chamfer
- * depth; `entry` is resolved by the plan (`auto` = P-C). Doc: docs/modes/plan-v0.4.md#chamfer-toolpath
+ * depth; `entry` is resolved by the plan (`auto` = P-C). `stepped` (F7): terraces by a flat end
+ * mill, for an operation with a `stepdown`. Doc: docs/modes/plan-v0.4.md#chamfer-toolpath,
+ * docs/modes/plan-v0.4.md#stepped-chamfer-f7
  */
 export interface ChamferStrategy {
-  readonly entry: 'plunge' | 'contour'
-  /** Steepest ramp along the ring (contour, degrees). */
+  readonly entry: 'plunge' | 'contour' | 'stepped'
+  /** Steepest ramp along the ring (contour, stepped; degrees). */
   readonly rampAngle: number
   /** Ring direction (contour); not settable, always `climb`. */
   readonly direction: CutDirection

@@ -16,7 +16,7 @@ import { dfmMessages, lengthSource } from '../../messages/dfm'
 import { useUi } from '../../shell/ShellContext'
 import { Field, FieldIcon, FieldInput, Icon, IconButton, Select, type FieldMessage } from '../../ui'
 import { chamferSection, coneDepth, type ChamferPart } from '../../viewport/chamfer-section'
-import { SectionView } from '../../viewport/SectionView'
+import { SketchView } from '../../viewport/SketchView'
 import { chamferSectionValues, edgeOptions } from './chamfer-view'
 import styles from './Design.module.css'
 import own from './ChamferInspector.module.css'
@@ -84,7 +84,7 @@ export function ChamferInspector({
       <Group title={t.groups.chamfer} level={level}>
         {sketch !== undefined ? (
           <div className={own['section']} data-readonly={ctx.readOnly || undefined}>
-            <SectionView
+            <SketchView
               sketch={sketch}
               highlighted={focused}
               onPartHover={setHovered}

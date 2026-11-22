@@ -62,6 +62,7 @@ export const ToolpathStatsSchema = z.object({
 const PassSchema = z.object({
   kind: z.enum(['rough', 'finish', 'drill']),
   moves: z.array(MoveSchema).readonly(),
+  operationId: z.string().exactOptional(),
 })
 
 /** Full check of every move. */
@@ -96,6 +97,7 @@ export const ToolpathSpotSchema: z.ZodType<Toolpath> = z.object({
               if (!r.success) ctx.addIssue({ code: 'custom', path: [i], message: 'malformed move' })
             }
           }) as unknown as z.ZodType<readonly Move[]>,
+        operationId: z.string().exactOptional(),
       }),
     )
     .readonly(),
@@ -236,7 +238,7 @@ export const ChamferInputSchema: z.ZodType<ChamferInput> = z.object({
   cutting: DrillCuttingSchema,
   operation: ChamferGeometrySchema.omit({ direction: true }),
   strategy: z.object({
-    entry: z.enum(['plunge', 'contour']),
+    entry: z.enum(['plunge', 'contour', 'stepped']),
     rampAngle: z.number(),
     direction: Direction,
   }),

@@ -1,61 +1,35 @@
-// SectionView (v0.4 task U4): a minimal renderer of section primitives (chamfer-section.ts) as a
-// small SVG at one uniform scale fitted to its width – the chamfer inspector's section until U2's
-// SketchView (same primitives, same look) is on main and replaces it. It knows only primitives and
-// the highlighted part: the highlighted measure is the amber line with its value in a chip, a
-// hovered one `--vp-hover`, an invalid one `--danger` with its chip. Pointer over or on a measured
-// part reports it (the caller highlights and focuses its field); the fields are the non-pointer
-// path, so the image is one `role="img"` and its targets are hidden from assistive tech. Paths
-// morph between values with a CSS `d` transition (`--motion-base`, 0 under reduced motion).
+// SketchView (v0.4 U2): renders sketch primitives (sketch.ts) as a small SVG at one uniform scale
+// fitted to its width and height – the hole section now, the chamfer section and the Field info
+// views' `sketch` view later. It knows only primitives and the highlighted part: the highlighted
+// measure is the amber line with its value in a chip, a hovered one `--vp-hover`, an invalid one
+// `--danger` with the error marker. Pointer over or on a measured part reports it (the caller
+// highlights and focuses its field); the fields are the non-pointer path, so the image is one
+// `role="img"` with the sketch's label and its targets are hidden from assistive tech. Paths morph
+// between values with a CSS `d` transition (`--motion-base`, cut under reduced motion).
 // Doc: docs/conventions/ui.md#section-illustration
 import { useId, useLayoutEffect, useRef, useState } from 'react'
-import type {
-  SectionBounds,
-  SectionPoint,
-  SectionPrimitive,
-  SectionSketch,
-} from './chamfer-section'
-import styles from './SectionView.module.css'
+import { fitSketch, sketchPath, toPx, type Sketch, type SketchPrimitive } from './sketch'
+import styles from './SketchView.module.css'
 
-export interface SectionViewProps {
-  readonly sketch: SectionSketch
+export interface SketchViewProps {
+  readonly sketch: Sketch
   /** The measured part drawn amber with its value chip (the focused field's). */
   readonly highlighted?: string | undefined
   /** Height in px (the width follows the container). */
   readonly height?: number
+  /** Pointer entered (part) or left (null) a measured part. */
   readonly onPartHover?: ((part: string | null) => void) | undefined
+  /** A measured part was clicked. */
   readonly onPartClick?: ((part: string) => void) | undefined
+  readonly className?: string | undefined
 }
 
 const PAD = 14
 const FALLBACK_WIDTH = 260
-const CHIP_H = 17
+
+/** Approximate chip width for its text (mono 11 px). */
 const chipWidth = (text: string) => text.length * 6.7 + 10
-
-interface Fit {
-  readonly scale: number
-  readonly ox: number
-  readonly oy: number
-}
-
-/** The uniform scale that fits `bounds` into `width` × `height` px with `pad` px around. */
-export function fitSection(b: SectionBounds, width: number, height: number, pad = PAD): Fit {
-  const bw = Math.max(b.maxX - b.minX, 1e-9)
-  const bh = Math.max(b.maxY - b.minY, 1e-9)
-  const scale = Math.max(Math.min((width - 2 * pad) / bw, (height - 2 * pad) / bh), 1e-6)
-  return {
-    scale,
-    ox: (width - bw * scale) / 2 - b.minX * scale,
-    oy: (height - bh * scale) / 2 - b.minY * scale,
-  }
-}
-
-const r1 = (v: number) => Math.round(v * 10) / 10
-
-function pathOf(fit: Fit, pts: readonly SectionPoint[], closed = false): string {
-  if (pts.length === 0) return ''
-  const xy = pts.map(([x, y]) => `${r1(fit.ox + x * fit.scale)} ${r1(fit.oy + y * fit.scale)}`)
-  return `M${xy.join('L')}${closed ? 'Z' : ''}`
-}
+const CHIP_H = 17
 
 function useWidth(): [React.RefObject<HTMLDivElement | null>, number] {
   const ref = useRef<HTMLDivElement>(null)
@@ -76,28 +50,36 @@ function useWidth(): [React.RefObject<HTMLDivElement | null>, number] {
   return [ref, width]
 }
 
-type Measure = Extract<SectionPrimitive, { kind: 'measure' }>
-
-export function SectionView({
+export function SketchView({
   sketch,
   highlighted,
   height = 120,
   onPartHover,
   onPartClick,
-}: SectionViewProps): React.JSX.Element {
+  className,
+}: SketchViewProps): React.JSX.Element {
   const [ref, width] = useWidth()
   const [hovered, setHovered] = useState<string | null>(null)
-  const hatch = `section-hatch-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
-  const fit = fitSection(sketch.bounds, width, height)
+  const hatch = `sketch-hatch-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
+  const fit = fitSketch(sketch.bounds, width, height, PAD)
+  const d = (points: Parameters<typeof sketchPath>[1], closed = false) =>
+    sketchPath(fit, points, closed)
   // CSS `d` (animatable in Chromium) and the attribute (everything else)
-  const pathProps = (d: string) => ({ d, style: { d: `path("${d}")` } as React.CSSProperties })
-  const measures = sketch.primitives.filter((p): p is Measure => p.kind === 'measure')
+  const pathProps = (data: string) => ({
+    d: data,
+    style: { d: `path("${data}")` } as React.CSSProperties,
+  })
+
+  const measures = sketch.primitives.filter(
+    (p): p is Extract<SketchPrimitive, { kind: 'measure' }> => p.kind === 'measure',
+  )
   const hover = (part: string | null) => {
     setHovered(part)
     onPartHover?.(part)
   }
+
   return (
-    <div ref={ref} className={styles['root']}>
+    <div ref={ref} className={[styles['root'], className].filter(Boolean).join(' ')}>
       <svg
         role="img"
         aria-label={sketch.label}
@@ -122,14 +104,14 @@ export function SectionView({
             p.kind === 'material' ? (
               <path
                 key={`m${i}`}
-                {...pathProps(pathOf(fit, p.points, true))}
+                {...pathProps(d(p.points, true))}
                 fill={`url(#${hatch})`}
                 className={styles['material']}
               />
             ) : p.kind === 'line' ? (
               <path
                 key={`l${i}`}
-                {...pathProps(pathOf(fit, p.points))}
+                {...pathProps(d(p.points, p.closed === true))}
                 className={styles['line']}
                 data-style={p.style}
               />
@@ -144,12 +126,12 @@ export function SectionView({
                   : hovered === p.part
                     ? 'hover'
                     : undefined
-            const d = p.paths.map((pts) => pathOf(fit, pts)).join('')
+            const data = p.paths.map((pts) => d(pts)).join('')
             return (
               <g key={p.part} data-part={p.part} data-state={state} className={styles['measure']}>
-                <path {...pathProps(d)} className={styles['measureLine']} />
+                <path {...pathProps(data)} className={styles['measureLine']} />
                 <path
-                  d={d}
+                  d={data}
                   className={styles['hit']}
                   onPointerEnter={() => hover(p.part)}
                   onPointerLeave={() => hover(null)}
@@ -164,7 +146,7 @@ export function SectionView({
               <Chip
                 key={`chip-${p.part}`}
                 text={p.value}
-                at={[fit.ox + p.chip[0] * fit.scale, fit.oy + p.chip[1] * fit.scale]}
+                at={toPx(fit, p.chip)}
                 side={p.side}
                 invalid={p.invalid === true}
                 box={[width, height]}
@@ -185,11 +167,11 @@ function Chip({
 }: {
   text: string
   at: readonly [number, number]
-  side: Measure['side']
+  side: 'left' | 'right' | 'above' | 'below'
   invalid: boolean
   box: readonly [number, number]
 }): React.JSX.Element {
-  const w = chipWidth(text)
+  const w = chipWidth(text) + (invalid ? 14 : 0)
   const gap = 6
   let x = side === 'right' ? at[0] + gap : side === 'left' ? at[0] - gap - w : at[0] - w / 2
   let y =
@@ -204,7 +186,18 @@ function Chip({
       style={{ transform: `translate(${Math.round(x)}px, ${Math.round(y)}px)` }}
     >
       <rect width={w} height={CHIP_H} rx="3" className={styles['chipBox']} />
-      <text x={5} y={CHIP_H / 2} dominantBaseline="central" className={styles['chipText']}>
+      {invalid ? (
+        <g className={styles['marker']}>
+          <circle cx="9" cy={CHIP_H / 2} r="5" />
+          <path d={`M9 ${CHIP_H / 2 - 2.6}V${CHIP_H / 2 + 0.6}M9 ${CHIP_H / 2 + 2.4}v0.1`} />
+        </g>
+      ) : null}
+      <text
+        x={(invalid ? 14 : 0) + 5}
+        y={CHIP_H / 2}
+        dominantBaseline="central"
+        className={styles['chipText']}
+      >
         {text}
       </text>
     </g>

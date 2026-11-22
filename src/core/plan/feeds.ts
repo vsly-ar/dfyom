@@ -258,8 +258,11 @@ function engagementOf(
         ? { kind: 'drill' }
         : { kind: 'helix', ap: i.helixPitch ?? 0.25 * D }
     case 'chamfer':
-      // F10: the effective diameter at the deepest point of the cut (plan-v0.4.md P-D)
-      return { kind: 'chamfer', depth: i.chamferDepth ?? 0 }
+      // F10: the effective diameter at the deepest point of the cut (plan-v0.4.md P-D); a stepped
+      // chamfer's end mill (F7) as helical boring, one terrace deep
+      return i.tool.type === 'flatEndMill'
+        ? { kind: 'helix', ap: i.chamferDepth ?? 0.25 * D }
+        : { kind: 'chamfer', depth: i.chamferDepth ?? 0 }
   }
 }
 

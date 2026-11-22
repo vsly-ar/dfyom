@@ -233,9 +233,31 @@ export function featureReadout(feature: FeatureDTO, instances?: number): string 
     const fastener = typeof feature['fastener'] === 'string' ? feature['fastener'] : undefined
     const diameter = source(feature['diameter'])
     const size = fastener ?? (diameter === undefined ? undefined : `Ø ${diameter}`)
-    return size === undefined ? type : `${size} · ${type}`
+    const readout = size === undefined ? type : `${size} · ${type}`
+    const custom = fastener === undefined ? undefined : customSize(feature)
+    return custom === undefined ? readout : `${readout} ${custom} (custom)`
   }
   return ''
+}
+
+/**
+ * The first size of a hole that differs from its fastener's table row, as the read-out shows it
+ * ("Ø 7 mm", "depth 3.5 mm", "100°"; ui.md § Hole inspector, Custom sizes): the kind's own
+ * `dfm.holeCustomSize` rule (core `holeSpec.warnings`), so both always agree.
+ */
+function customSize(feature: FeatureDTO): string | undefined {
+  const spec = featureKind('hole')
+  if (spec.isNone()) return undefined
+  const k = spec.unwrap()
+  const hole = k.fromDTO(feature)
+  if (hole.isErr()) return undefined
+  const first = k.warnings?.(hole.unwrap(), (role) => role)[0]
+  const field = first?.parameter
+  if (field === undefined) return undefined
+  const value = source(feature[field])
+  if (value === undefined) return undefined
+  if (field === 'cbDepth') return `depth ${value}`
+  return field === 'csAngle' ? value : `Ø ${value}`
 }
 
 /** The parameter path of an owned operation's first geometric field (where the note points). */

@@ -125,7 +125,7 @@ All answered (D30, D34); kept with the original questions for the record.
 
 - Plan sees **operations only**: the [design snapshot](plan-v0.1.md#plans-are-snapshots) copies the part, features included, but plan operations are built from operations as today. Equal holes from Clones group into one plan operation by the existing grouping key, and clones are cut tool by tool ([Plan and cut order](#plan-and-cut-order)).
 - [Plan-only edits](plan-v0.2.md#plan-only-edits-and-the-snapshot-scene) work per owned operation (they edit the snapshot's operations); the feature in the snapshot is informational. A rebuild discards them as today.
-- The plan navigator may label plan operations with their feature name ("Counterbore 1 · hole"); no feature logic in Plan ([Q9](#questions-for-the-user)).
+- The plan navigator labels plan operations with their feature name ("Hole 1 · counterbore", grouped clone instances "Hole 1 · drill × 6") and the program comments each clone position (`(Clones 1 #3)`); no feature logic in Plan ([Q9](#questions-for-the-user), [plan-v0.4.md § Implementation (P1)](plan-v0.4.md#implementation-p1)).
 
 ## Apply and pending changes
 

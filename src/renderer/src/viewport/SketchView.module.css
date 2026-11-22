@@ -1,9 +1,7 @@
-/* SectionView: the Field drawing style, larger. Doc: docs/conventions/ui.md#section-illustration */
+/* SketchView: the Field drawing style, larger. Doc: docs/conventions/ui.md#section-illustration */
 .root {
   width: 100%;
   min-width: 0;
-  /* the svg's px width follows this box; it must not hold the box open */
-  overflow: hidden;
 }
 
 .svg {
@@ -37,14 +35,14 @@
   stroke-dasharray: 6 2 1 2;
 }
 
-.line[data-style='break'] {
+.line[data-style='silhouette'] {
   stroke: var(--text-faint);
+  stroke-dasharray: 3 2;
 }
 
 .measureLine {
   stroke: transparent;
   stroke-width: 1.8px;
-  stroke-linecap: butt;
   transition:
     d var(--motion-base) var(--ease-standard),
     stroke var(--motion-fast);
@@ -56,6 +54,7 @@
 
 .measure[data-state='active'] .measureLine {
   stroke: var(--accent-icon);
+  filter: var(--accent-icon-edge);
 }
 
 .measure[data-state='invalid'] .measureLine {
@@ -88,4 +87,14 @@
   fill: var(--text);
   stroke: none;
   font: var(--weight-medium) 11px var(--font-mono);
+}
+
+.marker circle {
+  fill: var(--danger);
+  stroke: none;
+}
+
+.marker path {
+  stroke: var(--text-on-solid);
+  stroke-width: 1.4px;
 }

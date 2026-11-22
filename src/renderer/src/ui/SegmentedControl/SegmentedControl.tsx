@@ -2,7 +2,7 @@
 // with dark text slides to the selection. Radix ToggleGroup (radiogroup, roving arrow keys).
 // Doc: docs/conventions/ui.md#inventory-v01, #design-system (thumb stays amber)
 import { ToggleGroup } from 'radix-ui'
-import { useRef } from 'react'
+import { useRef, type ReactNode } from 'react'
 import { useSlidingIndicator } from '../useSlidingIndicator'
 import styles from './SegmentedControl.module.css'
 
@@ -10,6 +10,8 @@ export interface SegmentedOption<V extends string> {
   value: V
   label: string
   disabled?: boolean
+  /** A small icon before the label (decorative: the label names the option; hole types, v0.4). */
+  icon?: ReactNode
 }
 
 export interface SegmentedControlProps<V extends string> {
@@ -57,6 +59,11 @@ export function SegmentedControl<V extends string>({
           disabled={o.disabled ?? false}
           className={styles['item']}
         >
+          {o.icon !== undefined ? (
+            <span className={styles['icon']} aria-hidden="true">
+              {o.icon}
+            </span>
+          ) : null}
           {o.label}
         </ToggleGroup.Item>
       ))}

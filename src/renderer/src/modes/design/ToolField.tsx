@@ -317,11 +317,14 @@ export function ToolField({
   part,
   op,
   warnings,
+  label = t.label,
 }: {
   part: DesignPart
   op: OperationDTO
   /** The operation's DFM warnings (those at `tool` show here). */
   warnings: readonly DfmWarning[]
+  /** The field's label; the hole inspector's Tools group names the role ("Counterbore"). */
+  label?: string
 }): React.JSX.Element {
   const call = useCommand()
   const pending = usePending()
@@ -418,12 +421,12 @@ export function ToolField({
   return (
     <div className={styles['toolField']}>
       <Field
-        label={t.label}
+        label={label}
         illustration={<FieldIcon name="tool" />}
         messages={messages}
         lock={{
           locked,
-          name: t.lock,
+          name: label === t.label ? t.lock : t.lockOf(label),
           disabledReason: !locked && op.tool === undefined ? t.lockNoTool : undefined,
           onLockedChange: (l) =>
             void send(l ? 'design.operation.tool.lock' : 'design.operation.tool.unlock'),

@@ -12,6 +12,7 @@ import { PlanWarningSchema } from '../plan/checks'
 import { planOperationInputs } from '../plan/inputs'
 import { PlanIdSchema, PlanRecordIdSchema } from '../plan/plan.dto'
 import { loadPlan } from '../plan/plan'
+import { planOperationLabel, positionComment } from '../plan/labels'
 import { chooseSetup } from '../plan/setups'
 import { checkAllowed } from '../plan/status'
 import type { ProjectDoc } from '../project/document'
@@ -137,10 +138,27 @@ export async function exportPlan(
     )
     if (tp.isErr()) return Err(tp.unwrapErr().withContext(where, { planId, planOperationId: id }))
     if (tp.unwrap().status === 'generated') regenerated.push(id)
+    const part = plan.dto.design.part
+    const ids = input.operations.map((o) => o.id)
+    const positions: Record<string, string> = {}
+    for (const id of ids) {
+      const text = positionComment(part, id)
+      if (text !== undefined) positions[id] = text
+    }
+    const toolpath = tp.unwrap().toolpath
+    // a plan operation of one design operation: its passes name it (joined ones already do)
+    const only = ids.length === 1 ? ids[0]! : undefined
     operations.push({
-      toolpath: tp.unwrap().toolpath,
+      toolpath:
+        only === undefined
+          ? toolpath
+          : {
+              ...toolpath,
+              passes: toolpath.passes.map((p) => ({ ...p, operationId: p.operationId ?? only })),
+            },
       tool: { name: input.tool.name, diameter: input.tool.diameter.canonical },
-      label: input.operations.map((o) => o.name).join(', '),
+      label: planOperationLabel(part, ids),
+      ...(Object.keys(positions).length === 0 ? {} : { positions }),
     })
   }
   opts.progress?.({ done: total, total })

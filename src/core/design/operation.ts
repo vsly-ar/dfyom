@@ -157,6 +157,11 @@ export interface Chamfer extends Common {
   readonly diameter: Quantity
   /** Included angle. */
   readonly angle: Quantity
+  /**
+   * Some = stepped (F7, the stepped countersink): terraces of at most this height cut by a flat
+   * end mill; None = a chamfer mill. Doc: docs/modes/design-v0.4.md#stepped-countersink-f7-d41
+   */
+  readonly stepdown: Option<Quantity>
 }
 export type Operation = Facing | Pocket | Drilling | Profile | Chamfer
 
@@ -216,6 +221,8 @@ export const DEFAULTS = {
   // hole feature (design-v0.4.md#parameters)
   holeDiameter: { mm: '6 mm', inch: '1/4"' },
   headSink: { mm: '0.2 mm', inch: '0.008"' },
+  // stepped countersink terrace height (design-v0.4.md#stepped-countersink-f7-d41)
+  csStepdown: { mm: '1 mm', inch: '1/32"' },
   // chamfer operation (design-v0.4.md#chamfer-operation-v04-circular-edges): diameter = edge Ø + this
   chamferAngle: { mm: '90°', inch: '90°' },
   chamferWidening: { mm: '1 mm', inch: '1/32"' },
@@ -270,6 +277,7 @@ export function quantityParams(op: Operation): { path: string; value: Quantity }
     case 'chamfer':
       add('diameter', op.diameter)
       add('angle', op.angle)
+      addOpt('stepdown', op.stepdown)
       break
   }
   return out
@@ -302,6 +310,7 @@ export function withParam(op: Operation, path: string, value: Quantity): Operati
   if ((op.kind === 'drilling' || op.kind === 'profile') && head === 'depth')
     return { ...op, depth: Some(value) }
   if (op.kind === 'drilling' && head === 'pointAngle') return { ...op, pointAngle: Some(value) }
+  if (op.kind === 'chamfer' && head === 'stepdown') return { ...op, stepdown: Some(value) }
   return { ...op, [head]: value } as Operation
 }
 
@@ -499,13 +508,15 @@ export function operationFromDTO(dto: OperationDTO): AppResult<Operation> {
     case 'chamfer': {
       const diameter = q(dto.diameter, 'diameter')
       const angle = q(dto.angle, 'angle')
-      return collect([diameter, angle]).map(([d, a]) => ({
+      const stepdown = dto.stepdown === undefined ? Ok(undefined) : q(dto.stepdown, 'stepdown')
+      return collect<Quantity | undefined>([diameter, angle, stepdown]).map(([d, a, s]) => ({
         ...base,
         kind: 'chamfer',
         on: dto.on,
         edgeOf: dto.edgeOf,
         diameter: d!,
         angle: a!,
+        stepdown: s === undefined ? None : Some(s),
       }))
     }
   }
@@ -617,6 +628,7 @@ export function operationToDTO(op: Operation): OperationDTO {
         edgeOf: op.edgeOf,
         diameter: op.diameter.toDTO(),
         angle: op.angle.toDTO(),
+        ...(op.stepdown.isSome() ? { stepdown: op.stepdown.unwrap().toDTO() } : {}),
       } as OperationDTO
   }
 }
