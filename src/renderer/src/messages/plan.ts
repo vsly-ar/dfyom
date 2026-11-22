@@ -338,6 +338,8 @@ const CHECK: Readonly<Record<string, string>> = {
   fluteLength: 'has too short a flute',
   cornerRadius: 'is too wide for the corner radius',
   pocketSize: 'is too wide for the pocket',
+  /** T3: an inside profile's opening narrower than the tool. */
+  openingSize: 'is too wide for the opening',
   floorRadius: 'does not match the floor radius',
   drillDiameter: 'does not match the hole diameter',
   pointAngle: 'does not match the hole’s point angle',

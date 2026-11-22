@@ -16,7 +16,7 @@ import type { DesignPart } from './model'
 type ProfileGeometry = Extract<OperationGeometry, { kind: 'profile' }>
 
 export interface ProfileTabs {
-  /** The loop (or open path) in the face frame (moved to the shape's centre), from its start point. */
+  /** The loop (or open path) in the face frame, from its start point. */
   readonly chain: Loop
   readonly closed: boolean
   readonly length: number
@@ -54,23 +54,8 @@ export function profileTabs(
   return out
 }
 
-/** The chain moved by `by` (contours are relative to `Shape.center`). */
-function moved(chain: Loop, by: Vec2): Loop {
-  const m = (p: Vec2): Vec2 => [p[0] + by[0], p[1] + by[1]]
-  return {
-    elements: chain.elements.map((e) =>
-      e.kind === 'line'
-        ? { kind: 'line', a: m(e.a), b: m(e.b) }
-        : { kind: 'arc', a: m(e.a), b: m(e.b), centre: m(e.centre), ccw: e.ccw },
-    ),
-  }
-}
-
 function tabsOf(g: ProfileGeometry): ProfileTabs {
-  const local = profileChain(g)
-  const closed = local.closed
-  // in the face frame: the contour is relative to the shape's centre (geometry/model.ts)
-  const chain = moved(local.chain, g.shape.center)
+  const { chain, closed } = profileChain(g)
   const length = chainLength(chain)
   const c = g.shape.contour
   const entered = g.tabs.positions !== undefined
