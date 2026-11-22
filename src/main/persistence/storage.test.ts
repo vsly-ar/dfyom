@@ -295,29 +295,42 @@ describe('edit, flush and save', () => {
     )
   })
 
-  it('a failing save step leaves the project file untouched and the project dirty', async () => {
-    const before = await projectFile(4)
-    for (const op of ['writeFile', 'appendFile', 'fsync', 'readRange', 'rename'] as const) {
-      let armed = false
-      const fs = faultFs((o, path) =>
-        armed && o === op && path.includes('.tmp-') ? 'fail' : undefined,
-      )
-      const s = storage(A, { fs })
-      const p = opened(expectOk(await s.open(file())))
-      const d = run(p)
-      expectOk(await d.dispatch('project.name.update', { name: 'Version 2' }, uiSource()))
-      armed = true
-      expectErrCode(await d.dispatch('project.save', {}, uiSource()), 'persist.io')
-      expect(new Uint8Array(await readFile(file())), op).toEqual(before)
-      expect(p.session.dirty, op).toBe(true)
-      armed = false
-      expectOk(await s.close(p.session.key))
-      // Unsaved changes stay recoverable after close.
-      expect(expectOk(await s.listRecoverable()).map((r) => r.key)).toEqual(['project-x'])
-      expectOk(await resolveRecovery(s, { key: 'project-x', action: 'discard', confirm: true }))
-      expectOk(await s.close('project-x'))
-    }
-  })
+  // open, save and close once per step: ~0.6 s alone, several times that
+  // under a loaded parallel `npm test` (docs/conventions/testing.md#commands)
+  it(
+    'a failing save step leaves the project file untouched and the project dirty',
+    { timeout: 60_000 },
+    async () => {
+      const before = await projectFile(4)
+      for (const op of [
+        'writeFile',
+        'appendFile',
+        'fsync',
+        'stat',
+        'readRange',
+        'rename',
+      ] as const) {
+        let armed = false
+        const fs = faultFs((o, path) =>
+          armed && o === op && path.includes('.tmp-') ? 'fail' : undefined,
+        )
+        const s = storage(A, { fs })
+        const p = opened(expectOk(await s.open(file())))
+        const d = run(p)
+        expectOk(await d.dispatch('project.name.update', { name: 'Version 2' }, uiSource()))
+        armed = true
+        expectErrCode(await d.dispatch('project.save', {}, uiSource()), 'persist.io')
+        expect(new Uint8Array(await readFile(file())), op).toEqual(before)
+        expect(p.session.dirty, op).toBe(true)
+        armed = false
+        expectOk(await s.close(p.session.key))
+        // Unsaved changes stay recoverable after close.
+        expect(expectOk(await s.listRecoverable()).map((r) => r.key)).toEqual(['project-x'])
+        expectOk(await resolveRecovery(s, { key: 'project-x', action: 'discard', confirm: true }))
+        expectOk(await s.close('project-x'))
+      }
+    },
+  )
 
   it('a crash (kill) at any step of save leaves a loadable project file and recoverable changes', async () => {
     const before = await projectFile(4)

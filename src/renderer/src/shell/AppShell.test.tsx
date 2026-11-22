@@ -240,7 +240,7 @@ describe('AppShell', () => {
       return { ok: true, revision: 0, value: { state: 'finished' } }
     })
     const { user } = renderShell(bridge)
-    const trigger = await screen.findByRole('button', { name: 'Evaluate part' }, { timeout: 2000 })
+    const trigger = await screen.findByRole('button', { name: 'Evaluate part' })
     await user.click(trigger)
     await user.click(await screen.findByRole('button', { name: 'Cancel Evaluate part' }))
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Evaluate part' })).toBeNull())

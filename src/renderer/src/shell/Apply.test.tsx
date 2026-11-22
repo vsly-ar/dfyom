@@ -85,7 +85,7 @@ async function renderApp(opts: { plan?: boolean; mode?: 'design' | 'plan' } = {}
 const applyButton = (name: RegExp | string = /^Apply \d+ change/) =>
   screen.findByRole('button', { name })
 
-describe('Apply', { timeout: 20_000 }, () => {
+describe('Apply', () => {
   it('Tab commits only and the toolbar shows "Apply N"; the button applies', async () => {
     const t = await renderApp()
     expect(screen.queryByRole('button', { name: /^Apply/ })).toBeNull()
@@ -207,9 +207,7 @@ describe('Apply', { timeout: 20_000 }, () => {
       expect(r.isOk()).toBe(true)
     })
     await applyButton('Applied by agent')
-    await waitFor(() => expect(screen.queryByRole('button', { name: /^Appl/ })).toBeNull(), {
-      timeout: 3000,
-    })
+    await waitFor(() => expect(screen.queryByRole('button', { name: /^Appl/ })).toBeNull())
   })
 
   it('the stock setup keeps its Enter rule: Enter commits the field, no Apply', async () => {

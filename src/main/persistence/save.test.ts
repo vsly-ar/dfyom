@@ -63,10 +63,11 @@ describe('writeVerifiedArchive', () => {
     const steps = fs.calls
       .map((c) => c.replace(/\.tmp-[0-9a-f]+/, '.tmp-X').replace(join(tmp.dir, 'docs'), 'D'))
       .filter((c, i, all) => c !== all[i - 1])
-    expect(steps.slice(0, 6)).toEqual([
+    expect(steps.slice(0, 7)).toEqual([
       'writeFile D/bracket.dfyom.tmp-X',
       'appendFile D/bracket.dfyom.tmp-X',
       'fsync D/bracket.dfyom.tmp-X',
+      'stat D/bracket.dfyom.tmp-X', // verify: the size, to find the central directory
       'readRange D/bracket.dfyom.tmp-X',
       'rename D/bracket.dfyom.tmp-X',
       'fsyncDir D',
@@ -87,7 +88,7 @@ describe('writeVerifiedArchive', () => {
 
   it('an I/O failure at any step before the rename keeps the target and removes the temp file', async () => {
     const before = await original()
-    for (const op of ['writeFile', 'appendFile', 'fsync', 'readRange', 'rename'] as const) {
+    for (const op of ['writeFile', 'appendFile', 'fsync', 'stat', 'readRange', 'rename'] as const) {
       const fs = faultFs((o) => (o === op ? 'fail' : undefined))
       expectErrCode(await write(fs), 'persist.io')
       expect(new Uint8Array(await readFile(target())), op).toEqual(before)

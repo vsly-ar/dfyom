@@ -113,15 +113,21 @@ describe('evaluatePart: test part', () => {
       }
   })
 
-  it('frees every WASM object and keeps the heap flat over repeated evaluations', async () => {
-    const hosted = expectOk(await loadManifold(nodeManifoldSource()))
-    const run = () => expectOk(hosted.withSolids((s) => evaluatePart(testPart(), s)))
-    for (let i = 0; i < 5; i++) run()
-    const warm = hosted.heapBytes().unwrap()
-    for (let i = 0; i < 30; i++) run()
-    expect(hosted.liveObjects()).toBe(0)
-    expect(hosted.heapBytes().unwrap() - warm).toBeLessThanOrEqual(10 * 2 ** 20)
-  })
+  // repeated evaluations with heap checks: ~1 s alone, several times that
+  // under a loaded parallel `npm test` (docs/conventions/testing.md#commands)
+  it(
+    'frees every WASM object and keeps the heap flat over repeated evaluations',
+    { timeout: 60_000 },
+    async () => {
+      const hosted = expectOk(await loadManifold(nodeManifoldSource()))
+      const run = () => expectOk(hosted.withSolids((s) => evaluatePart(testPart(), s)))
+      for (let i = 0; i < 5; i++) run()
+      const warm = hosted.heapBytes().unwrap()
+      for (let i = 0; i < 30; i++) run()
+      expect(hosted.liveObjects()).toBe(0)
+      expect(hosted.heapBytes().unwrap() - warm).toBeLessThanOrEqual(10 * 2 ** 20)
+    },
+  )
 })
 
 const withOp = (op: OperationGeometry): PartGeometryInput => ({
@@ -196,7 +202,9 @@ describe('evaluatePart: edge cases', () => {
       expect(e.surfaces).toContain(id)
   })
 
-  it('evaluates tabs over corners of every size on both profile sides', () => {
+  // a part per corner size and side: ~1 s alone, several times that
+  // under a loaded parallel `npm test` (docs/conventions/testing.md#commands)
+  it('evaluates tabs over corners of every size on both profile sides', { timeout: 60_000 }, () => {
     for (const side of ['outside', 'inside'] as const)
       for (const cornerRadius of [0, 0.5, 2, 5, 9.5])
         for (const [count, width] of [
@@ -511,7 +519,9 @@ describe('evaluatePart: seeded random valid parameters', () => {
     }
   }
 
-  it('evaluates 40 random parts without error or air triangles', () => {
+  // 40 seeded parts: ~1 s alone, several times that
+  // under a loaded parallel `npm test` (docs/conventions/testing.md#commands)
+  it('evaluates 40 random parts without error or air triangles', { timeout: 60_000 }, () => {
     const rand = rng(20261117)
     const between = (lo: number, hi: number) => lo + (hi - lo) * rand()
     for (let i = 0; i < 40; i++) {

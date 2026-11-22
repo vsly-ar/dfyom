@@ -125,6 +125,24 @@ describe('readArchive / loadArchive', () => {
   it('rejects an archive whose uncompressed size exceeds the limit', async () => {
     expectErrCode(await readArchive((await built()).bytes, { maxBytes: 10 }), 'input.malformed')
   })
+
+  it('reads stored (uncompressed) entries', async () => {
+    const stored = zipSync(unzipSync((await built()).bytes), { level: 0 })
+    expect(expectOk(await loadArchive(stored)).doc).toEqual(doc)
+  })
+
+  it('rejects a cut-off archive, a damaged central directory and a damaged entry', async () => {
+    const bytes = (await built()).bytes
+    expectErrCode(await readArchive(bytes.subarray(0, bytes.length - 1)), 'input.malformed')
+    expectErrCode(await readArchive(bytes.subarray(0, bytes.length / 2)), 'input.malformed')
+    const end = bytes.length - 22
+    const badOffset = bytes.slice()
+    new DataView(badOffset.buffer).setUint32(end + 16, bytes.length, true) // past the end
+    expectErrCode(await readArchive(badOffset), 'input.malformed')
+    const badData = bytes.slice()
+    badData[45] = (badData[45] ?? 0) ^ 0xff // project.json's data starts at 30 + 12
+    expectErrCode(await readArchive(badData), 'input.malformed')
+  })
 })
 
 describe('isSafeEntryName', () => {
@@ -204,6 +222,25 @@ describe('assets (streamed)', () => {
     expect(fs.calls).toEqual([]) // no whole-file reads
     // Inflated pieces can exceed a read chunk slightly; nothing near the file size is held.
     expect(fs.maxChunk()).toBeLessThan(2 * CHUNK_BYTES)
+  })
+
+  // Regression (B17): fflate's streaming `Unzip` found the end of an entry with a data descriptor
+  // by scanning for the descriptor / header signatures, so these bytes inside a (stored, since
+  // incompressible) asset cut it short: "not a valid zip archive" for about 1 in 300 saves of a
+  // 5 MB random asset. The reader now takes each entry's size from the central directory.
+  it('an asset whose bytes contain zip signatures reads back whole', async () => {
+    const big = new Uint8Array(randomBytes(2 * CHUNK_BYTES))
+    const signatures = [0x08074b50, 0x02014b50, 0x04034b50, 0x06054b50]
+    signatures.forEach((sig, i) => {
+      const at = 1000 + i * (CHUNK_BYTES / 2)
+      new DataView(big.buffer).setUint32(at, sig, true)
+    })
+    const a = await asset(big)
+    const archive = join(tmp.dir, 'sig.dfyom')
+    expectOk(await writeArchive(nodeFs, archive, files(), [a], info))
+    const out = join(tmp.dir, 'out')
+    expectOk(await loadArchiveFile(nodeFs, archive, { extract: { dir: out, want: () => true } }))
+    expect(sha256(await readFile(join(out, a.path)))).toBe(sha256(big))
   })
 
   it('extracts only the assets `want` accepts; others are verified but not written', async () => {

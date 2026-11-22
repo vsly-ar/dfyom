@@ -63,7 +63,7 @@ function pauseState() {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
-describe('worker_threads host', { timeout: 20_000 }, () => {
+describe('worker_threads host', { timeout: 60_000 }, () => {
   it('evaluates the test part end to end: buffers transferred, no live objects', async () => {
     const p = pool()
     const e = expectOk(await p.run(geometryEvaluate, testPart(), ctl()))
@@ -202,7 +202,7 @@ function builtWorkerChunk(): string | undefined {
 
 const built = builtWorkerChunk()
 
-describe('production worker chunk (out/main, after npm run build)', { timeout: 20_000 }, () => {
+describe('production worker chunk (out/main, after npm run build)', { timeout: 60_000 }, () => {
   it.skipIf(built === undefined)(
     'evaluates the test part through the built CJS chunk',
     async () => {

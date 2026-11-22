@@ -193,7 +193,7 @@ describe('Run mode', () => {
     expect(t.callsOf('run.job.start')).toHaveLength(1)
 
     t.machine.progress = { done: 5, total: 20, label: 'pocket1 · tool 1: Flat 6' }
-    await within(inspector).findByText('Line 5 / 20', {}, { timeout: 2000 })
+    await within(inspector).findByText('Line 5 / 20')
     expect(within(inspector).getByText('pocket1 · tool 1: Flat 6')).toBeInTheDocument()
     expect(within(inspector).getByText('01:05')).toBeInTheDocument()
     expect(within(inspector).getByRole('progressbar', { name: 'Run progress' })).toHaveAttribute(
@@ -255,7 +255,7 @@ describe('Run mode', () => {
       },
     }
     t.machine.push({ state: 'Alarm', homed: false, alarm: { code: 2, text: 'Soft limit.' } })
-    const dialog = await screen.findByRole('dialog', { name: 'Machine alarm 2' }, { timeout: 2000 })
+    const dialog = await screen.findByRole('dialog', { name: 'Machine alarm 2' })
     expect(within(dialog).getByText('At line 42.')).toBeInTheDocument()
     expect(within(dialog).getByText(/Home the machine again/)).toBeInTheDocument()
     expect(within(machineGroup()!).getByText('Alarm 2: soft limit')).toBeInTheDocument()
@@ -310,11 +310,7 @@ describe('Run mode', () => {
       error: { code: 'machine.error', message: 'error:20', issues: [], frames: [] },
     }
     t.machine.push({ state: 'Idle' })
-    const dialog = await screen.findByRole(
-      'dialog',
-      { name: /stopped with an error/ },
-      { timeout: 2000 },
-    )
+    const dialog = await screen.findByRole('dialog', { name: /stopped with an error/ })
     expect(within(dialog).getByRole('button', { name: 'Close' })).toHaveFocus()
     await tabTo(t, within(dialog).getByRole('button', { name: 'Stop' }))
     await expectNoAxeViolations()
@@ -349,11 +345,7 @@ describe('Run mode', () => {
       },
     }
     t.machine.push({ state: 'Idle', ...t.machine.job('done') })
-    const prompt = await screen.findByRole(
-      'dialog',
-      { name: 'Setup change: setup 2, Top' },
-      { timeout: 2000 },
-    )
+    const prompt = await screen.findByRole('dialog', { name: 'Setup change: setup 2, Top' })
     expect(within(prompt).getByRole('img', { name: /top face up/ })).toBeInTheDocument()
     expect(within(prompt).getByText(/front-left corner/)).toBeInTheDocument()
     expect(within(prompt).getByRole('button', { name: 'Zero X Y Z' })).toBeEnabled()
