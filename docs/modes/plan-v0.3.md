@@ -19,6 +19,8 @@ The v0.1 generators compute offsets of rectangles and circles analytically ([pla
 
 Strategy parameters as [v0.1 pocket](plan-v0.1.md#pocket-offset-clearing); no new ones.
 
+Spike S4 measured this strategy on S1's corpus: [research/s4-offset-clearing.md](../research/s4-offset-clearing.md) (the √2·R cap leaves material in general regions; it recommends steps ≤ R and lists the changes this section should take).
+
 - **Rings:** offsets of the region by `R + finishAllowance`, then inward in equal steps ≤ `stepover`, until empty. Each offset may split (necks) or merge with islands; the rings form a **tree** (a ring's parent is the ring it was offset from).
 - **Step cap:** where a ring has sharp corners (inward offsets of convex corners stay sharp), the step is capped at √2·R as for v0.1 rectangles, so no cusp of material survives between rings. The heightmap simulation is the test oracle for coverage ([Tests](#tests)).
 - **Order:** per branch of the tree, from the innermost ring outwards (v0.1 order), climb direction (outer loops counter-clockwise, island loops clockwise, seen from the spindle). Branches are visited nearest-first.

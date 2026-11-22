@@ -1,0 +1,16 @@
+// Spike S4 (docs/research/s4-offset-clearing.md): vitest-run TypeScript against S1's WASM build
+// (spikes/2d) and src/core's toolpath heightmap oracle, not part of the app build. Run:
+// `cd spikes/2d && npm ci && npm run build:wasm`, then
+// `npx vitest run -c spikes/clearing/vitest.config.mts --silent=false`; typecheck:
+// `node node_modules/typescript7/bin/tsc --noEmit -p spikes/clearing` (needs spikes/2d's npm ci).
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "paths": { "clipper2-ts": ["../2d/node_modules/clipper2-ts"] }
+  },
+  "include": ["*.ts", "*.mts"]
+}
