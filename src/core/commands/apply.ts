@@ -8,7 +8,7 @@
 import { z } from 'zod'
 import { fail, Ok } from '../../shared/result'
 import { DesignToolDtoSchema, type PartDTO } from '../design/part.dto'
-import { designUnits } from '../design/feature'
+import { designUnits, featureKind } from '../design/feature'
 import { clonesSourceIds } from '../design/clones/clones'
 import { featuresUsingShape } from '../design/shape-users'
 import { sameValue } from '../plan/validity'
@@ -233,9 +233,16 @@ function featureChanges(id: string, after: PartDTO, before: PartDTO): PendingCha
     afterIds.add(f.id)
     const b = old.get(f.id)
     if (b === undefined) out.push(featureKey(id, f.id, 'added', `${f.name} added`))
-    else if (b !== f)
-      for (const field of changedFields(f as Rec, b as Rec, FEATURE_IGNORED))
-        out.push(featureKey(id, f.id, field, `${f.name}: ${field}`))
+    else if (b !== f) {
+      const fields = changedFields(f as Rec, b as Rec, FEATURE_IGNORED)
+      // sizes the command refilled from a pending driver fold into it (`pendingFolds`)
+      const folds = featureKind(f.kind).mapOr(undefined, (k) => k.pendingFolds)
+      const folded =
+        folds !== undefined && fields.some((x) => folds.drivers.includes(x))
+          ? fields.filter((x) => !folds.derived.includes(x))
+          : fields
+      for (const field of folded) out.push(featureKey(id, f.id, field, `${f.name}: ${field}`))
+    }
   }
   for (const b of before.features ?? [])
     if (!afterIds.has(b.id)) out.push(featureKey(id, b.id, 'removed', `${b.name} removed`))

@@ -22,7 +22,7 @@ export const LID_STOCK = {
   length: 255,
   width: 200,
   thickness: 6,
-  materialClass: 'plywood',
+  materialClass: 'sheetGood',
 } as const
 
 /** The board's centre in the top face's frame (mm). */

@@ -4,9 +4,11 @@
 // changes and progress → save → close → reopen; and the v0.2 flow (exit-criteria.v02.fixture.ts:
 // reference, three faces, a program per setup run in turn); and the v0.3 flow
 // (exit-criteria.v03.fixture.ts: SVG shapes, Shape Editor commands, shape operations, two setups,
-// the deviation check). Also checks the CI criterion.
+// the deviation check); and the v0.4 flow (exit-criteria.v04.fixture.ts: the enclosure lid with
+// holes, Clones and countersink chamfers). Also checks the CI criterion.
 // Spec: docs/plans/v0.1.md#exit-criteria, docs/plans/v0.2.md#exit-criteria,
-// docs/plans/v0.3.md#exit-criteria, docs/architecture/llm-api.md#testing,
+// docs/plans/v0.3.md#exit-criteria, docs/plans/v0.4.md#exit-criteria,
+// docs/architecture/llm-api.md#testing,
 // docs/conventions/testing.md#end-to-end
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -19,15 +21,18 @@ import { toMcpName } from '../../core/agent/tools'
 import { type CallResult, exitCriteriaFlow } from './exit-criteria.fixture'
 import { exitCriteriaV02Flow } from './exit-criteria.v02.fixture'
 import { exitCriteriaV03Flow } from './exit-criteria.v03.fixture'
+import { CALL_BUDGET, exitCriteriaV04Flow } from './exit-criteria.v04.fixture'
 
 const dir = mkdtempSync(join(tmpdir(), 'dfyom-e2e-mcp-'))
 // the v0.2 flow in its own data dir: a fresh library, so its auto tool choice sees only its tools
 const dirV02 = mkdtempSync(join(tmpdir(), 'dfyom-e2e-mcp-v02-'))
 const dirV03 = mkdtempSync(join(tmpdir(), 'dfyom-e2e-mcp-v03-'))
+const dirV04 = mkdtempSync(join(tmpdir(), 'dfyom-e2e-mcp-v04-'))
 afterAll(() => {
   rmSync(dir, { recursive: true, force: true })
   rmSync(dirV02, { recursive: true, force: true })
   rmSync(dirV03, { recursive: true, force: true })
+  rmSync(dirV04, { recursive: true, force: true })
 })
 
 interface ToolResult {
@@ -128,6 +133,29 @@ describe('exit criteria headless: dfyom mcp (stdio)', { timeout: 180_000 }, () =
     await exitCriteriaV03Flow(call, dirV03)
     await client.close()
     expect(stderr.join('')).toBe('')
+  })
+})
+
+describe('exit criteria headless: dfyom mcp, v0.4', { timeout: 180_000 }, () => {
+  it('runs the v0.4 flow (holes, Clones, chamfers, the lid) through MCP tools', async () => {
+    const { client, call, stderr } = await connect(dirV04)
+    expect((await client.listTools()).tools.map((t) => t.name)).toEqual(
+      expect.arrayContaining([
+        'design_fastener_list',
+        'design_hole_add',
+        'design_hole_update',
+        'design_clones_preview',
+        'design_clones_add',
+        'design_clones_update',
+        'design_feature_list',
+      ]),
+    )
+    // the same golden program as the batch run (exit-criteria.v04.fixture.ts): byte-equal
+    const { stats } = await exitCriteriaV04Flow(call, dirV04)
+    await client.close()
+    expect(stderr.join('')).toBe('')
+    expect(stats.calls - stats.polls).toBeLessThanOrEqual(CALL_BUDGET.calls)
+    expect(stats.largest.bytes, stats.largest.name).toBeLessThanOrEqual(CALL_BUDGET.resultBytes)
   })
 })
 
