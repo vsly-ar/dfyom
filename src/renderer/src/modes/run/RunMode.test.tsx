@@ -131,6 +131,16 @@ async function connectAndHome(t: Awaited<ReturnType<typeof renderRun>>) {
 }
 
 describe('Run mode', () => {
+  it('says once why the disconnected controls are disabled, and each control points at it', async () => {
+    const t = await renderRun()
+    const why = within(t.nav()).getByText('Connect to the virtual machine first.')
+    for (const name of ['Home', 'Jog X+', 'Zero X', 'Zero X Y Z']) {
+      const button = within(t.nav()).getByRole('button', { name })
+      expect(button).toBeDisabled()
+      expect(button).toHaveAttribute('aria-describedby', why.id)
+    }
+  })
+
   it('connects to the virtual machine; the badge, chip and Stop then show in every mode', async () => {
     const t = await renderRun()
     expect(machineGroup()).toBeNull()

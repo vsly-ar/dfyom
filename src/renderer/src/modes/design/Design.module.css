@@ -75,11 +75,17 @@
   padding: var(--space-3);
 }
 
+/* the add buttons under the empty state: one stack of equal widths (the empty state's), icons and
+   labels lined up at the start */
 .addRow {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-1);
-  justify-content: center;
+  justify-self: stretch;
+}
+
+.addRow > button {
+  justify-content: flex-start;
 }
 
 .ops {

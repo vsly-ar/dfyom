@@ -9,7 +9,7 @@
 // one and locks it (docs/conventions/ui-library-window.md L4).
 // Doc: docs/modes/design-v0.2.md#operation-tool, #implementation-task-f5;
 // docs/conventions/ui.md#design-and-plan-controls-v02; docs/architecture/apply.md#stale-derived-results
-import { Clock } from 'lucide-react'
+import { Clock, Plus } from 'lucide-react'
 import { useEffect, useId, useState } from 'react'
 import type { DesignToolDTO, OperationDTO, PartDTO } from '../../../../core/design/part.dto'
 import { designChangeTargets } from '../../../../core/design/shape-users'
@@ -337,7 +337,13 @@ export function ToolField({
               text,
               ...(w.code === 'dfm.toolUnfit' && fix !== undefined ? { fix } : {}),
               ...(w.code === 'dfm.toolNotInLibrary'
-                ? { fix: { label: t.addToLibrary, onApply: () => setAdding(true) } }
+                ? {
+                    fix: {
+                      label: t.addToLibrary,
+                      icon: <Plus aria-hidden="true" />,
+                      onApply: () => setAdding(true),
+                    },
+                  }
                 : {}),
             }
       }),

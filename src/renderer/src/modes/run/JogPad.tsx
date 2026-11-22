@@ -20,12 +20,14 @@ export interface JogPadProps {
   onStep: (step: string) => void
   onJog: (axis: Axis, mm: number, feed: number) => void
   onCancel: () => void
-  /** Why jogging is not possible now (shown under the pad), or null. */
+  /** Why jogging is not possible now (shown under the pad unless `reasonShown` is false), or null. */
   disabledReason: string | null
   /** Only the Z buttons (tool change: raise and lower). */
   zOnly?: boolean
   /** id of the reason text, for `aria-describedby`. */
   reasonId: string
+  /** false: the reason is shown elsewhere (the navigator's notice) under `reasonId`. */
+  reasonShown?: boolean
 }
 
 export function JogPad({
@@ -37,6 +39,7 @@ export function JogPad({
   disabledReason,
   zOnly = false,
   reasonId,
+  reasonShown = true,
 }: JogPadProps): React.JSX.Element {
   const disabled = disabledReason !== null
   const steps = JOG_STEPS[units]
@@ -85,7 +88,7 @@ export function JogPad({
       <Button size="sm" variant="ghost" disabled={disabled} onClick={onCancel}>
         {m.cancelJog}
       </Button>
-      {disabledReason !== null ? (
+      {disabledReason !== null && reasonShown ? (
         <p id={reasonId} className={styles['why']}>
           {disabledReason}
         </p>

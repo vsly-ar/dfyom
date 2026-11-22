@@ -1,4 +1,5 @@
 import { screen } from '@testing-library/react'
+import { Plus } from 'lucide-react'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
@@ -97,6 +98,27 @@ describe('Field', () => {
     expect(onApply).toHaveBeenCalledOnce()
     // hard warnings cannot be dismissed
     expect(screen.queryByRole('button', { name: 'Dismiss warning' })).toBeNull()
+  })
+
+  it('draws a check on a warning’s fix unless the fix brings its own icon', () => {
+    renderUi(
+      <>
+        <Field label="Corner R" messages={[soft]}>
+          <input />
+        </Field>
+        <Field
+          label="Tool"
+          messages={[
+            { ...soft, fix: { label: 'Add to library', onApply: () => {}, icon: <Plus /> } },
+          ]}
+        >
+          <input />
+        </Field>
+      </>,
+    )
+    const icon = (name: string) => screen.getByRole('button', { name }).querySelector('svg')
+    expect(icon('Use 1.20')).toHaveClass('lucide-check')
+    expect(icon('Add to library')).toHaveClass('lucide-plus')
   })
 
   it('dismisses a soft warning to "1 dismissed · Show" and restores it, keeping focus in place', async () => {
