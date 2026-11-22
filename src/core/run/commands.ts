@@ -39,7 +39,7 @@ export function prepareWorkZero(doc: ProjectDoc, planId: string, where: string):
   if (plan.machine.isNone())
     return fail('post.noMachine', 'the plan has no machine', { where, data: { planId } })
   const machine = plan.machine.unwrap()
-  const clearanceMm = Quantity.fromDTO(plan.setup.clearanceHeight).mapOr(0, (q) => q.canonical)
+  const clearanceMm = Quantity.fromDTO(plan.setups[0]!.clearanceHeight).mapOr(0, (q) => q.canonical)
   return Ok([
     -machine.travel.x.canonical / 2 - plan.stock.length.canonical / 2,
     -machine.travel.y.canonical / 2 - plan.stock.width.canonical / 2,

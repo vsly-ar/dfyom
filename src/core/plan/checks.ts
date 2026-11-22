@@ -20,6 +20,7 @@ export const PLAN_WARNING_CODES = [
   'plan.check',
   'plan.order',
   'plan.loosePiece',
+  'plan.cutoutBeforeSetup',
   'plan.machine',
   'plan.libraryBlocked',
   'plan.rebuildBlocked',
@@ -236,8 +237,18 @@ export function toolFindings(i: ToolCheckInput): Finding[] {
   return out
 }
 
-/** Stock + clearance against the travel (sizes only: work zero on the table is unknown). */
-export function stockFindings(stock: Stock, clearance: number, machine: Machine): Finding[] {
+/** Named stock sizes (mm) on the machine axes of one setup (`setupStockSize`). */
+export interface AxisSizes {
+  readonly x: readonly [string, number]
+  readonly y: readonly [string, number]
+  readonly z: readonly [string, number]
+}
+
+/**
+ * Stock + clearance against the travel (sizes only: work zero on the table is unknown), with the
+ * stock sizes in the setup's orientation (docs/modes/plan-v0.2.md#setups-from-face-directions).
+ */
+export function stockFindings(size: AxisSizes, clearance: number, machine: Machine): Finding[] {
   const out: Finding[] = []
   const fit = (axis: 'x' | 'y' | 'z', size: number, what: string) => {
     const travel = machine.travel[axis].canonical
@@ -249,9 +260,9 @@ export function stockFindings(stock: Stock, clearance: number, machine: Machine)
         params: { axis, size, travel },
       })
   }
-  fit('x', stock.length.canonical, 'stock length')
-  fit('y', stock.width.canonical, 'stock width')
-  fit('z', stock.thickness.canonical + clearance, 'stock thickness + clearance height')
+  fit('x', size.x[1], `stock ${size.x[0]}`)
+  fit('y', size.y[1], `stock ${size.y[0]}`)
+  fit('z', size.z[1] + clearance, `stock ${size.z[0]} + clearance height`)
   return out
 }
 

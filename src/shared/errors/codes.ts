@@ -176,6 +176,13 @@ export const ERROR_CODES = {
     userMessage: 'An operation would come before the operation whose surface it starts from.',
     retryable: false,
   },
+  // Several setups (v0.2 task E1): docs/modes/plan-v0.2.md#merge-split-reorder
+  'plan.setup': {
+    severity: 'warn',
+    userMessage:
+      'Setups of different face directions cannot be joined, and a plan with several setups is not exported as one program.',
+    retryable: false,
+  },
   // Plan mode (task 2.10): docs/modes/plan-v0.1.md#toolpath-generators-task-210
   'plan.check': {
     severity: 'warn',

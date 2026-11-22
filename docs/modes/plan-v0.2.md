@@ -9,7 +9,7 @@ Plan consequences of [design-v0.2.md](design-v0.2.md): several setups, one per a
 Settled with the user when this doc was accepted (D18, 2026-11-22: Q15 as taken by D16, K–N as recommended by D12, O as drafted); the sections below specify them.
 
 1. **No workholding, no in-process stock (Q15):** toolpaths of later setups use the design's analytic levels, so they may air-cut where an earlier setup already removed material, like the known facing/profile air-cutting.
-2. **Setup rotation (K):** 0/90/180/270° about the spindle axis per setup if it is cheap (decided in task E1): a long side face may only fit the travel rotated. If not, the orientation stays fixed by the face frame and the travel check warns ([§ Setups](#setups-from-face-directions)).
+2. **Setup rotation (K):** 0/90/180/270° about the spindle axis per setup if it is cheap (decided in task E1: built, see [§ Implementation (task E1)](#implementation-task-e1)): a long side face may only fit the travel rotated. If not, the orientation stays fixed by the face frame and the travel check warns ([§ Setups](#setups-from-face-directions)).
 3. **Default setup order (L):** the bottom (`−z`) first, as a datum, then the sides, the top (`+z`) last, so through profiles with tabs run last ([§ Merge, split, reorder](#merge-split-reorder)).
 4. **A design tool locked after a plan assignment (M):** the plan assignment wins and the stale flag `designToolChanged` shows; plans are snapshots and are tuned on their own ([§ Tool resolution](#tool-resolution-from-the-design-tool-field)).
 5. **Through features (N):** one approach direction per operation, the design's. Machining a through hole or profile from the opposite face ("access directions") is later; it changes the setup derivation.
@@ -51,6 +51,17 @@ Generators stay top-down ([plan-v0.1.md § Toolpath generators](plan-v0.1.md#too
 | `plan.setup.update`   | as v0.1, plus `name?` and `rotation?` (0/90/180/270, if built)      | `{}`          |
 
 `plan.create` returns `{ planId, setupIds }`. Statuses as `plan.setup.update` in v0.1 (`draft`, `settledDesign`).
+
+### Implementation (task E1)
+
+Core only (`src/core/plan/setups.ts`, `build.ts`, `order.ts`); the setup panel is F6, toolpaths per setup C3, export per setup E2.
+
+- **Record:** `direction` and `rotation` are optional and left out for `+z` and 0°, so v0.1 records load unchanged (no `schemaVersion` change); `setups` has no upper bound. New setups get the direction names ("Top", not v0.1's "Setup 1"; stored names stay).
+- **Direction of a plan operation:** the stock face its first design operation's `on` chain starts from (surfaces inherit their `on` direction, so every `on` dependency lies within one direction). Drillings are grouped into one plan operation only within one direction.
+- **Rotation is built** (decision 2): `plan.setup.update { rotation }` stores it and the machine check swaps the `u`/`v` extents for 90°/270°; turning the toolpaths and the work-zero corner is C3.
+- **Split / merge / move** (and `plan.operation.move` with `toSetupId`) refuse with `plan.order` when they add an order violation the plan did not have, like `plan.operation.move` in v0.1. A split must leave at least one operation in its setup (`input.malformed`, rule `allOperations`); the new setup keeps the source's heights and rotation. Merge joins into the first of the setups in machining order (operations concatenated in that order). A setup emptied by `plan.operation.move` is removed, like one emptied by a rebuild.
+- **Findings:** `plan.order` runs over the machining order of all setups; `plan.loosePiece` compares only operations of one direction (face-frame positions); `plan.cutoutBeforeSetup` (warning, rule `cutoutLast`) is attached to every profile's plan operation in a setup followed by another setup (every v0.2 profile is through); `plan.machine` runs per setup and carries `params.setupId` when the plan has several setups.
+- **Until E2,** `plan.export` of a plan with several setups fails with `plan.setup` (rule `severalSetups`) rather than writing one program across a re-fixture; `run.job.start` and its work zero use the first setup.
 
 ## Tool resolution from the design tool field
 

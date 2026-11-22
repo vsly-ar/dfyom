@@ -18,7 +18,7 @@ import type { ProjectDoc } from '../project/document'
 import { Quantity } from '../quantity/quantity'
 import { evaluateOperation, planFindings } from './evaluate'
 import type { ResolvedFeeds } from './feeds'
-import { loadPlan } from './plan'
+import { loadPlan, setupOf } from './plan'
 import { hashJson } from './snapshot'
 import type { ResolvedStrategy } from './strategy'
 
@@ -87,18 +87,19 @@ export function planOperationInputs(
     })
   const length = (dto: Parameters<typeof Quantity.fromDTO>[0]) =>
     Quantity.fromDTO(dto).mapOr(0, (q) => q.canonical)
-  const setup = {
-    id: plan.setup.id,
-    workOffset: plan.setup.workOffset,
-    clearanceHeight: length(plan.setup.clearanceHeight),
-    retractHeight: length(plan.setup.retractHeight),
-  }
   const out: PlanOperationInput[] = []
   // Chained over the machining order: an operation starts where the previous one ended, so its
   // hash covers its position and everything before it.
   let chain = ''
   let previous: string | undefined
-  plan.setup.operations.forEach((op, index) => {
+  plan.operations.forEach((op, index) => {
+    const own = setupOf(plan, op.id)
+    const setup = {
+      id: own.id,
+      workOffset: own.workOffset,
+      clearanceHeight: length(own.clearanceHeight),
+      retractHeight: length(own.retractHeight),
+    }
     const used = plan.dto.snapshots.filter(
       (s) => s.id === op.tool || s.id === plan.dto.design.part.stock || s.id === plan.dto.machine,
     )
@@ -109,7 +110,7 @@ export function planOperationInputs(
       part: plan.dto.design.part,
       planOperation: op,
       snapshots: used,
-      setup: { ...plan.setup, operations: undefined },
+      setup: { ...own, operations: undefined },
       // strategy defaults depend on the unit system (e.g. overshoot 1 mm vs 0.04")
       units: plan.units,
     })

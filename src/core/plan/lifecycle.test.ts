@@ -341,11 +341,14 @@ describe('undo law of every plan command', () => {
     const pocketOp = ops.find((o) => o.designOperationIds.includes('pocket1'))!.id
     await changeTool(s)
     const toolCopy = stale(s, planId).libraryCopies[0]!.snapshotId
-    const cases: [string, object][] = [
+    const cases: [string, object | (() => object)][] = [
       ['plan.update', { planId, name: 'A' }],
       ['plan.libraryItem.update', { planId, snapshotId: toolCopy }],
       ['plan.machine.set', { planId, machineLibraryItemId: s.machineId }],
-      ['plan.setup.update', { planId, setupId, retractHeight: '3' }],
+      ['plan.setup.update', { planId, setupId, retractHeight: '3', name: 'A', rotation: 90 }],
+      ['plan.setup.split', { planId, setupId, planOperationIds: [ops.at(-1)!.id] }],
+      ['plan.setup.move', { planId, setupId, toIndex: 1 }],
+      ['plan.setup.merge', () => ({ planId, setupIds: s.plan(planId).setups.map((x) => x.id) })],
       [
         'plan.operation.update',
         { planId, planOperationId: ops[0]!.id, overrides: { spindleSpeed: '9000' } },
@@ -367,6 +370,7 @@ describe('undo law of every plan command', () => {
     ]
     const covered = new Set(['plan.create', ...cases.map(([n]) => n)])
     expect(PLAN_COMMANDS.map((c) => c.name).filter((n) => !covered.has(n))).toEqual([])
-    for (const [name, args] of cases) await expectUndoRedo(s, name, args)
+    for (const [name, args] of cases)
+      await expectUndoRedo(s, name, typeof args === 'function' ? args() : args)
   })
 })

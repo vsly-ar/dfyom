@@ -1,5 +1,5 @@
 (Program: Plan 1)
-(Setup: Setup 1)
+(Setup: Top)
 (Units: mm)
 (Tool 1: Flat 6, dia 6 mm)
 (Tool 2: Drill 6, dia 6 mm)

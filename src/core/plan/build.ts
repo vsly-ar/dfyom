@@ -11,9 +11,17 @@ import type { LibraryItem } from '../library/library-item'
 import { deepEqual, takeSnapshot } from '../library/snapshot'
 import type { ProjectDoc, UnitSystem } from '../project/document'
 import { Quantity } from '../quantity/quantity'
-import { defaultOrder, repairOrder } from './order'
-import { loadPlanDTO } from './plan'
-import { lengthDTO, type LengthDTO, type PlanDTO, type PlanOperationDTO } from './plan.dto'
+import type { Direction } from '../geometry/face'
+import { operationDirections, repairOrder, surfaceDirection } from './order'
+import { findPlanOperation, loadPlanDTO } from './plan'
+import {
+  lengthDTO,
+  type LengthDTO,
+  type PlanDTO,
+  type PlanOperationDTO,
+  type SetupDTO,
+} from './plan.dto'
+import { defaultSetupIndex, deriveSetups, newSetup, setupDirection } from './setups'
 import { takeDesignSnapshot } from './snapshot'
 import { suggestTools } from './suggest'
 import { checkPartFits } from './validity'
@@ -39,19 +47,27 @@ export function defaultLength(source: string, units: UnitSystem): LengthDTO {
 
 const copy = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T
 
-/** Drillings with equal diameter, bottom, depth (and point angle) share one plan operation. */
-function drillKey(op: Operation): string | undefined {
+/**
+ * Drillings of one face direction with equal diameter, bottom, depth (and point angle) share one
+ * plan operation (a plan operation lies in one setup).
+ */
+function drillKey(op: Operation, direction: Direction): string | undefined {
   if (op.kind !== 'drilling') return undefined
   const q = (v: Quantity) => v.exact.toString()
-  return [q(op.diameter), op.bottom, op.depth.mapOr('-', q), op.pointAngle.mapOr('-', q)].join('|')
+  const depth = op.depth.mapOr('-', q)
+  return [direction, q(op.diameter), op.bottom, depth, op.pointAngle.mapOr('-', q)].join('|')
 }
 
-/** Groups of design operation ids, one per plan operation, in design order. */
-export function groupOperations(ops: readonly Operation[]): string[][] {
+/** Groups of design operation ids, one per plan operation, in design order (`all`: the part's). */
+export function groupOperations(
+  ops: readonly Operation[],
+  all: readonly Operation[] = ops,
+): string[][] {
+  const byId = new Map(all.map((o) => [o.id, o]))
   const groups: string[][] = []
   const byKey = new Map<string, string[]>()
   for (const op of ops) {
-    const key = drillKey(op)
+    const key = drillKey(op, surfaceDirection(op.on, byId))
     const existing = key === undefined ? undefined : byKey.get(key)
     if (existing !== undefined) existing.push(op.id)
     else {
@@ -83,8 +99,9 @@ export function assignTool(
   item: LibraryItem,
   c: Pick<BuildContext, 'ids' | 'now'>,
 ): AppResult<void> {
-  const op = plan.setups[0]?.operations.find((o) => o.id === planOperationId)
-  if (op === undefined) return Ok(undefined)
+  const ref = findPlanOperation(plan, planOperationId, 'plan.tool.assign')
+  if (ref.isErr()) return Ok(undefined)
+  const op = plan.setups[ref.unwrap().setup]!.operations[ref.unwrap().index]!
   const values = item.values.toDTO()
   let snap = plan.snapshots.find(
     (s) => s.kind === 'tool' && s.libraryItemId === item.id && deepEqual(s.values, values),
@@ -110,7 +127,7 @@ function suggestAndAssign(
   for (const id of planOperationIds) {
     const loaded = loadPlanDTO(plan, c.units, 'plan.suggest')
     if (loaded.isErr()) return Err(loaded.unwrapErr())
-    const op = loaded.unwrap().setup.operations.find((o) => o.id === id)
+    const op = loaded.unwrap().operations.find((o) => o.id === id)
     if (op === undefined || op.tool !== undefined) continue
     const first = suggestTools(loaded.unwrap(), op, c.tools)[0]
     const item = c.tools.find((t) => t.id === first?.toolLibraryItemId)
@@ -125,7 +142,11 @@ function partOf(plan: PlanDTO): AppResult<Part> {
   return partFromDTO(plan.design.part)
 }
 
-/** A new `draft` plan: design snapshot, one setup, every operation, suggested tools, default order. */
+/**
+ * A new `draft` plan: design snapshot, one setup per approach direction in use (default setup
+ * order), every operation, suggested tools, default order in each setup.
+ * Doc: docs/modes/plan-v0.2.md#setups-from-face-directions
+ */
 export function createPlan(
   doc: ProjectDoc,
   args: { partId: string; name?: string; machine?: LibraryItem },
@@ -138,25 +159,18 @@ export function createPlan(
   const part = partFromDTO(design.part)
   if (part.isErr()) return Err(part.unwrapErr().withContext(where))
   const id = c.ids.next('plan')
-  const setupId = c.ids.next('setup')
+  const operations = groupOperations(part.unwrap().operations).map((g) =>
+    newPlanOperation(c.ids, g),
+  )
+  const heights = safeHeights(c.units)
   const plan: PlanDTO = {
     id,
     name: args.name ?? `Plan ${Object.keys(doc.plans).length + 1}`,
     status: 'draft',
     design,
     snapshots: [stock],
-    setups: [
-      {
-        id: setupId,
-        name: 'Setup 1',
-        workOffset: 'G54',
-        clearanceHeight: defaultLength(SAFE_HEIGHTS.clearanceHeight[c.units], c.units),
-        retractHeight: defaultLength(SAFE_HEIGHTS.retractHeight[c.units], c.units),
-        operations: groupOperations(part.unwrap().operations).map((g) =>
-          newPlanOperation(c.ids, g),
-        ),
-      },
-    ],
+    // one setup holding every operation while tools are suggested; derived below
+    setups: [{ ...newSetup('-', '+z', heights, []), operations }],
   }
   if (args.machine !== undefined) {
     const m = takeSnapshot(args.machine, c.ids.next('snapshot'), c.now)
@@ -164,25 +178,38 @@ export function createPlan(
     plan.snapshots.push(m.unwrap().toDTO())
     plan.machine = m.unwrap().id
   }
-  const setup = plan.setups[0]!
   const assigned = suggestAndAssign(
     plan,
-    setup.operations.map((o) => o.id),
+    operations.map((o) => o.id),
     c,
   )
   if (assigned.isErr()) return Err(assigned.unwrapErr().withContext(where))
-  setup.operations = defaultOrder(setup.operations, part.unwrap())
+  // tools are suggested first: the default order keeps operations of one tool adjacent
+  const suggested = plan.setups[0]!.operations
+  plan.setups = deriveSetups(suggested, part.unwrap(), (d, setups) =>
+    newSetup(c.ids.next('setup'), d, heights, setups),
+  )
   return Ok(plan)
+}
+
+function safeHeights(units: UnitSystem): Pick<SetupDTO, 'clearanceHeight' | 'retractHeight'> {
+  return {
+    clearanceHeight: defaultLength(SAFE_HEIGHTS.clearanceHeight[units], units),
+    retractHeight: defaultLength(SAFE_HEIGHTS.retractHeight[units], units),
+  }
 }
 
 const RANK: Record<Operation['kind'], number> = { facing: 0, drilling: 1, pocket: 2, profile: 3 }
 
 /**
  * The plan with its design snapshot replaced by the current design: plan operations matched by
- * design operation id keep tool, preset, overrides and strategy; ones whose operations are gone
- * are dropped; a drilling group whose holes no longer match splits (the split-off ones keep the
- * settings); new design operations get new plan operations with a suggested tool, placed by
- * the default group order; then the whole order is repaired so every `on` dependency holds. The
+ * design operation id keep tool, preset, overrides, strategy and setup; ones whose operations are
+ * gone are dropped; a drilling group whose holes no longer match splits (the split-off ones keep
+ * the settings); new design operations get new plan operations with a suggested tool, placed by
+ * the default group order in the last setup of their direction (a new direction: a new setup at
+ * its default position; an operation whose direction changed moves the same way); empty setups
+ * are removed; then each setup's order is repaired so every `on` dependency holds.
+ * Doc: docs/modes/plan-v0.2.md#merge-split-reorder The
  * rebuilt part must fit the plan's own stock copy (else `model.invariant`, the plan unchanged).
  * Plan-only edits are discarded (the command checks the flag).
  */
@@ -204,40 +231,72 @@ export function rebuildPlan(
   if (part.isErr()) return Err(part.unwrapErr().withContext(where))
   const ops = part.unwrap().operations
   const byId = new Map(ops.map((o) => [o.id, o]))
-  const setup = plan.setups[0]!
-  const kept: PlanOperationDTO[] = []
-  for (const p of setup.operations) {
-    const ids = p.designOperationIds.filter((id) => byId.has(id))
-    if (ids.length === 0) continue
-    const groups = groupOperations(ids.map((id) => byId.get(id)!))
-    kept.push({ ...p, designOperationIds: groups[0]! })
-    for (const g of groups.slice(1))
-      kept.push({ ...copy(p), id: c.ids.next('planOp'), designOperationIds: g })
-  }
-  const covered = new Set(kept.flatMap((p) => p.designOperationIds))
-  const fresh = groupOperations(ops.filter((o) => !covered.has(o.id))).map((g) =>
-    newPlanOperation(c.ids, g),
+  // kept plan operations per setup (a drilling group whose holes no longer match splits)
+  const setups: SetupDTO[] = plan.setups.map((s) => {
+    const kept: PlanOperationDTO[] = []
+    for (const p of s.operations) {
+      const ids = p.designOperationIds.filter((id) => byId.has(id))
+      if (ids.length === 0) continue
+      const groups = groupOperations(
+        ids.map((id) => byId.get(id)!),
+        ops,
+      )
+      kept.push({ ...p, designOperationIds: groups[0]! })
+      for (const g of groups.slice(1))
+        kept.push({ ...copy(p), id: c.ids.next('planOp'), designOperationIds: g })
+    }
+    return { ...s, operations: kept }
+  })
+  const covered = new Set(setups.flatMap((s) => s.operations.flatMap((p) => p.designOperationIds)))
+  const fresh = groupOperations(
+    ops.filter((o) => !covered.has(o.id)),
+    ops,
+  ).map((g) => newPlanOperation(c.ids, g))
+  const direction = operationDirections(
+    [...setups.flatMap((s) => s.operations), ...fresh],
+    part.unwrap(),
   )
+  // an operation whose `on` changed direction moves like a new one
+  const placed: PlanOperationDTO[] = []
+  for (const s of setups)
+    s.operations = s.operations.filter((p) => {
+      const same = direction.get(p.id) === setupDirection(s)
+      if (!same) placed.push(p)
+      return same
+    })
+  placed.push(...fresh)
   const rank = (p: PlanOperationDTO) => RANK[byId.get(p.designOperationIds[0]!)!.kind]
   const owner = new Map<string, string>()
-  for (const p of kept) for (const d of p.designOperationIds) owner.set(d, p.id)
-  const list = [...kept]
-  for (const p of fresh) {
-    for (const d of p.designOperationIds) owner.set(d, p.id)
+  for (const s of setups)
+    for (const p of s.operations) for (const d of p.designOperationIds) owner.set(d, p.id)
+  const heights = setups[0]!
+  for (const p of placed) {
+    const d = direction.get(p.id) ?? '+z'
+    // the last setup of its direction, else a new setup at its default position
+    let target = setups.findLast((s) => setupDirection(s) === d)
+    if (target === undefined) {
+      target = newSetup(c.ids.next('setup'), d, heights, setups)
+      setups.splice(defaultSetupIndex(setups, d), 0, target)
+    }
+    for (const id of p.designOperationIds) owner.set(id, p.id)
     // after the last operation of an earlier or equal group, and after its `on` dependencies
+    const list = target.operations
     let at = 0
     list.forEach((q, i) => {
       if (rank(q) <= rank(p)) at = i + 1
     })
-    for (const d of p.designOperationIds) {
-      const o = byId.get(d)
+    for (const id of p.designOperationIds) {
+      const o = byId.get(id)
       const on = o?.kind === 'pocket' || o?.kind === 'drilling' ? o.on.split('.')[0] : undefined
       const dep = on === undefined ? -1 : list.findIndex((q) => q.id === owner.get(on))
       at = Math.max(at, dep + 1)
     }
     list.splice(at, 0, p)
   }
-  setup.operations = repairOrder(list, part.unwrap())
+  for (const s of setups) s.operations = repairOrder(s.operations, part.unwrap())
+  // a setup left empty is removed; a plan keeps at least one setup
+  const used = setups.filter((s) => s.operations.length > 0)
+  plan.setups = used.length > 0 ? used : setups.slice(0, 1)
   pruneSnapshots(plan)
   // the design fits the design's stock; the plan's own stock copy may differ
   const stockCopy = plan.snapshots.find((x) => x.id === plan.design.part.stock)
