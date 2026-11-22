@@ -3,12 +3,14 @@
 // (`design.part.add` takes a snapshot of the stock, design.md#part-and-stock-v01).
 // Doc: docs/modes/design.md#workflow, docs/architecture/library.md#stock
 import { Box } from 'lucide-react'
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { MATERIAL_CLASSES, type MaterialClass } from '../../../../core/library/item'
 import type { StockValuesDTO } from '../../../../core/library/stock.dto'
 import type { UnitSystem } from '../../../../core/project/document'
 import { Quantity } from '../../../../core/quantity/quantity'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
+import { issuesAt, unmatchedIssues } from '../../library/form'
+import { issueMessages } from '../../library/LibraryForm'
 import { LibraryLink } from '../../library/LibraryLink'
 import { designMessages } from '../../messages/design'
 import { libraryMessages } from '../../messages/library'
@@ -37,6 +39,9 @@ const DEFAULT_SIZE: Record<UnitSystem, [string, string, string]> = {
 
 type LibraryStock = StockValuesDTO & { id: string }
 
+/** The stock values the size fields edit (issue paths of `library.stock.add`). */
+const SIZE_FIELDS = ['length', 'width', 'thickness'] as const
+
 function parseLength(source: string, units: UnitSystem): Quantity {
   return Quantity.parse(source, { kind: 'length', defaultUnit: defaultUnit('length', units) })
     .ok()
@@ -54,6 +59,8 @@ export function StockSetup({ units }: { units: UnitSystem }): React.JSX.Element 
   const [materialClass, setMaterialClass] = useState<MaterialClass>('aluminum')
   const [error, setError] = useState<AppErrorData | undefined>(undefined)
   const [busy, setBusy] = useState(false)
+  const [failures, setFailures] = useState(0)
+  const section = useRef<HTMLElement>(null)
   const titleId = useId()
   // re-read when the library changes (the Library window, an agent)
   const libraryVersion = useLibraryVersion()
@@ -93,6 +100,7 @@ export function StockSetup({ units }: { units: UnitSystem }): React.JSX.Element 
       if (!added.ok) {
         setBusy(false)
         setError(added.error)
+        setFailures((n) => n + 1)
         return
       }
       stockId = (added.value as { id: string }).id
@@ -106,9 +114,28 @@ export function StockSetup({ units }: { units: UnitSystem }): React.JSX.Element 
       stockLibraryItemId: stockId,
     })
     setBusy(false)
-    if (!r.ok) setError(r.error)
+    if (!r.ok) {
+      setError(r.error)
+      setFailures((n) => n + 1)
+    }
   }
 
+  // after a failed Create, focus the first field it marked (ui.md#errors)
+  useEffect(() => {
+    if (failures > 0) section.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus()
+  }, [failures])
+
+  // a failed add shows its issues at the size fields (ui.md#errors), the rest above Create
+  const issues = error?.issues ?? []
+  const summary =
+    error === undefined
+      ? undefined
+      : issues.length === 0
+        ? error
+        : (() => {
+            const rest = unmatchedIssues(issues, SIZE_FIELDS)
+            return rest.length > 0 ? { ...error, issues: rest } : undefined
+          })()
   const sizeField = (i: 0 | 1 | 2, label: string, icon: 'length' | 'width' | 'depth') => (
     <QuantityInput
       label={label}
@@ -116,7 +143,16 @@ export function StockSetup({ units }: { units: UnitSystem }): React.JSX.Element 
       defaultUnit={defaultUnit('length', units)}
       value={size[i]}
       illustration={<FieldIcon name={icon} />}
-      onCommit={(q) => setSize((s) => s.map((v, j) => (j === i ? q : v)))}
+      messages={issueMessages(issues, SIZE_FIELDS[i])}
+      onCommit={(q) => {
+        setSize((s) => s.map((v, j) => (j === i ? q : v)))
+        // the edited field's issue is stale now; the others stay until the next Create
+        setError((e) => {
+          if (e === undefined || e.issues.length === 0) return e
+          const left = e.issues.filter((x) => issuesAt([x], SIZE_FIELDS[i]).length === 0)
+          return left.length === 0 ? undefined : { ...e, issues: left }
+        })
+      }}
     />
   )
 
@@ -124,7 +160,7 @@ export function StockSetup({ units }: { units: UnitSystem }): React.JSX.Element 
     // not a <form>: Enter in a field commits that field (QuantityInput), it does not submit; local
     // form state, so Enter never applies (apply.md#keyboard)
     <ApplyScope onApply={null}>
-      <section className={styles['setup']} aria-labelledby={titleId}>
+      <section ref={section} className={styles['setup']} aria-labelledby={titleId}>
         <h2 id={titleId} className={styles['setupTitle']}>
           {m.setupTitle}
         </h2>
@@ -184,7 +220,7 @@ export function StockSetup({ units }: { units: UnitSystem }): React.JSX.Element 
             <LibraryLink target={{ kind: 'stock' }} />
           </div>
         ) : null}
-        {error !== undefined ? <ErrorMessage error={error} /> : null}
+        {summary !== undefined ? <ErrorMessage error={summary} /> : null}
         <Button
           variant="primary"
           onClick={() => void create()}

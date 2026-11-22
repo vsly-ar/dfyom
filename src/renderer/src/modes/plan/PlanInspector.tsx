@@ -104,7 +104,7 @@ export function PlanInspector({ doc }: { doc: ProjectDoc }): React.JSX.Element {
     return (
       <>
         <PanelHeader title={t.plan} />
-        <p className={styles['note']}>{t.noSelection}</p>
+        <p className={styles['note']}>{t.noPlan}</p>
       </>
     )
   const op = allPlanOperations(plan).find((o) => o.id === selected)
@@ -396,7 +396,8 @@ function OperationInspector({
 
   return (
     <div className={styles['inspector']}>
-      <PanelHeader title={name} meta={op.id} />
+      {/* the design operations' ids (as the design inspector shows them), not the internal plan id */}
+      <PanelHeader title={name} meta={op.designOperationIds.join(', ')} />
       <div className={styles['fields']}>
         {readOnly ? <p className={styles['muted']}>{m.readOnly(plan.status)}</p> : null}
         {failed ? <ErrorMessage error={failed} message={t.commandFailed} /> : null}

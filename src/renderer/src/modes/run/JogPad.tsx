@@ -65,6 +65,7 @@ export function JogPad({
       <SegmentedControl
         label={m.step}
         size="sm"
+        className={styles['jogSteps']}
         options={steps.map((s) => ({ value: s, label: `${s} ${units === 'inch' ? 'in' : 'mm'}` }))}
         value={current}
         onValueChange={onStep}
