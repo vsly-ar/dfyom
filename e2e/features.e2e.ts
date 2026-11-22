@@ -185,7 +185,7 @@ test('features: add a hole, expand its row, the owned inspector is read-only, Ma
   await expect(readout).toHaveText('1 + 2 clones = 3 instances · 1 skipped')
   await expect(page.getByRole('button', { name: /^Clone 3 at .*skipped$/ })).toBeVisible()
   await render(page, 'clones', 'u3')
-  await clones.press('ArrowRight')
+  await navigator.getByRole('button', { name: /^Clones 1, ×3/ }).press('ArrowRight')
   await expect(navigator.getByRole('list', { name: 'Source of Clones 1' })).toContainText('Hole 1')
   await navigator.getByRole('button', { name: /^Clones\s*\d+$/ }).click()
   await expect(navigator.getByRole('list', { name: 'Instances of Clones 1' })).toContainText(
