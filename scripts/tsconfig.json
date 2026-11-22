@@ -1,0 +1,12 @@
+// Node-run TypeScript scripts (type stripping, `.ts` imports), not part of the app build; checked
+// by `npm run typecheck`. Today only the test-fixture generator (docs/conventions/testing.md#fixtures).
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "noEmit": true,
+    "allowImportingTsExtensions": true
+  },
+  "include": ["*.ts"]
+}
