@@ -203,7 +203,7 @@ While the field is **not locked**, the tool is chosen automatically:
 4. **No library tool fits:** the largest generalized tool of the [standard size series](#standard-sizes) that fits (bull nose: RE = `floorRadius`; drill: DC = `diameter`).
 5. **Nothing fits at all** (e.g. `cornerRadius` 0, or a corner radius below the smallest standard size): the current tool is kept and `dfm.toolUnfit` warns ([DFM](#dfm-with-the-tool)). The command never fails because of the tool.
 
-Library tools come first ([decision 9](#decisions)); with an empty library the choice is always generalized.
+Library tools come first ([decision 9](#decisions)); with an empty library the choice is always generalized. A feature's role may take another role's tool before step 2 (v0.4: a stepped countersink and a counterbore take the hole's end mill, [design-v0.4.md § Counterbore tool](design-v0.4.md#counterbore-tool)).
 
 #### Standard sizes
 

@@ -66,6 +66,14 @@ Ids follow [A3](features.md#expansion-and-owned-operations) (`hole1_drill`, `hol
 - Owned operations keep their own checks and codes; the navigator rolls them up on the feature row ([features.md § Validation and DFM](features.md#validation-and-dfm)).
 - New info note `dfm.holeCustomSize` when a size differs from the table row the feature names (so a hand-edited M3 counterbore that no longer fits an ISO 4762 head is visible): params `{ field, table, value }` (`table` the table's value and `value` the hole's, mm; plus `fastener` and `feature`), on the owned operation that carries the size (`<id>_drill` for `diameter`, `<id>_counterbore` for `cbDiameter` / `cbDepth`, `<id>_countersink` for `csDiameter` / `csAngle`, the angle in degrees), `parameter` = the hole field. The expected `cbDepth` and `csDiameter` use the current `headSink`.
 
+### Counterbore tool
+
+Status: implemented (X1 follow-up "plan order v2").
+
+- **One end mill for a counterbored hole.** The `counterbore` role's [auto choice](design-v0.2.md#auto-choice) takes the `drill` role's tool whenever that tool fits the counterbore (before keeping its own; change reason `followsHole`), and runs whenever the drill role's does; `design.operation.tool.set` on the drill role writes the same tool to an unlocked counterbore it fits (one undo step), as the [stepped countersink](#stepped-countersink-f7-d41) does. A drill bit never fits a pocket, so a hole made with a drill keeps a counterbore end mill of its own; a tool set on the counterbore itself locks it and is kept.
+- **Why.** A counterbore is a small bore (about twice the hole's Ø, a few mm deep): boring it with the hole's end mill costs a few more helix turns, seconds per hole, while each tool change on a manual GRBL machine is a stop, a tool swap and a Z re-zero. The rule is local to the feature, so a choice never depends on unrelated operations or on the order of Applies. A general "prefer a tool already used in the part" rule was not taken: it would put large pockets on the smallest end mill (cycle time grows roughly with area / DC) and make choices history-dependent. The remaining tool changes are the machining order's job ([plan-v0.4.md § Machining order v2](plan-v0.4.md#machining-order-v2)).
+- **Code and tests.** `tool-commands.ts` (`leaderOf`, `leadersFirst`, `toolFollowers`, shared with F7's stepped chamfer); `counterbore-tool.test.ts`.
+
 ### Fastener table
 
 Status: implemented (F2). A built-in, read-only table in core ([`src/core/design/fastener/data.ts`](../../src/core/design/fastener/data.ts), every row citing its sources as [feeds-speeds.md](../architecture/feeds-speeds.md) requires; values ported from cnc-code's hole helper and re-checked, D30 Q7, relicensed by the author). Plain numbers in mm. Columns per size:

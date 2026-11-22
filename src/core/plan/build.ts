@@ -20,6 +20,7 @@ import {
   keepWithEdge,
   onDependencies,
   operationDirections,
+  placeByTool,
   repairOrder,
   surfaceDirection,
 } from './order'
@@ -290,8 +291,11 @@ export function createPlan(
   if (assigned.isErr()) return Err(assigned.unwrapErr().withContext(where))
   // tools are resolved first: the default order keeps operations of one tool adjacent
   const suggested = plan.setups[0]!.operations
-  plan.setups = deriveSetups(suggested, part.unwrap(), (d, setups) =>
-    newSetup(c.ids.next('setup'), d, heights, setups),
+  plan.setups = deriveSetups(
+    suggested,
+    part.unwrap(),
+    (d, setups) => newSetup(c.ids.next('setup'), d, heights, setups),
+    c.region2d,
   )
   return Ok(plan)
 }
@@ -432,9 +436,12 @@ export function rebuildPlan(
   const resolved = [...changed, ...fresh.map((p) => p.id)]
   const assigned = resolveAndAssign(plan, resolved, c)
   if (assigned.isErr()) return Err(assigned.unwrapErr().withContext(where))
-  // with tools known: a resolved chamfer sharing its edge operation's tool joins it (F7)
-  for (const s of plan.setups)
-    s.operations = keepWithEdge(s.operations, part.unwrap(), new Set(resolved))
+  // with tools known: a new operation moves to where it adds the fewest tool changes (order
+  // v2), and a resolved chamfer sharing its edge operation's tool joins it (F7)
+  for (const s of plan.setups) {
+    const placedByTool = placeByTool(s.operations, part.unwrap(), freshIds, c.region2d)
+    s.operations = keepWithEdge(placedByTool, part.unwrap(), new Set(resolved))
+  }
   return Ok(plan)
 }
 

@@ -446,38 +446,36 @@ export async function exitCriteriaV04Flow(rawCall: Call, dir: string): Promise<F
   expect(plan.setups).toHaveLength(1)
   const setup = plan.setups[0]!
   const planned = setup.operations.map((o) => [o.kind, o.tool, o.designOperationIds.join(' ')])
-  // tool by tool across the clone instances (D34): every instance of one source operation shares
-  // the source's tool and they stay adjacent; equal holes and equal countersinks share one plan
-  // operation, so the chamfer mill cuts all four countersinks in one go
+  // tool by tool (plan-v0.4.md § Machining order v2): the fewest tool runs, each by kind group,
+  // and across the clone instances (D34) every instance of one source operation shares the
+  // source's tool; equal holes and equal countersinks share one plan operation, so the chamfer
+  // mill cuts all four countersinks in one go. The counterbores take their hole's Flat 3
+  // (design-v0.4.md § Counterbore tool); the outline frees the part, so it is cut last, after
+  // the cutout and vents inside it
   expect(planned).toEqual([
     ['drilling', 'Flat 3', ids('hole1_drill', 'clones1_%_hole1_drill', [2, 3, 4])],
     ...[1, 2, 3, 4, 5, 6].map((n) => [
       'pocket',
-      'Flat 6',
+      'Flat 3',
       n === 1 ? 'hole2_counterbore' : `clones2_${n}_hole2_counterbore`,
     ]),
     ['drilling', 'Flat 3', ids('hole2_drill', 'clones2_%_hole2_drill', [2, 3, 4, 5, 6])],
-    [
-      'chamfer',
-      'Chamfer 90 × 12',
-      ids('hole1_countersink', 'clones1_%_hole1_countersink', [2, 3, 4]),
-    ],
-    ['profile', 'Flat 6', profile.operationId],
-    ['profile', 'Flat 6', cutout.operationId],
     ...EXPECTED.vents.map((v) => [
       'profile',
       'Flat 3',
       v.n === 1 ? vent.operationId : `${ventClones.featureId}_${v.n}_${vent.operationId}`,
     ]),
+    [
+      'chamfer',
+      'Chamfer 90 × 12',
+      ids('hole1_countersink', 'clones1_%_hole1_countersink', [2, 3, 4]),
+    ],
+    ['profile', 'Flat 6', cutout.operationId],
+    ['profile', 'Flat 6', profile.operationId],
   ])
-  // KNOWN ISSUE (X1, reported): the criteria's "one tool change per distinct tool" does not hold
-  // across the default order's groups (drillings, pockets, chamfers, profiles; plan-v0.1.md): the
-  // auto choice gives the Ø 8 counterbores and the Ø 22 cutout the Flat 6 (largest that fits),
-  // so Flat 3 → Flat 6 → Flat 3 → chamfer → Flat 6 → Flat 3 = 5 changes for 3 tools; and the
-  // outline (first in design order) is cut before the cutout and vents inside it
-  // (`plan.loosePiece` skips later profiles). Within each group the order is tool by tool.
+  // one tool change per distinct tool: Flat 3 → chamfer mill → Flat 6
   const toolRuns = planned.map((o) => o[1]).filter((t, i, a) => i === 0 || t !== a[i - 1])
-  expect(toolRuns.filter((t) => t === LID_TOOLS.chamfer.name)).toHaveLength(1)
+  expect(toolRuns).toEqual([LID_TOOLS.mill.name, LID_TOOLS.chamfer.name, LID_TOOLS.profile.name])
   const findings = (await ok<{ warnings: Finding[] }>('plan.warning.list', { planId })).value
   expect(findings.warnings).toEqual([])
 
@@ -501,7 +499,7 @@ export async function exitCriteriaV04Flow(rawCall: Call, dir: string): Promise<F
   expect(program.trimEnd().endsWith('M30')).toBe(true)
   // the first tool is loaded at the start, then one change per tool run of the plan (see above)
   expect(exported.stats.toolChanges).toBe(toolRuns.length - 1)
-  expect(exported.stats.toolChanges).toBe(5)
+  expect(exported.stats.toolChanges).toBe(2)
   // the program names each clone position: the screws' grid, the bolt circle, the vents
   const comments = new Set([...program.matchAll(/^\((Clones \d+ #\d+)\)$/gm)].map((m) => m[1]))
   for (const n of [1, 2, 3, 4]) expect(comments).toContain(`Clones 1 #${n}`)
