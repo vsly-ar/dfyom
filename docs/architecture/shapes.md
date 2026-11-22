@@ -1,6 +1,6 @@
 # Shapes: 2D layer, geometry and import
 
-Status: accepted (v0.3; user decision D29 of 2026-11-22, [Decisions](#decisions-d29); follows [ADR 0019](../decisions/0019-2d-geometry-library.md), accepted); the [2D model, port and hosts](#implementation-k1) are implemented (task K1), the [shape model and `resolveShape`](#implementation-k2) (task K2) and [operations taking shapes](#implementation-k3) with placement and the geometry input mapping (task K3; solids G1, toolpaths T1/T2) and the [SVG import core](#implementation-i1-core) (task I1, without `design.shape.import`) · Design side: [design-v0.3.md](../modes/design-v0.3.md) · Toolpaths: [plan-v0.3.md](../modes/plan-v0.3.md) · Geometry base: [geometry.md](geometry.md) · Spike: [plans/v0.2.md § 7](../plans/v0.2.md#7-spike-for-v03), harness [`spikes/2d/`](../../spikes/2d/harness.ts) · Tasks: [plans/v0.3.md](../plans/v0.3.md) · Terms: [glossary.md](../glossary.md)
+Status: accepted (v0.3; user decision D29 of 2026-11-22, [Decisions](#decisions-d29); follows [ADR 0019](../decisions/0019-2d-geometry-library.md), accepted); the [2D model, port and hosts](#implementation-k1) are implemented (task K1), the [shape model and `resolveShape`](#implementation-k2) (task K2) and [operations taking shapes](#implementation-k3) with placement and the geometry input mapping (task K3; solids G1, toolpaths T1/T2) and the [SVG import](#implementation-i1-core) with [`design.shape.import`](#implementation-i1-command) (task I1) · Design side: [design-v0.3.md](../modes/design-v0.3.md) · Toolpaths: [plan-v0.3.md](../modes/plan-v0.3.md) · Geometry base: [geometry.md](geometry.md) · Spike: [plans/v0.2.md § 7](../plans/v0.2.md#7-spike-for-v03), harness [`spikes/2d/`](../../spikes/2d/harness.ts) · Tasks: [plans/v0.3.md](../plans/v0.3.md) · Terms: [glossary.md](../glossary.md)
 
 What `src/core` needs so shapes of lines and arcs flow through geometry, DFM and toolpaths. It extends the [layers](geometry.md#layers) of geometry.md: the "2D" row becomes CavalierContours behind a port; the analytic model stays the source of truth ([ADR 0007](../decisions/0007-layered-geometry-without-brep-kernel.md) holds: still 2.5D per direction).
 
@@ -196,6 +196,17 @@ Rules:
 - **Report** (`SvgImportReport`): viewport size, bounds, unit and whether assumed, elements imported and skipped by tag, Béziers and elliptical arcs fitted, max deviation (in-fit estimate), corners kept at cusps, micro corners and tiny segments merged, loops repaired and dropped, gaps closed, loop / open path / line / arc counts, warnings (`rule`, message, element).
 
 Measured: the exit drawing imports as its two shapes with 156 arcs and 3 lines, max deviation 0.0093 mm (in-fit estimate; the oracle agrees within 0.01 mm both ways), every S5 corpus case gives S5's element counts.
+
+### Implementation (I1 command)
+
+`design.shape.import` (in `src/core/design/shape-commands.ts`, rules in [design-v0.3.md § Implementation (I1)](../modes/design-v0.3.md#implementation-i1)):
+
+| File                                | Holds                                                                                                                                                        |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/core/import/svg/task.ts`       | Worker task `svg.import` (geometry lane, 30 s): the file through `ctl.files` (size checked against the 10 MB limit first), UTF-8, `importSvg`; output schema |
+| `src/core/design/shape-import.ts`   | `svgShapeItems(svgShape, units)`: loops and open paths → `path` items of `line`/`arc` segments, mm sources rounded to 1 nm                                   |
+| `src/core/design/shape-commands.ts` | The command: `prepare` checks the part, the 2D port and the absolute path, then runs the task; `run` resolves each shape (`settleItems`) and adds them all   |
+| `src/main/file-dialogs.ts`          | `chooseSvgFile` ("Import SVG" dialog), behind `files.chooseSvg()` / IPC `dfyom:file.chooseSvg`                                                               |
 
 ## Performance
 

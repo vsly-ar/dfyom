@@ -13,9 +13,10 @@ export const APP_STATE_FILE = 'app-state.json'
 
 /**
  * The kinds of file dialog with their own remembered folder. A new dialog adds its kind here
- * (`reference-import` is for the reference STL/STEP import, task R3).
+ * (`reference-import` is for the reference STL/STEP import, task R3; `svg-import` for the SVG
+ * shape import, I1).
  */
-export const DIALOG_KINDS = ['project', 'gcode-export', 'reference-import'] as const
+export const DIALOG_KINDS = ['project', 'gcode-export', 'reference-import', 'svg-import'] as const
 export type DialogKind = (typeof DIALOG_KINDS)[number]
 
 const RectSchema = z.object({

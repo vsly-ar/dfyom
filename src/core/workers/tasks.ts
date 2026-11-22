@@ -6,6 +6,7 @@ import { z } from 'zod'
 import { Err, tryAsync, type AppResult } from '../../shared/result'
 import type { AnyWorkerTask, WorkerTask } from '../commands/jobs'
 import { createStlParser, STL_LIMITS, StlPositions, type StlSummary } from '../design/stl'
+import { svgImportTask } from '../import/svg/task'
 import { evaluatePart, type PartEvaluation } from '../geometry/evaluate'
 import type { PartGeometryInput } from '../geometry/model'
 import { PartEvaluationSchema, PartGeometryInputSchema } from '../geometry/schemas'
@@ -135,4 +136,5 @@ export const WORKER_TASKS: readonly AnyWorkerTask[] = [
   toolpathGenerate,
   stlParse,
   stlMesh,
+  svgImportTask,
 ]
