@@ -24,8 +24,15 @@ export function activeJob(s: RunStatus): RunStatus['job'] {
 export const isCriticalAlarm = (s: RunStatus): boolean =>
   s.alarm !== undefined && CRITICAL_ALARMS.has(s.alarm.code)
 
-/** Badge state and label (ui.md#run-mode-safety-ui table: label and shape per state). */
-export function machineView(s: RunStatus): { state: MachineState; label: string } {
+/**
+ * Badge state and label (ui.md#run-mode-safety-ui table: label and shape per state). `setupChange`:
+ * the window waits for a setup change between two setups' runs (task E2); shown like a tool change
+ * while the machine is idle.
+ */
+export function machineView(
+  s: RunStatus,
+  opts: { readonly setupChange?: boolean } = {},
+): { state: MachineState; label: string } {
   if (s.connection.state === 'closed') return { state: 'offline', label: m.state.offline }
   if (s.connection.state === 'connecting') return { state: 'offline', label: m.state.connecting }
   const job = activeJob(s)
@@ -41,7 +48,10 @@ export function machineView(s: RunStatus): { state: MachineState; label: string 
   if (st.startsWith('Home')) return { state: 'moving', label: m.state.homing }
   if (st.startsWith('Run') || job?.phase === 'streaming')
     return { state: 'moving', label: m.state.running }
-  if (st === 'Idle') return { state: 'idle', label: m.state.idle }
+  if (st === 'Idle')
+    return opts.setupChange === true && job === undefined
+      ? { state: 'action', label: m.state.setupChange }
+      : { state: 'idle', label: m.state.idle }
   return { state: 'idle', label: m.state.other(st) }
 }
 

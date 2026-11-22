@@ -9,6 +9,7 @@ import type { ProjectDoc } from '../../../../core/project/document'
 import { runMessages } from '../../messages/run'
 import { Button, PanelHeader, Progress } from '../../ui'
 import { Dro } from './Dro'
+import { planRunInfo } from './plan-info'
 import { pauseMessage } from './RunDialogs'
 import { activeJob, isConnected, runGates } from './machine-state'
 import { useRun, useRunStore, waitKey, type RunEnd } from './run-store'
@@ -24,6 +25,7 @@ export function RunInspector({ doc }: { doc: ProjectDoc }): React.JSX.Element {
   const ended = useRun((s) => s.ended)
   const jobId = useRun((s) => s.jobId)
   const pending = useRun((s) => s.pending)
+  const setupChange = useRun((s) => s.setupChange)
   const startWhy = useId()
   const resetWhy = useId()
   const a = store.getState()
@@ -68,6 +70,10 @@ export function RunInspector({ doc }: { doc: ProjectDoc }): React.JSX.Element {
             </div>
           ) : null}
 
+          {job === undefined && setupChange !== undefined && planId !== undefined ? (
+            <SetupChangeNote doc={doc} planId={planId} setupId={setupChange} />
+          ) : null}
+
           {job === undefined ? (
             <>
               <Button
@@ -76,7 +82,10 @@ export function RunInspector({ doc }: { doc: ProjectDoc }): React.JSX.Element {
                 icon={<Play aria-hidden="true" />}
                 disabled={gates.start !== null || pending.includes('run.job.start')}
                 {...(gates.start === null ? {} : { 'aria-describedby': startWhy })}
-                onClick={() => a.setPreflightOpen(true)}
+                onClick={() =>
+                  // between setups, Start goes through the setup-change prompt (task E2)
+                  setupChange === undefined ? a.setPreflightOpen(true) : a.setSetupChangeOpen(true)
+                }
               >
                 {m.startRun}
               </Button>
@@ -141,6 +150,31 @@ export function RunProgressView({
         )}
       </div>
       {label ? <p className={styles['sectionLabel']}>{label}</p> : null}
+    </div>
+  )
+}
+
+/** The setup change the run waits for between setups, with "Show instructions" (task E2). */
+function SetupChangeNote({
+  doc,
+  planId,
+  setupId,
+}: {
+  doc: ProjectDoc
+  planId: string
+  setupId: string
+}): React.JSX.Element | null {
+  const store = useRunStore()
+  const plan = doc.plans[planId]
+  if (plan === undefined) return null
+  const info = planRunInfo(plan, setupId)
+  const n = info.setups.findIndex((x) => x.id === info.setup.id) + 1
+  return (
+    <div className={styles['wait']} data-kind="setupChange">
+      <span>{m.waitingSetupChange(n, info.setup.name)}</span>
+      <Button size="sm" onClick={() => store.getState().setSetupChangeOpen(true)}>
+        {m.openWait}
+      </Button>
     </div>
   )
 }

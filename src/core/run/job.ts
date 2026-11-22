@@ -1,16 +1,19 @@
 /**
- * The run job (`run.job.start { planId }`): checks, export with the connected G54, the soft-limit
- * refusal, streaming on the machine host with progress, and the job's pause/abort mapping.
- * Doc: docs/modes/run-v0.1.md#run-job
+ * The run job (`run.job.start { planId, setupId? }`): checks, export of the setup's program with the
+ * connected G54, the soft-limit refusal, streaming on the machine host with progress, and the
+ * job's pause/abort mapping. One job per setup: the result names the next setup, which the
+ * setup-change prompt runs after re-fixturing (task E2).
+ * Doc: docs/modes/run-v0.1.md#run-job, docs/modes/plan-v0.2.md#implementation-task-e2
  */
 import { z } from 'zod'
 import { Err, fail, Ok, type AppResult, type AsyncAppResult } from '../../shared/result'
 import type { JobContext, Services } from '../commands/context'
 import { defineCommand } from '../commands/define'
 import { PlanWarningSchema, type PlanWarning } from '../plan/checks'
-import { PlanIdSchema } from '../plan/plan.dto'
+import { PlanIdSchema, PlanRecordIdSchema, type SetupDTO } from '../plan/plan.dto'
 import { findPlanDTO } from '../plan/plan'
 import { machineKeyOf } from './machine-key'
+import { chooseSetup, setupDirection, setupRotation } from '../plan/setups'
 import { checkAllowed } from '../plan/status'
 import type { ProjectDoc } from '../project/document'
 import { commentLine } from '../post/grbl/format'
@@ -51,12 +54,33 @@ export function machineOf(services: Services, where: string): AppResult<MachineS
   return Ok(m)
 }
 
+const NextSetupSchema = z.object({
+  setupId: z.string(),
+  name: z.string(),
+  direction: z.string().describe('Part direction up to the spindle'),
+  rotation: z.number().int().describe('Quarter turn about machine +Z, degrees'),
+})
+
 const RunJobResult = RunSummarySchema.extend({
   warnings: z
     .array(PlanWarningSchema)
     .describe('plan.machine findings of the export other than softLimit'),
+  setupId: z.string().describe('The setup this run machined'),
+  next: NextSetupSchema.optional().describe(
+    'The next setup: re-fixture, set its work zero, then run.job.start with its setupId',
+  ),
 })
 type RunJobResult = z.output<typeof RunJobResult>
+
+/** What the setup-change prompt and agents need about the next setup. */
+export function nextSetupOf(setup: SetupDTO): z.output<typeof NextSetupSchema> {
+  return {
+    setupId: setup.id,
+    name: setup.name,
+    direction: setupDirection(setup),
+    rotation: setupRotation(setup),
+  }
+}
 
 /** Maps `job.pause`/`job.resume` to hold/resume and `job.abort` to the controlled stop. */
 function bindJobControl(m: MachineService, ctx: JobContext): () => void {
@@ -74,6 +98,7 @@ function bindJobControl(m: MachineService, ctx: JobContext): () => void {
 async function runJob(
   doc: ProjectDoc,
   planId: string,
+  setupId: string | undefined,
   ctx: JobContext,
 ): AsyncAppResult<RunJobResult> {
   const where = 'run.job.start'
@@ -103,6 +128,10 @@ async function runJob(
   if (plan.isErr()) return plan
   const allowed = checkAllowed(planId, plan.unwrap().status, where)
   if (allowed.isErr()) return allowed
+  // one program per setup (task E2)
+  const chosen = chooseSetup(plan.unwrap().setups, setupId, where)
+  if (chosen.isErr()) return Err(chosen.unwrapErr().withContext(where, { planId }))
+  const { setup, next } = chosen.unwrap()
   const key = machineKeyOf(doc, planId, where)
   if (key.isErr()) return key
   if (key.unwrap() === undefined)
@@ -123,7 +152,15 @@ async function runJob(
   // slips in between the soft-limit check and the start (the host re-checks the G54 anyway).
   const reserved = m.reserve(ctx.jobId)
   if (reserved.isErr()) return reserved
-  const started = await checkAndStart(doc, planId, ctx, m, status.workZero, key.unwrap() ?? '')
+  const started = await checkAndStart(
+    doc,
+    planId,
+    setup.id,
+    ctx,
+    m,
+    status.workZero,
+    key.unwrap() ?? '',
+  )
   m.release(ctx.jobId)
   if (started.isErr()) return started
   const { running, warnings } = started.unwrap()
@@ -133,13 +170,19 @@ async function runJob(
   const ended = await running.ended
   unbind()
   if (ended.isErr()) return Err(ended.unwrapErr().withContext(where, { planId }))
-  return Ok({ ...ended.unwrap(), warnings })
+  return Ok({
+    ...ended.unwrap(),
+    warnings,
+    setupId: setup.id,
+    ...(next === undefined ? {} : { next: nextSetupOf(next) }),
+  })
 }
 
 /** Steps 2–4 while the connection is reserved for the job. */
 async function checkAndStart(
   doc: ProjectDoc,
   planId: string,
+  setupId: string,
   ctx: JobContext,
   m: MachineService,
   workZero: readonly [number, number, number],
@@ -149,6 +192,7 @@ async function checkAndStart(
   const status = { workZero }
   // 2. program, exported with the live G54
   const exported = await exportPlan(doc, planId, ctx.services, {
+    setupId,
     workZero: status.workZero,
     signal: ctx.signal,
     progress: (p) => ctx.progress({ done: 0, label: `Export: ${p.label ?? ''}`.trim() }),
@@ -188,12 +232,17 @@ export const runJobStart = defineCommand({
   kind: 'job',
   name: 'run.job.start',
   summary:
-    "Run a plan's program on the connected virtual machine: exports it with the live work zero, refuses soft-limit violations, streams it and waits at each tool change for run.job.continue.",
+    "Run a plan's program (one setup) on the connected virtual machine: exports it with the live work zero, refuses soft-limit violations, streams it and waits at each tool change for run.job.continue.",
   title: () => 'Run plan',
   machine: true,
   // apply first: docs/architecture/apply.md#implicit-apply
   applyFirst: true,
-  args: z.object({ planId: PlanIdSchema }),
+  args: z.object({
+    planId: PlanIdSchema,
+    setupId: PlanRecordIdSchema.optional().describe(
+      'Setup to run; required when the plan has several',
+    ),
+  }),
   result: RunJobResult,
-  run: (doc, args, ctx) => runJob(doc, args.planId, ctx),
+  run: (doc, args, ctx) => runJob(doc, args.planId, args.setupId, ctx),
 })

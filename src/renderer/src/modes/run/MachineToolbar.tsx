@@ -33,7 +33,8 @@ export function MachineToolbar(): React.JSX.Element {
     return () => document.removeEventListener('keydown', onKey, true)
   }, [streaming, store])
 
-  const view = machineView(status)
+  const setupChange = useRun((s) => s.setupChange !== undefined)
+  const view = machineView(status, { setupChange })
   const open = status.connection.state !== 'closed'
   return (
     <>

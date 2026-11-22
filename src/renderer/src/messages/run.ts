@@ -31,6 +31,7 @@ export const runMessages = {
     door: 'Door open',
     paused: 'Paused (M0)',
     toolChange: 'Tool change',
+    setupChange: 'Setup change',
     alarm: (code: number | undefined) =>
       code === undefined ? 'Alarm' : `Alarm ${code}: ${ALARM_NAMES[code] ?? 'unknown'}`,
     other: (state: string) => state,
@@ -55,6 +56,8 @@ export const runMessages = {
     title: 'Run',
     plan: 'Plan',
     planPlaceholder: 'Choose a plan',
+    setup: 'Setup',
+    setupHint: 'One program per setup, run in this order.',
     connection: 'Connection',
     timeScale: 'Time scale',
     connect: 'Connect to virtual machine',
@@ -126,12 +129,16 @@ export const runMessages = {
     waitingToolChange: (n: number, name: string) => `Waiting for tool change ${n}: ${name}`,
     waitingPause: (message: string) => `Paused: ${message}`,
     openWait: 'Show instructions',
+    waitingSetupChange: (n: number, name: string) =>
+      `Next: setup ${n}, ${name}. Turn the stock and set the work zero.`,
   },
 
   preflight: {
     title: 'Start run?',
     description: 'Check the run before the machine moves.',
     plan: 'Plan',
+    setup: 'Setup',
+    setupOf: (name: string, n: number, total: number) => `${name} (${n} of ${total})`,
     machine: 'Machine',
     target: 'Target',
     virtualTarget: (scale: string) => `Virtual machine at ${scale}`,
@@ -159,6 +166,26 @@ export const runMessages = {
     continue: 'Continue',
     later: 'Later',
     announce: (n: number, name: string) => `Tool change ${n}: change to ${name}. The run waits.`,
+  },
+
+  setupChange: {
+    title: (n: number, name: string) => `Setup change: setup ${n}, ${name}`,
+    description: (face: string) =>
+      `The previous setup is done. Turn the stock so its ${face} face is up, set the work zero, then start.`,
+    picture: (up: string, front: string, right: string) =>
+      `The stock on the machine: ${up} face up, ${front} face towards you, ${right} face on the right. The work zero is the front-left corner of the top.`,
+    faces: { up: 'Up', front: 'Front', right: 'Right' },
+    workZero: 'Work zero',
+    steps: (up: string) => [
+      'Raise the spindle clear of the stock (jog Z+).',
+      `Turn the stock so its ${up} face is up, as in the picture, and clamp it.`,
+      'Set the work zero on the new top: X and Y at its front-left corner, Z on its surface.',
+      'Start the setup.',
+    ],
+    start: (n: number) => `Start setup ${n}`,
+    later: 'Later',
+    announce: (n: number, name: string) =>
+      `Setup ${n - 1} done. Setup change to setup ${n}, ${name}: turn the stock and set the work zero.`,
   },
 
   pause: {

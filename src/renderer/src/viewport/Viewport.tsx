@@ -37,7 +37,7 @@ import {
 } from './mesh'
 import type { RunScene } from './RunLayer'
 import { CameraControlsImpl, Scene } from './Scene'
-import { linesBounds } from './toolpath-lines'
+import { linesBounds, placeBox } from './toolpath-lines'
 import { classifyWheel, type WheelHistory } from './wheel'
 import { useTokens } from './useTokens'
 import styles from './Viewport.module.css'
@@ -175,13 +175,14 @@ export function Viewport({
     [selectedOperation, hovered, pick, outdated, pulse, tinted],
   )
   const runLines = run?.lines ?? null
+  const runFrame = run?.frame
   const bounds = useMemo(
     () =>
       unionBox(
         unionBox(mesh ? meshBounds(mesh) : undefined, stock ?? undefined),
-        runLines ? linesBounds(runLines) : undefined,
+        runLines ? placeBox(linesBounds(runLines), runFrame) : undefined,
       ),
-    [mesh, stock, runLines],
+    [mesh, stock, runLines, runFrame],
   )
 
   const hoveredRef = useRef<SurfaceTarget | undefined>(undefined)

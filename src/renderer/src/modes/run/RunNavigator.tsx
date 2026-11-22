@@ -1,5 +1,5 @@
-// Run mode navigator (ui.md#app-shell: "Run: connection, homing, jog, work zero"): the plan to run,
-// the virtual machine connection and its time scale, homing and unlock (confirmed), the jog pad
+// Run mode navigator (ui.md#app-shell: "Run: connection, homing, jog, work zero"): the plan to run
+// and, when it has several, the setup (one program per setup, task E2), the virtual machine connection and its time scale, homing and unlock (confirmed), the jog pad
 // and the work zero. Disabled controls say why. Doc: docs/conventions/ui.md#run-mode-safety-ui,
 // docs/modes/run-v0.1.md#commands-and-queries
 import { Crosshair, House, Plug, Unplug } from 'lucide-react'
@@ -44,6 +44,7 @@ export function RunNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
   const store = useRunStore()
   const status = useRun((s) => s.status)
   const planId = useRun((s) => s.planId)
+  const setupId = useRun((s) => s.setupId)
   const timeScale = useRun((s) => s.timeScale)
   const jogStep = useRun((s) => s.jogStep)
   const pending = useRun((s) => s.pending)
@@ -58,6 +59,8 @@ export function RunNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
   useEffect(() => {
     if (chosen !== planId) store.getState().setPlan(chosen)
   }, [chosen, planId, store])
+  const setups = chosen === undefined ? [] : (doc.plans[chosen]?.setups ?? [])
+  const setupChosen = setups.some((x) => x.id === setupId) ? setupId : setups[0]?.id
 
   const connected = isConnected(status)
   const gates = runGates(status, { planChosen: chosen !== undefined })
@@ -78,6 +81,18 @@ export function RunNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
           onValueChange={(v) => a.setPlan(v)}
         />
       </Section>
+
+      {setups.length > 1 ? (
+        <Section title={m.setup}>
+          <Select
+            aria-label={m.setup}
+            options={setups.map((x, i) => ({ value: x.id, label: `${i + 1}. ${x.name}` }))}
+            {...(setupChosen === undefined ? {} : { value: setupChosen })}
+            onValueChange={(v) => a.setSetup(v)}
+          />
+          <p className={styles['hint']}>{m.setupHint}</p>
+        </Section>
+      ) : null}
 
       <Section title={m.connection}>
         <div className={styles['row']}>

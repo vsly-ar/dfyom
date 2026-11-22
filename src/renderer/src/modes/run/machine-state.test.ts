@@ -30,6 +30,18 @@ describe('machineView', () => {
   ] as const)('%#: %s', (status, state, label) => {
     expect(machineView(status)).toEqual({ state, label })
   })
+
+  it('a setup change between runs shows like a tool change while idle (E2)', () => {
+    const setupChange = { setupChange: true }
+    expect(machineView(open(), setupChange)).toEqual({ state: 'action', label: 'Setup change' })
+    expect(machineView(open({ ...job('done') }), setupChange).label).toBe('Setup change')
+    // moving, alarms and a running job still win
+    expect(machineView(open({ state: 'Jog' }), setupChange).label).toBe('Jogging')
+    expect(machineView(open({ state: 'Alarm' }), setupChange).label).toBe('Alarm')
+    expect(machineView(open({ state: 'Run', ...job('streaming') }), setupChange).label).toBe(
+      'Running',
+    )
+  })
 })
 
 describe('runGates', () => {

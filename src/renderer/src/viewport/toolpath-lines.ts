@@ -1,7 +1,9 @@
 // Toolpaths as line segments for the viewport, and run playback: which segments the tool has
 // done, found by following the tool position (`wpos`) forward along the path. Pure. Toolpaths
-// are mm in the setup WCS, which is the part frame (Z0 = stock top, docs/modes/plan-v0.1.md),
-// so they draw in the scene as they are. Doc: docs/conventions/ui.md#viewport-task-35 (run scene)
+// are mm in the setup WCS; for an unrotated top setup that is the part frame (Z0 = stock top,
+// docs/modes/plan-v0.1.md), other setups are placed on the part by the setup's frame (`placeBox`,
+// the run layer's group matrix; task E2). Doc: docs/conventions/ui.md#viewport-task-35 (run scene)
+import { applyPlacement, type Placement } from '../../../core/geometry/model'
 import type { Toolpath, Vec3 } from '../../../core/toolpath/model'
 import type { Box } from './mesh'
 
@@ -87,6 +89,23 @@ export function linesBounds(lines: ToolpathLines): Box | undefined {
       min[k] = Math.min(min[k]!, p[i + k]!)
       max[k] = Math.max(max[k]!, p[i + k]!)
     }
+  return { min, max }
+}
+
+/** The box around `box` placed by `frame` (WCS → part frame); `box` itself without a frame. */
+export function placeBox(box: Box | undefined, frame: Placement | undefined): Box | undefined {
+  if (box === undefined || frame === undefined) return box
+  const min: [number, number, number] = [Infinity, Infinity, Infinity]
+  const max: [number, number, number] = [-Infinity, -Infinity, -Infinity]
+  for (const x of [box.min[0], box.max[0]])
+    for (const y of [box.min[1], box.max[1]])
+      for (const z of [box.min[2], box.max[2]]) {
+        const q = applyPlacement(frame, [x, y, z])
+        for (let k = 0; k < 3; k++) {
+          min[k] = Math.min(min[k]!, q[k]!)
+          max[k] = Math.max(max[k]!, q[k]!)
+        }
+      }
   return { min, max }
 }
 

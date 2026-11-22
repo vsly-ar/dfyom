@@ -1,5 +1,6 @@
 // Run dialogs, mounted with the machine toolbar so they work in every mode: the pre-flight dialog
-// before every run, the tool-change and program-pause dialogs (dismissable to the inspector), and
+// before every run, the tool-change and program-pause dialogs (dismissable to the inspector), the
+// setup-change prompt between setups (SetupChangeDialog, task E2), and
 // the blocking failure dialog; tool-change waits and alarms are announced assertively. Each
 // carries its own Stop (RunDialogFooter), reachable by keyboard and screen readers while modal.
 // Doc: docs/conventions/ui.md#confirmations, #run-mode-safety-ui
@@ -16,6 +17,7 @@ import { planRunInfo } from './plan-info'
 import { useRun, useRunStore, waitKey } from './run-store'
 import { WorkZeroButtons } from './RunNavigator'
 import { RunDialogFooter } from './RunStop'
+import { SetupChangeDialog } from './SetupChangeDialog'
 import styles from './Run.module.css'
 
 export function RunDialogs(): React.JSX.Element {
@@ -24,9 +26,10 @@ export function RunDialogs(): React.JSX.Element {
   return (
     <>
       {doc ? <PreflightDialog doc={doc} /> : null}
+      {doc ? <SetupChangeDialog doc={doc} /> : null}
       <WaitDialog units={doc?.unitSystem ?? 'mm'} />
       <FailureDialog />
-      <Announcer />
+      <Announcer doc={doc} />
     </>
   )
 }
@@ -36,11 +39,12 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
   const open = useRun((s) => s.preflightOpen)
   const status = useRun((s) => s.status)
   const planId = useRun((s) => s.planId)
+  const setupId = useRun((s) => s.setupId)
   const timeScale = status.connection.timeScale
   const whyId = useId()
   const m = runMessages.preflight
   const plan = planId === undefined ? undefined : doc.plans[planId]
-  const info = plan ? planRunInfo(plan) : undefined
+  const info = plan ? planRunInfo(plan, setupId) : undefined
   const gate = runGates(status, { planChosen: plan !== undefined }).start
   const units = doc.unitSystem
   const a = store.getState()
@@ -60,7 +64,7 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
             icon={<Play aria-hidden="true" />}
             disabled={gate !== null}
             {...(gate === null ? { autoFocus: true } : { 'aria-describedby': whyId })}
-            onClick={() => void a.startRun()}
+            onClick={() => void a.startRun(info?.setup.id)}
           >
             {m.start}
           </Button>
@@ -70,6 +74,18 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
       <dl className={styles['facts']}>
         <dt>{m.plan}</dt>
         <dd>{info?.name ?? '–'}</dd>
+        {info !== undefined && info.setups.length > 1 ? (
+          <>
+            <dt>{m.setup}</dt>
+            <dd>
+              {m.setupOf(
+                info.setup.name,
+                info.setups.findIndex((x) => x.id === info.setup.id) + 1,
+                info.setups.length,
+              )}
+            </dd>
+          </>
+        ) : null}
         <dt>{m.machine}</dt>
         <dd>{info?.machine ?? '–'}</dd>
         <dt>{m.target}</dt>
@@ -256,10 +272,14 @@ function FailureDialog(): React.JSX.Element | null {
 }
 
 /** Assertive announcements: tool-change and pause waits, alarms (ui.md#accessibility). */
-function Announcer(): React.JSX.Element {
+function Announcer({ doc }: { doc: ProjectDoc | undefined }): React.JSX.Element {
   const status = useRun((s) => s.status)
   const progress = useRun((s) => s.progress)
+  const setupChange = useRun((s) => s.setupChange)
+  const planId = useRun((s) => s.planId)
   const job = activeJob(status)
+  const plan = planId === undefined ? undefined : doc?.plans[planId]
+  const next = setupChange !== undefined && plan ? planRunInfo(plan, setupChange) : undefined
   const text =
     job?.phase === 'toolChange' && job.toolChange
       ? runMessages.toolChange.announce(job.toolChange.n, job.toolChange.name)
@@ -267,7 +287,12 @@ function Announcer(): React.JSX.Element {
         ? runMessages.pause.announce(pauseMessage(progress?.label))
         : status.alarm
           ? `${runMessages.state.alarm(status.alarm.code)}. ${status.alarm.text}`
-          : ''
+          : next !== undefined && job === undefined
+            ? runMessages.setupChange.announce(
+                next.setups.findIndex((x) => x.id === next.setup.id) + 1,
+                next.setup.name,
+              )
+            : ''
   return (
     <div aria-live="assertive" className={styles['srOnly']}>
       {text}

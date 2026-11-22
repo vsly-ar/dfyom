@@ -10,8 +10,9 @@ import { defineCommand } from '../commands/define'
 import type { JobProgress, Services } from '../commands/context'
 import { PlanWarningSchema } from '../plan/checks'
 import { planOperationInputs } from '../plan/inputs'
-import { PlanIdSchema } from '../plan/plan.dto'
+import { PlanIdSchema, PlanRecordIdSchema } from '../plan/plan.dto'
 import { loadPlan } from '../plan/plan'
+import { chooseSetup } from '../plan/setups'
 import { checkAllowed } from '../plan/status'
 import type { ProjectDoc } from '../project/document'
 import { cacheOf, ensureToolpath } from '../toolpath/generate'
@@ -48,6 +49,8 @@ export interface ExportFiles {
 }
 
 export interface PlanExportOptions {
+  /** The setup whose program to export; required when the plan has several (task E2). */
+  readonly setupId?: string
   /** MPos of the work zero (the connected controller's G54): enables the soft-limit check. */
   readonly workZero?: Vec3
   /** Header `Generator:` text; default `PROGRAM_GENERATOR`. */
@@ -59,6 +62,8 @@ export interface PlanExportOptions {
 }
 
 export interface PlanExport extends GrblExport {
+  /** The exported setup (one program per setup). */
+  readonly setupId: string
   /** Plan operations whose toolpath was missing or stale and was generated, in machining order. */
   readonly regenerated: readonly string[]
   /** Whether the soft-limit check ran (only with `workZero`). */
@@ -68,8 +73,9 @@ export interface PlanExport extends GrblExport {
 const neverAborted = new AbortController().signal
 
 /**
- * The GRBL program of a plan (its one setup). Fails like `plan.toolpath.generate` on plan
- * findings, with `plan.status` for an archived plan, `post.noMachine` without a machine copy
+ * The GRBL program of one setup of a plan (`opts.setupId`, or the only setup; `plan.setup`, rule
+ * `setupRequired`, when the plan has several and none is named). Fails like
+ * `plan.toolpath.generate` on the setup's plan findings, with `plan.status` for an archived plan, `post.noMachine` without a machine copy
  * (before any generator runs) and with the first generator error (context names the plan
  * operation); toolpaths generated before it stay cached.
  */
@@ -89,20 +95,16 @@ export async function exportPlan(
   if (allowed.isErr()) return allowed
   if (plan.machine.isNone())
     return fail('post.noMachine', 'gCode export needs a machine', { where, data: { planId } })
-  // one program per setup comes with task E2 (docs/modes/plan-v0.2.md#toolpaths-per-setup)
-  if (plan.setups.length > 1)
-    return fail(
-      'plan.setup',
-      `plan ${planId} has ${plan.setups.length} setups; export per setup comes later`,
-      {
-        issues: [
-          { path: ['planId'], rule: 'severalSetups', message: 'export needs a single setup' },
-        ],
-        where,
-        data: { planId },
-      },
-    )
-  const inputs = planOperationInputs(doc, planId)
+  // one program per setup (task E2, docs/modes/plan-v0.2.md#implementation-task-e2)
+  const chosen = chooseSetup(plan.setups, opts.setupId, where)
+  if (chosen.isErr()) return Err(chosen.unwrapErr().withContext(where, { planId }))
+  const setup = chosen.unwrap().setup
+  // only this setup's findings block its program (as plan.toolpath.generate per operation)
+  const inputs = planOperationInputs(
+    doc,
+    planId,
+    setup.operations.map((o) => o.id),
+  )
   if (inputs.isErr()) return inputs
   const all = inputs.unwrap()
   if (all.length === 0)
@@ -138,7 +140,7 @@ export async function exportPlan(
   const exported = exportGrbl(
     {
       name: plan.dto.name,
-      setup: { name: plan.setups[0]!.name, clearanceHeight: all[0]!.setup.clearanceHeight },
+      setup: { name: setup.name, clearanceHeight: all[0]!.setup.clearanceHeight },
       operations,
       machine: plan.machine,
       ...(opts.workZero === undefined ? {} : { workZero: opts.workZero }),
@@ -146,7 +148,12 @@ export async function exportPlan(
     { generator: opts.generator ?? PROGRAM_GENERATOR },
   )
   return exported
-    .map((e) => ({ ...e, regenerated, softLimitChecked: opts.workZero !== undefined }))
+    .map((e) => ({
+      ...e,
+      setupId: setup.id,
+      regenerated,
+      softLimitChecked: opts.workZero !== undefined,
+    }))
     .mapErr((e) => e.withContext(where, { planId }))
 }
 
@@ -179,7 +186,7 @@ export const planExport = defineCommand({
   kind: 'effect',
   name: 'plan.export',
   summary:
-    "Export a plan's GRBL gCode file: regenerates missing or stale toolpaths, writes the program and returns its stats and machine-check warnings.",
+    "Export a plan's GRBL gCode file, one program per setup: regenerates missing or stale toolpaths, writes the program and returns its stats and machine-check warnings.",
   title: () => 'Export gCode',
   machine: false,
   // apply first: docs/architecture/apply.md#implicit-apply
@@ -191,10 +198,14 @@ export const planExport = defineCommand({
       .min(1)
       .refine(isGcodeFileName, `must be a ${GCODE_EXTENSIONS.join(', ')} file`)
       .describe('Absolute path of the gCode file to write'),
+    setupId: PlanRecordIdSchema.optional().describe(
+      'Setup to export; required when the plan has several',
+    ),
     confirm: z.boolean().default(false).describe('Must be true to replace an existing file'),
   }),
   result: z.object({
     filePath: z.string(),
+    setupId: z.string(),
     lines: z.number().int().describe('gCode lines (what a sender streams)'),
     stats: ProgramStatsSchema,
     warnings: z
@@ -212,12 +223,10 @@ export const planExport = defineCommand({
     if (files === undefined)
       return fail('internal.unexpected', 'no export file service', { where: 'plan.export' })
     const workZero = connectedWorkZero(doc, args.planId, ctx.services)
-    const exported = await exportPlan(
-      doc,
-      args.planId,
-      ctx.services,
-      workZero === undefined ? {} : { workZero },
-    )
+    const exported = await exportPlan(doc, args.planId, ctx.services, {
+      ...(args.setupId === undefined ? {} : { setupId: args.setupId }),
+      ...(workZero === undefined ? {} : { workZero }),
+    })
     if (exported.isErr()) return exported
     const e = exported.unwrap()
     const written = await files.write(args.target, e.text, { confirm: args.confirm })
@@ -225,6 +234,7 @@ export const planExport = defineCommand({
       return Err(written.unwrapErr().withContext('plan.export', { planId: args.planId }))
     return Ok({
       filePath: written.unwrap().filePath,
+      setupId: e.setupId,
       lines: e.lines.length,
       stats: e.stats,
       warnings: [...e.warnings],

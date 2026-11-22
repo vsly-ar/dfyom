@@ -1,8 +1,10 @@
 // Run-mode state of one window: main's machine status (pushed, `window.dfyom.run.onStatus`), the
-// run job's progress and outcome, and the window's run choices (plan, time scale, jog step, open
-// dialogs). Every action is a command over the bridge; nothing here talks to the machine itself.
+// run job's progress and outcome, and the window's run choices (plan, setup, time scale, jog step,
+// open dialogs). One run job per setup: a run that ends with a next setup opens the setup-change
+// prompt (task E2). Every action is a command over the bridge; nothing here talks to the machine.
 // One store per bridge, started while a component uses it.
-// Doc: docs/modes/run-v0.1.md#status, docs/conventions/ui.md#run-mode-safety-ui
+// Doc: docs/modes/run-v0.1.md#status, docs/conventions/ui.md#run-mode-safety-ui,
+// docs/modes/plan-v0.2.md#setup-change-in-run
 import { useEffect } from 'react'
 import { useStore } from 'zustand'
 import { createStore, type StoreApi } from 'zustand/vanilla'
@@ -28,6 +30,9 @@ export interface RunSummaryView {
   readonly elapsedSeconds: number
   readonly toolChanges: number
   readonly pauses: number
+  /** The setup the run machined, and the one after it (task E2). */
+  readonly setupId?: string
+  readonly next?: { readonly setupId: string; readonly name: string }
 }
 
 /** How the window's last run job ended. */
@@ -42,6 +47,14 @@ export interface RunState {
   readonly status: RunStatus
   /** Plan chosen in the navigator (per window). */
   readonly planId: string | undefined
+  /** Setup of the plan whose program runs; `undefined` = the first (one program per setup). */
+  readonly setupId: string | undefined
+  /**
+   * The setup to re-fixture for: set when a run ends with a next setup, cleared when a run
+   * starts or the plan or setup is chosen by hand. The setup-change prompt shows it.
+   */
+  readonly setupChange: string | undefined
+  readonly setupChangeOpen: boolean
   /** Time scale chosen before connecting; while connected the status has the live one. */
   readonly timeScale: TimeScale
   /** Jog step in the project unit. */
@@ -61,6 +74,8 @@ export interface RunState {
   readonly pending: readonly string[]
 
   setPlan(planId: string | undefined): void
+  setSetup(setupId: string | undefined): void
+  setSetupChangeOpen(open: boolean): void
   setTimeScale(scale: TimeScale): void
   setJogStep(step: string): void
   setPreflightOpen(open: boolean): void
@@ -76,7 +91,8 @@ export interface RunState {
   jogCancel(): Promise<void>
   setWorkZero(axes: readonly Axis[]): Promise<void>
   reset(): Promise<void>
-  startRun(): Promise<void>
+  /** `setupId`: the setup to run (default: the chosen one; the server needs it for several). */
+  startRun(setupId?: string): Promise<void>
   hold(): Promise<void>
   resume(): Promise<void>
   stop(): Promise<void>
@@ -141,6 +157,9 @@ export function createRunStore(bridge: PreloadApi): RunStore {
     return {
       status: closedStatus(),
       planId: undefined,
+      setupId: undefined,
+      setupChange: undefined,
+      setupChangeOpen: false,
       timeScale: 1,
       jogStep: '10',
       jobId: undefined,
@@ -152,7 +171,17 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       preflightOpen: false,
       pending: [],
 
-      setPlan: (planId) => set({ planId }),
+      setPlan: (planId) =>
+        set((s) =>
+          s.planId === planId
+            ? {}
+            : { planId, setupId: undefined, setupChange: undefined, setupChangeOpen: false },
+        ),
+      setSetup: (setupId) =>
+        set((s) =>
+          s.setupId === setupId ? {} : { setupId, setupChange: undefined, setupChangeOpen: false },
+        ),
+      setSetupChangeOpen: (setupChangeOpen) => set({ setupChangeOpen }),
       setTimeScale: (timeScale) => {
         set({ timeScale })
         if (get().status.connection.state === 'open')
@@ -180,14 +209,24 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       jogCancel: async () => void (await call('run.machine.jogCancel')),
       setWorkZero: async (axes) => void (await call('run.workZero.set', { axes: [...axes] })),
       reset: async () => void (await call('run.machine.reset')),
-      async startRun() {
-        const { planId } = get()
-        set({ preflightOpen: false })
+      async startRun(chosen) {
+        const planId = get().planId
+        const setupId = chosen ?? get().setupId
+        set({ preflightOpen: false, setupChangeOpen: false })
         if (planId === undefined) return
-        const r = await call('run.job.start', { planId })
+        const r = await call('run.job.start', {
+          planId,
+          ...(setupId === undefined ? {} : { setupId }),
+        })
         if (!r.ok) return
         const { jobId } = r.value as { jobId: string }
-        set({ jobId, progress: undefined, ended: undefined, failureOpen: false })
+        set({
+          jobId,
+          progress: undefined,
+          ended: undefined,
+          failureOpen: false,
+          setupChange: undefined,
+        })
         follow(jobId)
       },
       hold: jobControl('job.pause'),
@@ -246,6 +285,14 @@ export function createRunStore(bridge: PreloadApi): RunStore {
             ? { jobId, kind: 'stopped' }
             : { jobId, kind: 'failed', error: o.error }
         store.setState({ ended, failureOpen: ended.kind === 'failed', dismissedWait: undefined })
+        // one program per setup: the next setup is chosen and its setup change prompted (E2)
+        const next = ended.kind === 'done' ? ended.summary.next : undefined
+        if (next !== undefined)
+          store.setState({
+            setupId: next.setupId,
+            setupChange: next.setupId,
+            setupChangeOpen: true,
+          })
       })
     }
     read()
@@ -253,10 +300,19 @@ export function createRunStore(bridge: PreloadApi): RunStore {
 
   const onStatus = (status: RunStatus): void => {
     store.setState({ status })
+    // a closed connection ends the setup sequence (the stock is no longer on a known machine)
+    if (status.connection.state === 'closed' && store.getState().setupChange !== undefined)
+      store.setState({ setupChange: undefined, setupChangeOpen: false })
     const job = status.job
     if (job !== undefined && store.getState().jobId !== job.jobId) {
       // a run started elsewhere (another window, an agent): follow it too
-      store.setState({ jobId: job.jobId, progress: undefined, ended: undefined })
+      store.setState({
+        jobId: job.jobId,
+        progress: undefined,
+        ended: undefined,
+        setupChange: undefined,
+        setupChangeOpen: false,
+      })
       follow(job.jobId)
     }
   }

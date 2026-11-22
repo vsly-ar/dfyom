@@ -14,7 +14,15 @@ import type { Move, Toolpath } from './model'
 import { generateRequest, GeneratorRequestSchema, type GeneratorRequest } from './request'
 import { toolpathStats } from './stats'
 import { render } from './testing/oracles'
-import { fromWcs, setupFrame, setupWcs, toWcs, turnToolpath, type WcsRotation } from './wcs'
+import {
+  fromWcs,
+  setupFrame,
+  setupOrientation,
+  setupWcs,
+  toWcs,
+  turnToolpath,
+  type WcsRotation,
+} from './wcs'
 
 const STOCK = { length: 100, width: 60, thickness: 20 }
 const ROTATIONS: WcsRotation[] = [0, 90, 180, 270]
@@ -351,5 +359,109 @@ describe('toolpaths per setup', () => {
       )
       await expect(e.text).toMatchFileSnapshot(`__golden__/${file}.nc`)
     }
+  })
+})
+
+// Spec: docs/modes/plan-v0.2.md (Implementation (task E2)).
+describe('export per setup (E2)', () => {
+  const services = () => ({ workers: createInProcessWorkers(), toolpaths: createToolpathCache() })
+
+  it('setupOrientation: the stock extents on machine X, Y, Z and the part faces seen', () => {
+    // top, unrotated: as designed (v0.1)
+    expect(setupOrientation('+z', 0, STOCK)).toEqual({
+      size: [100, 60, 20],
+      up: '+z',
+      front: '-y',
+      right: '+x',
+    })
+    // flipped about the part's x axis: the bottom up, the back in front
+    expect(setupOrientation('-z', 0, STOCK)).toEqual({
+      size: [100, 60, 20],
+      up: '-z',
+      front: '+y',
+      right: '+x',
+    })
+    // the right side up, turned a quarter: the extents swap on X and Y
+    const right = setupOrientation('+x', 90, STOCK)
+    expect(right.up).toBe('+x')
+    expect(right.size).toEqual([20, 60, 100])
+    for (const d of DIRECTIONS)
+      for (const r of ROTATIONS) {
+        const o = setupOrientation(d, r, STOCK)
+        expect(o.up).toBe(d)
+        // three perpendicular faces
+        expect(new Set([o.up, o.front, o.right].map((x) => x.slice(1))).size).toBe(3)
+        // the far top corner on the machine (X, Y at the extents) lies on the stock face
+        const frame = setupFrame(d, r, STOCK)
+        const far = applyPlacement(frame, [o.size[0], o.size[1], 0])
+        const near = applyPlacement(frame, [0, 0, 0])
+        const span = far.map((c, i) => Math.abs(c - near[i]!)).sort((a, b) => a - b)
+        const face = [o.size[0], o.size[1]].sort((a, b) => a - b)
+        expect(span[0]).toBeCloseTo(0, 9)
+        expect(span[1]).toBeCloseTo(face[0]!, 9)
+        expect(span[2]).toBeCloseTo(face[1]!, 9)
+      }
+  })
+
+  it('a plan with several setups needs setupId; each setup exports its own program', async () => {
+    const { s, planId } = await multiPlan()
+    const p = s.plan(planId)
+    expect(p.setups.map((x) => x.name)).toEqual(['Bottom', 'Right', 'Top'])
+    const missing = expectErrCode(await exportPlan(s.d.doc, planId, services()), 'plan.setup')
+    expect(missing.issues[0]).toMatchObject({ path: ['setupId'], rule: 'setupRequired' })
+    const unknown = expectErrCode(
+      await exportPlan(s.d.doc, planId, services(), { setupId: 'nope' }),
+      'input.malformed',
+    )
+    expect(unknown.issues[0]?.rule).toBe('unknownSetup')
+    const names = new Map(s.part().operations.map((o) => [o.id, o.name]))
+    for (const setup of p.setups) {
+      const e = expectOk(await exportPlan(s.d.doc, planId, services(), { setupId: setup.id }))
+      expect(e.setupId).toBe(setup.id)
+      expect(e.lines).toContain(`(Setup: ${setup.name})`)
+      // the program machines exactly this setup's operations, in order
+      const labels = e.program.blocks.flatMap((b) => (b.kind === 'comment' ? [b.text] : []))
+      const own = setup.operations.map((o) =>
+        o.designOperationIds.map((d) => names.get(d)).join(', '),
+      )
+      expect(labels.filter((l) => own.includes(l))).toEqual(own)
+      expect(e.regenerated).toEqual(setup.operations.map((o) => o.id))
+    }
+  })
+
+  it("only the exported setup's findings block its program", async () => {
+    const s = await planSetup()
+    await bottomAndSide(s)
+    const planId = await s.create({ machineLibraryItemId: s.machineId })
+    const p = s.plan(planId)
+    const top = setupOf(p, 'Top')
+    // the top drillings without data (the 6 mm drill has none): the top program fails
+    const drillings = new Set(
+      s
+        .part()
+        .operations.filter((o) => o.kind === 'drilling')
+        .map((o) => o.id),
+    )
+    for (const op of p.setups.filter((x) => x !== top).flatMap((x) => x.operations))
+      if (op.designOperationIds.some((d) => drillings.has(d)))
+        await s.run('plan.operation.update', {
+          planId,
+          planOperationId: op.id,
+          overrides: { spindleSpeed: '3000', feedRate: '150', plungeRate: '150' },
+        })
+    expectErrCode(await exportPlan(s.d.doc, planId, services(), { setupId: top.id }), 'plan.check')
+    for (const name of ['Bottom', 'Right'])
+      expectOk(await exportPlan(s.d.doc, planId, services(), { setupId: setupOf(p, name).id }))
+  })
+
+  it('a single-setup plan exports without setupId, as before', async () => {
+    const s = await planSetup({ part: false })
+    await bottomAndSide(s, { side: false })
+    const planId = await s.create({ machineLibraryItemId: s.machineId })
+    const only = s.plan(planId).setups[0]!.id
+    const a = expectOk(await exportPlan(s.d.doc, planId, services()))
+    const b = expectOk(await exportPlan(s.d.doc, planId, services(), { setupId: only }))
+    expect(a.setupId).toBe(only)
+    expect(b.text).toBe(a.text)
   })
 })
