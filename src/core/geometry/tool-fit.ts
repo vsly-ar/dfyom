@@ -3,11 +3,15 @@
  * table without stepdown and machine). Pure, on the resolved float64 mm of `OperationGeometry`
  * in the operation's face frame; used by the design tool field (auto choice, candidates,
  * `dfm.toolUnfit`); the plan's tool resolution uses the plan checks (plan-v0.2.md § E4).
- * Doc: docs/modes/design-v0.2.md#fit-when-a-tool-can-make-the-operation
+ * General shapes (v0.3 K4) read their width and inside corners from a `ShapeMeasure`
+ * (shape-measure.ts); without one their size rules are skipped.
+ * Doc: docs/modes/design-v0.2.md#fit-when-a-tool-can-make-the-operation,
+ * docs/modes/design-v0.3.md#dfm-checks-for-shapes
  */
 import type { DfmTool } from './dfm'
 import { EPSILON, type OperationGeometry, type StockGeometry } from './model'
 import { inradius } from './operations'
+import { FIT_SLACK, type ShapeMeasure } from './shape-measure'
 
 /** Sizes compare within this (mm), as the DFM tool rules (`TOOL_MATCH_TOLERANCE` in dfm.ts). */
 const TOL = 0.01
@@ -55,12 +59,14 @@ const endMill = (t: DfmTool) => t.type === 'flatEndMill' || t.type === 'bullNose
 /**
  * The first failed fit rule of `tool` for `op`, or undefined when it fits. `reach` is checked
  * only for a tool with one (a specific tool); a generalized tool has no length and passes.
+ * `measure` holds a general shape's width and inside corners (`shapeMeasure`).
  */
 export function toolFit(
   tool: DfmTool,
   op: OperationGeometry,
   stock: StockGeometry,
   unitSystem: 'metric' | 'inch',
+  measure?: ShapeMeasure,
 ): ToolUnfit | undefined {
   const dc = tool.diameter
   const corner = (cornerRadius: number): ToolUnfit | undefined =>
@@ -81,6 +87,9 @@ export function toolFit(
           need: { relation: 'atLeast', value: dc },
           values: { toolDiameter: dc, size, feature },
         }
+  // a shape's smallest inside corner of the cut (0: sharp); none (Infinity) fits every tool
+  const shapeCorner = (m: ShapeMeasure): ToolUnfit | undefined =>
+    Number.isFinite(m.smallestCornerRadius) ? corner(m.smallestCornerRadius) : undefined
   let unfit: ToolUnfit | undefined
   switch (op.kind) {
     case 'facing':
@@ -99,12 +108,21 @@ export function toolFit(
           values: { needs: 'endMill' },
         }
       const c = op.shape.contour
-      // general shapes: the narrowest size and corners need the 2D layer (K4)
+      // general shapes: the region's width (eroded by the tool radius it is empty) and the
+      // smallest inside corner, from the 2D layer
       unfit =
         c.kind === 'rectangle' || c.kind === 'circle'
           ? (wider(2 * inradius(c), 'pocket at its narrowest', 'pocket') ??
             (c.kind === 'rectangle' ? corner(c.cornerRadius) : undefined))
-          : undefined
+          : measure === undefined
+            ? undefined
+            : measure.fits(dc / 2 - FIT_SLACK)
+              ? shapeCorner(measure)
+              : wider(
+                  Math.min(measure.narrowest(), dc - 2 * TOL),
+                  'pocket at its narrowest',
+                  'pocket',
+                )
       if (unfit !== undefined) return unfit
       const f = op.floorRadius
       const re = tool.type === 'bullNoseEndMill' ? (tool.cornerRadius ?? 0) : 0
@@ -165,9 +183,11 @@ export function toolFit(
         }
       unfit =
         wider(op.slotWidth, 'slot', 'slot') ??
-        (op.side === 'inside' && op.shape.contour.kind === 'rectangle'
-          ? corner(op.shape.contour.cornerRadius)
-          : undefined)
+        (measure !== undefined
+          ? shapeCorner(measure)
+          : op.side === 'inside' && op.shape.contour.kind === 'rectangle'
+            ? corner(op.shape.contour.cornerRadius)
+            : undefined)
       if (unfit !== undefined) return unfit
       break
   }

@@ -5,8 +5,8 @@
  * Doc: docs/modes/plan-v0.3.md#pocket-offset-clearing-of-a-region,
  * docs/architecture/shapes.md#parameter-checks-for-shapes
  */
-import { Err, Ok, type AppResult } from '../../shared/result'
-import type { Vec2 } from '../geometry/model'
+import { Err, Ok, type AppResult } from '../../../shared/result'
+import type { Vec2 } from '../model'
 import {
   arc,
   arcRadius,
@@ -18,9 +18,9 @@ import {
   type Element,
   type Loop,
   type Region,
-} from '../geometry/2d/model'
-import { elementPointAt } from '../geometry/2d/measure'
-import type { Region2dPort } from '../geometry/2d/port'
+} from './model'
+import { elementPointAt } from './measure'
+import type { Region2dPort } from './port'
 
 /** One piece of rest material: its area (mm²) and a point inside it for the marker. */
 export interface RestPiece {
@@ -90,8 +90,10 @@ export function findRestMaterial(
   port: Region2dPort,
   region: Region,
   R: number,
+  /** `port.offset(region, R)` when the caller has it already (the design DFM's width check). */
+  inset?: AppResult<Region>,
 ): AppResult<RestPiece[]> {
-  const inner = port.offset(region, R)
+  const inner = inset ?? port.offset(region, R)
   if (inner.isErr()) return Err(inner.unwrapErr())
   let opening: Region = { pieces: [] }
   if (inner.unwrap().pieces.length > 0) {
@@ -99,27 +101,33 @@ export function findRestMaterial(
     if (o.isErr()) return Err(o.unwrapErr())
     opening = o.unwrap()
   }
+  const min = 0.5 * R * R
+  // the opening lies inside the region, so the rest's area is known before the difference
+  if (regionArea(region) - regionArea(opening) <= min) return Ok([])
   const restR = opening.pieces.length > 0 ? port.difference(region, opening) : Ok(region)
   if (restR.isErr()) return Err(restR.unwrapErr())
-  let rest = restR.unwrap()
-  const min = 0.5 * R * R
-  if (regionArea(rest) <= min) return Ok([])
-  for (const z of cornerZones(region, R)) {
-    if (rest.pieces.length === 0) break
-    const zb = chainBounds(z.elements)!
-    const rb = chainBounds(regionLoops(rest).flatMap((l) => l.elements))!
-    if (!boundsOverlap(zb, rb)) continue
-    const zr = port.normalise([z])
-    if (zr.isErr()) return Err(zr.unwrapErr())
-    const d = port.difference(rest, zr.unwrap())
-    if (d.isErr()) return Err(d.unwrapErr())
-    rest = d.unwrap()
-  }
+  const rest = restR.unwrap()
+  // subtracting zones only shrinks a piece: pieces at or below the threshold drop out first, and
+  // each piece loses the union of the zones over its own bounds in one difference (K4 perf)
+  const zones = cornerZones(region, R).map((z) => ({ loop: z, bounds: chainBounds(z.elements)! }))
   const out: RestPiece[] = []
   for (const piece of rest.pieces) {
-    const one: Region = { pieces: [piece] }
-    const area = regionArea(one)
-    if (area > min) out.push({ area, at: pointIn(port, one) })
+    let left: Region = { pieces: [piece] }
+    if (regionArea(left) <= min) continue
+    const pb = chainBounds(piece.outer.elements)!
+    const near = zones.filter((z) => boundsOverlap(z.bounds, pb)).map((z) => z.loop)
+    if (near.length > 0) {
+      const zr = port.normalise(near)
+      if (zr.isErr()) return Err(zr.unwrapErr())
+      const d = port.difference(left, zr.unwrap())
+      if (d.isErr()) return Err(d.unwrapErr())
+      left = d.unwrap()
+    }
+    for (const p of left.pieces) {
+      const one: Region = { pieces: [p] }
+      const area = regionArea(one)
+      if (area > min) out.push({ area, at: pointIn(port, one) })
+    }
   }
   return Ok(out.sort((x, y) => y.area - x.area))
 }
