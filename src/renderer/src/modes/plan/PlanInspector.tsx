@@ -401,7 +401,7 @@ function OperationInspector({
   return (
     <div className={styles['inspector']}>
       {/* the design operations' ids (as the design inspector shows them), not the internal plan id */}
-      <PanelHeader title={name} meta={op.designOperationIds.join(', ')} />
+      <PanelHeader title={name} itemId={op.designOperationIds.join(', ')} />
       <div className={styles['fields']}>
         {readOnly ? <p className={styles['muted']}>{m.readOnly(plan.status)}</p> : null}
         {failed ? <ErrorMessage error={failed} message={t.commandFailed} /> : null}

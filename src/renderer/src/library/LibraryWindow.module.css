@@ -66,15 +66,6 @@
   flex: 1 1 auto;
 }
 
-.project {
-  color: var(--text-muted);
-  font-size: var(--text-sm);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-}
-
 .machine {
   display: flex;
   align-items: center;
@@ -679,8 +670,5 @@
 @media (max-width: 960px) {
   .panel {
     grid-template-columns: minmax(280px, 1fr) minmax(360px, 1.2fr);
-  }
-  .project {
-    display: none;
   }
 }

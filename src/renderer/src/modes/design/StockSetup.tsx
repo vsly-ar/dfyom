@@ -1,8 +1,10 @@
 // Stock setup for the part (task 3.6): a project without a part picks its stock – a block from
 // the stock library or a new block (added to the library first) – and creates the part from it
-// (`design.part.add` takes a snapshot of the stock, design.md#part-and-stock-v01).
-// Doc: docs/modes/design.md#workflow, docs/architecture/library.md#stock
-import { useEffect, useId, useRef, useState } from 'react'
+// (`design.part.add` takes a snapshot of the stock, design.md#part-and-stock-v01). Since D45 the
+// body of the Stock dialog, which titles and describes it; `onCreated` closes the dialog.
+// Doc: docs/modes/design.md#workflow, docs/architecture/library.md#stock,
+// docs/conventions/ui.md#design-sidebar-and-setup-dialogs-v04-d45
+import { useEffect, useRef, useState } from 'react'
 import { MATERIAL_CLASSES, type MaterialClass } from '../../../../core/library/item'
 import type { StockValuesDTO } from '../../../../core/library/stock.dto'
 import type { UnitSystem } from '../../../../core/project/document'
@@ -48,7 +50,14 @@ function parseLength(source: string, units: UnitSystem): Quantity {
     .unwrap()
 }
 
-export function StockSetup({ units }: { units: UnitSystem }): React.JSX.Element {
+export function StockSetup({
+  units,
+  onCreated,
+}: {
+  units: UnitSystem
+  /** The part was created. */
+  onCreated?: () => void
+}): React.JSX.Element {
   const call = useCommand()
   const [partName, setPartName] = useState<string>(m.defaultPartName)
   const [library, setLibrary] = useState<readonly LibraryStock[]>([])
@@ -61,7 +70,6 @@ export function StockSetup({ units }: { units: UnitSystem }): React.JSX.Element 
   const [busy, setBusy] = useState(false)
   const [failures, setFailures] = useState(0)
   const section = useRef<HTMLElement>(null)
-  const titleId = useId()
   // re-read when the library changes (the Library window, an agent)
   const libraryVersion = useLibraryVersion()
 
@@ -117,7 +125,9 @@ export function StockSetup({ units }: { units: UnitSystem }): React.JSX.Element 
     if (!r.ok) {
       setError(r.error)
       setFailures((n) => n + 1)
+      return
     }
+    onCreated?.()
   }
 
   // after a failed Create, focus the first field it marked (ui.md#errors)
@@ -160,11 +170,7 @@ export function StockSetup({ units }: { units: UnitSystem }): React.JSX.Element 
     // not a <form>: Enter in a field commits that field (QuantityInput), it does not submit; local
     // form state, so Enter never applies (apply.md#keyboard)
     <ApplyScope onApply={null}>
-      <section ref={section} className={styles['setup']} aria-labelledby={titleId}>
-        <h2 id={titleId} className={styles['setupTitle']}>
-          {m.setupTitle}
-        </h2>
-        <p className={styles['muted']}>{m.setupDescription}</p>
+      <section ref={section} className={styles['setup']} aria-label={m.setupTitle}>
         <Field label={m.partName}>
           <FieldInput value={partName} onChange={(e) => setPartName(e.target.value)} />
         </Field>

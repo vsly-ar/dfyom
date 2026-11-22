@@ -6,8 +6,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   _electron as electron,
+  expect,
   test as base,
   type ElectronApplication,
+  type Locator,
   type Page,
 } from '@playwright/test'
 
@@ -138,5 +140,28 @@ export const test = base.extend<{ dfyom: AppFixture }>({
     }
   },
 })
+
+/**
+ * Opens one of design mode's part-setup dialogs (D45: Stock, Shapes, Reference) from the main
+ * toolbar, unless it is open; returns the dialog. While a modal dialog is open the rest of the
+ * window is hidden from role queries: close it (`closeDialog`) before using the navigator or the
+ * inspector. Doc: docs/conventions/ui.md#design-sidebar-and-setup-dialogs-v04-d45
+ */
+export async function openPartSetup(
+  page: Page,
+  name: 'Stock' | 'Shapes' | 'Reference',
+): Promise<Locator> {
+  const dialog = page.getByRole('dialog', { name })
+  if (!(await dialog.isVisible()))
+    await page.getByRole('toolbar', { name: 'Part setup' }).getByRole('button', { name }).click()
+  await expect(dialog).toBeVisible()
+  return dialog
+}
+
+/** Closes an open dialog by its "Done" (or `button`) and waits until it is gone. */
+export async function closeDialog(dialog: Locator, button = 'Done'): Promise<void> {
+  await dialog.getByRole('button', { name: button }).click()
+  await expect(dialog).toBeHidden()
+}
 
 export { expect } from '@playwright/test'

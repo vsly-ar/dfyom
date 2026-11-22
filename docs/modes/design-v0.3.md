@@ -178,7 +178,7 @@ Names per [commands.md § Naming](../architecture/commands.md#naming); `document
 
 Rules go to a [ui.md](../conventions/ui.md) amendment with the tasks ([plans/v0.3.md](../plans/v0.3.md)); intent:
 
-- **Navigator:** a "Shapes" group above the operations (shape icon, name, "used by 2"); "Add" offers shapes (primitives, path, Import SVG…) and operations.
+- **Navigator:** a "Shapes" group above the operations (shape icon, name, "used by 2"; since D45 the Shapes dialog, [ui.md § Design sidebar and setup dialogs](../conventions/ui.md#design-sidebar-and-setup-dialogs-v04-d45)); "Add" offers shapes (primitives, path, Import SVG…) and operations.
 - **Shape Editor:** selecting a shape shows it flat in the viewport (orthographic, looking at the face of the first operation that uses it, with the stock face and the reference section as context, else its own frame); the inspector lists its items with `op`, the fields of the selected item and the path's segment table. Handles move points, radii and sizes; Shift constrains to 15°. Every commit is one `design.shape.item.update`.
 - **Operation inspector:** a shape picker (inline rectangle/circle or a named shape), rotation, mirror, the `on` side, tab positions.
 - Live outline: the renderer resolves shapes with the same 2D port ([shapes.md § Where the 2D layer runs](../architecture/shapes.md#where-the-2d-layer-runs)).

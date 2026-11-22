@@ -6,13 +6,6 @@
   min-height: 0;
 }
 
-.partHeader {
-  display: grid;
-  gap: var(--space-0-5);
-  padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--border);
-}
-
 .partName {
   justify-self: start;
   padding: 0;
@@ -22,6 +15,92 @@
   font-weight: var(--weight-bold);
   color: var(--text);
   cursor: pointer;
+}
+
+/* the sidebar's one-line part and stock read-out under the Operations header (D45) */
+.partLine {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-1) var(--space-3) var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.partLine .partName {
+  flex: none;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stockReadout {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.stockReadout:hover {
+  color: var(--text);
+}
+
+/* the main toolbar's Part setup group (D45): a hairline apart from undo/redo */
+.setupTools::before {
+  content: '';
+  align-self: center;
+  width: 1px;
+  height: var(--space-4);
+  margin-right: var(--space-2);
+  background: var(--border);
+}
+
+/* the part-setup dialogs (D45): an action row, then the rows */
+.setupList {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--text);
+}
+
+.setupActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.setupEmpty {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-muted);
+}
+
+/* the Stock dialog's read-out of the part's stock */
+.stockFacts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+}
+
+.stockFacts dt {
+  color: var(--text-muted);
+}
+
+.stockFacts dd {
+  margin: 0;
+  color: var(--text);
 }
 
 .partName[aria-pressed='true'] {
@@ -54,18 +133,11 @@
 }
 
 .setup {
-  /* fields stack their label above the input when the navigator is narrow (Field) */
+  /* the Stock dialog's body (D45); fields stack their label above the input when narrow (Field) */
   container-type: inline-size;
   display: grid;
   gap: var(--space-3);
-  padding: var(--space-3);
-}
-
-.setupTitle {
-  margin: 0;
-  font-size: var(--text-lg);
-  line-height: var(--lh-lg);
-  font-weight: var(--weight-bold);
+  color: var(--text);
 }
 
 .emptyOps {
@@ -447,21 +519,13 @@
   color: var(--text-muted);
 }
 
-/* reference models (task R3): a group between the part and the operations */
+/* reference models (task R3): the Reference dialog's rows (D45) */
 .references {
   display: grid;
-  border-bottom: 1px solid var(--border);
-}
-
-.emptyReference {
-  display: grid;
-  gap: var(--space-2);
-  justify-items: start;
-  padding: var(--space-1) var(--space-3) var(--space-3);
 }
 
 .referenceError {
-  padding: 0 var(--space-3) var(--space-3);
+  padding: 0;
 }
 
 /* room for the eye and remove buttons, which stay over the row's end; the name over the count */
@@ -667,14 +731,6 @@
 }
 
 /* Shapes group (task U1, ui.md#navigator-and-add) */
-.shapesEmpty {
-  margin: 0;
-  padding: var(--space-1) var(--space-3) var(--space-2);
-  font-size: var(--text-sm);
-  line-height: var(--lh-sm);
-  color: var(--text-muted);
-}
-
 .shapeUse {
   font-size: var(--text-xs);
   line-height: var(--lh-xs);

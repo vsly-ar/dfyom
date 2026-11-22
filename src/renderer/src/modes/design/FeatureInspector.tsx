@@ -110,7 +110,7 @@ export function OwnedOperationInspector({
 
   return (
     <div className={styles['inspector']}>
-      <PanelHeader title={op.name} meta={op.id} />
+      <PanelHeader title={op.name} itemId={op.id} />
       <div className={styles['fields']}>
         <nav aria-label={f.breadcrumb}>
           <ol className={styles['breadcrumb']}>
@@ -244,7 +244,7 @@ export function FeatureInspector({
 
   return (
     <div className={styles['inspector']}>
-      <PanelHeader title={feature.name} meta={feature.id} />
+      <PanelHeader title={feature.name} itemId={feature.id} />
       <div className={styles['fields']}>
         {summary ? <ErrorMessage error={summary} message={m.inspector.commandFailed} /> : null}
         <NameField

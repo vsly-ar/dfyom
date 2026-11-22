@@ -392,7 +392,7 @@ function OperationInspector({
 
   return (
     <div className={styles['inspector']}>
-      <PanelHeader title={op.name} meta={op.id} />
+      <PanelHeader title={op.name} itemId={op.id} />
       <div className={styles['fields']}>
         {summary ? <ErrorMessage error={summary} message={t.commandFailed} /> : null}
         <NameField label={t.name} name={op.name} onCommit={(name) => void send({ name }, 'name')} />

@@ -30,6 +30,13 @@ function renderShell(bridge: FakeBridge = createFakeBridge()) {
   }
 }
 
+/** A project without a part opens the Stock dialog by itself (D45); these tests close it. */
+async function closeStockDialog(user: { keyboard: (keys: string) => Promise<void> }) {
+  const dialog = await screen.findByRole('dialog', { name: 'Stock' })
+  await user.keyboard('{Escape}')
+  await waitFor(() => expect(dialog).not.toBeInTheDocument())
+}
+
 afterEach(() => {
   delete document.documentElement.dataset['theme']
   delete document.documentElement.dataset['motion']
@@ -77,6 +84,7 @@ describe('AppShell', () => {
     const d = fixtureDispatcher('Bracket')
     bridge.bind(d, 'p1', { file: '/p/bracket.dfyom' })
     const { user } = renderShell(bridge)
+    await closeStockDialog(user)
     const status = screen.getByRole('contentinfo', { name: 'Status bar' })
     expect(await within(status).findByText('Saved')).toBeInTheDocument()
     expect(within(status).getByText('Unit system: millimetres')).toBeInTheDocument()
@@ -108,7 +116,8 @@ describe('AppShell', () => {
     const bridge = createFakeBridge()
     const d = fixtureDispatcher()
     bridge.bind(d)
-    renderShell(bridge)
+    const { user } = renderShell(bridge)
+    await closeStockDialog(user)
     await act(async () => {
       const agent = { kind: 'agent', id: 'http-1' } as const
       const r = await d.dispatch('project.name.update', { name: 'X' }, agent, {
@@ -125,6 +134,7 @@ describe('AppShell', () => {
     const bridge = createFakeBridge()
     bridge.bind(fixtureDispatcher())
     const { user } = renderShell(bridge)
+    await closeStockDialog(user)
     await user.click(screen.getByRole('radio', { name: 'Run' }))
     await user.click(await screen.findByRole('button', { name: 'Go to Plan' }))
     expect(screen.getByRole('radio', { name: 'Plan' })).toBeChecked()
@@ -242,6 +252,7 @@ describe('AppShell', () => {
       return { ok: true, revision: 0, value: { state: 'finished' } }
     })
     const { user } = renderShell(bridge)
+    await closeStockDialog(user)
     const trigger = await screen.findByRole('button', { name: 'Evaluate part' })
     await user.click(trigger)
     await user.click(await screen.findByRole('button', { name: 'Cancel Evaluate part' }))

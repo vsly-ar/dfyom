@@ -11,7 +11,7 @@
 // Docs: docs/conventions/ui.md#features-v04, docs/modes/features.md
 import { resolve } from 'node:path'
 import type { Locator, Page } from '@playwright/test'
-import { expect, test } from './app.fixture'
+import { closeDialog, expect, openPartSetup, test } from './app.fixture'
 
 async function setField(scope: Locator, label: string, value: string): Promise<void> {
   const field = scope.getByLabel(label, { exact: true }).and(scope.locator('input'))
@@ -45,6 +45,31 @@ async function render(
   }
 }
 
+/**
+ * With DFYOM_RENDERS=1: a part-setup dialog (D45) in light and dark. The theme is set first: an
+ * open modal dialog hides the toolbar's Settings button.
+ */
+async function renderDialog(
+  page: Page,
+  name: string,
+  open: () => Promise<Locator>,
+  close = 'Done',
+): Promise<void> {
+  if (!RENDERS) return
+  const settings = page.getByRole('dialog', { name: 'Settings' })
+  for (const theme of ['light', 'dark'] as const) {
+    await page.getByRole('button', { name: 'Settings' }).click()
+    await settings.getByRole('radio', { name: theme === 'light' ? 'Light' : 'Dark' }).click()
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
+    await settings.getByRole('button', { name: 'Done' }).click()
+    await expect(settings).toBeHidden()
+    const dialog = await open()
+    await page.waitForTimeout(400)
+    await page.screenshot({ path: `${rendersDir}/d45-${name}-${theme}.png` })
+    await closeDialog(dialog, close)
+  }
+}
+
 test('features: add a hole, expand its row, the owned inspector is read-only, Make Clones…', async ({
   dfyom,
 }) => {
@@ -59,13 +84,25 @@ test('features: add a hole, expand its row, the owned inspector is read-only, Ma
   const dialog = page.getByRole('dialog', { name: 'New project' })
   await dialog.getByRole('textbox', { name: 'Project name' }).fill('Features')
   await dialog.getByRole('button', { name: 'Create project' }).click()
-  const setup = navigator.getByRole('region', { name: 'Set up the part' })
+  // a new project starts in the Stock dialog (D45)
+  const stock = page.getByRole('dialog', { name: 'Stock' })
+  await expect(stock).toBeVisible()
+  if (RENDERS) {
+    await closeDialog(stock, 'Cancel')
+    await renderDialog(page, 'stock-setup', () => openPartSetup(page, 'Stock'), 'Cancel')
+    await openPartSetup(page, 'Stock')
+  }
+  const setup = page.getByRole('region', { name: 'Set up the part' })
   await setField(setup, 'Length (X)', '100')
   await setField(setup, 'Width (Y)', '60')
   await setField(setup, 'Thickness (Z)', '20')
   await setup.getByRole('button', { name: 'Create part' }).click()
+  await expect(stock).toBeHidden()
   await navigator.getByRole('button', { name: 'Add pocket' }).click()
   await expect(inspector.getByRole('heading', { name: 'Pocket 1' })).toBeVisible()
+  await renderDialog(page, 'stock', () => openPartSetup(page, 'Stock'))
+  await renderDialog(page, 'shapes', () => openPartSetup(page, 'Shapes'))
+  await renderDialog(page, 'reference', () => openPartSetup(page, 'Reference'))
 
   // ── Add → Features → Add hole ────────────────────────────────────────────────────────────
   await navigator.getByRole('button', { name: 'Add', exact: true }).click()
@@ -220,7 +257,7 @@ test('chamfer: add a drilling, add a chamfer from Add, edit it in its inspector'
   const dialog = page.getByRole('dialog', { name: 'New project' })
   await dialog.getByRole('textbox', { name: 'Project name' }).fill('Chamfers')
   await dialog.getByRole('button', { name: 'Create project' }).click()
-  const setup = navigator.getByRole('region', { name: 'Set up the part' })
+  const setup = page.getByRole('region', { name: 'Set up the part' })
   await setup.getByRole('button', { name: 'Create part' }).click()
 
   // no edge yet: Chamfer says why

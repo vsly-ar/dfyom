@@ -62,8 +62,10 @@ describe('project files', () => {
       name: 'Bracket',
       unitSystem: 'inch',
     })
-    expect(await screen.findByRole('region', { name: 'Set up the part' })).toBeInTheDocument()
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    // the new project starts in the Stock dialog (D45), which replaced the New project dialog
+    const stock = await screen.findByRole('dialog', { name: 'Stock' })
+    expect(within(stock).getByRole('region', { name: 'Set up the part' })).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'New project' })).not.toBeInTheDocument()
   })
 
   it('opens a file: the recovery prompt restores unsaved changes', async () => {
@@ -154,6 +156,10 @@ describe('project files', () => {
     const openProject = vi.spyOn(bridge.window, 'openProject')
     const { user } = renderApp(bridge)
     await screen.findByText('Unsaved changes')
+    // the partless fixture opened the Stock dialog by itself (D45): close it first
+    await screen.findByRole('dialog', { name: 'Stock' })
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     act(() => bridge.emitMenu('project.new'))
     const dialog = await screen.findByRole('dialog', { name: 'New project' })
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()

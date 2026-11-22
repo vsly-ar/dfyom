@@ -6,7 +6,7 @@
 // Docs: docs/conventions/ui.md#shape-in-the-operation-inspector, #tab-markers, #import-report
 import { resolve } from 'node:path'
 import type { ElectronApplication, Locator } from '@playwright/test'
-import { expect, test } from './app.fixture'
+import { closeDialog, expect, openPartSetup, test } from './app.fixture'
 
 const SVG = resolve('src/core/design/__fixtures__/enclosure-sections.svg')
 
@@ -42,14 +42,14 @@ test('shapes on operations: import SVG, pick a named shape, drag a tab, undo', a
   const dialog = page.getByRole('dialog', { name: 'New project' })
   await dialog.getByRole('textbox', { name: 'Project name' }).fill('Enclosure')
   await dialog.getByRole('button', { name: 'Create project' }).click()
-  const setup = navigator.getByRole('region', { name: 'Set up the part' })
+  const setup = page.getByRole('region', { name: 'Set up the part' })
   await setField(setup, 'Length (X)', '120')
   await setField(setup, 'Width (Y)', '80')
   await setField(setup, 'Thickness (Z)', '20')
   await setup.getByRole('button', { name: 'Create part' }).click()
 
-  // ── Import SVG… from the Shapes group ────────────────────────────────────────────────────
-  const shapes = navigator.getByRole('region', { name: 'Shapes' })
+  // ── Import SVG… from the Shapes dialog (D45) ─────────────────────────────────────────────
+  const shapes = await openPartSetup(page, 'Shapes')
   await shapes.getByRole('button', { name: 'Add shape' }).click()
   await page.getByRole('menuitem', { name: 'Import SVG…' }).click()
   const options = page.getByRole('dialog', { name: 'Import SVG' })
@@ -59,6 +59,7 @@ test('shapes on operations: import SVG, pick a named shape, drag a tab, undo', a
   await report.getByRole('button', { name: 'Close' }).first().click()
   await expect(report).toHaveCount(0)
   await expect(shapes.getByRole('list')).toBeVisible()
+  await closeDialog(shapes)
 
   // ── a pocket on a named shape ────────────────────────────────────────────────────────────
   await navigator.getByRole('button', { name: 'Add pocket' }).click()

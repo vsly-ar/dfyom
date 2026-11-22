@@ -1,15 +1,17 @@
-// The navigator's "Reference" group (task R3), under the part and its stock: import an STL through
+// The Reference dialog's body (task R3; the navigator's "Reference" group until D45): import an STL through
 // the native dialog (`design.reference.import` with the chosen absolute path, fitted centre + top),
 // one row per reference (its name over the triangle count, each one line) – select it (the inspector follows), the eye toggles its visibility in this
 // window only (decision D17: no command, no undo step, never unsaved), remove with the navigator's
-// undo toast.
-// Doc: docs/modes/reference-model.md#display, docs/conventions/ui.md#reference-ghost-v02
+// undo toast. Choosing a row or a finished import selects the reference and closes the dialog
+// (`onChosen`); the eye and Remove keep it open.
+// Doc: docs/modes/reference-model.md#display, docs/conventions/ui.md#reference-ghost-v02,
+// docs/conventions/ui.md#design-sidebar-and-setup-dialogs-v04-d45
 import { useState } from 'react'
 import type { ReferenceWarning } from '../../../../core/design/reference'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { referenceMessages } from '../../messages/reference'
 import { useShell, useUi } from '../../shell/ShellContext'
-import { Icon, Button, ErrorMessage, IconButton, PanelHeader } from '../../ui'
+import { Icon, Button, ErrorMessage, IconButton } from '../../ui'
 import styles from './Design.module.css'
 import type { DesignPart } from './model'
 import { useCommand, useDesignReferences, useDesignSelection } from './useDesign'
@@ -24,10 +26,13 @@ interface Imported {
 export function ReferenceRows({
   part,
   onRemoved,
+  onChosen,
 }: {
   part: DesignPart
   /** A reference was removed: the navigator shows its undo toast. */
   onRemoved: (name: string) => void
+  /** A reference was chosen or imported and is selected: the dialog closes so its inspector shows. */
+  onChosen: () => void
 }): React.JSX.Element {
   const { bridge } = useShell()
   const call = useCommand()
@@ -49,6 +54,7 @@ export function ReferenceRows({
     const { referenceId, warnings } = r.value as Imported
     setNotes(referenceId, warnings)
     select(referenceId)
+    onChosen()
   }
   const remove = async (id: string, name: string) => {
     const r = await call('design.reference.remove', { partId: part.dto.id, referenceId: id })
@@ -58,31 +64,19 @@ export function ReferenceRows({
   }
 
   return (
-    <section className={styles['references']} aria-label={m.title}>
-      <PanelHeader
-        title={m.title}
-        meta={references.length > 0 ? String(references.length) : undefined}
-        actions={
-          <IconButton
-            label={m.import}
-            icon={<Icon name="import" />}
-            disabled={busy}
-            onClick={() => void importReference()}
-          />
-        }
-      />
+    <div className={[styles['setupList'], styles['references']].join(' ')}>
+      <div className={styles['setupActions']}>
+        <Button
+          size="sm"
+          icon={<Icon name="import" />}
+          disabled={busy}
+          onClick={() => void importReference()}
+        >
+          {m.importStl}
+        </Button>
+      </div>
       {references.length === 0 ? (
-        <div className={styles['emptyReference']}>
-          <p className={styles['muted']}>{m.empty}</p>
-          <Button
-            size="sm"
-            icon={<Icon name="import" />}
-            disabled={busy}
-            onClick={() => void importReference()}
-          >
-            {busy ? m.importing : m.importStl}
-          </Button>
-        </div>
+        <p className={styles['setupEmpty']}>{m.empty}</p>
       ) : (
         <ul className={styles['ops']} aria-label={m.listLabel}>
           {references.map(({ ref, visible }) => (
@@ -96,7 +90,10 @@ export function ReferenceRows({
                 type="button"
                 className={styles['opSelect']}
                 aria-pressed={selected === ref.id}
-                onClick={() => select(selected === ref.id ? null : ref.id)}
+                onClick={() => {
+                  if (selected !== ref.id) select(ref.id)
+                  onChosen()
+                }}
               >
                 <Icon name="reference" />
                 <span className={styles['referenceText']}>
@@ -125,7 +122,7 @@ export function ReferenceRows({
           ))}
         </ul>
       )}
-      {busy && references.length > 0 ? (
+      {busy ? (
         <p className={styles['note']} role="status">
           {m.importing}
         </p>
@@ -135,6 +132,6 @@ export function ReferenceRows({
           <ErrorMessage error={error} message={m.importFailed} />
         </div>
       ) : null}
-    </section>
+    </div>
   )
 }

@@ -131,8 +131,13 @@ export function PanelResizeHandle({ label, className }: PanelResizeHandleProps):
 export interface PanelHeaderProps {
   /** Panel title, shown as an eyebrow ("Operations"). */
   title: string
-  /** Muted count or note after the title ("5"). */
+  /** Muted count or note after the title ("5"); never the item's id (use `itemId`). */
   meta?: ReactNode
+  /**
+   * The shown item's id (`chamfer1`): not shown, but the heading's tooltip ("Id: chamfer1") and
+   * `data-item-id`, for agents and assistive tech (ui.md#panels-and-inspectors, D45).
+   */
+  itemId?: string | undefined
   /** Icon buttons at the end. */
   actions?: ReactNode
   /** Heading level within the page outline. */
@@ -142,13 +147,19 @@ export interface PanelHeaderProps {
 export function PanelHeader({
   title,
   meta,
+  itemId,
   actions,
   headingLevel = 2,
 }: PanelHeaderProps): React.JSX.Element {
   const Heading = `h${headingLevel}` as const
   return (
     <div className={styles['header']}>
-      <Heading className={styles['title']}>{title}</Heading>
+      <Heading
+        className={styles['title']}
+        {...(itemId !== undefined ? { title: `Id: ${itemId}`, 'data-item-id': itemId } : {})}
+      >
+        {title}
+      </Heading>
       {meta !== undefined ? <span className={styles['meta']}>{meta}</span> : null}
       {actions ? <span className={styles['actions']}>{actions}</span> : null}
     </div>

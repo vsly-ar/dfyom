@@ -74,7 +74,6 @@ export const libraryMessages = {
         : `${n} ${kindWord[kind]}${n === 1 ? '' : 's'}`,
     unreadableCount: (n: number) => `${n} unreadable ${n === 1 ? 'file' : 'files'}`,
     shown: (n: number) => `${n} shown`,
-    projectNote: (name: string) => `Project: ${name}`,
     noProject: 'No project',
     empty: (kind: LibraryItemKind) =>
       kind === 'stock' ? 'The stock library is empty.' : `No ${kindWord[kind]}s yet.`,

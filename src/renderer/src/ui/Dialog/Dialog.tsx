@@ -23,6 +23,12 @@ export interface DialogProps {
   onOpenChange?: (open: boolean) => void
   /** Modal by default; the gallery shows dialogs inline with `modal={false}`. */
   modal?: boolean
+  /**
+   * Where focus goes on close when the dialog has no `trigger` (it was opened from elsewhere, e.g.
+   * a toolbar button through a store): called with the close event, `preventDefault()` keeps
+   * Radix from focusing the body.
+   */
+  onCloseAutoFocus?: (event: Event) => void
 }
 
 export function Dialog({
@@ -36,6 +42,7 @@ export function Dialog({
   defaultOpen,
   onOpenChange,
   modal = true,
+  onCloseAutoFocus,
 }: DialogProps): React.JSX.Element {
   const container = usePortalContainer()
   return (
@@ -52,6 +59,7 @@ export function Dialog({
           className={styles['content']}
           {...(description === undefined ? { 'aria-describedby': undefined } : {})}
           {...(modal ? { [MODAL_ATTR]: '' } : {})}
+          {...(onCloseAutoFocus ? { onCloseAutoFocus } : {})}
         >
           <RadixDialog.Title className={styles['title']}>{title}</RadixDialog.Title>
           {description !== undefined ? (

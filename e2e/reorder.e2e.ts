@@ -48,7 +48,7 @@ test('reorder (D45): drag operation rows by their grip; a refused drop says why'
   const dialog = page.getByRole('dialog', { name: 'New project' })
   await dialog.getByRole('textbox', { name: 'Project name' }).fill('Reorder')
   await dialog.getByRole('button', { name: 'Create project' }).click()
-  const setup = navigator.getByRole('region', { name: 'Set up the part' })
+  const setup = page.getByRole('region', { name: 'Set up the part' })
   await setField(setup, 'Length (X)', '100')
   await setField(setup, 'Width (Y)', '60')
   await setField(setup, 'Thickness (Z)', '20')
@@ -76,7 +76,16 @@ test('reorder (D45): drag operation rows by their grip; a refused drop says why'
     await page.mouse.move(x, y, { steps: 8 })
     if (!hold) await page.mouse.up()
   }
-  const topOf = async (row: Locator) => (await row.boundingBox())!.y
+  /** The row's top once it stopped moving (rows animate into place after a drop). */
+  const topOf = async (row: Locator) => {
+    let last = Number.NaN
+    for (;;) {
+      const y = (await row.boundingBox())!.y
+      if (y === last) return y
+      last = y
+      await page.waitForTimeout(50)
+    }
+  }
 
   // the profile to the top
   await drag(rowOf(/^Profile 1/), (await topOf(rows.first())) + 3)

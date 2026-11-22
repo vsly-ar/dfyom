@@ -168,7 +168,7 @@ export function ShapeInspector({
     <div className={styles['inspector']}>
       <PanelHeader
         title={shape.name}
-        meta={shape.id}
+        itemId={shape.id}
         actions={<LastImportButton part={part} shapeId={shape.id} />}
       />
       <div className={styles['fields']}>
