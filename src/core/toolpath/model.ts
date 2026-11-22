@@ -169,6 +169,18 @@ export type DrillingStrategy = { readonly breakthrough: number } & (
     }
 )
 
+/**
+ * Chamfer (v0.4 T1): `plunge` at the centre (DC ≥ D) or `contour` on one ring at the chamfer
+ * depth; `entry` is resolved by the plan (`auto` = P-C). Doc: docs/modes/plan-v0.4.md#chamfer-toolpath
+ */
+export interface ChamferStrategy {
+  readonly entry: 'plunge' | 'contour'
+  /** Steepest ramp along the ring (contour, degrees). */
+  readonly rampAngle: number
+  /** Ring direction (contour); not settable, always `climb`. */
+  readonly direction: CutDirection
+}
+
 export interface ProfileStrategy {
   readonly entry: 'ramp' | 'plunge'
   /** Degrees. */
@@ -202,7 +214,11 @@ export type DrillingOperation = Extract<OperationGeometry, { kind: 'drilling' }>
 /** v0.1 contours, `outside` / `inside` only; general loops go through generateRegionProfile. */
 export type ProfileOperation = AnalyticOperation<'profile'>
 
+export type ChamferOperation = Extract<OperationGeometry, { kind: 'chamfer' }>
+
 export type FacingInput = GeneratorInput<FacingOperation, FacingStrategy>
 export type PocketInput = GeneratorInput<PocketOperation, PocketStrategy>
 export type DrillingInput = GeneratorInput<DrillingOperation, DrillingStrategy, DrillCuttingParams>
 export type ProfileInput = GeneratorInput<ProfileOperation, ProfileStrategy>
+/** Plunge and contour use no stepdown or stepover (one pass at the chamfer depth). */
+export type ChamferInput = GeneratorInput<ChamferOperation, ChamferStrategy, DrillCuttingParams>

@@ -74,6 +74,10 @@ export const FACING_PATTERNS = ['zigzag', 'oneWay'] as const
 export const FACING_AXES = ['x', 'y'] as const
 export const POCKET_ENTRIES = ['helix', 'ramp', 'plunge'] as const
 export const PROFILE_ENTRIES = ['ramp', 'plunge'] as const
+/** Chamfer (v0.4 T1); absent = auto (plunge when DC covers the chamfer, else contour). */
+export const CHAMFER_ENTRIES = ['plunge', 'contour'] as const
+/** Every stored `entry` value; which ones a kind takes is checked in strategy.ts. */
+export const ENTRIES = ['helix', 'ramp', 'plunge', 'contour'] as const
 export const DRILL_CYCLES = ['simple', 'peck', 'chipBreak', 'helix'] as const
 
 /**
@@ -87,7 +91,7 @@ export const StrategyDtoSchema = z
     pattern: z.enum(FACING_PATTERNS).optional(),
     axis: z.enum(FACING_AXES).optional(),
     overshoot: length().optional(),
-    entry: z.enum(POCKET_ENTRIES).optional(),
+    entry: z.enum(ENTRIES).optional(),
     helixDiameter: length().optional(),
     rampAngle: quantityDto('angle').optional(),
     finishAllowance: length().optional(),

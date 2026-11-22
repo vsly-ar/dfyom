@@ -72,7 +72,7 @@ export interface FeedsInput {
   readonly facingDepth?: number
   /** Drilling with an end mill (helix): the resolved helix pitch (mm). */
   readonly helixPitch?: number
-  /** Chamfer (v0.4): the cut's depth below the tool tip (mm); wired by task T1. */
+  /** Chamfer (v0.4): the cut's depth below the tool tip (mm), the resolved strategy's `cutDepth`. */
   readonly chamferDepth?: number
 }
 

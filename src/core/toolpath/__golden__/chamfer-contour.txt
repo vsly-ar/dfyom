@@ -1,0 +1,14 @@
+toolpath op-chamfer1 tool cm6 S16000
+stats cut 63.2743 rapid 20 s 6.3956
+pass finish
+  rapid 15 12 10
+  rapid 15 12 1.5
+  line 15 12 -0.5 F200
+  arc 15 18 -0.75 c 15 15 ccw F800
+  arc 15 12 -1 c 15 15 ccw F800
+  arc 15 18 -1.25 c 15 15 ccw F800
+  arc 15 12 -1.5 c 15 15 ccw F800
+  arc 15 18 -1.5 c 15 15 ccw F800
+  arc 15 12 -1.5 c 15 15 ccw F800
+  arc 15 15 -1.5 c 15 13.5 ccw F800
+  rapid 15 15 10

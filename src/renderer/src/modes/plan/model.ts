@@ -480,8 +480,9 @@ export function shownStrategyKeys(
         if (key === 'helixPitch' || key === 'rampAngle') return cycle === 'helix'
         if (key === 'breakthrough') return through
         return true
-      case 'facing':
       case 'chamfer':
+        return key !== 'rampAngle' || entry === 'contour'
+      case 'facing':
         return true
     }
   }

@@ -6,6 +6,7 @@
  */
 import { z } from 'zod'
 import {
+  ChamferGeometrySchema,
   DrillingGeometrySchema,
   FacingGeometrySchema,
   AnalyticPocketGeometrySchema,
@@ -17,6 +18,7 @@ import {
   Vec3Schema,
 } from '../geometry/schemas'
 import type {
+  ChamferInput,
   DrillingInput,
   FacingInput,
   Move,
@@ -226,4 +228,16 @@ export const RegionProfileInputSchema: z.ZodType<RegionProfileInput> = z.object(
     }),
   }),
   strategy: ProfileStrategySchema.extend({ leadRadius: z.number() }),
+})
+
+/** A circular chamfer (v0.4 T1), placed in the face frame; `entry` resolved by the plan. */
+export const ChamferInputSchema: z.ZodType<ChamferInput> = z.object({
+  ...base,
+  cutting: DrillCuttingSchema,
+  operation: ChamferGeometrySchema.omit({ direction: true }),
+  strategy: z.object({
+    entry: z.enum(['plunge', 'contour']),
+    rampAngle: z.number(),
+    direction: Direction,
+  }),
 })

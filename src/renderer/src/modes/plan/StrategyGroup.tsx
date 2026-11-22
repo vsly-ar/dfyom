@@ -33,7 +33,7 @@ import styles from './Plan.module.css'
 const t = planMessages.inspector
 const s = t.strategy
 
-/** Values each choice offers, per kind (a profile enters by ramp or plunge). */
+/** Values each choice offers, per kind (a profile enters by ramp or plunge, a chamfer is plunged or contoured). */
 function choiceValues(key: StrategyKey, kind: PlanOperationView['kind']): readonly string[] {
   switch (key) {
     case 'direction':
@@ -43,7 +43,11 @@ function choiceValues(key: StrategyKey, kind: PlanOperationView['kind']): readon
     case 'axis':
       return ['x', 'y']
     case 'entry':
-      return kind === 'profile' ? ['ramp', 'plunge'] : ['helix', 'ramp', 'plunge']
+      return kind === 'profile'
+        ? ['ramp', 'plunge']
+        : kind === 'chamfer'
+          ? ['plunge', 'contour']
+          : ['helix', 'ramp', 'plunge']
     default:
       return []
   }

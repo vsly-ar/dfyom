@@ -885,11 +885,14 @@ const operationUpdate = defineCommand({
         unlock(op, field)
         continue
       }
-      if (kind === 'drilling' && (field === 'stepdown' || field === 'stepover')) {
+      if (
+        (kind === 'drilling' || kind === 'chamfer') &&
+        (field === 'stepdown' || field === 'stepover')
+      ) {
         issues.push({
           path: ['overrides', field],
           rule: 'notForKind',
-          message: 'drilling has no stepdown/stepover (see strategy)',
+          message: `${kind} has no stepdown/stepover (see strategy)`,
         })
         continue
       }
@@ -1350,7 +1353,9 @@ const operationFeedsGet = defineQuery({
                 ? { kind: g.kind, ae: g.ae }
                 : g.kind === 'helix'
                   ? { kind: g.kind, ap: g.ap }
-                  : { kind: g.kind },
+                  : g.kind === 'chamfer'
+                    ? { kind: g.kind, depth: g.depth }
+                    : { kind: g.kind },
             rigidity: machine.mapOr<string>(DEFAULT_RIGIDITY, (m) => m.rigidity),
             spindlePower: machine.andThen((m) => m.power).unwrapOr(null as unknown as number),
           }
