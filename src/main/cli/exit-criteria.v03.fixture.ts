@@ -403,11 +403,9 @@ export async function exitCriteriaV03Flow(call: Call, dir: string): Promise<Flow
     })
   ).value
 
-  // the part evaluates; agents auto-apply, so every operation has its tool choice already.
-  // KNOWN ISSUE (X1, docs/plans/v0.3.md): the solid tabs of the imported outline fail in the
-  // 2D port (G1's tab bands, `shapeTab`), so the evaluation fails at the profile's tab 0; being
-  // fixed. The outcome is returned and asserted by an `it.fails` in the batch test (it flips to
-  // passing with the fix). Toolpaths, export and runs do not need the solid.
+  // the part evaluates; agents auto-apply, so every operation has its tool choice already. The
+  // outcome is returned and asserted by the batch test (toolpaths, export and runs do not need
+  // the solid)
   const evaluated = await ok<{ jobId: string }>('design.part.evaluate', { partId })
   const evaluation = await waitJob(evaluated.value.jobId)
   const designed = (await ok<PartGet>('design.part.get', { partId })).value
@@ -605,7 +603,7 @@ export async function exitCriteriaV03Flow(call: Call, dir: string): Promise<Flow
   return { programs, deviation, evaluation }
 }
 
-/** The evaluation criterion (expected to fail until the known tab issue above is fixed). */
+/** The evaluation criterion: the part, tabs on the imported outline included, evaluates. */
 export function expectEvaluated(evaluation: FlowV03Result['evaluation']): void {
   expect(evaluation).toMatchObject({ ok: true, value: { evaluation: 'done' } })
 }
@@ -613,8 +611,8 @@ export function expectEvaluated(evaluation: FlowV03Result['evaluation']): void {
 /**
  * Test-only: the part (as `design.part.get` returned it) evaluated in-process with the same core
  * code the geometry worker runs, sectioned at mid-wall height, against the reference STL's section
- * there (placed as the fitted reference: its centre at `centre`, its bottom at `bottom`); profile
- * tabs are left out (see the flow's known issue). Returns the two-sided distance per loop
+ * there (placed as the fitted reference: its centre at `centre`, its bottom at `bottom`; the
+ * profile's tabs stand below the section). Returns the two-sided distance per loop
  * (outline, cavity), leaving out points within `FILLET_ZONE` of a corner the flow filleted
  * (`filleted`, part frame), and the largest distance inside those zones. Every other loop of the
  * section is offcut (the stock's corners outside the slot) and must lie outside the outline.
@@ -629,15 +627,7 @@ export async function deviationCheck(
   const snapshot = expectOk(Snapshot.fromDTO(got.stock as unknown as SnapshotDTO))
   if (!(snapshot.values instanceof Stock)) throw new Error('stock snapshot expected')
   const region2d = nodeRegion2d()
-  const full = expectOk(toGeometryInput(part, snapshot.values, region2d))
-  // without the tabs (the known G1 issue in the flow): they stand 4 mm up from the bottom, far
-  // below the mid-wall section, so the section is the same
-  const input = {
-    ...full,
-    operations: full.operations.map((o) =>
-      o.kind === 'profile' ? { ...o, tabs: { ...o.tabs, count: 0, positions: [] } } : o,
-    ),
-  }
+  const input = expectOk(toGeometryInput(part, snapshot.values, region2d))
   const kernel = expectOk(await loadManifold())
   const e = expectOk(kernel.withSolids((s) => evaluatePart(input, s, undefined, region2d)))
   const soup = new Float64Array(e.indices.length * 3)
