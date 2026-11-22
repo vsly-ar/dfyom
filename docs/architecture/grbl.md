@@ -94,16 +94,16 @@ Same input and options → byte-identical output: LF line endings, final newline
 
 ```ts
 exportPlan(doc: ProjectDoc, planId: string, services: Pick<Services, 'workers' | 'toolpaths'>,
-           opts?: { workZero?: Vec3, generator?: string /* 'DFYOM' */, signal?: AbortSignal,
-                    progress?: (p: JobProgress) => void }): AsyncAppResult<PlanExport>
-PlanExport = GrblExport & { regenerated: string[], softLimitChecked: boolean }
+           opts?: { setupId?: string, workZero?: Vec3, generator?: string /* 'DFYOM' */,
+                    signal?: AbortSignal, progress?: (p: JobProgress) => void }): AsyncAppResult<PlanExport>
+PlanExport = GrblExport & { setupId: string, regenerated: string[], softLimitChecked: boolean }
 
-plan.export { planId, target, confirm = false }   // effect command
-  → { filePath, lines /* count */, stats, warnings /* plan.machine */, softLimitChecked, regenerated }
+plan.export { planId, setupId?, target, confirm = false }   // effect command
+  → { filePath, setupId, lines /* count */, stats, warnings /* plan.machine */, softLimitChecked, regenerated }
 ```
 
-1. **Checks before any generator runs:** the plan exists, its status allows export (every status but `archived`: `plan.status`), it has a machine copy (`post.noMachine`), `planOperationInputs` has no error findings (`plan.check`/`plan.order`), and the plan has at least one operation (`plan.check`, rule `empty`). Every error from `exportPlan` carries a `plan.export` context frame with `planId` (and `planOperationId` for a generator error).
-2. **Toolpaths:** for each plan operation in machining order, the [toolpath cache](workers.md#toolpath-cache) entry for its current `inputHash`; a missing or stale one is generated on the `toolpath` lane and cached (`ensureToolpath`, shared with `plan.toolpath.generate`), so export never uses a stale toolpath. Unlike the job, the first generator error fails the export (a program without one of its operations is not a valid program); the error's context names the plan operation, and toolpaths generated before it stay cached. `regenerated` lists the generated ones.
+1. **Checks before any generator runs:** the plan exists, its status allows export (every status but `archived`: `plan.status`), it has a machine copy (`post.noMachine`), the setup is known (**one program per setup**, v0.2 task E2: `setupId` names it and may be left out only when the plan has one setup, else `plan.setup` rule `setupRequired`; an unknown id `input.malformed` rule `unknownSetup`; [plan-v0.2.md](../modes/plan-v0.2.md#implementation-task-e2)), `planOperationInputs` has no error findings for the setup's operations (`plan.check`/`plan.order`), and the setup has at least one operation (`plan.check`, rule `empty`). Every error from `exportPlan` carries a `plan.export` context frame with `planId` (and `planOperationId` for a generator error).
+2. **Toolpaths:** for each plan operation of the setup in machining order, the [toolpath cache](workers.md#toolpath-cache) entry for its current `inputHash`; a missing or stale one is generated on the `toolpath` lane and cached (`ensureToolpath`, shared with `plan.toolpath.generate`), so export never uses a stale toolpath. Unlike the job, the first generator error fails the export (a program without one of its operations is not a valid program); the error's context names the plan operation, and toolpaths generated before it stay cached. `regenerated` lists the generated ones.
 3. **Mapping:** plan name and setup name for the header; per operation the tool copy's name and diameter (`ProgramTool`) and as label the names of the design operations it machines (joined with `, `); `clearanceHeight` from the setup. The generator string is `DFYOM` without a version, so the same plan gives the same file.
 4. **Write** (command only): `text` goes to `target` through the `ExportFiles` port (`services.exportFiles`), so `src/core` stays headless. `src/main/persistence/export-file.ts` follows the user-folder protocol of [Save As](persistence.md#save): it writes `<file>.tmp-<8 hex>` next to the target (created exclusively, so no existing entry is touched), fsyncs it and renames it over the target; on a failure it unlinks only that temp file (never recursively) and the target is untouched. Errors carry `target` (and `plan.export` adds `planId`).
    - **Target:** an absolute, normalized path (on Windows with a drive or UNC root: no drive-relative `\out\a.nc` or `C:out`, no `:` after the root, i.e. no alternate data streams) whose file name has a stem and ends in `.nc`, `.gcode` or `.ngc` (any case).

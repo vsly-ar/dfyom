@@ -10,6 +10,7 @@ import type { JobDirectory, Services } from '../commands/context'
 import { Quantity } from '../quantity/quantity'
 import { loadPlan } from '../plan/plan'
 import { PlanIdSchema } from '../plan/plan.dto'
+import { setupStockSize } from '../plan/setups'
 import type { ProjectDoc } from '../project/document'
 import type { Vec3 } from '../toolpath/model'
 import { machineSettings } from './grbl/emulator/settings'
@@ -30,7 +31,8 @@ export const PREPARE_TOP_MARGIN = 5
 /**
  * Decision 7: G54 (MPos) that puts the plan's stock centred on the table (XY) with the clearance
  * plane `PREPARE_TOP_MARGIN` below the top of the travel. Work zero = stock front-left corner,
- * Z0 on the stock top (docs/modes/plan-v0.1.md#setup-orientation-work-zero-safe-heights).
+ * Z0 on the stock top (docs/modes/plan-v0.1.md#setup-orientation-work-zero-safe-heights), for the
+ * first setup: the stock in its orientation (v0.2, task E2; a top setup: length × width).
  */
 export function prepareWorkZero(doc: ProjectDoc, planId: string, where: string): AppResult<Vec3> {
   const loaded = loadPlan(doc, planId, where)
@@ -39,10 +41,12 @@ export function prepareWorkZero(doc: ProjectDoc, planId: string, where: string):
   if (plan.machine.isNone())
     return fail('post.noMachine', 'the plan has no machine', { where, data: { planId } })
   const machine = plan.machine.unwrap()
-  const clearanceMm = Quantity.fromDTO(plan.setups[0]!.clearanceHeight).mapOr(0, (q) => q.canonical)
+  const first = plan.setups[0]!
+  const clearanceMm = Quantity.fromDTO(first.clearanceHeight).mapOr(0, (q) => q.canonical)
+  const size = setupStockSize(plan.stock, first)
   return Ok([
-    -machine.travel.x.canonical / 2 - plan.stock.length.canonical / 2,
-    -machine.travel.y.canonical / 2 - plan.stock.width.canonical / 2,
+    -machine.travel.x.canonical / 2 - size.x[1] / 2,
+    -machine.travel.y.canonical / 2 - size.y[1] / 2,
     -PREPARE_TOP_MARGIN - clearanceMm,
   ])
 }

@@ -8,7 +8,14 @@
  * Quarter turns are a swap and a negation plus the face size, so they stay exact up to one
  * float64 subtraction. Headless: plain data only.
  */
-import { DIRECTION, faceFrame, localStock, type Direction, type StockSize } from '../geometry/face'
+import {
+  DIRECTION,
+  directionOf,
+  faceFrame,
+  localStock,
+  type Direction,
+  type StockSize,
+} from '../geometry/face'
 import { applyPlacement, type Placement, type Vec2, type Vec3 } from '../geometry/model'
 import type { AxisRates, Move, Pass, Toolpath } from './model'
 import { toolpathStats } from './stats'
@@ -116,4 +123,34 @@ export function setupFrame(
     wcs.rotation === 90 ? [neg(v), u] : wcs.rotation === 180 ? [neg(u), neg(v)] : [v, neg(u)]
   const [a, b] = fromWcs([0, 0], wcs)
   return { origin: applyPlacement(face, [a, b, 0]), u: x, v: y, n }
+}
+
+/**
+ * How the stock sits on the machine for a setup (the run-mode setup-change prompt, task E2): its
+ * extents along machine X, Y, Z (`u`/`v` swapped by a 90°/270° turn) and the part faces the
+ * operator sees on top (machine +Z), in front (machine −Y) and on the right (machine +X). The work
+ * zero is always the front-left corner of the top, Z0 on the top.
+ */
+export interface SetupOrientation {
+  readonly size: Vec3
+  readonly up: Direction
+  readonly front: Direction
+  readonly right: Direction
+}
+
+export function setupOrientation(
+  direction: Direction,
+  rotation: WcsRotation,
+  stock: StockSize,
+): SetupOrientation {
+  const f = setupFrame(direction, rotation, stock)
+  const face = localStock(direction, stock)
+  const turned = rotation % 180 !== 0
+  const neg = (a: Vec3): Vec3 => [-a[0] || 0, -a[1] || 0, -a[2] || 0]
+  return {
+    size: [turned ? face.width : face.length, turned ? face.length : face.width, face.thickness],
+    up: directionOf(f.n),
+    front: directionOf(neg(f.v)),
+    right: directionOf(f.u),
+  }
 }

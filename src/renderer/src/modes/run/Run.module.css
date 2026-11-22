@@ -307,3 +307,42 @@
   align-items: center;
   gap: 8px;
 }
+
+/* setup-change prompt (task E2): the stock on the machine, top marked, work zero at its corner */
+.setupPicture {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+  margin: 0 0 var(--space-3);
+}
+
+.setupPicture svg {
+  width: 240px;
+  max-width: 100%;
+  height: auto;
+}
+
+.stockSide {
+  fill: var(--bg-control);
+  stroke: var(--vp-stock);
+  stroke-width: 1;
+  stroke-linejoin: round;
+}
+
+.stockTop {
+  fill: var(--info-subtle);
+  stroke: var(--info);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+.workZeroRing {
+  fill: none;
+  stroke: var(--vp-tool);
+  stroke-width: 1.5;
+}
+
+.workZeroDot {
+  fill: var(--vp-tool);
+}

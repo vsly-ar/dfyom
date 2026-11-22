@@ -34,10 +34,13 @@ async function waitFor(cond: () => boolean, ms = 30_000): Promise<boolean> {
   return cond()
 }
 
-async function setup(opts: { machine?: boolean } = {}) {
+async function setup(opts: { machine?: boolean; bottom?: boolean } = {}) {
   const s: PlanSetup = await planSetup()
+  // a bottom facing too: setups Bottom, Top (task E2)
+  if (opts.bottom === true)
+    await s.run('design.facing.add', { partId: s.partId, on: 'stock.bottom', depth: '0.5' })
   const planId = await s.create({ machineLibraryItemId: s.machineId })
-  const ops = s.plan(planId).setups[0]!.operations
+  const ops = s.plan(planId).setups.at(-1)!.operations
   for (const op of ops.filter((o) => o.tool === ops[1]!.tool))
     await s.run('plan.operation.update', {
       planId,
@@ -158,6 +161,46 @@ describe('run commands', { timeout: 60_000 }, () => {
     expect(handle.progress).toMatchObject({ done: summary.lines, total: summary.lines })
     expectOk(await t.run('run.connection.close', {}))
     expect(t.status().connection.state).toBe('closed')
+  })
+
+  it('runs one setup per job; the result names the next setup (E2)', async () => {
+    const t = await setup({ bottom: true })
+    const [bottom, top] = t.s.plan(t.planId).setups
+    expect([bottom?.name, top?.name]).toEqual(['Bottom', 'Top'])
+    expectOk(await t.open({ prepare: true }))
+    // several setups: name one
+    let r = await t.job('run.job.start', { planId: t.planId })
+    const missing = expectErrCode(await r.result, 'plan.setup')
+    expect(missing.issues[0]?.rule).toBe('setupRequired')
+    r = await t.job('run.job.start', { planId: t.planId, setupId: 'nope' })
+    expectErrCode(await r.result, 'input.malformed')
+    /** Runs a setup to its end, continuing every wait. */
+    const runSetup = async (setupId: string) => {
+      const { jobId, result } = await t.job('run.job.start', { planId: t.planId, setupId })
+      let finished = false
+      void result.then(() => (finished = true))
+      for (;;) {
+        await waitFor(() => {
+          const p = t.status().job?.phase
+          return finished || p === 'toolChange' || p === 'programPause'
+        })
+        if (finished) break
+        const job = t.status().job!
+        const which =
+          job.phase === 'toolChange' ? { toolChange: job.toolChange!.n } : { pause: job.pause! }
+        expectOk(await t.run('run.job.continue', { jobId, ...which }))
+        await waitFor(() => finished || t.status().job?.phase === 'streaming')
+      }
+      return expectOk(await result) as { setupId: string; next?: object; lines: number }
+    }
+    const first = await runSetup(bottom!.id)
+    expect(first.setupId).toBe(bottom!.id)
+    expect(first.next).toEqual({ setupId: top!.id, name: 'Top', direction: '+z', rotation: 0 })
+    // the bottom program alone: fewer lines than the top's
+    const second = await runSetup(top!.id)
+    expect(second.setupId).toBe(top!.id)
+    expect(second.next).toBeUndefined()
+    expect(second.lines).toBeGreaterThan(first.lines)
   })
 
   it('refuses a start that is not homed, a soft-limit violation and another machine copy', async () => {

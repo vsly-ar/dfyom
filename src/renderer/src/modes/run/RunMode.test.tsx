@@ -91,9 +91,12 @@ function scriptMachine(bridge: FakeBridge): Machine {
   return Object.assign(m, { job })
 }
 
-async function renderRun() {
+async function renderRun(opts: { bottom?: boolean } = {}) {
   const s = await planSetup()
-  await s.create()
+  // a bottom facing too: setups Bottom, Top (task E2)
+  if (opts.bottom === true)
+    await s.run('design.facing.add', { partId: s.partId, on: 'stock.bottom', depth: '0.5' })
+  const planId = await s.create()
   const bridge = createFakeBridge()
   bridge.bind(s.d)
   const machine = scriptMachine(bridge) as Machine & {
@@ -109,7 +112,7 @@ async function renderRun() {
   const nav = () => screen.getByRole('navigation', { name: 'Navigator' })
   await within(nav()).findByRole('button', { name: 'Connect to virtual machine' })
   const callsOf = (name: string) => bridge.calls.filter((c) => c.name === name).map((c) => c.args)
-  return { ...r, bridge, machine, nav, callsOf }
+  return { ...r, bridge, machine, nav, callsOf, plan: () => s.plan(planId) }
 }
 
 const machineGroup = () => screen.queryByRole('group', { name: 'Machine' })
@@ -315,6 +318,57 @@ describe('Run mode', () => {
     expect(within(dialog).getByRole('button', { name: 'Close' })).toHaveFocus()
     await tabTo(t, within(dialog).getByRole('button', { name: 'Stop' }))
     await expectNoAxeViolations()
+  })
+
+  it('several setups: one run per setup, the setup-change prompt between them (E2)', async () => {
+    const t = await renderRun({ bottom: true })
+    const [bottom, top] = t.plan().setups
+    expect([bottom?.name, top?.name]).toEqual(['Bottom', 'Top'])
+    await connectAndHome(t)
+    expect(within(t.nav()).getByRole('combobox', { name: 'Setup' })).toHaveTextContent('1. Bottom')
+    await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
+    const inspector = screen.getByRole('complementary', { name: 'Inspector' })
+    await t.user.click(within(inspector).getByRole('button', { name: 'Start run' }))
+    const preflight = screen.getByRole('dialog', { name: 'Start run?' })
+    expect(within(preflight).getByText('Bottom (1 of 2)')).toBeInTheDocument()
+    await t.user.click(within(preflight).getByRole('button', { name: 'Start run' }))
+    expect(t.callsOf('run.job.start')).toEqual([{ planId: t.plan().id, setupId: bottom!.id }])
+
+    // the bottom setup's run ends: the prompt for the top setup opens, never continuing by itself
+    t.machine.outcome = {
+      ok: true,
+      value: {
+        lines: 20,
+        seconds: 60,
+        elapsedSeconds: 65,
+        toolChanges: 0,
+        pauses: 0,
+        warnings: [],
+        setupId: bottom!.id,
+        next: { setupId: top!.id, name: 'Top', direction: '+z', rotation: 0 },
+      },
+    }
+    t.machine.push({ state: 'Idle', ...t.machine.job('done') })
+    const prompt = await screen.findByRole(
+      'dialog',
+      { name: 'Setup change: setup 2, Top' },
+      { timeout: 2000 },
+    )
+    expect(within(prompt).getByRole('img', { name: /top face up/ })).toBeInTheDocument()
+    expect(within(prompt).getByText(/front-left corner/)).toBeInTheDocument()
+    expect(within(prompt).getByRole('button', { name: 'Zero X Y Z' })).toBeEnabled()
+    expect(within(prompt).getByRole('button', { name: 'Stop' })).toBeInTheDocument()
+    expect(within(machineGroup()!).getByText('Setup change')).toBeInTheDocument()
+    expect(t.callsOf('run.job.start')).toHaveLength(1)
+    await expectNoAxeViolations()
+
+    // Later puts it off to the inspector; Show instructions brings it back
+    await t.user.click(within(prompt).getByRole('button', { name: 'Later' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await t.user.click(within(inspector).getByRole('button', { name: 'Show instructions' }))
+    const again = await screen.findByRole('dialog', { name: 'Setup change: setup 2, Top' })
+    await t.user.click(within(again).getByRole('button', { name: 'Start setup 2' }))
+    expect(t.callsOf('run.job.start').at(-1)).toEqual({ planId: t.plan().id, setupId: top!.id })
   })
 
   it('stop without a run cancels a jog', async () => {

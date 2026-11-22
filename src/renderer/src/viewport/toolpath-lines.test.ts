@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { Toolpath } from '../../../core/toolpath/model'
 import { mix, toLinear, type Rgb } from './colours'
-import { DONE_DIM, segmentColours } from './RunLayer'
-import { advancePlayback, linesBounds, SEGMENT, toolpathLines } from './toolpath-lines'
+import { setupFrame } from '../../../core/toolpath/wcs'
+import { DONE_DIM, frameMatrix, segmentColours } from './RunLayer'
+import { advancePlayback, linesBounds, placeBox, SEGMENT, toolpathLines } from './toolpath-lines'
 
 const tp = (moves: Toolpath['passes'][number]['moves']): Toolpath => ({
   planOperationId: 'op1',
@@ -110,5 +111,28 @@ describe('segmentColours', () => {
     close(at(1), toLinear(mix(palette.plunge, palette.background, DONE_DIM)))
     close(at(2), toLinear(palette.feed))
     close(at(3), toLinear(palette.plunge))
+  })
+})
+
+describe('setup frame (E2)', () => {
+  const stock = { length: 100, width: 60, thickness: 20 }
+  const box = { min: [0, 0, -20], max: [100, 60, 0] } as const
+
+  it('placeBox: no frame keeps the box; the bottom setup lands on the stock', () => {
+    expect(placeBox(box, undefined)).toBe(box)
+    // the bottom setup's WCS: the stock seen from below lies on the stock again
+    const placed = placeBox(box, setupFrame('-z', 0, stock))!
+    expect(placed.min.map((c) => Math.round(c))).toEqual([0, 0, -20])
+    expect(placed.max.map((c) => Math.round(c))).toEqual([100, 60, 0])
+  })
+
+  it('frameMatrix maps WCS points like the placement', () => {
+    const frame = setupFrame('+x', 90, stock)
+    const m = frameMatrix(frame).elements
+    const at = (p: readonly number[]) =>
+      [0, 1, 2].map((i) => m[i]! * p[0]! + m[4 + i]! * p[1]! + m[8 + i]! * p[2]! + m[12 + i]!)
+    // the work zero is the frame origin; WCS X runs along u
+    expect(at([0, 0, 0])).toEqual([...frame.origin])
+    expect(at([1, 0, 0]).map((c, i) => c - frame.origin[i]!)).toEqual([...frame.u])
   })
 })

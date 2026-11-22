@@ -1,10 +1,12 @@
 // Run scene layer (task 3.12; plan mode's toolpaths too, 3.7): the toolpath played back (feeds
 // `--vp-feed`, rapids `--vp-rapid`, plunges `--vp-plunge`, the done part dimmed towards the background), the tool marker at the work position (`wpos`)
-// and the work zero marker at the WCS origin (= the part origin). Props only.
+// and the work zero marker at the WCS origin, all in the setup's WCS, placed on the part by the
+// setup's frame (identity for an unrotated top setup; task E2). Props only.
 // Doc: docs/conventions/ui.md#viewport-task-35 (run scene), #run-mode-safety-ui
 import { useThree } from '@react-three/fiber'
 import { useEffect, useLayoutEffect, useMemo } from 'react'
-import { BufferAttribute, BufferGeometry, Color, SRGBColorSpace } from 'three'
+import { BufferAttribute, BufferGeometry, Color, Matrix4, SRGBColorSpace } from 'three'
+import type { Placement } from '../../../core/geometry/model'
 import { mix, toLinear, type Palette, type Rgb } from './colours'
 import { SEGMENT, type ToolpathLines } from './toolpath-lines'
 
@@ -16,6 +18,34 @@ export interface RunScene {
   readonly done: number
   /** Tool tip in work coordinates (mm), `null` without a connection. */
   readonly tool: readonly [number, number, number] | null
+  /**
+   * The setup's WCS in the part frame (`setupFrame`, docs/modes/plan-v0.2.md#implementation-task-c3):
+   * the layer is drawn through it, so a bottom or side setup lands on the part. Absent = identity.
+   */
+  readonly frame?: Placement
+}
+
+/** The placement as a three.js matrix (columns u, v, n, origin). */
+export function frameMatrix(frame: Placement): Matrix4 {
+  const { u, v, n, origin: o } = frame
+  return new Matrix4().set(
+    u[0],
+    v[0],
+    n[0],
+    o[0],
+    u[1],
+    v[1],
+    n[1],
+    o[1],
+    u[2],
+    v[2],
+    n[2],
+    o[2],
+    0,
+    0,
+    0,
+    1,
+  )
 }
 
 /** How far done segments fade towards the background. */
@@ -46,7 +76,8 @@ export function segmentColours(
 
 export function RunLayer({ run, palette }: { run: RunScene; palette: Palette }): React.JSX.Element {
   const invalidate = useThree((s) => s.invalidate)
-  const { lines, done, tool } = run
+  const { lines, done, tool, frame } = run
+  const matrix = useMemo(() => (frame === undefined ? undefined : frameMatrix(frame)), [frame])
   const geometry = useMemo(() => {
     if (lines === null || lines.segments === 0) return null
     const g = new BufferGeometry()
@@ -67,7 +98,7 @@ export function RunLayer({ run, palette }: { run: RunScene; palette: Palette }):
 
   const toolColour = useMemo(() => colour(palette.tool), [palette])
   return (
-    <group>
+    <group {...(matrix === undefined ? {} : { matrix, matrixAutoUpdate: false })}>
       {geometry ? (
         <lineSegments geometry={geometry} raycast={noRaycast} renderOrder={2}>
           <lineBasicMaterial vertexColors />

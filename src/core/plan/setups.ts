@@ -88,6 +88,41 @@ export function unknownSetup(setupId: string, path: string, where: string): AppR
   })
 }
 
+/**
+ * The setup a per-setup command works on (`plan.export`, `run.job.start`, task E2): `setupId`, or
+ * the only setup when it is left out. A plan with several setups needs it (`plan.setup`, rule
+ * `setupRequired`: one program per setup, never one across a re-fixture); an unknown id fails
+ * with `input.malformed` (`unknownSetup`). `next` is the setup after it in machining order.
+ * Doc: docs/modes/plan-v0.2.md#implementation-task-e2
+ */
+export function chooseSetup(
+  setups: readonly SetupDTO[],
+  setupId: string | undefined,
+  where: string,
+): AppResult<{ readonly setup: SetupDTO; readonly next: SetupDTO | undefined }> {
+  if (setupId === undefined) {
+    if (setups.length > 1)
+      return fail('plan.setup', `the plan has ${setups.length} setups; name one with setupId`, {
+        issues: [
+          {
+            path: ['setupId'],
+            rule: 'setupRequired',
+            message: 'one program per setup: name the setup',
+            params: { setupIds: setups.map((s) => s.id) },
+          },
+        ],
+        where,
+      })
+    const only = setups[0]
+    // a plan always has a setup (v0.1 invariant; a rebuild keeps one)
+    if (only === undefined) return fail('internal.unexpected', 'plan without a setup', { where })
+    return Ok({ setup: only, next: undefined })
+  }
+  const index = setups.findIndex((s) => s.id === setupId)
+  if (index < 0) return unknownSetup(setupId, 'setupId', where)
+  return Ok({ setup: setups[index]!, next: setups[index + 1] })
+}
+
 /** `plan.setup`: setups of different directions cannot share one setup. */
 export function directionMismatch(
   a: Direction,
