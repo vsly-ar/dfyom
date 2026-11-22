@@ -257,6 +257,11 @@ export const DFM_WARNING_CODES = [
   'dfm.shapeHeavy',
   // features (v0.4): docs/modes/design-v0.4.md#checks-and-dfm
   'dfm.holeCustomSize',
+  // Clones features (v0.4 F5; `operation` = the feature id): docs/modes/features.md#checks-and-dfm
+  'dfm.cloneOutsideStock',
+  'dfm.cloneDuplicate',
+  'dfm.cloneOverlap',
+  'dfm.clonesHeavy',
 ] as const
 export type DfmWarningCode = (typeof DFM_WARNING_CODES)[number]
 

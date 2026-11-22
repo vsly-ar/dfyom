@@ -51,23 +51,29 @@ export function partWarnings(
         operationTools: operationTools(part.operations, snapshots),
         ...(region2d !== undefined && { region2d }),
       }),
-      featureWarnings(part.operations, features),
+      featureWarnings(part.operations, features, stock, units),
     ),
   )
 }
 
 /**
- * The features' own notes (`FeatureKindSpec.warnings`, e.g. `dfm.holeCustomSize`), for features
- * that still own operations in `ops` (a removed one is skipped).
+ * The features' own notes (`FeatureKindSpec.warnings`, e.g. `dfm.holeCustomSize`, and
+ * `spanWarnings`, e.g. `dfm.cloneOutsideStock`), for features that still own operations in `ops`
+ * (a removed one is skipped).
  */
 function featureWarnings(
   ops: Part['operations'],
   features: readonly LoadedFeature[],
+  stock: Stock,
+  units: UnitSystem,
 ): DfmWarning[] {
   return features.flatMap(({ spec, feature }) => {
     const { start, end } = featureBlock(ops, feature.id)
-    if (start === end || spec.warnings === undefined) return []
-    return spec.warnings(feature, (role) => ownedOperationId(feature.id, role))
+    if (start === end) return []
+    return [
+      ...(spec.warnings?.(feature, (role) => ownedOperationId(feature.id, role)) ?? []),
+      ...(spec.spanWarnings?.(feature, ops, stock, units) ?? []),
+    ]
   })
 }
 

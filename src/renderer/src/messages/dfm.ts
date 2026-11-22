@@ -44,6 +44,10 @@ const list = (items: readonly string[]): string =>
     ? (items[0] ?? '')
     : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
 
+/** A Clones warning's instance numbers: "3, 7 and 12". */
+const numbers = (p: DfmWarning['params']): string =>
+  list(((p['numbers'] as readonly number[] | undefined) ?? []).map(String))
+
 type Render = (
   p: DfmWarning['params'],
   L: (mm: unknown) => string,
@@ -116,6 +120,14 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
     `This shape has ${num(p['chords'])} segments after flattening, so the part updates more slowly.`,
   'dfm.holeCustomSize': (p, L) =>
     `${HOLE_FIELD[String(p['field'])] ?? 'A size'} ${L(p['value'])} differs from the ${typeof p['fastener'] === 'string' ? `${p['fastener']} ` : ''}table value ${L(p['table'])} (custom).`,
+  // v0.4 Clones (features.md § Checks and DFM)
+  'dfm.cloneOutsideStock': (p) =>
+    `${num(p['count'])} clones lie outside the stock (${numbers(p)}): skip them or shorten a row.`,
+  'dfm.cloneDuplicate': (p) =>
+    `${num(p['count'])} positions sit on an earlier instance and are left out (${numbers(p)}).`,
+  'dfm.cloneOverlap': (p) => `Instances ${numbers(p)} overlap.`,
+  'dfm.clonesHeavy': (p) =>
+    `${num(p['operations'])} cloned operations: the part updates more slowly.`,
 }
 
 /** Hole feature size fields in `dfm.holeCustomSize`. */

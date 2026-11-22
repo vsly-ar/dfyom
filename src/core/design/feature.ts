@@ -20,6 +20,7 @@ import { FEATURE_ROLE_PATTERN } from './feature.dto'
 import { ID_PREFIX, type FeatureOwner, type GeneralTolerance, type Operation } from './operation'
 import type { PartDTO } from './part.dto'
 import { holeSpec } from './hole'
+import { clonesKindSpec } from './clones/clones'
 
 /** Fields every feature model has; a kind adds its parameters (as quantities). */
 export interface FeatureBase {
@@ -48,6 +49,11 @@ export type OwnedBody = Operation extends infer O
 export interface ExpandedOperation {
   readonly role: string
   readonly operation: OwnedBody
+  /**
+   * The kept fields set by the kind instead of kept per role (A4): a read-only kind's operations
+   * follow another operation (Clones: the source operation's name, tolerance and tool, C3).
+   */
+  readonly kept?: Pick<Operation, 'name' | 'generalTolerance' | 'tool' | 'toolLocked'>
 }
 
 /** What an expansion may read besides the feature: the part's earlier state. */
@@ -99,6 +105,41 @@ export interface FeatureKindSpec<F extends FeatureBase = FeatureBase> {
   fieldOf?(role: string, path: IssuePath): IssuePath | undefined
   /** Notes about the feature itself (`dfm.holeCustomSize`), on its owned operations' ids. */
   warnings?(feature: F, ownedId: (role: string) => string): DfmWarning[]
+  /**
+   * Operations the feature nests but does not own (Clones: its source, F5), in design order. They
+   * stay plain operations (or another feature's block), contiguous and directly before the owned
+   * block; nested and owned operations together are the feature's **span**, which moves as one
+   * unit. A feature with nested operations may own none (Clones with every position skipped).
+   * Absent = none.
+   */
+  nested?(feature: F, ops: readonly Operation[]): readonly string[]
+  /**
+   * Owned operations are wholly read-only (Clones instances, D26): no name, tolerance or tool
+   * edits either; their kept fields come from the expansion (`ExpandedOperation.kept`).
+   */
+  readonly readOnly?: boolean
+  /**
+   * Where the feature's span goes when a command adds or changes it (F5: Clones gather their
+   * source and put the block right after it): the operations in their new order and the range
+   * `[start, end)` the owned block replaces. Absent: a new feature at the end, a changed one in
+   * place.
+   */
+  arrange?(
+    feature: F,
+    ops: readonly Operation[],
+    prev: F | undefined,
+    features: readonly LoadedFeature[],
+  ): AppResult<{ ops: readonly Operation[]; start: number; end: number }>
+  /**
+   * DFM warnings about the feature's whole span (Clones: `dfm.clone*`, which look at the source
+   * and the positions); their `operation` is the feature id. Absent = none.
+   */
+  spanWarnings?(
+    feature: F,
+    ops: readonly Operation[],
+    stock: Stock,
+    units: UnitSystem,
+  ): readonly DfmWarning[]
 }
 
 // ── kind registry ──────────────────────────────────────────────────────────────────────────
@@ -108,7 +149,10 @@ export interface FeatureKindSpec<F extends FeatureBase = FeatureBase> {
  * too) knows them without the command registry; their command modules register the same kind
  * again with its command parameters (`featureKindCommands`).
  */
-const BUILT_IN_KINDS: readonly FeatureKindSpec[] = [holeSpec as unknown as FeatureKindSpec]
+const BUILT_IN_KINDS: readonly FeatureKindSpec[] = [
+  holeSpec as unknown as FeatureKindSpec,
+  clonesKindSpec as unknown as FeatureKindSpec,
+]
 
 const kinds = new Map<string, FeatureKindSpec>(BUILT_IN_KINDS.map((k) => [k.kind, k]))
 
@@ -172,6 +216,48 @@ export function featureBlock(
 }
 
 /**
+ * A feature's span in `ops`: its nested operations `[start, ownedStart)` and its owned block
+ * `[ownedStart, end)` (feature.ts `FeatureKindSpec.nested`). Assumes a checked part (contiguous).
+ */
+export function featureSpan(
+  ops: readonly Operation[],
+  lf: { readonly spec: FeatureKindSpec; readonly feature: FeatureBase },
+): { start: number; ownedStart: number; end: number } {
+  const block = featureBlock(ops, lf.feature.id)
+  const nested = lf.spec.nested?.(lf.feature, ops) ?? []
+  const first = nested.length === 0 ? -1 : ops.findIndex((o) => o.id === nested[0])
+  if (first < 0) return { start: block.start, ownedStart: block.start, end: block.end }
+  const ownedStart = first + nested.length
+  return { start: first, ownedStart, end: block.start === block.end ? ownedStart : block.end }
+}
+
+/** The feature nesting operation `id` (Clones whose source it is), if any. */
+export function nestingFeature(
+  ops: readonly Operation[],
+  features: readonly LoadedFeature[],
+  id: string,
+): LoadedFeature | undefined {
+  return features.find((lf) => lf.spec.nested?.(lf.feature, ops).includes(id) === true)
+}
+
+/**
+ * The outermost unit of each operation in the design order: the feature whose span holds it
+ * (nesting before owning), else undefined (a plain operation).
+ */
+export function spanUnits(
+  ops: readonly Operation[],
+  features: readonly LoadedFeature[],
+): (string | undefined)[] {
+  const out: (string | undefined)[] = ops.map(ownerOf)
+  for (const lf of features) {
+    if (lf.spec.nested === undefined) continue
+    const { start, end } = featureSpan(ops, lf)
+    for (let i = start; i < end; i++) out[i] = lf.feature.id
+  }
+  return out
+}
+
+/**
  * The design order as units: a feature (its block) counts once, a plain operation once. Ids of
  * features and operations never clash (`registerFeatureKind`). Works on DTOs and models.
  */
@@ -230,6 +316,8 @@ export function materialize(
   expanded: readonly ExpandedOperation[],
   prev: readonly Operation[],
   prevFeatureName: string = feature.name,
+  /** A feature with nested operations may own none (F5). */
+  allowEmpty = false,
 ): AppResult<Operation[]> {
   const bad = (message: string, role: string) =>
     fail('internal.unexpected', `${feature.kind} expansion: ${message}`, {
@@ -241,7 +329,7 @@ export function materialize(
   const closedSteps = new Set<string>()
   let step: string | undefined
   const out: Operation[] = []
-  for (const { role, operation } of expanded) {
+  for (const { role, operation, kept } of expanded) {
     if (!FEATURE_ROLE_PATTERN.test(role)) return bad('invalid role', role)
     if (seen.has(role)) return bad('duplicate role', role)
     seen.add(role)
@@ -252,6 +340,15 @@ export function materialize(
       step = s
     }
     const id = ownedOperationId(feature.id, role)
+    if (kept !== undefined) {
+      out.push({
+        ...operation,
+        ...kept,
+        id,
+        owner: Some({ featureId: feature.id, role }),
+      } as Operation)
+      continue
+    }
     const old = byId.get(id)
     const name =
       old === undefined || old.name === ownedName(prevFeatureName, role)
@@ -267,7 +364,7 @@ export function materialize(
       owner: Some({ featureId: feature.id, role }),
     } as Operation)
   }
-  if (out.length === 0) return bad('no operations', '')
+  if (out.length === 0 && !allowEmpty) return bad('no operations', '')
   return Ok(out)
 }
 
@@ -304,17 +401,70 @@ export function loadFeatures(dto: Pick<PartDTO, 'features'>): AppResult<LoadedFe
 }
 
 /**
+ * The consistency check's expansions, as `role:kind` lists, cached by the feature record and the
+ * records before its block (both frozen objects of a committed document, so identity is enough):
+ * loading a part no longer re-runs every expansion (F1 known issue, F5).
+ */
+const expansionCache = new WeakMap<object, { key: readonly unknown[]; roles: readonly string[] }>()
+
+/**
+ * The frozen records a part was loaded from (a committed document), for the expansion cache;
+ * absent (a command's draft after an edit) = no caching.
+ */
+export interface FrozenRecords {
+  readonly features: readonly object[]
+  readonly operations: readonly object[]
+  readonly stock: object
+}
+
+function expansionOf(
+  spec: FeatureKindSpec,
+  feature: FeatureBase,
+  ops: readonly Operation[],
+  start: number,
+  stock: Stock,
+  units: UnitSystem,
+  record: object | undefined,
+  records: FrozenRecords | undefined,
+): AppResult<readonly string[]> {
+  const key =
+    records === undefined
+      ? undefined
+      : [records.stock, units, ...records.operations.slice(0, start)]
+  const hit = record === undefined ? undefined : expansionCache.get(record)
+  if (hit !== undefined && key !== undefined && sameKey(hit.key, key)) return Ok(hit.roles)
+  return spec
+    .expand(feature, {
+      units,
+      stock,
+      before: ops.slice(0, start),
+      ownedId: (role) => ownedOperationId(feature.id, role),
+    })
+    .map((list) => {
+      const roles = list.map((e) => `${e.role}:${e.operation.kind}`)
+      if (record !== undefined && key !== undefined) expansionCache.set(record, { key, roles })
+      return roles
+    })
+}
+
+const sameKey = (a: readonly unknown[], b: readonly unknown[]) =>
+  a.length === b.length && a.every((x, i) => x === b[i])
+
+/**
  * Consistency of features and owned operations (features.md § Persistence): every owner names a
  * feature, ids are `<featureId>_<role>`, each block is contiguous and holds exactly the roles and
- * kinds of the feature's expansion, in order. A mismatch is corruption, never repaired silently:
- * `input.malformed`. Owned values are not compared with a fresh expansion (commands are their
- * only writers, and recalculation updates them in place).
+ * kinds of the feature's expansion, in order; nested operations (F5) exist, are nested by one
+ * feature only and sit contiguous right before its block. A mismatch is corruption, never
+ * repaired silently: `input.malformed`. Owned values are not compared with a fresh expansion
+ * (commands are their only writers, and recalculation updates them in place). With `records`
+ * the expansions are cached per feature record.
  */
 export function checkFeatures(
   dto: Pick<PartDTO, 'features'>,
   ops: readonly Operation[],
   stock: Stock,
   units: UnitSystem,
+  records?: FrozenRecords,
 ): AppResult<LoadedFeature[]> {
   const loaded = loadFeatures(dto)
   if (loaded.isErr()) return loaded
@@ -343,10 +493,12 @@ export function checkFeatures(
         },
       )
   }
-  for (const { spec, feature } of loaded.unwrap()) {
+  const nestedBy = new Map<string, string>()
+  for (const [i, { spec, feature }] of loaded.unwrap().entries()) {
     const { start, end } = featureBlock(ops, feature.id)
     const data = { featureId: feature.id }
-    if (start === end)
+    const nested = spec.nested?.(feature, ops) ?? []
+    if (start === end && nested.length === 0)
       return malformed(
         `feature ${feature.id} owns no operations`,
         ['features'],
@@ -361,19 +513,45 @@ export function checkFeatures(
         'featureBlock',
         data,
       )
-    const expanded = spec.expand(feature, {
-      units,
+    // nested operations (F5): each exists, nested once, contiguous right before the owned block
+    const first = nested.length === 0 ? -1 : ops.findIndex((o) => o.id === nested[0])
+    const blockAt = start === end ? first + nested.length : start
+    for (const [k, id] of nested.entries()) {
+      const other = nestedBy.get(id)
+      nestedBy.set(id, feature.id)
+      if (first < 0 || ops[first + k]?.id !== id || other !== undefined || first + k >= blockAt)
+        return malformed(
+          `the nested operations of ${feature.id} are not right before its block`,
+          ['features'],
+          'featureNested',
+          { ...data, operationId: id },
+        )
+    }
+    if (nested.length > 0 && blockAt !== first + nested.length)
+      return malformed(
+        `the nested operations of ${feature.id} are not right before its block`,
+        ['features'],
+        'featureNested',
+        data,
+      )
+    const at = start === end ? blockAt : start
+    const expanded = expansionOf(
+      spec,
+      feature,
+      ops,
+      at,
       stock,
-      before: ops.slice(0, start),
-      ownedId: (role) => ownedOperationId(feature.id, role),
-    })
+      units,
+      records?.features[i],
+      records,
+    )
     if (expanded.isErr())
       return fail('input.malformed', `feature ${feature.id} does not expand`, {
         cause: expanded.unwrapErr(),
         data,
         where: 'checkFeatures',
       })
-    const want = expanded.unwrap().map((e) => `${e.role}:${e.operation.kind}`)
+    const want = expanded.unwrap()
     const have = owned.map((o) => `${o.owner.unwrap().role}:${o.kind}`)
     if (want.join(',') !== have.join(','))
       return malformed(

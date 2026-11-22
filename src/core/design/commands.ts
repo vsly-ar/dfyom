@@ -84,7 +84,7 @@ import { requirePort, shapeFromDTO as namedShapeFromDTO } from './shape'
 import { SHAPE_ID_PATTERN } from './shape.dto'
 
 import { designChangeTargets } from './shape-users'
-import { featureOwnedError, ownerOf, type LoadedFeature } from './feature'
+import { featureOwnedError, nestingFeature, spanUnits, type LoadedFeature } from './feature'
 import { mapFeatureIssues, settleFeatures } from './feature-sync'
 
 // ── arg schemas ───────────────────────────────────────────────────────────────────────────
@@ -399,6 +399,7 @@ export function withWarnings<R extends object>(
   operations: readonly Operation[],
   ctx: CommandContext,
   where: string,
+  /** The part's features after the command (a feature command changed them). */
   features: readonly LoadedFeature[] = loaded.features,
 ) {
   const library = ctx.services.library
@@ -542,12 +543,46 @@ export function findOperation(
  * `design.featureOwned` when the operation at `index` is owned by a feature (A4, A5): its geometry,
  * order and life go through the feature.
  */
-export function refuseOwned(loaded: LoadedPart, index: number, where: string): AppResult<void> {
+export function refuseOwned(
+  loaded: LoadedPart,
+  index: number,
+  where: string,
+  /** Also refuse an operation another feature nests (a Clones source, F5): its order and life go through that feature. */
+  nested = false,
+): AppResult<void> {
   const op = loaded.part.operations[index]!
+  if (nested && op.owner.isNone()) {
+    const outer = nestingFeature(loaded.part.operations, loaded.features, op.id)
+    if (outer !== undefined)
+      return fail(
+        'design.featureOwned',
+        `${op.id} is nested in ${outer.feature.name} (${outer.feature.id}); change that feature instead`,
+        {
+          issues: [
+            {
+              path: ['operationId'],
+              rule: 'featureNested',
+              message: `nested in ${outer.feature.name}`,
+              params: { featureId: outer.feature.id },
+            },
+          ],
+          data: { operationId: op.id, featureId: outer.feature.id },
+          where,
+        },
+      )
+  }
   if (op.owner.isNone()) return Ok(undefined)
   const owner = op.owner.unwrap()
   const name = loaded.dto.features?.find((f) => f.id === owner.featureId)?.name ?? owner.featureId
   return featureOwnedError(op.id, owner, name, where)
+}
+
+/** The operation is owned by a read-only kind (Clones instances): not even name or tool edits. */
+export function readOnlyOwned(loaded: LoadedPart, operationId: string): boolean {
+  const op = loaded.part.operations.find((o) => o.id === operationId)
+  if (op === undefined || op.owner.isNone()) return false
+  const featureId = op.owner.unwrap().featureId
+  return loaded.features.find((l) => l.feature.id === featureId)?.spec.readOnly === true
 }
 
 /** Args an owned operation still takes on `design.<kind>.update` (A4: kept per operation). */
@@ -781,11 +816,12 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
       const args = rawArgs as { partId: string; operationId: string } & UpdateArgs<P>
       const loaded = load(draft, args.partId, where)
       if (loaded.isErr()) return loaded
-      // an owned operation keeps only its name and tolerance; its geometry is the feature's
+      // an owned operation keeps only its name and tolerance; its geometry is the feature's; a
+      // read-only kind's operations (Clones instances) keep nothing of their own
       const geometric = Object.keys(args).some(
         (k) => !OWNED_EDITABLE.has(k) && (args as Record<string, unknown>)[k] !== undefined,
       )
-      if (geometric) {
+      if (geometric || readOnlyOwned(loaded.unwrap(), args.operationId)) {
         const found = findOperation(loaded.unwrap().part, args.operationId, spec.kind, where)
         if (found.isErr()) return found
         const owned = refuseOwned(loaded.unwrap(), found.unwrap(), where)
@@ -936,7 +972,7 @@ const operationRemove = defineCommand({
     const { part, stock } = loaded.unwrap()
     const index = findOperation(part, args.operationId, undefined, where)
     if (index.isErr()) return index
-    const owned = refuseOwned(loaded.unwrap(), index.unwrap(), where)
+    const owned = refuseOwned(loaded.unwrap(), index.unwrap(), where, true)
     if (owned.isErr()) return owned
     const next = part.operations.filter((_, k) => k !== index.unwrap())
     const refs = checkReferences(next, stock)
@@ -966,7 +1002,7 @@ const operationMove = defineCommand({
     const index = findOperation(part, args.operationId, undefined, where)
     if (index.isErr()) return index
     const from = index.unwrap()
-    const owned = refuseOwned(loaded.unwrap(), from, where)
+    const owned = refuseOwned(loaded.unwrap(), from, where, true)
     if (owned.isErr()) return owned
     if (args.toIndex >= part.operations.length)
       return fail('input.malformed', 'toIndex is past the end of the operation list', {
@@ -984,7 +1020,13 @@ const operationMove = defineCommand({
     const next = [...part.operations]
     const [moved] = next.splice(from, 1)
     next.splice(args.toIndex, 0, moved!)
-    const split = splitFeature(next, args.toIndex, args.toIndex + 1, where)
+    const split = splitFeature(
+      next,
+      args.toIndex,
+      args.toIndex + 1,
+      where,
+      loaded.unwrap().features,
+    )
     if (split.isErr()) return split
     const refs = checkReferences(next, stock)
     if (refs.isErr())
@@ -1006,9 +1048,12 @@ export function splitFeature(
   start: number,
   end: number,
   where: string,
+  features: readonly LoadedFeature[] = [],
 ): AppResult<void> {
-  const before = start > 0 ? ownerOf(ops[start - 1]!) : undefined
-  const after = end < ops.length ? ownerOf(ops[end]!) : undefined
+  // spans (nested operations plus the block, F5) count as their feature
+  const units = spanUnits(ops, features)
+  const before = start > 0 ? units[start - 1] : undefined
+  const after = end < ops.length ? units[end] : undefined
   if (before === undefined || before !== after) return Ok(undefined)
   return fail('input.malformed', `position ${start} is inside feature ${before}`, {
     issues: [

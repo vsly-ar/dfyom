@@ -25,7 +25,7 @@ import { deepEqual, refreshSnapshot, Snapshot } from '../library/snapshot'
 import { Tool } from '../library/tool'
 import { TOOL_TYPES } from '../library/tool.dto'
 import type { ProjectDoc } from '../project/document'
-import { findOperation, Warnings, withWarnings } from './commands'
+import { findOperation, readOnlyOwned, refuseOwned, Warnings, withWarnings } from './commands'
 import { toGeometryInput } from './geometry-input'
 import { loadPart, type LoadedPart } from './load'
 import type { Operation } from './operation'
@@ -122,6 +122,9 @@ function opCommand(
       const index = findOperation(l.part, args.operationId, undefined, name)
       if (index.isErr()) return index
       const i = index.unwrap()
+      // a Clones instance follows its source operation's tool (C3)
+      if (readOnlyOwned(l, args.operationId))
+        return refuseOwned(l, i, name).map(() => ({ warnings: [] }))
       const op = edit(draft, args, l, i, ctx)
       if (op.isErr()) return op
       const ops = l.part.operations.map((o, k) => (k === i ? op.unwrap() : o))
@@ -334,7 +337,8 @@ export function autoChooseTools(
     const inputs = choiceInputs(l, library, draft.snapshots, ctx.services.region2d)
     if (inputs.isErr()) return Err(inputs.unwrapErr().withContext(where))
     for (const [i, op] of l.part.operations.entries()) {
-      if (op.toolLocked || !ids.has(op.id)) continue
+      // Clones instances follow their source's tool (`design.clonesFollow` after this hook)
+      if (op.toolLocked || !ids.has(op.id) || readOnlyOwned(l, op.id)) continue
       const input = inputs.unwrap()(i, op)
       const choice = chooseTool(input)
       if (choice.kind === 'keep' || choice.kind === 'none') continue
@@ -377,7 +381,7 @@ export function toolScan(
     const inputs = choiceInputs(l, library, doc.snapshots, ctx.services.region2d)
     if (inputs.isErr()) continue
     for (const [i, op] of l.part.operations.entries()) {
-      if (op.toolLocked) continue
+      if (op.toolLocked || readOnlyOwned(l, op.id)) continue
       const tool = op.tool.andThen((t) => resolveDesignTool(t, doc.snapshots))
       if (tool.isSome() && fitOf(tool.unwrap(), inputs.unwrap()(i, op)) === undefined) continue
       out.push({
