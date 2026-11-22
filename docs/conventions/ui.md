@@ -376,7 +376,7 @@ What main remembers between runs without a setting (B18, B19; user requests 2026
 
 - The app is "DFYOM" in the Dock, app menu, Cmd+Tab and the task bar: `productName` in `package.json` (packaged builds take the name from it) and `app.setName` at start (also when run on a built file, as the end-to-end tests do).
 - **Development on macOS:** the unpackaged app runs inside `node_modules/electron`'s `Electron.app`, whose bundle name is what the Dock, Cmd+Tab and the bold app menu show; `app.setName` cannot change it. `npm run dev` first runs `scripts/dev-app-name.mjs` (`predev`), which renames that local bundle to DFYOM (`CFBundleName`, `CFBundleDisplayName`) and re-signs it ad hoc; idempotent, undone by reinstalling Electron (the next `npm run dev` renames again). The Dock icon stays Electron's in development; macOS may cache the old name until the Dock restarts.
-- **Icon:** none yet; it needs the user's design approval. There is no packaging configuration yet ([v0.1 known issues](../plans/v0.1.md): no installer); when packaging is set up, the icon goes in electron-builder's `buildResources` slot (`build/icon.icns`, `build/icon.ico`, `build/icon.png` ≥ 512 px) and the windows' `icon` on Linux.
+- **Icon:** none yet; it needs the user's design approval. Packaging ([packaging.md](packaging.md)) uses Electron's icon until then; the icon goes in electron-builder's `buildResources` slot (`build/icon.icns`, `build/icon.ico`, `build/icon.png` ≥ 512 px) and the windows' `icon` on Linux.
 
 ## Interaction
 

@@ -1,4 +1,5 @@
-// Launches the built app (out/main/index.js) isolated from the developer's app data.
+// Launches the built app (out/main/index.js, or a packaged app: DFYOM_E2E_APP) isolated from the
+// developer's app data.
 // Doc: docs/conventions/testing.md#end-to-end
 import { cp, mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -37,7 +38,14 @@ export async function launchApp(
   )
   // Windows stay hidden (no pop-ups, no focus stealing); DFYOM_E2E_SHOW=1 shows them for debugging.
   if (process.env['DFYOM_E2E_SHOW'] !== '1') env['DFYOM_HIDE_WINDOWS'] = '1'
-  const app = await electron.launch({ args: ['out/main/index.js', `--data-dir=${dataDir}`], env })
+  // DFYOM_E2E_APP runs the tests on a packaged app's executable instead (npm run smoke:packaged,
+  // docs/conventions/packaging.md#smoke-test).
+  const packaged = process.env['DFYOM_E2E_APP']
+  const app = await electron.launch(
+    packaged
+      ? { executablePath: packaged, args: [`--data-dir=${dataDir}`], env }
+      : { args: ['out/main/index.js', `--data-dir=${dataDir}`], env },
+  )
   const rendererErrors: string[] = []
   const watched = new WeakSet<Page>()
   const watch = (page: Page) => {
