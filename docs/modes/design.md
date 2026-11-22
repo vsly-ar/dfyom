@@ -10,7 +10,7 @@ Sections marked **v0.1** define the operations of [roadmap v0.1](../roadmap.md#v
 
 1. Pick a **stock** from the stock library.
 2. Define a **working area** in it (v0.1: the whole stock).
-3. Add **operations** (facing, pocketing, drilling, profiling, chamfering, cutting a straight line / curve / shape, …) or **features** (groups of operations, e.g. a bolt hole = several drilling ops + pocketing + chamfering + threading; engraving/carving = many operations).
+3. Add **operations** (facing, pocketing, drilling, profiling, chamfering, cutting a straight line / curve / shape, …) or **features** (groups of operations, e.g. a bolt hole = several drilling ops + pocketing + chamfering + threading; engraving/carving = many operations). Draft concept: [features.md](features.md) (B23).
 4. Optionally import a 3D model (not necessarily CAD) **for reference only**. v0.2: STL, placed and fitted to the stock ([reference-model.md](reference-model.md)).
 
 ## Generalized tools
@@ -108,7 +108,7 @@ The removal region is a slot of `slotWidth` beside the shape (outside it for `ou
 - A retained region (tab, fillet) inside another operation's removal region is removed; evaluation reports it as a DFM warning ([geometry.md open question](../architecture/geometry.md#open-questions)).
 - The design order is not the machining order; plan mode orders passes freely.
 - Design edits never change existing plans, except plans in `draft` status ([plan snapshots](plan-v0.1.md#plans-are-snapshots)).
-- **Repeat (later):** several identical features (a list of holes, a bolt circle, a row of pockets) are made by a **repeat** feature that instances one operation at several positions, never by list parameters on an operation. This is why drilling has one hole per operation.
+- **Repeat (later):** several identical features (a list of holes, a bolt circle, a row of pockets) are made by a **repeat** feature that instances one operation at several positions, never by list parameters on an operation. This is why drilling has one hole per operation. Drafted as the pattern feature in [features.md § Patterns](features.md#patterns).
 
 ## DFM checks
 
