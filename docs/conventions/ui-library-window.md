@@ -1,6 +1,6 @@
 # Library window: machines, tools and stock from every mode
 
-Status: implemented (backlog B24, task L1; the user confirmed the recommendations on 2026-11-22, D27) · Data and commands: [library.md](../architecture/library.md) · UI rules: [ui.md](ui.md) · Apply: [apply.md](../architecture/apply.md) · Tool field: [design-v0.2.md § Operation tool](../modes/design-v0.2.md#operation-tool) · Terms: [glossary.md](../glossary.md)
+Status: implemented (backlog B24, task L1; the user confirmed the recommendations on 2026-11-22, D27; look approved as built in L3, D33) · Data and commands: [library.md](../architecture/library.md) · UI rules: [ui.md](ui.md) · Apply: [apply.md](../architecture/apply.md) · Tool field: [design-v0.2.md § Operation tool](../modes/design-v0.2.md#operation-tool) · Terms: [glossary.md](../glossary.md)
 
 The user's request (B24): machines, tools and stock libraries reachable from the toolbar in all modes; today tools are created through Plan's "New tool…". This doc specifies the UI; the data model, storage and commands stay as in [library.md](../architecture/library.md). What is built, and where it differs from the sketch, is in [Implementation](#implementation-task-l1).
 

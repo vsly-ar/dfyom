@@ -151,11 +151,11 @@ describe('Viewport', () => {
     expect(onSelect).toHaveBeenCalledWith(null)
   })
 
-  it('M measures point to point (task U3): banner, live distance, Escape ends it first', () => {
+  it('D (Dimension) measures point to point (task U3): banner, live distance, Escape ends it first', () => {
     const onSelect = vi.fn()
     renderUi(<Viewport mesh={mesh} units="mm" onSelect={onSelect} />)
     const region = screen.getByRole('region')
-    fireEvent.keyDown(region, { key: 'm' })
+    fireEvent.keyDown(region, { key: 'd' })
     expect(region).toHaveAttribute('data-measuring')
     expect(screen.getByRole('button', { name: /Measure/ })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByRole('status')).toHaveTextContent('Click two points to measure')

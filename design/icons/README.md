@@ -1,12 +1,12 @@
 # Icon proposals: B21 app icon, B22 icon set
 
-Status: **draft, pending user approval in L3** ([plan v0.3](../../docs/plans/v0.3.md)). Nothing here is wired into the app; `build/icon.*` and `src/renderer/src/ui/icons/` are unchanged. The style rules are proposed in [ui.md § Icon set proposal](../../docs/conventions/ui.md#icon-set-proposal-v03-b22-draft).
+Status: **approved in L3 (D33)** ([plan v0.3](../../docs/plans/v0.3.md)) with the recommendations. B21 is built: concept C is the app icon (`build/icon.*`, made by `npm run icon`, [ui.md § App name and icon](../../docs/conventions/ui.md#app-name-and-icon)). B22 is not wired into the app yet; `src/renderer/src/ui/icons/` is unchanged. The style rules are proposed in [ui.md § Icon set proposal](../../docs/conventions/ui.md#icon-set-proposal-v03-b22-draft).
 
 ## Files
 
 | Path                | What                                                                                                                                   |
 | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `b21/concept-*.svg` | Three app icon concepts, 1024 canvas                                                                                                   |
+| `b21/concept-*.svg` | Three app icon concepts, 1024 canvas; `concept-c-small.svg` is the approved C simplified for 16 and 32 px                              |
 | `b22/icons.mjs`     | The one source of the 24 specimen icons (paths, accent part, provenance) and `iconSvg()`                                               |
 | `b22/svg/*.svg`     | Standalone exports of those icons (generated; grey `#5b6462`, accent `#f5b700`)                                                        |
 | `render.mjs`        | Renders everything with headless Chromium (no window): `node design/icons/render.mjs [outDir]`; `CHROMIUM_PATH` picks an installed one |
@@ -23,6 +23,8 @@ All three use the macOS grid: 1024 canvas, 824 body at (100, 100), corner radius
 - **C · Routed D:** the monogram D milled as a groove into a graphite block, amber floor, the end mill (from above) near the end of the stroke with the rest as a dashed toolpath preview. Holds up best: a clear amber D on dark at 32 and 16 px, distinct from other apps; the tool turns into a light dot at 32 px. **Recommended.**
 
 Small sizes (`renders/b21-small-sizes.png`): the `.icns` holds separate 16/32 px artwork, so whichever concept wins gets a simplified 16/32 variant (for C: the D alone, no tool, no dashes).
+
+**Decision (L3, D33):** C · Routed D (B21-1 c), simplified 16 and 32 px images (B21-2 a, `b21/concept-c-small.svg`: the closed D groove, wider, no tool, dashes or texture), dark body only (B21-3 a). `scripts/app-icon.mjs` (`npm run icon`) renders the full drawing for 64 px and up and the small one for 16–32 px into `build/icon.{png,icns,ico}`.
 
 ## B22 icon set
 

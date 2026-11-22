@@ -1,7 +1,7 @@
 // v0.3 snap and measure in the built app (task U3), through roles and labels: a pocket's rectangle
 // converted to a named shape opens face-on in the Shape Editor; its length handle dragged next to
 // the stock's right edge snaps to it (glyph "Stock edge", the value written exactly), then the
-// measure tool (M) picks two stock corners (snapped) and shows their distance. Windows stay hidden
+// measure tool (D, Dimension) picks two stock corners (snapped) and shows their distance. Windows stay hidden
 // (app.fixture.ts).
 // Docs: docs/conventions/ui.md#snap-and-measure, docs/modes/design-v0.3.md#implementation-u3
 import type { Locator } from '@playwright/test'
@@ -63,7 +63,7 @@ test('snap a handle to a stock edge, then measure two points', async ({ dfyom })
 
   // ── measure along the stock's front edge, corner to corner (the toolbar covers the top) ───
   await editor.focus()
-  await page.keyboard.press('m')
+  await page.keyboard.press('d')
   await expect(editor.getByRole('button', { name: /Measure/ })).toHaveAttribute(
     'aria-pressed',
     'true',

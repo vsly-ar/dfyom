@@ -501,7 +501,7 @@ export function Viewport({
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
     if (
-      (e.key === 'm' || e.key === 'M') &&
+      (e.key === 'd' || e.key === 'D') &&
       !e.ctrlKey &&
       !e.metaKey &&
       !e.altKey &&
@@ -678,7 +678,7 @@ export function Viewport({
           {run ? null : (
             <ToolbarButton
               label={snapMessages.measure.tool}
-              shortcut="M"
+              shortcut="D"
               icon={<Ruler aria-hidden="true" />}
               pressed={measureOn}
               tooltipSide="bottom"

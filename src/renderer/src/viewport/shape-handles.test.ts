@@ -4,7 +4,15 @@
 import { describe, expect, it } from 'vitest'
 import type { ShapeItem } from '../../../core/design/shape.dto'
 import { chainPath, fitView, toScreen, toShape, zoomAt } from './flat-view'
-import { arcGeometry, badMark, constrain15, dragHandle, itemHandles } from './shape-handles'
+import {
+  arcGeometry,
+  badMark,
+  constrain15,
+  dragHandle,
+  itemHandles,
+  segmentElements,
+  shownHandles,
+} from './shape-handles'
 
 type Item = ShapeItem<number>
 const rect: Item = {
@@ -67,6 +75,36 @@ describe('shape handles', () => {
     const far = dragHandle(path, 'seg.1.radius', [60, 10])
     if (far.kind !== 'path' || far.segments[1]!.kind !== 'arc') throw new Error('arc expected')
     expect(far.segments[1]!.large).toBe(true)
+  })
+
+  it('shows only the selected segment handles above 20 segments (L3-7)', () => {
+    // a closed 24-gon of lines with one arc at segment 5
+    const many: Item = {
+      kind: 'path',
+      op: 'add',
+      start: [10, 0],
+      closed: true,
+      segments: Array.from({ length: 24 }, (_, k) => {
+        const a = ((k + 1) * Math.PI) / 12
+        const to: [number, number] = [10 * Math.cos(a), 10 * Math.sin(a)]
+        return k === 5
+          ? { kind: 'arc' as const, to, radius: 5, cw: false }
+          : { kind: 'line' as const, to }
+      }),
+    }
+    const all = itemHandles(many)
+    expect(shownHandles(path, itemHandles(path), null)).toHaveLength(4)
+    expect(shownHandles(many, all, null)).toEqual([])
+    expect(shownHandles(many, all, 0).map((h) => h.id)).toEqual(['start', 'seg.0.to'])
+    expect(shownHandles(many, all, 5).map((h) => h.id)).toEqual([
+      'seg.4.to',
+      'seg.5.to',
+      'seg.5.radius',
+    ])
+    const per = segmentElements(many)
+    expect(per).toHaveLength(24)
+    expect(per[5]!.every((e) => e.kind === 'arc')).toBe(true)
+    expect(per[23]!.at(-1)!.b[0]).toBeCloseTo(10)
   })
 
   it('marks the segment an issue points at, else the whole item', () => {

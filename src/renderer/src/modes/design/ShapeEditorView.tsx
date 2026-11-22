@@ -129,6 +129,7 @@ function ShapeEditorView({
   const stored = useUi((s) => s.shapeIssues)
   const showItems = useUi((s) => s.showShapeItems)
   const setShowItems = useUi((s) => s.setShowShapeItems)
+  const selectShapeItem = useUi((s) => s.selectShapeItem)
   const onDrag = useShapeDrag(part?.dto.id ?? '', shape, port)
   // the last valid outline, kept while the current state does not resolve
   const [lastGood, setLastGood] = useState<FlatDrawing | null>(null)
@@ -193,6 +194,7 @@ function ShapeEditorView({
       items={items}
       selected={sel}
       segment={editor?.shapeId === shapeId ? editor.segment : null}
+      onSelectSegment={(k) => selectShapeItem(shapeId, sel, k)}
       showItems={showItems}
       onShowItems={setShowItems}
       isLocked={(n: number, h: ShapeHandle) => {

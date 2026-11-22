@@ -163,6 +163,22 @@
   pointer-events: none;
 }
 
+.selectedSegment {
+  fill: none;
+  stroke: var(--vp-selected);
+  stroke-width: 3;
+  stroke-linecap: round;
+  pointer-events: none;
+}
+
+/* invisible, wide click targets on the selected path item's segments (they select the row) */
+.segmentHit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 12;
+  cursor: pointer;
+}
+
 .bad {
   pointer-events: none;
 }

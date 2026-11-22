@@ -11,7 +11,7 @@ import type { SvgImportReport, SvgSplit, SvgUnit } from '../../../../core/import
 import type { UnitSystem } from '../../../../core/project/document'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { shapeMessages } from '../../messages/shape'
-import { Button, Dialog, ErrorMessage, Field, SegmentedControl, Select } from '../../ui'
+import { Button, Dialog, ErrorMessage, Field, Select } from '../../ui'
 import { chainPath, fitView } from '../../viewport/flat-view'
 import styles from './ImportReportDialog.module.css'
 
@@ -220,10 +220,9 @@ function OptionsStep(props: ImportReportDialogProps): React.JSX.Element {
             onValueChange={setUnit}
           />
         </Field>
-        <Field label={t.split} kind="toggle">
-          <SegmentedControl
-            label={t.split}
-            size="sm"
+        <Field label={t.split}>
+          <Select
+            id="svg-import-split"
             options={(['element', 'file', 'loop'] as const).map((s) => ({
               value: s,
               label: t.splits[s],

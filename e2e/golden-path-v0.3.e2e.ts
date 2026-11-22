@@ -346,7 +346,7 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
   for (let i = 0; i < 4; i++) await page.mouse.wheel(0, -120)
   await page.keyboard.up('Control')
   await editor.focus()
-  await page.keyboard.press('m')
+  await page.keyboard.press('d')
   await expect(editor.getByRole('button', { name: /Measure/ })).toHaveAttribute(
     'aria-pressed',
     'true',

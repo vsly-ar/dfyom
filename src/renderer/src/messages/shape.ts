@@ -160,6 +160,8 @@ export const shapeMessages = {
       }.${o.item === null ? '' : ` Selected: ${o.item}.`}`,
     noOutline: 'The shape does not resolve yet.',
     invalid: 'Invalid: the last valid outline is shown.',
+    /** A path with more than 20 segments shows the handles of the selected segment only (L3-7). */
+    pickSegment: 'Click a segment, or a row of the segment table, to show its handles.',
     showItems: 'Show items',
     fit: 'Fit',
     close: 'Back to the part',

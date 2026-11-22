@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- B21 concept C "Routed D", simplified for 16 and 32 px (approved in L3, D33: B21-2 a): the D
+       alone as a closed groove, no end mill, no dashed toolpath, no brushed texture; the groove
+       wider so the amber floor stays a clear D at 16 px. Same macOS grid and colours as
+       concept-c-monogram.svg. Own drawing, GPL-3.0-or-later. -->
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0" stop-color="#424c4c"/>
+      <stop offset="1" stop-color="#1b2020"/>
+    </linearGradient>
+    <linearGradient id="floor" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffc61a"/>
+      <stop offset="1" stop-color="#f0ac00"/>
+    </linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#body)"/>
+  <rect x="102" y="102" width="820" height="820" rx="183" fill="none" stroke="#ffffff" stroke-opacity="0.12" stroke-width="4"/>
+  <path d="M500 296H352V728H500A216 216 0 0 0 500 296Z" fill="none" stroke="#0f1212" stroke-width="176" stroke-linejoin="round"/>
+  <path d="M500 296H352V728H500A216 216 0 0 0 500 296Z" fill="none" stroke="url(#floor)" stroke-width="148" stroke-linejoin="round"/>
+</svg>

@@ -49,10 +49,12 @@
 }
 
 .toolbar {
-  /* one row (Fit, Views, Measure: wider than the cube), flush with the cube's right edge */
+  /* one row (Fit, Views, Measure: wider than the cube), flush with the cube's right edge; a small
+     gap below the cube's square (L3-22, D33): with --space-1 it touched the cube's lower edge in
+     some views */
   align-self: flex-end;
   width: max-content;
-  margin-top: var(--space-1);
+  margin-top: var(--space-3);
   pointer-events: auto;
 }
 

@@ -3,7 +3,9 @@
 // what the value chip and the handle's name read, and where an issue marks the outline red.
 // Every handle edits quantities that are also inspector fields (ui.md § Shapes: numbers first).
 // Doc: docs/conventions/ui.md#shape-editor, docs/modes/design-v0.3.md#shape-definition
+import { itemChain } from '../../../core/design/shape-items'
 import type { ShapeItem } from '../../../core/design/shape.dto'
+import { line, type Element } from '../../../core/geometry/2d/model'
 import type { Vec2 } from '../../../core/geometry/model'
 
 type Item = ShapeItem<number>
@@ -170,6 +172,57 @@ export function itemHandles(item: Item): ShapeHandle[] {
       return out
     }
   }
+}
+
+/**
+ * Above this many segments a path shows only the handles of its selected segment (L3-7, D33): an
+ * imported outline with a handle on every point is crowded. ui.md § Shape Editor.
+ */
+export const MANY_SEGMENTS = 20
+
+/** Whether `item` is a path with more than `MANY_SEGMENTS` segments. */
+export const hasManySegments = (item: Item | undefined): boolean =>
+  item?.kind === 'path' && item.segments.length > MANY_SEGMENTS
+
+/**
+ * The handles shown for `item`: all of them, except on a path with many segments, where only the
+ * selected segment's (its start and end points and an arc's radius) show, and none without one.
+ */
+export function shownHandles(
+  item: Item,
+  handles: readonly ShapeHandle[],
+  segment: number | null,
+): readonly ShapeHandle[] {
+  if (!hasManySegments(item)) return handles
+  if (segment === null) return []
+  const ids = new Set([
+    segment === 0 ? 'start' : `seg.${segment - 1}.to`,
+    `seg.${segment}.to`,
+    `seg.${segment}.radius`,
+  ])
+  return handles.filter((h) => ids.has(h.id))
+}
+
+/**
+ * The elements of each segment of a path, without fillets or the closing line (click targets and
+ * the selected segment's highlight). A segment that does not resolve is its chord.
+ */
+export function segmentElements(item: PathItem): Element[][] {
+  const chain = itemChain({ ...item, fillets: [], closed: false }, 0, [])
+  const out: Element[][] = []
+  let at = 0
+  const elements = chain?.loop.elements ?? []
+  item.segments.forEach((s, k) => {
+    const mine: Element[] = []
+    // pushArc may split one arc into several elements: take them until this segment's end
+    while (at < elements.length) {
+      const e = elements[at++]!
+      mine.push(e)
+      if (dist(e.b, s.to) < 1e-6) break
+    }
+    out.push(mine.length > 0 ? mine : [line(vertex(item, k - 1), s.to)])
+  })
+  return out
 }
 
 /** `p` constrained to 15° steps around `origin` (Shift), keeping its distance. */
