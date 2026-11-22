@@ -17,6 +17,7 @@ import {
   toMcpName,
   type AgentTool,
   type JsonObject,
+  withHomogeneousTuples,
   withoutSafeIntBounds,
 } from './tools'
 import { PRIMER } from './primer'
@@ -169,7 +170,9 @@ describe('agent tools', () => {
     for (const def of [...app.commands, ...app.queries, ...project.commands, ...project.queries]) {
       const d = expectOk(toolDescriptor(def))
       for (const s of [d.inputSchema, d.outputSchema]) {
-        const { $schema: _, ...plain } = withoutSafeIntBounds(s) as JsonObject
+        const { $schema: _, ...plain } = withHomogeneousTuples(
+          withoutSafeIntBounds(s),
+        ) as JsonObject
         if (JSON.stringify(plain).includes('"$ref"')) continue // recursive: kept as generated
         const compact = compactSchema(s)
         expect(expand(compact, (compact['$defs'] as JsonObject) ?? {}), def.name).toEqual(

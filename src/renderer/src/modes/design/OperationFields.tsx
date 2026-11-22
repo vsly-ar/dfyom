@@ -252,9 +252,9 @@ export function OperationFields({
               <span className={styles['caption']} aria-hidden="true">
                 {t.side}
               </span>
-              <SegmentedControl<'outside' | 'inside'>
+              <SegmentedControl<'outside' | 'inside' | 'on'>
                 label={t.side}
-                options={(['outside', 'inside'] as const).map((s) => ({
+                options={(['outside', 'inside', 'on'] as const).map((s) => ({
                   value: s,
                   label: t.sides[s],
                 }))}
@@ -339,6 +339,28 @@ function ShapeGroup({
   if (!('shape' in op)) return null
   const shape = op.shape
   const names = axes(ctx)
+  // a named shape: its items are edited as the part's shape (shapes UI, K5); here only placement
+  if (shape.kind === 'named')
+    return (
+      <Group title={t.groups.shape} level={level}>
+        {children}
+        <AnchorField ctx={ctx} />
+        <ParamField
+          ctx={ctx}
+          path="shape.center.0"
+          label={t.position('Position', names.u)}
+          kind="length"
+          icon="length"
+        />
+        <ParamField
+          ctx={ctx}
+          path="shape.center.1"
+          label={t.position('Position', names.v)}
+          kind="length"
+          icon="width"
+        />
+      </Group>
+    )
   return (
     <Group title={t.groups.shape} level={level}>
       {children}
@@ -446,7 +468,8 @@ function AnchorField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Elemen
       <AnchorPicker
         label={t.anchor}
         value={value}
-        shape={shape.kind}
+        shape={shape.kind === 'circle' ? 'circle' : 'rectangle'}
+
         disabled={ctx.readOnly || formula}
         caption={name(direction, value)}
         pointLabel={(p) => name(direction, p)}

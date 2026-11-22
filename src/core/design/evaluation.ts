@@ -19,6 +19,7 @@ import type { ActionLog } from '../commands/action-log'
 import { systemClock, systemTimers, type Clock, type Timers } from '../commands/context'
 import { defineCommand } from '../commands/define'
 import type { WorkerPort } from '../commands/jobs'
+import type { Region2dPort } from '../geometry/2d/port'
 import type { PartEvaluation } from '../geometry/evaluate'
 import type { DfmWarning, PartGeometryInput } from '../geometry/model'
 import { planGeometryInput, unknownPlan } from '../plan/plan'
@@ -90,6 +91,8 @@ export interface SchedulerOptions {
   readonly debounceMs?: number
   /** Results kept per subject, by input hash (default 8). */
   readonly lruSize?: number
+  /** The 2D port that places named and rotated shapes (absent: their parts fail to map). */
+  readonly region2d?: Region2dPort
 }
 
 export const EVALUATION_DEBOUNCE_MS = 200
@@ -204,7 +207,10 @@ export function createEvaluationScheduler(opts: SchedulerOptions): EvaluationSch
     const key = keyOf(kind, id)
     const hit = perDoc.get(key)
     if (hit !== undefined) return hit
-    const input = kind === 'part' ? partGeometryInput(doc, id) : planGeometryInput(doc, id)
+    const input =
+      kind === 'part'
+        ? partGeometryInput(doc, id, opts.region2d)
+        : planGeometryInput(doc, id, opts.region2d)
     const c: Computed = input.isOk()
       ? { ok: true, hash: hashJson(input.unwrap()), input: input.unwrap() }
       : { ok: false, error: input.unwrapErr() }
@@ -655,7 +661,8 @@ export const partEvaluate = defineCommand({
     const { part, stock, units } = loaded.unwrap()
     const library = ctx.services.library
     const tools = library === undefined ? [] : libraryTools(library)
-    const parameter = partWarnings(part, stock, units, tools, doc.snapshots)
+    const parameter = partWarnings(part, stock, units, tools, doc.snapshots, ctx.services.region2d)
+
     if (parameter.isErr()) return Err(parameter.unwrapErr().withContext(where))
     return Ok(warningsWithEvaluation(doc, args.partId, parameter.unwrap(), state.unwrap()))
   },

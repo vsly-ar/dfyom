@@ -4,7 +4,7 @@
  * Doc: docs/modes/design.md#operations-v01, docs/modes/design.md#implementation-task-25,
  * docs/modes/design-v0.2.md#face-targets-generalised-on
  */
-import { collect, None, Ok, Some, type AppResult, type Option } from '../../shared/result'
+import { collect, fail, None, Ok, Some, type AppResult, type Option } from '../../shared/result'
 import { quantityFromDTO } from '../library/item'
 import type { ParseContext } from '../quantity/parse'
 import type { Quantity } from '../quantity/quantity'
@@ -19,7 +19,9 @@ import type {
   OperationKind,
   PartDTO,
   OperationShapeDTO,
+  ProfileSide,
 } from './part.dto'
+import { shapeFromDTO as namedShapeFromDTO, type NamedShape } from './shape'
 import { designToolFromDTO, designToolToDTO, type DesignTool } from './tool'
 
 export type Point = readonly [Quantity, Quantity]
@@ -30,7 +32,11 @@ export type Anchor = Readonly<AnchorDTO>
 /** The default anchor, and the one of every v0.1 record. */
 export const CENTRE_ANCHOR: Anchor = Object.freeze({ u: 'centre', v: 'centre' })
 
-/** `center` is the anchor point (`[u, v]` of `anchor`), not necessarily the geometric centre. */
+/**
+ * `center` is the anchor point (`[u, v]` of `anchor`) of the placed bounding box, not
+ * necessarily the geometric centre. A rectangle with a rotation and every `named` shape are
+ * general shapes, placed through the 2D layer (placement.ts, design-v0.3.md#placing-a-shape-on-a-face).
+ */
 export type Shape =
   | {
       readonly kind: 'rectangle'
@@ -39,6 +45,8 @@ export type Shape =
       readonly length: Quantity
       readonly width: Quantity
       readonly cornerRadius: Quantity
+      /** Counter-clockwise about the anchor point; None = 0 (v0.1). */
+      readonly rotation: Option<Quantity>
     }
   | {
       readonly kind: 'circle'
@@ -46,6 +54,28 @@ export type Shape =
       readonly anchor: Anchor
       readonly diameter: Quantity
     }
+  | {
+      readonly kind: 'named'
+      readonly center: Point
+      readonly anchor: Anchor
+      /** A shape of the part (`Part.shapes`); a dangling id is `input.malformed` on load. */
+      readonly shapeId: string
+      readonly rotation: Option<Quantity>
+      /** Flips the shape frame's x before rotating. */
+      readonly mirror: boolean
+    }
+
+/** The rotation of a shape in degrees (0 for circles and absent rotations). */
+export const shapeRotation = (s: Shape): number =>
+  s.kind === 'circle' ? 0 : s.rotation.mapOr(0, (q) => q.canonical)
+
+/**
+ * A general shape goes through the 2D layer (placement.ts): every named shape and a rotated
+ * rectangle. Rectangles at rotation 0 and circles keep the v0.1 analytic path (byte-identical
+ * geometry inputs, design-v0.3.md#what-a-shape-is).
+ */
+export const isGeneralShape = (s: Shape): boolean =>
+  s.kind === 'named' || (s.kind === 'rectangle' && shapeRotation(s) !== 0)
 
 export interface GeneralTolerance {
   readonly length: Option<Quantity>
@@ -91,12 +121,16 @@ export interface Drilling extends Common {
 export interface Profile extends Common {
   readonly kind: 'profile'
   readonly shape: Shape
-  readonly side: 'outside' | 'inside'
+  readonly side: ProfileSide
   readonly slotWidth: Quantity
+  /** `on` only: a blind groove's depth below `on`; None = through. */
+  readonly depth: Option<Quantity>
   readonly tabs: {
     readonly count: Quantity
     readonly width: Quantity
     readonly thickness: Quantity
+    /** Distances along the loop from its start point; Some replaces `count` (v0.3). */
+    readonly positions: Option<readonly Quantity[]>
   }
 }
 export type Operation = Facing | Pocket | Drilling | Profile
@@ -108,6 +142,11 @@ export interface Part {
   readonly stock: string
   readonly generalTolerance: GeneralTolerance
   readonly operations: readonly Operation[]
+  /**
+   * The named shapes the operations place, by id (loaded lazily: only shapes an operation
+   * references, shapes.md#implementation-k2); absent = none referenced.
+   */
+  readonly shapes?: ReadonlyMap<string, NamedShape>
 }
 
 /** Id prefix of an operation kind: `facing1`, `pocket1`, `drill1`, `profile1`. */
@@ -166,7 +205,8 @@ export function quantityParams(op: Operation): { path: string; value: Quantity }
       add('shape.length', s.length)
       add('shape.width', s.width)
       add('shape.cornerRadius', s.cornerRadius)
-    } else add('shape.diameter', s.diameter)
+    } else if (s.kind === 'circle') add('shape.diameter', s.diameter)
+    if (s.kind !== 'circle') addOpt('shape.rotation', s.rotation)
   }
   switch (op.kind) {
     case 'facing':
@@ -187,9 +227,12 @@ export function quantityParams(op: Operation): { path: string; value: Quantity }
     case 'profile':
       shape(op.shape)
       add('slotWidth', op.slotWidth)
+      addOpt('depth', op.depth)
       add('tabs.count', op.tabs.count)
       add('tabs.width', op.tabs.width)
       add('tabs.thickness', op.tabs.thickness)
+      if (op.tabs.positions.isSome())
+        op.tabs.positions.unwrap().forEach((p, i) => add(`tabs.positions.${i}`, p))
       break
   }
   return out
@@ -204,15 +247,24 @@ export function withParam(op: Operation, path: string, value: Quantity): Operati
     const s = op.shape
     const shape: Shape = rest.startsWith('center.')
       ? { ...s, center: point(s.center, rest.slice('center.'.length)) }
-      : ({ ...s, [rest]: value } as Shape)
+      : rest === 'rotation'
+        ? ({ ...s, rotation: Some(value) } as Shape)
+        : ({ ...s, [rest]: value } as Shape)
     return { ...op, shape }
   }
   if (op.kind === 'drilling' && head === 'center')
     return { ...op, center: point(op.center, sub ?? '0') }
+  if (op.kind === 'profile' && head === 'tabs' && sub === 'positions') {
+    const i = Number(path.split('.')[2])
+    const list = [...op.tabs.positions.unwrapOr([])]
+    list[i] = value
+    return { ...op, tabs: { ...op.tabs, positions: Some(list) } }
+  }
   if (op.kind === 'profile' && head === 'tabs' && sub !== undefined)
     return { ...op, tabs: { ...op.tabs, [sub]: value } }
-  if (op.kind === 'drilling' && (head === 'depth' || head === 'pointAngle'))
-    return { ...op, [head]: Some(value) }
+  if ((op.kind === 'drilling' || op.kind === 'profile') && head === 'depth')
+    return { ...op, depth: Some(value) }
+  if (op.kind === 'drilling' && head === 'pointAngle') return { ...op, pointAngle: Some(value) }
   return { ...op, [head]: value } as Operation
 }
 
@@ -250,6 +302,17 @@ function pointFromDTO(p: readonly [QuantityDTO, QuantityDTO], ...path: string[])
 function shapeFromDTO(s: OperationShapeDTO): AppResult<Shape> {
   const center = pointFromDTO(s.center, 'shape', 'center')
   const anchor: Anchor = s.anchor === undefined ? CENTRE_ANCHOR : { u: s.anchor.u, v: s.anchor.v }
+  const rotation: AppResult<Option<Quantity>> =
+    s.kind === 'circle' ? Ok(None) : optQ(s.rotation, 'shape', 'rotation')
+  if (s.kind === 'named')
+    return collect<unknown>([center, rotation]).map(() => ({
+      kind: 'named',
+      center: center.unwrap(),
+      anchor,
+      shapeId: s.shapeId,
+      rotation: rotation.unwrap(),
+      mirror: s.mirror === true,
+    }))
   if (s.kind === 'circle')
     return collect<unknown>([center, q(s.diameter, 'shape', 'diameter')]).map(() => ({
       kind: 'circle',
@@ -262,7 +325,7 @@ function shapeFromDTO(s: OperationShapeDTO): AppResult<Shape> {
     q(s.width, 'shape', 'width'),
     q(s.cornerRadius, 'shape', 'cornerRadius'),
   ]
-  return collect<unknown>([center, ...fields]).map(() => {
+  return collect<unknown>([center, rotation, ...fields]).map(() => {
     const [length, width, cornerRadius] = fields.map((f) => f.unwrap())
     return {
       kind: 'rectangle',
@@ -271,6 +334,7 @@ function shapeFromDTO(s: OperationShapeDTO): AppResult<Shape> {
       length: length!,
       width: width!,
       cornerRadius: cornerRadius!,
+      rotation: rotation.unwrap(),
     }
   })
 }
@@ -355,15 +419,31 @@ export function operationFromDTO(dto: OperationDTO): AppResult<Operation> {
       const count = q(dto.tabs.count, 'tabs', 'count')
       const width = q(dto.tabs.width, 'tabs', 'width')
       const thickness = q(dto.tabs.thickness, 'tabs', 'thickness')
-      return collect<unknown>([shape, slotWidth, count, width, thickness]).map(() => ({
-        ...base,
-        kind: 'profile',
-        on: dto.on ?? DEFAULT_STOCK_FACE,
-        shape: shape.unwrap(),
-        side: dto.side,
-        slotWidth: slotWidth.unwrap(),
-        tabs: { count: count.unwrap(), width: width.unwrap(), thickness: thickness.unwrap() },
-      }))
+      const depth = optQ(dto.depth, 'depth')
+      const given = dto.tabs.positions
+      const positions =
+        given === undefined
+          ? Ok<Option<readonly Quantity[]>>(None)
+          : collect(given.map((p, i) => q(p, 'tabs', 'positions', i))).map(
+              (l): Option<readonly Quantity[]> => Some(l),
+            )
+      return collect<unknown>([shape, slotWidth, depth, count, width, thickness, positions]).map(
+        () => ({
+          ...base,
+          kind: 'profile',
+          on: dto.on ?? DEFAULT_STOCK_FACE,
+          shape: shape.unwrap(),
+          side: dto.side,
+          slotWidth: slotWidth.unwrap(),
+          depth: depth.unwrap(),
+          tabs: {
+            count: count.unwrap(),
+            width: width.unwrap(),
+            thickness: thickness.unwrap(),
+            positions: positions.unwrap(),
+          },
+        }),
+      )
     }
   }
 }
@@ -375,6 +455,18 @@ function shapeToDTO(s: Shape): OperationShapeDTO {
     s.anchor.u === 'centre' && s.anchor.v === 'centre'
       ? {}
       : { anchor: { u: s.anchor.u, v: s.anchor.v } }
+  // left out when absent, so v0.1 records stay byte-identical
+  const rotation =
+    s.kind !== 'circle' && s.rotation.isSome() ? { rotation: s.rotation.unwrap().toDTO() } : {}
+  if (s.kind === 'named')
+    return {
+      kind: 'named',
+      shapeId: s.shapeId,
+      center,
+      ...anchor,
+      ...rotation,
+      ...(s.mirror ? { mirror: true } : {}),
+    } as OperationShapeDTO
   return (
     s.kind === 'circle'
       ? { kind: 'circle', center, ...anchor, diameter: s.diameter.toDTO() }
@@ -385,6 +477,7 @@ function shapeToDTO(s: Shape): OperationShapeDTO {
           length: s.length.toDTO(),
           width: s.width.toDTO(),
           cornerRadius: s.cornerRadius.toDTO(),
+          ...rotation,
         }
   ) as OperationShapeDTO
 }
@@ -439,10 +532,14 @@ export function operationToDTO(op: Operation): OperationDTO {
         shape: shapeToDTO(op.shape),
         side: op.side,
         slotWidth: op.slotWidth.toDTO(),
+        ...(op.depth.isSome() ? { depth: op.depth.unwrap().toDTO() } : {}),
         tabs: {
           count: op.tabs.count.toDTO(),
           width: op.tabs.width.toDTO(),
           thickness: op.tabs.thickness.toDTO(),
+          ...(op.tabs.positions.isSome()
+            ? { positions: op.tabs.positions.unwrap().map((p) => p.toDTO()) }
+            : {}),
         },
       } as OperationDTO
   }
@@ -455,11 +552,81 @@ export function partFromDTO(dto: PartDTO): AppResult<Part> {
       operationFromDTO(o).mapErr((e) => e.prefixIssues('operations', i)),
     ),
   )
-  return collect<unknown>([tol, ops]).map(() => ({
+  const shapes = referencedShapes(dto)
+  return collect<unknown>([tol, ops, shapes]).map(() => ({
     id: dto.id,
     name: dto.name,
     stock: dto.stock,
     generalTolerance: tol.unwrap(),
     operations: ops.unwrap(),
+    ...(shapes.unwrap().size === 0 ? {} : { shapes: shapes.unwrap() }),
   }))
+}
+
+/**
+ * The named shapes the part's operations reference, loaded (design-v0.3.md#persistence): a
+ * `named` shape whose `shapeId` does not exist makes the part `input.malformed` (corruption,
+ * never repaired). Shapes nothing references are not loaded (shapes.md#implementation-k2).
+ */
+function referencedShapes(dto: PartDTO): AppResult<ReadonlyMap<string, NamedShape>> {
+  const out = new Map<string, NamedShape>()
+  const results: AppResult<unknown>[] = []
+  dto.operations.forEach((op, i) => {
+    if ((op.kind !== 'pocket' && op.kind !== 'profile') || op.shape.kind !== 'named') return
+    const id = op.shape.shapeId
+    if (out.has(id)) return
+    const k = dto.shapes?.findIndex((s) => s.id === id) ?? -1
+    if (k < 0) {
+      results.push(
+        fail('input.malformed', `${op.id} places shape ${id}, which the part does not have`, {
+          issues: [
+            {
+              path: ['operations', i, 'shape', 'shapeId'],
+              rule: 'unknownShape',
+              message: 'no such shape in the part',
+            },
+          ],
+          data: { operationId: op.id, shapeId: id },
+        }),
+      )
+      return
+    }
+    const s = namedShapeFromDTO(dto.shapes![k]!).mapErr((e) => e.prefixIssues('shapes', k))
+    results.push(s)
+    if (s.isOk()) out.set(id, s.unwrap())
+  })
+  return collect(results).map(() => out)
+}
+
+/**
+ * The named shapes `ops` place, loaded from the part's `shapes` (commands: the operations after
+ * an edit may place a shape the stored part did not). A `shapeId` the part does not have is
+ * `input.malformed` (`unknownShape`, at `operations.<id>.shape.shapeId`).
+ */
+export function shapesOf(
+  ops: readonly Operation[],
+  dto: Pick<PartDTO, 'shapes'>,
+): AppResult<ReadonlyMap<string, NamedShape>> {
+  const out = new Map<string, NamedShape>()
+  for (const op of ops) {
+    if ((op.kind !== 'pocket' && op.kind !== 'profile') || op.shape.kind !== 'named') continue
+    const id = op.shape.shapeId
+    if (out.has(id)) continue
+    const k = dto.shapes?.findIndex((s) => s.id === id) ?? -1
+    if (k < 0)
+      return fail('input.malformed', `${op.id} places shape ${id}, which the part does not have`, {
+        issues: [
+          {
+            path: ['operations', op.id, 'shape', 'shapeId'],
+            rule: 'unknownShape',
+            message: 'no such shape in the part',
+          },
+        ],
+        data: { operationId: op.id, shapeId: id },
+      })
+    const s = namedShapeFromDTO(dto.shapes![k]!).mapErr((e) => e.prefixIssues('shapes', k))
+    if (s.isErr()) return s
+    out.set(id, s.unwrap())
+  }
+  return Ok(out)
 }

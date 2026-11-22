@@ -2,12 +2,18 @@
  * The geometry test part (docs/architecture/geometry.md#testing): fixes the spike's invalid part
  * (its stock margin was smaller than the slot, so the tabs held nothing).
  */
-import type { OperationGeometry, PartGeometryInput } from '../model'
+import type { AnalyticOperation, OperationGeometry, PartGeometryInput } from '../model'
 import { drillVolume, pocketVolume } from './analytic'
 import { roundedRectArea } from './mesh-oracles'
 
 export const TEST_STOCK = { length: 100, width: 60, thickness: 20 } as const
 const FACED = -0.5
+
+/** The test part's operations: v0.1 kinds only (analytic contours). */
+export type TestOperation =
+  | Extract<OperationGeometry, { kind: 'facing' | 'drilling' }>
+  | AnalyticOperation<'pocket'>
+  | AnalyticOperation<'profile'>
 
 export interface TestPartOptions {
   readonly cornerRadius?: number
@@ -19,7 +25,9 @@ export interface TestPartOptions {
  * 4 drills Ø6 on a centered 70 × 30 pattern (through, flat, 2 × drillPoint 118°, depth 12);
  * profile outside 84 × 44 R5 centered, slot 6, 4 tabs 8 × 3 (stock margin 8 ≥ slot width).
  */
-export function testPart(options: TestPartOptions = {}): PartGeometryInput {
+export function testPart(
+  options: TestPartOptions = {},
+): PartGeometryInput & { readonly operations: readonly TestOperation[] } {
   const cornerRadius = options.cornerRadius ?? 4
   const floorRadius = options.floorRadius ?? 2
   const drill = (
@@ -27,7 +35,7 @@ export function testPart(options: TestPartOptions = {}): PartGeometryInput {
     x: number,
     y: number,
     bottom: Extract<OperationGeometry, { kind: 'drilling' }>['bottom'],
-  ): OperationGeometry => ({
+  ): TestOperation => ({
     kind: 'drilling',
     id,
     onZ: FACED,

@@ -5,7 +5,7 @@
  * Rings come from `offsetContour` + `contourElements` (exact arcs, no flattening).
  */
 import { contourElements, offsetContour, type ContourElement } from '../geometry/contour'
-import { EPSILON, type Contour, type Vec2, type Vec3 } from '../geometry/model'
+import { EPSILON, type AnalyticContour as Contour, type Vec2, type Vec3 } from '../geometry/model'
 import type { Move, Pass, PassKind } from './model'
 
 /** A planar path piece; an arc runs from `start` by `sweep` (counter-clockwise > 0). */

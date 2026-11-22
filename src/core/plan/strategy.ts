@@ -8,7 +8,7 @@
 import { z } from 'zod'
 import type { Issue } from '../../shared/errors/app-error'
 import { collect, fail, None, type AppResult, type Option } from '../../shared/result'
-import { fieldContext, type Operation } from '../design/operation'
+import { fieldContext, isGeneralShape, type Operation } from '../design/operation'
 import type { OperationKind } from '../design/part.dto'
 import { SurfaceTable } from '../design/surfaces'
 import type { Stock } from '../library/stock'
@@ -290,7 +290,14 @@ export function strategyIssues(
       bad('finishStepdown', 'positive', 'must be > 0')
     tool.map((t) => {
       const op = c.ops[0]
-      if (op?.kind === 'pocket' && r.entry === 'helix' && set('helixDiameter')) {
+      // general shapes: the narrowest size needs the 2D layer (T3)
+      if (
+        op?.kind === 'pocket' &&
+        op.shape.kind !== 'named' &&
+        !isGeneralShape(op.shape) &&
+        r.entry === 'helix' &&
+        set('helixDiameter')
+      ) {
         const narrowest =
           op.shape.kind === 'circle'
             ? op.shape.diameter.canonical

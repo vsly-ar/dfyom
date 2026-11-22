@@ -10,6 +10,7 @@ import { AppErrorDataSchema } from '../../shared/errors/schema'
 import { fail, Ok, tryAsync, type AppResult, type AsyncAppResult } from '../../shared/result'
 import type { QueryContext } from '../commands/context'
 import type { WorkerControl, WorkerPort } from '../commands/jobs'
+import type { Region2dPort } from '../geometry/2d/port'
 import type { PlanOperationInput } from '../plan/inputs'
 import { defineCommand, defineQuery } from '../commands/define'
 import { planOperationInputs } from '../plan/inputs'
@@ -56,13 +57,14 @@ export async function ensureToolpath(
   workers: WorkerPort,
   input: PlanOperationInput,
   ctl: WorkerControl,
+  region2d?: Region2dPort,
 ): AsyncAppResult<{ toolpath: Toolpath; status: 'generated' | 'cached' }> {
   const hit = cache.get(input.inputHash)
   if (hit !== undefined) {
     cache.remember(input.planId, input.planOperationId, input.inputHash)
     return Ok({ toolpath: hit, status: 'cached' })
   }
-  const request = toGeneratorInputs(input)
+  const request = toGeneratorInputs(input, region2d)
   if (request.isErr()) return request
   const tp = await workers.run(toolpathGenerate, request.unwrap(), ctl)
   if (tp.isErr()) return tp
@@ -103,13 +105,23 @@ export const toolpathGenerateJob = defineCommand({
       const cp = await tryAsync(() => ctx.checkpoint(), 'op.aborted', 'checkpoint')
       if (cp.isErr()) return abortedJob()
       ctx.progress({ done: i, total, label: id })
-      const tp = await ensureToolpath(cache.unwrap(), ctx.services.workers, input, {
-        // no `pause`: a paused job parks between plan operations (`ctx.checkpoint()`), never
-        // the single toolpath worker, which other jobs share
-        signal: ctx.signal,
-        progress: (p) =>
-          ctx.progress({ done: i, total, label: p.label === undefined ? id : `${id}: ${p.label}` }),
-      })
+      const tp = await ensureToolpath(
+        cache.unwrap(),
+        ctx.services.workers,
+        input,
+        {
+          // no `pause`: a paused job parks between plan operations (`ctx.checkpoint()`), never
+          // the single toolpath worker, which other jobs share
+          signal: ctx.signal,
+          progress: (p) =>
+            ctx.progress({
+              done: i,
+              total,
+              label: p.label === undefined ? id : `${id}: ${p.label}`,
+            }),
+        },
+        ctx.services.region2d,
+      )
       if (tp.isErr()) {
         if (tp.unwrapErr().code === 'op.aborted') return abortedJob()
         operations.push(failed(id, tp.unwrapErr()))

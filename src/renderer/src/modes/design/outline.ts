@@ -6,7 +6,12 @@
 // Doc: docs/conventions/ui.md#evaluation-status-pending-outdated-failed,
 // #design-and-plan-controls-v02; docs/modes/design-v0.2.md#face-frame
 import { shapeCentre } from '../../../../core/design/anchor'
-import { CENTRE_ANCHOR, type Operation, type Shape } from '../../../../core/design/operation'
+import {
+  CENTRE_ANCHOR,
+  isGeneralShape,
+  type Operation,
+  type Shape,
+} from '../../../../core/design/operation'
 import type { SurfaceTable } from '../../../../core/design/surfaces'
 import {
   DIRECTION,
@@ -29,6 +34,8 @@ const CIRCLE_SEGMENTS = 48
  * `[u, v, w]`; in the part frame for the top face.
  */
 export function shapeLoop(shape: Shape, w: number): Vec3[] {
+  // named and rotated shapes need the 2D layer: no outline yet (K5 draws them)
+  if (shape.kind === 'named' || isGeneralShape(shape)) return []
   const [cx, cy] = shapeCentre(shape) // `center` is the anchor point
   if (shape.kind === 'circle') {
     const r = shape.diameter.canonical / 2

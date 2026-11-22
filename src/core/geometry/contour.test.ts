@@ -8,7 +8,7 @@ import {
   parameterize,
   perimeter,
 } from './contour'
-import { CHORD_TOLERANCE, type Contour, type Vec2 } from './model'
+import { CHORD_TOLERANCE, type AnalyticContour as Contour, type Vec2 } from './model'
 
 const rect = (length: number, width: number, cornerRadius: number): Contour => ({
   kind: 'rectangle',
