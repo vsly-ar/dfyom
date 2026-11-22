@@ -63,6 +63,7 @@ import {
   type ToolIconName,
 } from '../ui'
 import { designMessages } from '../messages/design'
+import { ImportReportDemo } from './ImportReportDemo'
 import styles from './Gallery.module.css'
 import { ViewportDemo } from './ViewportDemo'
 
@@ -136,6 +137,9 @@ function Specimens({ title }: { title: string }): React.JSX.Element {
       <Toolbars />
       <Row label="Viewport · sample part, click to select, pick mode, evaluation status">
         <ViewportDemo />
+      </Row>
+      <Row label="Import report · SVG import options and report (task U1; the app's entry is disabled)">
+        <ImportReportDemo />
       </Row>
       <Row label="Mode switcher · own component">
         <ModeDemo />

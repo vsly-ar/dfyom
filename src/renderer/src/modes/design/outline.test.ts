@@ -1,0 +1,94 @@
+// The live outline of named and rotated shapes (task U1): placed through the renderer's 2D port
+// (`placeShape`), all loops of a region at the top face and the floor, an open path marked open;
+// without the port these shapes draw no outline.
+// Doc: docs/conventions/ui.md#evaluation-status-pending-outdated-failed,
+// docs/modes/design-v0.3.md#placing-a-shape-on-a-face
+import { describe, expect, it } from 'vitest'
+import { designSetup } from '../../../../core/design/design.fixture'
+import { nodeRegion2d } from '../../../../core/geometry/2d/testing/node-wasm'
+import { designPart } from './model'
+import { operationOutline } from './outline'
+
+const region2d = nodeRegion2d()
+
+const span = (loop: readonly (readonly number[])[], axis: number): number =>
+  Math.max(...loop.map((p) => p[axis]!)) - Math.min(...loop.map((p) => p[axis]!))
+
+describe('outline of named and rotated shapes', () => {
+  it('places a named shape through the 2D port; without it there is no outline', async () => {
+    const s = await designSetup({ services: { region2d } })
+    await s.run('design.shape.add', {
+      partId: s.partId,
+      items: [
+        { kind: 'rectangle', center: ['0', '0'], length: '20', width: '10' },
+        { kind: 'circle', op: 'subtract', center: ['0', '0'], diameter: '4' },
+      ],
+    })
+    await s.run('design.pocket.add', {
+      partId: s.partId,
+      shape: { kind: 'named', shapeId: 'shape1', center: ['50', '30'] },
+      depth: '2',
+    })
+    const part = designPart(s.d.doc)!
+    const op = part.loaded!.part.operations[0]!
+    expect(operationOutline(op, part.loaded!.stock, part.table!)).toEqual([])
+    const loops = operationOutline(op, part.loaded!.stock, part.table!, {
+      port: region2d,
+      shapes: part.loaded!.part.shapes,
+    })
+    // outer loop and island, at the top face and at the floor
+    expect(loops).toHaveLength(4)
+    const top = loops[0]!
+    expect(top.every((p) => p[2] === 0)).toBe(true)
+    expect(Math.min(...top.map((p) => p[0]))).toBeCloseTo(40)
+    expect(span(top, 0)).toBeCloseTo(20)
+    expect(span(top, 1)).toBeCloseTo(10)
+    expect(loops[2]!.every((p) => p[2] === -2)).toBe(true)
+    for (const p of loops[1]!) expect(Math.hypot(p[0] - 50, p[1] - 30)).toBeCloseTo(2)
+  })
+
+  it('places a rotated rectangle and marks an open path open', async () => {
+    const s = await designSetup({ services: { region2d } })
+    await s.run('design.pocket.add', {
+      partId: s.partId,
+      shape: {
+        kind: 'rectangle',
+        center: ['50', '30'],
+        length: '20',
+        width: '10',
+        cornerRadius: '0',
+        rotation: '90',
+      },
+      depth: '2',
+    })
+    await s.run('design.shape.add', {
+      partId: s.partId,
+      items: [
+        {
+          kind: 'path',
+          start: ['0', '0'],
+          closed: false,
+          segments: [{ kind: 'line', to: ['30', '0'] }],
+        },
+      ],
+    })
+    await s.run('design.profile.add', {
+      partId: s.partId,
+      shape: { kind: 'named', shapeId: 'shape1', center: ['50', '30'] },
+      side: 'on',
+    })
+    const part = designPart(s.d.doc)!
+    const [pocket, profile] = part.loaded!.part.operations
+    const ctx = { port: region2d, shapes: part.loaded!.part.shapes }
+    const [top] = operationOutline(pocket!, part.loaded!.stock, part.table!, ctx)
+    // turned a quarter: 10 along X, 20 along Y
+    expect(span(top!, 0)).toBeCloseTo(10)
+    expect(span(top!, 1)).toBeCloseTo(20)
+    const [open] = operationOutline(profile!, part.loaded!.stock, part.table!, ctx)
+    expect(open!.open).toBe(true)
+    expect(open!.map((p) => [p[0], p[1]])).toEqual([
+      [35, 30],
+      [65, 30],
+    ])
+  })
+})

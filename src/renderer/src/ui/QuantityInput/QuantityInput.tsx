@@ -136,6 +136,11 @@ export interface QuantityInputBaseProps {
   /** Warnings, notes and recommendations from checks; parse errors are added by the field. */
   messages?: readonly FieldMessage[]
   readOnly?: boolean
+  /**
+   * A table cell (the Shape Editor's segment table, task U1): no unit suffix and no adjust pencil,
+   * so the number keeps the narrow box; the echo still says how the value is read.
+   */
+  dense?: boolean
   className?: string | undefined
 }
 
@@ -192,6 +197,7 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
     lock,
     messages = [],
     readOnly = false,
+    dense = false,
     className,
   } = props
   const ctx: ParseContext = useMemo(() => ({ kind, defaultUnit }), [kind, defaultUnit])
@@ -708,8 +714,8 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
               ref={inputRef}
               value={text}
               {...(placeholder !== undefined ? { placeholder } : {})}
-              {...(suffix !== undefined ? { unit: suffix } : {})}
-              adjust={adjust}
+              {...(suffix !== undefined && !dense ? { unit: suffix } : {})}
+              adjust={dense ? null : adjust}
               overlay={overlay}
               autoComplete="off"
               onChange={(e) => edit(e.target.value, e.target.selectionStart)}

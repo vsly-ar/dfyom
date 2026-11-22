@@ -68,6 +68,7 @@ import {
   unionBox,
   type Box,
   type SurfaceTarget,
+  type OutlineLoop,
   type Vec3,
   type ViewportMesh,
 } from './mesh'
@@ -103,7 +104,7 @@ export interface ViewportProps {
    * Live outline of the edited operation while its evaluation is pending (closed loops in the
    * part frame, from the field values; ui.md#evaluation-status-pending-outdated-failed).
    */
-  outline?: readonly (readonly Vec3[])[] | null
+  outline?: readonly OutlineLoop[] | null
   /** Error marker at the failing operation (evaluation `failed`). */
   marker?: Vec3 | null
   /** Face-frame axes of the selected operation's face (`u`, `v`, labelled; task F1). */

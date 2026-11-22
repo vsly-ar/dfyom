@@ -223,6 +223,14 @@ Code: [shapes.md § Implementation (I1 command)](../architecture/shapes.md#imple
 - **`tools/list`:** +0.7 K (98.8 K measured with the work merged by then).
 - **Known limit.** The importer's fill repair is quadratic in crossings: a path that crosses itself thousands of times (e.g. 2 000 random cubics) takes tens of seconds, beyond the task's 30 s timeout (`op.timeout`), and holds the project queue meanwhile ([commands.md § Prepared input](../architecture/commands.md#prepared-input) expects about a second).
 
+## Implementation (U1)
+
+UI rules and how they were settled: [ui.md § Implementation (U1)](../conventions/ui.md#implementation-u1). For this mode:
+
+- **Shapes group** in the navigator: add (one menu per kind; Import SVG… disabled until `design.shape.import` is wired), select (opens the Shape Editor), remove (refused while used, with the reason).
+- **Shape Editor:** the shape flat in its own frame (the face-on view of the first operation that uses it comes with U2), the inspector's item list, fields and the path's segment table; every field commit and every handle drag is one undo step (`design.shape.item.update`, a drag as one gesture). Rotation, fillet and polygon corner radius have fields but no handles yet.
+- **Live outline** from the renderer's 2D port: the editor's outline while editing and dragging, and the 3D viewport's pending outline of operations with named or rotated shapes.
+
 ## Answered questions
 
 Answered by the user with D29 (2026-11-22, every recommendation taken):

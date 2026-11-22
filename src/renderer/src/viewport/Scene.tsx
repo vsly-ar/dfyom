@@ -23,6 +23,7 @@ import {
   type Box,
   type SurfaceGlyph,
   type SurfaceTarget,
+  type OutlineLoop,
   type Vec3,
   type ViewportMesh,
 } from './mesh'
@@ -43,7 +44,7 @@ export interface SceneProps {
   palette: Palette
   surfaceState: SurfaceState
   /** Live outline of the edited operation (pending evaluation). */
-  outline?: readonly (readonly Vec3[])[] | null
+  outline?: readonly OutlineLoop[] | null
   /** Error marker (failed evaluation). */
   marker?: Vec3 | null
   /** Pick mode's normal glyphs and the hovered eligible surface (task F1). */
@@ -296,7 +297,7 @@ function LiveOutline({
   loops,
   colour: c,
 }: {
-  loops: readonly (readonly Vec3[])[]
+  loops: readonly OutlineLoop[]
   colour: Rgb
 }): React.JSX.Element {
   const invalidate = useThree((s) => s.invalidate)
@@ -308,7 +309,9 @@ function LiveOutline({
         .map((l, i) => (
           <Line
             key={i}
-            points={[...l, l[0]!].map((p) => [p[0], p[1], p[2]] as [number, number, number])}
+            points={(l.open ? [...l] : [...l, l[0]!]).map(
+              (p) => [p[0], p[1], p[2]] as [number, number, number],
+            )}
             color={colour(c)}
             lineWidth={2}
             dashed

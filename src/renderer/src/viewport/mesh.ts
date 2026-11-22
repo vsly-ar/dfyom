@@ -12,6 +12,12 @@ export type ViewportMesh = Pick<
 
 export type Vec3 = readonly [number, number, number]
 
+/**
+ * One loop of a live outline (part frame, mm): closed (the last point does not repeat the first),
+ * or an open path when `open` (task U1: open named shapes).
+ */
+export type OutlineLoop = readonly Vec3[] & { readonly open?: true }
+
 /** Axis-aligned box in the part frame (mm). */
 export interface Box {
   readonly min: Vec3
