@@ -8,7 +8,8 @@ export default defineConfig({
       {
         test: {
           name: 'node',
-          include: ['src/**/*.test.ts', 'scripts/**/*.test.mjs'],
+          // spikes/biarc: spike S5's fitting checks (docs/research/s5-biarc-fitting.md)
+          include: ['src/**/*.test.ts', 'scripts/**/*.test.mjs', 'spikes/biarc/*.test.ts'],
           environment: 'node',
           // bundles the test worker entry for the real worker_threads tests (docs/architecture/workers.md#testing)
           globalSetup: ['src/main/workers/global-setup.ts'],

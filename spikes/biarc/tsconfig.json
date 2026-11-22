@@ -1,0 +1,14 @@
+// Spike S5 (docs/research/s5-biarc-fitting.md): Node-run TypeScript, not part of the app build.
+// Lint finds these files through the project service; tests run in `npm test` (vitest.config.mts);
+// typecheck: `node node_modules/typescript7/bin/tsc --noEmit -p spikes/biarc` (not in the root
+// `npm run typecheck`, which covers the app). No own dependencies, unlike spikes/2d.
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "noEmit": true,
+    "allowImportingTsExtensions": true
+  },
+  "include": ["*.ts"]
+}
