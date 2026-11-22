@@ -172,6 +172,7 @@ export const planMessages = {
     plan: 'Plan',
     name: 'Plan name',
     noSelection: 'Select a plan operation to choose its tool and feeds and speeds.',
+    noPlan: 'Create the plan in the navigator to start.',
     summary: (n: number) => plural(n, 'operation', 'operations'),
     commandFailed: 'The change was not applied.',
     groups: { tool: 'Tool', strategy: 'Strategy', feeds: 'Feeds and speeds' },

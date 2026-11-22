@@ -6,9 +6,32 @@
   min-height: 0;
   overflow: auto;
   display: grid;
+  /* the sections take the panel's width, never their widest control's (the 16 rem navigator) */
+  grid-template-columns: minmax(0, 1fr);
   align-content: start;
   gap: var(--space-4);
   padding: var(--space-3);
+}
+
+/* "Connect to virtual machine" wraps in the 16 rem navigator instead of running out of it */
+.wrapButton {
+  height: auto;
+  min-height: var(--control-lg);
+  padding-block: var(--space-1);
+  white-space: normal;
+  text-align: start;
+}
+
+/* the four jog steps share the navigator's width */
+.jogSteps {
+  display: flex;
+  justify-self: stretch;
+}
+
+/* (specific enough to beat the small SegmentedControl's item padding) */
+.jog .jogSteps[data-size] > button {
+  flex: 1 1 auto;
+  padding-inline: 2px;
 }
 
 .section {

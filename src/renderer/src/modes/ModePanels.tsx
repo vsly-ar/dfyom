@@ -65,7 +65,8 @@ export function ModeNavigator({ mode, doc, onMode }: ModePanelProps): React.JSX.
           <PlanNavigator doc={doc} />
         )
       case 'run':
-        return Object.keys(doc.plans).length === 0 ? (
+        // with a plan, run mode shows its own navigator (above)
+        return (
           <EmptyState
             icon={NavigatorIcon}
             title={m.run.noPlan.title}
@@ -76,8 +77,6 @@ export function ModeNavigator({ mode, doc, onMode }: ModePanelProps): React.JSX.
               onClick: () => onMode('plan'),
             }}
           />
-        ) : (
-          <EmptyState icon={NavigatorIcon} {...m.run.ready} />
         )
     }
   })()
@@ -99,7 +98,7 @@ export function ModeInspector({ mode, doc }: Omit<ModePanelProps, 'onMode'>): Re
     <>
       <PanelHeader title={shellMessages.regions.inspector} />
       <div className={styles['body']}>
-        {doc === undefined ? null : <p className={styles['note']}>{m[mode].inspector}</p>}
+        <p className={styles['note']}>{doc === undefined ? m.noProject : m[mode].inspector}</p>
       </div>
     </>
   )

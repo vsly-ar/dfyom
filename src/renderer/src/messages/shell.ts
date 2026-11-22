@@ -119,11 +119,8 @@ export const shellMessages = {
         description: 'Run mode runs a plan on the machine. Create one in Plan.',
         action: 'Go to Plan',
       },
-      ready: {
-        title: 'Run a plan',
-        description: 'Connection, homing, jog and run controls come with the run UI (task 3.12).',
-      },
-      inspector: 'DRO, run progress and run controls appear here (task 3.12).',
+      inspector: 'The DRO, run progress and run controls show here once there is a plan.',
     },
+    noProject: 'No project open.',
   },
 }

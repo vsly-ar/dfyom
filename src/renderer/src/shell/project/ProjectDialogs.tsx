@@ -62,9 +62,9 @@ function NewProjectDialog({
   const busy = useStore(files, (s) => s.busy)
   const [name, setName] = useState<string>(m.newDialog.defaultName)
   const [units, setUnits] = useState<UnitSystem>('mm')
-  const valid = name.trim().length > 0
+  // an emptied name falls back to the default rather than disabling Create without a reason
   const submit = () => {
-    if (valid && !busy) void files.getState().create(name.trim(), units)
+    if (!busy) void files.getState().create(name.trim() || m.newDialog.defaultName, units)
   }
   return (
     <Dialog
@@ -80,7 +80,7 @@ function NewProjectDialog({
           <Button
             variant="primary"
             icon={<FilePlus aria-hidden="true" />}
-            disabled={!valid || busy}
+            disabled={busy}
             onClick={submit}
           >
             {m.newDialog.create}
@@ -96,7 +96,12 @@ function NewProjectDialog({
         }}
       >
         <Field label={m.newDialog.name}>
-          <FieldInput value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+          <FieldInput
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={m.newDialog.defaultName}
+            autoFocus
+          />
         </Field>
         <div className={styles['row']}>
           <span className={styles['caption']} aria-hidden="true">

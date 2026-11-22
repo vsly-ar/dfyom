@@ -259,6 +259,7 @@ export function ItemTable({
         aria-rowcount={ids.length + errors.length + 1}
         className={styles['grid']}
         data-kind={kind}
+        data-empty={empty || undefined}
         onKeyDown={onKey}
       >
         <div role="rowgroup">{header}</div>

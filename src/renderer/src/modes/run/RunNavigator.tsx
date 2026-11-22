@@ -127,6 +127,7 @@ export function RunNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
             <Button
               size="lg"
               variant="primary"
+              className={styles['wrapButton']}
               icon={<Plug aria-hidden="true" />}
               disabled={
                 chosen === undefined ||
