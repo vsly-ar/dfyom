@@ -191,6 +191,8 @@ export const runJobStart = defineCommand({
     "Run a plan's program on the connected virtual machine: exports it with the live work zero, refuses soft-limit violations, streams it and waits at each tool change for run.job.continue.",
   title: () => 'Run plan',
   machine: true,
+  // apply first: docs/architecture/apply.md#implicit-apply
+  applyFirst: true,
   args: z.object({ planId: PlanIdSchema }),
   result: RunJobResult,
   run: (doc, args, ctx) => runJob(doc, args.planId, ctx),

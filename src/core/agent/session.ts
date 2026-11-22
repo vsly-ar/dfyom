@@ -20,10 +20,11 @@ import {
   type Source,
   type Timers,
 } from '../commands/context'
+import type { ApplyOutcome } from '../commands/apply'
 import type { CommandOutcome, Dispatcher } from '../commands/dispatcher'
 import { JobInfoSchema } from '../commands/jobs'
 import type { Registry } from '../commands/registry'
-import { EXPECTED_REVISION, type SessionToolDef } from './tools'
+import { APPLY_KEY, EXPECTED_REVISION, type SessionToolDef } from './tools'
 
 /** What a session needs from the app host. Implemented by src/main/host. */
 export interface SessionHost {
@@ -333,6 +334,9 @@ export class AgentSession {
     if (SESSION_TOOL_NAMES.has(name)) return this.sessionTool(name, rawArgs, opts)
     if (app.command(name).isSome()) {
       const r = await this.host.app.dispatch(name, rawArgs, this.source)
+      const def = app.command(name).unwrap()
+      const write = !(def.kind === 'effect' && def.readOnly === true)
+      if (name.startsWith('library.') && write) return this.afterLibraryWrite(r)
       return this.afterLifecycle(name, rawArgs, r)
     }
     if (app.query(name).isSome()) return this.host.app.query(name, rawArgs, this.source)
@@ -345,11 +349,48 @@ export class AgentSession {
     if (!isCommand) return d.query(name, rawArgs, this.source)
     const split = splitExpectedRevision(rawArgs)
     if (split.isErr()) return split
-    const { args, expectedRevision } = split.unwrap()
+    const isDocument = project.command(name).unwrap().kind === 'document'
+    const reserved: AppResult<{ args: unknown; apply?: boolean }> = isDocument
+      ? splitApply(split.unwrap().args)
+      : Ok({ args: split.unwrap().args })
+    if (reserved.isErr()) return reserved
+    const { args, apply } = reserved.unwrap()
+    const { expectedRevision } = split.unwrap()
     return d.dispatch(name, args, this.source, {
       ...(expectedRevision === undefined ? {} : { expectedRevision }),
       ...(opts.gesture === undefined ? {} : { gesture: opts.gesture }),
+      ...(isDocument && this.autoApplies && apply !== false ? { apply: true } : {}),
     })
+  }
+
+  /**
+   * Agents, the CLI and automation auto-apply per call; windows apply on Enter or the button
+   * (docs/architecture/apply.md#agents-mcp-and-cli).
+   */
+  private get autoApplies(): boolean {
+    return (
+      this.source.kind === 'agent' ||
+      this.source.kind === 'cli' ||
+      this.source.kind === 'automation'
+    )
+  }
+
+  /**
+   * A successful library write of an auto-applying session applies its bound project (a library
+   * change is pending in projects whose draft plans copy it); the result gains `applied`.
+   */
+  private async afterLibraryWrite(
+    r: AppResult<CommandOutcome>,
+  ): Promise<AppResult<CommandOutcome>> {
+    if (r.isErr() || !this.autoApplies) return r
+    const bound = this.bound()
+    if (bound.isNone()) return r
+    const applied = await bound.unwrap().dispatch('project.apply', {}, this.source)
+    if (applied.isErr()) {
+      const { stack: _stack, ...error } = applied.unwrapErr().toJSON()
+      return Ok({ ...r.unwrap(), applied: { error } })
+    }
+    return Ok({ ...r.unwrap(), applied: applied.unwrap().value as ApplyOutcome })
   }
 
   /** open/create/restore bind the session; closing the bound project unbinds it. */
@@ -526,6 +567,22 @@ function logList(d: Dispatcher, q: LogQuery) {
     gap,
     more: matching.length > q.limit,
   }
+}
+
+/**
+ * Removes the reserved `apply` (default true) of a project-scope document command before
+ * dispatch; `apply: false` leaves the change pending (docs/architecture/apply.md#agents-mcp-and-cli).
+ */
+export function splitApply(rawArgs: unknown): AppResult<{ args: unknown; apply?: boolean }> {
+  if (!isPlainObject(rawArgs) || !(APPLY_KEY in rawArgs)) return Ok({ args: rawArgs })
+  const { [APPLY_KEY]: apply, ...args } = rawArgs
+  if (apply === undefined) return Ok({ args })
+  if (typeof apply !== 'boolean')
+    return fail('input.malformed', 'apply must be a boolean', {
+      where: 'AgentSession',
+      issues: [{ path: [APPLY_KEY], rule: 'boolean', message: 'expected true or false' }],
+    })
+  return Ok({ args, apply })
 }
 
 /** Removes the reserved `expectedRevision` (decision 12) before dispatch. */

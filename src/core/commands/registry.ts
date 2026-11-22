@@ -8,7 +8,15 @@ import { DESIGN_COMMANDS, DESIGN_QUERIES } from '../design/commands'
 import { FEEDS_SPEEDS_QUERIES } from '../feeds-speeds/commands'
 import { LIBRARY_COMMANDS, LIBRARY_QUERIES } from '../library/commands'
 import { draftPlanAutoRebuild, PLAN_COMMANDS, PLAN_QUERIES } from '../plan/commands'
-import type { AnyCommand, DocumentHook, QueryDef } from './define'
+import type {
+  AnyCommand,
+  ApplyHook,
+  ApplyJob,
+  ApplyWarnings,
+  DocumentHook,
+  QueryDef,
+} from './define'
+import { projectApply, projectPendingGet } from './apply'
 import { projectSave } from '../project/commands'
 import { toolpathGenerateJob, toolpathGet } from '../toolpath/generate'
 import { planExport } from '../post/plan-export'
@@ -23,6 +31,7 @@ export const NAME_PATTERN =
 
 /** Commands executed by the dispatcher itself; always registered. */
 export const BUILTIN_COMMANDS: readonly AnyCommand[] = [
+  projectApply,
   historyUndo,
   historyRedo,
   jobPause,
@@ -31,7 +40,12 @@ export const BUILTIN_COMMANDS: readonly AnyCommand[] = [
 ]
 
 /** Queries answered from dispatcher state (`ctx.jobs`, `ctx.history`); always registered. */
-export const BUILTIN_QUERIES: readonly QueryDef[] = [jobGet, jobList, historyList]
+export const BUILTIN_QUERIES: readonly QueryDef[] = [
+  jobGet,
+  jobList,
+  historyList,
+  projectPendingGet,
+]
 
 /**
  * Project scope: commands and queries of one open project (its dispatcher); added by their
@@ -65,6 +79,36 @@ export const APP_SCOPE_QUERIES: readonly QueryDef[] = [
 /** Document hooks of the app (docs/architecture/commands.md#document-hooks). */
 export const APP_HOOKS: readonly DocumentHook[] = [draftPlanAutoRebuild]
 
+/**
+ * Apply hooks of the app, in this order (docs/architecture/apply.md#apply-hooks). Empty until
+ * task P2 moves the deferred reactions here: `design.toolAutoChoice`, then `plan.draftFollow`.
+ */
+export const APPLY_HOOKS: readonly ApplyHook[] = []
+
+/** Apply jobs of the app (docs/architecture/apply.md#apply-jobs); toolpaths of kept-current plans join in P2. */
+export const APPLY_JOBS: readonly ApplyJob[] = []
+
+/** `ApplyOutcome.warnings`: `design.warning.list` of each affected part (parts it cannot read are left out). */
+export const designApplyWarnings: ApplyWarnings = (doc, partIds, ctx) => {
+  const query = DESIGN_QUERIES.find((q) => q.name === 'design.warning.list')
+  if (query === undefined) return []
+  return partIds.flatMap((partId) => {
+    if (!Object.hasOwn(doc.parts, partId)) return []
+    const r = query.run(doc, { partId }, ctx)
+    if (r.isErr()) return []
+    const value = r.unwrap() as { warnings?: unknown[] }
+    return [{ partId, warnings: value.warnings ?? [] }]
+  })
+}
+
+/** Hooks, apply hooks, apply jobs and apply warnings of a project registry. */
+const APPLY_DEFS = {
+  hooks: APP_HOOKS,
+  applyHooks: APPLY_HOOKS,
+  applyJobs: APPLY_JOBS,
+  applyWarnings: designApplyWarnings,
+}
+
 export interface Registry {
   command(name: string): Option<AnyCommand>
   query(name: string): Option<QueryDef>
@@ -73,6 +117,11 @@ export interface Registry {
   readonly queries: readonly QueryDef[]
   /** Run after every successful document command, in this order (commands.md#document-hooks). */
   readonly hooks: readonly DocumentHook[]
+  /** Run by `project.apply`, in this order (docs/architecture/apply.md#apply-hooks). */
+  readonly applyHooks: readonly ApplyHook[]
+  readonly applyJobs: readonly ApplyJob[]
+  /** Computes `ApplyOutcome.warnings`; absent = none. */
+  readonly applyWarnings?: ApplyWarnings
 }
 
 /** Builds a registry (built-ins included). Invalid definitions are bugs → `internal.unexpected`. */
@@ -80,6 +129,9 @@ export function createRegistry(defs: {
   readonly commands?: readonly AnyCommand[]
   readonly queries?: readonly QueryDef[]
   readonly hooks?: readonly DocumentHook[]
+  readonly applyHooks?: readonly ApplyHook[]
+  readonly applyJobs?: readonly ApplyJob[]
+  readonly applyWarnings?: ApplyWarnings
   /** Register the built-ins (default true; the app-scope registry has none: no history, no jobs). */
   readonly builtins?: boolean
 }): AppResult<Registry> {
@@ -114,12 +166,19 @@ export function createRegistry(defs: {
     commands,
     queries,
     hooks: [...(defs.hooks ?? [])],
+    applyHooks: [...(defs.applyHooks ?? [])],
+    applyJobs: [...(defs.applyJobs ?? [])],
+    ...(defs.applyWarnings === undefined ? {} : { applyWarnings: defs.applyWarnings }),
   })
 }
 
 /** Registry of a project dispatcher: built-ins plus `PROJECT_COMMANDS` / `PROJECT_QUERIES`. */
 export function createProjectRegistry(): AppResult<Registry> {
-  return createRegistry({ commands: PROJECT_COMMANDS, queries: PROJECT_QUERIES, hooks: APP_HOOKS })
+  return createRegistry({
+    commands: PROJECT_COMMANDS,
+    queries: PROJECT_QUERIES,
+    ...APPLY_DEFS,
+  })
 }
 
 /** Registry of the app-scope dispatcher: library, feeds and speeds, project lifecycle; no built-ins. */
@@ -140,6 +199,6 @@ export function createAppRegistry(): AppResult<Registry> {
   return createRegistry({
     commands: [...PROJECT_COMMANDS, ...LIBRARY_COMMANDS],
     queries: [...PROJECT_QUERIES, ...LIBRARY_QUERIES, ...FEEDS_SPEEDS_QUERIES],
-    hooks: APP_HOOKS,
+    ...APPLY_DEFS,
   })
 }

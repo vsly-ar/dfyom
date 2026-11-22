@@ -12,6 +12,7 @@ import type { ToolpathCache } from '../toolpath/cache'
 import type { ExportFiles } from '../post/plan-export'
 import type { JobHandle, WorkerPort } from './jobs'
 import type { HistoryEntry } from './history'
+import type { ApplyView } from './apply'
 import type { HostPort } from '../project/lifecycle'
 import type { MachineService } from '../run/service'
 import type { Option } from '../../shared/result'
@@ -125,6 +126,8 @@ export interface QueryContext {
   readonly jobs?: JobDirectory
   /** The dispatcher's undo/redo stacks (`history.list`); absent without a dispatcher. */
   readonly history?: HistoryView
+  /** The dispatcher's pending changes and apply jobs (`project.pending.get`); absent without one. */
+  readonly apply?: ApplyView
 }
 
 /** Read-only view of a dispatcher's linear history (docs/architecture/commands.md#undo--redo). */

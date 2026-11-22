@@ -21,6 +21,8 @@ export const projectSave = defineCommand({
   summary: 'Save the project to its file, or to a new file (Save As).',
   title: (a) => (a.target === undefined ? 'Save' : 'Save as'),
   machine: false,
+  // apply first: docs/architecture/apply.md#implicit-apply
+  applyFirst: true,
   args: z.object({
     target: z
       .string()

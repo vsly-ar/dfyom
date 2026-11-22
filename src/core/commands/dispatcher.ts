@@ -6,7 +6,7 @@
  */
 import { freeze } from 'immer'
 import { summarizeArgs } from '../../shared/boundary'
-import type { AppError } from '../../shared/errors/app-error'
+import type { AppError, AppErrorData } from '../../shared/errors/app-error'
 import { parseArgs } from './args'
 import {
   Err,
@@ -39,12 +39,30 @@ import {
   type Services,
   type Source,
 } from './context'
-import type { AnyCommand, BuiltinCommand, DocumentCommand } from './define'
+import {
+  applyTitle,
+  EMPTY_APPLY,
+  pendingChanges,
+  type ApplyOutcome,
+  type ApplyView,
+  type LastApply,
+  type PendingChange,
+  type PendingChangeInfo,
+} from './apply'
+import type {
+  AnyCommand,
+  ApplyJobStart,
+  BuiltinCommand,
+  DocumentCommand,
+  JobCommand,
+} from './define'
 import {
   applyDocPatches,
   DEFAULT_HISTORY_LIMITS,
   entrySize,
+  executeApplyHooks,
   executeDocumentCommand,
+  type Patch,
   History,
   type HistoryEntry,
   type HistoryLimits,
@@ -61,14 +79,31 @@ export interface DispatchOptions {
    * gesture, source and command with nothing committed since (commands.md#gestures-live-edits).
    */
   readonly gesture?: string
+  /**
+   * Auto-apply (agents, CLI, automation; set by the session core): a successful `document`
+   * command is followed by `project.apply` in the same queue turn, and the outcome gains
+   * `applied` (docs/architecture/apply.md#agents-mcp-and-cli).
+   */
+  readonly apply?: boolean
 }
+
+/** `applied` of an auto-applied call: the Apply's outcome, or why it failed (the edit stays). */
+export type AppliedResult = ApplyOutcome | { readonly error: AppErrorData }
 
 /** Ok result of a dispatch. A job's `value` is `{ jobId }`. */
 export interface CommandOutcome {
   readonly value: unknown
-  /** Revision after the command. */
+  /** Revision after the command (after its Apply, when auto-applied). */
   readonly revision: number
+  /** Present when the command was auto-applied (`DispatchOptions.apply`). */
+  readonly applied?: AppliedResult
 }
+
+/** How an Apply was asked for; only the logged args differ. */
+type ApplyMode =
+  | { readonly kind: 'explicit'; readonly args: unknown }
+  | { readonly kind: 'auto' }
+  | { readonly kind: 'before'; readonly command: string }
 
 /** Ok result of a query: the value and the revision it read. */
 export interface QueryOutcome {
@@ -128,6 +163,8 @@ export interface Dispatcher {
   job(jobId: string): Option<JobHandle>
   /** Running and retained finished jobs (`checkNoRunJob`, closing a project aborts them). */
   readonly jobs: JobDirectory
+  /** Pending changes and apply state (docs/architecture/apply.md#queries-for-pending-state). */
+  readonly applyState: ApplyView
   /**
    * Records `revision` as `source`'s read (stale-write baseline): an adapter showed the source
    * the document at that revision, e.g. the result of a `project.open` that started this
@@ -145,6 +182,8 @@ export interface Dispatcher {
 
 /** Commands that can change `ProjectDoc` are subject to the stale-write rule. */
 function writesDocument(def: AnyCommand): boolean {
+  // `project.apply` writes only derived state from the current document: exempt from the
+  // baseline rule (apply.md § Concurrency and stale writes); `expectedRevision` still holds.
   return def.kind === 'document' || def.name === 'history.undo' || def.name === 'history.redo'
 }
 
@@ -174,6 +213,17 @@ class ProjectDispatcher implements Dispatcher {
     get: (jobId) => this.job(jobId),
     list: () => [...this.runs.values()],
   }
+  /** The document at open: the baseline while no Apply marker exists (apply.md § Baseline). */
+  private readonly opened: ProjectDoc
+  /** Last commit per touched record (`parts/<id>`, `snapshots/<id>`, …), for pending provenance. */
+  private readonly touched = new Map<string, { source: Source; revision: number }>()
+  private lastCommit: { source: Source; revision: number } | undefined
+  private pendingCache: { doc: ProjectDoc; base: ProjectDoc; changes: PendingChange[] } | undefined
+  private lastApplyInfo: LastApply | null = null
+  /** Running apply jobs by supersede key; the job ids of the last Apply (retry of failures). */
+  private readonly applyRuns = new Map<string, string>()
+  private lastApplyJobIds: readonly string[] = []
+  private readonly applyView: ApplyView
 
   constructor(o: DispatcherOptions) {
     this.registry = o.registry
@@ -191,6 +241,68 @@ class ProjectDispatcher implements Dispatcher {
       ...(o.onListenerError === undefined ? {} : { onListenerError: o.onListenerError }),
     })
     this.undo = new History(o.historyLimits ?? DEFAULT_HISTORY_LIMITS)
+    this.opened = this.current
+    const pending = () => this.pendingInfo()
+    const applying = () => this.runningApplyJobs()
+    const lastApply = () => this.lastApplyInfo
+    this.applyView = {
+      pending,
+      get applying() {
+        return applying()
+      },
+      get lastApply() {
+        return lastApply()
+      },
+    }
+  }
+
+  get applyState(): ApplyView {
+    return this.applyView
+  }
+
+  /** Baseline: the newest marker at or below the top of the undo stack, else the opened document. */
+  private baselineDoc(): ProjectDoc {
+    return this.undo.baseline() ?? this.opened
+  }
+
+  private pendingNow(): PendingChange[] {
+    const doc = this.current
+    const base = this.baselineDoc()
+    const c = this.pendingCache
+    if (c !== undefined && c.doc === doc && c.base === base) return c.changes
+    const changes = pendingChanges(doc, base)
+    this.pendingCache = { doc, base, changes }
+    return changes
+  }
+
+  /** Pending changes with the last commit that touched their part (or its stock snapshot). */
+  private pendingInfo(): PendingChangeInfo[] {
+    const fallback = this.lastCommit ?? {
+      source: { kind: 'system', id: 'open' } as Source,
+      revision: this.rev,
+    }
+    return this.pendingNow().map((c) => {
+      const part = c.partId === undefined ? undefined : this.current.parts[c.partId]
+      const keys = [
+        ...(c.partId === undefined ? [] : [`parts/${c.partId}`, 'parts/*']),
+        ...(part === undefined ? [] : [`snapshots/${part.stock}`, 'snapshots/*']),
+        ...(c.planId === undefined ? [] : [`plans/${c.planId}`, 'plans/*']),
+      ]
+      let by: { source: Source; revision: number } | undefined
+      for (const k of keys) {
+        const t = this.touched.get(k)
+        if (t !== undefined && (by === undefined || t.revision > by.revision)) by = t
+      }
+      const found = by ?? fallback
+      return { ...c, source: found.source, revision: found.revision }
+    })
+  }
+
+  private runningApplyJobs(): string[] {
+    return [...this.applyRuns.values()].filter((id) => {
+      const j = this.runs.get(id)
+      return j !== undefined && j.state !== 'finished'
+    })
   }
 
   get doc(): ProjectDoc {
@@ -253,6 +365,7 @@ class ProjectDispatcher implements Dispatcher {
       services: this.services,
       jobs: this.jobDirectory,
       history: this.history,
+      apply: this.applyView,
     })
     if (value.isErr()) return Err(value.unwrapErr())
     if (def.readsDocument !== false) this.recordBaseline(source, revision)
@@ -341,16 +454,25 @@ class ProjectDispatcher implements Dispatcher {
       const verdict = allowed.isOk() ? allowed.unwrap() : Err(allowed.unwrapErr())
       if (verdict.isErr()) return this.logged(def.name, args, source, Err(verdict.unwrapErr()))
     }
-    // 6. + 7. Execute by kind; each branch logs exactly one dispatch event
-    const ctx: CommandContext = {
-      source,
-      ids: this.ids,
-      clock: this.clock,
-      services: this.services,
+    // Implicit apply (apply.md § Implicit apply): its own event and entry, in this queue turn
+    if (this.appliesFirst(def, args)) {
+      const applied = this.runApply(source, { kind: 'before', command: def.name })
+      if (applied.isErr())
+        return this.logged(
+          def.name,
+          args,
+          source,
+          Err(applied.unwrapErr().withContext(`apply before ${def.name}`)),
+        )
     }
+    // 6. + 7. Execute by kind; each branch logs exactly one dispatch event
+    const ctx = this.context(source)
     switch (def.kind) {
-      case 'document':
-        return this.runDocument(def, args, ctx, opts.gesture)
+      case 'document': {
+        const done = this.runDocument(def, args, ctx, opts.gesture)
+        if (opts.apply !== true || done.isErr()) return done
+        return Ok(this.autoApply(done.unwrap(), source))
+      }
       case 'effect': {
         const ran = await tryAsync(
           () => def.run(this.current, args, ctx),
@@ -368,8 +490,147 @@ class ProjectDispatcher implements Dispatcher {
       case 'job':
         return this.startJob(def, args, ctx)
       case 'builtin':
+        if (def.name === 'project.apply') return this.runApply(source, { kind: 'explicit', args })
         return this.runBuiltin(def, args, source)
     }
+  }
+
+  private context(source: Source): CommandContext {
+    return { source, ids: this.ids, clock: this.clock, services: this.services }
+  }
+
+  private appliesFirst(def: AnyCommand, args: unknown): boolean {
+    const f = def.applyFirst as boolean | ((a: unknown) => boolean) | undefined
+    return typeof f === 'function' ? f(args) : f === true
+  }
+
+  /** The edit stays committed whatever the Apply does; its error goes into `applied`. */
+  private autoApply(done: CommandOutcome, source: Source): CommandOutcome {
+    const applied = this.runApply(source, { kind: 'auto' })
+    if (applied.isErr()) {
+      const { stack: _stack, ...error } = applied.unwrapErr().toJSON()
+      return { ...done, revision: this.rev, applied: { error } }
+    }
+    return { ...done, revision: this.rev, applied: applied.unwrap().value as ApplyOutcome }
+  }
+
+  /** Whether a job of the last Apply failed (then an Apply with nothing pending retries). */
+  private failedApplyJobs(): boolean {
+    return this.lastApplyJobIds.some((id) => {
+      const o = this.runs.get(id)?.outcome
+      return o !== undefined && o.isErr() && o.unwrapErr().code !== 'op.aborted'
+    })
+  }
+
+  /**
+   * `project.apply` (apply.md § Steps): document phase (apply hooks → one "Apply N changes"
+   * entry, or none), the apply marker, then the job phase. Everything that can fail runs before
+   * the commit; a failure leaves document, history and pending set unchanged.
+   */
+  private runApply(source: Source, mode: ApplyMode): AppResult<CommandOutcome> {
+    const name = 'project.apply'
+    const logArgs =
+      mode.kind === 'explicit'
+        ? mode.args
+        : mode.kind === 'auto'
+          ? { auto: true }
+          : { before: mode.command }
+    const pending = this.pendingNow()
+    if (pending.length === 0 && !this.failedApplyJobs())
+      return this.logged(name, logArgs, source, Ok({ value: EMPTY_APPLY, revision: this.rev }))
+    const ctx = this.context(source)
+    const ran = executeApplyHooks(this.current, this.registry.applyHooks, pending, ctx)
+    if (ran.result.isErr()) return this.logged(name, logArgs, source, Err(ran.result.unwrapErr()))
+    const contributions = ran.result.unwrap()
+    const changed = ran.patches.length > 0
+    const partIds = [...new Set(pending.flatMap((c) => (c.partId === undefined ? [] : [c.partId])))]
+    const prepared = tryCatch(
+      () => ({
+        title: applyTitle(pending.length),
+        size: changed
+          ? entrySize({ args: logArgs, patches: ran.patches, inversePatches: ran.inversePatches })
+          : 0,
+        jobs: this.registry.applyJobs.flatMap((j) => j.jobs(ran.next, pending, ctx)),
+        warnings:
+          this.registry.applyWarnings?.(ran.next, partIds, {
+            source,
+            services: this.services,
+            jobs: this.jobDirectory,
+            history: this.history,
+          }) ?? [],
+      }),
+      'internal.unexpected',
+      'project.apply: preparing the entry, jobs or warnings failed',
+    )
+    if (prepared.isErr()) return this.logged(name, logArgs, source, Err(prepared.unwrapErr()))
+    const { title, size, jobs, warnings } = prepared.unwrap()
+    const starts: { start: ApplyJobStart; def: JobCommand }[] = []
+    for (const start of jobs) {
+      const found = this.registry.command(start.command)
+      const def = found.isSome() ? found.unwrap() : undefined
+      if (def?.kind !== 'job')
+        return this.logged(
+          name,
+          logArgs,
+          source,
+          fail('internal.unexpected', `apply job ${start.command} is not a registered job`, {
+            where: name,
+          }),
+        )
+      starts.push({ start, def })
+    }
+    // Commit: nothing below may fail.
+    const frozenSource = freeze({ kind: source.kind, id: source.id }, true)
+    const revisionBefore = this.rev
+    if (changed) this.commit(ran.next, frozenSource, ran.patches, { derived: true })
+    const runs = starts.map(({ start, def }) => {
+      const superseded = this.applyRuns.get(start.key)
+      if (superseded !== undefined) this.runs.get(superseded)?.abort()
+      const job = this.createJob(def, start.args, ctx)
+      this.applyRuns.set(start.key, job.id)
+      return job
+    })
+    const outcome: ApplyOutcome = {
+      changes: pending.length,
+      entrySeq: changed ? this.actionLog.lastSeq + 1 : null,
+      toolChanges: contributions.flatMap((c) => [...(c.toolChanges ?? [])]),
+      plans: contributions.flatMap((c) => [...(c.plans ?? [])]),
+      jobIds: runs.map((j) => j.id),
+      warnings,
+    }
+    const event = this.emit(frozenSource, {
+      type: 'command',
+      name,
+      args: summarizeArgs(logArgs),
+      outcome: toWire(Ok(outcome)),
+      ...(changed ? { patches: ran.patches } : {}),
+    })
+    if (changed)
+      this.undo.push(
+        {
+          seq: event.seq,
+          command: name,
+          args: logArgs,
+          source: frozenSource,
+          title,
+          patches: ran.patches,
+          inversePatches: ran.inversePatches,
+          revisionBefore,
+          revisionAfter: this.rev,
+          at: event.at,
+        },
+        size,
+      )
+    this.undo.markApplied(this.current)
+    this.lastApplyInfo = {
+      entrySeq: changed ? event.seq : null,
+      revision: this.rev,
+      at: event.at,
+      source: { kind: source.kind, id: source.id },
+    }
+    this.lastApplyJobIds = outcome.jobIds
+    for (const job of runs) job.start()
+    return Ok({ value: outcome, revision: this.rev })
   }
 
   private checkRevision(def: AnyCommand, source: Source, opts: DispatchOptions): AppResult<void> {
@@ -409,7 +670,7 @@ class ProjectDispatcher implements Dispatcher {
     args: unknown,
     ctx: CommandContext,
     gesture: string | undefined,
-  ) {
+  ): AppResult<CommandOutcome> {
     const ran = executeDocumentCommand(this.current, def, args, ctx, this.registry.hooks)
     if (ran.result.isErr())
       return this.logged(def.name, args, ctx.source, Err(ran.result.unwrapErr()))
@@ -430,7 +691,7 @@ class ProjectDispatcher implements Dispatcher {
     const source = freeze({ kind: ctx.source.kind, id: ctx.source.id }, true)
     const revisionBefore = this.rev
     const merges = gesture !== undefined && this.continuesGesture(gesture, source, def.name)
-    this.commit(ran.next, source)
+    this.commit(ran.next, source, ran.patches)
     const outcome = Ok({ value, revision: this.rev })
     const event = this.emit(source, {
       type: 'command',
@@ -458,11 +719,15 @@ class ProjectDispatcher implements Dispatcher {
     return outcome
   }
 
-  /** The top undo entry is this gesture's, by this source and command, with nothing committed since. */
+  /**
+   * The top undo entry is this gesture's, by this source and command, with nothing committed
+   * since and no Apply in between (an Apply without changes marks the top entry).
+   */
   private continuesGesture(gesture: string, source: Source, command: string): boolean {
     const top = this.undo.peekUndo()
     return (
       top !== undefined &&
+      !this.undo.topApplied() &&
       top.gesture === gesture &&
       top.command === command &&
       sourceKey(top.source) === sourceKey(source) &&
@@ -470,10 +735,26 @@ class ProjectDispatcher implements Dispatcher {
     )
   }
 
-  private commit(next: ProjectDoc, source: Source): void {
+  /**
+   * `derived` (an Apply): the source's stale-write baseline advances only if it was current, so
+   * applying someone else's pending edits never counts as reading them.
+   */
+  private commit(
+    next: ProjectDoc,
+    source: Source,
+    patches: readonly Patch[],
+    opts: { derived?: boolean } = {},
+  ): void {
+    const wasCurrent = this.baseline.get(sourceKey(source)) === this.rev
     this.current = next
     this.rev += 1
-    this.recordBaseline(source, this.rev)
+    if (opts.derived !== true || wasCurrent) this.recordBaseline(source, this.rev)
+    const by = { source, revision: this.rev }
+    this.lastCommit = by
+    for (const p of patches) {
+      const [root, id] = p.path
+      this.touched.set(`${String(root)}/${id === undefined ? '*' : String(id)}`, by)
+    }
   }
 
   private runBuiltin(
@@ -486,9 +767,12 @@ class ProjectDispatcher implements Dispatcher {
       const gesture = isUndo ? (args as { gesture?: string }).gesture : undefined
       const top = isUndo ? this.undo.peekUndo() : this.undo.peekRedo()
       // a gesture cancel only reverts the caller's own top entry of that gesture
+      // ...and not once an Apply marked it (apply.md § Adjust popover)
       const entry =
         gesture === undefined ||
-        (top?.gesture === gesture && sourceKey(top.source) === sourceKey(source))
+        (top?.gesture === gesture &&
+          sourceKey(top.source) === sourceKey(source) &&
+          !this.undo.topApplied())
           ? top
           : undefined
       if (entry === undefined)
@@ -501,7 +785,7 @@ class ProjectDispatcher implements Dispatcher {
       const patches = isUndo ? entry.inversePatches : entry.patches
       const applied = applyDocPatches(this.current, patches)
       if (applied.isErr()) return this.logged(def.name, args, source, Err(applied.unwrapErr()))
-      this.commit(applied.unwrap(), source)
+      this.commit(applied.unwrap(), source, patches)
       if (gesture !== undefined) this.undo.discardTop()
       else if (isUndo) this.undo.markUndone()
       else this.undo.markRedone()
@@ -546,6 +830,19 @@ class ProjectDispatcher implements Dispatcher {
     args: unknown,
     ctx: CommandContext,
   ): AppResult<CommandOutcome> {
+    const job = this.createJob(def, args, ctx)
+    const out = this.logged(
+      def.name,
+      args,
+      ctx.source,
+      Ok({ value: { jobId: job.id }, revision: this.rev }),
+    )
+    job.start() // the queue is released when this returns
+    return out
+  }
+
+  /** A registered job run, not started yet (its lifecycle events are logged). */
+  private createJob(def: JobCommand, args: unknown, ctx: CommandContext): JobRun {
     const jobId = this.ids.next('job')
     const job = new JobRun(def, this.current, args, ctx, {
       id: jobId,
@@ -563,14 +860,7 @@ class ProjectDispatcher implements Dispatcher {
       },
     })
     this.runs.set(jobId, job)
-    const out = this.logged(
-      def.name,
-      args,
-      ctx.source,
-      Ok({ value: { jobId }, revision: this.rev }),
-    )
-    job.start() // the queue is released when this returns
-    return out
+    return job
   }
 
   /** Keeps the newest `maxFinishedJobs` finished jobs; evicted ids answer like unknown ones. */

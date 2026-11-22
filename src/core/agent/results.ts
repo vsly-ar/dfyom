@@ -44,7 +44,11 @@ export function toToolResult(call: SessionCallResult): ToolCallResult {
     }
   }
   const outcome = call.result.unwrap()
-  const structured = { value: outcome.value, revision: outcome.revision }
+  const structured = {
+    value: outcome.value,
+    revision: outcome.revision,
+    ...(outcome.applied === undefined ? {} : { applied: outcome.applied }),
+  }
   const lines = [JSON.stringify(structured)]
   if (call.kind === 'job') lines.push('Job started; wait with job_wait { jobId }.')
   return {

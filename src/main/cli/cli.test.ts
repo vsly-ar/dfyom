@@ -214,6 +214,26 @@ describe('dfyom CLI', { timeout: 60_000 }, () => {
     expect(locks()).toEqual([])
   })
 
+  it('batch: "apply": false leaves an edit pending until a project.apply line', async () => {
+    const lines = [
+      { name: 'project.create', args: { name: 'Pending', unitSystem: 'mm' } },
+      { name: 'design.part.add', args: { name: 'P', stockLibraryItemId: stock }, apply: false },
+      { name: 'project.pending.get', args: {} },
+      { name: 'project.apply', args: {} },
+      { name: 'project.pending.get', args: {} },
+    ].map((l) => JSON.stringify(l))
+    const r = await cli(['batch'], lines.join('\n'))
+    const out = r.stdout
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l) as { ok: boolean; value: unknown; applied?: unknown })
+    expect(out.map((o) => o.ok)).toEqual([true, true, true, true, true])
+    expect(out[1]?.applied).toBeUndefined()
+    expect(out[2]?.value).toMatchObject({ count: 1 })
+    expect(out[3]?.value).toMatchObject({ changes: 1 })
+    expect(out[4]?.value).toMatchObject({ count: 0 })
+  })
+
   it('SIGTERM shuts down under control: locks released, unsaved changes recoverable, 143', async () => {
     const p = spawnCli(['batch'], t.dir)
     p.send({ name: 'project.create', args: { name: 'Signalled', unitSystem: 'mm' } })
