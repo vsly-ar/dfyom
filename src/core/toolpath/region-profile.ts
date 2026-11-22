@@ -33,7 +33,7 @@ import {
 import { TOOL_FIT_TOLERANCE } from './pocket'
 import { tangentAt } from './region-pocket'
 import { elementSeg, linkInside, loopRing, ringClosest, ringFrom, ringStart } from './region-rings'
-import { diskHitsGeneralBands, generalTabBands, type GeneralTabBand } from './region-tabs'
+import { diskHitsGeneralBands, generalTabBands, type GeneralTabBand } from '../geometry/tab-bands'
 import { liftOverTabs } from './tabs'
 
 export type RegionProfileSide = 'outside' | 'inside' | 'on'
