@@ -1,6 +1,6 @@
 # Reference model: import, place and show a 3D model for reference
 
-Status: accepted (user direction D15 of 2026-11-21; confirmed with the v0.2 review, D17 and D18 of 2026-11-22) · Design: [design.md § Workflow](design.md#workflow) step 4 · Storage: [persistence.md § Assets and references](../architecture/persistence.md#assets-and-references-v02) · UI rules: [ui.md § Viewport](../conventions/ui.md#reference-ghost-v02) · Apply: [apply.md](../architecture/apply.md) · Plan of record: [plans/v0.2.md](../plans/v0.2.md#5-reference-model) · Terms: [glossary.md](../glossary.md)
+Status: implemented (v0.2 closed 2026-11-22; user direction D15 of 2026-11-21; confirmed with the v0.2 review, D17 and D18; visuals approved, D25 of 2026-11-22) · Design: [design.md § Workflow](design.md#workflow) step 4 · Storage: [persistence.md § Assets and references](../architecture/persistence.md#assets-and-references-v02) · UI rules: [ui.md § Viewport](../conventions/ui.md#reference-ghost-v02) · Apply: [apply.md](../architecture/apply.md) · Plan of record: [plans/v0.2.md](../plans/v0.2.md#5-reference-model) · Terms: [glossary.md](../glossary.md)
 
 The user's direction (D15) is the full CAM cycle **with a reference model**: import a 3D model, recreate it in Design with typical operations, Plan, Run on the virtual machine. This doc covers the first step only, for v0.2: get an STL into the project, place it on the stock and show it as a ghost. Measuring, snapping and assisted recreation come later ([§ Later](#later)).
 
