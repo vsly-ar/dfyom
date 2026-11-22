@@ -22,6 +22,7 @@ export { EmptyState, type EmptyStateProps } from './EmptyState/EmptyState'
 export { ErrorMessage, errorDetails, type ErrorMessageProps } from './ErrorMessage/ErrorMessage'
 export {
   Field,
+  ReadOnlyReason,
   type FieldControlProps,
   type FieldMessage,
   type FieldProps,
@@ -58,7 +59,7 @@ export {
   type MachineState,
   type MachineStateBadgeProps,
 } from './MachineStateBadge/MachineStateBadge'
-export { Menu, type MenuEntry, type MenuProps } from './Menu/Menu'
+export { Menu, type MenuEntry, type MenuGroup, type MenuItem, type MenuProps } from './Menu/Menu'
 export { ModeSwitcher, type ModeSwitcherProps } from './ModeSwitcher/ModeSwitcher'
 export { useReducedMotion } from './motion'
 export {

@@ -27,6 +27,8 @@ import {
   type WarningView,
 } from '../../ui'
 import styles from './Design.module.css'
+import { featureOfWarning, ownerFeature } from './feature-view'
+import { FeatureInspector, OwnedOperationInspector, useFixIn, type FixIn } from './FeatureInspector'
 import { NameField } from './NameField'
 import { ReferenceInspector } from './ReferenceInspector'
 import { ShapeInspector } from './ShapeInspector'
@@ -74,9 +76,17 @@ export function warningView(
   part: DesignPart,
   apply: ((w: DfmWarning, source: string) => void) | undefined,
   onSelect?: (operationId: string) => void,
+  /** v0.4 (U1): the fix of a finding on a feature or an owned operation ("Fix in Hole 1"). */
+  fixIn?: FixIn,
 ): WarningView {
-  const name = (id: string) => part.dto.operations.find((o) => o.id === id)?.name ?? id
+  // a finding names an operation, or a feature (F5: Clones notes carry the feature id)
+  const name = (id: string) =>
+    part.dto.operations.find((o) => o.id === id)?.name ??
+    part.dto.features?.find((f) => f.id === id)?.name ??
+    id
   const source = dfmMessages.suggestionSource(w, part.units)
+  const elsewhere = fixIn?.(w)
+  if (elsewhere !== undefined || featureOfWarning(part, w) !== undefined) apply = undefined // an owned operation is fixed in its feature, never directly
   return {
     id: `${w.code}:${w.operation}:${w.parameter ?? ''}`,
     tier: pendingApply(w) ? 'soft' : dfmMessages.tier(w),
@@ -91,7 +101,9 @@ export function warningView(
             onApply: () => apply(w, source),
           },
         }
-      : {}),
+      : elsewhere !== undefined
+        ? { fix: elsewhere }
+        : {}),
   }
 }
 
@@ -112,9 +124,14 @@ export function DesignInspector({ part }: { part: DesignPart | undefined }): Rea
     return <ReferenceInspector key={ref.id} part={part} reference={ref} />
   const shape = part.dto.shapes?.find((s) => s.id === selected)
   if (shape !== undefined) return <ShapeInspector key={shape.id} part={part} shape={shape} />
+  const feature = part.dto.features?.find((f) => f.id === selected)
+  if (feature !== undefined)
+    return <FeatureInspector key={feature.id} part={part} feature={feature} warnings={warnings} />
   const op = part.dto.operations.find((o) => o.id === selected)
-  return op === undefined ? (
-    <PartInspector part={part} warnings={warnings} />
+  if (op === undefined) return <PartInspector part={part} warnings={warnings} />
+  const owner = ownerFeature(part.dto, op)
+  return owner !== undefined ? (
+    <OwnedOperationInspector key={op.id} part={part} op={op} feature={owner} warnings={warnings} />
   ) : (
     <OperationInspector key={op.id} part={part} op={op} warnings={warnings} />
   )
@@ -145,6 +162,7 @@ function PartInspector({
     setError(r.ok ? undefined : r.error)
   }
   const apply = (w: DfmWarning, source: string) => void applyWarning(call, part, w, source)
+  const fixIn = useFixIn(part)
   return (
     <div className={styles['inspector']}>
       <PanelHeader title={t.part} meta={t.partSummary(part.dto.operations.length)} />
@@ -179,7 +197,7 @@ function PartInspector({
           <h3 className={styles['groupTitle']}>{dfmMessages.listTitle}</h3>
           <WarningList
             labels={warningLabels}
-            items={warnings.warnings.map((w) => warningView(w, part, apply, select))}
+            items={warnings.warnings.map((w) => warningView(w, part, apply, select, fixIn))}
             empty={dfmMessages.none}
             {...(warnings.evaluation === 'pending' ? { note: dfmMessages.checksPending } : {})}
           />
@@ -206,7 +224,8 @@ async function applyWarning(
   source: string,
 ): Promise<void> {
   const op = part.dto.operations.find((o) => o.id === w.operation)
-  if (op === undefined || w.parameter === undefined) return
+  // owned operations are changed through their feature (design.featureOwned)
+  if (op === undefined || op.featureId !== undefined || w.parameter === undefined) return
   await call(`design.${op.kind}.update`, {
     partId: part.dto.id,
     operationId: op.id,

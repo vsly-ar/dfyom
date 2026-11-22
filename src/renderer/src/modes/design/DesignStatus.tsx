@@ -8,6 +8,7 @@ import { dfmMessages } from '../../messages/dfm'
 import { Icon, Popover, StatusChip, WarningList } from '../../ui'
 import { DELAY_INDICATOR_MS } from '../../viewport'
 import { warningLabels, warningView } from './DesignInspector'
+import { useFixIn } from './FeatureInspector'
 import { pendingApply } from './model'
 import styles from './Design.module.css'
 import { failingOperation } from './model'
@@ -40,6 +41,7 @@ export function DesignStatus(): React.JSX.Element | null {
   const [, select] = useDesignSelection()
   const call = useCommand()
   const [open, setOpen] = useState(false)
+  const fixIn = useFixIn(part)
   const updating = useLate(evaluation?.status === 'pending')
   if (part === undefined) return null
   const status = evaluation?.status
@@ -89,7 +91,8 @@ export function DesignStatus(): React.JSX.Element | null {
                   part,
                   (warning, source) => {
                     const op = part.dto.operations.find((o) => o.id === warning.operation)
-                    if (op === undefined || warning.parameter === undefined) return
+                    if (op === undefined || op.featureId !== undefined) return
+                    if (warning.parameter === undefined) return
                     void call(`design.${op.kind}.update`, {
                       partId: part.dto.id,
                       operationId: op.id,
@@ -99,6 +102,10 @@ export function DesignStatus(): React.JSX.Element | null {
                   (id) => {
                     select(id)
                     setOpen(false)
+                  },
+                  (w) => {
+                    const fix = fixIn(w)
+                    return fix && { ...fix, onApply: () => (fix.onApply(), setOpen(false)) }
                   },
                 ),
               )}

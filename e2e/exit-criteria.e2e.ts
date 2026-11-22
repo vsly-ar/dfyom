@@ -61,7 +61,7 @@ async function newTool(
 
 async function addFromMenu(page: Page, label: string): Promise<void> {
   const navigator = page.getByRole('navigation', { name: 'Navigator' })
-  await navigator.getByRole('button', { name: 'Add operation' }).click()
+  await navigator.getByRole('button', { name: 'Add', exact: true }).click()
   await page.getByRole('menuitem', { name: label }).click()
 }
 

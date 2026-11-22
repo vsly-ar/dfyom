@@ -35,6 +35,48 @@ describe('Menu', () => {
     expect(screen.getByRole('button', { name: 'Actions' })).toHaveFocus()
   })
 
+  it('groups items under labels; a disabled item with a reason stays focusable and does nothing', async () => {
+    const hole = vi.fn()
+    const clones = vi.fn()
+    const { user } = renderUi(
+      <Menu
+        items={[
+          { group: 'Operations', items: [{ label: 'Add facing', onSelect: () => {} }] },
+          {
+            group: 'Features',
+            items: [
+              { label: 'Add hole', onSelect: hole },
+              {
+                label: 'Make Clones…',
+                onSelect: clones,
+                disabledReason: 'Select a hole to clone.',
+              },
+            ],
+          },
+        ]}
+      >
+        <Button>Add</Button>
+      </Menu>,
+    )
+    await user.tab()
+    await user.keyboard('{Enter}')
+    const features = screen.getByRole('group', { name: 'Features' })
+    expect(screen.getByRole('group', { name: 'Operations' })).toBeInTheDocument()
+    const make = screen.getByRole('menuitem', { name: 'Make Clones…' })
+    expect(features).toContainElement(make)
+    expect(make).toHaveAttribute('aria-disabled', 'true')
+    expect(make).toHaveAccessibleDescription('Select a hole to clone.')
+    // reachable by arrows (aria-disabled, not skipped), choosing it keeps the menu open
+    await user.keyboard('{ArrowDown}{ArrowDown}')
+    expect(make).toHaveFocus()
+    await user.keyboard('{Enter}')
+    expect(clones).not.toHaveBeenCalled()
+    expect(screen.getByRole('menu')).toBeInTheDocument()
+    await expectNoAxeViolations()
+    await user.keyboard('{ArrowUp}{Enter}')
+    expect(hole).toHaveBeenCalledOnce()
+  })
+
   it('has no axe violations while open', async () => {
     renderUi(
       <Menu defaultOpen items={[{ label: 'Rename', onSelect: () => {} }]}>

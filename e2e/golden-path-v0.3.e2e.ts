@@ -95,7 +95,7 @@ async function setField(scope: Locator, label: string, value: string): Promise<v
 async function addOperation(page: Page, label: string, name: string): Promise<void> {
   await page
     .getByRole('navigation', { name: 'Navigator' })
-    .getByRole('button', { name: 'Add operation' })
+    .getByRole('button', { name: 'Add', exact: true })
     .click()
   await page.getByRole('menuitem', { name: label }).click()
   await expect(

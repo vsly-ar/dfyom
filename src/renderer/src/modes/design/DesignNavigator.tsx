@@ -5,8 +5,7 @@
 // evaluation. Between the part and the operations, the reference models (ReferenceRows.tsx, task
 // R3), then the named shapes (ShapeList.tsx, task U1). Doc: docs/conventions/ui.md#panels-and-inspectors, #confirmations, #undo-and-redo;
 // docs/modes/design.md#ordering-and-composition
-import { useRef, type KeyboardEvent } from 'react'
-import type { OperationDTO, OperationKind } from '../../../../core/design/part.dto'
+import type { OperationKind } from '../../../../core/design/part.dto'
 import type { UnitSystem } from '../../../../core/project/document'
 import { designMessages } from '../../messages/design'
 import { useSettings, useShell, useUi } from '../../shell/ShellContext'
@@ -20,16 +19,25 @@ import {
   ToastRegion,
   Icon,
   type IconName,
+  type MenuEntry,
 } from '../../ui'
 import styles from './Design.module.css'
+import { clonesSource } from './feature-view'
 import { addArgs, failingOperation, type DesignPart } from './model'
+import { OperationList } from './OperationList'
 import { ReferenceRows } from './ReferenceRows'
 import { ShapeList } from './ShapeList'
 import { StockSetup } from './StockSetup'
 import { useCommand, useDesignEvaluation, useDesignSelection, useDesignWarnings } from './useDesign'
 
+export { operationIcon } from './OperationList'
+
 const m = designMessages
+const f = m.features
+/** The empty list's buttons (design order of a typical part). */
 const KINDS: readonly OperationKind[] = ['facing', 'pocket', 'drilling', 'profile']
+/** The Add menu's Operations group (ui.md § Feature rows and Add). */
+const MENU_KINDS: readonly OperationKind[] = ['facing', 'pocket', 'profile', 'drilling']
 const ICON: Record<OperationKind, IconName> = {
   facing: 'facing',
   pocket: 'pocket',
@@ -37,11 +45,6 @@ const ICON: Record<OperationKind, IconName> = {
   profile: 'profile',
   // until L1 draws the chamfer icon: the tool that cuts it (not in KINDS: added with U4)
   chamfer: 'chamfer',
-}
-
-/** A profile cut on its line is a groove (B22-5: the bent slot). */
-export function operationIcon(op: OperationDTO): IconName {
-  return op.kind === 'profile' && op.side === 'on' ? 'groove' : ICON[op.kind]
 }
 
 export function DesignNavigator({
@@ -59,6 +62,14 @@ export function DesignNavigator({
       </>
     )
   return <PartNavigator part={part} />
+}
+
+/** The stock's size (mm) new operations are placed in; a default block without a stock. */
+function stockDims(part: DesignPart): { length: number; width: number; thickness: number } {
+  const s = part.loaded?.stock
+  return s
+    ? { length: s.length.canonical, width: s.width.canonical, thickness: s.thickness.canonical }
+    : { length: 100, width: 60, thickness: 20 }
 }
 
 function stockSummary(part: DesignPart): string | undefined {
@@ -80,7 +91,6 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
   const setRemoved = (name: string) => setRemovedToast(m.navigator.removed(name))
   // the default-anchor setting places new pockets and profiles (design-v0.2.md#placement-anchors)
   const defaultAnchor = useSettings((s) => s.settings.defaultAnchor)
-  const rows = useRef(new Map<string, HTMLButtonElement>())
   const ops = part.dto.operations
   const ids = ops.map((o) => o.id)
   const failedAt =
@@ -89,46 +99,75 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
       : undefined
 
   const add = async (kind: OperationKind) => {
-    const s = part.loaded?.stock
-    const dims = s
-      ? { length: s.length.canonical, width: s.width.canonical, thickness: s.thickness.canonical }
-      : { length: 100, width: 60, thickness: 20 }
     const r = await call(`design.${kind}.add`, {
       partId: part.dto.id,
-      ...addArgs(kind, dims, part.units, defaultAnchor),
+      ...addArgs(kind, stockDims(part), part.units, defaultAnchor),
     })
     if (r.ok) select((r.value as { operationId: string }).operationId)
   }
-  const move = async (op: OperationDTO, by: -1 | 1) => {
-    const to = ids.indexOf(op.id) + by
-    if (to < 0 || to >= ids.length) return
-    const r = await call('design.operation.move', {
+  // a hole with the core defaults (simple, 6 mm / 1/4" through) where a new drilling goes; the
+  // feature is selected so its inspector is what the user sees next (ui.md § Feature rows)
+  const addHole = async () => {
+    const { center } = addArgs('drilling', stockDims(part), part.units) as { center: string[] }
+    const r = await call('design.hole.add', { partId: part.dto.id, center })
+    if (r.ok) select((r.value as { featureId: string }).featureId)
+  }
+  // Make Clones… (until U3's draft): one Clones feature with the draft's first row – one clone
+  // along u, the source's width plus a 3 mm / 1/8" gap beside it – then its inspector
+  const cloneChoice = clonesSource(part, selected)
+  const makeClones = async () => {
+    if (!cloneChoice.ok) return
+    const du = cloneChoice.width + (part.units === 'mm' ? 3 : 3.175)
+    const r = await call('design.clones.add', {
       partId: part.dto.id,
-      operationId: op.id,
-      toIndex: to,
+      source: cloneChoice.source,
+      rows: [
+        {
+          kind: 'offset',
+          count: 1,
+          du: part.units === 'mm' ? `${+du.toFixed(3)} mm` : `${+(du / 25.4).toFixed(4)}"`,
+          dv: part.units === 'mm' ? '0 mm' : '0"',
+        },
+      ],
     })
-    if (r.ok) rows.current.get(op.id)?.focus()
+    if (r.ok) select((r.value as { featureId: string }).featureId)
   }
-  const remove = async (op: OperationDTO) => {
-    const r = await call('design.operation.remove', { partId: part.dto.id, operationId: op.id })
-    if (!r.ok) return
-    if (selected === op.id) select(null)
-    setRemoved(op.name)
-  }
-  const onRowKey = (e: KeyboardEvent, op: OperationDTO, index: number) => {
-    if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
-      e.preventDefault()
-      void move(op, e.key === 'ArrowUp' ? -1 : 1)
-      return
-    }
-    if (!e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
-      e.preventDefault()
-      const next = ops[index + (e.key === 'ArrowUp' ? -1 : 1)]
-      if (next) rows.current.get(next.id)?.focus()
-    }
-  }
+  const addItems: MenuEntry[] = [
+    {
+      group: f.groups.operations,
+      items: [
+        ...MENU_KINDS.map((k) => ({
+          label: m.add(k),
+          icon: <Icon name={ICON[k]} />,
+          onSelect: () => void add(k),
+        })),
+        // C2 adds `design.chamfer.add`; until then the item says why it is not there
+        {
+          label: f.addChamfer,
+          icon: <Icon name="chamfer" />,
+          onSelect: () => {},
+          disabledReason: f.chamferNotBuilt,
+        },
+      ],
+    },
+    {
+      group: f.groups.features,
+      items: [
+        {
+          label: f.addHole,
+          icon: <Icon name="hole-counterbore" />,
+          onSelect: () => void addHole(),
+        },
+        {
+          label: f.makeClones,
+          icon: <Icon name="clones" />,
+          onSelect: () => void makeClones(),
+          disabledReason: cloneChoice.ok ? undefined : cloneChoice.reason,
+        },
+      ],
+    },
+  ]
 
-  const count = (id: string) => warnings.filter((w) => w.operation === id).length
   const summary = stockSummary(part)
 
   return (
@@ -155,15 +194,8 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
         title={m.navigator.operations}
         meta={ops.length > 0 ? String(ops.length) : undefined}
         actions={
-          <Menu
-            label={m.addOperation}
-            items={KINDS.map((k) => ({
-              label: m.add(k),
-              icon: <Icon name={ICON[k]} />,
-              onSelect: () => void add(k),
-            }))}
-          >
-            <IconButton label={m.addOperation} icon={<Icon name="add" />} />
+          <Menu label={m.addMenu} items={addItems}>
+            <IconButton label={m.addMenu} icon={<Icon name="add" />} />
           </Menu>
         }
       />
@@ -184,70 +216,14 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
           </div>
         </div>
       ) : (
-        <ol className={styles['ops']} aria-label={m.navigator.listLabel}>
-          {ops.map((op, i) => {
-            const n = count(op.id)
-            const failed = failedAt === op.id
-            return (
-              <li
-                key={op.id}
-                className={styles['op']}
-                data-selected={selected === op.id ? '' : undefined}
-              >
-                <button
-                  type="button"
-                  ref={(el) => {
-                    if (el) rows.current.set(op.id, el)
-                    else rows.current.delete(op.id)
-                  }}
-                  className={styles['opSelect']}
-                  aria-pressed={selected === op.id}
-                  aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
-                  onClick={() => select(selected === op.id ? null : op.id)}
-                  onKeyDown={(e) => onRowKey(e, op, i)}
-                >
-                  <Icon name={operationIcon(op)} />
-                  <span className={styles['opName']}>{op.name}</span>
-                  <span className={styles['opId']}>{op.id}</span>
-                  {failed ? (
-                    <span className={styles['opFailed']} title={m.navigator.failed}>
-                      <Icon name="error" />
-                      <span className={styles['srOnly']}>{m.navigator.failed}</span>
-                    </span>
-                  ) : null}
-                  {n > 0 ? (
-                    <span className={styles['opBadge']}>
-                      <Icon name="warning" />
-                      <span aria-hidden="true">{n}</span>
-                      <span className={styles['srOnly']}>{m.navigator.warnings(n)}</span>
-                    </span>
-                  ) : null}
-                </button>
-                <span className={styles['opActions']}>
-                  <IconButton
-                    label={m.navigator.moveUp(op.name)}
-                    icon={<Icon name="arrow-up" />}
-                    shortcut="Alt+↑"
-                    disabled={i === 0}
-                    onClick={() => void move(op, -1)}
-                  />
-                  <IconButton
-                    label={m.navigator.moveDown(op.name)}
-                    icon={<Icon name="arrow-down" />}
-                    shortcut="Alt+↓"
-                    disabled={i === ops.length - 1}
-                    onClick={() => void move(op, 1)}
-                  />
-                  <IconButton
-                    label={m.navigator.remove(op.name)}
-                    icon={<Icon name="delete" />}
-                    onClick={() => void remove(op)}
-                  />
-                </span>
-              </li>
-            )
-          })}
-        </ol>
+        <OperationList
+          part={part}
+          warnings={warnings}
+          failedAt={failedAt}
+          selected={selected}
+          select={select}
+          onRemoved={setRemovedToast}
+        />
       )}
       <ToastRegion>
         {removed !== null ? (

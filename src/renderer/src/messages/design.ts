@@ -21,7 +21,86 @@ export const designMessages = {
       profile: 'Add profile',
       chamfer: 'Add chamfer',
     })[kind],
-  addOperation: 'Add operation',
+  /** The operation list's one Add menu (v0.4 task U1: was "Add operation"). */
+  addMenu: 'Add',
+
+  /** Features in the navigator and inspector (v0.4 task U1, ui.md § Features (v0.4)). */
+  features: {
+    groups: { operations: 'Operations', features: 'Features' },
+    addHole: 'Add hole',
+    addChamfer: 'Add chamfer',
+    makeClones: 'Make Clones…',
+    // until the chamfer operation (C2) and Clones (F5) are in the app
+    chamferNotBuilt: 'Not available yet: the chamfer operation is still being built.',
+    cloneReasons: {
+      select: 'Select a hole, pocket, drilling, chamfer or inside profile to clone.',
+      facing: 'A facing can’t be cloned.',
+      outside: 'An outside profile can’t be cloned: that would be a copy of the part.',
+      taken: (name: string, clones: string) => `${name} is already cloned by ${clones}.`,
+    },
+    operations: (n: number) => (n === 1 ? '1 operation' : `${n} operations`),
+    /** A feature row's accessible name; `aria-expanded` says collapsed or expanded. */
+    rowName: (p: { name: string; readout: string; operations: number; warnings: number }) =>
+      [
+        p.name,
+        p.readout.replace(' · ', ' '),
+        p.operations === 1 ? '1 operation' : `${p.operations} operations`,
+        ...(p.warnings > 0 ? [p.warnings === 1 ? '1 warning' : `${p.warnings} warnings`] : []),
+      ]
+        .filter((x) => x.length > 0)
+        .join(', '),
+    source: 'Source',
+    sourceOf: (name: string) => `Source of ${name}`,
+    clonesGroup: 'Clones',
+    rows: 'Rows',
+    instancesOf: (name: string) => `Instances of ${name}`,
+    instance: (n: number) => `Clone ${n}`,
+    skipped: 'Skipped',
+    duplicate: 'Same spot as an earlier clone',
+    ownedName: (opName: string, featureName: string) => `${opName}, edited through ${featureName}`,
+    expand: (name: string) => `Expand ${name}`,
+    collapse: (name: string) => `Collapse ${name}`,
+    removed: (name: string, n: number) =>
+      `Removed ${name} and its ${n === 1 ? 'operation' : `${n} operations`}`,
+    referenced: (surface: string, users: readonly string[]) =>
+      `${surface} is used by ${
+        users.length <= 2
+          ? users.join(' and ')
+          : `${users.slice(0, -1).join(', ')} and ${users.at(-1)}`
+      }.`,
+    breadcrumb: 'Breadcrumb',
+    editedThrough: 'Edited through',
+    readOnly: (featureName: string, kindLabel: string) =>
+      `Part of ${featureName}: change it in the ${kindLabel.toLowerCase()}.`,
+    fixIn: (featureName: string) => `Fix in ${featureName}`,
+    kindLabel: (kind: string) => ({ hole: 'Hole', clones: 'Clones' })[kind] ?? kind,
+    /** The minimal feature inspector until the kind's own (hole: U2). */
+    placeholder: 'Its values are shown here; editing them in this panel comes next.',
+    findings: 'Findings',
+    ownedGroup: 'Operations',
+    hole: {
+      group: 'Hole',
+      type: 'Type',
+      types: { simple: 'Simple', counterbore: 'Counterbore', countersink: 'Countersink' } as Record<
+        string,
+        string
+      >,
+      fastener: 'Fastener',
+      custom: 'Custom',
+      purpose: 'Purpose',
+      purposes: { clearance: 'Clearance', tapDrill: 'Tap drill' } as Record<string, string>,
+      fit: 'Fit',
+      fits: { close: 'Close', normal: 'Normal', loose: 'Loose' } as Record<string, string>,
+      diameter: 'Diameter',
+      depth: 'Depth',
+      through: 'Through',
+      cbDiameter: 'Counterbore Ø',
+      cbDepth: 'Counterbore depth',
+      headSink: 'Head sink',
+      center: 'Position',
+      on: 'On',
+    },
+  },
 
   stock: {
     title: 'Stock',
