@@ -53,7 +53,13 @@ Out of scope: general shapes, Shape Editor and SVG (v0.3); workholding and in-pr
 
 Tasks, exit criteria (the user's enclosure recreated with its real outline) and status: [plans/v0.3.md](plans/v0.3.md). Docs accepted first (2026-11-22, D29): [design-v0.3.md](modes/design-v0.3.md), [plan-v0.3.md](modes/plan-v0.3.md), [architecture/shapes.md](architecture/shapes.md) and [ADR 0019](decisions/0019-2d-geometry-library.md); the [ui.md](conventions/ui.md) amendment for the Shape Editor follows before the Shape UI tasks (plan task 1.5). A parallel UI lane (D27, 2026-11-22): the [library window](conventions/ui-library-window.md) (B24) and the [view cube](conventions/ui-view-cube.md) (B25). Right after v0.3: hole-type [features](modes/features.md) (B23, D27).
 
-Next after v0.3, in the direction's order (unscheduled): STEP import, assisted recreation and deviation view, the golden-path reference cycle with a UX pass, real-machine readiness, LLM-first readiness for full cycles, from-scratch complex parts.
+## v0.4 – Features (draft)
+
+**Draft** (proposed 2026-11-22, awaiting the user's answers Q28–Q35). Hole-type features (B23, D27) as planned right after v0.3: the feature model of [features.md](modes/features.md) (owned operations, read-only, removed only with their feature, D26), the **hole** feature (simple, counterbore, countersink) with ISO metric fastener tables (D30 Q7), the **chamfer operation** on circular edges with a **chamfer mill / V-bit** tool type (D30 Q12) for countersinks, and **Clones** in their first version (one face, source orientation kept, stable numbering; D30). Bounded to about v0.3's size: edge chamfers along shapes, the Field info views framework (D30 Q11), clone rotation, decorative patterns and inch tables come later.
+
+Tasks, exit criteria (a lid for the v0.3 enclosure: countersunk and counterbored holes repeated by Clones) and questions: [plans/v0.4.md](plans/v0.4.md). Docs to accept first: [design-v0.4.md](modes/design-v0.4.md), [plan-v0.4.md](modes/plan-v0.4.md), [features.md](modes/features.md) (feature model and Clones), a [ui.md](conventions/ui.md) amendment, and the `tools/list` budget decision in [llm-api.md](architecture/llm-api.md).
+
+Next after v0.4, in the direction's order (unscheduled): STEP import, assisted recreation and deviation view, the golden-path reference cycle with a UX pass, real-machine readiness, LLM-first readiness for full cycles, from-scratch complex parts.
 
 ## Later (unordered)
 
