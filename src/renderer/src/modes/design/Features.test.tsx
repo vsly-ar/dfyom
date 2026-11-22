@@ -161,9 +161,14 @@ describe('feature UI (U1)', () => {
     const note = within(insp).getByText(/^Edited through/)
     await user.click(within(note).getByRole('button', { name: 'Hole 1' }))
     expect(await within(inspector()).findByRole('heading', { name: 'Hole 1' })).toBeInTheDocument()
+    // the hole inspector (U2) focuses the Center X input
     await waitFor(() =>
-      expect(document.activeElement).toHaveAttribute('data-feature-field', 'center'),
+      expect(document.activeElement?.closest('[data-feature-field]')).toHaveAttribute(
+        'data-feature-field',
+        'center.0',
+      ),
     )
+    expect(document.activeElement).toHaveAccessibleName('Center X')
   })
 
   it('moves the whole block over a neighbour, keeps focus on the owned row, removes with a toast', async () => {

@@ -29,6 +29,7 @@ import {
 import styles from './Design.module.css'
 import { featureOfWarning, ownerFeature } from './feature-view'
 import { FeatureInspector, OwnedOperationInspector, useFixIn, type FixIn } from './FeatureInspector'
+import { HoleInspector } from './HoleInspector'
 import { NameField } from './NameField'
 import { ReferenceInspector } from './ReferenceInspector'
 import { ShapeInspector } from './ShapeInspector'
@@ -125,6 +126,8 @@ export function DesignInspector({ part }: { part: DesignPart | undefined }): Rea
   const shape = part.dto.shapes?.find((s) => s.id === selected)
   if (shape !== undefined) return <ShapeInspector key={shape.id} part={part} shape={shape} />
   const feature = part.dto.features?.find((f) => f.id === selected)
+  if (feature?.kind === 'hole')
+    return <HoleInspector key={feature.id} part={part} feature={feature} warnings={warnings} />
   if (feature !== undefined)
     return <FeatureInspector key={feature.id} part={part} feature={feature} warnings={warnings} />
   const op = part.dto.operations.find((o) => o.id === selected)
