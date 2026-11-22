@@ -231,6 +231,16 @@ UI rules and how they were settled: [ui.md § Implementation (U1)](../convention
 - **Shape Editor:** the shape flat in its own frame (the face-on view of the first operation that uses it comes with U2), the inspector's item list, fields and the path's segment table; every field commit and every handle drag is one undo step (`design.shape.item.update`, a drag as one gesture). Rotation, fillet and polygon corner radius have fields but no handles yet.
 - **Live outline** from the renderer's 2D port: the editor's outline while editing and dragging, and the 3D viewport's pending outline of operations with named or rotated shapes.
 
+## Implementation (U2)
+
+UI rules and how they were settled: [ui.md § Implementation (U2)](../conventions/ui.md#implementation-u2). For this mode:
+
+- **Operation inspector:** the shape picker (inline or named, "New shape…", "Edit shape", "Convert to shape"), rotation, mirror, side On with the blind depth, and the shape's issues with their fixes ("Use side On", "Round corners to ≥ r" through `design.shape.item.update` for named items).
+- **Tabs on shapes:** markers on the selected profile's loop, dragged or moved by keys as one undo step each; the Tabs group lists entered positions with "Space evenly" and "Add tab".
+- **SVG import** from the Shapes group's menu, with the report reopenable from the shape inspector. The U1 note on Import SVG being disabled no longer holds.
+- **Shape Editor** shows a used shape face-on, on the first operation's face, with the stock face and the face axes. The U1 note on "own frame only" no longer holds for used shapes.
+- **Plan findings** for `plan.stepoverClamped` read in the project's units.
+
 ## Answered questions
 
 Answered by the user with D29 (2026-11-22, every recommendation taken):
