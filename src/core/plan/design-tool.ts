@@ -6,6 +6,7 @@
  */
 import { None, Some, type Option } from '../../shared/result'
 import { designToolFromDTO, generalizedLabel } from '../design/tool'
+import { CHAMFER_ANGLE_TOLERANCE } from '../geometry/tool-fit'
 import type { DesignToolDTO, PartDTO } from '../design/part.dto'
 import type { LibraryItem } from '../library/library-item'
 import type { Tool } from '../library/tool'
@@ -41,6 +42,8 @@ export interface PlanDesignTool {
   readonly diameter: number
   /** Bull nose only. */
   readonly cornerRadius?: number
+  /** Chamfer mill only: included angle, degrees. */
+  readonly angle?: number
   /** "1/4" flat end mill" or the library tool's name. */
   readonly label: string
   /** Specific only: the plan copy (same id as the design's snapshot), its item and its tool. */
@@ -70,6 +73,7 @@ export function planDesignTool(plan: LoadedPlan, op: PlanOperationDTO): Option<P
       type: tool.type,
       diameter: tool.diameter.canonical,
       ...(tool.cornerRadius.isSome() && { cornerRadius: tool.cornerRadius.unwrap().canonical }),
+      ...(tool.angle.isSome() && { angle: tool.angle.unwrap().canonical }),
       label: tool.name,
       specific: { snapshotId: dto.snapshotId, libraryItemId: snap.libraryItemId, tool },
     })
@@ -84,14 +88,22 @@ export function planDesignTool(plan: LoadedPlan, op: PlanOperationDTO): Option<P
     type: t.type,
     diameter: t.diameter.canonical,
     ...(t.cornerRadius.isSome() && { cornerRadius: t.cornerRadius.unwrap().canonical }),
+    ...(t.angle.isSome() && { angle: t.angle.unwrap().canonical }),
     label: generalizedLabel(t),
   })
 }
 
-/** A library tool matching the design tool's type and diameter (and RE) within 0.01 mm. */
+/**
+ * A library tool matching the design tool's type and diameter (and RE) within 0.01 mm; a chamfer
+ * mill also its angle within 0.5° (design-v0.4.md § Chamfer operation).
+ */
 export function matchesDesign(tool: Tool, d: PlanDesignTool): boolean {
   if (tool.type !== d.type) return false
   if (Math.abs(tool.diameter.canonical - d.diameter) > MATCH_TOLERANCE) return false
+  if (tool.type === 'chamferMill') {
+    const angle = tool.angle.mapOr(Number.NaN, (q) => q.canonical)
+    return Math.abs(angle - (d.angle ?? Number.NaN)) <= CHAMFER_ANGLE_TOLERANCE
+  }
   if (tool.type !== 'bullNoseEndMill') return true
   const re = tool.cornerRadius.mapOr(0, (q) => q.canonical)
   return Math.abs(re - (d.cornerRadius ?? 0)) <= MATCH_TOLERANCE

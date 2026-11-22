@@ -29,6 +29,7 @@ import {
   chipThinning,
   cuttingPower,
   drillFeed,
+  chamferEffectiveDiameter,
   effectiveDiameter,
   feedRate,
   materialRemovalRate,
@@ -48,6 +49,12 @@ export type Engagement =
   | { readonly kind: 'stepover'; readonly ae: number }
   | { readonly kind: 'helix'; readonly ap: number }
   | { readonly kind: 'drill' }
+  /** A chamfer mill cutting `depth` mm below its tip (F10: speed and chip load at De). */
+  | { readonly kind: 'chamfer'; readonly depth: number }
+
+/** The engagement's fixed axial depth: the helix pitch or the chamfer depth; else undefined. */
+export const fixedAp = (e: Engagement): number | undefined =>
+  e.kind === 'helix' ? e.ap : e.kind === 'chamfer' ? e.depth : undefined
 
 /**
  * Locked values: fixed inputs the calculator recommends every other field around, in canonical
@@ -108,6 +115,7 @@ export type StepId =
   | 'F5'
   | 'F8'
   | 'F9'
+  | 'F10'
 
 /** One step of an explanation: rendered as a formula/tooltip, returned verbatim to agents. */
 export interface DerivationStep {
@@ -206,7 +214,8 @@ function contextOf(input: CuttingInput, data: readonly MaterialRow[]): Lookup {
   const none = (reason: string, params: Record<string, number | string>): Lookup => ({
     noData: noData(reason, params),
   })
-  if (isDrill !== (engagement.kind === 'drill'))
+  const isChamfer = tool.type === 'chamferMill'
+  if (isDrill !== (engagement.kind === 'drill') || isChamfer !== (engagement.kind === 'chamfer'))
     return none(`engagement "${engagement.kind}" does not fit a ${tool.type}`, {
       engagement: engagement.kind,
       toolType: tool.type,
@@ -224,14 +233,32 @@ function contextOf(input: CuttingInput, data: readonly MaterialRow[]): Lookup {
   const speed = speedOf(row)
   if (speed === undefined)
     return none(`no speed data for ${toolMaterial} in ${materialClass}`, { materialClass })
-  const D = tool.diameter.canonical
+  // a chamfer mill is treated as a flat end mill of its effective diameter at the depth (F10)
+  const chamfer = engagement.kind === 'chamfer' ? chamferStep(tool, engagement.depth) : undefined
+  const D = chamfer?.result ?? tool.diameter.canonical
   const band = bandOf(row, D)
   const range = band === undefined ? undefined : isDrill ? band.fn : band.fz
   if (band === undefined || range === undefined)
     return none(`no ${isDrill ? 'fn' : 'fz'} data for a ${D} mm tool`, { diameter: D })
   const rigidity = input.machine.mapOr(DEFAULT_RIGIDITY, (m) => m.rigidity)
   const locked = input.locked ?? {}
-  return { ctx: { input, row, speed, band, range, rigidity, D, locked } }
+  return {
+    ctx: { input, row, speed, band, range, rigidity, D, locked, ...(chamfer && { chamfer }) },
+  }
+}
+
+/** F10: the chamfer mill's effective diameter at `depth` below its tip. */
+function chamferStep(tool: Tool, depth: number): DerivationStep {
+  const DC = tool.diameter.canonical
+  const dt = tool.tipDiameterMm
+  const angle = tool.angle.mapOr(90, (q) => q.canonical)
+  return {
+    step: 'F10',
+    formula: 'De = dt + 2·depth·tan(α/2), ≤ DC',
+    inputs: { dt, depth, angle, DC },
+    result: chamferEffectiveDiameter(dt, depth, angle, DC),
+    unit: 'mm',
+  }
 }
 
 interface Ctx {
@@ -243,8 +270,11 @@ interface Ctx {
   /** `fz` (end mill) or `fn` (drill) range of the band. */
   readonly range: Range
   readonly rigidity: Rigidity
+  /** Tool diameter, or a chamfer mill's effective diameter De (F10). */
   readonly D: number
   readonly locked: LockedInputs
+  /** Chamfer engagement: the F10 step that gave `D`. */
+  readonly chamfer?: DerivationStep
 }
 
 type MillEngagement = Exclude<Engagement, { kind: 'drill' }>
@@ -254,8 +284,8 @@ function mill(c: Ctx, e: MillEngagement): CuttingSuggestion {
   const factors = RIGIDITY_FACTORS[c.rigidity]
   // Pocket and profile engage as a slot whatever the stepover; facing uses a locked stepover.
   const ae = e.kind === 'stepover' ? Math.min(c.locked.ae ?? e.ae, c.D) : c.D
-  // A fixed stepdown (locked, or the helix pitch) is used, not suggested.
-  const fixed = e.kind === 'helix' ? e.ap : c.locked.ap
+  // A fixed stepdown (locked, the helix pitch or the chamfer depth) is used, not suggested.
+  const fixed = fixedAp(e) ?? c.locked.ap
   if (fixed !== undefined) return millAt(c, ae, fixed, None).suggestion
 
   // Calculator-owned stepdown: apSlot × D × apFactor, ≤ fluteLength; reduced to fit the power.
@@ -331,6 +361,8 @@ function millAt(
   const axial = actf(RE, ap)
   const k = chipThinning(radial, axial)
   const fzSteps: DerivationStep[] = [
+    // a chart rpm skips F1, so the chamfer's De (it picked the fz band) shows here
+    ...(c.chamfer !== undefined && c.speed.field === 'n' ? [c.chamfer] : []),
     dataStep(row, 'fz', fz, 'mm', c.range),
     {
       step: 'F3',
@@ -378,7 +410,8 @@ function millAt(
     n = clampToSpindle(n0, machine, nSteps)
   } else {
     const f4: DerivationStep | undefined =
-      RE > 0
+      c.chamfer ??
+      (RE > 0
         ? {
             step: 'F4',
             formula: 'De = D − 2·RE + 2·√(ap·(2·RE − ap)) if ap < RE, else D',
@@ -386,7 +419,7 @@ function millAt(
             result: dCalc,
             unit: 'mm',
           }
-        : undefined
+        : undefined)
     const speed = dataSpeed(c, pos, dCalc, f4)
     nSteps = speed.steps
     n = clampRpm(speed.n0, machine, nSteps, warnings)
@@ -705,7 +738,7 @@ export function checkCutting(
     return chipLoadWarnings(values.vf / values.n, c.range, true).map(on('feedRate'))
   const D = c.D
   const ae = e.kind === 'stepover' ? Math.min(values.ae ?? e.ae, D) : D
-  const ap = e.kind === 'helix' ? e.ap : values.ap
+  const ap = fixedAp(e) ?? values.ap
   const RE = tool.effectiveCornerRadius.toNumber()
   const z = tool.fluteCount.canonical
   const k = chipThinning(rctf(ae, D), ap === undefined ? 1 : actf(RE, ap))
@@ -723,7 +756,7 @@ export function checkCutting(
           'Cutting power exceeds the spindle: reduce stepdown, stepover or feed.',
           { cuttingPower: pc, availablePower: pAvail },
         ),
-        field: e.kind === 'helix' ? 'feedRate' : 'stepdown',
+        field: fixedAp(e) === undefined ? 'stepdown' : 'feedRate',
       })
   }
   return out
@@ -756,7 +789,7 @@ export function cuttingAt(
       spindleLoad: None,
     })
   const ae = e.kind === 'stepover' ? Math.min(values.ae ?? e.ae, D) : D
-  const ap = e.kind === 'helix' ? e.ap : values.ap
+  const ap = fixedAp(e) ?? values.ap
   const RE = tool.effectiveCornerRadius.toNumber()
   const z = tool.fluteCount.canonical
   const k = chipThinning(rctf(ae, D), ap === undefined ? 1 : actf(RE, ap))

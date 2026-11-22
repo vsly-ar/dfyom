@@ -26,6 +26,7 @@ export const ToolArg = z
       type: z.enum(TOOL_TYPES),
       diameter: Len,
       cornerRadius: Len.optional().describe('Bull nose only: 0 < RE < DC/2'),
+      angle: z.string().min(1).max(64).optional().describe('chamferMill only: included angle'),
     }),
     z.object({ kind: z.literal('specific'), toolLibraryItemId: ItemIdSchema }),
   ])
@@ -95,18 +96,22 @@ export function toolFromArg(
       .map((snapshotId): DesignTool => ({ kind: 'specific', snapshotId }))
       .mapErr((e) => e.withContext(where))
   }
-  const parse = (field: string, src: string) =>
-    Quantity.parse(src, fieldContext('length', units)).mapErr((e) => e.prefixIssues('tool', field))
+  const parse = (field: string, src: string, kind: 'length' | 'angle' = 'length') =>
+    Quantity.parse(src, fieldContext(kind, units)).mapErr((e) => e.prefixIssues('tool', field))
   const diameter = parse('diameter', arg.diameter)
   const re: AppResult<Quantity | undefined> =
     arg.cornerRadius === undefined ? Ok(undefined) : parse('cornerRadius', arg.cornerRadius)
-  const parsed = collect<unknown>([diameter, re])
+  const angle: AppResult<Quantity | undefined> =
+    arg.angle === undefined ? Ok(undefined) : parse('angle', arg.angle, 'angle')
+  const parsed = collect<unknown>([diameter, re, angle])
   if (parsed.isErr()) return Err(parsed.unwrapErr().withContext(where))
   const r = re.unwrap()
+  const a = angle.unwrap()
   return checkGeneralizedTool({
     kind: 'generalized',
     type: arg.type,
     diameter: diameter.unwrap(),
     cornerRadius: r === undefined ? None : Some(r),
+    angle: a === undefined ? None : Some(a),
   }).mapErr((e) => e.prefixIssues('tool').withContext(where))
 }

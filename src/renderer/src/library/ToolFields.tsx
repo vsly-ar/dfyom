@@ -58,6 +58,7 @@ export function ToolFields({
   onNameTyped?: () => void
 }): React.JSX.Element {
   const full = variant === 'full'
+  const chamfer = values.type === 'chamferMill'
   const [focused, setFocused] = useState<ToolDimension | undefined>(undefined)
   // recommended presets follow every change of the tool (library.md#recommended-presets)
   const set = (patch: Partial<ToolDraft>) => onChange(followDraft({ ...values, ...patch }, units))
@@ -90,9 +91,14 @@ export function ToolFields({
     <>
       <Focusable field="type" onFocusField={onFocusField}>
         <Field label={m.type} messages={messages('type')}>
+          {/* a chamfer mill is shown, not offered: its form comes with task U4 */}
           <Select
-            options={TOOL_TYPES.map((t) => ({ value: t, label: m.types[t] }))}
+            options={TOOL_TYPES.filter((t) => t !== 'chamferMill' || chamfer).map((t) => ({
+              value: t,
+              label: m.types[t],
+            }))}
             value={values.type}
+            disabled={chamfer}
             onValueChange={(type) =>
               onChange(followDraft(withToolType(values, type, units), units))
             }
@@ -111,6 +117,8 @@ export function ToolFields({
         : null}
       {quantity('fluteCount', 'scalar', 'tool')}
       {values.type === 'drill' ? quantity('pointAngle', 'angle', 'chamfer') : null}
+      {chamfer ? quantity('angle', 'angle', 'chamfer') : null}
+      {chamfer ? quantity('tipDiameter', 'length', 'width', { optional: true }) : null}
     </>
   )
 

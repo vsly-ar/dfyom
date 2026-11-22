@@ -47,6 +47,9 @@ export function toolpathTool(tool: Tool, id: string): ToolpathTool {
     ...(tool.type === 'drill' && tool.pointAngle.isSome()
       ? { pointAngle: tool.pointAngle.unwrap().canonical }
       : {}),
+    ...(tool.type === 'chamferMill' && tool.angle.isSome()
+      ? { angle: tool.angle.unwrap().canonical, tipDiameter: tool.tipDiameterMm }
+      : {}),
   }
 }
 

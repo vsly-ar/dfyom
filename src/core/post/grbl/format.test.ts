@@ -44,6 +44,8 @@ describe('comments', () => {
     )
     expect(sanitizeComment('tab\there\nnew')).toBe('tab here new')
     expect(sanitizeComment('µ')).toBe('_')
+    // chamfer mill names (v0.4 C1): the degree sign reads as a word
+    expect(sanitizeComment('90° chamfer mill Ø12 mm')).toBe('90 deg chamfer mill dia12 mm')
   })
 
   it('truncate to 70 bytes', () => {

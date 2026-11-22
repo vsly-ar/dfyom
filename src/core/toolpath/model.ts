@@ -90,7 +90,8 @@ export interface Toolpath {
 
 // ---------------------------------------------------------------- generator inputs
 
-export type ToolpathToolType = 'flatEndMill' | 'bullNoseEndMill' | 'ballEndMill' | 'drill'
+export type ToolpathToolType =
+  'flatEndMill' | 'bullNoseEndMill' | 'ballEndMill' | 'drill' | 'chamferMill'
 
 /** The plan's tool copy, reduced to float64 mm (and degrees for `pointAngle`). */
 export interface ToolpathTool {
@@ -103,6 +104,9 @@ export interface ToolpathTool {
   readonly fluteLength: number
   /** Drill only (SIG, degrees). */
   readonly pointAngle?: number
+  /** Chamfer mill only: included angle (degrees) and tip diameter (0 = pointed). */
+  readonly angle?: number
+  readonly tipDiameter?: number
 }
 
 /** Resolved feeds and speeds (override → preset → calculator → strategy fallback). */

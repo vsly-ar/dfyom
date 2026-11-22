@@ -34,11 +34,13 @@ const REPLACE: Readonly<Record<string, string>> = {
   ø: 'dia',
   Ø: 'dia',
   '⌀': 'dia',
+  '°': ' deg',
 }
 
 /**
  * Comment text as printable ASCII GRBL cannot mistake for realtime commands: drops `?!~()` and
- * `;`, maps `″` → `in`, `ø`/`Ø`/`⌀` → `dia`, other whitespace → space, anything else → `_`.
+ * `;`, maps `″` → `in`, `ø`/`Ø`/`⌀` → `dia`, `°` → ` deg` ("90 deg chamfer mill"), other
+ * whitespace → space, anything else → `_`.
  */
 export function sanitizeComment(text: string): string {
   let out = ''

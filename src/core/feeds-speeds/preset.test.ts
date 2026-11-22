@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { None } from '../../shared/result'
 import { expectOk } from '../../shared/testing/result'
-import { flatEndMillValues, rpm } from '../library/library.fixture'
+import { deg, flatEndMillValues, len, rpm } from '../library/library.fixture'
 import { Tool } from '../library/tool'
 import type { ToolValuesDTO } from '../library/tool.dto'
 import { followRecommended, presetRecommendation } from './preset'
@@ -29,6 +29,29 @@ describe('presetRecommendation', () => {
     expect(r.feedRate).toBe(s.feedRate.unwrap().value)
     expect(r.plungeRate).toBe(s.plungeRate.unwrap().value)
     expect(r.stepdown).toBe(s.stepdown.unwrap().value)
+  })
+
+  it('a chamfer mill: the full cone (De = DC), no stepdown (v0.4 C1)', () => {
+    const vbit = expectOk(
+      Tool.fromDTO({
+        ...values(),
+        type: 'chamferMill',
+        diameter: len('12'),
+        angle: deg('90'),
+        presets: [],
+      }),
+    )
+    const r = presetRecommendation(vbit, 'aluminum').unwrap()
+    const s = suggestCutting({
+      tool: vbit,
+      materialClass: 'aluminum',
+      engagement: { kind: 'chamfer', depth: 6 },
+      machine: None,
+    })
+    expect(s.display.unwrap().dCalc).toBeCloseTo(12, 9)
+    expect(r.spindleSpeed).toBeCloseTo(s.spindleSpeed.unwrap().value, 6)
+    expect(r.feedRate).toBeCloseTo(s.feedRate.unwrap().value, 6)
+    expect(r.stepdown).toBeUndefined()
   })
 
   it('without data: the calculator reason', () => {

@@ -252,6 +252,35 @@ describe('suggestCutting: engagement and chip thinning', () => {
     const drill = tool({ type: 'drill', diameter: len('5'), pointAngle: deg('118') })
     expect(codes(suggest({ tool: drill }))).toEqual(['feeds.noData'])
   })
+
+  // Doc: docs/architecture/feeds-speeds.md#chamfer-mills-v04 (F10, task C1)
+  const vbit = (over: Record<string, unknown> = {}) =>
+    tool({ type: 'chamferMill', diameter: len('12'), angle: deg('90'), ...over })
+
+  it('chamfer: speed and chip load of a flat end mill of the effective diameter De (F10)', () => {
+    // 90° V-bit 2.5 mm deep: De = 5 mm → the ≤ 6 mm band (fz 0.02), not DC's ≤ 12 mm band
+    const s = suggest({ tool: vbit(), engagement: { kind: 'chamfer', depth: 2.5 } })
+    const n = (100 * 1000) / (Math.PI * 5)
+    expect(value(s.spindleSpeed)).toBeCloseTo(n, 6)
+    expect(value(s.feedRate)).toBeCloseTo(n * 2 * 0.02, 6)
+    expect(s.stepdown.isNone()).toBe(true) // one pass at the chamfer depth
+    expect(s.display.unwrap().dCalc).toBeCloseTo(5, 9)
+    const steps = s.spindleSpeed.unwrap().derivation.map((d) => d.step)
+    expect(steps).toEqual(['data', 'F10', 'F1'])
+    // a flat tip adds to De; past the cone De stays DC
+    const tipped = suggest({
+      tool: vbit({ tipDiameter: len('1') }),
+      engagement: { kind: 'chamfer', depth: 2.5 },
+    })
+    expect(tipped.display.unwrap().dCalc).toBeCloseTo(6, 9)
+    const deep = suggest({ tool: vbit(), engagement: { kind: 'chamfer', depth: 20 } })
+    expect(deep.display.unwrap().dCalc).toBe(12)
+  })
+
+  it('chamfer engagement needs a chamfer mill, and a chamfer mill a chamfer engagement', () => {
+    expect(codes(suggest({ engagement: { kind: 'chamfer', depth: 1 } }))).toEqual(['feeds.noData'])
+    expect(codes(suggest({ tool: vbit() }))).toEqual(['feeds.noData'])
+  })
 })
 
 describe('suggestCutting: machine clamps', () => {

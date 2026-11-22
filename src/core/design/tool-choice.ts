@@ -23,7 +23,7 @@ import type { MaterialClass } from '../library/item'
 import type { LibraryItem } from '../library/library-item'
 import { Snapshot } from '../library/snapshot'
 import { Tool } from '../library/tool'
-import type { ToolType } from '../library/tool.dto'
+import { isEndMillType, type ToolType } from '../library/tool.dto'
 import type { ProjectDoc, UnitSystem } from '../project/document'
 import { Quantity } from '../quantity/quantity'
 import type { Operation } from './operation'
@@ -41,6 +41,8 @@ export function dfmTool(tool: Tool): DfmTool {
     type: tool.type,
     diameter: tool.diameter.canonical,
     ...(tool.cornerRadius.isSome() && { cornerRadius: tool.cornerRadius.unwrap().canonical }),
+    ...(tool.angle.isSome() && { angle: tool.angle.unwrap().canonical }),
+    ...(tool.type === 'chamferMill' && { tipDiameter: tool.tipDiameterMm }),
     reach: tool.stickout.mapOr(tool.fluteLength.canonical, (s) => s.canonical),
   }
 }
@@ -59,6 +61,9 @@ export function generalizedDfmTool(t: GeneralizedTool): DfmTool {
     type: t.type,
     diameter: t.diameter.canonical,
     ...(t.cornerRadius.isSome() && { cornerRadius: t.cornerRadius.unwrap().canonical }),
+    ...(t.angle.isSome() && { angle: t.angle.unwrap().canonical }),
+    // a generalized chamfer mill is pointed
+    ...(t.type === 'chamferMill' && { tipDiameter: 0 }),
   }
 }
 
@@ -148,7 +153,7 @@ export function fitOf(tool: DfmTool, input: ChoiceInput): ToolUnfit | undefined 
 export function leavesRest(tool: DfmTool, input: ChoiceInput): boolean {
   const m = measureOf(input)
   return (
-    m !== undefined && tool.type !== 'drill' && m.rest(tool.diameter / 2 - FIT_SLACK).length > 0
+    m !== undefined && isEndMillType(tool.type) && m.rest(tool.diameter / 2 - FIT_SLACK).length > 0
   )
 }
 
@@ -198,6 +203,7 @@ export function generalizedChoice(input: ChoiceInput): Option<GeneralizedTool> {
       type: 'drill',
       diameter: plain(op.diameter),
       cornerRadius: None,
+      angle: None,
     }
     if (fits(drill)) return Some(drill)
   }
@@ -208,7 +214,7 @@ export function generalizedChoice(input: ChoiceInput): Option<GeneralizedTool> {
   let fallback: Option<GeneralizedTool> = None
   for (let i = sizes.length - 1; i >= 0; i--) {
     const diameter = Quantity.parse(sizes[i]!, { kind: 'length', defaultUnit: 'mm' }).unwrap()
-    const t: GeneralizedTool = { kind: 'generalized', type, diameter, cornerRadius }
+    const t: GeneralizedTool = { kind: 'generalized', type, diameter, cornerRadius, angle: None }
     // a bull nose needs RE < DC/2
     if (bullNose && cornerRadius.unwrap().canonical >= diameter.canonical / 2) continue
     if (!fits(t)) continue

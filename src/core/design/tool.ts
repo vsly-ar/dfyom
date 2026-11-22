@@ -2,13 +2,14 @@
  * The operation's tool field as a model: a generalized tool (type + diameter, no lengths) or a
  * specific library tool held as a tool snapshot of the project; its validation, labels and the
  * standard size series of the auto choice.
- * Doc: docs/modes/design-v0.2.md#operation-tool (data model, standard sizes)
+ * Doc: docs/modes/design-v0.2.md#operation-tool (data model, standard sizes),
+ * docs/modes/design-v0.4.md#chamfer-mill-tool-type (the generalized chamfer mill)
  */
 import type { Issue } from '../../shared/errors/app-error'
 import { fail, None, Ok, Some, type AppResult, type Option } from '../../shared/result'
 import { quantityFromDTO } from '../library/item'
 import type { Tool } from '../library/tool'
-import type { ToolType } from '../library/tool.dto'
+import { CHAMFER_MILL_ANGLE, type ToolType } from '../library/tool.dto'
 import { Quantity } from '../quantity/quantity'
 import type { UnitSystem } from '../project/document'
 import { Rational } from '../quantity/rational'
@@ -20,6 +21,8 @@ export interface GeneralizedTool {
   readonly diameter: Quantity
   /** RE: bull nose only, 0 < RE < DC/2. */
   readonly cornerRadius: Option<Quantity>
+  /** Included angle: chamfer mill only (required), 30°–150°; a generalized one is pointed. */
+  readonly angle: Option<Quantity>
 }
 
 export type DesignTool =
@@ -31,6 +34,7 @@ export const TOOL_TYPE_LABEL: Record<ToolType, string> = {
   bullNoseEndMill: 'bull-nose end mill',
   ballEndMill: 'ball end mill',
   drill: 'drill',
+  chamferMill: 'chamfer mill',
 }
 
 /** Issues of a generalized tool's values (paths relative to the tool); none = valid. */
@@ -63,6 +67,28 @@ export function generalizedToolIssues(t: GeneralizedTool): Issue[] {
       rule: 'notAllowed',
       message: 'is only stored for a bull nose',
     })
+  if (t.type === 'chamferMill') {
+    const { min, max } = CHAMFER_MILL_ANGLE
+    const a = t.angle
+    if (a.isNone())
+      issues.push({ path: ['angle'], rule: 'required', message: 'is required for a chamfer mill' })
+    else if (
+      a.unwrap().kind !== 'angle' ||
+      a.unwrap().canonical < min ||
+      a.unwrap().canonical > max
+    )
+      issues.push({
+        path: ['angle'],
+        rule: 'range',
+        message: `must be an angle between ${min}° and ${max}°`,
+        params: { min, max },
+      })
+  } else if (t.angle.isSome())
+    issues.push({
+      path: ['angle'],
+      rule: 'notAllowed',
+      message: 'is only stored for a chamfer mill',
+    })
   return issues
 }
 
@@ -82,11 +108,17 @@ export function designToolFromDTO(dto: DesignToolDTO): AppResult<DesignTool> {
       ? Ok<Option<Quantity>>(None)
       : quantityFromDTO(dto.cornerRadius, 'cornerRadius').map((q): Option<Quantity> => Some(q))
   if (re.isErr()) return re
+  const angle =
+    dto.angle === undefined
+      ? Ok<Option<Quantity>>(None)
+      : quantityFromDTO(dto.angle, 'angle').map((q): Option<Quantity> => Some(q))
+  if (angle.isErr()) return angle
   return checkGeneralizedTool({
     kind: 'generalized',
     type: dto.type,
     diameter: diameter.unwrap(),
     cornerRadius: re.unwrap(),
+    angle: angle.unwrap(),
   })
 }
 
@@ -97,14 +129,22 @@ export function designToolToDTO(t: DesignTool): DesignToolDTO {
     type: t.type,
     diameter: t.diameter.toDTO(),
     ...(t.cornerRadius.isSome() ? { cornerRadius: t.cornerRadius.unwrap().toDTO() } : {}),
+    ...(t.angle.isSome() ? { angle: t.angle.unwrap().toDTO() } : {}),
   } as DesignToolDTO
 }
 
-/** "1/4" flat end mill", "6 mm bull-nose end mill R1 mm", or the library tool's name. */
+/** "1/4" flat end mill", "6 mm bull-nose end mill R1 mm", "90° chamfer mill Ø12 mm". */
 export function generalizedLabel(t: GeneralizedTool): string {
+  if (t.type === 'chamferMill') {
+    const angle = t.angle.mapOr('', (a) => `${degrees(a)} `)
+    return `${angle}${TOOL_TYPE_LABEL[t.type]} Ø${withUnit(t.diameter)}`
+  }
   const re = t.cornerRadius.isSome() ? ` R${withUnit(t.cornerRadius.unwrap())}` : ''
   return `${withUnit(t.diameter)} ${TOOL_TYPE_LABEL[t.type]}${re}`
 }
+
+/** An angle as whole or decimal degrees: `90°`, `82.5°`. */
+const degrees = (a: Quantity): string => `${Number(a.canonical.toFixed(2))}°`
 
 /** A length's source with its unit: a bare `6` reads "6 mm" (or `6"` in an inch project). */
 function withUnit(q: Quantity): string {
@@ -125,6 +165,15 @@ export const STANDARD_SIZES: Record<UnitSystem, readonly string[]> = {
   mm: ['1 mm', '1.5 mm', '2 mm', '3 mm', '4 mm', '5 mm', '6 mm', '8 mm', '10 mm', '12 mm'],
   inch: ['1/32"', '1/16"', '1/8"', '3/16"', '1/4"', '5/16"', '3/8"', '1/2"'],
 }
+
+/**
+ * Standard sizes of generalized chamfer mills (design-v0.4.md § Chamfer mill tool type): 90°,
+ * Ø6/12 mm or Ø1/4″/1/2″, as entered. For the chamfer operation's auto choice (task C2).
+ */
+export const CHAMFER_MILL_STANDARD = {
+  angle: '90 deg',
+  sizes: { mm: ['6 mm', '12 mm'], inch: ['1/4"', '1/2"'] },
+} as const satisfies { angle: string; sizes: Record<UnitSystem, readonly string[]> }
 
 /** A length as a plain quantity (no tolerance) for a generalized tool: `6 mm`, `0.25"`. */
 export function plainLength(mm: Rational, units: UnitSystem): Quantity {

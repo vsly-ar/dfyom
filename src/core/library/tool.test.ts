@@ -59,6 +59,34 @@ describe('Tool', () => {
     expect(issues({ ...flat(), pointAngle: deg('118') })).toEqual([['pointAngle', 'notAllowed']])
   })
 
+  it('a chamfer mill needs an angle of 30°–150° and a tip 0 ≤ dt < DC; only it stores them', () => {
+    const chamfer = {
+      ...flat(),
+      type: 'chamferMill',
+      diameter: len('12'),
+      presets: [],
+      angle: deg('90'),
+    }
+    const t = expectOk(load(chamfer))
+    expect(t.angle.unwrap().canonical).toBe(90)
+    expect(t.tipDiameterMm).toBe(0) // absent = pointed
+    expect(t.toDTO()).toEqual(chamfer)
+    const flatTip = { ...chamfer, tipDiameter: len('0.5') }
+    expect(expectOk(load(flatTip)).tipDiameterMm).toBe(0.5)
+    expect(expectOk(load({ ...chamfer, tipDiameter: len('0') })).tipDiameterMm).toBe(0)
+    expect(expectOk(load(flatTip)).toDTO()).toEqual(flatTip)
+    expect(issues({ ...chamfer, angle: undefined })).toEqual([['angle', 'required']])
+    expect(issues({ ...chamfer, angle: deg('29') })).toEqual([['angle', 'range']])
+    expect(issues({ ...chamfer, angle: deg('151') })).toEqual([['angle', 'range']])
+    expect(expectOk(load({ ...chamfer, angle: deg('150') })).angle.unwrap().canonical).toBe(150)
+    expect(issues({ ...chamfer, tipDiameter: len('12') })).toEqual([['tipDiameter', 'range']])
+    expect(issues({ ...chamfer, tipDiameter: len('-1') })).toEqual([['tipDiameter', 'range']])
+    expect(issues({ ...flat(), angle: deg('90'), tipDiameter: len('0.2') })).toEqual([
+      ['angle', 'notAllowed'],
+      ['tipDiameter', 'notAllowed'],
+    ])
+  })
+
   it('checks lengths and the flute count', () => {
     expect(
       issues({

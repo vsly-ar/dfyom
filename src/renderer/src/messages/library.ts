@@ -152,6 +152,7 @@ export const libraryMessages = {
       bullNoseEndMill: 'Bull nose end mill',
       ballEndMill: 'Ball end mill',
       drill: 'Drill',
+      chamferMill: 'Chamfer mill / V-bit',
     } satisfies Record<ToolType, string>,
     /** Short type word of the suggested name ("Flat 6"). */
     shortTypes: {
@@ -159,6 +160,7 @@ export const libraryMessages = {
       bullNoseEndMill: 'Bull',
       ballEndMill: 'Ball',
       drill: 'Drill',
+      chamferMill: 'Chamfer',
     } satisfies Record<ToolType, string>,
     diameter: 'Diameter',
     cornerRadius: 'Corner radius',
@@ -170,6 +172,8 @@ export const libraryMessages = {
     shankNote: 'Optional: the collet size.',
     fluteCount: 'Flutes',
     pointAngle: 'Point angle',
+    angle: 'Included angle',
+    tipDiameter: 'Tip diameter',
     toolMaterial: 'Tool material',
     materials: { carbide: 'Carbide', hss: 'HSS', other: 'Other' } satisfies Record<
       ToolMaterial,

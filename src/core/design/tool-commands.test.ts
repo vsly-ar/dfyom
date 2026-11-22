@@ -26,7 +26,7 @@ import { testStock } from './design.fixture'
 import { loadPart } from './load'
 import { operationFromDTO, operationToDTO } from './operation'
 import type { DesignToolDTO, OperationDTO } from './part.dto'
-import { checkGeneralizedTool, designToolFromDTO } from './tool'
+import { checkGeneralizedTool, designToolFromDTO, designToolToDTO, generalizedLabel } from './tool'
 import { designToolAutoChoice, toolScan } from './tool-commands'
 
 const ui = uiSource()
@@ -157,12 +157,14 @@ describe('tool field model', () => {
 
   it('a generalized tool: diameter > 0; RE only and required for a bull nose, 0 < RE < DC/2', () => {
     const q = (s: string) => expectOk(Quantity.parse(s, { kind: 'length', defaultUnit: 'mm' }))
-    const g = (type: ToolType, d: string, re?: string) =>
+    const deg = (s: string) => expectOk(Quantity.parse(s, { kind: 'angle', defaultUnit: 'deg' }))
+    const g = (type: ToolType, d: string, re?: string, angle?: string) =>
       checkGeneralizedTool({
         kind: 'generalized',
         type,
         diameter: q(d),
         cornerRadius: re === undefined ? None : Some(q(re)),
+        angle: angle === undefined ? None : Some(deg(angle)),
       })
     expectOk(g('flatEndMill', '6'))
     expectOk(g('bullNoseEndMill', '6', '1'))
@@ -172,6 +174,11 @@ describe('tool field model', () => {
     expect(rules(g('bullNoseEndMill', '6'))).toEqual(['cornerRadius required'])
     expect(rules(g('bullNoseEndMill', '6', '3'))).toEqual(['cornerRadius range'])
     expect(rules(g('drill', '6', '1'))).toEqual(['cornerRadius notAllowed'])
+    // chamfer mill (v0.4 C1): angle required, 30°–150°, and only for a chamfer mill
+    expectOk(g('chamferMill', '12', undefined, '90'))
+    expect(rules(g('chamferMill', '12'))).toEqual(['angle required'])
+    expect(rules(g('chamferMill', '12', undefined, '160'))).toEqual(['angle range'])
+    expect(rules(g('flatEndMill', '6', undefined, '90'))).toEqual(['angle notAllowed'])
     // a broken record is reported under `tool`
     const bad = {
       kind: 'facing',
@@ -275,6 +282,29 @@ describe('design.operation.tool.set / lock / unlock', () => {
       args(generalized('flatEndMill', 'abc')),
       'quantity.syntax',
     )
+  })
+
+  it('a generalized chamfer mill (v0.4 C1): angle stored, labelled; it does not fit a pocket', async () => {
+    const s = await setup()
+    await s.pocket()
+    const args = (tool: object) => ({ partId: s.partId, operationId: 'pocket1', tool })
+    const r = await s.run(
+      'design.operation.tool.set',
+      args({ ...generalized('chamferMill', '12'), angle: '90' }),
+    )
+    const tool = toolOf(s, 'pocket1') as DesignToolDTO
+    expect(tool).toMatchObject({ kind: 'generalized', type: 'chamferMill' })
+    expect(src((tool as { angle: unknown }).angle)).toBe('90')
+    const g = expectOk(designToolFromDTO(tool))
+    expect(g.kind === 'generalized' && generalizedLabel(g)).toBe('90° chamfer mill Ø12 mm')
+    expect(designToolToDTO(g)).toEqual(tool)
+    expect((r as { warnings: DfmWarning[] }).warnings.map((w) => w.code)).toContain('dfm.toolUnfit')
+    const m = await s.failWith(
+      'design.operation.tool.set',
+      args(generalized('chamferMill', '12')),
+      'model.invariant',
+    )
+    expect(m.issues[0]).toMatchObject({ path: ['tool', 'angle'], rule: 'required' })
   })
 
   it('lock pins the current tool (none yet: model.invariant); unlock keeps the tool', async () => {

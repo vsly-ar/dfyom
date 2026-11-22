@@ -8,7 +8,14 @@ import { agentSource, fakeClock, fakeIds, uiSource } from '../commands/testing'
 import { newProjectDoc } from '../project/document'
 import { LIBRARY_COMMANDS, LIBRARY_QUERIES } from './commands'
 import { Library } from './library'
-import { flatEndMillValues, len, libraryInput, machineValues, stockValues } from './library.fixture'
+import {
+  deg,
+  flatEndMillValues,
+  len,
+  libraryInput,
+  machineValues,
+  stockValues,
+} from './library.fixture'
 import { createMemoryLibraryStorage } from './memory-storage'
 import { followRecommended } from '../feeds-speeds/preset'
 
@@ -105,6 +112,39 @@ describe('library commands', () => {
       diameter: len('6'),
       presets: [{ feedRate: { defaultUnit: 'mm/min' } }],
     })
+  })
+
+  it('adds and updates a chamfer mill (v0.4 C1): angle and tip as strings; invariants apply', async () => {
+    const { d, storage } = await setup()
+    const values = {
+      ...libraryInput(flatEndMillValues()),
+      name: 'V-bit 90',
+      type: 'chamferMill',
+      diameter: '12',
+      angle: '90',
+      presets: [],
+    }
+    const added = await add(d, 'tool', values)
+    expect(added).toMatchObject({ type: 'chamferMill', angle: deg('90'), diameter: len('12') })
+    expect(added).not.toHaveProperty('tipDiameter')
+    const updated = expectOk(
+      await d.dispatch(
+        'library.tool.update',
+        { id: added.id, revision: 1, values: { ...values, tipDiameter: '0.2' } },
+        agent,
+      ),
+    ).value
+    expect(updated).toMatchObject({ revision: 2, tipDiameter: len('0.2') })
+    const bad = expectErrCode(
+      await d.dispatch(
+        'library.tool.add',
+        { values: { ...values, angle: '20', tipDiameter: '12' } },
+        agent,
+      ),
+      'model.invariant',
+    )
+    expect(bad.issues.map((i) => i.path.join('.'))).toEqual(['values.angle', 'values.tipDiameter'])
+    expect(expectOk(await storage.list('tool'))).toHaveLength(1)
   })
 
   it('a bad quantity string fails like in every command: its code, path below values', async () => {

@@ -1,7 +1,7 @@
 /**
  * Recommended cutting presets: a preset with `recommended: true` follows the calculator for its
  * tool and material class, for no particular machine (full-width slot for end mills, drilling for
- * drills; lowest rigidity, no spindle or feed clamp).
+ * drills, the full cone for chamfer mills; lowest rigidity, no spindle or feed clamp).
  * Doc: docs/architecture/library.md#recommended-presets
  */
 import type { Issue } from '../../shared/errors/app-error'
@@ -15,7 +15,8 @@ import { Quantity } from '../quantity/quantity'
 import type { QuantityDTO } from '../quantity/quantity.dto'
 import type { QuantityKind } from '../quantity/units'
 import type { MaterialRow } from './data'
-import { noDataFor, suggestCutting, type CuttingInput } from './suggest'
+import { chamferFullDepth } from './formulas'
+import { noDataFor, suggestCutting, type CuttingInput, type Engagement } from './suggest'
 
 /** The values a recommended preset follows, canonical (rpm, mm/min, mm); absent = not suggested. */
 export interface PresetValues {
@@ -28,6 +29,22 @@ export interface PresetValues {
 export const FOLLOWED_FIELDS = ['spindleSpeed', 'feedRate', 'plungeRate', 'stepdown'] as const
 export type FollowedField = (typeof FOLLOWED_FIELDS)[number]
 
+/**
+ * A preset's engagement: drilling for a drill, the full cone (De = DC) for a chamfer mill, else a
+ * full-width slot.
+ */
+function presetEngagement(tool: Tool): Engagement {
+  if (tool.type === 'drill') return { kind: 'drill' }
+  if (tool.type === 'chamferMill') {
+    const angle = tool.angle.mapOr(90, (q) => q.canonical)
+    return {
+      kind: 'chamfer',
+      depth: chamferFullDepth(tool.tipDiameterMm, angle, tool.diameter.canonical),
+    }
+  }
+  return { kind: 'slot' }
+}
+
 /** The recommendation for `tool` in `materialClass`, or the calculator's reason it has none. */
 export function presetRecommendation(
   tool: Tool,
@@ -37,7 +54,7 @@ export function presetRecommendation(
   const input: CuttingInput = {
     tool,
     materialClass,
-    engagement: tool.type === 'drill' ? { kind: 'drill' } : { kind: 'slot' },
+    engagement: presetEngagement(tool),
     machine: None,
   }
   const noData = data === undefined ? noDataFor(input) : noDataFor(input, data)

@@ -72,7 +72,7 @@ PostOptions = { generator: string, spinUpSeconds?: number /* 3 */, firstToolLoad
 
 - **Precision:** mm 3 decimals, inch 4 decimals for coordinates and `I`/`J`; `F` 1 decimal (also in inch: 0.1 in/min = 2.54 mm/min steps, enough for v0.1 feeds); `S` integer; `P` 2 decimals. Round half away from zero from the decimal value, strip trailing zeros and a trailing `.`, normalize `-0` to `0`, no exponent, keep the leading `0` (`0.5`). `F` must be > 0 after rounding, else `Err('model.invariant')`.
 - **Line length:** GRBL's line buffer is 80 chars (`LINE_BUFFER_SIZE`, overflow = `error:11`); the 128-byte RX buffer counts every byte sent. DFYOM rule: every line ≤ 70 bytes including comments; longer comments are truncated, code lines never exceed it.
-- **Character set (safety):** GRBL picks realtime commands out of the stream at any position, including inside comments: `?`, `!`, `~` and every byte ≥ 0x80 (overrides, door, jog cancel). The post therefore emits **printable ASCII only**, and comment text drops `?!~()`, `;` and non-ASCII (`″` → `in`, `ø` → `dia`, others → `_`).
+- **Character set (safety):** GRBL picks realtime commands out of the stream at any position, including inside comments: `?`, `!`, `~` and every byte ≥ 0x80 (overrides, door, jog cancel). The post therefore emits **printable ASCII only**, and comment text drops `?!~()`, `;` and non-ASCII (`″` → `in`, `ø` → `dia`, `°` → ` deg` for chamfer mill names, others → `_`).
 - **Comments:** `(text)` on their own line, no nesting; no `;` comments.
 
 ### Determinism and tests
