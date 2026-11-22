@@ -16,6 +16,7 @@
     "src/preload/**/*",
     "src/core/**/*",
     "src/shared/**/*",
-    "src/renderer/src/ui/tokens.test.ts"
+    "src/renderer/src/ui/tokens.test.ts",
+    "src/renderer/src/messages/copy.test.ts"
   ]
 }

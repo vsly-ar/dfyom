@@ -92,6 +92,8 @@ export const designMessages = {
       tool: 'Tool',
     },
     generalTolerance: 'General tolerance (length)',
+    /** The empty field's placeholder: no scope sets one, so untoleranced lengths are exact. */
+    generalToleranceNone: 'None: lengths are exact',
     shapeKind: 'Shape',
     shapes: { rectangle: 'Rectangle', circle: 'Circle' },
     centerX: 'Center X',

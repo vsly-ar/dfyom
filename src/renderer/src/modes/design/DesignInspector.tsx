@@ -152,8 +152,10 @@ function PartInspector({
           kind="length"
           defaultUnit={defaultUnit('length', part.units)}
           value={tolerance === undefined ? undefined : quantityOf(tolerance)}
+          placeholder={t.generalToleranceNone}
+          optional
           onCommit={(q, gesture) =>
-            void updatePart({ generalTolerance: { length: q.source } }, gesture)
+            void updatePart({ generalTolerance: { length: q?.source ?? null } }, gesture)
           }
           onCancelGesture={cancelGesture}
         />

@@ -2,7 +2,7 @@
 // other code the core's message, sentence-cased. Doc: docs/modes/plan-v0.2.md#implementation-task-e4
 import { describe, expect, it } from 'vitest'
 import type { PlanWarning } from '../../../core/plan/checks'
-import { findingText } from './plan'
+import { findingText, planMessages } from './plan'
 
 const finding = (over: Partial<PlanWarning>): PlanWarning =>
   ({
@@ -65,5 +65,20 @@ describe('plan finding texts', () => {
 
   it('keeps the core message, sentence-cased, for other codes', () => {
     expect(findingText(finding({}))).toBe('No tool assigned.')
+  })
+})
+
+describe('plan status texts', () => {
+  it('leaves the face out of a setup subtitle when the name already says it', () => {
+    expect(planMessages.setup.rowMeta('top', 'front left', 0, 'Top')).toBe('G54 front left · 0°')
+    expect(planMessages.setup.rowMeta('top', 'front left', 90, 'Flip')).toBe(
+      'Top · G54 front left · 90°',
+    )
+    expect(planMessages.setup.rowMeta('bottom', undefined, 0)).toBe('Bottom · 0°')
+  })
+
+  it('counts errors and warnings, never notes', () => {
+    expect(planMessages.warnings.count(0, 0)).toBe('0 warnings')
+    expect(planMessages.warnings.count(1, 2)).toBe('1 error, 2 warnings')
   })
 })

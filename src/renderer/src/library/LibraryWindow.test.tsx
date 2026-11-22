@@ -86,6 +86,8 @@ describe('Library window', () => {
     await user.click(screen.getByRole('tab', { name: 'Machines' }))
     expect(await screen.findByRole('grid', { name: 'Machines' })).toBeInTheDocument()
     expect(screen.getByText('No machines yet.')).toBeInTheDocument()
+    // the empty list says how to start; the editor does not ask to select an item
+    expect(editor().textContent).toBe('')
     await expectNoAxeViolations()
   })
 

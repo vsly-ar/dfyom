@@ -107,8 +107,8 @@ test('setup panel: setups in machining order, reorder, rotation and one program 
   const setupRow = (name: RegExp) => setups.getByRole('button', { name })
   /** Clicks a row at its start: with keyboard focus its move and menu buttons overlay its end. */
   const pick = (name: RegExp) => setupRow(name).click({ position: { x: 24, y: 12 } })
-  await expect(setupRow(/^1\. Bottom/)).toContainText('Bottom · G54 back left · 0°')
-  await expect(setupRow(/^2\. Top/)).toContainText('Top · G54 front left · 0°')
+  await expect(setupRow(/^1\. Bottom/)).toContainText('G54 back left · 0°')
+  await expect(setupRow(/^2\. Top/)).toContainText('G54 front left · 0°')
   await expect(
     navigator
       .getByRole('list', { name: 'Plan operations of Top in machining order' })

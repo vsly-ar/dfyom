@@ -102,9 +102,11 @@ describe('Setup panel', () => {
     const t = await renderSetups()
     const [bottom, top] = t.setupRows()
     expect(bottom).toHaveTextContent('1. Bottom')
-    expect(bottom).toHaveTextContent('Bottom · G54 back left · 0°')
+    expect(bottom).toHaveTextContent('G54 back left · 0°')
+    // the name already says the face, so the subtitle leaves it out
+    expect(bottom).not.toHaveTextContent('Bottom · G54')
     expect(top).toHaveTextContent('2. Top')
-    expect(top).toHaveTextContent('Top · G54 front left · 0°')
+    expect(top).toHaveTextContent('G54 front left · 0°')
     // the bottom facing under Bottom, the top operations under Top
     const bottomOps = within(t.opsOf('Bottom')).getAllByRole('button', { name: /^Facing/ })
     expect(bottomOps).toHaveLength(1)

@@ -213,6 +213,11 @@
   color: inherit;
 }
 
+.input::placeholder {
+  color: var(--text-faint);
+  opacity: 1;
+}
+
 /* text overlay (FieldInput `overlay`): same font and origin as the input text, clipped to it */
 .slot {
   position: relative;

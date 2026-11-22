@@ -4,7 +4,14 @@
 import { describe, expect, it } from 'vitest'
 import type { PlanWarning } from '../../../../core/plan/checks'
 import type { PlanDTO, SetupDTO } from '../../../../core/plan/plan.dto'
-import { currentSetup, operationStep, setupCorner, setupExportBlocked } from './model'
+import {
+  currentSetup,
+  isError,
+  isWarning,
+  operationStep,
+  setupCorner,
+  setupExportBlocked,
+} from './model'
 
 const stock = { length: 100, width: 60, thickness: 20 }
 const height = { value: '5', unit: 'mm' } as unknown as SetupDTO['clearanceHeight']
@@ -78,5 +85,13 @@ describe('setupExportBlocked', () => {
     expect(setupExportBlocked([w({ planOperationId: 'a', severity: 'warning' })], s1)).toBe(false)
     expect(setupExportBlocked([w({ params: { setupId: 's2' } })], s1)).toBe(false)
     expect(setupExportBlocked([w({})], s1)).toBe(true)
+  })
+})
+
+describe('finding severity', () => {
+  it('counts only `warning` findings as warnings; `info` is a note', () => {
+    const f = (severity: PlanWarning['severity']) => ({ severity }) as PlanWarning
+    expect([f('error'), f('warning'), f('info')].map(isWarning)).toEqual([false, true, false])
+    expect([f('error'), f('warning'), f('info')].map(isError)).toEqual([true, false, false])
   })
 })
