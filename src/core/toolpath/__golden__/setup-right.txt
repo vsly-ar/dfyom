@@ -1,0 +1,84 @@
+toolpath planOp-18 tool snapshot-23 S3000
+stats cut 242.0705 rapid 30 s 98.6282
+pass rough
+  rapid 30 9 10
+  rapid 30 9 2
+  line 30 9 0 F150
+  arc 30 11 -0.1622 c 30 10 ccw F150
+  arc 30 9 -0.3243 c 30 10 ccw F150
+  arc 30 11 -0.4865 c 30 10 ccw F150
+  arc 30 9 -0.6486 c 30 10 ccw F150
+  arc 30 11 -0.8108 c 30 10 ccw F150
+  arc 30 9 -0.973 c 30 10 ccw F150
+  arc 30 11 -1.1351 c 30 10 ccw F150
+  arc 30 9 -1.2973 c 30 10 ccw F150
+  arc 30 11 -1.4595 c 30 10 ccw F150
+  arc 30 9 -1.6216 c 30 10 ccw F150
+  arc 30 11 -1.7838 c 30 10 ccw F150
+  arc 30 9 -1.9459 c 30 10 ccw F150
+  arc 30 11 -2.1081 c 30 10 ccw F150
+  arc 30 9 -2.2703 c 30 10 ccw F150
+  arc 30 11 -2.4324 c 30 10 ccw F150
+  arc 30 9 -2.5946 c 30 10 ccw F150
+  arc 30 11 -2.7568 c 30 10 ccw F150
+  arc 30 9 -2.9189 c 30 10 ccw F150
+  arc 30 11 -3.0811 c 30 10 ccw F150
+  arc 30 9 -3.2432 c 30 10 ccw F150
+  arc 30 11 -3.4054 c 30 10 ccw F150
+  arc 30 9 -3.5676 c 30 10 ccw F150
+  arc 30 11 -3.7297 c 30 10 ccw F150
+  arc 30 9 -3.8919 c 30 10 ccw F150
+  arc 30 11 -4.0541 c 30 10 ccw F150
+  arc 30 9 -4.2162 c 30 10 ccw F150
+  arc 30 11 -4.3784 c 30 10 ccw F150
+  arc 30 9 -4.5405 c 30 10 ccw F150
+  arc 30 11 -4.7027 c 30 10 ccw F150
+  arc 30 9 -4.8649 c 30 10 ccw F150
+  arc 30 11 -5.027 c 30 10 ccw F150
+  arc 30 9 -5.1892 c 30 10 ccw F150
+  arc 30 11 -5.3514 c 30 10 ccw F150
+  arc 30 9 -5.5135 c 30 10 ccw F150
+  arc 30 11 -5.6757 c 30 10 ccw F150
+  arc 30 9 -5.8378 c 30 10 ccw F150
+  arc 30 11 -6 c 30 10 ccw F150
+  arc 30 9 -6.1622 c 30 10 ccw F150
+  arc 30 11 -6.3243 c 30 10 ccw F150
+  arc 30 9 -6.4865 c 30 10 ccw F150
+  arc 30 11 -6.6486 c 30 10 ccw F150
+  arc 30 9 -6.8108 c 30 10 ccw F150
+  arc 30 11 -6.973 c 30 10 ccw F150
+  arc 30 9 -7.1351 c 30 10 ccw F150
+  arc 30 11 -7.2973 c 30 10 ccw F150
+  arc 30 9 -7.4595 c 30 10 ccw F150
+  arc 30 11 -7.6216 c 30 10 ccw F150
+  arc 30 9 -7.7838 c 30 10 ccw F150
+  arc 30 11 -7.9459 c 30 10 ccw F150
+  arc 30 9 -8.1081 c 30 10 ccw F150
+  arc 30 11 -8.2703 c 30 10 ccw F150
+  arc 30 9 -8.4324 c 30 10 ccw F150
+  arc 30 11 -8.5946 c 30 10 ccw F150
+  arc 30 9 -8.7568 c 30 10 ccw F150
+  arc 30 11 -8.9189 c 30 10 ccw F150
+  arc 30 9 -9.0811 c 30 10 ccw F150
+  arc 30 11 -9.2432 c 30 10 ccw F150
+  arc 30 9 -9.4054 c 30 10 ccw F150
+  arc 30 11 -9.5676 c 30 10 ccw F150
+  arc 30 9 -9.7297 c 30 10 ccw F150
+  arc 30 11 -9.8919 c 30 10 ccw F150
+  arc 30 9 -10.0541 c 30 10 ccw F150
+  arc 30 11 -10.2162 c 30 10 ccw F150
+  arc 30 9 -10.3784 c 30 10 ccw F150
+  arc 30 11 -10.5405 c 30 10 ccw F150
+  arc 30 9 -10.7027 c 30 10 ccw F150
+  arc 30 11 -10.8649 c 30 10 ccw F150
+  arc 30 9 -11.027 c 30 10 ccw F150
+  arc 30 11 -11.1892 c 30 10 ccw F150
+  arc 30 9 -11.3514 c 30 10 ccw F150
+  arc 30 11 -11.5135 c 30 10 ccw F150
+  arc 30 9 -11.6757 c 30 10 ccw F150
+  arc 30 11 -11.8378 c 30 10 ccw F150
+  arc 30 9 -12 c 30 10 ccw F150
+  arc 30 11 -12 c 30 10 ccw F150
+  arc 30 9 -12 c 30 10 ccw F150
+  line 30 10 -12 F150
+  rapid 30 10 10
