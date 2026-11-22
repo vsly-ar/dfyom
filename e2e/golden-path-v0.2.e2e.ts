@@ -6,10 +6,13 @@
 // floor placed by its front-left corner with the anchor picker, a through profile with tabs;
 // right side, picked in the `on` dropdown: two holes; bottom: a recess), applied with Enter and
 // with the Apply button; Plan: a tall-Z machine from "New machine…", three setups (Bottom, Right,
-// Top), the tools added with "New tool…" and picked per operation, the design settled and the
-// recess deepened for this plan only, a peck cycle on the holes; toolpaths; one program per setup
-// from the setup panel; each run on the virtual machine, chained by the setup-change dialog
-// ("Start setup n"); save, close the app, reopen: reference, anchor, tools and setups unchanged.
+// Top), the tools added with "New tool…"; back in Design, the library's Flat 12 locked on the
+// profile with the tool field (the other operations keep the auto choice) and applied, so the
+// draft plan takes it from the design; the other tools picked per operation in Plan, the design
+// settled and the recess deepened for this plan only, a peck cycle on the holes; toolpaths; one
+// program per setup from the setup panel; each run on the virtual machine, chained by the
+// setup-change dialog ("Start setup n"); save, close the app, reopen: reference, anchor, the tool
+// lock, tools and setups unchanged.
 // Windows stay hidden (app.fixture.ts sets DFYOM_HIDE_WINDOWS=1).
 // Docs: docs/plans/v0.2.md#exit-criteria, docs/conventions/testing.md#end-to-end
 import { existsSync, readFileSync } from 'node:fs'
@@ -277,8 +280,6 @@ test('v0.2 golden path through the UI: reference, faces, setups, export and run 
     ['Overall length', '100'],
   ])
   await expect(setupOps(page, 'Top').nth(0)).toHaveText(/Flat 12/)
-  await pickTool(setupOps(page, 'Top').nth(1), 'Pocket 1', /Flat 12/)
-  await pickTool(setupOps(page, 'Top').nth(2), 'Profile 1', /Flat 12/)
   // the recess's 4 mm corners need a smaller end mill
   await setupOps(page, 'Bottom').nth(0).click()
   await expect(inspector.getByRole('heading', { name: 'Pocket 2', level: 2 })).toBeVisible()
@@ -288,6 +289,39 @@ test('v0.2 golden path through the UI: reference, faces, setups, export and run 
     ['Overall length', '60'],
   ])
   await expect(setupOps(page, 'Bottom').nth(0)).toHaveText(/Flat 6/)
+
+  // ── Design: lock the library's Flat 12 on the profile; the others keep the auto choice ───
+  await page.keyboard.press('ControlOrMeta+1')
+  await expect(page.getByRole('radio', { name: 'Design' })).toBeChecked()
+  await designRows(page).nth(2).click()
+  await expect(inspector.getByRole('heading', { name: 'Profile 1' })).toBeVisible()
+  const toolField = inspector.getByRole('region', { name: 'Tool' })
+  const toolCombo = toolField.getByRole('combobox', { name: 'Tool' })
+  await toolCombo.click()
+  await page
+    .getByRole('listbox')
+    .getByRole('option', { name: /^Flat 12 · Ø 12/ })
+    .click()
+  // picking locks (one command, commit only); Apply lets the draft plan follow the design
+  await expect(toolCombo).toHaveText(/^Flat 12 · Ø 12/)
+  await expect(toolField.getByRole('button', { name: 'Lock tool' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  )
+  await expect(toolField.getByText('Chosen by you.')).toBeVisible()
+  await page.getByRole('button', { name: /^Apply \d+ changes?$/ }).click()
+  await expect(page.getByRole('button', { name: /^Apply \d+ change/ })).toHaveCount(0)
+
+  // ── Plan: the profile takes the design's tool; the cavity's tool is picked here ──────────
+  await page.keyboard.press('ControlOrMeta+2')
+  await expect(page.getByRole('radio', { name: 'Plan' })).toBeChecked()
+  const profileRow = setupOps(page, 'Top').nth(2)
+  await expect(profileRow).toHaveText(/Flat 12/)
+  await profileRow.click()
+  await expect(inspector.getByRole('heading', { name: 'Profile 1', level: 2 })).toBeVisible()
+  await expect(inspector.getByText('From the design’s tool field.')).toBeVisible()
+  await pickTool(setupOps(page, 'Top').nth(1), 'Pocket 1', /Flat 12/)
+  await expect(inspector.getByText('Chosen in this plan.')).toBeVisible()
   // the holes: a drill (the form suggests one for a drilling)
   const drilling = setupOps(page, 'Right').nth(0)
   await drilling.click()
@@ -450,6 +484,14 @@ test('v0.2 golden path through the UI: reference, faces, setups, export and run 
       }),
     ).toBeChecked()
     await expect(input(inspector2, 'Position X')).toHaveValue('10')
+    // the profile's locked library tool
+    await designRows(page2).nth(2).click()
+    const toolField2 = inspector2.getByRole('region', { name: 'Tool' })
+    await expect(toolField2.getByRole('combobox', { name: 'Tool' })).toHaveText(/^Flat 12/)
+    await expect(toolField2.getByRole('button', { name: 'Lock tool' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
     await expect(
       page2.getByRole('contentinfo', { name: 'Status bar' }).getByText('Part up to date'),
     ).toBeAttached({ timeout: 30_000 })

@@ -280,6 +280,31 @@ describe('toolpaths on Apply (plan.toolpaths apply job)', () => {
     expect((await apply()).jobIds).toEqual([])
   })
 
+  it('plan edits made since the last Apply are not pending once Generate made the toolpaths current', async () => {
+    const t = await setup()
+    const facing = t.order[0]!
+    const pending = () => expectOk(t.d.query('project.pending.get', {}, ui)).value as Pending
+    const update = async (args: object) =>
+      expectOk(
+        await t.d.dispatch(
+          'plan.operation.update',
+          { planId: t.planId, planOperationId: facing, ...args },
+          ui,
+        ),
+      )
+    // an Apply with the plan in it (the baseline), then a plan edit, then an explicit Generate
+    expectOk(await t.d.dispatch('project.apply', {}, ui))
+    await update({ overrides: { feedRate: '900' } })
+    expectOk(await t.generate())
+    expect(pending().changes).toEqual([])
+    expect(t.get(facing)).toMatchObject({ stale: false, pendingApply: false })
+    // a later edit makes the plan's toolpaths stale: pending again
+    await update({ strategy: { overshoot: '3' } })
+    expect(pending().changes).toContainEqual(
+      expect.objectContaining({ kind: 'plan', operationId: facing, field: 'strategy.overshoot' }),
+    )
+  })
+
   it('an archived plan is not kept current', async () => {
     const t = await setup()
     expectOk(await t.generate())
