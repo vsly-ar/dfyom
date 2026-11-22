@@ -95,7 +95,7 @@ A few tools are not registry entries because they depend on the session, not on 
 
 ### Schemas
 
-- `inputSchema` = `toolDescriptor(def).inputSchema` from [`json-schema.ts`](../../src/core/commands/json-schema.ts) ([commands.md](commands.md#json-schema-for-agent-tools)), without the **reserved keys**: `expectedRevision` (integer, every command of project scope, [decision 12](#decisions)) and `apply` (boolean, project-scope document commands, [apply.md](apply.md#agents-mcp-and-cli)). They are not listed in any tool schema (on 47 tools they cost 3 K chars of the [size budget](#implementation-task-310)); the primer names them and which tools take them, and `apply` on a tool that does not take it fails with `input.malformed` naming the tools that do. The adapter removes them before `dispatch(…, { expectedRevision, apply })`; tests assert no command arg and no tool schema has either name.
+- `inputSchema` = `toolDescriptor(def).inputSchema` from [`json-schema.ts`](../../src/core/commands/json-schema.ts) ([commands.md](commands.md#json-schema-for-agent-tools)), without the **reserved keys**: `expectedRevision` (integer, every command of project scope, [decision 12](#decisions)) and `apply` (boolean, project-scope document commands, [apply.md](apply.md#agents-mcp-and-cli)); at the MCP and `batch` boundary also `detail` (`plan.get`, `plan.toolpath.get`) with `from`/`count` (`plan.toolpath.get`, [Result size](#result-size)). They are not listed in any tool schema (on 47 tools they cost 3 K chars of the [size budget](#implementation-task-310)); the primer names them and which tools take them, and `apply` on a tool that does not take it fails with `input.malformed` naming the tools that do. The adapter removes them before `dispatch(…, { expectedRevision, apply })`; tests assert no command arg and no tool schema has either name.
 - **Output schemas are not listed** in `tools/list` ([decision 2](#decisions)): they are 80 % of the size (470 K of 585 K chars; `plan.get` alone 148 K). They are served by the `dfyom://schema/{name}` resource and `dfyom tools --json`.
 - Size: input schemas of all 63 entries are about 111 K chars (~28 K tokens), dominated by `library.{tool,machine}.{add,update}` (~13 K each, repeated quantity sub-schemas; since v0.2 they take quantity strings, [library.md](library.md#command-input)). 3.10 generates with shared definitions (`$defs`/`$ref` for reused schemas) and a test enforces a budget on the serialized `tools/list` (target: under 60 K chars), so growth is noticed when a command is added. Clients with deferred tool loading handle the rest.
 - **Granularity:** ([decision 1](#decisions)) one tool per command/query (structural parity, client-side validation, no extra round trip). Server option `--areas design,plan,…` (MCP) restricts the list for small-context models; session tools and `history`/`job` are always listed.
@@ -103,7 +103,7 @@ A few tools are not registry entries because they depend on the session, not on 
 ### Annotations and server instructions
 
 - MCP tool annotations are derived, never hand-set: query → `readOnlyHint: true`; `document` → `destructiveHint: false` (undoable); `effect`/`job` → `destructiveHint: true` when the args require `confirm` or the command is `machine`, else `false`; `machine: true` → `openWorldHint: true`; queries and `job.wait` → `idempotentHint: true`.
-- The `initialize` result's `instructions` is a short primer generated from one source file (`src/core/agent/primer.ts`, linking here): open or create a project first; quantities are strings as entered (`"6 mm"`, `"1/4\""`, [quantities.md](quantities.md)); the reserved keys (`expectedRevision` on project commands, `apply` on tools described "Undoable."); query before editing or pass `expectedRevision`; job tools return a `jobId`, wait with `job_wait`; `confirm: true` means the user agreed.
+- The `initialize` result's `instructions` is a short primer generated from one source file (`src/core/agent/primer.ts`, linking here): open or create a project first; quantities are strings as entered (`"6 mm"`, `"1/4\""`, [quantities.md](quantities.md)); the reserved keys (`expectedRevision` on project commands, `apply` on tools described "Undoable.", `detail` on the summarized reads); compact results ([Result size](#result-size)); query before editing or pass `expectedRevision`; job tools return a `jobId`, wait with `job_wait`; `confirm: true` means the user agreed.
 
 ### Library
 
@@ -115,17 +115,44 @@ The adapter uses the SDK's **low-level `Server`** of `@modelcontextprotocol/sdk`
 
 Every tool call goes through `atBoundary` with `EntryPoint { kind: 'agent', name }` ([boundaries.md](../conventions/error-handling/boundaries.md#entry-points-ui-agent-cli-automation)) and returns a `CallToolResult`:
 
-| Outcome         | `isError` | `structuredContent`                      | `content` (text, for clients without structured output)         |
-| --------------- | --------- | ---------------------------------------- | --------------------------------------------------------------- |
-| Command `Ok`    | `false`   | `{ value, revision }` (`CommandOutcome`) | Same JSON, then the [digest](#action-log-and-user-actions) line |
-| Query `Ok`      | `false`   | `{ value, revision }` (`QueryOutcome`)   | Same                                                            |
-| Job started     | `false`   | `{ value: { jobId }, revision }`         | Same, plus "wait with job_wait"                                 |
-| `Err(AppError)` | `true`    | `{ error: AppErrorData, retryable }`     | `code: message` and the issues, one per line                    |
+| Outcome         | `isError` | `structuredContent`                      | `content` (text, for clients without structured output)                                                                           |
+| --------------- | --------- | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Command `Ok`    | `false`   | `{ value, revision }` (`CommandOutcome`) | Same JSON up to 32,000 chars, else an outline ([Result size](#result-size)), then the [digest](#action-log-and-user-actions) line |
+| Query `Ok`      | `false`   | `{ value, revision }` (`QueryOutcome`)   | Same                                                                                                                              |
+| Job started     | `false`   | `{ value: { jobId }, revision }`         | Same, plus "wait with job_wait"                                                                                                   |
+| `Err(AppError)` | `true`    | `{ error: AppErrorData, retryable }`     | `code: message` and the issues, one per line                                                                                      |
 
 - Errors are **tool execution errors** (`isError: true`), never JSON-RPC errors, so the model sees `code`, `issues` with `params` and frames and can self-correct ([app-error.md](../conventions/error-handling/app-error.md#serialization)). `retryable` comes from `ERROR_CODES`. JSON-RPC errors are only for protocol faults (unknown tool name, malformed request) – an unknown tool cannot be a known command, since the list equals the registry.
 - `command.conflict` text says to re-query and retry ([commands.md](commands.md#stale-writes)); `permission.denied` names the command and source kind.
 - **Explanations are data:** the calculator's derivation (formula, inputs and result per step) comes back verbatim, from `feedsSpeeds.suggest` outside a plan and `plan.operation.feeds.get` for a plan operation (with the values at use), so an agent can explain a number the same way the inspector's "Show calculation" does ([plan-v0.1.md](../modes/plan-v0.1.md#feeds-explanation-v02)).
-- Results are `ResultWire` DTOs; no truncation in v0.1 (meshes are not exposed, [workers.md](workers.md#jobs-for-agents)).
+- Results are `ResultWire` DTOs, shaped for agents at the MCP and `batch` boundary ([Result size](#result-size)); meshes are not exposed ([workers.md](workers.md#jobs-for-agents)).
+
+### Result size
+
+The black-box LLM test of 2026-11-22 (`.continuous/research/2026-11-22-llm-first-test.md`, F5) found results far too large for a model: every design edit carried all of the part's DFM warnings twice (`value.warnings` and `applied.warnings`, 23–30 KB for a one-field change), `plan_get` was 674 KB and `plan_toolpath_get` 7.45 MB, every quantity was a four-field object, and every result came twice (text and `structuredContent`). Since then the agent boundary shapes results; the command layer, the GUI's IPC and one-shot CLI calls (`dfyom <name>`) keep the full results. Implementation: [`src/core/agent/shape.ts`](../../src/core/agent/shape.ts) (`ResultShaper`, one per MCP session or `batch` run), [`results.ts`](../../src/core/agent/results.ts) (text).
+
+Rules, applied to MCP results and `dfyom batch` lines:
+
+1. **Summaries of the large reads.** `plan.get` returns a summary: plan id, name, status, design snapshot (part id, time, hash, operation count, `planEdits`), machine and stock names, and per setup its heights and operations (id, kind, design operations, tool name, the five feeds values, `seconds` and `toolpath`: `current`/`stale`/`none` from the toolpath cache, finding counts by severity), with setup and plan `seconds` (`null` while a toolpath is missing or stale) and the plan's finding counts. `plan.toolpath.get` returns the toolpath's envelope: move count, moves per pass, the bounds of the move end points (drills: top and bottom), `stats` (cut and rapid length, estimated seconds). Both carry a `detail` hint.
+2. **Detail on request: reserved args** (like `expectedRevision` and `apply`, not listed in the tool schemas, so `tools/list` does not grow; the primer and the `detail` hint name them): `detail: "full"` on `plan.get` returns the whole record; on `plan.toolpath.get` it returns a range of the moves across passes, `from` (default 0) and `count` (default 500, max 5,000), each pass with the index of its `first` move in the range, plus `moves: { from, count, total, next }`. The whole program is `plan_export`. On other tools these keys are unknown arguments (`input.malformed`).
+3. **DFM warnings as changes.** A result whose schema carries the part's DFM warnings (design edit commands) and every `applied.warnings` entry list only what changed against the warnings this session last received for that part: `{ count, added?, changed?, removed? }` (`added`/`changed` in full, `removed` as `{ code, operation, parameter? }`; empty lists left out). A warning's identity is code, operation and parameter (and its index among equal ones); `changed` = same identity, other content. The first time a part's warnings reach the session they are all `added`; `design.warning.list` stays complete and becomes the baseline. The baseline is per session and starts over when the session binds another project.
+4. **Compact quantities.** A quantity DTO becomes the plain number when its source is a decimal literal equal to its value in the canonical unit (mm, deg, mm/min, rpm, W, bare scalar; `"6 mm"`, `"89"`), else `{ source, value }` (value in the canonical unit; `tolerance: { upper, lower }` when it has one), e.g. `{ "source": "1/4\"", "value": 6.35 }`. Inputs stay quantity strings. The exact rational is in the project file and the GUI; agents that need it read `{ source }` and re-enter it.
+5. **Rounded floats.** Every non-integer number is rounded to 10 significant digits (`2.4000000000000004` → `2.4`; 0.1 µm or better on any part dimension).
+6. **Text content is short.** `structuredContent` holds the result; the text block repeats it when its JSON is at most 32,000 chars (every summary and most reads; set high so text-only clients such as some agent hosts still see the result), else gives an outline (nested objects and lists after their first three items elided) with "the full result is in structuredContent". The MCP spec asks for the serialized JSON in a text block for backward compatibility (a SHOULD); the outline is the deliberate exception for large results. Clients that show only text see small results in full.
+
+Measured on the logged flow (the saved test project reopened over stdio MCP, the calls replayed; bytes of the JSON-RPC result):
+
+| Call                                     | Before  | After                                       |
+| ---------------------------------------- | ------- | ------------------------------------------- |
+| `design_drilling_update` (#37)           | 24.4 KB | 2.5 KB                                      |
+| `design_shape_update` (#81)              | 11.8 KB | 0.4 KB                                      |
+| `design_shape_get` (84 arcs)             | 86.9 KB | 16.6 KB                                     |
+| `design_warning_list`                    | 11.2 KB | 6.2 KB                                      |
+| `plan_operation_list`                    | 17.7 KB | 10.2 KB                                     |
+| `plan_get` (#55)                         | 676 KB  | 4.0 KB (`detail: "full"`: 70 KB)            |
+| `plan_toolpath_get` (#105, 25,249 moves) | 7.45 MB | 2.0 KB (`detail: "full"`, 500 moves: 57 KB) |
+
+`tools/list` is unchanged (98,786 chars): the new args are reserved keys.
 
 ### Jobs
 
@@ -219,7 +246,7 @@ The CLI reuses the session core: same names (dotted registry names), same descri
 | Form                                                 | Behaviour                                                                                                                                                                                                                                                                                                                                           |
 | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `dfyom <name> [<json> \| @file.json \| -] [options]` | One call. Names contain a dot, so they never collide with subcommands. Project scope needs `--project <file>` (or `--new <name>`): open → call → if the document changed, save (default) or `--no-save` (discard) → close. A job is always waited for, since the process owns it; `--no-wait` (print the `jobId`) is allowed only with `--connect`. |
-| `dfyom batch [--project <file>]`                     | One session over JSON lines: each stdin line `{ "name", "args", "expectedRevision"?, "apply"? }`, each stdout line a result. Undo, jobs and revisions work across lines; `job.wait` too. `"apply": false` batches edits ([apply.md](apply.md#agents-mcp-and-cli)).                                                                                  |
+| `dfyom batch [--project <file>]`                     | One session over JSON lines: each stdin line `{ "name", "args", "expectedRevision"?, "apply"? }`, each stdout line a result. Undo, jobs and revisions work across lines; `job.wait` too. `"apply": false` batches edits ([apply.md](apply.md#agents-mcp-and-cli)). Results are shaped as over MCP ([Result size](#result-size)).                    |
 | `dfyom mcp [--areas …] [--connect [instance]]`       | Stdio MCP server, or bridge to a running instance.                                                                                                                                                                                                                                                                                                  |
 | `dfyom tools [--json] [<name>]`                      | Lists names and summaries, or one descriptor with input and output schema.                                                                                                                                                                                                                                                                          |
 
@@ -229,23 +256,24 @@ The CLI reuses the session core: same names (dotted registry names), same descri
 
 ## Files
 
-| File                            | Contents                                                                                                   |
-| ------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `src/core/agent/session.ts`     | `AgentSession`: source, binding, log cursor, routing (app/project scope, session tools), digest            |
-| `src/core/agent/tools.ts`       | Name mapping, descriptors (reserved keys unlisted), annotations, `--areas` filter, size budget             |
-| `src/core/agent/results.ts`     | `CallToolResult` mapping of outcomes and `AppError`                                                        |
-| `src/core/agent/primer.ts`      | Server instructions text                                                                                   |
-| `src/core/agent/exit-codes.ts`  | CLI exit codes by error code                                                                               |
-| `src/core/project/lifecycle.ts` | `project.create/open/close/list/recovery.*` app-scope commands; `HostPort`                                 |
-| `src/main/host/app-host.ts`     | App host: storage, library, app dispatcher, project runtimes (scheduler, toolpath cache, export), sessions |
-| `src/main/host/discovery.ts`    | Discovery files of instances serving HTTP (`<appData>/instances/`)                                         |
-| `src/main/mcp/server.ts`        | MCP `Server` wiring: tools, resources, progress, cancellation                                              |
-| `src/main/mcp/http.ts`          | Streamable HTTP on loopback: token, Host/Origin checks, session ids; the on/off switch                     |
-| `src/main/mcp/bridge.ts`        | `--connect`: stdio ↔ HTTP of a running instance                                                            |
-| `src/main/cli/main.ts`          | CLI: argument parsing, one-shot, `batch`, `mcp`, `tools`, `--connect`                                      |
-| `src/main/cli/runtime.ts`       | Headless runtime: CLI logging, worker pool, machine host (`worker_threads`), app host                      |
-| `src/main/cli/index.ts`         | Build entry `out/main/cli.js` (no Electron import)                                                         |
-| `src/main/ipc.ts`               | GUI: one session per window (`ui:win-<id>`), project IPC, indicator state, local HTTP switch               |
+| File                            | Contents                                                                                                          |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `src/core/agent/session.ts`     | `AgentSession`: source, binding, log cursor, routing (app/project scope, session tools), digest                   |
+| `src/core/agent/tools.ts`       | Name mapping, descriptors (reserved keys unlisted), annotations, `--areas` filter, size budget                    |
+| `src/core/agent/results.ts`     | `CallToolResult` mapping of outcomes and `AppError`; text = small JSON or an outline                              |
+| `src/core/agent/shape.ts`       | Result shaping for agents: summaries, `detail`, warning changes, compact quantities ([Result size](#result-size)) |
+| `src/core/agent/primer.ts`      | Server instructions text                                                                                          |
+| `src/core/agent/exit-codes.ts`  | CLI exit codes by error code                                                                                      |
+| `src/core/project/lifecycle.ts` | `project.create/open/close/list/recovery.*` app-scope commands; `HostPort`                                        |
+| `src/main/host/app-host.ts`     | App host: storage, library, app dispatcher, project runtimes (scheduler, toolpath cache, export), sessions        |
+| `src/main/host/discovery.ts`    | Discovery files of instances serving HTTP (`<appData>/instances/`)                                                |
+| `src/main/mcp/server.ts`        | MCP `Server` wiring: tools, resources, progress, cancellation                                                     |
+| `src/main/mcp/http.ts`          | Streamable HTTP on loopback: token, Host/Origin checks, session ids; the on/off switch                            |
+| `src/main/mcp/bridge.ts`        | `--connect`: stdio ↔ HTTP of a running instance                                                                   |
+| `src/main/cli/main.ts`          | CLI: argument parsing, one-shot, `batch`, `mcp`, `tools`, `--connect`                                             |
+| `src/main/cli/runtime.ts`       | Headless runtime: CLI logging, worker pool, machine host (`worker_threads`), app host                             |
+| `src/main/cli/index.ts`         | Build entry `out/main/cli.js` (no Electron import)                                                                |
+| `src/main/ipc.ts`               | GUI: one session per window (`ui:win-<id>`), project IPC, indicator state, local HTTP switch                      |
 
 ## Testing
 
@@ -254,7 +282,7 @@ Per [testing.md](../conventions/testing.md); everything runs in `npm run check` 
 | Layer          | Task | What                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | -------------- | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Mapping (core) | 3.10 | Name mapping bijective for every registry name; `tools/list` equals both registries plus session tools ([commands.md](commands.md#testing): parity is structural); annotation derivation; size budget; no `expectedRevision`/`apply` arg or schema key.                                                                                                                                                                 |
-| Results (core) | 3.10 | Each outcome kind and an `AppError` with issues map to the documented `CallToolResult`; exit code for every `ERROR_CODES` key.                                                                                                                                                                                                                                                                                          |
+| Results (core) | 3.10 | Each outcome kind and an `AppError` with issues map to the documented `CallToolResult`; exit code for every `ERROR_CODES` key. Result shaping (`shape.test.ts`): compact quantities, warning changes and baseline, both summaries, move ranges, reserved `detail` args.                                                                                                                                                 |
 | Session (core) | 3.10 | Binding and `noProject`; digest of other sources' events and cursor advance; `gap`; `job.wait` finish, timeout and cancellation (fake clock, in-process workers); stale-write conflict between a UI and an agent source; `job_abort` succeeds while the same session's `job_wait` is pending (urgent path).                                                                                                             |
 | MCP server     | 3.10 | SDK client ↔ server over the SDK's in-memory transport: list, call, errors, progress notifications, resource subscribe/updated.                                                                                                                                                                                                                                                                                         |
 | HTTP           | 3.10 | Real loopback server: 401 without/with a wrong token, 403 on foreign `Host` or any `Origin`, bound address is `127.0.0.1`, two sessions = two sources, discovery file permissions and cleanup; on by default, and turning the setting off stops the server, ends sessions and deletes the file.                                                                                                                         |

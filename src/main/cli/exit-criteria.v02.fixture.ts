@@ -252,9 +252,10 @@ export async function exitCriteriaV02Flow(call: Call, dir: string): Promise<Flow
   })
   const designed = (await ok<PartGet>('design.part.get', { partId })).value
   expect(designed.stock.values).toMatchObject({
-    length: { source: `${STOCK.length}` },
-    width: { source: `${STOCK.width}` },
-    thickness: { source: `${STOCK.thickness}` },
+    // quantities entered as plain numbers come back as numbers (llm-api.md#result-size)
+    length: STOCK.length,
+    width: STOCK.width,
+    thickness: STOCK.thickness,
   })
   const ops = designed.part.operations
   expect(ops.map((o) => [o.kind, o.on ?? 'stock.top'])).toEqual([
@@ -266,7 +267,7 @@ export async function exitCriteriaV02Flow(call: Call, dir: string): Promise<Flow
     ['pocket', 'stock.bottom'],
   ])
   expect(ops[1]).toMatchObject({
-    shape: { anchor: { u: 'min', v: 'min' }, center: [{ source: '10' }, { source: '13' }] },
+    shape: { anchor: { u: 'min', v: 'min' }, center: [10, 13] },
   })
   // agents auto-apply: the auto choice gave every other operation a tool, unlocked
   const byId = new Map(ops.map((o) => [o.id, o]))
@@ -293,7 +294,7 @@ export async function exitCriteriaV02Flow(call: Call, dir: string): Promise<Flow
     })
   ).value
   const planId = createdPlan.planId
-  let plan = (await ok<PlanGet>('plan.get', { planId })).value.plan
+  let plan = (await ok<PlanGet>('plan.get', { planId, detail: 'full' })).value.plan
   expect(plan.setups.map((s) => [s.name, s.direction ?? '+z'])).toEqual([
     ['Bottom', '-z'],
     ['Right', '+x'],
@@ -330,10 +331,10 @@ export async function exitCriteriaV02Flow(call: Call, dir: string): Promise<Flow
     planOperationId: drillPlanOp.id,
     strategy: { cycle: 'peck', peckDepth: '4' },
   })
-  plan = (await ok<PlanGet>('plan.get', { planId })).value.plan
+  plan = (await ok<PlanGet>('plan.get', { planId, detail: 'full' })).value.plan
   expect(plan.status).toBe('settledDesign')
   expect(plan.design.part.operations.find((o) => o.id === recess.operationId)).toMatchObject({
-    depth: { source: '2' },
+    depth: 2,
   })
 
   // Toolpaths (a job; job.wait reports its outcome)
@@ -427,13 +428,13 @@ export async function exitCriteriaV02Flow(call: Call, dir: string): Promise<Flow
   await ok('project.save', { target: file })
   const partBefore = (await ok('design.part.get', { partId })).value
   const refsBefore = (await ok('design.reference.list', { partId })).value
-  const planBefore = (await ok('plan.get', { planId })).value
+  const planBefore = (await ok('plan.get', { planId, detail: 'full' })).value
   await ok('project.close', { key: created.value.key })
   const reopened = await ok<{ key: string; alreadyOpen: boolean }>('project.open', { file })
   expect(reopened.value.alreadyOpen).toBe(false)
   expect((await ok('design.part.get', { partId })).value).toEqual(partBefore)
   expect((await ok('design.reference.list', { partId })).value).toEqual(refsBefore)
-  expect((await ok('plan.get', { planId })).value).toEqual(planBefore)
+  expect((await ok('plan.get', { planId, detail: 'full' })).value).toEqual(planBefore)
   // the reopened project exports the same programs
   for (const [i, setup] of plan.setups.entries()) {
     const again = join(dir, `enclosure-reopened-${i + 1}.nc`)
@@ -485,12 +486,10 @@ function snapshotName(plan: PlanGet['plan'], snapshotId: string): string | undef
   return plan.snapshots.find((s) => s.id === snapshotId)?.values.name
 }
 
-/** A quantity DTO's value in its canonical unit (mm). */
-const mm = (q: Exact) => Number(q.exact.num) / Number(q.exact.den)
+/** A compact quantity's value in its canonical unit (mm): a number, or `{ source, value }`. */
+const mm = (q: Exact) => (typeof q === 'number' ? q : q.value)
 
-interface Exact {
-  exact: { num: string; den: string }
-}
+type Exact = number | { source: string; value: number }
 interface Box {
   min: { x: number; y: number; z: number }
   max: { x: number; y: number; z: number }

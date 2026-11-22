@@ -21,6 +21,8 @@ import { evaluatePart } from '../../core/geometry/evaluate'
 import { loadManifold } from '../../core/geometry/manifold'
 import { Snapshot, type SnapshotDTO } from '../../core/library/snapshot'
 import { Stock } from '../../core/library/stock'
+import { loadArchive } from '../persistence/archive'
+import { nodeFs } from '../persistence/fs'
 import { agentSession, type Call, programEnd, type RunJobStatus } from './exit-criteria.fixture'
 import { ENCLOSURE_STL } from './exit-criteria.v02.fixture'
 
@@ -253,7 +255,8 @@ export async function exitCriteriaV03Flow(call: Call, dir: string): Promise<Flow
     })
   ).value
   // X0: two sharp convex corners where the back wall meets its 2 mm step; the warnings say where
-  const sharp = pocket.warnings.filter(
+  // an edit's result lists the warnings that changed since this session last saw the part's
+  const sharp = (pocket.warnings.added ?? []).filter(
     (w) => w.code === 'dfm.cornerSharp' && w.operation === pocket.operationId,
   )
   expect(sharp).toHaveLength(2)
@@ -426,13 +429,13 @@ export async function exitCriteriaV03Flow(call: Call, dir: string): Promise<Flow
   ])
   const byId = new Map(ops.map((o) => [o.id, o]))
   expect(byId.get(notchPocket.operationId)).toMatchObject({
-    shape: { kind: 'named', shapeId: notch.shapeId, rotation: { source: '90' } },
+    shape: { kind: 'named', shapeId: notch.shapeId, rotation: 90 },
   })
   expect(byId.get(profile.operationId)).toMatchObject({
     toolLocked: true,
-    tabs: { positions: tabPositions.map((source) => ({ source })) },
+    tabs: { positions: tabPositions.map(Number) },
   })
-  expect(byId.get(grooveOp.operationId)).toMatchObject({ side: 'on', depth: { source: '1' } })
+  expect(byId.get(grooveOp.operationId)).toMatchObject({ side: 'on', depth: 1 })
   // what the design still says: the filleted corners are below every end mill's radius, the
   // 2.75 mm board margin is narrower than the 12 mm slot (so the tabs hold to nothing), and two
   // setups are needed
@@ -453,7 +456,7 @@ export async function exitCriteriaV03Flow(call: Call, dir: string): Promise<Flow
     })
   ).value
   const planId = createdPlan.planId
-  const plan = (await ok<PlanGet>('plan.get', { planId })).value.plan
+  const plan = (await ok<PlanGet>('plan.get', { planId, detail: 'full' })).value.plan
   expect(plan.setups.map((s) => [s.name, s.direction ?? '+z'])).toEqual([
     ['Bottom', '-z'],
     ['Top', '+z'],
@@ -571,13 +574,13 @@ export async function exitCriteriaV03Flow(call: Call, dir: string): Promise<Flow
   await ok('project.save', { target: file })
   const partBefore = (await ok('design.part.get', { partId })).value
   const shapesBefore = (await ok('design.shape.list', { partId })).value
-  const planBefore = (await ok('plan.get', { planId })).value
+  const planBefore = (await ok('plan.get', { planId, detail: 'full' })).value
   await ok('project.close', { key: created.value.key })
   const reopened = await ok<{ key: string; alreadyOpen: boolean }>('project.open', { file })
   expect(reopened.value.alreadyOpen).toBe(false)
   expect((await ok('design.part.get', { partId })).value).toEqual(partBefore)
   expect((await ok('design.shape.list', { partId })).value).toEqual(shapesBefore)
-  expect((await ok('plan.get', { planId })).value).toEqual(planBefore)
+  expect((await ok('plan.get', { planId, detail: 'full' })).value).toEqual(planBefore)
   for (const [i, setup] of plan.setups.entries()) {
     const again = join(dir, `shapes-reopened-${i + 1}.nc`)
     await ok('plan.export', { planId, setupId: setup.id, target: again })
@@ -585,8 +588,12 @@ export async function exitCriteriaV03Flow(call: Call, dir: string): Promise<Flow
   }
 
   // ── Criterion (test-only): the deviation check ───────────────────────────────────────────
+  // on the saved part: agent results carry compact quantities (llm-api.md#result-size), the
+  // in-process evaluation needs the exact DTOs
+  const saved = expectOk(await loadArchive(nodeFs, file)).doc
+  const savedPart = saved.parts[partId]!
   const deviation = await deviationCheck(
-    (await ok<PartGet>('design.part.get', { partId })).value,
+    { part: savedPart, stock: saved.snapshots[savedPart.stock] } as unknown as PartGet,
     [placed.min.x + placed.max.x, placed.min.y + placed.max.y].map((v) => v / 2) as [
       number,
       number,
@@ -699,10 +706,9 @@ function longestLine(s: ShapeGet): { a: [number, number]; b: [number, number] } 
 /** The index of a path item's vertex at `p` (shape frame): 0 = start, i = end of segment i − 1. */
 function nearestVertex(s: ShapeGet, p: readonly [number, number]): number {
   const item = s.shape.items[0]!
-  const num = (q: { source: string }) => Number(q.source)
   // a closed path's last segment ends at the start (vertex 0)
   const vertices = [item.start, ...item.segments.slice(0, -1).map((g) => g.to)].map(
-    ([x, y]) => [num(x), num(y)] as const,
+    ([x, y]) => [mm(x), mm(y)] as const,
   )
   let best = 0
   vertices.forEach((v, i) => {
@@ -768,12 +774,10 @@ function oneSided(from: readonly Pt[], to: readonly Pt[], keep: (p: Pt) => boole
   return worst
 }
 
-/** A quantity DTO's value in its canonical unit (mm). */
-const mm = (q: Exact) => Number(q.exact.num) / Number(q.exact.den)
+/** A compact quantity's value in its canonical unit (mm): a number, or `{ source, value }`. */
+const mm = (q: Exact) => (typeof q === 'number' ? q : q.value)
 
-interface Exact {
-  exact: { num: string; den: string }
-}
+type Exact = number | { source: string; value: number }
 interface Box {
   min: { x: number; y: number; z: number }
   max: { x: number; y: number; z: number }
@@ -803,8 +807,8 @@ interface Element {
 interface ShapeGet {
   shape: {
     items: {
-      start: [{ source: string }, { source: string }]
-      segments: { to: [{ source: string }, { source: string }] }[]
+      start: [Exact, Exact]
+      segments: { to: [Exact, Exact] }[]
     }[]
   }
   usedBy: string[]
@@ -824,7 +828,8 @@ interface AddResult {
   operationId: string
   tool?: unknown
   toolLocked: boolean
-  warnings: Warning[]
+  /** The part's DFM warnings as changes (llm-api.md#result-size). */
+  warnings: { count: number; added?: Warning[]; changed?: Warning[]; removed?: unknown[] }
 }
 interface Op {
   id: string
