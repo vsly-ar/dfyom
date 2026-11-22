@@ -446,10 +446,15 @@ describe('implicit apply (applyFirst)', () => {
         'run.job.start',
       ].sort(),
     )
-    // P2: the deferred reactions, in apply.md's order; no document hook is left
-    expect(APPLY_HOOKS.map((h) => h.name)).toEqual(['design.toolAutoChoice', 'plan.draftFollow'])
+    // P2: the deferred reactions, in apply.md's order; the one document hook is the instant
+    // Clones expansion (v0.4 F5)
+    expect(APPLY_HOOKS.map((h) => h.name)).toEqual([
+      'design.toolAutoChoice',
+      'design.clonesFollow',
+      'plan.draftFollow',
+    ])
     expect(APPLY_JOBS.map((j) => j.name)).toEqual(['plan.toolpaths'])
-    expect(APP_HOOKS).toEqual([])
+    expect(APP_HOOKS.map((h) => h.name)).toEqual(['design.clonesFollow'])
   })
 })
 

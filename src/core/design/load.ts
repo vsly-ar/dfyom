@@ -8,7 +8,8 @@ import type { PartGeometryInput } from '../geometry/model'
 import { Snapshot } from '../library/snapshot'
 import { Stock } from '../library/stock'
 import type { ProjectDoc, UnitSystem } from '../project/document'
-import { checkFeatures, type LoadedFeature } from './feature'
+import { current, isDraft } from 'immer'
+import { checkFeatures, type FrozenRecords, type LoadedFeature } from './feature'
 import { toGeometryInput } from './geometry-input'
 import { partFromDTO, type Part } from './operation'
 import type { PartDTO } from './part.dto'
@@ -60,7 +61,13 @@ export function loadPart(doc: ProjectDoc, partId: string, where: string): AppRes
         data: { partId, operationId: op.id, snapshotId: t.snapshotId },
       })
   }
-  const features = checkFeatures(dto, part.unwrap().operations, stock.unwrap(), doc.unitSystem)
+  const features = checkFeatures(
+    dto,
+    part.unwrap().operations,
+    stock.unwrap(),
+    doc.unitSystem,
+    frozenRecords(dto, snap),
+  )
   if (features.isErr())
     return Err(features.unwrapErr().prefixIssues('parts', partId).withContext(where, { partId }))
   return Ok({
@@ -71,6 +78,18 @@ export function loadPart(doc: ProjectDoc, partId: string, where: string): AppRes
     snapshots: doc.snapshots,
     features: features.unwrap(),
   })
+}
+
+/**
+ * The committed (frozen) records of a part, for the consistency check's expansion cache: a
+ * draft's unmodified records are its base objects; anything modified or never frozen gives none.
+ */
+function frozenRecords(dto: PartDTO, snap: object): FrozenRecords | undefined {
+  if (dto.features === undefined) return undefined
+  const base = (isDraft(dto) ? current(dto) : dto) as PartDTO
+  const stock = isDraft(snap) ? current(snap) : snap
+  if (!Object.isFrozen(base) || !Object.isFrozen(stock)) return undefined
+  return { features: base.features ?? [], operations: base.operations, stock }
 }
 
 /** The geometry input of a part of the document (for evaluation, task 2.8/2.9). */
