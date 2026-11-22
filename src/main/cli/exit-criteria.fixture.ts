@@ -52,7 +52,7 @@ const POLL_SECONDS = 0.05
 export interface FlowResult {
   /** The text `plan.export` wrote. */
   readonly gcode: string
-  /** Every progress report of the run job seen by `job.wait`, in order. */
+  /** Every progress report of the run job seen by `job.wait`, in order (export phase first). */
   readonly runProgress: readonly Progress[]
 }
 
@@ -252,12 +252,18 @@ export async function exitCriteriaFlow(call: Call, dir: string): Promise<FlowRes
   )
   expect(waits.filter((w) => w === 'programPause')).toHaveLength(ended.value.pauses)
   expect(gcode.match(/^M0$/gm)).toHaveLength(markers.length + ended.value.pauses)
-  // progress: lines acknowledged out of the program's lines, never going back, ending complete
-  expect(progress.length).toBeGreaterThan(0)
-  expect(progress.every((p) => p.total === exported.lines)).toBe(true)
-  const done = progress.map((p) => p.done)
+  // progress: first the job's export (indeterminate: no total, seen only when a poll lands in
+  // it, i.e. under load), then lines acknowledged out of the program's lines, never going back,
+  // ending complete (docs/modes/run-v0.1.md#progress)
+  const streamStart = progress.findIndex((p) => p.total !== undefined)
+  expect(streamStart).toBeGreaterThanOrEqual(0)
+  for (const p of progress.slice(0, streamStart))
+    expect(p).toEqual({ done: 0, label: expect.stringMatching(/^Export:/) as unknown })
+  const streamed = progress.slice(streamStart)
+  expect(streamed.every((p) => p.total === exported.lines)).toBe(true)
+  const done = streamed.map((p) => p.done)
   expect(done).toEqual([...done].sort((a, b) => a - b))
-  expect(progress.at(-1)).toMatchObject({ done: exported.lines, total: exported.lines })
+  expect(streamed.at(-1)).toMatchObject({ done: exported.lines, total: exported.lines })
   // the machine ends idle where the program ends, without an alarm
   const after = (await ok<RunStatus>('run.status.get')).value
   expect(after).toMatchObject({ state: 'Idle', homed: true })
