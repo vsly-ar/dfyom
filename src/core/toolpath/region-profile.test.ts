@@ -227,6 +227,48 @@ describe('tab bands on general loops', () => {
     expect(inBand([corner!], [42, -2])).toBe(true) // the corner sector
     expect(inBand([corner!], [45, -5])).toBe(false) // beyond its radius
   })
+
+  it('is one loop across a smooth join: an arc where the offsets part, trimmed where they overlap', () => {
+    // two lines turning by θ < SMOOTH_TURN at (10, 0), the band on the right [−6, 0]
+    const theta = 0.005
+    const bent = (sign: number): Loop => {
+      const end: Vec2 = [10 + 10 * Math.cos(theta), sign * 10 * Math.sin(theta)]
+      return { elements: [line([0, 0], [10, 0]), line([10, 0], end), line(end, [0, 0])] }
+    }
+    const area = (band: GeneralTabBand) =>
+      regionArea(port.normalise(band.map((p) => p.loop)).unwrap())
+    // a left turn parts the right offsets (an arc of radius 6 round the vertex), a right turn
+    // overlaps them (trimmed at their crossing)
+    const [left] = generalTabBands(bent(1), [10], 8, -6, 0)
+    const [right] = generalTabBands(bent(-1), [10], 8, -6, 0)
+    expect(left).toHaveLength(1)
+    expect(right).toHaveLength(1)
+    expect(area(left!)).toBeCloseTo(8 * 6 + 18 * theta, 9)
+    expect(area(right!)).toBeCloseTo(8 * 6 - 36 * Math.tan(theta / 2), 9)
+  })
+
+  it('on the enclosure outline (fitted arcs, joins of ≈ 1e-7 rad): one piece per tab that the port takes', () => {
+    // the known issue's repro: tabs ≥ 2, or at 346.91, failed the port's union (`degenerate`)
+    const { outline } = enclosure()
+    const L = chainLength(outline)
+    const cases = [2, 3, 4, 5, 6].map((count) => tabCentres(L, { count }))
+    cases.push([346.91])
+    for (const positions of cases)
+      for (const [lo, hi] of [
+        [-6, 0],
+        [-7.001, 1.001],
+      ] as const) {
+        const bands = generalTabBands(outline, positions, 6, lo, hi)
+        for (const [i, band] of bands.entries()) {
+          expect(band, `${positions[i]}`).toHaveLength(1)
+          const r = port.normalise(band.map((p) => p.loop)).unwrap()
+          expect(r.pieces).toHaveLength(1)
+          // ≈ width × across (the outline's arcs are gentle)
+          expect(regionArea(r) / (6 * (hi - lo))).toBeGreaterThan(0.9)
+          expect(regionArea(r) / (6 * (hi - lo))).toBeLessThan(1.1)
+        }
+      }
+  })
 })
 
 function inBand(bands: readonly GeneralTabBand[], p: Vec2): boolean {
@@ -445,6 +487,23 @@ describe('generateRegionProfile: tabs', () => {
       ).toBe(true)
     }
   })
+
+  it(
+    'generates on the enclosure outline with 2–6 tabs and a tab at 346.91 (known-issue repro)',
+    { timeout: 60_000 },
+    () => {
+      const { outline } = enclosure()
+      const L = chainLength(outline)
+      const cases = [2, 3, 4, 5, 6].map((count) => tabCentres(L, { count }))
+      cases.push([346.91])
+      for (const positions of cases) {
+        const inp = input(outline, { stepdown: 2, tabs: { positions, width: 6, thickness: 2 } })
+        const tp = generateRegionProfile(inp, port).unwrap()
+        expect(checkRules(inp, tp)).toEqual([])
+        expect(atLevel(tp, -4).length).toBeGreaterThan(0)
+      }
+    },
+  )
 
   it('starts mid-way to the next tab when a tab lies at the start point', () => {
     const chain = rect(0, 0, 40, 20)
@@ -695,6 +754,28 @@ describe('coverage oracle (heightmap)', () => {
       expect(cov.leftover).toBeLessThan(0.5)
       expect(cov.tabCut).toBe(0)
       expect(cov.tabKept).toBeGreaterThan(3 * 8 * 8 * 0.8)
+    },
+  )
+
+  it(
+    'outside profile of the enclosure outline, 6 tabs and one at 346.91 (known-issue repro): tabs kept, no gouge',
+    { timeout: 60_000 },
+    () => {
+      const { outline } = enclosure()
+      const positions = [...tabCentres(chainLength(outline), { count: 6 }), 346.91]
+      const inp = input(outline, {
+        slotWidth: 6,
+        stepdown: 2,
+        tabs: { positions, width: 6, thickness: 2 },
+      })
+      const bands = generalTabBands(outline, positions, 6, -6, 0)
+      const { cov, rules } = cover(inp, { length: 274, width: 202 }, 0.25, bands)
+      expect(rules).toEqual([])
+      expect(cov.gouge).toBe(0)
+      expect(cov.belowFloor).toBe(0)
+      expect(cov.leftover).toBeLessThan(0.5)
+      expect(cov.tabCut).toBe(0)
+      expect(cov.tabKept).toBeGreaterThan(7 * 6 * 6 * 0.8)
     },
   )
 

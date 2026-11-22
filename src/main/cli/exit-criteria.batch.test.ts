@@ -66,9 +66,8 @@ describe('exit criteria headless: dfyom batch', { timeout: 180_000 }, () => {
     expect(await cli.exited).toMatchObject({ code: 2, stderr: '' })
   })
 
-  // KNOWN ISSUE (v0.3 X1, docs/plans/v0.3.md): the solid tabs of the imported enclosure outline
-  // fail evaluation (`geometry.evaluation`, `shapeTab`); remove `.fails` once that is fixed
-  it.fails('evaluates the v0.3 part (known issue: solid tabs on the imported outline)', () => {
+  // the solid tabs of the imported enclosure outline (tab bands on its fitted arcs, geometry/tab-bands.ts)
+  it('evaluates the v0.3 part with tabs on the imported outline', () => {
     expect(v03).toBeDefined()
     expectEvaluated(v03!.evaluation)
   })
