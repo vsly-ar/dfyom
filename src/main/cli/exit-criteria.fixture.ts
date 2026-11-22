@@ -28,7 +28,7 @@ export interface CallResult {
 /** Calls a tool by its registry (dotted) name; the transport maps the name. */
 export type Call = (name: string, args?: object) => Promise<CallResult>
 
-interface Progress {
+export interface Progress {
   readonly done: number
   readonly total?: number
   readonly label?: string
@@ -40,7 +40,7 @@ interface JobInfo {
   readonly outcome?: { readonly ok: boolean; readonly value?: unknown }
 }
 
-interface RunJobStatus {
+export interface RunJobStatus {
   readonly phase: string
   readonly toolChange?: { readonly n: number; readonly name: string }
   readonly pause?: number
@@ -56,20 +56,28 @@ export interface FlowResult {
   readonly runProgress: readonly Progress[]
 }
 
-/**
- * Runs the exit-criteria flow: library → project with a rectangular stock → facing, pocket
- * (inside corner radius, floor fillet), drilling, profile with tabs → one-setup plan →
- * toolpaths → GRBL export (golden) → virtual run at `max` through its tool changes and pauses,
- * with progress → save → close → reopen → compare (and re-export: same bytes).
- */
-export async function exitCriteriaFlow(call: Call, dir: string): Promise<FlowResult> {
+/** Calls that must succeed, job waits, and the run progress they saw; shared by the flows. */
+export interface AgentSession {
+  /** Calls a tool that must succeed; returns its value and the document revision. */
+  ok<T = unknown>(name: string, args?: object): Promise<{ value: T; revision: number }>
+  /** Waits for a job; on a run job's wait (`onWait`), polls and lets the caller continue it. */
+  waitJob(
+    jobId: string,
+    onWait?: (job: RunJobStatus) => Promise<void>,
+  ): Promise<{ ok: boolean; value?: unknown }>
+  /** Polls the run job until its progress label reads `label` (what the UI shows at a wait). */
+  untilLabel(jobId: string, label: string): Promise<Progress | undefined>
+  /** Every progress report of a run job seen while polling, in order. */
+  readonly progress: Progress[]
+}
+
+export function agentSession(call: Call): AgentSession {
   const ok = async <T = unknown>(name: string, args: object = {}) => {
     const r = await call(name, args)
     expect(r.ok, `${name}: ${JSON.stringify(r.error)}`).toBe(true)
     return { value: r.value as T, revision: r.revision ?? 0 }
   }
   const progress: Progress[] = []
-  /** Waits for a job; on a run job's wait (`onWait`), polls and lets the caller continue it. */
   const waitJob = async (
     jobId: string,
     onWait?: (job: RunJobStatus) => Promise<void>,
@@ -86,7 +94,6 @@ export async function exitCriteriaFlow(call: Call, dir: string): Promise<FlowRes
       if (job !== undefined) await onWait(job)
     }
   }
-  /** Polls the run job until its progress label reads `label` (what the UI shows at a wait). */
   const untilLabel = async (jobId: string, label: string) => {
     for (;;) {
       const { value } = await ok<JobInfo>('job.wait', { jobId, timeoutSeconds: POLL_SECONDS })
@@ -94,6 +101,17 @@ export async function exitCriteriaFlow(call: Call, dir: string): Promise<FlowRes
       if (value.progress?.label === label || value.state === 'finished') return value.progress
     }
   }
+  return { ok, waitJob, untilLabel, progress }
+}
+
+/**
+ * Runs the exit-criteria flow: library → project with a rectangular stock → facing, pocket
+ * (inside corner radius, floor fillet), drilling, profile with tabs → one-setup plan →
+ * toolpaths → GRBL export (golden) → virtual run at `max` through its tool changes and pauses,
+ * with progress → save → close → reopen → compare (and re-export: same bytes).
+ */
+export async function exitCriteriaFlow(call: Call, dir: string): Promise<FlowResult> {
+  const { ok, waitJob, untilLabel, progress } = agentSession(call)
 
   // ── Library (app scope, no project needed) ────────────────────────────────────────────────
   const stock = (await ok<{ id: string }>('library.stock.add', { values: testStock() })).value.id
