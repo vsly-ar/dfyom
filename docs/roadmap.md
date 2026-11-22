@@ -55,6 +55,8 @@ Tasks, exit criteria (the user's enclosure recreated with its real outline) and 
 
 ## v0.4 – Features
 
+**Done (2026-11-22).**
+
 **Accepted** (D34, 2026-11-22: every recommendation of Q28–Q35, ISO metric from M1.6). Hole-type features (B23, D27) as planned right after v0.3: the feature model of [features.md](modes/features.md) (owned operations, read-only, removed only with their feature, D26), the **hole** feature (simple, counterbore, countersink) with ISO metric fastener tables (D30 Q7), the **chamfer operation** on circular edges with a **chamfer mill / V-bit** tool type (D30 Q12) for countersinks, and **Clones** in their first version (one face, source orientation kept, stable numbering; D30). Bounded to about v0.3's size: edge chamfers along shapes, the Field info views framework (D30 Q11), clone rotation, decorative patterns and inch tables come later.
 
 Tasks, exit criteria (a lid for the v0.3 enclosure: countersunk and counterbored holes repeated by Clones) and answered questions: [plans/v0.4.md](plans/v0.4.md). Docs to accept first: [design-v0.4.md](modes/design-v0.4.md), [plan-v0.4.md](modes/plan-v0.4.md), [features.md](modes/features.md) (feature model and Clones), a [ui.md](conventions/ui.md) amendment, and the `tools/list` budget decision in [llm-api.md](architecture/llm-api.md).
