@@ -2,16 +2,23 @@
 // `design.shape.list` gives it (shape icon, name, "used by n", the failed marker when it does not
 // resolve), in the operation-row pattern without move actions (shapes have no order). Remove is
 // disabled while an operation uses the shape, with the reason as tooltip and visible text. "Add
-// shape" offers the primitives, a path and Import SVG… (disabled until `design.shape.import`).
-// Adding a shape selects it, which opens the Shape Editor.
+// shape" offers the primitives, a path and Import SVG… (task U2: the file dialog, the options step
+// of the import dialog, `design.shape.import`, then its report; "Edit shape" selects the first
+// created shape). Adding a shape selects it, which opens the Shape Editor.
 // Doc: docs/conventions/ui.md#navigator-and-add, docs/modes/design-v0.3.md#what-a-shape-is
 import { CircleAlert, Plus, Shapes, Trash2 } from 'lucide-react'
+import { useState } from 'react'
 import type { ShapeItemKind } from '../../../../core/design/shape.dto'
+import { chainBounds } from '../../../../core/geometry/2d/model'
+import type { SvgImportReport, SvgSplit, SvgUnit } from '../../../../core/import/svg'
+import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { shapeMessages } from '../../messages/shape'
-import { useShell } from '../../shell/ShellContext'
+import { useRegion2d, useShell } from '../../shell/ShellContext'
 import { IconButton, Menu, PanelHeader, type MenuEntry } from '../../ui'
 import styles from './Design.module.css'
+import { ImportReportDialog, type ImportReportStep } from './ImportReportDialog'
 import type { DesignPart } from './model'
+import { shapeLoops } from './ShapePicker'
 import { newItemArgs } from './shape-model'
 import { ShapeKindIcon } from './ShapeKindIcon'
 import { useCommand, useDesignSelection } from './useDesign'
@@ -26,17 +33,96 @@ export const SHAPE_KINDS: readonly ShapeItemKind[] = [
   'path',
 ]
 
-/** The "Add shape" entries: the kinds, then Import SVG… (disabled: `design.shape.import` is not built yet). */
-export function addShapeEntries(onAdd: (kind: ShapeItemKind) => void): MenuEntry[] {
+/** The "Add shape" entries: the kinds, then Import SVG… when `onImport` is given. */
+export function addShapeEntries(
+  onAdd: (kind: ShapeItemKind) => void,
+  onImport?: () => void,
+): MenuEntry[] {
   return [
     ...SHAPE_KINDS.map((k) => ({
       label: m.addKind(k),
       icon: <ShapeKindIcon kind={k} />,
       onSelect: () => onAdd(k),
     })),
-    'separator',
-    { label: m.importSvg, onSelect: () => undefined, disabled: true },
+    ...(onImport ? (['separator', { label: m.importSvg, onSelect: onImport }] as const) : []),
   ]
+}
+
+/** The import dialog's state: closed, or a step with the chosen file. */
+type ImportState =
+  | { readonly kind: 'closed' }
+  | { readonly kind: 'options'; readonly path: string }
+  | { readonly kind: 'refused'; readonly error: AppErrorData }
+  | {
+      readonly kind: 'report'
+      readonly shapeIds: readonly string[]
+      readonly report: SvgImportReport
+    }
+
+/**
+ * The SVG import flow (task U2): file dialog → options → `design.shape.import` → report. Names
+ * and the preview come from the part's shapes once the import has landed.
+ */
+export function useSvgImport(part: DesignPart): {
+  start: () => void
+  dialog: React.JSX.Element | null
+} {
+  const { bridge, ui } = useShell()
+  const call = useCommand()
+  const port = useRegion2d()
+  const [, select] = useDesignSelection()
+  const [state, setState] = useState<ImportState>({ kind: 'closed' })
+  const close = () => setState({ kind: 'closed' })
+
+  const start = () =>
+    void (async () => {
+      const path = await bridge.files.chooseSvg()
+      if (path !== null) setState({ kind: 'options', path })
+    })()
+  const run = async (path: string, unit: SvgUnit, split: SvgSplit) => {
+    const r = await call('design.shape.import', { partId: part.dto.id, path, unit, split })
+    if (!r.ok) return setState({ kind: 'refused', error: r.error })
+    const { shapeIds, report } = r.value as { shapeIds: string[]; report: SvgImportReport }
+    ui.getState().setLastImport({ shapeIds, report })
+    setState({ kind: 'report', shapeIds, report })
+  }
+
+  let step: ImportReportStep | undefined
+  if (state.kind === 'options' || state.kind === 'refused') step = state
+  else if (state.kind === 'report') {
+    const shapes = state.shapeIds.map((id) => part.dto.shapes?.find((s) => s.id === id))
+    const loops = shapes.flatMap((s) => (s === undefined ? [] : shapeLoops(port, s)))
+    step = {
+      kind: 'report',
+      report: state.report,
+      shapes: shapes.map((s, i) => s?.name ?? state.shapeIds[i]!),
+      ...(loops.length > 0
+        ? { preview: { loops, bounds: chainBounds(loops.flatMap((l) => l.elements)) } }
+        : {}),
+    }
+  }
+  const dialog =
+    step === undefined ? null : (
+      <ImportReportDialog
+        open
+        onOpenChange={(o) => {
+          if (!o) close()
+        }}
+        step={step}
+        units={part.units}
+        onImport={({ unit, split }) => {
+          if (state.kind === 'options') void run(state.path, unit, split)
+        }}
+        onEdit={() => {
+          const first = state.kind === 'report' ? state.shapeIds[0] : undefined
+          close()
+          if (first === undefined) return
+          ui.getState().selectShapeItem(first, 0)
+          select(first)
+        }}
+      />
+    )
+  return { start, dialog }
 }
 
 export function ShapeList({
@@ -50,6 +136,7 @@ export function ShapeList({
   const { ui } = useShell()
   const [selected, select] = useDesignSelection()
   const rows = useShapeList(part)
+  const svg = useSvgImport(part)
   const opName = (id: string) => part.dto.operations.find((o) => o.id === id)?.name ?? id
 
   const add = async (kind: ShapeItemKind) => {
@@ -75,7 +162,7 @@ export function ShapeList({
         title={m.title}
         meta={rows.length > 0 ? String(rows.length) : undefined}
         actions={
-          <Menu label={m.add} items={addShapeEntries((k) => void add(k))}>
+          <Menu label={m.add} items={addShapeEntries((k) => void add(k), svg.start)}>
             <IconButton label={m.add} icon={<Plus aria-hidden="true" />} />
           </Menu>
         }
@@ -135,6 +222,7 @@ export function ShapeList({
           })}
         </ul>
       )}
+      {svg.dialog}
     </section>
   )
 }

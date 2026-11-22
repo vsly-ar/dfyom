@@ -7,11 +7,7 @@
 import { toGeometryInput } from '../../../../core/design/geometry-input'
 import { profileChain, tabCentres } from '../../../../core/geometry/outline'
 import { chainLength, chainPointAt, closestOnChains } from '../../../../core/geometry/2d/measure'
-import {
-  arcRadius,
-  elementLength,
-  type Loop,
-} from '../../../../core/geometry/2d/model'
+import { arcRadius, elementLength, type Loop } from '../../../../core/geometry/2d/model'
 import type { Region2dPort } from '../../../../core/geometry/2d/port'
 import type { OperationGeometry, Vec2 } from '../../../../core/geometry/model'
 import { wallMiddle } from '../../../../core/toolpath/pocket'
@@ -52,9 +48,7 @@ export function profileTabs(
   const hit = byOp.get(key)
   if (hit !== undefined) return hit ?? undefined
   const input = toGeometryInput(loaded.part, loaded.stock, port)
-  const g = input.isOk()
-    ? input.unwrap().operations.find((o) => o.id === operationId)
-    : undefined
+  const g = input.isOk() ? input.unwrap().operations.find((o) => o.id === operationId) : undefined
   const out = g?.kind === 'profile' ? tabsOf(g) : undefined
   byOp.set(key, out ?? null)
   return out

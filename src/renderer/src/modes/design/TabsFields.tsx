@@ -25,8 +25,10 @@ export const positionSources = (op: ProfileDTO): string[] =>
   (op.tabs.positions ?? []).map((q) => q.source)
 
 /** Count-spaced centres as entered positions (project units). */
-export const centresAsSources = (centres: readonly number[], ctx: OperationFieldsContext): string[] =>
-  centres.map((c) => lengthSource(c, ctx.units))
+export const centresAsSources = (
+  centres: readonly number[],
+  ctx: OperationFieldsContext,
+): string[] => centres.map((c) => lengthSource(c, ctx.units))
 
 export function TabPositions({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Element | null {
   const port = useRegion2d()
@@ -40,9 +42,16 @@ export function TabPositions({ ctx }: { ctx: OperationFieldsContext }): React.JS
       .map((e, i) => ({ id: `error-${i}`, severity: 'error' as const, text: e.text }))
   const warnings: FieldMessage[] = ctx.warnings
     .filter((w) => w.parameter === 'tabs' && positions !== undefined)
-    .map((w) => ({ id: w.code, severity: dfmMessages.tier(w), text: dfmMessages.text(w, ctx.units, (id) => id) }))
-  const send = (next: readonly string[] | null, path: string, extra: Record<string, unknown> = {}) =>
-    ctx.send({ tabs: { positions: next, ...extra } }, path)
+    .map((w) => ({
+      id: w.code,
+      severity: dfmMessages.tier(w),
+      text: dfmMessages.text(w, ctx.units, (id) => id),
+    }))
+  const send = (
+    next: readonly string[] | null,
+    path: string,
+    extra: Record<string, unknown> = {},
+  ) => ctx.send({ tabs: { positions: next, ...extra } }, path)
 
   const add = () => {
     if (tabs === undefined) return
@@ -109,7 +118,8 @@ export function TabPositions({ ctx }: { ctx: OperationFieldsContext }): React.JS
                 onClick={() => {
                   const all = positionSources(op).filter((_, k) => k !== i)
                   // the last one removed: back to the count rule with no tabs
-                  if (all.length === 0) ctx.send({ tabs: { positions: null, count: '0' } }, 'tabs.count')
+                  if (all.length === 0)
+                    ctx.send({ tabs: { positions: null, count: '0' } }, 'tabs.count')
                   else send(all, 'tabs.positions')
                 }}
               />

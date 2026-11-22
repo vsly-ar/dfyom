@@ -7,7 +7,12 @@
 // docs/modes/design-v0.3.md#placing-a-shape-on-a-face, #dfm-checks-for-shapes
 import type { Operation, Part } from '../../../../core/design/operation'
 import type { OperationShapeDTO } from '../../../../core/design/part.dto'
-import { orientedShape, placeShape, shapeDefinition, shapeOrientation } from '../../../../core/design/placement'
+import {
+  orientedShape,
+  placeShape,
+  shapeDefinition,
+  shapeOrientation,
+} from '../../../../core/design/placement'
 import { itemChain } from '../../../../core/design/shape-items'
 import type { ShapeDTO, ShapeItemDTO } from '../../../../core/design/shape.dto'
 import { closestOnChains } from '../../../../core/geometry/2d/measure'
@@ -176,7 +181,8 @@ export function roundCornerFixes(
         if (vertex === last && closed) vertex = 0
         if (vertex < 0) continue
         if (!closed && (vertex === 0 || vertex === last)) continue
-        const prev = (byItem.get(index)?.['fillets'] as { vertex: number; radius: string }[]) ??
+        const prev =
+          (byItem.get(index)?.['fillets'] as { vertex: number; radius: string }[]) ??
           (itemSources(item) as { fillets?: { vertex: number; radius: string }[] }).fillets ??
           []
         const fillets = [...prev.filter((f) => f.vertex !== vertex), { vertex, radius: r }]

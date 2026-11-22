@@ -4,7 +4,7 @@
 // from `design.shape.get` (area, size, smallest inside radius). Item values come from the replica;
 // the summary and the shape's users from the query.
 // Doc: docs/conventions/ui.md#shape-editor, docs/modes/design-v0.3.md#shape-definition
-import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, FileText, Plus, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import type {
   ShapeDTO,
@@ -17,7 +17,8 @@ import type { QuantityKind } from '../../../../core/quantity/units'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { shapeMessages } from '../../messages/shape'
 import { useCancelGesture } from '../../shell/hooks'
-import { useShell, useUi } from '../../shell/ShellContext'
+import { useRegion2d, useShell, useUi } from '../../shell/ShellContext'
+import { chainBounds } from '../../../../core/geometry/2d/model'
 import {
   ErrorMessage,
   Field,
@@ -35,7 +36,9 @@ import styles from './Design.module.css'
 import { defaultUnit, quantityOf, type DesignPart } from './model'
 import { NameField } from './NameField'
 import { SegmentTable } from './SegmentTable'
+import { ImportReportDialog } from './ImportReportDialog'
 import { addShapeEntries } from './ShapeList'
+import { shapeLoops } from './ShapePicker'
 import { ShapeKindIcon } from './ShapeKindIcon'
 import {
   endVertex,
@@ -158,7 +161,11 @@ export function ShapeInspector({
 
   return (
     <div className={styles['inspector']}>
-      <PanelHeader title={shape.name} meta={shape.id} />
+      <PanelHeader
+        title={shape.name}
+        meta={shape.id}
+        actions={<LastImportButton part={part} shapeId={shape.id} />}
+      />
       <div className={styles['fields']}>
         {top ? <ErrorMessage error={top} message={t.commandFailed} /> : null}
         {errors?.summary ? <ErrorMessage error={errors.summary} message={t.commandFailed} /> : null}
@@ -174,7 +181,7 @@ export function ShapeInspector({
             <h3 className={styles['groupTitle']}>{t.items}</h3>
             <Menu
               label={t.addItem}
-              items={addShapeEntries(addItem).filter((e) => e !== 'separator' && !e.disabled)}
+              items={addShapeEntries(addItem).filter((e) => e !== 'separator')}
             >
               <IconButton label={t.addItem} icon={<Plus aria-hidden="true" />} />
             </Menu>
@@ -528,5 +535,49 @@ function StartFillet({ ctx }: { ctx: ItemEditContext }): React.JSX.Element | nul
     )
   return (
     <ItemQuantity ctx={ctx} path={['fillets', at, 'radius']} label={t.startFillet} icon="corner" />
+  )
+}
+
+/**
+ * "Import report" while the window is open and the last import made this shape (ui.md#import-report,
+ * "Later access"); reports are not persisted.
+ */
+function LastImportButton({
+  part,
+  shapeId,
+}: {
+  part: DesignPart
+  shapeId: string
+}): React.JSX.Element | null {
+  const last = useUi((s) => s.lastImport)
+  const port = useRegion2d()
+  const [open, setOpen] = useState(false)
+  if (last === null || !last.shapeIds.includes(shapeId)) return null
+  const shapes = last.shapeIds.flatMap((id) => part.dto.shapes?.filter((s) => s.id === id) ?? [])
+  const loops = shapes.flatMap((s) => shapeLoops(port, s))
+  return (
+    <>
+      <IconButton
+        label={shapeMessages.importReport.reopen}
+        icon={<FileText aria-hidden="true" />}
+        onClick={() => setOpen(true)}
+      />
+      {open ? (
+        <ImportReportDialog
+          open
+          onOpenChange={setOpen}
+          units={part.units}
+          step={{
+            kind: 'report',
+            report: last.report,
+            shapes: shapes.map((s) => s.name),
+            ...(loops.length > 0
+              ? { preview: { loops, bounds: chainBounds(loops.flatMap((l) => l.elements)) } }
+              : {}),
+          }}
+          onEdit={() => setOpen(false)}
+        />
+      ) : null}
+    </>
   )
 }

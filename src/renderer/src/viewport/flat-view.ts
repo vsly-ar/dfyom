@@ -161,5 +161,7 @@ export function placeElements(t: ShapePlacement, elements: readonly Element[]): 
 }
 
 /** Bounds of elements placed in the face frame (exact for arcs, as `chainBounds`). */
-export const placedBounds = (t: ShapePlacement, elements: readonly Element[]): Bounds2 | undefined =>
-  chainBounds(placeElements(t, elements))
+export const placedBounds = (
+  t: ShapePlacement,
+  elements: readonly Element[],
+): Bounds2 | undefined => chainBounds(placeElements(t, elements))

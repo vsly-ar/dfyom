@@ -9,13 +9,17 @@
 // #design-and-plan-controls-v02, #reference-ghost-v02
 import { useMemo } from 'react'
 import { placedBox } from '../../../../core/design/reference'
+import { toPartFrame } from '../../../../core/geometry/face'
+import { unapplyPlacement } from '../../../../core/geometry/model'
 import { useRegion2d, useUi } from '../../shell/ShellContext'
 import { designMessages } from '../../messages/design'
 import { referenceMessages } from '../../messages/reference'
 import type { ViewportProps } from '../../viewport'
+import type { Vec3 } from '../../viewport/mesh'
 import { failingOperation, surfaceLabel } from './model'
 import { anchorPoint, frameAxes, markerPoint, operationFace, operationOutline } from './outline'
 import { ghostMatrix, referencePlacement } from './reference-view'
+import { useTabMarkers } from './useTabMarkers'
 import {
   useDesignEvaluation,
   useDesignPart,
@@ -32,6 +36,7 @@ export function useDesignScene(): SceneProps {
   const { warnings } = useDesignWarnings(part)
   const [selected, select] = useDesignSelection()
   const pick = useUi((s) => s.pick)
+  const rotationGuide = useUi((s) => s.rotationGuide)
   const setPick = useUi((s) => s.setPick)
   const status = evaluation?.status ?? 'pending'
   const references = useDesignReferences(part)
@@ -87,13 +92,30 @@ export function useDesignScene(): SceneProps {
     const table = part.table
     const axes = frameAxes(selectedOp, s, table)
     const face = operationFace(selectedOp, s, table)
+    const outline = operationOutline(
+      selectedOp,
+      s,
+      table,
+      port === undefined ? undefined : { port, shapes: part.loaded.part.shapes },
+    )
+    // the placed shape's bounding box in the face frame (what the anchor refers to, task U2)
+    let guide: Vec3[] | null = null
+    if (rotationGuide === selectedOp.id && outline.length > 0) {
+      const top = outline[0]!.map((p) => unapplyPlacement(face.frame, p))
+      const us = top.map((p) => p[0])
+      const vs = top.map((p) => p[1])
+      const w = top[0]![2]
+      const [u0, u1, v0, v1] = [Math.min(...us), Math.max(...us), Math.min(...vs), Math.max(...vs)]
+      guide = [
+        [u0, v0],
+        [u1, v0],
+        [u1, v1],
+        [u0, v1],
+      ].map(([u, v]) => toPartFrame(face.frame, [u!, v!, w]))
+    }
     return {
-      outline: operationOutline(
-        selectedOp,
-        s,
-        table,
-        port === undefined ? undefined : { port, shapes: part.loaded.part.shapes },
-      ),
+      outline,
+      guide,
       frame: { ...axes, labels: designMessages.inspector.frameAxes },
       anchor: anchorPoint(selectedOp, s, table),
       describe: designMessages.selectionSummary({
@@ -105,7 +127,9 @@ export function useDesignScene(): SceneProps {
             : undefined,
       }),
     }
-  }, [selectedOp, part, port])
+  }, [selectedOp, part, port, rotationGuide])
+  const selectedDto = part?.dto.operations.find((o) => o.id === selected)
+  const tabs = useTabMarkers(part, selectedDto)
 
   const marker = useMemo(() => {
     if (status !== 'failed' || ops === undefined || part?.loaded === undefined || !part.table)
@@ -126,6 +150,8 @@ export function useDesignScene(): SceneProps {
     marker,
     frame: overlays?.frame ?? null,
     anchor: overlays?.anchor ?? null,
+    tabs,
+    guide: overlays?.guide ? [overlays.guide] : null,
     ghosts,
     ...(part === undefined
       ? {}

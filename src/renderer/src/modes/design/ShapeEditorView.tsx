@@ -2,16 +2,23 @@
 // view covers the 3D viewport (kept mounted underneath, so leaving the editor returns to the view
 // it had). The live outline comes from the renderer's 2D port (stored items plus the drag
 // preview); an invalid state keeps the last valid outline and marks its issue. Without the port
-// (still loading, failed, tests) the outline is the one `design.shape.get` resolved.
+// (still loading, failed, tests) the outline is the one `design.shape.get` resolved. With an
+// operation using the shape, the view is face-on (task U2): the shape placed as the first such
+// operation places it, on that face's stock rectangle and axes.
 // Doc: docs/conventions/ui.md#shape-editor, docs/architecture/shapes.md#where-the-2d-layer-runs
 import { useMemo, useState } from 'react'
 import { resolveShape, type ResolvedShape, type ShapeSummary } from '../../../../core/design/shape'
 import type { Element } from '../../../../core/geometry/2d/model'
 import { chainBounds } from '../../../../core/geometry/2d/model'
 import type { Issue } from '../../../../shared/errors/app-error'
+import { designMessages } from '../../messages/design'
 import { shapeMessages } from '../../messages/shape'
 import { useRegion2d, useUi } from '../../shell/ShellContext'
-import { ShapeView, type FlatDrawing } from '../../viewport/ShapeView'
+import { ShapeView, type FaceContext, type FlatDrawing } from '../../viewport/ShapeView'
+import type { DesignPart } from './model'
+import { axisNames } from './model'
+import { shapePlacement } from './operation-shape'
+import { operationFace } from './outline'
 import { badMark, type ShapeHandle } from '../../viewport/shape-handles'
 import {
   anyFormula,
@@ -58,6 +65,36 @@ function firstBad(
     if (n !== undefined) return { item: n, mark: badMark(i.path.slice(2), items[n]) }
   }
   return null
+}
+
+/** The face-on context: the first operation using the shape, its placement and face. */
+export function faceContext(
+  part: DesignPart | undefined,
+  shapeId: string,
+  port: Parameters<typeof shapePlacement>[0] | undefined,
+): { context: FaceContext; face: string } | null {
+  const loaded = part?.loaded
+  if (loaded === undefined || part?.table === undefined || port === undefined) return null
+  const op = loaded.part.operations.find(
+    (o) =>
+      (o.kind === 'pocket' || o.kind === 'profile') &&
+      o.shape.kind === 'named' &&
+      o.shape.shapeId === shapeId,
+  )
+  if (op === undefined || (op.kind !== 'pocket' && op.kind !== 'profile')) return null
+  const placement = shapePlacement(port, op.shape, loaded.part.shapes)
+  if (placement === undefined) return null
+  const f = operationFace(op, loaded.stock, part.table)
+  const names = axisNames(f.direction)
+  const d = designMessages.inspector.directions[f.direction]
+  return {
+    context: {
+      placement,
+      stock: { length: f.local.length, width: f.local.width },
+      axes: [names.u.toLowerCase(), names.v.toLowerCase()],
+    },
+    face: f.direction === '+z' || f.direction === '-z' ? `${d} face` : d,
+  }
 }
 
 /** The flat view when the design selection is a shape; nothing otherwise. */
@@ -125,6 +162,7 @@ function ShapeEditorView({
         ? stored.issues
         : (info?.issues ?? [])
   const bad = firstBad(issues, items)
+  const onFace = useMemo(() => faceContext(part, shapeId, port), [part, shapeId, port])
 
   if (part === undefined || shape === undefined) return null
   const sel = Math.min(selectedItem, shape.items.length - 1)
@@ -135,13 +173,14 @@ function ShapeEditorView({
     name: shape.name,
     loops,
     elements,
-    face: null,
+    face: onFace?.face ?? null,
     item: selItem === undefined ? null : m.inspector.itemLabel(selItem.kind, sel + 1),
   })
   return (
     <ShapeView
       name={shape.name}
-      face={null}
+      face={onFace?.face ?? null}
+      context={onFace?.context ?? null}
       drawing={drawing}
       items={items}
       selected={sel}

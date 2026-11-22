@@ -34,6 +34,7 @@ import {
   type AnchorOverlay,
   type FrameOverlay,
 } from './Overlays'
+import { TabMarkers, type TabOverlay } from './TabMarkers'
 import { ReferenceGhost, type ReferenceGhostView } from './ReferenceGhost'
 import { RunLayer, type RunScene } from './RunLayer'
 
@@ -54,6 +55,10 @@ export interface SceneProps {
   frame?: FrameOverlay | null
   /** Anchor marker of the selected feature (task F2). */
   anchor?: AnchorOverlay | null
+  /** Tab markers of the selected profile (task U2). */
+  tabs?: TabOverlay | null
+  /** Thin dashed guide loops, e.g. the rotated bounding box (task U2). */
+  guide?: readonly OutlineLoop[] | null
   /** Reference model ghosts, drawn after the part, never pickable (task R3). */
   ghosts?: readonly ReferenceGhostView[] | null
   reducedMotion?: boolean
@@ -108,7 +113,9 @@ export function Scene(props: SceneProps): React.JSX.Element {
           reducedMotion={props.reducedMotion ?? false}
         />
       ) : null}
+      {props.guide ? <GuideLoops loops={props.guide} colour={palette.edge} /> : null}
       {frame ? <FrameAxes frame={frame} palette={palette} /> : null}
+      {props.tabs ? <TabMarkers tabs={props.tabs} palette={palette} /> : null}
       {anchor ? (
         <AnchorMarker
           anchor={anchor}
@@ -293,6 +300,40 @@ function StockOutline({ box, colour: c }: { box: Box; colour: Rgb }): React.JSX.
 }
 
 /** The edited operation's shape while its evaluation is pending: dashed amber loops. */
+/** Thin dashed guide loops (the rotated bounding box while rotation has focus, task U2). */
+function GuideLoops({
+  loops,
+  colour: c,
+}: {
+  loops: readonly OutlineLoop[]
+  colour: Rgb
+}): React.JSX.Element {
+  const invalidate = useThree((s) => s.invalidate)
+  useEffect(() => invalidate(), [loops, invalidate])
+  return (
+    <group>
+      {loops
+        .filter((l) => l.length >= 2)
+        .map((l, i) => (
+          <Line
+            key={i}
+            points={[...l, l[0]!].map((p) => [p[0], p[1], p[2]] as [number, number, number])}
+            color={colour(c)}
+            lineWidth={1}
+            dashed
+            dashSize={1.2}
+            gapSize={1.2}
+            transparent
+            opacity={0.7}
+            depthTest={false}
+            renderOrder={2}
+            raycast={noRaycast}
+          />
+        ))}
+    </group>
+  )
+}
+
 function LiveOutline({
   loops,
   colour: c,

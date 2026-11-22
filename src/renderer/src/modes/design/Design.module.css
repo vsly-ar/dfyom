@@ -592,9 +592,9 @@
 }
 
 .segCell {
-  padding: 1px var(--space-0-5);
+  padding: 1px 1px;
   vertical-align: top;
-  min-width: 2rem;
+  min-width: 1.75rem;
 }
 
 .segCell:focus-visible {
@@ -606,7 +606,8 @@
 .segCell[data-column='y'],
 .segCell[data-column='radius'],
 .segCell[data-column='fillet'] {
-  min-width: 4.5rem;
+  /* dense enough for the default inspector width without scrolling (U1 review, task U2) */
+  min-width: 3.75rem;
 }
 
 .segNumber {
@@ -625,7 +626,7 @@
 }
 
 .segSelect {
-  min-width: 6.5rem;
+  min-width: 4.75rem;
 }
 
 /* table cells: label for screen readers only, dense control */
@@ -643,4 +644,63 @@
   display: flex;
   justify-content: center;
   padding-top: var(--space-1);
+}
+
+/* ── shape picker, placement and tab positions (task U2) ─────────────────────────────────── */
+.miniOutline {
+  display: block;
+}
+
+.miniFill {
+  fill: color-mix(in oklab, var(--vp-edge) 12%, transparent);
+  stroke: none;
+}
+
+.miniEdge {
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 1.25;
+  stroke-linejoin: round;
+}
+
+.pickerActions {
+  display: flex;
+  gap: var(--space-1);
+  margin-top: calc(-1 * var(--space-1));
+}
+
+.tabList {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.tabNote {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.tabIssue {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.tabIssue[data-severity='error'] {
+  color: var(--danger-text);
+}
+
+.tabRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-1);
+  align-items: end;
+}
+
+.tabRemove {
+  margin-bottom: var(--space-0-5);
 }

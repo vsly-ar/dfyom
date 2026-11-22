@@ -16,7 +16,7 @@ import type { QuantityKind } from '../../../../core/quantity/units'
 import type { AppErrorData, Issue } from '../../../../shared/errors/app-error'
 import { designMessages } from '../../messages/design'
 import { dfmMessages } from '../../messages/dfm'
-import { useUi } from '../../shell/ShellContext'
+import { useShell, useUi } from '../../shell/ShellContext'
 import {
   AnchorPicker,
   Field,
@@ -25,9 +25,13 @@ import {
   QuantityInput,
   SegmentedControl,
   Select,
+  Switch,
   type FieldIconName,
   type FieldMessage,
 } from '../../ui'
+import { isOpenNamed } from './operation-shape'
+import { isRotated, ShapePicker, type ShapeActions } from './ShapePicker'
+import { TabPositions } from './TabsFields'
 import styles from './Design.module.css'
 import {
   axisNames,
@@ -35,9 +39,10 @@ import {
   isFormula,
   onChoices,
   quantityAt,
+  quantityOf,
   referenceChoices,
-  shapeKindArgs,
   surfaceDirection,
+  shapeArgs,
   updateArgs,
   type DesignPart,
 } from './model'
@@ -67,6 +72,8 @@ export interface OperationFieldsContext {
   /** One update command with these args; `path` is where its errors show, `gesture` a live step. */
   send(args: Record<string, unknown>, path: string, gesture?: string): void
   cancelGesture(gesture: string): Promise<boolean>
+  /** The shape picker's design-only actions (task U2): New shape…, Edit shape, Convert, fixes. */
+  readonly shapeActions?: ShapeActions | undefined
 }
 
 /**
@@ -89,14 +96,24 @@ export function placeErrors(
   return { errors: mine, summary: mine.length === 0 || rest.length > 0 ? error : undefined }
 }
 
-/** The field a warning is shown at (a shape or center warning at its first field). */
+/**
+ * The field a warning is shown at (a shape or center warning at its first field; a general
+ * shape's warnings and the corner warnings at the shape picker, path `shape`; tab warnings at the
+ * positions while they are entered).
+ */
 export function warningPath(w: DfmWarning, op: OperationDTO): string | undefined {
   const p = w.parameter
   if (p === undefined) return undefined
   if (p === 'center') return 'center.0'
-  if (p === 'tabs') return 'tabs.count'
-  if (p === 'shape' && 'shape' in op)
+  if (p === 'tabs')
+    return op.kind === 'profile' && op.tabs.positions !== undefined
+      ? 'tabs.positions'
+      : 'tabs.count'
+  if (p === 'shape' && 'shape' in op) {
+    if (op.shape.kind === 'named' || isRotated(op.shape) || w.params['at'] !== undefined)
+      return 'shape'
     return op.shape.kind === 'circle' ? 'shape.diameter' : 'shape.length'
+  }
   return p
 }
 
@@ -243,26 +260,51 @@ export function OperationFields({
           )}
         </>
       )
-    case 'profile':
+    case 'profile': {
+      const named = op.shape.kind === 'named' ? op.shape.shapeId : undefined
+      const open = isOpenNamed(ctx.part.dto.shapes?.find((x) => x.id === named))
+      const sideMessages: FieldMessage[] = [
+        ...ctx.errors
+          .filter((e) => e.path === 'side')
+          .map((e, i): FieldMessage => ({ id: `error-${i}`, severity: 'error', text: e.text })),
+        ...(open
+          ? [
+              op.side !== 'on'
+                ? {
+                    id: 'openNeedsOn',
+                    severity: 'error' as const,
+                    text: t.openNeedsOn,
+                    ...(ctx.readOnly
+                      ? {}
+                      : {
+                          fix: {
+                            label: t.useSideOn,
+                            onApply: () => ctx.send({ side: 'on' }, 'side'),
+                          },
+                        }),
+                  }
+                : { id: 'openNote', severity: 'note' as const, text: t.openNeedsOn },
+            ]
+          : []),
+      ]
       return (
         <>
           <ShapeGroup ctx={ctx} level={level}>
             <OnField ctx={ctx} />
-            <div className={styles['choice']}>
-              <span className={styles['caption']} aria-hidden="true">
-                {t.side}
-              </span>
+            <Field label={t.side} kind="toggle" messages={sideMessages} readOnly={ctx.readOnly}>
               <SegmentedControl<'outside' | 'inside' | 'on'>
                 label={t.side}
                 options={(['outside', 'inside', 'on'] as const).map((s) => ({
                   value: s,
                   label: t.sides[s],
+                  disabled: open && s !== 'on',
                 }))}
                 value={op.side}
                 disabled={ctx.readOnly}
                 onValueChange={(side) => ctx.send({ side }, 'side')}
               />
-            </div>
+            </Field>
+            {op.side === 'on' ? <GrooveDepthField ctx={ctx} /> : null}
           </ShapeGroup>
           {toolGroup}
           {g(
@@ -278,13 +320,15 @@ export function OperationFields({
           {g(
             t.groups.tabs,
             <>
-              <ParamField
-                ctx={ctx}
-                path="tabs.count"
-                label={t.tabsCount}
-                kind="scalar"
-                icon="tabs"
-              />
+              {op.tabs.positions === undefined ? (
+                <ParamField
+                  ctx={ctx}
+                  path="tabs.count"
+                  label={t.tabsCount}
+                  kind="scalar"
+                  icon="tabs"
+                />
+              ) : null}
               <ParamField
                 ctx={ctx}
                 path="tabs.width"
@@ -299,10 +343,12 @@ export function OperationFields({
                 kind="length"
                 icon="depth"
               />
+              <TabPositions ctx={ctx} />
             </>,
           )}
         </>
       )
+    }
     default:
       return null
   }
@@ -339,48 +385,10 @@ function ShapeGroup({
   if (!('shape' in op)) return null
   const shape = op.shape
   const names = axes(ctx)
-  // a named shape: its items are edited as the part's shape (shapes UI, K5); here only placement
-  if (shape.kind === 'named')
-    return (
-      <Group title={t.groups.shape} level={level}>
-        {children}
-        <AnchorField ctx={ctx} />
-        <ParamField
-          ctx={ctx}
-          path="shape.center.0"
-          label={t.position('Position', names.u)}
-          kind="length"
-          icon="length"
-        />
-        <ParamField
-          ctx={ctx}
-          path="shape.center.1"
-          label={t.position('Position', names.v)}
-          kind="length"
-          icon="width"
-        />
-      </Group>
-    )
   return (
     <Group title={t.groups.shape} level={level}>
+      <ShapePicker ctx={ctx} actions={ctx.shapeActions} />
       {children}
-      <div className={styles['choice']}>
-        <span className={styles['caption']} aria-hidden="true">
-          {t.shapeKind}
-        </span>
-        <SegmentedControl<'rectangle' | 'circle'>
-          label={t.shapeKind}
-          options={(['rectangle', 'circle'] as const).map((k) => ({
-            value: k,
-            label: t.shapes[k],
-          }))}
-          value={shape.kind}
-          disabled={ctx.readOnly}
-          onValueChange={(kind) => {
-            if (kind !== shape.kind) ctx.send({ shape: shapeKindArgs(shape, kind) }, 'shape')
-          }}
-        />
-      </div>
       <AnchorField ctx={ctx} />
       <ParamField
         ctx={ctx}
@@ -413,9 +421,9 @@ function ShapeGroup({
             icon="width"
           />
         </>
-      ) : (
+      ) : shape.kind === 'circle' ? (
         <ParamField ctx={ctx} path="shape.diameter" label={t.diameter} kind="length" icon="width" />
-      )}
+      ) : null}
       {op.kind === 'profile' && shape.kind === 'rectangle' ? (
         <ParamField
           ctx={ctx}
@@ -425,7 +433,70 @@ function ShapeGroup({
           icon="corner"
         />
       ) : null}
+      {shape.kind !== 'circle' ? <RotationField ctx={ctx} /> : null}
+      {shape.kind === 'named' ? (
+        <Switch
+          label={t.picker.mirror}
+          checked={shape.mirror === true}
+          disabled={ctx.readOnly}
+          onCheckedChange={(mirror) => {
+            const { mirror: _was, ...rest } = shapeArgs(shape)
+            ctx.send({ shape: mirror ? { ...rest, mirror: true } : rest }, 'shape.mirror')
+          }}
+        />
+      ) : null}
     </Group>
+  )
+}
+
+/**
+ * Rotation in degrees (rectangles and named shapes); while it has focus the viewport draws the
+ * placed, rotated bounding box the anchor uses (ui store `rotationGuide`).
+ */
+function RotationField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Element {
+  const { ui } = useShell()
+  const id = ctx.op.id
+  return (
+    <div
+      onFocus={() => ui.getState().setRotationGuide(id)}
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null))
+          ui.getState().setRotationGuide(null)
+      }}
+    >
+      <ParamField
+        ctx={ctx}
+        path="shape.rotation"
+        label={t.picker.rotation}
+        kind="angle"
+        icon="chamfer"
+        placeholder={t.picker.rotationNone}
+      />
+    </div>
+  )
+}
+
+/** A groove's blind depth below `on` (side On only); empty = through (`depth: null`). */
+function GrooveDepthField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Element | null {
+  const op = ctx.op
+  if (op.kind !== 'profile') return null
+  const messages: FieldMessage[] = ctx.errors
+    .filter((e) => e.path === 'depth')
+    .map((e, i): FieldMessage => ({ id: `error-${i}`, severity: 'error', text: e.text }))
+  return (
+    <QuantityInput
+      label={t.grooveDepth}
+      kind="length"
+      defaultUnit={defaultUnit('length', ctx.units)}
+      value={op.depth === undefined ? undefined : quantityOf(op.depth)}
+      placeholder={t.grooveThrough}
+      optional
+      illustration={<FieldIcon name="depth" />}
+      messages={messages}
+      readOnly={ctx.readOnly}
+      onCommit={(q, gesture) => ctx.send({ depth: q?.source ?? null }, 'depth', gesture)}
+      onCancelGesture={ctx.cancelGesture}
+    />
   )
 }
 
@@ -486,12 +557,14 @@ function ParamField({
   label,
   kind,
   icon,
+  placeholder,
 }: {
   ctx: OperationFieldsContext
   path: string
   label: string
   kind: FieldKind
   icon: FieldIconName
+  placeholder?: string
 }): React.JSX.Element {
   const pick = useUi((s) => s.pick)
   const setPick = useUi((s) => s.setPick)
@@ -535,6 +608,7 @@ function ParamField({
       onCancelGesture={ctx.cancelGesture}
       illustration={<FieldIcon name={icon} />}
       messages={messages}
+      {...(placeholder !== undefined ? { placeholder } : {})}
       references={references}
       readOnly={ctx.readOnly}
       picking={ctx.pickable && pick?.owner === fieldId}

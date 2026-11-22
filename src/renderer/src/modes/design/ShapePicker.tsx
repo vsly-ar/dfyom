@@ -49,7 +49,7 @@ export interface ShapeActions {
 }
 
 /** A named shape's loops resolved by the renderer's port (shape frame, mm). */
-function shapeLoops(
+export function shapeLoops(
   port: Region2dPort | undefined,
   shape: ShapeDTO,
 ): { elements: readonly Element[]; closed: boolean }[] {
@@ -126,14 +126,21 @@ export function ShapePicker({
   const shape = op.shape
   const usedBy = (id: string) =>
     ctx.part.dto.operations.filter(
-      (o) => (o.kind === 'pocket' || o.kind === 'profile') && o.shape.kind === 'named' && o.shape.shapeId === id,
+      (o) =>
+        (o.kind === 'pocket' || o.kind === 'profile') &&
+        o.shape.kind === 'named' &&
+        o.shape.shapeId === id,
     ).length
 
   const choose = (value: string) => {
     if (value === NEW_SHAPE) return actions?.newShape()
     const choice = value as PickerValue
     if (choice === pickerValue(shape)) return
-    const id = choice.startsWith('named:') ? choice.slice(6) : shape.kind === 'named' ? shape.shapeId : undefined
+    const id = choice.startsWith('named:')
+      ? choice.slice(6)
+      : shape.kind === 'named'
+        ? shape.shapeId
+        : undefined
     const loops = id === undefined ? [] : (outlines.get(id) ?? [])
     const bounds = chainBounds(loops.flatMap((l) => l.elements))
     ctx.send({ shape: shapeChoiceArgs(shape, choice, bounds, ctx.units) }, 'shape')
@@ -156,7 +163,9 @@ export function ShapePicker({
   const named = shape.kind === 'named' ? shapes.find((s) => s.id === shape.shapeId) : undefined
   const loadedOp = ctx.part.loaded?.part.operations.find((o) => o.id === op.id)
   const placement =
-    port !== undefined && loadedOp !== undefined && (loadedOp.kind === 'pocket' || loadedOp.kind === 'profile')
+    port !== undefined &&
+    loadedOp !== undefined &&
+    (loadedOp.kind === 'pocket' || loadedOp.kind === 'profile')
       ? shapePlacement(port, loadedOp.shape, ctx.part.loaded?.part.shapes)
       : undefined
   const cornerFix = (w: DfmWarning): FieldMessage['fix'] | undefined => {
@@ -164,8 +173,15 @@ export function ShapePicker({
     const r = w.suggestion.value
     const label = p.roundCorners(lengthSource(r, ctx.units, 'up'))
     if (shape.kind === 'rectangle') {
-      const source = lengthSource(Math.max(r, quantityOf(shape.cornerRadius)?.canonical ?? 0), ctx.units, 'up')
-      return { label, onApply: () => ctx.send(updateArgs(op, 'shape.cornerRadius', source), 'shape.cornerRadius') }
+      const source = lengthSource(
+        Math.max(r, quantityOf(shape.cornerRadius)?.canonical ?? 0),
+        ctx.units,
+        'up',
+      )
+      return {
+        label,
+        onApply: () => ctx.send(updateArgs(op, 'shape.cornerRadius', source), 'shape.cornerRadius'),
+      }
     }
     if (named === undefined || placement === undefined || actions === undefined) return undefined
     const points = cornerPoints(w).map((q) => unplacePoint(placement, q))
@@ -175,17 +191,26 @@ export function ShapePicker({
   }
   const messages: FieldMessage[] = [
     ...ctx.errors
-      .filter((e) => (e.path === 'shape' || e.path.startsWith('shape.')) && !FIELD_PATHS.has(e.path))
+      .filter(
+        (e) => (e.path === 'shape' || e.path.startsWith('shape.')) && !FIELD_PATHS.has(e.path),
+      )
       .map((e, i): FieldMessage => ({ id: `error-${i}`, severity: 'error', text: e.text })),
     ...ctx.warnings
-      .filter((w) => w.parameter === 'shape' && (shape.kind === 'named' || isCornerWarning(w) || isRotated(shape)))
+      .filter(
+        (w) =>
+          w.parameter === 'shape' &&
+          (shape.kind === 'named' || isCornerWarning(w) || isRotated(shape)),
+      )
       .map((w, i): FieldMessage => {
         const fix = cornerFix(w)
-        const noFix = isCornerWarning(w) && fix === undefined && shape.kind === 'named' && !ctx.readOnly
+        const noFix =
+          isCornerWarning(w) && fix === undefined && shape.kind === 'named' && !ctx.readOnly
         return {
           id: `${w.code}:${i}`,
           severity: dfmMessages.tier(w),
-          text: noFix ? `${dfmMessages.text(w, ctx.units, (id) => id)} ${p.noRoundFix}` : dfmMessages.text(w, ctx.units, (id) => id),
+          text: noFix
+            ? `${dfmMessages.text(w, ctx.units, (id) => id)} ${p.noRoundFix}`
+            : dfmMessages.text(w, ctx.units, (id) => id),
           ...(fix ? { fix } : {}),
         }
       }),
@@ -204,7 +229,11 @@ export function ShapePicker({
       {actions && !ctx.readOnly ? (
         <div className={styles['pickerActions']}>
           {shape.kind === 'named' ? (
-            <Button size="sm" icon={<PenLine aria-hidden="true" />} onClick={() => actions.editShape(shape.shapeId)}>
+            <Button
+              size="sm"
+              icon={<PenLine aria-hidden="true" />}
+              onClick={() => actions.editShape(shape.shapeId)}
+            >
               {p.editShape}
             </Button>
           ) : (
@@ -219,7 +248,10 @@ export function ShapePicker({
 }
 
 /** A rectangle turned away from 0° (a general shape: its warnings name `shape`). */
-export function isRotated(shape: { kind: string; rotation?: { source: string } | undefined }): boolean {
+export function isRotated(shape: {
+  kind: string
+  rotation?: { source: string } | undefined
+}): boolean {
   if (shape.kind !== 'rectangle' || shape.rotation === undefined) return false
   const q = quantityOf(shape.rotation as Parameters<typeof quantityOf>[0])
   return q !== undefined && q.canonical !== 0
