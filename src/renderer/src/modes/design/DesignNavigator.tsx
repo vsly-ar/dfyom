@@ -6,11 +6,11 @@
 // R3), then the named shapes (ShapeList.tsx, task U1). Doc: docs/conventions/ui.md#panels-and-inspectors, #confirmations, #undo-and-redo;
 // docs/modes/design.md#ordering-and-composition
 import { ArrowDown, ArrowUp, CircleAlert, Plus, Trash2, TriangleAlert } from 'lucide-react'
-import { useRef, useState, type KeyboardEvent } from 'react'
+import { useRef, type KeyboardEvent } from 'react'
 import type { OperationDTO, OperationKind } from '../../../../core/design/part.dto'
 import type { UnitSystem } from '../../../../core/project/document'
 import { designMessages } from '../../messages/design'
-import { useSettings, useShell } from '../../shell/ShellContext'
+import { useSettings, useShell, useUi } from '../../shell/ShellContext'
 import {
   Button,
   EmptyState,
@@ -68,7 +68,10 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
   const [selected, select] = useDesignSelection()
   const { warnings } = useDesignWarnings(part)
   const evaluation = useDesignEvaluation(part)
-  const [removed, setRemoved] = useState<string | undefined>(undefined)
+  // the undo toast lives in the ui store: the inspector's segment table removes rows too
+  const removed = useUi((st) => st.removedToast)
+  const setRemovedToast = useUi((st) => st.setRemovedToast)
+  const setRemoved = (name: string) => setRemovedToast(m.navigator.removed(name))
   // the default-anchor setting places new pockets and profiles (design-v0.2.md#placement-anchors)
   const defaultAnchor = useSettings((s) => s.settings.defaultAnchor)
   const rows = useRef(new Map<string, HTMLButtonElement>())
@@ -246,19 +249,20 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
         </ol>
       )}
       <ToastRegion>
-        {removed !== undefined ? (
+        {removed !== null ? (
           <Toast
+            key={removed}
             open
             onOpenChange={(o) => {
-              if (!o) setRemoved(undefined)
+              if (!o) setRemovedToast(null)
             }}
-            message={m.navigator.removed(removed)}
+            message={removed}
             action={{
               label: m.navigator.undo,
               altText: m.navigator.undoAlt,
               onClick: () => {
                 void bridge.call('history.undo', {})
-                setRemoved(undefined)
+                setRemovedToast(null)
               },
             }}
           />

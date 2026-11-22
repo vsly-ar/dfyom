@@ -4,7 +4,7 @@
 // preview); an invalid state keeps the last valid outline and marks its issue. Without the port
 // (still loading, failed, tests) the outline is the one `design.shape.get` resolved.
 // Doc: docs/conventions/ui.md#shape-editor, docs/architecture/shapes.md#where-the-2d-layer-runs
-import { useMemo, useRef } from 'react'
+import { useMemo, useState } from 'react'
 import { resolveShape, type ResolvedShape, type ShapeSummary } from '../../../../core/design/shape'
 import type { Element } from '../../../../core/geometry/2d/model'
 import { chainBounds } from '../../../../core/geometry/2d/model'
@@ -13,7 +13,13 @@ import { shapeMessages } from '../../messages/shape'
 import { useRegion2d, useUi } from '../../shell/ShellContext'
 import { ShapeView, type FlatDrawing } from '../../viewport/ShapeView'
 import { badMark, type ShapeHandle } from '../../viewport/shape-handles'
-import { anyFormula, definitionNumbers, issueItem, itemNumbers, type ItemNumbers } from './shape-model'
+import {
+  anyFormula,
+  definitionNumbers,
+  issueItem,
+  itemNumbers,
+  type ItemNumbers,
+} from './shape-model'
 import { useDesignPart, useDesignSelection } from './useDesign'
 import { useShapeDrag } from './useShapeDrag'
 import { isShapeId, useShapeInfo } from './useShapes'
@@ -42,8 +48,24 @@ function drawingOfSummary(s: ShapeSummary): FlatDrawing {
   return { loops, bounds: { min: s.bounds.min, max: s.bounds.max } }
 }
 
+/** Where the first issue of an item points (red segment, closing line or the whole item). */
+function firstBad(
+  issues: readonly Issue[],
+  items: readonly (ItemNumbers | undefined)[],
+): { item: number; mark: ReturnType<typeof badMark> } | null {
+  for (const i of issues) {
+    const n = issueItem(i)
+    if (n !== undefined) return { item: n, mark: badMark(i.path.slice(2), items[n]) }
+  }
+  return null
+}
+
 /** The flat view when the design selection is a shape; nothing otherwise. */
-export function ShapeEditorLayer({ insetRight = 0 }: { insetRight?: number }): React.JSX.Element | null {
+export function ShapeEditorLayer({
+  insetRight = 0,
+}: {
+  insetRight?: number
+}): React.JSX.Element | null {
   const [selected] = useDesignSelection()
   if (!isShapeId(selected)) return null
   return <ShapeEditorView key={selected} shapeId={selected} insetRight={insetRight} />
@@ -67,7 +89,8 @@ function ShapeEditorView({
   const showItems = useUi((s) => s.showShapeItems)
   const setShowItems = useUi((s) => s.setShowShapeItems)
   const onDrag = useShapeDrag(part?.dto.id ?? '', shape, port)
-  const lastGood = useRef<FlatDrawing | null>(null)
+  // the last valid outline, kept while the current state does not resolve
+  const [lastGood, setLastGood] = useState<FlatDrawing | null>(null)
 
   const selectedItem = editor?.shapeId === shapeId ? editor.item : 0
   const items = useMemo((): (ItemNumbers | undefined)[] => {
@@ -88,28 +111,20 @@ function ShapeEditorView({
       : { drawing: null, issues: r.unwrapErr().issues }
   }, [port, shape, preview, shapeId])
 
-  let drawing: FlatDrawing | null
-  if (port !== undefined) {
-    if (live.drawing !== null) lastGood.current = live.drawing
-    drawing = live.drawing ?? lastGood.current
-  } else {
-    drawing = info?.resolved !== undefined ? drawingOfSummary(info.resolved) : null
-    if (drawing !== null) lastGood.current = drawing
-    else drawing = lastGood.current
-  }
+  const fromSummary = useMemo(
+    () => (info?.resolved !== undefined ? drawingOfSummary(info.resolved) : null),
+    [info],
+  )
+  const current = port !== undefined ? live.drawing : fromSummary
+  if (current !== null && current !== lastGood) setLastGood(current)
+  const drawing = current ?? lastGood
   const issues: readonly Issue[] =
     live.issues.length > 0
       ? live.issues
       : stored?.shapeId === shapeId
         ? stored.issues
         : (info?.issues ?? [])
-  const bad = useMemo(() => {
-    for (const i of issues) {
-      const n = issueItem(i)
-      if (n !== undefined) return { item: n, mark: badMark(i.path.slice(2), items[n]) }
-    }
-    return null
-  }, [issues, items])
+  const bad = firstBad(issues, items)
 
   if (part === undefined || shape === undefined) return null
   const sel = Math.min(selectedItem, shape.items.length - 1)

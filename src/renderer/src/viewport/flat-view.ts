@@ -17,8 +17,14 @@ export interface FlatView {
 export const MIN_SCALE = 0.02
 export const MAX_SCALE = 2000
 
-export const toScreen = (v: FlatView, p: Vec2): Vec2 => [v.ox + p[0] * v.scale, v.oy - p[1] * v.scale]
-export const toShape = (v: FlatView, s: Vec2): Vec2 => [(s[0] - v.ox) / v.scale, (v.oy - s[1]) / v.scale]
+export const toScreen = (v: FlatView, p: Vec2): Vec2 => [
+  v.ox + p[0] * v.scale,
+  v.oy - p[1] * v.scale,
+]
+export const toShape = (v: FlatView, s: Vec2): Vec2 => [
+  (s[0] - v.ox) / v.scale,
+  (v.oy - s[1]) / v.scale,
+]
 
 /** The view showing `bounds` centred in `width` × `height` px, with `margin` (fraction) around it. */
 export function fitView(

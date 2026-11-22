@@ -18,7 +18,10 @@ export interface ShapeRow {
   /** Absent: the shape does not resolve. */
   readonly kind?: 'region' | 'path'
   readonly area?: number
-  readonly bounds?: { readonly min: readonly [number, number]; readonly max: readonly [number, number] }
+  readonly bounds?: {
+    readonly min: readonly [number, number]
+    readonly max: readonly [number, number]
+  }
 }
 
 export interface ShapeInfo {
@@ -49,7 +52,6 @@ function useQuery<T>(name: string, args: object | undefined, tag: string): T | u
       live = false
     }
     // `key` covers `args`
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bridge, name, key])
   return key === undefined ? undefined : value?.value
 }
@@ -72,12 +74,17 @@ export function useShapeList(part: DesignPart | undefined): readonly ShapeRow[] 
 }
 
 /** The selected shape (`design.shape.get`), or undefined until it arrives. */
-export function useShapeInfo(part: DesignPart | undefined, shapeId: string | null): ShapeInfo | undefined {
+export function useShapeInfo(
+  part: DesignPart | undefined,
+  shapeId: string | null,
+): ShapeInfo | undefined {
   const tag = useRevisionTag()
   const exists = part?.dto.shapes?.some((s) => s.id === shapeId) ?? false
   const info = useQuery<ShapeInfo>(
     'design.shape.get',
-    part === undefined || !exists || shapeId === null ? undefined : { partId: part.dto.id, shapeId },
+    part === undefined || !exists || shapeId === null
+      ? undefined
+      : { partId: part.dto.id, shapeId },
     tag,
   )
   return info?.shape.id === shapeId ? info : undefined

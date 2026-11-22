@@ -18,7 +18,13 @@ import { useCommand, useDesignSelection } from './useDesign'
 import { useShapeList } from './useShapes'
 
 const m = shapeMessages.navigator
-export const SHAPE_KINDS: readonly ShapeItemKind[] = ['rectangle', 'circle', 'obround', 'polygon', 'path']
+export const SHAPE_KINDS: readonly ShapeItemKind[] = [
+  'rectangle',
+  'circle',
+  'obround',
+  'polygon',
+  'path',
+]
 
 /** The "Add shape" entries: the kinds, then Import SVG… (disabled: `design.shape.import` is not built yet). */
 export function addShapeEntries(onAdd: (kind: ShapeItemKind) => void): MenuEntry[] {
@@ -100,7 +106,9 @@ export function ShapeList({
                 >
                   <Shapes aria-hidden="true" />
                   <span className={styles['opName']}>{row.name}</span>
-                  <span className={styles['shapeUse']}>{m.usedBy(row.usedBy.length)}</span>
+                  {used ? (
+                    <span className={styles['shapeUse']}>{m.usedBy(row.usedBy.length)}</span>
+                  ) : null}
                   {failed ? (
                     <span className={styles['opFailed']} title={m.failed}>
                       <CircleAlert aria-hidden="true" />
@@ -117,9 +125,11 @@ export function ShapeList({
                     onClick={() => (used ? undefined : void remove(row.id, row.name))}
                   />
                 </span>
-                {reason ? <p id={`${row.id}-reason`} className={styles['shapeReason']}>
+                {reason ? (
+                  <p id={`${row.id}-reason`} className={styles['shapeReason']}>
                     {reason}
-                  </p> : null}
+                  </p>
+                ) : null}
               </li>
             )
           })}

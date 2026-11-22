@@ -2,16 +2,22 @@
 // of an operation while its evaluation is pending (ui.md decision 15: "drawn live as an outline
 // from the field values, cheap, no worker"), the point of the error marker of a failing
 // operation, the face-frame axes of the selected operation's face (task F1) and its anchor point
-// (task F2). Pure, from the analytic model (part frame, mm).
+// (task F2). Pure, from the analytic model (part frame, mm); named and rotated shapes (v0.3) are
+// placed through the renderer's 2D port when it is given (task U1), else they draw no outline.
 // Doc: docs/conventions/ui.md#evaluation-status-pending-outdated-failed,
-// #design-and-plan-controls-v02; docs/modes/design-v0.2.md#face-frame
+// #design-and-plan-controls-v02; docs/modes/design-v0.2.md#face-frame;
+// docs/modes/design-v0.3.md#placing-a-shape-on-a-face
 import { shapeCentre } from '../../../../core/design/anchor'
 import {
   CENTRE_ANCHOR,
   isGeneralShape,
   type Operation,
+  type Part,
   type Shape,
 } from '../../../../core/design/operation'
+import { placeShape } from '../../../../core/design/placement'
+import type { Element, Loop } from '../../../../core/geometry/2d/model'
+import type { Region2dPort } from '../../../../core/geometry/2d/port'
 import type { SurfaceTable } from '../../../../core/design/surfaces'
 import {
   DIRECTION,
@@ -23,18 +29,81 @@ import {
   type StockSize,
 } from '../../../../core/geometry/face'
 import type { Stock } from '../../../../core/library/stock'
-import type { Vec3 } from '../../viewport'
+import type { OutlineLoop, Vec3 } from '../../viewport'
 
 /** Segments per quarter circle (corner arcs) and per full circle. */
 const ARC_SEGMENTS = 8
 const CIRCLE_SEGMENTS = 48
 
+/** Chord angle of the arcs of general shapes (rad): 64 segments per full circle. */
+const ARC_STEP = Math.PI / 32
+
+/** The 2D layer the general shapes are placed with: the renderer's port and the part's shapes. */
+export interface ShapeContext {
+  readonly port: Region2dPort
+  readonly shapes: Part['shapes']
+}
+
+/** The points of an element chain (each element's start, then the arcs sampled), without its end. */
+function chainPoints(elements: readonly Element[], at: (u: number, v: number) => Vec3): Vec3[] {
+  const out: Vec3[] = []
+  for (const e of elements) {
+    out.push(at(e.a[0], e.a[1]))
+    if (e.kind !== 'arc') continue
+    const [cx, cy] = e.centre
+    const r = Math.hypot(e.a[0] - cx, e.a[1] - cy)
+    const a0 = Math.atan2(e.a[1] - cy, e.a[0] - cx)
+    let sweep = Math.atan2(e.b[1] - cy, e.b[0] - cx) - a0
+    const full = e.a[0] === e.b[0] && e.a[1] === e.b[1]
+    if (full) sweep = e.ccw ? 2 * Math.PI : -2 * Math.PI
+    else if (e.ccw && sweep <= 0) sweep += 2 * Math.PI
+    else if (!e.ccw && sweep >= 0) sweep -= 2 * Math.PI
+    const n = Math.max(2, Math.ceil(Math.abs(sweep) / ARC_STEP))
+    for (let i = 1; i < n; i++) {
+      const t = a0 + (sweep * i) / n
+      out.push(at(cx + r * Math.cos(t), cy + r * Math.sin(t)))
+    }
+  }
+  return out
+}
+
 /**
- * Closed loop of a shape at face-frame height `w` (the last point does not repeat the first), as
- * `[u, v, w]`; in the part frame for the top face.
+ * The loops of a named or rotated shape placed on its face (`placeShape`), at height `w`: every
+ * loop of a region closed, an open path marked `open`. None when the shape does not resolve.
+ */
+function generalLoops(shape: Shape, w: number, ctx: ShapeContext): OutlineLoop[] {
+  const placed = placeShape(ctx.port, shape, ctx.shapes)
+  if (placed.isErr()) return []
+  const { outline, centre } = placed.unwrap()
+  const at = (u: number, v: number): Vec3 => [centre[0] + u, centre[1] + v, w]
+  if (outline.kind === 'path') {
+    const els = outline.path.elements
+    const pts = chainPoints(els, at)
+    const last = els.at(-1)
+    if (last !== undefined) pts.push(at(last.b[0], last.b[1]))
+    return [Object.assign(pts, { open: true as const })]
+  }
+  const loops: Loop[] = outline.region.pieces.flatMap((p) => [p.outer, ...p.holes])
+  return loops.map((l) => chainPoints(l.elements, at))
+}
+
+/**
+ * The loops of a shape at face-frame height `w` as `[u, v, w]` (in the part frame for the top
+ * face): one closed loop for a v0.1 rectangle or circle; for a named or rotated shape the placed
+ * loops through `ctx` (none without it).
+ */
+export function shapeLoops(shape: Shape, w: number, ctx?: ShapeContext): OutlineLoop[] {
+  if (shape.kind === 'named' || isGeneralShape(shape))
+    return ctx === undefined ? [] : generalLoops(shape, w, ctx)
+  return [shapeLoop(shape, w)]
+}
+
+/**
+ * Closed loop of a v0.1 rectangle or circle at face-frame height `w` (the last point does not
+ * repeat the first), as `[u, v, w]`; in the part frame for the top face. Named and rotated shapes
+ * have none here (`shapeLoops` places them).
  */
 export function shapeLoop(shape: Shape, w: number): Vec3[] {
-  // named and rotated shapes need the 2D layer: no outline yet (K5 draws them)
   if (shape.kind === 'named' || isGeneralShape(shape)) return []
   const [cx, cy] = shapeCentre(shape) // `center` is the anchor point
   if (shape.kind === 'circle') {
@@ -103,15 +172,23 @@ export function operationFace(op: Operation, stock: Stock, table: SurfaceTable):
   }
 }
 
-const place = (face: OperationFace, loops: Vec3[][]): Vec3[][] =>
-  loops.map((l) => l.map((p) => toPartFrame(face.frame, p)))
+const place = (face: OperationFace, loops: OutlineLoop[]): OutlineLoop[] =>
+  loops.map((l) => {
+    const out = l.map((p) => toPartFrame(face.frame, p))
+    return l.open ? Object.assign(out, { open: true as const }) : out
+  })
 
 /**
  * The operation's shape where it starts and where it ends, in the part frame: the top loop at its
  * `on` face and the bottom loop at its floor (facing: the new face; profile: the stock face and
  * the opposite one).
  */
-export function operationOutline(op: Operation, stock: Stock, table: SurfaceTable): Vec3[][] {
+export function operationOutline(
+  op: Operation,
+  stock: Stock,
+  table: SurfaceTable,
+  ctx?: ShapeContext,
+): OutlineLoop[] {
   const face = operationFace(op, stock, table)
   const through = -face.local.thickness
   switch (op.kind) {
@@ -121,8 +198,8 @@ export function operationOutline(op: Operation, stock: Stock, table: SurfaceTabl
       ])
     case 'pocket':
       return place(face, [
-        shapeLoop(op.shape, face.w),
-        shapeLoop(op.shape, face.w - op.depth.canonical),
+        ...shapeLoops(op.shape, face.w, ctx),
+        ...shapeLoops(op.shape, face.w - op.depth.canonical, ctx),
       ])
     case 'drilling': {
       const circle: Shape = {
@@ -138,7 +215,10 @@ export function operationOutline(op: Operation, stock: Stock, table: SurfaceTabl
       return place(face, [shapeLoop(circle, face.w), shapeLoop(circle, bottom)])
     }
     case 'profile':
-      return place(face, [shapeLoop(op.shape, face.w), shapeLoop(op.shape, through)])
+      return place(face, [
+        ...shapeLoops(op.shape, face.w, ctx),
+        ...shapeLoops(op.shape, through, ctx),
+      ])
   }
 }
 

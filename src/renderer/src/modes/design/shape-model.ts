@@ -210,7 +210,10 @@ export function newSegment(
       mm,
       units === 'mm' ? 0.01 : 0.0254,
     )
-  return { kind: 'line', to: [source(after, 0, p[0] + ux * step), source(after, 1, p[1] + uy * step)] }
+  return {
+    kind: 'line',
+    to: [source(after, 0, p[0] + ux * step), source(after, 1, p[1] + uy * step)],
+  }
 }
 
 /** A segment of another type with the same end point (an arc's radius: the chord, so it is valid). */

@@ -6,7 +6,12 @@
 // Doc: docs/conventions/ui.md#shape-editor, docs/modes/design-v0.3.md#shape-definition
 import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react'
 import { useState } from 'react'
-import type { ShapeDTO, ShapeItemDTO, ShapeItemKind, ShapeOp } from '../../../../core/design/shape.dto'
+import type {
+  ShapeDTO,
+  ShapeItemDTO,
+  ShapeItemKind,
+  ShapeOp,
+} from '../../../../core/design/shape.dto'
 import type { QuantityDTO } from '../../../../core/quantity/quantity.dto'
 import type { QuantityKind } from '../../../../core/quantity/units'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
@@ -75,7 +80,13 @@ export interface ItemEditContext {
   cancelGesture(gesture: string): Promise<boolean>
 }
 
-export function ShapeInspector({ part, shape }: { part: DesignPart; shape: ShapeDTO }): React.JSX.Element {
+export function ShapeInspector({
+  part,
+  shape,
+}: {
+  part: DesignPart
+  shape: ShapeDTO
+}): React.JSX.Element {
   const call = useCommand()
   const cancelGesture = useCancelGesture()
   const { ui } = useShell()
@@ -368,8 +379,11 @@ export function ItemQuantity({
   const kind = KIND_OF[String(path[0])] ?? 'length'
   const unitKind = kind === 'angle' ? 'angle' : kind === 'scalar' ? 'scalar' : 'length'
   const error = ctx.errors?.byField.get(key)
-  const messages: FieldMessage[] = error ? [{ id: `error:${key}`, severity: 'error', text: error }] : []
-  const commit = (source: string, gesture?: string) => ctx.send(fieldUpdate(ctx.dto, path, source), gesture)
+  const messages: FieldMessage[] = error
+    ? [{ id: `error:${key}`, severity: 'error', text: error }]
+    : []
+  const commit = (source: string, gesture?: string) =>
+    ctx.send(fieldUpdate(ctx.dto, path, source), gesture)
   const common = {
     label,
     kind,
@@ -379,7 +393,7 @@ export function ItemQuantity({
     messages,
     ...(ctx.part.table ? { resolver: ctx.part.table.resolver(0) } : {}),
     ...(icon && !compact ? { illustration: <FieldIcon name={icon} /> } : {}),
-    ...(compact ? { className: styles['cellInput'] } : {}),
+    ...(compact ? { className: styles['cellInput'], dense: true } : {}),
   }
   return optional ? (
     <QuantityInput
@@ -446,7 +460,13 @@ function ItemFields({ ctx }: { ctx: ItemEditContext }): React.JSX.Element {
               onValueChange={(across) => ctx.send({ across })}
             />
           </Field>
-          <ItemQuantity ctx={ctx} path={['cornerRadius']} label={t.cornerRadius} icon="corner" optional />
+          <ItemQuantity
+            ctx={ctx}
+            path={['cornerRadius']}
+            label={t.cornerRadius}
+            icon="corner"
+            optional
+          />
           <ItemQuantity ctx={ctx} path={['rotation']} label={t.rotation} optional />
         </>
       )
@@ -498,10 +518,15 @@ function StartFillet({ ctx }: { ctx: ItemEditContext }): React.JSX.Element | nul
         onCommit={(v) => {
           if (v === undefined) return
           ctx.send({
-            fillets: [...(itemSources(item) as { fillets?: unknown[] }).fillets ?? [], { vertex: 0, radius: v.source }],
+            fillets: [
+              ...((itemSources(item) as { fillets?: unknown[] }).fillets ?? []),
+              { vertex: 0, radius: v.source },
+            ],
           })
         }}
       />
     )
-  return <ItemQuantity ctx={ctx} path={['fillets', at, 'radius']} label={t.startFillet} icon="corner" />
+  return (
+    <ItemQuantity ctx={ctx} path={['fillets', at, 'radius']} label={t.startFillet} icon="corner" />
+  )
 }

@@ -83,6 +83,12 @@ export interface UiState {
   setShapePreview(preview: ShapePreview | null): void
   readonly shapeIssues: ShapeIssues | null
   setShapeIssues(issues: ShapeIssues | null): void
+  /**
+   * The design navigator's undo toast ("Removed Pocket 2", "Removed segment 2"): one toast region
+   * for the mode, which the inspector's removals (segment table, task U1) also use.
+   */
+  readonly removedToast: string | null
+  setRemovedToast(message: string | null): void
 }
 
 export type UiStore = StoreApi<UiState>
@@ -121,5 +127,7 @@ export function createUiStore(initial: Partial<Pick<UiState, 'mode'>> = {}): UiS
     setShapePreview: (shapePreview) => set({ shapePreview }),
     shapeIssues: null,
     setShapeIssues: (shapeIssues) => set({ shapeIssues }),
+    removedToast: null,
+    setRemovedToast: (removedToast) => set({ removedToast }),
   }))
 }

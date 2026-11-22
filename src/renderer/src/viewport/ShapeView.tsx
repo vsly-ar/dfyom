@@ -129,7 +129,9 @@ function useSize(ref: React.RefObject<HTMLElement | null>): { width: number; hei
     const read = () => {
       const r = el.getBoundingClientRect()
       if (r.width > 0 && r.height > 0)
-        setSize((s) => (s.width === r.width && s.height === r.height ? s : { width: r.width, height: r.height }))
+        setSize((s) =>
+          s.width === r.width && s.height === r.height ? s : { width: r.width, height: r.height },
+        )
     }
     read()
     const ro = new ResizeObserver(read)
@@ -162,10 +164,15 @@ function readoutText(item: Item, h: ShapeHandle, units: UnitSystem, chip: boolea
 }
 
 /** The chain of one item for its outline (dashed when selected, thin under "Show items"). */
-function itemElements(item: Item | undefined, n: number): { elements: Element2[]; closed: boolean } | undefined {
+function itemElements(
+  item: Item | undefined,
+  n: number,
+): { elements: Element2[]; closed: boolean } | undefined {
   if (item === undefined) return undefined
   const chain = itemChain(item, n, [])
-  return chain === undefined ? undefined : { elements: [...chain.loop.elements], closed: chain.closed }
+  return chain === undefined
+    ? undefined
+    : { elements: [...chain.loop.elements], closed: chain.closed }
 }
 
 export function ShapeView(props: ShapeViewProps): React.JSX.Element {
@@ -184,6 +191,8 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
   const [focused, setFocused] = useState<string | null>(null)
   const handleRefs = useRef(new Map<string, SVGGElement>())
   const keyRun = useRef<{ drag: Drag; timer: ReturnType<typeof setTimeout> } | null>(null)
+  // the arrow-key run's drag for rendering (the value chip); `keyRun` holds it for the handlers
+  const [keyDrag, setKeyDrag] = useState<Drag | null>(null)
 
   const inset = props.insetRight ?? 0
   const fitted = (w: number, h: number): FlatView => {
@@ -204,7 +213,8 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
   }, [size, hasDrawing, inset])
   const v = view ?? fitted(size.width, size.height)
 
-  const item = selected === null ? undefined : (drag?.index === selected ? drag.last : items[selected])
+  const item =
+    selected === null ? undefined : drag?.index === selected ? drag.last : items[selected]
   const handles = useMemo(() => (item === undefined ? [] : itemHandles(item)), [item])
 
   // ── pointer ──────────────────────────────────────────────────────────────────────────────
@@ -217,7 +227,13 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
     dragRef.current = null
     setDrag(null)
     if (d?.started && !d.cancelled)
-      onDrag({ phase, index: d.index, handle: d.handle.id, item: d.last, stepMm: dragStepMm(v.scale) })
+      onDrag({
+        phase,
+        index: d.index,
+        handle: d.handle.id,
+        item: d.last,
+        stepMm: dragStepMm(v.scale),
+      })
   }
   const onHandleDown = (e: PointerEvent, index: number, h: ShapeHandle) => {
     if (e.button !== 0 || item === undefined || props.isLocked(index, h)) return
@@ -249,7 +265,13 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
       if (!d.started) {
         if (Math.hypot(at[0] - d.down[0], at[1] - d.down[1]) < CLICK_PX) return
         d.started = true
-        onDrag({ phase: 'start', index: d.index, handle: d.handle.id, item: d.base, stepMm: dragStepMm(v.scale) })
+        onDrag({
+          phase: 'start',
+          index: d.index,
+          handle: d.handle.id,
+          item: d.base,
+          stepMm: dragStepMm(v.scale),
+        })
       }
       const p = toShape(v, at)
       const next = dragHandle(d.base, d.handle.id, [p[0] + d.offset[0], p[1] + d.offset[1]], {
@@ -259,7 +281,13 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
       d.last = next
       d.pointer = at
       setDrag({ ...d })
-      onDrag({ phase: 'move', index: d.index, handle: d.handle.id, item: next, stepMm: dragStepMm(v.scale) })
+      onDrag({
+        phase: 'move',
+        index: d.index,
+        handle: d.handle.id,
+        item: next,
+        stepMm: dragStepMm(v.scale),
+      })
       return
     }
     const p = pan.current
@@ -291,10 +319,15 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
       touched.current = true
       const r = el.getBoundingClientRect()
       setView((prev) => {
-        const cur = prev ?? fitView(drawing?.bounds, r.width || DEFAULT_SIZE.width, r.height || DEFAULT_SIZE.height)
+        const cur =
+          prev ??
+          fitView(drawing?.bounds, r.width || DEFAULT_SIZE.width, r.height || DEFAULT_SIZE.height)
         if (gesture === 'pan') return panBy(cur, -e.deltaX, -e.deltaY)
         const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1
-        return zoomAt(cur, Math.exp((-e.deltaY * unit) / 300), [e.clientX - r.left, e.clientY - r.top])
+        return zoomAt(cur, Math.exp((-e.deltaY * unit) / 300), [
+          e.clientX - r.left,
+          e.clientY - r.top,
+        ])
       })
     }
     el.addEventListener('wheel', onWheel, { passive: false })
@@ -307,7 +340,14 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
     if (run === null) return
     clearTimeout(run.timer)
     keyRun.current = null
-    onDrag({ phase: 'end', index: run.drag.index, handle: run.drag.handle.id, item: run.drag.last, stepMm: 0.1 })
+    setKeyDrag(null)
+    onDrag({
+      phase: 'end',
+      index: run.drag.index,
+      handle: run.drag.handle.id,
+      item: run.drag.last,
+      stepMm: 0.1,
+    })
   }, [onDrag])
   useEffect(() => endKeyRun, [endKeyRun])
 
@@ -331,7 +371,12 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
       props.onExit()
       return
     }
-    if ((e.key === 'f' || e.key === 'F') && e.target === e.currentTarget && !e.metaKey && !e.ctrlKey) {
+    if (
+      (e.key === 'f' || e.key === 'F') &&
+      e.target === e.currentTarget &&
+      !e.metaKey &&
+      !e.ctrlKey
+    ) {
       e.preventDefault()
       fit()
       return
@@ -364,6 +409,9 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
       let run = keyRun.current
       if (run === null || run.drag.handle.id !== h.id) {
         endKeyRun()
+        run = null
+      }
+      if (run === null) {
         const d: Drag = {
           index: selected,
           handle: h,
@@ -376,15 +424,24 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
           pointer: toScreen(v, h.at),
         }
         run = { drag: d, timer: setTimeout(endKeyRun, KEY_RUN_MS) }
-        keyRun.current = run
         onDrag({ phase: 'start', index: selected, handle: h.id, item, stepMm: 0.1 })
       }
       clearTimeout(run.timer)
-      run.timer = setTimeout(endKeyRun, KEY_RUN_MS)
       const cur = itemHandles(run.drag.last).find((x) => x.id === h.id) ?? h
-      const next = dragHandle(run.drag.last, h.id, [cur.at[0] + dir[0] * step, cur.at[1] + dir[1] * step])
-      run.drag.last = next
-      onDrag({ phase: 'move', index: selected, handle: h.id, item: next, stepMm: Math.min(step, 0.1) })
+      const next = dragHandle(run.drag.last, h.id, [
+        cur.at[0] + dir[0] * step,
+        cur.at[1] + dir[1] * step,
+      ])
+      const nextDrag: Drag = { ...run.drag, last: next }
+      keyRun.current = { drag: nextDrag, timer: setTimeout(endKeyRun, KEY_RUN_MS) }
+      setKeyDrag(nextDrag)
+      onDrag({
+        phase: 'move',
+        index: selected,
+        handle: h.id,
+        item: next,
+        stepMm: Math.min(step, 0.1),
+      })
     }
   }
 
@@ -398,11 +455,17 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
     if (count > 600) return lines
     for (let x = Math.ceil(lo[0] / minor) * minor; x <= hi[0]; x += minor) {
       const sx = v.ox + x * v.scale
-      lines.push({ d: `M${sx} 0V${size.height}`, major: Math.abs(x / major - Math.round(x / major)) < 1e-6 })
+      lines.push({
+        d: `M${sx} 0V${size.height}`,
+        major: Math.abs(x / major - Math.round(x / major)) < 1e-6,
+      })
     }
     for (let y = Math.ceil(lo[1] / minor) * minor; y <= hi[1]; y += minor) {
       const sy = v.oy - y * v.scale
-      lines.push({ d: `M0 ${sy}H${size.width}`, major: Math.abs(y / major - Math.round(y / major)) < 1e-6 })
+      lines.push({
+        d: `M0 ${sy}H${size.width}`,
+        major: Math.abs(y / major - Math.round(y / major)) < 1e-6,
+      })
     }
     return lines
   }, [v, size, units])
@@ -429,7 +492,10 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
       if (ends === undefined) return null
       const a = toScreen(v, ends[0])
       const b = toScreen(v, ends[1])
-      return { d: `M${a[0]} ${a[1]}L${b[0]} ${b[1]}`, at: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] as Vec2 }
+      return {
+        d: `M${a[0]} ${a[1]}L${b[0]} ${b[1]}`,
+        at: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] as Vec2,
+      }
     }
     const ch = itemElements(it, bad.item)
     if (ch !== undefined && ch.elements.length > 0) {
@@ -442,12 +508,12 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
 
   const origin = toScreen(v, [0, 0])
   const axisLen = 36
-  const chipHandle = drag?.started
-    ? drag.handle
-    : keyRun.current !== null
-      ? keyRun.current.drag.handle
+  const chipHandle = drag?.started ? drag.handle : keyDrag !== null ? keyDrag.handle : null
+  const chipAt = drag?.started
+    ? drag.pointer
+    : chipHandle && item
+      ? toScreen(v, itemHandles(item).find((h) => h.id === chipHandle.id)?.at ?? [0, 0])
       : null
-  const chipAt = drag?.started ? drag.pointer : chipHandle && item ? toScreen(v, itemHandles(item).find((h) => h.id === chipHandle.id)?.at ?? [0, 0]) : null
 
   return (
     <div
@@ -483,8 +549,14 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
           ))}
         </g>
         <g className={styles['axes']}>
-          <path className={styles['axisX']} d={`M${origin[0]} ${origin[1]}h${axisLen}m-5 -3.5l5 3.5l-5 3.5`} />
-          <path className={styles['axisY']} d={`M${origin[0]} ${origin[1]}v${-axisLen}m-3.5 5l3.5 -5l3.5 5`} />
+          <path
+            className={styles['axisX']}
+            d={`M${origin[0]} ${origin[1]}h${axisLen}m-5 -3.5l5 3.5l-5 3.5`}
+          />
+          <path
+            className={styles['axisY']}
+            d={`M${origin[0]} ${origin[1]}v${-axisLen}m-3.5 5l3.5 -5l3.5 5`}
+          />
           <text className={styles['axisLabel']} x={origin[0] + axisLen + 4} y={origin[1] + 4}>
             x
           </text>
@@ -516,7 +588,10 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
         {badDraw ? (
           <g className={styles['bad']} data-testid="shape-invalid">
             {badDraw.d ? <path d={badDraw.d} /> : null}
-            <g transform={`translate(${badDraw.at[0]} ${badDraw.at[1]})`} className={styles['marker']}>
+            <g
+              transform={`translate(${badDraw.at[0]} ${badDraw.at[1]})`}
+              className={styles['marker']}
+            >
               <circle r="7" />
               <path d="M0 -3.5V0.8M0 3.2V3.3" />
             </g>
@@ -612,7 +687,7 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
           style={{ left: chipAt[0] + 14, top: chipAt[1] + 14 }}
           data-testid="shape-value-chip"
         >
-          {readoutText(drag?.last ?? keyRun.current?.drag.last ?? item, chipHandle, units, true)}
+          {readoutText(drag?.last ?? keyDrag?.last ?? item, chipHandle, units, true)}
         </div>
       ) : null}
       {drawing === null ? <p className={styles['empty']}>{m.noOutline}</p> : null}

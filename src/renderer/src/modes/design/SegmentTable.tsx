@@ -2,29 +2,26 @@
 // (Line, Arc, Tangent arc), end X and Y, radius, CW/CCW, large arc and the fillet at the end vertex;
 // a cell that does not apply to the type is empty. Arrows move between cells (roving focus),
 // Enter edits a cell and Enter commits it (back to the cell), Escape leaves the cell's control,
-// Alt+↑/↓ moves a row, Delete on # removes it with an undo toast. Every cell is a QuantityInput
+// Alt+↑/↓ moves a row, Delete on # removes it with an undo toast (the navigator's). Every cell is a QuantityInput
 // (or a choice); every commit is one `design.shape.item.update` of the segment (or fillet) list.
 // Doc: docs/conventions/ui.md#shape-editor, docs/modes/design-v0.3.md#shape-definition
 import { Plus } from 'lucide-react'
 import { useRef, useState, type KeyboardEvent } from 'react'
 import type { ShapeSegment } from '../../../../core/design/shape.dto'
-import { designMessages } from '../../messages/design'
 import { shapeMessages } from '../../messages/shape'
 import { useShell } from '../../shell/ShellContext'
-import {
-  Button,
-  Checkbox,
-  Menu,
-  QuantityInput,
-  SegmentedControl,
-  Select,
-  Toast,
-  ToastRegion,
-} from '../../ui'
+import { Button, Checkbox, Menu, QuantityInput, SegmentedControl, Select } from '../../ui'
 import { defaultUnit } from './model'
 import styles from './Design.module.css'
 import { ItemQuantity, type ItemEditContext } from './ShapeInspector'
-import { endVertex, fieldUpdate, itemNumbers, itemSources, newSegment, retypeSegment } from './shape-model'
+import {
+  endVertex,
+  fieldUpdate,
+  itemNumbers,
+  itemSources,
+  newSegment,
+  retypeSegment,
+} from './shape-model'
 
 const t = shapeMessages.segments
 const COLUMNS = ['number', 'type', 'x', 'y', 'radius', 'direction', 'large', 'fillet'] as const
@@ -41,9 +38,8 @@ export function SegmentTable({
   selected: number | null
   onSelect(k: number | null): void
 }): React.JSX.Element | null {
-  const { bridge } = useShell()
+  const { ui } = useShell()
   const [focus, setFocus] = useState<{ row: number; col: number }>({ row: 0, col: 0 })
-  const [removed, setRemoved] = useState<number | undefined>(undefined)
   const cells = useRef(new Map<string, HTMLTableCellElement>())
   const dto = ctx.dto
   const numbers = itemNumbers(dto)
@@ -81,7 +77,10 @@ export function SegmentTable({
     // the end vertices of the two rows swap with them
     const a = k + 1
     const b = to + 1
-    sendSegments(next, remapFillets((v) => (v === a ? b : v === b ? a : v)))
+    sendSegments(
+      next,
+      remapFillets((v) => (v === a ? b : v === b ? a : v)),
+    )
     onSelect(to)
     setFocus((f) => ({ ...f, row: to }))
   }
@@ -92,7 +91,8 @@ export function SegmentTable({
       next,
       remapFillets((v) => (v === k + 1 ? undefined : v > k + 1 ? v - 1 : v)),
     )
-    setRemoved(k + 1)
+    // the navigator's undo toast (one toast region per mode)
+    ui.getState().setRemovedToast(t.removed(k + 1))
     onSelect(null)
     setFocus((f) => ({ ...f, row: Math.max(0, Math.min(f.row, n - 2)) }))
   }
@@ -100,12 +100,20 @@ export function SegmentTable({
     const after = selected ?? n - 1
     const next = [...segments]
     next.splice(after + 1, 0, newSegment(numbers, dto, after, ctx.part.units))
-    sendSegments(next, remapFillets((v) => (v > after + 1 ? v + 1 : v)))
+    sendSegments(
+      next,
+      remapFillets((v) => (v > after + 1 ? v + 1 : v)),
+    )
     onSelect(after + 1)
   }
   const setFillet = (vertex: number, radius: string | undefined) => {
     const rest = fillets.filter((f) => f.vertex !== vertex)
-    ctx.send({ fillets: radius === undefined ? rest : [...rest, { vertex, radius }].sort((x, y) => x.vertex - y.vertex) })
+    ctx.send({
+      fillets:
+        radius === undefined
+          ? rest
+          : [...rest, { vertex, radius }].sort((x, y) => x.vertex - y.vertex),
+    })
   }
 
   const onCellKey = (e: KeyboardEvent<HTMLTableCellElement>, row: number, col: number) => {
@@ -138,7 +146,10 @@ export function SegmentTable({
     }
     if (e.key === 'Home' || e.key === 'End') {
       e.preventDefault()
-      focusCell(e.ctrlKey ? (e.key === 'Home' ? 0 : n - 1) : row, e.key === 'Home' ? 0 : COLUMNS.length - 1)
+      focusCell(
+        e.ctrlKey ? (e.key === 'Home' ? 0 : n - 1) : row,
+        e.key === 'Home' ? 0 : COLUMNS.length - 1,
+      )
       return
     }
     if ((e.key === 'Delete' || e.key === 'Backspace') && COLUMNS[col] === 'number') {
@@ -190,17 +201,38 @@ export function SegmentTable({
         </Button>
       </div>
       <div className={styles['segScroll']}>
-        <table role="grid" aria-label={t.label(label)} className={styles['segTable']} aria-describedby={`${dto.kind}-${ctx.index}-keys`}>
+        <table
+          role="grid"
+          aria-label={t.label(label)}
+          className={styles['segTable']}
+          aria-describedby={`${dto.kind}-${ctx.index}-keys`}
+        >
           <thead>
             <tr role="row">
-              <th role="columnheader" scope="col">{t.number}</th>
-              <th role="columnheader" scope="col">{t.type}</th>
-              <th role="columnheader" scope="col">{t.x}</th>
-              <th role="columnheader" scope="col">{t.y}</th>
-              <th role="columnheader" scope="col">{t.radius}</th>
-              <th role="columnheader" scope="col">{t.direction}</th>
-              <th role="columnheader" scope="col">{t.large}</th>
-              <th role="columnheader" scope="col">{t.fillet}</th>
+              <th role="columnheader" scope="col">
+                {t.number}
+              </th>
+              <th role="columnheader" scope="col">
+                {t.type}
+              </th>
+              <th role="columnheader" scope="col">
+                {t.x}
+              </th>
+              <th role="columnheader" scope="col">
+                {t.y}
+              </th>
+              <th role="columnheader" scope="col">
+                {t.radius}
+              </th>
+              <th role="columnheader" scope="col">
+                {t.direction}
+              </th>
+              <th role="columnheader" scope="col">
+                {t.large}
+              </th>
+              <th role="columnheader" scope="col">
+                {t.fillet}
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -213,7 +245,9 @@ export function SegmentTable({
               const from = k === 0 ? numbers.start : numbers.segments[k - 1]!.to
               const to = numbers.segments[k]!.to
               const chord = Math.hypot(to[0] - from[0], to[1] - from[1])
-              const bad = ctx.errors !== undefined && [...ctx.errors.byField.keys()].some((f) => f.startsWith(`segments.${k}.`))
+              const bad =
+                ctx.errors !== undefined &&
+                [...ctx.errors.byField.keys()].some((f) => f.startsWith(`segments.${k}.`))
               return (
                 <tr
                   key={k}
@@ -228,13 +262,34 @@ export function SegmentTable({
                     <Menu
                       label={t.actions(num)}
                       items={[
-                        { label: t.moveUp(num), shortcut: 'Alt+↑', disabled: k === 0, onSelect: () => moveRow(k, -1) },
-                        { label: t.moveDown(num), shortcut: 'Alt+↓', disabled: k === n - 1, onSelect: () => moveRow(k, 1) },
+                        {
+                          label: t.moveUp(num),
+                          shortcut: 'Alt+↑',
+                          disabled: k === 0,
+                          onSelect: () => moveRow(k, -1),
+                        },
+                        {
+                          label: t.moveDown(num),
+                          shortcut: 'Alt+↓',
+                          disabled: k === n - 1,
+                          onSelect: () => moveRow(k, 1),
+                        },
                         'separator',
-                        { label: t.remove(num), shortcut: 'Delete', danger: true, disabled: n <= 1, onSelect: () => removeRow(k) },
+                        {
+                          label: t.remove(num),
+                          shortcut: 'Delete',
+                          danger: true,
+                          disabled: n <= 1,
+                          onSelect: () => removeRow(k),
+                        },
                       ]}
                     >
-                      <button type="button" tabIndex={-1} className={styles['segNumber']} aria-label={t.actions(num)}>
+                      <button
+                        type="button"
+                        tabIndex={-1}
+                        className={styles['segNumber']}
+                        aria-label={t.actions(num)}
+                      >
                         {num}
                       </button>
                     </Menu>,
@@ -246,7 +301,10 @@ export function SegmentTable({
                     <Select
                       aria-label={t.cell(num, t.type)}
                       className={styles['segSelect']}
-                      options={(['line', 'arc', 'tangentArc'] as const).map((v) => ({ value: v, label: t.types[v] }))}
+                      options={(['line', 'arc', 'tangentArc'] as const).map((v) => ({
+                        value: v,
+                        label: t.types[v],
+                      }))}
                       value={s.kind}
                       onValueChange={(kind) => {
                         if (kind === s.kind) return
@@ -257,13 +315,38 @@ export function SegmentTable({
                     />,
                     t.type,
                   )}
-                  {cell(k, 'x', <ItemQuantity ctx={ctx} path={['segments', k, 'to', 0]} label={t.cell(num, t.x)} compact />, t.x)}
-                  {cell(k, 'y', <ItemQuantity ctx={ctx} path={['segments', k, 'to', 1]} label={t.cell(num, t.y)} compact />, t.y)}
+                  {cell(
+                    k,
+                    'x',
+                    <ItemQuantity
+                      ctx={ctx}
+                      path={['segments', k, 'to', 0]}
+                      label={t.cell(num, t.x)}
+                      compact
+                    />,
+                    t.x,
+                  )}
+                  {cell(
+                    k,
+                    'y',
+                    <ItemQuantity
+                      ctx={ctx}
+                      path={['segments', k, 'to', 1]}
+                      label={t.cell(num, t.y)}
+                      compact
+                    />,
+                    t.y,
+                  )}
                   {cell(
                     k,
                     'radius',
                     s.kind === 'arc' ? (
-                      <ItemQuantity ctx={ctx} path={['segments', k, 'radius']} label={t.cell(num, t.radius)} compact />
+                      <ItemQuantity
+                        ctx={ctx}
+                        path={['segments', k, 'radius']}
+                        label={t.cell(num, t.radius)}
+                        compact
+                      />
                     ) : null,
                     t.radius,
                   )}
@@ -279,7 +362,9 @@ export function SegmentTable({
                           { value: 'cw', label: t.cw },
                         ]}
                         value={s.cw ? 'cw' : 'ccw'}
-                        onValueChange={(v) => ctx.send(fieldUpdate(dto, ['segments', k, 'cw'], v === 'cw'))}
+                        onValueChange={(v) =>
+                          ctx.send(fieldUpdate(dto, ['segments', k, 'cw'], v === 'cw'))
+                        }
                       />
                     ) : null,
                     t.direction,
@@ -292,7 +377,9 @@ export function SegmentTable({
                         label={t.cell(num, t.large)}
                         className={styles['segCheck']}
                         checked={Boolean(s.large)}
-                        onCheckedChange={(v) => ctx.send(fieldUpdate(dto, ['segments', k, 'large'], v === true))}
+                        onCheckedChange={(v) =>
+                          ctx.send(fieldUpdate(dto, ['segments', k, 'large'], v === true))
+                        }
                       />
                     ) : null,
                     t.large,
@@ -328,25 +415,6 @@ export function SegmentTable({
       <p id={`${dto.kind}-${ctx.index}-keys`} className={styles['srOnly']}>
         {t.keys}
       </p>
-      <ToastRegion>
-        {removed !== undefined ? (
-          <Toast
-            open
-            onOpenChange={(o) => {
-              if (!o) setRemoved(undefined)
-            }}
-            message={t.removed(removed)}
-            action={{
-              label: designMessages.navigator.undo,
-              altText: designMessages.navigator.undoAlt,
-              onClick: () => {
-                void bridge.call('history.undo', {})
-                setRemoved(undefined)
-              },
-            }}
-          />
-        ) : null}
-      </ToastRegion>
     </section>
   )
 }
@@ -369,6 +437,7 @@ function FilletCell({
       value={undefined}
       optional
       className={styles['cellInput']}
+      dense
       onCommit={(v) => onCommit(v?.source)}
     />
   )

@@ -203,8 +203,16 @@ Code: [shapes.md § Implementation (K3)](../architecture/shapes.md#implementatio
 - **Tabs.** `tabs.count` spaces tabs evenly with the first half a spacing after the start point, so no tab straddles it (v0.1 rectangles keep their wall-middle rule until G1/T2 build general tabs). `count` is ignored on an open path or a blind groove (no tabs built); positions there are refused.
 - **Convert** keeps `center`, `anchor` and a rectangle's `rotation`, so the placed box and the feature stay where they were; a pocket with a floor radius cannot be converted (`floorRadiusShape`), an operation that already places a shape neither (`alreadyNamed`).
 - **Surfaces.** A blind `on` groove adds no `profile.floor` surface yet (it is not an `on` target until G1 builds it).
-- **Not yet.** Until G1 the evaluation of a part with a named or rotated shape, a profile `on` or tab positions fails (`geometry.evaluation`, rule `shapeSolidLater`); toolpaths of such operations fail with `plan.check` (`shapeToolpathLater`) until T1/T2; their parameter DFM checks come with K4; the renderer shows no outline for them and the inspector edits their placement only (UI tasks).
+- **Not yet.** Until G1 the evaluation of a part with a named or rotated shape, a profile `on` or tab positions fails (`geometry.evaluation`, rule `shapeSolidLater`); toolpaths of such operations fail with `plan.check` (`shapeToolpathLater`) until T1/T2; their parameter DFM checks come with K4; the inspector edits their placement only (U2). Since U1 the renderer draws their live outline through its 2D port.
 - **`tools/list`** after K3: 97.7 K of the 100 K budget ([llm-api.md](../architecture/llm-api.md#implementation-task-310)).
+
+## Implementation (U1)
+
+UI rules and how they were settled: [ui.md § Implementation (U1)](../conventions/ui.md#implementation-u1). For this mode:
+
+- **Shapes group** in the navigator: add (one menu per kind; Import SVG… disabled until `design.shape.import` is wired), select (opens the Shape Editor), remove (refused while used, with the reason).
+- **Shape Editor:** the shape flat in its own frame (the face-on view of the first operation that uses it comes with U2), the inspector's item list, fields and the path's segment table; every field commit and every handle drag is one undo step (`design.shape.item.update`, a drag as one gesture). Rotation, fillet and polygon corner radius have fields but no handles yet.
+- **Live outline** from the renderer's 2D port: the editor's outline while editing and dragging, and the 3D viewport's pending outline of operations with named or rotated shapes.
 
 ## Answered questions
 

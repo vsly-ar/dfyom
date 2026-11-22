@@ -23,8 +23,7 @@ const KIND: Record<ShapeItemKind, string> = {
   path: 'Path',
 }
 
-const plural = (n: number, one: string, many = `${one}s`): string =>
-  `${n} ${n === 1 ? one : many}`
+const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`
 
 export const shapeMessages = {
   kinds: KIND,
@@ -107,11 +106,11 @@ export const shapeMessages = {
     elements: 'Elements',
     pathLength: 'Length',
     loops: (pieces: number, holes: number) =>
-      holes === 0 ? plural(pieces, 'loop') : `${plural(pieces, 'loop')}, ${plural(holes, 'island')}`,
+      holes === 0
+        ? plural(pieces, 'loop')
+        : `${plural(pieces, 'loop')}, ${plural(holes, 'island')}`,
     areaText: (mm2: number, units: UnitSystem) =>
-      units === 'mm'
-        ? `${(mm2 / 100).toFixed(2)} cm²`
-        : `${(mm2 / 25.4 ** 2).toFixed(3)} in²`,
+      units === 'mm' ? `${(mm2 / 100).toFixed(2)} cm²` : `${(mm2 / 25.4 ** 2).toFixed(3)} in²`,
     sizeText: (w: number, h: number, units: UnitSystem) =>
       `${num(w, units)} × ${num(h, units)} ${unitLabel(units)}`,
     invalid: 'This shape does not resolve: fix the value marked in red.',
@@ -193,6 +192,9 @@ export const shapeMessages = {
   },
   importReport: {
     optionsTitle: 'Import SVG',
+    optionsDescription:
+      'Closed loops become shapes with holes; curves are fitted with arcs within 0.01 mm.',
+    refused: 'The file could not be imported',
     unit: 'Unit when the file has none',
     units: {
       mm: 'mm',
@@ -216,9 +218,11 @@ export const shapeMessages = {
           ? 'Unitless: 72 px per inch assumed'
           : `Unitless: 1 unit = 1 ${unit === 'in' ? 'inch' : unit} assumed`,
     created: (shapes: number, loops: number, open: number) =>
-      [plural(shapes, 'shape'), plural(loops, 'loop'), ...(open > 0 ? [plural(open, 'open path')] : [])].join(
-        ', ',
-      ),
+      [
+        plural(shapes, 'shape'),
+        plural(loops, 'loop'),
+        ...(open > 0 ? [plural(open, 'open path')] : []),
+      ].join(', '),
     facts: 'What was imported',
     imported: 'Elements imported',
     skipped: 'Elements skipped',
@@ -233,11 +237,7 @@ export const shapeMessages = {
     elementsValue: (lines: number, arcs: number) => `${lines} lines, ${arcs} arcs`,
     byKind: (counts: Readonly<Record<string, number>>) => {
       const e = Object.entries(counts).filter(([, n]) => n > 0)
-      return e.length === 0
-        ? '0'
-        : e
-            .map(([k, n]) => `${n} ${k}`)
-            .join(', ')
+      return e.length === 0 ? '0' : e.map(([k, n]) => `${n} ${k}`).join(', ')
     },
     total: (counts: Readonly<Record<string, number>>) =>
       Object.values(counts).reduce((s, n) => s + n, 0),
