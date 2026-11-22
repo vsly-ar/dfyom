@@ -44,6 +44,8 @@ export interface NodePoolOptions {
   readonly logLevel: LogLevel
   /** Writes forwarded worker log batches (`createForwardReceiver`); absent = dropped. */
   readonly forward?: ForwardReceiver
+  /** `cavalier_contours.wasm` for both lanes (the 2D port; src/main/region2d/node.ts). */
+  readonly region2dWasm?: ArrayBuffer
 }
 
 /** The app-wide pool of one process; `terminate()` it on app quit or CLI exit. */
@@ -54,6 +56,7 @@ export function createNodeWorkerPool(o: NodePoolOptions): WorkerPool {
     log: o.log,
     logLevel: o.logLevel,
     wasm: () => (wasm ??= readManifoldWasm()),
+    region2dWasm: () => o.region2dWasm,
     onLog: (batch, { worker }) => void o.forward?.(batch, { proc: 'worker', worker }),
   })
 }

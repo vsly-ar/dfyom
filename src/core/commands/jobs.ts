@@ -19,6 +19,7 @@ import {
   type AppResult,
   type AsyncAppResult,
 } from '../../shared/result'
+import type { Region2dPort } from '../geometry/2d/port'
 import type { SolidKernel } from '../geometry/solid-port'
 import type { ProjectDoc } from '../project/document'
 import { aborted, signalSteps, type Steps } from '../workers/steps'
@@ -52,6 +53,11 @@ export interface TaskControl {
   readonly log: Logger
   /** The solid kernel, loaded once per worker (geometry lane only). */
   readonly solids: () => AsyncAppResult<SolidKernel>
+  /**
+   * The 2D port (offsets, booleans of line/arc loops), loaded synchronously once per worker on
+   * first use (geometry and toolpath lanes). Doc: docs/architecture/shapes.md#where-the-2d-layer-runs
+   */
+  readonly region2d: () => AppResult<Region2dPort>
   /** Read-only access to local files (e.g. a project asset to parse); injected by the host. */
   readonly files: FileSource
 }
@@ -152,6 +158,8 @@ export interface InProcessOptions {
   readonly clone?: boolean
   /** Loads the solid kernel for geometry tasks, once (default: fails – no WASM in the fake). */
   readonly solids?: () => AsyncAppResult<SolidKernel>
+  /** Loads the 2D port for tasks, once (default: fails – no WASM in the fake). */
+  readonly region2d?: () => AppResult<Region2dPort>
   /** File access of tasks (default: none). */
   readonly files?: FileSource
   readonly log?: Logger
@@ -168,6 +176,9 @@ export function createInProcessWorkers(opts: InProcessOptions = {}): WorkerPort 
     (kernel ??=
       opts.solids?.() ??
       Promise.resolve(fail('internal.unexpected', 'no solid kernel in the in-process fake')))
+  let port: AppResult<Region2dPort> | undefined
+  const region2d = (): AppResult<Region2dPort> =>
+    (port ??= opts.region2d?.() ?? fail('internal.unexpected', 'no 2D port in the in-process fake'))
   return {
     async run<I, O>(task: WorkerTask<I, O>, input: I, ctl: WorkerControl): AsyncAppResult<O> {
       const where = `worker ${task.name}`
@@ -184,6 +195,7 @@ export function createInProcessWorkers(opts: InProcessOptions = {}): WorkerPort 
         steps: signalSteps(ctl.signal, ctl.progress),
         log: (opts.log ?? noopLogger).child({ task: task.name }),
         solids,
+        region2d,
         files: opts.files ?? noFiles,
       }
       const ran = await tryAsync(

@@ -33,14 +33,19 @@ import {
 } from '../logging/logger'
 import { createMachineClient, workerHostFactory } from '../machine/spawn'
 import { createExportFiles } from '../persistence/export-file'
+import { loadHostRegion2d } from '../region2d/node'
 import { createNodeWorkerPool } from '../workers/node'
 
 export const APP_VERSION: string = version
 
-/** Bundled entry files of the workers (`?modulePath` in the build, temp bundles in tests). */
+/**
+ * Bundled entry files of the workers (`?modulePath` in the build, temp bundles in tests) and the
+ * vendored 2D module (`?asset` in the build, the source file in tests).
+ */
 export interface WorkerEntries {
   readonly worker: string
   readonly machine: string
+  readonly region2dWasm: string
 }
 
 export interface HeadlessOptions {
@@ -108,11 +113,18 @@ export async function startHeadless(o: HeadlessOptions): AsyncAppResult<Headless
     log.warn({ ignored: level.ignored }, 'invalid log level override ignored')
   const report = createLogReporter(log.child({ scope: 'boundary' }))
   const forward = createForwardReceiver(logging, report)
+  // the 2D port: synchronously for the dispatcher, the bytes for the worker lanes
+  const region2d = loadHostRegion2d(o.entries.region2dWasm, log)
+  if (region2d.isErr()) {
+    logging.flushSync()
+    return Err(region2d.unwrapErr())
+  }
   const workers = createNodeWorkerPool({
     entryPath: o.entries.worker,
     log,
     logLevel: level.level,
     forward,
+    region2dWasm: region2d.unwrap().wasm,
   })
   const machine = createMachineClient({
     factory: workerHostFactory(o.entries.machine),
@@ -130,6 +142,7 @@ export async function startHeadless(o: HeadlessOptions): AsyncAppResult<Headless
     workers,
     machine,
     exportFiles: createExportFiles(),
+    region2d: region2d.unwrap().port,
   })
   if (host.isErr()) {
     workers.terminate()

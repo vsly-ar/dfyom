@@ -1,0 +1,44 @@
+Third-party notices for cavalier_contours.wasm
+=============================================
+
+cavalier_contours.wasm is built from src/lib.rs (part of DFYOM, GPL-3.0-or-later) and the Rust
+crates below, at the exact versions in Cargo.lock. Each crate is dual or triple licensed; DFYOM
+uses it under the MIT licence, which is compatible with GPL-3.0-or-later
+(docs/decisions/0014-gpl-3-or-later-license.md, docs/decisions/0019-2d-geometry-library.md).
+
+Compiled into the module:
+
+  Crate                 Version   Licence offered                  Used under   Copyright
+  cavalier_contours     0.9.0     MIT OR Apache-2.0                MIT          Buck McCready
+  static_aabb2d_index   2.1.0     MIT OR Apache-2.0                MIT          Buck McCready
+  num-traits            0.2.19    MIT OR Apache-2.0                MIT          (c) 2014 The Rust Project Developers
+  ahash                 0.8.12    MIT OR Apache-2.0                MIT          (c) 2018 Tom Kaitchuck
+  smallvec              1.16.6    MIT OR Apache-2.0                MIT          (c) 2018 The Servo Project Developers
+  cfg-if                1.0.5     MIT OR Apache-2.0                MIT          (c) 2014 Alex Crichton
+  once_cell             1.21.4    MIT OR Apache-2.0                MIT          Aleksey Kladov
+  zerocopy              0.8.64    BSD-2-Clause OR Apache-2.0 OR MIT MIT         2023 The Fuchsia Authors
+
+Build tools only (run at compile time, nothing of them is in the module): autocfg 1.5.1,
+version_check 0.9.5, zerocopy-derive 0.8.64, proc-macro2 1.0.107, quote 1.0.47, syn 2.0.119,
+unicode-ident 1.0.27 (all MIT OR Apache-2.0 or more permissive) and the Rust standard library
+(MIT OR Apache-2.0).
+
+The MIT licence, as it applies to each crate above with its copyright line:
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy of this software
+  and associated documentation files (the "Software"), to deal in the Software without
+  restriction, including without limitation the rights to use, copy, modify, merge, publish,
+  distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the
+  Software is furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all copies or
+  substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING
+  BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+  NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+  DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Sources: https://crates.io (checksums in Cargo.lock); cavalier_contours at
+https://github.com/jbuckmccready/cavalier_contours.

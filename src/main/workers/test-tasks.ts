@@ -2,6 +2,7 @@
 import { z } from 'zod'
 import { Err, Ok } from '../../shared/result'
 import type { AnyWorkerTask, WorkerTask } from '../../core/commands/jobs'
+import { line, regionArea } from '../../core/geometry/2d/model'
 
 const busy = (ms: number) => {
   const end = performance.now() + ms
@@ -74,10 +75,36 @@ export const testLog: WorkerTask<{ count: number }, { logged: number }> = {
   },
 }
 
+/** Offsets a `size` square by `d` with the worker's 2D port; returns the area left. */
+export const testRegion2d: WorkerTask<{ size: number; d: number }, { area: number }> = {
+  name: 'test.region2d',
+  lane: 'toolpath',
+  input: z.object({ size: z.number(), d: z.number() }),
+  output: z.object({ area: z.number() }),
+  timeoutMs: 5_000,
+  run({ size, d }, ctl) {
+    const port = ctl.region2d()
+    if (port.isErr()) return Err(port.unwrapErr())
+    const c: [number, number][] = [
+      [0, 0],
+      [size, 0],
+      [size, size],
+      [0, size],
+    ]
+    const square = { elements: c.map((p, i) => line(p, c[(i + 1) % 4]!)) }
+    return port
+      .unwrap()
+      .normalise([square])
+      .andThen((r) => port.unwrap().offset(r, d))
+      .map((r) => ({ area: regionArea(r) }))
+  },
+}
+
 export const TEST_TASKS: readonly AnyWorkerTask[] = [
   testLoop,
   testThrow,
   testExit,
   testHang,
   testLog,
+  testRegion2d,
 ]

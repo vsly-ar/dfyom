@@ -5,8 +5,12 @@ import { runCli } from './main'
 
 const worker = process.env['DFYOM_TEST_WORKER_ENTRY']
 const machine = process.env['DFYOM_TEST_MACHINE_ENTRY']
-if (worker === undefined || machine === undefined)
-  throw new Error('DFYOM_TEST_WORKER_ENTRY and DFYOM_TEST_MACHINE_ENTRY must be set')
+// set by the Vitest global setup (src/main/workers/global-setup.ts) for every test process
+const region2dWasm = process.env['DFYOM_TEST_REGION2D_WASM']
+if (worker === undefined || machine === undefined || region2dWasm === undefined)
+  throw new Error(
+    'DFYOM_TEST_WORKER_ENTRY, DFYOM_TEST_MACHINE_ENTRY and DFYOM_TEST_REGION2D_WASM must be set',
+  )
 
 void runCli(
   process.argv.slice(2),
@@ -17,7 +21,7 @@ void runCli(
     env: process.env,
     exit: (code) => process.exit(code),
   },
-  { worker, machine },
+  { worker, machine, region2dWasm },
 ).then((code) => {
   process.stdout.write('', () => process.exit(code))
 })

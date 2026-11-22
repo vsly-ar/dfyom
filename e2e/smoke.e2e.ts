@@ -87,6 +87,22 @@ test('the bundled geometry worker evaluates a part', async ({ dfyom }) => {
     outcome: { ok: true, value: { evaluation: 'done' } },
   })
   expect(dfyom.rendererErrors).toEqual([])
+
+  // The 2D port loaded in every host of the built app: the dispatcher (main, synchronously from
+  // the `?asset` file), the window (asynchronously, inlined module under the CSP) and the worker
+  // that just ran (prewarmed from the bytes in its init). docs/architecture/shapes.md#where-the-2d-layer-runs
+  await expect
+    .poll(async () => {
+      const procs = new Set<string>()
+      for (const f of await readdir(join(dfyom.dataDir, 'logs')))
+        for (const line of (await readFile(join(dfyom.dataDir, 'logs', f), 'utf8')).split('\n')) {
+          if (!line.includes('2D geometry loaded')) continue
+          const r = JSON.parse(line) as { proc?: string; worker?: string }
+          procs.add(r.worker === undefined ? (r.proc ?? '?') : `${r.proc}:${r.worker}`)
+        }
+      return [...procs].sort()
+    })
+    .toEqual(['main', 'renderer', 'worker:geometry-1'])
 })
 
 test('the shell switches the three modes and applies the theme setting', async ({ dfyom }) => {

@@ -55,6 +55,8 @@ export interface PoolOptions {
   readonly logLevel?: LogLevel
   /** `manifold.wasm` for the geometry lane, read once by the host and kept for restarts. */
   readonly wasm?: () => ArrayBuffer | undefined
+  /** `cavalier_contours.wasm` for both lanes (the 2D port), read once by the host. */
+  readonly region2dWasm?: () => ArrayBuffer | undefined
   readonly timers?: Timers
   /** Monotonic milliseconds (default `performance.now`). */
   readonly now?: () => number
@@ -229,6 +231,7 @@ export function createWorkerPool(opts: PoolOptions): WorkerPool {
       onDeath(lane, s, { reason: 'spawnTimeout' }, true)
     }, spawnTimeoutMs)
     const wasm = lane.name === 'geometry' ? opts.wasm?.() : undefined
+    const region2dWasm = opts.region2dWasm?.()
     const init: HostMessage = {
       type: 'init',
       protocol: PROTOCOL_VERSION,
@@ -236,6 +239,7 @@ export function createWorkerPool(opts: PoolOptions): WorkerPool {
       lane: lane.name,
       logLevel: opts.logLevel ?? 'info',
       ...(wasm === undefined ? {} : { wasm }),
+      ...(region2dWasm === undefined ? {} : { region2dWasm }),
     }
     const posted = tryCatch(() => s.handle.post(init), 'internal.unexpected', 'init not posted')
     if (posted.isErr()) {

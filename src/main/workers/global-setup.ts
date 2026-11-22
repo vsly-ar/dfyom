@@ -25,6 +25,12 @@ declare module 'vitest' {
 }
 
 export default async function setup(project: TestProject): Promise<() => void> {
+  // The vendored 2D module for CLI test runs (src/main/cli/test-entry.ts): test processes inherit
+  // this environment and pass it on to the CLIs they spawn.
+  process.env['DFYOM_TEST_REGION2D_WASM'] = resolve(
+    import.meta.dirname,
+    '../../../vendor/cavalier-contours/cavalier_contours.wasm',
+  )
   const outDir = mkdtempSync(join(tmpdir(), 'dfyom-workers-'))
   // manifold-3d stays external (its glue locates nothing: the host passes the bytes), imported
   // by absolute path so the bundle needs no node_modules next to it

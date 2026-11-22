@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { Err, fail, Ok } from '../../shared/result'
 import type { AnyWorkerTask, WorkerTask } from '../commands/jobs'
+import { line, regionArea } from '../geometry/2d/model'
+import { nodeCavalierWasm } from '../geometry/2d/testing/node-wasm'
 import { PROTOCOL_VERSION, type Endpoint, type WorkerMessage } from './protocol'
 import { runWorkerLoop } from './worker-loop'
 
@@ -87,6 +89,28 @@ const geometryOnly: WorkerTask<null, null> = {
   },
 }
 
+/** Offsets a 10 mm square by 1 with the worker's 2D port; returns the area. */
+const offsetSquare: WorkerTask<null, number> = {
+  name: 'test.region2d',
+  lane: 'toolpath',
+  input: z.null(),
+  output: z.number(),
+  timeoutMs: 1000,
+  run(_input, ctl) {
+    const c: [number, number][] = [
+      [0, 0],
+      [10, 0],
+      [10, 10],
+      [0, 10],
+    ]
+    const square = { elements: c.map((p, i) => line(p, c[(i + 1) % 4]!)) }
+    return ctl
+      .region2d()
+      .andThen((port) => port.normalise([square]).andThen((r) => port.offset(r, 1)))
+      .map(regionArea)
+  },
+}
+
 function setup(tasks: AnyWorkerTask[] = [], clock = { t: 0 }) {
   const posted: { m: WorkerMessage; transfer: readonly ArrayBuffer[] | undefined }[] = []
   let listener: (m: unknown) => void = () => {}
@@ -95,7 +119,7 @@ function setup(tasks: AnyWorkerTask[] = [], clock = { t: 0 }) {
     onMessage: (l) => (listener = l),
   }
   runWorkerLoop(endpoint, {
-    tasks: [echo, thrower, view, owned, logs, geometryOnly, looper(clock), ...tasks],
+    tasks: [echo, thrower, view, owned, logs, geometryOnly, offsetSquare, looper(clock), ...tasks],
     now: () => clock.t,
     loadSolids: async () => fail('geometry.evaluation', 'no wasm in this test'),
   })
@@ -104,13 +128,14 @@ function setup(tasks: AnyWorkerTask[] = [], clock = { t: 0 }) {
     await settle()
     await settle()
   }
-  const init = (lane: 'geometry' | 'toolpath' = 'toolpath') =>
+  const init = (lane: 'geometry' | 'toolpath' = 'toolpath', region2dWasm?: ArrayBuffer) =>
     send({
       type: 'init',
       protocol: PROTOCOL_VERSION,
       workerId: `${lane}-1`,
       lane,
       logLevel: 'debug',
+      ...(region2dWasm === undefined ? {} : { region2dWasm }),
     })
   let n = 0
   const run = (task: string, input: unknown) =>
@@ -208,6 +233,28 @@ describe('worker loop', () => {
       task: 'test.log',
       run: 'r1',
       x: 1,
+    })
+  })
+
+  it('prewarms the 2D port at init from the bytes in init; tasks use it', async () => {
+    const w = setup()
+    await w.init('toolpath', nodeCavalierWasm().slice().buffer as ArrayBuffer)
+    const entries = w.of('log').flatMap((l) => l.batch as Record<string, unknown>[])
+    expect(entries.find((e) => e['msg'] === '2D geometry loaded')).toMatchObject({
+      level: 'info',
+      lane: 'toolpath',
+    })
+    await w.run('test.region2d', null)
+    expect(w.lastResult().result).toEqual({ ok: true, value: 64 })
+  })
+
+  it('without the 2D bytes a task asking for the port fails', async () => {
+    const w = setup()
+    await w.init()
+    await w.run('test.region2d', null)
+    expect(w.lastResult().result).toMatchObject({
+      ok: false,
+      error: { code: 'internal.unexpected' },
     })
   })
 

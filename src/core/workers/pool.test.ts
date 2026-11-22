@@ -67,6 +67,7 @@ function setup(over: Partial<PoolOptions> = {}) {
   const workers: FakeWorker[] = []
   const clock = fakeTimers()
   const wasm = new ArrayBuffer(16)
+  const region2dWasm = new ArrayBuffer(8)
   const pool = createWorkerPool({
     factory: ({ lane, workerId }, events) => {
       const w: FakeWorker = {
@@ -87,6 +88,7 @@ function setup(over: Partial<PoolOptions> = {}) {
     timers: clock.timers,
     now: clock.now,
     wasm: () => wasm,
+    region2dWasm: () => region2dWasm,
     ...over,
   })
   const ready = (w: FakeWorker, protocol = PROTOCOL_VERSION) =>
@@ -117,11 +119,11 @@ function setup(over: Partial<PoolOptions> = {}) {
       .then((r) => (out = r))
     return { promise, abort: () => ac.abort(), settled: () => out }
   }
-  return { pool, workers, clock, wasm, ready, runs, lastRun, reply, start }
+  return { pool, workers, clock, wasm, region2dWasm, ready, runs, lastRun, reply, start }
 }
 
 describe('worker pool', () => {
-  it('spawns lazily, sends init (wasm only to geometry) and runs after ready', async () => {
+  it('spawns lazily, sends init (wasm only to geometry, the 2D module to both) and runs after ready', async () => {
     const s = setup()
     const a = s.start(tp, 1)
     expect(s.workers).toHaveLength(1)
@@ -130,6 +132,7 @@ describe('worker pool', () => {
       type: 'init',
       lane: 'toolpath',
       protocol: PROTOCOL_VERSION,
+      region2dWasm: s.region2dWasm,
     })
     expect(w.posted[0]).not.toHaveProperty('wasm')
     expect(s.runs(w)).toHaveLength(0)
@@ -140,7 +143,12 @@ describe('worker pool', () => {
     expect(expectOk(await a.promise)).toBe(2)
     expect(w.idle).toBe(true)
     s.start(geo, 1)
-    expect(s.workers[1]!.posted[0]).toMatchObject({ type: 'init', lane: 'geometry', wasm: s.wasm })
+    expect(s.workers[1]!.posted[0]).toMatchObject({
+      type: 'init',
+      lane: 'geometry',
+      wasm: s.wasm,
+      region2dWasm: s.region2dWasm,
+    })
   })
 
   it('queues FIFO per lane; the geometry lane never waits behind the toolpath lane', async () => {

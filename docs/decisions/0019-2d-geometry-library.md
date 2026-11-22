@@ -1,6 +1,6 @@
 # 0019 – 2D geometry library: CavalierContours (Rust crate as WASM)
 
-Status: accepted (2026-11-22, user decision D29; proposed 2026-11-21) · Date: 2026-11-21 · Design: [architecture/shapes.md](../architecture/shapes.md) · Spike: S1 ([plans/v0.2.md](../plans/v0.2.md#7-spike-for-v03)) · For: [roadmap v0.3 – Shapes](../roadmap.md#v03--shapes)
+Status: accepted (2026-11-22, user decision D29; proposed 2026-11-21) · Date: 2026-11-21 · Design: [architecture/shapes.md](../architecture/shapes.md) · Spike: S1 ([plans/v0.2.md](../plans/v0.2.md#7-spike-for-v03)) · Built in: [shapes.md § 2D port](../architecture/shapes.md#2d-port) · For: [roadmap v0.3 – Shapes](../roadmap.md#v03--shapes)
 
 ## Context
 
@@ -91,14 +91,14 @@ All three licences are compatible with GPL-3.0-or-later ([ADR 0014](0014-gpl-3-o
 3. **The port normalises regions before offsetting**: islands are subtracted from the outer loop (and overlapping islands united) with the library's boolean first. This avoids the touching-island defect and gives `Shape` the non-intersecting loops it assumes. The crate has only loop-to-loop booleans, so the port composes multi-loop shape booleans (fold unions; differences that produce holes).
 4. **Not the JS port**: same algorithm, but 5–70× slower than WASM, frozen at 0.7.0 with two defects the spike reproduced, and a single maintainer.
 5. **Clipper2 is not the primary 2D library.** Its polygons stay a candidate for polygon-only checks (e.g. the rest-region check in the v0.2 scope research), decided when that check is designed. Its flatten + re-fit route works on this corpus (≤ 5 µm, about as many arcs as the input) but its offsets are 10–100× slower (more at 2000 segments), it splits tangent unions, and depends on our own fitter.
-6. **Build: vendor the `.wasm` (Q26, D29).** The built module is committed with its SHA-256, next to the pinned crate source (`Cargo.toml` with the exact crate version, `Cargo.lock`, our C ABI) and a script that rebuilds it with a pinned Rust toolchain and the `wasm32-unknown-unknown` target. CI verifies the checksum of the vendored file and never installs a Rust toolchain; the module is rebuilt (and the checksum updated in the same commit) only when the crate or the ABI changes. Task K1 of [plans/v0.3.md](../plans/v0.3.md#3-2d-core-and-design).
+6. **The built `.wasm` is vendored** (Q26) in `vendor/cavalier-contours/` ([`Cargo.toml`](../../vendor/cavalier-contours/Cargo.toml)) with its SHA-256, the pinned crate source (`Cargo.toml` with `cavalier_contours = "=0.9.0"`, `Cargo.lock`, our C ABI in `src/lib.rs`) and the rebuild script `npm run wasm:cavalier` (pinned Rust 1.100.0 via rustup, reproducible paths; `--check` rebuilds and compares). `npm run check` verifies the checksum; CI needs no Rust toolchain; the module is rebuilt (and the checksum updated in the same commit) only when the crate or the ABI changes. Licences of the compiled crates: [`THIRD-PARTY-NOTICES.txt`](../../vendor/cavalier-contours/THIRD-PARTY-NOTICES.txt) (all used under MIT).
 
 ## Consequences
 
-- A binary (≈ 256 KiB) lives in git, guarded by its SHA-256 in CI; rebuilding it needs a pinned Rust toolchain with the `wasm32-unknown-unknown` target (spike: Rust 1.100, `cargo build --release`) on the developer's machine only (decision 6).
+- A binary in git (≈ 256 KiB) that changes on crate bumps only; changing `src/lib.rs` or the crate needs a local Rust 1.100.0 with the `wasm32-unknown-unknown` target (decision 6).
 - One more WASM module (≈ 70–86 KiB gzip) in the worker lanes and the renderer; instantiation is synchronous-capable and import-free.
 - Upstream fixes arrive by bumping the crate; the spike's fixtures become regression tests of the port (v0.3 lane B).
-- CavalierContours epsilons (position 1e-5, offset 1e-4 mm) sit well below the 0.01 mm chord tolerance; the port documents them next to the tolerance rules in [geometry.md](../architecture/geometry.md#evaluation-rules) when it is built.
+- CavalierContours epsilons (position 1e-5, offset 1e-4 mm) sit well below the 0.01 mm chord tolerance; documented next to the tolerance rules in [geometry.md](../architecture/geometry.md#evaluation-rules).
 - Béziers still have to become arcs on import (lane D). The spike's 3-point arc subdivision is not tangent-continuous; v0.3 needs real biarcs.
 
 ## Open questions

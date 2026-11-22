@@ -15,6 +15,7 @@ describe('host → worker messages', () => {
     }
     expect(HostMessage.safeParse(init).success).toBe(true)
     expect(HostMessage.safeParse({ ...init, wasm: new ArrayBuffer(8) }).success).toBe(true)
+    expect(HostMessage.safeParse({ ...init, region2dWasm: new ArrayBuffer(8) }).success).toBe(true)
     const run = { type: 'run', id: 'r1', task: 'geometry.evaluate', input: { any: 1 }, control }
     expect(HostMessage.safeParse(run).success).toBe(true)
   })
@@ -26,6 +27,17 @@ describe('host → worker messages', () => {
     [
       'wasm not a buffer',
       { type: 'init', protocol: 1, workerId: 'w', lane: 'geometry', logLevel: 'info', wasm: 'x' },
+    ],
+    [
+      '2D module not a buffer',
+      {
+        type: 'init',
+        protocol: 1,
+        workerId: 'w',
+        lane: 'toolpath',
+        logLevel: 'info',
+        region2dWasm: 1,
+      },
     ],
     [
       'control not shared',

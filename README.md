@@ -21,4 +21,4 @@ Commits that change app code bump the version automatically – see [docs/conven
 
 ## License
 
-[GPL-3.0-or-later](LICENSE) – see [ADR 0014](docs/decisions/0014-gpl-3-or-later-license.md).
+[GPL-3.0-or-later](LICENSE) – see [ADR 0014](docs/decisions/0014-gpl-3-or-later-license.md). The vendored 2D geometry module bundles MIT-licensed Rust crates: [vendor/cavalier-contours/THIRD-PARTY-NOTICES.txt](vendor/cavalier-contours/THIRD-PARTY-NOTICES.txt).
