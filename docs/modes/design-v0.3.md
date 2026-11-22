@@ -1,25 +1,27 @@
 # Design mode v0.3: shapes
 
-Status: draft (assumptions S-A to S-L await the user's confirmation, [Questions for the user](#questions-for-the-user)) · Scope: [roadmap v0.3](../roadmap.md#v03--shapes) (D16: Q12, Q14, Q16) · v0.2 base: [design-v0.2.md](design-v0.2.md) · 2D layer, geometry and import: [architecture/shapes.md](../architecture/shapes.md) · Toolpaths: [plan-v0.3.md](plan-v0.3.md) · 2D library: [ADR 0019](../decisions/0019-2d-geometry-library.md) (proposed) · Tasks: [plans/v0.3.md](../plans/v0.3.md) · Terms: [glossary.md](../glossary.md)
+Status: accepted (user, D29 of 2026-11-22: S-A to S-L and Q22–Q25 as recommended, [Decisions](#decisions)) · Scope: [roadmap v0.3](../roadmap.md#v03--shapes) (D16: Q12, Q14, Q16) · v0.2 base: [design-v0.2.md](design-v0.2.md) · 2D layer, geometry and import: [architecture/shapes.md](../architecture/shapes.md) · Toolpaths: [plan-v0.3.md](plan-v0.3.md) · 2D library: [ADR 0019](../decisions/0019-2d-geometry-library.md) (accepted) · Tasks: [plans/v0.3.md](../plans/v0.3.md) · Terms: [glossary.md](../glossary.md)
 
 v0.3 replaces "a pocket or profile is a rectangle or a circle" with **named shapes** of lines and arcs. Everything not mentioned here stays as in [design.md](design.md) and [design-v0.2.md](design-v0.2.md): face targets, face frames, placement anchors, the tool field, Apply.
 
-## Decisions (assumed)
+## Decisions
 
-| Id  | Assumption                                                                                                                                                                                                 | Section                                                 |
+Settled with the user when this doc was accepted (D29, 2026-11-22: every recommendation taken); the sections below specify them. Q22–Q25 are recorded under [Answered questions](#answered-questions).
+
+| Id  | Decision                                                                                                                                                                                                   | Section                                                 |
 | --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
 | S-A | A shape is a **part-level named record** with its own 2D frame; operations reference it by id and place it on their face. One shape can serve several operations (a pocket and the profile around it).     | [What a shape is](#what-a-shape-is)                     |
-| S-B | Entry is **parametric**: primitives combined by ordered booleans, plus a **path** item typed as a list of line and arc segments. No sketch constraint solver in v0.3 ([Q22](#questions-for-the-user)).     | [Shape definition](#shape-definition)                   |
+| S-B | Entry is **parametric**: primitives combined by ordered booleans, plus a **path** item typed as a list of line and arc segments. No sketch constraint solver in v0.3 ([Q22](#answered-questions)).         | [Shape definition](#shape-definition)                   |
 | S-C | Dimensions are quantities and may be expressions over surfaces, as operation parameters are; there are **no geometric constraints** (parallel, tangent, coincident). Positions use anchors.                | [Constraints](#constraints)                             |
 | S-D | A shape is drawn **as seen from outside the face** it is placed on ([face frame](design-v0.2.md#face-frame)), so text-like and asymmetric shapes read correctly on every face.                             | [Placing a shape on a face](#placing-a-shape-on-a-face) |
 | S-E | Every pocket and profile shape may be **rotated** by any angle; a rotated rectangle goes through the general loop path.                                                                                    | [Placing a shape on a face](#placing-a-shape-on-a-face) |
-| S-F | Profiles cut `outside`, `inside` or `on` (the centreline, Q12). An **open** shape is allowed only with `on` ([Q24](#questions-for-the-user)).                                                              | [Cut side](#cut-side-and-open-shapes)                   |
+| S-F | Profiles cut `outside`, `inside` or `on` (the centreline, Q12). An **open** shape is allowed only with `on` ([Q24](#answered-questions)).                                                                  | [Cut side](#cut-side-and-open-shapes)                   |
 | S-G | A pocket takes a closed shape with any number of loops: holes in the region are **islands** left standing.                                                                                                 | [Operations](#operations-that-take-a-shape)             |
 | S-H | A profile takes one closed loop (or one open path); a region of several loops needs one profile per loop.                                                                                                  | [Operations](#operations-that-take-a-shape)             |
 | S-I | **Free-form tabs**: positions along the loop, entered or dragged; `tabs.count` spacing stays the default. No floor fillets on shapes (Q16).                                                                | [Tabs](#tabs-on-shapes)                                 |
 | S-J | Only floors and tab tops have stable surface ids; walls of a shape operation are numbered for display and may renumber after a shape edit (walls are not face targets, [D12 A](design-v0.2.md#decisions)). | [Surfaces](#surfaces)                                   |
-| S-K | **SVG import** creates a shape of path items (Béziers and ellipses become tangent arcs, biarcs) with an import report; DXF later ([Q25](#questions-for-the-user)).                                         | [SVG import](#svg-import)                               |
-| S-L | **Measure and snap** (roadmap direction): snap to the grid, shape points, stock edges and the reference model's section; a measure tool for distances ([Q23](#questions-for-the-user)).                    | [Measure and snap](#measure-and-snap)                   |
+| S-K | **SVG import** creates a shape of path items (Béziers and ellipses become tangent arcs, biarcs) with an import report; DXF later ([Q25](#answered-questions)).                                             | [SVG import](#svg-import)                               |
+| S-L | **Measure and snap** (roadmap direction): snap to the grid, shape points, stock edges and the reference model's section; a measure tool for distances ([Q23](#answered-questions)).                        | [Measure and snap](#measure-and-snap)                   |
 
 ## What a shape is
 
@@ -52,7 +54,7 @@ No geometric constraint solver in v0.3 (S-C). What a sketcher's constraints give
 
 - **Dimensions** are quantities (tolerances, units, expressions over surface levels as in [design.md](design.md#implementation-task-25)); `tangentArc` gives tangency, `fillets` give tangent corners, primitives give symmetry and parallel sides.
 - **Positions** of items are explicit coordinates; the operation's [anchor](design-v0.2.md#placement-anchors) places the whole shape.
-- References between shapes (`shape1.items[0].length`) and drag-to-solve sketching are later ([Q22](#questions-for-the-user)).
+- References between shapes (`shape1.items[0].length`) and drag-to-solve sketching are later ([Q22](#answered-questions)).
 
 ## Placing a shape on a face
 
@@ -77,7 +79,7 @@ anchor?          (top-level arg, as v0.2)
 | `inside`       | beside the loop, inside it (opening)         | one closed loop              | 6 mm / 1/4″                |
 | `on` (new)     | centred on the loop or path (centreline cut) | one closed loop or open path | the tool diameter at Apply |
 
-- **`on` is a groove** cut along a line, the CAM "on-line" or "no compensation" profile. Through (as every profile in v0.2, `depth` = stock extent) or, new for `on` only, a blind `depth` below `on` for a groove that does not cut through ([Q24](#questions-for-the-user)).
+- **`on` is a groove** cut along a line, the CAM "on-line" or "no compensation" profile. Through (as every profile in v0.2, `depth` = stock extent) or, new for `on` only, a blind `depth` below `on` for a groove that does not cut through ([Q24](#answered-questions)).
 - **Open paths** have two ends; the slot gets round ends of `slotWidth` / 2 (the tool's footprint). `tabs` are allowed on a through `on` cut of a closed loop only (an open through groove holds nothing apart).
 - `side` changes keep `slotWidth`; a closed loop becoming open (path edit) with `inside`/`outside` is `model.invariant`, rule `openNeedsOn`.
 
@@ -116,7 +118,7 @@ Parameter checks stay synchronous in the commands ([geometry.md § Parameter and
 | `dfm.restMaterial` (new)                    | With the operation's tool, the cut leaves material away from corners: necks narrower than the tool between two parts of the region. `params.area`, `params.at`. Corners are the corner rules' job.                                                                                                                         | warning  |
 | `dfm.shapeOutsideFace` (new)                | A pocket's placed shape reaches outside the face rectangle of its direction (v0.2 checks holes only).                                                                                                                                                                                                                      | warning  |
 | `dfm.slotLeavesStock`, `dfm.slotOpensStock` | Stock margin measured from the loop's offset by `slotWidth`, not its bounding box.                                                                                                                                                                                                                                         | as v0.2  |
-| `dfm.shapeHeavy` (new, proposed)            | The shape operation's flattened chords exceed the evaluation budget (≈ 3 000 chords, [shapes.md § Performance](../architecture/shapes.md#performance)): the part updates more slowly. `params.chords`. Open question in [shapes.md](../architecture/shapes.md#open-questions).                                             | info     |
+| `dfm.shapeHeavy` (new)                      | The shape operation's flattened chords exceed the evaluation budget (≈ 3 000 chords, [shapes.md § Performance](../architecture/shapes.md#performance)): the part updates more slowly. `params.chords`. Decided with D29 ([shapes.md § Decisions](../architecture/shapes.md#decisions-d29)).                                | info     |
 
 - Corner checks are the familiar "minimum inside radius vs tool" rule. The fix offers "Round corners to ≥ r" (adds or raises `fillets` / `cornerRadius`), as the v0.1 suggestion does.
 - The [auto tool choice](design-v0.2.md#auto-choice) ranks fitting tools that leave no rest material first, then by diameter.
@@ -131,7 +133,7 @@ Parameter checks stay synchronous in the commands ([geometry.md § Parameter and
 
 ## Measure and snap
 
-Toward the [direction](../roadmap.md#direction) (S-L; scope in [Q23](#questions-for-the-user)):
+Toward the [direction](../roadmap.md#direction) (S-L; scope in [Q23](#answered-questions); bounded, and the first item cut if v0.3 runs long, [plans/v0.3.md § Risks](../plans/v0.3.md#risks-and-spikes)):
 
 - **Snap** while dragging in the Shape Editor or the viewport: grid (a setting), shape points (ends, centres, midpoints), stock edges and corners, and the **reference section**: the [reference model](reference-model.md)'s outline cut by the face plane at a chosen depth (computed in the worker from the mesh). Snapping never changes a value's unit or source format beyond what the user typed.
 - **Measure:** point-to-point and point-to-edge distances in the viewport on the part, stock and reference, shown in the project units; nothing is stored.
@@ -176,13 +178,13 @@ Rules go to a [ui.md](../conventions/ui.md) amendment with the tasks ([plans/v0.
 - **Operation inspector:** a shape picker (inline rectangle/circle or a named shape), rotation, mirror, the `on` side, tab positions.
 - Live outline: the renderer resolves shapes with the same 2D port ([shapes.md § Where the 2D layer runs](../architecture/shapes.md#where-the-2d-layer-runs)).
 
-## Questions for the user
+## Answered questions
 
-Each with the recommendation this draft assumes.
+Answered by the user with D29 (2026-11-22, every recommendation taken):
 
-22. **Shape entry: parametric items first, or a sketcher with constraints?** Recommendation: primitives + booleans + a typed line/arc path, dimensions as quantities, handles that edit those numbers (S-B, S-C). A constraint solver (coincident, tangent, parallel, dimensions driving a free sketch) is a large project of its own; it can be added later as another item kind without changing operations or persistence.
-23. **Measure and snap in v0.3?** The roadmap puts them here. Recommendation: yes, but bounded: snap to grid, shape points, stock edges and the reference section, and a point-to-point measure (S-L). Automatic tracing of the reference stays later. Alternative: move all of it to the next milestone and keep v0.3 smaller.
-24. **Open paths and blind grooves?** Recommendation: yes for `side: 'on'` only, with a blind `depth` allowed for `on` (a groove, a V-less engraving line with a flat end mill), because it costs little once offsets exist and covers decorative grooves and slots. Inside/outside stay closed and through.
-25. **SVG only, or DXF too?** Recommendation: SVG in v0.3 (the roadmap's scope; every vector tool exports it), DXF (LINE, ARC, CIRCLE, LWPOLYLINE with bulges, SPLINE) right after, since CAD users export sketches as DXF. Say if your workflow depends on DXF now.
+22. **Shape entry:** parametric items first: primitives + booleans + a typed line/arc path, dimensions as quantities, handles that edit those numbers (S-B, S-C). No constraint solver (coincident, tangent, parallel, dimensions driving a free sketch) in v0.3; it can be added later as another item kind without changing operations or persistence.
+23. **Measure and snap:** in v0.3, bounded: snap to grid, shape points, stock edges and the reference section, and a point-to-point measure (S-L). Automatic tracing of the reference stays later. First to cut if v0.3 runs long.
+24. **Open paths and blind grooves:** for `side: 'on'` only, with a blind `depth` allowed for `on` (a groove, an engraving line with a flat end mill). Inside/outside stay closed and through.
+25. **SVG or DXF:** SVG in v0.3; DXF (LINE, ARC, CIRCLE, LWPOLYLINE with bulges, SPLINE) right after.
 
-Developer questions (ADR 0019 build) and the exit-criteria part are in [plans/v0.3.md § Decisions to settle first](../plans/v0.3.md#decisions-to-settle-first).
+The ADR 0019 build (Q26) and the exit-criteria part (Q27) are recorded in [plans/v0.3.md § Confirmed decisions](../plans/v0.3.md#confirmed-decisions).
