@@ -19,11 +19,20 @@ const HALF = Rational.create(1n, 2n).unwrap()
 /** Most decimals written into a shifted literal's source (the exact value stays exact). */
 const MAX_DIGITS = 6
 
-/** Size of the bounding rectangle along `u` and `v` (a circle: its bounding square). */
-function size(s: Shape): readonly [Rational, Rational] {
-  return s.kind === 'circle'
-    ? [s.diameter.exact, s.diameter.exact]
-    : [s.length.exact, s.width.exact]
+/** Size of a bounding rectangle along `u` and `v` (exact, canonical mm). */
+export type Extents = readonly [Rational, Rational]
+
+/**
+ * Size of the bounding rectangle along `u` and `v` (a circle: its bounding square). A general
+ * shape (a named or rotated one, `isGeneralShape`) has no exact size: its placed box comes from
+ * the 2D layer (`placeShape`, `exactExtents`) and is passed in as `extents`.
+ */
+function size(s: Shape, extents?: Extents): Extents {
+  if (extents !== undefined) return extents
+  if (s.kind === 'circle') return [s.diameter.exact, s.diameter.exact]
+  if (s.kind === 'rectangle') return [s.length.exact, s.width.exact]
+  // unreachable for callers that follow the rule above; a zero box keeps the point as is
+  return [Rational.ZERO, Rational.ZERO]
 }
 
 function axisOffset(p: AnchorPoint, extent: Rational): Rational {
@@ -32,12 +41,19 @@ function axisOffset(p: AnchorPoint, extent: Rational): Rational {
 }
 
 /** Offset of the anchor point from the geometric centre, `[u, v]` (exact, canonical mm). */
-export function anchorOffset(s: Shape, anchor: Anchor = s.anchor): readonly [Rational, Rational] {
-  const [su, sv] = size(s)
+export function anchorOffset(
+  s: Shape,
+  anchor: Anchor = s.anchor,
+  extents?: Extents,
+): readonly [Rational, Rational] {
+  const [su, sv] = size(s, extents)
   return [axisOffset(anchor.u, su), axisOffset(anchor.v, sv)]
 }
 
-/** Geometric centre `[u, v]` of the shape (float64 mm): the anchor point minus its offset. */
+/**
+ * Geometric centre `[u, v]` of an axis-aligned shape (float64 mm): the anchor point minus its
+ * offset. General shapes take theirs from `placeShape`.
+ */
 export function shapeCentre(s: Shape): readonly [number, number] {
   const [du, dv] = anchorOffset(s)
   return [s.center[0].exact.sub(du).toNumber(), s.center[1].exact.sub(dv).toNumber()]
@@ -82,10 +98,10 @@ function shiftLiteral(q: Quantity, delta: Rational): AppResult<Quantity> {
  * a formula fails with `model.invariant`, rule `anchorExpression` (path `anchor`); one that does
  * not move may stay a formula.
  */
-export function reanchor(s: Shape, to: Anchor): AppResult<Shape> {
+export function reanchor(s: Shape, to: Anchor, extents?: Extents): AppResult<Shape> {
   if (sameAnchor(s.anchor, to)) return Ok(s)
-  const from = anchorOffset(s)
-  const next = anchorOffset(s, to)
+  const from = anchorOffset(s, s.anchor, extents)
+  const next = anchorOffset(s, to, extents)
   const issues: Issue[] = []
   const coords: Quantity[] = []
   for (const i of [0, 1] as const) {

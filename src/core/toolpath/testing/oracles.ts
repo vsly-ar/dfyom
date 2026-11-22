@@ -3,7 +3,7 @@
  * signed distances to contours, a heightmap material-removal simulation and a text rendering
  * for golden files. Doc: docs/modes/plan-v0.1.md#toolpath-generators-task-210
  */
-import type { Contour, Vec2, Vec3 } from '../../geometry/model'
+import type { AnalyticContour as Contour, Vec2, Vec3 } from '../../geometry/model'
 import type { Move, Toolpath, ToolpathTool } from '../model'
 import { arcSweep, expandDrill } from '../stats'
 

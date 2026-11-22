@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { contourParam, offsetContour, perimeter } from '../geometry/contour'
-import type { Contour, Vec2 } from '../geometry/model'
+import type { AnalyticContour as Contour, Vec2 } from '../geometry/model'
 import { slotCoversOpening } from '../geometry/operations'
 import type { ProfileOperation, ToolpathTool } from './model'
 import { generateProfile } from './profile'

@@ -203,7 +203,8 @@ describe('design model', () => {
       depth: '4',
     })
     const before = designPart(s.d.doc)!.dto.operations[0]!
-    if (before.kind !== 'pocket') throw new Error('pocket expected')
+    if (before.kind !== 'pocket' || before.shape.kind === 'named')
+      throw new Error('pocket expected')
     await s.run('design.pocket.update', {
       partId: s.partId,
       operationId: before.id,

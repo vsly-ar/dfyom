@@ -20,7 +20,7 @@ import {
   type ContourLabel,
   type FlattenMode,
 } from './contour'
-import { EPSILON, type Contour, type Level, type Vec2 } from './model'
+import { EPSILON, type AnalyticContour as Contour, type Level, type Vec2 } from './model'
 
 export interface LabelledMesh {
   /** x, y, z per vertex (mm, local frame). */

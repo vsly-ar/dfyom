@@ -5,7 +5,7 @@
  * Doc: docs/architecture/geometry.md#offset-loft
  */
 import { None, Option, Some } from '../../shared/result'
-import { CHORD_TOLERANCE, EPSILON, type Contour, type Vec2 } from './model'
+import { CHORD_TOLERANCE, EPSILON, type AnalyticContour as Contour, type Vec2 } from './model'
 
 /** Design role of a contour element: `wall[i]` (straight, or a whole circle) or `corner[i]`. */
 export interface ContourLabel {

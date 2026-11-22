@@ -8,8 +8,8 @@ import { z } from 'zod'
 import {
   DrillingGeometrySchema,
   FacingGeometrySchema,
-  PocketGeometrySchema,
-  ProfileGeometrySchema,
+  AnalyticPocketGeometrySchema,
+  AnalyticProfileGeometrySchema,
   StockGeometrySchema,
   Vec2Schema,
   Vec3Schema,
@@ -142,7 +142,7 @@ export const FacingInputSchema: z.ZodType<FacingInput> = z.object({
 export const PocketInputSchema: z.ZodType<PocketInput> = z.object({
   ...base,
   cutting: CuttingSchema,
-  operation: PocketGeometrySchema,
+  operation: AnalyticPocketGeometrySchema,
   strategy: z.object({
     entry: z.enum(['helix', 'ramp', 'plunge']),
     helixDiameter: z.number(),
@@ -179,7 +179,7 @@ export const DrillingInputSchema: z.ZodType<DrillingInput> = z.object({
 export const ProfileInputSchema: z.ZodType<ProfileInput> = z.object({
   ...base,
   cutting: CuttingSchema,
-  operation: ProfileGeometrySchema,
+  operation: AnalyticProfileGeometrySchema,
   strategy: z.object({
     entry: z.enum(['ramp', 'plunge']),
     rampAngle: z.number(),

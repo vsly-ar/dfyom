@@ -14,13 +14,40 @@ import type {
 } from '../geometry/model'
 import type { Direction } from '../geometry/face'
 import type { Stock } from '../library/stock'
-import type { Operation, Part, Point, Shape } from './operation'
+import type { Region2dPort } from '../geometry/2d/port'
+import { isGeneralShape, type Operation, type Part, type Point, type Shape } from './operation'
+import { placeShape } from './placement'
+import { requirePort } from './shape'
 import { operationReferences, SurfaceTable } from './surfaces'
 import { shapeCentre } from './anchor'
 
 const vec2 = (p: Point) => [p[0].canonical, p[1].canonical] as const
 
-function shapeGeometry(s: Shape): ShapeGeometry {
+/**
+ * A shape's geometry: v0.1 rectangles and circles analytically (inputs byte-identical to v0.2);
+ * general shapes (named, rotated) placed through the 2D layer (`placeShape`): the numbered region
+ * or path relative to the centre of its placed bounding box (docs/architecture/shapes.md#implementation-k3).
+ */
+function shapeGeometry(
+  s: Shape,
+  shapes: Part['shapes'],
+  port: Region2dPort | undefined,
+): AppResult<ShapeGeometry> {
+  if (isGeneralShape(s)) {
+    const p = requirePort(port, 'toGeometryInput')
+    if (p.isErr()) return p
+    return placeShape(p.unwrap(), s, shapes).map((placed) => ({
+      center: placed.centre,
+      contour:
+        placed.outline.kind === 'region'
+          ? { kind: 'region', region: placed.outline.region }
+          : { kind: 'path', path: placed.outline.path },
+    }))
+  }
+  return Ok(analyticShape(s as Extract<Shape, { kind: 'rectangle' | 'circle' }>))
+}
+
+function analyticShape(s: Extract<Shape, { kind: 'rectangle' | 'circle' }>): ShapeGeometry {
   const contour: Contour =
     s.kind === 'circle'
       ? { kind: 'circle', radius: s.diameter.canonical / 2 }
@@ -36,14 +63,20 @@ function shapeGeometry(s: Shape): ShapeGeometry {
 
 /**
  * The geometry input of a (valid) part. A dangling `on` or a missing drill depth cannot happen
- * after the commands' checks, so it is `internal.unexpected`.
+ * after the commands' checks, so it is `internal.unexpected`. `port` places general shapes
+ * (v0.3); a part with one and no port fails with `internal.unexpected`. The placed loops are part
+ * of the input, so the evaluation hash follows every shape edit.
  */
-export function toGeometryInput(part: Part, stock: Stock): AppResult<PartGeometryInput> {
-  const table = SurfaceTable.build(part.operations, stock)
+export function toGeometryInput(
+  part: Part,
+  stock: Stock,
+  port?: Region2dPort,
+): AppResult<PartGeometryInput> {
+  const table = SurfaceTable.build(part.operations, stock, part.shapes)
   const operations: OperationGeometry[] = []
   const references: SurfaceReference[] = []
   for (const [i, op] of part.operations.entries()) {
-    const g = operationGeometry(op, i, table)
+    const g = operationGeometry(op, i, table, part.shapes, port)
     if (g.isErr()) return Err(g.unwrapErr())
     operations.push(g.unwrap())
     const refs = operationReferences(op)
@@ -72,6 +105,8 @@ function operationGeometry(
   op: Operation,
   index: number,
   table: SurfaceTable,
+  shapes: Part['shapes'],
+  port: Region2dPort | undefined,
 ): AppResult<OperationGeometry> {
   const entry = table.get(op.on)
   if (entry.isNone() || entry.unwrap().owner >= index)
@@ -84,15 +119,15 @@ function operationGeometry(
     case 'facing':
       return Ok({ kind: 'facing', id: op.id, ...direction, depth: op.depth.canonical })
     case 'pocket':
-      return Ok({
+      return shapeGeometry(op.shape, shapes, port).map((shape) => ({
         kind: 'pocket',
         id: op.id,
         ...direction,
         onZ: on.faceZ.toNumber(),
-        shape: shapeGeometry(op.shape),
+        shape,
         depth: op.depth.canonical,
         floorRadius: op.floorRadius.canonical,
-      })
+      }))
     case 'drilling': {
       const base = {
         kind: 'drilling',
@@ -113,19 +148,24 @@ function operationGeometry(
       })
     }
     case 'profile':
-      return Ok({
+      // v0.3 fields only when set, so v0.2 inputs (and their hashes) stay byte-identical
+      return shapeGeometry(op.shape, shapes, port).map((shape) => ({
         kind: 'profile',
         id: op.id,
         ...direction,
-        shape: shapeGeometry(op.shape),
+        shape,
         side: op.side,
         slotWidth: op.slotWidth.canonical,
+        ...(op.depth.isSome() ? { depth: op.depth.unwrap().canonical } : {}),
         tabs: {
           count: op.tabs.count.canonical,
           width: op.tabs.width.canonical,
           thickness: op.tabs.thickness.canonical,
+          ...(op.tabs.positions.isSome()
+            ? { positions: op.tabs.positions.unwrap().map((q) => q.canonical) }
+            : {}),
         },
-      })
+      }))
   }
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { offsetContour } from '../geometry/contour'
-import { CHORD_TOLERANCE, type Contour } from '../geometry/model'
+import { CHORD_TOLERANCE, type AnalyticContour as Contour } from '../geometry/model'
 import type { PocketOperation, ToolpathTool } from './model'
 import { generatePocket, inradius, ringOffsets } from './pocket'
 import { bullNose, endMill, pocketInput } from './testing/fixtures'

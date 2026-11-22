@@ -2,7 +2,7 @@
  * Machining order: the default order of plan operations and the order checks.
  * Doc: docs/modes/plan-v0.1.md#plan-operations-and-order
  */
-import type { Operation, Part, Shape } from '../design/operation'
+import { isGeneralShape, type Operation, type Part, type Shape } from '../design/operation'
 import { shapeCentre } from '../design/anchor'
 import type { OperationKind } from '../design/part.dto'
 import { DIRECTIONS, STOCK_FACE, type Direction } from '../geometry/face'
@@ -145,8 +145,12 @@ export function repairOrder(planOps: readonly PlanOperationDTO[], part: Part): P
   return out
 }
 
-/** True if the point lies inside the shape's bounds (v0.1: axis-aligned rectangles, circles). */
+/**
+ * True if the point lies inside the shape's bounds (v0.1: axis-aligned rectangles, circles;
+ * general shapes are skipped until T3).
+ */
 function inside(shape: Shape, x: number, y: number): boolean {
+  if (shape.kind === 'named' || isGeneralShape(shape)) return false
   const [cx, cy] = shapeCentre(shape)
   if (shape.kind === 'circle') return Math.hypot(x - cx, y - cy) < shape.diameter.canonical / 2
   return (
@@ -156,7 +160,8 @@ function inside(shape: Shape, x: number, y: number): boolean {
 
 function centerOf(op: Operation): [number, number] | undefined {
   if (op.kind === 'drilling') return [op.center[0].canonical, op.center[1].canonical]
-  if (op.kind === 'pocket' || op.kind === 'profile') return [...shapeCentre(op.shape)]
+  if (op.kind === 'pocket' || op.kind === 'profile')
+    return isGeneralShape(op.shape) ? undefined : [...shapeCentre(op.shape)]
   return undefined
 }
 

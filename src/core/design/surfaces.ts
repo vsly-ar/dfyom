@@ -26,7 +26,14 @@ import type { Stock } from '../library/stock'
 import { Quantity } from '../quantity/quantity'
 import { Rational } from '../quantity/rational'
 import { Tolerance } from '../quantity/tolerance'
-import { quantityParams, withParam, type Operation, type Shape } from './operation'
+import {
+  isGeneralShape,
+  quantityParams,
+  withParam,
+  type Operation,
+  type Part,
+  type Shape,
+} from './operation'
 
 /** A level (or coordinate) as an interval: nominal plus exact deviations (0/0 when untoleranced). */
 export interface SurfaceLevel {
@@ -85,24 +92,49 @@ function minus(a: SurfaceLevel, b: SurfaceLevel): SurfaceLevel {
 const neg = (a: SurfaceLevel): SurfaceLevel => minus(exactLevel(zero), a)
 const plus = (a: SurfaceLevel, b: SurfaceLevel): SurfaceLevel => minus(a, neg(b))
 
-/** Half the narrowest size (float64 mm), as geometry's `inradius`. */
-export function inradius(s: Shape): number {
-  return s.kind === 'circle'
-    ? s.diameter.canonical / 2
-    : Math.min(s.length.canonical, s.width.canonical) / 2
+/**
+ * Half the narrowest size (float64 mm), as geometry's `inradius`; undefined for a general shape
+ * (named or rotated), whose width needs the 2D layer (K4).
+ */
+export function inradius(s: Shape): number | undefined {
+  if (isGeneralShape(s)) return undefined
+  if (s.kind === 'circle') return s.diameter.canonical / 2
+  if (s.kind === 'rectangle') return Math.min(s.length.canonical, s.width.canonical) / 2
+  return undefined
 }
 
 /**
  * Whether an `inside` profile's slot covers the whole opening, so no tabs are built
- * (the geometry rule, docs/architecture/geometry.md#building-the-solids).
+ * (the geometry rule, docs/architecture/geometry.md#building-the-solids). General shapes: never
+ * (their width is a 2D-layer check, K4; G1 builds their tabs).
  */
 export function slotCoversOpening(op: Extract<Operation, { kind: 'profile' }>): boolean {
-  return op.side === 'inside' && inradius(op.shape) - op.slotWidth.canonical <= CHORD_TOLERANCE
+  const r = inradius(op.shape)
+  return op.side === 'inside' && r !== undefined && r - op.slotWidth.canonical <= CHORD_TOLERANCE
 }
 
-/** Number of tabs a profile builds (0 when the slot covers an inside opening). */
-export function builtTabs(op: Extract<Operation, { kind: 'profile' }>): number {
+/**
+ * Whether a named shape is an open path (a single open `path` item): read from the definition,
+ * so it needs no 2D port.
+ */
+export function isOpenShape(s: Shape, shapes: Part['shapes']): boolean {
+  if (s.kind !== 'named') return false
+  const items = shapes?.get(s.shapeId)?.items
+  return items?.length === 1 && items[0]!.kind === 'path' && !items[0]!.closed
+}
+
+/**
+ * Number of tabs a profile builds: the given positions, else `count`; none when the slot covers
+ * an inside opening, and none on a blind `on` groove or an open path (tabs hold a through cut of
+ * a closed loop only, design-v0.3.md#cut-side-and-open-shapes).
+ */
+export function builtTabs(
+  op: Extract<Operation, { kind: 'profile' }>,
+  shapes?: Part['shapes'],
+): number {
   if (slotCoversOpening(op)) return 0
+  if (op.depth.isSome() || isOpenShape(op.shape, shapes)) return 0
+  if (op.tabs.positions.isSome()) return op.tabs.positions.unwrap().length
   const n = op.tabs.count.canonical
   return Number.isInteger(n) && n > 0 ? n : 0
 }
@@ -131,7 +163,8 @@ export class SurfaceTable {
     private readonly levels: StockLevels,
   ) {}
 
-  static build(ops: readonly Operation[], stock: Stock): SurfaceTable {
+  /** `shapes`: the part's loaded named shapes (an open path builds no tabs, `builtTabs`). */
+  static build(ops: readonly Operation[], stock: Stock, shapes?: Part['shapes']): SurfaceTable {
     const map = new Map<string, SurfaceEntry>()
     const levels = new StockLevels(stock)
     const put = (
@@ -176,7 +209,8 @@ export class SurfaceTable {
             const d = e.direction
             const opposite = minus(levels.face(d), levels.extent(d))
             const top = plus(opposite, ofQuantity(op.tabs.thickness))
-            for (let t = 0; t < builtTabs(op); t++) put(`${op.id}.tab[${t}].top`, i, d, top, true)
+            for (let t = 0; t < builtTabs(op, shapes); t++)
+              put(`${op.id}.tab[${t}].top`, i, d, top, true)
           })
           break
       }

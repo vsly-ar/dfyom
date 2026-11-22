@@ -19,6 +19,8 @@ import {
   type OperationGeometry,
   type PartGeometryInput,
   type StockGeometry,
+  isAnalyticOperation,
+  type AnalyticOperation,
 } from './model'
 import { inradius, slotCoversOpening } from './operations'
 import { reachDepth, toolFit } from './tool-fit'
@@ -120,12 +122,18 @@ export function parameterChecks(
       case 'facing':
         return [...facing(op, options.unitSystem), ...tool]
       case 'pocket':
-        return [...pocket(op, lib), ...reach(op, stock, lib, own), ...tool]
+        // general shapes: their parameter checks come with K4 (design-v0.3.md#dfm-checks-for-shapes)
+        return [
+          ...(isAnalyticOperation(op) ? pocket(op, lib) : []),
+          ...reach(op, stock, lib, own),
+          ...tool,
+        ]
       case 'drilling':
         return [...drilling(op, stock, lib), ...reach(op, stock, lib, own), ...tool]
       case 'profile':
         return [
-          ...profile(op, stock, lib, options.unitSystem),
+          ...(isAnalyticOperation(op) ? profile(op, stock, lib, options.unitSystem) : []),
+
           ...reach(op, stock, lib, own),
           ...tool,
         ]
@@ -300,7 +308,12 @@ function facing(op: Op<'facing'>, unitSystem: 'metric' | 'inch'): DfmWarning[] {
 }
 
 /** Narrowest size of a contour: the circle's diameter, the rectangle's shorter side. */
-const narrowest = (op: Op<'pocket'> | Op<'profile'>): number => 2 * inradius(op.shape.contour)
+/**
+ * Twice the inradius of a v0.1 shape; a general shape (named, rotated, `on`) has no analytic
+ * width: Infinity until K4 measures it with the 2D layer.
+ */
+const narrowest = (op: Op<'pocket'> | Op<'profile'>): number =>
+  isAnalyticOperation(op) ? 2 * inradius(op.shape.contour) : Infinity
 
 /** Inside corners (pocket, inside profile): r = 0 always warns; r below the smallest tool radius. */
 function corners(op: Op<'pocket'> | Op<'profile'>, lib: Library): DfmWarning[] {
@@ -335,7 +348,7 @@ function corners(op: Op<'pocket'> | Op<'profile'>, lib: Library): DfmWarning[] {
   return []
 }
 
-function pocket(op: Op<'pocket'>, lib: Library): DfmWarning[] {
+function pocket(op: AnalyticOperation<'pocket'>, lib: Library): DfmWarning[] {
   const out: DfmWarning[] = []
   const size = narrowest(op)
   if (lib.minEndMill !== undefined && size < lib.minEndMill - TOOL_MATCH_TOLERANCE)
@@ -457,7 +470,7 @@ function drilling(op: Op<'drilling'>, stock: StockGeometry, lib: Library): DfmWa
  * (the stock margin), in the face frame (`stock` is the local stock; on the top face the sides
  * front, right, back, left).
  */
-function margins(op: Op<'profile'>, stock: StockGeometry): [string, number][] {
+function margins(op: AnalyticOperation<'profile'>, stock: StockGeometry): [string, number][] {
   const c = op.shape.contour
   const [hx, hy] = c.kind === 'circle' ? [c.radius, c.radius] : [c.length / 2, c.width / 2]
   const [x, y] = op.shape.center
@@ -471,7 +484,7 @@ function margins(op: Op<'profile'>, stock: StockGeometry): [string, number][] {
 }
 
 function profile(
-  op: Op<'profile'>,
+  op: AnalyticOperation<'profile'>,
   stock: StockGeometry,
   lib: Library,
   unitSystem: 'metric' | 'inch',

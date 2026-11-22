@@ -263,11 +263,37 @@ export function withoutSafeIntBounds(node: unknown): unknown {
 }
 
 /**
- * Extracts repeated sub-schemas into `$defs`, drops `$schema` and the safe-integer bounds.
+ * A tuple of equal items (`[x, y]` points: `prefixItems: [A, A], items: false`, `minItems` =
+ * `maxItems` = 2) as the equivalent array of A with that length (JSON Schema 2020-12), shorter on
+ * every point of every tool (docs/architecture/llm-api.md#implementation-task-310).
+ */
+export function withHomogeneousTuples(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(withHomogeneousTuples)
+  if (!isObject(node)) return node
+  const out: JsonObject = {}
+  for (const [k, v] of Object.entries(node)) out[k] = withHomogeneousTuples(v)
+  const p = out['prefixItems']
+  if (
+    Array.isArray(p) &&
+    p.length > 0 &&
+    out['items'] === false &&
+    out['minItems'] === p.length &&
+    out['maxItems'] === p.length &&
+    p.every((x) => JSON.stringify(x) === JSON.stringify(p[0]))
+  ) {
+    const { prefixItems: _p, ...rest } = out
+    return { ...rest, items: p[0] as JsonObject }
+  }
+  return out
+}
+
+/**
+ * Extracts repeated sub-schemas into `$defs`, drops `$schema` and the safe-integer bounds, and
+ * writes tuples of equal items as arrays (`withHomogeneousTuples`).
  * Schemas that already use `$ref`/`$defs` (recursive Zod schemas) are returned without sharing.
  */
 export function compactSchema(schema: JsonObject): JsonObject {
-  const { $schema: _s, ...root } = withoutSafeIntBounds(schema) as JsonObject
+  const { $schema: _s, ...root } = withHomogeneousTuples(withoutSafeIntBounds(schema)) as JsonObject
   if (JSON.stringify(root).includes('"$ref"')) return root
   // A repeated node is shared whole (description included) if it repeats as is, else without
   // its description, which then stays beside the `$ref`.

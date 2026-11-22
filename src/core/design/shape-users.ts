@@ -11,7 +11,7 @@ interface PartLike {
 
 /**
  * Ids of the operations whose shape places `shapeId` (`shape: { kind: 'named', shapeId }`, v0.3
- * K3); in design order. Until K3 adds the `named` kind no operation has one, so this is empty.
+ * K3); in design order.
  */
 export function operationsUsingShape(part: PartLike, shapeId: string): string[] {
   return part.operations

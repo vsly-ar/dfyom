@@ -99,9 +99,12 @@ export function toolFit(
           values: { needs: 'endMill' },
         }
       const c = op.shape.contour
+      // general shapes: the narrowest size and corners need the 2D layer (K4)
       unfit =
-        wider(2 * inradius(c), 'pocket at its narrowest', 'pocket') ??
-        (c.kind === 'rectangle' ? corner(c.cornerRadius) : undefined)
+        c.kind === 'rectangle' || c.kind === 'circle'
+          ? (wider(2 * inradius(c), 'pocket at its narrowest', 'pocket') ??
+            (c.kind === 'rectangle' ? corner(c.cornerRadius) : undefined))
+          : undefined
       if (unfit !== undefined) return unfit
       const f = op.floorRadius
       const re = tool.type === 'bullNoseEndMill' ? (tool.cornerRadius ?? 0) : 0

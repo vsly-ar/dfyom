@@ -82,7 +82,7 @@ const neverAborted = new AbortController().signal
 export async function exportPlan(
   doc: ProjectDoc,
   planId: string,
-  services: Pick<Services, 'workers' | 'toolpaths'>,
+  services: Pick<Services, 'workers' | 'toolpaths' | 'region2d'>,
   opts: PlanExportOptions = {},
 ): AsyncAppResult<PlanExport> {
   const where = 'plan.export'
@@ -119,15 +119,21 @@ export async function exportPlan(
   for (const [i, input] of all.entries()) {
     const id = input.planOperationId
     opts.progress?.({ done: i, total, label: id })
-    const tp = await ensureToolpath(cache.unwrap(), services.workers, input, {
-      signal: opts.signal ?? neverAborted,
-      progress: (p) =>
-        opts.progress?.({
-          done: i,
-          total,
-          label: p.label === undefined ? id : `${id}: ${p.label}`,
-        }),
-    })
+    const tp = await ensureToolpath(
+      cache.unwrap(),
+      services.workers,
+      input,
+      {
+        signal: opts.signal ?? neverAborted,
+        progress: (p) =>
+          opts.progress?.({
+            done: i,
+            total,
+            label: p.label === undefined ? id : `${id}: ${p.label}`,
+          }),
+      },
+      services.region2d,
+    )
     if (tp.isErr()) return Err(tp.unwrapErr().withContext(where, { planId, planOperationId: id }))
     if (tp.unwrap().status === 'generated') regenerated.push(id)
     operations.push({

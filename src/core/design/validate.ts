@@ -3,15 +3,16 @@
  * synchronously in every design command. Violations are `model.invariant` issues with parameter
  * paths. DFM warnings (tool library, geometry) are task 2.8.
  * Doc: docs/modes/design.md#operations-v01, docs/modes/design.md#implementation-task-25,
- * docs/modes/design-v0.2.md#dfm-access-checks (limits along the face normal)
+ * docs/modes/design-v0.2.md#dfm-access-checks (limits along the face normal),
+ * docs/modes/design-v0.3.md#operations-that-take-a-shape (named shapes, `on`, tab positions)
  */
 import type { Issue } from '../../shared/errors/app-error'
-import { fail, Ok, type AppResult } from '../../shared/result'
+import { fail, Ok, type AppResult, type Option } from '../../shared/result'
 import type { Direction } from '../geometry/face'
 import type { Stock } from '../library/stock'
 import type { Quantity } from '../quantity/quantity'
 import { Rational } from '../quantity/rational'
-import type { Operation, Shape } from './operation'
+import type { Operation, Part, Shape } from './operation'
 import { slotCoversOpening, SurfaceTable, type SurfaceEntry } from './surfaces'
 
 const ZERO = Rational.ZERO
@@ -37,8 +38,33 @@ class Checker {
   }
 }
 
-/** Shape size > 0 and 0 ≤ cornerRadius ≤ min(length, width)/2; returns whether it is valid. */
+/**
+ * What validation needs of an operation's named shape (placement.ts `shapeFacts`): whether it is
+ * an open path (from the definition), and with the 2D port its loop count (pieces + holes) and the
+ * length of its loop or path (mm). Without the port only `open` is known; the checks that need the
+ * rest are skipped (a plan command re-checking a part has no port).
+ */
+export interface ShapeFacts {
+  readonly open: boolean
+  readonly loops?: number
+  readonly length?: number
+}
+
+/** Facts of the named shapes by operation id. */
+export type ShapeFactsTable = ReadonlyMap<string, ShapeFacts>
+
+/** Facts of any shape: v0.1 shapes (rotated too) are one closed loop of a known perimeter. */
+function factsOf(op: { id: string; shape: Shape }, table?: ShapeFactsTable): ShapeFacts {
+  if (op.shape.kind !== 'named') return { open: false, loops: 1, length: shapePerimeter(op.shape) }
+  return table?.get(op.id) ?? { open: false }
+}
+
+/**
+ * Shape size > 0 and 0 ≤ cornerRadius ≤ min(length, width)/2; returns whether it is valid. A named
+ * shape's own values are checked by the shape commands (shapes.md).
+ */
 function checkShape(c: Checker, s: Shape): boolean {
+  if (s.kind === 'named') return true
   if (s.kind === 'circle') return c.positive(s.diameter, 'shape.diameter')
   const l = c.positive(s.length, 'shape.length')
   const w = c.positive(s.width, 'shape.width')
@@ -83,11 +109,56 @@ function checkAboveBottom(
 const extentName = (d: Direction): string =>
   d === '+z' || d === '-z' ? 'the stock thickness' : 'the stock size along the face normal'
 
-/** Perimeter of a v0.1 shape (float64 mm). */
-export function shapePerimeter(s: Shape): number {
+/** Perimeter of a v0.1 shape, rotated or not (float64 mm). */
+export function shapePerimeter(s: Exclude<Shape, { kind: 'named' }>): number {
   if (s.kind === 'circle') return Math.PI * s.diameter.canonical
   const r = s.cornerRadius.canonical
   return 2 * (s.length.canonical + s.width.canonical) - 8 * r + 2 * Math.PI * r
+}
+
+/**
+ * `tabs.positions` (design-v0.3.md#tabs-on-shapes): none on an open path or a blind groove
+ * (`tabsNotAllowed`); each within the loop (`tabOutside`, 0 ≤ s < length); no two closer than the
+ * tab width around the loop (`tabsOverlap`). Positions need the loop length: skipped without it.
+ */
+function checkTabPositions(
+  c: Checker,
+  tabs: { readonly positions: Option<readonly Quantity[]> },
+  facts: ShapeFacts,
+  blind: boolean,
+  width: number,
+): void {
+  if (tabs.positions.isNone()) return
+  const positions = tabs.positions.unwrap()
+  if (facts.open || blind) {
+    c.check(
+      false,
+      'tabs.positions',
+      'tabsNotAllowed',
+      'tabs hold a through cut of a closed loop only',
+    )
+    return
+  }
+  const L = facts.length
+  if (L === undefined) return
+  let inside = true
+  positions.forEach((p, i) => {
+    const ok = p.canonical >= 0 && p.canonical < L
+    inside &&= ok
+    c.check(ok, `tabs.positions.${i}`, 'tabOutside', 'must be between 0 and the loop length', {
+      min: 0,
+      max: L,
+      actual: p.canonical,
+    })
+  })
+  if (!inside || positions.length < 2) return
+  const sorted = positions.map((p) => p.canonical).sort((a, b) => a - b)
+  const gaps = sorted.map((s, i) => (i + 1 < sorted.length ? sorted[i + 1]! : sorted[0]! + L) - s)
+  const min = Math.min(...gaps)
+  c.check(min >= width, 'tabs.positions', 'tabsOverlap', 'tabs must not overlap along the loop', {
+    min: width,
+    actual: min,
+  })
 }
 
 /**
@@ -99,6 +170,7 @@ export function operationIssues(
   index: number,
   stock: Stock,
   table: SurfaceTable = SurfaceTable.build(ops, stock),
+  shapeFacts?: ShapeFactsTable,
 ): Issue[] {
   const c = new Checker()
   const op = ops[index]!
@@ -131,9 +203,29 @@ export function operationIssues(
       break
     case 'pocket': {
       checkShape(c, op.shape)
+      c.check(
+        !factsOf(op, shapeFacts).open,
+        'shape',
+        'openNeedsOn',
+        'an open path needs a profile on',
+      )
       const depthOk = c.positive(op.depth, 'depth')
       if (depthOk && on !== undefined) checkAboveBottom(c, 'depth', on, op.depth, T.exact)
       const f = op.floorRadius.exact
+      if (op.shape.kind === 'named') {
+        // a named shape's corners are its own: the floor fillet waits for G1 (design-v0.3.md)
+        c.check(
+          f.compare(ZERO) === 0,
+          'floorRadius',
+          'floorRadiusShape',
+          'must be 0 for a named shape',
+          {
+            max: 0,
+            actual: op.floorRadius.canonical,
+          },
+        )
+        break
+      }
       const limits = [op.depth.exact]
       limits.push(
         op.shape.kind === 'circle'
@@ -187,7 +279,33 @@ export function operationIssues(
     }
     case 'profile': {
       const shapeOk = checkShape(c, op.shape)
+      const facts = factsOf(op, shapeFacts)
       c.positive(op.slotWidth, 'slotWidth')
+      const on = op.side === 'on'
+      c.check(on || !facts.open, 'side', 'openNeedsOn', 'an open path is cut on its line', {
+        allowed: ['on'],
+      })
+      c.check(
+        facts.loops === undefined || facts.loops === 1,
+        'shape',
+        'profileOneLoop',
+        'a profile cuts one loop: use a pocket for a shape with holes or several pieces',
+        { actual: facts.loops },
+      )
+      const blind = op.depth.isSome()
+      if (blind) {
+        const depth = op.depth.unwrap()
+        c.check(on, 'depth', 'onlyOn', 'only a profile on can stop at a depth')
+        if (on && c.positive(depth, 'depth'))
+          c.check(
+            depth.exact.compare(T.exact) < 0,
+            'depth',
+            'lessThanStockThickness',
+            `must be less than ${extentName(direction)}`,
+            { max: T.canonical, actual: depth.canonical },
+          )
+      }
+      checkTabPositions(c, op.tabs, facts, blind, op.tabs.width.canonical)
       const count = op.tabs.count
       const integer = count.exact.den === 1n
       c.check(integer, 'tabs.count', 'integer', 'must be a whole number', {
@@ -202,9 +320,13 @@ export function operationIssues(
         shapeOk &&
         integer &&
         count.canonical > 0 &&
+        op.tabs.positions.isNone() &&
+        !blind &&
+        !facts.open &&
+        facts.length !== undefined &&
         !slotCoversOpening(op)
       ) {
-        const perimeter = shapePerimeter(op.shape)
+        const perimeter = facts.length
         c.check(
           count.canonical * op.tabs.width.canonical < perimeter,
           'tabs.width',
@@ -236,12 +358,14 @@ export function checkOperations(
   ops: readonly Operation[],
   stock: Stock,
   edited?: string,
+  shapeFacts?: ShapeFactsTable,
+  shapes?: Part['shapes'],
 ): AppResult<void> {
-  const table = SurfaceTable.build(ops, stock)
+  const table = SurfaceTable.build(ops, stock, shapes)
   const own: Issue[] = []
   const others: Issue[] = []
   ops.forEach((op, i) => {
-    const issues = operationIssues(ops, i, stock, table)
+    const issues = operationIssues(ops, i, stock, table, shapeFacts)
     if (op.id === edited) own.push(...issues)
     else others.push(...issues.map((is) => ({ ...is, path: ['operations', op.id, ...is.path] })))
   })

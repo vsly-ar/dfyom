@@ -6,7 +6,7 @@
 import { z } from 'zod'
 import { NAME_MAX, quantityDto } from '../library/item'
 import { TOOL_TYPES } from '../library/tool.dto'
-import { ShapeDtoSchema } from './shape.dto'
+import { ShapeDtoSchema, ShapeIdSchema } from './shape.dto'
 
 const length = () => quantityDto('length')
 
@@ -40,9 +40,11 @@ export const AnchorDtoSchema = z.object({ u: z.enum(ANCHOR_POINTS), v: z.enum(AN
 export type AnchorDTO = z.output<typeof AnchorDtoSchema>
 
 /**
- * The shape of a pocket or profile (an inline shape; v0.3 K3 adds the `named` kind that places a
- * part's named shape, shape.dto.ts). `center` is the anchor point; absent `anchor` = the centre
- * (v0.1 records load unchanged, and it is written only when it is not the centre).
+ * The shape of a pocket or profile: an inline rectangle or circle, or (v0.3) a part's named shape
+ * placed by the `named` kind (docs/modes/design-v0.3.md#placing-a-shape-on-a-face). `center` is
+ * the anchor point of the placed (rotated, mirrored) bounding box; absent `anchor` = the centre
+ * (v0.1 records load unchanged, and it is written only when it is not the centre). `rotation`
+ * (counter-clockwise about the anchor point) and `mirror` are written only when set.
  */
 export const OperationShapeDtoSchema = z.discriminatedUnion('kind', [
   z.object({
@@ -52,12 +54,22 @@ export const OperationShapeDtoSchema = z.discriminatedUnion('kind', [
     length: length().describe('Size along X'),
     width: length().describe('Size along Y'),
     cornerRadius: length(),
+    rotation: quantityDto('angle').optional(),
   }),
   z.object({
     kind: z.literal('circle'),
     center: PointDtoSchema,
     anchor: AnchorDtoSchema.optional(),
     diameter: length(),
+  }),
+  z.object({
+    kind: z.literal('named'),
+    shapeId: ShapeIdSchema,
+    center: PointDtoSchema,
+    anchor: AnchorDtoSchema.optional(),
+    rotation: quantityDto('angle').optional(),
+    /** Flips the shape frame's x before rotating; absent = not mirrored. */
+    mirror: z.literal(true).optional(),
   }),
 ])
 export type OperationShapeDTO = z.output<typeof OperationShapeDtoSchema>
@@ -96,7 +108,9 @@ const common = {
 
 export const DRILL_BOTTOMS = ['through', 'flat', 'drillPoint'] as const
 export type DrillBottomKind = (typeof DRILL_BOTTOMS)[number]
-export const PROFILE_SIDES = ['outside', 'inside'] as const
+/** `on` (v0.3) cuts centred on the loop or open path (design-v0.3.md#cut-side-and-open-shapes). */
+export const PROFILE_SIDES = ['outside', 'inside', 'on'] as const
+export type ProfileSide = (typeof PROFILE_SIDES)[number]
 
 /** Absent on a facing or profile = `stock.top` (v0.1 records load unchanged). */
 const stockFaceOn = SurfaceIdSchema.optional().describe(
@@ -134,7 +148,15 @@ export const ProfileDtoSchema = z.object({
   shape: OperationShapeDtoSchema,
   side: z.enum(PROFILE_SIDES),
   slotWidth: length(),
-  tabs: z.object({ count: quantityDto('scalar'), width: length(), thickness: length() }),
+  /** `on` only: a blind groove's depth below `on`; absent = through (as every v0.2 profile). */
+  depth: length().optional(),
+  tabs: z.object({
+    count: quantityDto('scalar'),
+    width: length(),
+    thickness: length(),
+    /** Distances along the loop from its start point; replace `count` when present (v0.3). */
+    positions: z.array(length()).optional(),
+  }),
 })
 
 export const OperationDtoSchema = z.discriminatedUnion('kind', [

@@ -5,7 +5,13 @@
  * Toolpaths are derived data: plain float64 mm in the setup's WCS (Z0 = stock top), feeds in
  * mm/min, spindle speed in rpm. Nothing here is a quantity or a model class.
  */
-import type { OperationGeometry, StockGeometry, Vec2, Vec3 } from '../geometry/model'
+import type {
+  AnalyticOperation,
+  OperationGeometry,
+  StockGeometry,
+  Vec2,
+  Vec3,
+} from '../geometry/model'
 
 export type { Vec2, Vec3 }
 
@@ -186,9 +192,11 @@ export interface GeneratorInput<Op, Strategy, Cutting = CuttingParams> {
 }
 
 export type FacingOperation = Extract<OperationGeometry, { kind: 'facing' }>
-export type PocketOperation = Extract<OperationGeometry, { kind: 'pocket' }>
+/** v0.1 contours only; region pockets go through generateRegionPocket (T1). */
+export type PocketOperation = AnalyticOperation<'pocket'>
 export type DrillingOperation = Extract<OperationGeometry, { kind: 'drilling' }>
-export type ProfileOperation = Extract<OperationGeometry, { kind: 'profile' }>
+/** v0.1 contours, `outside` / `inside` only; general loops come with T2. */
+export type ProfileOperation = AnalyticOperation<'profile'>
 
 export type FacingInput = GeneratorInput<FacingOperation, FacingStrategy>
 export type PocketInput = GeneratorInput<PocketOperation, PocketStrategy>

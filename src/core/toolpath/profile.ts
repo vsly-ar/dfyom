@@ -4,7 +4,7 @@
  * Doc: docs/modes/plan-v0.1.md#profile-with-tabs and #toolpath-generators-task-210
  */
 import { contourParam, offsetContour, perimeter } from '../geometry/contour'
-import { EPSILON, type Contour, type Vec2, type Vec3 } from '../geometry/model'
+import { EPSILON, type AnalyticContour as Contour, type Vec2, type Vec3 } from '../geometry/model'
 import { slotCoversOpening } from '../geometry/operations'
 import { Err, Ok, type AppResult } from '../../shared/result'
 import { noSteps, type Steps } from '../workers/steps'

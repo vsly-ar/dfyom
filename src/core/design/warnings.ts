@@ -6,6 +6,7 @@
  */
 import type { AppResult } from '../../shared/result'
 import { parameterChecks, type DfmTool } from '../geometry/dfm'
+import type { Region2dPort } from '../geometry/2d/port'
 import type { DfmWarning } from '../geometry/model'
 import { DfmWarningSchema } from '../geometry/schemas'
 import type { Library } from '../library/library'
@@ -37,8 +38,9 @@ export function partWarnings(
   units: UnitSystem,
   tools: readonly DfmTool[],
   snapshots: ProjectDoc['snapshots'] = {},
+  region2d?: Region2dPort,
 ): AppResult<DfmWarning[]> {
-  return toGeometryInput(part, stock).map((input) =>
+  return toGeometryInput(part, stock, region2d).map((input) =>
     parameterChecks(input, {
       tools,
       unitSystem: units === 'inch' ? 'inch' : 'metric',

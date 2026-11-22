@@ -12,7 +12,7 @@
  */
 import type { Draft } from 'immer'
 import { z } from 'zod'
-import { Err, fail, Ok, type AppResult } from '../../shared/result'
+import { Err, fail, None, Ok, type AppResult } from '../../shared/result'
 import { defineCommand, defineQuery, type AnyCommand, type QueryDef } from '../commands/define'
 import type { CommandContext } from '../commands/context'
 import type { ReferenceResolver } from '../expression/evaluate'
@@ -22,9 +22,9 @@ import { NAME_MAX, quantityFromDTO } from '../library/item'
 import type { ProjectDoc, UnitSystem } from '../project/document'
 import type { Quantity } from '../quantity/quantity'
 import type { QuantityDTO } from '../quantity/quantity.dto'
-import { findOperation, Warnings, withWarnings } from './commands'
+import { findOperation, Warnings, withWarnings, writeOperationList } from './commands'
 import { loadPart, type LoadedPart } from './load'
-import { DEFAULTS, fieldContext, type FieldKind } from './operation'
+import { DEFAULTS, fieldContext, type FieldKind, type Operation } from './operation'
 import { OperationIdSchema, PartIdSchema } from './part.dto'
 import {
   definitionOf,
@@ -417,7 +417,7 @@ const shapeConvert = defineCommand({
   kind: 'document',
   name: 'design.shape.convert',
   summary:
-    "Create a named shape from a pocket's or profile's inline rectangle or circle (centred on the shape frame's origin).",
+    "Move a pocket's or profile's inline rectangle or circle into a new named shape the operation then places (one undo step).",
   title: () => 'Convert to shape',
   machine: false,
   args: z.object({ ...PartArg, operationId: OperationIdSchema }),
@@ -437,12 +437,35 @@ const shapeConvert = defineCommand({
         ],
         where,
       })
+    const s = op.shape
+    if (s.kind === 'named')
+      return fail('input.malformed', `${op.id} already places shape ${s.shapeId}`, {
+        issues: [
+          { path: ['operationId'], rule: 'alreadyNamed', message: 'already places a shape' },
+        ],
+        where,
+      })
+    // a named pocket has no floor fillet yet (validate.ts `floorRadiusShape`)
+    if (op.kind === 'pocket' && op.floorRadius.canonical !== 0)
+      return fail(
+        'model.invariant',
+        `${op.id} has a floor radius, which a named shape cannot keep`,
+        {
+          issues: [
+            {
+              path: ['floorRadius'],
+              rule: 'floorRadiusShape',
+              message: 'must be 0 to convert: a named shape has no floor fillet yet',
+            },
+          ],
+          where,
+        },
+      )
     // the operation's quantities, re-evaluated against the stock's faces (a formula over an
     // operation's surface cannot move into a shape)
     const resolver = shapeResolver(loaded)
     const zero = quantityFromSource('0', fieldContext('length', loaded.units), resolver)
     if (zero.isErr()) return Err(zero.unwrapErr().withContext(where))
-    const s = op.shape
     const raw: ShapeItem<Quantity> =
       s.kind === 'circle'
         ? {
@@ -472,7 +495,22 @@ const shapeConvert = defineCommand({
     const n = nextShapeNumber(shapes)
     const shapeId = `shape${n}`
     draftShapes(draft, args.partId).push({ id: shapeId, name: shapeName(n), items: dtos.unwrap() })
-    return withWarnings({ shapeId }, loaded, loaded.part.operations, ctx, where)
+    // the operation now places the shape: same anchor point, anchor and rotation, so the placed
+    // box (and the feature) stays where it was (shapes.md#implementation-k3)
+    const placed: Operation = {
+      ...op,
+      shape: {
+        kind: 'named',
+        center: s.center,
+        anchor: s.anchor,
+        shapeId,
+        rotation: s.kind === 'rectangle' ? s.rotation : None,
+        mirror: false,
+      },
+    }
+    const ops = loaded.part.operations.map((o) => (o.id === op.id ? placed : o))
+    writeOperationList(draft.parts[args.partId]!.operations, ops)
+    return withWarnings({ shapeId }, loaded, ops, ctx, where)
   },
 })
 
