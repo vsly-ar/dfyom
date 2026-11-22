@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- B21 concept C "Routed D": the monogram D milled as a groove into a graphite block, the floor
+       amber, an end mill (seen from above) part way round, the rest of the stroke a dashed toolpath preview. Own drawing, GPL-3.0-or-later.
+       macOS grid: 1024 canvas, 824 body at 100, corner radius 185. Tokens: accent #f5b700,
+       token accent-border #a87a00, dark chrome #2e3535 / #1e2323. -->
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0" stop-color="#424c4c"/>
+      <stop offset="1" stop-color="#1b2020"/>
+    </linearGradient>
+    <linearGradient id="floor" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffc61a"/>
+      <stop offset="1" stop-color="#f0ac00"/>
+    </linearGradient>
+    <radialGradient id="tool" cx="0.38" cy="0.32" r="0.75">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.6" stop-color="#c5ccdb"/>
+      <stop offset="1" stop-color="#5b6462"/>
+    </radialGradient>
+    <pattern id="brush" width="1024" height="6" patternUnits="userSpaceOnUse">
+      <rect width="1024" height="3" fill="#ffffff" fill-opacity="0.025"/>
+    </pattern>
+    <clipPath id="clip"><rect x="100" y="100" width="824" height="824" rx="185"/></clipPath>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  <g filter="url(#shadow)">
+    <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#body)"/>
+  </g>
+  <g clip-path="url(#clip)">
+    <rect x="100" y="100" width="824" height="824" fill="url(#brush)"/>
+    <rect x="100" y="100" width="824" height="824" rx="185" fill="none" stroke="#ffffff" stroke-opacity="0.1" stroke-width="4"/>
+  </g>
+  <!-- the D: cut so far (dark wall rim, amber floor lit from the top left), still to cut (dashed
+       toolpath preview); the end mill from above, two flutes, at the cut's end -->
+  <path d="M500 300H372V724H500A212 212 0 0 0 636.3 349.6" fill="none" stroke="#0f1212" stroke-width="128" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M500 300H372V724H500A212 212 0 0 0 636.3 349.6" fill="none" stroke="url(#floor)" stroke-width="104" stroke-linecap="round" stroke-linejoin="round" transform="translate(4 8)"/>
+  <path d="M636.3 349.6A212 212 0 0 0 500 300" fill="none" stroke="#f5b700" stroke-width="14" stroke-linecap="round" stroke-dasharray="2 34"/>
+  <circle cx="636.3" cy="349.6" r="66" fill="#000" opacity="0.35" transform="translate(8 14)"/>
+  <circle cx="636.3" cy="349.6" r="66" fill="url(#tool)"/>
+  <path d="M636.3 349.6c-26-6-32-36-15-54M636.3 349.6c26 6 32 36 15 54" fill="none" stroke="#39423f" stroke-width="12" stroke-linecap="round"/>
+  <circle cx="636.3" cy="349.6" r="66" fill="none" stroke="#2e3535" stroke-width="5"/>
+</svg>

@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- B21 concept A "Flute": a flat end mill cutting a slot into stock (front view); the slot floor, the toolpath, is amber. Own drawing, GPL-3.0-or-later.
+       macOS grid: 1024 canvas, 824 body at 100, corner radius 185, shadow below. Tokens: accent #f5b700,
+       dark chrome #2e3535 / #1e2323, steel #e9edf3 → #868f8d. -->
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3d4646"/>
+      <stop offset="1" stop-color="#1b2020"/>
+    </linearGradient>
+    <linearGradient id="steel" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7a8482"/>
+      <stop offset="0.28" stop-color="#f4f6fa"/>
+      <stop offset="0.55" stop-color="#c5ccdb"/>
+      <stop offset="1" stop-color="#5b6462"/>
+    </linearGradient>
+    <linearGradient id="flute" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#1e2323"/>
+      <stop offset="0.5" stop-color="#39423f"/>
+      <stop offset="1" stop-color="#141818"/>
+    </linearGradient>
+    <linearGradient id="stock" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#868f8d"/>
+      <stop offset="1" stop-color="#5b6462"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#f5b700" stop-opacity="0"/>
+      <stop offset="0.35" stop-color="#f5b700"/>
+      <stop offset="1" stop-color="#ffcf4d"/>
+    </linearGradient>
+    <clipPath id="clip"><rect x="100" y="100" width="824" height="824" rx="185"/></clipPath>
+    <clipPath id="cutter"><rect x="432" y="450" width="160" height="350" rx="6"/></clipPath>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  <g filter="url(#shadow)">
+    <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#body)"/>
+  </g>
+  <g clip-path="url(#clip)">
+    <rect x="100" y="100" width="824" height="824" rx="185" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="4"/>
+    <!-- stock (front view) with the slot the tool has just cut: its floor is the amber toolpath -->
+    <path d="M100 700h824v224H100z" fill="url(#stock)"/>
+    <path d="M592 700h332" stroke="#c5ccdb" stroke-width="6"/>
+    <path d="M100 700h492v110H100z" fill="#1b2020"/>
+    <path d="M100 810h492" stroke="url(#glow)" stroke-width="22"/>
+    <!-- shank -->
+    <rect x="442" y="160" width="140" height="300" rx="12" fill="url(#steel)"/>
+    <!-- fluted cutter, its end on the slot floor -->
+    <rect x="432" y="450" width="160" height="350" rx="6" fill="url(#steel)"/>
+    <g clip-path="url(#cutter)">
+      <g fill="url(#flute)">
+        <path d="M432 470l160-80v60l-160 80z"/>
+        <path d="M432 580l160-80v60l-160 80z"/>
+        <path d="M432 690l160-80v60l-160 80z"/>
+        <path d="M432 800l160-80v60l-160 80z"/>
+      </g>
+    </g>
+    <!-- chips -->
+    <g fill="#f5b700">
+      <path d="M628 668l30-14 8 20-30 10z"/>
+      <path d="M690 616l20-18 14 16-22 14z"/>
+      <path d="M650 580l16-9 7 13-16 7z" fill-opacity="0.75"/>
+    </g>
+  </g>
+</svg>

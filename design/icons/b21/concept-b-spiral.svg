@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- B21 concept B "Spiral pocket": a pocket milled into aluminium stock with its offset toolpath
+       rings in amber, the tool seen from above at the spiral's end. Own drawing, GPL-3.0-or-later.
+       macOS grid: 1024 canvas, 824 body at 100, corner radius 185. Tokens: accent #f5b700,
+       token bg-app #f6f8ff, token vp-grid-major #c5ccdb, token text #1c2121. -->
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="0.4" y2="1">
+      <stop offset="0" stop-color="#fbfcff"/>
+      <stop offset="1" stop-color="#cfd5e2"/>
+    </linearGradient>
+    <linearGradient id="floor" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9aa3b3"/>
+      <stop offset="1" stop-color="#b9c1cf"/>
+    </linearGradient>
+    <radialGradient id="tool" cx="0.4" cy="0.35" r="0.7">
+      <stop offset="0" stop-color="#f4f6fa"/>
+      <stop offset="1" stop-color="#5b6462"/>
+    </radialGradient>
+    <clipPath id="pocket"><rect x="232" y="232" width="560" height="560" rx="96"/></clipPath>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#141828" flood-opacity="0.3"/>
+    </filter>
+    <filter id="inset" x="-5%" y="-5%" width="110%" height="110%">
+      <feGaussianBlur stdDeviation="10"/>
+    </filter>
+  </defs>
+  <g filter="url(#shadow)">
+    <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#body)"/>
+  </g>
+  <rect x="102" y="102" width="820" height="820" rx="183" fill="none" stroke="#ffffff" stroke-width="4" stroke-opacity="0.9"/>
+  <!-- pocket: floor, wall shadow from the top-left light -->
+  <rect x="232" y="232" width="560" height="560" rx="96" fill="url(#floor)"/>
+  <g clip-path="url(#pocket)">
+    <rect x="200" y="200" width="624" height="624" rx="120" fill="none" stroke="#3a4343" stroke-opacity="0.55" stroke-width="70" filter="url(#inset)" transform="translate(14 18)"/>
+  </g>
+  <!-- offset toolpath: three rings, outside in, linked at the left; amber with a soft cast shadow -->
+  <g fill="none" stroke-width="38" stroke-linecap="round" stroke-linejoin="round">
+    <g stroke="#5b6462" stroke-opacity="0.35" transform="translate(5 9)">
+      <rect x="302" y="302" width="420" height="420" rx="70"/>
+      <rect x="372" y="372" width="280" height="280" rx="46"/>
+      <rect x="442" y="442" width="140" height="140" rx="22"/>
+      <path d="M302 512H372M372 512H442"/>
+    </g>
+    <g stroke="#f5b700">
+      <rect x="302" y="302" width="420" height="420" rx="70"/>
+      <rect x="372" y="372" width="280" height="280" rx="46"/>
+      <rect x="442" y="442" width="140" height="140" rx="22"/>
+      <path d="M302 512H372M372 512H442"/>
+    </g>
+  </g>
+  <!-- the end mill from above, two flutes, on the outer ring -->
+  <circle cx="512" cy="302" r="60" fill="#1c2121" opacity="0.3" transform="translate(6 10)"/>
+  <circle cx="512" cy="302" r="60" fill="url(#tool)"/>
+  <path d="M512 302c-24-6-30-34-14-50M512 302c24 6 30 34 14 50" fill="none" stroke="#39423f" stroke-width="12" stroke-linecap="round"/>
+  <circle cx="512" cy="302" r="60" fill="none" stroke="#39423f" stroke-width="5"/>
+</svg>

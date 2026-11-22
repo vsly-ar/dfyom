@@ -377,7 +377,7 @@ What main remembers between runs without a setting (B18, B19; user requests 2026
 
 - The app is "DFYOM" in the Dock, app menu, Cmd+Tab and the task bar: `productName` in `package.json` (packaged builds take the name from it) and `app.setName` at start (also when run on a built file, as the end-to-end tests do).
 - **Development on macOS:** the unpackaged app runs inside `node_modules/electron`'s `Electron.app`, whose bundle name is what the Dock, Cmd+Tab and the bold app menu show; `app.setName` cannot change it. `npm run dev` first runs `scripts/dev-app-name.mjs` (`predev`), which renames that local bundle to DFYOM (`CFBundleName`, `CFBundleDisplayName`) and re-signs it ad hoc; idempotent, undone by reinstalling Electron (the next `npm run dev` renames again). The Dock icon stays Electron's in development; macOS may cache the old name until the Dock restarts.
-- **Icon:** none yet; it needs the user's design approval. Packaging ([packaging.md](packaging.md)) uses Electron's icon until then; the icon goes in electron-builder's `buildResources` slot (`build/icon.icns`, `build/icon.ico`, `build/icon.png` ≥ 512 px) and the windows' `icon` on Linux.
+- **Icon:** none yet; it needs the user's design approval. Three concepts (draft, pending approval in L3) are in [design/icons/](../../design/icons/README.md#b21-app-icon). Packaging ([packaging.md](packaging.md)) uses Electron's icon until then; the icon goes in electron-builder's `buildResources` slot (`build/icon.icns`, `build/icon.ico`, `build/icon.png` ≥ 512 px) and the windows' `icon` on Linux.
 
 ## Interaction
 
@@ -802,6 +802,16 @@ Decided for v0.1 ([decision 7](#decisions)): **English only, i18n-ready structur
 - Field illustrations are their own set ([field](#field)).
 - Sizes `--icon-sm` 14 px (inline, status bar), `--icon-md` 16 px (buttons, toolbars), `--icon-lg` 20 px (run controls), `--icon-xl` 28 px (field illustrations, empty states). Icons inherit `currentColor`; accent parts use `--accent-icon` with `--accent-icon-edge`.
 - An icon never stands alone without an accessible name; icon-only buttons have a tooltip.
+
+### Icon set proposal (v0.3, B22, draft)
+
+Status: **draft, pending user approval in L3**. Not built; specimens, sources, inventory and provenance in [design/icons/](../../design/icons/README.md) (`renders/b22-specimen-{light,dark}.png`, `b22-in-context-{light,dark}.png`). On approval it replaces the own-icon rules above and the icons move into `ui/icons/`.
+
+- **Scope:** one set for operations (facing, pocket, profile, groove (on), drilling, shape import, fillet, tabs), tool types (flat, bull nose, ball end mill, V-bit, drill) and the CNC-specific UI (measure, snap, setups, export gCode, run, reference model, work zero). Generic actions (settings, undo, redo, library, add, delete, alerts) stay Lucide.
+- **Grid and stroke:** own icons on a 16 px grid (the code's grid; the "24 px grid" above is corrected on approval) with `--icon-stroke` 1.35 px, round caps and joins, rectangle corners `rx` 0.5–1.5, a 1.5 px margin, no fills except small dots. Lucide keeps its 24 grid (1.33 px at 16 px).
+- **One accent part per icon,** the part that tells the concept apart: a tool's cutting end, facing's passes, pocket's raster, profile's offset, the setup's up face, the G of gCode, the run triangle.
+- **Where amber shows:** grey (`currentColor`) at rest; the accent part turns `--accent-icon` (with `--accent-icon-edge`) when its control is active (pressed toggle, selected row, current mode) and always in a primary button. Field illustrations keep their own rule ([field](#field): amber focused and unfocused). Disabled and read-only: the whole icon grey at 45 % opacity, no amber. Lucide icons are never amber except as the primary button's icon.
+- **Views:** tools from the side, operations and UI from the front or top. Sizes `--icon-md` 16 px by default, `--icon-lg` 20 px for run controls and the tool picker; tool icons always sit next to the tool's name (flat, bull nose and ball differ only in their tip at 16 px).
 
 ## Testing
 
