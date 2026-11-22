@@ -5,7 +5,12 @@
  */
 // The glue file, not the package root: `.` is exported for `import` only, and the CJS main build
 // (compute worker chunk, docs/architecture/workers.md#lanes-and-pool) `require`s it.
-import Module, { type Manifold, type ManifoldToplevel, type Mesh } from 'manifold-3d/manifold.js'
+import Module, {
+  type Manifold,
+  type ManifoldToplevel,
+  type Mesh,
+  type Vec2,
+} from 'manifold-3d/manifold.js'
 import {
   Err,
   fail,
@@ -224,6 +229,14 @@ class ManifoldKernel implements SolidKernel {
       decompose: (s) => get(s).andThen((m) => call('decompose', () => m.decompose().map(own))),
       volume: (s) => get(s).andThen((m) => call('volume', () => m.volume())),
       toMesh: (s) => get(s).andThen((m) => call('getMesh', () => copyMesh(m))),
+      triangulate: (rings) =>
+        call('triangulate', () => {
+          // epsilon −1: Manifold derives it from the input's bounds
+          const tris = wasm.triangulate(rings as Vec2[][], -1)
+          const out = new Uint32Array(tris.length * 3)
+          tris.forEach((t, i) => out.set(t, 3 * i))
+          return out
+        }),
     }
   }
 }

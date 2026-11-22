@@ -1,11 +1,14 @@
 /**
  * Per operation: removal, cut and retained labelled meshes plus its surface table. Each
  * operation is built in its face frame (`u` → x, `v` → y, `n` → z, its stock face at z = 0, the
- * stock as `localStock`) exactly as a top operation, then placed by the face frame.
- * Doc: docs/architecture/geometry.md#building-the-solids, #non-top-faces-v02
+ * stock as `localStock`) exactly as a top operation, then every vertex is placed into the part
+ * frame in float64 (before the float32 mesh I/O). v0.1 contours use the offset-loft; general
+ * shapes (v0.3) the labelled prisms of `shape-solids.ts`.
+ * Doc: docs/architecture/geometry.md#building-the-solids, #non-top-faces-v02,
+ * docs/architecture/shapes.md#geometry-for-shape-operations
  */
 import { AppError } from '../../shared/errors/app-error'
-import { ctx, Err, Ok, type AppResult } from '../../shared/result'
+import { ctx, Err, fail, Ok, type AppResult } from '../../shared/result'
 import {
   arcSegments,
   contourElements,
@@ -14,48 +17,54 @@ import {
   type ContourLabel,
 } from './contour'
 import { faceFrame, localStock, type Direction, type FaceFrame } from './face'
+import {
+  AIR,
+  localSolids,
+  Table,
+  type LocalMesh,
+  type LocalSolids as LocalSolidsOf,
+  type SurfaceTable,
+} from './local-solids'
 import { offsetBand, offsetLoft, type LabelledMesh } from './loft'
 import {
   CHORD_TOLERANCE,
   EPSILON,
   OVERSHOOT,
+  applyPlacement,
   isAnalyticOperation,
   type AnalyticContour as Contour,
   type AnalyticOperation,
   type AnalyticShape,
   type Level,
   type OperationGeometry,
-  type Placement,
+  type PartGeometryInput,
   type StockGeometry,
   type Vec3,
   placeAt,
 } from './model'
+import { tiledBox, type Triangulate } from './prism'
+import { shapePocket, shapeProfile } from './shape-solids'
+import type { Region2dPort } from './2d/port'
 
-/** A mesh in its local frame plus the rigid placement into the part frame. */
-export interface PlacedMesh {
-  readonly mesh: LabelledMesh
-  readonly place: Placement
-}
-
-/** A mesh built around `at` in its operation's face frame (placed later by that frame). */
-interface LocalMesh {
-  readonly mesh: LabelledMesh
-  readonly at: Vec3
-  /**
-   * The z of the mesh's key level (a floor, a tab top), moved from the vertices into the float64
-   * placement: mesh I/O is float32, so this level lands exactly where the analytic model puts it
-   * and meets the same level of other directions without a float32 gap (fewer slivers).
-   */
-  readonly level?: number
-}
+export { AIR, type SurfaceTable } from './local-solids'
 
 /**
- * Surface roles of one operation (or the stock); a mesh's face label is the index here.
- * Index 0 is `air` (never survives); `offcut` (profiles) may survive but is not referenceable.
+ * A mesh with its vertices in the part frame: placed from its face frame in float64 before the
+ * float32 mesh I/O, so one part-frame value rounds to the same float32 in every mesh and walls of
+ * two directions meet as exactly as levels do (docs/architecture/shapes.md#geometry-for-shape-operations).
  */
-export type SurfaceTable = readonly string[]
+export interface PlacedMesh {
+  readonly mesh: LabelledMesh
+}
 
-export const AIR = 0
+/** What building needs besides the operation: caps' triangulator, the 2D port for general shapes. */
+export interface BuildContext {
+  readonly triangulate: Triangulate
+  /** Required by general shapes (named, rotated, `on`, blind, tab positions); a host bug without. */
+  readonly region2d?: Region2dPort
+}
+
+type LocalSolids = LocalSolidsOf<AnalyticShape>
 
 /** One operation's solids: (∪ removal − ∪ cut) − ∪ retained. */
 export interface OperationSolids {
@@ -106,38 +115,11 @@ export function slotCoversOpening(op: Extract<OperationGeometry, { kind: 'profil
   return op.side === 'inside' && inradius(op.shape.contour) - op.slotWidth <= CHORD_TOLERANCE
 }
 
-/**
- * A shape operation the v0.1/v0.2 builders do not take (a named or rotated shape, a profile
- * `on`): solids of general loops come with G1 (docs/architecture/shapes.md#implementation-k3).
- */
-function notYetBuilt(
-  op: Extract<OperationGeometry, { kind: 'pocket' | 'profile' }>,
-): AppResult<never> {
-  return Err(
-    new AppError('geometry.evaluation', `${op.id}: solids of shape operations are not built yet`, {
-      issues: [
-        {
-          path: ['shape'],
-          rule: 'shapeSolidLater',
-          message: 'named, rotated and on-line shapes get solids with task G1',
-          params: { operationId: op.id },
-        },
-      ],
-      where: 'operationSolids',
-    }),
+/** True if some operation needs the general builders, and so the 2D port. */
+export function needsRegion2d(input: PartGeometryInput): boolean {
+  return input.operations.some(
+    (op) => (op.kind === 'pocket' || op.kind === 'profile') && !isAnalyticOperation(op),
   )
-}
-
-/** Surface table under construction: role → index. */
-class Table {
-  private readonly roles: string[] = ['air']
-  add(role: string): number {
-    this.roles.push(role)
-    return this.roles.length - 1
-  }
-  get surfaces(): SurfaceTable {
-    return this.roles
-  }
 }
 
 const key = (l: ContourLabel): string => `${l.role}[${l.index}]`
@@ -162,34 +144,16 @@ function contourRoles(table: Table, contour: Contour): (l: ContourLabel) => numb
   return (l) => index.get(key(l)) ?? AIR
 }
 
-/** A box `0..L × 0..W × −T..0` with `stock.top`, `.bottom`, `.side[0..3]`. */
+/**
+ * A box `0..L × 0..W × −T..0` with `stock.top`, `.bottom`, `.side[0..3]`, every face in tiles of
+ * ≈ `FACE_TILE` (each tile its own face id, all mapped to the face's role).
+ */
 export function stockSolids(stock: StockGeometry): AppResult<OperationSolids> {
   const table = new Table()
-  const top = table.add('top')
-  const bottom = table.add('bottom')
-  const sides = [0, 1, 2, 3].map((i) => table.add(`side[${i}]`))
-  const contour: Contour = {
-    kind: 'rectangle',
-    length: stock.length,
-    width: stock.width,
-    cornerRadius: 0,
-  }
-  return offsetLoft(
-    contour,
-    [
-      { offset: 0, z: 0 },
-      { offset: 0, z: -stock.thickness },
-    ],
-    { band: (_k, l) => (l.role === 'wall' ? sides[l.index]! : AIR), top, bottom },
-  ).map((mesh) =>
-    placed(
-      '+z',
-      stock,
-      result('stock', table, {
-        removal: [{ mesh, at: [stock.length / 2, stock.width / 2, 0] }],
-      }),
-    ),
+  const mesh = tiledBox([0, 0, -stock.thickness], [stock.length, stock.width, 0], (f) =>
+    table.add(f),
   )
+  return Ok(placed('+z', stock, result('stock', table, { removal: [{ mesh, at: [0, 0, 0] }] })))
 }
 
 /**
@@ -199,30 +163,29 @@ export function stockSolids(stock: StockGeometry): AppResult<OperationSolids> {
 export function operationSolids(
   op: OperationGeometry,
   stock: StockGeometry,
+  context: BuildContext,
 ): AppResult<OperationSolids> {
   const direction = op.direction ?? '+z'
-  return build(op, localStock(direction, stock))
+  return build(op, localStock(direction, stock), context)
     .map((local) => placed(direction, stock, local))
     .mapErr(ctx('operationSolids', { operation: op.id, kind: op.kind }))
 }
 
-/** An operation built in its face frame, before placement. */
-interface LocalSolids {
-  readonly id: string
-  readonly surfaces: SurfaceTable
-  readonly removal: readonly LocalMesh[]
-  readonly cut: readonly LocalMesh[]
-  readonly retained: readonly LocalMesh[]
-  readonly nominal: readonly (Omit<NominalRegion, 'mesh'> & { readonly mesh: LocalMesh })[]
-}
-
-/** Every mesh placed by the face frame of `direction` (the identity for `+z`). */
+/** Every mesh's vertices placed by the face frame of `direction` into the part frame (float64). */
 function placed(direction: Direction, stock: StockGeometry, local: LocalSolids): OperationSolids {
   const frame = faceFrame(direction, stock)
-  const place = ({ mesh, at, level = 0 }: LocalMesh): PlacedMesh =>
-    level === 0
-      ? { mesh, place: placeAt(frame, at) }
-      : { mesh: shifted(mesh, -level), place: placeAt(frame, [at[0], at[1], at[2] + level]) }
+  const place = ({ mesh, at }: LocalMesh): PlacedMesh => {
+    const t = placeAt(frame, at)
+    const p = mesh.positions
+    const positions = new Float64Array(p.length)
+    for (let i = 0; i < p.length; i += 3) {
+      const q = applyPlacement(t, [p[i]!, p[i + 1]!, p[i + 2]!])
+      positions[i] = q[0]
+      positions[i + 1] = q[1]
+      positions[i + 2] = q[2]
+    }
+    return { mesh: { ...mesh, positions } }
+  }
   return {
     id: local.id,
     direction,
@@ -235,68 +198,52 @@ function placed(direction: Direction, stock: StockGeometry, local: LocalSolids):
   }
 }
 
-/** `mesh` moved by `dz` along z (float64, before the float32 mesh I/O). */
-function shifted(mesh: LabelledMesh, dz: number): LabelledMesh {
-  const positions = Float64Array.from(mesh.positions)
-  for (let i = 2; i < positions.length; i += 3) positions[i]! += dz
-  return { ...mesh, positions }
-}
-
-function build(op: OperationGeometry, stock: StockGeometry): AppResult<LocalSolids> {
+function build(
+  op: OperationGeometry,
+  stock: StockGeometry,
+  context: BuildContext,
+): AppResult<LocalSolids> {
   switch (op.kind) {
     case 'facing':
       return facing(op, stock)
     case 'pocket':
-      return isAnalyticOperation(op) ? pocket(op) : notYetBuilt(op)
+      if (isAnalyticOperation(op)) return pocket(op)
+      return general(op, context).andThen((c) => shapePocket(op, c))
     case 'drilling':
       return drilling(op, stock)
     case 'profile':
-      return isAnalyticOperation(op) ? profile(op, stock) : notYetBuilt(op)
+      if (isAnalyticOperation(op)) return profile(op, stock)
+      return general(op, context).andThen((c) => shapeProfile(op, stock, c))
   }
 }
 
-const result = (
-  id: string,
-  table: Table,
-  parts: {
-    removal: LocalMesh[]
-    cut?: LocalMesh[]
-    retained?: LocalMesh[]
-    nominal?: LocalSolids['nominal'][number][]
-  },
-): LocalSolids => ({
-  id,
-  surfaces: table.surfaces,
-  removal: parts.removal,
-  cut: parts.cut ?? [],
-  retained: parts.retained ?? [],
-  nominal: parts.nominal ?? [],
-})
+/** The context of the general builders; without the 2D port a host bug. */
+function general(
+  op: OperationGeometry,
+  context: BuildContext,
+): AppResult<{ triangulate: Triangulate; region2d: Region2dPort }> {
+  if (context.region2d === undefined)
+    return fail('internal.unexpected', `${op.id}: a shape operation needs the 2D port`, {
+      where: 'operationSolids',
+      data: { operationId: op.id },
+    })
+  return Ok({ triangulate: context.triangulate, region2d: context.region2d })
+}
+
+const result = localSolids<AnalyticShape>
 
 function facing(
   op: Extract<OperationGeometry, { kind: 'facing' }>,
   stock: StockGeometry,
 ): AppResult<LocalSolids> {
   const table = new Table()
-  const floor = table.add('floor')
-  const contour: Contour = {
-    kind: 'rectangle',
-    length: stock.length + 2 * OVERSHOOT,
-    width: stock.width + 2 * OVERSHOOT,
-    cornerRadius: 0,
-  }
-  return offsetLoft(
-    contour,
-    [
-      { offset: 0, z: OVERSHOOT },
-      { offset: 0, z: -op.depth },
-    ],
-    { band: () => AIR, top: AIR, bottom: floor },
-  ).map((mesh) =>
-    result(op.id, table, {
-      removal: [{ mesh, at: [stock.length / 2, stock.width / 2, 0], level: -op.depth }],
-    }),
+  // the floor in tiles (later cuts cross it), the faces outside the stock air
+  const mesh = tiledBox(
+    [-OVERSHOOT, -OVERSHOOT, -op.depth],
+    [stock.length + OVERSHOOT, stock.width + OVERSHOOT, OVERSHOOT],
+    (f) => (f === 'bottom' ? table.add('floor') : AIR),
   )
+  return Ok(result(op.id, table, { removal: [{ mesh, at: [0, 0, 0] }] }))
 }
 
 /** Levels (0, ov) → (0, zf + f) → fillet levels φₖ → (f, zf). */
@@ -325,7 +272,7 @@ function pocket(op: AnalyticOperation<'pocket'>): AppResult<LocalSolids> {
     bottom: floor,
   })
   if (removal.isErr() || op.floorRadius <= EPSILON)
-    return removal.map((mesh) => result(op.id, table, { removal: [{ mesh, at, level: zf }] }))
+    return removal.map((mesh) => result(op.id, table, { removal: [{ mesh, at }] }))
   // nominal fillet zone: the prism zf..zf + f minus this loft (same flattening at offset 0)
   const zone = offsetLoft(
     op.shape.contour,
@@ -339,12 +286,12 @@ function pocket(op: AnalyticOperation<'pocket'>): AppResult<LocalSolids> {
   const inset = offsetContour(op.shape.contour, op.floorRadius)
   return zone.map((z) =>
     result(op.id, table, {
-      removal: [{ mesh: removal.unwrap(), at, level: zf }],
+      removal: [{ mesh: removal.unwrap(), at }],
       nominal: [
         {
           region: 'floorFillet',
           parameter: 'floorRadius',
-          mesh: { mesh: z, at, level: zf },
+          mesh: { mesh: z, at },
           minusRemoval: true,
           ...(inset.isSome() && {
             clearInside: { center: op.shape.center, contour: inset.unwrap() },
@@ -384,13 +331,7 @@ function drilling(
     bottom,
   }).map((mesh) =>
     result(op.id, table, {
-      removal: [
-        {
-          mesh,
-          at: [op.center[0], op.center[1], 0],
-          level: op.bottom.kind === 'through' ? 0 : op.onZ - op.bottom.depth,
-        },
-      ],
+      removal: [{ mesh, at: [op.center[0], op.center[1], 0] }],
     }),
   )
 }
@@ -495,12 +436,11 @@ function profile(op: AnalyticOperation<'profile'>, stock: StockGeometry): AppRes
     const both = band.andThen((b) => exact.map((e) => [b, e] as const))
     if (both.isErr()) return Err(both.unwrapErr().withContext('tab', { index: i }))
     const [b, e] = both.unwrap()
-    const level = -T + op.tabs.thickness
-    retained.push({ mesh: b, at, level })
+    retained.push({ mesh: b, at })
     nominal.push({
       region: `tab[${i}]`,
       parameter: 'tabs',
-      mesh: { mesh: e, at, level },
+      mesh: { mesh: e, at },
       minusRemoval: false,
     })
   }

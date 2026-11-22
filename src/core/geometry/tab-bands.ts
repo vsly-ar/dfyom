@@ -1,6 +1,6 @@
 /**
- * Tabs of profiles on general loops (task T2): the nominal tab bands across the slot as exact
- * line/arc loops, and the tool-disk test the tab lift uses (`liftOverTabs` of tabs.ts).
+ * Tabs of profiles on general loops (tasks T2, G1): the nominal tab bands across the slot as exact
+ * line/arc loops (toolpaths and G1's solid tabs build the same band), and the tool-disk test the tab lift uses (`liftOverTabs` of tabs.ts).
  * Doc: docs/modes/plan-v0.3.md#profile-on-general-loops, bands:
  * docs/architecture/shapes.md#geometry-for-shape-operations
  *
@@ -11,7 +11,7 @@
  * outer side of a corner). Not bent on the medial axis: near a concave corner closer than the
  * slot width the band reaches past it (geometry builds the same band in G1).
  */
-import type { Vec2 } from '../geometry/model'
+import type { Vec2 } from './model'
 import {
   arc,
   arcRadius,
@@ -22,8 +22,8 @@ import {
   type Bounds2,
   type Element,
   type Loop,
-} from '../geometry/2d/model'
-import { closestOnChains, elementPointAt, regionContains } from '../geometry/2d/measure'
+} from './2d/model'
+import { closestOnChains, elementPointAt, regionContains } from './2d/measure'
 
 /** One convex-ish piece of a band: a closed loop and its bounds. */
 export interface TabBandPiece {

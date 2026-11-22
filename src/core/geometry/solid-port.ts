@@ -4,7 +4,7 @@
  */
 import type { AppResult, Option } from '../../shared/result'
 import type { LabelledMesh } from './loft'
-import type { Placement } from './model'
+import type { Placement, Vec2 } from './model'
 
 declare const solidBrand: unique symbol
 /** Opaque handle to a library solid; valid only inside the `withSolids` call that made it. */
@@ -48,6 +48,13 @@ export interface SolidPort {
   decompose(s: Solid): AppResult<readonly Solid[]>
   volume(s: Solid): AppResult<number>
   toMesh(s: Solid): AppResult<SolidMesh>
+  /**
+   * Manifold's `triangulate` of flattened rings (outer rings counter-clockwise, holes clockwise,
+   * any nesting): three indices per triangle into the rings' points concatenated, counter-clockwise.
+   * Plain data in and out (no library object is made), the caps of labelled prisms
+   * (docs/architecture/shapes.md#geometry-for-shape-operations).
+   */
+  triangulate(rings: readonly (readonly Vec2[])[]): AppResult<Uint32Array>
 }
 
 /**
