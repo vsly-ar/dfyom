@@ -62,17 +62,19 @@ Ids follow [A3](features.md#expansion-and-owned-operations) (`hole1_drill`, `hol
 
 ### Fastener table
 
-A built-in, read-only table in core (a sourced `data.ts`, every row with its source as [feeds-speeds.md](../architecture/feeds-speeds.md) requires; values ported from cnc-code's hole helper and re-checked, D30 Q7, relicensed by the author). Columns per size:
+Status: implemented (F2). A built-in, read-only table in core ([`src/core/design/fastener/data.ts`](../../src/core/design/fastener/data.ts), every row citing its sources as [feeds-speeds.md](../architecture/feeds-speeds.md) requires; values ported from cnc-code's hole helper and re-checked, D30 Q7, relicensed by the author). Plain numbers in mm. Columns per size:
 
-| Column                       | Source                                            |
-| ---------------------------- | ------------------------------------------------- |
-| Clearance close/normal/loose | ISO 273                                           |
-| Tap drill (coarse thread)    | ISO 2306 / ISO 261 pitch (e.g. M3 × 0.5 → 2.5 mm) |
-| Socket head Ø and height     | ISO 4762 (socket head cap screw)                  |
-| Counterbore Ø                | DIN 974-1 row for ISO 4762                        |
-| Countersunk head Ø and angle | ISO 10642 (90°)                                   |
+| Column                       | Source                                                                      |
+| ---------------------------- | --------------------------------------------------------------------------- |
+| Clearance close/normal/loose | ISO 273:1979 fine / medium / coarse series                                  |
+| Tap drill (coarse thread)    | ISO 2306:1972 (6H; = DIN 336) / ISO 261:1998 pitch (e.g. M3 × 0.5 → 2.5 mm) |
+| Socket head Ø and height     | ISO 4762:2004 dk max, k max (= d)                                           |
+| Counterbore Ø                | DIN 974-1:2008 series 1 for ISO 4762                                        |
+| Countersunk head Ø and angle | ISO 10642:2004 dk theoretical max, 90° (M3 up); ISO 7046-1:2011 below M3    |
 
-v0.4 sizes: ISO metric M1.6, M2, M2.5, M3, M4, M5, M6, M8, M10, M12 ([Q29](../plans/v0.4.md#questions-for-the-user), M1.6 added by D34). ISO 10642 starts at M3, so the countersunk head columns for M1.6–M2.5 come from ISO 2009 (slotted countersunk head, 90°), with that source on the row; inch (#4–1/2″, ASME B18.3, 82°) after v0.4. The table version is not stored ([features.md § Persistence](features.md#persistence-high-level)). Query: `design.fastener.list { standard? }` returns the rows (agents choose sizes the same way the inspector does).
+The values live in `data.ts` only (not repeated here). The ISO and DIN texts are paywalled: values are those of the standards' dimension tables as reproduced in catalogues and handbooks, cross-checked against the cnc-code port; DIN 974-1 was checked against secondary charts only, and each of its values exceeds the ISO 4762 dk max (by 0.5 mm at M1.6 and M2, at least 1 mm from M2.5). A test lint requires a source for every column, sizes growing with the screw size in every column, and holes that fit their screw (tap drill ≈ d − P, d < close < normal < loose, counterbore > head Ø). The hole defaults use the table so: `cbDiameter` = the counterbore Ø, `cbDepth` = k + `headSink`, `csDiameter` = countersunk dk + 2 × `headSink`, `csAngle` = 90°.
+
+v0.4 sizes: ISO metric M1.6, M2, M2.5, M3, M4, M5, M6, M8, M10, M12 ([Q29](../plans/v0.4.md#questions-for-the-user), M1.6 added by D34; ISO 10642 starts at M3, so the countersunk head values below M3 come from ISO 7046-1, with that source on the row); inch (#4–1/2″, ASME B18.3, 82°) after v0.4. The table version is not stored ([features.md § Persistence](features.md#persistence-high-level)). Query (app scope, no project needed): `design.fastener.list { standard?, size? }` returns `{ rows, sources }` (each row with its source keys, `sources` the cited standards); `size` is the folded `get` and an unknown size is `input.malformed` (rule `unknownSize`). Agents choose sizes the same way the inspector does.
 
 ## Chamfer operation (v0.4: circular edges)
 
@@ -116,7 +118,7 @@ Lengths, flutes, material and presets as for other types. Generalized: `{ kind: 
 
 ## Commands and queries (v0.4)
 
-New tools (each one MCP tool, [llm-api.md](../architecture/llm-api.md)): `design.hole.add`, `design.hole.update`, `design.chamfer.add`, `design.chamfer.update`, `design.clones.add`, `design.clones.update`, `design.clones.preview`, `design.feature.remove`, `design.feature.move`, `design.feature.list`, `design.fastener.list`; `design.feature.get` is folded into `list` (filter by id) to save room. `library.tool.add`/`update` and the tool unions grow by the `chamferMill` fields. Rough size: 11–14 K characters of `tools/list`, against **1.2 K** left of the 100 K budget: a budget decision comes first ([Q32](../plans/v0.4.md#questions-for-the-user), task M1).
+New tools (each one MCP tool, [llm-api.md](../architecture/llm-api.md)): `design.hole.add`, `design.hole.update`, `design.chamfer.add`, `design.chamfer.update`, `design.clones.add`, `design.clones.update`, `design.clones.preview`, `design.feature.remove`, `design.feature.move`, `design.feature.list`, `design.fastener.list`; `design.feature.get` is folded into `list` (filter by id) to save room. `library.tool.add`/`update` and the tool unions grow by the `chamferMill` fields. Rough size: 11–14 K characters of `tools/list`; the budget is **120 K** ([Q32](../plans/v0.4.md#questions-for-the-user) option A, task M1; measurements in [llm-api.md](../architecture/llm-api.md#implementation-task-310)).
 
 Results carry `{ featureId, operationIds, warnings }` as [features.md § Commands](features.md#commands-sketch) says; `design.operation.update` / `.remove` / `.move` on an owned operation fail with `design.featureOwned` naming the feature (A4, A5).
 

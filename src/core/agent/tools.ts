@@ -59,9 +59,11 @@ export const ALWAYS_LISTED_AREAS = ['history', 'job'] as const
  * 85 tools in 3.10 (the doc's 60 K target is not reachable without dropping field
  * descriptions; docs/architecture/llm-api.md#implementation-task-310). v0.2: 77.3 K for 89 tools
  * after the reserved keys left the schemas; 79.6 K after D20, E1, A4 and R2, raised to 100 K
- * for the rest of v0.2's commands (decision D21 in docs/plans/v0.2.md). Raise it deliberately.
+ * for the rest of v0.2's commands (decision D21 in docs/plans/v0.2.md). v0.4: 98.8 K for 111
+ * tools at the end of v0.3; raised to 120 K for v0.4's feature tools (Q32 option A, task M1 in
+ * docs/plans/v0.4.md), new tools designed folded (`get` as a `list` filter). Raise it deliberately.
  */
-export const TOOLS_LIST_BUDGET_CHARS = 100_000
+export const TOOLS_LIST_BUDGET_CHARS = 120_000
 
 /**
  * Reserved arg of every project-scope command (decision 12); the adapter strips it. Not in the
