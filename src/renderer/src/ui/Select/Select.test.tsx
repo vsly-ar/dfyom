@@ -59,6 +59,24 @@ describe('Select', () => {
     await expectNoAxeViolations()
   })
 
+  it('shows an option description in the list only, as its accessible description', async () => {
+    const options = [
+      { value: 'g', label: '6 mm flat end mill' },
+      { value: 't1', label: 'Flat 6 · Ø 6 mm', description: 'Preset for aluminum · largest' },
+    ]
+    const { user } = renderUi(
+      <Select aria-label="Tool" options={options} defaultValue="t1" muted />,
+    )
+    const combo = screen.getByRole('combobox', { name: 'Tool' })
+    expect(combo).toHaveTextContent(/^Flat 6 · Ø 6 mm$/)
+    expect(combo).toHaveAttribute('data-muted')
+    await user.tab()
+    await user.keyboard('{Enter}')
+    const option = await screen.findByRole('option', { name: 'Flat 6 · Ø 6 mm' })
+    expect(option).toHaveAccessibleDescription('Preset for aluminum · largest')
+    await expectNoAxeViolations()
+  })
+
   it('has no axe violations', async () => {
     renderUi(<Select aria-label="Strategy" options={TOOLS} placeholder="Choose…" />)
     await expectNoAxeViolations()

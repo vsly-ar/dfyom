@@ -191,6 +191,8 @@ export interface PlanStale {
     changedInDesign: boolean
     removedFromDesign: boolean
     editedInPlan: boolean
+    /** The design's tool field changed (E4); absent from plans read before it. */
+    designToolChanged?: boolean
   }[]
   readonly libraryCopies: readonly {
     snapshotId: string

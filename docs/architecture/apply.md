@@ -293,7 +293,7 @@ Code: `src/renderer/src/state/pending.ts` (window pending store), `ui/ApplyButto
 - **Tooltip** is a `Tooltip` with `rich`: title and shortcut, the concept text, the grouped list ("Pocket 1: depth, corner radius · Drilling 2 added · (and n more)", field paths in words). No `Term` links: tooltips are not interactive ([known issue](../plans/v0.2.md#known-issues-and-risks)).
 - **Live region** beside the slot (polite, no `status` role so it does not compete with the status bar's): the count after 1 s without changes, "Changes applied" after this window's Apply, "Applied by agent", "Apply failed".
 - **Outdated marks:** a `pendingApply` tool warning is soft with a clock and "May change on Apply…" and is left out of the status bar count; a plan whose inputs wait for Apply shows a pending notice in the navigator ("Design changes not applied yet. This draft plan updates on Apply." for a draft, instead of the stale notice and library copies; "Changes not applied yet…" otherwise) with "Apply now", mutes its checks ("Outdated until Apply.") in the inspector and status popover, and the plan scene dims the toolpaths of stale or pending operations (`MIX.outdated`). The plan data reloads when a `plan.toolpath.generate` job finishes.
-- **Not built:** the tool field's "Chosen again on Apply" mute waits for F5 (tool field UI); regenerated toolpaths have no draw-in yet, so reduced motion has nothing to drop there.
+- **Not built:** regenerated toolpaths have no draw-in yet, so reduced motion has nothing to drop there. The tool field's "Chosen again on Apply" mute came with F5 ([design-v0.2.md § Implementation (task F5)](../modes/design-v0.2.md#implementation-task-f5)), with the last `toolChanges` per operation kept in the pending store.
 
 ## Testing
 

@@ -1,8 +1,9 @@
 // Plan findings shown at their field (the inspector's tool, feeds and strategy fields): a
 // finding's severity maps to the field's support-area tier, its text is the core's message,
-// sentence-cased. Doc: docs/conventions/ui.md#plan-mode-task-37 (Checks)
+// sentence-cased (the design tool findings of E4 are worded from their params, `findingText`).
+// Doc: docs/conventions/ui.md#plan-mode-task-37 (Checks)
 import type { PlanWarning } from '../../../../core/plan/checks'
-import { sentence } from '../../messages/plan'
+import { findingText } from '../../messages/plan'
 import type { FieldMessage, FieldSeverity } from '../../ui'
 
 const SEVERITY: Record<PlanWarning['severity'], FieldSeverity> = {
@@ -18,5 +19,5 @@ export const fieldMessages = (findings: readonly PlanWarning[], field: string): 
     .map((w, i) => ({
       id: `${w.code}:${w.rule}:${i}`,
       severity: SEVERITY[w.severity],
-      text: sentence(w.message),
+      text: findingText(w),
     }))

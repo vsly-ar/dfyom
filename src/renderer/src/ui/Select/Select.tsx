@@ -1,9 +1,11 @@
 // Select: one value from a list (strategy, tool). Looks like a Field input in the UI font with a
-// chevron; the list is a raised menu, optionally in labelled groups (`on` by face direction).
+// chevron; the list is a raised menu, optionally in labelled groups (`on` by face direction),
+// options optionally with a second line (`description`: a tool's reasons, F5). `muted` shows a
+// value that is about to change (the tool field's "Chosen again on Apply").
 // Doc: docs/conventions/ui.md#inventory-v01, #design-and-plan-controls-v02
 import { Check, ChevronDown } from 'lucide-react'
 import { Select as RadixSelect } from 'radix-ui'
-import type { Ref } from 'react'
+import { useId, type Ref } from 'react'
 import { usePortalContainer } from '../UiProvider/UiProvider'
 import styles from './Select.module.css'
 
@@ -13,6 +15,8 @@ export interface SelectOption<V extends string> {
   disabled?: boolean
   /** Group heading; options with the same group are listed together, in order of first use. */
   group?: string
+  /** A second, smaller line in the list (not in the trigger); the option's accessible description. */
+  description?: string
 }
 
 /** Options by group, in order of first appearance (ungrouped ones under `undefined`). */
@@ -33,6 +37,8 @@ export interface SelectProps<V extends string> {
   value?: V
   defaultValue?: V
   onValueChange?: (value: V) => void
+  /** The list opened or closed (e.g. to re-read options that change outside the document). */
+  onOpenChange?: (open: boolean) => void
   placeholder?: string
   /** Accessible name when no `<label>` points at it (a Field provides one via `id`). */
   'aria-label'?: string
@@ -40,20 +46,37 @@ export interface SelectProps<V extends string> {
   'aria-describedby'?: string
   'aria-invalid'?: boolean
   disabled?: boolean
+  /** The value shows muted (it is about to change); still operable. */
+  muted?: boolean
   /** Layout only; appended to the trigger's class. */
   className?: string | undefined
   ref?: Ref<HTMLButtonElement>
 }
 
 function item<V extends string>(o: SelectOption<V>): React.JSX.Element {
+  return <SelectItem key={o.value} option={o} />
+}
+
+function SelectItem<V extends string>({
+  option: o,
+}: {
+  option: SelectOption<V>
+}): React.JSX.Element {
+  const id = useId()
   return (
     <RadixSelect.Item
-      key={o.value}
       value={o.value}
       disabled={o.disabled ?? false}
       className={styles['item']}
+      data-described={o.description !== undefined || undefined}
+      {...(o.description !== undefined ? { 'aria-describedby': id } : {})}
     >
       <RadixSelect.ItemText>{o.label}</RadixSelect.ItemText>
+      {o.description !== undefined ? (
+        <span id={id} className={styles['description']}>
+          {o.description}
+        </span>
+      ) : null}
       <RadixSelect.ItemIndicator className={styles['indicator']}>
         <Check aria-hidden="true" />
       </RadixSelect.ItemIndicator>
@@ -66,8 +89,10 @@ export function Select<V extends string>({
   value,
   defaultValue,
   onValueChange,
+  onOpenChange,
   placeholder,
   disabled = false,
+  muted = false,
   className,
   ref,
   ...aria
@@ -78,11 +103,13 @@ export function Select<V extends string>({
       {...(value !== undefined ? { value } : {})}
       {...(defaultValue !== undefined ? { defaultValue } : {})}
       {...(onValueChange ? { onValueChange: (v: string) => onValueChange(v as V) } : {})}
+      {...(onOpenChange ? { onOpenChange } : {})}
       disabled={disabled}
     >
       <RadixSelect.Trigger
         {...aria}
         ref={ref}
+        data-muted={muted || undefined}
         className={[styles['trigger'], className].filter(Boolean).join(' ')}
       >
         <span className={styles['value']}>

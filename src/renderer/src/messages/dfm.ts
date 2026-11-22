@@ -95,11 +95,63 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
     `No tool in the library reaches ${L(p['depth'])} deep from the stock face (longest ${L(p['reach'])}).`,
   'dfm.setups': (p) =>
     `The part needs ${num(p['count'])} setups (${list((p['directions'] as readonly string[] | undefined) ?? [])}).`,
-  // the operation's own tool (v0.2); the tool field UI is task F5
-  'dfm.toolUnfit': (p) =>
-    `The ${String(p['tool'])} does not fit (${String(p['rule'])})` +
-    (p['locked'] === true ? ': unlock or pick another tool.' : '.'),
-  'dfm.toolNotInLibrary': (p) => `Plan needs a ${String(p['tool'])}; add one to the library.`,
+  // the operation's own tool (v0.2, shown at the tool field: task F5)
+  'dfm.toolUnfit': (p, L) =>
+    toolUnfitText(p, L) + (p['locked'] === true ? ' Unlock it or pick another tool.' : ''),
+  'dfm.toolNotInLibrary': (p) => `Plan needs a ${String(p['tool'])}: add one to the library.`,
+}
+
+/** What a tool type rule asks for (`params.needs` of `dfm.toolUnfit`). */
+const NEEDS: Readonly<Record<string, string>> = {
+  flatEndMill: 'a flat end mill',
+  endMill: 'a flat or bull-nose end mill',
+  drillOrFlat: 'a drill or a flat end mill',
+}
+
+/**
+ * `dfm.toolUnfit` by its failed fit rule, from the rule's values (mm) in the project units
+ * (design-v0.2.md § DFM with the tool; values: src/core/geometry/tool-fit.ts `ToolUnfit.values`).
+ */
+function toolUnfitText(p: DfmWarning['params'], L: (mm: unknown) => string): string {
+  const tool = String(p['tool'])
+  const has = (k: string) => typeof p[k] === 'number'
+  switch (p['rule']) {
+    case 'cornerRadius':
+      if (has('cornerRadius'))
+        return `Corner radius ${L(p['cornerRadius'])} is smaller than the radius of the ${tool} (${L(p['toolRadius'])}).`
+      break
+    case 'width':
+      if (has('size'))
+        return p['feature'] === 'slot'
+          ? `The ${tool} is wider than the slot (${L(p['size'])}).`
+          : `The ${tool} is wider than the pocket at its narrowest (${L(p['size'])}).`
+      break
+    case 'floorRadius':
+      if (has('floorRadius'))
+        return num(p['floorRadius']) > 0
+          ? `Floor radius ${L(p['floorRadius'])} needs a bull-nose end mill with corner radius ${L(p['floorRadius'])}; the ${tool} does not have it.`
+          : `The ${tool} leaves a ${L(p['toolCornerRadius'])} fillet on the floor; the floor radius is 0.`
+      break
+    case 'diameter':
+      if (has('holeDiameter'))
+        return p['boring'] === true
+          ? `Helical boring of the Ø ${L(p['holeDiameter'])} hole needs an end mill between Ø ${L(num(p['holeDiameter']) / 2)} and Ø ${L(p['holeDiameter'])}; the ${tool} is not.`
+          : `The ${tool} does not match the Ø ${L(p['holeDiameter'])} hole.`
+      break
+    case 'type': {
+      const needs = String(p['needs'])
+      if (needs === 'notDrill') return 'A drill cannot make a flat bottom: use a flat end mill.'
+      if (needs === 'drill') return 'An end mill cannot make a drill-point bottom: use a drill.'
+      if (NEEDS[needs] !== undefined)
+        return `The ${tool} cannot make this operation: it needs ${NEEDS[needs]}.`
+      break
+    }
+    case 'reach':
+      if (has('reach'))
+        return `The ${tool} reaches ${L(p['reach'])}; the operation is ${L(p['depth'])} deep.`
+      break
+  }
+  return `The ${tool} does not fit.`
 }
 
 /** Parameters whose value is a count, not a length (suggestions are plain numbers). */
@@ -128,7 +180,13 @@ export const dfmMessages = {
     if (s === undefined || w.parameter === undefined) return undefined
     if (COUNT_PARAMETERS.has(w.parameter))
       return String(s.relation === 'atLeast' ? Math.ceil(s.value) : Math.floor(s.value))
-    if (w.parameter === 'shape' || w.parameter === 'center' || w.parameter === 'tabs')
+    // `tool`: the size the operation would need, not a value of the field (F5 offers tools)
+    if (
+      w.parameter === 'shape' ||
+      w.parameter === 'center' ||
+      w.parameter === 'tabs' ||
+      w.parameter === 'tool'
+    )
       return undefined
     return lengthSource(s.value, units, s.relation === 'atLeast' ? 'up' : 'down')
   },

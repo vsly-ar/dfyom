@@ -2,9 +2,13 @@
 // re-read after every action-log event, binding change and window focus), the running apply jobs, this window's
 // Apply call and its failure, and "Applied by …" after another source applied. `apply()` sends
 // `project.apply`; it is sent after the commit it follows (one IPC channel, one project queue,
-// both FIFO), so Enter in a field applies the value it just committed.
-// Doc: docs/architecture/apply.md#ui, docs/conventions/ui.md#app-shell
+// both FIFO), so Enter in a field applies the value it just committed. It also keeps the last
+// automatic tool change per operation from every source's Apply (`toolChanges` of the
+// `project.apply` events), for the tool field's "Chosen automatically: …" (task F5).
+// Doc: docs/architecture/apply.md#ui, docs/conventions/ui.md#app-shell,
+// docs/modes/design-v0.2.md#implementation-task-f5
 import type { ActionEvent } from '../../../core/commands/action-log'
+import type { ToolChange } from '../../../core/commands/apply'
 import type { AppErrorData } from '../../../shared/errors/app-error'
 import type { PreloadApi } from '../../../shared/preload-api'
 import type { Replica } from './replica'
@@ -20,6 +24,12 @@ export interface PendingChangeView {
   readonly label: string
   readonly source: { readonly kind: string; readonly id: string }
   readonly revision: number
+}
+
+/** An automatic tool change of an Apply, with the old tool's name when it was a library tool. */
+export interface ToolChangeView extends ToolChange {
+  /** Name of the replaced specific tool (its snapshot may be gone after the Apply). */
+  readonly fromName?: string
 }
 
 interface PendingAnswer {
@@ -46,7 +56,16 @@ export interface PendingState {
   readonly appliedBy: string | null
   /** Bumped whenever the pending answer changes: tag for re-reading `pendingApply` flags. */
   readonly version: number
+  /**
+   * The last automatic tool change of each operation (any source's Apply since the project was
+   * bound in this window), keyed `partId:operationId`.
+   */
+  readonly toolChanges: ReadonlyMap<string, ToolChangeView>
 }
+
+/** Key of `PendingState.toolChanges`. */
+export const toolChangeKey = (partId: string, operationId: string): string =>
+  `${partId}:${operationId}`
 
 export interface PendingStore {
   getState(): PendingState
@@ -72,6 +91,7 @@ const EMPTY: PendingState = {
   applied: false,
   appliedBy: null,
   version: 0,
+  toolChanges: new Map(),
 }
 
 /** Another source's `project.apply` that applied something (not a window's own). */
@@ -80,6 +100,13 @@ function appliedByOther(e: ActionEvent): string | null {
   if (e.source.kind === 'ui') return null
   const changes = (e.outcome.value as { changes?: unknown } | undefined)?.changes
   return typeof changes === 'number' && changes > 0 ? e.source.kind : null
+}
+
+/** The tool changes of a successful `project.apply` event (none for other events). */
+function toolChangesOf(e: ActionEvent): readonly ToolChange[] {
+  if (e.type !== 'command' || e.name !== 'project.apply' || !e.outcome.ok) return []
+  const changes = (e.outcome.value as { toolChanges?: unknown } | undefined)?.toolChanges
+  return Array.isArray(changes) ? (changes as ToolChange[]) : []
 }
 
 export function createPending(
@@ -93,6 +120,18 @@ export function createPending(
   let reading = false
   let again = false
   let appliedTimer: ReturnType<typeof setTimeout> | undefined
+  /** Names of the tool snapshots seen in this window (a replaced one is gone after the Apply). */
+  const toolNames = new Map<string, string>()
+  let seenSnapshots: object | undefined
+  const learnToolNames = () => {
+    const s = replica.getState()
+    if (s.status !== 'open' || s.doc.snapshots === seenSnapshots) return
+    seenSnapshots = s.doc.snapshots
+    for (const snap of Object.values(s.doc.snapshots)) {
+      const name = (snap.values as { name?: unknown }).name
+      if (snap.kind === 'tool' && typeof name === 'string') toolNames.set(snap.id, name)
+    }
+  }
 
   const set = (patch: Partial<PendingState>) => {
     state = { ...state, ...patch }
@@ -155,11 +194,30 @@ export function createPending(
         if (next === key) return
         key = next
         clearTimeout(appliedTimer)
-        set({ ...EMPTY, version: state.version + 1 })
+        toolNames.clear()
+        seenSnapshots = undefined
+        learnToolNames()
+        set({ ...EMPTY, version: state.version + 1, toolChanges: new Map() })
         read()
       }
-      const offState = replica.subscribe(follow)
+      const offState = replica.subscribe(() => {
+        learnToolNames()
+        follow()
+      })
       const offEvent = replica.onEvent((e) => {
+        const changes = toolChangesOf(e)
+        if (changes.length > 0) {
+          const next = new Map(state.toolChanges)
+          for (const c of changes) {
+            const fromName =
+              c.from?.kind === 'specific' ? toolNames.get(c.from.snapshotId) : undefined
+            next.set(toolChangeKey(c.partId, c.operationId), {
+              ...c,
+              ...(fromName === undefined ? {} : { fromName }),
+            })
+          }
+          set({ toolChanges: next })
+        }
         const by = appliedByOther(e)
         if (by !== null) {
           clearTimeout(appliedTimer)
