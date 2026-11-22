@@ -3,18 +3,22 @@
 // inspector), the live outline of the selected operation while pending (in its face frame), the
 // error marker at the failing operation, pick mode for the inspector's fields (normal glyphs on
 // every eligible face), and for the selected operation its face-frame axes (task F1) and anchor
-// marker (task F2).
+// marker (task F2), and the visible references as ghosts (task R3).
 // Doc: docs/conventions/ui.md#selection-and-picking, #evaluation-status-pending-outdated-failed,
-// #design-and-plan-controls-v02
+// #design-and-plan-controls-v02, #reference-ghost-v02
 import { useMemo } from 'react'
+import { placedBox } from '../../../../core/design/reference'
 import { useUi } from '../../shell/ShellContext'
 import { designMessages } from '../../messages/design'
+import { referenceMessages } from '../../messages/reference'
 import type { ViewportProps } from '../../viewport'
 import { failingOperation, surfaceLabel } from './model'
 import { anchorPoint, frameAxes, markerPoint, operationFace, operationOutline } from './outline'
+import { ghostMatrix, referencePlacement } from './reference-view'
 import {
   useDesignEvaluation,
   useDesignPart,
+  useDesignReferences,
   useDesignSelection,
   useDesignWarnings,
 } from './useDesign'
@@ -29,6 +33,37 @@ export function useDesignScene(): SceneProps {
   const pick = useUi((s) => s.pick)
   const setPick = useUi((s) => s.setPick)
   const status = evaluation?.status ?? 'pending'
+  const references = useDesignReferences(part)
+
+  const ghosts = useMemo(
+    () =>
+      references.flatMap(({ ref, visible, mesh }) => {
+        const p = referencePlacement(ref)
+        if (!visible || mesh?.status !== 'done' || p === undefined) return []
+        const matrix = ghostMatrix(ref.asset.bounds, p)
+        const box = placedBox(ref.asset.bounds, p)
+        return [
+          {
+            id: ref.id,
+            positions: mesh.positions,
+            matrix,
+            box: {
+              min: [box.min.x, box.min.y, box.min.z] as const,
+              max: [box.max.x, box.max.y, box.max.z] as const,
+            },
+          },
+        ]
+      }),
+    [references],
+  )
+  const referenceSummary = references
+    .filter((r) => r.visible)
+    .map((r) =>
+      referenceMessages.viewport(
+        r.ref.name,
+        r.mesh?.status === 'done' ? 'done' : r.mesh?.status === 'failed' ? 'failed' : 'loading',
+      ),
+    )
 
   const stock = useMemo(() => {
     const s = part?.loaded?.stock
@@ -83,6 +118,7 @@ export function useDesignScene(): SceneProps {
     marker,
     frame: overlays?.frame ?? null,
     anchor: overlays?.anchor ?? null,
+    ghosts,
     ...(part === undefined
       ? {}
       : {
@@ -93,6 +129,7 @@ export function useDesignScene(): SceneProps {
               status,
             }),
             overlays?.describe,
+            ...referenceSummary,
           ]
             .filter(Boolean)
             .join(' '),

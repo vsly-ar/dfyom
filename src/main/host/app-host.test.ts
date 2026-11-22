@@ -1,11 +1,14 @@
 // The app host: project lifecycle commands, unsaved changes, recovery, sessions, library follow on Apply.
 // Spec: docs/architecture/llm-api.md#app-scope-and-project-scope, #sessions-and-sources
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { flat6 } from '../../core/plan/plan.fixture'
 import { libraryInput } from '../../core/library/library.fixture'
 import type { Source } from '../../core/commands/context'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
+import { ENCLOSURE_STL, ENCLOSURE_TRIANGLES } from '../../core/design/stl.testing'
+import { nodeFiles } from '../workers/files'
 import { buildSmallPlan, tempDir, testHost } from './host.fixture'
 
 const cleanups: (() => unknown)[] = []
@@ -16,7 +19,7 @@ afterEach(async () => {
 async function setup(dir?: string) {
   const t = tempDir()
   cleanups.push(t.cleanup)
-  const host = await testHost(dir ?? t.dir)
+  const host = await testHost(dir ?? t.dir, { files: nodeFiles })
   cleanups.push(() => host.shutdown())
   const session = host.openSession({ kind: 'agent', id: 'stdio-1' })
   const call = async (name: string, args: object = {}) =>
@@ -184,5 +187,21 @@ describe('app host', () => {
     expect(again).toMatchObject({ key, alreadyOpen: true })
     expect(opened).toEqual([]) // no second window for an agent's or window's reopen
     other.end()
+  })
+
+  it("reads a reference's triangles for the window ghost (task R3)", async () => {
+    const { host, session, call } = await setup()
+    const { key, partId } = await buildSmallPlan(call)
+    const { referenceId } = (await call('design.reference.import', {
+      partId,
+      path: fileURLToPath(ENCLOSURE_STL),
+    })) as { referenceId: string }
+    const mesh = expectOk(await host.referenceMesh(key, referenceId))
+    expect(mesh.positions).toBeInstanceOf(Float32Array)
+    expect(mesh.positions.length).toBe(ENCLOSURE_TRIANGLES * 9)
+    const unknown = expectErrCode(await host.referenceMesh(key, 'nope'), 'input.malformed')
+    expect(unknown.issues[0]?.rule).toBe('unknownReference')
+    expectErrCode(await host.referenceMesh('no-project', referenceId), 'input.malformed')
+    expect(session.boundKey).toBe(key)
   })
 })

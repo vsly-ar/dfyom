@@ -49,6 +49,13 @@ export interface StlParser {
   finish(): AppResult<StlSummary>
 }
 
+/**
+ * Receives each triangle as it is read: 9 float32 values (3 vertices × xyz, source units). The
+ * array is reused for the next triangle, so copy what you keep. The summary parse passes none;
+ * the reference ghost's mesh read (task R3) collects them with `StlPositions`.
+ */
+export type TriangleSink = (v: Float32Array) => void
+
 const HEADER = 84
 const RECORD = 50
 /** An ASCII line longer than this is not a text STL (e.g. a binary file starting with "solid"). */
@@ -101,6 +108,8 @@ function fmix(h: number): number {
  * Constant memory, one pass. A mesh with flipped triangles counts as open.
  */
 class MeshSummary {
+  constructor(private readonly sink: TriangleSink | undefined) {}
+
   triangles = 0
   private minX = Infinity
   private minY = Infinity
@@ -116,6 +125,7 @@ class MeshSummary {
   /** `v`: 9 float32 values, `bits`: their bit patterns (−0 normalized to 0). */
   add(v: Float32Array, bits: Uint32Array): void {
     this.triangles++
+    this.sink?.(v)
     for (let i = 0; i < 3; i++) {
       const x = v[i * 3]!
       const y = v[i * 3 + 1]!
@@ -168,7 +178,7 @@ const finiteBits = (b: number) => (b & 0x7f800000) !== 0x7f800000
 // ── binary ────────────────────────────────────────────────────────────────────────────────
 
 class BinaryParser implements StlParser {
-  private readonly mesh = new MeshSummary()
+  private readonly mesh: MeshSummary
   private readonly carry = new Uint8Array(RECORD)
   private readonly carryView = new DataView(this.carry.buffer)
   private carried = 0
@@ -180,7 +190,10 @@ class BinaryParser implements StlParser {
     private readonly count: number,
     /** Bytes before the first record that were already consumed. */
     private offset: number,
-  ) {}
+    sink: TriangleSink | undefined,
+  ) {
+    this.mesh = new MeshSummary(sink)
+  }
 
   private record(view: DataView, at: number): AppResult<void> {
     for (let k = 0; k < 9; k++) {
@@ -251,7 +264,7 @@ type AsciiState =
   | 'after' // after `endsolid`: another `solid` or the end
 
 class AsciiParser implements StlParser {
-  private readonly mesh = new MeshSummary()
+  private readonly mesh: MeshSummary
   private readonly decoder = new TextDecoder('latin1')
   private partial = ''
   private line = 0
@@ -262,7 +275,12 @@ class AsciiParser implements StlParser {
   private readonly v = new Float32Array(9)
   private readonly bits = new Uint32Array(this.v.buffer)
 
-  constructor(private readonly maxTriangles: number) {}
+  constructor(
+    private readonly maxTriangles: number,
+    sink: TriangleSink | undefined,
+  ) {
+    this.mesh = new MeshSummary(sink)
+  }
 
   private bad(message: string): AppResult<never> {
     return malformed('stlSyntax', `line ${this.line}: ${message}`, { line: this.line })
@@ -406,6 +424,7 @@ class DetectingParser implements StlParser {
   constructor(
     private readonly size: number,
     private readonly limits: StlLimits,
+    private readonly sink: TriangleSink | undefined,
   ) {}
 
   private detect(): AppResult<StlParser> {
@@ -415,7 +434,7 @@ class DetectingParser implements StlParser {
       if (this.size === HEADER + RECORD * count) {
         if (count > this.limits.maxTriangles)
           return tooLarge('triangles', this.limits.maxTriangles, count)
-        return Ok(new BinaryParser(count, HEADER))
+        return Ok(new BinaryParser(count, HEADER, this.sink))
       }
       if (!startsWithSolid(head) && this.size < HEADER + RECORD * count)
         return malformed(
@@ -425,7 +444,7 @@ class DetectingParser implements StlParser {
         )
     }
     if (startsWithSolid(head)) {
-      const ascii = new AsciiParser(this.limits.maxTriangles)
+      const ascii = new AsciiParser(this.limits.maxTriangles, this.sink)
       const r = ascii.push(head)
       return r.isErr() ? r : Ok(ascii)
     }
@@ -459,13 +478,46 @@ class DetectingParser implements StlParser {
   }
 }
 
-/** A parser for a file of `size` bytes; a size over the limit is refused at once. */
+/**
+ * A parser for a file of `size` bytes; a size over the limit is refused at once. `sink` receives
+ * every triangle (the ghost's mesh read); the summary parse passes none.
+ */
 export function createStlParser(
   size: number,
   limits: StlLimits = STL_LIMITS,
+  sink?: TriangleSink,
 ): AppResult<StlParser> {
   if (size > limits.maxBytes) return tooLarge('bytes', limits.maxBytes, size)
-  return Ok(new DetectingParser(size, limits))
+  return Ok(new DetectingParser(size, limits, sink))
+}
+
+/**
+ * Collects triangles into one growing `Float32Array` (9 floats per triangle, source units) for
+ * the reference ghost (docs/modes/reference-model.md#ghost-mesh-task-r3). `expected` (a binary
+ * file's count, or the record's) sizes the buffer once, so the usual read never copies.
+ */
+export class StlPositions {
+  private data: Float32Array
+  private used = 0
+
+  constructor(expected = 1024) {
+    this.data = new Float32Array(Math.max(9, expected * 9))
+  }
+
+  readonly add: TriangleSink = (v) => {
+    if (this.used + 9 > this.data.length) {
+      const grown = new Float32Array(this.data.length * 2)
+      grown.set(this.data)
+      this.data = grown
+    }
+    this.data.set(v, this.used)
+    this.used += 9
+  }
+
+  /** The positions read so far; owns its whole buffer (transferable) when the size was exact. */
+  positions(): Float32Array {
+    return this.used === this.data.length ? this.data : this.data.slice(0, this.used)
+  }
 }
 
 /** Parses a whole file held in memory (tests, small files). */

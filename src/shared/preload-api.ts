@@ -61,6 +61,10 @@ export const IPC = {
   fileChooseSave: 'dfyom:file.chooseSave',
   /** Renderer → main (invoke): the native "Export gCode" dialog; the chosen path or null (3.7). */
   fileChooseExport: 'dfyom:file.chooseExport',
+  /** Renderer → main (invoke): the native "Import reference" dialog (STL); the path or null (R3). */
+  fileChooseReference: 'dfyom:file.chooseReference',
+  /** Renderer → main (invoke): a reference's triangles for the ghost (`ReferenceMeshReply`, R3). */
+  referenceMesh: 'dfyom:reference.mesh',
   /** Main → renderer: a native application menu item was chosen (`MenuAction`). */
   menuAction: 'dfyom:menu.action',
 } as const
@@ -93,6 +97,16 @@ export interface PartEvaluationView {
   /** `failed` only. */
   readonly error?: AppErrorData
 }
+
+/**
+ * The triangles of a reference's stored STL for the viewport ghost (task R3,
+ * docs/modes/reference-model.md#ghost-mesh-task-r3): 9 float32 per triangle in source units, read
+ * once per asset by the worker; the renderer applies the placement itself. Window plumbing like
+ * the evaluation push, not an agent capability.
+ */
+export type ReferenceMeshReply =
+  | { readonly ok: true; readonly positions: Float32Array }
+  | { readonly ok: false; readonly error: AppErrorData }
 
 /**
  * Native application menu items (docs/conventions/ui.md#app-shell, decision 12); main sends the
@@ -250,6 +264,12 @@ export interface PreloadApi {
     chooseSave(defaultName: string): Promise<string | null>
     /** `defaultName` without extension; the path ends in `.nc`, `.gcode` or `.ngc`. */
     chooseExport(defaultName: string): Promise<string | null>
+    /** An STL to import as a reference (R3); the window then calls `design.reference.import`. */
+    chooseReference(): Promise<string | null>
+  }
+  /** Reference models of the window's project (task R3): the ghost's triangles. */
+  readonly reference: {
+    mesh(referenceId: string): Promise<ReferenceMeshReply>
   }
   /** The native application menu's items for this window. */
   readonly menu: {

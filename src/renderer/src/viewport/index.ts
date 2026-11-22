@@ -4,6 +4,7 @@ export { MOUSE_PRESETS, VIEW_PRESETS, type MousePreset, type ViewPreset } from '
 export { surfaceOwner, type Box, type SurfaceTarget, type Vec3, type ViewportMesh } from './mesh'
 export { useToken, useTokens } from './useTokens'
 export type { AnchorOverlay, FrameOverlay } from './Overlays'
+export type { ReferenceGhostView } from './ReferenceGhost'
 export { RunLayer, segmentColours, type RunScene } from './RunLayer'
 export {
   advancePlayback,

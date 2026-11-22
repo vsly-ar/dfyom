@@ -186,6 +186,88 @@
   background: var(--accent-subtle);
 }
 
+/* reference models (task R3): a group between the part and the operations */
+.references {
+  display: grid;
+  border-bottom: 1px solid var(--border);
+}
+
+.emptyReference {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+  padding: var(--space-1) var(--space-3) var(--space-3);
+}
+
+.referenceError {
+  padding: 0 var(--space-3) var(--space-3);
+}
+
+/* room for the eye and remove buttons, which stay over the row's end */
+.references .opSelect {
+  padding-right: calc(2 * var(--control-md) + var(--space-2));
+}
+
+/* a hidden reference keeps its row, muted (ui.md#reference-ghost-v02) */
+.op[data-hidden] .opSelect {
+  color: var(--text-muted);
+}
+
+.op[data-hidden] .opSelect > svg {
+  opacity: 0.5;
+}
+
+/* the eye stays visible (it is the row's state); remove shows like the operation actions */
+.referenceActions {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  display: inline-flex;
+  padding: 0 var(--space-1);
+  background: var(--bg-chrome);
+}
+
+.op[data-selected] .referenceActions {
+  background: var(--accent-subtle);
+}
+
+.op:hover .referenceActions {
+  background: var(--bg-hover);
+}
+
+.referenceActions > :last-child {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--motion-fast) var(--ease-standard);
+}
+
+.op:hover .referenceActions > :last-child,
+.op:focus-within .referenceActions > :last-child,
+.op[data-selected] .referenceActions > :last-child {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.turnRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-1);
+  align-items: start;
+}
+
+.turnButtons {
+  display: inline-flex;
+  margin-top: var(--space-0-5);
+}
+
+.fitRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-2);
+  align-items: center;
+}
+
 .fields {
   container-type: inline-size;
   display: grid;

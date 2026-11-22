@@ -3,6 +3,7 @@
 // commands agents call with a path; the OS dialog asked about replacing an existing file.
 // Each kind of dialog starts in the folder last chosen in a dialog of that kind (`DialogKind`,
 // remembered in settings/app-state.ts); the reference import (R3) uses `reference-import`.
+// The window then calls `design.reference.import` with the path.
 // Doc: docs/conventions/ui.md#project-files, #plan-mode-task-37, #remembered-window-state-and-dialog-folders
 import { BrowserWindow, dialog } from 'electron'
 import { stat } from 'node:fs/promises'
@@ -116,4 +117,18 @@ export async function chooseExportFile(
   })
   if (file === null) return null
   return isGcodeFileName(file) ? file : `${file}.nc`
+}
+
+const STL_FILTERS = [{ name: 'STL model', extensions: ['stl'] }]
+
+/** The "Import reference" dialog (task R3): an STL file, starting in the last import's folder. */
+export function chooseReferenceFile(
+  win: BrowserWindow | null,
+  folders: DialogFolders,
+): Promise<string | null> {
+  return showOpen(win, folders, 'reference-import', {
+    title: 'Import reference',
+    filters: STL_FILTERS,
+    properties: ['openFile'],
+  })
 }

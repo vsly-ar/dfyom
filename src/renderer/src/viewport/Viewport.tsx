@@ -37,6 +37,7 @@ import {
   type ViewportMesh,
 } from './mesh'
 import type { AnchorOverlay, FrameOverlay } from './Overlays'
+import type { ReferenceGhostView } from './ReferenceGhost'
 import type { RunScene } from './RunLayer'
 import { CameraControlsImpl, Scene } from './Scene'
 import { linesBounds, placeBox } from './toolpath-lines'
@@ -74,6 +75,11 @@ export interface ViewportProps {
   frame?: FrameOverlay | null
   /** Anchor marker: the point the selected feature's position gives (task F2). */
   anchor?: AnchorOverlay | null
+  /**
+   * Reference model ghosts (task R3): translucent, never pickable; `box` (the placed bounding box,
+   * part frame) widens the framing bounds.
+   */
+  ghosts?: readonly (ReferenceGhostView & { readonly box: Box })[] | null
   /** Operations drawn with a light `--info` tint (edited in the plan: the plan scene, task E3b). */
   tinted?: ReadonlySet<string> | null
   /** Click on a surface → its target; click on empty space or Escape → `null`. */
@@ -149,6 +155,7 @@ export function Viewport({
   marker = null,
   frame = null,
   anchor = null,
+  ghosts = null,
   tinted = null,
   onSelect,
   onHover,
@@ -186,11 +193,14 @@ export function Viewport({
   const runFrame = run?.frame
   const bounds = useMemo(
     () =>
-      unionBox(
-        unionBox(mesh ? meshBounds(mesh) : undefined, stock ?? undefined),
-        runLines ? placeBox(linesBounds(runLines), runFrame) : undefined,
+      (ghosts ?? []).reduce<Box | undefined>(
+        (b, g) => unionBox(b, g.box),
+        unionBox(
+          unionBox(mesh ? meshBounds(mesh) : undefined, stock ?? undefined),
+          runLines ? placeBox(linesBounds(runLines), runFrame) : undefined,
+        ),
       ),
-    [mesh, stock, runLines, runFrame],
+    [mesh, stock, runLines, runFrame, ghosts],
   )
 
   // pick mode: a normal glyph on every eligible face (ui.md#design-and-plan-controls-v02)
@@ -372,6 +382,7 @@ export function Viewport({
           hovered={pick && hovered && pick.eligible.has(hovered.surface) ? hovered.surface : null}
           frame={frame}
           anchor={anchor}
+          ghosts={ghosts}
           reducedMotion={reducedMotion}
           controlsRef={controls}
           run={run}

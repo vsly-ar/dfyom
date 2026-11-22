@@ -3,7 +3,7 @@
 // so the replica and the shell run against the real command layer. Doc: docs/conventions/ui.md#testing
 import type { ActionEvent } from '../../../core/commands/action-log'
 import { FIXTURE_DOCUMENT_COMMANDS } from '../../../core/commands/commands.fixture'
-import type { Source } from '../../../core/commands/context'
+import type { Services, Source } from '../../../core/commands/context'
 import { createDispatcher, type Dispatcher } from '../../../core/commands/dispatcher'
 import { inProcessWorkers } from '../../../core/commands/jobs'
 import { createAppRegistry, createRegistry } from '../../../core/commands/registry'
@@ -22,6 +22,7 @@ import type {
   PartEvaluationView,
   PreloadApi,
   ProjectSnapshot,
+  ReferenceMeshReply,
   WindowCloseRequest,
 } from '../../../shared/preload-api'
 import type { AsyncAppResult } from '../../../shared/result'
@@ -44,10 +45,13 @@ export function fixtureDispatcher(name = 'Bracket'): Dispatcher {
 /**
  * A project runtime with the real project registry (design, library, plan …) and an in-memory
  * library, without an evaluation service: evaluations are pushed by the test (`emitEvaluation`).
+ * `services` adds or replaces some (e.g. a project session and file-reading workers for
+ * `design.reference.import`).
  */
 export async function designDispatcher(
   name = 'Bracket',
   unitSystem: UnitSystem = 'mm',
+  services: Partial<Services> = {},
 ): Promise<Dispatcher> {
   const library = await Library.open(createMemoryLibraryStorage())
   const registry = createAppRegistry()
@@ -57,7 +61,7 @@ export async function designDispatcher(
     registry: registry.unwrap(),
     doc: newProjectDoc({ name, unitSystem }),
     ids: fakeIds(),
-    services: { workers: inProcessWorkers, library: library.unwrap() },
+    services: { workers: inProcessWorkers, library: library.unwrap(), ...services },
   })
 }
 
@@ -87,9 +91,16 @@ export interface FakeBridge extends PreloadApi {
     open?: string | null
     save?: string | null
     export?: string | null
+    reference?: string | null
   }): void
   readonly saveDialogNames: string[]
   readonly exportDialogNames: string[]
+  /** The reference ids whose ghost mesh was asked for (`reference.mesh`), in order. */
+  readonly referenceMeshCalls: string[]
+  /** Answers `reference.mesh` (default: one triangle). */
+  setReferenceMesh(
+    handler: (referenceId: string) => ReferenceMeshReply | Promise<ReferenceMeshReply>,
+  ): void
 }
 
 export function errorReply(error: AppErrorData, retryable = false): CallReply {
@@ -135,11 +146,17 @@ export function createFakeBridge(initial: AppSettings = DEFAULT_SETTINGS): FakeB
   const evaluations = new Map<string, PartEvaluationView>()
   const saveDialogNames: string[] = []
   const exportDialogNames: string[] = []
-  let fileChoice: { open: string | null; save: string | null; export: string | null } = {
-    open: null,
-    save: null,
-    export: null,
-  }
+  let fileChoice: {
+    open: string | null
+    save: string | null
+    export: string | null
+    reference: string | null
+  } = { open: null, save: null, export: null, reference: null }
+  const referenceMeshCalls: string[] = []
+  let referenceMesh = (_id: string): ReferenceMeshReply | Promise<ReferenceMeshReply> => ({
+    ok: true,
+    positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+  })
   const handlers = new Map<string, Handler>()
   const calls: { name: string; args: unknown; gesture?: string }[] = []
   const settingsPatches: unknown[] = []
@@ -222,6 +239,17 @@ export function createFakeBridge(initial: AppSettings = DEFAULT_SETTINGS): FakeB
         exportDialogNames.push(name)
         return Promise.resolve(fileChoice.export)
       },
+      chooseReference: () => Promise.resolve(fileChoice.reference),
+    },
+    reference: {
+      mesh: (referenceId) => {
+        referenceMeshCalls.push(referenceId)
+        return Promise.resolve(referenceMesh(referenceId))
+      },
+    },
+    referenceMeshCalls,
+    setReferenceMesh(handler) {
+      referenceMesh = handler
     },
     menu: { onAction: menu.on },
     saveDialogNames,

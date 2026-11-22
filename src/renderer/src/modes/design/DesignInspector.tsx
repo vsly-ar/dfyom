@@ -4,7 +4,8 @@
 // step); `on` and formula references can be picked
 // in the viewport (pick mode) or chosen from a list. Without a selection: the part (name, stock,
 // general tolerance) and all its warnings. Command errors show at their field (or at the top);
-// DFM warnings at the blamed parameter, with "Apply" for a suggestion.
+// DFM warnings at the blamed parameter, with "Apply" for a suggestion. A selected reference model
+// shows its own inspector (ReferenceInspector.tsx, task R3).
 // Doc: docs/conventions/ui.md#panels-and-inspectors, #quantity-and-expression-input,
 // #selection-and-picking, #errors, #warnings-and-dfm; docs/modes/design.md#operations-v01
 import { useState } from 'react'
@@ -16,8 +17,6 @@ import { dfmMessages } from '../../messages/dfm'
 import { useCancelGesture } from '../../shell/hooks'
 import {
   ErrorMessage,
-  Field,
-  FieldInput,
   PanelHeader,
   QuantityInput,
   StatusChip,
@@ -25,6 +24,8 @@ import {
   type WarningView,
 } from '../../ui'
 import styles from './Design.module.css'
+import { NameField } from './NameField'
+import { ReferenceInspector } from './ReferenceInspector'
 import { defaultUnit, quantityOf, updateArgs, type DesignPart } from './model'
 import {
   OperationFields,
@@ -89,6 +90,11 @@ export function DesignInspector({ part }: { part: DesignPart | undefined }): Rea
         <p className={styles['note']}>{t.noPart}</p>
       </>
     )
+  const ref = Object.hasOwn(part.doc.references, selected ?? '')
+    ? part.doc.references[selected!]
+    : undefined
+  if (ref !== undefined && ref.partId === part.dto.id)
+    return <ReferenceInspector key={ref.id} part={part} reference={ref} />
   const op = part.dto.operations.find((o) => o.id === selected)
   return op === undefined ? (
     <PartInspector part={part} warnings={warnings} />
@@ -187,48 +193,6 @@ async function applyWarning(
     operationId: op.id,
     ...updateArgs(op, w.parameter, source),
   })
-}
-
-/** A text field committing on Enter or blur (Escape reverts). */
-function NameField({
-  label,
-  name,
-  onCommit,
-}: {
-  label: string
-  name: string
-  onCommit: (name: string) => void
-}): React.JSX.Element {
-  const [draft, setDraft] = useState(name)
-  // the stored name changed (commit, undo, agent): follow it
-  const [seen, setSeen] = useState(name)
-  if (name !== seen) {
-    setSeen(name)
-    setDraft(name)
-  }
-  const commit = () => {
-    const v = draft.trim()
-    if (v.length > 0 && v !== name) onCommit(v)
-    else setDraft(name)
-  }
-  return (
-    <Field label={label}>
-      <FieldInput
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault()
-            commit()
-          } else if (e.key === 'Escape') {
-            e.preventDefault()
-            setDraft(name)
-          }
-        }}
-      />
-    </Field>
-  )
 }
 
 // ── operation ─────────────────────────────────────────────────────────────────────────────

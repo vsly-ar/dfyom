@@ -9,6 +9,7 @@ import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { agentError } from '../core/agent/results'
 import type { AgentSession, SessionInfo } from '../core/agent/session'
 import { sourceKey } from '../core/commands/context'
+import type { AppErrorData } from '../shared/errors/app-error'
 import type { AppResult } from '../shared/result'
 import {
   IPC,
@@ -17,6 +18,7 @@ import {
   type LocalHttpState,
   type OpenedWindow,
   type ProjectSnapshot,
+  type ReferenceMeshReply,
   type WindowCloseRequest,
 } from '../shared/preload-api'
 import type { Dispatcher } from '../core/commands/dispatcher'
@@ -25,6 +27,7 @@ import { evaluationView, followEvaluations, planEvaluationView } from './evaluat
 import {
   chooseExportFile,
   chooseOpenFile,
+  chooseReferenceFile,
   chooseSaveFile,
   type DialogFolders,
 } from './file-dialogs'
@@ -49,11 +52,13 @@ interface WindowSession {
   closing: boolean
 }
 
-const NOT_A_WINDOW: CallReply = {
-  ok: false,
-  error: { code: 'input.malformed', message: 'not a DFYOM window', issues: [], frames: [] },
-  retryable: false,
+const NOT_A_WINDOW_ERROR: AppErrorData = {
+  code: 'input.malformed',
+  message: 'not a DFYOM window',
+  issues: [],
+  frames: [],
 }
+const NOT_A_WINDOW: CallReply = { ok: false, error: NOT_A_WINDOW_ERROR, retryable: false }
 
 /** The `gesture` of `call`'s options, if a short string (anything else is ignored). */
 function gestureOf(opts: unknown): string | undefined {
@@ -235,6 +240,26 @@ export function registerProjectIpc(
       ? null
       : chooseExportFile(ws.win, folders, typeof name === 'string' ? name : '')
   })
+
+  ipcMain.handle(IPC.fileChooseReference, (event) => {
+    const ws = sessionOf(event)
+    return ws === undefined ? null : chooseReferenceFile(ws.win, folders)
+  })
+  // The ghost's triangles (task R3): read by the worker, copied once to the renderer, which keeps
+  // them per asset (docs/modes/reference-model.md#ghost-mesh-task-r3).
+  ipcMain.handle(
+    IPC.referenceMesh,
+    async (event, referenceId: unknown): Promise<ReferenceMeshReply> => {
+      const ws = sessionOf(event)
+      const key = ws?.session.boundKey
+      if (key === undefined || typeof referenceId !== 'string')
+        return { ok: false, error: NOT_A_WINDOW_ERROR }
+      const r = await host.referenceMesh(key, referenceId)
+      return r.isOk()
+        ? { ok: true, positions: r.unwrap().positions }
+        : { ok: false, error: agentError(r.unwrapErr()).error }
+    },
+  )
 
   ipcMain.handle(IPC.settingsUpdate, (event, patch: unknown): CallReply => {
     if (sessionOf(event) === undefined) return NOT_A_WINDOW

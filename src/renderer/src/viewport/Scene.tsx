@@ -32,6 +32,7 @@ import {
   type AnchorOverlay,
   type FrameOverlay,
 } from './Overlays'
+import { ReferenceGhost, type ReferenceGhostView } from './ReferenceGhost'
 import { RunLayer, type RunScene } from './RunLayer'
 
 export interface SceneProps {
@@ -51,6 +52,8 @@ export interface SceneProps {
   frame?: FrameOverlay | null
   /** Anchor marker of the selected feature (task F2). */
   anchor?: AnchorOverlay | null
+  /** Reference model ghosts, drawn after the part, never pickable (task R3). */
+  ghosts?: readonly ReferenceGhostView[] | null
   reducedMotion?: boolean
   controlsRef: Ref<CameraControlsImpl>
   /** Run mode layer (task 3.12). */
@@ -83,6 +86,15 @@ export function Scene(props: SceneProps): React.JSX.Element {
       <Lights bounds={bounds} />
       {mesh && triangleCount(mesh) > 0 ? <PartMesh {...props} mesh={mesh} /> : null}
       {stock ? <StockOutline box={stock} colour={palette.stock} /> : null}
+      {props.ghosts?.map((g) => (
+        <ReferenceGhost
+          key={g.id}
+          ghost={g}
+          faceColour={palette.stock}
+          edgeColour={palette.edge}
+          reducedMotion={props.reducedMotion ?? false}
+        />
+      ))}
       {outline ? <LiveOutline loops={outline} colour={palette.selected} /> : null}
       {marker ? <ErrorMarker at={marker} bounds={bounds} colour={palette.danger} /> : null}
       {glyphs && glyphs.length > 0 ? (

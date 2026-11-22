@@ -9,6 +9,7 @@ import {
   type Evaluations,
   type PartEvaluationEntry,
 } from '../state/evaluations'
+import { createReferenceMeshes, type ReferenceMeshes } from '../state/reference-meshes'
 import { createReplica, type Replica, type ReplicaState } from '../state/replica'
 import { createSettingsStore, type SettingsState, type SettingsStore } from '../state/settings'
 import { createUiStore, type UiState, type UiStore } from '../state/ui-store'
@@ -23,6 +24,8 @@ export interface Shell {
   readonly evaluations: Evaluations
   /** New / Open / Save and their dialogs (task 3.6). */
   readonly files: ProjectFiles
+  /** The reference ghosts' triangles, per asset (task R3). */
+  readonly referenceMeshes: ReferenceMeshes
 }
 
 export function createShell(bridge: PreloadApi): Shell {
@@ -34,6 +37,7 @@ export function createShell(bridge: PreloadApi): Shell {
     ui: createUiStore(),
     evaluations: createEvaluations(bridge, replica),
     files: createProjectFiles({ bridge, replica }),
+    referenceMeshes: createReferenceMeshes(bridge),
   }
 }
 
@@ -51,10 +55,13 @@ export function ShellProvider({
     const stopReplica = shell.replica.start()
     const stopSettings = shell.settings.start()
     const stopEvaluations = shell.evaluations.start()
+    // a newly bound (or reopened) project shows every reference (decision D17)
+    const stopBound = shell.bridge.project.onBound(() => shell.ui.getState().resetReferenceView())
     return () => {
       stopReplica()
       stopSettings()
       stopEvaluations()
+      stopBound()
     }
   }, [shell])
   return <ShellContext.Provider value={shell}>{children}</ShellContext.Provider>

@@ -12,6 +12,7 @@ import {
   type PartEvaluationView,
   type PreloadApi,
   type ProjectSnapshot,
+  type ReferenceMeshReply,
   type WindowCloseRequest,
 } from '../shared/preload-api'
 import type { AppSettings } from '../shared/settings'
@@ -80,6 +81,11 @@ const api: PreloadApi = {
       ipcRenderer.invoke(IPC.fileChooseSave, defaultName) as Promise<string | null>,
     chooseExport: (defaultName) =>
       ipcRenderer.invoke(IPC.fileChooseExport, defaultName) as Promise<string | null>,
+    chooseReference: () => ipcRenderer.invoke(IPC.fileChooseReference) as Promise<string | null>,
+  },
+  reference: {
+    mesh: (referenceId) =>
+      ipcRenderer.invoke(IPC.referenceMesh, referenceId) as Promise<ReferenceMeshReply>,
   },
   menu: {
     onAction: (listener) => on<MenuAction>(IPC.menuAction, listener),
