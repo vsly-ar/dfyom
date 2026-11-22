@@ -129,12 +129,24 @@ The face model is in core: directions, frames and the local stock in [`src/core/
 Q13: 9-point ([decision 2](#decisions)). Every positioned feature (pocket and profile `shape`, drilling `center`) states **which point of its bounding box** its position gives.
 
 - **Anchor:** one of nine points of the shape's bounding rectangle in the [face frame](#face-frame): `{ u: 'min' | 'centre' | 'max', v: 'min' | 'centre' | 'max' }`. Seen from outside the face, `min`/`min` is the lower-left (front-left on the top face). A circle uses its bounding square; a drilling has only the centre (a hole is a point).
-- **Data model:** optional `shape.anchor` next to `shape.center`; `center` then means "the anchor point" (renaming it to `position` only if cheap, decided in task A2). Absent `anchor` = centre, so v0.1 projects load unchanged (no `schemaVersion` change).
+- **Data model:** optional `shape.anchor` next to `shape.center`; `center` then means "the anchor point" (kept as `center`, [§ Implementation (task A2)](#implementation-task-a2)). Absent `anchor` = centre, so v0.1 projects load unchanged (no `schemaVersion` change).
 - **Changing the anchor keeps the geometry:** `design.<kind>.update { anchor }` recomputes the position so the feature does not move (one undo step). If the position is an expression, the change fails with `model.invariant`, rule `anchorExpression`; the user removes the formula first.
 - **Size edits keep the anchor point fixed:** with a `min`/`min` anchor, a longer pocket grows toward `+u`, so a corner stays where it was dimensioned.
 - **Default anchor** for new operations is a setting (default: centre); agents pass `anchor` or get the centre.
 - **UI:** a 3 × 3 anchor picker beside the position fields, and the viewport marks the anchor point of the selected feature ([ui.md rules](../conventions/ui.md#design-and-plan-controls-v02)).
 - References to other features' edges or to a [reference model](reference-model.md) are later (backlog B10, snapping).
+
+### Implementation (task A2)
+
+Code: `ANCHOR_POINTS`, `AnchorDtoSchema` and the optional `anchor` on both shapes in [`part.dto.ts`](../../src/core/design/part.dto.ts); `Shape.anchor` (always set, `CENTRE_ANCHOR` when the record has none; written only when it is not the centre, so v0.1 records stay byte-identical) in [`operation.ts`](../../src/core/design/operation.ts); offsets, the geometric centre and re-anchoring in [`anchor.ts`](../../src/core/design/anchor.ts); the `anchor` arg in [`commands.ts`](../../src/core/design/commands.ts); the setting `defaultAnchor` in [`src/shared/settings.ts`](../../src/shared/settings.ts). Choices made with the implementation:
+
+- **`center` is not renamed** to `position`: the rename would touch the DTO (every saved record), the args, the renderer and the fixtures for no behaviour, so it is not cheap. The arg and DTO descriptions say "center = anchor point".
+- **One `anchor` arg per command, not inside `shape`:** `design.pocket.*` and `design.profile.*` take a top-level `anchor?` (kept out of the shape union to stay inside the `tools/list` budget). On **add** it names the point `shape.center` gives (absent: centre). On **update** it re-anchors without moving the feature (one command, one undo step); a `shape` given in the same update first keeps the previous anchor (its `center` is that anchor's point), then the re-anchor runs on the new shape. A `shape` without `anchor` on update keeps the anchor, so the inspector's size edits keep the anchor point fixed with no extra arg.
+- **Geometric centre in one place:** `shapeCentre(shape)` (exact `center − offset`, offset ±size/2 per axis for `min`/`max`) feeds `toGeometryInput` (so evaluation, DFM, toolpaths and tab/wall numbering see the same geometry as before), the plan's order checks (`plan/order.ts`) and the renderer's live outline and error marker. Nothing else reads `shape.center` as a centre.
+- **Re-anchoring writes literals as typed:** the number in the source is replaced in its written unit, unit, tolerance and written decimals stay (`30.50 ±0.1` → `25.50 ±0.1`, `2"` → `1.5"`); the exact value is shifted exactly, and a non-terminating decimal in the source is cut at 6 digits (the exact value wins, [quantities.md](../architecture/quantities.md#value)).
+- **`anchorExpression` per axis:** only a coordinate that has to move fails (`model.invariant`, issue path `anchor`, `params.parameter` = `shape.center.0` / `.1`); changing only `v` keeps a formula in `u`. Every failing axis is reported at once.
+- **Default anchor:** `defaultAnchor` in the app settings (default centre; validated by main like every setting), for the window to pass as `anchor` on add (F2). Core never reads it: agents pass `anchor` or get the centre.
+- Drillings take no `anchor` (an unknown arg, `input.malformed`).
 
 ## Operation tool
 
@@ -229,8 +241,8 @@ Names follow [commands.md § Naming](../architecture/commands.md#naming); all ar
 
 | Command / query                  | Args                                                                                                                             | Result                                        |
 | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| `design.<kind>.add`              | as v0.1, plus `on?` for every kind and `tool?` (a given tool is locked)                                                          | `{ operationId, tool, toolLocked, warnings }` |
-| `design.<kind>.update`           | as v0.1, plus `on?`                                                                                                              | `{ warnings }` (tool changes: on Apply)       |
+| `design.<kind>.add`              | as v0.1, plus `on?` for every kind, `tool?` (a given tool is locked), `anchor?` for pocket and profile                           | `{ operationId, tool, toolLocked, warnings }` |
+| `design.<kind>.update`           | as v0.1, plus `on?`, `anchor?` for pocket and profile (re-anchors, the feature stays)                                            | `{ warnings }` (tool changes: on Apply)       |
 | `design.operation.tool.set`      | `{ partId, operationId, tool }` – `tool` is a generalized tool or `{ toolLibraryItemId }` (snapshot taken in the command); locks | `{ warnings }`                                |
 | `design.operation.tool.lock`     | `{ partId, operationId }` – pins the current tool                                                                                | `{ warnings }`                                |
 | `design.operation.tool.unlock`   | `{ partId, operationId }` – the auto choice runs on Apply                                                                        | `{ warnings }`                                |

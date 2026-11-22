@@ -2,7 +2,8 @@
 // evaluation is pending (ui.md decision 15: "drawn live as an outline from the field values,
 // cheap, no worker") and the anchor of the error marker of a failing operation. Pure, from the
 // analytic model (part frame, mm). Doc: docs/conventions/ui.md#evaluation-status-pending-outdated-failed
-import type { Operation, Shape } from '../../../../core/design/operation'
+import { shapeCentre } from '../../../../core/design/anchor'
+import { CENTRE_ANCHOR, type Operation, type Shape } from '../../../../core/design/operation'
 import type { SurfaceTable } from '../../../../core/design/surfaces'
 import type { Stock } from '../../../../core/library/stock'
 import type { Vec3 } from '../../viewport'
@@ -13,7 +14,7 @@ const CIRCLE_SEGMENTS = 48
 
 /** Closed loop of a shape at height `z` (the last point does not repeat the first). */
 export function shapeLoop(shape: Shape, z: number): Vec3[] {
-  const [cx, cy] = [shape.center[0].canonical, shape.center[1].canonical]
+  const [cx, cy] = shapeCentre(shape) // `center` is the anchor point
   if (shape.kind === 'circle') {
     const r = shape.diameter.canonical / 2
     return Array.from({ length: CIRCLE_SEGMENTS }, (_, i): Vec3 => {
@@ -78,7 +79,12 @@ export function operationOutline(op: Operation, stock: Stock, table: SurfaceTabl
     }
     case 'drilling': {
       const top = surfaceZ(table, op.on)
-      const circle: Shape = { kind: 'circle', center: op.center, diameter: op.diameter }
+      const circle: Shape = {
+        kind: 'circle',
+        center: op.center,
+        anchor: CENTRE_ANCHOR,
+        diameter: op.diameter,
+      }
       const bottom = op.depth.isSome() ? top - op.depth.unwrap().canonical : -thickness
       return [
         shapeLoop(circle, top),
@@ -96,10 +102,10 @@ export function operationAnchor(op: Operation, stock: Stock, table: SurfaceTable
     case 'facing':
       return [stock.length.canonical / 2, stock.width.canonical / 2, -op.depth.canonical]
     case 'pocket':
-      return [op.shape.center[0].canonical, op.shape.center[1].canonical, surfaceZ(table, op.on)]
+      return [...shapeCentre(op.shape), surfaceZ(table, op.on)]
     case 'drilling':
       return [op.center[0].canonical, op.center[1].canonical, surfaceZ(table, op.on)]
     case 'profile':
-      return [op.shape.center[0].canonical, op.shape.center[1].canonical, 0]
+      return [...shapeCentre(op.shape), 0]
   }
 }

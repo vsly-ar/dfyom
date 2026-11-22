@@ -34,12 +34,14 @@ import { Quantity } from '../quantity/quantity'
 import { Rational } from '../quantity/rational'
 import { loadPart, unknownPart, type LoadedPart } from './load'
 import {
+  CENTRE_ANCHOR,
   DEFAULTS,
   fieldContext,
   generalToleranceToDTO,
   ID_PREFIX,
   KIND_LABEL,
   operationToDTO,
+  type Anchor,
   type FieldKind,
   type GeneralTolerance,
   type Operation,
@@ -47,6 +49,7 @@ import {
   type Shape,
 } from './operation'
 import {
+  AnchorDtoSchema,
   DesignToolDtoSchema,
   DRILL_BOTTOMS,
   OperationDtoSchema,
@@ -69,6 +72,7 @@ import {
 import { DfmWarningSchema, libraryTools, partWarnings } from './warnings'
 import { ToolArg, toolFromArg, type ToolArgs } from './tool-args'
 import { designToolToDTO, type DesignTool } from './tool'
+import { reanchor } from './anchor'
 
 // ── arg schemas ───────────────────────────────────────────────────────────────────────────
 
@@ -91,7 +95,10 @@ const ShapeArg = z
     }),
     z.object({ kind: z.literal('circle'), center: PointArg, diameter: Src }),
   ])
-  .describe('Axis-aligned shape given by its center; replaces the whole shape on update')
+  .describe('Axis-aligned shape; center = anchor point. Replaces the whole shape on update')
+const AnchorArg = AnchorDtoSchema.describe(
+  'Box point shape.center gives (min = low u/v); default centre. Update keeps the feature in place',
+)
 const ToleranceArg = z
   .object({
     length: Src.nullable()
@@ -125,6 +132,7 @@ const facingParams = {
 const pocketParams = {
   on: OnArg.optional(),
   shape: ShapeArg,
+  anchor: AnchorArg.optional(),
   depth: Src,
   floorRadius: Src.optional().describe('Floor fillet radius; default 0'),
 }
@@ -139,6 +147,7 @@ const drillingParams = {
 const profileParams = {
   on: StockFaceArg.optional(),
   shape: ShapeArg,
+  anchor: AnchorArg.optional(),
   side: z.enum(PROFILE_SIDES).optional().describe('outside (part outline, default) or inside'),
   slotWidth: Src.optional().describe('Default 6 mm / 1/4"'),
   tabs: TabsArg.optional(),
@@ -192,16 +201,23 @@ class Fields {
     return prev ?? this.q(path, kind, DEFAULTS[def][this.units])
   }
 
-  shape(a: ShapeArgs): Shape {
+  /** The shape from its args; `center` gives the point `anchor` names. */
+  shape(a: ShapeArgs, anchor: Anchor): Shape {
     const center = [
       this.q('shape.center.0', 'length', a.center[0]),
       this.q('shape.center.1', 'length', a.center[1]),
     ] as const
     if (a.kind === 'circle')
-      return { kind: 'circle', center, diameter: this.q('shape.diameter', 'length', a.diameter) }
+      return {
+        kind: 'circle',
+        center,
+        anchor,
+        diameter: this.q('shape.diameter', 'length', a.diameter),
+      }
     return {
       kind: 'rectangle',
       center,
+      anchor,
       length: this.q('shape.length', 'length', a.length),
       width: this.q('shape.width', 'length', a.width),
       cornerRadius: this.pick(
@@ -212,6 +228,26 @@ class Fields {
         'cornerRadius',
       ),
     }
+  }
+
+  /**
+   * The shape of an operation: on add (no `prev`) `center` gives `anchor` (default centre); on
+   * update a new shape keeps the previous anchor, then a given `anchor` re-anchors it without
+   * moving the feature (design-v0.2.md#placement-anchors).
+   */
+  placedShape(
+    a: ShapeArgs | undefined,
+    anchor: Anchor | undefined,
+    prev: Shape | undefined,
+  ): Shape {
+    if (prev === undefined) return this.shape(a!, anchor ?? CENTRE_ANCHOR)
+    const shape = a !== undefined ? this.shape(a, prev.anchor) : prev
+    if (anchor === undefined) return shape
+    // a shape arg that failed to parse has holes: its own errors are reported instead
+    if (this.results.some((r) => r.isErr())) return shape
+    const r = reanchor(shape, anchor)
+    this.results.push(r)
+    return r.unwrapOr(shape)
   }
 
   tolerance(a: ToleranceArgs | undefined, prev: GeneralTolerance): GeneralTolerance {
@@ -410,7 +446,7 @@ const pocketSpec: KindSpec<typeof pocketParams, Extract<Operation, { kind: 'pock
     name,
     generalTolerance: prev?.generalTolerance ?? NO_TOLERANCE,
     on: a.on ?? prev?.on ?? defaultOn(ops),
-    shape: a.shape !== undefined ? f.shape(a.shape) : prev!.shape,
+    shape: f.placedShape(a.shape, a.anchor, prev?.shape),
     depth: f.val('depth', 'length', a.depth, prev?.depth),
     floorRadius: f.pick('floorRadius', 'length', a.floorRadius, prev?.floorRadius, 'floorRadius'),
   }),
@@ -465,7 +501,7 @@ const profileSpec: KindSpec<typeof profileParams, Extract<Operation, { kind: 'pr
     name,
     generalTolerance: prev?.generalTolerance ?? NO_TOLERANCE,
     on: a.on ?? prev?.on ?? STOCK_TOP,
-    shape: a.shape !== undefined ? f.shape(a.shape) : prev!.shape,
+    shape: f.placedShape(a.shape, a.anchor, prev?.shape),
     side: a.side ?? prev?.side ?? 'outside',
     slotWidth: f.pick('slotWidth', 'length', a.slotWidth, prev?.slotWidth, 'slotWidth'),
     tabs: {

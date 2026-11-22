@@ -339,7 +339,7 @@ App settings (`src/shared/settings.ts`): GUI preferences of the app instance, ow
 | Reduce motion                 | off (default), on             | `data-motion='reduce'` on the root; the OS preference applies as well ([motion](#motion)).                                                                            |
 | Allow local agents to connect | on (default), off             | Starts or stops the local HTTP server at once ([llm-api.md](../architecture/llm-api.md#local-http)); `--mcp-http=off` or `=<port>` overrides it at start for one run. |
 | Panel layouts                 | per panel group id            | Last layout of the shell's panels ([app shell](#app-shell)).                                                                                                          |
-| Default anchor (v0.2)         | Centre (default), any of nine | [Placement anchor](../modes/design-v0.2.md#placement-anchors) of new positioned operations made in the UI; agents pass `anchor` or get the centre.                    |
+| Default anchor (v0.2)         | Centre (default), any of nine | `defaultAnchor`: [placement anchor](../modes/design-v0.2.md#placement-anchors) of new positioned operations made in the UI; agents pass `anchor` or get the centre.   |
 
 - The settings dialog (toolbar "Settings", or "Agent settings" in the agent indicator) applies changes at once and optimistically; main validates the patch (unknown fields and wrong values are refused, the window then returns to main's settings), writes the file atomically and pushes the new settings to every window.
 - A window gets the settings at creation as a window argument (`--dfyom-settings`), so theme and motion are applied before the first render (no flash).

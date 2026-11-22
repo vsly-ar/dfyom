@@ -30,15 +30,33 @@ export const SurfaceIdSchema = z
 /** Point `[u, v]` in the face frame of the operation's `on` (`[x, y]` on the top face). */
 export const PointDtoSchema = z.tuple([length(), length()])
 
+/** One coordinate of a placement anchor in the face frame (design-v0.2.md#placement-anchors). */
+export const ANCHOR_POINTS = ['min', 'centre', 'max'] as const
+export type AnchorPoint = (typeof ANCHOR_POINTS)[number]
+
+/** Which of the nine points of the shape's bounding rectangle its `center` gives. */
+export const AnchorDtoSchema = z.object({ u: z.enum(ANCHOR_POINTS), v: z.enum(ANCHOR_POINTS) })
+export type AnchorDTO = z.output<typeof AnchorDtoSchema>
+
+/**
+ * `center` is the anchor point; absent `anchor` = the centre (v0.1 records load unchanged, and it
+ * is written only when it is not the centre).
+ */
 export const ShapeDtoSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('rectangle'),
     center: PointDtoSchema,
+    anchor: AnchorDtoSchema.optional(),
     length: length().describe('Size along X'),
     width: length().describe('Size along Y'),
     cornerRadius: length(),
   }),
-  z.object({ kind: z.literal('circle'), center: PointDtoSchema, diameter: length() }),
+  z.object({
+    kind: z.literal('circle'),
+    center: PointDtoSchema,
+    anchor: AnchorDtoSchema.optional(),
+    diameter: length(),
+  }),
 ])
 export type ShapeDTO = z.output<typeof ShapeDtoSchema>
 

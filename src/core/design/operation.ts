@@ -12,6 +12,7 @@ import type { QuantityDTO } from '../quantity/quantity.dto'
 import { Tolerance } from '../quantity/tolerance'
 import type { UnitSystem } from '../project/document'
 import type {
+  AnchorDTO,
   DrillBottomKind,
   GeneralToleranceDTO,
   OperationDTO,
@@ -23,15 +24,28 @@ import { designToolFromDTO, designToolToDTO, type DesignTool } from './tool'
 
 export type Point = readonly [Quantity, Quantity]
 
+/** Placement anchor: a point of the shape's bounding rectangle in the face frame (anchor.ts). */
+export type Anchor = Readonly<AnchorDTO>
+
+/** The default anchor, and the one of every v0.1 record. */
+export const CENTRE_ANCHOR: Anchor = Object.freeze({ u: 'centre', v: 'centre' })
+
+/** `center` is the anchor point (`[u, v]` of `anchor`), not necessarily the geometric centre. */
 export type Shape =
   | {
       readonly kind: 'rectangle'
       readonly center: Point
+      readonly anchor: Anchor
       readonly length: Quantity
       readonly width: Quantity
       readonly cornerRadius: Quantity
     }
-  | { readonly kind: 'circle'; readonly center: Point; readonly diameter: Quantity }
+  | {
+      readonly kind: 'circle'
+      readonly center: Point
+      readonly anchor: Anchor
+      readonly diameter: Quantity
+    }
 
 export interface GeneralTolerance {
   readonly length: Option<Quantity>
@@ -235,10 +249,12 @@ function pointFromDTO(p: readonly [QuantityDTO, QuantityDTO], ...path: string[])
 
 function shapeFromDTO(s: ShapeDTO): AppResult<Shape> {
   const center = pointFromDTO(s.center, 'shape', 'center')
+  const anchor: Anchor = s.anchor === undefined ? CENTRE_ANCHOR : { u: s.anchor.u, v: s.anchor.v }
   if (s.kind === 'circle')
     return collect<unknown>([center, q(s.diameter, 'shape', 'diameter')]).map(() => ({
       kind: 'circle',
       center: center.unwrap(),
+      anchor,
       diameter: q(s.diameter).unwrap(),
     }))
   const fields = [
@@ -251,6 +267,7 @@ function shapeFromDTO(s: ShapeDTO): AppResult<Shape> {
     return {
       kind: 'rectangle',
       center: center.unwrap(),
+      anchor,
       length: length!,
       width: width!,
       cornerRadius: cornerRadius!,
@@ -353,12 +370,18 @@ export function operationFromDTO(dto: OperationDTO): AppResult<Operation> {
 
 function shapeToDTO(s: Shape): ShapeDTO {
   const center = [s.center[0].toDTO(), s.center[1].toDTO()]
+  // left out at the centre, so v0.1 records stay byte-identical
+  const anchor =
+    s.anchor.u === 'centre' && s.anchor.v === 'centre'
+      ? {}
+      : { anchor: { u: s.anchor.u, v: s.anchor.v } }
   return (
     s.kind === 'circle'
-      ? { kind: 'circle', center, diameter: s.diameter.toDTO() }
+      ? { kind: 'circle', center, ...anchor, diameter: s.diameter.toDTO() }
       : {
           kind: 'rectangle',
           center,
+          ...anchor,
           length: s.length.toDTO(),
           width: s.width.toDTO(),
           cornerRadius: s.cornerRadius.toDTO(),

@@ -3,6 +3,7 @@
  * Doc: docs/modes/plan-v0.1.md#plan-operations-and-order
  */
 import type { Operation, Part, Shape } from '../design/operation'
+import { shapeCentre } from '../design/anchor'
 import type { OperationKind } from '../design/part.dto'
 import { DIRECTIONS, STOCK_FACE, type Direction } from '../geometry/face'
 import type { PlanWarning } from './checks'
@@ -146,8 +147,7 @@ export function repairOrder(planOps: readonly PlanOperationDTO[], part: Part): P
 
 /** True if the point lies inside the shape's bounds (v0.1: axis-aligned rectangles, circles). */
 function inside(shape: Shape, x: number, y: number): boolean {
-  const cx = shape.center[0].canonical
-  const cy = shape.center[1].canonical
+  const [cx, cy] = shapeCentre(shape)
   if (shape.kind === 'circle') return Math.hypot(x - cx, y - cy) < shape.diameter.canonical / 2
   return (
     Math.abs(x - cx) < shape.length.canonical / 2 && Math.abs(y - cy) < shape.width.canonical / 2
@@ -156,8 +156,7 @@ function inside(shape: Shape, x: number, y: number): boolean {
 
 function centerOf(op: Operation): [number, number] | undefined {
   if (op.kind === 'drilling') return [op.center[0].canonical, op.center[1].canonical]
-  if (op.kind === 'pocket' || op.kind === 'profile')
-    return [op.shape.center[0].canonical, op.shape.center[1].canonical]
+  if (op.kind === 'pocket' || op.kind === 'profile') return [...shapeCentre(op.shape)]
   return undefined
 }
 

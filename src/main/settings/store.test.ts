@@ -17,6 +17,7 @@ describe('settings store', () => {
       theme: 'system',
       reduceMotion: false,
       allowLocalAgents: true,
+      defaultAnchor: { u: 'centre', v: 'centre' },
     })
     expect(log.at('warn')).toEqual([])
   })
@@ -33,6 +34,7 @@ describe('settings store', () => {
       reduceMotion: false,
       allowLocalAgents: false,
       layouts: { shell: { navigator: 20, viewport: 80 }, other: { a: 100 } },
+      defaultAnchor: { u: 'centre', v: 'centre' },
     })
 
     await writeFile(join(tmp.dir, SETTINGS_FILE), JSON.stringify({ reduceMotion: true }))
@@ -59,7 +61,10 @@ describe('settings store', () => {
     })
     expectErrCode(store.update({ theme: 'blue' }), 'input.malformed')
     expectErrCode(store.update({ token: 'x' }), 'input.malformed')
+    expectErrCode(store.update({ defaultAnchor: { u: 'left', v: 'min' } }), 'input.malformed')
     expect(store.get()).toEqual(DEFAULT_SETTINGS)
+    const next = expectOk(store.update({ defaultAnchor: { u: 'min', v: 'max' } }))
+    expect(next.defaultAnchor).toEqual({ u: 'min', v: 'max' })
   })
 
   it('falls back to the defaults for an invalid file, with a warning', async () => {

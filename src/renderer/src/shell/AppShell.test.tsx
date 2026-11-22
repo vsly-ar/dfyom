@@ -161,6 +161,7 @@ describe('AppShell', () => {
         reduceMotion: false,
         allowLocalAgents: true,
         layouts: {},
+        defaultAnchor: { u: 'centre', v: 'centre' },
       }),
     )
     await waitFor(() => expect(document.documentElement.dataset['theme']).toBe('light'))
