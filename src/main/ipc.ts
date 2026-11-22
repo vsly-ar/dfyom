@@ -119,6 +119,15 @@ export interface WindowSessions {
    * cancelled dialog or failed save.
    */
   saveAll(projects: readonly OpenProjectInfo[]): Promise<SaveAllOutcome>
+  /**
+   * Makes the Library window a session without a project (it calls the app-scope `library.*`
+   * commands; docs/conventions/ui-library-window.md), ended when it closes.
+   */
+  attachLibrary(win: BrowserWindow): void
+  /** Whether a DFYOM window (project or Library) owns these web contents. */
+  isWindow(webContentsId: number): boolean
+  /** The project a window shows: its key and runtime, if bound. */
+  boundProject(webContentsId: number): { key: string; dispatcher: Dispatcher } | undefined
 }
 
 export function registerProjectIpc(
@@ -180,9 +189,33 @@ export function registerProjectIpc(
       const gesture = gestureOf(opts)
       const r = await ws.session.call(name, args ?? {}, gesture === undefined ? {} : { gesture })
       follow(ws)
-      return reply(r.result)
+      const out = reply(r.result)
+      // Stop works from every window (ui.md#run-mode-safety-ui): a run job belongs to its
+      // project's dispatcher, so a window without that project (another project, the Library
+      // window) aborts it there.
+      if (!out.ok && name === 'job.abort') return abortElsewhere(args, ws, out)
+      return out
     },
   )
+
+  /** `job.abort` through each other open project until one knows the job; else `refused`. */
+  const abortElsewhere = async (
+    args: unknown,
+    ws: WindowSession,
+    refused: CallReply,
+  ): Promise<CallReply> => {
+    const session = host.openSession({ kind: 'ui', id: `stop-${ws.win.id}` })
+    try {
+      for (const p of host.list()) {
+        if (p.key === ws.session.boundKey || session.bind(p.key).isErr()) continue
+        const r = reply((await session.call('job.abort', args ?? {})).result)
+        if (r.ok) return r
+      }
+      return refused
+    } finally {
+      session.end()
+    }
+  }
 
   // Same sender check for every handler: only a DFYOM window's main frame.
   ipcMain.handle(IPC.agentsList, (event) =>
@@ -450,6 +483,17 @@ export function registerProjectIpc(
       const win = windows.create(BrowserWindow.getFocusedWindow() ?? undefined)
       attach(win, key)
       windows.reveal(win)
+    },
+    attachLibrary(win) {
+      attach(win, undefined)
+    },
+    isWindow: (id) => byContents.has(id),
+    boundProject(id) {
+      const ws = byContents.get(id)
+      const key = ws?.session.boundKey
+      const bound = ws?.session.bound()
+      if (key === undefined || bound === undefined || bound.isNone()) return undefined
+      return { key, dispatcher: bound.unwrap() }
     },
   }
 }

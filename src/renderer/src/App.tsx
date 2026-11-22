@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useSyncExternalStore } from 'react'
+import { LibraryWindow } from './library/LibraryWindow'
 import { AppShell } from './shell/AppShell'
-import { useSettings } from './shell/ShellContext'
+import { useSettings, useShell } from './shell/ShellContext'
 import { applySettings } from './state/settings'
 
 // Dev-only component gallery at #gallery (docs/conventions/ui.md#inventory-v01). The DEV check is
@@ -14,8 +15,12 @@ function subscribeHash(onChange: () => void): () => void {
   return () => window.removeEventListener('hashchange', onChange)
 }
 
-/** The window: the app shell, or the dev-only gallery at #gallery. Settings apply to the root. */
+/**
+ * The window: the app shell, the Library window (window kind `library`, ui-library-window.md), or
+ * the dev-only gallery at #gallery. Settings apply to the root.
+ */
 export function App(): React.JSX.Element {
+  const { bridge } = useShell()
   const hash = useSyncExternalStore(subscribeHash, () => window.location.hash)
   const settings = useSettings((s) => s.settings)
   useEffect(() => applySettings(settings), [settings])
@@ -27,5 +32,5 @@ export function App(): React.JSX.Element {
       </Suspense>
     )
   }
-  return <AppShell />
+  return bridge.windowKind === 'library' ? <LibraryWindow /> : <AppShell />
 }

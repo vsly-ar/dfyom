@@ -4,7 +4,9 @@
 // source note ("Chosen by you.", "Chosen automatically: …", "Chosen again on Apply." with the
 // value muted) and the checks against the tool (`dfm.toolUnfit`, `dfm.toolNotInLibrary`; soft
 // with a clock while Apply may change them). Picking and the lock commit only (one command, one
-// undo step each); the auto choice runs on Apply.
+// undo step each); the auto choice runs on Apply. "New tool…" at the end of the list (and the fix
+// "Add to library" of `dfm.toolNotInLibrary`) adds a library tool prefilled from the generalized
+// one and locks it (docs/conventions/ui-library-window.md L4).
 // Doc: docs/modes/design-v0.2.md#operation-tool, #implementation-task-f5;
 // docs/conventions/ui.md#design-and-plan-controls-v02; docs/architecture/apply.md#stale-derived-results
 import { Clock } from 'lucide-react'
@@ -15,10 +17,13 @@ import type { DfmWarning } from '../../../../core/geometry/model'
 import type { UnitSystem } from '../../../../core/project/document'
 import { isExpression } from '../../../../core/design/anchor'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
+import type { ToolPrefill } from '../../library/form'
+import { NewToolDialog } from '../../library/NewToolDialog'
 import { applyMessages } from '../../messages/apply'
 import { designMessages } from '../../messages/design'
 import { dfmMessages, lengthSource } from '../../messages/dfm'
-import { usePending, useReplica, useShell } from '../../shell/ShellContext'
+import { libraryMessages } from '../../messages/library'
+import { useLibraryVersion, usePending, useReplica, useShell } from '../../shell/ShellContext'
 import type { PendingChangeView, ToolChangeView } from '../../state/pending'
 import { toolChangeKey } from '../../state/pending'
 import { Field, FieldIcon, Select, type FieldMessage, type SelectOption } from '../../ui'
@@ -50,6 +55,8 @@ export interface ToolCandidates {
 const GENERALIZED = 'generalized'
 const CURRENT = 'current'
 const LIB = 'lib:'
+/** The list's last item: "New tool…" (ui-library-window.md L4). */
+export const NEW_TOOL = 'new-tool'
 
 /** "6 mm flat end mill", or the library tool's name (its snapshot), or undefined. */
 export function toolLabel(tool: DesignToolDTO, doc: DesignPart['doc']): string | undefined {
@@ -163,6 +170,7 @@ function useCandidates(
   const revision = replica.status === 'open' ? replica.revision : -1
   const version = usePending().version
   const [asked, setAsked] = useState(0)
+  const library = useLibraryVersion()
   const [value, setValue] = useState<ToolCandidates | undefined>(undefined)
   useEffect(() => {
     let live = true
@@ -172,12 +180,27 @@ function useCandidates(
     return () => {
       live = false
     }
-  }, [bridge, partId, operationId, revision, version, asked])
+  }, [bridge, partId, operationId, revision, version, asked, library])
   return [value, () => setAsked((n) => n + 1)]
 }
 
 /** The combobox options and the value the current tool is shown as. */
 export function toolOptions(
+  candidates: ToolCandidates | undefined,
+  op: OperationDTO,
+  part: Pick<DesignPart, 'doc' | 'units'>,
+): { options: SelectOption<string>[]; value: string | undefined } {
+  const r = listedOptions(candidates, op, part)
+  return {
+    ...r,
+    options: [
+      ...r.options,
+      { value: NEW_TOOL, label: t.newTool, group: t.groups.add, description: t.newToolNote },
+    ],
+  }
+}
+
+function listedOptions(
   candidates: ToolCandidates | undefined,
   op: OperationDTO,
   part: Pick<DesignPart, 'doc' | 'units'>,
@@ -219,6 +242,18 @@ export function toolOptions(
   return { options, value: CURRENT }
 }
 
+/** The generalized tool a new library tool starts from (type, diameter, corner radius; L4). */
+function prefill(g: DesignToolDTO | null): ToolPrefill | undefined {
+  if (g === null || g.kind !== 'generalized') return undefined
+  return {
+    type: g.type,
+    diameter: g.diameter as ToolPrefill['diameter'],
+    ...(g.cornerRadius !== undefined
+      ? { cornerRadius: g.cornerRadius as ToolPrefill['diameter'] }
+      : {}),
+  }
+}
+
 const sentenceCase = (s: string) => (s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1))
 
 /** The `tool` arg of `design.operation.tool.set` for a chosen option. */
@@ -258,14 +293,18 @@ export function ToolField({
     const r = await call(name, { partId, operationId: op.id, ...args })
     setError(r.ok ? undefined : r.error)
   }
+  const [adding, setAdding] = useState(false)
   const choose = (v: string) => {
+    if (v === NEW_TOOL) return setAdding(true)
     if (v === value || v === CURRENT) return
     const tool = toolArg(v, candidates)
     if (tool !== undefined) void send('design.operation.tool.set', { tool })
   }
 
   // the fix of a tool check: the first fitting tool (it locks), else "Unlock"
-  const first = options.find((o) => o.value !== CURRENT && o.value !== value)
+  const first = options.find(
+    (o) => o.value !== CURRENT && o.value !== value && o.value !== NEW_TOOL,
+  )
   const fix =
     first !== undefined
       ? { label: t.use(first.label), onApply: () => choose(first.value) }
@@ -294,6 +333,9 @@ export function ToolField({
               severity: dfmMessages.tier(w),
               text,
               ...(w.code === 'dfm.toolUnfit' && fix !== undefined ? { fix } : {}),
+              ...(w.code === 'dfm.toolNotInLibrary'
+                ? { fix: { label: t.addToLibrary, onApply: () => setAdding(true) } }
+                : {}),
             }
       }),
   ]
@@ -330,10 +372,9 @@ export function ToolField({
           options={options}
           value={value ?? ''}
           placeholder={
-            candidates !== undefined && options.length === 0 ? t.noChoice : t.placeholder
+            candidates !== undefined && options.length === 1 ? t.noChoice : t.placeholder
           }
           muted={waiting}
-          disabled={options.length === 0}
           onValueChange={choose}
           onOpenChange={(open) => {
             if (open) reread()
@@ -353,6 +394,26 @@ export function ToolField({
           <span>{source}</span>
         </p>
       ) : null}
+      <NewToolDialog
+        units={part.units}
+        operationKind={op.kind}
+        prefill={prefill(
+          candidates?.generalized ?? (op.tool?.kind === 'generalized' ? op.tool : null),
+        )}
+        description={libraryMessages.tool.designDescription}
+        trigger={null}
+        open={adding}
+        onOpenChange={setAdding}
+        onAdded={async (id) => {
+          const r = await call('design.operation.tool.set', {
+            partId,
+            operationId: op.id,
+            tool: { kind: 'specific', toolLibraryItemId: id },
+          })
+          if (r.ok) setError(undefined)
+          return r.ok ? undefined : r.error
+        }}
+      />
     </div>
   )
 }

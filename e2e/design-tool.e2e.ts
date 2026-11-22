@@ -81,7 +81,9 @@ test('tool field: auto choice on Apply with its reason, chosen again on Apply, l
   await expect(lock).toHaveAttribute('aria-pressed', 'false')
   await combo.click()
   const list = page.getByRole('listbox')
-  await expect(list.getByRole('group')).toHaveCount(1)
+  // the generalized tool, then "New tool…" (no library tool fits)
+  await expect(list.getByRole('group')).toHaveCount(2)
+  await expect(list.getByRole('option', { name: /^New tool/ })).toBeVisible()
   await expect(
     list.getByRole('option', { name: '3 mm flat end mill' }),
   ).toHaveAccessibleDescription('Type and size only: Plan uses a matching library tool.')

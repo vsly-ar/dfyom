@@ -102,7 +102,7 @@ describe('evaluation push', () => {
     expect(planEvaluationView(h.host, 'p1', 'plan1')).toBeNull()
   })
 
-  it('the menu has File, Edit, View and Help with the documented accelerators', () => {
+  it('the menu has File, Edit, View, Window and Help with the documented accelerators', () => {
     const t = menuTemplate('linux', false)
     expect(t.map((m) => m.label ?? m.role)).toEqual(['File', 'Edit', 'View', 'windowMenu', 'help'])
     const accelerators = t.flatMap((m) =>
@@ -119,6 +119,7 @@ describe('evaluation push', () => {
       'CmdOrCtrl+1',
       'CmdOrCtrl+2',
       'CmdOrCtrl+3',
+      'CmdOrCtrl+Shift+L',
     ])
     expect(menuTemplate('darwin', true)[0]).toEqual({ role: 'appMenu' })
   })

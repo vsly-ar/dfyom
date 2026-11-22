@@ -24,7 +24,13 @@ import type {
   ProjectSnapshot,
   ReferenceMeshReply,
   WindowCloseRequest,
+  LibraryCloseRequest,
+  LibraryContext,
+  LibraryTarget,
+  LibraryWindowState,
+  WindowKind,
 } from '../../../shared/preload-api'
+import type { LibraryChange } from '../../../core/library/library'
 import type { AsyncAppResult } from '../../../shared/result'
 import { DEFAULT_SETTINGS, type AppSettings } from '../../../shared/settings'
 
@@ -101,6 +107,21 @@ export interface FakeBridge extends PreloadApi {
   setReferenceMesh(
     handler: (referenceId: string) => ReferenceMeshReply | Promise<ReferenceMeshReply>,
   ): void
+  /**
+   * The app-scope dispatcher calls go to while no project is bound (the Library window's
+   * `library.*` commands); its library's writes are pushed as `library.onChanged`.
+   */
+  appScope(dispatcher: Dispatcher, library?: Library): void
+  /** `library.open` requests, in order. */
+  readonly libraryOpens: LibraryTarget[]
+  /** `library.report` states, in order. */
+  readonly libraryReports: LibraryWindowState[]
+  /** `library.close` calls (their `quit`), in order. */
+  readonly libraryCloses: boolean[]
+  /** Sets (and pushes) the Library window's context. */
+  emitLibraryContext(context: LibraryContext): void
+  emitLibraryChange(change: LibraryChange): void
+  emitLibraryCloseRequest(request: LibraryCloseRequest): void
 }
 
 export function errorReply(error: AppErrorData, retryable = false): CallReply {
@@ -134,7 +155,18 @@ async function toReply(
   return out.isOk() ? { ok: true, ...out.unwrap() } : { ok: false, ...agentError(out.unwrapErr()) }
 }
 
-export function createFakeBridge(initial: AppSettings = DEFAULT_SETTINGS): FakeBridge {
+export function createFakeBridge(
+  initial: AppSettings = DEFAULT_SETTINGS,
+  windowKind: WindowKind = 'project',
+): FakeBridge {
+  const libraryChanges = channel<LibraryChange>()
+  const libraryContexts = channel<LibraryContext>()
+  const libraryCloseRequests = channel<LibraryCloseRequest>()
+  let libraryContext: LibraryContext = { project: null, target: null, tab: 'tool' }
+  let app: { d: Dispatcher; off: () => void } | undefined
+  const libraryOpens: LibraryTarget[] = []
+  const libraryReports: LibraryWindowState[] = []
+  const libraryCloses: boolean[] = []
   const events = channel<ActionEvent>()
   const bound = channel<string | null>()
   const sessions = channel<readonly AgentSessionInfo[]>()
@@ -171,6 +203,7 @@ export function createFakeBridge(initial: AppSettings = DEFAULT_SETTINGS): FakeB
     calls,
     settingsPatches,
     closeCalls,
+    windowKind,
     versions: { electron: 'test', chrome: 'test', node: 'test' },
     log: { level: 'info', send: () => {} },
     run: { onStatus: runStatus.on },
@@ -179,8 +212,8 @@ export function createFakeBridge(initial: AppSettings = DEFAULT_SETTINGS): FakeB
       calls.push({ name, args, ...(gesture === undefined ? {} : { gesture }) })
       const h = handlers.get(name)
       if (h) return h(args ?? {})
-      if (project === undefined) return NO_PROJECT
-      const d = project.d
+      const d = project?.d ?? app?.d
+      if (d === undefined) return NO_PROJECT
       // queries first (as the session routes them); an unknown query is a command
       const q = d.query(name, args ?? {}, WINDOW_SOURCE)
       if (q.isOk() || q.unwrapErr().code !== 'command.unknown') return toReply(Promise.resolve(q))
@@ -252,6 +285,34 @@ export function createFakeBridge(initial: AppSettings = DEFAULT_SETTINGS): FakeB
       referenceMesh = handler
     },
     menu: { onAction: menu.on },
+    library: {
+      open(target) {
+        libraryOpens.push(target ?? {})
+        return Promise.resolve()
+      },
+      onChanged: libraryChanges.on,
+      context: () => Promise.resolve(libraryContext),
+      onContext: libraryContexts.on,
+      report: (state) => void libraryReports.push(state),
+      onCloseRequest: libraryCloseRequests.on,
+      close(quit) {
+        libraryCloses.push(quit === true)
+        return Promise.resolve()
+      },
+    },
+    libraryOpens,
+    libraryReports,
+    libraryCloses,
+    appScope(d, lib) {
+      app?.off()
+      app = { d, off: lib === undefined ? () => {} : lib.subscribe(libraryChanges.emit) }
+    },
+    emitLibraryContext(c) {
+      libraryContext = c
+      libraryContexts.emit(c)
+    },
+    emitLibraryChange: libraryChanges.emit,
+    emitLibraryCloseRequest: libraryCloseRequests.emit,
     saveDialogNames,
     exportDialogNames,
     emitEvaluation(view) {

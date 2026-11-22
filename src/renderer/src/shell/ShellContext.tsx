@@ -9,6 +9,7 @@ import {
   type Evaluations,
   type PartEvaluationEntry,
 } from '../state/evaluations'
+import { createLibraryChanges, type LibraryChanges } from '../state/library-changes'
 import { createPending, type PendingState, type PendingStore } from '../state/pending'
 import { createReferenceMeshes, type ReferenceMeshes } from '../state/reference-meshes'
 import { createReplica, type Replica, type ReplicaState } from '../state/replica'
@@ -29,6 +30,8 @@ export interface Shell {
   readonly pending: PendingStore
   /** The reference ghosts' triangles, per asset (task R3). */
   readonly referenceMeshes: ReferenceMeshes
+  /** Library writes by anyone (task L1): views of library data re-read on each. */
+  readonly libraryChanges: LibraryChanges
 }
 
 export function createShell(bridge: PreloadApi): Shell {
@@ -42,6 +45,7 @@ export function createShell(bridge: PreloadApi): Shell {
     files: createProjectFiles({ bridge, replica }),
     pending: createPending(bridge, replica),
     referenceMeshes: createReferenceMeshes(bridge),
+    libraryChanges: createLibraryChanges(bridge),
   }
 }
 
@@ -60,9 +64,12 @@ export function ShellProvider({
     const stopSettings = shell.settings.start()
     const stopEvaluations = shell.evaluations.start()
     const stopPending = shell.pending.start()
+    // a library edit is pending in projects whose draft plans copy it, without a project event
+    const stopLibrary = shell.libraryChanges.start(() => shell.pending.refresh())
     // a newly bound (or reopened) project shows every reference (decision D17)
     const stopBound = shell.bridge.project.onBound(() => shell.ui.getState().resetReferenceView())
     return () => {
+      stopLibrary()
       stopPending()
       stopReplica()
       stopSettings()
@@ -90,6 +97,12 @@ export function useSettings<T>(selector: (s: SettingsState) => T): T {
 
 export function useUi<T>(selector: (s: UiState) => T): T {
   return useStore(useShell().ui, selector)
+}
+
+/** Grows with every library write (task L1): a dependency of views that show library data. */
+export function useLibraryVersion(): number {
+  const { libraryChanges } = useShell()
+  return useSyncExternalStore(libraryChanges.subscribe, libraryChanges.getState)
 }
 
 /** The window's pending changes and Apply state (task P3). */

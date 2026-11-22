@@ -92,3 +92,23 @@ export function windowStart(i: WindowStartInput): WindowStart {
   if (i.othersOpen) return plain(cascadeBounds(bounds, workAreaOf(bounds, i.workAreas, i.primary)))
   return { bounds, maximized: i.saved.maximized, fullScreen: i.saved.fullScreen }
 }
+
+/** The Library window's default size, centred (docs/conventions/ui-library-window.md, L1). */
+export const LIBRARY_WINDOW_SIZE = { width: 1180, height: 760 } as const
+
+/**
+ * The Library window's start: its own remembered bounds made visible, restored as it was
+ * (maximized, full screen); without a record, the default size, centred.
+ */
+export function libraryWindowStart(
+  saved: WindowState | undefined,
+  workAreas: readonly Rect[],
+  primary: Rect,
+): WindowStart {
+  if (saved === undefined) return { bounds: undefined, maximized: false, fullScreen: false }
+  return {
+    bounds: visibleBounds(saved.bounds, workAreas, primary),
+    maximized: saved.maximized,
+    fullScreen: saved.fullScreen,
+  }
+}

@@ -9,7 +9,8 @@
 import { z } from 'zod'
 import { collect, Ok, type AppResult } from '../../shared/result'
 import type { UnitSystem } from '../project/document'
-import { MAX_SOURCE_LENGTH } from '../quantity/parse'
+import { MAX_SOURCE_LENGTH, parseLiteral } from '../quantity/parse'
+import type { QuantityDTO } from '../quantity/quantity.dto'
 import { Quantity } from '../quantity/quantity'
 import type { QuantityKind, UnitId } from '../quantity/units'
 
@@ -104,4 +105,71 @@ export function valuesFromInput(
     )
   }
   return Ok(value)
+}
+
+// ── values → command input (the Library window's draft, task L1) ─────────────────────────
+
+/** A stored quantity DTO node (structural: `kind`, `source`, `defaultUnit`, `exact`). */
+function isQuantityDto(v: unknown): v is QuantityDTO {
+  return (
+    typeof v === 'object' &&
+    v !== null &&
+    'source' in v &&
+    'defaultUnit' in v &&
+    'exact' in v &&
+    'kind' in v
+  )
+}
+
+/**
+ * The quantity's source with its unit written out when the source has none and its bare-number
+ * unit differs from `units`' (`1/4` entered in inches → `1/4 in`), so it reads the same with any
+ * `units` arg; otherwise the source unchanged. A source that no longer parses is returned as is
+ * (the command reports it).
+ */
+export function sourceFor(q: QuantityDTO, units: UnitSystem): string {
+  if (q.defaultUnit === libraryUnit(q.kind, units)) return q.source
+  const parsed = parseLiteral(q.source, { kind: q.kind, defaultUnit: q.defaultUnit })
+  if (parsed.isErr()) return q.source
+  const { end, unit } = parsed.unwrap().nominal
+  if (unit.isSome()) return q.source
+  return `${q.source.slice(0, end)} ${q.defaultUnit}${q.source.slice(end)}`
+}
+
+/**
+ * Command input (`values` of `library.<kind>.add` / `.update`) from stored values: every quantity
+ * DTO becomes its source (`sourceFor`, so stored sources stay as entered when `units` is the
+ * item's own unit system), `kind` is dropped. Doc: docs/architecture/library.md#command-input
+ */
+export function valuesInputFromDTO(values: object, units: UnitSystem): Record<string, unknown> {
+  const walk = (v: unknown): unknown => {
+    if (isQuantityDto(v)) return sourceFor(v, units)
+    if (Array.isArray(v)) return v.map(walk)
+    if (typeof v === 'object' && v !== null)
+      return Object.fromEntries(
+        Object.entries(v).flatMap(([k, x]) => (x === undefined ? [] : [[k, walk(x)]])),
+      )
+    return v
+  }
+  const { kind: _kind, ...rest } = values as Record<string, unknown>
+  return walk(rest) as Record<string, unknown>
+}
+
+/**
+ * The unit system an item was entered in: that of its first length quantity's bare-number unit
+ * (`in` → `inch`), else `fallback`. Saving with it keeps unchanged sources byte for byte.
+ */
+export function itemUnitSystem(values: object, fallback: UnitSystem): UnitSystem {
+  const find = (v: unknown): QuantityDTO | undefined => {
+    if (isQuantityDto(v)) return v.kind === 'length' ? v : undefined
+    if (typeof v !== 'object' || v === null) return undefined
+    for (const x of Object.values(v)) {
+      const q = find(x)
+      if (q !== undefined) return q
+    }
+    return undefined
+  }
+  const q = find(values)
+  if (q === undefined) return fallback
+  return q.defaultUnit === 'in' ? 'inch' : q.defaultUnit === 'mm' ? 'mm' : fallback
 }

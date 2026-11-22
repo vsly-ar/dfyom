@@ -10,6 +10,9 @@ import type { EvaluationStatus } from '../core/design/evaluation'
 import type { PartEvaluation } from '../core/geometry/evaluate'
 import type { ProjectDoc } from '../core/project/document'
 import type { RunStatus } from '../core/run/service'
+import type { LibraryItemKind } from '../core/library/item'
+import type { LibraryChange } from '../core/library/library'
+import type { UnitSystem } from '../core/project/document'
 import type { AppErrorData } from './errors/app-error'
 import type { LogLevel, LogRecord } from './logging'
 import type { AppSettings, AppSettingsPatch } from './settings'
@@ -67,7 +70,67 @@ export const IPC = {
   referenceMesh: 'dfyom:reference.mesh',
   /** Main → renderer: a native application menu item was chosen (`MenuAction`). */
   menuAction: 'dfyom:menu.action',
+  /**
+   * Renderer → main (invoke): open (or focus) the Library window on a tab / item (`LibraryTarget`),
+   * with the asking window's project as its context (docs/conventions/ui-library-window.md).
+   */
+  libraryOpen: 'dfyom:library.open',
+  /** Main → renderer (every window): a library item was added, updated or removed (`LibraryChange`). */
+  libraryChanged: 'dfyom:library.changed',
+  /** Library window → main (invoke): its context (`LibraryContext`). */
+  libraryContext: 'dfyom:library.context',
+  /** Main → Library window: its context changed (opened again, the project's library use changed). */
+  libraryContextChanged: 'dfyom:library.contextChanged',
+  /** Library window → main (send): its unsaved draft and tab (`LibraryWindowState`). */
+  libraryState: 'dfyom:library.state',
+  /** Main → Library window: closing (or quitting) needs the user's choice about the draft. */
+  libraryCloseRequest: 'dfyom:library.closeRequest',
+  /** Library window → main (invoke): close now, the draft was saved or discarded. */
+  libraryClose: 'dfyom:library.close',
 } as const
+
+/** Window argument (`webPreferences.additionalArguments`): which window this is. */
+export const WINDOW_KIND_ARG = '--dfyom-window'
+/** A project window (the app shell) or the one Library window. */
+export type WindowKind = 'project' | 'library'
+
+/** Which tab and item the Library window shows when it is opened. */
+export interface LibraryTarget {
+  readonly kind?: LibraryItemKind
+  readonly itemId?: string
+}
+
+/** The project of the window that opened the Library window (L5 units, "Used in this project"). */
+export interface LibraryProjectContext {
+  readonly key: string
+  readonly name: string
+  readonly unitSystem: UnitSystem
+  /** Library item ids the project uses (its snapshots and plan copies). */
+  readonly used: readonly string[]
+}
+
+/** What the Library window shows beyond the library itself. Window plumbing, not for agents. */
+export interface LibraryContext {
+  /** Null when opened from a window without a project, or once that project closed. */
+  readonly project: LibraryProjectContext | null
+  /** The last open request's tab and item; `seq` grows with every request. */
+  readonly target: (LibraryTarget & { readonly seq: number }) | null
+  /** The tab to start on (the last one of this app instance). */
+  readonly tab: LibraryItemKind
+}
+
+/** What the Library window reports to main: its unsaved draft (item name) and tab. */
+export interface LibraryWindowState {
+  readonly draft: string | null
+  readonly tab: LibraryItemKind
+}
+
+/** Closing the Library window (or quitting) with a draft: the window asks Save / Discard / Cancel. */
+export interface LibraryCloseRequest {
+  readonly name: string
+  /** The app quits once the window closed. */
+  readonly quit: boolean
+}
 
 /** The mesh of a done evaluation as the viewport draws it (copied by IPC, ≤ about 1 MB). */
 export type EvaluationMesh = Pick<
@@ -191,6 +254,8 @@ export type WindowCloseRequest =
 export type OpenedWindow = 'this' | 'other' | 'new'
 
 export interface PreloadApi {
+  /** Which window this is (window argument `--dfyom-window`; `project` when absent). */
+  readonly windowKind: WindowKind
   readonly versions: {
     readonly electron: string
     readonly chrome: string
@@ -271,6 +336,27 @@ export interface PreloadApi {
   /** Reference models of the window's project (task R3): the ghost's triangles. */
   readonly reference: {
     mesh(referenceId: string): Promise<ReferenceMeshReply>
+  }
+  /**
+   * The Library window (docs/conventions/ui-library-window.md): window plumbing around the
+   * `library.*` commands, which every window calls with `call` like agents do.
+   */
+  readonly library: {
+    /** Opens or focuses the Library window on a tab / item, with this window's project. */
+    open(target?: LibraryTarget): Promise<void>
+    /** Library writes by anyone (this instance's windows, agents). */
+    onChanged(listener: (change: LibraryChange) => void): () => void
+    /** Library window: its context. */
+    context(): Promise<LibraryContext>
+    onContext(listener: (context: LibraryContext) => void): () => void
+    /** Library window: reports its draft (guards closing and quitting) and tab. */
+    report(state: LibraryWindowState): void
+    onCloseRequest(listener: (request: LibraryCloseRequest) => void): () => void
+    /**
+     * Library window: closes it (the draft was saved or discarded); `quit` passes on a close
+     * request's `quit`, so the app quits once it closed.
+     */
+    close(quit?: boolean): Promise<void>
   }
   /** The native application menu's items for this window. */
   readonly menu: {
