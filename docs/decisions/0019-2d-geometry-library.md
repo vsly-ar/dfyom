@@ -1,10 +1,10 @@
 # 0019 – 2D geometry library: CavalierContours (Rust crate as WASM)
 
-Status: proposed · Date: 2026-11-21 · Spike: S1 ([plans/v0.2.md](../plans/v0.2.md#7-spike-for-v03)) · For: [roadmap v0.3 – Shapes](../roadmap.md#v03--shapes-draft)
+Status: proposed · Date: 2026-11-21 · Spike: S1 ([plans/v0.2.md](../plans/v0.2.md#7-spike-for-v03)) · For: [roadmap v0.3 – Shapes](../roadmap.md#v03--shapes)
 
 ## Context
 
-v0.3 shapes are closed (and open) loops of lines and circular arcs ([roadmap](../roadmap.md#v03--shapes-draft)). They need **offsets** (tool radius compensation inward and outward, repeated offsets for pocket clearing with islands, loop splitting in narrow necks) and **booleans** (union and difference for the Shape Editor and islands). Arcs should survive both, so the model stays analytic and gCode keeps G2/G3 ([geometry.md](../architecture/geometry.md#layers)). The 2D layer runs in `src/core` (headless, in worker lanes, the renderer and the CLI).
+v0.3 shapes are closed (and open) loops of lines and circular arcs ([roadmap](../roadmap.md#v03--shapes)). They need **offsets** (tool radius compensation inward and outward, repeated offsets for pocket clearing with islands, loop splitting in narrow necks) and **booleans** (union and difference for the Shape Editor and islands). Arcs should survive both, so the model stays analytic and gCode keeps G2/G3 ([geometry.md](../architecture/geometry.md#layers)). The 2D layer runs in `src/core` (headless, in worker lanes, the renderer and the CLI).
 
 Candidates measured by the spike harness in [`spikes/2d/`](../../spikes/2d/harness.ts):
 
