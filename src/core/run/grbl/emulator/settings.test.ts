@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { expectOk } from '../../../../shared/testing/result'
-import { machineValues, num, rpm } from '../../../library/library.fixture'
+import { len, machineValues, num, rpm } from '../../../library/library.fixture'
 import { Machine } from '../../../library/machine'
 import { GrblEmulator } from './emulator'
 import { machineSettings, Settings } from './settings'
@@ -34,6 +34,21 @@ describe('settings', () => {
     expect(out).toContain('$20=1\r\n')
     expect(out).toContain('$132=100.000\r\n')
     expect(out).toContain('$31=8000\r\n')
+  })
+
+  it('takes junction deviation, arc tolerance and steps/mm when the machine sets them', () => {
+    const m = expectOk(
+      Machine.fromDTO({
+        ...machineValues(),
+        junctionDeviation: len('0.02'),
+        arcTolerance: len('0.001'),
+        stepsPerMm: { x: num('40'), y: num('40'), z: num('400') },
+      }),
+    )
+    expect(machineSettings(m)).toMatchObject({ 11: 0.02, 12: 0.001, 100: 40, 101: 40, 102: 400 })
+    const plain = machineSettings(expectOk(Machine.fromDTO(machineValues())))
+    expect(plain[11]).toBeUndefined()
+    expect(plain[100]).toBeUndefined()
   })
 
   it('keeps GRBL defaults for acceleration when the machine has none', () => {

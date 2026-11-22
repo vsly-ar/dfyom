@@ -76,7 +76,7 @@ Chip load is derived and displayed, not stored (it is not a v0.1 quantity kind �
 
 ## Machine
 
-v0.1: a 3-axis router or mill on a GRBL-family controller ([ADR 0013](../decisions/0013-grbl-first-controller.md)). Limit fields mirror GRBL `$` settings ([GRBL v1.1 configuration](https://github.com/gnea/grbl/wiki/Grbl-v1.1-Configuration)), so they can be imported from `$$` output later and configure the virtual machine.
+v0.1: a 3-axis router or mill on a GRBL-family controller ([ADR 0013](../decisions/0013-grbl-first-controller.md)). Limit fields mirror GRBL `$` settings ([GRBL v1.1 configuration](https://github.com/gnea/grbl/wiki/Grbl-v1.1-Configuration)), so they can be imported from `$$` output ([GRBL `$$` import](#grbl--import)) and configure the virtual machine.
 
 | Field                | Kind / type                                                          | v0.1 | Invariants        | Why                                                                                                                      |
 | -------------------- | -------------------------------------------------------------------- | ---- | ----------------- | ------------------------------------------------------------------------------------------------------------------------ |
@@ -84,6 +84,9 @@ v0.1: a 3-axis router or mill on a GRBL-family controller ([ADR 0013](../decisio
 | `travel.x/y/z`       | length ×3 (`$130–$132`)                                              | yes  | > 0               | **Work envelope** = travel box; plan checks that stock and toolpaths fit; `machine.travel.z` in expressions.             |
 | `maxFeedRate.x/y/z`  | feedRate ×3 (`$110–$112`)                                            | yes  | > 0               | Feed rates above it are flagged; GRBL also rapids (G0) at it, so it drives run-time estimates.                           |
 | `acceleration.x/y/z` | scalar ×3, mm/s² (`$120–$122`)                                       | no   | > 0               | Better time estimates; virtual machine timing.                                                                           |
+| `junctionDeviation`  | length (`$11`)                                                       | no   | > 0               | GRBL's cornering speed model; the virtual machine and time estimates use it (none = DFYOM default 0.010 mm).             |
+| `arcTolerance`       | length (`$12`)                                                       | no   | > 0               | Chord tolerance GRBL splits `G2`/`G3` into; virtual machine and time estimates (none = DFYOM default 0.002 mm).          |
+| `stepsPerMm.x/y/z`   | scalar ×3, steps/mm (`$100–$102`)                                    | no   | > 0               | Recorded so a changed drive or controller reset is noticed (`$$` import); reported by the virtual machine, not used.     |
 | `spindle.control`    | `'gcode' \| 'manual'`                                                | yes  | –                 | `manual` (trim router dial): export pauses (M0) and asks the user to set the speed; S words informative.                 |
 | `spindle.maxSpeed`   | spindleSpeed (`$30`)                                                 | yes  | > 0               | GRBL clamps S above `$30` silently, so plan flags it.                                                                    |
 | `spindle.minSpeed`   | spindleSpeed (`$31`)                                                 | no   | ≥ 0, < `maxSpeed` | Flags presets below the spindle's range.                                                                                 |
@@ -92,7 +95,43 @@ v0.1: a 3-axis router or mill on a GRBL-family controller ([ADR 0013](../decisio
 | `programUnits`       | `'mm' \| 'in'`                                                       | yes  | –                 | G21/G20 in exported gCode. GRBL settings are always mm; `$13` changes only reports.                                      |
 | `toolChanger`        | `'none'`                                                             | yes  | –                 | Manual tool change: export stops (M0), the user changes the tool and re-zeros Z.                                         |
 
-Axes are fixed X/Y/Z in v0.1; 4th/5th axis, homing direction, tool length sensor and tool table come later.
+`acceleration` and `stepsPerMm` are set for all three axes or for none. Axes are fixed X/Y/Z in v0.1; 4th/5th axis, homing direction, tool length sensor and tool table come later.
+
+## GRBL `$$` import
+
+Status: implemented (paste import, D30) · planned: automatic diff on a real-machine connect · Origin: ported from the user's cnc-code `grblSettings.ts` (relicensed GPL-3.0-or-later)
+
+The user pastes GRBL's `$$` answer (from any sender or terminal); DFYOM shows what it would change in a library machine and applies only the changes the user accepts. **DFYOM never writes settings to GRBL** (writing `$x=` would be a separate, explicit command).
+
+**Parsing** (`src/core/run/grbl/settings.ts`, shared with the sender's [handshake](../modes/run-v0.1.md#sender), which classifies each received line with the same `parseSettingLine`):
+
+- A setting is `$<n>=<number>` anywhere in a line, after the line start or a space, ending at the line end, a space, `(` or `;`. Senders' prefixes (`>>> `, `[rx] `), GRBL builds' descriptions (`$110=5000.000 (x max rate, mm/min)`), `ok`, the banner, `[MSG:…]` and blank lines are ignored. A later duplicate wins.
+- Unknown ids (`$999=1`, grblHAL extras) are read and returned as `ignored`; text with no setting at all is `input.malformed` (rule `noSettings`, path `text`).
+- `$$` values are always mm, mm/min, mm/s² and rpm (`$13` changes only reports).
+
+**Mapping** to machine fields (`src/core/library/grbl-import.ts`, rules ported from cnc-code):
+
+| Setting      | Field                               | Rule                                                                                                                         |
+| ------------ | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `$11`, `$12` | `junctionDeviation`, `arcTolerance` | –                                                                                                                            |
+| `$100–$102`  | `stepsPerMm.x/y/z`                  | All three together when the machine has none (rule `allAxes`).                                                               |
+| `$110–$112`  | `maxFeedRate.x/y/z`                 | –                                                                                                                            |
+| `$120–$122`  | `acceleration.x/y/z`                | All three together when the machine has none (rule `allAxes`).                                                               |
+| `$130–$132`  | `travel.x/y/z`                      | Only with soft limits on (`$20=1`); else skipped (`softLimitsOff`): GRBL never uses them and they may be its defaults.       |
+| `$30`, `$31` | `spindle.maxSpeed`, `.minSpeed`     | Only for a `gcode` spindle; a manual dial ignores `S`, skipped (`manualSpindle`). `$31=0` means "no minimum" and is skipped. |
+
+- A value ≤ 0 of a mapped setting is skipped (`notPositive`); a value equal to the stored one within GRBL's printed precision (0.0005) is `unchanged`.
+- A new value is written in the machine's own unit system ([`itemUnitSystem`](#command-input)): a bare number in an mm machine, the GRBL unit written out in an inch machine (`5000 mm/min`), never converted.
+- **Diff entry:** `{ setting: '$110', field: 'maxFeedRate.x', value: 5000, from: '3000 mm/min' | null, to: '5000 mm/min', together: ['$120','$121','$122']? }`; `from`/`to` are display texts with their unit. Skipped entries carry `{ setting, field, value, rule }`; the UI words the rule.
+- `machineSettingsDiff(machineValues, settings)` takes a parsed `Map<number, number>`, so the connect path can call it with `ControllerInfo.settings` (planned below).
+
+**Commands** (app scope, like the other library commands):
+
+- Query `library.machine.settings.preview { id, text }` → `{ read, changes, unchanged, skipped, ignored }`.
+- Command `library.machine.settings.import { id, revision, text, accept }` (`effect`, not undoable): re-parses `text`, applies the accepted changes (`accept`: setting names from `changes`, at least one) and stores the machine; result `{ item, applied }`. An `accept` entry that is not a change is `input.malformed` (`notAChange`, path `accept.<i>`); accepting part of a `together` group is `input.malformed` (`allAxes`); the new machine is checked by the model like any update; a stale `revision` is `command.conflict`.
+- **UI:** "Import $$…" in the Library window's machine editor ([ui-library-window.md](../conventions/ui-library-window.md#implementation-task-l1)).
+
+**Planned: diff on connect** (needs the real serial transport, after v0.3). On `run.connection.open` against a real controller, compare the handshake's `$$` (`ControllerInfo.settings`) with the library machine through `machineSettingsDiff`; on any change show a non-blocking "Machine settings differ: Review" that opens the same diff view. The plan's machine snapshot is never changed silently, and nothing is written to GRBL.
 
 ## Snapshots
 
@@ -114,7 +153,7 @@ The app host opens the library once per instance (`Library.open` over `<appData>
 
 - Writes are atomic per file (temp + fsync + rename), like the [working folder](persistence.md#working-folder-writes). Every instance shares the folder; a write whose `revision` differs from the file on disk fails with `command.conflict`.
 - An item that does not load is listed with its error and never deleted or overwritten automatically ([pre-alpha rule](../conventions/error-handling/migrations.md#pre-alpha-exception-no-data-preservation-yet)).
-- Commands: `library.{stock,tool,machine}.{add,update,remove}`; queries `.get` and `.list` ([naming](commands.md#naming)). They are `effect` commands ([kinds](commands.md#command-definition)): written to disk at once, **not undoable**, no history entry, still logged in the action log.
+- Commands: `library.{stock,tool,machine}.{add,update,remove}`; queries `.get` and `.list` ([naming](commands.md#naming)); the `$$` import adds `library.machine.settings.{preview,import}` ([GRBL `$$` import](#grbl--import)). The commands are `effect` commands ([kinds](commands.md#command-definition)): written to disk at once, **not undoable**, no history entry, still logged in the action log.
 - **UI (v0.1):** the stock setup adds a block ([design.md](../modes/design.md#workflow)); plan mode's "New tool…" and "New machine…" forms add a tool or machine with the fields v0.1 needs ([ui.md](../conventions/ui.md#plan-mode-task-37)). Editing and removing items needs the library editor (later milestone; drafted as the [Library window](../conventions/ui-library-window.md), B24).
 - `add`/`update` take [quantity strings](#command-input), not stored quantity objects; results are the stored item DTO.
 - `remove` asks for confirmation: its args schema requires `confirm: true` (`z.literal(true)`), so a call without it fails with `input.malformed`. The UI sets it after a confirmation dialog; agents and CLI pass it explicitly. Projects keep their snapshots of a removed item.
@@ -158,5 +197,6 @@ Where this doc was silent, the implementation chose conservatively:
 | `src/core/library/library.ts`                   | `Library` service: cache, serialized writes, change events                     |
 | `src/core/library/commands.ts`                  | Library commands and queries                                                   |
 | `src/core/library/values-input.ts`              | Command input of values: string schema, parsing into DTOs, `libraryUnit`       |
+| `src/core/library/grbl-import.ts`               | `$$` settings → machine diff and apply ([GRBL `$$` import](#grbl--import))     |
 | `src/core/library/used.ts`                      | `usedLibraryItemIds`: the items a project uses (Library window chips)          |
 | `src/main/library/fs-storage.ts`                | Filesystem implementation of the port                                          |

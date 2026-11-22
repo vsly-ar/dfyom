@@ -59,9 +59,13 @@ export const AXES: readonly Axis[] = ['x', 'y', 'z']
 
 /** A tool's values; `cornerRadius` / `pointAngle` stay while the type is another (dropped on save). */
 export type ToolDraft = ToolValuesDTO
-/** A machine's values; `acceleration` may have some axes only while typing (all or none on save). */
-export type MachineDraft = Omit<MachineValuesDTO, 'acceleration'> & {
+/**
+ * A machine's values; `acceleration` and `stepsPerMm` may have some axes only while typing (all or
+ * none on save).
+ */
+export type MachineDraft = Omit<MachineValuesDTO, 'acceleration' | 'stepsPerMm'> & {
   readonly acceleration?: Partial<Record<Axis, QuantityDTO>> | undefined
+  readonly stepsPerMm?: Partial<Record<Axis, QuantityDTO>> | undefined
 }
 export type StockDraft = StockValuesDTO
 export type DraftValues = ToolDraft | MachineDraft | StockDraft
@@ -201,20 +205,24 @@ export function cleanValues(
     }
   }
   if (values.kind === 'machine') {
-    const { acceleration, ...rest } = values
-    const set = AXES.filter((a) => acceleration?.[a] !== undefined)
-    if (set.length > 0 && set.length < 3)
-      issues.push({
-        path: ['acceleration'],
-        rule: 'allAxes',
-        message: libraryMessages.machine.accelerationAll,
-      })
+    const { acceleration, stepsPerMm, ...rest } = values
+    /** The group when all three axes are set; an issue when only some are. */
+    const allOrNone = (
+      field: 'acceleration' | 'stepsPerMm',
+      group: Partial<Record<Axis, QuantityDTO>> | undefined,
+      message: string,
+    ) => {
+      const set = AXES.filter((a) => group?.[a] !== undefined)
+      if (set.length > 0 && set.length < 3) issues.push({ path: [field], rule: 'allAxes', message })
+      return set.length === 3 ? { [field]: group } : {}
+    }
     return {
       values: {
         ...rest,
         name: values.name.trim(),
         notes,
-        ...(set.length === 3 ? { acceleration } : {}),
+        ...allOrNone('acceleration', acceleration, libraryMessages.machine.accelerationAll),
+        ...allOrNone('stepsPerMm', stepsPerMm, libraryMessages.machine.stepsPerMmAll),
       } as MachineValuesDTO,
       issues,
     }

@@ -241,4 +241,74 @@ describe('Library window', () => {
     )
     expect(bridge.settingsPatches).toContainEqual({ libraryUnits: 'mm' })
   })
+
+  it('imports GRBL $$ settings into a saved machine: compare, untick, apply only the ticked', async () => {
+    const { user, editor, get, add } = await renderLibrary()
+    const id = await add('machine', {
+      name: 'Router',
+      controller: 'grbl',
+      travel: { x: '800', y: '800', z: '100' },
+      maxFeedRate: { x: '5000', y: '5000', z: '1000' },
+      spindle: { control: 'manual', maxSpeed: '30000' },
+      programUnits: 'mm',
+      toolChanger: 'none',
+    })
+    await user.click(screen.getByRole('tab', { name: 'Machines' }))
+    const grid = await screen.findByRole('grid', { name: 'Machines' })
+    await user.click(await within(grid).findByRole('row', { name: /Router/ }))
+    // the full form has the new fields
+    expect(
+      within(editor()).getByLabelText('Junction deviation', { selector: 'input' }),
+    ).toHaveValue('')
+    expect(
+      within(editor()).getByLabelText('Steps per mm X', { selector: 'input' }),
+    ).toBeInTheDocument()
+    await user.click(within(editor()).getByRole('button', { name: 'Import $$…' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Import GRBL settings' })
+    const text = within(dialog).getByLabelText('GRBL $$ output')
+    // nothing found: a message, still on the paste step
+    await user.type(text, 'hello')
+    await user.click(within(dialog).getByRole('button', { name: 'Compare' }))
+    expect(await within(dialog).findByText(/No GRBL settings found/)).toBeInTheDocument()
+    await user.clear(text)
+    await user.click(text)
+    await user.paste('ok\n$11=0.020\n$110=6000.000 (x max rate)\n$130=700\n$30=24000\n$0=10')
+    await user.click(within(dialog).getByRole('button', { name: 'Compare' }))
+    const jd = await within(dialog).findByRole('checkbox', {
+      name: 'Junction deviation ($11): not set → 0.02 mm',
+    })
+    const rate = within(dialog).getByRole('checkbox', {
+      name: 'Max feed rate X ($110): 5000 mm/min → 6000 mm/min',
+    })
+    expect(jd).toBeChecked()
+    expect(within(dialog).getByText(/Soft limits are off/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/a dial router ignores/)).toBeInTheDocument()
+    expect(within(dialog).getByText('Not used by DFYOM: $0.')).toBeInTheDocument()
+    await expectNoAxeViolations()
+    await user.click(rate)
+    expect(rate).not.toBeChecked()
+    await user.click(within(dialog).getByRole('button', { name: 'Apply 1 change' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    const stored = get('machine', id) as unknown as {
+      revision: number
+      junctionDeviation?: { source: string }
+      maxFeedRate: { x: { source: string } }
+    }
+    expect(stored.revision).toBe(2)
+    expect(stored.junctionDeviation?.source).toBe('0.02')
+    expect(stored.maxFeedRate.x.source).toBe('5000')
+    await waitFor(() =>
+      expect(
+        within(editor()).getByLabelText('Junction deviation', { selector: 'input' }),
+      ).toHaveValue('0.02'),
+    )
+  })
+
+  it('offers Import $$… only for a saved machine without unsaved changes', async () => {
+    const { user, editor } = await renderLibrary()
+    await user.click(screen.getByRole('tab', { name: 'Machines' }))
+    await screen.findByRole('grid', { name: 'Machines' })
+    await user.click(screen.getByRole('button', { name: /New machine/ }))
+    expect(within(editor()).getByRole('button', { name: 'Import $$…' })).toBeDisabled()
+  })
 })

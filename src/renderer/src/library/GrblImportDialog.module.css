@@ -1,0 +1,57 @@
+/* "Import $$…": the paste area and the diff list. Doc: docs/conventions/ui-library-window.md */
+
+.text {
+  width: 100%;
+  min-height: 180px;
+  resize: vertical;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  background: var(--bg-field);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+}
+
+.text:focus-visible {
+  outline: none;
+  border-color: var(--focus);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 22%, transparent);
+}
+
+.list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.summary,
+.empty,
+.note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+}
+
+.note {
+  margin-top: var(--space-1);
+}
+
+.skip {
+  display: grid;
+  gap: 2px;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-muted);
+}
+
+.skipName {
+  color: var(--text);
+  font-weight: var(--weight-medium);
+}

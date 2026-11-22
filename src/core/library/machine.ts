@@ -45,6 +45,12 @@ export interface MachineProps {
   readonly maxFeedRate: Axes<Quantity>
   /** Scalar quantities in mm/s² (acceleration is not a v0.1 quantity kind). */
   readonly acceleration: Option<Axes<Quantity>>
+  /** GRBL `$11` (length); None = the virtual machine's default. */
+  readonly junctionDeviation: Option<Quantity>
+  /** GRBL `$12` (length); None = the virtual machine's default. */
+  readonly arcTolerance: Option<Quantity>
+  /** GRBL `$100–$102`: scalar quantities in steps/mm. */
+  readonly stepsPerMm: Option<Axes<Quantity>>
   readonly spindle: Spindle
   readonly programUnits: 'mm' | 'in'
   readonly toolChanger: 'none'
@@ -68,6 +74,9 @@ export class Machine implements MachineProps {
     readonly travel: Axes<Quantity>,
     readonly maxFeedRate: Axes<Quantity>,
     readonly acceleration: Option<Axes<Quantity>>,
+    readonly junctionDeviation: Option<Quantity>,
+    readonly arcTolerance: Option<Quantity>,
+    readonly stepsPerMm: Option<Axes<Quantity>>,
     readonly spindle: Spindle,
     readonly programUnits: 'mm' | 'in',
     readonly toolChanger: 'none',
@@ -78,6 +87,10 @@ export class Machine implements MachineProps {
       checkAxes(c, 'travel', travel, 'length')
       checkAxes(c, 'maxFeedRate', maxFeedRate, 'feedRate')
       if (acceleration.isSome()) checkAxes(c, 'acceleration', acceleration.unwrap(), 'scalar')
+      if (junctionDeviation.isSome())
+        checkPositive(c, ['junctionDeviation'], junctionDeviation.unwrap(), 'length')
+      if (arcTolerance.isSome()) checkPositive(c, ['arcTolerance'], arcTolerance.unwrap(), 'length')
+      if (stepsPerMm.isSome()) checkAxes(c, 'stepsPerMm', stepsPerMm.unwrap(), 'scalar')
       checkPositive(c, ['spindle', 'maxSpeed'], spindle.maxSpeed, 'spindleSpeed')
       if (spindle.minSpeed.isSome()) {
         const min = spindle.minSpeed.unwrap()
@@ -101,6 +114,7 @@ export class Machine implements MachineProps {
     Object.freeze(travel)
     Object.freeze(maxFeedRate)
     if (acceleration.isSome()) Object.freeze(acceleration.unwrap())
+    if (stepsPerMm.isSome()) Object.freeze(stepsPerMm.unwrap())
     Object.freeze(spindle)
     Object.freeze(this)
   }
@@ -117,6 +131,9 @@ export class Machine implements MachineProps {
           copy(p.travel),
           copy(p.maxFeedRate),
           p.acceleration.map(copy),
+          p.junctionDeviation,
+          p.arcTolerance,
+          p.stepsPerMm.map(copy),
           { ...p.spindle },
           p.programUnits,
           p.toolChanger,
@@ -134,6 +151,12 @@ export class Machine implements MachineProps {
         dto.acceleration === undefined
           ? Ok(None)
           : axesFromDTO(dto.acceleration, 'acceleration').map((a) => Some(a)),
+      junctionDeviation: optionalQuantityFromDTO(dto.junctionDeviation, 'junctionDeviation'),
+      arcTolerance: optionalQuantityFromDTO(dto.arcTolerance, 'arcTolerance'),
+      stepsPerMm:
+        dto.stepsPerMm === undefined
+          ? Ok(None)
+          : axesFromDTO(dto.stepsPerMm, 'stepsPerMm').map((a) => Some(a)),
       maxSpeed: quantityFromDTO(dto.spindle.maxSpeed, 'spindle', 'maxSpeed'),
       minSpeed: optionalQuantityFromDTO(dto.spindle.minSpeed, 'spindle', 'minSpeed'),
       power: optionalQuantityFromDTO(dto.spindle.power, 'spindle', 'power'),
@@ -145,6 +168,9 @@ export class Machine implements MachineProps {
         travel: q.travel,
         maxFeedRate: q.maxFeedRate,
         acceleration: q.acceleration,
+        junctionDeviation: q.junctionDeviation,
+        arcTolerance: q.arcTolerance,
+        stepsPerMm: q.stepsPerMm,
         spindle: {
           control: dto.spindle.control,
           maxSpeed: q.maxSpeed,
@@ -172,6 +198,9 @@ export class Machine implements MachineProps {
       travel: axesToDTO(this.travel),
       maxFeedRate: axesToDTO(this.maxFeedRate),
       ...optionalField('acceleration', this.acceleration.map(axesToDTO)),
+      ...optionalQuantityDTO('junctionDeviation', this.junctionDeviation),
+      ...optionalQuantityDTO('arcTolerance', this.arcTolerance),
+      ...optionalField('stepsPerMm', this.stepsPerMm.map(axesToDTO)),
       spindle: {
         control: this.spindle.control,
         maxSpeed: this.spindle.maxSpeed.toDTO(),

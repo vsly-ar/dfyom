@@ -1,4 +1,5 @@
-// The machine form, shared by the Library window's editor (`full`: adds acceleration and notes)
+// The machine form, shared by the Library window's editor (`full`: adds acceleration, motion
+// planning `$11`/`$12`, steps per mm and notes)
 // and the quick "New machine…" dialog (`quick`: the v0.1 fields). GRBL controller and manual tool
 // change are fixed values (library.md#machine). Doc: docs/conventions/ui-library-window.md#layout, L4
 import { RIGIDITY_PRESETS } from '../../../core/library/machine.dto'
@@ -20,6 +21,9 @@ export const MACHINE_FIELDS: readonly string[] = [
   ...AXES.map((a) => `travel.${a}`),
   ...AXES.map((a) => `maxFeedRate.${a}`),
   ...AXES.map((a) => `acceleration.${a}`),
+  'junctionDeviation',
+  'arcTolerance',
+  ...AXES.map((a) => `stepsPerMm.${a}`),
   'spindle.maxSpeed',
   'spindle.minSpeed',
   'spindle.power',
@@ -27,6 +31,7 @@ export const MACHINE_FIELDS: readonly string[] = [
   'travel',
   'maxFeedRate',
   'acceleration',
+  'stepsPerMm',
   'spindle',
   'programUnits',
   'notes',
@@ -88,6 +93,33 @@ export function MachineFields({
       }),
     )
 
+  /** An optional all-or-none group of three scalar axes (acceleration, steps per mm). */
+  const scalarAxes = (
+    field: 'acceleration' | 'stepsPerMm',
+    title: string,
+    label: (axis: string) => string,
+    note: string,
+  ) => (
+    <Group title={title}>
+      {AXES.map((a, i) =>
+        q(
+          `${field}.${a}`,
+          label(a.toUpperCase()),
+          'scalar',
+          values[field]?.[a],
+          AXIS_ICON[a],
+          (v) => set({ [field]: { ...values[field], [a]: v } }),
+          i === 0 ? { optional: true, note } : { optional: true },
+        ),
+      )}
+      {messages(field).map((e) => (
+        <p key={e.id} role="alert" className={styles['groupError']}>
+          {e.text}
+        </p>
+      ))}
+    </Group>
+  )
+
   const fixed = full ? (
     <Group title={g.controller}>
       <FixedField label={m.controller} value={m.controllerValue} />
@@ -104,24 +136,29 @@ export function MachineFields({
       />
       <Group title={m.travel}>{axes('travel', 'length', m.travelAxis)}</Group>
       <Group title={m.maxFeed}>{axes('maxFeedRate', 'feedRate', m.maxFeedAxis)}</Group>
+      {full
+        ? scalarAxes('acceleration', m.acceleration, m.accelerationAxis, m.accelerationNote)
+        : null}
       {full ? (
-        <Group title={m.acceleration}>
-          {AXES.map((a, i) =>
-            q(
-              `acceleration.${a}`,
-              m.accelerationAxis(a.toUpperCase()),
-              'scalar',
-              values.acceleration?.[a],
-              AXIS_ICON[a],
-              (v) => set({ acceleration: { ...values.acceleration, [a]: v } }),
-              i === 0 ? { optional: true, note: m.accelerationNote } : { optional: true },
-            ),
+        <Group title={m.motion}>
+          {q(
+            'junctionDeviation',
+            m.junctionDeviation,
+            'length',
+            values.junctionDeviation,
+            'corner',
+            (junctionDeviation) => set({ junctionDeviation }),
+            { optional: true, note: m.junctionDeviationNote },
           )}
-          {messages('acceleration').map((e) => (
-            <p key={e.id} role="alert" className={styles['groupError']}>
-              {e.text}
-            </p>
-          ))}
+          {q(
+            'arcTolerance',
+            m.arcTolerance,
+            'length',
+            values.arcTolerance,
+            'corner',
+            (arcTolerance) => set({ arcTolerance }),
+            { optional: true, note: m.arcToleranceNote },
+          )}
         </Group>
       ) : null}
       <Group title={m.spindle}>
@@ -176,6 +213,7 @@ export function MachineFields({
           onValueChange={(programUnits) => set({ programUnits })}
         />
       </Choice>
+      {full ? scalarAxes('stepsPerMm', m.stepsPerMm, m.stepsPerMmAxis, m.stepsPerMmNote) : null}
       {fixed}
       {full ? (
         <Group title={g.notes}>

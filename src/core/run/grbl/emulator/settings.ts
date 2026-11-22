@@ -60,7 +60,7 @@ const BOOLEAN = new Set([4, 5, 6, 13, 20, 21, 22, 32])
 
 export type SettingValues = Readonly<Record<number, number>>
 
-/** `$100–$132` and `$30/$31` from a machine snapshot (library.md#machine). */
+/** `$110–$132`, `$30/$31` and, when set, `$11`, `$12`, `$100–$102` from a machine snapshot (library.md#machine). */
 export function machineSettings(m: Machine): SettingValues {
   const out: Record<number, number> = {
     110: m.maxFeedRate.x.canonical,
@@ -77,6 +77,14 @@ export function machineSettings(m: Machine): SettingValues {
     out[120] = a.x.canonical
     out[121] = a.y.canonical
     out[122] = a.z.canonical
+  }
+  if (m.junctionDeviation.isSome()) out[11] = m.junctionDeviation.unwrap().canonical
+  if (m.arcTolerance.isSome()) out[12] = m.arcTolerance.unwrap().canonical
+  if (m.stepsPerMm.isSome()) {
+    const s = m.stepsPerMm.unwrap()
+    out[100] = s.x.canonical
+    out[101] = s.y.canonical
+    out[102] = s.z.canonical
   }
   return out
 }

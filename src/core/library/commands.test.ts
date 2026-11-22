@@ -42,7 +42,7 @@ describe('library commands', () => {
     for (const kind of ['stock', 'tool', 'machine'])
       for (const verb of ['add', 'update', 'remove'])
         expect(reg.command(`library.${kind}.${verb}`).unwrap().kind).toBe('effect')
-    expect(LIBRARY_COMMANDS).toHaveLength(9)
+    expect(LIBRARY_COMMANDS).toHaveLength(10)
     expect(LIBRARY_QUERIES.map((q) => q.name)).toContain('library.tool.list')
   })
 
@@ -203,5 +203,108 @@ describe('library commands', () => {
       'input.malformed',
     )
     expect(expectOk(d.query('library.stock.get', { id }, agent)).value).toMatchObject({ id })
+  })
+})
+
+describe('library.machine.settings (GRBL $$ import)', () => {
+  const DUMP = [
+    'ok',
+    '$20=1',
+    '$110=6000.000 (x max rate)',
+    '$111=5000.000',
+    '$130=750',
+    '$11=0.02',
+    '$999=1',
+  ].join('\n')
+
+  it('preview lists the diff without writing; import applies only the accepted settings', async () => {
+    const { d, library } = await setup()
+    const { id } = await add(d, 'machine', libraryInput(machineValues()))
+    const preview = expectOk(
+      d.query('library.machine.settings.preview', { id, text: DUMP }, agent),
+    ).value
+    expect(preview).toEqual({
+      read: 6,
+      changes: [
+        {
+          setting: '$110',
+          field: 'maxFeedRate.x',
+          value: 6000,
+          from: '5000 mm/min',
+          to: '6000 mm/min',
+        },
+        { setting: '$11', field: 'junctionDeviation', value: 0.02, from: null, to: '0.02 mm' },
+        { setting: '$130', field: 'travel.x', value: 750, from: '800 mm', to: '750 mm' },
+      ],
+      unchanged: ['$111'],
+      skipped: [],
+      ignored: [999],
+    })
+    expect(library.lookup('machine', id)).toMatchObject({ item: { revision: 1 } })
+    const out = expectOk(
+      await d.dispatch(
+        'library.machine.settings.import',
+        { id, revision: 1, text: DUMP, accept: ['$110', '$11'] },
+        agent,
+      ),
+    ).value as { item: Record<string, unknown>; applied: string[] }
+    expect(out.applied).toEqual(['$110', '$11'])
+    expect(out.item).toMatchObject({
+      revision: 2,
+      maxFeedRate: { x: { source: '6000' } },
+      travel: { x: { source: '800' } },
+      junctionDeviation: { source: '0.02', defaultUnit: 'mm' },
+    })
+  })
+
+  it('writes GRBL units out in an inch machine', async () => {
+    const { d } = await setup()
+    const added = expectOk(
+      await d.dispatch(
+        'library.machine.add',
+        { values: libraryInput(machineValues()), units: 'inch' },
+        agent,
+      ),
+    ).value as { id: string }
+    const out = expectOk(
+      await d.dispatch(
+        'library.machine.settings.import',
+        { id: added.id, revision: 1, text: '$110=6000', accept: ['$110'] },
+        agent,
+      ),
+    ).value as { item: { maxFeedRate: { x: { source: string; defaultUnit: string } } } }
+    expect(out.item.maxFeedRate.x).toMatchObject({ source: '6000 mm/min', defaultUnit: 'in/min' })
+  })
+
+  it('rejects text without settings, unknown accepts, a stale revision and model issues', async () => {
+    const { d } = await setup()
+    const { id } = await add(d, 'machine', {
+      ...libraryInput(machineValues()),
+      spindle: { control: 'gcode', maxSpeed: '24000', minSpeed: '6000' },
+    })
+    const none = expectErrCode(
+      d.query('library.machine.settings.preview', { id, text: 'hello\nok' }, agent),
+      'input.malformed',
+    )
+    expect(none.issues[0]).toMatchObject({ path: ['text'], rule: 'noSettings' })
+    expectErrCode(
+      d.query('library.machine.settings.preview', { id: 'machine-x', text: DUMP }, agent),
+      'input.malformed',
+    )
+    const run = (args: object) =>
+      d.dispatch('library.machine.settings.import', { id, text: DUMP, ...args }, agent)
+    const bad = expectErrCode(await run({ revision: 1, accept: ['$120'] }), 'input.malformed')
+    expect(bad.issues[0]).toMatchObject({ path: ['accept', 0], rule: 'notAChange' })
+    expectErrCode(await run({ revision: 7, accept: ['$110'] }), 'command.conflict')
+    // $30 below the stored minimum speed: the machine model refuses it
+    const model = expectErrCode(
+      await d.dispatch(
+        'library.machine.settings.import',
+        { id, revision: 1, text: '$30=5000', accept: ['$30'] },
+        agent,
+      ),
+      'model.invariant',
+    )
+    expect(model.issues[0]?.path).toEqual(['values', 'spindle', 'minSpeed'])
   })
 })
