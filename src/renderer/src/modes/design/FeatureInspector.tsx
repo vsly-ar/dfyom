@@ -210,6 +210,11 @@ function featureFacts(part: DesignPart, feature: FeatureDTO): [string, string, s
         ['cbDiameter', h.cbDiameter, src(d['cbDiameter']) ?? ''],
         ['cbDepth', h.cbDepth, src(d['cbDepth']) ?? ''],
       )
+    if (d['type'] === 'countersink')
+      rows.push(
+        ['csDiameter', h.csDiameter, src(d['csDiameter']) ?? ''],
+        ['csAngle', h.csAngle, src(d['csAngle']) ?? ''],
+      )
     rows.push(['headSink', h.headSink, src(d['headSink']) ?? ''])
     return rows
   }

@@ -1,7 +1,8 @@
-// The hole feature (v0.4 F3): parameters, refill from the fastener table, expansion (simple,
-// counterbore), invariants, dfm.holeCustomSize, issue paths mapped to hole fields, and feature
-// fields written as expressions following what they reference.
-// Spec: docs/modes/design-v0.4.md#hole-feature, docs/modes/design-v0.4.md#implementation-f3
+// The hole feature (v0.4 F3, F4): parameters, refill from the fastener table, expansion (simple,
+// counterbore, countersink), invariants, dfm.holeCustomSize, issue paths mapped to hole fields,
+// feature fields written as expressions following what they reference, Clones of a countersink.
+// Spec: docs/modes/design-v0.4.md#hole-feature, docs/modes/design-v0.4.md#implementation-f3,
+// docs/modes/design-v0.4.md#implementation-f4
 import { describe, expect, it } from 'vitest'
 import { expectOk } from '../../shared/testing/result'
 import type { DfmWarning } from '../geometry/model'
@@ -184,12 +185,25 @@ describe('design.hole.update', () => {
     })
     expect(exact(opField(s, 'hole1_drill', 'diameter'))).toBe(5.3)
     expect(feature(s)).toMatchObject({ fit: 'close', cbDiameter: { source: '11' } })
-    // a size edited by hand stays until the next refill; headSink alone does not refill
-    await s.run('design.hole.update', { partId: s.partId, featureId: 'hole1', headSink: '0.5' })
-    expect(exact(feature(s)['cbDepth'])).toBeCloseTo(5.2, 12)
+    // a size edited by hand stays until the next refill; headSink alone moves only the sizes
+    // derived from it that still follow the table (cbDepth 5.2 → 5.5, cbDiameter 11 kept)
+    const out = (await s.run('design.hole.update', {
+      partId: s.partId,
+      featureId: 'hole1',
+      headSink: '0.5',
+    })) as { warnings: DfmWarning[] }
+    expect(exact(feature(s)['cbDepth'])).toBeCloseTo(5.5, 12)
+    expect(exact(feature(s)['cbDiameter'])).toBe(11)
+    expect(
+      out.warnings.filter((w) => w.code === 'dfm.holeCustomSize').map((w) => w.parameter),
+    ).toEqual(['cbDiameter'])
+    // a hand-edited cbDepth does not follow headSink
+    await s.run('design.hole.update', { partId: s.partId, featureId: 'hole1', cbDepth: '6' })
+    await s.run('design.hole.update', { partId: s.partId, featureId: 'hole1', headSink: '0.3' })
+    expect(exact(feature(s)['cbDepth'])).toBe(6)
     await s.run('design.hole.update', { partId: s.partId, featureId: 'hole1', fastener: 'M6' })
     expect(exact(feature(s)['cbDiameter'])).toBe(11)
-    expect(exact(feature(s)['cbDepth'])).toBeCloseTo(6.5, 12)
+    expect(exact(feature(s)['cbDepth'])).toBeCloseTo(6.3, 12)
     expect(exact(opField(s, 'hole1_drill', 'diameter'))).toBe(6.4)
   })
 
@@ -322,5 +336,156 @@ describe('persistence', () => {
       feature: { id: 'hole1', kind: 'hole' },
       operationIds: ['hole1_counterbore', 'hole1_drill'],
     })
+  })
+})
+
+describe('countersink (F4)', () => {
+  const rules = (e: { issues: readonly { path: readonly unknown[]; rule: string }[] }) =>
+    e.issues.map((i) => [i.path.join('.'), i.rule])
+
+  it('a drilling, then a chamfer on its mouth; sizes from ISO 10642 (M3 up)', async () => {
+    const s = await designSetup()
+    const out = await addHole(s, { fastener: 'M3', type: 'countersink' })
+    expect(out.operationIds).toEqual(['hole1_drill', 'hole1_countersink'])
+    expect(s.op('hole1_drill')).toMatchObject({ on: 'stock.top', diameter: { source: '3.4 mm' } })
+    const cs = s.op('hole1_countersink') as Record<string, unknown>
+    expect(cs).toMatchObject({
+      kind: 'chamfer',
+      on: 'stock.top',
+      edgeOf: 'hole1_drill',
+      angle: { source: '90°' },
+      featureId: 'hole1',
+      featureRole: 'countersink',
+    })
+    // csDiameter = dk 6.72 + 2 × headSink 0.2
+    expect(exact(cs['diameter'])).toBeCloseTo(7.12, 12)
+    expect(feature(s)).toMatchObject({
+      type: 'countersink',
+      csDiameter: { source: '7.12 mm' },
+      csAngle: { source: '90°' },
+    })
+    expect(feature(s)['cbDiameter']).toBeUndefined()
+    expect(out.warnings.filter((w) => w.code === 'dfm.holeCustomSize')).toEqual([])
+  })
+
+  it('below M3 the head comes from ISO 7046-1; without a fastener the angle is 90°', async () => {
+    const s = await designSetup()
+    await addHole(s, { fastener: 'M2', type: 'countersink' })
+    expect(exact(feature(s)['csDiameter'])).toBeCloseTo(4.8, 12)
+    await addHole(s, { type: 'countersink', diameter: '4', csDiameter: '8' })
+    expect(feature(s, 'hole2')).toMatchObject({ csAngle: { source: '90°' } })
+  })
+
+  it('rules: Ø, required, not for type, angle range (mapped), countersinkTooDeep', async () => {
+    const s = await designSetup()
+    const add = (args: object) =>
+      s.fail(
+        'design.hole.add',
+        { partId: s.partId, center: ['30', '30'], ...args },
+        'model.invariant',
+      )
+    expect(rules(await add({ type: 'countersink', diameter: '8', csDiameter: '8' }))).toEqual([
+      ['csDiameter', 'greaterThanDiameter'],
+    ])
+    expect(rules(await add({ type: 'countersink' }))).toEqual([['csDiameter', 'required']])
+    expect(rules(await add({ type: 'countersink', fastener: 'M3', cbDepth: '2' }))).toEqual([
+      ['cbDepth', 'notForType'],
+    ])
+    expect(rules(await add({ type: 'counterbore', fastener: 'M3', csAngle: '90' }))).toEqual([
+      ['csAngle', 'notForType'],
+    ])
+    expect(rules(await add({ fastener: 'M3', type: 'countersink', csAngle: '130' }))).toEqual([
+      ['csAngle', 'range'],
+    ])
+    // M3: cone (7.12 − 3.4) / 2 / tan 45° = 1.86 mm, deeper than a 1.5 mm blind hole
+    const deep = await add({ fastener: 'M3', type: 'countersink', bottom: 'flat', depth: '1.5' })
+    expect(deep.issues).toEqual([
+      expect.objectContaining({
+        path: ['csDiameter'],
+        rule: 'countersinkTooDeep',
+        params: expect.objectContaining({ coneDepth: 1.86, depth: 1.5, max: 6.4 }),
+      }),
+    ])
+    await addHole(s, { fastener: 'M3', type: 'countersink', bottom: 'flat', depth: '2' })
+    expect(s.part().features).toHaveLength(1)
+  })
+
+  it('type change keeps the drill and its lock; a hand-edited Ø is a custom size', async () => {
+    const s = await designSetup()
+    await addHole(s, { fastener: 'M4' })
+    await s.run('design.operation.tool.set', {
+      partId: s.partId,
+      operationId: 'hole1_drill',
+      tool: { kind: 'generalized', type: 'drill', diameter: '4.5' },
+    })
+    await s.run('design.hole.update', { partId: s.partId, featureId: 'hole1', type: 'countersink' })
+    expect(ids(s)).toEqual(['hole1_drill', 'hole1_countersink'])
+    expect(s.op('hole1_drill')).toMatchObject({ toolLocked: true, on: 'stock.top' })
+    expect(exact(opField(s, 'hole1_countersink', 'diameter'))).toBeCloseTo(9.36, 12)
+    const out = (await s.run('design.hole.update', {
+      partId: s.partId,
+      featureId: 'hole1',
+      csDiameter: '10',
+      csAngle: '100',
+    })) as { warnings: DfmWarning[] }
+    expect(
+      out.warnings
+        .filter((w) => w.code === 'dfm.holeCustomSize')
+        .map((w) => [w.operation, w.parameter, w.params?.['table'], w.params?.['value']]),
+    ).toEqual([
+      ['hole1_countersink', 'csDiameter', 9.36, 10],
+      ['hole1_countersink', 'csAngle', 90, 100],
+    ])
+    expect(exact(opField(s, 'hole1_countersink', 'angle'))).toBe(100)
+    // headSink moves a csDiameter that follows the table, not a hand-edited one
+    await s.run('design.hole.update', { partId: s.partId, featureId: 'hole1', fit: 'close' })
+    await s.run('design.hole.update', { partId: s.partId, featureId: 'hole1', headSink: '0.5' })
+    expect(exact(feature(s)['csDiameter'])).toBeCloseTo(9.96, 12)
+    await s.run('design.hole.update', { partId: s.partId, featureId: 'hole1', type: 'simple' })
+    expect(ids(s)).toEqual(['hole1_drill'])
+    expect(feature(s)['csDiameter']).toBeUndefined()
+  })
+
+  it('csDiameter as an expression follows what it references', async () => {
+    const s = await designSetup() // stock 20 thick
+    await s.run('design.pocket.add', {
+      partId: s.partId,
+      shape: { kind: 'rectangle', center: ['70', '30'], length: '20', width: '20' },
+      depth: '5',
+    })
+    await addHole(s, {
+      type: 'countersink',
+      diameter: '4',
+      csDiameter: 'pocket1.floor.z - stock.bottom.z - 7',
+    })
+    expect(exact(opField(s, 'hole1_countersink', 'diameter'))).toBe(8)
+    await s.run('design.pocket.update', { partId: s.partId, operationId: 'pocket1', depth: '6' })
+    expect(exact(feature(s)['csDiameter'])).toBe(7)
+    expect(exact(opField(s, 'hole1_countersink', 'diameter'))).toBe(7)
+    // a recalculation that breaks the countersink fails at its field
+    const e = await s.fail(
+      'design.pocket.update',
+      { partId: s.partId, operationId: 'pocket1', depth: '9' },
+      'model.invariant',
+    )
+    expect(e.issues[0]).toMatchObject({ path: ['features', 'hole1', 'csDiameter'] })
+  })
+
+  it('Clones of a countersunk hole pair each chamfer with its own drilling', async () => {
+    const s = await designSetup()
+    await addHole(s, { fastener: 'M3', type: 'countersink' })
+    await s.run('design.clones.add', {
+      partId: s.partId,
+      source: { featureId: 'hole1' },
+      rows: [{ kind: 'offset', count: 2, du: '20', dv: '0' }],
+    })
+    expect(s.op('clones1_2_hole1_countersink')).toMatchObject({
+      kind: 'chamfer',
+      edgeOf: 'clones1_2_hole1_drill',
+    })
+    await s.run('design.hole.update', { partId: s.partId, featureId: 'hole1', csAngle: '82' })
+    expect(exact(opField(s, 'clones1_2_hole1_countersink', 'angle'))).toBe(82)
+    const loaded = expectOk(loadPart(s.d.doc, s.partId, 'test'))
+    expect(loaded.features.map((l) => l.feature.id)).toEqual(['hole1', 'clones1'])
   })
 })

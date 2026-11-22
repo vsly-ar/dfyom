@@ -1,8 +1,10 @@
 /**
- * The hole feature kind (v0.4 F3): one round hole with an optional counterbore at its mouth,
- * sizes from the built-in fastener table, expanded to a drilling (simple) or a circular pocket
- * plus a drilling on its floor (counterbore). Countersink (F4) adds a `head` variant.
- * Doc: docs/modes/design-v0.4.md#hole-feature, docs/modes/design-v0.4.md#implementation-f3
+ * The hole feature kind (v0.4 F3, F4): one round hole with an optional counterbore or countersink
+ * at its mouth, sizes from the built-in fastener table, expanded to a drilling (simple), a
+ * circular pocket plus a drilling on its floor (counterbore), or a drilling plus a chamfer on its
+ * mouth (countersink).
+ * Doc: docs/modes/design-v0.4.md#hole-feature, docs/modes/design-v0.4.md#implementation-f3,
+ * docs/modes/design-v0.4.md#implementation-f4
  *
  * Only types come from feature.ts, which registers this kind as built in (so every reader of a
  * part knows it); the commands are in hole-commands.ts.
@@ -22,8 +24,8 @@ import { FeatureDtoSchema, type FeatureDTO } from './feature.dto'
 import { CENTRE_ANCHOR, DEFAULTS, fieldContext, type Point } from './operation'
 import { DRILL_BOTTOMS, type DrillBottomKind } from './part.dto'
 
-/** Hole types built so far; F4 adds `countersink` (a third `HoleHead` variant). */
-export const HOLE_TYPES = ['simple', 'counterbore'] as const
+/** Hole types, one `HoleHead` variant each. */
+export const HOLE_TYPES = ['simple', 'counterbore', 'countersink'] as const
 export type HoleType = (typeof HOLE_TYPES)[number]
 
 export const HOLE_PURPOSES = ['clearance', 'tapDrill'] as const
@@ -36,6 +38,7 @@ export const FASTENER_SIZES = FASTENER_TABLE.map((r) => r.size) as [string, ...s
 export type HoleHead =
   | { readonly type: 'simple' }
   | { readonly type: 'counterbore'; readonly cbDiameter: Quantity; readonly cbDepth: Quantity }
+  | { readonly type: 'countersink'; readonly csDiameter: Quantity; readonly csAngle: Quantity }
 
 export interface Hole extends FeatureBase {
   readonly kind: 'hole'
@@ -94,6 +97,10 @@ export interface HoleTableSizes {
   readonly cbDiameter: Quantity
   /** k + `headSink`. */
   readonly cbDepth: Quantity
+  /** Countersunk head dk + 2 × `headSink`. */
+  readonly csDiameter: Quantity
+  /** The countersunk head's angle (90° ISO). */
+  readonly csAngle: Quantity
 }
 
 export function holeTableSizes(
@@ -105,14 +112,20 @@ export function holeTableSizes(
 ): AppResult<HoleTableSizes> {
   const d = purpose === 'tapDrill' ? row.tapDrill : row.clearance[fit]
   const k = tableLength(row.socketHead.height, units)
+  const dk = tableLength(row.countersunkHead.diameter, units)
+  const sink2 = headSink.exact.add(headSink.exact)
   return collect([
     tableLength(d, units),
     tableLength(row.counterbore.diameter, units),
     k.andThen((k) => derivedLength(k.exact.add(headSink.exact), units)),
-  ]).map(([diameter, cbDiameter, cbDepth]) => ({
+    dk.andThen((dk) => derivedLength(dk.exact.add(sink2), units)),
+    Quantity.parse(`${row.countersunkHead.angle}°`, fieldContext('angle', units)),
+  ]).map(([diameter, cbDiameter, cbDepth, csDiameter, csAngle]) => ({
     diameter: diameter!,
     cbDiameter: cbDiameter!,
     cbDepth: cbDepth!,
+    csDiameter: csDiameter!,
+    csAngle: csAngle!,
   }))
 }
 
@@ -134,31 +147,37 @@ const HoleDtoSchema = FeatureDtoSchema.extend({
   headSink: length(),
   cbDiameter: length().optional(),
   cbDepth: length().optional(),
+  csDiameter: length().optional(),
+  csAngle: quantityDto('angle').optional(),
 })
 
 function holeFromDTO(raw: FeatureDTO): AppResult<Hole> {
   const parsed = parseWith(HoleDtoSchema, raw, 'holeFromDTO')
   if (parsed.isErr()) return parsed
   const d = parsed.unwrap()
-  const q = (dto: z.output<ReturnType<typeof length>>, ...path: (string | number)[]) =>
-    quantityFromDTO(dto, ...path)
-  const opt = (dto: z.output<ReturnType<typeof length>> | undefined, path: string) =>
-    dto === undefined ? Ok(undefined) : q(dto, path)
+  type Dto = z.output<ReturnType<typeof length>> | z.output<ReturnType<typeof quantityDto>>
+  const q = (dto: Dto, ...path: (string | number)[]) => quantityFromDTO(dto, ...path)
   const missing = (path: string) =>
     fail('input.malformed', `hole ${d.id}: ${path} is missing`, {
-      issues: [{ path: [path], rule: 'required', message: 'is required for a counterbore' }],
+      issues: [{ path: [path], rule: 'required', message: `is required for a ${d.type}` }],
       where: 'holeFromDTO',
     })
-  const cb = d.type === 'counterbore'
+  /** A head size: required by its own type, ignored otherwise. */
+  const head = (type: HoleType, dto: Dto | undefined, path: string) =>
+    d.type !== type ? Ok(undefined) : dto === undefined ? missing(path) : q(dto, path)
+  const opt = (dto: Dto | undefined, path: string) =>
+    dto === undefined ? Ok(undefined) : q(dto, path)
   return collect<Quantity | undefined>([
     q(d.center[0], 'center', 0),
     q(d.center[1], 'center', 1),
     q(d.diameter, 'diameter'),
     opt(d.depth, 'depth'),
     q(d.headSink, 'headSink'),
-    cb && d.cbDiameter === undefined ? missing('cbDiameter') : opt(d.cbDiameter, 'cbDiameter'),
-    cb && d.cbDepth === undefined ? missing('cbDepth') : opt(d.cbDepth, 'cbDepth'),
-  ]).map(([u, v, diameter, depth, headSink, cbDiameter, cbDepth]) => ({
+    head('counterbore', d.cbDiameter, 'cbDiameter'),
+    head('counterbore', d.cbDepth, 'cbDepth'),
+    head('countersink', d.csDiameter, 'csDiameter'),
+    head('countersink', d.csAngle, 'csAngle'),
+  ]).map(([u, v, diameter, depth, headSink, cbDiameter, cbDepth, csDiameter, csAngle]) => ({
     kind: 'hole',
     id: d.id,
     name: d.name,
@@ -171,9 +190,12 @@ function holeFromDTO(raw: FeatureDTO): AppResult<Hole> {
     bottom: d.bottom,
     depth: depth === undefined ? None : Some(depth),
     headSink: headSink!,
-    head: cb
-      ? { type: 'counterbore', cbDiameter: cbDiameter!, cbDepth: cbDepth! }
-      : { type: 'simple' },
+    head:
+      d.type === 'counterbore'
+        ? { type: 'counterbore', cbDiameter: cbDiameter!, cbDepth: cbDepth! }
+        : d.type === 'countersink'
+          ? { type: 'countersink', csDiameter: csDiameter!, csAngle: csAngle! }
+          : { type: 'simple' },
   }))
 }
 
@@ -194,6 +216,9 @@ function holeToDTO(h: Hole): FeatureDTO {
     headSink: h.headSink.toDTO(),
     ...(h.head.type === 'counterbore'
       ? { cbDiameter: h.head.cbDiameter.toDTO(), cbDepth: h.head.cbDepth.toDTO() }
+      : {}),
+    ...(h.head.type === 'countersink'
+      ? { csDiameter: h.head.csDiameter.toDTO(), csAngle: h.head.csAngle.toDTO() }
       : {}),
   }
 }
@@ -256,14 +281,42 @@ function holeInvariants(h: Hole): Issue[] {
         { max: depth.canonical, actual: cbDepth.canonical },
       )
   }
+  if (h.head.type === 'countersink') {
+    // the angle's range is the owned chamfer's rule (validate.ts), reported at csAngle by fieldOf
+    const { csDiameter, csAngle } = h.head
+    const wider = csDiameter.exact.compare(h.diameter.exact) > 0
+    check(wider, 'csDiameter', 'greaterThanDiameter', 'must be greater than the hole diameter', {
+      min: h.diameter.canonical,
+      actual: csDiameter.canonical,
+    })
+    if (wider && depth !== undefined) {
+      const tan = Math.tan(((csAngle.canonical / 2) * Math.PI) / 180)
+      const cone = (csDiameter.canonical - h.diameter.canonical) / 2 / tan
+      check(
+        !(tan > 0) || cone < depth.canonical,
+        'csDiameter',
+        'countersinkTooDeep',
+        `the countersink cone (${round3(cone)} mm deep) must end above the hole bottom (depth ${depth.canonical} mm)`,
+        {
+          coneDepth: round3(cone),
+          depth: depth.canonical,
+          max: Math.floor((h.diameter.canonical + 2 * depth.canonical * tan) * 1000 + 1e-6) / 1000,
+          actual: csDiameter.canonical,
+        },
+      )
+    }
+  }
   return issues
 }
+
+const round3 = (x: number) => Math.round(x * 1000) / 1000
 
 // ── expansion ──────────────────────────────────────────────────────────────────────────────
 
 /**
  * simple → `drill`; counterbore → `counterbore` (circular pocket) then `drill` on its floor,
- * blind depth `depth − cbDepth` (design-v0.4.md § Expansion). A drill point gets the drilling's
+ * blind depth `depth − cbDepth`; countersink → `drill` then `countersink`, a chamfer on the
+ * drilling's mouth (design-v0.4.md § Expansion). A drill point gets the drilling's
  * default 118°. Larger holes than any drill are still drillings: Plan bores them helically with
  * an end mill (design.md#drilling).
  */
@@ -286,6 +339,20 @@ function expandHole(h: Hole, ctx: ExpansionContext): AppResult<readonly Expanded
     },
   })
   if (h.head.type === 'simple') return Ok([drill(h.on, h.depth)])
+  if (h.head.type === 'countersink')
+    return Ok([
+      drill(h.on, h.depth),
+      {
+        role: 'countersink',
+        operation: {
+          kind: 'chamfer',
+          on: h.on,
+          edgeOf: ctx.ownedId('drill'),
+          diameter: h.head.csDiameter,
+          angle: h.head.csAngle,
+        },
+      },
+    ])
   const { cbDiameter, cbDepth } = h.head
   const below: AppResult<Option<Quantity>> = h.depth.isNone()
     ? Ok(None)
@@ -319,6 +386,7 @@ const FIELD_OF: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     'shape.diameter': 'cbDiameter',
     'shape.center': 'center',
   },
+  countersink: { diameter: 'csDiameter', angle: 'csAngle', on: 'on' },
 }
 
 function holeFieldOf(role: string, path: IssuePath): IssuePath | undefined {
@@ -335,28 +403,44 @@ function reevaluateHole(
   at: (q: Quantity, path: string) => AppResult<Quantity>,
 ): AppResult<Hole> {
   const head = h.head
-  const cb = head.type === 'counterbore'
+  const heads: [string, Quantity][] =
+    head.type === 'counterbore'
+      ? [
+          ['cbDiameter', head.cbDiameter],
+          ['cbDepth', head.cbDepth],
+        ]
+      : head.type === 'countersink'
+        ? [
+            ['csDiameter', head.csDiameter],
+            ['csAngle', head.csAngle],
+          ]
+        : []
   return collect<Quantity | undefined>([
     at(h.center[0], 'center.0'),
     at(h.center[1], 'center.1'),
     at(h.diameter, 'diameter'),
     h.depth.isSome() ? at(h.depth.unwrap(), 'depth') : Ok(undefined),
     at(h.headSink, 'headSink'),
-    cb ? at(head.cbDiameter, 'cbDiameter') : Ok(undefined),
-    cb ? at(head.cbDepth, 'cbDepth') : Ok(undefined),
-  ]).map(([u, v, diameter, depth, headSink, cbDiameter, cbDepth]) => ({
+    ...heads.map(([path, q]) => at(q, path)),
+  ]).map(([u, v, diameter, depth, headSink, a, b]) => ({
     ...h,
     center: [u!, v!],
     diameter: diameter!,
     depth: depth === undefined ? None : Some(depth),
     headSink: headSink!,
-    head: cb ? { type: 'counterbore', cbDiameter: cbDiameter!, cbDepth: cbDepth! } : head,
+    head:
+      head.type === 'counterbore'
+        ? { type: 'counterbore', cbDiameter: a!, cbDepth: b! }
+        : head.type === 'countersink'
+          ? { type: 'countersink', csDiameter: a!, csAngle: b! }
+          : head,
   }))
 }
 
 /**
  * `dfm.holeCustomSize` (info): a size that differs from the table row the hole names, on the
- * owned operation that carries it. Params `{ field, table, value }` (mm) plus `fastener`.
+ * owned operation that carries it. Params `{ field, table, value }` (mm; csAngle in degrees) plus
+ * `fastener`.
  */
 function holeWarnings(h: Hole, ownedId: (role: string) => string): DfmWarning[] {
   if (h.fastener.isNone()) return []
@@ -375,22 +459,30 @@ function holeWarnings(h: Hole, ownedId: (role: string) => string): DfmWarning[] 
       ['cbDiameter', 'counterbore', h.head.cbDiameter, t.cbDiameter],
       ['cbDepth', 'counterbore', h.head.cbDepth, t.cbDepth],
     )
+  if (h.head.type === 'countersink')
+    sizes.push(
+      ['csDiameter', 'countersink', h.head.csDiameter, t.csDiameter],
+      ['csAngle', 'countersink', h.head.csAngle, t.csAngle],
+    )
   return sizes
     .filter(([, , value, want]) => !value.exact.equals(want.exact))
-    .map(([field, role, value, want]) => ({
-      code: 'dfm.holeCustomSize',
-      severity: 'info',
-      message: `${field} ${value.canonical} mm differs from the ${size} table value ${want.canonical} mm (custom)`,
-      operation: ownedId(role),
-      parameter: field,
-      params: {
-        field,
-        table: want.canonical,
-        value: value.canonical,
-        fastener: size,
-        feature: h.id,
-      },
-    }))
+    .map(([field, role, value, want]) => {
+      const unit = value.kind === 'angle' ? '°' : ' mm'
+      return {
+        code: 'dfm.holeCustomSize',
+        severity: 'info',
+        message: `${field} ${value.canonical}${unit} differs from the ${size} table value ${want.canonical}${unit} (custom)`,
+        operation: ownedId(role),
+        parameter: field,
+        params: {
+          field,
+          table: want.canonical,
+          value: value.canonical,
+          fastener: size,
+          feature: h.id,
+        },
+      } satisfies DfmWarning
+    })
 }
 
 export const holeSpec: FeatureKindSpec<Hole> = {
