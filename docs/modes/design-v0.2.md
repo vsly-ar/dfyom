@@ -122,7 +122,7 @@ The face model is in core: directions, frames and the local stock in [`src/core/
 - A facing's or profile's `on` is not an operation reference (it is a stock face, always there, and a facing removes it), so it never raises `dfm.surfaceMissing` or `design.referenced`.
 - `dfm.reach` runs against the library until the [tool field](#operation-tool) exists (task A4): the longest reach (`stickout`, else `fluteLength`) of the library tools whose type and size fit the operation; a pocket or flat/point hole is measured to its floor (`depth − onZ`), a through hole and a profile by the stock extent along `n`. A4 switches it to the operation's own tool.
 - `dfm.setups` is attached to the first operation of the second direction (the one that adds a setup), parameter `on`, `params: { count, directions }` (`top`, `bottom`, `front`, `right`, `back`, `left`, in order of first use).
-- Until F1 the Design UI offers only top-facing `on` targets and `.z` formula names (±z), and draws outlines in the face frame's z; until A1b/C3 geometry and toolpaths reject other directions ([geometry.md](../architecture/geometry.md#non-top-faces-v02)).
+- Until F1 the Design UI offers only top-facing `on` targets and `.z` formula names (±z), and draws outlines in the face frame's z; geometry evaluates every direction (A1b), toolpaths reject other directions until C3 ([geometry.md](../architecture/geometry.md#non-top-faces-v02)).
 
 ## Placement anchors
 

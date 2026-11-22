@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { fail, Ok } from '../../../shared/result'
 import { expectErrCode, expectOk } from '../../../shared/testing/result'
 import { offsetLoft, type LabelledMesh } from '../loft'
+import { translation } from '../model'
 import type { SolidKernel } from '../solid-port'
 import { signedVolume } from '../testing/mesh-oracles'
 import { nodeManifoldSource } from '../testing/node-wasm'
@@ -54,7 +55,9 @@ describe('withSolids', () => {
       const a = expectOk(s.reserveOriginalId())
       const b = expectOk(s.reserveOriginalId())
       const big = expectOk(s.fromMesh(box(10, 10, 10, 1), a))
-      const small = expectOk(s.translate(expectOk(s.fromMesh(box(4, 4, 20, 5), b)), [0, 0, 5]))
+      const small = expectOk(
+        s.transform(expectOk(s.fromMesh(box(4, 4, 20, 5), b)), translation([0, 0, 5])),
+      )
       const cut = expectOk(s.subtract(big, small))
       return s.toMesh(cut).map((m) => ({ m, a, b, volume: expectOk(s.volume(cut)) }))
     })
@@ -72,11 +75,44 @@ describe('withSolids', () => {
     expect(kernel.liveObjects()).toBe(0)
   })
 
+  it('places a solid with an exact axis rotation plus translation, labels and volume kept', () => {
+    // u → −y, v → +z, n → −x (u × v = n), origin (100, 50, −20)
+    const r = kernel.withSolids((s) => {
+      const id = expectOk(s.reserveOriginalId())
+      const placed = expectOk(
+        s.transform(expectOk(s.fromMesh(box(10, 6, 2, 3), id)), {
+          origin: [100, 50, -20],
+          u: [0, -1, 0],
+          v: [0, 0, 1],
+          n: [-1, 0, 0],
+        }),
+      )
+      return s.toMesh(placed).map((m) => ({ m, volume: expectOk(s.volume(placed)) }))
+    })
+    const { m, volume } = expectOk(r)
+    expect(volume).toBeCloseTo(120, 6)
+    const axis = (a: number) => {
+      const vs = Array.from({ length: m.positions.length / 3 }, (_, i) => m.positions[3 * i + a]!)
+      return [Math.min(...vs), Math.max(...vs)]
+    }
+    // local x ∈ ±5 → y = 50 ∓ x; local y ∈ ±3 → z = −20 + y; local z ∈ 0..2 → x = 100 − z
+    expect(axis(0)).toEqual([98, 100])
+    expect(axis(1)).toEqual([45, 55])
+    expect(axis(2)).toEqual([-23, -17])
+    expect(new Set(m.triangleFace)).toEqual(new Set([3, 4, 5]))
+    expect(
+      signedVolume({ positions: Float64Array.from(m.positions), triangles: m.indices }),
+    ).toBeCloseTo(120, 3)
+    expect(kernel.liveObjects()).toBe(0)
+  })
+
   it('decomposes into pieces and unions a batch', () => {
     const r = kernel.withSolids((s) => {
       const id = expectOk(s.reserveOriginalId())
       const one = expectOk(s.fromMesh(box(1, 1, 1), id))
-      const two = expectOk(s.translate(expectOk(s.fromMesh(box(1, 1, 1), id)), [5, 0, 0]))
+      const two = expectOk(
+        s.transform(expectOk(s.fromMesh(box(1, 1, 1), id)), translation([5, 0, 0])),
+      )
       const both = expectOk(s.union([one, two]))
       const overlap = expectOk(s.intersect(both, one))
       return Ok({

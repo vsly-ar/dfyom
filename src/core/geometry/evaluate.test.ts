@@ -1,9 +1,11 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
 import { evaluatePart, type PartEvaluation } from './evaluate'
+import { localStock, type Direction } from './face'
 import { loadManifold } from './manifold'
 import { CHORD_TOLERANCE, type OperationGeometry, type PartGeometryInput } from './model'
 import type { SolidKernel } from './solid-port'
+import { pocketVolume } from './testing/analytic'
 import { signedVolume } from './testing/mesh-oracles'
 import { nodeManifoldSource } from './testing/node-wasm'
 import {
@@ -277,19 +279,6 @@ describe('evaluatePart: edge cases', () => {
     expect(e.volume).toBeCloseTo(100 * 60 * 20 - (200 - (4 - Math.PI) * 9) * 20, -1)
   })
 
-  it('fails with faceNotSupported for operations on faces other than the top (until task A1b)', () => {
-    const input = withOp({ ...pocket({ kind: 'circle', radius: 3 }, 2, 0), direction: '+x' })
-    const e = expectErrCode(
-      kernel.withSolids((s) => evaluatePart(input, s)),
-      'geometry.evaluation',
-    )
-    expect(e.issues[0]).toMatchObject({
-      rule: 'faceNotSupported',
-      path: ['operations', 'pocket1', 'on'],
-    })
-    expect(kernel.liveObjects()).toBe(0)
-  })
-
   it('fails with loftInvalid when floorRadius exceeds cornerRadius (a bug upstream)', () => {
     const e = kernel.withSolids((s) =>
       evaluatePart(
@@ -299,6 +288,214 @@ describe('evaluatePart: edge cases', () => {
     )
     expect(expectErrCode(e, 'geometry.evaluation').issues[0]?.rule).toBe('loftInvalid')
     expect(kernel.liveObjects()).toBe(0)
+  })
+})
+
+/** Every centroid of `id` (at least one) passes `check`. */
+function each(e: PartEvaluation, id: string, check: (c: [number, number, number]) => void): void {
+  const cs = centroids(e, id)
+  expect(cs.length, id).toBeGreaterThan(0)
+  for (const c of cs) check(c)
+}
+
+describe('evaluatePart: non-top faces (built in the face frame, then placed)', () => {
+  const T = TEST_STOCK
+  const drill = (
+    id: string,
+    direction: Direction,
+    center: readonly [number, number],
+    diameter: number,
+    bottom: Extract<OperationGeometry, { kind: 'drilling' }>['bottom'],
+  ): OperationGeometry => ({ kind: 'drilling', id, direction, onZ: 0, center, diameter, bottom })
+
+  it('drills through from the right face (+x): a hole along x over the whole length', () => {
+    // +x frame: origin (L, 0, −T), u = +y, v = +z → centre (30, 10) is y = 30, z = −10
+    const e = evaluate(withOp(drill('drill1', '+x', [30, 10], 6, { kind: 'through' })))
+    expect(e.surfaces).toEqual(expect.arrayContaining(['drill1.wall', 'stock.side[1]']))
+    expect(e.surfaces).not.toContain('drill1.bottom')
+    each(e, 'drill1.wall', (c) => {
+      const d = Math.hypot(c[1] - 30, c[2] + 10)
+      expect(d).toBeLessThanOrEqual(3 + 1e-4)
+      expect(d).toBeGreaterThanOrEqual(3 - CHORD_TOLERANCE)
+      expect(c[0]).toBeGreaterThan(-1e-4)
+      expect(c[0]).toBeLessThan(T.length + 1e-4)
+    })
+    const exact = T.length * T.width * T.thickness - Math.PI * 9 * T.length
+    expect(e.volume).toBeGreaterThanOrEqual(exact)
+    expect(e.volume - exact).toBeLessThan(2 * CHORD_TOLERANCE * 2 * Math.PI * 3 * T.length)
+    expect(e.pieces).toBe(1)
+  })
+
+  it('drills a flat hole from the front face (−y) to its depth along y', () => {
+    // −y frame: origin (0, 0, −T), u = +x, v = +z; depth 15 ends at y = 15
+    const e = evaluate(withOp(drill('drill1', '-y', [40, 12], 5, { kind: 'flat', depth: 15 })))
+    each(e, 'drill1.bottom', (c) => expect(c[1]).toBeCloseTo(15, 4))
+    each(e, 'drill1.wall', (c) => {
+      expect(Math.hypot(c[0] - 40, c[2] + 8)).toBeCloseTo(2.5, 1)
+      expect(c[1]).toBeLessThan(15 + 1e-4)
+    })
+  })
+
+  it('pockets the bottom face (−z): floor, walls and fillet in the bottom frame', () => {
+    // −z frame: origin (0, W, −T), u = +x, v = −y → centre (50, 20) is x = 50, y = 40;
+    // the floor (local z = −5) is z = −T + 5; wall[0] (lowest v) is the highest y
+    const e = evaluate(
+      withOp({
+        kind: 'pocket',
+        id: 'pocket1',
+        direction: '-z',
+        onZ: 0,
+        shape: {
+          center: [50, 20],
+          contour: { kind: 'rectangle', length: 40, width: 16, cornerRadius: 4 },
+        },
+        depth: 5,
+        floorRadius: 2,
+      }),
+    )
+    for (const id of ['floor', 'floorFillet', 'wall[0]', 'wall[1]', 'corner[0]'])
+      expect(e.surfaces).toContain(`pocket1.${id}`)
+    expect(e.surfaces).toContain('stock.bottom')
+    each(e, 'pocket1.floor', (c) => expect(c[2]).toBeCloseTo(-15, 4))
+    each(e, 'pocket1.wall[0]', (c) => expect(c[1]).toBeCloseTo(48, 4))
+    each(e, 'pocket1.wall[1]', (c) => expect(c[0]).toBeCloseTo(70, 4))
+    each(e, 'pocket1.wall[2]', (c) => expect(c[1]).toBeCloseTo(32, 4))
+    for (const id of ['pocket1.wall[0]', 'pocket1.floorFillet'])
+      each(e, id, (c) => expect(c[2]).toBeLessThan(-15 + 2 + 3 + 1e-4))
+    const exact = T.length * T.width * T.thickness - pocketVolume(40, 16, 4, 5, 2)
+    expect(e.volume).toBeGreaterThanOrEqual(exact - 1e-6)
+    expect(e.volume - exact).toBeLessThan(5)
+  })
+
+  it('pockets a side face (−x) on a level below the stock face', () => {
+    // −x frame: origin (0, W, −T), u = −y, v = +z; on 1 mm in (onZ −1), depth 4 → floor x = 5
+    const e = evaluate(
+      withOp({
+        kind: 'pocket',
+        id: 'pocket1',
+        direction: '-x',
+        onZ: -1,
+        shape: { center: [20, 10], contour: { kind: 'circle', radius: 5 } },
+        depth: 4,
+        floorRadius: 0,
+      }),
+    )
+    each(e, 'pocket1.floor', (c) => {
+      expect(c[0]).toBeCloseTo(5, 4)
+      expect(Math.hypot(c[1] - 40, c[2] + 10)).toBeLessThan(5 + 1e-4)
+    })
+    expect(e.volume).toBeCloseTo(T.length * T.width * T.thickness - Math.PI * 25 * 5, -1)
+  })
+
+  it('faces the bottom and profiles a side face with tabs measured up from the opposite face', () => {
+    const e = evaluate({
+      stock: T,
+      operations: [
+        { kind: 'facing', id: 'facing1', direction: '-z', depth: 1.5 },
+        {
+          kind: 'profile',
+          id: 'profile1',
+          direction: '+y',
+          shape: {
+            center: [50, 10],
+            contour: { kind: 'rectangle', length: 30, width: 10, cornerRadius: 2 },
+          },
+          side: 'inside',
+          slotWidth: 3,
+          tabs: { count: 2, width: 4, thickness: 6 },
+        },
+      ],
+    })
+    expect(e.surfaces).not.toContain('stock.bottom')
+    each(e, 'facing1.floor', (c) => expect(c[2]).toBeCloseTo(-T.thickness + 1.5, 4))
+    // +y frame: n = +y, the opposite face is y = 0, so a tab top is the plane y = 6
+    for (const i of [0, 1]) each(e, `profile1.tab[${i}].top`, (c) => expect(c[1]).toBeCloseTo(6, 4))
+    expect(e.surfaces).toContain('profile1.wall[0]')
+    expect(e.pieces).toBe(1)
+  })
+
+  it('composes removals from four directions that overlap and meet on near-coincident planes', () => {
+    // 12.7 thick: the side pocket's upper wall is −12.7 + 5 (≠ −7.7 in float64) against the
+    // top pocket's floor at −7.7, so the two meet on almost the same plane (a sliver case)
+    const stock = { length: 80, width: 50, thickness: 12.7 }
+    const input: PartGeometryInput = {
+      stock,
+      operations: [
+        {
+          kind: 'pocket',
+          id: 'top',
+          onZ: 0,
+          shape: {
+            center: [40, 25],
+            contour: { kind: 'rectangle', length: 30, width: 20, cornerRadius: 3 },
+          },
+          depth: 7.7,
+          floorRadius: 0,
+        },
+        {
+          kind: 'pocket',
+          id: 'side',
+          direction: '-y',
+          onZ: 0,
+          shape: {
+            center: [40, 2.5],
+            contour: { kind: 'rectangle', length: 20, width: 5, cornerRadius: 0 },
+          },
+          depth: 30,
+          floorRadius: 0,
+        },
+        {
+          kind: 'pocket',
+          id: 'bottom',
+          direction: '-z',
+          onZ: 0,
+          shape: { center: [40, 25], contour: { kind: 'circle', radius: 6 } },
+          depth: 12.7 - 7.7,
+          floorRadius: 0,
+        },
+        drill('cross', '+x', [25, 12.7 - 3.85], 4, { kind: 'through' }),
+      ],
+    }
+    const e = evaluate(input)
+    for (const id of ['top.wall[0]', 'side.wall[2]', 'bottom.wall[0]', 'cross.wall'])
+      expect(e.surfaces, id).toContain(id)
+    // the bottom pocket opens into the top one (coincident floors): its floor never survives
+    expect(e.surfaces).toContain('top.floor')
+    expect(e.surfaces).not.toContain('bottom.floor')
+    expect(e.pieces).toBe(1)
+    expect(e.warnings).toEqual([])
+    expect(
+      signedVolume({ positions: Float64Array.from(e.positions), triangles: e.indices }),
+    ).toBeCloseTo(e.volume, 0)
+    expect(kernel.liveObjects()).toBe(0)
+  })
+
+  it('runs the retainedRemoved boolean for removals of another direction', () => {
+    const fillet: OperationGeometry = {
+      kind: 'pocket',
+      id: 'pocket1',
+      onZ: 0,
+      shape: {
+        center: [50, 30],
+        contour: { kind: 'rectangle', length: 40, width: 24, cornerRadius: 4 },
+      },
+      depth: 8,
+      floorRadius: 3,
+    }
+    // +x frame: v = z + T, so v = 13.5 is z = −6.5, inside the fillet zone (z −8..−5)
+    const through = evaluate({
+      stock: T,
+      operations: [fillet, drill('drill1', '+x', [30, 13.5], 2, { kind: 'through' })],
+    })
+    expect(through.warnings.map((w) => [w.code, w.operation, w.params['by']])).toEqual([
+      ['dfm.retainedRemoved', 'pocket1', 'drill1'],
+    ])
+    // below the floor (z = −12): clear
+    const below = evaluate({
+      stock: T,
+      operations: [fillet, drill('drill1', '+x', [30, 8], 2, { kind: 'through' })],
+    })
+    expect(below.warnings).toEqual([])
   })
 })
 
@@ -359,6 +556,56 @@ describe('evaluatePart: seeded random valid parameters', () => {
       expect(r.isOk(), JSON.stringify({ i, input, err: r.isErr() && r.unwrapErr().toJSON() })).toBe(
         true,
       )
+    }
+    expect(kernel.liveObjects()).toBe(0)
+  })
+
+  it('evaluates 30 random mixed-direction parts without error, air triangles or slivers', () => {
+    const rand = rng(20261121)
+    const between = (lo: number, hi: number) => lo + (hi - lo) * rand()
+    const pick = <T>(xs: readonly T[]): T => xs[Math.floor(rand() * xs.length)]!
+    const directions = ['+z', '-z', '-y', '+x', '+y', '-x'] as const
+    // a non-dyadic stock, so face-frame origins are not exact in float32
+    const stock = { length: 83.3, width: 47.1, thickness: 12.7 }
+    for (let i = 0; i < 30; i++) {
+      const operations: OperationGeometry[] = []
+      for (let k = 0; k < 6; k++) {
+        const direction = pick(directions)
+        const local = localStock(direction, stock)
+        const center = [between(0.2, 0.8) * local.length, between(0.2, 0.8) * local.width] as const
+        const room = Math.min(local.length, local.width) * 0.3
+        if (rand() < 0.5) {
+          const length = between(2, room)
+          const width = between(2, room)
+          const cornerRadius = between(0, Math.min(length, width) / 2)
+          const depth = between(0.5, local.thickness * 0.7)
+          operations.push({
+            kind: 'pocket',
+            id: `pocket${k}`,
+            direction,
+            onZ: 0,
+            shape: { center, contour: { kind: 'rectangle', length, width, cornerRadius } },
+            depth,
+            floorRadius: between(0, Math.min(depth, cornerRadius)),
+          })
+        } else
+          operations.push({
+            kind: 'drilling',
+            id: `drill${k}`,
+            direction,
+            onZ: 0,
+            center,
+            diameter: between(1, room),
+            bottom:
+              rand() < 0.4
+                ? { kind: 'through' }
+                : { kind: 'flat', depth: between(1, local.thickness * 0.9) },
+          })
+      }
+      const r = kernel.withSolids((s) => evaluatePart({ stock, operations }, s))
+      const ctx = JSON.stringify({ i, operations, err: r.isErr() && r.unwrapErr().toJSON() })
+      expect(r.isOk(), ctx).toBe(true)
+      expect(r.unwrap().pieces, ctx).toBe(1)
     }
     expect(kernel.liveObjects()).toBe(0)
   })

@@ -120,3 +120,61 @@ it('meets the warm budget when the checks report warnings', async () => {
   }
   expect(kernel.liveObjects()).toBe(0)
 })
+
+it('meets the warm budget on the test part with side and bottom operations (v0.2)', async () => {
+  const kernel = (await loadManifold(nodeManifoldSource())).unwrap()
+  const base = testPart()
+  const input: PartGeometryInput = {
+    ...base,
+    operations: [
+      ...base.operations,
+      {
+        kind: 'drilling',
+        id: 'side1',
+        direction: '+x',
+        onZ: 0,
+        center: [30, 10],
+        diameter: 6,
+        bottom: { kind: 'through' },
+      },
+      {
+        kind: 'drilling',
+        id: 'side2',
+        direction: '-y',
+        onZ: 0,
+        center: [30, 8],
+        diameter: 5,
+        bottom: { kind: 'flat', depth: 20 },
+      },
+      {
+        kind: 'pocket',
+        id: 'bottom1',
+        direction: '-z',
+        onZ: 0,
+        shape: {
+          center: [50, 30],
+          contour: { kind: 'rectangle', length: 30, width: 16, cornerRadius: 4 },
+        },
+        depth: 6,
+        floorRadius: 2,
+      },
+    ],
+  }
+  for (let i = 0; i < 20; i++) kernel.withSolids((s) => evaluatePart(input, s)).unwrap()
+  const times: number[] = []
+  let triangles = 0
+  for (let i = 0; i < 200; i++) {
+    const t = performance.now()
+    triangles = kernel.withSolids((s) => evaluatePart(input, s)).unwrap().stats.triangles
+    times.push(performance.now() - t)
+  }
+  times.sort((a, b) => a - b)
+  const median = times[100]!
+  console.log(
+    `test part + side and bottom operations: warm median ${median.toFixed(1)} ms, ` +
+      `p95 ${times[190]!.toFixed(1)} ms, ${triangles} triangles (budget 50)`,
+  )
+  expect(median).toBeLessThanOrEqual(50)
+  expect(triangles).toBeLessThanOrEqual(20_000)
+  expect(kernel.liveObjects()).toBe(0)
+})

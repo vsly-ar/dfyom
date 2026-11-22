@@ -4,9 +4,9 @@
  * Doc: docs/modes/design-v0.2.md#face-frame, docs/architecture/geometry.md#non-top-faces-v02
  *
  * Pure data and float64 helpers, shared by the design model (surface table, checks) and
- * geometry (parameter checks; building in the face frame is task A1b).
+ * geometry (parameter checks; building in the face frame and placing, task A1b).
  */
-import type { Vec3 } from './model'
+import { applyPlacement, type Placement, type Vec3 } from './model'
 
 /** The six approach directions (outward normal of the face), in the order of the face table. */
 export const DIRECTIONS = ['+z', '-z', '-y', '+x', '+y', '-x'] as const
@@ -164,12 +164,8 @@ export function adjacentStockFaces(
   return [face(neg(v)), face(u), face(v), face(neg(u))]
 }
 
-export interface FaceFrame {
-  readonly origin: Vec3
-  readonly u: Vec3
-  readonly v: Vec3
-  readonly n: Vec3
-}
+/** A face frame is a rigid placement: local (u, v, w) → part frame. */
+export type FaceFrame = Placement
 
 /**
  * Face frame of a face of `direction` at `level` (`n · p`; default: the stock face): the origin
@@ -193,7 +189,5 @@ export function faceFrame(
 
 /** A point `[u, v, w]` of the face frame (w along `n`) in the part frame. */
 export function toPartFrame(frame: FaceFrame, p: Vec3): Vec3 {
-  const at = (i: number) =>
-    frame.origin[i]! + frame.u[i]! * p[0] + frame.v[i]! * p[1] + frame.n[i]! * p[2]
-  return [at(0), at(1), at(2)]
+  return applyPlacement(frame, p)
 }

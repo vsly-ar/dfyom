@@ -213,8 +213,13 @@ class ManifoldKernel implements SolidKernel {
         all([a, b]).andThen(([x, y]) => call('subtract', () => own(x!.subtract(y!)))),
       intersect: (a, b) =>
         all([a, b]).andThen(([x, y]) => call('intersect', () => own(x!.intersect(y!)))),
-      translate: (s, by) =>
-        get(s).andThen((m) => call('translate', () => own(m.translate([...by])))),
+      transform: (s, { origin: o, u, v, n }) =>
+        get(s).andThen((m) =>
+          // column-major 4×4 (the last row is ignored)
+          call('transform', () =>
+            own(m.transform([...u, 0, ...v, 0, ...n, 0, o[0], o[1], o[2], 1])),
+          ),
+        ),
       status: (s) => get(s).andThen((m) => call('status', () => m.status())),
       decompose: (s) => get(s).andThen((m) => call('decompose', () => m.decompose().map(own))),
       volume: (s) => get(s).andThen((m) => call('volume', () => m.volume())),
