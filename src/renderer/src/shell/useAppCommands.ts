@@ -1,6 +1,6 @@
 // The window's app commands from the native menu and the keyboard (task 3.6): New / Open / Save /
 // Save as (Ctrl/Cmd+N, O, S, Shift+S), undo/redo, modes, panel toggles, the shortcut list (`?`)
-// and Apply (Ctrl/Cmd+Enter, task P3). Menu items and keys run the same handlers as the buttons. A key the window handled is not
+// Apply (Ctrl/Cmd+Enter, task P3) and Settings (Ctrl/Cmd+,). Menu items and keys run the same handlers as the buttons. A key the window handled is not
 // run again when the menu's accelerator reports it too (platforms differ in who sees it first).
 // Doc: docs/conventions/ui.md#app-shell, #keyboard-shortcuts
 import { useEffect, useRef } from 'react'
@@ -59,6 +59,8 @@ export function useAppCommands(handlers: AppCommandHandlers): void {
           return h.onToggleInspector()
         case 'help.shortcuts':
           return ui.getState().setShortcutsOpen(true)
+        case 'app.settings':
+          return ui.getState().setSettingsOpen(true)
         case 'project.apply': {
           // inactive while a modal dialog is open (apply.md#keyboard)
           if (modalDialogOpen()) return
@@ -99,7 +101,9 @@ export function useAppCommands(handlers: AppCommandHandlers): void {
                 ? e.shiftKey
                   ? 'project.saveAs'
                   : 'project.save'
-                : undefined
+                : key === ',' && !e.shiftKey
+                  ? 'app.settings'
+                  : undefined
         if (action === undefined) return
         e.preventDefault()
         noteKeyAction(action)

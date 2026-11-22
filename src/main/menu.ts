@@ -1,5 +1,5 @@
-// The native application menu (ui.md decision 12): File, Edit, View, Window (with Library), Help
-// with accelerators. Items
+// The native application menu (ui.md decision 12): the macOS app menu (with Settings… Cmd+,), File
+// (Settings… Ctrl+, on Windows and Linux), Edit, View, Window (with Library), Help with accelerators. Items
 // that act on a project or the shell are sent to the focused window (`IPC.menuAction`), which
 // runs them like the matching button or key, so menu, toolbar and shortcuts dispatch the same
 // commands. Text editing (cut, copy, paste, select all) and window items use Electron's roles.
@@ -10,6 +10,8 @@ import { IPC, type MenuAction } from '../shared/preload-api'
 
 /** Menu actions that open an empty window when there is none (its start panel offers both). */
 const WITHOUT_WINDOW: readonly MenuAction[] = ['project.new', 'project.open']
+/** Menu actions that open a dialog: their window comes to the front (it may not be the focused one). */
+const TO_FRONT: readonly MenuAction[] = ['app.settings']
 
 /** What the menu needs from the app (src/main/index.ts). */
 export interface MenuHooks {
@@ -34,8 +36,11 @@ export function sendMenuAction(
   target: (action: MenuAction) => BrowserWindow | undefined = focusedOrFirst,
 ): void {
   const win = target(action)
-  if (win !== undefined && !win.isDestroyed()) win.webContents.send(IPC.menuAction, action)
-  else if (WITHOUT_WINDOW.includes(action)) noWindow()
+  if (win !== undefined && !win.isDestroyed()) {
+    // a hidden window (test runs, DFYOM_HIDE_WINDOWS) stays hidden
+    if (TO_FRONT.includes(action) && win.isVisible() && !win.isFocused()) win.focus()
+    win.webContents.send(IPC.menuAction, action)
+  } else if (WITHOUT_WINDOW.includes(action)) noWindow()
 }
 
 const NO_HOOKS: MenuHooks = { noWindow: () => {}, openLibrary: () => {} }
@@ -57,8 +62,26 @@ export function menuTemplate(
     click: () => sendMenuAction(action, noWindow, hooks.target),
     ...(accelerator === undefined ? {} : { accelerator }),
   })
+  // Settings… opens the settings dialog like the toolbar button (ui.md#keyboard-shortcuts)
+  const settings = item('Settings…', 'app.settings', 'CmdOrCtrl+,')
   const template: MenuItemConstructorOptions[] = []
-  if (mac) template.push({ role: 'appMenu' })
+  if (mac)
+    template.push({
+      role: 'appMenu',
+      submenu: [
+        { role: 'about' },
+        { type: 'separator' },
+        settings,
+        { type: 'separator' },
+        { role: 'services' },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
+    })
   template.push(
     {
       label: 'File',
@@ -69,6 +92,7 @@ export function menuTemplate(
         item('Save', 'project.save', 'CmdOrCtrl+S'),
         item('Save as…', 'project.saveAs', 'CmdOrCtrl+Shift+S'),
         { type: 'separator' },
+        ...(mac ? [] : [settings, { type: 'separator' } satisfies MenuItemConstructorOptions]),
         mac ? { role: 'close', label: 'Close window' } : { role: 'quit' },
       ],
     },
