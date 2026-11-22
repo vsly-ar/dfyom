@@ -331,5 +331,11 @@ export function toGeneratorInputs(
         })),
       }))
     }
+    case 'chamfer':
+      // blocked by the plan check `chamferToolpath` until the chamfer generator (task T1)
+      return fail('internal.unexpected', 'chamfer toolpaths are not generated yet', {
+        where: WHERE,
+        data: { planOperationId: id },
+      })
   }
 }

@@ -481,6 +481,7 @@ export function shownStrategyKeys(
         if (key === 'breakthrough') return through
         return true
       case 'facing':
+      case 'chamfer':
         return true
     }
   }

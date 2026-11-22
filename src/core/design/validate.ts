@@ -19,6 +19,9 @@ const ZERO = Rational.ZERO
 const HALF = Rational.create(1n, 2n).unwrap()
 const MIN_POINT_ANGLE = Rational.int(60n)
 const MAX_POINT_ANGLE = Rational.int(180n)
+/** Chamfer included angle (design-v0.4.md § Chamfer operation). */
+const MIN_CHAMFER_ANGLE = Rational.int(60n)
+const MAX_CHAMFER_ANGLE = Rational.int(120n)
 
 class Checker {
   readonly issues: Issue[] = []
@@ -343,6 +346,44 @@ export function operationIssues(
           `must be less than ${extentName(direction)}`,
           { max: T.canonical, actual: op.tabs.thickness.canonical },
         )
+      break
+    }
+    case 'chamfer': {
+      const edge = ops.slice(0, index).find((o) => o.id === op.edgeOf)
+      const edgeDiameter =
+        edge?.kind === 'drilling'
+          ? edge.diameter
+          : edge?.kind === 'pocket' && edge.shape.kind === 'circle'
+            ? edge.shape.diameter
+            : undefined
+      c.check(
+        edgeDiameter !== undefined,
+        'edgeOf',
+        'chamferEdge',
+        'must be an earlier drilling or circle pocket',
+        { actual: op.edgeOf },
+      )
+      if (edge !== undefined)
+        c.check(edge.on === op.on, 'on', 'chamferOn', `must be the face of ${edge.id}`, {
+          allowed: [edge.on],
+          actual: op.on,
+        })
+      if (c.positive(op.diameter, 'diameter') && edgeDiameter !== undefined)
+        c.check(
+          op.diameter.exact.compare(edgeDiameter.exact) > 0,
+          'diameter',
+          'greaterThanEdge',
+          `must be greater than the diameter of ${op.edgeOf}`,
+          { min: edgeDiameter.canonical, actual: op.diameter.canonical },
+        )
+      c.check(
+        op.angle.exact.compare(MIN_CHAMFER_ANGLE) >= 0 &&
+          op.angle.exact.compare(MAX_CHAMFER_ANGLE) <= 0,
+        'angle',
+        'range',
+        'must be between 60° and 120°',
+        { min: 60, max: 120, actual: op.angle.canonical },
+      )
       break
     }
   }

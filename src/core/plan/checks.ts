@@ -75,6 +75,7 @@ export const TOOL_TYPES_FOR: Readonly<Record<Operation['kind'], readonly ToolTyp
   pocket: ['flatEndMill', 'bullNoseEndMill'],
   drilling: ['drill', 'flatEndMill'],
   profile: ['flatEndMill'],
+  chamfer: ['chamferMill'],
 }
 
 /** Float slack for comparisons of derived float64 values. */
@@ -239,6 +240,10 @@ export function toolFindings(i: ToolCheckInput): Finding[] {
           })
         break
       }
+      case 'chamfer':
+        // the generator and its checks (angle, tip, reach) come with task T1 (plan-v0.4.md)
+        add('tool', 'chamferToolpath', 'chamfer toolpaths are not generated yet (v0.4 task T1)')
+        break
     }
   }
   return out

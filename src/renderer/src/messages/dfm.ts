@@ -128,6 +128,11 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
   'dfm.cloneOverlap': (p) => `Instances ${numbers(p)} overlap.`,
   'dfm.clonesHeavy': (p) =>
     `${num(p['operations'])} cloned operations: the part updates more slowly.`,
+  // v0.4 chamfer (design-v0.4.md § Chamfer operation)
+  'dfm.chamferTooDeep': (p, L) =>
+    `The chamfer is ${L(p['depth'])} deep, deeper than ${String(p['edgeOf'])} (${L(p['edgeDepth'])}).`,
+  'dfm.chamferNoTool': (p, L) =>
+    `The library has no ${num(p['angle'])}° chamfer mill that cuts Ø${L(p['edgeDiameter'])} to Ø${L(p['diameter'])}.`,
 }
 
 /** Hole feature size fields in `dfm.holeCustomSize`. */

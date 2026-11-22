@@ -35,6 +35,8 @@ const ICON: Record<OperationKind, IconName> = {
   pocket: 'pocket',
   drilling: 'drilling',
   profile: 'profile',
+  // until L1 draws the chamfer icon: the tool that cuts it (not in KINDS: added with U4)
+  chamfer: 'chamfer',
 }
 
 /** A profile cut on its line is a groove (B22-5: the bent slot). */

@@ -32,6 +32,8 @@ export const STRATEGY_KEYS: Readonly<Record<OperationKind, readonly StrategyKey[
   pocket: ['direction', 'entry', 'helixDiameter', 'rampAngle', 'finishAllowance', 'finishStepdown'],
   drilling: ['cycle', 'peckDepth', 'chipBreakBack', 'helixPitch', 'rampAngle', 'breakthrough'],
   profile: ['direction', 'entry', 'rampAngle', 'breakthrough', 'finishAllowance'],
+  // entry, dwell, rampAngle come with the chamfer generator (plan-v0.4.md, task T1)
+  chamfer: [],
 }
 
 const LENGTH_KEYS = [
@@ -131,6 +133,8 @@ const RAMP_ANGLE = 3
 type Direction = (typeof DIRECTIONS)[number]
 
 export type ResolvedStrategy =
+  /** v0.4: placeholder until the chamfer generator (task T1). */
+  | { readonly kind: 'chamfer' }
   | {
       readonly kind: 'facing'
       readonly direction: Direction
@@ -257,6 +261,8 @@ export function resolveStrategy(
         breakthrough,
         finishAllowance,
       }
+    case 'chamfer':
+      return { kind }
   }
 }
 

@@ -301,7 +301,7 @@ export const surfaceOfReference = (ref: string): string => ref.replace(/\.[xyz](
 export function operationReferences(op: Operation): AppResult<OperationReference[]> {
   const out: OperationReference[] = []
   // a facing's or profile's `on` is a stock face: always there, and removed by a facing itself
-  if (op.kind === 'pocket' || op.kind === 'drilling')
+  if (op.kind === 'pocket' || op.kind === 'drilling' || op.kind === 'chamfer')
     out.push({ param: 'on', reference: op.on, surface: op.on })
   for (const p of quantityParams(op)) {
     const refs = referencesOf(p.value)
@@ -327,6 +327,9 @@ export function checkReferences(ops: readonly Operation[], stock: Stock): AppRes
   const table = SurfaceTable.build(ops, stock)
   const dependants: Dependant[] = []
   for (const [i, op] of ops.entries()) {
+    // a chamfer's edge is an operation, not a surface (design-v0.4.md § Chamfer operation, Order)
+    if (op.kind === 'chamfer' && !ops.slice(0, i).some((o) => o.id === op.edgeOf))
+      dependants.push({ operationId: op.id, param: 'edgeOf', reference: op.edgeOf })
     const refs = operationReferences(op)
     if (refs.isErr()) return Err(refs.unwrapErr())
     for (const r of refs.unwrap()) {
@@ -410,7 +413,21 @@ export function recalculate(
     if (r.isErr()) return Err(dependantError(r.unwrapErr(), opId, path))
     next[index] = withParam(op, path, r.unwrap())
   }
-  return Ok(next)
+  return Ok(followEdges(next))
+}
+
+/**
+ * Chamfers keep their edge's face: each chamfer's `on` is set to its `edgeOf` operation's `on`
+ * (an edited drilling moved to another face takes its chamfers along). Pure; unchanged
+ * operations keep their identity.
+ */
+export function followEdges(ops: readonly Operation[]): Operation[] {
+  const byId = new Map(ops.map((o) => [o.id, o]))
+  return ops.map((op) => {
+    if (op.kind !== 'chamfer') return op
+    const edge = byId.get(op.edgeOf)
+    return edge === undefined || edge.on === op.on ? op : { ...op, on: edge.on }
+  })
 }
 
 function dependantError(e: AppError, opId: string, path: string): AppError {

@@ -15,8 +15,10 @@ import {
   type Part,
   type Shape,
 } from '../../../../core/design/operation'
+import { chamferEdge } from '../../../../core/design/geometry-input'
 import { placeShape } from '../../../../core/design/placement'
 import type { Element, Loop } from '../../../../core/geometry/2d/model'
+import { chamferDepth } from '../../../../core/geometry/model'
 import type { Region2dPort } from '../../../../core/geometry/2d/port'
 import type { SurfaceTable } from '../../../../core/design/surfaces'
 import {
@@ -106,13 +108,7 @@ export function shapeLoops(shape: Shape, w: number, ctx?: ShapeContext): Outline
 export function shapeLoop(shape: Shape, w: number): Vec3[] {
   if (shape.kind === 'named' || isGeneralShape(shape)) return []
   const [cx, cy] = shapeCentre(shape) // `center` is the anchor point
-  if (shape.kind === 'circle') {
-    const r = shape.diameter.canonical / 2
-    return Array.from({ length: CIRCLE_SEGMENTS }, (_, i): Vec3 => {
-      const a = (i / CIRCLE_SEGMENTS) * 2 * Math.PI
-      return [cx + r * Math.cos(a), cy + r * Math.sin(a), w]
-    })
-  }
+  if (shape.kind === 'circle') return circleLoop(cx, cy, shape.diameter.canonical / 2, w)
   const hx = shape.length.canonical / 2
   const hy = shape.width.canonical / 2
   const r = Math.max(0, Math.min(shape.cornerRadius.canonical, hx, hy))
@@ -130,6 +126,13 @@ export function shapeLoop(shape: Shape, w: number): Vec3[] {
       return [x + r * Math.cos(a), y + r * Math.sin(a), w]
     }),
   )
+}
+
+function circleLoop(cx: number, cy: number, r: number, w: number): Vec3[] {
+  return Array.from({ length: CIRCLE_SEGMENTS }, (_, i): Vec3 => {
+    const a = (i / CIRCLE_SEGMENTS) * 2 * Math.PI
+    return [cx + r * Math.cos(a), cy + r * Math.sin(a), w]
+  })
 }
 
 function rectangleLoop(x0: number, y0: number, x1: number, y1: number, w: number): Vec3[] {
@@ -181,13 +184,15 @@ const place = (face: OperationFace, loops: OutlineLoop[]): OutlineLoop[] =>
 /**
  * The operation's shape where it starts and where it ends, in the part frame: the top loop at its
  * `on` face and the bottom loop at its floor (facing: the new face; profile: the stock face and
- * the opposite one).
+ * the opposite one; chamfer: its diameter at the face and the edge's where the cone meets it,
+ * read from the part's operations `ops`).
  */
 export function operationOutline(
   op: Operation,
   stock: Stock,
   table: SurfaceTable,
   ctx?: ShapeContext,
+  ops: readonly Operation[] = [],
 ): OutlineLoop[] {
   const face = operationFace(op, stock, table)
   const through = -face.local.thickness
@@ -219,11 +224,31 @@ export function operationOutline(
         ...shapeLoops(op.shape, face.w, ctx),
         ...shapeLoops(op.shape, through, ctx),
       ])
+    case 'chamfer': {
+      const edge = chamferEdge(ops, op.edgeOf)
+      if (edge === undefined) return []
+      const [cu, cv] = edge.center
+      const d = op.diameter.canonical
+      const depth = chamferDepth({
+        edgeDiameter: edge.diameter,
+        diameter: d,
+        angle: op.angle.canonical,
+      })
+      return place(face, [
+        circleLoop(cu, cv, d / 2, face.w),
+        circleLoop(cu, cv, edge.diameter / 2, face.w - depth),
+      ])
+    }
   }
 }
 
 /** Where the error marker of a failing operation points: its shape's centre at its `on` face. */
-export function markerPoint(op: Operation, stock: Stock, table: SurfaceTable): Vec3 {
+export function markerPoint(
+  op: Operation,
+  stock: Stock,
+  table: SurfaceTable,
+  ops: readonly Operation[] = [],
+): Vec3 {
   const face = operationFace(op, stock, table)
   const at = (u: number, v: number, w = face.w) => toPartFrame(face.frame, [u, v, w])
   switch (op.kind) {
@@ -234,6 +259,10 @@ export function markerPoint(op: Operation, stock: Stock, table: SurfaceTable): V
       return at(...shapeCentre(op.shape))
     case 'drilling':
       return at(op.center[0].canonical, op.center[1].canonical)
+    case 'chamfer': {
+      const edge = chamferEdge(ops, op.edgeOf)
+      return edge === undefined ? at(0, 0) : at(...edge.center)
+    }
   }
 }
 
@@ -269,7 +298,8 @@ export function anchorPoint(
   stock: Stock,
   table: SurfaceTable,
 ): { at: Vec3; u: Vec3; v: Vec3 } | null {
-  if (op.kind === 'facing') return null
+  // a chamfer sits on its edge's axis: no anchor of its own
+  if (op.kind === 'facing' || op.kind === 'chamfer') return null
   const face = operationFace(op, stock, table)
   const c = op.kind === 'drilling' ? op.center : op.shape.center
   return {

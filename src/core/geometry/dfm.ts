@@ -18,6 +18,7 @@ import type { Region2dPort } from './2d/port'
 import type { Bounds2 } from './2d/model'
 import { adjacentStockFaces, DIRECTION_LABEL, localStock, type Direction } from './face'
 import {
+  chamferDepth,
   CHORD_TOLERANCE,
   EPSILON,
   type DfmSuggestion,
@@ -33,7 +34,7 @@ import { inradius, slotCoversOpening } from './operations'
 import { profileChain } from './outline'
 import { SHAPE_CHORD_BUDGET, shapeChords } from './shape-solids'
 import { FIT_SLACK, shapeMeasure, type ShapeMeasure } from './shape-measure'
-import { reachDepth, toolFit } from './tool-fit'
+import { chamferFit, reachDepth, toolFit } from './tool-fit'
 
 /** A library tool as the DFM rules see it (mm). */
 export interface DfmTool {
@@ -167,6 +168,12 @@ export function parameterChecks(
         ]
       case 'drilling':
         return [...drilling(op, stock, lib), ...reach(op, stock, lib, own), ...tool]
+      case 'chamfer':
+        return [
+          ...chamfer(op, input.operations, stock, lib),
+          ...reach(op, stock, lib, own),
+          ...tool,
+        ]
       case 'profile':
         return [
           ...(isAnalyticOperation(op)
@@ -296,7 +303,7 @@ function setups(input: PartGeometryInput): DfmWarning[] {
 
 /** Library tools that could make the operation (type and size; the fit table without reach). */
 function candidates(
-  op: Op<'pocket'> | Op<'drilling'> | Op<'profile'>,
+  op: Op<'pocket'> | Op<'drilling'> | Op<'profile'> | Op<'chamfer'>,
   lib: Library,
   measure?: ShapeMeasure,
 ): DfmTool[] {
@@ -323,6 +330,8 @@ function candidates(
       return lib.tools.filter(
         (t) => t.type === 'flatEndMill' && t.diameter <= op.slotWidth + TOOL_MATCH_TOLERANCE,
       )
+    case 'chamfer':
+      return lib.tools.filter((t) => chamferFit(t, op) === undefined)
   }
 }
 
@@ -334,7 +343,7 @@ function candidates(
  * library tools that could make it.
  */
 function reach(
-  op: Op<'pocket'> | Op<'drilling'> | Op<'profile'>,
+  op: Op<'pocket'> | Op<'drilling'> | Op<'profile'> | Op<'chamfer'>,
   stock: StockGeometry,
   lib: Library,
   own: OperationTool | undefined,
@@ -544,6 +553,56 @@ function drilling(op: Op<'drilling'>, stock: StockGeometry, lib: Library): DfmWa
           'a long drill',
         { depth, diameter: op.diameter },
         { severity: 'info', suggestion: atMost(deepest) },
+      ),
+    )
+  return out
+}
+
+/**
+ * Chamfer rules (design-v0.4.md § Chamfer operation, DFM): `dfm.chamferTooDeep` when the cone
+ * reaches the edge operation's bottom (a blind hole's or pocket's depth below the face; a through
+ * hole's material below the face); `dfm.chamferNoTool` when no library tool fits it (angle within
+ * 0.5°, tip smaller than the edge, covers it or its cutting edge spans the slant; as
+ * `dfm.holeNoTool`, only with a library).
+ */
+function chamfer(
+  op: Op<'chamfer'>,
+  all: readonly OperationGeometry[],
+  stock: StockGeometry,
+  lib: Library,
+): DfmWarning[] {
+  const out: DfmWarning[] = []
+  const edge = all.find((o) => o.id === op.edgeOf)
+  const edgeDepth =
+    edge?.kind === 'pocket'
+      ? edge.depth
+      : edge?.kind === 'drilling'
+        ? edge.bottom.kind === 'through'
+          ? edge.onZ + stock.thickness
+          : edge.bottom.depth
+        : undefined
+  const depth = chamferDepth(op)
+  if (edgeDepth !== undefined && depth >= edgeDepth - EPSILON) {
+    const tan = Math.tan(((op.angle / 2) * Math.PI) / 180)
+    out.push(
+      warning(
+        'dfm.chamferTooDeep',
+        op,
+        'diameter',
+        `the chamfer is ${mm(depth)} deep, ${op.edgeOf} only ${mm(edgeDepth)}`,
+        { depth, edgeDepth, edgeOf: op.edgeOf },
+        { suggestion: atMost(op.edgeDiameter + 2 * edgeDepth * tan) },
+      ),
+    )
+  }
+  if (!lib.empty && candidates(op, lib).length === 0)
+    out.push(
+      warning(
+        'dfm.chamferNoTool',
+        op,
+        'angle',
+        `no chamfer mill of ${op.angle}° in the library fits Ø${mm(op.edgeDiameter)} → Ø${mm(op.diameter)}`,
+        { angle: op.angle, diameter: op.diameter, edgeDiameter: op.edgeDiameter },
       ),
     )
   return out

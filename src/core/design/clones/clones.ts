@@ -27,6 +27,7 @@ import { QuantityDtoSchema } from '../../quantity/quantity.dto'
 import { Rational } from '../../quantity/rational'
 import { UNITS } from '../../quantity/units'
 import { isExpression, shiftLiteral } from '../anchor'
+import { chamferEdge } from '../geometry-input'
 // types only: feature.ts registers this kind (BUILT_IN_KINDS) and imports this module
 import type {
   ExpandedOperation,
@@ -167,7 +168,12 @@ export function sourceFace(src: readonly Operation[]): string | undefined {
 export function referencePoint(src: readonly Operation[]): UV {
   const op = src[0]
   if (op === undefined) return { u: 0, v: 0 }
-  const c = op.kind === 'drilling' ? op.center : op.kind === 'facing' ? undefined : op.shape.center
+  const c =
+    op.kind === 'drilling'
+      ? op.center
+      : op.kind === 'facing' || op.kind === 'chamfer'
+        ? undefined
+        : op.shape.center
   return c === undefined ? { u: 0, v: 0 } : { u: c[0].canonical, v: c[1].canonical }
 }
 
@@ -225,6 +231,9 @@ export function sourceIssues(
     }
     if (op.kind === 'facing' || (op.kind === 'profile' && op.side === 'outside'))
       at(path, 'clonesSourceKind', `${op.id}: facings and outside profiles cannot be cloned`)
+    // a chamfer follows its edge: it is cloned with it (design-v0.4.md#implementation-c2)
+    if (op.kind === 'chamfer' && !src.some((o) => o.id === op.edgeOf))
+      at(path, 'clonesChamferEdge', `${op.id}: clone its edge ${op.edgeOf} with it`)
   }
   const ids = new Set(src.map((o) => o.id))
   const faces = new Set(src.filter((o) => !ids.has(surfaceOwner(o.on))).map((o) => o.on))
@@ -285,6 +294,9 @@ function instanceOf(
   }
   const owner = surfaceOwner(op.on)
   const on = inSource.has(owner) ? ctx.ownedId(`${n}_${owner}`) + op.on.slice(owner.length) : op.on
+  // a chamfer bevels its edge's instance (sourceIssues keeps the edge in the source)
+  if (moved.kind === 'chamfer' && inSource.has(moved.edgeOf))
+    moved = { ...moved, edgeOf: ctx.ownedId(`${n}_${moved.edgeOf}`) }
   const { id: _i, name, generalTolerance, tool, toolLocked, owner: _o, ...body } = { ...moved, on }
   const suffix = ` · ${n}`
   return Ok({
@@ -472,6 +484,10 @@ function footprint(
     if (op.kind === 'drilling') {
       const r = op.diameter.canonical / 2
       grow(op.center[0].canonical, op.center[1].canonical, r, r)
+    } else if (op.kind === 'chamfer') {
+      const edge = chamferEdge(src, op.edgeOf)
+      if (edge !== undefined)
+        grow(...edge.center, op.diameter.canonical / 2, op.diameter.canonical / 2)
     } else if (op.kind !== 'facing') shapeBox(op.shape)
   return box
 }

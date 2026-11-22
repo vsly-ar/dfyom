@@ -237,6 +237,25 @@ describe('chamferFit (chamfer mill fit row)', () => {
     expect(short?.values['cuttingEdge']).toBeCloseTo(1.4142, 4)
   })
 
+  it('toolFit checks reach: plunged to where the tool cone has the chamfer Ø, contoured to the chamfer depth', () => {
+    const op: Op<'chamfer'> = {
+      kind: 'chamfer',
+      id: 'chamfer1',
+      onZ: -2,
+      center: [20, 20],
+      edgeOf: 'drill1',
+      edgeDiameter: 3.4,
+      diameter: 6.4,
+      angle: 90,
+    }
+    // plunged (DC 12 ≥ 6.4), pointed: the tip sits 3.2 mm under the face, 5.2 below the top
+    expect(toolFit(vbit({ reach: 5.2 }), op, TEST_STOCK, 'metric')).toBeUndefined()
+    expect(toolFit(vbit({ reach: 5 }), op, TEST_STOCK, 'metric')?.rule).toBe('reach')
+    // contoured (Ø6, pointed): the cone's bottom, 1.5 mm under the face, 3.5 below the top
+    expect(toolFit(vbit({ diameter: 6, reach: 3.5 }), op, TEST_STOCK, 'metric')).toBeUndefined()
+    expect(toolFit(vbit({ diameter: 6, reach: 3.4 }), op, TEST_STOCK, 'metric')?.rule).toBe('reach')
+  })
+
   it('a chamfer mill fits no other operation (the type row)', () => {
     expect(toolFit(vbit(), pocket(), TEST_STOCK, 'metric')?.rule).toBe('type')
     expect(toolFit(vbit(), drill(), TEST_STOCK, 'metric')?.rule).toBe('type')

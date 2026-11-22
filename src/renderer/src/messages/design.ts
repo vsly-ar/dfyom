@@ -11,6 +11,7 @@ export const designMessages = {
     pocket: 'Pocket',
     drilling: 'Drilling',
     profile: 'Profile',
+    chamfer: 'Chamfer',
   } satisfies Record<OperationKind, string>,
   add: (kind: OperationKind) =>
     ({
@@ -18,6 +19,7 @@ export const designMessages = {
       pocket: 'Add pocket',
       drilling: 'Add drilling',
       profile: 'Add profile',
+      chamfer: 'Add chamfer',
     })[kind],
   addOperation: 'Add operation',
 

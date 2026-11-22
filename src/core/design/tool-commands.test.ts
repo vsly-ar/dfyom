@@ -642,3 +642,29 @@ describe('design.snapshot.update', () => {
     expect(r.issues[0]?.rule).toBe('unknownItem')
   })
 })
+
+// Doc: docs/modes/design-v0.4.md#implementation-c2 (auto tool choice of a chamfer)
+describe('auto choice for a chamfer', () => {
+  const chamfered = async (s: Setup) => {
+    await s.run('design.drilling.add', { partId: s.partId, center: ['30', '30'], diameter: '6' })
+    await s.run('design.chamfer.add', { partId: s.partId, edgeOf: 'drill1' })
+  }
+
+  it('takes a fitting library chamfer mill of the chamfer angle', async () => {
+    const s = await setup()
+    await s.addTool('chamferMill', '12', { angle: '60' })
+    const v90 = await s.addTool('chamferMill', '10', { angle: '90' })
+    await chamfered(s)
+    await s.apply()
+    expect(snapshotOf(s, 'chamfer1')).toMatchObject({ libraryItemId: v90 })
+  })
+
+  it('falls back to a generalized chamfer mill of the chamfer angle', async () => {
+    const s = await setup()
+    await chamfered(s)
+    await s.apply()
+    const t = toolOf(s, 'chamfer1') as { kind: string; type: string; angle?: unknown }
+    expect(t).toMatchObject({ kind: 'generalized', type: 'chamferMill' })
+    expect(src(t.angle)).toBe('90°')
+  })
+})

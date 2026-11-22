@@ -198,7 +198,31 @@ export type OperationGeometry = FacePlacement &
           readonly positions?: readonly number[]
         }
       }
+    /**
+     * v0.4: a cone frustum at the mouth of `edgeOf` (an earlier drilling or circle pocket on the
+     * same face), coaxial with it: `center` is the edge's axis, `onZ` its face
+     * (docs/modes/design-v0.4.md#chamfer-operation-v04-circular-edges).
+     */
+    | {
+        readonly kind: 'chamfer'
+        readonly id: string
+        readonly onZ: number
+        readonly center: Vec2
+        readonly edgeOf: string
+        readonly edgeDiameter: number
+        /** In the face plane, > `edgeDiameter`. */
+        readonly diameter: number
+        /** Included angle, degrees. */
+        readonly angle: number
+      }
   )
+
+/** Depth of a chamfer's cone below its face: (D − d) / 2 / tan(α / 2) (mm). */
+export function chamferDepth(
+  c: Pick<Extract<OperationGeometry, { kind: 'chamfer' }>, 'edgeDiameter' | 'diameter' | 'angle'>,
+): number {
+  return (c.diameter - c.edgeDiameter) / 2 / Math.tan(((c.angle / 2) * Math.PI) / 180)
+}
 
 /**
  * A surface an operation parameter refers to (`on`, or a reference in an expression), so
@@ -257,6 +281,9 @@ export const DFM_WARNING_CODES = [
   'dfm.shapeHeavy',
   // features (v0.4): docs/modes/design-v0.4.md#checks-and-dfm
   'dfm.holeCustomSize',
+  // chamfer operation (v0.4): docs/modes/design-v0.4.md#chamfer-operation-v04-circular-edges
+  'dfm.chamferTooDeep',
+  'dfm.chamferNoTool',
   // Clones features (v0.4 F5; `operation` = the feature id): docs/modes/features.md#checks-and-dfm
   'dfm.cloneOutsideStock',
   'dfm.cloneDuplicate',

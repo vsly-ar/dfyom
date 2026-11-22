@@ -31,6 +31,7 @@ import {
   EPSILON,
   OVERSHOOT,
   applyPlacement,
+  chamferDepth,
   isAnalyticOperation,
   type AnalyticContour as Contour,
   type AnalyticOperation,
@@ -211,6 +212,8 @@ function build(
       return general(op, context).andThen((c) => shapePocket(op, c))
     case 'drilling':
       return drilling(op, stock)
+    case 'chamfer':
+      return chamfer(op)
     case 'profile':
       if (isAnalyticOperation(op)) return profile(op, stock)
       return general(op, context).andThen((c) => shapeProfile(op, stock, c))
@@ -333,6 +336,40 @@ function drilling(
     result(op.id, table, {
       removal: [{ mesh, at: [op.center[0], op.center[1], 0] }],
     }),
+  )
+}
+
+/**
+ * How far a chamfer's cone runs on past the edge diameter, into the edge operation's empty
+ * removal (mm): more than both rings' chord sagitta, so the cone meets the edge's wall inside
+ * the hole and leaves no film of stock.
+ */
+export const CHAMFER_RUN_IN = 4 * CHORD_TOLERANCE
+
+/**
+ * A chamfer (v0.4): the cone frustum from the face (`diameter`) down past the edge's diameter,
+ * built around the edge's axis in the same face frame as the edge, so both are placed by the same
+ * float64 transform (coaxial). Above the face a cylinder of `diameter` up to the overshoot (the
+ * mouth's column is the edge's own removal); the bottom cap lies inside the edge's removal (air).
+ * Doc: docs/modes/design-v0.4.md#implementation-c2
+ */
+function chamfer(op: Extract<OperationGeometry, { kind: 'chamfer' }>): AppResult<LocalSolids> {
+  const table = new Table()
+  const cone = table.add('cone')
+  const R = op.diameter / 2
+  const runIn = Math.min(CHAMFER_RUN_IN, op.edgeDiameter / 4)
+  const tan = Math.tan(((op.angle / 2) * Math.PI) / 180)
+  const levels: Level[] = [
+    { offset: 0, z: OVERSHOOT },
+    { offset: 0, z: op.onZ },
+    { offset: R - op.edgeDiameter / 2 + runIn, z: op.onZ - chamferDepth(op) - runIn / tan },
+  ]
+  return offsetLoft({ kind: 'circle', radius: R }, levels, {
+    band: () => cone,
+    top: AIR,
+    bottom: AIR,
+  }).map((mesh) =>
+    result(op.id, table, { removal: [{ mesh, at: [op.center[0], op.center[1], 0] }] }),
   )
 }
 

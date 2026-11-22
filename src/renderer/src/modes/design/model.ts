@@ -254,6 +254,9 @@ export function addArgs(
         anchor,
       }
     }
+    case 'chamfer':
+      // needs an edge: added from a drilling or circle pocket (inspector, task U4)
+      return {}
   }
 }
 

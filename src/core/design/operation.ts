@@ -144,7 +144,21 @@ export interface Profile extends Common {
     readonly positions: Option<readonly Quantity[]>
   }
 }
-export type Operation = Facing | Pocket | Drilling | Profile
+/**
+ * v0.4: a conical bevel at the mouth of an earlier circular drilling or pocket. `on` is always
+ * the edge operation's `on` (recalculation keeps it so, surfaces.ts).
+ * Doc: docs/modes/design-v0.4.md#chamfer-operation-v04-circular-edges
+ */
+export interface Chamfer extends Common {
+  readonly kind: 'chamfer'
+  /** Id of the earlier drilling or circle pocket whose mouth it bevels. */
+  readonly edgeOf: string
+  /** In the face plane; > the edge's diameter. */
+  readonly diameter: Quantity
+  /** Included angle. */
+  readonly angle: Quantity
+}
+export type Operation = Facing | Pocket | Drilling | Profile | Chamfer
 
 export interface Part {
   readonly id: string
@@ -166,6 +180,7 @@ export const ID_PREFIX: Record<OperationKind, string> = {
   pocket: 'pocket',
   drilling: 'drill',
   profile: 'profile',
+  chamfer: 'chamfer',
 }
 
 /** Display name of an operation kind (default `name`, command titles). */
@@ -174,6 +189,7 @@ export const KIND_LABEL: Record<OperationKind, string> = {
   pocket: 'Pocket',
   drilling: 'Drilling',
   profile: 'Profile',
+  chamfer: 'Chamfer',
 }
 
 // ── fields ────────────────────────────────────────────────────────────────────────────────
@@ -200,6 +216,9 @@ export const DEFAULTS = {
   // hole feature (design-v0.4.md#parameters)
   holeDiameter: { mm: '6 mm', inch: '1/4"' },
   headSink: { mm: '0.2 mm', inch: '0.008"' },
+  // chamfer operation (design-v0.4.md#chamfer-operation-v04-circular-edges): diameter = edge Ø + this
+  chamferAngle: { mm: '90°', inch: '90°' },
+  chamferWidening: { mm: '1 mm', inch: '1/32"' },
 } as const satisfies Record<string, Record<UnitSystem, string>>
 
 /**
@@ -247,6 +266,10 @@ export function quantityParams(op: Operation): { path: string; value: Quantity }
       add('tabs.thickness', op.tabs.thickness)
       if (op.tabs.positions.isSome())
         op.tabs.positions.unwrap().forEach((p, i) => add(`tabs.positions.${i}`, p))
+      break
+    case 'chamfer':
+      add('diameter', op.diameter)
+      add('angle', op.angle)
       break
   }
   return out
@@ -473,6 +496,18 @@ export function operationFromDTO(dto: OperationDTO): AppResult<Operation> {
         }),
       )
     }
+    case 'chamfer': {
+      const diameter = q(dto.diameter, 'diameter')
+      const angle = q(dto.angle, 'angle')
+      return collect([diameter, angle]).map(([d, a]) => ({
+        ...base,
+        kind: 'chamfer',
+        on: dto.on,
+        edgeOf: dto.edgeOf,
+        diameter: d!,
+        angle: a!,
+      }))
+    }
   }
 }
 
@@ -573,6 +608,15 @@ export function operationToDTO(op: Operation): OperationDTO {
             ? { positions: op.tabs.positions.unwrap().map((p) => p.toDTO()) }
             : {}),
         },
+      } as OperationDTO
+    case 'chamfer':
+      return {
+        kind: 'chamfer',
+        ...base,
+        on: op.on,
+        edgeOf: op.edgeOf,
+        diameter: op.diameter.toDTO(),
+        angle: op.angle.toDTO(),
       } as OperationDTO
   }
 }

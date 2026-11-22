@@ -86,6 +86,7 @@ import { SHAPE_ID_PATTERN } from './shape.dto'
 import { designChangeTargets } from './shape-users'
 import { featureOwnedError, nestingFeature, spanUnits, type LoadedFeature } from './feature'
 import { mapFeatureIssues, settleFeatures } from './feature-sync'
+import { derivedLength } from './hole'
 
 // ── arg schemas ───────────────────────────────────────────────────────────────────────────
 
@@ -172,6 +173,12 @@ const profileParams = {
   slotWidth: Src.optional().describe('Default 6 mm / 1/4"'),
   depth: Src.nullable().optional().describe('on only: blind groove depth; null = through'),
   tabs: TabsArg.optional(),
+}
+
+const chamferParams = {
+  edgeOf: OperationIdSchema.describe('Earlier drilling or circle pocket'),
+  diameter: Src.describe('Default edge Ø + 1 mm'),
+  angle: Src.describe('Default 90°'),
 }
 
 type ShapeArgs = z.output<typeof ShapeArg>
@@ -719,8 +726,53 @@ const profileSpec: KindSpec<typeof profileParams, Extract<Operation, { kind: 'pr
   }),
 }
 
+/**
+ * v0.4 chamfer (design-v0.4.md § Chamfer operation): `on` is not an argument, it is the edge's
+ * face; the default diameter is the edge's + 1 mm (1/32" in inch projects).
+ */
+const chamferSpec: KindSpec<typeof chamferParams, Extract<Operation, { kind: 'chamfer' }>> = {
+  kind: 'chamfer',
+  params: chamferParams,
+  required: ['edgeOf'],
+  build: (a, prev, { f, id, name, ops }) => {
+    const edgeOf = a.edgeOf ?? prev!.edgeOf
+    const index = ops.findIndex((o) => o.id === id)
+    const edge = (index < 0 ? ops : ops.slice(0, index)).find((o) => o.id === edgeOf)
+    const edgeDiameter =
+      edge?.kind === 'drilling'
+        ? edge.diameter
+        : edge?.kind === 'pocket' && edge.shape.kind === 'circle'
+          ? edge.shape.diameter
+          : undefined
+    const diameter = (): Quantity => {
+      if (a.diameter !== undefined) return f.q('diameter', 'length', a.diameter)
+      if (prev !== undefined && a.edgeOf === undefined) return prev.diameter
+      if (edgeDiameter === undefined)
+        return f.issue('edgeOf', 'chamferEdge', 'must be an earlier drilling or circle pocket')
+      const widen = f.q('diameter', 'length', DEFAULTS.chamferWidening[f.units])
+      if (widen === undefined) return widen
+      return derivedLength(edgeDiameter.exact.add(widen.exact), f.units).unwrap()
+    }
+    return {
+      kind: 'chamfer',
+      id,
+      name,
+      generalTolerance: prev?.generalTolerance ?? NO_TOLERANCE,
+      on: edge?.on ?? prev?.on ?? STOCK_TOP,
+      edgeOf,
+      diameter: diameter(),
+      angle: f.pick('angle', 'angle', a.angle, prev?.angle, 'chamferAngle'),
+    }
+  },
+}
+
+/**
+ * `lean` (v0.4 chamfer, tools/list budget): no `tool` and `generalTolerance` args (the tool via
+ * `design.operation.tool.set` or Apply's auto choice, tolerances on the values themselves).
+ */
 function kindCommands<P extends z.ZodRawShape, O extends Operation>(
   spec: KindSpec<P, O>,
+  lean = false,
 ): AnyCommand[] {
   const label = KIND_LABEL[spec.kind]
   const lower = label.toLowerCase()
@@ -737,15 +789,17 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
   const add = defineCommand({
     kind: 'document',
     name: `design.${spec.kind}.add`,
-    summary: `Add a ${lower} operation at the end of the part; omitted parameters take defaults.`,
+    summary: lean
+      ? `Add a ${lower} at the end of the part.`
+      : `Add a ${lower} operation at the end of the part; omitted parameters take defaults.`,
     title: () => `Add ${lower}`,
     machine: false,
     args: z.object({
       ...PartArg,
       name: NameArg.optional(),
-      generalTolerance: ToleranceArg.optional(),
+      ...(lean ? {} : { generalTolerance: ToleranceArg.optional() }),
       ...addParams,
-      tool: ToolArg.optional(),
+      ...(lean ? {} : { tool: ToolArg.optional() }),
     }),
     result: z.object({
       operationId: OperationIdSchema,
@@ -801,13 +855,15 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
   const update = defineCommand({
     kind: 'document',
     name: `design.${spec.kind}.update`,
-    summary: `Change parameters of a ${lower} operation; dependent formulas are recalculated.`,
+    summary: lean
+      ? `Change a ${lower}.`
+      : `Change parameters of a ${lower} operation; dependent formulas are recalculated.`,
     title: () => `Update ${lower}`,
     machine: false,
     args: z.object({
       ...OpArg,
       name: NameArg.optional(),
-      generalTolerance: ToleranceArg.optional(),
+      ...(lean ? {} : { generalTolerance: ToleranceArg.optional() }),
       ...optionalParams,
     }),
     result: z.object({ warnings: Warnings }),
@@ -1198,6 +1254,7 @@ const KIND_SPECS = {
   pocket: pocketSpec,
   drilling: drillingSpec,
   profile: profileSpec,
+  chamfer: chamferSpec,
 } as const
 
 type AnyParamKey =
@@ -1205,6 +1262,7 @@ type AnyParamKey =
   | keyof typeof pocketParams
   | keyof typeof drillingParams
   | keyof typeof profileParams
+  | keyof typeof chamferParams
 
 /**
  * The parameter args of `design.<kind>.update` for every kind, all optional (equal names share
@@ -1213,11 +1271,16 @@ type AnyParamKey =
 export const OPERATION_UPDATE_ARGS = {
   name: NameArg.optional(),
   generalTolerance: ToleranceArg.optional(),
+  // equal names keep the last kind's schema; the chamfer adds only `angle` (its edge is not
+  // re-pointed from a plan, its `diameter` shares the drilling's)
   ...Object.fromEntries(
-    Object.values(KIND_SPECS).flatMap((spec) =>
-      Object.entries(spec.params).map(([k, schema]) => [k, (schema as z.ZodType).optional()]),
-    ),
+    Object.values(KIND_SPECS)
+      .filter((spec) => spec.kind !== 'chamfer')
+      .flatMap((spec) =>
+        Object.entries(spec.params).map(([k, schema]) => [k, (schema as z.ZodType).optional()]),
+      ),
   ),
+  angle: chamferParams.angle.optional(),
 } as unknown as {
   name: z.ZodOptional<typeof NameArg>
   generalTolerance: z.ZodOptional<typeof ToleranceArg>
@@ -1260,6 +1323,7 @@ export const DESIGN_COMMANDS: readonly AnyCommand[] = [
   ...kindCommands(pocketSpec),
   ...kindCommands(drillingSpec),
   ...kindCommands(profileSpec),
+  ...kindCommands(chamferSpec, true),
   operationRemove,
   operationMove,
   partEvaluate,

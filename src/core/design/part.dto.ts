@@ -168,11 +168,26 @@ export const ProfileDtoSchema = z.object({
   }),
 })
 
+/**
+ * v0.4: a conical bevel at the mouth of an earlier circular drilling or pocket (`edgeOf`). `on`
+ * is always the edge operation's `on` (commands keep it so; it is stored so every reader sees
+ * the face without the edge). docs/modes/design-v0.4.md#chamfer-operation-v04-circular-edges
+ */
+export const ChamferDtoSchema = z.object({
+  kind: z.literal('chamfer'),
+  ...common,
+  on: SurfaceIdSchema,
+  edgeOf: OperationIdSchema,
+  diameter: length(),
+  angle: quantityDto('angle'),
+})
+
 export const OperationDtoSchema = z.discriminatedUnion('kind', [
   FacingDtoSchema,
   PocketDtoSchema,
   DrillingDtoSchema,
   ProfileDtoSchema,
+  ChamferDtoSchema,
 ])
 export type OperationDTO = z.output<typeof OperationDtoSchema>
 export type OperationKind = OperationDTO['kind']

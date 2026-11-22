@@ -28,6 +28,7 @@ import type { ProjectDoc, UnitSystem } from '../project/document'
 import { Quantity } from '../quantity/quantity'
 import type { Operation } from './operation'
 import {
+  CHAMFER_MILL_STANDARD,
   designToolLabel,
   plainLength,
   STANDARD_SIZES,
@@ -197,6 +198,28 @@ export function generalizedChoice(input: ChoiceInput): Option<GeneralizedTool> {
   const { op, units } = input
   const plain = (q: Quantity) => plainLength(q.exact, units)
   const fits = (t: GeneralizedTool) => fitOf(generalizedDfmTool(t), input) === undefined
+  if (op.kind === 'chamfer') {
+    // the standard chamfer mill sizes at the chamfer's own angle (largest first: it plunges)
+    const angle = Quantity.create({
+      kind: 'angle',
+      source: `${Number(op.angle.canonical.toFixed(4))}°`,
+      defaultUnit: 'deg',
+      exact: op.angle.exact,
+      tolerance: None,
+    }).unwrap()
+    for (const size of [...CHAMFER_MILL_STANDARD.sizes[units]].reverse()) {
+      const diameter = Quantity.parse(size, { kind: 'length', defaultUnit: 'mm' }).unwrap()
+      const t: GeneralizedTool = {
+        kind: 'generalized',
+        type: 'chamferMill',
+        diameter,
+        cornerRadius: None,
+        angle: Some(angle),
+      }
+      if (fits(t)) return Some(t)
+    }
+    return None
+  }
   if (op.kind === 'drilling' && op.bottom !== 'flat') {
     const drill: GeneralizedTool = {
       kind: 'generalized',
