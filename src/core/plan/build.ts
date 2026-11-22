@@ -17,6 +17,7 @@ import type { Direction } from '../geometry/face'
 import type { Region2dPort } from '../geometry/2d/port'
 import {
   edgeDependencies,
+  keepWithEdge,
   onDependencies,
   operationDirections,
   repairOrder,
@@ -428,8 +429,12 @@ export function rebuildPlan(
       if (p.toolSource === 'design') changed.push(p.id)
       else p.designToolChanged = true
     }
-  const assigned = resolveAndAssign(plan, [...changed, ...fresh.map((p) => p.id)], c)
+  const resolved = [...changed, ...fresh.map((p) => p.id)]
+  const assigned = resolveAndAssign(plan, resolved, c)
   if (assigned.isErr()) return Err(assigned.unwrapErr().withContext(where))
+  // with tools known: a resolved chamfer sharing its edge operation's tool joins it (F7)
+  for (const s of plan.setups)
+    s.operations = keepWithEdge(s.operations, part.unwrap(), new Set(resolved))
   return Ok(plan)
 }
 

@@ -79,12 +79,18 @@ interface Info {
   readonly deps: ReadonlySet<string>
   /** Of them, the plan operations cutting a chamfer's edge. */
   readonly edgeDeps: ReadonlySet<string>
+  /**
+   * The edge plan operation a chamfer shares its tool with (a stepped countersink's bore, F7):
+   * the chamfer is kept right after it, so no other tool comes between them.
+   */
+  readonly follows: string | undefined
 }
 
 function infos(planOps: readonly PlanOperationDTO[], part: Part): Info[] {
   const index = new Map(part.operations.map((o, i) => [o.id, i]))
   const owner = new Map<string, string>()
   for (const p of planOps) for (const d of p.designOperationIds) owner.set(d, p.id)
+  const toolOf = new Map(planOps.map((p) => [p.id, p.tool]))
   return planOps.map((p) => {
     const ops = p.designOperationIds.flatMap((d) => {
       const o = part.operations[index.get(d) ?? -1]
@@ -108,27 +114,40 @@ function infos(planOps: readonly PlanOperationDTO[], part: Part): Info[] {
       designIndex: Math.min(...p.designOperationIds.map((d) => index.get(d) ?? Infinity)),
       deps: new Set([...deps, ...edgeDeps]),
       edgeDeps,
+      follows:
+        p.tool === undefined ? undefined : [...edgeDeps].find((d) => toolOf.get(d) === p.tool),
     }
   })
 }
 
 /**
  * Default machining order: by group, then design order, with operations of one tool kept
- * adjacent within a group; an operation never precedes one whose surface it starts from.
+ * adjacent within a group; a chamfer sharing its edge operation's tool comes right after that
+ * operation (a stepped countersink, F7: no tool change between bore and terraces); an operation
+ * never precedes one whose surface it starts from.
  */
 export function defaultOrder(planOps: readonly PlanOperationDTO[], part: Part): PlanOperationDTO[] {
   const all = infos(planOps, part).sort((a, b) => a.rank - b.rank || a.designIndex - b.designIndex)
-  // tool order within a group: first appearance in design order
+  const byId = new Map(all.map((x) => [x.op.id, x]))
+  // a follower takes its edge operation's place in the order, just behind it
+  const lead = (x: Info) => (x.follows === undefined ? x : (byId.get(x.follows) ?? x))
+  // tool order within a group: first appearance in design order (followers do not count)
   const toolOrder = new Map<string, number>()
   all.forEach((x, i) => {
+    if (lead(x) !== x) return
     const key = `${x.rank}:${x.op.tool ?? `none-${x.op.id}`}`
     if (!toolOrder.has(key)) toolOrder.set(key, i)
   })
-  const sortKey = (x: Info) => [
-    x.rank,
-    toolOrder.get(`${x.rank}:${x.op.tool ?? `none-${x.op.id}`}`) ?? 0,
-    x.designIndex,
-  ]
+  const sortKey = (x: Info) => {
+    const l = lead(x)
+    return [
+      l.rank,
+      toolOrder.get(`${l.rank}:${l.op.tool ?? `none-${l.op.id}`}`) ?? 0,
+      l.designIndex,
+      l === x ? 0 : 1,
+      x.designIndex,
+    ]
+  }
   const less = (a: Info, b: Info) => {
     const ka = sortKey(a)
     const kb = sortKey(b)
@@ -164,6 +183,29 @@ export function repairOrder(planOps: readonly PlanOperationDTO[], part: Part): P
     out.push(next.op)
     done.add(next.op.id)
     rest = rest.filter((x) => x !== next)
+  }
+  return out
+}
+
+/**
+ * The list with each of `ids` that is a chamfer sharing its edge operation's tool moved up to
+ * right after that operation (and after its other dependencies): rebuild placement for new or
+ * re-resolved operations, once their tools are known (F7). Others keep their position; the list
+ * must satisfy every dependency already (`repairOrder`), and moving up keeps that.
+ */
+export function keepWithEdge(
+  planOps: readonly PlanOperationDTO[],
+  part: Part,
+  ids: ReadonlySet<string>,
+): PlanOperationDTO[] {
+  const out = [...planOps]
+  for (const x of infos(planOps, part)) {
+    if (!ids.has(x.op.id) || x.follows === undefined) continue
+    const from = out.indexOf(x.op)
+    const at = Math.max(...[...x.deps].map((d) => out.findIndex((q) => q.id === d) + 1))
+    if (at <= 0 || at >= from) continue
+    out.splice(from, 1)
+    out.splice(at, 0, x.op)
   }
   return out
 }
