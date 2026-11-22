@@ -9,14 +9,17 @@
  * contiguous (its **block**), each with `owner = { featureId, role }` and the id
  * `<featureId>_<role>`. Every consumer (geometry, DFM, tool choice, Plan) sees operations only.
  */
-import type { Issue } from '../../shared/errors/app-error'
+import type { Issue, IssuePath } from '../../shared/errors/app-error'
 import { Err, fail, None, Ok, Some, type AppResult, type Option } from '../../shared/result'
+import type { DfmWarning } from '../geometry/model'
 import type { Stock } from '../library/stock'
+import type { Quantity } from '../quantity/quantity'
 import type { UnitSystem } from '../project/document'
 import type { FeatureDTO } from './feature.dto'
 import { FEATURE_ROLE_PATTERN } from './feature.dto'
 import { ID_PREFIX, type FeatureOwner, type GeneralTolerance, type Operation } from './operation'
 import type { PartDTO } from './part.dto'
+import { holeSpec } from './hole'
 
 /** Fields every feature model has; a kind adds its parameters (as quantities). */
 export interface FeatureBase {
@@ -83,21 +86,45 @@ export interface FeatureKindSpec<F extends FeatureBase = FeatureBase> {
   /** Feature invariants (`model.invariant` issues at the feature's field paths); none = valid. */
   invariants(feature: F): Issue[]
   expand(feature: F, ctx: ExpansionContext): AppResult<readonly ExpandedOperation[]>
+  /**
+   * The feature with every expression field re-evaluated by `at` (recalculation after an earlier
+   * edit, feature-sync.ts); absent = the kind has no quantity fields. Paths as in `invariants`.
+   */
+  reevaluate?(feature: F, at: (q: Quantity, path: string) => AppResult<Quantity>): AppResult<F>
+  /**
+   * The feature field an owned operation's issue path stands for (`counterbore`, `depth` →
+   * `cbDepth`), so errors name what the user edits (features.md § Validation and DFM);
+   * undefined = not mapped (the issue keeps `operations.<id>.<path>`).
+   */
+  fieldOf?(role: string, path: IssuePath): IssuePath | undefined
+  /** Notes about the feature itself (`dfm.holeCustomSize`), on its owned operations' ids. */
+  warnings?(feature: F, ownedId: (role: string) => string): DfmWarning[]
 }
 
 // ── kind registry ──────────────────────────────────────────────────────────────────────────
 
-const kinds = new Map<string, FeatureKindSpec>()
+/**
+ * The app's kinds are registered here, so every reader of a part (the renderer's `loadPart`
+ * too) knows them without the command registry; their command modules register the same kind
+ * again with its command parameters (`featureKindCommands`).
+ */
+const BUILT_IN_KINDS: readonly FeatureKindSpec[] = [holeSpec as unknown as FeatureKindSpec]
+
+const kinds = new Map<string, FeatureKindSpec>(BUILT_IN_KINDS.map((k) => [k.kind, k]))
 
 /**
- * Registers a kind (its module does, next to its commands; tests register test-only kinds). A
+ * Registers a kind (its command module does; tests register test-only kinds). The same kind
+ * again (the same spec, or a command spec spreading it: same name and `fromDTO`) replaces it; a
  * second kind of the same name or prefix, or an operation prefix, is a bug.
  */
 export function registerFeatureKind<F extends FeatureBase>(
   spec: FeatureKindSpec<F>,
 ): AppResult<void> {
+  const same = (k: FeatureKindSpec) =>
+    k === (spec as unknown) ||
+    (k.kind === spec.kind && k.idPrefix === spec.idPrefix && k.fromDTO === spec.fromDTO)
   const clash = [...kinds.values()].find(
-    (k) => k !== (spec as unknown) && (k.kind === spec.kind || k.idPrefix === spec.idPrefix),
+    (k) => !same(k) && (k.kind === spec.kind || k.idPrefix === spec.idPrefix),
   )
   if (clash !== undefined || Object.values(ID_PREFIX).includes(spec.idPrefix))
     return fail('internal.unexpected', `feature kind ${spec.kind} clashes with another kind`, {

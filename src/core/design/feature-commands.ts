@@ -29,9 +29,11 @@ import {
   splitFeature,
   Warnings,
   withWarnings,
+  writeFeatures,
   writeOperationList,
   type ShapeEnv,
 } from './commands'
+import { mapFeatureIssues, settleFeatures } from './feature-sync'
 import {
   featureBlock,
   materialize,
@@ -122,12 +124,7 @@ export function placeFeature<F extends FeatureBase>(
   prev: F | undefined,
   where: string,
   env: ShapeEnv,
-): AppResult<{
-  ops: readonly Operation[]
-  owned: readonly Operation[]
-  start: number
-  replaced: number
-}> {
+): AppResult<Placed> {
   const { part, stock, units } = loaded
   const ops = part.operations
   const { start, end } =
@@ -144,12 +141,38 @@ export function placeFeature<F extends FeatureBase>(
   const owned = materialize(feature, expanded.unwrap(), ops.slice(start, end), prev?.name)
   if (owned.isErr()) return Err(owned.unwrapErr().withContext(where))
   const next = [...ops.slice(0, start), ...owned.unwrap(), ...ops.slice(end)]
-  return settleBlock(next, owned.unwrap(), stock, prev !== undefined, where, env).map((all) => ({
+  const self: LoadedFeature = { spec: spec as unknown as FeatureKindSpec, feature }
+  const features =
+    prev === undefined
+      ? [...loaded.features, self]
+      : loaded.features.map((l) => (l.feature.id === feature.id ? self : l))
+  const settled = settleBlock(next, owned.unwrap(), stock, prev !== undefined, where, env)
+  if (settled.isErr()) return Err(mapFeatureIssues(settled.unwrapErr(), next, features, feature.id))
+  // later features whose expression fields read this one's surfaces follow it (F3)
+  const synced =
+    prev === undefined
+      ? Ok({ ops: settled.unwrap(), features, changed: [] as string[] })
+      : settleFeatures(settled.unwrap(), features, stock, units, where, env, feature.id)
+  return synced.map(({ ops: all, features, changed }) => ({
     ops: all,
     owned: all.slice(start, start + owned.unwrap().length),
     start,
     replaced: end - start,
+    features,
+    changed: changed.filter((id) => id !== feature.id),
   }))
+}
+
+/** A feature expanded in place, ready to write. */
+interface Placed {
+  readonly ops: readonly Operation[]
+  readonly owned: readonly Operation[]
+  readonly start: number
+  readonly replaced: number
+  /** Every feature of the part after the edit (the placed one included). */
+  readonly features: readonly LoadedFeature[]
+  /** Other features recalculated by the edit (their records are rewritten). */
+  readonly changed: readonly string[]
 }
 
 /**
@@ -159,12 +182,7 @@ export function placeFeature<F extends FeatureBase>(
 function writePlaced(
   draft: Draft<ProjectDoc>,
   partId: string,
-  placed: {
-    ops: readonly Operation[]
-    owned: readonly Operation[]
-    start: number
-    replaced: number
-  },
+  placed: Placed,
   feature: FeatureDTO,
 ): void {
   const target = draft.parts[partId]!
@@ -183,6 +201,7 @@ function writePlaced(
   const i = features.findIndex((f) => f.id === feature.id)
   if (i < 0) features.push(feature)
   else if (!deepEqual(features[i], feature)) features[i] = feature
+  writeFeatures(draft, partId, placed.features, placed.changed)
 }
 
 function nextFeatureNumber(dto: PartDTO, prefix: string): number {
@@ -350,7 +369,7 @@ function finish<F extends FeatureBase>(
   if (placed.isErr()) return placed
   writePlaced(draft, partId, placed.unwrap(), spec.toDTO(feature))
   const result = { featureId: feature.id, operationIds: placed.unwrap().owned.map((o) => o.id) }
-  return withWarnings(result, loaded, placed.unwrap().ops, ctx, where)
+  return withWarnings(result, loaded, placed.unwrap().ops, ctx, where, placed.unwrap().features)
 }
 
 // ── shared commands ────────────────────────────────────────────────────────────────────────

@@ -197,6 +197,9 @@ export const DEFAULTS = {
   tabThickness: { mm: '2 mm', inch: '1/16"' },
   tabCount: { mm: '4', inch: '4' },
   pointAngle: { mm: '118°', inch: '118°' },
+  // hole feature (design-v0.4.md#parameters)
+  holeDiameter: { mm: '6 mm', inch: '1/4"' },
+  headSink: { mm: '0.2 mm', inch: '0.008"' },
 } as const satisfies Record<string, Record<UnitSystem, string>>
 
 /**

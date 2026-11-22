@@ -16,7 +16,7 @@ The single error type: shape, error-code registry, enrichment rules, serializati
 | `stack`                   | Captured where the error was **first created**; preserved by enrichment.                                                                 |
 | `severity`, `userMessage` | Derived getters from the registry.                                                                                                       |
 
-`AppError extends Error`, so stack traces, `cause`, React error boundaries and logging libraries work natively. It is immutable: `withContext()` and `prefixIssues()` return copies.
+`AppError extends Error`, so stack traces, `cause`, React error boundaries and logging libraries work natively. It is immutable: `withContext()`, `prefixIssues()` and `mapIssues()` (rewrites issues, e.g. an owned operation's path back to its feature field) return copies.
 
 Implementation: [`src/shared/errors/app-error.ts`](../../../src/shared/errors/app-error.ts) · tests: [`app-error.test.ts`](../../../src/shared/errors/app-error.test.ts)
 
