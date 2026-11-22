@@ -102,7 +102,7 @@ The generated pass strategies are in [plan-v0.3.md](plan-v0.3.md).
 
 - Stable as today: `<op>.floor`, `<op>.tab[i].top`, `<op>.tab[i].end[0|1]` (tab index = tab order from the start point), the stock's ids. These are what `on` and formulas use.
 - Islands add no surface ids: an island is uncut material, its top stays the surface it stood on (`stock.top`, `facing1.floor`).
-- Walls and corners of a shape operation are `wall[i]` / `corner[i]` per element of the resolved loops (loop 0 first, from the start point, counter-clockwise), for display and DFM markers only. They may renumber when the shape changes; nothing may reference them (S-J; walls are not face targets).
+- Walls and corners of a shape operation are `wall[i]` / `corner[i]` per element of the resolved loops, for display and DFM markers only: `i` is the **element index across all loops** in element order, the outer loop (loop 0, from the start point, counter-clockwise) first, then the holes – one index space for both roles (lines → `wall[i]`, arcs → `corner[i]`), as spike S3 built it ([shapes.md § Geometry](../architecture/shapes.md#geometry-for-shape-operations)). Recommended over counting per role as rectangles do (`wall[0..3]`, `corner[0..3]`). Ids may renumber whenever the shape or its resolution changes; nothing may reference them (S-J; walls are not face targets).
 
 ## DFM checks for shapes
 
@@ -116,6 +116,7 @@ Parameter checks stay synchronous in the commands ([geometry.md § Parameter and
 | `dfm.restMaterial` (new)                    | With the operation's tool, the cut leaves material away from corners: necks narrower than the tool between two parts of the region. `params.area`, `params.at`. Corners are the corner rules' job.                                                                                                                         | warning  |
 | `dfm.shapeOutsideFace` (new)                | A pocket's placed shape reaches outside the face rectangle of its direction (v0.2 checks holes only).                                                                                                                                                                                                                      | warning  |
 | `dfm.slotLeavesStock`, `dfm.slotOpensStock` | Stock margin measured from the loop's offset by `slotWidth`, not its bounding box.                                                                                                                                                                                                                                         | as v0.2  |
+| `dfm.shapeHeavy` (new, proposed)            | The shape operation's flattened chords exceed the evaluation budget (≈ 3 000 chords, [shapes.md § Performance](../architecture/shapes.md#performance)): the part updates more slowly. `params.chords`. Open question in [shapes.md](../architecture/shapes.md#open-questions).                                             | info     |
 
 - Corner checks are the familiar "minimum inside radius vs tool" rule. The fix offers "Round corners to ≥ r" (adds or raises `fillets` / `cornerRadius`), as the v0.1 suggestion does.
 - The [auto tool choice](design-v0.2.md#auto-choice) ranks fitting tools that leave no rest material first, then by diameter.
@@ -125,8 +126,8 @@ Parameter checks stay synchronous in the commands ([geometry.md § Parameter and
 - `design.shape.import { partId, path, options }` reads an SVG file (paths, `rect`, `circle`, `ellipse`, `polygon`, `polyline`, `line`; transforms; nested groups) in the dispatcher's prepared input, as the reference import does ([commands.md § Prepared input](../architecture/commands.md#prepared-input)).
 - Units come from the root `width`/`height` with units and the `viewBox`; unitless files assume 96 px per inch (CSS) with an option to override (mm, inch, px at 72/96 dpi).
 - Each closed subpath becomes a closed `path` item, open subpaths open paths; fills combine by the element's `fill-rule` (outer loops `add`, holes `subtract`). Options: one shape per file, per top-level element, or per loop.
-- Lines and circular arcs stay exact; quadratic and cubic Béziers and elliptical arcs become **tangent-continuous arcs** (biarcs) within 0.01 mm ([shapes.md § Arc fitting](../architecture/shapes.md#arc-fitting)).
-- The **import report** (result and a dialog): elements imported and skipped (text, images, clip paths, strokes without fill as open paths), Béziers fitted (count, max deviation), loops repaired (self-intersections, tiny segments), the size read and the unit assumed. The SVG is not stored; the shape keeps `source: { file, element }` for information.
+- Lines and circular arcs stay exact (arcs over 180° split in two); quadratic and cubic Béziers and elliptical arcs become **tangent-continuous arcs** (biarcs) within 0.01 mm, except at cusps, which stay true corners ([shapes.md § Arc fitting](../architecture/shapes.md#arc-fitting)).
+- The **import report** (result and a dialog): elements imported and skipped (text, images, clip paths, strokes without fill as open paths), Béziers fitted (count, max deviation), corners kept at cusps and micro corners merged, loops repaired (self-intersections, tiny segments), the size read and the unit assumed. The SVG is not stored; the shape keeps `source: { file, element }` for information.
 
 ## Measure and snap
 

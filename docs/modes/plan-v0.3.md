@@ -40,7 +40,8 @@ Strategy parameters as [v0.1 profile](plan-v0.1.md#profile-with-tabs), plus `lea
 ## Arcs in, G2/G3 out
 
 - Every offset element is a `line` or `arc` move; arcs over 180° are split (v0.1 rule). Helices (ramp and helix entries along arcs) are `arc` moves with a Z change.
-- **Degenerate arcs:** radius > 10 m or sweep < 1e-4 rad → `line`; radius < 0.005 mm → `line` (the offset of a corner arc just above zero).
+- **Degenerate arcs:** sweep < 1e-4 rad → `line`; radius < 0.005 mm → `line` (the offset of a corner arc just above zero). There is no radius rule in the toolpath: a huge radius is not a deviation bound (a 225 m arc over 300 mm bows 0.05 mm, [shapes.md § Arc fitting](../architecture/shapes.md#arc-fitting)).
+- **Huge-radius arcs:** whether a G2/G3 of huge radius goes out as `G1` (GRBL computes in float32, so km radii lose precision in `I`/`J`) is the **post's** decision, by the arc's sagitta against the post's own tolerance, beside its short-chord rule ([grbl.md § Output dialect](../architecture/grbl.md#output-dialect)); added to the post with these goldens.
 - **GRBL arcs:** the post already writes arcs as GRBL reads them (`I`/`J` from the written start, short chords as `G1`, the `error:33` end-on-circle guard, [grbl.md § Output dialect](../architecture/grbl.md#output-dialect)). v0.3 changes nothing there; it feeds the post many more arcs, so the post's property tests gain the shape goldens (tiny corner arcs, near-180° splits, helices along arcs) in mm and inch.
 
 ## Plan side
