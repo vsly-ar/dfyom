@@ -11,6 +11,7 @@
 import { fail, Ok, type AppResult, type Option } from '../../shared/result'
 import type { Operation, Part } from '../design/operation'
 import type { OperationKind } from '../design/part.dto'
+import type { Direction } from '../geometry/face'
 import type { Machine } from '../library/machine'
 import type { Stock } from '../library/stock'
 import type { Tool } from '../library/tool'
@@ -18,6 +19,8 @@ import type { ProjectDoc } from '../project/document'
 import { Quantity } from '../quantity/quantity'
 import { evaluateOperation, planFindings } from './evaluate'
 import type { ResolvedFeeds } from './feeds'
+import type { SetupRotation } from './plan.dto'
+import { setupDirection, setupRotation } from './setups'
 import { loadPlan, setupOf } from './plan'
 import { hashJson } from './snapshot'
 import type { ResolvedStrategy } from './strategy'
@@ -33,6 +36,10 @@ export interface PlanOperationInput {
   readonly stock: Stock
   readonly setup: {
     readonly id: string
+    /** The part direction up to the spindle; generators get its face frame (task C3). */
+    readonly direction: Direction
+    /** Quarter turn about machine +Z; turns the toolpaths and moves the work zero (task C3). */
+    readonly rotation: SetupRotation
     readonly workOffset: 'G54'
     readonly clearanceHeight: number
     readonly retractHeight: number
@@ -96,6 +103,8 @@ export function planOperationInputs(
     const own = setupOf(plan, op.id)
     const setup = {
       id: own.id,
+      direction: setupDirection(own),
+      rotation: setupRotation(own),
       workOffset: own.workOffset,
       clearanceHeight: length(own.clearanceHeight),
       retractHeight: length(own.retractHeight),

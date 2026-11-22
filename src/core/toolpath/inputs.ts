@@ -6,6 +6,7 @@
  */
 import { Err, fail, Ok, type AppResult } from '../../shared/result'
 import { toGeometryInput } from '../design/geometry-input'
+import { localStock } from '../geometry/face'
 import type { OperationGeometry, StockGeometry } from '../geometry/model'
 import type { Tool } from '../library/tool'
 import type { ResolvedFeeds } from '../plan/feeds'
@@ -20,6 +21,7 @@ import type {
   ToolpathTool,
 } from './model'
 import type { GeneratorRequest } from './request'
+import { setupWcs, toWcs } from './wcs'
 
 const WHERE = 'toGeneratorInputs'
 
@@ -111,26 +113,34 @@ export function toGeneratorInputs(input: PlanOperationInput): AppResult<Generato
         where: WHERE,
         data: { planOperationId: id },
       })
-    // toolpaths in the face frame and per setup are task C3 (docs/modes/plan-v0.2.md)
-    if (g.direction !== undefined && g.direction !== '+z')
+    // one approach direction per setup (E1); a plan-only edit of `on` may break it until a rebuild
+    const direction = g.direction ?? '+z'
+    if (direction !== input.setup.direction)
       return fail(
-        'plan.check',
-        `${op.id} is on a ${g.direction} face; toolpaths for faces other than the top are not generated yet`,
+        'plan.setup',
+        `${op.id} is on a ${direction} face but its setup machines the ${input.setup.direction} face`,
         {
           issues: [
             {
               path: ['operations', op.id, 'on'],
-              rule: 'faceNotSupported',
-              message: 'toolpaths for faces other than the top come with setups',
+              rule: 'setupDirection',
+              message: 'the operation is not on the face its setup machines',
+              params: { direction, setupDirection: input.setup.direction },
             },
           ],
           where: WHERE,
           data: { planOperationId: id, operation: op.id },
         },
       )
-    ops.push(g)
+    // generators stay top-down: the operation as read in its face frame, without the direction
+    const { direction: _, ...local } = g
+    ops.push(local)
   }
-  const stock: StockGeometry = geometry.unwrap().stock
+  // the stock as seen in the setup: face rectangle on X/Y, extent along `n` as the thickness
+  const partStock = geometry.unwrap().stock
+  const stock: StockGeometry = localStock(input.setup.direction, partStock)
+  const wcs = setupWcs(input.setup.direction, input.setup.rotation, partStock)
+  const turned = wcs === undefined ? {} : { wcs }
   const tool = toolpathTool(input.tool, input.toolSnapshotId)
   const heights = {
     clearanceHeight: input.setup.clearanceHeight,
@@ -169,8 +179,9 @@ export function toGeneratorInputs(input: PlanOperationInput): AppResult<Generato
   switch (s.kind) {
     case 'facing':
       return single('facing').andThen((operation) =>
-        milling().map((c) => ({
+        milling().map((c): GeneratorRequest => ({
           kind: 'facing',
+          ...turned,
           inputs: [
             {
               ...base,
@@ -188,8 +199,9 @@ export function toGeneratorInputs(input: PlanOperationInput): AppResult<Generato
       )
     case 'pocket':
       return single('pocket').andThen((operation) =>
-        milling().map((c) => ({
+        milling().map((c): GeneratorRequest => ({
           kind: 'pocket',
+          ...turned,
           inputs: [
             {
               ...base,
@@ -209,8 +221,9 @@ export function toGeneratorInputs(input: PlanOperationInput): AppResult<Generato
       )
     case 'profile':
       return single('profile').andThen((operation) =>
-        milling().map((c) => ({
+        milling().map((c): GeneratorRequest => ({
           kind: 'profile',
+          ...turned,
           inputs: [
             {
               ...base,
@@ -248,9 +261,17 @@ export function toGeneratorInputs(input: PlanOperationInput): AppResult<Generato
                   direction: s.direction,
                 }
       const holes = ops.filter((o): o is DrillingOperation => o.kind === 'drilling')
+      // visiting order from the work zero of the setup's WCS
+      const visits = nearestNeighbourOrder(
+        holes.map((operation) => ({
+          operation,
+          center: wcs === undefined ? operation.center : toWcs(operation.center, wcs),
+        })),
+      )
       return cutting(input.feeds, ['spindleSpeed', 'feedRate', 'plungeRate'], id).map((c) => ({
         kind: 'drilling',
-        inputs: nearestNeighbourOrder(holes).map((operation): DrillingInput => ({
+        ...turned,
+        inputs: visits.map(({ operation }): DrillingInput => ({
           ...base,
           cutting: { spindleSpeed: c.spindleSpeed, feedRate: c.feedRate, plungeRate: c.plungeRate },
           operation,

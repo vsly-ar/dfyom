@@ -20,27 +20,55 @@ import {
   ProfileInputSchema,
 } from './schemas'
 import { toolpathStats } from './stats'
+import { turnToolpath, type SetupWcs } from './wcs'
+import { Vec2Schema } from '../geometry/schemas'
 
-export type GeneratorRequest =
+export type GeneratorRequest = (
   | { readonly kind: 'facing'; readonly inputs: readonly FacingInput[] }
   | { readonly kind: 'pocket'; readonly inputs: readonly PocketInput[] }
   | { readonly kind: 'drilling'; readonly inputs: readonly DrillingInput[] }
   | { readonly kind: 'profile'; readonly inputs: readonly ProfileInput[] }
+) & {
+  /**
+   * The setup's quarter turn (v0.2 task C3): the inputs are in the face frame, the toolpath is
+   * turned into the setup's WCS after generation. Absent = the face frame is the WCS.
+   */
+  readonly wcs?: SetupWcs
+}
 
 const one = <S extends z.ZodType>(s: S) => z.array(s).length(1).readonly()
 
+const wcs = z
+  .object({ rotation: z.union([z.literal(90), z.literal(180), z.literal(270)]), size: Vec2Schema })
+  .exactOptional()
+
 export const GeneratorRequestSchema: z.ZodType<GeneratorRequest> = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('facing'), inputs: one(FacingInputSchema) }),
-  z.object({ kind: z.literal('pocket'), inputs: one(PocketInputSchema) }),
-  z.object({ kind: z.literal('drilling'), inputs: z.array(DrillingInputSchema).min(1).readonly() }),
-  z.object({ kind: z.literal('profile'), inputs: one(ProfileInputSchema) }),
+  z.object({ kind: z.literal('facing'), inputs: one(FacingInputSchema), wcs }),
+  z.object({ kind: z.literal('pocket'), inputs: one(PocketInputSchema), wcs }),
+  z.object({
+    kind: z.literal('drilling'),
+    inputs: z.array(DrillingInputSchema).min(1).readonly(),
+    wcs,
+  }),
+  z.object({ kind: z.literal('profile'), inputs: one(ProfileInputSchema), wcs }),
 ])
 
-/** The toolpath of one plan operation; `steps` per level/pass, and per hole for drilling. */
+/**
+ * The toolpath of one plan operation in the setup's WCS; `steps` per level/pass, and per hole
+ * for drilling.
+ */
 export function generateRequest(
   request: GeneratorRequest,
   steps: Steps = noSteps,
 ): AppResult<Toolpath> {
+  const tp = generateLocal(request, steps)
+  const turn = request.wcs
+  if (turn === undefined) return tp
+  return tp.map((t) => turnToolpath(t, turn, request.inputs[0]?.maxFeedRate))
+}
+
+/** The toolpath in the face frame (generators are top-down). */
+function generateLocal(request: GeneratorRequest, steps: Steps): AppResult<Toolpath> {
   switch (request.kind) {
     case 'facing':
       return generateFacing(request.inputs[0]!, steps)
