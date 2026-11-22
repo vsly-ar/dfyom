@@ -17,6 +17,7 @@ import { applyMessages } from '../../messages/apply'
 import { designMessages } from '../../messages/design'
 import { dfmMessages } from '../../messages/dfm'
 import { useCancelGesture } from '../../shell/hooks'
+import { useShell } from '../../shell/ShellContext'
 import {
   ErrorMessage,
   PanelHeader,
@@ -30,7 +31,16 @@ import { NameField } from './NameField'
 import { ReferenceInspector } from './ReferenceInspector'
 import { ShapeInspector } from './ShapeInspector'
 import { ToolField } from './ToolField'
-import { defaultUnit, pendingApply, quantityOf, updateArgs, type DesignPart } from './model'
+import {
+  defaultUnit,
+  pendingApply,
+  quantityOf,
+  shapeArgs,
+  updateArgs,
+  type DesignPart,
+} from './model'
+import { newItemArgs } from './shape-model'
+import type { ShapeActions } from './ShapePicker'
 import {
   OperationFields,
   placeErrors,
@@ -217,6 +227,8 @@ function OperationInspector({
 }): React.JSX.Element {
   const call = useCommand()
   const cancelGesture = useCancelGesture()
+  const { ui, bridge } = useShell()
+  const [, select] = useDesignSelection()
   const [errors, setErrors] = useState<readonly FieldError[]>([])
   const [summary, setSummary] = useState<AppErrorData | undefined>(undefined)
   const opWarnings = warnings.warnings.filter((w) => w.operation === op.id)
@@ -235,6 +247,69 @@ function OperationInspector({
     setErrors(placed?.errors ?? [])
     setSummary(placed?.summary)
   }
+  const openShape = (shapeId: string) => {
+    ui.getState().selectShapeItem(shapeId, 0)
+    select(shapeId)
+  }
+  const failed = (r: { ok: boolean; error?: AppErrorData }) => {
+    if (r.ok || r.error === undefined) return false
+    const placed = placeErrors(r.error, 'shape')
+    setErrors(placed.errors)
+    setSummary(placed.summary)
+    return true
+  }
+  // the shape picker's actions (task U2, ui.md#shape-in-the-operation-inspector)
+  const shapeActions: ShapeActions | undefined =
+    op.kind === 'pocket' || op.kind === 'profile'
+      ? {
+          newShape: () =>
+            void (async () => {
+              // two commands, two undo steps: the shape, then its use here
+              const added = await call('design.shape.add', {
+                partId: part.dto.id,
+                items: [newItemArgs('rectangle', part.units)],
+              })
+              if (failed(added) || !added.ok) return
+              const shapeId = (added.value as { shapeId: string }).shapeId
+              const center = shapeArgs(op.shape)['center']
+              const used = await call(`design.${op.kind}.update`, {
+                partId: part.dto.id,
+                operationId: op.id,
+                shape: { kind: 'named', shapeId, center },
+              })
+              failed(used)
+              openShape(shapeId)
+            })(),
+          editShape: openShape,
+          convert: () =>
+            void (async () => {
+              const r = await call('design.shape.convert', {
+                partId: part.dto.id,
+                operationId: op.id,
+              })
+              if (failed(r) || !r.ok) return
+              const id = (r.value as { shapeId: string }).shapeId
+              const got = await bridge.call('design.shape.get', {
+                partId: part.dto.id,
+                shapeId: id,
+              })
+              const name = got.ok ? (got.value as { shape: { name: string } }).shape.name : id
+              ui.getState().setRemovedToast(t.picker.converted(name))
+            })(),
+          updateItems: (shapeId, fixes) =>
+            void (async () => {
+              for (const f of fixes) {
+                const r = await call('design.shape.item.update', {
+                  partId: part.dto.id,
+                  shapeId,
+                  index: f.index,
+                  ...f.fields,
+                })
+                if (failed(r)) return
+              }
+            })(),
+        }
+      : undefined
   const ctx: OperationFieldsContext = {
     part,
     op,
@@ -245,6 +320,7 @@ function OperationInspector({
     pickable: true,
     send: (args, path, gesture) => void send(args, path, gesture),
     cancelGesture,
+    shapeActions,
   }
   const unplaced = opWarnings.filter((w) => warningPath(w, op) === undefined)
 

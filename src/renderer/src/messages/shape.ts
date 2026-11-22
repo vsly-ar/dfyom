@@ -206,6 +206,8 @@ export const shapeMessages = {
     splits: { file: 'One per file', element: 'One per top-level element', loop: 'One per loop' },
     import: 'Import',
     cancel: 'Cancel',
+    /** The shape inspector's button that reopens the last report (task U2). */
+    reopen: 'Import report',
     title: (shapes: readonly string[]) =>
       shapes.length === 1 ? `Imported ${shapes[0]}` : `Imported ${shapes.length} shapes`,
     size: (w: number, h: number, units: UnitSystem) =>

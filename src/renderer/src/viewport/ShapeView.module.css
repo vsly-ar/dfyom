@@ -71,9 +71,26 @@
 
 /* a pocket region's quiet tint; holes (islands) stay untinted through even-odd */
 .fill {
-  fill: var(--vp-removal);
-  fill-opacity: 0.85;
+  /* --vp-removal alone sits too close to the dark viewport background (U1 review); a light edge
+     tint over the background reads in both themes (task U2, proposed for L3's token pass) */
+  fill: color-mix(in oklab, var(--vp-edge) 10%, var(--vp-removal));
   stroke: none;
+}
+
+/* the face-on context (task U2): the stock face of the first operation using the shape */
+.stockFace {
+  pointer-events: none;
+  fill: none;
+  stroke: var(--vp-stock);
+  stroke-width: 1;
+  stroke-dasharray: 5 4;
+}
+
+.origin {
+  pointer-events: none;
+  fill: none;
+  stroke: var(--text-muted);
+  stroke-width: 1;
 }
 
 .edge {

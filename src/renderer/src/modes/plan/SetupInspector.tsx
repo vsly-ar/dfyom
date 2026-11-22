@@ -141,7 +141,7 @@ export function SetupInspector({
             <h3 className={styles['groupTitle']}>{m.findings}</h3>
             <WarningList
               labels={planWarningLabels}
-              items={mine.map((w, i) => planWarningView(w, plan, select, i))}
+              items={mine.map((w, i) => planWarningView(w, plan, select, i, units))}
               empty=""
             />
           </section>

@@ -85,12 +85,13 @@ export function planWarningView(
   plan: PlanDTO,
   onSelect?: (planOperationId: string) => void,
   index = 0,
+  units: UnitSystem = 'mm',
 ): WarningView {
   const op = allPlanOperations(plan).find((o) => o.id === w.planOperationId)
   return {
     id: `${w.code}:${w.planOperationId ?? ''}:${w.field ?? ''}:${w.rule}:${index}`,
     tier: TIER[w.severity],
-    text: findingText(w),
+    text: findingText(w, units),
     ...(op === undefined ? {} : { subject: planOperationName(plan, op.designOperationIds) }),
     ...(op !== undefined && onSelect ? { onSelect: () => onSelect(op.id) } : {}),
   }
@@ -124,6 +125,7 @@ export function PlanInspector({ doc }: { doc: ProjectDoc }): React.JSX.Element {
   return op === undefined ? (
     <PlanSummary
       plan={plan}
+      units={doc.unitSystem}
       warnings={data?.warnings ?? []}
       error={data?.error}
       outdated={data?.pendingApply === true}
@@ -150,11 +152,13 @@ export function PlanInspector({ doc }: { doc: ProjectDoc }): React.JSX.Element {
 
 function PlanSummary({
   plan,
+  units,
   warnings,
   error,
   outdated,
 }: {
   plan: PlanDTO
+  units: UnitSystem
   warnings: readonly PlanWarning[]
   error: AppErrorData | undefined
   /** The plan's inputs wait for Apply: its checks are outdated (P3). */
@@ -192,7 +196,7 @@ function PlanSummary({
           <h3 className={styles['groupTitle']}>{m.warnings.title}</h3>
           <WarningList
             labels={planWarningLabels}
-            items={warnings.map((w, i) => planWarningView(w, plan, select, i))}
+            items={warnings.map((w, i) => planWarningView(w, plan, select, i, units))}
             empty={m.warnings.none}
             outdated={outdated ? applyMessages.checksOutdated : undefined}
           />
@@ -553,7 +557,7 @@ function OperationInspector({
         {rest.length > 0 ? (
           <WarningList
             labels={planWarningLabels}
-            items={rest.map((w, i) => planWarningView(w, plan, undefined, i))}
+            items={rest.map((w, i) => planWarningView(w, plan, undefined, i, units))}
           />
         ) : null}
       </div>
@@ -622,7 +626,7 @@ function FeedField({
           ...(readOnly ? {} : { fix: { label: t.reset, onApply: clear } }),
         }
   }
-  const fromFindings: FieldMessage[] = fieldMessages(findings, field).map((m) =>
+  const fromFindings: FieldMessage[] = fieldMessages(findings, field, units).map((m) =>
     m.id.startsWith('feeds.lockInactive:') && !readOnly
       ? { ...m, fix: { label: t.unlock, onApply: () => onLock(false) } }
       : m,

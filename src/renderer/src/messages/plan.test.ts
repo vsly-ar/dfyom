@@ -17,6 +17,22 @@ const finding = (over: Partial<PlanWarning>): PlanWarning =>
   }) as PlanWarning
 
 describe('plan finding texts', () => {
+  it('words a clamped stepover in the user units (task U2)', () => {
+    const w = finding({
+      code: 'plan.stepoverClamped',
+      severity: 'info',
+      rule: 'offsetClearing',
+      field: 'stepover',
+      message: 'stepover clamped to 3 mm (half the tool) for offset clearing of op-1',
+      params: { operation: 'op-1', stepover: 5, effective: 3 },
+    })
+    expect(findingText(w)).toBe('Clamped to 3.00 mm (half the tool) for offset clearing.')
+    expect(findingText(w, 'inch')).not.toContain('mm')
+    expect(
+      findingText({ ...w, message: 'stepover clamped to 1 mm (the flat radius) for …' }),
+    ).toContain('(the flat radius)')
+  })
+
   it('words the design tool findings from their params', () => {
     expect(
       findingText(
