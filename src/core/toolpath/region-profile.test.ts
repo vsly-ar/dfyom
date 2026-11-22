@@ -23,7 +23,7 @@ import {
   generalTabBands,
   sliceChain,
   type GeneralTabBand,
-} from './region-tabs'
+} from '../geometry/tab-bands'
 import { segsLength, segPoint, type Seg } from './path'
 import { regionContains } from '../geometry/2d/measure'
 import { arcSweep } from './stats'

@@ -6,6 +6,8 @@ import { describe, expect, it } from 'vitest'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
 import { nodeRegion2d } from '../geometry/2d/testing/node-wasm'
 import { regionArea } from '../geometry/2d/model'
+import { evaluatePart } from '../geometry/evaluate'
+import { loadManifold } from '../geometry/manifold'
 import type { OperationGeometry } from '../geometry/model'
 import { shapeOutline } from '../geometry/outline'
 import { hashJson } from '../plan/snapshot'
@@ -194,6 +196,26 @@ describe('profiles on shapes', () => {
       'model.invariant',
     )
     expect(p.issues.map((i) => i.rule)).toEqual(['openNeedsOn'])
+  })
+
+  it('a blind on groove has a floor that operations start from, and evaluates (G1)', async () => {
+    const s = await setup()
+    await addShape(s, [openPath])
+    const shape = { kind: 'named', shapeId: 'shape1', center: ['50', '30'] }
+    await s.run('design.profile.add', { partId: s.partId, shape, side: 'on', depth: '2' })
+    await s.run('design.pocket.add', {
+      partId: s.partId,
+      shape: { kind: 'circle', center: ['35', '15'], diameter: '2' },
+      depth: '1',
+      on: 'profile1.floor',
+    })
+    expect(geometry(s, 'pocket1')).toMatchObject({ kind: 'pocket', onZ: -2, depth: 1 })
+    const input = expectOk(partGeometryInput(s.d.doc, s.partId, region2d))
+    const kernel = expectOk(await loadManifold())
+    const e = expectOk(kernel.withSolids((k) => evaluatePart(input, k, undefined, region2d)))
+    expect(e.pieces).toBe(1)
+    for (const id of ['profile1.floor', 'profile1.wall[0]', 'profile1.wall[1]', 'pocket1.floor'])
+      expect(e.surfaces).toContain(id)
   })
 
   it('cuts one loop and checks tab positions against its length', async () => {

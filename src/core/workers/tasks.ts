@@ -9,6 +9,8 @@ import { createStlParser, STL_LIMITS, StlPositions, type StlSummary } from '../d
 import { svgImportTask } from '../import/svg/task'
 import { evaluatePart, type PartEvaluation } from '../geometry/evaluate'
 import type { PartGeometryInput } from '../geometry/model'
+import { needsRegion2d } from '../geometry/operations'
+import type { Region2dPort } from '../geometry/2d/port'
 import { PartEvaluationSchema, PartGeometryInputSchema } from '../geometry/schemas'
 import type { Toolpath } from '../toolpath/model'
 import { generateRequest, GeneratorRequestSchema, type GeneratorRequest } from '../toolpath/request'
@@ -25,7 +27,14 @@ export const geometryEvaluate: WorkerTask<PartGeometryInput, PartEvaluation> = {
   async run(input, ctl) {
     const kernel = await ctl.solids()
     if (kernel.isErr()) return Err(kernel.unwrapErr())
-    return kernel.unwrap().withSolids((s) => evaluatePart(input, s, ctl.steps))
+    // the 2D port only when a shape operation needs it (general shapes, G1)
+    let region2d: Region2dPort | undefined
+    if (needsRegion2d(input)) {
+      const port = ctl.region2d()
+      if (port.isErr()) return Err(port.unwrapErr())
+      region2d = port.unwrap()
+    }
+    return kernel.unwrap().withSolids((s) => evaluatePart(input, s, ctl.steps, region2d))
   },
 }
 

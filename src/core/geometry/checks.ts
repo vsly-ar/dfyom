@@ -14,7 +14,6 @@ import {
   type SurfaceId,
   type SurfaceReference,
   type Vec3,
-  applyPlacement,
   unapplyPlacement,
   type Placement,
 } from './model'
@@ -78,15 +77,14 @@ export function geometryChecks(
 export function boxOf(meshes: readonly PlacedMesh[]): Box {
   const min = [Infinity, Infinity, Infinity]
   const max = [-Infinity, -Infinity, -Infinity]
-  for (const { mesh, place } of meshes) {
+  for (const { mesh } of meshes) {
     const p = mesh.positions
-    for (let i = 0; i < p.length; i += 3) {
-      const q = applyPlacement(place, [p[i]!, p[i + 1]!, p[i + 2]!])
+    for (let i = 0; i < p.length; i += 3)
       for (let a = 0; a < 3; a++) {
-        if (q[a]! < min[a]!) min[a] = q[a]!
-        if (q[a]! > max[a]!) max[a] = q[a]!
+        const q = p[i + a]!
+        if (q < min[a]!) min[a] = q
+        if (q > max[a]!) max[a] = q
       }
-    }
   }
   return { min: [min[0]!, min[1]!, min[2]!], max: [max[0]!, max[1]!, max[2]!] }
 }
@@ -274,9 +272,7 @@ function clearOf(region: NominalRegion, owner: OperationSolids, other: ComposedO
 }
 
 function placed(region: NominalRegion, originalId: number, solids: SolidPort): AppResult<Solid> {
-  return solids
-    .fromMesh(region.mesh.mesh, originalId)
-    .andThen((s) => solids.transform(s, region.mesh.place))
+  return solids.fromMesh(region.mesh.mesh, originalId)
 }
 
 /** vol(region ∩ other), minus the retaining operation's own removal when given. */

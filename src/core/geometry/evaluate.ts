@@ -17,6 +17,7 @@ import {
 } from './operations'
 import type { Solid, SolidMesh, SolidPort } from './solid-port'
 import { noSteps, type Steps } from '../workers/steps'
+import type { Region2dPort } from './2d/port'
 
 /** Plain data, transferable to the renderer (typed-array buffers are transferred). */
 export interface PartEvaluation {
@@ -46,6 +47,8 @@ const WHERE = 'evaluatePart'
 export const UNION_CHUNK = 25
 
 /**
+ * `region2d` builds general shapes (v0.3: named, rotated, `on`, blind, tab positions); without it
+ * such an operation fails with `internal.unexpected` (a host bug, `needsRegion2d`).
  * `steps.step()` runs after each operation's solids, after each union chunk, the union, the
  * subtraction and `toMesh`, and inside the checks; an abort returns `op.aborted` (the arena
  * frees everything).
@@ -54,6 +57,7 @@ export function evaluatePart(
   input: PartGeometryInput,
   solids: SolidPort,
   steps: Steps = noSteps,
+  region2d?: Region2dPort,
 ): AppResult<PartEvaluation> {
   const started = performance.now()
   const stock = stockSolids(input.stock)
@@ -61,7 +65,10 @@ export function evaluatePart(
   const stockSolidsValue = stock.unwrap()
   const ops: OperationSolids[] = []
   for (const op of input.operations) {
-    const r = operationSolids(op, input.stock)
+    const r = operationSolids(op, input.stock, {
+      triangulate: (rings) => solids.triangulate(rings),
+      ...(region2d === undefined ? {} : { region2d }),
+    })
     if (r.isErr()) return Err(r.unwrapErr().withContext(WHERE))
     ops.push(r.unwrap())
   }
@@ -161,7 +168,8 @@ function composeOperation(op: OperationSolids, id: number, solids: SolidPort): A
   const place = (meshes: readonly PlacedMesh[]): AppResult<Solid[]> => {
     const out: Solid[] = []
     for (const m of meshes) {
-      const s = solids.fromMesh(m.mesh, id).andThen((s) => solids.transform(s, m.place))
+      // vertices are in the part frame already (placed in float64, operations.ts)
+      const s = solids.fromMesh(m.mesh, id)
       if (s.isErr()) return Err(s.unwrapErr())
       out.push(s.unwrap())
     }
@@ -213,12 +221,22 @@ function labelMesh(
       where: WHERE,
     })
   }
+  // several face ids may share one role (the tiles of a face): one surface per id
   const keys = [...new Set(keyOf)].sort((a, b) => a - b)
-  const surfaceIndex = new Map(keys.map((k, i) => [k, i]))
-  const surfaces = keys.map((k) => {
+  const surfaces: SurfaceId[] = []
+  const byId = new Map<SurfaceId, number>()
+  const surfaceIndex = new Map<number, number>()
+  for (const k of keys) {
     const op = order[Math.floor(k / 65536)]!
-    return `${op.id}.${op.surfaces[k % 65536]!}`
-  })
+    const id = `${op.id}.${op.surfaces[k % 65536]!}`
+    let i = byId.get(id)
+    if (i === undefined) {
+      i = surfaces.length
+      surfaces.push(id)
+      byId.set(id, i)
+    }
+    surfaceIndex.set(k, i)
+  }
 
   // split vertices at surface boundaries: one output vertex per (vertex, surface)
   const triangleSurface = new Uint32Array(triangles)
