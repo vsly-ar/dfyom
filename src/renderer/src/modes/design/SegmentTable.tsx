@@ -7,7 +7,7 @@
 // (or a choice); every commit is one `design.shape.item.update` of the segment (or fillet) list.
 // Doc: docs/conventions/ui.md#shape-editor, docs/modes/design-v0.3.md#shape-definition
 import { Plus } from 'lucide-react'
-import { useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import type { ShapeSegment } from '../../../../core/design/shape.dto'
 import { shapeMessages } from '../../messages/shape'
 import { useShell } from '../../shell/ShellContext'
@@ -42,6 +42,11 @@ export function SegmentTable({
   const { ui } = useShell()
   const [focus, setFocus] = useState<{ row: number; col: number }>({ row: 0, col: 0 })
   const cells = useRef(new Map<string, HTMLTableCellElement>())
+  // a segment picked in the flat view: its row scrolls into view (long imported paths, L3-7)
+  useEffect(() => {
+    if (selected !== null)
+      cells.current.get(`${selected}:0`)?.scrollIntoView?.({ block: 'nearest' })
+  }, [selected])
   const dto = ctx.dto
   const numbers = itemNumbers(dto)
   if (dto.kind !== 'path' || numbers?.kind !== 'path') return null

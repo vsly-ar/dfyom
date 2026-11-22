@@ -85,7 +85,8 @@ export default {
   copyright: 'GPL-3.0-or-later',
   directories: {
     output: 'release',
-    // icon slot (build/icon.*), empty until the icon is designed (B21): Electron's icon is used
+    // the app icon: build/icon.icns (mac), icon.ico, icon.png, made by `npm run icon`
+    // (scripts/app-icon.mjs; B21, approved in L3, D33)
     buildResources: 'build',
   },
   asar: true,

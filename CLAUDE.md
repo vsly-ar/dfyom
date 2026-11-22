@@ -16,7 +16,7 @@ Guidance for AI agents working in this repo. Keep it short; link to docs instead
 - **Error handling** (oxide.ts Result/Option, AppError, invariant models) is implemented in `src/shared/` and documented in `docs/conventions/error-handling/` (start at its README) – follow its rules for any fallible code.
 - **Pre-alpha: no data migrations.** Don't bump `schemaVersion` or write migrations; incompatible data is reset after user confirmation ([migrations.md](docs/conventions/error-handling/migrations.md#pre-alpha-exception-no-data-preservation-yet)). Only the developer ends this phase.
 - Use industry-standard CNC terms; add new ones to `docs/glossary.md`.
-- **Keep the current plan current.** When work starts, finishes or uncovers a task/issue, update `docs/plans/v0.3.md` (status, next up, known issues) in the same commit. `docs/plans/v0.1.md` and `docs/plans/v0.2.md` are closed.
+- **Keep the current plan current.** When work starts, finishes or uncovers a task/issue, update the current plan in `docs/plans/` (status, next up, known issues) in the same commit. `docs/plans/v0.1.md`–`v0.3.md` are closed; until the v0.4 plan exists, record work and issues in `v0.3.md`'s known issues.
 
 ## Commands
 

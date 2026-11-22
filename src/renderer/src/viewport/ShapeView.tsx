@@ -49,9 +49,12 @@ import {
 import {
   dragHandle,
   handleReadout,
+  hasManySegments,
   itemHandles,
   nudgeStep,
+  segmentElements,
   segmentEnds,
+  shownHandles,
   type BadMark,
   type ShapeHandle,
 } from './shape-handles'
@@ -128,8 +131,13 @@ export interface ShapeViewProps {
   /** The items as numbers (undefined: a value that does not load). */
   readonly items: readonly (Item | undefined)[]
   readonly selected: number | null
-  /** The selected segment row of a path item: its end handle highlights. */
+  /**
+   * The selected segment row of a path item: its end handle highlights and the segment is drawn
+   * stronger; above 20 segments only its handles show (L3-7).
+   */
   readonly segment: number | null
+  /** A click on a segment of the selected path item selects its row. */
+  onSelectSegment?(segment: number): void
   readonly showItems: boolean
   onShowItems(show: boolean): void
   /** Whether a handle edits a formula (drawn disabled, tooltip "Remove the formula to drag."). */
@@ -347,7 +355,16 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
 
   const item =
     selected === null ? undefined : drag?.index === selected ? drag.last : items[selected]
-  const handles = useMemo(() => (item === undefined ? [] : itemHandles(item)), [item])
+  const segment = props.segment
+  // the handles shown: all, or the selected segment's on a path with many segments (L3-7)
+  const handles = useMemo(
+    () => (item === undefined ? [] : shownHandles(item, itemHandles(item), segment)),
+    [item, segment],
+  )
+  const segmentChains = useMemo(
+    () => (item?.kind === 'path' ? segmentElements(item) : null),
+    [item],
+  )
 
   // ── pointer ──────────────────────────────────────────────────────────────────────────────
   const local = (e: { clientX: number; clientY: number }): Vec2 => {
@@ -563,7 +580,7 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
       return
     }
     if (
-      (e.key === 'm' || e.key === 'M') &&
+      (e.key === 'd' || e.key === 'D') &&
       e.target === e.currentTarget &&
       !e.metaKey &&
       !e.ctrlKey &&
@@ -864,6 +881,32 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
             </g>
           </g>
         ) : null}
+        {segmentChains !== null && !measuring ? (
+          <g className={styles['segments']} data-testid="shape-segments">
+            {segment !== null && segmentChains[segment] ? (
+              <path
+                className={styles['selectedSegment']}
+                d={path(segmentChains[segment], false)}
+                data-testid="shape-selected-segment"
+              />
+            ) : null}
+            {props.onSelectSegment
+              ? segmentChains.map((els, k) => (
+                  <path
+                    key={k}
+                    className={styles['segmentHit']}
+                    d={path(els, false)}
+                    data-segment={k}
+                    onPointerDown={(e) => {
+                      if (e.button === 0) props.onSelectSegment?.(k)
+                      // a drag from the outline still pans, as from the background
+                      onBackgroundDown(e)
+                    }}
+                  />
+                ))
+              : null}
+          </g>
+        ) : null}
         {selected !== null && item !== undefined ? (
           <g className={styles['handles']} key={selected}>
             {handles.map((h) => {
@@ -963,6 +1006,11 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
           label={sm.target[snapShown.kind]}
         />
       ) : null}
+      {!measuring && segment === null && hasManySegments(item) ? (
+        <p className={styles['measurePrompt']} role="status">
+          {m.pickSegment}
+        </p>
+      ) : null}
       {measuring ? (
         <p className={styles['measurePrompt']} role="status">
           {mA !== null && measure.b === null ? sm.measure.second : sm.measure.prompt}
@@ -987,7 +1035,7 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
           ) : null}
           <ToolbarButton
             label={sm.measure.tool}
-            shortcut="M"
+            shortcut="D"
             icon={<Ruler aria-hidden="true" />}
             pressed={measuring}
             tooltipSide="bottom"

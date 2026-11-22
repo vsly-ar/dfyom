@@ -1,7 +1,8 @@
 // The Shape Editor's measure tool and snap glyph (task U3): M toggles it, two clicks measure
 // (snapped to stock corners within the pixel tolerance), the chip shows the distance in project
-// units and the live region adds ΔX/ΔY; Esc ends it before leaving the editor.
-// Doc: docs/conventions/ui.md#snap-and-measure
+// units and the live region adds ΔX/ΔY; Esc ends it before leaving the editor. Also the handles of
+// a path with many segments (L3-7): only the selected segment's, a click on a segment selects it.
+// Doc: docs/conventions/ui.md#snap-and-measure, #shape-editor
 import { fireEvent, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { renderUi } from '../test/render'
@@ -58,7 +59,7 @@ describe('measure', () => {
   it('M starts it; two clicks near stock corners snap to them and show the distance', () => {
     const { container } = setup()
     const root = container.querySelector('[data-measuring]') ?? container.firstElementChild!
-    fireEvent.keyDown(root, { key: 'm' })
+    fireEvent.keyDown(root, { key: 'd' })
     expect(screen.getByRole('button', { name: /Measure/ })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByRole('status')).toHaveTextContent('Click two points')
     // 3 px off each corner: within the 8 px tolerance, so exactly the corners
@@ -72,7 +73,7 @@ describe('measure', () => {
 
   it('places freely with Alt held, and in inch projects shows inch', () => {
     const { container } = setup({ units: 'inch' })
-    fireEvent.keyDown(container.firstElementChild!, { key: 'M' })
+    fireEvent.keyDown(container.firstElementChild!, { key: 'D' })
     const catcher = screen.getByTestId('measure-catcher')
     const a = toScreen(view, [0, 0])
     const b = toScreen(view, [25.4, 0])
@@ -105,11 +106,47 @@ describe('measure', () => {
   it('Escape ends the measure first, then leaves the editor', () => {
     const { container, onExit } = setup()
     const root = container.firstElementChild!
-    fireEvent.keyDown(root, { key: 'm' })
+    fireEvent.keyDown(root, { key: 'd' })
     fireEvent.keyDown(root, { key: 'Escape' })
     expect(screen.queryByTestId('measure-catcher')).toBeNull()
     expect(onExit).not.toHaveBeenCalled()
     fireEvent.keyDown(root, { key: 'Escape' })
     expect(onExit).toHaveBeenCalledOnce()
+  })
+})
+
+describe('many segments (L3-7)', () => {
+  const ring = {
+    kind: 'path' as const,
+    op: 'add' as const,
+    start: [60, 25] as [number, number],
+    closed: true,
+    segments: Array.from({ length: 24 }, (_, k) => {
+      const a = ((k + 1) * Math.PI) / 12
+      return {
+        kind: 'line' as const,
+        to: [50 + 10 * Math.cos(a), 25 + 10 * Math.sin(a)] as [number, number],
+      }
+    }),
+  }
+
+  it('shows no handles and a hint until a segment is selected; a click selects one', () => {
+    const onSelectSegment = vi.fn()
+    const { container } = setup({ items: [ring], selected: 0, onSelectSegment })
+    expect(container.querySelectorAll('[data-handle]')).toHaveLength(0)
+    expect(screen.getByRole('status')).toHaveTextContent('Click a segment')
+    const hit = container.querySelector('[data-segment="3"]')!
+    fireEvent.pointerDown(hit, { button: 0, pointerId: 1, clientX: 0, clientY: 0 })
+    expect(onSelectSegment).toHaveBeenCalledWith(3)
+  })
+
+  it('shows the selected segment handles only, with the segment highlighted', () => {
+    const { container } = setup({ items: [ring], selected: 0, segment: 3 })
+    const ids = [...container.querySelectorAll('[data-handle]')].map((h) =>
+      h.getAttribute('data-handle'),
+    )
+    expect(ids).toEqual(['seg.2.to', 'seg.3.to'])
+    expect(screen.getByTestId('shape-selected-segment')).toBeInTheDocument()
+    expect(screen.queryByText(/Click a segment/)).toBeNull()
   })
 })
