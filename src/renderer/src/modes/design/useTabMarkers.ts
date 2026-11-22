@@ -241,15 +241,21 @@ export function useTabMarkers(
     [tabs, face, part, begin, schedule, flush, cancelGesture, snapOn, gridSetting],
   )
 
-  // a drag still open when the selection goes away is sent as it stands
+  // a drag still open when the selection goes away is sent as it stands. Only on unmount: `flush`
+  // changes with every reply of the gesture's own steps (the profile changed), and ending the
+  // gesture then dropped the rest of a drag or key run (X2)
+  const latest = useRef({ flush, endKeyRun })
+  useEffect(() => {
+    latest.current = { flush, endKeyRun }
+  }, [flush, endKeyRun])
   useEffect(
     () => () => {
       const g = gesture.current
-      if (g !== null) flush(g)
+      if (g !== null) latest.current.flush(g)
       gesture.current = null
-      endKeyRun()
+      latest.current.endKeyRun()
     },
-    [flush, endKeyRun],
+    [],
   )
 
   return useMemo(() => {

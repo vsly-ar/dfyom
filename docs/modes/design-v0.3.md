@@ -1,6 +1,6 @@
 # Design mode v0.3: shapes
 
-Status: accepted (user, D29 of 2026-11-22: S-A to S-L and Q22–Q25 as recommended, [Decisions](#decisions)); the shape model and `design.shape.*` are implemented ([§ Implementation (K2)](#implementation-k2)), pockets and profiles take shapes ([§ Implementation (K3)](#implementation-k3); their solids and toolpaths come with G1, T1, T2), `design.shape.import` is implemented ([§ Implementation (I1)](#implementation-i1)); the UI is not yet · Scope: [roadmap v0.3](../roadmap.md#v03--shapes) (D16: Q12, Q14, Q16) · v0.2 base: [design-v0.2.md](design-v0.2.md) · 2D layer, geometry and import: [architecture/shapes.md](../architecture/shapes.md) · Toolpaths: [plan-v0.3.md](plan-v0.3.md) · 2D library: [ADR 0019](../decisions/0019-2d-geometry-library.md) (accepted) · Tasks: [plans/v0.3.md](../plans/v0.3.md) · Terms: [glossary.md](../glossary.md)
+Status: implemented (v0.3; accepted by the user, D29 of 2026-11-22: S-A to S-L and Q22–Q25 as recommended, [Decisions](#decisions)): the shape model and `design.shape.*` ([K2](#implementation-k2)), shapes on pockets and profiles ([K3](#implementation-k3)), `design.shape.import` ([I1](#implementation-i1)), the Shape UI ([U1](#implementation-u1), [U2](#implementation-u2), [U3](#implementation-u3)) and the exit-criteria flow through the UI ([X2](#implementation-x2)); the Shape UI's visuals await the user's review (L3, [ui.md § Shapes (v0.3)](../conventions/ui.md#shapes-v03)); what was not built is listed under [Implementation (X2)](#implementation-x2) · Scope: [roadmap v0.3](../roadmap.md#v03--shapes) (D16: Q12, Q14, Q16) · v0.2 base: [design-v0.2.md](design-v0.2.md) · 2D layer, geometry and import: [architecture/shapes.md](../architecture/shapes.md) · Toolpaths: [plan-v0.3.md](plan-v0.3.md) · 2D library: [ADR 0019](../decisions/0019-2d-geometry-library.md) (accepted) · Tasks: [plans/v0.3.md](../plans/v0.3.md) · Terms: [glossary.md](../glossary.md)
 
 v0.3 replaces "a pocket or profile is a rectangle or a circle" with **named shapes** of lines and arcs. Everything not mentioned here stays as in [design.md](design.md) and [design-v0.2.md](design-v0.2.md): face targets, face frames, placement anchors, the tool field, Apply.
 
@@ -208,7 +208,7 @@ Code: [shapes.md § Implementation (K3)](../architecture/shapes.md#implementatio
 - **Tabs.** `tabs.count` spaces tabs evenly with the first half a spacing after the start point, so no tab straddles it (v0.1 rectangles keep their wall-middle rule until G1/T2 build general tabs). `count` is ignored on an open path or a blind groove (no tabs built); positions there are refused.
 - **Convert** keeps `center`, `anchor` and a rectangle's `rotation`, so the placed box and the feature stay where they were; a pocket with a floor radius cannot be converted (`floorRadiusShape`), an operation that already places a shape neither (`alreadyNamed`).
 - **Surfaces.** A blind `on` groove adds a `profile.floor` surface at its depth (G1), an `on` target like a pocket floor.
-- **Not yet.** Parts with named or rotated shapes, profiles `on` and tab positions evaluate since G1 ([shapes.md § Implementation (G1)](../architecture/shapes.md#implementation-g1)); their toolpaths come from the region generators (T1/T2, [plan-v0.3.md § Wiring](plan-v0.3.md#wiring-t1-t2)); their parameter DFM checks come with K4; the renderer shows no outline for them and the inspector edits their placement only (UI tasks).
+- **Not yet.** Parts with named or rotated shapes, profiles `on` and tab positions evaluate since G1 ([shapes.md § Implementation (G1)](../architecture/shapes.md#implementation-g1)); their toolpaths come from the region generators (T1/T2, [plan-v0.3.md § Wiring](plan-v0.3.md#wiring-t1-t2)); their parameter DFM checks come with K4; the renderer shows no outline for them and the inspector edits their placement only (UI tasks) – all built since (K4, U1, U2).
 - **`tools/list`** after K3: 97.7 K of the 100 K budget ([llm-api.md](../architecture/llm-api.md#implementation-task-310)).
 
 ## Implementation (I1)
@@ -249,6 +249,22 @@ UI rules and how they were settled: [ui.md § Implementation (U3)](../convention
 - **Reference section** from the worker (`reference.section`): the first shown reference cut parallel to the edited shape's face at "Section depth" below it (default: the middle of the reference there). The matrix sent is the ghost's matrix followed by part → face frame (`sectionMatrix`), so the cut is exact for any rotation; the placed box is only used for the default depth.
 - **Measure:** point to point in the Shape Editor (face axes) and in the 3D viewport (part, stock, references; X, Y, Z), in project units; nothing is stored. Point-to-edge is not built.
 - **Reference backlog:** the ghost's feature edges are now computed in the worker with the mesh (`reference.meshStl` returns `edges`; the renderer's 0.4 s at the limit is gone, and every ghost has edges). Snapping and measuring use the exact mesh, but `reference.fit` and `exceedsStock` still use the placed box, so they stay conservative for free-angle rotations ([reference-model.md](reference-model.md#implementation-task-r3)).
+
+## Implementation (X2)
+
+The exit criteria's app flow runs through the UI only, in hidden windows ([testing.md § End to end](../conventions/testing.md#end-to-end), `e2e/golden-path-v0.3.e2e.ts`): the X0 drawing imported with **Import SVG…**, the cavity and outline picked as named shapes, the back wall measured in the face-on Shape Editor (a shape midpoint to a snapped point of the reference section), the cavity's step corners filleted in the segment table, the cable notch built from an obround and a rectangle and rotated on its pocket, tabs moved with the keys and typed as positions, and the open-path groove built in the segment table. Its two programs equal X1's goldens byte for byte, so the UI and the agent tools build the same part.
+
+Fixed on the way:
+
+- **"Round corners to ≥ r" refused silently.** The fix writes the tool radius; when the neighbouring segments cannot take it (`filletTooLarge`, the enclosure's step corners next to fitted arcs), the refusal's issues named shape-item fields the operation inspector does not show. The picker now says "The fillet does not fit between the neighbouring segments: round the corner with a smaller radius in the Shape Editor."
+- **Tab marker gestures ended early.** The markers' clean-up ran whenever the profile changed – also on the reply of a drag's or key run's own first step – so the rest of a drag was dropped and quick arrow keys lost steps (3 presses moved 2 mm). It runs on unmount only now.
+
+Not built in v0.3 (later, or by decision):
+
+- A constraint solver and references between shapes (Q22), offset items, mirror items, ellipse and text primitives, a shape library across projects ([Shape definition](#shape-definition)); DXF import (Q25: right after v0.3).
+- Shape Editor handles for rotation, fillets and the polygon corner radius (fields only, [U1](#implementation-u1)); point-to-edge measure and snapping in the 3D viewport beyond the measure tool ([U3](#implementation-u3)); snap and measure have no headless command (an agent reads `design.shape.get`).
+- "Round corners to ≥ r" offers the tool radius only, not the largest radius the corner takes, and has no fix for corners made where items meet; "New shape…" takes two undo steps; a moved tab marker has no live announcement and markers are not locked for positions written as expressions ([plans/v0.3.md § Known issues](../plans/v0.3.md#known-issues-and-risks)).
+- Picking an open path on a profile whose side is not On is refused at the picker (`openNeedsOn`); the side's "Use side On" fix shows only for a profile that already places the open path, so the user sets the side first.
 
 ## Answered questions
 

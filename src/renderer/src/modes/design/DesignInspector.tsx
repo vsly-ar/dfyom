@@ -305,8 +305,16 @@ function OperationInspector({
                   index: f.index,
                   ...f.fields,
                 })
-                if (failed(r)) return
+                if (r.ok) continue
+                // the item's issues name fields of the shape (`fillets.0.radius`), which this
+                // inspector does not show: a fillet that does not fit says so at the picker (X2)
+                const tooLarge = r.error.issues.some((i) => i.rule === 'filletTooLarge')
+                setErrors(tooLarge ? [{ path: 'shape', text: t.picker.roundTooLarge }] : [])
+                setSummary(tooLarge ? undefined : r.error)
+                return
               }
+              setErrors([])
+              setSummary(undefined)
             })(),
         }
       : undefined

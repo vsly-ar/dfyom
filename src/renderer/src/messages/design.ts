@@ -153,6 +153,8 @@ export const designMessages = {
       mirror: 'Mirror (flip x)',
       roundCorners: (r: string) => `Round corners to ≥ ${r}`,
       noRoundFix: 'Round the corner in the Shape Editor: it is made where items meet.',
+      roundTooLarge:
+        'The fillet does not fit between the neighbouring segments: round the corner with a smaller radius in the Shape Editor.',
     },
     openNeedsOn: 'An open path can only be cut on the line.',
     useSideOn: 'Use side On',
