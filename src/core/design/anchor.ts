@@ -72,7 +72,7 @@ export function isExpression(q: Quantity): boolean {
  * A literal moved by `delta` (canonical): the number in the source is replaced in the unit it is
  * written in, so unit and tolerance stay as typed (as the field's steppers do).
  */
-function shiftLiteral(q: Quantity, delta: Rational): AppResult<Quantity> {
+export function shiftLiteral(q: Quantity, delta: Rational): AppResult<Quantity> {
   const literal = parseLiteral(q.source, contextOf(q))
   if (literal.isErr()) return literal
   const { start, end, value, unit } = literal.unwrap().nominal

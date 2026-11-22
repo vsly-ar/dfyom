@@ -148,6 +148,7 @@ A **document hook** (`DocumentHook` in `define.ts`) runs after every successful 
 - Undo and redo replay the patches, so hooks never run for them.
 - v0.1: `plan.draftAutoRebuild` rebuilds the `draft` plans of the part after a `design.*` command; it never returns `Err` (a plan that cannot follow is skipped and reported), so design commands behave the same with or without plans ([plan-v0.1.md](../modes/plan-v0.1.md#implementation-task-213)).
 - **v0.2 (D13, accepted; tasks P1, P2):** decision-making derived work moves from document hooks to **apply hooks**, run once by `project.apply` over all pending changes; `plan.draftAutoRebuild` became the apply hook `plan.draftFollow` (P2), so the app registers no document hook ([apply.md](apply.md#apply-hooks)).
+- **v0.4 (F5):** `design.clonesFollow` re-runs every Clones expansion whose source changed, after any document command but `design.clones.*` (which expand themselves): an instant reaction ([apply.md § Rules for new reactions](apply.md#rules-for-new-reactions)), so a source edit and its instances are one undo step. A source edit that breaks its Clones (sources on two faces, a referenced instance gone, over the limit) fails the command ([design-v0.4.md § Implementation (F5)](../modes/design-v0.4.md#implementation-f5)).
 
 ## Undo / redo
 

@@ -36,7 +36,10 @@ import {
 import { mapFeatureIssues, settleFeatures } from './feature-sync'
 import {
   featureBlock,
+  featureSpan,
   materialize,
+  nestingFeature,
+  ownerOf,
   ownedOperationId,
   registerFeatureKind,
   type FeatureBase,
@@ -113,6 +116,20 @@ function settleBlock(
     .mapErr((e) => e.withContext(where))
 }
 
+/** A placed feature: all operations, its owned block at `start` replacing `replaced` records. */
+export interface Placed {
+  readonly ops: readonly Operation[]
+  readonly owned: readonly Operation[]
+  readonly start: number
+  readonly replaced: number
+  /** `arrange` changed the order of other operations: the whole list is rewritten. */
+  readonly reordered: boolean
+  /** Every feature of the part after the edit (the placed one included). */
+  readonly features: readonly LoadedFeature[]
+  /** Other features recalculated by the edit (their records are rewritten). */
+  readonly changed: readonly string[]
+}
+
 /**
  * Expands `feature` and puts its owned operations in place of its block (or at the end for a
  * new one), then checks the whole part. Returns all operations and the owned ones; writes nothing.
@@ -126,11 +143,18 @@ export function placeFeature<F extends FeatureBase>(
   env: ShapeEnv,
 ): AppResult<Placed> {
   const { part, stock, units } = loaded
-  const ops = part.operations
-  const { start, end } =
-    prev === undefined ? { start: ops.length, end: ops.length } : featureBlock(ops, feature.id)
   const issues = spec.invariants(feature)
   if (issues.length > 0) return invalid(issues, where)
+  const arranged =
+    spec.arrange?.(feature, part.operations, prev, loaded.features) ??
+    Ok({
+      ops: part.operations,
+      ...(prev === undefined
+        ? { start: part.operations.length, end: part.operations.length }
+        : featureBlock(part.operations, feature.id)),
+    })
+  if (arranged.isErr()) return Err(arranged.unwrapErr().withContext(where))
+  const { ops, start, end } = arranged.unwrap()
   const expanded = spec.expand(feature, {
     units,
     stock,
@@ -138,9 +162,16 @@ export function placeFeature<F extends FeatureBase>(
     ownedId: (role) => ownedOperationId(feature.id, role),
   })
   if (expanded.isErr()) return Err(expanded.unwrapErr().withContext(where))
-  const owned = materialize(feature, expanded.unwrap(), ops.slice(start, end), prev?.name)
+  const owned = materialize(
+    feature,
+    expanded.unwrap(),
+    ops.slice(start, end),
+    prev?.name,
+    spec.nested !== undefined,
+  )
   if (owned.isErr()) return Err(owned.unwrapErr().withContext(where))
   const next = [...ops.slice(0, start), ...owned.unwrap(), ...ops.slice(end)]
+  const reordered = ops !== part.operations
   const self: LoadedFeature = { spec: spec as unknown as FeatureKindSpec, feature }
   const features =
     prev === undefined
@@ -158,28 +189,17 @@ export function placeFeature<F extends FeatureBase>(
     owned: all.slice(start, start + owned.unwrap().length),
     start,
     replaced: end - start,
+    reordered,
     features,
     changed: changed.filter((id) => id !== feature.id),
   }))
-}
-
-/** A feature expanded in place, ready to write. */
-interface Placed {
-  readonly ops: readonly Operation[]
-  readonly owned: readonly Operation[]
-  readonly start: number
-  readonly replaced: number
-  /** Every feature of the part after the edit (the placed one included). */
-  readonly features: readonly LoadedFeature[]
-  /** Other features recalculated by the edit (their records are rewritten). */
-  readonly changed: readonly string[]
 }
 
 /**
  * Writes a placed feature: the block's DTOs (unchanged owned operations keep their record), the
  * operations recalculation changed, and the feature record.
  */
-function writePlaced(
+export function writePlaced(
   draft: Draft<ProjectDoc>,
   partId: string,
   placed: Placed,
@@ -187,16 +207,27 @@ function writePlaced(
 ): void {
   const target = draft.parts[partId]!
   const list = target.operations
-  const old = new Map(
-    list.slice(placed.start, placed.start + placed.replaced).map((o) => [o.id, o]),
-  )
-  const block = placed.owned.map((op): OperationDTO => {
-    const dto = operationToDTO(op)
-    const prev = old.get(op.id)
-    return prev !== undefined && deepEqual(prev, dto) ? prev : dto
-  })
-  list.splice(placed.start, placed.replaced, ...block)
-  writeOperationList(list, placed.ops)
+  if (placed.reordered) {
+    // the records by id, so unchanged ones keep their identity in the new order
+    const byId = new Map(list.map((o) => [o.id, o]))
+    const next = placed.ops.map((op): OperationDTO => {
+      const dto = operationToDTO(op)
+      const prev = byId.get(op.id)
+      return prev !== undefined && deepEqual(prev, dto) ? prev : dto
+    })
+    list.splice(0, list.length, ...next)
+  } else {
+    const old = new Map(
+      list.slice(placed.start, placed.start + placed.replaced).map((o) => [o.id, o]),
+    )
+    const block = placed.owned.map((op): OperationDTO => {
+      const dto = operationToDTO(op)
+      const prev = old.get(op.id)
+      return prev !== undefined && deepEqual(prev, dto) ? prev : dto
+    })
+    list.splice(placed.start, placed.replaced, ...block)
+    writeOperationList(list, placed.ops)
+  }
   const features = (target.features ??= [])
   const i = features.findIndex((f) => f.id === feature.id)
   if (i < 0) features.push(feature)
@@ -232,6 +263,10 @@ export interface FeatureCommandSpec<
   readonly params: P
   /** Parameters required on add (all are optional on update). */
   readonly required: readonly (keyof P & string)[]
+  /** false: no `on` arg (the kind derives its face, Clones from the source). */
+  readonly onArg?: false
+  /** The add tool's summary when the feature does not go at the end (Clones: after its source). */
+  readonly addSummary?: string
   /** The feature from args as entered (parsed through `c.f`) and its previous version. */
   build(args: Partial<z.output<z.ZodObject<P>>>, prev: F | undefined, c: FeatureBuildContext): F
 }
@@ -258,13 +293,15 @@ export function featureKindCommands<P extends z.ZodRawShape, F extends FeatureBa
   const add = defineCommand({
     kind: 'document',
     name: `design.${spec.kind}.add`,
-    summary: `Add a ${lower} feature at the end of the part; it creates its operations.`,
+    summary:
+      spec.addSummary ??
+      `Add a ${lower} feature at the end of the part; it creates its operations.`,
     title: () => `Add ${lower}`,
     machine: false,
     args: z.object({
       ...PartArg,
       name: NameArg.optional(),
-      on: OnArg.optional(),
+      ...(spec.onArg === false ? {} : { on: OnArg.optional() }),
       ...optional(true),
     }),
     result: FeatureResult,
@@ -302,7 +339,7 @@ export function featureKindCommands<P extends z.ZodRawShape, F extends FeatureBa
     args: z.object({
       ...FeatureArg,
       name: NameArg.optional(),
-      on: OnArg.optional(),
+      ...(spec.onArg === false ? {} : { on: OnArg.optional() }),
       ...optional(false),
     }),
     result: FeatureResult,
@@ -326,7 +363,7 @@ export function featureKindCommands<P extends z.ZodRawShape, F extends FeatureBa
           },
         )
       const prev = found.unwrap().loaded.feature as F
-      const { start } = featureBlock(l.part.operations, prev.id)
+      const { ownedStart: start } = featureSpan(l.part.operations, found.unwrap().loaded)
       const env = shapeEnv(l, ctx.services.region2d)
       const f = new Fields(
         l.units,
@@ -372,6 +409,33 @@ function finish<F extends FeatureBase>(
   return withWarnings(result, loaded, placed.unwrap().ops, ctx, where, placed.unwrap().features)
 }
 
+/**
+ * `design.featureOwned` for a feature nested in another (a hole that is a Clones source): it
+ * moves and goes with that feature's span (`design.clones.update { source }` takes it out).
+ */
+function refuseNestedFeature(l: LoadedPart, featureId: string, where: string): AppResult<void> {
+  const ops = l.part.operations
+  const first = ops.find((o) => ownerOf(o) === featureId)
+  const outer = first === undefined ? undefined : nestingFeature(ops, l.features, first.id)
+  if (outer === undefined) return Ok(undefined)
+  return fail(
+    'design.featureOwned',
+    `${featureId} is nested in ${outer.feature.name} (${outer.feature.id}); change that feature instead`,
+    {
+      issues: [
+        {
+          path: ['featureId'],
+          rule: 'featureNested',
+          message: `nested in ${outer.feature.name}`,
+          params: { featureId: outer.feature.id },
+        },
+      ],
+      data: { featureId, outerFeatureId: outer.feature.id },
+      where,
+    },
+  )
+}
+
 // ── shared commands ────────────────────────────────────────────────────────────────────────
 
 const featureRemove = defineCommand({
@@ -390,6 +454,9 @@ const featureRemove = defineCommand({
     const found = findFeature(l, args.featureId, where)
     if (found.isErr()) return found
     const ops = l.part.operations
+    const nested = refuseNestedFeature(l, args.featureId, where)
+    if (nested.isErr()) return nested
+    // nested operations stay (Clones: removing them keeps the source, C4)
     const { start, end } = featureBlock(ops, args.featureId)
     const next = [...ops.slice(0, start), ...ops.slice(end)]
     const refs = checkReferences(next, l.stock)
@@ -405,7 +472,8 @@ const featureRemove = defineCommand({
       featureId: args.featureId,
       operationIds: ops.slice(start, end).map((o) => o.id),
     }
-    return withWarnings(result, l, next, ctx, where)
+    const features = l.features.filter((f) => f.feature.id !== args.featureId)
+    return withWarnings(result, l, next, ctx, where, features)
   },
 })
 
@@ -428,7 +496,10 @@ const featureMove = defineCommand({
     const found = findFeature(l, args.featureId, where)
     if (found.isErr()) return found
     const ops = l.part.operations
-    const { start, end } = featureBlock(ops, args.featureId)
+    const nested = refuseNestedFeature(l, args.featureId, where)
+    if (nested.isErr()) return nested
+    // the span: nested operations and the owned block move as one unit
+    const { start, end } = featureSpan(ops, found.unwrap().loaded)
     const size = end - start
     const max = ops.length - size
     if (args.toIndex > max)
@@ -447,7 +518,7 @@ const featureMove = defineCommand({
       ...ops.slice(start, end),
       ...rest.slice(args.toIndex),
     ]
-    const split = splitFeature(next, args.toIndex, args.toIndex + size, where)
+    const split = splitFeature(next, args.toIndex, args.toIndex + size, where, l.features)
     if (split.isErr()) return split
     const refs = checkReferences(next, l.stock)
     if (refs.isErr()) return Err(refs.unwrapErr().withContext(where, { featureId: args.featureId }))
@@ -460,7 +531,7 @@ const featureMove = defineCommand({
 
 const FeatureEntry = z.object({
   feature: FeatureDtoSchema.describe('The feature record (kind parameters included)'),
-  index: z.number().int().describe('Operation index of its first owned operation'),
+  index: z.number().int().describe('Operation index of its owned block'),
   operationIds: z.array(OperationIdSchema).describe('Owned operations in design order'),
 })
 
@@ -475,9 +546,9 @@ const featureList = defineQuery({
     if (loaded.isErr()) return loaded
     const l = loaded.unwrap()
     const ops = l.part.operations
-    const entry = ({ feature }: LoadedFeature) => {
-      const { start, end } = featureBlock(ops, feature.id)
-      const dto = l.dto.features!.find((f) => f.id === feature.id)!
+    const entry = (lf: LoadedFeature) => {
+      const { ownedStart: start, end } = featureSpan(ops, lf)
+      const dto = l.dto.features!.find((f) => f.id === lf.feature.id)!
       return { feature: dto, index: start, operationIds: ops.slice(start, end).map((o) => o.id) }
     }
     if (args.featureId !== undefined) {

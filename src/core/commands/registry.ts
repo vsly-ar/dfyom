@@ -15,6 +15,12 @@ import { REFERENCE_COMMANDS, REFERENCE_QUERIES } from '../design/reference-comma
 import { SHAPE_COMMANDS, SHAPE_QUERIES } from '../design/shape-commands'
 import { FASTENER_QUERIES } from '../design/fastener/commands'
 import { FEATURE_COMMANDS, FEATURE_QUERIES } from '../design/feature-commands'
+import {
+  CLONES_COMMANDS,
+  CLONES_QUERIES,
+  clonesFollowApply,
+  clonesFollowHook,
+} from '../design/clones/commands'
 import { HOLE_COMMANDS } from '../design/hole-commands'
 import { FEEDS_SPEEDS_QUERIES } from '../feeds-speeds/commands'
 import { LIBRARY_COMMANDS, LIBRARY_QUERIES } from '../library/commands'
@@ -73,6 +79,7 @@ export const PROJECT_COMMANDS: readonly AnyCommand[] = [
   ...SHAPE_COMMANDS,
   ...FEATURE_COMMANDS,
   ...HOLE_COMMANDS,
+  ...CLONES_COMMANDS,
   ...REFERENCE_COMMANDS,
   ...PLAN_COMMANDS,
   toolpathGenerateJob,
@@ -84,6 +91,7 @@ export const PROJECT_QUERIES: readonly QueryDef[] = [
   ...DESIGN_TOOL_QUERIES,
   ...SHAPE_QUERIES,
   ...FEATURE_QUERIES,
+  ...CLONES_QUERIES,
   ...REFERENCE_QUERIES,
   ...PLAN_QUERIES,
   toolpathGet,
@@ -102,16 +110,22 @@ export const APP_SCOPE_QUERIES: readonly QueryDef[] = [
   ...LIFECYCLE_QUERIES,
 ]
 /**
- * Document hooks of the app (docs/architecture/commands.md#document-hooks): none since v0.2 P2
- * moved the draft auto-rebuild behind Apply (`plan.draftFollow`).
+ * Document hooks of the app (docs/architecture/commands.md#document-hooks): Clones instances
+ * follow an edited source in the same command (`design.clonesFollow`, v0.4 F5). The draft
+ * auto-rebuild moved behind Apply in v0.2 P2 (`plan.draftFollow`).
  */
-export const APP_HOOKS: readonly DocumentHook[] = []
+export const APP_HOOKS: readonly DocumentHook[] = [clonesFollowHook]
 
 /**
  * Apply hooks of the app, in this order (docs/architecture/apply.md#apply-hooks): the tool
- * choice first, because the rebuild resolves plan tools from the design tool field.
+ * choice first, because the rebuild resolves plan tools from the design tool field; then Clones
+ * instances take their source's chosen tool (C3) before the rebuild reads them.
  */
-export const APPLY_HOOKS: readonly ApplyHook[] = [designToolAutoChoice, planDraftFollow]
+export const APPLY_HOOKS: readonly ApplyHook[] = [
+  designToolAutoChoice,
+  clonesFollowApply,
+  planDraftFollow,
+]
 
 /** Apply jobs of the app (docs/architecture/apply.md#apply-jobs): toolpaths of kept-current plans. */
 export const APPLY_JOBS: readonly ApplyJob[] = [toolpathApplyJob]

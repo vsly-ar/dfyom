@@ -363,7 +363,8 @@ const fitting = (alternatives: unknown): string =>
 /**
  * A plan finding's text: the design tool findings of E4 worded from their params, every other
  * code the core's message, sentence-cased (docs/modes/plan-v0.2.md § Implementation (task E4));
- * `plan.stepoverClamped` in the project's units (ui.md#info-notes).
+ * `plan.stepoverClamped` and the region-width `plan.check` errors (`pocketSize`, `openingSize`) in
+ * the project's units (ui.md#info-notes, plan-v0.3.md § Tool checks).
  */
 export function findingText(w: PlanWarning, units: UnitSystem = 'mm'): string {
   const p = (w.params ?? {}) as Readonly<Record<string, unknown>>
@@ -382,6 +383,15 @@ export function findingText(w: PlanWarning, units: UnitSystem = 'mm'): string {
       if (typeof effective !== 'number') return sentence(w.message)
       const limit = w.message.includes('flat radius') ? 'the flat radius' : 'half the tool'
       return `Clamped to ${lengthText(effective, units)} (${limit}) for offset clearing.`
+    }
+    case 'plan.check': {
+      // the width rules carry the tool diameter and the narrowest width (mm) in their params
+      const target = w.rule === 'openingSize' ? 'opening' : w.rule === 'pocketSize' ? 'pocket' : ''
+      const width = p[target]
+      const diameter = p['diameter']
+      if (target === '' || typeof width !== 'number' || typeof diameter !== 'number')
+        return sentence(w.message)
+      return `The tool (${lengthText(diameter, units)}) is too wide for the ${target}: it is ${lengthText(width, units)} at its narrowest.`
     }
     default:
       return sentence(w.message)
