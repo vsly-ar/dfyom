@@ -1,9 +1,9 @@
 // The setup panel in the real app (v0.2 task F6): a part machined from the top and the bottom is
-// built and planned through the bridge (a multi-face design is not yet buildable through the
-// design UI, F1/F2); then, through plan mode's UI only: the setups in machining order with their
-// direction, WCS corner and rotation and their nested operations, reorder with Alt+↑/↓, the setup
-// inspector's rotation, toolpath generation and one gCode program per setup exported from the
-// panel. Windows stay hidden (fixture). Selectors are roles and accessible names.
+// built and planned through the bridge (keeps this test on the panel; the whole flow through the
+// UI is golden-path-v0.2.e2e.ts); then, through plan mode's UI only: the setups in machining order
+// with their direction, WCS corner and rotation and their nested operations, reorder with Alt+↑/↓,
+// the setup inspector's rotation, toolpath generation and one gCode program per setup exported
+// from the panel. Windows stay hidden (fixture). Selectors are roles and accessible names.
 // Docs: docs/conventions/ui.md#design-and-plan-controls-v02, docs/conventions/testing.md#end-to-end
 import { existsSync, readFileSync } from 'node:fs'
 import type { ElectronApplication, Page } from '@playwright/test'
