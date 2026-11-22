@@ -550,10 +550,16 @@ async function batchCommand(c: Ctx): Promise<number> {
         line(req.map(() => ({ value: null, revision: 0 })))
         continue
       }
-      const { name, args, expectedRevision } = req.unwrap()
+      const { name, args, expectedRevision, apply } = req.unwrap()
       const call = await s.call(
         name,
-        expectedRevision === undefined ? args : { ...(args as object), expectedRevision },
+        expectedRevision === undefined && apply === undefined
+          ? args
+          : {
+              ...(args as object),
+              ...(expectedRevision === undefined ? {} : { expectedRevision }),
+              ...(apply === undefined ? {} : { apply }),
+            },
       )
       line(call.result)
     }
@@ -572,19 +578,24 @@ async function batchCommand(c: Ctx): Promise<number> {
 
 function parseLine(
   text: string,
-): AppResult<{ name: string; args: unknown; expectedRevision?: unknown }> {
+): AppResult<{ name: string; args: unknown; expectedRevision?: unknown; apply?: unknown }> {
   let v: unknown
   try {
     v = JSON.parse(text)
   } catch {
-    return usage('each line must be a JSON object { "name", "args", "expectedRevision"? }')
+    return usage(
+      'each line must be a JSON object { "name", "args", "expectedRevision"?, "apply"? }',
+    )
   }
   if (typeof v !== 'object' || v === null || typeof (v as { name?: unknown }).name !== 'string')
-    return usage('each line must be a JSON object { "name", "args", "expectedRevision"? }')
-  const o = v as { name: string; args?: unknown; expectedRevision?: unknown }
+    return usage(
+      'each line must be a JSON object { "name", "args", "expectedRevision"?, "apply"? }',
+    )
+  const o = v as { name: string; args?: unknown; expectedRevision?: unknown; apply?: unknown }
   return Ok({
     name: o.name,
     args: o.args ?? {},
     ...(o.expectedRevision === undefined ? {} : { expectedRevision: o.expectedRevision }),
+    ...(o.apply === undefined ? {} : { apply: o.apply }),
   })
 }

@@ -9,6 +9,7 @@ import type { Draft } from 'immer'
 import type { z } from 'zod'
 import type { AppResult, AsyncAppResult } from '../../shared/result'
 import type { ProjectDoc } from '../project/document'
+import type { ApplyOutcome, PendingChange, PlanApply, ToolChange } from './apply'
 import type { CommandContext, JobContext, QueryContext } from './context'
 
 export type CommandKind = 'document' | 'effect' | 'job'
@@ -28,7 +29,17 @@ interface CommandMeta<A> {
    * no document. Doc: docs/architecture/commands.md#concurrency
    */
   readonly urgent?: boolean
+  /**
+   * Implicit apply: the dispatcher runs `project.apply` in the same queue turn before this
+   * command (its own log event and entry, the caller's source). For commands that consume the
+   * confirmed design or leave the project; a function decides per args (`plan.status.set` into
+   * `draft`). Doc: docs/architecture/apply.md#implicit-apply
+   */
+  readonly applyFirst?: boolean | ArgsPredicate<A>
 }
+
+/** A per-args predicate, bivariant like the `run`/`title` methods (see the file comment). */
+type ArgsPredicate<A> = { check(args: A): boolean }['check']
 
 /** Sync, undoable, changes `ProjectDoc` only. Never awaits, calls services or dispatches. */
 export interface DocumentCommand<S extends z.ZodType = z.ZodType, R = unknown> extends CommandMeta<
@@ -95,6 +106,56 @@ export interface DocumentHook {
     ctx: CommandContext,
   ): AppResult<void>
 }
+
+/** What an apply hook reports for the `ApplyOutcome` (apply.md § Steps). */
+export interface ApplyContribution {
+  readonly toolChanges?: readonly ToolChange[]
+  readonly plans?: readonly PlanApply[]
+}
+
+/**
+ * Deferred document work, run once by `project.apply` on its draft with all pending changes,
+ * in registry order (docs/architecture/apply.md#apply-hooks). Same rules as a document hook:
+ * synchronous, no dispatch, synchronous library reads only; an `Err` or throw fails the Apply and
+ * leaves document, history and pending set unchanged. Derived problems (no fitting tool, a plan
+ * that cannot follow) are reported in the contribution, never an `Err`.
+ */
+export interface ApplyHook {
+  readonly name: string
+  apply(
+    draft: Draft<ProjectDoc>,
+    pending: readonly PendingChange[],
+    ctx: CommandContext,
+  ): AppResult<ApplyContribution | void>
+}
+
+/** A job an apply job starts: a registered `job` command, its args and its supersede key. */
+export interface ApplyJobStart {
+  readonly command: string
+  readonly args: unknown
+  /** A newer Apply aborts the running apply job with the same key (e.g. `toolpaths:<planId>`). */
+  readonly key: string
+}
+
+/**
+ * Deferred cache work after the document phase of an Apply (docs/architecture/apply.md#apply-jobs):
+ * returns the jobs to start on the applied document. Not undoable, not in the Apply entry.
+ */
+export interface ApplyJob {
+  readonly name: string
+  jobs(
+    doc: ProjectDoc,
+    pending: readonly PendingChange[],
+    ctx: CommandContext,
+  ): readonly ApplyJobStart[]
+}
+
+/** `warnings` of the `ApplyOutcome`: the DFM warnings of the parts with applied changes. */
+export type ApplyWarnings = (
+  doc: ProjectDoc,
+  partIds: readonly string[],
+  ctx: QueryContext,
+) => ApplyOutcome['warnings']
 
 export interface QueryDef<S extends z.ZodType = z.ZodType, R = unknown> {
   /** e.g. `design.pocket.get`, `plan.operation.list`. */

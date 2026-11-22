@@ -250,6 +250,20 @@ One project per window, so the button applies the window's project. Agents' edit
 
 Under `prefers-reduced-motion` (or `data-motion='reduce'`): the button appears and disappears without sliding, the count changes without its roll, the progress ring shows the value without spinning, "Applied" feedback has no fade, and regenerated toolpaths appear without draw-in ([motion](../conventions/ui.md#motion)).
 
+## Implementation (task P1)
+
+Code: `src/core/commands/apply.ts` (pending computation, `project.apply` / `project.pending.get` definitions, `ApplyOutcome`), `dispatcher.ts` (`runApply`, `applyFirst`, `DispatchOptions.apply`), `history.ts` (markers, `executeApplyHooks`), `define.ts` (`ApplyHook`, `ApplyJob`, `applyFirst`), `registry.ts` (`APPLY_HOOKS`, `APPLY_JOBS`, both empty until P2), `agent/session.ts` (auto-apply, reserved `apply`). Choices made with the implementation:
+
+- **Pending by structural diff.** The pending set is computed from the current document and the baseline (no patch bookkeeping): unchanged parts and operations are skipped by reference (immutable, structure-shared documents), touched ones are compared with the plan's `sameValue`; cached per (document, baseline). Field keys are dotted paths (`depth`, `shape.cornerRadius`); a shape of another kind is one field; moved operations are those outside a longest kept order. A changed stock snapshot counts as the part field `stock`.
+- **P1 tracks design keys only.** Plan inputs of kept-current plans and library items join with the work that reads them (P2: toolpath apply job, draft library follow), as do the consistency scan on open and the `pendingApply` flags on `design.warning.list` and `plan.*` queries: until P2 the draft auto-rebuild still runs per commit, so those flags would be wrong.
+- **Provenance:** each pending change's `source` / `revision` is the last commit (edit, undo, redo or Apply) that touched its part or its stock snapshot.
+- **Markers** live on the history's entries; a marker an entry takes along when undone falls back with it (undoing an edit marked by an Apply without document changes does not make it pending). A marked entry dropped by the cap, or an Apply on an empty undo stack, leaves a floor marker that stays the baseline until a newer one.
+- **Stale writes:** an Apply's commit advances the caller's baseline only if it was current, so applying someone else's pending edits never counts as reading them.
+- **Implicit apply** runs after the command's revision and permission checks; an Apply error fails the command (it does not run), logged with context `apply before <command>`. Logged args: `{}` (explicit), `{ auto: true }` (auto-apply), `{ before: '<command>' }` (implicit).
+- **Apply jobs** (`ApplyJob.jobs(doc, pending, ctx)`) return `{ command, args, key }`; a newer Apply aborts the running job with the same key. Their dispatch is not logged separately: the Apply event (with `jobIds`) comes first, then the jobs' lifecycle events. An Apply with nothing pending re-runs the apply jobs if one of the last Apply's jobs failed (not aborted).
+- `ApplyOutcome.warnings` is `{ partId, warnings }[]` from `design.warning.list` of each part with applied changes; `toolChanges[].from/to` stay untyped until A4 defines the tool field.
+- A library write by an auto-applying session applies its bound project (`applied` in the library call's result); its own pending keys come with P2.
+
 ## Testing
 
 Per [testing.md](../conventions/testing.md), when implemented:

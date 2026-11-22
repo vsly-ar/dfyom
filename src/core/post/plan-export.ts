@@ -169,6 +169,8 @@ export const planExport = defineCommand({
     "Export a plan's GRBL gCode file: regenerates missing or stale toolpaths, writes the program and returns its stats and machine-check warnings.",
   title: () => 'Export gCode',
   machine: false,
+  // apply first: docs/architecture/apply.md#implicit-apply
+  applyFirst: true,
   args: z.object({
     planId: PlanIdSchema,
     target: z

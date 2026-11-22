@@ -64,6 +64,12 @@ export const TOOLS_LIST_BUDGET_CHARS = 80_000
 /** Reserved arg of every project-scope command (decision 12); the adapter strips it. */
 export const EXPECTED_REVISION = 'expectedRevision'
 
+/**
+ * Reserved arg of every project-scope document command: `false` leaves the change pending for a
+ * later `project_apply` (docs/architecture/apply.md#agents-mcp-and-cli); the adapter strips it.
+ */
+export const APPLY_KEY = 'apply'
+
 /** `design.pocket.add` → `design_pocket_add`. Registry names contain no `_`, so it is bijective. */
 export function toMcpName(name: string): string {
   return name.replaceAll('.', '_')
@@ -111,14 +117,15 @@ export function annotationsOf(
   return out
 }
 
-function withExpectedRevision(schema: JsonObject): JsonObject {
+function withReserved(schema: JsonObject, document: boolean): JsonObject {
   const props = (schema['properties'] as JsonObject | undefined) ?? {}
   return {
     ...schema,
     properties: {
       ...props,
-      // No description: the primer explains it once (it is on ~45 tools, the size budget).
+      // No descriptions: the primer explains them once (on ~45 tools, the size budget).
       [EXPECTED_REVISION]: { type: 'integer', minimum: 0 },
+      ...(document ? { [APPLY_KEY]: { type: 'boolean' } } : {}),
     },
   }
 }
@@ -134,7 +141,8 @@ function registryTool(def: AnyCommand | QueryDef, scope: ToolScope): AppResult<A
       area: def.name.split('.')[0] ?? def.name,
       kind,
       description: describe(def, kind),
-      inputSchema: scope === 'project' && kind !== 'query' ? withExpectedRevision(input) : input,
+      inputSchema:
+        scope === 'project' && kind !== 'query' ? withReserved(input, kind === 'document') : input,
       outputSchema: compactSchema(d.outputSchema),
       annotations: annotationsOf(def, d.inputSchema),
     }

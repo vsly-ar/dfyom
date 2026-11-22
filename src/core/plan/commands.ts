@@ -242,6 +242,8 @@ const planCreate = defineCommand({
     'Create a draft plan of a part: design snapshot, one setup, every operation with a suggested tool.',
   title: () => 'Create plan',
   machine: false,
+  // apply first: docs/architecture/apply.md#implicit-apply
+  applyFirst: true,
   args: z.object({
     partId: PartIdSchema,
     name: z.string().min(1).max(NAME_MAX).optional().describe('Default "Plan <n>"'),
@@ -338,6 +340,8 @@ const planStatusSet = defineCommand({
     'Change the status of a plan (draft, settledDesign, finalized, inUse, archived); without status, un-archive.',
   title: (a) => (a.status === undefined ? 'Un-archive plan' : `Set plan status to ${a.status}`),
   machine: false,
+  // apply first: docs/architecture/apply.md#implicit-apply
+  applyFirst: (a) => a.status === 'draft',
   args: z.object({
     ...PlanArg,
     status: PlanStatusSchema.optional().describe('Omit to un-archive (restores the previous one)'),
@@ -382,6 +386,8 @@ const planRebuild = defineCommand({
     'Replace the plan’s design snapshot with the current design; plan operations keep their tools and settings.',
   title: () => 'Rebuild plan from design',
   machine: false,
+  // apply first: docs/architecture/apply.md#implicit-apply
+  applyFirst: true,
   args: z.object({
     ...PlanArg,
     discardPlanEdits: z.boolean().optional().describe('Required (true) when there are plan edits'),

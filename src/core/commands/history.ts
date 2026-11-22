@@ -14,7 +14,15 @@ import { parseArgs } from './args'
 import { Err, fail, Ok, tryCatch, type AppResult } from '../../shared/result'
 import type { ProjectDoc } from '../project/document'
 import type { CommandContext, Source } from './context'
-import { defineQuery, type BuiltinCommand, type DocumentCommand, type DocumentHook } from './define'
+import {
+  defineQuery,
+  type ApplyContribution,
+  type ApplyHook,
+  type BuiltinCommand,
+  type DocumentCommand,
+  type DocumentHook,
+} from './define'
+import type { PendingChange } from './apply'
 
 enablePatches()
 const immer = new Immer({ autoFreeze: true })
@@ -74,6 +82,58 @@ export function executeDocumentCommand<S extends z.ZodType, R>(
     inversePatches = ip
   }) as ProjectDoc
   // Frozen once, then shared read-only by history, log events and subscribers.
+  return {
+    result,
+    next,
+    patches: freeze(patches, true),
+    inversePatches: freeze(inversePatches, true),
+  }
+}
+
+/**
+ * The document phase of `project.apply`: the apply hooks in order on one draft, with the pending
+ * set (docs/architecture/apply.md#steps). `Err` or a throw of any hook drops the draft.
+ */
+export function executeApplyHooks(
+  doc: ProjectDoc,
+  hooks: readonly ApplyHook[],
+  pending: readonly PendingChange[],
+  ctx: CommandContext,
+): DocumentRun<ApplyContribution[]> {
+  const draft = immer.createDraft(doc)
+  const ran = tryCatch(
+    (): AppResult<ApplyContribution[]> => {
+      const out: ApplyContribution[] = []
+      for (const hook of hooks) {
+        const h = hook.apply(draft, pending, ctx)
+        if (h.isErr()) return Err(h.unwrapErr().withContext(`apply hook ${hook.name}`))
+        const c = h.unwrap()
+        if (c !== undefined) out.push(c)
+      }
+      return Ok(out)
+    },
+    'internal.unexpected',
+    'project.apply: an apply hook threw',
+  )
+  const result = ran.isOk() ? ran.unwrap() : Err(ran.unwrapErr())
+  if (result.isErr() || containsDraft(result.unwrap())) {
+    return {
+      result: result.isErr()
+        ? result
+        : fail('internal.unexpected', 'an apply hook returned an Immer draft', {
+            where: 'project.apply',
+          }),
+      next: doc,
+      patches: [],
+      inversePatches: [],
+    }
+  }
+  let patches: Patch[] = []
+  let inversePatches: Patch[] = []
+  const next = immer.finishDraft(draft, (p, ip) => {
+    patches = p
+    inversePatches = ip
+  }) as ProjectDoc
   return {
     result,
     next,
@@ -154,6 +214,11 @@ export function entrySize(e: Pick<HistoryEntry, 'args' | 'patches' | 'inversePat
 interface Sized {
   readonly entry: HistoryEntry
   readonly size: number
+  /**
+   * Apply marker: the document after this entry, set by a successful Apply on the top entry
+   * (docs/architecture/apply.md#baseline-and-undo). Moves with the entry through undo and redo.
+   */
+  marker?: ProjectDoc
 }
 
 /** Linear, memory-only undo/redo stacks of one project. */
@@ -161,6 +226,11 @@ export class History {
   private readonly undoStack: Sized[] = []
   private redoStack: Sized[] = []
   private totalSize = 0
+  /**
+   * The newest marker without an entry: of a marked entry the cap dropped, or of an Apply while
+   * the undo stack was empty. The baseline when no entry on the stack is marked.
+   */
+  private floorMarker: ProjectDoc | undefined
 
   constructor(private readonly limits: HistoryLimits = DEFAULT_HISTORY_LIMITS) {}
 
@@ -205,7 +275,32 @@ export class History {
     ) {
       const dropped = this.undoStack.shift()
       if (dropped !== undefined) this.totalSize -= dropped.size
+      if (dropped?.marker !== undefined) this.floorMarker = dropped.marker
     }
+  }
+
+  /** Puts the apply marker on the top undo entry (with none, it becomes the floor marker). */
+  markApplied(doc: ProjectDoc): void {
+    const top = this.undoStack.at(-1)
+    if (top === undefined) this.floorMarker = doc
+    else top.marker = doc
+  }
+
+  /** Whether the top undo entry carries an apply marker (an Apply ended its gesture). */
+  topApplied(): boolean {
+    return this.undoStack.at(-1)?.marker !== undefined
+  }
+
+  /**
+   * The marker of the newest marked entry on the undo stack, else the floor marker; undefined
+   * when there is none (the baseline is then the document at open).
+   */
+  baseline(): ProjectDoc | undefined {
+    for (let i = this.undoStack.length - 1; i >= 0; i--) {
+      const m = this.undoStack[i]?.marker
+      if (m !== undefined) return m
+    }
+    return this.floorMarker
   }
 
   get undoable(): readonly HistoryEntry[] {
