@@ -1,0 +1,264 @@
+/* Shape Editor flat view (task U1). Colours are the viewport tokens only (no new values; L3 approves
+   the proposal). Reduced motion zeroes every duration (tokens.css). Doc: docs/conventions/ui.md#shapes-v03 */
+.view {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--bg-viewport);
+  outline-offset: -2px;
+  touch-action: none;
+  user-select: none;
+  /* entering the editor: the drawing settles in like a named view (--motion-slow) */
+  animation: enter var(--motion-slow) var(--ease-emphasized) both;
+}
+
+@keyframes enter {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+}
+
+.svg {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+
+.background {
+  fill: transparent;
+  cursor: grab;
+}
+
+.view[data-dragging] .background {
+  cursor: grabbing;
+}
+
+.grid path {
+  stroke: var(--vp-grid);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+  pointer-events: none;
+}
+
+.grid path[data-major] {
+  stroke: var(--vp-grid-major);
+}
+
+.axes {
+  pointer-events: none;
+  fill: none;
+  stroke-width: 1.5;
+}
+
+.axisX {
+  stroke: var(--vp-axis-x);
+}
+
+.axisY {
+  stroke: var(--vp-axis-y);
+}
+
+.axisLabel {
+  fill: var(--text-muted);
+  stroke: none;
+  font: var(--weight-medium) var(--text-xs) / 1 var(--font-ui);
+}
+
+.drawing {
+  pointer-events: none;
+}
+
+/* a pocket region's quiet tint; holes (islands) stay untinted through even-odd */
+.fill {
+  fill: var(--vp-removal);
+  fill-opacity: 0.85;
+  stroke: none;
+}
+
+.edge {
+  fill: none;
+  stroke: var(--vp-edge);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+.itemOutline {
+  fill: none;
+  stroke: var(--vp-edge);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+/* the selected item's own outline over the result (a subtracted item reads as a cut-out) */
+.selectedOutline {
+  fill: none;
+  stroke: var(--vp-selected);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+  pointer-events: none;
+}
+
+.bad {
+  pointer-events: none;
+}
+
+.bad > path {
+  fill: none;
+  stroke: var(--danger);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+
+.marker circle {
+  fill: var(--danger);
+  stroke: var(--bg-raised);
+  stroke-width: 1.5;
+}
+
+.marker path {
+  stroke: var(--bg-raised);
+  stroke-width: 1.75;
+  stroke-linecap: round;
+}
+
+.handles {
+  animation: fade var(--motion-fast) var(--ease-standard) both;
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+
+.handle {
+  cursor: move;
+  outline: none;
+}
+
+.hit {
+  fill: transparent;
+}
+
+.mark {
+  fill: var(--bg-raised);
+  stroke: var(--vp-edge);
+  stroke-width: 1.25;
+  transition:
+    fill var(--motion-fast) var(--ease-standard),
+    stroke var(--motion-fast) var(--ease-standard);
+}
+
+.cross {
+  stroke: var(--vp-edge);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+.handle[data-state='hovered'] .mark,
+.handle[data-related] .mark {
+  fill: var(--vp-hover);
+}
+
+.handle[data-state='dragged'] .mark {
+  fill: var(--vp-selected);
+  stroke: var(--accent-border);
+}
+
+.handle[data-state='dragged'] .cross {
+  stroke: var(--accent-border);
+}
+
+.handle:focus-visible .mark,
+.handle:focus-visible .cross {
+  stroke: var(--focus);
+  stroke-width: 2;
+}
+
+.handle[data-locked] {
+  cursor: not-allowed;
+}
+
+.handle[data-locked] .mark {
+  fill: var(--bg-control);
+  stroke-dasharray: 2 1.5;
+  opacity: 0.7;
+}
+
+.handle[data-locked] .cross {
+  opacity: 0.45;
+}
+
+.chip,
+.valueChip {
+  position: absolute;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: color-mix(in oklab, var(--bg-raised) 92%, transparent);
+  box-shadow: var(--shadow-1);
+  color: var(--text);
+  font: var(--weight-medium) var(--text-xs) / var(--lh-sm) var(--font-ui);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.chip {
+  top: var(--space-2);
+  left: var(--space-2);
+  color: var(--text-muted);
+}
+
+.valueChip {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  z-index: var(--z-toolbar);
+}
+
+.toolbar {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  transition: transform var(--motion-base) var(--ease-standard);
+}
+
+.empty,
+.invalidNote {
+  position: absolute;
+  left: 50%;
+  bottom: var(--space-3);
+  transform: translateX(-50%);
+  margin: 0;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklab, var(--bg-raised) 92%, transparent);
+  box-shadow: var(--shadow-1);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.empty {
+  color: var(--text-muted);
+}
+
+.invalidNote {
+  border: 1px solid var(--danger);
+  color: var(--danger-text);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}

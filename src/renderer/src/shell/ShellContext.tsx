@@ -1,8 +1,17 @@
 // The shell's per-window state behind one context: the bridge (`window.dfyom`, a fake in tests),
 // the document replica, the settings mirror and the UI store. Doc: docs/conventions/ui.md#app-shell
-import { createContext, useContext, useEffect, useSyncExternalStore, type ReactNode } from 'react'
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react'
 import { useStore } from 'zustand'
+import type { Region2dPort } from '../../../core/geometry/2d/port'
 import type { PreloadApi } from '../../../shared/preload-api'
+import type { AppResult } from '../../../shared/result'
 import {
   createEvaluations,
   planSubject,
@@ -32,11 +41,22 @@ export interface Shell {
   readonly referenceMeshes: ReferenceMeshes
   /** Library writes by anyone (task L1): views of library data re-read on each. */
   readonly libraryChanges: LibraryChanges
+  /**
+   * The renderer's 2D port (live shape outlines, task U1), loading asynchronously at window start
+   * (docs/architecture/shapes.md#where-the-2d-layer-runs); absent in hosts without one.
+   */
+  readonly region2d: Promise<AppResult<Region2dPort>> | undefined
 }
 
-export function createShell(bridge: PreloadApi): Shell {
+export interface ShellOptions {
+  /** The window's 2D port (`rendererRegion2d` in the app; the Node host in tests). */
+  readonly region2d?: Promise<AppResult<Region2dPort>>
+}
+
+export function createShell(bridge: PreloadApi, opts: ShellOptions = {}): Shell {
   const replica = createReplica(bridge)
   return {
+    region2d: opts.region2d,
     bridge,
     replica,
     settings: createSettingsStore(bridge),
@@ -109,6 +129,26 @@ export function useLibraryVersion(): number {
 export function usePending(): PendingState {
   const { pending } = useShell()
   return useSyncExternalStore(pending.subscribe, pending.getState)
+}
+
+/**
+ * The renderer's 2D port once it has loaded; undefined while loading, after a failed load (logged
+ * by the loader) and in hosts without one: the Shape Editor then draws the outlines
+ * `design.shape.get` resolved.
+ */
+export function useRegion2d(): Region2dPort | undefined {
+  const { region2d } = useShell()
+  const [port, setPort] = useState<Region2dPort | undefined>(undefined)
+  useEffect(() => {
+    let live = true
+    void region2d?.then((r) => {
+      if (live && r.isOk()) setPort(r.unwrap())
+    })
+    return () => {
+      live = false
+    }
+  }, [region2d])
+  return port
 }
 
 /** A part's evaluation (status and last good mesh), or undefined before the window knows it. */

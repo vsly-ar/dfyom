@@ -11,13 +11,13 @@ import { UiProvider } from './ui'
 
 const log = createRendererLogger(window.dfyom.log, import.meta.env.DEV)
 log.info('renderer started')
-// in the background: nothing in v0.3 K1 waits for it yet (sketching does, K3)
-void rendererRegion2d(log)
+// in the background: the Shape Editor's live outline waits for it (task U1)
+const region2d = rendererRegion2d(log)
 
 const rootEl = document.getElementById('root')
 if (!rootEl) throw new Error('Renderer root element #root is missing from index.html')
 
-const shell = createShell(window.dfyom)
+const shell = createShell(window.dfyom, { region2d })
 // before the first render: no flash of the wrong theme
 applySettings(shell.settings.getState().settings)
 

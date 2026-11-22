@@ -3,7 +3,7 @@
 // viewport and inspector follow), move up/down by buttons and Alt+↑/↓, remove with an undo toast
 // instead of a confirmation. Rows carry warning badges and the error marker of a failed
 // evaluation. Between the part and the operations, the reference models (ReferenceRows.tsx, task
-// R3). Doc: docs/conventions/ui.md#panels-and-inspectors, #confirmations, #undo-and-redo;
+// R3), then the named shapes (ShapeList.tsx, task U1). Doc: docs/conventions/ui.md#panels-and-inspectors, #confirmations, #undo-and-redo;
 // docs/modes/design.md#ordering-and-composition
 import { ArrowDown, ArrowUp, CircleAlert, Plus, Trash2, TriangleAlert } from 'lucide-react'
 import { useRef, useState, type KeyboardEvent } from 'react'
@@ -25,6 +25,7 @@ import {
 import styles from './Design.module.css'
 import { addArgs, failingOperation, type DesignPart } from './model'
 import { ReferenceRows } from './ReferenceRows'
+import { ShapeList } from './ShapeList'
 import { StockSetup } from './StockSetup'
 import { useCommand, useDesignEvaluation, useDesignSelection, useDesignWarnings } from './useDesign'
 
@@ -140,6 +141,7 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
         ) : null}
       </section>
       <ReferenceRows part={part} onRemoved={setRemoved} />
+      <ShapeList part={part} onRemoved={setRemoved} />
       <PanelHeader
         title={m.navigator.operations}
         meta={ops.length > 0 ? String(ops.length) : undefined}

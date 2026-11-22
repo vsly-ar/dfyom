@@ -5,6 +5,8 @@
 // docs/modes/reference-model.md#display
 import { createStore, type StoreApi } from 'zustand/vanilla'
 import type { ReferenceWarning } from '../../../core/design/reference'
+import type { ShapeItem } from '../../../core/design/shape.dto'
+import type { Issue } from '../../../shared/errors/app-error'
 import type { AppMode } from '../../../core/modes'
 
 /** Pick mode: a field asks the viewport for a surface (ui.md#selection-and-picking). */
@@ -17,6 +19,32 @@ export interface PickRequestState {
   readonly eligible: ReadonlySet<string>
   /** Called with the picked surface id; pick mode then ends. */
   readonly onPick: (surface: string) => void
+}
+
+/** The Shape Editor's per-window state (task U1): the selected item of the selected shape. */
+export interface ShapeEditorState {
+  readonly shapeId: string
+  /** The selected item's index (its fields, handles and dashed outline). */
+  readonly item: number
+  /** The selected segment row of a path item (its handles highlight), or null. */
+  readonly segment: number | null
+}
+
+/**
+ * A handle drag in progress (ui.md § Shapes: the outline follows the pointer every frame from the
+ * renderer's 2D port; commands go out at most every 100 ms).
+ */
+export interface ShapePreview {
+  readonly shapeId: string
+  readonly index: number
+  /** The dragged item's numbers (mm, degrees). */
+  readonly item: ShapeItem<number>
+}
+
+/** Why the shown shape is invalid: a refused commit or an invalid drag state (red segment). */
+export interface ShapeIssues {
+  readonly shapeId: string
+  readonly issues: readonly Issue[]
 }
 
 export interface UiState {
@@ -45,6 +73,16 @@ export interface UiState {
   setReferenceNotes(id: string, notes: readonly ReferenceWarning[]): void
   /** The window's project changed: every reference shows again, notes are dropped. */
   resetReferenceView(): void
+  /** Shape Editor (task U1): selected item and segment, null outside the editor. */
+  readonly shapeEditor: ShapeEditorState | null
+  selectShapeItem(shapeId: string, item: number, segment?: number | null): void
+  /** "Show items": every item's outline drawn thinly (per window, no command). */
+  readonly showShapeItems: boolean
+  setShowShapeItems(show: boolean): void
+  readonly shapePreview: ShapePreview | null
+  setShapePreview(preview: ShapePreview | null): void
+  readonly shapeIssues: ShapeIssues | null
+  setShapeIssues(issues: ShapeIssues | null): void
 }
 
 export type UiStore = StoreApi<UiState>
@@ -74,5 +112,14 @@ export function createUiStore(initial: Partial<Pick<UiState, 'mode'>> = {}): UiS
     setReferenceNotes: (id, notes) =>
       set((s) => ({ referenceNotes: { ...s.referenceNotes, [id]: notes } })),
     resetReferenceView: () => set({ hiddenReferences: new Set(), referenceNotes: {} }),
+    shapeEditor: null,
+    selectShapeItem: (shapeId, item, segment = null) =>
+      set({ shapeEditor: { shapeId, item, segment } }),
+    showShapeItems: false,
+    setShowShapeItems: (showShapeItems) => set({ showShapeItems }),
+    shapePreview: null,
+    setShapePreview: (shapePreview) => set({ shapePreview }),
+    shapeIssues: null,
+    setShapeIssues: (shapeIssues) => set({ shapeIssues }),
   }))
 }
