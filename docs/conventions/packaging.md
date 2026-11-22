@@ -6,11 +6,12 @@ How the app is packaged as `DFYOM.app` and installed for the developer. Local in
 
 ## Commands
 
-| Command                  | Does                                                                                                                                  |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `npm run package`        | `electron-vite build`, then electron-builder `--dir`: an unpacked `release/mac-arm64/DFYOM.app` (`release/` is gitignored)            |
-| `npm run install:local`  | `package`, then [`scripts/install-local.mjs`](../../scripts/install-local.mjs) copies the app to `~/Applications/DFYOM.app` (no sudo) |
-| `npm run smoke:packaged` | The [smoke tests](testing.md#app-playwright-for-electron) on the packaged executable, windows hidden; run after `package`             |
+| Command                  | Does                                                                                                                                                                        |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm run package`        | `electron-vite build`, the [third-party notices](#third-party-notices), then electron-builder `--dir`: an unpacked `release/mac-arm64/DFYOM.app` (`release/` is gitignored) |
+| `npm run notices`        | Only the [third-party notices](#third-party-notices), from the current `out/` (run after `npm run build`)                                                                   |
+| `npm run install:local`  | `package`, then [`scripts/install-local.mjs`](../../scripts/install-local.mjs) copies the app to `~/Applications/DFYOM.app` (no sudo)                                       |
+| `npm run smoke:packaged` | The [smoke tests](testing.md#app-playwright-for-electron) on the packaged executable, windows hidden; run after `package`                                                   |
 
 `smoke:packaged` is optional, not part of `npm run check` or CI. **When a milestone is reached** (a plan in [plans/](../plans/) closes), run `npm run install:local`, then `npm run smoke:packaged`, so the installed app is that milestone's version (`package.json` `version`, shown in the window title and Finder's Get Info).
 
@@ -34,11 +35,25 @@ How the app is packaged as `DFYOM.app` and installed for the developer. Local in
 
 - `out/**` (main, preload, renderer, worker and machine-host chunks, `cavalier_contours.wasm` via `?asset`) and `package.json`; no source maps, fixtures or vendor sources.
 - **Production dependencies:** only the packages the main process `require`s at run time (`MAIN_EXTERNALS` in the config) and their dependencies. Renderer libraries are bundled by Vite and left out; `manifold-3d` ships only `manifold.js` and `manifold.wasm` (its own dependencies serve its CLI). A new `require` of a dependency in `src/main` must be added to `MAIN_EXTERNALS`.
-- **Licence texts** in `DFYOM.app/Contents/Resources`: `LICENSE.txt` (the app, GPL-3.0-or-later) and `THIRD-PARTY-NOTICES.txt` (the 2D module's crates, [ADR 0019](../decisions/0019-2d-geometry-library.md)); Electron adds its own `LICENSE.electron.txt` and `LICENSES.chromium.html`.
+- **Licence texts** in `DFYOM.app/Contents/Resources`: `LICENSE.txt` (the app, GPL-3.0-or-later) and the generated `THIRD_PARTY_NOTICES.txt` ([below](#third-party-notices)); Electron adds its own `LICENSE.electron.txt` and `LICENSES.chromium.html`.
+
+## Third-party notices
+
+[`scripts/third-party-notices.mjs`](../../scripts/third-party-notices.mjs) writes `out/THIRD_PARTY_NOTICES.txt` after `electron-vite build`; electron-builder copies it to `Contents/Resources` (kept out of the asar). **Help → Open-source licences** opens it in a read-only window ([`src/main/licences-window.ts`](../../src/main/licences-window.ts): plain text, no preload or project session, never shown in hidden runs; menu items it receives go to a project window). In development it shows `out/THIRD_PARTY_NOTICES.txt` once `npm run notices` ran, else a hint.
+
+What it covers, each with its licence, where it is used, its source and its licence and NOTICE files:
+
+- **Bundled packages:** every `node_modules` package Rolldown put into `out/**/*.js` (today the renderer's: React, Radix, three.js, drei, Lucide icons via `lucide-react`, …), read from the `// <module path>` comment above each module. A file without these comments (a minified build) fails the script, so the list cannot silently empty.
+- **Main-process runtime packages:** `MAIN_EXTERNALS` and their dependencies, the same closure electron-builder ships ([What goes in](#what-goes-in); `runtimeClosureDirs` in the config).
+- **Vendored assets** (`VENDORED` in the script): `cavalier_contours.wasm` with its crate notices (`vendor/cavalier-contours/THIRD-PARTY-NOTICES.txt`). Every directory under `vendor/` and every font file under `src/` or `vendor/` must be listed; a test ([`third-party-notices.test.mjs`](../../scripts/third-party-notices.test.mjs)) checks it. No fonts are shipped: the UI uses system font stacks.
+- **Libraries compiled into a package's binary** (`EMBEDDED`): Clipper2 (BSL-1.0) and the Emscripten runtime (MIT) in `manifold.wasm`.
+- **Packages without a licence file in their npm tarball** (`MISSING_LICENCE_FILES`): the copyright line of their repository's LICENSE, used only while `package.json` names the same licence (today `@react-three/fiber`, `react-remove-scroll-bar`).
+
+The script **fails** when a package has no licence text or a licence expression that cannot be met with GPL-3.0-or-later compatible licences (`ALLOWED`: permissive licences, MPL-2.0, LGPL, GPL-2.0-or-later and GPL-3.0; not GPL-2.0-only, SSPL, proprietary or `SEE LICENSE IN`), and prints a summary by licence. A dependency that fails needs a decision ([ADR 0014](../decisions/0014-gpl-3-or-later-license.md)), not an entry in `ALLOWED`.
 
 ## Smoke test
 
-`DFYOM_E2E_APP=<executable>` makes the e2e fixture launch that executable instead of `out/main/index.js`. `DFYOM_HIDE_WINDOWS=1` is honoured by packaged builds too, so the packaged run shows no window. On a packaged app the first smoke test also checks `app.isPackaged`, the name `DFYOM`, the asar app path and the licence texts.
+`DFYOM_E2E_APP=<executable>` makes the e2e fixture launch that executable instead of `out/main/index.js`. `DFYOM_HIDE_WINDOWS=1` is honoured by packaged builds too, so the packaged run shows no window. On a packaged app the first smoke test also checks `app.isPackaged`, the name `DFYOM`, the asar app path and the licence texts (`LICENSE.txt`, `THIRD_PARTY_NOTICES.txt`). A smoke test opens Help → Open-source licences (on a packaged app it must show the generated notices).
 
 A dependency missing from the asar makes the packaged app stop at start with Electron's main-process error box (hidden in a test run, so the test just times out). To find it, require the externals inside the app with `ELECTRON_RUN_AS_NODE=1 DFYOM.app/Contents/MacOS/DFYOM -e "require('module').createRequire('<app.asar>/out/main/index.js')('<pkg>')"`.
 

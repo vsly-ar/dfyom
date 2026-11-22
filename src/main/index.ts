@@ -31,6 +31,7 @@ import {
 import { createAppStateStore, loadAppState, type AppStateStore } from './settings/app-state'
 import { createSettingsStore, loadSettings } from './settings/store'
 import { createLibraryWindows, type LibraryWindows } from './library-window'
+import { createLicencesWindow, noticesPath } from './licences-window'
 import {
   APP_NAME,
   LIBRARY_WINDOW_SIZE,
@@ -304,14 +305,20 @@ void app.whenReady().then(async () => {
     focus: (win) => windows.focus(win),
   })
   library.current = libraryWindows
+  // Help → Open-source licences (docs/conventions/packaging.md#third-party-notices)
+  const licences = createLicencesWindow({
+    path: noticesPath(app.isPackaged, process.resourcesPath, app.getAppPath()),
+    hidden: hideWindows,
+  })
   // The last focused project window: menu items the Library window does not handle go there.
   let lastProjectWindow: BrowserWindow | undefined
   app.on('browser-window-focus', (_e, win) => {
-    if (!libraryWindows.isLibrary(win)) lastProjectWindow = win
+    if (!libraryWindows.isLibrary(win) && !licences.isLicences(win)) lastProjectWindow = win
   })
   // New / Open without any window (macOS): an empty window, whose start panel offers both.
   installAppMenu({
     noWindow: () => sessions.open(),
+    openLicences: () => licences.open(),
     openLibrary: () => {
       const focused = BrowserWindow.getFocusedWindow() ?? undefined
       libraryWindows.open(
@@ -319,13 +326,20 @@ void app.whenReady().then(async () => {
       )
     },
     target: (action) => {
-      const focused = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
-      if (focused === undefined || !libraryWindows.isLibrary(focused)) return focused
-      if (libraryHandlesMenuAction(action)) return focused
+      const focused =
+        BrowserWindow.getFocusedWindow() ??
+        BrowserWindow.getAllWindows().find((w) => !licences.isLicences(w))
+      if (focused === undefined) return undefined
+      const library = libraryWindows.isLibrary(focused)
+      // the licences window runs nothing; the Library window runs its own items
+      if (!library && !licences.isLicences(focused)) return focused
+      if (library && libraryHandlesMenuAction(action)) return focused
       const project =
         lastProjectWindow !== undefined && !lastProjectWindow.isDestroyed()
           ? lastProjectWindow
-          : BrowserWindow.getAllWindows().find((w) => !libraryWindows.isLibrary(w))
+          : BrowserWindow.getAllWindows().find(
+              (w) => !libraryWindows.isLibrary(w) && !licences.isLicences(w),
+            )
       return project
     },
   })
@@ -336,7 +350,8 @@ void app.whenReady().then(async () => {
   })
   sessions.open()
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) sessions.open()
+    // the licences window alone is not an app window
+    if (BrowserWindow.getAllWindows().every((w) => licences.isLicences(w))) sessions.open()
   })
 
   // Quitting asks first (docs/conventions/ui.md#confirmations): during a run whether to stop it

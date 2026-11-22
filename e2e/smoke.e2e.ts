@@ -79,7 +79,7 @@ test('app opens its window, renders without console errors and quits', async ({ 
   if (process.env['DFYOM_E2E_APP']) {
     const resources = await app.evaluate(() => process.resourcesPath)
     expect(await readdir(resources)).toEqual(
-      expect.arrayContaining(['LICENSE.txt', 'THIRD-PARTY-NOTICES.txt']),
+      expect.arrayContaining(['LICENSE.txt', 'THIRD_PARTY_NOTICES.txt']),
     )
     expect(
       await app.evaluate(({ app: a }) => ({
@@ -89,6 +89,28 @@ test('app opens its window, renders without console errors and quits', async ({ 
       })),
     ).toEqual({ packaged: true, name: 'DFYOM', asar: true })
   }
+})
+
+test('Help → Open-source licences opens the third-party notices read-only', async ({ dfyom }) => {
+  const page = await dfyom.app.firstWindow()
+  await page.waitForLoadState('domcontentloaded')
+  await dfyom.app.evaluate(({ Menu }) => {
+    const help = Menu.getApplicationMenu()?.items.find((i) => i.role === 'help')
+    help?.submenu?.items.find((i) => i.label === 'Open-source licences')?.click()
+  })
+  const notices = await dfyom.app.waitForEvent('window')
+  await notices.waitForLoadState('domcontentloaded')
+  expect(await notices.title()).not.toBe('DFYOM')
+  // packaged (or after `npm run notices`): the generated file; else the hint to generate it
+  // (docs/conventions/packaging.md#third-party-notices)
+  const text = await notices.locator('body').innerText()
+  expect(text).toMatch(/DFYOM third-party notices|generated when the app is packaged/)
+  if (process.env['DFYOM_E2E_APP']) expect(text).toContain('Summary by licence:')
+  expect(
+    await dfyom.app.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows().map((w) => w.getTitle()),
+    ),
+  ).toContain('Open-source licences')
 })
 
 test('the bundled geometry worker evaluates a part', async ({ dfyom }) => {
