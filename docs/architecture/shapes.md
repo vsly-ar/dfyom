@@ -69,6 +69,7 @@ Builders in [Building the solids](geometry.md#building-the-solids) get general-l
 - **Flattening** as today: removals inscribed, the kept-side prism circumscribed, per element, at the 0.01 mm chord tolerance.
 - **Tabs:** the offset band of [Offset-loft](geometry.md#offset-loft) is defined by "points whose nearest shape point lies on the tab's stretch"; for general loops it is built from the stretch's elements offset to `outer` and `inner` with end faces along the loop normal, bent on the medial axis by the same rule. The tab stretch comes from `pointAt` with the design's positions.
 - **Slivers:** general shapes make wall positions non-dyadic everywhere, so the v0.2 backlog issue "walls of two directions differ by float32 rounding" ([plans/v0.2.md](../plans/v0.2.md#known-issues-and-risks)) matters more; task G2 measures it and, if needed, moves wall placement into float64 like the key levels.
+- **Spike S3** ([results](../../spikes/prisms/results.md), draft): labelled prisms with `triangulate` work, and every element label survives at 2000 elements. Three shape operations with 500 elements evaluate in 40 ms. 2000-element shapes take 60–170 ms, because Manifold re-triangulates each crossed face in time quadratic in the chords of the loop crossing it. Tiling the stock faces bounds that. Placing every vertex in float64 in the part frame removes the cross-direction wall slivers (0 of 60 cases, against 33 of 60 with the v0.2 placement). The recommendations there are not yet adopted here.
 
 ## Parameter checks for shapes
 
@@ -99,5 +100,5 @@ Budgets on the Apple M1 Pro class reference, measured by `npm run perf`:
 
 ## Open questions
 
-- Does Manifold's `triangulate` keep up with 2000-element caps within the evaluation budget, or do caps need their own fan of the region's rings? (spike S3, [plans/v0.3.md](../plans/v0.3.md#risks-and-spikes))
+- Does Manifold's `triangulate` keep up with 2000-element caps within the evaluation budget, or do caps need their own fan of the region's rings? (spike S3, [plans/v0.3.md](../plans/v0.3.md#risks-and-spikes)) Measured in the [S3 results](../../spikes/prisms/results.md): caps keep up and no fan is needed. The cost is in the booleans' face re-triangulation. Still to decide: the budget for 2000-element shapes, and whether to adopt the tiles and the part-frame placement.
 - Report the touching-island defect upstream with the spike fixture (ADR 0019 open question).
