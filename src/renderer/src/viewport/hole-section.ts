@@ -1,11 +1,12 @@
 // The hole inspector's section illustration (v0.4 U2), pure: the cut through the hole axis at true
 // proportions, drawn from the entered values – face, the stock below it (to its bottom for a
 // through hole, else cut by a break line under the deepest point), the bore, the counterbore step
-// or the countersink cone, the drill point, and with a fastener the screw's head and shank as a
+// or the countersink cone (its terraces when stepped, F7), the drill point, and with a fastener the screw's head and shank as a
 // dashed silhouette (a picture of the fit, not geometry). One measured part per size field, for
 // SketchView to highlight. Values are mm (resolved quantities); `units` only formats the chips and
 // the accessible name.
 // Doc: docs/conventions/ui.md#section-illustration, docs/modes/design-v0.4.md#hole-feature
+import { chamferTerraces } from '../../../core/geometry/model'
 import type { UnitSystem } from '../../../core/project/document'
 import type { Sketch, SketchPoint, SketchPrimitive } from './sketch'
 
@@ -14,7 +15,14 @@ export type HoleSectionBottom = 'through' | 'flat' | 'drillPoint'
 
 /** The hole fields that have a measured part in the drawing. */
 export type HoleSectionPart =
-  'diameter' | 'depth' | 'cbDiameter' | 'cbDepth' | 'csDiameter' | 'csAngle' | 'headSink'
+  | 'diameter'
+  | 'depth'
+  | 'cbDiameter'
+  | 'cbDepth'
+  | 'csDiameter'
+  | 'csAngle'
+  | 'csStepdown'
+  | 'headSink'
 
 export const HOLE_SECTION_PARTS: readonly HoleSectionPart[] = [
   'diameter',
@@ -23,6 +31,7 @@ export const HOLE_SECTION_PARTS: readonly HoleSectionPart[] = [
   'cbDepth',
   'csDiameter',
   'csAngle',
+  'csStepdown',
   'headSink',
 ]
 
@@ -49,6 +58,8 @@ export interface HoleSectionValues {
   readonly csDiameter?: number | undefined
   /** Included angle, degrees. */
   readonly csAngle?: number | undefined
+  /** Present = a stepped countersink (F7): terraces of at most this height. */
+  readonly csStepdown?: number | undefined
   readonly headSink: number
   /** Material below the face along the axis (stock extent from the hole's face), if known. */
   readonly stockDepth?: number | undefined
@@ -87,13 +98,28 @@ export function holeSection(values: HoleSectionValues, units: UnitSystem): Sketc
     values.type === 'countersink' && ok(values.csDiameter)
       ? { R: Math.max(values.csDiameter / 2, r) }
       : undefined
+  // stepped (F7): the core's terraces, each top step corner on the cone
+  const terraces =
+    cs !== undefined && ok(values.csStepdown) && values.csStepdown > 0
+      ? chamferTerraces(
+          { edgeDiameter: 2 * r, diameter: 2 * cs.R, angle },
+          // at most 200 steps drawn (a tiny stepdown would only blacken the cone)
+          Math.max(values.csStepdown, (cs.R - r) / Math.tan(rad(angle / 2)) / 200),
+        )
+      : undefined
   if (cb !== undefined) {
     mouth.push([cb.R, 0], [cb.R, cb.depth], [r, cb.depth])
     boreTop = cb.depth
     outer = cb.R
   } else if (cs !== undefined) {
     const h = (cs.R - r) / Math.tan(rad(angle / 2))
-    mouth.push([cs.R, 0], [r, h])
+    if (terraces === undefined) mouth.push([cs.R, 0], [r, h])
+    else {
+      terraces.radii.forEach((rk, k) =>
+        mouth.push([rk, k * terraces.height], [rk, (k + 1) * terraces.height]),
+      )
+      mouth.push([r, h])
+    }
     boreTop = h
     outer = cs.R
   } else mouth.push([r, 0])
@@ -333,13 +359,31 @@ export function holeSection(values: HoleSectionValues, units: UnitSystem): Sketc
       [0, 0],
       'above',
     )
+    // the cone itself (stepped: the line through the step corners)
+    const flank: SketchPoint[] = [
+      [cs.R, 0],
+      [r, boreTop],
+    ]
     measure(
       'csAngle',
-      [mouth, mirror(mouth)],
+      [flank, mirror(flank)],
       `${+angle.toFixed(2)}°`,
       [cs.R, boreTop / 2],
       'right',
     )
+    if (terraces !== undefined)
+      measure(
+        'csStepdown',
+        [
+          [
+            [-cs.R, 0],
+            [-cs.R, terraces.height],
+          ],
+        ],
+        L(terraces.height),
+        [-cs.R, terraces.height / 2],
+        'left',
+      )
   }
   if (sink !== undefined && sink > 1e-6)
     measure(
@@ -358,7 +402,7 @@ export function holeSection(values: HoleSectionValues, units: UnitSystem): Sketc
   return {
     bounds: { minX: -W, minY: top, maxX: W, maxY: bottomY },
     primitives,
-    label: sectionLabel(values, sink, L),
+    label: sectionLabel(values, sink, L, terraces),
   }
 }
 
@@ -367,6 +411,7 @@ function sectionLabel(
   v: HoleSectionValues,
   sink: number | undefined,
   L: (mm: number) => string,
+  terraces: { readonly count: number; readonly height: number } | undefined,
 ): string {
   const bottoms = { flat: 'flat bottom', drillPoint: 'drill point' } as const
   const parts = [
@@ -377,7 +422,12 @@ function sectionLabel(
   if (v.type === 'counterbore' && ok(v.cbDiameter) && ok(v.cbDepth))
     parts.push(`counterbore Ø ${L(v.cbDiameter)}, ${L(v.cbDepth)} deep`)
   if (v.type === 'countersink' && ok(v.csDiameter))
-    parts.push(`countersink Ø ${L(v.csDiameter)}, ${+(v.csAngle ?? 90).toFixed(2)}°`)
+    parts.push(
+      `countersink Ø ${L(v.csDiameter)}, ${+(v.csAngle ?? 90).toFixed(2)}°` +
+        (terraces === undefined
+          ? ''
+          : `, stepped in ${terraces.count} ${terraces.count === 1 ? 'step' : 'steps'} of ${L(terraces.height)}`),
+    )
   if (v.fastener !== undefined) {
     const size = v.fastener.size
     if (v.purpose === 'tapDrill') parts.push(`${size} tap drill`)

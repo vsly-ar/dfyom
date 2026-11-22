@@ -26,6 +26,7 @@ import {
   OVERSHOOT,
   applyPlacement,
   chamferDepth,
+  chamferTerraces,
   isAnalyticOperation,
   type AnalyticContour as Contour,
   type AnalyticOperation,
@@ -343,6 +344,7 @@ export const CHAMFER_RUN_IN = 4 * CHORD_TOLERANCE
 
 /**
  * A chamfer (v0.4): the cone frustum from the face (`diameter`) down past the edge's diameter,
+ * or, stepped (F7), the terraces the end mill cuts (`chamferTerraces`, a stack of cylinders),
  * built around the edge's axis in the same face frame as the edge, so both are placed by the same
  * float64 transform (coaxial). Above the face a cylinder of `diameter` up to the overshoot (the
  * mouth's column is the edge's own removal); the bottom cap lies inside the edge's removal (air).
@@ -354,11 +356,29 @@ function chamfer(op: Extract<OperationGeometry, { kind: 'chamfer' }>): AppResult
   const R = op.diameter / 2
   const runIn = Math.min(CHAMFER_RUN_IN, op.edgeDiameter / 4)
   const tan = Math.tan(((op.angle / 2) * Math.PI) / 180)
+  const terraces = op.stepdown === undefined ? undefined : chamferTerraces(op, op.stepdown)
   const levels: Level[] = [
     { offset: 0, z: OVERSHOOT },
     { offset: 0, z: op.onZ },
-    { offset: R - op.edgeDiameter / 2 + runIn, z: op.onZ - chamferDepth(op) - runIn / tan },
   ]
+  if (terraces === undefined)
+    levels.push({
+      offset: R - op.edgeDiameter / 2 + runIn,
+      z: op.onZ - chamferDepth(op) - runIn / tan,
+    })
+  else {
+    // F7: per terrace its wall down to its floor, then the floor in to the next wall; the last
+    // floor (at the cone depth) runs on into the hole
+    terraces.radii.forEach((r, k) => {
+      const floor = op.onZ - (k + 1) * terraces.height
+      levels.push({ offset: R - r, z: floor })
+      const next = terraces.radii[k + 1]
+      levels.push({
+        offset: next === undefined ? R - op.edgeDiameter / 2 + runIn : R - next,
+        z: floor,
+      })
+    })
+  }
   return offsetLoft({ kind: 'circle', radius: R }, levels, {
     band: () => cone,
     top: AIR,

@@ -2,9 +2,9 @@
 // hole adds a feature row, the row expands to its owned operations, an owned operation's
 // inspector is read-only ("Edited through Hole 1") and its link opens the hole, Make Clones…
 // clones the hole with Source and Clones groups under the Clones row; the hole inspector (U2) sets
-// type and fastener, draws the section and offers the custom-size fix. Windows stay hidden
-// (app.fixture.ts). With DFYOM_RENDERS=1 it also writes the light and dark review renders to
-// design/features/renders/ (ui.md § Features (v0.4), visuals reviewed in L2).
+// type and fastener, draws the section, offers the custom-size fix and a stepped countersink
+// (F7). Windows stay hidden (app.fixture.ts). With DFYOM_RENDERS=1 it also writes the light and
+// dark review renders to design/features/renders/ (ui.md § Features (v0.4), visuals reviewed in L2).
 // Docs: docs/conventions/ui.md#features-v04, docs/modes/features.md
 import { resolve } from 'node:path'
 import type { Locator, Page } from '@playwright/test'
@@ -156,6 +156,14 @@ test('features: add a hole, expand its row, the owned inspector is read-only, Ma
       .and(inspector.locator('input'))
       .focus(),
   )
+  // stepped (F7): terraces by the hole's end mill, the stepdown field, the shared tool
+  await inspector.getByRole('radio', { name: 'Stepped' }).click()
+  await expect(section).toHaveAccessibleName(/stepped in 2 steps of 0\.93 mm/)
+  await expect(tools.getByText(/no tool change/)).toBeVisible()
+  const stepdown = inspector.getByLabel('Stepdown', { exact: true }).and(inspector.locator('input'))
+  await stepdown.focus()
+  await expect(section.locator('[data-part="csStepdown"]')).toHaveAttribute('data-state', 'active')
+  await render(page, 'stepped', 'u2', () => stepdown.focus())
 
   // ── Make Clones… of the selected hole ───────────────────────────────────────────────────
   await navigator.getByRole('button', { name: 'Add', exact: true }).click()

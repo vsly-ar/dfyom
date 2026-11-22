@@ -123,6 +123,51 @@ describe('holeSection', () => {
     )
   })
 
+  it('draws a stepped countersink as terraces with each top step corner on the cone (F7)', () => {
+    // M3, 1 mm stepdown: cone 1.86 deep → 2 terraces of 0.93, walls at 3.56 and 2.63
+    const s = holeSection(
+      { ...base, type: 'countersink', csDiameter: 7.12, csAngle: 90, csStepdown: 1, fastener: M3 },
+      'mm',
+    )
+    const wall = lines(s.primitives, 'edge')[0]!.points
+    const at = (p: readonly number[]) => p.map((v) => +v.toFixed(9))
+    expect(wall.slice(0, 6).map(at)).toEqual([
+      [3.56, 0],
+      [3.56, 0.93],
+      [2.63, 0.93],
+      [2.63, 1.86],
+      [1.7, 1.86],
+      [1.7, 10],
+    ])
+    // the top corner of each terrace on the cone: depth = (R − r) / tan 45°
+    for (const [x, y] of [wall[0]!, wall[2]!]) expect(y).toBeCloseTo(3.56 - x, 9)
+    // the angle measures the cone through the corners; the stepdown chip shows the terrace height
+    expect(measure(s.primitives, 'csAngle')!.paths[0]).toEqual([
+      [3.56, 0],
+      [1.7, expect.closeTo(1.86, 9)],
+    ])
+    expect(measure(s.primitives, 'csStepdown')!.value).toBe('0.93 mm')
+    expect(measure(s.primitives, 'headSink')!.value).toBe('0.2 mm')
+    expect(s.label).toBe(
+      'Section: Ø 3.4 mm through; countersink Ø 7.12 mm, 90°, stepped in 2 steps of 0.93 mm; M3 head 0.2 mm below the face.',
+    )
+    // an uneven stepdown: ⌈1.86 / 0.8⌉ = 3 equal terraces; one terrace when it covers the cone
+    const three = holeSection(
+      { ...base, type: 'countersink', csDiameter: 7.12, csStepdown: 0.8 },
+      'mm',
+    )
+    expect(measure(three.primitives, 'csStepdown')!.value).toBe('0.62 mm')
+    const one = holeSection({ ...base, type: 'countersink', csDiameter: 7.12, csStepdown: 5 }, 'mm')
+    expect(one.label).toContain('stepped in 1 step of 1.86 mm')
+    // without a stepdown: the plain cone, no stepdown part
+    expect(
+      measure(
+        holeSection({ ...base, type: 'countersink', csDiameter: 7.12 }, 'mm').primitives,
+        'csStepdown',
+      ),
+    ).toBeUndefined()
+  })
+
   it('shows only the thread for a tap drill and puts a simple clearance head on the face', () => {
     const tap = holeSection({ ...base, purpose: 'tapDrill', diameter: 2.5, fastener: M3 }, 'mm')
     expect(lines(tap.primitives, 'silhouette')).toHaveLength(1)

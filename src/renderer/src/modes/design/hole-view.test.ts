@@ -8,6 +8,9 @@ import {
   customSizeNote,
   enteredSizesReplaced,
   fastenerSources,
+  holeRecord,
+  sectionValues,
+  sharedToolNote,
   sizeFields,
   type FastenerListRow,
   type HoleRecord,
@@ -24,6 +27,7 @@ const hole = (over: Partial<HoleRecord> = {}): HoleRecord => ({
   purpose: 'clearance',
   fit: 'normal',
   bottom: 'through',
+  csMethod: 'chamfer',
   center: [q('20'), q('20')],
   sizes: { diameter: q('3.4 mm'), headSink: q('0.2 mm') },
   ...over,
@@ -111,5 +115,34 @@ describe('hole view', () => {
     ])
     expect(fastenerSources(hole({ type: 'countersink' }), [M3])[1]).toEqual(['ISO 10642', 'head'])
     expect(fastenerSources(hole({ fastener: undefined }), [M3])).toEqual([])
+  })
+
+  it('reads the countersink method; the section gets the stepdown only when stepped (F7)', () => {
+    const feature = (extra: object) =>
+      ({ id: 'hole1', kind: 'hole', name: 'Hole 1', type: 'countersink', ...extra }) as never
+    expect(holeRecord(feature({})).csMethod).toBe('chamfer')
+    const stepped = holeRecord(feature({ csMethod: 'stepped', csStepdown: q('0.5 mm') }))
+    expect(stepped.csMethod).toBe('stepped')
+    expect(stepped.sizes.csStepdown?.source).toBe('0.5 mm')
+    // the stepdown follows the method control, not the size fields
+    expect(sizeFields(stepped)).toEqual(['diameter', 'csDiameter', 'csAngle'])
+    const noPart = { loaded: undefined, table: undefined } as never
+    const s = hole({ type: 'countersink', csMethod: 'stepped', sizes: { csStepdown: q('0.5') } })
+    expect(sectionValues(s, noPart, []).csStepdown).toBe(0.5)
+    expect(sectionValues({ ...s, csMethod: 'chamfer' }, noPart, []).csStepdown).toBeUndefined()
+  })
+
+  it('says whether a stepped countersink shares the drill role tool (F7)', () => {
+    const sink = hole({ type: 'countersink', csMethod: 'stepped' })
+    const ops = (cs: string | undefined, drill: string | undefined) => [
+      { featureRole: 'drill', tool: drill },
+      { featureRole: 'countersink', tool: cs },
+    ]
+    const same = (a: string, b: string) => a === b
+    expect(sharedToolNote(sink, ops('em3', 'em3'), same)).toBe('same')
+    expect(sharedToolNote(sink, ops('em2', 'em3'), same)).toBe('other')
+    expect(sharedToolNote(sink, ops(undefined, 'em3'), same)).toBe('pending')
+    expect(sharedToolNote({ ...sink, csMethod: 'chamfer' }, ops('a', 'b'), same)).toBeUndefined()
+    expect(sharedToolNote({ ...sink, type: 'simple' }, ops('a', 'a'), same)).toBeUndefined()
   })
 })

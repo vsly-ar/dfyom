@@ -42,3 +42,26 @@ export function drillVolume(diameter: number, depth: number, pointAngle?: number
   const h = r / Math.tan(((pointAngle / 2) * Math.PI) / 180)
   return cylinder + (Math.PI * r * r * h) / 3
 }
+
+/**
+ * A stepped chamfer's removal outside its hole (F7): N = ⌈h / stepdown⌉ terraces of height
+ * t = h / N, terrace k (0-based) a cylinder of radius D / 2 − k·t·tan(α / 2), minus the hole.
+ * Doc: docs/modes/design-v0.4.md#stepped-countersink-f7-d41
+ */
+export function terraceVolume(
+  edgeDiameter: number,
+  diameter: number,
+  angle: number,
+  stepdown: number,
+): number {
+  const tan = Math.tan((angle * Math.PI) / 360)
+  const h = (diameter - edgeDiameter) / 2 / tan
+  const n = Math.ceil(h / stepdown - 1e-9)
+  const t = h / n
+  let v = 0
+  for (let k = 0; k < n; k++) {
+    const r = diameter / 2 - k * t * tan
+    v += Math.PI * (r * r - (edgeDiameter / 2) ** 2) * t
+  }
+  return v
+}

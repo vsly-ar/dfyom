@@ -5,7 +5,7 @@ import { localStock, type Direction } from './face'
 import { loadManifold } from './manifold'
 import { CHORD_TOLERANCE, type OperationGeometry, type PartGeometryInput } from './model'
 import type { SolidKernel } from './solid-port'
-import { pocketVolume } from './testing/analytic'
+import { pocketVolume, terraceVolume } from './testing/analytic'
 import { signedVolume } from './testing/mesh-oracles'
 import { nodeManifoldSource } from './testing/node-wasm'
 import {
@@ -203,6 +203,56 @@ describe('evaluatePart: edge cases', () => {
     for (const c of centroids(e, 'chamfer1.cone')) {
       expect(c[2]).toBeLessThanOrEqual(1e-6)
       expect(c[2]).toBeGreaterThanOrEqual(-1 - 1e-3)
+    }
+  })
+
+  it('a stepped chamfer (F7) is its terraces: the analytic terrace sum, floors at each level', () => {
+    // an M3 countersink (Ø3.4 → Ø7.12 × 90°, 1.86 deep) and Ø6 → Ø14 × 82° (4.6 deep, uneven)
+    for (const [d, D, angle, stepdown] of [
+      [3.4, 7.12, 90, 1],
+      [6, 14, 82, 1.2],
+    ] as const) {
+      const hole: OperationGeometry = {
+        kind: 'drilling',
+        id: 'drill1',
+        onZ: 0,
+        center: [20, 20],
+        diameter: d,
+        bottom: { kind: 'through' },
+      }
+      const sink: OperationGeometry = {
+        kind: 'chamfer',
+        id: 'chamfer1',
+        onZ: 0,
+        center: [20, 20],
+        edgeOf: 'drill1',
+        edgeDiameter: d,
+        diameter: D,
+        angle,
+        stepdown,
+      }
+      const drilled = evaluate(withOp(hole))
+      const e = evaluate({ stock: TEST_STOCK, operations: [hole, sink] })
+      expect(e.pieces).toBe(1)
+      expect(e.warnings).toEqual([])
+      const exact = terraceVolume(d, D, angle, stepdown)
+      const removed = drilled.volume - e.volume
+      // inscribed rings: a little less, within the chord tolerance over the walls
+      expect(removed).toBeLessThanOrEqual(exact + 1e-6)
+      expect(exact - removed).toBeLessThan(0.005 * exact)
+      // more than the plain cone (the overcut under the head)
+      const tan = Math.tan((angle * Math.PI) / 360)
+      const h = (D - d) / 2 / tan
+      const cone = (Math.PI / 3) * h * ((D / 2) ** 2 + (D * d) / 4 + (d / 2) ** 2)
+      expect(removed).toBeGreaterThan(cone - Math.PI * (d / 2) ** 2 * h + 1)
+      const n = Math.ceil(h / stepdown - 1e-9)
+      const floors = new Set(
+        centroids(e, 'chamfer1.cone')
+          .filter((c) => Math.abs(c[2] - Math.round((c[2] * n) / h) * (h / n)) < 1e-6)
+          .map((c) => Math.round((-c[2] * n) / h)),
+      )
+      for (let k = 1; k <= n; k++) expect(floors, `floor ${k}`).toContain(k)
+      for (const c of centroids(e, 'chamfer1.cone')) expect(c[2]).toBeGreaterThanOrEqual(-h - 1e-6)
     }
   })
 

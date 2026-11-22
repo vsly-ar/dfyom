@@ -2,7 +2,8 @@
 // / Countersink), Fastener (size, purpose, fit, the sources of the filled sizes), Sizes with the
 // section illustration drawn from the entered values (SketchView over the pure holeSection), a
 // collapsed Defaults group (head sink) and Tools (one tool field per owned operation, each with
-// its lock). Every edit is one `design.hole.update` (one undo step); a refill that overwrote
+// its lock). A countersink has a Method (Chamfer mill / Stepped, F7) and, stepped, a Stepdown;
+// the section then draws the terraces and Tools says whether it shares the hole's end mill. Every edit is one `design.hole.update` (one undo step); a refill that overwrote
 // entered sizes says so in the undo toast; errors and findings show at their field, the custom-size
 // note with "Use <table value>". The focused size field's measured part is amber in the drawing;
 // hovering a part highlights its field's label, clicking it focuses the field.
@@ -45,7 +46,9 @@ import {
   fastenerSources,
   holeRecord,
   sectionValues,
+  sharedToolNote,
   sizeFields,
+  type CsMethod,
   type FastenerList,
   type HoleFit,
   type HolePurpose,
@@ -55,7 +58,7 @@ import {
 } from './hole-view'
 import { NameField } from './NameField'
 import { placeErrors, type FieldError } from './OperationFields'
-import { ToolField } from './ToolField'
+import { sameTool, ToolField } from './ToolField'
 import {
   axisNames,
   defaultUnit,
@@ -85,6 +88,7 @@ const FIELD_LABEL: Record<HoleSizeField, string> = {
   cbDepth: h.cbDepth,
   csDiameter: h.csDiameter,
   csAngle: h.csAngle,
+  csStepdown: h.csStepdown,
   headSink: h.headSink,
 }
 const FIELD_ICON: Record<HoleSizeField, FieldIconName> = {
@@ -94,6 +98,7 @@ const FIELD_ICON: Record<HoleSizeField, FieldIconName> = {
   cbDepth: 'depth',
   csDiameter: 'width',
   csAngle: 'chamfer',
+  csStepdown: 'depth',
   headSink: 'depth',
 }
 
@@ -176,6 +181,8 @@ export function HoleInspector({
     'tool',
     ...sizeFields(hole),
     'headSink',
+    ...(hole.type === 'countersink' ? ['csMethod'] : []),
+    ...(hole.type === 'countersink' && hole.csMethod === 'stepped' ? ['csStepdown'] : []),
   ])
   const unplaced = findings.filter((w) => {
     const f = fieldOf(w)
@@ -397,6 +404,27 @@ export function HoleInspector({
 
   // ── tools ──
   const opWarnings = (id: string) => warnings.warnings.filter((w) => w.operation === id)
+  const toolNote = sharedToolNote(hole, owned, sameTool)
+
+  // ── countersink method (F7) ──
+  const methodField =
+    hole.type === 'countersink' ? (
+      <div {...track('csMethod')}>
+        <Field label={h.csMethod} kind="toggle" messages={messagesAt('csMethod')}>
+          <SegmentedControl<CsMethod>
+            label={h.csMethod}
+            options={(['chamfer', 'stepped'] as const).map((v) => ({
+              value: v,
+              label: h.csMethods[v] ?? v,
+            }))}
+            value={hole.csMethod}
+            onValueChange={(csMethod) =>
+              csMethod !== hole.csMethod && void update({ csMethod }, 'csMethod')
+            }
+          />
+        </Field>
+      </div>
+    ) : null
 
   return (
     <div ref={rootRef} className={styles['inspector']}>
@@ -521,6 +549,10 @@ export function HoleInspector({
             </Field>
           </div>
           {sizeFields(hole).slice(1).map(sizeField)}
+          {methodField}
+          {hole.type === 'countersink' && hole.csMethod === 'stepped'
+            ? sizeField('csStepdown')
+            : null}
           <section className={styles['holeDefaults']} data-defaults aria-label={h.groups.defaults}>
             <h4 className={styles['groupTitle']}>
               <button
@@ -554,6 +586,11 @@ export function HoleInspector({
                   warnings={opWarnings(op.id)}
                   label={h.roleLabel(op.featureRole ?? op.kind)}
                 />
+                {toolNote !== undefined && op.featureRole === 'countersink' ? (
+                  <p className={styles['muted']} data-shared-tool={toolNote}>
+                    {h.sharedTool[toolNote]}
+                  </p>
+                ) : null}
               </div>
             ))}
           </Group>
