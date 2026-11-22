@@ -59,6 +59,21 @@ describe('menu actions', () => {
     expect(openLibrary).toHaveBeenCalledOnce()
   })
 
+  it('Help → Open-source licences opens the notices window', () => {
+    const openLicences = vi.fn()
+    const template = menuTemplate('darwin', false, {
+      noWindow: vi.fn(),
+      openLibrary: vi.fn(),
+      openLicences,
+    })
+    const items = template.find((m) => m.role === 'help')?.submenu as {
+      label?: string
+      click?: () => void
+    }[]
+    items.find((i) => i.label === 'Open-source licences')?.click?.()
+    expect(openLicences).toHaveBeenCalledOnce()
+  })
+
   it('Settings… (Ctrl/Cmd+,): the macOS app menu, else File; it sends app.settings', () => {
     type Item = {
       label?: string

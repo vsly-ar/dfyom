@@ -1,6 +1,6 @@
 // The native application menu (ui.md decision 12): the macOS app menu (with Settings… Cmd+,), File
-// (Settings… Ctrl+, on Windows and Linux), Edit, View, Window (with Library), Help with accelerators. Items
-// that act on a project or the shell are sent to the focused window (`IPC.menuAction`), which
+// (Settings… Ctrl+, on Windows and Linux), Edit, View, Window (with Library), Help (with
+// Open-source licences) with accelerators. Items that act on a project or the shell are sent to the focused window (`IPC.menuAction`), which
 // runs them like the matching button or key, so menu, toolbar and shortcuts dispatch the same
 // commands. Text editing (cut, copy, paste, select all) and window items use Electron's roles.
 // Without any window (macOS), New / Open open an empty window; other items do nothing.
@@ -19,6 +19,8 @@ export interface MenuHooks {
   readonly noWindow: () => void
   /** Window → Library (docs/conventions/ui-library-window.md, L2). */
   readonly openLibrary: () => void
+  /** Help → Open-source licences: the notices window (src/main/licences-window.ts, PK1). */
+  readonly openLicences?: () => void
   /**
    * The window that runs `action`: the focused one, except that the Library window passes the
    * items it does not handle to a project window. Default: the focused, else the first window.
@@ -151,7 +153,11 @@ export function menuTemplate(
     },
     {
       role: 'help',
-      submenu: [item('Keyboard shortcuts', 'help.shortcuts')],
+      submenu: [
+        item('Keyboard shortcuts', 'help.shortcuts'),
+        { type: 'separator' },
+        { label: 'Open-source licences', click: () => hooks.openLicences?.() },
+      ],
     },
   )
   return template
