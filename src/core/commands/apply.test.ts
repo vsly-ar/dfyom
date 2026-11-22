@@ -18,6 +18,7 @@ import { createDispatcher, type CommandOutcome } from './dispatcher'
 import type { HistoryLimits } from './history'
 import { inProcessWorkers } from './jobs'
 import {
+  APP_HOOKS,
   APPLY_HOOKS,
   APPLY_JOBS,
   createProjectRegistry,
@@ -381,7 +382,7 @@ describe('implicit apply (applyFirst)', () => {
     expect(t.pending().count).toBe(0)
   })
 
-  it('plan.create applies first; plan.status.set only into draft', async () => {
+  it('plan.create applies first; plan.status.set only into draft or un-archiving', async () => {
     const t = await setup({ applyHooks: [nameHook()] })
     await t.depth('8')
     const { planId } = (await t.run('plan.create', { partId: t.partId })).value as {
@@ -393,6 +394,12 @@ describe('implicit apply (applyFirst)', () => {
     await t.run('plan.status.set', { planId, status: 'settledDesign' })
     expect(t.pending().count).toBe(1)
     await t.run('plan.status.set', { planId, status: 'draft' })
+    expect(t.pending().count).toBe(0)
+    // un-archiving may restore draft (it then rebuilds): it applies first too (P2)
+    await t.run('plan.status.set', { planId, status: 'archived' })
+    await t.depth('10')
+    expect(t.pending().count).toBe(1)
+    await t.run('plan.status.set', { planId })
     expect(t.pending().count).toBe(0)
   })
 
@@ -423,9 +430,10 @@ describe('implicit apply (applyFirst)', () => {
         'run.job.start',
       ].sort(),
     )
-    // P1 registers no hooks or jobs; P2 adds them
-    expect(APPLY_HOOKS).toEqual([])
-    expect(APPLY_JOBS).toEqual([])
+    // P2: the deferred reactions, in apply.md's order; no document hook is left
+    expect(APPLY_HOOKS.map((h) => h.name)).toEqual(['design.toolAutoChoice', 'plan.draftFollow'])
+    expect(APPLY_JOBS.map((j) => j.name)).toEqual(['plan.toolpaths'])
+    expect(APP_HOOKS).toEqual([])
   })
 })
 

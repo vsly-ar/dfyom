@@ -1,4 +1,4 @@
-// The app host: project lifecycle commands, unsaved changes, recovery, sessions, library follow.
+// The app host: project lifecycle commands, unsaved changes, recovery, sessions, library follow on Apply.
 // Spec: docs/architecture/llm-api.md#app-scope-and-project-scope, #sessions-and-sources
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -84,20 +84,44 @@ describe('app host', () => {
     expect(host.list()[0]?.dirty).toBe(true)
   })
 
-  it('draft plans follow library changes (system source)', async () => {
-    const { host, call } = await setup()
+  it('draft plans follow library changes on Apply: pending in the project, applied by an agent write', async () => {
+    const { host, session, call } = await setup()
     const ids = await buildSmallPlan(call)
-    const tools = (await call('library.tool.list')) as { items: { id: string; revision: number }[] }
-    const tool = tools.items[0]!
-    await call('library.tool.update', {
-      id: tool.id,
-      revision: tool.revision,
-      values: { ...libraryInput(flat6()), overallLength: '70' },
-    })
     const d = host.project(ids.key).unwrap()
-    await expect
-      .poll(() => d.log.since(0, { names: ['plan.libraryItem.update'] }).map((e) => e.source.kind))
-      .toEqual(['system'])
+    const tool = async () =>
+      ((await call('library.tool.list')) as { items: { id: string; revision: number }[] }).items[0]!
+    // a window's library edit: pending in the project, nothing dispatched
+    const ui = { kind: 'ui' as const, id: 'w' }
+    const first = await tool()
+    expectOk(
+      await host.app.dispatch(
+        'library.tool.update',
+        {
+          id: first.id,
+          revision: first.revision,
+          values: { ...libraryInput(flat6()), overallLength: '70' },
+        },
+        ui,
+      ),
+    )
+    expect(d.applyState.pending()).toEqual([
+      expect.objectContaining({ kind: 'library', libraryItemId: first.id }),
+    ])
+    // an agent's library write auto-applies its bound project: the draft follows in the Apply
+    const second = await tool()
+    const r = expectOk(
+      (
+        await session.call('library.tool.update', {
+          id: second.id,
+          revision: second.revision,
+          values: { ...libraryInput(flat6()), overallLength: '72' },
+        })
+      ).result,
+    ) as { applied?: { plans: unknown[] } }
+    expect(r.applied?.plans).toEqual([{ planId: ids.planId, status: 'followed' }])
+    expect(d.applyState.pending()).toEqual([])
+    expect(d.history.undoable.at(-1)).toMatchObject({ command: 'project.apply' })
+    expect(d.log.since(0, { names: ['plan.libraryItem.update'] })).toEqual([])
   })
 
   it('shutdown closes every project and leaves unsaved changes recoverable', async () => {

@@ -1,14 +1,15 @@
 /**
  * Operation tool field (v0.2): `design.operation.tool.set/lock/unlock`, `design.snapshot.update`,
  * the `design.tool.candidates` query and the auto choice as the apply hook
- * `design.toolAutoChoice` (registered in `APPLY_HOOKS` by task P2).
+ * `design.toolAutoChoice` (registered in `APPLY_HOOKS`), and the tool part of the consistency scan
+ * on open.
  * Doc: docs/modes/design-v0.2.md#operation-tool, docs/modes/design-v0.2.md#commands-and-queries-v02,
  * docs/architecture/apply.md#apply-hooks
  */
 import type { Draft } from 'immer'
 import { z } from 'zod'
 import { Err, fail, Ok, Some, type AppResult } from '../../shared/result'
-import type { ToolChange } from '../commands/apply'
+import type { PendingChange, ToolChange } from '../commands/apply'
 import type { CommandContext } from '../commands/context'
 import {
   defineCommand,
@@ -350,7 +351,40 @@ export function autoChooseTools(
   return Ok(changes)
 }
 
-/** `design.toolAutoChoice`, the first apply hook (apply.md § Apply hooks); P2 registers it. */
+/**
+ * The tool part of the consistency scan on open (docs/architecture/apply.md#opening-and-recovery):
+ * every unlocked operation whose tool is absent or does not fit is pending (key field `tool`),
+ * so the next Apply chooses it. A part that does not load is left out (its commands report it).
+ */
+export function toolScan(
+  doc: ProjectDoc,
+  ctx: { services: CommandContext['services'] },
+): PendingChange[] {
+  const library = toolItems(ctx)
+  const out: PendingChange[] = []
+  for (const partId of Object.keys(doc.parts)) {
+    const loaded = loadPart(doc, partId, 'project.open')
+    if (loaded.isErr()) continue
+    const l = loaded.unwrap()
+    const inputs = choiceInputs(l, library, doc.snapshots)
+    if (inputs.isErr()) continue
+    for (const [i, op] of l.part.operations.entries()) {
+      if (op.toolLocked) continue
+      const tool = op.tool.andThen((t) => resolveDesignTool(t, doc.snapshots))
+      if (tool.isSome() && fitOf(tool.unwrap(), inputs.unwrap()(i, op)) === undefined) continue
+      out.push({
+        kind: 'design',
+        partId,
+        operationId: op.id,
+        field: 'tool',
+        label: `${op.name}: tool`,
+      })
+    }
+  }
+  return out
+}
+
+/** `design.toolAutoChoice`, the first apply hook (apply.md § Apply hooks). */
 export const designToolAutoChoice: ApplyHook = {
   name: 'design.toolAutoChoice',
   apply: (draft, pending, ctx) =>

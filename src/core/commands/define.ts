@@ -150,6 +150,30 @@ export interface ApplyJob {
   ): readonly ApplyJobStart[]
 }
 
+/**
+ * Pending keys beyond the design diff (docs/architecture/apply.md#what-is-pending): plan inputs
+ * of kept-current plans, `draft` plans that do not follow their part yet, changed library items
+ * that `draft` plans copy. Derived from the current document, the baseline and services (library,
+ * toolpath cache) on every pending read; `design` are the design keys already found. Pure and
+ * cheap: unchanged records are skipped by reference.
+ */
+export interface PendingSource {
+  readonly name: string
+  changes(
+    doc: ProjectDoc,
+    baseline: ProjectDoc,
+    design: readonly PendingChange[],
+    ctx: Pick<QueryContext, 'services'>,
+  ): readonly PendingChange[]
+}
+
+/**
+ * The consistency scan on open (docs/architecture/apply.md#opening-and-recovery): keys of the
+ * opened document that an older build or a recovered working folder left unapplied. They stay
+ * pending until the next successful Apply.
+ */
+export type OpenScan = (doc: ProjectDoc, ctx: Pick<QueryContext, 'services'>) => PendingChange[]
+
 /** `warnings` of the `ApplyOutcome`: the DFM warnings of the parts with applied changes. */
 export type ApplyWarnings = (
   doc: ProjectDoc,

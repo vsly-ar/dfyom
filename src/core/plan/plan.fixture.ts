@@ -19,7 +19,7 @@ import {
   num,
   rpm,
 } from '../library/library.fixture'
-import { draftPlanAutoRebuild, PLAN_COMMANDS } from './commands'
+import { PLAN_COMMANDS } from './commands'
 import type { PlanDTO } from './plan.dto'
 
 const ui = uiSource()
@@ -94,6 +94,8 @@ export async function planSetup(opts: { part?: boolean } = {}): Promise<PlanSetu
   }
   const { kind: _, ...m } = machineValues()
   const machineId = await add('machine', m)
+  // nothing pending to start with: the auto tool choice ran (docs/architecture/apply.md)
+  await s.run('project.apply', {})
   const query = (name: string, args: object) => expectOk(s.d.query(name, args, ui)).value
   const PATH: Record<PlanDTO['status'], PlanDTO['status'][]> = {
     draft: [],
@@ -147,7 +149,7 @@ export const stale = (s: PlanSetup, planId: string) =>
 
 /**
  * Patch laws of a document command run without a dispatcher, with the setup's library and the
- * app's document hooks: apply(next, inverse) ≡ before and apply(before, patches) ≡ next.
+ * app's document hooks (none since P2): apply(next, inverse) ≡ before and apply(before, patches) ≡ next.
  */
 export function expectPatchLaw(s: PlanSetup, def: DocumentCommand, args: object): void {
   const before = s.d.doc
@@ -156,7 +158,7 @@ export function expectPatchLaw(s: PlanSetup, def: DocumentCommand, args: object)
     def,
     args,
     { services: { workers: inProcessWorkers, library: s.library } },
-    [draftPlanAutoRebuild],
+    [],
   )
   expect(r.result.isOk(), `${def.name} failed`).toBe(true)
   expect(expectOk(applyDocPatches(r.next, r.inversePatches)), `inverse of ${def.name}`).toEqual(
@@ -167,8 +169,12 @@ export function expectPatchLaw(s: PlanSetup, def: DocumentCommand, args: object)
 
 /** Runs a plan command; patch laws hold, undo restores the document before and redo the one after. */
 export async function expectUndoRedo(s: PlanSetup, name: string, args: object): Promise<unknown> {
+  const def = PLAN_COMMANDS.find((c) => c.name === name) as DocumentCommand
+  // an applyFirst command applies pending changes in its own entry first: do that beforehand
+  const f = def.applyFirst as boolean | ((a: object) => boolean) | undefined
+  if (typeof f === 'function' ? f(args) : f === true) await s.run('project.apply', {})
   const before = s.d.doc
-  expectPatchLaw(s, PLAN_COMMANDS.find((c) => c.name === name) as DocumentCommand, args)
+  expectPatchLaw(s, def, args)
   const value = await s.run(name, args)
   const after = s.d.doc
   await s.undo()

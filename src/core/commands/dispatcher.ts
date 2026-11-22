@@ -43,6 +43,7 @@ import {
   applyTitle,
   EMPTY_APPLY,
   pendingChanges,
+  pendingKey,
   type ApplyOutcome,
   type ApplyView,
   type LastApply,
@@ -219,6 +220,11 @@ class ProjectDispatcher implements Dispatcher {
   private readonly touched = new Map<string, { source: Source; revision: number }>()
   private lastCommit: { source: Source; revision: number } | undefined
   private pendingCache: { doc: ProjectDoc; base: ProjectDoc; changes: PendingChange[] } | undefined
+  /**
+   * Keys of the consistency scan on open (apply.md § Opening and recovery): pending until the
+   * next successful Apply consumes them.
+   */
+  private openMarks: readonly PendingChange[] = []
   private lastApplyInfo: LastApply | null = null
   /** Running apply jobs by supersede key; the job ids of the last Apply (retry of failures). */
   private readonly applyRuns = new Map<string, string>()
@@ -242,6 +248,16 @@ class ProjectDispatcher implements Dispatcher {
     })
     this.undo = new History(o.historyLimits ?? DEFAULT_HISTORY_LIMITS)
     this.opened = this.current
+    const scan = this.registry.openScan
+    if (scan !== undefined) {
+      const marks = tryCatch(
+        () => scan(this.current, { services: this.services }),
+        'internal.unexpected',
+        'consistency scan threw',
+      )
+      // the scan only adds pending keys: a failure leaves none (the commands report broken parts)
+      if (marks.isOk()) this.openMarks = marks.unwrap()
+    }
     const pending = () => this.pendingInfo()
     const applying = () => this.runningApplyJobs()
     const lastApply = () => this.lastApplyInfo
@@ -265,14 +281,38 @@ class ProjectDispatcher implements Dispatcher {
     return this.undo.baseline() ?? this.opened
   }
 
+  /**
+   * All pending keys: the design diff against the baseline (cached per document pair), the
+   * registry's pending sources (plan inputs, draft plans, library items: they also read the
+   * library and the toolpath cache, so they are derived on every read) and the open scan's
+   * marks; one per key.
+   */
   private pendingNow(): PendingChange[] {
     const doc = this.current
     const base = this.baselineDoc()
     const c = this.pendingCache
-    if (c !== undefined && c.doc === doc && c.base === base) return c.changes
-    const changes = pendingChanges(doc, base)
-    this.pendingCache = { doc, base, changes }
-    return changes
+    let design: PendingChange[]
+    if (c !== undefined && c.doc === doc && c.base === base) design = c.changes
+    else {
+      design = pendingChanges(doc, base)
+      this.pendingCache = { doc, base, changes: design }
+    }
+    const extra = [
+      ...this.registry.pendingSources.flatMap((p) =>
+        p.changes(doc, base, design, { services: this.services }),
+      ),
+      ...this.openMarks,
+    ]
+    if (extra.length === 0) return design
+    const seen = new Set(design.map(pendingKey))
+    const out = [...design]
+    for (const e of extra) {
+      const k = pendingKey(e)
+      if (seen.has(k)) continue
+      seen.add(k)
+      out.push(e)
+    }
+    return out
   }
 
   /** Pending changes with the last commit that touched their part (or its stock snapshot). */
@@ -622,6 +662,7 @@ class ProjectDispatcher implements Dispatcher {
         size,
       )
     this.undo.markApplied(this.current)
+    this.openMarks = []
     this.lastApplyInfo = {
       entrySeq: changed ? event.seq : null,
       revision: this.rev,

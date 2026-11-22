@@ -103,5 +103,6 @@ Run mode loads **one program per setup** ([§ Toolpaths per setup](#toolpaths-pe
 User decision D13 (2026-11-21), specified in [apply.md](../architecture/apply.md): the draft auto-rebuild no longer runs on every `design.*` commit. It becomes the apply hook `plan.draftFollow`, which runs once per Apply after the design's tool choice, so setups and tools are derived from the confirmed design, not from every keystroke or popover step.
 
 - Between an edit and Apply, a `draft` plan shows "Design changes not applied yet" instead of a stale notice, its checks and toolpaths marked outdated ([apply.md § Stale derived results](../architecture/apply.md#stale-derived-results)).
-- `plan.create`, `plan.rebuild` and `plan.status.set` into `draft` apply first ([implicit apply](../architecture/apply.md#implicit-apply)).
+- `plan.create`, `plan.rebuild` and `plan.status.set` into `draft` (and un-archiving) apply first ([implicit apply](../architecture/apply.md#implicit-apply)).
+- Implemented by task P2 ([apply.md § Implementation (task P2)](../architecture/apply.md#implementation-task-p2)).
 - Draft plans follow **library** edits on Apply too, and Apply regenerates stale toolpaths of plans whose toolpaths the user generated ([apply.md decisions](../architecture/apply.md#decisions) 4 and 5).

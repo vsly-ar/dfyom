@@ -21,6 +21,13 @@ export interface ToolpathCache {
     planId: string,
     planOperationId: string,
   ): { inputHash: string; toolpath: Toolpath } | undefined
+  /** Whether `inputHash` is cached (does not mark it used). */
+  has(inputHash: string): boolean
+  /**
+   * Whether a toolpath was ever generated (or a cache hit remembered) for one of the plan's
+   * operations: the plan is kept current by Apply (docs/architecture/apply.md#apply-jobs).
+   */
+  generated(planId: string): boolean
   /** Estimated size of the cached toolpaths (bytes). */
   readonly bytes: number
   clear(): void
@@ -36,6 +43,7 @@ export function createToolpathCache(maxBytes = TOOLPATH_CACHE_MAX_BYTES): Toolpa
   /** Insertion order = LRU order (oldest first). */
   const entries = new Map<string, { toolpath: Toolpath; bytes: number }>()
   const lastHash = new Map<string, string>()
+  const plans = new Set<string>()
   let bytes = 0
   const key = (planId: string, planOperationId: string) => `${planId}\0${planOperationId}`
   const evict = () => {
@@ -63,10 +71,18 @@ export function createToolpathCache(maxBytes = TOOLPATH_CACHE_MAX_BYTES): Toolpa
       entries.set(inputHash, { toolpath, bytes: size })
       bytes += size
       lastHash.set(key(planId, planOperationId), inputHash)
+      plans.add(planId)
       evict()
     },
     remember(planId, planOperationId, inputHash) {
       lastHash.set(key(planId, planOperationId), inputHash)
+      plans.add(planId)
+    },
+    has(inputHash) {
+      return entries.has(inputHash)
+    },
+    generated(planId) {
+      return plans.has(planId)
     },
     last(planId, planOperationId) {
       const hash = lastHash.get(key(planId, planOperationId))
@@ -81,6 +97,7 @@ export function createToolpathCache(maxBytes = TOOLPATH_CACHE_MAX_BYTES): Toolpa
     clear() {
       entries.clear()
       lastHash.clear()
+      plans.clear()
       bytes = 0
     },
   }

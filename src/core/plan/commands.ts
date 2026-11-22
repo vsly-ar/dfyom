@@ -1,5 +1,5 @@
 /**
- * Plan commands and queries (v0.1, without toolpaths) and the draft auto-rebuild hook.
+ * Plan commands and queries (v0.1, without toolpaths) and the `plan.draftFollow` apply hook.
  * Doc: docs/modes/plan-v0.1.md#commands-and-queries-v01, docs/modes/plan-v0.1.md#plan-status
  *
  * All commands are `document` commands (one undo step each). Every command except
@@ -17,9 +17,10 @@ import {
   defineCommand,
   defineQuery,
   type AnyCommand,
-  type DocumentHook,
+  type ApplyHook,
   type QueryDef,
 } from '../commands/define'
+import type { PlanApply } from '../commands/apply'
 import { OPERATION_UPDATE_ARGS, updateOperation, writeOperationList } from '../design/commands'
 import { fieldContext, partFromDTO } from '../design/operation'
 import { OperationIdSchema, PartIdSchema } from '../design/part.dto'
@@ -58,6 +59,7 @@ import {
   type PlanOperationDTO,
   type SetupDTO,
 } from './plan.dto'
+import { planPendingApply } from './pending'
 import { designChanged, hasPlanEdits, planStale } from './snapshot'
 import { sameValue } from './validity'
 import { StepSchema, stepToDTO } from '../feeds-speeds/commands'
@@ -189,7 +191,7 @@ function needsDiscard(planId: string, where: string): AppResult<never> {
   )
 }
 
-/** Rebuild from the current design (shared by `plan.rebuild`, `→ draft` and the hook). */
+/** Rebuild from the current design (shared by `plan.rebuild`, `→ draft` and `plan.draftFollow`). */
 function rebuild(
   draft: Draft<ProjectDoc>,
   plan: PlanDTO,
@@ -350,8 +352,9 @@ const planStatusSet = defineCommand({
     'Change the status of a plan (draft, settledDesign, finalized, inUse, archived); without status, un-archive.',
   title: (a) => (a.status === undefined ? 'Un-archive plan' : `Set plan status to ${a.status}`),
   machine: false,
-  // apply first: docs/architecture/apply.md#implicit-apply
-  applyFirst: (a) => a.status === 'draft',
+  // apply first into draft, and before un-archiving (which may restore draft):
+  // docs/architecture/apply.md#implicit-apply
+  applyFirst: (a) => a.status === 'draft' || a.status === undefined,
   args: z.object({
     ...PlanArg,
     status: PlanStatusSchema.optional().describe('Omit to un-archive (restores the previous one)'),
@@ -425,52 +428,59 @@ const libraryItemUpdate = defineCommand({
   args: z.object({
     ...PlanArg,
     snapshotId: z.string().min(1).describe("Id of the copy in the plan's snapshots"),
-    followOnly: z
-      .literal(true)
-      .optional()
-      .describe('Automatic follow of a draft plan: a no-op unless the plan is still a draft'),
   }),
   result: z.object({ updated: z.boolean().describe('False when nothing changed') }),
   run(draft, args, ctx) {
     const where = 'plan.libraryItem.update'
-    if (args.followOnly === true) {
-      // re-checked inside the command: the status may have changed since the follow read it
-      const current = findPlanDTO(draft as ProjectDoc, args.planId, where)
-      if (current.isErr()) return current
-      if (current.unwrap().status !== 'draft') return Ok({ updated: false })
-    }
     const found = planFor(draft, args.planId, where)
     if (found.isErr()) return found
     const plan = plainCopy(found.unwrap())
-    const index = plan.snapshots.findIndex((s) => s.id === args.snapshotId)
-    const dto = plan.snapshots[index]
-    if (dto === undefined)
-      return fail('input.malformed', `plan ${args.planId} has no copy ${args.snapshotId}`, {
-        issues: [{ path: ['snapshotId'], rule: 'unknownSnapshot', message: 'no such copy' }],
-        where,
-      })
-    const item = libraryItem(ctx, dto.kind, dto.libraryItemId, 'snapshotId', where)
-    if (item.isErr()) return item
-    const refreshed = Snapshot.fromDTO(dto).andThen((s) =>
-      refreshSnapshot(s, item.unwrap(), nowIso(ctx)),
-    )
-    if (refreshed.isErr()) return Err(refreshed.unwrapErr().withContext(where))
-    if (deepEqual(refreshed.unwrap().values.toDTO(), dto.values)) return Ok({ updated: false })
-    plan.snapshots[index] = refreshed.unwrap().toDTO()
-    if (dto.kind === 'stock') {
-      // the plan's part must stay valid with the new stock
-      const loaded = loadPlanDTO(plan, draft.unitSystem, where)
-      if (loaded.isErr()) return loaded
-      const { part, stock } = loaded.unwrap()
-      const ok = checkReferences(part.operations, stock).andThen(() =>
-        checkOperations(part.operations, stock),
-      )
-      if (ok.isErr()) return Err(ok.unwrapErr().withContext(where))
-    }
+    const r = refreshCopy(plan, args.snapshotId, draft.unitSystem, ctx, where)
+    if (r.isErr() || !r.unwrap()) return r.map((updated) => ({ updated }))
     writePlan(draft, plan)
     return Ok({ updated: true })
   },
 })
+
+/**
+ * Re-imports one library copy of `plan` (a plain copy, changed in place) from the library:
+ * `false` when the values are equal. A new stock copy must keep the plan's part valid.
+ * Shared by `plan.libraryItem.update` and the `plan.draftFollow` apply hook.
+ */
+function refreshCopy(
+  plan: PlanDTO,
+  snapshotId: string,
+  units: UnitSystem,
+  ctx: CommandContext,
+  where: string,
+): AppResult<boolean> {
+  const index = plan.snapshots.findIndex((s) => s.id === snapshotId)
+  const dto = plan.snapshots[index]
+  if (dto === undefined)
+    return fail('input.malformed', `plan ${plan.id} has no copy ${snapshotId}`, {
+      issues: [{ path: ['snapshotId'], rule: 'unknownSnapshot', message: 'no such copy' }],
+      where,
+    })
+  const item = libraryItem(ctx, dto.kind, dto.libraryItemId, 'snapshotId', where)
+  if (item.isErr()) return item
+  const refreshed = Snapshot.fromDTO(dto).andThen((s) =>
+    refreshSnapshot(s, item.unwrap(), nowIso(ctx)),
+  )
+  if (refreshed.isErr()) return Err(refreshed.unwrapErr().withContext(where))
+  if (deepEqual(refreshed.unwrap().values.toDTO(), dto.values)) return Ok(false)
+  plan.snapshots[index] = refreshed.unwrap().toDTO()
+  if (dto.kind === 'stock') {
+    // the plan's part must stay valid with the new stock
+    const loaded = loadPlanDTO(plan, units, where)
+    if (loaded.isErr()) return loaded
+    const { part, stock } = loaded.unwrap()
+    const ok = checkReferences(part.operations, stock).andThen(() =>
+      checkOperations(part.operations, stock),
+    )
+    if (ok.isErr()) return Err(ok.unwrapErr().withContext(where))
+  }
+  return Ok(true)
+}
 
 const designOperationUpdate = defineCommand({
   kind: 'document',
@@ -1025,32 +1035,61 @@ const toolAssign = defineCommand({
   },
 })
 
-// ── draft auto-rebuild ────────────────────────────────────────────────────────────────────
+// ── draft follow (apply hook) ─────────────────────────────────────────────────────────────
 
 /**
- * After every design command, rebuilds each `draft` plan whose snapshot differs from the current
- * part, on the same draft: the design change and the rebuilds are one undo step
- * (docs/modes/plan-v0.1.md#commands-and-queries-v01; mechanism:
- * docs/architecture/commands.md#document-hooks). Design commands themselves are unchanged.
+ * `plan.draftFollow`, the second apply hook (docs/architecture/apply.md#apply-hooks): on the
+ * Apply draft, rebuilds every `draft` plan whose part has pending design changes (or that is
+ * itself pending as not following its part) and whose snapshot differs from the part; then
+ * re-imports the copies of pending library items in every `draft` plan (decision 5). Plans are
+ * downstream of the design: a plan that cannot follow is left as it was and reported
+ * (`blocked`), never an Apply failure (replaces v0.1's `plan.draftAutoRebuild` document hook).
  */
-export const draftPlanAutoRebuild: DocumentHook = {
-  name: 'plan.draftAutoRebuild',
-  after(draft, command, ctx) {
-    if (!command.name.startsWith('design.')) return Ok(undefined)
-    const args = command.args as { partId?: unknown }
-    const partId = typeof args.partId === 'string' ? args.partId : undefined
-    for (const id of Object.keys(draft.plans)) {
-      const plan = draft.plans[id]!
-      if (plan.status !== 'draft') continue
-      if (partId !== undefined && plan.design.partId !== partId) continue
-      if (!designChanged(plan as PlanDTO, draft as ProjectDoc)) continue
-      // A plan is downstream of the design: a draft that cannot follow (its stock copy no longer
-      // fits, or a broken record) is left as it was and reported by plan.stale.list and
-      // plan.warning.list; the design command never fails because of it.
-      const rebuilt = rebuild(draft, plainCopy(plan as PlanDTO), ctx, 'plan.draftAutoRebuild')
-      if (rebuilt.isOk()) writePlan(draft, rebuilt.unwrap())
+export const planDraftFollow: ApplyHook = {
+  name: 'plan.draftFollow',
+  apply(draft, pending, ctx) {
+    const where = 'plan.draftFollow'
+    const parts = new Set<string>()
+    const plans = new Set<string>()
+    const items = new Set<string>()
+    for (const c of pending) {
+      if (c.kind === 'design' && c.partId !== undefined) parts.add(c.partId)
+      else if (c.kind === 'plan' && c.field === 'design' && c.planId !== undefined)
+        plans.add(c.planId)
+      else if (c.kind === 'library' && c.libraryItemId !== undefined) items.add(c.libraryItemId)
     }
-    return Ok(undefined)
+    const lookup = ctx.services.library?.lookup
+    const out: PlanApply[] = []
+    for (const id of Object.keys(draft.plans)) {
+      const current = draft.plans[id] as PlanDTO
+      if (current.status !== 'draft') continue
+      let plan = plainCopy(current)
+      let status: PlanApply['status'] | undefined
+      const reasons: string[] = []
+      const follows = parts.has(plan.design.partId) || plans.has(plan.id)
+      if (follows && designChanged(plan, draft as ProjectDoc)) {
+        const rebuilt = rebuild(draft, plan, ctx, where)
+        if (rebuilt.isOk()) {
+          plan = rebuilt.unwrap()
+          status = 'rebuilt'
+        } else reasons.push(`rebuildBlocked: ${rebuilt.unwrapErr().message}`)
+      }
+      if (items.size > 0 && lookup !== undefined)
+        for (const c of planStale(plan, draft as ProjectDoc, lookup).libraryCopies) {
+          if (c.status !== 'libraryChanged' || !items.has(c.libraryItemId)) continue
+          const r =
+            c.blocked === null
+              ? refreshCopy(plan, c.snapshotId, draft.unitSystem, ctx, where)
+              : fail('model.invariant', c.blocked, { where })
+          if (r.isErr()) reasons.push(`libraryBlocked: ${r.unwrapErr().message}`)
+          else if (r.unwrap()) status ??= 'followed'
+        }
+      if (status !== undefined) writePlan(draft, plan)
+      if (reasons.length > 0)
+        out.push({ planId: id, status: 'blocked', reason: reasons.join('; ') })
+      else if (status !== undefined) out.push({ planId: id, status })
+    }
+    return Ok({ plans: out })
   },
 }
 
@@ -1330,6 +1369,9 @@ const staleList = defineQuery({
     'List what is stale in a plan: operations changed or removed in the design or edited in the plan, and library copies whose item changed or was removed.',
   args: z.object(PlanArg),
   result: z.object({
+    pendingApply: z
+      .boolean()
+      .describe('Its inputs have changes not applied yet: this plan updates on Apply'),
     partRemoved: z.boolean(),
     partChanged: z
       .array(z.string())
@@ -1360,6 +1402,7 @@ const staleList = defineQuery({
     return findPlanDTO(doc, args.planId, 'plan.stale.list').map((plan) => {
       const s = planStale(plan, doc, ctx.services.library?.lookup)
       return {
+        pendingApply: planPendingApply(plan, ctx.apply?.pending() ?? []),
         partRemoved: s.partRemoved,
         partChanged: [...s.partChanged],
         rebuildBlocked: s.rebuildBlocked,
@@ -1408,7 +1451,12 @@ const warningList = defineQuery({
   summary:
     'List the checks of a plan: tool, feeds and order errors (they block toolpaths), machine and calculator warnings.',
   args: z.object(PlanArg),
-  result: z.object({ warnings: z.array(PlanWarningSchema) }),
+  result: z.object({
+    warnings: z.array(PlanWarningSchema),
+    pendingApply: z
+      .boolean()
+      .describe('Its inputs have changes not applied yet: the checks are outdated until Apply'),
+  }),
   run(doc, args, ctx) {
     const where = 'plan.warning.list'
     const dto = findPlanDTO(doc, args.planId, where)
@@ -1444,7 +1492,10 @@ const warningList = defineQuery({
         rule: 'partFits',
         params: {},
       })
-    return Ok({ warnings: findings.map((w) => ({ ...w, params: { ...w.params } })) })
+    return Ok({
+      warnings: findings.map((w) => ({ ...w, params: { ...w.params } })),
+      pendingApply: planPendingApply(dto.unwrap(), ctx.apply?.pending() ?? []),
+    })
   },
 })
 
