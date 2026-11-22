@@ -2,16 +2,11 @@
 // operations in machining order"): create a plan of the part; pick, duplicate or remove plans
 // (remove confirmed); the plan's status and its stale notices with rebuild / update from library
 // (a rebuild or back to draft that discards plan-only edits is confirmed, naming their count);
-// the machine; the setup's work zero and safe heights; the plan operations in machining order
-// (select, move by buttons and Alt+↑/↓, tool, checks, toolpath state and stale badges); toolpath
-// generation and the gCode export. Doc: docs/conventions/ui.md#plan-mode-task-37,
+// the machine; the setup panel (SetupList.tsx, v0.2 F6: setups with their plan operations in
+// machining order); toolpath generation and the gCode export (of the window's setup when the plan
+// has several). Doc: docs/conventions/ui.md#plan-mode-task-37,
 // docs/modes/plan-v0.1.md#commands-and-queries-v01
 import {
-  ArrowDown,
-  ArrowUp,
-  CircleAlert,
-  CircleCheck,
-  CircleDashed,
   Copy,
   Download,
   History,
@@ -20,43 +15,35 @@ import {
   Plus,
   RefreshCw,
   Trash2,
-  TriangleAlert,
   Waypoints,
 } from 'lucide-react'
-import { useId, useRef, useState, type KeyboardEvent } from 'react'
+import { useId, useState } from 'react'
 import type { PlanDTO, PlanStatus } from '../../../../core/plan/plan.dto'
 import type { ProjectDoc } from '../../../../core/project/document'
-import type { AppErrorData, Issue } from '../../../../shared/errors/app-error'
+import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { planMessages, sentence } from '../../messages/plan'
 import {
   Button,
   ConfirmDialog,
   EmptyState,
   ErrorMessage,
-  FieldIcon,
   IconButton,
   Menu,
   Progress,
-  QuantityInput,
   Select,
   StatusChip,
-  ToolIcon,
-  type FieldMessage,
-  type ToolIconName,
 } from '../../ui'
-import { defaultUnit, quantityOf } from '../design/model'
 import { ExportDialog } from './ExportDialog'
 import { NewMachineDialog } from './NewMachineDialog'
 import {
+  allPlanOperations,
   allows,
   designStale,
   editable,
   isError,
   pickerPlans,
   planEditCount,
-  planOperationKind,
-  planOperationName,
-  rowStale,
+  setupExportBlocked,
   snapshotName,
   statusChoices,
   toolpathState,
@@ -68,18 +55,11 @@ import {
   usePlanStore,
   type PlanData,
 } from './plan-store'
-import { useCancelGesture } from '../../shell/hooks'
 import styles from './Plan.module.css'
-import { findingsOf, useChosenPlan, useLibraryItems, usePlanSelection } from './usePlan'
+import { SetupList } from './SetupList'
+import { useChosenPlan, useCurrentSetup, useLibraryItems } from './usePlan'
 
 const m = planMessages
-
-export const KIND_ICON: Record<string, ToolIconName> = {
-  facing: 'facing',
-  pocket: 'pocket',
-  drilling: 'drill',
-  profile: 'profile',
-}
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   const id = useId()
@@ -249,8 +229,9 @@ function PlanView({
       </Section>
 
       <MachineSection plan={plan} send={send} units={doc.unitSystem} />
-      <SetupSection doc={doc} plan={plan} />
-      <OperationList plan={plan} data={data} />
+      <Section title={m.setup.title}>
+        <SetupList doc={doc} plan={plan} data={data} />
+      </Section>
       <ToolpathSection plan={plan} data={data} />
 
       <ConfirmDialog
@@ -350,7 +331,7 @@ function StaleNotices({
   )
 }
 
-// ── machine and setup ─────────────────────────────────────────────────────────────────────
+// ── machine ────────────────────────────────────────────────────────────────────────────
 
 function MachineSection({
   plan,
@@ -398,205 +379,6 @@ function MachineSection({
   )
 }
 
-function SetupSection({ doc, plan }: { doc: ProjectDoc; plan: PlanDTO }): React.JSX.Element {
-  const call = usePlanCommand()
-  const setup = plan.setups[0]!
-  const [errors, setErrors] = useState<readonly Issue[]>([])
-  const units = doc.unitSystem
-  const readOnly = !allows(plan, 'plan.setup.update')
-  const cancelGesture = useCancelGesture()
-  const commit = async (
-    key: 'clearanceHeight' | 'retractHeight',
-    source: string,
-    gesture: string | undefined,
-  ) => {
-    const r = await call(
-      'plan.setup.update',
-      { planId: plan.id, setupId: setup.id, [key]: source },
-      gesture === undefined ? undefined : { gesture },
-    )
-    setErrors(r.ok ? [] : r.error.issues)
-  }
-  const messages = (key: string): FieldMessage[] =>
-    errors
-      .filter((i) => i.path[0] === key)
-      .map((i, n) => ({ id: `${key}-${n}`, severity: 'error', text: sentence(i.message) }))
-  return (
-    <Section title={m.setup.title}>
-      <p className={styles['muted']}>
-        {m.setup.workOffset}: {m.setup.workOffsetValue}
-      </p>
-      <QuantityInput
-        label={m.setup.clearanceHeight}
-        kind="length"
-        defaultUnit={defaultUnit('length', units)}
-        value={quantityOf(setup.clearanceHeight)}
-        illustration={<FieldIcon name="depth" />}
-        readOnly={readOnly}
-        messages={messages('clearanceHeight')}
-        onCommit={(q, gesture) => void commit('clearanceHeight', q.source, gesture)}
-        onCancelGesture={cancelGesture}
-      />
-      <QuantityInput
-        label={m.setup.retractHeight}
-        kind="length"
-        defaultUnit={defaultUnit('length', units)}
-        value={quantityOf(setup.retractHeight)}
-        illustration={<FieldIcon name="depth" />}
-        readOnly={readOnly}
-        messages={messages('retractHeight')}
-        onCommit={(q, gesture) => void commit('retractHeight', q.source, gesture)}
-        onCancelGesture={cancelGesture}
-      />
-    </Section>
-  )
-}
-
-// ── operations ────────────────────────────────────────────────────────────────────────────
-
-function OperationList({
-  plan,
-  data,
-}: {
-  plan: PlanDTO
-  data: PlanData | undefined
-}): React.JSX.Element {
-  const call = usePlanCommand()
-  const [selected, select] = usePlanSelection()
-  const failures = usePlanState((s) => s.failures)
-  const rows = useRef(new Map<string, HTMLButtonElement>())
-  const ops = plan.setups[0]!.operations
-  const canMove = allows(plan, 'plan.operation.move')
-
-  const move = async (id: string, by: -1 | 1) => {
-    const to = ops.findIndex((o) => o.id === id) + by
-    if (to < 0 || to >= ops.length) return
-    const r = await call('plan.operation.move', {
-      planId: plan.id,
-      planOperationId: id,
-      toIndex: to,
-    })
-    if (r.ok) rows.current.get(id)?.focus()
-  }
-  const onKey = (e: KeyboardEvent, id: string, index: number) => {
-    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
-    e.preventDefault()
-    const by = e.key === 'ArrowUp' ? -1 : 1
-    if (e.altKey) {
-      if (canMove) void move(id, by)
-      return
-    }
-    const next = ops[index + by]
-    if (next) rows.current.get(next.id)?.focus()
-  }
-
-  return (
-    <Section title={m.operations.title}>
-      <ol className={styles['ops']} aria-label={m.operations.listLabel}>
-        {ops.map((op, i) => {
-          const name = planOperationName(plan, op.designOperationIds)
-          const kind = planOperationKind(plan, op.designOperationIds) ?? 'facing'
-          const findings = findingsOf(data?.warnings ?? [], op.id)
-          const errors = findings.filter(isError).length
-          const warnings = findings.length - errors
-          const state = toolpathState(data?.toolpaths[op.id], failures[op.id])
-          const stale = rowStale(data?.stale, op.designOperationIds)
-          const tool = snapshotName(plan, op.tool)
-          return (
-            <li
-              key={op.id}
-              className={styles['op']}
-              data-selected={selected === op.id ? '' : undefined}
-            >
-              <button
-                type="button"
-                ref={(el) => {
-                  if (el) rows.current.set(op.id, el)
-                  else rows.current.delete(op.id)
-                }}
-                className={`${styles['opSelect']} ${styles['planRow']}`}
-                aria-pressed={selected === op.id}
-                aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
-                onClick={() => select(selected === op.id ? null : op.id)}
-                onKeyDown={(e) => onKey(e, op.id, i)}
-              >
-                <ToolIcon name={KIND_ICON[kind] ?? 'facing'} />
-                <span className={styles['opText']}>
-                  <span className={styles['opName']}>{name}</span>
-                  <span className={styles['opMeta']}>
-                    <span className={styles['opTool']}>{tool ?? m.operations.noTool}</span>
-                  </span>
-                </span>
-                {stale !== undefined ? (
-                  <span className={styles['opStale']} title={staleText(stale)}>
-                    <History aria-hidden="true" />
-                    <span className={styles['srOnly']}>{staleText(stale)}</span>
-                  </span>
-                ) : (
-                  <span />
-                )}
-                <span
-                  className={styles['opState']}
-                  data-state={state}
-                  title={m.toolpaths.state[state]}
-                >
-                  {state === 'ready' ? (
-                    <CircleCheck aria-hidden="true" />
-                  ) : state === 'failed' ? (
-                    <CircleAlert aria-hidden="true" />
-                  ) : (
-                    <CircleDashed aria-hidden="true" />
-                  )}
-                  <span className={styles['srOnly']}>{m.toolpaths.state[state]}</span>
-                </span>
-                {errors > 0 ? (
-                  <span className={styles['opFailed']}>
-                    <CircleAlert aria-hidden="true" />
-                    <span aria-hidden="true">{errors}</span>
-                    <span className={styles['srOnly']}>{m.operations.errors(errors)}</span>
-                  </span>
-                ) : (
-                  <span />
-                )}
-                {warnings > 0 ? (
-                  <span className={styles['opBadge']}>
-                    <TriangleAlert aria-hidden="true" />
-                    <span aria-hidden="true">{warnings}</span>
-                    <span className={styles['srOnly']}>{m.operations.warnings(warnings)}</span>
-                  </span>
-                ) : (
-                  <span />
-                )}
-              </button>
-              {canMove ? (
-                <span className={styles['opActions']}>
-                  <IconButton
-                    label={m.operations.moveUp(name)}
-                    icon={<ArrowUp aria-hidden="true" />}
-                    shortcut="Alt+↑"
-                    disabled={i === 0}
-                    onClick={() => void move(op.id, -1)}
-                  />
-                  <IconButton
-                    label={m.operations.moveDown(name)}
-                    icon={<ArrowDown aria-hidden="true" />}
-                    shortcut="Alt+↓"
-                    disabled={i === ops.length - 1}
-                    onClick={() => void move(op.id, 1)}
-                  />
-                </span>
-              ) : null}
-            </li>
-          )
-        })}
-      </ol>
-    </Section>
-  )
-}
-
-const staleText = (s: 'removed' | 'changed' | 'edited') =>
-  s === 'removed' ? m.stale.rowRemoved : s === 'changed' ? m.stale.rowChanged : m.stale.rowEdited
-
 // ── toolpaths and export ──────────────────────────────────────────────────────────────────
 
 function ToolpathSection({
@@ -613,11 +395,15 @@ function ToolpathSection({
   const failures = usePlanState((s) => s.failures)
   const exporting = usePlanState((s) => s.exporting)
   const ids = { generate: useId(), export: useId() }
-  const ops = plan.setups[0]!.operations
+  const ops = allPlanOperations(plan)
   const ready = ops.filter(
     (o) => toolpathState(data?.toolpaths[o.id], failures[o.id]) === 'ready',
   ).length
   const blocked = (data?.warnings ?? []).some(isError)
+  // one program per setup (task F6): with several setups the window's setup is exported
+  const setup = useCurrentSetup(plan)
+  const several = plan.setups.length > 1
+  const index = plan.setups.indexOf(setup)
   const failed = Object.keys(failures).length
   const busy = generating !== undefined
   const generateWhy = blocked ? m.toolpaths.blocked : null
@@ -626,7 +412,7 @@ function ToolpathSection({
       ? m.export.archived
       : plan.machine === undefined
         ? m.export.noMachine
-        : blocked
+        : (several ? setupExportBlocked(data?.warnings ?? [], setup) : blocked)
           ? m.export.blocked
           : null
 
@@ -667,9 +453,20 @@ function ToolpathSection({
           icon={<Download aria-hidden="true" />}
           disabled={exporting || busy || exportWhy !== null}
           {...(exportWhy === null ? {} : { 'aria-describedby': ids.export })}
-          onClick={() => void store.getState().exportPlan(plan.id, plan.name)}
+          onClick={() =>
+            void store.getState().exportPlan(
+              plan.id,
+              several ? `${plan.name} ${setup.name}` : plan.name,
+              several
+                ? {
+                    id: setup.id,
+                    label: m.export.setup(setup.name, index + 1, plan.setups.length),
+                  }
+                : undefined,
+            )
+          }
         >
-          {exporting ? m.export.busy : m.export.action}
+          {exporting ? m.export.busy : several ? m.export.actionSetup(setup.name) : m.export.action}
         </Button>
         {exportWhy !== null ? (
           <p id={ids.export} className={styles['why']}>

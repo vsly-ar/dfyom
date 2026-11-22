@@ -1,20 +1,31 @@
 // Plan mode's view of the document and of the plan queries (task 3.7), pure: which plans the
 // picker shows, a plan operation's name, the statuses a plan may go to, a resolved feeds value as
-// a quantity in the project units, what is stale, and each plan operation's toolpath state.
+// a quantity in the project units, what is stale, and each plan operation's toolpath state; the
+// setups (v0.2 task F6): the window's setup, its WCS corner and frame, same-direction moves.
 // Commands do the checking; this only builds what the UI shows and sends.
 // Doc: docs/modes/plan-v0.1.md#commands-and-queries-v01, docs/conventions/ui.md#plan-mode-task-37
 import type { OperationKind } from '../../../../core/design/part.dto'
 import { SurfaceTable } from '../../../../core/design/surfaces'
+import type { Direction, StockSize } from '../../../../core/geometry/face'
+import type { Placement } from '../../../../core/geometry/model'
 import { loadPlanDTO } from '../../../../core/plan/plan'
 import { sameValue } from '../../../../core/plan/validity'
 import type { PlanWarning } from '../../../../core/plan/checks'
-import type { FeedField, PlanDTO, PlanStatus } from '../../../../core/plan/plan.dto'
+import type {
+  FeedField,
+  PlanDTO,
+  PlanOperationDTO,
+  PlanStatus,
+  SetupDTO,
+} from '../../../../core/plan/plan.dto'
+import { setupDirection, setupRotation } from '../../../../core/plan/setups'
 import { STRATEGY_KEYS, type StrategyKey } from '../../../../core/plan/strategy'
 import { ALLOWED, TRANSITIONS } from '../../../../core/plan/status'
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
 import { Quantity } from '../../../../core/quantity/quantity'
 import type { QuantityKind, UnitId } from '../../../../core/quantity/units'
 import type { Toolpath } from '../../../../core/toolpath/model'
+import { setupFrame } from '../../../../core/toolpath/wcs'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import type { FeedSource, ToolpathState } from '../../messages/plan'
 import type { DesignPart } from '../design/model'
@@ -94,6 +105,107 @@ export function editedOperations(plan: PlanDTO): ReadonlySet<string> {
 
 /** How many plan-only edits a rebuild would discard (the confirmation names it). */
 export const planEditCount = (plan: PlanDTO): number => editedOperations(plan).size
+
+// ── setups (v0.2 task F6) ─────────────────────────────────────────────────────────────────
+
+/** Every plan operation in machining order, across the setups. */
+export const allPlanOperations = (plan: PlanDTO): PlanOperationDTO[] =>
+  plan.setups.flatMap((s) => s.operations)
+
+/** The setup a plan operation belongs to. */
+export const setupOf = (plan: PlanDTO, planOperationId: string | null): SetupDTO | undefined =>
+  plan.setups.find((s) => s.operations.some((o) => o.id === planOperationId))
+
+/**
+ * The setup the window works on (preview and export, docs/conventions/ui.md#design-and-plan-controls-v02):
+ * the selected setup, or the setup of the selected plan operation, else the same for the last
+ * selection (`last`) if the plan still has it, else the first.
+ */
+export function currentSetup(
+  plan: PlanDTO,
+  selected: string | null,
+  last: string | undefined,
+): SetupDTO {
+  const of = (id: string | null | undefined) =>
+    id === null || id === undefined
+      ? undefined
+      : (plan.setups.find((s) => s.id === id) ?? setupOf(plan, id))
+  return of(selected) ?? of(last) ?? plan.setups[0]!
+}
+
+/** The plan's stock copy as sizes in mm, or undefined when the plan does not load. */
+export function planStockSize(doc: ProjectDoc, plan: PlanDTO): StockSize | undefined {
+  const s = planPart(doc, plan).loaded?.stock
+  return s === undefined
+    ? undefined
+    : { length: s.length.canonical, width: s.width.canonical, thickness: s.thickness.canonical }
+}
+
+/** A setup's WCS in the part frame (`setupFrame`), for the per-setup preview. */
+export function setupPlacement(setup: SetupDTO, stock: StockSize): Placement {
+  return setupFrame(setupDirection(setup), setupRotation(setup), stock)
+}
+
+/**
+ * The part corner the setup's work zero (G54) sits at, named by the part faces that meet there
+ * besides the up face: "front left" for an unrotated top setup, "back left" for the bottom. On
+ * the machine it is always the front-left corner of the up face.
+ */
+export function setupCorner(setup: SetupDTO, stock: StockSize): string {
+  const o = setupPlacement(setup, stock).origin
+  const zero = (a: number) => Math.abs(a) < 1e-9
+  const axis = setupDirection(setup)[1]
+  const words: string[] = []
+  if (axis !== 'z') words.push(zero(o[2]) ? 'top' : 'bottom')
+  if (axis !== 'y') words.push(zero(o[1]) ? 'front' : 'back')
+  if (axis !== 'x') words.push(zero(o[0]) ? 'left' : 'right')
+  return words.join(' ')
+}
+
+/** A setup's direction (absent = `+z`). */
+export const directionOfSetup = (setup: SetupDTO): Direction => setupDirection(setup)
+
+/** Other setups a setup may merge with, or a plan operation move to: the same direction only. */
+export function sameDirectionSetups(plan: PlanDTO, setup: SetupDTO): SetupDTO[] {
+  const d = setupDirection(setup)
+  return plan.setups.filter((s) => s.id !== setup.id && setupDirection(s) === d)
+}
+
+/**
+ * Where `plan.operation.move` takes a plan operation one step up or down: within its setup, or
+ * across the boundary into the neighbouring setup when that has the same direction (to its end
+ * going up, to its start going down). Undefined at the ends.
+ */
+export function operationStep(
+  plan: PlanDTO,
+  planOperationId: string,
+  by: -1 | 1,
+): { toIndex: number; toSetupId?: string } | undefined {
+  const si = plan.setups.findIndex((s) => s.operations.some((o) => o.id === planOperationId))
+  const setup = plan.setups[si]
+  if (setup === undefined) return undefined
+  const to = setup.operations.findIndex((o) => o.id === planOperationId) + by
+  if (to >= 0 && to < setup.operations.length) return { toIndex: to }
+  const next = plan.setups[si + by]
+  if (next === undefined || setupDirection(next) !== setupDirection(setup)) return undefined
+  return { toSetupId: next.id, toIndex: by < 0 ? next.operations.length : 0 }
+}
+
+/**
+ * Whether error findings block the export of one setup: its operations' errors and plan-wide
+ * errors that are not about another setup (the core blocks a program only on its own setup's
+ * findings, docs/modes/plan-v0.2.md#implementation-task-e2).
+ */
+export function setupExportBlocked(warnings: readonly PlanWarning[], setup: SetupDTO): boolean {
+  const ids = new Set(setup.operations.map((o) => o.id))
+  return warnings.some(
+    (w) =>
+      isError(w) &&
+      (w.planOperationId === undefined
+        ? w.params['setupId'] === undefined || w.params['setupId'] === setup.id
+        : ids.has(w.planOperationId)),
+  )
+}
 
 /** The statuses the picker offers: the current one and its transitions. */
 export function statusChoices(plan: PlanDTO): PlanStatus[] {

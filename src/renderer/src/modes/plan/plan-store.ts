@@ -1,4 +1,4 @@
-// Plan-mode state of one window (task 3.7): the chosen plan, the plan queries of the current
+// Plan-mode state of one window (task 3.7): the chosen plan and setup (F6), the plan queries of the current
 // revision (operations with resolved feeds, checks, stale list, toolpaths) shared by navigator,
 // inspector, status bar and viewport, toolpath generation (a job, followed with `job.get`) and
 // the gCode export. Every change is a command over the bridge. One store per bridge.
@@ -39,6 +39,11 @@ export interface PlanExportResult {
 export interface PlanState {
   /** The plan the window shows (picker); undefined = the first one. */
   readonly planId: string | undefined
+  /**
+   * The setup or plan operation selected last (task F6): its setup is previewed and exported
+   * while nothing is selected; undefined = the first setup (`currentSetup` in model.ts).
+   */
+  readonly lastSelection: string | undefined
   readonly data: PlanData | undefined
   /** Toolpath generation of this window. */
   readonly generating: { readonly planId: string; readonly jobId: string } | undefined
@@ -50,14 +55,23 @@ export interface PlanState {
   readonly exporting: boolean
   /** The export dialog shows this result, or the error. */
   readonly exported:
-    | { readonly ok: true; readonly result: PlanExportResult }
+    | { readonly ok: true; readonly result: PlanExportResult; readonly setup?: string }
     | { readonly ok: false; readonly error: AppErrorData }
     | undefined
   choose(planId: string | undefined): void
+  remember(selection: string): void
   /** Loads the plan queries for `tag` (key, plan, revision, generation) once. */
   want(tag: string, planId: string): void
   generate(planId: string): Promise<void>
-  exportPlan(planId: string, name: string): Promise<void>
+  /**
+   * Exports one program: the whole plan when it has one setup, else `setup` (`setupId` and a
+   * label for the outcome dialog; docs/modes/plan-v0.2.md#implementation-task-e2).
+   */
+  exportPlan(
+    planId: string,
+    name: string,
+    setup?: { readonly id: string; readonly label: string },
+  ): Promise<void>
   closeExport(): void
 }
 
@@ -75,6 +89,7 @@ export function createPlanStore(bridge: Pick<PreloadApi, 'call' | 'files'>): Pla
   let round = 0
   const store = createStore<PlanState>()((set, get) => ({
     planId: undefined,
+    lastSelection: undefined,
     data: undefined,
     generating: undefined,
     progress: undefined,
@@ -82,7 +97,9 @@ export function createPlanStore(bridge: Pick<PreloadApi, 'call' | 'files'>): Pla
     failures: {},
     exporting: false,
     exported: undefined,
-    choose: (planId) => set({ planId, generateError: undefined, failures: {} }),
+    choose: (planId) =>
+      set({ planId, lastSelection: undefined, generateError: undefined, failures: {} }),
+    remember: (lastSelection) => set({ lastSelection }),
     want(next, planId) {
       const t = `${next}:${round}`
       if (t === tag) return
@@ -129,18 +146,27 @@ export function createPlanStore(bridge: Pick<PreloadApi, 'call' | 'files'>): Pla
       set({ generating: undefined, progress: undefined })
       refresh()
     },
-    async exportPlan(planId, name) {
+    async exportPlan(planId, name, setup) {
       if (get().exporting) return
       const target = await bridge.files.chooseExport(name)
       if (target === null) return
       set({ exporting: true })
       // the OS dialog already asked before replacing a file (as Save as, ui.md#project-files)
-      const r = await bridge.call('plan.export', { planId, target, confirm: true })
+      const r = await bridge.call('plan.export', {
+        planId,
+        ...(setup === undefined ? {} : { setupId: setup.id }),
+        target,
+        confirm: true,
+      })
       round++
       set({
         exporting: false,
         exported: r.ok
-          ? { ok: true, result: r.value as PlanExportResult }
+          ? {
+              ok: true,
+              result: r.value as PlanExportResult,
+              ...(setup === undefined ? {} : { setup: setup.label }),
+            }
           : { ok: false, error: r.error },
       })
       refresh()
