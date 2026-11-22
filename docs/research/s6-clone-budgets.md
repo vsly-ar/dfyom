@@ -103,6 +103,31 @@ For [features.md § Clones](../modes/features.md#clones), [design-v0.4.md § Clo
 2. Subtraction layers: clone groups in their own layers beyond `UNION_CHUNK`, and the kept clone prefix, as F5 tasks.
 3. Known issues for the plan: quadratic `plan.create` / export inputs; linear design commands far past 3 ms at hundreds of operations.
 
+## Follow-up: clone layers
+
+Done after F5 (2026-11-22; the known issue "Clones get no subtraction layers of their own" in [plans/v0.4.md](../plans/v0.4.md#known-issues-found-in-v04)), recommendation 3 as specified, documented in [geometry.md § Clone layers](../architecture/geometry.md#clone-layers):
+
+- `toGeometryInput` writes `cloneGroups` (per repeated source operation: its id and its instances' ids, from the owned roles `<n>_<source id>`); absent without Clones, so other inputs stay byte-identical.
+- `evaluatePart` subtracts the groups' tools first, in layers of at most `CLONE_LAYER` = 100 (first fit by bounds, so overlapping instances still separate), then the other operations in layers of `UNION_CHUNK` = 25.
+- With the worker caches the part after the clone layers is one kept solid, keyed by the original ids of the stock and the clone operations' solids (equal ids mean equal inputs; a rebuilt operation gets a new id). `KEPT_TRIANGLES` 150 000 → 300 000: 100 counterbored holes keep ≈ 60 000 (operations ≈ 27 000, the part after the clone layers ≈ 31 000; the prefix is lost below ≈ 55 000), so a few such Clones features fit. A separate pool was not needed: the prefix is used by every evaluation, so the LRU keeps it.
+- Same part: `clone-layers.test.ts` asserts identical labelled triangles at 16 holes and, at 100, the same volume, triangle count, surfaces, warnings and per-surface vertex sets and areas (another subtraction order triangulates some planar faces – a drill wall, the stock bottom – differently from the same vertices).
+
+Production `evaluatePart` before (no `cloneGroups`) and after, N counterbored holes beside a 60 × 200 pocket ([`layers.test.ts`](../../spikes/clones/layers.test.ts), `S6_RUNS=15`, fresh runs interleaved; same M1 Pro under load 13–24, so absolute values are pessimistic), ms (median):
+
+| Clones                 | Path                  | Fresh | Unchanged (caches) | Source edited (caches) | Pocket edited (caches) | Longest step | Triangles |
+| ---------------------- | --------------------- | ----- | ------------------ | ---------------------- | ---------------------- | ------------ | --------- |
+| 16 counterbored holes  | layers of 25 (before) | 31.7  | 26.0               | 30.1                   | **26.2**               | 15.2         | 7 284     |
+| 16 counterbored holes  | clone layers (after)  | 35.3  | 6.1                | 33.1                   | **6.3**                | 15.0         | 7 284     |
+| 100 counterbored holes | layers of 25 (before) | 234   | 211                | 242                    | **216**                | 36.1         | 30 804    |
+| 100 counterbored holes | clone layers (after)  | 175   | 21.9               | 179                    | **22.3**               | 87.9         | 30 804    |
+
+- **An edit elsewhere is ≈ 4× (16) to ≈ 10× (100) cheaper**, and 100 holes are back under the 50 ms budget for it; unchanged re-evaluation likewise.
+- **Fresh and source edits at 100 holes are ≈ 1.35× faster** (2 clone layers instead of 9 layers of 25), as the cut-down pipeline predicted (perOp, 100: 1.4×). At 16 holes they cost ≈ 3 ms more: the pocket gets a layer of its own instead of sharing the counterbores' (one more subtraction from the whole part).
+- **The longest step** grows to ≈ 90 ms (one layer of 100 counterbores; up to ≈ 150–220 ms in noisier runs), the accepted exception to the 50 ms step rule ([workers.md](../architecture/workers.md#abort-and-pause)).
+- Not taken: instancing by `transform` (recommendation 4) – compose is still ≈ 10 %.
+
+Run: `npx vitest run -c spikes/clones/vitest.config.mts spikes/clones/layers.test.ts --silent=false` (`S6_COUNTS`, `S6_RUNS`).
+
 ## Open questions
 
 - Idle-machine numbers: all timings here ran under load 11–18; the ratios hold, the absolute 100-instance values may halve.

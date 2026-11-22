@@ -23,10 +23,12 @@ const operationCache = new OperationCache()
 
 /**
  * Triangles of the solids the geometry worker's kernel keeps across evaluations (unchanged
- * operations' solids, `SolidPort.kept`): ≈ 20–30 MB of WASM heap
- * (docs/architecture/geometry.md#wasm-lifetime-and-ownership).
+ * operations' solids and the part after the clone layers, `SolidPort.kept`): ≈ 40–60 MB of WASM
+ * heap. A Clones feature of 100 counterbored holes keeps ≈ 60 000 (its operations ≈ 27 000, the
+ * part after its clone layers ≈ 31 000), so this holds a few of them; 150 000 before clone
+ * layers (docs/architecture/geometry.md#wasm-lifetime-and-ownership, #clone-layers).
  */
-export const KEPT_TRIANGLES = 150_000
+export const KEPT_TRIANGLES = 300_000
 
 /** `evaluatePart` in the geometry lane, inside one `withSolids` arena. */
 export const geometryEvaluate: WorkerTask<PartGeometryInput, PartEvaluation> = {
