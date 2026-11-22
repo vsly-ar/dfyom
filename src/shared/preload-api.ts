@@ -66,6 +66,8 @@ export const IPC = {
   fileChooseExport: 'dfyom:file.chooseExport',
   /** Renderer → main (invoke): the native "Import reference" dialog (STL); the path or null (R3). */
   fileChooseReference: 'dfyom:file.chooseReference',
+  /** Renderer → main (invoke): the native "Import SVG" dialog; the path or null (I1). */
+  fileChooseSvg: 'dfyom:file.chooseSvg',
   /** Renderer → main (invoke): a reference's triangles for the ghost (`ReferenceMeshReply`, R3). */
   referenceMesh: 'dfyom:reference.mesh',
   /** Main → renderer: a native application menu item was chosen (`MenuAction`). */
@@ -333,6 +335,8 @@ export interface PreloadApi {
     chooseExport(defaultName: string): Promise<string | null>
     /** An STL to import as a reference (R3); the window then calls `design.reference.import`. */
     chooseReference(): Promise<string | null>
+    /** An SVG to import as shapes (I1); the window then calls `design.shape.import`. */
+    chooseSvg(): Promise<string | null>
   }
   /** Reference models of the window's project (task R3): the ghost's triangles. */
   readonly reference: {

@@ -98,6 +98,7 @@ export interface FakeBridge extends PreloadApi {
     save?: string | null
     export?: string | null
     reference?: string | null
+    svg?: string | null
   }): void
   readonly saveDialogNames: string[]
   readonly exportDialogNames: string[]
@@ -183,7 +184,8 @@ export function createFakeBridge(
     save: string | null
     export: string | null
     reference: string | null
-  } = { open: null, save: null, export: null, reference: null }
+    svg: string | null
+  } = { open: null, save: null, export: null, reference: null, svg: null }
   const referenceMeshCalls: string[] = []
   let referenceMesh = (_id: string): ReferenceMeshReply | Promise<ReferenceMeshReply> => ({
     ok: true,
@@ -273,6 +275,7 @@ export function createFakeBridge(
         return Promise.resolve(fileChoice.export)
       },
       chooseReference: () => Promise.resolve(fileChoice.reference),
+      chooseSvg: () => Promise.resolve(fileChoice.svg),
     },
     reference: {
       mesh: (referenceId) => {

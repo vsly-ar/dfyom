@@ -87,6 +87,7 @@ const api: PreloadApi = {
     chooseExport: (defaultName) =>
       ipcRenderer.invoke(IPC.fileChooseExport, defaultName) as Promise<string | null>,
     chooseReference: () => ipcRenderer.invoke(IPC.fileChooseReference) as Promise<string | null>,
+    chooseSvg: () => ipcRenderer.invoke(IPC.fileChooseSvg) as Promise<string | null>,
   },
   reference: {
     mesh: (referenceId) =>
