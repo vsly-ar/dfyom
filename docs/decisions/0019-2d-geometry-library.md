@@ -1,6 +1,6 @@
 # 0019 – 2D geometry library: CavalierContours (Rust crate as WASM)
 
-Status: proposed · Date: 2026-11-21 · Spike: S1 ([plans/v0.2.md](../plans/v0.2.md#7-spike-for-v03)) · For: [roadmap v0.3 – Shapes](../roadmap.md#v03--shapes)
+Status: accepted (2026-11-22, user decision D29; proposed 2026-11-21) · Date: 2026-11-21 · Design: [architecture/shapes.md](../architecture/shapes.md) · Spike: S1 ([plans/v0.2.md](../plans/v0.2.md#7-spike-for-v03)) · For: [roadmap v0.3 – Shapes](../roadmap.md#v03--shapes)
 
 ## Context
 
@@ -84,17 +84,18 @@ Clipper must offset the original by the cumulative distance: offsetting the prev
 
 All three licences are compatible with GPL-3.0-or-later ([ADR 0014](0014-gpl-3-or-later-license.md)). All are headless: no DOM or Node-only APIs (checked in the sources). The WASM module has **no imports** (only its own memory), so it instantiates the same way in Electron main, `worker_threads`, renderer Web Workers and the CLI; the host supplies the bytes, exactly like `manifold.wasm` today ([geometry.md](../architecture/geometry.md#wasm-lifetime-and-ownership)).
 
-## Decision (proposed)
+## Decision
 
 1. **Use CavalierContours, the upstream Rust crate (pinned, 0.9.x), compiled to WASM**, for every offset and boolean of line/arc loops in v0.3: tool radius compensation, pocket rings, Shape Editor booleans and islands. Arcs in, arcs out; exact to float precision.
-2. **Behind a port in `src/core`** (like `SolidPort`), with our own thin C ABI (no wasm-bindgen, no imports), loaded in the geometry and toolpath lanes and in the renderer for the Shape Editor preview.
+2. **Behind a port in `src/core`** (like `SolidPort`), with our own thin C ABI (no wasm-bindgen, no imports), loaded in the geometry and toolpath lanes and in the renderer for the Shape Editor preview. Refined in [shapes.md § Where the 2D layer runs](../architecture/shapes.md#where-the-2d-layer-runs): the **dispatcher** (and the CLI and tests) hosts it too, because resolving shapes, invariants and parameter DFM checks run synchronously in the command step; the renderer instantiates it asynchronously at window start.
 3. **The port normalises regions before offsetting**: islands are subtracted from the outer loop (and overlapping islands united) with the library's boolean first. This avoids the touching-island defect and gives `Shape` the non-intersecting loops it assumes. The crate has only loop-to-loop booleans, so the port composes multi-loop shape booleans (fold unions; differences that produce holes).
 4. **Not the JS port**: same algorithm, but 5–70× slower than WASM, frozen at 0.7.0 with two defects the spike reproduced, and a single maintainer.
 5. **Clipper2 is not the primary 2D library.** Its polygons stay a candidate for polygon-only checks (e.g. the rest-region check in the v0.2 scope research), decided when that check is designed. Its flatten + re-fit route works on this corpus (≤ 5 µm, about as many arcs as the input) but its offsets are 10–100× slower (more at 2000 segments), it splits tangent unions, and depends on our own fitter.
+6. **Build: vendor the `.wasm` (Q26, D29).** The built module is committed with its SHA-256, next to the pinned crate source (`Cargo.toml` with the exact crate version, `Cargo.lock`, our C ABI) and a script that rebuilds it with a pinned Rust toolchain and the `wasm32-unknown-unknown` target. CI verifies the checksum of the vendored file and never installs a Rust toolchain; the module is rebuilt (and the checksum updated in the same commit) only when the crate or the ABI changes. Task K1 of [plans/v0.3.md](../plans/v0.3.md#3-2d-core-and-design).
 
 ## Consequences
 
-- The build needs a pinned Rust toolchain with the `wasm32-unknown-unknown` target (spike: Rust 1.100, `cargo build --release`), or the built `.wasm` is vendored with a checksum. Which of the two is an open question for the developer (CI cost vs. a binary in git).
+- A binary (≈ 256 KiB) lives in git, guarded by its SHA-256 in CI; rebuilding it needs a pinned Rust toolchain with the `wasm32-unknown-unknown` target (spike: Rust 1.100, `cargo build --release`) on the developer's machine only (decision 6).
 - One more WASM module (≈ 70–86 KiB gzip) in the worker lanes and the renderer; instantiation is synchronous-capable and import-free.
 - Upstream fixes arrive by bumping the crate; the spike's fixtures become regression tests of the port (v0.3 lane B).
 - CavalierContours epsilons (position 1e-5, offset 1e-4 mm) sit well below the 0.01 mm chord tolerance; the port documents them next to the tolerance rules in [geometry.md](../architecture/geometry.md#evaluation-rules) when it is built.
@@ -102,6 +103,5 @@ All three licences are compatible with GPL-3.0-or-later ([ADR 0014](0014-gpl-3-o
 
 ## Open questions
 
-- Build the WASM in CI or vendor the binary?
 - Report the touching-island defect upstream with the spike fixture.
 - Ellipses and elliptical SVG arcs: biarc approximation on import (lane D), not in the 2D library.
