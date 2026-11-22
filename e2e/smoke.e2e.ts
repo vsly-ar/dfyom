@@ -64,6 +64,31 @@ test('app opens its window, renders without console errors and quits', async ({ 
   // Isolation: Electron's userData and the logs are in the temp data dir, not the developer's.
   expect(await app.evaluate(({ app: a }) => a.getPath('userData'))).toBe(dataDir)
   expect(await readdir(join(dataDir, 'logs'))).not.toHaveLength(0)
+  // the vendored 2D module was found in the build and loaded (docs/architecture/shapes.md#where-the-2d-layer-runs)
+  await expect
+    .poll(async () => {
+      const dir = join(dataDir, 'logs')
+      const files = await readdir(dir)
+      const texts = await Promise.all(files.map((f) => readFile(join(dir, f), 'utf8')))
+      return texts.join('\n')
+    })
+    .toContain('2D geometry loaded')
+
+  // On a packaged app (npm run smoke:packaged): runs from its asar, named by `productName`, and
+  // ships the licence texts next to the asar (docs/conventions/packaging.md#what-goes-in).
+  if (process.env['DFYOM_E2E_APP']) {
+    const resources = await app.evaluate(() => process.resourcesPath)
+    expect(await readdir(resources)).toEqual(
+      expect.arrayContaining(['LICENSE.txt', 'THIRD-PARTY-NOTICES.txt']),
+    )
+    expect(
+      await app.evaluate(({ app: a }) => ({
+        packaged: a.isPackaged,
+        name: a.getName(),
+        asar: a.getAppPath().endsWith('app.asar'),
+      })),
+    ).toEqual({ packaged: true, name: 'DFYOM', asar: true })
+  }
 })
 
 test('the bundled geometry worker evaluates a part', async ({ dfyom }) => {

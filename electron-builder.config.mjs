@@ -1,0 +1,104 @@
+// electron-builder: packages the electron-vite build (`out/`) as DFYOM.app for local installs.
+// Doc: docs/conventions/packaging.md
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { dirname, join, relative } from 'node:path'
+
+const ROOT = import.meta.dirname
+
+/**
+ * The packages the main process (and its workers, the machine host and the CLI) `require` at run
+ * time: electron-vite externalizes `dependencies` for main, while the renderer bundles its own.
+ * Keep in step with the `require(...)`s of `out/main/**` (packaging.md#what-goes-in).
+ */
+const MAIN_EXTERNALS = [
+  '@modelcontextprotocol/sdk',
+  'fflate',
+  'immer',
+  'manifold-3d',
+  'oxide.ts',
+  'pino',
+  'pino-roll',
+  'zod',
+]
+/** Packages whose own dependencies are not loaded: the app uses only manifold.js + manifold.wasm. */
+const LEAVES = new Set(['manifold-3d'])
+
+/** Directory of `name` as Node resolves it from `fromDir` (nearest node_modules upwards). */
+function packageDir(name, fromDir) {
+  for (let dir = fromDir; ; dir = dirname(dir)) {
+    const candidate = join(dir, 'node_modules', name)
+    if (existsSync(join(candidate, 'package.json'))) return candidate
+    if (dir === ROOT || dirname(dir) === dir) return undefined
+  }
+}
+
+/** Names of MAIN_EXTERNALS and of their installed production dependencies, nested ones too. */
+function runtimeClosure() {
+  const seen = new Set()
+  const visit = (name, fromDir) => {
+    const dir = packageDir(name, fromDir)
+    if (dir === undefined || seen.has(dir)) return // an optional dependency not installed
+    seen.add(dir)
+    if (LEAVES.has(name)) return
+    const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'))
+    for (const dep of Object.keys({ ...pkg.dependencies, ...pkg.optionalDependencies }))
+      visit(dep, dir)
+  }
+  for (const name of MAIN_EXTERNALS) visit(name, ROOT)
+  return new Set(
+    [...seen].map((d) => relative(ROOT, d).replaceAll('\\', '/').split('node_modules/').pop()),
+  )
+}
+
+/**
+ * `!node_modules/<pkg>` patterns for every top-level package whose name is outside the runtime
+ * closure. By name, not by path: electron-builder re-hoists the production tree, so a nested copy
+ * (the MCP SDK's ajv 8 under a dev-only top-level ajv 6) may land at the top of the asar.
+ */
+function excludedModules() {
+  const keep = runtimeClosure()
+  const top = []
+  for (const entry of readdirSync(join(ROOT, 'node_modules'))) {
+    if (entry.startsWith('.')) continue
+    if (entry.startsWith('@'))
+      for (const scoped of readdirSync(join(ROOT, 'node_modules', entry)))
+        top.push(`${entry}/${scoped}`)
+    else top.push(entry)
+  }
+  return top.filter((name) => !keep.has(name)).map((name) => `!node_modules/${name}{,/**}`)
+}
+
+/** @type {import('electron-builder').Configuration} */
+export default {
+  appId: 'app.dfyom',
+  productName: 'DFYOM',
+  copyright: 'GPL-3.0-or-later',
+  directories: {
+    output: 'release',
+    // icon slot (build/icon.*), empty until the icon is designed (B21): Electron's icon is used
+    buildResources: 'build',
+  },
+  asar: true,
+  files: [
+    'out/**',
+    'package.json',
+    '!**/*.map',
+    '!node_modules/manifold-3d/{bin,lib,dist,types,node_modules}{,/**}',
+    ...excludedModules(),
+  ],
+  // licence texts next to the asar, in DFYOM.app/Contents/Resources
+  extraResources: [
+    { from: 'LICENSE', to: 'LICENSE.txt' },
+    { from: 'vendor/cavalier-contours/THIRD-PARTY-NOTICES.txt', to: 'THIRD-PARTY-NOTICES.txt' },
+  ],
+  // pure JS and WASM dependencies only: nothing to rebuild against Electron's Node
+  npmRebuild: false,
+  mac: {
+    target: [{ target: 'dir', arch: 'arm64' }],
+    category: 'public.app-category.productivity',
+    // local installs only: not signed with an identity (the linker's ad hoc signature stays),
+    // not notarized
+    identity: null,
+    notarize: false,
+  },
+}

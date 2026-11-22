@@ -45,8 +45,9 @@ import { loadHostRegion2d } from './region2d/node'
 import { createNodeWorkerPool } from './workers/node'
 
 // End-to-end tests run the app with its windows never shown (docs/conventions/testing.md#app-playwright-for-electron),
-// so a test run does not cover the developer's screen or take focus. Ignored in packaged builds.
-const hideWindows = !app.isPackaged && process.env['DFYOM_HIDE_WINDOWS'] === '1'
+// so a test run does not cover the developer's screen or take focus. Also honoured when packaged,
+// for the packaged smoke test (docs/conventions/packaging.md#smoke-test).
+const hideWindows = process.env['DFYOM_HIDE_WINDOWS'] === '1'
 if (hideWindows && process.platform === 'darwin') app.setActivationPolicy('accessory')
 
 /** Windows that fired `ready-to-show` (true) or not yet (false). */
