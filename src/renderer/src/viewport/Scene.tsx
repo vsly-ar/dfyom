@@ -12,7 +12,8 @@ import {
   SRGBColorSpace,
   type DirectionalLight,
 } from 'three'
-import { boxCenter, fitPose, FOV_DEG, presetDirection } from './camera'
+import { boxCenter, fitPose, FOV_DEG } from './camera'
+import { presetDirection } from './view-cube'
 import { isOutlined, vertexColours, type Palette, type Rgb, type SurfaceState } from './colours'
 import {
   CREASE_ANGLE_DEG,

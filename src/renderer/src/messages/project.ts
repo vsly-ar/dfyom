@@ -78,6 +78,7 @@ export const projectMessages = {
       regions: 'Next region (Shift+F6: previous)',
       list: 'This list',
       views: 'Top, Front, Right, Isometric view',
+      oppositeViews: 'Bottom, Back, Left view',
       fit: 'Fit',
       orbit: 'Orbit (Shift: pan)',
       zoom: 'Zoom',

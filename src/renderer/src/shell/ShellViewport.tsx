@@ -6,7 +6,14 @@ import { useModeScene } from '../modes/ModePanels'
 import { Viewport } from '../viewport'
 import styles from './AppShell.module.css'
 
-export function ShellViewport({ mode }: { mode: AppMode }): React.JSX.Element {
+export function ShellViewport({
+  mode,
+  insetRight = 0,
+}: {
+  mode: AppMode
+  /** Px covered by the narrow-window inspector overlay (the view cube moves beside it). */
+  insetRight?: number
+}): React.JSX.Element {
   const scene = useModeScene(mode)
-  return <Viewport {...scene} className={styles['viewportCanvas']} />
+  return <Viewport {...scene} insetRight={insetRight} className={styles['viewportCanvas']} />
 }

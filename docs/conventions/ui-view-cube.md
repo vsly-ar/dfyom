@@ -1,14 +1,12 @@
 # View cube
 
-Status: accepted (backlog B25; the user confirmed the recommendations on 2026-11-22, D27; not built yet) · Viewport: [ui.md § Viewport](ui.md#viewport-task-35), [§ Selection and picking](ui.md#selection-and-picking) · Face frames: [design-v0.2.md § Face frame](../modes/design-v0.2.md#face-frame) · Setups: [plan-v0.2.md](../modes/plan-v0.2.md#setups-from-face-directions) · Terms: [glossary.md](../glossary.md)
+Status: implemented (backlog B25; the user confirmed the recommendations on 2026-11-22, D27; built in v0.3 task L2, [§ As built](#as-built-task-l2)) · Viewport: [ui.md § Viewport](ui.md#viewport-task-35), [§ Selection and picking](ui.md#selection-and-picking) · Face frames: [design-v0.2.md § Face frame](../modes/design-v0.2.md#face-frame) · Setups: [plan-v0.2.md](../modes/plan-v0.2.md#setups-from-face-directions) · Terms: [glossary.md](../glossary.md)
 
-The user's request (B25): a chamfered 3D cube with named clickable faces that rotates the view to that face, replacing the Top / Front / Right view icons of the viewport toolbar, keeping the view hotkeys. Nothing here is implemented.
+The user's request (B25): a chamfered 3D cube with named clickable faces that rotates the view to that face, replacing the Top / Front / Right view icons of the viewport toolbar, keeping the view hotkeys.
 
-## Today
+Before L2 the floating viewport toolbar held Top, Front, Right, Iso and Fit (keys `1`–`4`, `F`); the cube replaces the four view buttons.
 
-The floating viewport toolbar at the top right (`Viewport.tsx`, `--shadow-1`) holds Top, Front, Right, Iso and, after a separator, Fit, with keys `1`–`4` and `F` while the viewport has focus ([ui.md § Selection and picking](ui.md#selection-and-picking)). A preset looks from a fixed direction (`presetDirection` in `viewport/camera.ts`) and fits the part (`fitPose`); camera moves animate unless motion is reduced.
-
-## Decisions (assumed)
+## Decisions (confirmed, D27)
 
 1. **C1 – The cube replaces Top, Front, Right and Iso.** It sits at the viewport's top right, where the toolbar is now. Below it a small floating toolbar keeps **Fit** (`F`) and adds a **Views** menu button (the keyboard and screen-reader equivalent, [Accessibility](#accessibility)).
 2. **C2 – 26 clickable regions.** 6 faces, 12 edge chamfers and 8 corner chamfers, as in common CAD view cubes. A face looks straight at it; an edge looks from the bisector of its two faces (45°); a corner looks from its three faces (isometric). The front-right-top corner is today's Iso (`[1, −1, 1]`).
@@ -57,7 +55,20 @@ In the one viewport canvas ([ADR 0010](../decisions/0010-react-three-fiber-viewp
 
 Pure parts unit-tested like `camera.ts` today: region → direction and screen-up per face (the face-frame rule C3 for all six faces), hotkeys by `code`, hit-testing of the 26 regions; `Viewport.test.tsx` checks the Views menu and its names with axe; the gallery shows the cube in both themes.
 
+## As built (task L2)
+
+- **Code:** `viewport/view-cube.ts` (pure: the 26 regions, `regionView` with the face-frame up of C3, `setupView`, `cameraDirection` with the pole tilt, `shownView` / `regionAlong`, `regionPolygon`, `regionColour`, `inCubeBox`), `viewport/ViewCube.tsx` (the HUD: drei `Hud` with an orthographic camera in px, one mesh per region, label and letter textures drawn on a 2D canvas from tokens, `--border-control` hairlines, the amber outline, the triad), `Viewport.tsx` (Fit and Views toolbar, tooltip, clicks, hotkeys, summary), `viewportKey` in `camera.ts` (`Shift+Digit1/2/3` by `code`). Names are in `messages/viewport.ts`.
+- **Size:** the square is `CUBE_BOX_PX` 88 px; the cube's half edge is 28 px (edge 56 px, faces 36 px), so the chamfered silhouette (radius ≈ 1.35 × the half edge) stays inside it. Labels share one font size, the largest at which "Bottom" fits. The flat shading is a mix towards black of up to 20 % by the angle to a light from the front-right-top, so the top is lightest and the bottom darkest.
+- **Current view:** the amber outline marks the region the camera looks along within 0.5° (roll ignored, so a turned Top view still marks Top). The summary names a view only when the roll matches too (within 1°): "View: Front", "View: Top front right corner", "View: Setup view" (a setup view equal to a region's view, an unrotated top setup, is named by the region), else "View: custom". A second `aria-live="polite"` paragraph carries the same text, so only view changes are announced. A click on a region whose view is already shown does nothing (C4).
+- **Setup (C7):** the window's setup is `run.frame` (Plan and Run pass it, [ui.md § Viewport](ui.md#viewport-task-35)). Its up face shows the spindle pictogram (spindle nose, tool, the face line) under the label; a click there, or "Setup view" in the menu, looks down `frame.n` with `frame.u` right and `frame.v` up. Top and bottom setups get every rotation through the pole tilt (camera up stays +Z); a side setup turned 90/180/270° needs a horizontal screen up, so its setup view sets the camera's up to `frame.v` (camera-controls `updateCameraUp`), and orbiting then turns about that axis until the next view command, which restores +Z. The tooltip there reads "Setup view · Top up to the spindle", without a shortcut.
+- **Pointer:** a press inside the square (`inCubeBox`) sets the default left-drag orbit for that press whatever the mouse preset (C5); an invisible plane fills the square, so clicks in its corners never reach the scene. Hover tints the region with `--bg-hover` over `--motion-fast` (frame-driven, instant under reduced motion); the tooltip (`Tooltip`, controlled, anchored to the square, opening to its left) follows after `--delay-tooltip` and hides while a button is held.
+- **Motion:** a click goes through the same camera command as the keys (camera-controls' damped transition, as the presets had; a cut under reduced motion). The cube renders the inverse of the camera's rotation every frame. Next to the narrow-window inspector overlay (`insetRight`, measured by `AppShell` with a `ResizeObserver`) the square slides left over `--motion-base` and the toolbar follows with a CSS transition.
+- **Triad:** X, Y, Z arrows from the front-left-top corner with letter sprites; hidden while that corner faces away from the camera (from below it would stick out behind the cube).
+- **Tests:** `view-cube.test.ts` (regions and names, region → direction and screen up, the face-frame table for all six faces, the setup view for every direction and rotation, the shown view, polygons and ray hit-testing of all 26 regions with three's `Raycaster`, shading, the square), `camera.test.ts` (`Shift+1/2/3` by `code` on several layouts), `Viewport.test.tsx` (toolbar, the Views menu with axe, menu and keys sending the camera, the setup view of a turned side setup), `e2e/view-cube.e2e.ts` (keys, a click on an edge strip, the menu, a click on the face in view, a drag, read from the text summary).
+
 ## Questions for the user
+
+Answered on 2026-11-22 (D27): every recommendation below was confirmed and built.
 
 Each with the recommendation this draft assumes.
 

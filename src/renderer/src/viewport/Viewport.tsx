@@ -1,15 +1,25 @@
 // The 3D viewport: one react-three-fiber canvas showing an evaluated part and its stock, with
-// orbit / pan / zoom-to-cursor, view presets, hover, click-to-select and pick mode. Props-driven:
+// orbit / pan / zoom-to-cursor, the view cube with Fit and the Views menu, hover,
+// click-to-select and pick mode. Props-driven:
 // it never owns the document; the shell passes the mesh, selection and pick request in and gets
 // surface targets back. Doc: docs/conventions/ui.md#selection-and-picking,
-// docs/architecture/geometry.md#worker-and-renderer, ADR 0010
+// docs/architecture/geometry.md#worker-and-renderer, docs/conventions/ui-view-cube.md, ADR 0010
 import { Canvas } from '@react-three/fiber'
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Vector3, type PerspectiveCamera } from 'three'
+import type { Placement } from '../../../core/geometry/model'
 import type { EvaluationStatus } from '../../../core/design/evaluation'
 import type { SurfaceId } from '../../../core/geometry/model'
 import { viewportMessages as msg } from '../messages/viewport'
-import { Toolbar, ToolbarButton, ToolbarSeparator, ToolIcon, useReducedMotion } from '../ui'
+import {
+  Menu,
+  Toolbar,
+  ToolbarButton,
+  ToolIcon,
+  Tooltip,
+  useReducedMotion,
+  type MenuEntry,
+} from '../ui'
 import {
   FOV_DEG,
   fitPose,
@@ -17,7 +27,6 @@ import {
   mouseButtons,
   normalize,
   PAN_STEP,
-  presetDirection,
   VIEW_PRESETS,
   viewportKey,
   ZOOM_STEP,
@@ -26,6 +35,32 @@ import {
   type ViewPreset,
 } from './camera'
 import { paletteFrom, PALETTE_TOKENS, type SurfaceState } from './colours'
+import {
+  cameraDirection,
+  CUBE_REGIONS,
+  CUBE_TOKENS,
+  cubeColours,
+  faceRegionOf,
+  inCubeBox,
+  PRESET_REGION,
+  PRESET_SHORTCUT,
+  regionAlong,
+  regionKey,
+  regionKind,
+  regionShortcut,
+  regionView,
+  regionWords,
+  sameRegion,
+  sameShownView,
+  setupView,
+  shownView,
+  showsView,
+  type CameraAxes,
+  type CubeRegion,
+  type CubeView,
+  type ShownView,
+} from './view-cube'
+import { ViewCube } from './ViewCube'
 import {
   meshBounds,
   meshOperations,
@@ -95,12 +130,32 @@ export interface ViewportProps {
   mousePreset?: MousePreset
   /** Run mode (task 3.12): toolpath playback, tool marker at `wpos`, work zero; `null` = none. */
   run?: RunScene | null
+  /**
+   * Px of the viewport's right edge covered by an overlay (the inspector in narrow windows): the
+   * view cube and its toolbar move left beside it (ui-view-cube.md § Rendering).
+   */
+  insetRight?: number
   /** Accessible text summary; defaults to the operation count and status. */
   summary?: string
   className?: string | undefined
 }
 
-const TOKEN_NAMES = Object.values(PALETTE_TOKENS)
+const TOKEN_NAMES = [
+  ...Object.values(PALETTE_TOKENS),
+  ...Object.values(CUBE_TOKENS),
+  '--font-ui',
+  '--weight-medium',
+]
+
+/** `--delay-tooltip` (tokens.css): the view cube's tooltip waits this long. */
+export const DELAY_TOOLTIP_MS = 450
+
+const regionName = (r: CubeRegion): string => msg.cubeRegion(regionKind(r), regionWords(r))
+
+/** Face labels for the cube's textures, by region key. */
+const FACE_LABELS: Readonly<Record<string, string>> = Object.fromEntries(
+  CUBE_REGIONS.filter((r) => regionKind(r) === 'face').map((r) => [regionKey(r), regionName(r)]),
+)
 
 const ACTIONS: Record<CameraAction, CameraControlsImpl['mouseButtons']['left']> = {
   orbit: CameraControlsImpl.ACTION.ROTATE,
@@ -164,6 +219,7 @@ export function Viewport({
   onPickCancel,
   mousePreset = 'default',
   run = null,
+  insetRight = 0,
   summary,
   className,
 }: ViewportProps): React.JSX.Element {
@@ -174,6 +230,11 @@ export function Viewport({
   const reducedMotion = useReducedMotion()
   const tokens = useTokens(regionRef, TOKEN_NAMES)
   const palette = useMemo(() => paletteFrom(tokens), [tokens])
+  const cube = useMemo(() => cubeColours(tokens), [tokens])
+  const axisColours = useMemo(
+    () => ({ x: palette.axisX, y: palette.axisY, z: palette.axisZ }),
+    [palette],
+  )
   const [hovered, setHovered] = useState<SurfaceTarget | undefined>(undefined)
 
   const outdated = useDelayed(status === 'pending', DELAY_INDICATOR_MS) || status === 'failed'
@@ -221,23 +282,39 @@ export function Viewport({
     [onHover],
   )
 
-  // --- camera commands (toolbar, keys) ---
+  // --- camera commands (view cube, toolbar, menu, keys) ---
   const animate = !reducedMotion
+  /** Looks at the part from `direction` and fits it; keeps the camera's up (Fit) unless given. */
   const lookFrom = useCallback(
-    (direction: readonly [number, number, number]) => {
+    (
+      direction: readonly [number, number, number],
+      cameraUp?: readonly [number, number, number],
+    ) => {
       const c = controls.current
-      if (!c || !bounds) return
-      const { position: p, target: t } = fitPose(
-        direction,
-        bounds,
-        (c.camera as PerspectiveCamera).aspect || 1,
-        FOV_DEG,
-      )
+      if (!c) return
+      const camera = c.camera as PerspectiveCamera
+      if (cameraUp && camera.up.distanceTo(new Vector3(...cameraUp)) > 1e-9) {
+        camera.up.set(...cameraUp)
+        c.updateCameraUp()
+      }
+      if (!bounds) {
+        // nothing to fit yet: turn about the current target at the current distance
+        const t = c.getTarget(new Vector3(), true)
+        const d = c.distance
+        const n = normalize(direction)
+        void c.setLookAt(t.x + n[0] * d, t.y + n[1] * d, t.z + n[2] * d, t.x, t.y, t.z, animate)
+        return
+      }
+      const { position: p, target: t } = fitPose(direction, bounds, camera.aspect || 1, FOV_DEG)
       void c.setLookAt(p[0], p[1], p[2], t[0], t[1], t[2], animate)
     },
     [bounds, animate],
   )
-  const preset = useCallback((p: ViewPreset) => lookFrom(presetDirection(p)), [lookFrom])
+  const goTo = useCallback(
+    (view: CubeView) => lookFrom(cameraDirection(view), view.cameraUp),
+    [lookFrom],
+  )
+  const preset = useCallback((p: ViewPreset) => goTo(regionView(PRESET_REGION[p])), [goTo])
   const fit = useCallback(() => {
     const c = controls.current
     if (!c) return
@@ -245,6 +322,85 @@ export function Viewport({
     const tgt = c.getTarget(new Vector3(), true)
     lookFrom(normalize([pos.x - tgt.x, pos.y - tgt.y, pos.z - tgt.z]))
   }, [lookFrom])
+
+  // --- view cube: the setup (Plan, Run), the view shown, hover and clicks ---
+  const setupFrame: Placement | null = run?.frame ?? null
+  const setup = useMemo(() => (setupFrame ? setupView(setupFrame) : null), [setupFrame])
+  const setupFace = useMemo(
+    () => (setupFrame ? (faceRegionOf(setupFrame.n) ?? null) : null),
+    [setupFrame],
+  )
+  const axesRef = useRef<CameraAxes | null>(null)
+  const [shown, setShown] = useState<ShownView>({ kind: 'custom' })
+  const [along, setAlong] = useState<CubeRegion | null>(null)
+  const onCamera = useCallback(
+    (axes: CameraAxes) => {
+      axesRef.current = axes
+      const next = shownView(axes, setup)
+      setShown((prev) => (sameShownView(prev, next) ? prev : next))
+      const region = regionAlong(axes) ?? null
+      setAlong((prev) => (prev === region || sameRegion(prev, region) ? prev : region))
+    },
+    [setup],
+  )
+  const [cubeHover, setCubeHover] = useState<CubeRegion | null>(null)
+  const onCubeHover = useCallback(
+    (r: CubeRegion | null) =>
+      setCubeHover((prev) => (prev === r || sameRegion(prev, r) ? prev : r)),
+    [],
+  )
+  /** The view a click on a region gives: the setup view on the setup's up face, else its own. */
+  const isSetupFace = useCallback(
+    (r: CubeRegion | null): boolean => setup !== null && sameRegion(r, setupFace),
+    [setup, setupFace],
+  )
+  const onCubeClick = useCallback(
+    (r: CubeRegion, e: MouseEvent) => {
+      if (!isClick(down.current, { x: e.clientX, y: e.clientY })) return
+      const view = isSetupFace(r) && setup ? setup : regionView(r)
+      if (axesRef.current && showsView(axesRef.current, view)) return // already in view (C4)
+      goTo(view)
+    },
+    [isSetupFace, setup, goTo],
+  )
+  const [pressing, setPressing] = useState(false)
+  useEffect(() => {
+    if (!pressing) return
+    const up = (): void => setPressing(false)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
+    return () => {
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+    }
+  }, [pressing])
+  const tooltipOpen = useDelayed(cubeHover !== null, DELAY_TOOLTIP_MS) && !pressing
+  const tooltipText = cubeHover
+    ? isSetupFace(cubeHover)
+      ? msg.setupRegion(regionName(cubeHover))
+      : regionName(cubeHover)
+    : ''
+  const tooltipShortcut =
+    cubeHover && !isSetupFace(cubeHover) ? regionShortcut(cubeHover) : undefined
+  const shownName =
+    shown.kind === 'region'
+      ? regionName(shown.region)
+      : shown.kind === 'setup'
+        ? msg.setupView
+        : null
+  const viewItems = useMemo<MenuEntry[]>(
+    () => [
+      ...VIEW_PRESETS.map((p) => ({
+        label: msg.preset[p],
+        shortcut: PRESET_SHORTCUT[p],
+        onSelect: () => preset(p),
+      })),
+      ...(setup
+        ? (['separator', { label: msg.setupView, onSelect: () => goTo(setup) }] as const)
+        : []),
+    ],
+    [preset, goTo, setup],
+  )
 
   // Mouse preset: applied on every press (the Shift modifier selects the action).
   const applyButtons = (shift: boolean): void => {
@@ -356,7 +512,21 @@ export function Viewport({
       onKeyDown={onKeyDown}
       onPointerDownCapture={(e) => {
         down.current = { x: e.clientX, y: e.clientY }
-        applyButtons(e.shiftKey)
+        const rect = e.currentTarget.getBoundingClientRect()
+        const onCube =
+          e.target instanceof HTMLCanvasElement && inCubeBox(e.clientX, e.clientY, rect, insetRight)
+        if (!onCube) {
+          applyButtons(e.shiftKey)
+          return
+        }
+        // a drag on the cube orbits like the default left-drag, whatever the preset (C5)
+        setPressing(true)
+        const c = controls.current
+        if (!c) return
+        const map = mouseButtons('default', false)
+        c.mouseButtons.left = ACTIONS[map.left]
+        c.mouseButtons.middle = ACTIONS[map.middle]
+        c.mouseButtons.right = ACTIONS[map.right]
       }}
     >
       <Canvas
@@ -395,34 +565,57 @@ export function Viewport({
             } else onSelect?.(target)
           }}
         />
-      </Canvas>
-      <Toolbar label={msg.toolbar} floating className={styles['toolbar']}>
-        {VIEW_PRESETS.map((p, i) => (
-          <ToolbarButton
-            key={p}
-            label={msg.preset[p]}
-            shortcut={String(i + 1)}
-            icon={<ToolIcon name={p} />}
-            tooltipSide="bottom"
-            onClick={() => preset(p)}
-          />
-        ))}
-        <ToolbarSeparator />
-        <ToolbarButton
-          label={msg.fit}
-          shortcut="F"
-          icon={<ToolIcon name="fit" />}
-          tooltipSide="bottom"
-          onClick={fit}
+        <ViewCube
+          colours={cube}
+          axes={axisColours}
+          labels={FACE_LABELS}
+          font={tokens['--font-ui'] ?? ''}
+          weight={tokens['--weight-medium'] ?? ''}
+          hovered={cubeHover}
+          current={along}
+          setupFace={setup ? setupFace : null}
+          insetRight={insetRight}
+          reducedMotion={reducedMotion}
+          onHover={onCubeHover}
+          onClick={onCubeClick}
+          onCamera={onCamera}
         />
-      </Toolbar>
+      </Canvas>
+      <div
+        className={styles['cube']}
+        style={insetRight ? { transform: `translateX(${-insetRight}px)` } : undefined}
+      >
+        <Tooltip
+          content={tooltipText}
+          {...(tooltipShortcut ? { shortcut: tooltipShortcut } : {})}
+          side="left"
+          open={tooltipOpen}
+        >
+          <span className={styles['cubeAnchor']} aria-hidden="true" />
+        </Tooltip>
+        <Toolbar label={msg.toolbar} floating className={styles['toolbar']}>
+          <ToolbarButton
+            label={msg.fit}
+            shortcut="F"
+            icon={<ToolIcon name="fit" />}
+            tooltipSide="bottom"
+            onClick={fit}
+          />
+          <Menu label={msg.views} align="end" items={viewItems}>
+            <ToolbarButton label={msg.views} icon={<ToolIcon name="iso" />} tooltipSide="bottom" />
+          </Menu>
+        </Toolbar>
+      </div>
       {pick ? (
         <div className={styles['banner']} role="status">
           {msg.pickPrompt(pick.field)} · {msg.pickCancel}
         </div>
       ) : null}
       <p id={summaryId} className={styles['srOnly']}>
-        {text} {msg.keys}
+        {text} {msg.shownView(shownName)} {msg.keys}
+      </p>
+      <p className={styles['srOnly']} aria-live="polite">
+        {msg.shownView(shownName)}
       </p>
     </div>
   )

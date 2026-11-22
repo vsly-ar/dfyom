@@ -1,33 +1,16 @@
-// Camera math and input mapping: view presets, fit, mouse presets, viewport keys. Pure.
-// The part frame is Z up (geometry.md); the camera's up is +Z.
-// Doc: docs/conventions/ui.md#selection-and-picking (camera, decision 10)
+// Camera math and input mapping: fit, mouse presets, viewport keys. Pure. The named views'
+// directions are in view-cube.ts. The part frame is Z up (geometry.md); the camera's up is +Z.
+// Doc: docs/conventions/ui.md#selection-and-picking (camera, decision 10), ui-view-cube.md
 import type { Box, Vec3 } from './mesh'
 
-export const VIEW_PRESETS = ['top', 'front', 'right', 'iso'] as const
+/** The named views (keys 1–4 and Shift+1–3, the Views menu; ui-view-cube.md C6). */
+export const VIEW_PRESETS = ['top', 'front', 'right', 'iso', 'bottom', 'back', 'left'] as const
 export type ViewPreset = (typeof VIEW_PRESETS)[number]
 
 /** Vertical field of view of the perspective camera (degrees): low, close to a CAD ortho look. */
 export const FOV_DEG = 30
 /** Space around the fitted part (1 = touching the frame). */
 export const FIT_MARGIN = 1.15
-
-/**
- * Unit vector from the target towards the camera. Top looks down with +Y up on screen (a tiny
- * tilt towards −Y keeps the orbit away from the pole, where the azimuth is undefined); Front looks
- * along +Y; Right along −X; Iso from front-right-top.
- */
-export function presetDirection(preset: ViewPreset): Vec3 {
-  switch (preset) {
-    case 'top':
-      return normalize([0, -1e-3, 1])
-    case 'front':
-      return [0, -1, 0]
-    case 'right':
-      return [1, 0, 0]
-    case 'iso':
-      return normalize([1, -1, 1])
-  }
-}
 
 export function normalize(v: Vec3): Vec3 {
   const len = Math.hypot(v[0], v[1], v[2])
@@ -120,7 +103,7 @@ export function isClick(
   return down !== null && Math.hypot(up.x - down.x, up.y - down.y) <= CLICK_TOLERANCE_PX
 }
 
-// --- Keyboard (ui.md: keys 1–4 and F; arrows orbit, Shift+arrows pan, +/− zoom) ---
+// --- Keyboard (ui.md: keys 1–4, Shift+1–3 and F; arrows orbit, Shift+arrows pan, +/− zoom) ---
 
 /** Orbit step per arrow key press (radians). */
 export const ORBIT_STEP = Math.PI / 12
@@ -139,6 +122,8 @@ export type ViewportKey =
 
 export interface KeyLike {
   readonly key: string
+  /** The physical key (`Digit1`…): Shift+1 types `!` or another sign on many layouts. */
+  readonly code?: string
   readonly shiftKey: boolean
   readonly ctrlKey: boolean
   readonly metaKey: boolean
@@ -146,12 +131,18 @@ export interface KeyLike {
 }
 
 /**
- * What a key does in the focused viewport; `undefined` = not ours (Ctrl/Cmd/Alt combinations are
+ * What a key does in the focused viewport (`1`–`4` by the typed key, `Shift+1`–`3` by the physical
+ * key: Bottom, Back, Left); `undefined` = not ours (Ctrl/Cmd/Alt combinations are
  * app shortcuts and pass through). `arrows` is false while focus is on a child control that uses
  * the arrow keys itself (the view toolbar's roving focus).
  */
 export function viewportKey(e: KeyLike, arrows = true): ViewportKey | undefined {
   if (e.ctrlKey || e.metaKey || e.altKey) return undefined
+  if (e.shiftKey) {
+    const opposite = { Digit1: 'bottom', Digit2: 'back', Digit3: 'left' }[e.code ?? ''] as
+      ViewPreset | undefined
+    if (opposite) return { kind: 'preset', preset: opposite }
+  }
   const preset = { '1': 'top', '2': 'front', '3': 'right', '4': 'iso' }[e.key] as
     ViewPreset | undefined
   if (preset) return { kind: 'preset', preset }
