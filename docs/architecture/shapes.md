@@ -128,7 +128,7 @@ Budgets on the Apple M1 Pro class reference, measured by `npm run perf`:
 | Part evaluation with three shape operations (500 elements total)  | ≤ 50 ms  | S3: 40 ms                                |
 | Pocket toolpath of the spike's star (200 + 2 islands)             | ≤ 500 ms | 20 rings 1.1 ms                          |
 
-The port's share, measured by `src/core/geometry/2d/region2d.perf.ts` (K1, 2026-11-22): sync load 1.7 ms; a 206-element shape folded from items and normalised 0.75 ms plus one tool's checks (offset, opening, difference) 1.2 ms – together ≈ 2 ms of the 3 ms budget, the rest is left for `resolveShape` (K2); the star's 15 pocket rings 1.5 ms; a union with a 2000-element star 12.5 ms.
+The port's share, measured by `src/core/geometry/2d/region2d.perf.ts` (K1, 2026-11-22): sync load 1.7 ms; a 206-element shape folded from items and normalised 0.75 ms plus one tool's checks (offset, opening, difference) 1.2 ms – together ≈ 2 ms of the 3 ms budget, the rest is left for `resolveShape` (K2); the star's 15 pocket rings 1.5 ms; a union with a 2000-element star 12.5 ms. The whole pocket toolpath of the star (T1, `src/core/toolpath/region-pocket.perf.ts`, 4 levels and finishing): ≈ 9 ms.
 
 Evaluation cost follows **chords** (flattened segments at the chord tolerance), not elements: with [tiles](#geometry-for-shape-operations), ≈ 16 µs per chord (triangulate ≈ 3.6, `fromMesh` ≈ 3.2, booleans ≈ 8), so the 50 ms budget holds ≈ 3 000 chords per evaluation ([S3](../../spikes/prisms/results.md#cost-median-of-15-part-placement)). Single 500-element pockets take 15–39 ms; 2000-element shapes (5 000–7 000 chords) take 47–115 ms tiled (82–169 ms untiled) and do not fit: they run under a documented limit ([Decisions](#decisions-d29)).
 
