@@ -1,8 +1,9 @@
 // The v0.1 exit criteria headless, through MCP: an SDK client spawns `dfyom mcp` (the bundled
 // CLI, temp data dir) over stdio and runs the exit-criteria flow (exit-criteria.fixture.ts):
 // create → design → plan → toolpaths → export (golden gCode) → virtual run at `max` with tool
-// changes and progress → save → close → reopen. Also checks the CI criterion.
-// Spec: docs/plans/v0.1.md#exit-criteria, docs/architecture/llm-api.md#testing,
+// changes and progress → save → close → reopen; and the v0.2 flow (exit-criteria.v02.fixture.ts:
+// reference, three faces, a program per setup run in turn). Also checks the CI criterion.
+// Spec: docs/plans/v0.1.md#exit-criteria, docs/plans/v0.2.md#exit-criteria, docs/architecture/llm-api.md#testing,
 // docs/conventions/testing.md#end-to-end
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -13,9 +14,15 @@ import type { Progress } from '@modelcontextprotocol/sdk/types.js'
 import { afterAll, describe, expect, inject, it } from 'vitest'
 import { toMcpName } from '../../core/agent/tools'
 import { type CallResult, exitCriteriaFlow } from './exit-criteria.fixture'
+import { exitCriteriaV02Flow } from './exit-criteria.v02.fixture'
 
 const dir = mkdtempSync(join(tmpdir(), 'dfyom-e2e-mcp-'))
-afterAll(() => rmSync(dir, { recursive: true, force: true }))
+// the v0.2 flow in its own data dir: a fresh library, so its auto tool choice sees only its tools
+const dirV02 = mkdtempSync(join(tmpdir(), 'dfyom-e2e-mcp-v02-'))
+afterAll(() => {
+  rmSync(dir, { recursive: true, force: true })
+  rmSync(dirV02, { recursive: true, force: true })
+})
 
 interface ToolResult {
   isError?: boolean
@@ -23,22 +30,41 @@ interface ToolResult {
   content: { type: string; text: string }[]
 }
 
+/** An MCP SDK client of a spawned `dfyom mcp` (temp data dir), with its stderr and progress. */
+async function connect(dataDir: string) {
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [inject('cliEntry'), 'mcp', '--data-dir', dataDir],
+    env: {
+      ...(process.env as Record<string, string>),
+      DFYOM_TEST_WORKER_ENTRY: inject('productionWorkerEntry'),
+      DFYOM_TEST_MACHINE_ENTRY: inject('machineEntry'),
+    },
+    stderr: 'pipe',
+  })
+  const stderr: string[] = []
+  transport.stderr?.on('data', (d: Buffer) => stderr.push(d.toString()))
+  const client = new Client({ name: 'exit-criteria-test', version: '1.0.0' })
+  await client.connect(transport)
+  const notifications: { name: string; p: Progress }[] = []
+  const call = async (name: string, args: object = {}): Promise<CallResult> => {
+    const mcpName = toMcpName(name)
+    const r = (await client.callTool(
+      { name: mcpName, arguments: args as Record<string, unknown> },
+      undefined,
+      { timeout: 120_000, onprogress: (p) => notifications.push({ name: mcpName, p }) },
+    )) as ToolResult
+    const sc = r.structuredContent
+    if (r.isError === true)
+      return { ok: false, error: sc?.error ?? { code: 'unknown', message: r.content[0]?.text } }
+    return { ok: true, value: sc?.value, revision: sc?.revision }
+  }
+  return { client, call, stderr, notifications }
+}
+
 describe('exit criteria headless: dfyom mcp (stdio)', { timeout: 180_000 }, () => {
   it('runs the v0.1 flow through MCP tools, with progress notifications', async () => {
-    const transport = new StdioClientTransport({
-      command: process.execPath,
-      args: [inject('cliEntry'), 'mcp', '--data-dir', dir],
-      env: {
-        ...(process.env as Record<string, string>),
-        DFYOM_TEST_WORKER_ENTRY: inject('productionWorkerEntry'),
-        DFYOM_TEST_MACHINE_ENTRY: inject('machineEntry'),
-      },
-      stderr: 'pipe',
-    })
-    const stderr: string[] = []
-    transport.stderr?.on('data', (d: Buffer) => stderr.push(d.toString()))
-    const client = new Client({ name: 'exit-criteria-test', version: '1.0.0' })
-    await client.connect(transport)
+    const { client, call, stderr, notifications } = await connect(dir)
 
     const { tools } = await client.listTools()
     expect(tools.map((t) => t.name)).toEqual(
@@ -50,20 +76,6 @@ describe('exit criteria headless: dfyom mcp (stdio)', { timeout: 180_000 }, () =
       ]),
     )
     expect(tools.every((t) => t.outputSchema === undefined)).toBe(true)
-
-    const notifications: { name: string; p: Progress }[] = []
-    const call = async (name: string, args: object = {}): Promise<CallResult> => {
-      const mcpName = toMcpName(name)
-      const r = (await client.callTool(
-        { name: mcpName, arguments: args as Record<string, unknown> },
-        undefined,
-        { timeout: 120_000, onprogress: (p) => notifications.push({ name: mcpName, p }) },
-      )) as ToolResult
-      const sc = r.structuredContent
-      if (r.isError === true)
-        return { ok: false, error: sc?.error ?? { code: 'unknown', message: r.content[0]?.text } }
-      return { ok: true, value: sc?.value, revision: sc?.revision }
-    }
 
     const { runProgress } = await exitCriteriaFlow(call, dir)
 
@@ -79,6 +91,21 @@ describe('exit criteria headless: dfyom mcp (stdio)', { timeout: 180_000 }, () =
     expect(runNotes.some((n) => n.p.message?.startsWith('Tool change ') === true)).toBe(true)
     await client.close()
     // no CLI errors and no "unsaved changes kept for recovery" notice (logs go to the log file)
+    expect(stderr.join('')).toBe('')
+  })
+
+  it('runs the v0.2 flow (reference, three faces, a program per setup) through MCP tools', async () => {
+    const { client, call, stderr } = await connect(dirV02)
+    expect((await client.listTools()).tools.map((t) => t.name)).toEqual(
+      expect.arrayContaining([
+        'design_reference_import',
+        'design_reference_list',
+        'design_tool_candidates',
+        'plan_design_operation_update',
+      ]),
+    )
+    await exitCriteriaV02Flow(call, dirV02)
+    await client.close()
     expect(stderr.join('')).toBe('')
   })
 })
