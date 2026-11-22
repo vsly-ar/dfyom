@@ -17,7 +17,9 @@ import {
   toMcpName,
   type AgentTool,
   type JsonObject,
+  withoutSafeIntBounds,
 } from './tools'
+import { PRIMER } from './primer'
 
 const registries = () => ({
   app: expectOk(createAppScopeRegistry()),
@@ -76,7 +78,7 @@ describe('agent tools', () => {
     )
   })
 
-  it('no command or query has an arg named expectedRevision; project commands get it', () => {
+  it('no command, query or tool schema has an arg named expectedRevision (the primer has it)', () => {
     const { app, project } = registries()
     for (const def of [...app.commands, ...app.queries, ...project.commands, ...project.queries]) {
       const schema = expectOk(toolDescriptor(def)).inputSchema
@@ -84,12 +86,11 @@ describe('agent tools', () => {
         EXPECTED_REVISION,
       )
     }
-    const tools = allTools()
-    const props = (t: AgentTool) => Object.keys(t.inputSchema['properties'] as object)
-    expect(props(tool(tools, 'design.pocket.add'))).toContain(EXPECTED_REVISION)
-    expect(props(tool(tools, 'history.undo'))).toContain(EXPECTED_REVISION)
-    expect(props(tool(tools, 'design.part.list'))).not.toContain(EXPECTED_REVISION)
-    expect(props(tool(tools, 'library.tool.add'))).not.toContain(EXPECTED_REVISION)
+    for (const t of allTools())
+      expect(Object.keys((t.inputSchema['properties'] as object) ?? {}), t.name).not.toContain(
+        EXPECTED_REVISION,
+      )
+    expect(PRIMER).toContain(EXPECTED_REVISION)
   })
 
   it('every input schema is an object schema', () => {
@@ -154,8 +155,10 @@ describe('agent tools', () => {
     expect(size).toBeLessThan(TOOLS_LIST_BUDGET_CHARS)
   })
 
-  it('tools/list has no output schema and no title', () => {
-    for (const t of mcpToolList(allTools())) {
+  it('tools/list has no output schema, no title and no safe-integer bounds', () => {
+    const list = mcpToolList(allTools())
+    expect(JSON.stringify(list)).not.toContain(String(Number.MAX_SAFE_INTEGER))
+    for (const t of list) {
       expect(t).not.toHaveProperty('outputSchema')
       expect(t).not.toHaveProperty('title')
     }
@@ -166,7 +169,7 @@ describe('agent tools', () => {
     for (const def of [...app.commands, ...app.queries, ...project.commands, ...project.queries]) {
       const d = expectOk(toolDescriptor(def))
       for (const s of [d.inputSchema, d.outputSchema]) {
-        const { $schema: _, ...plain } = s
+        const { $schema: _, ...plain } = withoutSafeIntBounds(s) as JsonObject
         if (JSON.stringify(plain).includes('"$ref"')) continue // recursive: kept as generated
         const compact = compactSchema(s)
         expect(expand(compact, (compact['$defs'] as JsonObject) ?? {}), def.name).toEqual(
