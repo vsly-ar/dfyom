@@ -4,7 +4,7 @@ import { expectOk } from '../../shared/testing/result'
 import { createRegistry } from '../commands/registry'
 import { uiSource } from '../commands/testing'
 import { docToFiles, loadProjectFiles } from '../project/layout'
-import { len } from '../library/library.fixture'
+import { libraryInput } from '../library/library.fixture'
 import { draftPlanAutoRebuild, PLAN_COMMANDS, PLAN_QUERIES } from './commands'
 import { draftLibraryUpdates, followLibraryChanges } from './follow'
 import type { PlanStatus } from './plan.dto'
@@ -437,7 +437,7 @@ describe('library copies', () => {
     await s.run('library.tool.update', {
       id,
       revision: item.revision,
-      values: { ...flat6(), name: 'Flat 6 reground', diameter: len('5.9') },
+      values: { ...libraryInput(flat6()), name: 'Flat 6 reground', diameter: '5.9' },
     })
   }
 

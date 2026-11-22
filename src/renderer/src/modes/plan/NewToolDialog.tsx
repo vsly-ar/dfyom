@@ -69,7 +69,7 @@ export function NewToolDialog({
 
   const submit = () =>
     f.submit(async () => {
-      const added = await call('library.tool.add', { values: toolValues(form) })
+      const added = await call('library.tool.add', { values: toolValues(form), units })
       if (!added.ok) return added.error
       return onAdded((added.value as { id: string }).id)
     })

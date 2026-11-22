@@ -3,7 +3,8 @@
  * Doc: docs/architecture/library.md#storage, docs/architecture/commands.md
  *
  * `effect` commands: written to disk at once, not undoable, no history entry, still logged.
- * They never touch `ProjectDoc`; the library is `ctx.services.library`.
+ * They never touch `ProjectDoc`; the library is `ctx.services.library`. `add`/`update` take
+ * quantities as strings (bare numbers in `units`) and store the parsed DTOs.
  */
 import { z } from 'zod'
 import { Err, fail, Ok, type AppResult } from '../../shared/result'
@@ -15,13 +16,20 @@ import { valuesFromDTO, type ItemValuesDTO, type LibraryItemDTO } from './librar
 import { MachineValuesDtoSchema } from './machine.dto'
 import { StockValuesDtoSchema } from './stock.dto'
 import { ToolValuesDtoSchema } from './tool.dto'
+import { valuesFromInput, valuesInputSchema } from './values-input'
+import { UnitSystemSchema, type UnitSystem } from '../project/document'
 
-/** Command args carry the values without `kind` (the command name says it). */
-const VALUES_ARGS = {
+/** Stored values without `kind` (the command name says it). */
+const VALUES = {
   stock: StockValuesDtoSchema.omit({ kind: true }),
   tool: ToolValuesDtoSchema.omit({ kind: true }),
   machine: MachineValuesDtoSchema.omit({ kind: true }),
 }
+
+/** Command args take quantities as strings (library.md#command-input); results are stored DTOs. */
+const UNITS_ARG = UnitSystemSchema.default('mm').describe(
+  'Unit system of bare numbers in values (default mm)',
+)
 
 const ITEM_RESULTS = {
   stock: StockValuesDtoSchema.extend(ItemMetaDtoSchema.shape),
@@ -39,7 +47,14 @@ function libraryOf(services: Services, where: string): AppResult<Library> {
 
 function forKind(kind: LibraryItemKind): { commands: AnyCommand[]; queries: QueryDef[] } {
   const label = LABEL[kind]
-  const valuesArg: z.ZodType<object> = VALUES_ARGS[kind].describe(`The ${label} values`)
+  const valuesArg: z.ZodType<object> = valuesInputSchema(VALUES[kind]).describe(
+    `The ${label} values; quantities are strings, e.g. "6 mm", "1/4 in"`,
+  ) as z.ZodType<object>
+  /** Parsed quantities, `kind`, then the model (all issues below `values`). */
+  const modelValues = (values: object, units: UnitSystem) =>
+    valuesFromInput(VALUES[kind], values, units, ['values']).andThen((v) =>
+      valuesFromDTO(toValuesDTO(v as object)).mapErr((e) => e.prefixIssues('values')),
+    )
   const itemResult: z.ZodType<LibraryItemDTO> = ITEM_RESULTS[kind]
   const toValuesDTO = (v: object) => ({ ...v, kind }) as ItemValuesDTO
   const now = (ms: number) => new Date(ms).toISOString()
@@ -50,14 +65,14 @@ function forKind(kind: LibraryItemKind): { commands: AnyCommand[]; queries: Quer
     summary: `Add a ${label} to the library (not undoable).`,
     title: () => `Add ${label} to library`,
     machine: false,
-    args: z.object({ values: valuesArg }),
+    args: z.object({ values: valuesArg, units: UNITS_ARG }),
     result: itemResult,
     async run(_doc, args, ctx) {
       const where = `library.${kind}.add`
       const lib = libraryOf(ctx.services, where)
       if (lib.isErr()) return lib
-      const values = valuesFromDTO(toValuesDTO(args.values)).mapErr((e) => e.prefixIssues('values'))
-      if (values.isErr()) return values
+      const values = modelValues(args.values, args.units)
+      if (values.isErr()) return Err(values.unwrapErr().withContext(where))
       const item = await lib
         .unwrap()
         .add(values.unwrap(), { id: ctx.ids.next(kind), updatedAt: now(ctx.clock.now()) })
@@ -75,13 +90,15 @@ function forKind(kind: LibraryItemKind): { commands: AnyCommand[]; queries: Quer
       id: ItemIdSchema,
       revision: z.number().int().min(1).describe('Revision you read; stale → command.conflict'),
       values: valuesArg,
+      units: UNITS_ARG,
     }),
     result: itemResult,
     async run(_doc, args, ctx) {
-      const lib = libraryOf(ctx.services, `library.${kind}.update`)
+      const where = `library.${kind}.update`
+      const lib = libraryOf(ctx.services, where)
       if (lib.isErr()) return lib
-      const values = valuesFromDTO(toValuesDTO(args.values)).mapErr((e) => e.prefixIssues('values'))
-      if (values.isErr()) return values
+      const values = modelValues(args.values, args.units)
+      if (values.isErr()) return Err(values.unwrapErr().withContext(where))
       const item = await lib
         .unwrap()
         .update(args.id, args.revision, values.unwrap(), now(ctx.clock.now()))

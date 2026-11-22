@@ -89,7 +89,7 @@ export function NewMachineDialog({
 
   const submit = () =>
     f.submit(async () => {
-      const added = await call('library.machine.add', { values: machineValues(form) })
+      const added = await call('library.machine.add', { values: machineValues(form), units })
       if (!added.ok) return added.error
       return onAdded((added.value as { id: string }).id)
     })

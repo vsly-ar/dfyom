@@ -8,12 +8,11 @@ import { agentSource, fakeClock, fakeIds, uiSource } from '../commands/testing'
 import { newProjectDoc } from '../project/document'
 import { LIBRARY_COMMANDS, LIBRARY_QUERIES } from './commands'
 import { Library } from './library'
-import { flatEndMillValues, len, machineValues, stockValues } from './library.fixture'
+import { flatEndMillValues, len, libraryInput, machineValues, stockValues } from './library.fixture'
 import { createMemoryLibraryStorage } from './memory-storage'
 
 const agent = agentSource()
 const doc = newProjectDoc({ name: 'Bracket', unitSystem: 'mm' })
-const omitKind = <T extends { kind: string }>({ kind: _, ...rest }: T) => rest
 
 async function setup(withLibrary = true) {
   const storage = createMemoryLibraryStorage()
@@ -49,7 +48,7 @@ describe('library commands', () => {
 
   it('add stores revision 1 with a generated id; get and list return it', async () => {
     const { d } = await setup()
-    const added = await add(d, 'tool', omitKind(flatEndMillValues()))
+    const added = await add(d, 'tool', libraryInput(flatEndMillValues()))
     expect(added).toEqual({
       id: 'tool-1',
       revision: 1,
@@ -65,7 +64,7 @@ describe('library commands', () => {
   it('effects are not undoable and leave the project untouched, but are logged', async () => {
     const { d, events } = await setup()
     const out = expectOk(
-      await d.dispatch('library.stock.add', { values: omitKind(stockValues()) }, agent),
+      await d.dispatch('library.stock.add', { values: libraryInput(stockValues()) }, agent),
     )
     expect(out.revision).toBe(0)
     expect(d.history.undoable).toEqual([])
@@ -77,7 +76,7 @@ describe('library commands', () => {
     const e = expectErrCode(
       await d.dispatch(
         'library.stock.add',
-        { values: { ...omitKind(stockValues()), width: len('0') } },
+        { values: { ...libraryInput(stockValues()), width: '0' } },
         agent,
       ),
       'model.invariant',
@@ -86,10 +85,52 @@ describe('library commands', () => {
     expect(expectOk(await storage.list('stock'))).toEqual([])
   })
 
+  it('quantities are strings: bare numbers in units (default mm), stored as entered', async () => {
+    const { d } = await setup()
+    const inch = await d.dispatch(
+      'library.stock.add',
+      { values: { ...libraryInput(stockValues()), length: '4', width: '60 mm' }, units: 'inch' },
+      agent,
+    )
+    expect(expectOk(inch).value).toMatchObject({
+      length: { source: '4', defaultUnit: 'in', exact: { num: '508', den: '5' } },
+      width: { source: '60 mm', defaultUnit: 'in', exact: { num: '60', den: '1' } },
+      thickness: { source: '10 ±0.1', defaultUnit: 'in' },
+    })
+    const mm = expectOk(
+      await d.dispatch('library.tool.add', { values: libraryInput(flatEndMillValues()) }, agent),
+    )
+    expect(mm.value).toMatchObject({
+      diameter: len('6'),
+      presets: [{ feedRate: { defaultUnit: 'mm/min' } }],
+    })
+  })
+
+  it('a bad quantity string fails like in every command: its code, path below values', async () => {
+    const { d, storage } = await setup()
+    const values = libraryInput(flatEndMillValues()) as { presets: Record<string, unknown>[] }
+    const syntax = expectErrCode(
+      await d.dispatch('library.tool.add', { values: { ...values, diameter: '6 mm mm' } }, agent),
+      'quantity.syntax',
+    )
+    expect(syntax.issues.map((i) => i.path.join('.'))).toEqual(['values.diameter'])
+    const preset = { ...values.presets[0], feedRate: '800 rpm' }
+    const unit = expectErrCode(
+      await d.dispatch('library.tool.add', { values: { ...values, presets: [preset] } }, agent),
+      'quantity.unit',
+    )
+    expect(unit.issues.map((i) => i.path.join('.'))).toEqual(['values.presets.0.feedRate'])
+    expectErrCode(
+      await d.dispatch('library.tool.add', { values: { ...values, diameter: len('6') } }, agent),
+      'input.malformed',
+    )
+    expect(expectOk(await storage.list('tool'))).toEqual([])
+  })
+
   it('update needs the revision the caller read; a stale one is command.conflict', async () => {
     const { d } = await setup()
-    const { id } = await add(d, 'machine', omitKind(machineValues()))
-    const values = { ...omitKind(machineValues()), name: 'Shapeoko 5' }
+    const { id } = await add(d, 'machine', libraryInput(machineValues()))
+    const values = { ...libraryInput(machineValues()), name: 'Shapeoko 5' }
     const up = expectOk(
       await d.dispatch('library.machine.update', { id, revision: 1, values }, agent),
     )
@@ -106,7 +147,7 @@ describe('library commands', () => {
 
   it('remove requires confirm: true', async () => {
     const { d } = await setup()
-    const { id } = await add(d, 'stock', omitKind(stockValues()))
+    const { id } = await add(d, 'stock', libraryInput(stockValues()))
     expectErrCode(await d.dispatch('library.stock.remove', { id }, agent), 'input.malformed')
     expectErrCode(
       await d.dispatch('library.stock.remove', { id, confirm: false }, agent),
@@ -138,7 +179,7 @@ describe('library commands', () => {
   it('without a library service the commands fail as a bug, not silently', async () => {
     const { d } = await setup(false)
     expectErrCode(
-      await d.dispatch('library.stock.add', { values: omitKind(stockValues()) }, agent),
+      await d.dispatch('library.stock.add', { values: libraryInput(stockValues()) }, agent),
       'internal.unexpected',
     )
     expectErrCode(d.query('library.stock.list', {}, agent), 'internal.unexpected')
@@ -152,7 +193,7 @@ describe('library commands', () => {
 
   it('a wrong-case id is rejected before it reaches storage', async () => {
     const { d } = await setup()
-    const { id } = await add(d, 'stock', omitKind(stockValues()))
+    const { id } = await add(d, 'stock', libraryInput(stockValues()))
     expectErrCode(
       await d.dispatch(
         'library.stock.remove',

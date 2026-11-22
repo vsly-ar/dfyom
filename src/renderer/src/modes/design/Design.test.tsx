@@ -34,9 +34,9 @@ async function renderDesign(withPart = true) {
         values: {
           name: 'Block',
           shape: 'block',
-          length: len('100'),
-          width: len('60'),
-          thickness: len('20'),
+          length: '100',
+          width: '60',
+          thickness: '20',
           material: { name: '6061-T6', class: 'aluminum' },
         },
       },
@@ -64,15 +64,6 @@ async function renderDesign(withPart = true) {
     await r.user.click(await screen.findByRole('menuitem', { name: label }))
   }
   return { ...r, bridge, d, shell, part, addFromMenu }
-}
-
-function len(source: string) {
-  return {
-    kind: 'length' as const,
-    source,
-    defaultUnit: 'mm' as const,
-    exact: { num: source, den: '1' },
-  }
 }
 
 /**

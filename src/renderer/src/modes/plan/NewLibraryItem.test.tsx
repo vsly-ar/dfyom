@@ -78,13 +78,17 @@ describe('New machine', { timeout: 20_000 }, () => {
     await t.user.click(within(dialog).getByRole('button', { name: 'Add machine' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
 
-    const [added] = t.callsOf('library.machine.add') as { values: Record<string, never> }[]
+    const [added] = t.callsOf('library.machine.add') as {
+      values: Record<string, never>
+      units: string
+    }[]
+    expect(added!.units).toBe('mm')
     expect(added!.values).toMatchObject({
       name: 'Router',
       controller: 'grbl',
-      travel: { x: { source: '600' }, y: { source: '400' } },
-      maxFeedRate: { z: { source: '800' } },
-      spindle: { control: 'gcode', maxSpeed: { source: '30000' }, power: { source: '800' } },
+      travel: { x: '600', y: '400' },
+      maxFeedRate: { z: '800' },
+      spindle: { control: 'gcode', maxSpeed: '30000', power: '800' },
       programUnits: 'mm',
       toolChanger: 'none',
     })
@@ -153,7 +157,7 @@ describe('New machine', { timeout: 20_000 }, () => {
     const [added] = t.callsOf('library.machine.add') as {
       values: { spindle: Record<string, unknown> }
     }[]
-    expect(added!.values.spindle).toMatchObject({ maxSpeed: { source: '30000' } })
+    expect(added!.values.spindle).toMatchObject({ maxSpeed: '30000' })
     expect(added!.values.spindle).not.toHaveProperty('minSpeed')
     expect(added!.values.spindle).not.toHaveProperty('power')
   })
@@ -183,8 +187,8 @@ describe('New tool', () => {
     expect(added!.values).toMatchObject({
       name: 'Drill 5',
       type: 'drill',
-      diameter: { source: '5' },
-      pointAngle: { source: '118' },
+      diameter: '5',
+      pointAngle: '118',
       toolMaterial: 'carbide',
       presets: [],
     })

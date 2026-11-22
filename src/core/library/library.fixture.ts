@@ -19,6 +19,25 @@ export function qty<K extends QuantityKind>(kind: K, source: string): QuantityDT
   return q.unwrap().toDTO() as QuantityDTO & { kind: K }
 }
 
+const isQuantityDTO = (v: unknown): v is QuantityDTO =>
+  typeof v === 'object' && v !== null && 'exact' in v && 'source' in v && 'defaultUnit' in v
+
+/**
+ * Command input (`library.<kind>.add/update` `values`) from stored values: each quantity DTO →
+ * its source, `kind` dropped. Bare numbers then mean the default `units: 'mm'`, as `qty` parsed.
+ */
+export function libraryInput(values: object): Record<string, unknown> {
+  const map = (v: unknown): unknown => {
+    if (isQuantityDTO(v)) return v.source
+    if (Array.isArray(v)) return v.map(map)
+    if (typeof v === 'object' && v !== null)
+      return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, map(x)]))
+    return v
+  }
+  const { kind: _, ...rest } = map(values) as Record<string, unknown>
+  return rest
+}
+
 export const len = (s: string) => qty('length', s)
 export const feed = (s: string) => qty('feedRate', s)
 export const rpm = (s: string) => qty('spindleSpeed', s)

@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { expect } from 'vitest'
 import { createInProcessWorkers } from '../../core/commands/jobs'
 import { testStock } from '../../core/design/design.fixture'
-import { machineValues } from '../../core/library/library.fixture'
+import { libraryInput, machineValues } from '../../core/library/library.fixture'
 import { flat6 } from '../../core/plan/plan.fixture'
 import type { MachineService } from '../../core/run/service'
 import { noopLogger } from '../../shared/logging'
@@ -49,8 +49,8 @@ export type Call = (name: string, args?: object) => Promise<unknown>
  */
 export async function buildSmallPlan(call: Call) {
   const stock = ((await call('library.stock.add', { values: testStock() })) as { id: string }).id
-  await call('library.tool.add', { values: flat6() })
-  const { kind: _, ...m } = machineValues()
+  await call('library.tool.add', { values: libraryInput(flat6()) })
+  const m = libraryInput(machineValues())
   const machine = ((await call('library.machine.add', { values: m })) as { id: string }).id
   const created = (await call('project.create', { name: 'Small', unitSystem: 'mm' })) as {
     key: string
