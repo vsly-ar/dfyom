@@ -1,12 +1,12 @@
 # Design mode v0.4: hole features, chamfers and Clones
 
-Status: draft (proposed 2026-11-22 with [plans/v0.4.md](../plans/v0.4.md); every decision below is a proposal until the user answers [Q28–Q35](../plans/v0.4.md#questions-for-the-user)) · Scope: [roadmap v0.4](../roadmap.md#v04--features-draft) · Concept: [features.md](features.md) (feature model A1–A6, [Clones](features.md#clones)) · Base: [design.md](design.md), [design-v0.2.md](design-v0.2.md), [design-v0.3.md](design-v0.3.md) · Toolpaths: [plan-v0.4.md](plan-v0.4.md) · Tasks: [plans/v0.4.md](../plans/v0.4.md) · Terms: [glossary.md](../glossary.md)
+Status: accepted (D34, 2026-11-22: the user took every recommendation of [Q28–Q35](../plans/v0.4.md#questions-for-the-user), ISO metric from M1.6; proposed 2026-11-22 with [plans/v0.4.md](../plans/v0.4.md)) · Scope: [roadmap v0.4](../roadmap.md#v04--features) · Concept: [features.md](features.md) (feature model A1–A6, [Clones](features.md#clones)) · Base: [design.md](design.md), [design-v0.2.md](design-v0.2.md), [design-v0.3.md](design-v0.3.md) · Toolpaths: [plan-v0.4.md](plan-v0.4.md) · Tasks: [plans/v0.4.md](../plans/v0.4.md) · Terms: [glossary.md](../glossary.md)
 
 v0.4 builds the **feature model** of [features.md](features.md) and its first two kinds: the **hole** feature (simple, counterbore, countersink, sizes from fastener tables) and the **Clones** feature (one face, no rotation). Countersinks need a cut DFYOM does not have yet, so v0.4 adds the **chamfer operation** on circular edges and the **chamfer mill** tool type first ([features.md rule](features.md#feature-vs-operation): a feature never cuts on its own). This doc owns what v0.4 adds or bounds; the feature model itself (owned operations, ids by role, order, Apply, undo, persistence) stays in [features.md](features.md) and is linked, not repeated.
 
 ## Decisions
 
-Proposed; the user settles them with [Q28–Q35](../plans/v0.4.md#questions-for-the-user).
+Accepted with [Q28–Q35](../plans/v0.4.md#questions-for-the-user) (D34, every recommendation taken).
 
 | Id  | Decision                                                                                                                                                                                                                                                     | Section                                                                          |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
@@ -72,7 +72,7 @@ A built-in, read-only table in core (a sourced `data.ts`, every row with its sou
 | Counterbore Ø                | DIN 974-1 row for ISO 4762                        |
 | Countersunk head Ø and angle | ISO 10642 (90°)                                   |
 
-v0.4 sizes: ISO metric M2, M2.5, M3, M4, M5, M6, M8, M10, M12 ([Q29](../plans/v0.4.md#questions-for-the-user)); inch (#4–1/2″, ASME B18.3, 82°) after v0.4. The table version is not stored ([features.md § Persistence](features.md#persistence-high-level)). Query: `design.fastener.list { standard? }` returns the rows (agents choose sizes the same way the inspector does).
+v0.4 sizes: ISO metric M1.6, M2, M2.5, M3, M4, M5, M6, M8, M10, M12 ([Q29](../plans/v0.4.md#questions-for-the-user), M1.6 added by D34). ISO 10642 starts at M3, so the countersunk head columns for M1.6–M2.5 come from ISO 2009 (slotted countersunk head, 90°), with that source on the row; inch (#4–1/2″, ASME B18.3, 82°) after v0.4. The table version is not stored ([features.md § Persistence](features.md#persistence-high-level)). Query: `design.fastener.list { standard? }` returns the rows (agents choose sizes the same way the inspector does).
 
 ## Chamfer operation (v0.4: circular edges)
 
