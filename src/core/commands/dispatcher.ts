@@ -14,6 +14,7 @@ import {
   None,
   Ok,
   Some,
+  toDataWire,
   toWire,
   tryAsync,
   tryCatch,
@@ -560,8 +561,7 @@ class ProjectDispatcher implements Dispatcher {
   private autoApply(done: CommandOutcome, source: Source): CommandOutcome {
     const applied = this.runApply(source, { kind: 'auto' })
     if (applied.isErr()) {
-      const { stack: _stack, ...error } = applied.unwrapErr().toJSON()
-      return { ...done, revision: this.rev, applied: { error } }
+      return { ...done, revision: this.rev, applied: { error: applied.unwrapErr().toWireData() } }
     }
     return { ...done, revision: this.rev, applied: applied.unwrap().value as ApplyOutcome }
   }
@@ -908,7 +908,7 @@ class ProjectDispatcher implements Dispatcher {
           jobId,
           name: def.name,
           state,
-          ...(outcome === undefined ? {} : { outcome: toWire(outcome) }),
+          ...(outcome === undefined ? {} : { outcome: toDataWire(outcome) }),
         })
         if (state === 'finished') this.retireJob(jobId)
       },
@@ -954,7 +954,7 @@ class ProjectDispatcher implements Dispatcher {
       type: 'command',
       name,
       args: summarizeArgs(args),
-      outcome: toWire(result.map((o) => o.value)),
+      outcome: toDataWire(result.map((o) => o.value)),
     })
     return result
   }

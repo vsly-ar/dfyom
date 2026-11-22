@@ -17,8 +17,10 @@ import { elementPointAt, onLoop, windingNumber } from './measure'
 import {
   boundsOverlap,
   chainBounds,
+  elementLength,
   line,
   MIN_ELEMENT_LENGTH,
+  OFFSET_EPSILON,
   reverseLoop,
   signedArea,
   type Bounds2,
@@ -380,4 +382,47 @@ function lobes(l: Loop): Loop[] {
     seen.set(k, i)
   }
   return [l]
+}
+
+/** Point key of the self-touch tests (1 nm grid, as `lobes`). */
+const touchKey = (p: Vec2) => `${Math.round(p[0] * 1e6)},${Math.round(p[1] * 1e6)}`
+
+/**
+ * Whether elements (a closed chain) enclose no width: mean width 2·|area| / perimeter below
+ * `OFFSET_EPSILON`, as a spike traced out and back or a lens of a tiny arc and its chord.
+ */
+export function isSliver(elements: readonly Loop['elements'][number][]): boolean {
+  let perimeter = 0
+  for (const e of elements) perimeter += elementLength(e)
+  return 2 * Math.abs(signedArea({ elements })) < OFFSET_EPSILON * perimeter
+}
+
+/**
+ * Cuts the zero-width spikes out of a loop: where the loop passes a vertex again, the stretch
+ * between the two visits is dropped when it is a sliver (`isSliver`). CavalierContours (0.9.0)
+ * leaves such spikes in an offset where an element much shorter than the offset sits between
+ * near-tangent neighbours (a 1 µm closing line between two arcs): the raw offset of the short
+ * element runs backwards, and the crate keeps it because it lies at the offset distance within
+ * its epsilons. Offsets of a spiky loop compound into open loops and holes outside their outer
+ * loop. Doc: docs/architecture/shapes.md#implementation-k1
+ */
+export function dropSpikes(l: Loop): Loop {
+  let els = l.elements
+  for (;;) {
+    let cut: Loop['elements'] | undefined
+    const seen = new Map<string, number>()
+    for (let i = 0; i < els.length && cut === undefined; i++) {
+      const k = touchKey(els[i]!.a)
+      const j = seen.get(k)
+      if (j !== undefined) {
+        const inner = els.slice(j, i)
+        const rest = [...els.slice(0, j), ...els.slice(i)]
+        if (isSliver(inner)) cut = rest
+        else if (isSliver(rest)) cut = inner
+      }
+      seen.set(k, i)
+    }
+    if (cut === undefined) return els === l.elements ? l : { elements: els }
+    els = cut
+  }
 }

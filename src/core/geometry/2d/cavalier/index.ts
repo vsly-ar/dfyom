@@ -16,6 +16,8 @@ import {
 } from '../model'
 import type { Region2dPort } from '../port'
 import {
+  dropSpikes,
+  isSliver,
   loopInside,
   normaliseLoops,
   regionDifference,
@@ -49,8 +51,9 @@ function decodeAll(
       return Err(region2dError('resultInvalid', 'the 2D library returned an open loop', where))
     const l = fromWire(o, where)
     if (l.isErr()) return Err(l.unwrapErr())
-    const loop = l.unwrap()
-    if (Math.abs(signedArea(loop)) < SLIVER_AREA) continue
+    // zero-width spikes and loops are the library's epsilons at work, never region boundary
+    const loop = dropSpikes(l.unwrap())
+    if (Math.abs(signedArea(loop)) < SLIVER_AREA || isSliver(loop.elements)) continue
     loops.push({ loop, neg: o.neg })
   }
   return Ok(loops)

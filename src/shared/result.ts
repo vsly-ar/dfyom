@@ -82,6 +82,16 @@ export function toWire<T>(r: AppResult<T>): ResultWire<T> {
   return r.isOk() ? { ok: true, value: r.unwrap() } : { ok: false, error: r.unwrapErr().toJSON() }
 }
 
+/**
+ * `toWire` without the error's `stack`: for results that leave the app or are kept as data (job
+ * outcomes, the action log, agent and CLI results). Doc: docs/conventions/error-handling/app-error.md#serialization
+ */
+export function toDataWire<T>(r: AppResult<T>): ResultWire<T> {
+  return r.isOk()
+    ? { ok: true, value: r.unwrap() }
+    : { ok: false, error: r.unwrapErr().toWireData() }
+}
+
 export function fromWire<T>(w: ResultWire<T>): AppResult<T> {
   return w.ok ? Ok(w.value) : Err(AppError.fromJSON(w.error))
 }

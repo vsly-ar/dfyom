@@ -46,4 +46,21 @@ describe('AppError', () => {
     expect(back.frames).toEqual([{ where: 'migrate' }])
     expect(back.stack).toBe(e.stack)
   })
+
+  it('drops the stack at every level for wire data, keeps it in toJSON (logs)', () => {
+    const inner = new AppError('geometry.evaluation', 'open loop', { where: 'region2d.offset' })
+    const e = new AppError('internal.unexpected', 'outer', { cause: inner }).withContext('job')
+    expect(e.toJSON().stack).toBeDefined()
+    expect((e.toJSON().cause as { stack?: string }).stack).toBeDefined()
+    const wire = e.toWireData()
+    expect(wire.stack).toBeUndefined()
+    expect(wire.cause).toEqual({
+      code: 'geometry.evaluation',
+      message: 'open loop',
+      issues: [],
+      frames: [{ where: 'region2d.offset' }],
+    })
+    expect(JSON.stringify(wire)).not.toContain('stack')
+    expect(wire.frames).toEqual([{ where: 'job' }])
+  })
 })

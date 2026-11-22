@@ -15,8 +15,7 @@ export interface ToolCallResult {
 
 /** The error as agents see it: no stack (noise for a model), `retryable` from `ERROR_CODES`. */
 export function agentError(e: AppError): { error: AppErrorData; retryable: boolean } {
-  const { stack: _stack, ...error } = e.toJSON()
-  return { error, retryable: ERROR_CODES[e.code].retryable }
+  return { error: e.toWireData(), retryable: ERROR_CODES[e.code].retryable }
 }
 
 /** `code: message`, then one line per issue (path, message, rule). */
