@@ -6,8 +6,8 @@
  * offset comes from the 2D port; arcs stay exact (G2/G3).
  * Doc: docs/modes/plan-v0.3.md#profile-on-general-loops
  *
- * Region-level only: the operation mapping (shape → placed loop) arrives with K3; until then the
- * v0.1 rectangle/circle profiles keep `generateProfile`.
+ * General profiles reach it as `regionProfile` requests (`regionProfileOperation` in inputs.ts);
+ * v0.1 rectangle/circle profiles keep `generateProfile` (plan-v0.3.md#wiring-t1-t2).
  */
 import { EPSILON, type Vec2, type Vec3 } from '../geometry/model'
 import { regionLoops, reverseLoop, signedArea, type Loop, type Region } from '../geometry/2d/model'

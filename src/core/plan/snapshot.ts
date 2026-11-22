@@ -142,7 +142,9 @@ export function planStale(
     const now = current?.operations.find((o) => o.id === op.id)
     const s: OperationStale = {
       operationId: op.id,
-      changedInDesign: now !== undefined && !sameValue(taken, now),
+      changedInDesign:
+        now !== undefined &&
+        (!sameValue(taken, now) || shapeChanged(now, plan.design.taken, current)),
       removedFromDesign: now === undefined,
       editedInPlan: !sameValue(taken, op),
       designToolChanged:
@@ -193,6 +195,26 @@ export function planStale(
     partChanged,
     rebuildBlocked,
   }
+}
+
+/** The named shape `op` places (design.shape.* keeps every referenced id existing). */
+const namedShapeId = (op: PartDTO['operations'][number]): string | undefined =>
+  'shape' in op && op.shape.kind === 'named' ? op.shape.shapeId : undefined
+
+/**
+ * Whether the definition of the named shape the design's `op` places differs between the plan's
+ * taken part and the current one: a shape-only edit changes the operation's cut (v0.3, K3 known
+ * issue "stale indicators miss shape-only edits"). Doc: docs/modes/plan-v0.3.md#wiring-t1-t2
+ */
+function shapeChanged(
+  op: PartDTO['operations'][number],
+  taken: PartDTO,
+  current: PartDTO | undefined,
+): boolean {
+  const id = namedShapeId(op)
+  if (id === undefined) return false
+  const find = (p: PartDTO | undefined) => p?.shapes?.find((x) => x.id === id)
+  return !sameValue(find(taken), find(current))
 }
 
 /**

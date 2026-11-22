@@ -3,21 +3,28 @@
  * task's input) and running it. Doc: docs/architecture/workers.md#plan-operation-to-generator-input
  *
  * Built in the host by `toGeneratorInputs` (inputs.ts); run in the worker. Drilling holds one
- * input per hole, in visiting order; their toolpaths are joined into one.
+ * input per hole, in visiting order; their toolpaths are joined into one. `regionPocket` and
+ * `regionProfile` (v0.3 T1/T2 wiring) carry general shapes; their generators take the 2D port of
+ * the worker (`TaskControl.region2d()`). Doc: docs/modes/plan-v0.3.md#wiring-t1-t2
  */
 import { z } from 'zod'
 import { Err, fail, Ok, type AppResult } from '../../shared/result'
+import type { Region2dPort } from '../geometry/2d/port'
 import { noSteps, type Steps } from '../workers/steps'
 import { generateDrilling } from './drilling'
 import { generateFacing } from './facing'
 import type { DrillingInput, FacingInput, Pass, PocketInput, ProfileInput, Toolpath } from './model'
 import { generatePocket } from './pocket'
 import { generateProfile } from './profile'
+import { generateRegionPocket, type RegionPocketInput } from './region-pocket'
+import { generateRegionProfile, type RegionProfileInput } from './region-profile'
 import {
   DrillingInputSchema,
   FacingInputSchema,
   PocketInputSchema,
   ProfileInputSchema,
+  RegionPocketInputSchema,
+  RegionProfileInputSchema,
 } from './schemas'
 import { toolpathStats } from './stats'
 import { turnToolpath, type SetupWcs } from './wcs'
@@ -28,6 +35,8 @@ export type GeneratorRequest = (
   | { readonly kind: 'pocket'; readonly inputs: readonly PocketInput[] }
   | { readonly kind: 'drilling'; readonly inputs: readonly DrillingInput[] }
   | { readonly kind: 'profile'; readonly inputs: readonly ProfileInput[] }
+  | { readonly kind: 'regionPocket'; readonly inputs: readonly RegionPocketInput[] }
+  | { readonly kind: 'regionProfile'; readonly inputs: readonly RegionProfileInput[] }
 ) & {
   /**
    * The setup's quarter turn (v0.2 task C3): the inputs are in the face frame, the toolpath is
@@ -51,7 +60,15 @@ export const GeneratorRequestSchema: z.ZodType<GeneratorRequest> = z.discriminat
     wcs,
   }),
   z.object({ kind: z.literal('profile'), inputs: one(ProfileInputSchema), wcs }),
+  z.object({ kind: z.literal('regionPocket'), inputs: one(RegionPocketInputSchema), wcs }),
+  z.object({ kind: z.literal('regionProfile'), inputs: one(RegionProfileInputSchema), wcs }),
 ])
+
+/** The 2D port of the worker, loaded on first use; the region generators need it. */
+export type PortSource = () => AppResult<Region2dPort>
+
+const noPort: PortSource = () =>
+  fail('internal.unexpected', 'no 2D port for a region generator', { where: 'generateRequest' })
 
 /**
  * The toolpath of one plan operation in the setup's WCS; `steps` per level/pass, and per hole
@@ -60,15 +77,20 @@ export const GeneratorRequestSchema: z.ZodType<GeneratorRequest> = z.discriminat
 export function generateRequest(
   request: GeneratorRequest,
   steps: Steps = noSteps,
+  region2d: PortSource = noPort,
 ): AppResult<Toolpath> {
-  const tp = generateLocal(request, steps)
+  const tp = generateLocal(request, steps, region2d)
   const turn = request.wcs
   if (turn === undefined) return tp
   return tp.map((t) => turnToolpath(t, turn, request.inputs[0]?.maxFeedRate))
 }
 
 /** The toolpath in the face frame (generators are top-down). */
-function generateLocal(request: GeneratorRequest, steps: Steps): AppResult<Toolpath> {
+function generateLocal(
+  request: GeneratorRequest,
+  steps: Steps,
+  region2d: PortSource,
+): AppResult<Toolpath> {
   switch (request.kind) {
     case 'facing':
       return generateFacing(request.inputs[0]!, steps)
@@ -78,6 +100,14 @@ function generateLocal(request: GeneratorRequest, steps: Steps): AppResult<Toolp
       return generateProfile(request.inputs[0]!, steps)
     case 'drilling':
       return generateHoles(request.inputs, steps)
+    case 'regionPocket': {
+      const input = request.inputs[0]!
+      return region2d().andThen((port) => generateRegionPocket(input, port, steps))
+    }
+    case 'regionProfile': {
+      const input = request.inputs[0]!
+      return region2d().andThen((port) => generateRegionProfile(input, port, steps))
+    }
   }
 }
 

@@ -8,7 +8,9 @@ import { Err, fail, Ok, type AppResult } from '../../shared/result'
 import { toGeometryInput } from '../design/geometry-input'
 import { localStock } from '../geometry/face'
 import type { Region2dPort } from '../geometry/2d/port'
+import { chainLength } from '../geometry/2d/measure'
 import { isAnalyticOperation, type OperationGeometry, type StockGeometry } from '../geometry/model'
+import { pocketRegion, profileChain, tabCentres } from '../geometry/outline'
 import type { Tool } from '../library/tool'
 import type { ResolvedFeeds } from '../plan/feeds'
 import type { PlanOperationInput } from '../plan/inputs'
@@ -21,6 +23,7 @@ import type {
   DrillingOperation,
   ToolpathTool,
 } from './model'
+import type { RegionProfileOperation } from './region-profile'
 import type { GeneratorRequest } from './request'
 import { setupWcs, toWcs } from './wcs'
 
@@ -95,6 +98,34 @@ export function nearestNeighbourOrder<T extends { readonly center: readonly [num
     at = h!.center
   }
   return out
+}
+
+/**
+ * A general profile (v0.3 T2 wiring) as `generateRegionProfile` takes it, in the face frame: K3's
+ * chain from its start point, through cuts from the stock face (Z 0) down `thickness`, blind `on`
+ * grooves down their depth; tab centres only on a closed loop cut through (`tabStretches`' rule).
+ * Doc: docs/modes/plan-v0.3.md#wiring-t1-t2
+ */
+export function regionProfileOperation(
+  op: Extract<OperationGeometry, { kind: 'profile' }>,
+  thickness: number,
+): RegionProfileOperation {
+  const { chain, closed } = profileChain(op)
+  const through = op.depth === undefined
+  return {
+    chain,
+    closed,
+    side: op.side,
+    slotWidth: op.slotWidth,
+    onZ: 0,
+    depth: op.depth ?? thickness,
+    through,
+    tabs: {
+      positions: closed && through ? tabCentres(chainLength(chain), op.tabs) : [],
+      width: op.tabs.width,
+      thickness: op.tabs.thickness,
+    },
+  }
 }
 
 /**
@@ -180,22 +211,6 @@ export function toGeneratorInputs(
           data: { planOperationId: id, operations: ops.length },
         })
   }
-  // general shapes (named, rotated, a profile `on`, tab positions) get generators with T1/T2
-  const analytic = <K extends 'pocket' | 'profile'>(op: Extract<OperationGeometry, { kind: K }>) =>
-    isAnalyticOperation(op)
-      ? Ok(op)
-      : fail('plan.check', `${op.id}: toolpaths of this shape come with a later v0.3 task`, {
-          issues: [
-            {
-              path: ['operations', op.id, 'shape'],
-              rule: 'shapeToolpathLater',
-              message: 'named, rotated and on-line shapes and tab positions get toolpaths later',
-              params: { operation: op.id },
-            },
-          ],
-          where: WHERE,
-          data: { planOperationId: id },
-        })
   switch (s.kind) {
     case 'facing':
       return single('facing').andThen((operation) =>
@@ -218,52 +233,62 @@ export function toGeneratorInputs(
         })),
       )
     case 'pocket':
-      return single('pocket')
-        .andThen(analytic)
-        .andThen((operation) =>
-          milling().map((c): GeneratorRequest => ({
-            kind: 'pocket',
-            ...turned,
-            inputs: [
-              {
-                ...base,
-                cutting: c,
-                operation,
-                strategy: {
-                  entry: s.entry,
-                  helixDiameter: s.helixDiameter,
-                  rampAngle: s.rampAngle,
-                  finishAllowance: s.finishAllowance,
-                  finishStepdown: s.finishStepdown,
-                  direction: s.direction,
-                },
-              },
-            ],
-          })),
-        )
+      return single('pocket').andThen((op) =>
+        milling().map((c): GeneratorRequest => {
+          const strategy = {
+            entry: s.entry,
+            helixDiameter: s.helixDiameter,
+            rampAngle: s.rampAngle,
+            finishAllowance: s.finishAllowance,
+            finishStepdown: s.finishStepdown,
+            direction: s.direction,
+          }
+          // v0.1 rectangles and circles keep the v0.1 generator (byte-identical v0.1/v0.2
+          // output); general shapes go to the region generator in the face frame (T1 wiring)
+          return isAnalyticOperation(op)
+            ? {
+                kind: 'pocket',
+                ...turned,
+                inputs: [{ ...base, cutting: c, operation: op, strategy }],
+              }
+            : {
+                kind: 'regionPocket',
+                ...turned,
+                inputs: [{ ...base, cutting: c, operation: pocketRegion(op), strategy }],
+              }
+        }),
+      )
     case 'profile':
-      return single('profile')
-        .andThen(analytic)
-        .andThen((operation) =>
-          milling().map((c): GeneratorRequest => ({
-            kind: 'profile',
+      return single('profile').andThen((op) =>
+        milling().map((c): GeneratorRequest => {
+          const strategy = {
+            entry: s.entry,
+            rampAngle: s.rampAngle,
+            breakthrough: s.breakthrough,
+            finishAllowance: s.finishAllowance,
+            direction: s.direction,
+          }
+          if (isAnalyticOperation(op))
+            return {
+              kind: 'profile',
+              ...turned,
+              inputs: [{ ...base, cutting: c, operation: op, strategy }],
+            }
+          return {
+            kind: 'regionProfile',
             ...turned,
             inputs: [
               {
                 ...base,
                 cutting: c,
-                operation,
-                strategy: {
-                  entry: s.entry,
-                  rampAngle: s.rampAngle,
-                  breakthrough: s.breakthrough,
-                  finishAllowance: s.finishAllowance,
-                  direction: s.direction,
-                },
+                operation: regionProfileOperation(op, stock.thickness),
+                // no plan parameter yet: the documented default 0.5 D (plan-v0.3.md § Profile)
+                strategy: { ...strategy, leadRadius: tool.diameter / 2 },
               },
             ],
-          })),
-        )
+          }
+        }),
+      )
     case 'drilling': {
       const strategy: DrillingStrategy =
         s.cycle === 'simple'

@@ -1,8 +1,8 @@
 // Plans of parts with named shapes (v0.3 K3): the toolpath input hash covers the shape
-// definition, and generators refuse general shapes with plan.check until T1/T2.
-// Doc: docs/architecture/shapes.md#implementation-k3
+// definition, and general shapes map to the region generators (T1/T2 wiring).
+// Doc: docs/architecture/shapes.md#implementation-k3, docs/modes/plan-v0.3.md#wiring-t1-t2
 import { describe, expect, it } from 'vitest'
-import { expectErrCode, expectOk } from '../../shared/testing/result'
+import { expectOk } from '../../shared/testing/result'
 import { nodeRegion2d } from '../geometry/2d/testing/node-wasm'
 import { toGeneratorInputs } from '../toolpath/inputs'
 import { planOperationInputs } from './inputs'
@@ -11,7 +11,7 @@ import { planSetup } from './plan.fixture'
 const region2d = nodeRegion2d()
 
 describe('plans with named shapes', () => {
-  it('hash the shape definition; generators wait for T1/T2', async () => {
+  it('hash the shape definition; general shapes go to the region generator', async () => {
     const s = await planSetup({ services: { region2d } })
     await s.run('design.shape.add', {
       partId: s.partId,
@@ -42,7 +42,6 @@ describe('plans with named shapes', () => {
     if (item.kind !== 'rectangle') throw new Error('rectangle expected')
     item.length = { ...item.length, source: '30' }
     expect(named(doc).inputHash).not.toBe(input.inputHash)
-    const e = expectErrCode(toGeneratorInputs(input, region2d), 'plan.check')
-    expect(e.issues[0]!.rule).toBe('shapeToolpathLater')
+    expect(expectOk(toGeneratorInputs(input, region2d)).kind).toBe('regionPocket')
   })
 })
