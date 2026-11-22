@@ -12,6 +12,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { EXIT, exitCodeOf } from '../../core/agent/exit-codes'
 import { agentError, errorText } from '../../core/agent/results'
 import { SESSION_TOOLS, type AgentSession } from '../../core/agent/session'
+import { ResultShaper, splitDetail } from '../../core/agent/shape'
 import { buildAgentTools, filterAreas, toMcpName, type AgentTool } from '../../core/agent/tools'
 import type { CommandOutcome } from '../../core/commands/dispatcher'
 import type { OpenProjectInfo } from '../../core/project/lifecycle'
@@ -526,6 +527,7 @@ async function batchCommand(c: Ctx): Promise<number> {
   const h = await headless(c)
   if (h === undefined) return EXIT.internal
   const s = h.host.openSession(cliSource())
+  const shaper = new ResultShaper(s)
   let code: number = EXIT.ok
   const fail1 = (e: AppError) => {
     if (code === EXIT.ok) code = exitCodeOf(e.code)
@@ -550,7 +552,14 @@ async function batchCommand(c: Ctx): Promise<number> {
         line(req.map(() => ({ value: null, revision: 0 })))
         continue
       }
-      const { name, args, expectedRevision, apply } = req.unwrap()
+      const { name, args: rawArgs, expectedRevision, apply } = req.unwrap()
+      // summaries, warning changes and compact numbers, as over MCP (llm-api.md#result-size)
+      const split = splitDetail(name, rawArgs)
+      if (split.isErr()) {
+        line(Err(split.unwrapErr()))
+        continue
+      }
+      const { args, view } = split.unwrap()
       const call = await s.call(
         name,
         expectedRevision === undefined && apply === undefined
@@ -561,7 +570,7 @@ async function batchCommand(c: Ctx): Promise<number> {
               ...(apply === undefined ? {} : { apply }),
             },
       )
-      line(call.result)
+      line(shaper.shape(call, args, view).result)
     }
     const projectKey = key.unwrap()
     if (projectKey !== undefined) {

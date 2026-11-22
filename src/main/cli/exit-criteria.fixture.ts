@@ -174,9 +174,10 @@ export async function exitCriteriaFlow(call: Call, dir: string): Promise<FlowRes
   const designed = (await ok<PartGet>('design.part.get', { partId })).value
   expect(designed.stock.values).toMatchObject({
     shape: 'block',
-    length: { source: '100' },
-    width: { source: '60' },
-    thickness: { source: '20' },
+    // quantities entered as plain numbers come back as numbers (llm-api.md#result-size)
+    length: 100,
+    width: 60,
+    thickness: 20,
   })
   const designOps = designed.part.operations
   expect(designOps.map((o) => o['kind'])).toEqual([
@@ -189,15 +190,16 @@ export async function exitCriteriaFlow(call: Call, dir: string): Promise<FlowRes
     'profile',
   ])
   expect(designOps[1]).toMatchObject({
-    shape: { kind: 'rectangle', cornerRadius: { source: '4' } },
-    floorRadius: { source: '2' },
+    shape: { kind: 'rectangle', cornerRadius: 4 },
+    floorRadius: 2,
   })
-  expect(designOps[6]).toMatchObject({ tabs: { count: { source: '4' } } })
+  expect(designOps[6]).toMatchObject({ tabs: { count: 4 } })
 
   // ── Criterion: plan one setup ─────────────────────────────────────────────────────────────
   const { planId } = (
     await ok<{ planId: string }>('plan.create', { partId, machineLibraryItemId: machine })
   ).value
+  // plan.get's summary (llm-api.md#result-size): tools by name
   const planned = (await ok<PlanGet>('plan.get', { planId })).value.plan
   expect(planned.setups).toHaveLength(1)
   const planOps = planned.setups[0]!.operations
@@ -206,8 +208,7 @@ export async function exitCriteriaFlow(call: Call, dir: string): Promise<FlowRes
     designOps.map((o) => o['id'] as string).sort(),
   )
   // the drill has no feeds-and-speeds preset (known issue): give its operations cutting values
-  const drill = planned.snapshots.find((s) => s.kind === 'tool' && s.values.name === 'Drill 6')
-  const drillOps = planOps.filter((o) => o.tool === drill?.id)
+  const drillOps = planOps.filter((o) => o.tool === 'Drill 6')
   expect(drillOps.length).toBeGreaterThan(0)
   for (const op of drillOps)
     await ok('plan.operation.update', {
@@ -298,7 +299,7 @@ export async function exitCriteriaFlow(call: Call, dir: string): Promise<FlowRes
   const listed = (await ok<ProjectList>('project.list')).value.projects
   expect(listed).toEqual([expect.objectContaining({ key: created.value.key, dirty: false })])
   const partBefore = (await ok('design.part.get', { partId })).value
-  const planBefore = (await ok('plan.get', { planId })).value
+  const planBefore = (await ok('plan.get', { planId, detail: 'full' })).value
   await ok('project.close', { key: created.value.key })
   expect((await ok<ProjectList>('project.list')).value.projects).toEqual([])
   // the closed project is gone from the session (the flow's only failing call)
@@ -309,7 +310,7 @@ export async function exitCriteriaFlow(call: Call, dir: string): Promise<FlowRes
   const reopened = await ok<{ key: string; alreadyOpen: boolean }>('project.open', { file })
   expect(reopened.value.alreadyOpen).toBe(false)
   expect((await ok('design.part.get', { partId })).value).toEqual(partBefore)
-  expect((await ok('plan.get', { planId })).value).toEqual(planBefore)
+  expect((await ok('plan.get', { planId, detail: 'full' })).value).toEqual(planBefore)
   // the reopened project exports the same program
   const again = join(dir, 'bracket-reopened.nc')
   await ok('plan.export', { planId, target: again })
@@ -335,8 +336,7 @@ interface PartGet {
 }
 interface PlanGet {
   plan: {
-    setups: { operations: { id: string; tool: string; designOperationIds: string[] }[] }[]
-    snapshots: { id: string; kind: string; values: { name: string } }[]
+    setups: { operations: { id: string; tool: string | null; designOperationIds: string[] }[] }[]
   }
 }
 interface ExportResult {

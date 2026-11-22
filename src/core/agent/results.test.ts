@@ -5,7 +5,7 @@ import { AppError } from '../../shared/errors/app-error'
 import { ERROR_CODES, type ErrorCode } from '../../shared/errors/codes'
 import { Err, Ok } from '../../shared/result'
 import { EXIT, exitCodeOf } from './exit-codes'
-import { toToolResult } from './results'
+import { resultText, TEXT_FULL_CHARS, toToolResult } from './results'
 import type { Digest } from './session'
 
 const digest: Digest = {
@@ -61,6 +61,22 @@ describe('tool results', () => {
     expect(r.content[0]?.text).toBe(
       '{"value":{"jobId":"job-1"},"revision":2}\nJob started; wait with job_wait { jobId }.',
     )
+  })
+
+  it('repeats a large result as an outline in the text (structuredContent has all of it)', () => {
+    const items = Array.from({ length: 200 }, (_, i) => ({
+      id: `op-${i}`,
+      nested: { deep: { x: i } },
+    }))
+    const structured = { value: { items, name: 'p' }, revision: 7 }
+    const r = toToolResult({ name: 'plan.get', kind: 'query', result: Ok(structured) })
+    expect(r.structuredContent).toEqual(structured)
+    const text = r.content[0]!.text
+    expect(text.length).toBeLessThan(TEXT_FULL_CHARS + 100)
+    expect(text).toContain('"revision":7')
+    expect(text).toContain('… 197 more')
+    expect(text).toMatch(/outline of \d+ chars; the full result is in structuredContent/)
+    expect(resultText({ small: true })).toBe('{"small":true}')
   })
 
   it('maps an AppError with issues to a tool execution error (no stack)', () => {

@@ -24,11 +24,13 @@ import {
 import type { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js'
 import { PRIMER } from '../../core/agent/primer'
 import { toToolResult } from '../../core/agent/results'
+import { ResultShaper, splitDetail } from '../../core/agent/shape'
 import type { AgentSession } from '../../core/agent/session'
 import { fromMcpName, mcpToolList, type AgentTool } from '../../core/agent/tools'
 import { systemTimers, type Timers } from '../../core/commands/context'
 import type { MachineService } from '../../core/run/service'
 import type { Logger } from '../../shared/logging'
+import { Err } from '../../shared/result'
 import type { AppHost } from '../host/app-host'
 
 export const SERVER_NAME = 'dfyom'
@@ -78,6 +80,8 @@ export function createMcpServer(o: McpServerOptions): Server {
   )
   const byMcpName = new Map(o.host.tools.map((t) => [t.mcpName, t]))
   const list = mcpToolList(o.listed)
+  // summaries, warning changes and compact numbers (docs/architecture/llm-api.md#result-size)
+  const shaper = new ResultShaper(o.session)
 
   server.oninitialized = () => {
     const client = server.getClientVersion()?.name
@@ -104,7 +108,11 @@ export function createMcpServer(o: McpServerOptions): Server {
     if (tool === undefined)
       throw new McpError(ErrorCode.InvalidParams, `unknown tool ${req.params.name}`)
     const token = req.params._meta?.progressToken
-    const call = await o.session.call(fromMcpName(tool.mcpName), req.params.arguments ?? {}, {
+    const name = fromMcpName(tool.mcpName)
+    const split = splitDetail(name, req.params.arguments ?? {})
+    if (split.isErr()) return toToolResult({ name, kind: 'query', result: Err(split.unwrapErr()) })
+    const { args, view } = split.unwrap()
+    const call = await o.session.call(name, args, {
       signal: extra.signal,
       ...(token === undefined
         ? {}
@@ -123,7 +131,7 @@ export function createMcpServer(o: McpServerOptions): Server {
                 .catch(() => undefined),
           }),
     })
-    return toToolResult(call)
+    return toToolResult(shaper.shape(call, args, view))
   }
 
   // --- resources ---------------------------------------------------------------------------

@@ -313,6 +313,30 @@ export class AgentSession {
     return undefined
   }
 
+  /** The registry result schema of a command or query (result shaping, shape.ts). */
+  resultSchema(name: string): z.ZodType | undefined {
+    for (const reg of [this.host.registries.app, this.host.registries.project]) {
+      const c = reg.command(name)
+      if (c.isSome()) return c.unwrap().result as z.ZodType
+      const q = reg.query(name)
+      if (q.isSome()) return q.unwrap().result as z.ZodType
+    }
+    return undefined
+  }
+
+  /**
+   * A query of the bound project as this session, outside the call flow: no boundary report and
+   * no digest (the result shaper's summaries, shape.ts).
+   */
+  peek(name: string, args: object): AppResult<unknown> {
+    const bound = this.bound()
+    if (bound.isNone()) return noProject(name)
+    return bound
+      .unwrap()
+      .query(name, args, this.source)
+      .map((o) => o.value)
+  }
+
   /** One tool call, inside `atBoundary` (entry kind = the source's kind). Never rejects. */
   async call(name: string, rawArgs: unknown, opts: CallOptions = {}): Promise<SessionCallResult> {
     const kind = this.kindOf(name) ?? 'command'

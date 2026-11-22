@@ -1,5 +1,6 @@
 /**
- * MCP `CallToolResult` of a session call: outcome, `AppError` and the action digest.
+ * MCP `CallToolResult` of a session call: outcome (text: compact JSON or an outline), `AppError`
+ * and the action digest.
  * Doc: docs/architecture/llm-api.md#results
  */
 import type { AppError, AppErrorData } from '../../shared/errors/app-error'
@@ -30,6 +31,38 @@ export function errorText(e: AppError): string {
   return lines.join('\n')
 }
 
+/** Results up to this size are repeated in full as text; larger ones as an outline. */
+export const TEXT_FULL_CHARS = 2000
+
+/**
+ * The text content of a result: the JSON when it is small, else an outline of it (nested
+ * objects and long lists elided) noting that the full result is in `structuredContent`
+ * (docs/architecture/llm-api.md#result-size).
+ */
+export function resultText(structured: object): string {
+  const json = JSON.stringify(structured)
+  if (json.length <= TEXT_FULL_CHARS) return json
+  for (let depth = 6; depth >= 1; depth--) {
+    const text = JSON.stringify(outline(structured, depth))
+    if (text.length <= TEXT_FULL_CHARS || depth === 1)
+      return `${text}\n(outline of ${json.length} chars; the full result is in structuredContent)`
+  }
+  return json
+}
+
+const LIST_ITEMS = 3
+
+function outline(v: unknown, depth: number): unknown {
+  if (Array.isArray(v)) {
+    if (depth === 0) return `[${v.length} items]`
+    const head = v.slice(0, LIST_ITEMS).map((x) => outline(x, depth - 1))
+    return v.length > LIST_ITEMS ? [...head, `… ${v.length - LIST_ITEMS} more`] : head
+  }
+  if (typeof v !== 'object' || v === null) return v
+  if (depth === 0) return `{${Object.keys(v).length} keys}`
+  return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, outline(x, depth - 1)]))
+}
+
 export function toToolResult(call: SessionCallResult): ToolCallResult {
   const digest = call.digest
   const meta = digest === undefined ? undefined : { 'dfyom/actions': digest.meta }
@@ -49,7 +82,7 @@ export function toToolResult(call: SessionCallResult): ToolCallResult {
     revision: outcome.revision,
     ...(outcome.applied === undefined ? {} : { applied: outcome.applied }),
   }
-  const lines = [JSON.stringify(structured)]
+  const lines = [resultText(structured)]
   if (call.kind === 'job') lines.push('Job started; wait with job_wait { jobId }.')
   return {
     isError: false,

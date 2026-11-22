@@ -104,6 +104,39 @@ describe('MCP server', () => {
     expect(r._meta?.['dfyom/actions']).toMatchObject({ count: 1 })
   })
 
+  it('shapes results for agents: plan summary, detail "full", warning changes, compact quantities', async () => {
+    const { call, raw } = await connect()
+    const { partId, planId } = await buildSmallPlan(call)
+    const summary = (await call('plan.get', { planId })) as {
+      plan: { setups: { operations: { tool: string | null; toolpath: string }[] }[] }
+      detail: string
+    }
+    expect(summary.detail).toMatch(/detail: "full"/)
+    expect(summary.plan.setups[0]!.operations.map((o) => o.toolpath)).toEqual(['none', 'none'])
+    const full = (await call('plan.get', { planId, detail: 'full' })) as {
+      plan: { snapshots: unknown[]; setups: { clearanceHeight: unknown }[] }
+    }
+    expect(full.plan.snapshots.length).toBeGreaterThan(0)
+    expect(typeof full.plan.setups[0]!.clearanceHeight).toBe('number')
+    // detail on a tool that does not take it is an unknown argument
+    const refused = await raw('design.part.get', { partId, detail: 'full' })
+    expect(refused.isError).toBe(true)
+    // an edit lists only the warnings that changed (none: just the count)
+    await call('design.warning.list', { partId })
+    const edited = (await call('design.facing.update', {
+      partId,
+      operationId: 'facing1',
+      depth: '0.6',
+    })) as { warnings: { count: number; added?: unknown[] } }
+    expect(edited.warnings.added).toBeUndefined()
+    expect(typeof edited.warnings.count).toBe('number')
+    const r = await raw('design.part.get', { partId })
+    expect(
+      (r.structuredContent?.value as { part: { operations: { depth: unknown }[] } }).part
+        .operations[0]!.depth,
+    ).toBe(0.6)
+  })
+
   it('serves the action log as a subscribable resource and the schemas', async () => {
     const { host, client, call } = await connect()
     const { key } = (await call('project.create', { name: 'P', unitSystem: 'mm' })) as {
