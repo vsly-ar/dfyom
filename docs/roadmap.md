@@ -49,6 +49,8 @@ Out of scope: general shapes, Shape Editor and SVG (v0.3); workholding and in-pr
 
 Split from v0.2 by D16 (Q14), accepted with the v0.2 review (D18); its docs are written and accepted before it starts. Named shapes of lines and arcs on any face, cut `inside`, `outside` or on the centreline (Q12): general loops in geometry and toolpaths (pocket clearing with islands, profiles with free-form tabs; free-form floor fillets deferred, Q16), a Shape Editor from primitives with booleans, SVG import with an import report, and shape rotation. Starts from the 2D library chosen by spike S1. Toward the [direction](#direction): **measure and snap to the reference**, since snapping needs shapes and anchors.
 
+Draft tasks, exit criteria (the user's enclosure recreated with its real outline) and status: [plans/v0.3.md](plans/v0.3.md). Docs to accept first: [design-v0.3.md](modes/design-v0.3.md), [plan-v0.3.md](modes/plan-v0.3.md), [architecture/shapes.md](architecture/shapes.md), [ADR 0019](decisions/0019-2d-geometry-library.md) and a [ui.md](conventions/ui.md) amendment for the Shape Editor. A parallel UI lane (D27, 2026-11-22): the [library window](conventions/ui-library-window.md) (B24) and the [view cube](conventions/ui-view-cube.md) (B25). Right after v0.3: hole-type [features](modes/features.md) (B23, D27).
+
 Next after v0.3, in the direction's order (unscheduled): STEP import, assisted recreation and deviation view, the golden-path reference cycle with a UX pass, real-machine readiness, LLM-first readiness for full cycles, from-scratch complex parts.
 
 ## Later (unordered)
