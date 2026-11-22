@@ -21,7 +21,7 @@ import {
   type QueryDef,
 } from '../commands/define'
 import { OPERATION_UPDATE_ARGS, updateOperation, writeOperationList } from '../design/commands'
-import { fieldContext } from '../design/operation'
+import { fieldContext, partFromDTO } from '../design/operation'
 import { OperationIdSchema, PartIdSchema } from '../design/part.dto'
 import { checkReferences } from '../design/surfaces'
 import { checkOperations } from '../design/validate'
@@ -50,6 +50,7 @@ import {
   type PlanOperationDTO,
 } from './plan.dto'
 import { designChanged, hasPlanEdits, planStale } from './snapshot'
+import { sameValue } from './validity'
 import { StepSchema, stepToDTO } from '../feeds-speeds/commands'
 import { DEFAULT_RIGIDITY } from '../feeds-speeds/data'
 import { machineLimits } from '../feeds-speeds/suggest'
@@ -483,6 +484,57 @@ const designOperationUpdate = defineCommand({
     if (ops.isErr()) return ops
     writeOperationList(draft.plans[planId]!.design.part.operations, ops.unwrap())
     return Ok({})
+  },
+})
+
+/**
+ * Copies the `taken` version of a plan operation's design operations back into the plan's part
+ * (one undo step). Unedited operations are left as they are; nothing edited = no patch.
+ * Doc: docs/modes/plan-v0.2.md#plan-only-edits-and-the-snapshot-scene
+ */
+const designOperationRevert = defineCommand({
+  kind: 'document',
+  name: 'plan.design.operation.revert',
+  summary:
+    "Revert the plan-only edits of a plan operation's design operations to the design snapshot as taken (settledDesign).",
+  title: () => 'Revert to design',
+  machine: false,
+  args: z.object({ ...PlanArg, planOperationId: PlanRecordIdSchema }),
+  result: z.object({
+    reverted: z
+      .array(OperationIdSchema)
+      .describe('Design operations whose plan-only edits were reverted (empty: none had any)'),
+  }),
+  run(draft, args) {
+    const where = 'plan.design.operation.revert'
+    const loaded = loadedFor(draft, args.planId, where)
+    if (loaded.isErr()) return loaded
+    const l = loaded.unwrap()
+    const index = findPlanOperation(l, args.planOperationId, where)
+    if (index.isErr()) return index
+    const design = plainCopy(l.dto.design)
+    const reverted: string[] = []
+    for (const id of l.setup.operations[index.unwrap()]!.designOperationIds) {
+      const i = design.part.operations.findIndex((o) => o.id === id)
+      const taken = design.taken.operations.find((o) => o.id === id)
+      if (i < 0 || taken === undefined || sameValue(taken, design.part.operations[i])) continue
+      design.part.operations[i] = plainCopy(taken)
+      reverted.push(id)
+    }
+    if (reverted.length === 0) return Ok({ reverted })
+    // the plan's stock copy may have changed since the snapshot: the reverted part must fit it
+    const part = partFromDTO(design.part)
+    if (part.isErr()) return Err(part.unwrapErr().withContext(where))
+    const ok = checkReferences(part.unwrap().operations, l.stock).andThen(() =>
+      checkOperations(part.unwrap().operations, l.stock),
+    )
+    if (ok.isErr()) return Err(ok.unwrapErr().withContext(where))
+    const target = draft.plans[args.planId]!.design.part.operations
+    for (const id of reverted) {
+      const i = target.findIndex((o) => o.id === id)
+      target[i] = design.part.operations[i]!
+    }
+    return Ok({ reverted })
   },
 })
 
@@ -1305,6 +1357,7 @@ export const PLAN_COMMANDS: readonly AnyCommand[] = [
   planRebuild,
   libraryItemUpdate,
   designOperationUpdate,
+  designOperationRevert,
   machineSet,
   setupUpdate,
   operationUpdate,

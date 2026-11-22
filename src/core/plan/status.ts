@@ -28,6 +28,7 @@ export const ALLOWED: Readonly<Record<string, readonly PlanStatus[]>> = {
   'plan.rebuild': EDITABLE,
   'plan.libraryItem.update': EDITABLE,
   'plan.design.operation.update': ['settledDesign'],
+  'plan.design.operation.revert': ['settledDesign'],
   'plan.machine.set': EDITABLE,
   'plan.setup.update': EDITABLE,
   'plan.operation.update': EDITABLE,

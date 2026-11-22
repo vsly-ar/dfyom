@@ -42,6 +42,7 @@ describe('plan commands: registry', () => {
       'plan.rebuild',
       'plan.libraryItem.update',
       'plan.design.operation.update',
+      'plan.design.operation.revert',
       'plan.machine.set',
       'plan.setup.update',
       'plan.operation.update',
@@ -368,6 +369,65 @@ describe('plan.design.operation.update (plan-only edits)', () => {
       { planId, operationId: 'nope1', depth: '1' },
       'input.malformed',
     )
+  })
+})
+
+describe('plan.design.operation.revert (plan-v0.2)', () => {
+  const planOpOf = (s: PlanSetup, planId: string, designId: string) =>
+    opsOf(s.plan(planId)).find((o) => o.designOperationIds.includes(designId))!.id
+
+  it('copies the taken version back for that plan operation only, one undo step', async () => {
+    const s = await planSetup()
+    const planId = await s.create()
+    await s.toStatus(planId, 'settledDesign')
+    await s.run('plan.design.operation.update', { planId, operationId: 'pocket1', depth: '7' })
+    await s.run('plan.design.operation.update', { planId, operationId: 'facing1', depth: '1' })
+    const r = await expectUndoRedo(s, 'plan.design.operation.revert', {
+      planId,
+      planOperationId: planOpOf(s, planId, 'pocket1'),
+    })
+    expect(r).toEqual({ reverted: ['pocket1'] })
+    const p = s.plan(planId)
+    expect(p.design.part.operations.find((o) => o.id === 'pocket1')).toEqual(
+      p.design.taken.operations.find((o) => o.id === 'pocket1'),
+    )
+    expect(stale(s, planId).operations.map((o) => o.operationId)).toEqual(['facing1'])
+    // the last edit reverted: the plan has no plan-only edits, a rebuild needs no discard
+    await s.run('plan.design.operation.revert', {
+      planId,
+      planOperationId: planOpOf(s, planId, 'facing1'),
+    })
+    expect(s.plan(planId).design.part).toEqual(s.plan(planId).design.taken)
+    await s.run('plan.rebuild', { planId })
+  })
+
+  it('an unedited plan operation reverts nothing and leaves no undo step', async () => {
+    const s = await planSetup()
+    const planId = await s.create()
+    await s.toStatus(planId, 'settledDesign')
+    const before = s.d.doc
+    const r = await s.run('plan.design.operation.revert', {
+      planId,
+      planOperationId: planOpOf(s, planId, 'pocket1'),
+    })
+    expect(r).toEqual({ reverted: [] })
+    expect(s.d.doc).toBe(before)
+  })
+
+  it('is for settledDesign only and checks the plan operation', async () => {
+    const s = await planSetup()
+    const planId = await s.create()
+    const planOperationId = planOpOf(s, planId, 'pocket1')
+    await s.failWith('plan.design.operation.revert', { planId, planOperationId }, 'plan.status')
+    await s.toStatus(planId, 'finalized')
+    await s.failWith('plan.design.operation.revert', { planId, planOperationId }, 'plan.status')
+    await s.run('plan.status.set', { planId, status: 'settledDesign' })
+    const e = await s.failWith(
+      'plan.design.operation.revert',
+      { planId, planOperationId: 'nope' },
+      'input.malformed',
+    )
+    expect(e.issues[0]).toMatchObject({ rule: 'unknownPlanOperation' })
   })
 })
 
