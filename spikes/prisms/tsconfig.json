@@ -1,0 +1,11 @@
+// Spike S3 (spikes/prisms/results.md): vitest-run TypeScript against src/core, not part of the app
+// build. Run: `npx vitest run -c spikes/prisms/vitest.config.mts`; typecheck: `npx tsc -p spikes/prisms`.
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "noEmit": true
+  },
+  "include": ["*.ts", "*.mts"]
+}
