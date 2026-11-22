@@ -6,20 +6,21 @@ This doc extends the [v0.1 operations](design.md#operations-v01) with two decisi
 
 - **D10, faces:** every operation targets a planar face whose outward normal is ±X, ±Y or ±Z. The face gives the operation a local 2D frame. Plan derives the setups from the face directions ([plan-v0.2.md](plan-v0.2.md#setups-from-face-directions)).
 - **D11, tools:** every operation has a tool field holding either a generalized tool or a specific library tool. This replaces the v0.1 rule "Design never names a tool" ([design.md § Generalized tools](design.md#generalized-tools)).
+- **D16 (Q13, assumed), anchors:** a position names one of nine points of the feature's bounding box ([§ Placement anchors](#placement-anchors)).
 
 Do not implement this doc before the user confirms it ([README.md](../README.md#status-values)).
 
 ## Open decisions (placeholders)
 
-These are still open. This doc does not decide them; sections that touch them say so.
+Q12–Q16 were taken as recommended on 2026-11-21 without a reply (decision D16; the user can veto). With the assumed split this doc is v0.2 and shapes are v0.3 ([roadmap.md](../roadmap.md), [plans/v0.2.md](../plans/v0.2.md)).
 
-| #   | Question                                                                                                                                  | Touches here                                                                                                                                           |
+| #   | Question                                                                                                                                  | Status (D16, assumed unless vetoed)                                                                                                                    |
 | --- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Q12 | Shapes model: named line/arc shapes, `inside` / `outside` / centreline                                                                    | `shape` stays the v0.1 rectangle or circle, now placed in the [face frame](#face-frame). Surface ids of general shapes are not specified here.         |
-| Q13 | Positioning anchors: 9-point vs centre / front-left                                                                                       | Positions stay **centres** in the face frame until Q13 is decided.                                                                                     |
-| Q14 | Split into v0.2 (faces, setups, anchors, tools) and v0.3 (shapes)?                                                                        | None; this doc is written so it works with either split.                                                                                               |
-| Q15 | Multi-setup without workholding or in-process stock?                                                                                      | DFM ignores clamping and material removed by earlier setups ([access checks](#dfm-access-checks)); Plan side in plan-v0.2.md.                          |
-| Q16 | Free-form fillets                                                                                                                         | None; floor fillets stay as in v0.1.                                                                                                                   |
+| Q12 | Shapes model: named line/arc shapes, `inside` / `outside` / centreline                                                                    | Yes, in **v0.3**. In v0.2 `shape` stays the v0.1 rectangle or circle, now placed in the [face frame](#face-frame).                                     |
+| Q13 | Positioning anchors: 9-point vs centre / front-left                                                                                       | **9-point**, in v0.2: [§ Placement anchors](#placement-anchors).                                                                                       |
+| Q14 | Split into v0.2 (faces, setups, anchors, tools) and v0.3 (shapes)?                                                                        | **Split.**                                                                                                                                             |
+| Q15 | Multi-setup without workholding or in-process stock?                                                                                      | **Yes, without both.** DFM ignores clamping and material removed by earlier setups ([access checks](#dfm-access-checks)); Plan side in plan-v0.2.md.   |
+| Q16 | Free-form fillets                                                                                                                         | Free-form tabs yes, free-form floor fillets deferred (both with v0.3 shapes). In v0.2 floor fillets stay as in v0.1.                                   |
 | Q17 | Project-wide **apply**: Enter (or an "Apply" button with the pending count) runs the deferred follow-up work of all pending edits at once | Decided as D13 (2026-11-21), draft in [apply.md](../architecture/apply.md). The [auto tool choice](#auto-choice) runs on Apply: [§ Apply](#apply-d13). |
 
 ## Faces and face targets
@@ -63,7 +64,7 @@ Each face has a **face frame** `{ origin, u, v, n }` in the part frame: `n` the 
 (L, W, T = stock length, width, thickness; part zero and side numbering as in [design.md](design.md#part-and-stock-v01).)
 
 - All faces of one direction share `u`, `v` and the origin's (u, v); only the level along `n` differs. So a position means the same point on `stock.side[1]` and on the floor of a pocket in it, as v0.1 positions mean the same on `stock.top` and `facing1.floor`.
-- `shape.center` and the drilling `center` are `[u, v]` in the frame of `on`. Changing `on` to a face of another direction keeps the numbers (the feature moves to the new face); the [access checks](#dfm-access-checks) warn if it no longer fits. Anchors other than the centre: Q13.
+- `shape.center` and the drilling `center` are `[u, v]` in the frame of `on`. Changing `on` to a face of another direction keeps the numbers (the feature moves to the new face); the [access checks](#dfm-access-checks) warn if it no longer fits. Anchors other than the centre: [§ Placement anchors](#placement-anchors).
 - `depth` runs along `−n` from the `on` face. The removal region is the shape extruded from `on.level − depth` outward through the stock's face of that direction (overshoot, [geometry.md](../architecture/geometry.md#non-top-faces-v02-draft)): a 3-axis tool removes everything between the floor and the outside along `n`. For `+z` this is the v0.1 rule.
 - Surface roles keep their v0.1 numbering, read in the face frame: `wall[0]` is the wall at the lowest `v` ("front" seen from outside), then counter-clockwise seen from outside; tabs start at the middle of `wall[0]` (circle: at the lowest `v`). For `+z` this is v0.1.
 - The frame orientation, especially the bottom's roll axis, is [question B](#questions-raised-by-this-draft).
@@ -107,6 +108,18 @@ New checks (codes to register with the implementation):
 | `dfm.setups`    | part                                               | The part uses more than one approach direction: "needs N setups (top, right, bottom)". Information for beginners; Plan derives them.                                                                                                                       | info     |
 
 Out of v0.2 DFM (Q15): workholding and clamping access, material already removed by an earlier setup, and thin walls between features from opposite faces (a geometry check later).
+
+## Placement anchors
+
+Draft for Q13 (9-point, assumed by D16). Every positioned feature (pocket and profile `shape`, drilling `center`) states **which point of its bounding box** its position gives.
+
+- **Anchor:** one of nine points of the shape's bounding rectangle in the [face frame](#face-frame): `{ u: 'min' | 'centre' | 'max', v: 'min' | 'centre' | 'max' }`. Seen from outside the face, `min`/`min` is the lower-left (front-left on the top face). A circle uses its bounding square; a drilling has only the centre (a hole is a point).
+- **Data model:** optional `shape.anchor` next to `shape.center`; `center` then means "the anchor point" (renaming it to `position` only if cheap, decided in task A2). Absent `anchor` = centre, so v0.1 projects load unchanged (no `schemaVersion` change).
+- **Changing the anchor keeps the geometry:** `design.<kind>.update { anchor }` recomputes the position so the feature does not move (one undo step). If the position is an expression, the change fails with `model.invariant`, rule `anchorExpression`; the user removes the formula first.
+- **Size edits keep the anchor point fixed:** with a `min`/`min` anchor, a longer pocket grows toward `+u`, so a corner stays where it was dimensioned.
+- **Default anchor** for new operations is a setting (default: centre); agents pass `anchor` or get the centre.
+- **UI:** a 3 × 3 anchor picker beside the position fields, and the viewport marks the anchor point of the selected feature. Rules go to [ui.md](../conventions/ui.md) on acceptance.
+- References to other features' edges or to a [reference model](reference-model.md) are later (backlog B10, snapping).
 
 ## Operation tool
 
@@ -232,3 +245,5 @@ Each with options and the draft's recommendation; the user answers before `accep
 | H   | Auto choice during adjust-popover steps               | (a) every committed step, as every command; (b) skip gesture steps and choose on apply                                             | Settled by D13: (b), [apply.md](../architecture/apply.md#adjust-popover)                            |
 | I   | Generalized drill and point angle                     | (a) a generalized drill takes the operation's `pointAngle`; (b) it stores its own                                                  | (a): the operation already states the result                                                        |
 | J   | Updating a specific tool's snapshot from the library  | (a) a new `design.snapshot.update { snapshotId }` for tool and stock snapshots; (b) re-pick the tool (`design.operation.tool.set`) | (a): one explicit, undoable path for every design snapshot, as plans have `plan.libraryItem.update` |
+
+A–J (except H, settled by D13) were answered with the recommendations by decision D12 (2026-11-21, self, draft); the user confirms them with this doc.
