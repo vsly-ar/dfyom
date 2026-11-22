@@ -45,6 +45,7 @@ export function partWarnings(
       tools,
       unitSystem: units === 'inch' ? 'inch' : 'metric',
       operationTools: operationTools(part.operations, snapshots),
+      ...(region2d !== undefined && { region2d }),
     }),
   )
 }

@@ -153,7 +153,13 @@ export const DfmWarningSchema: z.ZodType<DfmWarning> = z
       .describe('Its parameter to change, e.g. shape.cornerRadius'),
     params: z.record(
       z.string(),
-      z.union([z.number(), z.string(), z.boolean(), z.array(z.string()).readonly()]),
+      z.union([
+        z.number(),
+        z.string(),
+        z.boolean(),
+        z.array(z.string()).readonly(),
+        z.array(z.number()).readonly(),
+      ]),
     ),
     suggestion: z
       .object({ relation: z.enum(['atLeast', 'atMost']), value: z.number() })

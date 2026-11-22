@@ -2,12 +2,22 @@
  * The operation tool field at work: resolving a design tool for the DFM rules and the fit table,
  * the auto choice (keep if it fits → best fitting library tool → largest fitting generalized tool
  * of the standard series) and the candidates list. Pure: the library arrives as items.
- * Doc: docs/modes/design-v0.2.md#auto-choice, docs/modes/design-v0.2.md#commands-and-queries-v02
+ * General shapes (v0.3 K4) are measured with the 2D port (`shapeMeasure`): fit by the region's
+ * width and inside corners, and fitting tools that leave no rest material rank first.
+ * Doc: docs/modes/design-v0.2.md#auto-choice, docs/modes/design-v0.2.md#commands-and-queries-v02,
+ * docs/modes/design-v0.3.md#dfm-checks-for-shapes
  */
 import { None, Some, type Option } from '../../shared/result'
 import type { DfmTool, OperationTool } from '../geometry/dfm'
 import { localStock } from '../geometry/face'
-import type { OperationGeometry, PartGeometryInput, StockGeometry } from '../geometry/model'
+import type { Region2dPort } from '../geometry/2d/port'
+import {
+  isAnalyticOperation,
+  type OperationGeometry,
+  type PartGeometryInput,
+  type StockGeometry,
+} from '../geometry/model'
+import { FIT_SLACK, shapeMeasure, type ShapeMeasure } from '../geometry/shape-measure'
 import { toolFit, type ToolUnfit } from '../geometry/tool-fit'
 import type { MaterialClass } from '../library/item'
 import type { LibraryItem } from '../library/library-item'
@@ -94,6 +104,8 @@ export interface ChoiceInput {
   /** The library's readable tool items. */
   readonly library: readonly LibraryItem[]
   readonly snapshots: ProjectDoc['snapshots']
+  /** The 2D port for general shapes; absent = their size rules and rest material are skipped. */
+  readonly region2d?: Region2dPort
 }
 
 /** One fitting library tool, in auto-choice order. */
@@ -101,6 +113,8 @@ export interface LibraryCandidate {
   readonly item: LibraryItem
   readonly tool: Tool
   readonly hasPreset: boolean
+  /** It leaves rest material in the operation's general shape (`dfm.restMaterial`). */
+  readonly leavesRest: boolean
   readonly reasons: readonly string[]
 }
 
@@ -117,31 +131,52 @@ function localOf(input: ChoiceInput): StockGeometry {
   return localStock(input.geometry.direction ?? '+z', input.stock)
 }
 
+/** The measures of the operation's general shape (cached per shape); undefined for v0.1 ones. */
+export function measureOf(input: ChoiceInput): ShapeMeasure | undefined {
+  const g = input.geometry
+  if (input.region2d === undefined || (g.kind !== 'pocket' && g.kind !== 'profile'))
+    return undefined
+  return isAnalyticOperation(g) ? undefined : shapeMeasure(input.region2d, g)
+}
+
 /** The failed fit rule of a tool for the operation, or undefined when it fits. */
 export function fitOf(tool: DfmTool, input: ChoiceInput): ToolUnfit | undefined {
-  return toolFit(tool, input.geometry, localOf(input), metricOf(input.units))
+  return toolFit(tool, input.geometry, localOf(input), metricOf(input.units), measureOf(input))
+}
+
+/** Whether a fitting tool leaves rest material in the operation's general shape. */
+export function leavesRest(tool: DfmTool, input: ChoiceInput): boolean {
+  const m = measureOf(input)
+  return (
+    m !== undefined && tool.type !== 'drill' && m.rest(tool.diameter / 2 - FIT_SLACK).length > 0
+  )
 }
 
 /**
- * The library tools that fit, ranked: has a preset for the stock's material class → largest
- * diameter (fewer passes) → library id.
+ * The library tools that fit, ranked: leaves no rest material (general shapes) → has a preset
+ * for the stock's material class → largest diameter (fewer passes) → library id.
  */
 export function fittingLibraryTools(input: ChoiceInput): LibraryCandidate[] {
   const out: LibraryCandidate[] = []
   for (const item of input.library) {
     const tool = item.values
-    if (!(tool instanceof Tool) || fitOf(dfmTool(tool), input) !== undefined) continue
+    if (!(tool instanceof Tool)) continue
+    const t = dfmTool(tool)
+    if (fitOf(t, input) !== undefined) continue
     const hasPreset = tool.presets.some((p) =>
       p.materialClass.mapOr(false, (c) => c === input.materialClass),
     )
+    const rest = leavesRest(t, input)
     const reasons = [
+      ...(rest ? ['leaves rest material'] : []),
       ...(hasPreset ? [`has a preset for ${input.materialClass}`] : []),
       `diameter ${tool.diameter.canonical} mm`,
     ]
-    out.push({ item, tool, hasPreset, reasons })
+    out.push({ item, tool, hasPreset, leavesRest: rest, reasons })
   }
   return out.sort(
     (a, b) =>
+      Number(a.leavesRest) - Number(b.leavesRest) ||
       Number(b.hasPreset) - Number(a.hasPreset) ||
       b.tool.diameter.canonical - a.tool.diameter.canonical ||
       a.item.id.localeCompare(b.item.id),
@@ -150,7 +185,8 @@ export function fittingLibraryTools(input: ChoiceInput): LibraryCandidate[] {
 
 /**
  * The generalized tool the auto choice would pick: the largest standard size that fits (bull
- * nose with RE = `floorRadius`; drill with DC = the hole's diameter). None if nothing fits.
+ * nose with RE = `floorRadius`; drill with DC = the hole's diameter), for a general shape the
+ * largest that fits and leaves no rest material if one does. None if nothing fits.
  */
 export function generalizedChoice(input: ChoiceInput): Option<GeneralizedTool> {
   const { op, units } = input
@@ -169,14 +205,17 @@ export function generalizedChoice(input: ChoiceInput): Option<GeneralizedTool> {
   const type: ToolType = bullNose ? 'bullNoseEndMill' : 'flatEndMill'
   const cornerRadius: Option<Quantity> = bullNose ? Some(plain(op.floorRadius)) : None
   const sizes = STANDARD_SIZES[units]
+  let fallback: Option<GeneralizedTool> = None
   for (let i = sizes.length - 1; i >= 0; i--) {
     const diameter = Quantity.parse(sizes[i]!, { kind: 'length', defaultUnit: 'mm' }).unwrap()
     const t: GeneralizedTool = { kind: 'generalized', type, diameter, cornerRadius }
     // a bull nose needs RE < DC/2
     if (bullNose && cornerRadius.unwrap().canonical >= diameter.canonical / 2) continue
-    if (fits(t)) return Some(t)
+    if (!fits(t)) continue
+    if (!leavesRest(generalizedDfmTool(t), input)) return Some(t)
+    if (fallback.isNone()) fallback = Some(t)
   }
-  return None
+  return fallback
 }
 
 /**
