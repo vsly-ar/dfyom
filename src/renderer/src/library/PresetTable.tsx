@@ -1,6 +1,7 @@
-// A tool's cutting presets as an editable table (library.md#tool `presets`): one row per preset
-// with its name, material class, spindle speed, feed rate, plunge rate, optional stepdown and
-// stepover, and the chip load derived from feed / (speed × flutes), read-only. Cells parse as the
+// A tool's cutting presets (library.md#tool `presets`), one stacked block per preset so every value
+// fits the editor without sideways scrolling: name, material class and the chip load derived from
+// feed / (speed × flutes), read-only, above spindle speed, feed rate, plunge rate and the optional
+// stepdown and stepover (compact labels, full names in the tooltip and accessible name). Cells parse as the
 // fields do (a bare number in the window's unit, L5); an invalid entry stays in the cell, marked,
 // and is not committed. Doc: docs/conventions/ui-library-window.md#layout
 import { Plus, Trash2 } from 'lucide-react'
@@ -142,88 +143,87 @@ export function PresetTable({
       {presets.length === 0 ? (
         <p className={styles['emptyNote']}>{m.empty}</p>
       ) : (
-        <div className={styles['tableScroll']}>
-          <table className={styles['presetTable']}>
-            <caption className={styles['srOnly']}>{m.caption}</caption>
-            <thead>
-              <tr>
-                <th scope="col">{m.columns.name}</th>
-                <th scope="col">{m.columns.materialClass}</th>
+        <ul className={styles['presetList']} aria-label={m.caption}>
+          {presets.map((p, i) => {
+            const rowIssues = (key: string) => messages(`presets.${i}.${key}`).length > 0
+            const load = chipLoad(p, tool.fluteCount, units)
+            return (
+              <li key={i} className={styles['preset']} aria-label={p.name}>
+                <div className={styles['pcell']} data-wide="">
+                  <span className={styles['pcellLabel']} aria-hidden="true">
+                    {m.columns.name}
+                  </span>
+                  <FieldInput
+                    aria-label={m.field(p.name, m.columns.name)}
+                    aria-invalid={rowIssues('name')}
+                    value={p.name}
+                    maxLength={60}
+                    className={styles['cellName']}
+                    onChange={(e) => set(i, { name: e.target.value })}
+                  />
+                </div>
+                <div className={styles['pcell']} data-wide="">
+                  <span className={styles['pcellLabel']} aria-hidden="true">
+                    {m.columns.materialClass}
+                  </span>
+                  <Select<string>
+                    aria-label={m.field(p.name, m.columns.materialClass)}
+                    options={[
+                      { value: ANY, label: m.anyMaterial },
+                      ...MATERIAL_CLASSES.map((c) => ({
+                        value: c,
+                        label: libraryMessages.classes[c],
+                      })),
+                    ]}
+                    value={p.materialClass ?? ANY}
+                    className={styles['cellSelect']}
+                    onValueChange={(v) =>
+                      set(i, { materialClass: v === ANY ? undefined : (v as MaterialClass) })
+                    }
+                  />
+                </div>
+                <div className={styles['pcell']}>
+                  <span className={styles['pcellLabel']} aria-hidden="true">
+                    {m.columns.chipLoad}
+                  </span>
+                  <output
+                    aria-label={m.field(p.name, m.columns.chipLoad)}
+                    className={styles['derived']}
+                  >
+                    {load ?? m.chipLoadNone}
+                  </output>
+                </div>
+                <div className={styles['presetRemove']}>
+                  <IconButton
+                    label={m.remove(p.name)}
+                    icon={<Trash2 aria-hidden="true" />}
+                    onClick={() => onChange(presets.filter((_, n) => n !== i))}
+                  />
+                </div>
                 {COLUMNS.map((c) => (
-                  <th key={c.key} scope="col">
-                    {m.columns[c.key]}
-                  </th>
+                  <div key={c.key} className={styles['pcell']}>
+                    <span
+                      className={styles['pcellLabel']}
+                      title={m.columns[c.key]}
+                      aria-hidden="true"
+                    >
+                      {m.short[c.key]}
+                    </span>
+                    <QuantityCell
+                      label={m.field(p.name, m.columns[c.key])}
+                      kind={c.kind}
+                      value={p[c.key]}
+                      units={units}
+                      optional={c.optional}
+                      invalid={rowIssues(c.key)}
+                      onCommit={(v) => set(i, { [c.key]: v } as Partial<CuttingPresetDTO>)}
+                    />
+                  </div>
                 ))}
-                <th scope="col">{m.columns.chipLoad}</th>
-                <th scope="col">
-                  <span className={styles['srOnly']}>{libraryMessages.window.actions}</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {presets.map((p, i) => {
-                const rowIssues = (key: string) => messages(`presets.${i}.${key}`).length > 0
-                const load = chipLoad(p, tool.fluteCount, units)
-                return (
-                  <tr key={i}>
-                    <td>
-                      <FieldInput
-                        aria-label={m.field(p.name, m.columns.name)}
-                        aria-invalid={rowIssues('name')}
-                        value={p.name}
-                        maxLength={60}
-                        className={styles['cellName']}
-                        onChange={(e) => set(i, { name: e.target.value })}
-                      />
-                    </td>
-                    <td>
-                      <Select<string>
-                        aria-label={m.field(p.name, m.columns.materialClass)}
-                        options={[
-                          { value: ANY, label: m.anyMaterial },
-                          ...MATERIAL_CLASSES.map((c) => ({
-                            value: c,
-                            label: libraryMessages.classes[c],
-                          })),
-                        ]}
-                        value={p.materialClass ?? ANY}
-                        className={styles['cellSelect']}
-                        onValueChange={(v) =>
-                          set(i, { materialClass: v === ANY ? undefined : (v as MaterialClass) })
-                        }
-                      />
-                    </td>
-                    {COLUMNS.map((c) => (
-                      <td key={c.key}>
-                        <QuantityCell
-                          label={m.field(p.name, m.columns[c.key])}
-                          kind={c.kind}
-                          value={p[c.key]}
-                          units={units}
-                          optional={c.optional}
-                          invalid={rowIssues(c.key)}
-                          onCommit={(v) => set(i, { [c.key]: v } as Partial<CuttingPresetDTO>)}
-                        />
-                      </td>
-                    ))}
-                    <td className={styles['derived']}>
-                      <output aria-label={m.field(p.name, m.columns.chipLoad)}>
-                        {load ?? m.chipLoadNone}
-                      </output>
-                    </td>
-                    <td>
-                      <IconButton
-                        label={m.remove(p.name)}
-                        icon={<Trash2 aria-hidden="true" />}
-                        onClick={() => onChange(presets.filter((_, n) => n !== i))}
-                      />
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+              </li>
+            )
+          })}
+        </ul>
       )}
       {errors.length > 0 ? (
         <ul className={styles['presetErrors']}>
