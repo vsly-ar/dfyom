@@ -128,7 +128,7 @@ Results carry `{ featureId, operationIds, warnings }` as [features.md § Command
 
 ## UI (summary)
 
-The [ui.md](../conventions/ui.md) amendment (plan task 1.4) specifies: feature rows in the navigator with nested owned operations ([features.md § UI](features.md#ui-sketch)); "Add" with Operations and Features groups; the **hole inspector** with a fastener picker (size, purpose, fit) and a dynamic **section illustration** drawn from the entered sizes (principle 5; built so it can become the first `sketch` view of the later Field info views spec, D30 Q11); the chamfer inspector; the [Clones UI](features.md#ui-summary) (rows list, read-out, clone path, click-to-skip); new icons for hole types, chamfer, chamfer mill and Clones, reviewed with the B22 follow-ups.
+The [ui.md § Features (v0.4)](../conventions/ui.md#features-v04) amendment (plan task 1.4, draft until the L2 review) specifies: feature rows in the navigator with nested owned operations ([features.md § UI](features.md#ui-sketch)); "Add" with Operations and Features groups; the **hole inspector** with a fastener picker (size, purpose, fit) and a dynamic **section illustration** drawn from the entered sizes (principle 5; built so it can become the first `sketch` view of the later Field info views spec, D30 Q11); the chamfer inspector; the [Clones UI](features.md#ui-summary) (rows list, read-out, clone path, click-to-skip); new icons for hole types, chamfer, chamfer mill and Clones, reviewed with the B22 follow-ups.
 
 ## Persistence
 
