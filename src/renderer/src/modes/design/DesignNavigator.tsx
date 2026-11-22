@@ -24,6 +24,7 @@ import {
 import styles from './Design.module.css'
 import { chamferEdgeChoice } from './chamfer-view'
 import { clonesSource } from './feature-view'
+import { draftSource, draftSourceOptions, firstRow, firstRowGap } from './clones-view'
 import { addArgs, failingOperation, type DesignPart } from './model'
 import { OperationList } from './OperationList'
 import { ReferenceRows } from './ReferenceRows'
@@ -113,25 +114,26 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
     const r = await call('design.hole.add', { partId: part.dto.id, center })
     if (r.ok) select((r.value as { featureId: string }).featureId)
   }
-  // Make Clones… (until U3's draft): one Clones feature with the draft's first row – one clone
-  // along u, the source's width plus a 3 mm / 1/8" gap beside it – then its inspector
+  // Make Clones… opens the draft in the inspector (ui.md § Clones): nothing is written until
+  // "Make clones"; its first row puts one clone beside the source, a tool diameter apart
   const cloneChoice = clonesSource(part, selected)
-  const makeClones = async () => {
-    if (!cloneChoice.ok) return
-    const du = cloneChoice.width + (part.units === 'mm' ? 3 : 3.175)
-    const r = await call('design.clones.add', {
+  const setClonesDraft = useUi((st) => st.setClonesDraft)
+  const setClonesRow = useUi((st) => st.setClonesRow)
+  const makeClones = () => {
+    if (!cloneChoice.ok || selected === null) return
+    const options = draftSourceOptions(part, cloneChoice)
+    const feature = 'featureId' in cloneChoice.source
+    const gap = firstRowGap(part, draftSource(options, new Set(), feature))
+    setClonesDraft({
       partId: part.dto.id,
-      source: cloneChoice.source,
-      rows: [
-        {
-          kind: 'offset',
-          count: 1,
-          du: part.units === 'mm' ? `${+du.toFixed(3)} mm` : `${+(du / 25.4).toFixed(4)}"`,
-          dv: part.units === 'mm' ? '0 mm' : '0"',
-        },
-      ],
+      openedFor: selected,
+      options,
+      feature,
+      unchecked: new Set(),
+      rows: [firstRow(cloneChoice.width, gap, part.units)],
+      preview: null,
     })
-    if (r.ok) select((r.value as { featureId: string }).featureId)
+    setClonesRow({ owner: 'draft', row: 0 })
   }
   // Chamfer (task U4): `design.chamfer.add` with the core defaults (edge Ø + 1 mm / 1/32", 90°)
   // on the selected drilling or circle pocket, else the last one; then its inspector
@@ -170,7 +172,7 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
         {
           label: f.makeClones,
           icon: <Icon name="clones" />,
-          onSelect: () => void makeClones(),
+          onSelect: makeClones,
           disabledReason: cloneChoice.ok ? undefined : cloneChoice.reason,
         },
       ],

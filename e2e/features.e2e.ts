@@ -1,9 +1,11 @@
 // v0.4 feature UI in the built app (task U1), through roles and labels: Add → Features → Add
 // hole adds a feature row, the row expands to its owned operations, an owned operation's
 // inspector is read-only ("Edited through Hole 1") and its link opens the hole, Make Clones…
-// clones the hole with Source and Clones groups under the Clones row; the hole inspector (U2) sets
-// type and fastener, draws the section and offers the custom-size fix. Task U4: Add → Chamfer on a
-// drilling opens the chamfer inspector (Edge, Diameter, Angle, Depth and the section). Windows stay hidden
+// opens the Clones draft (U3: read-out, a 2 x 2 grid row, Make clones, skip clone 3 by clicking its
+// marker in the viewport, the instance inspector) with Source and Clones groups under the Clones
+// row; the hole inspector (U2) sets type and fastener, draws the section and offers the
+// custom-size fix. Task U4: Add → Chamfer on a drilling opens the chamfer inspector (Edge,
+// Diameter, Angle, Depth and the section). Windows stay hidden
 // (app.fixture.ts). With DFYOM_RENDERS=1 it also writes the light and dark review renders to
 // design/features/renders/ (ui.md § Features (v0.4), visuals reviewed in L2).
 // Docs: docs/conventions/ui.md#features-v04, docs/modes/features.md
@@ -24,7 +26,7 @@ const rendersDir = resolve(__dirname, '../design/features/renders')
 async function render(
   page: Page,
   name: string,
-  task: 'u1' | 'u2' | 'u4' = 'u1',
+  task: 'u1' | 'u2' | 'u3' | 'u4' = 'u1',
   // run after the Settings dialog closed (it takes focus): refocus a field
   before?: () => Promise<void>,
 ): Promise<void> {
@@ -158,18 +160,40 @@ test('features: add a hole, expand its row, the owned inspector is read-only, Ma
       .focus(),
   )
 
-  // ── Make Clones… of the selected hole ───────────────────────────────────────────────────
+  // ── Make Clones… of the selected hole (U3: the draft, then a grid, skip by click) ───────
   await navigator.getByRole('button', { name: 'Add', exact: true }).click()
   await page.getByRole('menuitem', { name: 'Make Clones…' }).click()
-  const clones = navigator.getByRole('button', { name: /^Clones 1, ×2/ })
+  await expect(inspector.getByText('New Clones')).toBeVisible()
+  const readout = inspector.getByText(/instances? ·/)
+  await expect(readout).toHaveText('1 + 1 clone = 2 instances · 0 skipped')
+  await render(page, 'draft', 'u3')
+  // a 2 × 2 grid instead of the first offset row
+  await inspector.getByRole('button', { name: 'Add row' }).click()
+  await page.getByRole('menuitem', { name: 'Grid' }).click()
+  await inspector.getByRole('button', { name: 'Remove row 1' }).click()
+  await expect(inspector.getByRole('button', { name: /^Row 1: Grid/ })).toBeVisible()
+  await expect(readout).toHaveText('1 + 3 clones = 4 instances · 0 skipped')
+  await render(page, 'draft-grid', 'u3')
+  await inspector.getByRole('button', { name: 'Make clones' }).click()
+  const clones = navigator.getByRole('button', { name: /^Clones 1, ×4/ })
   await expect(clones).toHaveAttribute('aria-pressed', 'true')
-  await clones.press('ArrowRight')
+  await expect(readout).toHaveText('1 + 3 clones = 4 instances · 0 skipped')
+  // the clone path: click clone 3's marker to skip it (only while the Clones is selected)
+  const marker = page.getByRole('button', { name: /^Clone 3 at / })
+  await expect(marker).toBeVisible()
+  await marker.click()
+  await expect(readout).toHaveText('1 + 2 clones = 3 instances · 1 skipped')
+  await expect(page.getByRole('button', { name: /^Clone 3 at .*skipped$/ })).toBeVisible()
+  await render(page, 'clones', 'u3')
+  await navigator.getByRole('button', { name: /^Clones 1, ×3/ }).press('ArrowRight')
   await expect(navigator.getByRole('list', { name: 'Source of Clones 1' })).toContainText('Hole 1')
-  await navigator.getByRole('button', { name: /^Clones\s*1$/ }).click()
+  await navigator.getByRole('button', { name: /^Clones\s*\d+$/ }).click()
   await expect(navigator.getByRole('list', { name: 'Instances of Clones 1' })).toContainText(
     'Clone 2',
   )
-  await render(page, 'clones-row')
+  await navigator.getByRole('button', { name: 'Clone 2', exact: true }).click()
+  await expect(inspector.getByText('Clone 2 of Clones 1')).toBeVisible()
+  await render(page, 'instance', 'u3')
 
   expect(dfyom.rendererErrors).toEqual([])
 })

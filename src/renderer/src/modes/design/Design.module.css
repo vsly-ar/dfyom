@@ -376,20 +376,70 @@
   transform: none;
 }
 
+/* an instance row (U3): selects the instance; Skip / Restore in a slot at its end, shown on
+   hover, focus or selection as the operation rows' actions */
 .instance {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  border-left: 2px solid transparent;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text);
+  transition: background-color var(--motion-fast) var(--ease-standard);
+}
+
+.instance:hover {
+  background: var(--bg-hover);
+}
+
+.instance[data-selected] {
+  border-left-color: var(--accent);
+  background: var(--accent-subtle);
+}
+
+.instance[data-muted] {
+  color: var(--text-muted);
+}
+
+.instanceSelect {
   display: flex;
   gap: var(--space-2);
   align-items: baseline;
   min-height: var(--control-sm);
   padding: var(--space-0-5) var(--space-3) var(--space-0-5)
-    calc(var(--space-3) + var(--space-2) + var(--icon-md) + var(--space-2));
-  font-size: var(--text-sm);
-  line-height: var(--lh-sm);
-  color: var(--text);
+    calc(var(--space-3) + var(--space-2) + var(--icon-md) + var(--space-2) - 2px);
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
-.instance[data-muted] {
-  color: var(--text-muted);
+.instanceActions {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  display: inline-flex;
+  padding: 0 var(--space-1);
+  background: var(--bg-chrome);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--motion-fast) var(--ease-standard);
+}
+
+.instance:hover .instanceActions,
+.instance:focus-within .instanceActions,
+.instance[data-selected] .instanceActions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.instance[data-selected] .instanceActions {
+  background: var(--accent-subtle);
 }
 
 .ownedId {
@@ -1195,4 +1245,164 @@
   outline: 2px solid var(--focus);
   outline-offset: 2px;
   border-radius: var(--radius-xs);
+}
+
+/* Clones inspector and draft (v0.4 task U3, ui.md § Clones) */
+.clonesReadout {
+  display: flex;
+  gap: var(--space-1);
+  align-items: center;
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.clonesReadout[data-invalid] {
+  color: var(--danger-text);
+}
+
+.cloneSources {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cloneSourceFixed,
+.cloneSourceItem {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  min-height: var(--control-sm);
+  font-size: var(--text-sm);
+}
+
+.cloneSourceItem > :first-child {
+  flex: 1;
+  text-align: left;
+}
+
+.fieldError {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--danger-text);
+}
+
+.cloneRows {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+}
+
+.cloneRowList {
+  display: grid;
+  gap: var(--space-1);
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cloneRow {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition: border-color var(--motion-fast) var(--ease-standard);
+}
+
+.cloneRow[data-invalid] {
+  border-color: var(--danger);
+}
+
+.cloneRowHead {
+  display: flex;
+  align-items: center;
+}
+
+.cloneRowSelect {
+  display: flex;
+  flex: 1;
+  gap: var(--space-2);
+  align-items: center;
+  min-width: 0;
+  min-height: var(--control-md);
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.cloneRowSelect > svg {
+  flex: none;
+  width: var(--icon-md);
+  height: var(--icon-md);
+}
+
+.cloneRow[data-open] .cloneRowSelect > svg [data-accent] {
+  stroke: var(--accent-icon);
+}
+
+.cloneRow[data-open] .cloneRowSelect > svg [data-accent][data-fill] {
+  fill: var(--accent-icon);
+  stroke: none;
+}
+
+.cloneRowText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cloneRowActions {
+  display: inline-flex;
+  flex: none;
+  padding-right: var(--space-1);
+}
+
+.cloneRowFields {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2) var(--space-2);
+  border-top: 1px solid var(--border);
+}
+
+.cloneSkipped {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  align-items: center;
+}
+
+.cloneChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.draftActions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.instanceGroup {
+  display: grid;
+  gap: var(--space-2);
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-2);
+}
+
+.instanceGroup > summary {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
 }

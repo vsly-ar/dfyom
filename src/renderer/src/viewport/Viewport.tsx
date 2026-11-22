@@ -78,6 +78,7 @@ import {
 } from './mesh'
 import type { AnchorOverlay, FrameOverlay } from './Overlays'
 import type { TabOverlay } from './TabMarkers'
+import type { ClonePathOverlay } from './clone-path'
 import type { ReferenceGhostView } from './ReferenceGhost'
 import type { RunScene } from './RunLayer'
 import { CameraControlsImpl, Scene } from './Scene'
@@ -127,6 +128,12 @@ export interface ViewportProps {
   ghosts?: readonly (ReferenceGhostView & { readonly box: Box })[] | null
   /** Operations drawn with a light `--info` tint (edited in the plan: the plan scene, task E3b). */
   tinted?: ReadonlySet<string> | null
+  /** Operations drawn selected besides `selectedOperation` (a Clones' source, v0.4 task U3). */
+  selectedAlso?: ReadonlySet<string> | null
+  /** The clone path of the selected Clones feature or the open draft (v0.4 task U3). */
+  clonePath?: ClonePathOverlay | null
+  /** Polite announcement under the viewport ("Clone 4 skipped."; task U3). */
+  announcement?: string | null
   /** Click on a surface → its target; click on empty space or Escape → `null`. */
   onSelect?: (target: SurfaceTarget | null) => void
   /** Pointer hover over a surface (for a navigator row highlight); `null` when it leaves. */
@@ -228,6 +235,9 @@ export function Viewport({
   guide = null,
   ghosts = null,
   tinted = null,
+  selectedAlso = null,
+  clonePath = null,
+  announcement = null,
   onSelect,
   onHover,
   pick = null,
@@ -265,8 +275,9 @@ export function Viewport({
       outdated,
       pulse,
       tinted,
+      selectedAlso,
     }),
-    [selectedOperation, hovered, pick, outdated, pulse, tinted],
+    [selectedOperation, hovered, pick, outdated, pulse, tinted, selectedAlso],
   )
   const runLines = run?.lines ?? null
   const runFrame = run?.frame
@@ -610,6 +621,7 @@ export function Viewport({
           frame={frame}
           anchor={anchor}
           tabs={pick ? null : tabs}
+          clonePath={pick ? null : clonePath}
           guide={guide}
           ghosts={ghosts}
           reducedMotion={reducedMotion}
@@ -714,6 +726,9 @@ export function Viewport({
               units,
             )}`
           : ''}
+      </p>
+      <p className={styles['srOnly']} aria-live="polite">
+        {announcement ?? ''}
       </p>
     </div>
   )

@@ -227,6 +227,10 @@ describe('feature UI (U1)', () => {
     const make = within(menu).getByRole('menuitem', { name: 'Make Clones…' })
     expect(make).not.toHaveAttribute('aria-disabled')
     await user.click(make)
+    // the draft (U3) writes nothing until Make clones
+    const makeButton = await within(inspector()).findByRole('button', { name: 'Make clones' })
+    expect(part().features ?? []).toHaveLength(0)
+    await user.click(makeButton)
     await waitFor(() => expect(part().features?.[0]?.kind).toBe('clones'))
     const row = await within(navigator()).findByRole('button', { name: /^Clones 1, ×2/ })
     expect(row).toHaveAttribute('aria-pressed', 'true')
@@ -239,8 +243,8 @@ describe('feature UI (U1)', () => {
     await user.click(group)
     const instances = within(navigator()).getByRole('list', { name: 'Instances of Clones 1' })
     expect(within(instances).getByText('Clone 2')).toBeInTheDocument()
-    // the source pocket (10 mm) plus a 3 mm gap along u
-    expect(within(instances).getByText('33.00, 30.00')).toBeInTheDocument()
+    // the source pocket (10 mm) plus a gap of its tool's diameter along u (U3)
+    expect(within(instances).getByText(/^\d+\.\d{2}, 30\.00$/)).toBeInTheDocument()
     await expectNoAxeViolations()
   })
 })

@@ -115,6 +115,12 @@ export interface PathRowResult {
   readonly end: UV
   /** The walk through the row, from `start` to `end` (a grid in zigzag). */
   readonly line: readonly UV[]
+  /**
+   * What the clone path draws for the row where it is not straight (v0.4 U3): an arc row's arc
+   * from `start` through its sweep, an `along` row's shape chain from `start` to its last
+   * station, sampled to `CURVE_STEP_DEG` / `CURVE_SAMPLES`; absent: draw `line`.
+   */
+  readonly curve?: readonly UV[]
   /** An arc row's circle: centre, radius, angle of `start` from the centre, the angle turned. */
   readonly arc?: {
     readonly centre: UV
@@ -156,7 +162,7 @@ export function clonePath(origin: UV, rows: readonly PathRow[]): ClonePath {
   // the reference point relative to the origin, exact so a long chain adds up no rounding
   let ref: UV = { u: 0, v: 0 }
   for (const row of rows) {
-    const { points, end, order, arc, closes } = rowPoints(row, ref, origin)
+    const { points, end, order, arc, closes, curve } = rowPoints(row, ref, origin)
     const skip = new Set(row.skip)
     const marked = points.map((p, k): PathPoint => {
       const offset = { u: round(p.u), v: round(p.v) }
@@ -184,6 +190,7 @@ export function clonePath(origin: UV, rows: readonly PathRow[]): ClonePath {
       end: abs(next),
       line: [abs(ref), ...order.map((k) => abs(points[k]!))],
       ...(arc && { arc: { ...arc, centre: abs(arc.centre) } }),
+      ...(curve && { curve: curve.map(abs) }),
     })
     ref = next
   }
@@ -204,6 +211,11 @@ export function arcSteps(row: Pick<ArcRow, 'arc' | 'step'>): { n: number; sweep:
 export function rowPointCount(row: PathRow): number {
   return rowPoints(row, { u: 0, v: 0 }).points.length
 }
+
+/** An arc row's drawn curve: one sample per this many degrees of sweep. */
+export const CURVE_STEP_DEG = 5
+/** An `along` row's drawn curve: at most this many samples (one per mm below it, at least 8). */
+export const CURVE_SAMPLES = 256
 
 /** Most stations an `along` row computes (the row limit, 100, is checked on them). */
 const ALONG_POINTS_MAX = 10_000
@@ -249,6 +261,7 @@ function rowPoints(
   order: number[]
   arc?: NonNullable<PathRowResult['arc']>
   closes: number[]
+  curve?: UV[]
 } {
   const points: UV[] = []
   switch (row.kind) {
@@ -291,12 +304,18 @@ function rowPoints(
         const t = rad(start + dir * k * row.step)
         points.push({ u: c.u + row.radius * Math.cos(t), v: c.v + row.radius * Math.sin(t) })
       }
+      const samples = Math.max(1, Math.ceil(Math.abs(sweep) / CURVE_STEP_DEG))
+      const curve = Array.from({ length: samples + 1 }, (_, k) => {
+        const t = rad(start + (sweep * k) / samples)
+        return { u: c.u + row.radius * Math.cos(t), v: c.v + row.radius * Math.sin(t) }
+      })
       return {
         points,
         end: points.length - 1,
         order: points.map((_, k) => k),
         arc: { centre: c, radius: row.radius, from: start, sweep },
         closes: Math.abs(Math.abs(sweep) - 360) < 1e-6 ? [points.length - 1] : [],
+        ...(n > 0 && { curve }),
       }
     }
     case 'along': {
@@ -315,7 +334,25 @@ function rowPoints(
         if (Math.abs(wrapped) < SAME_SPOT || (chain.closed && length - wrapped < SAME_SPOT))
           closes.push(k)
       }
-      return { points, end: points.length - 1, order: points.map((_, k) => k), closes }
+      // the drawn path: the chain from its start point (on `r`) to the last station
+      const last = s.at(-1) ?? 0
+      const curve: UV[] = []
+      if (last > 0) {
+        const samples = Math.min(CURVE_SAMPLES, Math.max(8, Math.ceil(last)))
+        for (let k = 0; k <= samples; k++) {
+          const p = chainPointAt(loop, Math.min((last * k) / samples, length), chain.closed)
+          if (p.isErr()) continue
+          const [x, y] = p.unwrap().point
+          curve.push({ u: r.u + x - a0, v: r.v + y - a1 })
+        }
+      }
+      return {
+        points,
+        end: points.length - 1,
+        order: points.map((_, k) => k),
+        closes,
+        ...(curve.length > 1 && { curve }),
+      }
     }
   }
   return { points, end: points.length - 1, order: points.map((_, k) => k), closes: [] }

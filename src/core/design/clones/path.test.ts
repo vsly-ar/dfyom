@@ -142,6 +142,17 @@ describe('clonePath', () => {
         expect(Math.hypot(i.at.u - 10, i.at.v)).toBeCloseTo(10, 3)
     })
 
+    it('its drawn curve runs along the arc from the start through the whole steps (U3)', () => {
+      const r = clonePath(at(0, 0), [arc(10, 0, 100, 30)]).rows[0]!
+      const curve = r.curve!
+      expect(curve[0]!.u).toBeCloseTo(0, 9)
+      expect(curve.at(-1)!.u).toBeCloseTo(10, 9)
+      expect(curve.at(-1)!.v).toBeCloseTo(-10, 9)
+      expect(curve.every((q) => Math.abs(Math.hypot(q.u - 10, q.v) - 10) < 1e-9)).toBe(true)
+      expect(curve.length).toBeGreaterThan(r.points.length + 1)
+      expect(clonePath(at(0, 0), [offset(2, 1, 0)]).rows[0]!.curve).toBeUndefined()
+    })
+
     it('a full circle in steps that are not whole degrees still closes', () => {
       expect(clonePath(at(0, 0), [arc(10, 0, 360, 360 / 7)]).instances).toHaveLength(7)
     })
@@ -355,6 +366,18 @@ describe('along rows (F6)', () => {
       ['clone', 3],
     ])
     expect(uv(p.rows[1]!.points[0]!)).toEqual([30, 25])
+  })
+
+  it('the drawn curve follows the chain to the last station, not straight segments (U3)', () => {
+    const p = clonePath(at(5, 5), [along(L, { spacing: 10 })])
+    const curve = p.rows[0]!.curve!
+    expect(curve[0]).toEqual(at(5, 5))
+    expect(curve.at(-1)).toEqual(at(35, 25))
+    // it turns the corner at (35, 5) rather than cutting across
+    expect(curve.some((q) => Math.abs(q.u - 35) < 1e-9 && Math.abs(q.v - 5) < 1e-9)).toBe(true)
+    const round = clonePath(at(0, 0), [along(circle, { count: 4 })]).rows[0]!.curve!
+    // three quarters round a radius-10 circle: every sample 10 from its centre (−10, 0)
+    expect(round.every((q) => Math.abs(Math.hypot(q.u + 10, q.v) - 10) < 1e-6)).toBe(true)
   })
 
   it('no chain (an unknown shape) or neither spacing nor count gives no positions', () => {

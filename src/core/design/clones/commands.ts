@@ -237,6 +237,8 @@ const clonesPreview = defineQuery({
       z.object({
         start: UVOut,
         end: UVOut,
+        path: z.array(UVOut).describe('Drawn path: straight, along the arc or the shape'),
+        centre: UVOut.optional().describe('arc'),
         points: z.array(
           z.object({
             at: UVOut,
@@ -303,6 +305,8 @@ const clonesPreview = defineQuery({
       rows: path.rows.map((r) => ({
         start: uv(r.start),
         end: uv(r.end),
+        path: (r.curve ?? r.line).map(uv),
+        ...(r.arc === undefined ? {} : { centre: uv(r.arc.centre) }),
         points: r.points.map((p) => ({
           at: uv(p.at),
           kind: p.kind,
