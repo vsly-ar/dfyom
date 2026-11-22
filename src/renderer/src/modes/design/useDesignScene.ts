@@ -3,12 +3,13 @@
 // inspector), the live outline of the selected operation while pending (in its face frame), the
 // error marker at the failing operation, pick mode for the inspector's fields (normal glyphs on
 // every eligible face), and for the selected operation its face-frame axes (task F1) and anchor
-// marker (task F2), and the visible references as ghosts (task R3).
+// marker (task F2), and the visible references as ghosts (task R3); named and rotated shapes'
+// outlines through the renderer's 2D port (task U1).
 // Doc: docs/conventions/ui.md#selection-and-picking, #evaluation-status-pending-outdated-failed,
 // #design-and-plan-controls-v02, #reference-ghost-v02
 import { useMemo } from 'react'
 import { placedBox } from '../../../../core/design/reference'
-import { useUi } from '../../shell/ShellContext'
+import { useRegion2d, useUi } from '../../shell/ShellContext'
 import { designMessages } from '../../messages/design'
 import { referenceMessages } from '../../messages/reference'
 import type { ViewportProps } from '../../viewport'
@@ -34,6 +35,8 @@ export function useDesignScene(): SceneProps {
   const setPick = useUi((s) => s.setPick)
   const status = evaluation?.status ?? 'pending'
   const references = useDesignReferences(part)
+  // named and rotated shapes are placed through the renderer's 2D port (task U1)
+  const port = useRegion2d()
 
   const ghosts = useMemo(
     () =>
@@ -85,7 +88,12 @@ export function useDesignScene(): SceneProps {
     const axes = frameAxes(selectedOp, s, table)
     const face = operationFace(selectedOp, s, table)
     return {
-      outline: operationOutline(selectedOp, s, table),
+      outline: operationOutline(
+        selectedOp,
+        s,
+        table,
+        port === undefined ? undefined : { port, shapes: part.loaded.part.shapes },
+      ),
       frame: { ...axes, labels: designMessages.inspector.frameAxes },
       anchor: anchorPoint(selectedOp, s, table),
       describe: designMessages.selectionSummary({
@@ -97,7 +105,7 @@ export function useDesignScene(): SceneProps {
             : undefined,
       }),
     }
-  }, [selectedOp, part])
+  }, [selectedOp, part, port])
 
   const marker = useMemo(() => {
     if (status !== 'failed' || ops === undefined || part?.loaded === undefined || !part.table)

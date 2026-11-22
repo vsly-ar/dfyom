@@ -28,6 +28,7 @@ import {
   chooseExportFile,
   chooseOpenFile,
   chooseReferenceFile,
+  chooseSvgFile,
   chooseSaveFile,
   type DialogFolders,
 } from './file-dialogs'
@@ -277,6 +278,10 @@ export function registerProjectIpc(
   ipcMain.handle(IPC.fileChooseReference, (event) => {
     const ws = sessionOf(event)
     return ws === undefined ? null : chooseReferenceFile(ws.win, folders)
+  })
+  ipcMain.handle(IPC.fileChooseSvg, (event) => {
+    const ws = sessionOf(event)
+    return ws === undefined ? null : chooseSvgFile(ws.win, folders)
   })
   // The ghost's triangles (task R3): read by the worker, copied once to the renderer, which keeps
   // them per asset (docs/modes/reference-model.md#ghost-mesh-task-r3).

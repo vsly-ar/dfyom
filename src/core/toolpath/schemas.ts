@@ -10,6 +10,8 @@ import {
   FacingGeometrySchema,
   AnalyticPocketGeometrySchema,
   AnalyticProfileGeometrySchema,
+  LoopSchema,
+  RegionSchema,
   StockGeometrySchema,
   Vec2Schema,
   Vec3Schema,
@@ -23,6 +25,8 @@ import type {
   Toolpath,
   ToolpathTool,
 } from './model'
+import type { RegionPocketInput } from './region-pocket'
+import type { RegionProfileInput } from './region-profile'
 
 const MoveSchema: z.ZodType<Move> = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('rapid'), to: Vec3Schema }),
@@ -139,18 +143,28 @@ export const FacingInputSchema: z.ZodType<FacingInput> = z.object({
   }),
 })
 
+const PocketStrategySchema = z.object({
+  entry: z.enum(['helix', 'ramp', 'plunge']),
+  helixDiameter: z.number(),
+  rampAngle: z.number(),
+  finishAllowance: z.number(),
+  finishStepdown: z.number(),
+  direction: Direction,
+})
+
 export const PocketInputSchema: z.ZodType<PocketInput> = z.object({
   ...base,
   cutting: CuttingSchema,
   operation: AnalyticPocketGeometrySchema,
-  strategy: z.object({
-    entry: z.enum(['helix', 'ramp', 'plunge']),
-    helixDiameter: z.number(),
-    rampAngle: z.number(),
-    finishAllowance: z.number(),
-    finishStepdown: z.number(),
-    direction: Direction,
-  }),
+  strategy: PocketStrategySchema,
+})
+
+/** A pocket of a general region (v0.3 T1): the region placed in the face frame. */
+export const RegionPocketInputSchema: z.ZodType<RegionPocketInput> = z.object({
+  ...base,
+  cutting: CuttingSchema,
+  operation: z.object({ region: RegionSchema, onZ: z.number(), depth: z.number() }),
+  strategy: PocketStrategySchema,
 })
 
 export const DrillingInputSchema: z.ZodType<DrillingInput> = z.object({
@@ -176,15 +190,38 @@ export const DrillingInputSchema: z.ZodType<DrillingInput> = z.object({
   ]),
 })
 
+const ProfileStrategySchema = z.object({
+  entry: z.enum(['ramp', 'plunge']),
+  rampAngle: z.number(),
+  breakthrough: z.number(),
+  finishAllowance: z.number(),
+  direction: Direction,
+})
+
 export const ProfileInputSchema: z.ZodType<ProfileInput> = z.object({
   ...base,
   cutting: CuttingSchema,
   operation: AnalyticProfileGeometrySchema,
-  strategy: z.object({
-    entry: z.enum(['ramp', 'plunge']),
-    rampAngle: z.number(),
-    breakthrough: z.number(),
-    finishAllowance: z.number(),
-    direction: Direction,
+  strategy: ProfileStrategySchema,
+})
+
+/** A profile of a general loop or open path (v0.3 T2), placed in the face frame. */
+export const RegionProfileInputSchema: z.ZodType<RegionProfileInput> = z.object({
+  ...base,
+  cutting: CuttingSchema,
+  operation: z.object({
+    chain: LoopSchema,
+    closed: z.boolean(),
+    side: z.enum(['outside', 'inside', 'on']),
+    slotWidth: z.number(),
+    onZ: z.number(),
+    depth: z.number(),
+    through: z.boolean(),
+    tabs: z.object({
+      positions: z.array(z.number()).readonly(),
+      width: z.number(),
+      thickness: z.number(),
+    }),
   }),
+  strategy: ProfileStrategySchema.extend({ leadRadius: z.number() }),
 })

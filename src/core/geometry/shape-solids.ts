@@ -391,6 +391,9 @@ function shapeTab(
   return band.andThen((m) => nominal.map((n) => ({ band: m, nominal: n })))
 }
 
+/** Chords one evaluation builds within its 50 ms budget (spike S3, D29); `dfm.shapeHeavy` above. */
+export const SHAPE_CHORD_BUDGET = 3000
+
 /**
  * Chords of a shape's own loops or path at the chord tolerance: the evaluation cost measure of
  * `dfm.shapeHeavy` (docs/modes/design-v0.3.md#dfm-checks-for-shapes; ≈ 3 000 chords per 50 ms).

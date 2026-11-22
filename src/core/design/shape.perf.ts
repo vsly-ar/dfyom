@@ -1,10 +1,13 @@
 /**
  * resolveShape against the command budget (docs/architecture/shapes.md#performance): resolve +
  * parameter checks of a 200-element shape ≤ 3 ms, of which the port takes ≈ 2 ms
- * (geometry/2d/region2d.perf.ts). Outside `npm run check` (timings are flaky in CI): `npm run perf`.
+ * (geometry/2d/region2d.perf.ts); since K4 also the real `parameterChecks` of a shape pocket.
+ * Outside `npm run check` (timings are flaky in CI): `npm run perf`.
  */
 import { expect, it } from 'vitest'
-import type { Vec2 } from '../geometry/model'
+import { parameterChecks, type DfmTool, type ParameterCheckOptions } from '../geometry/dfm'
+import type { PartGeometryInput, Vec2 } from '../geometry/model'
+import { shapeMeasure } from '../geometry/shape-measure'
 import { loadRegion2dSync } from '../geometry/2d/cavalier'
 import { regionLoops, type Region } from '../geometry/2d/model'
 import type { Region2dPort } from '../geometry/2d/port'
@@ -12,6 +15,8 @@ import { nodeCavalierWasm } from '../geometry/2d/testing/node-wasm'
 import { designSetup } from './design.fixture'
 import { mapItem, resolveDefinition, resolveShape, type ShapeDefinition } from './shape'
 import type { ShapeItem } from './shape.dto'
+
+const flat = (diameter: number): DfmTool => ({ type: 'flatEndMill', diameter })
 
 function median(n: number, fn: () => void): number {
   for (let i = 0; i < 5; i++) fn()
@@ -119,4 +124,51 @@ it('edits one item of a 200-element shape through the dispatcher', async () => {
       'command (parse, load of the other items, resolve on a cache miss, warnings, commit)',
   )
   expect(editMs).toBeLessThanOrEqual(10)
+})
+
+it('resolves and checks a 200-element shape operation within the command budget (K4)', () => {
+  const port = loadRegion2dSync(nodeCavalierWasm()).unwrap()
+  const options = (tool: number): ParameterCheckOptions => ({
+    tools: [flat(6), flat(3)],
+    unitSystem: 'metric',
+    region2d: port,
+    operationTools: {
+      pocket1: { tool: flat(tool), generalized: true, locked: false, label: 'flat end mill' },
+    },
+  })
+  const pocketOf = (region: Region): PartGeometryInput => ({
+    stock: { length: 400, width: 400, thickness: 40 },
+    operations: [
+      {
+        kind: 'pocket',
+        id: 'pocket1',
+        onZ: 0,
+        depth: 10,
+        floorRadius: 0,
+        shape: { center: [200, 200], contour: { kind: 'region', region } },
+      },
+    ],
+  })
+  // a new shape every run (scale + 1e-9 each time), so resolve and the measure caches miss
+  let k = 0
+  const fresh = (): Region => {
+    const r = resolveShape(port, starShape(98, 1 + ++k * 1e-9)).unwrap()
+    if (r.kind !== 'region') throw new Error('expected a region')
+    return r.region
+  }
+  const totalMs = median(50, () => parameterChecks(pocketOf(fresh()), options(6)))
+  const codes = parameterChecks(pocketOf(fresh()), options(6)).map((w) => w.code)
+  const resolveMs = median(50, fresh)
+  // the auto choice on Apply: fit and rest material of the 10 metric standard sizes, uncached
+  const choiceMs = median(20, () => {
+    const m = shapeMeasure(port, pocketOf(fresh()).operations[0]!)!
+    for (const d of [1, 1.5, 2, 3, 4, 5, 6, 8, 10, 12]) if (m.fits(d / 2)) m.rest(d / 2)
+  })
+  console.log(
+    `resolve + parameter checks (K4) of the 205-element star pocket with a 6 mm tool: ` +
+      `${totalMs.toFixed(2)} ms (resolve ${resolveMs.toFixed(2)} ms; budget 3 ms); warnings ` +
+      `${codes.join(', ') || 'none'}; fit + rest of 10 sizes (auto choice) ${choiceMs.toFixed(2)} ms ` +
+      '+ resolve',
+  )
+  expect(totalMs).toBeLessThanOrEqual(3)
 })

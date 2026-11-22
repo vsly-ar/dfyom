@@ -371,7 +371,7 @@ What main remembers between runs without a setting (B18, B19; user requests 2026
 - **Last window:** the normal bounds (`getNormalBounds`) of the window last moved, resized, maximized, made full screen or closed, with its maximized and full-screen state (minimized is not remembered). One record, not one per window: windows are not reopened at launch (no session restore).
 - **Where a new window starts** (`windowStart`, `src/main/window-state.ts`): opened from a window (the asking or focused one) → cascaded from it ([project files](#project-files)); else, with no other window open (launch, or the first window after closing all on macOS) → the remembered window as it was, maximized or full screen again when shown; else → cascaded from the remembered window, never maximized. Without a record: the default 1440 × 900, centred. A remembered window is first made visible (`visibleBounds`): on the display it overlaps most, no larger than its work area and moved inside it; when its display is gone, centred on the primary display.
 - Maximize and full screen are applied when the window is shown, so hidden end-to-end runs (`DFYOM_HIDE_WINDOWS=1`) never show a window; restoring bounds alone does not show one.
-- **Dialog folders:** each kind of file dialog (`DialogKind`: `project` for Open, Save as and the quit's Save all; `gcode-export`; `reference-import` for the R3 reference import) starts in the folder last chosen in a dialog of that kind (`defaultPath`; a save dialog gets the file name in it), if that folder still exists. A new dialog kind adds its key to `DIALOG_KINDS` and passes it to `showOpen` / `showSave` in `src/main/file-dialogs.ts`.
+- **Dialog folders:** each kind of file dialog (`DialogKind`: `project` for Open, Save as and the quit's Save all; `gcode-export`; `reference-import` for the R3 reference import; `svg-import` for the I1 SVG import) starts in the folder last chosen in a dialog of that kind (`defaultPath`; a save dialog gets the file name in it), if that folder still exists. A new dialog kind adds its key to `DIALOG_KINDS` and passes it to `showOpen` / `showSave` in `src/main/file-dialogs.ts`.
 
 ### App name and icon
 
@@ -507,7 +507,7 @@ Accepted with the v0.2 docs (D18, 2026-11-22); face picking and the anchor picke
 
 ### Shapes (v0.3)
 
-Accepted with the v0.3 docs (D29, 2026-11-22), not built (tasks U1–U3, [plans/v0.3.md § 5](../plans/v0.3.md#5-shape-ui)). Behaviour lives in [design-v0.3.md](../modes/design-v0.3.md) (its [UI summary](../modes/design-v0.3.md#ui-summary) is the intent), the renderer's 2D port in [shapes.md § Where the 2D layer runs](../architecture/shapes.md#where-the-2d-layer-runs), and toolpath notes in [plan-v0.3.md](../modes/plan-v0.3.md). These are the UI rules.
+Accepted with the v0.3 docs (D29, 2026-11-22); U1 (the Shapes group, the Shape Editor, the import dialog) is built, see [Implementation (U1)](#implementation-u1); U2 and U3 are not (tasks U1–U3, [plans/v0.3.md § 5](../plans/v0.3.md#5-shape-ui)). Behaviour lives in [design-v0.3.md](../modes/design-v0.3.md) (its [UI summary](../modes/design-v0.3.md#ui-summary) is the intent), the renderer's 2D port in [shapes.md § Where the 2D layer runs](../architecture/shapes.md#where-the-2d-layer-runs), and toolpath notes in [plan-v0.3.md](../modes/plan-v0.3.md). These are the UI rules.
 
 **Visuals pending approval (L3).** The colours, handle and marker shapes and the motion below are proposals made from existing tokens. Specimens go to the [design system](ui-design-system.html#planned-v03) page and the gallery with U1–U3, and L3 approves them in one review ([plans/v0.3.md § 6](../plans/v0.3.md#6-ui-lane-d27)). No new token is added without L3, and a token L3 adds gets its APCA pair in `tokens.test.ts`.
 
@@ -606,6 +606,21 @@ Tests, written with U1–U3:
 - Component tests for `ShapeItemList`, `SegmentTable`, `ShapePicker` and `ImportReportDialog`, against the fake bridge with a real design runtime.
 - Unit tests for the handle, marker and snap maths, kept in pure functions (`viewport/shape-handles.ts`, `viewport/snap.ts`).
 - An e2e Shape Editor flow in hidden windows for the canvas.
+
+#### Implementation (U1)
+
+Code: `modes/design/` (`ShapeList`, `ShapeInspector` with `ShapeItemList`, `SegmentTable`, `ShapeEditorView`, `useShapeDrag`, `ImportReportDialog`, the pure `shape-model.ts`) and `viewport/` (`ShapeView`, the pure `shape-handles.ts` and `flat-view.ts`). How it differs from the rules above, or settles what they left open:
+
+- **Flat view as an SVG overlay.** The Shape Editor draws the shape in an SVG layer over the 3D viewport, which stays mounted underneath (leaving the editor returns to the view it had), not with a three.js orthographic camera. Entering fades and scales it in over `--motion-slow` instead of animating the camera; reduced motion cuts. Pan by dragging the background, zoom with the wheel to the cursor (`wheel.ts`), `F` fits. A floating toolbar holds "Show items", "Fit" and "Back to the part" (`Esc`).
+- **Own frame only.** Every shape is shown in its own frame ("Shape · Shape frame"); the face-on context (stock face, face axes, reference section) waits for placement in the editor (U2).
+- **Two Add menus.** "Add shape" is its own menu in the Shapes group header (Rectangle, Circle, Obround, Polygon, Path, Import SVG…), next to the unchanged "Add operation"; one combined menu with groups was not built.
+- **Shape rows** say "Used by n" only when a shape is used. Remove of a used shape is `aria-disabled` with the reason as visible text under the row.
+- **Values** in the inspector come from the replica's stored items; the summary (area, size, smallest inside radius, elements and loops) and the rows from `design.shape.get` and `design.shape.list`. New items start at sensible sizes in the project units (rectangle 40 × 20 R3, circle Ø 20, obround 40 × 12, hexagon Ø 30, path line–arc R10–line).
+- **Drags** round each value to about one screen pixel (1-2-5 steps) and keep the unit the value was written in (`25 mm` stays `… mm`, a bare number stays bare). Steps go out at most every 100 ms, serialized; a step whose outline does not resolve in the renderer's port is not sent (the drag stops at its last valid step and the bad segment shows red). Arrow keys on a focused handle form one gesture per run (ends 500 ms after the last key).
+- **Handles built:** centre, length, width, corner radius (along the corner's diagonal), diameter, a path's start, segment end points and arc radius (past the half circle the arc turns large). Not built: rotation, fillet and polygon corner-radius handles (their fields edit them).
+- **Segment table** cells are dense `QuantityInput`s (`dense`: no unit suffix and no adjust pencil, the echo still shows the reading); the fillet column edits the fillet at the row's end vertex, and a closed path closing with a line has "Fillet at start" above the table. Removing a row uses the navigator's undo toast (one toast region per mode, `removedToast` in the ui store).
+- **Import SVG…** is in the menu but disabled ("Import SVG comes with the SVG import command."): `ImportReportDialog` (options step, report with facts, soft notes for what changed the drawing, a mini outline, "Edit shape" / "Close") is built against `SvgImportReport` and shown in the gallery only until `design.shape.import` is wired.
+- **Named and rotated shapes in the 3D viewport:** the live outline of a pocket or profile with a named or rotated shape is placed through the renderer's 2D port (`placeShape`): every loop of a region at its top and floor, an open path drawn open.
 
 ### Viewport (task 3.5)
 

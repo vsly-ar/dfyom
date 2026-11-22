@@ -68,9 +68,15 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
     `No tool fits: the pocket is ${L(p['narrowest'])} at its narrowest, the smallest end mill in the library ${L(p['toolDiameter'])}.`,
   'dfm.pocketDeepNarrow': (p, L) =>
     `Deep, narrow pocket: ${L(p['depth'])} deep and ${L(p['narrowest'])} at its narrowest. It needs a long tool.`,
-  'dfm.cornerSharp': () => 'A sharp inside corner cannot be cut by a round tool.',
+  // v0.3 shapes: one warning per corner up to 10, then one with `more` (design-v0.3.md § DFM)
+  'dfm.cornerSharp': (p) =>
+    typeof p['more'] === 'number'
+      ? `${num(p['more'])} more inside corners are too sharp for a round tool.`
+      : 'A sharp inside corner cannot be cut by a round tool.',
   'dfm.cornerTooSmall': (p, L) =>
-    `No tool can make this corner: the smallest end mill in the library has a radius of ${L(p['toolRadius'])}.`,
+    typeof p['more'] === 'number'
+      ? `${num(p['more'])} more inside corners are tighter than the smallest end mill in the library (radius ${L(p['toolRadius'])}).`
+      : `No tool can make this corner: the smallest end mill in the library has a radius of ${L(p['toolRadius'])}.`,
   'dfm.floorRadiusNoTool': (p, L) =>
     `The library has no bull-nose end mill with a corner radius of ${L(p['floorRadius'])} and no ball end mill with a radius of ${L(p['floorRadius'])} or less.`,
   'dfm.holeOutsideStock': () => 'The hole lies partly outside the stock.',
@@ -99,6 +105,15 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
   'dfm.toolUnfit': (p, L) =>
     toolUnfitText(p, L) + (p['locked'] === true ? ' Unlock it or pick another tool.' : ''),
   'dfm.toolNotInLibrary': (p) => `Plan needs a ${String(p['tool'])}: add one to the library.`,
+  // v0.3 shapes (design-v0.3.md § DFM checks for shapes)
+  'dfm.restMaterial': (p) =>
+    num(p['pieces']) > 1
+      ? `The ${String(p['tool'])} leaves material uncut in ${num(p['pieces'])} places narrower than the tool.`
+      : `The ${String(p['tool'])} leaves material uncut in a neck narrower than the tool.`,
+  'dfm.shapeOutsideFace': (p, L) =>
+    `The shape reaches ${L(p['by'])} outside the stock face at the ${list(((p['sides'] as readonly string[] | undefined) ?? []).map((s) => SIDE[s] ?? s))}.`,
+  'dfm.shapeHeavy': (p) =>
+    `This shape has ${num(p['chords'])} segments after flattening, so the part updates more slowly.`,
 }
 
 /** What a tool type rule asks for (`params.needs` of `dfm.toolUnfit`). */

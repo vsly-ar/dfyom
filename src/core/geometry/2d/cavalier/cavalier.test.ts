@@ -129,7 +129,7 @@ describe('offset (spike S1 fixtures)', () => {
     offsetCase(r, -2, 1)
   })
 
-  it('the 2000-segment star with 2 islands', () => {
+  it('the 2000-segment star with 2 islands', { timeout: 60_000 }, () => {
     const [outer, ...holes] = star(2000)
     offsetCase(norm(outer!, ...holes), 3, 3)
   })

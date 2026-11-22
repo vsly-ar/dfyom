@@ -6,6 +6,7 @@ import { z } from 'zod'
 import { Err, tryAsync, type AppResult } from '../../shared/result'
 import type { AnyWorkerTask, WorkerTask } from '../commands/jobs'
 import { createStlParser, STL_LIMITS, StlPositions, type StlSummary } from '../design/stl'
+import { svgImportTask } from '../import/svg/task'
 import { evaluatePart, type PartEvaluation } from '../geometry/evaluate'
 import type { PartGeometryInput } from '../geometry/model'
 import { needsRegion2d } from '../geometry/operations'
@@ -44,7 +45,7 @@ export const toolpathGenerate: WorkerTask<GeneratorRequest, Toolpath> = {
   input: GeneratorRequestSchema,
   output: ToolpathSchema,
   timeoutMs: 60_000,
-  run: (request, ctl) => generateRequest(request, ctl.steps),
+  run: (request, ctl) => generateRequest(request, ctl.steps, ctl.region2d),
 }
 
 const xyz = z.object({ x: z.number(), y: z.number(), z: z.number() })
@@ -144,4 +145,5 @@ export const WORKER_TASKS: readonly AnyWorkerTask[] = [
   toolpathGenerate,
   stlParse,
   stlMesh,
+  svgImportTask,
 ]

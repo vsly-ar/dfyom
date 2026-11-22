@@ -32,7 +32,7 @@ import {
   walkTree,
   type RingNode,
 } from './region-rings'
-import { findRestMaterial } from './rest-material'
+import { findRestMaterial } from '../geometry/2d/rest-material'
 import { arcSweep } from './stats'
 import { bullNose, cutting, endMill, HEIGHTS, RATES } from './testing/fixtures'
 import { placeLoops, regionCoverage } from './testing/region-coverage'

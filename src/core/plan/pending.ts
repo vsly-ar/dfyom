@@ -144,7 +144,7 @@ function uncoveredChanges(
 ): readonly PendingChange[] {
   const cache = services.toolpaths
   if (cache === undefined) return diff
-  const derived = planOperationInputs(doc, after.id)
+  const derived = planOperationInputs(doc, after.id, undefined, services.region2d)
   if (derived.isErr()) return diff
   const inputs = derived.unwrap()
   const current = inputs.map((i) => cache.has(i.inputHash))

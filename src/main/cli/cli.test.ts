@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { unzipSync } from 'fflate'
 import { afterAll, describe, expect, inject, it } from 'vitest'
 import { testStock } from '../../core/design/design.fixture'
+import { ENCLOSURE_SECTIONS_SVG } from '../../core/design/enclosure-sections.testing'
 import { ENCLOSURE_STL } from '../../core/design/stl.testing'
 import { tempDir } from '../host/host.fixture'
 import { INITIALIZE, INITIALIZED, spawnCli, toolCall } from './cli.fixture'
@@ -49,6 +50,7 @@ async function ok(args: readonly string[]): Promise<unknown> {
 
 const file = join(t.dir, 'cli.dfyom')
 const ENCLOSURE = fileURLToPath(ENCLOSURE_STL)
+const ENCLOSURE_SVG = fileURLToPath(ENCLOSURE_SECTIONS_SVG)
 
 describe('dfyom CLI', { timeout: 60_000 }, () => {
   let stock = ''
@@ -182,6 +184,35 @@ describe('dfyom CLI', { timeout: 60_000 }, () => {
     expect(listed.references[0]!.placed.max.z).toBeCloseTo(0, 3)
     const entries = unzipSync(readFileSync(refFile))
     expect(Object.keys(entries).filter((n) => n.startsWith('assets/'))).toHaveLength(1)
+  })
+
+  it('imports an SVG drawing as shapes (the enclosure sections) through the worker pool', async () => {
+    const svgFile = join(t.dir, 'shapes.dfyom')
+    const line = JSON.stringify({
+      name: 'design.part.add',
+      args: { name: 'Base', stockLibraryItemId: stock },
+    })
+    const first = await cli(['batch', '--new', 'Svg', '--save-as', svgFile], line)
+    expect(first.code, first.stderr).toBe(0)
+    const pid = (JSON.parse(first.stdout) as { value: { partId: string } }).value.partId
+    const imported = (await ok([
+      'design.shape.import',
+      JSON.stringify({ partId: pid, path: ENCLOSURE_SVG }),
+      '--project',
+      svgFile,
+    ])) as { shapeIds: string[]; report: { unit: string; imported: Record<string, number> } }
+    expect(imported.shapeIds).toEqual(['shape1', 'shape2'])
+    expect(imported.report).toMatchObject({ unit: 'mm', imported: { path: 2 } })
+    const listed = (await ok([
+      'design.shape.list',
+      JSON.stringify({ partId: pid }),
+      '--project',
+      svgFile,
+    ])) as { shapes: { name: string; kind: string }[] }
+    expect(listed.shapes.map((x) => [x.name, x.kind])).toEqual([
+      ['outline', 'region'],
+      ['cavity', 'region'],
+    ])
   })
 
   it('exit codes: usage and input 2, permission 4', async () => {

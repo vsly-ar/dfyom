@@ -1,6 +1,6 @@
 /**
  * Shape commands and queries (v0.3 K2): `design.shape.add/update/item.update/remove/convert`,
- * `design.shape.list/get`. Doc: docs/modes/design-v0.3.md#commands-and-queries-v03,
+ * `design.shape.import` (I1), `design.shape.list/get`. Doc: docs/modes/design-v0.3.md#commands-and-queries-v03,
  * docs/architecture/shapes.md#implementation-k2
  *
  * `document` commands (one gesture = one undo step). Item quantities arrive as entered and are
@@ -48,6 +48,10 @@ import {
 } from './shape.dto'
 import { operationsUsingShape } from './shape-users'
 import { SurfaceTable } from './surfaces'
+import { ABSOLUTE_PATH } from './reference-commands'
+import { svgShapeItems } from './shape-import'
+import type { SvgImport } from '../import/svg'
+import { svgImportTask, SvgImportReportSchema } from '../import/svg/task'
 
 // ── args ────────────────────────────────────────────────────────────────────────────────────
 
@@ -514,6 +518,71 @@ const shapeConvert = defineCommand({
   },
 })
 
+const shapeImport = defineCommand({
+  kind: 'document',
+  name: 'design.shape.import',
+  summary:
+    'Import an SVG as named shapes of line/arc paths (curves fitted to 0.01 mm); returns an import report.',
+  title: () => 'Import SVG',
+  machine: false,
+  args: z.object({
+    ...PartArg,
+    path: z.string().max(4096).describe('Absolute local path'),
+    unit: z.enum(['mm', 'in', 'px96', 'px72']).optional().describe('For unitless files; px96'),
+    split: z
+      .enum(['element', 'file', 'loop'])
+      .optional()
+      .describe('Shape per top-level element (default), file or outer loop'),
+  }),
+  result: z.object({
+    shapeIds: z.array(ShapeIdSchema),
+    report: SvgImportReportSchema,
+    warnings: Warnings,
+  }),
+  async prepare(doc, args, ctx: CommandContext): Promise<AppResult<SvgImport>> {
+    const where = 'design.shape.import'
+    const c = load(doc, args.partId, ctx, where)
+    if (c.isErr()) return c
+    if (!ABSOLUTE_PATH.test(args.path))
+      return fail('input.malformed', `${args.path}: not an absolute path`, {
+        issues: [{ path: ['path'], rule: 'absolutePath', message: 'must be an absolute path' }],
+        where,
+      })
+    const r = await ctx.services.workers.run(
+      svgImportTask,
+      { path: args.path, unit: args.unit, split: args.split },
+      { signal: new AbortController().signal, progress: () => undefined },
+    )
+    return r.isErr() ? Err(r.unwrapErr().withContext(where, { path: args.path })) : r
+  },
+  run(draft, args, ctx, prepared: SvgImport) {
+    const where = 'design.shape.import'
+    const c = load(draft as ProjectDoc, args.partId, ctx, where)
+    if (c.isErr()) return c
+    const { loaded, port, shapes } = c.unwrap()
+    const file = args.path.split(/[\\/]/).pop() || args.path
+    let n = nextShapeNumber(shapes)
+    const added: ShapeDTO[] = []
+    for (const s of prepared.shapes) {
+      const items = svgShapeItems(s, loaded.units)
+      if (items.isErr()) return Err(items.unwrapErr().withContext(where))
+      const dtos = settleItems(port, items.unwrap(), where)
+      if (dtos.isErr()) return Err(dtos.unwrapErr().withContext(where, { shape: s.name }))
+      const name = s.name.trim().slice(0, NAME_MAX)
+      added.push({
+        id: `shape${n}`,
+        name: name.length > 0 ? name : shapeName(n),
+        items: dtos.unwrap(),
+        source: { file: file.slice(-1024), element: s.source.element.slice(0, NAME_MAX) },
+      })
+      n++
+    }
+    draftShapes(draft, args.partId).push(...added)
+    const result = { shapeIds: added.map((s) => s.id), report: prepared.report }
+    return withWarnings(result, loaded, loaded.part.operations, ctx, where)
+  },
+})
+
 // ── queries ─────────────────────────────────────────────────────────────────────────────────
 
 const Vec = z.tuple([z.number(), z.number()])
@@ -627,5 +696,6 @@ export const SHAPE_COMMANDS: readonly AnyCommand[] = [
   itemUpdate,
   shapeRemove,
   shapeConvert,
+  shapeImport as AnyCommand,
 ]
 export const SHAPE_QUERIES: readonly QueryDef[] = [shapeList, shapeGet]

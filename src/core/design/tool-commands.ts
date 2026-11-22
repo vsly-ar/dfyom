@@ -70,6 +70,7 @@ function choiceInputs(
     materialClass: loaded.stock.material.class,
     library,
     snapshots,
+    ...(region2d !== undefined && { region2d }),
   }))
 }
 

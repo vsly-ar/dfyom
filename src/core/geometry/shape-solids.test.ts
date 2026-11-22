@@ -6,6 +6,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
 import { ENCLOSURE_SECTIONS_SVG } from '../design/enclosure-sections.testing'
 import { importSvg } from '../import/svg/import'
+import { parameterChecks } from './dfm'
 import { evaluatePart, type PartEvaluation } from './evaluate'
 import type { Direction } from './face'
 import { loadManifold } from './manifold'
@@ -378,6 +379,22 @@ describe('part-frame placement (two directions meeting, G2)', () => {
       if (trianglesInPlane(e.positions, e.indices, m) > 0) bad++
     }
     expect(bad).toBe(0)
+  })
+})
+
+describe('dfm.shapeHeavy', () => {
+  it('notes a general shape over the chord budget, not one within it', () => {
+    const codes = (region: Region) =>
+      parameterChecks(input([regionPocket('pocket1', region, 5)]), {
+        tools: [],
+        unitSystem: 'metric',
+        region2d,
+      })
+        .filter((w) => w.code === 'dfm.shapeHeavy')
+        .map((w) => [w.severity, w.params['chords']])
+    const heavy = islandsRegion(2000)
+    expect(codes(heavy)).toEqual([['info', chordCount(flattenRegion(heavy, 'shrink'))]])
+    expect(codes(starRegion(170))).toEqual([])
   })
 })
 

@@ -3,7 +3,8 @@
 // commands agents call with a path; the OS dialog asked about replacing an existing file.
 // Each kind of dialog starts in the folder last chosen in a dialog of that kind (`DialogKind`,
 // remembered in settings/app-state.ts); the reference import (R3) uses `reference-import`.
-// The window then calls `design.reference.import` with the path.
+// The window then calls `design.reference.import` with the path. The SVG import (I1) uses
+// `svg-import`; the window then calls `design.shape.import` with the path.
 // Doc: docs/conventions/ui.md#project-files, #plan-mode-task-37, #remembered-window-state-and-dialog-folders
 import { BrowserWindow, dialog } from 'electron'
 import { stat } from 'node:fs/promises'
@@ -129,6 +130,20 @@ export function chooseReferenceFile(
   return showOpen(win, folders, 'reference-import', {
     title: 'Import reference',
     filters: STL_FILTERS,
+    properties: ['openFile'],
+  })
+}
+
+const SVG_FILTERS = [{ name: 'SVG drawing', extensions: ['svg'] }]
+
+/** The "Import SVG" dialog (task I1): an SVG file, starting in the last SVG import's folder. */
+export function chooseSvgFile(
+  win: BrowserWindow | null,
+  folders: DialogFolders,
+): Promise<string | null> {
+  return showOpen(win, folders, 'svg-import', {
+    title: 'Import SVG',
+    filters: SVG_FILTERS,
     properties: ['openFile'],
   })
 }

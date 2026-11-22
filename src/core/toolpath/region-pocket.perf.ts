@@ -8,7 +8,7 @@ import { loadRegion2dSync } from '../geometry/2d/cavalier'
 import { star } from '../geometry/2d/testing/fixtures'
 import { nodeCavalierWasm } from '../geometry/2d/testing/node-wasm'
 import { generateRegionPocket, type RegionPocketInput } from './region-pocket'
-import { findRestMaterial } from './rest-material'
+import { findRestMaterial } from '../geometry/2d/rest-material'
 import { cutting, endMill, HEIGHTS, RATES } from './testing/fixtures'
 
 function median(n: number, fn: () => void): number {

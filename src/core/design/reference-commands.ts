@@ -51,7 +51,7 @@ const ReferenceIdSchema = z.string()
 const RefArg = { partId: PartIdSchema, referenceId: ReferenceIdSchema }
 const SourceUnitSchema = z.enum(['mm', 'inch'])
 /** POSIX `/…`, Windows `C:\…` or `\\server\…`: the main process has no meaningful cwd. */
-const ABSOLUTE = /^(\/|[A-Za-z]:[\\/]|\\\\)/
+export const ABSOLUTE_PATH = /^(\/|[A-Za-z]:[\\/]|\\\\)/
 const FitArg = z.object({ anchor: AnchorSchema.optional(), z: z.enum(FIT_Z).optional() })
 
 const Warnings = z.array(ReferenceWarningSchema)
@@ -212,7 +212,7 @@ const referenceImport = defineCommand({
     const where = 'design.reference.import'
     const loaded = loadPart(doc, args.partId, where)
     if (loaded.isErr()) return loaded
-    if (!ABSOLUTE.test(args.path))
+    if (!ABSOLUTE_PATH.test(args.path))
       return fail('input.malformed', `${args.path}: not an absolute path`, {
         issues: [{ path: ['path'], rule: 'absolutePath', message: 'must be an absolute path' }],
         where,

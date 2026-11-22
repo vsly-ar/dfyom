@@ -6,7 +6,9 @@
  * (re-imported from the library), so re-imports and rebuilds re-check the part against it.
  */
 import { Err, fail, type AppResult } from '../../shared/result'
-import { partFromDTO } from '../design/operation'
+import type { Region2dPort } from '../geometry/2d/port'
+import { partFromDTO, type Part } from '../design/operation'
+import { shapeFacts } from '../design/placement'
 import type { PartDTO } from '../design/part.dto'
 import { checkReferences } from '../design/surfaces'
 import { checkOperations } from '../design/validate'
@@ -16,8 +18,27 @@ import { Stock } from '../library/stock'
 import type { ProjectDoc } from '../project/document'
 import type { PlanDTO } from './plan.dto'
 
+/**
+ * References and constraints of a loaded part against a stock: with the 2D port the shape checks
+ * that need the placed loop (`profileOneLoop`, `tabOutside`, `tabsOverlap`, `tabsFit`) run as in
+ * the design (validate.ts `ShapeFacts`); without it they are skipped.
+ */
+export function checkPart(part: Part, stock: Stock, port?: Region2dPort): AppResult<void> {
+  const ops = part.operations
+  return checkReferences(ops, stock).andThen(() =>
+    shapeFacts(ops, part.shapes, port).andThen((facts) =>
+      checkOperations(ops, stock, undefined, facts, part.shapes),
+    ),
+  )
+}
+
 /** The part's references and constraints against a stock copy (`model.invariant`, `design.referenced`). */
-export function checkPartFits(part: PartDTO, stock: SnapshotDTO, where: string): AppResult<void> {
+export function checkPartFits(
+  part: PartDTO,
+  stock: SnapshotDTO,
+  where: string,
+  port?: Region2dPort,
+): AppResult<void> {
   const model = partFromDTO(part)
   if (model.isErr()) return Err(model.unwrapErr().withContext(where))
   const values = Snapshot.fromDTO(stock).map((s) => s.values)
@@ -25,10 +46,7 @@ export function checkPartFits(part: PartDTO, stock: SnapshotDTO, where: string):
   const s = values.unwrap()
   if (!(s instanceof Stock))
     return fail('input.malformed', `copy ${stock.id} is not a stock`, { where })
-  const ops = model.unwrap().operations
-  return checkReferences(ops, s)
-    .andThen(() => checkOperations(ops, s))
-    .mapErr((e) => e.withContext(where))
+  return checkPart(model.unwrap(), s, port).mapErr((e) => e.withContext(where))
 }
 
 /** The stock copy a part resolves to in a plan (after a rebuild: the design's, if new). */

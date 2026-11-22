@@ -251,6 +251,10 @@ export const DFM_WARNING_CODES = [
   // the operation's own tool (v0.2): docs/modes/design-v0.2.md#dfm-with-the-tool
   'dfm.toolUnfit',
   'dfm.toolNotInLibrary',
+  // shapes (v0.3): docs/modes/design-v0.3.md#dfm-checks-for-shapes
+  'dfm.restMaterial',
+  'dfm.shapeOutsideFace',
+  'dfm.shapeHeavy',
 ] as const
 export type DfmWarningCode = (typeof DFM_WARNING_CODES)[number]
 
@@ -271,6 +275,9 @@ export interface DfmWarning {
   readonly operation: string
   /** Its parameter (`tabs`, `shape.cornerRadius`, …), when one is to blame. */
   readonly parameter?: string
-  readonly params: Readonly<Record<string, number | string | boolean | readonly string[]>>
+  /** Values for the message; `at` = `[u, v]` of a marker in the face frame (v0.3 shapes). */
+  readonly params: Readonly<
+    Record<string, number | string | boolean | readonly string[] | readonly number[]>
+  >
   readonly suggestion?: DfmSuggestion
 }

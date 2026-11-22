@@ -5,7 +5,8 @@
 // in the viewport (pick mode) or chosen from a list. Without a selection: the part (name, stock,
 // general tolerance) and all its warnings. Command errors show at their field (or at the top);
 // DFM warnings at the blamed parameter, with "Use …" for a suggestion. A selected reference model
-// shows its own inspector (ReferenceInspector.tsx, task R3).
+// shows its own inspector (ReferenceInspector.tsx, task R3), a selected shape the Shape Editor's
+// (ShapeInspector.tsx, task U1).
 // Doc: docs/conventions/ui.md#panels-and-inspectors, #quantity-and-expression-input,
 // #selection-and-picking, #errors, #warnings-and-dfm; docs/modes/design.md#operations-v01
 import { useState } from 'react'
@@ -27,6 +28,7 @@ import {
 import styles from './Design.module.css'
 import { NameField } from './NameField'
 import { ReferenceInspector } from './ReferenceInspector'
+import { ShapeInspector } from './ShapeInspector'
 import { ToolField } from './ToolField'
 import { defaultUnit, pendingApply, quantityOf, updateArgs, type DesignPart } from './model'
 import {
@@ -98,6 +100,8 @@ export function DesignInspector({ part }: { part: DesignPart | undefined }): Rea
     : undefined
   if (ref !== undefined && ref.partId === part.dto.id)
     return <ReferenceInspector key={ref.id} part={part} reference={ref} />
+  const shape = part.dto.shapes?.find((s) => s.id === selected)
+  if (shape !== undefined) return <ShapeInspector key={shape.id} part={part} shape={shape} />
   const op = part.dto.operations.find((o) => o.id === selected)
   return op === undefined ? (
     <PartInspector part={part} warnings={warnings} />
