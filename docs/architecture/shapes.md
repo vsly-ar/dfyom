@@ -65,11 +65,12 @@ Builders in [Building the solids](geometry.md#building-the-solids) get general-l
 | Profile inside  | `loop − offset(loop, slotWidth)` prism                                                     | Tabs                       |
 | Profile `on`    | `offsetPath` / `offset(loop, ±slotWidth/2)` band, through or to the blind `depth`          | Tabs (closed through only) |
 
-- **Labelled prisms:** walls are bands per flattened element, labelled `wall[i]` / `corner[i]` by element (lines / arcs, [Surfaces](../modes/design-v0.3.md#surfaces)); caps are triangulated with holes (Manifold's `triangulate` on the flattened loops, so no new dependency) and labelled `floor` / `air`. The v0.1 offset-loft stays for rectangles and circles with floor fillets.
+- **Labelled prisms:** walls are bands per flattened element, labelled `wall[i]` / `corner[i]` by element (lines / arcs, numbering in [Surfaces](../modes/design-v0.3.md#surfaces)); caps are triangulated with holes by Manifold's `triangulate` on the flattened loops (no new dependency, no fan caps: S3 measured caps at 10–25 % of the cost) and labelled `floor` / `air`. `triangulate` is exposed through the manifold adapter (`src/core/geometry/manifold/`, plain data in and out, outside the arena, same module instance). The v0.1 offset-loft stays for rectangles and circles with floor fillets.
 - **Flattening** as today: removals inscribed, the kept-side prism circumscribed, per element, at the 0.01 mm chord tolerance.
 - **Tabs:** the offset band of [Offset-loft](geometry.md#offset-loft) is defined by "points whose nearest shape point lies on the tab's stretch"; for general loops it is built from the stretch's elements offset to `outer` and `inner` with end faces along the loop normal, bent on the medial axis by the same rule. The tab stretch comes from `pointAt` with the design's positions.
-- **Slivers:** general shapes make wall positions non-dyadic everywhere, so the v0.2 backlog issue "walls of two directions differ by float32 rounding" ([plans/v0.2.md](../plans/v0.2.md#known-issues-and-risks)) matters more; task G2 measures it and, if needed, moves wall placement into float64 like the key levels.
-- **Spike S3** ([results](../../spikes/prisms/results.md), draft): labelled prisms with `triangulate` work, and every element label survives at 2000 elements. Three shape operations with 500 elements evaluate in 40 ms. 2000-element shapes take 60–170 ms, because Manifold re-triangulates each crossed face in time quadratic in the chords of the loop crossing it. Tiling the stock faces bounds that. Placing every vertex in float64 in the part frame removes the cross-direction wall slivers (0 of 60 cases, against 33 of 60 with the v0.2 placement). The recommendations there are not yet adopted here.
+- **Part-frame placement:** every mesh, the stock included, has its vertices placed into the part frame in float64 **before** the float32 mesh I/O; the same part-frame value then rounds to the same float32 in every mesh, so walls of two directions meet as exactly as levels do. This supersedes the A1b "key level in the placement" rule ([geometry.md § Non-top faces](geometry.md#non-top-faces-v02)) once G1 lands, closes the v0.2 wall-sliver issue ([plans/v0.2.md](../plans/v0.2.md#known-issues-and-risks); S3: 0 of 60 cases, against 33 of 60) and folds G2 into G1. It changes v0.1/v0.2 meshes by float32 rounding, so mesh golden files change. Precision: half a float32 ulp is 3.8 nm at 100 mm, 30 nm at 1 m.
+- **Tiles:** Manifold re-triangulates every face a prism crosses as one polygon, in time quadratic in the chords of the crossing loop. Planar faces that later operations cross – the stock faces and facing floors – are therefore built as tiles of ≈ 15 mm, each with its own face id, all mapped to one surface role (`stock.top`, `facing1.floor`). S3: the 2000-element star 169 → 60 ms, ≈ 600 extra triangles on a 200 × 120 × 30 stock.
+- **Spike S3:** [results](../../spikes/prisms/results.md) (draft); numbers in [Performance](#performance).
 
 ## Parameter checks for shapes
 
@@ -82,9 +83,14 @@ Builders in [Building the solids](geometry.md#building-the-solids) get general-l
 
 ## Arc fitting
 
-SVG Béziers and elliptical arcs become **biarcs** (two tangent arcs per piece, tangent-continuous with their neighbours), subdivided until every point is within 0.01 mm (the chord tolerance). The spike's 3-point arcs are not tangent-continuous and are not used. Lines stay lines; circular arcs stay exact; arcs whose radius exceeds 10 m become lines. Fitting runs in the dispatcher's prepared input (import), never on render.
+SVG Béziers and elliptical arcs become **biarcs** (two tangent arcs per piece, tangent-continuous with their neighbours), subdivided until every point is within 0.01 mm (the chord tolerance). The spike's 3-point arcs are not tangent-continuous and are not used. Lines stay lines; circular arcs stay exact. Fitting runs in the dispatcher's prepared input (import), never on render. Method (spike S5, approach B, [research/s5-biarc-fitting.md](../research/s5-biarc-fitting.md)):
 
-Spike S5 measured three fitting methods and recommends the Riskus/Šír-style biarc (inflection split, incenter join); it also proposes changes to this section, notably replacing the 10 m radius rule with a sagitta rule: [research/s5-biarc-fitting.md](../research/s5-biarc-fitting.md) (draft, not yet folded in).
+1. **Split** each curve at cusps (B′ = 0: **true corners**, the source has no tangent there), then at inflections and ellipse vertices (G1 joins), so every piece is C-shaped.
+2. **Fit** each piece with a biarc joined at the incenter of its tangent triangle; subdivide at the parameter midpoint while the error estimate exceeds the tolerance. Estimate: 24 curve samples per piece against the elements, plus a guard rejecting element chains more than 10 % longer than the sampled curve.
+3. **Lines** only for degenerate arcs: sagitta ≤ 0.1 µm **and** half sweep (the kink left) ≤ 0.1 mrad; the fit runs at 0.01 mm − 0.1 µm to pay for it. There is no radius rule: a 225 m arc over 300 mm is 0.05 mm off its chord. Collinear lines merge.
+4. **Clean up:** micro corners (lines shorter than 1·10⁻⁴ mm left at near-cusps) are merged into their neighbours before the shape reaches the [2D port](#2d-port), so `segmentTooShort` never fires for imports; arcs over 180° are split in two (bulge ≤ 1), so a circular SVG arc or full circle gives 1–2 elements. Merging consecutive arcs with a common centre (within tolerance) is optional.
+
+Each fitted curve gives ≥ 2 elements (B: ≈ 7–8 per cubic, 27–33 µs per cubic). Corners kept at cusps and micro corners merged are counted in the [import report](../modes/design-v0.3.md#svg-import). The spike's independent oracle (two-sided sampled deviation, kink angles) and corpus become I1's tests; production code relies on the in-fit estimate and keeps no two-sided check (recommended, [Open questions](#open-questions)).
 
 ## SVG import
 
@@ -97,10 +103,13 @@ Budgets on the Apple M1 Pro class reference, measured by `npm run perf`:
 | Measure                                                           | Budget   | Spike evidence (ADR 0019)                |
 | ----------------------------------------------------------------- | -------- | ---------------------------------------- |
 | Resolve + parameter checks of a 200-element shape, in the command | ≤ 3 ms   | one offset 0.14 ms, union 0.26 ms (WASM) |
-| Part evaluation with three shape operations (500 elements total)  | ≤ 50 ms  | –                                        |
+| Part evaluation with three shape operations (500 elements total)  | ≤ 50 ms  | S3: 40 ms                                |
 | Pocket toolpath of the spike's star (200 + 2 islands)             | ≤ 500 ms | 20 rings 1.1 ms                          |
+
+Evaluation cost follows **chords** (flattened segments at the chord tolerance), not elements: with [tiles](#geometry-for-shape-operations), ≈ 16 µs per chord (triangulate ≈ 3.6, `fromMesh` ≈ 3.2, booleans ≈ 8), so the 50 ms budget holds ≈ 3 000 chords per evaluation ([S3](../../spikes/prisms/results.md#cost-median-of-15-part-placement)). Single 500-element pockets take 15–39 ms; 2000-element shapes (5 000–7 000 chords) take 47–115 ms tiled (82–169 ms untiled) and do not fit ([Open questions](#open-questions)).
 
 ## Open questions
 
-- Does Manifold's `triangulate` keep up with 2000-element caps within the evaluation budget, or do caps need their own fan of the region's rings? (spike S3, [plans/v0.3.md](../plans/v0.3.md#risks-and-spikes)) Measured in the [S3 results](../../spikes/prisms/results.md): caps keep up and no fan is needed. The cost is in the booleans' face re-triangulation. Still to decide: the budget for 2000-element shapes, and whether to adopt the tiles and the part-frame placement.
+- **Shapes over the chord budget** (2000 elements: 47–115 ms, [Performance](#performance)). Recommendation: a documented limit – each subtraction stays one evaluation step (≤ ≈ 60 ms, abortable between steps), no hard refusal – plus a DFM info note when a shape operation's chords exceed the budget. Alternative: a coarser chord tolerance for such shapes.
+- **Two-sided deviation check in I1 production code?** Recommendation: tests only; the in-fit estimate stayed ≤ 9.9 µm on every S5 case ([Arc fitting](#arc-fitting)).
 - Report the touching-island defect upstream with the spike fixture (ADR 0019 open question).
