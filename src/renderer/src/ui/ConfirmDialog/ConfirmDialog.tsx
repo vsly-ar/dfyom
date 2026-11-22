@@ -5,6 +5,7 @@ import { AlertDialog } from 'radix-ui'
 import type { ReactElement, ReactNode } from 'react'
 import { Button } from '../Button/Button'
 import styles from '../Dialog/Dialog.module.css'
+import { MODAL_ATTR } from '../ApplyButton/ApplyScope'
 import { usePortalContainer } from '../UiProvider/UiProvider'
 
 export interface ConfirmDialogProps {
@@ -46,7 +47,7 @@ export function ConfirmDialog({
       {trigger ? <AlertDialog.Trigger asChild>{trigger}</AlertDialog.Trigger> : null}
       <AlertDialog.Portal container={container}>
         <AlertDialog.Overlay className={styles['overlay']} />
-        <AlertDialog.Content className={styles['content']} data-size="sm">
+        <AlertDialog.Content className={styles['content']} data-size="sm" {...{ [MODAL_ATTR]: '' }}>
           <AlertDialog.Title className={styles['title']}>{title}</AlertDialog.Title>
           <AlertDialog.Description className={styles['body']}>
             {description}

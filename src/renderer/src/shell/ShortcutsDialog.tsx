@@ -4,7 +4,7 @@ import { projectMessages } from '../messages/project'
 import { Button, Dialog, DialogClose } from '../ui'
 import styles from './AppShell.module.css'
 import { useUi } from './ShellContext'
-import { IS_MAC, shortcutLabel } from './shortcuts'
+import { APPLY_SHORTCUT, IS_MAC, shortcutLabel } from './shortcuts'
 
 const m = projectMessages.shortcuts
 const alt = IS_MAC ? '⌥' : 'Alt+'
@@ -18,6 +18,7 @@ export const SHORTCUTS: readonly { group: keyof typeof m.groups; items: [string,
       [shortcutLabel('O'), m.what.openProject],
       [shortcutLabel('S'), m.what.save],
       [shortcutLabel('S', { shift: true }), m.what.saveAs],
+      [APPLY_SHORTCUT, m.what.apply],
     ],
   },
   {
@@ -53,6 +54,7 @@ export const SHORTCUTS: readonly { group: keyof typeof m.groups; items: [string,
     group: 'fields',
     items: [
       ['Enter', m.what.commit],
+      ['Tab', m.what.commitOnly],
       ['Esc', m.what.revert],
       ['↑ ↓', m.what.step],
       [`${alt}P`, m.what.pick],

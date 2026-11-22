@@ -9,6 +9,7 @@ import {
   type Evaluations,
   type PartEvaluationEntry,
 } from '../state/evaluations'
+import { createPending, type PendingState, type PendingStore } from '../state/pending'
 import { createReplica, type Replica, type ReplicaState } from '../state/replica'
 import { createSettingsStore, type SettingsState, type SettingsStore } from '../state/settings'
 import { createUiStore, type UiState, type UiStore } from '../state/ui-store'
@@ -23,6 +24,8 @@ export interface Shell {
   readonly evaluations: Evaluations
   /** New / Open / Save and their dialogs (task 3.6). */
   readonly files: ProjectFiles
+  /** Pending changes and Apply (task P3, docs/architecture/apply.md#ui). */
+  readonly pending: PendingStore
 }
 
 export function createShell(bridge: PreloadApi): Shell {
@@ -34,6 +37,7 @@ export function createShell(bridge: PreloadApi): Shell {
     ui: createUiStore(),
     evaluations: createEvaluations(bridge, replica),
     files: createProjectFiles({ bridge, replica }),
+    pending: createPending(bridge, replica),
   }
 }
 
@@ -51,7 +55,9 @@ export function ShellProvider({
     const stopReplica = shell.replica.start()
     const stopSettings = shell.settings.start()
     const stopEvaluations = shell.evaluations.start()
+    const stopPending = shell.pending.start()
     return () => {
+      stopPending()
       stopReplica()
       stopSettings()
       stopEvaluations()
@@ -77,6 +83,12 @@ export function useSettings<T>(selector: (s: SettingsState) => T): T {
 
 export function useUi<T>(selector: (s: UiState) => T): T {
   return useStore(useShell().ui, selector)
+}
+
+/** The window's pending changes and Apply state (task P3). */
+export function usePending(): PendingState {
+  const { pending } = useShell()
+  return useSyncExternalStore(pending.subscribe, pending.getState)
 }
 
 /** A part's evaluation (status and last good mesh), or undefined before the window knows it. */

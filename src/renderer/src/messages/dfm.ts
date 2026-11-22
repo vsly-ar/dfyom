@@ -132,8 +132,9 @@ export const dfmMessages = {
       return undefined
     return lengthSource(s.value, units, s.relation === 'atLeast' ? 'up' : 'down')
   },
-  apply: (relation: 'atLeast' | 'atMost', source: string): string =>
-    `Apply ${relation === 'atLeast' ? '≥' : '≤'} ${source}`,
+  /** Fix button: "Use ≥ 3.2 mm" ("Apply" names only project Apply, apply.md#keyboard). */
+  useValue: (relation: 'atLeast' | 'atMost', source: string): string =>
+    `Use ${relation === 'atLeast' ? '≥' : '≤'} ${source}`,
   listTitle: 'Warnings',
   none: 'No warnings.',
   checksPending: 'Geometry checks pending.',

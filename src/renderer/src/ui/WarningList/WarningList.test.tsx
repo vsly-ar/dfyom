@@ -26,7 +26,7 @@ describe('WarningList', () => {
             subject: 'Pocket 1',
             onSelect,
             text: 'No tool can make this corner.',
-            fix: { label: 'Apply ≥ 3.2 mm', onApply },
+            fix: { label: 'Use ≥ 3.2 mm', onApply },
           },
           { id: 'b', tier: 'soft', text: 'Needs pecking.' },
           { id: 'c', tier: 'error', text: 'No tool assigned.' },
@@ -35,7 +35,7 @@ describe('WarningList', () => {
     )
     const list = screen.getByRole('list', { name: 'Warnings' })
     expect(list).toHaveTextContent('Warning: Pocket 1No tool can make this corner.')
-    await user.click(screen.getByRole('button', { name: 'Apply ≥ 3.2 mm' }))
+    await user.click(screen.getByRole('button', { name: 'Use ≥ 3.2 mm' }))
     expect(onApply).toHaveBeenCalledOnce()
     await user.click(screen.getByRole('button', { name: 'Pocket 1' }))
     expect(onSelect).toHaveBeenCalledOnce()
@@ -58,5 +58,28 @@ describe('WarningList', () => {
     expect(screen.getByText(/1 dismissed/)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Show' }))
     expect(screen.getByText('Needs pecking.')).toBeInTheDocument()
+  })
+
+  it('marks warnings Apply may change, and the whole list as outdated until Apply', async () => {
+    renderUi(
+      <WarningList
+        labels={labels}
+        items={[
+          {
+            id: 'a',
+            tier: 'soft',
+            text: 'No tool can make this corner.',
+            pendingApply: 'May change on Apply: the tool is chosen again.',
+          },
+        ]}
+        empty="None"
+        outdated="Outdated until Apply."
+      />,
+    )
+    expect(screen.getByText('Outdated until Apply.')).toBeInTheDocument()
+    const list = screen.getByRole('list', { name: 'Warnings' })
+    expect(list).toHaveTextContent('May change on Apply: the tool is chosen again.')
+    expect(list.querySelector('[data-pending]')).not.toBeNull()
+    await expectNoAxeViolations()
   })
 })

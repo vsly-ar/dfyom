@@ -11,6 +11,7 @@ import { Quantity } from '../../../../core/quantity/quantity'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { designMessages } from '../../messages/design'
 import {
+  ApplyScope,
   Button,
   ErrorMessage,
   Field,
@@ -115,66 +116,69 @@ export function StockSetup({ units }: { units: UnitSystem }): React.JSX.Element 
   )
 
   return (
-    // not a <form>: Enter in a field commits that field (QuantityInput), it does not submit
-    <section className={styles['setup']} aria-labelledby={titleId}>
-      <h2 id={titleId} className={styles['setupTitle']}>
-        {m.setupTitle}
-      </h2>
-      <p className={styles['muted']}>{m.setupDescription}</p>
-      <Field label={m.partName}>
-        <FieldInput value={partName} onChange={(e) => setPartName(e.target.value)} />
-      </Field>
-      <div className={styles['choice']}>
-        <span className={styles['caption']} aria-hidden="true">
-          {m.source}
-        </span>
-        <SegmentedControl<'new' | 'library'>
-          label={m.source}
-          options={[
-            { value: 'new', label: m.newStock },
-            { value: 'library', label: m.fromLibrary, disabled: library.length === 0 },
-          ]}
-          value={source}
-          onValueChange={setSource}
-        />
-      </div>
-      {source === 'library' ? (
-        <Field label={m.libraryItem}>
-          <Select
-            options={library.map((i) => ({ value: i.id, label: i.name }))}
-            value={itemId ?? ''}
-            onValueChange={setItemId}
-          />
+    // not a <form>: Enter in a field commits that field (QuantityInput), it does not submit; local
+    // form state, so Enter never applies (apply.md#keyboard)
+    <ApplyScope onApply={null}>
+      <section className={styles['setup']} aria-labelledby={titleId}>
+        <h2 id={titleId} className={styles['setupTitle']}>
+          {m.setupTitle}
+        </h2>
+        <p className={styles['muted']}>{m.setupDescription}</p>
+        <Field label={m.partName}>
+          <FieldInput value={partName} onChange={(e) => setPartName(e.target.value)} />
         </Field>
-      ) : (
-        <>
-          {sizeField(0, m.length, 'length')}
-          {sizeField(1, m.width, 'width')}
-          {sizeField(2, m.thickness, 'depth')}
-          <Field label={m.materialName}>
-            <FieldInput value={material} onChange={(e) => setMaterial(e.target.value)} />
-          </Field>
-          <Field label={m.materialClass}>
-            <Select<MaterialClass>
-              options={MATERIAL_CLASSES.map((c) => ({ value: c, label: m.classes[c] }))}
-              value={materialClass}
-              onValueChange={setMaterialClass}
+        <div className={styles['choice']}>
+          <span className={styles['caption']} aria-hidden="true">
+            {m.source}
+          </span>
+          <SegmentedControl<'new' | 'library'>
+            label={m.source}
+            options={[
+              { value: 'new', label: m.newStock },
+              { value: 'library', label: m.fromLibrary, disabled: library.length === 0 },
+            ]}
+            value={source}
+            onValueChange={setSource}
+          />
+        </div>
+        {source === 'library' ? (
+          <Field label={m.libraryItem}>
+            <Select
+              options={library.map((i) => ({ value: i.id, label: i.name }))}
+              value={itemId ?? ''}
+              onValueChange={setItemId}
             />
           </Field>
-        </>
-      )}
-      {source === 'library' && library.length === 0 ? (
-        <p className={styles['muted']}>{m.noLibrary}</p>
-      ) : null}
-      {error !== undefined ? <ErrorMessage error={error} /> : null}
-      <Button
-        variant="primary"
-        onClick={() => void create()}
-        icon={<Box aria-hidden="true" />}
-        disabled={busy || (source === 'library' && itemId === undefined)}
-      >
-        {m.create}
-      </Button>
-    </section>
+        ) : (
+          <>
+            {sizeField(0, m.length, 'length')}
+            {sizeField(1, m.width, 'width')}
+            {sizeField(2, m.thickness, 'depth')}
+            <Field label={m.materialName}>
+              <FieldInput value={material} onChange={(e) => setMaterial(e.target.value)} />
+            </Field>
+            <Field label={m.materialClass}>
+              <Select<MaterialClass>
+                options={MATERIAL_CLASSES.map((c) => ({ value: c, label: m.classes[c] }))}
+                value={materialClass}
+                onValueChange={setMaterialClass}
+              />
+            </Field>
+          </>
+        )}
+        {source === 'library' && library.length === 0 ? (
+          <p className={styles['muted']}>{m.noLibrary}</p>
+        ) : null}
+        {error !== undefined ? <ErrorMessage error={error} /> : null}
+        <Button
+          variant="primary"
+          onClick={() => void create()}
+          icon={<Box aria-hidden="true" />}
+          disabled={busy || (source === 'library' && itemId === undefined)}
+        >
+          {m.create}
+        </Button>
+      </section>
+    </ApplyScope>
   )
 }

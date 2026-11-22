@@ -1,0 +1,153 @@
+/* ApplyButton. Doc: docs/architecture/apply.md#apply-button, docs/conventions/ui.md#buttons */
+
+/* The slot collapses to nothing while clean (grid track 0fr ↔ 1fr); its content stays for the
+   exit, inert. Reduced motion zeroes the durations (tokens.css). */
+.slot {
+  display: grid;
+  grid-template-columns: 0fr;
+  opacity: 0;
+  transform: translateX(6px);
+  transition:
+    grid-template-columns var(--motion-base) var(--ease-exit),
+    opacity var(--motion-fast) var(--ease-exit),
+    transform var(--motion-base) var(--ease-exit);
+}
+
+.slot[data-shown] {
+  grid-template-columns: 1fr;
+  opacity: 1;
+  transform: none;
+  transition:
+    grid-template-columns var(--motion-base) var(--ease-emphasized),
+    opacity var(--motion-base) var(--ease-emphasized),
+    transform var(--motion-base) var(--ease-emphasized);
+}
+
+.inner {
+  min-width: 0;
+  overflow: hidden;
+  /* room for the focus ring inside the clipped track */
+  padding: 3px;
+  margin: -3px;
+}
+
+.button {
+  font-variant-numeric: tabular-nums;
+}
+
+/* the count: a tabular badge that rolls in when it changes (keyed by the count) */
+.badge {
+  display: inline-block;
+  min-width: 1.25rem;
+  padding: 0 5px;
+  border-radius: var(--radius-full);
+  background: var(--bg-active);
+  color: var(--text);
+  font-size: var(--text-sm);
+  line-height: 1.25rem;
+  text-align: center;
+  animation: roll var(--motion-base) var(--ease-emphasized);
+}
+
+.danger {
+  color: var(--danger-text);
+}
+
+.button svg.danger {
+  color: var(--danger);
+  filter: none;
+}
+
+/* "Applied by agent": fades in */
+.fade {
+  color: var(--text-muted);
+  animation: fade-in var(--motion-base) var(--ease-emphasized);
+}
+
+/* determinate ring from the jobs' progress; indeterminate spins (static under reduced motion) */
+.ring {
+  width: var(--icon-md);
+  height: var(--icon-md);
+  flex: none;
+  fill: none;
+  stroke-width: 2px;
+}
+
+.track {
+  stroke: var(--border-control);
+}
+
+.value {
+  stroke: var(--accent-icon);
+  stroke-linecap: round;
+  transition: stroke-dasharray var(--motion-base) var(--ease-standard);
+}
+
+.ring[data-indeterminate] {
+  animation: spin 1s linear infinite;
+}
+
+/* rich tooltip body (on the inverted tooltip surface) */
+.tip {
+  display: grid;
+  gap: 6px;
+}
+
+.tip p {
+  margin: 0;
+}
+
+.tipTitle {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tipTitle b {
+  font-weight: var(--weight-bold);
+}
+
+.kbd {
+  font: var(--text-xs) var(--font-mono);
+  opacity: 0.7;
+}
+
+.tipList {
+  opacity: 0.8;
+}
+
+.tipError {
+  font-weight: var(--weight-medium);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@keyframes roll {
+  from {
+    opacity: 0;
+    transform: translateY(40%);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

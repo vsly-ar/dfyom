@@ -13,6 +13,8 @@ export interface TooltipProps {
   /** One focusable element; it becomes the trigger (Radix `asChild`). */
   children: ReactElement
   side?: 'top' | 'right' | 'bottom' | 'left'
+  /** Rich tooltip: a block of several lines (title, explanation, list), wider (Apply button). */
+  rich?: boolean
   /** Controlled open state (the gallery shows tooltips open). */
   open?: boolean
   onOpenChange?: (open: boolean) => void
@@ -23,6 +25,7 @@ export function Tooltip({
   shortcut,
   children,
   side = 'bottom',
+  rich = false,
   open,
   onOpenChange,
 }: TooltipProps): React.JSX.Element {
@@ -34,9 +37,14 @@ export function Tooltip({
     >
       <RadixTooltip.Trigger asChild>{children}</RadixTooltip.Trigger>
       <RadixTooltip.Portal container={container}>
-        <RadixTooltip.Content className={styles['content']} side={side} sideOffset={6}>
+        <RadixTooltip.Content
+          className={styles['content']}
+          side={side}
+          sideOffset={6}
+          data-rich={rich || undefined}
+        >
           {content}
-          {shortcut ? <kbd className={styles['kbd']}>{shortcut}</kbd> : null}
+          {shortcut && !rich ? <kbd className={styles['kbd']}>{shortcut}</kbd> : null}
         </RadixTooltip.Content>
       </RadixTooltip.Portal>
     </RadixTooltip.Root>

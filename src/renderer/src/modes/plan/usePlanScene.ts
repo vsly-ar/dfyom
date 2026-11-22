@@ -1,7 +1,7 @@
 // The viewport's plan scene (task 3.7): the chosen plan's toolpaths in machining order (feeds,
 // rapids and plunges in their colours) with the work zero marker, drawn by the run layer without
-// playback (nothing done, no tool marker). Current and outdated toolpaths are drawn; operations
-// without one are left out. Snapshot scene (task E3b): the part drawn is the plan's part (its
+// playback (nothing done, no tool marker). Current and outdated toolpaths are drawn, outdated ones
+// (stale or waiting for Apply, task P3) dimmed; operations without one are left out. Snapshot scene (task E3b): the part drawn is the plan's part (its
 // design snapshot with plan-only edits, evaluated as the plan's own subject) on the plan's stock
 // copy, its edited operations tinted. `null` outside plan mode.
 // Doc: docs/conventions/ui.md#plan-mode-task-37, docs/modes/plan-v0.2.md#plan-only-edits-and-the-snapshot-scene
@@ -28,11 +28,19 @@ export function usePlanScene(mode: AppMode): RunScene | null {
   const data = usePlanData(plan?.id)
   return useMemo(() => {
     if (data === undefined || plan === undefined) return null
-    const toolpaths = plan.setups[0]!.operations.flatMap((o) => {
-      const tp = data.toolpaths[o.id]?.toolpath
-      return tp ? [tp as Toolpath] : []
+    const drawn = plan.setups[0]!.operations.flatMap((o) => {
+      const entry = data.toolpaths[o.id]
+      return entry?.toolpath ? [entry] : []
     })
-    return { lines: toolpaths.length === 0 ? null : toolpathLines(toolpaths), done: 0, tool: null }
+    const toolpaths = drawn.map((e) => e.toolpath as Toolpath)
+    // outdated (stale, or the plan waits for Apply): dimmed until regenerated (P3)
+    const outdated = drawn.map((e) => e.stale || e.pendingApply === true || data.pendingApply)
+    return {
+      lines: toolpaths.length === 0 ? null : toolpathLines(toolpaths),
+      done: 0,
+      tool: null,
+      ...(outdated.some(Boolean) ? { outdated } : {}),
+    }
   }, [data, plan])
 }
 

@@ -61,11 +61,15 @@ export function useHistorySteps(): HistorySteps {
  * the steps of a live edit, docs/architecture/commands.md#gestures-live-edits).
  */
 export function useCall(): (name: string, args: object, opts?: CallOpts) => Promise<CallReply> {
-  const { bridge } = useShell()
+  const { bridge, pending } = useShell()
   return useCallback(
-    (name, args, opts) =>
-      opts === undefined ? bridge.call(name, args) : bridge.call(name, args, opts),
-    [bridge],
+    async (name, args, opts) => {
+      const r = await (opts === undefined ? bridge.call(name, args) : bridge.call(name, args, opts))
+      // a library edit is pending in projects whose draft plans copy it, without a project event
+      if (name.startsWith('library.')) pending.refresh()
+      return r
+    },
+    [bridge, pending],
   )
 }
 

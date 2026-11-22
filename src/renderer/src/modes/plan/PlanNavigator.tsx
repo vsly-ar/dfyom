@@ -1,7 +1,8 @@
 // Plan navigator (task 3.7; ui.md#app-shell: "Plan: plan picker, plan status, setup, plan
 // operations in machining order"): create a plan of the part; pick, duplicate or remove plans
 // (remove confirmed); the plan's status and its stale notices with rebuild / update from library
-// (a rebuild or back to draft that discards plan-only edits is confirmed, naming their count);
+// (a rebuild or back to draft that discards plan-only edits is confirmed, naming their count),
+// or, while its inputs wait for Apply, the pending notice with "Apply now" (task P3);
 // the machine; the setup's work zero and safe heights; the plan operations in machining order
 // (select, move by buttons and Alt+↑/↓, tool, checks, toolpath state and stale badges); toolpath
 // generation and the gCode export. Doc: docs/conventions/ui.md#plan-mode-task-37,
@@ -9,6 +10,7 @@
 import {
   ArrowDown,
   ArrowUp,
+  CheckCheck,
   CircleAlert,
   CircleCheck,
   CircleDashed,
@@ -27,7 +29,9 @@ import { useId, useRef, useState, type KeyboardEvent } from 'react'
 import type { PlanDTO, PlanStatus } from '../../../../core/plan/plan.dto'
 import type { ProjectDoc } from '../../../../core/project/document'
 import type { AppErrorData, Issue } from '../../../../shared/errors/app-error'
+import { applyMessages } from '../../messages/apply'
 import { planMessages, sentence } from '../../messages/plan'
+import { usePending, useShell } from '../../shell/ShellContext'
 import {
   Button,
   ConfirmDialog,
@@ -298,14 +302,33 @@ function StaleNotices({
   /** Rebuild, confirmed first when it discards plan-only edits. */
   onRebuild: () => void
 }): React.JSX.Element | null {
+  const pending = usePending()
+  const { pending: applyStore } = useShell()
   const stale = data?.stale
   if (stale === undefined) return null
-  const design = designStale(stale)
-  const copies = stale.libraryCopies
-  if (!design && stale.rebuildBlocked === null && copies.length === 0) return null
+  // the plan follows on Apply: its notice replaces the stale one (apply.md#stale-derived-results)
+  const waits = data?.pendingApply === true
+  const design = designStale(stale) && !(waits && plan.status === 'draft')
+  const copies = waits && plan.status === 'draft' ? [] : stale.libraryCopies
+  if (!waits && !design && stale.rebuildBlocked === null && copies.length === 0) return null
   const canRebuild = allows(plan, 'plan.rebuild')
   return (
     <div className={styles['banner']} role="status">
+      {waits ? (
+        <span className={styles['actions']}>
+          <span>
+            {plan.status === 'draft' ? applyMessages.planPending : applyMessages.planInputsPending}
+          </span>
+          <Button
+            size="sm"
+            icon={<CheckCheck aria-hidden="true" />}
+            disabled={pending.sending}
+            onClick={() => void applyStore.apply()}
+          >
+            {applyMessages.applyNow}
+          </Button>
+        </span>
+      ) : null}
       {stale.rebuildBlocked !== null ? <span>{m.stale.blocked(stale.rebuildBlocked)}</span> : null}
       {design ? (
         <>

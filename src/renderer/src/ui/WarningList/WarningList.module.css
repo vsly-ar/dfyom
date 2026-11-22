@@ -101,6 +101,33 @@ button.subject {
   cursor: pointer;
 }
 
+/* v0.2 (task P3): Apply may change this warning – clock icon, muted note */
+.pendingNote {
+  color: var(--text-muted);
+}
+
+/* the checks wait for Apply: muted, not hidden (apply.md#stale-derived-results) */
+.root[data-outdated] .list {
+  opacity: 0.6;
+  transition: opacity var(--motion-base) var(--ease-standard);
+}
+
+.outdated {
+  display: flex;
+  gap: var(--space-1);
+  align-items: center;
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-muted);
+}
+
+.outdatedIcon {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  flex: none;
+}
+
 .srOnly {
   position: absolute;
   width: 1px;

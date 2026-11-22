@@ -102,6 +102,8 @@ export const MIX = {
   pulse: 0.6,
   /** Operations edited in the plan (`--info`, a light tint: never the accent or a warning). */
   tinted: 0.3,
+  /** Outdated toolpaths (stale or waiting for Apply) towards the background (task P3). */
+  outdated: 0.55,
 } as const
 
 export interface SurfaceState {

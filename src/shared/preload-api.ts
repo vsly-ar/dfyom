@@ -103,6 +103,7 @@ export const MENU_ACTIONS = [
   'project.open',
   'project.save',
   'project.saveAs',
+  'project.apply',
   'edit.undo',
   'edit.redo',
   'mode.design',

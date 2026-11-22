@@ -115,6 +115,7 @@ describe('evaluation push', () => {
       'CmdOrCtrl+Shift+S',
       'CmdOrCtrl+Z',
       'Ctrl+Y',
+      'CmdOrCtrl+Enter',
       'CmdOrCtrl+1',
       'CmdOrCtrl+2',
       'CmdOrCtrl+3',

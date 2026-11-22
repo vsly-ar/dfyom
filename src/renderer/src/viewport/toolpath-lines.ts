@@ -13,6 +13,8 @@ export interface ToolpathLines {
   /** Per segment: `SEGMENT.feed`, `.rapid` or `.plunge` (a feed straight down, task 3.7). */
   readonly kind: Uint8Array
   readonly segments: number
+  /** The first segment of each toolpath (in the order given); a toolpath ends where the next starts. */
+  readonly starts: Uint32Array
 }
 
 /** Segment kinds of `ToolpathLines.kind`: drawn `--vp-feed`, `--vp-rapid`, `--vp-plunge`. */
@@ -28,6 +30,7 @@ const ARC_STEP_RAD = (3 * Math.PI) / 180
 export function toolpathLines(toolpaths: readonly Toolpath[]): ToolpathLines {
   const pos: number[] = []
   const kind: number[] = []
+  const starts: number[] = []
   let at: Vec3 | undefined
   const seg = (to: Vec3, isRapid: boolean) => {
     if (at !== undefined) {
@@ -37,7 +40,8 @@ export function toolpathLines(toolpaths: readonly Toolpath[]): ToolpathLines {
     }
     at = to
   }
-  for (const tp of toolpaths)
+  for (const tp of toolpaths) {
+    starts.push(kind.length)
     for (const pass of tp.passes)
       for (const mv of pass.moves) {
         switch (mv.kind) {
@@ -76,7 +80,13 @@ export function toolpathLines(toolpaths: readonly Toolpath[]): ToolpathLines {
           }
         }
       }
-  return { positions: new Float32Array(pos), kind: Uint8Array.from(kind), segments: kind.length }
+  }
+  return {
+    positions: new Float32Array(pos),
+    kind: Uint8Array.from(kind),
+    segments: kind.length,
+    starts: Uint32Array.from(starts),
+  }
 }
 
 export function linesBounds(lines: ToolpathLines): Box | undefined {

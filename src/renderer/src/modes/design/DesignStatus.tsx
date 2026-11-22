@@ -8,7 +8,7 @@ import { designMessages } from '../../messages/design'
 import { dfmMessages } from '../../messages/dfm'
 import { Popover, StatusChip, WarningList } from '../../ui'
 import { DELAY_INDICATOR_MS } from '../../viewport'
-import { warningLabels, warningView } from './DesignInspector'
+import { pendingApply, warningLabels, warningView } from './DesignInspector'
 import styles from './Design.module.css'
 import { failingOperation } from './model'
 import {
@@ -47,7 +47,8 @@ export function DesignStatus(): React.JSX.Element | null {
   const failedAt =
     status === 'failed' && evaluation?.error ? failingOperation(evaluation.error, ids) : undefined
   const failedName = part.dto.operations.find((o) => o.id === failedAt)?.name
-  const n = warnings.warnings.length
+  // warnings Apply may change are not counted until applied (apply.md#stale-derived-results)
+  const n = warnings.warnings.filter((w) => !pendingApply(w)).length
 
   return (
     <>
