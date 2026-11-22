@@ -2,7 +2,7 @@
  * Fit: whether a tool can make an operation, the design's tool requirement (the plan's check
  * table without stepdown and machine). Pure, on the resolved float64 mm of `OperationGeometry`
  * in the operation's face frame; used by the design tool field (auto choice, candidates,
- * `dfm.toolUnfit`) and later by the plan's tool resolution.
+ * `dfm.toolUnfit`); the plan's tool resolution uses the plan checks (plan-v0.2.md § E4).
  * Doc: docs/modes/design-v0.2.md#fit-when-a-tool-can-make-the-operation
  */
 import type { DfmTool } from './dfm'

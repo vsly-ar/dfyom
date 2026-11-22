@@ -33,7 +33,14 @@ import { deepEqual, refreshSnapshot, Snapshot, takeSnapshot } from '../library/s
 import type { ProjectDoc, UnitSystem } from '../project/document'
 import { Quantity } from '../quantity/quantity'
 import type { ParseContext } from '../quantity/parse'
-import { assignTool, createPlan, duplicatePlan, rebuildPlan, type BuildContext } from './build'
+import {
+  assignTool,
+  createPlan,
+  duplicatePlan,
+  nextSnapshotId,
+  rebuildPlan,
+  type BuildContext,
+} from './build'
 import { PlanWarningSchema, type PlanWarning } from './checks'
 import { evaluateOperation, planFindings } from './evaluate'
 import { feedModeIssues, type LockState } from './feeds'
@@ -68,6 +75,7 @@ import { machineLimits } from '../feeds-speeds/suggest'
 import { checkAllowed, nextStatus } from './status'
 import { applyStrategyArgs, StrategyArgSchema, strategyIssues, resolveStrategy } from './strategy'
 import { suggestTools } from './suggest'
+import { designToolFindings } from './tool-resolution'
 
 // ── helpers ───────────────────────────────────────────────────────────────────────────────
 
@@ -594,7 +602,7 @@ const machineSet = defineCommand({
       deepEqual(old.values, values)
     )
       return Ok({})
-    const snap = takeSnapshot(item.unwrap(), ctx.ids.next('snapshot'), nowIso(ctx))
+    const snap = takeSnapshot(item.unwrap(), nextSnapshotId(plan, ctx.ids), nowIso(ctx))
     if (snap.isErr()) return Err(snap.unwrapErr().withContext(where))
     plan.snapshots = [...plan.snapshots.filter((s) => s.id !== plan.machine), snap.unwrap().toDTO()]
     plan.machine = snap.unwrap().id
@@ -1011,7 +1019,7 @@ const toolAssign = defineCommand({
   kind: 'document',
   name: 'plan.tool.assign',
   summary:
-    'Assign a library tool to a plan operation (the plan takes or reuses a copy); resets the preset to the default.',
+    "Assign a library tool to a plan operation (the plan takes or reuses a copy); resets the preset to the default. Marks it toolSource 'plan': rebuilds keep it.",
   title: () => 'Assign tool',
   machine: false,
   args: z.object({ ...PlanOpArg, toolLibraryItemId: ItemIdSchema }),
@@ -1030,6 +1038,13 @@ const toolAssign = defineCommand({
       now: nowIso(ctx),
     })
     if (r.isErr()) return Err(r.unwrapErr().withContext(where))
+    // a deliberate plan decision: wins over the design tool field (plan-v0.2.md § Tool resolution)
+    const ref = findPlanOperation(plan, args.planOperationId, where)
+    if (ref.isOk()) {
+      const op = plan.setups[ref.unwrap().setup]!.operations[ref.unwrap().index]!
+      op.toolSource = 'plan'
+      delete op.designToolChanged
+    }
     writePlan(draft, plan)
     return Ok({})
   },
@@ -1383,6 +1398,9 @@ const staleList = defineQuery({
         changedInDesign: z.boolean(),
         removedFromDesign: z.boolean(),
         editedInPlan: z.boolean(),
+        designToolChanged: z
+          .boolean()
+          .describe("The design's tool field changed; a plan-assigned tool was kept"),
       }),
     ),
     libraryCopies: z.array(
@@ -1416,7 +1434,7 @@ const staleList = defineQuery({
 const toolSuggest = defineQuery({
   name: 'plan.tool.suggest',
   summary:
-    'Rank the library tools that pass the checks of a plan operation (preset for the material, already used, largest diameter), with reasons.',
+    "Rank the library tools that pass the checks of a plan operation (the design's tool, matching the design tool, preset for the material, already used, largest diameter), with reasons.",
   args: z.object(PlanOpArg),
   result: z.object({
     tools: z.array(
@@ -1424,6 +1442,8 @@ const toolSuggest = defineQuery({
         toolLibraryItemId: z.string(),
         name: z.string(),
         diameter: z.number().describe('mm'),
+        designTool: z.boolean().describe("The library tool of the design's specific tool"),
+        matchesDesign: z.boolean().describe("Type and diameter (and RE) of the design's tool"),
         hasPreset: z.boolean(),
         usedInPlan: z.boolean(),
         reasons: z.array(z.string()),
@@ -1463,7 +1483,10 @@ const warningList = defineQuery({
     if (dto.isErr()) return dto
     const loaded = loadPlanDTO(dto.unwrap(), doc.unitSystem, where)
     const findings: PlanWarning[] = loaded.isOk()
-      ? planFindings(loaded.unwrap())
+      ? [
+          ...planFindings(loaded.unwrap()),
+          ...designToolFindings(loaded.unwrap(), libraryTools(ctx.services)),
+        ]
       : [
           {
             code: 'plan.broken',

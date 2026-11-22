@@ -16,6 +16,7 @@ import {
 import type { ProjectDoc } from '../project/document'
 import { stableJson } from '../project/layout'
 import type { DesignSnapshotDTO, PlanDTO } from './plan.dto'
+import { sameDesignToolField } from './design-tool'
 import { libraryUpdateBlocker, rebuildBlocker, sameValue } from './validity'
 
 /** Hash of a part DTO (the design snapshot's `hash`). */
@@ -40,15 +41,16 @@ export function hashJson(value: unknown): string {
 }
 
 /**
- * The plan's copy of a part of the design and of the part's stock snapshot (same id, so
- * `part.stock` resolves in the plan's own snapshots). JSON copies: nothing is shared.
+ * The plan's copy of a part of the design, of the part's stock snapshot and of the tool snapshots
+ * of its specific design tools (same ids, so `part.stock` and the tool fields resolve in the plan's
+ * own snapshots; a missing tool snapshot is left out). JSON copies: nothing is shared.
  */
 export function takeDesignSnapshot(
   doc: ProjectDoc,
   partId: string,
   takenAt: string,
   where: string,
-): AppResult<{ design: DesignSnapshotDTO; stock: SnapshotDTO }> {
+): AppResult<{ design: DesignSnapshotDTO; stock: SnapshotDTO; tools: SnapshotDTO[] }> {
   const part = Object.hasOwn(doc.parts, partId) ? doc.parts[partId] : undefined
   if (part === undefined)
     return fail('input.malformed', `part ${partId} does not exist`, {
@@ -61,9 +63,17 @@ export function takeDesignSnapshot(
       where,
     })
   const copy = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T
+  const toolIds = new Set(
+    part.operations.flatMap((o) => (o.tool?.kind === 'specific' ? [o.tool.snapshotId] : [])),
+  )
+  const tools = [...toolIds].flatMap((id) => {
+    const s = Object.hasOwn(doc.snapshots, id) ? doc.snapshots[id] : undefined
+    return s?.kind === 'tool' ? [copy(s)] : []
+  })
   return Ok({
     design: { partId, takenAt, hash: hashPart(part), taken: copy(part), part: copy(part) },
     stock: copy(stock),
+    tools,
   })
 }
 
@@ -76,6 +86,11 @@ export interface OperationStale {
   readonly removedFromDesign: boolean
   /** Edited in the plan (`plan.design.operation.update`). */
   readonly editedInPlan: boolean
+  /**
+   * The design's tool field differs from the snapshot's, or a rebuild kept a plan-assigned tool
+   * although it changed (docs/modes/plan-v0.2.md#tool-resolution-from-the-design-tool-field).
+   */
+  readonly designToolChanged: boolean
 }
 
 /** Stale indicator of one library copy (`current` copies are not listed). */
@@ -113,6 +128,15 @@ export function planStale(
     ? doc.parts[plan.design.partId]
     : undefined
   const operations: OperationStale[] = []
+  const kept = new Set(
+    plan.setups.flatMap((s) =>
+      s.operations.flatMap((p) => (p.designToolChanged === true ? p.designOperationIds : [])),
+    ),
+  )
+  const field = (o: PartDTO['operations'][number] | undefined) => ({
+    tool: o?.tool,
+    locked: o?.toolLocked === true,
+  })
   for (const op of plan.design.part.operations) {
     const taken = plan.design.taken.operations.find((o) => o.id === op.id)
     const now = current?.operations.find((o) => o.id === op.id)
@@ -121,8 +145,11 @@ export function planStale(
       changedInDesign: now !== undefined && !sameValue(taken, now),
       removedFromDesign: now === undefined,
       editedInPlan: !sameValue(taken, op),
+      designToolChanged:
+        kept.has(op.id) || (now !== undefined && !sameDesignToolField(field(taken), field(now))),
     }
-    if (s.changedInDesign || s.removedFromDesign || s.editedInPlan) operations.push(s)
+    if (s.changedInDesign || s.removedFromDesign || s.editedInPlan || s.designToolChanged)
+      operations.push(s)
   }
   const libraryCopies: LibraryCopyStale[] = []
   if (lookup !== undefined)

@@ -136,6 +136,7 @@ export interface Stale {
     changedInDesign: boolean
     removedFromDesign: boolean
     editedInPlan: boolean
+    designToolChanged: boolean
   }[]
   libraryCopies: {
     snapshotId: string

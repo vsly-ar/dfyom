@@ -6,6 +6,8 @@
 import { Err, fail, Ok, type AppResult } from '../../shared/result'
 import type { IdGenerator } from '../commands/context'
 import { fieldContext, partFromDTO, type Operation, type Part } from '../design/operation'
+import { designToolToDTO } from '../design/tool'
+import { stableJson } from '../project/layout'
 import { NAME_MAX } from '../library/item'
 import type { LibraryItem } from '../library/library-item'
 import { deepEqual, takeSnapshot } from '../library/snapshot'
@@ -23,7 +25,8 @@ import {
 } from './plan.dto'
 import { defaultSetupIndex, deriveSetups, newSetup, setupDirection } from './setups'
 import { takeDesignSnapshot } from './snapshot'
-import { suggestTools } from './suggest'
+import { designToolField, sameDesignToolField } from './design-tool'
+import { resolveTool } from './tool-resolution'
 import { checkPartFits } from './validity'
 
 export interface BuildContext {
@@ -48,14 +51,24 @@ export function defaultLength(source: string, units: UnitSystem): LengthDTO {
 const copy = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T
 
 /**
- * Drillings of one face direction with equal diameter, bottom, depth (and point angle) share one
- * plan operation (a plan operation lies in one setup).
+ * Drillings of one face direction with equal diameter, bottom, depth (and point angle) and an
+ * equal design tool field share one plan operation (a plan operation lies in one setup and has
+ * one tool, docs/modes/plan-v0.2.md#tool-resolution-from-the-design-tool-field).
  */
 function drillKey(op: Operation, direction: Direction): string | undefined {
   if (op.kind !== 'drilling') return undefined
   const q = (v: Quantity) => v.exact.toString()
   const depth = op.depth.mapOr('-', q)
-  return [direction, q(op.diameter), op.bottom, depth, op.pointAngle.mapOr('-', q)].join('|')
+  const tool = op.tool.mapOr('-', (t) => stableJson(designToolToDTO(t)))
+  return [
+    direction,
+    q(op.diameter),
+    op.bottom,
+    depth,
+    op.pointAngle.mapOr('-', q),
+    tool,
+    op.toolLocked ? 'locked' : 'auto',
+  ].join('|')
 }
 
 /** Groups of design operation ids, one per plan operation, in design order (`all`: the part's). */
@@ -83,10 +96,29 @@ function newPlanOperation(ids: IdGenerator, designOperationIds: string[]): PlanO
   return { id: ids.next('planOp'), designOperationIds, overrides: {}, strategy: {} }
 }
 
-/** Removes tool copies no plan operation references (stock and machine copies stay). */
+/**
+ * Removes tool copies neither a plan operation nor a design tool field of the plan's part
+ * references (stock and machine copies stay).
+ */
 export function pruneSnapshots(plan: PlanDTO): void {
-  const used = new Set(plan.setups.flatMap((s) => s.operations.flatMap((o) => o.tool ?? [])))
+  const used = new Set([
+    ...plan.setups.flatMap((s) => s.operations.flatMap((o) => o.tool ?? [])),
+    ...plan.design.part.operations.flatMap((o) =>
+      o.tool?.kind === 'specific' ? [o.tool.snapshotId] : [],
+    ),
+  ])
   plan.snapshots = plan.snapshots.filter((s) => s.kind !== 'tool' || used.has(s.id))
+}
+
+/**
+ * A new snapshot id not used in the plan: its copies of the design's tool snapshots keep the
+ * design's ids, which an id generator does not know about in tests.
+ */
+export function nextSnapshotId(plan: PlanDTO, ids: IdGenerator): string {
+  for (;;) {
+    const id = ids.next('snapshot')
+    if (!plan.snapshots.some((s) => s.id === id)) return id
+  }
 }
 
 /**
@@ -102,12 +134,9 @@ export function assignTool(
   const ref = findPlanOperation(plan, planOperationId, 'plan.tool.assign')
   if (ref.isErr()) return Ok(undefined)
   const op = plan.setups[ref.unwrap().setup]!.operations[ref.unwrap().index]!
-  const values = item.values.toDTO()
-  let snap = plan.snapshots.find(
-    (s) => s.kind === 'tool' && s.libraryItemId === item.id && deepEqual(s.values, values),
-  )
+  let snap = equalCopy(plan, item)
   if (snap === undefined) {
-    const taken = takeSnapshot(item, c.ids.next('snapshot'), c.now)
+    const taken = takeSnapshot(item, nextSnapshotId(plan, c.ids), c.now)
     if (taken.isErr()) return Err(taken.unwrapErr())
     snap = taken.unwrap().toDTO()
     plan.snapshots.push(snap)
@@ -118,23 +147,52 @@ export function assignTool(
   return Ok(undefined)
 }
 
-/** Assigns the first suggestion to each listed plan operation without a tool, in order. */
-function suggestAndAssign(
+/** The plan's tool copy of `item` with its current values, if any. */
+function equalCopy(plan: PlanDTO, item: LibraryItem): PlanDTO['snapshots'][number] | undefined {
+  const values = item.values.toDTO()
+  return plan.snapshots.find(
+    (s) => s.kind === 'tool' && s.libraryItemId === item.id && deepEqual(s.values, values),
+  )
+}
+
+/** Sets the tool copy; a different tool resets `presetName` (the same one keeps it). */
+function setTool(op: PlanOperationDTO, snapshotId: string | undefined): void {
+  if (op.tool === snapshotId) return
+  if (snapshotId === undefined) delete op.tool
+  else op.tool = snapshotId
+  delete op.presetName
+}
+
+/**
+ * Resolves the tool of each listed plan operation from the design tool field, in order
+ * (docs/modes/plan-v0.2.md#tool-resolution-from-the-design-tool-field), and marks it
+ * `toolSource: 'design'`. Never fails because of a tool: an unresolved one is a finding.
+ */
+function resolveAndAssign(
   plan: PlanDTO,
   planOperationIds: readonly string[],
   c: BuildContext,
 ): AppResult<void> {
   for (const id of planOperationIds) {
-    const loaded = loadPlanDTO(plan, c.units, 'plan.suggest')
+    const loaded = loadPlanDTO(plan, c.units, 'plan.toolResolution')
     if (loaded.isErr()) return Err(loaded.unwrapErr())
-    const op = loaded.unwrap().operations.find((o) => o.id === id)
-    if (op === undefined || op.tool !== undefined) continue
-    const first = suggestTools(loaded.unwrap(), op, c.tools)[0]
-    const item = c.tools.find((t) => t.id === first?.toolLibraryItemId)
-    if (item === undefined) continue
-    const r = assignTool(plan, id, item, c)
-    if (r.isErr()) return r
+    const ref = findPlanOperation(plan, id, 'plan.toolResolution')
+    if (ref.isErr()) continue
+    const op = plan.setups[ref.unwrap().setup]!.operations[ref.unwrap().index]!
+    op.toolSource = 'design'
+    delete op.designToolChanged
+    const r = resolveTool(loaded.unwrap(), op, c.tools)
+    if (r.kind === 'copy') setTool(op, r.snapshotId)
+    else if (r.kind === 'none') setTool(op, undefined)
+    else if (
+      r.kind === 'item' &&
+      (op.tool === undefined || op.tool !== equalCopy(plan, r.item)?.id)
+    ) {
+      const assigned = assignTool(plan, id, r.item, c)
+      if (assigned.isErr()) return assigned
+    }
   }
+  pruneSnapshots(plan)
   return Ok(undefined)
 }
 
@@ -155,7 +213,7 @@ export function createPlan(
 ): AppResult<PlanDTO> {
   const taken = takeDesignSnapshot(doc, args.partId, c.now, where)
   if (taken.isErr()) return Err(taken.unwrapErr())
-  const { design, stock } = taken.unwrap()
+  const { design, stock, tools } = taken.unwrap()
   const part = partFromDTO(design.part)
   if (part.isErr()) return Err(part.unwrapErr().withContext(where))
   const id = c.ids.next('plan')
@@ -168,23 +226,23 @@ export function createPlan(
     name: args.name ?? `Plan ${Object.keys(doc.plans).length + 1}`,
     status: 'draft',
     design,
-    snapshots: [stock],
+    snapshots: [stock, ...tools],
     // one setup holding every operation while tools are suggested; derived below
     setups: [{ ...newSetup('-', '+z', heights, []), operations }],
   }
   if (args.machine !== undefined) {
-    const m = takeSnapshot(args.machine, c.ids.next('snapshot'), c.now)
+    const m = takeSnapshot(args.machine, nextSnapshotId(plan, c.ids), c.now)
     if (m.isErr()) return Err(m.unwrapErr().withContext(where))
     plan.snapshots.push(m.unwrap().toDTO())
     plan.machine = m.unwrap().id
   }
-  const assigned = suggestAndAssign(
+  const assigned = resolveAndAssign(
     plan,
     operations.map((o) => o.id),
     c,
   )
   if (assigned.isErr()) return Err(assigned.unwrapErr().withContext(where))
-  // tools are suggested first: the default order keeps operations of one tool adjacent
+  // tools are resolved first: the default order keeps operations of one tool adjacent
   const suggested = plan.setups[0]!.operations
   plan.setups = deriveSetups(suggested, part.unwrap(), (d, setups) =>
     newSetup(c.ids.next('setup'), d, heights, setups),
@@ -221,12 +279,15 @@ export function rebuildPlan(
 ): AppResult<PlanDTO> {
   const taken = takeDesignSnapshot(doc, current.design.partId, c.now, where)
   if (taken.isErr()) return Err(taken.unwrapErr())
-  const { design, stock } = taken.unwrap()
+  const { design, stock, tools } = taken.unwrap()
   const plan = copy(current)
   const oldStock = plan.design.part.stock
+  const before = current.design.taken
   plan.design = design
   if (design.part.stock !== oldStock)
     plan.snapshots = [stock, ...plan.snapshots.filter((s) => s.id !== oldStock)]
+  // copies of new design tool snapshots; an existing copy stays (it follows the library itself)
+  for (const t of tools) if (!plan.snapshots.some((s) => s.id === t.id)) plan.snapshots.push(t)
   const part = partOf(plan)
   if (part.isErr()) return Err(part.unwrapErr().withContext(where))
   const ops = part.unwrap().operations
@@ -304,11 +365,17 @@ export function rebuildPlan(
     return fail('input.malformed', `plan ${plan.id}: the stock copy is missing`, { where })
   const fits = checkPartFits(plan.design.part, stockCopy, where)
   if (fits.isErr()) return Err(fits.unwrapErr().withContext(where, { planId: plan.id }))
-  const assigned = suggestAndAssign(
-    plan,
-    fresh.map((p) => p.id),
-    c,
-  )
+  // re-resolve `design` tools whose design tool field changed; plan assignments stay, flagged
+  const changed: string[] = []
+  const freshIds = new Set(fresh.map((p) => p.id))
+  for (const s of plan.setups)
+    for (const p of s.operations) {
+      if (freshIds.has(p.id)) continue
+      if (sameDesignToolField(designToolField(before, p), designToolField(design.part, p))) continue
+      if (p.toolSource === 'design') changed.push(p.id)
+      else p.designToolChanged = true
+    }
+  const assigned = resolveAndAssign(plan, [...changed, ...fresh.map((p) => p.id)], c)
   if (assigned.isErr()) return Err(assigned.unwrapErr().withContext(where))
   return Ok(plan)
 }
