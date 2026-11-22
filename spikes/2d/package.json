@@ -1,0 +1,17 @@
+{
+  "name": "dfyom-spike-2d",
+  "private": true,
+  "description": "Spike S1: 2D offset/boolean library comparison (docs/decisions/0019-2d-geometry-library.md). Not part of the app.",
+  "type": "module",
+  "license": "GPL-3.0-or-later",
+  "scripts": {
+    "build:wasm": "cargo build --release --target wasm32-unknown-unknown --manifest-path cc-wasm/Cargo.toml && cp cc-wasm/target/wasm32-unknown-unknown/release/cc_wasm.wasm cc-wasm/cc_wasm.wasm",
+    "bench": "node harness.ts",
+    "size": "node size.ts"
+  },
+  "devDependencies": {
+    "cavalier-contours-js": "0.1.1",
+    "clipper2-ts": "2.0.1-19",
+    "esbuild": "0.25.12"
+  }
+}
