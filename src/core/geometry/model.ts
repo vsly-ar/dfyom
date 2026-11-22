@@ -214,6 +214,11 @@ export type OperationGeometry = FacePlacement &
         readonly diameter: number
         /** Included angle, degrees. */
         readonly angle: number
+        /**
+         * Stepped (F7): terraces of at most this height by a flat end mill; absent = a chamfer
+         * mill (docs/modes/design-v0.4.md#stepped-countersink-f7-d41). The solid stays the cone.
+         */
+        readonly stepdown?: number
       }
   )
 
@@ -229,6 +234,25 @@ export function chamferDepth(
   c: Pick<Extract<OperationGeometry, { kind: 'chamfer' }>, 'edgeDiameter' | 'diameter' | 'angle'>,
 ): number {
   return (c.diameter - c.edgeDiameter) / 2 / Math.tan(((c.angle / 2) * Math.PI) / 180)
+}
+
+/**
+ * The terraces of a stepped chamfer (F7): N = ⌈h / stepdown⌉ of equal height h / N, h the cone
+ * depth; terrace k (0-based) has its wall at radius D / 2 − k · height · tan(α / 2), so each top
+ * step corner lies on the cone (docs/modes/design-v0.4.md#stepped-countersink-f7-d41).
+ * Undefined when the sizes give no cone or the stepdown is not positive.
+ */
+export function chamferTerraces(
+  c: Pick<Extract<OperationGeometry, { kind: 'chamfer' }>, 'edgeDiameter' | 'diameter' | 'angle'>,
+  stepdown: number,
+): { readonly count: number; readonly height: number; readonly radii: number[] } | undefined {
+  const h = chamferDepth(c)
+  if (!(h > 0 && stepdown > 0 && Number.isFinite(h))) return undefined
+  const count = Math.max(1, Math.ceil(h / stepdown - 1e-9))
+  const height = h / count
+  const tan = Math.tan(((c.angle / 2) * Math.PI) / 180)
+  const radii = Array.from({ length: count }, (_, k) => c.diameter / 2 - k * height * tan)
+  return { count, height, radii }
 }
 
 /**
@@ -295,6 +319,8 @@ export const DFM_WARNING_CODES = [
   'dfm.shapeHeavy',
   // features (v0.4): docs/modes/design-v0.4.md#checks-and-dfm
   'dfm.holeCustomSize',
+  // stepped countersink (F7): docs/modes/design-v0.4.md#stepped-countersink-f7-d41
+  'dfm.countersinkStepped',
   // chamfer operation (v0.4): docs/modes/design-v0.4.md#chamfer-operation-v04-circular-edges
   'dfm.chamferTooDeep',
   'dfm.chamferNoTool',

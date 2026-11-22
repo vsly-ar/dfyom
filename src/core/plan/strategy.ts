@@ -12,7 +12,7 @@ import { fieldContext, isGeneralShape, type Operation } from '../design/operatio
 import type { OperationKind } from '../design/part.dto'
 import { chamferEdge } from '../design/geometry-input'
 import { SurfaceTable } from '../design/surfaces'
-import { chamferDepth } from '../geometry/model'
+import { chamferDepth, chamferTerraces } from '../geometry/model'
 import type { Stock } from '../library/stock'
 import type { CuttingPreset, Tool } from '../library/tool'
 import type { UnitSystem } from '../project/document'
@@ -139,8 +139,11 @@ type Direction = (typeof DIRECTIONS)[number]
 export type ResolvedStrategy =
   | {
       readonly kind: 'chamfer'
-      /** `auto` (absent) resolved: plunge when DC covers the chamfer and the tip stays in the edge. */
-      readonly entry: 'plunge' | 'contour'
+      /**
+       * `auto` (absent) resolved: plunge when DC covers the chamfer and the tip stays in the edge;
+       * `stepped` for a chamfer with a stepdown (F7, never stored).
+       */
+      readonly entry: 'plunge' | 'contour' | 'stepped'
       readonly rampAngle: number
       /** The cut's depth below the tool tip (mm): F10's `depth` for the feeds (P-D). */
       readonly cutDepth: number
@@ -278,9 +281,18 @@ export function resolveStrategy(
         const cut = chamferCuts(op, c.allOps, c.stock, tool)
         return cut !== undefined && cut.plungeFits && cut.plungeDepth <= cut.edgeDepth + EPS
       })
-      const entry =
-        s.entry === 'plunge' || s.entry === 'contour' ? s.entry : plunge ? 'plunge' : 'contour'
       const op = c.ops[0]
+      // F7: terraces by a flat end mill; the feeds see one terrace's height
+      const terraces =
+        op?.kind === 'chamfer' && op.stepdown.isSome() ? steppedTerraces(op, c.allOps) : null
+      const entry =
+        terraces !== null
+          ? 'stepped'
+          : s.entry === 'plunge' || s.entry === 'contour'
+            ? s.entry
+            : plunge
+              ? 'plunge'
+              : 'contour'
       const cut =
         op?.kind === 'chamfer' && tool !== undefined
           ? chamferCuts(op, c.allOps, c.stock, tool)
@@ -289,7 +301,14 @@ export function resolveStrategy(
         kind,
         entry,
         rampAngle,
-        cutDepth: cut === undefined ? 0 : entry === 'plunge' ? cut.plungeDepth : cut.contourDepth,
+        cutDepth:
+          terraces !== null
+            ? (terraces?.height ?? 0)
+            : cut === undefined
+              ? 0
+              : entry === 'plunge'
+                ? cut.plungeDepth
+                : cut.contourDepth,
       }
     }
   }
@@ -299,6 +318,19 @@ export function resolveStrategy(
 const EPS = 1e-9
 /** Tool sizes compare within this (mm), as the fit rule (tool-fit.ts). */
 const FIT_TOL = 0.01
+
+/** A stepped chamfer's terraces (F7); undefined when its edge is not round or gives no cone. */
+function steppedTerraces(
+  op: Extract<Operation, { kind: 'chamfer' }>,
+  allOps: readonly Operation[],
+): { readonly count: number; readonly height: number } | undefined {
+  const edge = chamferEdge(allOps, op.edgeOf)
+  if (edge === undefined || op.stepdown.isNone()) return undefined
+  return chamferTerraces(
+    { edgeDiameter: edge.diameter, diameter: op.diameter.canonical, angle: op.angle.canonical },
+    op.stepdown.unwrap().canonical,
+  )
+}
 
 /** A chamfer's cuts with `tool` (mm below its face); undefined when the edge is not round. */
 export interface ChamferCuts {
@@ -362,6 +394,8 @@ export function strategyIssues(
     bad('entry', 'notForKind', 'a pocket enters by helix, ramp or plunge')
   if (kind === 'chamfer' && (s.entry === 'helix' || s.entry === 'ramp'))
     bad('entry', 'notForKind', 'a chamfer is plunged or contoured')
+  if (r.kind === 'chamfer' && r.entry === 'stepped' && s.entry !== undefined)
+    bad('entry', 'stepped', 'a stepped chamfer is cut in terraces (no plunge or contour)')
   if ('rampAngle' in r && (r.rampAngle < 0.5 || r.rampAngle > 30))
     bad('rampAngle', 'range', 'must be 0.5° to 30°', { min: 0.5, max: 30 })
   if ('finishAllowance' in r && r.finishAllowance < 0)
@@ -413,7 +447,7 @@ export function strategyIssues(
         )
     })
   }
-  if (r.kind === 'chamfer' && s.entry === 'plunge')
+  if (r.kind === 'chamfer' && r.entry !== 'stepped' && s.entry === 'plunge')
     tool.map((t) => {
       for (const op of c.ops) {
         if (op.kind !== 'chamfer') continue

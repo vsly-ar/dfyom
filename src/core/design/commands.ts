@@ -763,6 +763,8 @@ const chamferSpec: KindSpec<typeof chamferParams, Extract<Operation, { kind: 'ch
       edgeOf,
       diameter: diameter(),
       angle: f.pick('angle', 'angle', a.angle, prev?.angle, 'chamferAngle'),
+      // stepped only through the hole feature in v0.4 (F7): no arg, kept as it is
+      stepdown: prev?.stepdown ?? None,
     }
   },
 }

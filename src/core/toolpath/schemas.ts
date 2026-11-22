@@ -236,7 +236,7 @@ export const ChamferInputSchema: z.ZodType<ChamferInput> = z.object({
   cutting: DrillCuttingSchema,
   operation: ChamferGeometrySchema.omit({ direction: true }),
   strategy: z.object({
-    entry: z.enum(['plunge', 'contour']),
+    entry: z.enum(['plunge', 'contour', 'stepped']),
     rampAngle: z.number(),
     direction: Direction,
   }),

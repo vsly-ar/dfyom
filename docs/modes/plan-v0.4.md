@@ -23,6 +23,17 @@ Input: the chamfer's axis point (the edge centre in the face frame), the edge di
 - **Order checks:** a chamfer must cut after its `edgeOf` operation in the same setup ([order checks](plan-v0.1.md#plan-operations-and-order)); `plan.order` blocks the reverse.
 - **Strategy parameters:** `entry` (`plunge`, `contour`, `auto` = P-C), `dwell`, `rampAngle` (contour); nothing else. A finishing pass is not offered (one ring cuts to size). As built ([Implementation (T1)](#implementation-t1)): `auto` is the default (no stored value), `dwell` is later.
 
+### Stepped chamfer (F7)
+
+A chamfer with a `stepdown` (the stepped countersink, [design-v0.4.md § Stepped countersink](design-v0.4.md#stepped-countersink-f7-d41), D41) is cut by a **flat end mill** as terraces; Plan resolves its `entry` to `stepped` (a stored `plunge` or `contour` is `strategy.entry` `stepped`), and `rampAngle` applies.
+
+- **Terraces:** N = ⌈h / stepdown⌉ of height t = h / N (h the chamfer depth), terrace k a circle of radius r<sub>k</sub> = D / 2 − (k − 1)·t·tan(α / 2) at depth k·t, top to bottom, so every top step corner lies on the cone.
+- **Rings per terrace** (tool radius R): the outermost has its axis at r<sub>k</sub> − R; inner rings (spacing ≤ DC / 2, equal) until the innermost, at most d / 2 + 0.4·DC, reaches into the hole. Usually one ring: an end mill that bores the hole has DC > d / 2.
+- **Moves:** rapid to the first terrace's innermost ring start (−90°) at clearance and retract, feed down to the face at `plungeRate` (inside the hole); per terrace a **ramp along the innermost ring** from the level above to k·t (whole turns, at most `rampAngle`, never descending faster than `plungeRate`; a straight plunge below r = 0.1 mm), one full ring at k·t, then each outer ring after a radial feed outward; then a radial feed back in to the next terrace's innermost ring (cleared). After the last terrace, feed to the centre (the hole) and rapid out. Climb (counter-clockwise inside the hole), one pass of kind `rough`.
+- **Checks:** tool type `flatEndMill`, DC < d (`plan.check` `diameter`), reach to h; the generator re-checks type, size and the terrace count (≤ 1000).
+- **Feeds:** the end mill's helical-boring engagement `helix { ap }` with ap = t (the hole's helix uses the same tool), drilling's field list.
+- **One tool:** the drilling and the chamfer get the same design tool ([design-v0.4.md § Stepped countersink](design-v0.4.md#stepped-countersink-f7-d41)), so a plan holding only them changes tools once; the default order (drillings, pockets, chamfers) can put another tool between them in a larger part (reorder, or use the same end mill there).
+
 ## Tool checks for chamfer mills
 
 Added to the [plan check table](plan-v0.1.md#tool-assignment-and-checks):
@@ -53,6 +64,10 @@ The generator is `generateChamfer` (`src/core/toolpath/chamfer.ts`), request kin
 | Order          | A chamfer depends on the plan operation of its `edgeOf` (rule **`edgeBefore`**, `plan.order`) and, like pockets and drillings, on its `on` surface's; the default order, rebuild placement and `repairOrder` keep it after both.                                                                                                                                                                                                                                                                                  |
 | Tests          | The heightmap oracle's `toolSurface` gains the chamfer mill's cone over its tip; the swept surface equals the chamfer cone between d and D and nothing outside D is cut (contour, plunge, a cutting edge that just covers the slant); toolpath goldens mm and inch, GRBL goldens mm and inch (streamed through the virtual machine).                                                                                                                                                                              |
 | Later          | `dwell` (needs a dwell move in the toolpath model and post); travel order from the previous operation's end.                                                                                                                                                                                                                                                                                                                                                                                                      |
+
+## Implementation (F7)
+
+The stepped chamfer ([§ Stepped chamfer](#stepped-chamfer-f7)): `generateChamfer` hands an input with entry `stepped` (or a `stepdown`) to `generateSteppedChamfer` (`src/core/toolpath/chamfer.ts`; `terraceRings`, the ramp shared with the contour as `rampRing`). Plan: `strategy.ts` resolves `stepped` (rule `strategy.entry` `stepped` for a stored entry; `cutDepth` = the terrace height), `checks.ts` (tool type `flatEndMill`, `chamferFit` with the stepdown), `feeds.ts` (`helix { ap }` for an end mill on a chamfer), `toolpath/inputs.ts` (entry per chamfer). Tests: `stepped-chamfer.test.ts` (heightmap oracle: top corners on the cone, no stock inside it, nothing below the terraces or more than one terrace past the cone, nothing outside D; path rules; rings; refusals; golden `chamfer-stepped.txt`), GRBL golden `countersink-stepped.nc` (helical hole + terraces, one tool, streamed through the virtual machine), `plan/stepped-countersink.test.ts` (one end mill, no tool change in the export).
 
 ## Plan side
 

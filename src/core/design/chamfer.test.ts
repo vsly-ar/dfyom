@@ -356,6 +356,7 @@ const sinkSpec: FeatureCommandSpec<typeof sinkParams, Sink> = {
           edgeOf: ctx.ownedId('drill'),
           diameter: p.sinkDiameter,
           angle: Quantity.parse('90°', fieldContext('angle', ctx.units)).unwrap(),
+          stepdown: None,
         },
       },
     ]),

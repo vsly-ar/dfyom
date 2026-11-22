@@ -342,12 +342,13 @@ export function toGeneratorInputs(
           center: wcs === undefined ? operation.center : toWcs(operation.center, wcs),
         })),
       )
-      // one ring in climb direction (plan-v0.4.md § Chamfer toolpath); entry resolved by the plan
-      const strategy: ChamferStrategy = {
-        entry: s.entry,
+      // one ring in climb direction (plan-v0.4.md § Chamfer toolpath); entry resolved by the plan,
+      // per chamfer `stepped` when it has a stepdown (F7)
+      const strategyOf = (op: ChamferOperation): ChamferStrategy => ({
+        entry: op.stepdown !== undefined ? 'stepped' : s.entry === 'stepped' ? 'contour' : s.entry,
         rampAngle: s.rampAngle,
         direction: 'climb',
-      }
+      })
       return cutting(input.feeds, ['spindleSpeed', 'feedRate', 'plungeRate'], id).map((c) => ({
         kind: 'chamfer',
         ...turned,
@@ -355,7 +356,7 @@ export function toGeneratorInputs(
           ...base,
           cutting: { spindleSpeed: c.spindleSpeed, feedRate: c.feedRate, plungeRate: c.plungeRate },
           operation,
-          strategy,
+          strategy: strategyOf(operation),
         })),
       }))
     }
