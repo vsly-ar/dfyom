@@ -1,8 +1,8 @@
 # Geometry
 
-Status: implemented (2.5D, tasks 2.6–2.8; carving and [non-top faces](#non-top-faces-v02-draft) still draft) · Decision: [ADR 0007](../decisions/0007-layered-geometry-without-brep-kernel.md) · Operations: [design.md](../modes/design.md#operations-v01) · Values: [quantities.md](quantities.md) · Terms: [glossary.md](../glossary.md)
+Status: implemented (2.5D, tasks 2.6–2.8; [non-top faces](#non-top-faces-v02) accepted, carving still draft) · Decision: [ADR 0007](../decisions/0007-layered-geometry-without-brep-kernel.md) · Operations: [design.md](../modes/design.md#operations-v01) · Values: [quantities.md](quantities.md) · Terms: [glossary.md](../glossary.md)
 
-[2.5D evaluation (v0.1)](#25d-evaluation-v01) specifies tasks 2.6–2.8 of the [v0.1 plan](../plans/v0.1.md), all implemented in [`src/core/geometry/`](../../src/core/geometry/), including the [evaluation checks](#evaluation-checks) and the synchronous [parameter and tool checks](#parameter-and-tool-checks). The [Non-top faces (v0.2)](#non-top-faces-v02-draft) and [Carving (later)](#carving-later) sections are still draft and must not be implemented yet.
+[2.5D evaluation (v0.1)](#25d-evaluation-v01) specifies tasks 2.6–2.8 of the [v0.1 plan](../plans/v0.1.md), all implemented in [`src/core/geometry/`](../../src/core/geometry/), including the [evaluation checks](#evaluation-checks) and the synchronous [parameter and tool checks](#parameter-and-tool-checks). [Non-top faces (v0.2)](#non-top-faces-v02) is accepted (v0.2 tasks A1, A1b); [Carving (later)](#carving-later) is still draft and must not be implemented yet.
 
 ## Principle: geometry comes from material removal
 
@@ -184,9 +184,9 @@ Measured with `npm run perf` (Node, Apple M1 Pro class). The checks add about 0.
 - **Edge cases:** `floorRadius` = `cornerRadius` (collapsed corner), `cornerRadius` = 0 and = min(length, width)/2, `floorRadius` = `depth`, `pointAngle` 180°, inside profile whose slot covers the opening; seeded random valid parameters per operation → `NoError`, no `air` triangle.
 - Geometry tests run in Node against the real `manifold-3d`; other modules may use a fake `SolidPort`.
 
-## Non-top faces (v0.2, draft)
+## Non-top faces (v0.2)
 
-Status: draft (user decision D10, 2026-11-21; await confirmation). What evaluation needs so operations can target any face whose normal is ±X/±Y/±Z ([design-v0.2.md § Faces](../modes/design-v0.2.md#faces-and-face-targets)). Brief by intent; details follow with the implementation and spike S2 (a side-face drilling and a bottom-face pocket with labels intact).
+Status: accepted (user decision D10, 2026-11-21; confirmed with the v0.2 review, D18 of 2026-11-22; tasks [A1, A1b](../plans/v0.2.md#2-design-faces-anchors-tools)). What evaluation needs so operations can target any face whose normal is ±X/±Y/±Z ([design-v0.2.md § Faces](../modes/design-v0.2.md#faces-and-face-targets)). Brief by intent; details follow with the implementation and spike S2 (a side-face drilling and a bottom-face pocket with labels intact).
 
 - **Build in the face frame, then place.** Each operation's solids are built exactly as in [Building the solids](#building-the-solids), in a local frame where the [face frame](../modes/design-v0.2.md#face-frame) is `u` → x, `v` → y, `n` → z and the operation's stock face is z = 0. Then one rigid transform (a rotation whose matrix entries are 0 or ±1, plus a translation) places it in the part frame. `SolidPort` gains `transform(solid, matrix)` (Manifold's float64 `transform`), replacing `translate` as the placement step; axis rotations are exact, so no precision is lost and meshes are still built near the origin ([evaluation rules](#evaluation-rules)).
 - **Per-direction heights.** The design mapper resolves `on` to a level along the face normal instead of `onZ`, and each operation carries its direction. Where v0.1 uses the stock top (z = 0) and the thickness `T`, the face frame uses the stock face of the direction (level 0 locally) and the **stock extent along `n`** (T, L or W): overshoot goes beyond that face along `n`, through cuts end `ov` beyond the opposite face, tabs are measured up from the opposite face.

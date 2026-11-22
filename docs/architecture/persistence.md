@@ -1,6 +1,6 @@
 # Persistence: project archive and working folder
 
-Status: implemented · Decision: [ADR 0006](../decisions/0006-project-archive-with-working-folder.md) · State: [commands.md](commands.md#project-state) · Loading: [migrations.md](../conventions/error-handling/migrations.md)
+Status: implemented ([assets and references](#assets-and-references-v02): accepted, v0.2 task R1) · Decision: [ADR 0006](../decisions/0006-project-archive-with-working-folder.md) · State: [commands.md](commands.md#project-state) · Loading: [migrations.md](../conventions/error-handling/migrations.md)
 
 The project file is a zip archive; the main process unpacks it into a **working folder**, keeps that folder current after every commit, and builds, verifies and atomically swaps a new archive on save.
 
@@ -21,33 +21,34 @@ The archive holds no undo history and no action log in v0.1.
 
 `<appData>` is Electron's `userData` in the app, or `--data-dir` in headless/CLI runs (injected, so persistence code does not import Electron). The app accepts `--data-dir` too: it then uses it as Electron's `userData` and `<data-dir>/logs/` as the log folder, set before startup, so one flag isolates a run (the [app end-to-end tests](../conventions/testing.md#app-playwright-for-electron) use it).
 
-| Item           | Path                                                 | Content                                                                                           |
-| -------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| Project file   | Anywhere the user chooses, extension `.dfyom`        | Zip of the working folder's documents plus `manifest.json`.                                       |
-| Project folder | `<appData>/projects/<key>/`                          | `<key>` = project id; a second file with the same id open at once gets `<id>~2`, `~3`, ….         |
-| Working folder | `<project folder>/work/`                             | Unpacked documents ([layout](#working-folder-layout)), `assets/` (not in v0.1).                   |
-| State          | `<project folder>/state.json`                        | `schemaVersion`, project id, file path, `dirty`, working and last saved revision, archive sha256. |
-| Lock           | `<project folder>/lock.json`                         | Instance id, PID, host, `startedAt`, `heartbeatAt`.                                               |
-| Save history   | `<project folder>/saves/<savedAt>-r<revision>.dfyom` | Verified archives, identical to what was written to the project file.                             |
+| Item           | Path                                                 | Content                                                                                                |
+| -------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Project file   | Anywhere the user chooses, extension `.dfyom`        | Zip of the working folder's documents plus `manifest.json`.                                            |
+| Project folder | `<appData>/projects/<key>/`                          | `<key>` = project id; a second file with the same id open at once gets `<id>~2`, `~3`, ….              |
+| Working folder | `<project folder>/work/`                             | Unpacked documents ([layout](#working-folder-layout)), `assets/` ([v0.2](#assets-and-references-v02)). |
+| State          | `<project folder>/state.json`                        | `schemaVersion`, project id, file path, `dirty`, working and last saved revision, archive sha256.      |
+| Lock           | `<project folder>/lock.json`                         | Instance id, PID, host, `startedAt`, `heartbeatAt`.                                                    |
+| Save history   | `<project folder>/saves/<savedAt>-r<revision>.dfyom` | Verified archives, identical to what was written to the project file.                                  |
 
 - Documents are **JSON**, pretty-printed with stable key order, so they diff cleanly. They are the `ProjectDoc` DTOs ([commands.md](commands.md#project-state)).
 - The stock/tool/machine **library is global app data**, not part of a project: sketched as `<appData>/library/`; format and location are defined in task 1.7 (library models doc, [plan](../plans/v0.1.md)).
 - `manifest.json`: `{ format: 'dfyom-project', schemaVersion, projectId, appVersion, savedAt, revision, files: [{ path, size, sha256 }] }`. It is the archive's single `schemaVersion` for all its documents.
 - Zip entries: JSON is deflated; files that are already compressed (images, recordings) are stored.
-- Zip library: **fflate** (MIT, so GPL-3.0-or-later compatible; pure JS, no native build). v0.1 archives hold only JSON, so they are built and read in memory (512 MB uncompressed limit as a zip-bomb guard); streaming comes with `assets/`.
+- Zip library: **fflate** (MIT, so GPL-3.0-or-later compatible; pure JS, no native build). v0.1 archives hold only JSON, so they are built and read in memory (512 MB uncompressed limit as a zip-bomb guard); v0.2 streams them ([assets](#assets-and-references-v02)).
 
 ### Working-folder layout
 
 One JSON file per top-level record of `ProjectDoc`:
 
-| File                  | Content                                                                                                           |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `project.json`        | Project-level fields of `ProjectDoc` (name, unit system, …); id and revision are in the manifest and `state.json` |
-| `parts/<id>.json`     | One part with its operations                                                                                      |
-| `plans/<id>.json`     | One plan: status, design snapshot, own library copies, setups ([plan-v0.1.md](../modes/plan-v0.1.md#plan-record)) |
-| `snapshots/<id>.json` | One library-item snapshot used by the design (below)                                                              |
+| File                   | Content                                                                                                           |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `project.json`         | Project-level fields of `ProjectDoc` (name, unit system, …); id and revision are in the manifest and `state.json` |
+| `parts/<id>.json`      | One part with its operations                                                                                      |
+| `plans/<id>.json`      | One plan: status, design snapshot, own library copies, setups ([plan-v0.1.md](../modes/plan-v0.1.md#plan-record)) |
+| `snapshots/<id>.json`  | One library-item snapshot used by the design (below)                                                              |
+| `references/<id>.json` | One reference model record (v0.2, [below](#assets-and-references-v02))                                            |
 
-The mapping is generic: `layout.ts` lists the `ProjectDoc` keys that are record collections (`<key>/<id>.json`, ids must match `[A-Za-z0-9_-]`); every other field goes to `project.json`. `parts` and `snapshots` are registered (task 2.5), `plans` with task 2.13. Any other file in an archive or `work/` is `input.malformed`.
+The mapping is generic: `layout.ts` lists the `ProjectDoc` keys that are record collections (`<key>/<id>.json`, ids must match `[A-Za-z0-9_-]`); every other field goes to `project.json`. `parts` and `snapshots` are registered (task 2.5), `plans` with task 2.13, `references` with v0.2 task R1. Besides these and `assets/` ([below](#assets-and-references-v02)), any other file in an archive or `work/` is `input.malformed`.
 
 ### Library references
 
@@ -56,6 +57,17 @@ Decided pending task 1.7 (it may refine fields, not the rule):
 - A project uses a library item only through a **snapshot**: `{ id, kind, libraryItemId, takenAt, values }`, a copy of the item's values at the time it was used. Parts and plans reference the snapshot `id`, never the library item directly. Rule: `snapshots/` serves the design (parts); each plan keeps its own snapshots inside `plans/<id>.json` and references only those, so a plan never shares a snapshot with the design or another plan.
 - Loading a project never reads the library, so an archive opens unchanged on another machine or after the library item was edited or deleted.
 - Library changes reach a project only through an explicit, undoable command (e.g. "update from library"), which replaces the snapshot's `values`.
+
+### Assets and references (v0.2)
+
+Accepted with [reference-model.md](../modes/reference-model.md#storage) (D18, 2026-11-22), implemented by v0.2 task [R1](../plans/v0.2.md#5-reference-model). An **asset** is a binary file the project stores as given (v0.2: the STL of a reference model); records point to it, documents never embed it.
+
+- **Layout:** `work/assets/<sha256>.<ext>` (lower-case hex of the file bytes; v0.2: `.stl`), content-addressed, so the same file imported twice is stored once and two records may share it. A record names its asset by that path and hash. Asset names must match `^[0-9a-f]{64}\.stl$`; any other file in `assets/` is `input.malformed`.
+- **Records:** `references` is a record collection in `layout.ts` (`references/<id>.json`), like `parts`.
+- **Manifest and archive:** assets are listed in `manifest.json` like every file (path, size, sha256) and deflated in the archive. Open verifies each asset's hash against both the manifest and its file name.
+- **Streaming:** archives are written and read as streams (fflate's streaming zip API), so an asset is never held in memory twice and the archive is never built in memory; this replaces the in-memory v0.1 archive (the 512 MB zip-bomb guard stays, counted while streaming). Save's verify step streams too. Import copies the source file into `work/assets/` with the same atomic write as documents (temp file, fsync, rename), hashing while copying.
+- **Unreferenced assets:** undoing an import removes the record, not the file, so redo works. Save writes only assets referenced by a record **or** by an entry of the session's undo or redo history; open (and restore) deletes files in `work/assets/` that no record references, since the undo history starts empty.
+- **No `schemaVersion` bump** (pre-alpha rule, [Schema version](#schema-version-pre-alpha)): a project without references has no `references/` and no `assets/`, so v0.1 projects open unchanged.
 
 ## Open
 
@@ -155,10 +167,10 @@ Codes are in [`ERROR_CODES`](../../src/shared/errors/codes.ts). Frames carry the
 
 ## v0.1 scope
 
-| In v0.1                                                                     | Later                                                              |
-| --------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| New, open, save, save as, close – for UI, MCP and CLI                       | Persisted undo history ([commands.md](commands.md#open-questions)) |
-| Zip archive, manifest, verify, atomic replace                               | `assets/` (reference models, recordings)                           |
-| Working folder flush per commit, lock, crash recovery                       | Save-history browser and restore UI                                |
-| Save history with fixed retention limits ([below](#save-history-retention)) | Detecting external changes to the project file                     |
-| Refuse to open a project locked by another instance                         | Much later: read-only view of a locked project; migrations         |
+| In v0.1                                                                     | Later                                                                                  |
+| --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| New, open, save, save as, close – for UI, MCP and CLI                       | Persisted undo history ([commands.md](commands.md#open-questions))                     |
+| Zip archive, manifest, verify, atomic replace                               | `assets/` for reference models (v0.2, [above](#assets-and-references-v02)); recordings |
+| Working folder flush per commit, lock, crash recovery                       | Save-history browser and restore UI                                                    |
+| Save history with fixed retention limits ([below](#save-history-retention)) | Detecting external changes to the project file                                         |
+| Refuse to open a project locked by another instance                         | Much later: read-only view of a locked project; migrations                             |

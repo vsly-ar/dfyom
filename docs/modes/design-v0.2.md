@@ -1,27 +1,32 @@
 # Design mode v0.2: face targets and the operation tool
 
-Status: draft (user decisions D10 and D11 of 2026-11-21; the details below await confirmation) · Vision and v0.1: [design.md](design.md) · Plan side: [plan-v0.2.md](plan-v0.2.md) · Geometry: [geometry.md § Non-top faces](../architecture/geometry.md#non-top-faces-v02-draft) · Library: [library.md](../architecture/library.md#tool) · Terms: [glossary.md](../glossary.md)
+Status: accepted (user decisions D10, D11, D13, D16; details confirmed with the v0.2 review, D18 of 2026-11-22) · Vision and v0.1: [design.md](design.md) · Plan side: [plan-v0.2.md](plan-v0.2.md) · Geometry: [geometry.md § Non-top faces](../architecture/geometry.md#non-top-faces-v02) · Library: [library.md](../architecture/library.md#tool) · UI rules: [ui.md § Design and plan controls (v0.2)](../conventions/ui.md#design-and-plan-controls-v02) · Tasks: [plans/v0.2.md](../plans/v0.2.md#2-design-faces-anchors-tools) · Terms: [glossary.md](../glossary.md)
 
-This doc extends the [v0.1 operations](design.md#operations-v01) with two decisions. Everything not mentioned here stays as in design.md.
+This doc extends the [v0.1 operations](design.md#operations-v01) with three decisions. Everything not mentioned here stays as in design.md.
 
 - **D10, faces:** every operation targets a planar face whose outward normal is ±X, ±Y or ±Z. The face gives the operation a local 2D frame. Plan derives the setups from the face directions ([plan-v0.2.md](plan-v0.2.md#setups-from-face-directions)).
 - **D11, tools:** every operation has a tool field holding either a generalized tool or a specific library tool. This replaces the v0.1 rule "Design never names a tool" ([design.md § Generalized tools](design.md#generalized-tools)).
-- **D16 (Q13, assumed), anchors:** a position names one of nine points of the feature's bounding box ([§ Placement anchors](#placement-anchors)).
+- **D16 (Q13), anchors:** a position names one of nine points of the feature's bounding box ([§ Placement anchors](#placement-anchors)).
 
-Do not implement this doc before the user confirms it ([README.md](../README.md#status-values)).
+## Decisions
 
-## Open decisions (placeholders)
+Settled with the user when this doc was accepted (D18, 2026-11-22: Q12–Q16 as taken by D16, A–J as recommended by D12); the sections below specify them.
 
-Q12–Q16 were taken as recommended on 2026-11-21 without a reply (decision D16; the user can veto). With the assumed split this doc is v0.2 and shapes are v0.3 ([roadmap.md](../roadmap.md), [plans/v0.2.md](../plans/v0.2.md)).
-
-| #   | Question                                                                                                                                  | Status (D16, assumed unless vetoed)                                                                                                                    |
-| --- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Q12 | Shapes model: named line/arc shapes, `inside` / `outside` / centreline                                                                    | Yes, in **v0.3**. In v0.2 `shape` stays the v0.1 rectangle or circle, now placed in the [face frame](#face-frame).                                     |
-| Q13 | Positioning anchors: 9-point vs centre / front-left                                                                                       | **9-point**, in v0.2: [§ Placement anchors](#placement-anchors).                                                                                       |
-| Q14 | Split into v0.2 (faces, setups, anchors, tools) and v0.3 (shapes)?                                                                        | **Split.**                                                                                                                                             |
-| Q15 | Multi-setup without workholding or in-process stock?                                                                                      | **Yes, without both.** DFM ignores clamping and material removed by earlier setups ([access checks](#dfm-access-checks)); Plan side in plan-v0.2.md.   |
-| Q16 | Free-form fillets                                                                                                                         | Free-form tabs yes, free-form floor fillets deferred (both with v0.3 shapes). In v0.2 floor fillets stay as in v0.1.                                   |
-| Q17 | Project-wide **apply**: Enter (or an "Apply" button with the pending count) runs the deferred follow-up work of all pending edits at once | Decided as D13 (2026-11-21), draft in [apply.md](../architecture/apply.md). The [auto tool choice](#auto-choice) runs on Apply: [§ Apply](#apply-d13). |
+1. **Shapes (Q12, Q14):** v0.2 keeps the v0.1 rectangle and circle as `shape`, placed in the [face frame](#face-frame). Named line/arc shapes cut `inside`, `outside` or on the centreline are v0.3 ([roadmap.md](../roadmap.md#v03--shapes)).
+2. **Placement anchors (Q13):** 9-point, in v0.2 ([§ Placement anchors](#placement-anchors)).
+3. **Several setups without workholding or in-process stock (Q15):** DFM ignores clamping and material removed by earlier setups ([access checks](#dfm-access-checks)); Plan side in [plan-v0.2.md](plan-v0.2.md).
+4. **Fillets (Q16):** free-form tabs come with v0.3 shapes; free-form floor fillets are deferred beyond that. In v0.2 floor fillets stay as in v0.1.
+5. **Apply (Q17 → D13):** the [auto tool choice](#auto-choice) runs on Apply, not inside the edit command ([§ Apply](#apply-d13), [apply.md](../architecture/apply.md)).
+6. **Face targets (A):** stock faces, floors and tab tops. Walls are not face targets in v0.2: a feature in a wall needs the tool to fit inside the pocket beside it, a new access rule (later).
+7. **Face frame (B):** as tabled in [§ Face frame](#face-frame): seen from outside, `v` up on the sides, the bottom rolled over the X axis, so X stays X on top and bottom (a flip toward the operator).
+8. **Formula names (C):** part-frame `.x` / `.y` / `.z` per axis ([§ Formula names](#formula-names)); no direction-neutral `.level`, so `.z` keeps its v0.1 meaning.
+9. **Auto choice (D):** a fitting library tool first, else a generalized tool ([§ Auto choice](#auto-choice)): real tools give real DFM (principle 5).
+10. **Facing and profile `on` (E):** stock faces only in v0.2; a profile or facing from a floor is later, so through-cut and tab rules stay unchanged.
+11. **`tool.*` in design expressions (F):** unknown in v0.2 ([§ Expressions and the tool](#expressions-and-the-tool)).
+12. **Changing `on` to another direction (G):** keeps the `[u, v]` numbers; the [access checks](#dfm-access-checks) warn if the feature no longer fits.
+13. **Auto choice during adjust-popover steps (H):** none; the choice waits for Apply (D13, [apply.md § Adjust popover](../architecture/apply.md#adjust-popover)).
+14. **Generalized drill (I):** takes the operation's `pointAngle`; it stores none of its own.
+15. **Updating a specific tool from the library (J):** a new command `design.snapshot.update { snapshotId }` for tool and stock snapshots, one explicit, undoable path for every design snapshot, as plans have `plan.libraryItem.update` ([§ Commands](#commands-and-queries-v02)).
 
 ## Faces and face targets
 
@@ -43,7 +48,7 @@ The model is open for later **user planes** with any orientation (roadmap "Later
 | Profile   | A stock face (a through cut from that face to the opposite one)                                       | `stock.top` | The cut may run along X or Y through the stock; tabs are measured from the **opposite** stock face. |
 
 - A face target's direction comes from the surface table ([below](#surface-table-per-direction)); the operation never stores a direction of its own.
-- **Walls are not face targets in v0.2** (e.g. a hole in a pocket's straight wall). They are planar with axis normals, so the model allows them; whether v0.2 includes them is [question A](#questions-raised-by-this-draft).
+- **Walls are not face targets in v0.2** (e.g. a hole in a pocket's straight wall). They are planar with axis normals, so the model allows them; they come later with their own access rule ([decision 6](#decisions)).
 - Floors of operations on other faces are eligible like +Z floors: a drilling on the floor of a pocket in `stock.side[1]` approaches along `−x`.
 - A wrong target stays `model.invariant`, rule `onSurface` (params list the allowed ids), as in [design.md § Implementation](design.md#implementation-task-25).
 - The DTO field stays a surface id string. Absent `on` on a facing or profile means `stock.top`, so v0.1 projects load unchanged (no `schemaVersion` change, [CLAUDE.md](../../CLAUDE.md) pre-alpha rule).
@@ -65,9 +70,9 @@ Each face has a **face frame** `{ origin, u, v, n }` in the part frame: `n` the 
 
 - All faces of one direction share `u`, `v` and the origin's (u, v); only the level along `n` differs. So a position means the same point on `stock.side[1]` and on the floor of a pocket in it, as v0.1 positions mean the same on `stock.top` and `facing1.floor`.
 - `shape.center` and the drilling `center` are `[u, v]` in the frame of `on`. Changing `on` to a face of another direction keeps the numbers (the feature moves to the new face); the [access checks](#dfm-access-checks) warn if it no longer fits. Anchors other than the centre: [§ Placement anchors](#placement-anchors).
-- `depth` runs along `−n` from the `on` face. The removal region is the shape extruded from `on.level − depth` outward through the stock's face of that direction (overshoot, [geometry.md](../architecture/geometry.md#non-top-faces-v02-draft)): a 3-axis tool removes everything between the floor and the outside along `n`. For `+z` this is the v0.1 rule.
+- `depth` runs along `−n` from the `on` face. The removal region is the shape extruded from `on.level − depth` outward through the stock's face of that direction (overshoot, [geometry.md](../architecture/geometry.md#non-top-faces-v02)): a 3-axis tool removes everything between the floor and the outside along `n`. For `+z` this is the v0.1 rule.
 - Surface roles keep their v0.1 numbering, read in the face frame: `wall[0]` is the wall at the lowest `v` ("front" seen from outside), then counter-clockwise seen from outside; tabs start at the middle of `wall[0]` (circle: at the lowest `v`). For `+z` this is v0.1.
-- The frame orientation, especially the bottom's roll axis, is [question B](#questions-raised-by-this-draft).
+- The bottom is rolled over the X axis, not the Y axis ([decision 7](#decisions)).
 
 ### Surface table per direction
 
@@ -86,7 +91,7 @@ Expression references to face positions are the face's **part-frame coordinate**
 | `±y`           | `<surface>.y`, `.y.min`, `.y.max` | `stock.side[0].y` = 0                                |
 
 - A name on the wrong axis (`stock.side[1].z`) is an unknown reference. Bracketed ids become expression names here (`stock.side[1]`), so the [expression grammar](../architecture/quantities.md#expression-grammar) needs bracketed segments in references; tab tops (`profile1.tab[0].top.z`) become reachable the same way.
-- Depth arithmetic depends on the sign of `n`: on `+x` a floor is at `x = L − depth`, on `−x` at `x = depth`. A direction-neutral name (`.level`, `.depthFromStock`) is the alternative; [question C](#questions-raised-by-this-draft).
+- Depth arithmetic depends on the sign of `n`: on `+x` a floor is at `x = L − depth`, on `−x` at `x = depth`. A direction-neutral name (`.level`, `.depthFromStock`) was considered and not taken ([decision 8](#decisions)).
 
 ### DFM access checks
 
@@ -111,14 +116,14 @@ Out of v0.2 DFM (Q15): workholding and clamping access, material already removed
 
 ## Placement anchors
 
-Draft for Q13 (9-point, assumed by D16). Every positioned feature (pocket and profile `shape`, drilling `center`) states **which point of its bounding box** its position gives.
+Q13: 9-point ([decision 2](#decisions)). Every positioned feature (pocket and profile `shape`, drilling `center`) states **which point of its bounding box** its position gives.
 
 - **Anchor:** one of nine points of the shape's bounding rectangle in the [face frame](#face-frame): `{ u: 'min' | 'centre' | 'max', v: 'min' | 'centre' | 'max' }`. Seen from outside the face, `min`/`min` is the lower-left (front-left on the top face). A circle uses its bounding square; a drilling has only the centre (a hole is a point).
 - **Data model:** optional `shape.anchor` next to `shape.center`; `center` then means "the anchor point" (renaming it to `position` only if cheap, decided in task A2). Absent `anchor` = centre, so v0.1 projects load unchanged (no `schemaVersion` change).
 - **Changing the anchor keeps the geometry:** `design.<kind>.update { anchor }` recomputes the position so the feature does not move (one undo step). If the position is an expression, the change fails with `model.invariant`, rule `anchorExpression`; the user removes the formula first.
 - **Size edits keep the anchor point fixed:** with a `min`/`min` anchor, a longer pocket grows toward `+u`, so a corner stays where it was dimensioned.
 - **Default anchor** for new operations is a setting (default: centre); agents pass `anchor` or get the centre.
-- **UI:** a 3 × 3 anchor picker beside the position fields, and the viewport marks the anchor point of the selected feature. Rules go to [ui.md](../conventions/ui.md) on acceptance.
+- **UI:** a 3 × 3 anchor picker beside the position fields, and the viewport marks the anchor point of the selected feature ([ui.md rules](../conventions/ui.md#design-and-plan-controls-v02)).
 - References to other features' edges or to a [reference model](reference-model.md) are later (backlog B10, snapping).
 
 ## Operation tool
@@ -135,7 +140,7 @@ DesignTool = { kind: 'generalized', type, diameter, cornerRadius? }
 ```
 
 - **Generalized tool:** a tool [`type`](../architecture/library.md#tool) (`flatEndMill`, `bullNoseEndMill`, `ballEndMill`, `drill`) and a `diameter` quantity; `cornerRadius` only for a bull nose (0 < RE < DC/2). No lengths, no flute count, no presets: "a 1/4″ flat end mill". A generalized drill's point angle is the operation's `pointAngle`. A user without the tool can still design with it.
-- **Specific tool:** a tool from the library, held like the part's stock as a **tool snapshot** in `ProjectDoc.snapshots` ([persistence.md § Library references](../architecture/persistence.md#library-references)): the design never references a library item directly, so the project opens unchanged elsewhere. Library edits never change it; only an explicit, undoable command may ([question J](#questions-raised-by-this-draft)).
+- **Specific tool:** a tool from the library, held like the part's stock as a **tool snapshot** in `ProjectDoc.snapshots` ([persistence.md § Library references](../architecture/persistence.md#library-references)): the design never references a library item directly, so the project opens unchanged elsewhere. Library edits never change it; only the explicit, undoable `design.snapshot.update` or re-picking the tool may ([decision 15](#decisions)).
 - **`toolLocked`:** set by any user choice ([locks](#tool-lock)). Absent = auto.
 - Both fields are optional in the DTO: absent `tool` means "auto, nothing chosen yet" (a v0.1 project); the next Apply chooses one (opening marks it pending, [apply.md § Opening](../architecture/apply.md#opening-and-recovery)). No `schemaVersion` change.
 
@@ -161,7 +166,7 @@ While the field is **not locked**, the tool is chosen automatically:
 4. **No library tool fits:** the largest generalized tool of the [standard size series](#standard-sizes) that fits (bull nose: RE = `floorRadius`; drill: DC = `diameter`).
 5. **Nothing fits at all** (e.g. `cornerRadius` 0, or a corner radius below the smallest standard size): the current tool is kept and `dfm.toolUnfit` warns ([DFM](#dfm-with-the-tool)). The command never fails because of the tool.
 
-Whether auto prefers a library tool or always a generalized one is [question D](#questions-raised-by-this-draft) (this draft: library first).
+Library tools come first ([decision 9](#decisions)); with an empty library the choice is always generalized.
 
 #### Standard sizes
 
@@ -192,7 +197,7 @@ The DFM tool rules ([geometry.md § Parameter and tool checks](../architecture/g
 
 ### Expressions and the tool
 
-`tool.*` stays an unknown reference in design expressions in v0.2 ([design.md § Implementation](design.md#implementation-task-25)): the auto choice depends on the parameters, so a parameter depending on the tool would make a cycle, and the geometry would change with a library edit. See [question F](#questions-raised-by-this-draft).
+`tool.*` stays an unknown reference in design expressions in v0.2 ([design.md § Implementation](design.md#implementation-task-25)): the auto choice depends on the parameters, so a parameter depending on the tool would make a cycle, and the geometry would change with a library edit ([decision 11](#decisions)). Allowing it for locked tools only was rejected for the second reason: it breaks the result-first rule.
 
 ## Commands and queries (v0.2)
 
@@ -205,45 +210,27 @@ Names follow [commands.md § Naming](../architecture/commands.md#naming); all ar
 | `design.operation.tool.set`      | `{ partId, operationId, tool }` – `tool` is a generalized tool or `{ toolLibraryItemId }` (snapshot taken in the command); locks | `{ warnings }`                                |
 | `design.operation.tool.lock`     | `{ partId, operationId }` – pins the current tool                                                                                | `{ warnings }`                                |
 | `design.operation.tool.unlock`   | `{ partId, operationId }` – the auto choice runs on Apply                                                                        | `{ warnings }`                                |
+| `design.snapshot.update`         | `{ snapshotId }` – a design tool or stock snapshot takes the library item's current values ([decision 15](#decisions))           | `{ warnings }`                                |
 | `design.tool.candidates` (query) | `{ partId, operationId }`                                                                                                        | `{ fitting[], generalized, current }`         |
 
 - `toolChange` = `{ partId, operationId, from, to, reason }` whenever the auto choice replaced the tool (reason: the failed fit rule of the old tool). It is in the Apply's result (`ApplyOutcome.toolChanges`); an agent's edit auto-applies, so it sees the swap in the `applied` part of its call's result ([apply.md § Agents](../architecture/apply.md#agents-mcp-and-cli)).
 - `design.tool.candidates` lists the fitting library tools in auto-choice order with reasons, the generalized tool auto would pick, and the current tool with its fit result. It is the "makeable with" list of the inspector and the agent's way to pick a tool.
-- A specific tool whose library item changed shows as stale and never updates silently. Design has no "update from library" command yet (not for the stock either); [question J](#questions-raised-by-this-draft).
+- A specific tool (or the stock) whose library item changed shows as stale and never updates silently; `design.snapshot.update` updates it explicitly (one undo step). A library item that no longer exists fails it with `input.malformed`. An updated tool snapshot keeps `toolLocked`; if it stops fitting, `dfm.toolUnfit` warns as for any locked tool. Updating the stock snapshot is pending for Apply like any part field ([apply.md § What is pending](../architecture/apply.md#what-is-pending)).
 - Errors: a library item that is not a tool or does not exist → `input.malformed`; a generalized tool with invalid values → `model.invariant` (rule per field). A tool that does not fit is **not** an error (a warning).
 - **Agents and CLI:** the command layer exposes all of these as MCP tools (`design_operation_tool_set` …, [llm-api.md § Names](../architecture/llm-api.md#names)) and CLI calls (`dfyom design.operation.tool.set '{…}'`) with no extra work. Tool args are typed (a union on `kind`), so the JSON Schema shows agents both forms.
 
 ## UI (summary)
 
-UI rules go to [ui.md](../conventions/ui.md) when this doc is accepted. Sketch:
+Rules for the controls: [ui.md § Design and plan controls (v0.2)](../conventions/ui.md#design-and-plan-controls-v02). What they show:
 
 - **`on`:** the pick mode highlights every face target of the operation kind ([ui.md § Selection and picking](../conventions/ui.md#selection-and-picking)), sides and bottom included, with a normal glyph; the dropdown groups targets by direction ("Top", "Right side", …).
 - **Tool field** in each operation's inspector, first group after `on`: a combobox with the generalized tool (type + size) and the fitting library tools from `design.tool.candidates`, the lock button of [ui.md § Field](../conventions/ui.md#field), and "Chosen automatically: the 6 mm end mill didn't fit the 2 mm corner" after an auto change.
 
 ## Apply (D13)
 
-Q17 is decided as D13 (2026-11-21) and specified, as a draft, in [apply.md](../architecture/apply.md). In short, for this doc:
+Q17 is decided as D13 (2026-11-21) and specified in [apply.md](../architecture/apply.md). In short, for this doc:
 
 - Edits commit live (one undo step each; the mesh, parameter checks and live outline follow); the [auto tool choice](#auto-choice) is **deferred** to Apply: Enter in a field, Cmd/Ctrl+Enter, or the "Apply N" button. Blur and Tab commit only.
 - Apply runs the auto choice for every unlocked operation with pending changes, then the draft plans follow ([plan-v0.2.md](plan-v0.2.md#tool-resolution-from-the-design-tool-field)), as one undoable entry "Apply N changes"; undoing it restores the old tools and leaves the edits pending.
 - Until Apply, `dfm.toolUnfit` and `dfm.toolNotInLibrary` of an unlocked tool with pending changes show as "may change on Apply"; against a locked tool they are final.
 - Agents auto-apply per call by default (`apply: false` batches); the swap comes back as `applied.toolChanges`.
-
-## Questions raised by this draft
-
-Each with options and the draft's recommendation; the user answers before `accepted`.
-
-| #   | Question                                              | Options                                                                                                                            | Recommendation                                                                                      |
-| --- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| A   | Are planar pocket/profile walls face targets in v0.2? | (a) no, stock faces + floors + tab tops; (b) also straight walls of rectangles                                                     | (a): walls need the tool to fit inside the pocket beside the feature (a new access rule); add later |
-| B   | Face frame orientation                                | (a) as tabled: seen from outside, v up on sides, bottom rolled over X; (b) bottom rolled over Y (u = −X, v = +Y)                   | (a): X stays X on top and bottom, matching a flip toward the operator                               |
-| C   | Formula names for face levels                         | (a) part-frame `.x` / `.y` / `.z` per axis; (b) neutral `.level` along the normal; (c) both                                        | (a): readers think in axes, and `.z` stays valid                                                    |
-| D   | What the auto choice prefers                          | (a) a fitting library tool, else generalized; (b) always generalized (Plan picks the real tool)                                    | (a): shows real tools and real DFM ("real data", principle 5); (b) for an empty library anyway      |
-| E   | Facing and profile `on` beyond stock faces            | (a) stock faces only in v0.2; (b) a profile from a floor (through opening in a pocket floor), a facing of a floor                  | (a): keeps through-cut and tab rules unchanged; (b) later                                           |
-| F   | `tool.*` in design expressions                        | (a) unknown in v0.2; (b) allowed for locked tools only                                                                             | (a): (b) still changes geometry on a library edit and breaks the result-first rule                  |
-| G   | Changing `on` to another direction                    | (a) keep the `[u, v]` numbers; (b) keep the point in the part frame where possible; (c) reset to the face centre                   | (a): predictable, and the access checks warn                                                        |
-| H   | Auto choice during adjust-popover steps               | (a) every committed step, as every command; (b) skip gesture steps and choose on apply                                             | Settled by D13: (b), [apply.md](../architecture/apply.md#adjust-popover)                            |
-| I   | Generalized drill and point angle                     | (a) a generalized drill takes the operation's `pointAngle`; (b) it stores its own                                                  | (a): the operation already states the result                                                        |
-| J   | Updating a specific tool's snapshot from the library  | (a) a new `design.snapshot.update { snapshotId }` for tool and stock snapshots; (b) re-pick the tool (`design.operation.tool.set`) | (a): one explicit, undoable path for every design snapshot, as plans have `plan.libraryItem.update` |
-
-A–J (except H, settled by D13) were answered with the recommendations by decision D12 (2026-11-21, self, draft); the user confirms them with this doc.

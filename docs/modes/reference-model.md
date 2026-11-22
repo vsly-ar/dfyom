@@ -1,10 +1,18 @@
 # Reference model: import, place and show a 3D model for reference
 
-Status: draft (proposal from user direction D15 of 2026-11-21; nothing here is confirmed) · Design: [design.md § Workflow](design.md#workflow) step 4 · Storage: [persistence.md](../architecture/persistence.md#working-folder-layout) · Apply: [apply.md](../architecture/apply.md) · Plan of record: [plans/v0.2.md](../plans/v0.2.md#5-reference-model) · Terms: [glossary.md](../glossary.md)
+Status: accepted (user direction D15 of 2026-11-21; confirmed with the v0.2 review, D17 and D18 of 2026-11-22) · Design: [design.md § Workflow](design.md#workflow) step 4 · Storage: [persistence.md § Assets and references](../architecture/persistence.md#assets-and-references-v02) · UI rules: [ui.md § Viewport](../conventions/ui.md#reference-ghost-v02) · Apply: [apply.md](../architecture/apply.md) · Plan of record: [plans/v0.2.md](../plans/v0.2.md#5-reference-model) · Terms: [glossary.md](../glossary.md)
 
 The user's direction (D15) is the full CAM cycle **with a reference model**: import a 3D model, recreate it in Design with typical operations, Plan, Run on the virtual machine. This doc covers the first step only, for v0.2: get an STL into the project, place it on the stock and show it as a ghost. Measuring, snapping and assisted recreation come later ([§ Later](#later)).
 
-Do not implement this doc before the user confirms it ([README.md](../README.md#status-values)).
+## Decisions
+
+Settled with the user when this doc was accepted (D17, D18, 2026-11-22: the reference-model core stays in v0.2; R-A, R-C, R-D, R-E as recommended, R-B as per-window view state); the sections below specify them.
+
+1. **A reference belongs to a part (R-A)** and lives in the part frame: a project can hold many parts, and a reference describes one ([§ Data model](#data-model)).
+2. **Visibility is per-window view state (R-B),** like the camera and the selection: not in the document, not undoable, never marks the project unsaved, not saved with the project; a new window shows every reference ([§ Display](#display)).
+3. **The asset is copied into the project (R-C),** so the project opens on another machine and in the e2e tests; linking to an external file is later ([§ Storage](#storage)).
+4. **Import fits to centre + top by default (R-D):** the stock usually has margin around the part and its top is faced, so the reference shows inside the stock at once ([§ Fit to stock](#fit-to-stock)).
+5. **Apply ignores references in v0.2 (R-E):** their commands are instant reactions only ([§ Commands](#commands-and-queries)).
 
 ## Rule: reference only
 
@@ -33,7 +41,6 @@ Reference {
   scale                          // uniform factor on top of sourceUnit, default 1 (a scalar quantity)
   rotation: { x, y, z }          // angle quantities, applied in the order x, then y, then z, about the part axes
   position: { x, y, z }          // length quantities: where the reference's bounding-box min corner lands, after rotation and scale
-  visible                        // shown in the viewport
 }
 ```
 
@@ -52,7 +59,7 @@ All are `document` commands (undoable, one gesture = one command; names per [com
 | Command / query                 | Args                                                                                         | Result                                         |
 | ------------------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------- |
 | `design.reference.import`       | `{ partId, path, name?, sourceUnit?, fit? }` – `path` is a local file the main process reads | `{ referenceId, sourceUnit, guess, warnings }` |
-| `design.reference.update`       | `{ partId, referenceId, name?, sourceUnit?, scale?, rotation?, position?, visible? }`        | `{ warnings }`                                 |
+| `design.reference.update`       | `{ partId, referenceId, name?, sourceUnit?, scale?, rotation?, position? }`                  | `{ warnings }`                                 |
 | `design.reference.rotate90`     | `{ partId, referenceId, axis: 'x' \| 'y' \| 'z', turns: -1 \| 1 \| 2 }`                      | `{ warnings }`                                 |
 | `design.reference.fit`          | `{ partId, referenceId, anchor, z: 'top' \| 'centre' \| 'bottom' }` – see below              | `{ warnings }`                                 |
 | `design.reference.remove`       | `{ partId, referenceId }`                                                                    | `{}`                                           |
@@ -68,16 +75,12 @@ All are `document` commands (undoable, one gesture = one command; names per [com
 
 ## Storage
 
-The asset is a new kind of project file. The [persistence](../architecture/persistence.md) changes it needs (draft, part of [plan task R1](../plans/v0.2.md#5-reference-model)):
-
-- **Layout:** the original file bytes at `work/assets/<sha256>.stl` (content-addressed, so importing the same file twice stores it once) and the record at `references/<id>.json`, a new record collection in `layout.ts`. Assets are listed in `manifest.json` like every file (path, size, sha256) and deflated in the archive.
-- **Streaming:** v0.1 builds archives in memory; assets need streamed zip writing and reading so a large STL does not hold the archive twice in memory ([known issue](../plans/v0.1.md#known-issues-and-risks) "Archives are built and read in memory").
-- **Unreferenced assets:** undoing an import removes the record, not the file, so redo works. Save writes only assets referenced by a record **or** by the session's undo history; on open, unreferenced files in `work/assets/` are deleted.
-- **No `schemaVersion` bump** (pre-alpha, [CLAUDE.md](../../CLAUDE.md)): a project without references has no `references/` and no `assets/`, so older projects open unchanged. Any other file in `assets/` stays `input.malformed`.
+The original file bytes are stored with the project as a content-addressed **asset** (importing the same file twice stores it once) and the record as `references/<id>.json`. Layout, streaming, cleanup of unreferenced assets and loading of older projects: [persistence.md § Assets and references (v0.2)](../architecture/persistence.md#assets-and-references-v02) (plan task [R1](../plans/v0.2.md#5-reference-model)).
 
 ## Display
 
-- Ghost in the Design viewport: translucent neutral material with edges, drawn after the part, never pickable in face-pick mode and never highlighted as a face target ([ui.md § Selection and picking](../conventions/ui.md#selection-and-picking)). Styling goes to [ui.md](../conventions/ui.md) when this doc is accepted.
+- Ghost in the Design viewport: translucent neutral material with edges, drawn after the part, never pickable in face-pick mode and never highlighted as a face target (rules: [ui.md § Reference ghost](../conventions/ui.md#reference-ghost-v02)).
+- **Visibility** is per-window view state in the window's UI store ([decision 2](#decisions)): the eye toggles it without a command, an undo step or the unsaved mark; a new window or a reopened project shows the reference. Headless instances have no viewport, so agents have no visibility command.
 - Navigator: a "Reference" row under the stock with the visibility eye; inspector: file name, triangles, source unit (with the guess reason), scale, rotation (90° buttons per axis and the three angle fields), position, and "Fit to stock" with the anchor picker and the Z choice.
 - The renderer receives the parsed mesh once per asset (transferable buffer) and applies the placement matrix itself, so editing placement never re-sends the mesh.
 
@@ -94,13 +97,3 @@ The asset is a new kind of project file. The [persistence](../architecture/persi
 | Measure and snap to the reference         | later | With v0.3 shapes; uses the anchors                                                                |
 | Assisted recreation and deviation view    | later | Spike recognition on real parts first                                                             |
 | Golden-path reference cycle e2e + UX pass | later | v0.2 has a first version ([plan task X2](../plans/v0.2.md#6-acceptance))                          |
-
-## Open questions
-
-| #   | Question                               | Options                                                                            | Recommendation                                                                                                      |
-| --- | -------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| R-A | Where the reference belongs            | (a) to a part (part frame); (b) to the project (stock frame)                       | (a): a project can hold many parts, and a reference describes one part                                              |
-| R-B | Is visibility undoable document state? | (a) yes, a document field (saved, agents read it back); (b) per-window view state  | (a): simple and saved with the project; (b) if toggling clutters the undo history in testing                        |
-| R-C | Where the asset lives                  | (a) copied into the project (`work/assets/`); (b) linked by path                   | (a): the project opens on another machine and in the e2e tests; linking is later                                    |
-| R-D | Default fit on import                  | (a) centre + top; (b) front-left + bottom; (c) none, placed at the STL origin      | (a): the stock usually has margin around and the top is faced; the user sees the reference inside the stock at once |
-| R-E | Does Apply care about references?      | (a) no, instant reactions only; (b) later reactions (snapping hints) go into Apply | (a) for v0.2                                                                                                        |

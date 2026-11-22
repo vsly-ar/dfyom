@@ -505,6 +505,8 @@ svg.fi .ext { stroke-dasharray: 1.5 1.5; opacity: 0.7; }
 .decide ol { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
 .decide b { font-weight: 600; }
 .new-badge { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: var(--radius-full); border: 1px solid var(--info); color: var(--info); background: var(--info-subtle); font: 500 var(--text-xs)/var(--lh-xs) var(--font-ui); white-space: nowrap; vertical-align: 1px; text-transform: none; letter-spacing: 0; }
+.planned-badge { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: var(--radius-full); border: 1px dashed var(--border-control); color: var(--text-muted); font: 500 var(--text-xs)/var(--lh-xs) var(--font-ui); white-space: nowrap; vertical-align: 1px; }
+.planned { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
 .changed-badge { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: var(--radius-full); border: 1px solid var(--border-control); color: var(--text-muted); font: 500 var(--text-xs)/var(--lh-xs) var(--font-ui); white-space: nowrap; vertical-align: 1px; }
 .vp-new { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .vp-new > .t-light, .vp-new > .t-dark { background: var(--bg-app); color: var(--text); padding: 12px; border-radius: var(--radius-md); border: 1px solid var(--border); }
@@ -558,6 +560,7 @@ svg.fi .ext { stroke-dasharray: 1.5 1.5; opacity: 0.7; }
     <a href="#motion">Motion</a>
     <a href="#icons">Icons</a>
     <a href="#components">Components</a>
+    <a href="#planned">Planned (v0.2)</a>
     <a href="#shell">App shell</a>
     <a href="#decide">To decide</a>
     <a href="#changelog">Changelog</a>
@@ -729,6 +732,20 @@ svg.fi .ext { stroke-dasharray: 1.5 1.5; opacity: 0.7; }
       <div class="duo" id="gallery"></div>
     </section>
 
+    <section id="planned">
+      <h2>Planned components (v0.2) <span class="planned-badge">Planned · not designed yet</span></h2>
+      <p class="muted">Accepted with the v0.2 docs (2026-11-22); rules in <a href="ui.md#design-and-plan-controls-v02">ui.md § Design and plan controls (v0.2)</a>. Each gets a specimen in both themes, from existing tokens only, for approval with its task; until then this list is the placeholder.</p>
+      <ol class="planned">
+        <li><b>Face glyph and face-frame axes</b> (F1): normal arrow on every eligible face in pick mode, amber when hovered; labelled <span class="code">u</span>/<span class="code">v</span> axes on the selected face.</li>
+        <li><b>Anchor picker</b> (F2): 3 × 3 radio grid beside the position fields; the chosen point amber; a marker at the anchor point in the viewport.</li>
+        <li><b>Tool field</b> (F5): combobox (generalized tool, then fitting library tools) in a Field with the tool lock, always shown; "Chosen automatically." / "Chosen by you."; "May change on Apply" notes.</li>
+        <li><b>Apply button</b> (P3): "Apply N" at the start of the toolbar's end column while changes are pending, with its explaining tooltip.</li>
+        <li><b>Setup list</b> (F6): setups in machining order with direction icon, WCS corner and rotation; plan operations nested.</li>
+        <li><b>Setup-change dialog</b> (E2): like the tool-change dialog, with the stock picture in its new orientation and the run dialogs' Stop.</li>
+        <li><b>Reference ghost and row</b> (R3): translucent neutral ghost with edges (never accent or selection colours); navigator row with a visibility eye.</li>
+      </ol>
+    </section>
+
     <section id="shell">
       <h2>App shell · example</h2>
       <p class="muted"><b>For illustration only.</b> One possible Design mode window, showing the tokens and components above working together. It is not a layout spec: the window layout is decided with the mode work later, and approving the design system does not fix it. Try the pencil on Width.</p>
@@ -806,6 +823,7 @@ svg.fi .ext { stroke-dasharray: 1.5 1.5; opacity: 0.7; }
         <li><b>2026-11-21 · Lock rule</b> <span class="changed-badge">Changed since approval</span>: a lock appears only on a field with a recommendation mode while it is on (plan feeds fields in auto mode, task 3.14), so the design fields (Corner R, Chamfer, Width, Depth) and the read-only field lost theirs. A lock that can't be pressed is <span class="code">aria-disabled</span> (still focusable) with its reason as tooltip and as visible text (Spindle speed specimen); its name stays "Lock &lt;field&gt;" whether pressed or not (<a href="ui.md#field">ui.md § Field</a>).</li>
         <li><b>2026-11-21 · Colours accepted</b>: the user reviewed the values after the APCA pass and accepted them as is: the split <span class="code">--danger</span> / <span class="code">--danger-text</span>, <span class="code">--text-muted</span> as secondary text at Lc 60 (<a href="../decisions/0018-danger-text-and-secondary-text-role.md">ADR 0018</a>) and <span class="code">--vp-plunge</span>.</li>
         <li><b>2026-11-21 · Fields: icons, echo, narrow layout</b> (decided by the user): field illustrations keep full colour and saturation whether the field is focused or not <span class="changed-badge">Changed since approval</span> (was 35 % at rest); focus still thickens the amber line, read-only and disabled fields stay grey. The echo shows only when it adds something to the typed text (expression, reference, fraction, another unit, asymmetric tolerance): a plain "15" or "15 mm" in an mm field shows none, a plain value with an inherited tolerance shows only that tolerance <span class="changed-badge">Changed since approval</span>. When a field loses focus to a click, its echo stays until the click has landed, then collapses with <span class="code">--motion-base</span> (instant with reduced motion). Narrow field lists (below 20 rem) put the label above the input <span class="new-badge">New since approval</span> (<a href="#gallery">specimen in the gallery</a>).</li>
+        <li><b>2026-11-22 · Planned v0.2 components</b> <span class="planned-badge">Planned · not designed yet</span>: placeholders for the components the v0.2 docs add (<a href="#planned">list</a>); their specimens come with their tasks for approval.</li>
       </ol>
     </section>
   </main>
