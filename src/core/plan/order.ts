@@ -420,6 +420,8 @@ function frees(
   port: Region2dPort | undefined,
 ): boolean {
   if (op.id === profile.id) return false
+  // a chamfer on the profile's own edge bevels the rim round it, not material inside it (X2)
+  if (op.kind === 'chamfer' && op.edgeOf === profile.id) return false
   if (op.kind === 'facing') return true
   const c = centerOf(op, part, port)
   if (c === undefined || !inside(profile.shape, part, port, c)) return false

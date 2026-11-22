@@ -562,7 +562,7 @@ function drilling(op: Op<'drilling'>, stock: StockGeometry, lib: Library): DfmWa
 /**
  * Chamfer rules (design-v0.4.md § Chamfer operation, DFM): `dfm.chamferTooDeep` when the cone
  * reaches the edge operation's bottom (a blind hole's or pocket's depth below the face; a through
- * hole's material below the face); `dfm.chamferNoTool` when no library tool fits it (angle within
+ * hole's or inside circle profile's material below the face); `dfm.chamferNoTool` when no library tool fits it (angle within
  * 0.5°, tip smaller than the edge, covers it or its cutting edge spans the slant; as
  * `dfm.holeNoTool`, only with a library).
  */
@@ -581,7 +581,9 @@ function chamfer(
         ? edge.bottom.kind === 'through'
           ? edge.onZ + stock.thickness
           : edge.bottom.depth
-        : undefined
+        : edge?.kind === 'profile'
+          ? (edge.depth ?? op.onZ + stock.thickness)
+          : undefined
   const depth = chamferDepth(op)
   if (edgeDepth !== undefined && depth >= edgeDepth - EPSILON) {
     const tan = Math.tan(((op.angle / 2) * Math.PI) / 180)

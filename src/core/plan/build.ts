@@ -5,7 +5,13 @@
  */
 import { Err, fail, Ok, type AppResult } from '../../shared/result'
 import type { IdGenerator } from '../commands/context'
-import { fieldContext, partFromDTO, type Operation, type Part } from '../design/operation'
+import {
+  circularEdgeDiameter,
+  fieldContext,
+  partFromDTO,
+  type Operation,
+  type Part,
+} from '../design/operation'
 import { designToolToDTO } from '../design/tool'
 import { stableJson } from '../project/layout'
 import { NAME_MAX } from '../library/item'
@@ -97,12 +103,7 @@ function chamferKey(
 ): string | undefined {
   if (op.kind !== 'chamfer') return undefined
   const edge = byId.get(op.edgeOf)
-  const edgeDiameter =
-    edge?.kind === 'drilling'
-      ? edge.diameter
-      : edge?.kind === 'pocket' && edge.shape.kind === 'circle'
-        ? edge.shape.diameter
-        : undefined
+  const edgeDiameter = circularEdgeDiameter(edge)
   // not a round edge: the plan reports it; never grouped
   if (edgeDiameter === undefined) return undefined
   const q = (v: Quantity) => v.exact.toString()

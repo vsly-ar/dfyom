@@ -12,7 +12,7 @@ import type { Direction } from '../geometry/face'
 import type { Stock } from '../library/stock'
 import type { Quantity } from '../quantity/quantity'
 import { Rational } from '../quantity/rational'
-import type { Operation, Part, Shape } from './operation'
+import { circularEdgeDiameter, type Operation, type Part, type Shape } from './operation'
 import { slotCoversOpening, SurfaceTable, type SurfaceEntry } from './surfaces'
 
 const ZERO = Rational.ZERO
@@ -352,17 +352,12 @@ export function operationIssues(
     }
     case 'chamfer': {
       const edge = ops.slice(0, index).find((o) => o.id === op.edgeOf)
-      const edgeDiameter =
-        edge?.kind === 'drilling'
-          ? edge.diameter
-          : edge?.kind === 'pocket' && edge.shape.kind === 'circle'
-            ? edge.shape.diameter
-            : undefined
+      const edgeDiameter = circularEdgeDiameter(edge)
       c.check(
         edgeDiameter !== undefined,
         'edgeOf',
         'chamferEdge',
-        'must be an earlier drilling or circle pocket',
+        'must be an earlier drilling, circle pocket or inside circle profile',
         { actual: op.edgeOf },
       )
       if (edge !== undefined)

@@ -169,7 +169,7 @@ export const ProfileDtoSchema = z.object({
 })
 
 /**
- * v0.4: a conical bevel at the mouth of an earlier circular drilling or pocket (`edgeOf`). `on`
+ * v0.4: a conical bevel at the mouth of an earlier circular drilling, pocket or inside profile (`edgeOf`). `on`
  * is always the edge operation's `on` (commands keep it so; it is stored so every reader sees
  * the face without the edge). docs/modes/design-v0.4.md#chamfer-operation-v04-circular-edges
  */

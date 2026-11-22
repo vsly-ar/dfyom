@@ -199,7 +199,7 @@ export type OperationGeometry = FacePlacement &
         }
       }
     /**
-     * v0.4: a cone frustum at the mouth of `edgeOf` (an earlier drilling or circle pocket on the
+     * v0.4: a cone frustum at the mouth of `edgeOf` (an earlier drilling, circle pocket or inside circle profile on the
      * same face), coaxial with it: `center` is the edge's axis, `onZ` its face
      * (docs/modes/design-v0.4.md#chamfer-operation-v04-circular-edges).
      */

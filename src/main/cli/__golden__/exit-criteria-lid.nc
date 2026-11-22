@@ -2,8 +2,8 @@
 (Setup: Top)
 (Units: mm)
 (Tool 1: Flat 3, dia 3 mm)
-(Tool 2: Chamfer 90 x 12, dia 12 mm)
-(Tool 3: Flat 6, dia 6 mm)
+(Tool 2: Flat 6, dia 6 mm)
+(Tool 3: Chamfer 90 x 12, dia 12 mm)
 (Generator: DFYOM)
 G90 G94 G17 G21
 G54
@@ -1756,41 +1756,10 @@ G3 Y129 I0 J-1
 G1 X79.805
 G0 Z2
 Z10
-(Hole 1 - countersink x 4)
-M5
-(Stop the spindle)
-(DFYOM TOOL CHANGE 2: Chamfer 90 x 12)
-M0
-G90 G94 G17 G21
-G54
-G0 Z10
-M3 S12000
-(Set spindle to 12000 rpm)
-M0
-(Clones 1 #1)
-X39 Y55.7
-Z2
-G1 Z-3.56 F600
-G0 Z10
-(Clones 1 #3)
-Y144.3
-Z2
-G1 Z-3.56
-G0 Z10
-(Clones 1 #4)
-X216
-Z2
-G1 Z-3.56
-G0 Z10
-(Clones 1 #2)
-Y55.7
-Z2
-G1 Z-3.56
-G0 Z10
 (Profile 2)
 M5
 (Stop the spindle)
-(DFYOM TOOL CHANGE 3: Flat 6)
+(DFYOM TOOL CHANGE 2: Flat 6)
 M0
 G90 G94 G17 G21
 G54
@@ -1888,7 +1857,58 @@ Y92 I0 J-8
 G1 Y92.2
 G0 Z2
 Z10
+(Hole 1 - countersink x 4)
+M5
+(Stop the spindle)
+(DFYOM TOOL CHANGE 3: Chamfer 90 x 12)
+M0
+G90 G94 G17 G21
+G54
+G0 Z10
+M3 S12000
+(Set spindle to 12000 rpm)
+M0
+(Clones 1 #1)
+X39 Y55.7
+Z2
+G1 Z-3.56 F600
+G0 Z10
+(Clones 1 #3)
+Y144.3
+Z2
+G1 Z-3.56
+G0 Z10
+(Clones 1 #4)
+X216
+Z2
+G1 Z-3.56
+G0 Z10
+(Clones 1 #2)
+Y55.7
+Z2
+G1 Z-3.56
+G0 Z10
+(Chamfer 1)
+X187.5 Y89
+Z2
+G1 Z0
+G3 Y111 Z-0.75 I0 J11 F3800
+Y89 Z-1.5 I0 J-11
+Y111 I0 J11
+Y89 I0 J-11
+Y100 I0 J5.5
+G0 Z10
 (Profile 1)
+M5
+(Stop the spindle)
+(DFYOM TOOL CHANGE 2: Flat 6)
+M0
+G90 G94 G17 G21
+G54
+G0 Z10
+M3 S18000
+(Set spindle to 18000 rpm)
+M0
 X126.089 Y8.443
 Z2
 G1 Z0 F800

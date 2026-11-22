@@ -48,6 +48,7 @@ import {
   sectionValues,
   sharedToolNote,
   sizeFields,
+  stockBelow,
   type CsMethod,
   type FastenerList,
   type HoleFit,
@@ -206,7 +207,9 @@ export function HoleInspector({
       return true
     }
     const placed = placeErrors(r.error, path)
-    setErrors(placed.errors)
+    // an issue at a field the inspector does not show (yet): a refused type change's head size
+    // shows at the choice that caused it, not nowhere (X2)
+    setErrors(placed.errors.map((e) => (shown.has(e.path) ? e : { ...e, path })))
     setSummary(placed.summary)
     return false
   }
@@ -390,7 +393,7 @@ export function HoleInspector({
       refillWith({ type, purpose: 'clearance' }, 'type')
     // without a fastener the core needs the head's sizes: proportional starting values
     else if (hole.fastener === undefined && type !== 'simple')
-      void update({ type, ...headDefaults(hole, type, units) }, 'type')
+      void update({ type, ...headDefaults(hole, type, units, stockBelow(part, hole.on)) }, 'type')
     else void update({ type }, 'type')
   }
   const purposeMessages: FieldMessage[] = [

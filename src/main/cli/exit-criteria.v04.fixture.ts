@@ -2,7 +2,7 @@
 // both agent transports (exit-criteria.mcp.test.ts, exit-criteria.batch.test.ts), like the v0.3
 // flow. The exit part is the enclosure lid (src/core/design/enclosure-lid.testing.ts): the SVG
 // outline as an outside profile with six tabs, a Clones grid of countersunk M3 holes, a Ø 22
-// cutout with an arc of counterbored holes (then edited M3 → M4), an offset row of vent slots with
+// cutout with a standalone chamfer on its edge (X2) and an arc of counterbored holes (then edited M3 → M4), an offset row of vent slots with
 // one skipped. Every step goes through the public tools; only the geometry check at the end
 // evaluates the part in-process (test-only, as the criteria say). Not app code.
 // Docs: docs/plans/v0.4.md#exit-criteria, docs/conventions/testing.md#end-to-end
@@ -146,10 +146,11 @@ export interface FlowV04Result {
  * Runs the v0.4 exit-criteria flow: library → project with the 255 × 200 × 6 plywood board →
  * `design.shape.import` of the v0.3 drawing, keeping the outline → outside profile with six tabs
  * (two relocate, `dfm.tabsRelocated`) → `design.fastener.list` → the countersunk M3 hole and its
- * Clones grid (`preview` first) → the Ø 22 cutout, the counterbored M3 hole and its arc Clones →
+ * Clones grid (`preview` first) → the Ø 22 cutout and the chamfer on its edge, the counterbored
+ * M3 hole and its arc Clones →
  * the vent slot and its offset Clones, instance 4 skipped by an update → the bolt-circle source
  * M3 → M4 (one pending change; every instance follows) → plan (one setup) → toolpaths → GRBL
- * export (golden; one tool change per distinct tool, clone position comments) → virtual run →
+ * export (golden; one tool run per distinct tool but Flat 6, clone position comments) → virtual run →
  * save → close → reopen → compare → the geometry check of the evaluated part (test-only).
  */
 export async function exitCriteriaV04Flow(rawCall: Call, dir: string): Promise<FlowV04Result> {
@@ -296,6 +297,17 @@ export async function exitCriteriaV04Flow(rawCall: Call, dir: string): Promise<F
       tabs: { count: '0' },
     })
   ).value
+  // a standalone chamfer breaks the cutout's edge (X2: the criteria name no design.chamfer.* step
+  // of their own): 1.5 mm × 45° (Ø 25, 90°), contoured by the chamfer mill after the cutout. Not
+  // the default edge + 1 mm: 0.5 mm deep, the mill's effective diameter (1 mm) is too small for
+  // its plywood feed (feeds.chipLoadHigh)
+  const cutoutChamfer = (
+    await ok<AddResult>('design.chamfer.add', {
+      partId,
+      edgeOf: cutout.operationId,
+      diameter: `${CUTOUT.chamfer}`,
+    })
+  ).value
   const bolt = (
     await ok<FeatureResult>('design.hole.add', {
       partId,
@@ -416,9 +428,14 @@ export async function exitCriteriaV04Flow(rawCall: Call, dir: string): Promise<F
   expect(counterbores.map((o) => mm((o['shape'] as { diameter: Exact }).diameter))).toEqual(
     Array(6).fill(m4.cbDiameter),
   )
-  const chamfers = ops.filter((o) => o.kind === 'chamfer')
+  const chamfers = ops.filter((o) => o.kind === 'chamfer' && o.id !== cutoutChamfer.operationId)
   const cs = countersinkSizes(SCREWS.fastener)
   expect(chamfers.map((o) => mm(o['diameter'] as Exact))).toEqual(Array(4).fill(cs.csDiameter))
+  expect(byId.get(cutoutChamfer.operationId)).toMatchObject({
+    kind: 'chamfer',
+    edgeOf: cutout.operationId,
+  })
+  expect(mm(byId.get(cutoutChamfer.operationId)!['diameter'] as Exact)).toBe(CUTOUT.chamfer)
   const features = (await ok<FeatureList>('design.feature.list', { partId })).value
   // the instances keep their ids through the edit
   expect(ownedOf(features, boltClones.featureId)).toEqual(boltOps)
@@ -451,7 +468,9 @@ export async function exitCriteriaV04Flow(rawCall: Call, dir: string): Promise<F
   // source's tool; equal holes and equal countersinks share one plan operation, so the chamfer
   // mill cuts all four countersinks in one go. The counterbores take their hole's Flat 3
   // (design-v0.4.md § Counterbore tool); the outline frees the part, so it is cut last, after
-  // the cutout and vents inside it
+  // the cutout and vents inside it. The cutout's chamfer follows the cutout (its edge), so the
+  // fewest runs cut the cutout with Flat 6 before the chamfer mill's run and come back to Flat 6
+  // for the outline: one Flat 6 run more than without it (X2)
   expect(planned).toEqual([
     ['drilling', 'Flat 3', ids('hole1_drill', 'clones1_%_hole1_drill', [2, 3, 4])],
     ...[1, 2, 3, 4, 5, 6].map((n) => [
@@ -465,17 +484,24 @@ export async function exitCriteriaV04Flow(rawCall: Call, dir: string): Promise<F
       'Flat 3',
       v.n === 1 ? vent.operationId : `${ventClones.featureId}_${v.n}_${vent.operationId}`,
     ]),
+    ['profile', 'Flat 6', cutout.operationId],
     [
       'chamfer',
       'Chamfer 90 × 12',
       ids('hole1_countersink', 'clones1_%_hole1_countersink', [2, 3, 4]),
     ],
-    ['profile', 'Flat 6', cutout.operationId],
+    ['chamfer', 'Chamfer 90 × 12', cutoutChamfer.operationId],
     ['profile', 'Flat 6', profile.operationId],
   ])
-  // one tool change per distinct tool: Flat 3 → chamfer mill → Flat 6
+  // one tool run per distinct tool but Flat 6 (cutout, outline): Flat 3 → Flat 6 → chamfer mill →
+  // Flat 6
   const toolRuns = planned.map((o) => o[1]).filter((t, i, a) => i === 0 || t !== a[i - 1])
-  expect(toolRuns).toEqual([LID_TOOLS.mill.name, LID_TOOLS.chamfer.name, LID_TOOLS.profile.name])
+  expect(toolRuns).toEqual([
+    LID_TOOLS.mill.name,
+    LID_TOOLS.profile.name,
+    LID_TOOLS.chamfer.name,
+    LID_TOOLS.profile.name,
+  ])
   const findings = (await ok<{ warnings: Finding[] }>('plan.warning.list', { planId })).value
   expect(findings.warnings).toEqual([])
 
@@ -499,7 +525,7 @@ export async function exitCriteriaV04Flow(rawCall: Call, dir: string): Promise<F
   expect(program.trimEnd().endsWith('M30')).toBe(true)
   // the first tool is loaded at the start, then one change per tool run of the plan (see above)
   expect(exported.stats.toolChanges).toBe(toolRuns.length - 1)
-  expect(exported.stats.toolChanges).toBe(2)
+  expect(exported.stats.toolChanges).toBe(3)
   // the program names each clone position: the screws' grid, the bolt circle, the vents
   const comments = new Set([...program.matchAll(/^\((Clones \d+ #\d+)\)$/gm)].map((m) => m[1]))
   for (const n of [1, 2, 3, 4]) expect(comments).toContain(`Clones 1 #${n}`)
@@ -573,7 +599,8 @@ const POSITION_TOL = 0.01
  * sectioned just below the top face and at mid-thickness. The loops through the board (not the
  * outline's) are matched to the expected holes, cutout and slots by centre (within 0.01 mm) and
  * by the diameter of a circle of equal area (the mesh facets a circle: within 2 %).
- * Below the face: 4 cones (countersink diameter at that depth), 6 counterbores (M4), the cutout,
+ * Below the face: 4 cones (countersink diameter at that depth), 6 counterbores (M4), the cutout's
+ * chamfer (its diameter at that depth),
  * 6 slots; at mid-thickness: 4 Ø 3.4 and 6 Ø 4.5 holes under the cones and counterbores.
  */
 async function geometryCheck(dto: PartDTO, stockDto: unknown): Promise<void> {
@@ -599,10 +626,10 @@ async function geometryCheck(dto: PartDTO, stockDto: unknown): Promise<void> {
   const slotDiameter = Math.sqrt(
     (4 * (VENTS.width * (VENTS.length - VENTS.width) + (Math.PI * VENTS.width ** 2) / 4)) / Math.PI,
   )
-  const expected = (screwD: number, boltD: number) => [
+  const expected = (screwD: number, boltD: number, cutoutD: number) => [
     ...EXPECTED.screws.map((p) => ({ at: p, d: screwD })),
     ...EXPECTED.boltCircle.map((p) => ({ at: p, d: boltD })),
-    { at: EXPECTED.cutout, d: CUTOUT.diameter },
+    { at: EXPECTED.cutout, d: cutoutD },
     ...EXPECTED.vents.map((v) => ({ at: v.at, d: slotDiameter })),
   ]
   const check = (got: Hole[], want: { at: readonly [number, number]; d: number }[]) => {
@@ -615,15 +642,17 @@ async function geometryCheck(dto: PartDTO, stockDto: unknown): Promise<void> {
       expect(h!.d / w.d).toBeLessThan(1.001)
     }
   }
-  // 10 screw holes: 4 with cones (Ø at 0.5 mm deep), 6 with counterbores
+  // 10 screw holes: 4 with cones (Ø at 0.5 mm deep), 6 with counterbores; the cutout's chamfer
+  // (90°, Ø at 0.5 mm deep)
   check(
     top,
     expected(
       cs.csDiameter - 2 * near * Math.tan(((cs.csAngle / 2) * Math.PI) / 180),
       m4.cbDiameter,
+      CUTOUT.chamfer - 2 * near,
     ),
   )
-  check(mid, expected(m3, m4.diameter))
+  check(mid, expected(m3, m4.diameter, CUTOUT.diameter))
 }
 
 interface Hole {

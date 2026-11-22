@@ -132,6 +132,27 @@ describe('default order: the freeing cut last', () => {
     ])
   })
 
+  it("a chamfer on a cutout's edge follows the cutout and frees nothing (X2)", async () => {
+    const s = await planSetup({ part: false })
+    await outline(s)
+    await s.run('design.profile.add', {
+      partId: s.partId,
+      shape: { kind: 'circle', center: ['50', '30'], diameter: '20' },
+      side: 'inside',
+      slotWidth: '10',
+      tabs: { count: '0' },
+    })
+    await s.run('design.chamfer.add', { partId: s.partId, edgeOf: 'profile2' })
+    await s.run('project.apply', {})
+    const planId = await s.create()
+    // the chamfer's centre is inside the cutout, but it bevels the rim round it: the cutout is
+    // not cut after it (which the edge forbids anyway) and does not warn about it
+    expect(designIds(s.plan(planId))).toEqual(['profile2', 'chamfer1', 'profile1'])
+    expect(
+      warnings(s, planId).filter((w) => w.code === 'plan.loosePiece' || w.code === 'plan.order'),
+    ).toEqual([])
+  })
+
   it('a blind groove frees nothing: no loose-piece warning', async () => {
     const s = await planSetup({ part: false })
     await s.run('design.profile.add', {

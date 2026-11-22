@@ -1,5 +1,5 @@
 // Pure helpers of the chamfer UI (v0.4 task U4): which operations can be a chamfer's edge (a
-// drilling or a circle pocket), the edge the Add menu's Chamfer uses (the selected one, else the
+// drilling, a circle pocket or an inside circle profile), the edge the Add menu's Chamfer uses (the selected one, else the
 // last in design order, else disabled with the reason), the Edge field's options ("Drilling 2 ·
 // Ø 3.4 mm", earlier operations only) and the section illustration's values from the part.
 // Doc: docs/conventions/ui.md#feature-rows-and-add, #chamfer-inspector;
@@ -14,10 +14,15 @@ import { operationFace } from './outline'
 
 type ChamferDTO = Extract<OperationDTO, { kind: 'chamfer' }>
 
-/** The edge's diameter DTO: a drilling's, a circle pocket's; undefined for any other operation. */
+/**
+ * The edge's diameter DTO: a drilling's, a circle pocket's, an inside circle profile's (core
+ * `circularEdgeDiameter`); undefined for any other operation.
+ */
 function edgeDiameterDto(op: OperationDTO) {
   if (op.kind === 'drilling') return op.diameter
   if (op.kind === 'pocket' && op.shape.kind === 'circle') return op.shape.diameter
+  if (op.kind === 'profile' && op.side === 'inside' && op.shape.kind === 'circle')
+    return op.shape.diameter
   return undefined
 }
 
@@ -34,7 +39,7 @@ export type ChamferEdgeChoice =
   { readonly ok: true; readonly edgeOf: string } | { readonly ok: false; readonly reason: string }
 
 /**
- * The edge "Add chamfer" breaks: the selected drilling or circle pocket, else the last one in
+ * The edge "Add chamfer" breaks: the selected drilling, circle pocket or inside circle profile, else the last one in
  * design order; none in the part: disabled with the reason (ui.md § Feature rows and Add).
  */
 export function chamferEdgeChoice(part: PartDTO, selected: string | null): ChamferEdgeChoice {
@@ -52,7 +57,7 @@ export interface EdgeOption {
 }
 
 /**
- * The Edge field's options: the drillings and circle pockets before the chamfer in design order,
+ * The Edge field's options: the drillings, circle pockets and inside circle profiles before the chamfer in design order,
  * "Drilling 2 · Ø 3.4 mm"; the current edge is listed even when it no longer qualifies, so the
  * field never shows an empty value.
  */

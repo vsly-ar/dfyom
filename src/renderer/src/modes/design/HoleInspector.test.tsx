@@ -27,7 +27,7 @@ vi.mock('../../viewport/Scene', () => ({
 const ui = { kind: 'ui', id: 'test' } as const
 const partId = (d: Dispatcher) => Object.keys(d.doc.parts)[0]!
 
-async function renderHole(hole: Record<string, unknown> = {}) {
+async function renderHole(hole: Record<string, unknown> = {}, thickness = '20') {
   const bridge = createFakeBridge()
   const d = await designDispatcher()
   const stock = await d.dispatch(
@@ -38,7 +38,7 @@ async function renderHole(hole: Record<string, unknown> = {}) {
         shape: 'block',
         length: '100',
         width: '60',
-        thickness: '20',
+        thickness,
         material: { name: '6061-T6', class: 'aluminum' },
       },
     },
@@ -270,5 +270,17 @@ describe('hole inspector (U2)', () => {
     const hit = section().querySelector('[data-part="diameter"] path:last-child')!
     await user.click(hit)
     expect(field('Diameter')).toHaveFocus()
+  })
+
+  it('a refused type change shows its reason at the type, not at a field not shown yet (X2)', async () => {
+    // an M3 counterbore is 3.2 mm deep: it would reach the bottom of a 3 mm board
+    const { user, hole1 } = await renderHole({ fastener: 'M3' }, '3')
+    await user.click(within(insp()).getByRole('radio', { name: 'Counterbore' }))
+    expect(await within(insp()).findByText('Must end above the stock bottom')).toBeInTheDocument()
+    expect(hole1()['type']).toBe('simple')
+    expect(within(insp()).getByRole('radio', { name: 'Simple' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    )
   })
 })
