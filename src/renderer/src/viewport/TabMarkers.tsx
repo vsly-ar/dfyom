@@ -6,8 +6,9 @@
 // while a marker is held; Escape cancels the drag. Each marker also has a focusable anchor at its
 // centre (an Html overlay that lets the pointer through): arrow keys move it 1 mm along the loop
 // (0.1 mm with Alt, 10 mm with Shift), and its name says where it is. Positions come from the
-// design side.
-// Doc: docs/conventions/ui.md#tab-markers
+// design side. Task U3: a drag also reports the screen scale at the point and whether Alt is held,
+// so the design side can snap; the snap glyph is drawn at the snapped point.
+// Doc: docs/conventions/ui.md#tab-markers, #snap-and-measure
 import { Html, Line, type CameraControlsImpl } from '@react-three/drei'
 import { useThree, type ThreeEvent } from '@react-three/fiber'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -20,9 +21,12 @@ import {
   SRGBColorSpace,
   Vector3,
 } from 'three'
+import { snapMessages } from '../messages/snap'
 import type { Palette, Rgb } from './colours'
 import type { Vec3 } from './mesh'
 import { nudgeStep } from './shape-handles'
+import type { SnapKind } from './snap'
+import { SnapGlyph } from './SnapGlyph'
 import styles from './Viewport.module.css'
 
 /** One tab: its quad on the face (part frame, counter-clockwise) and its accessible name. */
@@ -32,6 +36,12 @@ export interface TabMarkerView {
 }
 
 export type TabDragPhase = 'start' | 'move' | 'end' | 'cancel'
+
+/** How a drag step may snap (task U3): pixels per mm at the point, and Alt (place freely). */
+export interface TabDragInfo {
+  readonly pxPerMm: number
+  readonly alt: boolean
+}
 
 export interface TabOverlay {
   readonly markers: readonly TabMarkerView[]
@@ -43,7 +53,9 @@ export interface TabOverlay {
   readonly dragging: number | null
   /** Markers cannot be dragged (a formula, a plan copy). */
   readonly locked: boolean
-  onDrag(phase: TabDragPhase, index: number, point: Vec3): void
+  onDrag(phase: TabDragPhase, index: number, point: Vec3, info?: TabDragInfo): void
+  /** The snapped point of the running drag and what it snapped to (task U3), or null. */
+  readonly snap?: { readonly at: Vec3; readonly kind: SnapKind } | null
   /** Keyboard path: move tab `index` by `delta` mm along the loop (a run of keys is one gesture). */
   onNudge(index: number, delta: number): void
 }
@@ -170,6 +182,15 @@ export function TabMarkers({
     const v = e.ray.intersectPlane(plane, new Vector3())
     return v === null ? null : [v.x, v.y, v.z]
   }
+  /** Screen pixels per mm along the face's `u` at `p` (for the snap tolerance). */
+  const info = (p: Vec3, e: ThreeEvent<PointerEvent>): TabDragInfo => {
+    const { camera, size } = getState()
+    const a = new Vector3(...p).project(camera)
+    const u = tabs.plane.u
+    const b = new Vector3(p[0] + u[0], p[1] + u[1], p[2] + u[2]).project(camera)
+    const px = Math.hypot(((b.x - a.x) * size.width) / 2, ((b.y - a.y) * size.height) / 2)
+    return { pxPerMm: px > 0 ? px : 1, alt: e.altKey }
+  }
   const release = () => {
     const d = drag.current
     drag.current = null
@@ -214,10 +235,10 @@ export function TabMarkers({
       if (Math.hypot(e.clientX - d.down[0], e.clientY - d.down[1]) < CLICK_PX) return
       d.started = true
       const p = hit(e)
-      if (p) tabs.onDrag('start', d.index, p)
+      if (p) tabs.onDrag('start', d.index, p, info(p, e))
     }
     const p = hit(e)
-    if (p) tabs.onDrag('move', d.index, p)
+    if (p) tabs.onDrag('move', d.index, p, info(p, e))
   }
   const onUp = (e: ThreeEvent<PointerEvent>) => {
     const d = drag.current
@@ -256,8 +277,22 @@ export function TabMarkers({
   }, [start, tabs.plane.normal])
 
   const edge = useMemo(() => colour(palette.edge), [palette])
+  const snap = tabs.snap ?? null
   return (
     <group>
+      {snap !== null ? (
+        <Html position={[snap.at[0], snap.at[1], snap.at[2]]} zIndexRange={[20, 10]}>
+          <div className={styles['snapAnchor']}>
+            <SnapGlyph
+              key={`${snap.kind}:${snap.at.join(',')}`}
+              kind={snap.kind}
+              x={0}
+              y={0}
+              label={snapMessages.target[snap.kind]}
+            />
+          </div>
+        </Html>
+      ) : null}
       {ring ? (
         <>
           <Line

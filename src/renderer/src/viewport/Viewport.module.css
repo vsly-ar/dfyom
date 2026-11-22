@@ -123,3 +123,26 @@
   outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
+
+/* the snap glyph of a tab marker drag (task U3): positioned by its Html overlay */
+.snapAnchor {
+  position: relative;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+/* a picked point of the 3D measure (task U3) */
+.measureEnd {
+  width: 7px;
+  height: 7px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 1.5px solid var(--vp-edge);
+  background: var(--bg-raised);
+  pointer-events: none;
+}
+
+.viewport[data-measuring] canvas {
+  cursor: crosshair;
+}

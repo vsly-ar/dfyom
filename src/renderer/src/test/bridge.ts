@@ -23,6 +23,8 @@ import type {
   PreloadApi,
   ProjectSnapshot,
   ReferenceMeshReply,
+  ReferenceSectionReply,
+  ReferenceSectionRequest,
   WindowCloseRequest,
   LibraryCloseRequest,
   LibraryContext,
@@ -108,6 +110,14 @@ export interface FakeBridge extends PreloadApi {
   setReferenceMesh(
     handler: (referenceId: string) => ReferenceMeshReply | Promise<ReferenceMeshReply>,
   ): void
+  /** The section requests (`reference.section`, U3), in order. */
+  readonly referenceSectionCalls: ReferenceSectionRequest[]
+  /** Answers `reference.section` (default: no segments). */
+  setReferenceSection(
+    handler: (
+      request: ReferenceSectionRequest,
+    ) => ReferenceSectionReply | Promise<ReferenceSectionReply>,
+  ): void
   /**
    * The app-scope dispatcher calls go to while no project is bound (the Library window's
    * `library.*` commands); its library's writes are pushed as `library.onChanged`.
@@ -190,6 +200,14 @@ export function createFakeBridge(
   let referenceMesh = (_id: string): ReferenceMeshReply | Promise<ReferenceMeshReply> => ({
     ok: true,
     positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+    edges: new Float32Array([0, 0, 0, 1, 0, 0]),
+  })
+  const referenceSectionCalls: ReferenceSectionRequest[] = []
+  let referenceSection = (
+    _r: ReferenceSectionRequest,
+  ): ReferenceSectionReply | Promise<ReferenceSectionReply> => ({
+    ok: true,
+    segments: new Float32Array(0),
   })
   const handlers = new Map<string, Handler>()
   const calls: { name: string; args: unknown; gesture?: string }[] = []
@@ -282,10 +300,18 @@ export function createFakeBridge(
         referenceMeshCalls.push(referenceId)
         return Promise.resolve(referenceMesh(referenceId))
       },
+      section: (request) => {
+        referenceSectionCalls.push(request)
+        return Promise.resolve(referenceSection(request))
+      },
     },
     referenceMeshCalls,
     setReferenceMesh(handler) {
       referenceMesh = handler
+    },
+    referenceSectionCalls,
+    setReferenceSection(handler) {
+      referenceSection = handler
     },
     menu: { onAction: menu.on },
     library: {

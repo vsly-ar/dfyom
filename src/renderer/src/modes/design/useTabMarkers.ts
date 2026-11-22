@@ -5,6 +5,8 @@
 // every 100 ms and on release, so it is one undo step. Count-spaced tabs become entered positions
 // with the first step. Escape cancels (`history.undo { gesture }`). Arrow keys on a focused
 // marker move it along the loop; a run of keys (ended 500 ms after the last) is one gesture.
+// Task U3: a drag snaps to the loop's corners and side middles, else to the grid along the loop
+// (`snapAlong`); Alt or the "Snap" toggle off drags freely.
 // Doc: docs/conventions/ui.md#tab-markers, docs/modes/design-v0.3.md#tabs-on-shapes
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { OperationDTO } from '../../../../core/design/part.dto'
@@ -14,12 +16,14 @@ import { designMessages } from '../../messages/design'
 import { lengthSource } from '../../messages/dfm'
 import { lengthText } from '../../messages/shape'
 import { useCancelGesture } from '../../shell/hooks'
-import { useRegion2d } from '../../shell/ShellContext'
+import { useRegion2d, useSettings, useUi } from '../../shell/ShellContext'
 import type { TabDragPhase, TabMarkerView, TabOverlay } from '../../viewport'
+import type { TabDragInfo } from '../../viewport/TabMarkers'
+import { snapGridMm, type SnapKind } from '../../viewport/snap'
 import type { Vec3 } from '../../viewport/mesh'
 import type { DesignPart } from './model'
 import { operationFace } from './outline'
-import { clampTab, distanceAlong, pointAlong, profileTabs, type ProfileTabs } from './tabs-model'
+import { clampTab, pointAlong, profileTabs, snapAlong, type ProfileTabs } from './tabs-model'
 import { SHAPE_COMMIT_MS } from './useShapeDrag'
 import { useCommand } from './useDesign'
 
@@ -87,6 +91,9 @@ export function useTabMarkers(
   const call = useCommand()
   const cancelGesture = useCancelGesture()
   const [preview, setPreview] = useState<{ index: number; centres: number[] } | null>(null)
+  const [snapped, setSnapped] = useState<{ at: [number, number]; kind: SnapKind } | null>(null)
+  const snapOn = useUi((s) => s.snapOn)
+  const gridSetting = useSettings((s) => s.settings.snapGrid)
   const gesture = useRef<Gesture | null>(null)
   const keyRun = useRef<{ g: Gesture; at: number; timer: ReturnType<typeof setTimeout> } | null>(
     null,
@@ -194,7 +201,7 @@ export function useTabMarkers(
   )
 
   const onDrag = useCallback(
-    (phase: TabDragPhase, index: number, point: Vec3) => {
+    (phase: TabDragPhase, index: number, point: Vec3, info?: TabDragInfo) => {
       if (tabs === undefined || face === undefined || part === undefined) return
       if (phase === 'start') {
         gesture.current = begin(index) ?? null
@@ -204,8 +211,14 @@ export function useTabMarkers(
       if (g === null || g.index !== index) return
       if (phase === 'move') {
         const local = unapplyPlacement(face.frame, point)
-        const s = distanceAlong(tabs.chain, [local[0], local[1]])
-        const at = clampTab(g.base, index, s, tabs.width, tabs.length)
+        const free = !snapOn || info === undefined || info.alt
+        const r = snapAlong(tabs, [local[0], local[1]], {
+          pxPerMm: info?.pxPerMm ?? 1,
+          grid: free ? null : snapGridMm(gridSetting, part.units),
+          ...(free ? { tolerancePx: 0 } : {}),
+        })
+        setSnapped(r.snap === null ? null : { at: [r.snap.at[0], r.snap.at[1]], kind: r.snap.kind })
+        const at = clampTab(g.base, index, r.s, tabs.width, tabs.length)
         const centres = [...g.base]
         centres[index] = at
         setPreview({ index, centres })
@@ -214,6 +227,7 @@ export function useTabMarkers(
         return
       }
       gesture.current = null
+      setSnapped(null)
       if (phase === 'end') {
         flush(g)
         void g.chain.then(() => setPreview(null))
@@ -224,7 +238,7 @@ export function useTabMarkers(
       setPreview(null)
       void g.chain.then(() => (g.sent ? cancelGesture(g.id) : undefined))
     },
-    [tabs, face, part, begin, schedule, flush, cancelGesture],
+    [tabs, face, part, begin, schedule, flush, cancelGesture, snapOn, gridSetting],
   )
 
   // a drag still open when the selection goes away is sent as it stands
@@ -274,8 +288,9 @@ export function useTabMarkers(
       // the dragged marker only (a key run keeps its focus ring instead)
       dragging: gesture.current !== null ? (preview?.index ?? null) : null,
       locked: !tabs.allowed,
+      snap: snapped === null ? null : { at: at(snapped.at), kind: snapped.kind },
       onDrag,
       onNudge,
     }
-  }, [tabs, face, part, preview, onDrag, onNudge])
+  }, [tabs, face, part, preview, onDrag, onNudge, snapped])
 }

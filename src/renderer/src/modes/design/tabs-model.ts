@@ -2,7 +2,8 @@
 // geometry input builds it (its start point, counter-clockwise), the tab centres the cut uses
 // (`tabs.positions`, else the count rule: evenly from half a spacing after the start point, v0.1
 // rectangles and circles from the middle of their front wall), the distance along the loop of a
-// point, a dragged marker kept off its neighbours, and a new tab in the largest gap.
+// point, a dragged marker kept off its neighbours, a new tab in the largest gap, and a dragged
+// marker's snap (U3: loop points, the grid along the loop).
 // Doc: docs/conventions/ui.md#tab-markers, docs/modes/design-v0.3.md#tabs-on-shapes
 import { toGeometryInput } from '../../../../core/design/geometry-input'
 import { profileChain, tabCentres } from '../../../../core/geometry/outline'
@@ -11,6 +12,7 @@ import { arcRadius, elementLength, type Loop } from '../../../../core/geometry/2
 import type { Region2dPort } from '../../../../core/geometry/2d/port'
 import type { OperationGeometry, Vec2 } from '../../../../core/geometry/model'
 import { wallMiddle } from '../../../../core/toolpath/pocket'
+import { shapePoints, SNAP_PX, snapPoint, type SnapKind } from '../../viewport/snap'
 import type { DesignPart } from './model'
 
 type ProfileGeometry = Extract<OperationGeometry, { kind: 'profile' }>
@@ -151,4 +153,40 @@ export function newTabPosition(centres: readonly number[], length: number): numb
     if (next - c > best.gap) best = { at: c + (next - c) / 2, gap: next - c }
   })
   return mod(best.at, length)
+}
+
+/** A dragged tab's place after snapping (task U3), and what it snapped to. */
+export interface TabSnap {
+  /** Distance along the loop (mm). */
+  readonly s: number
+  /** The snapped point (face frame) and its kind, or null when the drag is free. */
+  readonly snap: { readonly at: Vec2; readonly kind: SnapKind } | null
+}
+
+/**
+ * The distance along the loop for pointer point `q` (face frame) with snapping: the loop's own
+ * points (element ends and midpoints) within `SNAP_PX`, else the nearest multiple of `grid`
+ * along the loop when that is within `SNAP_PX` too (a tab is a distance from the start point, so
+ * its grid is along the loop, not in the plane).
+ */
+export function snapAlong(
+  t: ProfileTabs,
+  q: Vec2,
+  opts: { readonly pxPerMm: number; readonly grid: number | null; readonly tolerancePx?: number },
+): TabSnap {
+  const tol = opts.tolerancePx ?? SNAP_PX
+  const points = shapePoints([t.chain.elements]).filter(
+    (p) => p.kind === 'end' || p.kind === 'midpoint',
+  )
+  const hit = snapPoint(q, { points, edges: [] }, { pxPerUnit: opts.pxPerMm, tolerancePx: tol })
+  if (hit !== null) return { s: distanceAlong(t.chain, hit.at), snap: hit }
+  const s = distanceAlong(t.chain, q)
+  const g = opts.grid
+  if (g !== null && g > 0) {
+    const along = Math.round(s / g) * g
+    const at = pointAlong(t, mod(along, t.length))
+    if (at !== undefined && Math.abs(along - s) * opts.pxPerMm <= tol)
+      return { s: mod(along, t.length), snap: { at: at.point, kind: 'grid' } }
+  }
+  return { s, snap: null }
 }

@@ -141,7 +141,7 @@ Parameter checks stay synchronous in the commands ([geometry.md § Parameter and
 Toward the [direction](../roadmap.md#direction) (S-L; scope in [Q23](#answered-questions); bounded, and the first item cut if v0.3 runs long, [plans/v0.3.md § Risks](../plans/v0.3.md#risks-and-spikes)):
 
 - **Snap** while dragging in the Shape Editor or the viewport: grid (a setting), shape points (ends, centres, midpoints), stock edges and corners, and the **reference section**: the [reference model](reference-model.md)'s outline cut by the face plane at a chosen depth (computed in the worker from the mesh). Snapping never changes a value's unit or source format beyond what the user typed.
-- **Measure:** point-to-point and point-to-edge distances in the viewport on the part, stock and reference, shown in the project units; nothing is stored.
+- **Measure:** point-to-point and point-to-edge distances in the viewport on the part, stock and reference, shown in the project units; nothing is stored. U3 built point to point ([Implementation (U3)](#implementation-u3)).
 - Fitting arcs to a reference section automatically ("trace the reference") is assisted recreation, later.
 
 ## Commands and queries (v0.3)
@@ -240,6 +240,15 @@ UI rules and how they were settled: [ui.md § Implementation (U2)](../convention
 - **SVG import** from the Shapes group's menu, with the report reopenable from the shape inspector. The U1 note on Import SVG being disabled no longer holds.
 - **Shape Editor** shows a used shape face-on, on the first operation's face, with the stock face and the face axes. The U1 note on "own frame only" no longer holds for used shapes.
 - **Plan findings** for `plan.stepoverClamped` read in the project's units.
+
+## Implementation (U3)
+
+UI rules and how they were settled: [ui.md § Implementation (U3)](../conventions/ui.md#implementation-u3). For this mode:
+
+- **Snap** in the Shape Editor (handle drags) and on tab markers: grid (the Snap grid setting, per unit system), shape points, stock edges and corners, and the reference section. Exact targets are written exactly in the value's unit; `Alt` or the window's "Snap" toggle drags freely.
+- **Reference section** from the worker (`reference.section`): the first shown reference cut parallel to the edited shape's face at "Section depth" below it (default: the middle of the reference there). The matrix sent is the ghost's matrix followed by part → face frame (`sectionMatrix`), so the cut is exact for any rotation; the placed box is only used for the default depth.
+- **Measure:** point to point in the Shape Editor (face axes) and in the 3D viewport (part, stock, references; X, Y, Z), in project units; nothing is stored. Point-to-edge is not built.
+- **Reference backlog:** the ghost's feature edges are now computed in the worker with the mesh (`reference.meshStl` returns `edges`; the renderer's 0.4 s at the limit is gone, and every ghost has edges). Snapping and measuring use the exact mesh, but `reference.fit` and `exceedsStock` still use the placed box, so they stay conservative for free-angle rotations ([reference-model.md](reference-model.md#implementation-task-r3)).
 
 ## Answered questions
 

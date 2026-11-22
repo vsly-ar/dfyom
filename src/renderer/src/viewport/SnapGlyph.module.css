@@ -1,0 +1,111 @@
+/* Snap glyph, label chip and the measure tool's dimension (task U3). Viewport tokens only (no new
+   values; L3 approves the proposal). Reduced motion zeroes the durations (tokens.css).
+   Doc: docs/conventions/ui.md#snap-and-measure */
+.snap {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  z-index: var(--z-toolbar);
+}
+
+.glyph {
+  position: absolute;
+  left: -8px;
+  top: -8px;
+  overflow: visible;
+  animation: pulse var(--motion-emphasis) var(--ease-emphasized) both;
+}
+
+.glyph path {
+  fill: var(--vp-hover);
+  stroke: var(--vp-edge);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+.glyph path[data-open] {
+  fill: none;
+  stroke-linecap: round;
+}
+
+/* one pulse when the target changes: the glyph lands, slightly large, and settles */
+@keyframes pulse {
+  from {
+    transform: scale(1.6);
+    opacity: 0.4;
+  }
+}
+
+.label {
+  position: absolute;
+  left: 12px;
+  top: -26px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: color-mix(in oklab, var(--bg-raised) 92%, transparent);
+  box-shadow: var(--shadow-1);
+  color: var(--text-muted);
+  font: var(--weight-medium) var(--text-xs) / var(--lh-sm) var(--font-ui);
+  white-space: nowrap;
+}
+
+/* ── the measure tool's dimension (SVG in the flat view) ── */
+.dimension {
+  pointer-events: none;
+}
+
+.dimension path {
+  fill: none;
+  stroke: var(--vp-edge);
+  stroke-width: 1.25;
+  stroke-linecap: round;
+}
+
+.dimension circle {
+  fill: var(--bg-raised);
+  stroke: var(--vp-edge);
+  stroke-width: 1.25;
+}
+
+.dimensionChip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-control);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-1);
+  color: var(--text);
+  font: var(--weight-medium) var(--text-xs) / var(--lh-sm) var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  z-index: var(--z-toolbar);
+  animation: settle var(--motion-fast) var(--ease-standard) both;
+}
+
+@keyframes settle {
+  from {
+    opacity: 0;
+  }
+}
+
+.measurePrompt {
+  position: absolute;
+  left: 50%;
+  top: var(--space-2);
+  transform: translateX(-50%);
+  margin: 0;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklab, var(--bg-raised) 92%, transparent);
+  box-shadow: var(--shadow-1);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: var(--z-toolbar);
+}

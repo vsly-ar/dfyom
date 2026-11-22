@@ -5,12 +5,17 @@
 // surface targets back. Doc: docs/conventions/ui.md#selection-and-picking,
 // docs/architecture/geometry.md#worker-and-renderer, docs/conventions/ui-view-cube.md, ADR 0010
 import { Canvas } from '@react-three/fiber'
+import { Ruler } from 'lucide-react'
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Vector3, type PerspectiveCamera } from 'three'
 import type { Placement } from '../../../core/geometry/model'
 import type { EvaluationStatus } from '../../../core/design/evaluation'
 import type { SurfaceId } from '../../../core/geometry/model'
+import type { UnitSystem } from '../../../core/project/document'
+import { snapMessages } from '../messages/snap'
 import { viewportMessages as msg } from '../messages/viewport'
+import { measureBetween } from './MeasureTool'
+import { Measure3d, type MeasurePoints } from './Measure3d'
 import {
   Menu,
   Toolbar,
@@ -134,6 +139,10 @@ export interface ViewportProps {
   onPickCancel?: () => void
   /** Mouse mapping setting (ui.md decision 10). */
   mousePreset?: MousePreset
+  /** Project units of the measure tool's distances (task U3). */
+  units?: UnitSystem
+  /** The window's "Snap" toggle: the measure tool snaps to vertices and stock corners (task U3). */
+  snap?: boolean
   /** Run mode (task 3.12): toolpath playback, tool marker at `wpos`, work zero; `null` = none. */
   run?: RunScene | null
   /**
@@ -226,6 +235,8 @@ export function Viewport({
   onPick,
   onPickCancel,
   mousePreset = 'default',
+  units = 'mm',
+  snap = true,
   run = null,
   insetRight = 0,
   summary,
@@ -372,6 +383,22 @@ export function Viewport({
     [isSetupFace, setup, goTo],
   )
   const [pressing, setPressing] = useState(false)
+  // the measure tool (task U3): on/off and the picked points, never stored
+  const [measuring, setMeasuring] = useState(false)
+  const [measurePoints, setMeasurePoints] = useState<MeasurePoints>({ a: null, b: null })
+  // pick mode wins over the measure tool while it runs
+  const measureOn = measuring && !pick
+  const endMeasure = useCallback(() => {
+    setMeasuring(false)
+    setMeasurePoints({ a: null, b: null })
+  }, [])
+  const toggleMeasure = useCallback(() => {
+    if (measuring) endMeasure()
+    else setMeasuring(true)
+  }, [measuring, endMeasure])
+  const measurePick = useCallback((p: Vec3) => {
+    setMeasurePoints((m) => (m.a === null || m.b !== null ? { a: p, b: null } : { a: m.a, b: p }))
+  }, [])
   useEffect(() => {
     if (!pressing) return
     const up = (): void => setPressing(false)
@@ -473,10 +500,27 @@ export function Viewport({
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+    if (
+      (e.key === 'm' || e.key === 'M') &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey &&
+      !e.shiftKey &&
+      !pick
+    ) {
+      e.preventDefault()
+      toggleMeasure()
+      return
+    }
     const key = viewportKey(e, e.target === e.currentTarget)
     if (!key) return
     if (key.kind === 'escape') {
       if (pick) return // handled by the document listener
+      if (measuring) {
+        e.preventDefault()
+        endMeasure()
+        return
+      }
       e.preventDefault()
       onSelect?.(null)
       return
@@ -506,6 +550,10 @@ export function Viewport({
 
   const operations = mesh ? meshOperations(mesh).filter((o) => o !== 'stock').length : 0
   const text = summary ?? msg.summary({ operations, status: mesh ? status : 'empty' })
+  const measured =
+    measurePoints.a !== null && measurePoints.b !== null
+      ? measureBetween(measurePoints.a, measurePoints.b)
+      : null
 
   return (
     <div
@@ -516,6 +564,7 @@ export function Viewport({
       tabIndex={0}
       className={[styles['viewport'], className].filter(Boolean).join(' ')}
       data-picking={pick ? '' : undefined}
+      data-measuring={measureOn ? '' : undefined}
       data-hover={hovered && (!pick || pick.eligible.has(hovered.surface)) ? '' : undefined}
       onKeyDown={onKeyDown}
       onPointerDownCapture={(e) => {
@@ -545,7 +594,8 @@ export function Viewport({
         dpr={[1, 2]}
         camera={{ fov: FOV_DEG, near: 0.5, far: 50000, up: [0, 0, 1], position: [200, -200, 200] }}
         onPointerMissed={(e) => {
-          if (!pick && isClick(down.current, { x: e.clientX, y: e.clientY })) onSelect?.(null)
+          if (!pick && !measureOn && isClick(down.current, { x: e.clientX, y: e.clientY }))
+            onSelect?.(null)
         }}
       >
         <Scene
@@ -568,6 +618,7 @@ export function Viewport({
           run={run}
           onHover={hover}
           onClick={(target, e) => {
+            if (measureOn) return
             if (!isClick(down.current, { x: e.nativeEvent.clientX, y: e.nativeEvent.clientY }))
               return
             if (pick) {
@@ -575,6 +626,16 @@ export function Viewport({
             } else onSelect?.(target)
           }}
         />
+        {measureOn ? (
+          <Measure3d
+            points={measurePoints}
+            onPick={measurePick}
+            stock={stock}
+            snap={snap}
+            units={units}
+            palette={palette}
+          />
+        ) : null}
         <ViewCube
           colours={cube}
           axes={axisColours}
@@ -614,6 +675,16 @@ export function Viewport({
           <Menu label={msg.views} align="end" items={viewItems}>
             <ToolbarButton label={msg.views} icon={<ToolIcon name="iso" />} tooltipSide="bottom" />
           </Menu>
+          {run ? null : (
+            <ToolbarButton
+              label={snapMessages.measure.tool}
+              shortcut="M"
+              icon={<Ruler aria-hidden="true" />}
+              pressed={measureOn}
+              tooltipSide="bottom"
+              onClick={toggleMeasure}
+            />
+          )}
         </Toolbar>
       </div>
       {pick ? (
@@ -621,11 +692,29 @@ export function Viewport({
           {msg.pickPrompt(pick.field)} · {msg.pickCancel}
         </div>
       ) : null}
+      {measureOn ? (
+        <div className={styles['banner']} role="status">
+          {measurePoints.a !== null && measurePoints.b === null
+            ? snapMessages.measure.second
+            : snapMessages.measure.prompt}
+        </div>
+      ) : null}
       <p id={summaryId} className={styles['srOnly']}>
         {text} {msg.shownView(shownName)} {msg.keys}
       </p>
       <p className={styles['srOnly']} aria-live="polite">
         {msg.shownView(shownName)}
+        {measured
+          ? ` ${snapMessages.measure.summary(
+              measured.distance,
+              [
+                ['x', measured.deltas[0]!],
+                ['y', measured.deltas[1]!],
+                ['z', measured.deltas[2]!],
+              ],
+              units,
+            )}`
+          : ''}
       </p>
     </div>
   )

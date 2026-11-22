@@ -5,8 +5,11 @@
 // its error marker over the last valid outline. Pan (drag on empty space, trackpad scroll) and
 // zoom (wheel or pinch, to the cursor); no orbit. Props-driven: the design mode owns the data
 // and the gesture (one drag = one gesture, commits ≤ every 100 ms, Escape cancels).
-// Doc: docs/conventions/ui.md#shape-editor, #shapes-v03, #accessibility-shape-ui
-import { Eye, Maximize, X } from 'lucide-react'
+// Task U3: handle drags snap (grid, shape points, stock corners and edges, the reference section,
+// `snap.ts`; Alt places freely, the "Snap" toggle turns it off), the reference section is drawn
+// with its depth field, and the measure tool (`M`) measures between two snapped points.
+// Doc: docs/conventions/ui.md#shape-editor, #shapes-v03, #accessibility-shape-ui, #snap-and-measure
+import { Eye, Magnet, Maximize, Ruler, X } from 'lucide-react'
 import {
   useCallback,
   useEffect,
@@ -23,8 +26,10 @@ import type { ShapeItem } from '../../../core/design/shape.dto'
 import type { Bounds2, Element as Element2 } from '../../../core/geometry/2d/model'
 import type { Vec2 } from '../../../core/geometry/model'
 import type { UnitSystem } from '../../../core/project/document'
+import type { Quantity } from '../../../core/quantity/quantity'
 import { shapeMessages } from '../messages/shape'
-import { Toolbar, ToolbarButton, useReducedMotion } from '../ui'
+import { snapMessages } from '../messages/snap'
+import { QuantityInput, Toolbar, ToolbarButton, ToolbarSeparator, useReducedMotion } from '../ui'
 import {
   chainPath,
   dragStepMm,
@@ -51,7 +56,21 @@ import {
   type ShapeHandle,
 } from './shape-handles'
 import { classifyWheel, type WheelHistory } from './wheel'
+import { Dimension2d, MeasureChip, measureBetween } from './MeasureTool'
+import { SnapGlyph } from './SnapGlyph'
+import {
+  isExactSnap,
+  shapePoints,
+  snapPoint,
+  stockTargets,
+  type Snap,
+  type SnapTargets,
+} from './snap'
 import styles from './ShapeView.module.css'
+
+const sm = snapMessages
+/** The rounding of a value written from an exact snap (grid, stock, shape point): 0.1 µm. */
+export const SNAP_STEP_MM = 1e-4
 
 const m = shapeMessages.view
 type Item = ShapeItem<number>
@@ -75,8 +94,29 @@ export interface ShapeDragEvent {
   readonly handle: string
   /** The item at the drag's start (`start`) or as dragged (`move`). */
   readonly item: Item
-  /** The rounding of the written value at this zoom (mm). */
+  /**
+   * The rounding of the written value (mm): about one pixel at this zoom, or `SNAP_STEP_MM` when
+   * the point snapped to an exact target, so a grid or stock value is written as it is.
+   */
   readonly stepMm: number
+}
+
+/** Snapping in the editor (task U3). */
+export interface SnapSettings {
+  /** Grid step (mm) in the view's frame: the face frame, or the shape frame without a face. */
+  readonly grid: number
+  /** The "Snap" toolbar toggle (per window). */
+  readonly on: boolean
+  onToggle(on: boolean): void
+}
+
+/** The reference section on the face (task U3) and its depth field. */
+export interface SectionView {
+  /** Segments `[u0, v0, u1, v1, …]` in the face frame (mm); null while it is cut. */
+  readonly segments: Float32Array | null
+  readonly depth: Quantity | undefined
+  readonly defaultUnit: 'mm' | 'in'
+  onDepth(depth: Quantity): void
 }
 
 export interface ShapeViewProps {
@@ -111,6 +151,10 @@ export interface ShapeViewProps {
    * edit the shape's own frame; the placement is frozen while a drag runs.
    */
   readonly context?: FaceContext | null
+  /** Snapping of handle drags and measure points (task U3); absent: none. */
+  readonly snap?: SnapSettings | null
+  /** The reference section while a reference is shown on a face (task U3). */
+  readonly section?: SectionView | null
 }
 
 /** The face an operation places the shape on (face frame, mm). */
@@ -139,6 +183,16 @@ interface Drag {
   cancelled: boolean
   last: Item
   pointer: Vec2
+  /** Snap targets frozen at the press (the outline as it was), and the handle's start (view frame). */
+  readonly targets: SnapTargets | null
+  readonly startView: Vec2
+  snapped: boolean
+}
+
+interface Measure {
+  /** Picked points in the view frame (mm). */
+  readonly a: Vec2 | null
+  readonly b: Vec2 | null
 }
 
 function useSize(ref: React.RefObject<HTMLElement | null>): { width: number; height: number } {
@@ -213,6 +267,12 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
   const keyRun = useRef<{ drag: Drag; timer: ReturnType<typeof setTimeout> } | null>(null)
   // the arrow-key run's drag for rendering (the value chip); `keyRun` holds it for the handlers
   const [keyDrag, setKeyDrag] = useState<Drag | null>(null)
+  // the snap shown (view frame) while dragging or measuring
+  const [snapShown, setSnapShown] = useState<Snap | null>(null)
+  const [measuring, setMeasuring] = useState(false)
+  const [measure, setMeasure] = useState<Measure>({ a: null, b: null })
+  const [measureHover, setMeasureHover] = useState<Vec2 | null>(null)
+  const measurePress = useRef<{ at: Vec2; last: Vec2; panned: boolean } | null>(null)
 
   const inset = props.insetRight ?? 0
   // the face-on placement, frozen while a drag or a key run edits the shape
@@ -259,6 +319,32 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
   const path = (elements: readonly Element2[], closed: boolean): string =>
     chainPath(v, fc === null ? elements : placeElements(fc.placement, elements), closed)
 
+  // ── snapping (task U3) ───────────────────────────────────────────────────────────────────
+  const snap = props.snap ?? null
+  const segments = props.section?.segments ?? null
+  /** What a point can snap to now, in the view frame: the outline as drawn, stock, section, grid. */
+  const targets = useMemo((): SnapTargets | null => {
+    if (snap === null) return null
+    const loops = (drawing?.loops ?? []).map((l) =>
+      fc === null ? l.elements : placeElements(fc.placement, l.elements),
+    )
+    const stock = fc === null ? null : stockTargets(fc.stock.length, fc.stock.width)
+    return {
+      points: [...shapePoints(loops), ...(stock?.points ?? [])],
+      edges: stock?.edges ?? [],
+      reference: segments,
+      grid: snap.grid,
+    }
+  }, [snap, drawing, fc, segments])
+  const snapActive = snap !== null && snap.on
+  /** The snap for a view-frame point, unless snapping is off or Alt is held. */
+  const snapAt = (q: Vec2, e: { altKey: boolean }, t: SnapTargets | null, exclude?: Vec2) =>
+    snapActive && !e.altKey && t !== null
+      ? snapPoint(q, t, { pxPerUnit: v.scale, ...(exclude ? { exclude } : {}) })
+      : null
+  const toView = (p: Vec2): Vec2 => (fc === null ? p : placePoint(fc.placement, p))
+  const fromView = (q: Vec2): Vec2 => (fc === null ? q : unplacePoint(fc.placement, q))
+
   const item =
     selected === null ? undefined : drag?.index === selected ? drag.last : items[selected]
   const handles = useMemo(() => (item === undefined ? [] : itemHandles(item)), [item])
@@ -272,17 +358,18 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
     const d = dragRef.current
     dragRef.current = null
     setDrag(null)
+    setSnapShown(null)
     if (d?.started && !d.cancelled)
       onDrag({
         phase,
         index: d.index,
         handle: d.handle.id,
         item: d.last,
-        stepMm: dragStepMm(v.scale),
+        stepMm: d.snapped ? SNAP_STEP_MM : dragStepMm(v.scale),
       })
   }
   const onHandleDown = (e: PointerEvent, index: number, h: ShapeHandle) => {
-    if (e.button !== 0 || item === undefined || props.isLocked(index, h)) return
+    if (e.button !== 0 || item === undefined || props.isLocked(index, h) || measuring) return
     e.stopPropagation()
     e.preventDefault()
     ;(e.currentTarget as Element).setPointerCapture?.(e.pointerId)
@@ -298,6 +385,9 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
       cancelled: false,
       last: item,
       pointer: at,
+      targets,
+      startView: toView(h.at),
+      snapped: false,
     }
     dragRef.current = d
     setDrag(d)
@@ -320,7 +410,13 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
         })
       }
       const p = toItem(at)
-      const next = dragHandle(d.base, d.handle.id, [p[0] + d.offset[0], p[1] + d.offset[1]], {
+      let target: Vec2 = [p[0] + d.offset[0], p[1] + d.offset[1]]
+      // snapping (U3): the handle's point snaps in the view frame; Shift's 15° steps win over it
+      const s = e.shiftKey ? null : snapAt(toView(target), e, d.targets, d.startView)
+      if (s !== null) target = fromView(s.at)
+      d.snapped = s !== null && isExactSnap(s.kind)
+      setSnapShown(s)
+      const next = dragHandle(d.base, d.handle.id, target, {
         shift: e.shiftKey,
         from: d.handle.at,
       })
@@ -332,7 +428,7 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
         index: d.index,
         handle: d.handle.id,
         item: next,
-        stepMm: dragStepMm(v.scale),
+        stepMm: d.snapped ? SNAP_STEP_MM : dragStepMm(v.scale),
       })
       return
     }
@@ -352,6 +448,51 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
     const at = local(e)
     pan.current = { x: at[0], y: at[1] }
     ;(e.currentTarget as Element).setPointerCapture?.(e.pointerId)
+  }
+
+  // ── measure (task U3) ────────────────────────────────────────────────────────────────────
+  const endMeasure = () => {
+    setMeasuring(false)
+    setMeasure({ a: null, b: null })
+    setMeasureHover(null)
+    setSnapShown(null)
+    measurePress.current = null
+  }
+  const toggleMeasure = () => (measuring ? endMeasure() : setMeasuring(true))
+  /** The measured point under the pointer: snapped, or where it is. */
+  const measurePoint = (at: Vec2, e: { altKey: boolean }): { at: Vec2; snap: Snap | null } => {
+    const q = toShape(v, at)
+    const s = snapAt(q, e, targets)
+    return { at: s?.at ?? q, snap: s }
+  }
+  const onMeasureDown = (e: PointerEvent) => {
+    if (e.button !== 0) return
+    const at = local(e)
+    measurePress.current = { at, last: at, panned: false }
+    ;(e.currentTarget as Element).setPointerCapture?.(e.pointerId)
+  }
+  const onMeasureMove = (e: PointerEvent) => {
+    const at = local(e)
+    const press = measurePress.current
+    if (press !== null) {
+      if (press.panned || Math.hypot(at[0] - press.at[0], at[1] - press.at[1]) >= CLICK_PX) {
+        press.panned = true
+        touched.current = true
+        setView(panBy(v, at[0] - press.last[0], at[1] - press.last[1]))
+        press.last = at
+        return
+      }
+    }
+    const p = measurePoint(at, e)
+    setSnapShown(p.snap)
+    setMeasureHover(p.at)
+  }
+  const onMeasureUp = (e: PointerEvent) => {
+    const press = measurePress.current
+    measurePress.current = null
+    if (press === null || press.panned) return
+    const p = measurePoint(local(e), e).at
+    setMeasure((m0) => (m0.a === null || m0.b !== null ? { a: p, b: null } : { a: m0.a, b: p }))
   }
 
   // wheel: zoom to the cursor, a trackpad scroll pans (wheel.ts); not passive, so it can prevent scrolling
@@ -414,7 +555,22 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
         setDrag(null)
         return
       }
+      if (measuring) {
+        endMeasure()
+        return
+      }
       props.onExit()
+      return
+    }
+    if (
+      (e.key === 'm' || e.key === 'M') &&
+      e.target === e.currentTarget &&
+      !e.metaKey &&
+      !e.ctrlKey &&
+      !e.altKey
+    ) {
+      e.preventDefault()
+      toggleMeasure()
       return
     }
     if (
@@ -477,6 +633,9 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
           cancelled: false,
           last: item,
           pointer: scr(h.at),
+          targets: null,
+          startView: toView(h.at),
+          snapped: false,
         }
         run = { drag: d, timer: setTimeout(endKeyRun, KEY_RUN_MS) }
         onDrag({ phase: 'start', index: selected, handle: h.id, item, stepMm: 0.1 })
@@ -562,6 +721,34 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bad, drag, items, v, fc])
 
+  // the reference section in screen space (one path; thousands of short segments)
+  const sectionPath = useMemo(() => {
+    if (segments === null || segments.length === 0) return ''
+    const parts: string[] = []
+    for (let i = 0; i + 3 < segments.length; i += 4) {
+      const a = toScreen(v, [segments[i]!, segments[i + 1]!])
+      const b = toScreen(v, [segments[i + 2]!, segments[i + 3]!])
+      parts.push(`M${a[0].toFixed(1)} ${a[1].toFixed(1)}L${b[0].toFixed(1)} ${b[1].toFixed(1)}`)
+    }
+    return parts.join('')
+  }, [segments, v])
+
+  // the measurement: picked points, or the first and the point under the pointer
+  const mA = measure.a
+  const mB = measure.b ?? (measuring && mA !== null ? measureHover : null)
+  const measured = mA !== null && mB !== null ? measureBetween(mA, mB) : null
+  const axisPair = fc?.axes ?? (['x', 'y'] as const)
+  const measureParts = measured
+    ? ([
+        [axisPair[0], measured.deltas[0]!],
+        [axisPair[1], measured.deltas[1]!],
+      ] as const)
+    : []
+  const measureSummary =
+    measure.a !== null && measure.b !== null && measured
+      ? sm.measure.summary(measured.distance, measureParts, units)
+      : ''
+
   const origin = toScreen(v, [0, 0])
   // the axis triad sits in the lower-left corner, off the drawing (U1 review: it covered a path's
   // start corner at the origin); the origin keeps a small cross
@@ -585,6 +772,7 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
       className={[styles['view'], props.className].filter(Boolean).join(' ')}
       data-reduced={reduced ? '' : undefined}
       data-dragging={drag?.started ? '' : undefined}
+      data-measuring={measuring ? '' : undefined}
       onKeyDown={onKeyDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -618,6 +806,9 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
             })()}
             data-testid="shape-stock-face"
           />
+        ) : null}
+        {sectionPath ? (
+          <path className={styles['section']} d={sectionPath} data-testid="shape-section" />
         ) : null}
         <path
           className={styles['origin']}
@@ -724,7 +915,58 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
             })}
           </g>
         ) : null}
+        {measuring ? (
+          <rect
+            className={styles['measureCatcher']}
+            width={size.width}
+            height={size.height}
+            data-testid="measure-catcher"
+            onPointerDown={onMeasureDown}
+            onPointerMove={onMeasureMove}
+            onPointerUp={onMeasureUp}
+            onPointerLeave={() => {
+              if (measurePress.current === null) setSnapShown(null)
+            }}
+          />
+        ) : null}
+        {mA !== null ? <Dimension2d a={toScreen(v, mA)} b={mB ? toScreen(v, mB) : null} /> : null}
       </svg>
+      {measured && mA && mB && measured.distance > 0 ? (
+        <MeasureChip
+          at={(() => {
+            const a = toScreen(v, mA)
+            const b = toScreen(v, mB)
+            const len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1
+            // beside the line's middle, on its upper side
+            const side = (b[0] - a[0]) / len >= 0 ? -1 : 1
+            return [
+              (a[0] + b[0]) / 2 + side * ((b[1] - a[1]) / len) * -16,
+              (a[1] + b[1]) / 2 + side * ((b[0] - a[0]) / len) * 16,
+            ] as const
+          })()}
+          distance={measured.distance}
+          parts={measureParts}
+          units={units}
+        />
+      ) : null}
+      {snapShown !== null ? (
+        <SnapGlyph
+          key={
+            snapShown.kind === 'edge' || snapShown.kind === 'reference'
+              ? snapShown.kind
+              : `${snapShown.kind}:${snapShown.at[0]}:${snapShown.at[1]}`
+          }
+          kind={snapShown.kind}
+          x={toScreen(v, snapShown.at)[0]}
+          y={toScreen(v, snapShown.at)[1]}
+          label={sm.target[snapShown.kind]}
+        />
+      ) : null}
+      {measuring ? (
+        <p className={styles['measurePrompt']} role="status">
+          {mA !== null && measure.b === null ? sm.measure.second : sm.measure.prompt}
+        </p>
+      ) : null}
       <div className={styles['chip']} aria-hidden="true">
         {props.face === null ? m.chip(null) : m.chip(props.face)}
       </div>
@@ -733,6 +975,24 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
         style={inset > 0 ? { transform: `translateX(${-inset}px)` } : undefined}
       >
         <Toolbar label={m.region} floating>
+          {snap !== null ? (
+            <ToolbarButton
+              label={sm.toggle}
+              icon={<Magnet aria-hidden="true" />}
+              pressed={snap.on}
+              tooltipSide="bottom"
+              onClick={() => snap.onToggle(!snap.on)}
+            />
+          ) : null}
+          <ToolbarButton
+            label={sm.measure.tool}
+            shortcut="M"
+            icon={<Ruler aria-hidden="true" />}
+            pressed={measuring}
+            tooltipSide="bottom"
+            onClick={toggleMeasure}
+          />
+          <ToolbarSeparator />
           <ToolbarButton
             label={m.showItems}
             icon={<Eye aria-hidden="true" />}
@@ -755,6 +1015,17 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
             onClick={props.onExit}
           />
         </Toolbar>
+        {props.section ? (
+          <div className={styles['sectionPanel']}>
+            <QuantityInput
+              label={sm.sectionDepth}
+              kind="length"
+              defaultUnit={props.section.defaultUnit}
+              value={props.section.depth}
+              onCommit={props.section.onDepth}
+            />
+          </div>
+        ) : null}
       </div>
       {chipHandle && chipAt && item ? (
         <div
@@ -776,6 +1047,7 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
       </p>
       <p className={styles['srOnly']} aria-live="polite">
         {props.summary}
+        {measureSummary ? ` ${measureSummary}` : ''}
       </p>
     </div>
   )

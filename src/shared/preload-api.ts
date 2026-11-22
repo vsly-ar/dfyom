@@ -70,6 +70,11 @@ export const IPC = {
   fileChooseSvg: 'dfyom:file.chooseSvg',
   /** Renderer → main (invoke): a reference's triangles for the ghost (`ReferenceMeshReply`, R3). */
   referenceMesh: 'dfyom:reference.mesh',
+  /**
+   * Renderer → main (invoke): a reference's section by a face-parallel plane for the Shape Editor
+   * (`ReferenceSectionReply`, U3).
+   */
+  referenceSection: 'dfyom:reference.section',
   /** Main → renderer: a native application menu item was chosen (`MenuAction`). */
   menuAction: 'dfyom:menu.action',
   /**
@@ -166,11 +171,28 @@ export interface PartEvaluationView {
 /**
  * The triangles of a reference's stored STL for the viewport ghost (task R3,
  * docs/modes/reference-model.md#ghost-mesh-task-r3): 9 float32 per triangle in source units, read
- * once per asset by the worker; the renderer applies the placement itself. Window plumbing like
+ * once per asset by the worker; the renderer applies the placement itself. `edges` are its feature
+ * edges (6 float32 per segment, source units), found by the worker too (U3). Window plumbing like
  * the evaluation push, not an agent capability.
  */
 export type ReferenceMeshReply =
-  | { readonly ok: true; readonly positions: Float32Array }
+  | { readonly ok: true; readonly positions: Float32Array; readonly edges: Float32Array }
+  | { readonly ok: false; readonly error: AppErrorData }
+
+/**
+ * A reference's section for the Shape Editor (task U3, docs/modes/design-v0.3.md#measure-and-snap):
+ * `matrix` (column-major 4 × 4) takes the STL's source units into the face frame (mm), whose third
+ * axis is the face normal; the mesh is cut at `w = level` there. The reply's `segments` are
+ * `[u0, v0, u1, v1, …]` in the face frame (mm).
+ */
+export interface ReferenceSectionRequest {
+  readonly referenceId: string
+  readonly matrix: readonly number[]
+  readonly level: number
+}
+
+export type ReferenceSectionReply =
+  | { readonly ok: true; readonly segments: Float32Array }
   | { readonly ok: false; readonly error: AppErrorData }
 
 /**
@@ -338,9 +360,10 @@ export interface PreloadApi {
     /** An SVG to import as shapes (I1); the window then calls `design.shape.import`. */
     chooseSvg(): Promise<string | null>
   }
-  /** Reference models of the window's project (task R3): the ghost's triangles. */
+  /** Reference models of the window's project: the ghost's triangles (R3), a section (U3). */
   readonly reference: {
     mesh(referenceId: string): Promise<ReferenceMeshReply>
+    section(request: ReferenceSectionRequest): Promise<ReferenceSectionReply>
   }
   /**
    * The Library window (docs/conventions/ui-library-window.md): window plumbing around the

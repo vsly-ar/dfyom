@@ -6,7 +6,14 @@ import type { ReferenceDTO } from '../../../../core/design/reference.dto'
 import type { Box } from '../../../../core/design/stl'
 import { fieldContext } from '../../../../core/design/operation'
 import { Quantity } from '../../../../core/quantity/quantity'
-import { ghostMatrix, liveWarnings, referencePlacement, sourceSize } from './reference-view'
+import {
+  ghostMatrix,
+  liveWarnings,
+  middleDepth,
+  referencePlacement,
+  sectionMatrix,
+  sourceSize,
+} from './reference-view'
 
 const bounds: Box = { min: { x: -1, y: 2, z: 0.5 }, max: { x: 3, y: 4, z: 1.5 } }
 
@@ -109,5 +116,45 @@ describe('reference view model', () => {
 
   it('names the source size', () => {
     expect(sourceSize(bounds)).toBe('4 × 2 × 1')
+  })
+})
+
+describe('reference section (U3)', () => {
+  it('maps source points into the face frame through the ghost matrix', () => {
+    const bounds = { min: { x: 0, y: 0, z: 0 }, max: { x: 10, y: 20, z: 5 } }
+    const p = {
+      sourceUnit: 'mm' as const,
+      scale: 1,
+      rotation: { x: 0, y: 0, z: 0 },
+      position: { x: 5, y: 5, z: -5 },
+    }
+    const ghost = ghostMatrix(bounds, p)
+    // the bottom face's frame: u = +x, v = −y, n = −z, origin at (0, 30, −5)
+    const frame = {
+      origin: [0, 30, -5] as const,
+      u: [1, 0, 0] as const,
+      v: [0, -1, 0] as const,
+      n: [0, 0, -1] as const,
+    }
+    const m = sectionMatrix(ghost, frame)
+    const apply = (x: number, y: number, z: number) =>
+      [0, 1, 2].map((r) => m[r]! * x + m[4 + r]! * y + m[8 + r]! * z + m[12 + r]!)
+    // source (0, 0, 0) → part (5, 5, −5) → face (5, 25, 0)
+    expect(apply(0, 0, 0).map((v) => +v.toFixed(9))).toEqual([5, 25, 0])
+    // source (0, 0, 5) → part (5, 5, 0) → face w = −5
+    expect(apply(0, 0, 5)[2]).toBeCloseTo(-5)
+  })
+
+  it('cuts at the middle of the placed box, never above the face', () => {
+    const frame = {
+      origin: [0, 0, 0] as const,
+      u: [1, 0, 0] as const,
+      v: [0, 1, 0] as const,
+      n: [0, 0, 1] as const,
+    }
+    const box = { min: { x: 0, y: 0, z: -39 }, max: { x: 10, y: 10, z: 0 } }
+    expect(middleDepth(box, frame, 0)).toBeCloseTo(19.5)
+    expect(middleDepth(box, frame, -5)).toBeCloseTo(14.5)
+    expect(middleDepth({ min: { x: 0, y: 0, z: 2 }, max: { x: 1, y: 1, z: 6 } }, frame, 0)).toBe(0)
   })
 })

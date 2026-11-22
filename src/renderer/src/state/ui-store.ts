@@ -99,6 +99,15 @@ export interface UiState {
   /** The last SVG import's report (task U2), reopened from the shape inspector; not persisted. */
   readonly lastImport: LastImport | null
   setLastImport(last: LastImport | null): void
+  /** The "Snap" toggle of the Shape Editor and the viewport (task U3; per window, on at start). */
+  readonly snapOn: boolean
+  setSnapOn(on: boolean): void
+  /**
+   * Depth (mm) of the reference section below the edited shape's face (task U3; per window); null:
+   * the middle of the reference's height there.
+   */
+  readonly sectionDepth: number | null
+  setSectionDepth(mm: number | null): void
 }
 
 /** The last import's report and the shapes it created (ui.md#import-report: "Later access"). */
@@ -149,5 +158,9 @@ export function createUiStore(initial: Partial<Pick<UiState, 'mode'>> = {}): UiS
     setRotationGuide: (rotationGuide) => set({ rotationGuide }),
     lastImport: null,
     setLastImport: (lastImport) => set({ lastImport }),
+    snapOn: true,
+    setSnapOn: (snapOn) => set({ snapOn }),
+    sectionDepth: null,
+    setSectionDepth: (sectionDepth) => set({ sectionDepth }),
   }))
 }

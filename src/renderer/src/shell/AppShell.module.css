@@ -247,6 +247,13 @@
   justify-items: start;
 }
 
+.settingPair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+  width: 100%;
+}
+
 .settingLabel {
   font-weight: var(--weight-medium);
 }

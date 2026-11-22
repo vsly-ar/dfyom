@@ -222,6 +222,7 @@ function PartMesh({
     <group>
       <mesh
         geometry={geometry}
+        userData={{ measure: 'part' }}
         onPointerMove={(e) => {
           e.stopPropagation()
           onHover(surfaceAtFace(mesh, e.faceIndex))

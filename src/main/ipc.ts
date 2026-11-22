@@ -19,6 +19,7 @@ import {
   type OpenedWindow,
   type ProjectSnapshot,
   type ReferenceMeshReply,
+  type ReferenceSectionReply,
   type WindowCloseRequest,
 } from '../shared/preload-api'
 import type { Dispatcher } from '../core/commands/dispatcher'
@@ -294,7 +295,28 @@ export function registerProjectIpc(
         return { ok: false, error: NOT_A_WINDOW_ERROR }
       const r = await host.referenceMesh(key, referenceId)
       return r.isOk()
-        ? { ok: true, positions: r.unwrap().positions }
+        ? { ok: true, positions: r.unwrap().positions, edges: r.unwrap().edges }
+        : { ok: false, error: agentError(r.unwrapErr()).error }
+    },
+  )
+  // The reference section for the Shape Editor (task U3): cut in the worker, segments copied once
+  // (docs/modes/design-v0.3.md#implementation-u3).
+  ipcMain.handle(
+    IPC.referenceSection,
+    async (event, request: unknown): Promise<ReferenceSectionReply> => {
+      const ws = sessionOf(event)
+      const key = ws?.session.boundKey
+      const req = request as { referenceId?: unknown; matrix?: unknown; level?: unknown } | null
+      if (
+        key === undefined ||
+        typeof req?.referenceId !== 'string' ||
+        !Array.isArray(req.matrix) ||
+        typeof req.level !== 'number'
+      )
+        return { ok: false, error: NOT_A_WINDOW_ERROR }
+      const r = await host.referenceSection(key, req.referenceId, req.matrix, req.level)
+      return r.isOk()
+        ? { ok: true, segments: r.unwrap().segments }
         : { ok: false, error: agentError(r.unwrapErr()).error }
     },
   )

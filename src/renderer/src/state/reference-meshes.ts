@@ -7,7 +7,7 @@ import type { PreloadApi } from '../../../shared/preload-api'
 
 export type ReferenceMeshEntry =
   | { readonly status: 'loading' }
-  | { readonly status: 'done'; readonly positions: Float32Array }
+  | { readonly status: 'done'; readonly positions: Float32Array; readonly edges: Float32Array }
   | { readonly status: 'failed'; readonly error: AppErrorData }
 
 export interface ReferenceMeshes {
@@ -43,7 +43,7 @@ export function createReferenceMeshes(bridge: Pick<PreloadApi, 'reference'>): Re
           entries.set(
             sha,
             r.ok
-              ? { status: 'done', positions: r.positions }
+              ? { status: 'done', positions: r.positions, edges: r.edges }
               : { status: 'failed', error: r.error },
           )
           changed()

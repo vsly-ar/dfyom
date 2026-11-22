@@ -1,7 +1,7 @@
 // WebGL does not run in jsdom: the canvas and the scene are stubbed; the DOM around them
 // (region, toolbar, pick banner, keys) is tested here, the scene's logic in the pure modules.
 // Doc: docs/conventions/ui.md#testing
-import { fireEvent, screen, within } from '@testing-library/react'
+import { act, fireEvent, screen, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { Vector3 } from 'three'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -32,6 +32,14 @@ vi.mock('./Scene', () => ({
   CameraControlsImpl: { ACTION: { NONE: 0, ROTATE: 1, TRUCK: 2, DOLLY: 16 } },
 }))
 vi.mock('./ViewCube', () => ({ ViewCube: () => null }))
+// the 3D measure layer raycasts the scene: stubbed, its picks driven through `measurePick`
+const measure = vi.hoisted(() => ({ pick: null as null | ((p: [number, number, number]) => void) }))
+vi.mock('./Measure3d', () => ({
+  Measure3d: ({ onPick }: { onPick: (p: [number, number, number]) => void }) => {
+    measure.pick = onPick
+    return <div data-testid="measure-3d" />
+  },
+}))
 
 const mesh = sampleMesh()
 
@@ -69,7 +77,7 @@ describe('Viewport', () => {
     renderUi(<Viewport mesh={mesh} />)
     const toolbar = screen.getByRole('toolbar', { name: 'View' })
     const names = [...toolbar.querySelectorAll('button')].map((b) => b.getAttribute('aria-label'))
-    expect(names).toEqual(['Fit', 'Views'])
+    expect(names).toEqual(['Fit', 'Views', 'Measure'])
     // the summary ends with the current view
     expect(screen.getByRole('region')).toHaveAccessibleDescription(/View: custom\./)
   })
@@ -141,6 +149,23 @@ describe('Viewport', () => {
     renderUi(<Viewport mesh={mesh} selectedOperation="pocket1" onSelect={onSelect} />)
     fireEvent.keyDown(screen.getByRole('region'), { key: 'Escape' })
     expect(onSelect).toHaveBeenCalledWith(null)
+  })
+
+  it('M measures point to point (task U3): banner, live distance, Escape ends it first', () => {
+    const onSelect = vi.fn()
+    renderUi(<Viewport mesh={mesh} units="mm" onSelect={onSelect} />)
+    const region = screen.getByRole('region')
+    fireEvent.keyDown(region, { key: 'm' })
+    expect(region).toHaveAttribute('data-measuring')
+    expect(screen.getByRole('button', { name: /Measure/ })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('status')).toHaveTextContent('Click two points to measure')
+    act(() => measure.pick?.([0, 0, 0]))
+    expect(screen.getByRole('status')).toHaveTextContent('Click the second point')
+    act(() => measure.pick?.([3, 4, 12]))
+    expect(region).toHaveTextContent('Distance 13.00 mm (ΔX 3.00 mm, ΔY 4.00 mm, ΔZ 12.00 mm).')
+    fireEvent.keyDown(region, { key: 'Escape' })
+    expect(screen.queryByTestId('measure-3d')).toBeNull()
+    expect(onSelect).not.toHaveBeenCalled()
   })
 
   it('pick mode shows the banner and Escape cancels from anywhere', () => {
