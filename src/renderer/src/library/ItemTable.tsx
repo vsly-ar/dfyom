@@ -1,6 +1,6 @@
 // The Library window's item list: a sortable `grid` of the tab's items, filtered by the search
 // (name and notes) and, for tools, by type. ↑/↓ (Home/End) select a row, Enter moves focus into
-// the editor. A row the opening window's project uses has the "Used in this project" chip, the
+// the editor. A row the opening window's project uses has the "Used" chip (tooltip "Used in this project"), the
 // row being drafted shows "Unsaved", and a file that does not load is listed with its error and
 // cannot be selected for editing. Doc: docs/conventions/ui-library-window.md#layout, #accessibility
 import { ArrowDown, ArrowUp } from 'lucide-react'
@@ -309,12 +309,22 @@ export function ItemTable({
                         <ToolIcon name={i.type === 'drill' ? 'drill' : 'endmill'} />
                       </span>
                     ) : null}
-                    {n === 0 ? <span className={styles['name']}>{c.text(i)}</span> : c.text(i)}
+                    {n === 0 ? (
+                      <span className={styles['name']} title={c.text(i)}>
+                        {c.text(i)}
+                      </span>
+                    ) : (
+                      c.text(i)
+                    )}
                     {n === 0 && unsavedId === i.id ? (
-                      <StatusChip tone="warning">{w.unsaved}</StatusChip>
+                      <span className={styles['chip']}>
+                        <StatusChip tone="warning">{w.unsaved}</StatusChip>
+                      </span>
                     ) : null}
                     {n === 0 && used.has(i.id) ? (
-                      <StatusChip tone="neutral">{w.used}</StatusChip>
+                      <span className={styles['chip']} title={w.used}>
+                        <StatusChip tone="neutral">{w.usedShort}</StatusChip>
+                      </span>
                     ) : null}
                   </div>
                 ))}

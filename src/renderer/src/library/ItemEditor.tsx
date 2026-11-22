@@ -3,7 +3,7 @@
 // "Unsaved" state, a conflict note with Reload / Overwrite, and the actions Duplicate, Remove…,
 // Revert and Save. Doc: docs/conventions/ui-library-window.md#layout, #behaviour-with-projects
 import { Copy, RotateCcw, Save, Trash2 } from 'lucide-react'
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { LibraryItemKind } from '../../../core/library/item'
 import { libraryMessages } from '../messages/library'
 import { sentence } from '../messages/plan'
@@ -41,6 +41,7 @@ export function ItemEditor({
 }): React.JSX.Element {
   const s = useStore(store)
   const ref = useRef<HTMLDivElement>(null)
+  const [scrolled, setScrolled] = useState(false)
   const d = s.draft
   const units = s.units()
   const dirty = s.isDirty()
@@ -115,7 +116,11 @@ export function ItemEditor({
           }
         />
       ) : null}
-      <div className={styles['fieldsScroll']}>
+      <div
+        className={styles['fieldsScroll']}
+        data-scrolled={scrolled || undefined}
+        onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 0)}
+      >
         <div className={styles['formBody']}>
           {d.values.kind === 'tool' ? (
             <ToolFields
