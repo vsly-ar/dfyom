@@ -7,7 +7,8 @@
 import { Err, fail, Ok, type AppResult } from '../../shared/result'
 import { toGeometryInput } from '../design/geometry-input'
 import { localStock } from '../geometry/face'
-import type { OperationGeometry, StockGeometry } from '../geometry/model'
+import type { Region2dPort } from '../geometry/2d/port'
+import { isAnalyticOperation, type OperationGeometry, type StockGeometry } from '../geometry/model'
 import type { Tool } from '../library/tool'
 import type { ResolvedFeeds } from '../plan/feeds'
 import type { PlanOperationInput } from '../plan/inputs'
@@ -100,9 +101,12 @@ export function nearestNeighbourOrder<T extends { readonly center: readonly [num
  * The generator request of one plan operation: one input, except drilling (one per hole,
  * nearest-neighbour order). Mapper bugs are `internal.unexpected`.
  */
-export function toGeneratorInputs(input: PlanOperationInput): AppResult<GeneratorRequest> {
+export function toGeneratorInputs(
+  input: PlanOperationInput,
+  region2d?: Region2dPort,
+): AppResult<GeneratorRequest> {
   const id = input.planOperationId
-  const geometry = toGeometryInput(input.part, input.stock)
+  const geometry = toGeometryInput(input.part, input.stock, region2d)
   if (geometry.isErr()) return Err(geometry.unwrapErr().withContext(WHERE, { planOperationId: id }))
   const byId = new Map(geometry.unwrap().operations.map((g) => [g.id, g]))
   const ops: OperationGeometry[] = []
@@ -176,6 +180,22 @@ export function toGeneratorInputs(input: PlanOperationInput): AppResult<Generato
           data: { planOperationId: id, operations: ops.length },
         })
   }
+  // general shapes (named, rotated, a profile `on`, tab positions) get generators with T1/T2
+  const analytic = <K extends 'pocket' | 'profile'>(op: Extract<OperationGeometry, { kind: K }>) =>
+    isAnalyticOperation(op)
+      ? Ok(op)
+      : fail('plan.check', `${op.id}: toolpaths of this shape come with a later v0.3 task`, {
+          issues: [
+            {
+              path: ['operations', op.id, 'shape'],
+              rule: 'shapeToolpathLater',
+              message: 'named, rotated and on-line shapes and tab positions get toolpaths later',
+              params: { operation: op.id },
+            },
+          ],
+          where: WHERE,
+          data: { planOperationId: id },
+        })
   switch (s.kind) {
     case 'facing':
       return single('facing').andThen((operation) =>
@@ -198,48 +218,52 @@ export function toGeneratorInputs(input: PlanOperationInput): AppResult<Generato
         })),
       )
     case 'pocket':
-      return single('pocket').andThen((operation) =>
-        milling().map((c): GeneratorRequest => ({
-          kind: 'pocket',
-          ...turned,
-          inputs: [
-            {
-              ...base,
-              cutting: c,
-              operation,
-              strategy: {
-                entry: s.entry,
-                helixDiameter: s.helixDiameter,
-                rampAngle: s.rampAngle,
-                finishAllowance: s.finishAllowance,
-                finishStepdown: s.finishStepdown,
-                direction: s.direction,
+      return single('pocket')
+        .andThen(analytic)
+        .andThen((operation) =>
+          milling().map((c): GeneratorRequest => ({
+            kind: 'pocket',
+            ...turned,
+            inputs: [
+              {
+                ...base,
+                cutting: c,
+                operation,
+                strategy: {
+                  entry: s.entry,
+                  helixDiameter: s.helixDiameter,
+                  rampAngle: s.rampAngle,
+                  finishAllowance: s.finishAllowance,
+                  finishStepdown: s.finishStepdown,
+                  direction: s.direction,
+                },
               },
-            },
-          ],
-        })),
-      )
+            ],
+          })),
+        )
     case 'profile':
-      return single('profile').andThen((operation) =>
-        milling().map((c): GeneratorRequest => ({
-          kind: 'profile',
-          ...turned,
-          inputs: [
-            {
-              ...base,
-              cutting: c,
-              operation,
-              strategy: {
-                entry: s.entry,
-                rampAngle: s.rampAngle,
-                breakthrough: s.breakthrough,
-                finishAllowance: s.finishAllowance,
-                direction: s.direction,
+      return single('profile')
+        .andThen(analytic)
+        .andThen((operation) =>
+          milling().map((c): GeneratorRequest => ({
+            kind: 'profile',
+            ...turned,
+            inputs: [
+              {
+                ...base,
+                cutting: c,
+                operation,
+                strategy: {
+                  entry: s.entry,
+                  rampAngle: s.rampAngle,
+                  breakthrough: s.breakthrough,
+                  finishAllowance: s.finishAllowance,
+                  direction: s.direction,
+                },
               },
-            },
-          ],
-        })),
-      )
+            ],
+          })),
+        )
     case 'drilling': {
       const strategy: DrillingStrategy =
         s.cycle === 'simple'

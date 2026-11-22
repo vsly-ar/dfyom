@@ -7,6 +7,7 @@
  * and `on` references before evaluation, so geometry never sees `Quantity` objects.
  */
 import type { Direction } from './face'
+import type { Path, Region } from './2d/model'
 
 /** Coincidence, collapse and zero-length threshold (mm). */
 export const EPSILON = 1e-6
@@ -75,6 +76,48 @@ export type Contour =
       readonly cornerRadius: number
     }
   | { readonly kind: 'circle'; readonly radius: number }
+  /**
+   * v0.3: a general shape (named, or a rotated rectangle) placed in the face frame (rotation and
+   * mirror applied), relative to `Shape.center` = the centre of its placed bounding box. Loops
+   * and pieces are in surface-numbering order (`wall[i]` / `corner[i]` = element i across all
+   * loops; each loop from its start point, docs/modes/design-v0.3.md#surfaces). Builders take it
+   * from G1 (geometry) and T1/T2 (toolpaths) through `outline.ts`.
+   */
+  | { readonly kind: 'region'; readonly region: Region }
+  /** v0.3: an open path (profile `on` only), placed as `region` is. */
+  | { readonly kind: 'path'; readonly path: Path }
+
+/** The analytic v0.1 contours (contour.ts, the offset-loft). */
+export type AnalyticContour = Extract<Contour, { kind: 'rectangle' | 'circle' }>
+
+/** True for the v0.1 contours; false for v0.3 general ones (`region`, `path`). */
+export const isAnalytic = (c: Contour): c is AnalyticContour =>
+  c.kind === 'rectangle' || c.kind === 'circle'
+
+/** A v0.1 shape: an analytic contour placed by its centre. */
+export interface AnalyticShape {
+  readonly center: Vec2
+  readonly contour: AnalyticContour
+}
+
+/** A pocket or profile the v0.1/v0.2 builders and generators take. */
+export type AnalyticOperation<K extends 'pocket' | 'profile'> = Extract<
+  OperationGeometry,
+  { kind: K }
+> & { readonly shape: AnalyticShape }
+
+/**
+ * True if the v0.1/v0.2 builders and generators take this pocket or profile: an analytic contour
+ * and (profiles) `outside` / `inside` through. General shapes and `on` grooves wait for G1
+ * (solids) and T1/T2 (toolpaths); see docs/architecture/shapes.md#implementation-k3.
+ */
+export function isAnalyticOperation<O extends Extract<OperationGeometry, { shape: Shape }>>(
+  op: O,
+): op is O & { readonly shape: AnalyticShape } {
+  if (!isAnalytic(op.shape.contour)) return false
+  if (op.kind === 'pocket') return true
+  return op.side !== 'on' && op.depth === undefined && op.tabs.positions === undefined
+}
 
 /** One level of an offset-loft: the contour offset by `offset` (> 0 = inward) at height `z`. */
 export interface Level {
@@ -134,12 +177,19 @@ export type OperationGeometry = FacePlacement &
         readonly kind: 'profile'
         readonly id: string
         readonly shape: Shape
-        readonly side: 'outside' | 'inside'
+        readonly side: 'outside' | 'inside' | 'on'
         readonly slotWidth: number
+        /** v0.3, `on` only: a blind groove's depth below the stock face; absent = through. */
+        readonly depth?: number
         readonly tabs: {
           readonly count: number
           readonly width: number
           readonly thickness: number
+          /**
+           * v0.3: tab centres as distances along the loop from its start point (mm); present =
+           * replaces `count`. Absent on v0.1/v0.2 inputs (byte-identical).
+           */
+          readonly positions?: readonly number[]
         }
       }
   )

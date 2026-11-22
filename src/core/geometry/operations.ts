@@ -19,11 +19,13 @@ import {
   CHORD_TOLERANCE,
   EPSILON,
   OVERSHOOT,
-  type Contour,
+  isAnalyticOperation,
+  type AnalyticContour as Contour,
+  type AnalyticOperation,
+  type AnalyticShape,
   type Level,
   type OperationGeometry,
   type Placement,
-  type Shape,
   type StockGeometry,
   type Vec3,
   placeAt,
@@ -87,7 +89,7 @@ export interface NominalRegion {
    * Removals of the same direction whose bounds lie inside this shape (u, v of the face frame)
    * cannot reach the region.
    */
-  readonly clearInside?: Shape
+  readonly clearInside?: AnalyticShape
 }
 
 /** Half the narrowest size: the largest inward offset a contour allows. */
@@ -100,7 +102,30 @@ export function inradius(c: Contour): number {
  * within the chord tolerance): no offcut, so no tabs are built.
  */
 export function slotCoversOpening(op: Extract<OperationGeometry, { kind: 'profile' }>): boolean {
+  if (!isAnalyticOperation(op)) return false
   return op.side === 'inside' && inradius(op.shape.contour) - op.slotWidth <= CHORD_TOLERANCE
+}
+
+/**
+ * A shape operation the v0.1/v0.2 builders do not take (a named or rotated shape, a profile
+ * `on`): solids of general loops come with G1 (docs/architecture/shapes.md#implementation-k3).
+ */
+function notYetBuilt(
+  op: Extract<OperationGeometry, { kind: 'pocket' | 'profile' }>,
+): AppResult<never> {
+  return Err(
+    new AppError('geometry.evaluation', `${op.id}: solids of shape operations are not built yet`, {
+      issues: [
+        {
+          path: ['shape'],
+          rule: 'shapeSolidLater',
+          message: 'named, rotated and on-line shapes get solids with task G1',
+          params: { operationId: op.id },
+        },
+      ],
+      where: 'operationSolids',
+    }),
+  )
 }
 
 /** Surface table under construction: role → index. */
@@ -222,11 +247,11 @@ function build(op: OperationGeometry, stock: StockGeometry): AppResult<LocalSoli
     case 'facing':
       return facing(op, stock)
     case 'pocket':
-      return pocket(op)
+      return isAnalyticOperation(op) ? pocket(op) : notYetBuilt(op)
     case 'drilling':
       return drilling(op, stock)
     case 'profile':
-      return profile(op, stock)
+      return isAnalyticOperation(op) ? profile(op, stock) : notYetBuilt(op)
   }
 }
 
@@ -287,7 +312,7 @@ function pocketLevels(zf: number, f: number): Level[] {
   return levels
 }
 
-function pocket(op: Extract<OperationGeometry, { kind: 'pocket' }>): AppResult<LocalSolids> {
+function pocket(op: AnalyticOperation<'pocket'>): AppResult<LocalSolids> {
   const table = new Table()
   const floor = table.add('floor')
   const role = contourRoles(table, op.shape.contour)
@@ -375,10 +400,7 @@ function firstTab(c: Contour): number {
   return c.kind === 'circle' ? 0 : (c.length - 2 * c.cornerRadius) / 2
 }
 
-function profile(
-  op: Extract<OperationGeometry, { kind: 'profile' }>,
-  stock: StockGeometry,
-): AppResult<LocalSolids> {
+function profile(op: AnalyticOperation<'profile'>, stock: StockGeometry): AppResult<LocalSolids> {
   const table = new Table()
   const offcut = table.add('offcut')
   const shape = op.shape.contour

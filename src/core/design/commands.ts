@@ -42,6 +42,8 @@ import {
   ID_PREFIX,
   KIND_LABEL,
   operationToDTO,
+  isGeneralShape,
+  shapesOf,
   type Anchor,
   type FieldKind,
   type GeneralTolerance,
@@ -57,6 +59,7 @@ import {
   type OperationDTO,
   OperationIdSchema,
   PartDtoSchema,
+  type PartDTO,
   PartIdSchema,
   PROFILE_SIDES,
   SurfaceIdSchema,
@@ -73,7 +76,12 @@ import {
 import { DfmWarningSchema, libraryTools, partWarnings } from './warnings'
 import { ToolArg, toolFromArg, type ToolArgs } from './tool-args'
 import { designToolToDTO, type DesignTool } from './tool'
-import { reanchor } from './anchor'
+import { reanchor, type Extents } from './anchor'
+import type { Region2dPort } from '../geometry/2d/port'
+import { exactExtents, placeShape, shapeFacts } from './placement'
+import { requirePort, shapeFromDTO as namedShapeFromDTO } from './shape'
+import { SHAPE_ID_PATTERN } from './shape.dto'
+
 import { designChangeTargets } from './shape-users'
 
 // ── arg schemas ───────────────────────────────────────────────────────────────────────────
@@ -82,37 +90,41 @@ const Src = z
   .string()
   .min(1)
   .max(256)
-  .describe('Quantity as entered: literal (`1/16"`, `6 ±0.05`) or formula (`facing1.floor.z - 2`)')
-const PointArg = z
-  .tuple([Src, Src])
-  .describe('[x, y] in the part frame (part zero: top front-left)')
+  .describe('Literal (`1/16"`, `6 ±0.05`) or formula (`facing1.floor.z - 2`)')
+const PointArg = z.tuple([Src, Src]).describe('[u, v] in the face frame')
+const RotationArg = Src.optional().describe('CCW about the anchor point; default 0°')
 const ShapeArg = z
   .discriminatedUnion('kind', [
     z.object({
       kind: z.literal('rectangle'),
       center: PointArg,
-      length: Src.describe('Size along X'),
-      width: Src.describe('Size along Y'),
+      length: Src.describe('Size along u'),
+      width: Src.describe('Size along v'),
       cornerRadius: Src.optional().describe('Default 3 mm / 1/8"'),
+      rotation: RotationArg,
     }),
     z.object({ kind: z.literal('circle'), center: PointArg, diameter: Src }),
+    z.object({
+      kind: z.literal('named'),
+      shapeId: z.string().regex(SHAPE_ID_PATTERN),
+      center: PointArg,
+      rotation: RotationArg,
+      mirror: z.literal(true).optional().describe('Flip x before rotating'),
+    }),
   ])
-  .describe('Axis-aligned shape; center = anchor point. Replaces the whole shape on update')
+  .describe('center = anchor point; named places a part shape. Replaces the shape on update')
 const AnchorArg = AnchorDtoSchema.describe(
-  'Box point shape.center gives (min = low u/v); default centre. Update keeps the feature in place',
+  'Placed-box point center gives; default centre; update keeps the feature in place',
 )
 const ToleranceArg = z
   .object({
-    length: Src.nullable()
-      .optional()
-      .describe('± deviation for lengths, e.g. "0.1 mm"; null clears'),
-    angle: Src.nullable().optional().describe('± deviation for angles, e.g. "0.5°"; null clears'),
+    length: Src.nullable().optional().describe('Lengths, e.g. "0.1 mm"; null clears'),
+    angle: Src.nullable().optional().describe('Angles, e.g. "0.5°"; null clears'),
   })
-  .describe('General tolerance (one ± per kind) for untoleranced values')
+  .describe('General ± for untoleranced values')
 const NameArg = z.string().min(1).max(NAME_MAX).describe('Display label')
 const OnArg = SurfaceIdSchema.describe(
-  'Face it starts from: a stock face (stock.top, stock.bottom, stock.side[0..3]) or an earlier ' +
-    'floor / tab top; positions are [u, v] in its face frame; default: last top facing floor',
+  'Start face: stock.top/bottom/side[0..3] or an earlier floor / tab top; default last top facing floor',
 )
 const StockFaceArg = SurfaceIdSchema.describe(
   'Stock face it starts from: stock.top (default), stock.bottom or stock.side[0..3]',
@@ -122,9 +134,12 @@ const OpArg = { partId: PartIdSchema, operationId: OperationIdSchema }
 const TabsArg = z.object({
   count: Src.optional().describe('Whole number ≥ 0; default 4'),
   width: Src.optional().describe('Default 6 mm / 1/4"'),
-  thickness: Src.optional().describe(
-    'Measured up from the opposite stock face (the bottom for stock.top); default 2 mm / 1/16"',
-  ),
+  thickness: Src.optional().describe('Up from the opposite stock face; default 2 mm / 1/16"'),
+  positions: z
+    .array(Src)
+    .nullable()
+    .optional()
+    .describe('Along the loop from its start point; replace count; null clears'),
 })
 
 const facingParams = {
@@ -150,12 +165,27 @@ const profileParams = {
   on: StockFaceArg.optional(),
   shape: ShapeArg,
   anchor: AnchorArg.optional(),
-  side: z.enum(PROFILE_SIDES).optional().describe('outside (part outline, default) or inside'),
+  side: z.enum(PROFILE_SIDES).optional().describe('Default outside; on: centred on the line'),
   slotWidth: Src.optional().describe('Default 6 mm / 1/4"'),
+  depth: Src.nullable().optional().describe('on only: blind groove depth; null = through'),
   tabs: TabsArg.optional(),
 }
 
 type ShapeArgs = z.output<typeof ShapeArg>
+
+/**
+ * Where an edit's named shapes come from: the part's shape DTOs (the draft's, so a shape command
+ * sees its own edit) and the 2D port that places them (`services.region2d`).
+ */
+interface ShapeEnv {
+  readonly dto: Pick<PartDTO, 'shapes'>
+  readonly port?: Region2dPort
+}
+
+const shapeEnv = (loaded: LoadedPart, port: Region2dPort | undefined): ShapeEnv => ({
+  dto: loaded.dto,
+  ...(port === undefined ? {} : { port }),
+})
 type ToleranceArgs = z.output<typeof ToleranceArg>
 
 // ── field parsing ─────────────────────────────────────────────────────────────────────────
@@ -171,6 +201,7 @@ class Fields {
   constructor(
     readonly units: UnitSystem,
     private readonly resolver: ReferenceResolver,
+    private readonly env: ShapeEnv = { dto: {} },
   ) {}
 
   q(path: string, kind: FieldKind, source: string): Quantity {
@@ -216,6 +247,26 @@ class Fields {
         anchor,
         diameter: this.q('shape.diameter', 'length', a.diameter),
       }
+    const rotation: Option<Quantity> =
+      a.rotation === undefined ? None : Some(this.q('shape.rotation', 'angle', a.rotation))
+    if (a.kind === 'named') {
+      if (!(this.env.dto.shapes ?? []).some((s) => s.id === a.shapeId))
+        this.results.push(
+          fail('input.malformed', `shape ${a.shapeId} does not exist in the part`, {
+            issues: [
+              { path: ['shape', 'shapeId'], rule: 'unknownShape', message: 'no such shape' },
+            ],
+          }),
+        )
+      return {
+        kind: 'named',
+        center,
+        anchor,
+        shapeId: a.shapeId,
+        rotation,
+        mirror: a.mirror === true,
+      }
+    }
     return {
       kind: 'rectangle',
       center,
@@ -229,7 +280,42 @@ class Fields {
         undefined,
         'cornerRadius',
       ),
+      rotation,
     }
+  }
+
+  /** `source` if given (null: None), else `prev`, else None. */
+  opt(
+    path: string,
+    kind: FieldKind,
+    source: string | null | undefined,
+    prev: Option<Quantity> | undefined,
+  ): Option<Quantity> {
+    if (source === null) return None
+    if (source !== undefined) return Some(this.q(path, kind, source))
+    return prev ?? None
+  }
+
+  /** The placed box of a general shape as exact extents (re-anchoring, anchor.ts). */
+  private extents(shape: Shape): AppResult<Extents | undefined> {
+    if (!isGeneralShape(shape)) return Ok(undefined)
+    const where = 'placedShape'
+    return requirePort(this.env.port, where).andThen((port) =>
+      this.shapesFor(shape)
+        .andThen((shapes) => placeShape(port, shape, shapes))
+        .map((p) => exactExtents(p.size)),
+    )
+  }
+
+  /** The named shape `shape` places, loaded (absent for other kinds). */
+  private shapesFor(shape: Shape): AppResult<Part['shapes']> {
+    if (shape.kind !== 'named') return Ok(undefined)
+    const dto = this.env.dto.shapes?.find((s) => s.id === shape.shapeId)
+    if (dto === undefined)
+      return fail('input.malformed', `shape ${shape.shapeId} does not exist in the part`, {
+        issues: [{ path: ['shape', 'shapeId'], rule: 'unknownShape', message: 'no such shape' }],
+      })
+    return namedShapeFromDTO(dto).map((n) => new Map([[shape.shapeId, n]]))
   }
 
   /**
@@ -247,7 +333,7 @@ class Fields {
     if (anchor === undefined) return shape
     // a shape arg that failed to parse has holes: its own errors are reported instead
     if (this.results.some((r) => r.isErr())) return shape
-    const r = reanchor(shape, anchor)
+    const r = this.extents(shape).andThen((extents) => reanchor(shape, anchor, extents))
     this.results.push(r)
     return r.unwrapOr(shape)
   }
@@ -300,13 +386,17 @@ export function withWarnings<R extends object>(
 ) {
   const library = ctx.services.library
   const tools = library === undefined ? [] : libraryTools(library)
-  return partWarnings(
-    { ...loaded.part, operations },
-    loaded.stock,
-    loaded.units,
-    tools,
-    loaded.snapshots,
-  )
+  return shapesOf(operations, loaded.dto)
+    .andThen((shapes) =>
+      partWarnings(
+        { ...loaded.part, operations, ...(shapes.size === 0 ? {} : { shapes }) },
+        loaded.stock,
+        loaded.units,
+        tools,
+        loaded.snapshots,
+        ctx.services.region2d,
+      ),
+    )
     .map((warnings) => ({ ...value, warnings }))
     .mapErr((e) => e.withContext(where))
 }
@@ -325,7 +415,8 @@ function invalid(issues: Issue[], where: string): AppResult<never> {
 
 /**
  * Whole-part check after an edit of `edited`: its constraints, references of all operations,
- * recalculation of its dependants (`recalc`), constraints of the others.
+ * recalculation of its dependants (`recalc`), constraints of the others. Named shapes are loaded
+ * from `env` and placed for their checks (validate.ts `ShapeFacts`).
  */
 function settle(
   ops: readonly Operation[],
@@ -333,12 +424,20 @@ function settle(
   edited: string | undefined,
   recalc: boolean,
   where: string,
+  env: ShapeEnv = { dto: {} },
 ): AppResult<readonly Operation[]> {
+  const loadedShapes = shapesOf(ops, env.dto)
+  if (loadedShapes.isErr()) return Err(loadedShapes.unwrapErr().withContext(where))
+  const shapes = loadedShapes.unwrap()
+  const facts = shapeFacts(ops, shapes, env.port)
+  if (facts.isErr()) return Err(facts.unwrapErr().withContext(where))
   if (edited !== undefined) {
     const own = operationIssues(
       ops,
       ops.findIndex((o) => o.id === edited),
       stock,
+      SurfaceTable.build(ops, stock, shapes),
+      facts.unwrap(),
     )
     if (own.length > 0) return invalid(own, where)
   }
@@ -346,7 +445,7 @@ function settle(
   if (refs.isErr()) return Err(refs.unwrapErr().withContext(where))
   const next = recalc && edited !== undefined ? recalculate(ops, stock, edited) : Ok([...ops])
   if (next.isErr()) return Err(next.unwrapErr().withContext(where))
-  return checkOperations(next.unwrap(), stock, edited)
+  return checkOperations(next.unwrap(), stock, edited, facts.unwrap(), shapes)
     .map(() => next.unwrap())
     .mapErr((e) => e.withContext(where))
 }
@@ -506,6 +605,7 @@ const profileSpec: KindSpec<typeof profileParams, Extract<Operation, { kind: 'pr
     shape: f.placedShape(a.shape, a.anchor, prev?.shape),
     side: a.side ?? prev?.side ?? 'outside',
     slotWidth: f.pick('slotWidth', 'length', a.slotWidth, prev?.slotWidth, 'slotWidth'),
+    depth: f.opt('depth', 'length', a.depth, prev?.depth),
     tabs: {
       count: f.pick('tabs.count', 'scalar', a.tabs?.count, prev?.tabs.count, 'tabCount'),
       width: f.pick('tabs.width', 'length', a.tabs?.width, prev?.tabs.width, 'tabWidth'),
@@ -516,6 +616,12 @@ const profileSpec: KindSpec<typeof profileParams, Extract<Operation, { kind: 'pr
         prev?.tabs.thickness,
         'tabThickness',
       ),
+      positions:
+        a.tabs?.positions === undefined
+          ? (prev?.tabs.positions ?? None)
+          : a.tabs.positions === null
+            ? None
+            : Some(a.tabs.positions.map((p, i) => f.q(`tabs.positions.${i}`, 'length', p))),
     },
   }),
 }
@@ -566,7 +672,8 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
       if (loaded.isErr()) return loaded
       const { part, stock, units } = loaded.unwrap()
       const ops = part.operations
-      const f = new Fields(units, SurfaceTable.build(ops, stock).resolver(ops.length))
+      const env = shapeEnv(loaded.unwrap(), ctx.services.region2d)
+      const f = new Fields(units, SurfaceTable.build(ops, stock).resolver(ops.length), env)
       const n = nextNumber(part, spec.kind)
       const id = `${ID_PREFIX[spec.kind]}${n}`
       const built = spec.build(args, undefined, { f, id, name: args.name ?? `${label} ${n}`, ops })
@@ -585,7 +692,7 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
         tool: tool.unwrap(),
         toolLocked: args.tool !== undefined,
       } as O
-      const settled = settle([...ops, op], stock, id, false, where)
+      const settled = settle([...ops, op], stock, id, false, where, env)
       if (settled.isErr()) return settled
       writeOperations(draft, args.partId, settled.unwrap())
       const result = {
@@ -615,7 +722,14 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
       const args = rawArgs as { partId: string; operationId: string } & UpdateArgs<P>
       const loaded = load(draft, args.partId, where)
       if (loaded.isErr()) return loaded
-      const settled = applyUpdate(spec, loaded.unwrap(), args.operationId, args, where)
+      const settled = applyUpdate(
+        spec,
+        loaded.unwrap(),
+        args.operationId,
+        args,
+        where,
+        ctx.services.region2d,
+      )
       if (settled.isErr()) return settled
       writeOperations(draft, args.partId, settled.unwrap())
       return withWarnings({}, loaded.unwrap(), settled.unwrap(), ctx, where)
@@ -639,14 +753,16 @@ function applyUpdate<P extends z.ZodRawShape, O extends Operation>(
   operationId: string,
   args: UpdateArgs<P>,
   where: string,
+  port?: Region2dPort,
 ): AppResult<readonly Operation[]> {
   const { part, stock, units } = loaded
+  const env = shapeEnv(loaded, port)
   const index = findOperation(part, operationId, spec.kind, where)
   if (index.isErr()) return index
   const i = index.unwrap()
   const ops = part.operations
   const prev = ops[i] as O
-  const f = new Fields(units, SurfaceTable.build(ops, stock).resolver(i))
+  const f = new Fields(units, SurfaceTable.build(ops, stock).resolver(i), env)
   const built = spec.build(args, prev, { f, id: prev.id, name: args.name ?? prev.name, ops })
   const op = {
     ...built,
@@ -657,7 +773,7 @@ function applyUpdate<P extends z.ZodRawShape, O extends Operation>(
   const parsed = f.done()
   if (parsed.isErr()) return Err(parsed.unwrapErr().withContext(where))
   const next = ops.map((o, k) => (k === i ? op : o))
-  return settle(next, stock, prev.id, true, where)
+  return settle(next, stock, prev.id, true, where, env)
 }
 
 // ── part and shared operation commands ────────────────────────────────────────────────────
@@ -904,7 +1020,14 @@ const warningList = defineQuery({
     const { part, stock, units } = loaded.unwrap()
     const state = ctx.services.evaluations?.state(doc, args.partId) ?? { status: 'pending' }
     const again = choosesAgain(doc.parts[args.partId]!, args.partId, ctx.apply?.pending() ?? [])
-    return partWarnings(part, stock, units, libraryTools(library), doc.snapshots)
+    return partWarnings(
+      part,
+      stock,
+      units,
+      libraryTools(library),
+      doc.snapshots,
+      ctx.services.region2d,
+    )
       .map((warnings) => {
         const r = warningsWithEvaluation(doc, args.partId, warnings, state)
         return {
@@ -960,6 +1083,7 @@ export function updateOperation(
   operationId: string,
   args: Readonly<Record<string, unknown>>,
   where: string,
+  port?: Region2dPort,
 ): AppResult<readonly Operation[]> {
   const found = findOperation(loaded.part, operationId, undefined, where)
   if (found.isErr()) return found
@@ -976,7 +1100,7 @@ export function updateOperation(
       })),
       where,
     })
-  return applyUpdate(spec, loaded, operationId, args as UpdateArgs<z.ZodRawShape>, where)
+  return applyUpdate(spec, loaded, operationId, args as UpdateArgs<z.ZodRawShape>, where, port)
 }
 
 export const DESIGN_COMMANDS: readonly AnyCommand[] = [

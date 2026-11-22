@@ -131,7 +131,7 @@ export const designMessages = {
     bottoms: { through: 'Through', flat: 'Flat', drillPoint: 'Drill point' },
     pointAngle: 'Point angle',
     side: 'Side',
-    sides: { outside: 'Outside', inside: 'Inside' },
+    sides: { outside: 'Outside', inside: 'Inside', on: 'On line' },
     slotWidth: 'Slot width',
     tabsCount: 'Tab count',
     tabsWidth: 'Tab width',

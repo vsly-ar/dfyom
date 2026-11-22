@@ -2,7 +2,7 @@
  * Pocket: offset clearing from the center outwards, helix/ramp/plunge entry, wall finishing.
  * Doc: docs/modes/plan-v0.1.md#pocket-offset-clearing and #toolpath-generators-task-210
  */
-import { EPSILON, type Contour, type Vec2, type Vec3 } from '../geometry/model'
+import { EPSILON, type AnalyticContour as Contour, type Vec2, type Vec3 } from '../geometry/model'
 import { Err, Ok, type AppResult } from '../../shared/result'
 import { noSteps, type Steps } from '../workers/steps'
 import { commonIssues, levels, passSteps, toolpath } from './common'

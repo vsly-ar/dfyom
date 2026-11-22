@@ -3,6 +3,7 @@
  * Doc: docs/modes/design.md#implementation-task-25
  */
 import { Err, fail, Ok, type AppResult } from '../../shared/result'
+import type { Region2dPort } from '../geometry/2d/port'
 import type { PartGeometryInput } from '../geometry/model'
 import { Snapshot } from '../library/snapshot'
 import { Stock } from '../library/stock'
@@ -66,6 +67,12 @@ export function loadPart(doc: ProjectDoc, partId: string, where: string): AppRes
 }
 
 /** The geometry input of a part of the document (for evaluation, task 2.8/2.9). */
-export function partGeometryInput(doc: ProjectDoc, partId: string): AppResult<PartGeometryInput> {
-  return loadPart(doc, partId, 'partGeometryInput').andThen((l) => toGeometryInput(l.part, l.stock))
+export function partGeometryInput(
+  doc: ProjectDoc,
+  partId: string,
+  region2d?: Region2dPort,
+): AppResult<PartGeometryInput> {
+  return loadPart(doc, partId, 'partGeometryInput').andThen((l) =>
+    toGeometryInput(l.part, l.stock, region2d),
+  )
 }

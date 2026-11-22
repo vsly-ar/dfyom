@@ -95,6 +95,16 @@ const src = (q: QuantityDTO): string => q.source
 /** The command args of a shape (as entered), from its DTO. */
 export function shapeArgs(shape: OperationShapeDTO): Record<string, unknown> {
   const center = [src(shape.center[0]), src(shape.center[1])]
+  const rotation =
+    'rotation' in shape && shape.rotation !== undefined ? { rotation: src(shape.rotation) } : {}
+  if (shape.kind === 'named')
+    return {
+      kind: 'named',
+      shapeId: shape.shapeId,
+      center,
+      ...rotation,
+      ...(shape.mirror === true ? { mirror: true } : {}),
+    }
   return shape.kind === 'rectangle'
     ? {
         kind: 'rectangle',
@@ -102,6 +112,7 @@ export function shapeArgs(shape: OperationShapeDTO): Record<string, unknown> {
         length: src(shape.length),
         width: src(shape.width),
         cornerRadius: src(shape.cornerRadius),
+        ...rotation,
       }
     : { kind: 'circle', center, diameter: src(shape.diameter) }
 }
@@ -141,8 +152,8 @@ export function updateArgs(
  * anchored rectangle becomes a circle in the same front-left corner, as a size edit would.
  */
 export function shapeKindArgs(
-  shape: OperationShapeDTO,
-  kind: OperationShapeDTO['kind'],
+  shape: Exclude<OperationShapeDTO, { kind: 'named' }>,
+  kind: 'rectangle' | 'circle',
 ): Record<string, unknown> {
   const center = [src(shape.center[0]), src(shape.center[1])]
   if (kind === 'circle')

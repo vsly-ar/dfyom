@@ -4,8 +4,8 @@
  */
 import { describe, expect, it } from 'vitest'
 import { contourParam, perimeter } from '../geometry/contour'
-import type { OperationGeometry, Vec2 } from '../geometry/model'
-import { TEST_STOCK, testPart } from '../geometry/testing/test-part'
+import type { Vec2 } from '../geometry/model'
+import { TEST_STOCK, testPart, type TestOperation } from '../geometry/testing/test-part'
 import type { ProfileOperation } from './model'
 import { Heightmap, insideDistance } from './testing/oracles'
 import { violations } from './testing/rules'
@@ -28,7 +28,7 @@ function inTab(op: ProfileOperation, q: Vec2, d: number): boolean {
 }
 
 /** Analytic height of the test part's top surface at `p` (−T where cut through). */
-function expectedHeight(p: Vec2, ops: readonly OperationGeometry[]): number {
+function expectedHeight(p: Vec2, ops: readonly TestOperation[]): number {
   let h = 0
   for (const op of ops) {
     if (op.kind === 'facing') h = Math.min(h, -op.depth)

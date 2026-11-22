@@ -428,6 +428,7 @@ class Host implements AppHost {
     const scheduler = createEvaluationScheduler({
       workers: this.o.workers,
       log: this.o.log,
+      ...(this.o.region2d === undefined ? {} : { region2d: this.o.region2d }),
       ...(this.o.timers === undefined ? {} : { timers: this.o.timers }),
       ...(this.o.clock === undefined ? {} : { clock: this.o.clock }),
       ...(this.o.evaluationDebounceMs === undefined

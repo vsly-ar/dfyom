@@ -4,6 +4,7 @@ import { expect } from 'vitest'
 import type { AppError } from '../../shared/errors/app-error'
 import type { ErrorCode } from '../../shared/errors/codes'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
+import type { Services } from '../commands/context'
 import type { DocumentCommand } from '../commands/define'
 import { applyDocPatches } from '../commands/history'
 import { inProcessWorkers } from '../commands/jobs'
@@ -81,8 +82,10 @@ export interface PlanSetup extends DesignSetup {
   failWith(name: string, args: object, code: ErrorCode): Promise<AppError>
 }
 
-export async function planSetup(opts: { part?: boolean } = {}): Promise<PlanSetup> {
-  const s = await designSetup()
+export async function planSetup(
+  opts: { part?: boolean; services?: Partial<Services> } = {},
+): Promise<PlanSetup> {
+  const s = await designSetup(opts.services === undefined ? {} : { services: opts.services })
   if (opts.part !== false) await buildTestPart(s)
   const add = async (kind: string, values: object) =>
     ((await s.run(`library.${kind}.add`, { values: libraryInput(values) })) as { id: string }).id

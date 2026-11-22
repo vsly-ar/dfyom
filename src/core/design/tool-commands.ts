@@ -18,6 +18,7 @@ import {
   type ApplyHook,
   type QueryDef,
 } from '../commands/define'
+import type { Region2dPort } from '../geometry/2d/port'
 import type { DfmWarning } from '../geometry/model'
 import type { LibraryItem } from '../library/library-item'
 import { deepEqual, refreshSnapshot, Snapshot } from '../library/snapshot'
@@ -59,8 +60,9 @@ function choiceInputs(
   loaded: LoadedPart,
   library: readonly LibraryItem[],
   snapshots: ProjectDoc['snapshots'],
+  region2d?: Region2dPort,
 ): AppResult<(index: number, op?: Operation) => ChoiceInput> {
-  return toGeometryInput(loaded.part, loaded.stock).map((input) => (index, op) => ({
+  return toGeometryInput(loaded.part, loaded.stock, region2d).map((input) => (index, op) => ({
     op: op ?? loaded.part.operations[index]!,
     geometry: input.operations[index]!,
     stock: input.stock,
@@ -264,7 +266,7 @@ const toolCandidates = defineQuery({
     const l = loaded.unwrap()
     const index = findOperation(l.part, args.operationId, undefined, where)
     if (index.isErr()) return index
-    const inputs = choiceInputs(l, toolItems(ctx), doc.snapshots)
+    const inputs = choiceInputs(l, toolItems(ctx), doc.snapshots, ctx.services.region2d)
     if (inputs.isErr()) return Err(inputs.unwrapErr().withContext(where))
     const input = inputs.unwrap()(index.unwrap())
     const g = generalizedChoice(input)
@@ -325,7 +327,7 @@ export function autoChooseTools(
     const loaded = loadPart(draft as ProjectDoc, partId, where)
     if (loaded.isErr()) return loaded
     const l = loaded.unwrap()
-    const inputs = choiceInputs(l, library, draft.snapshots)
+    const inputs = choiceInputs(l, library, draft.snapshots, ctx.services.region2d)
     if (inputs.isErr()) return Err(inputs.unwrapErr().withContext(where))
     for (const [i, op] of l.part.operations.entries()) {
       if (op.toolLocked || !ids.has(op.id)) continue
@@ -368,7 +370,7 @@ export function toolScan(
     const loaded = loadPart(doc, partId, 'project.open')
     if (loaded.isErr()) continue
     const l = loaded.unwrap()
-    const inputs = choiceInputs(l, library, doc.snapshots)
+    const inputs = choiceInputs(l, library, doc.snapshots, ctx.services.region2d)
     if (inputs.isErr()) continue
     for (const [i, op] of l.part.operations.entries()) {
       if (op.toolLocked) continue

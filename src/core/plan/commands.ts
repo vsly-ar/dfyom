@@ -499,7 +499,7 @@ const designOperationUpdate = defineCommand({
   machine: false,
   args: z.object({ ...PlanArg, operationId: OperationIdSchema, ...OPERATION_UPDATE_ARGS }),
   result: Empty,
-  run(draft, rawArgs) {
+  run(draft, rawArgs, ctx) {
     const where = 'plan.design.operation.update'
     const { planId, operationId, ...params } = rawArgs as {
       planId: string
@@ -513,6 +513,7 @@ const designOperationUpdate = defineCommand({
       operationId,
       params,
       where,
+      ctx.services.region2d,
     )
     if (ops.isErr()) return ops
     writeOperationList(draft.plans[planId]!.design.part.operations, ops.unwrap())
