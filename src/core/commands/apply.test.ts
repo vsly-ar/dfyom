@@ -150,6 +150,22 @@ describe('pending changes', () => {
     expect(t.pending().changes.map((c) => c.label)).toEqual(['Renamed removed'])
   })
 
+  it('a new part is pending through its operations only: an empty part (or a reference) is not', async () => {
+    const t = await setup()
+    const empty = newProjectDoc({ name: 'Bracket', unitSystem: 'mm' })
+    const doc = t.d.doc
+    const part = doc.parts[t.partId]!
+    // the part with its pocket against a project without it: the pocket, not the part
+    expect(pendingChanges(doc, empty)).toEqual([
+      expect.objectContaining({ partId: t.partId, field: 'added', label: 'Pocket 1 added' }),
+    ])
+    // the part alone (as right after "Create part", or with only a reference imported): nothing
+    const bare = { ...doc, parts: { [t.partId]: { ...part, operations: [] } } }
+    expect(pendingChanges(bare, empty)).toEqual([])
+    // removing a part stays pending (its plans follow on Apply)
+    expect(pendingChanges(empty, doc).map((c) => c.label)).toEqual(['Bracket removed'])
+  })
+
   it('is computed from the documents alone (pure function)', () => {
     const doc = newProjectDoc({ name: 'A', unitSystem: 'mm' })
     expect(pendingChanges(doc, doc)).toEqual([])

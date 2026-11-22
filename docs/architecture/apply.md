@@ -84,7 +84,8 @@ A new automatic reaction is classified in this table when it is designed:
 | A changed library item that a `draft` plan holds a copy of                                                        | (library item)                         | draft library follow ([decision 5](#decisions)) |
 
 - **By value:** a field is pending when its value differs from the value at the last Apply, compared as the plan's stale detection compares (quantities by value and tolerance, not `source`, [plan-v0.1.md](../modes/plan-v0.1.md#implementation-task-213)). Retyping `8` as `8.0 mm` is not pending; editing a field five times counts once; editing it back to the applied value removes it.
-- **Not pending:** names and other fields no deferred work reads; selection, camera, UI state; library edits that no `draft` plan copies (the [instant](#instant-and-deferred-reactions) library DFM checks re-run anyway).
+- **New and removed parts:** a new part counts through its operations (one "added" key each); a part without operations has no derived work and is not pending (so "Create part", alone or followed by a [reference](../modes/reference-model.md) import, shows no "Apply 1"; decided 2026-11-22). A removed part is one key (`removed`).
+- **Not pending:** names and other fields no deferred work reads; selection, camera, UI state; reference models ([reference-model.md](../modes/reference-model.md), instant only); library edits that no `draft` plan copies (the [instant](#instant-and-deferred-reactions) library DFM checks re-run anyway).
 - **Count:** `N` = the number of keys. The button shows it; the tooltip lists them ("Pocket 1: depth, corner radius · Drilling 2 added").
 - **Cost:** tracked incrementally from each commit's patches (compare only the touched paths against the baseline); the baseline is an immutable document, so it shares structure with the current one.
 

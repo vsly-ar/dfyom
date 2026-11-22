@@ -1,12 +1,13 @@
 // Setup panel (v0.2 task F6): the plan's setups in machining order, each row with its name, the
 // direction (an icon of the stock with its up face shaded, plus the word), the WCS corner and the
 // rotation; the plan operations nest under their setup (kind icon, name, tool, stale badge,
-// toolpath state, error and warning counts). Setups move with buttons and Alt+↑/↓
+// toolpath state, error and warning counts). Setups move from their menu and with Alt+↑/↓
 // (`plan.setup.move`) and merge from their menu with setups of the same direction
 // (`plan.setup.merge`); plan operations move with buttons and Alt+↑/↓ within their setup and
 // across into a neighbouring setup of the same direction (`plan.operation.move`), and split off
 // into a new setup or move to another setup of the same direction from their menu. ↑/↓ move the
-// focus over every row. Selecting a setup opens it in the inspector; the selected setup (or the
+// focus over every row. A setup row's actions (move up / move down / merge) sit in its menu, the
+// one button on its name line, so name and subtitle stay readable in a narrow navigator. Selecting a setup opens it in the inspector; the selected setup (or the
 // selected operation's) is the one previewed and exported. Doc: docs/conventions/ui.md#design-and-plan-controls-v02,
 // docs/modes/plan-v0.2.md#merge-split-reorder
 import {
@@ -137,9 +138,10 @@ export function SetupList({
           const merges = sameDirectionSetups(plan, setup)
           const isCurrent = several && setup.id === current.id
           return (
-            <li key={setup.id} className={styles['setup']}>
+            <li key={setup.id} className={styles['setupItem']}>
               <div
-                className={styles['op']}
+                className={`${styles['op']} ${styles['setupRow']}`}
+                data-actions={canMove ? '' : undefined}
                 data-selected={selected === setup.id ? '' : undefined}
                 data-current={isCurrent ? '' : undefined}
               >
@@ -157,40 +159,43 @@ export function SetupList({
                     className={styles['dirIcon']}
                   />
                   <span className={styles['opText']}>
-                    <span className={styles['setupName']}>
+                    <span className={styles['setupName']} title={name}>
                       {several ? `${si + 1}. ${name}` : name}
                     </span>
                     <span className={styles['opMeta']}>
-                      <span className={styles['opTool']}>{setupMeta(doc, plan, setup)}</span>
+                      <span className={styles['opTool']} title={setupMeta(doc, plan, setup)}>
+                        {setupMeta(doc, plan, setup)}
+                      </span>
                     </span>
                   </span>
                   {isCurrent ? <span className={styles['srOnly']}>{m.setup.shown}</span> : null}
                 </button>
                 {canMove ? (
-                  <span className={styles['opActions']}>
-                    {several ? (
-                      <>
-                        <IconButton
-                          label={m.setup.moveUp(name)}
-                          icon={<ArrowUp aria-hidden="true" />}
-                          shortcut="Alt+↑"
-                          disabled={si === 0}
-                          onClick={() => void moveSetup(setup, -1)}
-                        />
-                        <IconButton
-                          label={m.setup.moveDown(name)}
-                          icon={<ArrowDown aria-hidden="true" />}
-                          shortcut="Alt+↓"
-                          disabled={si === plan.setups.length - 1}
-                          onClick={() => void moveSetup(setup, 1)}
-                        />
-                      </>
-                    ) : null}
+                  <span className={styles['setupActions']}>
                     <Menu
                       label={m.setup.actions(name)}
                       align="end"
-                      items={
-                        merges.length === 0
+                      items={[
+                        ...(several
+                          ? ([
+                              {
+                                label: m.setup.moveUpItem,
+                                icon: <ArrowUp aria-hidden="true" />,
+                                shortcut: 'Alt+↑',
+                                disabled: si === 0,
+                                onSelect: () => void moveSetup(setup, -1),
+                              },
+                              {
+                                label: m.setup.moveDownItem,
+                                icon: <ArrowDown aria-hidden="true" />,
+                                shortcut: 'Alt+↓',
+                                disabled: si === plan.setups.length - 1,
+                                onSelect: () => void moveSetup(setup, 1),
+                              },
+                              'separator',
+                            ] satisfies MenuEntry[])
+                          : []),
+                        ...(merges.length === 0
                           ? [{ label: m.setup.noMerge, disabled: true, onSelect: () => {} }]
                           : merges.map((other) => ({
                               label: m.setup.merge(other.name),
@@ -200,13 +205,12 @@ export function SetupList({
                                   planId: plan.id,
                                   setupIds: [setup.id, other.id],
                                 }),
-                            }))
-                      }
+                            }))),
+                      ]}
                     >
                       <IconButton
                         label={m.setup.actions(name)}
                         icon={<MoreHorizontal aria-hidden="true" />}
-                        className={styles['opMenu']}
                       />
                     </Menu>
                   </span>

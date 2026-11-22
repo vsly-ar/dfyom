@@ -60,7 +60,12 @@ function useGrow(reduced: boolean): number {
   return reduced ? 1 : 1 - (1 - t) ** 3 // ease out
 }
 
-/** One arrow: a shaft from `at` along `dir` and a cone head. */
+/** Head proportions: a glyph's stubby head, and the slim head of the face-frame axes (CAD style). */
+const GLYPH_HEAD = { length: 0.28, radius: 0.38 } as const
+const AXIS_HEAD = { length: 0.14, radius: 0.24 } as const
+
+/** One arrow: a shaft from `at` along `dir` and a cone head (`shape`: head length as a fraction of
+ * the arrow, radius as a fraction of the head). */
 function Arrow({
   at,
   dir,
@@ -68,6 +73,7 @@ function Arrow({
   colour: c,
   width,
   onTop = false,
+  shape = GLYPH_HEAD,
 }: {
   at: Vec3
   dir: Vec3
@@ -75,9 +81,10 @@ function Arrow({
   colour: Color
   width: number
   onTop?: boolean
+  shape?: { readonly length: number; readonly radius: number }
 }): React.JSX.Element {
-  const head = length * 0.28
-  const radius = head * 0.38
+  const head = length * shape.length
+  const radius = head * shape.radius
   const base = add(at, dir, length - head)
   const quaternion = useMemo(
     () => new Quaternion().setFromUnitVectors(new Vector3(0, 1, 0), new Vector3(...dir)),
@@ -147,7 +154,8 @@ export function PickGlyphs({
   )
 }
 
-/** The selected operation's face frame: `u` and `v` arrows from the origin, labelled. */
+/** The selected operation's face frame: slim `u` and `v` arrows from the origin (thin shafts,
+ * small heads), each labelled just past its tip on a chip that reads on any surface. */
 export function FrameAxes({
   frame,
   palette,
@@ -160,7 +168,7 @@ export function FrameAxes({
   useEffect(() => invalidate(), [frame, invalidate])
   const label = (axis: 'u' | 'v') => (
     <Html
-      position={add(frame.origin, frame[axis], frame.length * 1.12)}
+      position={add(frame.origin, frame[axis], frame.length * 1.16)}
       center
       zIndexRange={[10, 0]}
       className={styles['axisLabel']}
@@ -170,8 +178,18 @@ export function FrameAxes({
   )
   return (
     <group>
-      <Arrow at={frame.origin} dir={frame.u} length={frame.length} colour={c} width={1.5} onTop />
-      <Arrow at={frame.origin} dir={frame.v} length={frame.length} colour={c} width={1.5} onTop />
+      {(['u', 'v'] as const).map((axis) => (
+        <Arrow
+          key={axis}
+          at={frame.origin}
+          dir={frame[axis]}
+          length={frame.length}
+          colour={c}
+          width={1.5}
+          shape={AXIS_HEAD}
+          onTop
+        />
+      ))}
       {label('u')}
       {label('v')}
     </group>

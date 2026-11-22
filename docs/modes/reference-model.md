@@ -81,7 +81,7 @@ The original file bytes are stored with the project as a content-addressed **ass
 
 - Ghost in the Design viewport: translucent neutral material with edges, drawn after the part, never pickable in face-pick mode and never highlighted as a face target (rules: [ui.md § Reference ghost](../conventions/ui.md#reference-ghost-v02)).
 - **Visibility** is per-window view state in the window's UI store ([decision 2](#decisions)): the eye toggles it without a command, an undo step or the unsaved mark; a new window or a reopened project shows the reference. Headless instances have no viewport, so agents have no visibility command.
-- Navigator: a "Reference" row under the stock with the visibility eye; inspector: file name, triangles, source unit (with the guess reason), scale, rotation (90° buttons per axis and the three angle fields), position, and "Fit to stock" with the anchor picker and the Z choice.
+- Navigator: a "Reference" row under the stock (its name, truncated with a tooltip, over the triangle count on one line) with the visibility eye; inspector: file name, triangles, source unit (with the guess reason), scale, rotation (90° buttons per axis and the three angle fields), position, and "Fit to stock" with the anchor picker and the Z choice.
 - The renderer receives the parsed mesh once per asset and applies the placement matrix itself, so editing placement never re-sends the mesh ([§ Ghost mesh](#ghost-mesh-task-r3)).
 
 ## Performance

@@ -261,23 +261,41 @@ describe('dfyom CLI', { timeout: 60_000 }, () => {
   })
 
   it('batch: "apply": false leaves an edit pending until a project.apply line', async () => {
-    const lines = [
-      { name: 'project.create', args: { name: 'Pending', unitSystem: 'mm' } },
-      { name: 'design.part.add', args: { name: 'P', stockLibraryItemId: stock }, apply: false },
-      { name: 'project.pending.get', args: {} },
-      { name: 'project.apply', args: {} },
-      { name: 'project.pending.get', args: {} },
-    ].map((l) => JSON.stringify(l))
-    const r = await cli(['batch'], lines.join('\n'))
-    const out = r.stdout
-      .trim()
-      .split('\n')
-      .map((l) => JSON.parse(l) as { ok: boolean; value: unknown; applied?: unknown })
-    expect(out.map((o) => o.ok)).toEqual([true, true, true, true, true])
-    expect(out[1]?.applied).toBeUndefined()
-    expect(out[2]?.value).toMatchObject({ count: 1 })
-    expect(out[3]?.value).toMatchObject({ changes: 1 })
-    expect(out[4]?.value).toMatchObject({ count: 0 })
+    const p = spawnCli(['batch'], t.dir)
+    const send = async (line: object) => {
+      p.send(line)
+      return (await p.next()) as { ok: boolean; value: unknown; applied?: unknown }
+    }
+    expect(
+      (await send({ name: 'project.create', args: { name: 'Pending', unitSystem: 'mm' } })).ok,
+    ).toBe(true)
+    // an empty part has no derived work: never pending (apply.md § What is pending)
+    const part = await send({
+      name: 'design.part.add',
+      args: { name: 'P', stockLibraryItemId: stock },
+      apply: false,
+    })
+    expect(part.applied).toBeUndefined()
+    expect((await send({ name: 'project.pending.get', args: {} })).value).toMatchObject({
+      count: 0,
+    })
+    const { partId } = part.value as { partId: string }
+    const facing = await send({
+      name: 'design.facing.add',
+      args: { partId, depth: '0.5' },
+      apply: false,
+    })
+    expect(facing.ok).toBe(true)
+    expect(facing.applied).toBeUndefined()
+    expect((await send({ name: 'project.pending.get', args: {} })).value).toMatchObject({
+      count: 1,
+    })
+    expect((await send({ name: 'project.apply', args: {} })).value).toMatchObject({ changes: 1 })
+    expect((await send({ name: 'project.pending.get', args: {} })).value).toMatchObject({
+      count: 0,
+    })
+    p.kill('SIGTERM')
+    await p.exited
   })
 
   it('SIGTERM shuts down under control: locks released, unsaved changes recoverable, 143', async () => {

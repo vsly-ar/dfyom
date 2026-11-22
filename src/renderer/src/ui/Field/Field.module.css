@@ -360,13 +360,13 @@
   display: none;
 }
 
-/* below 260 px the support buttons wrap under the text */
+/* below 260 px a fix button wraps under the text; a lone dismiss (an icon) stays at its end */
 @container (max-width: 260px) {
-  .item:has(> .actions:not(:empty)) {
+  .item:has(> .actions > :not(.quick)) {
     grid-template-columns: 14px minmax(0, 1fr);
     padding-bottom: 4px;
   }
-  .item > .actions {
+  .item:has(> .actions > :not(.quick)) > .actions {
     grid-column: 2;
     justify-self: start;
   }

@@ -487,6 +487,10 @@
   padding: 0 0 var(--space-1);
 }
 
+.setupItem {
+  display: grid;
+}
+
 .setupSelect {
   /* outdented against its operations (their icons sit 8 px further in): nesting at full width */
   grid-template-columns: var(--icon-lg) minmax(0, 1fr);
@@ -510,6 +514,28 @@
   font-weight: var(--weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* a setup row's one action, its menu (move up / move down / merge), sits at the end of the name
+   line in a slot the name never runs into; the subtitle below keeps the row's full width */
+.setupRow[data-actions] .setupName {
+  padding-right: calc(var(--control-md) + var(--space-1));
+}
+
+.setupActions {
+  position: absolute;
+  top: var(--space-0-5);
+  right: var(--space-1);
+  display: inline-flex;
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-standard);
+}
+
+.op:hover .setupActions,
+.op:focus-within .setupActions,
+.op[data-selected] .setupActions,
+.setupActions:has([aria-expanded='true']) {
+  opacity: 1;
 }
 
 /* the setup the viewport shows and the panel exports (several setups only) */
