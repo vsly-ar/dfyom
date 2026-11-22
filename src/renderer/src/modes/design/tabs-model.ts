@@ -1,17 +1,18 @@
 // Tabs of a selected profile along its loop (task U2), pure: the loop in the face frame as the
 // geometry input builds it (its start point, counter-clockwise), the tab centres the cut uses
 // (`tabs.positions`, else the count rule: evenly from half a spacing after the start point, v0.1
-// rectangles and circles from the middle of their front wall), the distance along the loop of a
-// point, a dragged marker kept off its neighbours, a new tab in the largest gap, and a dragged
-// marker's snap (U3: loop points, the grid along the loop).
+// rectangles and circles from the middle of their front wall; tabs over free sides moved, TB1),
+// the distance along the loop of a point, a dragged marker kept off its neighbours, a new tab in
+// the largest gap, and a dragged marker's snap (U3: loop points, the grid along the loop).
 // Doc: docs/conventions/ui.md#tab-markers, docs/modes/design-v0.3.md#tabs-on-shapes
 import { toGeometryInput } from '../../../../core/design/geometry-input'
-import { profileChain, tabCentres } from '../../../../core/geometry/outline'
+import { localStock, type StockSize } from '../../../../core/geometry/face'
+import { profileChain } from '../../../../core/geometry/outline'
+import { resolveProfileTabs } from '../../../../core/geometry/tab-hold'
 import { chainLength, chainPointAt, closestOnChains } from '../../../../core/geometry/2d/measure'
 import { arcRadius, elementLength, type Loop } from '../../../../core/geometry/2d/model'
 import type { Region2dPort } from '../../../../core/geometry/2d/port'
 import type { OperationGeometry, Vec2 } from '../../../../core/geometry/model'
-import { wallMiddle } from '../../../../core/toolpath/pocket'
 import { shapePoints, SNAP_PX, snapPoint, type SnapKind } from '../../viewport/snap'
 import type { DesignPart } from './model'
 
@@ -51,25 +52,20 @@ export function profileTabs(
   if (hit !== undefined) return hit ?? undefined
   const input = toGeometryInput(loaded.part, loaded.stock, port)
   const g = input.isOk() ? input.unwrap().operations.find((o) => o.id === operationId) : undefined
-  const out = g?.kind === 'profile' ? tabsOf(g) : undefined
+  const out =
+    g?.kind === 'profile'
+      ? tabsOf(g, localStock(g.direction ?? '+z', input.unwrap().stock))
+      : undefined
   byOp.set(key, out ?? null)
   return out
 }
 
-function tabsOf(g: ProfileGeometry): ProfileTabs {
+function tabsOf(g: ProfileGeometry, stock: StockSize): ProfileTabs {
   const { chain, closed } = profileChain(g)
   const length = chainLength(chain)
-  const c = g.shape.contour
   const entered = g.tabs.positions !== undefined
-  let centres: number[]
-  if (entered || (c.kind !== 'rectangle' && c.kind !== 'circle'))
-    centres = tabCentres(length, g.tabs)
-  else {
-    // v0.1 rule (toolpath/tabs.ts): the first at the middle of the front wall
-    const n = Number.isInteger(g.tabs.count) && g.tabs.count > 0 ? g.tabs.count : 0
-    const s0 = wallMiddle(c)
-    centres = Array.from({ length: n }, (_, i) => mod(s0 + (i * length) / n, length))
-  }
+  // the centres the cut uses: the count rule with tabs off free sides moved (TB1), else as entered
+  const centres = resolveProfileTabs(g, stock).centres.map((c) => (entered ? c : mod(c, length)))
   return {
     chain,
     closed,

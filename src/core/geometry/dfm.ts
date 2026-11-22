@@ -33,6 +33,7 @@ import {
 import { inradius, slotCoversOpening } from './operations'
 import { profileChain } from './outline'
 import { SHAPE_CHORD_BUDGET, shapeChords } from './shape-solids'
+import { resolveProfileTabs } from './tab-hold'
 import { FIT_SLACK, shapeMeasure, type ShapeMeasure } from './shape-measure'
 import { chamferFit, reachDepth, toolFit } from './tool-fit'
 
@@ -652,6 +653,7 @@ function profile(
   else out.push(...corners(op, lib))
   out.push(...slotTool(op, lib))
   out.push(...tabRules(op, op.tabs.count, covers, () => narrowest(op), unitSystem))
+  if (!covers && op.tabs.count > 0) out.push(...tabHold(op, stock, out))
   return out
 }
 
@@ -900,6 +902,59 @@ function shapePocket(
 }
 
 /**
+ * `dfm.tabsRelocated` / `dfm.tabsNoHold` (v0.4 TB1): counted tabs moved off sides where the slot
+ * leaves no stock beyond the cut, tabs that hold nothing (none when `dfm.slotLeavesStock` in
+ * `before` already says so for the whole loop).
+ * Doc: docs/modes/design-v0.4.md#tabs-relocate-off-free-sides-tb1
+ */
+function tabHold(
+  op: Op<'profile'>,
+  stock: StockGeometry,
+  before: readonly DfmWarning[],
+): DfmWarning[] {
+  const r = resolveProfileTabs(op, stock)
+  const out: DfmWarning[] = []
+  const entered = op.tabs.positions !== undefined
+  const count = r.centres.length
+  if (r.moved.length > 0)
+    out.push(
+      warning(
+        'dfm.tabsRelocated',
+        op,
+        'tabs.count',
+        `${r.moved.length} of ${count} tabs moved off sides where the slot leaves no stock ` +
+          `beyond the cut`,
+        { moved: r.moved.length, count, positions: [...r.centres] },
+        { severity: 'info' },
+      ),
+    )
+  const leaves = before.some((w) => w.code === 'dfm.slotLeavesStock')
+  if (r.unheld.length === 0 || (leaves && !r.anyHeld)) return out
+  const held = count - r.unheld.length
+  out.push(
+    entered
+      ? warning(
+          'dfm.tabsNoHold',
+          op,
+          'tabs.positions',
+          `${r.unheld.length} of ${count} tabs lie where the slot leaves no stock beyond the ` +
+            `cut, so they hold nothing`,
+          { held, count, indices: [...r.unheld] },
+        )
+      : warning(
+          'dfm.tabsNoHold',
+          op,
+          'tabs.count',
+          `only ${held} of ${count} tabs fit where stock remains beyond the slot; the others ` +
+            `hold nothing`,
+          { held, count },
+          held > 0 ? { suggestion: atMost(held) } : {},
+        ),
+  )
+  return out
+}
+
+/**
  * Rules of a general profile (a named or rotated loop, an `on` groove): stock margins of an
  * outside slot from the loop's exact bounds (its offset by `slotWidth` reaches exactly
  * `slotWidth` beyond them on each side), inside corners (`inside`: the loop's corners,
@@ -927,6 +982,7 @@ function shapeProfile(
       m !== undefined && op.side === 'inside' && !m.fits(op.slotWidth + CHORD_TOLERANCE)
     const count = op.tabs.positions?.length ?? op.tabs.count
     out.push(...tabRules(op, count, covers, () => m?.narrowest() ?? Infinity, unitSystem))
+    if (!covers && count > 0) out.push(...tabHold(op, stock, out))
   }
   return out
 }

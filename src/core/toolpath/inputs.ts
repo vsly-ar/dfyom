@@ -8,9 +8,9 @@ import { Err, fail, Ok, type AppResult } from '../../shared/result'
 import { toGeometryInput } from '../design/geometry-input'
 import { localStock } from '../geometry/face'
 import type { Region2dPort } from '../geometry/2d/port'
-import { chainLength } from '../geometry/2d/measure'
 import { isAnalyticOperation, type OperationGeometry, type StockGeometry } from '../geometry/model'
-import { pocketRegion, profileChain, tabCentres } from '../geometry/outline'
+import { pocketRegion, profileChain } from '../geometry/outline'
+import { resolveProfileTabs } from '../geometry/tab-hold'
 import type { Tool } from '../library/tool'
 import type { ResolvedFeeds } from '../plan/feeds'
 import type { PlanOperationInput } from '../plan/inputs'
@@ -106,12 +106,13 @@ export function nearestNeighbourOrder<T extends { readonly center: readonly [num
 /**
  * A general profile (v0.3 T2 wiring) as `generateRegionProfile` takes it, in the face frame: K3's
  * chain from its start point, through cuts from the stock face (Z 0) down `thickness`, blind `on`
- * grooves down their depth; tab centres only on a closed loop cut through (`tabStretches`' rule).
- * Doc: docs/modes/plan-v0.3.md#wiring-t1-t2
+ * grooves down their depth; tab centres only on a closed loop cut through, resolved on the local
+ * `stock` (tabs off free sides, `resolveProfileTabs`).
+ * Doc: docs/modes/plan-v0.3.md#wiring-t1-t2, docs/modes/design-v0.4.md#tabs-relocate-off-free-sides-tb1
  */
 export function regionProfileOperation(
   op: Extract<OperationGeometry, { kind: 'profile' }>,
-  thickness: number,
+  stock: StockGeometry,
 ): RegionProfileOperation {
   const { chain, closed } = profileChain(op)
   const through = op.depth === undefined
@@ -121,10 +122,10 @@ export function regionProfileOperation(
     side: op.side,
     slotWidth: op.slotWidth,
     onZ: 0,
-    depth: op.depth ?? thickness,
+    depth: op.depth ?? stock.thickness,
     through,
     tabs: {
-      positions: closed && through ? tabCentres(chainLength(chain), op.tabs) : [],
+      positions: closed && through ? [...resolveProfileTabs(op, stock).centres] : [],
       width: op.tabs.width,
       thickness: op.tabs.thickness,
     },
@@ -284,7 +285,7 @@ export function toGeneratorInputs(
               {
                 ...base,
                 cutting: c,
-                operation: regionProfileOperation(op, stock.thickness),
+                operation: regionProfileOperation(op, stock),
                 // no plan parameter yet: the documented default 0.5 D (plan-v0.3.md § Profile)
                 strategy: { ...strategy, leadRadius: tool.diameter / 2 },
               },

@@ -97,7 +97,7 @@ The generated pass strategies are in [plan-v0.3.md](plan-v0.3.md).
 ### Tabs on shapes
 
 - Positions are distances along the loop from its **start point**: the loop point with the lowest `v` (then lowest `u`) in the face frame, so the first tab is "at the front" as on v0.1 rectangles; the distance runs counter-clockwise seen from outside.
-- `tabs.count` spaces them evenly (default, as v0.1). `tabs.positions?: Quantity[]` places them freely (S-I); given positions replace the count. Each tab must lie on the loop with its width, and tabs must not overlap (`model.invariant`, rules `tabOutside`, `tabsOverlap`).
+- `tabs.count` spaces them evenly (default, as v0.1); since v0.4 a counted tab over a side where the slot leaves no stock moves to the nearest side that holds ([design-v0.4.md § Tabs relocate off free sides](design-v0.4.md#tabs-relocate-off-free-sides-tb1)). `tabs.positions?: Quantity[]` places them freely (S-I); given positions replace the count. Each tab must lie on the loop with its width, and tabs must not overlap (`model.invariant`, rules `tabOutside`, `tabsOverlap`).
 - The viewport shows tab markers that drag along the loop (one gesture, [commands.md § Gestures](../architecture/commands.md#gestures-live-edits)).
 
 ### Surfaces

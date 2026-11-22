@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { chainLength } from './2d/measure'
 import { line, regionArea, type Loop } from './2d/model'
 import type { OperationGeometry } from './model'
-import { pocketRegion, profileChain, shapeOutline, tabCentres, tabStretches } from './outline'
+import { pocketRegion, profileChain, shapeOutline, tabCentres } from './outline'
 
 const square: Loop = {
   elements: [
@@ -96,15 +96,5 @@ describe('tabs', () => {
     expect(tabCentres(40, { count: 4 })).toEqual([5, 15, 25, 35])
     expect(tabCentres(40, { count: 0 })).toEqual([])
     expect(tabCentres(40, { count: 4, positions: [1, 2] })).toEqual([1, 2])
-  })
-
-  it('gives stretches of a closed through cut only', () => {
-    expect(tabStretches(profile())).toEqual([
-      { from: 4, to: 6 },
-      { from: 14, to: 16 },
-      { from: 24, to: 26 },
-      { from: 34, to: 36 },
-    ])
-    expect(tabStretches(profile({ side: 'on', depth: 2 }))).toEqual([])
   })
 })

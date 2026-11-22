@@ -23,7 +23,8 @@ import {
   type Vec2,
   type Vec3,
 } from './model'
-import { pocketRegion, profileChain, shapeOutline, tabStretches, type Outline } from './outline'
+import { pocketRegion, profileChain, shapeOutline, type Outline } from './outline'
+import { tabStretches } from './tab-hold'
 import {
   chordCount,
   flattenLoop,
@@ -199,7 +200,7 @@ export function shapeProfile(
   const retained: LocalMesh[] = []
   const nominal: LocalNominal<never>[] = []
   if (closed && !blind && !covers) {
-    const stretches = [...tabStretches(op)].sort((a, b) => a.from - b.from)
+    const stretches = [...tabStretches(op, stock)].sort((a, b) => a.from - b.from)
     const slots = stretches.length > 0 ? tabSlots(op, chain, port) : undefined
     if (slots?.isErr()) return Err(slots.unwrapErr())
     for (const [i, stretch] of stretches.entries()) {

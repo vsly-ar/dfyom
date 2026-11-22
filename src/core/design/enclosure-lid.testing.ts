@@ -9,13 +9,18 @@ import type { Vec2 } from '../geometry/model'
 import { chainLength, chainPointAt } from '../geometry/2d/measure'
 import type { Loop } from '../geometry/2d/model'
 import { fromStartPoint, translatePath } from '../geometry/2d/place'
+import { resolveTabs } from '../geometry/tab-hold'
 import { importSvg } from '../import/svg'
 import { fastenerRows, type FastenerRow } from './fastener/data'
 
-/** The board: 6 mm plywood, the v0.3 board's length and width (mm). */
+/**
+ * The board: 6 mm plywood, the v0.3 board's length, 15 mm wider (D40): along X the outline nearly
+ * fills it, so the slot runs off the left and right sides and the tabs must move off them (TB1);
+ * along Y the slot stays on the board (mm).
+ */
 export const LID_STOCK = {
   length: 255,
-  width: 185,
+  width: 200,
   thickness: 6,
   materialClass: 'plywood',
 } as const
@@ -236,14 +241,30 @@ export function lidOutline(svg: string): Loop {
 }
 
 /**
- * Tab centres by the v0.3 rule (`tabs.count`, design-v0.3.md#tabs-on-shapes): evenly spaced, the
- * first half a spacing after the start point. Distances along the loop and points.
+ * Tab centres by the v0.3 rule (`tabs.count`, design-v0.3.md#tabs-on-shapes: evenly spaced, the
+ * first half a spacing after the start point), then moved off the free sides of the board (TB1,
+ * design-v0.4.md#tabs-relocate-off-free-sides-tb1). Distances along the loop and points (layout
+ * frame); `nominal` the v0.3 rule's distances.
  */
-export function lidTabs(outline: Loop): { s: number; at: Vec2 }[] {
+export function lidTabs(outline: Loop): { s: number; at: Vec2; nominal: number }[] {
   const n = LID_PROFILE.tabs.count
   const length = chainLength(outline)
-  return Array.from({ length: n }, (_, k) => {
-    const s = ((k + 0.5) * length) / n
-    return { s, at: chainPointAt(outline, s, true).unwrap().point }
-  })
+  const nominal = Array.from({ length: n }, (_, k) => ((k + 0.5) * length) / n)
+  // the hold test runs in the face frame: the outline placed on the board's centre
+  const r = resolveTabs(
+    {
+      chain: translatePath(outline, LID_CENTRE),
+      side: LID_PROFILE.side,
+      slotWidth: LID_PROFILE.slotWidth,
+      width: LID_PROFILE.tabs.width,
+      stock: LID_STOCK,
+    },
+    nominal,
+    false,
+  )
+  return r.centres.map((s, k) => ({
+    s,
+    at: chainPointAt(outline, s, true).unwrap().point,
+    nominal: nominal[k]!,
+  }))
 }

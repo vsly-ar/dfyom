@@ -296,6 +296,9 @@ export const DFM_WARNING_CODES = [
   'dfm.cloneDuplicate',
   'dfm.cloneOverlap',
   'dfm.clonesHeavy',
+  // tabs off free sides (v0.4 TB1): docs/modes/design-v0.4.md#tabs-relocate-off-free-sides-tb1
+  'dfm.tabsRelocated',
+  'dfm.tabsNoHold',
 ] as const
 export type DfmWarningCode = (typeof DFM_WARNING_CODES)[number]
 
