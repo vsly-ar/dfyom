@@ -32,6 +32,8 @@ import {
   type TaskControl,
   type TransferView,
 } from '../commands/jobs'
+import { loadRegion2dSync } from '../geometry/2d/cavalier'
+import type { Region2dPort } from '../geometry/2d/port'
 import { loadManifold } from '../geometry/manifold'
 import type { SolidKernel } from '../geometry/solid-port'
 import {
@@ -47,6 +49,8 @@ export interface WorkerLoopOptions {
   readonly tasks: readonly AnyWorkerTask[]
   /** Loads the solid kernel (default: `loadManifold` with the bytes from `init`). */
   readonly loadSolids?: (wasm: ArrayBuffer | undefined) => AsyncAppResult<SolidKernel>
+  /** Loads the 2D port (default: `loadRegion2dSync` with the bytes from `init`). */
+  readonly loadRegion2d?: (wasm: ArrayBuffer | undefined) => AppResult<Region2dPort>
   /** Monotonic milliseconds (default `performance.now`). */
   readonly now?: () => number
   /** Min interval between progress messages of a run (default 50 ms; the final tick always goes). */
@@ -66,6 +70,18 @@ export function runWorkerLoop(endpoint: Endpoint, opts: WorkerLoopOptions): { lo
     opts.loadSolids ??
     ((wasm: ArrayBuffer | undefined) =>
       loadManifold(wasm === undefined ? {} : { wasmBinary: wasm }))
+  const loadRegion2d =
+    opts.loadRegion2d ??
+    ((bytes: ArrayBuffer | undefined): AppResult<Region2dPort> =>
+      bytes === undefined
+        ? fail(
+            'internal.unexpected',
+            `no 2D module was sent to the ${lane ?? 'uninitialized'} lane`,
+            {
+              where: WHERE,
+            },
+          )
+        : loadRegion2dSync(bytes))
   const post = (m: WorkerMessage, transfer?: readonly ArrayBuffer[]) => endpoint.post(m, transfer)
 
   let log: Logger = noopLogger
@@ -87,6 +103,11 @@ export function runWorkerLoop(endpoint: Endpoint, opts: WorkerLoopOptions): { lo
     })
     return kernel
   }
+  let region2dWasm: ArrayBuffer | undefined
+  let port: AppResult<Region2dPort> | undefined
+  // prewarmed at init when the host sent the bytes, else on first use; a failed load is kept
+  // (the bytes do not change)
+  const region2d = (): AppResult<Region2dPort> => (port ??= loadRegion2d(region2dWasm))
   // one task at a time (the host never sends `run` before `result`; this keeps it so anyway)
   let queue: Promise<void> = Promise.resolve()
 
@@ -94,6 +115,7 @@ export function runWorkerLoop(endpoint: Endpoint, opts: WorkerLoopOptions): { lo
     const started = now()
     lane = m.lane
     wasm = m.wasm
+    region2dWasm = m.region2dWasm
     forwarder = createLogForwarder({ send: (batch) => post({ type: 'log', batch: [...batch] }) })
     const fw = forwarder
     log = createEntryLogger({
@@ -107,6 +129,13 @@ export function runWorkerLoop(endpoint: Endpoint, opts: WorkerLoopOptions): { lo
       const k = await solids()
       if (k.isErr()) log.error({ err: k.unwrapErr().toJSON() }, 'solid kernel failed to load')
       else heapBytes = k.unwrap().heapBytes().unwrapOr(-1)
+    }
+    if (m.region2dWasm !== undefined) {
+      // prewarm (synchronous, ≈ 2 ms): a broken module shows in the log at worker start
+      const t = now()
+      const p = region2d()
+      if (p.isErr()) log.error({ err: p.unwrapErr().toJSON() }, '2D geometry failed to load')
+      else log.info({ ms: now() - t }, '2D geometry loaded')
     }
     const initMs = now() - started
     log.debug({ initMs }, 'worker ready')
@@ -151,6 +180,7 @@ export function runWorkerLoop(endpoint: Endpoint, opts: WorkerLoopOptions): { lo
       }),
       log: taskLog,
       solids,
+      region2d,
       files: opts.files ?? noFiles,
     }
     let result: AppResult<unknown>

@@ -76,6 +76,7 @@ interface TaskControl {
   readonly steps: Steps
   readonly log: Logger
   readonly solids: () => AsyncAppResult<SolidKernel> // loaded once per worker, geometry lane only
+  readonly region2d: () => AppResult<Region2dPort> // 2D port, both lanes (shapes.md#where-the-2d-layer-runs)
 }
 
 /** Synchronous control for pure code: abort/pause between steps, progress per step. */
@@ -102,10 +103,10 @@ One protocol for both worker kinds, defined as Zod discriminated unions on `type
 
 ### Host → worker
 
-| `type` | Fields                                                                               | Notes                                                                           |
-| ------ | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
-| `init` | `protocol`, `workerId`, `lane`, `logLevel`, `wasm?` (`ArrayBuffer`)                  | First message; the worker answers `ready` or exits. `wasm` only for `geometry`. |
-| `run`  | `id` (task run id), `task` (name), `input`, `control` (`SharedArrayBuffer`, 4 bytes) | One task at a time per worker; the host never sends `run` before `result`.      |
+| `type` | Fields                                                                                | Notes                                                                                                                             |
+| ------ | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `init` | `protocol`, `workerId`, `lane`, `logLevel`, `wasm?`, `region2dWasm?` (`ArrayBuffer`s) | First message; the worker answers `ready` or exits. `wasm` only for `geometry`; `region2dWasm` (CavalierContours) for both lanes. |
+| `run`  | `id` (task run id), `task` (name), `input`, `control` (`SharedArrayBuffer`, 4 bytes)  | One task at a time per worker; the host never sends `run` before `result`.                                                        |
 
 **Abort, pause and resume are not messages.** The pure code is synchronous, so the worker cannot read its message queue while it computes. The host writes the run's state into `control` (`Int32Array[0]`: 0 run, 1 pause, 2 abort) with `Atomics.store` + `Atomics.notify`; `Steps.step()` reads it with `Atomics.load` and parks on pause with `Atomics.wait` (allowed in workers). `SharedArrayBuffer` is always available in Node `worker_threads`; a future renderer Web Worker host needs cross-origin isolation or falls back to `terminate()` for abort.
 
@@ -148,7 +149,7 @@ Added with plan task R2 (STL import). A task that must read a local file gets it
 
 Extends [geometry.md](geometry.md#wasm-lifetime-and-ownership):
 
-- **Load once per worker.** The host reads `manifold.wasm` (bundled asset; resolved by the main build, not by `src/core`) once and sends it in `init`; the worker calls `loadManifold({ wasmBinary })` on prewarm or on the first task and keeps the `SolidKernel` for its lifetime. Passing the bytes makes `heapBytes()` measurable.
+- **Load once per worker.** The host reads `manifold.wasm` (bundled asset; resolved by the main build, not by `src/core`) once and sends it in `init`; the worker calls `loadManifold({ wasmBinary })` on prewarm or on the first task and keeps the `SolidKernel` for its lifetime. Passing the bytes makes `heapBytes()` measurable. The 2D module (`region2dWasm`) goes the same way to both lanes and is prewarmed synchronously at init ([shapes.md](shapes.md#where-the-2d-layer-runs)); it holds no handles between calls, so it needs no heap measurement or recycling (a trap replaces the instance).
 - **Measure after every task:** `heapBytes()` and `liveObjects()` go into `result.stats`; the host logs them at `debug` and keeps the last value per worker.
 - **Recycling policy** (soak data: 16 MB plateau, no growth, so no recycling by count):
   - `liveObjects() > 0` after a task → leak bug: log `error`, recycle after the result is delivered.

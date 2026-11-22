@@ -25,6 +25,7 @@ import {
 } from '../../core/commands/context'
 import { createDispatcher, type Dispatcher } from '../../core/commands/dispatcher'
 import type { WorkerPort } from '../../core/commands/jobs'
+import type { Region2dPort } from '../../core/geometry/2d/port'
 import type { PermissionPolicy } from '../../core/commands/permission'
 import {
   createAppScopeRegistry,
@@ -74,6 +75,8 @@ export interface AppHostOptions {
   /** The instance's machine connection (`services.machine` of every project). */
   readonly machine?: MachineService
   readonly exportFiles?: ExportFiles
+  /** The 2D port of the instance (`services.region2d` of every project). */
+  readonly region2d?: Region2dPort
   /** Defaults: storage under `appData`, library under `<appData>/library`. */
   readonly storage?: ProjectStorage
   readonly library?: Library
@@ -439,6 +442,7 @@ class Host implements AppHost {
       project: session,
       ...(this.o.machine === undefined ? {} : { machine: this.o.machine }),
       ...(this.o.exportFiles === undefined ? {} : { exportFiles: this.o.exportFiles }),
+      ...(this.o.region2d === undefined ? {} : { region2d: this.o.region2d }),
     }
     const dispatcher = createDispatcher({
       registry: this.registries.project,

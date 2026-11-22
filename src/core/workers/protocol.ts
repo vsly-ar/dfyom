@@ -24,6 +24,11 @@ export const InitMessage = z.object({
   logLevel: z.enum(LOG_LEVELS),
   /** `manifold.wasm`, geometry lane only; the worker loads it before answering `ready`. */
   wasm: z.instanceof(ArrayBuffer).exactOptional(),
+  /**
+   * `cavalier_contours.wasm` (the 2D port), geometry and toolpath lanes; prewarmed at init
+   * (docs/architecture/shapes.md#where-the-2d-layer-runs).
+   */
+  region2dWasm: z.instanceof(ArrayBuffer).exactOptional(),
 })
 
 export const RunMessage = z.object({

@@ -40,6 +40,8 @@ import {
   type WindowStart,
 } from './window-state'
 import { WORKER_ENTRY_PATH } from './workers/bundled'
+import { CAVALIER_WASM_PATH } from './region2d/bundled'
+import { loadHostRegion2d } from './region2d/node'
 import { createNodeWorkerPool } from './workers/node'
 
 // End-to-end tests run the app with its windows never shown (docs/conventions/testing.md#app-playwright-for-electron),
@@ -198,6 +200,15 @@ if (dataDir !== undefined) {
 
 void app.whenReady().then(async () => {
   const { log, level, instance, forward, report } = await startLogging()
+  // The 2D port: synchronously for the dispatcher, the same bytes for the worker lanes
+  // (docs/architecture/shapes.md#where-the-2d-layer-runs). The module ships with the app.
+  const region2d = loadHostRegion2d(CAVALIER_WASM_PATH, log)
+  if (region2d.isErr()) {
+    report(region2d.unwrapErr(), { kind: 'system', name: 'app.start' })
+    app.exit(1)
+    return
+  }
+  const { port: region2dPort, wasm: region2dWasm } = region2d.unwrap()
   // The app-wide compute pool (docs/architecture/workers.md#lanes-and-pool). Workers spawn lazily;
   // the host prewarms the geometry worker when the first project opens.
   const workers = createNodeWorkerPool({
@@ -205,6 +216,7 @@ void app.whenReady().then(async () => {
     log,
     logLevel: level,
     forward,
+    region2dWasm,
   })
   // The app instance's one machine connection (docs/modes/run-v0.1.md#processes): the host runs in
   // a utility process started by run.connection.open; it is `services.machine` of every project
@@ -226,6 +238,7 @@ void app.whenReady().then(async () => {
     workers,
     machine,
     exportFiles: createExportFiles(),
+    region2d: region2dPort,
   })
   if (created.isErr()) {
     report(created.unwrapErr(), { kind: 'system', name: 'app.start' })

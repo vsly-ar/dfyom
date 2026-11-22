@@ -14,6 +14,7 @@ import type { JobHandle, WorkerPort } from './jobs'
 import type { HistoryEntry } from './history'
 import type { ApplyView } from './apply'
 import type { HostPort } from '../project/lifecycle'
+import type { Region2dPort } from '../geometry/2d/port'
 import type { MachineService } from '../run/service'
 import type { Option } from '../../shared/result'
 
@@ -79,6 +80,11 @@ export interface Services {
    * (docs/architecture/llm-api.md#app-scope-and-project-scope); absent = they fail.
    */
   readonly host?: HostPort
+  /**
+   * The 2D port (offsets and booleans of shapes), loaded synchronously at host start
+   * (docs/architecture/shapes.md#where-the-2d-layer-runs); absent = shape commands fail (K2).
+   */
+  readonly region2d?: Region2dPort
 }
 
 export interface CommandContext {

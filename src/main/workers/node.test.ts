@@ -7,13 +7,16 @@ import type { PauseState } from '../../core/commands/context'
 import type { JobProgress } from '../../core/commands/context'
 import { evaluatePart } from '../../core/geometry/evaluate'
 import { loadManifold } from '../../core/geometry/manifold'
+import { nodeCavalierWasm } from '../../core/geometry/2d/testing/node-wasm'
 import { nodeManifoldSource } from '../../core/geometry/testing/node-wasm'
 import { testPart } from '../../core/geometry/testing/test-part'
 import { createWorkerPool, type PoolOptions, type WorkerPool } from '../../core/workers/pool'
 import { geometryEvaluate } from '../../core/workers/tasks'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
 import { nodeWorkerFactory, readManifoldWasm } from './node'
-import { testExit, testHang, testLog, testLoop, testThrow } from './test-tasks'
+import { testExit, testHang, testLog, testLoop, testRegion2d, testThrow } from './test-tasks'
+
+const region2dBytes = nodeCavalierWasm().slice().buffer as ArrayBuffer
 
 const entry = inject('workerEntry')
 const pools: WorkerPool[] = []
@@ -148,6 +151,16 @@ describe('worker_threads host', { timeout: 60_000 }, () => {
     expect(performance.now() - t0).toBeGreaterThanOrEqual(290)
     expectOk(await p.run(testLoop, { steps: 1, stepMs: 0 }, ctl()))
     expect(p.lastStats('toolpath')!.workerId).toBe('toolpath-2')
+  })
+
+  it('loads the 2D port lazily in the toolpath lane from the bytes the host sends', async () => {
+    const p = pool({ region2dWasm: () => region2dBytes })
+    const r = expectOk(await p.run(testRegion2d, { size: 20, d: 2 }, ctl()))
+    expect(r.area).toBeCloseTo(256, 9)
+    // without the bytes the task fails, the worker survives
+    const none = pool()
+    expectErrCode(await none.run(testRegion2d, { size: 20, d: 2 }, ctl()), 'internal.unexpected')
+    expectOk(await none.run(testLoop, { steps: 1, stepMs: 0 }, ctl()))
   })
 
   it('forwards worker logs with the worker id', async () => {
