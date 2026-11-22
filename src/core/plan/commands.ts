@@ -36,8 +36,15 @@ import { assignTool, createPlan, duplicatePlan, rebuildPlan, type BuildContext }
 import { PlanWarningSchema, type PlanWarning } from './checks'
 import { evaluateOperation, planFindings } from './evaluate'
 import { feedModeIssues, type LockState } from './feeds'
-import { orderFindings } from './order'
 import { findPlanDTO, findPlanOperation, loadPlan, loadPlanDTO, type LoadedPlan } from './plan'
+import {
+  checkNoNewOrderViolation,
+  directionMismatch,
+  mergeSetups,
+  setupDirection,
+  splitSetup,
+  unknownSetup,
+} from './setups'
 import {
   FEED_FIELDS,
   lengthDTO,
@@ -45,9 +52,11 @@ import {
   PlanIdSchema,
   PlanRecordIdSchema,
   PlanStatusSchema,
+  SETUP_ROTATIONS,
   type FeedField,
   type PlanDTO,
   type PlanOperationDTO,
+  type SetupDTO,
 } from './plan.dto'
 import { designChanged, hasPlanEdits, planStale } from './snapshot'
 import { sameValue } from './validity'
@@ -240,7 +249,7 @@ const planCreate = defineCommand({
   kind: 'document',
   name: 'plan.create',
   summary:
-    'Create a draft plan of a part: design snapshot, one setup, every operation with a suggested tool.',
+    'Create a draft plan of a part: design snapshot, one setup per face direction, every operation with a suggested tool.',
   title: () => 'Create plan',
   machine: false,
   // apply first: docs/architecture/apply.md#implicit-apply
@@ -250,7 +259,7 @@ const planCreate = defineCommand({
     name: z.string().min(1).max(NAME_MAX).optional().describe('Default "Plan <n>"'),
     machineLibraryItemId: ItemIdSchema.optional().describe('Library machine to take a copy of'),
   }),
-  result: z.object({ planId: PlanIdSchema, setupId: PlanRecordIdSchema }),
+  result: z.object({ planId: PlanIdSchema, setupIds: z.array(PlanRecordIdSchema) }),
   run(draft, args, ctx) {
     const where = 'plan.create'
     let machine: LibraryItem | undefined
@@ -277,7 +286,7 @@ const planCreate = defineCommand({
     )
     if (plan.isErr()) return plan
     draft.plans[plan.unwrap().id] = plan.unwrap()
-    return Ok({ planId: plan.unwrap().id, setupId: plan.unwrap().setups[0]!.id })
+    return Ok({ planId: plan.unwrap().id, setupIds: plan.unwrap().setups.map((x) => x.id) })
   },
 })
 
@@ -520,7 +529,7 @@ const designOperationRevert = defineCommand({
     if (index.isErr()) return index
     const design = plainCopy(l.dto.design)
     const reverted: string[] = []
-    for (const id of l.setup.operations[index.unwrap()]!.designOperationIds) {
+    for (const id of index.unwrap().op.designOperationIds) {
       const i = design.part.operations.findIndex((o) => o.id === id)
       const taken = design.taken.operations.find((o) => o.id === id)
       if (i < 0 || taken === undefined || sameValue(taken, design.part.operations[i])) continue
@@ -584,15 +593,48 @@ const machineSet = defineCommand({
   },
 })
 
+const SetupArg = { ...PlanArg, setupId: PlanRecordIdSchema }
+
+/**
+ * Writes the plan's setups after a setup command (an emptied setup is removed); `plan.order` if
+ * the new order adds an order violation. Doc: docs/modes/plan-v0.2.md#merge-split-reorder
+ */
+function writeSetups(
+  draft: Draft<ProjectDoc>,
+  plan: LoadedPlan,
+  setups: SetupDTO[],
+  path: string,
+  where: string,
+): AppResult<void> {
+  const ok = checkNoNewOrderViolation(plan.setups, setups, plan.part, path, where)
+  if (ok.isErr()) return ok
+  const next = plainCopy(plan.dto)
+  next.setups = plainCopy(setups.filter((x) => x.operations.length > 0))
+  if (next.setups.length === 0) next.setups = plainCopy(setups.slice(0, 1))
+  writePlan(draft, next)
+  return Ok(undefined)
+}
+
+function pastEnd(max: number, where: string): AppResult<never> {
+  return fail('input.malformed', 'toIndex is past the end of the list', {
+    issues: [
+      { path: ['toIndex'], rule: 'range', message: `must be at most ${max}`, params: { max } },
+    ],
+    where,
+  })
+}
+
 const setupUpdate = defineCommand({
   kind: 'document',
   name: 'plan.setup.update',
-  summary: 'Change the safe heights of a setup (clearance above the stock top, retract above on).',
+  summary:
+    'Rename or rotate a setup, or change its safe heights (clearance above the stock top, retract above on).',
   title: () => 'Update setup',
   machine: false,
   args: z.object({
-    ...PlanArg,
-    setupId: PlanRecordIdSchema,
+    ...SetupArg,
+    name: z.string().min(1).max(NAME_MAX).optional(),
+    rotation: z.literal(SETUP_ROTATIONS).optional().describe('Degrees about the spindle axis'),
     clearanceHeight: Src.optional().describe('Up from the stock top; > retractHeight'),
     retractHeight: Src.optional().describe("Up from the operation's on surface; > 0"),
   }),
@@ -602,11 +644,7 @@ const setupUpdate = defineCommand({
     const found = planFor(draft, args.planId, where)
     if (found.isErr()) return found
     const setup = found.unwrap().setups.find((s) => s.id === args.setupId)
-    if (setup === undefined)
-      return fail('input.malformed', `setup ${args.setupId} does not exist`, {
-        issues: [{ path: ['setupId'], rule: 'unknownSetup', message: 'no such setup' }],
-        where,
-      })
+    if (setup === undefined) return unknownSetup(args.setupId, 'setupId', where)
     const ctxL = fieldContext('length', draft.unitSystem)
     const parse = (key: 'clearanceHeight' | 'retractHeight') => {
       const src = args[key]
@@ -630,7 +668,88 @@ const setupUpdate = defineCommand({
     const target = draft.plans[args.planId]!.setups.find((s) => s.id === args.setupId)!
     if (args.clearanceHeight !== undefined) target.clearanceHeight = lengthDTO(clearance)
     if (args.retractHeight !== undefined) target.retractHeight = lengthDTO(retract)
+    if (args.name !== undefined && args.name !== target.name) target.name = args.name
+    // 0° is stored as absent (v0.1 records)
+    if (args.rotation === 0) delete target.rotation
+    else if (args.rotation !== undefined) target.rotation = args.rotation
     return Ok({})
+  },
+})
+
+const setupSplit = defineCommand({
+  kind: 'document',
+  name: 'plan.setup.split',
+  summary:
+    'Move plan operations of a setup into a new setup of the same direction right after it (e.g. rough the top, flip, finish the top later).',
+  title: () => 'Split setup',
+  machine: false,
+  args: z.object({
+    ...SetupArg,
+    planOperationIds: z.array(PlanRecordIdSchema).min(1).describe('Operations to move'),
+    name: z.string().min(1).max(NAME_MAX).optional().describe('Default e.g. "Top 2"'),
+  }),
+  result: z.object({ setupId: PlanRecordIdSchema }),
+  run(draft, args, ctx) {
+    const where = 'plan.setup.split'
+    const loaded = loadedFor(draft, args.planId, where)
+    if (loaded.isErr()) return loaded
+    const plan = loaded.unwrap()
+    const setups = splitSetup(plan.dto, args, ctx.ids, where)
+    if (setups.isErr()) return setups
+    const created = setups.unwrap()[plan.setups.findIndex((x) => x.id === args.setupId) + 1]!
+    const written = writeSetups(draft, plan, setups.unwrap(), 'planOperationIds', where)
+    return written.isErr() ? written : Ok({ setupId: created.id })
+  },
+})
+
+const setupMerge = defineCommand({
+  kind: 'document',
+  name: 'plan.setup.merge',
+  summary:
+    'Join setups of the same direction into the first of them in machining order; different directions fail with plan.setup.',
+  title: () => 'Merge setups',
+  machine: false,
+  args: z.object({ ...PlanArg, setupIds: z.array(PlanRecordIdSchema).min(2) }),
+  result: z.object({ setupId: PlanRecordIdSchema }),
+  run(draft, args) {
+    const where = 'plan.setup.merge'
+    const loaded = loadedFor(draft, args.planId, where)
+    if (loaded.isErr()) return loaded
+    const plan = loaded.unwrap()
+    const setups = mergeSetups(plan.dto, args.setupIds, where)
+    if (setups.isErr()) return setups
+    const into = setups.unwrap().find((x) => args.setupIds.includes(x.id))!
+    const written = writeSetups(draft, plan, setups.unwrap(), 'setupIds', where)
+    return written.isErr() ? written : Ok({ setupId: into.id })
+  },
+})
+
+const setupMove = defineCommand({
+  kind: 'document',
+  name: 'plan.setup.move',
+  summary:
+    'Move a setup in the setup order; operations must stay after the ones whose surfaces they start from.',
+  title: () => 'Move setup',
+  machine: false,
+  args: z.object({
+    ...SetupArg,
+    toIndex: z.number().int().min(0).describe('New 0-based position'),
+  }),
+  result: Empty,
+  run(draft, args) {
+    const where = 'plan.setup.move'
+    const loaded = loadedFor(draft, args.planId, where)
+    if (loaded.isErr()) return loaded
+    const plan = loaded.unwrap()
+    const from = plan.setups.findIndex((x) => x.id === args.setupId)
+    if (from < 0) return unknownSetup(args.setupId, 'setupId', where)
+    if (args.toIndex >= plan.setups.length) return pastEnd(plan.setups.length - 1, where)
+    if (from === args.toIndex) return Ok({})
+    const setups = [...plan.setups]
+    const [moved] = setups.splice(from, 1)
+    setups.splice(args.toIndex, 0, moved!)
+    const written = writeSetups(draft, plan, setups, 'toIndex', where)
+    return written.isErr() ? written : Ok({})
   },
 })
 
@@ -689,7 +808,7 @@ const operationUpdate = defineCommand({
     const index = findPlanOperation(plan, args.planOperationId, where)
     if (index.isErr()) return index
     const units = draft.unitSystem
-    const op: PlanOperationDTO = plainCopy(plan.setup.operations[index.unwrap()]!)
+    const op: PlanOperationDTO = plainCopy(index.unwrap().op)
     const kind = evaluateOperation(plan, op).kind
     const tool = op.tool === undefined ? undefined : plan.tools.get(op.tool)
     const issues: Issue[] = []
@@ -832,8 +951,9 @@ const operationUpdate = defineCommand({
     }
     const modeIssues = feedModeIssues(op, kind)
     if (modeIssues.length > 0) return invalid(modeIssues, where)
-    const target = draft.plans[args.planId]!.setups[0]!.operations
-    if (!deepEqual(target[index.unwrap()], op)) target[index.unwrap()] = op
+    const { setup, index: i } = index.unwrap()
+    const target = draft.plans[args.planId]!.setups[setup]!.operations
+    if (!deepEqual(target[i], op)) target[i] = op
     return Ok({})
   },
 })
@@ -842,12 +962,13 @@ const operationMove = defineCommand({
   kind: 'document',
   name: 'plan.operation.move',
   summary:
-    'Move a plan operation in the machining order; it must stay after the operations whose surfaces it starts from.',
+    'Move a plan operation in the machining order, also into another setup of the same direction; it must stay after the operations whose surfaces it starts from.',
   title: () => 'Move plan operation',
   machine: false,
   args: z.object({
     ...PlanOpArg,
-    toIndex: z.number().int().min(0).describe('New 0-based position'),
+    toIndex: z.number().int().min(0).describe('New 0-based position in the target setup'),
+    toSetupId: PlanRecordIdSchema.optional().describe('Same direction; default its own setup'),
   }),
   result: Empty,
   run(draft, args) {
@@ -857,49 +978,22 @@ const operationMove = defineCommand({
     const plan = loaded.unwrap()
     const from = findPlanOperation(plan, args.planOperationId, where)
     if (from.isErr()) return from
-    const list = plan.setup.operations
-    if (args.toIndex >= list.length)
-      return fail('input.malformed', 'toIndex is past the end of the list', {
-        issues: [
-          {
-            path: ['toIndex'],
-            rule: 'range',
-            message: `must be at most ${list.length - 1}`,
-            params: { max: list.length - 1 },
-          },
-        ],
-        where,
-      })
-    if (from.unwrap() === args.toIndex) return Ok({})
-    const next = [...list]
-    const [moved] = next.splice(from.unwrap(), 1)
-    next.splice(args.toIndex, 0, moved!)
-    const key = (w: { planOperationId?: string; params: Record<string, unknown> }) =>
-      `${w.planOperationId}>${String(w.params['dependsOn'])}`
-    const violations = (ops: readonly PlanOperationDTO[]) =>
-      new Set(
-        orderFindings(ops, plan.part)
-          .filter((w) => w.code === 'plan.order')
-          .map(key),
-      )
-    const before = violations(list)
-    const added = orderFindings(next, plan.part).filter(
-      (w) => w.code === 'plan.order' && !before.has(key(w)),
-    )
-    if (added.length > 0)
-      return fail('plan.order', added.map((w) => w.message).join('; '), {
-        issues: added.map((w) => ({
-          path: ['toIndex'],
-          rule: w.rule,
-          message: w.message,
-          params: w.params,
-        })),
-        where,
-      })
-    const target = draft.plans[args.planId]!.setups[0]!.operations
-    const [dto] = target.splice(from.unwrap(), 1)
-    target.splice(args.toIndex, 0, dto!)
-    return Ok({})
+    const { setup: si, index } = from.unwrap()
+    const source = plan.setups[si]!
+    const ti =
+      args.toSetupId === undefined ? si : plan.setups.findIndex((x) => x.id === args.toSetupId)
+    const target = plan.setups[ti]
+    if (target === undefined) return unknownSetup(args.toSetupId ?? '', 'toSetupId', where)
+    if (setupDirection(target) !== setupDirection(source))
+      return directionMismatch(setupDirection(source), setupDirection(target), 'toSetupId', where)
+    const max = ti === si ? target.operations.length - 1 : target.operations.length
+    if (args.toIndex > max) return pastEnd(max, where)
+    if (ti === si && index === args.toIndex) return Ok({})
+    const setups = plan.setups.map((x) => ({ ...x, operations: [...x.operations] }))
+    const [moved] = setups[si]!.operations.splice(index, 1)
+    setups[ti]!.operations.splice(args.toIndex, 0, moved!)
+    const written = writeSetups(draft, plan, setups, 'toIndex', where)
+    return written.isErr() ? written : Ok({})
   },
 })
 
@@ -1071,7 +1165,7 @@ const operationList = defineQuery({
     if (loaded.isErr()) return loaded
     const plan = loaded.unwrap()
     return Ok({
-      operations: plan.setup.operations.map((op) => {
+      operations: plan.operations.map((op) => {
         const e = evaluateOperation(plan, op)
         const snap = plan.dto.snapshots.find((s) => s.id === op.tool)
         const feeds = Object.fromEntries(
@@ -1176,7 +1270,7 @@ const operationFeedsGet = defineQuery({
     const plan = loaded.unwrap()
     const index = findPlanOperation(plan, args.planOperationId, where)
     if (index.isErr()) return index
-    const e = evaluateOperation(plan, plan.setup.operations[index.unwrap()]!)
+    const e = evaluateOperation(plan, index.unwrap().op)
     const auto = e.feeds.mapOr<z.output<typeof AutoDTO>>(e.autoRequested ? 'on' : 'off', (r) =>
       typeof r.auto === 'string' ? r.auto : { unavailable: r.auto.unavailable },
     )
@@ -1299,7 +1393,7 @@ const toolSuggest = defineQuery({
     if (loaded.isErr()) return loaded
     const index = findPlanOperation(loaded.unwrap(), args.planOperationId, where)
     if (index.isErr()) return index
-    const op = loaded.unwrap().setup.operations[index.unwrap()]!
+    const op = index.unwrap().op
     return Ok({
       tools: suggestTools(loaded.unwrap(), op, libraryTools(ctx.services)).map((t) => ({
         ...t,
@@ -1366,6 +1460,9 @@ export const PLAN_COMMANDS: readonly AnyCommand[] = [
   designOperationRevert,
   machineSet,
   setupUpdate,
+  setupSplit,
+  setupMerge,
+  setupMove,
   operationUpdate,
   operationMove,
   toolAssign,

@@ -45,6 +45,9 @@ describe('plan commands: registry', () => {
       'plan.design.operation.revert',
       'plan.machine.set',
       'plan.setup.update',
+      'plan.setup.split',
+      'plan.setup.merge',
+      'plan.setup.move',
       'plan.operation.update',
       'plan.operation.move',
       'plan.tool.assign',
@@ -64,10 +67,10 @@ describe('plan commands: registry', () => {
 describe('plan.create', () => {
   it('snapshots the design and the stock, groups equal holes, suggests tools, orders by group', async () => {
     const s = await planSetup()
-    const { planId, setupId } = (await expectUndoRedo(s, 'plan.create', {
+    const { planId, setupIds } = (await expectUndoRedo(s, 'plan.create', {
       partId: s.partId,
       machineLibraryItemId: s.machineId,
-    })) as { planId: string; setupId: string }
+    })) as { planId: string; setupIds: string[] }
     const p = s.plan(planId)
     expect(p).toMatchObject({ name: 'Plan 1', status: 'draft' })
     expect(p.design.taken).toEqual(s.part())
@@ -77,7 +80,12 @@ describe('plan.create', () => {
       s.d.doc.snapshots[s.part().stock],
     )
     expect(p.snapshots.find((x) => x.id === p.machine)).toMatchObject({ kind: 'machine' })
-    expect(p.setups[0]).toMatchObject({ id: setupId, workOffset: 'G54' })
+    // top operations only: one setup, as in v0.1 (no direction, no rotation stored)
+    expect(setupIds).toHaveLength(1)
+    expect(p.setups).toHaveLength(1)
+    expect(p.setups[0]).toMatchObject({ id: setupIds[0], name: 'Top', workOffset: 'G54' })
+    expect(p.setups[0]).not.toHaveProperty('direction')
+    expect(p.setups[0]).not.toHaveProperty('rotation')
     expect(src(p.setups[0]!.clearanceHeight)).toBe('10 mm')
     expect(src(p.setups[0]!.retractHeight)).toBe('2 mm')
     // facing, drillings (same tool adjacent), pocket, profile

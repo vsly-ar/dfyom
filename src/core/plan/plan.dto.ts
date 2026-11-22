@@ -5,6 +5,7 @@
  */
 import { z } from 'zod'
 import { PartDtoSchema, PartIdSchema, OperationIdSchema } from '../design/part.dto'
+import { DIRECTIONS as FACE_DIRECTIONS } from '../geometry/face'
 import { NAME_MAX, quantityDto } from '../library/item'
 import { SnapshotDtoSchema } from '../library/snapshot'
 import { PRESET_NAME_MAX } from '../library/tool.dto'
@@ -122,9 +123,25 @@ export const PlanOperationDtoSchema = z.object({
 })
 export type PlanOperationDTO = z.output<typeof PlanOperationDtoSchema>
 
+/** Setup rotations about the spindle axis, degrees (docs/modes/plan-v0.2.md#setups-from-face-directions). */
+export const SETUP_ROTATIONS = [0, 90, 180, 270] as const
+export type SetupRotation = (typeof SETUP_ROTATIONS)[number]
+
+/**
+ * One setup (v0.2: one per approach direction, docs/modes/plan-v0.2.md#setups-from-face-directions).
+ * `direction` and `rotation` are omitted for `+z` and 0° (v0.1 records stay valid unchanged).
+ */
 export const SetupDtoSchema = z.object({
   id: PlanRecordIdSchema,
   name: z.string().min(1).max(NAME_MAX),
+  direction: z
+    .enum(FACE_DIRECTIONS)
+    .optional()
+    .describe('Part direction pointing up to the spindle; absent = +z'),
+  rotation: z
+    .literal(SETUP_ROTATIONS)
+    .optional()
+    .describe('Degrees about the spindle axis; absent = 0'),
   workOffset: z.literal('G54').describe('Work coordinate system (v0.1: G54 only)'),
   clearanceHeight: length().describe('Up from the stock top'),
   retractHeight: length().describe("Up from the operation's `on` surface"),
@@ -144,6 +161,6 @@ export const PlanDtoSchema = z.object({
     .array(SnapshotDtoSchema)
     .describe("The plan's own library copies: stock, machine, tools"),
   machine: z.string().min(1).optional().describe("Id of the machine copy in the plan's snapshots"),
-  setups: z.array(SetupDtoSchema).min(1).max(1).describe('v0.1: one setup'),
+  setups: z.array(SetupDtoSchema).min(1).describe('Setups in machining order'),
 })
 export type PlanDTO = z.output<typeof PlanDtoSchema>

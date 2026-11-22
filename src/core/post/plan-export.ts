@@ -89,6 +89,19 @@ export async function exportPlan(
   if (allowed.isErr()) return allowed
   if (plan.machine.isNone())
     return fail('post.noMachine', 'gCode export needs a machine', { where, data: { planId } })
+  // one program per setup comes with task E2 (docs/modes/plan-v0.2.md#toolpaths-per-setup)
+  if (plan.setups.length > 1)
+    return fail(
+      'plan.setup',
+      `plan ${planId} has ${plan.setups.length} setups; export per setup comes later`,
+      {
+        issues: [
+          { path: ['planId'], rule: 'severalSetups', message: 'export needs a single setup' },
+        ],
+        where,
+        data: { planId },
+      },
+    )
   const inputs = planOperationInputs(doc, planId)
   if (inputs.isErr()) return inputs
   const all = inputs.unwrap()
@@ -125,7 +138,7 @@ export async function exportPlan(
   const exported = exportGrbl(
     {
       name: plan.dto.name,
-      setup: { name: plan.setup.name, clearanceHeight: all[0]!.setup.clearanceHeight },
+      setup: { name: plan.setups[0]!.name, clearanceHeight: all[0]!.setup.clearanceHeight },
       operations,
       machine: plan.machine,
       ...(opts.workZero === undefined ? {} : { workZero: opts.workZero }),

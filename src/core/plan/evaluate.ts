@@ -19,6 +19,7 @@ import {
   type ResolvedFeeds,
 } from './feeds'
 import { orderFindings } from './order'
+import { setupFindings, setupStockSize } from './setups'
 import { checkPartFits } from './validity'
 import { designOperations, type LoadedPlan } from './plan'
 import { FEED_FIELDS, type PlanOperationDTO } from './plan.dto'
@@ -199,12 +200,16 @@ export function evaluateOperation(
   }
 }
 
-/** Every finding of the plan: per operation, then order, then machine (stock vs. travel). */
+/**
+ * Every finding of the plan: per operation, then order (across setups), then setups, then machine
+ * (stock vs. travel per setup; `params.setupId` when the plan has several setups).
+ */
 export function planFindings(plan: LoadedPlan, data?: readonly MaterialRow[]): PlanWarning[] {
   const out: PlanWarning[] = []
-  for (const op of plan.setup.operations)
+  for (const op of plan.operations)
     out.push(...evaluateOperation(plan, op, undefined, data).findings)
-  out.push(...orderFindings(plan.setup.operations, plan.part))
+  out.push(...orderFindings(plan.operations, plan.part))
+  out.push(...setupFindings(plan.setups, plan.part))
   const stock = plan.dto.snapshots.find((x) => x.id === plan.dto.design.part.stock)
   if (stock !== undefined) {
     const fits = checkPartFits(plan.dto.design.part, stock, 'plan.warning.list')
@@ -222,9 +227,17 @@ export function planFindings(plan: LoadedPlan, data?: readonly MaterialRow[]): P
         })
   }
   plan.machine.map((m) => {
-    const clearance = Quantity.fromDTO(plan.setup.clearanceHeight).mapOr(0, (q) => q.canonical)
-    for (const f of stockFindings(plan.stock, clearance, m))
-      out.push({ ...f, code: 'plan.machine', severity: 'warning' })
+    const several = plan.setups.length > 1
+    for (const s of plan.setups) {
+      const clearance = Quantity.fromDTO(s.clearanceHeight).mapOr(0, (q) => q.canonical)
+      for (const f of stockFindings(setupStockSize(plan.stock, s), clearance, m))
+        out.push({
+          ...f,
+          code: 'plan.machine',
+          severity: 'warning',
+          ...(several ? { params: { ...f.params, setupId: s.id } } : {}),
+        })
+    }
   })
   return out
 }

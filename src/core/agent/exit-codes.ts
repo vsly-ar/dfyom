@@ -54,6 +54,7 @@ const BY_CODE: Record<ErrorCode, ExitCode> = {
   'run.softLimit': EXIT.other,
   'plan.status': EXIT.other,
   'plan.order': EXIT.other,
+  'plan.setup': EXIT.other,
   'plan.check': EXIT.other,
   'post.noMachine': EXIT.other,
 }

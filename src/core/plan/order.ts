@@ -4,6 +4,7 @@
  */
 import type { Operation, Part, Shape } from '../design/operation'
 import type { OperationKind } from '../design/part.dto'
+import { DIRECTIONS, STOCK_FACE, type Direction } from '../geometry/face'
 import type { PlanWarning } from './checks'
 import type { PlanOperationDTO } from './plan.dto'
 
@@ -14,6 +15,38 @@ const RANK: Record<OperationKind, number> = { facing: 0, drilling: 1, pocket: 2,
 export function ownerOf(surfaceId: string): string | undefined {
   const id = surfaceId.split('.')[0]
   return id === undefined || id === 'stock' ? undefined : id
+}
+
+const STOCK_DIRECTION = new Map(DIRECTIONS.map((d) => [STOCK_FACE[d], d]))
+
+/** Approach direction of a surface: the stock face its `on` chain starts from (`+z` if dangling). */
+export function surfaceDirection(
+  surfaceId: string,
+  byId: ReadonlyMap<string, Operation>,
+): Direction {
+  let id = surfaceId
+  for (let i = 0; i <= byId.size; i++) {
+    const stock = STOCK_DIRECTION.get(id)
+    if (stock !== undefined) return stock
+    const owner = byId.get(ownerOf(id) ?? '')
+    if (owner === undefined) break
+    id = owner.on
+  }
+  return '+z'
+}
+
+/** Approach direction of each plan operation: its first design operation's `on` face. */
+export function operationDirections(
+  planOps: readonly PlanOperationDTO[],
+  part: Part,
+): Map<string, Direction> {
+  const byId = new Map(part.operations.map((o) => [o.id, o]))
+  return new Map(
+    planOps.map((p) => {
+      const op = byId.get(p.designOperationIds[0]!)
+      return [p.id, op === undefined ? '+z' : surfaceDirection(op.on, byId)]
+    }),
+  )
 }
 
 /** Design operations whose surface an operation starts from (`on`). */
@@ -129,11 +162,13 @@ function centerOf(op: Operation): [number, number] | undefined {
 }
 
 /**
- * Order findings: `plan.order` (error) when an operation precedes one whose surface it starts
- * from; `plan.loosePiece` (warning) when a profile comes before an operation inside its shape.
+ * Order findings over the machining order of every setup: `plan.order` (error) when an operation
+ * precedes one whose surface it starts from; `plan.loosePiece` (warning) when a profile comes
+ * before an operation of the same face direction inside its shape (positions are face-frame).
  */
 export function orderFindings(planOps: readonly PlanOperationDTO[], part: Part): PlanWarning[] {
   const out: PlanWarning[] = []
+  const direction = operationDirections(planOps, part)
   const position = new Map(planOps.map((p, i) => [p.id, i]))
   const byId = new Map(part.operations.map((o) => [o.id, o]))
   const list = infos(planOps, part)
@@ -154,7 +189,8 @@ export function orderFindings(planOps: readonly PlanOperationDTO[], part: Part):
       .map((d) => byId.get(d))
       .filter((o): o is Extract<Operation, { kind: 'profile' }> => o?.kind === 'profile')
     for (const profile of profiles)
-      for (const later of planOps.slice(i + 1))
+      for (const later of planOps.slice(i + 1)) {
+        if (direction.get(later.id) !== direction.get(p.id)) continue
         for (const d of later.designOperationIds) {
           const o = byId.get(d)
           if (o === undefined || o.kind === 'profile') continue
@@ -171,6 +207,7 @@ export function orderFindings(planOps: readonly PlanOperationDTO[], part: Part):
             break
           }
         }
+      }
   })
   return out
 }
