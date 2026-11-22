@@ -327,6 +327,38 @@ describe('Plan mode', { timeout: 20_000 }, () => {
     expect(t.callsOf('plan.rebuild')).toEqual([{ planId: t.planId() }])
   })
 
+  it('names where the tool came from and when the design’s tool field changed (F5)', async () => {
+    const t = await renderPlan({
+      setup: async (s) => {
+        const planId = Object.keys(s.d.doc.plans)[0]!
+        await s.toStatus(planId, 'settledDesign')
+        const facing = s.part().operations.find((o) => o.kind === 'facing')!
+        await s.run('design.operation.tool.set', {
+          partId: s.partId,
+          operationId: facing.id,
+          tool: { kind: 'generalized', type: 'flatEndMill', diameter: '4 mm' },
+        })
+      },
+    })
+    await waitFor(() => expect(t.rows().length).toBeGreaterThan(0))
+    await t.user.click(t.rows()[0]!)
+    const insp = t.inspector()
+    await within(insp).findByRole('heading', { name: 'Facing 1' })
+    expect(await within(insp).findByText('From the design’s tool field.')).toBeInTheDocument()
+    expect(
+      await within(insp).findByText(/^The design’s tool field changed since this plan was made\./),
+    ).toBeInTheDocument()
+    // a tool chosen in the plan is kept
+    await t.user.click(within(insp).getByRole('combobox', { name: 'Tool' }))
+    await t.user.click(await screen.findByRole('option', { name: /^Flat 4/ }))
+    expect(await within(insp).findByText('Chosen in this plan.')).toBeInTheDocument()
+    expect(
+      await within(insp).findByText(
+        'The design’s tool field changed. This plan keeps the tool chosen here.',
+      ),
+    ).toBeInTheDocument()
+  })
+
   it('shows a finalized plan read-only with the way out', async () => {
     const t = await renderPlan({
       setup: async (s) => s.toStatus(Object.keys(s.d.doc.plans)[0]!, 'finalized'),

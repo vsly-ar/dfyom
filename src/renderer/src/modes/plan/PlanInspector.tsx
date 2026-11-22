@@ -16,7 +16,7 @@ import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
 import type { Quantity } from '../../../../core/quantity/quantity'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { applyMessages } from '../../messages/apply'
-import { planMessages, sentence } from '../../messages/plan'
+import { findingText, planMessages, sentence } from '../../messages/plan'
 import { useReplica, useShell } from '../../shell/ShellContext'
 import {
   ErrorMessage,
@@ -89,7 +89,7 @@ export function planWarningView(
   return {
     id: `${w.code}:${w.planOperationId ?? ''}:${w.field ?? ''}:${w.rule}:${index}`,
     tier: TIER[w.severity],
-    text: sentence(w.message),
+    text: findingText(w),
     ...(op === undefined ? {} : { subject: planOperationName(plan, op.designOperationIds) }),
     ...(op !== undefined && onSelect ? { onSelect: () => onSelect(op.id) } : {}),
   }
@@ -136,6 +136,11 @@ export function PlanInspector({ doc }: { doc: ProjectDoc }): React.JSX.Element {
       view={view}
       units={doc.unitSystem}
       findings={findingsOf(data?.warnings ?? [], op.id)}
+      designToolChanged={
+        data?.stale?.operations.some(
+          (s) => s.designToolChanged === true && op.designOperationIds.includes(s.operationId),
+        ) ?? false
+      }
     />
   )
 }
@@ -288,6 +293,7 @@ function OperationInspector({
   view,
   units,
   findings,
+  designToolChanged = false,
 }: {
   doc: ProjectDoc
   plan: PlanDTO
@@ -295,6 +301,8 @@ function OperationInspector({
   view: PlanOperationView | undefined
   units: UnitSystem
   findings: readonly PlanWarning[]
+  /** The design's tool field differs from the plan's (`plan.stale.list`, E4). */
+  designToolChanged?: boolean
 }): React.JSX.Element {
   const call = usePlanCommand()
   const cancelGesture = useCancelGesture()
@@ -330,6 +338,19 @@ function OperationInspector({
     ...fieldMessages(findings, 'tool'),
     ...(suggestions !== undefined && suggestions.length === 0
       ? [{ id: 'noSuggestion', severity: 'info' as const, text: t.noSuggestion }]
+      : []),
+    ...(designToolChanged
+      ? [
+          {
+            id: 'designToolChanged',
+            severity: 'info' as const,
+            text: t.designToolChanged(op.toolSource),
+          },
+        ]
+      : []),
+    // where the tool came from (E4's `toolSource`, shown since F5)
+    ...(op.toolSource !== undefined && t.toolSource[op.toolSource] !== undefined
+      ? [{ id: 'toolSource', severity: 'note' as const, text: t.toolSource[op.toolSource]! }]
       : []),
   ]
 

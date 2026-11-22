@@ -20,6 +20,7 @@ import {
   type SurfaceEntry,
 } from '../../../../core/design/surfaces'
 import { DIRECTIONS, type Direction } from '../../../../core/geometry/face'
+import type { DfmWarning } from '../../../../core/geometry/model'
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
 import { Quantity } from '../../../../core/quantity/quantity'
 import type { QuantityDTO } from '../../../../core/quantity/quantity.dto'
@@ -330,6 +331,10 @@ export function axisNames(direction: Direction): { u: string; v: string } {
 }
 
 /** True if a stored coordinate is a formula (the anchor picker is then disabled). */
+/** `design.warning.list` marks a check against an unlocked tool that Apply may change (P2). */
+export const pendingApply = (w: DfmWarning): boolean =>
+  (w as DfmWarning & { pendingApply?: boolean }).pendingApply === true
+
 export function isFormula(dto: QuantityDTO): boolean {
   const q = quantityOf(dto)
   return q !== undefined && isExpression(q)

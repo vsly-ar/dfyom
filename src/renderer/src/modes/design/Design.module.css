@@ -352,3 +352,39 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* The tool field (task F5): the source line under the field stays visible ("Chosen
+   automatically: …"); a new text slides in (keyed by text; reduced motion zeroes it). */
+.toolField {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.toolSource {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-1);
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-muted);
+  animation: tool-source-in var(--motion-base) var(--ease-standard);
+}
+
+.toolSource svg {
+  flex: none;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  margin-top: 2px;
+}
+
+@keyframes tool-source-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

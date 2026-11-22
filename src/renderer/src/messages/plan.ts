@@ -1,6 +1,7 @@
 // User-facing strings of plan mode (task 3.7). Labels follow docs/modes/plan-v0.1.md; terms from
 // docs/glossary.md. Doc: docs/conventions/ui.md#internationalization, #plan-mode-task-37
 import type { OperationKind } from '../../../core/design/part.dto'
+import type { PlanWarning } from '../../../core/plan/checks'
 import type { FeedField, PlanStatus } from '../../../core/plan/plan.dto'
 import type { StrategyKey } from '../../../core/plan/strategy'
 import type { WarningTier } from '../ui'
@@ -187,6 +188,16 @@ export const planMessages = {
     noSuggestion: 'No library tool can make this operation. Add a fitting one with “New tool…”.',
     suggestion: (name: string, diameter: string) => `${name} · Ø ${diameter}`,
     reasons: 'Why this tool',
+    /** Where the plan operation's tool came from (`toolSource`, E4; shown by F5). */
+    toolSource: {
+      design: 'From the design’s tool field.',
+      plan: 'Chosen in this plan.',
+    } as Record<string, string>,
+    /** `designToolChanged` (`plan.stale.list`): the design's tool field differs from the plan's. */
+    designToolChanged: (source: string | undefined) =>
+      source === 'design'
+        ? 'The design’s tool field changed since this plan was made. The tool follows it when the plan is rebuilt.'
+        : 'The design’s tool field changed. This plan keeps the tool chosen here.',
     otherTool: (name: string) => `${name} (current)`,
     stickout: 'Stickout',
     preset: 'Cutting preset',
@@ -308,6 +319,52 @@ export const planMessages = {
     drilling: 'Drilling',
     profile: 'Profile',
   } satisfies Record<OperationKind, string>,
+}
+
+/** A failed plan check of the design's tool, by its rule (`params.check` of the E4 findings). */
+const CHECK: Readonly<Record<string, string>> = {
+  toolType: 'is the wrong tool type for the operation',
+  stickoutRange: 'has a stickout out of range',
+  fluteLength: 'has too short a flute',
+  cornerRadius: 'is too wide for the corner radius',
+  pocketSize: 'is too wide for the pocket',
+  floorRadius: 'does not match the floor radius',
+  drillDiameter: 'does not match the hole diameter',
+  pointAngle: 'does not match the hole’s point angle',
+  flatBottom: 'cannot make a flat bottom',
+  helixDiameter: 'does not suit helical boring of the hole',
+  drillPoint: 'cannot make a drill point',
+  slotWidth: 'is wider than the slot',
+  reach: 'does not reach the depth with its stickout',
+}
+
+const FIXES =
+  'Assign another tool here, change the machine, extend the stickout, or change the design.'
+
+/** "Tools that fit: Flat 3, Flat 4." or "No library tool fits." */
+const fitting = (alternatives: unknown): string =>
+  typeof alternatives === 'string' && alternatives.length > 0
+    ? `Tools that fit: ${alternatives}.`
+    : 'No library tool fits.'
+
+/**
+ * A plan finding's text: the design tool findings of E4 worded from their params, every other
+ * code the core's message, sentence-cased (docs/modes/plan-v0.2.md § Implementation (task E4)).
+ */
+export function findingText(w: PlanWarning): string {
+  const p = (w.params ?? {}) as Readonly<Record<string, unknown>>
+  const tool = String(p['designTool'] ?? 'tool')
+  const check = CHECK[String(p['check'])] ?? 'fails a plan check'
+  switch (w.code) {
+    case 'plan.designToolReplaced':
+      return `The design’s tool, the ${tool}, ${check}: ${String(p['tool'])} is used instead.`
+    case 'plan.designToolFailed':
+      return `The design’s locked tool, the ${tool}, ${check}. ${fitting(p['alternatives'])} ${FIXES}`
+    case 'plan.toolUnresolved':
+      return `No library tool that matches the design’s locked ${tool} passes the plan checks. ${fitting(p['alternatives'])} Add a matching tool to the library, or assign another tool here.`
+    default:
+      return sentence(w.message)
+  }
 }
 
 /** "12 min 5 s", "45 s". */

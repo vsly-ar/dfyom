@@ -168,7 +168,7 @@ function ownTool(
         'tool',
         `the ${own.label} does not fit: ${unfit.detail}` +
           (own.locked ? ' – unlock or pick another tool' : ''),
-        { rule: unfit.rule, locked: own.locked, tool: own.label },
+        { ...unfit.values, rule: unfit.rule, locked: own.locked, tool: own.label },
         unfit.need === undefined ? {} : { suggestion: unfit.need },
       ),
     )

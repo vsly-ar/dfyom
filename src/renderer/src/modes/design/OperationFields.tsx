@@ -2,7 +2,8 @@
 // design.md (Shape, Position, Depth, Corners, Hole, Slot, Tabs): each a QuantityInput (or a
 // choice) whose commit is one update command through `ctx.send`, with its warnings and errors at
 // the field. Shared by the Design inspector (`design.<kind>.update`) and the plan inspector's
-// "Part (plan copy)" group (`plan.design.operation.update`, task E3b), never copied.
+// "Part (plan copy)" group (`plan.design.operation.update`, task E3b), never copied. The tool
+// field (task F5, design only) comes in as `tool`, shown as the group after the one with `on`.
 // Doc: docs/conventions/ui.md#quantity-and-expression-input, #selection-and-picking,
 // #design-and-plan-controls-v02; docs/modes/design.md#operations-v01
 import { Crosshair } from 'lucide-react'
@@ -113,10 +114,13 @@ const commit = (ctx: OperationFieldsContext, path: string, source: string, gestu
 export function OperationFields({
   ctx,
   level = 3,
+  tool,
 }: {
   ctx: OperationFieldsContext
   /** Heading level of the group titles (4 when nested in another group). */
   level?: 3 | 4
+  /** The tool field (Design inspector only), placed as the first group after `on`'s. */
+  tool?: React.ReactNode
 }): React.JSX.Element | null {
   const op = ctx.op
   const g = (title: string, children: React.ReactNode) => (
@@ -124,14 +128,20 @@ export function OperationFields({
       {children}
     </Group>
   )
+  const toolGroup = tool === undefined ? null : g(t.groups.tool, tool)
   switch (op.kind) {
     case 'facing':
-      return g(
-        t.groups.depth,
+      return (
         <>
-          <OnField ctx={ctx} />
-          <ParamField ctx={ctx} path="depth" label={t.depth} kind="length" icon="depth" />
-        </>,
+          {g(
+            t.groups.depth,
+            <>
+              <OnField ctx={ctx} />
+              <ParamField ctx={ctx} path="depth" label={t.depth} kind="length" icon="depth" />
+            </>,
+          )}
+          {toolGroup}
+        </>
       )
     case 'pocket':
       return (
@@ -144,6 +154,7 @@ export function OperationFields({
               <ParamField ctx={ctx} path="depth" label={t.depth} kind="length" icon="depth" />
             </>,
           )}
+          {toolGroup}
           {g(
             t.groups.corners,
             <>
@@ -190,6 +201,7 @@ export function OperationFields({
               <OnField ctx={ctx} />
             </>,
           )}
+          {toolGroup}
           {g(
             t.groups.hole,
             <>
@@ -252,6 +264,7 @@ export function OperationFields({
               />
             </div>
           </ShapeGroup>
+          {toolGroup}
           {g(
             t.groups.slot,
             <ParamField

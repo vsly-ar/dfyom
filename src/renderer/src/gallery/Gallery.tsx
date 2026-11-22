@@ -190,6 +190,17 @@ function Specimens({ title }: { title: string }): React.JSX.Element {
           <Select aria-label="Tool (disabled)" options={TOOLS} defaultValue="t1" disabled />
         </div>
       </Row>
+      <Row label="Select · groups with descriptions (tool field), muted value (chosen again on Apply)">
+        <div className={styles['selects']}>
+          <Select aria-label="Tool candidates" options={TOOL_CANDIDATES} defaultValue="lib:t1" />
+          <Select
+            aria-label="Tool (muted)"
+            options={TOOL_CANDIDATES}
+            defaultValue="generalized"
+            muted
+          />
+        </div>
+      </Row>
       <Fields />
       <QuantityFields />
       <Row label="Status chips · evaluation and plan state">
@@ -492,6 +503,23 @@ const TOOLS = [
   { value: 't1', label: 'T1 · Ø6 flat end mill 2F' },
   { value: 't2', label: 'T2 · Ø3 drill' },
 ] as const
+
+/** The design tool field's list (task F5): generalized tool, then fitting library tools. */
+const TOOL_CANDIDATES = [
+  {
+    value: 'generalized',
+    label: '6 mm flat end mill',
+    group: 'Generalized tool',
+    description: 'Type and size only: Plan uses a matching library tool.',
+  },
+  {
+    value: 'lib:t1',
+    label: 'Flat 6 · Ø 6 mm',
+    group: 'Library tools that fit',
+    description: 'Has a preset for aluminum',
+  },
+  { value: 'lib:t2', label: 'Flat 4 · Ø 4 mm', group: 'Library tools that fit' },
+]
 
 function Fields(): React.JSX.Element {
   const lockOff = { locked: false, onLockedChange: noop }

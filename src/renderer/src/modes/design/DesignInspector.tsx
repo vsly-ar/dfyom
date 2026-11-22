@@ -27,7 +27,8 @@ import {
 import styles from './Design.module.css'
 import { NameField } from './NameField'
 import { ReferenceInspector } from './ReferenceInspector'
-import { defaultUnit, quantityOf, updateArgs, type DesignPart } from './model'
+import { ToolField } from './ToolField'
+import { defaultUnit, pendingApply, quantityOf, updateArgs, type DesignPart } from './model'
 import {
   OperationFields,
   placeErrors,
@@ -54,10 +55,6 @@ export const warningLabels = {
   hide: dfmMessages.hide,
   tier: dfmMessages.severity,
 }
-
-/** `design.warning.list` marks a check against an unlocked tool that Apply may change (P2). */
-export const pendingApply = (w: DfmWarning): boolean =>
-  (w as DfmWarning & { pendingApply?: boolean }).pendingApply === true
 
 /** View of one DFM warning for the warning lists (soft with a clock while Apply may change it). */
 export function warningView(
@@ -251,7 +248,7 @@ function OperationInspector({
       <div className={styles['fields']}>
         {summary ? <ErrorMessage error={summary} message={t.commandFailed} /> : null}
         <NameField label={t.name} name={op.name} onCommit={(name) => void send({ name }, 'name')} />
-        <OperationFields ctx={ctx} />
+        <OperationFields ctx={ctx} tool={<ToolField part={part} op={op} warnings={opWarnings} />} />
         {unplaced.length > 0 ? (
           <WarningList
             labels={warningLabels}

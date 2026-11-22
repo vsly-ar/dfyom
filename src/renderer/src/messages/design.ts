@@ -89,6 +89,7 @@ export const designMessages = {
       slot: 'Slot',
       tabs: 'Tabs',
       tolerance: 'Tolerance',
+      tool: 'Tool',
     },
     generalTolerance: 'General tolerance (length)',
     shapeKind: 'Shape',
@@ -169,6 +170,50 @@ export const designMessages = {
     return `${vNames[a.v]} ${uNames[a.u]}`
   },
   stockName: 'Stock',
+
+  /** The operation's tool field (task F5, docs/modes/design-v0.2.md#operation-tool). */
+  tool: {
+    label: 'Tool',
+    lock: 'Lock tool',
+    placeholder: 'No tool yet',
+    noChoice: 'No tool can make this operation.',
+    groups: {
+      generalized: 'Generalized tool',
+      library: 'Library tools that fit',
+      current: 'Current tool',
+    },
+    generalizedNote: 'Type and size only: Plan uses a matching library tool.',
+    library: (name: string, diameter: string) => `${name} · Ø ${diameter}`,
+    current: (label: string) => `${label} (current)`,
+    currentUnfit: 'Doesn’t fit this operation.',
+    /** The source note (ui.md § Design and plan controls (v0.2): tool field). */
+    chosenByYou: 'Chosen by you.',
+    chosenAuto: 'Chosen automatically.',
+    chosenAutoBecause: (why: string) => `Chosen automatically: ${why}.`,
+    chosenAgain: 'Chosen again on Apply.',
+    lockNoTool: 'No tool yet. Apply chooses one, or pick one from the list.',
+    use: (label: string) => `Use ${label}`,
+    unlock: 'Unlock',
+    previousTool: 'previous tool',
+    /** Why an automatic swap happened, by the old tool's failed fit rule. */
+    why: {
+      cornerRadius: (tool: string, corner: string | undefined) =>
+        `the ${tool} didn’t fit the ${corner === undefined ? '' : `${corner} `}corner`,
+      pocket: (tool: string) => `the ${tool} didn’t fit the pocket`,
+      slot: (tool: string, width: string | undefined) =>
+        `the ${tool} was wider than the ${width === undefined ? '' : `${width} `}slot`,
+      floorRadius: (tool: string, radius: string | undefined) =>
+        radius === undefined
+          ? `the ${tool} left a fillet on the sharp floor`
+          : `the ${tool} didn’t match the ${radius} floor radius`,
+      diameter: (tool: string, hole: string | undefined) =>
+        `the ${tool} didn’t fit the ${hole === undefined ? '' : `Ø ${hole} `}hole`,
+      type: (tool: string, kind: string) => `the ${tool} can’t make a ${kind}`,
+      reach: (tool: string) => `the ${tool} didn’t reach the depth`,
+      unresolved: 'the previous tool could not be read',
+      other: (tool: string) => `the ${tool} didn’t fit`,
+    },
+  },
 
   evaluation: {
     updating: 'Updating…',

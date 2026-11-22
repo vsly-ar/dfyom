@@ -45,4 +45,61 @@ describe('dfm messages', () => {
     expect(dfmMessages.tier(w({ severity: 'info' }))).toBe('soft')
     expect(lengthSource(25.4, 'inch')).toBe('1"')
   })
+
+  it('words the tool checks by their fit rule, in the project units (F5)', () => {
+    const unfit = (params: DfmWarning['params']) =>
+      w({
+        code: 'dfm.toolUnfit',
+        parameter: 'tool',
+        params: { tool: '6 mm flat end mill', ...params },
+      })
+    const text = (params: DfmWarning['params'], units: 'mm' | 'inch' = 'mm') =>
+      dfmMessages.text(unfit(params), units, (id) => id)
+    expect(text({ rule: 'cornerRadius', cornerRadius: 2, toolRadius: 3, locked: false })).toBe(
+      'Corner radius 2 mm is smaller than the radius of the 6 mm flat end mill (3 mm).',
+    )
+    expect(text({ rule: 'cornerRadius', cornerRadius: 2, toolRadius: 3, locked: true })).toMatch(
+      /Unlock it or pick another tool\.$/,
+    )
+    expect(text({ rule: 'width', toolDiameter: 6, size: 5.08, feature: 'slot' }, 'inch')).toBe(
+      'The 6 mm flat end mill is wider than the slot (0.2").',
+    )
+    expect(text({ rule: 'width', toolDiameter: 6, size: 4, feature: 'pocket' })).toContain(
+      'pocket at its narrowest (4 mm)',
+    )
+    expect(text({ rule: 'floorRadius', floorRadius: 1, toolCornerRadius: 0 })).toContain(
+      'needs a bull-nose end mill with corner radius 1 mm',
+    )
+    expect(text({ rule: 'floorRadius', floorRadius: 0, toolCornerRadius: 1 })).toContain(
+      'leaves a 1 mm fillet',
+    )
+    expect(text({ rule: 'diameter', holeDiameter: 5, toolDiameter: 6 })).toBe(
+      'The 6 mm flat end mill does not match the Ø 5 mm hole.',
+    )
+    expect(text({ rule: 'diameter', holeDiameter: 10, toolDiameter: 4, boring: true })).toContain(
+      'between Ø 5 mm and Ø 10 mm',
+    )
+    expect(text({ rule: 'type', needs: 'endMill' })).toContain('a flat or bull-nose end mill')
+    expect(text({ rule: 'type', needs: 'notDrill' })).toBe(
+      'A drill cannot make a flat bottom: use a flat end mill.',
+    )
+    expect(text({ rule: 'reach', reach: 20, depth: 25 })).toBe(
+      'The 6 mm flat end mill reaches 20 mm; the operation is 25 mm deep.',
+    )
+    // values missing (unknown rule): still a sentence naming the tool
+    expect(text({ rule: 'other' })).toBe('The 6 mm flat end mill does not fit.')
+    expect(
+      dfmMessages.text(
+        w({
+          code: 'dfm.toolNotInLibrary',
+          parameter: 'tool',
+          params: { tool: '1/4" flat end mill' },
+        }),
+        'inch',
+        (id) => id,
+      ),
+    ).toBe('Plan needs a 1/4" flat end mill: add one to the library.')
+    // a tool check's suggestion is the size the operation needs, never a value of the tool field
+    expect(dfmMessages.suggestionSource(unfit({ rule: 'cornerRadius' }), 'mm')).toBeUndefined()
+  })
 })

@@ -21,6 +21,13 @@ export interface ToolUnfit {
   readonly detail: string
   /** What the operation would need (mm): `{ relation, value }` for size rules. */
   readonly need?: { readonly relation: 'atLeast' | 'atMost'; readonly value: number }
+  /**
+   * The rule's values for messages (lengths in mm), merged into `dfm.toolUnfit`'s params so the
+   * UI can word them in the project units (F5): `cornerRadius` + `toolRadius`, `toolDiameter` +
+   * `size` + `feature` (`pocket` | `slot`), `floorRadius` + `toolCornerRadius`, `holeDiameter`
+   * (+ `toolDiameter` for a drill, `boring: true` for an end mill), `reach` + `depth`, `needs`.
+   */
+  readonly values: Readonly<Record<string, number | string | boolean>>
 }
 
 /** The plan's default `breakthrough` (plan-v0.1.md § Strategy defaults): 0.5 mm / 0.02″. */
@@ -63,27 +70,37 @@ export function toolFit(
           rule: 'cornerRadius',
           detail: `cornerRadius ${mm(cornerRadius)} < tool radius ${mm(dc / 2)}`,
           need: { relation: 'atLeast', value: dc / 2 },
+          values: { cornerRadius, toolRadius: dc / 2 },
         }
-  const wider = (size: number, what: string): ToolUnfit | undefined =>
+  const wider = (size: number, what: string, feature: string): ToolUnfit | undefined =>
     dc <= size + TOL
       ? undefined
       : {
           rule: 'width',
           detail: `Ø${mm(dc)} is wider than the ${what} (${mm(size)})`,
           need: { relation: 'atLeast', value: dc },
+          values: { toolDiameter: dc, size, feature },
         }
   let unfit: ToolUnfit | undefined
   switch (op.kind) {
     case 'facing':
       return tool.type === 'flatEndMill'
         ? undefined
-        : { rule: 'type', detail: 'a facing needs a flat end mill' }
+        : {
+            rule: 'type',
+            detail: 'a facing needs a flat end mill',
+            values: { needs: 'flatEndMill' },
+          }
     case 'pocket': {
       if (!endMill(tool))
-        return { rule: 'type', detail: 'a pocket needs a flat or bull-nose end mill' }
+        return {
+          rule: 'type',
+          detail: 'a pocket needs a flat or bull-nose end mill',
+          values: { needs: 'endMill' },
+        }
       const c = op.shape.contour
       unfit =
-        wider(2 * inradius(c), 'pocket at its narrowest') ??
+        wider(2 * inradius(c), 'pocket at its narrowest', 'pocket') ??
         (c.kind === 'rectangle' ? corner(c.cornerRadius) : undefined)
       if (unfit !== undefined) return unfit
       const f = op.floorRadius
@@ -91,6 +108,7 @@ export function toolFit(
       if (Math.abs(re - f) > TOL)
         return {
           rule: 'floorRadius',
+          values: { floorRadius: f, toolCornerRadius: re },
           detail:
             f > EPSILON
               ? `floorRadius ${mm(f)} needs a bull nose with corner radius ${mm(f)}`
@@ -102,25 +120,48 @@ export function toolFit(
       const d = op.diameter
       const bottom = op.bottom.kind
       if (tool.type === 'drill') {
-        if (bottom === 'flat') return { rule: 'type', detail: 'a drill cannot make a flat bottom' }
+        if (bottom === 'flat')
+          return {
+            rule: 'type',
+            detail: 'a drill cannot make a flat bottom',
+            values: { needs: 'notDrill' },
+          }
         if (Math.abs(dc - d) > TOL)
-          return { rule: 'diameter', detail: `drill Ø${mm(dc)} ≠ hole Ø${mm(d)}` }
+          return {
+            rule: 'diameter',
+            detail: `drill Ø${mm(dc)} ≠ hole Ø${mm(d)}`,
+            values: { holeDiameter: d, toolDiameter: dc },
+          }
       } else if (tool.type === 'flatEndMill') {
         if (bottom === 'drillPoint')
-          return { rule: 'type', detail: 'an end mill cannot make a drill point' }
+          return {
+            rule: 'type',
+            detail: 'an end mill cannot make a drill point',
+            values: { needs: 'drill' },
+          }
         if (!(dc > d / 2 && dc < d - TOL))
           return {
             rule: 'diameter',
+            values: { holeDiameter: d, toolDiameter: dc, boring: true },
             detail: `helical boring of Ø${mm(d)} needs an end mill between Ø${mm(d / 2)} and Ø${mm(d)}`,
           }
-      } else return { rule: 'type', detail: 'a hole needs a drill or a flat end mill' }
+      } else
+        return {
+          rule: 'type',
+          detail: 'a hole needs a drill or a flat end mill',
+          values: { needs: 'drillOrFlat' },
+        }
       break
     }
     case 'profile':
       if (tool.type !== 'flatEndMill')
-        return { rule: 'type', detail: 'a profile needs a flat end mill' }
+        return {
+          rule: 'type',
+          detail: 'a profile needs a flat end mill',
+          values: { needs: 'flatEndMill' },
+        }
       unfit =
-        wider(op.slotWidth, 'slot') ??
+        wider(op.slotWidth, 'slot', 'slot') ??
         (op.side === 'inside' && op.shape.contour.kind === 'rectangle'
           ? corner(op.shape.contour.cornerRadius)
           : undefined)
@@ -132,5 +173,9 @@ export function toolFit(
   const depth = op.kind === 'profile' ? base + DEFAULT_BREAKTHROUGH[unitSystem] : base
   return tool.reach + EPSILON >= depth
     ? undefined
-    : { rule: 'reach', detail: `reaches ${mm(tool.reach)}, the operation is ${mm(depth)} deep` }
+    : {
+        rule: 'reach',
+        detail: `reaches ${mm(tool.reach)}, the operation is ${mm(depth)} deep`,
+        values: { reach: tool.reach, depth },
+      }
 }
