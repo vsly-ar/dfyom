@@ -16,6 +16,7 @@ import type { Direction } from '../geometry/face'
 import type { Stock } from '../library/stock'
 import type { Operation, Part, Point, Shape } from './operation'
 import { operationReferences, SurfaceTable } from './surfaces'
+import { shapeCentre } from './anchor'
 
 const vec2 = (p: Point) => [p[0].canonical, p[1].canonical] as const
 
@@ -29,7 +30,8 @@ function shapeGeometry(s: Shape): ShapeGeometry {
           width: s.width.canonical,
           cornerRadius: s.cornerRadius.canonical,
         }
-  return { center: vec2(s.center), contour }
+  // the geometric centre: `center` is the anchor point (design-v0.2.md#placement-anchors)
+  return { center: shapeCentre(s), contour }
 }
 
 /**

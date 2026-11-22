@@ -108,8 +108,15 @@ describe('design model', () => {
     expect(operationAnchor(ops[2]!, part.loaded!.stock, part.table!)).toEqual([10, 10, -0.5])
     const drill = ops[2]!
     if (drill.kind !== 'drilling') throw new Error('drill1 expected')
-    const circle = shapeLoop({ kind: 'circle', center: drill.center, diameter: drill.diameter }, 0)
+    const anchor = { u: 'min', v: 'min' } as const
+    const circle = shapeLoop(
+      { kind: 'circle', center: drill.center, anchor, diameter: drill.diameter },
+      0,
+    )
     expect(circle).toHaveLength(48)
+    // `center` is the anchor point: a min/min circle lies up and right of it
+    expect(Math.min(...circle.map((p) => p[0]))).toBeCloseTo(drill.center[0].canonical)
+    expect(Math.min(...circle.map((p) => p[1]))).toBeCloseTo(drill.center[1].canonical)
     expect(
       failingOperation({ issues: [], frames: [{ data: { operation: 'pocket1' } }] }, [
         'facing1',

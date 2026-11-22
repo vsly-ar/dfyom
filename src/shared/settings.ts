@@ -7,6 +7,7 @@
  * connect" guards the agents' own access (docs/architecture/llm-api.md#local-http).
  */
 import { z } from 'zod'
+import { AnchorDtoSchema } from '../core/design/part.dto'
 
 export const THEMES = ['system', 'light', 'dark'] as const
 export type ThemeSetting = (typeof THEMES)[number]
@@ -24,6 +25,11 @@ const fields = {
   allowLocalAgents: z.boolean(),
   /** Last panel layout per panel group id; new windows start from it. */
   layouts: z.record(z.string(), PanelLayoutSchema),
+  /**
+   * Placement anchor of new positioned operations made in the UI (design-v0.2.md#placement-anchors);
+   * the window passes it as `anchor` (agents pass their own or get the centre).
+   */
+  defaultAnchor: AnchorDtoSchema,
 }
 
 /** The settings file; a missing field takes its default (new settings need no migration). */
@@ -32,6 +38,7 @@ export const AppSettingsSchema = z.object({
   reduceMotion: fields.reduceMotion.default(false),
   allowLocalAgents: fields.allowLocalAgents.default(true),
   layouts: fields.layouts.default({}),
+  defaultAnchor: fields.defaultAnchor.default({ u: 'centre', v: 'centre' }),
 })
 
 export type AppSettings = Readonly<z.output<typeof AppSettingsSchema>>
@@ -52,5 +59,6 @@ export function mergeSettings(
     reduceMotion: patch.reduceMotion ?? current.reduceMotion,
     allowLocalAgents: patch.allowLocalAgents ?? current.allowLocalAgents,
     layouts: { ...current.layouts, ...(patch.layouts ?? {}) },
+    defaultAnchor: patch.defaultAnchor ?? current.defaultAnchor,
   }
 }

@@ -3,7 +3,12 @@
 // Doc: docs/conventions/ui.md#settings · contract: src/shared/settings.ts
 import { createStore, type StoreApi } from 'zustand/vanilla'
 import type { PreloadApi } from '../../../shared/preload-api'
-import { DEFAULT_SETTINGS, type AppSettings, type AppSettingsPatch } from '../../../shared/settings'
+import {
+  DEFAULT_SETTINGS,
+  mergeSettings,
+  type AppSettings,
+  type AppSettingsPatch,
+} from '../../../shared/settings'
 
 export interface SettingsState {
   readonly settings: AppSettings
@@ -21,14 +26,7 @@ export function createSettingsStore(bridge: Pick<PreloadApi, 'settings'>): Setti
     settings: bridge.settings.initial ?? DEFAULT_SETTINGS,
     update(patch) {
       const s = get().settings
-      set({
-        settings: {
-          theme: patch.theme ?? s.theme,
-          reduceMotion: patch.reduceMotion ?? s.reduceMotion,
-          allowLocalAgents: patch.allowLocalAgents ?? s.allowLocalAgents,
-          layouts: { ...s.layouts, ...(patch.layouts ?? {}) },
-        },
-      })
+      set({ settings: mergeSettings(s, patch) })
       void bridge.settings.update(patch).then((reply) => {
         // main refused it (invalid): go back to main's settings
         if (!reply.ok) set({ settings: s })
