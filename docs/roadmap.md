@@ -61,9 +61,15 @@ Tasks, exit criteria (the user's enclosure recreated with its real outline) and 
 
 Tasks, exit criteria (a lid for the v0.3 enclosure: countersunk and counterbored holes repeated by Clones) and answered questions: [plans/v0.4.md](plans/v0.4.md). Docs to accept first: [design-v0.4.md](modes/design-v0.4.md), [plan-v0.4.md](modes/plan-v0.4.md), [features.md](modes/features.md) (feature model and Clones), a [ui.md](conventions/ui.md) amendment, and the `tools/list` budget decision in [llm-api.md](architecture/llm-api.md).
 
+## Hardening – make existing features work well (draft)
+
+**Draft** (2026-11-22). Right after v0.4, user direction D43: find and fix bugs, improve UX and AX (agentic experience) and interact with a real machine, driven by the user's dogfood feedback. No new modelling features; the fixes to existing features from the LLM-first test move in from the follow-up below. Toward the [direction](#direction)'s second verification step (the user by hand and on a real machine): the serial connection to a GRBL controller behind an accepted [safety spec](modes/run.md#safety).
+
+Tasks, exit criteria (the user cuts the v0.4 lid on their machine using only the app, and an agent over MCP designs one variant), the dogfood intake and questions Q47–Q54: [plans/hardening.md](plans/hardening.md).
+
 ## v0.4 follow-up – LLM-first gaps (draft)
 
-**Draft** (2026-11-22). After v0.4, before v0.5: the user asked to investigate and fix the findings of the [LLM-first black-box test](plans/v0.4-llm-first.md#source) of the installed v0.3.2 app over MCP. Toward the [direction](#direction)'s last verification step (the user guiding agents through real projects) and real-machine readiness: an agent with the MCP tools only must take a reference model to safe programs and measure the result itself.
+**Draft** (2026-11-22). After v0.4 and the [hardening](#hardening--make-existing-features-work-well-draft) milestone, before v0.5: the user asked to investigate and fix the findings of the [LLM-first black-box test](plans/v0.4-llm-first.md#source) of the installed v0.3.2 app over MCP. Toward the [direction](#direction)'s last verification step (the user guiding agents through real projects) and real-machine readiness: an agent with the MCP tools only must take a reference model to safe programs and measure the result itself.
 
 1. **Workholding** per setup (toe clamps, vise, screws, blocks, spoilboard / fixture plate, tape / vacuum): keep-out in toolpaths, links that hop over clamps, clearance from the highest item, a collision check of every move that guards the export ([workholding.md](modes/workholding.md)).
 2. **Reference query** for agents: depth levels, sections as shapes in one call, circular hole detection ([reference-query.md](modes/reference-query.md)).
