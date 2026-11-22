@@ -1,0 +1,13 @@
+// Spike S1 harness (docs/decisions/0019-2d-geometry-library.md): Node-run TypeScript, not part of
+// the app build. Lint finds this file through the project service; typecheck: `npx tsc -p spikes/2d`
+// after `npm ci` in spikes/2d (the root `npm run typecheck` does not include spikes).
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "noEmit": true,
+    "allowImportingTsExtensions": true
+  },
+  "include": ["*.ts"]
+}

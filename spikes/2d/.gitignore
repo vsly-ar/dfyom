@@ -1,0 +1,3 @@
+# build output of `npm run build:wasm` (reproducible from cc-wasm/src and Cargo.lock)
+cc-wasm/target/
+cc-wasm/cc_wasm.wasm

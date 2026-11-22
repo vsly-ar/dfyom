@@ -1,0 +1,21 @@
+# Spike S1 (docs/decisions/0019-2d-geometry-library.md): the upstream cavalier_contours crate
+# behind a minimal C ABI, built for wasm32-unknown-unknown without wasm-bindgen.
+[package]
+name = "cc_wasm"
+version = "0.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+cavalier_contours = "=0.9.0"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

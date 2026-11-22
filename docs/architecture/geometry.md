@@ -238,5 +238,5 @@ All libraries sit behind interfaces (ports) in `src/core`; heavy evaluation runs
 - 4th/5th axis: `z = f(x, y)` surfaces stop working there; what replaces them.
 - Raster-to-vector tracing: `@visioncortex/vtracer` (MIT, WASM, Bézier output, still alpha) or Potrace (GPL, best black-and-white quality – allowed by [ADR 0014](../decisions/0014-gpl-3-or-later-license.md)); how much the user can tune the tracing.
 - Medial axis for V-carving – candidates: JSPoly (JS port of Boost.Polygon Voronoi, used by Kiri:Moto; segments only), `flo-mat` (MIT, works on Béziers directly), CGAL via WASM (GPL, allowed). Needs its own spike.
-- Arc-preserving offsets: `cavalier-contours-js` (young, single maintainer) vs. a WASM build of the Rust `cavalier_contours` crate.
+- Arc-preserving offsets and booleans: measured by spike S1; recommendation in [ADR 0019](../decisions/0019-2d-geometry-library.md) (proposed).
 - Simulation model (Z-map vs. dexel – internal to simulation only); performance budget.
