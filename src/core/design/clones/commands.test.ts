@@ -462,6 +462,16 @@ describe('preview, pending keys, persistence', () => {
       { n: 4, at: [80, 20] },
     ])
     expect(r.rows[0]!.points[1]).toEqual({ at: [60, 20], kind: 'skipped', n: 3 })
+    // the drawn path (U3): straight through an offset row's positions, no arc centre
+    expect(r.rows[0]).toMatchObject({
+      path: [
+        [20, 20],
+        [40, 20],
+        [60, 20],
+        [80, 20],
+      ],
+    })
+    expect(r.rows[0]).not.toHaveProperty('centre')
     expect(s.d.doc).toBe(before)
   })
 

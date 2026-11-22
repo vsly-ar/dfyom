@@ -1,7 +1,7 @@
 // Feature inspectors (v0.4 task U1): the read-only owned-operation inspector (breadcrumb, "Edited
 // through Hole 1" with its lock reason, the usual OperationFields read-only, name and tool still
-// editable as A4 allows, findings with "Fix in Hole 1") and a minimal feature inspector until the
-// kinds' own (hole: U2, Clones: U3): name, the feature's values read-only, its operations or
+// editable as A4 allows, findings with "Fix in Hole 1") and a minimal feature inspector for a kind
+// without its own (holes: HoleInspector, U2; Clones: ClonesInspector, U3): name, its operations or
 // source, and its findings with fixes that a single feature field can take. "Edited through" and
 // "Fix in" select the feature and ask it to focus the mapped field (ui store `featureFocus`).
 // Doc: docs/conventions/ui.md#owned-operations-and-clone-instances, #feature-rows-and-add;
@@ -20,10 +20,8 @@ import { ErrorMessage, Icon, PanelHeader, ReadOnlyReason, WarningList } from '..
 import { warningLabels, warningView } from './DesignInspector'
 import styles from './Design.module.css'
 import {
-  cloneInstances,
   featureFieldOf,
   featureOfWarning,
-  featureReadout,
   firstGeometricPath,
   FIXABLE_FIELDS,
   operationUnits,
@@ -184,19 +182,10 @@ export function OwnedOperationInspector({
   )
 }
 
-// ── feature (minimal: Clones until U3; holes have HoleInspector) ─────────────────────────
+// ── feature (minimal: a kind without its own inspector) ──────────────────────────────────
 
 /** The feature's values as read-only rows `[field, label, value]` (field: the focus target). */
-function featureFacts(part: DesignPart, feature: FeatureDTO): [string, string, string][] {
-  if (feature.kind === 'clones') {
-    const instances = cloneInstances(part, feature.id)
-    const made = instances.filter((x) => x.kind === 'clone').length
-    return [
-      ['instances', f.clonesGroup, featureReadout(feature, 1 + made)],
-      ['rows', f.rows, String((feature['rows'] as unknown[] | undefined)?.length ?? 0)],
-      ['skipped', f.skipped, String(instances.filter((x) => x.kind === 'skipped').length)],
-    ]
-  }
+function featureFacts(_part: DesignPart, _feature: FeatureDTO): [string, string, string][] {
   return []
 }
 

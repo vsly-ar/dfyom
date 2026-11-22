@@ -9,6 +9,8 @@ import type { ShapeItem } from '../../../core/design/shape.dto'
 import type { SvgImportReport } from '../../../core/import/svg'
 import type { Issue } from '../../../shared/errors/app-error'
 import type { AppMode } from '../../../core/modes'
+import type { CloneRowKind } from '../../../core/design/clones/clones'
+import type { ClonePathData } from '../viewport/clone-path'
 
 /** Pick mode: a field asks the viewport for a surface (ui.md#selection-and-picking). */
 export interface PickRequestState {
@@ -120,6 +122,51 @@ export interface UiState {
    */
   readonly featureFocus: FeatureFocus | null
   setFeatureFocus(focus: FeatureFocus | null): void
+  /**
+   * The open "Make Clones…" draft (v0.4 task U3): shown in the inspector, its ghosts in the
+   * viewport; no command and no undo step until "Make clones". Null when none is open.
+   */
+  readonly clonesDraft: ClonesDraftState | null
+  setClonesDraft(draft: ClonesDraftState | null): void
+  /** The selected (expanded) row of the Clones editor shown: its path segment is amber (U3). */
+  readonly clonesRow: ClonesRowFocus | null
+  setClonesRow(focus: ClonesRowFocus | null): void
+  /** A polite announcement of the design viewport ("Clone 4 skipped."; U3), or null. */
+  readonly announcement: string | null
+  announce(message: string | null): void
+}
+
+/** A path row as the Clones editors hold it: `design.clones.*` args (quantities as entered). */
+export type ClonesRowArg = {
+  readonly kind: CloneRowKind
+  readonly skip?: readonly number[]
+} & Readonly<Record<string, unknown>>
+
+/** The "Make Clones…" draft (ui.md § Clones). */
+export interface ClonesDraftState {
+  readonly partId: string
+  /** What was selected when it opened (a selection change closes the draft). */
+  readonly openedFor: string
+  /** The Source list: the selected item first (fixed), then what sits on its surfaces. */
+  readonly options: readonly {
+    readonly id: string
+    readonly label: string
+    readonly fixed: boolean
+    readonly host?: string
+  }[]
+  /** A feature source (one feature, no options). */
+  readonly feature: boolean
+  /** Source options the user unchecked. */
+  readonly unchecked: ReadonlySet<string>
+  readonly rows: readonly ClonesRowArg[]
+  /** The last preview's path (the viewport's ghosts), or null before the first or after a refusal. */
+  readonly preview: ClonePathData | null
+}
+
+/** Which Clones editor's row is selected: a feature id, or `draft`. */
+export interface ClonesRowFocus {
+  readonly owner: string
+  readonly row: number
 }
 
 /** Which feature field the feature inspector should focus (a dotted field path, `cbDiameter`). */
@@ -191,5 +238,11 @@ export function createUiStore(initial: Partial<Pick<UiState, 'mode'>> = {}): UiS
       }),
     featureFocus: null,
     setFeatureFocus: (featureFocus) => set({ featureFocus }),
+    clonesDraft: null,
+    setClonesDraft: (clonesDraft) => set({ clonesDraft }),
+    clonesRow: null,
+    setClonesRow: (clonesRow) => set({ clonesRow }),
+    announcement: null,
+    announce: (announcement) => set({ announcement }),
   }))
 }

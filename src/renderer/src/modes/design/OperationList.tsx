@@ -16,7 +16,7 @@ import type { UnitSystem } from '../../../../core/project/document'
 import type { DfmWarning } from '../../../../core/geometry/model'
 import { designMessages } from '../../messages/design'
 import { useUi } from '../../shell/ShellContext'
-import { Icon, IconButton, type IconName } from '../../ui'
+import { Button, Icon, IconButton, type IconName } from '../../ui'
 import styles from './Design.module.css'
 import {
   cloneInstances,
@@ -32,9 +32,12 @@ import {
 } from './feature-view'
 import type { DesignPart } from './model'
 import { useCommand } from './useDesign'
+import { useSkipToggle } from './ClonesInspector'
+import { instanceId } from './clones-view'
 
 const m = designMessages
 const f = m.features
+const c = f.clones
 
 const ICON: Record<OperationDTO['kind'], IconName> = {
   facing: 'facing',
@@ -78,10 +81,12 @@ interface VisibleRow {
 function visibleRows(
   unit: OperationUnit,
   expanded: ReadonlySet<string>,
+  instancesOf: (featureId: string) => readonly number[],
   outer: string = unit.id,
   parent?: string,
 ): VisibleRow[] {
   if (unit.kind === 'operation') return [{ id: unit.id, unit: outer, parent }]
+  const instanceNumbers = unit.feature.kind === 'clones' ? instancesOf(unit.id) : []
   const self: VisibleRow = { id: unit.id, unit: outer, parent, expands: unit.id }
   if (!expanded.has(unit.id)) return [self]
   if (unit.feature.kind !== 'clones')
@@ -89,8 +94,11 @@ function visibleRows(
   const group = instancesKey(unit.id)
   return [
     self,
-    ...unit.nested.flatMap((n) => visibleRows(n, expanded, outer, unit.id)),
+    ...unit.nested.flatMap((n) => visibleRows(n, expanded, instancesOf, outer, unit.id)),
     { id: group, unit: outer, parent: unit.id, expands: group },
+    ...(expanded.has(group)
+      ? instanceNumbers.map((n) => ({ id: instanceId(unit.id, n), unit: outer, parent: group }))
+      : []),
   ]
 }
 
@@ -105,6 +113,8 @@ interface ListContext {
   select(id: string): void
   key(e: KeyboardEvent, rowId: string): void
   rowRef(id: string): (el: HTMLButtonElement | null) => void
+  /** Skip or restore a clone instance (v0.4 task U3). */
+  toggleSkip(feature: FeatureDTO, n: number): void
 }
 
 export function OperationList({
@@ -124,6 +134,7 @@ export function OperationList({
   onRemoved: (message: string) => void
 }): React.JSX.Element {
   const call = useCommand()
+  const toggleSkip = useSkipToggle(part)
   const expanded = useUi((s) => s.expandedFeatures)
   const setExpanded = useUi((s) => s.setFeatureExpanded)
   const rows = useRef(new Map<string, HTMLButtonElement>())
@@ -140,6 +151,9 @@ export function OperationList({
       )
       if (inner !== undefined)
         return inner.kind === 'feature' && inner.id !== selected ? [u.id, inner.id] : [u.id]
+      // a selected clone instance (viewport click, breadcrumb) shows in the open Clones group
+      if (u.feature.kind === 'clones' && selected?.startsWith(`${u.id}_`) === true)
+        return [u.id, instancesKey(u.id)]
       return u.ops.some((o) => o.id === selected) && u.feature.kind !== 'clones' ? [u.id] : []
     })
     .join(' ')
@@ -147,7 +161,9 @@ export function OperationList({
     for (const id of openFor.split(' ')) if (id.length > 0) setExpanded(id, true)
   }, [openFor, setExpanded])
 
-  const visible = units.flatMap((u) => visibleRows(u, expanded))
+  const visible = units.flatMap((u) =>
+    visibleRows(u, expanded, (id) => cloneInstances(part, id).map((x) => x.n)),
+  )
   const focusRow = (id: string) => rows.current.get(id)?.focus()
 
   /** Moves a unit one step over its neighbour; `keep` is the row that keeps focus. */
@@ -218,6 +234,7 @@ export function OperationList({
       if (el) rows.current.set(id, el)
       else rows.current.delete(id)
     },
+    toggleSkip,
   }
 
   return (
@@ -509,8 +526,9 @@ function position(at: CloneInstanceRow['at'], units: UnitSystem): string {
 /**
  * A Clones row's children (ui.md § Clones in the navigator): Source, expanded (the nested
  * operations or source feature, editable in their own inspectors), and Clones, collapsed (one row
- * per instance number from 2; skipped and duplicate spots keep their numbered row, muted). The
- * instances' Skip / Restore and selection come with U3.
+ * per instance number from 2; skipped and duplicate spots keep their numbered row, muted). An
+ * instance row selects the instance; its action slot has Skip or Restore (U3: the keyboard path
+ * of the viewport's click-to-skip).
  */
 function ClonesChildren({
   ctx,
@@ -557,22 +575,49 @@ function ClonesChildren({
           className={styles['instances']}
           aria-label={f.instancesOf(unit.feature.name)}
         >
-          {instances.map((x) => (
-            <li
-              key={x.n}
-              className={styles['instance']}
-              data-muted={x.kind !== 'clone' || undefined}
-            >
-              <span>{f.instance(x.n)}</span>
-              <span className={styles['featureReadout']}>
-                {x.kind === 'clone'
-                  ? position(x.at, ctx.part.units)
-                  : x.kind === 'skipped'
-                    ? f.skipped
-                    : f.duplicate}
-              </span>
-            </li>
-          ))}
+          {instances.map((x) => {
+            const id = instanceId(unit.id, x.n)
+            const selected = ctx.selected === id
+            return (
+              <li
+                key={x.n}
+                className={styles['instance']}
+                data-muted={x.kind !== 'clone' || undefined}
+                data-selected={selected ? '' : undefined}
+              >
+                <button
+                  type="button"
+                  ref={ctx.rowRef(id)}
+                  className={styles['instanceSelect']}
+                  aria-pressed={selected}
+                  aria-label={c.instanceRow(x.n, x.kind)}
+                  onClick={() => ctx.select(id)}
+                  onKeyDown={(e) => ctx.key(e, id)}
+                >
+                  <span>{f.instance(x.n)}</span>
+                  <span className={styles['featureReadout']}>
+                    {x.kind === 'clone'
+                      ? position(x.at, ctx.part.units)
+                      : x.kind === 'skipped'
+                        ? f.skipped
+                        : f.duplicate}
+                  </span>
+                </button>
+                {x.kind !== 'duplicate' ? (
+                  <span className={styles['instanceActions']}>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      aria-label={x.kind === 'skipped' ? c.restoreN(x.n) : c.skipN(x.n)}
+                      onClick={() => ctx.toggleSkip(unit.feature, x.n)}
+                    >
+                      {x.kind === 'skipped' ? c.restoreLabel : c.skipLabel}
+                    </Button>
+                  </span>
+                ) : null}
+              </li>
+            )
+          })}
         </ol>
       </div>
     </>

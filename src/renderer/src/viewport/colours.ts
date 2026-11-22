@@ -135,6 +135,8 @@ export interface SurfaceState {
   readonly pulse?: number | undefined
   /** Operations tinted `--info`: edited in the plan (plan scene, task E3b). */
   readonly tinted?: ReadonlySet<string> | null | undefined
+  /** Operations drawn selected with `selectedOperation` (a Clones selection's source, task U3). */
+  readonly selectedAlso?: ReadonlySet<string> | null | undefined
 }
 
 /**
@@ -150,7 +152,7 @@ export function surfaceColour(surface: SurfaceId, state: SurfaceState, palette: 
     if (state.hovered === surface) return mix(base, palette.selected, MIX.pickHover)
     return mix(base, palette.selected, MIX.pickEligible)
   }
-  if (isSelectedOwner(owner, state.selectedOperation)) {
+  if (isSelectedOwner(owner, state.selectedOperation) || state.selectedAlso?.has(owner) === true) {
     const p = Math.min(1, Math.max(0, state.pulse ?? 0))
     return mix(base, palette.selected, MIX.selected + p * (MIX.pulse - MIX.selected))
   }
@@ -178,7 +180,8 @@ export function vertexColours(
 /** Whether a surface is drawn with the selection outline. */
 export function isOutlined(surface: SurfaceId, state: SurfaceState): boolean {
   if (state.pickEligible) return state.hovered === surface && state.pickEligible.has(surface)
-  return isSelectedOwner(surfaceOwner(surface), state.selectedOperation)
+  const owner = surfaceOwner(surface)
+  return isSelectedOwner(owner, state.selectedOperation) || state.selectedAlso?.has(owner) === true
 }
 
 /**

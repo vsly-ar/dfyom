@@ -20,6 +20,8 @@ import { failingOperation, surfaceLabel } from './model'
 import { anchorPoint, frameAxes, markerPoint, operationFace, operationOutline } from './outline'
 import { ghostMatrix, referencePlacement } from './reference-view'
 import { useTabMarkers } from './useTabMarkers'
+import { useClonesScene } from './useClonesScene'
+import { instanceId, instanceOfOperation } from './clones-view'
 import {
   useDesignEvaluation,
   useDesignPart,
@@ -133,6 +135,8 @@ export function useDesignScene(): SceneProps {
   }, [selectedOp, part, port, rotationGuide])
   const selectedDto = part?.dto.operations.find((o) => o.id === selected)
   const tabs = useTabMarkers(part, selectedDto)
+  const clones = useClonesScene(part, selected, warnings)
+  const announcement = useUi((s) => s.announcement)
 
   const marker = useMemo(() => {
     if (status !== 'failed' || ops === undefined || part?.loaded === undefined || !part.table)
@@ -154,7 +158,10 @@ export function useDesignScene(): SceneProps {
     frame: overlays?.frame ?? null,
     anchor: overlays?.anchor ?? null,
     tabs,
-    guide: overlays?.guide ? [overlays.guide] : null,
+    guide: overlays?.guide ? [overlays.guide] : clones.guide,
+    clonePath: clones.clonePath,
+    selectedAlso: clones.selectedAlso,
+    announcement,
     ghosts,
     snap: snapOn,
     ...(part === undefined ? {} : { units: part.units }),
@@ -168,13 +175,24 @@ export function useDesignScene(): SceneProps {
               status,
             }),
             overlays?.describe,
+            clones.summary,
             ...referenceSummary,
           ]
             .filter(Boolean)
             .join(' '),
         }),
-    onSelect: (target) =>
-      select(target === null || target.operation === 'stock' ? null : target.operation),
+    // a clone instance's surface selects the instance, a second click its Clones; an owned
+    // operation's second click selects its feature (ui.md § Feature selection in the viewport)
+    onSelect: (target) => {
+      if (target === null || target.operation === 'stock') return select(null)
+      const inst = part === undefined ? undefined : instanceOfOperation(part, target.operation)
+      if (inst !== undefined) {
+        const id = instanceId(inst.feature.id, inst.n)
+        return select(selected === id ? inst.feature.id : id)
+      }
+      const owner = part?.dto.operations.find((o) => o.id === target.operation)?.featureId
+      select(owner !== undefined && selected === target.operation ? owner : target.operation)
+    },
     pick: pick === null ? null : { eligible: pick.eligible, field: pick.field },
     onPick: (target) => {
       pick?.onPick(target.surface)

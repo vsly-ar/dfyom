@@ -35,6 +35,8 @@ import {
   type FrameOverlay,
 } from './Overlays'
 import { TabMarkers, type TabOverlay } from './TabMarkers'
+import { ClonePathLayer } from './ClonePath'
+import type { ClonePathOverlay } from './clone-path'
 import { ReferenceGhost, type ReferenceGhostView } from './ReferenceGhost'
 import { RunLayer, type RunScene } from './RunLayer'
 
@@ -59,6 +61,8 @@ export interface SceneProps {
   tabs?: TabOverlay | null
   /** Thin dashed guide loops, e.g. the rotated bounding box (task U2). */
   guide?: readonly OutlineLoop[] | null
+  /** The clone path of a Clones selection or draft (v0.4 task U3). */
+  clonePath?: ClonePathOverlay | null
   /** Reference model ghosts, drawn after the part, never pickable (task R3). */
   ghosts?: readonly ReferenceGhostView[] | null
   reducedMotion?: boolean
@@ -116,6 +120,13 @@ export function Scene(props: SceneProps): React.JSX.Element {
       {props.guide ? <GuideLoops loops={props.guide} colour={palette.edge} /> : null}
       {frame ? <FrameAxes frame={frame} palette={palette} /> : null}
       {props.tabs ? <TabMarkers tabs={props.tabs} palette={palette} /> : null}
+      {props.clonePath ? (
+        <ClonePathLayer
+          overlay={props.clonePath}
+          palette={palette}
+          reducedMotion={props.reducedMotion ?? false}
+        />
+      ) : null}
       {anchor ? (
         <AnchorMarker
           anchor={anchor}

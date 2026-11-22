@@ -78,6 +78,105 @@ export const designMessages = {
     placeholder: 'Its values are shown here; editing them in this panel comes next.',
     findings: 'Findings',
     ownedGroup: 'Operations',
+    /** The Clones inspector, draft, instances and clone path (v0.4 task U3, ui.md § Clones). */
+    clones: {
+      draftTitle: 'New Clones',
+      draftMeta: 'Draft',
+      make: 'Make clones',
+      cancel: 'Cancel',
+      source: 'Source',
+      rows: 'Rows',
+      /** "1 + 5 clones = 6 instances · 0 skipped" */
+      readout: (clones: number, instances: number, skipped: number) =>
+        `1 + ${clones === 1 ? '1 clone' : `${clones} clones`} = ${
+          instances === 1 ? '1 instance' : `${instances} instances`
+        } · ${skipped} skipped`,
+      overLimit: (actual: number, max: number, excess: number) =>
+        `${actual} instances: Clones are limited to ${max}. Remove or skip ${excess}.`,
+      addRow: 'Add row',
+      kinds: {
+        grid: 'Grid',
+        offset: 'Offset',
+        polar: 'Polar',
+        arc: 'Arc',
+        point: 'Point',
+        along: 'Along',
+      } as Record<string, string>,
+      alongNoShape: 'Add a path shape first: Along places clones along it.',
+      positions: (n: number) => (n === 1 ? '1 position' : `${n} positions`),
+      rowName: (i: number, kind: string) => `Row ${i + 1}: ${kind}`,
+      rowList: 'Rows in path order',
+      moveUp: (i: number) => `Move row ${i + 1} up`,
+      moveDown: (i: number) => `Move row ${i + 1} down`,
+      remove: (i: number) => `Remove row ${i + 1}`,
+      removeLast: 'A Clones needs at least one row.',
+      fields: {
+        cols: 'Columns',
+        rows: 'Rows',
+        du: 'Spacing u',
+        dv: 'Spacing v',
+        count: 'Count',
+        stepU: 'Step u',
+        stepV: 'Step v',
+        angle: 'Angle per step',
+        distance: 'Distance per step',
+        radius: 'Radius',
+        centreAngle: 'Centre angle',
+        arc: 'Sweep',
+        step: 'Step angle',
+        u: 'u',
+        v: 'v',
+        shape: 'Shape',
+        start: 'Start offset',
+        by: 'Place by',
+        spacing: 'Spacing',
+      },
+      countError: 'Enter a whole number from 1 to 100.',
+      skipped: 'Skipped',
+      restoreChip: (n: number) => `Restore clone ${n}`,
+      addToSource: 'Add to source…',
+      noneToAdd: 'No other operation on this face can join the source.',
+      removeFromSource: (name: string) => `Remove ${name} from the source`,
+      removeLastSource: 'Remove the Clones instead: a Clones needs a source.',
+      sourceList: 'Source items',
+      warnings: 'Warnings',
+      skipThem: 'Skip them',
+      // instances
+      instanceTitle: (n: number, clones: string) => `Clone ${n} of ${clones}`,
+      position: 'Position',
+      at: (u: string, v: string) => `u ${u}, v ${v}`,
+      skipThis: 'Skip this clone',
+      restore: 'Restore',
+      skippedNote: 'This clone is skipped: nothing is cut here.',
+      duplicateNote: 'This position is on an earlier instance: nothing is cut here.',
+      cloneOf: 'Clone of',
+      followsTool: (name: string) => `Follows ${name}’s tool.`,
+      instanceGroup: (op: string, n: number) => `${op} · ${n}`,
+      readOnly: (clones: string) => `Part of ${clones}: change it in the source or the Clones.`,
+      instanceRow: (n: number, state: 'clone' | 'skipped' | 'duplicate') =>
+        state === 'clone'
+          ? `Clone ${n}`
+          : state === 'skipped'
+            ? `Clone ${n}, skipped`
+            : `Clone ${n}, same spot as an earlier clone`,
+      skipLabel: 'Skip',
+      restoreLabel: 'Restore',
+      skipN: (n: number) => `Skip clone ${n}`,
+      restoreN: (n: number) => `Restore clone ${n}`,
+      // the clone path in the viewport
+      markerLabel: (n: number, where: string, skipped: boolean) =>
+        `${n === 1 ? 'Source' : `Clone ${n}`} at ${where}${skipped ? ', skipped' : ''}`,
+      hintSkip: (n: number) => `Clone ${n} · click to skip`,
+      hintRestore: 'Skipped · click to restore',
+      sourceHint: 'The source can’t be skipped.',
+      announceSkip: (n: number, skipped: boolean) =>
+        skipped ? `Clone ${n} skipped.` : `Clone ${n} restored.`,
+      summary: (name: string, instances: number, skipped: number) =>
+        `${name}: ${instances === 1 ? '1 instance' : `${instances} instances`}, ${skipped} skipped.`,
+      selectedInstance: (n: number, source: string) => `Selected: clone ${n} of ${source}.`,
+      draftSummary: (instances: number) =>
+        `New Clones draft: ${instances === 1 ? '1 instance' : `${instances} instances`}.`,
+    },
     hole: {
       group: 'Hole',
       type: 'Type',

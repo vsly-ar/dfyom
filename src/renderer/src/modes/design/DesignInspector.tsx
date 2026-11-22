@@ -6,10 +6,11 @@
 // general tolerance) and all its warnings. Command errors show at their field (or at the top);
 // DFM warnings at the blamed parameter, with "Use …" for a suggestion. A selected reference model
 // shows its own inspector (ReferenceInspector.tsx, task R3), a selected shape the Shape Editor's
-// (ShapeInspector.tsx, task U1).
+// (ShapeInspector.tsx, task U1); a Clones feature, its instances and the Make Clones… draft their
+// own (ClonesInspector.tsx, v0.4 task U3).
 // Doc: docs/conventions/ui.md#panels-and-inspectors, #quantity-and-expression-input,
 // #selection-and-picking, #errors, #warnings-and-dfm; docs/modes/design.md#operations-v01
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { OperationDTO } from '../../../../core/design/part.dto'
 import type { DfmWarning } from '../../../../core/geometry/model'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
@@ -17,7 +18,7 @@ import { applyMessages } from '../../messages/apply'
 import { designMessages } from '../../messages/design'
 import { dfmMessages } from '../../messages/dfm'
 import { useCancelGesture } from '../../shell/hooks'
-import { useShell } from '../../shell/ShellContext'
+import { useShell, useUi } from '../../shell/ShellContext'
 import {
   ErrorMessage,
   PanelHeader,
@@ -29,6 +30,8 @@ import {
 import styles from './Design.module.css'
 import { featureOfWarning, ownerFeature } from './feature-view'
 import { FeatureInspector, OwnedOperationInspector, useFixIn, type FixIn } from './FeatureInspector'
+import { CloneInstanceInspector, ClonesDraft, ClonesInspector } from './ClonesInspector'
+import { parseInstanceId } from './clones-view'
 import { HoleInspector } from './HoleInspector'
 import { NameField } from './NameField'
 import { ReferenceInspector } from './ReferenceInspector'
@@ -111,6 +114,13 @@ export function warningView(
 export function DesignInspector({ part }: { part: DesignPart | undefined }): React.JSX.Element {
   const [selected] = useDesignSelection()
   const warnings = useDesignWarnings(part)
+  const draft = useUi((s) => s.clonesDraft)
+  const setDraft = useUi((s) => s.setClonesDraft)
+  // the Make Clones… draft belongs to what was selected when it opened (ui.md § Clones)
+  const stale = draft !== null && (draft.openedFor !== selected || draft.partId !== part?.dto.id)
+  useEffect(() => {
+    if (stale) setDraft(null)
+  }, [stale, setDraft])
   if (part === undefined)
     return (
       <>
@@ -123,13 +133,26 @@ export function DesignInspector({ part }: { part: DesignPart | undefined }): Rea
     : undefined
   if (ref !== undefined && ref.partId === part.dto.id)
     return <ReferenceInspector key={ref.id} part={part} reference={ref} />
+  if (draft !== null && !stale) return <ClonesDraft part={part} draft={draft} />
   const shape = part.dto.shapes?.find((s) => s.id === selected)
   if (shape !== undefined) return <ShapeInspector key={shape.id} part={part} shape={shape} />
   const feature = part.dto.features?.find((f) => f.id === selected)
   if (feature?.kind === 'hole')
     return <HoleInspector key={feature.id} part={part} feature={feature} warnings={warnings} />
+  if (feature?.kind === 'clones')
+    return <ClonesInspector key={feature.id} part={part} feature={feature} warnings={warnings} />
   if (feature !== undefined)
     return <FeatureInspector key={feature.id} part={part} feature={feature} warnings={warnings} />
+  const instance = parseInstanceId(part, selected)
+  if (instance !== undefined)
+    return (
+      <CloneInstanceInspector
+        key={selected}
+        part={part}
+        feature={instance.feature}
+        n={instance.n}
+      />
+    )
   const op = part.dto.operations.find((o) => o.id === selected)
   if (op === undefined) return <PartInspector part={part} warnings={warnings} />
   const owner = ownerFeature(part.dto, op)

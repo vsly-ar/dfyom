@@ -156,3 +156,116 @@
 .viewport[data-measuring] canvas {
   cursor: crosshair;
 }
+
+/* clone path markers (v0.4 task U3): a 24 px target around a 7 px dot in the handle look
+   (neutral at rest, --vp-hover hovered); the instance number in a chip beside it, shown when no
+   other marker is within 24 px on screen (data-chip) or on hover/focus; the source has a ring;
+   skipped and duplicate positions are muted */
+.cloneAnchor {
+  pointer-events: none;
+}
+
+.cloneMarker {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  pointer-events: none;
+}
+
+button.cloneMarker {
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+button.cloneMarker[aria-disabled='true'] {
+  cursor: default;
+}
+
+button.cloneMarker:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 0;
+}
+
+.cloneDot {
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid var(--vp-edge);
+  border-radius: 50%;
+  background: var(--bg-viewport);
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    opacity var(--motion-fast) var(--ease-standard);
+}
+
+button.cloneMarker:not([aria-disabled='true']):hover .cloneDot {
+  background: var(--vp-hover);
+}
+
+.cloneMarker[data-state='source'] .cloneDot {
+  box-shadow:
+    0 0 0 2px var(--bg-viewport),
+    0 0 0 3px var(--vp-edge);
+}
+
+.cloneMarker[data-state='skipped'] .cloneDot,
+.cloneMarker[data-state='duplicate'] .cloneDot {
+  border-style: dashed;
+  opacity: 0.6;
+}
+
+.cloneChip,
+.cloneHint {
+  position: absolute;
+  left: 20px;
+  bottom: 14px;
+  padding: 0 var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: color-mix(in oklab, var(--bg-raised) 92%, transparent);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  white-space: nowrap;
+  visibility: hidden;
+}
+
+.cloneMarker[data-chip] .cloneChip,
+.cloneMarker:hover .cloneChip,
+.cloneMarker:focus-visible .cloneChip {
+  visibility: visible;
+}
+
+.cloneMarker[data-state='skipped'] .cloneChip,
+.cloneMarker[data-state='duplicate'] .cloneChip {
+  color: var(--text-muted);
+}
+
+/* the hover chip of a clickable marker replaces the number */
+.cloneHint {
+  font-family: var(--font-ui);
+}
+
+.cloneMarker:hover .cloneHint,
+.cloneMarker:focus-visible .cloneHint {
+  visibility: visible;
+}
+
+.cloneMarker:hover .cloneHint ~ .cloneChip,
+.cloneMarker:has(.cloneHint):hover .cloneChip,
+.cloneMarker:has(.cloneHint):focus-visible .cloneChip {
+  visibility: hidden;
+}
+
+.cloneWarn {
+  margin-left: 2px;
+  color: var(--warning);
+}
