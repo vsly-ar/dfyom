@@ -113,6 +113,7 @@ describe('evaluation push', () => {
       'CmdOrCtrl+O',
       'CmdOrCtrl+S',
       'CmdOrCtrl+Shift+S',
+      'CmdOrCtrl+,',
       'CmdOrCtrl+Z',
       'Ctrl+Y',
       'CmdOrCtrl+Enter',
@@ -121,7 +122,7 @@ describe('evaluation push', () => {
       'CmdOrCtrl+3',
       'CmdOrCtrl+Shift+L',
     ])
-    expect(menuTemplate('darwin', true)[0]).toEqual({ role: 'appMenu' })
+    expect(menuTemplate('darwin', true)[0]).toMatchObject({ role: 'appMenu' })
   })
 
   it('suggests a safe file name from the project name', () => {

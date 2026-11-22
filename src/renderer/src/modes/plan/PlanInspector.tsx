@@ -357,9 +357,9 @@ function OperationInspector({
 
   // presets of the tool copy
   const toolCopy = plan.snapshots.find((s) => s.id === op.tool)
-  const presets = (
-    (toolCopy?.values as { presets?: { name: string }[] } | undefined)?.presets ?? []
-  ).map((p) => p.name)
+  const presets =
+    (toolCopy?.values as { presets?: { name: string; recommended?: boolean }[] } | undefined)
+      ?.presets ?? []
   const defaultPreset = defaultPresetName(plan, op.tool)
   const autoUnavailable =
     view !== undefined && typeof view.auto === 'object' ? view.auto.unavailable : undefined
@@ -483,7 +483,12 @@ function OperationInspector({
                     label: t.presetDefault(defaultPreset, autoUnavailable === undefined),
                   },
                   { value: AUTO, label: t.presetAuto, disabled: autoUnavailable !== undefined },
-                  ...presets.map((p) => ({ value: p, label: p })),
+                  ...presets.map((p) => ({
+                    value: p.name,
+                    label: p.name,
+                    // library.md#recommended-presets
+                    ...(p.recommended === true ? { description: t.presetFollows } : {}),
+                  })),
                 ]}
                 value={op.auto === true ? AUTO : (op.presetName ?? DEFAULT_PRESET)}
                 disabled={readOnly}

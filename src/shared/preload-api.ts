@@ -189,6 +189,7 @@ export const MENU_ACTIONS = [
   'view.navigator',
   'view.inspector',
   'help.shortcuts',
+  'app.settings',
 ] as const
 export type MenuAction = (typeof MENU_ACTIONS)[number]
 

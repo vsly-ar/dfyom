@@ -58,4 +58,47 @@ describe('menu actions', () => {
     item?.click?.()
     expect(openLibrary).toHaveBeenCalledOnce()
   })
+
+  it('Settings… (Ctrl/Cmd+,): the macOS app menu, else File; it sends app.settings', () => {
+    type Item = {
+      label?: string
+      accelerator?: string
+      role?: string
+      submenu?: unknown
+      click?: () => void
+    }
+    const find = (items: Item[]) => items.find((i) => i.label === 'Settings…')
+    const mac = menuTemplate('darwin', false) as Item[]
+    const appMenu = mac.find((m) => m.role === 'appMenu')
+    const macItem = find(appMenu?.submenu as Item[])
+    expect(macItem?.accelerator).toBe('CmdOrCtrl+,')
+    expect(find(mac.find((m) => m.label === 'File')?.submenu as Item[])).toBeUndefined()
+    const win = menuTemplate('win32', false) as Item[]
+    expect(win.find((m) => m.role === 'appMenu')).toBeUndefined()
+    const winItem = find(win.find((m) => m.label === 'File')?.submenu as Item[])
+    expect(winItem?.accelerator).toBe('CmdOrCtrl+,')
+    const send = vi.fn()
+    windows.list = [{ isDestroyed: () => false, webContents: { send } }]
+    Object.assign(windows.list[0]!, { isVisible: () => false, isFocused: () => false })
+    winItem?.click?.()
+    expect(send).toHaveBeenCalledWith('dfyom:menu.action', 'app.settings')
+  })
+
+  it('Settings brings its window to the front unless it is hidden', () => {
+    const focus = vi.fn()
+    const target = (visible: boolean) =>
+      ({
+        isDestroyed: () => false,
+        isVisible: () => visible,
+        isFocused: () => false,
+        focus,
+        webContents: { send: vi.fn() },
+      }) as never
+    sendMenuAction('app.settings', vi.fn(), () => target(false))
+    expect(focus).not.toHaveBeenCalled()
+    sendMenuAction('app.settings', vi.fn(), () => target(true))
+    expect(focus).toHaveBeenCalledOnce()
+    sendMenuAction('mode.plan', vi.fn(), () => target(true))
+    expect(focus).toHaveBeenCalledOnce()
+  })
 })

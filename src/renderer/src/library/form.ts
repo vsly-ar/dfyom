@@ -7,7 +7,12 @@
 // Doc: docs/conventions/ui-library-window.md, docs/architecture/library.md,
 // docs/conventions/ui.md#plan-mode-task-37
 import type { OperationKind } from '../../../core/design/part.dto'
-import type { LibraryItemKind } from '../../../core/library/item'
+import {
+  followRecommended,
+  presetRecommendation,
+  type FollowedField,
+} from '../../../core/feeds-speeds/preset'
+import type { LibraryItemKind, MaterialClass } from '../../../core/library/item'
 import {
   valuesFromDTO,
   type ItemValuesDTO,
@@ -15,7 +20,8 @@ import {
 } from '../../../core/library/library-item'
 import type { MachineValuesDTO } from '../../../core/library/machine.dto'
 import type { StockValuesDTO } from '../../../core/library/stock.dto'
-import type { ToolType, ToolValuesDTO } from '../../../core/library/tool.dto'
+import { Tool } from '../../../core/library/tool'
+import type { CuttingPresetDTO, ToolType, ToolValuesDTO } from '../../../core/library/tool.dto'
 import {
   itemUnitSystem,
   libraryUnit,
@@ -234,7 +240,52 @@ export function cleanValues(
 export function draftIssues(values: DraftValues, autoName = false): Issue[] {
   const clean = cleanValues(values, autoName)
   const model = valuesFromDTO(clean.values)
-  return [...clean.issues, ...(model.isErr() ? model.unwrapErr().issues : [])]
+  const follow =
+    clean.values.kind === 'tool' ? followRecommended(clean.values, 'mm').issues : ([] as Issue[])
+  return [...clean.issues, ...(model.isErr() ? model.unwrapErr().issues : []), ...follow]
+}
+
+// ── recommended presets (library.md#recommended-presets) ─────────────────────────────────
+
+/** The draft with its recommended presets following the calculator (unchanged if none follow). */
+export function followDraft(values: ToolDraft, units: UnitSystem): ToolDraft {
+  const clean = cleanValues(values, true).values as ToolValuesDTO
+  const followed = followRecommended({ ...clean, presets: values.presets }, units).values
+  return followed.presets === values.presets ? values : { ...values, presets: followed.presets }
+}
+
+/** Whether a preset of the draft can follow the calculator, else the reason shown. */
+export function followState(
+  values: ToolDraft,
+  materialClass: MaterialClass | undefined,
+): { ok: true } | { ok: false; reason: string } {
+  const m = libraryMessages.tool.presets
+  if (materialClass === undefined) return { ok: false, reason: m.recommendedNoClass }
+  const tool = Tool.fromDTO({ ...(cleanValues(values, true).values as ToolValuesDTO), presets: [] })
+  if (tool.isErr()) return { ok: false, reason: m.recommendedBadTool }
+  const rec = presetRecommendation(tool.unwrap(), materialClass)
+  return rec.isErr() ? { ok: false, reason: rec.unwrapErr() } : { ok: true }
+}
+
+/**
+ * The preset with `patch` applied; typing another value into a followed field of a recommended
+ * preset ends the following (the flag is dropped, the values stay).
+ */
+export function patchPreset(
+  p: CuttingPresetDTO,
+  patch: Partial<CuttingPresetDTO>,
+): CuttingPresetDTO {
+  const next = { ...p, ...patch } as CuttingPresetDTO
+  const followed: readonly FollowedField[] = ['spindleSpeed', 'feedRate', 'plungeRate', 'stepdown']
+  const edited = followed.some((f) => f in patch && !sameQuantity(patch[f], p[f]))
+  if (p.recommended !== true || !edited || 'recommended' in patch) return next
+  const { recommended: _r, ...rest } = next
+  return rest
+}
+
+function sameQuantity(a: QuantityDTO | undefined, b: QuantityDTO | undefined): boolean {
+  if (a === undefined || b === undefined) return a === b
+  return a.exact.num === b.exact.num && a.exact.den === b.exact.den
 }
 
 /**

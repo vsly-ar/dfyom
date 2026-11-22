@@ -156,6 +156,7 @@ export function AppShell(): React.JSX.Element {
               />
               <ToolbarButton
                 label={m.settings}
+                shortcut={shortcutLabel(',')}
                 icon={<Settings aria-hidden="true" />}
                 onClick={() => openSettings(true)}
               />

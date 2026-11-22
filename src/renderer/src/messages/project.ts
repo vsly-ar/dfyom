@@ -72,6 +72,7 @@ export const projectMessages = {
       save: 'Save',
       saveAs: 'Save as',
       apply: 'Apply changes (also in a text field)',
+      settings: 'Settings',
       undo: 'Undo (in a text field: the text)',
       redo: 'Redo',
       escape: 'Clear the selection, cancel pick mode',

@@ -20,6 +20,7 @@ export const SHORTCUTS: readonly { group: keyof typeof m.groups; items: [string,
       [shortcutLabel('S'), m.what.save],
       [shortcutLabel('S', { shift: true }), m.what.saveAs],
       [APPLY_SHORTCUT, m.what.apply],
+      [shortcutLabel(','), m.what.settings],
     ],
   },
   {

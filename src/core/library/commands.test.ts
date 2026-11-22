@@ -10,6 +10,7 @@ import { LIBRARY_COMMANDS, LIBRARY_QUERIES } from './commands'
 import { Library } from './library'
 import { flatEndMillValues, len, libraryInput, machineValues, stockValues } from './library.fixture'
 import { createMemoryLibraryStorage } from './memory-storage'
+import { followRecommended } from '../feeds-speeds/preset'
 
 const agent = agentSource()
 const doc = newProjectDoc({ name: 'Bracket', unitSystem: 'mm' })
@@ -306,5 +307,90 @@ describe('library.machine.settings (GRBL $$ import)', () => {
       'model.invariant',
     )
     expect(model.issues[0]?.path).toEqual(['values', 'spindle', 'minSpeed'])
+  })
+})
+
+describe('library.tool recommended presets', () => {
+  it('recommended presets follow the calculator on add and update (library.md#recommended-presets)', async () => {
+    const { d } = await setup()
+    const values = { ...flatEndMillValues(), toolMaterial: 'carbide' as const }
+    const input = libraryInput(values) as { presets: Record<string, unknown>[] }
+    const recommended = { ...input, presets: [{ ...input.presets[0], recommended: true }] }
+    const added = (await add(d, 'tool', recommended)) as unknown as {
+      id: string
+      revision: number
+      presets: { spindleSpeed: { source: string }; stepover: { source: string } }[]
+    }
+    const followed = followRecommended(
+      { ...values, presets: [{ ...values.presets[0]!, recommended: true }] },
+      'mm',
+    ).values.presets[0]!
+    expect(added.presets[0]).toEqual(followed)
+    expect(added.presets[0]!.spindleSpeed.source).not.toBe('18000')
+    expect(added.presets[0]!.stepover.source).toBe('3')
+    // a bigger diameter: the preset follows
+    const bigger = expectOk(
+      await d.dispatch(
+        'library.tool.update',
+        {
+          id: added.id,
+          revision: 1,
+          values: { ...recommended, diameter: '8' },
+        },
+        agent,
+      ),
+    ).value as { presets: { spindleSpeed: { source: string } }[] }
+    expect(bigger.presets[0]!.spindleSpeed.source).not.toBe(added.presets[0]!.spindleSpeed.source)
+    // recommended false: the given values are stored
+    const own = expectOk(
+      await d.dispatch(
+        'library.tool.update',
+        {
+          id: added.id,
+          revision: 2,
+          values: { ...input, presets: [{ ...input.presets[0], recommended: false }] },
+        },
+        agent,
+      ),
+    ).value as { presets: { spindleSpeed: { source: string }; recommended?: boolean }[] }
+    expect(own.presets[0]).toMatchObject({ spindleSpeed: { source: '18000' } })
+    expect(own.presets[0]!.recommended).toBeUndefined()
+  })
+
+  it('a recommended preset without calculator data or class → model.invariant', async () => {
+    const { d } = await setup()
+    const input = libraryInput(flatEndMillValues()) as { presets: Record<string, unknown>[] }
+    // no tool material: the calculator has no data
+    const noData = expectErrCode(
+      await d.dispatch(
+        'library.tool.add',
+        { values: { ...input, presets: [{ ...input.presets[0], recommended: true }] } },
+        agent,
+      ),
+      'model.invariant',
+    )
+    expect(noData.issues[0]).toMatchObject({
+      path: ['values', 'presets', 0, 'recommended'],
+      rule: 'noRecommendation',
+    })
+    const { materialClass: _, ...any } = input.presets[0]!
+    const noClass = expectErrCode(
+      await d.dispatch(
+        'library.tool.add',
+        {
+          values: {
+            ...input,
+            toolMaterial: 'carbide',
+            presets: [{ ...any, recommended: true }],
+          },
+        },
+        agent,
+      ),
+      'model.invariant',
+    )
+    expect(noClass.issues[0]).toMatchObject({
+      path: ['values', 'presets', 0, 'recommended'],
+      rule: 'recommendedNeedsClass',
+    })
   })
 })

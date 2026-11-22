@@ -214,6 +214,8 @@ export const planMessages = {
           ? 'Default (auto)'
           : 'Default (none for this material)',
     presetAuto: 'Auto (calculator)',
+    /** A recommended preset's second line (library.md#recommended-presets). */
+    presetFollows: 'Follows the calculator',
     autoUnavailable: (reason: string) => `Auto (calculator) is unavailable. ${reason}`,
     noPresets: 'The tool has no cutting presets.',
     machines: (names: string) => `Machines: ${names}`,

@@ -15,6 +15,7 @@ import {
 } from '../../test/bridge'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
 import { createShell, ShellProvider } from '../ShellContext'
+import { IS_MAC, shortcutLabel } from '../shortcuts'
 
 vi.mock('@react-three/fiber', () => ({
   Canvas: ({ children: _c, ...rest }: { children: ReactNode; 'data-testid'?: string }) => (
@@ -197,5 +198,28 @@ describe('project files', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     await user.keyboard('?')
     expect(await screen.findByRole('dialog', { name: 'Keyboard shortcuts' })).toBeInTheDocument()
+  })
+
+  it('opens Settings from the menu and Ctrl/Cmd+, ; the tooltip and the list show the shortcut', async () => {
+    const bridge = createFakeBridge()
+    bridge.handle('project.recovery.list', () => ok({ projects: [] }))
+    const { user } = renderApp(bridge)
+    await screen.findByRole('heading', { name: 'No project open' })
+    const key = shortcutLabel(',')
+    await user.hover(screen.getByRole('button', { name: 'Settings' }))
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(`Settings${key}`)
+    act(() => bridge.emitMenu('app.settings'))
+    expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    await user.keyboard(IS_MAC ? '{Meta>},{/Meta}' : '{Control>},{/Control}')
+    expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    act(() => bridge.emitMenu('help.shortcuts'))
+    const list = await screen.findByRole('dialog', { name: 'Keyboard shortcuts' })
+    expect(within(list).getByRole('region', { name: 'Project' })).toHaveTextContent(
+      `${key}Settings`,
+    )
   })
 })

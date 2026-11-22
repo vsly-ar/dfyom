@@ -62,17 +62,30 @@ v0.1 has exactly the four types above. Later: holder (gauge length, collision sh
 
 Feeds and speeds are stored as optional presets on the tool, per material class, like the Fusion tool library's presets ([Autodesk blog](https://www.autodesk.com/products/fusion-360/blog/new-manufacturing-tool-library/)). How plan mode picks or fills a preset (manual entry, calculator) is task 1.9 ([plan](../plans/v0.1.md)):
 
-| `CuttingPreset` field | Kind / type     | Invariants                  |
-| --------------------- | --------------- | --------------------------- |
-| `name`                | string          | 1–60 chars                  |
-| `materialClass`       | `MaterialClass` | optional; none = any        |
-| `spindleSpeed`        | spindleSpeed    | > 0                         |
-| `feedRate`            | feedRate        | > 0                         |
-| `plungeRate`          | feedRate        | > 0                         |
-| `stepdown`            | length          | optional; > 0               |
-| `stepover`            | length          | optional; > 0, ≤ `diameter` |
+| `CuttingPreset` field | Kind / type     | Invariants                                                     |
+| --------------------- | --------------- | -------------------------------------------------------------- |
+| `name`                | string          | 1–60 chars                                                     |
+| `materialClass`       | `MaterialClass` | optional; none = any                                           |
+| `spindleSpeed`        | spindleSpeed    | > 0                                                            |
+| `feedRate`            | feedRate        | > 0                                                            |
+| `plungeRate`          | feedRate        | > 0                                                            |
+| `stepdown`            | length          | optional; > 0                                                  |
+| `stepover`            | length          | optional; > 0, ≤ `diameter`                                    |
+| `recommended`         | boolean         | optional; needs `materialClass`; [below](#recommended-presets) |
 
 Chip load is derived and displayed, not stored (it is not a v0.1 quantity kind – [quantities.md](quantities.md#kinds-and-units)). Machine limits are checked by plan mode, not as tool invariants ([models.md](../conventions/error-handling/models.md#a-simple-model)).
+
+### Recommended presets
+
+A preset with `recommended: true` **follows the calculator** until its values are edited (the user's D30 item 14, after the "Recommended" checkbox of the earlier cnc-code tool library). Its `spindleSpeed`, `feedRate`, `plungeRate` and `stepdown` are the [calculator's](feeds-speeds.md) recommendation for the tool and the preset's material class:
+
+- **Engagement:** a full-width slot for end mills (as pockets and profiles use), drilling for drills. **No particular machine:** the lowest [rigidity](feeds-speeds.md#machine-rigidity-presets) (`extrusion`) and no spindle or feed clamp, because a library tool serves every machine. Plan mode's machine checks still apply to the stored values; for values that follow the plan's machine, use [auto mode](../modes/plan-v0.1.md#locks-and-auto-mode).
+- **Written on save:** `library.tool.add` and `.update` replace those four values of every recommended preset with the recommendation (a field the calculator does not suggest keeps its value; `stepover` always keeps its value), so the preset follows changes to the tool's diameter, flutes, type, lengths, stickout or tool material. Values are rounded (whole rpm; mm: whole mm/min and 0.01 mm; inch: 0.1 in/min and 0.001 in) and written in the command's `units`. A calculator update reaches a preset when its tool is next saved; plans use the stored values like any preset (their tool copies are [snapshots](#snapshots)).
+- **Editing ends it:** to enter its own values, an agent sends the preset with `recommended` false or omitted; in the [Library window](../conventions/ui-library-window.md#recommended-presets) editing one of the four values unticks the flag (the values stay).
+- **Rules:** `recommended` without `materialClass` is a `CuttingPreset` invariant issue (`recommendedNeedsClass`, path `presets.<i>.recommended`); a tool and class the calculator has no data for (`feeds.noData`) fails the command with `model.invariant`, rule `noRecommendation` at `values.presets.<i>.recommended`, the calculator's reason as the message.
+- **Offered:** the plan inspector's "Cutting preset" list shows "Follows the calculator" under a recommended preset; the tool's preset order is kept.
+- **Stored** only when true; the field is optional, so existing presets load unchanged (not recommended). The rules are `followRecommended` in `src/core/feeds-speeds/preset.ts`.
+- **Built-in presets:** none; the library starts empty, so nothing is seeded.
 
 ## Machine
 
@@ -188,6 +201,7 @@ Where this doc was silent, the implementation chose conservatively:
 | `src/core/library/item.ts`                      | Common fields, `LibraryItemKind`, `MaterialClass`, model helpers               |
 | `src/core/library/stock.ts`, `stock.dto.ts`     | `Stock` model and Zod DTO schema                                               |
 | `src/core/library/tool.ts`, `tool.dto.ts`       | `Tool` model (per-type invariants), `CuttingPreset`                            |
+| `src/core/feeds-speeds/preset.ts`               | Recommended presets: `presetRecommendation`, `followRecommended`               |
 | `src/core/library/machine.ts`, `machine.dto.ts` | `Machine` model and DTO, `RIGIDITY_PRESETS`                                    |
 | `src/core/library/library-item.ts`              | `LibraryItem` (meta + values), item/values schemas, `parseLibraryItem`         |
 | `src/core/library/snapshot.ts`                  | `Snapshot` model and DTO, `takeSnapshot`, `refreshSnapshot`, status, notices   |

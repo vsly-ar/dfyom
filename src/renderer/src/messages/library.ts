@@ -219,6 +219,12 @@ export const libraryMessages = {
       field: (preset: string, column: string) => `${column} of ${preset}`,
       chipLoad: (value: string) => value,
       chipLoadNone: '–',
+      /** library.md#recommended-presets */
+      recommended: 'Recommended',
+      recommendedHint:
+        'Follows the calculator for this tool and material, for no particular machine. Editing a value unticks it.',
+      recommendedNoClass: 'Choose a material to follow the calculator.',
+      recommendedBadTool: 'Fix the tool’s values to follow the calculator.',
     },
   },
 
