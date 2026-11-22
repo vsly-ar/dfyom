@@ -3,11 +3,12 @@
 // rotation; the plan operations nest under their setup (kind icon, name, tool, stale badge,
 // toolpath state, error and warning counts). Setups move from their menu and with Alt+↑/↓
 // (`plan.setup.move`) and merge from their menu with setups of the same direction
-// (`plan.setup.merge`); plan operations move with buttons and Alt+↑/↓ within their setup and
-// across into a neighbouring setup of the same direction (`plan.operation.move`), and split off
-// into a new setup or move to another setup of the same direction from their menu. ↑/↓ move the
-// focus over every row. A setup row's actions (move up / move down / merge) sit in its menu, the
-// one button on its name line, so name and subtitle stay readable in a narrow navigator. Selecting a setup opens it in the inspector; the selected setup (or the
+// (`plan.setup.merge`); plan operations move from their menu and with Alt+↑/↓ within their setup
+// and across into a neighbouring setup of the same direction (`plan.operation.move`), and split
+// off into a new setup or move to another setup of the same direction from their menu. ↑/↓ move
+// the focus over every row. Each row's actions sit in its one menu button, in a reserved slot at
+// the row's end (a setup's on its name line), so names, subtitles and status icons stay readable
+// in a narrow navigator. Selecting a setup opens it in the inspector; the selected setup (or the
 // selected operation's) is the one previewed and exported. Doc: docs/conventions/ui.md#design-and-plan-controls-v02,
 // docs/modes/plan-v0.2.md#merge-split-reorder
 import {
@@ -301,6 +302,21 @@ function OperationRow({
   const others = sameDirectionSetups(plan, setup)
   const menu: MenuEntry[] = [
     {
+      label: m.operations.moveUpItem,
+      icon: <ArrowUp aria-hidden="true" />,
+      shortcut: 'Alt+↑',
+      disabled: operationStep(plan, op.id, -1) === undefined,
+      onSelect: () => onMove(-1),
+    },
+    {
+      label: m.operations.moveDownItem,
+      icon: <ArrowDown aria-hidden="true" />,
+      shortcut: 'Alt+↓',
+      disabled: operationStep(plan, op.id, 1) === undefined,
+      onSelect: () => onMove(1),
+    },
+    'separator',
+    {
       label: m.operations.split,
       icon: <Split aria-hidden="true" />,
       disabled: setup.operations.length < 2,
@@ -313,7 +329,11 @@ function OperationRow({
     })),
   ]
   return (
-    <li className={styles['op']} data-selected={selected ? '' : undefined}>
+    <li
+      className={styles['op']}
+      data-actions={canMove ? '' : undefined}
+      data-selected={selected ? '' : undefined}
+    >
       <button
         type="button"
         ref={rowRef}
@@ -325,69 +345,52 @@ function OperationRow({
       >
         <ToolIcon name={KIND_ICON[kind] ?? 'facing'} />
         <span className={styles['opText']}>
-          <span className={styles['opName']}>{name}</span>
+          <span className={styles['opName']} title={name}>
+            {name}
+          </span>
           <span className={styles['opMeta']}>
             <span className={styles['opTool']}>{tool ?? m.operations.noTool}</span>
           </span>
         </span>
-        {stale !== undefined ? (
-          <span className={styles['opStale']} title={staleText(stale)}>
-            <History aria-hidden="true" />
-            <span className={styles['srOnly']}>{staleText(stale)}</span>
+        <span className={styles['opStatus']}>
+          {stale !== undefined ? (
+            <span className={styles['opStale']} title={staleText(stale)}>
+              <History aria-hidden="true" />
+              <span className={styles['srOnly']}>{staleText(stale)}</span>
+            </span>
+          ) : null}
+          <span className={styles['opState']} data-state={state} title={m.toolpaths.state[state]}>
+            {state === 'ready' ? (
+              <CircleCheck aria-hidden="true" />
+            ) : state === 'failed' ? (
+              <CircleAlert aria-hidden="true" />
+            ) : (
+              <CircleDashed aria-hidden="true" />
+            )}
+            <span className={styles['srOnly']}>{m.toolpaths.state[state]}</span>
           </span>
-        ) : (
-          <span />
-        )}
-        <span className={styles['opState']} data-state={state} title={m.toolpaths.state[state]}>
-          {state === 'ready' ? (
-            <CircleCheck aria-hidden="true" />
-          ) : state === 'failed' ? (
-            <CircleAlert aria-hidden="true" />
-          ) : (
-            <CircleDashed aria-hidden="true" />
-          )}
-          <span className={styles['srOnly']}>{m.toolpaths.state[state]}</span>
+          {errors > 0 ? (
+            <span className={styles['opFailed']}>
+              <CircleAlert aria-hidden="true" />
+              <span aria-hidden="true">{errors}</span>
+              <span className={styles['srOnly']}>{m.operations.errors(errors)}</span>
+            </span>
+          ) : null}
+          {warnings > 0 ? (
+            <span className={styles['opBadge']}>
+              <TriangleAlert aria-hidden="true" />
+              <span aria-hidden="true">{warnings}</span>
+              <span className={styles['srOnly']}>{m.operations.warnings(warnings)}</span>
+            </span>
+          ) : null}
         </span>
-        {errors > 0 ? (
-          <span className={styles['opFailed']}>
-            <CircleAlert aria-hidden="true" />
-            <span aria-hidden="true">{errors}</span>
-            <span className={styles['srOnly']}>{m.operations.errors(errors)}</span>
-          </span>
-        ) : (
-          <span />
-        )}
-        {warnings > 0 ? (
-          <span className={styles['opBadge']}>
-            <TriangleAlert aria-hidden="true" />
-            <span aria-hidden="true">{warnings}</span>
-            <span className={styles['srOnly']}>{m.operations.warnings(warnings)}</span>
-          </span>
-        ) : (
-          <span />
-        )}
       </button>
       {canMove ? (
-        <span className={styles['opActions']}>
-          <IconButton
-            label={m.operations.moveUp(name)}
-            icon={<ArrowUp aria-hidden="true" />}
-            shortcut="Alt+↑"
-            disabled={operationStep(plan, op.id, -1) === undefined}
-            onClick={() => onMove(-1)}
-          />
-          <IconButton
-            label={m.operations.moveDown(name)}
-            icon={<ArrowDown aria-hidden="true" />}
-            shortcut="Alt+↓"
-            disabled={operationStep(plan, op.id, 1) === undefined}
-            onClick={() => onMove(1)}
-          />
+        <span className={styles['rowActions']}>
           <Menu label={m.operations.actions(name)} align="end" items={menu}>
             <IconButton
               label={m.operations.actions(name)}
               icon={<MoreHorizontal aria-hidden="true" />}
-              className={styles['opMenu']}
             />
           </Menu>
         </span>

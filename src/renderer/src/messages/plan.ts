@@ -117,8 +117,8 @@ export const planMessages = {
     /** With several setups, one list per setup. */
     setupListLabel: (setup: string) => `Plan operations of ${setup} in machining order`,
     noTool: 'No tool',
-    moveUp: (name: string) => `Move ${name} up`,
-    moveDown: (name: string) => `Move ${name} down`,
+    moveUpItem: 'Move up',
+    moveDownItem: 'Move down',
     actions: (name: string) => `Actions for ${name}`,
     split: 'Move to new setup',
     moveTo: (setup: string) => `Move to ${setup}`,

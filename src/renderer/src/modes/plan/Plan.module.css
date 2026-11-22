@@ -162,31 +162,6 @@
   height: var(--icon-sm);
 }
 
-.opActions {
-  /* over the row's end while hovered, focused or selected, so names keep the full width */
-  position: absolute;
-  top: 50%;
-  right: 0;
-  transform: translateY(-50%);
-  display: inline-flex;
-  padding: 0 var(--space-1);
-  background: var(--bg-chrome);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--motion-fast) var(--ease-standard);
-}
-
-.op:hover .opActions,
-.op:focus-within .opActions,
-.op[data-selected] .opActions {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.op[data-selected] .opActions {
-  background: var(--accent-subtle);
-}
-
 .fields {
   container-type: inline-size;
   display: grid;
@@ -407,8 +382,38 @@
   overflow-wrap: anywhere;
 }
 
+/* a plan operation row: icon, name over tool, then its status icons as one cluster */
 .opSelect.planRow {
-  grid-template-columns: var(--icon-md) minmax(0, 1fr) auto auto auto auto;
+  grid-template-columns: var(--icon-md) minmax(0, 1fr) auto;
+}
+
+.opStatus {
+  display: inline-flex;
+  gap: var(--space-1);
+  align-items: center;
+}
+
+/* its one action, the menu (move up / move down / move to …), sits in a slot at the row's end
+   that name and status icons never run into (shown on hover, focus or selection) */
+.op[data-actions] > .planRow {
+  padding-right: calc(var(--control-md) + var(--space-2));
+}
+
+.rowActions {
+  position: absolute;
+  top: 50%;
+  right: var(--space-1);
+  display: inline-flex;
+  transform: translateY(-50%);
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-standard);
+}
+
+.op:hover .rowActions,
+.op:focus-within .rowActions,
+.op[data-selected] .rowActions,
+.rowActions:has([aria-expanded='true']) {
+  opacity: 1;
 }
 
 .statusIcon[data-error] {
@@ -495,18 +500,6 @@
   /* outdented against its operations (their icons sit 8 px further in): nesting at full width */
   grid-template-columns: var(--icon-lg) minmax(0, 1fr);
   padding-left: var(--space-1);
-}
-
-/* a row's menu shows once the row is selected or has keyboard focus: on hover (and while a
-   click presses) only the move buttons overlay the row's end, so a click on the row's middle
-   still selects it in a narrow navigator */
-.opMenu {
-  display: none;
-}
-
-.op[data-selected] .opMenu,
-.op:has(:focus-visible) .opMenu {
-  display: inline-flex;
 }
 
 .setupName {
