@@ -101,6 +101,30 @@ export const designMessages = {
       headSink: 'Head sink',
       center: 'Position',
       on: 'On',
+      // the hole inspector (U2, ui.md § Hole inspector)
+      groups: {
+        position: 'Position',
+        type: 'Type',
+        fastener: 'Fastener',
+        sizes: 'Sizes',
+        defaults: 'Defaults',
+        tools: 'Tools',
+      },
+      size: 'Size',
+      bottom: 'Bottom',
+      tapDrillSimple: 'A tap drill hole is a simple hole: change the type to Simple first.',
+      defaultsHint: 'How far the head sits below the face when sizes are filled from the table.',
+      showDefaults: 'Show defaults',
+      hideDefaults: 'Hide defaults',
+      sourcesLabel: 'Sizes from',
+      sourceWhat: { close: 'close', normal: 'normal', loose: 'loose' } as Record<string, string>,
+      /** Refill toast: "Sizes set from M4 (2 entered sizes replaced)". */
+      refilled: (size: string, n: number) =>
+        `Sizes set from ${size} (${n === 1 ? '1 entered size' : `${n} entered sizes`} replaced)`,
+      useTable: (source: string) => `Use ${source}`,
+      roleLabel: (role: string) =>
+        ({ drill: 'Drill', counterbore: 'Counterbore', countersink: 'Countersink' })[role] ??
+        role[0]!.toUpperCase() + role.slice(1),
     },
   },
 
@@ -299,6 +323,7 @@ export const designMessages = {
   tool: {
     label: 'Tool',
     lock: 'Lock tool',
+    lockOf: (role: string) => `Lock ${role.toLowerCase()} tool`,
     placeholder: 'No tool yet',
     noChoice: 'No tool can make this operation.',
     groups: {

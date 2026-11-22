@@ -11,7 +11,6 @@ import { featureKind } from '../../../../core/design/feature'
 import type { FeatureDTO } from '../../../../core/design/feature.dto'
 import type { OperationDTO } from '../../../../core/design/part.dto'
 import type { DfmWarning } from '../../../../core/geometry/model'
-import type { QuantityDTO } from '../../../../core/quantity/quantity.dto'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { designMessages } from '../../messages/design'
 import { dfmMessages } from '../../messages/dfm'
@@ -185,39 +184,10 @@ export function OwnedOperationInspector({
   )
 }
 
-// ── feature (minimal, until the kind's own inspector) ─────────────────────────────────────
-
-const src = (q: unknown): string | undefined =>
-  q !== null && typeof q === 'object' && 'source' in q ? (q as QuantityDTO).source : undefined
+// ── feature (minimal: Clones until U3; holes have HoleInspector) ─────────────────────────
 
 /** The feature's values as read-only rows `[field, label, value]` (field: the focus target). */
 function featureFacts(part: DesignPart, feature: FeatureDTO): [string, string, string][] {
-  if (feature.kind === 'hole') {
-    const h = f.hole
-    const d = feature as Record<string, unknown>
-    const center = d['center'] as [QuantityDTO, QuantityDTO] | undefined
-    const rows: [string, string, string][] = [
-      ['type', h.type, h.types[String(d['type'])] ?? String(d['type'])],
-      ['fastener', h.fastener, typeof d['fastener'] === 'string' ? d['fastener'] : h.custom],
-      ['purpose', h.purpose, h.purposes[String(d['purpose'])] ?? String(d['purpose'])],
-      ['fit', h.fit, h.fits[String(d['fit'])] ?? String(d['fit'])],
-      ['center', h.center, center ? `${center[0].source}, ${center[1].source}` : ''],
-      ['diameter', h.diameter, src(d['diameter']) ?? ''],
-      ['depth', h.depth, src(d['depth']) ?? h.through],
-    ]
-    if (d['type'] === 'counterbore')
-      rows.push(
-        ['cbDiameter', h.cbDiameter, src(d['cbDiameter']) ?? ''],
-        ['cbDepth', h.cbDepth, src(d['cbDepth']) ?? ''],
-      )
-    if (d['type'] === 'countersink')
-      rows.push(
-        ['csDiameter', h.csDiameter, src(d['csDiameter']) ?? ''],
-        ['csAngle', h.csAngle, src(d['csAngle']) ?? ''],
-      )
-    rows.push(['headSink', h.headSink, src(d['headSink']) ?? ''])
-    return rows
-  }
   if (feature.kind === 'clones') {
     const instances = cloneInstances(part, feature.id)
     const made = instances.filter((x) => x.kind === 'clone').length
