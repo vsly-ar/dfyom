@@ -1,6 +1,8 @@
 /**
- * Per operation: removal, cut and retained labelled meshes plus its surface table.
- * Doc: docs/architecture/geometry.md#building-the-solids
+ * Per operation: removal, cut and retained labelled meshes plus its surface table. Each
+ * operation is built in its face frame (`u` → x, `v` → y, `n` → z, its stock face at z = 0, the
+ * stock as `localStock`) exactly as a top operation, then placed by the face frame.
+ * Doc: docs/architecture/geometry.md#building-the-solids, #non-top-faces-v02
  */
 import { AppError } from '../../shared/errors/app-error'
 import { ctx, Err, Ok, type AppResult } from '../../shared/result'
@@ -11,6 +13,7 @@ import {
   perimeter,
   type ContourLabel,
 } from './contour'
+import { faceFrame, localStock, type Direction, type FaceFrame } from './face'
 import { offsetBand, offsetLoft, type LabelledMesh } from './loft'
 import {
   CHORD_TOLERANCE,
@@ -19,15 +22,29 @@ import {
   type Contour,
   type Level,
   type OperationGeometry,
+  type Placement,
   type Shape,
   type StockGeometry,
   type Vec3,
+  placeAt,
 } from './model'
 
-/** A mesh in its local frame plus the translation into the part frame. */
+/** A mesh in its local frame plus the rigid placement into the part frame. */
 export interface PlacedMesh {
   readonly mesh: LabelledMesh
+  readonly place: Placement
+}
+
+/** A mesh built around `at` in its operation's face frame (placed later by that frame). */
+interface LocalMesh {
+  readonly mesh: LabelledMesh
   readonly at: Vec3
+  /**
+   * The z of the mesh's key level (a floor, a tab top), moved from the vertices into the float64
+   * placement: mesh I/O is float32, so this level lands exactly where the analytic model puts it
+   * and meets the same level of other directions without a float32 gap (fewer slivers).
+   */
+  readonly level?: number
 }
 
 /**
@@ -41,6 +58,10 @@ export const AIR = 0
 /** One operation's solids: (∪ removal − ∪ cut) − ∪ retained. */
 export interface OperationSolids {
   readonly id: string
+  /** Approach direction (the stock: `+z`). */
+  readonly direction: Direction
+  /** Face frame of the direction at its stock face: where the meshes were built. */
+  readonly frame: FaceFrame
   readonly surfaces: SurfaceTable
   readonly removal: readonly PlacedMesh[]
   /** Subtracted from the removal (the kept side of a profile slot). */
@@ -62,7 +83,10 @@ export interface NominalRegion {
   readonly parameter: string
   readonly mesh: PlacedMesh
   readonly minusRemoval: boolean
-  /** Removals whose bounds lie inside this shape (XY, part frame) cannot reach the region. */
+  /**
+   * Removals of the same direction whose bounds lie inside this shape (u, v of the face frame)
+   * cannot reach the region.
+   */
   readonly clearInside?: Shape
 }
 
@@ -132,25 +156,68 @@ export function stockSolids(stock: StockGeometry): AppResult<OperationSolids> {
       { offset: 0, z: -stock.thickness },
     ],
     { band: (_k, l) => (l.role === 'wall' ? sides[l.index]! : AIR), top, bottom },
-  ).map((mesh) => ({
-    id: 'stock',
-    surfaces: table.surfaces,
-    removal: [{ mesh, at: [stock.length / 2, stock.width / 2, 0] }],
-    cut: [],
-    retained: [],
-    nominal: [],
-  }))
+  ).map((mesh) =>
+    placed(
+      '+z',
+      stock,
+      result('stock', table, {
+        removal: [{ mesh, at: [stock.length / 2, stock.width / 2, 0] }],
+      }),
+    ),
+  )
 }
 
+/**
+ * The operation's solids: built in the face frame of its direction against the stock seen from
+ * there (`localStock`: face rectangle, extent along `n`), then placed by the face frame.
+ */
 export function operationSolids(
   op: OperationGeometry,
   stock: StockGeometry,
 ): AppResult<OperationSolids> {
-  const r = build(op, stock)
-  return r.mapErr(ctx('operationSolids', { operation: op.id, kind: op.kind }))
+  const direction = op.direction ?? '+z'
+  return build(op, localStock(direction, stock))
+    .map((local) => placed(direction, stock, local))
+    .mapErr(ctx('operationSolids', { operation: op.id, kind: op.kind }))
 }
 
-function build(op: OperationGeometry, stock: StockGeometry): AppResult<OperationSolids> {
+/** An operation built in its face frame, before placement. */
+interface LocalSolids {
+  readonly id: string
+  readonly surfaces: SurfaceTable
+  readonly removal: readonly LocalMesh[]
+  readonly cut: readonly LocalMesh[]
+  readonly retained: readonly LocalMesh[]
+  readonly nominal: readonly (Omit<NominalRegion, 'mesh'> & { readonly mesh: LocalMesh })[]
+}
+
+/** Every mesh placed by the face frame of `direction` (the identity for `+z`). */
+function placed(direction: Direction, stock: StockGeometry, local: LocalSolids): OperationSolids {
+  const frame = faceFrame(direction, stock)
+  const place = ({ mesh, at, level = 0 }: LocalMesh): PlacedMesh =>
+    level === 0
+      ? { mesh, place: placeAt(frame, at) }
+      : { mesh: shifted(mesh, -level), place: placeAt(frame, [at[0], at[1], at[2] + level]) }
+  return {
+    id: local.id,
+    direction,
+    frame,
+    surfaces: local.surfaces,
+    removal: local.removal.map(place),
+    cut: local.cut.map(place),
+    retained: local.retained.map(place),
+    nominal: local.nominal.map((r) => ({ ...r, mesh: place(r.mesh) })),
+  }
+}
+
+/** `mesh` moved by `dz` along z (float64, before the float32 mesh I/O). */
+function shifted(mesh: LabelledMesh, dz: number): LabelledMesh {
+  const positions = Float64Array.from(mesh.positions)
+  for (let i = 2; i < positions.length; i += 3) positions[i]! += dz
+  return { ...mesh, positions }
+}
+
+function build(op: OperationGeometry, stock: StockGeometry): AppResult<LocalSolids> {
   switch (op.kind) {
     case 'facing':
       return facing(op, stock)
@@ -167,12 +234,12 @@ const result = (
   id: string,
   table: Table,
   parts: {
-    removal: PlacedMesh[]
-    cut?: PlacedMesh[]
-    retained?: PlacedMesh[]
-    nominal?: NominalRegion[]
+    removal: LocalMesh[]
+    cut?: LocalMesh[]
+    retained?: LocalMesh[]
+    nominal?: LocalSolids['nominal'][number][]
   },
-): OperationSolids => ({
+): LocalSolids => ({
   id,
   surfaces: table.surfaces,
   removal: parts.removal,
@@ -184,7 +251,7 @@ const result = (
 function facing(
   op: Extract<OperationGeometry, { kind: 'facing' }>,
   stock: StockGeometry,
-): AppResult<OperationSolids> {
+): AppResult<LocalSolids> {
   const table = new Table()
   const floor = table.add('floor')
   const contour: Contour = {
@@ -201,7 +268,9 @@ function facing(
     ],
     { band: () => AIR, top: AIR, bottom: floor },
   ).map((mesh) =>
-    result(op.id, table, { removal: [{ mesh, at: [stock.length / 2, stock.width / 2, 0] }] }),
+    result(op.id, table, {
+      removal: [{ mesh, at: [stock.length / 2, stock.width / 2, 0], level: -op.depth }],
+    }),
   )
 }
 
@@ -218,7 +287,7 @@ function pocketLevels(zf: number, f: number): Level[] {
   return levels
 }
 
-function pocket(op: Extract<OperationGeometry, { kind: 'pocket' }>): AppResult<OperationSolids> {
+function pocket(op: Extract<OperationGeometry, { kind: 'pocket' }>): AppResult<LocalSolids> {
   const table = new Table()
   const floor = table.add('floor')
   const role = contourRoles(table, op.shape.contour)
@@ -231,7 +300,7 @@ function pocket(op: Extract<OperationGeometry, { kind: 'pocket' }>): AppResult<O
     bottom: floor,
   })
   if (removal.isErr() || op.floorRadius <= EPSILON)
-    return removal.map((mesh) => result(op.id, table, { removal: [{ mesh, at }] }))
+    return removal.map((mesh) => result(op.id, table, { removal: [{ mesh, at, level: zf }] }))
   // nominal fillet zone: the prism zf..zf + f minus this loft (same flattening at offset 0)
   const zone = offsetLoft(
     op.shape.contour,
@@ -245,12 +314,12 @@ function pocket(op: Extract<OperationGeometry, { kind: 'pocket' }>): AppResult<O
   const inset = offsetContour(op.shape.contour, op.floorRadius)
   return zone.map((z) =>
     result(op.id, table, {
-      removal: [{ mesh: removal.unwrap(), at }],
+      removal: [{ mesh: removal.unwrap(), at, level: zf }],
       nominal: [
         {
           region: 'floorFillet',
           parameter: 'floorRadius',
-          mesh: { mesh: z, at },
+          mesh: { mesh: z, at, level: zf },
           minusRemoval: true,
           ...(inset.isSome() && {
             clearInside: { center: op.shape.center, contour: inset.unwrap() },
@@ -264,7 +333,7 @@ function pocket(op: Extract<OperationGeometry, { kind: 'pocket' }>): AppResult<O
 function drilling(
   op: Extract<OperationGeometry, { kind: 'drilling' }>,
   stock: StockGeometry,
-): AppResult<OperationSolids> {
+): AppResult<LocalSolids> {
   const table = new Table()
   const wall = table.add('wall')
   const bottom = op.bottom.kind === 'through' ? AIR : table.add('bottom')
@@ -289,7 +358,15 @@ function drilling(
     top: AIR,
     bottom,
   }).map((mesh) =>
-    result(op.id, table, { removal: [{ mesh, at: [op.center[0], op.center[1], 0] }] }),
+    result(op.id, table, {
+      removal: [
+        {
+          mesh,
+          at: [op.center[0], op.center[1], 0],
+          level: op.bottom.kind === 'through' ? 0 : op.onZ - op.bottom.depth,
+        },
+      ],
+    }),
   )
 }
 
@@ -301,7 +378,7 @@ function firstTab(c: Contour): number {
 function profile(
   op: Extract<OperationGeometry, { kind: 'profile' }>,
   stock: StockGeometry,
-): AppResult<OperationSolids> {
+): AppResult<LocalSolids> {
   const table = new Table()
   const offcut = table.add('offcut')
   const shape = op.shape.contour
@@ -357,7 +434,7 @@ function profile(
     : prism(shape, removalLevels, role, false)
   if (removal.isErr()) return Err(removal.unwrapErr())
 
-  const cut: PlacedMesh[] = []
+  const cut: LocalMesh[] = []
   if (outside || !covers) {
     const kept = outside
       ? prism(shape, cutLevels, role, true)
@@ -371,8 +448,8 @@ function profile(
   const room = inradius(shape)
   const inner = outside ? Math.min(OVERSHOOT, room / 2) : s + Math.min(OVERSHOOT, (room - s) / 2)
   const outer = outside ? -s - OVERSHOOT : -OVERSHOOT
-  const retained: PlacedMesh[] = []
-  const nominal: NominalRegion[] = []
+  const retained: LocalMesh[] = []
+  const nominal: LocalSolids['nominal'][number][] = []
   for (let i = 0; i < tabCount; i++) {
     const c = firstTab(shape) + (i * P) / tabCount
     const along = { from: c - op.tabs.width / 2, to: c + op.tabs.width / 2 }
@@ -396,11 +473,12 @@ function profile(
     const both = band.andThen((b) => exact.map((e) => [b, e] as const))
     if (both.isErr()) return Err(both.unwrapErr().withContext('tab', { index: i }))
     const [b, e] = both.unwrap()
-    retained.push({ mesh: b, at })
+    const level = -T + op.tabs.thickness
+    retained.push({ mesh: b, at, level })
     nominal.push({
       region: `tab[${i}]`,
       parameter: 'tabs',
-      mesh: { mesh: e, at },
+      mesh: { mesh: e, at, level },
       minusRemoval: false,
     })
   }

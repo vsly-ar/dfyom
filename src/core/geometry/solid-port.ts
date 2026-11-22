@@ -4,7 +4,7 @@
  */
 import type { AppResult, Option } from '../../shared/result'
 import type { LabelledMesh } from './loft'
-import type { Vec3 } from './model'
+import type { Placement } from './model'
 
 declare const solidBrand: unique symbol
 /** Opaque handle to a library solid; valid only inside the `withSolids` call that made it. */
@@ -39,8 +39,11 @@ export interface SolidPort {
   union(solids: readonly Solid[]): AppResult<Solid>
   subtract(a: Solid, b: Solid): AppResult<Solid>
   intersect(a: Solid, b: Solid): AppResult<Solid>
-  /** Translation in the library (float64). */
-  translate(s: Solid, by: Vec3): AppResult<Solid>
+  /**
+   * Rigid placement in the library (float64; axis rotations are exact), the step that puts a
+   * mesh built in its local or face frame into the part frame.
+   */
+  transform(s: Solid, placement: Placement): AppResult<Solid>
   status(s: Solid): AppResult<SolidStatus>
   decompose(s: Solid): AppResult<readonly Solid[]>
   volume(s: Solid): AppResult<number>

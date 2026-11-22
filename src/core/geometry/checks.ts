@@ -14,6 +14,9 @@ import {
   type SurfaceId,
   type SurfaceReference,
   type Vec3,
+  applyPlacement,
+  unapplyPlacement,
+  type Placement,
 } from './model'
 import type { NominalRegion, OperationSolids, PlacedMesh } from './operations'
 import type { Solid, SolidPort } from './solid-port'
@@ -75,16 +78,27 @@ export function geometryChecks(
 export function boxOf(meshes: readonly PlacedMesh[]): Box {
   const min = [Infinity, Infinity, Infinity]
   const max = [-Infinity, -Infinity, -Infinity]
-  for (const { mesh, at } of meshes) {
+  for (const { mesh, place } of meshes) {
     const p = mesh.positions
-    for (let i = 0; i < p.length; i += 3)
+    for (let i = 0; i < p.length; i += 3) {
+      const q = applyPlacement(place, [p[i]!, p[i + 1]!, p[i + 2]!])
       for (let a = 0; a < 3; a++) {
-        const v = p[i + a]! + at[a]!
-        if (v < min[a]!) min[a] = v
-        if (v > max[a]!) max[a] = v
+        if (q[a]! < min[a]!) min[a] = q[a]!
+        if (q[a]! > max[a]!) max[a] = q[a]!
       }
+    }
   }
   return { min: [min[0]!, min[1]!, min[2]!], max: [max[0]!, max[1]!, max[2]!] }
+}
+
+/** A part-frame box seen in the local frame of `t` (axis rotations map boxes to boxes). */
+function boxIn(t: Placement, box: Box): Box {
+  const a = unapplyPlacement(t, box.min)
+  const b = unapplyPlacement(t, box.max)
+  return {
+    min: [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.min(a[2], b[2])],
+    max: [Math.max(a[0], b[0]), Math.max(a[1], b[1]), Math.max(a[2], b[2])],
+  }
 }
 
 const overlaps = (a: Box, b: Box): boolean =>
@@ -190,7 +204,7 @@ function retainedRemoved(
     for (const region of a.op.nominal) {
       const box = boxOf([region.mesh])
       const others = input.operations.filter(
-        (b) => b !== a && overlaps(box, b.box) && !clearOf(region, b.box),
+        (b) => b !== a && overlaps(box, b.box) && !clearOf(region, a.op, b),
       )
       if (others.length === 0) continue
       const solid = placed(region, a.originalId, solids)
@@ -235,12 +249,14 @@ function retainedRemoved(
 }
 
 /**
- * A removal whose bounds lie, in XY, inside the region's `clearInside` shape (a pocket contour
- * inset by its fillet radius) cannot reach the region: no booleans needed.
+ * A removal of the same direction whose bounds lie, in the face frame's u, v, inside the
+ * region's `clearInside` shape (a pocket contour inset by its fillet radius) cannot reach the
+ * region: no booleans needed. Removals of other directions always run the boolean.
  */
-function clearOf(region: NominalRegion, box: Box): boolean {
+function clearOf(region: NominalRegion, owner: OperationSolids, other: ComposedOperation): boolean {
   const shape = region.clearInside
-  if (shape === undefined) return false
+  if (shape === undefined || other.op.direction !== owner.direction) return false
+  const box = boxIn(owner.frame, other.box)
   const inside = (x: number, y: number): boolean => {
     const dx = Math.abs(x - shape.center[0])
     const dy = Math.abs(y - shape.center[1])
@@ -260,7 +276,7 @@ function clearOf(region: NominalRegion, box: Box): boolean {
 function placed(region: NominalRegion, originalId: number, solids: SolidPort): AppResult<Solid> {
   return solids
     .fromMesh(region.mesh.mesh, originalId)
-    .andThen((s) => solids.translate(s, region.mesh.at))
+    .andThen((s) => solids.transform(s, region.mesh.place))
 }
 
 /** vol(region ∩ other), minus the retaining operation's own removal when given. */

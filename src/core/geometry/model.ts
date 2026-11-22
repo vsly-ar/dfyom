@@ -21,6 +21,41 @@ export type Vec2 = readonly [number, number]
 export type Vec3 = readonly [number, number, number]
 
 /**
+ * A rigid placement `p ↦ origin + u·p₀ + v·p₁ + n·p₂`: a rotation whose columns `u`, `v`, `n` are
+ * axis unit vectors (entries 0 or ±1, `u × v = n`) plus a translation, so placing is exact in
+ * float64. A face frame is one (docs/architecture/geometry.md#non-top-faces-v02).
+ */
+export interface Placement {
+  readonly origin: Vec3
+  readonly u: Vec3
+  readonly v: Vec3
+  readonly n: Vec3
+}
+
+/** The translation by `by` (no rotation). */
+export function translation(by: Vec3): Placement {
+  return { origin: by, u: [1, 0, 0], v: [0, 1, 0], n: [0, 0, 1] }
+}
+
+/** `p` placed by `t` (local → part frame). */
+export function applyPlacement(t: Placement, p: Vec3): Vec3 {
+  const at = (i: number) => t.origin[i]! + t.u[i]! * p[0] + t.v[i]! * p[1] + t.n[i]! * p[2]
+  return [at(0), at(1), at(2)]
+}
+
+/** `p` taken back into the local frame of `t` (part → local; the inverse of `applyPlacement`). */
+export function unapplyPlacement(t: Placement, p: Vec3): Vec3 {
+  const d = [p[0] - t.origin[0], p[1] - t.origin[1], p[2] - t.origin[2]]
+  const dot = (a: Vec3) => a[0] * d[0]! + a[1] * d[1]! + a[2] * d[2]!
+  return [dot(t.u), dot(t.v), dot(t.n)]
+}
+
+/** `t` after a translation by `at` in its local frame (place a mesh built around `at`). */
+export function placeAt(t: Placement, at: Vec3): Placement {
+  return { ...t, origin: applyPlacement(t, at) }
+}
+
+/**
  * Surface id, `<operation id>.<role>`, e.g. `pocket1.floor`, `profile1.tab[0].top`.
  * Derived from the operation and role, never from computed topology.
  */
