@@ -2,9 +2,9 @@
 
 Status: draft (follows from user decisions D10 and D11 of 2026-11-21; the details below await confirmation) · Vision: [plan.md](plan.md) · v0.1 subset: [plan-v0.1.md](plan-v0.1.md) · Design input: [design-v0.2.md](design-v0.2.md) · Apply (D13): [apply.md](../architecture/apply.md) · Terms: [glossary.md](../glossary.md)
 
-Plan consequences of [design-v0.2.md](design-v0.2.md): several setups, one per approach direction, and tool assignment from the design's tool field. Everything not mentioned here stays as in [plan-v0.1.md](plan-v0.1.md). Do not implement before the user confirms it.
+Plan consequences of [design-v0.2.md](design-v0.2.md): several setups, one per approach direction, and tool assignment from the design's tool field; plus plan-only edits of the design snapshot in the UI (strategy editing phase 2, [roadmap.md](../roadmap.md)). Everything not mentioned here stays as in [plan-v0.1.md](plan-v0.1.md). Do not implement before the user confirms it. Tasks: [plans/v0.2.md](../plans/v0.2.md).
 
-**Open (placeholder) – Q15:** whether v0.2 multi-setup goes without workholding and without in-process stock. This doc assumes neither exists yet (toolpaths of later setups use the design's analytic levels, so they may air-cut where an earlier setup already removed material, like the known facing/profile air-cutting). It does not decide Q15.
+**Q15 (assumed by D16, 2026-11-21; the user can veto):** v0.2 multi-setup goes **without workholding and without in-process stock**. Toolpaths of later setups use the design's analytic levels, so they may air-cut where an earlier setup already removed material, like the known facing/profile air-cutting.
 
 ## Setups from face directions
 
@@ -60,6 +60,20 @@ The design's [tool field](design-v0.2.md#operation-tool) is an input to Plan's [
 - **Draft plans** follow the design tool field through the rebuild like any design change, on Apply ([below](#draft-plans-follow-on-apply)); a locked specific tool that fails reports `plan.designToolFailed`, never a blocked rebuild.
 - `plan.tool.suggest` gains a reason per candidate for the design tool (`matchesDesign`, `designTool`), so the UI and agents see why a tool ranks first.
 
+## Plan-only edits and the snapshot scene
+
+Strategy editing phase 2 ([roadmap.md](../roadmap.md); phase 1 shipped the Strategy group and the feeds derivation). The core already has [plan-only edits](plan-v0.1.md#plans-are-snapshots) (`plan.design.operation.update` in `settledDesign`, the `editedInPlan` stale indicator, `discardPlanEdits` on rebuild); this section adds what the UI needs. No new data: the plan's design snapshot `{ taken, part }` already holds both versions.
+
+- **New command `plan.design.operation.revert`** `{ planId, planOperationId }`: copies the `taken` version back into `part` for that operation (one undo step); allowed where `plan.design.operation.update` is. Agents and the CLI get it from the command layer.
+- **Inspector:** in a `settledDesign` plan, a "Part (plan copy)" group under Tool shows the operation's design fields, reusing the Design inspector's per-kind field components (factored out of the Design inspector, not copied). An edited operation shows an "Edited in plan" badge and "Revert to design". In `draft` the group is read-only with the hint "Settle the design to edit it for this plan only"; in `finalized` and later it is read-only.
+- **Rebuild with plan edits** asks first ([ui.md § Confirmations](../conventions/ui.md#confirmations)): "Rebuild discards 2 plan-only edits" with Rebuild and Cancel; agents still pass `discardPlanEdits: true`.
+- **Snapshot scene:** the plan scene draws the **plan's** part (`design.part` of the plan), not the design's current mesh. The geometry worker evaluates a part DTO passed in (cached by the snapshot's hash, [workers.md](../architecture/workers.md)); edited operations are tinted, and the design's current part can be shown as a ghost for comparison (view toggle, off by default).
+- **Open:** may a rebuild keep plan edits that do not conflict with the design change? Today it discards all; this draft keeps that ([question O](#questions-raised-by-this-draft)).
+
+## Setup change in Run
+
+Run mode loads **one program per setup** ([§ Toolpaths per setup](#toolpaths-per-setup)). Between programs it shows a setup-change prompt, styled like the tool-change dialog ([run-v0.1.md](run-v0.1.md)): the next setup's name and direction, a picture of the stock in its new orientation, "Set the work zero on the new top" with the WCS corner, then Start. The virtual machine needs nothing new (a setup change is a pause with a new program). The [run-v0.1.md](run-v0.1.md) amendment is part of plan task E2 ([plans/v0.2.md](../plans/v0.2.md#3-plan-and-run)).
+
 ## Draft plans follow on Apply
 
 User decision D13 (2026-11-21), draft in [apply.md](../architecture/apply.md): the draft auto-rebuild no longer runs on every `design.*` commit. It becomes the apply hook `plan.draftFollow`, which runs once per Apply after the design's tool choice, so setups and tools are derived from the confirmed design, not from every keystroke or popover step.
@@ -76,3 +90,6 @@ User decision D13 (2026-11-21), draft in [apply.md](../architecture/apply.md): t
 | L   | Default setup order                          | (a) `+z`, `−z`, sides; (b) `−z` first (face the bottom as a datum), then sides, `+z` last (cutouts last)              | (b): profiles with tabs are usually on top and should run last; dependencies repair the rest           |
 | M   | A design tool locked after a plan assignment | (a) plan assignment wins, stale flag shown; (b) the design lock replaces it on rebuild                                | (a): plans are snapshots and are tuned on their own                                                    |
 | N   | Through features from the opposite side      | (a) one direction per operation (the design's); (b) Plan may machine a through hole or profile from the opposite face | (a) in v0.2; (b) later as "access directions", it changes setup derivation                             |
+| O   | Plan-only edits on rebuild                   | (a) a rebuild discards all plan edits (as today); (b) keeps edits of operations the design change did not touch       | (a) in v0.2: predictable, and the confirmation names what is lost; (b) later if users ask              |
+
+K–N were answered with the recommendations by decision D12 (2026-11-21, self, draft); the user confirms them with this doc.
