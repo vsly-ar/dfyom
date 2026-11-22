@@ -9,13 +9,7 @@
  */
 import { AppError } from '../../shared/errors/app-error'
 import { ctx, Err, fail, Ok, type AppResult } from '../../shared/result'
-import {
-  arcSegments,
-  contourElements,
-  offsetContour,
-  perimeter,
-  type ContourLabel,
-} from './contour'
+import { arcSegments, contourElements, offsetContour, type ContourLabel } from './contour'
 import { faceFrame, localStock, type Direction, type FaceFrame } from './face'
 import {
   AIR,
@@ -45,6 +39,7 @@ import {
 } from './model'
 import { tiledBox, type Triangulate } from './prism'
 import { shapePocket, shapeProfile } from './shape-solids'
+import { analyticTabCentres } from './tab-hold'
 import type { Region2dPort } from './2d/port'
 
 export { AIR, type SurfaceTable } from './local-solids'
@@ -373,11 +368,6 @@ function chamfer(op: Extract<OperationGeometry, { kind: 'chamfer' }>): AppResult
   )
 }
 
-/** Arc length (from the start of wall[0]) of the first tab: the middle of wall[0]; circle: front. */
-function firstTab(c: Contour): number {
-  return c.kind === 'circle' ? 0 : (c.length - 2 * c.cornerRadius) / 2
-}
-
 function profile(op: AnalyticOperation<'profile'>, stock: StockGeometry): AppResult<LocalSolids> {
   const table = new Table()
   const offcut = table.add('offcut')
@@ -444,14 +434,15 @@ function profile(op: AnalyticOperation<'profile'>, stock: StockGeometry): AppRes
   }
 
   // tabs: offset bands across the slot plus ov on both sides, up from below the stock bottom
-  const P = perimeter(shape)
   const room = inradius(shape)
   const inner = outside ? Math.min(OVERSHOOT, room / 2) : s + Math.min(OVERSHOOT, (room - s) / 2)
   const outer = outside ? -s - OVERSHOOT : -OVERSHOOT
   const retained: LocalMesh[] = []
   const nominal: LocalSolids['nominal'][number][] = []
+  // the count rule's centres, tabs over free sides moved (design-v0.4.md#tabs-relocate-off-free-sides-tb1)
+  const { centres } = analyticTabCentres(op, stock, tabCount)
   for (let i = 0; i < tabCount; i++) {
-    const c = firstTab(shape) + (i * P) / tabCount
+    const c = centres[i]!
     const along = { from: c - op.tabs.width / 2, to: c + op.tabs.width / 2 }
     const band = offsetBand(
       shape,

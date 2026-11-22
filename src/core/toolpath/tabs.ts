@@ -3,32 +3,25 @@
  * so the tool lifts exactly where the geometry keeps material) and the lift over them.
  * Doc: docs/modes/plan-v0.1.md#toolpath-generators-task-210, bands: docs/architecture/geometry.md#offset-loft
  */
-import { perimeter } from '../geometry/contour'
 import { offsetBand } from '../geometry/loft'
 import { EPSILON, type Vec2 } from '../geometry/model'
 import { Err, Ok, type AppResult } from '../../shared/result'
 import type { ProfileOperation } from './model'
 import { segLength, segPoint, segSlice, type Seg3 } from './path'
-import { wallMiddle } from './pocket'
 
 /** A tab band's outline in XY (part frame) as triangles. */
 export type TabBand = readonly (readonly [Vec2, Vec2, Vec2])[]
 
-/** Arc length of tab `i`'s center along the shape (geometry.md: first at the middle of wall[0]). */
-export function tabCenter(op: ProfileOperation, i: number): number {
-  return wallMiddle(op.shape.contour) + (i * perimeter(op.shape.contour)) / op.tabs.count
-}
-
 /**
- * Nominal bands of `count` tabs: exactly across the slot, as geometry's `nominal` regions.
- * `count` is 0 when the slot covers an inside opening.
+ * Nominal bands of tabs centred at `centres` (arc lengths along the shape: the count rule with
+ * tabs off free sides moved, `analyticTabCentres`): exactly across the slot, as geometry's
+ * `nominal` regions. None when the slot covers an inside opening.
  */
-export function tabBands(op: ProfileOperation, count: number): AppResult<TabBand[]> {
+export function tabBands(op: ProfileOperation, centres: readonly number[]): AppResult<TabBand[]> {
   const bands: TabBand[] = []
   const outside = op.side === 'outside'
   const [cx, cy] = op.shape.center
-  for (let i = 0; i < count; i++) {
-    const c = tabCenter(op, i)
+  for (const [i, c] of centres.entries()) {
     const mesh = offsetBand(
       op.shape.contour,
       {

@@ -6,6 +6,7 @@
 import { contourParam, offsetContour, perimeter } from '../geometry/contour'
 import { EPSILON, type AnalyticContour as Contour, type Vec2, type Vec3 } from '../geometry/model'
 import { slotCoversOpening } from '../geometry/operations'
+import { analyticTabCentres } from '../geometry/tab-hold'
 import { Err, Ok, type AppResult } from '../../shared/result'
 import { noSteps, type Steps } from '../workers/steps'
 import { commonIssues, levels, passSteps, toolpath } from './common'
@@ -76,7 +77,9 @@ export function generateProfile(input: ProfileInput, steps: Steps = noSteps): Ap
 
   const covers = slotCoversOpening(op)
   const tabCount = covers ? 0 : op.tabs.count
-  const bandsResult = tabBands(op, tabCount)
+  // tabs over free sides moved (design-v0.4.md#tabs-relocate-off-free-sides-tb1)
+  const { centres, moved: relocated } = analyticTabCentres(op, stock, tabCount)
+  const bandsResult = tabBands(op, centres)
   if (bandsResult.isErr())
     return Err(
       bandsResult
@@ -119,8 +122,11 @@ export function generateProfile(input: ProfileInput, steps: Steps = noSteps): Ap
   /** Shape arc length nearest to a point. */
   const paramOf = (p: Vec2) => contourParam(shape, [p[0] - c[0], p[1] - c[1]])
 
-  // start between tabs (evenly spaced, so half a spacing after the first one)
-  const start = wallMiddle(shape) + (tabCount > 0 ? perimeter(shape) / (2 * tabCount) : 0)
+  // start between tabs (evenly spaced, so half a spacing after the first one; tabs moved off free
+  // sides: the middle of the largest gap between them)
+  const start = relocated
+    ? largestGapMiddle(centres, perimeter(shape))
+    : wallMiddle(shape) + (tabCount > 0 ? perimeter(shape) / (2 * tabCount) : 0)
   const retract = heights.retractHeight
   const bottom = -T - st.breakthrough
   const tan = Math.tan((st.rampAngle * Math.PI) / 180)
@@ -197,4 +203,19 @@ export function generateProfile(input: ProfileInput, steps: Steps = noSteps): Ap
   }
   b.rapid(at(xy(b.position!), heights.clearanceHeight))
   return Ok(toolpath(input, b.build()))
+}
+
+/** The middle of the largest gap between tab centres around a loop of length `P`. */
+function largestGapMiddle(centres: readonly number[], P: number): number {
+  const sorted = centres.map((c) => ((c % P) + P) % P).sort((a, b) => a - b)
+  let best = 0
+  let at = 0
+  sorted.forEach((c, i) => {
+    const next = i + 1 < sorted.length ? sorted[i + 1]! : sorted[0]! + P
+    if (next - c > best + 1e-9) {
+      best = next - c
+      at = (c + next) / 2
+    }
+  })
+  return at
 }

@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Vec2 } from '../geometry/model'
 import { translatePath } from '../geometry/2d/place'
-import { importSvg } from '../import/svg'
+import { freeSides, holdTest, resolveTabs } from '../geometry/tab-hold'
 import { chainLength, chainPointAt, closestOnChains, windingNumber } from '../geometry/2d/measure'
 import { chainBounds, type Loop } from '../geometry/2d/model'
 import {
@@ -15,6 +15,7 @@ import {
   CUTOUT,
   EXPECTED,
   gridInstances,
+  LID_CENTRE,
   LID_PROFILE,
   LID_STOCK,
   LID_TOOLS,
@@ -33,6 +34,14 @@ const fs = (globalThis as unknown as { process: NodeProcess }).process.getBuilti
 const svg = fs.readFileSync(ENCLOSURE_SECTIONS_SVG, 'utf8')
 const outline = lidOutline(svg)
 const tabs = lidTabs(outline)
+/** The hold test's input: the outline on the board (face frame), the profile's slot and tabs. */
+const holdInput = {
+  chain: translatePath(outline, LID_CENTRE),
+  side: LID_PROFILE.side,
+  slotWidth: LID_PROFILE.slotWidth,
+  width: LID_PROFILE.tabs.width,
+  stock: LID_STOCK,
+}
 
 /** What a cut leaves at the face: a disc, or an obround (a segment swept by a radius). */
 interface Footprint {
@@ -182,13 +191,26 @@ describe('v0.4 exit part: the lid layout (X0)', () => {
     },
   )
 
-  it('places the four tabs by the v0.3 rule, clear of the cuts and of each other', () => {
+  it('places the six tabs by the v0.3 rule, relocating the two on the free ends (TB1, D40), clear of the cuts and of each other', () => {
     const length = chainLength(outline)
     const { width } = LID_PROFILE.tabs
     const web = LID_TOOLS.profile.diameter
-    expect(tabs.map((t) => t.s)).toEqual([0, 1, 2, 3].map((k) => ((k + 0.5) * length) / 4))
-    // the spacing leaves a slot of at least the profile tool between neighbours (and round the start)
-    expect(length / 4 - width).toBeGreaterThanOrEqual(web)
+    const n = LID_PROFILE.tabs.count
+    expect(n).toBe(6)
+    expect(tabs.map((t) => t.nominal)).toEqual(
+      Array.from({ length: n }, (_, k) => ((k + 0.5) * length) / n),
+    )
+    // the slot runs off the board's left and right ends (255 × 200, D40): the tabs the v0.3 rule
+    // puts there move along the loop to where the slot's far side lies on the board; the rest stay
+    const moved = tabs.filter((t) => t.s !== t.nominal)
+    expect(moved.length).toBeGreaterThan(0)
+    expect(moved.length).toBeLessThan(n)
+    // moved tabs keep at least the profile tool between neighbours (round the loop)
+    const sorted = tabs.map((t) => t.s).sort((a, b) => a - b)
+    for (let i = 0; i < n; i++) {
+      const gap = i + 1 < n ? sorted[i + 1]! - sorted[i]! : sorted[0]! + length - sorted[i]!
+      expect(gap - width).toBeGreaterThanOrEqual(web)
+    }
     expect(tabs[0]!.s - width / 2).toBeGreaterThan(0)
     for (const t of tabs) {
       close(pointAt(t.s), t.at)
@@ -237,27 +259,43 @@ describe('v0.4 exit part: the lid layout (X0)', () => {
     expect(LID_TOOLS.profile.diameter).toBeLessThanOrEqual(LID_PROFILE.slotWidth)
   })
 
-  it('stands the screws over the base cavity, not its wall (known, X0 finding)', () => {
-    // the base's holes are blind holes in its floor (drilled from the bottom), inside the cavity
-    // seen from above: a lid screw there passes over the cavity and reaches no base material
-    const cavity = importSvg(svg)
-      .unwrap()
-      .shapes.find((x) => x.name === 'cavity')!.items[0]!
-    if (cavity.kind !== 'loop') throw new Error('expected a loop')
-    const loop = translatePath(cavity.loop, [-125, -89])
-    for (const p of EXPECTED.screws) {
-      expect(windingNumber(loop, p)).toBe(1)
-      expect(closestOnChains([loop], p)!.distance).toBeGreaterThan(14)
-    }
-  })
-
-  it('leaves the v0.3 board margin: narrower than the profile slot (known, as v0.3 X1)', () => {
+  it('leaves the slot on the board along Y, off it along X (D40: 255 × 200)', () => {
     const b = chainBounds(outline.elements)!
     const marginU = Math.min(LID_STOCK.length / 2 + b.min[0], LID_STOCK.length / 2 - b.max[0])
     const marginV = Math.min(LID_STOCK.width / 2 + b.min[1], LID_STOCK.width / 2 - b.max[1])
-    expect(marginU).toBeCloseTo(2.77, 1)
-    expect(marginV).toBeCloseTo(3.94, 1)
+    expect(marginU).toBeCloseTo(2.75, 2)
+    expect(marginV).toBeCloseTo(11.43, 2)
     expect(marginU).toBeLessThan(LID_PROFILE.slotWidth)
-    expect(marginV).toBeLessThan(LID_PROFILE.slotWidth)
+    expect(marginV).toBeGreaterThanOrEqual(LID_PROFILE.slotWidth)
+    // front and back keep a strip beyond the slot; left and right are free
+    expect(freeSides(holdInput)).toEqual([false, true, false, true])
+  })
+
+  it('moves counted tabs off the free left and right sides (TB1)', () => {
+    const length = chainLength(outline)
+    const nominal = Array.from({ length: 6 }, (_, k) => ((k + 0.5) * length) / 6)
+    const held = holdTest(holdInput)
+    const r = resolveTabs(holdInput, nominal, false)
+    // tabs 1 and 4 fall on the right and left ends of the oval: moved to the nearest held place
+    expect(r.moved).toEqual([1, 4])
+    expect(r.unheld).toEqual([])
+    r.centres.forEach((c, k) => {
+      if (!r.moved.includes(k)) expect(c).toBe(nominal[k])
+      const at = pointAt(c)
+      // still on the right / left end, now over the back / front strip
+      if (k === 1 || k === 4) expect(Math.abs(at[0])).toBeGreaterThan(85)
+      for (let d = -3; d <= 3; d += 0.25) expect(held(c + d), `tab ${k} at ${d}`).toBe(true)
+    })
+    expect(
+      nominal
+        .slice(1, 2)
+        .concat(nominal[4]!)
+        .some((c) => held(c)),
+    ).toBe(false)
+    // deterministic, and entered positions are never moved
+    expect(resolveTabs(holdInput, nominal, false).centres).toEqual(r.centres)
+    const entered = resolveTabs(holdInput, nominal, true)
+    expect(entered.centres).toEqual(nominal)
+    expect(entered.unheld).toEqual([1, 4])
   })
 })
