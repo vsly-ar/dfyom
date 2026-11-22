@@ -9,6 +9,7 @@ import type { DfmWarning } from '../geometry/model'
 import { uiSource } from '../commands/testing'
 import { designSetup, type DesignSetup } from './design.fixture'
 import { loadPart } from './load'
+import { pendingChanges } from '../commands/apply'
 
 const ui = uiSource()
 const ids = (s: DesignSetup) => s.part().operations.map((o) => o.id)
@@ -174,6 +175,22 @@ describe('invariants and issue paths (at the hole fields)', () => {
 })
 
 describe('design.hole.update', () => {
+  // X1 found 4: the refilled table sizes counted beside the fastener (exit criteria: "1 change")
+  it('a new fastener is one pending change: the refilled sizes fold into it; a hand size alone is its own', async () => {
+    const s = await designSetup()
+    await addHole(s, { fastener: 'M3', type: 'counterbore' })
+    await s.run('project.apply', {})
+    let base = s.d.doc
+    const keys = () => pendingChanges(s.d.doc, base).map((c) => c.label)
+    await s.run('design.hole.update', { partId: s.partId, featureId: 'hole1', fastener: 'M4' })
+    expect(exact(feature(s)['cbDiameter'])).toBe(8)
+    expect(keys()).toEqual(['Hole 1: fastener'])
+    await s.run('project.apply', {})
+    base = s.d.doc
+    await s.run('design.hole.update', { partId: s.partId, featureId: 'hole1', cbDiameter: '9' })
+    expect(keys()).toEqual(['Hole 1: cbDiameter'])
+  })
+
   it('choosing fit or purpose refills the sizes; explicit sizes in the same command win', async () => {
     const s = await designSetup()
     await addHole(s, { fastener: 'M5', type: 'counterbore' })

@@ -29,6 +29,7 @@ import {
   type FieldIconName,
   type FieldMessage,
 } from '../../ui'
+import { ChamferInspector } from './ChamferInspector'
 import { isOpenNamed } from './operation-shape'
 import { isRotated, ShapePicker, type ShapeActions } from './ShapePicker'
 import { TabPositions } from './TabsFields'
@@ -107,6 +108,8 @@ export function placeErrors(
  * positions while they are entered).
  */
 export function warningPath(w: DfmWarning, op: OperationDTO): string | undefined {
+  // v0.4 U4: "no library tool fits the chamfer" shows at the tool field, with "New tool…"
+  if (w.code === 'dfm.chamferNoTool') return 'tool'
   const p = w.parameter
   if (p === undefined) return undefined
   if (p === 'center') return 'center.0'
@@ -354,12 +357,14 @@ export function OperationFields({
         </>
       )
     }
+    case 'chamfer':
+      return <ChamferInspector ctx={ctx} level={level} tool={toolGroup} />
     default:
       return null
   }
 }
 
-function Group({
+export function Group({
   title,
   level,
   children,
@@ -556,7 +561,7 @@ function AnchorField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Elemen
 }
 
 /** One quantity parameter: stored value, commit = one update command, warnings and errors here. */
-function ParamField({
+export function ParamField({
   ctx,
   path,
   label,

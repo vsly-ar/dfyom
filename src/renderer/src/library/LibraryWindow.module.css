@@ -209,7 +209,8 @@
 
 .headRow[data-kind='tool'],
 .row[data-kind='tool'] {
-  grid-template-columns: minmax(220px, 2.4fr) repeat(4, minmax(48px, 0.8fr)) minmax(44px, 0.6fr);
+  /* name, Ø, RE, flutes, flute length, angle (U4), presets */
+  grid-template-columns: minmax(200px, 2.4fr) repeat(5, minmax(44px, 0.8fr)) minmax(44px, 0.6fr);
 }
 
 .headRow[data-kind='machine'],

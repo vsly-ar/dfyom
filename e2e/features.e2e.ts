@@ -4,7 +4,8 @@
 // opens the Clones draft (U3: read-out, a 2 x 2 grid row, Make clones, skip clone 3 by clicking its
 // marker in the viewport, the instance inspector) with Source and Clones groups under the Clones
 // row; the hole inspector (U2) sets type and fastener, draws the section and offers the
-// custom-size fix. Windows stay hidden
+// custom-size fix. Task U4: Add → Chamfer on a drilling opens the chamfer inspector (Edge,
+// Diameter, Angle, Depth and the section). Windows stay hidden
 // (app.fixture.ts). With DFYOM_RENDERS=1 it also writes the light and dark review renders to
 // design/features/renders/ (ui.md § Features (v0.4), visuals reviewed in L2).
 // Docs: docs/conventions/ui.md#features-v04, docs/modes/features.md
@@ -25,7 +26,7 @@ const rendersDir = resolve(__dirname, '../design/features/renders')
 async function render(
   page: Page,
   name: string,
-  task: 'u1' | 'u2' | 'u3' = 'u1',
+  task: 'u1' | 'u2' | 'u3' | 'u4' = 'u1',
   // run after the Settings dialog closed (it takes focus): refocus a field
   before?: () => Promise<void>,
 ): Promise<void> {
@@ -193,6 +194,60 @@ test('features: add a hole, expand its row, the owned inspector is read-only, Ma
   await navigator.getByRole('button', { name: 'Clone 2', exact: true }).click()
   await expect(inspector.getByText('Clone 2 of Clones 1')).toBeVisible()
   await render(page, 'instance', 'u3')
+
+  expect(dfyom.rendererErrors).toEqual([])
+})
+
+test('chamfer: add a drilling, add a chamfer from Add, edit it in its inspector', async ({
+  dfyom,
+}) => {
+  test.setTimeout(120_000)
+  const page = await dfyom.app.firstWindow()
+  await page.waitForLoadState('domcontentloaded')
+  if (RENDERS) await page.setViewportSize({ width: 1280, height: 800 })
+  const navigator = page.getByRole('navigation', { name: 'Navigator' })
+  const inspector = page.getByRole('complementary', { name: 'Inspector' })
+
+  await navigator.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  await dialog.getByRole('textbox', { name: 'Project name' }).fill('Chamfers')
+  await dialog.getByRole('button', { name: 'Create project' }).click()
+  const setup = navigator.getByRole('region', { name: 'Set up the part' })
+  await setup.getByRole('button', { name: 'Create part' }).click()
+
+  // no edge yet: Chamfer says why
+  await navigator.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(page.getByRole('menuitem', { name: 'Add chamfer' })).toHaveAttribute(
+    'aria-disabled',
+    'true',
+  )
+  await page.keyboard.press('Escape')
+  await navigator.getByRole('button', { name: 'Add drilling' }).click()
+  await expect(inspector.getByRole('heading', { name: 'Drilling 1' })).toBeVisible()
+
+  // ── Add → Operations → Add chamfer on the selected drilling ─────────────────────────────
+  await navigator.getByRole('button', { name: 'Add', exact: true }).click()
+  const item = page.getByRole('menu').getByRole('menuitem', { name: 'Add chamfer' })
+  await expect(item).not.toHaveAttribute('aria-disabled', 'true')
+  await item.click()
+  await expect(inspector.getByRole('heading', { name: 'Chamfer 1' })).toBeVisible()
+  await expect(inspector.getByRole('combobox', { name: 'Edge' })).toContainText('Drilling 1 · Ø')
+  await expect(inspector.getByRole('img', { name: /^Section: chamfer Ø/ })).toBeVisible()
+  const depth = inspector.getByLabel('Depth', { exact: true }).and(inspector.locator('input'))
+  await expect(depth).toHaveAttribute('readonly', '')
+  const before = await depth.inputValue()
+
+  // a new angle: one update, the derived depth follows
+  await setField(inspector, 'Angle', '60')
+  await expect(depth).not.toHaveValue(before)
+  await expect(inspector.getByRole('img', { name: /at 60°/ })).toBeVisible()
+  // the focused field's part is amber in the section (the review render)
+  const focusDiameter = async () => {
+    await inspector.getByLabel('Diameter', { exact: true }).and(inspector.locator('input')).focus()
+    await expect(page.locator('[data-part="diameter"]')).toHaveAttribute('data-state', 'active')
+  }
+  await focusDiameter()
+  await render(page, 'chamfer-inspector', 'u4', focusDiameter)
 
   expect(dfyom.rendererErrors).toEqual([])
 })

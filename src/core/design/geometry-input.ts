@@ -205,6 +205,7 @@ function operationGeometry(
         edgeDiameter: edge.diameter,
         diameter: op.diameter.canonical,
         angle: op.angle.canonical,
+        ...(op.stepdown.isSome() ? { stepdown: op.stepdown.unwrap().canonical } : {}),
       })
     }
   }

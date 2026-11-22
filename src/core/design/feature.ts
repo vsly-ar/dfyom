@@ -135,6 +135,16 @@ export interface FeatureKindSpec<F extends FeatureBase = FeatureBase> {
     shapes: readonly ShapeDTO[],
   ): AppResult<{ ops: readonly Operation[]; start: number; end: number }>
   /**
+   * Fields a command refills from other fields (the hole's table sizes from its fastener): while a
+   * `drivers` field is pending, changed `derived` fields fold into it and are no keys of their own
+   * (features.md § Apply and pending changes: choosing M4 counts 1). Absent = every changed field
+   * is its own key.
+   */
+  readonly pendingFolds?: {
+    readonly drivers: readonly string[]
+    readonly derived: readonly string[]
+  }
+  /**
    * DFM warnings about the feature's whole span (Clones: `dfm.clone*`, which look at the source
    * and the positions); their `operation` is the feature id. Absent = none.
    */

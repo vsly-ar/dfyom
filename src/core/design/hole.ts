@@ -13,7 +13,7 @@ import { z } from 'zod'
 import type { Issue, IssuePath } from '../../shared/errors/app-error'
 import { parseWith } from '../../shared/parse'
 import { collect, fail, None, Ok, Some, type AppResult, type Option } from '../../shared/result'
-import type { DfmWarning } from '../geometry/model'
+import { chamferTerraces, type DfmWarning } from '../geometry/model'
 import { quantityDto, quantityFromDTO } from '../library/item'
 import type { UnitSystem } from '../project/document'
 import { Quantity } from '../quantity/quantity'
@@ -23,6 +23,10 @@ import type { ExpandedOperation, ExpansionContext, FeatureBase, FeatureKindSpec 
 import { FeatureDtoSchema, type FeatureDTO } from './feature.dto'
 import { CENTRE_ANCHOR, DEFAULTS, fieldContext, type Point } from './operation'
 import { DRILL_BOTTOMS, type DrillBottomKind } from './part.dto'
+
+/** How a countersink is cut (F7): a chamfer mill, or terraces by the hole's end mill. */
+export const CS_METHODS = ['chamfer', 'stepped'] as const
+export type CsMethod = (typeof CS_METHODS)[number]
 
 /** Hole types, one `HoleHead` variant each. */
 export const HOLE_TYPES = ['simple', 'counterbore', 'countersink'] as const
@@ -38,7 +42,16 @@ export const FASTENER_SIZES = FASTENER_TABLE.map((r) => r.size) as [string, ...s
 export type HoleHead =
   | { readonly type: 'simple' }
   | { readonly type: 'counterbore'; readonly cbDiameter: Quantity; readonly cbDepth: Quantity }
-  | { readonly type: 'countersink'; readonly csDiameter: Quantity; readonly csAngle: Quantity }
+  | {
+      readonly type: 'countersink'
+      readonly csDiameter: Quantity
+      readonly csAngle: Quantity
+      /**
+       * Some = `csMethod: stepped` (F7, D41): terraces of at most this height by the hole's own
+       * end mill; None = `chamfer` (a chamfer mill, the default).
+       */
+      readonly csStepdown: Option<Quantity>
+    }
 
 export interface Hole extends FeatureBase {
   readonly kind: 'hole'
@@ -149,6 +162,9 @@ const HoleDtoSchema = FeatureDtoSchema.extend({
   cbDepth: length().optional(),
   csDiameter: length().optional(),
   csAngle: quantityDto('angle').optional(),
+  /** F7: stored only when `stepped`, with `csStepdown`. */
+  csMethod: z.enum(CS_METHODS).optional(),
+  csStepdown: length().optional(),
 })
 
 function holeFromDTO(raw: FeatureDTO): AppResult<Hole> {
@@ -177,7 +193,10 @@ function holeFromDTO(raw: FeatureDTO): AppResult<Hole> {
     head('counterbore', d.cbDepth, 'cbDepth'),
     head('countersink', d.csDiameter, 'csDiameter'),
     head('countersink', d.csAngle, 'csAngle'),
-  ]).map(([u, v, diameter, depth, headSink, cbDiameter, cbDepth, csDiameter, csAngle]) => ({
+    d.type === 'countersink' && d.csMethod === 'stepped'
+      ? head('countersink', d.csStepdown, 'csStepdown')
+      : Ok(undefined),
+  ]).map(([u, v, diameter, depth, headSink, cbDiameter, cbDepth, csDiameter, csAngle, step]) => ({
     kind: 'hole',
     id: d.id,
     name: d.name,
@@ -194,7 +213,12 @@ function holeFromDTO(raw: FeatureDTO): AppResult<Hole> {
       d.type === 'counterbore'
         ? { type: 'counterbore', cbDiameter: cbDiameter!, cbDepth: cbDepth! }
         : d.type === 'countersink'
-          ? { type: 'countersink', csDiameter: csDiameter!, csAngle: csAngle! }
+          ? {
+              type: 'countersink',
+              csDiameter: csDiameter!,
+              csAngle: csAngle!,
+              csStepdown: step === undefined ? None : Some(step),
+            }
           : { type: 'simple' },
   }))
 }
@@ -218,7 +242,13 @@ function holeToDTO(h: Hole): FeatureDTO {
       ? { cbDiameter: h.head.cbDiameter.toDTO(), cbDepth: h.head.cbDepth.toDTO() }
       : {}),
     ...(h.head.type === 'countersink'
-      ? { csDiameter: h.head.csDiameter.toDTO(), csAngle: h.head.csAngle.toDTO() }
+      ? {
+          csDiameter: h.head.csDiameter.toDTO(),
+          csAngle: h.head.csAngle.toDTO(),
+          ...(h.head.csStepdown.isSome()
+            ? { csMethod: 'stepped', csStepdown: h.head.csStepdown.unwrap().toDTO() }
+            : {}),
+        }
       : {}),
   }
 }
@@ -282,7 +312,8 @@ function holeInvariants(h: Hole): Issue[] {
       )
   }
   if (h.head.type === 'countersink') {
-    // the angle's range is the owned chamfer's rule (validate.ts), reported at csAngle by fieldOf
+    // the angle's range and the stepdown's minimum are the owned chamfer's rules (validate.ts),
+    // reported at csAngle / csStepdown by fieldOf
     const { csDiameter, csAngle } = h.head
     const wider = csDiameter.exact.compare(h.diameter.exact) > 0
     check(wider, 'csDiameter', 'greaterThanDiameter', 'must be greater than the hole diameter', {
@@ -350,6 +381,7 @@ function expandHole(h: Hole, ctx: ExpansionContext): AppResult<readonly Expanded
           edgeOf: ctx.ownedId('drill'),
           diameter: h.head.csDiameter,
           angle: h.head.csAngle,
+          stepdown: h.head.csStepdown,
         },
       },
     ])
@@ -386,7 +418,7 @@ const FIELD_OF: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     'shape.diameter': 'cbDiameter',
     'shape.center': 'center',
   },
-  countersink: { diameter: 'csDiameter', angle: 'csAngle', on: 'on' },
+  countersink: { diameter: 'csDiameter', angle: 'csAngle', stepdown: 'csStepdown', on: 'on' },
 }
 
 function holeFieldOf(role: string, path: IssuePath): IssuePath | undefined {
@@ -413,6 +445,9 @@ function reevaluateHole(
         ? [
             ['csDiameter', head.csDiameter],
             ['csAngle', head.csAngle],
+            ...(head.csStepdown.isSome()
+              ? [['csStepdown', head.csStepdown.unwrap()] as [string, Quantity]]
+              : []),
           ]
         : []
   return collect<Quantity | undefined>([
@@ -422,7 +457,7 @@ function reevaluateHole(
     h.depth.isSome() ? at(h.depth.unwrap(), 'depth') : Ok(undefined),
     at(h.headSink, 'headSink'),
     ...heads.map(([path, q]) => at(q, path)),
-  ]).map(([u, v, diameter, depth, headSink, a, b]) => ({
+  ]).map(([u, v, diameter, depth, headSink, a, b, c]) => ({
     ...h,
     center: [u!, v!],
     diameter: diameter!,
@@ -432,9 +467,43 @@ function reevaluateHole(
       head.type === 'counterbore'
         ? { type: 'counterbore', cbDiameter: a!, cbDepth: b! }
         : head.type === 'countersink'
-          ? { type: 'countersink', csDiameter: a!, csAngle: b! }
+          ? {
+              type: 'countersink',
+              csDiameter: a!,
+              csAngle: b!,
+              csStepdown: c === undefined ? None : Some(c),
+            }
           : head,
   }))
+}
+
+/** The hole's notes: `dfm.countersinkStepped`, then `dfm.holeCustomSize`. */
+function holeWarnings(h: Hole, ownedId: (role: string) => string): DfmWarning[] {
+  return [...steppedNote(h, ownedId), ...customSizeNotes(h, ownedId)]
+}
+
+/** `dfm.countersinkStepped` (info, F7): the cone is cut as terraces, up to one past it. */
+function steppedNote(h: Hole, ownedId: (role: string) => string): DfmWarning[] {
+  if (h.head.type !== 'countersink' || h.head.csStepdown.isNone()) return []
+  const t = chamferTerraces(
+    {
+      edgeDiameter: h.diameter.canonical,
+      diameter: h.head.csDiameter.canonical,
+      angle: h.head.csAngle.canonical,
+    },
+    h.head.csStepdown.unwrap().canonical,
+  )
+  if (t === undefined) return []
+  return [
+    {
+      code: 'dfm.countersinkStepped',
+      severity: 'info',
+      message: `stepped countersink: ${t.count} terraces of ${round3(t.height)} mm by the hole's end mill; the cone is cut past by up to one terrace, hidden under the screw head`,
+      operation: ownedId('countersink'),
+      parameter: 'csMethod',
+      params: { stepdown: round3(t.height), terraces: t.count, feature: h.id },
+    },
+  ]
 }
 
 /**
@@ -442,7 +511,7 @@ function reevaluateHole(
  * owned operation that carries it. Params `{ field, table, value }` (mm; csAngle in degrees) plus
  * `fastener`.
  */
-function holeWarnings(h: Hole, ownedId: (role: string) => string): DfmWarning[] {
+function customSizeNotes(h: Hole, ownedId: (role: string) => string): DfmWarning[] {
   if (h.fastener.isNone()) return []
   const size = h.fastener.unwrap()
   const row = fastenerRow(size)
@@ -496,4 +565,10 @@ export const holeSpec: FeatureKindSpec<Hole> = {
   reevaluate: reevaluateHole,
   fieldOf: holeFieldOf,
   warnings: holeWarnings,
+  // the refill of design.hole.add/update (hole-commands.ts): a new fastener, purpose, fit, head
+  // type or headSink rewrites the table sizes in the same command
+  pendingFolds: {
+    drivers: ['fastener', 'purpose', 'fit', 'headSink', 'type'],
+    derived: ['diameter', 'cbDiameter', 'cbDepth', 'csDiameter', 'csAngle'],
+  },
 }

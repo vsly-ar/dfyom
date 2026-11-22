@@ -28,6 +28,8 @@ export const TOOL_FIELDS: readonly string[] = [
   'shankDiameter',
   'fluteCount',
   'pointAngle',
+  'angle',
+  'tipDiameter',
   'toolMaterial',
   'coating',
   'presets',
@@ -42,6 +44,8 @@ const DIMENSIONS: ReadonlySet<string> = new Set([
   'stickout',
   'shankDiameter',
   'pointAngle',
+  'angle',
+  'tipDiameter',
 ])
 
 export function ToolFields({
@@ -70,7 +74,7 @@ export function ToolFields({
     field: keyof ToolDraft & string,
     kind: 'length' | 'scalar' | 'angle',
     icon: Parameters<typeof QuantityField>[0]['icon'],
-    opts: { optional?: boolean; note?: string } = {},
+    opts: { optional?: boolean; note?: string; placeholder?: string } = {},
   ) => (
     <QuantityField
       field={field}
@@ -82,6 +86,7 @@ export function ToolFields({
       messages={messages}
       note={opts.note}
       optional={opts.optional ?? false}
+      placeholder={opts.placeholder}
       onChange={(v) => set({ [field]: v })}
       onFocusField={onFocusField}
     />
@@ -91,14 +96,14 @@ export function ToolFields({
     <>
       <Focusable field="type" onFocusField={onFocusField}>
         <Field label={m.type} messages={messages('type')}>
-          {/* a chamfer mill is shown, not offered: its form comes with task U4 */}
+          {/* one type for chamfer mills and V-bits (H-F): "V-bit" in its hint (task U4) */}
           <Select
-            options={TOOL_TYPES.filter((t) => t !== 'chamferMill' || chamfer).map((t) => ({
+            options={TOOL_TYPES.map((t) => ({
               value: t,
               label: m.types[t],
+              ...(t === 'chamferMill' ? { description: m.chamferHint } : {}),
             }))}
             value={values.type}
-            disabled={chamfer}
             onValueChange={(type) =>
               onChange(followDraft(withToolType(values, type, units), units))
             }
@@ -107,6 +112,13 @@ export function ToolFields({
       </Focusable>
       {quantity('diameter', 'length', 'width')}
       {values.type === 'bullNoseEndMill' ? quantity('cornerRadius', 'length', 'corner') : null}
+      {chamfer ? quantity('angle', 'angle', 'chamfer') : null}
+      {chamfer
+        ? quantity('tipDiameter', 'length', 'width', {
+            optional: true,
+            placeholder: m.tipPointed,
+          })
+        : null}
       {quantity('fluteLength', 'length', 'depth')}
       {quantity('overallLength', 'length', 'length')}
       {full
@@ -117,8 +129,6 @@ export function ToolFields({
         : null}
       {quantity('fluteCount', 'scalar', 'tool')}
       {values.type === 'drill' ? quantity('pointAngle', 'angle', 'chamfer') : null}
-      {chamfer ? quantity('angle', 'angle', 'chamfer') : null}
-      {chamfer ? quantity('tipDiameter', 'length', 'width', { optional: true }) : null}
     </>
   )
 

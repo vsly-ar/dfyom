@@ -63,16 +63,41 @@ function choiceInputs(
   snapshots: ProjectDoc['snapshots'],
   region2d?: Region2dPort,
 ): AppResult<(index: number, op?: Operation) => ChoiceInput> {
-  return toGeometryInput(loaded.part, loaded.stock, region2d).map((input) => (index, op) => ({
-    op: op ?? loaded.part.operations[index]!,
-    geometry: input.operations[index]!,
-    stock: input.stock,
-    units: loaded.units,
-    materialClass: loaded.stock.material.class,
-    library,
-    snapshots,
-    ...(region2d !== undefined && { region2d }),
-  }))
+  return toGeometryInput(loaded.part, loaded.stock, region2d).map((input) => (index, op) => {
+    const id = loaded.part.operations[index]!.id
+    // F7: a drilling under a stepped chamfer is bored by the chamfer's end mill
+    const also = input.operations.filter(
+      (g) => g.kind === 'chamfer' && g.stepdown !== undefined && g.edgeOf === id,
+    )
+    return {
+      op: op ?? loaded.part.operations[index]!,
+      geometry: input.operations[index]!,
+      stock: input.stock,
+      units: loaded.units,
+      materialClass: loaded.stock.material.class,
+      library,
+      snapshots,
+      ...(region2d !== undefined && { region2d }),
+      ...(also.length > 0 && { also }),
+    }
+  })
+}
+
+/**
+ * Unlocked stepped chamfers on the mouth of operation `index` (F7): they follow its tool when it
+ * fits them (design-v0.4.md § Stepped countersink). Their indices.
+ */
+function steppedFollowers(loaded: LoadedPart, index: number): number[] {
+  const id = loaded.part.operations[index]!.id
+  return loaded.part.operations.flatMap((o, k) =>
+    o.kind === 'chamfer' &&
+    o.stepdown.isSome() &&
+    o.edgeOf === id &&
+    !o.toolLocked &&
+    !readOnlyOwned(loaded, o.id)
+      ? [k]
+      : [],
+  )
 }
 
 /** Sets the tool field of one operation in the draft (and drops a tool snapshot it no longer uses). */
@@ -127,8 +152,10 @@ function opCommand(
         return refuseOwned(l, i, name).map(() => ({ warnings: [] }))
       const op = edit(draft, args, l, i, ctx)
       if (op.isErr()) return op
-      const ops = l.part.operations.map((o, k) => (k === i ? op.unwrap() : o))
-      return withWarnings({}, l, ops, ctx, name)
+      // the part as the edit left it (a tool set may also move stepped chamfers along, F7)
+      const after = loadPart(draft as ProjectDoc, args.partId, name)
+      if (after.isErr()) return after
+      return withWarnings({}, after.unwrap(), after.unwrap().part.operations, ctx, name)
     },
   })
 }
@@ -143,6 +170,16 @@ const toolSet = opCommand(
     const tool = toolFromArg(args['tool'] as never, draft, loaded.units, ctx, where)
     if (tool.isErr()) return tool
     writeTool(draft, args.partId, i, tool.unwrap(), true)
+    // F7: unlocked stepped chamfers on this hole follow when the tool fits them (no tool change)
+    const followers = steppedFollowers(loaded, i)
+    if (followers.length > 0) {
+      const inputs = choiceInputs(loaded, [], draft.snapshots, ctx.services.region2d)
+      if (inputs.isErr()) return Err(inputs.unwrapErr().withContext(where))
+      const resolved = resolveDesignTool(tool.unwrap(), draft.snapshots)
+      for (const k of followers)
+        if (resolved.isSome() && fitOf(resolved.unwrap(), inputs.unwrap()(k)) === undefined)
+          writeTool(draft, args.partId, k, tool.unwrap(), undefined)
+    }
     return Ok({ ...loaded.part.operations[i]!, tool: Some(tool.unwrap()), toolLocked: true })
   },
 )
@@ -336,14 +373,30 @@ export function autoChooseTools(
     const l = loaded.unwrap()
     const inputs = choiceInputs(l, library, draft.snapshots, ctx.services.region2d)
     if (inputs.isErr()) return Err(inputs.unwrapErr().withContext(where))
+    // tools written by this pass, by operation id (a stepped chamfer follows its edge's, F7)
+    const written = new Map<string, DesignTool>()
     for (const [i, op] of l.part.operations.entries()) {
+      // F7: a stepped chamfer is chosen with its edge and takes the edge's tool when it fits
+      const edgeOf = op.kind === 'chamfer' && op.stepdown.isSome() ? op.edgeOf : undefined
+      const target = ids.has(op.id) || (edgeOf !== undefined && ids.has(edgeOf))
       // Clones instances follow their source's tool (`design.clonesFollow` after this hook)
-      if (op.toolLocked || !ids.has(op.id) || readOnlyOwned(l, op.id)) continue
+      if (op.toolLocked || !target || readOnlyOwned(l, op.id)) continue
       const input = inputs.unwrap()(i, op)
-      const choice = chooseTool(input)
-      if (choice.kind === 'keep' || choice.kind === 'none') continue
+      const edgeTool = edgeOf === undefined ? undefined : edgeToolOf(l, edgeOf, written)
+      const follow =
+        edgeTool !== undefined &&
+        resolveDesignTool(edgeTool, draft.snapshots).mapOr(
+          false,
+          (t) => fitOf(t, input) === undefined,
+        )
+      const choice = follow ? undefined : chooseTool(input)
+      if (choice !== undefined && (choice.kind === 'keep' || choice.kind === 'none')) continue
       let to: DesignTool
-      if (choice.kind === 'library') {
+      if (choice === undefined) {
+        to = edgeTool!
+        if (op.tool.isSome() && deepEqual(designToolToDTO(op.tool.unwrap()), designToolToDTO(to)))
+          continue
+      } else if (choice.kind === 'library') {
         const id = toolSnapshotFor(draft, choice.candidate.item, ctx)
         if (id.isErr()) return Err(id.unwrapErr().withContext(where))
         to = { kind: 'specific', snapshotId: id.unwrap() }
@@ -353,14 +406,29 @@ export function autoChooseTools(
       const reason =
         from === null
           ? 'unset'
-          : old.isNone()
-            ? 'unresolved'
-            : (fitOf(old.unwrap(), input)?.rule ?? 'unfit')
+          : choice === undefined
+            ? 'followsEdge'
+            : old.isNone()
+              ? 'unresolved'
+              : (fitOf(old.unwrap(), input)?.rule ?? 'unfit')
       writeTool(draft, partId, i, to, undefined)
+      written.set(op.id, to)
       changes.push({ partId, operationId: op.id, from, to: designToolToDTO(to), reason })
     }
   }
   return Ok(changes)
+}
+
+/** The tool of a stepped chamfer's edge operation: as this pass wrote it, else as stored. */
+function edgeToolOf(
+  l: LoadedPart,
+  edgeOf: string,
+  written: ReadonlyMap<string, DesignTool>,
+): DesignTool | undefined {
+  const w = written.get(edgeOf)
+  if (w !== undefined) return w
+  const edge = l.part.operations.find((o) => o.id === edgeOf)
+  return edge !== undefined && edge.tool.isSome() ? edge.tool.unwrap() : undefined
 }
 
 /**

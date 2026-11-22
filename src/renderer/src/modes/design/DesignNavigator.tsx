@@ -22,6 +22,7 @@ import {
   type MenuEntry,
 } from '../../ui'
 import styles from './Design.module.css'
+import { chamferEdgeChoice } from './chamfer-view'
 import { clonesSource } from './feature-view'
 import { draftSource, draftSourceOptions, firstRow, firstRowGap } from './clones-view'
 import { addArgs, failingOperation, type DesignPart } from './model'
@@ -44,7 +45,7 @@ const ICON: Record<OperationKind, IconName> = {
   pocket: 'pocket',
   drilling: 'drilling',
   profile: 'profile',
-  // until L1 draws the chamfer icon: the tool that cuts it (not in KINDS: added with U4)
+  // not in KINDS: a chamfer needs an edge (the Add menu's Chamfer, task U4)
   chamfer: 'chamfer',
 }
 
@@ -134,6 +135,14 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
     })
     setClonesRow({ owner: 'draft', row: 0 })
   }
+  // Chamfer (task U4): `design.chamfer.add` with the core defaults (edge Ø + 1 mm / 1/32", 90°)
+  // on the selected drilling or circle pocket, else the last one; then its inspector
+  const chamferEdge = chamferEdgeChoice(part.dto, selected)
+  const addChamfer = async () => {
+    if (!chamferEdge.ok) return
+    const r = await call('design.chamfer.add', { partId: part.dto.id, edgeOf: chamferEdge.edgeOf })
+    if (r.ok) select((r.value as { operationId: string }).operationId)
+  }
   const addItems: MenuEntry[] = [
     {
       group: f.groups.operations,
@@ -143,12 +152,12 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
           icon: <Icon name={ICON[k]} />,
           onSelect: () => void add(k),
         })),
-        // C2 adds `design.chamfer.add`; until then the item says why it is not there
+        // on the selected drilling or circle pocket, else the last one (task U4)
         {
           label: f.addChamfer,
           icon: <Icon name="chamfer" />,
-          onSelect: () => {},
-          disabledReason: f.chamferNotBuilt,
+          onSelect: () => void addChamfer(),
+          disabledReason: chamferEdge.ok ? undefined : chamferEdge.reason,
         },
       ],
     },

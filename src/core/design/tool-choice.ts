@@ -112,6 +112,11 @@ export interface ChoiceInput {
   readonly snapshots: ProjectDoc['snapshots']
   /** The 2D port for general shapes; absent = their size rules and rest material are skipped. */
   readonly region2d?: Region2dPort
+  /**
+   * Operations the same tool must also make (F7: the stepped chamfers on a drilling's mouth, so
+   * the hole is bored by the end mill that cuts its terraces); absent = none.
+   */
+  readonly also?: readonly OperationGeometry[]
 }
 
 /** One fitting library tool, in auto-choice order. */
@@ -147,7 +152,13 @@ export function measureOf(input: ChoiceInput): ShapeMeasure | undefined {
 
 /** The failed fit rule of a tool for the operation, or undefined when it fits. */
 export function fitOf(tool: DfmTool, input: ChoiceInput): ToolUnfit | undefined {
-  return toolFit(tool, input.geometry, localOf(input), metricOf(input.units), measureOf(input))
+  const own = toolFit(tool, input.geometry, localOf(input), metricOf(input.units), measureOf(input))
+  if (own !== undefined) return own
+  for (const g of input.also ?? []) {
+    const unfit = toolFit(tool, g, localOf(input), metricOf(input.units))
+    if (unfit !== undefined) return unfit
+  }
+  return undefined
 }
 
 /** Whether a fitting tool leaves rest material in the operation's general shape. */

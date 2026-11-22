@@ -250,6 +250,8 @@ export interface ChamferFitInput {
   readonly diameter: number
   /** Included angle, degrees. */
   readonly angle: number
+  /** Stepped (F7): cut in terraces by a flat end mill. */
+  readonly stepdown?: number
 }
 
 export { CHAMFER_ANGLE_TOLERANCE, coneSlant }
@@ -263,6 +265,7 @@ export { CHAMFER_ANGLE_TOLERANCE, coneSlant }
  * § Implementation (task C2)). Reach is checked by `toolFit`, which knows the depth below the face.
  */
 export function chamferFit(tool: DfmTool, c: ChamferFitInput): ToolUnfit | undefined {
+  if (c.stepdown !== undefined) return steppedFit(tool, c)
   if (tool.type !== 'chamferMill' || tool.angle === undefined)
     return {
       rule: 'type',
@@ -292,5 +295,26 @@ export function chamferFit(tool: DfmTool, c: ChamferFitInput): ToolUnfit | undef
         rule: 'slant',
         detail: `cutting edge ${mm(edge)} is shorter than the chamfer's slant ${mm(slant)}`,
         values: { cuttingEdge: edge, slant, toolDiameter: tool.diameter, diameter: c.diameter },
+      }
+}
+
+/**
+ * A stepped chamfer (F7, design-v0.4.md § Stepped countersink): a flat end mill smaller than the
+ * edge Ø, which goes down inside it (the upper bound of helical boring, so the hole's end mill
+ * fits). First failed rule, or undefined; reach as for a contoured chamfer (`toolFit`).
+ */
+function steppedFit(tool: DfmTool, c: ChamferFitInput): ToolUnfit | undefined {
+  if (tool.type !== 'flatEndMill')
+    return {
+      rule: 'type',
+      detail: 'a stepped chamfer needs a flat end mill',
+      values: { needs: 'flatEndMill' },
+    }
+  return tool.diameter < c.edgeDiameter - TOL
+    ? undefined
+    : {
+        rule: 'diameter',
+        detail: `Ø${mm(tool.diameter)} is not smaller than the edge Ø${mm(c.edgeDiameter)}`,
+        values: { toolDiameter: tool.diameter, edgeDiameter: c.edgeDiameter },
       }
 }
