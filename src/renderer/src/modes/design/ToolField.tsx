@@ -11,7 +11,8 @@
 // docs/conventions/ui.md#design-and-plan-controls-v02; docs/architecture/apply.md#stale-derived-results
 import { Clock } from 'lucide-react'
 import { useEffect, useId, useState } from 'react'
-import type { DesignToolDTO, OperationDTO } from '../../../../core/design/part.dto'
+import type { DesignToolDTO, OperationDTO, PartDTO } from '../../../../core/design/part.dto'
+import { designChangeTargets } from '../../../../core/design/shape-users'
 import { designToolFromDTO, generalizedLabel } from '../../../../core/design/tool'
 import type { DfmWarning } from '../../../../core/geometry/model'
 import type { UnitSystem } from '../../../../core/project/document'
@@ -94,18 +95,20 @@ export function sameTool(
   )
 }
 
-/** Whether the operation has changes waiting for Apply (its own, or its part's stock / a new part). */
+/**
+ * Whether the operation has changes waiting for Apply: its own, its part's stock, a new part, or
+ * a named shape it uses (core `designChangeTargets`).
+ */
 export function operationPending(
   changes: readonly PendingChangeView[],
-  partId: string,
+  part: PartDTO,
   operationId: string,
 ): boolean {
   return changes.some(
     (c) =>
       c.kind === 'design' &&
-      c.partId === partId &&
-      (c.operationId === operationId ||
-        (c.operationId === undefined && (c.field === 'stock' || c.field === 'added'))),
+      c.partId === part.id &&
+      designChangeTargets(part, c).includes(operationId),
   )
 }
 
@@ -286,7 +289,7 @@ export function ToolField({
   const sourceId = useId()
   const partId = part.dto.id
   const locked = op.toolLocked === true
-  const waiting = !locked && operationPending(pending.changes, partId, op.id)
+  const waiting = !locked && operationPending(pending.changes, part.dto, op.id)
   const { options, value } = toolOptions(candidates, op, part)
 
   const send = async (name: string, args: object = {}) => {

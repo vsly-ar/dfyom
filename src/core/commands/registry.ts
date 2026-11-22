@@ -12,6 +12,7 @@ import {
   toolScan,
 } from '../design/tool-commands'
 import { REFERENCE_COMMANDS, REFERENCE_QUERIES } from '../design/reference-commands'
+import { SHAPE_COMMANDS, SHAPE_QUERIES } from '../design/shape-commands'
 import { FEEDS_SPEEDS_QUERIES } from '../feeds-speeds/commands'
 import { LIBRARY_COMMANDS, LIBRARY_QUERIES } from '../library/commands'
 import { PLAN_COMMANDS, PLAN_QUERIES, planDraftFollow } from '../plan/commands'
@@ -66,6 +67,7 @@ export const PROJECT_COMMANDS: readonly AnyCommand[] = [
   projectSave,
   ...DESIGN_COMMANDS,
   ...DESIGN_TOOL_COMMANDS,
+  ...SHAPE_COMMANDS,
   ...REFERENCE_COMMANDS,
   ...PLAN_COMMANDS,
   toolpathGenerateJob,
@@ -75,6 +77,7 @@ export const PROJECT_COMMANDS: readonly AnyCommand[] = [
 export const PROJECT_QUERIES: readonly QueryDef[] = [
   ...DESIGN_QUERIES,
   ...DESIGN_TOOL_QUERIES,
+  ...SHAPE_QUERIES,
   ...REFERENCE_QUERIES,
   ...PLAN_QUERIES,
   toolpathGet,

@@ -33,6 +33,7 @@ import {
   PartIdSchema,
   type DesignToolDTO,
 } from './part.dto'
+import { designChangeTargets } from './shape-users'
 import { designToolToDTO, type DesignTool } from './tool'
 import { dropUnusedToolSnapshot, ToolArg, toolFromArg, toolSnapshotFor } from './tool-args'
 import {
@@ -296,24 +297,25 @@ const toolCandidates = defineQuery({
 
 /**
  * The auto choice of every unlocked operation with a pending change (a new part or a changed
- * stock: all of the part's operations), on the Apply draft (design-v0.2.md § Auto choice). Keeps a tool that fits;
+ * stock: all of the part's operations; a shape: the operations using it), on the Apply draft (design-v0.2.md § Auto choice). Keeps a tool that fits;
  * otherwise writes the first fitting library tool (snapshot taken) or the largest fitting
  * generalized tool; nothing fits: keeps the current one. Returns one `ToolChange` per replaced or
  * first chosen tool (`from: null`, reason `unset`). A part that does not load fails the Apply.
  */
 export function autoChooseTools(
   draft: Draft<ProjectDoc>,
-  pending: readonly { kind: string; partId?: string; operationId?: string; field?: string }[],
+  pending: readonly Pick<PendingChange, 'kind' | 'partId' | 'operationId' | 'shapeId' | 'field'>[],
   ctx: CommandContext,
 ): AppResult<ToolChange[]> {
-  const targets = new Map<string, Set<string> | 'all'>()
+  // per part: the operations a change is an input of (a new part or a changed stock: all; a
+  // shape: the operations using it)
+  const targets = new Map<string, Set<string>>()
   for (const p of pending) {
-    if (p.kind !== 'design' || p.partId === undefined) continue
-    const t = targets.get(p.partId)
-    if (t === 'all') continue
-    if (p.operationId !== undefined) targets.set(p.partId, (t ?? new Set()).add(p.operationId))
-    // a new part or a changed stock: every operation of the part
-    else if (p.field === 'stock' || p.field === 'added') targets.set(p.partId, 'all')
+    if (p.kind !== 'design' || p.partId === undefined || !Object.hasOwn(draft.parts, p.partId))
+      continue
+    const t = targets.get(p.partId) ?? new Set<string>()
+    for (const id of designChangeTargets(draft.parts[p.partId]!, p)) t.add(id)
+    if (t.size > 0) targets.set(p.partId, t)
   }
   const where = 'design.toolAutoChoice'
   const library = toolItems(ctx)
@@ -326,7 +328,7 @@ export function autoChooseTools(
     const inputs = choiceInputs(l, library, draft.snapshots)
     if (inputs.isErr()) return Err(inputs.unwrapErr().withContext(where))
     for (const [i, op] of l.part.operations.entries()) {
-      if (op.toolLocked || (ids !== 'all' && !ids.has(op.id))) continue
+      if (op.toolLocked || !ids.has(op.id)) continue
       const input = inputs.unwrap()(i, op)
       const choice = chooseTool(input)
       if (choice.kind === 'keep' || choice.kind === 'none') continue

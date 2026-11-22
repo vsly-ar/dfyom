@@ -1,6 +1,6 @@
 # Design mode v0.3: shapes
 
-Status: accepted (user, D29 of 2026-11-22: S-A to S-L and Q22–Q25 as recommended, [Decisions](#decisions)) · Scope: [roadmap v0.3](../roadmap.md#v03--shapes) (D16: Q12, Q14, Q16) · v0.2 base: [design-v0.2.md](design-v0.2.md) · 2D layer, geometry and import: [architecture/shapes.md](../architecture/shapes.md) · Toolpaths: [plan-v0.3.md](plan-v0.3.md) · 2D library: [ADR 0019](../decisions/0019-2d-geometry-library.md) (accepted) · Tasks: [plans/v0.3.md](../plans/v0.3.md) · Terms: [glossary.md](../glossary.md)
+Status: accepted (user, D29 of 2026-11-22: S-A to S-L and Q22–Q25 as recommended, [Decisions](#decisions)); the shape model and `design.shape.*` are implemented ([§ Implementation (K2)](#implementation-k2)), shape operations and UI are not yet · Scope: [roadmap v0.3](../roadmap.md#v03--shapes) (D16: Q12, Q14, Q16) · v0.2 base: [design-v0.2.md](design-v0.2.md) · 2D layer, geometry and import: [architecture/shapes.md](../architecture/shapes.md) · Toolpaths: [plan-v0.3.md](plan-v0.3.md) · 2D library: [ADR 0019](../decisions/0019-2d-geometry-library.md) (accepted) · Tasks: [plans/v0.3.md](../plans/v0.3.md) · Terms: [glossary.md](../glossary.md)
 
 v0.3 replaces "a pocket or profile is a rectangle or a circle" with **named shapes** of lines and arcs. Everything not mentioned here stays as in [design.md](design.md) and [design-v0.2.md](design-v0.2.md): face targets, face frames, placement anchors, the tool field, Apply.
 
@@ -177,6 +177,21 @@ Rules go to a [ui.md](../conventions/ui.md) amendment with the tasks ([plans/v0.
 - **Shape Editor:** selecting a shape shows it flat in the viewport (orthographic, looking at the face of the first operation that uses it, with the stock face and the reference section as context, else its own frame); the inspector lists its items with `op`, the fields of the selected item and the path's segment table. Handles move points, radii and sizes; Shift constrains to 15°. Every commit is one `design.shape.item.update`.
 - **Operation inspector:** a shape picker (inline rectangle/circle or a named shape), rotation, mirror, the `on` side, tab positions.
 - Live outline: the renderer resolves shapes with the same 2D port ([shapes.md § Where the 2D layer runs](../architecture/shapes.md#where-the-2d-layer-runs)).
+
+## Implementation (K2)
+
+Code: [shapes.md § Implementation (K2)](../architecture/shapes.md#implementation-k2). Details the sections above left open:
+
+- **Formulas over stock faces only.** Shape quantities may reference `stock.*` faces, not operation surfaces (`expression.reference` otherwise): shapes resolve independently of operations, so no cycle is possible ([shapes.md § Validity](../architecture/shapes.md#validity)).
+- **Issue paths** in command errors are relative to the shape: `items.<n>.<param>` (e.g. `items.1.segments.2.radius`, `items.0.fillets.1.radius`, `items.2.closed`); the stored path is `shapes.<id>.items…`.
+- **Defaults** (args may leave them out; stored items have them): `op: 'add'`, rectangle `cornerRadius` 3 mm / 1/8" (as v0.1), path `closed: true`, arc `cw: false`; polygon `across: 'corners'`, `cornerRadius` 0, `rotation` 0.
+- **Conventions.** Rotation is counter-clockwise about `center`. A polygon at rotation 0 has a flat side at the bottom. A rectangle or obround at rotation 0 has `length` along x; an obround's `width` is its end diameter (`length ≥ width`). Path vertices are numbered 0 = `start`, i = end of segment i−1 (a closed path's vertex 0 joins its last segment or closing line to the first; a closing line starts at vertex n = segments.length; an open path's fillets go on inner vertices 1 … n−1). A `tangentArc` as first segment has no tangent (`tangentArcStart`); one whose end lies straight ahead is a line; one whose end lies behind the tangent cannot be drawn (`tangentArcReverse`).
+- **Rules added** to the invariants above: `firstItemAdd` (`items.0.op`), `openPathAlone` (`items.<n>.closed`), `cornerRadiusRange` (≤ half the smaller side), `obroundLength` (length ≥ width), `range` (polygon sides 3–64), `filletNoCorner` (the neighbours are tangent there), `filletVertex` (out of range, duplicate, or an end of an open path), `tangentArcStart`, `tangentArcReverse`. A closing gap shorter than ε is `segmentTooShort` at `items.<n>.closed`.
+- **`design.shape.item.update`** takes the kind's fields only (`input.malformed`, rule `notForKind`, for others); the item's kind cannot change (replace the list with `design.shape.update`). Only `items[index]` is written.
+- **`design.shape.convert`** creates the shape (the item centred at the shape origin, quantities as entered) but does **not** rewire the operation yet: the `named` kind arrives with K3, which makes convert one undo step that replaces the inline shape by `{ kind: 'named', shapeId, center }`.
+- **Queries.** `design.shape.list { partId }` → per shape `id`, `name`, item count, `usedBy`, and when it resolves `kind`, `area`, `bounds`; `design.shape.get { partId, shapeId }` → `shape` (DTO), `usedBy`, and `resolved` (loops as elements in mm, area, bounds, smallest inside radius) or `issues`.
+- **Removing the last shape** removes `part.shapes`, so a part without shapes stays byte-identical to v0.2.
+- **`tools/list`** with the seven `design.shape.*` tools: 94.9 K of the 100 K budget ([llm-api.md](../architecture/llm-api.md#implementation-task-310)).
 
 ## Answered questions
 

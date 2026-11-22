@@ -1,11 +1,12 @@
 /**
- * Persisted shape of a part and its v0.1 operations (record `parts/<id>.json`).
- * Shape only; constraints live in validate.ts. Doc: docs/modes/design.md#part-and-stock-v01,
+ * Persisted shape of a part, its operations and named shapes (record `parts/<id>.json`).
+ * Shape only; constraints live in validate.ts and shape.ts. Doc: docs/modes/design.md#part-and-stock-v01,
  * docs/modes/design.md#operations-v01, docs/modes/design.md#implementation-task-25
  */
 import { z } from 'zod'
 import { NAME_MAX, quantityDto } from '../library/item'
 import { TOOL_TYPES } from '../library/tool.dto'
+import { ShapeDtoSchema } from './shape.dto'
 
 const length = () => quantityDto('length')
 
@@ -39,10 +40,11 @@ export const AnchorDtoSchema = z.object({ u: z.enum(ANCHOR_POINTS), v: z.enum(AN
 export type AnchorDTO = z.output<typeof AnchorDtoSchema>
 
 /**
- * `center` is the anchor point; absent `anchor` = the centre (v0.1 records load unchanged, and it
- * is written only when it is not the centre).
+ * The shape of a pocket or profile (an inline shape; v0.3 K3 adds the `named` kind that places a
+ * part's named shape, shape.dto.ts). `center` is the anchor point; absent `anchor` = the centre
+ * (v0.1 records load unchanged, and it is written only when it is not the centre).
  */
-export const ShapeDtoSchema = z.discriminatedUnion('kind', [
+export const OperationShapeDtoSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('rectangle'),
     center: PointDtoSchema,
@@ -58,7 +60,7 @@ export const ShapeDtoSchema = z.discriminatedUnion('kind', [
     diameter: length(),
   }),
 ])
-export type ShapeDTO = z.output<typeof ShapeDtoSchema>
+export type OperationShapeDTO = z.output<typeof OperationShapeDtoSchema>
 
 /** One symmetric `±` per kind; the value is the deviation (`0.1 mm` = ±0.1 mm). */
 export const GeneralToleranceDtoSchema = z.object({
@@ -111,7 +113,7 @@ export const PocketDtoSchema = z.object({
   kind: z.literal('pocket'),
   ...common,
   on: SurfaceIdSchema,
-  shape: ShapeDtoSchema,
+  shape: OperationShapeDtoSchema,
   depth: length(),
   floorRadius: length(),
 })
@@ -129,7 +131,7 @@ export const ProfileDtoSchema = z.object({
   kind: z.literal('profile'),
   ...common,
   on: stockFaceOn,
-  shape: ShapeDtoSchema,
+  shape: OperationShapeDtoSchema,
   side: z.enum(PROFILE_SIDES),
   slotWidth: length(),
   tabs: z.object({ count: quantityDto('scalar'), width: length(), thickness: length() }),
@@ -154,6 +156,8 @@ export const PartDtoSchema = z.object({
   name: z.string().min(1).max(NAME_MAX),
   stock: z.string().min(1).describe('Id of the block stock snapshot (snapshots/<id>.json)'),
   generalTolerance: GeneralToleranceDtoSchema.optional(),
+  /** Named shapes (v0.3, docs/modes/design-v0.3.md#persistence); absent = none. */
+  shapes: z.array(ShapeDtoSchema).optional().describe('Named shapes operations place'),
   operations: z.array(OperationDtoSchema).describe('Design order; references go to earlier ones'),
 })
 export type PartDTO = z.output<typeof PartDtoSchema>

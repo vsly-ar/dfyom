@@ -25,13 +25,16 @@ export interface PendingChange {
   /** A design operation (`design`), or a plan operation (`plan`). */
   readonly operationId?: string
   readonly planId?: string
+  /** A named shape of the part (`design` keys of shapes, design-v0.3.md § Apply). */
+  readonly shapeId?: string
   /** A setup of a plan (`plan` keys of setup fields). */
   readonly setupId?: string
   /** The changed library item (`library` keys). */
   readonly libraryItemId?: string
   /**
-   * The changed field as a dotted path (`depth`, `shape.cornerRadius`, `stock`), or the
-   * structural change of an operation: `added`, `removed`, `moved` (one key each).
+   * The changed field as a dotted path (`depth`, `shape.cornerRadius`, `stock`, a shape's
+   * `items.2.radius`), or the structural change of an operation: `added`, `removed`, `moved`, of a
+   * shape: `added`, `removed`, `items` (its item list) – one key each.
    */
   readonly field?: string
   /** For the tooltip: "Pocket 1: depth", "Drilling 2 added". */
@@ -52,7 +55,9 @@ const isQuantity = (v: unknown): boolean => isRec(v) && isRec(v['exact'])
 /** Operation fields no deferred work reads (apply.md: "names and other fields"). */
 const OPERATION_IGNORED = new Set(['id', 'kind', 'name'])
 /** Part fields handled separately (`operations`) or read by no deferred work. */
-const PART_IGNORED = new Set(['id', 'name', 'operations', 'stock'])
+const PART_IGNORED = new Set(['id', 'name', 'operations', 'shapes', 'stock'])
+/** Shape item fields are all read (the definition); the shape's `name` and `source` are not. */
+const ITEM_IGNORED: ReadonlySet<string> = new Set()
 
 /**
  * Changed fields by value as dotted paths. Plain objects of the same `kind` (shape, tabs,
@@ -124,6 +129,7 @@ function partChanges(doc: ProjectDoc, base: ProjectDoc, id: string): PendingChan
   const fields = changedFields(after as unknown as Rec, before as unknown as Rec, PART_IGNORED)
   if (!stockSame(doc, base, after, before)) fields.unshift('stock')
   for (const f of fields) out.push(design(f, `${after.name}: ${f}`))
+  out.push(...shapeChanges(id, after, before))
   if (before.operations === after.operations) return out
   const beforeOps = new Map(before.operations.map((o) => [o.id, o]))
   const afterIds = new Set(after.operations.map((o) => o.id))
@@ -144,6 +150,51 @@ function partChanges(doc: ProjectDoc, base: ProjectDoc, id: string): PendingChan
   return out
 }
 
+/**
+ * Keys of the part's named shapes (design-v0.3.md § Apply and pending changes): (part, shape) for
+ * an added or removed shape and a changed item list (count or an item's kind / `op`), else
+ * (part, shape, item, field) per changed item field (`items.<n>.<field>`). Names and `source`
+ * are not pending.
+ */
+function shapeChanges(id: string, after: PartDTO, before: PartDTO): PendingChange[] {
+  if (after.shapes === before.shapes) return []
+  const key = (shapeId: string, field: string, label: string): PendingChange => ({
+    kind: 'design',
+    partId: id,
+    shapeId,
+    field,
+    label,
+  })
+  const out: PendingChange[] = []
+  const old = new Map((before.shapes ?? []).map((s) => [s.id, s]))
+  const afterIds = new Set<string>()
+  for (const s of after.shapes ?? []) {
+    afterIds.add(s.id)
+    const b = old.get(s.id)
+    if (b === undefined) {
+      out.push(key(s.id, 'added', `${s.name} added`))
+      continue
+    }
+    if (b === s || b.items === s.items) continue
+    const listChanged =
+      b.items.length !== s.items.length ||
+      s.items.some((it, n) => it.kind !== b.items[n]!.kind || it.op !== b.items[n]!.op)
+    if (listChanged) {
+      if (!sameValue(b.items, s.items)) out.push(key(s.id, 'items', `${s.name}: items`))
+      continue
+    }
+    s.items.forEach((it, n) => {
+      const was = b.items[n]!
+      if (it === was) return
+      for (const f of changedFields(it as unknown as Rec, was as unknown as Rec, ITEM_IGNORED))
+        out.push(key(s.id, `items.${n}.${f}`, `${s.name}: item ${n + 1} ${f}`))
+    })
+  }
+  for (const b of before.shapes ?? [])
+    if (!afterIds.has(b.id)) out.push(key(b.id, 'removed', `${b.name} removed`))
+  return out
+}
+
 /** The part's stock: the same snapshot id with an equal snapshot value. */
 function stockSame(doc: ProjectDoc, base: ProjectDoc, after: PartDTO, before: PartDTO): boolean {
   if (after.stock !== before.stock) return false
@@ -154,7 +205,16 @@ function stockSame(doc: ProjectDoc, base: ProjectDoc, after: PartDTO, before: Pa
 
 /** A pending change's identity (one count per key), to merge the keys of several sources. */
 export function pendingKey(c: PendingChange): string {
-  return [c.kind, c.partId, c.planId, c.setupId, c.operationId, c.libraryItemId, c.field].join('\0')
+  return [
+    c.kind,
+    c.partId,
+    c.planId,
+    c.setupId,
+    c.operationId,
+    c.shapeId,
+    c.libraryItemId,
+    c.field,
+  ].join('\0')
 }
 
 /**
@@ -249,6 +309,7 @@ const PendingChangeSchema = z.object({
   partId: z.string().optional(),
   operationId: z.string().optional().describe('Design or plan operation'),
   planId: z.string().optional(),
+  shapeId: z.string().optional().describe('Named shape of the part'),
   setupId: z.string().optional(),
   libraryItemId: z.string().optional(),
   field: z.string().optional().describe('Changed field, or added / removed / moved'),

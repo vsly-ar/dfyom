@@ -1,6 +1,6 @@
 # Shapes: 2D layer, geometry and import
 
-Status: accepted (v0.3; user decision D29 of 2026-11-22, [Decisions](#decisions-d29); follows [ADR 0019](../decisions/0019-2d-geometry-library.md), accepted); the [2D model, port and hosts](#implementation-k1) are implemented (task K1) · Design side: [design-v0.3.md](../modes/design-v0.3.md) · Toolpaths: [plan-v0.3.md](../modes/plan-v0.3.md) · Geometry base: [geometry.md](geometry.md) · Spike: [plans/v0.2.md § 7](../plans/v0.2.md#7-spike-for-v03), harness [`spikes/2d/`](../../spikes/2d/harness.ts) · Tasks: [plans/v0.3.md](../plans/v0.3.md) · Terms: [glossary.md](../glossary.md)
+Status: accepted (v0.3; user decision D29 of 2026-11-22, [Decisions](#decisions-d29); follows [ADR 0019](../decisions/0019-2d-geometry-library.md), accepted); the [2D model, port and hosts](#implementation-k1) are implemented (task K1), the [shape model and `resolveShape`](#implementation-k2) (task K2; placement, step 4, comes with K3) · Design side: [design-v0.3.md](../modes/design-v0.3.md) · Toolpaths: [plan-v0.3.md](../modes/plan-v0.3.md) · Geometry base: [geometry.md](geometry.md) · Spike: [plans/v0.2.md § 7](../plans/v0.2.md#7-spike-for-v03), harness [`spikes/2d/`](../../spikes/2d/harness.ts) · Tasks: [plans/v0.3.md](../plans/v0.3.md) · Terms: [glossary.md](../glossary.md)
 
 What `src/core` needs so shapes of lines and arcs flow through geometry, DFM and toolpaths. It extends the [layers](geometry.md#layers) of geometry.md: the "2D" row becomes CavalierContours behind a port; the analytic model stays the source of truth ([ADR 0007](../decisions/0007-layered-geometry-without-brep-kernel.md) holds: still 2.5D per direction).
 
@@ -49,6 +49,25 @@ Code in `src/core/geometry/2d/` (headless; the contract comments point here):
 - **C ABI** (`vendor/cavalier-contours/src/lib.rs`, `ABI_VERSION` 1, checked at load): `f64` buffers `[loopCount, per loop: flags, n, x, y, bulge …]` written straight into the module memory; exports `shape_offset`, `pline_offset`, `pline_boolean`. A trap (a Rust panic aborts) fails that call with rule `kernel` and the instance is replaced from the compiled module.
 - **Build:** vendored per [ADR 0019 decision 6](../decisions/0019-2d-geometry-library.md#decision) (`npm run wasm:cavalier`, checksum test in `check`: [testing.md](../conventions/testing.md#commands)).
 
+### Implementation (K2)
+
+Code in `src/core/design/` (headless) plus one geometry helper; contract comments point here and to [design-v0.3.md](../modes/design-v0.3.md#shape-definition):
+
+| File                       | Holds                                                                                                                                                                                                                 |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `shape.dto.ts`             | `ShapeDTO`, the item union generic in its quantity type (`ShapeItem<Q>`: DTOs, `Quantity`, `number`), the stored and the command-arg Zod schemas (args leave defaults out), limits (1000 items, 20 000 path segments) |
+| `shape-items.ts`           | Items → chains of exact elements in the shape frame: primitives, paths (`arc`, `tangentArc`, closing line), fillets; per-item invariants                                                                              |
+| `shape.ts`                 | `NamedShape` (loaded model), DTO mapping, `ShapeDefinition` (canonical numbers), `resolveDefinition`, the cached `resolveShape`, `shapeSummary` (resolved loops, area, bounds, smallest inside radius)                |
+| `shape-users.ts`           | `operationsUsingShape`, `designChangeTargets` (which operations a pending key feeds; one place for Apply's tool choice, "chosen again" and the tool field)                                                            |
+| `shape-commands.ts`        | `design.shape.*` commands and queries ([design-v0.3.md](../modes/design-v0.3.md#commands-and-queries-v03))                                                                                                            |
+| `geometry/2d/crossings.ts` | `closedChainCrossing`: exact self-crossing test of a closed line/arc chain (sweep over bounding boxes; touching and tangency are not crossings, a stretch traced twice is)                                            |
+
+- **Pure core, port passed in.** `resolveShape(port, definition)` takes the `Region2dPort` from `services.region2d`; without it shape commands fail with `internal.unexpected`. The definition is canonical numbers (mm, degrees), so tolerances and sources do not change the result or the cache key.
+- **Steps.** Structure (`empty`, `firstItemAdd`, `openPathAlone`), then each item to a chain, collecting every issue; a closed chain is made counter-clockwise, checked for crossings, normalised alone; items fold with union / difference / intersect; a single item skips the final normalise; an empty result is `shapeEmpty`. Port errors are prefixed with the item's path.
+- **Cache.** 128 entries LRU per port instance (`WeakMap`), keyed by the JSON of the definition; errors are cached too. Placement (step 4) is not part of K2, so the key is the definition alone; K3 adds the placement.
+- **Shapes load lazily.** `partFromDTO` does not load `part.shapes`; the shape commands load and resolve them, so operation commands do not pay for shapes until an operation references one (K3).
+- **Performance** (`src/core/design/shape.perf.ts`, `npm run perf`, 2026-11-22): a 205-element shape (98-corner path with a 0.6 mm fillet at every vertex, a rectangle added, two islands) resolves in 0.86 ms uncached (the port's share ≈ 0.75 ms, [above](#performance)), 0.76 ms on a cache miss with the key, 14 µs on a hit; with one tool's checks (1.12 ms) **1.98 ms of the 3 ms budget**. A whole `design.shape.item.update` on that shape (parse, load, resolve, warnings, commit) takes 2.0 ms.
+
 ## Where the 2D layer runs
 
 | Host                         | Why                                                                                                                                                               | Loading                                                                                                                                                                                                                                                                          |
@@ -66,7 +85,7 @@ The module has no imports (ADR 0019), so one loader serves all hosts. The `.wasm
 
 1. Each item to loops in the shape frame: primitives analytically (exact arcs), paths by walking segments (`arc` from `to`, `radius`, `cw`, `large`; `tangentArc` from the previous element's end tangent), fillets as tangent arcs between neighbours.
 2. Fold the items with their `op` through the port, `normalise` the result.
-3. Validate: no crossings, area > ε, every loop ≥ 3 elements or a circle.
+3. Validate: no crossings, area > ε (K2: the area rule replaces "every loop ≥ 3 elements or a circle", since a two-arc lens – the intersection of two circles – is a valid loop; normalise already drops lobes of < 2 elements).
 4. Place: shape frame → face frame by the operation's anchor, rotation and mirror; anchors use the placed bounding box of the exact elements (arc extremes included).
 
 Results are cached per (definition hash, placement): commands, the geometry mapper and the toolpath mapper call it many times per edit.
@@ -74,6 +93,7 @@ Results are cached per (definition hash, placement): commands, the geometry mapp
 ### Validity
 
 - A closed `path` that crosses itself is refused (`shapeSelfIntersects`), not repaired: which side is "inside" is the user's intent. SVG import repairs instead and says so in the report (`fill-rule` decides).
+- Shape quantities are formulas over **stock faces only** (`stock.side[1].x - 10`), not over operation surfaces: shapes are resolved before and independently of operations, so a shape can never depend on an operation that places it (K2).
 - A boolean result with several disjoint outer loops is valid for a pocket (several pockets in one) and refused for a profile (`profileOneLoop`).
 
 ## Geometry for shape operations
@@ -128,7 +148,7 @@ Budgets on the Apple M1 Pro class reference, measured by `npm run perf`:
 | Part evaluation with three shape operations (500 elements total)  | ≤ 50 ms  | S3: 40 ms                                |
 | Pocket toolpath of the spike's star (200 + 2 islands)             | ≤ 500 ms | 20 rings 1.1 ms                          |
 
-The port's share, measured by `src/core/geometry/2d/region2d.perf.ts` (K1, 2026-11-22): sync load 1.7 ms; a 206-element shape folded from items and normalised 0.75 ms plus one tool's checks (offset, opening, difference) 1.2 ms – together ≈ 2 ms of the 3 ms budget, the rest is left for `resolveShape` (K2); the star's 15 pocket rings 1.5 ms; a union with a 2000-element star 12.5 ms.
+The port's share, measured by `src/core/geometry/2d/region2d.perf.ts` (K1, 2026-11-22): sync load 1.7 ms; a 206-element shape folded from items and normalised 0.75 ms plus one tool's checks (offset, opening, difference) 1.2 ms – together ≈ 2 ms of the 3 ms budget, the rest is left for `resolveShape` ([K2](#implementation-k2): resolve 0.86 ms + checks 1.12 ms = 1.98 ms); the star's 15 pocket rings 1.5 ms; a union with a 2000-element star 12.5 ms.
 
 Evaluation cost follows **chords** (flattened segments at the chord tolerance), not elements: with [tiles](#geometry-for-shape-operations), ≈ 16 µs per chord (triangulate ≈ 3.6, `fromMesh` ≈ 3.2, booleans ≈ 8), so the 50 ms budget holds ≈ 3 000 chords per evaluation ([S3](../../spikes/prisms/results.md#cost-median-of-15-part-placement)). Single 500-element pockets take 15–39 ms; 2000-element shapes (5 000–7 000 chords) take 47–115 ms tiled (82–169 ms untiled) and do not fit: they run under a documented limit ([Decisions](#decisions-d29)).
 

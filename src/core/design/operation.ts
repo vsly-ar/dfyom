@@ -18,7 +18,7 @@ import type {
   OperationDTO,
   OperationKind,
   PartDTO,
-  ShapeDTO,
+  OperationShapeDTO,
 } from './part.dto'
 import { designToolFromDTO, designToolToDTO, type DesignTool } from './tool'
 
@@ -247,7 +247,7 @@ function pointFromDTO(p: readonly [QuantityDTO, QuantityDTO], ...path: string[])
   ])
 }
 
-function shapeFromDTO(s: ShapeDTO): AppResult<Shape> {
+function shapeFromDTO(s: OperationShapeDTO): AppResult<Shape> {
   const center = pointFromDTO(s.center, 'shape', 'center')
   const anchor: Anchor = s.anchor === undefined ? CENTRE_ANCHOR : { u: s.anchor.u, v: s.anchor.v }
   if (s.kind === 'circle')
@@ -368,7 +368,7 @@ export function operationFromDTO(dto: OperationDTO): AppResult<Operation> {
   }
 }
 
-function shapeToDTO(s: Shape): ShapeDTO {
+function shapeToDTO(s: Shape): OperationShapeDTO {
   const center = [s.center[0].toDTO(), s.center[1].toDTO()]
   // left out at the centre, so v0.1 records stay byte-identical
   const anchor =
@@ -386,7 +386,7 @@ function shapeToDTO(s: Shape): ShapeDTO {
           width: s.width.toDTO(),
           cornerRadius: s.cornerRadius.toDTO(),
         }
-  ) as ShapeDTO
+  ) as OperationShapeDTO
 }
 
 /** A facing's or profile's `on`, left out when it is the default (records stay as in v0.1). */
