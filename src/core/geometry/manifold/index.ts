@@ -24,7 +24,7 @@ import {
   type Option,
 } from '../../../shared/result'
 import type { LabelledMesh } from '../loft'
-import type { Solid, SolidKernel, SolidMesh, SolidPort } from '../solid-port'
+import type { KeptSolid, Solid, SolidKernel, SolidMesh, SolidPort } from '../solid-port'
 
 /**
  * How the host supplies `manifold.wasm`; `src/core` has no `fs`/`fetch` of its own.
@@ -124,9 +124,20 @@ function rawConstructor(wasm: ManifoldToplevel): RawManifoldCtor {
   return ctor
 }
 
+/** A solid the kernel keeps across arenas (`SolidPort.kept`). */
+interface Kept {
+  readonly manifold: Manifold
+  readonly originalId: number
+  readonly triangles: number
+}
+
 class ManifoldKernel implements SolidKernel {
   private live = 0
   private readonly RawManifold: RawManifoldCtor
+  /** Least recently used first; evicted only between arenas (an arena may be using any). */
+  private readonly kept = new Map<string, Kept>()
+  private keptTriangles = 0
+  private keepCapacity = 0
 
   constructor(
     private readonly wasm: ManifoldToplevel,
@@ -137,6 +148,24 @@ class ManifoldKernel implements SolidKernel {
 
   liveObjects(): number {
     return this.live
+  }
+
+  keepSolids(triangles: number): void {
+    this.keepCapacity = Math.max(0, triangles)
+    this.evict()
+  }
+
+  keptObjects(): number {
+    return this.kept.size
+  }
+
+  private evict(): void {
+    for (const [key, k] of this.kept) {
+      if (this.keptTriangles <= this.keepCapacity) break
+      this.kept.delete(key)
+      this.keptTriangles -= k.triangles
+      k.manifold.delete()
+    }
   }
 
   heapBytes(): Option<number> {
@@ -153,6 +182,7 @@ class ManifoldKernel implements SolidKernel {
       for (const m of arena.owned) m.delete()
       this.live -= arena.owned.length
       arena.owned.length = 0
+      this.evict()
     }
   }
 
@@ -163,6 +193,20 @@ class ManifoldKernel implements SolidKernel {
       arena.owned.push(m)
       this.live++
       return { manifold: m, arena } as unknown as Handle
+    }
+    // a kept solid used in this arena, which must not free it
+    const borrow = (m: Manifold): Solid => ({ manifold: m, arena }) as unknown as Handle
+    const keep = (key: string, made: KeptSolid): void => {
+      const m = (made.solid as Handle).manifold
+      const at = arena.owned.lastIndexOf(m)
+      if (at < 0 || m.status() !== 'NoError') return
+      const triangles = m.numTri()
+      if (triangles > this.keepCapacity) return
+      // ownership moves from the arena to the kernel
+      arena.owned.splice(at, 1)
+      this.live--
+      this.kept.set(key, { manifold: m, originalId: made.originalId, triangles })
+      this.keptTriangles += triangles
     }
     const get = (s: Solid): AppResult<Manifold> => {
       const h = s as Handle
@@ -229,6 +273,18 @@ class ManifoldKernel implements SolidKernel {
       decompose: (s) => get(s).andThen((m) => call('decompose', () => m.decompose().map(own))),
       volume: (s) => get(s).andThen((m) => call('volume', () => m.volume())),
       toMesh: (s) => get(s).andThen((m) => call('getMesh', () => copyMesh(m))),
+      kept: (key, make) => {
+        const hit = this.kept.get(key)
+        if (hit !== undefined) {
+          this.kept.delete(key)
+          this.kept.set(key, hit)
+          return Ok({ solid: borrow(hit.manifold), originalId: hit.originalId })
+        }
+        const made = make()
+        if (made.isOk() && this.keepCapacity > 0 && get(made.unwrap().solid).isOk())
+          keep(key, made.unwrap())
+        return made
+      },
       triangulate: (rings) =>
         call('triangulate', () => {
           // epsilon −1: Manifold derives it from the input's bounds

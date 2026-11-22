@@ -138,6 +138,37 @@ export const designMessages = {
     tabsThickness: 'Tab thickness',
     surface: (id: string, label: string) => `${label} · ${id}`,
     commandFailed: 'The change was not applied.',
+    /** The shape picker and placement of a pocket or profile (task U2, ui.md § Shapes v0.3). */
+    picker: {
+      label: 'Shape',
+      inline: 'Inline',
+      named: 'Shapes',
+      newShape: 'New shape…',
+      usedBy: (n: number) => (n === 0 ? 'Not used' : `Used by ${n}`),
+      editShape: 'Edit shape',
+      convert: 'Convert to shape',
+      converted: (name: string) => `Converted to ${name}`,
+      rotation: 'Rotation',
+      rotationNone: '0°',
+      mirror: 'Mirror (flip x)',
+      roundCorners: (r: string) => `Round corners to ≥ ${r}`,
+      noRoundFix: 'Round the corner in the Shape Editor: it is made where items meet.',
+    },
+    openNeedsOn: 'An open path can only be cut on the line.',
+    useSideOn: 'Use side On',
+    grooveDepth: 'Depth',
+    grooveThrough: 'Through',
+    tabs: {
+      entered: 'Positions entered by you.',
+      spaceEvenly: 'Space evenly',
+      add: 'Add tab',
+      remove: (n: number) => `Remove tab ${n}`,
+      position: (n: number) => `Tab ${n}`,
+      /** The marker's and the field's accessible name. */
+      at: (n: number, distance: string) => `Tab ${n}, ${distance} from the start`,
+      notAllowed: 'Tabs hold a through cut of a closed loop only.',
+      unknownLength: 'The loop length is not known yet.',
+    },
   },
 
   /** Human names of surfaces (ui.md#selection-and-picking: id plus operation name). */

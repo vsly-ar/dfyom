@@ -64,6 +64,7 @@ export function PlanStatus({ doc }: { doc: ProjectDoc }): React.JSX.Element | nu
                     setOpen(false)
                   },
                   i,
+                  doc.unitSystem,
                 ),
               )}
               empty={planMessages.warnings.none}

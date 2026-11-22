@@ -31,10 +31,15 @@ import {
   fitView,
   gridSteps,
   panBy,
+  placedBounds,
+  placeElements,
+  placePoint,
   toScreen,
   toShape,
+  unplacePoint,
   zoomAt,
   type FlatView,
+  type ShapePlacement,
 } from './flat-view'
 import {
   dragHandle,
@@ -100,6 +105,21 @@ export interface ShapeViewProps {
   /** Px of the right edge covered by the inspector overlay: the toolbar and the fit move beside it. */
   readonly insetRight?: number
   readonly className?: string | undefined
+  /**
+   * Face-on context (task U2): the shape as the first operation using it places it on its face
+   * (rotation, mirror, position), with that face's stock rectangle and axis names. Handles still
+   * edit the shape's own frame; the placement is frozen while a drag runs.
+   */
+  readonly context?: FaceContext | null
+}
+
+/** The face an operation places the shape on (face frame, mm). */
+export interface FaceContext {
+  readonly placement: ShapePlacement
+  /** The stock face seen in the face frame: [0, 0] to [length, width]. */
+  readonly stock: { readonly length: number; readonly width: number }
+  /** The face frame's axis names ("x", "y" on the top face). */
+  readonly axes: readonly [string, string]
 }
 
 /** A press that moves less than this (px) is a click and commits nothing (ui.md). */
@@ -195,15 +215,32 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
   const [keyDrag, setKeyDrag] = useState<Drag | null>(null)
 
   const inset = props.insetRight ?? 0
+  // the face-on placement, frozen while a drag or a key run edits the shape
+  const [frozen, setFrozen] = useState<FaceContext | null>(props.context ?? null)
+  const editing = (drag?.started ?? false) || keyDrag !== null
+  if (!editing && frozen !== (props.context ?? null)) setFrozen(props.context ?? null)
+  const fc = editing ? frozen : (props.context ?? null)
+  const viewBounds = useMemo((): Bounds2 | undefined => {
+    if (fc === null) return drawing?.bounds
+    const placed = placedBounds(fc.placement, drawing?.loops.flatMap((l) => l.elements) ?? [])
+    const lo: Vec2 = [0, 0]
+    const hi: Vec2 = [fc.stock.length, fc.stock.width]
+    return placed === undefined
+      ? { min: lo, max: hi }
+      : {
+          min: [Math.min(lo[0], placed.min[0]), Math.min(lo[1], placed.min[1])],
+          max: [Math.max(hi[0], placed.max[0]), Math.max(hi[1], placed.max[1])],
+        }
+  }, [fc, drawing])
   const fitted = (w: number, h: number): FlatView => {
-    const f = fitView(drawing?.bounds, Math.max(w - inset, w / 3), h)
+    const f = fitView(viewBounds, Math.max(w - inset, w / 3), h)
     return f
   }
   const fit = useCallback(() => {
     touched.current = false
     setView(fitted(size.width, size.height))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [drawing, size, inset])
+  }, [viewBounds, size, inset])
   // fit on the first outline and on resize until the user pans or zooms
   const hasDrawing = drawing !== null
   useEffect(() => {
@@ -212,6 +249,15 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [size, hasDrawing, inset])
   const v = view ?? fitted(size.width, size.height)
+  // shape frame ↔ screen through the placement (the face frame is the view's frame)
+  const scr = (p: readonly [number, number]): Vec2 =>
+    toScreen(v, fc === null ? p : placePoint(fc.placement, p))
+  const toItem = (at: Vec2): Vec2 => {
+    const q = toShape(v, at)
+    return fc === null ? q : unplacePoint(fc.placement, q)
+  }
+  const path = (elements: readonly Element2[], closed: boolean): string =>
+    chainPath(v, fc === null ? elements : placeElements(fc.placement, elements), closed)
 
   const item =
     selected === null ? undefined : drag?.index === selected ? drag.last : items[selected]
@@ -241,7 +287,7 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
     e.preventDefault()
     ;(e.currentTarget as Element).setPointerCapture?.(e.pointerId)
     const at = local(e)
-    const p = toShape(v, at)
+    const p = toItem(at)
     const d: Drag = {
       index,
       handle: h,
@@ -273,7 +319,7 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
           stepMm: dragStepMm(v.scale),
         })
       }
-      const p = toShape(v, at)
+      const p = toItem(at)
       const next = dragHandle(d.base, d.handle.id, [p[0] + d.offset[0], p[1] + d.offset[1]], {
         shift: e.shiftKey,
         from: d.handle.at,
@@ -321,7 +367,7 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
       setView((prev) => {
         const cur =
           prev ??
-          fitView(drawing?.bounds, r.width || DEFAULT_SIZE.width, r.height || DEFAULT_SIZE.height)
+          fitView(viewBounds, r.width || DEFAULT_SIZE.width, r.height || DEFAULT_SIZE.height)
         if (gesture === 'pan') return panBy(cur, -e.deltaX, -e.deltaY)
         const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1
         return zoomAt(cur, Math.exp((-e.deltaY * unit) / 300), [
@@ -332,7 +378,7 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
-  }, [drawing])
+  }, [viewBounds])
 
   // ── keyboard ─────────────────────────────────────────────────────────────────────────────
   const endKeyRun = useCallback(() => {
@@ -400,7 +446,16 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
       ArrowUp: [0, 1],
       ArrowDown: [0, -1],
     }
-    const dir = arrows[e.key]
+    const screenDir = arrows[e.key]
+    // arrows move along the view's axes: back through the placement's rotation and mirror
+    const dir: Vec2 | undefined =
+      screenDir === undefined || fc === null
+        ? screenDir
+        : (() => {
+            const o = unplacePoint(fc.placement, [0, 0])
+            const q = unplacePoint(fc.placement, screenDir)
+            return [q[0] - o[0], q[1] - o[1]]
+          })()
     const h = handles.find((x) => x.id === focused)
     if (dir && h && item !== undefined && selected !== null) {
       e.preventDefault()
@@ -421,7 +476,7 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
           started: true,
           cancelled: false,
           last: item,
-          pointer: toScreen(v, h.at),
+          pointer: scr(h.at),
         }
         run = { drag: d, timer: setTimeout(endKeyRun, KEY_RUN_MS) }
         onDrag({ phase: 'start', index: selected, handle: h.id, item, stepMm: 0.1 })
@@ -472,13 +527,13 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
 
   const fillPath = drawing?.loops
     .filter((l) => l.closed)
-    .map((l) => chainPath(v, l.elements, true))
+    .map((l) => path(l.elements, true))
     .join('')
   const others = props.showItems
     ? items.flatMap((it, n) => {
         if (n === selected) return []
         const ch = itemElements(it, n)
-        return ch ? [{ n, d: chainPath(v, ch.elements, ch.closed) }] : []
+        return ch ? [{ n, d: path(ch.elements, ch.closed) }] : []
       })
     : []
   const selectedChain = selected === null ? undefined : itemElements(item, selected)
@@ -490,8 +545,8 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
     if (it.kind === 'path' && bad.mark.kind !== 'item') {
       const ends = segmentEnds(it, bad.mark)
       if (ends === undefined) return null
-      const a = toScreen(v, ends[0])
-      const b = toScreen(v, ends[1])
+      const a = scr(ends[0])
+      const b = scr(ends[1])
       return {
         d: `M${a[0]} ${a[1]}L${b[0]} ${b[1]}`,
         at: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] as Vec2,
@@ -500,19 +555,24 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
     const ch = itemElements(it, bad.item)
     if (ch !== undefined && ch.elements.length > 0) {
       const first = ch.elements[0]!
-      return { d: chainPath(v, ch.elements, ch.closed), at: toScreen(v, first.a) }
+      return { d: path(ch.elements, ch.closed), at: scr(first.a) }
     }
     const h = itemHandles(it)[0]
-    return h ? { d: '', at: toScreen(v, h.at) } : null
-  }, [bad, drag, items, v])
+    return h ? { d: '', at: scr(h.at) } : null
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bad, drag, items, v, fc])
 
   const origin = toScreen(v, [0, 0])
-  const axisLen = 36
+  // the axis triad sits in the lower-left corner, off the drawing (U1 review: it covered a path's
+  // start corner at the origin); the origin keeps a small cross
+  const axisLen = 28
+  const triad: Vec2 = [20, size.height - 20]
+  const axisNames = fc?.axes ?? (['x', 'y'] as const)
   const chipHandle = drag?.started ? drag.handle : keyDrag !== null ? keyDrag.handle : null
   const chipAt = drag?.started
     ? drag.pointer
     : chipHandle && item
-      ? toScreen(v, itemHandles(item).find((h) => h.id === chipHandle.id)?.at ?? [0, 0])
+      ? scr(itemHandles(item).find((h) => h.id === chipHandle.id)?.at ?? [0, 0])
       : null
 
   return (
@@ -548,20 +608,35 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
             <path key={i} d={l.d} data-major={l.major ? '' : undefined} />
           ))}
         </g>
-        <g className={styles['axes']}>
+        {fc !== null ? (
+          <path
+            className={styles['stockFace']}
+            d={(() => {
+              const a = toScreen(v, [0, 0])
+              const b = toScreen(v, [fc.stock.length, fc.stock.width])
+              return `M${a[0]} ${a[1]}H${b[0]}V${b[1]}H${a[0]}Z`
+            })()}
+            data-testid="shape-stock-face"
+          />
+        ) : null}
+        <path
+          className={styles['origin']}
+          d={`M${origin[0] - 5} ${origin[1]}h10M${origin[0]} ${origin[1] - 5}v10`}
+        />
+        <g className={styles['axes']} data-testid="shape-axes">
           <path
             className={styles['axisX']}
-            d={`M${origin[0]} ${origin[1]}h${axisLen}m-5 -3.5l5 3.5l-5 3.5`}
+            d={`M${triad[0]} ${triad[1]}h${axisLen}m-5 -3.5l5 3.5l-5 3.5`}
           />
           <path
             className={styles['axisY']}
-            d={`M${origin[0]} ${origin[1]}v${-axisLen}m-3.5 5l3.5 -5l3.5 5`}
+            d={`M${triad[0]} ${triad[1]}v${-axisLen}m-3.5 5l3.5 -5l3.5 5`}
           />
-          <text className={styles['axisLabel']} x={origin[0] + axisLen + 4} y={origin[1] + 4}>
-            x
+          <text className={styles['axisLabel']} x={triad[0] + axisLen + 4} y={triad[1] + 4}>
+            {axisNames[0]}
           </text>
-          <text className={styles['axisLabel']} x={origin[0] - 3} y={origin[1] - axisLen - 5}>
-            y
+          <text className={styles['axisLabel']} x={triad[0] - 3} y={triad[1] - axisLen - 5}>
+            {axisNames[1]}
           </text>
         </g>
         <g className={styles['drawing']} data-testid="shape-outline">
@@ -570,7 +645,7 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
             <path
               key={i}
               className={styles['edge']}
-              d={chainPath(v, l.elements, l.closed)}
+              d={path(l.elements, l.closed)}
               data-hole={l.hole ? '' : undefined}
             />
           ))}
@@ -581,7 +656,7 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
         {selectedChain ? (
           <path
             className={styles['selectedOutline']}
-            d={chainPath(v, selectedChain.elements, selectedChain.closed)}
+            d={path(selectedChain.elements, selectedChain.closed)}
             data-testid="shape-selected-item"
           />
         ) : null}
@@ -600,7 +675,7 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
         {selected !== null && item !== undefined ? (
           <g className={styles['handles']} key={selected}>
             {handles.map((h) => {
-              const at = toScreen(v, h.at)
+              const at = scr(h.at)
               const locked = props.isLocked(selected, h)
               const active = drag?.handle.id === h.id && drag.started
               const segmentHit =

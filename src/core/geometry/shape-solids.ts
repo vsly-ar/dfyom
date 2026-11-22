@@ -348,7 +348,12 @@ function shapeTab(
   const exactRegion = bandOf(exact, slots.exact)
   if (bandRegion.isErr()) return Err(bandRegion.unwrapErr())
   if (exactRegion.isErr()) return Err(exactRegion.unwrapErr())
-  const slot = slots.exact
+  // the exact slot where the band is: on the band's boundary, inside it ⇔ inside the slot, and
+  // tested against a few elements instead of the whole slot's (`regionContains` is linear in
+  // them, once per band chord)
+  const local = port.intersect(bandRegion.unwrap(), slots.exact)
+  if (local.isErr()) return Err(local.unwrapErr())
+  const slot = local.unwrap()
 
   const topFace = table.add(`tab[${index}].top`)
   const ends = [table.add(`tab[${index}].end[0]`), table.add(`tab[${index}].end[1]`)] as const

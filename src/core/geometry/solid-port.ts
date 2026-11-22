@@ -55,6 +55,19 @@ export interface SolidPort {
    * (docs/architecture/shapes.md#geometry-for-shape-operations).
    */
   triangulate(rings: readonly (readonly Vec2[])[]): AppResult<Uint32Array>
+  /**
+   * The solid the kernel keeps for `key` across arenas, else `make()`'s, which the kernel then
+   * keeps when it fits (`SolidKernel.keepSolids`; with no room, just `make()`). A kept solid is
+   * never freed by an arena: use it in this arena only, like any other. `key` must identify the
+   * solid and its original id completely (docs/architecture/geometry.md#wasm-lifetime-and-ownership).
+   */
+  kept(key: string, make: () => AppResult<KeptSolid>): AppResult<KeptSolid>
+}
+
+/** A solid with the original id its triangles carry. */
+export interface KeptSolid {
+  readonly solid: Solid
+  readonly originalId: number
 }
 
 /**
@@ -64,6 +77,14 @@ export interface SolidPort {
  */
 export interface SolidKernel {
   withSolids<T>(fn: (solids: SolidPort) => AppResult<T>): AppResult<T>
+  /**
+   * Lets `SolidPort.kept` keep solids of up to `triangles` triangles in total across arenas,
+   * least recently used evicted when an arena closes (0, the default: keep none, free all). Call
+   * it between arenas.
+   */
+  keepSolids(triangles: number): void
+  /** Solids kept across arenas (`SolidPort.kept`), not counted by `liveObjects`. */
+  keptObjects(): number
   /** Library objects not yet freed – 0 between evaluations, or something leaked. */
   liveObjects(): number
   /** Size of the WASM linear memory in bytes, when the host passed the binary in. */

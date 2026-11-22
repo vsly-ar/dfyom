@@ -73,6 +73,7 @@ import {
   type ViewportMesh,
 } from './mesh'
 import type { AnchorOverlay, FrameOverlay } from './Overlays'
+import type { TabOverlay } from './TabMarkers'
 import type { ReferenceGhostView } from './ReferenceGhost'
 import type { RunScene } from './RunLayer'
 import { CameraControlsImpl, Scene } from './Scene'
@@ -111,6 +112,10 @@ export interface ViewportProps {
   frame?: FrameOverlay | null
   /** Anchor marker: the point the selected feature's position gives (task F2). */
   anchor?: AnchorOverlay | null
+  /** Tab markers and the start point of the selected profile, draggable (task U2). */
+  tabs?: TabOverlay | null
+  /** Thin dashed guide loops (part frame): the rotated bounding box while rotation has focus (U2). */
+  guide?: readonly OutlineLoop[] | null
   /**
    * Reference model ghosts (task R3): translucent, never pickable; `box` (the placed bounding box,
    * part frame) widens the framing bounds.
@@ -211,6 +216,8 @@ export function Viewport({
   marker = null,
   frame = null,
   anchor = null,
+  tabs = null,
+  guide = null,
   ghosts = null,
   tinted = null,
   onSelect,
@@ -553,6 +560,8 @@ export function Viewport({
           hovered={pick && hovered && pick.eligible.has(hovered.surface) ? hovered.surface : null}
           frame={frame}
           anchor={anchor}
+          tabs={pick ? null : tabs}
+          guide={guide}
           ghosts={ghosts}
           reducedMotion={reducedMotion}
           controlsRef={controls}

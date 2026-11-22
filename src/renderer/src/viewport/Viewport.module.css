@@ -101,3 +101,25 @@
   text-align: center;
   white-space: nowrap;
 }
+
+/* tab markers' keyboard anchors (task U2): invisible, the pointer passes to the canvas; a focus
+   ring shows the focused tab */
+.tabAnchor {
+  pointer-events: none;
+}
+
+.tabAnchor > button {
+  display: block;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: none;
+  pointer-events: none;
+}
+
+.tabAnchor > button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}

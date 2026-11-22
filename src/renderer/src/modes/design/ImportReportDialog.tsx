@@ -1,9 +1,8 @@
 // The SVG import dialog (task U1): the options step (unit for a unitless file, how the drawing
 // splits into shapes), then the report of `design.shape.import` – title, summary line, the facts
 // as a two-column list (what changed the drawing as soft notes with the "i" icon), a mini flat
-// outline, and "Edit shape" / "Close". Presentational: the caller runs the import. Until the
-// `design.shape.import` command is wired in the renderer, the navigator's "Import SVG…" entry is
-// disabled and the dialog is reachable from the gallery only.
+// outline, and "Edit shape" / "Close". Presentational: the caller runs the import (the
+// navigator's "Import SVG…", `useSvgImport` in ShapeList.tsx, task U2).
 // Doc: docs/conventions/ui.md#import-report, docs/modes/design-v0.3.md#svg-import
 import { FileInput, Info, PenLine } from 'lucide-react'
 import { useState } from 'react'

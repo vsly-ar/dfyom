@@ -2,7 +2,7 @@
 // on screen pixels (y down), fit to bounds, zoomed about the cursor and panned; elements as SVG path
 // data in screen space; grid steps and the rounding step of a drag at the current zoom.
 // Doc: docs/conventions/ui.md#shape-editor
-import type { Bounds2, Element } from '../../../core/geometry/2d/model'
+import { chainBounds, type Bounds2, type Element } from '../../../core/geometry/2d/model'
 import type { Vec2 } from '../../../core/geometry/model'
 import type { UnitSystem } from '../../../core/project/document'
 
@@ -116,3 +116,52 @@ export function dragStepMm(scale: number): number {
   const m = target / e
   return Math.max(0.001, (m <= 1.5 ? 1 : m <= 3.5 ? 2 : m <= 7.5 ? 5 : 10) * e)
 }
+
+// ── placement (task U2: the face-on view) ────────────────────────────────────────────────
+
+/**
+ * Where the shape frame lies in the face frame: `face = R·M·p + offset` (M flips x when
+ * mirrored, R turns counter-clockwise; design-v0.3.md#placing-a-shape-on-a-face).
+ */
+export interface ShapePlacement {
+  readonly cos: number
+  readonly sin: number
+  readonly mirror: boolean
+  readonly offset: Vec2
+}
+
+/** A shape-frame point in the face frame. */
+export function placePoint(t: ShapePlacement, p: readonly [number, number]): Vec2 {
+  const x = t.mirror ? -p[0] : p[0]
+  return [t.cos * x - t.sin * p[1] + t.offset[0], t.sin * x + t.cos * p[1] + t.offset[1]]
+}
+
+/** A face-frame point in the shape frame. */
+export function unplacePoint(t: ShapePlacement, q: readonly [number, number]): Vec2 {
+  const dx = q[0] - t.offset[0]
+  const dy = q[1] - t.offset[1]
+  const x = t.cos * dx + t.sin * dy
+  const y = -t.sin * dx + t.cos * dy
+  return [t.mirror ? -x : x, y]
+}
+
+/** Elements of a chain mapped into the face frame (a mirror reverses arc senses). */
+export function placeElements(t: ShapePlacement, elements: readonly Element[]): Element[] {
+  return elements.map((e) =>
+    e.kind === 'line'
+      ? { ...e, a: placePoint(t, e.a), b: placePoint(t, e.b) }
+      : {
+          ...e,
+          a: placePoint(t, e.a),
+          b: placePoint(t, e.b),
+          centre: placePoint(t, e.centre),
+          ccw: t.mirror ? !e.ccw : e.ccw,
+        },
+  )
+}
+
+/** Bounds of elements placed in the face frame (exact for arcs, as `chainBounds`). */
+export const placedBounds = (
+  t: ShapePlacement,
+  elements: readonly Element[],
+): Bounds2 | undefined => chainBounds(placeElements(t, elements))

@@ -17,6 +17,8 @@ export interface SelectOption<V extends string> {
   group?: string
   /** A second, smaller line in the list (not in the trigger); the option's accessible description. */
   description?: string
+  /** A small picture before the label in the list (a shape's mini outline), never in the trigger. */
+  icon?: React.ReactNode
 }
 
 /** Options by group, in order of first appearance (ungrouped ones under `undefined`). */
@@ -69,19 +71,41 @@ function SelectItem<V extends string>({
       disabled={o.disabled ?? false}
       className={styles['item']}
       data-described={o.description !== undefined || undefined}
+      data-icon={o.icon !== undefined || undefined}
       {...(o.description !== undefined ? { 'aria-describedby': id } : {})}
     >
+      {o.icon !== undefined ? (
+        <span className={styles['optionIcon']} aria-hidden="true">
+          {o.icon}
+        </span>
+      ) : null}
+      <ItemBody option={o} id={id} />
+      <RadixSelect.ItemIndicator className={styles['indicator']}>
+        <Check aria-hidden="true" />
+      </RadixSelect.ItemIndicator>
+    </RadixSelect.Item>
+  )
+}
+
+/** The label and the optional description; wrapped in a column beside an icon. */
+function ItemBody<V extends string>({
+  option: o,
+  id,
+}: {
+  option: SelectOption<V>
+  id: string
+}): React.JSX.Element {
+  const body = (
+    <>
       <RadixSelect.ItemText>{o.label}</RadixSelect.ItemText>
       {o.description !== undefined ? (
         <span id={id} className={styles['description']}>
           {o.description}
         </span>
       ) : null}
-      <RadixSelect.ItemIndicator className={styles['indicator']}>
-        <Check aria-hidden="true" />
-      </RadixSelect.ItemIndicator>
-    </RadixSelect.Item>
+    </>
   )
+  return o.icon === undefined ? body : <span className={styles['optionText']}>{body}</span>
 }
 
 export function Select<V extends string>({

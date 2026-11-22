@@ -1,12 +1,13 @@
 /**
  * 2.5D part evaluation: build every operation's labelled solids, compose
- * `stock − ∪ (removal − retained)` in one batch union, map output triangles to surface ids and
- * run the evaluation checks (errors here; geometry warnings and pieces in `checks.ts`).
+ * `stock − ∪ (removal − retained)` as subtraction layers (one batch union of tools with disjoint
+ * bounds per layer), map output triangles to surface ids and run the evaluation checks (errors
+ * here; geometry warnings and pieces in `checks.ts`).
  * Doc: docs/architecture/geometry.md#building-the-solids, #surface-ids-in-meshes,
  * #evaluation-checks; steps: docs/architecture/workers.md#abort-and-pause
  */
 import { ctx, Err, fail, Ok, type AppResult } from '../../shared/result'
-import { boxOf, geometryChecks, type ComposedOperation } from './checks'
+import { boxOf, boxesOverlap, geometryChecks, type Box, type ComposedOperation } from './checks'
 import type { DfmWarning, PartGeometryInput, SurfaceId } from './model'
 import {
   AIR,
@@ -18,6 +19,7 @@ import {
 import type { Solid, SolidMesh, SolidPort } from './solid-port'
 import { noSteps, type Steps } from '../workers/steps'
 import type { Region2dPort } from './2d/port'
+import { operationKey, type OperationCache } from './operation-cache'
 
 /** Plain data, transferable to the renderer (typed-array buffers are transferred). */
 export interface PartEvaluation {
@@ -40,83 +42,119 @@ export interface PartEvaluation {
 const WHERE = 'evaluatePart'
 
 /**
- * Operations per batch union before it is split into chunks: on the stress case (30 pockets +
- * 120 drills) one union took ≈ 145 ms, chunks of 25 ≈ 24 ms each (`npm run perf`), keeping every
- * step under 50 ms (docs/architecture/workers.md#abort-and-pause).
+ * Most operations in one subtraction layer: on the stress case (30 pockets + 120 drills) one
+ * batch union of everything took ≈ 145 ms, chunks of 25 ≈ 24 ms each (`npm run perf`), keeping
+ * every step under 50 ms (docs/architecture/workers.md#abort-and-pause).
  */
 export const UNION_CHUNK = 25
 
 /**
+ * Subtraction layers (docs/architecture/geometry.md#building-the-solids): each tool joins the
+ * first layer that has room (`chunk`) and none of whose tools' bounds it overlaps, else opens a
+ * new one. Tools of one layer are pairwise disjoint, so their batch union is a cheap compose and
+ * `stock − layer₁ − layer₂ − …` never unions overlapping tools – a union of overlapping tools
+ * builds geometry the stock subtraction then cuts again (the exit part's facing under its
+ * pocket and profile: one union of the three cost more than the three subtractions).
+ * Only the grouping depends on the bounds; any grouping gives the same solid.
+ */
+export function subtractionLayers<T extends { readonly box: Box }>(
+  tools: readonly T[],
+  chunk = UNION_CHUNK,
+): T[][] {
+  const layers: T[][] = []
+  for (const t of tools) {
+    const layer = layers.find(
+      (l) => l.length < chunk && l.every((u) => !boxesOverlap(t.box, u.box)),
+    )
+    if (layer === undefined) layers.push([t])
+    else layer.push(t)
+  }
+  return layers
+}
+
+/**
  * `region2d` builds general shapes (v0.3: named, rotated, `on`, blind, tab positions); without it
- * such an operation fails with `internal.unexpected` (a host bug, `needsRegion2d`).
- * `steps.step()` runs after each operation's solids, after each union chunk, the union, the
- * subtraction and `toMesh`, and inside the checks; an abort returns `op.aborted` (the arena
- * frees everything).
+ * such an operation fails with `internal.unexpected` (a host bug, `needsRegion2d`). `cache`
+ * reuses operations built by earlier evaluations whose input is unchanged (`operation-cache.ts`).
+ * `steps.step()` runs after each operation's solids, after each subtraction layer and `toMesh`,
+ * and inside the checks; an abort returns `op.aborted` (the arena frees everything).
  */
 export function evaluatePart(
   input: PartGeometryInput,
   solids: SolidPort,
   steps: Steps = noSteps,
   region2d?: Region2dPort,
+  cache?: OperationCache,
 ): AppResult<PartEvaluation> {
   const started = performance.now()
   const stock = stockSolids(input.stock)
   if (stock.isErr()) return Err(stock.unwrapErr())
   const stockSolidsValue = stock.unwrap()
+  // with a cache: each operation's input as its key, for its built meshes and its solid
+  const keys = new Map<OperationSolids, string>()
+  if (cache !== undefined) keys.set(stockSolidsValue, operationKey('stock', input.stock))
   const ops: OperationSolids[] = []
+  const context = {
+    triangulate: (rings: Parameters<SolidPort['triangulate']>[0]) => solids.triangulate(rings),
+    ...(region2d === undefined ? {} : { region2d }),
+  }
   for (const op of input.operations) {
-    const r = operationSolids(op, input.stock, {
-      triangulate: (rings) => solids.triangulate(rings),
-      ...(region2d === undefined ? {} : { region2d }),
-    })
+    const fresh = () => operationSolids(op, input.stock, context)
+    const key = cache === undefined ? undefined : operationKey(op, input.stock)
+    const r = key === undefined ? fresh() : cache!.solids(key, fresh)
     if (r.isErr()) return Err(r.unwrapErr().withContext(WHERE))
     ops.push(r.unwrap())
+    if (key !== undefined) keys.set(r.unwrap(), key)
   }
-
-  // one original id per operation (and the stock): (original id, face id) → surface
-  const tables = new Map<number, OperationSolids>()
-  const build = (op: OperationSolids): AppResult<{ id: number; solid: Solid }> =>
-    solids.reserveOriginalId().andThen((id) => {
-      tables.set(id, op)
-      return composeOperation(op, id, solids).map((solid) => ({ id, solid }))
-    })
 
   // manifold-3d evaluates booleans lazily: `status()` forces each stage, so the work lands
   // between the steps it belongs to (docs/architecture/workers.md#abort-and-pause)
   const force = (solid: Solid): AppResult<Solid> => solids.status(solid).map(() => solid)
-  const composed: ComposedOperation[] = []
-  const chunks = Math.ceil(ops.length / UNION_CHUNK)
-  const total = ops.length + (chunks > 1 ? chunks : 0) + 3
+  // one original id per operation (and the stock): (original id, face id) → surface; the solid
+  // of an unchanged operation (same key) is the one the kernel kept from an earlier evaluation
+  const tables = new Map<number, OperationSolids>()
+  const build = (op: OperationSolids): AppResult<{ id: number; solid: Solid }> => {
+    const make = () =>
+      solids.reserveOriginalId().andThen((originalId) =>
+        composeOperation(op, originalId, solids)
+          .andThen(force)
+          .map((solid) => ({ solid, originalId })),
+      )
+    const key = keys.get(op)
+    return (key === undefined ? make() : solids.kept(key, make)).map(({ solid, originalId }) => {
+      tables.set(originalId, op)
+      return { id: originalId, solid }
+    })
+  }
+
+  const composed = new Map<OperationSolids, ComposedOperation>()
+  const placed = ops.map((op) => ({ op, box: boxOf(op.removal) }))
+  const layers = subtractionLayers(placed)
+  const total = ops.length + layers.length + 1
   let done = 0
   const step = (label: string) => steps.step({ done: ++done, total, label })
   const built = build(stockSolidsValue).andThen((stockSolid) => {
-    for (const op of ops) {
-      const s = build(op)
-        .andThen(({ id, solid }) => force(solid).map(() => ({ id, solid })))
-        .mapErr(ctx(WHERE, { operation: op.id }))
+    for (const { op, box } of placed) {
+      const s = build(op).mapErr(ctx(WHERE, { operation: op.id }))
       if (s.isErr()) return Err(s.unwrapErr())
       const { id, solid } = s.unwrap()
-      composed.push({ op, originalId: id, solid, box: boxOf(op.removal) })
+      composed.set(op, { op, originalId: id, solid, box })
       const st = step(op.id)
       if (st.isErr()) return Err(st.unwrapErr())
     }
-    // one batch union, in chunks of UNION_CHUNK when larger (each chunk is one step)
-    let tools = composed.map((c) => c.solid)
-    if (chunks > 1) {
-      const unions: Solid[] = []
-      for (let k = 0; k < chunks; k++) {
-        const u = solids.union(tools.slice(k * UNION_CHUNK, (k + 1) * UNION_CHUNK)).andThen(force)
-        if (u.isErr()) return Err(u.unwrapErr())
-        unions.push(u.unwrap())
-        const st = step(`union ${k + 1}/${chunks}`)
-        if (st.isErr()) return Err(st.unwrapErr())
-      }
-      tools = unions
+    // stock − layer₁ − layer₂ − …, one step per layer
+    let part = stockSolid.solid
+    for (const [k, layer] of layers.entries()) {
+      const tools = layer.map((t) => composed.get(t.op)!.solid)
+      const next = (tools.length === 1 ? Ok(tools[0]!) : solids.union(tools))
+        .andThen((tool) => solids.subtract(part, tool))
+        .andThen(force)
+      if (next.isErr()) return Err(next.unwrapErr())
+      part = next.unwrap()
+      const st = step(`subtract ${k + 1}/${layers.length}`)
+      if (st.isErr()) return Err(st.unwrapErr())
     }
-    return solids
-      .union(tools)
-      .andThen(force)
-      .andThen((all) => step('union').andThen(() => solids.subtract(stockSolid.solid, all)))
+    return Ok(part)
   })
   if (built.isErr()) return Err(built.unwrapErr())
   const part = built.unwrap()
@@ -131,8 +169,6 @@ export function evaluatePart(
       where: WHERE,
     })
   }
-  const subtracted = step('subtract')
-  if (subtracted.isErr()) return Err(subtracted.unwrapErr())
   return solids
     .toMesh(part)
     .andThen((mesh) => step('mesh').map(() => mesh))
@@ -142,7 +178,7 @@ export function evaluatePart(
         geometryChecks(
           {
             part,
-            operations: composed,
+            operations: ops.map((op) => composed.get(op)!),
             tables,
             surfaces: labelled.surfaces,
             references: input.references ?? [],
@@ -241,23 +277,37 @@ function labelMesh(
   // split vertices at surface boundaries: one output vertex per (vertex, surface)
   const triangleSurface = new Uint32Array(triangles)
   const indices = new Uint32Array(triangles * 3)
-  const remap = new Map<number, number>()
-  const pos: number[] = []
   const vertexCount = mesh.positions.length / 3
+  // most vertices lie on one surface: its output index in typed arrays, the others in a map
+  const firstSurface = new Int32Array(vertexCount).fill(-1)
+  const firstOut = new Uint32Array(vertexCount)
+  const more = new Map<number, number>()
+  const pos = new Float32Array(9 * triangles)
+  let count = 0
+  const emit = (v: number): number => {
+    pos[3 * count] = mesh.positions[3 * v]!
+    pos[3 * count + 1] = mesh.positions[3 * v + 1]!
+    pos[3 * count + 2] = mesh.positions[3 * v + 2]!
+    return count++
+  }
   for (let t = 0; t < triangles; t++) {
     const s = surfaceIndex.get(keyOf[t]!)!
     triangleSurface[t] = s
     for (let k = 0; k < 3; k++) {
       const v = mesh.indices[3 * t + k]!
-      const key = s * vertexCount + v
-      let out = remap.get(key)
-      if (out === undefined) {
-        out = pos.length / 3
-        pos.push(mesh.positions[3 * v]!, mesh.positions[3 * v + 1]!, mesh.positions[3 * v + 2]!)
-        remap.set(key, out)
+      let out: number
+      if (firstSurface[v] === s) out = firstOut[v]!
+      else if (firstSurface[v] === -1) {
+        firstSurface[v] = s
+        out = firstOut[v] = emit(v)
+      } else {
+        const key = s * vertexCount + v
+        const known = more.get(key)
+        out = known ?? emit(v)
+        if (known === undefined) more.set(key, out)
       }
       indices[3 * t + k] = out
     }
   }
-  return Ok({ positions: Float32Array.from(pos), indices, triangleSurface, surfaces })
+  return Ok({ positions: pos.slice(0, 3 * count), indices, triangleSurface, surfaces })
 }
