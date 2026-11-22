@@ -17,6 +17,7 @@ import { App } from '../../App'
 import { createShell, ShellProvider } from '../../shell/ShellContext'
 import { createFakeBridge, designDispatcher, type FakeBridge } from '../../test/bridge'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
+import { dragTo, gripOf, layOutRows } from '../../test/reorder'
 
 vi.mock('@react-three/fiber', () => ({
   Canvas: ({ children: _c, ...rest }: { children: ReactNode; 'data-testid'?: string }) => (
@@ -141,6 +142,29 @@ describe('shape editor', () => {
     expect(within(inspector()).getByText('40.00 × 20.00 mm')).toBeInTheDocument()
     // the import entry is disabled until design.shape.import is wired
     within(shapesGroup()).getByRole('button', { name: 'Add shape' }).focus()
+  })
+
+  it('reorders items by their grip (D45): the item moved to the top adds', async () => {
+    const { user, shape, addShape } = await renderShapes()
+    await addShape('Rectangle')
+    await user.click(within(inspector()).getByRole('button', { name: 'Add item' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Circle' }))
+    await waitFor(() => expect(shape().items.map((i) => i.kind)).toEqual(['rectangle', 'circle']))
+    const items = within(inspector()).getByRole('list', { name: 'Items in order' })
+    expect(within(items).queryByRole('button', { name: /^Move / })).toBeNull()
+    const restore = layOutRows()
+    try {
+      dragTo(gripOf(within(items).getByRole('button', { name: /^Circle 2/ })), 3)
+      await waitFor(() =>
+        expect(shape().items.map((i) => [i.kind, i.op])).toEqual([
+          ['circle', 'add'],
+          ['rectangle', 'add'],
+        ]),
+      )
+      expect(await screen.findByText('Moved Circle 2 to position 1 of 2.')).toBeInTheDocument()
+    } finally {
+      restore()
+    }
   })
 
   it('commits a field as one design.shape.item.update and undoes it', async () => {

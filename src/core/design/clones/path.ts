@@ -113,7 +113,10 @@ export interface PathRowResult {
   readonly points: readonly PathPoint[]
   /** Where the reference point moves: the row's last point (a grid's zigzag-last cell). */
   readonly end: UV
-  /** The walk through the row, from `start` to `end` (a grid in zigzag). */
+  /**
+   * What the clone path draws for a straight row: from `start` through its points in number order
+   * (a grid row by row), then on to `end` when that is another point (a grid's zigzag-last cell).
+   */
   readonly line: readonly UV[]
   /**
    * What the clone path draws for the row where it is not straight (v0.4 U3): an arc row's arc
@@ -162,7 +165,7 @@ export function clonePath(origin: UV, rows: readonly PathRow[]): ClonePath {
   // the reference point relative to the origin, exact so a long chain adds up no rounding
   let ref: UV = { u: 0, v: 0 }
   for (const row of rows) {
-    const { points, end, order, arc, closes, curve } = rowPoints(row, ref, origin)
+    const { points, end, arc, closes, curve } = rowPoints(row, ref, origin)
     const skip = new Set(row.skip)
     const marked = points.map((p, k): PathPoint => {
       const offset = { u: round(p.u), v: round(p.v) }
@@ -188,7 +191,13 @@ export function clonePath(origin: UV, rows: readonly PathRow[]): ClonePath {
       start: abs(ref),
       points: marked,
       end: abs(next),
-      line: [abs(ref), ...order.map((k) => abs(points[k]!))],
+      // number order, so the drawn path visits 1, 2, 3, 4 (D45); then on to `end` where that is
+      // another point (a grid's zigzag-last cell), so the next row starts on the line
+      line: [
+        abs(ref),
+        ...points.map(abs),
+        ...(end >= 0 && end !== points.length - 1 ? [abs(next)] : []),
+      ],
       ...(arc && { arc: { ...arc, centre: abs(arc.centre) } }),
       ...(curve && { curve: curve.map(abs) }),
     })
@@ -248,8 +257,9 @@ export function alongStations(row: AlongRow): { s: number[]; length: number } {
 
 /**
  * A row's points from the reference point `r` (both relative to `origin`; a point row's
- * absolute `[u, v]` is made relative with it), in numbering order; the index of its last point;
- * the walking order; an arc's circle; the points back on the row's start (`closes`).
+ * absolute `[u, v]` is made relative with it), in numbering order; the index of the point the
+ * reference point moves to (a grid's zigzag-last cell); an arc's circle; the points back on the
+ * row's start (`closes`).
  */
 function rowPoints(
   row: PathRow,
@@ -258,7 +268,6 @@ function rowPoints(
 ): {
   points: UV[]
   end: number
-  order: number[]
   arc?: NonNullable<PathRowResult['arc']>
   closes: number[]
   curve?: UV[]
@@ -269,14 +278,11 @@ function rowPoints(
       for (let j = 0; j < row.rows; j++)
         for (let c = 0; c < row.cols; c++)
           if (j > 0 || c > 0) points.push({ u: r.u + c * row.du, v: r.v + j * row.dv })
-      // cell (c, j) is point j · cols + c − 1 (cell 0 is `r`); odd rows run back
-      const order: number[] = []
-      for (let j = 0; j < row.rows; j++)
-        for (let k = 0; k < row.cols; k++) {
-          const c = j % 2 === 0 ? k : row.cols - 1 - k
-          if (j > 0 || c > 0) order.push(j * row.cols + c - 1)
-        }
-      return { points, end: order.at(-1) ?? -1, order, closes: [] }
+      // cell (c, j) is point j · cols + c − 1 (cell 0 is `r`); the reference point ends on the
+      // zigzag-last cell: odd rows run back, so an even number of rows ends in column 0
+      const last = row.rows - 1
+      const end = last * row.cols + (last % 2 === 0 ? row.cols - 1 : 0) - 1
+      return { points, end: points.length === 0 ? -1 : end, closes: [] }
     }
     case 'offset':
       for (let k = 1; k <= row.count; k++) points.push({ u: r.u + k * row.du, v: r.v + k * row.dv })
@@ -312,7 +318,6 @@ function rowPoints(
       return {
         points,
         end: points.length - 1,
-        order: points.map((_, k) => k),
         arc: { centre: c, radius: row.radius, from: start, sweep },
         closes: Math.abs(Math.abs(sweep) - 360) < 1e-6 ? [points.length - 1] : [],
         ...(n > 0 && { curve }),
@@ -349,13 +354,12 @@ function rowPoints(
       return {
         points,
         end: points.length - 1,
-        order: points.map((_, k) => k),
         closes,
         ...(curve.length > 1 && { curve }),
       }
     }
   }
-  return { points, end: points.length - 1, order: points.map((_, k) => k), closes: [] }
+  return { points, end: points.length - 1, closes: [] }
 }
 
 /**

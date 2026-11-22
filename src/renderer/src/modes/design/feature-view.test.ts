@@ -13,6 +13,7 @@ import {
   operationUnits,
   rolledUpCount,
   roleLabel,
+  unitDropIndex,
   unitMoveIndex,
   warningFeatureField,
   type FeatureUnit,
@@ -77,6 +78,12 @@ describe('feature view', () => {
     expect(unitMoveIndex(units, 'hole1', -1)).toBe(0)
     expect(unitMoveIndex(units, 'hole1', 1)).toBe(2)
     expect(unitMoveIndex(units, 'drill1', -1)).toBeUndefined()
+    // a drop (D45) lands where the same number of steps would
+    for (const [i, u] of units.entries())
+      for (const by of [-1, 1] as const)
+        expect(unitDropIndex(units, u.id, i + by)).toBe(unitMoveIndex(units, u.id, by))
+    expect(unitDropIndex(units, 'drill2', 0)).toBe(0)
+    expect(unitDropIndex(units, 'drill1', 0)).toBeUndefined()
     // a part that does not load still groups owned blocks from the records
     expect(operationUnits({ ...p, loaded: undefined }).map((u) => u.id)).toEqual(
       units.map((u) => u.id),
