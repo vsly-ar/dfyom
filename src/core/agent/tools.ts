@@ -58,9 +58,10 @@ export const ALWAYS_LISTED_AREAS = ['history', 'job'] as const
  * Budget of the serialized `tools/list` result (all tools), in characters: measured 76.6 K for
  * 85 tools in 3.10 (the doc's 60 K target is not reachable without dropping field
  * descriptions; docs/architecture/llm-api.md#implementation-task-310). v0.2: 77.3 K for 89 tools
- * after the reserved keys left the schemas. Raise it deliberately.
+ * after the reserved keys left the schemas; 79.6 K after D20, E1, A4 and R2, raised to 100 K
+ * for the rest of v0.2's commands (decision D21 in docs/plans/v0.2.md). Raise it deliberately.
  */
-export const TOOLS_LIST_BUDGET_CHARS = 80_000
+export const TOOLS_LIST_BUDGET_CHARS = 100_000
 
 /**
  * Reserved arg of every project-scope command (decision 12); the adapter strips it. Not in the
