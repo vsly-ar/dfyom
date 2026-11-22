@@ -1,23 +1,81 @@
 // Native file dialogs for New / Open / Save (task 3.6) and the gCode export (task 3.7). The window
 // gets a path and then calls `project.open` / `project.save` / `plan.export` itself, the same
 // commands agents call with a path; the OS dialog asked about replacing an existing file.
-// Doc: docs/conventions/ui.md#project-files, #plan-mode-task-37
+// Each kind of dialog starts in the folder last chosen in a dialog of that kind (`DialogKind`,
+// remembered in settings/app-state.ts); the reference import (R3) uses `reference-import`.
+// Doc: docs/conventions/ui.md#project-files, #plan-mode-task-37, #remembered-window-state-and-dialog-folders
 import { BrowserWindow, dialog } from 'electron'
+import { stat } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import { isGcodeFileName } from '../core/post/plan-export'
 import { isProjectFileName } from '../core/project/storage'
+import type { DialogKind } from './settings/app-state'
+
+/** The remembered folder per dialog kind (an `AppStateStore`). */
+export interface DialogFolders {
+  dialogFolder(kind: DialogKind): string | undefined
+  rememberDialogFolder(kind: DialogKind, folder: string): void
+}
+
+/** The remembered folder of `kind` if it still exists; a folder that is gone is not offered. */
+export async function startFolder(
+  folders: DialogFolders,
+  kind: DialogKind,
+): Promise<string | undefined> {
+  const folder = folders.dialogFolder(kind)
+  if (folder === undefined) return undefined
+  try {
+    return (await stat(folder)).isDirectory() ? folder : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** A save dialog's `defaultPath`: the file name in the remembered folder, else the name alone. */
+export function saveDefaultPath(folder: string | undefined, fileName: string): string {
+  return folder === undefined ? fileName : join(folder, fileName)
+}
+
+async function showOpen(
+  win: BrowserWindow | null,
+  folders: DialogFolders,
+  kind: DialogKind,
+  options: Electron.OpenDialogOptions,
+): Promise<string | null> {
+  const folder = await startFolder(folders, kind)
+  const o = folder === undefined ? options : { ...options, defaultPath: folder }
+  const r = win === null ? await dialog.showOpenDialog(o) : await dialog.showOpenDialog(win, o)
+  const file = r.canceled ? undefined : r.filePaths[0]
+  if (file === undefined) return null
+  folders.rememberDialogFolder(kind, dirname(file))
+  return file
+}
+
+async function showSave(
+  win: BrowserWindow | null,
+  folders: DialogFolders,
+  kind: DialogKind,
+  fileName: string,
+  options: Electron.SaveDialogOptions,
+): Promise<string | null> {
+  const o = { ...options, defaultPath: saveDefaultPath(await startFolder(folders, kind), fileName) }
+  const r = win === null ? await dialog.showSaveDialog(o) : await dialog.showSaveDialog(win, o)
+  if (r.canceled || r.filePath === undefined || r.filePath === '') return null
+  folders.rememberDialogFolder(kind, dirname(r.filePath))
+  return r.filePath
+}
 
 const FILTERS = [{ name: 'DFYOM project', extensions: ['dfyom'] }]
 
-export async function chooseOpenFile(win: BrowserWindow | null): Promise<string | null> {
-  const options: Electron.OpenDialogOptions = {
+export function chooseOpenFile(
+  win: BrowserWindow | null,
+  folders: DialogFolders,
+): Promise<string | null> {
+  return showOpen(win, folders, 'project', {
     title: 'Open project',
     filters: FILTERS,
     properties: ['openFile'],
-  }
-  const r =
-    win === null ? await dialog.showOpenDialog(options) : await dialog.showOpenDialog(win, options)
-  const file = r.canceled ? undefined : r.filePaths[0]
-  return file === undefined ? null : file
+  })
 }
 
 /** A file name from the project name: no path separators or reserved characters. */
@@ -31,18 +89,16 @@ export function safeFileName(name: string): string {
 
 export async function chooseSaveFile(
   win: BrowserWindow | null,
+  folders: DialogFolders,
   defaultName: string,
 ): Promise<string | null> {
-  const options: Electron.SaveDialogOptions = {
+  const file = await showSave(win, folders, 'project', `${safeFileName(defaultName)}.dfyom`, {
     title: 'Save project',
-    defaultPath: `${safeFileName(defaultName)}.dfyom`,
     filters: FILTERS,
     properties: ['createDirectory', 'showOverwriteConfirmation'],
-  }
-  const r =
-    win === null ? await dialog.showSaveDialog(options) : await dialog.showSaveDialog(win, options)
-  if (r.canceled || r.filePath === undefined || r.filePath === '') return null
-  return isProjectFileName(r.filePath) ? r.filePath : `${r.filePath}.dfyom`
+  })
+  if (file === null) return null
+  return isProjectFileName(file) ? file : `${file}.dfyom`
 }
 
 const GCODE_FILTERS = [{ name: 'gCode', extensions: ['nc', 'gcode', 'ngc'] }]
@@ -50,16 +106,14 @@ const GCODE_FILTERS = [{ name: 'gCode', extensions: ['nc', 'gcode', 'ngc'] }]
 /** The "Export gCode" dialog: a `.nc` file named after the plan unless another gCode extension is typed. */
 export async function chooseExportFile(
   win: BrowserWindow | null,
+  folders: DialogFolders,
   defaultName: string,
 ): Promise<string | null> {
-  const options: Electron.SaveDialogOptions = {
+  const file = await showSave(win, folders, 'gcode-export', `${safeFileName(defaultName)}.nc`, {
     title: 'Export gCode',
-    defaultPath: `${safeFileName(defaultName)}.nc`,
     filters: GCODE_FILTERS,
     properties: ['createDirectory', 'showOverwriteConfirmation'],
-  }
-  const r =
-    win === null ? await dialog.showSaveDialog(options) : await dialog.showSaveDialog(win, options)
-  if (r.canceled || r.filePath === undefined || r.filePath === '') return null
-  return isGcodeFileName(r.filePath) ? r.filePath : `${r.filePath}.nc`
+  })
+  if (file === null) return null
+  return isGcodeFileName(file) ? file : `${file}.nc`
 }
