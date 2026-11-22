@@ -101,6 +101,13 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
     p['thickness'] !== undefined
       ? `Tabs ${L(p['thickness'])} thick are too thin to hold the piece.`
       : `Tabs ${L(p['width'])} wide are too narrow to hold the piece.`,
+  // v0.4 TB1 (design-v0.4.md § Tabs relocate off free sides)
+  'dfm.tabsRelocated': (p) =>
+    `${num(p['moved'])} of ${num(p['count'])} tabs moved off sides where the slot leaves no stock beyond the cut.`,
+  'dfm.tabsNoHold': (p) =>
+    Array.isArray(p['indices'])
+      ? `${num(p['count']) - num(p['held'])} of ${num(p['count'])} tabs lie where the slot leaves no stock beyond the cut, so they hold nothing. Move them to a side with stock.`
+      : `Only ${num(p['held'])} of ${num(p['count'])} tabs fit where stock remains beyond the slot. The others hold nothing: use fewer tabs or a larger stock.`,
   'dfm.reach': (p, L) =>
     `No tool in the library reaches ${L(p['depth'])} deep from the stock face (longest ${L(p['reach'])}).`,
   'dfm.setups': (p) =>

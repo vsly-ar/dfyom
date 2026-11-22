@@ -58,8 +58,9 @@ export interface RegionProfileOperation {
   readonly through: boolean
   readonly tabs: {
     /**
-     * Tab centres as arc lengths along the loop, in [0, length): K3's `tabCentres(length,
-     * op.tabs)` (the centres of `tabStretches`; empty for open or blind cuts). Empty: no tabs.
+     * Tab centres as arc lengths along the loop, in [0, length): `resolveProfileTabs` (the
+     * centres of `tabStretches`, tabs moved off free sides; empty for open or blind cuts). Empty:
+     * no tabs.
      */
     readonly positions: readonly number[]
     readonly width: number

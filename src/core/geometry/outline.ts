@@ -1,13 +1,13 @@
 /**
  * The geometry input mapping of shape operations (v0.3 K3): a pocket's or profile's `Shape` (any
- * contour kind) as exact 2D loops in its face frame, in surface-numbering order, plus the tab
- * stretches along a profile's loop. What G1 (prisms), T1 (`generateRegionPocket`) and T2 (profiles
- * on general loops) consume. Pure; no port call.
+ * contour kind) as exact 2D loops in its face frame, in surface-numbering order, plus the nominal
+ * tab centres along a profile's loop (resolved against the stock in `tab-hold.ts`). What G1
+ * (prisms), T1 (`generateRegionPocket`) and T2 (profiles on general loops) consume. Pure; no port
+ * call.
  * Doc: docs/architecture/shapes.md#implementation-k3, docs/modes/design-v0.3.md#surfaces,
  * docs/modes/design-v0.3.md#tabs-on-shapes
  */
 import { contourElements } from './contour'
-import { chainLength } from './2d/measure'
 import {
   arc,
   elementLength,
@@ -105,15 +105,4 @@ export function tabCentres(
   if (tabs.positions !== undefined) return [...tabs.positions]
   const n = Number.isInteger(tabs.count) && tabs.count > 0 ? tabs.count : 0
   return Array.from({ length: n }, (_, i) => ((i + 0.5) * length) / n)
-}
-
-/** Tab stretches `[from, to]` (distances along the loop from its start point, mm). */
-export function tabStretches(
-  op: Extract<OperationGeometry, { kind: 'profile' }>,
-): { readonly from: number; readonly to: number }[] {
-  const { chain, closed } = profileChain(op)
-  // tabs hold a through cut of a closed loop only (design-v0.3.md#cut-side-and-open-shapes)
-  if (!closed || op.depth !== undefined) return []
-  const w = op.tabs.width
-  return tabCentres(chainLength(chain), op.tabs).map((c) => ({ from: c - w / 2, to: c + w / 2 }))
 }

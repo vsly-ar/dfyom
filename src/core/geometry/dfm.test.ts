@@ -205,10 +205,19 @@ describe('parameterChecks', () => {
           slotWidth: 6,
         }),
       }),
+      // the front and back tabs move to the left and right sides (TB1)
+      expect.objectContaining({
+        code: 'dfm.tabsRelocated',
+        severity: 'info',
+        parameter: 'tabs.count',
+        params: expect.objectContaining({ moved: 2, count: 4 }),
+      }),
     ])
     // three sides short: still held by the fourth
     const three = run(profile({ shape: { ...rect(94, 56, 5), center: [53, 30] } }))
-    expect(codes(three)).toEqual(['dfm.slotOpensStock'])
+    expect(codes(three)).toEqual(['dfm.slotOpensStock', 'dfm.tabsRelocated'])
+    // all four tabs fit on the held left side (94 × 56 R5: 46 mm of straight wall)
+    expect(three[1]!.params['moved']).toBe(3)
     expect(three[0]!.params['sides']).toEqual(['stock.side[0]', 'stock.side[1]', 'stock.side[2]'])
     // inside profiles cut an opening inside the part: no margin rule
     expect(codes(run(profile({ side: 'inside', shape: rect(94, 54, 5) })))).toEqual([])

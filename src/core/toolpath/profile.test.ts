@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { contourParam, offsetContour, perimeter } from '../geometry/contour'
 import type { AnalyticContour as Contour, Vec2 } from '../geometry/model'
 import { slotCoversOpening } from '../geometry/operations'
+import { analyticTabCentres } from '../geometry/tab-hold'
 import type { ProfileOperation, ToolpathTool } from './model'
 import { generateProfile } from './profile'
 import { endMill, profileInput } from './testing/fixtures'
@@ -37,7 +38,18 @@ function random(seed: number): () => number {
   }
 }
 
-/** Independent tab oracle: is `q` in the slot within tab `i`'s stretch of the shape? */
+/**
+ * Independent tab oracle: is `q` in the slot within a tab's stretch of the shape? The centres are
+ * the count rule's, with tabs over free sides of `stock` moved (`analyticTabCentres`, tested in
+ * geometry/tab-hold.test.ts).
+ */
+const centreCache = new WeakMap<ProfileOperation, readonly number[]>()
+function centresOf(op: ProfileOperation): readonly number[] {
+  let c = centreCache.get(op)
+  if (c === undefined)
+    centreCache.set(op, (c = analyticTabCentres(op, stock, op.tabs.count).centres))
+  return c
+}
 function inTab(op: ProfileOperation, q: Vec2): boolean {
   const { contour } = op.shape
   const c = op.shape.center
@@ -46,9 +58,7 @@ function inTab(op: ProfileOperation, q: Vec2): boolean {
   if (!inSlot || op.tabs.count === 0 || slotCoversOpening(op)) return false
   const P = perimeter(contour)
   const s = contourParam(contour, [q[0] - c[0], q[1] - c[1]])
-  const first = contour.kind === 'circle' ? 0 : (contour.length - 2 * contour.cornerRadius) / 2
-  for (let i = 0; i < op.tabs.count; i++) {
-    const center = first + (i * P) / op.tabs.count
+  for (const center of centresOf(op)) {
     const off = ((((s - center) % P) + P * 1.5) % P) - P / 2
     if (Math.abs(off) <= op.tabs.width / 2) return true
   }
@@ -162,6 +172,11 @@ describe('generateProfile', () => {
   it('cuts outside and inside slots with tabs left at their height', { timeout: 60_000 }, () => {
     checkProfile(profile(rect(30, 20, 3), 'outside', 6), endMill(6))
     checkProfile(profile(rect(30, 20, 3), 'outside', 10), endMill(4))
+    // 4 mm from the stock front: the front tab moves off the free side (TB1), the cut lifts there
+    const nearFront = profile(rect(30, 20, 3), 'outside', 6)
+    const moved = { ...nearFront, shape: { ...nearFront.shape, center: [30, 14] as Vec2 } }
+    expect(centresOf(moved)[0]).not.toBeCloseTo(12, 3)
+    checkProfile(moved, endMill(6))
     checkProfile(profile(rect(30, 24, 4), 'inside', 6), endMill(6))
     checkProfile(profile(rect(30, 24, 1), 'inside', 7), endMill(4)) // corners smaller than the slot
     checkProfile(
