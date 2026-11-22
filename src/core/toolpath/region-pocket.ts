@@ -441,7 +441,7 @@ export function finishLead(
 }
 
 /** Unit tangent at the start of a piece. */
-function tangentAt(s: Seg): Vec2 {
+export function tangentAt(s: Seg): Vec2 {
   if (s.kind === 'line') {
     const len = segLength(s)
     return [(s.to[0] - s.from[0]) / len, (s.to[1] - s.from[1]) / len]

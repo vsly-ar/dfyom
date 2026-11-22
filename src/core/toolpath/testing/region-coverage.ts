@@ -21,6 +21,20 @@ export interface Coverage {
   readonly gouge: number
   /** Region cells cut below the floor (mm²). */
   readonly belowFloor: number
+  /** Tab cells (`tabs.inBand`) cut below the tab top (mm²); 0 without tabs. */
+  readonly tabCut: number
+  /** Tab cells kept at or above the tab top (mm²); 0 without tabs. */
+  readonly tabKept: number
+}
+
+/**
+ * Tabs of a profile (task T2): cells in a band must stay at the tab top; cells near a band (the
+ * crescents the lifted tool leaves at the tab ends) are not classified.
+ */
+export interface CoverageTabs {
+  readonly inBand: (p: Vec2) => boolean
+  readonly nearBand: (p: Vec2) => boolean
+  readonly top: number
 }
 
 type Poly = Vec2[]
@@ -61,7 +75,8 @@ function distToPolys(polys: readonly Poly[], p: Vec2): number {
 
 /**
  * Sweeps the toolpath over `size` (from the origin) and classifies the cells. `floor` is the
- * pocket's floor Z; the stock top is Z 0.
+ * pocket's floor Z (a through profile's: its breakthrough Z); the stock top is Z 0. For a
+ * profile, `region` is the slot and `c0` the slot's tool-centre region.
  */
 export function regionCoverage(
   region: Region,
@@ -72,6 +87,7 @@ export function regionCoverage(
   floor: number,
   cell = 0.1,
   tol = 0.01,
+  tabs?: CoverageTabs,
 ): Coverage {
   const hm = new Heightmap(size.length, size.width, cell)
   hm.sweep(tool, tp, cell)
@@ -83,6 +99,8 @@ export function regionCoverage(
   let rest = 0
   let gouge = 0
   let belowFloor = 0
+  let tabCut = 0
+  let tabKept = 0
   for (let j = 0; j < hm.ny; j++) {
     const y = (j + 0.5) * cell
     const spans = rowSpans(regionPolys, y)
@@ -91,6 +109,12 @@ export function regionCoverage(
       const h = hm.z[j * hm.nx + i]!
       const p: Vec2 = [(i + 0.5) * cell, y]
       if (inSpans(spans, p[0])) {
+        if (tabs !== undefined && tabs.inBand(p)) {
+          if (h < tabs.top - 1e-6) tabCut += area
+          else tabKept += area
+          continue
+        }
+        if (tabs !== undefined && tabs.nearBand(p)) continue
         if (h < floor - 1e-6) belowFloor += area
         if (h <= floor + 1e-6) continue
         const d = inSpans(c0Spans, p[0]) ? 0 : distToPolys(c0Polys, p)
@@ -99,7 +123,7 @@ export function regionCoverage(
       } else if (h < -1e-9 && distToPolys(regionPolys, p) > tol) gouge += area
     }
   }
-  return { leftover, rest, gouge, belowFloor }
+  return { leftover, rest, gouge, belowFloor, tabCut, tabKept }
 }
 
 /** Loops moved so their bounding box starts at (margin, margin), and the heightmap size. */
