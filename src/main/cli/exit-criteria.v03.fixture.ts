@@ -821,7 +821,7 @@ interface ShapeGet {
   resolved: {
     kind: 'region' | 'path'
     pieces: { outer: Element[] }[]
-    bounds: { min: number[]; max: number[] }
+    bounds: { min: [number, number]; max: [number, number] }
     length: number
   }
 }
