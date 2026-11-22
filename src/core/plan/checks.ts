@@ -218,20 +218,22 @@ export function toolFindings(i: ToolCheckInput): Finding[] {
         break
       }
       case 'profile': {
+        // a blind `on` groove (v0.3) cuts to its depth below the stock face, without breakthrough
         const breakthrough = i.strategy.kind === 'profile' ? i.strategy.breakthrough : 0
-        const cut = thickness + breakthrough
+        const cut = op.depth.mapOr(thickness + breakthrough, (d) => d.canonical)
+        const what = op.depth.isSome() ? 'groove depth' : 'thickness + breakthrough'
         if (D > op.slotWidth.canonical + EPS)
           add('tool', 'slotWidth', 'tool diameter must be at most the slot width', {
             diameter: D,
             slotWidth: op.slotWidth.canonical,
           })
         if (cut > flute + EPS)
-          add('tool', 'fluteLength', 'thickness + breakthrough must be at most the flute length', {
+          add('tool', 'fluteLength', `${what} must be at most the flute length`, {
             depth: cut,
             fluteLength: flute,
           })
         if (cut > i.stickout + EPS)
-          add('stickout', 'reach', 'thickness + breakthrough must be at most the stickout', {
+          add('stickout', 'reach', `${what} must be at most the stickout`, {
             depth: cut,
             stickout: i.stickout,
           })

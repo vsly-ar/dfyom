@@ -126,6 +126,21 @@ describe('order checks across setups', () => {
     expect(warnings(s, planId).filter((w) => w.code === 'plan.loosePiece')).toEqual([])
   })
 
+  it('a blind on groove before another setup frees nothing: no plan.cutoutBeforeSetup', async () => {
+    const s = await planSetup()
+    await multiFace(s)
+    await s.run('design.profile.update', {
+      partId: s.partId,
+      operationId: 'profile1',
+      side: 'on',
+      depth: '2',
+    })
+    const planId = await s.create()
+    const top = s.plan(planId).setups[2]!.id
+    await s.run('plan.setup.move', { planId, setupId: top, toIndex: 0 })
+    expect(warnings(s, planId).filter((w) => w.code === 'plan.cutoutBeforeSetup')).toEqual([])
+  })
+
   it('rejects a move that puts an operation before the setup making its on face', async () => {
     const { s, planId } = await multiPlan()
     const bottom = s.plan(planId).setups[0]!.id

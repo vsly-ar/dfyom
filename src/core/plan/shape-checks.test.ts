@@ -13,6 +13,7 @@ import { createToolpathCache } from '../toolpath/cache'
 import type { PlanWarning } from './checks'
 import { PLAN_COMMANDS } from './commands'
 import { planOperationInputs } from './inputs'
+import { testStock } from '../design/design.fixture'
 import { planSetup, stale, type PlanSetup } from './plan.fixture'
 import { rebuildBlocker } from './validity'
 
@@ -138,6 +139,42 @@ describe('tool checks of general shapes', () => {
       ['error', 'strategy.helixDiameter', 'fits'],
     ])
     expect(Number(found[0]!.params['max'])).toBeCloseTo(6, 2)
+  })
+
+  it('a blind on groove is checked at its depth, not the stock thickness (flute, stickout)', async () => {
+    // a 30 mm board: deeper than the 25 mm flute of the 6 mm flat
+    const s = await planSetup({ part: false, services: services(), stock: testStock('30') })
+    await s.run('design.shape.add', {
+      partId: s.partId,
+      items: [
+        {
+          kind: 'path',
+          start: ['0', '0'],
+          closed: false,
+          segments: [{ kind: 'line', to: ['40', '0'] }],
+        },
+      ],
+    })
+    await s.run('design.profile.add', {
+      partId: s.partId,
+      shape: { kind: 'named', shapeId: 'shape1', center: ['50', '30'] },
+      side: 'on',
+      slotWidth: '6',
+      depth: '2',
+    })
+    await s.run('project.apply', {})
+    const planId = await s.create({ machineLibraryItemId: s.machineId })
+    const planOp = s.plan(planId).setups[0]!.operations[0]!.id
+    await s.run('plan.tool.assign', {
+      planId,
+      planOperationId: planOp,
+      toolLibraryItemId: s.tools.flat6,
+    })
+    expect(ofOp(warnings(s, planId), planOp)).toEqual([])
+    // through again: 30 mm + breakthrough exceeds the flute
+    await s.run('plan.status.set', { planId, status: 'settledDesign' })
+    await s.run('plan.design.operation.update', { planId, operationId: 'profile1', depth: null })
+    expect(ofOp(warnings(s, planId), planOp).map((f) => f.rule)).toContain('fluteLength')
   })
 })
 
