@@ -37,10 +37,8 @@ export const NOTES_MAX = 4000
 export const ITEM_ID_PATTERN = /^[a-z0-9_-]{1,120}$/
 export const ITEM_ID_RULE = 'must be 1–120 lowercase letters, digits, _ or -'
 
-export const ItemIdSchema = z
-  .string()
-  .regex(ITEM_ID_PATTERN)
-  .describe('Library item id (lowercase letters, digits, _ and -)')
+// The pattern states the characters; repeating them costs tools/list size (llm-api.md#implementation-task-310).
+export const ItemIdSchema = z.string().regex(ITEM_ID_PATTERN).describe('Library item id')
 
 /** `id`, `revision`, `updatedAt`: library bookkeeping, not part of a snapshot's `values`. */
 export const ItemMetaDtoSchema = z.object({

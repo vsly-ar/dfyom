@@ -332,6 +332,11 @@ export class AgentSession {
   ): Promise<AppResult<CommandOutcome>> {
     const { app, project } = this.host.registries
     if (SESSION_TOOL_NAMES.has(name)) return this.sessionTool(name, rawArgs, opts)
+    const takesApply = project
+      .command(name)
+      .map((c) => c.kind === 'document')
+      .unwrapOr(false)
+    if (!takesApply && isPlainObject(rawArgs) && APPLY_KEY in rawArgs) return misplacedApply(name)
     if (app.command(name).isSome()) {
       const r = await this.host.app.dispatch(name, rawArgs, this.source)
       const def = app.command(name).unwrap()
@@ -583,6 +588,23 @@ export function splitApply(rawArgs: unknown): AppResult<{ args: unknown; apply?:
       issues: [{ path: [APPLY_KEY], rule: 'boolean', message: 'expected true or false' }],
     })
   return Ok({ args, apply })
+}
+
+/**
+ * `apply` on a tool that does not take it. The key is not in the tool schemas (size budget), so
+ * the message names the tools that take it (docs/architecture/apply.md#agents-mcp-and-cli).
+ */
+function misplacedApply(name: string): AppResult<never> {
+  return fail(
+    'input.malformed',
+    `${name} does not take apply: only project edit tools described as "Undoable." do (apply: false leaves the edit pending for project_apply)`,
+    {
+      where: 'AgentSession',
+      issues: [
+        { path: [APPLY_KEY], rule: 'unrecognized_keys', message: 'unknown argument "apply"' },
+      ],
+    },
+  )
 }
 
 /** Removes the reserved `expectedRevision` (decision 12) before dispatch. */

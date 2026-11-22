@@ -23,6 +23,7 @@ import { createMemoryLibraryStorage } from '../library/memory-storage'
 import { newProjectDoc } from '../project/document'
 import { toToolResult } from './results'
 import { AgentSession, type SessionHost } from './session'
+import { PRIMER } from './primer'
 import { APPLY_KEY, buildAgentTools } from './tools'
 import { SESSION_TOOLS } from './session'
 
@@ -166,10 +167,25 @@ describe('auto-apply per call', () => {
     const ok = await a.call('design.pocket.update', t.depth('8'))
     expect(toToolResult(ok).structuredContent).toMatchObject({ applied: { changes: 1 } })
   })
+
+  it('apply on a tool that does not take it names the tools that do', async () => {
+    const t = await setup()
+    const a = t.session(agentSource('mcp-1'))
+    for (const [name, args] of [
+      ['design.part.get', { partId: t.partId }],
+      ['history.undo', {}],
+      ['library.stock.list', {}],
+    ] as const) {
+      const r = await a.call(name, { ...args, apply: false })
+      const e = r.result.isErr() ? r.result.unwrapErr() : undefined
+      expect(e?.code, name).toBe('input.malformed')
+      expect(e?.message, name).toContain('"Undoable."')
+    }
+  })
 })
 
 describe('the reserved apply key', () => {
-  it('is on every project-scope document tool and no command has an arg of that name', () => {
+  it('is in no tool schema (the primer explains it) and no command has an arg of that name', () => {
     const tools = expectOk(
       buildAgentTools(
         { app: expectOk(createAppScopeRegistry()), project: expectOk(createProjectRegistry()) },
@@ -178,8 +194,10 @@ describe('the reserved apply key', () => {
     )
     for (const t of tools) {
       const props = (t.inputSchema['properties'] ?? {}) as Record<string, unknown>
-      expect(APPLY_KEY in props, t.name).toBe(t.scope === 'project' && t.kind === 'document')
+      expect(APPLY_KEY in props, t.name).toBe(false)
     }
+    expect(PRIMER).toContain('apply: false')
+    expect(PRIMER).toContain('"Undoable."')
     for (const reg of [createAppScopeRegistry(), createProjectRegistry()])
       for (const c of expectOk(reg).commands) {
         const shape = (c.args as { shape?: Record<string, unknown> }).shape ?? {}

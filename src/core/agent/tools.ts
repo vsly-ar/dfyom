@@ -57,16 +57,21 @@ export const ALWAYS_LISTED_AREAS = ['history', 'job'] as const
 /**
  * Budget of the serialized `tools/list` result (all tools), in characters: measured 76.6 K for
  * 85 tools in 3.10 (the doc's 60 K target is not reachable without dropping field
- * descriptions; docs/architecture/llm-api.md#implementation-task-310). Raise it deliberately.
+ * descriptions; docs/architecture/llm-api.md#implementation-task-310). v0.2: 77.3 K for 89 tools
+ * after the reserved keys left the schemas. Raise it deliberately.
  */
 export const TOOLS_LIST_BUDGET_CHARS = 80_000
 
-/** Reserved arg of every project-scope command (decision 12); the adapter strips it. */
+/**
+ * Reserved arg of every project-scope command (decision 12); the adapter strips it. Not in the
+ * tool schemas: the primer explains it once (size budget, llm-api.md#schemas).
+ */
 export const EXPECTED_REVISION = 'expectedRevision'
 
 /**
  * Reserved arg of every project-scope document command: `false` leaves the change pending for a
  * later `project_apply` (docs/architecture/apply.md#agents-mcp-and-cli); the adapter strips it.
+ * Not in the tool schemas: the primer explains it once; misuse names the accepting tools.
  */
 export const APPLY_KEY = 'apply'
 
@@ -117,19 +122,6 @@ export function annotationsOf(
   return out
 }
 
-function withReserved(schema: JsonObject, document: boolean): JsonObject {
-  const props = (schema['properties'] as JsonObject | undefined) ?? {}
-  return {
-    ...schema,
-    properties: {
-      ...props,
-      // No descriptions: the primer explains them once (on ~45 tools, the size budget).
-      [EXPECTED_REVISION]: { type: 'integer', minimum: 0 },
-      ...(document ? { [APPLY_KEY]: { type: 'boolean' } } : {}),
-    },
-  }
-}
-
 function registryTool(def: AnyCommand | QueryDef, scope: ToolScope): AppResult<AgentTool> {
   return toolDescriptor(def).map((d) => {
     const kind: AgentTool['kind'] = 'kind' in def ? def.kind : 'query'
@@ -141,8 +133,9 @@ function registryTool(def: AnyCommand | QueryDef, scope: ToolScope): AppResult<A
       area: def.name.split('.')[0] ?? def.name,
       kind,
       description: describe(def, kind),
-      inputSchema:
-        scope === 'project' && kind !== 'query' ? withReserved(input, kind === 'document') : input,
+      // The reserved keys (expectedRevision, apply) are not listed: the primer explains them
+      // once, the session strips them (docs/architecture/llm-api.md#schemas).
+      inputSchema: input,
       outputSchema: compactSchema(d.outputSchema),
       annotations: annotationsOf(def, d.inputSchema),
     }
@@ -253,11 +246,27 @@ function mapChildren(node: JsonObject, fn: (c: JsonObject) => JsonObject): JsonO
 }
 
 /**
- * Extracts repeated sub-schemas into `$defs` and drops `$schema`. Schemas that already use
- * `$ref`/`$defs` (recursive Zod schemas) are returned with only `$schema` dropped.
+ * Drops Zod's `.int()` bounds `±Number.MAX_SAFE_INTEGER`: they say nothing an agent needs (the
+ * command validates anyway) and repeat on every integer field.
+ */
+export function withoutSafeIntBounds(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(withoutSafeIntBounds)
+  if (!isObject(node)) return node
+  const out: JsonObject = {}
+  for (const [k, v] of Object.entries(node)) {
+    if (k === 'maximum' && v === Number.MAX_SAFE_INTEGER) continue
+    if (k === 'minimum' && v === Number.MIN_SAFE_INTEGER) continue
+    out[k] = withoutSafeIntBounds(v)
+  }
+  return out
+}
+
+/**
+ * Extracts repeated sub-schemas into `$defs`, drops `$schema` and the safe-integer bounds.
+ * Schemas that already use `$ref`/`$defs` (recursive Zod schemas) are returned without sharing.
  */
 export function compactSchema(schema: JsonObject): JsonObject {
-  const { $schema: _s, ...root } = schema
+  const { $schema: _s, ...root } = withoutSafeIntBounds(schema) as JsonObject
   if (JSON.stringify(root).includes('"$ref"')) return root
   // A repeated node is shared whole (description included) if it repeats as is, else without
   // its description, which then stays beside the `$ref`.
