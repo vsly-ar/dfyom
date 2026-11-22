@@ -11,9 +11,8 @@
 import type { Issue } from '../../shared/errors/app-error'
 import { collect, Err, fail, Ok, type AppResult } from '../../shared/result'
 import type { Vec2 } from '../geometry/model'
-import { chainLength, elementPointAt } from '../geometry/2d/measure'
+import { chainLength } from '../geometry/2d/measure'
 import {
-  arcRadius,
   chainBounds,
   regionArea,
   regionLoops,
@@ -23,6 +22,7 @@ import {
   type Region,
 } from '../geometry/2d/model'
 import type { Region2dPort } from '../geometry/2d/port'
+import { insideCorners } from '../geometry/shape-measure'
 import { quantityFromDTO } from '../library/item'
 import type { Quantity } from '../quantity/quantity'
 import type { QuantityDTO } from '../quantity/quantity.dto'
@@ -344,34 +344,24 @@ export interface ShapeSummary {
   /** mm; for a path its length. */
   readonly length: number
   /**
-   * Smallest radius a tool cutting the region's interior meets (0: a sharp corner); absent when
-   * the region has no such corner, and for a path.
+   * Smallest inside corner radius with the region cut as a pocket (0: a sharp corner), the same
+   * corners the pocket's DFM corner check takes (`insideCorners`); a shape alone has no cut side.
+   * Absent when the region has no such corner, and for a path.
    */
   readonly smallestInsideRadius?: number
 }
 
 /**
- * The smallest inside radius of a region: with the interior on the left of every loop, a vertex
- * turning left without an arc is 0, an arc turning left (counter-clockwise) is its radius.
+ * The smallest inside corner radius of a region read as a pocket (0: a sharp corner), as the
+ * pocket's DFM corner check sees it: the inside corners of the cut of `insideCorners` (convex
+ * vertices turning more than `CORNER_MIN_TURN`, counter-clockwise arcs; an island's notch counts).
+ * Undefined without such corners.
  */
 export function smallestInsideRadius(region: Region): number | undefined {
-  let min: number | undefined
-  const take = (r: number) => {
-    min = min === undefined ? r : Math.min(min, r)
-  }
-  for (const loop of regionLoops(region)) {
-    const els = loop.elements
-    for (let i = 0; i < els.length; i++) {
-      const e = els[i]!
-      if (e.kind === 'arc' && e.ccw) take(arcRadius(e))
-      const next = els[(i + 1) % els.length]!
-      const t1 = elementPointAt(e, 1).tangent
-      const t2 = elementPointAt(next, 0).tangent
-      const turn = Math.atan2(t1[0] * t2[1] - t1[1] * t2[0], t1[0] * t2[0] + t1[1] * t2[1])
-      if (turn > 1e-6) take(0)
-    }
-  }
-  return min
+  const corners = insideCorners(regionLoops(region), 1)
+  return corners.length === 0
+    ? undefined
+    : corners.reduce((m, c) => Math.min(m, c.radius), Infinity)
 }
 
 export function shapeSummary(r: ResolvedShape): ShapeSummary {
