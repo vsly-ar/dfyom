@@ -8,10 +8,13 @@ import { clockTimers, VirtualClock } from '../clock'
 import type { ControllerTransport } from '../transport'
 import { GrblEmulator, RX_BUFFER_SIZE, type EmulatorOptions } from './emulator/emulator'
 import { FAST } from './emulator.fixture'
+import { machineSettings } from './emulator/settings'
+import type { Machine } from '../../library/machine'
 import {
   GrblSender,
   type PhaseChange,
   type RunProgress,
+  type RunSummary,
   type SenderEvent,
   type SenderOptions,
 } from './sender'
@@ -164,6 +167,35 @@ export function start(
     { lines, sections },
     { phase: (p) => r.phases.push(p), progress: (p) => r.progress.push(p) },
   )
+}
+
+/**
+ * Streams a program through the virtual machine of `machine` (no homing, so no soft limits),
+ * continuing at once at every DFYOM tool change and `M0`; expects no `error:`, no `ALARM`, no
+ * trace violation and an Idle machine at the end. Returns the run summary.
+ */
+export async function streamProgram(
+  lines: readonly string[],
+  machine: Machine,
+): Promise<RunSummary> {
+  const emu = expectOk(GrblEmulator.create({ settings: machineSettings(machine), homing: false }))
+  const r = await connected(emu)
+  let finished = false
+  const run = r.sender.run({ lines, sections: [] }).then((res) => {
+    finished = true
+    return res
+  })
+  const waiting = () => r.sender.phase === 'toolChange' || r.sender.phase === 'programPause'
+  for (;;) {
+    expect(await until(r.clock, () => finished || waiting(), 24 * HOUR)).toBe(true)
+    if (finished) break
+    expectOk(r.sender.continueProgram())
+  }
+  const summary = expectOk(await drive(r.clock, run))
+  expect(r.io.received.filter((l) => l.startsWith('error') || l.startsWith('ALARM'))).toEqual([])
+  expect(emu.trace.violations).toEqual([])
+  expect(emu.status().state).toBe('Idle')
+  return summary
 }
 
 /**

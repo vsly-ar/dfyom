@@ -84,7 +84,10 @@ function profileInput(
 /** The common rules: feeds, plunge rate, ramp angle, retract and clearance planes, target depth. */
 function rules(
   tp: Toolpath,
-  i: { cutting: { feedRate: number; plungeRate: number }; heights: typeof HEIGHTS },
+  i: {
+    cutting: { feedRate: number; plungeRate: number }
+    heights: { clearanceHeight: number; retractHeight: number }
+  },
   onZ: number,
   floor: number,
   rampAngle: number,

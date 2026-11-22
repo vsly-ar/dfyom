@@ -490,7 +490,7 @@ describe('postGrbl', () => {
       { kind: 'arc', to: [r * Math.cos(a), r * Math.sin(a), 0], i: -r, j: 0, cw: false, feed: 500 },
       {
         kind: 'arc',
-        to: [r * Math.cos(0.004), r * Math.sin(0.004), 0],
+        to: [r * Math.cos(0.1), r * Math.sin(0.1), 0],
         i: -r * Math.cos(a),
         j: -r * Math.sin(a),
         cw: false,
@@ -498,9 +498,50 @@ describe('postGrbl', () => {
       },
     ]
     const lines = expectOk(postGrblLines(program(blocks), OPTS))
-    // the first (chord 0.0008 mm) becomes G1, the second (chord 0.019 mm) stays an arc
-    expect(body(lines).slice(4, 6)).toEqual(['G1 Y0.001 F500', 'G3 Y0.02 I-5 J-0.001'])
+    // the first (chord 0.0008 mm) becomes G1, the second (chord 0.5 mm) stays an arc
+    expect(body(lines).slice(4, 6)).toEqual(['G1 Y0.001 F500', 'G3 X4.975 Y0.499 I-5 J-0.001'])
     expectIntendedMotion(program(blocks), lines)
+  })
+
+  it('writes a flat arc (sagitta ≤ half a step) as G1: huge radii, short chords of small radii', () => {
+    // a 225 m arc over 30 mm bows 0.0005 mm; over 300 mm 0.05 mm (stays an arc)
+    const R = 225_000
+    const arcTo = (x: number): Block => {
+      const y = R - Math.sqrt(R * R - x * x)
+      return { kind: 'arc', to: [x, y, 0], i: 0, j: R, cw: false, feed: 500 }
+    }
+    /** The motion lines after the rapid to the start, before the footer. */
+    const moves = (lines: string[]) => body(lines).slice(body(lines).indexOf('X0 Y0 Z0') + 1, -3)
+    const flat = expectOk(postGrblLines(program([tool(), spin(), rapid(0, 0, 0), arcTo(30)]), OPTS))
+    expect(moves(flat)).toEqual(['G1 X30 Y0.002 F500'])
+    // over 300 mm it bows 0.2 mm: chords within 0.001 mm (I/J of 225 m are never written)
+    const bowed = program([tool(), spin(), rapid(0, 0, 0), arcTo(300)])
+    const chords = moves(expectOk(postGrblLines(bowed, OPTS)))
+    expect(chords.length).toBeGreaterThan(5)
+    expect(chords.every((l) => /^(G1 )?X[\d.]+ Y[\d.]+( F500)?$/.test(l))).toBe(true)
+    expect(chords.at(-1)).toBe('X300 Y0.2')
+    // a 2 mm arc of 10° (sagitta 0.0076 mm) stays an arc; of 1° (chord 0.035 mm, sagitta
+    // 0.00008 mm) it is a line although its chord is above the short-chord rule
+    const small = (deg: number): string => {
+      const a = (deg * Math.PI) / 180
+      const to: Vec3 = [2 * Math.cos(a), 2 * Math.sin(a), 0]
+      const lines = body(
+        expectOk(
+          postGrblLines(
+            program([
+              tool(),
+              spin(),
+              rapid(2, 0, 0),
+              { kind: 'arc', to, i: -2, j: 0, cw: false, feed: 500 },
+            ]),
+            OPTS,
+          ),
+        ),
+      )
+      return lines[lines.indexOf('X2 Y0 Z0') + 1]!
+    }
+    expect(small(10)).toMatch(/^G3 /)
+    expect(small(1)).toMatch(/^G1 /)
   })
 
   it('fails with model.invariant on values it cannot write', () => {

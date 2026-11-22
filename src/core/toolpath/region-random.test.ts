@@ -80,3 +80,34 @@ describe('30 seeded random regions (heightmap oracle)', () => {
     },
   )
 })
+
+describe('2D library edge cases met by random regions', () => {
+  it('an invalid offset near collapse in the helix search does not fail the pocket', () => {
+    // seed 7 (the gear, turned 4.883 rad, ×0.731) at the default stepover: offsetting a leaf by
+    // ≈ 1.9723 mm returns "an offset hole lies in no outer loop" from the 2D library
+    const r = randomRegion(7)
+    const placed = placeLoops(r.loops)
+    const region = port.normalise(placed.loops).unwrap()
+    const tp = generateRegionPocket(
+      {
+        planOperationId: 'op-gear',
+        tool: D6,
+        cutting: cutting(D6, { stepdown: 2 }),
+        heights: HEIGHTS,
+        stock: { ...placed.size, thickness: 10 },
+        operation: { region, onZ: 0, depth: 2 },
+        strategy: {
+          entry: 'helix',
+          helixDiameter: 4.8,
+          rampAngle: 3,
+          finishAllowance: 0.2,
+          finishStepdown: 2,
+          direction: 'climb',
+        },
+        maxFeedRate: RATES,
+      },
+      port,
+    )
+    expect(tp.isOk()).toBe(true)
+  })
+})

@@ -33,6 +33,15 @@ const MM_PER_INCH = 25.4
 const AXES = ['X', 'Y', 'Z'] as const
 /** An arc whose written chord is below this many resolution units is written as `G1`. */
 const MIN_ARC_CHORD_UNITS = 10
+/** An arc whose sagitta is at most this many resolution units is written as `G1`. */
+const ARC_FLAT_STEPS = 0.5
+/**
+ * Arcs of a larger radius (mm) are written as `G1` chords: GRBL holds I/J in float32, whose step
+ * at 10 m is ≈ 0.001 mm, so its centre (and its `error:33` check) would drift.
+ */
+export const ARC_HUGE_RADIUS = 10_000
+/** Max sagitta of each chord of a huge-radius arc (mm): one mm resolution step. */
+const ARC_HUGE_TOLERANCE = 0.001
 /** GRBL's arc target check (gc_execute_line, error:33), mm. */
 const ARC_RADIUS_ERROR = 0.005
 const ARC_RADIUS_ERROR_REL = 0.001
@@ -96,8 +105,11 @@ function validate(p: MachiningProgram, opts: PostOptions): Issue[] {
         issues.push({ path: at, message: 'feed move with the spindle off', rule: 'spindleOff' })
     }
     if (b.kind === 'arc') {
-      num([...at, 'i'], b.i)
-      num([...at, 'j'], b.j)
+      // huge radii go out as chords (Writer.arc): their I/J are never written
+      if (!(Math.hypot(b.i, b.j) > ARC_HUGE_RADIUS)) {
+        num([...at, 'i'], b.i)
+        num([...at, 'j'], b.j)
+      }
       if (b.i === 0 && b.j === 0)
         issues.push({ path: at, message: 'arc without a radius', rule: 'arcRadius' })
     }
@@ -282,6 +294,35 @@ class Writer {
     const res = 10 ** -u.decimals
     if (!full && Math.hypot(ex - sx, ey - sy) < MIN_ARC_CHORD_UNITS * res - res / 2) {
       // Too short to write as an arc: GRBL would read near-equal ends as a full circle.
+      return this.move('G1', b.to, b.feed)
+    }
+    // Flat arcs as G1: a line within half a resolution step of the arc is the same cut as
+    // written. Huge radii (offsets of fitted curves) as G1 chords within 0.001 mm: GRBL computes
+    // I/J in float32 (docs/architecture/grbl.md#output-dialect).
+    const r = Math.hypot(b.i, b.j)
+    if (!full) {
+      const half = Math.hypot(b.to[0] - x0, b.to[1] - y0) / 2
+      if (r - Math.sqrt(Math.max(0, r * r - half * half)) <= (res / u.perMm) * ARC_FLAT_STEPS)
+        return this.move('G1', b.to, b.feed)
+    }
+    if (r > ARC_HUGE_RADIUS) {
+      const z0 = this.pos[2] ?? b.to[2]
+      const total = full
+        ? (b.cw ? -2 : 2) * Math.PI
+        : sweep(x0 - cx, y0 - cy, b.to[0] - cx, b.to[1] - cy, b.cw)
+      const n = Math.max(
+        1,
+        Math.ceil(Math.abs(total) / (2 * Math.acos(1 - ARC_HUGE_TOLERANCE / r))),
+      )
+      const a0 = Math.atan2(y0 - cy, x0 - cx)
+      for (let k = 1; k < n; k++) {
+        const a = a0 + (total * k) / n
+        this.move(
+          'G1',
+          [cx + r * Math.cos(a), cy + r * Math.sin(a), z0 + ((b.to[2] - z0) * k) / n],
+          b.feed,
+        )
+      }
       return this.move('G1', b.to, b.feed)
     }
     // I/J: center − written start, rounded. GRBL checks that the end lies on that circle
