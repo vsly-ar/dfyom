@@ -1,6 +1,6 @@
 # Library window: machines, tools and stock from every mode
 
-Status: draft (backlog B24; assumptions below await the user's confirmation, [Questions for the user](#questions-for-the-user)) · Data and commands: [library.md](../architecture/library.md) · UI rules: [ui.md](ui.md) · Apply: [apply.md](../architecture/apply.md) · Tool field: [design-v0.2.md § Operation tool](../modes/design-v0.2.md#operation-tool) · Terms: [glossary.md](../glossary.md)
+Status: accepted (backlog B24; the user confirmed the recommendations on 2026-11-22, D27; not built yet) · Data and commands: [library.md](../architecture/library.md) · UI rules: [ui.md](ui.md) · Apply: [apply.md](../architecture/apply.md) · Tool field: [design-v0.2.md § Operation tool](../modes/design-v0.2.md#operation-tool) · Terms: [glossary.md](../glossary.md)
 
 The user's request (B24): machines, tools and stock libraries reachable from the toolbar in all modes; today tools are created through Plan's "New tool…". This doc drafts the UI; the data model, storage and commands stay as in [library.md](../architecture/library.md). Nothing here is implemented.
 

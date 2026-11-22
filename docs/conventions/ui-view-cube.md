@@ -1,6 +1,6 @@
 # View cube
 
-Status: draft (backlog B25; assumptions below await the user's confirmation, [Questions for the user](#questions-for-the-user)) · Viewport: [ui.md § Viewport](ui.md#viewport-task-35), [§ Selection and picking](ui.md#selection-and-picking) · Face frames: [design-v0.2.md § Face frame](../modes/design-v0.2.md#face-frame) · Setups: [plan-v0.2.md](../modes/plan-v0.2.md#setups-from-face-directions) · Terms: [glossary.md](../glossary.md)
+Status: accepted (backlog B25; the user confirmed the recommendations on 2026-11-22, D27; not built yet) · Viewport: [ui.md § Viewport](ui.md#viewport-task-35), [§ Selection and picking](ui.md#selection-and-picking) · Face frames: [design-v0.2.md § Face frame](../modes/design-v0.2.md#face-frame) · Setups: [plan-v0.2.md](../modes/plan-v0.2.md#setups-from-face-directions) · Terms: [glossary.md](../glossary.md)
 
 The user's request (B25): a chamfered 3D cube with named clickable faces that rotates the view to that face, replacing the Top / Front / Right view icons of the viewport toolbar, keeping the view hotkeys. Nothing here is implemented.
 

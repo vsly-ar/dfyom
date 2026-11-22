@@ -1,6 +1,6 @@
 # Design features: parametric groups of operations
 
-Status: draft (backlog B23; assumptions below await the user's confirmation, [Questions for the user](#questions-for-the-user)) · Design: [design.md](design.md), [design-v0.2.md](design-v0.2.md) · Apply: [apply.md](../architecture/apply.md) · Plan: [plan-v0.1.md](plan-v0.1.md#plans-are-snapshots) · Shapes: [roadmap v0.3](../roadmap.md#v03--shapes), [ADR 0019](../decisions/0019-2d-geometry-library.md) · Terms: [glossary.md](../glossary.md)
+Status: draft (backlog B23; the user settled A4, A5, chamfers and the order on 2026-11-22, D26/D28; patterns wait for the user's own explanation; the other assumptions await confirmation, [Questions for the user](#questions-for-the-user)) · Design: [design.md](design.md), [design-v0.2.md](design-v0.2.md) · Apply: [apply.md](../architecture/apply.md) · Plan: [plan-v0.1.md](plan-v0.1.md#plans-are-snapshots) · Shapes: [roadmap v0.3](../roadmap.md#v03--shapes), [ADR 0019](../decisions/0019-2d-geometry-library.md) · Terms: [glossary.md](../glossary.md)
 
 The user's request (B23): "Features create and combine operations (bolt hole with counterbore, no thread; pattern with optional chamfers; engraving; text…) + a backlog of features." [design.md § Workflow](design.md#workflow) already names features as "groups of operations" and [§ Ordering and composition](design.md#ordering-and-composition) reserves a "repeat" feature; this doc drafts the concept. Nothing here is implemented, and every decision is an **assumption** until the user confirms it.
 
@@ -24,8 +24,8 @@ Assumptions A1–A6:
 2. **A2 – Regenerated in the same command.** `design.<featureKind>.add` / `.update` run the expansion inside the command (one undo step) and replace the owned operations by role. Expansion is cheap, deterministic and decides nothing on the user's behalf, so it is an **instant** reaction ([apply.md § Rules for new reactions](../architecture/apply.md#rules-for-new-reactions)); the auto tool choice of the owned operations still waits for Apply.
 3. **A3 – Stable ids by role.** An owned operation's id is `<featureId>_<role>` (`hole1_drill`, `hole1_counterbore`); pattern instances add the instance number (`pattern1_3_drill`, instance 1 = the seed). Underscores are valid in [expression names](../architecture/quantities.md#expressions-and-references), so surface ids stay `<operation id>.<role>` (`hole1_counterbore.floor`). A role that survives a parameter change keeps its id, so references, plan operations and tool locks survive; a role that disappears removes its operation and fails with `design.referenced` if a later operation references it, as [`design.operation.remove`](design.md#commands-and-queries-v01) does.
 4. **A4 – Owned geometry is read-only.** The owned operations' geometric parameters are edited only through the feature. Each owned operation keeps the fields that are not part of the feature's definition: its **tool field** (pick, lock, unlock per operation), its `generalTolerance` and its display `name`; they survive regeneration by role. No per-field geometric overrides in the first version ([Q1](#questions-for-the-user)).
-5. **A5 – Explode.** `design.feature.explode` turns the owned operations into plain operations (drops `featureId`/`featureRole`, keeps ids and values) and removes the feature: one undo step. This is the way out when a user needs an edit the feature does not offer (industry: "explode" / "dissolve").
-6. **A6 – One nesting level.** A pattern's seed is either an operation or a non-pattern feature (a bolt circle of counterbored holes); a pattern of patterns is not allowed. Other features do not nest.
+5. **A5 – No explode; owned operations live and die with their feature** (user, D26). Owned operations cannot be turned into plain operations, and `design.operation.remove` on one is refused; removing the feature removes them. An edit the feature does not offer means adding that option to the feature.
+6. **A6 – One nesting level** (patterns are parked until the user explains them, D28; this stays a placeholder). A pattern's seed is either an operation or a non-pattern feature (a bolt circle of counterbored holes); a pattern of patterns is not allowed. Other features do not nest.
 
 ### Order and references
 
@@ -62,7 +62,7 @@ The "repeat" of [design.md](design.md#ordering-and-composition) becomes the **pa
 
 ## Undo
 
-One feature command is one undo step, the expansion included: add, update, remove (removes its owned operations), move, explode. An adjust-popover session on a feature field is one [gesture](../architecture/commands.md#gestures-live-edits) as for operations. Undoing a feature update restores the owned operations by their inverse patches; the expansion is never re-run on undo or redo (handlers are not re-run, [commands.md](../architecture/commands.md#undo--redo)).
+One feature command is one undo step, the expansion included: add, update, remove (removes its owned operations), move. An adjust-popover session on a feature field is one [gesture](../architecture/commands.md#gestures-live-edits) as for operations. Undoing a feature update restores the owned operations by their inverse patches; the expansion is never re-run on undo or redo (handlers are not re-run, [commands.md](../architecture/commands.md#undo--redo)).
 
 ## Persistence (high level)
 
@@ -72,12 +72,12 @@ One feature command is one undo step, the expansion included: add, update, remov
 
 ## Commands (sketch)
 
-Per-kind, like operations, so each has a typed schema for agents ([commands.md § Naming](../architecture/commands.md#naming)): `design.hole.add` / `.update`, `design.pattern.add` / `.update` (`{ seed: operationId | featureId, … }`), later `design.edgeChamfer.*`, `design.text.*`. Shared: `design.feature.remove`, `.move`, `.explode`; queries `design.feature.list`, `design.feature.get`. Results carry `{ featureId, operationIds, warnings }`. MCP and CLI get them from the command layer ([llm-api.md](../architecture/llm-api.md)).
+Per-kind, like operations, so each has a typed schema for agents ([commands.md § Naming](../architecture/commands.md#naming)): `design.hole.add` / `.update`, `design.pattern.add` / `.update` (`{ seed: operationId | featureId, … }`), later `design.edgeChamfer.*`, `design.text.*`. Shared: `design.feature.remove`, `.move`; queries `design.feature.list`, `design.feature.get`. Results carry `{ featureId, operationIds, warnings }`. MCP and CLI get them from the command layer ([llm-api.md](../architecture/llm-api.md)).
 
 ## UI (sketch)
 
 - **Navigator:** a feature row (feature icon, name, rolled-up warning badge) with its owned operations nested below, collapsed by default, as plan operations nest under setups ([ui.md § Design and plan controls (v0.2)](../conventions/ui.md#design-and-plan-controls-v02)). "Add operation" becomes "Add" with two groups: Operations and Features.
-- **Feature inspector:** its parameters with dynamic illustrations ([principle 5](../principles.md#5-user-friendly-beginner-friendly-highly-graphical): a counterbore section drawn with the entered sizes, a bolt circle preview). Selecting an owned operation shows its fields read-only with "Edited through Hole 1" (a link) and "Explode feature…", except its tool field.
+- **Feature inspector:** its parameters with dynamic illustrations ([principle 5](../principles.md#5-user-friendly-beginner-friendly-highly-graphical): a counterbore section drawn with the entered sizes, a bolt circle preview). Selecting an owned operation shows its fields read-only with "Edited through Hole 1" (a link), except its tool field; it has no remove action of its own.
 - **Viewport:** selecting a feature highlights all owned operations; clicking a surface selects the owned operation, a second click (or the breadcrumb) its feature.
 
 ## Relation to ADR 0019 and v0.3 shapes
@@ -110,12 +110,12 @@ Prioritised by value for the [target users](../vision.md) and by what they need 
 
 Each with the recommendation this draft assumes.
 
-1. **Owned operations: read-only, or editable with per-field overrides?** Recommendation: read-only geometry, own tool field, tolerance and name per owned operation, plus Explode (A4, A5). Overrides that survive regeneration are hard to show and to reason about; add them later only for a concrete case.
+1. **Answered (D26):** read-only, no explode, removed only with their feature. Original question: owned operations read-only, or editable with per-field overrides? Recommendation was: read-only geometry, own tool field, tolerance and name per owned operation, plus Explode (A4, A5). Overrides that survive regeneration are hard to show and to reason about; add them later only for a concrete case.
 2. **Store owned operations or derive them on read?** Recommendation: store them with `featureId` (A1), so every consumer stays unchanged.
 3. **Pattern of features?** Recommendation: yes, one level (A6): a bolt circle of counterbored holes is the common case.
 4. **Pending count per feature field?** Recommendation: yes (4 → 6 instances is "1 change").
 5. **Fastener tables in the hole feature?** Recommendation: yes, a small built-in table (ISO metric M2–M12 socket head and flat head, inch #4–1/2″; clearance close / normal / loose; counterbore and countersink sizes), values copied into the feature and always editable; a fastener library later.
-6. **"Pattern with optional chamfers":** a repeat pattern whose seed may carry a chamfer (assumed), or a decorative surface pattern (texture)? Recommendation: the former; decorative patterns would be a carving feature later.
+6. **Answered (D26):** the seed's chamfer, and a chamfer is an operation of its own (needs a chamfer operation and a chamfer-mill / V-bit tool type). Original question, "pattern with optional chamfers": a repeat pattern whose seed may carry a chamfer (assumed), or a decorative surface pattern (texture)? Recommendation: the former; decorative patterns would be a carving feature later.
 7. **Converting existing operations:** pattern from an existing operation, yes; a general "group these operations into a custom feature" (user templates)? Recommendation: not now; user-defined features later.
-8. **Milestone:** hole (counterbore) and patterns need nothing from v0.3. Recommendation: a small lane after v0.2 (or in v0.3 beside shapes); chamfers, text and engraving after v0.3 shapes and their operations.
+8. **Answered (D28):** v0.3 Shapes first; hole features after it; patterns much later, after the user explains them. Original question, milestone: hole (counterbore) and patterns need nothing from v0.3. Recommendation: a small lane after v0.2 (or in v0.3 beside shapes); chamfers, text and engraving after v0.3 shapes and their operations.
 9. **Feature names in Plan:** recommendation: label only, no plan logic per feature.
