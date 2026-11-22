@@ -43,7 +43,20 @@ export const GOLDEN_V03 = [
 ] as const
 
 /** Stock: the hardwood board of v0.2 (mm). */
-const STOCK = { length: 255, width: 185, thickness: 40 }
+export const STOCK_V03 = { length: 255, width: 185, thickness: 40 } as const
+const STOCK = STOCK_V03
+
+/**
+ * The four blind holes drilled on `stock.bottom`, as `[u, v]` in that face's frame (u = part +X,
+ * v = part −Y from the back): (±88.5, ±44.3) from the centre. The v0.4 lid's countersunk screws
+ * stand over them (exit-part-v04.test.ts, task X0).
+ */
+export const BASE_HOLE_CENTRES: readonly (readonly [string, string])[] = [-88.5, 88.5].flatMap(
+  (du) =>
+    [-44.3, 44.3].map(
+      (dv) => [`${STOCK.length / 2 + du}`, `${(STOCK.width / 2 + dv).toFixed(1)}`] as const,
+    ),
+)
 
 /** The deviation the criteria allow between the evaluated part and the reference (mm). */
 export const DEVIATION_LIMIT = 0.2
@@ -358,20 +371,19 @@ export async function exitCriteriaV03Flow(call: Call, dir: string): Promise<Flow
   // ── Criterion: four drillings on the bottom (u = part +X, v = part −Y from the back) ──────
   // Ø 3 mm, 3.9 mm deep at (±88.5, ±44.3) from the centre
   const holes: AddResult[] = []
-  for (const du of [-88.5, 88.5])
-    for (const dv of [-44.3, 44.3])
-      holes.push(
-        (
-          await ok<AddResult>('design.drilling.add', {
-            partId,
-            on: 'stock.bottom',
-            center: [`${STOCK.length / 2 + du}`, `${(STOCK.width / 2 + dv).toFixed(1)}`],
-            diameter: '3',
-            bottom: 'drillPoint',
-            depth: '3.9',
-          })
-        ).value,
-      )
+  for (const center of BASE_HOLE_CENTRES)
+    holes.push(
+      (
+        await ok<AddResult>('design.drilling.add', {
+          partId,
+          on: 'stock.bottom',
+          center,
+          diameter: '3',
+          bottom: 'drillPoint',
+          depth: '3.9',
+        })
+      ).value,
+    )
 
   // ── Criterion: an `on` groove along an open path on the bottom (a blind label line) ──────
   const groove = (
