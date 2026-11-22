@@ -120,20 +120,78 @@ function planInputDiff(after: PlanDTO, before: PlanDTO): PendingChange[] {
 }
 
 /**
- * Whether every toolpath of the plan is current (its inputs are all cached): Apply has nothing to
- * regenerate. False when the inputs cannot be derived (error findings) or without a cache.
+ * The plan-input keys whose toolpaths are not current (apply.md § Implementation (task P2)).
+ * Input hashes are chained over the machining order (`planOperationInputs`), so a key is covered
+ * when the **first plan operation it affects** has a cached input: a toolpath was generated with
+ * the change, and later operations that are stale are stale for a later change (its own key).
+ * First affected operation of a key:
+ * - an operation key (fields, `setup`, `moved`, `added`): that operation;
+ * - `removed` (operation or setup): the earliest remaining operation that came after it;
+ * - a setup key (fields, `added`, `moved`): the setup's earliest operation;
+ * - `machine`, `design`, a stock or machine copy: the first operation; a tool copy: the first
+ *   operation using it.
+ * A key that affects no operation (a copy nothing uses, the last operation removed) needs no
+ * toolpath and is covered. Every key is kept when the inputs cannot be derived (error findings)
+ * or without a cache, and when all keys are covered while a toolpath is still stale (an entry
+ * the cache no longer has), so a stale plan is never shown as up to date.
  */
-function toolpathsCurrent(doc: ProjectDoc, planId: string, services: Services): boolean {
+function uncoveredChanges(
+  doc: ProjectDoc,
+  after: PlanDTO,
+  before: PlanDTO,
+  diff: readonly PendingChange[],
+  services: Services,
+): readonly PendingChange[] {
   const cache = services.toolpaths
-  if (cache === undefined) return false
-  const inputs = planOperationInputs(doc, planId)
-  return inputs.isOk() && inputs.unwrap().every((i) => cache.has(i.inputHash))
+  if (cache === undefined) return diff
+  const derived = planOperationInputs(doc, after.id)
+  if (derived.isErr()) return diff
+  const inputs = derived.unwrap()
+  const current = inputs.map((i) => cache.has(i.inputHash))
+  if (current.every(Boolean)) return []
+  const position = new Map(inputs.map((i, index) => [i.planOperationId, index]))
+  const beforeOps = before.setups.flatMap((s) => s.operations.map((op) => op.id))
+  const earliest = (ids: readonly string[]): number | undefined => {
+    const at = ids.flatMap((id) => {
+      const p = position.get(id)
+      return p === undefined ? [] : [p]
+    })
+    return at.length === 0 ? undefined : Math.min(...at)
+  }
+  /** Earliest remaining operation that came after the removed one in the baseline. */
+  const nextRemaining = (removedId: string | undefined) =>
+    removedId === undefined
+      ? undefined
+      : earliest(beforeOps.slice(beforeOps.indexOf(removedId) + 1))
+  const first = inputs.length > 0 ? 0 : undefined
+  const affected = (c: PendingChange): number | undefined => {
+    if (c.operationId !== undefined)
+      return c.field === 'removed' ? nextRemaining(c.operationId) : position.get(c.operationId)
+    if (c.setupId !== undefined) {
+      if (c.field === 'removed')
+        return nextRemaining(before.setups.find((s) => s.id === c.setupId)?.operations.at(-1)?.id)
+      const s = after.setups.find((x) => x.id === c.setupId)
+      return earliest(s?.operations.map((op) => op.id) ?? [])
+    }
+    if (c.field?.startsWith('snapshots.') === true) {
+      const id = c.field.slice('snapshots.'.length)
+      if (id === after.design.part.stock || id === after.machine) return first
+      return earliest(inputs.filter((i) => i.toolSnapshotId === id).map((i) => i.planOperationId))
+    }
+    return first // machine, design copy
+  }
+  const out = diff.filter((c) => {
+    const at = affected(c)
+    return at !== undefined && current[at] === false
+  })
+  return out.length === 0 ? diff : out
 }
 
 /**
  * Changed plan inputs (operation tool, feeds, strategy, setup, machine) of kept-current plans
- * whose toolpaths are not all current: an explicit "Generate toolpaths" after plan edits leaves
- * nothing for Apply, even though the baseline predates those edits (found by X2).
+ * whose toolpaths are not current: an explicit "Generate toolpaths" after plan edits leaves
+ * nothing for Apply, even though the baseline predates those edits (found by X2), and a later
+ * edit lists only the inputs not generated yet (`uncoveredChanges`).
  */
 export const planInputPending: PendingSource = {
   name: 'plan.inputs',
@@ -144,8 +202,8 @@ export const planInputPending: PendingSource = {
       const before = Object.hasOwn(baseline.plans, id) ? baseline.plans[id] : undefined
       if (before === undefined || before === after || !keptCurrent(after, ctx.services)) continue
       const diff = planInputDiff(after, before)
-      if (diff.length === 0 || toolpathsCurrent(doc, id, ctx.services)) continue
-      out.push(...diff)
+      if (diff.length === 0) continue
+      out.push(...uncoveredChanges(doc, after, before, diff, ctx.services))
     }
     return out
   },

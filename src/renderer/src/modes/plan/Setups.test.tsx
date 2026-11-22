@@ -1,6 +1,6 @@
 // The setup panel (v0.2 task F6) against the fake bridge bound to a real project runtime (core
 // plan fixture plus a facing on the bottom: setups Bottom, Top): setup rows with direction, WCS
-// corner and rotation, operations nested per setup, reorder by buttons and Alt+↑/↓, split and
+// corner and rotation, operations nested per setup, reorder from the row menus and Alt+↑/↓, split and
 // merge (same direction only), moving an operation across setups, the setup inspector (name,
 // rotation, heights), the per-setup export and the per-setup preview placed by the setup's WCS.
 // Doc: docs/conventions/ui.md#design-and-plan-controls-v02, docs/modes/plan-v0.2.md#merge-split-reorder
@@ -14,6 +14,7 @@ import { App } from '../../App'
 import { createShell, ShellProvider } from '../../shell/ShellContext'
 import { createFakeBridge } from '../../test/bridge'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
+import type { PlanOperationDTO } from '../../../../core/plan/plan.dto'
 import type { RunScene } from '../../viewport'
 import { planStockSize } from './model'
 import { usePlanScene } from './usePlanScene'
@@ -149,6 +150,41 @@ describe('Setup panel', () => {
     await t.user.keyboard('{ArrowDown}')
     expect(document.activeElement).toHaveTextContent('2. Top')
     expect(top).toBeDefined()
+  })
+
+  it('moves an operation from its menu, the row’s only action button', async () => {
+    const t = await renderSetups()
+    const top = t.plan().setups[1]!
+    const [facing, drilling1, drilling34] = top.operations as [
+      PlanOperationDTO,
+      PlanOperationDTO,
+      PlanOperationDTO,
+    ]
+    // nothing overlays the name or the status icons: no separate move buttons
+    expect(within(t.nav()).queryByRole('button', { name: /^Move / })).toBeNull()
+    const triggers = () => within(t.opsOf('Top')).getAllByRole('button', { name: /^Actions for / })
+    // the first operation of Top cannot go up (Bottom faces another way)
+    await openMenu(t, triggers()[0]!)
+    expect(await screen.findByRole('menuitem', { name: /^Move up/ })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    )
+    await t.user.keyboard('{Escape}')
+    // Drilling 1 down past Drilling 3, Drilling 4
+    await openMenu(t, triggers()[1]!)
+    await t.user.click(await screen.findByRole('menuitem', { name: /^Move down/ }))
+    await waitFor(() =>
+      expect(
+        t
+          .plan()
+          .setups[1]!.operations.map((o) => o.id)
+          .slice(0, 3),
+      ).toEqual([facing.id, drilling34.id, drilling1.id]),
+    )
+    expect(t.callsOf('plan.operation.move').at(-1)).toMatchObject({
+      planId: t.planId,
+      planOperationId: drilling1.id,
+    })
   })
 
   it('splits an operation into a new setup, moves operations across setups of one direction and merges them', async () => {

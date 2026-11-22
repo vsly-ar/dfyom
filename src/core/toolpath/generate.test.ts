@@ -240,7 +240,15 @@ describe('plan.toolpath.generate', () => {
 
 // Spec: docs/architecture/apply.md#apply-jobs (decision 4)
 describe('toolpaths on Apply (plan.toolpaths apply job)', () => {
-  type Pending = { changes: { kind: string; planId?: string; operationId?: string }[] }
+  type Pending = {
+    changes: {
+      kind: string
+      planId?: string
+      operationId?: string
+      setupId?: string
+      field?: string
+    }[]
+  }
   type Applied = { jobIds: string[] }
 
   it('keeps a plan current once its toolpaths were generated: plan edits are pending, Apply regenerates', async () => {
@@ -303,6 +311,38 @@ describe('toolpaths on Apply (plan.toolpaths apply job)', () => {
     expect(pending().changes).toContainEqual(
       expect.objectContaining({ kind: 'plan', operationId: facing, field: 'strategy.overshoot' }),
     )
+  })
+
+  it('after Generate, a later edit lists only the inputs whose toolpaths are not current', async () => {
+    const t = await setup()
+    const [first, second] = t.order as [string, string]
+    const planKeys = () =>
+      (expectOk(t.d.query('project.pending.get', {}, ui)).value as Pending).changes
+        .filter((c) => c.kind === 'plan')
+        .map((c) => [c.operationId ?? c.setupId ?? '', c.field])
+    const update = async (planOperationId: string, args: object) =>
+      expectOk(
+        await t.d.dispatch(
+          'plan.operation.update',
+          { planId: t.planId, planOperationId, ...args },
+          ui,
+        ),
+      )
+    expectOk(await t.d.dispatch('project.apply', {}, ui))
+    // edits on both operations, generated explicitly
+    await update(first, { overrides: { feedRate: '900' } })
+    await update(second, { overrides: { feedRate: '160' } })
+    expectOk(await t.generate())
+    expect(planKeys()).toEqual([])
+    // a later edit on the second operation: only it is pending, not the generated feed rate
+    await update(second, { overrides: { feedRate: '170' } })
+    expect(planKeys()).toEqual([[second, 'overrides.feedRate']])
+    // an edit on the first operation is pending too (the second stays stale through the chain)
+    await update(first, { overrides: { feedRate: '950' } })
+    expect(planKeys()).toEqual([
+      [first, 'overrides.feedRate'],
+      [second, 'overrides.feedRate'],
+    ])
   })
 
   it('an archived plan is not kept current', async () => {
