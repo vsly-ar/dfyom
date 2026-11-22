@@ -37,6 +37,7 @@ import { loadPart, unknownPart, type LoadedPart } from './load'
 import {
   CENTRE_ANCHOR,
   DEFAULTS,
+  circularEdgeDiameter,
   fieldContext,
   generalToleranceToDTO,
   ID_PREFIX,
@@ -176,7 +177,7 @@ const profileParams = {
 }
 
 const chamferParams = {
-  edgeOf: OperationIdSchema.describe('Earlier drilling or circle pocket'),
+  edgeOf: OperationIdSchema.describe('Earlier drilling, circle pocket or inside circle profile'),
   diameter: Src.describe('Default edge Ø + 1 mm'),
   angle: Src.describe('Default 90°'),
 }
@@ -739,17 +740,16 @@ const chamferSpec: KindSpec<typeof chamferParams, Extract<Operation, { kind: 'ch
     const edgeOf = a.edgeOf ?? prev!.edgeOf
     const index = ops.findIndex((o) => o.id === id)
     const edge = (index < 0 ? ops : ops.slice(0, index)).find((o) => o.id === edgeOf)
-    const edgeDiameter =
-      edge?.kind === 'drilling'
-        ? edge.diameter
-        : edge?.kind === 'pocket' && edge.shape.kind === 'circle'
-          ? edge.shape.diameter
-          : undefined
+    const edgeDiameter = circularEdgeDiameter(edge)
     const diameter = (): Quantity => {
       if (a.diameter !== undefined) return f.q('diameter', 'length', a.diameter)
       if (prev !== undefined && a.edgeOf === undefined) return prev.diameter
       if (edgeDiameter === undefined)
-        return f.issue('edgeOf', 'chamferEdge', 'must be an earlier drilling or circle pocket')
+        return f.issue(
+          'edgeOf',
+          'chamferEdge',
+          'must be an earlier drilling, circle pocket or inside circle profile',
+        )
       const widen = f.q('diameter', 'length', DEFAULTS.chamferWidening[f.units])
       if (widen === undefined) return widen
       return derivedLength(edgeDiameter.exact.add(widen.exact), f.units).unwrap()

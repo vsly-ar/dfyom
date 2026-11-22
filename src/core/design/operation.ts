@@ -145,13 +145,13 @@ export interface Profile extends Common {
   }
 }
 /**
- * v0.4: a conical bevel at the mouth of an earlier circular drilling or pocket. `on` is always
+ * v0.4: a conical bevel at the mouth of an earlier circular drilling, pocket or inside profile. `on` is always
  * the edge operation's `on` (recalculation keeps it so, surfaces.ts).
  * Doc: docs/modes/design-v0.4.md#chamfer-operation-v04-circular-edges
  */
 export interface Chamfer extends Common {
   readonly kind: 'chamfer'
-  /** Id of the earlier drilling or circle pocket whose mouth it bevels. */
+  /** Id of the earlier drilling, circle pocket or inside circle profile whose mouth it bevels. */
   readonly edgeOf: string
   /** In the face plane; > the edge's diameter. */
   readonly diameter: Quantity
@@ -164,6 +164,21 @@ export interface Chamfer extends Common {
   readonly stepdown: Option<Quantity>
 }
 export type Operation = Facing | Pocket | Drilling | Profile | Chamfer
+
+/**
+ * The diameter of the circular edge a chamfer can bevel (design-v0.4.md rule `chamferEdge`): the
+ * mouth of a drilling, a circle pocket or an `inside` profile of a circle (a through opening, X2);
+ * undefined for any other operation.
+ */
+export function circularEdgeDiameter(op: Operation | undefined): Quantity | undefined {
+  if (op?.kind === 'drilling') return op.diameter
+  if (
+    (op?.kind === 'pocket' || (op?.kind === 'profile' && op.side === 'inside')) &&
+    op.shape.kind === 'circle'
+  )
+    return op.shape.diameter
+  return undefined
+}
 
 export interface Part {
   readonly id: string

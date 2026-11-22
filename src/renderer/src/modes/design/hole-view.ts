@@ -271,15 +271,19 @@ export function fastenerSources(
 /**
  * Starting head sizes for a hole without a fastener that gets a head (the core requires them
  * then): a counterbore 1.8 × the diameter wide and one diameter deep, a countersink twice the
- * diameter wide (90° from the core) – kept within a blind hole's depth. In the project's units.
+ * diameter wide (90° from the core) – kept within half a blind hole's depth, or half the
+ * material below the face (`below`, `stockBelow`) for a through hole: a 6 mm hole in a 6 mm
+ * board got a counterbore to the stock bottom, which the core refuses (X2). In the project's
+ * units.
  */
 export function headDefaults(
   h: HoleRecord,
   type: 'counterbore' | 'countersink',
   units: UnitSystem,
+  below?: number,
 ): Record<string, string> {
   const d = mm(h.sizes.diameter) ?? 6
-  const depth = h.bottom === 'through' ? undefined : mm(h.sizes.depth)
+  const depth = h.bottom === 'through' ? below : mm(h.sizes.depth)
   const room = depth === undefined ? Infinity : depth * 0.5
   if (type === 'counterbore')
     return {

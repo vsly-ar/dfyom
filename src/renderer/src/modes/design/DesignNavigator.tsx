@@ -136,7 +136,7 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
     setClonesRow({ owner: 'draft', row: 0 })
   }
   // Chamfer (task U4): `design.chamfer.add` with the core defaults (edge Ø + 1 mm / 1/32", 90°)
-  // on the selected drilling or circle pocket, else the last one; then its inspector
+  // on the selected drilling, circle pocket or inside circle profile, else the last one; then its inspector
   const chamferEdge = chamferEdgeChoice(part.dto, selected)
   const addChamfer = async () => {
     if (!chamferEdge.ok) return
@@ -152,7 +152,7 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
           icon: <Icon name={ICON[k]} />,
           onSelect: () => void add(k),
         })),
-        // on the selected drilling or circle pocket, else the last one (task U4)
+        // on the selected drilling, circle pocket or inside circle profile, else the last one (task U4)
         {
           label: f.addChamfer,
           icon: <Icon name="chamfer" />,

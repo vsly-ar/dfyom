@@ -15,7 +15,14 @@ import type {
 import type { Direction } from '../geometry/face'
 import type { Stock } from '../library/stock'
 import type { Region2dPort } from '../geometry/2d/port'
-import { isGeneralShape, type Operation, type Part, type Point, type Shape } from './operation'
+import {
+  circularEdgeDiameter,
+  isGeneralShape,
+  type Operation,
+  type Part,
+  type Point,
+  type Shape,
+} from './operation'
 import { placeShape } from './placement'
 import { requirePort } from './shape'
 import { operationReferences, SurfaceTable } from './surfaces'
@@ -213,7 +220,7 @@ function operationGeometry(
 
 /**
  * The circular edge a chamfer bevels (design-v0.4.md § Chamfer operation): the mouth of the
- * drilling or circle pocket `edgeOf` among `before`, as its axis `[u, v]` and diameter (float64
+ * drilling, circle pocket or inside circle profile `edgeOf` among `before`, as its axis `[u, v]` and diameter (float64
  * mm, as that operation's own geometry input). Undefined: no such round operation.
  */
 export function chamferEdge(
@@ -221,9 +228,11 @@ export function chamferEdge(
   edgeOf: string,
 ): { center: readonly [number, number]; diameter: number } | undefined {
   const e = before.find((o) => o.id === edgeOf)
-  if (e?.kind === 'drilling') return { center: vec2(e.center), diameter: e.diameter.canonical }
-  if (e?.kind === 'pocket' && e.shape.kind === 'circle')
-    return { center: shapeCentre(e.shape), diameter: e.shape.diameter.canonical }
+  const diameter = circularEdgeDiameter(e)
+  if (e === undefined || diameter === undefined) return undefined
+  if (e.kind === 'drilling') return { center: vec2(e.center), diameter: diameter.canonical }
+  if (e.kind === 'pocket' || e.kind === 'profile')
+    return { center: shapeCentre(e.shape), diameter: diameter.canonical }
   return undefined
 }
 

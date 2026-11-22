@@ -1,6 +1,6 @@
 // The chamfer inspector (v0.4 task U4): the `chamfer` kind's groups inside OperationFields, so the
 // Design inspector, a countersink's read-only owned chamfer and the plan copy share it. Edge (a
-// Select of the earlier drillings and circle pockets, "Drilling 2 · Ø 3.4 mm", with pick mode
+// Select of the earlier drillings, circle pockets and inside circle profiles, "Drilling 2 · Ø 3.4 mm", with pick mode
 // tinting their surfaces in the viewport; `edgeOf`), then the section illustration of the edge with
 // its cone above Diameter, Angle (60°–120°) and the derived Depth (read-only, "from diameter and
 // angle"), then the tool field (where `dfm.chamferNoTool` shows with "New tool…", ToolField).
@@ -129,7 +129,7 @@ function DepthField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Element
 }
 
 /**
- * `edgeOf`: the earlier drillings and circle pockets, or pick one in the viewport (its surfaces
+ * `edgeOf`: the earlier drillings, circle pockets and inside circle profiles, or pick one in the viewport (its surfaces
  * are eligible; a picked surface's operation is the edge). Not re-pointed in a plan copy (the
  * plan's update has no `edgeOf`, design-v0.4.md § Implementation (C2)).
  */

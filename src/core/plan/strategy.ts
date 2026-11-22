@@ -363,7 +363,7 @@ export function chamferCuts(
         : holeDepth(edgeOp, allOps, stock)
       : edgeOp.kind === 'pocket'
         ? edgeOp.depth.canonical
-        : Infinity
+        : Infinity // an inside circle profile cuts through
   return {
     edgeDiameter: edge.diameter,
     plungeFits: tool.diameter.canonical + FIT_TOL >= D,

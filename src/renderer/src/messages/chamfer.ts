@@ -8,13 +8,14 @@ export const chamferMessages = {
   pickEdge: 'Pick the edge in the viewport',
   pickEdgeField: 'Edge',
   /** The edge operation is gone or not round any more (the command refuses such an edge). */
-  edgeMissing: (id: string) => `${id} (not a drilling or circular pocket)`,
+  edgeMissing: (id: string) => `${id} (not a drilling, circular pocket or circular opening)`,
   diameter: 'Diameter',
   angle: 'Angle',
   depth: 'Depth',
   depthNote: 'From diameter and angle.',
-  /** Add menu: no drilling or circular pocket in the part (ui.md § Feature rows and Add). */
-  noEdge: 'Add a drilling or a circular pocket first: a chamfer breaks its edge.',
+  /** Add menu: no drilling, circular pocket or circular opening in the part (ui.md § Feature rows and Add). */
+  noEdge:
+    'Add a drilling, a circular pocket or a circular opening first: a chamfer breaks its edge.',
   /** The section illustration's accessible name, built from the values. */
   sectionLabel: (p: {
     diameter: string

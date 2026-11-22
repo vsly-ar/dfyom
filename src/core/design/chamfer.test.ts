@@ -85,6 +85,35 @@ describe('design.chamfer.add / update', () => {
     expect(s.op('chamfer1')).toMatchObject({ on: 'facing1.floor', angle: { source: '60' } })
   })
 
+  it('an inside circle profile (a through opening) is an edge; outside and on profiles are not', async () => {
+    const s = await designSetup()
+    const circle = { kind: 'circle', center: ['50', '30'], diameter: '22' }
+    await s.run('design.profile.add', {
+      partId: s.partId,
+      shape: circle,
+      side: 'inside',
+      slotWidth: '11',
+      tabs: { count: '0' },
+    })
+    await chamfer(s, { edgeOf: 'profile1' })
+    expect(exact(s.op('chamfer1')['diameter' as never])).toBe(23)
+    expect(s.op('chamfer1')).toMatchObject({ on: 'stock.top', edgeOf: 'profile1' })
+    // through: the cone never reaches a bottom
+    expect(warnings(s).map((w) => w.code)).not.toContain('dfm.chamferTooDeep')
+    await s.run('design.profile.add', {
+      partId: s.partId,
+      shape: { ...circle, center: ['20', '30'], diameter: '10' },
+      side: 'outside',
+      tabs: { count: '0' },
+    })
+    const e = await s.fail(
+      'design.chamfer.add',
+      { partId: s.partId, edgeOf: 'profile2' },
+      'model.invariant',
+    )
+    expect(e.issues.map((i) => i.rule)).toContain('chamferEdge')
+  })
+
   it('refuses a missing or non-circular edge, a small diameter and an angle out of range', async () => {
     const s = await designSetup()
     await drill(s)

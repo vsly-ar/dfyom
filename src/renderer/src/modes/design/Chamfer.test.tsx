@@ -1,6 +1,6 @@
 // The chamfer UI in design mode (v0.4 task U4) against the fake bridge bound to a real project
 // runtime: the Add menu's Chamfer (disabled with its reason without an edge; on the selected
-// drilling or circle pocket, else the last one), the chamfer inspector (Edge with its options,
+// drilling, circle pocket or inside circle profile, else the last one), the chamfer inspector (Edge with its options,
 // Diameter, Angle, the derived Depth, the section illustration with the focused field's part, one
 // update per commit, a new edge re-defaulting the diameter), `dfm.chamferNoTool` at the tool field
 // with "New tool…" prefilled with a chamfer mill of that angle, and a countersink's owned chamfer
@@ -101,13 +101,13 @@ const addEdges = async (d: Dispatcher) => {
 }
 
 describe('chamfer UI (U4)', () => {
-  it('Add chamfer is disabled with its reason while the part has no drilling or circle pocket', async () => {
+  it('Add chamfer is disabled with its reason while the part has no drilling, circle pocket or inside circle profile', async () => {
     const { openAdd } = await renderDesign()
     const menu = await openAdd()
     const item = within(menu).getByRole('menuitem', { name: 'Add chamfer' })
     expect(item).toHaveAttribute('aria-disabled', 'true')
     expect(item).toHaveAccessibleDescription(
-      'Add a drilling or a circular pocket first: a chamfer breaks its edge.',
+      'Add a drilling, a circular pocket or a circular opening first: a chamfer breaks its edge.',
     )
   })
 

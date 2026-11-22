@@ -8,6 +8,7 @@ import {
   customSizeNote,
   enteredSizesReplaced,
   fastenerSources,
+  headDefaults,
   holeRecord,
   sectionValues,
   sharedToolNote,
@@ -44,6 +45,21 @@ const M3: FastenerListRow = {
 }
 
 describe('hole view', () => {
+  it('head defaults stay within half the material below a through hole (X2: 6 mm board)', () => {
+    const custom = hole({ fastener: undefined, sizes: { diameter: q('6 mm') } })
+    // without the material: one diameter deep
+    expect(headDefaults(custom, 'counterbore', 'mm')).toEqual({
+      cbDiameter: '10.8 mm',
+      cbDepth: '6 mm',
+    })
+    // a 6 mm board: 3 mm, which the core takes (a counterbore must end above the stock bottom)
+    expect(headDefaults(custom, 'counterbore', 'mm', 6)).toEqual({
+      cbDiameter: '10.8 mm',
+      cbDepth: '3 mm',
+    })
+    expect(headDefaults(custom, 'countersink', 'mm', 4)).toEqual({ csDiameter: '10 mm' })
+  })
+
   it('lists the size fields of a type and bottom', () => {
     expect(sizeFields({ type: 'simple', bottom: 'through' })).toEqual(['diameter'])
     expect(sizeFields({ type: 'counterbore', bottom: 'flat' })).toEqual([
