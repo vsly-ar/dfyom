@@ -23,6 +23,7 @@ import type { DfmWarning } from '../geometry/model'
 import type { LibraryItem } from '../library/library-item'
 import { deepEqual, refreshSnapshot, Snapshot } from '../library/snapshot'
 import { Tool } from '../library/tool'
+import { TOOL_TYPES } from '../library/tool.dto'
 import type { ProjectDoc } from '../project/document'
 import { findOperation, Warnings, withWarnings } from './commands'
 import { toGeometryInput } from './geometry-input'
@@ -237,6 +238,7 @@ const CandidatesResult = z.object({
       z.object({
         toolLibraryItemId: z.string(),
         name: z.string(),
+        type: z.enum(TOOL_TYPES).describe('Tool type (the tool picker shows its icon)'),
         diameter: z.number().describe('mm'),
         reasons: z.array(z.string()),
       }),
@@ -287,6 +289,7 @@ const toolCandidates = defineQuery({
       fitting: fittingLibraryTools(input).map((c) => ({
         toolLibraryItemId: c.item.id,
         name: c.tool.name,
+        type: c.tool.type,
         diameter: c.tool.diameter.canonical,
         reasons: [...c.reasons],
       })),

@@ -4,13 +4,12 @@
 // start), jog and work-zero controls inside, "Start setup n" as the only primary action and the
 // run dialogs' Stop. It never continues by itself; "Later" puts it off to the inspector.
 // Doc: docs/modes/plan-v0.2.md#setup-change-in-run, docs/conventions/ui.md#run-mode-safety-ui
-import { Play } from 'lucide-react'
 import { useId } from 'react'
 import { DIRECTION_LABEL } from '../../../../core/geometry/face'
 import type { ProjectDoc } from '../../../../core/project/document'
 import type { SetupOrientation } from '../../../../core/toolpath/wcs'
 import { runMessages } from '../../messages/run'
-import { Button, Dialog } from '../../ui'
+import { Icon, Button, Dialog } from '../../ui'
 import { JogPad } from './JogPad'
 import { formatLength, runGates } from './machine-state'
 import { planRunInfo, setupPlacement } from './plan-info'
@@ -53,7 +52,7 @@ export function SetupChangeDialog({ doc }: { doc: ProjectDoc }): React.JSX.Eleme
           </Button>
           <Button
             variant="primary"
-            icon={<Play aria-hidden="true" />}
+            icon={<Icon name="run" />}
             disabled={gates.start !== null || starting}
             {...(gates.start === null ? {} : { 'aria-describedby': ids.start })}
             onClick={() => void a.startRun(info.setup.id)}

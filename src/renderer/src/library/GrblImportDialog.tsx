@@ -3,12 +3,11 @@
 // all-axes group tick together) and apply them (`library.machine.settings.import`). Nothing is
 // ever sent to GRBL. Doc: docs/conventions/ui-library-window.md#implementation-task-l1,
 // docs/architecture/library.md#grbl--import
-import { ClipboardPaste, Download } from 'lucide-react'
 import { useId, useState } from 'react'
 import type { AppErrorData } from '../../../shared/errors/app-error'
 import { libraryMessages } from '../messages/library'
 import { useCall } from '../shell/hooks'
-import { Button, Checkbox, Dialog, ErrorMessage, Field } from '../ui'
+import { Icon, Button, Checkbox, Dialog, ErrorMessage, Field } from '../ui'
 import styles from './GrblImportDialog.module.css'
 import formStyles from './LibraryForm.module.css'
 
@@ -130,7 +129,7 @@ export function GrblImportDialog({
     <Button
       size="sm"
       variant="ghost"
-      icon={<ClipboardPaste aria-hidden="true" />}
+      icon={<Icon name="paste" />}
       disabled={disabled}
       title={disabled ? t.saveFirst : undefined}
     >
@@ -146,7 +145,7 @@ export function GrblImportDialog({
         </Button>
         <Button
           variant="primary"
-          icon={<ClipboardPaste aria-hidden="true" />}
+          icon={<Icon name="paste" />}
           disabled={busy || text.trim() === ''}
           onClick={() => void compare()}
         >
@@ -160,7 +159,7 @@ export function GrblImportDialog({
         </Button>
         <Button
           variant="primary"
-          icon={<Download aria-hidden="true" />}
+          icon={<Icon name="download" />}
           disabled={busy || accepted.size === 0}
           onClick={() => void apply()}
         >

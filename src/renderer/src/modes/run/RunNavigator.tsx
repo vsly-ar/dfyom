@@ -3,12 +3,11 @@
 // and the work zero. Disabled controls say why: once, in one notice above the homing, jog and
 // work-zero sections (one reason usually disables them all), each control described by its line. Doc: docs/conventions/ui.md#run-mode-safety-ui,
 // docs/modes/run-v0.1.md#commands-and-queries
-import { Crosshair, House, Info, Plug, Unplug } from 'lucide-react'
 import { useEffect, useId, useState } from 'react'
 import type { ProjectDoc } from '../../../../core/project/document'
 import type { TimeScale } from '../../../../core/run/clock'
 import { runMessages } from '../../messages/run'
-import { Button, ConfirmDialog, ErrorMessage, Select, StatusChip } from '../../ui'
+import { Icon, Button, ConfirmDialog, ErrorMessage, Select, StatusChip } from '../../ui'
 import { JogPad } from './JogPad'
 import { formatLength, isConnected, runGates } from './machine-state'
 import { runnablePlans } from './plan-info'
@@ -48,7 +47,7 @@ function Why({ id, reason }: { id: string; reason: string | null }) {
 function WhyNotice({ reasons }: { reasons: readonly { id: string; text: string }[] }) {
   return reasons.length === 0 ? null : (
     <div className={styles['notice']}>
-      <Info aria-hidden="true" />
+      <Icon name="info" />
       <div>
         {reasons.map((r) => (
           <p key={r.id} id={r.id} className={styles['why']}>
@@ -146,7 +145,7 @@ export function RunNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
           <>
             <Button
               size="lg"
-              icon={<Unplug aria-hidden="true" />}
+              icon={<Icon name="disconnect" />}
               disabled={gates.disconnect !== null || busy('run.connection.close')}
               {...(gates.disconnect === null ? {} : { 'aria-describedby': ids.connect })}
               onClick={() => void a.disconnect()}
@@ -160,7 +159,7 @@ export function RunNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
               size="lg"
               variant="primary"
               className={styles['wrapButton']}
-              icon={<Plug aria-hidden="true" />}
+              icon={<Icon name="connect" />}
               disabled={
                 chosen === undefined ||
                 status.connection.state !== 'closed' ||
@@ -181,7 +180,7 @@ export function RunNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
         <div className={styles['buttons']}>
           <Button
             size="lg"
-            icon={<House aria-hidden="true" />}
+            icon={<Icon name="home" />}
             disabled={gates.home !== null || busy('run.machine.home')}
             {...(gates.home === null ? {} : { 'aria-describedby': ids.home })}
             onClick={() => void a.home()}
@@ -279,7 +278,7 @@ export function WorkZeroButtons({
         {only === undefined ? (
           <Button
             size="lg"
-            icon={<Crosshair aria-hidden="true" />}
+            icon={<Icon name="work-zero" />}
             disabled={disabled}
             {...describe}
             onClick={() => onZero(['x', 'y', 'z'])}

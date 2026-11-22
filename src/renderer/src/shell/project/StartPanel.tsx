@@ -1,11 +1,10 @@
 // The navigator without a project (every mode): New project, Open project, and the projects with
 // unsaved changes from an earlier session (restore or discard, persistence.md#crash-recovery).
 // Doc: docs/conventions/ui.md#project-files
-import { FilePlus, FolderOpen } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useStore } from 'zustand'
 import { projectMessages as m } from '../../messages/project'
-import { Button, ConfirmDialog } from '../../ui'
+import { Icon, Button, ConfirmDialog } from '../../ui'
 import { useShell } from '../ShellContext'
 import styles from './Project.module.css'
 
@@ -27,15 +26,12 @@ export function StartPanel(): React.JSX.Element {
       <div className={styles['actions']}>
         <Button
           variant="primary"
-          icon={<FilePlus aria-hidden="true" />}
+          icon={<Icon name="file-new" />}
           onClick={() => files.getState().newProject()}
         >
           {m.start.new}
         </Button>
-        <Button
-          icon={<FolderOpen aria-hidden="true" />}
-          onClick={() => void files.getState().open()}
-        >
+        <Button icon={<Icon name="open" />} onClick={() => void files.getState().open()}>
           {m.start.open}
         </Button>
       </div>

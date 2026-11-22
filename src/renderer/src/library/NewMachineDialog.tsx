@@ -3,13 +3,12 @@
 // editor, L4) that adds the machine with `library.machine.add` and hands its id to `onAdded`. The
 // core validates; its issues show at their field, the rest above the fields.
 // Doc: docs/conventions/ui.md#plan-mode-task-37, docs/conventions/ui-library-window.md
-import { Cpu, Plus } from 'lucide-react'
 import { useState } from 'react'
 import type { UnitSystem } from '../../../core/project/document'
 import type { AppErrorData } from '../../../shared/errors/app-error'
 import { libraryMessages } from '../messages/library'
 import { useCall } from '../shell/hooks'
-import { Button, Dialog, DialogClose } from '../ui'
+import { Icon, Button, Dialog, DialogClose } from '../ui'
 import { commandInput, defaultMachineValues, type MachineDraft } from './form'
 import { LibraryFormBody, useLibraryForm } from './LibraryForm'
 import { MACHINE_FIELDS, MachineFields } from './MachineFields'
@@ -51,7 +50,7 @@ export function NewMachineDialog({
         open={f.open}
         onOpenChange={open}
         trigger={
-          <Button size="sm" icon={<Plus aria-hidden="true" />} disabled={disabled}>
+          <Button size="sm" icon={<Icon name="add" />} disabled={disabled}>
             {m.open}
           </Button>
         }
@@ -62,7 +61,7 @@ export function NewMachineDialog({
             </DialogClose>
             <Button
               variant="primary"
-              icon={<Cpu aria-hidden="true" />}
+              icon={<Icon name="machine" />}
               disabled={f.busy}
               onClick={() => void submit()}
             >

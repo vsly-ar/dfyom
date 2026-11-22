@@ -133,6 +133,17 @@
   height: var(--icon-md);
 }
 
+/* the selected row's icon shows its accent part (B22-3) */
+.op[data-selected] .opSelect > svg [data-accent] {
+  stroke: var(--accent-icon);
+  filter: var(--accent-icon-edge);
+}
+
+.op[data-selected] .opSelect > svg [data-accent][data-fill] {
+  fill: var(--accent-icon);
+  stroke: none;
+}
+
 .opName {
   overflow: hidden;
   text-overflow: ellipsis;

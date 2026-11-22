@@ -5,7 +5,6 @@
 // the anchor and position in the Shape group (OperationFields.tsx). A choice is one command on
 // `shape`.
 // Doc: docs/conventions/ui.md#shape-in-the-operation-inspector, docs/modes/design-v0.3.md#dfm-checks-for-shapes
-import { Combine, PenLine } from 'lucide-react'
 import { useMemo } from 'react'
 import { resolveShape } from '../../../../core/design/shape'
 import type { ShapeDTO } from '../../../../core/design/shape.dto'
@@ -15,7 +14,7 @@ import type { DfmWarning } from '../../../../core/geometry/model'
 import { designMessages } from '../../messages/design'
 import { dfmMessages, lengthSource } from '../../messages/dfm'
 import { useRegion2d } from '../../shell/ShellContext'
-import { Button, Field, Select, type FieldMessage } from '../../ui'
+import { Icon, Button, Field, Select, type FieldMessage } from '../../ui'
 import { chainPath, fitView, unplacePoint } from '../../viewport/flat-view'
 import styles from './Design.module.css'
 import { quantityOf, updateArgs } from './model'
@@ -231,13 +230,13 @@ export function ShapePicker({
           {shape.kind === 'named' ? (
             <Button
               size="sm"
-              icon={<PenLine aria-hidden="true" />}
+              icon={<Icon name="edit" />}
               onClick={() => actions.editShape(shape.shapeId)}
             >
               {p.editShape}
             </Button>
           ) : (
-            <Button size="sm" icon={<Combine aria-hidden="true" />} onClick={actions.convert}>
+            <Button size="sm" icon={<Icon name="shapes" />} onClick={actions.convert}>
               {p.convert}
             </Button>
           )}

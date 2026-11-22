@@ -6,7 +6,6 @@
 // field (task F5, design only) comes in as `tool`, shown as the group after the one with `on`.
 // Doc: docs/conventions/ui.md#quantity-and-expression-input, #selection-and-picking,
 // #design-and-plan-controls-v02; docs/modes/design.md#operations-v01
-import { Crosshair } from 'lucide-react'
 import type { FieldKind } from '../../../../core/design/operation'
 import type { OperationDTO } from '../../../../core/design/part.dto'
 import { STOCK_FACE } from '../../../../core/geometry/face'
@@ -18,6 +17,7 @@ import { designMessages } from '../../messages/design'
 import { dfmMessages } from '../../messages/dfm'
 import { useShell, useUi } from '../../shell/ShellContext'
 import {
+  Icon,
   AnchorPicker,
   Field,
   FieldIcon,
@@ -674,7 +674,7 @@ function OnField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Element | 
         <IconButton
           label={t.pickOn}
           shortcut="Alt+P"
-          icon={<Crosshair aria-hidden="true" />}
+          icon={<Icon name="pick" />}
           pressed={picking}
           className={styles['pickButton']}
           onClick={() =>

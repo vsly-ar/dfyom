@@ -1,17 +1,17 @@
 // StatusChip: evaluation, plan and stale status as a label with an icon (colour never alone).
 // Machine state has its own badge (MachineStateBadge). Doc: docs/conventions/ui.md#inventory-v01
-import { Check, CircleAlert, LoaderCircle, TriangleAlert, type LucideIcon } from 'lucide-react'
+import { Icon, type IconName } from '../icons/Icon'
 import type { ReactNode } from 'react'
 import styles from './StatusChip.module.css'
 
 export type StatusTone = 'neutral' | 'success' | 'busy' | 'warning' | 'danger'
 
-const ICONS: Record<StatusTone, LucideIcon | null> = {
+const ICONS: Record<StatusTone, IconName | null> = {
   neutral: null,
-  success: Check,
-  busy: LoaderCircle,
-  warning: TriangleAlert,
-  danger: CircleAlert,
+  success: 'check',
+  busy: 'busy',
+  warning: 'warning',
+  danger: 'error',
 }
 
 export interface StatusChipProps {
@@ -29,10 +29,10 @@ export function StatusChip({
   icon,
   className,
 }: StatusChipProps): React.JSX.Element {
-  const Icon = ICONS[tone]
+  const name = ICONS[tone]
   return (
     <span data-tone={tone} className={[styles['chip'], className].filter(Boolean).join(' ')}>
-      {icon ?? (Icon ? <Icon aria-hidden="true" className={styles['icon']} /> : null)}
+      {icon ?? (name ? <Icon name={name} className={styles['icon']} /> : null)}
       {children}
     </span>
   )

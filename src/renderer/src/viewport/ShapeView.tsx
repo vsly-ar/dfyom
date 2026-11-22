@@ -9,7 +9,6 @@
 // `snap.ts`; Alt places freely, the "Snap" toggle turns it off), the reference section is drawn
 // with its depth field, and the measure tool (`M`) measures between two snapped points.
 // Doc: docs/conventions/ui.md#shape-editor, #shapes-v03, #accessibility-shape-ui, #snap-and-measure
-import { Eye, Magnet, Maximize, Ruler, X } from 'lucide-react'
 import {
   useCallback,
   useEffect,
@@ -29,7 +28,14 @@ import type { UnitSystem } from '../../../core/project/document'
 import type { Quantity } from '../../../core/quantity/quantity'
 import { shapeMessages } from '../messages/shape'
 import { snapMessages } from '../messages/snap'
-import { QuantityInput, Toolbar, ToolbarButton, ToolbarSeparator, useReducedMotion } from '../ui'
+import {
+  Icon,
+  QuantityInput,
+  Toolbar,
+  ToolbarButton,
+  ToolbarSeparator,
+  useReducedMotion,
+} from '../ui'
 import {
   chainPath,
   dragStepMm,
@@ -979,7 +985,7 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
           {snap !== null ? (
             <ToolbarButton
               label={sm.toggle}
-              icon={<Magnet aria-hidden="true" />}
+              icon={<Icon name="snap" />}
               pressed={snap.on}
               tooltipSide="bottom"
               onClick={() => snap.onToggle(!snap.on)}
@@ -988,7 +994,7 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
           <ToolbarButton
             label={sm.measure.tool}
             shortcut="M"
-            icon={<Ruler aria-hidden="true" />}
+            icon={<Icon name="measure" />}
             pressed={measuring}
             tooltipSide="bottom"
             onClick={toggleMeasure}
@@ -996,7 +1002,7 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
           <ToolbarSeparator />
           <ToolbarButton
             label={m.showItems}
-            icon={<Eye aria-hidden="true" />}
+            icon={<Icon name="eye" />}
             pressed={props.showItems}
             tooltipSide="bottom"
             onClick={() => props.onShowItems(!props.showItems)}
@@ -1004,14 +1010,14 @@ export function ShapeView(props: ShapeViewProps): React.JSX.Element {
           <ToolbarButton
             label={m.fit}
             shortcut="F"
-            icon={<Maximize aria-hidden="true" />}
+            icon={<Icon name="fit" />}
             tooltipSide="bottom"
             onClick={fit}
           />
           <ToolbarButton
             label={m.close}
             shortcut="Esc"
-            icon={<X aria-hidden="true" />}
+            icon={<Icon name="close" />}
             tooltipSide="bottom"
             onClick={props.onExit}
           />

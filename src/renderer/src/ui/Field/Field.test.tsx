@@ -1,5 +1,5 @@
+import { Icon } from '../icons/Icon'
 import { screen } from '@testing-library/react'
-import { Plus } from 'lucide-react'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
@@ -109,7 +109,10 @@ describe('Field', () => {
         <Field
           label="Tool"
           messages={[
-            { ...soft, fix: { label: 'Add to library', onApply: () => {}, icon: <Plus /> } },
+            {
+              ...soft,
+              fix: { label: 'Add to library', onApply: () => {}, icon: <Icon name="add" /> },
+            },
           ]}
         >
           <input />
@@ -117,8 +120,8 @@ describe('Field', () => {
       </>,
     )
     const icon = (name: string) => screen.getByRole('button', { name }).querySelector('svg')
-    expect(icon('Use 1.20')).toHaveClass('lucide-check')
-    expect(icon('Add to library')).toHaveClass('lucide-plus')
+    expect(icon('Use 1.20')).toHaveAttribute('data-icon', 'check')
+    expect(icon('Add to library')).toHaveAttribute('data-icon', 'add')
   })
 
   it('dismisses a soft warning to "1 dismissed · Show" and restores it, keeping focus in place', async () => {

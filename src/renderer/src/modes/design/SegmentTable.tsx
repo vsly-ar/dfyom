@@ -6,12 +6,11 @@
 // Alt+↑/↓ moves a row, Delete on # removes it with an undo toast (the navigator's). Every cell is a QuantityInput
 // (or a choice); every commit is one `design.shape.item.update` of the segment (or fillet) list.
 // Doc: docs/conventions/ui.md#shape-editor, docs/modes/design-v0.3.md#shape-definition
-import { Plus } from 'lucide-react'
 import { useRef, useState, type KeyboardEvent } from 'react'
 import type { ShapeSegment } from '../../../../core/design/shape.dto'
 import { shapeMessages } from '../../messages/shape'
 import { useShell } from '../../shell/ShellContext'
-import { Button, Checkbox, Menu, QuantityInput, SegmentedControl, Select } from '../../ui'
+import { Icon, Button, Checkbox, Menu, QuantityInput, SegmentedControl, Select } from '../../ui'
 import { defaultUnit } from './model'
 import styles from './Design.module.css'
 import { ItemQuantity, type ItemEditContext } from './ShapeInspector'
@@ -197,7 +196,7 @@ export function SegmentTable({
     <section className={styles['group']} aria-label={t.title}>
       <div className={styles['groupHead']}>
         <h3 className={styles['groupTitle']}>{t.title}</h3>
-        <Button size="sm" variant="ghost" icon={<Plus aria-hidden="true" />} onClick={addRow}>
+        <Button size="sm" variant="ghost" icon={<Icon name="add" />} onClick={addRow}>
           {t.add}
         </Button>
       </div>

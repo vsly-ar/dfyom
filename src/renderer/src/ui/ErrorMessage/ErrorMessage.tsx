@@ -2,7 +2,7 @@
 // (the catalogue's message, else the code's userMessage); code, developer message, issues and
 // frames only in a "Details" expander with "Copy details" (for bug reports). Info-level errors
 // (incl. `op.aborted`) render neutral. Doc: docs/conventions/ui.md#errors
-import { CircleAlert, Info, TriangleAlert } from 'lucide-react'
+import { Icon, type IconName } from '../icons/Icon'
 import { Collapsible } from 'radix-ui'
 import { useState } from 'react'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
@@ -30,7 +30,10 @@ function toneOf(error: AppErrorData): Tone {
   return severity === 'warn' ? 'warning' : 'danger'
 }
 
-const ICONS = { neutral: Info, warning: TriangleAlert, danger: CircleAlert } as const
+const ICONS = { neutral: 'info', warning: 'warning', danger: 'error' } as const satisfies Record<
+  Tone,
+  IconName
+>
 
 /** Developer-facing text of the error, as copied for bug reports. */
 export function errorDetails(error: AppErrorData): string {
@@ -46,7 +49,7 @@ export function ErrorMessage({
 }: ErrorMessageProps): React.JSX.Element {
   const [copied, setCopied] = useState(false)
   const tone = toneOf(error)
-  const Icon = ICONS[tone]
+  const icon = ICONS[tone]
   const text = message ?? ERROR_CODES[error.code]?.userMessage ?? error.message
   const canRetry = (retryable ?? ERROR_CODES[error.code]?.retryable ?? false) && onRetry
   return (
@@ -55,7 +58,7 @@ export function ErrorMessage({
       data-tone={tone}
       className={[styles['root'], className].filter(Boolean).join(' ')}
     >
-      <Icon aria-hidden="true" className={styles['icon']} />
+      <Icon name={icon} className={styles['icon']} />
       <div className={styles['body']}>
         <p className={styles['text']}>{text}</p>
         <Collapsible.Root className={styles['details']}>

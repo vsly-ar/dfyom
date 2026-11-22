@@ -2,11 +2,10 @@
 // the plan's machine, "Open library" in the stock setup. Opens (or focuses) the window on the
 // item's tab with the item selected, with this window's project as its context.
 // Doc: docs/conventions/ui-library-window.md#decisions-assumed
-import { Library } from 'lucide-react'
 import type { LibraryTarget } from '../../../shared/preload-api'
 import { libraryMessages } from '../messages/library'
 import { useShell } from '../shell/ShellContext'
-import { Button } from '../ui'
+import { Icon, Button } from '../ui'
 
 export function LibraryLink({
   target,
@@ -20,7 +19,7 @@ export function LibraryLink({
     <Button
       size="sm"
       variant="ghost"
-      icon={<Library aria-hidden="true" />}
+      icon={<Icon name="library" />}
       onClick={() => void bridge.library.open(target)}
     >
       {label}

@@ -9,7 +9,6 @@
 // one and locks it (docs/conventions/ui-library-window.md L4).
 // Doc: docs/modes/design-v0.2.md#operation-tool, #implementation-task-f5;
 // docs/conventions/ui.md#design-and-plan-controls-v02; docs/architecture/apply.md#stale-derived-results
-import { Clock, Plus } from 'lucide-react'
 import { useEffect, useId, useState } from 'react'
 import type { DesignToolDTO, OperationDTO, PartDTO } from '../../../../core/design/part.dto'
 import { designChangeTargets } from '../../../../core/design/shape-users'
@@ -27,7 +26,9 @@ import { libraryMessages } from '../../messages/library'
 import { useLibraryVersion, usePending, useReplica, useShell } from '../../shell/ShellContext'
 import type { PendingChangeView, ToolChangeView } from '../../state/pending'
 import { toolChangeKey } from '../../state/pending'
-import { Field, FieldIcon, Select, type FieldMessage, type SelectOption } from '../../ui'
+import type { ToolType } from '../../../../core/library/tool.dto'
+import { TOOL_TYPE_ICON } from '../../library/toolTypeIcon'
+import { Field, FieldIcon, Icon, Select, type FieldMessage, type SelectOption } from '../../ui'
 import styles from './Design.module.css'
 import { pendingApply, quantityAt, type DesignPart } from './model'
 import { useCommand } from './useDesign'
@@ -39,6 +40,7 @@ export interface ToolCandidates {
   readonly fitting: readonly {
     readonly toolLibraryItemId: string
     readonly name: string
+    readonly type: ToolType
     /** mm */
     readonly diameter: number
     readonly reasons: readonly string[]
@@ -72,6 +74,23 @@ export function toolLabel(tool: DesignToolDTO, doc: DesignPart['doc']): string |
   return g.isOk() && g.unwrap().kind === 'generalized'
     ? generalizedLabel(g.unwrap() as Parameters<typeof generalizedLabel>[0])
     : undefined
+}
+
+/** The tool's type: the generalized tool's, or the library tool's (its snapshot). */
+export function toolType(tool: DesignToolDTO, doc: DesignPart['doc']): ToolType | undefined {
+  if (tool.kind === 'generalized') return tool.type
+  const snap = Object.hasOwn(doc.snapshots, tool.snapshotId)
+    ? doc.snapshots[tool.snapshotId]
+    : undefined
+  const type = (snap?.values as { type?: unknown } | undefined)?.type
+  return typeof type === 'string' && Object.hasOwn(TOOL_TYPE_ICON, type)
+    ? (type as ToolType)
+    : undefined
+}
+
+/** The tool type's icon at the picker's size (20 px, B22-4), beside the tool's name. */
+function typeIcon(type: ToolType | undefined): { icon?: React.ReactNode } {
+  return type === undefined ? {} : { icon: <Icon name={TOOL_TYPE_ICON[type]} size="lg" /> }
 }
 
 /** Whether two tool field values name the same tool (generalized by value). */
@@ -198,7 +217,13 @@ export function toolOptions(
     ...r,
     options: [
       ...r.options,
-      { value: NEW_TOOL, label: t.newTool, group: t.groups.add, description: t.newToolNote },
+      {
+        value: NEW_TOOL,
+        label: t.newTool,
+        group: t.groups.add,
+        description: t.newToolNote,
+        icon: <Icon name="add" size="lg" />,
+      },
     ],
   }
 }
@@ -216,6 +241,7 @@ function listedOptions(
       label: toolLabel(g, part.doc) ?? designMessages.tool.previousTool,
       group: t.groups.generalized,
       description: t.generalizedNote,
+      ...typeIcon(toolType(g, part.doc)),
     })
   for (const f of candidates?.fitting ?? []) {
     const reasons = f.reasons.filter((r) => !r.startsWith('diameter '))
@@ -223,6 +249,7 @@ function listedOptions(
       value: `${LIB}${f.toolLibraryItemId}`,
       label: t.library(f.name, lengthSource(f.diameter, part.units)),
       group: t.groups.library,
+      ...typeIcon(f.type),
       ...(reasons.length > 0 ? { description: reasons.map(sentenceCase).join(' · ') } : {}),
     })
   }
@@ -240,6 +267,7 @@ function listedOptions(
     value: CURRENT,
     label: t.current(toolLabel(current, part.doc) ?? t.previousTool),
     group: t.groups.current,
+    ...typeIcon(toolType(current, part.doc)),
     ...(fits ? {} : { description: t.currentUnfit }),
   })
   return { options, value: CURRENT }
@@ -291,6 +319,7 @@ export function ToolField({
   const locked = op.toolLocked === true
   const waiting = !locked && operationPending(pending.changes, part.dto, op.id)
   const { options, value } = toolOptions(candidates, op, part)
+  const currentType = op.tool === undefined ? undefined : toolType(op.tool, part.doc)
 
   const send = async (name: string, args: object = {}) => {
     const r = await call(name, { partId, operationId: op.id, ...args })
@@ -328,7 +357,7 @@ export function ToolField({
           ? {
               id: w.code,
               severity: 'soft',
-              icon: <Clock aria-hidden="true" />,
+              icon: <Icon name="clock" />,
               text: `${text} ${applyMessages.warningPending}`,
             }
           : {
@@ -340,7 +369,7 @@ export function ToolField({
                 ? {
                     fix: {
                       label: t.addToLibrary,
-                      icon: <Plus aria-hidden="true" />,
+                      icon: <Icon name="add" />,
                       onApply: () => setAdding(true),
                     },
                   }
@@ -384,6 +413,9 @@ export function ToolField({
             candidates !== undefined && options.length === 1 ? t.noChoice : t.placeholder
           }
           muted={waiting}
+          {...(currentType === undefined
+            ? {}
+            : { valueIcon: <Icon name={TOOL_TYPE_ICON[currentType]} /> })}
           onValueChange={choose}
           onOpenChange={(open) => {
             if (open) reread()
@@ -399,7 +431,7 @@ export function ToolField({
           className={styles['toolSource']}
           data-waiting={waiting || undefined}
         >
-          {waiting ? <Clock aria-hidden="true" /> : null}
+          {waiting ? <Icon name="clock" /> : null}
           <span>{source}</span>
         </p>
       ) : null}

@@ -2,12 +2,11 @@
 // mode shows the start panel (New / Open, recovery). Design (3.6, modes/design/), plan (3.7,
 // modes/plan/) and run (3.12, modes/run/); a mode without its input says so and offers the way
 // there (Plan without a part → Design; Run without a plan → Plan). Mode screens use ui/ only. Doc: docs/conventions/ui.md#mode-switching, #panels-and-inspectors
-import { ArrowRight } from 'lucide-react'
 import type { AppMode } from '../../../core/modes'
 import type { ProjectDoc } from '../../../core/project/document'
 import { shellMessages } from '../messages/shell'
 import { StartPanel } from '../shell/project/StartPanel'
-import { EmptyState, PanelHeader } from '../ui'
+import { Icon, EmptyState, PanelHeader } from '../ui'
 import { DesignInspector } from './design/DesignInspector'
 import { DesignNavigator } from './design/DesignNavigator'
 import { DesignStatus } from './design/DesignStatus'
@@ -57,7 +56,7 @@ export function ModeNavigator({ mode, doc, onMode }: ModePanelProps): React.JSX.
             description={m.plan.noPart.description}
             action={{
               label: m.plan.noPart.action,
-              icon: <ArrowRight aria-hidden="true" />,
+              icon: <Icon name="arrow-right" />,
               onClick: () => onMode('design'),
             }}
           />
@@ -73,7 +72,7 @@ export function ModeNavigator({ mode, doc, onMode }: ModePanelProps): React.JSX.
             description={m.run.noPlan.description}
             action={{
               label: m.run.noPlan.action,
-              icon: <ArrowRight aria-hidden="true" />,
+              icon: <Icon name="arrow-right" />,
               onClick: () => onMode('plan'),
             }}
           />

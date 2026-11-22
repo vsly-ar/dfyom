@@ -5,7 +5,6 @@
 // surface targets back. Doc: docs/conventions/ui.md#selection-and-picking,
 // docs/architecture/geometry.md#worker-and-renderer, docs/conventions/ui-view-cube.md, ADR 0010
 import { Canvas } from '@react-three/fiber'
-import { Ruler } from 'lucide-react'
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Vector3, type PerspectiveCamera } from 'three'
 import type { Placement } from '../../../core/geometry/model'
@@ -20,7 +19,7 @@ import {
   Menu,
   Toolbar,
   ToolbarButton,
-  ToolIcon,
+  Icon,
   Tooltip,
   useReducedMotion,
   type MenuEntry,
@@ -668,18 +667,18 @@ export function Viewport({
           <ToolbarButton
             label={msg.fit}
             shortcut="F"
-            icon={<ToolIcon name="fit" />}
+            icon={<Icon name="fit" />}
             tooltipSide="bottom"
             onClick={fit}
           />
           <Menu label={msg.views} align="end" items={viewItems}>
-            <ToolbarButton label={msg.views} icon={<ToolIcon name="iso" />} tooltipSide="bottom" />
+            <ToolbarButton label={msg.views} icon={<Icon name="iso" />} tooltipSide="bottom" />
           </Menu>
           {run ? null : (
             <ToolbarButton
               label={snapMessages.measure.tool}
               shortcut="M"
-              icon={<Ruler aria-hidden="true" />}
+              icon={<Icon name="measure" />}
               pressed={measureOn}
               tooltipSide="bottom"
               onClick={toggleMeasure}

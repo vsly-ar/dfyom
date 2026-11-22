@@ -199,7 +199,7 @@ Rules for [ui.md](../conventions/ui.md) once accepted.
 ### Apply button
 
 - **Place:** the main toolbar's end column ([app shell](../conventions/ui.md#app-shell)), its **first** item, left of the machine group and the panel toggles, so appearing never moves the controls to its right; the centre column keeps the mode switcher centred.
-- **Look:** a primary `Button` (semibold label, amber `--accent-icon` icon, [decision 19](../conventions/ui.md#decisions)), icon Lucide `check-check`, label "Apply" with the count as a tabular-numeral badge: "Apply 3". At most one primary in the toolbar.
+- **Look:** a primary `Button` (semibold label, amber `--accent-icon` icon, [decision 19](../conventions/ui.md#decisions)), icon `check-all` ([own set](../conventions/ui.md#icons)), label "Apply" with the count as a tabular-numeral badge: "Apply 3". At most one primary in the toolbar.
 - **States:**
 
 | State                          | Shown                                                                                                                                                            | Click                                                 |

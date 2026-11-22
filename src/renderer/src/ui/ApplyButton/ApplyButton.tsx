@@ -1,12 +1,12 @@
-// ApplyButton: the main toolbar's "Apply N" (v0.2, D13; task P3). A primary Button (Lucide
-// `check-check`, the count as a tabular badge that rolls when it changes) with a rich tooltip that
+// ApplyButton: the main toolbar's "Apply N" (v0.2, D13; task P3). A primary Button (icon
+// `check-all`, the count as a tabular badge that rolls when it changes) with a rich tooltip that
 // explains Apply and lists the pending changes. Hidden while nothing is pending: its slot collapses
 // (`--motion-base`) and stays mounted but inert, so appearing never moves the controls to its
 // right. "Applying…" with a progress ring after `--delay-indicator`; "Apply failed" (retries);
 // "Applied by agent" for 2 s. A polite live region announces the count (debounced 1 s) and the
 // outcome. Under reduced motion nothing slides, rolls, spins or fades (tokens zero the durations;
 // the indeterminate ring is static). Doc: docs/architecture/apply.md#apply-button, #tooltip
-import { CheckCheck, CircleAlert } from 'lucide-react'
+import { Icon } from '../icons/Icon'
 import { useEffect, useState } from 'react'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { ERROR_CODES } from '../../../../shared/errors/codes'
@@ -216,9 +216,9 @@ export function ApplyButton({
       variant="primary"
       icon={
         content.kind === 'failed' ? (
-          <CircleAlert aria-hidden="true" className={styles['danger']} />
+          <Icon name="error" className={styles['danger']} />
         ) : (
-          <CheckCheck aria-hidden="true" />
+          <Icon name="check-all" />
         )
       }
       aria-label={name}

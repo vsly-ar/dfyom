@@ -3,13 +3,13 @@
 // panels, the Library window and settings), status bar. Below 1280 px the inspector overlays the viewport instead of shrinking it.
 // Landmarks: banner, navigation (modes, navigator), main (viewport), complementary (inspector),
 // contentinfo (status bar); F6 cycles them. Doc: docs/conventions/ui.md#app-shell
-import { Library, PanelLeft, PanelRight, Settings } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AppMode } from '../../../core/modes'
 import { shellMessages as m } from '../messages/shell'
 import { ModeInspector, ModeNavigator } from '../modes/ModePanels'
 import { MachineToolbar } from '../modes/run'
 import {
+  Icon,
   ApplyScope,
   ModeSwitcher,
   Panel,
@@ -134,13 +134,13 @@ export function AppShell(): React.JSX.Element {
             <Toolbar label="Window">
               <ToolbarButton
                 label={m.toggles.navigator}
-                icon={<PanelLeft aria-hidden="true" />}
+                icon={<Icon name="panel-left" />}
                 pressed={navOpen}
                 onClick={() => toggle(navigator, navOpen)}
               />
               <ToolbarButton
                 label={m.toggles.inspector}
-                icon={<PanelRight aria-hidden="true" />}
+                icon={<Icon name="panel-right" />}
                 pressed={inspectorShown}
                 onClick={() =>
                   wide ? toggle(inspector, inspectorOpen) : setOverlayOpen((o) => !o)
@@ -151,13 +151,13 @@ export function AppShell(): React.JSX.Element {
               <ToolbarButton
                 label={m.library}
                 shortcut={shortcutLabel('L', { shift: true })}
-                icon={<Library aria-hidden="true" />}
+                icon={<Icon name="library" />}
                 onClick={() => void bridge.library.open()}
               />
               <ToolbarButton
                 label={m.settings}
                 shortcut={shortcutLabel(',')}
-                icon={<Settings aria-hidden="true" />}
+                icon={<Icon name="settings" />}
                 onClick={() => openSettings(true)}
               />
             </Toolbar>

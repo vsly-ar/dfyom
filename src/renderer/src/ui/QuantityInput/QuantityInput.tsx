@@ -11,7 +11,7 @@
 // commit only. Doc: docs/conventions/ui.md#quantity-and-expression-input, #field,
 // #selection-and-picking; docs/architecture/apply.md#field-rule;
 // grammar and errors: docs/architecture/quantities.md
-import { Check, Crosshair } from 'lucide-react'
+import { Icon } from '../icons/Icon'
 import {
   useEffect,
   useId,
@@ -597,7 +597,7 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
             aria-pressed={picking}
             onClick={startPick}
           >
-            <Crosshair aria-hidden="true" />
+            <Icon name="pick" />
           </button>
         </Tooltip>
       ) : null}
@@ -652,7 +652,7 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
                 <Button
                   size="sm"
                   variant="primary"
-                  icon={<Check aria-hidden="true" />}
+                  icon={<Icon name="check" />}
                   disabled={!fixAvailable}
                   onClick={() => {
                     commitSource(recommended.source, session.current?.id)

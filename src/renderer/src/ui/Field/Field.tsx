@@ -3,7 +3,7 @@
 // collapsed; a dismissed soft warning collapses to "1 dismissed · Show"). Wires the control's
 // id, aria-describedby and aria-invalid. Structure only: the quantity behaviour is QuantityInput
 // (task 3.4). Doc: docs/conventions/ui.md#field, severities: ui.md#warnings-and-dfm (decision 21)
-import { Check, ChevronDown, CircleAlert, Info, LockKeyhole, TriangleAlert, X } from 'lucide-react'
+import { Icon } from '../icons/Icon'
 import {
   cloneElement,
   isValidElement,
@@ -41,11 +41,11 @@ export interface FieldMessage {
 const RANK: Record<FieldSeverity, number> = { error: 0, hard: 1, soft: 2, info: 3, note: 4 }
 
 const ICON: Record<FieldSeverity, ReactNode> = {
-  error: <CircleAlert aria-hidden="true" />,
-  hard: <TriangleAlert aria-hidden="true" />,
-  soft: <TriangleAlert aria-hidden="true" />,
-  info: <Info aria-hidden="true" />,
-  note: <Info aria-hidden="true" />,
+  error: <Icon name="error" />,
+  hard: <Icon name="warning" />,
+  soft: <Icon name="warning" />,
+  info: <Icon name="info" />,
+  note: <Icon name="info" />,
 }
 
 /** Props the Field adds to its control (any element that spreads them onto its focusable node). */
@@ -256,7 +256,7 @@ export function Field({
                     <Button
                       size="sm"
                       variant="primary"
-                      icon={primary.fix.icon ?? <Check aria-hidden="true" />}
+                      icon={primary.fix.icon ?? <Icon name="check" />}
                       onClick={primary.fix.onApply}
                     >
                       {primary.fix.label}
@@ -275,7 +275,7 @@ export function Field({
                         setDismissed((d) => new Set(d).add(primary.id))
                       }}
                     >
-                      <X aria-hidden="true" />
+                      <Icon name="close" />
                     </button>
                   </Tooltip>
                 ) : null}
@@ -284,7 +284,7 @@ export function Field({
           ) : null}
           {lock?.disabledReason !== undefined ? (
             <div className={styles['item']} data-severity="note">
-              <LockKeyhole aria-hidden="true" />
+              <Icon name="lock" />
               <span id={lockReasonId}>{lock.disabledReason}</span>
               <span />
             </div>
@@ -299,7 +299,7 @@ export function Field({
                 setDismissed(new Set())
               }}
             >
-              <TriangleAlert aria-hidden="true" />
+              <Icon name="warning" />
               {dismissedCount} dismissed · Show
             </button>
           ) : null}
@@ -313,7 +313,7 @@ export function Field({
                 onClick={() => setExpanded((e) => !e)}
               >
                 {expanded ? 'Fewer' : `${rest.length} more`}
-                <ChevronDown aria-hidden="true" className={styles['chevron']} />
+                <Icon name="chevron-down" className={styles['chevron']} />
               </button>
               <div id={moreId} className={styles['extra']} hidden={!expanded}>
                 {rest.map((m) => (

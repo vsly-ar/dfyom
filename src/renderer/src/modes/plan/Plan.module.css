@@ -128,6 +128,12 @@
   height: var(--icon-md);
 }
 
+/* the selected row's icon shows its accent part (B22-3) */
+.op[data-selected] .opSelect > svg [data-accent] {
+  stroke: var(--accent-icon);
+  filter: var(--accent-icon-edge);
+}
+
 .opName {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -274,6 +280,9 @@
 }
 
 .sectionTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin: 0;
   font-size: var(--text-xs);
   line-height: var(--lh-xs);

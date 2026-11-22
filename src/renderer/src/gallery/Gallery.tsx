@@ -1,7 +1,6 @@
 // Dev-only gallery: every ui/ component in every variant and state, light and dark side by side
 // like the design system page. The manual review surface (not screenshotted by e2e); never shipped
 // (App.tsx loads it only in dev builds, at #gallery). Doc: docs/conventions/ui.md#inventory-v01
-import { ArrowRight, Download, Play, Redo2, Square, Undo2 } from 'lucide-react'
 import { useId, useState, type ReactNode } from 'react'
 import type { ReferenceResolver } from '../../../core/expression/evaluate'
 import { quantityFromSource } from '../../../core/expression/quantity'
@@ -53,14 +52,16 @@ import {
   Toolbar,
   ToolbarButton,
   ToolbarSeparator,
-  TOOL_ICON_NAMES,
-  ToolIcon,
-  toolIconLabel,
+  ICON_NAMES,
+  ICON_SET,
+  Icon,
+  iconLabel,
   Tooltip,
   UndoRedo,
   type FieldMessage,
   type JobView,
-  type ToolIconName,
+  type IconName,
+  type IconGroup,
 } from '../ui'
 import { designMessages } from '../messages/design'
 import { ImportReportDemo } from './ImportReportDemo'
@@ -251,7 +252,7 @@ function Specimens({ title }: { title: string }): React.JSX.Element {
           description="Plans are made from a part. Add a part in Design."
           action={{
             label: 'Go to Design',
-            icon: <ArrowRight aria-hidden="true" />,
+            icon: <Icon name="arrow-right" />,
             onClick: noop,
           }}
         />
@@ -275,11 +276,11 @@ function Buttons(): React.JSX.Element {
       </div>
       <div className={styles['line']}>
         <Button size="sm">Small</Button>
-        <Button icon={<Download aria-hidden="true" />}>With icon</Button>
-        <Button size="lg" variant="primary" icon={<Play aria-hidden="true" />}>
+        <Button icon={<Icon name="download" />}>With icon</Button>
+        <Button size="lg" variant="primary" icon={<Icon name="run" />}>
           Resume
         </Button>
-        <Button size="lg" icon={<Square aria-hidden="true" />}>
+        <Button size="lg" icon={<Icon name="kind-rectangle" />}>
           Large
         </Button>
       </div>
@@ -304,9 +305,9 @@ function ToolpathIcon(): React.JSX.Element {
 }
 
 function Toolbars(): React.JSX.Element {
-  const [tool, setTool] = useState<ToolIconName>('rect')
+  const [tool, setTool] = useState<IconName>('rect')
   const [grid, setGrid] = useState(true)
-  const tools: [ToolIconName, string][][] = [
+  const tools: [IconName, string][][] = [
     [
       ['select', 'V'],
       ['rect', 'R'],
@@ -316,7 +317,7 @@ function Toolbars(): React.JSX.Element {
     [
       ['profile', 'P'],
       ['pocket', 'K'],
-      ['drill', 'D'],
+      ['drilling', 'D'],
     ],
   ]
   return (
@@ -329,31 +330,31 @@ function Toolbars(): React.JSX.Element {
               {group.map(([name, key]) => (
                 <ToolbarButton
                   key={name}
-                  label={toolIconLabel(name)}
+                  label={iconLabel(name)}
                   shortcut={key}
                   pressed={tool === name}
                   onClick={() => setTool(name)}
-                  icon={<ToolIcon name={name} />}
+                  icon={<Icon name={name} />}
                 />
               ))}
             </span>
           ))}
           <ToolbarSeparator />
-          <ToolbarButton label="Undo" shortcut="⌘Z" icon={<Undo2 aria-hidden="true" />} />
-          <ToolbarButton label="Redo" shortcut="⇧⌘Z" disabled icon={<Redo2 aria-hidden="true" />} />
+          <ToolbarButton label="Undo" shortcut="⌘Z" icon={<Icon name="undo" />} />
+          <ToolbarButton label="Redo" shortcut="⇧⌘Z" disabled icon={<Icon name="redo" />} />
         </Toolbar>
         <Toolbar label="View" floating>
-          <ToolbarButton label="Fit" shortcut="F" icon={<ToolIcon name="fit" />} />
-          <ToolbarButton label="Isometric" shortcut="0" icon={<ToolIcon name="iso" />} />
+          <ToolbarButton label="Fit" shortcut="F" icon={<Icon name="fit" />} />
+          <ToolbarButton label="Isometric" shortcut="0" icon={<Icon name="iso" />} />
           <ToolbarButton
             label="Grid"
             shortcut="G"
             pressed={grid}
             onClick={() => setGrid((g) => !g)}
-            icon={<ToolIcon name="grid" />}
+            icon={<Icon name="grid" />}
           />
         </Toolbar>
-        <IconButton label="Run controls (large)" size="lg" icon={<ToolIcon name="simulate" />} />
+        <IconButton label="Run controls (large)" size="lg" icon={<Icon name="simulate" />} />
       </div>
     </Row>
   )
@@ -779,7 +780,7 @@ function Overlays(): React.JSX.Element {
       <div className={styles['overlays']}>
         <Stage>
           <Tooltip content="Rectangle" shortcut="R" open side="right">
-            <IconButton label="Rectangle" icon={<ToolIcon name="rect" />} />
+            <IconButton label="Rectangle" icon={<Icon name="rect" />} />
           </Tooltip>
         </Stage>
         <Stage tall>
@@ -855,19 +856,46 @@ function Overlays(): React.JSX.Element {
   )
 }
 
+const ICON_GROUPS: [IconGroup, string][] = [
+  ['operation', 'Operations'],
+  ['tool', 'Tool types (20 px in the tool picker)'],
+  ['shape', 'Drawing tools and shape kinds'],
+  ['cnc', 'Modes and CNC actions'],
+  ['view', 'Views'],
+  ['action', 'Generic actions (no accent part)'],
+  ['status', 'Status (coloured by the status)'],
+]
+
+/** The B22 set from its single source: each icon at rest and active (accent amber). */
 function Icons(): React.JSX.Element {
   return (
-    <Row label="Icons · own tool icons (accent detail when active), field illustrations">
-      <div className={styles['icons']}>
-        {TOOL_ICON_NAMES.map((name) => (
-          <figure key={name} className={styles['figure']}>
-            <span className={styles['iconCell']} data-active={name === 'pocket' || undefined}>
-              <ToolIcon name={name} />
-            </span>
-            <figcaption>{toolIconLabel(name)}</figcaption>
-          </figure>
-        ))}
-      </div>
+    <Row label="Icons · own set (B22): rest, active (accent part amber), 20 px; then field illustrations">
+      {ICON_GROUPS.map(([group, title]) => (
+        <div key={group} className={styles['iconGroup']}>
+          <h4 className={styles['iconGroupTitle']}>{title}</h4>
+          <div className={styles['icons']}>
+            {ICON_NAMES.filter((n) => ICON_SET[n].group === group).map((name) => (
+              <figure key={name} className={styles['figure']}>
+                <span className={styles['iconStates']}>
+                  <span className={styles['iconCell']}>
+                    <Icon name={name} />
+                  </span>
+                  <span className={styles['iconCell']} data-active="">
+                    <Icon name={name} />
+                  </span>
+                  <span className={styles['iconCell']} data-active="">
+                    <Icon name={name} size="lg" />
+                  </span>
+                </span>
+                <figcaption>
+                  {iconLabel(name)}
+                  {'reserved' in ICON_SET[name] ? ' (not shown yet)' : ''}
+                </figcaption>
+              </figure>
+            ))}
+          </div>
+        </div>
+      ))}
       <div className={styles['icons']}>
         {FIELD_ICON_NAMES.map((name) => (
           <figure key={name} className={styles['figure']}>

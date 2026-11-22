@@ -1,7 +1,7 @@
 // JobIndicator: the status bar's view of running jobs (count, the newest job's label and
 // progress), shown only after --delay-indicator so fast work never flickers; opens JobList with
 // each job's progress, pause/resume and cancel. Doc: docs/conventions/ui.md#jobs-and-progress
-import { LoaderCircle, Pause, Play, X } from 'lucide-react'
+import { Icon } from '../icons/Icon'
 import { useEffect, useState } from 'react'
 import { IconButton } from '../IconButton/IconButton'
 import { Popover } from '../Popover/Popover'
@@ -49,19 +49,19 @@ export function JobList({ jobs, onPause, onResume, onCancel }: JobListProps): Re
               {j.state === 'paused' ? (
                 <IconButton
                   label={`Resume ${j.label}`}
-                  icon={<Play aria-hidden="true" />}
+                  icon={<Icon name="play" />}
                   onClick={() => onResume(j.id)}
                 />
               ) : (
                 <IconButton
                   label={`Pause ${j.label}`}
-                  icon={<Pause aria-hidden="true" />}
+                  icon={<Icon name="pause" />}
                   onClick={() => onPause(j.id)}
                 />
               )}
               <IconButton
                 label={`Cancel ${j.label}`}
-                icon={<X aria-hidden="true" />}
+                icon={<Icon name="close" />}
                 onClick={() => onCancel(j.id)}
               />
             </span>
@@ -108,7 +108,7 @@ export function JobIndicator({
   return (
     <Popover label="Jobs" title="Jobs" side="top" content={<JobList jobs={jobs} {...handlers} />}>
       <button type="button" className={[styles['trigger'], className].filter(Boolean).join(' ')}>
-        <LoaderCircle aria-hidden="true" className={styles['spinner']} />
+        <Icon name="busy" className={styles['spinner']} />
         {text}
         {/* decorative; the list has the accessible progress bars */}
         <span className={styles['mini']} data-indeterminate={value === null || undefined}>

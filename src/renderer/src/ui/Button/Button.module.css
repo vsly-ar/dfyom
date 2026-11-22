@@ -43,9 +43,24 @@
 }
 
 .button[data-variant='primary'] svg {
+  stroke-width: 1.6px;
+}
+
+/* the primary button's icon is amber (decision 19): an icon with an accent part shows only that
+   part amber, an icon without one turns amber whole (B22-3, ui.md#icons) */
+.button[data-variant='primary'] svg:not(:has([data-accent])) {
   color: var(--accent-icon);
   filter: var(--accent-icon-edge);
-  stroke-width: 1.6px;
+}
+
+.button[data-variant='primary'] svg [data-accent] {
+  stroke: var(--accent-icon);
+  filter: var(--accent-icon-edge);
+}
+
+.button[data-variant='primary'] svg [data-accent][data-fill] {
+  fill: var(--accent-icon);
+  stroke: none;
 }
 
 .button[data-variant='primary']:hover {
@@ -100,7 +115,14 @@
   transform: none;
 }
 
-.button:disabled svg {
+.button:disabled svg,
+.button:disabled svg [data-accent] {
   color: inherit;
+  stroke: currentColor;
   filter: none;
+}
+
+.button:disabled svg [data-fill] {
+  fill: currentColor;
+  stroke: none;
 }

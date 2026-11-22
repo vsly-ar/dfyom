@@ -11,33 +11,13 @@
 // in a narrow navigator. Selecting a setup opens it in the inspector; the selected setup (or the
 // selected operation's) is the one previewed and exported. Doc: docs/conventions/ui.md#design-and-plan-controls-v02,
 // docs/modes/plan-v0.2.md#merge-split-reorder
-import {
-  ArrowDown,
-  ArrowUp,
-  CircleAlert,
-  CircleCheck,
-  CircleDashed,
-  Combine,
-  History,
-  MoreHorizontal,
-  Split,
-  TriangleAlert,
-  CornerDownRight,
-} from 'lucide-react'
 import { useRef, useState, type KeyboardEvent } from 'react'
 import { DIRECTION_LABEL } from '../../../../core/geometry/face'
 import type { PlanDTO, PlanOperationDTO, SetupDTO } from '../../../../core/plan/plan.dto'
 import type { ProjectDoc } from '../../../../core/project/document'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { planMessages } from '../../messages/plan'
-import {
-  ErrorMessage,
-  IconButton,
-  Menu,
-  ToolIcon,
-  type MenuEntry,
-  type ToolIconName,
-} from '../../ui'
+import { ErrorMessage, IconButton, Menu, Icon, type MenuEntry, type IconName } from '../../ui'
 import { DirectionIcon } from './DirectionIcon'
 import {
   allows,
@@ -60,10 +40,10 @@ import { findingsOf, useCurrentSetup, usePlanSelection } from './usePlan'
 
 const m = planMessages
 
-export const KIND_ICON: Record<string, ToolIconName> = {
+export const KIND_ICON: Record<string, IconName> = {
   facing: 'facing',
   pocket: 'pocket',
-  drilling: 'drill',
+  drilling: 'drilling',
   profile: 'profile',
 }
 
@@ -183,14 +163,14 @@ export function SetupList({
                           ? ([
                               {
                                 label: m.setup.moveUpItem,
-                                icon: <ArrowUp aria-hidden="true" />,
+                                icon: <Icon name="arrow-up" />,
                                 shortcut: 'Alt+↑',
                                 disabled: si === 0,
                                 onSelect: () => void moveSetup(setup, -1),
                               },
                               {
                                 label: m.setup.moveDownItem,
-                                icon: <ArrowDown aria-hidden="true" />,
+                                icon: <Icon name="arrow-down" />,
                                 shortcut: 'Alt+↓',
                                 disabled: si === plan.setups.length - 1,
                                 onSelect: () => void moveSetup(setup, 1),
@@ -202,7 +182,7 @@ export function SetupList({
                           ? [{ label: m.setup.noMerge, disabled: true, onSelect: () => {} }]
                           : merges.map((other) => ({
                               label: m.setup.merge(other.name),
-                              icon: <Combine aria-hidden="true" />,
+                              icon: <Icon name="merge" />,
                               onSelect: () =>
                                 void call('plan.setup.merge', {
                                   planId: plan.id,
@@ -211,10 +191,7 @@ export function SetupList({
                             }))),
                       ]}
                     >
-                      <IconButton
-                        label={m.setup.actions(name)}
-                        icon={<MoreHorizontal aria-hidden="true" />}
-                      />
+                      <IconButton label={m.setup.actions(name)} icon={<Icon name="more" />} />
                     </Menu>
                   </span>
                 ) : null}
@@ -305,14 +282,14 @@ function OperationRow({
   const menu: MenuEntry[] = [
     {
       label: m.operations.moveUpItem,
-      icon: <ArrowUp aria-hidden="true" />,
+      icon: <Icon name="arrow-up" />,
       shortcut: 'Alt+↑',
       disabled: operationStep(plan, op.id, -1) === undefined,
       onSelect: () => onMove(-1),
     },
     {
       label: m.operations.moveDownItem,
-      icon: <ArrowDown aria-hidden="true" />,
+      icon: <Icon name="arrow-down" />,
       shortcut: 'Alt+↓',
       disabled: operationStep(plan, op.id, 1) === undefined,
       onSelect: () => onMove(1),
@@ -320,13 +297,13 @@ function OperationRow({
     'separator',
     {
       label: m.operations.split,
-      icon: <Split aria-hidden="true" />,
+      icon: <Icon name="split" />,
       disabled: setup.operations.length < 2,
       onSelect: onSplit,
     },
     ...others.map((s) => ({
       label: m.operations.moveTo(s.name),
-      icon: <CornerDownRight aria-hidden="true" />,
+      icon: <Icon name="move-to" />,
       onSelect: () => onMoveTo(s),
     })),
   ]
@@ -345,7 +322,7 @@ function OperationRow({
         onClick={onSelect}
         onKeyDown={onKeyDown}
       >
-        <ToolIcon name={KIND_ICON[kind] ?? 'facing'} />
+        <Icon name={KIND_ICON[kind] ?? 'facing'} />
         <span className={styles['opText']}>
           <span className={styles['opName']} title={name}>
             {name}
@@ -357,30 +334,30 @@ function OperationRow({
         <span className={styles['opStatus']}>
           {stale !== undefined ? (
             <span className={styles['opStale']} title={staleText(stale)}>
-              <History aria-hidden="true" />
+              <Icon name="history" />
               <span className={styles['srOnly']}>{staleText(stale)}</span>
             </span>
           ) : null}
           <span className={styles['opState']} data-state={state} title={m.toolpaths.state[state]}>
             {state === 'ready' ? (
-              <CircleCheck aria-hidden="true" />
+              <Icon name="success" />
             ) : state === 'failed' ? (
-              <CircleAlert aria-hidden="true" />
+              <Icon name="error" />
             ) : (
-              <CircleDashed aria-hidden="true" />
+              <Icon name="not-started" />
             )}
             <span className={styles['srOnly']}>{m.toolpaths.state[state]}</span>
           </span>
           {errors > 0 ? (
             <span className={styles['opFailed']}>
-              <CircleAlert aria-hidden="true" />
+              <Icon name="error" />
               <span aria-hidden="true">{errors}</span>
               <span className={styles['srOnly']}>{m.operations.errors(errors)}</span>
             </span>
           ) : null}
           {warnings > 0 ? (
             <span className={styles['opBadge']}>
-              <TriangleAlert aria-hidden="true" />
+              <Icon name="warning" />
               <span aria-hidden="true">{warnings}</span>
               <span className={styles['srOnly']}>{m.operations.warnings(warnings)}</span>
             </span>
@@ -390,10 +367,7 @@ function OperationRow({
       {canMove ? (
         <span className={styles['rowActions']}>
           <Menu label={m.operations.actions(name)} align="end" items={menu}>
-            <IconButton
-              label={m.operations.actions(name)}
-              icon={<MoreHorizontal aria-hidden="true" />}
-            />
+            <IconButton label={m.operations.actions(name)} icon={<Icon name="more" />} />
           </Menu>
         </span>
       ) : null}

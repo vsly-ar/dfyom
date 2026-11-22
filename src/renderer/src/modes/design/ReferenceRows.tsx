@@ -4,13 +4,12 @@
 // window only (decision D17: no command, no undo step, never unsaved), remove with the navigator's
 // undo toast.
 // Doc: docs/modes/reference-model.md#display, docs/conventions/ui.md#reference-ghost-v02
-import { Box, Eye, EyeOff, FileUp, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import type { ReferenceWarning } from '../../../../core/design/reference'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { referenceMessages } from '../../messages/reference'
 import { useShell, useUi } from '../../shell/ShellContext'
-import { Button, ErrorMessage, IconButton, PanelHeader } from '../../ui'
+import { Icon, Button, ErrorMessage, IconButton, PanelHeader } from '../../ui'
 import styles from './Design.module.css'
 import type { DesignPart } from './model'
 import { useCommand, useDesignReferences, useDesignSelection } from './useDesign'
@@ -66,7 +65,7 @@ export function ReferenceRows({
         actions={
           <IconButton
             label={m.import}
-            icon={<FileUp aria-hidden="true" />}
+            icon={<Icon name="import" />}
             disabled={busy}
             onClick={() => void importReference()}
           />
@@ -77,7 +76,7 @@ export function ReferenceRows({
           <p className={styles['muted']}>{m.empty}</p>
           <Button
             size="sm"
-            icon={<FileUp aria-hidden="true" />}
+            icon={<Icon name="import" />}
             disabled={busy}
             onClick={() => void importReference()}
           >
@@ -99,7 +98,7 @@ export function ReferenceRows({
                 aria-pressed={selected === ref.id}
                 onClick={() => select(selected === ref.id ? null : ref.id)}
               >
-                <Box aria-hidden="true" />
+                <Icon name="reference" />
                 <span className={styles['referenceText']}>
                   <span className={styles['opName']} title={ref.name}>
                     {ref.name}
@@ -113,12 +112,12 @@ export function ReferenceRows({
                 <IconButton
                   label={m.show}
                   pressed={visible}
-                  icon={visible ? <Eye aria-hidden="true" /> : <EyeOff aria-hidden="true" />}
+                  icon={visible ? <Icon name="eye" /> : <Icon name="eye-off" />}
                   onClick={() => setVisible(ref.id, !visible)}
                 />
                 <IconButton
                   label={m.remove(ref.name)}
-                  icon={<Trash2 aria-hidden="true" />}
+                  icon={<Icon name="delete" />}
                   onClick={() => void remove(ref.id, ref.name)}
                 />
               </span>

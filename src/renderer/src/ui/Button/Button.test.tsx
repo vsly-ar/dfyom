@@ -1,5 +1,5 @@
+import { Icon } from '../icons/Icon'
 import { screen } from '@testing-library/react'
-import { Check } from 'lucide-react'
 import { describe, expect, it, vi } from 'vitest'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
 import { Button } from './Button'
@@ -16,7 +16,7 @@ describe('Button', () => {
 
   it('exposes variant and size as data attributes for the CSS module', () => {
     renderUi(
-      <Button variant="primary" size="lg" icon={<Check aria-hidden />}>
+      <Button variant="primary" size="lg" icon={<Icon name="check" />}>
         Generate toolpaths
       </Button>,
     )

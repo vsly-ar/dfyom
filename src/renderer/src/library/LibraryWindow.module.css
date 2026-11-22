@@ -350,6 +350,12 @@
   height: var(--icon-md);
 }
 
+/* the selected tool's tip turns amber (B22-3) */
+.row[aria-selected='true'] .typeIcon [data-accent] {
+  stroke: var(--accent-icon);
+  filter: var(--accent-icon-edge);
+}
+
 .cell {
   min-width: 0;
   overflow: hidden;

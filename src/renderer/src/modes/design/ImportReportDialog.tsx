@@ -4,14 +4,13 @@
 // outline, and "Edit shape" / "Close". Presentational: the caller runs the import (the
 // navigator's "Import SVG…", `useSvgImport` in ShapeList.tsx, task U2).
 // Doc: docs/conventions/ui.md#import-report, docs/modes/design-v0.3.md#svg-import
-import { FileInput, Info, PenLine } from 'lucide-react'
 import { useState } from 'react'
 import type { Bounds2, Element } from '../../../../core/geometry/2d/model'
 import type { SvgImportReport, SvgSplit, SvgUnit } from '../../../../core/import/svg'
 import type { UnitSystem } from '../../../../core/project/document'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { shapeMessages } from '../../messages/shape'
-import { Button, Dialog, ErrorMessage, Field, SegmentedControl, Select } from '../../ui'
+import { Icon, Button, Dialog, ErrorMessage, Field, SegmentedControl, Select } from '../../ui'
 import { chainPath, fitView } from '../../viewport/flat-view'
 import styles from './ImportReportDialog.module.css'
 
@@ -90,7 +89,7 @@ export function ImportReportDialog(props: ImportReportDialogProps): React.JSX.El
           <Button onClick={close}>{t.close}</Button>
           <Button
             variant="primary"
-            icon={<PenLine aria-hidden="true" />}
+            icon={<Icon name="edit" />}
             onClick={() => {
               props.onEdit?.()
               close()
@@ -121,7 +120,7 @@ export function ImportReportDialog(props: ImportReportDialogProps): React.JSX.El
             <ul className={styles['warnings']}>
               {r.warnings.map((w, i) => (
                 <li key={i}>
-                  <Info aria-hidden="true" />
+                  <Icon name="info" />
                   <span>
                     {w.message}
                     {w.element ? <span className={styles['source']}> · {w.element}</span> : null}
@@ -150,7 +149,7 @@ function Fact({
   return (
     <div className={styles['fact']} data-note={note ? '' : undefined}>
       <dt>
-        {note ? <Info aria-label={t.changed} role="img" /> : null}
+        {note ? <Icon name="info" label={t.changed} /> : null}
         {label}
       </dt>
       <dd>{value}</dd>
@@ -200,7 +199,7 @@ function OptionsStep(props: ImportReportDialogProps): React.JSX.Element {
           <Button onClick={() => props.onOpenChange(false)}>{t.cancel}</Button>
           <Button
             variant="primary"
-            icon={<FileInput aria-hidden="true" />}
+            icon={<Icon name="shape-import" />}
             onClick={() => props.onImport?.({ unit, split })}
           >
             {t.import}

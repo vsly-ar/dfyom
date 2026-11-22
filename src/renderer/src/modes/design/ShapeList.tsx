@@ -6,7 +6,6 @@
 // of the import dialog, `design.shape.import`, then its report; "Edit shape" selects the first
 // created shape). Adding a shape selects it, which opens the Shape Editor.
 // Doc: docs/conventions/ui.md#navigator-and-add, docs/modes/design-v0.3.md#what-a-shape-is
-import { CircleAlert, Plus, Shapes, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import type { ShapeItemKind } from '../../../../core/design/shape.dto'
 import { chainBounds } from '../../../../core/geometry/2d/model'
@@ -14,7 +13,7 @@ import type { SvgImportReport, SvgSplit, SvgUnit } from '../../../../core/import
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { shapeMessages } from '../../messages/shape'
 import { useRegion2d, useShell } from '../../shell/ShellContext'
-import { IconButton, Menu, PanelHeader, type MenuEntry } from '../../ui'
+import { Icon, IconButton, Menu, PanelHeader, type MenuEntry } from '../../ui'
 import styles from './Design.module.css'
 import { ImportReportDialog, type ImportReportStep } from './ImportReportDialog'
 import type { DesignPart } from './model'
@@ -163,7 +162,7 @@ export function ShapeList({
         meta={rows.length > 0 ? String(rows.length) : undefined}
         actions={
           <Menu label={m.add} items={addShapeEntries((k) => void add(k), svg.start)}>
-            <IconButton label={m.add} icon={<Plus aria-hidden="true" />} />
+            <IconButton label={m.add} icon={<Icon name="add" />} />
           </Menu>
         }
       />
@@ -191,14 +190,14 @@ export function ShapeList({
                     select(row.id)
                   }}
                 >
-                  <Shapes aria-hidden="true" />
+                  <Icon name="shapes" />
                   <span className={styles['opName']}>{row.name}</span>
                   {used ? (
                     <span className={styles['shapeUse']}>{m.usedBy(row.usedBy.length)}</span>
                   ) : null}
                   {failed ? (
                     <span className={styles['opFailed']} title={m.failed}>
-                      <CircleAlert aria-hidden="true" />
+                      <Icon name="error" />
                       <span className={styles['srOnly']}>{m.failed}</span>
                     </span>
                   ) : null}
@@ -206,7 +205,7 @@ export function ShapeList({
                 <span className={styles['opActions']}>
                   <IconButton
                     label={m.remove(row.name)}
-                    icon={<Trash2 aria-hidden="true" />}
+                    icon={<Icon name="delete" />}
                     aria-disabled={used || undefined}
                     {...(reason ? { 'aria-describedby': `${row.id}-reason` } : {})}
                     onClick={() => (used ? undefined : void remove(row.id, row.name))}

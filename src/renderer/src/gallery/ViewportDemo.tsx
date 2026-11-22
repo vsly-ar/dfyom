@@ -1,8 +1,7 @@
 // Gallery specimen of the 3D viewport (task 3.5) on a hand-built sample part: selection, hover,
 // pick mode, evaluation status and mouse presets. Dev only. Doc: docs/conventions/ui.md#testing
-import { Crosshair } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { Button, SegmentedControl } from '../ui'
+import { Icon, Button, SegmentedControl } from '../ui'
 import { MOUSE_PRESETS, Viewport, type MousePreset, type SurfaceTarget } from '../viewport'
 import { sampleMesh, SAMPLE_PICK_ELIGIBLE, SAMPLE_STOCK } from '../viewport/sample-mesh'
 import styles from './Gallery.module.css'
@@ -55,7 +54,7 @@ export function ViewportDemo(): React.JSX.Element {
           value={preset}
           onValueChange={setPreset}
         />
-        <Button size="sm" icon={<Crosshair />} onClick={() => setPicking((p) => !p)}>
+        <Button size="sm" icon={<Icon name="pick" />} onClick={() => setPicking((p) => !p)}>
           {picking ? 'Cancel pick' : 'Pick a surface'}
         </Button>
       </div>

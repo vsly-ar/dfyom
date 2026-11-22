@@ -32,22 +32,6 @@
   color: var(--text);
 }
 
-.icon {
-  width: var(--icon-md);
-  height: var(--icon-md);
-  flex: none;
-  overflow: visible;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: var(--icon-stroke);
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.icon [data-accent] {
-  transition: stroke var(--motion-base);
-}
-
 .item[data-state='on'] .icon [data-accent] {
   stroke: var(--accent-icon);
   filter: var(--accent-icon-edge);

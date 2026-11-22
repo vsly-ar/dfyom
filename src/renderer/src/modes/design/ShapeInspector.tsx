@@ -4,7 +4,6 @@
 // from `design.shape.get` (area, size, smallest inside radius). Item values come from the replica;
 // the summary and the shape's users from the query.
 // Doc: docs/conventions/ui.md#shape-editor, docs/modes/design-v0.3.md#shape-definition
-import { ArrowDown, ArrowUp, FileText, Plus, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import type {
   ShapeDTO,
@@ -20,6 +19,7 @@ import { useCancelGesture } from '../../shell/hooks'
 import { useRegion2d, useShell, useUi } from '../../shell/ShellContext'
 import { chainBounds } from '../../../../core/geometry/2d/model'
 import {
+  Icon,
   ErrorMessage,
   Field,
   FieldIcon,
@@ -183,7 +183,7 @@ export function ShapeInspector({
               label={t.addItem}
               items={addShapeEntries(addItem).filter((e) => e !== 'separator')}
             >
-              <IconButton label={t.addItem} icon={<Plus aria-hidden="true" />} />
+              <IconButton label={t.addItem} icon={<Icon name="add" />} />
             </Menu>
           </div>
           <ShapeItemList
@@ -331,21 +331,21 @@ export function ShapeItemList({
             <span className={styles['itemActions']}>
               <IconButton
                 label={t.moveUp(label)}
-                icon={<ArrowUp aria-hidden="true" />}
+                icon={<Icon name="arrow-up" />}
                 shortcut="Alt+↑"
                 disabled={n === 0}
                 onClick={() => onMove(n, -1)}
               />
               <IconButton
                 label={t.moveDown(label)}
-                icon={<ArrowDown aria-hidden="true" />}
+                icon={<Icon name="arrow-down" />}
                 shortcut="Alt+↓"
                 disabled={n === count - 1}
                 onClick={() => onMove(n, 1)}
               />
               <IconButton
                 label={count <= 1 ? `${t.removeItem(label)}. ${t.lastItem}` : t.removeItem(label)}
-                icon={<Trash2 aria-hidden="true" />}
+                icon={<Icon name="delete" />}
                 disabled={count <= 1}
                 onClick={() => onRemove(n)}
               />
@@ -559,7 +559,7 @@ function LastImportButton({
     <>
       <IconButton
         label={shapeMessages.importReport.reopen}
-        icon={<FileText aria-hidden="true" />}
+        icon={<Icon name="report" />}
         onClick={() => setOpen(true)}
       />
       {open ? (

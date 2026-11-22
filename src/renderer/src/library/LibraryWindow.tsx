@@ -4,7 +4,6 @@
 // Ctrl/Cmd+Enter save the draft, F6 cycles toolbar, tabs, list and editor. Leaving a draft asks
 // "Save changes to …?"; closing the window with one asks the same (main's close request).
 // Doc: docs/conventions/ui-library-window.md
-import { Plus, Save, Search } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { useStore } from 'zustand'
 import type { LibraryItemKind } from '../../../core/library/item'
@@ -15,7 +14,15 @@ import { MachineToolbar } from '../modes/run'
 import { isKeyEcho, noteKeyAction } from '../shell/key-echo'
 import { useShell } from '../shell/ShellContext'
 import { cycleRegion, IS_MAC, isEditableTarget, REGION_ATTR } from '../shell/shortcuts'
-import { ApplyScope, Button, Dialog, DialogClose, SegmentedControl, modalDialogOpen } from '../ui'
+import {
+  Icon,
+  ApplyScope,
+  Button,
+  Dialog,
+  DialogClose,
+  SegmentedControl,
+  modalDialogOpen,
+} from '../ui'
 import { ItemEditor } from './ItemEditor'
 import { ItemTable } from './ItemTable'
 import { createLibraryStore, KINDS, NEW, type LibraryStore } from './library-store'
@@ -54,7 +61,7 @@ function SavePrompt({
           <Button variant="danger" onClick={onDiscard}>
             {w.leaveDiscard}
           </Button>
-          <Button variant="primary" icon={<Save aria-hidden="true" />} onClick={onSave}>
+          <Button variant="primary" icon={<Icon name="save" />} onClick={onSave}>
             {w.leaveSave}
           </Button>
         </>
@@ -170,7 +177,7 @@ export function LibraryWindow(): React.JSX.Element {
     <div className={styles['window']}>
       <header className={styles['toolbar']} {...region}>
         <label className={styles['search']}>
-          <Search aria-hidden="true" />
+          <Icon name="search" />
           <input
             type="search"
             aria-label={w.search}
@@ -189,12 +196,7 @@ export function LibraryWindow(): React.JSX.Element {
           value={units}
           onValueChange={(u) => s.setUnits(u)}
         />
-        <Button
-          variant="primary"
-          size="sm"
-          icon={<Plus aria-hidden="true" />}
-          onClick={() => s.newItem()}
-        >
+        <Button variant="primary" size="sm" icon={<Icon name="add" />} onClick={() => s.newItem()}>
           {w.newItem[s.tab]}
         </Button>
         <span className={styles['spacer']} />

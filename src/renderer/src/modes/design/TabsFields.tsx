@@ -4,12 +4,11 @@
 // and the note "Positions entered by you." with "Space evenly", which clears them. The keyboard
 // path of the viewport's tab markers. Every commit is one profile update.
 // Doc: docs/conventions/ui.md#tab-markers
-import { Plus, Trash2 } from 'lucide-react'
 import type { OperationDTO } from '../../../../core/design/part.dto'
 import { designMessages } from '../../messages/design'
 import { dfmMessages, lengthSource } from '../../messages/dfm'
 import { useRegion2d } from '../../shell/ShellContext'
-import { Button, FieldIcon, IconButton, QuantityInput, type FieldMessage } from '../../ui'
+import { Icon, Button, FieldIcon, IconButton, QuantityInput, type FieldMessage } from '../../ui'
 import styles from './Design.module.css'
 import { defaultUnit, quantityOf } from './model'
 import type { OperationFieldsContext } from './OperationFields'
@@ -64,7 +63,7 @@ export function TabPositions({ ctx }: { ctx: OperationFieldsContext }): React.JS
   if (positions === undefined)
     return canAdd ? (
       <div className={styles['pickerActions']}>
-        <Button size="sm" icon={<Plus aria-hidden="true" />} onClick={add}>
+        <Button size="sm" icon={<Icon name="add" />} onClick={add}>
           {tt.add}
         </Button>
       </div>
@@ -113,7 +112,7 @@ export function TabPositions({ ctx }: { ctx: OperationFieldsContext }): React.JS
             {!ctx.readOnly ? (
               <IconButton
                 label={tt.remove(i + 1)}
-                icon={<Trash2 aria-hidden="true" />}
+                icon={<Icon name="delete" />}
                 className={styles['tabRemove']}
                 onClick={() => {
                   const all = positionSources(op).filter((_, k) => k !== i)
@@ -129,7 +128,7 @@ export function TabPositions({ ctx }: { ctx: OperationFieldsContext }): React.JS
       })}
       {canAdd ? (
         <div className={styles['pickerActions']}>
-          <Button size="sm" icon={<Plus aria-hidden="true" />} onClick={add}>
+          <Button size="sm" icon={<Icon name="add" />} onClick={add}>
             {tt.add}
           </Button>
         </div>

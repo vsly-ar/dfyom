@@ -148,6 +148,18 @@
   color: var(--text-muted);
 }
 
+/* the chosen option's icon shows its accent part (B22-3: active) */
+.item[data-state='checked'] .optionIcon [data-accent] {
+  stroke: var(--accent-icon);
+  filter: var(--accent-icon-edge);
+}
+
+.valueIcon {
+  display: inline-flex;
+  flex: none;
+  color: var(--text-muted);
+}
+
 .optionText {
   display: flex;
   flex-direction: column;

@@ -1,13 +1,14 @@
 # Icon proposals: B21 app icon, B22 icon set
 
-Status: **draft, pending user approval in L3** ([plan v0.3](../../docs/plans/v0.3.md)). Nothing here is wired into the app; `build/icon.*` and `src/renderer/src/ui/icons/` are unchanged. The style rules are proposed in [ui.md § Icon set proposal](../../docs/conventions/ui.md#icon-set-proposal-v03-b22-draft).
+Status: B22 **approved in the L3 review and wired** (D33, [plan v0.3](../../docs/plans/v0.3.md)); its rules are in [ui.md § Icons](../../docs/conventions/ui.md#icons). B21 (app icon): see its section.
 
 ## Files
 
 | Path                | What                                                                                                                                   |
 | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | `b21/concept-*.svg` | Three app icon concepts, 1024 canvas                                                                                                   |
-| `b22/icons.mjs`     | The one source of the 24 specimen icons (paths, accent part, provenance) and `iconSvg()`                                               |
+| `b22/icons.mjs`     | Adapts the single source (`src/renderer/src/ui/icons/iconSet.ts`) for the renders: `ICONS` and `iconSvg()`                             |
+| `b22/sync-page.mjs` | Writes the icon sheet of `docs/conventions/ui-design-system.html` from the single source (a test checks it)                            |
 | `b22/svg/*.svg`     | Standalone exports of those icons (generated; grey `#5b6462`, accent `#f5b700`)                                                        |
 | `render.mjs`        | Renders everything with headless Chromium (no window): `node design/icons/render.mjs [outDir]`; `CHROMIUM_PATH` picks an installed one |
 | `renders/*.png`     | B21 concepts at 1024, small-size sheet; B22 specimen and in-context mock, light and dark                                               |
@@ -26,32 +27,20 @@ Small sizes (`renders/b21-small-sizes.png`): the `.icns` holds separate 16/32 px
 
 ## B22 icon set
 
-### Inventory (before this proposal)
+Approved in L3 (D33, 2026-11-22) with these answers: **B22-1 b** (user override) every generic icon redrawn in the own style too, Lucide removed; **B22-2 a** 16 px grid, 1.35 px stroke, round caps and joins; **B22-3 a** amber only when active or in a primary button, field drawings keep always-amber; **B22-4 a** tool side views told apart by the amber tip, always next to the tool name, 20 px in the tool picker; **B22-5 a** groove = bent slot; **B22-6 a** V-bit drawn but shown only with the V-bit tool type (kept in the source as `reserved`); **B22-7 b** (user override) the tabs drawing refined to read alone at 16 px (still a bridge on a cut line: the stock top, the cut floor on both sides and the tab standing between them).
 
-- **Own, approved** (`ui/icons/tool/ToolIcon.tsx`, 16 grid, 1.35 px): select, rect, circle, polyline, measure, facing, profile, pocket, drill(ing), tabs, end mill, simulate, jog, work zero, probe, fit, iso, top/front/right, grid. Mode icons in `ModeSwitcher`, direction icons in `plan/DirectionIcon`, inline glyphs in `Field`, `StopControl`, `ApplyButton`, `MachineStateBadge`.
-- **Field illustrations** (`ui/icons/field/FieldIcon.tsx`, 20 grid, 1 px grey + 1.4 px amber): length, width, depth, stepdown, corner, chamfer, tool, feed, tabs.
-- **Lucide** (`lucide-react` 1.77, ISC), about 60 glyphs: Plus, CircleAlert, TriangleAlert, Trash2, Play, Undo2/Redo2, Check, X, Settings, Library, Download, FileInput/FileUp, Box, Crosshair, Wrench, the shape kinds (RectangleHorizontal, Circle, Pill, Hexagon, Spline), …
-- **Gaps (text or generic icons today):** operation kinds beyond the four (groove / profile "on", fillet, shape import use text or Lucide), tool types (no icon: flat, bull nose, ball, drill are text only; V-bit is not a tool type yet), reference model (Lucide `Box`), snap, setups (only the per-setup direction icon), export gCode (Lucide `Download`), run.
+The rules live in [ui.md § Icons](../../docs/conventions/ui.md#icons). The single source is [`src/renderer/src/ui/icons/iconSet.ts`](../../src/renderer/src/ui/icons/iconSet.ts): the app's `<Icon>` renders it, `render.mjs` (through `b22/icons.mjs`) renders the specimen sheets and the SVG exports, `b22/sync-page.mjs` the design-system page's sheet. Groups: operations, tool types, drawing tools and shape kinds, modes and CNC actions, views, generic actions, status.
 
-### Style rules (proposed)
+### Review at 16 px (after wiring)
 
-1. **Grid and stroke:** own icons on a 16 px grid, 1.35 px stroke (`--icon-stroke`), round caps and joins, no fills except dots ≤ 1.8 px. Lucide icons keep their 24 grid; at 16 px their stroke is 1.33 px, so both sit together. (ui.md said "24 px grid" for own icons; the code and this set use 16, to be corrected on approval.)
-2. **Corners:** rectangles `rx` 0.5–1.5 (1 by default); outlines touch the 1.5 px margin, never the edge.
-3. **One accent part per icon:** the part that tells the concept apart (a tool's cutting end, the pass lines of facing, the floor of the setup's up face, the G of gCode). Lucide icons have none.
-4. **Where amber shows:** toolbar and navigator icons are grey at rest; the accent part turns amber when the control is active (pressed toggle, selected row, current mode) and always in a primary button. Field illustrations keep their own rule (D-entry: amber focused and unfocused; the line thickens on focus). Disabled and read-only: the whole icon grey at 45 % opacity, accent desaturated.
-5. **Sizes:** 16 (default), 20 (run controls, tool picker), 14 inline; never scaled below 14. Tools are side views, operations and UI front/top views.
-6. **Colour:** grey is `currentColor` (`--text-muted` in rows, `--text` in buttons); amber is `--accent-icon` with `--accent-icon-edge` (a hairline in light theme).
-
-### Critical review at 16 px
-
-- Flat, bull nose and ball end mill differ only in the bottom 2–3 px; at 16 px they need the tool name beside them (always the case in the tool field and library). Bodies were widened to 6 px for this.
-- Groove (on) reads as the slot bend at 20 px and above; at 16 px it is close to a "signal" glyph. Alternative if rejected: the profile square with the amber line on its edge.
-- Tabs (approved shape) is a small bump at 16 px, fine in a row with its label, too small alone in a toolbar.
-- Fillet's dashed sharp corner disappears at 16 px; the arc alone still reads.
-- Export gCode's G is 5 px; legible at 16 px on both themes, crisp at 20.
+- Flat, bull nose and ball end mill differ only in the bottom 2–3 px; they always sit next to the tool's name (tool field, tool picker at 20 px, library rows).
+- Groove reads as the slot bend at 20 px and above; at 16 px it is close to a "signal" glyph, but it only appears beside the operation's name.
+- Fillet is drawn but not shown: fillets are shape-item fields with the `corner` field illustration, not an operation.
+- The pick (crosshair with a centre dot) and drilling (crosshair through the circle) are close; they never appear side by side.
+- Disconnect (the connect plug struck through) is the busiest drawing; it only appears in a labelled button.
 
 ## Provenance and licence
 
-- `b21/*`, and the icons marked `new` and `approved` in `b22/icons.mjs`: own drawings for DFYOM, GPL-3.0-or-later (the `approved` ones are copies of shapes already in `src/renderer/src/ui/icons/`).
-- Icons marked `lucide` (settings, undo-2, redo-2, library): path data copied unchanged from `lucide-react` 1.77.0, ISC licence (GPL-compatible, [ADR 0014](../../docs/decisions/0014-gpl-3-or-later-license.md)); the app already ships them.
+- `b21/*` and every icon in `src/renderer/src/ui/icons/iconSet.ts` (`src`: `approved` = shapes approved with the design system or earlier, `b22` = drawn for this proposal, `redraw` = drawn for B22-1 b in place of a former Lucide glyph): own drawings for DFYOM, GPL-3.0-or-later. The `redraw` icons were drawn from scratch on the 16 px grid to the rules above, not traced or copied from Lucide or any other set.
+- Lucide (`lucide-react`, ISC) is no longer a dependency, so its notice left the shipped third-party notices.
 - No other sources, fonts or generated imagery were used.
