@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
 import { fail, Ok, type AppResult } from '../../shared/result'
 import { Warnings } from '../design/commands'
+import { CLONES_QUERIES } from '../design/clones/commands'
 import { compact, ResultShaper, splitDetail, type ShaperSession, type View } from './shape'
 import type { SessionCallResult } from './session'
 
@@ -207,6 +208,32 @@ describe('DFM warnings as changes', () => {
       SUMMARY,
     )
     expect(valueOf(r)['warnings']).toEqual({ count: 1, added: [a] })
+  })
+
+  // X1 found the preview's own Clones warnings shaped as changes of the part's: every part
+  // warning came back `removed`, and the next edit listed them all as `added` again
+  it("leaves a query's own warnings (design.clones.preview) as they are and keeps the baseline", () => {
+    const preview = CLONES_QUERIES.find((d) => d.name === 'design.clones.preview')!
+    const session = fakeSession()
+    const shaper = new ResultShaper({
+      ...session,
+      resultSchema: (name) =>
+        name === preview.name ? (preview.result as z.ZodType) : session.resultSchema(name),
+    })
+    const a = warn('dfm.tabsRelocated', 'profile1')
+    shaper.shape(call('design.warning.list', { warnings: [a] }), { partId: 'P' }, SUMMARY)
+    const r = shaper.shape(
+      call(preview.name, { instances: [], rows: [], warnings: [] }),
+      { partId: 'P' },
+      SUMMARY,
+    )
+    expect(valueOf(r)['warnings']).toEqual([])
+    const next = shaper.shape(
+      call('design.pocket.add', { operationId: 'pocket1', warnings: [a] }),
+      { partId: 'P' },
+      SUMMARY,
+    )
+    expect(valueOf(next)['warnings']).toEqual({ count: 1 })
   })
 
   it('passes errors unchanged', () => {

@@ -565,4 +565,10 @@ export const holeSpec: FeatureKindSpec<Hole> = {
   reevaluate: reevaluateHole,
   fieldOf: holeFieldOf,
   warnings: holeWarnings,
+  // the refill of design.hole.add/update (hole-commands.ts): a new fastener, purpose, fit, head
+  // type or headSink rewrites the table sizes in the same command
+  pendingFolds: {
+    drivers: ['fastener', 'purpose', 'fit', 'headSink', 'type'],
+    derived: ['diameter', 'cbDiameter', 'cbDepth', 'csDiameter', 'csAngle'],
+  },
 }
