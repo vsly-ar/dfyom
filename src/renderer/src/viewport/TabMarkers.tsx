@@ -3,9 +3,12 @@
 // `--vp-selected` while dragged), and the loop's start point as a small open circle with a tick in
 // its counter-clockwise direction. A drag hits the face plane under the pointer and reports that
 // point; the caller turns it into a distance along the loop (one gesture). Camera controls are off
-// while a marker is held; Escape cancels the drag. Positions come from the design side.
+// while a marker is held; Escape cancels the drag. Each marker also has a focusable anchor at its
+// centre (an Html overlay that lets the pointer through): arrow keys move it 1 mm along the loop
+// (0.1 mm with Alt, 10 mm with Shift), and its name says where it is. Positions come from the
+// design side.
 // Doc: docs/conventions/ui.md#tab-markers
-import { Line, type CameraControlsImpl } from '@react-three/drei'
+import { Html, Line, type CameraControlsImpl } from '@react-three/drei'
 import { useThree, type ThreeEvent } from '@react-three/fiber'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -19,6 +22,8 @@ import {
 } from 'three'
 import type { Palette, Rgb } from './colours'
 import type { Vec3 } from './mesh'
+import { nudgeStep } from './shape-handles'
+import styles from './Viewport.module.css'
 
 /** One tab: its quad on the face (part frame, counter-clockwise) and its accessible name. */
 export interface TabMarkerView {
@@ -39,9 +44,17 @@ export interface TabOverlay {
   /** Markers cannot be dragged (a formula, a plan copy). */
   readonly locked: boolean
   onDrag(phase: TabDragPhase, index: number, point: Vec3): void
+  /** Keyboard path: move tab `index` by `delta` mm along the loop (a run of keys is one gesture). */
+  onNudge(index: number, delta: number): void
 }
 
 const noRaycast = (): void => {}
+
+const centre = (c: readonly Vec3[]): [number, number, number] => {
+  const n = c.length || 1
+  const sum = c.reduce((s, p) => [s[0] + p[0], s[1] + p[1], s[2] + p[2]], [0, 0, 0])
+  return [sum[0] / n, sum[1] / n, sum[2] / n]
+}
 /** A press that moves less than this (px) is a click and commits nothing (ui.md). */
 const CLICK_PX = 4
 
@@ -265,6 +278,34 @@ export function TabMarkers({
           />
         </>
       ) : null}
+      {tabs.markers.map((m, i) => (
+        <Html
+          key={`key-${i}`}
+          position={centre(m.corners)}
+          center
+          zIndexRange={[10, 0]}
+          className={styles['tabAnchor']}
+        >
+          <button
+            type="button"
+            aria-label={m.label}
+            data-tab-marker={i}
+            disabled={tabs.locked}
+            onKeyDown={(e) => {
+              const dir =
+                e.key === 'ArrowRight' || e.key === 'ArrowUp'
+                  ? 1
+                  : e.key === 'ArrowLeft' || e.key === 'ArrowDown'
+                    ? -1
+                    : 0
+              if (dir === 0) return
+              e.preventDefault()
+              e.stopPropagation()
+              tabs.onNudge(i, dir * nudgeStep(e))
+            }}
+          />
+        </Html>
+      ))}
       {tabs.markers.map((m, i) => (
         <Marker
           key={i}

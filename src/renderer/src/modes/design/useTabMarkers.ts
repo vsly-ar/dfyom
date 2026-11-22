@@ -3,7 +3,8 @@
 // along the loop (the pointer's closest point on it), kept a tab width off its neighbours
 // (`clampTab`); it is one gesture of `design.profile.update { tabs: { positions } }` steps at most
 // every 100 ms and on release, so it is one undo step. Count-spaced tabs become entered positions
-// with the first step. Escape cancels (`history.undo { gesture }`).
+// with the first step. Escape cancels (`history.undo { gesture }`). Arrow keys on a focused
+// marker move it along the loop; a run of keys (ended 500 ms after the last) is one gesture.
 // Doc: docs/conventions/ui.md#tab-markers, docs/modes/design-v0.3.md#tabs-on-shapes
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { OperationDTO } from '../../../../core/design/part.dto'
@@ -23,6 +24,8 @@ import { SHAPE_COMMIT_MS } from './useShapeDrag'
 import { useCommand } from './useDesign'
 
 const tt = designMessages.inspector.tabs
+/** A run of arrow keys ends this long after the last key (one gesture per run, as handles). */
+const KEY_RUN_MS = 500
 
 let counter = 0
 const newGestureId = (): string =>
@@ -85,6 +88,9 @@ export function useTabMarkers(
   const cancelGesture = useCancelGesture()
   const [preview, setPreview] = useState<{ index: number; centres: number[] } | null>(null)
   const gesture = useRef<Gesture | null>(null)
+  const keyRun = useRef<{ g: Gesture; at: number; timer: ReturnType<typeof setTimeout> } | null>(
+    null,
+  )
 
   const loadedOp =
     op?.kind === 'profile' ? part?.loaded?.part.operations.find((o) => o.id === op.id) : undefined
@@ -120,25 +126,78 @@ export function useTabMarkers(
     [call, part, op],
   )
 
+  const begin = useCallback(
+    (index: number): Gesture | undefined => {
+      if (tabs === undefined || part === undefined) return undefined
+      const entered =
+        op?.kind === 'profile' && op.tabs.positions !== undefined
+          ? op.tabs.positions.map((q) => q.source)
+          : tabs.centres.map((c) => lengthSource(c, part.units))
+      return {
+        id: newGestureId(),
+        index,
+        base: tabs.centres,
+        sources: entered,
+        pending: null,
+        lastSent: 0,
+        sent: false,
+        timer: undefined,
+        chain: Promise.resolve(),
+      }
+    },
+    [tabs, part, op],
+  )
+
+  const schedule = useCallback(
+    (g: Gesture) => {
+      const wait = SHAPE_COMMIT_MS - (performance.now() - g.lastSent)
+      if (wait <= 0) flush(g)
+      else g.timer ??= setTimeout(() => flush(g), wait)
+    },
+    [flush],
+  )
+
+  const endKeyRun = useCallback(() => {
+    const run = keyRun.current
+    if (run === null) return
+    clearTimeout(run.timer)
+    keyRun.current = null
+    flush(run.g)
+    void run.g.chain.then(() => setPreview(null))
+  }, [flush])
+
+  const onNudge = useCallback(
+    (index: number, delta: number) => {
+      if (tabs === undefined) return
+      let run = keyRun.current
+      if (run !== null && run.g.index !== index) {
+        endKeyRun()
+        run = null
+      }
+      if (run === null) {
+        const g = begin(index)
+        if (g === undefined) return
+        run = { g, at: g.base[index] ?? 0, timer: setTimeout(endKeyRun, KEY_RUN_MS) }
+        keyRun.current = run
+      }
+      clearTimeout(run.timer)
+      run.timer = setTimeout(endKeyRun, KEY_RUN_MS)
+      const at = clampTab(run.g.base, index, run.at + delta, tabs.width, tabs.length)
+      run.at = at
+      const centres = [...run.g.base]
+      centres[index] = at
+      setPreview({ index, centres })
+      run.g.pending = at
+      schedule(run.g)
+    },
+    [tabs, begin, endKeyRun, schedule],
+  )
+
   const onDrag = useCallback(
     (phase: TabDragPhase, index: number, point: Vec3) => {
       if (tabs === undefined || face === undefined || part === undefined) return
       if (phase === 'start') {
-        const entered =
-          op?.kind === 'profile' && op.tabs.positions !== undefined
-            ? op.tabs.positions.map((q) => q.source)
-            : tabs.centres.map((c) => lengthSource(c, part.units))
-        gesture.current = {
-          id: newGestureId(),
-          index,
-          base: tabs.centres,
-          sources: entered,
-          pending: null,
-          lastSent: 0,
-          sent: false,
-          timer: undefined,
-          chain: Promise.resolve(),
-        }
+        gesture.current = begin(index) ?? null
         return
       }
       const g = gesture.current
@@ -151,9 +210,7 @@ export function useTabMarkers(
         centres[index] = at
         setPreview({ index, centres })
         g.pending = at
-        const wait = SHAPE_COMMIT_MS - (performance.now() - g.lastSent)
-        if (wait <= 0) flush(g)
-        else g.timer ??= setTimeout(() => flush(g), wait)
+        schedule(g)
         return
       }
       gesture.current = null
@@ -167,7 +224,7 @@ export function useTabMarkers(
       setPreview(null)
       void g.chain.then(() => (g.sent ? cancelGesture(g.id) : undefined))
     },
-    [tabs, face, part, op, flush, cancelGesture],
+    [tabs, face, part, begin, schedule, flush, cancelGesture],
   )
 
   // a drag still open when the selection goes away is sent as it stands
@@ -176,8 +233,9 @@ export function useTabMarkers(
       const g = gesture.current
       if (g !== null) flush(g)
       gesture.current = null
+      endKeyRun()
     },
-    [flush],
+    [flush, endKeyRun],
   )
 
   return useMemo(() => {
@@ -213,9 +271,11 @@ export function useTabMarkers(
               radius: Math.max(0.8, Math.min(3, tabs.slotWidth * 0.6)),
             },
       plane: { origin: at([0, 0]), normal: face.frame.n, u: face.frame.u },
-      dragging: preview?.index ?? null,
+      // the dragged marker only (a key run keeps its focus ring instead)
+      dragging: gesture.current !== null ? (preview?.index ?? null) : null,
       locked: !tabs.allowed,
       onDrag,
+      onNudge,
     }
-  }, [tabs, face, part, preview, onDrag])
+  }, [tabs, face, part, preview, onDrag, onNudge])
 }
