@@ -55,6 +55,7 @@ The docs are the **source of truth**. Code implements what is documented here; w
 | Conventions  | [conventions/documentation.md](conventions/documentation.md) – how docs are written                                                                                                                                                  | accepted    |
 | Research     | [research/s4-offset-clearing.md](research/s4-offset-clearing.md) – spike S4: offset clearing of regions (ring tree, step cap, links, entries) measured by heightmap; step ≤ R recommended, proposed changes to plan-v0.3.md          | draft       |
 | Research     | [research/s5-biarc-fitting.md](research/s5-biarc-fitting.md) – spike S5: biarc fitting of Béziers and elliptical arcs within 0.01 mm; three methods compared, recommendation, proposed changes to shapes.md                          | draft       |
+| Research     | [research/s6-clone-budgets.md](research/s6-clone-budgets.md) – spike S6: 100 / 500 / 1000 clone instances against the evaluation and command budgets, levers measured, limit and approach recommended                                | draft       |
 | Decisions    | [decisions/](decisions/) – architecture decision records (ADRs)                                                                                                                                                                      | –           |
 
 ## Status values

@@ -1,0 +1,12 @@
+// Spike S6 (docs/research/s6-clone-budgets.md): vitest-run TypeScript against src/core, not part of
+// the app build. Run: `npx vitest run -c spikes/clones/vitest.config.mts --silent=false`;
+// typecheck: `node node_modules/typescript7/bin/tsc --noEmit -p spikes/clones`.
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "noEmit": true
+  },
+  "include": ["*.ts", "*.mts"]
+}

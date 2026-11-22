@@ -1,0 +1,109 @@
+# Spike S6: clone instances at scale
+
+Status: draft (spike report, 2026-11-22) · Task: S6 in [plans/v0.4.md § Spikes](../plans/v0.4.md#2-spikes) · Specs it informs: [features.md § Clones](../modes/features.md#clones) (draft limits), [design-v0.4.md § Clones in v0.4](../modes/design-v0.4.md#clones-in-v04), [shapes.md § Evaluation perf](../architecture/shapes.md#evaluation-perf-g1-follow-up) and [§ Performance](../architecture/shapes.md#performance) · Code: [`spikes/clones/`](../../spikes/clones/evaluate.ts) · Terms: [glossary.md](../glossary.md)
+
+## Question
+
+Can 100 / 500 / 1000 clone instances stay within the command budget (resolve + checks ≤ 3 ms, [shapes.md § Performance](../architecture/shapes.md#performance)) and the part evaluation budget (≤ 50 ms warm, [geometry.md](../architecture/geometry.md#performance-budgets-v01))? What do toolpath generation and the program size do? Which levers help, and what limit and implementation should F5 take?
+
+## Method
+
+- **Instances as plain operations.** Clones do not exist yet, so an instance is a translated copy of its source operations, in the expansion order of [features.md § Plan and cut order](../modes/features.md#plan-and-cut-order) (source operation A on every position, then B). This is what an expansion writes into the part, so the numbers are what F5 would get with today's pipeline.
+- **Workloads** ([`workload.ts`](../../spikes/clones/workload.ts)), each on a 6 mm board:
+  - **Counterbored M3 hole** as [design-v0.4.md](../modes/design-v0.4.md) expands it: a Ø6 circular pocket 3.3 deep plus a Ø3.4 through drilling on its floor (2 operations per instance), 40 per row at a 10 mm pitch, stock 420 × 270.
+  - **Obround slot** 30 × 5 (the lid's vent): one pocket per instance, through in the geometry runs, 5.5 deep in the command runs (a pocket must end above the stock bottom today), 25 per row at a 36 × 10 pitch, stock 920 × 420.
+- **Evaluation** ([`evaluation.test.ts`](../../spikes/clones/evaluation.test.ts)): production `evaluatePart` fresh, unchanged with the worker caches (`OperationCache` + kept solids at `KEPT_TRIANGLES` = 150 000), and with every instance changed by a source edit. Then a cut-down copy of the same pipeline ([`evaluate.ts`](../../spikes/clones/evaluate.ts), no geometry checks) with the levers: subtraction layers of 25 (today), 100 or unbounded (every pairwise-disjoint tool in one layer); instances by `perOp` (today), `translateMesh` (source meshes built once, cache key per source + offset, each instance a translated mesh copy with its own original id) or `transform` (source solid composed once, instances by `SolidPort.transform`, labels recovered per triangle by a grid lookup of the instance boxes). Every way gives the same volume (asserted to 1e-6) and labels every triangle.
+- **Unrelated edit** ([`prefix.test.ts`](../../spikes/clones/prefix.test.ts)): a 60 × 200 pocket next to N counterbored holes is edited; today (worker caches) against keeping the part after the clone layers as one kept solid and subtracting only the edited pocket.
+- **Commands and plan** ([`commands.test.ts`](../../spikes/clones/commands.test.ts)): `parameterChecks` over the expanded input; N instances added through `design.pocket.add` / `design.drilling.add` (the drilling `on` its pocket's floor), then the time of one more add and of a `design.pocket.update`; `project.apply` (auto tool choice), `plan.create` (with a machine), `exportPlan` with an empty and a warm toolpath cache, the program's lines and bytes. Tools: Flat 6, Flat 3 (stepover 1.2), Drill 3.4; the auto choice took the Flat 6 for the Ø6 counterbores (a plunge per level).
+- **Machine:** Apple M1 Pro (10 cores), Node 26.7.0, manifold-3d 3.5.4, **under load average 11–18** from parallel agents (comparable G1 runs swung ≈ 2× under such load, [shapes.md § Performance](../architecture/shapes.md#performance)); medians of 3 runs (evaluation) and 9 (checks), one run for the command table. Absolute values are pessimistic; the scaling and the ratios between levers are the result.
+
+Run: `npx vitest run -c spikes/clones/vitest.config.mts --silent=false` (≈ 15 min; `S6_COUNTS=100` and `S6_RUNS=1` shorten it). Typecheck: `node node_modules/typescript7/bin/tsc --noEmit -p spikes/clones`.
+
+## Results
+
+### Evaluation, today
+
+`evaluatePart`, ms (median):
+
+| Instances               | Operations | Fresh | Unchanged (caches) | Source edited | Triangles |
+| ----------------------- | ---------- | ----- | ------------------ | ------------- | --------- |
+| 100 counterbored holes  | 200        | 236   | 199                | 231           | 30 064    |
+| 500 counterbored holes  | 1 000      | 2 361 | 2 255              | 2 364         | 141 920   |
+| 1000 counterbored holes | 2 000      | 7 770 | 7 539              | 7 890         | 281 644   |
+| 100 slots               | 100        | 147   | 134                | 145           | 24 318    |
+| 500 slots               | 500        | 1 070 | 1 012              | 1 070         | 92 188    |
+| 1000 slots              | 1 000      | 3 022 | 2 898              | 3 020         | 176 886   |
+
+- **Already 100 instances are 3–5× over the 50 ms budget**, like the stress grid of 30 pockets + 120 drills (232 ms, [geometry.md](../architecture/geometry.md#performance-budgets-v01)). The output passes the 20 000-triangle budget at about 70 instances.
+- **Cost grows quadratically** with today's layers of 25: 10× the instances cost 33× (holes) and 21× (slots). Each layer subtracts from the whole part, which grows with every layer: 80 layers at 1000 holes.
+- **The caches do not help**: the subtraction layers always run and make ≈ 90 % of the time; from ≈ 500 instances the kept solids (150 000 triangles) no longer fit either.
+
+### Levers
+
+Cut-down pipeline (no geometry checks), total ms (median); in brackets the slowest single layer, i.e. the longest abortable step:
+
+| Instances               | perOp, 25 (today) | perOp, 100  | perOp, one layer | translateMesh, one layer | transform, 100 | transform, one layer |
+| ----------------------- | ----------------- | ----------- | ---------------- | ------------------------ | -------------- | -------------------- |
+| 100 counterbored holes  | 213 (36)          | 156 (90)    | 156 (90)         | 152 (90)                 | 137 (91)       | **139** (93)         |
+| 500 counterbored holes  | 2 300 (94)        | 1 115 (149) | 795 (468)        | 767 (464)                | 1 017 (150)    | **691** (464)        |
+| 1000 counterbored holes | 7 713 (176)       | 2 987 (222) | 1 613 (948)      | 1 615 (961)              | 2 808 (223)    | **1 420** (946)      |
+| 100 slots               | 141 (41)          | 92 (74)     | 93 (74)          | 89 (73)                  | 80 (73)        | **81** (74)          |
+| 500 slots               | 1 046 (73)        | 548 (114)   | 427 (359)        | 414 (356)                | 495 (114)      | **369** (354)        |
+| 1000 slots              | 2 996 (119)       | 1 345 (167) | 865 (724)        | 845 (729)                | 1 231 (168)    | **749** (718)        |
+
+Phases (1000 holes, today → transform with one layer): build 42 → 0.6 ms, compose (`fromMesh` + per-operation booleans) 166 → 5 ms, subtraction 7 496 → 1 397 ms (unions inside it ≈ 100 ms either way), `toMesh` 8 ms, the label lookup 9 ms (0.8 ms at 100).
+
+- **Subtraction layers dominate.** One layer per disjoint set (clone instances of one source operation never overlap) turns the growth linear: ≈ 1.4 ms per counterbored hole and ≈ 0.75 ms per slot on this machine, 1.4–5× faster than today. The price is one long step (0.9 s at 1000 holes), which breaks the "abortable between steps" rule ([workers.md](../architecture/workers.md#abort-and-pause)); layers of 100 keep steps at 90–220 ms and still gain 1.4–2.7×.
+- **Instancing the source** (`transform`) removes build and compose almost entirely, but they are only ≈ 10 % of the time. Its label pass is cheap (one grid lookup per clone triangle). `translateMesh` (cache key per source + offset, own original ids, no new label code) gains only the build (≈ 40 ms at 1000).
+- **Caches with a source-relative key** make "unchanged" and "source edited" cost the same as fresh minus build/compose (e.g. 1000 slots: 744 / 749 ms, `transform`); again the subtraction remains.
+- **Nothing makes 100+ instances fit 50 ms.** The boolean cost per chord is the floor ([S3](../../spikes/prisms/results.md): ≈ 8 µs per chord in booleans when idle); a counterbored hole has ≈ 70 chords, so 100 holes are ≈ 7 000 chords, more than twice the ≈ 3 000-chord budget of an evaluation.
+
+### Unrelated edit next to clones
+
+ms (median); the lever excludes labels and checks:
+
+| Clones                  | Today (worker caches) | Kept clone layers: subtract + `toMesh` | Part triangles |
+| ----------------------- | --------------------- | -------------------------------------- | -------------- |
+| 100 counterbored holes  | 213                   | **16.8**                               | 30 804         |
+| 500 counterbored holes  | 2 318                 | **74**                                 | 143 108        |
+| 1000 counterbored holes | 7 969                 | **149**                                | 283 388        |
+
+Subtraction order does not change the solid ([geometry.md § Building the solids](../architecture/geometry.md#building-the-solids)), so the part after the clone layers can be one kept solid keyed by the clone groups' inputs; an edit elsewhere then pays one subtraction against a larger part instead of all clone layers again. This is the lever that keeps a part with clones editable.
+
+### Commands, plan and program
+
+`parameterChecks` itself is negligible: 0.15 / 0.60 / 0.71 ms for 200 / 1000 / 2000 operations. Whole commands are not ("one run each", ms):
+
+| Instances               | Ops   | Add one more | Update one | Apply | `plan.create` | Generate + export | Export, cached | Plan ops | Program lines | Program size |
+| ----------------------- | ----- | ------------ | ---------- | ----- | ------------- | ----------------- | -------------- | -------- | ------------- | ------------ |
+| 100 counterbored holes  | 200   | 10           | 12         | 18    | 260           | 348               | 222            | 101      | 1 728         | 13 KB        |
+| 500 counterbored holes  | 1 000 | 55           | 70         | 76    | 6 157         | 7 877             | 5 429          | 501      | 8 528         | 61 KB        |
+| 1000 counterbored holes | 2 000 | 127          | 165        | 155   | 27 887        | 33 280            | 23 716         | 1 001    | 17 028        | 122 KB       |
+| 100 slots               | 100   | 8            | 10         | 10    | 159           | 331               | 213            | 100      | 14 572        | 189 KB       |
+| 500 slots               | 500   | 45           | 50         | 46    | 3 725         | 6 446             | 4 387          | 500      | 72 972        | 970 KB       |
+| 1000 slots              | 1 000 | 100          | 114        | 119   | 18 269        | 26 402            | 17 382         | 1 000    | 145 972       | 1 958 KB     |
+
+- **Every design command is linear in the part's operations** (≈ 50–100 µs per operation): it reloads the part from its DTO (quantity parsing, `Rational` arithmetic), rebuilds the surface graph, maps the geometry input and rewrites the operation list (a CPU profile at 500 instances: `partFromDTO`, `surfaces.build`, `toGeometryInput`, `writeOperationList`, `stableJson` sorting). The 3 ms budget holds to ≈ 30–50 operations on this machine; this is a property of today's commands, not of Clones, but Clones are the first feature that makes hundreds of operations easy.
+- **The plan side is quadratic:** `plan.create` and `planOperationInputs` (every export, also with all toolpaths cached) spend their time in `deepEqual` of snapshots and `hashJson` of the chained input hash per plan operation, each over the whole part. 100 instances: 0.2–0.3 s; 1000: 18–28 s.
+- **Toolpaths and the program** scale linearly and are no problem for a GRBL stream: ≈ 17 lines (≈ 120 bytes) per counterbored hole (equal drillings share one plan operation; each counterbore pocket is its own), ≈ 146 lines (≈ 2 KB) per slot pocket. 1000 slots give a 2 MB, 146 000-line program.
+
+## Recommendation
+
+1. **Limit for v0.4: 100 instances per Clones feature** (the draft's "100 positions per row" stays; "1000 instances in all" becomes 100 for now), and an info note when a part's evaluation exceeds the chord budget (as `dfm.shapeHeavy`; e.g. `dfm.clonesHeavy` with the instance count). At 100 instances: evaluation 80–140 ms with the levers below (150–240 ms today), commands ≈ 10 ms, plan creation and export ≈ 0.3 s, program ≤ 200 KB. The exit part needs 4 + 6 + 6 instances. 1000 stays a target for after the plan-side and command-side fixes; 500 costs 0.4–0.7 s per evaluation even with every lever, which only a stepped background evaluation with progress can carry.
+2. **F5 expands into plain operations** (as features.md specifies): read-only instances, ids by role and Plan untouched. The spike found no reason to keep instances virtual for 100 instances; the costs above are in evaluation and in O(N) / O(N²) document code, not in the expansion itself.
+3. **Evaluation (with F5, small):** put the instances of one clone source operation into **one subtraction layer** regardless of `UNION_CHUNK` (they are disjoint by construction, `dfm.cloneOverlap` aside), capped so a step stays near 100 ms (≈ 100 instances); and **keep the part after the clone layers** as one kept solid keyed by the clone groups, so edits elsewhere cost ≈ 17 ms more instead of ≈ 200 ms. Raise `KEPT_TRIANGLES` with it, or key the prefix separately, because a 100-hole prefix is already 30 000 triangles.
+4. **Instancing by `transform` is optional.** It saves build and compose (≈ 10 %) for a label pass by position; take it only if F5's measurements on an idle machine show compose mattering. It moves x/y by a float64 offset of float32 vertices (z untouched, so floors stay coplanar exactly); instances that meet other operations' walls would need the sliver test of G1. `translateMesh` is not worth its code.
+5. **Before raising the limit** (backlog, independent of Clones): make `plan.create` / `planOperationInputs` linear (hash each operation's own inputs once and chain the hashes; compare snapshot values once per copy, not per operation), and make design commands incremental (load and check only the operations a command touches plus their dependants, cache the parsed part per document revision). Then re-measure with this harness.
+
+## Changes the draft docs should take
+
+For [features.md § Clones](../modes/features.md#clones), [design-v0.4.md § Clones in v0.4](../modes/design-v0.4.md#clones-in-v04) and [shapes.md § Evaluation perf](../architecture/shapes.md#evaluation-perf-g1-follow-up) when they are next edited (not folded in by the spike):
+
+1. Draft limit "1000 instances in all" → 100 per Clones feature in v0.4, with the evaluation note above; [plans/v0.4.md § Risks](../plans/v0.4.md#risks-and-spikes) "the 1000-instance limit stays" no longer holds.
+2. Subtraction layers: clone groups in their own layers beyond `UNION_CHUNK`, and the kept clone prefix, as F5 tasks.
+3. Known issues for the plan: quadratic `plan.create` / export inputs; linear design commands far past 3 ms at hundreds of operations.
+
+## Open questions
+
+- Idle-machine numbers: all timings here ran under load 11–18; the ratios hold, the absolute 100-instance values may halve.
+- Should evaluation past the budget show a progress state in the viewport (the clones as ghosts until it lands), so 200–500 instances become acceptable without the plan-side fixes? A UI decision for the user.
