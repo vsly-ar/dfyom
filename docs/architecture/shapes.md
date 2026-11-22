@@ -83,6 +83,8 @@ Builders in [Building the solids](geometry.md#building-the-solids) get general-l
 
 SVG Béziers and elliptical arcs become **biarcs** (two tangent arcs per piece, tangent-continuous with their neighbours), subdivided until every point is within 0.01 mm (the chord tolerance). The spike's 3-point arcs are not tangent-continuous and are not used. Lines stay lines; circular arcs stay exact; arcs whose radius exceeds 10 m become lines. Fitting runs in the dispatcher's prepared input (import), never on render.
 
+Spike S5 measured three fitting methods and recommends the Riskus/Šír-style biarc (inflection split, incenter join); it also proposes changes to this section, notably replacing the 10 m radius rule with a sagitta rule: [research/s5-biarc-fitting.md](../research/s5-biarc-fitting.md) (draft, not yet folded in).
+
 ## SVG import
 
 `src/core/import/svg.ts`, pure: an XML tokenizer of the SVG subset (no DOM; `src/core` stays headless), transforms flattened into the element coordinates, units from `width`/`height`/`viewBox`, `fill-rule` to booleans, the [import report](../modes/design-v0.3.md#svg-import) as data. Limits (refused with `input.malformed`, rule `svgLimit`): 10 MB file, 20 000 elements after fitting. The spike corpus (`spikes/2d/corpus/`) seeds the tests.
