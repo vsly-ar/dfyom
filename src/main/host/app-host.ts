@@ -37,7 +37,6 @@ import {
   type PartEvaluationState,
 } from '../../core/design/evaluation'
 import { Library } from '../../core/library/library'
-import { followLibraryChanges } from '../../core/plan/follow'
 import type { ExportFiles } from '../../core/post/plan-export'
 import { newProjectDoc } from '../../core/project/document'
 import type { HostPort, OpenedResult, OpenProjectInfo } from '../../core/project/lifecycle'
@@ -212,19 +211,8 @@ class Host implements AppHost {
       services: { workers: o.workers, library, host: this },
       ...this.common(),
     })
-    // Draft plans follow library changes (docs/modes/plan-v0.1.md#implementation-task-213).
-    library.subscribe(() => {
-      for (const rt of this.runtimes.values())
-        void followLibraryChanges(rt.dispatcher, library.lookup).then((r) => {
-          if (r.isErr())
-            this.log.warn({ err: r.unwrapErr().toJSON(), key: rt.key }, 'library follow failed')
-          else if (r.unwrap().failed.length > 0)
-            this.log.warn(
-              { key: rt.key, failed: r.unwrap().failed.length },
-              'library follow incomplete',
-            )
-        })
-    })
+    // Draft plans follow library changes on the next Apply of each project: a changed library
+    // item a draft plan copies is pending there (docs/architecture/apply.md#apply-hooks).
   }
 
   private common() {

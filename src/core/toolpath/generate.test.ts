@@ -95,7 +95,7 @@ describe('plan.toolpath.generate', () => {
   it('generates every operation in machining order; a second run is all cached', async () => {
     const { port, runs } = countingPort()
     const t = await setup({ port })
-    expect(t.get(t.order[0]!)).toEqual({ toolpath: null, stale: true })
+    expect(t.get(t.order[0]!)).toEqual({ toolpath: null, stale: true, pendingApply: false })
     const first = expectOk(await t.generate()) as Outcome
     expect(first.operations).toEqual(
       t.order.map((id) => ({ planOperationId: id, status: 'generated' })),
@@ -129,7 +129,8 @@ describe('plan.toolpath.generate', () => {
         ui,
       ),
     )
-    expect(t.get(facing)).toEqual({ toolpath: before, stale: true })
+    // the plan's toolpaths were generated: its edited inputs are pending for Apply
+    expect(t.get(facing)).toEqual({ toolpath: before, stale: true, pendingApply: true })
     const r = expectOk(await t.generate()) as Outcome
     // the facing and everything after it (chained hash) regenerate
     expect(r.operations.every((o) => o.status === 'generated')).toBe(true)
@@ -154,7 +155,7 @@ describe('plan.toolpath.generate', () => {
       code: 'plan.check',
       message: 'tool does not fit',
     })
-    expect(t.get(failId)).toEqual({ toolpath: null, stale: true })
+    expect(t.get(failId)).toEqual({ toolpath: null, stale: true, pendingApply: false })
   })
 
   it('abort mid-job ends in op.aborted with the completed operations; they stay cached', async () => {
@@ -233,6 +234,58 @@ describe('plan.toolpath.generate', () => {
     expectErrCode(
       t.d.query('plan.toolpath.get', { planId: t.planId, planOperationId: 'planOp-x' }, ui),
       'input.malformed',
+    )
+  })
+})
+
+// Spec: docs/architecture/apply.md#apply-jobs (decision 4)
+describe('toolpaths on Apply (plan.toolpaths apply job)', () => {
+  type Pending = { changes: { kind: string; planId?: string; operationId?: string }[] }
+  type Applied = { jobIds: string[] }
+
+  it('keeps a plan current once its toolpaths were generated: plan edits are pending, Apply regenerates', async () => {
+    const t = await setup()
+    const facing = t.order[0]!
+    const pending = () => expectOk(t.d.query('project.pending.get', {}, ui)).value as Pending
+    const apply = async () => expectOk(await t.d.dispatch('project.apply', {}, ui)).value as Applied
+    const overshoot = async (v: string) =>
+      expectOk(
+        await t.d.dispatch(
+          'plan.operation.update',
+          { planId: t.planId, planOperationId: facing, strategy: { overshoot: v } },
+          ui,
+        ),
+      )
+    // never generated: the plan stays explicit ("Generate toolpaths")
+    await overshoot('2')
+    expect(pending().changes).toEqual([])
+    expect((await apply()).jobIds).toEqual([])
+    expectOk(await t.generate())
+    await overshoot('3')
+    expect(pending().changes).toEqual([
+      expect.objectContaining({
+        kind: 'plan',
+        planId: t.planId,
+        operationId: facing,
+        field: 'strategy.overshoot',
+      }),
+    ])
+    expect(t.get(facing)).toMatchObject({ stale: true, pendingApply: true })
+    const { jobIds } = await apply()
+    expect(jobIds).toHaveLength(1)
+    const r = expectOk(await t.d.job(jobIds[0]!).unwrap().result) as Outcome
+    expect(r.operations.map((o) => o.planOperationId)).toEqual(t.order)
+    expect(t.get(facing)).toMatchObject({ stale: false, pendingApply: false })
+    // nothing stale or pending: no job
+    expect((await apply()).jobIds).toEqual([])
+  })
+
+  it('an archived plan is not kept current', async () => {
+    const t = await setup()
+    expectOk(await t.generate())
+    expectOk(await t.d.dispatch('plan.status.set', { planId: t.planId, status: 'archived' }, ui))
+    expect((expectOk(t.d.query('project.pending.get', {}, ui)).value as Pending).changes).toEqual(
+      [],
     )
   })
 })

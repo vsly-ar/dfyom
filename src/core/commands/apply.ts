@@ -7,7 +7,7 @@
  */
 import { z } from 'zod'
 import { fail, Ok } from '../../shared/result'
-import { DesignToolDtoSchema, type OperationDTO, type PartDTO } from '../design/part.dto'
+import { DesignToolDtoSchema, type PartDTO } from '../design/part.dto'
 import { sameValue } from '../plan/validity'
 import type { ProjectDoc } from '../project/document'
 import type { Source } from './context'
@@ -15,15 +15,20 @@ import { defineQuery, type BuiltinCommand } from './define'
 
 // ── pending changes ─────────────────────────────────────────────────────────────────────────
 
-/** Kind of a pending change (apply.md § What is pending); `plan` and `library` keys come with P2. */
+/** Kind of a pending change (apply.md § What is pending). */
 export type PendingKind = 'design' | 'plan' | 'library'
 
 /** One pending key; the count `N` is the number of these. */
 export interface PendingChange {
   readonly kind: PendingKind
   readonly partId?: string
+  /** A design operation (`design`), or a plan operation (`plan`). */
   readonly operationId?: string
   readonly planId?: string
+  /** A setup of a plan (`plan` keys of setup fields). */
+  readonly setupId?: string
+  /** The changed library item (`library` keys). */
+  readonly libraryItemId?: string
   /**
    * The changed field as a dotted path (`depth`, `shape.cornerRadius`, `stock`), or the
    * structural change of an operation: `added`, `removed`, `moved` (one key each).
@@ -54,7 +59,7 @@ const PART_IGNORED = new Set(['id', 'name', 'operations', 'stock'])
  * tolerances) recurse one level per nesting, so "corner radius" and "depth" count apart;
  * quantities, arrays (points) and objects of another kind are one field.
  */
-function changedFields(a: Rec, b: Rec, ignored: ReadonlySet<string>, prefix = ''): string[] {
+export function changedFields(a: Rec, b: Rec, ignored: ReadonlySet<string>, prefix = ''): string[] {
   const out: string[] = []
   const keys = new Set([...Object.keys(a), ...Object.keys(b)])
   for (const k of keys) {
@@ -88,8 +93,11 @@ function longestIncreasing(seq: readonly number[]): Set<number> {
   return keep
 }
 
-/** Operations whose order relative to the others changed: those outside a longest kept order. */
-function movedOperations(before: readonly OperationDTO[], after: readonly OperationDTO[]) {
+/** Records whose order relative to the others changed: those outside a longest kept order. */
+export function movedIds(
+  before: readonly { readonly id: string }[],
+  after: readonly { readonly id: string }[],
+): string[] {
   const index = new Map(before.map((o, i) => [o.id, i]))
   const common = after.filter((o) => index.has(o.id))
   const keep = longestIncreasing(common.map((o) => index.get(o.id) ?? 0))
@@ -123,7 +131,7 @@ function partChanges(doc: ProjectDoc, base: ProjectDoc, id: string): PendingChan
   if (before.operations === after.operations) return out
   const beforeOps = new Map(before.operations.map((o) => [o.id, o]))
   const afterIds = new Set(after.operations.map((o) => o.id))
-  const moved = new Set(movedOperations(before.operations, after.operations))
+  const moved = new Set(movedIds(before.operations, after.operations))
   for (const op of after.operations) {
     const old = beforeOps.get(op.id)
     if (old === undefined) {
@@ -148,11 +156,15 @@ function stockSame(doc: ProjectDoc, base: ProjectDoc, after: PartDTO, before: Pa
   return a === b || sameValue(a, b)
 }
 
+/** A pending change's identity (one count per key), to merge the keys of several sources. */
+export function pendingKey(c: PendingChange): string {
+  return [c.kind, c.partId, c.planId, c.setupId, c.operationId, c.libraryItemId, c.field].join('\0')
+}
+
 /**
- * The pending changes of `doc` against the `baseline` (the document at the last Apply), by
- * value (apply.md § What is pending). v0.2 P1 tracks design changes (operations and part
- * fields); plan inputs of kept-current plans and library items join with their apply hooks and
- * jobs (task P2). Cost: both documents are immutable and share structure, so unchanged parts
+ * The design changes of `doc` against the `baseline` (the document at the last Apply), by
+ * value (apply.md § What is pending): operations and part fields. The plan-input, draft-plan
+ * and library keys come from the registry's `PendingSource`s (plan/pending.ts). Cost: both documents are immutable and share structure, so unchanged parts
  * and operations are skipped by reference; only touched ones are compared.
  */
 export function pendingChanges(doc: ProjectDoc, baseline: ProjectDoc): PendingChange[] {
@@ -239,8 +251,10 @@ export const projectApply: BuiltinCommand<z.ZodObject, ApplyOutcome> = {
 const PendingChangeSchema = z.object({
   kind: z.enum(['design', 'plan', 'library']),
   partId: z.string().optional(),
-  operationId: z.string().optional(),
+  operationId: z.string().optional().describe('Design or plan operation'),
   planId: z.string().optional(),
+  setupId: z.string().optional(),
+  libraryItemId: z.string().optional(),
   field: z.string().optional().describe('Changed field, or added / removed / moved'),
   label: z.string(),
   source: z.object({ kind: z.string(), id: z.string() }).describe('Who changed it last'),
@@ -255,7 +269,7 @@ export const LastApplySchema = z.object({
 })
 export type LastApply = z.output<typeof LastApplySchema>
 
-/** The dispatcher's Apply state, for `project.pending.get` (and later the `pendingApply` flags). */
+/** The dispatcher's Apply state, for `project.pending.get` and the `pendingApply` flags. */
 export interface ApplyView {
   pending(): readonly PendingChangeInfo[]
   /** Ids of the running apply jobs. */

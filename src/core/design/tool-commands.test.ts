@@ -27,7 +27,7 @@ import { loadPart } from './load'
 import { operationFromDTO, operationToDTO } from './operation'
 import type { DesignToolDTO, OperationDTO } from './part.dto'
 import { checkGeneralizedTool, designToolFromDTO } from './tool'
-import { designToolAutoChoice } from './tool-commands'
+import { designToolAutoChoice, toolScan } from './tool-commands'
 
 const ui = uiSource()
 
@@ -488,6 +488,58 @@ describe('auto choice (apply hook design.toolAutoChoice)', () => {
     expect(s.warnings().find((w) => w.code === 'dfm.toolUnfit')).toMatchObject({
       params: { locked: false },
     })
+  })
+
+  it('checks against an unlocked tool with pending changes are marked pendingApply until Apply', async () => {
+    const s = await setup()
+    await s.pocket({ tool: generalized('flatEndMill', '12') })
+    await s.apply()
+    const unfit = () => s.warnings().find((w) => w.code === 'dfm.toolUnfit')
+    expect(unfit()).toMatchObject({ params: { locked: true } })
+    expect(unfit()).not.toHaveProperty('pendingApply') // locked: final
+    await s.run('design.operation.tool.unlock', { partId: s.partId, operationId: 'pocket1' })
+    expect(unfit()).toMatchObject({ params: { locked: false }, pendingApply: true })
+    await s.apply()
+    expect(unfit()).toBeUndefined()
+  })
+
+  it('the consistency scan on open makes absent or unfit auto tools pending until the next Apply', async () => {
+    const s = await setup()
+    await s.addTool('flatEndMill', '8')
+    await s.pocket() // never applied: no tool yet
+    await s.pocket({ tool: generalized('flatEndMill', '6') }) // locked: not scanned
+    const registry = expectOk(
+      createRegistry({
+        commands: [...PROJECT_COMMANDS, ...LIBRARY_COMMANDS],
+        queries: [...PROJECT_QUERIES, ...LIBRARY_QUERIES],
+        applyHooks: [designToolAutoChoice],
+        openScan: toolScan,
+      }),
+    )
+    const d = createDispatcher({
+      registry,
+      doc: s.d.doc,
+      ids: fakeIds(),
+      clock: fakeClock(0),
+      services: { workers: inProcessWorkers, library: s.library },
+    })
+    const pending = () =>
+      expectOk(d.query('project.pending.get', {}, ui)).value as { changes: unknown[] }
+    expect(pending().changes).toEqual([
+      expect.objectContaining({
+        kind: 'design',
+        partId: s.partId,
+        operationId: 'pocket1',
+        field: 'tool',
+        label: 'Pocket 1: tool',
+        source: { kind: 'system', id: 'open' },
+      }),
+    ])
+    const out = expectOk(await d.dispatch('project.apply', {}, ui)).value as ApplyOutcome
+    expect(out.toolChanges).toEqual([
+      expect.objectContaining({ operationId: 'pocket1', from: null, reason: 'unset' }),
+    ])
+    expect(pending().changes).toEqual([])
   })
 
   it('replacing a library tool drops its snapshot when no operation uses it', async () => {

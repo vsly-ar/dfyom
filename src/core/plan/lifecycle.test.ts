@@ -1,6 +1,7 @@
 // Spec: docs/modes/plan-v0.1.md (Plan status, Plans are snapshots, Implementation (task 2.13)):
-// inUse has no way back, library follow races and failures, rebuild validity and order, stale
-// detection by value, the draft auto-rebuild hook, the toolpath input hash, undo laws.
+// inUse has no way back, library follow on Apply and its failures, rebuild validity and order,
+// stale detection by value, the plan.draftFollow apply hook (docs/architecture/apply.md), the
+// toolpath input hash, undo laws.
 import { describe, expect, it } from 'vitest'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
 import type { DocumentCommand } from '../commands/define'
@@ -13,7 +14,6 @@ import { testStock } from '../design/design.fixture'
 import { len, libraryInput } from '../library/library.fixture'
 import type { ProjectDoc } from '../project/document'
 import { PLAN_COMMANDS, PLAN_QUERIES } from './commands'
-import { followLibraryChanges } from './follow'
 import { planOperationInputs } from './inputs'
 import type { PlanDTO } from './plan.dto'
 import {
@@ -41,6 +41,11 @@ async function setStockThickness(s: PlanSetup, thickness: string) {
   const item = s.query('library.stock.get', { id }) as { revision: number }
   await s.run('library.stock.update', { id, revision: item.revision, values: testStock(thickness) })
 }
+
+const apply = async (s: PlanSetup) =>
+  (await s.run('project.apply', {})) as {
+    plans: { planId: string; status: string; reason?: string }[]
+  }
 
 async function changeTool(s: PlanSetup) {
   const item = s.query('library.tool.get', { id: s.tools.flat6 }) as { revision: number }
@@ -72,44 +77,16 @@ describe('inUse has no way back', () => {
   })
 })
 
-describe('library follow: only draft plans, races, failures', () => {
-  it('followOnly re-checks the status inside the command: a non-draft plan is left unchanged', async () => {
-    const s = await planSetup()
-    const planId = await s.create()
-    await s.toStatus(planId, 'settledDesign')
-    await changeTool(s)
-    const snapshotId = stale(s, planId).libraryCopies[0]!.snapshotId
-    const before = s.plan(planId)
-    expect(
-      await s.run('plan.libraryItem.update', { planId, snapshotId, followOnly: true }),
-    ).toEqual({ updated: false })
-    expect(s.plan(planId)).toEqual(before)
-  })
-
-  it('a UI status change queued before the follow runs wins: the plan is not touched', async () => {
+describe('library follow on Apply: only draft plans, failures', () => {
+  it('a status change before the Apply wins: the plan is not touched', async () => {
     const s = await planSetup()
     const planId = await s.create()
     await changeTool(s)
     const before = s.plan(planId).snapshots
-    const settle = s.d.dispatch('plan.status.set', { planId, status: 'settledDesign' }, ui)
-    const follow = followLibraryChanges(s.d, s.library.lookup)
-    expectOk(await settle)
-    const r = expectOk(await follow)
-    expect(r).toEqual({ updated: 0, failed: [] })
+    await s.run('plan.status.set', { planId, status: 'settledDesign' })
+    expect((await apply(s)).plans).toEqual([])
     expect(s.plan(planId).snapshots).toEqual(before)
     expect(s.plan(planId).status).toBe('settledDesign')
-  })
-
-  it('a conflicting unrelated edit is retried: the draft still follows', async () => {
-    const s = await planSetup()
-    const planId = await s.create()
-    await changeTool(s)
-    const rename = s.d.dispatch('plan.update', { planId, name: 'Renamed' }, ui)
-    const follow = followLibraryChanges(s.d, s.library.lookup)
-    expectOk(await rename)
-    expect(expectOk(await follow)).toEqual({ updated: 1, failed: [] })
-    expect(stale(s, planId).libraryCopies).toEqual([])
-    expect(s.plan(planId).name).toBe('Renamed')
   })
 
   it('a copy that cannot be applied does not block the others; it stays a notice with the reason', async () => {
@@ -117,11 +94,10 @@ describe('library follow: only draft plans, races, failures', () => {
     const planId = await s.create()
     await changeTool(s)
     await setStockThickness(s, '10') // drill2 is 12.5 mm deep: the part no longer fits
-    const r = expectOk(await followLibraryChanges(s.d, s.library.lookup))
-    expect(r.updated).toBe(1)
-    expect(r.failed).toEqual([
-      expect.objectContaining({ planId, snapshotId: s.plan(planId).design.part.stock }),
-    ])
+    // the blocked stock copy is not pending (it would never apply), the tool is
+    const pending = s.query('project.pending.get', {}) as { changes: { libraryItemId?: string }[] }
+    expect(pending.changes.map((c) => c.libraryItemId)).toEqual([s.tools.flat6])
+    expect((await apply(s)).plans).toEqual([{ planId, status: 'followed' }])
     const copies = stale(s, planId).libraryCopies
     expect(copies).toEqual([
       expect.objectContaining({
@@ -140,7 +116,7 @@ describe('rebuild validity against the plan’s own stock copy', () => {
     const s = await planSetup()
     const planId = await s.create()
     await setStockThickness(s, '15')
-    expect(expectOk(await followLibraryChanges(s.d, s.library.lookup)).updated).toBe(1)
+    expect((await apply(s)).plans).toEqual([{ planId, status: 'followed' }])
     return { s, planId }
   }
 
@@ -149,6 +125,10 @@ describe('rebuild validity against the plan’s own stock copy', () => {
     const before = s.plan(planId)
     // fits the design's 20 mm stock, not the plan's 15 mm copy
     await s.run('design.pocket.update', { partId: s.partId, operationId: 'pocket1', depth: '15' })
+    const outcome = await apply(s)
+    expect(outcome.plans).toEqual([
+      { planId, status: 'blocked', reason: expect.stringContaining('rebuildBlocked') },
+    ])
     expect(s.plan(planId)).toEqual(before)
     expect(stale(s, planId).rebuildBlocked).toContain('rebuild blocked')
     expect(warnings(s, planId).map((w) => w.code)).toContain('plan.rebuildBlocked')
@@ -255,11 +235,12 @@ describe('stale detection by value', () => {
   })
 })
 
-describe('draft auto-rebuild hook', () => {
+describe('plan.draftFollow apply hook', () => {
   it('writes only what changed (small patches)', async () => {
     const s = await planSetup()
     const planId = await s.create()
     await s.run('design.pocket.update', { partId: s.partId, operationId: 'pocket1', depth: '6' })
+    await apply(s)
     const event = s.d.log.since(0, { withPatches: true }).at(-1)!
     const planPatches = (event.type === 'command' ? event.patches : [])!.filter(
       (p) => p.path[0] === 'plans',

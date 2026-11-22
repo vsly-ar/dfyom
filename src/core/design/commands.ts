@@ -23,6 +23,7 @@ import {
   type Option,
 } from '../../shared/result'
 import { defineCommand, defineQuery, type AnyCommand, type QueryDef } from '../commands/define'
+import type { PendingChange } from '../commands/apply'
 import type { CommandContext } from '../commands/context'
 import type { ReferenceResolver } from '../expression/evaluate'
 import { quantityFromSource } from '../expression/quantity'
@@ -842,13 +843,54 @@ const operationList = defineQuery({
   },
 })
 
+/** Rules against the operation's own tool: Apply may swap an unlocked tool and clear them. */
+const TOOL_RULES: ReadonlySet<string> = new Set(['dfm.toolUnfit', 'dfm.toolNotInLibrary'])
+
+/**
+ * Operations of a part whose tool Apply chooses again: unlocked, with a pending change (a new
+ * part or a changed stock: all of them), as the `design.toolAutoChoice` hook targets them
+ * (docs/architecture/apply.md#queries-for-pending-state).
+ */
+function choosesAgain(
+  part: {
+    readonly operations: readonly {
+      readonly id: string
+      readonly toolLocked?: boolean | undefined
+    }[]
+  },
+  partId: string,
+  pending: readonly PendingChange[],
+): Set<string> {
+  const out = new Set<string>()
+  for (const c of pending) {
+    if (c.kind !== 'design' || c.partId !== partId) continue
+    if (c.operationId !== undefined) out.add(c.operationId)
+    else if (c.field === 'stock' || c.field === 'added')
+      for (const op of part.operations) out.add(op.id)
+  }
+  for (const op of part.operations) if (op.toolLocked === true) out.delete(op.id)
+  return out
+}
+
 const warningList = defineQuery({
   name: 'design.warning.list',
   summary:
     "List a part's DFM warnings: parameter and tool checks now against the whole tool library, plus the geometry warnings once its evaluation is done.",
   args: z.object(PartArg),
   result: z.object({
-    warnings: z.array(DfmWarningSchema).describe('In design order; geometry ones only when done'),
+    warnings: z
+      .array(
+        z.intersection(
+          DfmWarningSchema,
+          z.object({
+            pendingApply: z
+              .literal(true)
+              .exactOptional()
+              .describe('May change on Apply: a check against an unlocked tool chosen again'),
+          }),
+        ),
+      )
+      .describe('In design order; geometry ones only when done'),
     evaluation: EvaluationStatusSchema,
     error: EvaluationErrorSchema.optional(),
   }),
@@ -861,8 +903,19 @@ const warningList = defineQuery({
     if (loaded.isErr()) return loaded
     const { part, stock, units } = loaded.unwrap()
     const state = ctx.services.evaluations?.state(doc, args.partId) ?? { status: 'pending' }
+    const again = choosesAgain(doc.parts[args.partId]!, args.partId, ctx.apply?.pending() ?? [])
     return partWarnings(part, stock, units, libraryTools(library), doc.snapshots)
-      .map((warnings) => warningsWithEvaluation(doc, args.partId, warnings, state))
+      .map((warnings) => {
+        const r = warningsWithEvaluation(doc, args.partId, warnings, state)
+        return {
+          ...r,
+          warnings: r.warnings.map((w) =>
+            TOOL_RULES.has(w.code) && again.has(w.operation)
+              ? { ...w, pendingApply: true as const }
+              : w,
+          ),
+        }
+      })
       .mapErr((e) => e.withContext(where))
   },
 })

@@ -1,12 +1,14 @@
 // Spec: docs/modes/plan-v0.1.md (Plans are snapshots, Plan status, Commands and queries v0.1).
 import { describe, expect, it } from 'vitest'
 import { expectOk } from '../../shared/testing/result'
-import { createRegistry } from '../commands/registry'
-import { uiSource } from '../commands/testing'
+import { createDispatcher } from '../commands/dispatcher'
+import { inProcessWorkers } from '../commands/jobs'
+import { createAppRegistry, createRegistry } from '../commands/registry'
+import { fakeClock, fakeIds, uiSource } from '../commands/testing'
+import type { ProjectDoc } from '../project/document'
 import { docToFiles, loadProjectFiles } from '../project/layout'
 import { libraryInput } from '../library/library.fixture'
-import { draftPlanAutoRebuild, PLAN_COMMANDS, PLAN_QUERIES } from './commands'
-import { draftLibraryUpdates, followLibraryChanges } from './follow'
+import { PLAN_COMMANDS, PLAN_QUERIES } from './commands'
 import type { PlanStatus } from './plan.dto'
 import {
   designIds,
@@ -29,7 +31,6 @@ describe('plan commands: registry', () => {
       createRegistry({
         commands: PLAN_COMMANDS,
         queries: PLAN_QUERIES,
-        hooks: [draftPlanAutoRebuild],
       }),
     )
     for (const c of PLAN_COMMANDS) expect(reg.command(c.name).unwrap().kind).toBe('document')
@@ -289,28 +290,71 @@ describe('snapshot independence and stale detection', () => {
   })
 })
 
-describe('draft auto-rebuild', () => {
-  it('design commands rebuild draft plans in the same undo step; settled plans stay', async () => {
+describe('draft follow on Apply (plan.draftFollow)', () => {
+  const pending = (s: PlanSetup) =>
+    s.query('project.pending.get', {}) as { count: number; changes: { kind: string }[] }
+
+  it('design commands leave draft plans pending; Apply rebuilds them in its own undo step; settled plans stay', async () => {
     const s = await planSetup()
     const draft = await s.create()
     const settled = await s.create()
     await s.toStatus(settled, 'settledDesign')
     const settledBefore = s.plan(settled)
     const pocketTool = opsOf(s.plan(draft)).find((o) => o.designOperationIds[0] === 'pocket1')!.tool
-    const before = s.d.doc
+    const draftBefore = s.plan(draft)
     const undoDepth = s.d.history.undoable.length
     await s.run('design.pocket.update', { partId: s.partId, operationId: 'pocket1', depth: '6' })
     await s.run('design.drilling.add', { partId: s.partId, center: ['50', '50'], diameter: '6' })
     expect(s.d.history.undoable.length).toBe(undoDepth + 2) // no extra steps
+    // the draft waits for Apply: unchanged, marked pendingApply
+    expect(s.plan(draft)).toEqual(draftBefore)
+    expect(stale(s, draft)).toMatchObject({ pendingApply: true })
+    expect(stale(s, settled)).toMatchObject({ pendingApply: false })
+    expect(s.query('plan.warning.list', { planId: draft })).toMatchObject({ pendingApply: true })
+    const afterEdits = s.d.doc
+    const outcome = (await s.run('project.apply', {})) as { plans: unknown[] }
+    expect(outcome.plans).toEqual([{ planId: draft, status: 'rebuilt' }])
+    expect(s.d.history.undoable.length).toBe(undoDepth + 3)
+    expect(s.d.history.undoable.at(-1)?.command).toBe('project.apply')
     const p = s.plan(draft)
     expect(p.design.taken).toEqual(s.part())
-    expect(stale(s, draft).operations).toEqual([])
+    expect(stale(s, draft)).toMatchObject({ pendingApply: false, operations: [] })
     expect(opsOf(p).find((o) => o.designOperationIds[0] === 'pocket1')!.tool).toBe(pocketTool)
     expect(designIds(p)).toContain('drill5')
     expect(s.plan(settled)).toEqual(settledBefore)
+    // undoing the Apply reverts the automation and keeps the edits pending
     await s.undo()
-    await s.undo()
-    expect(s.d.doc).toEqual(before)
+    expect(s.d.doc).toEqual(afterEdits)
+    expect(stale(s, draft)).toMatchObject({ pendingApply: true })
+    expect(pending(s).count).toBeGreaterThan(0)
+  })
+
+  it('a draft that does not follow its part is pending without a design change (recovered file)', async () => {
+    const s = await planSetup()
+    const planId = await s.create()
+    // a working folder written before the Apply: the part changed, the draft did not
+    const doc = JSON.parse(JSON.stringify(s.d.doc)) as ProjectDoc
+    const pocket = doc.parts[s.partId]!.operations.find((o) => o.id === 'pocket1')!
+    const depth = (pocket as { depth: Record<string, unknown> }).depth
+    Object.assign(depth, { source: '6', exact: { num: '6', den: '1' } })
+    const d = createDispatcher({
+      registry: expectOk(createAppRegistry()),
+      doc,
+      ids: fakeIds(),
+      clock: fakeClock(0),
+      services: { workers: inProcessWorkers, library: s.library },
+    })
+    const pendingOf = () =>
+      expectOk(d.query('project.pending.get', {}, ui)).value as { changes: unknown[] }
+    expect(pendingOf().changes).toEqual([
+      expect.objectContaining({ kind: 'plan', planId, field: 'design' }),
+    ])
+    expect(expectOk(d.query('plan.stale.list', { planId }, ui)).value).toMatchObject({
+      pendingApply: true,
+    })
+    const out = expectOk(await d.dispatch('project.apply', {}, ui)).value as { plans: unknown[] }
+    expect(out.plans).toEqual([{ planId, status: 'rebuilt' }])
+    expect(pendingOf().changes).toEqual([])
   })
 
   it('settledDesign → draft rebuilds from the current design', async () => {
@@ -482,22 +526,34 @@ describe('library copies', () => {
     )
   })
 
-  it('draft plans follow library changes (system source, one undo step each); others only notify', async () => {
+  it('draft plans follow library changes on Apply (in its undo step); others only notify', async () => {
     const s = await planSetup()
     const draft = await s.create()
     const settled = await s.create()
     await s.toStatus(settled, 'settledDesign')
     await changeTool(s, s.tools.flat6)
-    const lookup = s.library.lookup
-    expect(draftLibraryUpdates(s.d.doc, lookup)).toEqual([
-      { planId: draft, snapshotId: expect.any(String) },
+    const pending = s.query('project.pending.get', {}) as { changes: unknown[] }
+    expect(pending.changes).toEqual([
+      expect.objectContaining({
+        kind: 'library',
+        libraryItemId: s.tools.flat6,
+        label: 'Flat 6 reground changed in the library',
+      }),
     ])
+    expect(stale(s, draft)).toMatchObject({ pendingApply: true })
+    expect(stale(s, settled)).toMatchObject({ pendingApply: false })
     const depth = s.d.history.undoable.length
-    expect(expectOk(await followLibraryChanges(s.d, lookup))).toEqual({ updated: 1, failed: [] })
+    const outcome = (await s.run('project.apply', {})) as { plans: unknown[] }
+    expect(outcome.plans).toEqual([{ planId: draft, status: 'followed' }])
     expect(s.d.history.undoable.length).toBe(depth + 1)
-    expect(s.d.history.undoable.at(-1)?.source.kind).toBe('system')
+    expect(s.d.history.undoable.at(-1)?.command).toBe('project.apply')
     expect(stale(s, draft).libraryCopies).toEqual([])
     expect(stale(s, settled).libraryCopies).toHaveLength(1)
+    expect((s.query('project.pending.get', {}) as { count: number }).count).toBe(0)
+    // undo brings the change back as pending
+    await s.undo()
+    expect(stale(s, draft).libraryCopies).toHaveLength(1)
+    expect((s.query('project.pending.get', {}) as { count: number }).count).toBe(1)
   })
 
   it('assigning a tool reuses an equal copy and drops unused ones; resets the preset', async () => {

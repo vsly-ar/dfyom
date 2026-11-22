@@ -5,21 +5,30 @@
 import type { Issue } from '../../shared/errors/app-error'
 import { fail, None, Ok, Some, type AppResult, type Option } from '../../shared/result'
 import { DESIGN_COMMANDS, DESIGN_QUERIES } from '../design/commands'
-import { DESIGN_TOOL_COMMANDS, DESIGN_TOOL_QUERIES } from '../design/tool-commands'
+import {
+  DESIGN_TOOL_COMMANDS,
+  DESIGN_TOOL_QUERIES,
+  designToolAutoChoice,
+  toolScan,
+} from '../design/tool-commands'
 import { REFERENCE_COMMANDS, REFERENCE_QUERIES } from '../design/reference-commands'
 import { FEEDS_SPEEDS_QUERIES } from '../feeds-speeds/commands'
 import { LIBRARY_COMMANDS, LIBRARY_QUERIES } from '../library/commands'
-import { draftPlanAutoRebuild, PLAN_COMMANDS, PLAN_QUERIES } from '../plan/commands'
+import { PLAN_COMMANDS, PLAN_QUERIES, planDraftFollow } from '../plan/commands'
+import { PLAN_PENDING_SOURCES } from '../plan/pending'
 import type {
   AnyCommand,
   ApplyHook,
   ApplyJob,
   ApplyWarnings,
   DocumentHook,
+  OpenScan,
+  PendingSource,
   QueryDef,
 } from './define'
 import { projectApply, projectPendingGet } from './apply'
 import { projectSave } from '../project/commands'
+import { toolpathApplyJob } from '../toolpath/apply-job'
 import { toolpathGenerateJob, toolpathGet } from '../toolpath/generate'
 import { planExport } from '../post/plan-export'
 import { RUN_COMMANDS, RUN_QUERIES } from '../run/commands'
@@ -82,17 +91,30 @@ export const APP_SCOPE_QUERIES: readonly QueryDef[] = [
   ...FEEDS_SPEEDS_QUERIES,
   ...LIFECYCLE_QUERIES,
 ]
-/** Document hooks of the app (docs/architecture/commands.md#document-hooks). */
-export const APP_HOOKS: readonly DocumentHook[] = [draftPlanAutoRebuild]
+/**
+ * Document hooks of the app (docs/architecture/commands.md#document-hooks): none since v0.2 P2
+ * moved the draft auto-rebuild behind Apply (`plan.draftFollow`).
+ */
+export const APP_HOOKS: readonly DocumentHook[] = []
 
 /**
- * Apply hooks of the app, in this order (docs/architecture/apply.md#apply-hooks). Empty until
- * task P2 moves the deferred reactions here: `design.toolAutoChoice`, then `plan.draftFollow`.
+ * Apply hooks of the app, in this order (docs/architecture/apply.md#apply-hooks): the tool
+ * choice first, because the rebuild resolves plan tools from the design tool field.
  */
-export const APPLY_HOOKS: readonly ApplyHook[] = []
+export const APPLY_HOOKS: readonly ApplyHook[] = [designToolAutoChoice, planDraftFollow]
 
-/** Apply jobs of the app (docs/architecture/apply.md#apply-jobs); toolpaths of kept-current plans join in P2. */
-export const APPLY_JOBS: readonly ApplyJob[] = []
+/** Apply jobs of the app (docs/architecture/apply.md#apply-jobs): toolpaths of kept-current plans. */
+export const APPLY_JOBS: readonly ApplyJob[] = [toolpathApplyJob]
+
+/** Pending keys beyond the design diff (docs/architecture/apply.md#what-is-pending). */
+export const PENDING_SOURCES: readonly PendingSource[] = PLAN_PENDING_SOURCES
+
+/**
+ * The consistency scan on open (docs/architecture/apply.md#opening-and-recovery): unfit or absent
+ * auto tools. `draft` plans that do not follow their part and changed library copies of `draft`
+ * plans are pending through `PENDING_SOURCES` (derived on every read), so they need no scan.
+ */
+export const OPEN_SCAN: OpenScan = toolScan
 
 /** `ApplyOutcome.warnings`: `design.warning.list` of each affected part (parts it cannot read are left out). */
 export const designApplyWarnings: ApplyWarnings = (doc, partIds, ctx) => {
@@ -113,6 +135,8 @@ const APPLY_DEFS = {
   applyHooks: APPLY_HOOKS,
   applyJobs: APPLY_JOBS,
   applyWarnings: designApplyWarnings,
+  pendingSources: PENDING_SOURCES,
+  openScan: OPEN_SCAN,
 }
 
 export interface Registry {
@@ -128,6 +152,10 @@ export interface Registry {
   readonly applyJobs: readonly ApplyJob[]
   /** Computes `ApplyOutcome.warnings`; absent = none. */
   readonly applyWarnings?: ApplyWarnings
+  /** Pending keys beyond the design diff, in this order (apply.md § What is pending). */
+  readonly pendingSources: readonly PendingSource[]
+  /** The consistency scan when a dispatcher opens a document; absent = none. */
+  readonly openScan?: OpenScan
 }
 
 /** Builds a registry (built-ins included). Invalid definitions are bugs → `internal.unexpected`. */
@@ -138,6 +166,8 @@ export function createRegistry(defs: {
   readonly applyHooks?: readonly ApplyHook[]
   readonly applyJobs?: readonly ApplyJob[]
   readonly applyWarnings?: ApplyWarnings
+  readonly pendingSources?: readonly PendingSource[]
+  readonly openScan?: OpenScan
   /** Register the built-ins (default true; the app-scope registry has none: no history, no jobs). */
   readonly builtins?: boolean
 }): AppResult<Registry> {
@@ -175,6 +205,8 @@ export function createRegistry(defs: {
     applyHooks: [...(defs.applyHooks ?? [])],
     applyJobs: [...(defs.applyJobs ?? [])],
     ...(defs.applyWarnings === undefined ? {} : { applyWarnings: defs.applyWarnings }),
+    pendingSources: [...(defs.pendingSources ?? [])],
+    ...(defs.openScan === undefined ? {} : { openScan: defs.openScan }),
   })
 }
 

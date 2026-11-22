@@ -13,6 +13,7 @@ import type { WorkerControl, WorkerPort } from '../commands/jobs'
 import type { PlanOperationInput } from '../plan/inputs'
 import { defineCommand, defineQuery } from '../commands/define'
 import { planOperationInputs } from '../plan/inputs'
+import { planPendingApply } from '../plan/pending'
 import { PlanIdSchema, PlanRecordIdSchema } from '../plan/plan.dto'
 import { toolpathGenerate } from '../workers/tasks'
 import type { ToolpathCache } from './cache'
@@ -130,6 +131,9 @@ export const toolpathGet = defineQuery({
   result: z.object({
     toolpath: ToolpathSchema.nullable(),
     stale: z.boolean().describe('True unless the toolpath matches the current inputs'),
+    pendingApply: z
+      .boolean()
+      .describe("The plan's inputs have changes not applied yet: regenerated on Apply"),
   }),
   run(doc, args, ctx) {
     const where = 'plan.toolpath.get'
@@ -156,8 +160,9 @@ export const toolpathGet = defineQuery({
     const inputs = planOperationInputs(doc, args.planId, [args.planOperationId])
     const hash = inputs.isOk() ? inputs.unwrap()[0]?.inputHash : undefined
     const current = hash === undefined ? undefined : cache.unwrap().get(hash)
-    if (current !== undefined) return Ok({ toolpath: current, stale: false })
+    const pendingApply = planPendingApply(plan, ctx.apply?.pending() ?? [])
+    if (current !== undefined) return Ok({ toolpath: current, stale: false, pendingApply })
     const last = cache.unwrap().last(args.planId, args.planOperationId)
-    return Ok({ toolpath: last?.toolpath ?? null, stale: true })
+    return Ok({ toolpath: last?.toolpath ?? null, stale: true, pendingApply })
   },
 })

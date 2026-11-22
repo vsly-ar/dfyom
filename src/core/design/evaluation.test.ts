@@ -632,7 +632,8 @@ describe('plan parts (snapshot scene, plan-v0.2.md)', () => {
     expect(facingDepth(settled.s.runs[1]!)).toBe(2)
     expect(settled.plan().status).toBe('done') // still the snapshot's 0.5
     const draft = await withPlan('draft')
-    await draft.s.setDepth('2') // the draft auto-rebuild takes the new design
+    await draft.s.setDepth('2')
+    await draft.s.run('project.apply', {}) // the draft follows the new design on Apply
     draft.s.timers.advance(200)
     expect(draft.s.runs).toHaveLength(2)
     expect(draft.plan().status).toBe('pending')
