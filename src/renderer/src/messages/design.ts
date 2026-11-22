@@ -271,6 +271,30 @@ export const designMessages = {
     material_: (name: string) => `Material: ${name}`,
   },
 
+  /** The part-setup toolbar group and its dialogs (D45, ui.md § Design sidebar and setup dialogs). */
+  setup: {
+    toolbar: 'Part setup',
+    stock: 'Stock',
+    shapes: 'Shapes',
+    reference: 'Reference',
+    done: 'Done',
+    stockDescription: 'The block the part is cut from.',
+    shapesDescription: 'Outlines that pockets and profiles can cut. Choose one to edit it.',
+    referenceDescription: 'Models shown on the stock as a ghost. Choose one to place it.',
+    part: 'Part',
+    size: 'Size (X × Y × Z)',
+    material: 'Material',
+    materialValue: (name: string, cls: string) => (name === cls ? name : `${name} (${cls})`),
+    copyNote: 'The part keeps its own copy of the stock; library changes do not change it.',
+    showPart: 'Show part',
+    noPart: 'Set up the stock first: every part starts from a stock block.',
+    setUpStock: 'Set up stock…',
+    emptyTitle: 'Set up the stock',
+    readout: (summary: string, material: string | undefined) =>
+      `Stock: ${summary}${material === undefined ? '' : ` · ${material}`}`,
+    cancel: 'Cancel',
+  },
+
   navigator: {
     operations: 'Operations',
     listLabel: 'Operations in design order',
@@ -292,7 +316,7 @@ export const designMessages = {
   inspector: {
     part: 'Part',
     partSummary: (n: number) => (n === 1 ? '1 operation' : `${n} operations`),
-    noPart: 'Set up the part in the navigator to start.',
+    noPart: 'Set up the stock to start.',
     operation: (kind: string) => kind,
     name: 'Name',
     groups: {

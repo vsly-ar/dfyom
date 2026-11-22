@@ -53,6 +53,14 @@ describe('Panel', () => {
     expect(ref?.current?.isCollapsed()).toBe(false)
   })
 
+  it('shows an item header by name only; the id is its tooltip and data attribute (D45)', () => {
+    renderUi(<PanelHeader title="Chamfer 1" itemId="chamfer1" />)
+    const heading = screen.getByRole('heading', { name: 'Chamfer 1' })
+    expect(heading.parentElement).not.toHaveTextContent('chamfer1')
+    expect(heading).toHaveAttribute('title', 'Id: chamfer1')
+    expect(heading).toHaveAttribute('data-item-id', 'chamfer1')
+  })
+
   it('has no axe violations', async () => {
     renderUi(<Shell />)
     await expectNoAxeViolations()

@@ -1,11 +1,12 @@
-// The navigator's "Shapes" group (task U1), above the operations: one row per named shape as
+// The Shapes dialog's body (task U1; the navigator's "Shapes" group until D45): one row per named shape as
 // `design.shape.list` gives it (shape icon, name, "used by n", the failed marker when it does not
 // resolve), in the operation-row pattern without move actions (shapes have no order). Remove is
 // disabled while an operation uses the shape, with the reason as tooltip and visible text. "Add
 // shape" offers the primitives, a path and Import SVG… (task U2: the file dialog, the options step
 // of the import dialog, `design.shape.import`, then its report; "Edit shape" selects the first
-// created shape). Adding a shape selects it, which opens the Shape Editor.
-// Doc: docs/conventions/ui.md#navigator-and-add, docs/modes/design-v0.3.md#what-a-shape-is
+// created shape). Adding or choosing a shape selects it, which opens the Shape Editor, and closes
+// the dialog (`onChosen`). Doc: docs/conventions/ui.md#navigator-and-add,
+// docs/conventions/ui.md#design-sidebar-and-setup-dialogs-v04-d45, docs/modes/design-v0.3.md#what-a-shape-is
 import { useState } from 'react'
 import type { ShapeItemKind } from '../../../../core/design/shape.dto'
 import { chainBounds } from '../../../../core/geometry/2d/model'
@@ -13,7 +14,7 @@ import type { SvgImportReport, SvgSplit, SvgUnit } from '../../../../core/import
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { shapeMessages } from '../../messages/shape'
 import { useRegion2d, useShell } from '../../shell/ShellContext'
-import { Icon, IconButton, Menu, PanelHeader, type MenuEntry } from '../../ui'
+import { Button, Icon, IconButton, Menu, type MenuEntry } from '../../ui'
 import styles from './Design.module.css'
 import { ImportReportDialog, type ImportReportStep } from './ImportReportDialog'
 import type { DesignPart } from './model'
@@ -62,7 +63,11 @@ type ImportState =
  * The SVG import flow (task U2): file dialog → options → `design.shape.import` → report. Names
  * and the preview come from the part's shapes once the import has landed.
  */
-export function useSvgImport(part: DesignPart): {
+export function useSvgImport(
+  part: DesignPart,
+  /** "Edit shape" chose a created shape (the Shapes dialog closes). */
+  onChosen?: () => void,
+): {
   start: () => void
   dialog: React.JSX.Element | null
 } {
@@ -118,6 +123,7 @@ export function useSvgImport(part: DesignPart): {
           if (first === undefined) return
           ui.getState().selectShapeItem(first, 0)
           select(first)
+          onChosen?.()
         }}
       />
     )
@@ -127,15 +133,18 @@ export function useSvgImport(part: DesignPart): {
 export function ShapeList({
   part,
   onRemoved,
+  onChosen,
 }: {
   part: DesignPart
   onRemoved: (name: string) => void
+  /** A shape was chosen or added and is selected: the dialog closes so its editor shows. */
+  onChosen: () => void
 }): React.JSX.Element {
   const call = useCommand()
   const { ui } = useShell()
   const [selected, select] = useDesignSelection()
   const rows = useShapeList(part)
-  const svg = useSvgImport(part)
+  const svg = useSvgImport(part, onChosen)
   const opName = (id: string) => part.dto.operations.find((o) => o.id === id)?.name ?? id
 
   const add = async (kind: ShapeItemKind) => {
@@ -147,6 +156,7 @@ export function ShapeList({
     const id = (r.value as { shapeId: string }).shapeId
     ui.getState().selectShapeItem(id, 0)
     select(id)
+    onChosen()
   }
   const remove = async (id: string, name: string) => {
     const r = await call('design.shape.remove', { partId: part.dto.id, shapeId: id })
@@ -156,18 +166,16 @@ export function ShapeList({
   }
 
   return (
-    <section aria-label={m.title}>
-      <PanelHeader
-        title={m.title}
-        meta={rows.length > 0 ? String(rows.length) : undefined}
-        actions={
-          <Menu label={m.add} items={addShapeEntries((k) => void add(k), svg.start)}>
-            <IconButton label={m.add} icon={<Icon name="add" />} />
-          </Menu>
-        }
-      />
+    <div className={styles['setupList']}>
+      <div className={styles['setupActions']}>
+        <Menu label={m.add} items={addShapeEntries((k) => void add(k), svg.start)}>
+          <Button size="sm" icon={<Icon name="add" />}>
+            {m.add}
+          </Button>
+        </Menu>
+      </div>
       {(part.dto.shapes?.length ?? 0) === 0 ? (
-        <p className={styles['shapesEmpty']}>{m.empty}</p>
+        <p className={styles['setupEmpty']}>{m.empty}</p>
       ) : (
         <ul className={styles['ops']} aria-label={m.listLabel}>
           {rows.map((row) => {
@@ -185,9 +193,11 @@ export function ShapeList({
                   className={styles['opSelect']}
                   aria-pressed={selected === row.id}
                   onClick={() => {
-                    if (selected === row.id) return select(null)
-                    ui.getState().selectShapeItem(row.id, 0)
-                    select(row.id)
+                    if (selected !== row.id) {
+                      ui.getState().selectShapeItem(row.id, 0)
+                      select(row.id)
+                    }
+                    onChosen()
                   }}
                 >
                   <Icon name="shapes" />
@@ -222,6 +232,6 @@ export function ShapeList({
         </ul>
       )}
       {svg.dialog}
-    </section>
+    </div>
   )
 }

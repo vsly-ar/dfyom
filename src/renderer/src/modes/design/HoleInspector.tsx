@@ -431,7 +431,7 @@ export function HoleInspector({
 
   return (
     <div ref={rootRef} className={styles['inspector']}>
-      <PanelHeader title={feature.name} meta={feature.id} />
+      <PanelHeader title={feature.name} itemId={feature.id} />
       <div className={styles['fields']}>
         {summary ? <ErrorMessage error={summary} message={t.commandFailed} /> : null}
         <NameField

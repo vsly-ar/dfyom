@@ -56,8 +56,9 @@ async function renderDesign(withPart = true) {
     </ShellProvider>,
   )
   const part = (): PartDTO => Object.values(d.doc.parts)[0]!
-  // test windows are narrow: the inspector is an overlay, opened by its toggle
-  await r.user.click(screen.getByRole('button', { name: 'Inspector' }))
+  // test windows are narrow: the inspector is an overlay, opened by its toggle (without a part
+  // the Stock dialog opened by itself and holds the focus, D45)
+  if (withPart) await r.user.click(screen.getByRole('button', { name: 'Inspector' }))
   const addFromMenu = async (label: string) => {
     within(navigator()).getByRole('button', { name: 'Add' }).focus()
     await r.user.keyboard('{Enter}')
@@ -87,17 +88,84 @@ const inspector = () => screen.getByRole('complementary', { name: 'Inspector' })
 const status = () => screen.getByRole('contentinfo', { name: 'Status bar' })
 
 describe('design mode', () => {
-  it('sets up the part from a new block of stock', async () => {
+  it('sets up the part from a new block of stock in the Stock dialog it opens by itself', async () => {
     const { user, d } = await renderDesign(false)
-    const form = await screen.findByRole('region', { name: 'Set up the part' })
+    // a project without a part opens the Stock dialog (D45)
+    const dialog = await screen.findByRole('dialog', { name: 'Stock' })
+    const form = within(dialog).getByRole('region', { name: 'Set up the part' })
+    await expectNoAxeViolations()
     const length = within(form).getByRole('textbox', { name: 'Length (X)' })
     await retype(user, length, '120{Enter}')
     await user.click(within(form).getByRole('button', { name: 'Create part' }))
+    // Create part closes it; the sidebar starts with the operations and the stock read-out
+    await waitFor(() => expect(dialog).not.toBeInTheDocument())
     await within(navigator()).findByRole('heading', { name: 'No operations yet' })
+    expect(within(navigator()).getAllByRole('heading')[0]).toHaveTextContent('Operations')
+    expect(within(navigator()).getByText(/^Stock: 120 × 60 × 20 · 6061-T6$/)).toBeInTheDocument()
     const part = Object.values(d.doc.parts)[0]!
     const snap = d.doc.snapshots[part.stock]!
     expect((snap.values as { length: { source: string } }).length.source).toBe('120')
+    // the read-out opens the Stock dialog again: the part's copy of the stock, Show part
+    await user.click(within(navigator()).getByRole('button', { name: /^Stock: 120/ }))
+    const again = await screen.findByRole('dialog', { name: 'Stock' })
+    expect(within(again).getByText('120 × 60 × 20')).toBeInTheDocument()
+    expect(within(again).getByText('6061-T6 (Aluminium)')).toBeInTheDocument()
     await expectNoAxeViolations()
+    await user.click(within(again).getByRole('button', { name: 'Show part' }))
+    await waitFor(() => expect(again).not.toBeInTheDocument())
+    // it opens by itself only once per project: undoing the part leaves the empty state
+    await user.keyboard('{Control>}z{/Control}')
+    await within(navigator()).findByRole('heading', { name: 'Set up the stock' })
+    expect(screen.queryByRole('dialog', { name: 'Stock' })).not.toBeInTheDocument()
+    await user.click(within(navigator()).getByRole('button', { name: 'Set up stock…' }))
+    expect(await screen.findByRole('dialog', { name: 'Stock' })).toBeInTheDocument()
+  })
+
+  it('closes the Stock dialog it opened by itself when an agent creates the part', async () => {
+    const { d } = await renderDesign(false)
+    const dialog = await screen.findByRole('dialog', { name: 'Stock' })
+    const agent = { kind: 'agent', id: 'http-1' } as const
+    await act(async () => {
+      const stock = await d.dispatch(
+        'library.stock.add',
+        {
+          values: {
+            name: 'Block',
+            shape: 'block',
+            length: '100',
+            width: '60',
+            thickness: '20',
+            material: { name: '6061-T6', class: 'aluminum' },
+          },
+        },
+        agent,
+      )
+      const id = (stock.unwrap().value as { id: string }).id
+      await d.dispatch('design.part.add', { name: 'Bracket', stockLibraryItemId: id }, agent, {
+        expectedRevision: d.revision,
+      })
+    })
+    await waitFor(() => expect(dialog).not.toBeInTheDocument())
+    expect(await within(navigator()).findByText(/^Stock: 100 × 60 × 20/)).toBeInTheDocument()
+  })
+
+  it('opens the part-setup dialogs from the toolbar; Escape closes them, focus returns', async () => {
+    const { user } = await renderDesign()
+    const tools = screen.getByRole('toolbar', { name: 'Part setup' })
+    for (const name of ['Stock', 'Shapes', 'Reference']) {
+      const button = within(tools).getByRole('button', { name })
+      // by keyboard: in jsdom a click lands on the panel separator (see retype)
+      button.focus()
+      await user.keyboard('{Enter}')
+      const dialog = await screen.findByRole('dialog', { name })
+      expect(dialog).toHaveAttribute('aria-describedby')
+      await user.keyboard('{Escape}')
+      await waitFor(() => expect(dialog).not.toBeInTheDocument())
+      expect(button).toHaveFocus()
+    }
+    // plan and run have no part-setup group
+    await user.click(screen.getByRole('radio', { name: 'Plan' }))
+    expect(screen.queryByRole('toolbar', { name: 'Part setup' })).not.toBeInTheDocument()
   })
 
   it('adds operations, selects them and edits one parameter as one undo step', async () => {

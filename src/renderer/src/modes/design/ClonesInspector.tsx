@@ -401,7 +401,7 @@ export function ClonesInspector({
 
   return (
     <div className={styles['inspector']}>
-      <PanelHeader title={feature.name} meta={feature.id} />
+      <PanelHeader title={feature.name} itemId={feature.id} />
       <div className={styles['fields']}>
         {summary ? <ErrorMessage error={summary} message={m.inspector.commandFailed} /> : null}
         <NameField
@@ -553,7 +553,7 @@ export function CloneInstanceInspector({
 
   return (
     <div className={styles['inspector']}>
-      <PanelHeader title={c.instanceTitle(n, feature.name)} meta={instanceId(feature.id, n)} />
+      <PanelHeader title={c.instanceTitle(n, feature.name)} itemId={instanceId(feature.id, n)} />
       <div className={styles['fields']}>
         <nav aria-label={f.breadcrumb}>
           <ol className={styles['breadcrumb']}>

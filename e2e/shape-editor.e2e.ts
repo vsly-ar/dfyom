@@ -1,10 +1,10 @@
 // v0.3 Shape Editor in the built app (task U1), through roles and labels: a shape added from the
-// navigator's Shapes group opens its flat view and inspector; a dimension edited by dragging its
+// Shapes dialog (D45) opens its flat view and inspector; a dimension edited by dragging its
 // handle (one undo step) and by its field (one undo step); undo restores each. Windows stay
 // hidden (app.fixture.ts).
 // Docs: docs/modes/design-v0.3.md#shape-definition, docs/conventions/ui.md#shape-editor
 import type { Locator } from '@playwright/test'
-import { expect, test } from './app.fixture'
+import { expect, openPartSetup, test } from './app.fixture'
 
 async function setField(scope: Locator, label: string, value: string): Promise<void> {
   const field = input(scope, label)
@@ -27,21 +27,26 @@ test('shape editor: add a shape, drag a handle, edit a field, undo', async ({ df
   const dialog = page.getByRole('dialog', { name: 'New project' })
   await dialog.getByRole('textbox', { name: 'Project name' }).fill('Shapes')
   await dialog.getByRole('button', { name: 'Create project' }).click()
-  const setup = navigator.getByRole('region', { name: 'Set up the part' })
+  const setup = page.getByRole('region', { name: 'Set up the part' })
   await setField(setup, 'Length (X)', '100')
   await setField(setup, 'Width (Y)', '60')
   await setField(setup, 'Thickness (Z)', '20')
   await setup.getByRole('button', { name: 'Create part' }).click()
 
-  // ── add a rectangle from the Shapes group ────────────────────────────────────────────────
-  const shapes = navigator.getByRole('region', { name: 'Shapes' })
+  // ── add a rectangle from the Shapes dialog (D45): it is selected, the dialog closes ──────
+  let shapes = await openPartSetup(page, 'Shapes')
   await shapes.getByRole('button', { name: 'Add shape' }).click()
   await page.getByRole('menuitem', { name: 'Rectangle' }).click()
+  await expect(shapes).toBeHidden()
   await expect(inspector.getByRole('heading', { name: 'Shape 1' })).toBeVisible()
+  shapes = await openPartSetup(page, 'Shapes')
   await expect(shapes.getByRole('button', { name: /^Shape 1/ })).toHaveAttribute(
     'aria-pressed',
     'true',
   )
+  // choosing the selected row keeps it selected and closes the dialog
+  await shapes.getByRole('button', { name: /^Shape 1/ }).click()
+  await expect(shapes).toBeHidden()
   const editor = page.getByRole('region', { name: 'Shape Editor' })
   await expect(editor).toBeVisible()
   await expect(editor.getByText('Shape · Shape frame')).toBeVisible()

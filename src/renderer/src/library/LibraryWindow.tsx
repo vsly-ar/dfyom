@@ -200,9 +200,6 @@ export function LibraryWindow(): React.JSX.Element {
           {w.newItem[s.tab]}
         </Button>
         <span className={styles['spacer']} />
-        {s.context.project !== null ? (
-          <span className={styles['project']}>{w.projectNote(s.context.project.name)}</span>
-        ) : null}
         <div className={styles['machine']}>
           <MachineToolbar />
         </div>

@@ -1,12 +1,12 @@
-// Design navigator (task 3.6): without a part the stock setup; with one the part and its stock,
-// and the operation list in design order – add (Facing, Pocket, Drilling, Profile), select (the
+// Design navigator (task 3.6; laid out by D45): the "Operations" header first, then a one-line
+// read-out of the part (selects it) and its stock (opens the Stock dialog), and the operation list in design order – add (Facing, Pocket, Drilling, Profile), select (the
 // viewport and inspector follow), move up/down by buttons and Alt+↑/↓, remove with an undo toast
 // instead of a confirmation. Rows carry warning badges and the error marker of a failed
-// evaluation. Between the part and the operations, the reference models (ReferenceRows.tsx, task
-// R3), then the named shapes (ShapeList.tsx, task U1). Doc: docs/conventions/ui.md#panels-and-inspectors, #confirmations, #undo-and-redo;
-// docs/modes/design.md#ordering-and-composition
+// evaluation. Without a part an empty state opens the Stock dialog. Stock setup, shapes and
+// reference models are in the part-setup dialogs (PartSetupDialogs.tsx, D45).
+// Doc: docs/conventions/ui.md#design-sidebar-and-setup-dialogs-v04-d45, #panels-and-inspectors,
+// #confirmations, #undo-and-redo; docs/modes/design.md#ordering-and-composition
 import type { OperationKind } from '../../../../core/design/part.dto'
-import type { UnitSystem } from '../../../../core/project/document'
 import { designMessages } from '../../messages/design'
 import { useSettings, useShell, useUi } from '../../shell/ShellContext'
 import {
@@ -27,9 +27,7 @@ import { clonesSource } from './feature-view'
 import { draftSource, draftSourceOptions, firstRow, firstRowGap } from './clones-view'
 import { addArgs, failingOperation, type DesignPart } from './model'
 import { OperationList } from './OperationList'
-import { ReferenceRows } from './ReferenceRows'
-import { ShapeList } from './ShapeList'
-import { StockSetup } from './StockSetup'
+import { stockReadout } from './PartSetupDialogs'
 import { useCommand, useDesignEvaluation, useDesignSelection, useDesignWarnings } from './useDesign'
 
 export { operationIcon } from './OperationList'
@@ -49,21 +47,32 @@ const ICON: Record<OperationKind, IconName> = {
   chamfer: 'chamfer',
 }
 
-export function DesignNavigator({
-  part,
-  units,
-}: {
-  part: DesignPart | undefined
-  units: UnitSystem
-}): React.JSX.Element {
-  if (part === undefined)
-    return (
-      <>
-        <PanelHeader title={m.stock.title} />
-        <StockSetup units={units} />
-      </>
-    )
+export function DesignNavigator({ part }: { part: DesignPart | undefined }): React.JSX.Element {
+  if (part === undefined) return <NoPart />
   return <PartNavigator part={part} />
+}
+
+/** Without a part: the way to the Stock dialog (it opened by itself for a new project). */
+function NoPart(): React.JSX.Element {
+  const open = useUi((st) => st.setDesignDialog)
+  return (
+    <>
+      <PanelHeader title={m.navigator.operations} />
+      <div className={styles['emptyOps']}>
+        <EmptyState
+          icon={<Icon name="stock" />}
+          title={m.setup.emptyTitle}
+          description={m.setup.noPart}
+          headingLevel={3}
+          action={{
+            label: m.setup.setUpStock,
+            icon: <Icon name="stock" />,
+            onClick: () => open('stock'),
+          }}
+        />
+      </div>
+    </>
+  )
 }
 
 /** The stock's size (mm) new operations are placed in; a default block without a stock. */
@@ -72,13 +81,6 @@ function stockDims(part: DesignPart): { length: number; width: number; thickness
   return s
     ? { length: s.length.canonical, width: s.width.canonical, thickness: s.thickness.canonical }
     : { length: 100, width: 60, thickness: 20 }
-}
-
-function stockSummary(part: DesignPart): string | undefined {
-  const s = part.loaded?.stock
-  return s === undefined
-    ? undefined
-    : m.stock.summary(s.length.source, s.width.source, s.thickness.source)
 }
 
 function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
@@ -90,7 +92,6 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
   // the undo toast lives in the ui store: the inspector's segment table removes rows too
   const removed = useUi((st) => st.removedToast)
   const setRemovedToast = useUi((st) => st.setRemovedToast)
-  const setRemoved = (name: string) => setRemovedToast(m.navigator.removed(name))
   // the default-anchor setting places new pockets and profiles (design-v0.2.md#placement-anchors)
   const defaultAnchor = useSettings((s) => s.settings.defaultAnchor)
   const ops = part.dto.operations
@@ -179,28 +180,11 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
     },
   ]
 
-  const summary = stockSummary(part)
+  const readout = stockReadout(part)
+  const openDialog = useUi((st) => st.setDesignDialog)
 
   return (
     <div className={styles['navigator']}>
-      <section className={styles['partHeader']} aria-label={m.inspector.part}>
-        <button
-          type="button"
-          className={styles['partName']}
-          aria-pressed={selected === null}
-          onClick={() => select(null)}
-        >
-          {part.dto.name}
-        </button>
-        {summary !== undefined ? (
-          <span className={styles['muted']}>
-            {m.stock.title}: {summary}
-            {part.loaded ? ` · ${part.loaded.stock.material.name}` : ''}
-          </span>
-        ) : null}
-      </section>
-      <ReferenceRows part={part} onRemoved={setRemoved} />
-      <ShapeList part={part} onRemoved={setRemoved} />
       <PanelHeader
         title={m.navigator.operations}
         meta={ops.length > 0 ? String(ops.length) : undefined}
@@ -210,6 +194,28 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
           </Menu>
         }
       />
+      <section className={styles['partLine']} aria-label={m.inspector.part}>
+        <button
+          type="button"
+          className={styles['partName']}
+          aria-pressed={selected === null}
+          title={part.dto.name}
+          onClick={() => select(null)}
+        >
+          {part.dto.name}
+        </button>
+        {readout !== undefined ? (
+          <button
+            type="button"
+            className={styles['stockReadout']}
+            aria-haspopup="dialog"
+            title={readout}
+            onClick={() => openDialog('stock')}
+          >
+            {readout}
+          </button>
+        ) : null}
+      </section>
       {ops.length === 0 ? (
         <div className={styles['emptyOps']}>
           <EmptyState

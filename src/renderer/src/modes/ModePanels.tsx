@@ -10,6 +10,7 @@ import { Icon, EmptyState, PanelHeader } from '../ui'
 import { DesignInspector } from './design/DesignInspector'
 import { DesignNavigator } from './design/DesignNavigator'
 import { DesignStatus } from './design/DesignStatus'
+import { PartSetupDialogs, PartSetupTools } from './design/PartSetupDialogs'
 import { designPart } from './design/model'
 import { useDesignScene, type SceneProps } from './design/useDesignScene'
 import styles from './ModePanels.module.css'
@@ -47,7 +48,7 @@ export function ModeNavigator({ mode, doc, onMode }: ModePanelProps): React.JSX.
     const parts = Object.values(doc.parts)
     switch (mode) {
       case 'design':
-        return <DesignNavigator part={designPart(doc)} units={doc.unitSystem} />
+        return <DesignNavigator part={designPart(doc)} />
       case 'plan':
         return parts.length === 0 ? (
           <EmptyState
@@ -81,10 +82,24 @@ export function ModeNavigator({ mode, doc, onMode }: ModePanelProps): React.JSX.
   })()
   return (
     <>
-      <PanelHeader title={title} />
+      {/* design with a project starts with its Operations header (D45): no mode eyebrow */}
+      {mode === 'design' && doc !== undefined ? null : <PanelHeader title={title} />}
       <div className={styles['body']}>{body}</div>
     </>
   )
+}
+
+/** The mode's tools in the main toolbar after undo/redo (design: the part-setup group, D45). */
+export function ModeTools({ mode, doc }: Omit<ModePanelProps, 'onMode'>): React.JSX.Element | null {
+  return mode === 'design' && doc !== undefined ? <PartSetupTools /> : null
+}
+
+/** The mode's dialogs, kept mounted with the shell (design: the part-setup dialogs, D45). */
+export function ModeDialogs({
+  mode,
+  doc,
+}: Omit<ModePanelProps, 'onMode'>): React.JSX.Element | null {
+  return doc === undefined ? null : <PartSetupDialogs doc={doc} active={mode === 'design'} />
 }
 
 export function ModeInspector({ mode, doc }: Omit<ModePanelProps, 'onMode'>): React.JSX.Element {

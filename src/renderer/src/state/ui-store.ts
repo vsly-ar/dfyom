@@ -59,6 +59,12 @@ export interface UiState {
   /** The keyboard shortcut list (`?`, Help menu). */
   readonly shortcutsOpen: boolean
   setShortcutsOpen(open: boolean): void
+  /** The open part-setup dialog of design mode (ui.md § Design sidebar and setup dialogs), or null. */
+  readonly designDialog: DesignDialog | null
+  setDesignDialog(dialog: DesignDialog | null): void
+  /** The project key the Stock dialog opened by itself for (once per project and window). */
+  readonly stockOfferedFor: string | null
+  markStockOffered(key: string): void
   /** Each mode keeps its own selection (an operation or, in design, a reference id; or null). */
   readonly selection: Readonly<Record<AppMode, string | null>>
   select(mode: AppMode, id: string | null): void
@@ -181,6 +187,9 @@ export interface LastImport {
   readonly report: SvgImportReport
 }
 
+/** Design mode's part-setup dialogs (D45): set once per project, opened from the toolbar. */
+export type DesignDialog = 'stock' | 'shapes' | 'reference'
+
 export type UiStore = StoreApi<UiState>
 
 export function createUiStore(initial: Partial<Pick<UiState, 'mode'>> = {}): UiStore {
@@ -191,6 +200,10 @@ export function createUiStore(initial: Partial<Pick<UiState, 'mode'>> = {}): UiS
     setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
     shortcutsOpen: false,
     setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
+    designDialog: null,
+    setDesignDialog: (designDialog) => set({ designDialog }),
+    stockOfferedFor: null,
+    markStockOffered: (stockOfferedFor) => set({ stockOfferedFor }),
     selection: { design: null, plan: null, run: null },
     select: (mode, id) => set((s) => ({ selection: { ...s.selection, [mode]: id } })),
     pick: null,

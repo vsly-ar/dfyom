@@ -96,7 +96,7 @@ test('exit criteria through the UI: design, plan, export, run, save, close and r
   await dialog.getByRole('textbox', { name: 'Project name' }).fill('Bracket')
   await dialog.getByRole('button', { name: 'Create project' }).click()
   await expect(page).toHaveTitle('Bracket')
-  const setup = navigator.getByRole('region', { name: 'Set up the part' })
+  const setup = page.getByRole('region', { name: 'Set up the part' })
   await setField(setup, 'Length (X)', '100')
   await setField(setup, 'Width (Y)', '60')
   await setField(setup, 'Thickness (Z)', '20')

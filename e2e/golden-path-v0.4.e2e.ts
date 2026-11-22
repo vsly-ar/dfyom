@@ -30,7 +30,7 @@ import {
   SCREWS,
   VENTS,
 } from '../src/core/design/enclosure-lid.testing'
-import { expect, launchApp, test } from './app.fixture'
+import { closeDialog, expect, launchApp, openPartSetup, test } from './app.fixture'
 
 const SVG = resolve('src/core/design/__fixtures__/enclosure-sections.svg')
 /** X1's golden program: the same lid built through the UI exports the same bytes. */
@@ -224,7 +224,7 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
   await dialog.getByRole('textbox', { name: 'Project name' }).fill('Enclosure lid')
   await dialog.getByRole('button', { name: 'Create project' }).click()
   await expect(page).toHaveTitle('Enclosure lid')
-  const setup = navigator.getByRole('region', { name: 'Set up the part' })
+  const setup = page.getByRole('region', { name: 'Set up the part' })
   await setField(setup, 'Length (X)', `${LID_STOCK.length}`)
   await setField(setup, 'Width (Y)', `${LID_STOCK.width}`)
   await setField(setup, 'Thickness (Z)', `${LID_STOCK.thickness}`)
@@ -235,7 +235,8 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
   await expect(navigator.getByText(/^Stock: 255 × 200 × 6/)).toBeVisible()
 
   // ── Import SVG…: two shapes; the cavity removed, the outline kept ────────────────────────
-  const shapes = navigator.getByRole('region', { name: 'Shapes' })
+  // in the Shapes dialog (D45); the import's dialogs stack over it
+  let shapes = await openPartSetup(page, 'Shapes')
   await shapes.getByRole('button', { name: 'Add shape' }).click()
   await page.getByRole('menuitem', { name: 'Import SVG…' }).click()
   await page
@@ -246,11 +247,12 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
   await expect(report).toBeVisible({ timeout: 30_000 })
   await report.getByRole('button', { name: 'Close' }).first().click()
   await expect(report).toHaveCount(0)
-  // a row's actions show while it is hovered (ui.md § Navigator)
+  // a row's actions show while it is hovered (ui.md § Navigator); Remove keeps the dialog open
   await shapes.getByRole('button', { name: /^cavity/ }).hover()
   await shapes.getByRole('button', { name: 'Remove cavity' }).click()
   const shapeRows = shapes.getByRole('list').getByRole('button', { name: /^(outline|cavity)/ })
   await expect(shapeRows).toHaveText([/^outline/])
+  await closeDialog(shapes)
 
   // ── the outline as an outside profile with six tabs; two relocate (D42, TB1) ─────────────
   await addFromMenu(page, 'Add profile')
@@ -366,6 +368,7 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
   await expect(navigator.getByRole('button', { name: /^Clones 2, ×6/ })).toBeVisible()
 
   // ── the vent slot: an obround shape, its inside profile, an offset Clones, 4 skipped ─────
+  shapes = await openPartSetup(page, 'Shapes')
   await shapes.getByRole('button', { name: 'Add shape' }).click()
   await page.getByRole('menuitem', { name: 'Obround' }).click()
   await expect(inspector.getByRole('heading', { name: /^Shape \d$/ })).toBeVisible()

@@ -328,6 +328,8 @@ describe('Library window', () => {
     })
     await waitFor(() => expect(row(/Flat 6/)).toHaveAttribute('aria-selected', 'true'))
     expect(row(/Flat 6/)).toHaveTextContent('Used')
+    // the library is app-wide: the window never shows the opener's project name (D45)
+    expect(screen.queryByText(/Bracket/)).not.toBeInTheDocument()
     const units = screen.getByRole('radiogroup', { name: 'Units' })
     expect(within(units).getByRole('radio', { name: 'in' })).toHaveAttribute('aria-checked', 'true')
     // a source entered in mm reads with its unit in the inch window

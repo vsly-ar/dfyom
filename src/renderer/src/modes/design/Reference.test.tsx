@@ -1,10 +1,10 @@
 // Reference model UI (task R3) against the fake bridge bound to a real project runtime with an
 // in-memory project session and file-reading in-process workers: import through the file dialog,
-// the navigator row and its per-window eye (no command, no undo step), the inspector (unit, scale,
+// the Reference dialog's row (D45) and its per-window eye (no command, no undo step), the inspector (unit, scale,
 // 90° turns, angles, fit) as one command per edit, remove with undo, errors, and the ghost's mesh
 // read once per asset. The viewport canvas is stubbed.
 // Doc: docs/modes/reference-model.md#display, docs/conventions/ui.md#reference-ghost-v02
-import { screen, waitFor, within } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { createInProcessWorkers, memoryFiles } from '../../../../core/commands/jobs'
@@ -89,12 +89,12 @@ async function renderReference() {
   // test windows are narrow: the inspector is an overlay, opened by its toggle
   await r.user.click(screen.getByRole('button', { name: 'Inspector' }))
   const refs = () => Object.values(d.doc.references) as ReferenceDTO[]
+  // a finished import selects the reference and closes the dialog (D45)
   const importBox = async () => {
     bridge.setFileChoice({ reference: BOX })
-    await r.user.click(
-      await within(referenceGroup()).findByRole('button', { name: 'Import reference…' }),
-    )
-    await within(referenceGroup()).findByRole('button', { name: /^box/ })
+    const dialog = await referenceGroup()
+    await r.user.click(within(dialog).getByRole('button', { name: 'Import STL…' }))
+    await waitFor(() => expect(dialog).not.toBeInTheDocument())
   }
   return { ...r, bridge, d, shell, refs, importBox }
 }
@@ -111,8 +111,20 @@ async function retype(
   await user.type(el, text, { skipClick: true })
 }
 
-const navigator = () => screen.getByRole('navigation', { name: 'Navigator' })
-const referenceGroup = () => within(navigator()).getByRole('region', { name: 'Reference' })
+/** The Reference dialog (D45), opened from the toolbar's Part setup group unless it is open. */
+async function referenceGroup(): Promise<HTMLElement> {
+  const open = screen.queryByRole('dialog', { name: 'Reference' })
+  if (open !== null) return open
+  const tools = screen.getByRole('toolbar', { name: 'Part setup' })
+  act(() => within(tools).getByRole('button', { name: 'Reference' }).click())
+  return screen.findByRole('dialog', { name: 'Reference' })
+}
+/** Closes the open dialog by Done (the inspector is hidden from queries while a modal is open). */
+async function closeDialog(user: { click(e: Element): Promise<void> }): Promise<void> {
+  const dialog = screen.getByRole('dialog')
+  await user.click(within(dialog).getByRole('button', { name: 'Done' }))
+  await waitFor(() => expect(dialog).not.toBeInTheDocument())
+}
 const inspector = () => screen.getByRole('complementary', { name: 'Inspector' })
 const viewport = () => screen.getByRole('region', { name: '3D viewport' })
 const field = (label: string) => within(inspector()).getByLabelText(label, { selector: 'input' })
@@ -121,21 +133,23 @@ describe('reference model UI', () => {
   it('imports an STL through the file dialog: row, inspector, ghost mesh read once', async () => {
     const { user, bridge, refs, importBox } = await renderReference()
     expect(
-      within(referenceGroup()).getByText(/Import an STL to show it on the stock/),
+      within(await referenceGroup()).getByText(/Import an STL to show it on the stock/),
     ).toBeInTheDocument()
     // a cancelled dialog imports nothing
-    await user.click(within(referenceGroup()).getByRole('button', { name: 'Import STL…' }))
+    await user.click(within(await referenceGroup()).getByRole('button', { name: 'Import STL…' }))
     expect(bridge.calls.filter((c) => c.name === 'design.reference.import')).toHaveLength(0)
 
     await importBox()
     expect(bridge.calls.filter((c) => c.name === 'design.reference.import')).toEqual([
       { name: 'design.reference.import', args: { partId: expect.any(String), path: BOX } },
     ])
-    const row = within(referenceGroup()).getByRole('button', { name: /^box/ })
+    const row = within(await referenceGroup()).getByRole('button', { name: /^box/ })
     expect(row).toHaveAttribute('aria-pressed', 'true') // selected: the inspector follows
     expect(row).toHaveTextContent('12 triangles')
-    // the name is its own line (ellipsis with a tooltip in a narrow navigator), the count under it
+    // the name is its own line (ellipsis with a tooltip), the count under it
     expect(within(row).getByTitle('box')).toHaveTextContent(/^box$/)
+    await expectNoAxeViolations()
+    await closeDialog(user)
     expect(within(inspector()).getByRole('heading', { name: 'box' })).toBeInTheDocument()
     expect(within(inspector()).getByText('STL · 12 triangles · 20 × 10 × 5')).toBeInTheDocument()
     expect(within(inspector()).getByText(/Unit guess: Read as mm/)).toBeInTheDocument()
@@ -158,16 +172,18 @@ describe('reference model UI', () => {
     await waitFor(() => expect(viewport()).toHaveAccessibleDescription(/Reference box shown/))
     const calls = bridge.calls.length
     const revision = d.revision
-    const eye = within(referenceGroup()).getByRole('button', { name: 'Show reference' })
+    const eye = within(await referenceGroup()).getByRole('button', { name: 'Show reference' })
     expect(eye).toHaveAttribute('aria-pressed', 'true')
     await user.click(eye)
     expect(eye).toHaveAttribute('aria-pressed', 'false')
-    expect(within(referenceGroup()).getByRole('button', { name: /^box/ })).toHaveTextContent(
+    expect(within(await referenceGroup()).getByRole('button', { name: /^box/ })).toHaveTextContent(
       'hidden',
     )
+    await closeDialog(user)
     expect(viewport()).not.toHaveAccessibleDescription(/Reference box/)
     expect(within(inspector()).getByText('Hidden in this window.')).toBeInTheDocument()
-    await user.click(eye)
+    await user.click(within(await referenceGroup()).getByRole('button', { name: 'Show reference' }))
+    await closeDialog(user)
     await waitFor(() => expect(viewport()).toHaveAccessibleDescription(/Reference box shown/))
     // nothing reached the project; the mesh was not read again
     expect(bridge.calls).toHaveLength(calls)
@@ -234,9 +250,9 @@ describe('reference model UI', () => {
   it('an unreadable file shows the import error and adds nothing', async () => {
     const { user, bridge, refs } = await renderReference()
     bridge.setFileChoice({ reference: '/models/missing.stl' })
-    await user.click(within(referenceGroup()).getByRole('button', { name: 'Import STL…' }))
+    await user.click(within(await referenceGroup()).getByRole('button', { name: 'Import STL…' }))
     expect(
-      await within(referenceGroup()).findByText('The reference could not be imported.'),
+      await within(await referenceGroup()).findByText('The reference could not be imported.'),
     ).toBeInTheDocument()
     expect(refs()).toHaveLength(0)
   })
@@ -244,12 +260,14 @@ describe('reference model UI', () => {
   it('removes a reference with an undo toast', async () => {
     const { user, refs, importBox } = await renderReference()
     await importBox()
-    await user.click(within(referenceGroup()).getByRole('button', { name: 'Remove box' }))
+    await user.click(within(await referenceGroup()).getByRole('button', { name: 'Remove box' }))
     await waitFor(() => expect(refs()).toHaveLength(0))
+    // Remove keeps the dialog open; the undo toast is there once it closes
+    await closeDialog(user)
     expect(within(inspector()).getByRole('heading', { name: 'Part' })).toBeInTheDocument()
     await user.click(await findToastAction('Undo'))
     await waitFor(() => expect(refs()).toHaveLength(1))
-    expect(within(referenceGroup()).getByRole('button', { name: /^box/ })).toBeInTheDocument()
+    expect(within(await referenceGroup()).getByRole('button', { name: /^box/ })).toBeInTheDocument()
   })
 
   it('a failed mesh read says so in the inspector and the viewport', async () => {

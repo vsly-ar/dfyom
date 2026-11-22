@@ -4,7 +4,7 @@
 // tab turns the count into positions, Space evenly clears them, typing ends a marker key run), and Import SVG from the navigator (file dialog,
 // options, `design.shape.import`, report). The 3D canvas is stubbed.
 // Doc: docs/conventions/ui.md#shape-in-the-operation-inspector, #tab-markers, #import-report
-import { screen, waitFor, within } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import type { Dispatcher } from '../../../../core/commands/dispatcher'
@@ -257,10 +257,12 @@ describe('operation inspector for shapes', () => {
     unregister()
   })
 
-  it('imports an SVG from the navigator and shows its report', async () => {
+  it('imports an SVG from the Shapes dialog and shows its report', async () => {
     const { user, part, bridge } = await renderOps()
     bridge.setFileChoice({ svg: SVG })
-    const shapes = within(navigator()).getByRole('region', { name: 'Shapes' })
+    const tools = screen.getByRole('toolbar', { name: 'Part setup' })
+    act(() => within(tools).getByRole('button', { name: 'Shapes' }).click())
+    const shapes = await screen.findByRole('dialog', { name: 'Shapes' })
     within(shapes).getByRole('button', { name: 'Add shape' }).focus()
     await user.keyboard('{Enter}')
     await user.click(await screen.findByRole('menuitem', { name: 'Import SVG…' }))
@@ -269,7 +271,10 @@ describe('operation inspector for shapes', () => {
     const report = await screen.findByRole('dialog', { name: /^Imported/ })
     expect(bridge.calls.filter((c) => c.name === 'design.shape.import')).toHaveLength(1)
     expect((part().shapes ?? []).length).toBeGreaterThan(0)
+    // the options and report stack over the Shapes dialog; Edit shape closes both
+    expect(shapes).toBeInTheDocument()
     await user.click(within(report).getByRole('button', { name: 'Edit shape' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(await screen.findByRole('region', { name: 'Shape Editor' })).toBeInTheDocument()
     // later access: the shape inspector reopens the report
     await user.click(within(inspector()).getByRole('button', { name: 'Import report' }))

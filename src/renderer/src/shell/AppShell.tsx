@@ -1,4 +1,4 @@
-// The window layout (task 3.3b): main toolbar (undo/redo and mode tools · mode switcher in the
+// The window layout (task 3.3b): main toolbar (undo/redo and mode tools – design's part setup, D45 – · mode switcher in the
 // centre · Apply (P3), machine group, panel toggles and settings), navigator | viewport | inspector in resizable, collapsible
 // panels, the Library window and settings), status bar. Below 1280 px the inspector overlays the viewport instead of shrinking it.
 // Landmarks: banner, navigation (modes, navigator), main (viewport), complementary (inspector),
@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AppMode } from '../../../core/modes'
 import { shellMessages as m } from '../messages/shell'
-import { ModeInspector, ModeNavigator } from '../modes/ModePanels'
+import { ModeDialogs, ModeInspector, ModeNavigator, ModeTools } from '../modes/ModePanels'
 import { MachineToolbar } from '../modes/run'
 import {
   Icon,
@@ -123,6 +123,7 @@ export function AppShell(): React.JSX.Element {
                 redoShortcut={shortcutLabel('Z', { shift: true })}
               />
             </Toolbar>
+            <ModeTools mode={mode} doc={doc} />
           </div>
           <nav aria-label="Modes" className={styles['modes']}>
             <ModeSwitcher value={mode} onValueChange={onMode} />
@@ -237,6 +238,7 @@ export function AppShell(): React.JSX.Element {
         <CloseProjectDialog />
         <ProjectDialogs />
         <ShortcutsDialog />
+        <ModeDialogs mode={mode} doc={doc} />
       </div>
     </ApplyScope>
   )

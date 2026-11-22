@@ -30,7 +30,7 @@ test('tool field: auto choice on Apply with its reason, chosen again on Apply, l
   const dialog = page.getByRole('dialog', { name: 'New project' })
   await dialog.getByRole('textbox', { name: 'Project name' }).fill('Tools')
   await dialog.getByRole('button', { name: 'Create project' }).click()
-  const setup = navigator.getByRole('region', { name: 'Set up the part' })
+  const setup = page.getByRole('region', { name: 'Set up the part' })
   await setField(setup, 'Length (X)', '100')
   await setField(setup, 'Width (Y)', '60')
   await setField(setup, 'Thickness (Z)', '20')

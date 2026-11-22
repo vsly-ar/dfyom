@@ -18,7 +18,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type { ElectronApplication, Locator, Page } from '@playwright/test'
-import { expect, launchApp, test } from './app.fixture'
+import { closeDialog, expect, launchApp, openPartSetup, test } from './app.fixture'
 
 const STL = resolve('src/core/design/__fixtures__/enclosure-wood-base.stl')
 
@@ -122,7 +122,7 @@ test('v0.2 golden path through the UI: reference, faces, setups, export and run 
   await dialog.getByRole('textbox', { name: 'Project name' }).fill('Enclosure')
   await dialog.getByRole('button', { name: 'Create project' }).click()
   await expect(page).toHaveTitle('Enclosure')
-  const setup = navigator.getByRole('region', { name: 'Set up the part' })
+  const setup = page.getByRole('region', { name: 'Set up the part' })
   await setField(setup, 'Length (X)', '255')
   await setField(setup, 'Width (Y)', '185')
   await setField(setup, 'Thickness (Z)', '40')
@@ -133,10 +133,11 @@ test('v0.2 golden path through the UI: reference, faces, setups, export and run 
   await expect(navigator.getByText(/^Stock: 255 × 185 × 40/)).toBeVisible()
 
   // ── Import the STL reference (read as mm, fitted centre + top), onto the bottom ──────────
-  const references = navigator.getByRole('region', { name: 'Reference' })
+  // the Stock dialog closed with Create part; Import STL… is in the Reference dialog (D45), which
+  // closes when the import has selected the new reference
+  let references = await openPartSetup(page, 'Reference')
   await references.getByRole('button', { name: 'Import STL…' }).click()
-  const refRow = references.getByRole('button', { name: /^enclosure-wood-base/ })
-  await expect(refRow).toContainText('49 806 triangles', { timeout: 30_000 })
+  await expect(references).toBeHidden({ timeout: 30_000 })
   await expect(inspector.getByText(/Unit guess: Read as mm/)).toBeVisible()
   await expect(input(inspector, 'Position Z')).toHaveValue('-39 mm')
   // the board is faced by 1 mm: the reference sits on the stock bottom, its top on the faced top
@@ -152,13 +153,22 @@ test('v0.2 golden path through the UI: reference, faces, setups, export and run 
     { timeout: 30_000 },
   )
   // hide and show it (view state of this window: no command)
+  references = await openPartSetup(page, 'Reference')
+  const refRow = references.getByRole('button', { name: /^enclosure-wood-base/ })
+  await expect(refRow).toContainText('49 806 triangles')
   const eye = references.getByRole('button', { name: 'Show reference' })
   await eye.click()
   await expect(eye).toHaveAttribute('aria-pressed', 'false')
   await expect(refRow).toContainText('hidden')
+  await closeDialog(references)
   await expect(viewport).not.toHaveAccessibleDescription(/Reference enclosure-wood-base/)
-  await eye.click()
-  await expect(eye).toHaveAttribute('aria-pressed', 'true')
+  references = await openPartSetup(page, 'Reference')
+  await references.getByRole('button', { name: 'Show reference' }).click()
+  await expect(references.getByRole('button', { name: 'Show reference' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  )
+  await closeDialog(references)
   await expect(viewport).toHaveAccessibleDescription(/Reference enclosure-wood-base shown/)
 
   // ── Top: facing, the cavity by its front-left corner on the facing floor, the profile ────
@@ -469,10 +479,11 @@ test('v0.2 golden path through the UI: reference, faces, setups, export and run 
     await nav2.getByRole('button', { name: 'Open project' }).click()
     await expect(page2).toHaveTitle('Enclosure')
     // the reference, placed as saved
-    const refRow2 = nav2
-      .getByRole('region', { name: 'Reference' })
-      .getByRole('button', { name: /^enclosure-wood-base/ })
+    const refRow2 = (await openPartSetup(page2, 'Reference')).getByRole('button', {
+      name: /^enclosure-wood-base/,
+    })
     await expect(refRow2).toContainText('49 806 triangles')
+    // choosing the row selects it and closes the dialog
     await refRow2.click()
     await expect(input(inspector2, 'Position Z')).toHaveValue('-40 mm')
     // the operations and the cavity's anchor

@@ -1,11 +1,11 @@
 // Shape Editor UI (task U1) against the fake bridge bound to a real dispatcher with the node 2D
-// port: the navigator's Shapes group, the inspector (one `design.shape.item.update` per field
+// port: the Shapes dialog (D45), the inspector (one `design.shape.item.update` per field
 // commit), handle drags in the flat view (one gesture per drag, a press within 4 px commits
 // nothing, Escape undoes the gesture, a formula locks its handle), the segment table's keyboard
 // grid, and accessibility. The 3D canvas is stubbed; jsdom boxes are empty, so the flat view is
 // 800 × 600 px at the origin and a handle's screen point is its `translate`.
 // Doc: docs/conventions/ui.md#shape-editor, docs/modes/design-v0.3.md#shape-definition
-import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import type { Dispatcher } from '../../../../core/commands/dispatcher'
@@ -72,8 +72,11 @@ async function renderShapes() {
   const part = (): PartDTO => Object.values(d.doc.parts)[0]!
   const shape = (n = 0): ShapeDTO => part().shapes![n]!
   await r.user.click(screen.getByRole('button', { name: 'Inspector' }))
+  // adding selects the shape and closes the dialog, so the Shape Editor shows (D45)
   const addShape = async (kind: string) => {
-    within(shapesGroup()).getByRole('button', { name: 'Add shape' }).focus()
+    within(await shapesGroup())
+      .getByRole('button', { name: 'Add shape' })
+      .focus()
     await r.user.keyboard('{Enter}')
     await r.user.click(await screen.findByRole('menuitem', { name: kind }))
     await within(inspector()).findByRole('region', { name: 'Items' })
@@ -93,8 +96,14 @@ async function retype(
   await user.type(el, text, { skipClick: true })
 }
 
-const navigator = () => screen.getByRole('navigation', { name: 'Navigator' })
-const shapesGroup = () => within(navigator()).getByRole('region', { name: 'Shapes' })
+/** The Shapes dialog (D45), opened from the toolbar's Part setup group unless it is open. */
+async function shapesGroup(): Promise<HTMLElement> {
+  const open = screen.queryByRole('dialog', { name: 'Shapes' })
+  if (open !== null) return open
+  const tools = screen.getByRole('toolbar', { name: 'Part setup' })
+  act(() => within(tools).getByRole('button', { name: 'Shapes' }).click())
+  return screen.findByRole('dialog', { name: 'Shapes' })
+}
 const inspector = () => screen.getByRole('complementary', { name: 'Inspector' })
 const editor = () => screen.getByRole('region', { name: 'Shape Editor' })
 const field = (label: string) => within(inspector()).getByLabelText(label, { selector: 'input' })
@@ -122,16 +131,20 @@ const itemUpdates = (bridge: FakeBridge) =>
 
 describe('shape editor', () => {
   it('adds a shape from the Shapes group: row, inspector, flat view', async () => {
-    const { bridge, shape, addShape } = await renderShapes()
-    expect(within(shapesGroup()).getByText(/No shapes/)).toBeInTheDocument()
+    const { user, bridge, shape, addShape } = await renderShapes()
+    expect(within(await shapesGroup()).getByText(/No shapes/)).toBeInTheDocument()
     await addShape('Rectangle')
+    expect(screen.queryByRole('dialog', { name: 'Shapes' })).not.toBeInTheDocument()
     expect(bridge.calls.filter((c) => c.name === 'design.shape.add')).toHaveLength(1)
     expect(shape().items[0]).toMatchObject({ kind: 'rectangle', op: 'add' })
-    const row = await within(shapesGroup()).findByRole('button', {
+    const row = await within(await shapesGroup()).findByRole('button', {
       name: new RegExp(`^${shape().name}`),
     })
     expect(row).toHaveAttribute('aria-pressed', 'true')
     expect(row).not.toHaveTextContent('Used by') // only a used shape says so
+    // choosing the row closes the dialog and keeps the shape selected
+    await user.click(row)
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(field('Length')).toHaveValue('40')
     // the flat view covers the 3D viewport with the outline and the item's handles
     await waitFor(() => expect(editor().querySelector('[data-handle="length"]')).not.toBeNull())
@@ -139,8 +152,6 @@ describe('shape editor', () => {
     // the summary from design.shape.get
     expect(await within(inspector()).findByText('7.92 cm²')).toBeInTheDocument()
     expect(within(inspector()).getByText('40.00 × 20.00 mm')).toBeInTheDocument()
-    // the import entry is disabled until design.shape.import is wired
-    within(shapesGroup()).getByRole('button', { name: 'Add shape' }).focus()
   })
 
   it('commits a field as one design.shape.item.update and undoes it', async () => {

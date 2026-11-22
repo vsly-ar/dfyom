@@ -20,7 +20,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type { ElectronApplication, Locator, Page } from '@playwright/test'
-import { expect, launchApp, test } from './app.fixture'
+import { closeDialog, expect, launchApp, openPartSetup, test } from './app.fixture'
 
 const STL = resolve('src/core/design/__fixtures__/enclosure-wood-base.stl')
 const SVG = resolve('src/core/design/__fixtures__/enclosure-sections.svg')
@@ -257,7 +257,7 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
   await dialog.getByRole('textbox', { name: 'Project name' }).fill('Enclosure shapes')
   await dialog.getByRole('button', { name: 'Create project' }).click()
   await expect(page).toHaveTitle('Enclosure shapes')
-  const setup = navigator.getByRole('region', { name: 'Set up the part' })
+  const setup = page.getByRole('region', { name: 'Set up the part' })
   await setField(setup, 'Length (X)', '255')
   await setField(setup, 'Width (Y)', '185')
   await setField(setup, 'Thickness (Z)', '40')
@@ -268,10 +268,11 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
   await expect(navigator.getByText(/^Stock: 255 × 185 × 40/)).toBeVisible()
 
   // ── Import the STL reference, fitted onto the stock bottom ───────────────────────────────
-  const references = navigator.getByRole('region', { name: 'Reference' })
+  // in the Reference dialog (D45), which closes when the import has selected the reference
+  const references = await openPartSetup(page, 'Reference')
   await references.getByRole('button', { name: 'Import STL…' }).click()
-  const refRow = references.getByRole('button', { name: /^enclosure-wood-base/ })
-  await expect(refRow).toContainText('49 806 triangles', { timeout: 30_000 })
+  await expect(references).toBeHidden({ timeout: 30_000 })
+  await expect(inspector.getByRole('heading', { name: 'enclosure-wood-base' })).toBeVisible()
   await inspector
     .getByRole('radiogroup', { name: 'Height' })
     .getByRole('radio', { name: 'Bottom' })
@@ -285,7 +286,8 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
   )
 
   // ── Import SVG…: two shapes, Béziers fitted to arcs, the deviation ───────────────────────
-  const shapes = navigator.getByRole('region', { name: 'Shapes' })
+  // in the Shapes dialog (D45); the import's dialogs stack over it
+  let shapes = await openPartSetup(page, 'Shapes')
   await shapes.getByRole('button', { name: 'Add shape' }).click()
   await page.getByRole('menuitem', { name: 'Import SVG…' }).click()
   await page
@@ -302,6 +304,7 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
   await expect(report).toHaveCount(0)
   const shapeRows = shapes.getByRole('list').getByRole('button', { name: /^(outline|cavity)/ })
   await expect(shapeRows).toHaveCount(2)
+  await closeDialog(shapes)
 
   // ── Top: facing; the cavity as a named shape on the facing floor ─────────────────────────
   await navigator.getByRole('button', { name: 'Add facing' }).click()
@@ -404,6 +407,8 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
   ).toHaveCount(0)
 
   // ── Shape Editor: a cable notch from an obround and a rectangle (a boolean) ──────────────
+  // adding a shape selects it and closes the Shapes dialog (D45)
+  shapes = await openPartSetup(page, 'Shapes')
   await shapes.getByRole('button', { name: 'Add shape' }).click()
   await page.getByRole('menuitem', { name: 'Obround' }).click()
   await expect(inspector.getByRole('heading', { name: 'Shape 3' })).toBeVisible()
@@ -509,6 +514,7 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
   }
 
   // ── an `on` groove along an open path: a line and a tangent arc, built in the segment table
+  shapes = await openPartSetup(page, 'Shapes')
   await shapes.getByRole('button', { name: 'Add shape' }).click()
   await page.getByRole('menuitem', { name: 'Path' }).click()
   await expect(inspector.getByRole('heading', { name: 'Shape 4' })).toBeVisible()
@@ -568,11 +574,13 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
     /^Drilling 4/,
     /^Profile 2/,
   ])
+  shapes = await openPartSetup(page, 'Shapes')
   await expect(
     shapes
       .getByRole('list')
       .getByRole('button', { name: /^(outline|cavity|Cable notch|Label groove)/ }),
   ).toHaveCount(4)
+  await closeDialog(shapes)
   await expect(applyButton).toHaveCount(0)
   await expect(status.getByText('Part up to date')).toBeAttached({ timeout: 60_000 })
   await expect(viewport).toHaveAccessibleDescription(/Part with 9 operations/)
@@ -719,18 +727,20 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
     const inspector2 = page2.getByRole('complementary', { name: 'Inspector' })
     await nav2.getByRole('button', { name: 'Open project' }).click()
     await expect(page2).toHaveTitle('Enclosure shapes')
-    await expect(
-      nav2
-        .getByRole('region', { name: 'Reference' })
-        .getByRole('button', { name: /^enclosure-wood-base/ }),
-    ).toContainText('49 806 triangles')
-    // the shapes: the cavity's fillets, the notch's two items, the groove's open path
-    const shapes2 = nav2.getByRole('region', { name: 'Shapes' })
+    const references2 = await openPartSetup(page2, 'Reference')
+    await expect(references2.getByRole('button', { name: /^enclosure-wood-base/ })).toContainText(
+      '49 806 triangles',
+    )
+    await closeDialog(references2)
+    // the shapes: the cavity's fillets, the notch's two items, the groove's open path; choosing
+    // a row selects it and closes the dialog
+    let shapes2 = await openPartSetup(page2, 'Shapes')
     for (const name of ['outline', 'cavity', 'Cable notch', 'Label groove'])
       await expect(shapes2.getByRole('button', { name: new RegExp(`^${name}`) })).toBeVisible()
     await shapes2.getByRole('button', { name: /^cavity/ }).click()
     await expect(inspector2.getByRole('heading', { name: 'cavity' })).toBeVisible()
     await expect(input(inspector2, `Segment ${FILLETS[0].vertex} Fillet`)).toHaveValue(/^1/)
+    shapes2 = await openPartSetup(page2, 'Shapes')
     await shapes2.getByRole('button', { name: /^Cable notch/ }).click()
     await expect(itemRows(inspector2)).toHaveText([/Obround 24 × 10/, /Rectangle 12 × 10/])
     await page2.getByRole('region', { name: 'Shape Editor' }).focus()
