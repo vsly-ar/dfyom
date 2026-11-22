@@ -561,6 +561,7 @@ svg.fi .ext { stroke-dasharray: 1.5 1.5; opacity: 0.7; }
     <a href="#icons">Icons</a>
     <a href="#components">Components</a>
     <a href="#planned">Planned (v0.2)</a>
+    <a href="#planned-v03">Planned (v0.3)</a>
     <a href="#shell">App shell</a>
     <a href="#decide">To decide</a>
     <a href="#changelog">Changelog</a>
@@ -746,6 +747,23 @@ svg.fi .ext { stroke-dasharray: 1.5 1.5; opacity: 0.7; }
       </ol>
     </section>
 
+    <section id="planned-v03">
+      <h2>Planned components (v0.3) <span class="planned-badge">Planned · not designed yet</span></h2>
+      <p class="muted">Accepted with the v0.3 docs (2026-11-22); rules in <a href="ui.md#shapes-v03">ui.md § Shapes (v0.3)</a>. Each gets a specimen in both themes, from existing tokens only, with its task (U1–U3); all are approved together in review L3. Until then this list is the placeholder.</p>
+      <ol class="planned">
+        <li><b>Shapes navigator group</b> (U1): shape rows with icon, name, "used by n", warning badge; the Add menu with its Shapes and Operations groups.</li>
+        <li><b>Shape Editor flat view</b> (U1): resolved loops as thin edge lines, quiet removal tint with untinted islands, the selected item amber and dashed, stock face and reference section muted behind; the view chip.</li>
+        <li><b>Handles</b> (U1): point squares, size and radius diamonds, centre crosses at rest, hovered and dragged; the value chip beside the pointer; a formula-locked handle.</li>
+        <li><b>Item list and segment table</b> (U1): op segmented control per item, dense segment grid with empty non-applicable cells, a cell in edit and in error.</li>
+        <li><b>Invalid outline</b> (U1): last valid outline with the offending segment in danger red and the error marker.</li>
+        <li><b>Import report dialog</b> (U1): options step, then summary, facts list with soft notes, mini preview, Edit shape / Close.</li>
+        <li><b>Shape picker</b> (U2): inline and named groups with mini outlines, rotation, mirror switch, the side control with On and a disabled choice with its reason.</li>
+        <li><b>Tab markers</b> (U2): marker at rest, dragged and focused; the start point mark with its direction tick.</li>
+        <li><b>Snap glyphs and measure</b> (U3): the four glyph shapes with label chips; a dimension line with its value chip.</li>
+        <li><b>Info notes</b>: clamped stepover and <span class="code">dfm.shapeHeavy</span> as soft notes in a field support area and a warning list.</li>
+      </ol>
+    </section>
+
     <section id="shell">
       <h2>App shell · example</h2>
       <p class="muted"><b>For illustration only.</b> One possible Design mode window, showing the tokens and components above working together. It is not a layout spec: the window layout is decided with the mode work later, and approving the design system does not fix it. Try the pencil on Width.</p>
@@ -824,6 +842,7 @@ svg.fi .ext { stroke-dasharray: 1.5 1.5; opacity: 0.7; }
         <li><b>2026-11-21 · Colours accepted</b>: the user reviewed the values after the APCA pass and accepted them as is: the split <span class="code">--danger</span> / <span class="code">--danger-text</span>, <span class="code">--text-muted</span> as secondary text at Lc 60 (<a href="../decisions/0018-danger-text-and-secondary-text-role.md">ADR 0018</a>) and <span class="code">--vp-plunge</span>.</li>
         <li><b>2026-11-21 · Fields: icons, echo, narrow layout</b> (decided by the user): field illustrations keep full colour and saturation whether the field is focused or not <span class="changed-badge">Changed since approval</span> (was 35 % at rest); focus still thickens the amber line, read-only and disabled fields stay grey. The echo shows only when it adds something to the typed text (expression, reference, fraction, another unit, asymmetric tolerance): a plain "15" or "15 mm" in an mm field shows none, a plain value with an inherited tolerance shows only that tolerance <span class="changed-badge">Changed since approval</span>. When a field loses focus to a click, its echo stays until the click has landed, then collapses with <span class="code">--motion-base</span> (instant with reduced motion). Narrow field lists (below 20 rem) put the label above the input <span class="new-badge">New since approval</span> (<a href="#gallery">specimen in the gallery</a>).</li>
         <li><b>2026-11-22 · Planned v0.2 components</b> <span class="planned-badge">Planned · not designed yet</span>: placeholders for the components the v0.2 docs add (<a href="#planned">list</a>); their specimens come with their tasks for approval.</li>
+        <li><b>2026-11-22 · Planned v0.3 components</b> <span class="planned-badge">Planned · not designed yet</span>: placeholders for the Shape UI (<a href="#planned-v03">list</a>); specimens come with U1–U3 and are approved in L3.</li>
       </ol>
     </section>
   </main>

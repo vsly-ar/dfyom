@@ -1,6 +1,6 @@
 # UI guidelines
 
-Status: accepted · Principle: [principles.md §5](../principles.md#5-user-friendly-beginner-friendly-highly-graphical) · Decisions: [ADR 0012 Radix + own styles](../decisions/0012-radix-primitives-own-styles.md), [ADR 0010 react-three-fiber](../decisions/0010-react-three-fiber-viewport.md), [ADR 0017 APCA contrast](../decisions/0017-apca-contrast-for-design-tokens.md), [ADR 0018 red text token, secondary text](../decisions/0018-danger-text-and-secondary-text-role.md) · Terms: [glossary.md](../glossary.md) · Task: [v0.1 plan](../plans/v0.1.md) 1.11 (blocks 3.3–3.7, 3.12); v0.2 amendments: [plans/v0.2.md](../plans/v0.2.md) 1.5
+Status: accepted · Principle: [principles.md §5](../principles.md#5-user-friendly-beginner-friendly-highly-graphical) · Decisions: [ADR 0012 Radix + own styles](../decisions/0012-radix-primitives-own-styles.md), [ADR 0010 react-three-fiber](../decisions/0010-react-three-fiber-viewport.md), [ADR 0017 APCA contrast](../decisions/0017-apca-contrast-for-design-tokens.md), [ADR 0018 red text token, secondary text](../decisions/0018-danger-text-and-secondary-text-role.md) · Terms: [glossary.md](../glossary.md) · Task: [v0.1 plan](../plans/v0.1.md) 1.11 (blocks 3.3–3.7, 3.12); v0.2 amendments: [plans/v0.2.md](../plans/v0.2.md) 1.5; v0.3 amendment ([shapes](#shapes-v03)): [plans/v0.3.md](../plans/v0.3.md) 1.5
 
 How the renderer looks and behaves: design tokens, components, layout, interaction, run-mode safety, accessibility, copy, testing. Rules are imperative. The user's answers to the open questions are recorded as [decisions](#decisions); concrete token values, the palette and the component looks come from the approved [design system](#design-system) (task 1.16).
 
@@ -219,6 +219,19 @@ Per [ADR 0012](../decisions/0012-radix-primitives-own-styles.md): Radix primitiv
 | `SetupChangeDialog`              | E2   | Run dialog between setups ([run-mode safety](#run-mode-safety-ui)).                                                                                      |
 | `ReferenceGhost`, `ReferenceRow` | R3   | Viewport ghost and navigator row ([reference ghost](#reference-ghost-v02)); built as `viewport/ReferenceGhost.tsx` and `modes/design/ReferenceRows.tsx`. |
 
+**v0.3 components** (accepted, not built; tasks in [plans/v0.3.md](../plans/v0.3.md); rules in [Shapes (v0.3)](#shapes-v03); visuals pending approval in L3):
+
+| Component                         | Task | Notes                                                                            |
+| --------------------------------- | ---- | -------------------------------------------------------------------------------- |
+| `ShapeList`                       | U1   | "Shapes" group in the design navigator, operation-row pattern.                   |
+| `ShapeInspector`, `ShapeItemList` | U1   | Item list with `op`, the selected item's fields, shape summary.                  |
+| `SegmentTable`                    | U1   | Path segments as a keyboard grid of `QuantityInput` cells.                       |
+| `ShapeHandles`, flat view         | U1   | Viewport overlay (`viewport/`): handles, live outline, item outlines, view chip. |
+| `ImportReportDialog`              | U1   | SVG import options and report.                                                   |
+| `ShapePicker`                     | U2   | Inline or named shape, rotation, mirror; the profile side gains On.              |
+| `TabMarkers`                      | U2   | Viewport markers dragged along the loop, start point mark.                       |
+| `SnapGlyph`, `MeasureTool`        | U3   | Snap target glyphs and labels, the measure tool (first to cut).                  |
+
 A dev-only **gallery** screen renders every `ui/` component in every variant and state in both themes, side by side as in the [design system](#design-system) page; it is the manual review surface ([testing](#testing)).
 
 ### Buttons
@@ -318,7 +331,7 @@ New / Open / Save in the window (task 3.6; `shell/project/`, shared by every mod
 
 - The native menu (`src/main/menu.ts`): File (New project… `Ctrl/Cmd+N`, Open project… `Ctrl/Cmd+O`, Save `Ctrl/Cmd+S`, Save as… `Ctrl/Cmd+Shift+S`, Close window or Quit), Edit (Undo, Redo, Apply changes `Ctrl/Cmd+Enter` (v0.2, P3; inactive while a modal dialog is open), cut, copy, paste, select all), View (Design / Plan / Run `Ctrl/Cmd+1/2/3`, Navigator, Inspector, zoom, full screen; reload and developer tools in development), Window (Library `Ctrl/Cmd+Shift+L`, [Library window](ui-library-window.md)), Help (Keyboard shortcuts). Items are sent to the focused window (`menu.onAction`), which runs the same handler as the button or key (`shell/useAppCommands.ts`).
 - The window handles the same keys itself (so they work whichever sees a key first); a menu action within 300 ms of the same key handled by the window is its accelerator echo and is skipped (`shell/key-echo.ts`). Menu Undo/Redo in a text field edit the text (`document.execCommand`), elsewhere the history.
-- `?` (not in a text field) and Help → Keyboard shortcuts open the shortcut list (`ShortcutsDialog`), grouped as project, edit, modes and panels, viewport, design navigator, fields. The viewport group lists `1 2 3 4` (Top, Front, Right, Isometric) and `Shift+1 2 3` (Bottom, Back, Left; v0.3 L2).
+- `?` (not in a text field) and Help → Keyboard shortcuts open the shortcut list (`ShortcutsDialog`), grouped as project, edit, modes and panels, viewport, design navigator, fields. The viewport group lists `1 2 3 4` (Top, Front, Right, Isometric) and `Shift+1 2 3` (Bottom, Back, Left; v0.3 L2). v0.3 (U1–U3, [shapes](#shapes-v03)): `M` measure in the viewport, `Alt+↑/↓` and `Delete` in the item list and segment table, `Shift` (15°) and `Alt` (no snap) while dragging a handle.
 
 ## Shell state
 
@@ -335,14 +348,15 @@ New / Open / Save in the window (task 3.6; `shell/project/`, shared by every mod
 
 App settings (`src/shared/settings.ts`): GUI preferences of the app instance, owned by main (`src/main/settings/store.ts`), persisted in `<appData>/settings.json`, mirrored by every window (`state/settings.ts`). Not part of any project, and not reachable by agents ("Allow local agents to connect" guards their own access).
 
-| Setting                       | Values                        | Effect                                                                                                                                                                |
-| ----------------------------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Theme                         | System (default), Light, Dark | `data-theme` on the root; none for System, so `prefers-color-scheme` applies ([tokens](#design-tokens)).                                                              |
-| Reduce motion                 | off (default), on             | `data-motion='reduce'` on the root; the OS preference applies as well ([motion](#motion)).                                                                            |
-| Allow local agents to connect | on (default), off             | Starts or stops the local HTTP server at once ([llm-api.md](../architecture/llm-api.md#local-http)); `--mcp-http=off` or `=<port>` overrides it at start for one run. |
-| Panel layouts                 | per panel group id            | Last layout of the shell's panels ([app shell](#app-shell)).                                                                                                          |
-| Default anchor (v0.2)         | Centre (default), any of nine | `defaultAnchor`: [placement anchor](../modes/design-v0.2.md#placement-anchors) of new positioned operations made in the UI; agents pass `anchor` or get the centre.   |
-| Library units (v0.3)          | mm (default), in              | `libraryUnits`: unit system of the [Library window](ui-library-window.md#implementation-task-l1) without a project; its mm / in control writes it.                    |
+| Setting                       | Values                                   | Effect                                                                                                                                                                |
+| ----------------------------- | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Theme                         | System (default), Light, Dark            | `data-theme` on the root; none for System, so `prefers-color-scheme` applies ([tokens](#design-tokens)).                                                              |
+| Reduce motion                 | off (default), on                        | `data-motion='reduce'` on the root; the OS preference applies as well ([motion](#motion)).                                                                            |
+| Allow local agents to connect | on (default), off                        | Starts or stops the local HTTP server at once ([llm-api.md](../architecture/llm-api.md#local-http)); `--mcp-http=off` or `=<port>` overrides it at start for one run. |
+| Panel layouts                 | per panel group id                       | Last layout of the shell's panels ([app shell](#app-shell)).                                                                                                          |
+| Default anchor (v0.2)         | Centre (default), any of nine            | `defaultAnchor`: [placement anchor](../modes/design-v0.2.md#placement-anchors) of new positioned operations made in the UI; agents pass `anchor` or get the centre.   |
+| Library units (v0.3)          | mm (default), in                         | `libraryUnits`: unit system of the [Library window](ui-library-window.md#implementation-task-l1) without a project; its mm / in control writes it.                    |
+| Snap grid (v0.3)              | 1 mm / 1/16 in (default), any length > 0 | `snapGrid`: grid step for [snapping](#snap-and-measure) in the Shape Editor and viewport (U3; value pending L3).                                                      |
 
 - The settings dialog (toolbar "Settings", or "Agent settings" in the agent indicator) applies changes at once and optimistically; main validates the patch (unknown fields and wrong values are refused, the window then returns to main's settings), writes the file atomically and pushes the new settings to every window.
 - A window gets the settings at creation as a window argument (`--dfyom-settings`), so theme and motion are applied before the first render (no flash).
@@ -489,6 +503,108 @@ Accepted with the v0.2 docs (D18, 2026-11-22); face picking and the anchor picke
 - Visibility is per window: the row's eye is an `IconButton` toggle named "Show reference" with `aria-pressed` (pressed = shown; the icon switches between eye and crossed eye) that sends no command, adds no undo step and never marks the project unsaved. A toggle keeps one name and states its state by being pressed (R3; first sketched as a "Hide" / "Show" label swap, which reads ambiguously with `aria-pressed`). A hidden reference keeps its row, muted ("hidden" instead of its triangle count).
 - v0.2 shows the ghost in Design only.
 - Built in R3 (`ReferenceRows`, `ReferenceInspector`, `viewport/ReferenceGhost.tsx`): [reference-model.md § Implementation](../modes/reference-model.md#implementation-task-r3).
+
+### Shapes (v0.3)
+
+Accepted with the v0.3 docs (D29, 2026-11-22), not built (tasks U1–U3, [plans/v0.3.md § 5](../plans/v0.3.md#5-shape-ui)). Behaviour lives in [design-v0.3.md](../modes/design-v0.3.md) (its [UI summary](../modes/design-v0.3.md#ui-summary) is the intent), the renderer's 2D port in [shapes.md § Where the 2D layer runs](../architecture/shapes.md#where-the-2d-layer-runs), and toolpath notes in [plan-v0.3.md](../modes/plan-v0.3.md). These are the UI rules.
+
+**Visuals pending approval (L3).** The colours, handle and marker shapes and the motion below are proposals made from existing tokens. Specimens go to the [design system](ui-design-system.html#planned-v03) page and the gallery with U1–U3, and L3 approves them in one review ([plans/v0.3.md § 6](../plans/v0.3.md#6-ui-lane-d27)). No new token is added without L3, and a token L3 adds gets its APCA pair in `tokens.test.ts`.
+
+**Rules for the whole Shape UI:**
+
+- **Numbers first:** every handle, marker and snap edits a quantity that is also a field in the inspector. The field is the keyboard and screen-reader path; the canvas is the pointer convenience, as with the view cube. A value given as an expression locks its handle (drawn disabled, tooltip "Remove the formula to drag."), as the [anchor picker](#design-and-plan-controls-v02) does.
+- **One drag is one [gesture](../architecture/commands.md#gestures-live-edits):** the outline follows the pointer every frame from the renderer's 2D port. Gesture steps (`design.shape.item.update`, or the operation's update) go out at most every 100 ms and on release, so the drag is one undo step. `Escape` during a drag cancels it (`history.undo { gesture }`). A press that stays within the 4 px click distance commits nothing.
+- **Drawing style:** a CAD drawing, not an illustration. Loops are 1.5 px `--vp-edge` lines, a pocket region has a quiet `--vp-removal` tint with its holes (islands) left untinted, and open paths are bare lines. The selected item gets the amber outline (`--vp-selected`). The accent never fills an area.
+- **Both themes:** overlays read their colours through `useTokens`, so they follow the theme and add no values of their own.
+- **Motion:** handles fade in over `--motion-fast`. A snap pulls the point in over `--motion-instant` and pulses its glyph once (`--motion-emphasis`). Entering the Shape Editor animates the camera to the flat view (`--motion-slow`, like a named view). Reduced motion turns all of these into cuts, and nothing loops.
+
+#### Navigator and Add
+
+- **"Shapes"** is a group above the operations in `DesignNavigator`. Its rows (`ShapeList`) follow the operation-row pattern: shape icon, name, "used by 2" in secondary text, warning badge, and the failed marker when a shape does not resolve. Shapes have no order, so the rows have no move actions. Remove is disabled while the shape is referenced, with the reason as tooltip and visible text ("Used by Pocket 1 and Profile 2.", `design.referenced`).
+- **"Add"** is one `Menu` with two groups. Shapes: Rectangle, Circle, Obround, Polygon, Path, Import SVG…. Operations: as before. "Convert to shape" is in the row menu and the inspector of a pocket or profile that has an inline shape (`design.shape.convert`, toast "Converted to Shape 3 · Undo").
+- **Import SVG…** opens the native open dialog (`.svg`), then an options dialog with two choices. Unit: taken from the file; when the file has none, mm, inch, or px at 96 or 72 dpi. Split: one shape per file, per top-level element, or per loop. The import runs as a [job](#jobs-and-progress) and ends in the [import report](#import-report).
+
+#### Shape Editor
+
+Selecting a shape row, or adding a shape, opens the Shape Editor: the inspector shows the shape and the viewport switches to its flat view. Clearing the selection returns the camera to its previous view.
+
+- **Flat view:** orthographic and face-on to the face of the first operation that uses the shape, seen from outside that face ([S-D](../modes/design-v0.3.md#placing-a-shape-on-a-face)). Muted context sits behind the shape: the stock face outline (dashed `--vp-stock`), the [reference section](#snap-and-measure) while the reference is shown, and the face-frame axes. A shape no operation uses is shown in its own frame on the grid. Orbit is off; pan and zoom work as usual. A chip at the viewport's top left names the view ("Shape · Top face" or "Shape frame"), and so does the view summary ("View: Shape 1 on Top face, flat").
+- **Inspector** (`ShapeInspector`) shows the name, then the **item list** (`ShapeItemList`). Each row has:
+  - the item's `op` as a `SegmentedControl` (Add, Subtract, Intersect), read-only Add on the first row
+  - the kind icon and a short label ("Rectangle 40 × 20")
+  - move up, move down (`Alt+↑/↓`) and remove, as in the operation list
+
+  Under the list are the selected item's `Field`s with illustrations. Each commit is one `design.shape.item.update`, and its issues show at their field (`shapes.<id>.items.<n>.<param>`). A summary from `design.shape.get` ends the group: area, bounding box and smallest inside radius.
+
+- **Segment table** (`SegmentTable`) for a path item: a dense grid (`--control-sm`) with a row per segment.
+  - Columns: #, type (`Select`: Line, Arc, Tangent arc), end X and Y, radius, CW/CCW, large arc, and the fillet at the end vertex. A cell that does not apply to the type is empty, not disabled.
+  - Above the table: the start point and "Closed" (`Switch`). "Add segment" inserts after the selected row; a row's menu removes it.
+  - Keyboard: arrows move between cells (grid roving focus); `Enter` starts editing a cell and `Enter` commits it; `Alt+↑/↓` moves a row; `Delete` on a row header removes the row, with an undo toast.
+  - Every cell is a `QuantityInput`, so expressions, units and the echo work as in any field. The selected row and its segment's handles highlight each other.
+- **Handles** (`ShapeHandles`) appear on the selected item only:
+  - Marks: points are 7 px squares, radii and sizes are 7 px diamonds on the edge they size, and centres are small crosses. The mark stays small, but its pointer target is ≥ 24 px.
+  - Colours: neutral at rest (`--bg-raised` fill, `--vp-edge` outline), `--vp-hover` when hovered, amber while dragged.
+  - Modifiers: `Shift` constrains the drag to 15° steps; `Alt` turns [snapping](#snap-and-measure) off for that drag.
+  - While dragging, a chip beside the pointer shows the edited value in project units ("R 12.50 mm"), in `--text` on `--bg-raised` like the face-frame labels.
+- **Live outline:** the renderer's 2D port redraws the resolved loops on every value change, before the mesh follows ([evaluation status](#evaluation-status-pending-outdated-failed)). In an invalid state (a crossing path, a fillet too large) the last valid outline stays, the offending segment is drawn in `--danger` with the error marker, and the error shows at its field. An unresolvable shape never looks valid.
+- **Boolean items:** the selected item's own outline is drawn dashed over the resolved result, so a subtracted item reads as a cut-out. Other items show only through the result. "Show items" (`IconButton` with `aria-pressed`, per window, sends no command) draws every item's outline thinly.
+
+#### Shape in the operation inspector
+
+`ShapePicker` (U2) replaces the pocket's and profile's shape kind control:
+
+- **Picker:** a `Select` with two groups. Inline lists Rectangle and Circle; Shapes lists the part's named shapes, each with a mini outline and "used by n". "New shape…" adds a shape, references it and opens the Shape Editor. Under the picker, a named shape offers "Edit shape" (selects its row) and an inline one offers "Convert to shape". A choice is one command on `shape`.
+- **Placement** under the picker: centre with the [anchor picker](#design-and-plan-controls-v02); **rotation** in ° (also on inline rectangles); **mirror** as a `Switch` "Mirror (flip x)", named shapes only. While the rotation field has focus, the viewport draws the placed, rotated bounding box (which the anchor uses) thin and dashed.
+- **Profile side** gets a third choice: Outside, Inside, On ([centreline cut](../glossary.md)). With an open path only On is enabled, and the others show the reason "An open path can only be cut on the line." Blind `depth` shows only with On.
+- **Issues** at the picker: a shape the operation cannot take shows the core's issue there (`profileOneLoop`, `openNeedsOn`, `floorRadiusShape`) with its fix where one exists ("Use side On").
+
+#### Tab markers
+
+On a selected profile with tabs (U2), each tab is a marker on the loop: a bar across the slot as long as the tab is wide, neutral with a `--vp-edge` outline, amber while dragged. A small open circle with a direction tick marks the loop's **start point** and its counter-clockwise direction seen from outside.
+
+- **Dragging** moves a marker along the loop to the nearest loop point (`pointAt`, `distance`). The first drag on a count-spaced profile turns the count into `tabs.positions` within the same gesture; the note then says "Positions entered by you." with "Space evenly", which clears them. A marker stops at its neighbour's edge, so a drag never makes `tabsOverlap`.
+- **Keyboard path:** the Tabs group lists one `QuantityInput` per position ("Tab 1 at 32.0 mm from the start"), with "Add tab" and a remove action per row. On the canvas, a focused marker moves 1 mm per arrow key (0.1 mm with `Alt`, 10 mm with `Shift`), and each run of keys is one gesture. Its name is "Tab 2, 84.5 mm from the start", announced politely when it changes.
+
+#### Import report
+
+`ImportReportDialog` (U1) is a `Dialog` opened after `design.shape.import`, built from its `report` ([design-v0.3.md § SVG import](../modes/design-v0.3.md#svg-import)):
+
+- **Title and summary:** "Imported Shape 1" or "Imported 3 shapes". The summary line gives the size, where it came from, and the shapes and loops created: "120.0 × 80.0 mm, from the file's width and height", or "Unitless: 96 px per inch assumed".
+- **Facts** in a two-column list (label, value, tabular numerals): elements imported; elements skipped, by kind (text, images, clip paths); curves fitted with arcs (count, largest deviation "≤ 0.010 mm"); corners kept at cusps; micro corners merged; loops repaired.
+  - What changed the drawing (skipped, repaired) is a soft warning with the "i" icon; the rest are plain facts.
+  - Nothing in the report is an error; a refused file shows its `ErrorMessage` instead.
+- **Preview and actions:** a mini flat outline of the result, then "Edit shape" (primary, selects the first shape) and "Close". The import is undone like any edit ("Undo Import SVG").
+- **Later access:** while the window is open, the shape inspector reopens the last report ("Import report"). Reports are not persisted.
+
+#### Snap and measure
+
+Bounded, and the first item cut if v0.3 runs long (U3, [Q23](../modes/design-v0.3.md#answered-questions)). Without U3, handles and markers work unsnapped.
+
+- **Snap targets** while dragging handles and tab markers: grid ([Snap grid](#settings) setting), shape points (ends, centres, midpoints), stock edges and corners, and the **reference section**, computed in the worker.
+- **Snap glyph** at the active target: a square for ends and corners, a circle for centres, a triangle for midpoints, a cross for grid points, plus a label chip ("Midpoint", "Stock corner", "Reference"). The glyph is `--vp-edge` with the hover tint; the shapes tell targets apart, so colour carries no meaning alone.
+- **Snap values:** a snap writes the number in the user's units and format ([design-v0.3.md § Measure and snap](../modes/design-v0.3.md#measure-and-snap)). Holding `Alt` turns snapping off for one drag; the "Snap" toolbar toggle (`IconButton`, `aria-pressed`, per window) turns it off until pressed again.
+- **Reference section:** while a reference is shown, the Shape Editor's floating toolbar has "Section depth" (`QuantityInput`). The section is a thin `--vp-edge` line at the ghost's opacity, never in the accent.
+- **Measure** (`MeasureTool`): the viewport toolbar button "Measure", or `M` while the viewport has focus. Click two points (snapping applies), or a point and an edge. A dimension line with ticks shows the distance in a chip in project units, and the chip's tooltip adds ΔX, ΔY, ΔZ. Nothing is stored; `Escape` or the button ends the tool. Keyboard path: the viewport's live summary repeats the result ("Distance 42.00 mm"), and the inspector fields give exact positions.
+
+#### Info notes
+
+Soft tier ([severities](#warnings-and-dfm)): neutral, "i" icon, dismissible, with no fix button.
+
+- **Clamped stepover** ([plan-v0.3.md T-H](../modes/plan-v0.3.md#decisions)): at the plan operation's stepover field, "Clamped to 3.00 mm (half the tool) for offset clearing." with the effective value. The entered value stays.
+- **`dfm.shapeHeavy`** ([design-v0.3.md § DFM](../modes/design-v0.3.md#dfm-checks-for-shapes)): on the operation, "This shape has 4 200 segments after flattening, so the part updates more slowly." The status bar's "Updating…" is unchanged.
+- **Shape DFM markers** (corners, rest material) sit at `params.at` in the face frame; a corner's marker is a small arc. With more than 10 corners the list shows a count, and the viewport still marks every one.
+
+#### Accessibility (Shape UI)
+
+- **Field paths:** every canvas action has a field. Handles map to item fields and the segment table, tab markers to tab positions, snapping to typed values, measuring to field values and the summary. Each new component gets an axe check; the segment table grid and the marker keys get keyboard tests.
+- **Summary:** the viewport summary names the Shape Editor state ("Shape 1: 2 loops, 14 elements, flat on Top face. Selected: item 2, Circle.") and is announced politely when the selected item changes.
+- **Handles and markers** stay out of the app's tab order. From the focused viewport, `Tab` cycles the selected item's handles, then the markers. A handle is named for what it edits ("Segment 3 end point, X 40.00, Y 12.50"). Arrows move it 1 mm (0.1 mm with `Alt`, 10 mm with `Shift`), one gesture per run of keys.
+
+Tests, written with U1–U3:
+
+- Component tests for `ShapeItemList`, `SegmentTable`, `ShapePicker` and `ImportReportDialog`, against the fake bridge with a real design runtime.
+- Unit tests for the handle, marker and snap maths, kept in pure functions (`viewport/shape-handles.ts`, `viewport/snap.ts`).
+- An e2e Shape Editor flow in hidden windows for the canvas.
 
 ### Viewport (task 3.5)
 
