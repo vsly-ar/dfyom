@@ -103,10 +103,25 @@ export class AppError extends Error {
     }
   }
 
+  /**
+   * `toJSON()` without `stack`, nested causes included: the form for data that leaves the app
+   * (agent and CLI results, job outcomes, evaluation status). Logs keep the stack.
+   */
+  toWireData(): AppErrorData {
+    return withoutStack(this.toJSON())
+  }
+
   static fromJSON(d: AppErrorData): AppError {
     const e = new AppError(d.code, d.message, { issues: d.issues, cause: d.cause })
     ;(e as { frames: readonly ContextFrame[] }).frames = d.frames
     if (d.stack !== undefined) e.stack = d.stack
     return e
   }
+}
+
+/** `AppErrorData` without `stack`, at every level of `cause`. */
+export function withoutStack(d: AppErrorData): AppErrorData {
+  const { stack: _stack, cause, ...rest } = d
+  if (cause === undefined) return rest
+  return { ...rest, cause: 'code' in cause ? withoutStack(cause) : cause }
 }

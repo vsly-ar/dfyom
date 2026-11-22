@@ -45,7 +45,7 @@ export function cacheOf(
 const failed = (planOperationId: string, e: AppError): OperationOutcome => ({
   planOperationId,
   status: 'failed',
-  error: e.toJSON(),
+  error: e.toWireData(),
 })
 
 /**

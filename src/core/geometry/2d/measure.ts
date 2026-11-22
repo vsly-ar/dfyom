@@ -151,8 +151,10 @@ function angleBetween(p: Vec2, a: Vec2, b: Vec2): number {
 /** The angle the element sweeps as seen from `p`. */
 function sweptAngle(e: Element, p: Vec2): number {
   if (e.kind === 'line') return angleBetween(p, e.a, e.b)
-  // pieces of at most a quarter turn: each sweeps its chord's angle, plus a full turn when `p`
-  // lies in the circular segment between the chord and the arc
+  // pieces of at most a quarter turn. Outside the circle each sweeps its chord's angle; inside,
+  // the direction to a point running along the circle turns one way only, so each sweeps its
+  // chord's angle taken the arc's way round, in (0, 2π) or (−2π, 0): a point on a chord (the
+  // chord's angle ±π by the sign of a zero) sees half a turn the arc's way
   const sweep = arcSweep(e)
   const pieces = Math.max(1, Math.ceil(Math.abs(sweep) / (Math.PI / 2)))
   const r = arcRadius(e)
@@ -161,12 +163,8 @@ function sweptAngle(e: Element, p: Vec2): number {
   let prev = e.a
   for (let k = 1; k <= pieces; k++) {
     const q = k === pieces ? e.b : elementPointAt(e, k / pieces).point
-    s += angleBetween(p, prev, q)
-    if (inCircle) {
-      const side = (q[0] - prev[0]) * (p[1] - prev[1]) - (q[1] - prev[1]) * (p[0] - prev[0])
-      // a counter-clockwise arc bulges to the right of its chord, a clockwise one to the left
-      if (sweep > 0 ? side < 0 : side > 0) s += sweep > 0 ? 2 * Math.PI : -2 * Math.PI
-    }
+    const c = angleBetween(p, prev, q)
+    s += !inCircle ? c : sweep > 0 ? (c > 0 ? c : c + 2 * Math.PI) : c < 0 ? c : c - 2 * Math.PI
     prev = q
   }
   return s

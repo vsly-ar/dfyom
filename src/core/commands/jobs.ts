@@ -13,6 +13,7 @@ import {
   fail,
   fromWire,
   Ok,
+  toDataWire,
   toWire,
   tryAsync,
   tryCatch,
@@ -284,7 +285,7 @@ function jobInfo(j: JobHandle): z.output<typeof JobInfoSchema> {
     state: j.state,
     ...(j.progress === undefined ? {} : { progress: j.progress }),
     startRevision: j.startRevision,
-    ...(outcome === undefined ? {} : { outcome: toWire(outcome) }),
+    ...(outcome === undefined ? {} : { outcome: toDataWire(outcome) }),
   }
 }
 

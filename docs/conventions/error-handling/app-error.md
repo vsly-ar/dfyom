@@ -42,4 +42,6 @@ Run mode added `machine.error`, `machine.alarm` and `run.*` ([run-v0.1.md](../..
 
 Implementation: `ResultWire`, `toWire`, `fromWire` in [`src/shared/result.ts`](../../../src/shared/result.ts) · tests: [`result.test.ts`](../../../src/shared/result.test.ts) (including the oxide cloning pitfall)
 
-Used for: IPC handlers (main ↔ renderer), worker messages, the agent API response, CLI `--json` output. `T` itself must be a DTO, not a model instance (see [migrations.md](migrations.md) for `toDTO()`).
+Used for: IPC handlers (main ↔ renderer), worker messages, the agent API response, CLI `--json` output.
+
+**No stack outside the app.** Data that leaves the app or is kept as data – agent and CLI results, job outcomes (`job.get`/`job.wait`), the action log, per-operation failures of `plan.toolpath.generate`, the evaluation status of `design.part.evaluate` – carries `AppError.toWireData()` / `toDataWire(result)`: `toJSON()` without `stack` at every level of `cause` (stacks hold install paths and are noise for a model). Logs, IPC to the renderer and worker messages keep the stack; a toolpath worker logs a failed generation whole, since the job keeps it only as data. `T` itself must be a DTO, not a model instance (see [migrations.md](migrations.md) for `toDTO()`).

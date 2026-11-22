@@ -416,8 +416,7 @@ export class AgentSession {
     if (bound.isNone()) return r
     const applied = await bound.unwrap().dispatch('project.apply', {}, this.source)
     if (applied.isErr()) {
-      const { stack: _stack, ...error } = applied.unwrapErr().toJSON()
-      return Ok({ ...r.unwrap(), applied: { error } })
+      return Ok({ ...r.unwrap(), applied: { error: applied.unwrapErr().toWireData() } })
     }
     return Ok({ ...r.unwrap(), applied: applied.unwrap().value as ApplyOutcome })
   }

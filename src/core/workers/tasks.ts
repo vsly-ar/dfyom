@@ -59,7 +59,16 @@ export const toolpathGenerate: WorkerTask<GeneratorRequest, Toolpath> = {
   input: GeneratorRequestSchema,
   output: ToolpathSchema,
   timeoutMs: 60_000,
-  run: (request, ctl) => generateRequest(request, ctl.steps, ctl.region2d),
+  run: (request, ctl) => {
+    const r = generateRequest(request, ctl.steps, ctl.region2d)
+    // the job keeps a failure as data (stack dropped, plan.toolpath.generate); the log keeps it
+    // whole, the one place it is reported
+    if (r.isErr() && r.unwrapErr().code !== 'op.aborted') {
+      const e = r.unwrapErr()
+      ctl.log[e.severity]({ err: e.toJSON() }, 'toolpath generation failed')
+    }
+    return r
+  },
 }
 
 const xyz = z.object({ x: z.number(), y: z.number(), z: z.number() })

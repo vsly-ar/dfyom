@@ -27,6 +27,7 @@ import {
 } from '../testing/fixtures'
 import { nodeCavalierWasm, nodeRegion2d } from '../testing/node-wasm'
 import { crossings, maxOffsetError } from '../testing/oracles'
+import { dropSpikes, isSliver } from '../regions'
 import { Ok } from '../../../../shared/result'
 import { loadCavalierSync } from './binding'
 import { createCavalierPort, loadRegion2d, loadRegion2dSync } from '.'
@@ -469,6 +470,17 @@ describe('measures', () => {
     expect(d.distance).toBeCloseTo(4, 12)
     expect(port.distance([], [0, 0])).toBeUndefined()
   })
+
+  it('contains points on the chord of an arc (exactly half a turn seen from there)', () => {
+    // fillets of r 4 centred at (6, 6) and of a keep-out notch: (8, 8) and (7, 9) lie exactly on
+    // their chords; the chord's angle was ±π by the sign of a zero (LLM test F3 coverage)
+    const r = norm(rect(0, 0, 10, 10, 4))
+    for (const p of [[8, 8] as Vec2, [7, 9] as Vec2, [6.5, 9.5] as Vec2])
+      expect(port.contains(r, p), `${p}`).toBe(true)
+    const notch = norm(rect(0, 0, 40, 20), hole(rect(-4, -4, 14, 14, 4)))
+    for (const p of [[8, 8] as Vec2, [7, 9] as Vec2, [6.5, 9.5] as Vec2])
+      expect(port.contains(notch, p), `${p}`).toBe(false)
+  })
 })
 
 describe('library failures', () => {
@@ -476,5 +488,37 @@ describe('library failures', () => {
     const r = norm(rect(0, 0, 50, 50, 5))
     for (let i = 0; i < 2000; i++) port.offset(r, 1).unwrap()
     expect(port.offset(r, 1).unwrap().pieces).toHaveLength(1)
+  })
+})
+
+// the library leaving one in an offset: toolpath/region-inset-fuzz.test.ts
+describe('zero-width spikes (LLM test F3)', () => {
+  it('drops a spike traced out and back, keeps a lobe', () => {
+    const spiky: Loop = {
+      elements: [
+        line([0, 0], [10, 0]),
+        line([10, 0], [10, 5]),
+        line([10, 5], [14, 5.00001]),
+        line([14, 5.00001], [10, 5]),
+        line([10, 5], [10, 10]),
+        line([10, 10], [0, 10]),
+        line([0, 10], [0, 0]),
+      ],
+    }
+    expect(dropSpikes(spiky).elements).toHaveLength(5)
+    expect(isSliver(spiky.elements.slice(2, 4))).toBe(true)
+    const lobe: Loop = {
+      elements: [
+        line([0, 0], [10, 0]),
+        line([10, 0], [10, 10]),
+        line([10, 10], [20, 10]),
+        line([20, 10], [20, 20]),
+        line([20, 20], [10, 20]),
+        line([10, 20], [10, 10]),
+        line([10, 10], [0, 10]),
+        line([0, 10], [0, 0]),
+      ],
+    }
+    expect(dropSpikes(lobe)).toBe(lobe)
   })
 })

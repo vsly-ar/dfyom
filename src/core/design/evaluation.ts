@@ -632,7 +632,7 @@ export function warningsWithEvaluation(
   return {
     warnings: mergeWarnings(parameter, geometry, ids),
     evaluation: state.status,
-    ...(state.error === undefined ? {} : { error: state.error.toJSON() }),
+    ...(state.error === undefined ? {} : { error: state.error.toWireData() }),
   }
 }
 

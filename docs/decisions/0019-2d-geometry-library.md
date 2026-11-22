@@ -59,6 +59,8 @@ Booleans (area error vs. the analytic area): CavalierContours is exact (≤ 2e-6
 
 Two CavalierContours defects reproduced in the JS port are **upstream 0.7.0 bugs fixed by 0.9.0**: a 0.7.0 WASM build gives the same 856 µm / 4 crossings on the outward neck and returns 140 garbage loops (0.2 mm error) on the 1500–2000 segment star where the JS port's debug assert throws. The touching-island defect remains in 0.9.0.
 
+Found later (v0.3, LLM black-box test F3): the **spike defect** of 0.9.0's offset. An element much shorter than the offset between near-tangent neighbours (a 1 µm closing line between two arcs, left by an inset whose ends were rounded to 0.1 µm) has a raw offset that runs backwards; the crate keeps it, as it lies at the offset distance within its epsilons, so the result loop runs out and back along a few µm (a zero-width spike). Offsets of such a loop compound into open result loops and holes outside their outer loop. The port cuts the spikes out ([shapes.md § Implementation (K1)](../architecture/shapes.md#implementation-k1)); fixture: [`region-inset-fuzz.test.ts`](../../src/core/toolpath/region-inset-fuzz.test.ts).
+
 ### Speed (median ms)
 
 Fixture: filleted star with n outer segments (half arcs) + 2 islands; "20 offsets" = 20 successive rings, stepover 0.4.
@@ -104,4 +106,5 @@ All three licences are compatible with GPL-3.0-or-later ([ADR 0014](0014-gpl-3-o
 ## Open questions
 
 - Report the touching-island defect upstream with the spike fixture.
+- Report the spike defect upstream (the enclosure inset fixture, reduced).
 - Ellipses and elliptical SVG arcs: biarc approximation on import (lane D), not in the 2D library.

@@ -213,7 +213,13 @@ export interface RingNode {
 
 /**
  * The ring tree: one root per piece of `roots` (the tool-centre region of the roughing), each
- * node's children the pieces of its own offset by `step`, until empty. `step()` per node.
+ * node's children the pieces of its own offset by `step`, until empty. `step()` per level.
+ *
+ * Offsets by discs compose exactly, so level k is computed as the offset of its root piece by
+ * k × `step` and each of its pieces hung under the piece of level k − 1 that holds it (a piece of
+ * a smaller offset lies in exactly one piece of a larger one). Offsetting each level's own result
+ * instead compounds the 2D library's epsilon-sized debris (tiny elements and kinks at near-tangent
+ * joins) over dozens of levels until an offset fails ("an open loop", LLM test F3).
  */
 export function ringTree(
   port: Region2dPort,
@@ -224,30 +230,68 @@ export function ringTree(
 ): AppResult<RingNode[]> {
   interface Draft {
     piece: RegionPiece
+    region: Region
     offset: number
     children: Draft[]
   }
-  const top: Draft[] = roots.pieces.map((piece) => ({ piece, offset: rootOffset, children: [] }))
-  const todo = [...top]
-  while (todo.length > 0) {
-    const s = steps.step()
-    if (s.isErr()) return Err(s.unwrapErr())
-    const d = todo.pop()!
-    const off = port.offset({ pieces: [d.piece] }, step)
-    if (off.isErr()) return Err(off.unwrapErr())
-    for (const piece of off.unwrap().pieces) {
-      const child: Draft = { piece, offset: d.offset + step, children: [] }
-      d.children.push(child)
-      todo.push(child)
+  const top: Draft[] = roots.pieces.map((piece) => ({
+    piece,
+    region: { pieces: [piece] },
+    offset: rootOffset,
+    children: [],
+  }))
+  for (const root of top) {
+    let level = [root]
+    for (let k = 1; level.length > 0; k++) {
+      const s = steps.step()
+      if (s.isErr()) return Err(s.unwrapErr())
+      const off = port.offset(root.region, k * step)
+      if (off.isErr()) return Err(off.unwrapErr())
+      const next: Draft[] = []
+      for (const piece of off.unwrap().pieces) {
+        const child: Draft = {
+          piece,
+          region: { pieces: [piece] },
+          offset: rootOffset + k * step,
+          children: [],
+        }
+        holder(port, level, piece).children.push(child)
+        next.push(child)
+      }
+      level = next
     }
   }
   const freeze = (d: Draft): RingNode => ({
     piece: d.piece,
-    region: { pieces: [d.piece] },
+    region: d.region,
     offset: d.offset,
     children: d.children.map(freeze),
   })
   return Ok(top.map(freeze))
+}
+
+/**
+ * The node of `level` whose piece holds `piece`: the one containing a point of its outer ring,
+ * else (a point on the boundary within the library's epsilons) the nearest.
+ */
+function holder<T extends { region: Region }>(
+  port: Region2dPort,
+  level: readonly T[],
+  piece: RegionPiece,
+): T {
+  if (level.length === 1) return level[0]!
+  const p = piece.outer.elements[0]!.a
+  let best = level[0]!
+  let bestDistance = Infinity
+  for (const n of level) {
+    const d = regionDistance(port, n.region, p)
+    if (d === 0) return n
+    if (d < bestDistance) {
+      best = n
+      bestDistance = d
+    }
+  }
+  return best
 }
 
 export function* walkTree(nodes: readonly RingNode[]): Generator<RingNode> {
