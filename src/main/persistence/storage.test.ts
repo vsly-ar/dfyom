@@ -451,7 +451,16 @@ describe('assets and references', () => {
       join(projectPaths(appData(), 'project-x').work, a.path),
     )
     expectErrCode(p.session.assetFile('assets/../project.json'), 'input.malformed')
-    expectErrCode(await p.session.importAsset(join(tmp.dir, 'missing.stl')), 'persist.io')
+    const missing = expectErrCode(
+      await p.session.importAsset(join(tmp.dir, 'missing.stl')),
+      'input.malformed',
+    )
+    expect(missing.issues[0]?.rule).toBe('unreadableFile')
+    const big = expectErrCode(
+      await p.session.importAsset(await stl('big.stl', 'solid big'), { maxBytes: 8 }),
+      'input.malformed',
+    )
+    expect(big.issues[0]).toMatchObject({ rule: 'tooLarge', params: { limit: 8, actual: 9 } })
     expect(await assetsIn()).toEqual([a.path.slice('assets/'.length)]) // no temp file left
   })
 

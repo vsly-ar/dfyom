@@ -24,7 +24,14 @@ import {
   type AppResult,
   type AsyncAppResult,
 } from '../../shared/result'
-import type { AnyWorkerTask, Lane, TaskControl, TransferView } from '../commands/jobs'
+import {
+  noFiles,
+  type AnyWorkerTask,
+  type FileSource,
+  type Lane,
+  type TaskControl,
+  type TransferView,
+} from '../commands/jobs'
 import { loadManifold } from '../geometry/manifold'
 import type { SolidKernel } from '../geometry/solid-port'
 import {
@@ -44,6 +51,8 @@ export interface WorkerLoopOptions {
   readonly now?: () => number
   /** Min interval between progress messages of a run (default 50 ms; the final tick always goes). */
   readonly progressIntervalMs?: number
+  /** File access of tasks (default: none); the Node host passes `node:fs` streams. */
+  readonly files?: FileSource
 }
 
 const WHERE = 'workerLoop'
@@ -142,6 +151,7 @@ export function runWorkerLoop(endpoint: Endpoint, opts: WorkerLoopOptions): { lo
       }),
       log: taskLog,
       solids,
+      files: opts.files ?? noFiles,
     }
     let result: AppResult<unknown>
     if (task === undefined)

@@ -5,6 +5,7 @@ import type { AppError } from '../../shared/errors/app-error'
 import type { ErrorCode } from '../../shared/errors/codes'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
 import { createDispatcher, type Dispatcher } from '../commands/dispatcher'
+import type { Services } from '../commands/context'
 import { inProcessWorkers } from '../commands/jobs'
 import { createAppRegistry } from '../commands/registry'
 import { fakeClock, fakeIds, uiSource } from '../commands/testing'
@@ -43,7 +44,13 @@ export interface DesignSetup {
 }
 
 export async function designSetup(
-  opts: { units?: UnitSystem; thickness?: string } = {},
+  opts: {
+    units?: UnitSystem
+    thickness?: string
+    /** Library stock values instead of the test block. */
+    stock?: object
+    services?: Partial<Services>
+  } = {},
 ): Promise<DesignSetup> {
   const library = expectOk(await Library.open(createMemoryLibraryStorage()))
   const d = createDispatcher({
@@ -51,10 +58,12 @@ export async function designSetup(
     doc: newProjectDoc({ name: 'Bracket', unitSystem: opts.units ?? 'mm' }),
     ids: fakeIds(),
     clock: fakeClock(Date.UTC(2026, 10, 17, 10)),
-    services: { workers: inProcessWorkers, library },
+    services: { workers: inProcessWorkers, library, ...opts.services },
   })
   const run = async (name: string, args: object) => expectOk(await d.dispatch(name, args, ui)).value
-  const stock = (await run('library.stock.add', { values: testStock(opts.thickness) })) as {
+  const stock = (await run('library.stock.add', {
+    values: opts.stock ?? testStock(opts.thickness),
+  })) as {
     id: string
   }
   const { partId } = (await run('design.part.add', {

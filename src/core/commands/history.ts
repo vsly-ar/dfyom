@@ -42,17 +42,18 @@ export interface DocumentRun<R> {
  * stray throw → `internal.unexpected`) of either drops the draft: no partial patches. Args must
  * already be parsed.
  */
-export function executeDocumentCommand<S extends z.ZodType, R>(
+export function executeDocumentCommand<S extends z.ZodType, R, P = unknown>(
   doc: ProjectDoc,
-  def: DocumentCommand<S, R>,
+  def: DocumentCommand<S, R, P>,
   args: z.output<S>,
   ctx: CommandContext,
   hooks: readonly DocumentHook[] = [],
+  prepared?: P,
 ): DocumentRun<R> {
   const draft = immer.createDraft(doc)
   const ran = tryCatch(
     () => {
-      const r = def.run(draft, args, ctx)
+      const r = def.run(draft, args, ctx, prepared as P)
       if (r.isErr()) return r
       for (const hook of hooks) {
         const h = hook.after(draft, { name: def.name, args }, ctx)

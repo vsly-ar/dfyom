@@ -56,22 +56,22 @@ STL has no units. On import, the guess picks the unit whose placed bounding box 
 
 All are `document` commands (undoable, one gesture = one command; names per [commands.md § Naming](../architecture/commands.md#naming)). They have **no deferred work**, so they are instant reactions in [apply.md](../architecture/apply.md#instant-and-deferred-reactions) terms and never make the Apply button count up. MCP tools and CLI calls come from the command layer as usual ([llm-api.md § Names](../architecture/llm-api.md#names)).
 
-| Command / query                 | Args                                                                                         | Result                                         |
-| ------------------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| `design.reference.import`       | `{ partId, path, name?, sourceUnit?, fit? }` – `path` is a local file the main process reads | `{ referenceId, sourceUnit, guess, warnings }` |
-| `design.reference.update`       | `{ partId, referenceId, name?, sourceUnit?, scale?, rotation?, position? }`                  | `{ warnings }`                                 |
-| `design.reference.rotate90`     | `{ partId, referenceId, axis: 'x' \| 'y' \| 'z', turns: -1 \| 1 \| 2 }`                      | `{ warnings }`                                 |
-| `design.reference.fit`          | `{ partId, referenceId, anchor, z: 'top' \| 'centre' \| 'bottom' }` – see below              | `{ warnings }`                                 |
-| `design.reference.remove`       | `{ partId, referenceId }`                                                                    | `{}`                                           |
-| `design.reference.list` (query) | `{ partId }`                                                                                 | references with placed bounds in part units    |
+| Command / query                 | Args                                                                                                                                                                                    | Result                                                                        |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `design.reference.import`       | `{ partId, path, name?, sourceUnit?, fit? }` – `path` is an absolute local file the main process reads                                                                                  | `{ referenceId, sourceUnit, guess: { unit, reason }, warnings }`              |
+| `design.reference.update`       | `{ partId, referenceId, name?, sourceUnit?, scale?, rotation?, position?, turn?, fit? }` – `turn: { axis: 'x' \| 'y' \| 'z', turns: -1 \| 1 \| 2 }`, `fit: { anchor?, z? }` (see below) | `{ warnings }`                                                                |
+| `design.reference.remove`       | `{ partId, referenceId }`                                                                                                                                                               | `{}`                                                                          |
+| `design.reference.list` (query) | `{ partId }`                                                                                                                                                                            | the records plus `placed` (bounding box in the part frame, mm) and `warnings` |
 
-- `import` parses in the compute worker ([workers.md](../architecture/workers.md)), stores the asset ([§ Storage](#storage)) and adds the record in one command. With `fit` it also fits (default `{ anchor: 'centre', z: 'top' }`, the usual case: the model's top at the stock top, centred).
-- Errors: an unreadable or unparsable file is `input.malformed` (issue names the byte offset or line); a mesh over the limits ([§ Performance](#performance)) is refused with the same code and the limit in its params. Error handling per [error-handling](../conventions/error-handling/README.md).
-- Warnings (never errors): `reference.exceedsStock` (placed bounds outside the stock, with the overhang per axis), `reference.unitGuessed` (once, after import), `reference.openMesh` (the STL is not watertight; display only, so this is information).
+- `import` copies the file into the project ([§ Storage](#storage)), parses it in the compute worker ([workers.md](../architecture/workers.md#file-access)) and adds the record in one command (its [`prepare` step](../architecture/commands.md#prepared-input) does the copy and parse; undo removes only the record). It always fits (default `{ anchor: { u: 'centre', v: 'centre' }, z: 'top' }`, the usual case: the model's top at the stock top, centred); `name` defaults to the file name without extension.
+- **One update command for every placement edit (task R2):** the 90° buttons and "Fit to stock" are `update` with `turn` or `fit` (titles "Rotate reference", "Fit reference to stock"), not separate `rotate90` / `fit` commands as first sketched: the same behaviour with two fewer agent tools, which keeps `tools/list` within its [budget](../architecture/llm-api.md#implementation-task-310). Order inside one call: the fields, then `turn`, then `fit` (so "scale ×3 and fit" is one step); `fit` together with `position` is refused (rule `fitWithPosition`).
+- Field values are quantities as entered; `position` may use formulas on stock faces (`stock.top.z - 10`), never on operation results (a reference is placed on the stock). Scale must be > 0 (`model.invariant`, rule `positive`); tolerances are dropped.
+- Errors: a relative path (rule `absolutePath`), a path that is not a readable file (`unreadableFile`), or an unparsable file is `input.malformed` (the issue names the byte offset or line); a mesh over the limits ([§ Performance](#performance)) is refused with the same code, rule `tooLarge` and the limit in its params. Nothing is recorded then. Error handling per [error-handling](../conventions/error-handling/README.md).
+- Warnings (never errors; `{ code, severity, message, referenceId, params }`, values in mm): `reference.exceedsStock` (placed bounds outside the stock, with the overhang per axis, both sides added; every command and the list), `reference.unitGuessed` (after an import without `sourceUnit`, with the reason), `reference.openMesh` (the STL is not closed; display only, so `info`), `reference.manyTriangles` (over the warn limit; import only).
 
 ### Fit to stock
 
-`design.reference.fit` computes `position` so the reference's placed bounding box sits on the stock: `anchor` is the [9-point placement anchor](design-v0.2.md#placement-anchors) (XY: the matching point of both rectangles coincide), `z` aligns the box's top, centre or bottom with the stock's. It is one undoable write of `position`; nothing is kept live. Scale is never changed by a fit.
+`fit` (of `import` or `update`) computes `position` so the reference's placed bounding box sits on the stock: `anchor` is the [9-point placement anchor](design-v0.2.md#placement-anchors) `{ u, v }` (on the top face `u` is X and `v` is Y; each `min`, `centre` or `max`, default centre; XY: the matching point of both rectangles coincide), `z` aligns the box's top, centre or bottom with the stock's (default top). It is one undoable write of `position`; nothing is kept live. Scale is never changed by a fit. The written position is a literal in the project's units, rounded to 0.0001 mm (0.00001 in).
 
 ## Storage
 
@@ -87,7 +87,43 @@ The original file bytes are stored with the project as a content-addressed **ass
 ## Performance
 
 - Parse in the worker, never on the main or renderer thread. Binary STL target: 1 M triangles parsed in under 1 s on the reference machine.
-- Limits (first guess, to measure in task R2): refuse over 5 M triangles or 512 MB; warn over 1 M triangles (the viewport may get slow). Decimation is later.
+- **Limits (measured in task R2, `STL_LIMITS` in `src/core/design/stl.ts`):** refuse over **5 M triangles** or **512 MB** (the file is refused before it is copied; ASCII is refused while counting); warn over **1 M triangles** (`reference.manyTriangles`: the viewport may get slow; R3 measures the viewport side). Decimation is later. The byte limit equals the per-asset archive guard, so a stored reference never makes a project unopenable ([persistence.md](../architecture/persistence.md#assets-and-references-v02)).
+- **Measured** (`npm run perf`, `stl.perf.ts`, Apple M1 Pro, 2026-11-21; the parse itself, chunks of 1 MB as the worker reads them):
+
+  | File                                                    | Size    | Parse    | Parser memory                                           |
+  | ------------------------------------------------------- | ------- | -------- | ------------------------------------------------------- |
+  | Real enclosure base (binary, 49 806 triangles, fixture) | 2.4 MB  | 13–20 ms | ~1–2 MB heap (constant state; the 1 MB chunk dominates) |
+  | Binary, 1 M triangles                                   | 47.7 MB | 61 ms    | constant                                                |
+  | Binary, 5 M triangles (the limit)                       | 238 MB  | 0.29 s   | constant                                                |
+  | ASCII, 1 M triangles                                    | 122 MB  | 1.3 s    | constant                                                |
+
+  The parser keeps only a summary (count, bounds, closed check), never the mesh, so memory does not grow with the file; the copy into the project streams too. ASCII is ~20× slower than binary per triangle; at the byte limit an ASCII file holds ~4 M triangles (~5 s). Import holds the project queue while it parses ([prepared input](../architecture/commands.md#prepared-input)), so these times are the command's latency.
+
+## STL parser (task R2)
+
+`createStlParser(size)` in `src/core/design/stl.ts` (pure, streamed: `push(chunk)` then `finish()`), run by the worker task `reference.parseStl`:
+
+- **Detection:** binary if the size is exactly `84 + 50 × count` (count at byte 80), else ASCII if the file starts with `solid`, else refused (`stlFormat`; a binary size mismatch without `solid` is `stlTruncated`). The size test comes first because many binary files start with "solid" too; the user's enclosure file starts with "MESH-MESH-…".
+- **Binary:** records split across chunks are reassembled; a NaN or infinite coordinate is `stlValue` with its byte offset; a short file is `stlTruncated`.
+- **ASCII:** tokens `solid` (rest of the line is the name), `facet normal n n n` (normals ignored, some exporters write `nan`), `outer loop`, exactly three `vertex x y z`, `endloop`, `endfacet`, `endsolid`; several solids in one file are accepted; it must end after `endsolid`. Errors are `stlSyntax` with the line; a line over 4096 characters is refused (a binary file mistaken for text). Values are read as float32, like binary.
+- **Empty** (no triangles or no bytes) is `emptyMesh`. All issues have path `['path']`, so they point at the import's file argument.
+- **Closed check** (`reference.openMesh`): constant memory, one pass. Every directed edge a→b of a closed, consistently oriented mesh has its twin b→a, so the sum of `f(a,b) − f(b,a)` over all edges, with a non-symmetric hash `f` of the vertices' float32 bit patterns (−0 = 0), is exactly 0; two independent 32-bit sums make a false "closed" ~2⁻⁶⁴ likely. A closed mesh with flipped triangles counts as open (fine for information).
+
+## Placement math (task R2)
+
+`src/core/design/reference.ts`, canonical units (mm, degrees):
+
+- The rotation matrix is `Rz · Ry · Rx` (x first, about the fixed part axes); multiples of 90° use exact 0/±1, so quarter turns never drift. `turn` adds `90° × turns` exactly (rational) and keeps the angle within ±360°.
+- The **placed bounding box** is the axis-aligned box of the 8 corners of the source bounds, times `scale × (1 mm or 25.4 mm)`, rotated; its min corner is `position`. Exact for 90° steps; for free angles it is larger than the mesh's own box, because the mesh is never re-read. R3's renderer must use the same box to turn `position` into its matrix.
+- The unit guess compares **sorted** extents ("fits within the stock" regardless of how the model lies in the file), and the reasons read "Read as inch: 2 × 1.5 × 0.5 in mm would be 50× smaller than the stock" or "Read as mm: … mm".
+- `exceedsStock` ignores overhangs under 0.001 mm (fitted positions are rounded).
+
+## Testing (task R2)
+
+- `stl.test.ts`: binary and ASCII (incl. every chunking), the closed check (open, flipped, −0), the real enclosure fixture (`src/core/design/__fixtures__/enclosure-wood-base.stl`), the evaluated test part written as binary and ASCII STL (closed), malformed files with offsets/lines, limits.
+- `reference.test.ts`: unit guess, exact quarter turns, extents, fit, `exceedsStock`.
+- `reference-commands.test.ts`: the commands through a dispatcher with an in-memory session and in-process worker (import incl. the enclosure end to end, undo/redo, update/turn/fit, remove, list, refused input leaves no record).
+- `cli.test.ts`: the bundled CLI imports the enclosure STL into a saved project (real worker thread, real asset copy), and a reopen lists the record with its asset.
 
 ## Later
 

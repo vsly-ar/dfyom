@@ -5,6 +5,7 @@ import type { AnyWorkerTask } from '../../core/commands/jobs'
 import type { Endpoint } from '../../core/workers/protocol'
 import { runWorkerLoop } from '../../core/workers/worker-loop'
 import { serializeErr } from '../../shared/logging'
+import { nodeFiles } from './files'
 
 function parentEndpoint(): Endpoint {
   const port = parentPort
@@ -21,7 +22,7 @@ function parentEndpoint(): Endpoint {
  * `error` and the worker keeps running (docs/conventions/logging.md).
  */
 export function serveWorker(tasks: readonly AnyWorkerTask[]): void {
-  const loop = runWorkerLoop(parentEndpoint(), { tasks })
+  const loop = runWorkerLoop(parentEndpoint(), { tasks, files: nodeFiles })
   process.on('uncaughtException', (err) =>
     loop.log().error({ err: serializeErr(err), scope: 'workers' }, 'uncaught exception in worker'),
   )

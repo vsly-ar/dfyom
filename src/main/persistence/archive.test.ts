@@ -233,15 +233,22 @@ describe('assets (streamed)', () => {
     }
   })
 
-  it('counts the zip-bomb guard while inflating assets', async () => {
+  it('counts the assets zip-bomb guards (per asset, all assets) while inflating', async () => {
     const a = await asset(new Uint8Array(4 * CHUNK_BYTES))
     const built = await buildArchive(files(), info, [a])
     expect(built.bytes.length).toBeLessThan(CHUNK_BYTES)
-    const e = expectErrCode(
-      await readArchive(built.bytes, { maxBytes: 2 * CHUNK_BYTES }),
+    const one = expectErrCode(
+      await readArchive(built.bytes, { maxAssetBytes: 2 * CHUNK_BYTES }),
       'input.malformed',
     )
-    expect(e.message).toMatch(/too large/)
+    expect(one.message).toMatch(/asset is too large/)
+    const all = expectErrCode(
+      await readArchive(built.bytes, { maxAssetsBytes: 2 * CHUNK_BYTES }),
+      'input.malformed',
+    )
+    expect(all.message).toMatch(/assets are too large/)
+    // assets do not count toward the documents' guard
+    expectOk(await readArchive(built.bytes, { maxBytes: 2 * CHUNK_BYTES }))
   })
 
   it('a record naming an asset the archive lacks does not load', async () => {

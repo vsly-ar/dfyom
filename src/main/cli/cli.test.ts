@@ -2,10 +2,13 @@
 // exit codes, tools, and stdout holding only results (no log lines).
 // Spec: docs/architecture/llm-api.md#testing (CLI), #cli
 import { spawn } from 'node:child_process'
-import { existsSync, readdirSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { unzipSync } from 'fflate'
 import { afterAll, describe, expect, inject, it } from 'vitest'
 import { testStock } from '../../core/design/design.fixture'
+import { ENCLOSURE_STL } from '../../core/design/stl.testing'
 import { tempDir } from '../host/host.fixture'
 import { INITIALIZE, INITIALIZED, spawnCli, toolCall } from './cli.fixture'
 
@@ -45,6 +48,7 @@ async function ok(args: readonly string[]): Promise<unknown> {
 }
 
 const file = join(t.dir, 'cli.dfyom')
+const ENCLOSURE = fileURLToPath(ENCLOSURE_STL)
 
 describe('dfyom CLI', { timeout: 60_000 }, () => {
   let stock = ''
@@ -136,6 +140,48 @@ describe('dfyom CLI', { timeout: 60_000 }, () => {
       retryable: true,
     })
     expect(await get()).toBe('Kept')
+  })
+
+  it('imports an STL reference (the real enclosure file), saves and reopens it', async () => {
+    const big = { ...testStock(), length: '300', width: '200', thickness: '50' }
+    const bigStock = (
+      (await ok(['library.stock.add', JSON.stringify({ values: big })])) as {
+        id: string
+      }
+    ).id
+    const refFile = join(t.dir, 'reference.dfyom')
+    const lines = [
+      { name: 'design.part.add', args: { name: 'Base', stockLibraryItemId: bigStock } },
+    ].map((l) => JSON.stringify(l))
+    const first = await cli(['batch', '--new', 'Ref', '--save-as', refFile], lines.join('\n'))
+    expect(first.code, first.stderr).toBe(0)
+    const pid = (JSON.parse(first.stdout) as { value: { partId: string } }).value.partId
+    // a separate invocation: import into the saved project, saved on change
+    const imported = (await ok([
+      'design.reference.import',
+      JSON.stringify({ partId: pid, path: ENCLOSURE }),
+      '--project',
+      refFile,
+    ])) as { referenceId: string; sourceUnit: string; warnings: { code: string }[] }
+    expect(imported.sourceUnit).toBe('mm')
+    expect(imported.warnings.map((w) => w.code)).toEqual(['reference.unitGuessed'])
+    // reopened from the file: the record and its asset came back
+    const listed = (await ok([
+      'design.reference.list',
+      JSON.stringify({ partId: pid }),
+      '--project',
+      refFile,
+    ])) as {
+      references: { id: string; asset: { triangles: number }; placed: { max: { z: number } } }[]
+    }
+    expect(listed.references).toHaveLength(1)
+    expect(listed.references[0]).toMatchObject({
+      id: imported.referenceId,
+      asset: { triangles: 49_806 },
+    })
+    expect(listed.references[0]!.placed.max.z).toBeCloseTo(0, 3)
+    const entries = unzipSync(readFileSync(refFile))
+    expect(Object.keys(entries).filter((n) => n.startsWith('assets/'))).toHaveLength(1)
   })
 
   it('exit codes: usage and input 2, permission 4', async () => {

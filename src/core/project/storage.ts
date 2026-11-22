@@ -59,9 +59,11 @@ export interface ProjectSession {
   /**
    * Copies a local file into the working folder's `assets/` (hashed while copying, atomic);
    * the same content is stored once. Records then name the returned path
-   * (docs/architecture/persistence.md#assets-and-references-v02).
+   * (docs/architecture/persistence.md#assets-and-references-v02). A source that is not a
+   * readable regular file, or is larger than `maxBytes`, is `input.malformed` (rules
+   * `unreadableFile`, `tooLarge`) and nothing is stored.
    */
-  importAsset(source: string): AsyncAppResult<AssetRef>
+  importAsset(source: string, opts?: { readonly maxBytes?: number }): AsyncAppResult<AssetRef>
   /** Absolute path of a stored asset (`assets/<sha256>.stl`), e.g. for the parser to read. */
   assetFile(path: string): AppResult<string>
   /** The dispatcher's undo/redo stacks: save keeps the assets their entries name. */
