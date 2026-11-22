@@ -1,0 +1,29 @@
+/* The chamfer inspector's section and its field targets, as the hole inspector's (U2).
+   Doc: docs/conventions/ui.md#chamfer-inspector */
+.section {
+  /* a grid item: never wider than the inspector (the drawing follows its width) */
+  min-width: 0;
+  overflow: hidden;
+  padding: var(--space-1) 0;
+  border-radius: var(--radius-sm);
+  background: var(--bg-field);
+}
+
+/* read-only (an owned chamfer): desaturated at reduced opacity, as read-only Field illustrations */
+.section[data-readonly] {
+  filter: saturate(0);
+  opacity: 0.7;
+}
+
+.target {
+  display: grid;
+  min-width: 0;
+}
+
+/* hovering the section's part highlights its field's label: a `--vp-hover` tint behind it (the
+   token as text colour is too faint on the light theme) */
+.target[data-hovered] label {
+  background: var(--vp-hover);
+  border-radius: var(--radius-sm);
+  transition: background var(--motion-fast);
+}

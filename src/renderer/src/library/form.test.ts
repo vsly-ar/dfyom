@@ -86,6 +86,33 @@ describe('library forms', () => {
     expect(toolName(d)).toBe('Ball 3')
   })
 
+  it.each(['mm', 'inch'] as const)(
+    'a chamfer mill (U4): 90° default, slant flute length, named "Chamfer 90° Ø12" (%s)',
+    (units) => {
+      const d = defaultToolValues(units, 'chamfer')
+      expect(d.type).toBe('chamferMill')
+      expect(d.angle?.source).toBe('90')
+      // Ø12 × 90°: slant 8.49 mm → 8.5 mm; Ø1/2" → 0.354" → 0.375"
+      expect(d.fluteLength.source).toBe(units === 'mm' ? '8.5' : '0.375')
+      expect(toolName(d)).toBe(units === 'mm' ? 'Chamfer 90° Ø12' : 'Chamfer 90° Ø1/2')
+      const input = commandInput(d, { units, autoName: true })
+      valid('tool', input)
+      expect(input.values).toMatchObject({ angle: '90' })
+      expect(input.values).not.toHaveProperty('pointAngle')
+      expect(input.values).not.toHaveProperty('tipDiameter')
+      // prefilled from a chamfer's generalized tool: its angle and diameter
+      const p = defaultToolValues(units, 'chamfer', {
+        type: 'chamferMill',
+        diameter: qdto('length', '6', units),
+        angle: qdto('angle', '60', units),
+      })
+      expect(toolName(p)).toBe('Chamfer 60° Ø6')
+      expect(
+        cleanValues(withToolType(defaultToolValues(units), 'drill', units)).values,
+      ).not.toHaveProperty('angle')
+    },
+  )
+
   it('needs all three acceleration axes or none', () => {
     const m = defaultMachineValues('mm')
     const partial = { ...m, acceleration: { x: qdto('scalar', '500', 'mm') } }

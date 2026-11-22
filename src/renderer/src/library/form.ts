@@ -87,35 +87,64 @@ export interface ToolPrefill {
   readonly type: ToolType
   readonly diameter: QDto<'length'>
   readonly cornerRadius?: QDto<'length'> | undefined
+  /** A chamfer mill's included angle (v0.4 U4). */
+  readonly angle?: QDto<'angle'> | undefined
 }
 
 /**
- * Typical small router tool (library.md#tool): carbide, 2 flutes; a drill for a drilling. The name
- * is empty: the form suggests one (`toolName`) until the user types one.
+ * Typical small router tool (library.md#tool): carbide, 2 flutes; a drill for a drilling; a 90°
+ * chamfer mill Ø 12 mm / ½″ for a chamfer, whose flute length covers its cone's slant. The name is
+ * empty: the form suggests one (`toolName`) until the user types one.
  */
 export function defaultToolValues(
   units: UnitSystem,
   kind?: OperationKind,
   prefill?: ToolPrefill,
 ): ToolDraft {
-  const drill = (prefill?.type ?? (kind === 'drilling' ? 'drill' : 'flatEndMill')) === 'drill'
+  const type: ToolType =
+    prefill?.type ??
+    (kind === 'drilling' ? 'drill' : kind === 'chamfer' ? 'chamferMill' : 'flatEndMill')
+  const drill = type === 'drill'
+  const chamfer = type === 'chamferMill'
   const mm = units === 'mm'
   const [d, re, lcf, oal] = mm
-    ? ['6', '1', drill ? '30' : '20', drill ? '66' : '50']
-    : ['1/4', '1/32', drill ? '1' : '3/4', drill ? '2 1/2' : '2']
+    ? [chamfer ? '12' : '6', '1', drill ? '30' : '20', drill ? '66' : '50']
+    : [chamfer ? '1/2' : '1/4', '1/32', drill ? '1' : '3/4', drill ? '2 1/2' : '2']
+  const diameter = prefill?.diameter ?? qdto('length', d, units)
+  const angle = prefill?.angle ?? qdto('angle', '90', units)
   return {
     kind: 'tool',
     name: '',
-    type: prefill?.type ?? (drill ? 'drill' : 'flatEndMill'),
-    diameter: prefill?.diameter ?? qdto('length', d, units),
+    type,
+    diameter,
     cornerRadius: prefill?.cornerRadius ?? qdto('length', re, units),
-    fluteLength: qdto('length', lcf, units),
+    fluteLength: chamfer ? slantLength(diameter, angle, units) : qdto('length', lcf, units),
     overallLength: qdto('length', oal, units),
     fluteCount: qdto('scalar', '2', units),
     pointAngle: qdto('angle', '118', units),
+    angle,
     toolMaterial: 'carbide',
     presets: [],
   }
+}
+
+/**
+ * A pointed chamfer mill's cutting edge (the cone's slant from tip to DC, design-v0.4.md
+ * Implementation C1), rounded up to 0.5 mm or 1/16″ so a chamfer the tool can plunge also fits.
+ */
+export function slantLength(
+  diameter: QuantityDTO,
+  angle: QuantityDTO,
+  units: UnitSystem,
+): QDto<'length'> {
+  const d = quantityOf(diameter)?.canonical ?? 12
+  const a = quantityOf(angle)?.canonical ?? 90
+  const mm = d / 2 / Math.sin(((a / 2) * Math.PI) / 180)
+  const source =
+    units === 'mm'
+      ? String(Math.ceil(mm * 2 - 1e-9) / 2)
+      : String(Math.ceil((mm / 25.4) * 16 - 1e-9) / 16)
+  return qdto('length', source, units)
 }
 
 /** A hobby router with a trim router (dial spindle), lowest rigidity; gCode units follow `units`. */
@@ -164,19 +193,31 @@ export function defaultValues(kind: LibraryItemKind, units: UnitSystem): DraftVa
       : defaultStockValues(units)
 }
 
-/** The suggested name: short type and diameter as entered ("Flat 6", "Drill 1/4"). */
-export function toolName(v: Pick<ToolDraft, 'type' | 'diameter'>): string {
-  return `${libraryMessages.tool.shortTypes[v.type]} ${v.diameter.source.trim()}`
+/**
+ * The suggested name: short type and diameter as entered ("Flat 6", "Drill 1/4"); a chamfer mill
+ * with its angle ("Chamfer 90° Ø12", ui.md § Chamfer mill in the Library window).
+ */
+export function toolName(v: Pick<ToolDraft, 'type' | 'diameter' | 'angle'>): string {
+  const short = libraryMessages.tool.shortTypes[v.type]
+  const d = v.diameter.source.trim()
+  if (v.type !== 'chamferMill') return `${short} ${d}`
+  const a = v.angle === undefined ? undefined : quantityOf(v.angle)?.canonical
+  return a === undefined ? `${short} Ø${d}` : `${short} ${Number(a.toFixed(2))}° Ø${d}`
 }
 
 /** The tool with another type; a bull nose, drill or chamfer mill gets its RE / SIG / angle if none. */
 export function withToolType(v: ToolDraft, type: ToolType, units: UnitSystem): ToolDraft {
+  const angle = v.angle ?? qdto('angle', '90', units)
   return {
     ...v,
     type,
+    // becoming a chamfer mill: the flute length is its cutting edge, the cone's slant (U4)
+    ...(type === 'chamferMill' && v.type !== 'chamferMill'
+      ? { fluteLength: slantLength(v.diameter, angle, units) }
+      : {}),
     cornerRadius: v.cornerRadius ?? qdto('length', units === 'mm' ? '1' : '1/32', units),
     pointAngle: v.pointAngle ?? qdto('angle', '118', units),
-    angle: v.angle ?? qdto('angle', '90', units),
+    angle,
   }
 }
 
