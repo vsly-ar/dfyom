@@ -2,7 +2,9 @@ import { realpathSync } from 'node:fs'
 import { mkdir, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { z } from 'zod'
 import { renameProject } from '../../core/commands/commands.fixture'
+import { defineCommand } from '../../core/commands/define'
 import { createDispatcher } from '../../core/commands/dispatcher'
 import { inProcessWorkers } from '../../core/commands/jobs'
 import { createRegistry } from '../../core/commands/registry'
@@ -16,9 +18,13 @@ import {
   type OpenedProject,
   type OpenOutcome,
 } from '../../core/project/storage'
+import type { ReferenceDTO } from '../../core/design/reference.dto'
+import type { QuantityKind } from '../../core/quantity/units'
 import { noopLogger } from '../../shared/logging'
+import { Ok } from '../../shared/result'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
-import { buildArchive, loadArchive, sha256 } from './archive'
+import { sha256 } from './archive'
+import { buildArchive, loadArchiveBytes as loadArchive } from './archive.testing'
 import { nodeFs } from './fs'
 import { faultFs, useTempDir } from './fs.testing'
 import { LOCK_HEARTBEAT_MS, LOCK_STALE_MS, type LockOwner } from './lock'
@@ -52,7 +58,7 @@ function storage(owner = A, over: Partial<StorageOptions> = {}) {
 }
 
 async function projectFile(revision = 4): Promise<Uint8Array> {
-  const a = buildArchive(expectOk(docToFiles(v1)), {
+  const a = await buildArchive(expectOk(docToFiles(v1)), {
     projectId: 'project-x',
     appVersion: '0.0.1',
     savedAt: '2026-11-16T09:00:00.000Z',
@@ -130,7 +136,7 @@ describe('open', () => {
   })
 
   it('refuses a newer schema version and never touches the file', async () => {
-    const newer = buildArchive(expectOk(docToFiles(v1)), {
+    const newer = await buildArchive(expectOk(docToFiles(v1)), {
       projectId: 'p',
       appVersion: '9',
       savedAt: '2026-11-16T09:00:00.000Z',
@@ -212,7 +218,7 @@ describe('edit, flush and save', () => {
       warnings: string[]
     }
     expect(out).toMatchObject({ revision: 5, warnings: [] })
-    const saved = expectOk(loadArchive(await readFile(file())))
+    const saved = expectOk(await loadArchive(await readFile(file())))
     expect(saved.doc.name).toBe('Version 2')
     expect(saved.manifest.revision).toBe(5)
     expect(p.session.dirty).toBe(false)
@@ -238,7 +244,7 @@ describe('edit, flush and save', () => {
     const target = join(realpathSync(tmp.dir), 'docs', 'new.dfyom')
     expectOk(await d.dispatch('project.save', { target }, uiSource()))
     expect(p.session.filePath).toBe(target)
-    expect(expectOk(loadArchive(await readFile(target))).doc.name).toBe('New')
+    expect(expectOk(await loadArchive(await readFile(target))).doc.name).toBe('New')
   })
 
   it('Save As refuses targets that are not .dfyom files', async () => {
@@ -254,16 +260,20 @@ describe('edit, flush and save', () => {
     await projectFile()
     const p = opened(expectOk(await storage().open(file())))
     const other = join(tmp.dir, 'docs', 'other.dfyom')
-    const otherBytes = buildArchive(
-      expectOk(docToFiles(newProjectDoc({ name: 'Other', unitSystem: 'mm' }))),
-      { projectId: 'project-o', appVersion: '0', savedAt: '2026-11-15T08:00:00.000Z', revision: 9 },
+    const otherBytes = (
+      await buildArchive(expectOk(docToFiles(newProjectDoc({ name: 'Other', unitSystem: 'mm' }))), {
+        projectId: 'project-o',
+        appVersion: '0',
+        savedAt: '2026-11-15T08:00:00.000Z',
+        revision: 9,
+      })
     ).bytes
     await writeFile(other, otherBytes)
     const e = expectErrCode(await p.session.save(p.doc, { target: other }), 'input.malformed')
     expect(e.issues[0]?.path).toEqual(['confirm'])
     expect(new Uint8Array(await readFile(other))).toEqual(otherBytes)
     expectOk(await p.session.save(p.doc, { target: other, confirm: true }))
-    expect(expectOk(loadArchive(await readFile(other))).doc).toEqual(v1)
+    expect(expectOk(await loadArchive(await readFile(other))).doc).toEqual(v1)
     const saves = await readdir(projectPaths(appData(), 'project-x').saves)
     expect(saves).toContain('2026-11-15T08-00-00.000Z-r9.dfyom')
   })
@@ -287,7 +297,7 @@ describe('edit, flush and save', () => {
 
   it('a failing save step leaves the project file untouched and the project dirty', async () => {
     const before = await projectFile(4)
-    for (const op of ['writeFile', 'fsync', 'readFile', 'rename'] as const) {
+    for (const op of ['writeFile', 'appendFile', 'fsync', 'readRange', 'rename'] as const) {
       let armed = false
       const fs = faultFs((o, path) =>
         armed && o === op && path.includes('.tmp-') ? 'fail' : undefined,
@@ -323,7 +333,7 @@ describe('edit, flush and save', () => {
       await d.dispatch('project.save', {}, uiSource())
       const crashed = fs.crashed
       // The project file is the old or the new version, never broken.
-      const now = expectOk(loadArchive(await readFile(file())))
+      const now = expectOk(await loadArchive(await readFile(file())))
       expect(['Version 1', 'Version 2']).toContain(now.doc.name)
       // "Restart": a new instance; the dead one's lock is stale.
       const s2 = storage(B, {
@@ -348,6 +358,231 @@ describe('edit, flush and save', () => {
       if (!crashed) break
     }
   }, 60_000)
+})
+
+describe('assets and references', () => {
+  const q = (kind: QuantityKind, unit: 'mm' | 'deg' | '1', value = '0') => ({
+    kind,
+    source: value,
+    defaultUnit: unit,
+    exact: { num: value, den: '1' },
+  })
+  const reference = (id: string, path: string, sha: string) =>
+    ({
+      id,
+      partId: 'part-1',
+      name: 'Bracket',
+      asset: {
+        path,
+        sha256: sha,
+        format: 'stl',
+        triangles: 12,
+        bounds: { min: { x: 0, y: 0, z: 0 }, max: { x: 10, y: 10, z: 5 } },
+      },
+      sourceUnit: 'mm',
+      scale: q('scalar', '1', '1'),
+      rotation: { x: q('angle', 'deg'), y: q('angle', 'deg'), z: q('angle', 'deg') },
+      position: { x: q('length', 'mm'), y: q('length', 'mm'), z: q('length', 'mm') },
+    }) as ReferenceDTO
+  /** Stand-in for R2's `design.reference.import`/`remove`: records only, assets via the session. */
+  const addReference = defineCommand({
+    kind: 'document',
+    name: 'design.testReference.add',
+    summary: 'Add a reference record (test).',
+    title: () => 'Add reference',
+    machine: false,
+    args: z.object({ id: z.string(), path: z.string(), sha256: z.string() }),
+    result: z.object({}),
+    run(draft, a) {
+      draft.references[a.id] = reference(a.id, a.path, a.sha256)
+      return Ok({})
+    },
+  })
+  const removeReference = defineCommand({
+    kind: 'document',
+    name: 'design.testReference.remove',
+    summary: 'Remove a reference record (test).',
+    title: () => 'Remove reference',
+    machine: false,
+    args: z.object({ id: z.string() }),
+    result: z.object({}),
+    run(draft, a) {
+      delete draft.references[a.id]
+      return Ok({})
+    },
+  })
+  const runWithRefs = (p: OpenedProject) => {
+    const d = createDispatcher({
+      registry: expectOk(
+        createRegistry({ commands: [renameProject, projectSave, addReference, removeReference] }),
+      ),
+      doc: p.doc,
+      revision: p.revision,
+      services: { workers: inProcessWorkers, project: p.session },
+    })
+    attachSession(d, p.session)
+    return d
+  }
+  const stl = async (name: string, text: string) => {
+    const path = join(tmp.dir, name)
+    await writeFile(path, text)
+    return path
+  }
+  const assetsIn = async (key = 'project-x') => {
+    const dir = join(projectPaths(appData(), key).work, 'assets')
+    return readdir(dir).catch(() => [] as string[])
+  }
+  const entriesOf = async (path: string) =>
+    expectOk(await loadArchive(await readFile(path))).manifest.files.map((f) => f.path)
+
+  it('imports a file into work/assets once per content, hashed while copying', async () => {
+    await projectFile()
+    const p = opened(expectOk(await storage().open(file())))
+    const a = expectOk(await p.session.importAsset(await stl('a.stl', 'solid a')))
+    expect(a).toEqual({
+      path: `assets/${sha256(new TextEncoder().encode('solid a'))}.stl`,
+      sha256: sha256(new TextEncoder().encode('solid a')),
+      size: 7,
+    })
+    const again = expectOk(await p.session.importAsset(await stl('copy.stl', 'solid a')))
+    expect(again).toEqual(a)
+    expect(await assetsIn()).toEqual([a.path.slice('assets/'.length)])
+    expect(expectOk(p.session.assetFile(a.path))).toBe(
+      join(projectPaths(appData(), 'project-x').work, a.path),
+    )
+    expectErrCode(p.session.assetFile('assets/../project.json'), 'input.malformed')
+    expectErrCode(await p.session.importAsset(join(tmp.dir, 'missing.stl')), 'persist.io')
+    expect(await assetsIn()).toEqual([a.path.slice('assets/'.length)]) // no temp file left
+  })
+
+  it('save stores referenced assets; reopen unpacks them with the record', async () => {
+    await projectFile()
+    const s = storage()
+    const p = opened(expectOk(await s.open(file())))
+    const d = runWithRefs(p)
+    const a = expectOk(await p.session.importAsset(await stl('a.stl', 'solid a')))
+    const unused = expectOk(await p.session.importAsset(await stl('b.stl', 'solid b')))
+    expectOk(
+      await d.dispatch(
+        'design.testReference.add',
+        { id: 'ref-1', path: a.path, sha256: a.sha256 },
+        uiSource(),
+      ),
+    )
+    expectOk(await d.dispatch('project.save', {}, uiSource()))
+    // Only what a record (or the history) names goes into the archive.
+    expect(await entriesOf(file())).toEqual(['project.json', 'references/ref-1.json', a.path])
+    expectOk(await s.close(p.session.key))
+
+    const again = opened(expectOk(await storage().open(file())))
+    expect(again.doc.references['ref-1']?.asset.path).toBe(a.path)
+    expect(await assetsIn()).toEqual([a.path.slice('assets/'.length)])
+    expect(await readFile(expectOk(again.session.assetFile(a.path)), 'utf8')).toBe('solid a')
+    expect(unused.path).not.toBe(a.path)
+  })
+
+  it('an undone import keeps its asset through save (redo works), reopen drops it', async () => {
+    await projectFile()
+    const s = storage()
+    const p = opened(expectOk(await s.open(file())))
+    const d = runWithRefs(p)
+    const a = expectOk(await p.session.importAsset(await stl('a.stl', 'solid a')))
+    expectOk(
+      await d.dispatch(
+        'design.testReference.add',
+        { id: 'ref-1', path: a.path, sha256: a.sha256 },
+        uiSource(),
+      ),
+    )
+    expectOk(await d.dispatch('history.undo', {}, uiSource()))
+    expectOk(await d.dispatch('project.save', {}, uiSource()))
+    expect(await entriesOf(file())).toEqual(['project.json', a.path])
+    expect(await assetsIn()).toEqual([a.path.slice('assets/'.length)]) // file stays for redo
+    expectOk(await d.dispatch('history.redo', {}, uiSource()))
+    expect(d.doc.references['ref-1']?.asset.path).toBe(a.path)
+    expectOk(await d.dispatch('history.undo', {}, uiSource()))
+    expectOk(await d.dispatch('project.save', {}, uiSource()))
+    expectOk(await s.close(p.session.key))
+
+    opened(expectOk(await storage().open(file())))
+    expect(await assetsIn()).toEqual([]) // empty history: nothing references it
+  })
+
+  it('restore deletes assets no record references (the undo history starts empty)', async () => {
+    await projectFile()
+    const p = opened(expectOk(await storage(A).open(file())))
+    const d = runWithRefs(p)
+    const a = expectOk(await p.session.importAsset(await stl('a.stl', 'solid a')))
+    const b = expectOk(await p.session.importAsset(await stl('b.stl', 'solid b')))
+    expectOk(
+      await d.dispatch(
+        'design.testReference.add',
+        { id: 'ref-1', path: a.path, sha256: a.sha256 },
+        uiSource(),
+      ),
+    )
+    expectOk(
+      await d.dispatch(
+        'design.testReference.add',
+        { id: 'ref-2', path: b.path, sha256: b.sha256 },
+        uiSource(),
+      ),
+    )
+    expectOk(await d.dispatch('design.testReference.remove', { id: 'ref-2' }, uiSource()))
+    expectOk(await p.session.flush())
+    // The instance dies; a restart restores the working folder.
+    const s2 = storage(B, {
+      isPidAlive: (pid) => pid !== 100,
+      clock: fakeClock(T0 + LOCK_HEARTBEAT_MS + 1),
+    })
+    const r = expectOk(await resolveRecovery(s2, { key: 'project-x', action: 'restore' }))
+    expect(Object.keys(r?.doc.references ?? {})).toEqual(['ref-1'])
+    expect(await assetsIn()).toEqual([a.path.slice('assets/'.length)])
+  })
+
+  it('a referenced asset missing from work/ fails the save; the project file is untouched', async () => {
+    const before = await projectFile()
+    const p = opened(expectOk(await storage().open(file())))
+    const d = runWithRefs(p)
+    const a = expectOk(await p.session.importAsset(await stl('a.stl', 'solid a')))
+    expectOk(
+      await d.dispatch(
+        'design.testReference.add',
+        { id: 'ref-1', path: a.path, sha256: a.sha256 },
+        uiSource(),
+      ),
+    )
+    await rm(expectOk(p.session.assetFile(a.path)))
+    expectErrCode(await d.dispatch('project.save', {}, uiSource()), 'persist.io')
+    expect(new Uint8Array(await readFile(file()))).toEqual(before)
+    expect(await readdir(join(tmp.dir, 'docs'))).toEqual(['bracket.dfyom'])
+  })
+
+  it('a damaged asset in work/ fails verification (persist.verify)', async () => {
+    const before = await projectFile()
+    const p = opened(expectOk(await storage().open(file())))
+    const d = runWithRefs(p)
+    const a = expectOk(await p.session.importAsset(await stl('a.stl', 'solid a')))
+    expectOk(
+      await d.dispatch(
+        'design.testReference.add',
+        { id: 'ref-1', path: a.path, sha256: a.sha256 },
+        uiSource(),
+      ),
+    )
+    await writeFile(expectOk(p.session.assetFile(a.path)), 'solid X')
+    expectErrCode(await d.dispatch('project.save', {}, uiSource()), 'persist.verify')
+    expect(new Uint8Array(await readFile(file()))).toEqual(before)
+  })
+
+  it('a v0.1 project (no references, no assets) opens unchanged and saves without assets/', async () => {
+    await projectFile()
+    const p = opened(expectOk(await storage().open(file())))
+    expect(p.doc.references).toEqual({})
+    expect(await readdir(projectPaths(appData(), 'project-x').work)).toEqual(['project.json'])
+    expectOk(await p.session.save(p.doc))
+    expect(await entriesOf(file())).toEqual(['project.json'])
+  })
 })
 
 describe('crash recovery', () => {

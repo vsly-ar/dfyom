@@ -11,7 +11,14 @@ describe('runCommand', () => {
   it('runs a document command without a dispatcher and returns patches', () => {
     const r = runCommand(doc, renameProject, { name: 'Plate' })
     expect(expectOk(r.result)).toEqual({ name: 'Plate' })
-    expect(r.next).toEqual({ name: 'Plate', unitSystem: 'mm', parts: {}, snapshots: {}, plans: {} })
+    expect(r.next).toEqual({
+      name: 'Plate',
+      unitSystem: 'mm',
+      parts: {},
+      snapshots: {},
+      plans: {},
+      references: {},
+    })
     expect(r.patches).toEqual([{ op: 'replace', path: ['name'], value: 'Plate' }])
     expect(r.inversePatches).toEqual([{ op: 'replace', path: ['name'], value: 'Bracket' }])
     expect(doc.name).toBe('Bracket')

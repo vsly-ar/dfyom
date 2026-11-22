@@ -3,9 +3,15 @@
  * Doc: docs/architecture/persistence.md
  */
 import { randomUUID } from 'node:crypto'
-import { resolve, sep } from 'node:path'
+import { join, resolve, sep } from 'node:path'
 import type { Patch } from 'immer'
-import type { Clock } from '../../core/commands/context'
+import type { Clock, HistoryView } from '../../core/commands/context'
+import {
+  ASSET_DIR,
+  historyAssets,
+  referencedAssets,
+  type AssetRef,
+} from '../../core/project/assets'
 import type { ProjectDoc } from '../../core/project/document'
 import { docToFiles, PROJECT_SCHEMA_VERSION, type FileMap } from '../../core/project/layout'
 import type {
@@ -19,10 +25,11 @@ import type {
   SaveOutcome,
 } from '../../core/project/storage'
 import { isProjectFileName, isProjectKey } from '../../core/project/storage'
-import type { AppError } from '../../shared/errors/app-error'
+import { AppError } from '../../shared/errors/app-error'
 import type { Logger } from '../../shared/logging'
 import { Err, fail, Ok, tryAsync, type AppResult, type AsyncAppResult } from '../../shared/result'
-import { loadArchive, readArchive, sha256, type LoadedArchive } from './archive'
+import { loadArchive, readArchive, type ArchiveAsset, type LoadedArchive } from './archive'
+import { assetFileIn, importAssetFile, removeUnreferencedAssets } from './assets'
 import { canonicalPath, nodeFs, samePath, type PersistFs } from './fs'
 import {
   acquireLock,
@@ -136,13 +143,8 @@ class MainProjectStorage implements ProjectStorage {
     )
     if (canonical.isErr()) return Err(canonical.unwrapErr().withContext(where, { file: filePath }))
     const path = canonical.unwrap()
-    const bytes = await tryAsync(
-      () => this.fs.readFile(path),
-      'persist.io',
-      'reading the project file failed',
-    )
-    if (bytes.isErr()) return Err(bytes.unwrapErr().withContext(where, { file: path }))
-    const loaded = loadArchive(bytes.unwrap())
+    // Step 1: stream and verify the whole archive (assets only hashed); nothing is written yet.
+    const loaded = await loadArchive(this.fs, path)
     if (loaded.isErr()) return Err(loaded.unwrapErr().withContext(where, { file: path }))
     const archive = loaded.unwrap()
     const found = await this.folderFor(archive.manifest.projectId, path)
@@ -155,14 +157,7 @@ class MainProjectStorage implements ProjectStorage {
       await lock.unwrap().release()
       return Ok({ kind: 'recoverable', recoverable: recoverable(paths.key, state) })
     }
-    const opened = await this.openArchive(
-      paths,
-      path,
-      archive,
-      sha256(bytes.unwrap()),
-      lock.unwrap(),
-      state,
-    )
+    const opened = await this.openArchive(paths, path, archive, lock.unwrap(), state)
     return opened.map((project) => ({ kind: 'opened', project }) as const)
   }
 
@@ -208,11 +203,11 @@ class MainProjectStorage implements ProjectStorage {
     paths: ProjectPaths,
     filePath: string,
     archive: LoadedArchive,
-    sha: string,
     lock: Lock,
     prior: ProjectState | undefined,
   ): AsyncAppResult<OpenedProject> {
     const { manifest } = archive
+    const sha = archive.sha256
     const revision =
       prior === undefined
         ? manifest.revision
@@ -226,13 +221,41 @@ class MainProjectStorage implements ProjectStorage {
       savedRevision: manifest.revision,
       savedSha256: sha,
     }
-    const opened = await this.start(paths, archive.files, state, archive.doc, lock)
+    const opened = await this.start(paths, archive.files, state, archive.doc, lock, {
+      fill: this.assetFill(filePath, archive),
+    })
     if (opened.isOk())
       this.log.info(
         { project: manifest.projectId, key: paths.key, rev: revision },
         'project opened',
       )
     return opened
+  }
+
+  /**
+   * Unpack step for the assets of a verified archive: streams it a second time and writes only
+   * the assets a record references (open starts with an empty undo history, so the others are
+   * unreferenced and dropped). The archive must still be the one verified (same sha256).
+   * `undefined` when there is nothing to extract (e.g. every v0.1 project): one pass only.
+   */
+  private assetFill(
+    filePath: string,
+    archive: LoadedArchive,
+  ): ((fresh: string) => Promise<void>) | undefined {
+    const keep = referencedAssets(archive.doc)
+    if (!archive.manifest.files.some((f) => keep.has(f.path))) return undefined
+    return async (fresh) => {
+      const r = await readArchive(this.fs, filePath, {
+        extract: { dir: fresh, want: (p) => keep.has(p) },
+      })
+      if (r.isErr()) throw r.unwrapErr()
+      if (r.unwrap().sha256 !== archive.sha256)
+        throw new AppError('input.malformed', 'the project file changed while opening', {
+          where: 'storage.unpackAssets',
+          data: { file: filePath },
+        })
+      await this.fs.fsyncDir(join(fresh, ASSET_DIR))
+    }
   }
 
   /** With the lock held: unpacks `files` into `work/` (unless restoring it), starts the session. */
@@ -242,10 +265,13 @@ class MainProjectStorage implements ProjectStorage {
     state: ProjectState,
     doc: ProjectDoc,
     lock: Lock,
-    unpackFirst = true,
+    opts: {
+      readonly unpack?: boolean
+      readonly fill?: ((fresh: string) => Promise<void>) | undefined
+    } = {},
   ): AsyncAppResult<OpenedProject> {
-    if (unpackFirst) {
-      const unpacked = await unpack(this.fs, paths, files, state)
+    if (opts.unpack !== false) {
+      const unpacked = await unpack(this.fs, paths, files, state, opts.fill)
       if (unpacked.isErr()) {
         await lock.release()
         return Err(unpacked.unwrapErr())
@@ -299,9 +325,11 @@ class MainProjectStorage implements ProjectStorage {
       const work = await loadWork(this.fs, paths)
       if (work.isErr()) return abort(work.unwrapErr())
       const { doc, files } = work.unwrap()
+      // The undo history starts empty: assets only an undone or redone entry named go.
+      await removeUnreferencedAssets(this.fs, paths.work, referencedAssets(doc), this.log)
       // Commits after the last flush were lost with their revisions: start above them.
       const restored = { ...s, workingRevision: s.workingRevision + 1 }
-      const opened = await this.start(paths, files, restored, doc, lock, false)
+      const opened = await this.start(paths, files, restored, doc, lock, { unpack: false })
       if (opened.isOk())
         this.log.info(
           { project: s.projectId, key, rev: restored.workingRevision },
@@ -326,22 +354,9 @@ class MainProjectStorage implements ProjectStorage {
       this.log.info({ project: s.projectId, key }, 'unsaved changes discarded')
       return Ok(undefined)
     }
-    const bytes = await tryAsync(
-      () => this.fs.readFile(s.filePath as string),
-      'persist.io',
-      'reading the project file failed',
-    )
-    if (bytes.isErr()) return abort(bytes.unwrapErr())
-    const archive = loadArchive(bytes.unwrap())
+    const archive = await loadArchive(this.fs, s.filePath)
     if (archive.isErr()) return abort(archive.unwrapErr())
-    const opened = await this.openArchive(
-      paths,
-      s.filePath,
-      archive.unwrap(),
-      sha256(bytes.unwrap()),
-      lock,
-      s,
-    )
+    const opened = await this.openArchive(paths, s.filePath, archive.unwrap(), lock, s)
     if (opened.isOk()) this.log.info({ project: s.projectId, key }, 'unsaved changes discarded')
     return opened
   }
@@ -393,6 +408,7 @@ class MainSession implements ProjectSession {
   private readonly wf: WorkingFolder
   private revision: number
   private historyChecked = false
+  private history: (() => HistoryView) | undefined
 
   constructor(
     private readonly storage: MainProjectStorage,
@@ -439,6 +455,34 @@ class MainSession implements ProjectSession {
     return this.wf.flush()
   }
 
+  importAsset(source: string): AsyncAppResult<AssetRef> {
+    const { fs, log } = this.storage.deps
+    return importAssetFile(fs, this.paths.work, source).then((r) => {
+      if (r.isOk())
+        log.info(
+          { project: this.projectId, asset: r.unwrap().path, size: r.unwrap().size },
+          'asset imported',
+        )
+      return r
+    })
+  }
+
+  assetFile(path: string): AppResult<string> {
+    return assetFileIn(this.paths.work, path)
+  }
+
+  useHistory(history: () => HistoryView): void {
+    this.history = history
+  }
+
+  /** Assets a save stores: named by a record or by an undo/redo entry (redo after reopen). */
+  private savedAssets(doc: ProjectDoc): ArchiveAsset[] {
+    const keep = referencedAssets(doc)
+    const h = this.history?.()
+    if (h !== undefined) historyAssets(h, keep)
+    return [...keep].map((path) => ({ path, source: join(this.paths.work, path) }))
+  }
+
   async save(doc: ProjectDoc, opts: SaveOptions = {}): AsyncAppResult<SaveOutcome> {
     const { fs, clock, log, o } = this.storage.deps
     const where = 'project.save'
@@ -475,6 +519,7 @@ class MainSession implements ProjectSession {
       fs,
       target: file,
       files: files.unwrap(),
+      assets: this.savedAssets(doc),
       info: { projectId: this.projectId, appVersion: o.appVersion, savedAt, revision },
       log,
     })
@@ -505,7 +550,7 @@ class MainSession implements ProjectSession {
         project: this.projectId,
         rev: revision,
         ms: clock.now() - started,
-        size: archive.bytes.length,
+        size: archive.size,
       },
       'project saved',
     )
@@ -547,9 +592,7 @@ class MainSession implements ProjectSession {
         data: { target: file },
         issues: [{ path: ['confirm'], rule: 'confirmOverwrite', message: 'set confirm: true' }],
       })
-    const bytes = await tryAsync(() => fs.readFile(file), 'persist.io', 'reading the target failed')
-    if (bytes.isErr()) return Err(bytes.unwrapErr())
-    const read = readArchive(bytes.unwrap())
+    const read = await readArchive(fs, file)
     if (read.isErr())
       return fail('input.malformed', 'refusing to replace a file that is not a DFYOM project', {
         data: { target: file },
@@ -569,13 +612,7 @@ class MainSession implements ProjectSession {
     const { fs } = this.storage.deps
     const exists = await tryAsync(() => fs.stat(file), 'persist.io', 'stat failed')
     if (exists.isErr() || exists.unwrap() === undefined) return exists.map(() => undefined)
-    const bytes = await tryAsync(
-      () => fs.readFile(file),
-      'persist.io',
-      'reading the project file failed',
-    )
-    if (bytes.isErr()) return Err(bytes.unwrapErr())
-    const read: AppResult<{ manifest: LoadedArchive['manifest'] }> = readArchive(bytes.unwrap())
+    const read = await readArchive(fs, file)
     // A file that is not a valid archive is not ours to keep; the save still replaces it.
     if (read.isErr()) return Ok(undefined)
     const added = await addToHistory({

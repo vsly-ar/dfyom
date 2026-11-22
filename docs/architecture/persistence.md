@@ -1,6 +1,6 @@
 # Persistence: project archive and working folder
 
-Status: implemented ([assets and references](#assets-and-references-v02): accepted, v0.2 task R1) · Decision: [ADR 0006](../decisions/0006-project-archive-with-working-folder.md) · State: [commands.md](commands.md#project-state) · Loading: [migrations.md](../conventions/error-handling/migrations.md)
+Status: implemented (incl. [assets and references](#assets-and-references-v02), v0.2 task R1) · Decision: [ADR 0006](../decisions/0006-project-archive-with-working-folder.md) · State: [commands.md](commands.md#project-state) · Loading: [migrations.md](../conventions/error-handling/migrations.md)
 
 The project file is a zip archive; the main process unpacks it into a **working folder**, keeps that folder current after every commit, and builds, verifies and atomically swaps a new archive on save.
 
@@ -34,7 +34,7 @@ The archive holds no undo history and no action log in v0.1.
 - The stock/tool/machine **library is global app data**, not part of a project: sketched as `<appData>/library/`; format and location are defined in task 1.7 (library models doc, [plan](../plans/v0.1.md)).
 - `manifest.json`: `{ format: 'dfyom-project', schemaVersion, projectId, appVersion, savedAt, revision, files: [{ path, size, sha256 }] }`. It is the archive's single `schemaVersion` for all its documents.
 - Zip entries: JSON is deflated; files that are already compressed (images, recordings) are stored.
-- Zip library: **fflate** (MIT, so GPL-3.0-or-later compatible; pure JS, no native build). v0.1 archives hold only JSON, so they are built and read in memory (512 MB uncompressed limit as a zip-bomb guard); v0.2 streams them ([assets](#assets-and-references-v02)).
+- Zip library: **fflate** (MIT, so GPL-3.0-or-later compatible; pure JS, no native build), streaming API: archives are written and read in 1 MB chunks, never held in memory (512 MB uncompressed limit as a zip-bomb guard, counted while inflating; [assets](#assets-and-references-v02), since task R1).
 
 ### Working-folder layout
 
@@ -69,12 +69,20 @@ Accepted with [reference-model.md](../modes/reference-model.md#storage) (D18, 20
 - **Unreferenced assets:** undoing an import removes the record, not the file, so redo works. Save writes only assets referenced by a record **or** by an entry of the session's undo or redo history; open (and restore) deletes files in `work/assets/` that no record references, since the undo history starts empty.
 - **No `schemaVersion` bump** (pre-alpha rule, [Schema version](#schema-version-pre-alpha)): a project without references has no `references/` and no `assets/`, so v0.1 projects open unchanged.
 
+Implementation (task R1):
+
+- **Records:** `ReferenceDtoSchema` in `src/core/design/reference.dto.ts` is the [data model](../modes/reference-model.md#data-model) as a shape; R2's commands write it. Asset name rules and the scans for referenced assets are in `src/core/project/assets.ts`. A scan collects every string matching the asset path pattern in the records (or in an undo/redo entry's patches), so it can keep too much, never too little.
+- **Session port:** `ProjectSession.importAsset(source)` copies a file into `work/assets/` (streamed into `assets/import-<random>.tmp`, hashed on the way, fsynced, renamed to its hash name; the same content again replaces the identical file) and returns `{ path, sha256, size }`; `assetFile(path)` gives the absolute file for the parser; `useHistory` (called by `attachSession`) lets save see the undo/redo stacks.
+- **Streaming I/O:** `PersistFs.readRange` and `appendFile` (one call per chunk, so `faultFs` can fail any of them). Inflate input is pushed in 64 KB slices, so one push can expand to at most ~64 MB before the size guard and the asset writes catch up. Documents (small JSON) are collected in memory for the load pipeline; assets never are.
+- **Open:** step 1 streams the whole archive and verifies it, hashing assets without writing them. The unpack (step 4) streams the archive a second time and writes only the assets a record references, checking that the file's sha256 is still the one verified. A project without referenced assets (every v0.1 project) is read once.
+- **Restore** deletes files in `work/assets/` that no record references (incl. leftover import temp files) before the session starts; a failure there is logged, not returned. A referenced asset missing from `work/` fails the save (`persist.io`); a damaged one fails its verification (`persist.verify`, hash ≠ name).
+
 ## Open
 
-1. Read and verify the archive in memory (zip-slip, manifest, entry set, sizes, hashes, load pipeline); nothing is written yet, so a bad file changes nothing.
+1. Read and verify the archive, streamed (zip-slip, manifest, entry set, sizes, hashes incl. assets, load pipeline); nothing is written yet, so a bad file changes nothing.
 2. Resolve the file's canonical path (`realpath`: symlinks and `..` resolved; compared case-folded on macOS and Windows, whose volumes are case-insensitive by default), so one file always maps to one folder and lock. Resolve the project folder: the one whose `state.json` names this file, else the first free `<id>`, `<id>~2`, …; an unreadable folder is skipped, never reused. Take the [lock](#lock) or fail with `persist.locked`.
 3. If `state.json` says `dirty: true` → release the lock and return **recovery** ([below](#crash-recovery)) instead of opening.
-4. Otherwise unpack into a new folder, swap it in as `work/`, then write `state.json`. Zip-slip: entry names must be relative forward-slash paths without `.`/`..`/empty segments or drive letters, and every write is checked to stay inside `work/`.
+4. Otherwise unpack into a new folder (assets streamed from the archive again, only those a record references: [assets](#assets-and-references-v02)), swap it in as `work/`, then write `state.json`. Zip-slip: entry names must be relative forward-slash paths without `.`/`..`/empty segments or drive letters, and every write is checked to stay inside `work/`.
 5. Each document went through the load pipeline in step 1 ([migrations.md](../conventions/error-handling/migrations.md#rules-once-data-is-preserved)): `parseWith` → `Model.create`.
 6. Start the dispatcher with an empty undo history at `revision` (`DispatcherOptions.revision`): the manifest's revision for a new folder; otherwise `max(manifest revision, previous working revision) + 1`, so revisions of discarded changes are never reused for other content. `attachSession` feeds its commits to the working folder.
 
@@ -91,7 +99,7 @@ There is no other autosave: the project file changes only on an explicit save.
 `project.save` is an `effect` command: it holds the project queue, so it sees one stable revision ([commands.md](commands.md#concurrency)).
 
 1. Flush the working folder.
-2. Build `<target>.tmp-<random>` **in the target's directory** (same volume, so the rename is atomic); write `manifest.json` last; fsync.
+2. Stream `<target>.tmp-<random>` **in the target's directory** (same volume, so the rename is atomic): documents, the assets a record or an undo/redo entry names, `manifest.json` last; fsync.
 3. **Verify**: reopen the temp archive, check the entry set, sizes and hashes against the manifest, and load every document through the load pipeline.
 4. Rename the temp archive over the target (Windows: retry briefly on `EPERM`/`EBUSY`); fsync the directory on POSIX. Leftover `<target>.tmp-<8 hex>` files of a crashed save are then deleted.
 5. Copy the new archive into `saves/` (copy-on-write clone where supported) and apply the retention limits. The first save of a session also adds the file being replaced (if it is a valid archive whose hash is not in `saves/` yet) – before step 2, since the rename replaces it.
@@ -147,21 +155,23 @@ Codes are in [`ERROR_CODES`](../../src/shared/errors/codes.ts). Frames carry the
 
 `src/core` stays headless: it defines the port and the pure parts; the filesystem lives in `src/main`.
 
-| File                                     | Contents                                                                                                                                                                                                  |
-| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/core/project/storage.ts`            | `ProjectStorage` port (`create`, `open`, `recover`, `listRecoverable`, `close`); per-project `ProjectSession` (`changed`, `flush`, `save`) = `ctx.services.project`; recovery operations; `attachSession` |
-| `src/core/project/commands.ts`           | `project.save` effect command (`target` = Save As)                                                                                                                                                        |
-| `src/core/project/layout.ts`             | `ProjectDoc` ↔ file map (`{ path: json }`), manifest Zod schema, project `MigrationPlan`, load pipeline                                                                                                   |
-| `src/main/persistence/paths.ts`          | `<appData>` resolution (injected; Electron or `--data-dir`), project folder paths                                                                                                                         |
-| `src/main/persistence/fs.ts`             | `PersistFs` port over `node:fs` (incl. `lstat`, non-recursive `unlink`), atomic write, rename retry; tests wrap it with `faultFs` (`fs.testing.ts`)                                                       |
-| `src/main/persistence/export-file.ts`    | `ExportFiles` port for `plan.export`: Save As protocol in the user's folder (random temp file, rename, `lstat`, symlinks resolved), replace only with `confirm` ([grbl.md](grbl.md#plan-export-command))  |
-| `src/main/persistence/storage.ts`        | `createProjectStorage`: the `ProjectStorage` implementation and sessions (open/create/recover/close, save sequence)                                                                                       |
-| `src/main/persistence/archive.ts`        | Streaming zip read/write, hashing, zip-slip check                                                                                                                                                         |
-| `src/main/persistence/working-folder.ts` | Atomic file writes, debounced flush, `state.json`                                                                                                                                                         |
-| `src/main/persistence/save.ts`           | Save/verify/replace sequence                                                                                                                                                                              |
-| `src/main/persistence/lock.ts`           | Lock, heartbeat, stale detection                                                                                                                                                                          |
-| `src/main/persistence/recovery.ts`       | Recoverable-project scan, restore, discard                                                                                                                                                                |
-| `src/main/persistence/retention.ts`      | Save-history limits                                                                                                                                                                                       |
+| File                                     | Contents                                                                                                                                                                                                                                            |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/core/project/storage.ts`            | `ProjectStorage` port (`create`, `open`, `recover`, `listRecoverable`, `close`); per-project `ProjectSession` (`changed`, `flush`, `save`, `importAsset`, `assetFile`, `useHistory`) = `ctx.services.project`; recovery operations; `attachSession` |
+| `src/core/project/commands.ts`           | `project.save` effect command (`target` = Save As)                                                                                                                                                                                                  |
+| `src/core/project/layout.ts`             | `ProjectDoc` ↔ file map (`{ path: json }`), manifest Zod schema, project `MigrationPlan`, load pipeline                                                                                                                                             |
+| `src/main/persistence/paths.ts`          | `<appData>` resolution (injected; Electron or `--data-dir`), project folder paths                                                                                                                                                                   |
+| `src/main/persistence/fs.ts`             | `PersistFs` port over `node:fs` (incl. `lstat`, non-recursive `unlink`, chunked `readRange`/`appendFile`), atomic write, rename retry; tests wrap it with `faultFs` (`fs.testing.ts`)                                                               |
+| `src/main/persistence/export-file.ts`    | `ExportFiles` port for `plan.export`: Save As protocol in the user's folder (random temp file, rename, `lstat`, symlinks resolved), replace only with `confirm` ([grbl.md](grbl.md#plan-export-command))                                            |
+| `src/main/persistence/storage.ts`        | `createProjectStorage`: the `ProjectStorage` implementation and sessions (open/create/recover/close, save sequence)                                                                                                                                 |
+| `src/main/persistence/archive.ts`        | Streaming zip read/write, hashing, zip-slip check; tests build archives in memory with `archive.testing.ts`                                                                                                                                         |
+| `src/main/persistence/assets.ts`         | Asset import into `work/assets/`, cleanup of unreferenced assets                                                                                                                                                                                    |
+| `src/core/project/assets.ts`             | Asset name rules (`assets/<sha256>.stl`), referenced-asset scans of records and undo history                                                                                                                                                        |
+| `src/main/persistence/working-folder.ts` | Atomic file writes, debounced flush, `state.json`                                                                                                                                                                                                   |
+| `src/main/persistence/save.ts`           | Save/verify/replace sequence                                                                                                                                                                                                                        |
+| `src/main/persistence/lock.ts`           | Lock, heartbeat, stale detection                                                                                                                                                                                                                    |
+| `src/main/persistence/recovery.ts`       | Recoverable-project scan, restore, discard                                                                                                                                                                                                          |
+| `src/main/persistence/retention.ts`      | Save-history limits                                                                                                                                                                                                                                 |
 
 `src/main/persistence/` does not import Electron (the caller passes `userData` to `paths.ts`), so the CLI and headless instances reuse it. Tests use a temp directory and inject failures through `faultFs` – `fail` (one call throws) and `crash` (that call and every later one throws, so no cleanup runs, like a killed process) – at every step of save, flush and unpack, plus a corrupting write for verification, to prove the previous file survives.
 

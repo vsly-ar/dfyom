@@ -6,6 +6,7 @@
  */
 import { constants } from 'node:fs'
 import {
+  appendFile,
   copyFile,
   link,
   lstat,
@@ -25,6 +26,10 @@ import { tryAsync, type AsyncAppResult } from '../../shared/result'
 
 export interface PersistFs {
   readFile(path: string): Promise<Uint8Array>
+  /** Up to `length` bytes from `offset`; shorter (or empty) at the end of the file. Streaming. */
+  readRange(path: string, offset: number, length: number): Promise<Uint8Array>
+  /** Appends to a file, creating it if needed. Streaming writes. */
+  appendFile(path: string, data: Uint8Array): Promise<void>
   /** `exclusive`: fail with EEXIST if the file exists (`wx`). */
   writeFile(path: string, data: Uint8Array | string, opts?: { exclusive?: boolean }): Promise<void>
   fsync(path: string): Promise<void>
@@ -64,8 +69,26 @@ async function fsyncPath(path: string, flags: 'r' | 'r+'): Promise<void> {
   }
 }
 
+async function readRange(path: string, offset: number, length: number): Promise<Uint8Array> {
+  const h = await open(path, 'r')
+  try {
+    const buf = new Uint8Array(length)
+    let got = 0
+    while (got < length) {
+      const { bytesRead } = await h.read(buf, got, length - got, offset + got)
+      if (bytesRead === 0) break
+      got += bytesRead
+    }
+    return got === length ? buf : buf.subarray(0, got)
+  } finally {
+    await h.close()
+  }
+}
+
 export const nodeFs: PersistFs = {
   readFile: (p) => readFile(p),
+  readRange,
+  appendFile: (p, data) => appendFile(p, data),
   writeFile: (p, data, opts) => writeFile(p, data, { flag: opts?.exclusive === true ? 'wx' : 'w' }),
   fsync: (p) => fsyncPath(p, 'r+'),
   fsyncDir: async (p) => {

@@ -56,6 +56,8 @@ export function faultFs(
     }
   const ops: FsOp[] = [
     'readFile',
+    'readRange',
+    'appendFile',
     'writeFile',
     'fsync',
     'fsyncDir',

@@ -20,6 +20,7 @@ import {
   type AppResult,
   type Option,
 } from '../../shared/result'
+import { assetHashOf, isAssetPath } from './assets'
 import { parseProjectDoc, type ProjectDoc } from './document'
 
 /** Pre-alpha: stays 1, no migrations (docs/conventions/error-handling/migrations.md). */
@@ -37,8 +38,10 @@ export interface ProjectLayout {
   readonly collections: readonly string[]
 }
 
-/** v0.1: `parts` and `snapshots` (task 2.5), `plans` (task 2.13). */
-export const PROJECT_LAYOUT: ProjectLayout = { collections: ['parts', 'snapshots', 'plans'] }
+/** v0.1: `parts` and `snapshots` (task 2.5), `plans` (task 2.13); v0.2: `references` (R1). */
+export const PROJECT_LAYOUT: ProjectLayout = {
+  collections: ['parts', 'snapshots', 'plans', 'references'],
+}
 
 export const PROJECT_FILE = 'project.json'
 export const MANIFEST_FILE = 'manifest.json'
@@ -135,8 +138,11 @@ export function fileContent(
 // ---------------------------------------------------------------------------
 // Manifest
 
+/** Documents (`project.json`, records) and assets (`assets/<sha256>.stl`, never documents). */
 const ManifestFileSchema = z.object({
-  path: z.string().refine((p) => isLayoutPath(p), 'not a project document path'),
+  path: z
+    .string()
+    .refine((p) => isLayoutPath(p) || isAssetPath(p), 'not a project document or asset path'),
   size: z.number().int().nonnegative(),
   sha256: z.string().regex(/^[0-9a-f]{64}$/),
 })
@@ -165,6 +171,12 @@ export function parseManifest(raw: unknown): AppResult<Manifest> {
   const paths = m.unwrap().files.map((f) => f.path)
   if (new Set(paths).size !== paths.length)
     return fail('input.malformed', 'manifest lists a file twice', { where: 'layout.manifest' })
+  for (const f of m.unwrap().files)
+    if (isAssetPath(f.path) && assetHashOf(f.path) !== f.sha256)
+      return fail('input.malformed', 'asset hash does not match its name', {
+        where: 'layout.manifest',
+        data: { path: f.path },
+      })
   return Ok(freeze(m.unwrap(), true))
 }
 

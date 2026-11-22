@@ -13,15 +13,17 @@ import type { AppResult } from '../../shared/result'
 import { PartDtoSchema } from '../design/part.dto'
 import { SnapshotDtoSchema } from '../library/snapshot'
 import { PlanDtoSchema } from '../plan/plan.dto'
+import { ReferenceDtoSchema } from '../design/reference.dto'
 
 /** Display unit system of a project (docs/architecture/quantities.md, glossary "Unit system"). */
 export const UnitSystemSchema = z.enum(['mm', 'inch']).describe('Project display unit system')
 export type UnitSystem = z.output<typeof UnitSystemSchema>
 
 /**
- * Shape of the document. `parts`, `snapshots` and `plans` are record collections keyed by id
- * (docs/architecture/persistence.md#working-folder-layout; parts: docs/modes/design.md; plans:
- * docs/modes/plan-v0.1.md#plan-record).
+ * Shape of the document. `parts`, `snapshots`, `plans` and `references` are record collections
+ * keyed by id (docs/architecture/persistence.md#working-folder-layout; parts:
+ * docs/modes/design.md; plans: docs/modes/plan-v0.1.md#plan-record; references:
+ * docs/modes/reference-model.md#data-model).
  */
 export const ProjectDocSchema = z.object({
   name: z.string().describe('Project name'),
@@ -35,6 +37,10 @@ export const ProjectDocSchema = z.object({
     .record(z.string(), PlanDtoSchema)
     .default({})
     .describe('Plans by id, each with its own design snapshot and library copies'),
+  references: z
+    .record(z.string(), ReferenceDtoSchema)
+    .default({})
+    .describe('Reference models by id, each belonging to a part (never input to the design)'),
 })
 
 export type ProjectDoc = Readonly<z.output<typeof ProjectDocSchema>>
@@ -42,7 +48,14 @@ export type ProjectDoc = Readonly<z.output<typeof ProjectDocSchema>>
 /** A new, deeply frozen document. */
 export function newProjectDoc(init: Pick<ProjectDoc, 'name' | 'unitSystem'>): ProjectDoc {
   return freeze(
-    { name: init.name, unitSystem: init.unitSystem, parts: {}, snapshots: {}, plans: {} },
+    {
+      name: init.name,
+      unitSystem: init.unitSystem,
+      parts: {},
+      snapshots: {},
+      plans: {},
+      references: {},
+    },
     true,
   )
 }
