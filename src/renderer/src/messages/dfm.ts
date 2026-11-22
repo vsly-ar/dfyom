@@ -114,6 +114,15 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
     `The shape reaches ${L(p['by'])} outside the stock face at the ${list(((p['sides'] as readonly string[] | undefined) ?? []).map((s) => SIDE[s] ?? s))}.`,
   'dfm.shapeHeavy': (p) =>
     `This shape has ${num(p['chords'])} segments after flattening, so the part updates more slowly.`,
+  'dfm.holeCustomSize': (p, L) =>
+    `${HOLE_FIELD[String(p['field'])] ?? 'A size'} ${L(p['value'])} differs from the ${typeof p['fastener'] === 'string' ? `${p['fastener']} ` : ''}table value ${L(p['table'])} (custom).`,
+}
+
+/** Hole feature size fields in `dfm.holeCustomSize`. */
+const HOLE_FIELD: Readonly<Record<string, string>> = {
+  diameter: 'Hole Ø',
+  cbDiameter: 'Counterbore Ø',
+  cbDepth: 'Counterbore depth',
 }
 
 /** What a tool type rule asks for (`params.needs` of `dfm.toolUnfit`). */

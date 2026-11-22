@@ -74,8 +74,13 @@ export class AppError extends Error {
 
   /** Returns a copy whose issue paths are prefixed (nested model validation). */
   prefixIssues(...prefix: IssuePath): AppError {
+    return this.mapIssues((i) => ({ ...i, path: [...prefix, ...i.path] }))
+  }
+
+  /** Returns a copy with every issue rewritten (paths mapped back to what the user edits). */
+  mapIssues(f: (issue: Issue) => Issue): AppError {
     const copy = new AppError(this.code, this.message, {
-      issues: this.issues.map((i) => ({ ...i, path: [...prefix, ...i.path] })),
+      issues: this.issues.map(f),
       cause: this.cause,
     })
     ;(copy as { frames: readonly ContextFrame[] }).frames = this.frames

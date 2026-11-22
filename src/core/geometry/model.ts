@@ -255,6 +255,8 @@ export const DFM_WARNING_CODES = [
   'dfm.restMaterial',
   'dfm.shapeOutsideFace',
   'dfm.shapeHeavy',
+  // features (v0.4): docs/modes/design-v0.4.md#checks-and-dfm
+  'dfm.holeCustomSize',
 ] as const
 export type DfmWarningCode = (typeof DFM_WARNING_CODES)[number]
 

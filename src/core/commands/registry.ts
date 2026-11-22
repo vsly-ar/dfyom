@@ -15,6 +15,7 @@ import { REFERENCE_COMMANDS, REFERENCE_QUERIES } from '../design/reference-comma
 import { SHAPE_COMMANDS, SHAPE_QUERIES } from '../design/shape-commands'
 import { FASTENER_QUERIES } from '../design/fastener/commands'
 import { FEATURE_COMMANDS, FEATURE_QUERIES } from '../design/feature-commands'
+import { HOLE_COMMANDS } from '../design/hole-commands'
 import { FEEDS_SPEEDS_QUERIES } from '../feeds-speeds/commands'
 import { LIBRARY_COMMANDS, LIBRARY_QUERIES } from '../library/commands'
 import { PLAN_COMMANDS, PLAN_QUERIES, planDraftFollow } from '../plan/commands'
@@ -71,6 +72,7 @@ export const PROJECT_COMMANDS: readonly AnyCommand[] = [
   ...DESIGN_TOOL_COMMANDS,
   ...SHAPE_COMMANDS,
   ...FEATURE_COMMANDS,
+  ...HOLE_COMMANDS,
   ...REFERENCE_COMMANDS,
   ...PLAN_COMMANDS,
   toolpathGenerateJob,

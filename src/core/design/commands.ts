@@ -84,7 +84,8 @@ import { requirePort, shapeFromDTO as namedShapeFromDTO } from './shape'
 import { SHAPE_ID_PATTERN } from './shape.dto'
 
 import { designChangeTargets } from './shape-users'
-import { featureOwnedError, ownerOf } from './feature'
+import { featureOwnedError, ownerOf, type LoadedFeature } from './feature'
+import { mapFeatureIssues, settleFeatures } from './feature-sync'
 
 // ── arg schemas ───────────────────────────────────────────────────────────────────────────
 
@@ -363,6 +364,19 @@ export class Fields {
     return { length: one('length', prev.length), angle: one('angle', prev.angle) }
   }
 
+  /**
+   * A value that is missing or not allowed with the other args (`model.invariant` at `path`,
+   * e.g. rule `required`); like a failed parse, the returned value is unusable and `done()` fails.
+   */
+  issue(path: string, rule: string, message: string): Quantity {
+    this.results.push(
+      fail('model.invariant', `${path} ${message}`, {
+        issues: [{ path: toPath(path), rule, message }],
+      }),
+    )
+    return undefined as unknown as Quantity
+  }
+
   done(): AppResult<void> {
     return collect(this.results).map(() => undefined)
   }
@@ -385,6 +399,7 @@ export function withWarnings<R extends object>(
   operations: readonly Operation[],
   ctx: CommandContext,
   where: string,
+  features: readonly LoadedFeature[] = loaded.features,
 ) {
   const library = ctx.services.library
   const tools = library === undefined ? [] : libraryTools(library)
@@ -397,6 +412,7 @@ export function withWarnings<R extends object>(
         tools,
         loaded.snapshots,
         ctx.services.region2d,
+        features,
       ),
     )
     .map((warnings) => ({ ...value, warnings }))
@@ -471,6 +487,22 @@ export function writeOperationList(list: OperationDTO[], ops: readonly Operation
     if (i >= list.length) list.push(dto)
     else if (!deepEqual(list[i], dto)) list[i] = dto
   })
+}
+
+/** Writes the records of the features in `changed` (recalculated, feature-sync.ts). */
+export function writeFeatures(
+  draft: Draft<ProjectDoc>,
+  partId: string,
+  features: readonly LoadedFeature[],
+  changed: readonly string[],
+): void {
+  const records = draft.parts[partId]!.features
+  if (records === undefined) return
+  for (const id of changed) {
+    const l = features.find((f) => f.feature.id === id)
+    const i = records.findIndex((f) => f.id === id)
+    if (l !== undefined && i >= 0) records[i] = l.spec.toDTO(l.feature)
+  }
 }
 
 function nextNumber(part: Part, kind: OperationKind): number {
@@ -759,17 +791,18 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
         const owned = refuseOwned(loaded.unwrap(), found.unwrap(), where)
         if (owned.isErr()) return owned
       }
-      const settled = applyUpdate(
-        spec,
-        loaded.unwrap(),
-        args.operationId,
-        args,
-        where,
-        ctx.services.region2d,
-      )
-      if (settled.isErr()) return settled
-      writeOperations(draft, args.partId, settled.unwrap())
-      return withWarnings({}, loaded.unwrap(), settled.unwrap(), ctx, where)
+      const l = loaded.unwrap()
+      const settled = applyUpdate(spec, l, args.operationId, args, where, ctx.services.region2d)
+      if (settled.isErr())
+        return Err(mapFeatureIssues(settled.unwrapErr(), l.part.operations, l.features))
+      // feature fields written as expressions follow the edit (design-v0.4.md#implementation-f3)
+      const env = shapeEnv(l, ctx.services.region2d)
+      const synced = settleFeatures(settled.unwrap(), l.features, l.stock, l.units, where, env)
+      if (synced.isErr()) return synced
+      const { ops, features, changed } = synced.unwrap()
+      writeOperations(draft, args.partId, ops)
+      writeFeatures(draft, args.partId, features, changed)
+      return withWarnings({}, l, ops, ctx, where, features)
     },
   })
   return [add, update]
@@ -1088,7 +1121,7 @@ const warningList = defineQuery({
       return fail('internal.unexpected', 'no library service configured', { where })
     const loaded = loadPart(doc, args.partId, where)
     if (loaded.isErr()) return loaded
-    const { part, stock, units } = loaded.unwrap()
+    const { part, stock, units, features } = loaded.unwrap()
     const state = ctx.services.evaluations?.state(doc, args.partId) ?? { status: 'pending' }
     const again = choosesAgain(doc.parts[args.partId]!, args.partId, ctx.apply?.pending() ?? [])
     return partWarnings(
@@ -1098,6 +1131,7 @@ const warningList = defineQuery({
       libraryTools(library),
       doc.snapshots,
       ctx.services.region2d,
+      features,
     )
       .map((warnings) => {
         const r = warningsWithEvaluation(doc, args.partId, warnings, state)
