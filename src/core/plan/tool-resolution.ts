@@ -5,6 +5,7 @@
  * Pure: the library arrives as items; the plan is read only from its own record.
  * Doc: docs/modes/plan-v0.2.md#tool-resolution-from-the-design-tool-field
  */
+import type { Region2dPort } from '../geometry/2d/port'
 import type { LibraryItem } from '../library/library-item'
 import type { PlanWarning } from './checks'
 import { planDesignTool } from './design-tool'
@@ -33,8 +34,9 @@ export function resolveTool(
   plan: LoadedPlan,
   op: PlanOperationDTO,
   library: readonly LibraryItem[],
+  port?: Region2dPort,
 ): ToolResolution {
-  const suggestions = suggestTools(plan, op, library)
+  const suggestions = suggestTools(plan, op, library, port)
   const item = (s: ToolSuggestion | undefined): ToolResolution => {
     const found = library.find((i) => i.id === s?.toolLibraryItemId)
     return found === undefined ? { kind: 'keep' } : { kind: 'item', item: found }
@@ -45,7 +47,7 @@ export function resolveTool(
   if (d.specific !== undefined) {
     const copy: ToolResolution = { kind: 'copy', snapshotId: d.specific.snapshotId }
     if (d.locked || suggestions.length === 0) return copy
-    return failedCheck(plan, op, d.specific.tool) === undefined ? copy : item(suggestions[0])
+    return failedCheck(plan, op, d.specific.tool, port) === undefined ? copy : item(suggestions[0])
   }
   if (!d.locked) return item(suggestions[0])
   const match = suggestions.find((s) => s.matchesDesign)
@@ -67,6 +69,7 @@ const FIXES =
 export function designToolFindings(
   plan: LoadedPlan,
   library: readonly LibraryItem[],
+  port?: Region2dPort,
 ): PlanWarning[] {
   const out: PlanWarning[] = []
   for (const op of plan.operations) {
@@ -75,7 +78,7 @@ export function designToolFindings(
     if (design.isNone()) continue
     const d = design.unwrap()
     const alternatives = () => {
-      const s = suggestTools(plan, op, library)
+      const s = suggestTools(plan, op, library, port)
       return {
         alternatives: s.map((t) => t.name).join(', '),
         alternativeIds: s.map((t) => t.toolLibraryItemId).join(','),
@@ -87,7 +90,9 @@ export function designToolFindings(
     if (d.specific !== undefined) {
       const assigned = op.tool === d.specific.snapshotId
       // the assigned design tool as the plan uses it; another one as resolution judged it
-      const failed = assigned ? failedCheck(plan, op) : failedCheck(plan, op, d.specific.tool)
+      const failed = assigned
+        ? failedCheck(plan, op, undefined, port)
+        : failedCheck(plan, op, d.specific.tool, port)
       if (failed === undefined) continue
       const check = { check: failed.rule, checkField: failed.field ?? 'tool', designTool: d.label }
       if (d.locked && assigned) {

@@ -5,6 +5,7 @@
  * Doc: docs/modes/plan-v0.1.md#tool-assignment-and-checks,
  * docs/modes/plan-v0.2.md#tool-resolution-from-the-design-tool-field
  */
+import type { Region2dPort } from '../geometry/2d/port'
 import type { LibraryItem } from '../library/library-item'
 import { Tool } from '../library/tool'
 import type { PlanWarning } from './checks'
@@ -33,15 +34,19 @@ const DISQUALIFYING = new Set(['tool', 'stickout', 'stepdown'])
 /**
  * The first check `tool` fails for the plan operation (judged with its own default stickout and
  * preset), or undefined when it passes. Without `tool`: the operation as assigned (its tool,
- * stickout and preset).
+ * stickout and preset). With the 2D port the width checks of general shapes count (T3).
  */
 export function failedCheck(
   plan: LoadedPlan,
   op: PlanOperationDTO,
   tool?: Tool,
+  port?: Region2dPort,
 ): PlanWarning | undefined {
   const { stickout: _s, presetName: _p, ...base } = op
-  const e = tool === undefined ? evaluateOperation(plan, op) : evaluateOperation(plan, base, tool)
+  const e =
+    tool === undefined
+      ? evaluateOperation(plan, op, undefined, undefined, port)
+      : evaluateOperation(plan, base, tool, undefined, port)
   return e.findings.find(
     (f) =>
       f.severity === 'error' &&
@@ -56,6 +61,7 @@ export function suggestTools(
   plan: LoadedPlan,
   op: PlanOperationDTO,
   items: readonly LibraryItem[],
+  port?: Region2dPort,
 ): ToolSuggestion[] {
   const materialClass = plan.stock.material.class
   const design = planDesignTool(plan, op)
@@ -66,7 +72,7 @@ export function suggestTools(
   for (const item of items) {
     const tool = item.values
     if (!(tool instanceof Tool)) continue
-    if (failedCheck(plan, op, tool) !== undefined) continue
+    if (failedCheck(plan, op, tool, port) !== undefined) continue
     const designTool = design.mapOr(false, (d) => isDesignTool(item, d))
     const matches = design.mapOr(false, (d) => matchesDesign(tool, d))
     const hasPreset = tool.presets.some((p) =>

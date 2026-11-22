@@ -5,7 +5,10 @@
 import { isGeneralShape, type Operation, type Part, type Shape } from '../design/operation'
 import { shapeCentre } from '../design/anchor'
 import type { OperationKind } from '../design/part.dto'
+import { placeShape } from '../design/placement'
 import { DIRECTIONS, STOCK_FACE, type Direction } from '../geometry/face'
+import type { Region2dPort } from '../geometry/2d/port'
+import type { Vec2 } from '../geometry/model'
 import type { PlanWarning } from './checks'
 import type { PlanOperationDTO } from './plan.dto'
 
@@ -145,32 +148,70 @@ export function repairOrder(planOps: readonly PlanOperationDTO[], part: Part): P
   return out
 }
 
-/**
- * True if the point lies inside the shape's bounds (v0.1: axis-aligned rectangles, circles;
- * general shapes are skipped until T3).
- */
-function inside(shape: Shape, x: number, y: number): boolean {
-  if (shape.kind === 'named' || isGeneralShape(shape)) return false
-  const [cx, cy] = shapeCentre(shape)
-  if (shape.kind === 'circle') return Math.hypot(x - cx, y - cy) < shape.diameter.canonical / 2
-  return (
-    Math.abs(x - cx) < shape.length.canonical / 2 && Math.abs(y - cy) < shape.width.canonical / 2
-  )
+/** Axis-aligned bounds of an operation's shape in its face frame (`[u, v]`, mm). */
+interface Box {
+  readonly min: Vec2
+  readonly max: Vec2
 }
 
-function centerOf(op: Operation): [number, number] | undefined {
+/**
+ * The bounds of a shape in its face frame: v0.1 rectangles and circles analytically; general
+ * shapes (named, rotated) by their placed bounding box (v0.3 T3, with the 2D port; without it, or
+ * when the shape does not place, none: the shape is skipped).
+ */
+function shapeBox(shape: Shape, part: Part, port: Region2dPort | undefined): Box | undefined {
+  if (isGeneralShape(shape)) {
+    if (port === undefined) return undefined
+    const placed = placeShape(port, shape, part.shapes)
+    if (placed.isErr()) return undefined
+    const { centre, size } = placed.unwrap()
+    return {
+      min: [centre[0] - size[0] / 2, centre[1] - size[1] / 2],
+      max: [centre[0] + size[0] / 2, centre[1] + size[1] / 2],
+    }
+  }
+  const [cx, cy] = shapeCentre(shape)
+  const [hu, hv] =
+    shape.kind === 'circle'
+      ? [shape.diameter.canonical / 2, shape.diameter.canonical / 2]
+      : shape.kind === 'rectangle'
+        ? [shape.length.canonical / 2, shape.width.canonical / 2]
+        : [0, 0]
+  return { min: [cx - hu, cy - hv], max: [cx + hu, cy + hv] }
+}
+
+/**
+ * True if the point lies inside the shape: a circle by its radius, a rectangle (and since T3 a
+ * general shape) by its bounding box; open bounds.
+ */
+function inside(shape: Shape, part: Part, port: Region2dPort | undefined, p: Vec2): boolean {
+  if (shape.kind === 'circle') {
+    const [cx, cy] = shapeCentre(shape)
+    return Math.hypot(p[0] - cx, p[1] - cy) < shape.diameter.canonical / 2
+  }
+  const b = shapeBox(shape, part, port)
+  return b !== undefined && p[0] > b.min[0] && p[0] < b.max[0] && p[1] > b.min[1] && p[1] < b.max[1]
+}
+
+/** Where an operation lies: a hole's centre, a shape's bounding-box centre. */
+function centerOf(op: Operation, part: Part, port: Region2dPort | undefined): Vec2 | undefined {
   if (op.kind === 'drilling') return [op.center[0].canonical, op.center[1].canonical]
-  if (op.kind === 'pocket' || op.kind === 'profile')
-    return isGeneralShape(op.shape) ? undefined : [...shapeCentre(op.shape)]
-  return undefined
+  if (op.kind !== 'pocket' && op.kind !== 'profile') return undefined
+  const b = shapeBox(op.shape, part, port)
+  return b === undefined ? undefined : [(b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2]
 }
 
 /**
  * Order findings over the machining order of every setup: `plan.order` (error) when an operation
  * precedes one whose surface it starts from; `plan.loosePiece` (warning) when a profile comes
- * before an operation of the same face direction inside its shape (positions are face-frame).
+ * before an operation of the same face direction inside its shape (positions are face-frame;
+ * general shapes by their placed bounding box, with the 2D port only).
  */
-export function orderFindings(planOps: readonly PlanOperationDTO[], part: Part): PlanWarning[] {
+export function orderFindings(
+  planOps: readonly PlanOperationDTO[],
+  part: Part,
+  port?: Region2dPort,
+): PlanWarning[] {
   const out: PlanWarning[] = []
   const direction = operationDirections(planOps, part)
   const position = new Map(planOps.map((p, i) => [p.id, i]))
@@ -198,8 +239,8 @@ export function orderFindings(planOps: readonly PlanOperationDTO[], part: Part):
         for (const d of later.designOperationIds) {
           const o = byId.get(d)
           if (o === undefined || o.kind === 'profile') continue
-          const c = centerOf(o)
-          if (o.kind === 'facing' || (c !== undefined && inside(profile.shape, c[0], c[1]))) {
+          const c = centerOf(o, part, port)
+          if (o.kind === 'facing' || (c !== undefined && inside(profile.shape, part, port, c))) {
             out.push({
               code: 'plan.loosePiece',
               severity: 'warning',

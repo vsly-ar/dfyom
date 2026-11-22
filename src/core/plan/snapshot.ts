@@ -13,6 +13,7 @@ import {
   type SnapshotDTO,
   type SnapshotStatus,
 } from '../library/snapshot'
+import type { Region2dPort } from '../geometry/2d/port'
 import type { ProjectDoc } from '../project/document'
 import { stableJson } from '../project/layout'
 import type { DesignSnapshotDTO, PlanDTO } from './plan.dto'
@@ -123,6 +124,7 @@ export function planStale(
   plan: PlanDTO,
   doc: ProjectDoc,
   lookup: ItemLookup | undefined,
+  port?: Region2dPort,
 ): PlanStale {
   const current = Object.hasOwn(doc.parts, plan.design.partId)
     ? doc.parts[plan.design.partId]
@@ -163,7 +165,7 @@ export function planStale(
       const found = lookup(dto.kind, dto.libraryItemId)
       const blocked =
         status === 'libraryChanged' && found.state === 'found'
-          ? libraryUpdateBlocker(plan, dto, found.item)
+          ? libraryUpdateBlocker(plan, dto, found.item, port)
           : undefined
       libraryCopies.push({
         snapshotId: dto.id,
@@ -187,7 +189,9 @@ export function planStale(
           )
           .sort()
   const rebuildBlocked =
-    plan.status === 'draft' && designChanged(plan, doc) ? (rebuildBlocker(plan, doc) ?? null) : null
+    plan.status === 'draft' && designChanged(plan, doc)
+      ? (rebuildBlocker(plan, doc, port) ?? null)
+      : null
   return {
     operations,
     libraryCopies,

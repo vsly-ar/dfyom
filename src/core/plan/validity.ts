@@ -79,24 +79,33 @@ export function libraryUpdateBlocker(
   plan: PlanDTO,
   copy: SnapshotDTO,
   item: LibraryItem,
+  port?: Region2dPort,
 ): string | undefined {
   if (copy.kind !== 'stock' || item.values.kind !== 'stock') return undefined
   const next = { ...copy, values: item.values.toDTO() } as SnapshotDTO
-  const why = reason(checkPartFits(plan.design.part, next, 'plan.libraryItem.update'))
+  const why = reason(checkPartFits(plan.design.part, next, 'plan.libraryItem.update', port))
   return why === undefined
     ? undefined
     : `library update of stock "${item.values.name}" can't be applied: the part doesn't fit (${why})`
 }
 
-/** Why rebuilding from the current design is blocked by the plan's stock copy, else undefined. */
-export function rebuildBlocker(plan: PlanDTO, doc: ProjectDoc): string | undefined {
+/**
+ * Why rebuilding from the current design is blocked by the plan's stock copy, else undefined.
+ * With the 2D port the shape checks run as in the design (`checkPart`); so does the library
+ * update check above (v0.3 T3).
+ */
+export function rebuildBlocker(
+  plan: PlanDTO,
+  doc: ProjectDoc,
+  port?: Region2dPort,
+): string | undefined {
   const part = Object.hasOwn(doc.parts, plan.design.partId)
     ? doc.parts[plan.design.partId]
     : undefined
   if (part === undefined) return undefined
   const stock = stockCopyFor(plan, part, doc)
   if (stock === undefined) return 'rebuild blocked: the stock copy is missing'
-  const why = reason(checkPartFits(part, stock, 'plan.rebuild'))
+  const why = reason(checkPartFits(part, stock, 'plan.rebuild', port))
   return why === undefined
     ? undefined
     : `rebuild blocked: the current design doesn't fit the plan's stock copy (${why})`
