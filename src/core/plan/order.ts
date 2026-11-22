@@ -12,8 +12,14 @@ import type { Vec2 } from '../geometry/model'
 import type { PlanWarning } from './checks'
 import type { PlanOperationDTO } from './plan.dto'
 
-/** Default group order: facing, drilling, pockets, profiles (cutouts last). */
-const RANK: Record<OperationKind, number> = { facing: 0, drilling: 1, pocket: 2, profile: 3 }
+/** Default group order: facing, drilling, pockets, chamfers (after their edge), profiles (cutouts last). */
+const RANK: Record<OperationKind, number> = {
+  facing: 0,
+  drilling: 1,
+  pocket: 2,
+  chamfer: 3,
+  profile: 4,
+}
 
 /** The operation id owning a surface id (`facing1.floor` → `facing1`); stock surfaces: none. */
 export function ownerOf(surfaceId: string): string | undefined {

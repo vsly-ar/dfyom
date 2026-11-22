@@ -72,6 +72,8 @@ export interface FeedsInput {
   readonly facingDepth?: number
   /** Drilling with an end mill (helix): the resolved helix pitch (mm). */
   readonly helixPitch?: number
+  /** Chamfer (v0.4): the cut's depth below the tool tip (mm); wired by task T1. */
+  readonly chamferDepth?: number
 }
 
 export type FeedWarningCode = CuttingWarningCode | 'feeds.lockInactive'
@@ -156,6 +158,7 @@ export function lockableFields(kind: OperationKind): readonly FeedField[] {
     case 'profile':
       return ['spindleSpeed', 'feedRate', 'stepdown']
     case 'drilling':
+    case 'chamfer':
       return ['spindleSpeed', 'feedRate']
   }
 }
@@ -212,7 +215,7 @@ function fallback(
   i: Pick<FeedsInput, 'kind' | 'tool' | 'facingDepth'>,
 ): Option<number> {
   const D = i.tool.diameter.canonical
-  if (i.kind === 'drilling') return None
+  if (i.kind === 'drilling' || i.kind === 'chamfer') return None
   if (field === 'stepover') return Some((i.kind === 'facing' ? 0.75 : 0.4) * D)
   if (i.kind === 'facing') return i.facingDepth === undefined ? None : Some(i.facingDepth)
   return Some(0.25 * D)
@@ -240,7 +243,7 @@ function presetValue(preset: Option<CuttingPreset>, field: FeedField): Option<Re
 }
 
 /** The calculator's engagement: the strategy's (facing: its stepover, never an entered one). */
-function engagementOf(i: Pick<FeedsInput, 'kind' | 'tool' | 'helixPitch'>): Engagement {
+function engagementOf(i: Pick<FeedsInput, 'kind' | 'tool' | 'helixPitch' | 'chamferDepth'>): Engagement {
   const D = i.tool.diameter.canonical
   switch (i.kind) {
     case 'facing':
@@ -252,6 +255,9 @@ function engagementOf(i: Pick<FeedsInput, 'kind' | 'tool' | 'helixPitch'>): Enga
       return i.tool.type === 'drill'
         ? { kind: 'drill' }
         : { kind: 'helix', ap: i.helixPitch ?? 0.25 * D }
+    case 'chamfer':
+      // F10: the effective diameter at the deepest point of the cut (plan-v0.4.md P-D)
+      return { kind: 'chamfer', depth: i.chamferDepth ?? 0 }
   }
 }
 
@@ -282,7 +288,7 @@ const perField = <T>(f: (field: FeedField) => T): Record<FeedField, T> =>
  * strategy fallback (stepdown/stepover). `data` is the material table (tests may pass a fixture).
  */
 export function resolveFeeds(i: FeedsInput, data?: readonly MaterialRow[]): ResolvedFeeds {
-  const applicable = i.kind === 'drilling' ? DRILLING : MILLING
+  const applicable = i.kind === 'drilling' || i.kind === 'chamfer' ? DRILLING : MILLING
   const engagement = engagementOf(i)
   const base: CuttingInput = {
     tool: i.tool,

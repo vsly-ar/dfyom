@@ -76,7 +76,7 @@ export function toGeometryInput(
   const operations: OperationGeometry[] = []
   const references: SurfaceReference[] = []
   for (const [i, op] of part.operations.entries()) {
-    const g = operationGeometry(op, i, table, part.shapes, port)
+    const g = operationGeometry(op, i, table, part.shapes, port, part.operations)
     if (g.isErr()) return Err(g.unwrapErr())
     operations.push(g.unwrap())
     const refs = operationReferences(op)
@@ -107,6 +107,7 @@ function operationGeometry(
   table: SurfaceTable,
   shapes: Part['shapes'],
   port: Region2dPort | undefined,
+  ops: readonly Operation[],
 ): AppResult<OperationGeometry> {
   const entry = table.get(op.on)
   if (entry.isNone() || entry.unwrap().owner >= index)
@@ -166,7 +167,39 @@ function operationGeometry(
             : {}),
         },
       }))
+    case 'chamfer': {
+      const edge = chamferEdge(ops.slice(0, index), op.edgeOf)
+      if (edge === undefined) return bug(op, `edge ${op.edgeOf} is not an earlier round operation`)
+      return Ok({
+        kind: 'chamfer',
+        id: op.id,
+        ...direction,
+        onZ: on.faceZ.toNumber(),
+        // the edge's own axis, so both solids are placed by one transform (coaxial)
+        center: edge.center,
+        edgeOf: op.edgeOf,
+        edgeDiameter: edge.diameter,
+        diameter: op.diameter.canonical,
+        angle: op.angle.canonical,
+      })
+    }
   }
+}
+
+/**
+ * The circular edge a chamfer bevels (design-v0.4.md § Chamfer operation): the mouth of the
+ * drilling or circle pocket `edgeOf` among `before`, as its axis `[u, v]` and diameter (float64
+ * mm, as that operation's own geometry input). Undefined: no such round operation.
+ */
+export function chamferEdge(
+  before: readonly Operation[],
+  edgeOf: string,
+): { center: readonly [number, number]; diameter: number } | undefined {
+  const e = before.find((o) => o.id === edgeOf)
+  if (e?.kind === 'drilling') return { center: vec2(e.center), diameter: e.diameter.canonical }
+  if (e?.kind === 'pocket' && e.shape.kind === 'circle')
+    return { center: shapeCentre(e.shape), diameter: e.shape.diameter.canonical }
+  return undefined
 }
 
 function bug(op: Operation, message: string): AppResult<never> {

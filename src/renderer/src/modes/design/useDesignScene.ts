@@ -99,6 +99,7 @@ export function useDesignScene(): SceneProps {
       s,
       table,
       port === undefined ? undefined : { port, shapes: part.loaded.part.shapes },
+      part.loaded.part.operations,
     )
     // the placed shape's bounding box in the face frame (what the anchor refers to, task U2)
     let guide: Vec3[] | null = null
@@ -140,7 +141,7 @@ export function useDesignScene(): SceneProps {
     const at =
       (evaluation?.error && failingOperation(evaluation.error, ids)) ?? selected ?? ids.at(-1)
     const op = ops.find((o) => o.id === at)
-    return op === undefined ? null : markerPoint(op, part.loaded.stock, part.table)
+    return op === undefined ? null : markerPoint(op, part.loaded.stock, part.table, ops)
   }, [status, ops, part, evaluation, selected])
 
   return {

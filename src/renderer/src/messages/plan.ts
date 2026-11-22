@@ -328,6 +328,7 @@ export const planMessages = {
     pocket: 'Pocket',
     drilling: 'Drilling',
     profile: 'Profile',
+    chamfer: 'Chamfer',
   } satisfies Record<OperationKind, string>,
 }
 

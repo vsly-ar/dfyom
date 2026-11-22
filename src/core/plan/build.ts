@@ -263,7 +263,13 @@ function safeHeights(units: UnitSystem): Pick<SetupDTO, 'clearanceHeight' | 'ret
   }
 }
 
-const RANK: Record<Operation['kind'], number> = { facing: 0, drilling: 1, pocket: 2, profile: 3 }
+const RANK: Record<Operation['kind'], number> = {
+  facing: 0,
+  drilling: 1,
+  pocket: 2,
+  chamfer: 3,
+  profile: 4,
+}
 
 /**
  * The plan with its design snapshot replaced by the current design: plan operations matched by

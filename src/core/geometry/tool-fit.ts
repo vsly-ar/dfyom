@@ -9,7 +9,7 @@
  * docs/modes/design-v0.3.md#dfm-checks-for-shapes
  */
 import type { DfmTool } from './dfm'
-import { EPSILON, type OperationGeometry, type StockGeometry } from './model'
+import { chamferDepth, EPSILON, type OperationGeometry, type StockGeometry } from './model'
 import { inradius } from './operations'
 import { FIT_SLACK, type ShapeMeasure } from './shape-measure'
 
@@ -62,6 +62,8 @@ export function reachDepth(op: Cutting, stock: StockGeometry): [number, string] 
   if (op.kind === 'profile')
     return op.depth === undefined ? [stock.thickness, 'on'] : [op.depth, 'depth']
   if (op.kind === 'pocket') return [op.depth - op.onZ, 'depth']
+  // the cone's bottom (the tool tip when contoured; a plunged tip goes deeper, `toolFit`)
+  if (op.kind === 'chamfer') return [chamferDepth(op) - op.onZ, 'diameter']
   return op.bottom.kind === 'through'
     ? [stock.thickness, 'on']
     : [op.bottom.depth - op.onZ, 'depth']
@@ -203,6 +205,23 @@ export function toolFit(
             : undefined)
       if (unfit !== undefined) return unfit
       break
+    case 'chamfer': {
+      unfit = chamferFit(tool, op)
+      if (unfit !== undefined || tool.reach === undefined) return unfit
+      // plunged (DC covers the chamfer): the tip ends where the tool cone has the chamfer's Ø
+      const tip = tool.tipDiameter ?? 0
+      const depth =
+        tool.diameter + TOL >= op.diameter
+          ? chamferDepth({ ...op, edgeDiameter: tip }) - op.onZ
+          : reachDepth(op, stock)[0]
+      return tool.reach + EPSILON >= depth
+        ? undefined
+        : {
+            rule: 'reach',
+            detail: `reaches ${mm(tool.reach)}, the operation is ${mm(depth)} deep`,
+            values: { reach: tool.reach, depth },
+          }
+    }
   }
   if (tool.reach === undefined) return undefined
   const [base] = reachDepth(op, stock)

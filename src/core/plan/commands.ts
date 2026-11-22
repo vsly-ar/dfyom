@@ -1192,7 +1192,7 @@ const operationList = defineQuery({
     operations: z.array(
       z.object({
         id: PlanRecordIdSchema,
-        kind: z.enum(['facing', 'pocket', 'drilling', 'profile']),
+        kind: z.enum(['facing', 'pocket', 'drilling', 'profile', 'chamfer']),
         designOperationIds: z.array(OperationIdSchema),
         tool: z
           .object({ snapshotId: z.string(), libraryItemId: z.string(), name: z.string() })

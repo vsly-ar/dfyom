@@ -86,6 +86,7 @@ import { SHAPE_ID_PATTERN } from './shape.dto'
 import { designChangeTargets } from './shape-users'
 import { featureOwnedError, ownerOf, type LoadedFeature } from './feature'
 import { mapFeatureIssues, settleFeatures } from './feature-sync'
+import { derivedLength } from './hole'
 
 // ── arg schemas ───────────────────────────────────────────────────────────────────────────
 
@@ -172,6 +173,12 @@ const profileParams = {
   slotWidth: Src.optional().describe('Default 6 mm / 1/4"'),
   depth: Src.nullable().optional().describe('on only: blind groove depth; null = through'),
   tabs: TabsArg.optional(),
+}
+
+const chamferParams = {
+  edgeOf: OperationIdSchema.describe('Earlier drilling or circle pocket whose mouth it bevels'),
+  diameter: Src.describe('At the face; default edge Ø + 1 mm / 1/32"'),
+  angle: Src.describe('Included, 60–120°; default 90°'),
 }
 
 type ShapeArgs = z.output<typeof ShapeArg>
@@ -684,6 +691,46 @@ const profileSpec: KindSpec<typeof profileParams, Extract<Operation, { kind: 'pr
   }),
 }
 
+/**
+ * v0.4 chamfer (design-v0.4.md § Chamfer operation): `on` is not an argument, it is the edge's
+ * face; the default diameter is the edge's + 1 mm (1/32" in inch projects).
+ */
+const chamferSpec: KindSpec<typeof chamferParams, Extract<Operation, { kind: 'chamfer' }>> = {
+  kind: 'chamfer',
+  params: chamferParams,
+  required: ['edgeOf'],
+  build: (a, prev, { f, id, name, ops }) => {
+    const edgeOf = a.edgeOf ?? prev!.edgeOf
+    const index = ops.findIndex((o) => o.id === id)
+    const edge = (index < 0 ? ops : ops.slice(0, index)).find((o) => o.id === edgeOf)
+    const edgeDiameter =
+      edge?.kind === 'drilling'
+        ? edge.diameter
+        : edge?.kind === 'pocket' && edge.shape.kind === 'circle'
+          ? edge.shape.diameter
+          : undefined
+    const diameter = (): Quantity => {
+      if (a.diameter !== undefined) return f.q('diameter', 'length', a.diameter)
+      if (prev !== undefined && a.edgeOf === undefined) return prev.diameter
+      if (edgeDiameter === undefined)
+        return f.issue('edgeOf', 'chamferEdge', 'must be an earlier drilling or circle pocket')
+      const widen = f.q('diameter', 'length', DEFAULTS.chamferWidening[f.units])
+      if (widen === undefined) return widen
+      return derivedLength(edgeDiameter.exact.add(widen.exact), f.units).unwrap()
+    }
+    return {
+      kind: 'chamfer',
+      id,
+      name,
+      generalTolerance: prev?.generalTolerance ?? NO_TOLERANCE,
+      on: edge?.on ?? prev?.on ?? STOCK_TOP,
+      edgeOf,
+      diameter: diameter(),
+      angle: f.pick('angle', 'angle', a.angle, prev?.angle, 'chamferAngle'),
+    }
+  },
+}
+
 function kindCommands<P extends z.ZodRawShape, O extends Operation>(
   spec: KindSpec<P, O>,
 ): AnyCommand[] {
@@ -1153,6 +1200,7 @@ const KIND_SPECS = {
   pocket: pocketSpec,
   drilling: drillingSpec,
   profile: profileSpec,
+  chamfer: chamferSpec,
 } as const
 
 type AnyParamKey =
@@ -1160,6 +1208,7 @@ type AnyParamKey =
   | keyof typeof pocketParams
   | keyof typeof drillingParams
   | keyof typeof profileParams
+  | keyof typeof chamferParams
 
 /**
  * The parameter args of `design.<kind>.update` for every kind, all optional (equal names share
@@ -1215,6 +1264,7 @@ export const DESIGN_COMMANDS: readonly AnyCommand[] = [
   ...kindCommands(pocketSpec),
   ...kindCommands(drillingSpec),
   ...kindCommands(profileSpec),
+  ...kindCommands(chamferSpec),
   operationRemove,
   operationMove,
   partEvaluate,

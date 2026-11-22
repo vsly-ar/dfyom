@@ -124,11 +124,24 @@ export const AnalyticProfileGeometrySchema = ProfileGeometrySchema.omit({ depth:
   tabs: z.object({ count: z.number(), width: z.number(), thickness: z.number() }),
 })
 
+export const ChamferGeometrySchema = z.object({
+  kind: z.literal('chamfer'),
+  id: z.string(),
+  direction,
+  onZ: z.number(),
+  center: Vec2Schema,
+  edgeOf: z.string(),
+  edgeDiameter: z.number(),
+  diameter: z.number(),
+  angle: z.number(),
+})
+
 export const OperationGeometrySchema: z.ZodType<OperationGeometry> = z.discriminatedUnion('kind', [
   FacingGeometrySchema,
   PocketGeometrySchema,
   DrillingGeometrySchema,
   ProfileGeometrySchema,
+  ChamferGeometrySchema,
 ])
 
 export const PartGeometryInputSchema: z.ZodType<PartGeometryInput> = z.object({
