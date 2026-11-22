@@ -67,6 +67,22 @@ export function parseColour(value: string): Rgb | undefined {
   return channels.map((c) => Math.min(1, Math.max(0, c / 255))) as unknown as Rgb
 }
 
+/**
+ * The alpha of a colour token value (`rgb(r g b / a)`, `rgba(r, g, b, a)`, `#rrggbbaa`, `#rgba`);
+ * 1 when it has none or cannot be read. `parseColour` gives the channels.
+ */
+export function parseAlpha(value: string): number {
+  const s = value.trim().toLowerCase()
+  const hex = /^#([0-9a-f]{4}|[0-9a-f]{8})$/.exec(s)?.[1]
+  if (hex) return parseInt(hex.length === 4 ? hex[3]!.repeat(2) : hex.slice(6), 16) / 255
+  const fn = /^rgba?\(([^)]*)\)$/.exec(s)?.[1]
+  if (fn === undefined) return 1
+  const parts = fn.split(/[\s,/]+/).filter(Boolean)
+  if (parts.length < 4) return 1
+  const a = parts[3]!.endsWith('%') ? parseFloat(parts[3]!) / 100 : parseFloat(parts[3]!)
+  return Number.isFinite(a) ? Math.min(1, Math.max(0, a)) : 1
+}
+
 /** Token values (as `getComputedStyle` returns them) → palette; missing ones become `FALLBACK`. */
 export function paletteFrom(values: Readonly<Record<string, string>>): Palette {
   const out = {} as Record<PaletteKey, Rgb>

@@ -8,6 +8,7 @@ import { APPLY_SHORTCUT, IS_MAC, shortcutLabel } from './shortcuts'
 
 const m = projectMessages.shortcuts
 const alt = IS_MAC ? '⌥' : 'Alt+'
+const shift = IS_MAC ? '⇧' : 'Shift+'
 
 /** The list, grouped as the menu is (whole sentences live in messages; keys are symbols). */
 export const SHORTCUTS: readonly { group: keyof typeof m.groups; items: [string, string][] }[] = [
@@ -41,6 +42,7 @@ export const SHORTCUTS: readonly { group: keyof typeof m.groups; items: [string,
     group: 'viewport',
     items: [
       ['1 2 3 4', m.what.views],
+      [`${shift}1 ${shift}2 ${shift}3`, m.what.oppositeViews],
       ['F', m.what.fit],
       ['← → ↑ ↓', m.what.orbit],
       ['+ −', m.what.zoom],

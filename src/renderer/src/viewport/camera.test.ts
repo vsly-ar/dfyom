@@ -6,7 +6,6 @@ import {
   mouseButtons,
   MOUSE_PRESETS,
   ORBIT_STEP,
-  presetDirection,
   viewportKey,
   type KeyLike,
 } from './camera'
@@ -20,18 +19,7 @@ const key = (k: string, mods: Partial<KeyLike> = {}): KeyLike => ({
   ...mods,
 })
 
-describe('view presets', () => {
-  it('look along the CAD axes (Z up)', () => {
-    const top = presetDirection('top')
-    expect(top[2]).toBeCloseTo(1, 5)
-    expect(top[1]).toBeLessThan(0) // +Y up on screen
-    expect(presetDirection('front')).toEqual([0, -1, 0])
-    expect(presetDirection('right')).toEqual([1, 0, 0])
-    const iso = presetDirection('iso')
-    for (const c of iso) expect(Math.abs(c)).toBeCloseTo(1 / Math.sqrt(3), 9)
-    expect(iso[0] > 0 && iso[1] < 0 && iso[2] > 0).toBe(true) // front-right-top
-  })
-
+describe('fit', () => {
   it('fit distance shows the bounding sphere in the narrower angle', () => {
     // 90° vertical fov, square: r / sin 45°
     expect(fitDistance(10, 90, 1, 1)).toBeCloseTo(10 / Math.SQRT1_2, 6)
@@ -85,6 +73,20 @@ describe('viewport keys', () => {
     expect(viewportKey(key('+'))).toEqual({ kind: 'zoom', direction: 1 })
     expect(viewportKey(key('-'))).toEqual({ kind: 'zoom', direction: -1 })
     expect(viewportKey(key('Escape'))).toEqual({ kind: 'escape' })
+  })
+
+  it('Shift+1/2/3 by the physical key: Bottom, Back, Left (C6)', () => {
+    const shifted = (k: string, code: string) => key(k, { code, shiftKey: true })
+    expect(viewportKey(shifted('!', 'Digit1'))).toEqual({ kind: 'preset', preset: 'bottom' })
+    expect(viewportKey(shifted('@', 'Digit2'))).toEqual({ kind: 'preset', preset: 'back' })
+    expect(viewportKey(shifted('#', 'Digit3'))).toEqual({ kind: 'preset', preset: 'left' })
+    // other layouts type other signs on the same keys (German: Shift+3 is §, French: 1 needs Shift)
+    expect(viewportKey(shifted('§', 'Digit3'))).toEqual({ kind: 'preset', preset: 'left' })
+    expect(viewportKey(shifted('1', 'Digit1'))).toEqual({ kind: 'preset', preset: 'bottom' })
+    // Shift+4 has no opposite view; without Shift the typed key decides
+    expect(viewportKey(shifted('$', 'Digit4'))).toBeUndefined()
+    expect(viewportKey(key('1', { code: 'Digit1' }))).toEqual({ kind: 'preset', preset: 'top' })
+    expect(viewportKey(key('1', { code: 'Digit1', shiftKey: true, metaKey: true }))).toBeUndefined()
   })
 
   it('arrows orbit, Shift+arrows pan, only when the region itself has focus', () => {

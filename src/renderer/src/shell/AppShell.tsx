@@ -66,6 +66,8 @@ export function AppShell(): React.JSX.Element {
   const [inspectorOpen, setInspectorOpen] = useState(true)
   // narrow windows: the overlaid inspector starts closed and is opened on demand
   const [overlayOpen, setOverlayOpen] = useState(false)
+  // its width: the view cube and its toolbar move left beside it (ui-view-cube.md § Rendering)
+  const [overlayWidth, overlayRef] = useWidth()
 
   // Save a layout the user made (drag, keyboard, toggles), not the one restored at mount; wide
   // and narrow windows keep their own (different panel sets).
@@ -179,7 +181,7 @@ export function AppShell(): React.JSX.Element {
             <PanelResizeHandle label={m.resize.navigator} />
             <Panel id="viewport" minSize="20rem">
               <main aria-label={m.regions.viewport} className={styles['viewport']} {...region}>
-                <ShellViewport mode={mode} />
+                <ShellViewport mode={mode} insetRight={!wide && overlayOpen ? overlayWidth : 0} />
               </main>
             </Panel>
             {wide ? (
@@ -209,6 +211,7 @@ export function AppShell(): React.JSX.Element {
           </PanelGroup>
           {!wide && overlayOpen ? (
             <aside
+              ref={overlayRef}
               aria-label={m.regions.inspector}
               className={[styles['side'], styles['overlay']].join(' ')}
               {...region}
@@ -229,4 +232,21 @@ export function AppShell(): React.JSX.Element {
       </div>
     </ApplyScope>
   )
+}
+
+/** An element's border-box width, followed with a ResizeObserver; 0 while it is not mounted. */
+function useWidth(): [number, (el: HTMLElement | null) => (() => void) | undefined] {
+  const [width, setWidth] = useState(0)
+  const ref = useCallback((el: HTMLElement | null) => {
+    if (!el) return undefined
+    const read = (): void => setWidth(el.offsetWidth)
+    read()
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(read)
+    observer?.observe(el)
+    return () => {
+      observer?.disconnect()
+      setWidth(0)
+    }
+  }, [])
+  return [width, ref]
 }
