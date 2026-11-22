@@ -1,6 +1,7 @@
 // The Clones feature (v0.4 F5) through its commands: expansion with reference mapping, stable
 // numbering, the source following, refusals, limits, warnings, preview, pending keys, undo and
-// persistence. Sources are plain operations and the F1 test kind `probe`.
+// persistence; `along` rows on a named shape (F6). Sources are plain operations and the F1 test
+// kind `probe`.
 // Spec: docs/modes/features.md#clones, docs/modes/design-v0.4.md#implementation-f5
 import { describe, expect, it } from 'vitest'
 import { expectOk } from '../../../shared/testing/result'
@@ -8,6 +9,7 @@ import { pendingChanges } from '../../commands/apply'
 import { uiSource } from '../../commands/testing'
 import { docToFiles, loadProjectFiles } from '../../project/layout'
 import type { ProjectDoc } from '../../project/document'
+import { nodeRegion2d } from '../../geometry/2d/testing/node-wasm'
 import { designSetup, type DesignSetup } from '../design.fixture'
 import { PROBE_COMMANDS } from '../feature.fixture'
 import { loadPart } from '../load'
@@ -490,5 +492,152 @@ describe('preview, pending keys, persistence', () => {
     }
     const doc: ProjectDoc = { ...s.d.doc, parts: { [s.partId]: swap } }
     expect(loadPart(doc, s.partId, 't').unwrapErr()).toMatchObject({ code: 'input.malformed' })
+  })
+})
+
+describe('along rows (F6)', () => {
+  const region2d = nodeRegion2d()
+  const withShape = async () => {
+    const s = await designSetup({ services: { region2d } })
+    await withSource(s)
+    // an open L from (0, 0): 30 along x, then 20 along y
+    await s.run('design.shape.add', {
+      partId: s.partId,
+      items: [
+        {
+          kind: 'path',
+          start: ['0', '0'],
+          closed: false,
+          segments: [
+            { kind: 'line', to: ['30', '0'] },
+            { kind: 'line', to: ['30', '20'] },
+          ],
+        },
+      ],
+    })
+    return s
+  }
+  const at = (s: DesignSetup, id: string) =>
+    (s.op(id) as unknown as { shape: { center: unknown[] } }).shape.center.map(exact)
+
+  it('places clones along the shape and follows it when it changes (one undo step)', async () => {
+    const s = await withShape()
+    const r = await addClones(s, [{ kind: 'along', shapeId: 'shape1', spacing: '25' }])
+    // 0: the source itself (no number); 25: (45, 20); 50: the end (50, 40)
+    expect(r.operationIds).toEqual([
+      'clones1_2_pocket1',
+      'clones1_3_pocket1',
+      'clones1_2_drill1',
+      'clones1_3_drill1',
+    ])
+    expect(at(s, 'clones1_2_pocket1')).toEqual([45, 20])
+    expect(at(s, 'clones1_3_pocket1')).toEqual([50, 40])
+    const base = s.d.doc
+    await s.run('design.shape.update', {
+      partId: s.partId,
+      shapeId: 'shape1',
+      items: [
+        {
+          kind: 'path',
+          start: ['0', '0'],
+          closed: false,
+          segments: [
+            { kind: 'line', to: ['40', '0'] },
+            { kind: 'line', to: ['40', '10'] },
+          ],
+        },
+      ],
+    })
+    expect(at(s, 'clones1_2_pocket1')).toEqual([45, 20])
+    expect(at(s, 'clones1_3_pocket1')).toEqual([60, 30])
+    // the instances' change folds into the shape's key
+    expect(pendingChanges(s.d.doc, base).map((k) => k.shapeId)).toEqual(['shape1'])
+    await s.undo()
+    expect(at(s, 'clones1_3_pocket1')).toEqual([50, 40])
+  })
+
+  it('count spreads evenly from start; the shape cannot be removed while used', async () => {
+    const s = await withShape()
+    await addClones(s, [{ kind: 'along', shapeId: 'shape1', start: '10', count: 3 }])
+    expect(
+      ['clones1_2_pocket1', 'clones1_3_pocket1', 'clones1_4_pocket1'].map((id) => at(s, id)),
+    ).toEqual([
+      [30, 20],
+      [50, 20],
+      [50, 40],
+    ])
+    const e = await s.fail(
+      'design.shape.remove',
+      { partId: s.partId, shapeId: 'shape1' },
+      'design.referenced',
+    )
+    expect(e.issues).toEqual([expect.objectContaining({ path: ['features', 'clones1', 'rows'] })])
+    // a shape edit that breaks the row fails the command (design.clonesFollow)
+    await s.fail(
+      'design.shape.update',
+      {
+        partId: s.partId,
+        shapeId: 'shape1',
+        items: [
+          { kind: 'rectangle', center: ['0', '0'], length: '10', width: '10' },
+          { kind: 'circle', op: 'subtract', center: ['0', '0'], diameter: '2' },
+        ],
+      },
+      'model.invariant',
+    )
+  })
+
+  it('refuses unknown and many-item shapes, spacing with count, start off the path', async () => {
+    const s = await withShape()
+    await s.run('design.shape.add', {
+      partId: s.partId,
+      items: [
+        { kind: 'rectangle', center: ['0', '0'], length: '10', width: '10' },
+        { kind: 'circle', op: 'subtract', center: ['0', '0'], diameter: '2' },
+      ],
+    })
+    const rules = async (row: object) =>
+      (
+        await s.fail(
+          'design.clones.add',
+          { partId: s.partId, source: { operationIds: ['pocket1', 'drill1'] }, rows: [row] },
+          'model.invariant',
+        )
+      ).issues.map((i) => [i.path.join('.'), i.rule])
+    expect(await rules({ kind: 'along', shapeId: 'shape9', count: 2 })).toEqual([
+      ['rows.0.shapeId', 'unknownShape'],
+    ])
+    expect(await rules({ kind: 'along', shapeId: 'shape2', count: 2 })).toEqual([
+      ['rows.0.shapeId', 'alongOneItem'],
+    ])
+    expect(await rules({ kind: 'along', shapeId: 'shape1', count: 2, spacing: '5' })).toEqual([
+      ['rows.0.spacing', 'alongSpacingOrCount'],
+    ])
+    expect(await rules({ kind: 'along', shapeId: 'shape1', count: 2, start: '51' })).toEqual([
+      ['rows.0.start', 'range'],
+    ])
+  })
+
+  it('update and preview check source and rows against the full schema', async () => {
+    const s = await withShape()
+    await addClones(s)
+    const bad = await s.fail(
+      'design.clones.update',
+      { partId: s.partId, featureId: 'clones1', rows: [{ kind: 'along', count: 2 }] },
+      'input.malformed',
+    )
+    expect(bad.issues[0]!.path.slice(0, 2)).toEqual(['rows', 0])
+    await s.run('design.clones.update', {
+      partId: s.partId,
+      featureId: 'clones1',
+      rows: [{ kind: 'along', shapeId: 'shape1', count: 2 }],
+    })
+    expect(at(s, 'clones1_2_pocket1')).toEqual([50, 40])
+    const preview = s.d.query(
+      'design.clones.preview',
+      { partId: s.partId, source: { operationIds: 'pocket1' }, rows: [] },
+      uiSource(),
+    )
+    expect(preview.unwrapErr()).toMatchObject({ code: 'input.malformed' })
   })
 })

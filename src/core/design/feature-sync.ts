@@ -11,6 +11,7 @@ import { deepEqual } from '../library/snapshot'
 import type { Stock } from '../library/stock'
 import type { UnitSystem } from '../project/document'
 import type { ShapeEnv } from './commands'
+import type { ShapeDTO } from './shape.dto'
 import { featureBlock, materialize, ownedOperationId, type LoadedFeature } from './feature'
 import { shapesOf, type Operation } from './operation'
 import { shapeFacts } from './placement'
@@ -59,6 +60,7 @@ export function recalculateFeatures(
   features: readonly LoadedFeature[],
   stock: Stock,
   units: UnitSystem,
+  shapes: readonly ShapeDTO[],
 ): AppResult<{ ops: readonly Operation[]; features: LoadedFeature[]; changed: string[] }> {
   let next: readonly Operation[] = ops
   const changed: string[] = []
@@ -91,6 +93,7 @@ export function recalculateFeatures(
       stock,
       before: next.slice(0, start),
       ownedId: (role) => ownedOperationId(feature.id, role),
+      shapes,
     })
     if (expanded.isErr()) return expanded
     const owned = materialize(f, expanded.unwrap(), next.slice(start, end))
@@ -124,7 +127,7 @@ export function settleFeatures(
   const mapped = (e: AppError, at: readonly Operation[]) =>
     Err(mapFeatureIssues(e, at, features, edited).withContext(where))
   if (features.length === 0) return Ok({ ops, features: [], changed: [] })
-  const r = recalculateFeatures(ops, features, stock, units)
+  const r = recalculateFeatures(ops, features, stock, units, env.dto.shapes ?? [])
   if (r.isErr()) return mapped(r.unwrapErr(), ops)
   const { changed } = r.unwrap()
   if (changed.length === 0) return r

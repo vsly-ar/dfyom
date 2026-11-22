@@ -27,6 +27,27 @@ export function operationsUsingShape(part: PartLike, shapeId: string): string[] 
 }
 
 /**
+ * Ids of the features with a Clones `along` row on `shapeId` (v0.4 F6; their clones follow the
+ * shape), in record order.
+ */
+export function featuresUsingShape(
+  part: { readonly features?: readonly { readonly id: string }[] | undefined },
+  shapeId: string,
+): string[] {
+  return (part.features ?? [])
+    .filter((f) => {
+      const rows = (f as { rows?: unknown }).rows
+      return (
+        Array.isArray(rows) &&
+        rows.some(
+          (r: { kind?: unknown; shapeId?: unknown }) => r.kind === 'along' && r.shapeId === shapeId,
+        )
+      )
+    })
+    .map((f) => f.id)
+}
+
+/**
  * The operations of `part` a design change is an input of: its own operation; for a feature key
  * the operations the feature owns; for a shape key
  * every operation using the shape (counted once however many use it); a new part or a changed

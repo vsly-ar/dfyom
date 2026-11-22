@@ -658,7 +658,7 @@ export const partEvaluate = defineCommand({
     if (loaded.isErr()) return Err(loaded.unwrapErr())
     const state = await evaluations.evaluate(args.partId, ctx.signal)
     if (state.isErr()) return Err(state.unwrapErr())
-    const { part, stock, units, features } = loaded.unwrap()
+    const { part, stock, units, features, dto } = loaded.unwrap()
     const library = ctx.services.library
     const tools = library === undefined ? [] : libraryTools(library)
     const parameter = partWarnings(
@@ -669,6 +669,7 @@ export const partEvaluate = defineCommand({
       doc.snapshots,
       ctx.services.region2d,
       features,
+      dto.shapes,
     )
 
     if (parameter.isErr()) return Err(parameter.unwrapErr().withContext(where))

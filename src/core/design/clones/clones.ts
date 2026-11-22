@@ -39,7 +39,19 @@ import type {
 import type { FeatureDTO } from '../feature.dto'
 import { NAME_MAX } from '../../library/item'
 import { quantityParams, withParam, type FieldKind, type Operation, type Shape } from '../operation'
-import { clonePath, rowPointCount, type ClonePath, type PathRow, type UV } from './path'
+import type { ShapeDTO } from '../shape.dto'
+import { definitionOf, shapeFromDTO } from '../shape'
+import { itemChain } from '../shape-items'
+import {
+  alongStations,
+  clonePath,
+  rowPointCount,
+  SAME_SPOT,
+  type AlongChain,
+  type ClonePath,
+  type PathRow,
+  type UV,
+} from './path'
 
 /** Most instances of one Clones feature, the source included (D36, spike S6). */
 export const CLONES_MAX = 100
@@ -56,22 +68,78 @@ export const CLONES_HEAVY_OPERATIONS = 50
 
 // ── rows ───────────────────────────────────────────────────────────────────────────────────
 
-/** Quantity fields and whole-number fields of each row kind (F6 adds `along`). */
+/**
+ * The fields of each row kind: quantities (`q`, optional `oq`), whole numbers (`n`, optional
+ * `on`) and strings (`s`: an `along` row's shape id).
+ */
 export const ROW_FIELDS = {
-  grid: { q: { du: 'length', dv: 'length' }, n: ['cols', 'rows'] },
-  offset: { q: { du: 'length', dv: 'length' }, n: ['count'] },
-  polar: { q: { angle: 'angle', distance: 'length' }, n: ['count'] },
-  arc: { q: { radius: 'length', angle: 'angle', arc: 'angle', step: 'angle' }, n: [] },
-  point: { q: { u: 'length', v: 'length' }, n: [] },
-} as const satisfies Record<PathRow['kind'], { q: Record<string, FieldKind>; n: readonly string[] }>
+  grid: { q: { du: 'length', dv: 'length' }, oq: {}, n: ['cols', 'rows'], on: [], s: [] },
+  offset: { q: { du: 'length', dv: 'length' }, oq: {}, n: ['count'], on: [], s: [] },
+  polar: { q: { angle: 'angle', distance: 'length' }, oq: {}, n: ['count'], on: [], s: [] },
+  arc: {
+    q: { radius: 'length', angle: 'angle', arc: 'angle', step: 'angle' },
+    oq: {},
+    n: [],
+    on: [],
+    s: [],
+  },
+  point: { q: { u: 'length', v: 'length' }, oq: {}, n: [], on: [], s: [] },
+  along: {
+    q: {},
+    oq: { start: 'length', spacing: 'length' },
+    n: [],
+    on: ['count'],
+    s: ['shapeId'],
+  },
+} as const satisfies Record<
+  PathRow['kind'],
+  {
+    q: Record<string, FieldKind>
+    oq: Record<string, FieldKind>
+    n: readonly string[]
+    on: readonly string[]
+    s: readonly string[]
+  }
+>
 
 export type CloneRowKind = keyof typeof ROW_FIELDS
+type RowFields<K extends CloneRowKind> = (typeof ROW_FIELDS)[K]
 type RowOf<K extends CloneRowKind> = { readonly kind: K; readonly skip?: readonly number[] } & {
-  readonly [F in keyof (typeof ROW_FIELDS)[K]['q']]: Quantity
-} & { readonly [F in (typeof ROW_FIELDS)[K]['n'][number]]: number }
+  readonly [F in keyof RowFields<K>['q']]: Quantity
+} & { readonly [F in keyof RowFields<K>['oq']]?: Quantity } & {
+  readonly [F in RowFields<K>['n'][number]]: number
+} & { readonly [F in RowFields<K>['on'][number]]?: number } & {
+  readonly [F in RowFields<K>['s'][number]]: string
+}
 
 /** One path row with quantities (path.ts `PathRow` with canonical numbers). */
 export type CloneRow = { [K in CloneRowKind]: RowOf<K> }[CloneRowKind]
+
+/** The quantity fields of a row kind, required then optional, with their kinds. */
+export const rowQuantities = (kind: CloneRowKind): [string, FieldKind][] => [
+  ...Object.entries(ROW_FIELDS[kind].q),
+  ...Object.entries(ROW_FIELDS[kind].oq),
+]
+
+/**
+ * `r` with its quantity fields mapped by `f` (absent optional ones left out), whole-number and
+ * string fields copied, `skip` sorted and unique (left out when empty).
+ */
+export function mapRow<A, B>(
+  r: { readonly kind: CloneRowKind },
+  f: (a: A, field: string, kind: FieldKind) => B,
+): Record<string, unknown> {
+  const rec = r as unknown as Readonly<Record<string, unknown>>
+  const out: Record<string, unknown> = { kind: r.kind }
+  for (const [k, kind] of rowQuantities(r.kind))
+    if (rec[k] !== undefined) out[k] = f(rec[k] as A, k, kind)
+  const fields = ROW_FIELDS[r.kind]
+  for (const k of [...fields.n, ...fields.on, ...fields.s])
+    if (rec[k] !== undefined) out[k] = rec[k]
+  const skip = rec['skip'] as readonly number[] | undefined
+  if (skip !== undefined && skip.length > 0) out['skip'] = [...new Set(skip)].sort((a, b) => a - b)
+  return out
+}
 
 export type ClonesSource =
   { readonly operationIds: readonly string[] } | { readonly featureId: string }
@@ -82,19 +150,26 @@ export interface Clones extends FeatureBase {
   readonly rows: readonly CloneRow[]
 }
 
+/** The part's named shape records, which `along` rows follow (`PartDTO.shapes`; [] = none). */
+export type CloneShapes = readonly ShapeDTO[]
+
 const count = z.number().int().min(1).max(CLONE_ROW_MAX)
 const Skip = z.array(z.number().int().min(0)).max(CLONE_ROW_MAX)
 
 /** A row schema per kind with `q` as the quantity field schema (DTO or arg). */
 function rowSchemas<Q extends z.ZodType>(q: Q) {
-  return (Object.keys(ROW_FIELDS) as CloneRowKind[]).map((kind) =>
-    z.object({
+  return (Object.keys(ROW_FIELDS) as CloneRowKind[]).map((kind) => {
+    const f = ROW_FIELDS[kind]
+    return z.object({
       kind: z.literal(kind),
-      ...Object.fromEntries(Object.keys(ROW_FIELDS[kind].q).map((k) => [k, q])),
-      ...Object.fromEntries(ROW_FIELDS[kind].n.map((k) => [k, count])),
+      ...Object.fromEntries(Object.keys(f.q).map((k) => [k, q])),
+      ...Object.fromEntries(Object.keys(f.oq).map((k) => [k, q.optional()])),
+      ...Object.fromEntries(f.n.map((k) => [k, count])),
+      ...Object.fromEntries(f.on.map((k) => [k, count.optional()])),
+      ...Object.fromEntries(f.s.map((k) => [k, z.string().min(1).max(64)])),
       skip: Skip.optional(),
-    }),
-  ) as unknown as [z.ZodObject, z.ZodObject, ...z.ZodObject[]]
+    })
+  }) as unknown as [z.ZodObject, z.ZodObject, ...z.ZodObject[]]
 }
 
 export const ClonesSourceSchema = z.union([
@@ -107,41 +182,60 @@ const ClonesDtoSchema = z.looseObject({
   rows: z.array(z.discriminatedUnion('kind', rowSchemas(QuantityDtoSchema))).max(CLONE_ROWS_MAX),
 })
 
-/** The rows as canonical numbers for the path walk. */
-export function pathRows(rows: readonly CloneRow[]): PathRow[] {
+/**
+ * The chain of an `along` row's shape (one item: a path or a primitive's outline, in its shape
+ * frame), or issues at the row's `shapeId` (`unknownShape`, `alongOneItem`, `alongShape`).
+ */
+export function alongChain(
+  shapes: CloneShapes,
+  shapeId: string,
+): { chain?: AlongChain; issues: Issue[] } {
+  const bad = (rule: string, message: string) => ({
+    issues: [{ path: ['shapeId'], rule, message, params: { shapeId } }],
+  })
+  const dto = shapes.find((s) => s.id === shapeId)
+  if (dto === undefined) return bad('unknownShape', 'no such shape in the part')
+  const shape = shapeFromDTO(dto)
+  if (shape.isErr()) return bad('alongShape', 'the shape does not load')
+  const items = shape.unwrap().items
+  if (items.length !== 1)
+    return bad('alongOneItem', 'the shape must be one item: one path or one outline')
+  const issues: Issue[] = []
+  const c = itemChain(definitionOf(items)[0]!, 0, issues)
+  if (c === undefined || c.loop.elements.length === 0)
+    return bad('alongShape', `the shape is invalid: ${issues[0]?.message ?? 'no elements'}`)
+  return { chain: { elements: c.loop.elements, closed: c.closed }, issues: [] }
+}
+
+/**
+ * The rows as canonical numbers for the path walk; `along` rows take their chain from `shapes`
+ * (none when the shape is unknown or invalid: `alongIssues` names it) and `start` 0 by default.
+ */
+export function pathRows(rows: readonly CloneRow[], shapes: CloneShapes = []): PathRow[] {
   return rows.map((r) => {
-    const out: Record<string, unknown> = { kind: r.kind }
-    const rec = r as unknown as Record<string, unknown>
-    for (const k of Object.keys(ROW_FIELDS[r.kind].q)) out[k] = (rec[k] as Quantity).canonical
-    for (const k of ROW_FIELDS[r.kind].n) out[k] = rec[k]
-    if (r.skip !== undefined && r.skip.length > 0) out['skip'] = [...r.skip]
+    const out = mapRow<Quantity, number>(r, (q) => q.canonical)
+    if (r.kind === 'along') {
+      out['chain'] = alongChain(shapes, r.shapeId).chain
+      out['start'] ??= 0
+    }
     return out as unknown as PathRow
   })
 }
 
-function rowToDTO(r: CloneRow): Record<string, unknown> {
-  const rec = r as unknown as Record<string, unknown>
-  const out: Record<string, unknown> = { kind: r.kind }
-  for (const k of Object.keys(ROW_FIELDS[r.kind].q)) out[k] = (rec[k] as Quantity).toDTO()
-  for (const k of ROW_FIELDS[r.kind].n) out[k] = rec[k]
-  if (r.skip !== undefined && r.skip.length > 0) out['skip'] = [...r.skip]
-  return out
-}
+const rowToDTO = (r: CloneRow): Record<string, unknown> =>
+  mapRow<Quantity, unknown>(r, (q) => q.toDTO())
 
 function rowFromDTO(dto: Record<string, unknown>, i: number): AppResult<CloneRow> {
   const kind = dto['kind'] as CloneRowKind
-  const keys = Object.keys(ROW_FIELDS[kind].q)
+  const keys = rowQuantities(kind)
+    .map(([k]) => k)
+    .filter((k) => dto[k] !== undefined)
   const qs = collect(
     keys.map((k) => Quantity.fromDTO(dto[k] as never).mapErr((e) => e.prefixIssues('rows', i, k))),
   )
   return qs.map((values) => {
-    const out: Record<string, unknown> = { kind }
-    keys.forEach((k, j) => (out[k] = values[j]))
-    for (const k of ROW_FIELDS[kind].n) out[k] = dto[k]
-    const skip = dto['skip'] as number[] | undefined
-    if (skip !== undefined && skip.length > 0)
-      out['skip'] = [...new Set(skip)].sort((a, b) => a - b)
-    return out as unknown as CloneRow
+    const byKey = new Map(keys.map((k, j) => [k, values[j]]))
+    return mapRow<unknown, unknown>({ ...dto, kind }, (_, k) => byKey.get(k)) as unknown as CloneRow
   })
 }
 
@@ -312,8 +406,15 @@ function instanceOf(
 }
 
 /** The clone path of a feature from its source in `ops` (the source's reference point). */
-export function featurePath(feature: Clones, ops: readonly Operation[]): ClonePath {
-  return clonePath(referencePoint(sourceOperations(feature.source, ops)), pathRows(feature.rows))
+export function featurePath(
+  feature: Clones,
+  ops: readonly Operation[],
+  shapes: CloneShapes,
+): ClonePath {
+  return clonePath(
+    referencePoint(sourceOperations(feature.source, ops)),
+    pathRows(feature.rows, shapes),
+  )
 }
 
 /** `model.invariant` (`clonesLimit`, at `rows`) when the path makes more than `CLONES_MAX` instances. */
@@ -345,7 +446,13 @@ export function expandClones(
       issues: [{ path: ['source'], rule: 'clonesSourceEmpty', message: 'no source operations' }],
       data: { featureId: feature.id },
     })
-  const path = clonePath(referencePoint(src), pathRows(feature.rows))
+  const along = alongIssues(feature.rows, ctx.shapes)
+  if (along.length > 0)
+    return fail('model.invariant', `${feature.id}: ${along[0]!.message}`, {
+      issues: along,
+      data: { featureId: feature.id },
+    })
+  const path = clonePath(referencePoint(src), pathRows(feature.rows, ctx.shapes))
   const limit = limitIssues(path)
   if (limit.length > 0)
     return fail('model.invariant', limit[0]!.message, {
@@ -395,8 +502,11 @@ export function clonesToDTO(c: Clones): FeatureDTO {
 
 // ── invariants ─────────────────────────────────────────────────────────────────────────────
 
-/** Row rules (features.md § Checks and DFM) as `model.invariant` issues at `rows.<i>.<field>`. */
-export function rowIssues(rows: readonly CloneRow[]): Issue[] {
+/**
+ * Row rules (features.md § Checks and DFM) as `model.invariant` issues at `rows.<i>.<field>`;
+ * with `shapes` also the `along` rows' shape and length rules (`alongIssues`).
+ */
+export function rowIssues(rows: readonly CloneRow[], shapes?: CloneShapes): Issue[] {
   const issues: Issue[] = []
   const at = (i: number, field: string, rule: string, message: string) =>
     issues.push({ path: ['rows', i, ...(field === '' ? [] : [field])], rule, message })
@@ -425,12 +535,53 @@ export function rowIssues(rows: readonly CloneRow[]): Issue[] {
         break
       case 'point':
         break
+      case 'along':
+        if ((r.spacing === undefined) === (r.count === undefined))
+          at(i, 'spacing', 'alongSpacingOrCount', 'give spacing or count, not both')
+        else if (r.spacing !== undefined && r.spacing.canonical <= 0)
+          at(i, 'spacing', 'positive', 'must be more than 0')
+        if (r.start !== undefined && r.start.canonical < 0)
+          at(i, 'start', 'nonNegative', 'must be 0 or more')
+        break
     }
-    const [row] = pathRows([r])
+    if (shapes !== undefined && !issues.some((x) => x.path[1] === i))
+      issues.push(
+        ...alongIssues([r], shapes).map((x) => ({ ...x, path: ['rows', i, ...x.path.slice(2)] })),
+      )
+    const [row] = pathRows([r], shapes)
     if (!issues.some((x) => x.path[1] === i) && rowPointCount(row!) > CLONE_ROW_MAX)
       at(i, '', 'clonesRowMax', `more than ${CLONE_ROW_MAX} positions in one row`)
   }
   return issues
+}
+
+/**
+ * The `along` rows' rules that need the part's shapes, at `rows.<i>.<field>`: the shape exists
+ * and is one item (`alongChain`); `start` lies on the path (a closed loop: before its end).
+ */
+export function alongIssues(rows: readonly CloneRow[], shapes: CloneShapes): Issue[] {
+  return rows.flatMap((r, i) => {
+    if (r.kind !== 'along') return []
+    const { chain, issues } = alongChain(shapes, r.shapeId)
+    const at = (x: Issue): Issue => ({ ...x, path: ['rows', i, ...x.path] })
+    if (chain === undefined) return issues.map(at)
+    const [row] = pathRows([r], shapes)
+    const { length } = alongStations(row as Extract<PathRow, { kind: 'along' }>)
+    const start = r.start?.canonical ?? 0
+    const past = chain.closed
+      ? start >= length - SAME_SPOT && start > 0
+      : start > length + SAME_SPOT
+    return past
+      ? [
+          at({
+            path: ['start'],
+            rule: 'range',
+            message: chain.closed ? 'must be less than the loop length' : 'must lie on the path',
+            params: { length: Math.round(length * 1000) / 1000 },
+          }),
+        ]
+      : []
+  })
 }
 
 // ── warnings ───────────────────────────────────────────────────────────────────────────────
@@ -503,11 +654,12 @@ export function clonesWarnings(
   ops: readonly Operation[],
   stock: Stock,
   _units: UnitSystem,
+  shapes: CloneShapes = [],
 ): DfmWarning[] {
   const src = sourceOperations(feature.source, ops)
   if (src.length === 0) return []
   const ref = referencePoint(src)
-  const path = clonePath(ref, pathRows(feature.rows))
+  const path = clonePath(ref, pathRows(feature.rows, shapes))
   const out: DfmWarning[] = []
   const w = (
     code: DfmWarning['code'],
@@ -590,9 +742,10 @@ function arrangeClones(
   ops: readonly Operation[],
   prev: Clones | undefined,
   features: readonly LoadedFeature[],
+  shapes: CloneShapes = [],
 ): AppResult<{ ops: readonly Operation[]; start: number; end: number }> {
   const where = 'design.clones'
-  const issues = sourceIssues(feature, ops, features)
+  const issues = [...sourceIssues(feature, ops, features), ...alongIssues(feature.rows, shapes)]
   if (issues.length > 0)
     return fail('model.invariant', `${issues.length} invalid value(s)`, { issues, where })
   const nested = new Set(sourceOperations(feature.source, ops).map((o) => o.id))
@@ -624,7 +777,7 @@ function arrangeClones(
   const next = keyed.map((x) => x.o)
   const start = next.findIndex((o) => nested.has(o.id)) + nested.size // right after the source (an empty block is still there)
   const owned = next.filter((o) => ownerOf(o) === feature.id).length
-  const path = featurePath(feature, next)
+  const path = featurePath(feature, next, shapes)
   const limit = limitIssues(path)
   if (limit.length > 0)
     return fail('model.invariant', `${limit.length} invalid value(s)`, { issues: limit, where })
@@ -639,7 +792,9 @@ function reevaluateClones(
   return collect(
     c.rows.map((r, i) => {
       const rec = r as unknown as Record<string, unknown>
-      const keys = Object.keys(ROW_FIELDS[r.kind].q)
+      const keys = rowQuantities(r.kind)
+        .map(([k]) => k)
+        .filter((k) => rec[k] !== undefined)
       return collect(keys.map((k) => at(rec[k] as Quantity, `rows.${i}.${k}`))).map((qs) => {
         const out: Record<string, unknown> = { ...rec }
         keys.forEach((k, j) => (out[k] = qs[j]))

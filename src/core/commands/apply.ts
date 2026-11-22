@@ -10,6 +10,7 @@ import { fail, Ok } from '../../shared/result'
 import { DesignToolDtoSchema, type PartDTO } from '../design/part.dto'
 import { designUnits } from '../design/feature'
 import { clonesSourceIds } from '../design/clones/clones'
+import { featuresUsingShape } from '../design/shape-users'
 import { sameValue } from '../plan/validity'
 import type { ProjectDoc } from '../project/document'
 import type { Source } from './context'
@@ -188,14 +189,20 @@ function partChanges(doc: ProjectDoc, base: ProjectDoc, id: string): PendingChan
   // owned operations changed with no key of their feature (recalculated from an earlier edit):
   // one key per feature, so the auto tool choice still targets them
   const keyed = new Set(featureKeys.map((k) => k.featureId))
-  // Clones instances that followed an edited source fold into the source's keys (F5)
+  // Clones instances that followed an edited source fold into the source's keys (F5), and
+  // those that followed an `along` row's edited shape into the shape's keys (F6)
   const sourceKeyed = (f: string) => {
     const dto = after.features?.find((x) => x.id === f)
     const src = dto === undefined ? undefined : clonesSourceIds(dto, after.operations)
     return (
       src !== undefined &&
       (out.some((k) => k.operationId !== undefined && src.has(k.operationId)) ||
-        featureKeys.some((k) => k.featureId !== undefined && src.has(k.featureId)))
+        featureKeys.some((k) => k.featureId !== undefined && src.has(k.featureId)) ||
+        out.some(
+          (k) =>
+            k.shapeId !== undefined &&
+            featuresUsingShape({ features: [dto!] }, k.shapeId).length > 0,
+        ))
     )
   }
   for (const f of touched)
