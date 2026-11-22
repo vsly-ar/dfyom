@@ -30,8 +30,6 @@ export const designMessages = {
     addHole: 'Add hole',
     addChamfer: 'Add chamfer',
     makeClones: 'Make Clones…',
-    // until the chamfer operation (C2) and Clones (F5) are in the app
-    chamferNotBuilt: 'Not available yet: the chamfer operation is still being built.',
     cloneReasons: {
       select: 'Select a hole, pocket, drilling, chamfer or inside profile to clone.',
       facing: 'A facing can’t be cloned.',

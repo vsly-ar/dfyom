@@ -130,6 +130,7 @@ All answered (D30, D34); kept with the original questions for the record.
 ## Apply and pending changes
 
 - **Pending keys** ([apply.md § What is pending](../architecture/apply.md#what-is-pending)) for a feature are `(part, feature, field)` for its own fields and `(part, feature)` for add, remove and move; changes of its owned operations caused by the expansion fold into these keys, so changing a Clones row from 4 to 6 positions counts **1**, not 12. Owned-operation fields the user edits directly (tool unlock) keep their per-operation keys.
+- **Refilled fields fold too:** a field a command refills from another one is no key of its own while the field that drove the refill is pending (`FeatureKindSpec.pendingFolds`). The hole's table sizes (`diameter`, `cbDiameter`, `cbDepth`, `csDiameter`, `csAngle`) fold into `fastener`, `purpose`, `fit`, `headSink` or `type` ([design-v0.4.md § Parameters](design-v0.4.md#parameters)), so choosing M4 counts **1**; a size typed by hand with no driver pending counts 1 on its own (X1).
 - The [auto tool choice](design-v0.2.md#auto-choice) on Apply targets every unlocked owned operation of a feature with pending changes, plus new owned operations.
 - The tooltip lists features by name ("Counterbore 1: diameter · Clones 1 added").
 

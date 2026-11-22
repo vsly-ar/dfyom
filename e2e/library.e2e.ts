@@ -3,8 +3,26 @@
 // then edited and saved again, and the design tool field lists it. The context link "Edit in
 // library" is not used here (plan mode); the leave prompt and conflicts are covered by component
 // tests. Docs: docs/conventions/ui-library-window.md, docs/conventions/testing.md#end-to-end
-import type { Locator } from '@playwright/test'
+import { resolve } from 'node:path'
+import type { Locator, Page } from '@playwright/test'
 import { expect, test } from './app.fixture'
+
+const RENDERS = process.env['DFYOM_RENDERS'] === '1'
+const rendersDir = resolve(__dirname, '../design/features/renders')
+
+/** With DFYOM_RENDERS=1: the Library window in light and dark (the theme is set in `main`). */
+async function render(main: Page, lib: Page, name: string): Promise<void> {
+  if (!RENDERS) return
+  const settings = main.getByRole('dialog', { name: 'Settings' })
+  for (const theme of ['light', 'dark'] as const) {
+    await main.getByRole('button', { name: 'Settings' }).click()
+    await settings.getByRole('radio', { name: theme === 'light' ? 'Light' : 'Dark' }).click()
+    await settings.getByRole('button', { name: 'Done' }).click()
+    await expect(lib.locator('html')).toHaveAttribute('data-theme', theme)
+    await lib.waitForTimeout(400)
+    await lib.screenshot({ path: `${rendersDir}/${name}-${theme}.png` })
+  }
+}
 
 const input = (scope: Locator, label: string) =>
   scope.getByLabel(label, { exact: true }).and(scope.locator('input'))
@@ -73,5 +91,52 @@ test('library window: add and edit a tool, see it in the design tool field', asy
   await expect(listbox.getByRole('option', { name: /^Shop flat 6 long · Ø 6 mm/ })).toBeVisible()
   await listbox.getByRole('option', { name: /^Shop flat 6 long/ }).click()
   await expect(combo).toHaveText(/Shop flat 6 long/)
+  expect(dfyom.rendererErrors).toEqual([])
+})
+
+test('library window: a new chamfer mill with its angle, tip and drawing (U4)', async ({
+  dfyom,
+}) => {
+  test.setTimeout(120_000)
+  const page = await dfyom.app.firstWindow()
+  await page.waitForLoadState('domcontentloaded')
+  const navigator = page.getByRole('navigation', { name: 'Navigator' })
+  await navigator.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  await dialog.getByRole('textbox', { name: 'Project name' }).fill('Chamfer mills')
+  await dialog.getByRole('button', { name: 'Create project' }).click()
+  await navigator
+    .getByRole('region', { name: 'Set up the part' })
+    .getByRole('button', { name: 'Create part' })
+    .click()
+
+  const opened = dfyom.app.waitForEvent('window')
+  await page.getByRole('button', { name: 'Library', exact: true }).click()
+  const lib = await opened
+  await lib.waitForLoadState('domcontentloaded')
+  if (RENDERS) await lib.setViewportSize({ width: 1100, height: 760 })
+  await lib.getByRole('button', { name: 'New tool' }).click()
+  const editor = lib.getByRole('region', { name: 'Item editor' })
+  const grid = lib.getByRole('grid', { name: 'Tools' })
+
+  // the type is offered for new tools, with "V-bit" in its hint
+  await editor.getByRole('combobox', { name: 'Type' }).click()
+  const option = lib.getByRole('option', { name: 'Chamfer mill' })
+  await expect(option).toContainText('V-bit')
+  await option.click()
+  await expect(input(editor, 'Tip diameter')).toHaveAttribute('placeholder', '0: pointed')
+  await setField(editor, 'Diameter', '12')
+  await expect(editor.getByRole('heading', { name: 'Chamfer 90° Ø12' })).toBeVisible()
+  // the drawing: the cone with its tip flat, the focused dimension highlighted
+  await input(editor, 'Included angle').focus()
+  await expect(
+    editor.getByRole('img', { name: 'Tool drawing: included angle highlighted' }),
+  ).toBeVisible()
+  await render(page, lib, 'u4-chamfer-mill')
+  await editor.getByRole('button', { name: 'Save' }).click()
+  const row = grid.getByRole('row', { name: /Chamfer 90° Ø12/ })
+  await expect(row).toHaveAttribute('aria-selected', 'true')
+  await expect(row).toContainText('90°')
+  await expect(row).not.toContainText('Unsaved')
   expect(dfyom.rendererErrors).toEqual([])
 })

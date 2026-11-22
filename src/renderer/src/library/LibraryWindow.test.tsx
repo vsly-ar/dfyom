@@ -233,6 +233,54 @@ describe('Library window', () => {
     await expectNoAxeViolations()
   })
 
+  it('a new chamfer mill (U4): offered type with its V-bit hint, angle and tip fields, drawing, Angle column, V-bit search', async () => {
+    const { user, row, grid, editor, library } = await renderLibrary()
+    await user.click(screen.getByRole('button', { name: 'New tool' }))
+    await waitFor(() =>
+      expect(within(editor()).getByRole('heading', { name: 'Flat 6' })).toBeInTheDocument(),
+    )
+    within(editor()).getByRole('combobox', { name: 'Type' }).focus()
+    await user.keyboard('{Enter}')
+    const list = await screen.findByRole('listbox')
+    const option = within(list).getByRole('option', { name: 'Chamfer mill' })
+    expect(option).toHaveAccessibleDescription(/V-bit/)
+    await user.click(option)
+    // angle and tip right after the diameter; the name follows "Chamfer 90° Ø6"
+    const labels = within(editor())
+      .getAllByRole('textbox')
+      .map((i) => i.getAttribute('aria-label') ?? (i as HTMLInputElement).labels?.[0]?.textContent)
+    expect(labels.indexOf('Included angle')).toBe(labels.indexOf('Diameter') + 1)
+    expect(labels.indexOf('Tip diameter')).toBe(labels.indexOf('Diameter') + 2)
+    const tip = within(editor()).getByLabelText('Tip diameter', { selector: 'input' })
+    expect(tip).toHaveAttribute('placeholder', '0: pointed')
+    await waitFor(() =>
+      expect(within(editor()).getByRole('heading', { name: 'Chamfer 90° Ø6' })).toBeInTheDocument(),
+    )
+    await user.click(within(editor()).getByLabelText('Included angle', { selector: 'input' }))
+    expect(
+      await within(editor()).findByRole('img', {
+        name: 'Tool drawing: included angle highlighted',
+      }),
+    ).toBeInTheDocument()
+    await expectNoAxeViolations()
+    await user.click(within(editor()).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(row(/Chamfer 90° Ø6/)).toHaveAttribute('aria-selected', 'true'))
+    await waitFor(() => expect(row(/Chamfer 90° Ø6/)).not.toHaveTextContent('Unsaved'))
+    const saved = library.list('tool').items.map((i) => i.toDTO())
+    expect(saved.find((t) => t.name === 'Chamfer 90° Ø6')).toMatchObject({
+      type: 'chamferMill',
+      angle: { source: '90' },
+    })
+    // the Angle column: 90° for the chamfer mill, empty for the others
+    expect(within(grid()).getByRole('columnheader', { name: /Angle/ })).toBeInTheDocument()
+    expect(row(/Chamfer 90° Ø6/)).toHaveTextContent('90°')
+    expect(row(/Flat 6/)).not.toHaveTextContent('°')
+    // "V-bit" finds chamfer mills
+    await user.type(screen.getByRole('searchbox', { name: 'Search' }), 'v-bit')
+    expect(row(/Chamfer 90° Ø6/)).toBeInTheDocument()
+    expect(within(grid()).queryByRole('row', { name: /Flat 6/ })).toBeNull()
+  })
+
   it('offers Reload or Overwrite when the item changed elsewhere', async () => {
     const { user, row, editor, d, get, flat6 } = await renderLibrary()
     await user.click(row(/Flat 6/))

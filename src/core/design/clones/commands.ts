@@ -19,7 +19,8 @@ import {
 import type { CommandContext } from '../../commands/context'
 import { deepEqual } from '../../library/snapshot'
 import type { ProjectDoc } from '../../project/document'
-import { Fields, invalid, load, PartArg, settle, shapeEnv, Src, Warnings } from '../commands'
+import { Fields, invalid, load, PartArg, settle, shapeEnv, Src } from '../commands'
+import { DfmWarningSchema } from '../warnings'
 import { featureSpan, materialize, ownedOperationId, type FeatureKindSpec } from '../feature'
 import { featureKindCommands, type FeatureCommandSpec } from '../feature-commands'
 import { FeatureIdSchema } from '../feature.dto'
@@ -245,7 +246,9 @@ const clonesPreview = defineQuery({
         ),
       }),
     ),
-    warnings: Warnings,
+    // the draft's own warnings, not the part's: not `Warnings`, which the agent boundary turns
+    // into changes against the part's last warnings (llm-api.md#result-size)
+    warnings: z.array(DfmWarningSchema).describe("The Clones' own warnings (clone*)"),
   }),
   run(doc, args) {
     const where = 'design.clones.preview'

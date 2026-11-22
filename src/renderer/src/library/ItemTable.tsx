@@ -30,6 +30,12 @@ interface Column {
 const num = (q: QuantityDTO | undefined): number =>
   q === undefined ? -Infinity : (quantityOf(q)?.canonical ?? -Infinity)
 
+/** An angle as whole or decimal degrees: "90°", "82.5°". */
+const degrees = (q: QuantityDTO): string => {
+  const v = quantityOf(q)?.canonical
+  return v === undefined ? q.source : `${Number(v.toFixed(2))}°`
+}
+
 const nameCol: Column = {
   key: 'name',
   label: w.columns.name,
@@ -55,6 +61,14 @@ function columns(kind: LibraryItemKind): Column[] {
         text: (i) => (i.kind === 'tool' ? quantityText(i[key]) : ''),
         sort: (i) => (i.kind === 'tool' ? num(i[key]) : 0),
       })),
+      // a chamfer mill's included angle; an empty cell for the other types (task U4)
+      {
+        key: 'angle',
+        label: w.columns.angle,
+        numeric: true,
+        text: (i) => (i.kind === 'tool' && i.angle !== undefined ? degrees(i.angle) : ''),
+        sort: (i) => (i.kind === 'tool' ? num(i.angle) : 0),
+      },
       {
         key: 'presets',
         label: w.columns.presets,
@@ -121,7 +135,10 @@ function columns(kind: LibraryItemKind): Column[] {
   ]
 }
 
-/** Items matching the search (name and notes, case-insensitive) and the type filter. */
+/**
+ * Items matching the search (name, notes and a tool type's aliases such as "V-bit",
+ * case-insensitive) and the type filter.
+ */
 export function filterItems(
   items: readonly LibraryItemDTO[],
   search: string,
@@ -133,7 +150,10 @@ export function filterItems(
       (type === ALL || (i.kind === 'tool' && i.type === type)) &&
       (q === '' ||
         i.name.toLocaleLowerCase().includes(q) ||
-        (i.notes ?? '').toLocaleLowerCase().includes(q)),
+        (i.notes ?? '').toLocaleLowerCase().includes(q) ||
+        (i.kind === 'tool' &&
+          q.length >= 2 &&
+          (libraryMessages.tool.typeAliases[i.type] ?? []).some((a) => a.startsWith(q)))),
   )
 }
 
