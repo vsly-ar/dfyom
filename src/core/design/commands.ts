@@ -47,6 +47,7 @@ import {
   type Shape,
 } from './operation'
 import {
+  DesignToolDtoSchema,
   DRILL_BOTTOMS,
   OperationDtoSchema,
   type OperationDTO,
@@ -66,6 +67,8 @@ import {
   warningsWithEvaluation,
 } from './evaluation'
 import { DfmWarningSchema, libraryTools, partWarnings } from './warnings'
+import { ToolArg, toolFromArg, type ToolArgs } from './tool-args'
+import { designToolToDTO, type DesignTool } from './tool'
 
 // ── arg schemas ───────────────────────────────────────────────────────────────────────────
 
@@ -241,7 +244,7 @@ class Fields {
 
 // ── warnings ──────────────────────────────────────────────────────────────────────────────
 
-const Warnings = z
+export const Warnings = z
   .array(DfmWarningSchema)
   .describe('DFM parameter and tool warnings of the part after the command; they never block')
 
@@ -250,7 +253,7 @@ const Warnings = z
  * only the geometric rules run, so an edit never fails because of the checks; a mapper error is
  * a bug (`internal.unexpected`).
  */
-function withWarnings<R extends object>(
+export function withWarnings<R extends object>(
   value: R,
   loaded: LoadedPart,
   operations: readonly Operation[],
@@ -259,7 +262,13 @@ function withWarnings<R extends object>(
 ) {
   const library = ctx.services.library
   const tools = library === undefined ? [] : libraryTools(library)
-  return partWarnings({ ...loaded.part, operations }, loaded.stock, loaded.units, tools)
+  return partWarnings(
+    { ...loaded.part, operations },
+    loaded.stock,
+    loaded.units,
+    tools,
+    loaded.snapshots,
+  )
     .map((warnings) => ({ ...value, warnings }))
     .mapErr((e) => e.withContext(where))
 }
@@ -336,7 +345,7 @@ function defaultOn(ops: readonly Operation[]): string {
   return facing === undefined ? STOCK_TOP : `${facing.id}.floor`
 }
 
-function findOperation(
+export function findOperation(
   part: Part,
   operationId: string,
   kind: OperationKind | undefined,
@@ -367,7 +376,12 @@ interface KindSpec<P extends z.ZodRawShape, O extends Operation> {
   readonly params: P
   /** Parameters required on add (all are optional on update). */
   readonly required: readonly (keyof P & string)[]
-  build(args: Partial<z.output<z.ZodObject<P>>>, prev: O | undefined, c: BuildContext): O
+  /** The tool field is not a parameter: add and update set it (design-v0.2.md § Operation tool). */
+  build(
+    args: Partial<z.output<z.ZodObject<P>>>,
+    prev: O | undefined,
+    c: BuildContext,
+  ): Omit<O, 'tool' | 'toolLocked'>
 }
 
 type Args<P extends z.ZodRawShape> = Partial<z.output<z.ZodObject<P>>>
@@ -494,14 +508,21 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
       name: NameArg.optional(),
       generalTolerance: ToleranceArg.optional(),
       ...addParams,
+      tool: ToolArg.optional(),
     }),
-    result: z.object({ operationId: OperationIdSchema, warnings: Warnings }),
+    result: z.object({
+      operationId: OperationIdSchema,
+      tool: DesignToolDtoSchema.optional().describe('Absent: chosen on Apply'),
+      toolLocked: z.boolean(),
+      warnings: Warnings,
+    }),
     run(draft, rawArgs, ctx) {
       const where = `design.${spec.kind}.add`
       const args = rawArgs as {
         partId: string
         name?: string
         generalTolerance?: ToleranceArgs
+        tool?: ToolArgs
       } & Args<P>
       const loaded = load(draft, args.partId, where)
       if (loaded.isErr()) return loaded
@@ -511,13 +532,30 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
       const n = nextNumber(part, spec.kind)
       const id = `${ID_PREFIX[spec.kind]}${n}`
       const built = spec.build(args, undefined, { f, id, name: args.name ?? `${label} ${n}`, ops })
-      const op = { ...built, generalTolerance: f.tolerance(args.generalTolerance, NO_TOLERANCE) }
+      const generalTolerance = f.tolerance(args.generalTolerance, NO_TOLERANCE)
       const parsed = f.done()
       if (parsed.isErr()) return Err(parsed.unwrapErr().withContext(where))
+      // a given tool is a user choice, so it is locked (design-v0.2.md § Tool lock)
+      const tool: AppResult<Option<DesignTool>> =
+        args.tool === undefined
+          ? Ok(None)
+          : toolFromArg(args.tool, draft, units, ctx, where).map((t) => Some(t))
+      if (tool.isErr()) return tool
+      const op = {
+        ...built,
+        generalTolerance,
+        tool: tool.unwrap(),
+        toolLocked: args.tool !== undefined,
+      } as O
       const settled = settle([...ops, op], stock, id, false, where)
       if (settled.isErr()) return settled
       writeOperations(draft, args.partId, settled.unwrap())
-      return withWarnings({ operationId: id }, loaded.unwrap(), settled.unwrap(), ctx, where)
+      const result = {
+        operationId: id,
+        ...(op.tool.isSome() ? { tool: designToolToDTO(op.tool.unwrap()) } : {}),
+        toolLocked: op.toolLocked,
+      }
+      return withWarnings(result, loaded.unwrap(), settled.unwrap(), ctx, where)
     },
   })
 
@@ -575,7 +613,9 @@ function applyUpdate<P extends z.ZodRawShape, O extends Operation>(
   const op = {
     ...built,
     generalTolerance: f.tolerance(args.generalTolerance, prev.generalTolerance),
-  }
+    tool: prev.tool,
+    toolLocked: prev.toolLocked,
+  } as O
   const parsed = f.done()
   if (parsed.isErr()) return Err(parsed.unwrapErr().withContext(where))
   const next = ops.map((o, k) => (k === i ? op : o))
@@ -785,7 +825,7 @@ const warningList = defineQuery({
     if (loaded.isErr()) return loaded
     const { part, stock, units } = loaded.unwrap()
     const state = ctx.services.evaluations?.state(doc, args.partId) ?? { status: 'pending' }
-    return partWarnings(part, stock, units, libraryTools(library))
+    return partWarnings(part, stock, units, libraryTools(library), doc.snapshots)
       .map((warnings) => warningsWithEvaluation(doc, args.partId, warnings, state))
       .mapErr((e) => e.withContext(where))
   },

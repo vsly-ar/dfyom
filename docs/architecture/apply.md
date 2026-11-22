@@ -261,7 +261,7 @@ Code: `src/core/commands/apply.ts` (pending computation, `project.apply` / `proj
 - **Stale writes:** an Apply's commit advances the caller's baseline only if it was current, so applying someone else's pending edits never counts as reading them.
 - **Implicit apply** runs after the command's revision and permission checks; an Apply error fails the command (it does not run), logged with context `apply before <command>`. Logged args: `{}` (explicit), `{ auto: true }` (auto-apply), `{ before: '<command>' }` (implicit).
 - **Apply jobs** (`ApplyJob.jobs(doc, pending, ctx)`) return `{ command, args, key }`; a newer Apply aborts the running job with the same key. Their dispatch is not logged separately: the Apply event (with `jobIds`) comes first, then the jobs' lifecycle events. An Apply with nothing pending re-runs the apply jobs if one of the last Apply's jobs failed (not aborted).
-- `ApplyOutcome.warnings` is `{ partId, warnings }[]` from `design.warning.list` of each part with applied changes; `toolChanges[].from/to` stay untyped until A4 defines the tool field.
+- `ApplyOutcome.warnings` is `{ partId, warnings }[]` from `design.warning.list` of each part with applied changes; `toolChanges[].from/to` are design tool DTOs (`from: null` for a first choice) since A4, which also provides the first hook, `designToolAutoChoice` in `src/core/design/tool-commands.ts`, for P2 to register ([design-v0.2.md § Implementation (task A4)](../modes/design-v0.2.md#implementation-task-a4)).
 - A library write by an auto-applying session applies its bound project (`applied` in the library call's result); its own pending keys come with P2.
 
 ## Testing

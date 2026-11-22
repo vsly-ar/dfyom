@@ -95,6 +95,11 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
     `No tool in the library reaches ${L(p['depth'])} deep from the stock face (longest ${L(p['reach'])}).`,
   'dfm.setups': (p) =>
     `The part needs ${num(p['count'])} setups (${list((p['directions'] as readonly string[] | undefined) ?? [])}).`,
+  // the operation's own tool (v0.2); the tool field UI is task F5
+  'dfm.toolUnfit': (p) =>
+    `The ${String(p['tool'])} does not fit (${String(p['rule'])})` +
+    (p['locked'] === true ? ': unlock or pick another tool.' : '.'),
+  'dfm.toolNotInLibrary': (p) => `Plan needs a ${String(p['tool'])}; add one to the library.`,
 }
 
 /** Parameters whose value is a count, not a length (suggestions are plain numbers). */

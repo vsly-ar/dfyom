@@ -5,6 +5,7 @@
  */
 import { z } from 'zod'
 import { NAME_MAX, quantityDto } from '../library/item'
+import { TOOL_TYPES } from '../library/tool.dto'
 
 const length = () => quantityDto('length')
 
@@ -48,10 +49,29 @@ export const GeneralToleranceDtoSchema = z.object({
 })
 export type GeneralToleranceDTO = z.output<typeof GeneralToleranceDtoSchema>
 
+/**
+ * The operation's tool field (docs/modes/design-v0.2.md#data-model): a generalized tool (type and
+ * diameter, no lengths) or a specific library tool held as a tool snapshot of the project.
+ */
+export const DesignToolDtoSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('generalized'),
+    type: z.enum(TOOL_TYPES),
+    diameter: length(),
+    cornerRadius: length().optional().describe('Bull nose only'),
+  }),
+  z.object({ kind: z.literal('specific'), snapshotId: z.string().min(1) }),
+])
+export type DesignToolDTO = z.output<typeof DesignToolDtoSchema>
+
 const common = {
   id: OperationIdSchema,
   name: z.string().min(1).max(NAME_MAX).describe('Display label'),
   generalTolerance: GeneralToleranceDtoSchema.optional(),
+  /** Absent = auto, nothing chosen yet (v0.1 records); the next Apply chooses one. */
+  tool: DesignToolDtoSchema.optional(),
+  /** Set by any user choice of the tool; absent = auto. */
+  toolLocked: z.literal(true).optional(),
 }
 
 export const DRILL_BOTTOMS = ['through', 'flat', 'drillPoint'] as const

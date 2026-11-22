@@ -655,7 +655,7 @@ export const partEvaluate = defineCommand({
     const { part, stock, units } = loaded.unwrap()
     const library = ctx.services.library
     const tools = library === undefined ? [] : libraryTools(library)
-    const parameter = partWarnings(part, stock, units, tools)
+    const parameter = partWarnings(part, stock, units, tools, doc.snapshots)
     if (parameter.isErr()) return Err(parameter.unwrapErr().withContext(where))
     return Ok(warningsWithEvaluation(doc, args.partId, parameter.unwrap(), state.unwrap()))
   },
