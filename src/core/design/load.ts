@@ -8,6 +8,7 @@ import type { PartGeometryInput } from '../geometry/model'
 import { Snapshot } from '../library/snapshot'
 import { Stock } from '../library/stock'
 import type { ProjectDoc, UnitSystem } from '../project/document'
+import { checkFeatures, type LoadedFeature } from './feature'
 import { toGeometryInput } from './geometry-input'
 import { partFromDTO, type Part } from './operation'
 import type { PartDTO } from './part.dto'
@@ -19,6 +20,8 @@ export interface LoadedPart {
   readonly units: UnitSystem
   /** The document's snapshots (specific tools of the tool field resolve here); absent: none. */
   readonly snapshots?: ProjectDoc['snapshots']
+  /** The part's features (v0.4), checked against their owned operations; in record order. */
+  readonly features: readonly LoadedFeature[]
 }
 
 export function unknownPart(partId: string, where: string): AppResult<never> {
@@ -57,12 +60,16 @@ export function loadPart(doc: ProjectDoc, partId: string, where: string): AppRes
         data: { partId, operationId: op.id, snapshotId: t.snapshotId },
       })
   }
+  const features = checkFeatures(dto, part.unwrap().operations, stock.unwrap(), doc.unitSystem)
+  if (features.isErr())
+    return Err(features.unwrapErr().prefixIssues('parts', partId).withContext(where, { partId }))
   return Ok({
     dto,
     part: part.unwrap(),
     stock: stock.unwrap(),
     units: doc.unitSystem,
     snapshots: doc.snapshots,
+    features: features.unwrap(),
   })
 }
 

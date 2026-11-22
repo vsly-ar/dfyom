@@ -95,6 +95,17 @@ interface Common {
   readonly tool: Option<DesignTool>
   /** Set by any user choice of the tool; false = auto. */
   readonly toolLocked: boolean
+  /**
+   * The feature that owns it (v0.4, features.md A1–A5): its geometry is edited only through the
+   * feature; None = a plain operation.
+   */
+  readonly owner: Option<FeatureOwner>
+}
+
+/** An owned operation's feature and role; its id is `<featureId>_<role>` (feature.ts). */
+export interface FeatureOwner {
+  readonly featureId: string
+  readonly role: string
 }
 
 /** `on` of a facing or profile whose record has none (v0.1). */
@@ -369,12 +380,26 @@ export function operationFromDTO(dto: OperationDTO): AppResult<Operation> {
           .map((t): Option<DesignTool> => Some(t))
           .mapErr((e) => e.prefixIssues('tool'))
   if (tool.isErr()) return tool
+  if ((dto.featureId === undefined) !== (dto.featureRole === undefined))
+    return fail('input.malformed', `${dto.id}: featureId and featureRole go together`, {
+      issues: [
+        {
+          path: [dto.featureId === undefined ? 'featureId' : 'featureRole'],
+          rule: 'featureOwner',
+          message: 'an owned operation has both featureId and featureRole',
+        },
+      ],
+    })
   const base = {
     id: dto.id,
     name: dto.name,
     generalTolerance: tol.unwrap(),
     tool: tool.unwrap(),
     toolLocked: dto.toolLocked === true,
+    owner:
+      dto.featureId === undefined || dto.featureRole === undefined
+        ? None
+        : Some<FeatureOwner>({ featureId: dto.featureId, role: dto.featureRole }),
   }
   switch (dto.kind) {
     case 'facing':
@@ -495,6 +520,10 @@ export function operationToDTO(op: Operation): OperationDTO {
     // left out while auto with nothing chosen, so v0.1 records stay byte-identical
     ...(op.tool.isSome() ? { tool: designToolToDTO(op.tool.unwrap()) } : {}),
     ...(op.toolLocked ? { toolLocked: true as const } : {}),
+    // left out on plain operations, so earlier records stay byte-identical
+    ...(op.owner.isSome()
+      ? { featureId: op.owner.unwrap().featureId, featureRole: op.owner.unwrap().role }
+      : {}),
   }
   switch (op.kind) {
     case 'facing':

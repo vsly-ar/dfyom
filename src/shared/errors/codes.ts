@@ -122,6 +122,12 @@ export const ERROR_CODES = {
     userMessage: 'Later operations refer to this operation. Change or remove them first.',
     retryable: false,
   },
+  // Features (v0.4 F1): docs/modes/features.md#expansion-and-owned-operations (A4, A5)
+  'design.featureOwned': {
+    severity: 'warn',
+    userMessage: 'This operation belongs to a feature. Edit, move or remove the feature instead.',
+    retryable: false,
+  },
   // Machine connection (task 3.8): docs/architecture/grbl.md#transport-and-sender
   'machine.connection': {
     severity: 'error',

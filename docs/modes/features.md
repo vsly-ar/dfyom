@@ -152,6 +152,14 @@ Per-kind, like operations, so each has a typed schema for agents ([commands.md �
 - **Feature inspector:** its parameters with dynamic illustrations ([principle 5](../principles.md#5-user-friendly-beginner-friendly-highly-graphical): a counterbore section drawn with the entered sizes, a bolt circle preview). Selecting an owned operation shows its fields read-only with "Edited through Hole 1" (a link), except its tool field; it has no remove action of its own.
 - **Viewport:** selecting a feature highlights all owned operations; clicking a surface selects the owned operation, a second click (or the breadcrumb) its feature.
 
+## Implementation (F1)
+
+The feature model (A1–A6, order, Apply, undo, persistence) is built as this doc says; how and where, and what is left open for hole and Clones: [design-v0.4.md § Implementation (F1)](design-v0.4.md#implementation-f1). Where F1 settles details this doc leaves open:
+
+- **Owned operation edits:** `design.<kind>.update` on an owned operation accepts only `name` and `generalTolerance` (A4); any geometric parameter, `design.operation.remove`, `.move` and `design.shape.convert` fail with `design.featureOwned`.
+- **Roles and cut order:** a role is `<step>` or `<instance>_<step>`; expansions are step-major, which keeps the "operation by operation" order of [Plan and cut order](#plan-and-cut-order) in the stored data (tool by tool across all instances, D34).
+- **`design.feature.get`** is folded into `design.feature.list { featureId }` (Q32 A).
+
 ## Relation to ADR 0019 and v0.3 shapes
 
 - **Hole, counterbore and patterns of circles** need nothing from [ADR 0019](../decisions/0019-2d-geometry-library.md): they expand to v0.2 circles and drillings.

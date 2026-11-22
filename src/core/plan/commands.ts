@@ -512,7 +512,8 @@ const designOperationUpdate = defineCommand({
     if (loaded.isErr()) return loaded
     const l = loaded.unwrap()
     const ops = updateOperation(
-      { dto: l.dto.design.part, part: l.part, stock: l.stock, units: l.units },
+      // plan-only edits work per owned operation (features.md § Plan): no feature checks here
+      { dto: l.dto.design.part, part: l.part, stock: l.stock, units: l.units, features: [] },
       operationId,
       params,
       where,

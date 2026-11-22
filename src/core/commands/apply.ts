@@ -8,6 +8,7 @@
 import { z } from 'zod'
 import { fail, Ok } from '../../shared/result'
 import { DesignToolDtoSchema, type PartDTO } from '../design/part.dto'
+import { designUnits } from '../design/feature'
 import { sameValue } from '../plan/validity'
 import type { ProjectDoc } from '../project/document'
 import type { Source } from './context'
@@ -27,6 +28,8 @@ export interface PendingChange {
   readonly planId?: string
   /** A named shape of the part (`design` keys of shapes, design-v0.3.md § Apply). */
   readonly shapeId?: string
+  /** A feature of the part (`design` keys of features, features.md § Apply and pending changes). */
+  readonly featureId?: string
   /** A setup of a plan (`plan` keys of setup fields). */
   readonly setupId?: string
   /** The changed library item (`library` keys). */
@@ -55,7 +58,15 @@ const isQuantity = (v: unknown): boolean => isRec(v) && isRec(v['exact'])
 /** Operation fields no deferred work reads (apply.md: "names and other fields"). */
 const OPERATION_IGNORED = new Set(['id', 'kind', 'name'])
 /** Part fields handled separately (`operations`) or read by no deferred work. */
-const PART_IGNORED = new Set(['id', 'name', 'operations', 'shapes', 'stock'])
+const PART_IGNORED = new Set(['id', 'name', 'operations', 'shapes', 'features', 'stock'])
+/** Feature fields read by no deferred work (its owned operations carry what is read). */
+const FEATURE_IGNORED = new Set(['id', 'kind', 'name'])
+/**
+ * Fields of an owned operation the user edits on the operation itself (A4); all its other changes
+ * come from its feature and fold into the feature's keys.
+ */
+const OWNED_OWN_FIELDS = ['generalTolerance', 'tool', 'toolLocked']
+const isOwnField = (f: string) => OWNED_OWN_FIELDS.some((k) => f === k || f.startsWith(`${k}.`))
 /** Shape item fields are all read (the definition); the shape's `name` and `source` are not. */
 const ITEM_IGNORED: ReadonlySet<string> = new Set()
 
@@ -130,12 +141,35 @@ function partChanges(doc: ProjectDoc, base: ProjectDoc, id: string): PendingChan
   if (!stockSame(doc, base, after, before)) fields.unshift('stock')
   for (const f of fields) out.push(design(f, `${after.name}: ${f}`))
   out.push(...shapeChanges(id, after, before))
-  if (before.operations === after.operations) return out
+  if (before.operations === after.operations && before.features === after.features) return out
+  const featureKeys = featureChanges(id, after, before)
   const beforeOps = new Map(before.operations.map((o) => [o.id, o]))
   const afterIds = new Set(after.operations.map((o) => o.id))
-  const moved = new Set(movedIds(before.operations, after.operations))
+  // a feature's block moves as one unit; its owned operations never count as moved
+  const units = (ops: PartDTO['operations']) => designUnits(ops)
+  const featureNames = new Map(
+    [...(before.features ?? []), ...(after.features ?? [])].map((f) => [f.id, f.name]),
+  )
+  const moved = new Set(movedIds(units(before.operations), units(after.operations)))
+  for (const u of moved) {
+    const name = featureNames.get(u)
+    if (name !== undefined) featureKeys.push(featureKey(id, u, 'moved', `${name} moved`))
+  }
+  const touched = new Set<string>()
   for (const op of after.operations) {
     const old = beforeOps.get(op.id)
+    const owner = op.featureId ?? old?.featureId
+    if (owner !== undefined) {
+      // expansion changes fold into the feature's keys (features.md § Apply and pending changes)
+      if (old === undefined || old === op) {
+        if (old === undefined) touched.add(owner)
+        continue
+      }
+      for (const f of changedFields(op as unknown as Rec, old as unknown as Rec, OPERATION_IGNORED))
+        if (isOwnField(f)) out.push(design(f, `${op.name}: ${f}`, op.id))
+        else touched.add(owner)
+      continue
+    }
     if (old === undefined) {
       out.push(design('added', `${op.name} added`, op.id))
       continue
@@ -146,7 +180,47 @@ function partChanges(doc: ProjectDoc, base: ProjectDoc, id: string): PendingChan
       out.push(design(f, `${op.name}: ${f}`, op.id))
   }
   for (const op of before.operations)
-    if (!afterIds.has(op.id)) out.push(design('removed', `${op.name} removed`, op.id))
+    if (!afterIds.has(op.id)) {
+      if (op.featureId !== undefined) touched.add(op.featureId)
+      else out.push(design('removed', `${op.name} removed`, op.id))
+    }
+  // owned operations changed with no key of their feature (recalculated from an earlier edit):
+  // one key per feature, so the auto tool choice still targets them
+  const keyed = new Set(featureKeys.map((k) => k.featureId))
+  for (const f of touched)
+    if (!keyed.has(f) && featureNames.has(f))
+      featureKeys.push(featureKey(id, f, 'operations', `${featureNames.get(f)}: operations`))
+  out.push(...featureKeys)
+  return out
+}
+
+const featureKey = (
+  partId: string,
+  featureId: string,
+  field: string,
+  label: string,
+): PendingChange => ({ kind: 'design', partId, featureId, field, label })
+
+/**
+ * Keys of the part's features (features.md § Apply and pending changes): (part, feature) for an
+ * added or removed one, (part, feature, field) per changed field of its own; `moved` is added by
+ * the caller from the design order.
+ */
+function featureChanges(id: string, after: PartDTO, before: PartDTO): PendingChange[] {
+  if (after.features === before.features) return []
+  const out: PendingChange[] = []
+  const old = new Map((before.features ?? []).map((f) => [f.id, f]))
+  const afterIds = new Set<string>()
+  for (const f of after.features ?? []) {
+    afterIds.add(f.id)
+    const b = old.get(f.id)
+    if (b === undefined) out.push(featureKey(id, f.id, 'added', `${f.name} added`))
+    else if (b !== f)
+      for (const field of changedFields(f as Rec, b as Rec, FEATURE_IGNORED))
+        out.push(featureKey(id, f.id, field, `${f.name}: ${field}`))
+  }
+  for (const b of before.features ?? [])
+    if (!afterIds.has(b.id)) out.push(featureKey(id, b.id, 'removed', `${b.name} removed`))
   return out
 }
 
@@ -212,6 +286,7 @@ export function pendingKey(c: PendingChange): string {
     c.setupId,
     c.operationId,
     c.shapeId,
+    c.featureId,
     c.libraryItemId,
     c.field,
   ].join('\0')
@@ -310,6 +385,7 @@ const PendingChangeSchema = z.object({
   operationId: z.string().optional().describe('Design or plan operation'),
   planId: z.string().optional(),
   shapeId: z.string().optional().describe('Named shape of the part'),
+  featureId: z.string().optional().describe('Feature of the part'),
   setupId: z.string().optional(),
   libraryItemId: z.string().optional(),
   field: z.string().optional().describe('Changed field, or added / removed / moved'),
