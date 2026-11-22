@@ -1,0 +1,91 @@
+/* SectionView: the Field drawing style, larger. Doc: docs/conventions/ui.md#section-illustration */
+.root {
+  width: 100%;
+  min-width: 0;
+  /* the svg's px width follows this box; it must not hold the box open */
+  overflow: hidden;
+}
+
+.svg {
+  display: block;
+  overflow: visible;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.svg path {
+  transition: d var(--motion-base) var(--ease-standard);
+}
+
+.hatchLine {
+  stroke: var(--vp-edge);
+  stroke-width: 1px;
+}
+
+.material {
+  stroke: none;
+}
+
+.line {
+  stroke: var(--text-muted);
+  stroke-width: 1px;
+}
+
+.line[data-style='axis'] {
+  stroke: var(--text-faint);
+  stroke-dasharray: 6 2 1 2;
+}
+
+.line[data-style='break'] {
+  stroke: var(--text-faint);
+}
+
+.measureLine {
+  stroke: transparent;
+  stroke-width: 1.8px;
+  stroke-linecap: butt;
+  transition:
+    d var(--motion-base) var(--ease-standard),
+    stroke var(--motion-fast);
+}
+
+.measure[data-state='hover'] .measureLine {
+  stroke: var(--vp-hover);
+}
+
+.measure[data-state='active'] .measureLine {
+  stroke: var(--accent-icon);
+}
+
+.measure[data-state='invalid'] .measureLine {
+  stroke: var(--danger);
+}
+
+.hit {
+  stroke: transparent;
+  stroke-width: 10px;
+  pointer-events: stroke;
+  cursor: pointer;
+  transition: none;
+}
+
+.chip {
+  transition: transform var(--motion-base) var(--ease-standard);
+}
+
+.chipBox {
+  fill: var(--bg-raised);
+  stroke: var(--border);
+  stroke-width: 1px;
+}
+
+.chip[data-invalid] .chipBox {
+  stroke: var(--danger);
+}
+
+.chipText {
+  fill: var(--text);
+  stroke: none;
+  font: var(--weight-medium) 11px var(--font-mono);
+}

@@ -92,6 +92,7 @@ export function QuantityField<K extends QuantityKind>({
   messages,
   note,
   optional = false,
+  placeholder,
   onChange,
   onFocusField,
 }: {
@@ -105,6 +106,8 @@ export function QuantityField<K extends QuantityKind>({
   note?: string | undefined
   /** Emptying it removes the value (an optional library field). */
   optional?: boolean
+  /** Shown while empty (an optional field: what empty means, "0: pointed"). */
+  placeholder?: string | undefined
   onChange: (value: QDto<K> | undefined) => void
   onFocusField?: ((field: string | undefined) => void) | undefined
 }): React.JSX.Element {
@@ -119,6 +122,7 @@ export function QuantityField<K extends QuantityKind>({
     value: displayQuantity(value, units),
     illustration: <FieldIcon name={icon} />,
     messages: shown,
+    ...(placeholder !== undefined ? { placeholder } : {}),
   }
   return (
     <Focusable field={field} onFocusField={onFocusField}>

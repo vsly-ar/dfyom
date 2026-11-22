@@ -85,6 +85,7 @@ export const libraryMessages = {
       type: 'Type',
       name: 'Name',
       diameter: 'Ø',
+      angle: 'Angle',
       cornerRadius: 'RE',
       flutes: 'Flutes',
       fluteLength: 'Flute length',
@@ -152,8 +153,15 @@ export const libraryMessages = {
       bullNoseEndMill: 'Bull nose end mill',
       ballEndMill: 'Ball end mill',
       drill: 'Drill',
-      chamferMill: 'Chamfer mill / V-bit',
+      chamferMill: 'Chamfer mill',
     } satisfies Record<ToolType, string>,
+    /** The chamfer mill type's hint: one type for chamfer mills and V-bits (H-F, task U4). */
+    chamferHint: 'Also V-bits: a 90° V-bit is a 90° chamfer mill.',
+    /** Search aliases per type (the item list's search, task U4). */
+    typeAliases: { chamferMill: ['v-bit', 'vbit', 'v bit', 'chamfer'] } as Partial<
+      Record<ToolType, readonly string[]>
+    >,
+    tipPointed: '0: pointed',
     /** Short type word of the suggested name ("Flat 6"). */
     shortTypes: {
       flatEndMill: 'Flat',
@@ -184,6 +192,11 @@ export const libraryMessages = {
     coatingHint: 'Optional, shown only (TiAlN, ZrN, uncoated).',
     drawing: (focused: string | undefined) =>
       focused === undefined ? 'Tool drawing' : `Tool drawing: ${focused} highlighted`,
+    /** The drawing label's name of a highlighted dimension (the symbol, unless a word reads better). */
+    drawingNames: { angle: 'included angle', tipDiameter: 'tip diameter' } as Record<
+      string,
+      string
+    >,
     /** ISO 13399 symbols of the drawing's dimensions. */
     symbols: {
       diameter: 'DC',
@@ -193,6 +206,8 @@ export const libraryMessages = {
       stickout: 'Stickout',
       shankDiameter: 'DMM',
       pointAngle: 'SIG',
+      angle: 'SIG',
+      tipDiameter: 'DCN',
     },
     presets: {
       caption: 'Cutting presets',

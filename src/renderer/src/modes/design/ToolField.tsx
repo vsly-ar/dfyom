@@ -110,7 +110,8 @@ export function sameTool(
   return (
     x.type === y.type &&
     x.diameter.exact.equals(y.diameter.exact) &&
-    x.cornerRadius.mapOr(-1, (r) => r.canonical) === y.cornerRadius.mapOr(-1, (r) => r.canonical)
+    x.cornerRadius.mapOr(-1, (r) => r.canonical) === y.cornerRadius.mapOr(-1, (r) => r.canonical) &&
+    x.angle.mapOr(-1, (a) => a.canonical) === y.angle.mapOr(-1, (a) => a.canonical)
   )
 }
 
@@ -273,15 +274,26 @@ function listedOptions(
   return { options, value: CURRENT }
 }
 
-/** The generalized tool a new library tool starts from (type, diameter, corner radius; L4). */
-function prefill(g: DesignToolDTO | null): ToolPrefill | undefined {
-  if (g === null || g.kind !== 'generalized') return undefined
+/**
+ * The generalized tool a new library tool starts from (type, diameter, corner radius, a chamfer
+ * mill's angle; L4). A chamfer without one: a chamfer mill of its angle and diameter (U4).
+ */
+export function prefill(g: DesignToolDTO | null, op?: OperationDTO): ToolPrefill | undefined {
+  if (g === null || g.kind !== 'generalized') {
+    if (op?.kind !== 'chamfer') return undefined
+    return {
+      type: 'chamferMill',
+      diameter: op.diameter as ToolPrefill['diameter'],
+      angle: op.angle as NonNullable<ToolPrefill['angle']>,
+    }
+  }
   return {
     type: g.type,
     diameter: g.diameter as ToolPrefill['diameter'],
     ...(g.cornerRadius !== undefined
       ? { cornerRadius: g.cornerRadius as ToolPrefill['diameter'] }
       : {}),
+    ...(g.angle !== undefined ? { angle: g.angle as NonNullable<ToolPrefill['angle']> } : {}),
   }
 }
 
@@ -297,6 +309,7 @@ function toolArg(value: string, candidates: ToolCandidates | undefined): object 
     type: g.type,
     diameter: g.diameter.source,
     ...(g.cornerRadius !== undefined ? { cornerRadius: g.cornerRadius.source } : {}),
+    ...(g.angle !== undefined ? { angle: g.angle.source } : {}),
   }
 }
 
@@ -350,7 +363,8 @@ export function ToolField({
       ? []
       : [{ id: 'error', severity: 'error' as const, text: sentenceCase(error.message) }]),
     ...warnings
-      .filter((w) => w.parameter === 'tool')
+      // v0.4 U4: no library tool fits the chamfer – shown here, its fix is "New tool…"
+      .filter((w) => w.parameter === 'tool' || w.code === 'dfm.chamferNoTool')
       .map((w): FieldMessage => {
         const text = dfmMessages.text(w, part.units, name)
         return pendingApply(w)
@@ -365,6 +379,15 @@ export function ToolField({
               severity: dfmMessages.tier(w),
               text,
               ...(w.code === 'dfm.toolUnfit' && fix !== undefined ? { fix } : {}),
+              ...(w.code === 'dfm.chamferNoTool'
+                ? {
+                    fix: {
+                      label: t.newTool,
+                      icon: <Icon name="add" />,
+                      onApply: () => setAdding(true),
+                    },
+                  }
+                : {}),
               ...(w.code === 'dfm.toolNotInLibrary'
                 ? {
                     fix: {
@@ -440,6 +463,7 @@ export function ToolField({
         operationKind={op.kind}
         prefill={prefill(
           candidates?.generalized ?? (op.tool?.kind === 'generalized' ? op.tool : null),
+          op,
         )}
         description={libraryMessages.tool.designDescription}
         trigger={null}
