@@ -8,5 +8,5 @@
     "types": []
   },
   "include": ["src/renderer/src/**/*", "src/core/**/*", "src/shared/**/*"],
-  "exclude": ["src/renderer/src/ui/tokens.test.ts"]
+  "exclude": ["src/renderer/src/ui/tokens.test.ts", "src/renderer/src/messages/copy.test.ts"]
 }

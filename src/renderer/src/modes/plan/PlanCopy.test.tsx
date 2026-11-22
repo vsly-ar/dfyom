@@ -93,7 +93,9 @@ describe('Plan-only edits', () => {
     const t = await renderPlan()
     const group = await t.facingCopy()
     expect(
-      within(group).getByText('Settle the design to edit it for this plan only.'),
+      within(group).getByText(
+        'Set the plan status to settled design to edit this operation for this plan only.',
+      ),
     ).toBeInTheDocument()
     expect(within(group).getByLabelText('Depth', { selector: 'input' })).toHaveAttribute('readonly')
   })

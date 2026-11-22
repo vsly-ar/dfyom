@@ -9,7 +9,7 @@ import { applyMessages } from '../../messages/apply'
 import { planMessages } from '../../messages/plan'
 import { Popover, StatusChip, WarningList } from '../../ui'
 import { DELAY_INDICATOR_MS } from '../../viewport'
-import { isError } from './model'
+import { isError, isWarning } from './model'
 import { usePlanData, usePlanState } from './plan-store'
 import { planWarningLabels, planWarningView } from './PlanInspector'
 import styles from './Plan.module.css'
@@ -37,7 +37,7 @@ export function PlanStatus({ doc }: { doc: ProjectDoc }): React.JSX.Element | nu
   if (plan === undefined) return null
   const warnings = data?.warnings ?? []
   const errors = warnings.filter(isError).length
-  const n = warnings.length
+  const hard = warnings.filter(isWarning).length
   return (
     <>
       <span className={styles['statusSlot']} aria-live="polite">
@@ -79,10 +79,10 @@ export function PlanStatus({ doc }: { doc: ProjectDoc }): React.JSX.Element | nu
             <TriangleAlert
               aria-hidden="true"
               className={styles['statusIcon']}
-              data-on={n > 0 || undefined}
+              data-on={hard > 0 || undefined}
             />
           )}
-          {planMessages.warnings.count(errors, n - errors)}
+          {planMessages.warnings.count(errors, hard)}
         </button>
       </Popover>
     </>

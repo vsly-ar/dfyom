@@ -94,8 +94,13 @@ export const planMessages = {
     workOffset: 'Work zero',
     workOffsetValue: (corner: string, face: string) =>
       `G54 at the ${corner} corner of the ${face}; on the machine, the front-left corner of the top.`,
-    rowMeta: (face: string, corner: string | undefined, rotation: number) =>
-      [capital(face), corner === undefined ? undefined : `G54 ${corner}`, `${rotation}°`]
+    /** The face is left out when the setup's name already says it ("Top" over "G54 front left · 0°"). */
+    rowMeta: (face: string, corner: string | undefined, rotation: number, name?: string) =>
+      [
+        name?.trim().toLowerCase() === face.toLowerCase() ? undefined : capital(face),
+        corner === undefined ? undefined : `G54 ${corner}`,
+        `${rotation}°`,
+      ]
         .filter((x) => x !== undefined)
         .join(' · '),
     rotation: 'Rotation',
@@ -181,7 +186,7 @@ export const planMessages = {
       title: 'Part (plan copy)',
       edited: 'Edited in plan',
       revert: 'Revert to design',
-      draftHint: 'Settle the design to edit it for this plan only.',
+      draftHint: 'Set the plan status to settled design to edit this operation for this plan only.',
       settledHint: 'Changes here apply to this plan only, not to the design.',
     },
     tool: 'Tool',

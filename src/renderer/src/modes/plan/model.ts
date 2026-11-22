@@ -355,6 +355,8 @@ export function toolpathState(
 
 /** Error findings block generation and export (plan-v0.1.md: `plan.check`, `plan.order`). */
 export const isError = (w: PlanWarning): boolean => w.severity === 'error'
+/** A hard warning; `info` findings are notes and are not counted as warnings (ui.md#warnings-and-dfm). */
+export const isWarning = (w: PlanWarning): boolean => w.severity === 'warning'
 
 // ── feeds and speeds ──────────────────────────────────────────────────────────────────────
 

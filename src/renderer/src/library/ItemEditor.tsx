@@ -55,12 +55,12 @@ export function ItemEditor({
     ref.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus()
   }, [s.failures])
 
-  if (d === null)
-    return (
-      <div className={styles['noSelection']}>
-        <p>{w.noSelection}</p>
-      </div>
-    )
+  if (d === null) {
+    // an empty list already says how to create the first item; the editor adds nothing
+    const listing = s.lists[s.tab]
+    const any = listing.items.length > 0 || listing.errors.length > 0
+    return <div className={styles['noSelection']}>{any ? <p>{w.noSelection}</p> : null}</div>
+  }
 
   const name = s.draftName()
   const rest = s.error === undefined ? [] : unmatchedIssues(s.error.issues, FIELDS[d.kind])

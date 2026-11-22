@@ -43,6 +43,7 @@ import {
   allows,
   directionOfSetup,
   isError,
+  isWarning,
   operationStep,
   planOperationKind,
   planOperationName,
@@ -66,13 +67,14 @@ export const KIND_ICON: Record<string, ToolIconName> = {
   profile: 'profile',
 }
 
-/** One line of a setup row: "Bottom · G54 back left · 0°". */
+/** One line of a setup row: "Bottom · G54 back left · 0°"; without the face when the name is the face. */
 export function setupMeta(doc: ProjectDoc, plan: PlanDTO, setup: SetupDTO): string {
   const stock = planStockSize(doc, plan)
   return m.setup.rowMeta(
     DIRECTION_LABEL[directionOfSetup(setup)],
     stock === undefined ? undefined : setupCorner(setup, stock),
     setup.rotation ?? 0,
+    setup.name,
   )
 }
 
@@ -295,7 +297,7 @@ function OperationRow({
   const kind = planOperationKind(plan, op.designOperationIds) ?? 'facing'
   const findings = findingsOf(data?.warnings ?? [], op.id)
   const errors = findings.filter(isError).length
-  const warnings = findings.length - errors
+  const warnings = findings.filter(isWarning).length
   const state = toolpathState(data?.toolpaths[op.id], failure)
   const stale = rowStale(data?.stale, op.designOperationIds)
   const tool = snapshotName(plan, op.tool)

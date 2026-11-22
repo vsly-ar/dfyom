@@ -113,6 +113,8 @@ export interface QuantityInputBaseProps {
   step?: StepSize
   /** General tolerance an untoleranced value inherits, shown in the echo. */
   inheritedTolerance?: InheritedTolerance
+  /** Shown while empty: what applies without a value ("None: values are exact"). */
+  placeholder?: string
   /** Recommended value: the pencil turns amber and the popover offers "Use …". */
   recommended?: { source: string; text: ReactNode }
   /**
@@ -181,6 +183,7 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
     precision,
     step = '1',
     inheritedTolerance,
+    placeholder,
     recommended,
     onCancelGesture,
     onPick,
@@ -704,6 +707,7 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
               {...combobox}
               ref={inputRef}
               value={text}
+              {...(placeholder !== undefined ? { placeholder } : {})}
               {...(suffix !== undefined ? { unit: suffix } : {})}
               adjust={adjust}
               overlay={overlay}

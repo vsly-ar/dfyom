@@ -35,7 +35,6 @@ import {
   Menu,
   Progress,
   Select,
-  StatusChip,
 } from '../../ui'
 import { ExportDialog } from './ExportDialog'
 import { LibraryLink } from '../../library/LibraryLink'
@@ -215,9 +214,6 @@ function PlanView({
               else void send('plan.status.set', s === 'unarchive' ? {} : { status: s })
             }}
           />
-          <StatusChip tone={plan.status === 'draft' ? 'neutral' : 'success'}>
-            {m.statuses[plan.status]}
-          </StatusChip>
         </div>
         {!canEdit ? (
           <p className={styles['why']}>

@@ -182,6 +182,21 @@ describe('design mode', () => {
     expect(radius).toHaveAttribute('aria-invalid', 'true')
   })
 
+  it('shows the general tolerance’s effective value while empty, and emptying it clears it', async () => {
+    const { user, d } = await renderDesign()
+    const field = await within(inspector()).findByLabelText('General tolerance (length)', {
+      selector: 'input',
+    })
+    expect(field).toHaveValue('')
+    expect(field).toHaveAttribute('placeholder', 'None: lengths are exact')
+    const tol = () => Object.values(d.doc.parts)[0]!.generalTolerance?.length?.source
+    await retype(user, field, '0.1{Enter}')
+    await waitFor(() => expect(tol()).toBe('0.1'))
+    await user.clear(field)
+    await user.keyboard('{Enter}')
+    await waitFor(() => expect(tol()).toBeUndefined())
+  })
+
   it('shows DFM warnings at the parameter, in the part summary and in the status bar', async () => {
     const { user } = await renderDesign()
     await user.click(await within(navigator()).findByRole('button', { name: 'Add pocket' }))
