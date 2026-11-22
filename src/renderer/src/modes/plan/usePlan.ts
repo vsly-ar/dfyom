@@ -1,14 +1,14 @@
 // Plan mode hooks over the shell: the chosen plan (the run mode follows an explicit choice), the
-// plan-operation selection, the library items a picker offers, and the plan's checks per
-// operation. Doc: docs/conventions/ui.md#plan-mode-task-37
+// plan-operation (or setup) selection, the window's setup (F6), the library items a picker
+// offers, and the plan's checks per operation. Doc: docs/conventions/ui.md#plan-mode-task-37
 import { useCallback, useEffect, useState } from 'react'
 import type { PlanWarning } from '../../../../core/plan/checks'
-import type { PlanDTO } from '../../../../core/plan/plan.dto'
+import type { PlanDTO, SetupDTO } from '../../../../core/plan/plan.dto'
 import type { ProjectDoc } from '../../../../core/project/document'
 import { useShell, useUi } from '../../shell/ShellContext'
 import { activeJob } from '../run/machine-state'
 import { useRunStore } from '../run/run-store'
-import { chosenPlan } from './model'
+import { chosenPlan, currentSetup } from './model'
 import { usePlanState, usePlanStore } from './plan-store'
 
 /** The plan the window shows, and a setter for an explicit choice (also run mode's plan). */
@@ -30,11 +30,32 @@ export function useChosenPlan(doc: ProjectDoc): [PlanDTO | undefined, (planId: s
   return [plan, choose]
 }
 
-/** The plan-mode selection (a plan operation id or null) and its setter. */
+/**
+ * The plan-mode selection (a plan operation id, a setup id since F6, or null) and its setter.
+ * Selecting a setup or a plan operation also makes its setup the window's setup (preview and
+ * export), which stays when the selection is cleared.
+ */
 export function usePlanSelection(): [string | null, (id: string | null) => void] {
   const selected = useUi((s) => s.selection.plan)
   const select = useUi((s) => s.select)
-  return [selected, useCallback((id: string | null) => select('plan', id), [select])]
+  const store = usePlanStore()
+  return [
+    selected,
+    useCallback(
+      (id: string | null) => {
+        select('plan', id)
+        if (id !== null) store.getState().remember(id)
+      },
+      [select, store],
+    ),
+  ]
+}
+
+/** The setup the window previews and exports (`currentSetup`). */
+export function useCurrentSetup(plan: PlanDTO): SetupDTO {
+  const selected = useUi((s) => s.selection.plan)
+  const last = usePlanState((s) => s.lastSelection)
+  return currentSetup(plan, selected, last)
 }
 
 /** A library item as `library.<kind>.list` returns it (meta and values flat). */

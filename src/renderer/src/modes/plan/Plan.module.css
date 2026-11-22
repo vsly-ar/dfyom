@@ -473,3 +473,91 @@
   font-size: var(--text-xs);
   overflow-wrap: anywhere;
 }
+
+/* setup panel (v0.2 task F6): setups in machining order, plan operations nested under each */
+.setups {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.setup > .ops {
+  padding: 0 0 var(--space-1);
+}
+
+.setupSelect {
+  /* outdented against its operations (their icons sit 8 px further in): nesting at full width */
+  grid-template-columns: var(--icon-lg) minmax(0, 1fr);
+  padding-left: var(--space-1);
+}
+
+/* a row's menu shows once the row is selected or has keyboard focus: on hover (and while a
+   click presses) only the move buttons overlay the row's end, so a click on the row's middle
+   still selects it in a narrow navigator */
+.opMenu {
+  display: none;
+}
+
+.op[data-selected] .opMenu,
+.op:has(:focus-visible) .opMenu {
+  display: inline-flex;
+}
+
+.setupName {
+  overflow: hidden;
+  font-weight: var(--weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* the setup the viewport shows and the panel exports (several setups only) */
+.op[data-current]:not([data-selected]) {
+  border-left-color: var(--border-control);
+}
+
+.setupSelect > .dirIcon {
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+  color: var(--text-muted);
+  transition: color var(--motion-fast) var(--ease-standard);
+}
+
+.op[data-current] .dirIcon,
+.op[data-selected] .dirIcon,
+.setupSelect:hover .dirIcon {
+  color: var(--text);
+}
+
+.setupFacts {
+  display: grid;
+  grid-template-columns: var(--icon-xl) minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.dirIconLg {
+  width: var(--icon-xl);
+  height: var(--icon-xl);
+  color: var(--text-muted);
+}
+
+.facts {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+}
+
+.facts dt {
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  color: var(--text-muted);
+}
+
+.facts dd {
+  margin: 0 0 var(--space-1);
+  color: var(--text);
+}

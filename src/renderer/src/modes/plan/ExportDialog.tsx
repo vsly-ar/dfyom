@@ -1,6 +1,7 @@
 // The gCode export's outcome (task 3.7): after the native "Export gCode" dialog and `plan.export`,
-// a dialog with the file, lines, estimated time, tool changes, whether soft limits were checked
-// and the export's machine warnings – or the error. Doc: docs/conventions/ui.md#plan-mode-task-37,
+// a dialog with the setup (v0.2 F6, plans with several setups), the file, lines, estimated time,
+// tool changes, whether soft limits were checked and the export's machine warnings – or the
+// error. Doc: docs/conventions/ui.md#plan-mode-task-37,
 // docs/architecture/grbl.md#plan-export-command
 import { planMessages, sentence } from '../../messages/plan'
 import { Button, Dialog, DialogClose, ErrorMessage, WarningList } from '../../ui'
@@ -38,6 +39,7 @@ export function ExportDialog(): React.JSX.Element | null {
       footer={close}
     >
       <ul className={styles['stats']}>
+        {exported.setup !== undefined ? <li>{exported.setup}</li> : null}
         <li>{m.lines(r.lines)}</li>
         <li>{m.time(r.stats.estimatedSeconds)}</li>
         <li>{m.toolChanges(r.stats.toolChanges)}</li>

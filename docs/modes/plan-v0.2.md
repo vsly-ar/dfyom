@@ -75,6 +75,16 @@ Core only (`src/core/plan/inputs.ts`, `src/core/toolpath/inputs.ts`, `request.ts
 - **Cache:** `inputHash` already covered the whole setup record, so a changed rotation regenerates.
 - **Tests** (`src/core/toolpath/setups.test.ts`): quarter turns and their inverse, `setupFrame` against the face frame for every direction and rotation, side and bottom toolpaths landing on the part where the geometry has the hole and the pocket, rotated setups placing back onto the same path, drilling order in a turned WCS, the direction check; golden toolpaths of the bottom and right setups (and the bottom turned 90°) and the gCode of a bottom-only plan and of a right-side plan turned 90° (`src/core/toolpath/__golden__/setup-*`). The exit-criteria golden is unchanged.
 
+### Implementation (task F6)
+
+Plan-mode UI only (`modes/plan/SetupList.tsx`, `SetupInspector.tsx`, `DirectionIcon.tsx`, setup helpers in `model.ts`); the commands are E1's, `plan.export { setupId }` E2's. UI rules as built: [ui.md § Design and plan controls (v0.2)](../conventions/ui.md#design-and-plan-controls-v02).
+
+- **Every setup is shown:** the navigator lists all setups with their operations nested; the inspector finds a plan operation in any setup and shows a selected setup (name, rotation, safe heights); the plan summary counts every operation. Closes E1's "only the first setup" issue.
+- **The window's setup** (selected setup, else the selected operation's, else the last selected, else the first) is the one previewed and exported. The plan scene draws only its toolpaths, through `setupFrame` (closes C3's preview issue for Plan); the export sends its `setupId` when the plan has several setups (closes E2's Export dialog issue). A one-setup plan sends no `setupId`, so v0.1 flows are unchanged.
+- **WCS corner as text:** the part corner at the work zero, named by the faces that meet there besides the up face ("front left" on the top, "back left" on the bottom, "bottom front" on the right face; a 90° top setup "back left"), from `setupFrame`'s origin. On the machine it is always the front-left corner of the up face (the setup-change prompt's wording).
+- **Moves across setups:** an operation's move up / move down (and `Alt+↑/↓`) continue into the neighbouring setup when it has the same direction (`plan.operation.move { toSetupId }`); a split moves one operation ("Move to new setup"; multi-select later); merge joins two setups from the setup's menu. The core refuses order violations (`plan.order`), shown like any refused move (the row stays).
+- **Export blocking per setup:** the panel disables the export on the window's setup's own errors and plan-wide errors without another setup's `params.setupId`, as the core blocks only that setup's program.
+
 ## Tool resolution from the design tool field
 
 The design's [tool field](design-v0.2.md#operation-tool) is an input to Plan's [tool assignment](plan-v0.1.md#tool-assignment-and-checks). It replaces "the design's tool requirement" as the only input to `plan.tool.suggest`; the plan check table itself is unchanged.

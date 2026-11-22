@@ -1,5 +1,5 @@
 // Plan inspector (task 3.7): without a selection the plan (name, status, machine, all checks with a
-// link to their operation); a selected plan operation: the tool picker (library tools that pass
+// link to their operation); a selected setup: SetupInspector.tsx (v0.2 F6); a selected plan operation: the tool picker (library tools that pass
 // the checks, ranked, with their reasons: `plan.tool.suggest`), stickout and cutting preset, and
 // "Part (plan copy)" (PlanCopyGroup.tsx, plan-only edits, v0.2), the strategy group
 // (StrategyGroup.tsx, v0.2), the feeds-and-speeds card: one QuantityInput per
@@ -37,6 +37,7 @@ import {
 } from '../../ui'
 import { defaultUnit, quantityOf } from '../design/model'
 import {
+  allPlanOperations,
   defaultPresetName,
   editable,
   feedFields,
@@ -52,6 +53,7 @@ import { FeedsCalculation } from './FeedsCalculation'
 import { fieldMessages } from './fieldMessages'
 import { NewToolDialog } from './NewToolDialog'
 import { PlanCopyGroup } from './PlanCopyGroup'
+import { SetupInspector } from './SetupInspector'
 import { useCancelGesture } from '../../shell/hooks'
 import { usePlanCommand, usePlanData } from './plan-store'
 import styles from './Plan.module.css'
@@ -83,7 +85,7 @@ export function planWarningView(
   onSelect?: (planOperationId: string) => void,
   index = 0,
 ): WarningView {
-  const op = plan.setups[0]?.operations.find((o) => o.id === w.planOperationId)
+  const op = allPlanOperations(plan).find((o) => o.id === w.planOperationId)
   return {
     id: `${w.code}:${w.planOperationId ?? ''}:${w.field ?? ''}:${w.rule}:${index}`,
     tier: TIER[w.severity],
@@ -104,8 +106,20 @@ export function PlanInspector({ doc }: { doc: ProjectDoc }): React.JSX.Element {
         <p className={styles['note']}>{t.noSelection}</p>
       </>
     )
-  const op = plan.setups[0]!.operations.find((o) => o.id === selected)
+  const op = allPlanOperations(plan).find((o) => o.id === selected)
   const view = data?.operations?.find((o) => o.id === selected)
+  // a setup selected in the setup panel (task F6)
+  const setup = plan.setups.find((s) => s.id === selected)
+  if (setup !== undefined)
+    return (
+      <SetupInspector
+        key={setup.id}
+        doc={doc}
+        plan={plan}
+        setup={setup}
+        warnings={data?.warnings ?? []}
+      />
+    )
   return op === undefined ? (
     <PlanSummary
       plan={plan}
@@ -143,7 +157,7 @@ function PlanSummary({
   const call = usePlanCommand()
   const [, select] = usePlanSelection()
   const [failed, setFailed] = useState<AppErrorData | undefined>(undefined)
-  const ops = plan.setups[0]!.operations
+  const ops = allPlanOperations(plan)
   const machine = snapshotName(plan, plan.machine)
   return (
     <div className={styles['inspector']}>
@@ -183,7 +197,7 @@ function PlanSummary({
 }
 
 /** A text field committing on Enter or blur (Escape reverts). */
-function NameField({
+export function NameField({
   label,
   name,
   readOnly,

@@ -332,9 +332,12 @@ describe('Plan mode', { timeout: 20_000 }, () => {
       setup: async (s) => s.toStatus(Object.keys(s.d.doc.plans)[0]!, 'finalized'),
     })
     await within(t.nav()).findByText(/Finalized plans are read-only/)
-    expect(
-      within(t.nav()).getByLabelText('Clearance height', { selector: 'input' }),
-    ).toHaveAttribute('readonly')
     expect(within(t.nav()).queryByRole('button', { name: /^Move / })).toBeNull()
+    expect(within(t.nav()).queryByRole('button', { name: /^Actions for / })).toBeNull()
+    // the setup's fields are in the inspector (task F6), read-only too
+    await t.user.click(within(t.nav()).getByRole('button', { name: /^Top/ }))
+    expect(
+      within(t.inspector()).getByLabelText('Clearance height', { selector: 'input' }),
+    ).toHaveAttribute('readonly')
   })
 })

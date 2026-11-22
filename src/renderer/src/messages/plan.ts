@@ -9,6 +9,7 @@ export type FeedSource = 'override' | 'preset' | 'calculator' | 'strategy'
 export type ToolpathState = 'ready' | 'stale' | 'none' | 'failed'
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? `1 ${one}` : `${n} ${many}`)
+const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 
 export const planMessages = {
   title: 'Plan',
@@ -25,7 +26,7 @@ export const planMessages = {
   empty: {
     title: 'Plan the part',
     description:
-      'A plan turns the part into toolpaths: one setup, a tool for every operation, feeds and speeds.',
+      'A plan turns the part into toolpaths: a setup per face it is machined from, a tool for every operation, feeds and speeds.',
     action: 'Create plan',
   },
 
@@ -79,20 +80,47 @@ export const planMessages = {
     empty: 'The machine library is empty. Add a machine to export gCode.',
   },
 
+  // setup panel (v0.2 task F6): docs/conventions/ui.md#design-and-plan-controls-v02
   setup: {
-    title: 'Setup',
+    title: 'Setups',
+    listLabel: 'Setups in machining order',
+    inspector: 'Setup',
+    name: 'Setup name',
+    position: (i: number, n: number) => `${i} of ${n}`,
+    direction: 'Up face',
+    directionValue: (face: string) => `${capital(face)} face up to the spindle`,
+    faceName: (face: string) => capital(face),
     workOffset: 'Work zero',
-    workOffsetValue: 'G54 · stock top, front-left corner',
+    workOffsetValue: (corner: string, face: string) =>
+      `G54 at the ${corner} corner of the ${face}; on the machine, the front-left corner of the top.`,
+    rowMeta: (face: string, corner: string | undefined, rotation: number) =>
+      [capital(face), corner === undefined ? undefined : `G54 ${corner}`, `${rotation}°`]
+        .filter((x) => x !== undefined)
+        .join(' · '),
+    rotation: 'Rotation',
+    rotationHint: 'About the spindle axis; the work zero moves to the new front-left corner.',
     clearanceHeight: 'Clearance height',
     retractHeight: 'Retract height',
+    shown: 'Shown in the viewport and exported',
+    moveUp: (name: string) => `Move setup ${name} up`,
+    moveDown: (name: string) => `Move setup ${name} down`,
+    actions: (name: string) => `Actions for setup ${name}`,
+    merge: (name: string) => `Merge with ${name}`,
+    noMerge: 'No other setup of this face to merge with',
+    findings: 'Setup checks',
   },
 
   operations: {
     title: 'Operations',
     listLabel: 'Plan operations in machining order',
+    /** With several setups, one list per setup. */
+    setupListLabel: (setup: string) => `Plan operations of ${setup} in machining order`,
     noTool: 'No tool',
     moveUp: (name: string) => `Move ${name} up`,
     moveDown: (name: string) => `Move ${name} down`,
+    actions: (name: string) => `Actions for ${name}`,
+    split: 'Move to new setup',
+    moveTo: (setup: string) => `Move to ${setup}`,
     errors: (n: number) => plural(n, 'error', 'errors'),
     warnings: (n: number) => plural(n, 'warning', 'warnings'),
   },
@@ -117,6 +145,9 @@ export const planMessages = {
 
   export: {
     action: 'Export gCode…',
+    /** With several setups the panel exports the window's setup (one program per setup). */
+    actionSetup: (setup: string) => `Export ${setup} gCode…`,
+    setup: (setup: string, i: number, n: number) => `Setup ${setup} (${i} of ${n})`,
     busy: 'Exporting…',
     noMachine: 'Choose a machine to export gCode.',
     archived: 'Archived plans cannot be exported.',
