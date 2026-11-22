@@ -40,6 +40,8 @@ export interface CuttingPresetProps {
   readonly plungeRate: Quantity
   readonly stepdown: Option<Quantity>
   readonly stepover: Option<Quantity>
+  /** Follows the calculator (library.md#recommended-presets); needs a material class. */
+  readonly recommended?: boolean
 }
 
 /** One feeds-and-speeds preset; rules that need the tool (stepover ≤ DC, unique name) are Tool's. */
@@ -52,6 +54,7 @@ export class CuttingPreset implements CuttingPresetProps {
     readonly plungeRate: Quantity,
     readonly stepdown: Option<Quantity>,
     readonly stepover: Option<Quantity>,
+    readonly recommended: boolean,
   ) {
     invariants('CuttingPreset', (c) => {
       checkText(c, ['name'], name, 1, PRESET_NAME_MAX)
@@ -60,6 +63,12 @@ export class CuttingPreset implements CuttingPresetProps {
       checkPositive(c, ['plungeRate'], plungeRate, 'feedRate')
       if (stepdown.isSome()) checkPositive(c, ['stepdown'], stepdown.unwrap(), 'length')
       if (stepover.isSome()) checkPositive(c, ['stepover'], stepover.unwrap(), 'length')
+      c.check(
+        !recommended || materialClass.isSome(),
+        ['recommended'],
+        'recommendedNeedsClass',
+        'needs a material class to follow the calculator',
+      )
     })
     Object.freeze(this)
   }
@@ -76,6 +85,7 @@ export class CuttingPreset implements CuttingPresetProps {
           p.plungeRate,
           p.stepdown,
           p.stepover,
+          p.recommended ?? false,
         ),
     )
   }
@@ -88,7 +98,12 @@ export class CuttingPreset implements CuttingPresetProps {
       stepdown: optionalQuantityFromDTO(dto.stepdown, 'stepdown'),
       stepover: optionalQuantityFromDTO(dto.stepover, 'stepover'),
     }).andThen((q) =>
-      CuttingPreset.create({ name: dto.name, materialClass: toOption(dto.materialClass), ...q }),
+      CuttingPreset.create({
+        name: dto.name,
+        materialClass: toOption(dto.materialClass),
+        recommended: dto.recommended === true,
+        ...q,
+      }),
     )
   }
 
@@ -101,6 +116,7 @@ export class CuttingPreset implements CuttingPresetProps {
       plungeRate: this.plungeRate.toDTO(),
       ...optionalQuantityDTO('stepdown', this.stepdown),
       ...optionalQuantityDTO('stepover', this.stepover),
+      ...(this.recommended ? { recommended: true } : {}),
     } as CuttingPresetDTO // quantity kinds are model invariants
   }
 }

@@ -7,7 +7,7 @@ import { TOOL_MATERIALS, TOOL_TYPES, type ToolMaterial } from '../../../core/lib
 import type { QuantityDTO } from '../../../core/quantity/quantity.dto'
 import { libraryMessages } from '../messages/library'
 import { Field, FieldInput, Select } from '../ui'
-import { toolName, withToolType, type ToolDraft } from './form'
+import { followDraft, toolName, withToolType, type ToolDraft } from './form'
 import { Focusable, Group, NameField, NotesField, QuantityField, type FormProps } from './fields'
 import { PresetTable } from './PresetTable'
 import { ToolDrawing, type ToolDimension } from './ToolDrawing'
@@ -59,7 +59,8 @@ export function ToolFields({
 }): React.JSX.Element {
   const full = variant === 'full'
   const [focused, setFocused] = useState<ToolDimension | undefined>(undefined)
-  const set = (patch: Partial<ToolDraft>) => onChange({ ...values, ...patch })
+  // recommended presets follow every change of the tool (library.md#recommended-presets)
+  const set = (patch: Partial<ToolDraft>) => onChange(followDraft({ ...values, ...patch }, units))
   const onFocusField = full
     ? (f: string | undefined) =>
         setFocused(f !== undefined && DIMENSIONS.has(f) ? (f as ToolDimension) : undefined)
@@ -92,7 +93,9 @@ export function ToolFields({
           <Select
             options={TOOL_TYPES.map((t) => ({ value: t, label: m.types[t] }))}
             value={values.type}
-            onValueChange={(type) => onChange(withToolType(values, type, units))}
+            onValueChange={(type) =>
+              onChange(followDraft(withToolType(values, type, units), units))
+            }
           />
         </Field>
       </Focusable>

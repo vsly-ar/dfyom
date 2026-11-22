@@ -112,6 +112,19 @@ describe('Tool', () => {
     expect(t.toDTO().presets).toEqual([any])
   })
 
+  it('recommended presets: stored only when true, and need a material class', () => {
+    const rec = { ...preset, recommended: true }
+    const t = expectOk(load({ ...flat(), presets: [rec] }))
+    expect(t.presets[0]!.recommended).toBe(true)
+    expect(t.toDTO().presets).toEqual([rec])
+    const off = expectOk(load({ ...flat(), presets: [{ ...preset, recommended: false }] }))
+    expect(off.toDTO().presets).toEqual([preset])
+    const { materialClass: _, ...any } = rec
+    expect(issues({ ...flat(), presets: [any] })).toEqual([
+      ['presets.0.recommended', 'recommendedNeedsClass'],
+    ])
+  })
+
   it('shape checks: type enum, preset name length, kinds', () => {
     expectErrCode(load({ ...flat(), type: 'vBit' }), 'input.malformed')
     expectErrCode(load({ ...flat(), presets: [{ ...preset, name: '' }] }), 'input.malformed')

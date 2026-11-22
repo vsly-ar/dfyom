@@ -3,18 +3,28 @@
 // feed / (speed × flutes), read-only, above spindle speed, feed rate, plunge rate and the optional
 // stepdown and stepover (compact labels, full names in the tooltip and accessible name). Cells parse as the
 // fields do (a bare number in the window's unit, L5); an invalid entry stays in the cell, marked,
-// and is not committed. Doc: docs/conventions/ui-library-window.md#layout
+// and is not committed. A "Recommended" checkbox per preset makes it follow the calculator; typing
+// another followed value unticks it (patchPreset). Doc: docs/conventions/ui-library-window.md#layout,
+// #recommended-presets
 import { Plus, Trash2 } from 'lucide-react'
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { MATERIAL_CLASSES, type MaterialClass } from '../../../core/library/item'
-import type { CuttingPresetDTO, ToolValuesDTO } from '../../../core/library/tool.dto'
+import type { CuttingPresetDTO } from '../../../core/library/tool.dto'
 import type { UnitSystem } from '../../../core/project/document'
 import { Quantity } from '../../../core/quantity/quantity'
 import type { QuantityDTO } from '../../../core/quantity/quantity.dto'
 import type { QuantityKind } from '../../../core/quantity/units'
 import { libraryMessages } from '../messages/library'
-import { Button, FieldInput, IconButton, Select, type FieldMessage } from '../ui'
-import { displayQuantity, libraryUnit, qdto, quantityOf } from './form'
+import { Button, Checkbox, FieldInput, IconButton, Select, type FieldMessage } from '../ui'
+import {
+  displayQuantity,
+  followState,
+  libraryUnit,
+  patchPreset,
+  qdto,
+  quantityOf,
+  type ToolDraft,
+} from './form'
 import styles from './LibraryWindow.module.css'
 
 const m = libraryMessages.tool.presets
@@ -107,6 +117,37 @@ function QuantityCell({
   )
 }
 
+/** The "Recommended" checkbox of one preset with its hint, or the reason it cannot follow. */
+function RecommendedCell({
+  preset,
+  tool,
+  invalid,
+  onChange,
+}: {
+  preset: CuttingPresetDTO
+  tool: ToolDraft
+  invalid: boolean
+  onChange: (on: boolean) => void
+}): React.JSX.Element {
+  const noteId = useId()
+  const state = followState(tool, preset.materialClass)
+  const on = preset.recommended === true
+  return (
+    <div className={styles['presetFollow']} data-invalid={invalid ? '' : undefined}>
+      <Checkbox
+        label={m.recommended}
+        checked={on}
+        disabled={!on && !state.ok}
+        aria-describedby={noteId}
+        onCheckedChange={(c) => onChange(c === true)}
+      />
+      <span id={noteId} className={styles['presetFollowNote']}>
+        {state.ok ? m.recommendedHint : state.reason}
+      </span>
+    </div>
+  )
+}
+
 export function PresetTable({
   presets,
   tool,
@@ -115,13 +156,13 @@ export function PresetTable({
   onChange,
 }: {
   presets: readonly CuttingPresetDTO[]
-  tool: Pick<ToolValuesDTO, 'fluteCount' | 'diameter'>
+  tool: ToolDraft
   units: UnitSystem
   messages: (field: string) => FieldMessage[]
   onChange: (presets: CuttingPresetDTO[]) => void
 }): React.JSX.Element {
   const set = (i: number, patch: Partial<CuttingPresetDTO>) =>
-    onChange(presets.map((p, n) => (n === i ? ({ ...p, ...patch } as CuttingPresetDTO) : p)))
+    onChange(presets.map((p, n) => (n === i ? patchPreset(p, patch) : p)))
   const add = () => {
     const mm = units === 'mm'
     let n = presets.length + 1
@@ -220,6 +261,12 @@ export function PresetTable({
                     />
                   </div>
                 ))}
+                <RecommendedCell
+                  preset={p}
+                  tool={tool}
+                  invalid={rowIssues('recommended')}
+                  onChange={(on) => set(i, { recommended: on ? true : undefined })}
+                />
               </li>
             )
           })}

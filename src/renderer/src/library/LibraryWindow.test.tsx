@@ -128,6 +128,55 @@ describe('Library window', () => {
     expect(bridge.libraryReports.at(-1)).toEqual({ draft: null, tab: 'tool' })
   })
 
+  it('a Recommended preset follows the calculator until a value is typed (library.md#recommended-presets)', async () => {
+    const { user, row, editor, get, add } = await renderLibrary()
+    const id = await add('tool', {
+      ...TOOL,
+      name: 'Flat 8',
+      diameter: '8',
+      toolMaterial: 'carbide',
+      presets: [
+        {
+          name: 'Alu',
+          materialClass: 'aluminum',
+          spindleSpeed: '1000',
+          feedRate: '100',
+          plungeRate: '50',
+        },
+        { name: 'Any', spindleSpeed: '1000', feedRate: '100', plungeRate: '50' },
+      ],
+    })
+    await user.click(await waitFor(() => row(/Flat 8/)))
+    const preset = (name: string) => within(editor()).getByRole('listitem', { name })
+    const speed = () =>
+      within(preset('Alu')).getByLabelText('Spindle speed of Alu', { selector: 'input' })
+    const box = (name: string) =>
+      within(preset(name)).getByRole('checkbox', { name: 'Recommended' })
+    // a preset for any material cannot follow: the reason is its description
+    expect(box('Any')).toBeDisabled()
+    expect(box('Any')).toHaveAccessibleDescription('Choose a material to follow the calculator.')
+    expect(box('Alu')).toBeEnabled()
+    await user.click(box('Alu'))
+    expect(box('Alu')).toBeChecked()
+    await waitFor(() => expect(speed()).not.toHaveValue('1000'))
+    const followed = (speed() as HTMLInputElement).value
+    // a tool change: the preset follows
+    const dc = within(editor()).getByLabelText('Diameter', { selector: 'input' })
+    await user.clear(dc)
+    await user.type(dc, '4{Enter}')
+    await waitFor(() => expect(speed()).not.toHaveValue(followed))
+    await user.keyboard('{Control>}s{/Control}{Meta>}s{/Meta}')
+    await waitFor(() => expect(get('tool', id).revision).toBe(2))
+    expect(get('tool', id)).toMatchObject({
+      presets: [{ name: 'Alu', recommended: true }, { name: 'Any' }],
+    })
+    // typing a value ends the following; the values stay
+    await user.clear(speed())
+    await user.type(speed(), '12000{Enter}')
+    expect(box('Alu')).not.toBeChecked()
+    expect(speed()).toHaveValue('12000')
+  })
+
   it('asks before leaving a draft: Save / Discard / Cancel', async () => {
     const { user, row, editor, get, flat6 } = await renderLibrary()
     await user.click(row(/Flat 6/))

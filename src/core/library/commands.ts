@@ -19,6 +19,7 @@ import { MachineValuesDtoSchema, type MachineValuesDTO } from './machine.dto'
 import { parseSettingsText } from '../run/grbl/settings'
 import { StockValuesDtoSchema } from './stock.dto'
 import { ToolValuesDtoSchema } from './tool.dto'
+import { followRecommended } from '../feeds-speeds/preset'
 import { valuesFromInput, valuesInputSchema } from './values-input'
 import { UnitSystemSchema, type UnitSystem } from '../project/document'
 
@@ -53,11 +54,23 @@ function forKind(kind: LibraryItemKind): { commands: AnyCommand[]; queries: Quer
   const valuesArg: z.ZodType<object> = valuesInputSchema(VALUES[kind]).describe(
     `The ${label} values; quantities are strings, e.g. "6 mm", "1/4 in"`,
   ) as z.ZodType<object>
-  /** Parsed quantities, `kind`, then the model (all issues below `values`). */
+  /**
+   * Parsed quantities, `kind`, recommended presets following the calculator (tools,
+   * library.md#recommended-presets), then the model (all issues below `values`).
+   */
   const modelValues = (values: object, units: UnitSystem) =>
-    valuesFromInput(VALUES[kind], values, units, ['values']).andThen((v) =>
-      valuesFromDTO(toValuesDTO(v as object)).mapErr((e) => e.prefixIssues('values')),
-    )
+    valuesFromInput(VALUES[kind], values, units, ['values']).andThen((v) => {
+      let dto = toValuesDTO(v as object)
+      if (dto.kind === 'tool') {
+        const followed = followRecommended(dto, units)
+        if (followed.issues.length > 0)
+          return fail('model.invariant', 'a recommended preset has no calculator data', {
+            issues: followed.issues.map((i) => ({ ...i, path: ['values', ...i.path] })),
+          })
+        dto = followed.values
+      }
+      return valuesFromDTO(dto).mapErr((e) => e.prefixIssues('values'))
+    })
   const itemResult: z.ZodType<LibraryItemDTO> = ITEM_RESULTS[kind]
   const toValuesDTO = (v: object) => ({ ...v, kind }) as ItemValuesDTO
   const now = (ms: number) => new Date(ms).toISOString()

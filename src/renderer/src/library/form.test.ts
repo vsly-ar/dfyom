@@ -18,7 +18,10 @@ import {
   defaultToolValues,
   displayQuantity,
   draftIssues,
+  followDraft,
+  followState,
   issuesAt,
+  patchPreset,
   qdto,
   quantityText,
   toolName,
@@ -147,5 +150,45 @@ describe('library forms', () => {
     expect(issuesAt(issues, 'travel.y')).toHaveLength(0)
     expect(issuesAt(issues, 'spindle.minSpeed')).toHaveLength(1)
     expect(unmatchedIssues(issues, ['travel.x', 'spindle.minSpeed'])).toEqual([issues[2]])
+  })
+})
+
+describe('recommended presets (library.md#recommended-presets)', () => {
+  const preset = {
+    name: 'Alu',
+    materialClass: 'aluminum' as const,
+    spindleSpeed: qdto('spindleSpeed', '1000', 'mm'),
+    feedRate: qdto('feedRate', '100', 'mm'),
+    plungeRate: qdto('feedRate', '50', 'mm'),
+  }
+  const tool = (recommended?: boolean) => ({
+    ...defaultToolValues('mm'),
+    presets: [recommended === undefined ? preset : { ...preset, recommended }],
+  })
+
+  it('a draft follows the calculator; a stray corner radius of a flat does not stop it', () => {
+    const followed = followDraft(tool(true), 'mm')
+    expect(followed.presets[0]!.spindleSpeed.source).not.toBe('1000')
+    expect(followDraft(tool(false), 'mm')).toEqual(tool(false))
+  })
+
+  it('can follow with a material class and calculator data only', () => {
+    expect(followState(tool(), 'aluminum')).toEqual({ ok: true })
+    expect(followState(tool(), undefined)).toMatchObject({ ok: false })
+    const { toolMaterial: _m, ...noMaterial } = tool()
+    expect(followState(noMaterial, 'aluminum')).toMatchObject({ ok: false })
+  })
+
+  it('typing another followed value drops the flag; the same value, stepover or the name keep it', () => {
+    const p = { ...preset, recommended: true }
+    expect(patchPreset(p, { spindleSpeed: qdto('spindleSpeed', '2000', 'mm') })).not.toHaveProperty(
+      'recommended',
+    )
+    expect(
+      patchPreset(p, { spindleSpeed: qdto('spindleSpeed', '1000 rpm', 'mm') }).recommended,
+    ).toBe(true)
+    expect(patchPreset(p, { stepover: qdto('length', '2', 'mm') }).recommended).toBe(true)
+    expect(patchPreset(p, { name: 'B' }).recommended).toBe(true)
+    expect(patchPreset(p, { recommended: undefined }).recommended).toBeUndefined()
   })
 })

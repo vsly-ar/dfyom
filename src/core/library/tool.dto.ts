@@ -22,6 +22,12 @@ export const CuttingPresetDtoSchema = z.object({
   plungeRate: quantityDto('feedRate'),
   stepdown: quantityDto('length').optional(),
   stepover: quantityDto('length').optional().describe('At most the tool diameter'),
+  recommended: z
+    .boolean()
+    .optional()
+    .describe(
+      'Follows the calculator: speed, feed, plunge and stepdown are replaced by its recommendation on every save (needs materialClass; send false to enter your own values)',
+    ),
 })
 export type CuttingPresetDTO = z.output<typeof CuttingPresetDtoSchema>
 
