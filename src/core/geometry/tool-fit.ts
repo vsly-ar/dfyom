@@ -44,10 +44,12 @@ type Cutting = Exclude<OperationGeometry, { kind: 'facing' }>
 /**
  * Depth from the stock's outer face of the operation's direction to its deepest point, and the
  * parameter it is measured at: pocket and flat/point hole to the floor, a through hole and a
- * profile by the stock extent along the normal (`stock` is the local stock).
+ * through profile by the stock extent along the normal (`stock` is the local stock), a blind `on`
+ * groove (v0.3) by its depth below the stock face it starts from.
  */
 export function reachDepth(op: Cutting, stock: StockGeometry): [number, string] {
-  if (op.kind === 'profile') return [stock.thickness, 'on']
+  if (op.kind === 'profile')
+    return op.depth === undefined ? [stock.thickness, 'on'] : [op.depth, 'depth']
   if (op.kind === 'pocket') return [op.depth - op.onZ, 'depth']
   return op.bottom.kind === 'through'
     ? [stock.thickness, 'on']
@@ -193,7 +195,9 @@ export function toolFit(
   }
   if (tool.reach === undefined) return undefined
   const [base] = reachDepth(op, stock)
-  const depth = op.kind === 'profile' ? base + DEFAULT_BREAKTHROUGH[unitSystem] : base
+  // a through profile breaks through the far face; a blind groove stops at its depth
+  const through = op.kind === 'profile' && op.depth === undefined
+  const depth = through ? base + DEFAULT_BREAKTHROUGH[unitSystem] : base
   return tool.reach + EPSILON >= depth
     ? undefined
     : {

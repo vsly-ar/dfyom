@@ -261,6 +261,23 @@ describe('booleans', () => {
     expect(smallestInsideRadius(r)).toBeCloseTo(3, 9)
     expect(regionLoops(r)).toHaveLength(2)
   })
+
+  it('smallest inside radius reads the region as a pocket: concave vertices and kinks are not corners', () => {
+    // an L with its convex corners rounded: the reflex vertex at (10, 10) is no pocket corner
+    const ell = path([0, 0], [L(30, 0), L(30, 10), L(10, 10), L(10, 30), L(0, 30)], {
+      fillets: [0, 1, 2, 4, 5].map((vertex) => ({ vertex, radius: 2 })),
+    })
+    expect(smallestInsideRadius(region([ell]))).toBeCloseTo(2, 9)
+    // a 2° kink (below CORNER_MIN_TURN, like the joins of fitted curves) is smooth
+    const kink = path(
+      [0, 0],
+      [L(20, 0), L(40, Math.tan((2 * Math.PI) / 180) * 20), L(40, 20), L(0, 20)],
+      {
+        fillets: [0, 2, 3, 4].map((vertex) => ({ vertex, radius: 3 })),
+      },
+    )
+    expect(smallestInsideRadius(region([kink]))).toBeCloseTo(3, 9)
+  })
 })
 
 describe('cache', () => {

@@ -117,6 +117,31 @@ describe('design.shape.import', () => {
     expect((await importSvg(s, { path: ENCLOSURE })).shapeIds).toEqual(['shape3', 'shape4'])
   })
 
+  it('reports the cavity smallest inside radius as its pocket corners: 0, then its fillets', async () => {
+    const s = await setup()
+    await importSvg(s, { path: ENCLOSURE })
+    const radius = (id: string) =>
+      (
+        expectOk(s.d.query('design.shape.get', { partId: s.partId, shapeId: id }, ui)).value as {
+          resolved: { smallestInsideRadius?: number }
+        }
+      ).resolved.smallestInsideRadius
+    // the back-wall step's two sharp convex corners (X0); its concave corners and the fitted
+    // curves' tangent joins are no corners of a pocket
+    expect(radius('shape2')).toBe(0)
+    // the fillets X1 gives them (exit-criteria.v03.fixture.ts)
+    await s.run('design.shape.item.update', {
+      partId: s.partId,
+      shapeId: 'shape2',
+      index: 0,
+      fillets: [
+        { vertex: 72, radius: '1' },
+        { vertex: 0, radius: '0.25' },
+      ],
+    })
+    expect(radius('shape2')).toBeCloseTo(0.25, 9)
+  })
+
   it('assumes 96 px per inch for unitless files unless told otherwise', async () => {
     const s = await setup()
     const px = await importSvg(s, { path: UNITLESS })

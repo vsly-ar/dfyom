@@ -318,6 +318,12 @@ function tabSlots(op: Profile, loop: Loop, port: Region2dPort): AppResult<TabSlo
   return slotOf(exact).andThen((e) => slotOf(grown).map((g) => ({ exact: e, grown: g })))
 }
 
+/**
+ * How much wider (mm, each side) a tab band is built than the slot that clips it: well above the
+ * port's epsilons and below the chord tolerance.
+ */
+const TAB_CLIP_MARGIN = 1e-3
+
 function shapeTab(
   op: Profile,
   loop: Loop,
@@ -329,7 +335,7 @@ function shapeTab(
   ctx: ShapeSolidsContext,
 ): AppResult<{ band: LabelledMesh; nominal: LabelledMesh }> {
   const port = ctx.region2d
-  const { exact, grown } = slotOffsets(op)
+  const [lo, hi] = slotOffsets(op).grown
   const p0 = chainPointAt(loop, stretch.from, true)
   const p1 = chainPointAt(loop, stretch.to, true)
   if (p0.isErr()) return Err(p0.unwrapErr())
@@ -339,18 +345,19 @@ function shapeTab(
   const centre = (stretch.from + stretch.to) / 2
   const width = stretch.to - stretch.from
   // the band, clipped to the slot between true offsets: near a corner the band's side reaches
-  // past the slot, into material the slot never cut
-  const bandOf = (range: [number, number], slot: Region): AppResult<Region> =>
-    port
-      .normalise(generalTabBands(loop, [centre], width, range[0], range[1])[0]!.map((p) => p.loop))
-      .andThen((band) => port.intersect(band, slot))
-  const bandRegion = bandOf(grown, slots.grown)
-  const exactRegion = bandOf(exact, slots.exact)
+  // past the slot, into material the slot never cut. Built `TAB_CLIP_MARGIN` wider on both
+  // sides, so its sides never coincide with the slot's loops (the port's intersection of
+  // coincident boundaries can come out empty: v0.3 known issue, tabs on the enclosure outline)
+  const m = TAB_CLIP_MARGIN
+  const bandRegion = port
+    .normalise(generalTabBands(loop, [centre], width, lo - m, hi + m)[0]!.map((p) => p.loop))
+    .andThen((band) => port.intersect(band, slots.grown))
   if (bandRegion.isErr()) return Err(bandRegion.unwrapErr())
-  if (exactRegion.isErr()) return Err(exactRegion.unwrapErr())
   // the exact slot where the band is: on the band's boundary, inside it ⇔ inside the slot, and
   // tested against a few elements instead of the whole slot's (`regionContains` is linear in
-  // them, once per band chord)
+  // them, once per band chord). It is also the nominal tab: the grown band clipped to the exact
+  // slot. The band at the exact offsets would share its sides with the slot's loops, and the
+  // port's intersection of coincident boundaries can come out empty (v0.3 known issue)
   const local = port.intersect(bandRegion.unwrap(), slots.exact)
   if (local.isErr()) return Err(local.unwrapErr())
   const slot = local.unwrap()
@@ -385,14 +392,7 @@ function shapeTab(
     { wall, top: topFace, bottom: AIR },
     ctx,
   )
-  const nominal = prism(
-    exactRegion.unwrap(),
-    'shrink',
-    tabTop,
-    -T,
-    { wall: () => AIR, top: AIR, bottom: AIR },
-    ctx,
-  )
+  const nominal = prism(slot, 'shrink', tabTop, -T, { wall: () => AIR, top: AIR, bottom: AIR }, ctx)
   return band.andThen((m) => nominal.map((n) => ({ band: m, nominal: n })))
 }
 
