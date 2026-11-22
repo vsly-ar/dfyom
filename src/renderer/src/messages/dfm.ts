@@ -129,6 +129,8 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
     const v = (x: unknown) => (p['field'] === 'csAngle' ? `${num(x)}°` : L(x))
     return `${HOLE_FIELD[String(p['field'])] ?? 'A size'} ${v(p['value'])} differs from the ${typeof p['fastener'] === 'string' ? `${p['fastener']} ` : ''}table value ${v(p['table'])} (custom).`
   },
+  'dfm.countersinkStepped': (p, L) =>
+    `Stepped countersink: ${num(p['terraces'])} steps of ${L(p['stepdown'])} cut by the hole's end mill. The screw head seats on the step corners and hides the steps.`,
   // v0.4 Clones (features.md § Checks and DFM)
   'dfm.cloneOutsideStock': (p) =>
     `${num(p['count'])} clones lie outside the stock (${numbers(p)}): skip them or shorten a row.`,
@@ -141,7 +143,9 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
   'dfm.chamferTooDeep': (p, L) =>
     `The chamfer is ${L(p['depth'])} deep, deeper than ${String(p['edgeOf'])} (${L(p['edgeDepth'])}).`,
   'dfm.chamferNoTool': (p, L) =>
-    `The library has no ${num(p['angle'])}° chamfer mill that cuts Ø${L(p['edgeDiameter'])} to Ø${L(p['diameter'])}.`,
+    p['stepped'] === 1
+      ? `The library has no flat end mill smaller than Ø${L(p['edgeDiameter'])} for the stepped countersink.`
+      : `The library has no ${num(p['angle'])}° chamfer mill that cuts Ø${L(p['edgeDiameter'])} to Ø${L(p['diameter'])}.`,
 }
 
 /** Hole feature size fields in `dfm.holeCustomSize`. */
@@ -189,6 +193,8 @@ function toolUnfitText(p: DfmWarning['params'], L: (mm: unknown) => string): str
         return p['boring'] === true
           ? `Helical boring of the Ø ${L(p['holeDiameter'])} hole needs an end mill between Ø ${L(num(p['holeDiameter']) / 2)} and Ø ${L(p['holeDiameter'])}; the ${tool} is not.`
           : `The ${tool} does not match the Ø ${L(p['holeDiameter'])} hole.`
+      if (has('edgeDiameter'))
+        return `A stepped countersink needs an end mill smaller than the Ø ${L(p['edgeDiameter'])} hole; the ${tool} is not.`
       break
     case 'type': {
       const needs = String(p['needs'])

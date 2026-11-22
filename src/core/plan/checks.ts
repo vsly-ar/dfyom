@@ -127,10 +127,18 @@ export function toolFindings(i: ToolCheckInput): Finding[] {
   const D = tool.diameter.canonical
   const kind = i.ops[0]?.kind
   if (kind === undefined) return out
-  if (!TOOL_TYPES_FOR[kind].includes(tool.type)) {
-    add('tool', 'toolType', `a ${kind} needs a ${TOOL_TYPES_FOR[kind].join(' or ')}`, {
-      toolType: tool.type,
-    })
+  // F7: a stepped chamfer is cut by a flat end mill (plan-v0.4.md § Stepped chamfer)
+  const stepped = i.ops.some((o) => o.kind === 'chamfer' && o.stepdown.isSome())
+  const types: readonly ToolType[] = stepped ? ['flatEndMill'] : TOOL_TYPES_FOR[kind]
+  if (!types.includes(tool.type)) {
+    add(
+      'tool',
+      'toolType',
+      `a ${stepped ? 'stepped chamfer' : kind} needs a ${types.join(' or ')}`,
+      {
+        toolType: tool.type,
+      },
+    )
     return out
   }
   const flute = tool.fluteLength.canonical
@@ -265,6 +273,7 @@ export function toolFindings(i: ToolCheckInput): Finding[] {
             edgeDiameter: cut.edgeDiameter,
             diameter: op.diameter.canonical,
             angle: op.angle.canonical,
+            ...(op.stepdown.isSome() ? { stepdown: op.stepdown.unwrap().canonical } : {}),
           },
         )
         if (unfit !== undefined) add('tool', unfit.rule, unfit.detail, numeric(unfit.values))

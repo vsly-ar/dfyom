@@ -1,12 +1,14 @@
 /**
  * Chamfer (v0.4 T1): one circular chamfer per input, plunged at the centre (DC ≥ D) or
  * contoured on one ring at the chamfer depth (the fit rule makes the cutting edge cover the
- * slant, so one ring always cuts it). Doc: docs/modes/plan-v0.4.md#chamfer-toolpath
+ * slant, so one ring always cuts it); stepped (F7): terraces by a flat end mill.
+ * Doc: docs/modes/plan-v0.4.md#chamfer-toolpath, docs/modes/plan-v0.4.md#stepped-chamfer-f7
  */
 import { Err, Ok, type AppResult } from '../../shared/result'
 import {
   CHAMFER_ANGLE_TOLERANCE,
   chamferDepth,
+  chamferTerraces,
   coneSlant,
   type Vec2,
   type Vec3,
@@ -40,8 +42,13 @@ export function chamferCut(
     : { ringRadius: (op.edgeDiameter - tip) / 2, tipZ: op.onZ - chamferDepth(op) }
 }
 
+/** Most terraces of a stepped chamfer (a guard; the design's 0.1 mm minimum keeps far below). */
+export const MAX_TERRACES = 1000
+
 /** One chamfer is one step (after the input checks), as one hole of a drilling. */
 export function generateChamfer(input: ChamferInput, steps: Steps = noSteps): AppResult<Toolpath> {
+  if (input.strategy.entry === 'stepped' || input.operation.stepdown !== undefined)
+    return generateSteppedChamfer(input, steps)
   const { tool, cutting, heights, operation: op, strategy: st } = input
   const issues = commonIssues(input)
   issues.positive('operation.edgeDiameter', op.edgeDiameter)
@@ -115,21 +122,7 @@ export function generateChamfer(input: ChamferInput, steps: Steps = noSteps): Ap
   b.rapid(at(start, heights.clearanceHeight))
   b.rapid(at(start, retract))
   b.line(at(start, op.onZ), cutting.plungeRate)
-  const drop = op.onZ - tipZ
-  if (r < HELIX_MIN_RADIUS) b.line(at(start, tipZ), cutting.plungeRate)
-  else {
-    const turn = 2 * Math.PI * r
-    const turns = Math.max(
-      1,
-      Math.ceil(drop / (turn * Math.tan((st.rampAngle * Math.PI) / 180)) - 1e-9),
-    )
-    const perTurn = drop / turns
-    const feed = Math.min(
-      cutting.feedRate,
-      (cutting.plungeRate * Math.hypot(turn, perTurn)) / perTurn,
-    )
-    for (const s of slope(Array<Seg>(turns).fill(ring), op.onZ, tipZ)) b.seg(s, feed)
-  }
+  rampRing(b, ring, op.onZ, tipZ, input)
   for (const s of flat([ring], tipZ)) b.seg(s, cutting.feedRate)
   const exit: Seg = {
     kind: 'arc',
@@ -141,5 +134,133 @@ export function generateChamfer(input: ChamferInput, steps: Steps = noSteps): Ap
   if (r < HELIX_MIN_RADIUS) b.line(at(c, tipZ), cutting.feedRate)
   else for (const s of flat([exit], tipZ)) b.seg(s, cutting.feedRate)
   b.rapid(at(c, heights.clearanceHeight))
+  return Ok(toolpath(input, b.build()))
+}
+
+/**
+ * Down along `ring` from `z0` to `z1` in whole turns, each at most `rampAngle` and never
+ * descending faster than the plunge rate (as helical boring); below r = 0.1 mm a straight plunge.
+ */
+function rampRing(
+  b: MoveBuilder,
+  ring: Extract<Seg, { kind: 'arc' }>,
+  z0: number,
+  z1: number,
+  input: Pick<ChamferInput, 'cutting' | 'strategy'>,
+): void {
+  const { cutting, strategy: st } = input
+  const r = ring.radius
+  // every ring starts at −90°
+  const start: Vec2 = [ring.center[0], ring.center[1] - r]
+  if (r < HELIX_MIN_RADIUS) {
+    b.line([start[0], start[1], z1], cutting.plungeRate)
+    return
+  }
+  const drop = z0 - z1
+  const turn = 2 * Math.PI * r
+  const turns = Math.max(
+    1,
+    Math.ceil(drop / (turn * Math.tan((st.rampAngle * Math.PI) / 180)) - 1e-9),
+  )
+  const perTurn = drop / turns
+  const feed = Math.min(
+    cutting.feedRate,
+    (cutting.plungeRate * Math.hypot(turn, perTurn)) / perTurn,
+  )
+  for (const s of slope(Array<Seg>(turns).fill(ring), z0, z1)) b.seg(s, feed)
+}
+
+/**
+ * The ring radii (tool axis) of one terrace whose wall is at `wall`: the outermost at wall − R,
+ * inner ones at most DC / 2 apart (equal) down to d / 2 + 0.4 · DC, so the innermost reaches
+ * 0.1 · DC into the hole (plan-v0.4.md § Stepped chamfer). Inner to outer.
+ */
+export function terraceRings(wall: number, edgeDiameter: number, toolDiameter: number): number[] {
+  const outer = wall - toolDiameter / 2
+  const inner = edgeDiameter / 2 + 0.4 * toolDiameter
+  if (outer <= inner + 1e-9) return [outer]
+  const n = 1 + Math.ceil((outer - inner) / (toolDiameter / 2) - 1e-9)
+  const w = (outer - inner) / (n - 1)
+  return Array.from({ length: n }, (_, j) => inner + j * w)
+}
+
+/**
+ * Stepped (F7): a flat end mill cuts the terraces top to bottom; per terrace a ramp along its
+ * innermost ring from the level above, a full ring, then each outer ring after a radial feed
+ * outward; back in at depth to the next terrace; at the end to the centre (the hole) and out.
+ * Every top step corner lies on the cone (plan-v0.4.md § Stepped chamfer).
+ */
+function generateSteppedChamfer(input: ChamferInput, steps: Steps): AppResult<Toolpath> {
+  const { tool, cutting, heights, operation: op, strategy: st } = input
+  const issues = commonIssues(input)
+  issues.positive('operation.edgeDiameter', op.edgeDiameter)
+  if (!(op.diameter > op.edgeDiameter))
+    issues.rule('invariant', 'operation.diameter', 'greaterThanEdge', 'diameter must be > edge Ø', {
+      diameter: op.diameter,
+      edgeDiameter: op.edgeDiameter,
+    })
+  if (!(op.angle > 0 && op.angle < 180))
+    issues.rule('invariant', 'operation.angle', 'range', 'angle must be in (0°, 180°)', {
+      angle: op.angle,
+    })
+  if (st.entry !== 'stepped' || op.stepdown === undefined)
+    issues.rule('invariant', 'strategy.entry', 'stepped', 'a stepped chamfer is cut in terraces', {
+      entry: st.entry,
+    })
+  if (!(st.rampAngle >= 0.5 && st.rampAngle <= 30))
+    issues.rule('invariant', 'strategy.rampAngle', 'range', 'rampAngle must be 0.5°–30°', {
+      rampAngle: st.rampAngle,
+    })
+  const terraces =
+    op.stepdown !== undefined && op.diameter > op.edgeDiameter
+      ? chamferTerraces(op, op.stepdown)
+      : undefined
+  if (op.stepdown !== undefined && (terraces === undefined || terraces.count > MAX_TERRACES))
+    issues.rule('invariant', 'operation.stepdown', 'range', 'stepdown gives too many terraces', {
+      stepdown: op.stepdown,
+      max: MAX_TERRACES,
+    })
+  if (tool.type !== 'flatEndMill')
+    issues.rule('check', 'tool.type', 'toolType', 'a stepped chamfer needs a flat end mill')
+  else if (tool.diameter >= op.edgeDiameter - TOOL_FIT_TOLERANCE)
+    issues.rule('check', 'tool.diameter', 'diameter', 'the tool must be smaller than the edge Ø', {
+      diameter: tool.diameter,
+      edgeDiameter: op.edgeDiameter,
+    })
+  const ok = issues.result('generateChamfer', input.planOperationId).andThen(() => steps.step())
+  if (ok.isErr()) return Err(ok.unwrapErr())
+
+  const c = op.center
+  const at = (r: number, z: number): Vec3 => [c[0], c[1] - r, z]
+  const sweep = st.direction === 'climb' ? 2 * Math.PI : -2 * Math.PI
+  const ring = (r: number): Extract<Seg, { kind: 'arc' }> => ({
+    kind: 'arc',
+    center: c,
+    radius: r,
+    start: -Math.PI / 2,
+    sweep,
+  })
+  const { height, radii } = terraces!
+  const rings = radii.map((wall) => terraceRings(wall, op.edgeDiameter, tool.diameter))
+  const b = new MoveBuilder()
+  b.pass('rough')
+  const first = rings[0]![0]!
+  b.rapid(at(first, heights.clearanceHeight))
+  b.rapid(at(first, op.onZ + heights.retractHeight))
+  b.line(at(first, op.onZ), cutting.plungeRate)
+  let z = op.onZ
+  rings.forEach((rs, k) => {
+    const floor = op.onZ - (k + 1) * height
+    // back in at the level above (cleared: the terrace above is wider), then down the ring
+    if (k > 0) b.line(at(rs[0]!, z), cutting.feedRate)
+    rampRing(b, ring(rs[0]!), z, floor, input)
+    rs.forEach((r, j) => {
+      if (j > 0) b.line(at(r, floor), cutting.feedRate)
+      if (r >= HELIX_MIN_RADIUS) for (const s of flat([ring(r)], floor)) b.seg(s, cutting.feedRate)
+    })
+    z = floor
+  })
+  b.line([c[0], c[1], z], cutting.feedRate)
+  b.rapid([c[0], c[1], heights.clearanceHeight])
   return Ok(toolpath(input, b.build()))
 }

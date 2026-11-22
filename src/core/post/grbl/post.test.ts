@@ -150,6 +150,52 @@ const chamferOps = (inch = false): ExportOperation[] => {
   ]
 }
 
+/**
+ * A stepped M3 countersink (v0.4 F7): the Ø3.4 hole bored helically by a 2.5 mm end mill, then
+ * its terraces by the same end mill (one tool, no tool change).
+ */
+const steppedCountersinkOps = (): ExportOperation[] => {
+  const tool = endMill(2.5)
+  const stock = { length: 30, width: 30, thickness: 6 }
+  const hole = {
+    kind: 'drilling',
+    id: 'hole1_drill',
+    onZ: 0,
+    center: [15, 15],
+    diameter: 3.4,
+    bottom: { kind: 'through' },
+  } as const
+  const sink = {
+    kind: 'chamfer',
+    id: 'hole1_countersink',
+    onZ: 0,
+    center: [15, 15],
+    edgeOf: 'hole1_drill',
+    edgeDiameter: 3.4,
+    diameter: 7.12,
+    angle: 90,
+    stepdown: 1,
+  } as const
+  return [
+    operation(
+      generateDrilling(
+        drillingInput(stock, hole, tool, {
+          cycle: 'helix',
+          helixPitch: 0.6,
+          rampAngle: 3,
+          direction: 'climb',
+          breakthrough: 0.5,
+        }),
+      ).unwrap(),
+      tool,
+    ),
+    operation(
+      generateChamfer(chamferInput(stock, sink, tool, { entry: 'stepped' })).unwrap(),
+      tool,
+    ),
+  ]
+}
+
 /** Facing, the two holes, the profile: three tools, the drill at another speed. */
 const multiToolOps = (): ExportOperation[] => [facingOp(), ...drillOps(), profileOp()]
 
@@ -350,6 +396,7 @@ describe('golden files (also streamed through the virtual machine)', () => {
     ['multi-tool', multiToolOps],
     ['chamfer', () => chamferOps()],
     ['chamfer-inch', () => chamferOps(true), testMachine({ programUnits: 'in' })],
+    ['countersink-stepped', steppedCountersinkOps],
     [
       'multi-tool-inch-manual-spindle',
       multiToolOps,
@@ -364,6 +411,11 @@ describe('golden files (also streamed through the virtual machine)', () => {
       expectIntendedMotion(e.program, e.lines)
       await streamed(e.lines, machine)
     })
+})
+
+it('a stepped countersink and its hole run on one tool: loaded once (F7)', () => {
+  const e = exportOf(steppedCountersinkOps())
+  expect(e.program.blocks.filter((b) => b.kind === 'toolChange')).toHaveLength(1)
 })
 
 // ── Dialect ─────────────────────────────────────────────────────────────────────────────

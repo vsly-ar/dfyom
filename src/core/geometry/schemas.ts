@@ -134,6 +134,7 @@ export const ChamferGeometrySchema = z.object({
   edgeDiameter: z.number(),
   diameter: z.number(),
   angle: z.number(),
+  stepdown: z.number().exactOptional(),
 })
 
 export const OperationGeometrySchema: z.ZodType<OperationGeometry> = z.discriminatedUnion('kind', [

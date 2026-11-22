@@ -601,9 +601,17 @@ function chamfer(
       warning(
         'dfm.chamferNoTool',
         op,
-        'angle',
-        `no chamfer mill of ${op.angle}° in the library fits Ø${mm(op.edgeDiameter)} → Ø${mm(op.diameter)}`,
-        { angle: op.angle, diameter: op.diameter, edgeDiameter: op.edgeDiameter },
+        op.stepdown === undefined ? 'angle' : 'stepdown',
+        op.stepdown === undefined
+          ? `no chamfer mill of ${op.angle}° in the library fits Ø${mm(op.edgeDiameter)} → Ø${mm(op.diameter)}`
+          : `no flat end mill in the library is smaller than Ø${mm(op.edgeDiameter)} (stepped)`,
+        {
+          angle: op.angle,
+          diameter: op.diameter,
+          edgeDiameter: op.edgeDiameter,
+          // F7: a stepped chamfer needs a flat end mill smaller than the edge
+          ...(op.stepdown !== undefined && { stepped: 1 }),
+        },
       ),
     )
   return out

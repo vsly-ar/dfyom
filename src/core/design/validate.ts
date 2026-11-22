@@ -22,6 +22,8 @@ const MAX_POINT_ANGLE = Rational.int(180n)
 /** Chamfer included angle (design-v0.4.md § Chamfer operation). */
 const MIN_CHAMFER_ANGLE = Rational.int(60n)
 const MAX_CHAMFER_ANGLE = Rational.int(120n)
+/** Smallest terrace height of a stepped chamfer, mm (design-v0.4.md § Stepped countersink). */
+const MIN_CHAMFER_STEPDOWN = Rational.create(1n, 10n).unwrap()
 
 class Checker {
   readonly issues: Issue[] = []
@@ -384,6 +386,14 @@ export function operationIssues(
         'must be between 60° and 120°',
         { min: 60, max: 120, actual: op.angle.canonical },
       )
+      if (op.stepdown.isSome())
+        c.check(
+          op.stepdown.unwrap().exact.compare(MIN_CHAMFER_STEPDOWN) >= 0,
+          'stepdown',
+          'range',
+          'must be at least 0.1 mm',
+          { min: 0.1, actual: op.stepdown.unwrap().canonical },
+        )
       break
     }
   }

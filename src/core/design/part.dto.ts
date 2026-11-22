@@ -180,6 +180,8 @@ export const ChamferDtoSchema = z.object({
   edgeOf: OperationIdSchema,
   diameter: length(),
   angle: quantityDto('angle'),
+  /** Present = stepped (v0.4 F7): terraces of at most this height by a flat end mill. */
+  stepdown: length().optional(),
 })
 
 export const OperationDtoSchema = z.discriminatedUnion('kind', [

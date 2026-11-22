@@ -10,6 +10,7 @@ import { PointArg, Src } from './commands'
 import { FASTENER_FITS } from './fastener/data'
 import { featureKindCommands, type FeatureCommandSpec } from './feature-commands'
 import {
+  CS_METHODS,
   FASTENER_SIZES,
   fastenerRow,
   HOLE_PURPOSES,
@@ -41,6 +42,10 @@ const params = {
   cbDepth: Src.describe('counterbore; default head height + headSink'),
   csDiameter: Src.describe('countersink; default head Ø + 2 × headSink'),
   csAngle: Src.describe('countersink; default 90°'),
+  csMethod: z
+    .enum(CS_METHODS)
+    .describe("countersink; default chamfer; stepped: cut by the hole's end mill"),
+  csStepdown: Src.describe('stepped; default 1 mm / 1/32"'),
   headSink: Src.describe('Head below the face, for table defaults; default 0.2 mm'),
 }
 
@@ -104,7 +109,8 @@ const spec: FeatureCommandSpec<typeof params, Hole> = {
       return f.issue(path, 'required', `is required for a ${type} hole without a fastener`)
     }
     const prevHead = prev?.head
-    const notFor = (keys: readonly ('cbDiameter' | 'cbDepth' | 'csDiameter' | 'csAngle')[]) => {
+    type HeadKey = 'cbDiameter' | 'cbDepth' | 'csDiameter' | 'csAngle' | 'csMethod' | 'csStepdown'
+    const notFor = (keys: readonly HeadKey[]) => {
       for (const k of keys)
         if (a[k] !== undefined)
           f.issue(
@@ -116,7 +122,7 @@ const spec: FeatureCommandSpec<typeof params, Hole> = {
     let head: HoleHead
     if (type === 'counterbore') {
       const old = prevHead?.type === 'counterbore' ? prevHead : undefined
-      notFor(['csDiameter', 'csAngle'])
+      notFor(['csDiameter', 'csAngle', 'csMethod', 'csStepdown'])
       head = {
         type,
         cbDiameter: size('cbDiameter', old?.cbDiameter),
@@ -125,13 +131,27 @@ const spec: FeatureCommandSpec<typeof params, Hole> = {
     } else if (type === 'countersink') {
       const old = prevHead?.type === 'countersink' ? prevHead : undefined
       notFor(['cbDiameter', 'cbDepth'])
+      // F7: `csStepdown` alone switches to stepped; `chamfer` drops the stepdown
+      const oldStep = old?.csStepdown.isSome() ? old.csStepdown.unwrap() : undefined
+      const method =
+        a.csMethod ?? (a.csStepdown !== undefined || oldStep !== undefined ? 'stepped' : 'chamfer')
+      if (a.csMethod === 'chamfer' && a.csStepdown !== undefined)
+        f.issue('csStepdown', 'notForMethod', 'is only used with csMethod stepped')
       head = {
         type,
         csDiameter: size('csDiameter', old?.csDiameter),
         csAngle: size('csAngle', old?.csAngle, DEFAULTS.chamferAngle[units]),
+        csStepdown:
+          method === 'chamfer'
+            ? None
+            : Some(
+                a.csStepdown !== undefined
+                  ? f.q('csStepdown', 'length', a.csStepdown)
+                  : (oldStep ?? f.q('csStepdown', 'length', DEFAULTS.csStepdown[units])),
+              ),
       }
     } else {
-      notFor(['cbDiameter', 'cbDepth', 'csDiameter', 'csAngle'])
+      notFor(['cbDiameter', 'cbDepth', 'csDiameter', 'csAngle', 'csMethod', 'csStepdown'])
       head = { type }
     }
     const bottom = a.bottom ?? prev?.bottom ?? 'through'
