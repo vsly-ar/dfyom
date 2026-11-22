@@ -191,7 +191,7 @@ The first pass runs on the part side of the slot (tool edge on the shape); a slo
 
 Independent of the post-processor and of gCode; all numbers float64 mm in the setup's WCS (derived data, not quantities):
 
-A `Toolpath` is `{ planOperationId, tool (snapshot id), spindleSpeed, passes[], stats }`; a pass is `{ kind: 'rough' | 'finish' | 'drill', moves[] }`; `stats` holds cut length, rapid length and estimated seconds.
+A `Toolpath` is `{ planOperationId, tool (snapshot id), spindleSpeed, passes[], stats }`; a pass is `{ kind: 'rough' | 'finish' | 'drill', moves[], operationId? }` (`operationId`: the hole or chamfer of a joined toolpath, v0.4 [P1](plan-v0.4.md#implementation-p1)); `stats` holds cut length, rapid length and estimated seconds.
 
 | Move    | Fields                                                                                                          |
 | ------- | --------------------------------------------------------------------------------------------------------------- |

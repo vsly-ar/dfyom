@@ -9,6 +9,7 @@ import { SurfaceTable } from '../../../../core/design/surfaces'
 import type { Direction, StockSize } from '../../../../core/geometry/face'
 import type { Placement } from '../../../../core/geometry/model'
 import { loadPlanDTO } from '../../../../core/plan/plan'
+import { planOperationLabel } from '../../../../core/plan/labels'
 import { sameValue } from '../../../../core/plan/validity'
 import type { PlanWarning } from '../../../../core/plan/checks'
 import type {
@@ -245,10 +246,9 @@ export function defaultPresetName(
   )
 }
 
-/** A plan operation's name: the names of the design operations it machines. */
+/** A plan operation's name: its feature label ("Hole 1 · drill × 6", plan-v0.4.md § Plan side). */
 export function planOperationName(plan: PlanDTO, designOperationIds: readonly string[]): string {
-  const ops = plan.design.part.operations
-  return designOperationIds.map((id) => ops.find((o) => o.id === id)?.name ?? id).join(', ')
+  return planOperationLabel(plan.design.part, designOperationIds)
 }
 
 export function planOperationKind(

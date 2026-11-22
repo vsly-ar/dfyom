@@ -64,6 +64,11 @@ export type PassKind = 'rough' | 'finish' | 'drill'
 export interface Pass {
   readonly kind: PassKind
   readonly moves: readonly Move[]
+  /**
+   * The design operation it cuts, in a joined toolpath (one input per hole or chamfer): the
+   * export writes clone position comments from it (plan-v0.4.md P-E). Absent elsewhere.
+   */
+  readonly operationId?: string
 }
 
 export interface ToolpathStats {

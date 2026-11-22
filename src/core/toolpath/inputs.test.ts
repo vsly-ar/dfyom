@@ -148,7 +148,10 @@ describe('toGeneratorInputs', () => {
     }
     const joined = expectOk(generateRequest(group))
     const each = holes.map((h) => expectOk(generateDrilling(h)))
-    const passes = each.flatMap((t) => t.passes)
+    // each pass names its hole (clone position comments, plan-v0.4.md P-E)
+    const passes = each.flatMap((t, i) =>
+      t.passes.map((p) => ({ ...p, operationId: holes[i]!.operation.id })),
+    )
     expect(joined.passes).toEqual(passes)
     expect(joined.stats).toEqual(toolpathStats(passes, [5000, 5000, 1000]))
     expect(joined).toMatchObject({

@@ -116,6 +116,7 @@ export type StepId =
   | 'F8'
   | 'F9'
   | 'F10'
+  | 'fzScale'
 
 /** One step of an explanation: rendered as a formula/tooltip, returned verbatim to agents. */
 export interface DerivationStep {
@@ -236,16 +237,39 @@ function contextOf(input: CuttingInput, data: readonly MaterialRow[]): Lookup {
   // a chamfer mill is treated as a flat end mill of its effective diameter at the depth (F10)
   const chamfer = engagement.kind === 'chamfer' ? chamferStep(tool, engagement.depth) : undefined
   const D = chamfer?.result ?? tool.diameter.canonical
-  const band = bandOf(row, D)
-  const range = band === undefined ? undefined : isDrill ? band.fn : band.fz
-  if (band === undefined || range === undefined)
+  // a chamfer's De below the smallest charted diameter: that chart's fz, scaled by De (fzScale)
+  const scaled = chamfer !== undefined && D > 0 && D < CHART_MIN_DIAMETER
+  const band = bandOf(row, scaled ? CHART_MIN_DIAMETER : D)
+  const chart = band === undefined ? undefined : isDrill ? band.fn : band.fz
+  if (band === undefined || chart === undefined)
     return none(`no ${isDrill ? 'fn' : 'fz'} data for a ${D} mm tool`, { diameter: D })
+  const factor = D / CHART_MIN_DIAMETER
+  const fzScale = scaled ? { chart, factor } : undefined
+  const range = fzScale === undefined ? chart : { min: chart.min * factor, max: chart.max * factor }
   const rigidity = input.machine.mapOr(DEFAULT_RIGIDITY, (m) => m.rigidity)
   const locked = input.locked ?? {}
   return {
-    ctx: { input, row, speed, band, range, rigidity, D, locked, ...(chamfer && { chamfer }) },
+    ctx: {
+      input,
+      row,
+      speed,
+      band,
+      range,
+      rigidity,
+      D,
+      locked,
+      ...(chamfer && { chamfer }),
+      ...(fzScale && { fzScale }),
+    },
   }
 }
+
+/**
+ * The smallest charted tool diameter (1/8″, the ≤ 6 mm band's representative,
+ * docs/architecture/feeds-speeds.md#chamfer-mills-v04): a chamfer whose De is smaller takes that
+ * chip load × De / 3.175 (chip load proportional to the effective diameter).
+ */
+export const CHART_MIN_DIAMETER = 3.175
 
 /** F10: the chamfer mill's effective diameter at `depth` below its tip. */
 function chamferStep(tool: Tool, depth: number): DerivationStep {
@@ -275,6 +299,8 @@ interface Ctx {
   readonly locked: LockedInputs
   /** Chamfer engagement: the F10 step that gave `D`. */
   readonly chamfer?: DerivationStep
+  /** De below the smallest charted diameter: the chart's `fz` range and the factor De / 3.175. */
+  readonly fzScale?: { readonly chart: Range; readonly factor: number }
 }
 
 type MillEngagement = Exclude<Engagement, { kind: 'drill' }>
@@ -363,7 +389,18 @@ function millAt(
   const fzSteps: DerivationStep[] = [
     // a chart rpm skips F1, so the chamfer's De (it picked the fz band) shows here
     ...(c.chamfer !== undefined && c.speed.field === 'n' ? [c.chamfer] : []),
-    dataStep(row, 'fz', fz, 'mm', c.range),
+    ...(c.fzScale === undefined
+      ? [dataStep(row, 'fz', fz, 'mm', c.range)]
+      : [
+          dataStep(row, 'fz', pick(c.fzScale.chart, pos), 'mm', c.fzScale.chart),
+          {
+            step: 'fzScale' as const,
+            formula: `fz = fz(${CHART_MIN_DIAMETER} mm) · De / ${CHART_MIN_DIAMETER}`,
+            inputs: { fz: pick(c.fzScale.chart, pos), De: D, factor: c.fzScale.factor },
+            result: fz,
+            unit: 'mm',
+          },
+        ]),
     {
       step: 'F3',
       formula: 'RCTF = 1 / (2·√((ae/D)·(1 − ae/D))) if ae < D/2, else 1',

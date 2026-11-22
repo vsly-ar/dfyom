@@ -171,7 +171,8 @@ describe('generateChamfer', () => {
     const tp = generateRequest(request).unwrap()
     const one = generateChamfer(inputs[0]!).unwrap()
     expect(tp.passes).toHaveLength(2)
-    expect(tp.passes[0]).toEqual(one.passes[0])
+    expect(tp.passes[0]).toEqual({ ...one.passes[0], operationId: 'chamfer1' })
+    expect(tp.passes[1]!.operationId).toBe('chamfer2')
     expect(tp.stats.cutLength).toBeCloseTo(
       one.stats.cutLength + generateChamfer(inputs[1]!).unwrap().stats.cutLength,
       9,
