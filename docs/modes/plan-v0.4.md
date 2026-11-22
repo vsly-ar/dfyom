@@ -36,7 +36,7 @@ Added to the [plan check table](plan-v0.1.md#tool-assignment-and-checks):
 
 ## Feeds for chamfer mills
 
-Amendment to [feeds-speeds.md](../architecture/feeds-speeds.md) when this doc is accepted: the cutting speed uses the effective diameter `De = dt + 2 · depth · tan(α / 2)` at the deepest point (≤ DC), with the same chip-load data as a flat end mill of that diameter for the material class; spindle speed from De, feed from the tool's flutes. Sources are added with the amendment (V-bit speed-by-depth rule from cnc-code, D30 Q12, re-sourced).
+Amendment to [feeds-speeds.md](../architecture/feeds-speeds.md), applied with task C1 ([§ Chamfer mills](../architecture/feeds-speeds.md#chamfer-mills-v04), formula F10, engagement `chamfer { depth }`): the cutting speed uses the effective diameter `De = dt + 2 · depth · tan(α / 2)` at the deepest point (≤ DC), with the same chip-load data as a flat end mill of that diameter for the material class; spindle speed from De, feed from the tool's flutes. Sources are added with the amendment (V-bit speed-by-depth rule from cnc-code, D30 Q12, re-sourced).
 
 ## Plan side
 

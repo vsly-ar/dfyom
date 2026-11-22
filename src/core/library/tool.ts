@@ -23,6 +23,7 @@ import {
   type MaterialClass,
 } from './item'
 import {
+  CHAMFER_MILL_ANGLE,
   COATING_MAX,
   PRESET_NAME_MAX,
   type CuttingPresetDTO,
@@ -135,6 +136,10 @@ export interface ToolProps {
   readonly fluteCount: Quantity
   /** Drill only. */
   readonly pointAngle: Option<Quantity>
+  /** Chamfer mill only (required): included angle, 30°–150°. */
+  readonly angle: Option<Quantity>
+  /** Chamfer mill only: smallest cutting diameter, 0 ≤ tip < DC; None = pointed (0). */
+  readonly tipDiameter: Option<Quantity>
   readonly toolMaterial: Option<ToolMaterial>
   readonly coating: Option<string>
   readonly presets: readonly CuttingPreset[]
@@ -157,6 +162,8 @@ export class Tool implements ToolProps {
     readonly shankDiameter: Option<Quantity>,
     readonly fluteCount: Quantity,
     readonly pointAngle: Option<Quantity>,
+    readonly angle: Option<Quantity>,
+    readonly tipDiameter: Option<Quantity>,
     readonly toolMaterial: Option<ToolMaterial>,
     readonly coating: Option<string>,
     readonly presets: readonly CuttingPreset[],
@@ -214,6 +221,37 @@ export class Tool implements ToolProps {
       } else {
         c.check(pointAngle.isNone(), ['pointAngle'], 'notAllowed', 'is only stored for a drill')
       }
+      if (type === 'chamferMill') {
+        c.check(angle.isSome(), ['angle'], 'required', 'is required for a chamfer mill')
+        if (angle.isSome() && checkKind(c, ['angle'], angle.unwrap(), 'angle')) {
+          const a = angle.unwrap().canonical
+          const { min, max } = CHAMFER_MILL_ANGLE
+          c.check(a >= min && a <= max, ['angle'], 'range', `must be between ${min}° and ${max}°`, {
+            min,
+            max,
+            actual: a,
+          })
+        }
+        if (tipDiameter.isSome() && checkKind(c, ['tipDiameter'], tipDiameter.unwrap(), 'length')) {
+          const dt = tipDiameter.unwrap()
+          c.check(
+            dt.exact.compare(Rational.ZERO) >= 0 &&
+              (diameter.kind !== 'length' || dt.exact.compare(diameter.exact) < 0),
+            ['tipDiameter'],
+            'range',
+            'must be at least 0 and less than the diameter',
+            { min: 0, max: diameter.canonical, actual: dt.canonical },
+          )
+        }
+      } else {
+        c.check(angle.isNone(), ['angle'], 'notAllowed', 'is only stored for a chamfer mill')
+        c.check(
+          tipDiameter.isNone(),
+          ['tipDiameter'],
+          'notAllowed',
+          'is only stored for a chamfer mill',
+        )
+      }
       if (coating.isSome()) checkText(c, ['coating'], coating.unwrap(), 0, COATING_MAX)
 
       // Cross-field rules (kinds compared only when both are lengths).
@@ -270,6 +308,8 @@ export class Tool implements ToolProps {
           p.shankDiameter,
           p.fluteCount,
           p.pointAngle,
+          p.angle,
+          p.tipDiameter,
           p.toolMaterial,
           p.coating,
           [...p.presets],
@@ -293,6 +333,8 @@ export class Tool implements ToolProps {
       shankDiameter: optionalQuantityFromDTO(dto.shankDiameter, 'shankDiameter'),
       fluteCount: quantityFromDTO(dto.fluteCount, 'fluteCount'),
       pointAngle: optionalQuantityFromDTO(dto.pointAngle, 'pointAngle'),
+      angle: optionalQuantityFromDTO(dto.angle, 'angle'),
+      tipDiameter: optionalQuantityFromDTO(dto.tipDiameter, 'tipDiameter'),
       presets,
     }).andThen((q) =>
       Tool.create({
@@ -310,6 +352,11 @@ export class Tool implements ToolProps {
   get effectiveCornerRadius(): Rational {
     if (this.type === 'ballEndMill') return this.diameter.exact.div(TWO).unwrap()
     return this.cornerRadius.isSome() ? this.cornerRadius.unwrap().exact : Rational.ZERO
+  }
+
+  /** Chamfer mill: the tip diameter in mm (0 when pointed); 0 for other types. */
+  get tipDiameterMm(): number {
+    return this.tipDiameter.mapOr(0, (q) => q.canonical)
   }
 
   with(patch: Partial<ToolProps>): AppResult<Tool> {
@@ -331,6 +378,8 @@ export class Tool implements ToolProps {
       ...optionalQuantityDTO('shankDiameter', this.shankDiameter),
       fluteCount: this.fluteCount.toDTO(),
       ...optionalQuantityDTO('pointAngle', this.pointAngle),
+      ...optionalQuantityDTO('angle', this.angle),
+      ...optionalQuantityDTO('tipDiameter', this.tipDiameter),
       ...optionalField('toolMaterial', this.toolMaterial),
       ...optionalField('coating', this.coating),
       presets: this.presets.map((p) => p.toDTO()),

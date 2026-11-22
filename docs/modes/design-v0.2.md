@@ -190,6 +190,7 @@ DesignTool = { kind: 'generalized', type, diameter, cornerRadius? }
 | Pocket                   | `flatEndMill` or `bullNoseEndMill`; DC ≤ narrowest size; radius ≤ `cornerRadius` (rectangle); `floorRadius` > 0 needs a bull nose with RE = `floorRadius`.                                                                      |
 | Drilling                 | `drill` with DC = `diameter` (not for `flat`); or `flatEndMill` with `diameter`/2 < DC < `diameter` for `flat` / `through` (helical boring).                                                                                    |
 | Profile                  | `flatEndMill` with DC ≤ `slotWidth`; `inside`: radius ≤ `cornerRadius`.                                                                                                                                                         |
+| Chamfer (v0.4)           | `chamferMill`, rule in [design-v0.4.md § Chamfer operation](design-v0.4.md#chamfer-operation-v04-circular-edges) (angle, tip, diameter or cutting edge). A chamfer mill fits none of the rows above.                            |
 | All, specific tools only | Reach: `stickout` (else `fluteLength`) ≥ the depth from the stock's outer face of the direction (profile: the stock extent along `n` + the plan's default breakthrough). A generalized tool has no length, so it always passes. |
 
 ### Auto choice

@@ -9,7 +9,13 @@ import { None, Some, type Option } from '../../shared/result'
 import type { Tool } from '../library/tool'
 import type { MaterialRow } from './data'
 import { MATERIAL_DATA } from './data'
-import { checkCutting, type CuttingInput, type LockedInputs, type MachineLimits } from './suggest'
+import {
+  checkCutting,
+  fixedAp,
+  type CuttingInput,
+  type LockedInputs,
+  type MachineLimits,
+} from './suggest'
 
 export const LOCK_RULES = [
   'invalid',
@@ -131,7 +137,7 @@ export function powerLockIssue(
   const { engagement: e } = input
   const L = input.locked ?? {}
   if (e.kind === 'drill' || L.n === undefined || L.vf === undefined) return None
-  const ap = e.kind === 'helix' ? e.ap : L.ap
+  const ap = fixedAp(e) ?? L.ap
   if (ap === undefined || (e.kind === 'stepover' && L.ae === undefined)) return None
   const values = { n: L.n, vf: L.vf, ap, ...(L.ae === undefined ? {} : { ae: L.ae }) }
   const over = checkCutting(input, values, data).find((w) => w.code === 'feeds.powerExceeded')

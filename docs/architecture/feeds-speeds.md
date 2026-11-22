@@ -1,6 +1,6 @@
 # Feeds-and-speeds calculator
 
-Status: implemented (locked inputs and final-value check: task 3.14) · Code: [`src/core/feeds-speeds/`](../../src/core/feeds-speeds/suggest.ts) · Used by: [plan-v0.1.md](../modes/plan-v0.1.md#feeds-and-speeds) · Presets: [library.md](library.md#feeds-and-speeds-presets) · Values: [quantities.md](quantities.md) · Terms: [glossary.md](../glossary.md) · Task: [v0.1 plan](../plans/v0.1.md) 1.15 (code: 2.12)
+Status: implemented (locked inputs and final-value check: task 3.14; chamfer mills F10: v0.4 task C1) · Code: [`src/core/feeds-speeds/`](../../src/core/feeds-speeds/suggest.ts) · Used by: [plan-v0.1.md](../modes/plan-v0.1.md#feeds-and-speeds) · Presets: [library.md](library.md#feeds-and-speeds-presets) · Values: [quantities.md](quantities.md) · Terms: [glossary.md](../glossary.md) · Task: [v0.1 plan](../plans/v0.1.md) 1.15 (code: 2.12)
 
 The calculator recommends the feeds of a plan operation in [auto mode](../modes/plan-v0.1.md#locks-and-auto-mode) (entered value → **calculator** → strategy fallback; outside auto mode a tool preset gives fixed values). It suggests `spindleSpeed`, `feedRate`, `plungeRate`, `stepdown` and `stepover` for one plan operation from the tool, the stock's material class, the strategy's engagement and the machine, and explains every number ([principles §5](../principles.md#5-user-friendly-beginner-friendly-highly-graphical)).
 
@@ -8,17 +8,18 @@ The calculator recommends the feeds of a plan operation in [auto mode](../modes/
 
 Symbols follow Sandvik Coromant (ISO): `vc` surface speed, `D` tool diameter, `z` flutes (NOF), `fz` chip load, `n` spindle speed, `vf` feed rate, `ae` radial engagement (stepover), `ap` axial engagement (stepdown), `fn` feed per revolution, `Q` material removal rate, `u` unit power. Metric shown; inch input is converted by the quantity layer.
 
-| #   | Quantity                    | Formula                                                                                     | Source                     |
-| --- | --------------------------- | ------------------------------------------------------------------------------------------- | -------------------------- |
-| F1  | Spindle speed               | `n = vc·1000 / (π·Dcalc)`; `Dcalc` = `D`, or `De` (F4); router rows give `n` directly       | [S1], [MH], [AM1]          |
-| F2  | Feed rate                   | `vf = n · z · fz_prog`                                                                      | [S1], [MH]                 |
-| F3  | Radial chip thinning (RCTF) | `ae < D/2`: `fz_prog = fz / (2·√((ae/D)(1 − ae/D)))`; otherwise `fz_prog = fz`              | [MD], [S1] (`hex`)         |
-| F4  | Effective diameter          | `ap < RE`: `De = D − 2·RE + 2·√(ap(2·RE − ap))`; ball: `RE = D/2` gives `De = 2√(ap(D−ap))` | [K1], [HT1]                |
-| F5  | Axial chip thinning (ACTF)  | `ap < RE`: `fz_prog = fz / sin κ`, `cos κ = (RE − ap)/RE`; flat end mill: none (`κ = 90°`)  | [S1] (`hex = fz·sin κ`)    |
-| F6  | Material removal rate       | `Q = ae · ap · vf` (mm³/min)                                                                | [S1], [MH]                 |
-| F7  | Cutting power               | `Pc = Q · u / 60 000` (kW, `u` in W·s/mm³); `u = Kp · 2.73` from unit horsepower `Kp`       | [S1] (`kc`), [MMS], [AD]   |
-| F8  | Drilling feed               | `vf = fn · n`; `fn` from the data table per material × diameter band                        | [S2]                       |
-| F9  | Plunge rate (end mill)      | `plungeRate = kPlunge · vf` (data: 0.5 wood/plastic, 0.25 metals); drills use F8            | [AM1] ramp-down, estimated |
+| #   | Quantity                     | Formula                                                                                            | Source                                             |
+| --- | ---------------------------- | -------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| F1  | Spindle speed                | `n = vc·1000 / (π·Dcalc)`; `Dcalc` = `D`, or `De` (F4); router rows give `n` directly              | [S1], [MH], [AM1]                                  |
+| F2  | Feed rate                    | `vf = n · z · fz_prog`                                                                             | [S1], [MH]                                         |
+| F3  | Radial chip thinning (RCTF)  | `ae < D/2`: `fz_prog = fz / (2·√((ae/D)(1 − ae/D)))`; otherwise `fz_prog = fz`                     | [MD], [S1] (`hex`)                                 |
+| F4  | Effective diameter           | `ap < RE`: `De = D − 2·RE + 2·√(ap(2·RE − ap))`; ball: `RE = D/2` gives `De = 2√(ap(D−ap))`        | [K1], [HT1]                                        |
+| F5  | Axial chip thinning (ACTF)   | `ap < RE`: `fz_prog = fz / sin κ`, `cos κ = (RE − ap)/RE`; flat end mill: none (`κ = 90°`)         | [S1] (`hex = fz·sin κ`)                            |
+| F6  | Material removal rate        | `Q = ae · ap · vf` (mm³/min)                                                                       | [S1], [MH]                                         |
+| F7  | Cutting power                | `Pc = Q · u / 60 000` (kW, `u` in W·s/mm³); `u = Kp · 2.73` from unit horsepower `Kp`              | [S1] (`kc`), [MMS], [AD]                           |
+| F8  | Drilling feed                | `vf = fn · n`; `fn` from the data table per material × diameter band                               | [S2]                                               |
+| F9  | Plunge rate (end mill)       | `plungeRate = kPlunge · vf` (data: 0.5 wood/plastic, 0.25 metals); drills use F8                   | [AM1] ramp-down, estimated                         |
+| F10 | Chamfer mill diameter (v0.4) | `De = dt + 2·depth·tan(α/2)`, ≤ `DC`; `dt` tip diameter, `α` included angle, `depth` below the tip | cone geometry; [SC4] ([below](#chamfer-mills-v04)) |
 
 - F3 and F5 multiply when both apply. Both are capped at ×3 to avoid runaway feeds at tiny engagement ([MD]).
 - **Adaptive/HSM:** large chip-thinning gains with deep `ap` and small constant `ae` assume constant tool engagement ([glossary: adaptive clearing](../glossary.md)). v0.1 offset pocketing has full-width engagement in its first ring and in corners, so it gets **no RCTF credit** (see [Engagement](#engagement-per-strategy)).
@@ -55,13 +56,20 @@ All warnings join `plan.warning.list` (chip load and power from the [final-value
 
 ## Engagement per strategy
 
-| Strategy (v0.1)  | `ae` used for F3/F6 | `ap`         | Notes                                                                               |
-| ---------------- | ------------------- | ------------ | ----------------------------------------------------------------------------------- |
-| Facing           | `stepover`          | `stepdown`   | RCTF only when `stepover < D/2` (default 0.75 D: none).                             |
-| Pocket (offset)  | `D` (slot)          | `stepdown`   | First ring and corners are full-width; worst case for feed and power.               |
-| Profile          | `D` (slot)          | `stepdown`   | First pass is a slot; finishing pass runs at the same `feedRate` (one feed per op). |
-| Drilling (drill) | –                   | –            | F1 with drill `vc`, F8, `plungeRate = vf`; peck parameters are strategy-owned.      |
-| Drilling (helix) | `D` (slot)          | `helixPitch` | Treated as a slot on a helix.                                                       |
+| Strategy (v0.1)  | `ae` used for F3/F6 | `ap`          | Notes                                                                                                    |
+| ---------------- | ------------------- | ------------- | -------------------------------------------------------------------------------------------------------- |
+| Facing           | `stepover`          | `stepdown`    | RCTF only when `stepover < D/2` (default 0.75 D: none).                                                  |
+| Pocket (offset)  | `D` (slot)          | `stepdown`    | First ring and corners are full-width; worst case for feed and power.                                    |
+| Profile          | `D` (slot)          | `stepdown`    | First pass is a slot; finishing pass runs at the same `feedRate` (one feed per op).                      |
+| Drilling (drill) | –                   | –             | F1 with drill `vc`, F8, `plungeRate = vf`; peck parameters are strategy-owned.                           |
+| Drilling (helix) | `D` (slot)          | `helixPitch`  | Treated as a slot on a helix.                                                                            |
+| Chamfer (v0.4)   | `De` (slot)         | chamfer depth | A flat end mill of diameter `De` ([Chamfer mills](#chamfer-mills-v04)); one pass, no stepdown suggested. |
+
+### Chamfer mills (v0.4)
+
+Amendment from [plan-v0.4.md § Feeds for chamfer mills](../modes/plan-v0.4.md#feeds-for-chamfer-mills) (decision P-D), task C1. A `chamferMill` ([library.md](library.md#tool)) cuts with a cone, so its cutting diameter grows with depth. The engagement `chamfer { depth }` (mm below the tool's tip, at the deepest point of the cut) gives the **effective diameter** `De` (F10), capped at `DC` where the cone ends. The calculator then treats the tool as a **flat end mill of diameter `De`**: the diameter band (chip load `fz`), F1 (`n` from `vc` and `De`), F2 with the tool's flutes, F9 for the plunge, and `ae = De`, `ap = depth` for F6/F7 (an upper bound: a cone removes less than that rectangle). The stepdown is fixed (one pass at the chamfer depth), so it is not suggested; a power excess lowers the feed as with a helix. The derivation shows an `F10` step before F1 (with a chart rpm, before the chip load). A chamfer engagement needs a chamfer mill and a chamfer mill a chamfer engagement, else `feeds.noData`. Recommended presets use the full cone (`depth` where `De = DC`).
+
+F10 is the cone's geometry (the diameter of a cone of included angle α at a height above its tip), the speed-by-depth rule of the earlier cnc-code V-bit calculator (D30 Q12). It is not re-sourced from a published chart yet (known gap); Sandvik's chamfer-milling guidance [SC4] confirms the light engagement of chamfers, so the slot-rule power check is conservative. Choosing the speed at the deepest point is conservative for the surface speed (the largest diameter in contact sets `n`).
 
 Stepdown suggestion: `ap = apSlot(material) × D × rigidityFactor`, ≤ `fluteLength` (none when the stepdown is locked); stepover suggestion is left to the strategy fallback in v0.1 (the strategies fix engagement, not the calculator).
 
@@ -190,7 +198,7 @@ checkCutting(input: CuttingInput, values: CuttingValues): CheckWarning[] // fina
 noDataFor(input: CuttingInput): Option<CuttingWarning> // feeds.noData, or None when there is data
 ```
 
-- `CuttingInput = { tool, materialClass, engagement, machine: Option<MachineLimits>, locked? }` with `engagement` `slot {}`, `stepover { ae }` (the strategy's stepover), `helix { ap }` (pitch) or `drill {}`. Inputs are already-valid models, so the function cannot fail; unsupported combinations return `None` fields with `feeds.noData`.
+- `CuttingInput = { tool, materialClass, engagement, machine: Option<MachineLimits>, locked? }` with `engagement` `slot {}`, `stepover { ae }` (the strategy's stepover), `helix { ap }` (pitch), `drill {}` or (v0.4) `chamfer { depth }`. Inputs are already-valid models, so the function cannot fail; unsupported combinations return `None` fields with `feeds.noData`.
 - Query `feedsSpeeds.suggest { toolLibraryItemId, materialClass, engagement, locked?: { spindleSpeed?, feedRate?, stepdown?, stepover? }, machineLibraryItemId? }` exposes it to MCP/CLI ([LLM-first](../principles.md#1-llm-first)) for "what-if" use outside a plan.
 - Plan mode maps its strategy to `engagement` in `src/core/plan/feeds.ts` (resolution order and table above).
 
@@ -198,7 +206,7 @@ noDataFor(input: CuttingInput): Option<CuttingWarning> // feeds.noData, or None 
 
 | File                                                                           | Contents                                                                                                     |
 | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| [`src/core/feeds-speeds/formulas.ts`](../../src/core/feeds-speeds/formulas.ts) | F1–F9 as pure functions on float64 canonical units                                                           |
+| [`src/core/feeds-speeds/formulas.ts`](../../src/core/feeds-speeds/formulas.ts) | F1–F10 as pure functions on float64 canonical units                                                          |
 | [`src/core/feeds-speeds/data.ts`](../../src/core/feeds-speeds/data.ts)         | Material table with per-row sources, rigidity factors, data lint                                             |
 | [`src/core/feeds-speeds/suggest.ts`](../../src/core/feeds-speeds/suggest.ts)   | `suggestCutting`, `machineLimits`: data lookup, locked inputs, clamps, power check, warnings; `checkCutting` |
 | [`src/core/feeds-speeds/locks.ts`](../../src/core/feeds-speeds/locks.ts)       | Impossible-lock rules                                                                                        |
@@ -214,6 +222,7 @@ noDataFor(input: CuttingInput): Option<CuttingWarning> // feeds.noData, or None 
 
 ## Sources
 
+- [SC4] Sandvik Coromant, [Chamfer milling](https://www.sandvik.coromant.com/en-us/knowledge/milling/chamfer-milling) (light engagement: the higher cutting-speed recommendations apply; adjust the chamfer by Z, not by diameter).
 - [S1] Sandvik Coromant, [Formulas and definitions for milling (metric)](https://cdn.sandvik.coromant.com/files/sitecollectiondocuments/services/metal-cutting-e-learning/formulas-and-definitions/formulas-and-deinitions-for-milling-metric-enu.pdf); [S2] [Drilling formulas](https://www.sandvik.coromant.com/en-us/knowledge/machining-formulas-definitions/drilling-formulas-definitions); [S3] [Ramping](https://www.sandvik.coromant.com/en-gb/knowledge/milling/milling-holes-cavities-pockets/ramping).
 - [MH] Machinery's Handbook, power constant `Kp` (unit horsepower) and speed/feed formulas; [AD] Autodesk, [Unit horsepower or specific cutting force](https://help.autodesk.com/cloudhelp/2018/ENU/FCAM/files/GUID-AD4A06B2-6972-4F93-9D7A-E2825783D69D.htm).
 - [K1] Kennametal KDMB ball nose working-diameter table ([product page](https://www.kennametal.com/us/en/products/p.2878444.html)); [HT1] Harvey Performance, [Ball nose effective diameter](https://www.harveyperformance.com/in-the-loupe/in-the-loupe-tv-ball-nose-end-mills-effective-diameter/); [HT2] Harvey Tool speeds-and-feeds charts per tool.

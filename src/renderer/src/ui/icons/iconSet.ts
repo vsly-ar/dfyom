@@ -140,7 +140,6 @@ export const ICON_SET = {
     label: 'V-bit',
     group: 'tool',
     src: 'b22',
-    reserved: 'ships with the V-bit tool type (B22-6)',
     parts: [{ d: 'M6 7V1.5h4V7M3.5 7h9' }, { d: 'M3.5 7L8 14.5 12.5 7', a: true }],
   },
   // ── drawing tools and shape kinds (top views) ───────────────────────────────────────────────

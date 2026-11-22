@@ -102,11 +102,13 @@ export const ToolpathSpotSchema: z.ZodType<Toolpath> = z.object({
 
 const ToolpathToolSchema: z.ZodType<ToolpathTool> = z.object({
   id: z.string(),
-  type: z.enum(['flatEndMill', 'bullNoseEndMill', 'ballEndMill', 'drill']),
+  type: z.enum(['flatEndMill', 'bullNoseEndMill', 'ballEndMill', 'drill', 'chamferMill']),
   diameter: z.number(),
   cornerRadius: z.number(),
   fluteLength: z.number(),
   pointAngle: z.number().exactOptional(),
+  angle: z.number().exactOptional(),
+  tipDiameter: z.number().exactOptional(),
 })
 
 const CuttingSchema = z.object({

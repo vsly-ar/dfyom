@@ -96,6 +96,7 @@ export const DesignToolDtoSchema = z.discriminatedUnion('kind', [
     type: z.enum(TOOL_TYPES),
     diameter: length(),
     cornerRadius: length().optional().describe('Bull nose only'),
+    angle: quantityDto('angle').optional().describe('Chamfer mill only: included angle'),
   }),
   z.object({ kind: z.literal('specific'), snapshotId: z.string().min(1) }),
 ])

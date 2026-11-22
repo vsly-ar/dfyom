@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest'
 import {
   actf,
   availablePower,
+  chamferEffectiveDiameter,
+  chamferFullDepth,
   chipThinning,
   cuttingPower,
   CHIP_THINNING_CAP,
@@ -130,5 +132,23 @@ describe('F9 plunge rate', () => {
   it('plungeRate = kPlunge · vf (doc examples 0.5 wood/plastic, 0.3 metals)', () => {
     expect(plungeRate(0.5, 2000)).toBe(1000)
     expect(plungeRate(0.3, 1000)).toBeCloseTo(300, 9)
+  })
+})
+
+describe('F10 chamfer mill effective diameter (v0.4 C1)', () => {
+  it('De = dt + 2·depth·tan(α/2), at most DC', () => {
+    // 90° V-bit: De = 2·depth; 1.5 mm deep → Ø3
+    expect(chamferEffectiveDiameter(0, 1.5, 90, 12)).toBeCloseTo(3, 9)
+    // 60° with a 0.5 mm flat tip, 2 mm deep: 0.5 + 4·tan 30° = 2.809
+    expect(chamferEffectiveDiameter(0.5, 2, 60, 12)).toBeCloseTo(0.5 + 4 / Math.sqrt(3), 9)
+    // the cone ends at DC
+    expect(chamferEffectiveDiameter(0, 10, 90, 12)).toBe(12)
+    expect(chamferEffectiveDiameter(0.2, 0, 90, 12)).toBe(0.2)
+  })
+
+  it('the full depth is where De reaches DC', () => {
+    const depth = chamferFullDepth(0.5, 60, 6)
+    expect(chamferEffectiveDiameter(0.5, depth, 60, 6)).toBeCloseTo(6, 9)
+    expect(chamferFullDepth(0, 90, 12)).toBeCloseTo(6, 9)
   })
 })

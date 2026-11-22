@@ -9,7 +9,7 @@ import {
 } from './dfm'
 import type { DfmWarning, OperationGeometry } from './model'
 import { TEST_STOCK } from './testing/test-part'
-import { toolFit } from './tool-fit'
+import { chamferFit, coneSlant, toolFit } from './tool-fit'
 
 type Op<K extends OperationGeometry['kind']> = Extract<OperationGeometry, { kind: K }>
 
@@ -193,5 +193,52 @@ describe('DFM with the operation tool', () => {
     expect(find(checks([deep], { pocket1: own(flat(6)) }, library), 'dfm.reach')).toEqual([])
     // generalized with no matching library tool: skipped
     expect(find(checks([deep], { pocket1: own(flat(8)) }, library), 'dfm.reach')).toEqual([])
+  })
+})
+
+// Doc: docs/modes/design-v0.4.md#chamfer-operation-v04-circular-edges (Fit), task C1
+describe('chamferFit (chamfer mill fit row)', () => {
+  const vbit = (over: Partial<DfmTool> = {}): DfmTool => ({
+    type: 'chamferMill',
+    diameter: 12,
+    angle: 90,
+    tipDiameter: 0,
+    ...over,
+  })
+  const m3 = { edgeDiameter: 3.4, diameter: 6.4, angle: 90 }
+
+  it('fits a chamfer mill of the same angle that covers the chamfer (plunged)', () => {
+    expect(chamferFit(vbit(), m3)).toBeUndefined()
+    expect(chamferFit(vbit({ angle: 90.4 }), m3)).toBeUndefined()
+  })
+
+  it('needs a chamfer mill, of the chamfer angle within 0.5°', () => {
+    expect(chamferFit({ type: 'flatEndMill', diameter: 6 }, m3)?.rule).toBe('type')
+    expect(chamferFit({ type: 'drill', diameter: 6 }, m3)?.rule).toBe('type')
+    const wrong = chamferFit(vbit({ angle: 82 }), m3)
+    expect(wrong?.rule).toBe('angle')
+    expect(wrong?.values).toEqual({ toolAngle: 82, angle: 90 })
+  })
+
+  it('needs a tip smaller than the edge', () => {
+    const tip = chamferFit(vbit({ tipDiameter: 3.4 }), m3)
+    expect(tip?.rule).toBe('tip')
+    expect(tip?.need).toEqual({ relation: 'atLeast', value: 3.4 })
+    expect(chamferFit(vbit({ tipDiameter: 1 }), m3)).toBeUndefined()
+  })
+
+  it('a smaller tool fits when its cutting edge covers the slant (contoured)', () => {
+    // chamfer slant (6.4 − 3.4)/2/sin 45° = 2.12 mm; a Ø6 pointed V-bit has 4.24 mm of edge
+    expect(coneSlant(3.4, 6.4, 90)).toBeCloseTo(2.1213, 4)
+    expect(chamferFit(vbit({ diameter: 6 }), m3)).toBeUndefined()
+    // a Ø4 bit with a 2 mm tip has 1.41 mm of edge
+    const short = chamferFit(vbit({ diameter: 4, tipDiameter: 2 }), m3)
+    expect(short?.rule).toBe('slant')
+    expect(short?.values['cuttingEdge']).toBeCloseTo(1.4142, 4)
+  })
+
+  it('a chamfer mill fits no other operation (the type row)', () => {
+    expect(toolFit(vbit(), pocket(), TEST_STOCK, 'metric')?.rule).toBe('type')
+    expect(toolFit(vbit(), drill(), TEST_STOCK, 'metric')?.rule).toBe('type')
   })
 })

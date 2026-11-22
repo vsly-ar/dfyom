@@ -41,9 +41,17 @@ export interface DfmTool {
   readonly diameter: number
   /** Bull-nose corner radius (RE); flat = 0 and ball = diameter / 2 are derived. */
   readonly cornerRadius?: number
+  /** Chamfer mill only: included angle, degrees. */
+  readonly angle?: number
+  /** Chamfer mill only: tip diameter (0 = pointed). */
+  readonly tipDiameter?: number
   /** How deep it reaches: its default stickout, else its flute length (`dfm.reach`). */
   readonly reach?: number
 }
+
+/** Flat, bull-nose or ball end mill (not a drill, not a chamfer mill). */
+export const isEndMill = (t: Pick<DfmTool, 'type'>): boolean =>
+  t.type === 'flatEndMill' || t.type === 'bullNoseEndMill' || t.type === 'ballEndMill'
 
 /** The operation's own tool (its design tool field, docs/modes/design-v0.2.md#dfm-with-the-tool). */
 export interface OperationTool {
@@ -114,7 +122,7 @@ interface Library {
 }
 
 function library(tools: readonly DfmTool[]): Library {
-  const endMills = tools.filter((t) => t.type !== 'drill').map((t) => t.diameter)
+  const endMills = tools.filter(isEndMill).map((t) => t.diameter)
   return {
     empty: tools.length === 0,
     minEndMill: endMills.length === 0 ? undefined : Math.min(...endMills),
@@ -507,7 +515,7 @@ function drilling(op: Op<'drilling'>, stock: StockGeometry, lib: Library): DfmWa
     // bottoms (a flat end mill only), never a drill point
     const boring = (t: DfmTool): boolean =>
       t.diameter < op.diameter - TOOL_MATCH_TOLERANCE &&
-      (op.bottom.kind === 'through' ? t.type !== 'drill' : t.type === 'flatEndMill')
+      (op.bottom.kind === 'through' ? isEndMill(t) : t.type === 'flatEndMill')
     const bore = op.bottom.kind !== 'drillPoint' && lib.tools.some(boring)
     const borer = { through: ' and no end mill', flat: ' and no flat end mill', drillPoint: '' }
     if (!drill && !bore)

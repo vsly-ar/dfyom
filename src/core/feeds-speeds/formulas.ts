@@ -1,5 +1,5 @@
 /**
- * Feeds-and-speeds formulas F1–F9 as pure functions.
+ * Feeds-and-speeds formulas F1–F10 as pure functions.
  * Doc: docs/architecture/feeds-speeds.md#formulas (sources [S1], [S2], [MH], [MD], [K1], [HT1], [AD]).
  *
  * Float64 on purpose: the formulas need π, square roots and trigonometry, which the exact
@@ -37,6 +37,25 @@ export function effectiveDiameter(D: number, RE: number, ap: number): number {
   if (RE <= 0 || ap >= RE) return D
   return D - 2 * RE + 2 * Math.sqrt(ap * (2 * RE - ap))
 }
+
+/**
+ * F10 effective diameter of a chamfer mill / V-bit at depth `depth` below its tip:
+ * `De = dt + 2·depth·tan(α/2)`, at most DC (the cone ends there). `angle` is the included angle α
+ * in degrees. Doc: docs/architecture/feeds-speeds.md#chamfer-mills-v04.
+ */
+export function chamferEffectiveDiameter(
+  tip: number,
+  depth: number,
+  angle: number,
+  D: number,
+): number {
+  const de = tip + 2 * Math.max(0, depth) * Math.tan(((angle / 2) * Math.PI) / 180)
+  return Math.min(D, de)
+}
+
+/** The depth below the tip at which a chamfer mill cuts its full diameter DC. */
+export const chamferFullDepth = (tip: number, angle: number, D: number): number =>
+  (D - tip) / 2 / Math.tan(((angle / 2) * Math.PI) / 180)
 
 /** F5 axial chip-thinning factor `1 / sin κ`, `cos κ = (RE − ap)/RE`; 1 for flat or `ap ≥ RE`. */
 export function actf(RE: number, ap: number): number {

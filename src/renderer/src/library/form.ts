@@ -169,13 +169,14 @@ export function toolName(v: Pick<ToolDraft, 'type' | 'diameter'>): string {
   return `${libraryMessages.tool.shortTypes[v.type]} ${v.diameter.source.trim()}`
 }
 
-/** The tool with another type; a bull nose or drill gets a corner radius / point angle if none. */
+/** The tool with another type; a bull nose, drill or chamfer mill gets its RE / SIG / angle if none. */
 export function withToolType(v: ToolDraft, type: ToolType, units: UnitSystem): ToolDraft {
   return {
     ...v,
     type,
     cornerRadius: v.cornerRadius ?? qdto('length', units === 'mm' ? '1' : '1/32', units),
     pointAngle: v.pointAngle ?? qdto('angle', '118', units),
+    angle: v.angle ?? qdto('angle', '90', units),
   }
 }
 
@@ -196,7 +197,7 @@ export function cleanValues(
   const issues: Issue[] = []
   const notes = values.notes?.trim() === '' ? undefined : values.notes
   if (values.kind === 'tool') {
-    const { cornerRadius, pointAngle, coating, ...rest } = values
+    const { cornerRadius, pointAngle, angle, tipDiameter, coating, ...rest } = values
     const name = autoName && values.name.trim() === '' ? toolName(values) : values.name.trim()
     return {
       values: {
@@ -205,6 +206,7 @@ export function cleanValues(
         notes,
         ...(values.type === 'bullNoseEndMill' ? { cornerRadius } : {}),
         ...(values.type === 'drill' ? { pointAngle } : {}),
+        ...(values.type === 'chamferMill' ? { angle, tipDiameter } : {}),
         ...(coating?.trim() ? { coating: coating.trim() } : {}),
       } as ToolValuesDTO,
       issues,

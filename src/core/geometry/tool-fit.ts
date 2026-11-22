@@ -17,7 +17,17 @@ import { FIT_SLACK, type ShapeMeasure } from './shape-measure'
 const TOL = 0.01
 
 /** The failed row of the fit table (`params.rule` of `dfm.toolUnfit`). */
-export type FitRule = 'type' | 'width' | 'cornerRadius' | 'floorRadius' | 'diameter' | 'reach'
+export type FitRule =
+  | 'type'
+  | 'width'
+  | 'cornerRadius'
+  | 'floorRadius'
+  | 'diameter'
+  | 'reach'
+  // chamfer (design-v0.4.md § Chamfer operation, Fit)
+  | 'angle'
+  | 'tip'
+  | 'slant'
 
 export interface ToolUnfit {
   readonly rule: FitRule
@@ -29,7 +39,8 @@ export interface ToolUnfit {
    * The rule's values for messages (lengths in mm), merged into `dfm.toolUnfit`'s params so the
    * UI can word them in the project units (F5): `cornerRadius` + `toolRadius`, `toolDiameter` +
    * `size` + `feature` (`pocket` | `slot`), `floorRadius` + `toolCornerRadius`, `holeDiameter`
-   * (+ `toolDiameter` for a drill, `boring: true` for an end mill), `reach` + `depth`, `needs`.
+   * (+ `toolDiameter` for a drill, `boring: true` for an end mill), `reach` + `depth`, `needs`; chamfers (v0.4):
+   * `toolAngle` + `angle`, `tipDiameter` + `edgeDiameter`, `cuttingEdge` + `slant`.
    */
   readonly values: Readonly<Record<string, number | string | boolean>>
 }
@@ -204,5 +215,60 @@ export function toolFit(
         rule: 'reach',
         detail: `reaches ${mm(tool.reach)}, the operation is ${mm(depth)} deep`,
         values: { reach: tool.reach, depth },
+      }
+}
+
+/** A circular chamfer as the fit rule sees it (mm, degrees): its edge Ø, chamfer Ø and angle. */
+export interface ChamferFitInput {
+  readonly edgeDiameter: number
+  readonly diameter: number
+  /** Included angle, degrees. */
+  readonly angle: number
+}
+
+/** Chamfer mill angles match within this (degrees), design-v0.4.md § Chamfer operation. */
+export const CHAMFER_ANGLE_TOLERANCE = 0.5
+
+/** Slant length of a cone between two diameters at included angle `angle` (degrees). */
+export const coneSlant = (inner: number, outer: number, angle: number): number =>
+  (outer - inner) / 2 / Math.sin(((angle / 2) * Math.PI) / 180)
+
+/**
+ * The fit row of a circular chamfer (design-v0.4.md § Chamfer operation, Fit): a `chamferMill`
+ * whose angle equals the chamfer's within 0.5°, whose tip is smaller than the edge Ø, and that
+ * either covers the chamfer Ø (plunged at the centre) or has a cutting edge (its cone's slant from
+ * tip to DC) at least the chamfer's slant height (contoured). First failed rule, or undefined.
+ * Reach is checked by the chamfer operation (task C2), which knows the depth below the face.
+ */
+export function chamferFit(tool: DfmTool, c: ChamferFitInput): ToolUnfit | undefined {
+  if (tool.type !== 'chamferMill' || tool.angle === undefined)
+    return {
+      rule: 'type',
+      detail: 'a chamfer needs a chamfer mill',
+      values: { needs: 'chamferMill' },
+    }
+  if (Math.abs(tool.angle - c.angle) > CHAMFER_ANGLE_TOLERANCE)
+    return {
+      rule: 'angle',
+      detail: `tool angle ${tool.angle}° ≠ chamfer angle ${c.angle}°`,
+      values: { toolAngle: tool.angle, angle: c.angle },
+    }
+  const tip = tool.tipDiameter ?? 0
+  if (tip >= c.edgeDiameter - TOL)
+    return {
+      rule: 'tip',
+      detail: `tip Ø${mm(tip)} is not smaller than the edge Ø${mm(c.edgeDiameter)}`,
+      need: { relation: 'atLeast', value: tip },
+      values: { tipDiameter: tip, edgeDiameter: c.edgeDiameter },
+    }
+  if (tool.diameter + TOL >= c.diameter) return undefined
+  const edge = coneSlant(tip, tool.diameter, tool.angle)
+  const slant = coneSlant(c.edgeDiameter, c.diameter, c.angle)
+  return edge + TOL >= slant
+    ? undefined
+    : {
+        rule: 'slant',
+        detail: `cutting edge ${mm(edge)} is shorter than the chamfer's slant ${mm(slant)}`,
+        values: { cuttingEdge: edge, slant, toolDiameter: tool.diameter, diameter: c.diameter },
       }
 }
