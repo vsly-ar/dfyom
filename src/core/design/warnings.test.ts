@@ -65,10 +65,11 @@ describe('libraryTools: library items → DfmTool (mm)', () => {
     await add(stockValues(), 'stock')
     expect(lib.list('tool').errors.map((e) => e.id)).toEqual(['broken'])
     expect(libraryTools(lib)).toEqual([
-      { type: 'flatEndMill', diameter: 6.35 },
-      { type: 'bullNoseEndMill', diameter: 10, cornerRadius: 1 },
-      { type: 'ballEndMill', diameter: 6 },
-      { type: 'drill', diameter: 5 },
+      // reach: the stickout, else the flute length (20 mm here)
+      { type: 'flatEndMill', diameter: 6.35, reach: 20 },
+      { type: 'bullNoseEndMill', diameter: 10, cornerRadius: 1, reach: 20 },
+      { type: 'ballEndMill', diameter: 6, reach: 20 },
+      { type: 'drill', diameter: 5, reach: 20 },
     ])
   })
 })

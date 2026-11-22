@@ -1,10 +1,11 @@
 /**
- * Horizontal planar surfaces of a part, the design reference resolver, operation references,
- * the dependency graph and recalculation after an edit.
+ * Planar face surfaces of a part (the surface table, per direction), the design reference
+ * resolver, operation references, the dependency graph and recalculation after an edit.
  * Doc: docs/modes/design.md#implementation-task-25,
+ * docs/modes/design-v0.2.md#surface-table-per-direction,
  * docs/architecture/quantities.md#expressions-and-references
  *
- * Surface z values come from the analytic model (exact rationals with worst-case tolerance
+ * Surface levels come from the analytic model (exact rationals with worst-case tolerance
  * intervals), never from a mesh.
  */
 import type { AppError } from '../../shared/errors/app-error'
@@ -12,6 +13,14 @@ import { Err, fail, None, Ok, Some, type AppResult, type Option } from '../../sh
 import type { ReferenceResolver } from '../expression/evaluate'
 import { DependencyGraph } from '../expression/graph'
 import { reevaluate, referencesOf } from '../expression/quantity'
+import {
+  DIRECTION,
+  DIRECTIONS,
+  STOCK_FACE,
+  type Axis,
+  type Direction,
+  type StockDimension,
+} from '../geometry/face'
 import { CHORD_TOLERANCE } from '../geometry/model'
 import type { Stock } from '../library/stock'
 import { Quantity } from '../quantity/quantity'
@@ -19,9 +28,9 @@ import { Rational } from '../quantity/rational'
 import { Tolerance } from '../quantity/tolerance'
 import { quantityParams, withParam, type Operation, type Shape } from './operation'
 
-/** A z value as an interval: nominal plus exact deviations (0/0 when untoleranced). */
-export interface SurfaceZ {
-  readonly z: Rational
+/** A level (or coordinate) as an interval: nominal plus exact deviations (0/0 when untoleranced). */
+export interface SurfaceLevel {
+  readonly value: Rational
   readonly upper: Rational
   readonly lower: Rational
   readonly toleranced: boolean
@@ -31,33 +40,50 @@ export interface SurfaceEntry {
   readonly id: string
   /** Index of the creating operation; −1 for stock surfaces. */
   readonly owner: number
-  readonly z: SurfaceZ
-  /** May be an operation's `on` (stock top, floors, tab tops). */
+  /** Outward normal: the approach direction of operations on this face. */
+  readonly direction: Direction
+  /** Signed coordinate along the normal (`n · p`): deeper is lower. */
+  readonly level: SurfaceLevel
+  /**
+   * Nominal level relative to the stock face of its direction: 0 on the stock face, −depth below
+   * it. The z of the face frame (on `+z` the part-frame z, as in v0.1).
+   */
+  readonly faceZ: Rational
+  /** May be an operation's `on` (stock faces, floors, tab tops). */
   readonly onTarget: boolean
 }
 
-export const STOCK_TOP = 'stock.top'
+export const STOCK_TOP = STOCK_FACE['+z']
+
+/** The six stock face ids (the valid `on` of a facing or profile). */
+export const STOCK_FACES: readonly string[] = DIRECTIONS.map((d) => STOCK_FACE[d])
 
 const zero = Rational.ZERO
-const exactZ = (z: Rational): SurfaceZ => ({ z, upper: zero, lower: zero, toleranced: false })
+const exactLevel = (value: Rational): SurfaceLevel => ({
+  value,
+  upper: zero,
+  lower: zero,
+  toleranced: false,
+})
 
-function ofQuantity(q: Quantity): SurfaceZ {
-  if (q.tolerance.isNone()) return exactZ(q.exact)
+function ofQuantity(q: Quantity): SurfaceLevel {
+  if (q.tolerance.isNone()) return exactLevel(q.exact)
   const t = q.tolerance.unwrap()
-  return { z: q.exact, upper: t.upper, lower: t.lower, toleranced: true }
+  return { value: q.exact, upper: t.upper, lower: t.lower, toleranced: true }
 }
 
 /** a − b with worst-case deviations. */
-function minus(a: SurfaceZ, b: SurfaceZ): SurfaceZ {
+function minus(a: SurfaceLevel, b: SurfaceLevel): SurfaceLevel {
   return {
-    z: a.z.sub(b.z),
+    value: a.value.sub(b.value),
     upper: a.upper.sub(b.lower),
     lower: a.lower.sub(b.upper),
     toleranced: a.toleranced || b.toleranced,
   }
 }
 
-const neg = (a: SurfaceZ): SurfaceZ => minus(exactZ(zero), a)
+const neg = (a: SurfaceLevel): SurfaceLevel => minus(exactLevel(zero), a)
+const plus = (a: SurfaceLevel, b: SurfaceLevel): SurfaceLevel => minus(a, neg(b))
 
 /** Half the narrowest size (float64 mm), as geometry's `inradius`. */
 export function inradius(s: Shape): number {
@@ -81,44 +107,81 @@ export function builtTabs(op: Extract<Operation, { kind: 'profile' }>): number {
   return Number.isInteger(n) && n > 0 ? n : 0
 }
 
-/** Horizontal planar surfaces in design order: the stock's, then each operation's. */
+/** Stock levels per direction, with the stock's tolerances. */
+class StockLevels {
+  constructor(private readonly stock: Stock) {}
+  private size(d: StockDimension): SurfaceLevel {
+    return ofQuantity(this.stock[d])
+  }
+  /** Level of the stock face of `direction`. */
+  face(direction: Direction): SurfaceLevel {
+    const f = DIRECTION[direction].faceLevel
+    return f === undefined ? exactLevel(zero) : this.size(f)
+  }
+  /** Stock extent along the normal of `direction` (T, L or W). */
+  extent(direction: Direction): SurfaceLevel {
+    return this.size(DIRECTION[direction].extent)
+  }
+}
+
+/** Planar face surfaces in design order: the six stock faces, then each operation's. */
 export class SurfaceTable {
-  private constructor(private readonly entries: ReadonlyMap<string, SurfaceEntry>) {}
+  private constructor(
+    private readonly entries: ReadonlyMap<string, SurfaceEntry>,
+    private readonly levels: StockLevels,
+  ) {}
 
   static build(ops: readonly Operation[], stock: Stock): SurfaceTable {
     const map = new Map<string, SurfaceEntry>()
-    const thickness = ofQuantity(stock.thickness)
-    const put = (id: string, owner: number, z: SurfaceZ, onTarget: boolean) =>
-      map.set(id, { id, owner, z, onTarget })
-    put(STOCK_TOP, -1, exactZ(zero), true)
-    put('stock.bottom', -1, neg(thickness), false)
+    const levels = new StockLevels(stock)
+    const put = (
+      id: string,
+      owner: number,
+      direction: Direction,
+      level: SurfaceLevel,
+      onTarget: boolean,
+    ) =>
+      map.set(id, {
+        id,
+        owner,
+        direction,
+        level,
+        faceZ: level.value.sub(levels.face(direction).value),
+        onTarget,
+      })
+    for (const d of DIRECTIONS) put(STOCK_FACE[d], -1, d, levels.face(d), true)
     ops.forEach((op, i) => {
-      // `on` must be earlier; a dangling `on` leaves the surface out (reported by checkReferences)
-      const on = (id: string): Option<SurfaceZ> => {
+      // `on` must be earlier; a dangling `on` leaves the surface out (reported by checkReferences
+      // and the `onSurface` rule)
+      const on = (id: string): Option<SurfaceEntry> => {
         const e = map.get(id)
-        return e !== undefined && e.owner < i ? Some(e.z) : None
+        return e !== undefined && e.owner < i ? Some(e) : None
       }
+      const below = (id: string, depth: Quantity, role: string, onTarget: boolean) =>
+        on(id).map((e) =>
+          put(`${op.id}.${role}`, i, e.direction, minus(e.level, ofQuantity(depth)), onTarget),
+        )
       switch (op.kind) {
         case 'facing':
-          put(`${op.id}.floor`, i, neg(ofQuantity(op.depth)), true)
-          break
         case 'pocket':
-          on(op.on).map((z) => put(`${op.id}.floor`, i, minus(z, ofQuantity(op.depth)), true))
+          below(op.on, op.depth, 'floor', true)
           break
         case 'drilling':
-          if (op.bottom === 'flat' && op.depth.isSome()) {
-            const depth = ofQuantity(op.depth.unwrap())
-            on(op.on).map((z) => put(`${op.id}.bottom`, i, minus(z, depth), false))
-          }
+          if (op.bottom === 'flat' && op.depth.isSome())
+            below(op.on, op.depth.unwrap(), 'bottom', false)
           break
-        case 'profile': {
-          const top = minus(ofQuantity(op.tabs.thickness), thickness)
-          for (let t = 0; t < builtTabs(op); t++) put(`${op.id}.tab[${t}].top`, i, top, true)
+        case 'profile':
+          on(op.on).map((e) => {
+            // measured up from the opposite stock face along the profile's normal
+            const d = e.direction
+            const opposite = minus(levels.face(d), levels.extent(d))
+            const top = plus(opposite, ofQuantity(op.tabs.thickness))
+            for (let t = 0; t < builtTabs(op); t++) put(`${op.id}.tab[${t}].top`, i, d, top, true)
+          })
           break
-        }
       }
     })
-    return new SurfaceTable(map)
+    return new SurfaceTable(map, levels)
   }
 
   get(id: string): Option<SurfaceEntry> {
@@ -131,22 +194,41 @@ export class SurfaceTable {
     return [...this.entries.values()].filter((e) => e.owner < index)
   }
 
-  /** Expression resolver for an operation at `index` (`<surface>.z`, `.z.min`, `.z.max`). */
+  /** Nominal stock extent along the normal of `direction` (T, L or W). */
+  extent(direction: Direction): Rational {
+    return this.levels.extent(direction).value
+  }
+
+  /**
+   * Expression resolver for an operation at `index`: `<surface>.<axis>`, `.<axis>.min`,
+   * `.<axis>.max`, the part-frame coordinate on the axis of the surface's normal
+   * (design-v0.2.md#formula-names). A name on another axis is unknown.
+   */
   resolver(index: number): ReferenceResolver {
     return {
       resolve: (name) => {
-        const m = /^(.+)\.z(?:\.(min|max))?$/.exec(name)
+        const m = /^(.+)\.([xyz])(?:\.(min|max))?$/.exec(name)
         if (m === null) return None
         const e = this.entries.get(m[1]!)
         if (e === undefined || e.owner >= index) return None
-        return surfaceQuantity(name, e.z, m[2] as 'min' | 'max' | undefined)
+        if (DIRECTION[e.direction].axis !== (m[2] as Axis)) return None
+        return surfaceQuantity(name, coordinate(e), m[3] as 'min' | 'max' | undefined)
       },
     }
   }
 }
 
-function surfaceQuantity(name: string, s: SurfaceZ, limit: 'min' | 'max' | undefined) {
-  const exact = limit === 'max' ? s.z.add(s.upper) : limit === 'min' ? s.z.add(s.lower) : s.z
+/** Part-frame coordinate of a surface on its normal's axis (`sign · level`). */
+export function coordinate(e: SurfaceEntry): SurfaceLevel {
+  return DIRECTION[e.direction].sign > 0 ? e.level : neg(e.level)
+}
+
+/** Formula name of a surface's coordinate, e.g. `pocket1.floor.z`, `stock.side[1].x`. */
+export const coordinateName = (e: SurfaceEntry): string => `${e.id}.${DIRECTION[e.direction].axis}`
+
+function surfaceQuantity(name: string, s: SurfaceLevel, limit: 'min' | 'max' | undefined) {
+  const exact =
+    limit === 'max' ? s.value.add(s.upper) : limit === 'min' ? s.value.add(s.lower) : s.value
   const tol =
     limit === undefined && s.toleranced
       ? Tolerance.create({
@@ -174,11 +256,15 @@ export interface OperationReference {
   readonly surface: string
 }
 
-/** Surface id of an expression reference (`pocket1.floor.z.max` → `pocket1.floor`). */
-export const surfaceOfReference = (ref: string): string => ref.replace(/\.z(\.(min|max))?$/, '')
+/**
+ * Surface id of an expression reference (`pocket1.floor.z.max` → `pocket1.floor`,
+ * `stock.side[1].x` → `stock.side[1]`).
+ */
+export const surfaceOfReference = (ref: string): string => ref.replace(/\.[xyz](\.(min|max))?$/, '')
 
 export function operationReferences(op: Operation): AppResult<OperationReference[]> {
   const out: OperationReference[] = []
+  // a facing's or profile's `on` is a stock face: always there, and removed by a facing itself
   if (op.kind === 'pocket' || op.kind === 'drilling')
     out.push({ param: 'on', reference: op.on, surface: op.on })
   for (const p of quantityParams(op)) {
@@ -235,7 +321,8 @@ const paramsNode = (opId: string) => `${opId}#params`
 const paramNode = (opId: string, path: string) => `${opId}#${path}`
 
 /**
- * Nodes: each expression parameter (depends on what it references) and each surface's `.z`
+ * Nodes: each expression parameter (depends on what it references) and each surface's coordinate
+ * (`.z`, or `.x` / `.y` on side faces)
  * (depends on its `on` surface, its operation's parameters as a whole and each of its
  * operation's expression parameters, so a chain through an operation's own formula is complete:
  * `facing1.floor.z` → `pocket1#depth` → `pocket1.floor.z` → `pocket2#depth`).
@@ -253,9 +340,10 @@ export function designGraph(ops: readonly Operation[], stock: Stock): AppResult<
       nodes.set(node, refs.unwrap())
       formulas.push(node)
     }
-    const on = op.kind === 'pocket' || op.kind === 'drilling' ? [`${op.on}.z`] : []
+    const onEntry = table.get(op.on)
+    const on = onEntry.isSome() ? [coordinateName(onEntry.unwrap())] : []
     for (const e of table.before(i + 1))
-      if (e.owner === i) nodes.set(`${e.id}.z`, [...on, paramsNode(op.id), ...formulas])
+      if (e.owner === i) nodes.set(coordinateName(e), [...on, paramsNode(op.id), ...formulas])
   }
   return DependencyGraph.create(nodes)
 }

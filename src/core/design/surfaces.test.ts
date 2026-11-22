@@ -49,10 +49,11 @@ describe('design reference resolver', () => {
     expect(z('pocket1.floor.z.max').canonical).toBeCloseTo(-5.95)
     expect(z('pocket1.floor.z.min').canonical).toBeCloseTo(-6.1)
     expect(z('pocket1.floor.z').tolerance.unwrap().notation).toBe('deviations')
-    // tab tops: −T + thickness (2 mm default); only reachable through `on`, not formulas
-    expect(table.get('profile1.tab[0].top').unwrap().z.z.toNumber()).toBe(-18)
+    // tab tops: −T + thickness (2 mm default); bracketed ids are formula names too (v0.2)
+    expect(table.get('profile1.tab[0].top').unwrap().level.value.toNumber()).toBe(-18)
+    expect(z('profile1.tab[0].top.z').canonical).toBe(-18)
     expect(table.get('profile1.tab[4].top').isNone()).toBe(true)
-    // only earlier operations and only horizontal planar surfaces
+    // only earlier operations and only planar face surfaces
     expect(table.resolver(1).resolve('pocket1.floor.z').isNone()).toBe(true)
     expect(r.resolve('pocket1.wall[0].z').isNone()).toBe(true)
     expect(r.resolve('pocket1.floor').isNone()).toBe(true)

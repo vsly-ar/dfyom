@@ -23,7 +23,9 @@ import type { ToleranceProps } from '../quantity/tolerance'
 import { UNITS } from '../quantity/units'
 import type { BinaryOperator, Expression, ExprNode } from './ast'
 
-const IDENTIFIER = /[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*/y
+/** `name { "." name }`, each name optionally indexed: `stock.side[1].x`, `profile1.tab[0].top.z`. */
+const IDENTIFIER =
+  /[A-Za-z_][A-Za-z0-9_]*(?:\[[0-9]+\])?(?:\.[A-Za-z_][A-Za-z0-9_]*(?:\[[0-9]+\])?)*/y
 const MUL = new Set(['*', '×'])
 const DIV = new Set(['/', '÷'])
 const OPERAND = ['number', 'reference', '(', '-']

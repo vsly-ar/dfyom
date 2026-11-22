@@ -2,15 +2,17 @@
  * Operation constraints (design.md "Constraints" columns): pure parameter checks, run
  * synchronously in every design command. Violations are `model.invariant` issues with parameter
  * paths. DFM warnings (tool library, geometry) are task 2.8.
- * Doc: docs/modes/design.md#operations-v01, docs/modes/design.md#implementation-task-25
+ * Doc: docs/modes/design.md#operations-v01, docs/modes/design.md#implementation-task-25,
+ * docs/modes/design-v0.2.md#dfm-access-checks (limits along the face normal)
  */
 import type { Issue } from '../../shared/errors/app-error'
 import { fail, Ok, type AppResult } from '../../shared/result'
+import type { Direction } from '../geometry/face'
 import type { Stock } from '../library/stock'
 import type { Quantity } from '../quantity/quantity'
 import { Rational } from '../quantity/rational'
 import type { Operation, Shape } from './operation'
-import { slotCoversOpening, SurfaceTable } from './surfaces'
+import { slotCoversOpening, SurfaceTable, type SurfaceEntry } from './surfaces'
 
 const ZERO = Rational.ZERO
 const HALF = Rational.create(1n, 2n).unwrap()
@@ -54,17 +56,32 @@ function checkShape(c: Checker, s: Shape): boolean {
   return ok
 }
 
-/** `on.z − depth` must stay above `stock.bottom` (−thickness). */
-function checkAboveBottom(c: Checker, path: string, onZ: Rational, depth: Quantity, T: Quantity) {
-  const maxDepth = onZ.add(T.exact)
+/**
+ * `on.level − depth` must stay above the opposite stock face along the normal (`stock.bottom` on
+ * the top face): depth < on's face z + the stock extent along `n`.
+ */
+function checkAboveBottom(
+  c: Checker,
+  path: string,
+  on: SurfaceEntry,
+  depth: Quantity,
+  extent: Rational,
+) {
+  const maxDepth = on.faceZ.add(extent)
   c.check(
     depth.exact.compare(maxDepth) < 0,
     path,
     'aboveStockBottom',
-    'must end above the stock bottom',
+    on.direction === '+z'
+      ? 'must end above the stock bottom'
+      : 'must end before the opposite stock face',
     { max: maxDepth.toNumber(), actual: depth.canonical },
   )
 }
+
+/** "stock thickness" on ±z, else the stock size along the normal (messages). */
+const extentName = (d: Direction): string =>
+  d === '+z' || d === '-z' ? 'the stock thickness' : 'the stock size along the face normal'
 
 /** Perimeter of a v0.1 shape (float64 mm). */
 export function shapePerimeter(s: Shape): number {
@@ -85,20 +102,22 @@ export function operationIssues(
 ): Issue[] {
   const c = new Checker()
   const op = ops[index]!
-  const T = stock.thickness
-  let onZ: Rational | undefined
-  if (op.kind === 'pocket' || op.kind === 'drilling') {
-    const targets = table.before(index).filter((e) => e.onTarget)
-    const target = targets.find((e) => e.id === op.on)
-    c.check(
-      target !== undefined,
-      'on',
-      'onSurface',
-      'must be stock.top or a floor or tab top of an earlier operation',
-      { allowed: targets.map((e) => e.id), actual: op.on },
-    )
-    onZ = target?.z.z
-  }
+  // a facing or profile starts from a stock face (design-v0.2.md decision 10)
+  const stockOnly = op.kind === 'facing' || op.kind === 'profile'
+  const targets = table.before(index).filter((e) => e.onTarget && (!stockOnly || e.owner < 0))
+  const on = targets.find((e) => e.id === op.on)
+  c.check(
+    on !== undefined,
+    'on',
+    'onSurface',
+    stockOnly
+      ? 'must be a stock face'
+      : 'must be a stock face or a floor or tab top of an earlier operation',
+    { allowed: targets.map((e) => e.id), actual: op.on },
+  )
+  const direction = on?.direction ?? '+z'
+  /** Stock extent along the normal of `on` (the thickness on the top face). */
+  const T = { exact: table.extent(direction), canonical: table.extent(direction).toNumber() }
   switch (op.kind) {
     case 'facing':
       if (c.positive(op.depth, 'depth'))
@@ -106,14 +125,14 @@ export function operationIssues(
           op.depth.exact.compare(T.exact) < 0,
           'depth',
           'lessThanStockThickness',
-          'must be less than the stock thickness',
+          `must be less than ${extentName(direction)}`,
           { max: T.canonical, actual: op.depth.canonical },
         )
       break
     case 'pocket': {
       checkShape(c, op.shape)
       const depthOk = c.positive(op.depth, 'depth')
-      if (depthOk && onZ !== undefined) checkAboveBottom(c, 'depth', onZ, op.depth, T)
+      if (depthOk && on !== undefined) checkAboveBottom(c, 'depth', on, op.depth, T.exact)
       const f = op.floorRadius.exact
       const limits = [op.depth.exact]
       limits.push(
@@ -144,8 +163,8 @@ export function operationIssues(
       )
       if (usesDepth && op.depth.isSome()) {
         const depth = op.depth.unwrap()
-        if (c.positive(depth, 'depth') && onZ !== undefined)
-          checkAboveBottom(c, 'depth', onZ, depth, T)
+        if (c.positive(depth, 'depth') && on !== undefined)
+          checkAboveBottom(c, 'depth', on, depth, T.exact)
       }
       const point = op.bottom === 'drillPoint'
       c.check(
@@ -199,7 +218,7 @@ export function operationIssues(
           op.tabs.thickness.exact.compare(T.exact) < 0,
           'tabs.thickness',
           'lessThanStockThickness',
-          'must be less than the stock thickness',
+          `must be less than ${extentName(direction)}`,
           { max: T.canonical, actual: op.tabs.thickness.canonical },
         )
       break

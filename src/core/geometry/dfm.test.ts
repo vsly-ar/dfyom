@@ -323,3 +323,95 @@ describe('parameterChecks', () => {
     for (const w of ws) expect(w.message).toContain(w.operation)
   })
 })
+
+describe('face access checks (design-v0.2.md#dfm-access-checks)', () => {
+  // a 12 mm board, 100 × 60: the right side face (+x) is 60 × 12, the extent along x is 100
+  const board = { length: 100, width: 60, thickness: 12 }
+  const checks = (ops: OperationGeometry[], options: ParameterCheckOptions = metric) =>
+    parameterChecks({ stock: board, operations: ops }, options)
+
+  it('dfm.holeOutsideStock uses the stock face rectangle of the direction', () => {
+    // fits on the top (100 × 60), not on the 60 × 12 right side
+    const onSide = drill({ direction: '+x', center: [30, 10], diameter: 5 })
+    expect(codes(checks([onSide]))).toContain('dfm.holeOutsideStock')
+    expect(codes(checks([drill({ direction: '+x', center: [30, 6], diameter: 5 })]))).not.toContain(
+      'dfm.holeOutsideStock',
+    )
+    expect(codes(checks([drill({ center: [30, 10], diameter: 5 })]))).not.toContain(
+      'dfm.holeOutsideStock',
+    )
+  })
+
+  it('dfm.holeDeep: a through hole is as deep as the stock along n', () => {
+    const through = { kind: 'through' } as const
+    const side = checks([drill({ direction: '+x', center: [30, 6], diameter: 5, bottom: through })])
+    expect(side.find((w) => w.code === 'dfm.holeDeep')?.params).toMatchObject({ depth: 100 })
+    // on the top of the same board: 12 mm < 5 × 5
+    expect(codes(checks([drill({ diameter: 5, bottom: through })]))).not.toContain('dfm.holeDeep')
+  })
+
+  it('slot margins are measured in the face rectangle; params.sides names the stock faces', () => {
+    // a front profile (−y: u = +X, v = +Z, the face is 100 × 12): runs out at bottom and top
+    const p = profile({
+      direction: '-y',
+      shape: { center: [50, 6], contour: rect(40, 10, 1).contour },
+    })
+    const w = checks([p]).find((x) => x.code === 'dfm.slotOpensStock')
+    expect(w?.params['sides']).toEqual(['stock.bottom', 'stock.top'])
+  })
+
+  it('dfm.reach: deeper than every matching library tool reaches (none with a reach: skipped)', () => {
+    const tools: DfmTool[] = [
+      { type: 'flatEndMill', diameter: 6, reach: 20 },
+      { type: 'flatEndMill', diameter: 3, reach: 12 },
+      { type: 'drill', diameter: 5, reach: 40 },
+    ]
+    const opts = { tools, unitSystem: 'metric' } as const
+    // a pocket 25 deep below a floor 5 down: 30 from the stock face > 20
+    const deep = checks(
+      [pocket({ direction: '+x', onZ: -5, depth: 25, shape: rect(10, 8, 4) })],
+      opts,
+    )
+    expect(deep.find((w) => w.code === 'dfm.reach')).toMatchObject({
+      parameter: 'depth',
+      params: { depth: 30, reach: 20 },
+    })
+    const shallow = checks([pocket({ onZ: 0, depth: 10, shape: rect(10, 8, 4) })], opts)
+    expect(codes(shallow)).not.toContain('dfm.reach')
+    // a through hole on the right side: 100 deep > 40
+    const hole = drill({
+      direction: '+x',
+      center: [30, 6],
+      diameter: 5,
+      bottom: { kind: 'through' },
+    })
+    expect(checks([hole], opts).find((w) => w.code === 'dfm.reach')).toMatchObject({
+      parameter: 'on',
+      params: { depth: 100, reach: 40 },
+    })
+    // a profile from the front: the stock extent along n (60) > 20
+    const side = checks([profile({ direction: '-y', shape: rect(20, 6, 1) })], opts)
+    expect(codes(side)).toContain('dfm.reach')
+    // no reach known: skipped
+    expect(codes(checks([hole]))).not.toContain('dfm.reach')
+  })
+
+  it('dfm.setups: more than one approach direction, on the first operation of the second', () => {
+    const ops: OperationGeometry[] = [
+      facing(0.5),
+      drill({ id: 'drill1', direction: '+x', center: [30, 6], diameter: 5 }),
+      pocket({ id: 'pocket1', direction: '-z' }),
+      pocket({ id: 'pocket2' }),
+    ]
+    const w = checks(ops).filter((x) => x.code === 'dfm.setups')
+    expect(w).toEqual([
+      expect.objectContaining({
+        severity: 'info',
+        operation: 'drill1',
+        parameter: 'on',
+        params: { count: 3, directions: ['top', 'right', 'bottom'] },
+      }),
+    ])
+    expect(codes(checks([facing(0.5), pocket()]))).not.toContain('dfm.setups')
+  })
+})

@@ -2,12 +2,15 @@
  * Parameter and tool DFM checks: synchronous, pure and total, run by the design commands on
  * every change (the geometry checks run in the evaluation, `checks.ts`).
  * Doc: docs/modes/design.md#dfm-checks (rules per operation in its DFM-warnings columns),
- * docs/architecture/geometry.md#evaluation-checks
+ * docs/architecture/geometry.md#evaluation-checks, docs/modes/design-v0.2.md#dfm-access-checks
  *
  * Inputs are the resolved float64 mm of `PartGeometryInput` plus the tool library reduced to
- * the fields the rules need. With an empty library only the geometric rules run.
+ * the fields the rules need. With an empty library only the geometric rules run. Each operation
+ * is checked in its face frame: the stock face rectangle of its direction and the stock extent
+ * along its normal stand in for the stock's length × width and thickness (`localStock`).
  */
 import type { ToolType } from '../library/tool.dto'
+import { adjacentStockFaces, DIRECTION_LABEL, localStock, type Direction } from './face'
 import {
   EPSILON,
   type DfmSuggestion,
@@ -25,6 +28,8 @@ export interface DfmTool {
   readonly diameter: number
   /** Bull-nose corner radius (RE); flat = 0 and ball = diameter / 2 are derived. */
   readonly cornerRadius?: number
+  /** How deep it reaches: its default stickout, else its flute length (`dfm.reach`). */
+  readonly reach?: number
 }
 
 export interface ParameterCheckOptions {
@@ -92,18 +97,108 @@ export function parameterChecks(
   options: ParameterCheckOptions,
 ): DfmWarning[] {
   const lib = library(options.tools)
-  return input.operations.flatMap((op): DfmWarning[] => {
+  const perOperation = input.operations.flatMap((op): DfmWarning[] => {
+    const stock = localStock(directionOf(op), input.stock)
     switch (op.kind) {
       case 'facing':
         return facing(op, options.unitSystem)
       case 'pocket':
-        return pocket(op, lib)
+        return [...pocket(op, lib), ...reach(op, stock, lib)]
       case 'drilling':
-        return drilling(op, input.stock, lib)
+        return [...drilling(op, stock, lib), ...reach(op, stock, lib)]
       case 'profile':
-        return profile(op, input.stock, lib, options.unitSystem)
+        return [...profile(op, stock, lib, options.unitSystem), ...reach(op, stock, lib)]
     }
   })
+  return [...perOperation, ...setups(input)]
+}
+
+const directionOf = (op: OperationGeometry): Direction => op.direction ?? '+z'
+
+/**
+ * `dfm.setups` (info): the part uses more than one approach direction. Attached to the first
+ * operation of the second direction (the one that adds a setup), parameter `on`.
+ */
+function setups(input: PartGeometryInput): DfmWarning[] {
+  const directions: Direction[] = []
+  let first: OperationGeometry | undefined
+  for (const op of input.operations) {
+    const d = directionOf(op)
+    if (directions.includes(d)) continue
+    directions.push(d)
+    if (directions.length === 2) first = op
+  }
+  if (first === undefined) return []
+  const names = directions.map((d) => DIRECTION_LABEL[d])
+  return [
+    warning(
+      'dfm.setups',
+      first,
+      'on',
+      `the part needs ${directions.length} setups (${names.join(', ')})`,
+      { count: directions.length, directions: names },
+      { severity: 'info' },
+    ),
+  ]
+}
+
+/** Library tools that could make the operation (type and size; the fit table without reach). */
+function candidates(op: Op<'pocket'> | Op<'drilling'> | Op<'profile'>, lib: Library): DfmTool[] {
+  const endMill = (t: DfmTool) => t.type === 'flatEndMill' || t.type === 'bullNoseEndMill'
+  switch (op.kind) {
+    case 'pocket':
+      return lib.tools.filter(
+        (t) => endMill(t) && t.diameter <= narrowest(op) + TOOL_MATCH_TOLERANCE,
+      )
+    case 'drilling':
+      return lib.tools.filter((t) =>
+        t.type === 'drill'
+          ? Math.abs(t.diameter - op.diameter) <= TOOL_MATCH_TOLERANCE
+          : op.bottom.kind !== 'drillPoint' &&
+            t.type === 'flatEndMill' &&
+            t.diameter > op.diameter / 2 &&
+            t.diameter < op.diameter - TOOL_MATCH_TOLERANCE,
+      )
+    case 'profile':
+      return lib.tools.filter(
+        (t) => t.type === 'flatEndMill' && t.diameter <= op.slotWidth + TOOL_MATCH_TOLERANCE,
+      )
+  }
+}
+
+/**
+ * `dfm.reach` (warning): the depth from the stock's outer face of the operation's direction to
+ * its deepest point exceeds the reach of every library tool that could make it (none with a
+ * reach: skipped). Until the operation tool field (task A4) this is the "generalized" reading of
+ * design-v0.2.md: the longest of the matching library tools.
+ */
+function reach(
+  op: Op<'pocket'> | Op<'drilling'> | Op<'profile'>,
+  stock: StockGeometry,
+  lib: Library,
+): DfmWarning[] {
+  const reaches = candidates(op, lib).flatMap((t) => (t.reach === undefined ? [] : [t.reach]))
+  if (reaches.length === 0) return []
+  const longest = Math.max(...reaches)
+  const [depth, parameter] =
+    op.kind === 'profile'
+      ? [stock.thickness, 'on']
+      : op.kind === 'pocket'
+        ? [op.depth - op.onZ, 'depth']
+        : op.bottom.kind === 'through'
+          ? [stock.thickness, 'on']
+          : [op.bottom.depth - op.onZ, 'depth']
+  if (depth <= longest + EPSILON) return []
+  return [
+    warning(
+      'dfm.reach',
+      op,
+      parameter,
+      `no tool in the library reaches ${mm(depth)} deep from the stock face (longest reach ` +
+        `${mm(longest)})`,
+      { depth, reach: longest },
+    ),
+  ]
 }
 
 function facing(op: Op<'facing'>, unitSystem: 'metric' | 'inch'): DfmWarning[] {
@@ -256,7 +351,7 @@ function drilling(op: Op<'drilling'>, stock: StockGeometry, lib: Library): DfmWa
         ),
       )
   }
-  // through holes: the material below `on`
+  // through holes: the material below `on` along the normal
   const depth = op.bottom.kind === 'through' ? op.onZ + stock.thickness : op.bottom.depth
   const deepest = HOLE_DEPTH_RATIO * op.diameter
   if (depth > deepest + EPSILON)
@@ -274,16 +369,21 @@ function drilling(op: Op<'drilling'>, stock: StockGeometry, lib: Library): DfmWa
   return out
 }
 
-/** Stock sides by surface id, with the profile shape's distance to each (the stock margin). */
+/**
+ * Stock faces around the face rectangle by surface id, with the profile shape's distance to each
+ * (the stock margin), in the face frame (`stock` is the local stock; on the top face the sides
+ * front, right, back, left).
+ */
 function margins(op: Op<'profile'>, stock: StockGeometry): [string, number][] {
   const c = op.shape.contour
   const [hx, hy] = c.kind === 'circle' ? [c.radius, c.radius] : [c.length / 2, c.width / 2]
   const [x, y] = op.shape.center
+  const [vMin, uMax, vMax, uMin] = adjacentStockFaces(directionOf(op))
   return [
-    ['stock.side[0]', y - hy], // front, y = 0
-    ['stock.side[1]', stock.length - x - hx], // right
-    ['stock.side[2]', stock.width - y - hy], // back
-    ['stock.side[3]', x - hx], // left, x = 0
+    [vMin, y - hy],
+    [uMax, stock.length - x - hx],
+    [vMax, stock.width - y - hy],
+    [uMin, x - hx],
   ]
 }
 

@@ -97,9 +97,9 @@ export interface ToolCheckInput {
 
 type Finding = Omit<PlanWarning, 'code' | 'severity' | 'planOperationId'>
 
-/** Depth of a surface below the stock top (mm, ≥ 0). */
+/** Depth of a surface below the stock face of its direction (mm, ≥ 0; the top in v0.1). */
 function belowTop(table: SurfaceTable, id: string): number {
-  return table.get(id).mapOr(0, (e) => -e.z.z.toNumber())
+  return table.get(id).mapOr(0, (e) => -e.faceZ.toNumber())
 }
 
 /** The tool checks of the table (docs/modes/plan-v0.1.md#tool-assignment-and-checks). */

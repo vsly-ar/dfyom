@@ -9,6 +9,7 @@
  */
 import { z } from 'zod'
 import type { PartEvaluation } from './evaluate'
+import { DIRECTIONS } from './face'
 import {
   DFM_WARNING_CODES,
   type DfmWarning,
@@ -44,14 +45,18 @@ const DrillBottomSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('drillPoint'), depth: z.number(), pointAngle: z.number() }),
 ])
 
+const direction = z.enum(DIRECTIONS).exactOptional()
+
 export const FacingGeometrySchema = z.object({
   kind: z.literal('facing'),
   id: z.string(),
+  direction,
   depth: z.number(),
 })
 export const PocketGeometrySchema = z.object({
   kind: z.literal('pocket'),
   id: z.string(),
+  direction,
   onZ: z.number(),
   shape: ShapeSchema,
   depth: z.number(),
@@ -60,6 +65,7 @@ export const PocketGeometrySchema = z.object({
 export const DrillingGeometrySchema = z.object({
   kind: z.literal('drilling'),
   id: z.string(),
+  direction,
   onZ: z.number(),
   center: Vec2Schema,
   diameter: z.number(),
@@ -68,6 +74,7 @@ export const DrillingGeometrySchema = z.object({
 export const ProfileGeometrySchema = z.object({
   kind: z.literal('profile'),
   id: z.string(),
+  direction,
   shape: ShapeSchema,
   side: z.enum(['outside', 'inside']),
   slotWidth: z.number(),

@@ -48,7 +48,8 @@ export function shapeLoop(shape: Shape, z: number): Vec3[] {
 
 /** z (mm) of a surface the operation starts from; the stock top (0) when unknown. */
 function surfaceZ(table: SurfaceTable, id: string): number {
-  return table.get(id).mapOr(0, (e) => e.z.z.toNumber())
+  // the face frame's z; non-top faces are drawn in their frame with task F1
+  return table.get(id).mapOr(0, (e) => e.faceZ.toNumber())
 }
 
 function rectangleLoop(x0: number, y0: number, x1: number, y1: number, z: number): Vec3[] {

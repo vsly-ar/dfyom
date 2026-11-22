@@ -1,5 +1,6 @@
 /**
- * Design part → geometry input: quantities to canonical float64 mm/degrees, `on` to `onZ`,
+ * Design part → geometry input: quantities to canonical float64 mm/degrees, `on` to the
+ * operation's `direction` and `onZ` (the z of `on` in its face frame, 0 at the stock face),
  * `on` and expression references to `references` (for `dfm.surfaceMissing`). Pure; the geometry types are owned by src/core/geometry/model.ts.
  * Doc: docs/modes/design.md#implementation-task-25, docs/architecture/geometry.md#evaluation-rules
  */
@@ -11,6 +12,7 @@ import type {
   Shape as ShapeGeometry,
   SurfaceReference,
 } from '../geometry/model'
+import type { Direction } from '../geometry/face'
 import type { Stock } from '../library/stock'
 import type { Operation, Part, Point, Shape } from './operation'
 import { operationReferences, SurfaceTable } from './surfaces'
@@ -69,31 +71,32 @@ function operationGeometry(
   index: number,
   table: SurfaceTable,
 ): AppResult<OperationGeometry> {
-  const onZ = (id: string): AppResult<number> => {
-    const e = table.get(id)
-    return e.isSome() && e.unwrap().owner < index
-      ? Ok(e.unwrap().z.z.toNumber())
-      : bug(op, `on surface ${id} does not exist before the operation`)
-  }
+  const entry = table.get(op.on)
+  if (entry.isNone() || entry.unwrap().owner >= index)
+    return bug(op, `on surface ${op.on} does not exist before the operation`)
+  const on = entry.unwrap()
+  // `+z` is left out, so top-face inputs stay exactly as in v0.1
+  const direction: { direction?: Direction } =
+    on.direction === '+z' ? {} : { direction: on.direction }
   switch (op.kind) {
     case 'facing':
-      return Ok({ kind: 'facing', id: op.id, depth: op.depth.canonical })
+      return Ok({ kind: 'facing', id: op.id, ...direction, depth: op.depth.canonical })
     case 'pocket':
-      return onZ(op.on).map((z) => ({
+      return Ok({
         kind: 'pocket',
         id: op.id,
-        onZ: z,
+        ...direction,
+        onZ: on.faceZ.toNumber(),
         shape: shapeGeometry(op.shape),
         depth: op.depth.canonical,
         floorRadius: op.floorRadius.canonical,
-      }))
+      })
     case 'drilling': {
-      const z = onZ(op.on)
-      if (z.isErr()) return Err(z.unwrapErr())
       const base = {
         kind: 'drilling',
         id: op.id,
-        onZ: z.unwrap(),
+        ...direction,
+        onZ: on.faceZ.toNumber(),
         center: vec2(op.center),
         diameter: op.diameter.canonical,
       } as const
@@ -111,6 +114,7 @@ function operationGeometry(
       return Ok({
         kind: 'profile',
         id: op.id,
+        ...direction,
         shape: shapeGeometry(op.shape),
         side: op.side,
         slotWidth: op.slotWidth.canonical,
