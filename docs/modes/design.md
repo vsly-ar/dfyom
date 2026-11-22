@@ -4,14 +4,14 @@ Status: implemented (v0.1 sections, design UI task 3.6) · Library: [library.md]
 
 **Goal:** design parts that can be manufactured on the user's existing machines (DFM-first).
 
-Sections marked **v0.1** define the operations of [roadmap v0.1](../roadmap.md#v01--25d-basics-to-the-virtual-machine) (task 1.8 of the [plan](../plans/v0.1.md)); the rest is direction for later milestones. v0.2 (draft: face targets on any ±X/±Y/±Z face and the operation tool field) is specified in [design-v0.2.md](design-v0.2.md).
+Sections marked **v0.1** define the operations of [roadmap v0.1](../roadmap.md#v01--25d-basics-to-the-virtual-machine) (task 1.8 of the [plan](../plans/v0.1.md)); the rest is direction for later milestones. v0.2 (accepted: face targets on any ±X/±Y/±Z face, placement anchors and the operation tool field) is specified in [design-v0.2.md](design-v0.2.md); the reference model of workflow step 4 in [reference-model.md](reference-model.md).
 
 ## Workflow
 
 1. Pick a **stock** from the stock library.
 2. Define a **working area** in it (v0.1: the whole stock).
 3. Add **operations** (facing, pocketing, drilling, profiling, chamfering, cutting a straight line / curve / shape, …) or **features** (groups of operations, e.g. a bolt hole = several drilling ops + pocketing + chamfering + threading; engraving/carving = many operations).
-4. Optionally import a 3D model (not necessarily CAD) **for reference only**.
+4. Optionally import a 3D model (not necessarily CAD) **for reference only**. v0.2: STL, placed and fitted to the stock ([reference-model.md](reference-model.md)).
 
 ## Generalized tools
 
@@ -19,7 +19,7 @@ Operations specify tool _requirements_ (e.g. facing: "a fly cutter or any flat e
 
 **Design intent vs. tool choice:** design states the _result_ – radii, depths, diameters, slot width. Plan picks a tool that produces it within tolerance (e.g. a floor fillet: bull-nose end mill in one pass or ball end mill with 3D passes; a hole: drill bit or helical boring with an end mill), and design checks that the result is _achievable_ ([DFM checks](#dfm-checks)).
 
-**Changed 2026-11-21 (user decision D11):** the v0.1 rule "Design never names a tool" is replaced. Each design operation has a **tool field**, either a generalized tool (type + diameter, e.g. a 1/4″ flat end mill) or a specific library tool, chosen automatically unless the user locks it; Plan resolves it to a concrete tool. Spec (draft): [design-v0.2.md § Operation tool](design-v0.2.md#operation-tool); plan side: [plan-v0.2.md](plan-v0.2.md#tool-resolution-from-the-design-tool-field). The v0.1 implementation still follows the old rule until v0.2 is implemented.
+**Changed 2026-11-21 (user decision D11):** the v0.1 rule "Design never names a tool" is replaced. Each design operation has a **tool field**, either a generalized tool (type + diameter, e.g. a 1/4″ flat end mill) or a specific library tool, chosen automatically unless the user locks it; Plan resolves it to a concrete tool. Spec: [design-v0.2.md § Operation tool](design-v0.2.md#operation-tool); plan side: [plan-v0.2.md](plan-v0.2.md#tool-resolution-from-the-design-tool-field). The v0.1 implementation still follows the old rule until v0.2 is implemented.
 
 ## Tolerances and references
 
@@ -38,7 +38,7 @@ Operations specify tool _requirements_ (e.g. facing: "a fly cutter or any flat e
 
 Each operation has:
 
-- `on`: a horizontal planar surface it starts from – `stock.top` or an earlier operation's floor or tab top (e.g. `facing1.floor`). Default: the last facing's floor, else `stock.top`. (v0.2, draft: any face with a ±X/±Y/±Z normal, [design-v0.2.md § Face targets](design-v0.2.md#face-targets-generalised-on).)
+- `on`: a horizontal planar surface it starts from – `stock.top` or an earlier operation's floor or tab top (e.g. `facing1.floor`). Default: the last facing's floor, else `stock.top`. (v0.2: any face target with a ±X/±Y/±Z normal, [design-v0.2.md § Face targets](design-v0.2.md#face-targets-generalised-on); positions by a [placement anchor](design-v0.2.md#placement-anchors).)
 - `shape`: an axis-aligned 2D shape (no rotation in v0.1) in the part frame, given by its center:
   - `rectangle { center: [x, y], length (X), width (Y), cornerRadius }`
   - `circle { center: [x, y], diameter }`
@@ -156,7 +156,7 @@ Decisions made with task 2.5, where this doc left room:
 - **DTOs.** Operations are a union on `kind` (`facing`, `pocket`, `drilling`, `profile`); every parameter is a quantity DTO, `center` a pair `[x, y]` of lengths. The stock snapshot lives in `ProjectDoc.snapshots` (`snapshots/<id>.json`); the part's `stock` is its id.
 - **Ids** are the kind prefix (`facing`, `pocket`, `drill`, `profile` – `drill` as in the surface ids) plus 1 + the highest number of that prefix in the part, so removing the last one frees its number. The default `name` is `Pocket 2` etc.
 - **`on`** exists on pockets and drillings only: facing always starts from `stock.top`, and a profile is a through cut whose tabs are measured from `stock.bottom`. Valid targets: `stock.top`, the `floor` of an earlier facing or pocket, and existing tab tops of an earlier profile (`profile1.tab[0].top`). A wrong target of the edited operation is `model.invariant` (rule `onSurface`, params list the allowed ids).
-- **Expression references** in design are `<surface>.z`, `.z.min` and `.z.max` of the horizontal planar surfaces of the stock and earlier operations: `stock.top`, `stock.bottom`, `facingN.floor`, `pocketN.floor`, `drillN.bottom` (flat only). Tab tops are reachable only through `on`: bracketed ids are not expression names. z comes from the analytic model (`on.z − depth`, tab top `−thickness + tabs.thickness`) with the explicit tolerances propagated worst-case; `.min`/`.max` are its limits, untoleranced. Design never names a tool or machine, so `tool.*` and `machine.*` are unknown references here (plan mode resolves them); project variables are not specified yet. (Changed 2026-11-21, user decision D11: design operations now carry a tool field, [design-v0.2.md](design-v0.2.md#operation-tool); `tool.*` stays unknown in design expressions, [design-v0.2.md § Expressions and the tool](design-v0.2.md#expressions-and-the-tool).)
+- **Expression references** in design are `<surface>.z`, `.z.min` and `.z.max` of the horizontal planar surfaces of the stock and earlier operations: `stock.top`, `stock.bottom`, `facingN.floor`, `pocketN.floor`, `drillN.bottom` (flat only). Tab tops are reachable only through `on`: bracketed ids are not expression names. z comes from the analytic model (`on.z − depth`, tab top `−thickness + tabs.thickness`) with the explicit tolerances propagated worst-case; `.min`/`.max` are its limits, untoleranced. Design never names a tool or machine, so `tool.*` and `machine.*` are unknown references here (plan mode resolves them); project variables are not specified yet. (Changed 2026-11-21, user decision D11: design operations now carry a tool field, [design-v0.2.md](design-v0.2.md#operation-tool); `tool.*` stays unknown in design expressions, [design-v0.2.md § Expressions and the tool](design-v0.2.md#expressions-and-the-tool). v0.2 adds `.x`/`.y` names and bracketed ids such as `stock.side[1].x`: [design-v0.2.md § Formula names](design-v0.2.md#formula-names).)
 - **Recalculation.** The dependency graph has a node per expression parameter (`pocket2#depth`, depends on its references) and per surface `.z` (depends on its `on` surface, its operation's parameters as a whole, `pocket1#params`, and each of its operation's expression parameters, so a chain through an operation's own formula – `facing1.floor.z` → `pocket1#depth` → `pocket1.floor.z` → `pocket2#depth` – is complete and ordered). After an update, `affectedBy(<op>#params)` gives the dependants, re-evaluated in that order in the same command (one undo step).
 - **Check order of an edit:** quantity errors (`quantity.*`, `expression.*`, issue path = parameter) → the edited operation's constraints (`model.invariant`, every invalid field at once) → references of all operations (`design.referenced`) → recalculation → constraints of the other operations (`model.invariant`, paths `operations.<id>.<param>`). Any failure leaves the document unchanged.
 - **`design.referenced`** has one issue per broken reference (path `operations.<id>.<param>`, params `{ operationId, reference }`) and lists the dependants in its data. It also stops an update that removes a referenced surface (fewer tabs, a profile side change, a drill bottom that is no longer flat).
