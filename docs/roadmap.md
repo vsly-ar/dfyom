@@ -26,7 +26,9 @@ From user direction D15 (2026-11-21), accepted with the v0.2 review (D18, 2026-1
 
 ## v0.2 – Faces, setups, placement, tools
 
-Scope from decisions D8–D17, accepted with the v0.2 review (D18, 2026-11-22). Tasks, exit criteria and status: [plans/v0.2.md](plans/v0.2.md).
+**Done 2026-11-22.**
+
+Scope from decisions D8–D17, accepted with the v0.2 review (D18, 2026-11-22); visuals approved (D25, 2026-11-22). Tasks, exit criteria and status: [plans/v0.2.md](plans/v0.2.md).
 
 **Goal:** design and machine parts from more than one side, place features where a drawing dimensions them, and choose tools while designing; plus the first step of the reference cycle.
 

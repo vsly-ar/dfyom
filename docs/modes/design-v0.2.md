@@ -1,6 +1,6 @@
 # Design mode v0.2: face targets and the operation tool
 
-Status: accepted (user decisions D10, D11, D13, D16; details confirmed with the v0.2 review, D18 of 2026-11-22) · Vision and v0.1: [design.md](design.md) · Plan side: [plan-v0.2.md](plan-v0.2.md) · Geometry: [geometry.md § Non-top faces](../architecture/geometry.md#non-top-faces-v02) · Library: [library.md](../architecture/library.md#tool) · UI rules: [ui.md § Design and plan controls (v0.2)](../conventions/ui.md#design-and-plan-controls-v02) · Tasks: [plans/v0.2.md](../plans/v0.2.md#2-design-faces-anchors-tools) · Terms: [glossary.md](../glossary.md)
+Status: implemented (v0.2 closed 2026-11-22; user decisions D10, D11, D13, D16; details confirmed with the v0.2 review, D18; visuals approved, D25 of 2026-11-22) · Vision and v0.1: [design.md](design.md) · Plan side: [plan-v0.2.md](plan-v0.2.md) · Geometry: [geometry.md § Non-top faces](../architecture/geometry.md#non-top-faces-v02) · Library: [library.md](../architecture/library.md#tool) · UI rules: [ui.md § Design and plan controls (v0.2)](../conventions/ui.md#design-and-plan-controls-v02) · Tasks: [plans/v0.2.md](../plans/v0.2.md#2-design-faces-anchors-tools) · Terms: [glossary.md](../glossary.md)
 
 This doc extends the [v0.1 operations](design.md#operations-v01) with three decisions. Everything not mentioned here stays as in design.md.
 
