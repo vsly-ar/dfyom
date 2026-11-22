@@ -6,11 +6,12 @@
 // "Import SVG…" (report: two shapes, Béziers fitted to arcs, the deviation); facing; the cavity
 // picked as a named shape on the facing floor, opened face-on in the Shape Editor where the back
 // wall is measured (a shape midpoint to a snapped point on the reference section), the corner fix
-// tried and the two sharp step corners filleted in the segment table (1 / 0.25 mm, as X1); a cable
-// notch built in the Shape Editor from an obround and a rectangle and rotated 90° on its pocket;
-// the outline profiled outside with four tabs (count, then a marker moved with the keys, then the
-// positions typed) and the library's Flat 12 locked; four drillings and an `on` groove along an
-// open path (built in the segment table) on the bottom. Plan: a machine from "New machine…", two
+// offered at the largest fitting radius and the two sharp step corners filleted in the segment
+// table (1 / 0.25 mm, as X1); a cable notch built in the Shape Editor from an obround and a
+// rectangle and rotated 90° on its pocket; the outline profiled outside with four tabs (count,
+// then a marker moved with the keys, then the positions typed) and the library's Flat 12 locked;
+// four drillings and an `on` groove along an open path (built in the segment table, picked while
+// Outside: the side turns On) on the bottom. Plan: a machine from "New machine…", two
 // setups (Bottom, Top), toolpaths, one program per setup, byte for byte X1's goldens; both setups
 // run on the virtual machine at Max; saved, the app closed and relaunched, the project opened:
 // shapes, placements, tabs, the tool lock and the setups unchanged, the programs exported again
@@ -320,11 +321,14 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
     shapeGroup.getByText('A sharp inside corner cannot be cut by a round tool.').first(),
   ).toBeVisible()
   await expect(shapeGroup.getByRole('button', { name: '1 more' })).toBeVisible()
-  // the fix writes the tool radius; the neighbouring segments of the fitted wall take at most 1
-  // and 0.25 mm, so the edit is refused and says so at the picker (it was silent before X2)
-  await shapeGroup.getByRole('button', { name: 'Round corners to ≥ 3 mm' }).click()
+  // the tool radius does not fit between the fitted wall's segments: the fix offers the largest
+  // radius the corner takes and says the warning stays (X2 finding). Not applied here: the step
+  // corners are filleted in the segment table below, as X1 does
   await expect(
-    shapeGroup.getByText(/^The fillet does not fit between the neighbouring/),
+    shapeGroup.getByRole('button', { name: /^Round corners to .+ \(largest that fits\)$/ }),
+  ).toBeVisible()
+  await expect(
+    shapeGroup.getByText(/less than the tool radius 3 mm: the warning stays\.$/).first(),
   ).toBeVisible()
 
   // ── Shape Editor face-on: measure the back wall, snapped to the reference section ────────
@@ -530,21 +534,23 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
 
   await addOperation(page, 'Add profile', 'Profile 2')
   await pickOn(page, /^Stock bottom/)
-  // an open path is cut on the line only: picked while the side is Outside, it is refused with
-  // the reason at the picker (FINDING (X2): no "Use side On" fix then, the side comes first)
+  // an open path is cut on the line only: picked while the side is Outside, the side turns On
+  // in the same step, with a notice (X2 finding: it was refused at the picker before)
   const picker = inspector.getByRole('combobox', { name: 'Shape', exact: true })
   await picker.click()
   await page
     .getByRole('listbox')
     .getByRole('option', { name: /^Label groove/ })
     .click()
-  await expect(inspector.getByText(/open path/i).first()).toBeVisible()
-  await expect(picker).toContainText('Rectangle')
-  await inspector
-    .getByRole('radiogroup', { name: 'Side' })
-    .getByRole('radio', { name: 'On line' })
-    .click()
-  await pickShape(page, 'Label groove')
+  await expect(picker).toContainText('Label groove')
+  await expect(
+    inspector.getByRole('radiogroup', { name: 'Side' }).getByRole('radio', { name: 'On line' }),
+  ).toBeChecked()
+  await expect(
+    page
+      .getByTestId('navigator')
+      .getByText('Side set to On line: an open path is cut on the line.'),
+  ).toBeVisible()
   // a blind 1 mm groove
   await setField(inspector, 'Position u', PLACE.groove[0])
   await setField(inspector, 'Position v', PLACE.groove[1])

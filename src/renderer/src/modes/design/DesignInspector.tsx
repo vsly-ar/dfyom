@@ -316,6 +316,19 @@ function OperationInspector({
               setErrors([])
               setSummary(undefined)
             })(),
+          pickOnLine: (shape) =>
+            void (async () => {
+              const r = await call(`design.${op.kind}.update`, {
+                partId: part.dto.id,
+                operationId: op.id,
+                shape,
+                side: 'on',
+              })
+              if (failed(r)) return
+              setErrors([])
+              setSummary(undefined)
+              ui.getState().setRemovedToast(t.picker.sideSetOn)
+            })(),
         }
       : undefined
   const ctx: OperationFieldsContext = {

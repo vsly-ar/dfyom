@@ -1,9 +1,10 @@
 // The shape picker of a pocket or profile (task U2): one Select with the inline kinds (Rectangle,
 // Circle) and the part's named shapes (mini outline, "Used by n"), plus "New shape…"; under it
 // "Edit shape" for a named shape or "Convert to shape" for an inline one, and the shape's issues
-// and corner warnings with "Round corners to ≥ r". The placement fields (rotation, mirror) follow
-// the anchor and position in the Shape group (OperationFields.tsx). A choice is one command on
-// `shape`.
+// and corner warnings with "Round corners to ≥ r" (or to the largest radius each corner takes).
+// The placement fields (rotation, mirror) follow the anchor and position in the Shape group
+// (OperationFields.tsx). A choice is one command on `shape`; an open path picked on a profile
+// cutting Outside or Inside sets side On in the same command, with a notice.
 // Doc: docs/conventions/ui.md#shape-in-the-operation-inspector, docs/modes/design-v0.3.md#dfm-checks-for-shapes
 import { useMemo } from 'react'
 import { resolveShape } from '../../../../core/design/shape'
@@ -21,8 +22,10 @@ import { quantityOf, updateArgs } from './model'
 import {
   cornerPoints,
   isCornerWarning,
+  isOpenNamed,
   NEW_SHAPE,
   pickerValue,
+  cornerRadiusFor,
   roundCornerFixes,
   shapeChoiceArgs,
   shapePlacement,
@@ -31,6 +34,7 @@ import {
 } from './operation-shape'
 import type { OperationFieldsContext } from './OperationFields'
 import { definitionNumbers } from './shape-model'
+import type { UnitSystem } from '../../../../core/project/document'
 
 const t = designMessages.inspector
 const p = t.picker
@@ -45,6 +49,8 @@ export interface ShapeActions {
   convert(): void
   /** Item updates of a named shape (the corner fix). */
   updateItems(shapeId: string, fixes: readonly ItemFix[]): void
+  /** A profile's open path picked while cutting Outside or Inside: shape and side On, one step. */
+  pickOnLine(shape: Record<string, unknown>): void
 }
 
 /** A named shape's loops resolved by the renderer's port (shape frame, mm). */
@@ -142,7 +148,16 @@ export function ShapePicker({
         : undefined
     const loops = id === undefined ? [] : (outlines.get(id) ?? [])
     const bounds = chainBounds(loops.flatMap((l) => l.elements))
-    ctx.send({ shape: shapeChoiceArgs(shape, choice, bounds, ctx.units) }, 'shape')
+    const args = shapeChoiceArgs(shape, choice, bounds, ctx.units)
+    // only On cuts an open path (`openNeedsOn`): switch the side with the pick, one undo step
+    const open =
+      op.kind === 'profile' &&
+      op.side !== 'on' &&
+      choice.startsWith('named:') &&
+      isOpenNamed(shapes.find((s) => s.id === id))
+    if (!open) return ctx.send({ shape: args }, 'shape')
+    if (actions) return actions.pickOnLine(args)
+    ctx.send({ shape: args, side: 'on' }, 'shape')
   }
 
   const options = [
@@ -167,26 +182,45 @@ export function ShapePicker({
     (loadedOp.kind === 'pocket' || loadedOp.kind === 'profile')
       ? shapePlacement(port, loadedOp.shape, ctx.part.loaded?.part.shapes)
       : undefined
-  const cornerFix = (w: DfmWarning): FieldMessage['fix'] | undefined => {
+  // the fix rounds each corner to the tool radius, or as far as the corner takes (X2 finding)
+  const cornerFix = (w: DfmWarning): { fix?: FieldMessage['fix']; note?: string } | undefined => {
     if (ctx.readOnly || !isCornerWarning(w) || w.suggestion === undefined) return undefined
     const r = w.suggestion.value
-    const label = p.roundCorners(lengthSource(r, ctx.units, 'up'))
-    if (shape.kind === 'rectangle') {
-      const source = lengthSource(
-        Math.max(r, quantityOf(shape.cornerRadius)?.canonical ?? 0),
-        ctx.units,
-        'up',
-      )
+    const tool = lengthSource(r, ctx.units, 'up')
+    const text = (plan: { limited: boolean; range: readonly [number, number] | undefined }) => {
+      const fit = plan.range && lengthRange(plan.range, ctx.units)
       return {
-        label,
-        onApply: () => ctx.send(updateArgs(op, 'shape.cornerRadius', source), 'shape.cornerRadius'),
+        label: plan.limited && fit !== undefined ? p.roundCornersFit(fit) : p.roundCorners(tool),
+        note: plan.limited && fit !== undefined ? p.roundFitSmaller(fit, tool) : undefined,
+      }
+    }
+    if (shape.kind === 'rectangle') {
+      const length = quantityOf(shape.length)?.canonical
+      const width = quantityOf(shape.width)?.canonical
+      const current = quantityOf(shape.cornerRadius)?.canonical ?? 0
+      const max = length !== undefined && width !== undefined ? Math.min(length, width) / 2 : r
+      const target = cornerRadiusFor(Math.max(r, current), max, ctx.units)
+      if (target === undefined || target.mm <= current + 1e-9)
+        return target?.limited ? { note: p.roundAtLargest(tool) } : undefined
+      const { label, note } = text({ limited: target.limited, range: [target.mm, target.mm] })
+      return {
+        fix: {
+          label,
+          onApply: () =>
+            ctx.send(updateArgs(op, 'shape.cornerRadius', target.source), 'shape.cornerRadius'),
+        },
+        ...(note === undefined ? {} : { note }),
       }
     }
     if (named === undefined || placement === undefined || actions === undefined) return undefined
     const points = cornerPoints(w).map((q) => unplacePoint(placement, q))
-    const fixes = roundCornerFixes(named, points, r, ctx.units)
-    if (fixes.length === 0) return undefined
-    return { label, onApply: () => actions.updateItems(named.id, fixes) }
+    const plan = roundCornerFixes(named, points, r, ctx.units)
+    if (plan.fixes.length === 0) return plan.limited ? { note: p.roundAtLargest(tool) } : undefined
+    const { label, note } = text(plan)
+    return {
+      fix: { label, onApply: () => actions.updateItems(named.id, plan.fixes) },
+      ...(note === undefined ? {} : { note }),
+    }
   }
   const messages: FieldMessage[] = [
     ...ctx.errors
@@ -201,15 +235,19 @@ export function ShapePicker({
           (shape.kind === 'named' || isCornerWarning(w) || isRotated(shape)),
       )
       .map((w, i): FieldMessage => {
-        const fix = cornerFix(w)
+        const corner = cornerFix(w)
+        const fix = corner?.fix
+        const base = dfmMessages.text(w, ctx.units, (id) => id)
         const noFix =
-          isCornerWarning(w) && fix === undefined && shape.kind === 'named' && !ctx.readOnly
+          isCornerWarning(w) && corner === undefined && shape.kind === 'named' && !ctx.readOnly
         return {
           id: `${w.code}:${i}`,
           severity: dfmMessages.tier(w),
           text: noFix
-            ? `${dfmMessages.text(w, ctx.units, (id) => id)} ${p.noRoundFix}`
-            : dfmMessages.text(w, ctx.units, (id) => id),
+            ? `${base} ${p.noRoundFix}`
+            : corner?.note !== undefined
+              ? `${base} ${corner.note}`
+              : base,
           ...(fix ? { fix } : {}),
         }
       }),
@@ -244,6 +282,13 @@ export function ShapePicker({
       ) : null}
     </>
   )
+}
+
+/** Radii as written by the fix: one value, or the smallest to the largest. */
+function lengthRange(range: readonly [number, number], units: UnitSystem): string {
+  const a = lengthSource(range[0], units, 'down')
+  const b = lengthSource(range[1], units, 'down')
+  return a === b ? a : `${a}–${b}`
 }
 
 /** A rectangle turned away from 0° (a general shape: its warnings name `shape`). */

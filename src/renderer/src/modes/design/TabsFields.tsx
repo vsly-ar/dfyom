@@ -2,7 +2,9 @@
 // positions (`tabs.positions`, design-v0.3.md#tabs-on-shapes) one field per tab ("Tab 2" at its
 // distance from the start point) with a remove action, "Add tab" (the middle of the largest gap)
 // and the note "Positions entered by you." with "Space evenly", which clears them. The keyboard
-// path of the viewport's tab markers. Every commit is one profile update.
+// path of the viewport's tab markers. Every commit is one profile update; an arrow-key run of a
+// marker still being applied ends first and the edit builds on the positions it left
+// (`tab-key-run.ts`, X2 finding).
 // Doc: docs/conventions/ui.md#tab-markers
 import type { OperationDTO } from '../../../../core/design/part.dto'
 import { designMessages } from '../../messages/design'
@@ -12,6 +14,7 @@ import { Icon, Button, FieldIcon, IconButton, QuantityInput, type FieldMessage }
 import styles from './Design.module.css'
 import { defaultUnit, quantityOf } from './model'
 import type { OperationFieldsContext } from './OperationFields'
+import { settleTabKeyRun } from './tab-key-run'
 import { newTabPosition, profileTabs } from './tabs-model'
 
 const t = designMessages.inspector
@@ -51,6 +54,12 @@ export function TabPositions({ ctx }: { ctx: OperationFieldsContext }): React.JS
     path: string,
     extra: Record<string, unknown> = {},
   ) => ctx.send({ tabs: { positions: next, ...extra } }, path)
+
+  /** The stored positions after any open key run of the markers has ended. */
+  const settled = async (): Promise<string[]> => {
+    const run = await settleTabKeyRun(op.id)
+    return run !== undefined ? [...run] : positionSources(op)
+  }
 
   const add = () => {
     if (tabs === undefined) return
@@ -102,11 +111,12 @@ export function TabPositions({ ctx }: { ctx: OperationFieldsContext }): React.JS
               illustration={<FieldIcon name="tabs" />}
               messages={errorsAt(path)}
               readOnly={ctx.readOnly}
-              onCommit={(next) => {
-                const all = positionSources(op)
-                all[i] = next.source
-                send(all, path)
-              }}
+              onCommit={(next) =>
+                void settled().then((all) => {
+                  all[i] = next.source
+                  send(all, path)
+                })
+              }
               onCancelGesture={ctx.cancelGesture}
             />
             {!ctx.readOnly ? (

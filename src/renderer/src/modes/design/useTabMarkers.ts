@@ -4,7 +4,9 @@
 // (`clampTab`); it is one gesture of `design.profile.update { tabs: { positions } }` steps at most
 // every 100 ms and on release, so it is one undo step. Count-spaced tabs become entered positions
 // with the first step. Escape cancels (`history.undo { gesture }`). Arrow keys on a focused
-// marker move it along the loop; a run of keys (ended 500 ms after the last) is one gesture.
+// marker move it along the loop; a run of keys (ended 500 ms after the last) is one gesture. A
+// position typed in the Tabs fields ends the run first (`tab-key-run.ts`), so its last step cannot
+// overwrite the typed value.
 // Task U3: a drag snaps to the loop's corners and side middles, else to the grid along the loop
 // (`snapAlong`); Alt or the "Snap" toggle off drags freely.
 // Doc: docs/conventions/ui.md#tab-markers, docs/modes/design-v0.3.md#tabs-on-shapes
@@ -24,6 +26,7 @@ import type { Vec3 } from '../../viewport/mesh'
 import type { DesignPart } from './model'
 import { operationFace } from './outline'
 import { clampTab, pointAlong, profileTabs, snapAlong, type ProfileTabs } from './tabs-model'
+import { registerTabKeyRun } from './tab-key-run'
 import { SHAPE_COMMIT_MS } from './useShapeDrag'
 import { useCommand } from './useDesign'
 
@@ -79,6 +82,8 @@ interface Gesture {
   pending: number | null
   lastSent: number
   sent: boolean
+  /** The positions of the last step applied (sources). */
+  lastSources: readonly string[] | undefined
   timer: ReturnType<typeof setTimeout> | undefined
   chain: Promise<void>
 }
@@ -127,7 +132,10 @@ export function useTabMarkers(
           { partId: part.dto.id, operationId: op.id, tabs: { positions: sources } },
           { gesture: g.id },
         )
-        if (r.ok) g.sent = true
+        if (r.ok) {
+          g.sent = true
+          g.lastSources = sources
+        }
       })
     },
     [call, part, op],
@@ -148,6 +156,7 @@ export function useTabMarkers(
         pending: null,
         lastSent: 0,
         sent: false,
+        lastSources: undefined,
         timer: undefined,
         chain: Promise.resolve(),
       }
@@ -171,6 +180,19 @@ export function useTabMarkers(
     keyRun.current = null
     flush(run.g)
     void run.g.chain.then(() => setPreview(null))
+  }, [flush])
+
+  // a typed position ends the run first: its pending step goes out now and the typed edit waits
+  // for the run's replies, building on the positions it left
+  const settleKeyRun = useCallback(async (): Promise<readonly string[] | undefined> => {
+    const run = keyRun.current
+    if (run === null) return undefined
+    clearTimeout(run.timer)
+    keyRun.current = null
+    flush(run.g)
+    await run.g.chain
+    setPreview(null)
+    return run.g.lastSources
   }, [flush])
 
   const onNudge = useCallback(
@@ -244,10 +266,18 @@ export function useTabMarkers(
   // a drag still open when the selection goes away is sent as it stands. Only on unmount: `flush`
   // changes with every reply of the gesture's own steps (the profile changed), and ending the
   // gesture then dropped the rest of a drag or key run (X2)
-  const latest = useRef({ flush, endKeyRun })
+  const latest = useRef({ flush, endKeyRun, settleKeyRun })
   useEffect(() => {
-    latest.current = { flush, endKeyRun }
-  }, [flush, endKeyRun])
+    latest.current = { flush, endKeyRun, settleKeyRun }
+  }, [flush, endKeyRun, settleKeyRun])
+  const profileId = op?.kind === 'profile' ? op.id : undefined
+  useEffect(
+    () =>
+      profileId === undefined
+        ? undefined
+        : registerTabKeyRun(profileId, () => latest.current.settleKeyRun()),
+    [profileId],
+  )
   useEffect(
     () => () => {
       const g = gesture.current
