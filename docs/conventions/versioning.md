@@ -13,6 +13,6 @@ The app version (`package.json` `version`) **bumps its patch number automaticall
 
 ## Notes
 
-- Minor/major bumps are manual: `npm version minor --no-git-tag-version`.
+- **Minor = last closed milestone** (D31, 2026-11-22): when a milestone `docs/plans/v0.N.md` closes, set the version to `0.N.0` in the closing commit (`npm version 0.N.0 --no-git-tag-version`), then reinstall the local app ([packaging.md](packaging.md)). Patches keep bumping automatically in between. v0.1 and v0.2 are closed, so the line is `0.2.x` until v0.3 closes. Major stays 0 until the developer ends pre-alpha.
 - If `package.json`/`package-lock.json` have **unstaged** changes, the hook aborts rather than staging them silently.
 - Escape hatch: `SKIP_VERSION_BUMP=1 git commit …` (e.g. for `--amend` of an already-bumped commit).
