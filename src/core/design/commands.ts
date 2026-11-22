@@ -176,9 +176,9 @@ const profileParams = {
 }
 
 const chamferParams = {
-  edgeOf: OperationIdSchema.describe('Earlier drilling or circle pocket whose mouth it bevels'),
-  diameter: Src.describe('At the face; default edge Ø + 1 mm / 1/32"'),
-  angle: Src.describe('Included, 60–120°; default 90°'),
+  edgeOf: OperationIdSchema.describe('Earlier drilling or circle pocket'),
+  diameter: Src.describe('Default edge Ø + 1 mm'),
+  angle: Src.describe('Default 90°'),
 }
 
 type ShapeArgs = z.output<typeof ShapeArg>
@@ -766,8 +766,13 @@ const chamferSpec: KindSpec<typeof chamferParams, Extract<Operation, { kind: 'ch
   },
 }
 
+/**
+ * `lean` (v0.4 chamfer, tools/list budget): no `tool` and `generalTolerance` args (the tool via
+ * `design.operation.tool.set` or Apply's auto choice, tolerances on the values themselves).
+ */
 function kindCommands<P extends z.ZodRawShape, O extends Operation>(
   spec: KindSpec<P, O>,
+  lean = false,
 ): AnyCommand[] {
   const label = KIND_LABEL[spec.kind]
   const lower = label.toLowerCase()
@@ -784,15 +789,17 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
   const add = defineCommand({
     kind: 'document',
     name: `design.${spec.kind}.add`,
-    summary: `Add a ${lower} operation at the end of the part; omitted parameters take defaults.`,
+    summary: lean
+      ? `Add a ${lower} at the end of the part.`
+      : `Add a ${lower} operation at the end of the part; omitted parameters take defaults.`,
     title: () => `Add ${lower}`,
     machine: false,
     args: z.object({
       ...PartArg,
       name: NameArg.optional(),
-      generalTolerance: ToleranceArg.optional(),
+      ...(lean ? {} : { generalTolerance: ToleranceArg.optional() }),
       ...addParams,
-      tool: ToolArg.optional(),
+      ...(lean ? {} : { tool: ToolArg.optional() }),
     }),
     result: z.object({
       operationId: OperationIdSchema,
@@ -848,13 +855,15 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
   const update = defineCommand({
     kind: 'document',
     name: `design.${spec.kind}.update`,
-    summary: `Change parameters of a ${lower} operation; dependent formulas are recalculated.`,
+    summary: lean
+      ? `Change a ${lower}.`
+      : `Change parameters of a ${lower} operation; dependent formulas are recalculated.`,
     title: () => `Update ${lower}`,
     machine: false,
     args: z.object({
       ...OpArg,
       name: NameArg.optional(),
-      generalTolerance: ToleranceArg.optional(),
+      ...(lean ? {} : { generalTolerance: ToleranceArg.optional() }),
       ...optionalParams,
     }),
     result: z.object({ warnings: Warnings }),
@@ -1262,11 +1271,16 @@ type AnyParamKey =
 export const OPERATION_UPDATE_ARGS = {
   name: NameArg.optional(),
   generalTolerance: ToleranceArg.optional(),
+  // equal names keep the last kind's schema; the chamfer adds only `angle` (its edge is not
+  // re-pointed from a plan, its `diameter` shares the drilling's)
   ...Object.fromEntries(
-    Object.values(KIND_SPECS).flatMap((spec) =>
-      Object.entries(spec.params).map(([k, schema]) => [k, (schema as z.ZodType).optional()]),
-    ),
+    Object.values(KIND_SPECS)
+      .filter((spec) => spec.kind !== 'chamfer')
+      .flatMap((spec) =>
+        Object.entries(spec.params).map(([k, schema]) => [k, (schema as z.ZodType).optional()]),
+      ),
   ),
+  angle: chamferParams.angle.optional(),
 } as unknown as {
   name: z.ZodOptional<typeof NameArg>
   generalTolerance: z.ZodOptional<typeof ToleranceArg>
@@ -1309,7 +1323,7 @@ export const DESIGN_COMMANDS: readonly AnyCommand[] = [
   ...kindCommands(pocketSpec),
   ...kindCommands(drillingSpec),
   ...kindCommands(profileSpec),
-  ...kindCommands(chamferSpec),
+  ...kindCommands(chamferSpec, true),
   operationRemove,
   operationMove,
   partEvaluate,

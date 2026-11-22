@@ -257,7 +257,8 @@ export const coneSlant = (inner: number, outer: number, angle: number): number =
  * whose angle equals the chamfer's within 0.5°, whose tip is smaller than the edge Ø, and that
  * either covers the chamfer Ø (plunged at the centre) or has a cutting edge (its cone's slant from
  * tip to DC) at least the chamfer's slant height (contoured). First failed rule, or undefined.
- * Reach is checked by the chamfer operation (task C2), which knows the depth below the face.
+ * One ring only: several rings are stepped clearing, not a chamfer pass (design-v0.4.md
+ * § Implementation (task C2)). Reach is checked by `toolFit`, which knows the depth below the face.
  */
 export function chamferFit(tool: DfmTool, c: ChamferFitInput): ToolUnfit | undefined {
   if (tool.type !== 'chamferMill' || tool.angle === undefined)

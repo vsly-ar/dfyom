@@ -243,7 +243,9 @@ function presetValue(preset: Option<CuttingPreset>, field: FeedField): Option<Re
 }
 
 /** The calculator's engagement: the strategy's (facing: its stepover, never an entered one). */
-function engagementOf(i: Pick<FeedsInput, 'kind' | 'tool' | 'helixPitch' | 'chamferDepth'>): Engagement {
+function engagementOf(
+  i: Pick<FeedsInput, 'kind' | 'tool' | 'helixPitch' | 'chamferDepth'>,
+): Engagement {
   const D = i.tool.diameter.canonical
   switch (i.kind) {
     case 'facing':

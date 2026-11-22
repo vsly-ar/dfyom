@@ -229,7 +229,11 @@ export function operationOutline(
       if (edge === undefined) return []
       const [cu, cv] = edge.center
       const d = op.diameter.canonical
-      const depth = chamferDepth({ edgeDiameter: edge.diameter, diameter: d, angle: op.angle.canonical })
+      const depth = chamferDepth({
+        edgeDiameter: edge.diameter,
+        diameter: d,
+        angle: op.angle.canonical,
+      })
       return place(face, [
         circleLoop(cu, cv, d / 2, face.w),
         circleLoop(cu, cv, edge.diameter / 2, face.w - depth),

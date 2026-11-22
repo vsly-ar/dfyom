@@ -173,6 +173,39 @@ describe('evaluatePart: edge cases', () => {
     if (f > 0) expect(e.surfaces).toContain('pocket1.floorFillet')
   })
 
+  it('a chamfer bevels the mouth of a hole: a cone ring of the analytic volume, one piece', () => {
+    // v0.4 C2: Ø6 through, Ø8 × 90° → 1 mm deep; the ring outside the hole is a frustum minus
+    // the hole's cylinder: π/3·(16 + 12 + 9) − 9π = 10π/3
+    const hole: OperationGeometry = {
+      kind: 'drilling',
+      id: 'drill1',
+      onZ: 0,
+      center: [20, 20],
+      diameter: 6,
+      bottom: { kind: 'through' },
+    }
+    const cone: OperationGeometry = {
+      kind: 'chamfer',
+      id: 'chamfer1',
+      onZ: 0,
+      center: [20, 20],
+      edgeOf: 'drill1',
+      edgeDiameter: 6,
+      diameter: 8,
+      angle: 90,
+    }
+    const drilled = evaluate(withOp(hole))
+    const e = evaluate({ stock: TEST_STOCK, operations: [hole, cone] })
+    expect(e.pieces).toBe(1)
+    expect(e.warnings).toEqual([])
+    expect(e.surfaces).toContain('chamfer1.cone')
+    expect(drilled.volume - e.volume).toBeCloseTo((10 * Math.PI) / 3, 0)
+    for (const c of centroids(e, 'chamfer1.cone')) {
+      expect(c[2]).toBeLessThanOrEqual(1e-6)
+      expect(c[2]).toBeGreaterThanOrEqual(-1 - 1e-3)
+    }
+  })
+
   it('drills with a 180° point have a flat bottom', () => {
     const e = evaluate(
       withOp({
