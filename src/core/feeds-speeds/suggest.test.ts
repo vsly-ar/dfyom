@@ -277,6 +277,20 @@ describe('suggestCutting: engagement and chip thinning', () => {
     expect(deep.display.unwrap().dCalc).toBe(12)
   })
 
+  it('chamfer: De below the smallest charted diameter scales that chip load by De / 3.175', () => {
+    // pointed 90° V-bit 0.5 mm deep: De = 1 mm (the ≤ 3 mm band is empty); fz = 0.02 · 1 / 3.175
+    const s = suggest({ tool: vbit(), engagement: { kind: 'chamfer', depth: 0.5 } })
+    expect(codes(s)).not.toContain('feeds.noData')
+    const n = (100 * 1000) / Math.PI
+    expect(value(s.spindleSpeed)).toBeCloseTo(n, 6)
+    expect(s.display.unwrap().fz).toBeCloseTo(0.02 / 3.175, 9)
+    expect(value(s.feedRate)).toBeCloseTo((n * 2 * 0.02) / 3.175, 6)
+    expect(s.feedRate.unwrap().derivation.map((d) => d.step)).toContain('fzScale')
+    // continuous at the charted diameter: De = 3.175 takes the chart value unscaled
+    const at = suggest({ tool: vbit(), engagement: { kind: 'chamfer', depth: 3.175 / 2 } })
+    expect(at.display.unwrap().fz).toBeCloseTo(0.02, 9)
+  })
+
   it('chamfer engagement needs a chamfer mill, and a chamfer mill a chamfer engagement', () => {
     expect(codes(suggest({ engagement: { kind: 'chamfer', depth: 1 } }))).toEqual(['feeds.noData'])
     expect(codes(suggest({ tool: vbit() }))).toEqual(['feeds.noData'])

@@ -35,6 +35,9 @@ const REPLACE: Readonly<Record<string, string>> = {
   Ø: 'dia',
   '⌀': 'dia',
   '°': ' deg',
+  // feature labels (plan-v0.4.md P-E): "Hole 1 · drill × 6" → "Hole 1 - drill x 6"
+  '·': '-',
+  '×': 'x',
 }
 
 /**

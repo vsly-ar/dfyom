@@ -83,6 +83,38 @@ function drillKey(op: Operation, direction: Direction): string | undefined {
   ].join('|')
 }
 
+/**
+ * Chamfers of one face direction with equal angle, diameter and edge diameter and an equal design
+ * tool field share one plan operation, as equal holes do (plan-v0.4.md P-B): the generator cuts
+ * them in nearest-neighbour order with one tool. `all` finds the edge.
+ */
+function chamferKey(
+  op: Operation,
+  direction: Direction,
+  byId: ReadonlyMap<string, Operation>,
+): string | undefined {
+  if (op.kind !== 'chamfer') return undefined
+  const edge = byId.get(op.edgeOf)
+  const edgeDiameter =
+    edge?.kind === 'drilling'
+      ? edge.diameter
+      : edge?.kind === 'pocket' && edge.shape.kind === 'circle'
+        ? edge.shape.diameter
+        : undefined
+  // not a round edge: the plan reports it; never grouped
+  if (edgeDiameter === undefined) return undefined
+  const q = (v: Quantity) => v.exact.toString()
+  return [
+    'chamfer',
+    direction,
+    q(op.angle),
+    q(op.diameter),
+    q(edgeDiameter),
+    op.tool.mapOr('-', (t) => stableJson(designToolToDTO(t))),
+    op.toolLocked ? 'locked' : 'auto',
+  ].join('|')
+}
+
 /** Groups of design operation ids, one per plan operation, in design order (`all`: the part's). */
 export function groupOperations(
   ops: readonly Operation[],
@@ -92,7 +124,8 @@ export function groupOperations(
   const groups: string[][] = []
   const byKey = new Map<string, string[]>()
   for (const op of ops) {
-    const key = drillKey(op, surfaceDirection(op.on, byId))
+    const direction = surfaceDirection(op.on, byId)
+    const key = drillKey(op, direction) ?? chamferKey(op, direction, byId)
     const existing = key === undefined ? undefined : byKey.get(key)
     if (existing !== undefined) existing.push(op.id)
     else {

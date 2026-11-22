@@ -110,7 +110,7 @@ describe('chamfer plan operations', () => {
   })
 
   it('a smaller mill contours one ring at the chamfer depth', async () => {
-    // a 10 mm chamfer: F10's De = 0 + 2 · 2 · tan 45° = 4 mm (the calculator has no band ≤ 3 mm)
+    // a 10 mm chamfer: F10's De = 0 + 2 · 2 · tan 45° = 4 mm
     const t = await setup({ diameter: '10' })
     await t.assign(t.tools.cm6)
     expect(t.errors()).toEqual([])
@@ -140,6 +140,17 @@ describe('chamfer plan operations', () => {
         )
       ).issues.map((i) => i.rule),
     ).toEqual(['notForKind'])
+  })
+
+  it('a small contoured chamfer gets calculator feeds (De below the smallest charted diameter)', async () => {
+    // the default 7 mm chamfer on the 6 mm hole with a pointed 6 mm mill: De = 0 + 7 − 6 = 1 mm
+    const t = await setup()
+    await t.assign(t.tools.cm6)
+    expect(t.errors()).toEqual([])
+    expect(t.view().strategy).toMatchObject({ entry: 'contour' })
+    const v = t.view()
+    for (const f of ['spindleSpeed', 'feedRate', 'plungeRate'])
+      expect(v.feeds[f]?.source, f).toBe('calculator')
   })
 
   it('checks the chamfer mill: angle, tip, reach', async () => {

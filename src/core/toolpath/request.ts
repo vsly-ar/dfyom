@@ -135,7 +135,9 @@ function generateLocal(
  * One toolpath per hole (or chamfer), joined: passes concatenated (each starts and ends at
  * clearance), stats recomputed over all of them.
  */
-function joined<I extends GeneratorInput<unknown, unknown, { spindleSpeed: number }>>(
+function joined<
+  I extends GeneratorInput<{ readonly id: string }, unknown, { spindleSpeed: number }>,
+>(
   inputs: readonly I[],
   generate: (input: I, steps: Steps) => AppResult<Toolpath>,
   what: 'hole' | 'chamfer',
@@ -154,7 +156,8 @@ function joined<I extends GeneratorInput<unknown, unknown, { spindleSpeed: numbe
     if (step.isErr()) return Err(step.unwrapErr())
     const tp = generate(input, steps)
     if (tp.isErr()) return Err(tp.unwrapErr().withContext('generateRequest', { [what]: i }))
-    passes.push(...tp.unwrap().passes)
+    // each pass names its hole or chamfer (clone position comments, plan-v0.4.md P-E)
+    passes.push(...tp.unwrap().passes.map((p) => ({ ...p, operationId: input.operation.id })))
   }
   return Ok({
     planOperationId: first.planOperationId,
