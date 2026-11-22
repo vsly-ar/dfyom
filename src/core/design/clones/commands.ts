@@ -7,6 +7,7 @@
  */
 import type { Draft } from 'immer'
 import { z } from 'zod'
+import { AppError } from '../../../shared/errors/app-error'
 import { Err, fail, Ok, type AppResult } from '../../../shared/result'
 import {
   defineQuery,
@@ -24,7 +25,9 @@ import { featureKindCommands, type FeatureCommandSpec } from '../feature-command
 import { FeatureIdSchema } from '../feature.dto'
 import { loadPart } from '../load'
 import { operationToDTO } from '../operation'
+import { ShapeIdSchema } from '../shape.dto'
 import { SurfaceTable } from '../surfaces'
+import { parseWith } from '../../../shared/parse'
 import {
   CLONE_ROW_MAX,
   CLONE_ROWS_MAX,
@@ -33,77 +36,68 @@ import {
   ClonesSourceSchema,
   expandClones,
   featurePath,
-  ROW_FIELDS,
+  mapRow,
   rowIssues,
   sourceFace,
   sourceIssues,
   sourceOperations,
   type CloneRow,
-  type CloneRowKind,
   type Clones,
 } from './clones'
 
 const count = z.number().int().min(1).max(CLONE_ROW_MAX)
-const Skip = z
-  .array(z.number().int().min(0))
-  .max(CLONE_ROW_MAX)
-  .describe('Point indices (0-based) left out; numbers stay')
+const skip = z.array(z.number().int().min(0)).max(CLONE_ROW_MAX).optional()
 
+// Field meanings live in one description on `rows` (tools/list budget, llm-api.md § Implementation).
 const RowArg = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('grid'), cols: count, rows: count, du: Src, dv: Src, skip }),
+  z.object({ kind: z.literal('offset'), count, du: Src, dv: Src, skip }),
+  z.object({ kind: z.literal('polar'), count, angle: Src, distance: Src, skip }),
+  z.object({ kind: z.literal('arc'), radius: Src, angle: Src, arc: Src, step: Src, skip }),
+  z.object({ kind: z.literal('point'), u: Src, v: Src, skip }),
   z.object({
-    kind: z.literal('grid'),
-    cols: count,
-    rows: count,
-    du: Src,
-    dv: Src,
-    skip: Skip.optional(),
+    kind: z.literal('along'),
+    shapeId: ShapeIdSchema,
+    start: Src.optional(),
+    spacing: Src.optional(),
+    count: count.optional(),
+    skip,
   }),
-  z.object({ kind: z.literal('offset'), count, du: Src, dv: Src, skip: Skip.optional() }),
-  z.object({
-    kind: z.literal('polar'),
-    count,
-    angle: Src.describe('From +u, CCW'),
-    distance: Src,
-    skip: Skip.optional(),
-  }),
-  z.object({
-    kind: z.literal('arc'),
-    radius: Src,
-    angle: Src.describe('Centre direction from the reference point'),
-    arc: Src.describe('±360°, + = CCW'),
-    step: Src,
-    skip: Skip.optional(),
-  }),
-  z.object({ kind: z.literal('point'), u: Src, v: Src, skip: Skip.optional() }),
 ])
 type RowArgs = z.output<typeof RowArg>
 
 const RowsArg = z
   .array(RowArg)
   .max(CLONE_ROWS_MAX)
-  .describe('Path rows from the source; each moves the reference point to its last position')
+  .describe(
+    'From the source, each row from the last position of the one before. polar: angle from +u CCW. arc: centre radius away at angle, sweep arc (±360°, + CCW) every step. point: absolute u v. along: a one-item shape with its start on that position; from arc length start (0), every spacing or count evenly. skip: 0-based point indices left out, numbers kept.',
+  )
 
 const params = {
   source: ClonesSourceSchema.describe('Existing operations, or one feature'),
   rows: RowsArg,
 }
 
+/**
+ * `source` and `rows` as the update and preview tools show them: their full schemas are on
+ * design.clones.add only and are checked in `run` (tools/list budget, llm-api.md § Implementation).
+ */
+const AS_ADD = {
+  source: z.looseObject({}).describe('As design.clones.add'),
+  rows: z.array(z.looseObject({})).max(CLONE_ROWS_MAX).describe('As design.clones.add'),
+}
+
 function parseRow(f: Fields, r: RowArgs, i: number): CloneRow {
-  const rec = r as unknown as Record<string, unknown>
-  const out: Record<string, unknown> = { kind: r.kind }
-  const fields = ROW_FIELDS[r.kind as CloneRowKind]
-  for (const [k, kind] of Object.entries(fields.q))
-    out[k] = f.q(`rows.${i}.${k}`, kind, rec[k] as string)
-  for (const k of fields.n) out[k] = rec[k]
-  if (r.skip !== undefined && r.skip.length > 0)
-    out['skip'] = [...new Set(r.skip)].sort((a, b) => a - b)
-  return out as unknown as CloneRow
+  return mapRow<string, unknown>(r, (src, k, kind) =>
+    f.q(`rows.${i}.${k}`, kind, src),
+  ) as unknown as CloneRow
 }
 
 export const clonesSpec: FeatureCommandSpec<typeof params, Clones> = {
   ...clonesKindSpec,
   params,
   required: ['source', 'rows'],
+  updateParams: AS_ADD,
   onArg: false,
   addSummary: 'Clone operations or a feature along a path; instances go right after the source.',
   build: (a, prev, { f, id, name, before, on }) => {
@@ -140,7 +134,13 @@ export function followClones(draft: Draft<ProjectDoc>, ctx: CommandContext): App
     const features = draft.parts[partId]!.features
     if (features === undefined || !features.some((f) => f.kind === 'clones')) continue
     const loaded = loadPart(draft as ProjectDoc, partId, where)
-    if (loaded.isErr()) return loaded
+    if (loaded.isErr()) {
+      // an edit a Clones cannot follow (a shape an `along` row reads, F6) is the expansion's own
+      // refusal, not a corrupt part
+      const e = loaded.unwrapErr()
+      const c = e.cause
+      return Err(c instanceof AppError && c.code === 'model.invariant' ? c.withContext(where) : e)
+    }
     const l = loaded.unwrap()
     let ops = l.part.operations
     let changed = false
@@ -159,6 +159,7 @@ export function followClones(draft: Draft<ProjectDoc>, ctx: CommandContext): App
         stock: l.stock,
         before: ops.slice(0, span.ownedStart),
         ownedId: (role) => ownedOperationId(c.id, role),
+        shapes: l.dto.shapes ?? [],
       })
       if (expanded.isErr()) return Err(expanded.unwrapErr().withContext(where, { featureId: c.id }))
       const prevBlock = ops.slice(span.ownedStart, span.end)
@@ -221,11 +222,12 @@ const UVOut = z.tuple([z.number(), z.number()])
 const clonesPreview = defineQuery({
   name: 'design.clones.preview',
   summary: 'Clone positions, numbers and warnings of a Clones feature or a draft; changes nothing.',
+  // the draft's source and rows are checked in `run`: their full schemas are on design.clones.add
   args: z.object({
     ...PartArg,
     featureId: FeatureIdSchema.optional().describe('Absent: a draft from source and rows'),
-    source: ClonesSourceSchema.optional(),
-    rows: RowsArg.optional(),
+    source: AS_ADD.source.optional(),
+    rows: AS_ADD.rows.optional(),
   }),
   result: z.object({
     on: z.string(),
@@ -260,8 +262,15 @@ const clonesPreview = defineQuery({
         ],
         where,
       })
-    const source = args.source ?? prev?.source
-    if (source === undefined || (args.rows === undefined && prev === undefined))
+    const given = parseWith(
+      z.object({ source: ClonesSourceSchema.optional(), rows: RowsArg.optional() }),
+      { source: args.source, rows: args.rows },
+      where,
+    )
+    if (given.isErr()) return given
+    const draftArgs = given.unwrap()
+    const source = draftArgs.source ?? prev?.source
+    if (source === undefined || (draftArgs.rows === undefined && prev === undefined))
       return fail('input.malformed', 'a draft needs source and rows', {
         issues: [
           { path: ['source'], rule: 'required', message: 'give featureId or source and rows' },
@@ -269,7 +278,7 @@ const clonesPreview = defineQuery({
         where,
       })
     const f = new Fields(l.units, SurfaceTable.build(ops, l.stock).resolver(ops.length))
-    const rows = args.rows?.map((r, i) => parseRow(f, r, i)) ?? prev!.rows
+    const rows = draftArgs.rows?.map((r, i) => parseRow(f, r, i)) ?? prev!.rows
     const parsed = f.done()
     if (parsed.isErr()) return Err(parsed.unwrapErr().withContext(where))
     const draft: Clones = {
@@ -280,9 +289,10 @@ const clonesPreview = defineQuery({
       source,
       rows,
     }
-    const issues = [...rowIssues(rows), ...sourceIssues(draft, ops, l.features)]
+    const shapes = l.dto.shapes ?? []
+    const issues = [...rowIssues(rows, shapes), ...sourceIssues(draft, ops, l.features)]
     if (issues.length > 0) return invalid(issues, where)
-    const path = featurePath(draft, ops)
+    const path = featurePath(draft, ops, shapes)
     const uv = (p: { u: number; v: number }): [number, number] => [p.u, p.v]
     return Ok({
       on: draft.on,
@@ -296,7 +306,7 @@ const clonesPreview = defineQuery({
           ...(p.number === undefined ? {} : { n: p.number }),
         })),
       })),
-      warnings: clonesWarnings(draft, ops, l.stock, l.units),
+      warnings: clonesWarnings(draft, ops, l.stock, l.units, shapes),
     })
   },
 })

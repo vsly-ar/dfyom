@@ -46,7 +46,7 @@ import {
   type ShapeOp,
   type ShapeItemDTO,
 } from './shape.dto'
-import { operationsUsingShape } from './shape-users'
+import { featuresUsingShape, operationsUsingShape } from './shape-users'
 import { SurfaceTable } from './surfaces'
 import { ABSOLUTE_PATH } from './reference-commands'
 import { svgShapeItems } from './shape-import'
@@ -399,17 +399,31 @@ const shapeRemove = defineCommand({
     const index = findShape(shapes, args.shapeId, where)
     if (index.isErr()) return index
     const users = operationsUsingShape(l.dto, args.shapeId)
-    if (users.length > 0)
-      return fail('design.referenced', `${args.shapeId} is used by ${users.join(', ')}`, {
-        issues: users.map((id) => ({
-          path: ['operations', id, 'shape'],
-          rule: 'referenced',
-          message: `uses ${args.shapeId}`,
-          params: { operationId: id, shapeId: args.shapeId },
-        })),
-        where,
-        data: { dependants: users },
-      })
+    // Clones whose `along` row follows the shape (F6)
+    const features = featuresUsingShape(l.dto, args.shapeId)
+    if (users.length + features.length > 0)
+      return fail(
+        'design.referenced',
+        `${args.shapeId} is used by ${[...users, ...features].join(', ')}`,
+        {
+          issues: [
+            ...users.map((id) => ({
+              path: ['operations', id, 'shape'],
+              rule: 'referenced',
+              message: `uses ${args.shapeId}`,
+              params: { operationId: id, shapeId: args.shapeId },
+            })),
+            ...features.map((id) => ({
+              path: ['features', id, 'rows'],
+              rule: 'referenced',
+              message: `clones along ${args.shapeId}`,
+              params: { featureId: id, shapeId: args.shapeId },
+            })),
+          ],
+          where,
+          data: { dependants: [...users, ...features] },
+        },
+      )
     const list = draftShapes(draft, args.partId)
     list.splice(index.unwrap(), 1)
     if (list.length === 0) delete draft.parts[args.partId]!.shapes

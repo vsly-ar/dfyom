@@ -1,7 +1,9 @@
 // The clone path (v0.4 F5), ported from cnc-code's clones tests (src/core/composer/clones.test.ts)
 // with stable numbering. Spec: docs/modes/features.md#properties
 import { describe, expect, it } from 'vitest'
+import { arc as arcElement, line, type Element } from '../../geometry/2d/model'
 import {
+  alongStations,
   arcSteps,
   clonePath,
   keepSkips,
@@ -13,6 +15,7 @@ import {
 } from './path'
 
 const at = (u: number, v: number): UV => ({ u, v })
+const fullArc = (a: [number, number], c: [number, number]) => arcElement(a, a, c, true)
 const sk = (skip?: number[]) => (skip ? { skip } : {})
 const grid = (cols: number, rows: number, du: number, dv: number, skip?: number[]): PathRow => ({
   kind: 'grid',
@@ -287,5 +290,78 @@ describe('keepSkips', () => {
       arc(10, 0, 90, 30, [2]),
     )
     expect(keepSkips(offset(3, 1, 0, [0]), polar(3, 0, 1, [1]))).toEqual(polar(3, 0, 1))
+  })
+})
+
+describe('along rows (F6)', () => {
+  // an L of 30 then 20 mm, starting at (100, 100) in its shape frame
+  const L = {
+    elements: [line([100, 100], [130, 100]), line([130, 100], [130, 120])],
+    closed: false,
+  }
+  // a Ø20 circle, counter-clockwise from its rightmost point (circumference 20π)
+  const circle = { elements: [fullArc([10, 0], [0, 0])], closed: true }
+  const along = (
+    chain: { elements: Element[]; closed: boolean } | undefined,
+    by: { spacing?: number; count?: number; start?: number },
+    skip?: number[],
+  ): PathRow => ({ kind: 'along', chain, start: by.start ?? 0, ...by, ...sk(skip) })
+  const uv = (p: { at: UV }) => [p.at.u, p.at.v]
+
+  it('places the chain with its start on the reference point, every spacing to the end', () => {
+    const p = clonePath(at(5, 5), [along(L, { spacing: 10 })])
+    const [row] = p.rows
+    // 0 is the reference point itself: the row's start, no number
+    expect(row!.points.map((x) => x.kind)).toEqual(['closes', ...Array(5).fill('clone')])
+    expect(row!.points.map(uv)).toEqual([
+      [5, 5],
+      [15, 5],
+      [25, 5],
+      [35, 5],
+      [35, 15],
+      [35, 25],
+    ])
+    expect(p.instances.map((i) => i.number)).toEqual([1, 2, 3, 4, 5, 6])
+    expect(row!.end).toEqual(at(35, 25))
+  })
+
+  it('start moves the first position; count spreads positions to the end', () => {
+    const p = clonePath(at(0, 0), [along(L, { start: 10, count: 3 })])
+    expect(p.rows[0]!.points.map(uv)).toEqual([
+      [10, 0],
+      [30, 0],
+      [30, 20],
+    ])
+    expect(p.lastNumber).toBe(4)
+    expect(rowPointCount(along(L, { count: 1, start: 50 }))).toBe(1)
+  })
+
+  it('a closed loop goes once round from start; count includes the start position', () => {
+    const six = clonePath(at(0, 0), [along(circle, { count: 6 })])
+    expect(six.instances).toHaveLength(6)
+    expect(six.rows[0]!.points[0]!.kind).toBe('closes')
+    // 1/6 round the circle of radius 10 from its start, relative to the reference point
+    expect(uv(six.rows[0]!.points[1]!)).toEqual([-5, 8.66])
+    const spaced = clonePath(at(0, 0), [along(circle, { spacing: (20 * Math.PI) / 4, start: 1 })])
+    expect(spaced.rows[0]!.points).toHaveLength(4)
+    expect(spaced.rows[0]!.points.every((x) => x.kind === 'clone')).toBe(true)
+  })
+
+  it('the next row continues from the last position; skips keep numbers', () => {
+    const p = clonePath(at(0, 0), [along(L, { spacing: 25 }, [1]), offset(1, 0, 5)])
+    expect(p.rows[0]!.points.map((x) => [x.kind, x.number])).toEqual([
+      ['closes', undefined],
+      ['skipped', 2],
+      ['clone', 3],
+    ])
+    expect(uv(p.rows[1]!.points[0]!)).toEqual([30, 25])
+  })
+
+  it('no chain (an unknown shape) or neither spacing nor count gives no positions', () => {
+    expect(rowPointCount(along(undefined, { spacing: 5 }))).toBe(0)
+    expect(rowPointCount(along(L, {}))).toBe(0)
+    expect(alongStations({ kind: 'along', chain: L, start: 0, spacing: 1e-9 }).s).toHaveLength(
+      10_000,
+    )
   })
 })

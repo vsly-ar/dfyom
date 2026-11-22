@@ -19,6 +19,7 @@ import type { FeatureDTO } from './feature.dto'
 import { FEATURE_ROLE_PATTERN } from './feature.dto'
 import { ID_PREFIX, type FeatureOwner, type GeneralTolerance, type Operation } from './operation'
 import type { PartDTO } from './part.dto'
+import type { ShapeDTO } from './shape.dto'
 import { holeSpec } from './hole'
 import { clonesKindSpec } from './clones/clones'
 
@@ -64,6 +65,8 @@ export interface ExpansionContext {
   readonly before: readonly Operation[]
   /** The id the owned operation of `role` gets, for references inside the expansion. */
   ownedId(role: string): string
+  /** The part's named shape records (`PartDTO.shapes`, [] = none): Clones `along` rows follow them (F6). */
+  readonly shapes: readonly ShapeDTO[]
 }
 
 /**
@@ -129,6 +132,7 @@ export interface FeatureKindSpec<F extends FeatureBase = FeatureBase> {
     ops: readonly Operation[],
     prev: F | undefined,
     features: readonly LoadedFeature[],
+    shapes: readonly ShapeDTO[],
   ): AppResult<{ ops: readonly Operation[]; start: number; end: number }>
   /**
    * DFM warnings about the feature's whole span (Clones: `dfm.clone*`, which look at the source
@@ -139,6 +143,7 @@ export interface FeatureKindSpec<F extends FeatureBase = FeatureBase> {
     ops: readonly Operation[],
     stock: Stock,
     units: UnitSystem,
+    shapes: readonly ShapeDTO[],
   ): readonly DfmWarning[]
 }
 
@@ -415,6 +420,8 @@ export interface FrozenRecords {
   readonly features: readonly object[]
   readonly operations: readonly object[]
   readonly stock: object
+  /** The part's shape records (undefined: none), which Clones `along` rows read. */
+  readonly shapes: readonly object[] | undefined
 }
 
 function expansionOf(
@@ -424,13 +431,14 @@ function expansionOf(
   start: number,
   stock: Stock,
   units: UnitSystem,
+  shapes: readonly ShapeDTO[],
   record: object | undefined,
   records: FrozenRecords | undefined,
 ): AppResult<readonly string[]> {
   const key =
     records === undefined
       ? undefined
-      : [records.stock, units, ...records.operations.slice(0, start)]
+      : [records.stock, units, records.shapes, ...records.operations.slice(0, start)]
   const hit = record === undefined ? undefined : expansionCache.get(record)
   if (hit !== undefined && key !== undefined && sameKey(hit.key, key)) return Ok(hit.roles)
   return spec
@@ -439,6 +447,7 @@ function expansionOf(
       stock,
       before: ops.slice(0, start),
       ownedId: (role) => ownedOperationId(feature.id, role),
+      shapes,
     })
     .map((list) => {
       const roles = list.map((e) => `${e.role}:${e.operation.kind}`)
@@ -460,7 +469,7 @@ const sameKey = (a: readonly unknown[], b: readonly unknown[]) =>
  * the expansions are cached per feature record.
  */
 export function checkFeatures(
-  dto: Pick<PartDTO, 'features'>,
+  dto: Pick<PartDTO, 'features' | 'shapes'>,
   ops: readonly Operation[],
   stock: Stock,
   units: UnitSystem,
@@ -542,6 +551,7 @@ export function checkFeatures(
       at,
       stock,
       units,
+      dto.shapes ?? [],
       records?.features[i],
       records,
     )

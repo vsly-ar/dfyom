@@ -4,9 +4,13 @@
  * (clones.ts) converts its quantities. Ported from cnc-code's `clonePath` / `arcSteps` /
  * `keepSkips` (src/core/composer/clones.ts, the user's earlier project) with v0.4's changes:
  * `[u, v]` instead of `x, y`, stable numbering (a skipped or duplicate position keeps its
- * number), no cut at a maximum (the limit is a feature invariant).
+ * number), no cut at a maximum (the limit is a feature invariant). The `along` row (F6) is new:
+ * positions by arc length along a named shape's chain (cnc-code has no such row).
  * Doc: docs/modes/features.md#properties, docs/modes/design-v0.4.md#implementation-f5
  */
+
+import { chainLength, chainPointAt } from '../../geometry/2d/measure'
+import type { Element } from '../../geometry/2d/model'
 
 /** A point or a step in the face frame, mm. */
 export interface UV {
@@ -61,12 +65,33 @@ export interface PointRow extends RowBase {
   readonly u: number
   readonly v: number
 }
-/** One path row (F6 adds `along`). */
-export type PathRow = GridRow | OffsetRow | PolarRow | ArcRow | PointRow
+/** A named shape's chain in its shape frame (mm): elements in order, closed or open. */
+export interface AlongChain {
+  readonly elements: readonly Element[]
+  readonly closed: boolean
+}
+/**
+ * Positions along `chain`, laid with its start point on the reference point and its shape frame
+ * on the face frame (orientation kept), at arc lengths `start` + k · step from that start point:
+ * `spacing` apart (as many as fit), or `count` spread evenly (an open path from `start` to its
+ * end, a closed loop once round). A closed loop goes once round from `start`, wrapping past its
+ * end. A position on the reference point itself (arc length 0) is the row's start (`closes`).
+ * Exactly one of `spacing` and `count`; no chain (an unknown shape) gives no positions.
+ */
+export interface AlongRow extends RowBase {
+  readonly kind: 'along'
+  readonly chain: AlongChain | undefined
+  readonly start: number
+  readonly spacing?: number
+  readonly count?: number
+}
+/** One path row. */
+export type PathRow = GridRow | OffsetRow | PolarRow | ArcRow | PointRow | AlongRow
 
 /**
- * What became of one point: a clone; skipped (in the row's `skip`); a full circle's last point,
- * back on its start (`closes`: no number, no clone); or a duplicate of an earlier instance.
+ * What became of one point: a clone; skipped (in the row's `skip`); back on the row's start (a
+ * full circle's last point, an `along` position at arc length 0: `closes`, no number, no clone);
+ * or a duplicate of an earlier instance.
  */
 export type PathPointKind = 'clone' | 'skipped' | 'closes' | 'duplicate'
 
@@ -131,13 +156,12 @@ export function clonePath(origin: UV, rows: readonly PathRow[]): ClonePath {
   // the reference point relative to the origin, exact so a long chain adds up no rounding
   let ref: UV = { u: 0, v: 0 }
   for (const row of rows) {
-    const { points, end, order, arc } = rowPoints(row, ref, origin)
+    const { points, end, order, arc, closes } = rowPoints(row, ref, origin)
     const skip = new Set(row.skip)
-    const closes = arc !== undefined && Math.abs(Math.abs(arc.sweep) - 360) < 1e-6 ? end : -1
     const marked = points.map((p, k): PathPoint => {
       const offset = { u: round(p.u), v: round(p.v) }
       const at = { u: round(origin.u + p.u), v: round(origin.v + p.v) }
-      if (k === closes) return { at, offset, kind: 'closes' }
+      if (closes.includes(k)) return { at, offset, kind: 'closes' }
       const n = ++number
       if (skip.has(k)) {
         skipped.push(n)
@@ -181,16 +205,51 @@ export function rowPointCount(row: PathRow): number {
   return rowPoints(row, { u: 0, v: 0 }).points.length
 }
 
+/** Most stations an `along` row computes (the row limit, 100, is checked on them). */
+const ALONG_POINTS_MAX = 10_000
+
+/**
+ * The arc lengths of an `along` row's positions from its chain's start point, and the chain's
+ * length (mm); none without a chain or with neither `spacing` nor `count`.
+ */
+export function alongStations(row: AlongRow): { s: number[]; length: number } {
+  if (row.chain === undefined || row.chain.elements.length === 0) return { s: [], length: 0 }
+  const length = chainLength({ elements: [...row.chain.elements] })
+  const { closed } = row.chain
+  const s0 = row.start
+  let n = 0
+  let step = 0
+  if (row.spacing !== undefined && row.spacing > 0) {
+    step = row.spacing
+    // as many as fit: to the end of a path, once round a loop (not back onto `start`)
+    n = closed
+      ? Math.ceil((length - SAME_SPOT) / step - 1e-9)
+      : Math.floor((length - s0) / step + 1e-9) + 1
+  } else if (row.count !== undefined && row.count >= 1) {
+    n = row.count
+    step = closed ? length / n : n > 1 ? (length - s0) / (n - 1) : 0
+  }
+  // a hostile spacing never runs away: the row limit is checked on this count
+  n = Math.max(0, Math.min(n, ALONG_POINTS_MAX))
+  return { s: Array.from({ length: n }, (_, k) => s0 + k * step), length }
+}
+
 /**
  * A row's points from the reference point `r` (both relative to `origin`; a point row's
  * absolute `[u, v]` is made relative with it), in numbering order; the index of its last point;
- * the walking order; an arc's circle.
+ * the walking order; an arc's circle; the points back on the row's start (`closes`).
  */
 function rowPoints(
   row: PathRow,
   r: UV,
   origin: UV = { u: 0, v: 0 },
-): { points: UV[]; end: number; order: number[]; arc?: NonNullable<PathRowResult['arc']> } {
+): {
+  points: UV[]
+  end: number
+  order: number[]
+  arc?: NonNullable<PathRowResult['arc']>
+  closes: number[]
+} {
   const points: UV[] = []
   switch (row.kind) {
     case 'grid': {
@@ -204,7 +263,7 @@ function rowPoints(
           const c = j % 2 === 0 ? k : row.cols - 1 - k
           if (j > 0 || c > 0) order.push(j * row.cols + c - 1)
         }
-      return { points, end: order.at(-1) ?? -1, order }
+      return { points, end: order.at(-1) ?? -1, order, closes: [] }
     }
     case 'offset':
       for (let k = 1; k <= row.count; k++) points.push({ u: r.u + k * row.du, v: r.v + k * row.dv })
@@ -237,10 +296,29 @@ function rowPoints(
         end: points.length - 1,
         order: points.map((_, k) => k),
         arc: { centre: c, radius: row.radius, from: start, sweep },
+        closes: Math.abs(Math.abs(sweep) - 360) < 1e-6 ? [points.length - 1] : [],
       }
     }
+    case 'along': {
+      const { s, length } = alongStations(row)
+      const chain = row.chain
+      if (chain === undefined) break
+      const loop = { elements: [...chain.elements] }
+      const [a0, a1] = chain.elements[0]!.a
+      const closes: number[] = []
+      for (const [k, sk] of s.entries()) {
+        // the chain's start point lies on the reference point
+        const p = chainPointAt(loop, Math.min(sk, length), chain.closed)
+        const [x, y] = p.isOk() ? p.unwrap().point : [a0, a1]
+        points.push({ u: r.u + x - a0, v: r.v + y - a1 })
+        const wrapped = chain.closed && length > 0 ? sk % length : sk
+        if (Math.abs(wrapped) < SAME_SPOT || (chain.closed && length - wrapped < SAME_SPOT))
+          closes.push(k)
+      }
+      return { points, end: points.length - 1, order: points.map((_, k) => k), closes }
+    }
   }
-  return { points, end: points.length - 1, order: points.map((_, k) => k) }
+  return { points, end: points.length - 1, order: points.map((_, k) => k), closes: [] }
 }
 
 /**

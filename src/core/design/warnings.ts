@@ -16,6 +16,7 @@ import type { ProjectDoc, UnitSystem } from '../project/document'
 import { toGeometryInput } from './geometry-input'
 import { featureBlock, ownedOperationId, type LoadedFeature } from './feature'
 import type { Part } from './operation'
+import type { ShapeDTO } from './shape.dto'
 import { dfmTool, operationTools } from './tool-choice'
 
 /** `DfmWarning` as a result schema (defined with the other boundary schemas). */
@@ -41,6 +42,7 @@ export function partWarnings(
   snapshots: ProjectDoc['snapshots'] = {},
   region2d?: Region2dPort,
   features: readonly LoadedFeature[] = [],
+  shapes: readonly ShapeDTO[] = [],
 ): AppResult<DfmWarning[]> {
   return toGeometryInput(part, stock, region2d).map((input) =>
     insertInOrder(
@@ -51,7 +53,7 @@ export function partWarnings(
         operationTools: operationTools(part.operations, snapshots),
         ...(region2d !== undefined && { region2d }),
       }),
-      featureWarnings(part.operations, features, stock, units),
+      featureWarnings(part.operations, features, stock, units, shapes),
     ),
   )
 }
@@ -66,13 +68,14 @@ function featureWarnings(
   features: readonly LoadedFeature[],
   stock: Stock,
   units: UnitSystem,
+  shapes: readonly ShapeDTO[],
 ): DfmWarning[] {
   return features.flatMap(({ spec, feature }) => {
     const { start, end } = featureBlock(ops, feature.id)
     if (start === end) return []
     return [
       ...(spec.warnings?.(feature, (role) => ownedOperationId(feature.id, role)) ?? []),
-      ...(spec.spanWarnings?.(feature, ops, stock, units) ?? []),
+      ...(spec.spanWarnings?.(feature, ops, stock, units, shapes) ?? []),
     ]
   })
 }

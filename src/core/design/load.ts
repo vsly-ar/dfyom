@@ -89,7 +89,7 @@ function frozenRecords(dto: PartDTO, snap: object): FrozenRecords | undefined {
   const base = (isDraft(dto) ? current(dto) : dto) as PartDTO
   const stock = isDraft(snap) ? current(snap) : snap
   if (!Object.isFrozen(base) || !Object.isFrozen(stock)) return undefined
-  return { features: base.features ?? [], operations: base.operations, stock }
+  return { features: base.features ?? [], operations: base.operations, stock, shapes: base.shapes }
 }
 
 /** The geometry input of a part of the document (for evaluation, task 2.8/2.9). */

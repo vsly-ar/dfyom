@@ -414,6 +414,7 @@ export function withWarnings<R extends object>(
         loaded.snapshots,
         ctx.services.region2d,
         features,
+        loaded.dto.shapes,
       ),
     )
     .map((warnings) => ({ ...value, warnings }))
@@ -1166,7 +1167,7 @@ const warningList = defineQuery({
       return fail('internal.unexpected', 'no library service configured', { where })
     const loaded = loadPart(doc, args.partId, where)
     if (loaded.isErr()) return loaded
-    const { part, stock, units, features } = loaded.unwrap()
+    const { part, stock, units, features, dto } = loaded.unwrap()
     const state = ctx.services.evaluations?.state(doc, args.partId) ?? { status: 'pending' }
     const again = choosesAgain(doc.parts[args.partId]!, args.partId, ctx.apply?.pending() ?? [])
     return partWarnings(
@@ -1177,6 +1178,7 @@ const warningList = defineQuery({
       doc.snapshots,
       ctx.services.region2d,
       features,
+      dto.shapes,
     )
       .map((warnings) => {
         const r = warningsWithEvaluation(doc, args.partId, warnings, state)
