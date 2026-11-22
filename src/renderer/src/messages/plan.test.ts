@@ -33,6 +33,37 @@ describe('plan finding texts', () => {
     ).toContain('(the flat radius)')
   })
 
+  it('words the region-width tool checks in the user units (BL2)', () => {
+    const w = finding({
+      rule: 'openingSize',
+      message: 'tool diameter must fit the opening of profile1 (4.99 mm at its widest)',
+      params: { operation: 'profile1', diameter: 6, opening: 4.99 },
+    })
+    expect(findingText(w)).toBe(
+      'The tool (6.00 mm) is too wide for the opening: it is 4.99 mm at its narrowest.',
+    )
+    expect(findingText(w, 'inch')).not.toContain('mm')
+    expect(findingText(finding({ rule: 'pocketSize', params: { diameter: 6, pocket: 5 } }))).toBe(
+      'The tool (6.00 mm) is too wide for the pocket: it is 5.00 mm at its narrowest.',
+    )
+    // without the numbers, and for other rules, the core text stays
+    expect(findingText(finding({ rule: 'openingSize', message: 'too wide' }))).toBe('Too wide.')
+    expect(findingText(finding({}))).toBe('No tool assigned.')
+  })
+
+  it('names the openingSize check of a design tool (BL2)', () => {
+    expect(
+      findingText(
+        finding({
+          code: 'plan.designToolReplaced',
+          severity: 'info',
+          rule: 'openingSize',
+          params: { check: 'openingSize', designTool: 'Flat 6', tool: 'Flat 3' },
+        }),
+      ),
+    ).toBe('The design’s tool, the Flat 6, is too wide for the opening: Flat 3 is used instead.')
+  })
+
   it('words the design tool findings from their params', () => {
     expect(
       findingText(
