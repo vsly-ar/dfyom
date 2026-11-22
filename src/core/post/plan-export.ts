@@ -104,6 +104,7 @@ export async function exportPlan(
     doc,
     planId,
     setup.operations.map((o) => o.id),
+    services.region2d,
   )
   if (inputs.isErr()) return inputs
   const all = inputs.unwrap()

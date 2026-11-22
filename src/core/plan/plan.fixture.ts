@@ -83,9 +83,12 @@ export interface PlanSetup extends DesignSetup {
 }
 
 export async function planSetup(
-  opts: { part?: boolean; services?: Partial<Services> } = {},
+  opts: { part?: boolean; services?: Partial<Services>; stock?: object } = {},
 ): Promise<PlanSetup> {
-  const s = await designSetup(opts.services === undefined ? {} : { services: opts.services })
+  const s = await designSetup({
+    ...(opts.services === undefined ? {} : { services: opts.services }),
+    ...(opts.stock === undefined ? {} : { stock: opts.stock }),
+  })
   if (opts.part !== false) await buildTestPart(s)
   const add = async (kind: string, values: object) =>
     ((await s.run(`library.${kind}.add`, { values: libraryInput(values) })) as { id: string }).id

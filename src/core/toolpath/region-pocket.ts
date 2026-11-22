@@ -6,8 +6,8 @@
  * Doc: docs/modes/plan-v0.3.md#pocket-offset-clearing-of-a-region (spike: spikes/clearing/,
  * docs/research/s4-offset-clearing.md)
  *
- * Region-level only: the operation mapping (shape → placed region) arrives with K3; until then the
- * v0.1 rectangle/circle pockets keep `generatePocket`.
+ * General shapes reach it as `regionPocket` requests (K3's `pocketRegion`, the T1 wiring in
+ * inputs.ts); v0.1 rectangle/circle pockets keep `generatePocket` (plan-v0.3.md#wiring-t1-t2).
  */
 import { EPSILON, type Vec2, type Vec3 } from '../geometry/model'
 import { regionLoops, type Region } from '../geometry/2d/model'

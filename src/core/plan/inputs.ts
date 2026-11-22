@@ -12,6 +12,7 @@ import { fail, Ok, type AppResult, type Option } from '../../shared/result'
 import type { Operation, Part } from '../design/operation'
 import type { OperationKind } from '../design/part.dto'
 import type { Direction } from '../geometry/face'
+import type { Region2dPort } from '../geometry/2d/port'
 import type { Machine } from '../library/machine'
 import type { Stock } from '../library/stock'
 import type { Tool } from '../library/tool'
@@ -65,19 +66,21 @@ export interface PlanOperationInput {
 
 /**
  * Inputs of the listed plan operations (all by default), in machining order. Error findings of
- * the plan (`plan.check`, `plan.order`) for those operations fail with their code.
+ * the plan (`plan.check`, `plan.order`) for those operations fail with their code; with the 2D
+ * port these include the part's shape checks (`tabOutside`, …), as `plan.warning.list` shows them.
  */
 export function planOperationInputs(
   doc: ProjectDoc,
   planId: string,
   planOperationIds?: readonly string[],
+  port?: Region2dPort,
 ): AppResult<PlanOperationInput[]> {
   const where = 'planOperationInputs'
   const loaded = loadPlan(doc, planId, where)
   if (loaded.isErr()) return loaded
   const plan = loaded.unwrap()
   const wanted = (id: string) => planOperationIds === undefined || planOperationIds.includes(id)
-  const errors = planFindings(plan).filter(
+  const errors = planFindings(plan, undefined, port).filter(
     (f) => f.severity === 'error' && (f.planOperationId === undefined || wanted(f.planOperationId)),
   )
   const first = errors[0]

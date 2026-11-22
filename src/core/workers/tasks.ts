@@ -35,7 +35,7 @@ export const toolpathGenerate: WorkerTask<GeneratorRequest, Toolpath> = {
   input: GeneratorRequestSchema,
   output: ToolpathSchema,
   timeoutMs: 60_000,
-  run: (request, ctl) => generateRequest(request, ctl.steps),
+  run: (request, ctl) => generateRequest(request, ctl.steps, ctl.region2d),
 }
 
 const xyz = z.object({ x: z.number(), y: z.number(), z: z.number() })

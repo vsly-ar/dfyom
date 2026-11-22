@@ -203,7 +203,7 @@ Code: [shapes.md § Implementation (K3)](../architecture/shapes.md#implementatio
 - **Tabs.** `tabs.count` spaces tabs evenly with the first half a spacing after the start point, so no tab straddles it (v0.1 rectangles keep their wall-middle rule until G1/T2 build general tabs). `count` is ignored on an open path or a blind groove (no tabs built); positions there are refused.
 - **Convert** keeps `center`, `anchor` and a rectangle's `rotation`, so the placed box and the feature stay where they were; a pocket with a floor radius cannot be converted (`floorRadiusShape`), an operation that already places a shape neither (`alreadyNamed`).
 - **Surfaces.** A blind `on` groove adds no `profile.floor` surface yet (it is not an `on` target until G1 builds it).
-- **Not yet.** Until G1 the evaluation of a part with a named or rotated shape, a profile `on` or tab positions fails (`geometry.evaluation`, rule `shapeSolidLater`); toolpaths of such operations fail with `plan.check` (`shapeToolpathLater`) until T1/T2; their parameter DFM checks come with K4; the renderer shows no outline for them and the inspector edits their placement only (UI tasks).
+- **Not yet.** Until G1 the evaluation of a part with a named or rotated shape, a profile `on` or tab positions fails (`geometry.evaluation`, rule `shapeSolidLater`); their toolpaths come from the region generators (T1/T2, [plan-v0.3.md § Wiring](plan-v0.3.md#wiring-t1-t2)); their parameter DFM checks come with K4; the renderer shows no outline for them and the inspector edits their placement only (UI tasks).
 - **`tools/list`** after K3: 97.7 K of the 100 K budget ([llm-api.md](../architecture/llm-api.md#implementation-task-310)).
 
 ## Answered questions

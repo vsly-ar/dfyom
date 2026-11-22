@@ -21,6 +21,7 @@ import {
 import { orderFindings } from './order'
 import { setupFindings, setupStockSize } from './setups'
 import { checkPartFits } from './validity'
+import type { Region2dPort } from '../geometry/2d/port'
 import { designOperations, type LoadedPlan } from './plan'
 import { FEED_FIELDS, type PlanOperationDTO } from './plan.dto'
 import {
@@ -202,9 +203,16 @@ export function evaluateOperation(
 
 /**
  * Every finding of the plan: per operation, then order (across setups), then setups, then machine
- * (stock vs. travel per setup; `params.setupId` when the plan has several setups).
+ * (stock vs. travel per setup; `params.setupId` when the plan has several setups). With the 2D port
+ * the part's shape checks run as in the design (`tabOutside`, `tabsOverlap`, …); the shape
+ * findings that need geometry (`plan.restMaterial`, `plan.stepoverClamped`) are
+ * `shapeFindings`' (plan.warning.list only).
  */
-export function planFindings(plan: LoadedPlan, data?: readonly MaterialRow[]): PlanWarning[] {
+export function planFindings(
+  plan: LoadedPlan,
+  data?: readonly MaterialRow[],
+  port?: Region2dPort,
+): PlanWarning[] {
   const out: PlanWarning[] = []
   for (const op of plan.operations)
     out.push(...evaluateOperation(plan, op, undefined, data).findings)
@@ -212,7 +220,7 @@ export function planFindings(plan: LoadedPlan, data?: readonly MaterialRow[]): P
   out.push(...setupFindings(plan.setups, plan.part))
   const stock = plan.dto.snapshots.find((x) => x.id === plan.dto.design.part.stock)
   if (stock !== undefined) {
-    const fits = checkPartFits(plan.dto.design.part, stock, 'plan.warning.list')
+    const fits = checkPartFits(plan.dto.design.part, stock, 'plan.warning.list', port)
     if (fits.isErr())
       for (const issue of fits.unwrapErr().issues.length > 0
         ? fits.unwrapErr().issues

@@ -92,7 +92,12 @@ export const toolpathGenerateJob = defineCommand({
     const cache = cacheOf(ctx.services, where)
     if (cache.isErr()) return cache
     // plan.check / plan.order findings fail the job before any worker runs
-    const inputs = planOperationInputs(doc, args.planId, args.planOperationIds)
+    const inputs = planOperationInputs(
+      doc,
+      args.planId,
+      args.planOperationIds,
+      ctx.services.region2d,
+    )
     if (inputs.isErr()) return inputs
     const all = inputs.unwrap()
     const total = all.length
@@ -169,7 +174,12 @@ export const toolpathGet = defineQuery({
         where,
       })
     // inputs with error findings have no current toolpath: fall back to the last one
-    const inputs = planOperationInputs(doc, args.planId, [args.planOperationId])
+    const inputs = planOperationInputs(
+      doc,
+      args.planId,
+      [args.planOperationId],
+      ctx.services.region2d,
+    )
     const hash = inputs.isOk() ? inputs.unwrap()[0]?.inputHash : undefined
     const current = hash === undefined ? undefined : cache.unwrap().get(hash)
     const pendingApply = planPendingApply(plan, ctx.apply?.pending() ?? [])

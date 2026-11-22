@@ -192,10 +192,10 @@ export interface GeneratorInput<Op, Strategy, Cutting = CuttingParams> {
 }
 
 export type FacingOperation = Extract<OperationGeometry, { kind: 'facing' }>
-/** v0.1 contours only; region pockets go through generateRegionPocket (T1). */
+/** v0.1 contours only; general shapes go through generateRegionPocket (`regionPocket`). */
 export type PocketOperation = AnalyticOperation<'pocket'>
 export type DrillingOperation = Extract<OperationGeometry, { kind: 'drilling' }>
-/** v0.1 contours, `outside` / `inside` only; general loops come with T2. */
+/** v0.1 contours, `outside` / `inside` only; general loops go through generateRegionProfile. */
 export type ProfileOperation = AnalyticOperation<'profile'>
 
 export type FacingInput = GeneratorInput<FacingOperation, FacingStrategy>

@@ -22,6 +22,8 @@ export const PLAN_WARNING_CODES = [
   'plan.loosePiece',
   'plan.cutoutBeforeSetup',
   'plan.machine',
+  'plan.restMaterial',
+  'plan.stepoverClamped',
   'plan.designToolReplaced',
   'plan.designToolFailed',
   'plan.toolUnresolved',

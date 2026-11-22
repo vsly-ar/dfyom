@@ -24,8 +24,6 @@ import type { PlanApply } from '../commands/apply'
 import { OPERATION_UPDATE_ARGS, updateOperation, writeOperationList } from '../design/commands'
 import { fieldContext, partFromDTO } from '../design/operation'
 import { OperationIdSchema, PartIdSchema } from '../design/part.dto'
-import { checkReferences } from '../design/surfaces'
-import { checkOperations } from '../design/validate'
 import { ItemIdSchema, NAME_MAX, type LibraryItemKind } from '../library/item'
 import type { LibraryItem } from '../library/library-item'
 import { Tool } from '../library/tool'
@@ -68,7 +66,8 @@ import {
 } from './plan.dto'
 import { planPendingApply } from './pending'
 import { designChanged, hasPlanEdits, planStale } from './snapshot'
-import { sameValue } from './validity'
+import { shapeFindings } from './shape-findings'
+import { checkPart, sameValue } from './validity'
 import { StepSchema, stepToDTO } from '../feeds-speeds/commands'
 import { DEFAULT_RIGIDITY } from '../feeds-speeds/data'
 import { machineLimits } from '../feeds-speeds/suggest'
@@ -482,9 +481,7 @@ function refreshCopy(
     const loaded = loadPlanDTO(plan, units, where)
     if (loaded.isErr()) return loaded
     const { part, stock } = loaded.unwrap()
-    const ok = checkReferences(part.operations, stock).andThen(() =>
-      checkOperations(part.operations, stock),
-    )
+    const ok = checkPart(part, stock, ctx.services.region2d)
     if (ok.isErr()) return Err(ok.unwrapErr().withContext(where))
   }
   return Ok(true)
@@ -539,7 +536,7 @@ const designOperationRevert = defineCommand({
       .array(OperationIdSchema)
       .describe('Design operations whose plan-only edits were reverted (empty: none had any)'),
   }),
-  run(draft, args) {
+  run(draft, args, ctx) {
     const where = 'plan.design.operation.revert'
     const loaded = loadedFor(draft, args.planId, where)
     if (loaded.isErr()) return loaded
@@ -559,9 +556,7 @@ const designOperationRevert = defineCommand({
     // the plan's stock copy may have changed since the snapshot: the reverted part must fit it
     const part = partFromDTO(design.part)
     if (part.isErr()) return Err(part.unwrapErr().withContext(where))
-    const ok = checkReferences(part.unwrap().operations, l.stock).andThen(() =>
-      checkOperations(part.unwrap().operations, l.stock),
-    )
+    const ok = checkPart(part.unwrap(), l.stock, ctx.services.region2d)
     if (ok.isErr()) return Err(ok.unwrapErr().withContext(where))
     const target = draft.plans[args.planId]!.design.part.operations
     for (const id of reverted) {
@@ -1485,7 +1480,10 @@ const warningList = defineQuery({
     const loaded = loadPlanDTO(dto.unwrap(), doc.unitSystem, where)
     const findings: PlanWarning[] = loaded.isOk()
       ? [
-          ...planFindings(loaded.unwrap()),
+          ...planFindings(loaded.unwrap(), undefined, ctx.services.region2d),
+          ...(ctx.services.region2d === undefined
+            ? []
+            : shapeFindings(loaded.unwrap(), ctx.services.region2d)),
           ...designToolFindings(loaded.unwrap(), libraryTools(ctx.services)),
         ]
       : [
