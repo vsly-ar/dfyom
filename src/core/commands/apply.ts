@@ -7,7 +7,7 @@
  */
 import { z } from 'zod'
 import { fail, Ok } from '../../shared/result'
-import type { OperationDTO, PartDTO } from '../design/part.dto'
+import { DesignToolDtoSchema, type OperationDTO, type PartDTO } from '../design/part.dto'
 import { sameValue } from '../plan/validity'
 import type { ProjectDoc } from '../project/document'
 import type { Source } from './context'
@@ -172,8 +172,8 @@ export function applyTitle(changes: number): string {
 export const ToolChangeSchema = z.object({
   partId: z.string(),
   operationId: z.string(),
-  from: z.unknown().describe('The tool before Apply'),
-  to: z.unknown().describe('The tool after Apply'),
+  from: DesignToolDtoSchema.nullable().describe('The tool before Apply; null: none chosen yet'),
+  to: DesignToolDtoSchema.describe('The tool after Apply'),
   reason: z.string().describe('Why the old tool was replaced (its failed fit rule)'),
 })
 export type ToolChange = z.output<typeof ToolChangeSchema>

@@ -21,6 +21,7 @@ import {
   type StockGeometry,
 } from './model'
 import { inradius, slotCoversOpening } from './operations'
+import { reachDepth, toolFit } from './tool-fit'
 
 /** A library tool as the DFM rules see it (mm). */
 export interface DfmTool {
@@ -32,11 +33,23 @@ export interface DfmTool {
   readonly reach?: number
 }
 
+/** The operation's own tool (its design tool field, docs/modes/design-v0.2.md#dfm-with-the-tool). */
+export interface OperationTool {
+  /** A generalized tool has no `reach` (no lengths). */
+  readonly tool: DfmTool
+  readonly generalized: boolean
+  readonly locked: boolean
+  /** "6 mm flat end mill" or the library tool's name, for messages. */
+  readonly label: string
+}
+
 export interface ParameterCheckOptions {
   /** The whole tool library, not a chosen machine. */
   readonly tools: readonly DfmTool[]
   /** Picks the thresholds that differ per unit system (facing: 3 mm / 1/8″). */
   readonly unitSystem: 'metric' | 'inch'
+  /** Each operation's tool by operation id; absent = none chosen yet (no own-tool rules). */
+  readonly operationTools?: Readonly<Record<string, OperationTool>>
 }
 
 /** A tool matches a nominal size within this (mm): a drill's diameter, a bull-nose radius. */
@@ -97,20 +110,86 @@ export function parameterChecks(
   options: ParameterCheckOptions,
 ): DfmWarning[] {
   const lib = library(options.tools)
+  const notInLibrary = new Set<string>()
+  const tools = options.operationTools ?? {}
   const perOperation = input.operations.flatMap((op): DfmWarning[] => {
     const stock = localStock(directionOf(op), input.stock)
+    const own = Object.hasOwn(tools, op.id) ? tools[op.id] : undefined
+    const tool = own === undefined ? [] : ownTool(op, own, stock, lib, options, notInLibrary)
     switch (op.kind) {
       case 'facing':
-        return facing(op, options.unitSystem)
+        return [...facing(op, options.unitSystem), ...tool]
       case 'pocket':
-        return [...pocket(op, lib), ...reach(op, stock, lib)]
+        return [...pocket(op, lib), ...reach(op, stock, lib, own), ...tool]
       case 'drilling':
-        return [...drilling(op, stock, lib), ...reach(op, stock, lib)]
+        return [...drilling(op, stock, lib), ...reach(op, stock, lib, own), ...tool]
       case 'profile':
-        return [...profile(op, stock, lib, options.unitSystem), ...reach(op, stock, lib)]
+        return [
+          ...profile(op, stock, lib, options.unitSystem),
+          ...reach(op, stock, lib, own),
+          ...tool,
+        ]
     }
   })
   return [...perOperation, ...setups(input)]
+}
+
+/** The library tools of a generalized tool's type and size (RE for a bull nose) within 0.01 mm. */
+function matching(t: DfmTool, lib: Library): DfmTool[] {
+  const near = (a: number | undefined, b: number | undefined) =>
+    Math.abs((a ?? 0) - (b ?? 0)) <= TOOL_MATCH_TOLERANCE
+  return lib.tools.filter(
+    (l) =>
+      l.type === t.type &&
+      near(l.diameter, t.diameter) &&
+      (t.type !== 'bullNoseEndMill' || near(l.cornerRadius, t.cornerRadius)),
+  )
+}
+
+/**
+ * Rules against the operation's own tool: `dfm.toolUnfit` (the failed fit rule) and, for a
+ * generalized tool, `dfm.toolNotInLibrary` (with an empty library once per distinct tool).
+ */
+function ownTool(
+  op: OperationGeometry,
+  own: OperationTool,
+  stock: StockGeometry,
+  lib: Library,
+  options: ParameterCheckOptions,
+  notInLibrary: Set<string>,
+): DfmWarning[] {
+  const out: DfmWarning[] = []
+  const unfit = toolFit(own.tool, op, stock, options.unitSystem)
+  if (unfit !== undefined)
+    out.push(
+      warning(
+        'dfm.toolUnfit',
+        op,
+        'tool',
+        `the ${own.label} does not fit: ${unfit.detail}` +
+          (own.locked ? ' – unlock or pick another tool' : ''),
+        { rule: unfit.rule, locked: own.locked, tool: own.label },
+        unfit.need === undefined ? {} : { suggestion: unfit.need },
+      ),
+    )
+  if (own.generalized && matching(own.tool, lib).length === 0) {
+    const t = own.tool
+    const key = `${t.type}:${t.diameter}:${t.cornerRadius ?? ''}`
+    if (!lib.empty || !notInLibrary.has(key)) {
+      notInLibrary.add(key)
+      out.push(
+        warning(
+          'dfm.toolNotInLibrary',
+          op,
+          'tool',
+          `Plan needs a ${own.label}; add one to the library`,
+          { tool: own.label, type: t.type, diameter: t.diameter },
+          { severity: 'info' },
+        ),
+      )
+    }
+  }
+  return out
 }
 
 const directionOf = (op: OperationGeometry): Direction => op.direction ?? '+z'
@@ -168,33 +247,37 @@ function candidates(op: Op<'pocket'> | Op<'drilling'> | Op<'profile'>, lib: Libr
 
 /**
  * `dfm.reach` (warning): the depth from the stock's outer face of the operation's direction to
- * its deepest point exceeds the reach of every library tool that could make it (none with a
- * reach: skipped). Until the operation tool field (task A4) this is the "generalized" reading of
- * design-v0.2.md: the longest of the matching library tools.
+ * its deepest point exceeds the reach of the operation's tool: a specific tool's own reach
+ * (`stickout`, else `fluteLength`), for a generalized one the longest of the matching library
+ * tools (none: skipped). Without a tool yet (before the first Apply) the longest reach of the
+ * library tools that could make it.
  */
 function reach(
   op: Op<'pocket'> | Op<'drilling'> | Op<'profile'>,
   stock: StockGeometry,
   lib: Library,
+  own: OperationTool | undefined,
 ): DfmWarning[] {
-  const reaches = candidates(op, lib).flatMap((t) => (t.reach === undefined ? [] : [t.reach]))
+  const pool =
+    own === undefined ? candidates(op, lib) : own.generalized ? matching(own.tool, lib) : [own.tool]
+  const reaches = pool.flatMap((t) => (t.reach === undefined ? [] : [t.reach]))
   if (reaches.length === 0) return []
   const longest = Math.max(...reaches)
-  const [depth, parameter] =
-    op.kind === 'profile'
-      ? [stock.thickness, 'on']
-      : op.kind === 'pocket'
-        ? [op.depth - op.onZ, 'depth']
-        : op.bottom.kind === 'through'
-          ? [stock.thickness, 'on']
-          : [op.bottom.depth - op.onZ, 'depth']
+  const [depth, parameter] = reachDepth(op, stock)
   if (depth <= longest + EPSILON) return []
+  const specific = own !== undefined && !own.generalized
+  const what =
+    own === undefined
+      ? 'no tool in the library reaches'
+      : specific
+        ? `the ${own.label} does not reach`
+        : `no ${own.label} in the library reaches`
   return [
     warning(
       'dfm.reach',
       op,
       parameter,
-      `no tool in the library reaches ${mm(depth)} deep from the stock face (longest reach ` +
+      `${what} ${mm(depth)} deep from the stock face (${specific ? '' : 'longest '}reach ` +
         `${mm(longest)})`,
       { depth, reach: longest },
     ),

@@ -16,6 +16,8 @@ export interface LoadedPart {
   readonly part: Part
   readonly stock: Stock
   readonly units: UnitSystem
+  /** The document's snapshots (specific tools of the tool field resolve here); absent: none. */
+  readonly snapshots?: ProjectDoc['snapshots']
 }
 
 export function unknownPart(partId: string, where: string): AppResult<never> {
@@ -43,7 +45,24 @@ export function loadPart(doc: ProjectDoc, partId: string, where: string): AppRes
       : fail('input.malformed', 'part stock is not a stock snapshot', { where }),
   )
   if (stock.isErr()) return Err(stock.unwrapErr())
-  return Ok({ dto, part: part.unwrap(), stock: stock.unwrap(), units: doc.unitSystem })
+  // a specific tool's snapshot must be there, like the stock's
+  for (const op of part.unwrap().operations) {
+    const t = op.tool.isSome() ? op.tool.unwrap() : undefined
+    if (t?.kind !== 'specific') continue
+    const s = Object.hasOwn(doc.snapshots, t.snapshotId) ? doc.snapshots[t.snapshotId] : undefined
+    if (s?.kind !== 'tool')
+      return fail('input.malformed', `tool snapshot ${t.snapshotId} of ${op.id} is missing`, {
+        where,
+        data: { partId, operationId: op.id, snapshotId: t.snapshotId },
+      })
+  }
+  return Ok({
+    dto,
+    part: part.unwrap(),
+    stock: stock.unwrap(),
+    units: doc.unitSystem,
+    snapshots: doc.snapshots,
+  })
 }
 
 /** The geometry input of a part of the document (for evaluation, task 2.8/2.9). */

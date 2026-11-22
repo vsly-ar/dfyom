@@ -192,6 +192,9 @@ export const DFM_WARNING_CODES = [
   // face access checks (v0.2): docs/modes/design-v0.2.md#dfm-access-checks
   'dfm.reach',
   'dfm.setups',
+  // the operation's own tool (v0.2): docs/modes/design-v0.2.md#dfm-with-the-tool
+  'dfm.toolUnfit',
+  'dfm.toolNotInLibrary',
 ] as const
 export type DfmWarningCode = (typeof DFM_WARNING_CODES)[number]
 

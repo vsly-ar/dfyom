@@ -19,6 +19,7 @@ import type {
   PartDTO,
   ShapeDTO,
 } from './part.dto'
+import { designToolFromDTO, designToolToDTO, type DesignTool } from './tool'
 
 export type Point = readonly [Quantity, Quantity]
 
@@ -46,6 +47,10 @@ interface Common {
    * direction comes from the surface table; positions are `[u, v]` in its face frame.
    */
   readonly on: string
+  /** Tool field (design-v0.2.md § Operation tool); None = auto, nothing chosen yet. */
+  readonly tool: Option<DesignTool>
+  /** Set by any user choice of the tool; false = auto. */
+  readonly toolLocked: boolean
 }
 
 /** `on` of a facing or profile whose record has none (v0.1). */
@@ -276,7 +281,20 @@ export function generalToleranceToDTO(t: GeneralTolerance): GeneralToleranceDTO 
 export function operationFromDTO(dto: OperationDTO): AppResult<Operation> {
   const tol = generalToleranceFromDTO(dto.generalTolerance)
   if (tol.isErr()) return tol
-  const base = { id: dto.id, name: dto.name, generalTolerance: tol.unwrap() }
+  const tool =
+    dto.tool === undefined
+      ? Ok<Option<DesignTool>>(None)
+      : designToolFromDTO(dto.tool)
+          .map((t): Option<DesignTool> => Some(t))
+          .mapErr((e) => e.prefixIssues('tool'))
+  if (tool.isErr()) return tool
+  const base = {
+    id: dto.id,
+    name: dto.name,
+    generalTolerance: tol.unwrap(),
+    tool: tool.unwrap(),
+    toolLocked: dto.toolLocked === true,
+  }
   switch (dto.kind) {
     case 'facing':
       return q(dto.depth, 'depth').map((depth) => ({
@@ -354,7 +372,14 @@ const stockFaceOn = (op: Operation) => (op.on === DEFAULT_STOCK_FACE ? {} : { on
 /** Quantity kinds are guaranteed by the parameter's field, so the kind-specific DTO type holds. */
 export function operationToDTO(op: Operation): OperationDTO {
   const tol = generalToleranceToDTO(op.generalTolerance)
-  const base = { id: op.id, name: op.name, ...(tol === undefined ? {} : { generalTolerance: tol }) }
+  const base = {
+    id: op.id,
+    name: op.name,
+    ...(tol === undefined ? {} : { generalTolerance: tol }),
+    // left out while auto with nothing chosen, so v0.1 records stay byte-identical
+    ...(op.tool.isSome() ? { tool: designToolToDTO(op.tool.unwrap()) } : {}),
+    ...(op.toolLocked ? { toolLocked: true as const } : {}),
+  }
   switch (op.kind) {
     case 'facing':
       return {
