@@ -31,6 +31,7 @@ import {
 } from './model'
 import { inradius, slotCoversOpening } from './operations'
 import { profileChain } from './outline'
+import { SHAPE_CHORD_BUDGET, shapeChords } from './shape-solids'
 import { FIT_SLACK, shapeMeasure, type ShapeMeasure } from './shape-measure'
 import { reachDepth, toolFit } from './tool-fit'
 
@@ -141,9 +142,11 @@ export function parameterChecks(
         : undefined
     const tool =
       own === undefined ? [] : ownTool(op, own, stock, lib, options, notInLibrary, measure)
-    // G1 hook: `dfm.shapeHeavy` (info, a general shape's chords over the evaluation budget,
-    // docs/architecture/shapes.md#decisions-d29) joins the general pocket and profile rules here
-    // once G1's chord flattening exists
+    // `dfm.shapeHeavy`: a general shape's chords over the evaluation budget (G1, D29)
+    const heavy =
+      (op.kind === 'pocket' || op.kind === 'profile') && !isAnalyticOperation(op)
+        ? shapeHeavy(op)
+        : []
     switch (op.kind) {
       case 'facing':
         return [...facing(op, options.unitSystem), ...tool]
@@ -151,6 +154,7 @@ export function parameterChecks(
         return [
           ...(isAnalyticOperation(op) ? pocket(op, lib) : shapePocket(op, stock, lib, measure)),
           ...reach(op, stock, lib, own, measure),
+          ...heavy,
           ...tool,
         ]
       case 'drilling':
@@ -163,11 +167,32 @@ export function parameterChecks(
               ? []
               : shapeProfile(op, stock, lib, options.unitSystem, measure)),
           ...reach(op, stock, lib, own),
+          ...heavy,
           ...tool,
         ]
     }
   })
   return [...perOperation, ...setups(input)]
+}
+
+/**
+ * `dfm.shapeHeavy` (info): the shape's chords at the chord tolerance exceed what one evaluation
+ * builds within its budget (≈ 3 000 chords per 50 ms), so the part updates more slowly
+ * (docs/architecture/shapes.md#implementation-g1, #decisions-d29).
+ */
+function shapeHeavy(op: Op<'pocket'> | Op<'profile'>): DfmWarning[] {
+  const chords = shapeChords(op)
+  if (chords <= SHAPE_CHORD_BUDGET) return []
+  return [
+    warning(
+      'dfm.shapeHeavy',
+      op,
+      'shape',
+      `the shape has ${chords} segments after flattening, so the part updates more slowly`,
+      { chords, budget: SHAPE_CHORD_BUDGET },
+      { severity: 'info' },
+    ),
+  ]
 }
 
 /** The library tools of a generalized tool's type and size (RE for a bull nose) within 0.01 mm. */

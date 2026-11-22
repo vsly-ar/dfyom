@@ -204,6 +204,8 @@ export class SurfaceTable {
             below(op.on, op.depth.unwrap(), 'bottom', false)
           break
         case 'profile':
+          // a blind `on` groove has a floor (G1, docs/architecture/shapes.md#implementation-g1)
+          if (op.depth.isSome()) below(op.on, op.depth.unwrap(), 'floor', true)
           on(op.on).map((e) => {
             // measured up from the opposite stock face along the profile's normal
             const d = e.direction

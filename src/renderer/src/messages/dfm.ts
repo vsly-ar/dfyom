@@ -112,6 +112,8 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
       : `The ${String(p['tool'])} leaves material uncut in a neck narrower than the tool.`,
   'dfm.shapeOutsideFace': (p, L) =>
     `The shape reaches ${L(p['by'])} outside the stock face at the ${list(((p['sides'] as readonly string[] | undefined) ?? []).map((s) => SIDE[s] ?? s))}.`,
+  'dfm.shapeHeavy': (p) =>
+    `This shape has ${num(p['chords'])} segments after flattening, so the part updates more slowly.`,
 }
 
 /** What a tool type rule asks for (`params.needs` of `dfm.toolUnfit`). */

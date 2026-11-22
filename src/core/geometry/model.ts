@@ -17,6 +17,12 @@ export const OVERSHOOT = 1
 export const EPSILON_VOLUME = 1e-3
 /** Maximum sagitta of every flattened arc and fillet step in v0.1 (mm). */
 export const CHORD_TOLERANCE = 0.01
+/**
+ * Largest tile edge of planar faces that later cuts cross (the stock faces, facing floors), mm:
+ * each tile has its own face id, so Manifold re-triangulates small polygons
+ * (docs/architecture/shapes.md#geometry-for-shape-operations, spike S3).
+ */
+export const FACE_TILE = 15
 
 export type Vec2 = readonly [number, number]
 export type Vec3 = readonly [number, number, number]
@@ -248,6 +254,7 @@ export const DFM_WARNING_CODES = [
   // shapes (v0.3): docs/modes/design-v0.3.md#dfm-checks-for-shapes
   'dfm.restMaterial',
   'dfm.shapeOutsideFace',
+  'dfm.shapeHeavy',
 ] as const
 export type DfmWarningCode = (typeof DFM_WARNING_CODES)[number]
 
