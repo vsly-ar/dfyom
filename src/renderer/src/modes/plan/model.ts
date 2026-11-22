@@ -71,6 +71,8 @@ export function planPart(doc: ProjectDoc, plan: PlanDTO): DesignPart {
         part: r.unwrap().part,
         stock: r.unwrap().stock,
         units: doc.unitSystem,
+        // Plan sees operations only (docs/modes/features.md#plan)
+        features: [],
       }
     : undefined
   const part: DesignPart = {

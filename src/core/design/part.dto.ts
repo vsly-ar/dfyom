@@ -6,12 +6,17 @@
 import { z } from 'zod'
 import { NAME_MAX, quantityDto } from '../library/item'
 import { TOOL_TYPES } from '../library/tool.dto'
+import { FeatureDtoSchema, FeatureIdSchema, FeatureRoleSchema } from './feature.dto'
 import { ShapeDtoSchema, ShapeIdSchema } from './shape.dto'
 
 const length = () => quantityDto('length')
 
-/** `facing1`, `pocket2`, `drill3`, `profile1`: kind prefix + number, immutable. */
-export const OPERATION_ID_PATTERN = /^(facing|pocket|drill|profile)[1-9][0-9]{0,5}$/
+/**
+ * `facing1`, `pocket2`, `drill3`, `profile1`: kind prefix + number, immutable; an owned operation
+ * of a feature (v0.4) is `<featureId>_<role>` (`hole1_drill`, `clones1_3_pocket2`,
+ * docs/modes/features.md#expansion-and-owned-operations A3). Kept short: it is in many schemas.
+ */
+export const OPERATION_ID_PATTERN = /^[a-z][a-zA-Z]*[1-9]\d*(_\w+)*$/
 
 export const OperationIdSchema = z
   .string()
@@ -104,6 +109,9 @@ const common = {
   tool: DesignToolDtoSchema.optional(),
   /** Set by any user choice of the tool; absent = auto. */
   toolLocked: z.literal(true).optional(),
+  /** Owned operations of a feature (v0.4): both or neither (features.md#persistence-high-level). */
+  featureId: FeatureIdSchema.optional(),
+  featureRole: FeatureRoleSchema.optional(),
 }
 
 export const DRILL_BOTTOMS = ['through', 'flat', 'drillPoint'] as const
@@ -180,6 +188,8 @@ export const PartDtoSchema = z.object({
   generalTolerance: GeneralToleranceDtoSchema.optional(),
   /** Named shapes (v0.3, docs/modes/design-v0.3.md#persistence); absent = none. */
   shapes: z.array(ShapeDtoSchema).optional().describe('Named shapes operations place'),
+  /** Features (v0.4, docs/modes/features.md#persistence-high-level); absent = none. */
+  features: z.array(FeatureDtoSchema).optional().describe('Features owning operations'),
   operations: z.array(OperationDtoSchema).describe('Design order; references go to earlier ones'),
 })
 export type PartDTO = z.output<typeof PartDtoSchema>

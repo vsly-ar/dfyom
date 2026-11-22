@@ -6,6 +6,7 @@ import type { ErrorCode } from '../../shared/errors/codes'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
 import { createDispatcher, type Dispatcher } from '../commands/dispatcher'
 import type { Services } from '../commands/context'
+import type { AnyCommand } from '../commands/define'
 import { inProcessWorkers } from '../commands/jobs'
 import { createAppRegistry } from '../commands/registry'
 import { fakeClock, fakeIds, uiSource } from '../commands/testing'
@@ -50,11 +51,13 @@ export async function designSetup(
     /** Library stock values instead of the test block. */
     stock?: object
     services?: Partial<Services>
+    /** Extra commands in the registry (a test feature kind). */
+    commands?: readonly AnyCommand[]
   } = {},
 ): Promise<DesignSetup> {
   const library = expectOk(await Library.open(createMemoryLibraryStorage()))
   const d = createDispatcher({
-    registry: expectOk(createAppRegistry()),
+    registry: expectOk(createAppRegistry(opts.commands)),
     doc: newProjectDoc({ name: 'Bracket', unitSystem: opts.units ?? 'mm' }),
     ids: fakeIds(),
     clock: fakeClock(Date.UTC(2026, 10, 17, 10)),

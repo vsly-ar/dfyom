@@ -45,6 +45,7 @@ import {
   isGeneralShape,
   shapesOf,
   type Anchor,
+  type FeatureOwner,
   type FieldKind,
   type GeneralTolerance,
   type Operation,
@@ -83,15 +84,16 @@ import { requirePort, shapeFromDTO as namedShapeFromDTO } from './shape'
 import { SHAPE_ID_PATTERN } from './shape.dto'
 
 import { designChangeTargets } from './shape-users'
+import { featureOwnedError, ownerOf } from './feature'
 
 // ── arg schemas ───────────────────────────────────────────────────────────────────────────
 
-const Src = z
+export const Src = z
   .string()
   .min(1)
   .max(256)
   .describe('Literal (`1/16"`, `6 ±0.05`) or formula (`facing1.floor.z - 2`)')
-const PointArg = z.tuple([Src, Src]).describe('[u, v] in the face frame')
+export const PointArg = z.tuple([Src, Src]).describe('[u, v] in the face frame')
 const RotationArg = Src.optional().describe('CCW about the anchor point; default 0°')
 const ShapeArg = z
   .discriminatedUnion('kind', [
@@ -113,23 +115,23 @@ const ShapeArg = z
     }),
   ])
   .describe('center = anchor point; named places a part shape. Replaces the shape on update')
-const AnchorArg = AnchorDtoSchema.describe(
+export const AnchorArg = AnchorDtoSchema.describe(
   'Placed-box point center gives; default centre; update keeps the feature in place',
 )
-const ToleranceArg = z
+export const ToleranceArg = z
   .object({
     length: Src.nullable().optional().describe('Lengths, e.g. "0.1 mm"; null clears'),
     angle: Src.nullable().optional().describe('Angles, e.g. "0.5°"; null clears'),
   })
   .describe('General ± for untoleranced values')
-const NameArg = z.string().min(1).max(NAME_MAX).describe('Display label')
-const OnArg = SurfaceIdSchema.describe(
+export const NameArg = z.string().min(1).max(NAME_MAX).describe('Display label')
+export const OnArg = SurfaceIdSchema.describe(
   'Start face: stock.top/bottom/side[0..3] or an earlier floor / tab top; default last top facing floor',
 )
 const StockFaceArg = SurfaceIdSchema.describe(
   'Stock face it starts from: stock.top (default), stock.bottom or stock.side[0..3]',
 )
-const PartArg = { partId: PartIdSchema }
+export const PartArg = { partId: PartIdSchema }
 const OpArg = { partId: PartIdSchema, operationId: OperationIdSchema }
 const TabsArg = z.object({
   count: Src.optional().describe('Whole number ≥ 0; default 4'),
@@ -177,16 +179,16 @@ type ShapeArgs = z.output<typeof ShapeArg>
  * Where an edit's named shapes come from: the part's shape DTOs (the draft's, so a shape command
  * sees its own edit) and the 2D port that places them (`services.region2d`).
  */
-interface ShapeEnv {
+export interface ShapeEnv {
   readonly dto: Pick<PartDTO, 'shapes'>
   readonly port?: Region2dPort
 }
 
-const shapeEnv = (loaded: LoadedPart, port: Region2dPort | undefined): ShapeEnv => ({
+export const shapeEnv = (loaded: LoadedPart, port: Region2dPort | undefined): ShapeEnv => ({
   dto: loaded.dto,
   ...(port === undefined ? {} : { port }),
 })
-type ToleranceArgs = z.output<typeof ToleranceArg>
+export type ToleranceArgs = z.output<typeof ToleranceArg>
 
 // ── field parsing ─────────────────────────────────────────────────────────────────────────
 
@@ -196,7 +198,7 @@ const toPath = (path: string) => path.split('.').map((s) => (/^\d+$/.test(s) ? N
  * Parses the sources of one operation against its resolver, collecting every error. Values it
  * returns are only meaningful once `done()` is Ok.
  */
-class Fields {
+export class Fields {
   private readonly results: AppResult<unknown>[] = []
   constructor(
     readonly units: UnitSystem,
@@ -403,13 +405,17 @@ export function withWarnings<R extends object>(
 
 // ── part editing ──────────────────────────────────────────────────────────────────────────
 
-const NO_TOLERANCE: GeneralTolerance = { length: None, angle: None }
+export const NO_TOLERANCE: GeneralTolerance = { length: None, angle: None }
 
-function load(draft: Draft<ProjectDoc>, partId: string, where: string): AppResult<LoadedPart> {
+export function load(
+  draft: Draft<ProjectDoc>,
+  partId: string,
+  where: string,
+): AppResult<LoadedPart> {
   return loadPart(draft as ProjectDoc, partId, where)
 }
 
-function invalid(issues: Issue[], where: string): AppResult<never> {
+export function invalid(issues: Issue[], where: string): AppResult<never> {
   return fail('model.invariant', `${issues.length} invalid value(s)`, { issues, where })
 }
 
@@ -418,7 +424,7 @@ function invalid(issues: Issue[], where: string): AppResult<never> {
  * recalculation of its dependants (`recalc`), constraints of the others. Named shapes are loaded
  * from `env` and placed for their checks (validate.ts `ShapeFacts`).
  */
-function settle(
+export function settle(
   ops: readonly Operation[],
   stock: Stock,
   edited: string | undefined,
@@ -477,7 +483,7 @@ function nextNumber(part: Part, kind: OperationKind): number {
 }
 
 /** design.md: the last top facing's floor, else `stock.top`. */
-function defaultOn(ops: readonly Operation[]): string {
+export function defaultOn(ops: readonly Operation[]): string {
   const facing = ops.findLast((o) => o.kind === 'facing' && o.on === STOCK_TOP)
   return facing === undefined ? STOCK_TOP : `${facing.id}.floor`
 }
@@ -500,6 +506,26 @@ export function findOperation(
   return Ok(index)
 }
 
+/**
+ * `design.featureOwned` when the operation at `index` is owned by a feature (A4, A5): its geometry,
+ * order and life go through the feature.
+ */
+export function refuseOwned(loaded: LoadedPart, index: number, where: string): AppResult<void> {
+  const op = loaded.part.operations[index]!
+  if (op.owner.isNone()) return Ok(undefined)
+  const owner = op.owner.unwrap()
+  const name = loaded.dto.features?.find((f) => f.id === owner.featureId)?.name ?? owner.featureId
+  return featureOwnedError(op.id, owner, name, where)
+}
+
+/** Args an owned operation still takes on `design.<kind>.update` (A4: kept per operation). */
+const OWNED_EDITABLE: ReadonlySet<string> = new Set([
+  'partId',
+  'operationId',
+  'name',
+  'generalTolerance',
+])
+
 interface BuildContext {
   readonly f: Fields
   readonly id: string
@@ -518,7 +544,7 @@ interface KindSpec<P extends z.ZodRawShape, O extends Operation> {
     args: Partial<z.output<z.ZodObject<P>>>,
     prev: O | undefined,
     c: BuildContext,
-  ): Omit<O, 'tool' | 'toolLocked'>
+  ): Omit<O, 'tool' | 'toolLocked' | 'owner'>
 }
 
 type Args<P extends z.ZodRawShape> = Partial<z.output<z.ZodObject<P>>>
@@ -691,6 +717,7 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
         generalTolerance,
         tool: tool.unwrap(),
         toolLocked: args.tool !== undefined,
+        owner: None as Option<FeatureOwner>,
       } as O
       const settled = settle([...ops, op], stock, id, false, where, env)
       if (settled.isErr()) return settled
@@ -722,6 +749,16 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
       const args = rawArgs as { partId: string; operationId: string } & UpdateArgs<P>
       const loaded = load(draft, args.partId, where)
       if (loaded.isErr()) return loaded
+      // an owned operation keeps only its name and tolerance; its geometry is the feature's
+      const geometric = Object.keys(args).some(
+        (k) => !OWNED_EDITABLE.has(k) && (args as Record<string, unknown>)[k] !== undefined,
+      )
+      if (geometric) {
+        const found = findOperation(loaded.unwrap().part, args.operationId, spec.kind, where)
+        if (found.isErr()) return found
+        const owned = refuseOwned(loaded.unwrap(), found.unwrap(), where)
+        if (owned.isErr()) return owned
+      }
       const settled = applyUpdate(
         spec,
         loaded.unwrap(),
@@ -769,6 +806,7 @@ function applyUpdate<P extends z.ZodRawShape, O extends Operation>(
     generalTolerance: f.tolerance(args.generalTolerance, prev.generalTolerance),
     tool: prev.tool,
     toolLocked: prev.toolLocked,
+    owner: prev.owner,
   } as O
   const parsed = f.done()
   if (parsed.isErr()) return Err(parsed.unwrapErr().withContext(where))
@@ -865,6 +903,8 @@ const operationRemove = defineCommand({
     const { part, stock } = loaded.unwrap()
     const index = findOperation(part, args.operationId, undefined, where)
     if (index.isErr()) return index
+    const owned = refuseOwned(loaded.unwrap(), index.unwrap(), where)
+    if (owned.isErr()) return owned
     const next = part.operations.filter((_, k) => k !== index.unwrap())
     const refs = checkReferences(next, stock)
     if (refs.isErr())
@@ -893,6 +933,8 @@ const operationMove = defineCommand({
     const index = findOperation(part, args.operationId, undefined, where)
     if (index.isErr()) return index
     const from = index.unwrap()
+    const owned = refuseOwned(loaded.unwrap(), from, where)
+    if (owned.isErr()) return owned
     if (args.toIndex >= part.operations.length)
       return fail('input.malformed', 'toIndex is past the end of the operation list', {
         issues: [
@@ -909,6 +951,8 @@ const operationMove = defineCommand({
     const next = [...part.operations]
     const [moved] = next.splice(from, 1)
     next.splice(args.toIndex, 0, moved!)
+    const split = splitFeature(next, args.toIndex, args.toIndex + 1, where)
+    if (split.isErr()) return split
     const refs = checkReferences(next, stock)
     if (refs.isErr())
       return Err(refs.unwrapErr().withContext(where, { operationId: args.operationId }))
@@ -918,6 +962,33 @@ const operationMove = defineCommand({
     return withWarnings({}, loaded.unwrap(), next, ctx, where)
   },
 })
+
+/**
+ * `input.malformed` (`insideFeature`) when the unit at `[start, end)` of `ops` (a moved operation
+ * or block) sits inside another feature's block: a block stays contiguous (features.md § Order
+ * and references).
+ */
+export function splitFeature(
+  ops: readonly Operation[],
+  start: number,
+  end: number,
+  where: string,
+): AppResult<void> {
+  const before = start > 0 ? ownerOf(ops[start - 1]!) : undefined
+  const after = end < ops.length ? ownerOf(ops[end]!) : undefined
+  if (before === undefined || before !== after) return Ok(undefined)
+  return fail('input.malformed', `position ${start} is inside feature ${before}`, {
+    issues: [
+      {
+        path: ['toIndex'],
+        rule: 'insideFeature',
+        message: `inside feature ${before}: move before or after it`,
+        params: { featureId: before },
+      },
+    ],
+    where,
+  })
+}
 
 // ── queries ───────────────────────────────────────────────────────────────────────────────
 

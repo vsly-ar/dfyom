@@ -6,7 +6,11 @@
 import type { PendingChange } from '../commands/apply'
 
 interface PartLike {
-  readonly operations: readonly { readonly id: string; readonly shape?: unknown }[]
+  readonly operations: readonly {
+    readonly id: string
+    readonly shape?: unknown
+    readonly featureId?: string | undefined
+  }[]
 }
 
 /**
@@ -23,15 +27,19 @@ export function operationsUsingShape(part: PartLike, shapeId: string): string[] 
 }
 
 /**
- * The operations of `part` a design change is an input of: its own operation; for a shape key
+ * The operations of `part` a design change is an input of: its own operation; for a feature key
+ * the operations the feature owns; for a shape key
  * every operation using the shape (counted once however many use it); a new part or a changed
  * stock: all of them; other part fields (general tolerance): none.
  */
 export function designChangeTargets(
   part: PartLike,
-  c: Pick<PendingChange, 'operationId' | 'shapeId' | 'field'>,
+  c: Pick<PendingChange, 'operationId' | 'shapeId' | 'featureId' | 'field'>,
 ): readonly string[] {
   if (c.operationId !== undefined) return [c.operationId]
+  // a feature key: every operation it owns (features.md § Apply and pending changes)
+  if (c.featureId !== undefined)
+    return part.operations.filter((op) => op.featureId === c.featureId).map((op) => op.id)
   if (c.shapeId !== undefined) return operationsUsingShape(part, c.shapeId)
   if (c.field === 'stock' || c.field === 'added') return part.operations.map((op) => op.id)
   return []

@@ -13,6 +13,7 @@ import {
 } from '../design/tool-commands'
 import { REFERENCE_COMMANDS, REFERENCE_QUERIES } from '../design/reference-commands'
 import { SHAPE_COMMANDS, SHAPE_QUERIES } from '../design/shape-commands'
+import { FEATURE_COMMANDS, FEATURE_QUERIES } from '../design/feature-commands'
 import { FEEDS_SPEEDS_QUERIES } from '../feeds-speeds/commands'
 import { LIBRARY_COMMANDS, LIBRARY_QUERIES } from '../library/commands'
 import { PLAN_COMMANDS, PLAN_QUERIES, planDraftFollow } from '../plan/commands'
@@ -68,6 +69,7 @@ export const PROJECT_COMMANDS: readonly AnyCommand[] = [
   ...DESIGN_COMMANDS,
   ...DESIGN_TOOL_COMMANDS,
   ...SHAPE_COMMANDS,
+  ...FEATURE_COMMANDS,
   ...REFERENCE_COMMANDS,
   ...PLAN_COMMANDS,
   toolpathGenerateJob,
@@ -78,6 +80,7 @@ export const PROJECT_QUERIES: readonly QueryDef[] = [
   ...DESIGN_QUERIES,
   ...DESIGN_TOOL_QUERIES,
   ...SHAPE_QUERIES,
+  ...FEATURE_QUERIES,
   ...REFERENCE_QUERIES,
   ...PLAN_QUERIES,
   toolpathGet,
@@ -236,9 +239,12 @@ export function createAppScopeRegistry(): AppResult<Registry> {
  * add library items and use them in a project without an app host. Not used by the app (it runs
  * the two scopes on separate dispatchers); the project lifecycle needs a host and is left out.
  */
-export function createAppRegistry(): AppResult<Registry> {
+export function createAppRegistry(
+  /** Test-only extra commands (a test feature kind, design-v0.4.md#implementation-f1). */
+  extra: readonly AnyCommand[] = [],
+): AppResult<Registry> {
   return createRegistry({
-    commands: [...PROJECT_COMMANDS, ...LIBRARY_COMMANDS],
+    commands: [...PROJECT_COMMANDS, ...LIBRARY_COMMANDS, ...extra],
     queries: [...PROJECT_QUERIES, ...LIBRARY_QUERIES, ...FEEDS_SPEEDS_QUERIES],
     ...APPLY_DEFS,
   })

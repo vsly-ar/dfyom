@@ -22,7 +22,7 @@ import { NAME_MAX, quantityFromDTO } from '../library/item'
 import type { ProjectDoc, UnitSystem } from '../project/document'
 import type { Quantity } from '../quantity/quantity'
 import type { QuantityDTO } from '../quantity/quantity.dto'
-import { findOperation, Warnings, withWarnings, writeOperationList } from './commands'
+import { findOperation, refuseOwned, Warnings, withWarnings, writeOperationList } from './commands'
 import { loadPart, type LoadedPart } from './load'
 import { DEFAULTS, fieldContext, type FieldKind, type Operation } from './operation'
 import { OperationIdSchema, PartIdSchema } from './part.dto'
@@ -433,6 +433,8 @@ const shapeConvert = defineCommand({
     const { loaded, port, shapes } = c.unwrap()
     const found = findOperation(loaded.part, args.operationId, undefined, where)
     if (found.isErr()) return found
+    const owned = refuseOwned(loaded, found.unwrap(), where)
+    if (owned.isErr()) return owned
     const op = loaded.part.operations[found.unwrap()]!
     if (op.kind !== 'pocket' && op.kind !== 'profile')
       return fail('input.malformed', `${op.id} is a ${op.kind}, which has no shape`, {
