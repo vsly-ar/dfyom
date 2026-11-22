@@ -10,6 +10,7 @@ import {
   type PartEvaluationEntry,
 } from '../state/evaluations'
 import { createPending, type PendingState, type PendingStore } from '../state/pending'
+import { createReferenceMeshes, type ReferenceMeshes } from '../state/reference-meshes'
 import { createReplica, type Replica, type ReplicaState } from '../state/replica'
 import { createSettingsStore, type SettingsState, type SettingsStore } from '../state/settings'
 import { createUiStore, type UiState, type UiStore } from '../state/ui-store'
@@ -26,6 +27,8 @@ export interface Shell {
   readonly files: ProjectFiles
   /** Pending changes and Apply (task P3, docs/architecture/apply.md#ui). */
   readonly pending: PendingStore
+  /** The reference ghosts' triangles, per asset (task R3). */
+  readonly referenceMeshes: ReferenceMeshes
 }
 
 export function createShell(bridge: PreloadApi): Shell {
@@ -38,6 +41,7 @@ export function createShell(bridge: PreloadApi): Shell {
     evaluations: createEvaluations(bridge, replica),
     files: createProjectFiles({ bridge, replica }),
     pending: createPending(bridge, replica),
+    referenceMeshes: createReferenceMeshes(bridge),
   }
 }
 
@@ -56,11 +60,14 @@ export function ShellProvider({
     const stopSettings = shell.settings.start()
     const stopEvaluations = shell.evaluations.start()
     const stopPending = shell.pending.start()
+    // a newly bound (or reopened) project shows every reference (decision D17)
+    const stopBound = shell.bridge.project.onBound(() => shell.ui.getState().resetReferenceView())
     return () => {
       stopPending()
       stopReplica()
       stopSettings()
       stopEvaluations()
+      stopBound()
     }
   }, [shell])
   return <ShellContext.Provider value={shell}>{children}</ShellContext.Provider>

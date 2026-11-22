@@ -50,6 +50,7 @@ import {
 import { checkNoRunJob } from '../../core/run/commands'
 import type { MachineService } from '../../core/run/service'
 import { createToolpathCache } from '../../core/toolpath/cache'
+import { stlMesh, type StlMesh } from '../../core/workers/tasks'
 import type { ErrorReporter } from '../../shared/boundary'
 import type { AppError } from '../../shared/errors/app-error'
 import type { Logger } from '../../shared/logging'
@@ -146,6 +147,13 @@ export interface AppHost extends SessionHost, HostPort {
   ): { readonly partId: string; readonly state: PartEvaluationState } | undefined
   /** A plan's part evaluation may have changed (`planEvaluation` reads it). Returns the unsubscribe. */
   onPlanEvaluation(key: string, listener: (planId: string) => void): () => void
+  /**
+   * The triangles of a reference's stored asset for the window's ghost (task R3: window plumbing
+   * like the mesh push, not an agent capability), read by the worker
+   * (docs/modes/reference-model.md#ghost-mesh-task-r3). `input.malformed` (rule
+   * `unknownReference`) without the project or the reference.
+   */
+  referenceMesh(key: string, referenceId: string): AsyncAppResult<StlMesh>
   /**
    * Stdin end, app quit: abort jobs and close every project (unsaved changes stay recoverable).
    * Returns the projects that had unsaved changes.
@@ -529,6 +537,27 @@ class Host implements AppHost {
   onPlanEvaluation(key: string, listener: (planId: string) => void): () => void {
     const rt = this.runtimes.get(key)
     return rt === undefined ? () => {} : rt.scheduler.onPlanChange(listener)
+  }
+
+  async referenceMesh(key: string, referenceId: string): AsyncAppResult<StlMesh> {
+    const where = 'reference.mesh'
+    const rt = this.runtimes.get(key)
+    const refs = rt?.dispatcher.doc.references
+    const ref =
+      refs !== undefined && Object.hasOwn(refs, referenceId) ? refs[referenceId] : undefined
+    if (rt === undefined || ref === undefined)
+      return fail('input.malformed', `reference ${referenceId} is not in this project`, {
+        issues: [{ path: ['referenceId'], rule: 'unknownReference', message: 'no such reference' }],
+        where,
+      })
+    const file = rt.session.assetFile(ref.asset.path)
+    if (file.isErr()) return Err(file.unwrapErr().withContext(where))
+    const r = await this.o.workers.run(
+      stlMesh,
+      { path: file.unwrap(), triangles: ref.asset.triangles },
+      { signal: new AbortController().signal, progress: () => undefined },
+    )
+    return r.isErr() ? Err(r.unwrapErr().withContext(where, { referenceId })) : r
   }
 
   onProjectsChanged(listener: () => void): () => void {

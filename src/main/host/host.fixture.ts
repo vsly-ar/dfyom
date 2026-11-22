@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect } from 'vitest'
-import { createInProcessWorkers } from '../../core/commands/jobs'
+import { createInProcessWorkers, type FileSource } from '../../core/commands/jobs'
 import { testStock } from '../../core/design/design.fixture'
 import { libraryInput, machineValues } from '../../core/library/library.fixture'
 import { flat6 } from '../../core/plan/plan.fixture'
@@ -24,7 +24,7 @@ let instances = 0
 
 export async function testHost(
   appData: string,
-  o: { machine?: MachineService; instanceId?: string } = {},
+  o: { machine?: MachineService; instanceId?: string; files?: FileSource } = {},
 ): Promise<AppHost> {
   return expectOk(
     await createAppHost({
@@ -33,7 +33,7 @@ export async function testHost(
       instanceId: o.instanceId ?? `test-instance-${process.pid}-${++instances}`,
       log: noopLogger,
       report: () => {},
-      workers: createInProcessWorkers(),
+      workers: createInProcessWorkers(o.files === undefined ? {} : { files: o.files }),
       exportFiles: { write: async (target) => Ok({ filePath: target }) },
       ...(o.machine === undefined ? {} : { machine: o.machine }),
     }),

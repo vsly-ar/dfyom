@@ -6,7 +6,9 @@ import { evaluatePart } from '../geometry/evaluate'
 import { loadManifold } from '../geometry/manifold'
 import { nodeManifoldSource } from '../geometry/testing/node-wasm'
 import { testPart } from '../geometry/testing/test-part'
-import { createStlParser, parseStl, STL_LIMITS, type StlSummary } from './stl'
+import { createInProcessWorkers, memoryFiles } from '../commands/jobs'
+import { stlMesh } from '../workers/tasks'
+import { createStlParser, parseStl, STL_LIMITS, StlPositions, type StlSummary } from './stl'
 import {
   asciiStl,
   binaryStl,
@@ -157,5 +159,42 @@ describe('STL parser: limits', () => {
       maxTriangles: 5_000_000,
       warnTriangles: 1_000_000,
     })
+  })
+})
+
+describe('STL triangles for the ghost (task R3)', () => {
+  const read = (bytes: Uint8Array, expected?: number, chunk = bytes.length) => {
+    const keep = new StlPositions(expected)
+    const p = expectOk(createStlParser(bytes.length, STL_LIMITS, keep.add))
+    for (let i = 0; i < bytes.length; i += chunk) expectOk(p.push(bytes.subarray(i, i + chunk)))
+    expectOk(p.finish())
+    return keep.positions()
+  }
+
+  it('collects every triangle of binary and ASCII files, in any chunking', () => {
+    const want = Float32Array.from(box)
+    expect(read(binaryStl(box), 12)).toEqual(want)
+    expect(read(binaryStl(box), 12, 7)).toEqual(want)
+    expect(read(asciiStl(box), undefined, 5)).toEqual(want)
+  })
+
+  it('grows past a wrong size hint and trims to the triangles read', () => {
+    const p = read(binaryStl(box), 1)
+    expect(p.length).toBe(12 * 9)
+    expect(p.buffer.byteLength).toBe(12 * 9 * 4) // owns its buffer: transferable
+  })
+
+  it('the worker task reads the enclosure fixture into 49 806 triangles', async () => {
+    const bytes = enclosureStl()
+    const workers = createInProcessWorkers({ files: memoryFiles(new Map([['/a.stl', bytes]])) })
+    const ctl = { signal: new AbortController().signal, progress: () => undefined }
+    const m = expectOk(
+      await workers.run(stlMesh, { path: '/a.stl', triangles: ENCLOSURE_TRIANGLES }, ctl),
+    )
+    expect(m.positions.length).toBe(ENCLOSURE_TRIANGLES * 9)
+    const s = expectOk(parseStl(bytes))
+    let minX = Infinity
+    for (let i = 0; i < m.positions.length; i += 3) minX = Math.min(minX, m.positions[i]!)
+    expect(minX).toBe(s.bounds.min.x)
   })
 })
