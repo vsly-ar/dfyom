@@ -36,7 +36,7 @@ Out of scope: multiple setups, optimization, simulation beyond previews, carving
 4. **Tools in Design** (D11): each operation has a generalized or library tool, chosen automatically on Apply unless the user locked it ([design-v0.2.md](modes/design-v0.2.md#operation-tool)).
 5. **Apply** (D13, D14, Q18 → D16): edits commit live; tool choice, draft plans and toolpaths wait for Enter or the "Apply N" button ([apply.md](architecture/apply.md)).
 6. **Several setups** (D10, Q15 → D16): Plan derives one setup per approach direction, export per setup, a setup-change prompt in Run; no workholding and no in-process stock yet ([plan-v0.2.md](modes/plan-v0.2.md)).
-7. **Reference model, core** (proposal from D15, backlog B9): STL import as a ghost stored with the project, placement, fit to stock, visibility; never affects geometry ([reference-model.md](modes/reference-model.md)).
+7. **Reference model, core** (proposal from the user's direction, 2026-11-21): STL import as a ghost stored with the project, placement, fit to stock, visibility; never affects geometry ([reference-model.md](modes/reference-model.md)).
 8. **Spike S1** for v0.3: choose the 2D offset and boolean library (lines and arcs) and record it in an ADR.
 
 Docs to accept first: [design-v0.2.md](modes/design-v0.2.md), [plan-v0.2.md](modes/plan-v0.2.md), [apply.md](architecture/apply.md), [reference-model.md](modes/reference-model.md), [geometry.md § Non-top faces](architecture/geometry.md#non-top-faces-v02-draft), and the ui.md and persistence.md amendments they name.
@@ -45,9 +45,9 @@ Out of scope: general shapes, Shape Editor and SVG (v0.3); workholding and in-pr
 
 ## v0.3 – Shapes (draft)
 
-**Draft (split assumed by D16, Q14).** Named shapes of lines and arcs on any face, cut `inside`, `outside` or on the centreline (Q12): general loops in geometry and toolpaths (pocket clearing with islands, profiles with free-form tabs; free-form floor fillets deferred, Q16), a Shape Editor from primitives with booleans, SVG import with an import report, and shape rotation. Starts from the 2D library chosen by spike S1. Toward the [direction](#direction-draft-proposal): **measure and snap to the reference** (B10), since snapping needs shapes and anchors.
+**Draft (split assumed by D16, Q14).** Named shapes of lines and arcs on any face, cut `inside`, `outside` or on the centreline (Q12): general loops in geometry and toolpaths (pocket clearing with islands, profiles with free-form tabs; free-form floor fillets deferred, Q16), a Shape Editor from primitives with booleans, SVG import with an import report, and shape rotation. Starts from the 2D library chosen by spike S1. Toward the [direction](#direction-draft-proposal): **measure and snap to the reference**, since snapping needs shapes and anchors.
 
-Next after v0.3, in the direction's order (unscheduled): STEP import (B9), assisted recreation and deviation view (B11), the golden-path reference cycle with a UX pass (B12), real-machine readiness (B13), LLM-first readiness for full cycles (B14), from-scratch complex parts (B15).
+Next after v0.3, in the direction's order (unscheduled): STEP import, assisted recreation and deviation view, the golden-path reference cycle with a UX pass, real-machine readiness, LLM-first readiness for full cycles, from-scratch complex parts.
 
 ## Later (unordered)
 

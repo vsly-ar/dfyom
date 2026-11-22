@@ -1,6 +1,6 @@
 # Reference model: import, place and show a 3D model for reference
 
-Status: draft (proposal from user direction D15 of 2026-11-21, backlog B9 core; nothing here is confirmed) · Design: [design.md § Workflow](design.md#workflow) step 4 · Storage: [persistence.md](../architecture/persistence.md#working-folder-layout) · Apply: [apply.md](../architecture/apply.md) · Plan of record: [plans/v0.2.md](../plans/v0.2.md#5-reference-model) · Terms: [glossary.md](../glossary.md)
+Status: draft (proposal from user direction D15 of 2026-11-21; nothing here is confirmed) · Design: [design.md § Workflow](design.md#workflow) step 4 · Storage: [persistence.md](../architecture/persistence.md#working-folder-layout) · Apply: [apply.md](../architecture/apply.md) · Plan of record: [plans/v0.2.md](../plans/v0.2.md#5-reference-model) · Terms: [glossary.md](../glossary.md)
 
 The user's direction (D15) is the full CAM cycle **with a reference model**: import a 3D model, recreate it in Design with typical operations, Plan, Run on the virtual machine. This doc covers the first step only, for v0.2: get an STL into the project, place it on the stock and show it as a ghost. Measuring, snapping and assisted recreation come later ([§ Later](#later)).
 
@@ -19,7 +19,7 @@ A reference model **never** changes the part, the toolpaths or any check. It is 
 | Placement: position, rotation (90° steps and free angles), uniform scale, source unit guess | Non-uniform scale, mirroring                                                |
 | Fit to stock: 9-point anchor in XY plus top / centre / bottom in Z                          | Drop onto a picked reference face (align a reference plane to a stock face) |
 | Ghost display in Design (translucent, never pickable as a face target); visibility toggle   | Ghost in Plan and Run; section view at a level                              |
-| Warnings when the placed reference sticks out of the stock                                  | Measure and snap (B10), assisted recreation and deviation view (B11)        |
+| Warnings when the placed reference sticks out of the stock                                  | Measure and snap, assisted recreation and deviation view                    |
 
 ## Data model
 
@@ -37,7 +37,7 @@ Reference {
 }
 ```
 
-- Values are [quantities](../architecture/quantities.md) like every other design value, so `25.4 mm`, `1"` and expressions referencing stock surfaces (e.g. `stock.top.z`) work. A reference is **not** a reference target: other values cannot refer to it in v0.2 (that is B10).
+- Values are [quantities](../architecture/quantities.md) like every other design value, so `25.4 mm`, `1"` and expressions referencing stock surfaces (e.g. `stock.top.z`) work. A reference is **not** a reference target: other values cannot refer to it in v0.2 (that comes with measure and snap).
 - Placement is stored, never re-derived: "fit to stock" writes `position` once ([below](#fit-to-stock)). Changing the stock later does not move the reference.
 - `rotation` keeps the user's numbers; the 90° buttons add ±90° to one axis. The renderer composes them into one matrix. Exact 90° multiples stay exact (no drift from repeated quarter turns).
 
@@ -88,19 +88,19 @@ The asset is a new kind of project file. The [persistence](../architecture/persi
 
 ## Later
 
-| Item                                      | Backlog | Notes                                                                        |
-| ----------------------------------------- | ------- | ---------------------------------------------------------------------------- |
-| STEP import                               | B9      | `occt-import-js` (LGPL-2.1); tessellated for display, B-rep kept for B10/B11 |
-| Measure and snap to the reference         | B10     | With v0.3 shapes; uses the anchors                                           |
-| Assisted recreation and deviation view    | B11     | Spike recognition on real parts first                                        |
-| Golden-path reference cycle e2e + UX pass | B12     | v0.2 has a first version ([plan task X2](../plans/v0.2.md#6-acceptance))     |
+| Item                                      | When  | Notes                                                                                             |
+| ----------------------------------------- | ----- | ------------------------------------------------------------------------------------------------- |
+| STEP import                               | later | `occt-import-js` (LGPL-2.1); tessellated for display, B-rep kept for measure, snap and recreation |
+| Measure and snap to the reference         | later | With v0.3 shapes; uses the anchors                                                                |
+| Assisted recreation and deviation view    | later | Spike recognition on real parts first                                                             |
+| Golden-path reference cycle e2e + UX pass | later | v0.2 has a first version ([plan task X2](../plans/v0.2.md#6-acceptance))                          |
 
 ## Open questions
 
-| #   | Question                               | Options                                                                                | Recommendation                                                                                                      |
-| --- | -------------------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| R-A | Where the reference belongs            | (a) to a part (part frame); (b) to the project (stock frame)                           | (a): a project can hold many parts, and a reference describes one part                                              |
-| R-B | Is visibility undoable document state? | (a) yes, a document field (saved, agents read it back); (b) per-window view state      | (a): simple and saved with the project; (b) if toggling clutters the undo history in testing                        |
-| R-C | Where the asset lives                  | (a) copied into the project (`work/assets/`); (b) linked by path                       | (a): the project opens on another machine and in the e2e tests; linking is later                                    |
-| R-D | Default fit on import                  | (a) centre + top; (b) front-left + bottom; (c) none, placed at the STL origin          | (a): the stock usually has margin around and the top is faced; the user sees the reference inside the stock at once |
-| R-E | Does Apply care about references?      | (a) no, instant reactions only; (b) later reactions (B10 snapping hints) go into Apply | (a) for v0.2                                                                                                        |
+| #   | Question                               | Options                                                                            | Recommendation                                                                                                      |
+| --- | -------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| R-A | Where the reference belongs            | (a) to a part (part frame); (b) to the project (stock frame)                       | (a): a project can hold many parts, and a reference describes one part                                              |
+| R-B | Is visibility undoable document state? | (a) yes, a document field (saved, agents read it back); (b) per-window view state  | (a): simple and saved with the project; (b) if toggling clutters the undo history in testing                        |
+| R-C | Where the asset lives                  | (a) copied into the project (`work/assets/`); (b) linked by path                   | (a): the project opens on another machine and in the e2e tests; linking is later                                    |
+| R-D | Default fit on import                  | (a) centre + top; (b) front-left + bottom; (c) none, placed at the STL origin      | (a): the stock usually has margin around and the top is faced; the user sees the reference inside the stock at once |
+| R-E | Does Apply care about references?      | (a) no, instant reactions only; (b) later reactions (snapping hints) go into Apply | (a) for v0.2                                                                                                        |
