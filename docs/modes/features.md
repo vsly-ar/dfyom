@@ -1,6 +1,6 @@
 # Design features: parametric groups of operations
 
-Status: draft (backlog B23; the user settled A4, A5, chamfers and the order on 2026-11-22, D26/D28; patterns wait for the user's own explanation; the other assumptions await confirmation, [Questions for the user](#questions-for-the-user)) · Design: [design.md](design.md), [design-v0.2.md](design-v0.2.md) · Apply: [apply.md](../architecture/apply.md) · Plan: [plan-v0.1.md](plan-v0.1.md#plans-are-snapshots) · Shapes: [roadmap v0.3](../roadmap.md#v03--shapes), [ADR 0019](../decisions/0019-2d-geometry-library.md) · Terms: [glossary.md](../glossary.md)
+Status: draft (backlog B23; the user settled A4, A5, chamfers and the order on 2026-11-22, D26/D28; patterns wait for the user's own explanation; [Clones](#clones) drafted from the user's definition, D30; the other assumptions await confirmation, [Questions for the user](#questions-for-the-user)) · Design: [design.md](design.md), [design-v0.2.md](design-v0.2.md) · Apply: [apply.md](../architecture/apply.md) · Plan: [plan-v0.1.md](plan-v0.1.md#plans-are-snapshots) · Shapes: [roadmap v0.3](../roadmap.md#v03--shapes), [ADR 0019](../decisions/0019-2d-geometry-library.md) · Terms: [glossary.md](../glossary.md)
 
 The user's request (B23): "Features create and combine operations (bolt hole with counterbore, no thread; pattern with optional chamfers; engraving; text…) + a backlog of features." [design.md § Workflow](design.md#workflow) already names features as "groups of operations" and [§ Ordering and composition](design.md#ordering-and-composition) reserves a "repeat" feature; this doc drafts the concept. Nothing here is implemented, and every decision is an **assumption** until the user confirms it.
 
@@ -25,7 +25,7 @@ Assumptions A1–A6:
 3. **A3 – Stable ids by role.** An owned operation's id is `<featureId>_<role>` (`hole1_drill`, `hole1_counterbore`); pattern instances add the instance number (`pattern1_3_drill`, instance 1 = the seed). Underscores are valid in [expression names](../architecture/quantities.md#expressions-and-references), so surface ids stay `<operation id>.<role>` (`hole1_counterbore.floor`). A role that survives a parameter change keeps its id, so references, plan operations and tool locks survive; a role that disappears removes its operation and fails with `design.referenced` if a later operation references it, as [`design.operation.remove`](design.md#commands-and-queries-v01) does.
 4. **A4 – Owned geometry is read-only.** The owned operations' geometric parameters are edited only through the feature. Each owned operation keeps the fields that are not part of the feature's definition: its **tool field** (pick, lock, unlock per operation), its `generalTolerance` and its display `name`; they survive regeneration by role. No per-field geometric overrides in the first version ([Q1](#questions-for-the-user)).
 5. **A5 – No explode; owned operations live and die with their feature** (user, D26). Owned operations cannot be turned into plain operations, and `design.operation.remove` on one is refused; removing the feature removes them. An edit the feature does not offer means adding that option to the feature.
-6. **A6 – One nesting level** (patterns are parked until the user explains them, D28; this stays a placeholder). A pattern's seed is either an operation or a non-pattern feature (a bolt circle of counterbored holes); a pattern of patterns is not allowed. Other features do not nest.
+6. **A6 – One nesting level** (patterns are parked until the user explains them, D28; this stays a placeholder). A pattern's seed is either an operation or a non-pattern feature (a bolt circle of counterbored holes); a pattern of patterns is not allowed. Other features do not nest, except that [Clones](#clones) nest their source.
 
 ### Order and references
 
@@ -40,13 +40,81 @@ Assumptions A1–A6:
 
 ## Patterns
 
-The "repeat" of [design.md](design.md#ordering-and-composition) becomes the **pattern** feature (industry term), still "never list parameters on an operation":
+Parked placeholder (D28): the user says DFYOM patterns are closer to cnc-code's pattern helper; repeating a feature or a set of operations is [Clones](#clones) (D30). The earlier draft read the "repeat" of [design.md](design.md#ordering-and-composition) as a **pattern** feature (industry term), still "never list parameters on an operation":
 
 - **Kinds:** linear (count, pitch or extent, direction `u`/`v`), rectangular grid (two directions), circular / bolt circle (count, pitch circle diameter, start angle, full circle or angle), later mirror and along a path (v0.3 shapes).
 - **Seed:** an existing operation or feature (A6). Making a pattern from an existing one moves it into the pattern as instance 1 (one undo step).
 - **Skip instances:** `skip: number[]`; a skipped instance generates nothing and keeps its number, so the other instances keep their ids.
 - **Rotation:** circular patterns rotate each instance. Circles and holes need nothing new; rotated rectangles need [v0.3 shape rotation](../roadmap.md#v03--shapes), so until then a circular pattern only accepts rotation-invariant seeds (drilling, circular pocket, round holes).
 - "Pattern with optional chamfers" is read as: the seed's own options (a hole's chamfer) are repeated with it ([Q6](#questions-for-the-user)).
+
+## Clones
+
+Draft (D30, 2026-11-22). Confirmed so far: the user's definition (the source of truth for this section), first-version orientation and face (C1, C5) and stable numbering (C2); the rest awaits the user ([Open questions](#open-questions-clones)). The definition:
+
+> "I see clones as maybe creating a feature in dfyom from an existing feature or a set of operations (nesting them as a source that can be edited) to repeat (clone) them with a read-only operations. Number of clones, its positions (in a path) configured in the Clones feature's properties."
+
+Clones are not [patterns](#patterns), which stay parked (D28). cnc-code's Clones are a different concept; only its path rows, skipping and cut order are borrowed (background only: the local research note `.continuous/research/2026-11-22-cnc-code-reuse.md` § 1, not in the repo).
+
+### Source and clone instances
+
+- **Source:** the Clones feature nests one existing feature (a counterbored hole) or a set of operations (a pocket plus the drilling on its floor). Creating Clones moves the source into the feature in one undo step; the feature takes the source's place in the [design order](#order-and-references).
+- **The source stays editable.** Source operations keep their ids and their own commands (`design.pocket.update`, …); a source feature is edited through that feature. The source is **instance 1**.
+- **Clone instances** (instances 2…N) are owned operations of the Clones feature ([A1–A3](#expansion-and-owned-operations)), one per source operation per position, with ids `<clonesId>_<n>_<source operation id>` (`clones1_3_pocket2`, `clones1_3_hole1_drill`). D26 applies strictly: read-only, no Explode, never removed apart from their feature. Unlike A4, their tool field follows the source operation's tool ([C3](#open-questions-clones)).
+- **One face, one orientation (user, D30):** all source operations sit on one face target or on surfaces of each other (a drilling on the pocket floor); that face is the Clones feature's `on`, positions are in its [face frame](design-v0.2.md#face-frame), and every instance lands on that face (side) with the source's orientation. References inside the source map to the same instance's copies (clone 3's drilling is `on` clone 3's pocket floor); references to surfaces outside the source stay unchanged.
+- **Nesting:** one level ([A6](#expansion-and-owned-operations)); Clones of Clones are refused.
+
+### Properties
+
+| Property | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `rows`   | Ordered **path rows**. A reference point starts at the source (instance 1); each row places its positions from it and moves it to its own last position, so the next row continues there ("3 along u, then an arc of 5, then a 2 × 2 grid"). Kinds: `grid` (columns × rows, spacing per direction), `offset` (count, step `[du, dv]`), `polar` (count, angle and distance per step), `arc` (centre by radius and angle from the reference point, sweep ±360°, step angle; a full circle never repeats its start), `point` (absolute `[u, v]`, a jump). |
+| count    | Derived, never entered: the rows' positions summed; the read-out shows "1 + 11 clones = 12 instances · 4 skipped". Draft limits: 100 positions per row, 1000 instances in all.                                                                                                                                                                                                                                                                                                                                                                         |
+| `skip`   | Per row, position indices that make no clone; the reference point still walks through them, so a skipped one-position row is a shift. Instance 1 cannot be skipped. Numbering stays stable (user, D30): skipping 3 leaves 4–8 as 4–8, so ids, references, plan operations and tool locks survive.                                                                                                                                                                                                                                                      |
+| rotation | None in the first version: every instance keeps the source's orientation, also on `polar` and `arc` rows (user, D30). Rotating instances to follow the path (radial, like flange bolts) is a **later extension**, not specified here (it would build on v0.3 shape rotation, [S-E](design-v0.3.md#decisions)).                                                                                                                                                                                                                                         |
+| `name`   | Default "Clones 1"; instance names default to "<source operation name> · <n>" ("Pocket 2 · 3").                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+
+Row fields are quantities and may be expressions, as operation parameters are.
+
+### Editing the source
+
+- A command that changes a source operation or the source feature re-runs the Clones expansion **in the same command** (one undo step, an instant reaction as in [A2](#expansion-and-owned-operations)); every instance follows. The pending key is the source field's own, so the instances' changes fold into it ([Apply](#apply-and-pending-changes)): "Pocket 2: depth" counts 1, not 12.
+- Adding or removing source operations is `design.clones.update { source }`. Removing a source operation removes its instances; leaving the source empty is refused (remove the Clones feature instead).
+- Removing the Clones feature removes its instances; the source goes back into the design order as plain operations or its feature ([C4](#open-questions-clones)).
+
+### Plan and cut order
+
+- The expansion orders instances **operation by operation**: source operation A on every position in path order, then operation B on every position. With one shared tool per source operation, Plan's existing [default order](plan-v0.1.md#plan-operations-and-order) keeps them adjacent, so 8 counterbored holes cut as 8 counterbores, then 8 holes: **one tool change per source operation**, as for a single instance. Equal holes still share one plan operation. No Clones logic in Plan ([Q9](#questions-for-the-user)).
+- Within one source operation, positions follow the path (an arc is cut round the arc); a shorter travel order is a later plan optimisation.
+
+### Checks and DFM
+
+- Feature invariants (`model.invariant`): at least one row, every row count ≥ 1, the limits above, the source on one face, no Clones of Clones.
+- Every instance runs the existing operation checks; the navigator rolls them up on the Clones row.
+- **Outside the stock:** instances are still generated; one warning on the Clones feature lists them (draft code `dfm.cloneOutsideStock`: "3 clones outside the stock (7, 8, 12): skip them or shorten row 2"), and the per-operation warnings they cause fold into it.
+- **Overlaps:** a position within 0.001 mm of another is dropped with one warning (`dfm.cloneDuplicate`); instances whose removal regions overlap get an info note (`dfm.cloneOverlap`), since an overlap can be intended (a slot of overlapping pockets).
+
+### Commands (sketch)
+
+As [Commands (sketch)](#commands-sketch): `design.clones.add { source: { featureId } | { operationIds }, rows }` and `design.clones.update { featureId, rows?, source?, name? }` (skips live in `rows`); the query `design.clones.preview` returns positions, instance numbers, skipped spots and warnings for a feature or a draft without changing the part (agents and the add flow). Shared: `design.feature.remove`, `.move`, `.list`, `.get`. Results carry `{ featureId, operationIds, warnings }`.
+
+### UI (summary)
+
+- **Navigator:** the Clones row (icon, name, "×12", rolled-up badge) nests **Source** (editable, normal rows) and **Clones** (read-only instances by number, collapsed by default).
+- **Inspector:** a sortable list of path rows with an "Add row" menu (first values from the source footprint plus a gap), per-row fields with a dynamic illustration and the instance read-out. An instance shows read-only fields with "Clone 3 of Pocket 2", linking to the source.
+- **Viewport:** selecting the Clones feature draws the **clone path** (reference chain, arc centres, instance numbers) and skipped positions as dashed ghosts; clicking a position toggles its skip. While adding, the clones are ghosts until confirmed. Clicking an instance's surface selects it, a second click its Clones feature.
+
+### Open questions (Clones)
+
+Each with the recommendation this draft assumes.
+
+- **C1 – Answered (D30):** "ok but much later. When first implementing clones, assume the clones will all land on the same face or at least on the same side/orientation." First version: instances keep the source's orientation; rotation along the path is a later extension. Original question: on arcs and circles, do copies rotate to follow the path (radial) or keep their orientation? Recommendation was an option per Clones feature, default rotate for `polar` and `arc`.
+- **C2 – Answered (D30):** "Stable numbering sounds better." Skipping keeps 4–8 as 4–8 (no renumbering).
+- **C3 – Tool of clone instances:** always the source operation's tool (read-only), or a tool field per instance as A4? Recommendation: follow the source (D26 read-only, one tool change).
+- **C4 – Removing the Clones feature:** keep the source as plain operations or its feature, or remove it too? Recommendation: keep the source.
+- **C5 – Answered with C1 (D30):** one face (and the source's own surfaces) in the first version; sources on several faces are not allowed.
+- **C6 – Creating from scratch:** only from an existing feature or operations, or also "Add Clones" with a new source? Recommendation: from existing ones only, as the definition says.
+- **C7 – Milestone:** Clones right after the hole features (a bolt circle of counterbored holes is the first use)? Recommendation: yes; not scheduled yet.
 
 ## Plan
 
