@@ -79,6 +79,8 @@ Strategy editing phase 2 ([roadmap.md](../roadmap.md); phase 1 shipped the Strat
 - **Snapshot scene:** the plan scene draws the **plan's** part (`design.part` of the plan), not the design's current mesh. The geometry worker evaluates a part DTO passed in (cached by the snapshot's hash, [workers.md](../architecture/workers.md)); edited operations are tinted, and the design's current part can be shown as a ghost for comparison (view toggle, off by default).
 - **A rebuild discards all plan edits**, also those the design change did not touch ([decision 6](#decisions)).
 
+**Implementation (task E3a, core):** `plan.design.operation.revert` returns `{ reverted }`, the design operation ids whose edits it reverted (empty, and no undo step, when the plan operation had none); it checks the reverted part against the plan's stock copy like `plan.libraryItem.update` (a copy updated since the snapshot can make the taken version not fit: `model.invariant`, the edit stays). The scene evaluation runs in the `EvaluationScheduler` as the plan's own subject ([workers.md](../architecture/workers.md#automatic-evaluation-after-design-edits)); the window push and drawing are task E3b.
+
 ## Setup change in Run
 
 Run mode loads **one program per setup** ([§ Toolpaths per setup](#toolpaths-per-setup)). Between programs it shows a setup-change prompt, styled like the tool-change dialog ([run-v0.1.md](run-v0.1.md)): the next setup's name and direction, a picture of the stock in its new orientation, "Set the work zero on the new top" with the WCS corner, then Start. The virtual machine needs nothing new (a setup change is a pause with a new program). The [run-v0.1.md](run-v0.1.md) amendment is part of plan task E2 ([plans/v0.2.md](../plans/v0.2.md#3-plan-and-run)).

@@ -349,11 +349,11 @@ describe('automatic evaluation', () => {
 })
 
 describe('several parts (hand-made source; v0.1 projects have one part)', () => {
-  /** Part DTOs of the setup's part at facing depths 0.5, 1 and 2. */
-  async function versions() {
+  /** Part DTOs of the setup's part at facing depths 0.5, 1, 2 and then `more`. */
+  async function versions(more: string[] = []) {
     const s = await setup()
     const v: PartDTO[] = [s.d.doc.parts[s.partId]!]
-    for (const depth of ['1', '2']) {
+    for (const depth of ['1', '2', ...more]) {
       await s.setDepth(depth)
       v.push(s.d.doc.parts[s.partId]!)
     }
@@ -386,12 +386,13 @@ describe('several parts (hand-made source; v0.1 projects have one part)', () => 
   const as = (dto: PartDTO, id: string): PartDTO => ({ ...dto, id })
 
   it('serves the most recently edited part first', async () => {
-    const { base, v } = await versions()
+    // distinct inputs everywhere: an input another part has is served from its result
+    const { base, v } = await versions(['3', '4', '5'])
     const clock = fakeClock(0)
     const timers = manualTimers(clock)
     const fake = fakePort()
     const sch = createEvaluationScheduler({ workers: fake.port, timers, clock })
-    const parts = { a: as(v[0]!, 'a'), b: as(v[0]!, 'b'), c: as(v[0]!, 'c') }
+    const parts = { a: as(v[3]!, 'a'), b: as(v[4]!, 'b'), c: as(v[5]!, 'c') }
     const h = handSource(base, parts)
     sch.attach(h.src)
     for (let i = 0; i < 3; i++) await finish(fake.runs[i]!) // one at a time
@@ -400,7 +401,7 @@ describe('several parts (hand-made source; v0.1 projects have one part)', () => 
     h.commit({ ...h.src.doc.parts, c: as(v[1]!, 'c') }, 'c', 'replace')
     timers.advance(200)
     expect(fake.runs).toHaveLength(4)
-    h.commit({ ...h.src.doc.parts, a: as(v[1]!, 'a') }, 'a', 'replace')
+    h.commit({ ...h.src.doc.parts, a: as(v[0]!, 'a') }, 'a', 'replace')
     timers.advance(50)
     h.commit({ ...h.src.doc.parts, b: as(v[2]!, 'b') }, 'b', 'replace')
     timers.advance(300)
@@ -408,7 +409,7 @@ describe('several parts (hand-made source; v0.1 projects have one part)', () => 
     await finish(fake.runs[3]!)
     expect(facingDepth(fake.runs[4]!)).toBe(2) // b, edited last
     await finish(fake.runs[4]!)
-    expect(facingDepth(fake.runs[5]!)).toBe(1) // then a
+    expect(facingDepth(fake.runs[5]!)).toBe(0.5) // then a
   })
 
   it('a removed part aborts its evaluation and its waiters', async () => {
@@ -571,6 +572,90 @@ describe('design.warning.list and design.part.evaluate', () => {
     const s = await setup({ evaluations: false })
     const job = await startJob(s)
     expectErrCode(await job.result, 'internal.unexpected')
+  })
+})
+
+describe('plan parts (snapshot scene, plan-v0.2.md)', () => {
+  /** The setup's part evaluated, then a plan of it (debounce over). */
+  async function withPlan(status: 'draft' | 'settledDesign' = 'settledDesign') {
+    const s = await setup()
+    await finish(s.runs[0]!)
+    const seen: string[] = []
+    s.scheduler.onPlanChange((id) => seen.push(id))
+    const { planId } = (await s.run('plan.create', { partId: s.partId })) as { planId: string }
+    if (status === 'settledDesign')
+      await s.run('plan.status.set', { planId, status: 'settledDesign' })
+    s.timers.advance(200)
+    await settle()
+    const plan = () => s.scheduler.planState(s.d.doc, planId)
+    const part = () => s.scheduler.state(s.d.doc, s.partId)
+    return { s, planId, plan, part, seen }
+  }
+
+  it("an unedited plan's part is served from the design part's result (same hash, no run)", async () => {
+    const { s, planId, plan, part, seen } = await withPlan()
+    expect(s.runs).toHaveLength(1)
+    expect(plan().status).toBe('done')
+    expect(plan().inputHash).toBe(part().inputHash)
+    expect(plan().evaluation).toBe(part().evaluation)
+    expect(seen).toContain(planId)
+  })
+
+  it("a plan-only edit evaluates the plan's part; revert and undo come back from the cache", async () => {
+    const { s, planId, plan, part } = await withPlan()
+    const designHash = part().inputHash
+    await s.run('plan.design.operation.update', { planId, operationId: 'facing1', depth: '1' })
+    expect(plan().status).toBe('pending')
+    s.timers.advance(200)
+    expect(s.runs).toHaveLength(2)
+    expect(facingDepth(s.runs[1]!)).toBe(1) // the plan's version, not the design's 0.5
+    await finish(s.runs[1]!)
+    expect(plan().status).toBe('done')
+    const editedHash = plan().inputHash
+    expect(editedHash).not.toBe(designHash)
+    expect(part()).toMatchObject({ status: 'done', inputHash: designHash }) // untouched
+    const planOperationId = s.d.doc.plans[planId]!.setups[0]!.operations[0]!.id
+    await s.run('plan.design.operation.revert', { planId, planOperationId })
+    s.timers.advance(200)
+    expect(plan()).toMatchObject({ status: 'done', inputHash: designHash })
+    expectOk(await s.d.dispatch('history.undo', {}, ui))
+    s.timers.advance(200)
+    expect(plan()).toMatchObject({ status: 'done', inputHash: editedHash })
+    expect(s.runs).toHaveLength(2)
+  })
+
+  it('a design edit leaves a settled plan alone; a following draft plan shares the new result', async () => {
+    const settled = await withPlan()
+    await settled.s.setDepth('2')
+    settled.s.timers.advance(200)
+    expect(settled.s.runs).toHaveLength(2)
+    expect(facingDepth(settled.s.runs[1]!)).toBe(2)
+    expect(settled.plan().status).toBe('done') // still the snapshot's 0.5
+    const draft = await withPlan('draft')
+    await draft.s.setDepth('2') // the draft auto-rebuild takes the new design
+    draft.s.timers.advance(200)
+    expect(draft.s.runs).toHaveLength(2)
+    expect(draft.plan().status).toBe('pending')
+    await finish(draft.s.runs[1]!)
+    expect(draft.s.runs).toHaveLength(2)
+    expect(draft.plan()).toMatchObject({ status: 'done', inputHash: draft.part().inputHash })
+  })
+
+  it('evaluatePlan skips the debounce and waits; unknown and removed plans', async () => {
+    const { s, planId, plan, seen } = await withPlan()
+    await s.run('plan.design.operation.update', { planId, operationId: 'facing1', depth: '1' })
+    const waiting = s.scheduler.evaluatePlan(planId, new AbortController().signal)
+    expect(s.runs).toHaveLength(2)
+    await finish(s.runs[1]!)
+    expect(expectOk(await waiting).status).toBe('done')
+    expectErrCode(
+      await s.scheduler.evaluatePlan('nope', new AbortController().signal),
+      'input.malformed',
+    )
+    seen.length = 0
+    await s.run('plan.remove', { planId, confirm: true })
+    expect(seen).toEqual([planId])
+    expect(plan()).toMatchObject({ status: 'failed', error: { code: 'input.malformed' } })
   })
 })
 

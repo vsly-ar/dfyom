@@ -1,8 +1,11 @@
 /**
- * Automatic part evaluation after design edits: per-part trailing debounce, abort on a newer
- * revision, a result store keyed by input hash with a small LRU, and the `design.part.evaluate`
- * job. Not a job itself (one job per edit would flood the action log); debug log only.
- * Doc: docs/architecture/workers.md#automatic-evaluation-after-design-edits
+ * Automatic evaluation after edits: per-subject trailing debounce, abort on a newer revision, a
+ * result store keyed by input hash with a small LRU, and the `design.part.evaluate` job. Subjects
+ * are the design's parts and the plans' parts (their design snapshots with plan-only edits, for
+ * the plan scene); an input hash evaluated for one subject serves every other subject with that
+ * hash. Not a job itself (one job per edit would flood the action log); debug log only.
+ * Doc: docs/architecture/workers.md#automatic-evaluation-after-design-edits,
+ * docs/modes/plan-v0.2.md#plan-only-edits-and-the-snapshot-scene
  *
  * Headless: timers come through the injected `Timers` port, results through the `WorkerPort`.
  */
@@ -18,6 +21,7 @@ import { defineCommand } from '../commands/define'
 import type { WorkerPort } from '../commands/jobs'
 import type { PartEvaluation } from '../geometry/evaluate'
 import type { DfmWarning, PartGeometryInput } from '../geometry/model'
+import { planGeometryInput, unknownPlan } from '../plan/plan'
 import { hashJson } from '../plan/snapshot'
 import type { ProjectDoc } from '../project/document'
 import { geometryEvaluate } from '../workers/tasks'
@@ -28,10 +32,10 @@ import { DfmWarningSchema, libraryTools, partWarnings } from './warnings'
 export const EVALUATION_STATUSES = ['done', 'pending', 'failed'] as const
 export type EvaluationStatus = (typeof EVALUATION_STATUSES)[number]
 
-/** A part's evaluation for one document: `done` / `failed` for its current input hash, else `pending`. */
+/** An evaluation for one document: `done` / `failed` for its current input hash, else `pending`. */
 export interface PartEvaluationState {
   readonly status: EvaluationStatus
-  /** Hash of the part's geometry input in that document (absent when the input fails). */
+  /** Hash of the geometry input in that document (absent when the input fails). */
   readonly inputHash?: string
   readonly evaluation?: PartEvaluation
   readonly error?: AppError
@@ -56,7 +60,7 @@ export interface EvaluationSource {
 }
 
 export interface EvaluationScheduler extends EvaluationService {
-  /** Start following a project: every part is dirty (evaluated at once, in document order). */
+  /** Start following a project: every part and plan is dirty (evaluated at once, parts first). */
   attach(source: EvaluationSource): void
   /** Project closed: abort everything, drop all results. */
   close(): void
@@ -66,6 +70,15 @@ export interface EvaluationScheduler extends EvaluationService {
    * docs/architecture/workers.md#evaluation-status). Returns the unsubscribe.
    */
   onChange(listener: (partId: string) => void): () => void
+  /**
+   * The plan's part (snapshot scene, docs/modes/plan-v0.2.md#plan-only-edits-and-the-snapshot-scene):
+   * as `state`, for `design.part` of the plan on its stock copy.
+   */
+  planState(doc: ProjectDoc, planId: string): PartEvaluationState
+  /** As `evaluate`, for the plan's part; a newer revision of the plan's part → `op.aborted`. */
+  evaluatePlan(planId: string, signal: AbortSignal): AsyncAppResult<PartEvaluationState>
+  /** As `onChange`, with a plan id whenever the state of the plan's part may have changed. */
+  onPlanChange(listener: (planId: string) => void): () => void
 }
 
 export interface SchedulerOptions {
@@ -73,14 +86,20 @@ export interface SchedulerOptions {
   readonly timers?: Timers
   readonly clock?: Clock
   readonly log?: Logger
-  /** Trailing debounce per part, no max wait (default 200 ms). */
+  /** Trailing debounce per subject, no max wait (default 200 ms). */
   readonly debounceMs?: number
-  /** Results kept per part, by input hash (default 8). */
+  /** Results kept per subject, by input hash (default 8). */
   readonly lruSize?: number
 }
 
 export const EVALUATION_DEBOUNCE_MS = 200
 export const EVALUATION_LRU_SIZE = 8
+
+/** What is evaluated: a design part, or a plan's part (its snapshot with plan-only edits). */
+type SubjectKind = 'part' | 'plan'
+
+/** Map key of a subject (ids are file-name safe, never contain `:`). */
+const keyOf = (kind: SubjectKind, id: string): string => `${kind}:${id}`
 
 type Computed =
   | { readonly ok: true; readonly hash: string; readonly input: PartGeometryInput }
@@ -98,7 +117,8 @@ interface Request {
   readonly attempt: number
 }
 
-interface PartEntry {
+interface Entry {
+  readonly kind: SubjectKind
   readonly id: string
   /** Clock time of the last change that altered the input (priority: most recent first). */
   lastEdit: number
@@ -106,7 +126,7 @@ interface PartEntry {
   timer: unknown
   /** Debounce over (or skipped): waiting for its turn. */
   due: boolean
-  /** Asked for by `design.part.evaluate`: goes before automatic ones. */
+  /** Asked for by `design.part.evaluate` / `evaluatePlan`: goes before automatic ones. */
   urgent: boolean
   attempt: number
   running: Request | undefined
@@ -128,15 +148,29 @@ const WHERE = 'EvaluationScheduler'
 
 const abortedErr = (message: string) => fail('op.aborted', message, { where: WHERE })
 
-/** Part ids a patch may change the geometry input of (`undefined` = all parts). */
-function touchedParts(patches: readonly Patch[], doc: ProjectDoc): Set<string> {
-  const out = new Set<string>()
+const exists = (doc: ProjectDoc, kind: SubjectKind, id: string): boolean =>
+  Object.hasOwn(kind === 'part' ? doc.parts : doc.plans, id)
+
+const idsOf = (doc: ProjectDoc, kind: SubjectKind): string[] =>
+  Object.keys(kind === 'part' ? doc.parts : doc.plans)
+
+/** Subjects a patch may change the geometry input of, as `[kind, id]` by key. */
+function touchedSubjects(
+  patches: readonly Patch[],
+  doc: ProjectDoc,
+): Map<string, [SubjectKind, string]> {
+  const out = new Map<string, [SubjectKind, string]>()
+  const add = (kind: SubjectKind, id: string) => out.set(keyOf(kind, id), [kind, id])
   for (const p of patches) {
     const [area, id] = p.path
-    if (area === 'parts' && typeof id === 'string') out.add(id)
-    // a whole-record replace, or a stock snapshot change: recompute every part (cheap)
+    if (area === 'parts' && typeof id === 'string') add('part', id)
+    else if (area === 'plans' && typeof id === 'string') add('plan', id)
+    // a whole-record replace, or a stock snapshot change: recompute every part (cheap); plans
+    // keep their own stock copies
     else if (area === 'parts' || area === 'snapshots' || p.path.length === 0)
-      for (const partId of Object.keys(doc.parts)) out.add(partId)
+      for (const partId of idsOf(doc, 'part')) add('part', partId)
+    if ((area === 'plans' && id === undefined) || p.path.length === 0)
+      for (const planId of idsOf(doc, 'plan')) add('plan', planId)
   }
   return out
 }
@@ -147,36 +181,44 @@ export function createEvaluationScheduler(opts: SchedulerOptions): EvaluationSch
   const log = (opts.log ?? noopLogger).child({ scope: 'evaluation' })
   const debounceMs = opts.debounceMs ?? EVALUATION_DEBOUNCE_MS
   const lruSize = opts.lruSize ?? EVALUATION_LRU_SIZE
-  const parts = new Map<string, PartEntry>()
-  /** Per immutable document: the computed input of each part. */
+  const entries = new Map<string, Entry>()
+  /** Per immutable document: the computed input of each subject, by key. */
   const computedByDoc = new WeakMap<ProjectDoc, Map<string, Computed>>()
   let source: EvaluationSource | undefined
   let unsubscribe: (() => void) | undefined
-  /** At most one evaluation requested at a time, so a newly due part can go first. */
-  let inFlight: PartEntry | undefined
-  const listeners = new Set<(partId: string) => void>()
-  const notify = (partId: string): void => {
-    for (const l of [...listeners]) l(partId)
+  /** At most one evaluation requested at a time, so a newly due subject can go first. */
+  let inFlight: Entry | undefined
+  const listeners: Record<SubjectKind, Set<(id: string) => void>> = {
+    part: new Set(),
+    plan: new Set(),
   }
+  const notify = (kind: SubjectKind, id: string): void => {
+    for (const l of [...listeners[kind]]) l(id)
+  }
+  const label = (e: Pick<Entry, 'kind' | 'id'>) =>
+    e.kind === 'part' ? `part ${e.id}` : `the part of plan ${e.id}`
 
-  function compute(doc: ProjectDoc, partId: string): Computed {
+  function compute(doc: ProjectDoc, kind: SubjectKind, id: string): Computed {
     let perDoc = computedByDoc.get(doc)
     if (perDoc === undefined) computedByDoc.set(doc, (perDoc = new Map()))
-    const hit = perDoc.get(partId)
+    const key = keyOf(kind, id)
+    const hit = perDoc.get(key)
     if (hit !== undefined) return hit
-    const input = partGeometryInput(doc, partId)
+    const input = kind === 'part' ? partGeometryInput(doc, id) : planGeometryInput(doc, id)
     const c: Computed = input.isOk()
       ? { ok: true, hash: hashJson(input.unwrap()), input: input.unwrap() }
       : { ok: false, error: input.unwrapErr() }
-    perDoc.set(partId, c)
+    perDoc.set(key, c)
     return c
   }
 
-  function entry(partId: string): PartEntry {
-    let e = parts.get(partId)
+  function entry(kind: SubjectKind, id: string): Entry {
+    const key = keyOf(kind, id)
+    let e = entries.get(key)
     if (e === undefined) {
       e = {
-        id: partId,
+        kind,
+        id,
         lastEdit: 0,
         current: undefined,
         timer: undefined,
@@ -190,12 +232,12 @@ export function createEvaluationScheduler(opts: SchedulerOptions): EvaluationSch
         lru: new Map(),
         waiters: [],
       }
-      parts.set(partId, e)
+      entries.set(key, e)
     }
     return e
   }
 
-  function stateOf(e: PartEntry | undefined, c: Computed): PartEvaluationState {
+  function stateOf(e: Entry | undefined, c: Computed): PartEvaluationState {
     if (!c.ok) return { status: 'failed', error: c.error }
     const isCurrent = e?.current?.ok === true && e.current.hash === c.hash
     if (isCurrent && !e.quiet) return { status: 'pending', inputHash: c.hash }
@@ -208,8 +250,24 @@ export function createEvaluationScheduler(opts: SchedulerOptions): EvaluationSch
       : { status: 'failed', inputHash: c.hash, error: r.unwrapErr() }
   }
 
+  /** Stores a result as the most recent of the subject's LRU. */
+  function store(e: Entry, hash: string, r: AppResult<PartEvaluation>): void {
+    e.lru.delete(hash)
+    e.lru.set(hash, r)
+    while (e.lru.size > lruSize) e.lru.delete(e.lru.keys().next().value!)
+  }
+
+  /** A result for `hash` stored by another subject (e.g. an unedited plan and its design part). */
+  function shared(hash: string): AppResult<PartEvaluation> | undefined {
+    for (const other of entries.values()) {
+      const r = other.lru.get(hash)
+      if (r !== undefined) return r
+    }
+    return undefined
+  }
+
   function resolveWaiters(
-    e: PartEntry,
+    e: Entry,
     pred: (w: Waiter) => boolean,
     r: () => AppResult<PartEvaluationState>,
   ) {
@@ -221,38 +279,39 @@ export function createEvaluationScheduler(opts: SchedulerOptions): EvaluationSch
     e.waiters = keep
   }
 
-  function abortRunning(e: PartEntry, why: string): void {
+  function abortRunning(e: Entry, why: string): void {
     if (e.running === undefined) return
-    log.debug({ partId: e.id, hash: e.running.hash, why }, 'evaluation aborted')
+    log.debug({ [`${e.kind}Id`]: e.id, hash: e.running.hash, why }, 'evaluation aborted')
     e.running.controller.abort()
     e.running = undefined
   }
 
-  function remove(partId: string): void {
-    const e = parts.get(partId)
+  function remove(kind: SubjectKind, id: string): void {
+    const key = keyOf(kind, id)
+    const e = entries.get(key)
     if (e === undefined) return
     timers.clear(e.timer)
-    abortRunning(e, 'part removed')
+    abortRunning(e, `${kind} removed`)
     resolveWaiters(
       e,
       () => true,
-      () => abortedErr(`part ${partId} was removed`),
+      () => abortedErr(`${label(e)} was removed`),
     )
-    parts.delete(partId)
-    notify(partId)
+    entries.delete(key)
+    notify(kind, id)
   }
 
-  /** A commit may have changed the part's input. */
-  function changed(doc: ProjectDoc, partId: string, debounce: boolean): void {
-    if (!Object.hasOwn(doc.parts, partId)) return remove(partId)
-    const before = parts.get(partId)?.current
-    update(doc, partId, debounce)
-    if (parts.get(partId)?.current !== before) notify(partId)
+  /** A commit may have changed the subject's input. */
+  function changed(doc: ProjectDoc, kind: SubjectKind, id: string, debounce: boolean): void {
+    if (!exists(doc, kind, id)) return remove(kind, id)
+    const before = entries.get(keyOf(kind, id))?.current
+    update(doc, kind, id, debounce)
+    if (entries.get(keyOf(kind, id))?.current !== before) notify(kind, id)
   }
 
-  function update(doc: ProjectDoc, partId: string, debounce: boolean): void {
-    const e = entry(partId)
-    const c = compute(doc, partId)
+  function update(doc: ProjectDoc, kind: SubjectKind, id: string, debounce: boolean): void {
+    const e = entry(kind, id)
+    const c = compute(doc, kind, id)
     const prev = e.current
     if (prev !== undefined && prev.ok && c.ok && prev.hash === c.hash) return // e.g. a rename
     e.current = c
@@ -277,7 +336,7 @@ export function createEvaluationScheduler(opts: SchedulerOptions): EvaluationSch
     resolveWaiters(
       e,
       (w) => w.hash !== c.hash,
-      () => abortedErr(`part ${partId} changed; evaluate again`),
+      () => abortedErr(`${label(e)} changed; evaluate again`),
     )
     if (!debounce) {
       e.due = true
@@ -288,13 +347,13 @@ export function createEvaluationScheduler(opts: SchedulerOptions): EvaluationSch
       e.quiet = true
       e.due = true
       schedule()
-      notify(e.id) // a cached result of this input shows now
+      notify(e.kind, e.id) // a cached result of this input shows now
     }, debounceMs)
   }
 
-  function next(): PartEntry | undefined {
-    let best: PartEntry | undefined
-    for (const e of parts.values()) {
+  function next(): Entry | undefined {
+    let best: Entry | undefined
+    for (const e of entries.values()) {
       if (!e.due || e.running !== undefined) continue
       if (
         best === undefined ||
@@ -314,23 +373,25 @@ export function createEvaluationScheduler(opts: SchedulerOptions): EvaluationSch
       e.urgent = false
       const c = e.current
       if (c === undefined || !c.ok) continue
-      if (e.lru.has(c.hash)) {
-        // undo/redo back to an evaluated input: instant, no worker run
-        const r = e.lru.get(c.hash)!
-        e.lru.delete(c.hash)
-        e.lru.set(c.hash, r)
+      const own = e.lru.get(c.hash)
+      const r = own ?? shared(c.hash)
+      if (r !== undefined) {
+        // undo/redo back to an evaluated input, or an input another subject has: instant, no
+        // worker run
+        store(e, c.hash, r)
         resolveWaiters(
           e,
           (w) => w.hash === c.hash,
           () => Ok(stateOf(e, c)),
         )
+        if (own === undefined) notify(e.kind, e.id)
         continue
       }
       start(e, c)
     }
   }
 
-  function start(e: PartEntry, c: Extract<Computed, { ok: true }>): void {
+  function start(e: Entry, c: Extract<Computed, { ok: true }>): void {
     const req: Request = {
       hash: c.hash,
       revision: source!.revision,
@@ -340,7 +401,12 @@ export function createEvaluationScheduler(opts: SchedulerOptions): EvaluationSch
     e.running = req
     inFlight = e
     log.debug(
-      { partId: e.id, hash: c.hash, revision: req.revision, attempt: req.attempt },
+      {
+        [`${e.kind}Id`]: e.id,
+        hash: c.hash,
+        revision: req.revision,
+        attempt: req.attempt,
+      },
       'evaluation started',
     )
     void opts.workers
@@ -348,11 +414,11 @@ export function createEvaluationScheduler(opts: SchedulerOptions): EvaluationSch
       .then((r) => finished(e, req, r))
   }
 
-  function finished(e: PartEntry, req: Request, r: AppResult<PartEvaluation>): void {
+  function finished(e: Entry, req: Request, r: AppResult<PartEvaluation>): void {
     if (inFlight === e) inFlight = undefined
     if (e.running === req) e.running = undefined
-    // aborted by us (newer revision, removed part, close): nothing to store or answer
-    if (parts.get(e.id) !== e || req.controller.signal.aborted) {
+    // aborted by us (newer revision, removed subject, close): nothing to store or answer
+    if (entries.get(keyOf(e.kind, e.id)) !== e || req.controller.signal.aborted) {
       schedule()
       return
     }
@@ -361,7 +427,7 @@ export function createEvaluationScheduler(opts: SchedulerOptions): EvaluationSch
     // a crash, a timeout or an abort nobody asked for (e.g. the pool closed): not the input's fault
     if (code === 'internal.unexpected' || code === 'op.timeout' || code === 'op.aborted') {
       if (req.attempt === 1 && current) {
-        log.debug({ partId: e.id, code }, 'evaluation retried')
+        log.debug({ [`${e.kind}Id`]: e.id, code }, 'evaluation retried')
         e.attempt = 2
         e.due = true
       } else if (current) {
@@ -373,7 +439,7 @@ export function createEvaluationScheduler(opts: SchedulerOptions): EvaluationSch
           (w) => w.hash === req.hash,
           () => Ok(stateOf(e, c)),
         )
-        notify(e.id)
+        notify(e.kind, e.id)
       }
       schedule()
       return
@@ -381,17 +447,18 @@ export function createEvaluationScheduler(opts: SchedulerOptions): EvaluationSch
     // a straggler for an older input (out of order): dropped; a result for the current input
     // is valid whatever its revision (e.g. after a re-attach)
     if (req.revision <= e.storedRevision && !current) {
-      log.debug({ partId: e.id, revision: req.revision }, 'out-of-order evaluation result dropped')
+      log.debug(
+        { [`${e.kind}Id`]: e.id, revision: req.revision },
+        'out-of-order evaluation result dropped',
+      )
       schedule()
       return
     }
     e.storedRevision = Math.max(e.storedRevision, req.revision)
-    e.lru.delete(req.hash)
-    e.lru.set(req.hash, r)
-    while (e.lru.size > lruSize) e.lru.delete(e.lru.keys().next().value!)
+    store(e, req.hash, r)
     log.debug(
       {
-        partId: e.id,
+        [`${e.kind}Id`]: e.id,
         hash: req.hash,
         ok: r.isOk(),
         ms: r.isOk() ? r.unwrap().stats.ms : undefined,
@@ -405,16 +472,16 @@ export function createEvaluationScheduler(opts: SchedulerOptions): EvaluationSch
         (w) => w.hash === req.hash,
         () => Ok(stateOf(e, c)),
       )
-    notify(e.id)
+    notify(e.kind, e.id)
     schedule()
   }
 
   function onCommit(patches: readonly Patch[] | undefined): void {
     if (source === undefined || patches === undefined || patches.length === 0) return
     const doc = source.doc
-    for (const partId of touchedParts(patches, doc)) changed(doc, partId, true)
-    // parts that vanished without a `parts/<id>` patch (whole-record replace)
-    for (const partId of [...parts.keys()]) if (!Object.hasOwn(doc.parts, partId)) remove(partId)
+    for (const [kind, id] of touchedSubjects(patches, doc).values()) changed(doc, kind, id, true)
+    // subjects that vanished without a `parts/<id>` / `plans/<id>` patch (whole-record replace)
+    for (const e of [...entries.values()]) if (!exists(doc, e.kind, e.id)) remove(e.kind, e.id)
     schedule()
   }
 
@@ -422,8 +489,70 @@ export function createEvaluationScheduler(opts: SchedulerOptions): EvaluationSch
     unsubscribe?.()
     unsubscribe = undefined
     source = undefined
-    for (const partId of [...parts.keys()]) remove(partId)
+    for (const e of [...entries.values()]) remove(e.kind, e.id)
     inFlight = undefined
+  }
+
+  function subscribe(kind: SubjectKind, listener: (id: string) => void): () => void {
+    listeners[kind].add(listener)
+    return () => void listeners[kind].delete(listener)
+  }
+
+  function evaluateSubject(
+    kind: SubjectKind,
+    id: string,
+    signal: AbortSignal,
+  ): AsyncAppResult<PartEvaluationState> {
+    if (source === undefined)
+      return Promise.resolve(fail('internal.unexpected', 'no project attached', { where: WHERE }))
+    const doc = source.doc
+    if (!exists(doc, kind, id))
+      return Promise.resolve(
+        kind === 'part' ? unknownPart(id, 'design.part.evaluate') : unknownPlan(id, WHERE),
+      )
+    if (signal.aborted) return Promise.resolve(abortedErr('aborted'))
+    const e = entry(kind, id)
+    if (e.current === undefined) changed(doc, kind, id, false)
+    const c = e.current!
+    // skips the debounce; a transient failure is run again
+    e.quiet = true
+    if (c.ok && e.transient?.hash === c.hash) {
+      e.transient = undefined
+      e.attempt = 1
+    }
+    const now = stateOf(e, c)
+    if (now.status !== 'pending') {
+      notify(kind, id) // skipping the debounce may show a cached result
+      return Promise.resolve(Ok(now))
+    }
+    return new Promise((resolve) => {
+      const w: Waiter = {
+        hash: (c as Extract<Computed, { ok: true }>).hash,
+        resolve: (r) => {
+          signal.removeEventListener('abort', onAbort)
+          resolve(r)
+        },
+      }
+      const onAbort = () => {
+        e.waiters = e.waiters.filter((x) => x !== w)
+        resolve(
+          abortedErr(
+            kind === 'part'
+              ? 'design.part.evaluate was aborted'
+              : `evaluation of ${label(e)} was aborted`,
+          ),
+        )
+      }
+      signal.addEventListener('abort', onAbort, { once: true })
+      e.waiters.push(w)
+      if (e.running?.hash !== w.hash) {
+        timers.clear(e.timer)
+        e.timer = undefined
+        e.due = true
+        e.urgent = true
+      }
+      schedule()
+    })
   }
 
   return {
@@ -434,61 +563,22 @@ export function createEvaluationScheduler(opts: SchedulerOptions): EvaluationSch
       unsubscribe = s.log.subscribe({ withPatches: true }, (e) =>
         onCommit('patches' in e ? e.patches : undefined),
       )
-      for (const partId of Object.keys(s.doc.parts)) changed(s.doc, partId, false)
+      // parts first: an unedited plan's part then reuses its design part's result
+      for (const partId of idsOf(s.doc, 'part')) changed(s.doc, 'part', partId, false)
+      for (const planId of idsOf(s.doc, 'plan')) changed(s.doc, 'plan', planId, false)
       schedule()
     },
     close,
-    onChange(listener) {
-      listeners.add(listener)
-      return () => void listeners.delete(listener)
-    },
+    onChange: (listener) => subscribe('part', listener),
+    onPlanChange: (listener) => subscribe('plan', listener),
     state(doc, partId) {
-      return stateOf(parts.get(partId), compute(doc, partId))
+      return stateOf(entries.get(keyOf('part', partId)), compute(doc, 'part', partId))
     },
-    evaluate(partId, signal) {
-      if (source === undefined)
-        return Promise.resolve(fail('internal.unexpected', 'no project attached', { where: WHERE }))
-      const doc = source.doc
-      if (!Object.hasOwn(doc.parts, partId))
-        return Promise.resolve(unknownPart(partId, 'design.part.evaluate'))
-      if (signal.aborted) return Promise.resolve(abortedErr('aborted'))
-      const e = entry(partId)
-      if (e.current === undefined) changed(doc, partId, false)
-      const c = e.current!
-      // skips the debounce; a transient failure is run again
-      e.quiet = true
-      if (c.ok && e.transient?.hash === c.hash) {
-        e.transient = undefined
-        e.attempt = 1
-      }
-      const now = stateOf(e, c)
-      if (now.status !== 'pending') {
-        notify(partId) // skipping the debounce may show a cached result
-        return Promise.resolve(Ok(now))
-      }
-      return new Promise((resolve) => {
-        const w: Waiter = {
-          hash: (c as Extract<Computed, { ok: true }>).hash,
-          resolve: (r) => {
-            signal.removeEventListener('abort', onAbort)
-            resolve(r)
-          },
-        }
-        const onAbort = () => {
-          e.waiters = e.waiters.filter((x) => x !== w)
-          resolve(abortedErr('design.part.evaluate was aborted'))
-        }
-        signal.addEventListener('abort', onAbort, { once: true })
-        e.waiters.push(w)
-        if (e.running?.hash !== w.hash) {
-          timers.clear(e.timer)
-          e.timer = undefined
-          e.due = true
-          e.urgent = true
-        }
-        schedule()
-      })
+    planState(doc, planId) {
+      return stateOf(entries.get(keyOf('plan', planId)), compute(doc, 'plan', planId))
     },
+    evaluate: (partId, signal) => evaluateSubject('part', partId, signal),
+    evaluatePlan: (planId, signal) => evaluateSubject('plan', planId, signal),
   }
 }
 

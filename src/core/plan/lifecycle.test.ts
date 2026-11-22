@@ -177,6 +177,27 @@ describe('rebuild validity against the plan’s own stock copy', () => {
   })
 })
 
+describe('plan.design.operation.revert against the plan’s own stock copy', () => {
+  it('fails when the taken version no longer fits the stock copy; the edit stays', async () => {
+    const s = await planSetup()
+    const planId = await s.create()
+    await s.toStatus(planId, 'settledDesign')
+    // drill2–4 are 12.5 mm deep: make them fit a 10 mm stock in the plan, then thin the plan's copy
+    for (const operationId of ['drill2', 'drill3', 'drill4'])
+      await s.run('plan.design.operation.update', { planId, operationId, depth: '8' })
+    await setStockThickness(s, '10')
+    const stockCopy = s.plan(planId).design.part.stock
+    await s.run('plan.libraryItem.update', { planId, snapshotId: stockCopy })
+    const before = s.plan(planId)
+    const planOperationId = opsOf(before).find((o) => o.designOperationIds.includes('drill2'))!.id
+    expectErrCode(
+      await s.d.dispatch('plan.design.operation.revert', { planId, planOperationId }, ui),
+      'model.invariant',
+    )
+    expect(s.plan(planId)).toEqual(before)
+  })
+})
+
 describe('rebuild order', () => {
   it('kept operations move after the operations whose surfaces they now start from', async () => {
     for (const status of ['draft', 'settledDesign'] as const) {
@@ -317,6 +338,7 @@ describe('undo law of every plan command', () => {
     }
     const ops = opsOf(s.plan(planId))
     const setupId = s.plan(planId).setups[0]!.id
+    const pocketOp = ops.find((o) => o.designOperationIds.includes('pocket1'))!.id
     await changeTool(s)
     const toolCopy = stale(s, planId).libraryCopies[0]!.snapshotId
     const cases: [string, object][] = [
@@ -334,6 +356,8 @@ describe('undo law of every plan command', () => {
         { planId, planOperationId: ops[0]!.id, toolLibraryItemId: s.tools.flat4 },
       ],
       ['plan.status.set', { planId, status: 'settledDesign' }],
+      ['plan.design.operation.update', { planId, operationId: 'pocket1', depth: '7' }],
+      ['plan.design.operation.revert', { planId, planOperationId: pocketOp }],
       ['plan.design.operation.update', { planId, operationId: 'pocket1', depth: '7' }],
       ['plan.rebuild', { planId, discardPlanEdits: true }],
       ['plan.duplicate', { planId }],

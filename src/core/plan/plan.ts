@@ -4,7 +4,9 @@
  * Doc: docs/modes/plan-v0.1.md#plan-record
  */
 import { Err, fail, None, Ok, Some, type AppResult, type Option } from '../../shared/result'
+import { toGeometryInput } from '../design/geometry-input'
 import { partFromDTO, type Operation, type Part } from '../design/operation'
+import type { PartGeometryInput } from '../geometry/model'
 import { Machine } from '../library/machine'
 import { Snapshot, type SnapshotDTO } from '../library/snapshot'
 import { Stock } from '../library/stock'
@@ -113,4 +115,26 @@ export function findPlanOperation(
     issues: [{ path: ['planOperationId'], rule: 'unknownPlanOperation', message: 'no such one' }],
     where,
   })
+}
+
+/**
+ * The geometry input of the plan's part (its design snapshot with plan-only edits) on the plan's
+ * stock copy: what the plan scene draws. Only the part and the stock copy are read, so a broken
+ * tool copy never hides the scene.
+ * Doc: docs/modes/plan-v0.2.md#plan-only-edits-and-the-snapshot-scene
+ */
+export function planGeometryInput(doc: ProjectDoc, planId: string): AppResult<PartGeometryInput> {
+  const where = 'planGeometryInput'
+  const found = findPlanDTO(doc, planId, where)
+  if (found.isErr()) return found
+  const plan = found.unwrap()
+  const part = partFromDTO(plan.design.part)
+  if (part.isErr()) return Err(part.unwrapErr().prefixIssues('design', 'part').withContext(where))
+  const dto = snapshotById(plan, plan.design.part.stock)
+  if (dto === undefined) return broken(plan, 'the stock copy is missing', where)
+  const stock = Snapshot.fromDTO(dto)
+  if (stock.isErr()) return Err(stock.unwrapErr().withContext(where))
+  const values = stock.unwrap().values
+  if (!(values instanceof Stock)) return broken(plan, 'the stock copy is not a stock', where)
+  return toGeometryInput(part.unwrap(), values)
 }

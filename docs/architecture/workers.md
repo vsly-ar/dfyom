@@ -162,6 +162,8 @@ Extends [geometry.md](geometry.md#wasm-lifetime-and-ownership):
 
 A per-dispatcher `EvaluationScheduler` (`src/core/design/evaluation.ts`, headless; timers through an injected `Timer` port like `Clock`) keeps each part's evaluation current. It is not a job: one job per edit would flood the action log and job table.
 
+**Plans' parts (v0.2, task E3a).** The scheduler also evaluates each plan's part – `design.part` of the plan (the design snapshot with [plan-only edits](../modes/plan-v0.2.md#plan-only-edits-and-the-snapshot-scene)) on the plan's stock copy (`planGeometryInput`, `src/core/plan/plan.ts`) – for the plan scene, with the same rules as a part below: dirty on a `plans/<id>` patch, debounce, abort, LRU, transient retries. Results are cached by input hash **across subjects**: an input hash already evaluated for any part or plan is served from that result without a worker run, so an unedited or freshly rebuilt plan costs nothing, and a plan-only edit costs one evaluation. On attach the parts are due before the plans. API: `planState(doc, planId)`, `evaluatePlan(planId, signal)` (as `evaluate`), `onPlanChange(listener)` (as `onChange`, for the window push of task E3b). Not an agent capability: no command reads it.
+
 ### Triggers and debounce
 
 - The scheduler listens to the dispatcher's commits (action-log subscription with patches). A part is **dirty** when a patch touches it (`parts/<id>/…`); undo/redo count the same. On project open every part is dirty; dirty parts are served most recently edited first.
@@ -287,7 +289,7 @@ Reference as in [geometry.md](geometry.md#performance-budgets-v01) (Apple M1 Pro
 | `src/core/workers/tasks.ts`                                          | `WORKER_TASKS`: `geometry.evaluate`, `toolpath.generate`                                                                                |
 | `src/core/workers/worker-loop.ts`                                    | Environment-neutral worker side over an `Endpoint`                                                                                      |
 | `src/core/workers/pool.ts`                                           | Host side: lanes, queues, timeouts, recycling; implements `WorkerPort`                                                                  |
-| `src/core/design/evaluation.ts`                                      | `EvaluationScheduler`, result store, `design.part.evaluate`                                                                             |
+| `src/core/design/evaluation.ts`                                      | `EvaluationScheduler` (parts and plans' parts), result store, `design.part.evaluate`                                                    |
 | `src/core/toolpath/inputs.ts`                                        | `toGeneratorInputs` (plan operation → generator inputs)                                                                                 |
 | `src/core/toolpath/generate.ts`                                      | `plan.toolpath.generate` job, `plan.toolpath.get`                                                                                       |
 | `src/core/toolpath/cache.ts`                                         | `ToolpathCache`                                                                                                                         |
