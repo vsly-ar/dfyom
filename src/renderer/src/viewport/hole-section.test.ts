@@ -1,4 +1,4 @@
-// holeSection (v0.4 U2): true proportions, through vs blind (break line), counterbore step,
+// holeSection (v0.4 U2): true proportions, through vs blind (fading out, D45), counterbore step,
 // countersink cone, drill point, the screw silhouette and its head sink, measured parts per field,
 // invalid parts, and the accessible label. Doc: docs/conventions/ui.md#section-illustration
 import { describe, expect, it } from 'vitest'
@@ -21,6 +21,8 @@ const base: HoleSectionValues = {
   stockDepth: 10,
 }
 
+const fades = (prims: readonly SketchPrimitive[]) =>
+  prims.filter((p): p is Extract<SketchPrimitive, { kind: 'fade' }> => p.kind === 'fade')
 const measures = (prims: readonly SketchPrimitive[]) =>
   prims.filter((p): p is Extract<SketchPrimitive, { kind: 'measure' }> => p.kind === 'measure')
 const measure = (prims: readonly SketchPrimitive[], part: string) =>
@@ -37,6 +39,7 @@ describe('holeSection', () => {
     expect(s.bounds.minY).toBe(0)
     expect(s.primitives.filter((p) => p.kind === 'material')).toHaveLength(2)
     expect(lines(s.primitives, 'break')).toHaveLength(0)
+    expect(fades(s.primitives)).toHaveLength(0)
     // the bore wall runs from the face to the bottom at r = 1.7
     const wall = lines(s.primitives, 'edge')[0]!
     expect(wall.points).toEqual([
@@ -48,11 +51,23 @@ describe('holeSection', () => {
     expect(s.label).toBe('Section: Ø 3.4 mm through.')
   })
 
-  it('cuts a blind hole by a break line under its drill point', () => {
+  it("fades the stock out under a blind hole's drill point (no break line, D45)", () => {
     const s = holeSection({ ...base, bottom: 'drillPoint', depth: 4, stockDepth: 40 }, 'mm')
     expect(s.primitives.filter((p) => p.kind === 'material')).toHaveLength(1)
-    expect(lines(s.primitives, 'break')).toHaveLength(1)
+    expect(lines(s.primitives, 'break')).toHaveLength(0)
     const tip = 1.7 / Math.tan((59 * Math.PI) / 180)
+    // one fade across the drawing, from below the tip down to the drawn bottom; no bottom line
+    const [fade, ...more] = fades(s.primitives)
+    expect(more).toHaveLength(0)
+    expect(fade).toMatchObject({ x0: s.bounds.minX, x1: s.bounds.maxX, to: s.bounds.maxY })
+    expect(fade!.from).toBeGreaterThan(4 + tip)
+    expect(fade!.from).toBeLessThan(s.bounds.maxY)
+    expect(
+      lines(s.primitives, 'edge').some((l) => l.points.every(([, y]) => y === s.bounds.maxY)),
+    ).toBe(false)
+    // drawn before the measures, so a highlighted part stays on top
+    const at = (k: string) => s.primitives.findIndex((p) => p.kind === k)
+    expect(at('fade')).toBeLessThan(at('measure'))
     const profile = lines(s.primitives, 'edge')[0]!.points
     expect(profile).toContainEqual([0, 4 + tip])
     expect(s.bounds.maxY).toBeGreaterThan(4 + tip)
@@ -64,6 +79,7 @@ describe('holeSection', () => {
   it('ends a blind hole at the stock bottom when it is that close', () => {
     const s = holeSection({ ...base, bottom: 'flat', depth: 8, stockDepth: 10 }, 'mm')
     expect(lines(s.primitives, 'break')).toHaveLength(0)
+    expect(fades(s.primitives)).toHaveLength(0)
     expect(s.bounds.maxY).toBe(10)
   })
 

@@ -365,14 +365,7 @@ export function operationIssues(
           allowed: [edge.on],
           actual: op.on,
         })
-      if (c.positive(op.diameter, 'diameter') && edgeDiameter !== undefined)
-        c.check(
-          op.diameter.exact.compare(edgeDiameter.exact) > 0,
-          'diameter',
-          'greaterThanEdge',
-          `must be greater than the diameter of ${op.edgeOf}`,
-          { min: edgeDiameter.canonical, actual: op.diameter.canonical },
-        )
+      c.positive(op.width, 'width')
       c.check(
         op.angle.exact.compare(MIN_CHAMFER_ANGLE) >= 0 &&
           op.angle.exact.compare(MAX_CHAMFER_ANGLE) <= 0,

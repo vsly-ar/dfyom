@@ -76,6 +76,7 @@ export const fastenerRow = (size: string): FastenerRow | undefined =>
   FASTENER_TABLE.find((r) => r.size === size)
 
 const MM_PER_INCH = Rational.create(254n, 10n).unwrap()
+const HALF = Rational.create(1n, 2n).unwrap()
 
 /** Display source of a derived length (exact value kept): mm or inch, at most 4 / 5 decimals. */
 function lengthSource(exactMm: Rational, units: UnitSystem): string {
@@ -370,7 +371,10 @@ function expandHole(h: Hole, ctx: ExpansionContext): AppResult<readonly Expanded
     },
   })
   if (h.head.type === 'simple') return Ok([drill(h.on, h.depth)])
-  if (h.head.type === 'countersink')
+  if (h.head.type === 'countersink') {
+    // the chamfer stores its width (D45): (csDiameter − diameter) / 2, exact
+    const width = derivedLength(h.head.csDiameter.exact.sub(h.diameter.exact).mul(HALF), ctx.units)
+    if (width.isErr()) return width
     return Ok([
       drill(h.on, h.depth),
       {
@@ -379,12 +383,13 @@ function expandHole(h: Hole, ctx: ExpansionContext): AppResult<readonly Expanded
           kind: 'chamfer',
           on: h.on,
           edgeOf: ctx.ownedId('drill'),
-          diameter: h.head.csDiameter,
+          width: width.unwrap(),
           angle: h.head.csAngle,
           stepdown: h.head.csStepdown,
         },
       },
     ])
+  }
   const { cbDiameter, cbDepth } = h.head
   const below: AppResult<Option<Quantity>> = h.depth.isNone()
     ? Ok(None)
@@ -418,7 +423,7 @@ const FIELD_OF: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     'shape.diameter': 'cbDiameter',
     'shape.center': 'center',
   },
-  countersink: { diameter: 'csDiameter', angle: 'csAngle', stepdown: 'csStepdown', on: 'on' },
+  countersink: { width: 'csDiameter', angle: 'csAngle', stepdown: 'csStepdown', on: 'on' },
 }
 
 function holeFieldOf(role: string, path: IssuePath): IssuePath | undefined {

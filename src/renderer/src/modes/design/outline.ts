@@ -228,7 +228,8 @@ export function operationOutline(
       const edge = chamferEdge(ops, op.edgeOf)
       if (edge === undefined) return []
       const [cu, cv] = edge.center
-      const d = op.diameter.canonical
+      // D45: the chamfer stores its width; its diameter at the face follows the edge
+      const d = edge.diameter + 2 * op.width.canonical
       const depth = chamferDepth({
         edgeDiameter: edge.diameter,
         diameter: d,

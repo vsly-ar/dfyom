@@ -333,9 +333,11 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
   await addFromMenu(page, 'Add chamfer')
   await expect(heading('Chamfer 1')).toBeVisible()
   await expect(inspector.getByRole('combobox', { name: 'Edge' })).toContainText('Profile 2 · Ø 22')
-  // 1.5 mm × 45°: the default edge + 1 mm is too shallow for the mill's plywood feed (X1)
-  await setField(inspector, 'Diameter', `${CUTOUT.chamfer}`)
+  // 1.5 mm × 45° (sized by width, D45): the default 0.5 mm is too shallow for the mill's plywood
+  // feed (X1); the diameter at the face follows, read-only
+  await setField(inspector, 'Width', `${CUTOUT.chamferWidth}`)
   await expect(input(inspector, 'Depth')).toHaveValue(/^1\.5/)
+  await expect(input(inspector, 'Diameter')).toHaveValue(`Ø ${CUTOUT.chamfer} mm`)
 
   // ── the counterbored M3 hole 18 mm right of the cutout and its arc Clones ────────────────
   await addFromMenu(page, 'Add hole')

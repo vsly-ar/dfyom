@@ -110,10 +110,11 @@ export const SCREWS = {
 } as const
 
 /**
- * The Ø 22 through cutout (an inside profile), its edge broken by a standalone chamfer of Ø 25 at
- * 90° (1.5 mm × 45°; X2): 1.5 mm of web stays to the M4 counterbores at r 18.
+ * The Ø 22 through cutout (an inside profile), its edge broken by a standalone chamfer 1.5 mm
+ * wide at 90° (1.5 mm × 45°, Ø 25 at the face; X2, sized by width since D45): 1.5 mm of web stays
+ * to the M4 counterbores at r 18.
  */
-export const CUTOUT = { diameter: 22, centre: [60, 0], chamfer: 25 } as const
+export const CUTOUT = { diameter: 22, centre: [60, 0], chamfer: 25, chamferWidth: 1.5 } as const
 
 /**
  * The bolt circle: a counterbored M3 hole right of the cutout's centre and a Clones `arc` row round

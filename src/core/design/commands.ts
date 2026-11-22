@@ -37,7 +37,6 @@ import { loadPart, unknownPart, type LoadedPart } from './load'
 import {
   CENTRE_ANCHOR,
   DEFAULTS,
-  circularEdgeDiameter,
   fieldContext,
   generalToleranceToDTO,
   ID_PREFIX,
@@ -178,7 +177,8 @@ const profileParams = {
 
 const chamferParams = {
   edgeOf: OperationIdSchema.describe('Earlier drilling, circle pocket or inside circle profile'),
-  diameter: Src.describe('Default edge Ø + 1 mm'),
+  width: Src.describe('At the face (1.5 × 45°: 1.5); default 0.5 mm'),
+  depth: Src.describe('Instead of width'),
   angle: Src.describe('Default 90°'),
 }
 
@@ -730,7 +730,8 @@ const profileSpec: KindSpec<typeof profileParams, Extract<Operation, { kind: 'pr
 
 /**
  * v0.4 chamfer (design-v0.4.md § Chamfer operation): `on` is not an argument, it is the edge's
- * face; the default diameter is the edge's + 1 mm (1/32" in inch projects).
+ * face. Sized by its width at the face (D45; default 0.5 mm, 1/64" in inch projects), or by its
+ * depth instead, turned into the width through the angle; a new edge keeps the width.
  */
 const chamferSpec: KindSpec<typeof chamferParams, Extract<Operation, { kind: 'chamfer' }>> = {
   kind: 'chamfer',
@@ -740,19 +741,18 @@ const chamferSpec: KindSpec<typeof chamferParams, Extract<Operation, { kind: 'ch
     const edgeOf = a.edgeOf ?? prev!.edgeOf
     const index = ops.findIndex((o) => o.id === id)
     const edge = (index < 0 ? ops : ops.slice(0, index)).find((o) => o.id === edgeOf)
-    const edgeDiameter = circularEdgeDiameter(edge)
-    const diameter = (): Quantity => {
-      if (a.diameter !== undefined) return f.q('diameter', 'length', a.diameter)
-      if (prev !== undefined && a.edgeOf === undefined) return prev.diameter
-      if (edgeDiameter === undefined)
-        return f.issue(
-          'edgeOf',
-          'chamferEdge',
-          'must be an earlier drilling, circle pocket or inside circle profile',
-        )
-      const widen = f.q('diameter', 'length', DEFAULTS.chamferWidening[f.units])
-      if (widen === undefined) return widen
-      return derivedLength(edgeDiameter.exact.add(widen.exact), f.units).unwrap()
+    const angle = f.pick('angle', 'angle', a.angle, prev?.angle, 'chamferAngle')
+    const width = (): Quantity => {
+      if (a.width !== undefined && a.depth !== undefined)
+        return f.issue('depth', 'notWithWidth', 'give width or depth, not both')
+      if (a.depth !== undefined) {
+        // a plan copy's update shares the profile's nullable `depth`: a chamfer always has one
+        if (typeof a.depth !== 'string') return f.issue('depth', 'required', 'must be a length')
+        const depth = f.q('depth', 'length', a.depth)
+        if (depth === undefined || angle === undefined) return depth
+        return chamferWidthOfDepth(depth, angle, f.units)
+      }
+      return f.pick('width', 'length', a.width, prev?.width, 'chamferWidth')
     }
     return {
       kind: 'chamfer',
@@ -761,12 +761,25 @@ const chamferSpec: KindSpec<typeof chamferParams, Extract<Operation, { kind: 'ch
       generalTolerance: prev?.generalTolerance ?? NO_TOLERANCE,
       on: edge?.on ?? prev?.on ?? STOCK_TOP,
       edgeOf,
-      diameter: diameter(),
-      angle: f.pick('angle', 'angle', a.angle, prev?.angle, 'chamferAngle'),
+      width: width(),
+      angle,
       // stepped only through the hole feature in v0.4 (F7): no arg, kept as it is
       stepdown: prev?.stepdown ?? None,
     }
   },
+}
+
+/** Micrometres per mm: a width from a depth is kept to 1 µm (tan is irrational but at 90°). */
+const MICRONS = 1_000_000
+
+/** The width of a chamfer `depth` deep at `angle`: depth × tan(angle / 2), to 1 µm. */
+function chamferWidthOfDepth(depth: Quantity, angle: Quantity, units: UnitSystem): Quantity {
+  const tan = Math.tan(((angle.canonical / 2) * Math.PI) / 180)
+  const exact = Rational.create(
+    BigInt(Math.round(depth.canonical * tan * MICRONS)),
+    BigInt(MICRONS),
+  ).unwrap()
+  return derivedLength(exact, units).unwrap()
 }
 
 /**
@@ -1275,8 +1288,8 @@ type AnyParamKey =
 export const OPERATION_UPDATE_ARGS = {
   name: NameArg.optional(),
   generalTolerance: ToleranceArg.optional(),
-  // equal names keep the last kind's schema; the chamfer adds only `angle` (its edge is not
-  // re-pointed from a plan, its `diameter` shares the drilling's)
+  // equal names keep the last kind's schema; the chamfer adds `angle` and `width` (its edge is
+  // not re-pointed from a plan; `depth` shares the other kinds')
   ...Object.fromEntries(
     Object.values(KIND_SPECS)
       .filter((spec) => spec.kind !== 'chamfer')
@@ -1285,6 +1298,7 @@ export const OPERATION_UPDATE_ARGS = {
       ),
   ),
   angle: chamferParams.angle.optional(),
+  width: chamferParams.width.optional(),
 } as unknown as {
   name: z.ZodOptional<typeof NameArg>
   generalTolerance: z.ZodOptional<typeof ToleranceArg>

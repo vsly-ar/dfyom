@@ -1,11 +1,14 @@
 // Pure helpers of the chamfer UI (v0.4 task U4): which operations can be a chamfer's edge (a
 // drilling, a circle pocket or an inside circle profile), the edge the Add menu's Chamfer uses (the selected one, else the
 // last in design order, else disabled with the reason), the Edge field's options ("Drilling 2 ·
-// Ø 3.4 mm", earlier operations only) and the section illustration's values from the part.
+// Ø 3.4 mm", earlier operations only), the derived diameter and depth (D45: a chamfer stores its
+// width) and the section illustration's values from the part.
 // Doc: docs/conventions/ui.md#feature-rows-and-add, #chamfer-inspector;
 // docs/modes/design-v0.4.md#implementation-c2
+import { derivedLength } from '../../../../core/design/hole'
 import type { OperationDTO, PartDTO } from '../../../../core/design/part.dto'
 import type { UnitSystem } from '../../../../core/project/document'
+import type { Quantity } from '../../../../core/quantity/quantity'
 import { chamferMessages } from '../../messages/chamfer'
 import { lengthSource } from '../../messages/dfm'
 import type { ChamferSectionValues } from '../../viewport/chamfer-section'
@@ -33,6 +36,29 @@ export const isChamferEdge = (op: OperationDTO): boolean => edgeDiameterDto(op) 
 export function edgeDiameter(op: OperationDTO): number {
   const dto = edgeDiameterDto(op)
   return dto === undefined ? Number.NaN : (quantityOf(dto)?.canonical ?? Number.NaN)
+}
+
+/**
+ * The chamfer's diameter at the face, edge Ø + 2 × width (core `chamferDiameter`), exact and
+ * shown in the project's units; undefined while the edge or the width doesn't load.
+ */
+export function chamferDiameter(
+  part: Pick<PartDTO, 'operations'>,
+  chamfer: ChamferDTO,
+  units: UnitSystem,
+): Quantity | undefined {
+  const edge = part.operations.find((o) => o.id === chamfer.edgeOf)
+  const edgeDto = edge === undefined ? undefined : edgeDiameterDto(edge)
+  const edgeQ = edgeDto === undefined ? undefined : quantityOf(edgeDto)
+  const width = quantityOf(chamfer.width)
+  if (edgeQ === undefined || width === undefined) return undefined
+  const d = derivedLength(edgeQ.exact.add(width.exact).add(width.exact), units)
+  return d.isOk() ? d.unwrap() : undefined
+}
+
+/** The chamfer's depth below the face (mm): width / tan(angle / 2), as core `chamferDepth`. */
+export function chamferDepthOf(width: number, angle: number): number {
+  return width / Math.tan(((angle / 2) * Math.PI) / 180)
 }
 
 export type ChamferEdgeChoice =
@@ -84,11 +110,12 @@ export function chamferSectionValues(
   invalid?: ReadonlySet<string>,
 ): ChamferSectionValues | undefined {
   const edge = part.dto.operations.find((o) => o.id === chamfer.edgeOf)
-  const diameter = quantityOf(chamfer.diameter)?.canonical
+  const width = quantityOf(chamfer.width)?.canonical
   const angle = quantityOf(chamfer.angle)?.canonical
-  if (edge === undefined || diameter === undefined || angle === undefined) return undefined
+  if (edge === undefined || width === undefined || angle === undefined) return undefined
   const edgeD = edgeDiameter(edge)
   if (!Number.isFinite(edgeD)) return undefined
+  const diameter = edgeD + 2 * width
   let depth = Number.NaN
   let through = false
   if (edge.kind === 'pocket') depth = quantityOf(edge.depth)?.canonical ?? Number.NaN
@@ -103,6 +130,7 @@ export function chamferSectionValues(
     }
   }
   return {
+    width,
     diameter,
     angle,
     edgeDiameter: edgeD,

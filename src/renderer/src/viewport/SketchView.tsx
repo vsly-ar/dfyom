@@ -5,7 +5,9 @@
 // `--danger` with the error marker. Pointer over or on a measured part reports it (the caller
 // highlights and focuses its field); the fields are the non-pointer path, so the image is one
 // `role="img"` with the sketch's label and its targets are hidden from assistive tech. Paths morph
-// between values with a CSS `d` transition (`--motion-base`, cut under reduced motion).
+// between values with a CSS `d` transition (`--motion-base`, cut under reduced motion). A `fade`
+// is a band filled with a gradient to the box's background (`--sketch-bg`, default `--bg-field`),
+// so stock that runs on beyond the drawing fades out in both themes (D45).
 // Doc: docs/conventions/ui.md#section-illustration
 import { useId, useLayoutEffect, useRef, useState } from 'react'
 import { fitSketch, sketchPath, toPx, type Sketch, type SketchPrimitive } from './sketch'
@@ -60,7 +62,9 @@ export function SketchView({
 }: SketchViewProps): React.JSX.Element {
   const [ref, width] = useWidth()
   const [hovered, setHovered] = useState<string | null>(null)
-  const hatch = `sketch-hatch-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
+  const uid = useId().replace(/[^a-zA-Z0-9_-]/g, '')
+  const hatch = `sketch-hatch-${uid}`
+  const fade = `sketch-fade-${uid}`
   const fit = fitSketch(sketch.bounds, width, height, PAD)
   const d = (points: Parameters<typeof sketchPath>[1], closed = false) =>
     sketchPath(fit, points, closed)
@@ -98,6 +102,19 @@ export function SketchView({
           >
             <line x1="0" y1="0" x2="0" y2="5" className={styles['hatchLine']} />
           </pattern>
+          {(['down', 'up'] as const).map((dir) => (
+            <linearGradient
+              key={dir}
+              id={`${fade}-${dir}`}
+              x1="0"
+              y1={dir === 'down' ? '0' : '1'}
+              x2="0"
+              y2={dir === 'down' ? '1' : '0'}
+            >
+              <stop offset="0" stopOpacity="0" className={styles['fadeStop']} />
+              <stop offset="1" stopOpacity="1" className={styles['fadeStop']} />
+            </linearGradient>
+          ))}
         </defs>
         <g aria-hidden="true">
           {sketch.primitives.map((p, i) =>
@@ -107,6 +124,24 @@ export function SketchView({
                 {...pathProps(d(p.points, true))}
                 fill={`url(#${hatch})`}
                 className={styles['material']}
+              />
+            ) : p.kind === 'fade' ? (
+              <path
+                key={`f${i}`}
+                {...pathProps(
+                  d(
+                    [
+                      [p.x0, p.from],
+                      [p.x1, p.from],
+                      [p.x1, p.to],
+                      [p.x0, p.to],
+                    ],
+                    true,
+                  ),
+                )}
+                fill={`url(#${fade}-${p.to >= p.from ? 'down' : 'up'})`}
+                className={styles['fade']}
+                data-fade
               />
             ) : p.kind === 'line' ? (
               <path

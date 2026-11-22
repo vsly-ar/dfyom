@@ -178,7 +178,8 @@ export const ChamferDtoSchema = z.object({
   ...common,
   on: SurfaceIdSchema,
   edgeOf: OperationIdSchema,
-  diameter: length(),
+  /** The chamfer's width at the face (D45); diameter = edge Ø + 2 × width. */
+  width: length(),
   angle: quantityDto('angle'),
   /** Present = stepped (v0.4 F7): terraces of at most this height by a flat end mill. */
   stepdown: length().optional(),

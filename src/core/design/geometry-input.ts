@@ -16,6 +16,7 @@ import type { Direction } from '../geometry/face'
 import type { Stock } from '../library/stock'
 import type { Region2dPort } from '../geometry/2d/port'
 import {
+  chamferDiameter,
   circularEdgeDiameter,
   isGeneralShape,
   type Operation,
@@ -210,7 +211,11 @@ function operationGeometry(
         center: edge.center,
         edgeOf: op.edgeOf,
         edgeDiameter: edge.diameter,
-        diameter: op.diameter.canonical,
+        // the chamfer's diameter from its edge (D45: the width is stored)
+        diameter: chamferDiameter(
+          op,
+          ops.find((o) => o.id === op.edgeOf),
+        )!.toNumber(),
         angle: op.angle.canonical,
         ...(op.stepdown.isSome() ? { stepdown: op.stepdown.unwrap().canonical } : {}),
       })
