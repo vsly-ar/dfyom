@@ -4,7 +4,9 @@ import type { OperationKind } from '../../../core/design/part.dto'
 import type { PlanWarning } from '../../../core/plan/checks'
 import type { FeedField, PlanStatus } from '../../../core/plan/plan.dto'
 import type { StrategyKey } from '../../../core/plan/strategy'
+import type { UnitSystem } from '../../../core/project/document'
 import type { WarningTier } from '../ui'
+import { lengthText } from './shape'
 
 export type FeedSource = 'override' | 'preset' | 'calculator' | 'strategy'
 export type ToolpathState = 'ready' | 'stale' | 'none' | 'failed'
@@ -357,9 +359,10 @@ const fitting = (alternatives: unknown): string =>
 
 /**
  * A plan finding's text: the design tool findings of E4 worded from their params, every other
- * code the core's message, sentence-cased (docs/modes/plan-v0.2.md § Implementation (task E4)).
+ * code the core's message, sentence-cased (docs/modes/plan-v0.2.md § Implementation (task E4));
+ * `plan.stepoverClamped` in the project's units (ui.md#info-notes).
  */
-export function findingText(w: PlanWarning): string {
+export function findingText(w: PlanWarning, units: UnitSystem = 'mm'): string {
   const p = (w.params ?? {}) as Readonly<Record<string, unknown>>
   const tool = String(p['designTool'] ?? 'tool')
   const check = CHECK[String(p['check'])] ?? 'fails a plan check'
@@ -370,6 +373,13 @@ export function findingText(w: PlanWarning): string {
       return `The design’s locked tool, the ${tool}, ${check}. ${fitting(p['alternatives'])} ${FIXES}`
     case 'plan.toolUnresolved':
       return `No library tool that matches the design’s locked ${tool} passes the plan checks. ${fitting(p['alternatives'])} Add a matching tool to the library, or assign another tool here.`
+    case 'plan.stepoverClamped': {
+      // ui.md#info-notes: the effective value in project units; the core's text says which limit
+      const effective = p['effective']
+      if (typeof effective !== 'number') return sentence(w.message)
+      const limit = w.message.includes('flat radius') ? 'the flat radius' : 'half the tool'
+      return `Clamped to ${lengthText(effective, units)} (${limit}) for offset clearing.`
+    }
     default:
       return sentence(w.message)
   }

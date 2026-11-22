@@ -6,6 +6,7 @@
 import { createStore, type StoreApi } from 'zustand/vanilla'
 import type { ReferenceWarning } from '../../../core/design/reference'
 import type { ShapeItem } from '../../../core/design/shape.dto'
+import type { SvgImportReport } from '../../../core/import/svg'
 import type { Issue } from '../../../shared/errors/app-error'
 import type { AppMode } from '../../../core/modes'
 
@@ -89,6 +90,21 @@ export interface UiState {
    */
   readonly removedToast: string | null
   setRemovedToast(message: string | null): void
+  /**
+   * The operation whose rotation field has focus (task U2): the viewport draws its placed,
+   * rotated bounding box thin and dashed; null otherwise.
+   */
+  readonly rotationGuide: string | null
+  setRotationGuide(operationId: string | null): void
+  /** The last SVG import's report (task U2), reopened from the shape inspector; not persisted. */
+  readonly lastImport: LastImport | null
+  setLastImport(last: LastImport | null): void
+}
+
+/** The last import's report and the shapes it created (ui.md#import-report: "Later access"). */
+export interface LastImport {
+  readonly shapeIds: readonly string[]
+  readonly report: SvgImportReport
 }
 
 export type UiStore = StoreApi<UiState>
@@ -129,5 +145,9 @@ export function createUiStore(initial: Partial<Pick<UiState, 'mode'>> = {}): UiS
     setShapeIssues: (shapeIssues) => set({ shapeIssues }),
     removedToast: null,
     setRemovedToast: (removedToast) => set({ removedToast }),
+    rotationGuide: null,
+    setRotationGuide: (rotationGuide) => set({ rotationGuide }),
+    lastImport: null,
+    setLastImport: (lastImport) => set({ lastImport }),
   }))
 }

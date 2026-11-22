@@ -136,6 +136,24 @@
   user-select: none;
 }
 
+.item[data-icon] {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.optionIcon {
+  display: inline-flex;
+  flex: none;
+  color: var(--text-muted);
+}
+
+.optionText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 .item[data-highlighted] {
   background: var(--bg-hover);
 }
