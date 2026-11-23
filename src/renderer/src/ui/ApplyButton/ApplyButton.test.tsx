@@ -43,6 +43,35 @@ describe('ApplyButton', () => {
     expect(onApply).toHaveBeenCalledTimes(1)
   })
 
+  it('shows the auto-apply wait as a draining bar and in its tooltip (DF28)', async () => {
+    const due = { at: Date.now() + 10_000, durationMs: 10_000 }
+    const { user } = renderUi(
+      <ApplyButton {...props({ kind: 'pending', count: 2 })} autoApply={due} />,
+    )
+    const button = screen.getByRole('button', { name: 'Apply 2 changes' })
+    expect(button).toHaveAttribute('data-auto-apply')
+    const bar = button.querySelector('[class*="countdown"]')
+    expect(bar).toHaveAttribute('aria-hidden', 'true')
+    expect(bar).not.toHaveAttribute('data-static')
+    await user.tab()
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(
+      'Applies by itself after 10 s without another edit (Settings).',
+    )
+    await expectNoAxeViolations()
+  })
+
+  it('keeps the auto-apply bar still under reduced motion and shows none when not pending', () => {
+    setReducedMotion(true)
+    const due = { at: Date.now() + 5000, durationMs: 5000 }
+    const { rerender } = renderUi(
+      <ApplyButton {...props({ kind: 'pending', count: 1 })} autoApply={due} />,
+    )
+    expect(document.querySelector('[class*="countdown"]')).toHaveAttribute('data-static')
+    rerender(wrap(<ApplyButton {...props({ kind: 'clean' })} autoApply={due} />))
+    expect(document.querySelector('[data-auto-apply]')).toBeNull()
+    setReducedMotion(false)
+  })
+
   it('shows "Applying…" with the progress ring only after --delay-indicator', () => {
     vi.useFakeTimers()
     try {

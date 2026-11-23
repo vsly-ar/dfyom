@@ -7,7 +7,7 @@ import { TOOL_MATERIALS, TOOL_TYPES, type ToolMaterial } from '../../../core/lib
 import type { QuantityDTO } from '../../../core/quantity/quantity.dto'
 import { libraryMessages } from '../messages/library'
 import { Field, FieldInput, Select } from '../ui'
-import { followDraft, toolName, withToolType, type ToolDraft } from './form'
+import { followDraft, toolName, withQuickOverall, withToolType, type ToolDraft } from './form'
 import { Focusable, Group, NameField, NotesField, QuantityField, type FormProps } from './fields'
 import { PresetTable } from './PresetTable'
 import { ToolDrawing, type ToolDimension } from './ToolDrawing'
@@ -37,7 +37,7 @@ export const TOOL_FIELDS: readonly string[] = [
 ]
 
 /** The full form's collapsed Details group (DF1): secondary fields, the cutting geometry stays open. */
-const DETAIL_FIELDS: readonly string[] = ['toolMaterial', 'coating', 'notes']
+const DETAIL_FIELDS: readonly string[] = ['overallLength', 'toolMaterial', 'coating', 'notes']
 
 const DIMENSIONS: ReadonlySet<string> = new Set([
   'diameter',
@@ -84,7 +84,10 @@ export function ToolFields({
   const chamfer = values.type === 'chamferMill'
   const [focused, setFocused] = useState<ToolDimension | undefined>(undefined)
   // recommended presets follow every change of the tool (library.md#recommended-presets)
-  const set = (patch: Partial<ToolDraft>) => onChange(followDraft({ ...values, ...patch }, units))
+  // the quick dialog keeps its hidden overall length longer than stickout and flutes (DF26)
+  const commit = (draft: ToolDraft) =>
+    onChange(followDraft(full ? draft : withQuickOverall(draft, units), units))
+  const set = (patch: Partial<ToolDraft>) => commit({ ...values, ...patch })
   const onFocusField = full
     ? (f: string | undefined) =>
         setFocused(f !== undefined && DIMENSIONS.has(f) ? (f as ToolDimension) : undefined)
@@ -123,28 +126,30 @@ export function ToolFields({
               ...(t === 'chamferMill' ? { description: m.chamferHint } : {}),
             }))}
             value={values.type}
-            onValueChange={(type) =>
-              onChange(followDraft(withToolType(values, type, units), units))
-            }
+            onValueChange={(type) => commit(withToolType(values, type, units))}
           />
         </Field>
       </Focusable>
-      {quantity('diameter', 'length', 'width')}
+      {quantity('diameter', 'length', 'diameter')}
       {values.type === 'bullNoseEndMill' ? quantity('cornerRadius', 'length', 'corner') : null}
       {chamfer ? quantity('angle', 'angle', 'chamfer') : null}
       {chamfer
-        ? quantity('tipDiameter', 'length', 'width', {
+        ? quantity('tipDiameter', 'length', 'tipDiameter', {
             optional: true,
             placeholder: m.tipPointed,
           })
         : null}
-      {quantity('fluteLength', 'length', 'depth')}
-      {quantity('overallLength', 'length', 'length')}
+      {quantity('fluteLength', 'length', 'fluteLength')}
+      {/* Stickout, not the overall length, is the length people set (DF26): the quick dialog
+          keeps the overall length hidden and longer than the stickout, the full form shows it
+          under Details */}
+      {quantity('stickout', 'length', 'stickout', {
+        optional: true,
+        note: m.stickoutNote,
+        placeholder: m.stickoutPlaceholder,
+      })}
       {full
-        ? quantity('stickout', 'length', 'depth', { optional: true, note: m.stickoutNote })
-        : null}
-      {full
-        ? quantity('shankDiameter', 'length', 'width', { optional: true, note: m.shankNote })
+        ? quantity('shankDiameter', 'length', 'shank', { optional: true, note: m.shankNote })
         : null}
       {quantity('fluteCount', 'scalar', 'tool')}
       {values.type === 'drill' ? quantity('pointAngle', 'angle', 'chamfer') : null}
@@ -213,6 +218,7 @@ export function ToolFields({
           summary: detailsSummary,
         }}
       >
+        {quantity('overallLength', 'length', 'overallLength', { note: m.overallLengthNote })}
         {material}
         <Field
           label={m.coating}
