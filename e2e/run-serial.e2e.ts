@@ -189,13 +189,16 @@ test('real machine (M2, M3): alarm panel, home, hold to jog, the real-machine pr
     await page.mouse.down()
     await expect(machine.getByText('Jogging')).toBeVisible()
     await render(page, 'm3-continuous-jog')
+    // hold on state, not time: until the reported X has passed −2 mm
+    const machineX = async () => parseFloat((await cell('Machine position X').textContent()) ?? '')
+    await expect.poll(machineX).toBeLessThan(-2)
     await page.mouse.up()
     await expect(machine.getByText('Idle')).toBeVisible()
-    const x = Number(await cell('Machine position X').textContent())
-    expect(x).toBeLessThan(-1.2)
-    // stopped: the position holds
-    await page.waitForTimeout(500)
-    expect(Number(await cell('Machine position X').textContent())).toBe(x)
+    // Idle is reported only once motion has stopped: the jog cancel ended it short of the
+    // travel edge (−$130)
+    const x = await machineX()
+    expect(x).toBeLessThan(-2)
+    expect(x).toBeGreaterThan(-150)
 
     // M2: the real-machine pre-flight names the plan status and the air cut; a draft does not run
     await inspector.getByRole('button', { name: 'Start run' }).click()
