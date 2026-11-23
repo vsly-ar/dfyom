@@ -202,7 +202,7 @@ export function OperationFields({
                 path="floorRadius"
                 label={t.floorRadius}
                 kind="length"
-                icon="corner"
+                icon="floorRadius"
               />
             </>,
           )}
@@ -219,14 +219,14 @@ export function OperationFields({
                 path="center.0"
                 label={t.position('Center', axes(ctx).u)}
                 kind="length"
-                icon="length"
+                icon="positionX"
               />
               <ParamField
                 ctx={ctx}
                 path="center.1"
                 label={t.position('Center', axes(ctx).v)}
                 kind="length"
-                icon="width"
+                icon="positionY"
               />
               <OnField ctx={ctx} />
             </>,
@@ -235,7 +235,13 @@ export function OperationFields({
           {g(
             t.groups.hole,
             <>
-              <ParamField ctx={ctx} path="diameter" label={t.diameter} kind="length" icon="width" />
+              <ParamField
+                ctx={ctx}
+                path="diameter"
+                label={t.diameter}
+                kind="length"
+                icon="diameter"
+              />
               <Field label={t.bottom} readOnly={ctx.readOnly}>
                 <Select
                   options={(['through', 'flat', 'drillPoint'] as const).map((b) => ({
@@ -327,7 +333,7 @@ export function OperationFields({
               path="slotWidth"
               label={t.slotWidth}
               kind="length"
-              icon="width"
+              icon="slotWidth"
             />,
           )}
           {g(
@@ -347,14 +353,14 @@ export function OperationFields({
                 path="tabs.width"
                 label={t.tabsWidth}
                 kind="length"
-                icon="length"
+                icon="tabWidth"
               />
               <ParamField
                 ctx={ctx}
                 path="tabs.thickness"
                 label={t.tabsThickness}
                 kind="length"
-                icon="depth"
+                icon="tabThickness"
               />
               <TabPositions ctx={ctx} />
             </>,
@@ -410,14 +416,14 @@ function ShapeGroup({
         path="shape.center.0"
         label={t.position('Position', names.u)}
         kind="length"
-        icon="length"
+        icon="positionX"
       />
       <ParamField
         ctx={ctx}
         path="shape.center.1"
         label={t.position('Position', names.v)}
         kind="length"
-        icon="width"
+        icon="positionY"
       />
       {shape.kind === 'rectangle' ? (
         <>
@@ -437,7 +443,13 @@ function ShapeGroup({
           />
         </>
       ) : shape.kind === 'circle' ? (
-        <ParamField ctx={ctx} path="shape.diameter" label={t.diameter} kind="length" icon="width" />
+        <ParamField
+          ctx={ctx}
+          path="shape.diameter"
+          label={t.diameter}
+          kind="length"
+          icon="diameter"
+        />
       ) : null}
       {op.kind === 'profile' && shape.kind === 'rectangle' ? (
         <ParamField
@@ -484,7 +496,7 @@ function RotationField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Elem
         path="shape.rotation"
         label={t.picker.rotation}
         kind="angle"
-        icon="chamfer"
+        icon="rotation"
         placeholder={t.picker.rotationNone}
       />
     </div>

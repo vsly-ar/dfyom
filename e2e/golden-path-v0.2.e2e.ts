@@ -234,7 +234,9 @@ test('v0.2 golden path through the UI: reference, faces, setups, export and run 
   // ── Plan: a tall-Z machine (the right setup stands the board on its end), three setups ───
   await page.keyboard.press('ControlOrMeta+2')
   await expect(page.getByRole('radio', { name: 'Plan' })).toBeChecked()
-  await navigator.getByRole('button', { name: 'New machine…' }).click()
+  // no plan yet: "Plan the part" is a card over the view (DF29)
+  const planStart = page.getByRole('dialog', { name: 'Plan the part' })
+  await planStart.getByRole('button', { name: 'New machine…' }).click()
   const newMachine = page.getByRole('dialog', { name: 'New machine' })
   await newMachine.getByRole('textbox', { name: 'Name' }).fill('Router, tall Z')
   for (const [label, value] of [
@@ -249,7 +251,7 @@ test('v0.2 golden path through the UI: reference, faces, setups, export and run 
     await setField(newMachine, label, value)
   await newMachine.getByRole('button', { name: 'Add machine' }).click()
   await expect(newMachine).toBeHidden()
-  await navigator.getByRole('button', { name: 'Create plan' }).click()
+  await planStart.getByRole('button', { name: 'Create plan' }).click()
   const setups = navigator.getByRole('list', { name: 'Setups in machining order' })
   const setupRow = (i: number) =>
     setups.getByRole('button', { name: new RegExp(`^${i + 1}\\. ${SETUPS[i]}`) })
@@ -273,7 +275,6 @@ test('v0.2 golden path through the UI: reference, faces, setups, export and run 
   await newTool(page, [
     ['Diameter', '12'],
     ['Flute length', '50'],
-    ['Overall length', '100'],
   ])
   await expect(setupOps(page, 'Top').nth(0)).toHaveText(/Flat 12/)
   // the recess's 4 mm corners need a smaller end mill
@@ -282,7 +283,6 @@ test('v0.2 golden path through the UI: reference, faces, setups, export and run 
   await newTool(page, [
     ['Diameter', '6'],
     ['Flute length', '25'],
-    ['Overall length', '60'],
   ])
   await expect(setupOps(page, 'Bottom').nth(0)).toHaveText(/Flat 6/)
 
@@ -327,7 +327,6 @@ test('v0.2 golden path through the UI: reference, faces, setups, export and run 
   await newTool(page, [
     ['Diameter', '6'],
     ['Flute length', '30'],
-    ['Overall length', '66'],
     ['Point angle', '118'],
   ])
   await expect(drilling).toHaveText(/Drill 6/)

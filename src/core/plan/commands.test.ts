@@ -684,6 +684,18 @@ describe('setup, operations and order', () => {
     expect(cleared.strategy.entry).toBeUndefined()
   })
 
+  it('plan.operation.list gives a through profile its material depth (DF23)', async () => {
+    const s = await planSetup()
+    const planId = await s.create()
+    const list = s.query('plan.operation.list', { planId }) as {
+      operations: { designOperationIds: string[]; throughDepth: number | null }[]
+    }
+    const of = (id: string) => list.operations.find((o) => o.designOperationIds[0] === id)!
+    // the test stock is 20 mm thick (design.fixture.ts)
+    expect(of('profile1').throughDepth).toBe(20)
+    expect(of('pocket1').throughDepth).toBeNull()
+  })
+
   it('plan.operation.update rejects invalid values', async () => {
     const s = await planSetup()
     const planId = await s.create()

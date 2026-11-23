@@ -36,6 +36,7 @@ import { ProjectDialogs } from './project/ProjectDialogs'
 import { ShellViewport } from './ShellViewport'
 import { ShortcutsDialog } from './ShortcutsDialog'
 import { useAppCommands } from './useAppCommands'
+import { sidePanelsOf, useModePanels } from './useModePanels'
 
 /** Below this width the inspector overlays the viewport (ui.md#app-shell). */
 export const WIDE_QUERY = '(min-width: 1280px)'
@@ -96,7 +97,28 @@ export function AppShell(): React.JSX.Element {
     userLayout.current = true
     if (open) ref.current?.collapse()
     else ref.current?.expand()
+    // remembered for this mode (DF30); the narrow window's inspector overlay is not a panel
+    const current = sidePanelsOf(settings.getState().settings, mode)
+    const side = ref === navigator ? 'navigator' : 'inspector'
+    settings.getState().update({ sidePanels: { [mode]: { ...current, [side]: !open } } })
   }
+  // the side panels' content follows the mode with a slide, and each mode opens its panels (DF30)
+  const { panelMode, phase, onAnimationEnd } = useModePanels(mode, (shown) => {
+    const want = sidePanelsOf(settings.getState().settings, shown)
+    const apply = (ref: typeof navigator, open: boolean) => {
+      const collapsed = ref.current?.isCollapsed()
+      if (collapsed === undefined) return
+      if (open && collapsed) ref.current?.expand()
+      else if (!open && !collapsed) ref.current?.collapse()
+    }
+    apply(navigator, want.navigator)
+    if (wide) apply(inspector, want.inspector)
+  })
+  const slide = (side: 'navigator' | 'inspector') => ({
+    'data-side': side,
+    ...(phase === null ? {} : { 'data-phase': phase }),
+    onAnimationEnd,
+  })
   // a panel that lives in the inspector opened (the Reference panel, ui.md § Reference panel):
   // show a collapsed inspector or the narrow window's overlay
   const inspectorRequest = useUi((s) => s.inspectorRequest)
@@ -125,7 +147,7 @@ export function AppShell(): React.JSX.Element {
     onApply: apply,
   })
   const inspectorShown = wide ? inspectorOpen : overlayOpen
-  const inspectorContent = <ModeInspector mode={mode} doc={doc} />
+  const inspectorContent = <ModeInspector mode={panelMode} doc={doc} />
 
   return (
     <ApplyScope onApply={apply}>
@@ -240,8 +262,9 @@ export function AppShell(): React.JSX.Element {
                 className={styles['side']}
                 {...region}
                 {...(navOpen ? {} : { 'data-collapsed': '' })}
+                {...slide('navigator')}
               >
-                <ModeNavigator mode={mode} doc={doc} onMode={onMode} />
+                <ModeNavigator mode={panelMode} doc={doc} onMode={onMode} />
               </nav>
             </Panel>
             <PanelResizeHandle label={m.resize.navigator} />
@@ -268,6 +291,7 @@ export function AppShell(): React.JSX.Element {
                     className={styles['side']}
                     {...region}
                     {...(inspectorOpen ? {} : { 'data-collapsed': '' })}
+                    {...slide('inspector')}
                   >
                     {inspectorContent}
                   </aside>
@@ -281,6 +305,7 @@ export function AppShell(): React.JSX.Element {
               aria-label={m.regions.inspector}
               className={[styles['side'], styles['overlay']].join(' ')}
               {...region}
+              {...slide('inspector')}
             >
               {inspectorContent}
             </aside>

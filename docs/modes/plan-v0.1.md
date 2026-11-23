@@ -179,6 +179,7 @@ Drill tip Z = hole depth (to full diameter) + tip length from SIG, plus `breakth
 | `breakthrough`    | length | 0.5 mm / 0.02″      | ≥ 0; below `stock.bottom`              |
 | `finishAllowance` | length | 0.2 mm / 0.008″     | ≥ 0; 0 = no finishing pass             |
 
+Cut depth (DF23): a through profile (no `depth`) reaches the stock thickness + `breakthrough` below the stock top. `plan.operation.list` gives each plan operation `throughDepth` (mm: the thickness for a through profile, else `null`), so an agent or the inspector turns a wanted cut depth into the breakthrough (cut depth − `throughDepth`, at least 0); the plan inspector shows both, linked ([ui.md § Plan mode](../conventions/ui.md#plan-mode-task-37)). A blind profile (with `depth`) does not use `breakthrough`.
 The first pass runs on the part side of the slot (tool edge on the shape); a slot wider than D adds passes away from the part. In levels below `tabs.thickness` the tool lifts to the tab top over each tab (tab width + D, vertical moves); the finishing pass skips tabs the same way.
 
 ## Toolpath generation (job)

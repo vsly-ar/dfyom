@@ -291,6 +291,8 @@ export interface PlanOperationView {
   readonly chipLoad: number | null
   /** Resolved strategy parameters (mm, °), defaults included. */
   readonly strategy: Readonly<Record<string, number | string>>
+  /** A through profile: the material it cuts below the stock face (mm), else null (DF23). */
+  readonly throughDepth?: number | null
 }
 
 /** `plan.stale.list`. */
@@ -456,7 +458,7 @@ export function strategyQuantity(
 /**
  * The strategy parameters the inspector shows for a kind, in table order, given the resolved
  * values (docs/conventions/ui.md#plan-mode-task-37: only parameters that apply). `through`: a
- * drilling through the stock (breakthrough applies).
+ * drilling through the stock or a through profile, not a blind groove (breakthrough applies).
  */
 export function shownStrategyKeys(
   kind: OperationKind,
@@ -473,6 +475,7 @@ export function shownStrategyKeys(
         if (key === 'finishStepdown') return Number(resolved['finishAllowance'] ?? 0) > 0
         return true
       case 'profile':
+        if (key === 'breakthrough') return through
         return key !== 'rampAngle' || entry === 'ramp'
       case 'drilling':
         if (key === 'peckDepth') return cycle === 'peck' || cycle === 'chipBreak'

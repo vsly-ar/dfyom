@@ -1,12 +1,15 @@
 // The main toolbar's Apply button wired to the window's pending store (task P3): the state from
 // the pending changes, this window's Apply call, the running apply jobs' progress and another
-// source's Apply. Doc: docs/architecture/apply.md#apply-button, docs/conventions/ui.md#app-shell
+// source's Apply, and the auto-apply countdown (DF28). Doc: docs/architecture/apply.md#apply-button,
+// #auto-apply-df28, docs/conventions/ui.md#app-shell
+import { useCallback } from 'react'
 import { pendingList } from '../messages/apply'
 import type { PendingState } from '../state/pending'
 import { ApplyButton, type ApplyButtonState, type JobView } from '../ui'
 import { useJobs } from './hooks'
-import { usePending, useShell } from './ShellContext'
+import { usePending, useSettings, useShell } from './ShellContext'
 import { APPLY_KEY_SHORTCUTS, APPLY_SHORTCUT } from './shortcuts'
+import { useAutoApply } from './useAutoApply'
 
 /** Overall progress (0..1) of the apply jobs, or null when no total is known. */
 function applyProgress(jobs: readonly JobView[], ids: readonly string[]): number | null {
@@ -37,13 +40,17 @@ export function ApplyControl(): React.JSX.Element {
   const state = usePending()
   const { jobs } = useJobs()
   const progress = applyProgress(jobs, state.applying)
+  const delay = useSettings((s) => s.settings.autoApplyDelay)
+  const apply = useCallback(() => void pending.apply(), [pending])
+  const due = useAutoApply(state, delay, apply)
   return (
     <ApplyButton
       state={applyButtonState(state, progress)}
       list={pendingList(state.changes.map((c) => c.label))}
       shortcut={APPLY_SHORTCUT}
       keyShortcuts={APPLY_KEY_SHORTCUTS}
-      onApply={() => void pending.apply()}
+      onApply={apply}
+      autoApply={due}
     />
   )
 }

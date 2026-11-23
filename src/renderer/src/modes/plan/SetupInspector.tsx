@@ -119,7 +119,7 @@ export function SetupInspector({
           kind="length"
           defaultUnit={defaultUnit('length', units)}
           value={quantityOf(setup.clearanceHeight)}
-          illustration={<FieldIcon name="depth" />}
+          illustration={<FieldIcon name="clearance" />}
           readOnly={readOnly}
           messages={messages('clearanceHeight')}
           onCommit={(q, gesture) => void update({ clearanceHeight: q.source }, gesture)}
@@ -130,7 +130,7 @@ export function SetupInspector({
           kind="length"
           defaultUnit={defaultUnit('length', units)}
           value={quantityOf(setup.retractHeight)}
-          illustration={<FieldIcon name="depth" />}
+          illustration={<FieldIcon name="retract" />}
           readOnly={readOnly}
           messages={messages('retractHeight')}
           onCommit={(q, gesture) => void update({ retractHeight: q.source }, gesture)}

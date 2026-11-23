@@ -26,6 +26,7 @@ import {
   quantityText,
   toolName,
   unmatchedIssues,
+  withQuickOverall,
   withToolType,
 } from './form'
 import { chipLoad } from './PresetTable'
@@ -60,6 +61,23 @@ describe('library forms', () => {
     valid('machine', commandInput(defaultMachineValues(units), { units }))
     valid('stock', commandInput(defaultStockValues(units), { units }))
     expect(draftIssues(defaultToolValues(units), true)).toEqual([])
+  })
+
+  it('keeps the quick dialog’s hidden overall length longer than stickout and flutes (DF26)', () => {
+    const mm = defaultToolValues('mm')
+    expect(withQuickOverall({ ...mm, stickout: qdto('length', '30', 'mm') }, 'mm')).toEqual({
+      ...mm,
+      stickout: qdto('length', '30', 'mm'),
+    })
+    const long = withQuickOverall({ ...mm, stickout: qdto('length', '55.2', 'mm') }, 'mm')
+    expect(long.overallLength).toEqual(qdto('length', '66', 'mm'))
+    valid('tool', commandInput(long, { units: 'mm', autoName: true }))
+    const flutes = withQuickOverall({ ...mm, fluteLength: qdto('length', '60', 'mm') }, 'mm')
+    expect(flutes.overallLength).toEqual(qdto('length', '70', 'mm'))
+    const inch = defaultToolValues('inch')
+    const i = withQuickOverall({ ...inch, stickout: qdto('length', '2', 'inch') }, 'inch')
+    expect(i.overallLength).toEqual(qdto('length', '2.5', 'inch'))
+    valid('tool', commandInput(i, { units: 'inch', autoName: true }))
   })
 
   it('suggests a drill for a drilling and names the tool by type and diameter', () => {

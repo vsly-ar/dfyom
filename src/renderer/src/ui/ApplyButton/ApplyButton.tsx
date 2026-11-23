@@ -37,6 +37,11 @@ export interface ApplyButtonProps {
   /** `aria-keyshortcuts`: "Meta+Enter" or "Control+Enter". */
   keyShortcuts: string
   onApply: () => void
+  /**
+   * When the pending changes apply by themselves (DF28): a thin bar along the button's bottom
+   * drains until then (static under reduced motion) and the tooltip says so. Pending state only.
+   */
+  autoApply?: { readonly at: number; readonly durationMs: number } | null | undefined
   /** Test seam; default `--delay-indicator` (applying) and 1 s (live count). */
   delayMs?: number
   liveDelayMs?: number
@@ -129,14 +134,49 @@ function Ring({ progress }: { progress: number | null }): React.JSX.Element {
   )
 }
 
+/**
+ * The auto-apply wait (DF28): a 2 px bar along the button's bottom edge that drains to nothing
+ * when the changes apply; restarts (remounts) with every edit. Decorative: the tooltip says it in
+ * words. Under reduced motion it stays as a static full bar (pending, applies by itself).
+ */
+function Countdown({
+  due,
+}: {
+  due: { readonly at: number; readonly durationMs: number }
+}): React.JSX.Element {
+  const reduced = useReducedMotion()
+  // the share left when it mounts (a re-render keeps the running animation)
+  const [left] = useState(() =>
+    Math.max(0, Math.min(1, (due.at - Date.now()) / Math.max(1, due.durationMs))),
+  )
+  return (
+    <span
+      aria-hidden="true"
+      className={styles['countdown']}
+      data-static={reduced || undefined}
+      style={
+        reduced
+          ? undefined
+          : ({
+              '--countdown-from': left,
+              animationDuration: `${Math.round(left * due.durationMs)}ms`,
+            } as React.CSSProperties)
+      }
+    />
+  )
+}
+
 function TooltipBody({
   state,
   list,
   shortcut,
+  autoSeconds,
 }: {
   state: ApplyButtonState
   list: string
   shortcut: string
+  /** DF28: the auto-apply wait while it runs. */
+  autoSeconds?: number | undefined
 }): React.JSX.Element {
   const count = 'count' in state ? state.count : 0
   return (
@@ -156,6 +196,7 @@ function TooltipBody({
         {count > 0 ? `${m.tooltip.pending(count)} ` : null}
         {m.tooltip.concept} {m.tooltip.how(shortcut)}
       </p>
+      {autoSeconds !== undefined ? <p>{m.tooltip.auto(autoSeconds)}</p> : null}
       {count > 0 && list !== '' ? <p className={styles['tipList']}>{list}</p> : null}
     </div>
   )
@@ -167,6 +208,7 @@ export function ApplyButton({
   shortcut,
   keyShortcuts,
   onApply,
+  autoApply,
   delayMs = INDICATOR_DELAY_MS,
   liveDelayMs = LIVE_DELAY_MS,
   className,
@@ -211,6 +253,8 @@ export function ApplyButton({
           ? m.appliedBy(content.by)
           : m.name(count)
 
+  const countdown = shown.kind === 'pending' && autoApply ? autoApply : null
+
   const button = (
     <Button
       variant="primary"
@@ -224,6 +268,7 @@ export function ApplyButton({
       aria-label={name}
       aria-keyshortcuts={keyShortcuts}
       data-state={content.kind}
+      data-auto-apply={countdown ? '' : undefined}
       className={styles['button']}
       onClick={content.kind === 'appliedBy' ? undefined : onApply}
       tabIndex={visible ? undefined : -1}
@@ -252,6 +297,7 @@ export function ApplyButton({
           <span key={count} className={styles['badge']}>
             {count}
           </span>
+          {countdown ? <Countdown key={countdown.at} due={countdown} /> : null}
         </>
       )}
     </Button>
@@ -272,7 +318,17 @@ export function ApplyButton({
           {content.kind === 'appliedBy' ? (
             button
           ) : (
-            <Tooltip rich content={<TooltipBody state={content} list={list} shortcut={shortcut} />}>
+            <Tooltip
+              rich
+              content={
+                <TooltipBody
+                  state={content}
+                  list={list}
+                  shortcut={shortcut}
+                  autoSeconds={countdown ? Math.round(countdown.durationMs / 1000) : undefined}
+                />
+              }
+            >
               {button}
             </Tooltip>
           )}
