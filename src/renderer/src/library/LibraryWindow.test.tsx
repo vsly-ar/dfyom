@@ -385,6 +385,11 @@ describe('Library window', () => {
     expect(labels.indexOf('Tip diameter')).toBe(labels.indexOf('Diameter') + 2)
     const tip = within(editor()).getByLabelText('Tip diameter', { selector: 'input' })
     expect(tip).toHaveAttribute('placeholder', '0: pointed')
+    // an empty stickout shows the flute length it takes, marked as the default (DF48)
+    expect(within(editor()).getByLabelText('Stickout', { selector: 'input' })).toHaveAttribute(
+      'placeholder',
+      expect.stringMatching(/^Default: [\d.]+ mm$/),
+    )
     await waitFor(() =>
       expect(within(editor()).getByRole('heading', { name: 'Chamfer 90° Ø6' })).toBeInTheDocument(),
     )
@@ -394,6 +399,18 @@ describe('Library window', () => {
         name: 'Tool drawing: included angle highlighted',
       }),
     ).toBeInTheDocument()
+    // the legend names the drawing's ISO symbols (DF48)
+    const legend = editor().querySelector<HTMLElement>(
+      'dl[aria-label="Dimensions in the drawing"]',
+    )!
+    expect(legend).toHaveTextContent('DCDiameter')
+    expect(legend).toHaveTextContent('LCFFlute length')
+    // the draft row shows its type icon like a saved one (DF48)
+    expect(row(/Chamfer 90° Ø6/).querySelector('[title="Chamfer mill"] svg')).not.toBeNull()
+    // short headers explain themselves (DF48)
+    expect(
+      within(grid()).getByRole('button', { name: 'Sort by Corner radius (RE)' }),
+    ).toHaveAttribute('title', 'Corner radius (RE)')
     await expectNoAxeViolations()
     await user.click(within(editor()).getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(row(/Chamfer 90° Ø6/)).toHaveAttribute('aria-selected', 'true'))

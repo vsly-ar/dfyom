@@ -23,6 +23,7 @@ import {
   SegmentedControl,
   modalDialogOpen,
 } from '../ui'
+import type { ToolDraft } from './form'
 import { ItemEditor } from './ItemEditor'
 import { ItemTable } from './ItemTable'
 import { createLibraryStore, KINDS, NEW, type LibraryStore } from './library-store'
@@ -222,6 +223,11 @@ export function LibraryWindow(): React.JSX.Element {
               used={used}
               unsavedId={unsavedId}
               newName={s.draftName()}
+              newType={
+                s.draft?.kind === 'tool' && s.draft.id === null
+                  ? (s.draft.values as ToolDraft).type
+                  : undefined
+              }
               onSelect={(id) => (id === NEW ? undefined : s.select(s.tab, id))}
               onEnter={() =>
                 editorRef.current

@@ -436,7 +436,7 @@ describe('Run mode', () => {
     await expectNoAxeViolations()
 
     // Later puts it off to the inspector; Show instructions brings it back
-    await t.user.click(within(prompt).getByRole('button', { name: 'Later' }))
+    await t.user.click(within(prompt).getByRole('button', { name: 'Close (start later)' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     await t.user.click(within(inspector).getByRole('button', { name: 'Show instructions' }))
     const again = await screen.findByRole('dialog', { name: 'Setup change: setup 2, Top' })

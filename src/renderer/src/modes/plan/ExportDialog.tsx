@@ -4,7 +4,9 @@
 // error. Doc: docs/conventions/ui.md#plan-mode-task-37,
 // docs/architecture/grbl.md#plan-export-command
 import { planMessages, sentence } from '../../messages/plan'
-import { Button, Dialog, DialogClose, ErrorMessage, WarningList } from '../../ui'
+import { useShell } from '../../shell/ShellContext'
+import { IS_MAC } from '../../shell/shortcuts'
+import { Button, Dialog, DialogClose, ErrorMessage, Icon, WarningList } from '../../ui'
 import { planWarningLabels } from './PlanInspector'
 import { usePlanState, usePlanStore } from './plan-store'
 import styles from './Plan.module.css'
@@ -13,6 +15,7 @@ const m = planMessages.export
 
 export function ExportDialog(): React.JSX.Element | null {
   const store = usePlanStore()
+  const { bridge } = useShell()
   const exported = usePlanState((s) => s.exported)
   if (exported === undefined) return null
   const close = (
@@ -30,14 +33,33 @@ export function ExportDialog(): React.JSX.Element | null {
       </Dialog>
     )
   const r = exported.result
+  // the file name in the description, its folder on one line (DF48: the full path wrapped)
+  const cut = Math.max(r.filePath.lastIndexOf('/'), r.filePath.lastIndexOf('\\'))
+  const name = cut < 0 ? r.filePath : r.filePath.slice(cut + 1)
+  const folder = cut < 0 ? undefined : r.filePath.slice(0, cut)
   return (
     <Dialog
       open
       onOpenChange={onOpenChange}
       title={m.doneTitle}
-      description={m.doneDescription(r.filePath)}
-      footer={close}
+      description={m.doneDescription(name)}
+      footer={
+        <>
+          <Button
+            icon={<Icon name="open" />}
+            onClick={() => void bridge.files.showInFolder(r.filePath)}
+          >
+            {m.showInFolder(IS_MAC)}
+          </Button>
+          {close}
+        </>
+      }
     >
+      {folder !== undefined ? (
+        <p className={styles['exportFolder']} title={r.filePath}>
+          {m.folder(folder)}
+        </p>
+      ) : null}
       <ul className={styles['stats']}>
         {exported.setup !== undefined ? <li>{exported.setup}</li> : null}
         <li>{m.lines(r.lines)}</li>

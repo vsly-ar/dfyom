@@ -311,8 +311,22 @@ export function StockSetup({
           <Field label={m.partName}>
             <FieldInput value={partName} onChange={(e) => setPartName(e.target.value)} />
           </Field>
-          <Field label={m.fromLibrary}>
-            <Select options={options} value={itemId ?? NONE} onValueChange={(id) => choose(id)} />
+          {/* an empty library has nothing to choose: disabled with the way to fill it (DF48) */}
+          <Field
+            label={m.fromLibrary}
+            readOnly={library.length === 0}
+            messages={
+              library.length === 0
+                ? [{ id: 'libraryEmpty', severity: 'note', text: m.libraryEmpty }]
+                : []
+            }
+          >
+            <Select
+              options={options}
+              value={itemId ?? NONE}
+              disabled={library.length === 0}
+              onValueChange={(id) => choose(id)}
+            />
           </Field>
           {sizeField(0, m.length)}
           {sizeField(1, m.width)}
@@ -338,15 +352,16 @@ export function StockSetup({
               onValueChange={setMaterialClass}
             />
           </Field>
-          <div>
+          {/* the two library actions in one row, each with its own icon (DF48) */}
+          <div className={styles['setupButtons']}>
             <LibraryLink
               target={{ kind: 'stock', ...(itemId === null ? {} : { itemId }) }}
               label={libraryMessages.links.open}
+              variant="default"
             />
-          </div>
-          <div className={styles['setupButtons']}>
             <Button
-              icon={<Icon name="library" />}
+              size="sm"
+              icon={<Icon name="save" />}
               disabled={saveDisabled}
               title={item !== undefined && !changed ? m.unchanged : undefined}
               onClick={() => (item !== undefined ? setAsking(true) : void save('add'))}

@@ -191,7 +191,7 @@ export function PartSetupDialogs({
       )}
       <Dialog
         title={m.shapes}
-        description={m.shapesDescription}
+        description={m.shapesDescription((part?.dto.shapes?.length ?? 0) > 0)}
         open={dialog === 'shapes'}
         onOpenChange={onOpenChange}
         onCloseAutoFocus={returnFocus}

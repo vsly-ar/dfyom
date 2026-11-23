@@ -7,7 +7,14 @@ import { TOOL_MATERIALS, TOOL_TYPES, type ToolMaterial } from '../../../core/lib
 import type { QuantityDTO } from '../../../core/quantity/quantity.dto'
 import { libraryMessages } from '../messages/library'
 import { Field, FieldInput, Select } from '../ui'
-import { followDraft, toolName, withQuickOverall, withToolType, type ToolDraft } from './form'
+import {
+  followDraft,
+  quantityText,
+  toolName,
+  withQuickOverall,
+  withToolType,
+  type ToolDraft,
+} from './form'
 import { Focusable, Group, NameField, NotesField, QuantityField, type FormProps } from './fields'
 import { PresetTable } from './PresetTable'
 import { ToolDrawing, type ToolDimension } from './ToolDrawing'
@@ -149,7 +156,11 @@ export function ToolFields({
       {quantity('stickout', 'length', 'stickout', {
         optional: true,
         note: m.stickoutNote,
-        placeholder: m.stickoutPlaceholder,
+        placeholder: m.stickoutPlaceholder(
+          values.fluteLength === undefined || values.fluteLength.source.trim() === ''
+            ? undefined
+            : quantityText(values.fluteLength),
+        ),
       })}
       {full
         ? quantity('shankDiameter', 'length', 'shank', { optional: true, note: m.shankNote })

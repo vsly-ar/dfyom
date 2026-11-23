@@ -200,6 +200,8 @@ export function AppShell(): React.JSX.Element {
                   shortcut="D"
                   icon={<Icon name="measure" />}
                   pressed={measuring}
+                  // nothing to measure without a project (DF48)
+                  disabled={doc === undefined}
                   onClick={() => setMeasuring(!measuring)}
                 />
               </Toolbar>

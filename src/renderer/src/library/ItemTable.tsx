@@ -178,6 +178,7 @@ export function ItemTable({
   used,
   unsavedId,
   newName,
+  newType,
   onSelect,
   onEnter,
 }: {
@@ -190,6 +191,8 @@ export function ItemTable({
   unsavedId: string | null
   /** The new item's row label while one is drafted. */
   newName: string
+  /** A new tool draft's type: its row shows the type icon like a saved one (DF48). */
+  newType?: ToolType | undefined
   onSelect: (id: string) => void
   onEnter: () => void
 }): React.JSX.Element {
@@ -254,7 +257,8 @@ export function ItemTable({
               type="button"
               tabIndex={-1}
               className={styles['sortButton']}
-              aria-label={w.sortBy(c.label)}
+              aria-label={w.sortBy(w.columnTips[c.key] ?? c.label)}
+              title={w.columnTips[c.key]}
               onClick={() => setSort({ key: c.key, dir: active ? (-sort.dir as 1 | -1) : 1 })}
             >
               {c.label}
@@ -313,6 +317,11 @@ export function ItemTable({
               data-kind={kind}
             >
               <div role="gridcell" className={styles['nameCell']}>
+                {newType !== undefined ? (
+                  <span className={styles['typeIcon']} title={libraryMessages.tool.types[newType]}>
+                    <Icon name={TOOL_TYPE_ICON[newType]} />
+                  </span>
+                ) : null}
                 <span className={styles['name']}>{newName}</span>
                 <StatusChip tone="warning">{w.unsaved}</StatusChip>
               </div>

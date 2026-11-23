@@ -200,8 +200,9 @@
 
 .headRow[data-kind='tool'],
 .row[data-kind='tool'] {
-  /* name, Ø, RE, flutes, flute length, angle (U4), presets */
-  grid-template-columns: minmax(200px, 2.4fr) repeat(5, minmax(44px, 0.8fr)) minmax(44px, 0.6fr);
+  /* name, Ø, corner R, flutes, flute length, angle (U4), presets; a header too long for its column
+     wraps to two lines instead of clipping (DF48: "Flute leng") */
+  grid-template-columns: minmax(120px, 2.2fr) repeat(5, minmax(44px, 0.8fr)) minmax(52px, 0.7fr);
 }
 
 .headRow[data-kind='machine'],
@@ -224,7 +225,8 @@
   position: sticky;
   top: calc(var(--space-2) * -1);
   z-index: 1;
-  height: var(--control-md);
+  min-height: var(--control-md);
+  padding-block: 2px;
   background: var(--bg-app);
   border-bottom: 1px solid var(--border);
 }
@@ -236,6 +238,7 @@
 
 .headCell[data-numeric] {
   justify-content: flex-end;
+  text-align: right;
 }
 
 .sortButton {
@@ -249,9 +252,9 @@
   color: var(--text-muted);
   font: inherit;
   font-weight: var(--weight-medium);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: var(--lh-xs);
+  text-align: inherit;
+  overflow-wrap: break-word;
   cursor: pointer;
 }
 
@@ -524,6 +527,44 @@
 }
 
 /* ── tool drawing ────────────────────────────────────────────────────────────────────── */
+/* the drawing and its legend (DF48) */
+.drawingFigure {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: center;
+  margin: 0;
+}
+
+.legend {
+  display: grid;
+  grid-template-columns: repeat(2, max-content);
+  gap: 2px var(--space-4);
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+}
+
+.legend > div {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.legend dt {
+  min-width: 3ch;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+.legend dd {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.legend > [data-active] dt,
+.legend > [data-active] dd {
+  color: var(--text);
+}
+
 .drawing {
   width: 100%;
   max-width: 240px;

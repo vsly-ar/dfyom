@@ -2,7 +2,7 @@
 // dialog: the next setup's name and direction, a picture of the stock in its new orientation, the
 // steps (turn and clamp the stock, set the work zero at the front-left corner of the new top,
 // start), jog and work-zero controls inside, "Start setup n" as the only primary action and the
-// run dialogs' Stop. It never continues by itself; "Later" puts it off to the inspector.
+// run dialogs' Stop. It never continues by itself; "Close (start later)" puts it off to the inspector.
 // Doc: docs/modes/plan-v0.2.md#setup-change-in-run, docs/conventions/ui.md#run-mode-safety-ui
 import { useId } from 'react'
 import { DIRECTION_LABEL } from '../../../../core/geometry/face'

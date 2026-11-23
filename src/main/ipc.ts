@@ -5,7 +5,7 @@
 // Doc: docs/architecture/llm-api.md#processes-and-hosting, docs/conventions/ui.md#app-shell,
 // docs/conventions/ui.md#project-files
 // Contract: src/shared/preload-api.ts
-import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron'
+import { BrowserWindow, ipcMain, shell, type IpcMainInvokeEvent, type WebContents } from 'electron'
 import { agentError } from '../core/agent/results'
 import type { AgentSession, SessionInfo } from '../core/agent/session'
 import { sourceKey } from '../core/commands/context'
@@ -276,11 +276,24 @@ export function registerProjectIpc(
       ? null
       : chooseSaveFile(ws.win, folders, typeof name === 'string' ? name : '')
   })
-  ipcMain.handle(IPC.fileChooseExport, (event, name: unknown) => {
+  // the export paths each window chose: the only files "Show in Finder" reveals (DF48)
+  const exportedPaths = new WeakMap<WebContents, Set<string>>()
+  ipcMain.handle(IPC.fileChooseExport, async (event, name: unknown) => {
     const ws = sessionOf(event)
-    return ws === undefined
-      ? null
-      : chooseExportFile(ws.win, folders, typeof name === 'string' ? name : '')
+    if (ws === undefined) return null
+    const path = await chooseExportFile(ws.win, folders, typeof name === 'string' ? name : '')
+    if (path !== null) {
+      const paths = exportedPaths.get(event.sender) ?? new Set<string>()
+      paths.add(path)
+      exportedPaths.set(event.sender, paths)
+    }
+    return path
+  })
+  ipcMain.handle(IPC.fileShowInFolder, (event, path: unknown): boolean => {
+    if (typeof path !== 'string' || exportedPaths.get(event.sender)?.has(path) !== true)
+      return false
+    shell.showItemInFolder(path)
+    return true
   })
 
   ipcMain.handle(IPC.fileChooseReference, (event) => {

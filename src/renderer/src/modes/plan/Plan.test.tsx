@@ -392,6 +392,11 @@ describe('Plan mode', () => {
     expect(t.callsOf('plan.export')).toEqual([
       { planId: t.planId(), target: '/out/Plan 1.nc', confirm: true },
     ])
+    // the file name in the description, its folder on a line; Show in Finder reveals it (DF48)
+    expect(dialog).toHaveAccessibleDescription('The GRBL program was written to Plan 1.nc.')
+    expect(within(dialog).getByText('In /out')).toHaveAttribute('title', '/out/Plan 1.nc')
+    await t.user.click(within(dialog).getByRole('button', { name: /^Show in (Finder|folder)$/ }))
+    expect(t.bridge.shownInFolder).toEqual(['/out/Plan 1.nc'])
     expect(within(dialog).getByText('1234 lines')).toBeInTheDocument()
     expect(within(dialog).getByText('About 12 min 5 s without tool changes')).toBeInTheDocument()
     expect(within(dialog).getByRole('list', { name: 'Export warnings' })).toHaveTextContent(

@@ -88,7 +88,7 @@ export const libraryMessages = {
       name: 'Name',
       diameter: 'Ø',
       angle: 'Angle',
-      cornerRadius: 'RE',
+      cornerRadius: 'Corner R',
       flutes: 'Flutes',
       fluteLength: 'Flute length',
       presets: 'Presets',
@@ -100,6 +100,11 @@ export const libraryMessages = {
       material: 'Material',
     },
     sortBy: (column: string) => `Sort by ${column}`,
+    /** Header tooltips where the header is short (DF48). */
+    columnTips: { cornerRadius: 'Corner radius (RE)', diameter: 'Diameter (DC)' } as Record<
+      string,
+      string
+    >,
     allTypes: 'All types',
     typeFilter: 'Tool type',
     duplicate: 'Duplicate',
@@ -185,8 +190,11 @@ export const libraryMessages = {
     overallLength: 'Overall length',
     stickout: 'Stickout',
     overallLengthNote: 'The whole tool, shank included: the stickout must be shorter.',
-    stickoutNote: 'Length below the collet; plans may override it.',
-    stickoutPlaceholder: 'Flute length',
+    /** DF48: says what an empty stickout means; the placeholder shows the value it takes. */
+    stickoutNote: 'Length below the collet; empty uses the flute length. Plans may override it.',
+    /** The empty stickout's value, marked as a default (DF48: "Flute length" read like a value). */
+    stickoutPlaceholder: (flute: string | undefined) =>
+      flute === undefined ? 'Default' : `Default: ${flute}`,
     shankDiameter: 'Shank diameter',
     shankNote: 'Optional: the collet size.',
     fluteCount: 'Flutes',
@@ -208,6 +216,8 @@ export const libraryMessages = {
       string,
       string
     >,
+    /** The legend under the drawing (DF48): each symbol it shows with its field's name. */
+    legend: 'Dimensions in the drawing',
     /** ISO 13399 symbols of the drawing's dimensions. */
     symbols: {
       diameter: 'DC',

@@ -316,16 +316,32 @@ describe('operation inspector for shapes', () => {
     const shapes = await screen.findByRole('dialog', { name: 'Shapes' })
     // no shapes yet: the explanation, then "Add shape" and "Import SVG…" (DF49)
     expect(within(shapes).getByText(/import an SVG drawing/)).toBeVisible()
+    // "Choose one to edit it." only once there is one (DF48)
+    expect(shapes).toHaveAccessibleDescription('Outlines that pockets and profiles can cut.')
     await expectNoAxeViolations(shapes)
     await user.click(within(shapes).getByRole('button', { name: 'Import SVG…' }))
     const options = await screen.findByRole('dialog', { name: 'Import SVG' })
+    // the options name the file (DF48), the full path as tooltip
+    expect(within(options).getByText('enclosure-sections.svg')).toBeVisible()
+    expect(within(options).getByTitle(SVG)).toBeInTheDocument()
+    await expectNoAxeViolations(options)
     await user.click(within(options).getByRole('button', { name: 'Import' }))
     const report = await screen.findByRole('dialog', { name: /^Imported/ })
     expect(bridge.calls.filter((c) => c.name === 'design.shape.import')).toHaveLength(1)
     expect((part().shapes ?? []).length).toBeGreaterThan(0)
-    // the options and report stack over the Shapes dialog; Edit shape closes both
+    // element counts in words (DF48: "2 path")
+    expect(within(report).getByText('2 paths')).toBeVisible()
+    // the options and report stack over the Shapes dialog; Close leaves it open
     expect(shapes).toBeInTheDocument()
-    await user.click(within(report).getByRole('button', { name: 'Edit shape' }))
+    await user.click(within(report).getByRole('button', { name: 'Close' }))
+    // rows: the kind's icon and a read-out "Path · 250 × 178"-like (DF48)
+    expect(
+      within(shapes).getByRole('button', { name: /^outline,\s?Path · 249\.5 × 177\.1$/ }),
+    ).toBeVisible()
+    expect(shapes).toHaveAccessibleDescription(
+      'Outlines that pockets and profiles can cut. Choose one to edit it.',
+    )
+    await user.click(within(shapes).getByRole('button', { name: /^outline/ }))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(await screen.findByRole('region', { name: 'Shape Editor' })).toBeInTheDocument()
     // later access: the shape inspector reopens the report
@@ -380,7 +396,7 @@ describe('operation inspector for shapes', () => {
     // new shapes; the edited one is unchanged
     expect(part().shapes?.map((s) => s.name)).toEqual(['Shape 1', 'outline', 'cavity'])
     expect(part().shapes?.[0]?.items).toHaveLength(1)
-    await user.click(within(report).getByRole('button', { name: 'Edit shape' }))
+    await user.click(within(report).getByRole('button', { name: 'Edit outline' }))
     expect(await within(inspector()).findByRole('heading', { name: 'outline' })).toBeVisible()
   })
 })
