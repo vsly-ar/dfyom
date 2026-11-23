@@ -215,5 +215,27 @@ export function loadProjectFiles(
   }
   if (typeof project !== 'object' || project === null || Array.isArray(project))
     return fail('input.malformed', 'project.json is missing or not an object', { where })
-  return parseProjectDoc({ ...project, ...raw }, where)
+  const p = project as Record<string, unknown>
+  return parseProjectDoc({ ...p, ...raw }, where).mapErr((e) =>
+    e.withContext(INCOMPATIBLE_PROJECT, {
+      ...(typeof p['name'] === 'string' ? { name: p['name'] } : {}),
+      ...(p['unitSystem'] === 'mm' || p['unitSystem'] === 'inch'
+        ? { unitSystem: p['unitSystem'] }
+        : {}),
+    }),
+  )
+}
+
+/**
+ * Frame of a load error whose documents parse as JSON but no longer fit the current schemas
+ * (pre-alpha: data of an earlier version, e.g. a chamfer saved before D45). Data: the old
+ * `name` and `unitSystem` when `project.json` still has them. Such a project file is reset after
+ * the user confirms, never repaired (docs/architecture/persistence.md#open, hardening B6).
+ */
+export const INCOMPATIBLE_PROJECT = 'project.incompatible'
+
+export function isIncompatibleProject(e: {
+  readonly frames: readonly { readonly where: string }[]
+}): boolean {
+  return e.frames.some((f) => f.where === INCOMPATIBLE_PROJECT)
 }

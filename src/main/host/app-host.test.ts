@@ -8,6 +8,9 @@ import { libraryInput } from '../../core/library/library.fixture'
 import type { Source } from '../../core/commands/context'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
 import { ENCLOSURE_STL, ENCLOSURE_TRIANGLES } from '../../core/design/stl.testing'
+import { isIncompatibleProject } from '../../core/project/layout'
+import { readArchive, writeArchive } from '../persistence/archive'
+import { testFs } from '../persistence/fs.testing'
 import { nodeFiles } from '../workers/files'
 import { buildSmallPlan, tempDir, testHost } from './host.fixture'
 
@@ -187,6 +190,70 @@ describe('app host', () => {
     expect(again).toMatchObject({ key, alreadyOpen: true })
     expect(opened).toEqual([]) // no second window for an agent's or window's reopen
     other.end()
+  })
+
+  it('a project saved before D45 asks for a reset; project.open { reset } replaces it (B6)', async () => {
+    const { host, session, call, dir } = await setup()
+    const ids = await buildSmallPlan(call)
+    await call('design.drilling.add', { partId: ids.partId, center: ['20', '20'], diameter: '6' })
+    await call('design.chamfer.add', { partId: ids.partId, edgeOf: 'drill1' })
+    const file = join(dir, 'old.dfyom')
+    await call('project.save', { target: file })
+    await call('project.close', { key: ids.key })
+    // Fixture: the same file as a pre-D45 build wrote it (chamfer `diameter`, no `width`).
+    const a = expectOk(await readArchive(testFs, file))
+    const files = new Map(a.files)
+    const partPath = [...files.keys()].find((p) => p.startsWith('parts/'))!
+    const part = JSON.parse(files.get(partPath)!) as { operations: Record<string, unknown>[] }
+    const c = part.operations.find((o) => o['kind'] === 'chamfer')!
+    c['diameter'] = c['width']
+    delete c['width']
+    files.set(partPath, JSON.stringify(part))
+    const { projectId, appVersion, savedAt, revision } = a.manifest
+    expectOk(
+      await writeArchive(testFs, file, files, [], { projectId, appVersion, savedAt, revision }),
+    )
+
+    const refused = expectErrCode(
+      (await session.call('project.open', { file })).result,
+      'input.malformed',
+    )
+    expect(isIncompatibleProject(refused)).toBe(true)
+    expect(refused.frames.find((f) => f.where === 'project.incompatible')?.data).toEqual({
+      name: 'Small',
+      unitSystem: 'mm',
+    })
+    expect(host.list()).toEqual([])
+
+    const reset = (await call('project.open', { file, reset: true })) as { key: string }
+    expect(reset).toMatchObject({ alreadyOpen: false })
+    expect(session.boundKey).toBe(reset.key)
+    expect(host.list()[0]).toMatchObject({
+      name: 'Small',
+      dirty: false,
+      file: expect.stringMatching(/old\.dfyom$/),
+    })
+    expect(((await call('design.part.list')) as { parts: unknown[] }).parts).toEqual([])
+    // the file now holds the empty project: it opens without reset
+    await call('project.close', { key: reset.key })
+    const again = (await call('project.open', { file })) as { key: string }
+    expect(again.key).toBe(reset.key)
+  })
+
+  it('reset does nothing to a file that loads; other open errors are never reset (B6)', async () => {
+    const { host, session, call, dir } = await setup()
+    const ids = await buildSmallPlan(call)
+    const file = join(dir, 'good.dfyom')
+    await call('project.save', { target: file })
+    await call('project.close', { key: ids.key })
+    await call('project.open', { file, reset: true })
+    expect(host.list()).toHaveLength(1)
+    expect(((await call('design.part.list')) as { parts: unknown[] }).parts).toHaveLength(1)
+    const missing = expectErrCode(
+      (await session.call('project.open', { file: join(dir, 'none.dfyom'), reset: true })).result,
+      'persist.io',
+    )
+    expect(isIncompatibleProject(missing)).toBe(false)
   })
 
   it("reads a reference's triangles for the window ghost (task R3)", async () => {

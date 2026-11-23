@@ -96,6 +96,51 @@ describe('project files', () => {
     await waitFor(() => expect(document.title).toBe('Bracket — Edited'))
   })
 
+  it('a project of an earlier pre-alpha version offers "Discard and start fresh", confirmed (B6)', async () => {
+    const bridge = createFakeBridge()
+    bridge.handle('project.recovery.list', () => ok({ projects: [] }))
+    bridge.setFileChoice({ open: '/p/old.dfyom' })
+    bridge.handle('project.open', (args) => {
+      if ((args as { reset?: boolean }).reset !== true)
+        return errorReply({
+          code: 'input.malformed',
+          message: 'document does not match the schema',
+          issues: [
+            {
+              path: ['parts', 'p1', 'operations', 2, 'width'],
+              rule: 'invalid_type',
+              message: 'Required',
+            },
+          ],
+          frames: [
+            { where: 'layout.load' },
+            { where: 'project.incompatible', data: { name: 'Old', unitSystem: 'mm' } },
+          ],
+        })
+      bridge.bind(fixtureDispatcher('Old'), 'proj-2')
+      return ok({ key: 'proj-2', revision: 0, alreadyOpen: false })
+    })
+    const { user } = renderApp(bridge)
+    await user.click(await screen.findByRole('button', { name: 'Open project' }))
+    const dialog = await screen.findByRole('dialog', { name: 'This project can’t be opened' })
+    expect(dialog).toHaveTextContent('“old.dfyom” was saved by an earlier pre-alpha version')
+    await expectNoAxeViolations()
+    await user.click(within(dialog).getByRole('button', { name: 'Discard and start fresh' }))
+    // asks again before anything is deleted
+    expect(bridge.calls.filter((c) => c.name === 'project.open')).toHaveLength(1)
+    const confirm = await screen.findByRole('alertdialog', {
+      name: 'Discard the content of “old.dfyom”?',
+    })
+    await user.click(within(confirm).getByRole('button', { name: 'Discard and start fresh' }))
+    await waitFor(() =>
+      expect(bridge.calls.filter((c) => c.name === 'project.open').at(-1)?.args).toEqual({
+        file: '/p/old.dfyom',
+        reset: true,
+      }),
+    )
+    await waitFor(() => expect(document.title).toBe('Old'))
+  })
+
   it('a foreign lock offers to try again now or in 2 minutes', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     try {
