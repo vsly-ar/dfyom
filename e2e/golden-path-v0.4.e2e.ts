@@ -189,7 +189,7 @@ async function libraryTool(lib: Page, tool: ToolSpec): Promise<void> {
 
 /** The program's section comments in order, clone positions left out. */
 const sections = (gcode: string) =>
-  [...gcode.matchAll(/^\(((?:Hole|Profile|Chamfer)[^)]*)\)$/gm)].map((m) => m[1])
+  [...gcode.matchAll(/^\(((?:Bolt hole|Profile|Chamfer)[^)]*)\)$/gm)].map((m) => m[1])
 
 test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers, one setup, reopen', async ({
   dfyom,
@@ -499,7 +499,7 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
   // plan operation, every clone instance keeps its source's tool, the outline last
   const planned = setups
     .getByRole('list', { name: 'Plan operations in machining order' })
-    .getByRole('button', { name: /^(Hole|Profile|Chamfer) \d/ })
+    .getByRole('button', { name: /^(Bolt hole|Profile|Chamfer) \d/ })
   await expect(planned).toHaveText([
     /^Bolt hole 1 · drill × 4\s*Flat 3/,
     /^Bolt hole 2 · counterbore\s*Flat 3/,
