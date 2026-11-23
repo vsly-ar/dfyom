@@ -75,7 +75,8 @@ export function planDesignTool(plan: LoadedPlan, op: PlanOperationDTO): Option<P
       ...(tool.cornerRadius.isSome() && { cornerRadius: tool.cornerRadius.unwrap().canonical }),
       ...(tool.angle.isSome() && { angle: tool.angle.unwrap().canonical }),
       label: tool.name,
-      specific: { snapshotId: dto.snapshotId, libraryItemId: snap.libraryItemId, tool },
+      // tool snapshots always come from the library (only a part's stock may be its own)
+      specific: { snapshotId: dto.snapshotId, libraryItemId: snap.libraryItemId ?? '', tool },
     })
   }
   const g = designToolFromDTO(dto)

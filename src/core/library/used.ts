@@ -8,8 +8,9 @@ import type { ProjectDoc } from '../project/document'
 /** Library item ids used by the project, sorted, without duplicates. */
 export function usedLibraryItemIds(doc: ProjectDoc): string[] {
   const ids = new Set<string>()
-  for (const s of Object.values(doc.snapshots)) ids.add(s.libraryItemId)
+  // a part's own stock (no libraryItemId, DF13) uses no library item
+  for (const s of Object.values(doc.snapshots)) if (s.libraryItemId) ids.add(s.libraryItemId)
   for (const plan of Object.values(doc.plans))
-    for (const s of plan.snapshots) ids.add(s.libraryItemId)
+    for (const s of plan.snapshots) if (s.libraryItemId) ids.add(s.libraryItemId)
   return [...ids].sort()
 }

@@ -171,7 +171,7 @@ export function PartSetupDialogs({
         }
       >
         {part === undefined ? (
-          <StockSetup units={doc.unitSystem} onCreated={close} />
+          <StockSetup units={doc.unitSystem} projectName={doc.name} onCreated={close} />
         ) : (
           <StockFacts
             part={part}

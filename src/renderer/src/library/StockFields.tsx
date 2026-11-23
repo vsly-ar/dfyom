@@ -31,7 +31,7 @@ export function StockFields({
   const set = (patch: Partial<StockDraft>) => onChange({ ...values, ...patch })
   const size = (
     field: 'length' | 'width' | 'thickness',
-    icon: 'length' | 'width' | 'depth',
+    icon: 'stock-length' | 'stock-width' | 'stock-thickness',
     note?: string,
   ) => (
     <QuantityField
@@ -57,9 +57,9 @@ export function StockFields({
       />
       <Group title={g.size}>
         <FixedField label={m.shape} value={libraryMessages.window.shapes[values.shape]} />
-        {size('length', 'length')}
-        {size('width', 'width')}
-        {size('thickness', 'depth', m.thicknessNote)}
+        {size('length', 'stock-length')}
+        {size('width', 'stock-width')}
+        {size('thickness', 'stock-thickness', m.thicknessNote)}
       </Group>
       <Group title={g.material}>
         <Field label={m.materialName} messages={messages('material.name')}>

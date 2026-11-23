@@ -161,7 +161,8 @@ export function planStale(
       const snap = Snapshot.fromDTO(dto)
       if (snap.isErr()) continue
       const status = snapshotStatus(snap.unwrap(), lookup)
-      if (status === 'current') continue
+      // a part's own stock (no libraryItemId, DF13) is always current
+      if (status === 'current' || dto.libraryItemId === undefined) continue
       const found = lookup(dto.kind, dto.libraryItemId)
       const blocked =
         status === 'libraryChanged' && found.state === 'found'

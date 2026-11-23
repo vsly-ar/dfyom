@@ -1,5 +1,5 @@
-// Design navigator (task 3.6; laid out by D45): the "Operations" header first, then a one-line
-// read-out of the part (selects it) and its stock (opens the Stock dialog), and the operation list in design order – add (Facing, Pocket, Drilling, Profile), select (the
+// Design navigator (task 3.6; laid out by D45, DF15): a one-line read-out of the part (selects it)
+// and its stock (opens the Stock dialog) first, then the "Operations" header and the operation list in design order – add (Facing, Pocket, Drilling, Profile), select (the
 // viewport and inspector follow), move up/down by buttons and Alt+↑/↓, remove with an undo toast
 // instead of a confirmation. Rows carry warning badges and the error marker of a failed
 // evaluation. Without a part an empty state opens the Stock dialog. Stock setup, shapes and
@@ -196,15 +196,7 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
 
   return (
     <div className={styles['navigator']}>
-      <PanelHeader
-        title={m.navigator.operations}
-        meta={ops.length > 0 ? String(ops.length) : undefined}
-        actions={
-          <Menu label={m.addMenu} items={addItems}>
-            <IconButton label={m.addMenu} icon={<Icon name="add" />} />
-          </Menu>
-        }
-      />
+      {/* the part row heads the sidebar, above Operations: it is not an operation (DF15) */}
       <section className={styles['partLine']} aria-label={m.inspector.part}>
         <button
           type="button"
@@ -227,6 +219,15 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
           </button>
         ) : null}
       </section>
+      <PanelHeader
+        title={m.navigator.operations}
+        meta={ops.length > 0 ? String(ops.length) : undefined}
+        actions={
+          <Menu label={m.addMenu} items={addItems}>
+            <IconButton label={m.addMenu} icon={<Icon name="add" />} />
+          </Menu>
+        }
+      />
       {ops.length === 0 ? (
         <div className={styles['emptyOps']}>
           <EmptyState

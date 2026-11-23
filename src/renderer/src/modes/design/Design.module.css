@@ -17,13 +17,13 @@
   cursor: pointer;
 }
 
-/* the sidebar's one-line part and stock read-out under the Operations header (D45) */
+/* the sidebar's one-line part and stock read-out above the Operations header (D45, DF15) */
 .partLine {
   display: flex;
   align-items: baseline;
   gap: var(--space-2);
   min-width: 0;
-  padding: var(--space-1) var(--space-3) var(--space-2);
+  padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--border);
 }
 
@@ -122,22 +122,20 @@
   padding: var(--space-3);
 }
 
-.caption {
-  font-size: var(--text-sm);
-  color: var(--text-muted);
-}
-
-.choice {
-  display: grid;
-  gap: var(--space-1);
-}
-
 .setup {
   /* the Stock dialog's body (D45); fields stack their label above the input when narrow (Field) */
   container-type: inline-size;
   display: grid;
   gap: var(--space-3);
   color: var(--text);
+}
+
+/* Save to library and Create part (DF13), at the end of the Stock dialog's body */
+.setupButtons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
 }
 
 .emptyOps {

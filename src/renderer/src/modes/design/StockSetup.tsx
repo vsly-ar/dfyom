@@ -1,16 +1,21 @@
-// Stock setup for the part (task 3.6): a project without a part picks its stock – a block from
-// the stock library or a new block (added to the library first) – and creates the part from it
-// (`design.part.add` takes a snapshot of the stock, design.md#part-and-stock-v01). Since D45 the
+// Stock setup for the part (task 3.6; one screen since dogfood DF11–DF13): the part name (the
+// project name + " 1"), an optional library stock that fills the block's fields (sizes stay
+// editable: the part is cut from a piece of it; its material is shown locked), the block's size
+// and material, "Save to library" (add, or for a changed library stock: update it or save a
+// variant of it) and "Create part" (`design.part.add`: a linked copy of an unchanged library
+// stock, else the project's own block; nothing is added to the library by itself). Since D45 the
 // body of the Stock dialog, which titles and describes it; `onCreated` closes the dialog.
-// Doc: docs/modes/design.md#workflow, docs/architecture/library.md#stock,
-// docs/conventions/ui.md#design-sidebar-and-setup-dialogs-v04-d45
+// Doc: docs/conventions/ui.md#stock-dialog-df11df13, docs/modes/design.md#workflow,
+// docs/architecture/library.md#stock-variants-df13
 import { useEffect, useRef, useState } from 'react'
 import { MATERIAL_CLASSES, type MaterialClass } from '../../../../core/library/item'
+import type { LibraryItemDTO } from '../../../../core/library/library-item'
 import type { StockValuesDTO } from '../../../../core/library/stock.dto'
 import type { UnitSystem } from '../../../../core/project/document'
+import type { QuantityDTO } from '../../../../core/quantity/quantity.dto'
 import { Quantity } from '../../../../core/quantity/quantity'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
-import { issuesAt, unmatchedIssues } from '../../library/form'
+import { displayQuantity, issuesAt, unmatchedIssues } from '../../library/form'
 import { issueMessages } from '../../library/LibraryForm'
 import { LibraryLink } from '../../library/LibraryLink'
 import { designMessages } from '../../messages/design'
@@ -20,13 +25,15 @@ import {
   Icon,
   ApplyScope,
   Button,
+  Dialog,
+  DialogClose,
   ErrorMessage,
   Field,
   FieldIcon,
   FieldInput,
   QuantityInput,
-  SegmentedControl,
   Select,
+  type SelectOption,
 } from '../../ui'
 import styles from './Design.module.css'
 import { defaultUnit } from './model'
@@ -39,10 +46,13 @@ const DEFAULT_SIZE: Record<UnitSystem, [string, string, string]> = {
   inch: ['4', '2 1/2', '3/4'],
 }
 
-type LibraryStock = StockValuesDTO & { id: string }
+type LibraryStock = StockValuesDTO & { id: string; revision: number; parentId?: string }
 
-/** The stock values the size fields edit (issue paths of `library.stock.add`). */
+/** The stock values the size fields edit (issue paths of `library.stock.*` and `stock.*`). */
 const SIZE_FIELDS = ['length', 'width', 'thickness'] as const
+const SIZE_ICONS = ['stock-length', 'stock-width', 'stock-thickness'] as const
+/** The From library list's "Not selected" (Radix Select values must not be empty). */
+const NONE = '\u0000none'
 
 function parseLength(source: string, units: UnitSystem): Quantity {
   return Quantity.parse(source, { kind: 'length', defaultUnit: defaultUnit('length', units) })
@@ -50,121 +60,219 @@ function parseLength(source: string, units: UnitSystem): Quantity {
     .unwrap()
 }
 
+/** Same value and tolerance (the source may differ: "100" and "100 mm" are the same size). */
+function sameSize(q: Quantity, dto: QuantityDTO): boolean {
+  const { exact, tolerance } = q.toDTO()
+  return (
+    JSON.stringify({ exact, tolerance }) ===
+    JSON.stringify({ exact: dto.exact, tolerance: dto.tolerance })
+  )
+}
+
+/** Roots by name, each followed by its variants; a variant without its parent counts as a root. */
+export function stockOrder(items: readonly LibraryStock[]): LibraryStock[] {
+  const ids = new Set(items.map((i) => i.id))
+  const byName = (a: LibraryStock, b: LibraryStock) => a.name.localeCompare(b.name)
+  const isRoot = (i: LibraryStock) => i.parentId === undefined || !ids.has(i.parentId)
+  return [...items]
+    .filter(isRoot)
+    .sort(byName)
+    .flatMap((r) => [r, ...items.filter((i) => !isRoot(i) && i.parentId === r.id).sort(byName)])
+}
+
 export function StockSetup({
   units,
+  projectName,
   onCreated,
 }: {
   units: UnitSystem
+  /** The project's name: the part is named after it (DF12). */
+  projectName: string
   /** The part was created. */
   onCreated?: () => void
 }): React.JSX.Element {
   const call = useCommand()
-  const [partName, setPartName] = useState<string>(m.defaultPartName)
+  const [partName, setPartName] = useState(() => m.firstPartName(projectName))
   const [library, setLibrary] = useState<readonly LibraryStock[]>([])
-  const [source, setSource] = useState<'new' | 'library'>('new')
-  const [itemId, setItemId] = useState<string | undefined>(undefined)
+  const [itemId, setItemId] = useState<string | null>(null)
   const [size, setSize] = useState(() => DEFAULT_SIZE[units].map((s) => parseLength(s, units)))
+  // bumped when a library stock fills the fields, so the inputs show the new values
+  const [fill, setFill] = useState(0)
   const [material, setMaterial] = useState('6061-T6')
   const [materialClass, setMaterialClass] = useState<MaterialClass>('aluminum')
   const [error, setError] = useState<AppErrorData | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [failures, setFailures] = useState(0)
+  const [asking, setAsking] = useState(false)
   const section = useRef<HTMLElement>(null)
-  // re-read when the library changes (the Library window, an agent)
+  // re-read when the library changes (the Library window, an agent, our own Save)
   const libraryVersion = useLibraryVersion()
+
+  const reload = async (): Promise<readonly LibraryStock[]> => {
+    const r = await call('library.stock.list', {})
+    if (!r.ok) return library
+    const items = ((r.value as { items: LibraryItemDTO[] }).items ?? []).filter(
+      (i): i is LibraryItemDTO & { kind: 'stock' } => i.kind === 'stock' && i.shape === 'block',
+    ) as LibraryStock[]
+    return stockOrder(items)
+  }
 
   useEffect(() => {
     let live = true
-    void call('library.stock.list', {}).then((r) => {
-      if (!live || !r.ok) return
-      const items = ((r.value as { items: LibraryStock[] }).items ?? []).filter(
-        (i) => i.shape === 'block',
-      )
-      setLibrary(items)
-      if (items[0] !== undefined) setItemId((id) => id ?? items[0]!.id)
+    void reload().then((items) => {
+      if (live) setLibrary(items)
     })
     return () => {
       live = false
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-read on library changes only
   }, [call, libraryVersion])
+
+  const item = itemId === null ? undefined : library.find((i) => i.id === itemId)
+  const parentOf = (i: LibraryStock) =>
+    i.parentId === undefined ? undefined : library.find((p) => p.id === i.parentId)
+  const changed =
+    item !== undefined && SIZE_FIELDS.some((f, i) => !sameSize(size[i] as Quantity, item[f]))
+
+  /** Fills the fields from a library stock (or keeps them for "Not selected"). */
+  const choose = (id: string, items: readonly LibraryStock[] = library) => {
+    const chosen = id === NONE ? undefined : items.find((i) => i.id === id)
+    setItemId(chosen?.id ?? null)
+    setError(undefined)
+    if (chosen === undefined) return
+    setSize((s) =>
+      SIZE_FIELDS.map((f, i) => displayQuantity(chosen[f], units) ?? (s[i] as Quantity)),
+    )
+    setMaterial(chosen.material.name)
+    setMaterialClass(chosen.material.class)
+    setFill((n) => n + 1)
+  }
+
+  const [l, w, t] = size as [Quantity, Quantity, Quantity]
+  const summary = m.summary(l.source, w.source, t.source)
+  /** The block's values as `library.stock.add` and `design.part.add { stock }` take them. */
+  const blockValues = (name: string, notes?: string) => ({
+    name,
+    ...(notes === undefined ? {} : { notes }),
+    shape: 'block' as const,
+    length: l.source,
+    width: w.source,
+    thickness: t.source,
+    material: { name: material.trim() || m.classes[materialClass], class: materialClass },
+  })
+
+  const failed = (e: AppErrorData) => {
+    setError(e)
+    setFailures((n) => n + 1)
+  }
 
   const create = async () => {
     setBusy(true)
     setError(undefined)
-    let stockId = itemId
-    if (source === 'new') {
-      const [l, w, t] = size as [Quantity, Quantity, Quantity]
-      const added = await call('library.stock.add', {
-        values: {
-          name: m.defaultName(l.source, w.source, t.source),
-          shape: 'block',
-          length: l.source,
-          width: w.source,
-          thickness: t.source,
-          material: { name: material.trim() || m.classes[materialClass], class: materialClass },
-        },
-        units, // bare numbers as the fields read them (library.md#command-input)
-      })
-      if (!added.ok) {
-        setBusy(false)
-        setError(added.error)
-        setFailures((n) => n + 1)
-        return
-      }
-      stockId = (added.value as { id: string }).id
-    }
-    if (stockId === undefined) {
-      setBusy(false)
-      return
-    }
-    const r = await call('design.part.add', {
-      name: partName.trim() || m.defaultPartName,
-      stockLibraryItemId: stockId,
-    })
+    const name = partName.trim() || m.firstPartName(projectName)
+    const r = await call(
+      'design.part.add',
+      item !== undefined && !changed
+        ? { name, stockLibraryItemId: item.id }
+        : { name, stock: blockValues(m.defaultName(l.source, w.source, t.source)) },
+    )
     setBusy(false)
-    if (!r.ok) {
-      setError(r.error)
-      setFailures((n) => n + 1)
-      return
-    }
+    if (!r.ok) return failed(r.error)
     onCreated?.()
   }
 
-  // after a failed Create, focus the first field it marked (ui.md#errors)
+  /** Saves to the library: add (no stock chosen, or a variant) or update the chosen one. */
+  const save = async (how: 'add' | 'update' | 'variant') => {
+    setAsking(false)
+    setBusy(true)
+    setError(undefined)
+    const root = item === undefined ? undefined : (parentOf(item) ?? item)
+    const r =
+      how === 'update' && item !== undefined
+        ? await call('library.stock.update', {
+            id: item.id,
+            revision: item.revision,
+            values: blockValues(item.name, item.notes),
+            units,
+          })
+        : await call('library.stock.add', {
+            values: blockValues(
+              how === 'variant' && root !== undefined
+                ? m.variantName(root.name, summary)
+                : m.defaultName(l.source, w.source, t.source),
+            ),
+            units, // bare numbers as the fields read them (library.md#command-input)
+            ...(how === 'variant' && root !== undefined ? { parentId: root.id } : {}),
+          })
+    if (!r.ok) {
+      setBusy(false)
+      return failed(r.error)
+    }
+    const saved = r.value as LibraryStock
+    const items = await reload()
+    setLibrary(items)
+    setBusy(false)
+    choose(saved.id, items)
+  }
+
+  // after a failed Create or Save, focus the first field it marked (ui.md#errors)
   useEffect(() => {
     if (failures > 0) section.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus()
   }, [failures])
 
-  // a failed add shows its issues at the size fields (ui.md#errors), the rest above Create
-  const issues = error?.issues ?? []
-  const summary =
+  // a failed command shows its issues at the size fields (ui.md#errors), the rest above Create
+  const issues = (error?.issues ?? []).map((i) =>
+    i.path[0] === 'stock' ? { ...i, path: i.path.slice(1) } : i,
+  )
+  const rest =
     error === undefined
       ? undefined
       : issues.length === 0
         ? error
         : (() => {
-            const rest = unmatchedIssues(issues, SIZE_FIELDS)
-            return rest.length > 0 ? { ...error, issues: rest } : undefined
+            const left = unmatchedIssues(issues, SIZE_FIELDS)
+            return left.length > 0 ? { ...error, issues: left } : undefined
           })()
-  const sizeField = (i: 0 | 1 | 2, label: string, icon: 'length' | 'width' | 'depth') => (
+  const sizeField = (i: 0 | 1 | 2, label: string) => (
     <QuantityInput
+      key={`${SIZE_FIELDS[i]}-${fill}`}
       label={label}
       kind="length"
       defaultUnit={defaultUnit('length', units)}
       value={size[i]}
-      illustration={<FieldIcon name={icon} />}
+      illustration={<FieldIcon name={SIZE_ICONS[i]} />}
       messages={issueMessages(issues, SIZE_FIELDS[i])}
       onCommit={(q) => {
         setSize((s) => s.map((v, j) => (j === i ? q : v)))
         // the edited field's issue is stale now; the others stay until the next Create
         setError((e) => {
           if (e === undefined || e.issues.length === 0) return e
-          const left = e.issues.filter((x) => issuesAt([x], SIZE_FIELDS[i]).length === 0)
+          const left = e.issues.filter(
+            (x) =>
+              issuesAt(
+                [{ ...x, path: x.path.slice(x.path[0] === 'stock' ? 1 : 0) }],
+                SIZE_FIELDS[i],
+              ).length === 0,
+          )
           return left.length === 0 ? undefined : { ...e, issues: left }
         })
       }}
     />
   )
+
+  const options: SelectOption<string>[] = [
+    { value: NONE, label: m.notSelected },
+    ...library.map((i) => {
+      const parent = parentOf(i)
+      return {
+        value: i.id,
+        label: i.name,
+        ...(parent === undefined ? {} : { description: m.variantOf(parent.name) }),
+      }
+    }),
+  ]
+  const locked = item !== undefined
+  const saveDisabled = busy || (item !== undefined && !changed)
 
   return (
     // not a <form>: Enter in a field commits that field (QuantityInput), it does not submit; local
@@ -174,68 +282,82 @@ export function StockSetup({
         <Field label={m.partName}>
           <FieldInput value={partName} onChange={(e) => setPartName(e.target.value)} />
         </Field>
-        <div className={styles['choice']}>
-          <span className={styles['caption']} aria-hidden="true">
-            {m.source}
-          </span>
-          <SegmentedControl<'new' | 'library'>
-            label={m.source}
-            options={[
-              { value: 'new', label: m.newStock },
-              { value: 'library', label: m.fromLibrary, disabled: library.length === 0 },
-            ]}
-            value={source}
-            onValueChange={setSource}
+        <Field label={m.fromLibrary}>
+          <Select options={options} value={itemId ?? NONE} onValueChange={(id) => choose(id)} />
+        </Field>
+        {sizeField(0, m.length)}
+        {sizeField(1, m.width)}
+        {sizeField(2, m.thickness)}
+        <Field
+          label={m.materialName}
+          readOnly={locked}
+          messages={
+            locked ? [{ id: 'materialLocked', severity: 'note', text: m.materialLocked }] : []
+          }
+        >
+          <FieldInput
+            value={material}
+            readOnly={locked}
+            onChange={(e) => setMaterial(e.target.value)}
+          />
+        </Field>
+        <Field label={m.materialClass} readOnly={locked}>
+          <Select<MaterialClass>
+            options={MATERIAL_CLASSES.map((c) => ({ value: c, label: m.classes[c] }))}
+            value={materialClass}
+            disabled={locked}
+            onValueChange={setMaterialClass}
+          />
+        </Field>
+        <div>
+          <LibraryLink
+            target={{ kind: 'stock', ...(itemId === null ? {} : { itemId }) }}
+            label={libraryMessages.links.open}
           />
         </div>
-        {source === 'library' ? (
-          <>
-            <Field label={m.libraryItem}>
-              <Select
-                options={library.map((i) => ({ value: i.id, label: i.name }))}
-                value={itemId ?? ''}
-                onValueChange={setItemId}
-              />
-            </Field>
-            <div>
-              <LibraryLink
-                target={{ kind: 'stock', ...(itemId === undefined ? {} : { itemId }) }}
-                label={libraryMessages.links.open}
-              />
-            </div>
-          </>
-        ) : (
-          <>
-            {sizeField(0, m.length, 'length')}
-            {sizeField(1, m.width, 'width')}
-            {sizeField(2, m.thickness, 'depth')}
-            <Field label={m.materialName}>
-              <FieldInput value={material} onChange={(e) => setMaterial(e.target.value)} />
-            </Field>
-            <Field label={m.materialClass}>
-              <Select<MaterialClass>
-                options={MATERIAL_CLASSES.map((c) => ({ value: c, label: m.classes[c] }))}
-                value={materialClass}
-                onValueChange={setMaterialClass}
-              />
-            </Field>
-          </>
-        )}
-        {source !== 'library' ? (
-          <div>
-            <LibraryLink target={{ kind: 'stock' }} />
-          </div>
-        ) : null}
-        {summary !== undefined ? <ErrorMessage error={summary} /> : null}
-        <Button
-          variant="primary"
-          onClick={() => void create()}
-          icon={<Icon name="stock" />}
-          disabled={busy || (source === 'library' && itemId === undefined)}
-        >
-          {m.create}
-        </Button>
+        {rest !== undefined ? <ErrorMessage error={rest} /> : null}
+        <div className={styles['setupButtons']}>
+          <Button
+            icon={<Icon name="library" />}
+            disabled={saveDisabled}
+            title={item !== undefined && !changed ? m.unchanged : undefined}
+            onClick={() => (item !== undefined ? setAsking(true) : void save('add'))}
+          >
+            {m.saveToLibrary}
+          </Button>
+          <Button
+            variant="primary"
+            onClick={() => void create()}
+            icon={<Icon name="stock" />}
+            disabled={busy}
+          >
+            {m.create}
+          </Button>
+        </div>
       </section>
+      {item !== undefined ? (
+        <Dialog
+          title={m.saveTitle}
+          description={m.saveDescription(item.name)}
+          open={asking}
+          onOpenChange={setAsking}
+          footer={
+            <>
+              <DialogClose>
+                <Button>{libraryMessages.cancel}</Button>
+              </DialogClose>
+              <Button onClick={() => void save('update')}>{m.updateStock}</Button>
+              <Button
+                variant="primary"
+                icon={<Icon name="add" />}
+                onClick={() => void save('variant')}
+              >
+                {m.saveVariant}
+              </Button>
+            </>
+          }
+        />
+      ) : null}
     </ApplyScope>
   )
 }

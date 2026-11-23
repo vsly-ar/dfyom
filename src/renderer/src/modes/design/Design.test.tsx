@@ -25,9 +25,10 @@ vi.mock('../../viewport/Scene', () => ({
   CameraControlsImpl: { ACTION: { NONE: 0, ROTATE: 1, TRUCK: 2, DOLLY: 16 } },
 }))
 
-async function renderDesign(withPart = true) {
+async function renderDesign(withPart = true, seed?: (d: Dispatcher) => Promise<unknown>) {
   const bridge: FakeBridge = createFakeBridge()
   const d: Dispatcher = await designDispatcher()
+  await seed?.(d)
   if (withPart) {
     const stock = await d.dispatch(
       'library.stock.add',
@@ -95,17 +96,37 @@ describe('design mode', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Stock' })
     const form = within(dialog).getByRole('region', { name: 'Set up the part' })
     await expectNoAxeViolations()
+    // the part is named after the project (DF12); no library stock is chosen (DF13)
+    expect(within(form).getByRole('textbox', { name: 'Part name' })).toHaveValue('Bracket 1')
+    expect(within(form).getByRole('combobox', { name: 'From library' })).toHaveTextContent(
+      'Not selected',
+    )
     const length = within(form).getByRole('combobox', { name: 'Length (X)' })
     await retype(user, length, '120{Enter}')
     await user.click(within(form).getByRole('button', { name: 'Create part' }))
-    // Create part closes it; the sidebar starts with the operations and the stock read-out
+    // Create part closes it; the sidebar starts with the part row, then the operations (DF15)
     await waitFor(() => expect(dialog).not.toBeInTheDocument())
     await within(navigator()).findByRole('heading', { name: 'No operations yet' })
     expect(within(navigator()).getAllByRole('heading')[0]).toHaveTextContent('Operations')
+    const partRow = within(navigator()).getByRole('region', { name: 'Part' })
+    expect(
+      partRow.compareDocumentPosition(within(navigator()).getAllByRole('heading')[0]!) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
     expect(within(navigator()).getByText(/^Stock: 120 × 60 × 20 · 6061-T6$/)).toBeInTheDocument()
     const part = Object.values(d.doc.parts)[0]!
+    expect(part.name).toBe('Bracket 1')
     const snap = d.doc.snapshots[part.stock]!
     expect((snap.values as { length: { source: string } }).length.source).toBe('120')
+    // the project's own block: nothing was added to the library (DF13)
+    expect(snap.libraryItemId).toBeUndefined()
+    expect(
+      (
+        expectOk(d.query('library.stock.list', {}, { kind: 'ui', id: 'test' })).value as {
+          items: []
+        }
+      ).items,
+    ).toHaveLength(0)
     // the read-out opens the Stock dialog again: the part's copy of the stock, Show part
     await user.click(within(navigator()).getByRole('button', { name: /^Stock: 120/ }))
     const again = await screen.findByRole('dialog', { name: 'Stock' })
@@ -120,6 +141,75 @@ describe('design mode', () => {
     expect(screen.queryByRole('dialog', { name: 'Stock' })).not.toBeInTheDocument()
     await user.click(within(navigator()).getByRole('button', { name: 'Set up stock…' }))
     expect(await screen.findByRole('dialog', { name: 'Stock' })).toBeInTheDocument()
+  })
+
+  it('fills the block from a library stock; changed sizes save as a variant or update (DF13)', async () => {
+    const ui = { kind: 'ui', id: 'test' } as const
+    const values = {
+      name: 'Aluminium plate 10',
+      shape: 'block',
+      length: '300',
+      width: '200',
+      thickness: '10',
+      material: { name: '5083', class: 'aluminum' },
+    }
+    let root = { id: '' }
+    const { user, d } = await renderDesign(false, async (d) => {
+      root = (await d.dispatch('library.stock.add', { values }, ui)).unwrap().value as {
+        id: string
+      }
+    })
+    const dialog = await screen.findByRole('dialog', { name: 'Stock' })
+    const form = within(dialog).getByRole('region', { name: 'Set up the part' })
+    const from = await within(form).findByRole('combobox', { name: 'From library' })
+    await user.click(from)
+    await user.click(await screen.findByRole('option', { name: 'Aluminium plate 10' }))
+    // the fields take its values; the material is shown but locked
+    await waitFor(() =>
+      expect(within(form).getByRole('combobox', { name: 'Length (X)' })).toHaveValue('300'),
+    )
+    expect(within(form).getByRole('textbox', { name: 'Material name' })).toHaveAttribute('readonly')
+    expect(within(form).getByRole('combobox', { name: 'Material class' })).toBeDisabled()
+    // unchanged: nothing to save
+    expect(within(form).getByRole('button', { name: 'Save to library' })).toBeDisabled()
+    await expectNoAxeViolations()
+    // a cut piece: Save asks update or variant; the variant goes under the stock
+    await retype(user, within(form).getByRole('combobox', { name: 'Length (X)' }), '150{Enter}')
+    await user.click(within(form).getByRole('button', { name: 'Save to library' }))
+    const ask = await screen.findByRole('dialog', { name: 'Save to library' })
+    await expectNoAxeViolations()
+    await user.click(within(ask).getByRole('button', { name: 'Save as variant' }))
+    await waitFor(() => expect(ask).not.toBeInTheDocument())
+    const list = () =>
+      (
+        expectOk(d.query('library.stock.list', {}, ui)).value as {
+          items: { id: string; name: string; parentId?: string; length: { source: string } }[]
+        }
+      ).items
+    await waitFor(() => expect(list()).toHaveLength(2))
+    const variant = list().find((i) => i.parentId === root.id)!
+    expect(variant.name).toBe('Aluminium plate 10 · 150 × 200 × 10')
+    // the variant is chosen now, so Create part links the part's copy to it
+    await waitFor(() =>
+      expect(within(form).getByRole('combobox', { name: 'From library' })).toHaveTextContent(
+        'Aluminium plate 10 · 150 × 200 × 10',
+      ),
+    )
+    // Update changes the chosen stock in place
+    await retype(user, within(form).getByRole('combobox', { name: 'Width (Y)' }), '120{Enter}')
+    await user.click(within(form).getByRole('button', { name: 'Save to library' }))
+    const again = await screen.findByRole('dialog', { name: 'Save to library' })
+    await user.click(within(again).getByRole('button', { name: 'Update stock' }))
+    await waitFor(() =>
+      expect(list().find((i) => i.id === variant.id)).toMatchObject({
+        width: { source: '120' },
+        parentId: root.id,
+      }),
+    )
+    await user.click(within(form).getByRole('button', { name: 'Create part' }))
+    await waitFor(() => expect(dialog).not.toBeInTheDocument())
+    const part = Object.values(d.doc.parts)[0]!
+    expect(d.doc.snapshots[part.stock]!.libraryItemId).toBe(variant.id)
   })
 
   it('closes the Stock dialog it opened by itself when an agent creates the part', async () => {

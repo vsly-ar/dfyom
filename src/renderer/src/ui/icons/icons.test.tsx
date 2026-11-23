@@ -17,6 +17,9 @@ describe('field illustrations', () => {
       'tool',
       'feed',
       'tabs',
+      'stock-length',
+      'stock-width',
+      'stock-thickness',
     ])
   })
 

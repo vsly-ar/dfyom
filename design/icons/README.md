@@ -11,7 +11,7 @@ Status: **approved in L3 (D33)** ([plan v0.3](../../docs/plans/v0.3.md)) with th
 | `b22/sync-page.mjs` | Writes the icon sheet of `docs/conventions/ui-design-system.html` from the single source (a test checks it)                            |
 | `b22/svg/*.svg`     | Standalone exports of those icons (generated; grey `#5b6462`, accent `#f5b700`)                                                        |
 | `render.mjs`        | Renders everything with headless Chromium (no window): `node design/icons/render.mjs [outDir]`; `CHROMIUM_PATH` picks an installed one |
-| `renders/*.png`     | B21 concepts at 1024, small-size sheet; B22 specimen and in-context mock, light and dark                                               |
+| `renders/*.png`     | B21 concepts at 1024, small-size sheet; B22 specimen and in-context mock, L1 and DF11 sheets, light and dark                           |
 
 The specimen and the mock load the real `src/renderer/src/ui/tokens.css`, so colours follow the tokens.
 
@@ -49,6 +49,10 @@ Drawn to the rules above for [ui.md § Icons (v0.4)](../../docs/conventions/ui.m
 - `chamfer-mill` is the former `v-bit` drawing, renamed to the name in ui.md (the `chamferMill` tool type's icon since C1).
 - Clones: the source square, two dashed copies and the dotted path between them (amber).
 - Row kinds (`row-grid`, `row-offset`, `row-polar`, `row-arc`, `row-point`, `row-along`): grid, arc, point and along read at 16 px; offset (three dots on a diagonal) and polar (the same with a ray from a small origin) are close at 16 px, so for L2: keep them or show the Add row menu's labels alone.
+
+### DF11: stock size field illustrations
+
+Dogfood DF11 ([ui.md § Stock dialog](../../docs/conventions/ui.md#stock-dialog-df11df13)): the Stock dialog showed the slot's length, width and depth drawings for the stock's Length, Width and Thickness. `stock-length`, `stock-width` and `stock-thickness` are field illustrations (viewBox 20, 1 px grey, one amber measured line) of one oblique block with its front bottom edge, receding bottom edge and front right vertical edge highlighted; the data is in [`ui/icons/field/stockSize.ts`](../../src/renderer/src/ui/icons/field/stockSize.ts), which `FieldIcon` and `render.mjs` both read. Review sheet: `renders/df11-stock-size-{light,dark}.png` (28 px beside the label at rest and focused, then 16 / 20 / 28 / 32 px, then the slot drawing replaced).
 
 ## Provenance and licence
 

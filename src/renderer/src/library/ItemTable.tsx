@@ -2,7 +2,7 @@
 // (name and notes) and, for tools, by type. ↑/↓ (Home/End) select a row, Enter moves focus into
 // the editor. A row the opening window's project uses has the "Used" chip (tooltip "Used in this project"), the
 // row being drafted shows "Unsaved", and a file that does not load is listed with its error and
-// cannot be selected for editing. Doc: docs/conventions/ui-library-window.md#layout, #accessibility
+// cannot be selected for editing. Stock variants follow their parent, indented (DF13). Doc: docs/conventions/ui-library-window.md#layout, #accessibility
 import { useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import type { LibraryItemKind } from '../../../core/library/item'
 import type { LibraryItemDTO } from '../../../core/library/library-item'
@@ -157,6 +157,19 @@ export function filterItems(
   )
 }
 
+/**
+ * Stock variants under their parent (DF13, ui-library-window.md#stock-variants-df13): `sorted`
+ * rows in the order of their roots, each root followed by its variants in the same order; a
+ * variant whose parent is not listed counts as a root.
+ */
+export function withVariants(sorted: readonly LibraryItemDTO[]): LibraryItemDTO[] {
+  const ids = new Set(sorted.map((i) => i.id))
+  const isRoot = (i: LibraryItemDTO) => i.parentId === undefined || !ids.has(i.parentId)
+  return sorted
+    .filter(isRoot)
+    .flatMap((r) => [r, ...sorted.filter((i) => !isRoot(i) && i.parentId === r.id)])
+}
+
 export function ItemTable({
   kind,
   listing,
@@ -187,12 +200,18 @@ export function ItemTable({
   const col = cols.find((c) => c.key === sort.key) ?? nameCol
   const rows = useMemo(() => {
     const list = filterItems(listing.items, search, kind === 'tool' ? type : ALL)
-    return list.sort((a, b) => {
+    // a search hit on a stock variant shows its parent too
+    const parents = listing.items.filter(
+      (p) => !list.includes(p) && list.some((i) => i.parentId === p.id),
+    )
+    const sorted = [...list, ...parents].sort((a, b) => {
       const x = col.sort(a)
       const y = col.sort(b)
       return (x < y ? -1 : x > y ? 1 : 0) * sort.dir
     })
+    return withVariants(sorted)
   }, [listing.items, search, type, kind, col, sort.dir])
+  const nameOf = (id: string | undefined) => listing.items.find((i) => i.id === id)?.name
   const errors = search.trim() === '' ? listing.errors : []
   const ids = [...(selected === NEW ? [NEW] : []), ...rows.map((r) => r.id)]
 
@@ -304,11 +323,15 @@ export function ItemTable({
           ) : null}
           {rows.map((i) => {
             const isSelected = i.id === selected
+            const parent = nameOf(i.parentId)
             return (
               <div
                 key={i.id}
                 role="row"
                 aria-selected={isSelected}
+                {...(parent === undefined
+                  ? {}
+                  : { 'aria-label': w.variantRow(i.name, parent), 'data-variant': '' })}
                 data-row={i.id}
                 tabIndex={isSelected || (selected === null && i === rows[0]) ? 0 : -1}
                 className={styles['row']}
