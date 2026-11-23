@@ -17,7 +17,7 @@ import {
   type ReadOptions,
   type WrittenArchive,
 } from './archive'
-import { nodeFs } from './fs'
+import { testFs } from './fs.testing'
 
 async function withTemp<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   const dir = await mkdtemp(join(tmpdir(), 'dfyom-archive-'))
@@ -36,7 +36,7 @@ export function buildArchive(
 ): Promise<WrittenArchive & { readonly bytes: Uint8Array }> {
   return withTemp(async (dir) => {
     const path = join(dir, 'a.dfyom')
-    const w = expectOk(await writeArchive(nodeFs, path, files, assets, info))
+    const w = expectOk(await writeArchive(testFs, path, files, assets, info))
     const bytes = new Uint8Array(await readFile(path))
     if (sha256(bytes) !== w.sha256) throw new Error('archive hash differs from its file')
     return { ...w, bytes }
@@ -51,7 +51,7 @@ export function readArchiveBytes(
   return withTemp(async (dir) => {
     const path = join(dir, 'a.dfyom')
     await writeFile(path, bytes)
-    return readArchive(nodeFs, path, opts)
+    return readArchive(testFs, path, opts)
   })
 }
 
@@ -60,6 +60,6 @@ export function loadArchiveBytes(bytes: Uint8Array): Promise<AppResult<LoadedArc
   return withTemp(async (dir) => {
     const path = join(dir, 'a.dfyom')
     await writeFile(path, bytes)
-    return loadArchive(nodeFs, path)
+    return loadArchive(testFs, path)
   })
 }

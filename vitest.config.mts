@@ -13,6 +13,11 @@ export default defineConfig({
           environment: 'node',
           // bundles the test worker entry for the real worker_threads tests (docs/architecture/workers.md#testing)
           globalSetup: ['src/main/workers/global-setup.ts'],
+          // Not Vitest's 5 s: on a loaded, swapping machine (load 100–300, 13 GB swap in use) every
+          // worker froze for ≈ 5 s at once, and a 40 ms test failed at 5.5 s. 15 s rides out such a
+          // stall and still ends a hang quickly; heavy tests keep their own 60 s
+          // (docs/conventions/testing.md#load-stable-tests).
+          testTimeout: 15_000,
         },
       },
       {

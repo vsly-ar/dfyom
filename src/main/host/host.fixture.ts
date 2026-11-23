@@ -1,7 +1,7 @@
 // Test-only app hosts in temp data dirs (in-process workers, no machine unless given), and a
 // small part with a plan built through tool calls. Not app code. Doc: docs/architecture/llm-api.md#testing
 import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect } from 'vitest'
 import { createInProcessWorkers, type FileSource } from '../../core/commands/jobs'
@@ -12,6 +12,8 @@ import type { MachineService } from '../../core/run/service'
 import { noopLogger } from '../../shared/logging'
 import { Ok } from '../../shared/result'
 import { expectOk } from '../../shared/testing/result'
+import { testFs } from '../persistence/fs.testing'
+import { createProjectStorage } from '../persistence/storage'
 import { createAppHost, type AppHost } from './app-host'
 
 /** A temp folder removed by `cleanup()`. */
@@ -26,12 +28,21 @@ export async function testHost(
   appData: string,
   o: { machine?: MachineService; instanceId?: string; files?: FileSource } = {},
 ): Promise<AppHost> {
+  const instanceId = o.instanceId ?? `test-instance-${process.pid}-${++instances}`
   return expectOk(
     await createAppHost({
       appData,
       appVersion: '0.0.0-test',
-      instanceId: o.instanceId ?? `test-instance-${process.pid}-${++instances}`,
+      instanceId,
       log: noopLogger,
+      // The host's default project storage, without disk flushes (load-stable, see `testFs`).
+      storage: createProjectStorage({
+        fs: testFs,
+        appData,
+        appVersion: '0.0.0-test',
+        owner: { instanceId, pid: process.pid, host: hostname() },
+        log: noopLogger,
+      }),
       report: () => {},
       workers: createInProcessWorkers(o.files === undefined ? {} : { files: o.files }),
       exportFiles: { write: async (target) => Ok({ filePath: target }) },

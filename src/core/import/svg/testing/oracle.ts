@@ -6,6 +6,7 @@
 import type { Vec2 } from '../../../geometry/model'
 import { elementClosest, elementPointAt } from '../../../geometry/2d/measure'
 import type { Element } from '../../../geometry/2d/model'
+import { segmentGrid } from '../../../geometry/2d/testing/oracles'
 import { curveOf, type Curve } from '../curves'
 import type { Seg } from '../path-data'
 
@@ -58,15 +59,12 @@ export function deviation(
       }
       worst = Math.max(worst, best)
     }
+  const grid = segmentGrid(
+    poly.flatMap((line) => line.slice(1).map((b, i) => [line[i]!, b] as const)),
+  )
   for (const e of elements)
-    for (let k = 0; k <= perElem; k++) {
-      const q = elementPointAt(e, k / perElem).point
-      let best = Infinity
-      for (const line of poly)
-        for (let i = 0; i + 1 < line.length; i++)
-          best = Math.min(best, distToSeg(q, line[i]!, line[i + 1]!))
-      worst = Math.max(worst, best)
-    }
+    for (let k = 0; k <= perElem; k++)
+      worst = Math.max(worst, grid(elementPointAt(e, k / perElem).point))
   return worst
 }
 
