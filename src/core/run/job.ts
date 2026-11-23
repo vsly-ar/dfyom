@@ -88,7 +88,10 @@ function bindJobControl(m: MachineService, ctx: JobContext): () => void {
     void m.controlJob(ctx.jobId, paused ? 'hold' : 'resume')
   })
   const abort = () => void m.controlJob(ctx.jobId, 'stop')
-  ctx.signal.addEventListener('abort', abort, { once: true })
+  // An abort while the start was in flight (the host already streams, its reply not yet here)
+  // has fired before this listener existed: stop now, or the job runs on (hardening P1).
+  if (ctx.signal.aborted) abort()
+  else ctx.signal.addEventListener('abort', abort, { once: true })
   return () => {
     off()
     ctx.signal.removeEventListener('abort', abort)
