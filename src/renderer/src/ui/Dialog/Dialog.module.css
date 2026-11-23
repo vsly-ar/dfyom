@@ -30,6 +30,11 @@
   width: min(340px, calc(100% - 32px));
 }
 
+/* reports with a list beside a picture (DF48: the SVG import report) */
+.content[data-size='lg'] {
+  width: min(560px, calc(100% - 32px));
+}
+
 .content:focus-visible {
   outline: none;
 }
@@ -47,6 +52,10 @@
 }
 
 .footer {
+  /* pinned to the bottom edge while a tall body scrolls: the actions stay in view (ui.md#radix-wrapping-pattern) */
+  position: sticky;
+  z-index: 1;
+  bottom: 0;
   display: flex;
   justify-content: flex-end;
   gap: 8px;

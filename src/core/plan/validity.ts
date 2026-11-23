@@ -10,6 +10,7 @@ import type { Region2dPort } from '../geometry/2d/port'
 import { partFromDTO, type Part } from '../design/operation'
 import { shapeFacts } from '../design/placement'
 import type { PartDTO } from '../design/part.dto'
+import { partIssueText } from '../design/issue-text'
 import { checkReferences } from '../design/surfaces'
 import { checkOperations } from '../design/validate'
 import type { LibraryItem } from '../library/library-item'
@@ -45,7 +46,10 @@ export function checkPartFits(
   if (values.isErr()) return Err(values.unwrapErr().withContext(where))
   const s = values.unwrap()
   if (!(s instanceof Stock))
-    return fail('input.malformed', `copy ${stock.id} is not a stock`, { where })
+    return fail('input.malformed', 'the stock copy is not a stock', {
+      where,
+      data: { snapshotId: stock.id },
+    })
   return checkPart(model.unwrap(), s, port).mapErr((e) => e.withContext(where))
 }
 
@@ -61,15 +65,32 @@ export function stockCopyFor(
   )
 }
 
-const reason = (r: AppResult<void>): string | undefined =>
-  r.isOk()
-    ? undefined
-    : [
-        r.unwrapErr().message,
-        ...r.unwrapErr().issues.map((i) => `${i.path.join('.')}: ${i.message}`),
-      ]
-        .slice(0, 3)
-        .join('; ')
+/**
+ * Why a part does not fit a stock copy: the readable text (items by name, fields in words, at most
+ * three issues; DF43) and the failing fields as issue paths of the part for agents
+ * (`operations.pocket1.depth`).
+ */
+export interface Blocker {
+  readonly reason: string
+  readonly fields: readonly string[]
+}
+
+function blockerOf(part: PartDTO, r: AppResult<void>): Blocker | undefined {
+  if (r.isOk()) return undefined
+  const e = r.unwrapErr()
+  const issues = e.issues
+  const more = issues.length > 3 ? ` (+ ${issues.length - 3} more)` : ''
+  return {
+    reason:
+      issues.length === 0
+        ? e.message
+        : issues
+            .slice(0, 3)
+            .map((i) => partIssueText(part, i))
+            .join('; ') + more,
+    fields: issues.map((i) => i.path.join('.')),
+  }
+}
 
 /**
  * Why re-importing a copy from `item` cannot be applied (only stock copies can fail: the part
@@ -80,13 +101,17 @@ export function libraryUpdateBlocker(
   copy: SnapshotDTO,
   item: LibraryItem,
   port?: Region2dPort,
-): string | undefined {
+): Blocker | undefined {
   if (copy.kind !== 'stock' || item.values.kind !== 'stock') return undefined
   const next = { ...copy, values: item.values.toDTO() } as SnapshotDTO
-  const why = reason(checkPartFits(plan.design.part, next, 'plan.libraryItem.update', port))
+  const part = plan.design.part
+  const why = blockerOf(part, checkPartFits(part, next, 'plan.libraryItem.update', port))
   return why === undefined
     ? undefined
-    : `library update of stock "${item.values.name}" can't be applied: the part doesn't fit (${why})`
+    : {
+        ...why,
+        reason: `library update of stock "${item.values.name}" can't be applied: the part doesn't fit (${why.reason})`,
+      }
 }
 
 /**
@@ -98,17 +123,21 @@ export function rebuildBlocker(
   plan: PlanDTO,
   doc: ProjectDoc,
   port?: Region2dPort,
-): string | undefined {
+): Blocker | undefined {
   const part = Object.hasOwn(doc.parts, plan.design.partId)
     ? doc.parts[plan.design.partId]
     : undefined
   if (part === undefined) return undefined
   const stock = stockCopyFor(plan, part, doc)
-  if (stock === undefined) return 'rebuild blocked: the stock copy is missing'
-  const why = reason(checkPartFits(part, stock, 'plan.rebuild', port))
+  if (stock === undefined)
+    return { reason: 'rebuild blocked: the stock copy is missing', fields: ['stock'] }
+  const why = blockerOf(part, checkPartFits(part, stock, 'plan.rebuild', port))
   return why === undefined
     ? undefined
-    : `rebuild blocked: the current design doesn't fit the plan's stock copy (${why})`
+    : {
+        ...why,
+        reason: `rebuild blocked: the current design doesn't fit the plan's stock copy (${why.reason})`,
+      }
 }
 
 // ── comparison by value ────────────────────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 // Gallery specimen of the SVG import dialog (task U1): the options step and a report, inline. The
-// app's "Import SVG…" entry stays disabled until `design.shape.import` is wired in the renderer.
+// app runs it through `useSvgImport` (ShapeList.tsx) from its "Import SVG…" entries (DF49).
 // Doc: docs/conventions/ui.md#import-report
 import type { Element } from '../../../core/geometry/2d/model'
 import type { SvgImportReport } from '../../../core/import/svg'

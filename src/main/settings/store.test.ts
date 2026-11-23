@@ -27,6 +27,7 @@ describe('settings store', () => {
     const store = createSettingsStore({ appData: tmp.dir, initial: DEFAULT_SETTINGS, log })
     expectOk(store.update({ theme: 'dark', layouts: { shell: { navigator: 20, viewport: 80 } } }))
     expectOk(store.update({ allowLocalAgents: false, layouts: { other: { a: 100 } } }))
+    expectOk(store.update({ lastMachine: 'machine-1' }))
     await store.flush()
     const loaded = await loadSettings(tmp.dir, log)
     expect(loaded).toEqual({
@@ -39,6 +40,7 @@ describe('settings store', () => {
       snapGrid: { mm: 1, inch: 1 / 16 },
       autoApplyDelay: 10,
       sidePanels: {},
+      lastMachine: 'machine-1',
     })
 
     await writeFile(join(tmp.dir, SETTINGS_FILE), JSON.stringify({ reduceMotion: true }))

@@ -3,7 +3,7 @@
 // steps (turn and clamp the stock, set the work zero at the front-left corner of the new top,
 // start), the zero to set and the part corner it is (M7), jog and work-zero controls inside,
 // "Start setup n" as the only primary action and the run dialogs' Stop. It never continues by
-// itself; "Later" puts it off to the inspector.
+// itself; "Close (start later)" puts it off to the inspector.
 // Doc: docs/modes/plan-v0.2.md#setup-change-in-run, docs/conventions/ui.md#run-mode-safety-ui,
 // docs/modes/run-machine.md#run-status-and-the-zero-to-set-m7
 import { useId } from 'react'

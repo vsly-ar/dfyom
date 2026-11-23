@@ -9,6 +9,7 @@ import type { Services } from '../commands/context'
 import type { PendingSource } from '../commands/define'
 import type { ProjectDoc } from '../project/document'
 import { planOperationInputs } from './inputs'
+import { UNKNOWN_OPERATION } from './labels'
 import type { PlanDTO } from './plan.dto'
 import { designChanged, planStale } from './snapshot'
 import { rebuildBlocker, sameValue } from './validity'
@@ -32,7 +33,7 @@ const SETUP_IGNORED = new Set(['id', 'name', 'operations'])
 /** "Pocket 1, Drilling 2": the design operations a plan operation machines. */
 function opLabel(plan: PlanDTO, designOperationIds: readonly string[]): string {
   const names = designOperationIds.map(
-    (id) => plan.design.part.operations.find((o) => o.id === id)?.name ?? id,
+    (id) => plan.design.part.operations.find((o) => o.id === id)?.name ?? UNKNOWN_OPERATION,
   )
   return names.join(', ')
 }
@@ -254,7 +255,8 @@ export const libraryPending: PendingSource = {
         if (c.status !== 'libraryChanged' || c.blocked !== null || out.has(c.libraryItemId))
           continue
         const found = lookup(c.kind, c.libraryItemId)
-        const name = found.state === 'found' ? found.item.values.name : c.libraryItemId
+        // never the library id in the notice (DF43)
+        const name = found.state === 'found' ? found.item.values.name : `A library ${c.kind}`
         out.set(c.libraryItemId, {
           kind: 'library',
           libraryItemId: c.libraryItemId,

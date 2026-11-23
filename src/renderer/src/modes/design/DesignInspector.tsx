@@ -30,7 +30,7 @@ import {
   type WarningView,
 } from '../../ui'
 import styles from './Design.module.css'
-import { featureOfWarning, ownerFeature } from './feature-view'
+import { featureOfWarning, operationUnits, ownerFeature } from './feature-view'
 import { FeatureInspector, OwnedOperationInspector, useFixIn, type FixIn } from './FeatureInspector'
 import { CloneInstanceInspector, ClonesDraft, ClonesInspector } from './ClonesInspector'
 import { parseInstanceId } from './clones-view'
@@ -48,9 +48,13 @@ import {
   shapeArgs,
   updateArgs,
   type DesignPart,
+  dfmNames,
 } from './model'
 import { newItemArgs } from './shape-model'
 import type { ShapeActions } from './ShapePicker'
+import { useSvgImport } from './ShapeList'
+import { isOpenNamed, shapeChoiceArgs } from './operation-shape'
+import type { ShapeDTO } from '../../../../core/design/shape.dto'
 import {
   OperationFields,
   placeErrors,
@@ -90,10 +94,7 @@ export function warningView(
   fixIn?: FixIn,
 ): WarningView {
   // a finding names an operation, or a feature (F5: Clones notes carry the feature id)
-  const name = (id: string) =>
-    part.dto.operations.find((o) => o.id === id)?.name ??
-    part.dto.features?.find((f) => f.id === id)?.name ??
-    id
+  const names = dfmNames(part.dto)
   const source = dfmMessages.suggestionSource(w, part.units)
   const elsewhere = fixIn?.(w)
   if (elsewhere !== undefined || featureOfWarning(part, w) !== undefined) apply = undefined // an owned operation is fixed in its feature, never directly
@@ -101,8 +102,8 @@ export function warningView(
     id: `${w.code}:${w.operation}:${w.parameter ?? ''}`,
     tier: pendingApply(w) ? 'soft' : dfmMessages.tier(w),
     ...(pendingApply(w) ? { pendingApply: applyMessages.warningPending } : {}),
-    text: dfmMessages.text(w, part.units, name),
-    subject: name(w.operation),
+    text: dfmMessages.text(w, part.units, names),
+    subject: names.item(w.operation),
     ...(onSelect && w.operation !== 'stock' ? { onSelect: () => onSelect(w.operation) } : {}),
     ...(apply && source !== undefined && w.suggestion
       ? {
@@ -197,7 +198,16 @@ function PartInspector({
   const fixIn = useFixIn(part)
   return (
     <div className={styles['inspector']}>
-      <PanelHeader title={t.part} meta={t.partSummary(part.dto.operations.length)} />
+      <PanelHeader
+        title={t.part}
+        meta={
+          <span
+            title={m.navigator.countTip(operationUnits(part).length, part.dto.operations.length)}
+          >
+            {t.partSummary(part.dto.operations.length)}
+          </span>
+        }
+      />
       <div className={styles['fields']}>
         <NameField
           label={t.name}
@@ -317,6 +327,33 @@ function OperationInspector({
     setSummary(placed.summary)
     return true
   }
+  // the picker's "Import SVG…" (DF49): the first imported shape is used here, in the import's
+  // gesture (one undo step); a profile cutting Outside or Inside switches to On for an open path
+  const svg = useSvgImport(part, {
+    onImported: async (shapeIds, gesture) => {
+      const shapeId = shapeIds[0]
+      if (shapeId === undefined || (op.kind !== 'pocket' && op.kind !== 'profile')) return undefined
+      const got = await bridge.call('design.shape.get', { partId: part.dto.id, shapeId })
+      const shape = got.ok ? (got.value as { shape: ShapeDTO }).shape : undefined
+      const name = shape?.name ?? shapeId
+      const on = op.kind === 'profile' && op.side !== 'on' && isOpenNamed(shape)
+      const r = await call(
+        `design.${op.kind}.update`,
+        {
+          partId: part.dto.id,
+          operationId: op.id,
+          shape: shapeChoiceArgs(op.shape, `named:${shapeId}`, undefined, part.units),
+          ...(on ? { side: 'on' } : {}),
+        },
+        { gesture },
+      )
+      if (failed(r)) return t.picker.importNotUsed(op.name, name)
+      setErrors([])
+      setSummary(undefined)
+      const used = t.picker.importUsed(op.name, name)
+      return on ? `${used} ${t.picker.sideSetOn}` : used
+    },
+  })
   // the shape picker's actions (task U2, ui.md#shape-in-the-operation-inspector)
   const shapeActions: ShapeActions | undefined =
     op.kind === 'pocket' || op.kind === 'profile'
@@ -345,6 +382,7 @@ function OperationInspector({
               failed(used)
               openShape(shapeId)
             })(),
+          importSvg: svg.start,
           editShape: openShape,
           convert: () =>
             void (async () => {
@@ -358,8 +396,11 @@ function OperationInspector({
                 partId: part.dto.id,
                 shapeId: id,
               })
-              const name = got.ok ? (got.value as { shape: { name: string } }).shape.name : id
-              ui.getState().setRemovedToast(t.picker.converted(name))
+              ui.getState().setRemovedToast(
+                got.ok
+                  ? t.picker.converted((got.value as { shape: { name: string } }).shape.name)
+                  : t.picker.convertedUnnamed,
+              )
             })(),
           updateItems: (shapeId, fixes) =>
             void (async () => {
@@ -412,10 +453,7 @@ function OperationInspector({
           recommended: {
             depth: {
               source: facingDepth.source,
-              text: t.facingToReference(
-                facingDepth.source,
-                facingReference ?? facingDepth.referenceId,
-              ),
+              text: t.facingToReference(facingDepth.source, facingReference ?? t.referenceModel),
             },
           },
         }
@@ -437,6 +475,7 @@ function OperationInspector({
           />
         ) : null}
       </div>
+      {svg.dialog}
     </div>
   )
 }

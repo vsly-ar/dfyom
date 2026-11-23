@@ -14,6 +14,7 @@ import { Stock } from '../library/stock'
 import { Tool } from '../library/tool'
 import type { ProjectDoc, UnitSystem } from '../project/document'
 import { feedModeIssues } from './feeds'
+import { planOperationLabel } from './labels'
 import type { PlanDTO, PlanOperationDTO, SetupDTO } from './plan.dto'
 
 export interface LoadedPlan {
@@ -54,11 +55,31 @@ export function snapshotById(plan: PlanDTO, id: string): SnapshotDTO | undefined
   return plan.snapshots.find((s) => s.id === id)
 }
 
-function broken(plan: PlanDTO, message: string, where: string): AppResult<never> {
-  return fail('input.malformed', `plan ${plan.id}: ${message}`, {
+/**
+ * A plan record that does not load. The message is shown as the `plan.broken` finding, so it names
+ * no ids (DF43); they are in `data`.
+ */
+function broken(
+  plan: PlanDTO,
+  message: string,
+  where: string,
+  data: Readonly<Record<string, unknown>> = {},
+): AppResult<never> {
+  return fail('input.malformed', message, {
     where,
-    data: { planId: plan.id },
+    data: { planId: plan.id, ...data },
   })
+}
+
+/**
+ * Models already parsed by an earlier `loadPlanDTO` of the same plan, for a caller that reloads
+ * it after changes it knows (hardening P4: reloading per plan operation was quadratic). The
+ * part is reused as is (the caller does not change `design.part`), snapshots by record identity
+ * (a changed copy is a new record).
+ */
+export interface PlanLoadCache {
+  part?: Part
+  readonly snapshots: Map<SnapshotDTO, Snapshot>
 }
 
 /** Models of a plan's copies; a broken record is `input.malformed`. */
@@ -66,14 +87,19 @@ export function loadPlanDTO(
   plan: PlanDTO,
   units: UnitSystem,
   where: string,
+  cache?: PlanLoadCache,
 ): AppResult<LoadedPlan> {
-  const part = partFromDTO(plan.design.part)
+  const part: AppResult<Part> =
+    cache?.part === undefined ? partFromDTO(plan.design.part) : Ok(cache.part)
   if (part.isErr()) return Err(part.unwrapErr().prefixIssues('design', 'part').withContext(where))
+  if (cache !== undefined) cache.part = part.unwrap()
   const models = new Map<string, Snapshot>()
   for (const dto of plan.snapshots) {
-    const s = Snapshot.fromDTO(dto)
+    const known = cache?.snapshots.get(dto)
+    const s = known === undefined ? Snapshot.fromDTO(dto) : Ok(known)
     if (s.isErr()) return Err(s.unwrapErr().prefixIssues('snapshots', dto.id).withContext(where))
     models.set(dto.id, s.unwrap())
+    cache?.snapshots.set(dto, s.unwrap())
   }
   const stock = models.get(plan.design.part.stock)?.values
   if (!(stock instanceof Stock)) return broken(plan, 'the stock copy is missing', where)
@@ -89,18 +115,27 @@ export function loadPlanDTO(
   for (const [si, setup] of plan.setups.entries())
     for (const op of setup.operations) {
       if (op.tool !== undefined && !tools.has(op.tool))
-        return broken(plan, `the tool copy of ${op.id} is missing`, where)
-      const kind = part.unwrap().operations.find((o) => o.id === op.designOperationIds[0])?.kind
+        return broken(
+          plan,
+          `the tool copy of ${planOperationLabel(plan.design.part, op.designOperationIds)} is missing`,
+          where,
+          { planOperationId: op.id, snapshotId: op.tool },
+        )
+      const kind = operationById(part.unwrap(), op.designOperationIds[0] ?? '')?.kind
       const issues = kind === undefined ? [] : feedModeIssues(op, kind)
       if (issues.length > 0)
-        return fail('model.invariant', `plan ${plan.id}: ${op.id} has invalid locks`, {
-          issues: issues.map((i) => ({
-            ...i,
-            path: ['setups', si, 'operations', op.id, ...i.path],
-          })),
-          where,
-          data: { planId: plan.id },
-        })
+        return fail(
+          'model.invariant',
+          `${planOperationLabel(plan.design.part, op.designOperationIds)} has invalid locks`,
+          {
+            issues: issues.map((i) => ({
+              ...i,
+              path: ['setups', si, 'operations', op.id, ...i.path],
+            })),
+            where,
+            data: { planId: plan.id, planOperationId: op.id },
+          },
+        )
     }
   const { setups } = plan
   const operations = setups.flatMap((x) => x.operations)
@@ -111,10 +146,24 @@ export function loadPlan(doc: ProjectDoc, planId: string, where: string): AppRes
   return findPlanDTO(doc, planId, where).andThen((p) => loadPlanDTO(p, doc.unitSystem, where))
 }
 
+/** Operations by id per operations array (immutable models; hardening P4: no scan per lookup). */
+const byIdMemo = new WeakMap<readonly Operation[], ReadonlyMap<string, Operation>>()
+
+/** The part's operation `id` (the first of that id), if any. */
+function operationById(part: Part, id: string): Operation | undefined {
+  let byId = byIdMemo.get(part.operations)
+  if (byId === undefined) {
+    const m = new Map<string, Operation>()
+    for (const o of part.operations) if (!m.has(o.id)) m.set(o.id, o)
+    byIdMemo.set(part.operations, (byId = m))
+  }
+  return byId.get(id)
+}
+
 /** The design operations a plan operation machines, in the plan's part (missing ids skipped). */
 export function designOperations(plan: LoadedPlan, op: PlanOperationDTO): Operation[] {
   return op.designOperationIds.flatMap((id) => {
-    const found = plan.part.operations.find((o) => o.id === id)
+    const found = operationById(plan.part, id)
     return found === undefined ? [] : [found]
   })
 }

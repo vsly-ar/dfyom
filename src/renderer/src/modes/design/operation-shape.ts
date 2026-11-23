@@ -30,6 +30,8 @@ import { itemNumbers, itemSources } from './shape-model'
 export type PickerValue = 'rectangle' | 'circle' | `named:${string}`
 
 export const NEW_SHAPE = 'new' as const
+/** The picker's "Import SVG…" entry (DF49). */
+export const IMPORT_SVG = 'import-svg' as const
 
 export const pickerValue = (s: OperationShapeDTO): PickerValue =>
   s.kind === 'named' ? `named:${s.shapeId}` : s.kind

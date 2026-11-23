@@ -1,8 +1,9 @@
 // The SVG import dialog (task U1): the options step (unit for a unitless file, how the drawing
 // splits into shapes), then the report of `design.shape.import` – title, summary line, the facts
 // as a two-column list (what changed the drawing as soft notes with the "i" icon), a mini flat
-// outline, and "Edit shape" / "Close". Presentational: the caller runs the import (the
-// navigator's "Import SVG…", `useSvgImport` in ShapeList.tsx, task U2).
+// outline, and "Edit shape" / "Close"; an import from an operation's shape picker says above the
+// facts which operation now uses the shape (DF49). Presentational: the caller runs the import
+// (`useSvgImport` in ShapeList.tsx, task U2; its entries since DF49 in ui.md#import-svg-where-it-is-looked-for-df49).
 // Doc: docs/conventions/ui.md#import-report, docs/modes/design-v0.3.md#svg-import
 import { useState } from 'react'
 import type { Bounds2, Element } from '../../../../core/geometry/2d/model'
@@ -23,7 +24,11 @@ export interface ImportPreview {
 }
 
 export type ImportReportStep =
-  | { readonly kind: 'options' }
+  | {
+      readonly kind: 'options'
+      /** The chosen file's path: the dialog names it (DF48). */
+      readonly path?: string
+    }
   | { readonly kind: 'refused'; readonly error: AppErrorData }
   | {
       readonly kind: 'report'
@@ -31,6 +36,8 @@ export type ImportReportStep =
       /** The created shapes' names, in order (the first is the one "Edit shape" selects). */
       readonly shapes: readonly string[]
       readonly preview?: ImportPreview
+      /** DF49: what the import did beyond the shapes ("Profile 1 now cuts outline."). */
+      readonly note?: string
     }
 
 export interface ImportReportDialogProps {
@@ -84,6 +91,7 @@ export function ImportReportDialog(props: ImportReportDialogProps): React.JSX.El
       modal={props.modal ?? true}
       title={t.title(step.shapes)}
       description={summary}
+      size="lg"
       footer={
         <>
           <Button onClick={close}>{t.close}</Button>
@@ -95,11 +103,12 @@ export function ImportReportDialog(props: ImportReportDialogProps): React.JSX.El
               close()
             }}
           >
-            {t.edit}
+            {t.edit(step.shapes)}
           </Button>
         </>
       }
     >
+      {step.note !== undefined ? <p className={styles['note']}>{step.note}</p> : null}
       <div className={styles['body']}>
         <section aria-label={t.facts}>
           <h3 className={styles['heading']}>{t.facts}</h3>
@@ -157,6 +166,9 @@ function Fact({
   )
 }
 
+/** The file name of a path (either separator). */
+const baseName = (path: string): string => path.split(/[\\/]/).at(-1) ?? path
+
 const PREVIEW_W = 220
 const PREVIEW_H = 140
 
@@ -208,6 +220,12 @@ function OptionsStep(props: ImportReportDialogProps): React.JSX.Element {
       }
     >
       <div className={styles['options']}>
+        {props.step.kind === 'options' && props.step.path !== undefined ? (
+          <p className={styles['file']} title={props.step.path}>
+            <span className={styles['fileLabel']}>{t.file}</span>
+            <span className={styles['fileName']}>{baseName(props.step.path)}</span>
+          </p>
+        ) : null}
         <Field label={t.unit}>
           <Select
             id="svg-import-unit"

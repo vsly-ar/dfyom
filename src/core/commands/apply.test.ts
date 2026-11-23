@@ -444,6 +444,7 @@ describe('implicit apply (applyFirst)', () => {
         'plan.status.set',
         'project.save',
         'run.job.start',
+        'run.job.check',
       ].sort(),
     )
     // P2: the deferred reactions, in apply.md's order; the one document hook is the instant

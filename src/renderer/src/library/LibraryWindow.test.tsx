@@ -249,8 +249,9 @@ describe('Library window', () => {
   it('adds a new tool, duplicates it and removes the copy after confirming', async () => {
     const { user, row, editor, library } = await renderLibrary()
     await user.click(screen.getByRole('button', { name: 'New tool' }))
+    // the library has a Flat 6: the default name never repeats it (DF47)
     await waitFor(() =>
-      expect(within(editor()).getByRole('heading', { name: 'Flat 6' })).toBeInTheDocument(),
+      expect(within(editor()).getByRole('heading', { name: 'Flat 6 (2)' })).toBeInTheDocument(),
     )
     const d = within(editor()).getByLabelText('Diameter', { selector: 'input' })
     await user.clear(d)
@@ -274,6 +275,29 @@ describe('Library window', () => {
       expect(library.list('tool').items.map((i) => i.toDTO().name)).not.toContain('Flat 8 copy'),
     )
     await expectNoAxeViolations()
+  })
+
+  it('DF47: a typed name that repeats another item’s saves, with a soft warning at Name', async () => {
+    const { user, row, editor, library } = await renderLibrary()
+    await user.click(screen.getByRole('button', { name: 'New tool' }))
+    const name = await within(editor()).findByRole('textbox', { name: 'Name' })
+    expect(name).toHaveValue('Flat 6 (2)')
+    expect(within(editor()).queryByText(/already named/)).toBeNull()
+    await user.clear(name)
+    await user.type(name, 'flat 6 ')
+    expect(
+      within(editor()).getByText(
+        'Another tool is already named flat 6: a different name tells them apart in lists.',
+      ),
+    ).toBeInTheDocument()
+    await expectNoAxeViolations()
+    await user.click(within(editor()).getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(library.list('tool').items.map((i) => i.toDTO().name)).toEqual(
+        expect.arrayContaining(['Flat 6', 'flat 6']),
+      ),
+    )
+    expect(row(/^flat 6/)).toHaveAttribute('aria-selected', 'true')
   })
 
   it('lists stock variants under their parent; New variant; a parent with variants is kept (DF13)', async () => {
@@ -342,8 +366,9 @@ describe('Library window', () => {
   it('a new chamfer mill (U4): offered type with its V-bit hint, angle and tip fields, drawing, Angle column, V-bit search', async () => {
     const { user, row, grid, editor, library } = await renderLibrary()
     await user.click(screen.getByRole('button', { name: 'New tool' }))
+    // the library has a Flat 6: the default name never repeats it (DF47)
     await waitFor(() =>
-      expect(within(editor()).getByRole('heading', { name: 'Flat 6' })).toBeInTheDocument(),
+      expect(within(editor()).getByRole('heading', { name: 'Flat 6 (2)' })).toBeInTheDocument(),
     )
     within(editor()).getByRole('combobox', { name: 'Type' }).focus()
     await user.keyboard('{Enter}')
@@ -360,6 +385,11 @@ describe('Library window', () => {
     expect(labels.indexOf('Tip diameter')).toBe(labels.indexOf('Diameter') + 2)
     const tip = within(editor()).getByLabelText('Tip diameter', { selector: 'input' })
     expect(tip).toHaveAttribute('placeholder', '0: pointed')
+    // an empty stickout shows the flute length it takes, marked as the default (DF48)
+    expect(within(editor()).getByLabelText('Stickout', { selector: 'input' })).toHaveAttribute(
+      'placeholder',
+      expect.stringMatching(/^Default: [\d.]+ mm$/),
+    )
     await waitFor(() =>
       expect(within(editor()).getByRole('heading', { name: 'Chamfer 90° Ø6' })).toBeInTheDocument(),
     )
@@ -369,6 +399,18 @@ describe('Library window', () => {
         name: 'Tool drawing: included angle highlighted',
       }),
     ).toBeInTheDocument()
+    // the legend names the drawing's ISO symbols (DF48)
+    const legend = editor().querySelector<HTMLElement>(
+      'dl[aria-label="Dimensions in the drawing"]',
+    )!
+    expect(legend).toHaveTextContent('DCDiameter')
+    expect(legend).toHaveTextContent('LCFFlute length')
+    // the draft row shows its type icon like a saved one (DF48)
+    expect(row(/Chamfer 90° Ø6/).querySelector('[title="Chamfer mill"] svg')).not.toBeNull()
+    // short headers explain themselves (DF48)
+    expect(
+      within(grid()).getByRole('button', { name: 'Sort by Corner radius (RE)' }),
+    ).toHaveAttribute('title', 'Corner radius (RE)')
     await expectNoAxeViolations()
     await user.click(within(editor()).getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(row(/Chamfer 90° Ø6/)).toHaveAttribute('aria-selected', 'true'))

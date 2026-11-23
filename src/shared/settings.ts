@@ -55,6 +55,11 @@ const fields = {
     z.enum(APP_MODES),
     z.object({ navigator: z.boolean(), inspector: z.boolean() }),
   ),
+  /**
+   * Machine library id of the machine last chosen for a plan (DF45): preselected by the Plan start
+   * card (docs/conventions/ui.md#plan-start-df29). `null`: none yet. Only plan mode writes it.
+   */
+  lastMachine: z.string().min(1).nullable(),
 }
 
 /** The settings file; a missing field takes its default (new settings need no migration). */
@@ -68,6 +73,7 @@ export const AppSettingsSchema = z.object({
   snapGrid: fields.snapGrid.default({ mm: 1, inch: 1 / 16 }),
   autoApplyDelay: fields.autoApplyDelay.default(10),
   sidePanels: fields.sidePanels.default({}),
+  lastMachine: fields.lastMachine.default(null),
 })
 
 export type AppSettings = Readonly<z.output<typeof AppSettingsSchema>>
@@ -93,5 +99,6 @@ export function mergeSettings(
     snapGrid: patch.snapGrid ?? current.snapGrid,
     autoApplyDelay: patch.autoApplyDelay ?? current.autoApplyDelay,
     sidePanels: { ...current.sidePanels, ...(patch.sidePanels ?? {}) },
+    lastMachine: patch.lastMachine === undefined ? current.lastMachine : patch.lastMachine,
   }
 }

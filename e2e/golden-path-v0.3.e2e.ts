@@ -295,7 +295,10 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
   await setup.getByRole('textbox', { name: 'Material name' }).fill('Walnut')
   await setup.getByRole('combobox', { name: 'Material class' }).click()
   await page.getByRole('option', { name: 'Hardwood' }).click()
-  await setup.getByRole('button', { name: 'Create part' }).click()
+  await page
+    .getByRole('dialog', { name: 'Stock' })
+    .getByRole('button', { name: 'Create part' })
+    .click()
   await expect(navigator.getByText(/^Stock: 255 × 185 × 40/)).toBeVisible()
 
   // ── Import the STL reference, fitted onto the stock bottom ───────────────────────────────
@@ -314,8 +317,7 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
   // ── Import SVG…: two shapes, Béziers fitted to arcs, the deviation ───────────────────────
   // in the Shapes dialog (D45); the import's dialogs stack over it
   let shapes = await openPartSetup(page, 'Shapes')
-  await shapes.getByRole('button', { name: 'Add shape' }).click()
-  await page.getByRole('menuitem', { name: 'Import SVG…' }).click()
+  await shapes.getByRole('button', { name: 'Import SVG…' }).click()
   await page
     .getByRole('dialog', { name: 'Import SVG' })
     .getByRole('button', { name: 'Import' })
@@ -531,8 +533,8 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
   for (const [i, [u, v]] of holes.entries()) {
     await addOperation(page, 'Drilling', `Drilling ${i + 1}`)
     await pickOn(page, /^Stock bottom/)
-    await setField(inspector, 'Center u', u)
-    await setField(inspector, 'Center v', v)
+    await setField(inspector, 'Centre u', u)
+    await setField(inspector, 'Centre v', v)
     await setField(inspector, 'Diameter', '3')
     await inspector.getByRole('combobox', { name: 'Bottom' }).click()
     await page.getByRole('option', { name: 'Drill point' }).click()
@@ -578,9 +580,10 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
   await expect(
     inspector.getByRole('radiogroup', { name: 'Side' }).getByRole('radio', { name: 'On line' }),
   ).toBeChecked()
+  // the toast shows over the 3D view since DF45, not over the navigator
   await expect(
     page
-      .getByTestId('navigator')
+      .getByRole('region', { name: /^Notifications/ })
       .getByText('Side set to On line: an open path is cut on the line.'),
   ).toBeVisible()
   // a blind 1 mm groove
@@ -691,7 +694,7 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
   const machine = page.getByRole('group', { name: 'Machine' })
   await navigator.getByRole('combobox', { name: 'Time scale' }).click()
   await page.getByRole('option', { name: 'Max' }).click()
-  await navigator.getByRole('button', { name: 'Connect to virtual machine' }).click()
+  await navigator.getByRole('button', { name: 'Connect', exact: true }).click()
   await expect(machine.getByText('Virtual machine · Max')).toBeVisible()
   await navigator.getByRole('button', { name: 'Home' }).click()
   await expect(machine.getByText('Idle')).toBeVisible()

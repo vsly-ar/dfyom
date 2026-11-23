@@ -31,7 +31,7 @@ import {
 import { chamferSection, coneDepth, type ChamferPart } from '../../viewport/chamfer-section'
 import { SketchView } from '../../viewport/SketchView'
 import { chamferDiameter, chamferSectionValues, edgeOptions } from './chamfer-view'
-import { defaultUnit } from './model'
+import { defaultUnit, dfmNames } from './model'
 import styles from './Design.module.css'
 import own from './ChamferInspector.module.css'
 import { Group, ParamField, warningPath, type OperationFieldsContext } from './OperationFields'
@@ -205,7 +205,7 @@ function EdgeField({
       .map((w): FieldMessage => ({
         id: w.code,
         severity: dfmMessages.tier(w),
-        text: dfmMessages.text(w, ctx.units, (id) => id),
+        text: dfmMessages.text(w, ctx.units, dfmNames(ctx.part.dto)),
       })),
   ]
   const choose = (edgeOf: string) => {

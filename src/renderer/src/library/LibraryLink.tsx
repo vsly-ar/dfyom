@@ -10,15 +10,18 @@ import { Icon, Button } from '../ui'
 export function LibraryLink({
   target,
   label = target.itemId === undefined ? libraryMessages.links.open : libraryMessages.links.edit,
+  variant = 'ghost',
 }: {
   target: LibraryTarget
   label?: string
+  /** `default`: a bordered button beside other actions (the Stock dialog's library row, DF48). */
+  variant?: 'ghost' | 'default'
 }): React.JSX.Element {
   const { bridge } = useShell()
   return (
     <Button
       size="sm"
-      variant="ghost"
+      variant={variant}
       icon={<Icon name="library" />}
       onClick={() => void bridge.library.open(target)}
     >

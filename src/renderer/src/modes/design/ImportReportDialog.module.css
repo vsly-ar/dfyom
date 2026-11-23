@@ -12,10 +12,39 @@
   }
 }
 
+.note {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text);
+}
+
 .options {
   display: grid;
   gap: var(--space-3);
   container-type: inline-size;
+}
+
+/* the options step's file line (DF48): label and name; the full path is the tooltip */
+.file {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text);
+}
+
+.fileLabel {
+  color: var(--text-muted);
+}
+
+.fileName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .heading {

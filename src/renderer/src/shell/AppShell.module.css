@@ -37,6 +37,9 @@
 
 .toolbarEnd {
   justify-content: flex-end;
+  /* the machine group's 44 px run controls (Stop) fit at any time, so connecting never moves the
+     window content (DF46, docs/conventions/ui.md#run-mode-safety-ui) */
+  min-height: calc(var(--control-lg) + var(--space-1));
 }
 
 /* Save in the File toolbar (DF14): a small amber dot on the icon while there are unsaved changes */

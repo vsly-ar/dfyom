@@ -1,11 +1,13 @@
 // The shape picker of a pocket or profile (task U2): one Select with the inline kinds (Rectangle,
-// Circle) and the part's named shapes (mini outline, "Used by n"), plus "New shape…"; under it
+// Circle) and the part's named shapes (mini outline, "Used by n"), plus "New shape…" and "Import
+// SVG…" (DF49: imports and uses the first shape, one undo step); under it
 // "Edit shape" for a named shape or "Convert to shape" for an inline one, and the shape's issues
 // and corner warnings with "Round corners to ≥ r" (or to the largest radius each corner takes).
 // The placement fields (rotation, mirror) follow the anchor and position in the Shape group
 // (OperationFields.tsx). A choice is one command on `shape`; an open path picked on a profile
 // cutting Outside or Inside sets side On in the same command, with a notice.
-// Doc: docs/conventions/ui.md#shape-in-the-operation-inspector, docs/modes/design-v0.3.md#dfm-checks-for-shapes
+// Doc: docs/conventions/ui.md#shape-in-the-operation-inspector, #import-svg-where-it-is-looked-for-df49,
+// docs/modes/design-v0.3.md#dfm-checks-for-shapes
 import { useMemo } from 'react'
 import { resolveShape } from '../../../../core/design/shape'
 import type { ShapeDTO } from '../../../../core/design/shape.dto'
@@ -18,10 +20,11 @@ import { useRegion2d } from '../../shell/ShellContext'
 import { Icon, Button, Field, Select, type FieldMessage } from '../../ui'
 import { chainPath, fitView, unplacePoint } from '../../viewport/flat-view'
 import styles from './Design.module.css'
-import { quantityOf, updateArgs } from './model'
+import { dfmNames, quantityOf, updateArgs } from './model'
 import {
   cornerPoints,
   isCornerWarning,
+  IMPORT_SVG,
   isOpenNamed,
   NEW_SHAPE,
   pickerValue,
@@ -43,6 +46,8 @@ const p = t.picker
 export interface ShapeActions {
   /** Adds a shape, references it here and opens the Shape Editor. */
   newShape(): void
+  /** Imports an SVG and uses its first shape here, one undo step (DF49). */
+  importSvg(): void
   /** Selects the shape's row (the Shape Editor). */
   editShape(shapeId: string): void
   /** `design.shape.convert` of the inline shape. */
@@ -139,6 +144,7 @@ export function ShapePicker({
 
   const choose = (value: string) => {
     if (value === NEW_SHAPE) return actions?.newShape()
+    if (value === IMPORT_SVG) return actions?.importSvg()
     const choice = value as PickerValue
     if (choice === pickerValue(shape)) return
     const id = choice.startsWith('named:')
@@ -170,7 +176,12 @@ export function ShapePicker({
       description: p.usedBy(usedBy(s.id)),
       icon: <MiniOutline loops={outlines.get(s.id) ?? []} />,
     })),
-    ...(actions && !ctx.readOnly ? [{ value: NEW_SHAPE, label: p.newShape, group: p.named }] : []),
+    ...(actions && !ctx.readOnly
+      ? [
+          { value: NEW_SHAPE, label: p.newShape, group: p.named },
+          { value: IMPORT_SVG, label: p.importSvg, group: p.named },
+        ]
+      : []),
   ]
 
   // corner warnings on a general shape: "Round corners to ≥ r"
@@ -237,7 +248,7 @@ export function ShapePicker({
       .map((w, i): FieldMessage => {
         const corner = cornerFix(w)
         const fix = corner?.fix
-        const base = dfmMessages.text(w, ctx.units, (id) => id)
+        const base = dfmMessages.text(w, ctx.units, dfmNames(ctx.part.dto))
         const noFix =
           isCornerWarning(w) && corner === undefined && shape.kind === 'named' && !ctx.readOnly
         return {

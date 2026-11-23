@@ -129,7 +129,10 @@ test('v0.2 golden path through the UI: reference, faces, setups, export and run 
   await setup.getByRole('textbox', { name: 'Material name' }).fill('Walnut')
   await setup.getByRole('combobox', { name: 'Material class' }).click()
   await page.getByRole('option', { name: 'Hardwood' }).click()
-  await setup.getByRole('button', { name: 'Create part' }).click()
+  await page
+    .getByRole('dialog', { name: 'Stock' })
+    .getByRole('button', { name: 'Create part' })
+    .click()
   await expect(navigator.getByText(/^Stock: 255 × 185 × 40/)).toBeVisible()
 
   // ── Import the STL reference (read as mm, fitted centre + top), onto the bottom ──────────
@@ -201,8 +204,8 @@ test('v0.2 golden path through the UI: reference, faces, setups, export and run 
   ] as const) {
     await addOperation(page, 'Drilling', name)
     await pickOn(page, /^Stock right side/)
-    await setField(inspector, 'Center u', u)
-    await setField(inspector, 'Center v', '20')
+    await setField(inspector, 'Centre u', u)
+    await setField(inspector, 'Centre v', '20')
     await setField(inspector, 'Diameter', '6')
     await inspector.getByRole('combobox', { name: 'Bottom' }).click()
     await page.getByRole('option', { name: 'Drill point' }).click()
@@ -397,7 +400,7 @@ test('v0.2 golden path through the UI: reference, faces, setups, export and run 
   const machine = page.getByRole('group', { name: 'Machine' })
   await navigator.getByRole('combobox', { name: 'Time scale' }).click()
   await page.getByRole('option', { name: 'Max' }).click()
-  await navigator.getByRole('button', { name: 'Connect to virtual machine' }).click()
+  await navigator.getByRole('button', { name: 'Connect', exact: true }).click()
   await expect(machine.getByText('Virtual machine · Max')).toBeVisible()
   await navigator.getByRole('button', { name: 'Home' }).click()
   await expect(machine.getByText('Idle')).toBeVisible()

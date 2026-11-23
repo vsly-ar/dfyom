@@ -208,7 +208,7 @@ export function holeDepth(
   stock: Stock,
 ): number {
   if (op.bottom !== 'through' && op.depth.isSome()) return op.depth.unwrap().canonical
-  const table = SurfaceTable.build(allOps, stock)
+  const table = SurfaceTable.of(allOps, stock)
   // the material below `on` along its normal (the stock thickness on the top face)
   return table
     .get(op.on)

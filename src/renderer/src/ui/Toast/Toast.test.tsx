@@ -4,7 +4,7 @@ import { expectNoAxeViolations, findToastAction, renderUi } from '../../test/ren
 import { useState } from 'react'
 import { ConfirmDialog } from '../ConfirmDialog/ConfirmDialog'
 import { Dialog } from '../Dialog/Dialog'
-import { Toast, ToastRegion } from './Toast'
+import { Toast, ToastAnchor, ToastRegion } from './Toast'
 
 /** A dialog with a button that shows a toast while the dialog stays open (U1). */
 function DialogWithToast({ confirm = false }: { confirm?: boolean }): React.JSX.Element {
@@ -73,6 +73,49 @@ describe('Toast', () => {
     await screen.findByRole('alertdialog')
     await r.user.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+  })
+
+  it('shows in the mounted anchor (the 3D view), not over the side panels (DF45)', async () => {
+    renderUi(
+      <div>
+        <aside aria-label="Inspector">Tool</aside>
+        <main aria-label="View">
+          <ToastAnchor insetRight={120} />
+        </main>
+        <ToastRegion>
+          <Toast defaultOpen duration={Infinity} message="Removed cavity" />
+        </ToastRegion>
+      </div>,
+    )
+    const text = await screen.findByText('Removed cavity')
+    const view = screen.getByRole('main', { name: 'View' })
+    expect(view).toContainElement(text)
+    expect(screen.getByRole('complementary', { name: 'Inspector' })).not.toContainElement(text)
+    // beside an overlay on the view's right edge (the narrow window's inspector)
+    expect(view.querySelector('[data-toast-anchor]')).toHaveStyle({ right: '120px' })
+    expect(
+      screen.getByRole('region', { name: /^Notifications/ }).querySelector('ol'),
+    ).toHaveAttribute('data-anchored')
+    await expectNoAxeViolations()
+  })
+
+  it('closes by itself after 6 s (DF45)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const onOpenChange = vi.fn()
+      renderUi(
+        <ToastRegion>
+          <Toast defaultOpen onOpenChange={onOpenChange} message="Sizes set from M3" />
+        </ToastRegion>,
+      )
+      await screen.findByText('Sizes set from M3')
+      vi.advanceTimersByTime(5000)
+      expect(onOpenChange).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(1500)
+      await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('has no axe violations', async () => {

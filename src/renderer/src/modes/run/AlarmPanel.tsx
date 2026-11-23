@@ -1,12 +1,14 @@
 // The navigator's alarm panel (M3): while the machine is in Alarm, the alarm's name, what happened
 // in plain words, the next steps and GRBL's own text. At the end of the navigator, so it never moves
 // the controls (DF34); announced by the run dialogs' assertive announcer, so not a live region here.
+// GRBL's start-up lock shows as "Needs homing" in neutral colours, not as an error (DF46).
 // Also the warning after a real connection was lost without a reset (M2).
-// Doc: docs/modes/run-machine.md#machine-readiness-m3, #lost-connection-m2
+// Doc: docs/modes/run-machine.md#machine-readiness-m3, #lost-connection-m2,
+// docs/modes/run.md#run-mode-presentation-df46
 import type { RunStatus } from '../../../../core/run/service'
 import { runMessages } from '../../messages/run'
 import { Icon } from '../../ui'
-import { isConnected, isCriticalAlarm } from './machine-state'
+import { isConnected, isCriticalAlarm, needsHoming } from './machine-state'
 import styles from './Run.module.css'
 
 const m = runMessages.alarm
@@ -20,10 +22,20 @@ export function AlarmPanel({ status }: { status: RunStatus }): React.JSX.Element
   if (!inAlarm(status)) return null
   const code = status.alarm?.code
   const info = code === undefined ? m.codes[0]! : (m.codes[code] ?? m.other)
-  const title = code === undefined ? m.lockedTitle : runMessages.state.alarm(code)
+  // the start-up lock is the next step, not an error (DF46): the badge's words, neutral colours
+  const lock = needsHoming(status)
+  const title = lock
+    ? runMessages.state.needsHoming
+    : code === undefined
+      ? m.lockedTitle
+      : runMessages.state.alarm(code)
   return (
-    <section className={styles['alarmPanel']} aria-label={m.region}>
-      <Icon name="error" />
+    <section
+      className={styles['alarmPanel']}
+      data-kind={lock ? 'lock' : 'alarm'}
+      aria-label={lock ? runMessages.state.needsHoming : m.region}
+    >
+      <Icon name={lock ? 'info' : 'error'} />
       <div>
         <h3 className={styles['alarmTitle']}>{title}</h3>
         {info.what === '' ? null : <p className={styles['why']}>{info.what}</p>}

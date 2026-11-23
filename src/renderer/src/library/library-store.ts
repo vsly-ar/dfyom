@@ -26,6 +26,7 @@ import {
   draftIssues,
   itemValues,
   toolName,
+  uniqueName,
   type DraftValues,
 } from './form'
 
@@ -107,6 +108,8 @@ export interface LibraryActions {
   closeCancel(): void
   isDirty(): boolean
   draftName(): string
+  /** The names of the draft kind's other items (all of them for a new item; DF47). */
+  otherNames(): readonly string[]
   /** The item list's rows: the kind's items, filtered by the search. */
   load(kind: LibraryItemKind): Promise<void>
 }
@@ -237,6 +240,7 @@ export function createLibraryStore(deps: {
         units: get().units(),
         base: d.base ?? undefined,
         autoName: d.autoName,
+        taken: get().otherNames(),
       })
       set({ saving: true, error: undefined })
       const r =
@@ -351,7 +355,10 @@ export function createLibraryStore(deps: {
 
       newItem(kind) {
         const k = kind ?? get().tab
-        guard(() =>
+        guard(() => {
+          const values = defaultValues(k, get().units())
+          // a default name never repeats another item's (a tool's follows type and size; DF47)
+          const taken = get().lists[k].items.map((i) => i.name)
           patch({
             tab: k,
             selected: { ...get().selected, [k]: NEW },
@@ -359,21 +366,22 @@ export function createLibraryStore(deps: {
               kind: k,
               id: null,
               revision: null,
-              values: defaultValues(k, get().units()),
+              values: k === 'tool' ? values : { ...values, name: uniqueName(values.name, taken) },
               base: null,
               autoName: k === 'tool',
             },
             error: undefined,
             conflict: null,
-          }),
-        )
+          })
+        })
       },
 
       duplicate() {
         const d = get().draft
         if (d === null) return
         guard(() => {
-          const values = { ...d.values, name: copyName(get().draftName()) } as DraftValues
+          const taken = get().lists[d.kind].items.map((i) => i.name)
+          const values = { ...d.values, name: copyName(get().draftName(), taken) } as DraftValues
           patch({
             selected: { ...get().selected, [d.kind]: NEW },
             // a duplicated variant stays under the same parent
@@ -398,7 +406,9 @@ export function createLibraryStore(deps: {
         const root = d.parentId ?? d.id
         const rootName = get().lists.stock.items.find((i) => i.id === root)?.name ?? d.values.name
         guard(() => {
-          const values = { ...d.values, name: libraryMessages.window.variantName(rootName) }
+          const taken = get().lists.stock.items.map((i) => i.name)
+          const name = uniqueName(libraryMessages.window.variantName(rootName), taken)
+          const values = { ...d.values, name }
           patch({
             selected: { ...get().selected, stock: NEW },
             draft: {
@@ -526,8 +536,16 @@ export function createLibraryStore(deps: {
         if (d === null) return ''
         const name = d.values.name.trim()
         if (name !== '') return name
-        if (d.values.kind === 'tool' && d.autoName) return toolName(d.values)
+        if (d.values.kind === 'tool' && d.autoName) return toolName(d.values, get().otherNames())
         return libraryMessages.window.newRow(d.kind)
+      },
+
+      otherNames() {
+        const d = get().draft
+        if (d === null) return []
+        return get()
+          .lists[d.kind].items.filter((i) => i.id !== d.id)
+          .map((i) => i.name)
       },
     }
   })

@@ -100,7 +100,7 @@ async function expandInstances(user: ReturnType<typeof renderUi>['user']) {
   const row = await within(navigator()).findByRole('button', { name: /^Clones 1, ×/ })
   row.focus()
   await user.keyboard('{ArrowRight}')
-  await user.click(within(navigator()).getByRole('button', { name: /^Clones\s*\d+$/ }))
+  await user.click(within(navigator()).getByRole('button', { name: /^\d+ clones?$/ }))
 }
 
 describe('Clones UI (U3)', () => {
@@ -119,6 +119,34 @@ describe('Clones UI (U3)', () => {
     )
     expect(part().features ?? []).toHaveLength(0)
     expect(d.revision).toBe(revision)
+  })
+
+  it('DF47: Cancel then Make clones in a footer; row fields name the axis, with hint and drawing', async () => {
+    const { user } = await openDraft()
+    const footer = within(inspector()).getByRole('group', { name: 'Clones draft actions' })
+    expect(
+      within(footer)
+        .getAllByRole('button')
+        .map((b) => b.textContent),
+    ).toEqual(['Cancel', 'Make clones'])
+    // the offset row on the top face: Step X / Step Y, each with its (i) hint and illustration
+    const stepX = within(inspector()).getByRole('combobox', { name: 'Step X' })
+    expect(stepX).toHaveAccessibleDescription(/along X\. Negative goes the other way\./)
+    const field = (name: string) =>
+      within(inspector()).getByText(name, { selector: 'label' }).closest('label')!
+    expect(field('Step X').querySelector('svg[data-icon="cloneStepU"]')).not.toBeNull()
+    expect(field('Step Y').querySelector('svg[data-icon="cloneStepV"]')).not.toBeNull()
+    expect(field('Count').querySelector('svg[data-icon="cloneCount"]')).not.toBeNull()
+    await user.click(within(inspector()).getByRole('button', { name: 'Add row' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Grid' }))
+    const spacing = await within(inspector()).findByRole('combobox', { name: 'Column spacing (X)' })
+    expect(spacing).toHaveAccessibleDescription(/Distance between neighbouring columns, along X/)
+    expect(
+      within(inspector()).getByRole('combobox', { name: 'Row spacing (Y)' }),
+    ).toHaveAccessibleDescription(/neighbouring rows, along Y/)
+    expect(field('Columns').querySelector('svg[data-icon="cloneColumns"]')).not.toBeNull()
+    expect(within(inspector()).queryByText(/^Spacing [uv]$/)).toBeNull()
+    await expectNoAxeViolations()
   })
 
   it('rows reorder by their grip and Alt+↑/↓, announced; no move buttons (D45)', async () => {

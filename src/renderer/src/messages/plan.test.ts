@@ -17,6 +17,53 @@ const finding = (over: Partial<PlanWarning>): PlanWarning =>
   }) as PlanWarning
 
 describe('plan finding texts', () => {
+  it('names operations and setups by name in order, loose-piece, cut-out, corner and rest findings, never by id (DF43)', () => {
+    const NAMES: Record<string, string> = {
+      pocket1: 'Pocket 1',
+      profile1: 'Profile 1',
+      'op-2': 'Hole 1',
+      top: 'Top',
+      bottom: 'Bottom',
+    }
+    const names = {
+      design: (id: string) => NAMES[id] ?? 'Unknown operation',
+      planOperation: (id: string) => NAMES[id] ?? 'Unknown operation',
+      setup: (id: string) => NAMES[id] ?? 'Unknown',
+    }
+    const texts = [
+      finding({ code: 'plan.order', rule: 'edgeBefore', params: { dependsOn: 'op-2' } }),
+      finding({ code: 'plan.order', rule: 'onBefore', params: { dependsOn: 'op-2' } }),
+      finding({
+        code: 'plan.loosePiece',
+        rule: 'profileFirst',
+        params: { profile: 'profile1', operation: 'pocket1' },
+      }),
+      finding({
+        code: 'plan.cutoutBeforeSetup',
+        rule: 'cutoutLast',
+        params: { profile: 'profile1', setupId: 'top', nextSetupId: 'bottom' },
+      }),
+      finding({
+        rule: 'cornerRadius',
+        params: { operation: 'pocket1', radius: 3, cornerRadius: 0 },
+      }),
+      finding({
+        code: 'plan.restMaterial',
+        rule: 'restMaterial',
+        params: { operation: 'pocket1', area: 12.34, u: 10, v: 5 },
+      }),
+    ].map((w) => findingText(w, 'mm', names))
+    expect(texts).toEqual([
+      'This operation chamfers an edge of Hole 1, which comes later.',
+      'This operation starts from a surface of Hole 1, which comes later.',
+      'Profile 1 is cut before Pocket 1 inside it: the piece may be loose.',
+      'Profile 1 cuts through in setup Top before setup Bottom: held only by its tabs while re-fixtured.',
+      'Tool radius 3.00 mm is above the smallest inside corner of Pocket 1 (sharp): that corner keeps the tool radius.',
+      '12.3 mm² of Pocket 1 near (10.00 mm, 5.00 mm) stays uncut: a neck is narrower than the tool.',
+    ])
+    for (const t of texts) expect(t).not.toMatch(/pocket1|profile1|op-2/)
+  })
+
   it('words a clamped stepover in the user units (task U2)', () => {
     const w = finding({
       code: 'plan.stepoverClamped',

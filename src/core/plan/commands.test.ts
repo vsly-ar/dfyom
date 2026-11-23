@@ -784,7 +784,7 @@ describe('queries', () => {
     // the design's auto choice picked Flat 6: it ranks first for that reason too
     expect(r.tools[0]?.reasons.slice(0, 2)).toEqual([
       "the design's tool",
-      'has a preset for aluminum',
+      'has a preset for aluminium',
     ])
     const drill1 = opsOf(s.plan(planId)).find((o) => o.designOperationIds[0] === 'drill1')!.id
     const d = s.query('plan.tool.suggest', { planId, planOperationId: drill1 }) as {
@@ -809,6 +809,8 @@ describe('queries', () => {
         severity: 'error',
         field: 'spindleSpeed',
         rule: 'unresolved',
+        // DF43: the field in words ("Spindle speed"), its key only in `field`
+        message: 'spindle speed has no entered, preset or calculator value',
       }),
     )
     const drill1 = opsOf(s.plan(planId)).find((o) => o.designOperationIds[0] === 'drill1')!.id

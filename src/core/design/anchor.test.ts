@@ -159,6 +159,8 @@ describe('placement anchors', () => {
         path: ['anchor'],
         rule: 'anchorExpression',
         params: { parameter: 'shape.center.0' },
+        // DF43: the field in words; its path stays in `params.parameter`
+        message: "the shape's centre X is a formula: remove it to change the anchor",
       }),
     ])
     // only v moves: the u formula stays

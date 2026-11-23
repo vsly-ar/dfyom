@@ -28,7 +28,7 @@ Toolbar **Library** (`Cmd+Shift+L`) → **Tools** tab → **New tool** for each;
 | Name            | Type          | Geometry                                 | Preset (rpm / feed / plunge / stepdown / stepover) |
 | --------------- | ------------- | ---------------------------------------- | -------------------------------------------------- |
 | Flat 6          | Flat end mill | Ø 6, flute length 22                     | 18000 / 4800 / 800 / 3 / 3                         |
-| Flat 3          | Flat end mill | Ø 3, flute length 12                     | 18000 / 1200 / 300 / 1.5 / 1.2                     |
+| Flat 3          | Flat end mill | Ø 3, flute length 12                     | 18000 / 3600 / 300 / 1.5 / 1.2                     |
 | Chamfer 90 × 12 | Chamfer mill  | Ø 12, included angle 90°, flute length 8 | 12000 / 3800 / 600                                 |
 
 Watch: **Stickout** (was "Overall length", DF26) and whether the **Details** accordion keeps its open state; hints right under their inputs (DF27); the row stays "Unsaved" until Save.
@@ -58,11 +58,11 @@ Watch: the Add menu's tooltips (DF18); does the outline land centred on the boar
 
 All positions are from the board's lower-left corner on the top face (mm).
 
-1. **Add** → **Bolt hole**. **Center X** 39, **Center Y** 55.7; type **Countersink**; **Size** M3. The section reads "Ø 3.4 mm through; countersink Ø 7.12 mm, 90°"; the row "Bolt hole 1, M3 countersink".
-2. Right-click the row (or its … button, or `Shift+F10`) → **Make Clones…**. **Add row** → **Grid**, **Remove row 1** (the default offset row); **Columns** 2, **Rows** 2, **Spacing u** 177, **Spacing v** 88.6. Readout: "1 + 3 clones = 4 instances · 0 skipped". **Make clones** → "Clones 1, ×4".
+1. **Add** → **Bolt hole**. **Centre X** 39, **Centre Y** 55.7; type **Countersink**; **Size** M3. The section reads "Ø 3.4 mm through; countersink Ø 7.12 mm, 90°"; the row "Bolt hole 1, M3 countersink".
+2. Right-click the row (or its … button, or `Shift+F10`) → **Make Clones…**. **Add row** → **Grid**, **Remove row 1** (the default offset row); **Columns** 2, **Rows** 2, **Column spacing (X)** 177, **Row spacing (Y)** 88.6. Readout: "1 + 3 clones = 4 instances · 0 skipped". **Make clones** → "Clones 1, ×4".
 3. **Add** → **Profile**. **Shape** Circle; **Position X** 187.5, **Position Y** 100; **Diameter** 22; **Side** Inside; **Slot width** 11; **Tab count** 0.
 4. Row menu of Profile 2 → **Chamfer**. **Edge** "Profile 2 · Ø 22"; **Width** 1.5 → **Depth** 1.5 and **Diameter** "Ø 25 mm" follow.
-5. **Add** → **Bolt hole**. **Center X** 205.5, **Center Y** 100; **Counterbore**; **Size** M3.
+5. **Add** → **Bolt hole**. **Centre X** 205.5, **Centre Y** 100; **Counterbore**; **Size** M3.
 6. Its row menu → **Make Clones…** → **Add row** → **Arc**, **Remove row 1**; **Radius** 18, **Centre angle** 180, **Sweep** 360, **Step angle** 60. Readout: "1 + 5 clones = 6 instances · 0 skipped" (a full circle doesn't repeat the source). **Make clones** → "Clones 2, ×6".
 
 Optional (DF22): click the stock's top face; the inspector shows "Face: Stock top" with "Add … here" buttons; Add creates on that face. `Alt`+click selects a pocket floor.
@@ -73,7 +73,7 @@ Watch: which row is selected after each Add; whether the face stays selected whe
 
 1. Toolbar **Shapes** → **Add shape** → **Obround**. **Name** "Vent slot"; **Centre X** 0, **Centre Y** 0; **Length** 30, **Width** 5. `Escape` closes the Shape Editor.
 2. **Add** → **Profile**. **Shape** Vent slot; **Position X** 67.5, **Position Y** 70; **Side** Inside; **Slot width** 3; **Tab count** 0.
-3. Row menu → **Make Clones…**. Row 1 is already **Offset**: **Count** 6, **Step u** 0, **Step v** 10 → "1 + 6 clones = 7 instances · 0 skipped". **Make clones**.
+3. Row menu → **Make Clones…**. Row 1 is already **Offset**: **Count** 6, **Step X** 0, **Step Y** 10 → "1 + 6 clones = 7 instances · 0 skipped". **Make clones**.
 4. In the 3D view click the marker of clone 4: it turns skipped, readout "… 6 instances · 1 skipped". **Apply** if the button shows (or wait: auto-apply runs after 10 s, DF28; change it in **Settings**).
 
 ## 6. Change the bolt circle to M4

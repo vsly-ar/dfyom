@@ -232,6 +232,44 @@ export async function fitReference(
   await expect(fit).toBeHidden()
 }
 
+/** What a window did while it should have been idle (`idleActivity`). */
+export interface IdleActivity {
+  /** WebGL frames drawn (`clear` calls of the viewport's context). */
+  readonly frames: number
+  /** Run-status pushes the window received. */
+  readonly statusPushes: number
+}
+
+/**
+ * Counts the viewport's WebGL frames and the run-status pushes in `page` over `ms` of wall time
+ * (P7, idle cost: an idle window draws nothing and hears nothing; the viewport renders on demand,
+ * the machine host posts a status only when it changed). The one wait on time in the suite: idling
+ * is what it checks. Doc: docs/research/2026-11-23-idle-cost.md
+ */
+export async function idleActivity(page: Page, ms = 2000): Promise<IdleActivity> {
+  // Runs in the renderer; this tsconfig has no DOM lib, hence `globalThis`.
+  return page.evaluate(async (wait) => {
+    const g = globalThis as unknown as {
+      WebGL2RenderingContext: { prototype: { clear(mask: number): void } }
+      dfyom: { run: { onStatus(l: () => void): () => void } }
+      setTimeout(fn: () => void, ms: number): void
+    }
+    const proto = g.WebGL2RenderingContext.prototype
+    const clear = proto.clear
+    let frames = 0
+    let statusPushes = 0
+    proto.clear = function (this: unknown, mask: number) {
+      frames++
+      clear.call(this, mask)
+    }
+    const off = g.dfyom.run.onStatus(() => statusPushes++)
+    await new Promise<void>((r) => g.setTimeout(r, wait))
+    off()
+    proto.clear = clear
+    return { frames, statusPushes }
+  }, ms)
+}
+
 /** Closes an open dialog by its "Done" (or `button`) and waits until it is gone. */
 export async function closeDialog(dialog: Locator, button = 'Done'): Promise<void> {
   await dialog.getByRole('button', { name: button }).click()

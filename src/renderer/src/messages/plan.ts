@@ -16,6 +16,9 @@ const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 
 export const planMessages = {
   title: 'Plan',
+  /** An id a finding names that the plan no longer has (DF43: never shown as the id). */
+  unknownOperation: 'Unknown operation',
+  unknownSetup: 'Unknown',
   statuses: {
     draft: 'Draft',
     settledDesign: 'Settled design',
@@ -75,13 +78,23 @@ export const planMessages = {
     rowChanged: 'Changed in design',
     rowRemoved: 'Removed from design',
     rowEdited: 'Edited in plan',
+    /** A copy whose snapshot has no name (never its library id, DF43). */
+    unnamed: 'unnamed',
   },
 
   machine: {
     title: 'Machine',
+    /** A machine copy whose snapshot has no name (never its library id, DF43). */
+    unnamed: 'Unnamed machine',
     label: 'Machine',
     placeholder: 'Choose a machine',
-    empty: 'The machine library is empty. Add a machine to export gCode.',
+    /** Plan start card, several machines and none remembered (DF45): why Create plan waits. */
+    choose: 'Choose the machine to plan for.',
+    // dogfood re-report of DF29: the machine is needed to plan, not only to export
+    empty:
+      'The machine library is empty. Add a machine: the plan checks the stock and clearance height against its travel and the feeds against its limits, and exports gCode for it.',
+    /** The plan inspector without a machine (DF29). */
+    missing: 'No machine: the plan cannot check travel and feed limits or export gCode.',
   },
 
   /** Drag to reorder setups and plan operations (hardening U3, ui.md § Reordering lists). */
@@ -114,7 +127,8 @@ export const planMessages = {
       ]
         .filter((x) => x !== undefined)
         .join(' · '),
-    rotation: 'Rotation',
+    /** DF45: a field label, not only the group's name (the control had no visible label). */
+    rotation: 'Rotation on the table',
     rotationHint: 'About the spindle axis; the work zero moves to the new front-left corner.',
     clearanceHeight: 'Clearance height',
     retractHeight: 'Retract height',
@@ -170,7 +184,11 @@ export const planMessages = {
     archived: 'Archived plans cannot be exported.',
     blocked: 'Fix the errors before exporting.',
     doneTitle: 'gCode exported',
+    /** DF48: the file name here; its folder on its own line, the full path as its tooltip. */
     doneDescription: (file: string) => `The GRBL program was written to ${file}.`,
+    folder: (folder: string) => `In ${folder}`,
+    /** DF48: reveals the file; "Show in folder" off macOS. */
+    showInFolder: (mac: boolean) => (mac ? 'Show in Finder' : 'Show in folder'),
     failedTitle: 'The gCode could not be exported',
     lines: (n: number) => `${n} lines`,
     time: (seconds: number) => `About ${formatDuration(seconds)} without tool changes`,
@@ -181,6 +199,9 @@ export const planMessages = {
     warnings: 'Export warnings',
     noWarnings: 'No machine warnings.',
     close: 'Close',
+    /** DF45: Export works with outdated toolpaths; its hint says it regenerates them. */
+    generatesFirst: (n: number) =>
+      `Export generates the ${plural(n, 'missing or outdated toolpath', 'missing or outdated toolpaths')} first.`,
     regenerated: (n: number) => `${plural(n, 'toolpath was', 'toolpaths were')} generated first.`,
   },
 
@@ -190,6 +211,11 @@ export const planMessages = {
     noSelection: 'Select a plan operation to choose its tool and feeds and speeds.',
     noPlan: 'Create the plan in the view to start.',
     summary: (n: number) => plural(n, 'operation', 'operations'),
+    /** The count's tooltip (DF44): equal holes and chamfers share one plan operation. */
+    summaryTip: (n: number, design: number) =>
+      n === design
+        ? `${plural(n, 'plan operation', 'plan operations')}, one per design operation.`
+        : `${plural(n, 'plan operation', 'plan operations')} from the design's ${plural(design, 'operation', 'operations')}: equal holes and chamfers (clones too) are machined together as one.`,
     commandFailed: 'The change was not applied.',
     groups: { tool: 'Tool', strategy: 'Strategy', feeds: 'Feeds and speeds' },
     // plan-only edits (task E3b): docs/modes/plan-v0.2.md#plan-only-edits-and-the-snapshot-scene
@@ -197,7 +223,9 @@ export const planMessages = {
       title: 'Part (plan copy)',
       edited: 'Edited in plan',
       revert: 'Revert to design',
-      draftHint: 'Set the plan status to settled design to edit this operation for this plan only.',
+      // DF48: what the draft does first, then how to edit (UX audit: it read twice-over)
+      draftHint:
+        'This plan follows the design while it is a draft. To edit this operation for this plan only, set the plan status to settled design.',
       settledHint: 'Changes here apply to this plan only, not to the design.',
     },
     tool: 'Tool',
@@ -380,13 +408,44 @@ const fitting = (alternatives: unknown): string =>
     : 'No library tool fits.'
 
 /**
- * A plan finding's text: the design tool findings of E4 worded from their params, every other
- * code the core's message, sentence-cased (docs/modes/plan-v0.2.md § Implementation (task E4));
+ * Readable names of the ids a plan finding's params carry (DF43: visible text never shows an id):
+ * a design operation, a plan operation, a setup.
+ */
+export interface FindingNames {
+  readonly design: (id: string) => string
+  readonly planOperation: (id: string) => string
+  readonly setup: (id: string) => string
+}
+
+/** Without the plan at hand: generic words, never the id. */
+const NO_NAMES: FindingNames = {
+  design: () => 'an operation',
+  planOperation: () => 'an operation',
+  setup: () => 'one setup',
+}
+
+/** An area (mm²) in the project's units: "12.3 mm²", "0.0191 in²". */
+const areaText = (mm2: number, units: UnitSystem): string =>
+  units === 'mm'
+    ? `${Math.round(mm2 * 10) / 10} mm²`
+    : `${Math.round((mm2 / 645.16) * 10000) / 10000} in²`
+
+/**
+ * A plan finding's text: the design tool findings of E4 worded from their params; the findings
+ * whose core message names operations or setups by id (order, loose piece, cut-out before a
+ * setup, corner radius, rest material) worded from their params with readable names (DF43);
+ * every other code the core's message, sentence-cased (docs/modes/plan-v0.2.md § Implementation (task E4));
  * `plan.stepoverClamped` and the region-width `plan.check` errors (`pocketSize`, `openingSize`) in
  * the project's units (ui.md#info-notes, plan-v0.3.md § Tool checks).
  */
-export function findingText(w: PlanWarning, units: UnitSystem = 'mm'): string {
+export function findingText(
+  w: PlanWarning,
+  units: UnitSystem = 'mm',
+  names: FindingNames = NO_NAMES,
+): string {
   const p = (w.params ?? {}) as Readonly<Record<string, unknown>>
+  const str = (k: string): string | undefined =>
+    typeof p[k] === 'string' ? (p[k] as string) : undefined
   const tool = String(p['designTool'] ?? 'tool')
   const check = CHECK[String(p['check'])] ?? 'fails a plan check'
   switch (w.code) {
@@ -403,7 +462,47 @@ export function findingText(w: PlanWarning, units: UnitSystem = 'mm'): string {
       const limit = w.message.includes('flat radius') ? 'the flat radius' : 'half the tool'
       return `Clamped to ${lengthText(effective, units)} (${limit}) for offset clearing.`
     }
+    case 'plan.order': {
+      const before = str('dependsOn')
+      if (before === undefined) return sentence(w.message)
+      return w.rule === 'edgeBefore'
+        ? `This operation chamfers an edge of ${names.planOperation(before)}, which comes later.`
+        : `This operation starts from a surface of ${names.planOperation(before)}, which comes later.`
+    }
+    case 'plan.loosePiece': {
+      const profile = str('profile')
+      const inside = str('operation')
+      if (profile === undefined || inside === undefined) return sentence(w.message)
+      return `${capital(names.design(profile))} is cut before ${names.design(inside)} inside it: the piece may be loose.`
+    }
+    case 'plan.cutoutBeforeSetup': {
+      const profile = str('profile')
+      const setup = str('setupId')
+      const next = str('nextSetupId')
+      if (profile === undefined || setup === undefined || next === undefined)
+        return sentence(w.message)
+      return `${capital(names.design(profile))} cuts through in setup ${names.setup(setup)} before setup ${names.setup(next)}: held only by its tabs while re-fixtured.`
+    }
+    case 'plan.restMaterial': {
+      const op = str('operation')
+      const [area, u, v] = [p['area'], p['u'], p['v']]
+      if (
+        op === undefined ||
+        typeof area !== 'number' ||
+        typeof u !== 'number' ||
+        typeof v !== 'number'
+      )
+        return sentence(w.message)
+      return `${areaText(area, units)} of ${names.design(op)} near (${lengthText(u, units)}, ${lengthText(v, units)}) stays uncut: a neck is narrower than the tool.`
+    }
     case 'plan.check': {
+      if (w.rule === 'cornerRadius') {
+        const op = str('operation')
+        const [radius, corner] = [p['radius'], p['cornerRadius']]
+        if (op === undefined || typeof radius !== 'number' || typeof corner !== 'number')
+          return sentence(w.message)
+        return `Tool radius ${lengthText(radius, units)} is above the smallest inside corner of ${names.design(op)} (${corner === 0 ? 'sharp' : lengthText(corner, units)}): that corner keeps the tool radius.`
+      }
       // the width rules carry the tool diameter and the narrowest width (mm) in their params
       const target = w.rule === 'openingSize' ? 'opening' : w.rule === 'pocketSize' ? 'pocket' : ''
       const width = p[target]

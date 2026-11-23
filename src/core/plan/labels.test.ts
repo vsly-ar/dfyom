@@ -49,4 +49,9 @@ describe('planOperationLabel', () => {
     expect(planOperationLabel(part, ['drilling1', 'drilling2'])).toBe('Drilling 1, Drilling 2')
     expect(planOperationLabel(part, ['drilling1'])).toBe('Drilling 1')
   })
+
+  it('reads "Unknown operation" for an id the part no longer has, never the id (DF43)', () => {
+    expect(planOperationLabel(part, ['gone1'])).toBe('Unknown operation')
+    expect(planOperationLabel(part, ['drilling1', 'gone1'])).toBe('Drilling 1, Unknown operation')
+  })
 })

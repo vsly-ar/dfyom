@@ -20,6 +20,8 @@ interface Machine {
   push(patch: Partial<RunStatus>): void
   progress: { done: number; total: number; label: string }
   outcome: { ok: true; value: unknown } | { ok: false; error: AppErrorData } | undefined
+  /** `softLimit` findings `run.job.check` answers (DF46). */
+  findings: { rule: string; params: Record<string, number | string> }[]
 }
 
 /** Answers the run commands like main and the virtual machine would, and pushes statuses. */
@@ -32,6 +34,7 @@ function scriptMachine(bridge: FakeBridge): Machine {
     },
     progress: { done: 0, total: 20, label: 'facing1 · tool 1: Flat 6' },
     outcome: undefined,
+    findings: [],
   }
   const job = (phase: NonNullable<RunStatus['job']>['phase'], extra = {}) => ({
     job: {
@@ -88,6 +91,7 @@ function scriptMachine(bridge: FakeBridge): Machine {
   })
   bridge.handle('job.abort', () => ok({}))
   bridge.handle('run.job.continue', () => ok({}))
+  bridge.handle('run.job.check', () => ok({ setupId: 's', findings: m.findings }))
   bridge.handle('run.machine.reset', () => ok({}))
   bridge.handle('run.machine.probeZ', () => ok({ jobId: 'probe-1' }))
   bridge.handle('run.override.set', () => ok({}))
@@ -122,7 +126,7 @@ async function renderRun(opts: { bottom?: boolean; plate?: string } = {}) {
     </ShellProvider>,
   )
   const nav = () => screen.getByRole('navigation', { name: 'Navigator' })
-  await within(nav()).findByRole('button', { name: 'Connect to virtual machine' })
+  await within(nav()).findByRole('button', { name: 'Connect' })
   const callsOf = (name: string) => bridge.calls.filter((c) => c.name === name).map((c) => c.args)
   return { ...r, bridge, machine, nav, callsOf, plan: () => s.plan(planId) }
 }
@@ -136,7 +140,7 @@ async function tabTo(t: Awaited<ReturnType<typeof renderRun>>, target: HTMLEleme
 }
 
 async function connectAndHome(t: Awaited<ReturnType<typeof renderRun>>) {
-  await t.user.click(within(t.nav()).getByRole('button', { name: 'Connect to virtual machine' }))
+  await t.user.click(within(t.nav()).getByRole('button', { name: 'Connect' }))
   await screen.findByRole('group', { name: 'Machine' })
   await t.user.click(within(t.nav()).getByRole('button', { name: 'Home' }))
   await within(machineGroup()!).findByText('Idle')
@@ -156,12 +160,17 @@ describe('Run mode', () => {
   it('connects to the virtual machine; the badge, chip and Stop then show in every mode', async () => {
     const t = await renderRun()
     expect(machineGroup()).toBeNull()
-    await t.user.click(within(t.nav()).getByRole('button', { name: 'Connect to virtual machine' }))
+    await t.user.click(within(t.nav()).getByRole('button', { name: 'Connect' }))
     expect(t.callsOf('run.connection.open')).toEqual([
       { target: 'virtual', planId: expect.any(String), timeScale: 1 },
     ])
     const group = await screen.findByRole('group', { name: 'Machine' })
-    expect(within(group).getByText('Alarm')).toHaveAttribute('data-state', 'alarm')
+    // DF46: GRBL's start-up lock is "Needs homing", not a red alarm; Home is the primary action
+    expect(within(group).getByText('Needs homing')).toHaveAttribute('data-state', 'needsHoming')
+    expect(within(t.nav()).getByRole('button', { name: 'Home' })).toHaveAttribute(
+      'data-variant',
+      'primary',
+    )
     expect(within(group).getByText('Virtual machine · 1×')).toBeInTheDocument()
     for (const mode of ['Design', 'Plan', 'Run']) {
       await t.user.click(screen.getByRole('radio', { name: mode }))
@@ -170,6 +179,31 @@ describe('Run mode', () => {
     // in Alarm, jog and work zero say why they are disabled
     expect(within(t.nav()).getByRole('button', { name: 'Jog X+' })).toBeDisabled()
     expect(within(t.nav()).getAllByText('Home the machine first.').length).toBeGreaterThan(0)
+    await expectNoAxeViolations()
+  })
+
+  it('the position reads unknown until homed (DF46)', async () => {
+    const t = await renderRun()
+    await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
+    const inspector = screen.getByRole('complementary', { name: 'Inspector' })
+    const dro = within(inspector).getByRole('table', { name: 'Position' })
+    const cell = (name: string) => within(dro).getByRole('cell', { name })
+    expect(cell('Machine position X')).toHaveTextContent('—')
+    expect(dro).toHaveAccessibleDescription('Position unknown until homed.')
+    // "Connect … first" once, in the navigator; the idle line describes Start run
+    expect(screen.getAllByText('Connect to a machine first.')).toHaveLength(1)
+    expect(
+      within(inspector).getByRole('button', { name: 'Start run' }),
+    ).toHaveAccessibleDescription(/^No run yet/)
+    await t.user.click(within(t.nav()).getByRole('button', { name: 'Connect' }))
+    await screen.findByRole('group', { name: 'Machine' })
+    t.machine.push({ mpos: [-400, -400, -50] })
+    expect(cell('Machine position X')).toHaveTextContent('—')
+    expect(cell('Work position Z')).toHaveTextContent('—')
+    await t.user.click(within(t.nav()).getByRole('button', { name: 'Home' }))
+    await within(machineGroup()!).findByText('Idle')
+    expect(cell('Machine position X')).toHaveTextContent('-1.000')
+    expect(dro).not.toHaveAccessibleDescription()
     await expectNoAxeViolations()
   })
 
@@ -190,7 +224,7 @@ describe('Run mode', () => {
 
   it('unlock asks first: the position is not known until homed', async () => {
     const t = await renderRun()
-    await t.user.click(within(t.nav()).getByRole('button', { name: 'Connect to virtual machine' }))
+    await t.user.click(within(t.nav()).getByRole('button', { name: 'Connect' }))
     await screen.findByRole('group', { name: 'Machine' })
     await t.user.click(within(t.nav()).getByRole('button', { name: 'Unlock' }))
     const confirm = screen.getByRole('alertdialog', { name: 'Unlock without homing?' })
@@ -209,7 +243,12 @@ describe('Run mode', () => {
     expect(within(preflight).getAllByRole('listitem').length).toBeGreaterThan(0)
     expect(within(preflight).getByText('Virtual machine at 1×')).toBeInTheDocument()
     const start = within(preflight).getByRole('button', { name: 'Start run' })
-    expect(start).toHaveFocus()
+    // DF46: the soft-limit result, then Start run is enabled and focused
+    await within(preflight).findByText('Inside the travel at this work zero.')
+    await waitFor(() => expect(start).toHaveFocus())
+    expect(t.callsOf('run.job.check')).toEqual([
+      { planId: t.plan().id, setupId: expect.any(String) },
+    ])
     await expectNoAxeViolations()
     await t.user.click(start)
     expect(t.callsOf('run.job.start')).toHaveLength(1)
@@ -239,7 +278,33 @@ describe('Run mode', () => {
     expect(screen.queryByRole('alertdialog')).toBeNull()
   })
 
-  it('tool change: dialog with steps, Later to the inspector, Continue names the wait', async () => {
+  it('pre-flight: a program outside the travel keeps Start run disabled and says why (DF46)', async () => {
+    const t = await renderRun()
+    t.machine.findings = [
+      { rule: 'softLimit', params: { axis: 'x', min: -812, max: -12, travel: 800 } },
+    ]
+    await connectAndHome(t)
+    await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
+    const inspector = screen.getByRole('complementary', { name: 'Inspector' })
+    await t.user.click(within(inspector).getByRole('button', { name: 'Start run' }))
+    const preflight = screen.getByRole('dialog', { name: 'Start run?' })
+    await within(preflight).findByText(
+      'X leaves the travel: the program spans -812.000 to -12.000 mm, the travel is −800.000 to 0 mm.',
+    )
+    const start = within(preflight).getByRole('button', { name: 'Start run' })
+    expect(start).toBeDisabled()
+    expect(start).toHaveAccessibleDescription(/Move the work zero/)
+    expect(within(preflight).getByRole('button', { name: 'Cancel' })).toHaveFocus()
+    // a new work zero is checked again
+    t.machine.findings = []
+    t.machine.push({ workZero: [-400, -300, -60] })
+    await within(preflight).findByText('Inside the travel at this work zero.')
+    await waitFor(() => expect(start).toBeEnabled())
+    expect(t.callsOf('run.job.check')).toHaveLength(2)
+    await expectNoAxeViolations()
+  })
+
+  it('tool change: dialog with steps, Close to the inspector, Continue names the wait', async () => {
     const t = await renderRun()
     await connectAndHome(t)
     t.machine.push({
@@ -251,7 +316,7 @@ describe('Run mode', () => {
     expect(within(dialog).getByRole('button', { name: 'Jog Z+' })).toBeEnabled()
     expect(within(machineGroup()!).getByText('Tool change')).toHaveAttribute('data-state', 'action')
     await expectNoAxeViolations()
-    await t.user.click(within(dialog).getByRole('button', { name: 'Later' }))
+    await t.user.click(within(dialog).getByRole('button', { name: 'Close (stay paused)' }))
     expect(screen.queryByRole('dialog', { name: 'Tool change 2' })).toBeNull()
 
     await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
@@ -294,7 +359,9 @@ describe('Run mode', () => {
     const inspector = screen.getByRole('complementary', { name: 'Inspector' })
     await t.user.click(within(inspector).getByRole('button', { name: 'Start run' }))
     const preflight = screen.getByRole('dialog', { name: 'Start run?' })
-    expect(within(preflight).getByRole('button', { name: 'Start run' })).toHaveFocus()
+    await waitFor(() =>
+      expect(within(preflight).getByRole('button', { name: 'Start run' })).toHaveFocus(),
+    )
     t.machine.push({ state: 'Jog' })
     await tabTo(t, within(preflight).getByRole('button', { name: 'Stop' }))
     await t.user.keyboard('{Enter}')
@@ -303,10 +370,13 @@ describe('Run mode', () => {
     await t.user.click(within(preflight).getByRole('button', { name: 'Cancel' }))
     t.machine.push({ state: 'Idle' })
 
-    // program pause: Later has the first focus (never Stop or Continue); Stop aborts the run
+    // program pause: Close (stay paused) has the first focus (never Stop or Continue); Stop
+    // aborts the run. No bare M0 jargon: the badge says "Paused by program" (DF46)
     t.machine.push({ state: 'Hold:0', ...t.machine.job('programPause', { pause: 1 }) })
     const pause = await screen.findByRole('dialog', { name: /Program pause/ })
-    expect(within(pause).getByRole('button', { name: 'Later' })).toHaveFocus()
+    expect(within(pause).getByRole('button', { name: 'Close (stay paused)' })).toHaveFocus()
+    expect(within(pause).getByText(/^Program pause \(M0\) in the gCode/)).toBeInTheDocument()
+    expect(within(machineGroup()!).getByText('Paused by program')).toBeInTheDocument()
     await tabTo(t, within(pause).getByRole('button', { name: 'Stop' }))
     await t.user.keyboard('{Enter}')
     expect(t.callsOf('job.abort')).toEqual([{ jobId: 'run-1' }])
@@ -349,6 +419,7 @@ describe('Run mode', () => {
     await t.user.click(within(inspector).getByRole('button', { name: 'Start run' }))
     const preflight = screen.getByRole('dialog', { name: 'Start run?' })
     expect(within(preflight).getByText('Bottom (1 of 2)')).toBeInTheDocument()
+    await within(preflight).findByText('Inside the travel at this work zero.')
     await t.user.click(within(preflight).getByRole('button', { name: 'Start run' }))
     expect(t.callsOf('run.job.start')).toEqual([{ planId: t.plan().id, setupId: bottom!.id }])
 
@@ -383,7 +454,7 @@ describe('Run mode', () => {
     await expectNoAxeViolations()
 
     // Later puts it off to the inspector; Show instructions brings it back
-    await t.user.click(within(prompt).getByRole('button', { name: 'Later' }))
+    await t.user.click(within(prompt).getByRole('button', { name: 'Close (start later)' }))
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     await t.user.click(within(inspector).getByRole('button', { name: 'Show instructions' }))
     const again = await screen.findByRole('dialog', { name: 'Setup change: setup 2, Top' })
@@ -610,11 +681,11 @@ describe('Run mode', () => {
 
   it('in Alarm the panel at the end of the navigator says what happened and what to do (M3)', async () => {
     const t = await renderRun()
-    await t.user.click(within(t.nav()).getByRole('button', { name: 'Connect to virtual machine' }))
+    await t.user.click(within(t.nav()).getByRole('button', { name: 'Connect' }))
     const nav = within(t.nav())
-    // locked at start ($22=1), no alarm code
-    let panel = await nav.findByRole('region', { name: 'Alarm' })
-    expect(within(panel).getByText('Locked (Alarm)')).toBeInTheDocument()
+    // locked at start ($22=1), no alarm code: the next step, not an error (DF46)
+    let panel = await nav.findByRole('region', { name: 'Needs homing' })
+    expect(within(panel).getByRole('heading', { name: 'Needs homing' })).toBeInTheDocument()
     expect(within(panel).getByText('Home the machine.')).toBeInTheDocument()
     // a hard limit: reset first, then check the switch, then home
     t.machine.push({
@@ -775,7 +846,7 @@ describe('Run mode: serial port (docs/modes/run-machine.md#ports-and-the-port-pi
     expect(nav.queryByRole('combobox', { name: 'Time scale' })).toBeNull()
     expect(nav.getByRole('combobox', { name: 'Baud' })).toHaveTextContent('115200')
     await expectNoAxeViolations(t.container)
-    await t.user.click(nav.getByRole('button', { name: 'Connect to machine' }))
+    await t.user.click(nav.getByRole('button', { name: 'Connect' }))
     expect(t.callsOf('run.connection.open').at(-1)).toMatchObject({
       target: 'serial',
       path: PORT,
@@ -800,10 +871,8 @@ describe('Run mode: serial port (docs/modes/run-machine.md#ports-and-the-port-pi
     scriptSerial(t, true)
     const nav = within(t.nav())
     await t.user.click(nav.getByRole('radio', { name: 'Serial port' }))
-    await waitFor(() =>
-      expect(nav.getByRole('button', { name: 'Connect to machine' })).toBeEnabled(),
-    )
-    await t.user.click(nav.getByRole('button', { name: 'Connect to machine' }))
+    await waitFor(() => expect(nav.getByRole('button', { name: 'Connect' })).toBeEnabled())
+    await t.user.click(nav.getByRole('button', { name: 'Connect' }))
     await screen.findByRole('group', { name: 'Machine' })
     t.machine.push({ state: 'Idle', homed: true })
     await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
@@ -828,10 +897,8 @@ describe('Run mode: serial port (docs/modes/run-machine.md#ports-and-the-port-pi
     scriptSerial(t, true)
     const nav = within(t.nav())
     await t.user.click(nav.getByRole('radio', { name: 'Serial port' }))
-    await waitFor(() =>
-      expect(nav.getByRole('button', { name: 'Connect to machine' })).toBeEnabled(),
-    )
-    await t.user.click(nav.getByRole('button', { name: 'Connect to machine' }))
+    await waitFor(() => expect(nav.getByRole('button', { name: 'Connect' })).toBeEnabled())
+    await t.user.click(nav.getByRole('button', { name: 'Connect' }))
     await screen.findByRole('group', { name: 'Machine' })
     t.machine.push({ state: 'Idle', homed: true })
     t.machine.push({ state: 'Run', ...t.machine.job('streaming') })
@@ -873,7 +940,7 @@ describe('Run mode: serial port (docs/modes/run-machine.md#ports-and-the-port-pi
     expect(
       await nav.findByText('No serial ports found. Connect the controller by USB and refresh.'),
     ).toBeInTheDocument()
-    expect(nav.getByRole('button', { name: 'Connect to machine' })).toBeDisabled()
+    expect(nav.getByRole('button', { name: 'Connect' })).toBeDisabled()
     await expectNoAxeViolations(t.container)
   })
 })

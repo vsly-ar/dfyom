@@ -52,7 +52,10 @@ test('reorder (D45): drag operation rows by their grip; a refused drop says why'
   await setField(setup, 'Length (X)', '100')
   await setField(setup, 'Width (Y)', '60')
   await setField(setup, 'Thickness (Z)', '20')
-  await setup.getByRole('button', { name: 'Create part' }).click()
+  await page
+    .getByRole('dialog', { name: 'Stock' })
+    .getByRole('button', { name: 'Create part' })
+    .click()
   await navigator.getByRole('button', { name: 'Add facing' }).click()
   // the pocket's default `on` is the facing's floor: it can't go before the facing
   for (const kind of ['Pocket', 'Profile']) {
@@ -95,7 +98,7 @@ test('reorder (D45): drag operation rows by their grip; a refused drop says why'
 
   // the pocket over the gap above the facing: the indicator turns red and says why
   await drag(rowOf(/^Pocket 1/), (await topOf(rowOf(/^Facing 1/))) + 3, true)
-  const why = 'Not moved: Pocket 1 uses facing1.floor, which has to come before it.'
+  const why = 'Not moved: Pocket 1 uses Facing 1 floor, which has to come before it.'
   await expect(navigator.locator('span', { hasText: why })).toBeVisible()
   await expect(rowOf(/^Facing 1/)).toHaveAttribute('data-drop-refused', '')
   await render(page, 'drag-refused')

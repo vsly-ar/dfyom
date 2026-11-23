@@ -1,6 +1,8 @@
 // The operation's tool field (task F5): a combobox of `design.tool.candidates` (the generalized
 // tool auto would pick, then the fitting library tools in auto-choice order with their reasons,
-// and the current tool when it is neither), the tool lock (always shown: released = auto), the
+// then the library's other tools of the type with why they don't fit (DF42), and the current tool
+// when it is none of them), the near match offered at `dfm.toolNotInLibrary` and "Widen slot"
+// at a locked tool wider than a profile's slot (DF42, design-v0.2.md § Library tools of the type), the tool lock (always shown: released = auto), the
 // source note ("Chosen by you.", "Chosen automatically: …", "Chosen again on Apply." with the
 // value muted) and the checks against the tool (`dfm.toolUnfit`, `dfm.toolNotInLibrary`; soft
 // with a clock while Apply may change them). Picking and the lock commit only (one command, one
@@ -31,21 +33,30 @@ import { TOOL_TYPE_ICON } from '../../library/toolTypeIcon'
 import { Field, FieldIcon, Icon, Select, type FieldMessage, type SelectOption } from '../../ui'
 import { chamferDiameter } from './chamfer-view'
 import styles from './Design.module.css'
-import { pendingApply, quantityAt, type DesignPart } from './model'
+import { dfmNames, pendingApply, quantityAt, type DesignPart } from './model'
 import { useCommand } from './useDesign'
 
 const t = designMessages.tool
 
+/** A library tool of `design.tool.candidates`. */
+interface LibraryToolEntry {
+  readonly toolLibraryItemId: string
+  readonly name: string
+  readonly type: ToolType
+  /** mm */
+  readonly diameter: number
+  /** mm, bull nose only */
+  readonly cornerRadius?: number
+  readonly fluteCount: number
+}
+
 /** `design.tool.candidates` (src/core/design/tool-commands.ts). */
 export interface ToolCandidates {
-  readonly fitting: readonly {
-    readonly toolLibraryItemId: string
-    readonly name: string
-    readonly type: ToolType
-    /** mm */
-    readonly diameter: number
-    readonly reasons: readonly string[]
-  }[]
+  readonly fitting: readonly (LibraryToolEntry & { readonly reasons: readonly string[] })[]
+  /** Library tools of a type that can make the operation but failing another fit rule (DF42). */
+  readonly unfitting?: readonly (LibraryToolEntry & { readonly rule: string })[]
+  /** The library tool offered for a generalized tool the library lacks (DF42). */
+  readonly nearMatch?: string | null
   readonly generalized: DesignToolDTO | null
   readonly current: {
     readonly tool: DesignToolDTO
@@ -182,6 +193,34 @@ export function autoChangeReason(
 }
 
 /**
+ * Why a listed library tool does not fit the operation ("wider than the 6 mm slot"), from its
+ * failed fit rule and the operation's current values (DF42).
+ */
+export function unfitWhy(rule: string, op: OperationDTO, units: UnitSystem): string {
+  const w = t.unfitWhy
+  switch (rule) {
+    case 'width':
+      return op.kind === 'profile' ? w.slot(lengthAt(op, 'slotWidth', units)) : w.pocket
+    case 'cornerRadius':
+      return w.cornerRadius(lengthAt(op, 'shape.cornerRadius', units))
+    case 'floorRadius': {
+      const q = quantityAt(op, 'floorRadius')
+      return w.floorRadius(
+        q !== undefined && q.canonical > 0 ? lengthAt(op, 'floorRadius', units) : undefined,
+      )
+    }
+    case 'diameter':
+      return w.diameter(lengthAt(op, 'diameter', units))
+    case 'reach':
+      return w.reach
+    case 'angle':
+      return w.angle
+    default:
+      return w.other
+  }
+}
+
+/**
  * The operation's candidates, re-read on every revision and pending change, and by `reread()`
  * when the list opens (the library can change without either).
  */
@@ -245,14 +284,31 @@ function listedOptions(
       description: t.generalizedNote,
       ...typeIcon(toolType(g, part.doc)),
     })
+  // DF42: every library tool of a type that can make the operation; the fitting ones first (in
+  // auto-choice order), then the others nearest in diameter first, saying what does not fit
+  const geometry = (f: LibraryToolEntry) => [
+    ...(f.cornerRadius !== undefined
+      ? [t.cornerRadius(lengthSource(f.cornerRadius, part.units))]
+      : []),
+    t.flutes(f.fluteCount),
+  ]
   for (const f of candidates?.fitting ?? []) {
-    const reasons = f.reasons.filter((r) => !r.startsWith('diameter '))
+    const reasons = f.reasons.filter((r) => !r.startsWith('diameter ')).map(sentenceCase)
     options.push({
       value: `${LIB}${f.toolLibraryItemId}`,
       label: t.library(f.name, lengthSource(f.diameter, part.units)),
       group: t.groups.library,
       ...typeIcon(f.type),
-      ...(reasons.length > 0 ? { description: reasons.map(sentenceCase).join(' · ') } : {}),
+      description: [...geometry(f), ...reasons].join(' · '),
+    })
+  }
+  for (const f of candidates?.unfitting ?? []) {
+    options.push({
+      value: `${LIB}${f.toolLibraryItemId}`,
+      label: t.library(f.name, lengthSource(f.diameter, part.units)),
+      group: t.groups.library,
+      ...typeIcon(f.type),
+      description: [...geometry(f), t.unfit(unfitWhy(f.rule, op, part.units))].join(' · '),
     })
   }
   const current = op.tool
@@ -358,8 +414,12 @@ export function ToolField({
   }
 
   // the fix of a tool check: the first fitting tool (it locks), else "Unlock"
+  const unfitting = new Set(
+    (candidates?.unfitting ?? []).map((u) => `${LIB}${u.toolLibraryItemId}`),
+  )
   const first = options.find(
-    (o) => o.value !== CURRENT && o.value !== value && o.value !== NEW_TOOL,
+    (o) =>
+      o.value !== CURRENT && o.value !== value && o.value !== NEW_TOOL && !unfitting.has(o.value),
   )
   const fix =
     first !== undefined
@@ -367,8 +427,38 @@ export function ToolField({
       : locked
         ? { label: t.unlock, onApply: () => void send('design.operation.tool.unlock') }
         : undefined
+  // DF42: a locked tool wider than the profile's slot: widening the slot to it is the user's
+  // explicit choice (the slot is as wide as it is designed; nothing widens it automatically)
+  const widen = (w: DfmWarning) => {
+    const dc = w.params?.['toolDiameter']
+    if (
+      !locked ||
+      op.kind !== 'profile' ||
+      op.featureId !== undefined ||
+      w.params?.['rule'] !== 'width' ||
+      typeof dc !== 'number'
+    )
+      return undefined
+    const width = lengthSource(dc, part.units, 'up')
+    return {
+      label: t.widenSlot(width),
+      onApply: () => void send('design.profile.update', { slotWidth: width }),
+    }
+  }
+  // DF42: the library's tool offered for the generalized tool it lacks
+  const nearId = candidates?.nearMatch ?? null
+  const near =
+    nearId === null
+      ? undefined
+      : [...(candidates?.fitting ?? []), ...(candidates?.unfitting ?? [])].find(
+          (f) => f.toolLibraryItemId === nearId,
+        )
+  const addToLibrary = {
+    label: t.addToLibrary,
+    icon: <Icon name="add" />,
+    onApply: () => setAdding(true),
+  }
 
-  const name = (id: string) => part.dto.operations.find((o) => o.id === id)?.name ?? id
   const messages: FieldMessage[] = [
     ...(error === undefined
       ? []
@@ -377,7 +467,7 @@ export function ToolField({
       // v0.4 U4: no library tool fits the chamfer – shown here, its fix is "New tool…"
       .filter((w) => w.parameter === 'tool' || w.code === 'dfm.chamferNoTool')
       .map((w): FieldMessage => {
-        const text = dfmMessages.text(w, part.units, name)
+        const text = dfmMessages.text(w, part.units, dfmNames(part.dto))
         return pendingApply(w)
           ? {
               id: w.code,
@@ -389,7 +479,13 @@ export function ToolField({
               id: w.code,
               severity: dfmMessages.tier(w),
               text,
-              ...(w.code === 'dfm.toolUnfit' && fix !== undefined ? { fix } : {}),
+              ...(w.code === 'dfm.toolUnfit'
+                ? (() => {
+                    const wider = widen(w)
+                    if (wider === undefined) return fix !== undefined ? { fix } : {}
+                    return { fix: wider, ...(fix !== undefined ? { alternative: fix } : {}) }
+                  })()
+                : {}),
               ...(w.code === 'dfm.chamferNoTool'
                 ? {
                     fix: {
@@ -400,13 +496,15 @@ export function ToolField({
                   }
                 : {}),
               ...(w.code === 'dfm.toolNotInLibrary'
-                ? {
-                    fix: {
-                      label: t.addToLibrary,
-                      icon: <Icon name="add" />,
-                      onApply: () => setAdding(true),
-                    },
-                  }
+                ? near === undefined
+                  ? { fix: addToLibrary }
+                  : {
+                      fix: {
+                        label: t.useNear(near.name, lengthSource(near.diameter, part.units)),
+                        onApply: () => choose(`${LIB}${near.toolLibraryItemId}`),
+                      },
+                      alternative: addToLibrary,
+                    }
                 : {}),
             }
       }),

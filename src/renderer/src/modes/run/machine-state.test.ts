@@ -5,6 +5,8 @@ import {
   formatFeed,
   formatLength,
   machineView,
+  needsHoming,
+  positionKnown,
   runGates,
   stepToMm,
   stopGate,
@@ -26,12 +28,19 @@ describe('machineView', () => {
     [closedStatus(), 'offline', 'Not connected'],
     [open(), 'idle', 'Idle'],
     [open({ state: 'Alarm' }), 'alarm', 'Alarm'],
+    // DF46: GRBL's start-up lock (no alarm code, not homed) is no error
+    [open({ state: 'Alarm', homed: false }), 'needsHoming', 'Needs homing'],
+    [
+      open({ state: 'Alarm', homed: false, alarm: { code: 3, text: '' } }),
+      'alarm',
+      'Alarm 3: reset while moving',
+    ],
     [open({ state: 'Alarm', alarm: { code: 2, text: '' } }), 'alarm', 'Alarm 2: soft limit'],
     [open({ state: 'Home' }), 'moving', 'Homing'],
     [open({ state: 'Jog' }), 'moving', 'Jogging'],
     [open({ state: 'Run', ...job('streaming') }), 'moving', 'Running'],
     [open({ state: 'Hold:0', ...job('held') }), 'hold', 'Feed hold'],
-    [open({ state: 'Hold:0', ...job('programPause') }), 'hold', 'Paused (M0)'],
+    [open({ state: 'Hold:0', ...job('programPause') }), 'hold', 'Paused by program'],
     [open({ ...job('toolChange', { toolChange: { n: 2, name: 'x' } }) }), 'action', 'Tool change'],
     [open({ state: 'Jog', ...job('toolChange') }), 'moving', 'Jogging'],
     [open({ ...job('done') }), 'idle', 'Idle'],
@@ -125,5 +134,24 @@ describe('actionText (DF33)', () => {
     expect(
       actionText({ code: 'run.state', message: 'm', issues: [], frames: [] }, 'mm'),
     ).toBeUndefined()
+  })
+})
+
+describe('needs homing and the known position (DF46)', () => {
+  it('needs homing only in Alarm without a code before homing', () => {
+    expect(needsHoming(open({ state: 'Alarm', homed: false }))).toBe(true)
+    expect(needsHoming(open({ state: 'Alarm', homed: true }))).toBe(false)
+    expect(needsHoming(open({ state: 'Idle', homed: false }))).toBe(false)
+    expect(needsHoming(closedStatus())).toBe(false)
+    // the gates stay those of Alarm
+    const gates = runGates(open({ state: 'Alarm', homed: false }), { planChosen: true })
+    expect(gates.jog).toBe('Home the machine first.')
+    expect(gates.home).toBeNull()
+  })
+
+  it('the position is known only once homed', () => {
+    expect(positionKnown(closedStatus())).toBe(false)
+    expect(positionKnown(open({ homed: false }))).toBe(false)
+    expect(positionKnown(open())).toBe(true)
   })
 })

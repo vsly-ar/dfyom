@@ -93,7 +93,7 @@ test('serial port (M1): pick the port, connect, settings warning, Home asks firs
     await expect(navigator.getByRole('combobox', { name: 'Time scale' })).toBeHidden()
     await render(page, 'm1-serial-picker')
 
-    await navigator.getByRole('button', { name: 'Connect to machine' }).click()
+    await navigator.getByRole('button', { name: 'Connect', exact: true }).click()
     await expect(machine.getByText(`Serial · ${PORT}`)).toBeVisible()
     const warning = navigator.getByRole('alert')
     await expect(warning).toContainText("The controller's settings differ from the library machine")
@@ -111,7 +111,7 @@ test('serial port (M1): pick the port, connect, settings warning, Home asks firs
     await expect(confirm).toBeHidden()
 
     await navigator.getByRole('button', { name: 'Disconnect' }).click()
-    await expect(navigator.getByRole('button', { name: 'Connect to machine' })).toBeEnabled()
+    await expect(navigator.getByRole('button', { name: 'Connect', exact: true })).toBeEnabled()
     expect(rendererErrors).toEqual([])
   } finally {
     await app.close()
@@ -160,12 +160,12 @@ test('real machine (M2, M3): alarm panel, home, hold to jog, the real-machine pr
     await expect(navigator.getByRole('combobox', { name: 'Serial port' })).toHaveText(
       `${PORT} · Arduino (www.arduino.cc)`,
     )
-    await navigator.getByRole('button', { name: 'Connect to machine' }).click()
+    await navigator.getByRole('button', { name: 'Connect', exact: true }).click()
     await expect(machine.getByText(`Serial · ${PORT}`)).toBeVisible()
 
-    // M3: GRBL starts locked ($22=1): the alarm panel says so and what to do
-    const alarm = navigator.getByRole('region', { name: 'Alarm' })
-    await expect(alarm.getByRole('heading', { name: 'Locked (Alarm)' })).toBeVisible()
+    // M3: GRBL starts locked ($22=1): the panel says so and what to do, as the next step (DF46)
+    const alarm = navigator.getByRole('region', { name: 'Needs homing' })
+    await expect(alarm.getByRole('heading', { name: 'Needs homing' })).toBeVisible()
     await expect(alarm.getByText('Home the machine.')).toBeVisible()
     // at the end of the navigator (DF34): scrolled to for the render
     await alarm.scrollIntoViewIfNeeded()
@@ -211,7 +211,7 @@ test('real machine (M2, M3): alarm panel, home, hold to jog, the real-machine pr
     await preflight.getByRole('button', { name: 'Cancel' }).click()
 
     await navigator.getByRole('button', { name: 'Disconnect' }).click()
-    await expect(navigator.getByRole('button', { name: 'Connect to machine' })).toBeEnabled()
+    await expect(navigator.getByRole('button', { name: 'Connect', exact: true })).toBeEnabled()
     expect(rendererErrors).toEqual([])
   } finally {
     await app.close()
@@ -260,7 +260,7 @@ test('touch plate and overrides (M4, M6): a probe that misses, unlock, a probe t
       inspector.getByRole('table', { name: 'Position' }).getByRole('cell', { name })
 
     await navigator.getByRole('radio', { name: 'Serial port' }).click()
-    await navigator.getByRole('button', { name: 'Connect to machine' }).click()
+    await navigator.getByRole('button', { name: 'Connect', exact: true }).click()
     await expect(machine.getByText(`Serial · ${PORT}`)).toBeVisible()
     await navigator.getByRole('button', { name: 'Home' }).click()
     await page
@@ -329,7 +329,7 @@ test('touch plate and overrides (M4, M6): a probe that misses, unlock, a probe t
     await expect(navigator.getByText(/G54 .* · -70\.000 mm/)).toBeVisible()
 
     await navigator.getByRole('button', { name: 'Disconnect' }).click()
-    await expect(navigator.getByRole('button', { name: 'Connect to machine' })).toBeEnabled()
+    await expect(navigator.getByRole('button', { name: 'Connect', exact: true })).toBeEnabled()
     expect(rendererErrors).toEqual([])
   } finally {
     await app.close()

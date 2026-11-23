@@ -11,7 +11,7 @@ import { planSetup, type PlanSetup } from '../../../../core/plan/plan.fixture'
 import type { CallReply } from '../../../../shared/preload-api'
 import { App } from '../../App'
 import { createShell, ShellProvider } from '../../shell/ShellContext'
-import { createFakeBridge } from '../../test/bridge'
+import { createFakeBridge, type FakeBridge } from '../../test/bridge'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
 
 vi.mock('@react-three/fiber', () => ({
@@ -26,13 +26,21 @@ vi.mock('../../viewport/Scene', () => ({
 
 const ok = (value: unknown = {}): CallReply => ({ ok: true, value, revision: 0 })
 
-async function renderPlan(opts: { plan?: boolean; setup?: (s: PlanSetup) => Promise<void> } = {}) {
+async function renderPlan(
+  opts: {
+    plan?: boolean
+    setup?: (s: PlanSetup) => Promise<void>
+    /** Scripts the bridge and the shell before the first render (DF45: machines, settings). */
+    before?: (s: PlanSetup, bridge: FakeBridge, shell: ReturnType<typeof createShell>) => void
+  } = {},
+) {
   const s = await planSetup()
   if (opts.plan !== false) await s.create({ machineLibraryItemId: s.machineId })
   await opts.setup?.(s)
   const bridge = createFakeBridge()
   bridge.bind(s.d)
   const shell = createShell(bridge)
+  opts.before?.(s, bridge, shell)
   shell.ui.getState().setMode('plan')
   const r = renderUi(
     <ShellProvider shell={shell}>
@@ -81,6 +89,78 @@ describe('Plan mode', () => {
       'Draft',
     )
     await expectNoAxeViolations()
+  })
+
+  it('chooses the machine in the Plan start card: none, several, the last used (DF45)', async () => {
+    // an empty machine library: no select, "Create plan" disabled with the reason, New machine…
+    let machines: { id: string; name: string }[] = []
+    const t = await renderPlan({
+      plan: false,
+      before: (_s, bridge) => bridge.handle('library.machine.list', () => ok({ items: machines })),
+    })
+    const card = await screen.findByRole('dialog', { name: 'Plan the part' })
+    const create = within(card).getByRole('button', { name: 'Create plan' })
+    await waitFor(() => expect(create).toHaveAccessibleDescription(/machine library is empty/))
+    expect(create).toBeDisabled()
+    expect(within(card).queryByRole('combobox', { name: 'Machine' })).toBeNull()
+    expect(within(card).getByRole('button', { name: 'New machine…' })).toBeVisible()
+    await expectNoAxeViolations()
+    t.unmount()
+
+    // several machines, none remembered: "Choose a machine", disabled with why until chosen
+    machines = [
+      { id: 'router', name: 'Router' },
+      { id: 'mill', name: 'Mill' },
+    ]
+    const u = await renderPlan({
+      plan: false,
+      before: (s, bridge) => {
+        machines = [{ id: s.machineId, name: 'Shapeoko' }, ...machines]
+        bridge.handle('library.machine.list', () => ok({ items: machines }))
+      },
+    })
+    const card2 = await screen.findByRole('dialog', { name: 'Plan the part' })
+    const select = await within(card2).findByRole('combobox', { name: 'Machine' })
+    expect(select).toHaveTextContent('Choose a machine')
+    const create2 = within(card2).getByRole('button', { name: 'Create plan' })
+    expect(create2).toBeDisabled()
+    expect(create2).toHaveAccessibleDescription('Choose the machine to plan for.')
+    await expectNoAxeViolations()
+    await u.user.click(select)
+    // the first option is highlighted on open; Enter picks it (Radix can swallow the first
+    // pointerup after an opening click in jsdom)
+    expect(await screen.findByRole('option', { name: 'Shapeoko' })).toHaveAttribute(
+      'data-highlighted',
+    )
+    await u.user.keyboard('{Enter}')
+    await waitFor(() => expect(create2).toBeEnabled())
+    await u.user.click(create2)
+    await waitFor(() => expect(u.rows().length).toBeGreaterThan(0))
+    expect(u.callsOf('plan.create')).toEqual([
+      { partId: u.s.partId, machineLibraryItemId: u.s.machineId },
+    ])
+    expect(u.bridge.settingsPatches).toContainEqual({ lastMachine: u.s.machineId })
+    u.unmount()
+
+    // the last machine used is preselected
+    await renderPlan({
+      plan: false,
+      before: (s, bridge, shell) => {
+        machines = [
+          { id: s.machineId, name: 'Shapeoko' },
+          { id: 'router', name: 'Router' },
+        ]
+        bridge.handle('library.machine.list', () => ok({ items: machines }))
+        shell.settings.setState({
+          settings: { ...shell.settings.getState().settings, lastMachine: 'router' },
+        })
+      },
+    })
+    const card3 = await screen.findByRole('dialog', { name: 'Plan the part' })
+    expect(await within(card3).findByRole('combobox', { name: 'Machine' })).toHaveTextContent(
+      'Router',
+    )
+    expect(within(card3).getByRole('button', { name: 'Create plan' })).toBeEnabled()
   })
 
   it('shows feeds and speeds with their source; a preset has no locks, an entered value resets', async () => {
@@ -273,8 +353,18 @@ describe('Plan mode', () => {
     await waitFor(() => expect(t.rows().length).toBeGreaterThan(0))
     const generate = within(t.nav()).getByRole('button', { name: 'Generate toolpaths' })
     await waitFor(() => expect(generate).toBeEnabled())
+    // DF45: the next step is the primary; Export still works and says it generates first
+    const exportButton = within(t.nav()).getByRole('button', { name: 'Export gCode…' })
+    expect(generate).toHaveAttribute('data-variant', 'primary')
+    expect(exportButton).toHaveAttribute('data-variant', 'default')
+    expect(exportButton).toHaveAccessibleDescription(
+      /^Export generates the \d+ missing or outdated toolpaths first\.$/,
+    )
     await t.user.click(generate)
     await within(t.nav()).findByText('All toolpaths up to date.')
+    expect(generate).toHaveAttribute('data-variant', 'default')
+    expect(exportButton).toHaveAttribute('data-variant', 'primary')
+    expect(exportButton).not.toHaveAccessibleDescription()
     expect(t.callsOf('plan.toolpath.generate')).toEqual([{ planId: t.planId() }])
 
     t.bridge.setFileChoice({ export: '/out/Plan 1.nc' })
@@ -302,6 +392,11 @@ describe('Plan mode', () => {
     expect(t.callsOf('plan.export')).toEqual([
       { planId: t.planId(), target: '/out/Plan 1.nc', confirm: true },
     ])
+    // the file name in the description, its folder on a line; Show in Finder reveals it (DF48)
+    expect(dialog).toHaveAccessibleDescription('The GRBL program was written to Plan 1.nc.')
+    expect(within(dialog).getByText('In /out')).toHaveAttribute('title', '/out/Plan 1.nc')
+    await t.user.click(within(dialog).getByRole('button', { name: /^Show in (Finder|folder)$/ }))
+    expect(t.bridge.shownInFolder).toEqual(['/out/Plan 1.nc'])
     expect(within(dialog).getByText('1234 lines')).toBeInTheDocument()
     expect(within(dialog).getByText('About 12 min 5 s without tool changes')).toBeInTheDocument()
     expect(within(dialog).getByRole('list', { name: 'Export warnings' })).toHaveTextContent(

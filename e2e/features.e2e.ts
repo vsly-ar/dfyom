@@ -4,7 +4,8 @@
 // opens the Clones draft (U3: read-out, a 2 x 2 grid row, Make clones, skip clone 3 by clicking its
 // marker in the viewport, the instance inspector) with Source and Clones groups under the Clones
 // row; the hole inspector (U2) sets type and fastener, draws the section and offers the
-// custom-size fix and a stepped countersink (F7). Task U4: Add → Chamfer on a drilling opens the chamfer inspector (Edge,
+// custom-size fix and a stepped countersink (F7); its On select names surfaces without ids (DF43,
+// render df43-hole-on). Task U4: Add → Chamfer on a drilling opens the chamfer inspector (Edge,
 // Width, Depth, Angle, the read-only Diameter and the section, D45). Windows stay hidden
 // (app.fixture.ts). With DFYOM_RENDERS=1 it also writes the light and dark review renders to
 // design/features/renders/ (ui.md § Features (v0.4), visuals reviewed in L2).
@@ -26,7 +27,7 @@ const rendersDir = resolve(__dirname, '../design/features/renders')
 async function render(
   page: Page,
   name: string,
-  task: 'u1' | 'u2' | 'u3' | 'u4' | 'd45' = 'u1',
+  task: 'u1' | 'u2' | 'u3' | 'u4' | 'd45' | 'df25' = 'u1',
   // run after the Settings dialog closed (it takes focus): refocus a field
   before?: () => Promise<void>,
 ): Promise<void> {
@@ -49,7 +50,7 @@ async function render(
  * With DFYOM_RENDERS=1: light and dark renders without touching the page (an open menu stays
  * open); the theme attribute is set directly and put back to the setting's after.
  */
-async function renderOpen(page: Page, name: string, task: 'df16' | 'df18'): Promise<void> {
+async function renderOpen(page: Page, name: string, task: 'df16' | 'df18' | 'df43'): Promise<void> {
   if (!RENDERS) return
   const setTheme = (t: string | null) =>
     // runs in the renderer; this tsconfig has no DOM lib, hence `globalThis`
@@ -130,7 +131,10 @@ test('features: add a hole, expand its row, the owned inspector is read-only, Ma
   await setField(setup, 'Length (X)', '100')
   await setField(setup, 'Width (Y)', '60')
   await setField(setup, 'Thickness (Z)', '20')
-  await setup.getByRole('button', { name: 'Create part' }).click()
+  await page
+    .getByRole('dialog', { name: 'Stock' })
+    .getByRole('button', { name: 'Create part' })
+    .click()
   await expect(stock).toBeHidden()
   await navigator.getByRole('button', { name: 'Add pocket' }).click()
   await expect(inspector.getByRole('heading', { name: 'Pocket 1' })).toBeVisible()
@@ -191,7 +195,7 @@ test('features: add a hole, expand its row, the owned inspector is read-only, Ma
   await expect(inspector.getByRole('heading', { name: 'Bolt hole 1' })).toBeVisible()
   // the hole inspector (U2) focused the field behind the drill's first one
   await expect(
-    inspector.getByLabel('Center X', { exact: true }).and(inspector.locator('input')),
+    inspector.getByLabel('Centre X', { exact: true }).and(inspector.locator('input')),
   ).toBeFocused()
 
   // ── the hole inspector: type, fastener, section, sizes (U2) ────────────────────────────
@@ -214,6 +218,17 @@ test('features: add a hole, expand its row, the owned inspector is read-only, Ma
     navigator.getByRole('button', { name: /^Bolt hole 1, M3 counterbore/ }),
   ).toBeVisible()
   await render(page, 'hole-inspector', 'u2')
+  // DF43: the On select names surfaces, never their ids ("Stock top", not "Stock top · stock.top")
+  const on = inspector.getByRole('combobox', { name: 'On' })
+  await expect(on).toContainText('Stock top')
+  await expect(on).not.toContainText('stock.')
+  await on.click()
+  const onList = page.getByRole('listbox')
+  await expect(onList.getByRole('option', { name: 'Stock top', exact: true })).toBeVisible()
+  await expect(onList).not.toContainText('stock.')
+  await renderOpen(page, 'hole-on', 'df43')
+  await page.keyboard.press('Escape')
+  await expect(onList).toBeHidden()
   // the focused field's part of the section is amber with its value chip
   await inspector
     .getByLabel('Counterbore depth', { exact: true })
@@ -287,13 +302,40 @@ test('features: add a hole, expand its row, the owned inspector is read-only, Ma
   await expect(navigator.getByRole('list', { name: 'Source of Clones 1' })).toContainText(
     'Bolt hole 1',
   )
-  await navigator.getByRole('button', { name: /^Clones\s*\d+$/ }).click()
+  await navigator.getByRole('button', { name: /^\d+ clones?$/ }).click()
   await expect(navigator.getByRole('list', { name: 'Instances of Clones 1' })).toContainText(
     'Clone 2',
   )
   await navigator.getByRole('button', { name: 'Clone 2', exact: true }).click()
   await expect(inspector.getByText('Clone 2 of Clones 1')).toBeVisible()
   await render(page, 'instance', 'u3')
+
+  // ── DF25 re-report: nested rows show readable names, never ids, in the default sidebar ────
+  const source = navigator.getByRole('list', { name: 'Source of Clones 1' })
+  const nestedHole = source.getByRole('button', { name: /^Bolt hole 1,/ })
+  await nestedHole.click()
+  await expect(inspector.getByRole('heading', { name: 'Bolt hole 1' })).toBeVisible()
+  const long = 'Lid hinge counterbore, left side'
+  await setField(inspector, 'Name', long)
+  const renamed = source.getByRole('button', { name: new RegExp(`^${long},`) })
+  await expect(renamed).toBeVisible()
+  await renamed.press('ArrowRight')
+  const owned = navigator.getByRole('list', { name: long })
+  await expect(owned.getByRole('button')).not.toHaveCount(0)
+  // no op id ("hole1_counterbore") in any row; the names get the row's width, not one letter
+  await expect(
+    navigator.getByRole('list', { name: 'Operations in design order' }),
+  ).not.toContainText(/\b(hole|pocket|drilling|clones)\d+(_\w+)?\b/)
+  for (const row of await owned.getByRole('button').all()) {
+    const width = await row.evaluate((el) => {
+      const name = (el as unknown as { querySelector(s: string): unknown }).querySelector(
+        '[class*="opName"]',
+      ) as { getBoundingClientRect(): { width: number } } | null
+      return name?.getBoundingClientRect().width ?? 0
+    })
+    expect(width).toBeGreaterThan(60)
+  }
+  await render(page, 'long-names', 'df25')
 
   expect(dfyom.rendererErrors).toEqual([])
 })
@@ -312,8 +354,10 @@ test('chamfer: add a drilling, add a chamfer from Add, edit it in its inspector'
   const dialog = page.getByRole('dialog', { name: 'New project' })
   await dialog.getByRole('textbox', { name: 'Project name' }).fill('Chamfers')
   await dialog.getByRole('button', { name: 'Create project' }).click()
-  const setup = page.getByRole('region', { name: 'Set up the part' })
-  await setup.getByRole('button', { name: 'Create part' }).click()
+  await page
+    .getByRole('dialog', { name: 'Stock' })
+    .getByRole('button', { name: 'Create part' })
+    .click()
 
   await navigator.getByRole('button', { name: 'Add drilling' }).click()
   await expect(inspector.getByRole('heading', { name: 'Drilling 1' })).toBeVisible()

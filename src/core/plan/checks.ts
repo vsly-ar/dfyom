@@ -148,7 +148,7 @@ export function toolFindings(i: ToolCheckInput): Finding[] {
       stickout: i.stickout,
       overallLength: oal,
     })
-  const table = SurfaceTable.build(part.operations, stock)
+  const table = SurfaceTable.of(part.operations, stock)
   const thickness = stock.thickness.canonical
   for (const op of i.ops) {
     switch (op.kind) {

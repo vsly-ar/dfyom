@@ -134,7 +134,7 @@ export async function exportPlan(
       ],
     })
   if (all.length === 0)
-    return fail('plan.check', `plan ${planId} has no operations to export`, {
+    return fail('plan.check', 'the plan has no operations to export', {
       where,
       data: { planId },
       issues: [{ path: ['planId'], rule: 'empty', message: 'the plan has no operations' }],
@@ -142,9 +142,13 @@ export async function exportPlan(
   const total = all.length
   const operations: ExportOperation[] = []
   const regenerated: string[] = []
+  const part = plan.dto.design.part
   for (const [i, input] of all.entries()) {
     const id = input.planOperationId
-    opts.progress?.({ done: i, total, label: id })
+    const ids = input.operations.map((o) => o.id)
+    // progress names the operation, never its id (DF43: "Export: Pocket 1: pass 2/4")
+    const label = planOperationLabel(part, ids)
+    opts.progress?.({ done: i, total, label })
     const tp = await ensureToolpath(
       cache.unwrap(),
       services.workers,
@@ -155,15 +159,13 @@ export async function exportPlan(
           opts.progress?.({
             done: i,
             total,
-            label: p.label === undefined ? id : `${id}: ${p.label}`,
+            label: p.label === undefined ? label : `${label}: ${p.label}`,
           }),
       },
       services.region2d,
     )
     if (tp.isErr()) return Err(tp.unwrapErr().withContext(where, { planId, planOperationId: id }))
     if (tp.unwrap().status === 'generated') regenerated.push(id)
-    const part = plan.dto.design.part
-    const ids = input.operations.map((o) => o.id)
     const positions: Record<string, string> = {}
     for (const id of ids) {
       const text = positionComment(part, id)
@@ -181,7 +183,7 @@ export async function exportPlan(
               passes: toolpath.passes.map((p) => ({ ...p, operationId: p.operationId ?? only })),
             },
       tool: { name: input.tool.name, diameter: input.tool.diameter.canonical },
-      label: planOperationLabel(part, ids),
+      label,
       ...(Object.keys(positions).length === 0 ? {} : { positions }),
     })
   }

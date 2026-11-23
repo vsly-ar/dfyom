@@ -45,6 +45,7 @@ import {
   feedUnit,
   FEED_KIND,
   lengthText,
+  findingNames,
   planOperationName,
   snapshotName,
   type PlanOperationView,
@@ -91,7 +92,7 @@ export function planWarningView(
   return {
     id: `${w.code}:${w.planOperationId ?? ''}:${w.field ?? ''}:${w.rule}:${index}`,
     tier: TIER[w.severity],
-    text: findingText(w, units),
+    text: findingText(w, units, findingNames(plan)),
     ...(op === undefined ? {} : { subject: planOperationName(plan, op.designOperationIds) }),
     ...(op !== undefined && onSelect ? { onSelect: () => onSelect(op.id) } : {}),
   }
@@ -171,7 +172,14 @@ function PlanSummary({
   const machine = snapshotName(plan, plan.machine)
   return (
     <div className={styles['inspector']}>
-      <PanelHeader title={t.plan} meta={t.summary(ops.length)} />
+      <PanelHeader
+        title={t.plan}
+        meta={
+          <span title={t.summaryTip(ops.length, plan.design.part.operations.length)}>
+            {t.summary(ops.length)}
+          </span>
+        }
+      />
       <div className={styles['fields']}>
         <NameField
           label={t.name}
@@ -189,7 +197,7 @@ function PlanSummary({
           <StatusChip tone={plan.status === 'draft' ? 'neutral' : 'success'}>
             {m.statuses[plan.status]}
           </StatusChip>{' '}
-          {machine === undefined ? m.export.noMachine : `${m.machine.title}: ${machine}`}
+          {machine === undefined ? m.machine.missing : `${m.machine.title}: ${machine}`}
         </p>
         <p className={styles['muted']}>{t.noSelection}</p>
         <section aria-label={m.warnings.title} className={styles['warnings']}>
@@ -340,7 +348,7 @@ function OperationInspector({
     toolOptions.push({ value: current.libraryItemId, label: t.otherTool(current.name) })
   const chosen = suggestions?.find((s) => s.toolLibraryItemId === current?.libraryItemId)
   const toolMessages: FieldMessage[] = [
-    ...fieldMessages(findings, 'tool'),
+    ...fieldMessages(findings, 'tool', units, findingNames(plan)),
     ...(suggestions !== undefined && suggestions.length === 0
       ? [{ id: 'noSuggestion', severity: 'info' as const, text: t.noSuggestion }]
       : []),

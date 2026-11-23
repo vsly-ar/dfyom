@@ -15,6 +15,10 @@ const num = (mm: number, units: UnitSystem): string =>
 const short = (mm: number, units: UnitSystem): string =>
   String(+(units === 'mm' ? mm : mm / 25.4).toFixed(digitsOf(units)))
 
+/** A size at a glance (row read-outs): 0.1 mm, 0.01 in. */
+const rough = (mm: number, units: UnitSystem): string =>
+  String(+(units === 'mm' ? mm : mm / 25.4).toFixed(units === 'mm' ? 1 : 2))
+
 const KIND: Record<ShapeItemKind, string> = {
   rectangle: 'Rectangle',
   circle: 'Circle',
@@ -25,6 +29,27 @@ const KIND: Record<ShapeItemKind, string> = {
 
 const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`
 
+/** SVG element names in words (singular, plural); others as named, with an "s". */
+const ELEMENTS: Readonly<Record<string, readonly [string, string]>> = {
+  path: ['path', 'paths'],
+  rect: ['rectangle', 'rectangles'],
+  circle: ['circle', 'circles'],
+  ellipse: ['ellipse', 'ellipses'],
+  line: ['line', 'lines'],
+  polyline: ['polyline', 'polylines'],
+  polygon: ['polygon', 'polygons'],
+  text: ['text', 'texts'],
+  image: ['image', 'images'],
+  use: ['reused element', 'reused elements'],
+  clipPath: ['clip path', 'clip paths'],
+  mask: ['mask', 'masks'],
+  pattern: ['pattern', 'patterns'],
+}
+const elementCount = (kind: string, n: number): string => {
+  const [one, many] = ELEMENTS[kind] ?? [kind, `${kind}s`]
+  return plural(n, one, many)
+}
+
 export const shapeMessages = {
   kinds: KIND,
   navigator: {
@@ -33,9 +58,13 @@ export const shapeMessages = {
     add: 'Add shape',
     addKind: (k: ShapeItemKind) => KIND[k],
     importSvg: 'Import SVG…',
-    importSvgLater: 'Import SVG comes with the SVG import command.',
-    empty: 'No shapes. A shape is an outline that pockets and profiles can cut.',
+    empty: 'No shapes yet: draw one, or import an SVG drawing.',
     usedBy: (n: number) => (n === 0 ? 'Not used' : `Used by ${n}`),
+    /** A row's read-out (DF48): its kind ("Path", "3 items") and box size, "Path · 250 × 178". */
+    readout: (kind: string, size: readonly [number, number] | undefined, units: UnitSystem) =>
+      size === undefined ? kind : `${kind} · ${rough(size[0], units)} × ${rough(size[1], units)}`,
+    items: (n: number) => plural(n, 'item'),
+    openPath: 'Open path',
     failed: 'Does not resolve',
     remove: (name: string) => `Remove ${name}`,
     removed: (name: string) => `Removed ${name}`,
@@ -239,15 +268,20 @@ export const shapeMessages = {
     gaps: 'Gaps closed',
     elements: 'Lines and arcs',
     elementsValue: (lines: number, arcs: number) => `${lines} lines, ${arcs} arcs`,
+    /** SVG element counts in words: "2 paths, 1 rectangle" (DF48: "2 path" until then). */
     byKind: (counts: Readonly<Record<string, number>>) => {
       const e = Object.entries(counts).filter(([, n]) => n > 0)
-      return e.length === 0 ? '0' : e.map(([k, n]) => `${n} ${k}`).join(', ')
+      return e.length === 0 ? '0' : e.map(([k, n]) => elementCount(k, n)).join(', ')
     },
     total: (counts: Readonly<Record<string, number>>) =>
       Object.values(counts).reduce((s, n) => s + n, 0),
     changed: 'Changed the drawing',
     preview: 'Preview of the imported outline',
-    edit: 'Edit shape',
+    /** The primary: with several shapes it names the one it opens (DF48). */
+    edit: (shapes: readonly string[]) =>
+      shapes.length > 1 && shapes[0] !== undefined ? `Edit ${shapes[0]}` : 'Edit shape',
     close: 'Close',
+    /** DF48: the options step names the file it imports. */
+    file: 'File',
   },
 }

@@ -15,15 +15,49 @@ const w = (over: Partial<DfmWarning>): DfmWarning => ({
   ...over,
 })
 
+/** Readable names of the fixture's ids, as the design inspector resolves them (DF43). */
+const NAMES: Readonly<Record<string, string>> = {
+  pocket1: 'Pocket 1',
+  drill1: 'Drilling 1',
+  'pocket1.floor': 'Pocket 1 floor',
+}
+const names = {
+  item: (id: string) => NAMES[id] ?? 'Unknown operation',
+  surface: (id: string) => NAMES[id] ?? 'Unknown operation surface',
+}
+
 describe('dfm messages', () => {
   it('renders every code in mm and inch, never the core fallback', () => {
     for (const code of DFM_WARNING_CODES) {
-      const text = dfmMessages.text(w({ code }), 'inch', (id) => id)
+      const text = dfmMessages.text(w({ code }), 'inch', names)
       expect(text, code).not.toBe('core text')
       expect(text, code).toMatch(/^[A-Z]/)
     }
-    expect(dfmMessages.text(w({}), 'mm', (id) => id)).toContain('3.18 mm')
-    expect(dfmMessages.text(w({}), 'inch', (id) => id)).toContain('0.125"')
+    expect(dfmMessages.text(w({}), 'mm', names)).toContain('3.18 mm')
+    expect(dfmMessages.text(w({}), 'inch', names)).toContain('0.125"')
+  })
+
+  it('names operations and surfaces by their readable names, never their ids (DF43)', () => {
+    const missing = dfmMessages.text(
+      w({ code: 'dfm.surfaceMissing', parameter: 'on', params: { surface: 'pocket1.floor' } }),
+      'mm',
+      names,
+    )
+    expect(missing).toBe(
+      'It starts from or refers to Pocket 1 floor, which the part no longer has. Pick another surface.',
+    )
+    const removed = dfmMessages.text(
+      w({
+        code: 'dfm.retainedRemoved',
+        params: { by: 'drill1', regions: ['floorFillet', 'tab[1]'] },
+      }),
+      'mm',
+      names,
+    )
+    expect(removed).toBe(
+      'Drilling 1 cuts away the floor fillet and tab 2 of this operation. Move one of them.',
+    )
+    for (const text of [missing, removed]) expect(text).not.toMatch(/pocket1|drill1|\[|floorFillet/)
   })
 
   it('suggests a value that satisfies the check, in the project units', () => {
@@ -51,13 +85,13 @@ describe('dfm messages', () => {
       dfmMessages.text(
         w({ code: 'dfm.chamferTooDeep', operation: 'chamfer1', parameter: 'width', params }),
         'mm',
-        (id) => id,
+        names,
       )
     expect(tooDeep({ depth: 2, edgeDepth: 1.5, edgeOf: 'pocket1', floor: 1 })).toBe(
-      'The chamfer is 2 mm deep and cuts through the 1.5 mm floor above pocket1.',
+      'The chamfer is 2 mm deep and cuts through the 1.5 mm floor above Pocket 1.',
     )
     expect(tooDeep({ depth: 2, edgeDepth: 1, edgeOf: 'drill1' })).toBe(
-      'The chamfer is 2 mm deep, deeper than drill1 (1 mm).',
+      'The chamfer is 2 mm deep, deeper than Drilling 1 (1 mm).',
     )
   })
 
@@ -69,7 +103,7 @@ describe('dfm messages', () => {
         params: { tool: '6 mm flat end mill', ...params },
       })
     const text = (params: DfmWarning['params'], units: 'mm' | 'inch' = 'mm') =>
-      dfmMessages.text(unfit(params), units, (id) => id)
+      dfmMessages.text(unfit(params), units, names)
     expect(text({ rule: 'cornerRadius', cornerRadius: 2, toolRadius: 3, locked: false })).toBe(
       'Corner radius 2 mm is smaller than the radius of the 6 mm flat end mill (3 mm).',
     )
@@ -111,7 +145,7 @@ describe('dfm messages', () => {
           params: { tool: '1/4" flat end mill' },
         }),
         'inch',
-        (id) => id,
+        names,
       ),
     ).toBe('Plan needs a 1/4" flat end mill: add one to the library.')
     // a tool check's suggestion is the size the operation needs, never a value of the tool field

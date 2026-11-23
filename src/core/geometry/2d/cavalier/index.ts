@@ -57,8 +57,8 @@ export async function loadRegion2d(bytes: Uint8Array | ArrayBuffer): AsyncAppRes
 function decodeAll(
   outs: readonly WireOut[],
   where: string,
-): AppResult<{ loop: Loop; neg: boolean }[]> {
-  const loops: { loop: Loop; neg: boolean }[] = []
+): AppResult<{ loop: Loop; neg: boolean; area: number }[]> {
+  const loops: { loop: Loop; neg: boolean; area: number }[] = []
   for (const o of outs) {
     if (!o.closed) {
       // a stray piece shorter than the chord tolerance is a slice the library failed to stitch
@@ -71,8 +71,9 @@ function decodeAll(
     if (l.isErr()) return Err(l.unwrapErr())
     // zero-width spikes and loops are the library's epsilons at work, never region boundary
     const loop = dropSpikes(straightenMicroArcs(l.unwrap()))
-    if (Math.abs(signedArea(loop)) < SLIVER_AREA || isSliver(loop.elements)) continue
-    loops.push({ loop, neg: o.neg })
+    const area = signedArea(loop)
+    if (Math.abs(area) < SLIVER_AREA || isSliver(loop.elements, area)) continue
+    loops.push({ loop, neg: o.neg, area })
   }
   return Ok(loops)
 }
@@ -92,8 +93,11 @@ function straightenMicroArcs(l: Loop): Loop {
   }
 }
 
-const orient = (l: Loop, positive: boolean): Loop =>
-  signedArea(l) > 0 === positive ? l : reverseLoop(l)
+const orient = (l: Loop, positive: boolean): Loop => orientBy(l, signedArea(l), positive)
+
+/** `orient` with the loop's signed area known (`decodeAll` has it). */
+const orientBy = (l: Loop, area: number, positive: boolean): Loop =>
+  area > 0 === positive ? l : reverseLoop(l)
 
 export function createCavalierPort(binding: CavalierBinding): Region2dPort {
   const loopBoolean: LoopBoolean = (a, b, op) => {
@@ -106,8 +110,8 @@ export function createCavalierPort(binding: CavalierBinding): Region2dPort {
       .boolean(wa.unwrap(), wb.unwrap(), op)
       .andThen((outs) => decodeAll(outs, where))
       .map((loops) => ({
-        pos: loops.filter((l) => !l.neg).map((l) => orient(l.loop, true)),
-        neg: loops.filter((l) => l.neg).map((l) => orient(l.loop, false)),
+        pos: loops.filter((l) => !l.neg).map((l) => orientBy(l.loop, l.area, true)),
+        neg: loops.filter((l) => l.neg).map((l) => orientBy(l.loop, l.area, false)),
       }))
   }
 

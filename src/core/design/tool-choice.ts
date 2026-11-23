@@ -8,10 +8,11 @@
  * docs/modes/design-v0.3.md#dfm-checks-for-shapes
  */
 import { None, Some, type Option } from '../../shared/result'
-import type { DfmTool, OperationTool } from '../geometry/dfm'
+import { TOOL_MATCH_TOLERANCE, type DfmTool, type OperationTool } from '../geometry/dfm'
 import { localStock } from '../geometry/face'
 import type { Region2dPort } from '../geometry/2d/port'
 import {
+  CHAMFER_ANGLE_TOLERANCE,
   isAnalyticOperation,
   type OperationGeometry,
   type PartGeometryInput,
@@ -19,9 +20,9 @@ import {
 } from '../geometry/model'
 import { FIT_SLACK, shapeMeasure, type ShapeMeasure } from '../geometry/shape-measure'
 import { toolFit, type ToolUnfit } from '../geometry/tool-fit'
-import type { MaterialClass } from '../library/item'
+import { MATERIAL_CLASS_WORDS, type MaterialClass } from '../library/item'
 import type { LibraryItem } from '../library/library-item'
-import { Snapshot } from '../library/snapshot'
+import { snapshotFromRecord } from './frozen-memo'
 import { Tool } from '../library/tool'
 import { isEndMillType, type ToolType } from '../library/tool.dto'
 import type { ProjectDoc, UnitSystem } from '../project/document'
@@ -52,7 +53,7 @@ export function dfmTool(tool: Tool): DfmTool {
 export function snapshotTool(snapshots: ProjectDoc['snapshots'], id: string): Option<Tool> {
   const dto = Object.hasOwn(snapshots, id) ? snapshots[id] : undefined
   if (dto?.kind !== 'tool') return None
-  const s = Snapshot.fromDTO(dto)
+  const s = snapshotFromRecord(dto)
   return s.isOk() && s.unwrap().values instanceof Tool ? Some(s.unwrap().values as Tool) : None
 }
 
@@ -186,7 +187,7 @@ export function fittingLibraryTools(input: ChoiceInput): LibraryCandidate[] {
     const rest = leavesRest(t, input)
     const reasons = [
       ...(rest ? ['leaves rest material'] : []),
-      ...(hasPreset ? [`has a preset for ${input.materialClass}`] : []),
+      ...(hasPreset ? [`has a preset for ${MATERIAL_CLASS_WORDS[input.materialClass]}`] : []),
       `diameter ${tool.diameter.canonical} mm`,
     ]
     out.push({ item, tool, hasPreset, leavesRest: rest, reasons })
@@ -198,6 +199,75 @@ export function fittingLibraryTools(input: ChoiceInput): LibraryCandidate[] {
       b.tool.diameter.canonical - a.tool.diameter.canonical ||
       a.item.id.localeCompare(b.item.id),
   )
+}
+
+/** One library tool that can make the operation's kind but fails another fit rule. */
+export interface LibraryMiss {
+  readonly item: LibraryItem
+  readonly tool: Tool
+  /** The failed fit rule (never `type`). */
+  readonly unfit: ToolUnfit
+}
+
+/**
+ * The library tools of a type that can make the operation (the fit table's `type` row passes)
+ * which fail another rule (size, corner, floor radius, reach, chamfer angle …), nearest to
+ * `diameter` (mm; the generalized or current tool's) first, then smaller, then library id; by
+ * diameter when none is given. The tool field lists them below the fitting ones: picking one is
+ * the user's explicit choice (it locks, and `dfm.toolUnfit` says what does not fit).
+ */
+export function unfitLibraryTools(input: ChoiceInput, diameter?: number): LibraryMiss[] {
+  const out: LibraryMiss[] = []
+  for (const item of input.library) {
+    const tool = item.values
+    if (!(tool instanceof Tool)) continue
+    const unfit = fitOf(dfmTool(tool), input)
+    if (unfit === undefined || unfit.rule === 'type') continue
+    out.push({ item, tool, unfit })
+  }
+  const away = (t: Tool) =>
+    diameter === undefined ? t.diameter.canonical : Math.abs(t.diameter.canonical - diameter)
+  return out.sort(
+    (a, b) =>
+      away(a.tool) - away(b.tool) ||
+      a.tool.diameter.canonical - b.tool.diameter.canonical ||
+      a.item.id.localeCompare(b.item.id),
+  )
+}
+
+/** How far a near match may be from the generalized tool: 20 % of its diameter. */
+export const NEAR_MATCH_SHARE = 0.2
+
+/**
+ * The library tool to offer for a generalized tool the library lacks (`dfm.toolNotInLibrary`):
+ * none when a tool matches it (type and diameter, RE for a bull nose, within 0.01 mm: the plan
+ * takes that one), else a tool of its type within `NEAR_MATCH_SHARE` of its diameter, with the
+ * same RE (bull nose, 0.01 mm) or angle (chamfer mill, 0.5°): one that fits the operation first,
+ * then the nearest in diameter, then library id. Offered only, never taken automatically: another Ø changes what the operation cuts
+ * (a slot is as wide as its tool), so the user picks it (design-v0.2.md § Near match).
+ */
+export function nearLibraryTool(g: GeneralizedTool, input: ChoiceInput): Option<LibraryItem> {
+  const t = generalizedDfmTool(g)
+  const near = (a: number | undefined, b: number | undefined, tol = TOOL_MATCH_TOLERANCE) =>
+    Math.abs((a ?? 0) - (b ?? 0)) <= tol
+  const kin: { item: LibraryItem; d: DfmTool; fits: number }[] = []
+  for (const item of input.library) {
+    if (!(item.values instanceof Tool)) continue
+    const d = dfmTool(item.values)
+    if (d.type !== t.type) continue
+    if (t.type === 'bullNoseEndMill' && !near(d.cornerRadius, t.cornerRadius)) continue
+    if (t.type === 'chamferMill' && !near(d.angle, t.angle, CHAMFER_ANGLE_TOLERANCE)) continue
+    if (near(d.diameter, t.diameter)) return None
+    if (Math.abs(d.diameter - t.diameter) > NEAR_MATCH_SHARE * t.diameter) continue
+    kin.push({ item, d, fits: fitOf(d, input) === undefined ? 0 : 1 })
+  }
+  kin.sort(
+    (a, b) =>
+      a.fits - b.fits ||
+      Math.abs(a.d.diameter - t.diameter) - Math.abs(b.d.diameter - t.diameter) ||
+      a.item.id.localeCompare(b.item.id),
+  )
+  return kin.length === 0 ? None : Some(kin[0]!.item)
 }
 
 /**

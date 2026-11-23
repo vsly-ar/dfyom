@@ -5,6 +5,10 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
+  /* P6/DF34: with always-visible scroll bars (macOS "Show scroll bars: Always", or a mouse
+     attached) a refusal at the end overflowing the panel added a scroll bar, the narrower panel
+     wrapped Home/Unlock and the jog pad moved down a row; the gutter is reserved up front */
+  scrollbar-gutter: stable;
   display: grid;
   /* the sections take the panel's width, never their widest control's (the 16 rem navigator) */
   grid-template-columns: minmax(0, 1fr);
@@ -13,7 +17,7 @@
   padding: var(--space-3);
 }
 
-/* "Connect to virtual machine" wraps in the 16 rem navigator instead of running out of it */
+/* "Connect" fits one line; a larger font wraps it rather than overflowing */
 .wrapButton {
   height: auto;
   min-height: var(--control-lg);
@@ -276,6 +280,20 @@
   padding-left: var(--space-3);
 }
 
+/* not homed (DF46): "—" in every cell and the reason, on a line reserved either way */
+.droTable[data-known='false'] .droWork,
+.droTable[data-known='false'] .droMachine {
+  color: var(--text-muted);
+}
+
+.droUnknown {
+  margin: 0;
+  min-height: var(--lh-sm);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-muted);
+}
+
 .droMeta {
   display: flex;
   gap: var(--space-4);
@@ -357,6 +375,7 @@
   margin: 0;
 }
 
+.findings,
 .tools,
 .steps {
   margin: 0;
@@ -487,6 +506,16 @@
   height: var(--icon-sm);
   margin-top: calc((var(--lh-sm) - var(--icon-sm)) / 2);
   color: var(--danger);
+}
+
+/* GRBL's start-up lock (DF46): the next step, not an error */
+.alarmPanel[data-kind='lock'] {
+  border-color: var(--border);
+  background: var(--bg-chrome);
+}
+
+.alarmPanel[data-kind='lock'] > svg {
+  color: var(--info);
 }
 
 .alarmPanel > div {

@@ -183,7 +183,8 @@ export function JogPad({
         {button('z', 1, 'zPlus')}
         {button('z', -1, 'zMinus')}
       </div>
-      <Button size="sm" variant="ghost" disabled={disabled} onClick={onCancel}>
+      {/* the default look: bordered when enabled, dimmed when disabled (DF46) */}
+      <Button size="sm" disabled={disabled} onClick={onCancel}>
         {m.cancelJog}
       </Button>
       {disabledReason !== null && reasonShown ? (

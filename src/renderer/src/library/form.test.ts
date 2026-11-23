@@ -25,6 +25,8 @@ import {
   qdto,
   quantityText,
   toolName,
+  uniqueName,
+  nameTaken,
   unmatchedIssues,
   withQuickOverall,
   withToolType,
@@ -78,6 +80,20 @@ describe('library forms', () => {
     const i = withQuickOverall({ ...inch, stickout: qdto('length', '2', 'inch') }, 'inch')
     expect(i.overallLength).toEqual(qdto('length', '2.5', 'inch'))
     valid('tool', commandInput(i, { units: 'inch', autoName: true }))
+  })
+
+  it('makes a suggested name unique among the other items (DF47)', () => {
+    expect(uniqueName('Flat 6', [])).toBe('Flat 6')
+    expect(uniqueName('Flat 6', ['flat 6 ', 'Flat 6 (2)'])).toBe('Flat 6 (3)')
+    expect(nameTaken(' FLAT 6', ['Flat 6'])).toBe(true)
+    expect(nameTaken('', [''])).toBe(false)
+    expect(uniqueName('x'.repeat(120), ['x'.repeat(120)])).toHaveLength(120)
+    const d = defaultToolValues('mm')
+    expect(toolName(d, ['Flat 6'])).toBe('Flat 6 (2)')
+    expect(
+      commandInput(d, { units: 'mm', autoName: true, taken: ['Flat 6'] }).values,
+    ).toMatchObject({ name: 'Flat 6 (2)' })
+    expect(copyName('Flat 6', ['Flat 6 copy'])).toBe('Flat 6 copy (2)')
   })
 
   it('suggests a drill for a drilling and names the tool by type and diameter', () => {

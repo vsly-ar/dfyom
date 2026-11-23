@@ -152,9 +152,10 @@ function withUnit(q: Quantity): string {
   return q.defaultUnit === 'in' ? `${q.source.trim()}"` : `${q.source.trim()} ${q.defaultUnit}`
 }
 
+/** The tool's readable label; a missing snapshot reads "missing tool", never its id (DF43). */
 export function designToolLabel(t: DesignTool, specific: Option<Tool>): string {
   if (t.kind === 'generalized') return generalizedLabel(t)
-  return specific.mapOr(`tool snapshot ${t.snapshotId}`, (tool) => tool.name)
+  return specific.mapOr('missing tool', (tool) => tool.name)
 }
 
 /**

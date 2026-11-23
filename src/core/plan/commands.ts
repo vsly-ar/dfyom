@@ -1426,6 +1426,9 @@ const staleList = defineQuery({
       .array(z.string())
       .describe('Part-level fields that differ from the design, e.g. generalTolerance'),
     rebuildBlocked: z.string().nullable().describe('A draft that could not follow the design: why'),
+    rebuildBlockedFields: z
+      .array(z.string())
+      .describe("The design part's fields that block the rebuild, e.g. operations.pocket1.depth"),
     operations: z.array(
       z.object({
         operationId: OperationIdSchema,
@@ -1447,6 +1450,11 @@ const staleList = defineQuery({
           .string()
           .nullable()
           .describe("Why re-importing this copy can't be applied (it stays a notice)"),
+        blockedFields: z
+          .array(z.string())
+          .describe(
+            "The part's fields that don't fit the new stock, e.g. operations.pocket1.depth",
+          ),
       }),
     ),
   }),
@@ -1458,8 +1466,9 @@ const staleList = defineQuery({
         partRemoved: s.partRemoved,
         partChanged: [...s.partChanged],
         rebuildBlocked: s.rebuildBlocked,
+        rebuildBlockedFields: [...s.rebuildBlockedFields],
         operations: [...s.operations],
-        libraryCopies: [...s.libraryCopies],
+        libraryCopies: s.libraryCopies.map((c) => ({ ...c, blockedFields: [...c.blockedFields] })),
       }
     })
   },
@@ -1505,6 +1514,10 @@ const toolSuggest = defineQuery({
   },
 })
 
+/** A blocked finding's failing part fields for agents (`params.fields`, comma-separated paths). */
+const fieldsParam = (fields: readonly string[]): Record<string, string> =>
+  fields.length === 0 ? {} : { fields: fields.join(',') }
+
 const warningList = defineQuery({
   name: 'plan.warning.list',
   summary:
@@ -1547,7 +1560,11 @@ const warningList = defineQuery({
           message: c.blocked,
           field: `snapshots.${c.snapshotId}`,
           rule: 'partFits',
-          params: { snapshotId: c.snapshotId, libraryItemId: c.libraryItemId },
+          params: {
+            snapshotId: c.snapshotId,
+            libraryItemId: c.libraryItemId,
+            ...fieldsParam(c.blockedFields),
+          },
         })
     if (stale.rebuildBlocked !== null)
       findings.push({
@@ -1555,7 +1572,7 @@ const warningList = defineQuery({
         severity: 'warning',
         message: stale.rebuildBlocked,
         rule: 'partFits',
-        params: {},
+        params: fieldsParam(stale.rebuildBlockedFields),
       })
     return Ok({
       warnings: findings.map((w) => ({ ...w, params: { ...w.params } })),

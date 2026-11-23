@@ -156,6 +156,9 @@ class StockLevels {
   }
 }
 
+/** `SurfaceTable.of`: tables by operations array, then stock (weakly held). */
+const memo = new WeakMap<readonly Operation[], WeakMap<Stock, SurfaceTable>>()
+
 /** Planar face surfaces in design order: the six stock faces, then each operation's. */
 export class SurfaceTable {
   private constructor(
@@ -218,6 +221,20 @@ export class SurfaceTable {
       }
     })
     return new SurfaceTable(map, levels)
+  }
+
+  /**
+   * `build(ops, stock)` once per (operations array, stock) – both immutable models – for code
+   * that asks per operation of one part (the plan's tool checks and hole depths, hardening P4:
+   * a table per plan operation made plan creation and export quadratic in operations).
+   * Doc: docs/research/s6-clone-budgets.md#follow-up-p4
+   */
+  static of(ops: readonly Operation[], stock: Stock): SurfaceTable {
+    let byStock = memo.get(ops)
+    if (byStock === undefined) memo.set(ops, (byStock = new WeakMap()))
+    let table = byStock.get(stock)
+    if (table === undefined) byStock.set(stock, (table = SurfaceTable.build(ops, stock)))
+    return table
   }
 
   get(id: string): Option<SurfaceEntry> {

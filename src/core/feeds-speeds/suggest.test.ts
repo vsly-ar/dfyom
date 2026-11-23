@@ -76,7 +76,16 @@ describe('suggestCutting: data lookup', () => {
       expect(s.spindleSpeed.isNone() && s.feedRate.isNone() && s.plungeRate.isNone()).toBe(true)
       expect(s.stepdown.isNone() && s.stepover.isNone() && s.display.isNone()).toBe(true)
       expect(codes(s)).toEqual(['feeds.noData'])
+      // no enum keys in the visible text (DF44): "HSS", "sheet good", "flat end mill"
+      expect(s.warnings[0]?.message).not.toMatch(/[a-z][A-Z]|\bhss\b/)
     }
+  })
+
+  it('names the material class and the tool type in words (DF44)', () => {
+    const sheet = suggest({ materialClass: 'sheetGood', tool: tool({ toolMaterial: 'hss' }) })
+    expect(sheet.warnings[0]?.message).toContain('HSS in sheet good')
+    const drill = suggest({ engagement: { kind: 'drill' } })
+    expect(drill.warnings[0]?.message).toContain('does not fit a flat end mill')
   })
 })
 

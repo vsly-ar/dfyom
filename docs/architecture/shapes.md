@@ -289,6 +289,30 @@ Phases of a fresh evaluation (medians, same load): 3 pockets – triangulate 7.7
 
 Evaluation cost follows **chords** (flattened segments at the chord tolerance), not elements: with [tiles](#geometry-for-shape-operations), ≈ 16 µs per chord (triangulate ≈ 3.6, `fromMesh` ≈ 3.2, booleans ≈ 8), so the 50 ms budget holds ≈ 3 000 chords per evaluation ([S3](../../spikes/prisms/results.md#cost-median-of-15-part-placement)). Single 500-element pockets take 15–39 ms; 2000-element shapes (5 000–7 000 chords) take 47–115 ms tiled (82–169 ms untiled) and do not fit: they run under a documented limit ([Decisions](#decisions-d29)).
 
+### Design commands (P5)
+
+Hardening P5 (2026-11-23), measured by `src/core/design/design-command.perf.ts` on two realistic parts: the v0.4 exit lid (`enclosure-lid.testing.ts`, 29 operations, 5 features, an 85-arc outline with 6 tabs) and a part with a 100-instance Clones grid of a pocket and a hole (202 operations). Medians on the reference machine under load average 8–10 from parallel runs, before → after, A/B in the same session:
+
+| Measure                                                      | Lid            | 100 clones     |
+| ------------------------------------------------------------ | -------------- | -------------- |
+| Operation update (`design.profile.update` / `pocket.update`) | 30.5 → 3.6 ms  | 30.3 → 5.0 ms  |
+| `design.hole.update` of a Clones source                      | 31.9 → 4.5 ms  | 41 → 24.5 ms   |
+| Resolve + checks (the part's warnings)                       | 22.3 → 1.15 ms | 3.4 → 1.2 ms   |
+| Clones follow hook, nothing changed                          | 1.7 → 0.2 ms   | 6.9 → 0.22 ms  |
+| `loadPart`                                                   | 0.42 → 0.07 ms | 0.97 → 0.1 ms  |
+| `recalculateFeatures`                                        | 0.17 → 0.04 ms | 0.23 → 0.02 ms |
+
+K4 (`shape.perf.ts`, the 205-element star with every cache missed): 3.4 → 2.8–2.9 ms on the same loaded machine.
+
+What took the time, and what changed (behaviour unchanged; every golden passes):
+
+- **Tab hold sampling** (the lid's 22 ms): the hold test samples the loop every 0.25 mm, and each sample walked the loop from its start. `chainSampler` (`measure.ts`) takes the running lengths once and finds each point by binary search; a point can differ from `chainPointAt`'s in the last bits only.
+- **Records parsed once** (`frozen-memo.ts`): a committed document is deep-frozen, so its records are keys for memos (`WeakMap`). Operations, shapes and snapshots parse once per record (`operationFromDTO`, `shapeFromDTO`, `snapshotFromRecord`); a draft's unmodified record reads as its frozen base (`baseOf`), and modified or new records are parsed every time. `writeOperationList` keeps the record of an unchanged operation instead of converting and comparing it (`recordOf`: only when the model round-trips to its record).
+- **The Clones follow hook** skips a Clones whose inputs (its record, the stock, units, shapes and every operation before it) are the same frozen records as the last time it was found in line, and writes back the records it did not change. The feature expansion cache takes only frozen keys.
+- **Smaller costs**: `recalculateFeatures` builds its surface table only when a reference is resolved; `referencesOf` is memoized per quantity; `toWire` per elements array; the 2D decode reuses the area it computed (`isSliver`, orientation); the spike and lobe checks index touch points by numeric keys.
+
+The budget guards (`npm run perf`) allow about twice these medians: a whole design update ≤ 10 ms, resolve + checks ≤ 3 ms, load and follow ≤ 1 ms, recalculation ≤ 0.5 ms, and a source edit with 100 instances ≤ 60 ms (it expands and rewrites 200 operations, no budget of its own). The cache-miss case stays the tight one: the lid's checks with a fresh 2D port take ≈ 7 ms (the tab test and the 85-arc outline's offsets run once per edited shape) and K4 sits at 2.8–2.9 ms of 3; most of that is the rest-material difference and the offset checks (`offsetProblem`, `nearestIndex`) in JS around the WASM calls – the next levers if the budget must hold on cache misses too.
+
 ## Decisions (D29)
 
 Settled with the user when this doc was accepted (D29, 2026-11-22, the recommendations taken):

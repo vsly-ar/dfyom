@@ -5,6 +5,7 @@
 // along the flank. The dimension of the focused field is
 // drawn as an amber line, as in the field illustrations; the others stay grey. Decorative for the
 // form (the fields carry the values), so it is an image with a label naming the highlighted one.
+// A legend under it names each ISO symbol it shows ("DC Diameter", DF48).
 // Doc: docs/conventions/ui-library-window.md#layout
 import type { ToolType } from '../../../core/library/tool.dto'
 import { libraryMessages } from '../messages/library'
@@ -22,6 +23,20 @@ export type ToolDimension =
   | 'tipDiameter'
 
 const S = libraryMessages.tool.symbols
+const T = libraryMessages.tool
+
+/** The symbols a type's drawing shows, in reading order (the stickout is labelled in words). */
+function shown(type: ToolType): ToolDimension[] {
+  return [
+    'diameter',
+    ...(type === 'bullNoseEndMill' ? (['cornerRadius'] as const) : []),
+    ...(type === 'chamferMill' ? (['angle', 'tipDiameter'] as const) : []),
+    ...(type === 'drill' ? (['pointAngle'] as const) : []),
+    'fluteLength',
+    'overallLength',
+    'shankDiameter',
+  ]
+}
 
 // geometry (viewBox 220 × 250): the tool axis at x = AX, shank above the flutes, tip below;
 // lengths on the left (LCF inside, OAL outside), the stickout on the right, diameters above/below
@@ -105,133 +120,145 @@ export function ToolDrawing({
     .map((y) => `M${X0} ${FLUTE + y + 12}L${X1} ${FLUTE + y + 2}`)
     .join('')
   return (
-    <svg
-      viewBox="0 0 220 250"
-      role="img"
-      aria-label={libraryMessages.tool.drawing(name)}
-      className={styles['drawing']}
-      data-focused={focused}
-    >
-      {/* collet face */}
-      <path className={styles['collet']} d={`M${X0 - 22} ${COLLET}H${X1 + 40}`} />
-      <path className={styles['toolBody']} d={body(type)} />
-      {/* flutes: helix hints below the shank (a chamfer mill: one flute edge on the cone) */}
-      {chamfer ? (
-        <path className={styles['flutes']} d={`M${AX + 8} ${CONE}L${AX + 2} ${CTIP}`} />
-      ) : (
-        <path className={styles['flutes']} d={`M${X0} ${FLUTE}H${X1}${helix}`} />
-      )}
-
-      <Dim
-        id="overallLength"
-        focused={focused}
-        label={S.overallLength}
-        lx={30}
-        ly={(TOP + tip) / 2}
-        anchor="end"
+    <figure className={styles['drawingFigure']}>
+      <svg
+        viewBox="0 0 220 250"
+        role="img"
+        aria-label={libraryMessages.tool.drawing(name)}
+        className={styles['drawing']}
+        data-focused={focused}
       >
-        <path d={`M${X0 - 4} ${TOP}H34M${X0 - 4} ${tip}H34M38 ${TOP}V${tip}`} />
-      </Dim>
-      {chamfer ? (
-        // the cutting edge: parallel to the right flank, offset outwards
+        {/* collet face */}
+        <path className={styles['collet']} d={`M${X0 - 22} ${COLLET}H${X1 + 40}`} />
+        <path className={styles['toolBody']} d={body(type)} />
+        {/* flutes: helix hints below the shank (a chamfer mill: one flute edge on the cone) */}
+        {chamfer ? (
+          <path className={styles['flutes']} d={`M${AX + 8} ${CONE}L${AX + 2} ${CTIP}`} />
+        ) : (
+          <path className={styles['flutes']} d={`M${X0} ${FLUTE}H${X1}${helix}`} />
+        )}
+
         <Dim
-          id="fluteLength"
+          id="overallLength"
           focused={focused}
-          label={S.fluteLength}
-          lx={AX + CR + 4}
-          ly={CTIP + 6}
-          anchor="start"
-        >
-          <path d={`M${AX + CR + 5} ${CONE + 5}L${AX + CT + 5} ${CTIP + 5}`} />
-        </Dim>
-      ) : (
-        <Dim
-          id="fluteLength"
-          focused={focused}
-          label={S.fluteLength}
-          lx={64}
-          ly={(FLUTE + tip) / 2}
+          label={S.overallLength}
+          lx={30}
+          ly={(TOP + tip) / 2}
           anchor="end"
         >
-          <path d={`M${X0 - 4} ${FLUTE}H68M72 ${FLUTE}V${tip}M${X0 - 4} ${tip}H68`} />
+          <path d={`M${X0 - 4} ${TOP}H34M${X0 - 4} ${tip}H34M38 ${TOP}V${tip}`} />
         </Dim>
-      )}
-      <Dim
-        id="stickout"
-        focused={focused}
-        label={S.stickout}
-        lx={sx + 6}
-        ly={(COLLET + tip) / 2}
-        anchor="start"
-      >
-        <path d={`M${sx} ${COLLET}V${tip}M${sx - (chamfer ? 4 : 16)} ${tip}H${sx + 4}`} />
-      </Dim>
-      <Dim id="shankDiameter" focused={focused} label={S.shankDiameter} lx={AX} ly={10}>
-        <path
-          d={`M${X0} ${TOP - 3}V${TOP - 12}M${X1} ${TOP - 3}V${TOP - 12}M${X0} ${TOP - 8}H${X1}`}
-        />
-      </Dim>
-      {chamfer ? (
-        // DC: the width at the top of the cone, dimensioned below the tool as for the other types
-        <Dim id="diameter" focused={focused} label={S.diameter} lx={AX} ly={tip + 34}>
-          <path
-            d={`M${AX - CR} ${tip + 6}V${tip + 24}M${AX + CR} ${tip + 6}V${tip + 24}M${AX - CR} ${tip + 20}H${AX + CR}`}
-          />
-        </Dim>
-      ) : (
-        <Dim id="diameter" focused={focused} label={S.diameter} lx={AX} ly={tip + 34}>
-          <path
-            d={`M${X0} ${tip + 6}V${tip + 24}M${X1} ${tip + 6}V${tip + 24}M${X0} ${tip + 20}H${X1}`}
-          />
-        </Dim>
-      )}
-      {chamfer ? (
-        <>
-          {/* the included angle: an arc between the flanks about their (virtual) apex */}
+        {chamfer ? (
+          // the cutting edge: parallel to the right flank, offset outwards
           <Dim
-            id="angle"
+            id="fluteLength"
             focused={focused}
-            label={S.angle}
+            label={S.fluteLength}
             lx={AX + CR + 4}
-            ly={CONE + 2}
+            ly={CTIP + 6}
+            anchor="start"
+          >
+            <path d={`M${AX + CR + 5} ${CONE + 5}L${AX + CT + 5} ${CTIP + 5}`} />
+          </Dim>
+        ) : (
+          <Dim
+            id="fluteLength"
+            focused={focused}
+            label={S.fluteLength}
+            lx={64}
+            ly={(FLUTE + tip) / 2}
+            anchor="end"
+          >
+            <path d={`M${X0 - 4} ${FLUTE}H68M72 ${FLUTE}V${tip}M${X0 - 4} ${tip}H68`} />
+          </Dim>
+        )}
+        <Dim
+          id="stickout"
+          focused={focused}
+          label={S.stickout}
+          lx={sx + 6}
+          ly={(COLLET + tip) / 2}
+          anchor="start"
+        >
+          <path d={`M${sx} ${COLLET}V${tip}M${sx - (chamfer ? 4 : 16)} ${tip}H${sx + 4}`} />
+        </Dim>
+        <Dim id="shankDiameter" focused={focused} label={S.shankDiameter} lx={AX} ly={10}>
+          <path
+            d={`M${X0} ${TOP - 3}V${TOP - 12}M${X1} ${TOP - 3}V${TOP - 12}M${X0} ${TOP - 8}H${X1}`}
+          />
+        </Dim>
+        {chamfer ? (
+          // DC: the width at the top of the cone, dimensioned below the tool as for the other types
+          <Dim id="diameter" focused={focused} label={S.diameter} lx={AX} ly={tip + 34}>
+            <path
+              d={`M${AX - CR} ${tip + 6}V${tip + 24}M${AX + CR} ${tip + 6}V${tip + 24}M${AX - CR} ${tip + 20}H${AX + CR}`}
+            />
+          </Dim>
+        ) : (
+          <Dim id="diameter" focused={focused} label={S.diameter} lx={AX} ly={tip + 34}>
+            <path
+              d={`M${X0} ${tip + 6}V${tip + 24}M${X1} ${tip + 6}V${tip + 24}M${X0} ${tip + 20}H${X1}`}
+            />
+          </Dim>
+        )}
+        {chamfer ? (
+          <>
+            {/* the included angle: an arc between the flanks about their (virtual) apex */}
+            <Dim
+              id="angle"
+              focused={focused}
+              label={S.angle}
+              lx={AX + CR + 4}
+              ly={CONE + 2}
+              anchor="start"
+            >
+              <path
+                d={`M${AX - 13} ${CTIP + CT - 13}A${13 * Math.SQRT2} ${13 * Math.SQRT2} 0 0 1 ${AX + 13} ${CTIP + CT - 13}`}
+              />
+            </Dim>
+            {/* the tip: the flat at the bottom */}
+            <Dim id="tipDiameter" focused={focused} label={S.tipDiameter} lx={AX} ly={tip + 10}>
+              <path d={`M${AX - CT} ${tip}H${AX + CT}`} />
+            </Dim>
+          </>
+        ) : null}
+        {type === 'bullNoseEndMill' ? (
+          <Dim
+            id="cornerRadius"
+            focused={focused}
+            label={S.cornerRadius}
+            lx={X1 + 26}
+            ly={TIP + 16}
+            anchor="start"
+          >
+            <path d={`M${X1 - 2} ${TIP - 2}L${X1 + 22} ${TIP + 14}`} />
+          </Dim>
+        ) : null}
+        {type === 'drill' ? (
+          <Dim
+            id="pointAngle"
+            focused={focused}
+            label={S.pointAngle}
+            lx={X1 + 26}
+            ly={TIP + 18}
             anchor="start"
           >
             <path
-              d={`M${AX - 13} ${CTIP + CT - 13}A${13 * Math.SQRT2} ${13 * Math.SQRT2} 0 0 1 ${AX + 13} ${CTIP + CT - 13}`}
+              d={`M${AX} ${tip}L${X0 - 10} ${TIP - 6}M${AX} ${tip}L${X1 + 10} ${TIP - 6}M${X1 + 2} ${TIP - 1}Q${X1 + 8} ${TIP + 6} ${X1 + 22} ${TIP + 16}`}
             />
           </Dim>
-          {/* the tip: the flat at the bottom */}
-          <Dim id="tipDiameter" focused={focused} label={S.tipDiameter} lx={AX} ly={tip + 10}>
-            <path d={`M${AX - CT} ${tip}H${AX + CT}`} />
-          </Dim>
-        </>
-      ) : null}
-      {type === 'bullNoseEndMill' ? (
-        <Dim
-          id="cornerRadius"
-          focused={focused}
-          label={S.cornerRadius}
-          lx={X1 + 26}
-          ly={TIP + 16}
-          anchor="start"
-        >
-          <path d={`M${X1 - 2} ${TIP - 2}L${X1 + 22} ${TIP + 14}`} />
-        </Dim>
-      ) : null}
-      {type === 'drill' ? (
-        <Dim
-          id="pointAngle"
-          focused={focused}
-          label={S.pointAngle}
-          lx={X1 + 26}
-          ly={TIP + 18}
-          anchor="start"
-        >
-          <path
-            d={`M${AX} ${tip}L${X0 - 10} ${TIP - 6}M${AX} ${tip}L${X1 + 10} ${TIP - 6}M${X1 + 2} ${TIP - 1}Q${X1 + 8} ${TIP + 6} ${X1 + 22} ${TIP + 16}`}
-          />
-        </Dim>
-      ) : null}
-    </svg>
+        ) : null}
+      </svg>
+      <figcaption>
+        <dl className={styles['legend']} aria-label={T.legend}>
+          {shown(type).map((d) => (
+            <div key={d} data-active={focused === d || undefined}>
+              <dt>{S[d]}</dt>
+              <dd>{T[d]}</dd>
+            </div>
+          ))}
+        </dl>
+      </figcaption>
+    </figure>
   )
 }

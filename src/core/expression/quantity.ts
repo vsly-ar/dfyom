@@ -60,8 +60,22 @@ export function reevaluate(q: Quantity, resolver: ReferenceResolver): AppResult<
   return quantityFromSource(q.source, context, resolver)
 }
 
-/** Dependency extraction from a stored quantity's source (parsed, not evaluated). */
+const referencesCache = new WeakMap<Quantity, AppResult<readonly string[]>>()
+
+/**
+ * Dependency extraction from a stored quantity's source (parsed, not evaluated). Cached per
+ * quantity (immutable): every design command walks every operation's references (hardening P5).
+ */
 export function referencesOf(q: Quantity): AppResult<readonly string[]> {
+  let r = referencesCache.get(q)
+  if (r === undefined) {
+    r = parseReferences(q)
+    referencesCache.set(q, r)
+  }
+  return r
+}
+
+function parseReferences(q: Quantity): AppResult<readonly string[]> {
   const context: ParseContext = { kind: q.kind, defaultUnit: q.defaultUnit }
   if (parseLiteral(q.source, context).isOk()) return Ok([])
   return parseExpression(q.source, context)

@@ -321,9 +321,16 @@ describe('run commands', { timeout: 60_000 }, () => {
     expect(expectErrCode(await r.result, 'run.state').toJSON().frames[0]?.data).toMatchObject({
       homed: false,
     })
+    expectErrCode(await t.run('run.job.check', { planId: t.planId }), 'run.state')
     const home = await t.job('run.machine.home', {})
     expect(expectOk(await home.result)).toEqual({ workZero: [0, 0, 0] })
     // G54 at the home position: the part lies above the travel
+    // (DF46) run.job.check says so first, without moving the machine
+    const checked = expectOk(await t.run('run.job.check', { planId: t.planId })) as {
+      findings: { rule: string }[]
+    }
+    expect(checked.findings.length).toBeGreaterThan(0)
+    expect(checked.findings.every((f) => f.rule === 'softLimit')).toBe(true)
     r = await t.job('run.job.start', { planId: t.planId })
     const e = expectErrCode(await r.result, 'run.softLimit')
     expect((e.toJSON().frames[0]?.data as { findings: unknown[] }).findings.length).toBeGreaterThan(
@@ -351,6 +358,18 @@ describe('run commands', { timeout: 60_000 }, () => {
       .value as { jobId: string }
     const mismatch = expectErrCode(await d2.job(jobId).unwrap().result, 'run.state')
     expect(mismatch.issues[0]?.rule).toBe('machineMismatch')
+  })
+
+  it('run.job.check finds nothing at a work zero inside the travel (DF46)', async () => {
+    const t = await setup()
+    expectOk(await t.open({ prepare: true }))
+    const r = expectOk(await t.run('run.job.check', { planId: t.planId })) as {
+      setupId: string
+      findings: unknown[]
+    }
+    expect(r.findings).toEqual([])
+    expect(r.setupId).toBe(t.s.plan(t.planId).setups[0]!.id)
+    expect(t.status().state).toBe('Idle')
   })
 
   it('an archived plan does not run', async () => {

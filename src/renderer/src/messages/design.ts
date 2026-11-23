@@ -60,7 +60,11 @@ export const designMessages = {
         .join(', '),
     source: 'Source',
     sourceOf: (name: string) => `Source of ${name}`,
-    clonesGroup: 'Clones',
+    /** The Clones row's instance group (DF44: not "Clones 5", which reads like a feature). */
+    clonesGroup: (n: number) => (n === 1 ? '1 clone' : `${n} clones`),
+    /** An instance row's position (DF44): "X 196.50 · Y 115.59 mm" (u · v off the top face). */
+    instanceAt: (u: string, v: string, axes: { u: string; v: string }, unit: string) =>
+      `${axes.u} ${u} · ${axes.v} ${v} ${unit}`,
     rows: 'Rows',
     instancesOf: (name: string) => `Instances of ${name}`,
     instance: (n: number) => `Clone ${n}`,
@@ -93,6 +97,7 @@ export const designMessages = {
       draftMeta: 'Draft',
       make: 'Make clones',
       cancel: 'Cancel',
+      actions: 'Clones draft actions',
       source: 'Source',
       rows: 'Rows',
       /** "1 + 5 clones = 6 instances · 0 skipped" */
@@ -118,26 +123,53 @@ export const designMessages = {
       rowNamed: (i: number) => `row ${i + 1}`,
       remove: (i: number) => `Remove row ${i + 1}`,
       removeLast: 'A Clones needs at least one row.',
+      /**
+       * Row field labels and hints (DF47, ui.md § Clones): axis names follow the face (`X`/`Y` on
+       * the top face, `u`/`v` elsewhere, `axisNames`).
+       */
       fields: {
         cols: 'Columns',
         rows: 'Rows',
-        du: 'Spacing u',
-        dv: 'Spacing v',
+        du: (u: string) => `Column spacing (${u})`,
+        dv: (v: string) => `Row spacing (${v})`,
         count: 'Count',
-        stepU: 'Step u',
-        stepV: 'Step v',
-        angle: 'Angle per step',
+        stepU: (u: string) => `Step ${u}`,
+        stepV: (v: string) => `Step ${v}`,
+        angle: 'Direction',
         distance: 'Distance per step',
         radius: 'Radius',
         centreAngle: 'Centre angle',
         arc: 'Sweep',
         step: 'Step angle',
-        u: 'u',
-        v: 'v',
         shape: 'Shape',
         start: 'Start offset',
         by: 'Place by',
         spacing: 'Spacing',
+      },
+      hints: {
+        cols: (u: string) => `How many positions across, along ${u}.`,
+        rows: (v: string) => `How many positions up, along ${v}.`,
+        du: (u: string) =>
+          `Distance between neighbouring columns, along ${u}. Negative goes the other way.`,
+        dv: (v: string) =>
+          `Distance between neighbouring rows, along ${v}. Negative goes the other way.`,
+        count: 'How many clones, each one step further on.',
+        stepU: (u: string) =>
+          `How far each clone sits from the one before, along ${u}. Negative goes the other way.`,
+        stepV: (v: string) =>
+          `How far each clone sits from the one before, along ${v}. Negative goes the other way.`,
+        angle: (u: string) => `Angle of the line the clones follow, from ${u}, counter-clockwise.`,
+        distance: 'How far each clone sits from the one before, along that line.',
+        radius: 'From the previous position to the arc’s centre.',
+        centreAngle: (u: string) =>
+          `Direction from the previous position to the arc’s centre, from ${u}, counter-clockwise.`,
+        arc: 'How far the arc turns, up to ±360°: positive is counter-clockwise.',
+        step: 'Angle between neighbouring positions, seen from the centre.',
+        point: 'Where this clone goes, from the face’s origin (a jump: no path between).',
+        shape: 'Positions follow this path from its start point.',
+        start: 'Distance along the path before the first position. Empty: 0.',
+        spacing: 'Distance between positions along the path.',
+        alongCount: 'How many positions, spread evenly along the path.',
       },
       countError: 'Enter a whole number from 1 to 100.',
       skipped: 'Skipped',
@@ -258,6 +290,8 @@ export const designMessages = {
     /** DF13: one screen, the library stock optional. */
     fromLibrary: 'From library',
     notSelected: 'Not selected',
+    /** DF48: the From library select with nothing to choose. */
+    libraryEmpty: 'No stock in the library yet: Save to library adds one.',
     variantOf: (parent: string) => `Variant of ${parent}`,
     materialLocked: 'From the library stock. Choose Not selected to change the material.',
     saveToLibrary: 'Save to library',
@@ -300,7 +334,11 @@ export const designMessages = {
     reference: 'Reference',
     done: 'Done',
     stockDescription: 'The block the part is cut from.',
-    shapesDescription: 'Outlines that pockets and profiles can cut. Choose one to edit it.',
+    /** "Choose one" only while there is one to choose (DF48). */
+    shapesDescription: (any: boolean) =>
+      any
+        ? 'Outlines that pockets and profiles can cut. Choose one to edit it.'
+        : 'Outlines that pockets and profiles can cut.',
     part: 'Part',
     size: 'Size (X × Y × Z)',
     material: 'Material',
@@ -331,10 +369,20 @@ export const designMessages = {
 
   navigator: {
     operations: 'Operations',
+    /**
+     * The Operations header count's tooltip (DF44): the count is the list's rows, as shown; the
+     * tooltip adds the operations in all when features hold more.
+     */
+    countTip: (rows: number, ops: number) =>
+      rows === ops
+        ? `${ops === 1 ? '1 operation' : `${ops} operations`} in design order.`
+        : `${rows === 1 ? '1 row' : `${rows} rows`} in the list; ${ops === 1 ? '1 operation' : `${ops} operations`} in all, counting each hole's operations and every clone.`,
     listLabel: 'Operations in design order',
     empty: {
       title: 'No operations yet',
-      description: 'Add an operation to remove material from the stock, starting with facing.',
+      // DF48: no "starting with facing" (wrong for sheet goods); features are offered too
+      description: 'Add an operation or a feature to cut the stock.',
+      addHole: 'Add bolt hole',
     },
     remove: (name: string) => `Remove ${name}`,
     /** The row menu's Remove (DF16). */
@@ -369,16 +417,16 @@ export const designMessages = {
     generalToleranceNone: 'None: lengths are exact',
     shapeKind: 'Shape',
     shapes: { rectangle: 'Rectangle', circle: 'Circle' },
-    centerX: 'Center X',
-    centerY: 'Center Y',
+    centerX: 'Centre X',
+    centerY: 'Centre Y',
     length: 'Length (X)',
     width: 'Width (Y)',
     /**
      * Position and size labels in the face frame: the top face reads X and Y (its `u` and `v`),
-     * every other face `u` and `v` (design-v0.2.md#face-frame). `point` is "Center" for a
+     * every other face `u` and `v` (design-v0.2.md#face-frame). `point` is "Centre" for a
      * drilling (a hole is a point), "Position" for an anchored shape.
      */
-    position: (point: 'Center' | 'Position', axis: string) => `${point} ${axis}`,
+    position: (point: 'Centre' | 'Position', axis: string) => `${point} ${axis}`,
     lengthAlong: (axis: string) => `Length (${axis})`,
     widthAlong: (axis: string) => `Width (${axis})`,
     anchor: 'Anchor',
@@ -389,6 +437,8 @@ export const designMessages = {
     floorRadius: 'Floor fillet radius',
     /** A facing's recommended depth (DF4): "0.48 mm, down to the top of Enclosure". */
     facingToReference: (depth: string, reference: string) => `${depth}, down to ${reference}`,
+    /** A reference model without a name in `facingToReference` (never its id, DF43). */
+    referenceModel: 'the reference model',
     on: 'On',
     /** `on` dropdown groups, in the order of ui.md#design-and-plan-controls-v02. */
     directions: {
@@ -411,7 +461,6 @@ export const designMessages = {
     tabsCount: 'Tab count',
     tabsWidth: 'Tab width',
     tabsThickness: 'Tab thickness',
-    surface: (id: string, label: string) => `${label} · ${id}`,
     commandFailed: 'The change was not applied.',
     /** The shape picker and placement of a pocket or profile (task U2, ui.md § Shapes v0.3). */
     picker: {
@@ -419,10 +468,16 @@ export const designMessages = {
       inline: 'Inline',
       named: 'Shapes',
       newShape: 'New shape…',
+      /** DF49: imports a drawing and uses its first shape here (ui.md § Import SVG where it is looked for). */
+      importSvg: 'Import SVG…',
+      importUsed: (op: string, shape: string) => `${op} now cuts ${shape}.`,
+      importNotUsed: (op: string, shape: string) =>
+        `${op} could not use ${shape}; the reason shows at its Shape field.`,
       usedBy: (n: number) => (n === 0 ? 'Not used' : `Used by ${n}`),
       editShape: 'Edit shape',
       convert: 'Convert to shape',
       converted: (name: string) => `Converted to ${name}`,
+      convertedUnnamed: 'Converted to a shape',
       rotation: 'Rotation',
       rotationNone: '0°',
       mirror: 'Mirror (flip x)',
@@ -454,8 +509,12 @@ export const designMessages = {
     },
   },
 
-  /** Human names of surfaces (ui.md#selection-and-picking: id plus operation name). */
+  /** Human names of surfaces (ui.md#selection-and-picking: operation name and role, never the id). */
   surfaceLabel: (operationName: string, role: string) => `${operationName} ${role}`,
+  /** Two surfaces that would read the same, told apart by their operation's place (DF43). */
+  surfaceAt: (label: string, position: number) => `${label} (operation ${position})`,
+  /** An operation id the part no longer has (a stale finding); the id itself is never shown. */
+  unknownOperation: 'Unknown operation',
   surfaceRoles: {
     top: 'top',
     bottom: 'bottom',
@@ -465,6 +524,7 @@ export const designMessages = {
     'side[1]': 'right side',
     'side[2]': 'back side',
     'side[3]': 'left side',
+    unknown: 'surface',
   },
 
   /**
@@ -496,7 +556,7 @@ export const designMessages = {
     noChoice: 'No tool can make this operation.',
     groups: {
       generalized: 'Generalized tool',
-      library: 'Library tools that fit',
+      library: 'Library',
       current: 'Current tool',
       add: 'Add',
     },
@@ -505,6 +565,31 @@ export const designMessages = {
     addToLibrary: 'Add to library',
     generalizedNote: 'Type and size only: Plan uses a matching library tool.',
     library: (name: string, diameter: string) => `${name} · Ø ${diameter}`,
+    /** A library option's geometry (its description's start): "RE 1 mm · 2 flutes". */
+    flutes: (n: number) => (n === 1 ? '1 flute' : `${n} flutes`),
+    cornerRadius: (radius: string) => `RE ${radius}`,
+    /** A library tool of the operation's type that fails another fit rule (DF42). */
+    unfit: (why: string) => `Doesn’t fit: ${why}`,
+    unfitWhy: {
+      slot: (width: string | undefined) =>
+        `wider than the ${width === undefined ? '' : `${width} `}slot`,
+      pocket: 'wider than the pocket at its narrowest',
+      cornerRadius: (corner: string | undefined) =>
+        `too wide for the ${corner === undefined ? '' : `${corner} `}corner`,
+      floorRadius: (radius: string | undefined) =>
+        radius === undefined
+          ? 'leaves a fillet on the sharp floor'
+          : `doesn’t match the ${radius} floor radius`,
+      diameter: (hole: string | undefined) =>
+        `doesn’t fit the ${hole === undefined ? '' : `Ø ${hole} `}hole`,
+      reach: 'too short for the depth',
+      angle: 'another angle',
+      other: 'too small for the chamfer',
+    },
+    /** `dfm.toolNotInLibrary`'s fix: the library's nearest tool of the type (DF42). */
+    useNear: (name: string, diameter: string) => `Use ${name} (${diameter})`,
+    /** `dfm.toolUnfit` of a locked tool wider than the slot: widen it to the tool (DF42). */
+    widenSlot: (width: string) => `Widen slot to ${width}`,
     current: (label: string) => `${label} (current)`,
     currentUnfit: 'Doesn’t fit this operation.',
     /** The source note (ui.md § Design and plan controls (v0.2): tool field). */

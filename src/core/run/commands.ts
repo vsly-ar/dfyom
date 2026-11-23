@@ -14,7 +14,7 @@ import { setupStockSize } from '../plan/setups'
 import type { ProjectDoc } from '../project/document'
 import type { Vec3 } from '../toolpath/model'
 import { machineSettings } from './grbl/emulator/settings'
-import { machineOf, runJobStart } from './job'
+import { machineOf, runJobCheck, runJobStart } from './job'
 import { machineKeyOf } from './machine-key'
 import { Machine } from '../library/machine'
 import { ItemIdSchema } from '../library/item'
@@ -30,7 +30,7 @@ import {
   type MachineAction,
 } from './host/protocol'
 import { RunStatusSchema } from './service'
-import { BAUD_RATES, DEFAULT_BAUD, SerialPortInfoSchema } from './serial'
+import { DEFAULT_BAUD, SerialPortInfoSchema } from './serial'
 import { settingsCheck, SettingsCheckSchema } from './settings-check'
 import type { MachineValuesDTO } from '../library/machine.dto'
 
@@ -132,9 +132,7 @@ export const runConnectionOpen = defineCommand({
   args: z.object({
     target: z
       .enum(['virtual', 'serial'])
-      .describe(
-        'virtual: the GRBL emulator; serial: a real controller (UI only, docs/modes/run-machine.md)',
-      ),
+      .describe('virtual: the GRBL emulator; serial: a real controller (UI only)'),
     path: z
       .string()
       .min(1)
@@ -147,7 +145,7 @@ export const runConnectionOpen = defineCommand({
       .min(300)
       .max(4_000_000)
       .default(DEFAULT_BAUD)
-      .describe(`Baud rate (target serial), e.g. ${BAUD_RATES.join(', ')}`),
+      .describe('Baud rate (target serial)'),
     planId: PlanIdSchema.optional().describe(
       'The plan whose machine copy the virtual machine emulates; or give machineId',
     ),
@@ -461,7 +459,7 @@ export const runPortsScan = defineCommand({
   kind: 'effect',
   name: 'run.ports.scan',
   summary:
-    'List the serial ports the machine host sees (USB ports first), for run.connection.open { target: serial }. Opens nothing.',
+    'List serial ports (USB first) for run.connection.open { target: serial }. Opens nothing.',
   title: () => 'Scan serial ports',
   machine: false,
   args: Empty,
@@ -620,6 +618,7 @@ export const RUN_COMMANDS: readonly AnyCommand[] = [
   runMachineProbeZ,
   runOverrideSet,
   runJobStart,
+  runJobCheck,
   runJobContinue,
   runTimeScaleSet,
 ]

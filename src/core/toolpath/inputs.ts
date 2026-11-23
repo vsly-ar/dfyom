@@ -12,7 +12,7 @@ import { isAnalyticOperation, type OperationGeometry, type StockGeometry } from 
 import { pocketRegion, profileChain } from '../geometry/outline'
 import { resolveProfileTabs } from '../geometry/tab-hold'
 import type { Tool } from '../library/tool'
-import type { ResolvedFeeds } from '../plan/feeds'
+import { FEED_FIELD_LABEL, type ResolvedFeeds } from '../plan/feeds'
 import type { PlanOperationInput } from '../plan/inputs'
 import type { FeedField } from '../plan/plan.dto'
 import type {
@@ -70,15 +70,19 @@ function cutting(
     else missing.push(f)
   }
   if (missing.length > 0)
-    return fail('plan.check', `${planOperationId}: unresolved feeds: ${missing.join(', ')}`, {
-      issues: missing.map((f) => ({
-        path: [planOperationId, f],
-        rule: 'unresolved',
-        message: `${f} is not resolved: enter a value or pick a preset (plan_operation_update)`,
-      })),
-      where: WHERE,
-      data: { planOperationId },
-    })
+    return fail(
+      'plan.check',
+      `unresolved feeds: ${missing.map((f) => FEED_FIELD_LABEL[f].toLowerCase()).join(', ')}`,
+      {
+        issues: missing.map((f) => ({
+          path: [planOperationId, f],
+          rule: 'unresolved',
+          message: `${FEED_FIELD_LABEL[f].toLowerCase()} is not resolved: enter a value or pick a preset (plan_operation_update)`,
+        })),
+        where: WHERE,
+        data: { planOperationId },
+      },
+    )
   return Ok(out as Record<FeedField, number>)
 }
 
@@ -135,6 +139,37 @@ export function regionProfileOperation(
   }
 }
 
+interface GeometryById {
+  readonly stock: StockGeometry
+  readonly byId: ReadonlyMap<string, OperationGeometry>
+}
+const geometryMemo = new WeakMap<
+  PlanOperationInput['part'],
+  WeakMap<PlanOperationInput['stock'], Map<Region2dPort | undefined, AppResult<GeometryById>>>
+>()
+
+/**
+ * The part's operation geometry by id, mapped once per (part, stock, port): the inputs of one
+ * plan share the plan's part and stock models (immutable), and mapping the whole part per plan
+ * operation made generating a plan quadratic in operations (hardening P4,
+ * docs/research/s6-clone-budgets.md#follow-up-p4).
+ */
+function partGeometry(input: PlanOperationInput, region2d?: Region2dPort): AppResult<GeometryById> {
+  let byStock = geometryMemo.get(input.part)
+  if (byStock === undefined) geometryMemo.set(input.part, (byStock = new WeakMap()))
+  let byPort = byStock.get(input.stock)
+  if (byPort === undefined) byStock.set(input.stock, (byPort = new Map()))
+  let r = byPort.get(region2d)
+  if (r === undefined) {
+    r = toGeometryInput(input.part, input.stock, region2d).map((g): GeometryById => ({
+      stock: g.stock,
+      byId: new Map(g.operations.map((o) => [o.id, o])),
+    }))
+    byPort.set(region2d, r)
+  }
+  return r
+}
+
 /**
  * The generator request of one plan operation: one input, except drilling and chamfers (one per
  * hole or chamfer, nearest-neighbour order). Mapper bugs are `internal.unexpected`.
@@ -144,9 +179,9 @@ export function toGeneratorInputs(
   region2d?: Region2dPort,
 ): AppResult<GeneratorRequest> {
   const id = input.planOperationId
-  const geometry = toGeometryInput(input.part, input.stock, region2d)
+  const geometry = partGeometry(input, region2d)
   if (geometry.isErr()) return Err(geometry.unwrapErr().withContext(WHERE, { planOperationId: id }))
-  const byId = new Map(geometry.unwrap().operations.map((g) => [g.id, g]))
+  const { byId, stock: partStock } = geometry.unwrap()
   const ops: OperationGeometry[] = []
   for (const op of input.operations) {
     const g = byId.get(op.id)
@@ -179,7 +214,6 @@ export function toGeneratorInputs(
     ops.push(local)
   }
   // the stock as seen in the setup: face rectangle on X/Y, extent along `n` as the thickness
-  const partStock = geometry.unwrap().stock
   const stock: StockGeometry = localStock(input.setup.direction, partStock)
   const wcs = setupWcs(input.setup.direction, input.setup.rotation, partStock)
   const turned = wcs === undefined ? {} : { wcs }

@@ -84,7 +84,10 @@ test('reference model: the Reference panel imports the enclosure STL, ghost, vis
   await setField(setup, 'Length (X)', '260')
   await setField(setup, 'Width (Y)', '190')
   await setField(setup, 'Thickness (Z)', '40')
-  await setup.getByRole('button', { name: 'Create part' }).click()
+  await page
+    .getByRole('dialog', { name: 'Stock' })
+    .getByRole('button', { name: 'Create part' })
+    .click()
 
   // ── the toolbar toggle opens the panel; import through the file dialog ────────────────────
   const panel = await openReferencePanel(page)

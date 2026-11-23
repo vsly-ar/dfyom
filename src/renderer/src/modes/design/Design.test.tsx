@@ -101,12 +101,36 @@ describe('design mode', () => {
     expect(within(form).getByRole('combobox', { name: 'From library' })).toHaveTextContent(
       'Not selected',
     )
+    // an empty library: nothing to choose, and the note says how to add one (DF48)
+    expect(within(form).getByRole('combobox', { name: 'From library' })).toBeDisabled()
+    expect(within(form).getByText(/No stock in the library yet/)).toBeVisible()
     const length = within(form).getByRole('combobox', { name: 'Length (X)' })
     await retype(user, length, '120{Enter}')
-    await user.click(within(form).getByRole('button', { name: 'Create part' }))
+    // the primary Create part is in the footer beside Cancel, not in the body (DF12 re-report)
+    const create = within(dialog).getByRole('button', { name: 'Create part' })
+    const cancel = within(dialog).getByRole('button', { name: 'Cancel' })
+    expect(within(form).queryByRole('button', { name: 'Create part' })).toBeNull()
+    expect(create.parentElement).toBe(cancel.parentElement)
+    expect(create.parentElement!.lastElementChild).toBe(create)
+    expect(create.parentElement!.contains(form)).toBe(false)
+    await user.click(create)
     // Create part closes it; the sidebar starts with the part row, then the operations (DF15)
     await waitFor(() => expect(dialog).not.toBeInTheDocument())
     await within(navigator()).findByRole('heading', { name: 'No operations yet' })
+    // the empty state offers the Add menu's operations in its order, then the bolt hole (DF48)
+    const empty = within(navigator())
+      .getAllByRole('button', { name: /^Add (facing|pocket|profile|drilling|bolt hole)$/ })
+      .map((b) => b.textContent)
+    expect(empty).toEqual([
+      'Add facing',
+      'Add pocket',
+      'Add profile',
+      'Add drilling',
+      'Add bolt hole',
+    ])
+    expect(
+      within(navigator()).getByText('Add an operation or a feature to cut the stock.'),
+    ).toBeVisible()
     expect(within(navigator()).getAllByRole('heading')[0]).toHaveTextContent('Operations')
     const partRow = within(navigator()).getByRole('region', { name: 'Part' })
     expect(
@@ -206,7 +230,7 @@ describe('design mode', () => {
         parentId: root.id,
       }),
     )
-    await user.click(within(form).getByRole('button', { name: 'Create part' }))
+    await user.click(within(dialog).getByRole('button', { name: 'Create part' }))
     await waitFor(() => expect(dialog).not.toBeInTheDocument())
     const part = Object.values(d.doc.parts)[0]!
     expect(d.doc.snapshots[part.stock]!.libraryItemId).toBe(variant.id)
@@ -422,7 +446,7 @@ describe('design mode', () => {
       // over the gap above the facing the indicator turns red and says why, before the drop
       const pocket = rowOf(/^Pocket 1/)
       dragTo(gripOf(pocket), 35, true)
-      const why = 'Not moved: Pocket 1 uses facing1.floor, which has to come before it.'
+      const why = 'Not moved: Pocket 1 uses Facing 1 floor, which has to come before it.'
       expect(within(navigator()).getByText(why)).toBeInTheDocument()
       const facingItem = rowOf(/^Facing 1/).closest('[data-reorder-item]')!
       expect(facingItem).toHaveAttribute('data-drop', 'before')
@@ -519,9 +543,7 @@ describe('design mode', () => {
     const { user, part, addFromMenu } = await renderDesign()
     await user.click(await within(navigator()).findByRole('button', { name: 'Add facing' }))
     await within(inspector()).findByRole('heading', { name: 'Facing 1' })
-    expect(within(inspector()).getByRole('combobox', { name: 'On' })).toHaveTextContent(
-      'Stock top · stock.top',
-    )
+    expect(within(inspector()).getByRole('combobox', { name: 'On' })).toHaveTextContent('Stock top')
     await addFromMenu('Profile')
     await within(inspector()).findByRole('heading', { name: 'Profile 1' })
     const on = within(inspector()).getByRole('combobox', { name: 'On' })
@@ -529,12 +551,12 @@ describe('design mode', () => {
     await user.keyboard('{Enter}')
     const options = within(await screen.findByRole('listbox')).getAllByRole('option')
     expect(options.map((o) => o.textContent)).toEqual([
-      'Stock top · stock.top',
-      'Stock bottom · stock.bottom',
-      'Stock front side · stock.side[0]',
-      'Stock right side · stock.side[1]',
-      'Stock back side · stock.side[2]',
-      'Stock left side · stock.side[3]',
+      'Stock top',
+      'Stock bottom',
+      'Stock front side',
+      'Stock right side',
+      'Stock back side',
+      'Stock left side',
     ])
     await user.click(options[1]!)
     await waitFor(() => expect(part().operations[1]).toMatchObject({ on: 'stock.bottom' }))

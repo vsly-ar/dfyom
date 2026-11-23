@@ -5,7 +5,7 @@
 // Without a plan ("No plan (manual control)") it connects with a library machine (DF31). The
 // notice keeps a reserved height and a refused action shows at the end of the panel, so messages
 // never move the controls (DF34). Doc: docs/conventions/ui.md#run-mode-safety-ui,
-// docs/modes/run.md#machine-frame-and-manual-control-hardening-df31df35,
+// docs/modes/run.md#machine-frame-and-manual-control-hardening-df31df35, #run-mode-presentation-df46,
 // docs/modes/run-v0.1.md#commands-and-queries; serial port and real-machine confirmations:
 // docs/modes/run-machine.md#ports-and-the-port-picker, docs/modes/run.md#3-confirmations-before-motion;
 // continuous jog and the alarm panel: docs/modes/run-machine.md#machine-readiness-m3
@@ -17,7 +17,7 @@ import { Icon, Button, ConfirmDialog, ErrorMessage, Select, StatusChip } from '.
 import { AlarmPanel, LostConnectionWarning } from './AlarmPanel'
 import { JogPad, useJogMode } from './JogPad'
 import { useLibraryItems } from '../plan/usePlan'
-import { actionText, formatLength, isConnected, runGates } from './machine-state'
+import { actionText, formatLength, isConnected, needsHoming, runGates } from './machine-state'
 import { runnablePlans } from './plan-info'
 import { NO_PLAN, useRun, useRunStore, type Axis } from './run-store'
 import { SerialPicker, SettingsWarning } from './SerialPicker'
@@ -250,7 +250,7 @@ export function RunNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
               }
               onClick={() => void a.connect()}
             >
-              {serial ? m.connectSerial : m.connect}
+              {m.connect}
             </Button>
             <p className={styles['hint']}>
               {serial ? m.connectHintSerial : manual ? m.connectHintNoPlan : m.connectHint}
@@ -265,6 +265,8 @@ export function RunNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
         <div className={styles['buttons']}>
           <Button
             size="lg"
+            // the next step while GRBL's start-up lock holds (DF46): one primary in the panel
+            {...(needsHoming(status) ? { variant: 'primary' as const } : {})}
             icon={<Icon name="home" />}
             disabled={gates.home !== null || busy('run.machine.home')}
             {...(gates.home === null ? {} : { 'aria-describedby': ids.home })}

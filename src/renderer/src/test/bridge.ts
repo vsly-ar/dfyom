@@ -109,6 +109,8 @@ export interface FakeBridge extends PreloadApi {
   }): void
   readonly saveDialogNames: string[]
   readonly exportDialogNames: string[]
+  /** Paths passed to `files.showInFolder` (DF48). */
+  readonly shownInFolder: string[]
   /** The reference ids whose ghost mesh was asked for (`reference.mesh`), in order. */
   readonly referenceMeshCalls: string[]
   /** Answers `reference.mesh` (default: one triangle). */
@@ -204,6 +206,7 @@ export function createFakeBridge(
   const evaluations = new Map<string, PartEvaluationView>()
   const saveDialogNames: string[] = []
   const exportDialogNames: string[] = []
+  const shownInFolder: string[] = []
   let fileChoice: {
     open: string | null
     save: string | null
@@ -310,6 +313,10 @@ export function createFakeBridge(
       },
       chooseReference: () => Promise.resolve(fileChoice.reference),
       chooseSvg: () => Promise.resolve(fileChoice.svg),
+      showInFolder: (path) => {
+        shownInFolder.push(path)
+        return Promise.resolve(true)
+      },
     },
     reference: {
       mesh: (referenceId) => {
@@ -360,6 +367,7 @@ export function createFakeBridge(
     emitLibraryCloseRequest: libraryCloseRequests.emit,
     saveDialogNames,
     exportDialogNames,
+    shownInFolder,
     emitEvaluation(view) {
       evaluations.set(view.planId === undefined ? view.partId : `plan:${view.planId}`, view)
       evaluationPush.emit(view)

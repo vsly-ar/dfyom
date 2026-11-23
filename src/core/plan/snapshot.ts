@@ -102,6 +102,8 @@ export interface LibraryCopyStale {
   readonly status: Exclude<SnapshotStatus, 'current'>
   /** Why re-importing this changed copy cannot be applied (the part must fit a new stock). */
   readonly blocked: string | null
+  /** The part fields that do not fit the new stock (issue paths, `operations.pocket1.depth`). */
+  readonly blockedFields: readonly string[]
 }
 
 export interface PlanStale {
@@ -114,6 +116,8 @@ export interface PlanStale {
   readonly partChanged: readonly string[]
   /** A `draft` plan that could not follow the design: why (rebuild blocked by its stock copy). */
   readonly rebuildBlocked: string | null
+  /** The design part's fields that block the rebuild (issue paths, `operations.pocket1.depth`). */
+  readonly rebuildBlockedFields: readonly string[]
 }
 
 /**
@@ -139,9 +143,17 @@ export function planStale(
     tool: o?.tool,
     locked: o?.toolLocked === true,
   })
+  // by id, the first of each (a scan per operation was quadratic, hardening P4)
+  const byId = (ops: readonly PartDTO['operations'][number][] = []) => {
+    const m = new Map<string, PartDTO['operations'][number]>()
+    for (const o of ops) if (!m.has(o.id)) m.set(o.id, o)
+    return m
+  }
+  const takenById = byId(plan.design.taken.operations)
+  const nowById = byId(current?.operations)
   for (const op of plan.design.part.operations) {
-    const taken = plan.design.taken.operations.find((o) => o.id === op.id)
-    const now = current?.operations.find((o) => o.id === op.id)
+    const taken = takenById.get(op.id)
+    const now = nowById.get(op.id)
     const s: OperationStale = {
       operationId: op.id,
       changedInDesign:
@@ -173,7 +185,8 @@ export function planStale(
         kind: dto.kind,
         libraryItemId: dto.libraryItemId,
         status,
-        blocked: blocked ?? null,
+        blocked: blocked?.reason ?? null,
+        blockedFields: blocked?.fields ?? [],
       })
     }
   const partChanged =
@@ -189,16 +202,17 @@ export function planStale(
               ),
           )
           .sort()
-  const rebuildBlocked =
+  const blocker =
     plan.status === 'draft' && designChanged(plan, doc)
-      ? (rebuildBlocker(plan, doc, port) ?? null)
-      : null
+      ? rebuildBlocker(plan, doc, port)
+      : undefined
   return {
     operations,
     libraryCopies,
     partRemoved: current === undefined,
     partChanged,
-    rebuildBlocked,
+    rebuildBlocked: blocker?.reason ?? null,
+    rebuildBlockedFields: blocker?.fields ?? [],
   }
 }
 

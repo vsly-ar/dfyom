@@ -223,6 +223,7 @@ function Specimens({ title }: { title: string }): React.JSX.Element {
           <MachineStateBadge state="moving" />
           <MachineStateBadge state="hold" />
           <MachineStateBadge state="action" />
+          <MachineStateBadge state="needsHoming" />
           <MachineStateBadge state="alarm" label="Alarm 2: soft limit" />
         </div>
       </Row>
@@ -520,7 +521,7 @@ const TOOL_CANDIDATES = [
     value: 'lib:t1',
     label: 'Flat 6 · Ø 6 mm',
     group: 'Library tools that fit',
-    description: 'Has a preset for aluminum',
+    description: 'Has a preset for aluminium',
   },
   { value: 'lib:t2', label: 'Flat 4 · Ø 4 mm', group: 'Library tools that fit' },
 ]

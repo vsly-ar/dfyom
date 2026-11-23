@@ -8,9 +8,29 @@
 // and accessible names.
 // Docs: docs/plans/v0.1.md#exit-criteria, docs/conventions/testing.md#end-to-end
 import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import type { ElectronApplication, Locator, Page } from '@playwright/test'
 import { expect, launchApp, test } from './app.fixture'
+
+const RENDERS = process.env['DFYOM_RENDERS'] === '1'
+
+/** With DFYOM_RENDERS=1: the review render `name`-light/-dark.png (DF46: the pre-flight). */
+async function render(page: Page, name: string): Promise<void> {
+  if (!RENDERS) return
+  const dir = resolve(__dirname, '../design/features/renders')
+  for (const theme of ['light', 'dark'] as const) {
+    await page.evaluate((t) => {
+      const root = (
+        globalThis as unknown as {
+          document: { documentElement: { dataset: Record<string, string | undefined> } }
+        }
+      ).document.documentElement
+      root.dataset['theme'] = t
+    }, theme)
+    await page.waitForTimeout(400)
+    await page.screenshot({ path: `${dir}/${name}-${theme}.png` })
+  }
+}
 
 /** The OS dialogs answer `project` for the project file and `gcode` for the export. */
 async function stubFileDialogs(
@@ -100,7 +120,10 @@ test('exit criteria through the UI: design, plan, export, run, save, close and r
   await setField(setup, 'Length (X)', '100')
   await setField(setup, 'Width (Y)', '60')
   await setField(setup, 'Thickness (Z)', '20')
-  await setup.getByRole('button', { name: 'Create part' }).click()
+  await page
+    .getByRole('dialog', { name: 'Stock' })
+    .getByRole('button', { name: 'Create part' })
+    .click()
   await expect(navigator.getByText(/^Stock: 100 × 60 × 20/)).toBeVisible()
 
   // ── Facing, pocket (corner radius, floor fillet), drilling, profile with tabs ────────────
@@ -235,7 +258,7 @@ test('exit criteria through the UI: design, plan, export, run, save, close and r
   const machine = page.getByRole('group', { name: 'Machine' })
   await navigator.getByRole('combobox', { name: 'Time scale' }).click()
   await page.getByRole('option', { name: 'Max' }).click()
-  await navigator.getByRole('button', { name: 'Connect to virtual machine' }).click()
+  await navigator.getByRole('button', { name: 'Connect', exact: true }).click()
   await expect(machine.getByText('Virtual machine · Max')).toBeVisible()
   await navigator.getByRole('button', { name: 'Home' }).click()
   await expect(machine.getByText('Idle')).toBeVisible()
@@ -264,6 +287,12 @@ test('exit criteria through the UI: design, plan, export, run, save, close and r
     'Bull 6',
     'Flat 6',
   ])
+  // DF46: the soft-limit result before the start
+  await expect(preflight.getByText('Inside the travel at this work zero.')).toBeVisible({
+    timeout: 30_000,
+  })
+  await expect(preflight.getByRole('button', { name: 'Start run' })).toBeFocused()
+  await render(page, 'df46-run-preflight')
   await preflight.getByRole('button', { name: 'Start run' }).click()
 
   // on screen, even when the first program pause's modal already hides it (and the inspector

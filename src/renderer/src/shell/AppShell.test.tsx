@@ -218,6 +218,7 @@ describe('AppShell', () => {
         snapGrid: { mm: 1, inch: 1 / 16 },
         autoApplyDelay: 10,
         sidePanels: {},
+        lastMachine: null,
       }),
     )
     await waitFor(() => expect(document.documentElement.dataset['theme']).toBe('light'))
