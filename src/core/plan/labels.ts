@@ -8,6 +8,25 @@ import type { PartDTO } from '../design/part.dto'
 
 type OpDTO = PartDTO['operations'][number]
 
+const byIdMemo = new WeakMap<readonly OpDTO[], ReadonlyMap<string, OpDTO>>()
+
+/**
+ * The part's operation `id` (the first of that id): indexed once per frozen operation list (a
+ * committed document's), so labelling every plan operation stays linear (hardening P4); a
+ * draft's list is scanned.
+ */
+function operationOf(part: PartDTO, id: string): OpDTO | undefined {
+  const ops = part.operations
+  if (!Object.isFrozen(ops)) return ops.find((o) => o.id === id)
+  let byId = byIdMemo.get(ops)
+  if (byId === undefined) {
+    const m = new Map<string, OpDTO>()
+    for (const o of ops) if (!m.has(o.id)) m.set(o.id, o)
+    byIdMemo.set(ops, (byId = m))
+  }
+  return byId.get(id)
+}
+
 /** A Clones feature's source as stored (`clones.ts` `ClonesSource`). */
 function sourceOf(f: NonNullable<PartDTO['features']>[number]): {
   operationIds?: readonly string[]
@@ -24,7 +43,7 @@ export function clonesPosition(
   part: PartDTO,
   operationId: string,
 ): { readonly featureId: string; readonly name: string; readonly n: number } | undefined {
-  const op = part.operations.find((o) => o.id === operationId)
+  const op = operationOf(part, operationId)
   if (op === undefined) return undefined
   const features = part.features ?? []
   const owner = features.find((f) => f.id === op.featureId)
@@ -51,7 +70,7 @@ export function positionComment(part: PartDTO, operationId: string): string | un
 function baseName(op: OpDTO, part: PartDTO): string {
   const owner = part.features?.find((f) => f.id === op.featureId)
   if (owner?.kind !== 'clones' || op.featureRole === undefined) return op.name
-  const source = part.operations.find((o) => o.id === stepOf(op.featureRole!))
+  const source = operationOf(part, stepOf(op.featureRole!))
   return source?.name ?? op.name
 }
 
@@ -63,7 +82,7 @@ function baseName(op: OpDTO, part: PartDTO): string {
  * single operations keep their names.
  */
 export function planOperationLabel(part: PartDTO, designOperationIds: readonly string[]): string {
-  const ops = designOperationIds.map((id) => part.operations.find((o) => o.id === id))
+  const ops = designOperationIds.map((id) => operationOf(part, id))
   const names = ops.map((o, i) => o?.name ?? designOperationIds[i]!)
   if (ops.length < 2 || ops.some((o) => o === undefined)) return names.join(', ')
   const counts = new Map<string, number>()
