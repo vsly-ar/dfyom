@@ -519,6 +519,7 @@ function millAt(
     if (machine.isSome() && vf0 > machine.unwrap().maxFeedXY) {
       const m = machine.unwrap()
       vf = m.maxFeedXY
+      const n0 = n
       if (L.n === undefined) {
         const keep = vf / (z * fzProg)
         n = Math.max(keep, m.minSpeed)
@@ -546,10 +547,14 @@ function millAt(
         })
       }
       warnings.push(
-        warn('feeds.feedClamped', 'Feed rate limited to the machine maximum (X/Y).', {
-          suggested: vf0,
-          maxFeedRate: m.maxFeedXY,
-          spindleSpeed: n,
+        feedClampedWarning('Feed rate limited to the machine maximum (X/Y)', false, {
+          vf0,
+          vf,
+          max: m.maxFeedXY,
+          n0,
+          n,
+          perRev: z,
+          locked: L.n !== undefined,
         }),
       )
     }
@@ -683,6 +688,7 @@ function drill(c: Ctx): CuttingSuggestion {
     if (machine.isSome() && vf0 > machine.unwrap().maxFeedZ) {
       const m = machine.unwrap()
       vf = m.maxFeedZ
+      const n0 = n
       if (L.n === undefined) {
         const keep = vf / fn
         n = Math.max(keep, m.minSpeed)
@@ -710,10 +716,14 @@ function drill(c: Ctx): CuttingSuggestion {
         })
       }
       warnings.push(
-        warn('feeds.feedClamped', 'Drilling feed limited to the machine maximum (Z).', {
-          suggested: vf0,
-          maxFeedRate: m.maxFeedZ,
-          spindleSpeed: n,
+        feedClampedWarning('Drilling feed limited to the machine maximum (Z)', true, {
+          vf0,
+          vf,
+          max: m.maxFeedZ,
+          n0,
+          n,
+          perRev: 1,
+          locked: L.n !== undefined,
         }),
       )
     }
@@ -1019,6 +1029,46 @@ function dataStep(
     unit,
     sources: row.sources.filter((s) => s.fields.includes(field)).map((s) => s.ref),
   }
+}
+
+/**
+ * `feeds.feedClamped` of a feed the machine caps (hardening DF56): says whether the spindle speed
+ * came down with the feed and kept the chip load, stopped at the machine minimum or is locked,
+ * and by how much the chip load drops then. `perRev`: flutes (milling) or 1 (drilling, `fn`).
+ * Doc: docs/architecture/feeds-speeds.md#feed-clamp-and-chip-load-hardening-df56
+ */
+function feedClampedWarning(
+  lead: string,
+  isDrill: boolean,
+  c: {
+    readonly vf0: number
+    readonly vf: number
+    readonly max: number
+    readonly n0: number
+    readonly n: number
+    readonly perRev: number
+    readonly locked: boolean
+  },
+): CuttingWarning {
+  const before = c.vf0 / (c.n0 * c.perRev)
+  const after = c.vf / (c.n * c.perRev)
+  const drop = Math.max(0, (1 - after / before) * 100)
+  const what = isDrill ? 'feed per revolution' : 'chip load'
+  const kept = drop < 0.5
+  const ending = kept
+    ? `spindle speed lowered with it, so the ${what} stays`
+    : c.locked
+      ? `the spindle speed is locked, so the ${what} drops by ${Math.round(drop)} %`
+      : `the spindle speed stops at the machine minimum, so the ${what} drops by ${Math.round(drop)} %`
+  return warn('feeds.feedClamped', `${lead}; ${ending}.`, {
+    suggested: c.vf0,
+    maxFeedRate: c.max,
+    spindleSpeed: c.n,
+    suggestedSpindleSpeed: c.n0,
+    chipLoad: after,
+    suggestedChipLoad: before,
+    chipLoadDrop: kept ? 0 : drop,
+  })
 }
 
 const warn = (

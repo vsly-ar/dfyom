@@ -377,7 +377,7 @@ test('v0.2 golden path through the UI: reference, faces, setups, export and run 
     const file = join(dfyom.dataDir, `Plan 1 ${name}.nc`)
     expect(existsSync(file)).toBe(true)
     const gcode = readFileSync(file, 'utf8')
-    expect(gcode).toContain(`(Setup: ${name})`)
+    expect(gcode).toContain(`(Setup ${i + 1} of 3: ${name})`)
     expect(gcode.trimEnd().endsWith('M30')).toBe(true)
     const lines = gcode.trimEnd().split('\n').length
     await expect(exported.getByText(`${lines} lines`)).toBeVisible()

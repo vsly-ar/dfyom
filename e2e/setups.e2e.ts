@@ -188,7 +188,7 @@ test('setup panel: setups in machining order, reorder, rotation and one program 
     await expect(done).toBeHidden()
     const file = `${dfyom.dataDir}/Plan 1 ${name}.nc`
     expect(existsSync(file)).toBe(true)
-    expect(readFileSync(file, 'utf8')).toContain(`(Setup: ${name})`)
+    expect(readFileSync(file, 'utf8')).toContain(`(Setup ${i} of 2: ${name})`)
   }
   expect(dfyom.rendererErrors).toEqual([])
 })

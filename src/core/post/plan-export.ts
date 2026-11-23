@@ -13,6 +13,7 @@ import { planOperationInputs } from '../plan/inputs'
 import { PlanIdSchema, PlanRecordIdSchema } from '../plan/plan.dto'
 import { loadPlan } from '../plan/plan'
 import { planOperationLabel, positionComment } from '../plan/labels'
+import { setupHeader } from '../plan/setup-header'
 import { chooseSetup } from '../plan/setups'
 import { checkAllowed } from '../plan/status'
 import type { ProjectDoc } from '../project/document'
@@ -100,6 +101,7 @@ export async function exportPlan(
   const chosen = chooseSetup(plan.setups, opts.setupId, where)
   if (chosen.isErr()) return Err(chosen.unwrapErr().withContext(where, { planId }))
   const setup = chosen.unwrap().setup
+  const setupIndex = plan.setups.findIndex((s) => s.id === setup.id)
   // only this setup's findings block its program (as plan.toolpath.generate per operation)
   const inputs = planOperationInputs(
     doc,
@@ -167,7 +169,15 @@ export async function exportPlan(
   const exported = exportGrbl(
     {
       name: plan.dto.name,
-      setup: { name: setup.name, clearanceHeight: all[0]!.setup.clearanceHeight },
+      setup: {
+        name: setup.name,
+        clearanceHeight: all[0]!.setup.clearanceHeight,
+        header: setupHeader(plan.setups, setupIndex, {
+          length: plan.stock.length.canonical,
+          width: plan.stock.width.canonical,
+          thickness: plan.stock.thickness.canonical,
+        }),
+      },
       operations,
       machine: plan.machine,
       ...(opts.workZero === undefined ? {} : { workZero: opts.workZero }),
@@ -200,6 +210,13 @@ export function connectedWorkZero(
   const key = machineKeyOf(doc, planId, 'plan.export')
   return key.isOk() && key.unwrap() === m.machineKey ? status.workZero : undefined
 }
+
+/**
+ * `plan.export`'s note when the soft limits were not checked (hardening DF58): where to check them.
+ * Doc: docs/architecture/grbl.md#plan-export-command
+ */
+export const SOFT_LIMIT_NOTE =
+  "Soft limits not checked: no homed connection to this plan's machine. Before running, set the work zero and check with run.job.check (or the Run pre-flight); run.job.start checks too."
 
 const ProgramStatsSchema = z.object({
   cutLength: z.number().describe('mm'),
@@ -241,6 +258,10 @@ export const planExport = defineCommand({
     softLimitChecked: z
       .boolean()
       .describe('Whether the soft-limit check ran (needs the work zero of a connected machine)'),
+    softLimitNote: z
+      .string()
+      .optional()
+      .describe('Without the check: how to check the soft limits before running'),
     regenerated: z
       .array(z.string())
       .describe('Plan operations whose toolpath was missing or stale and was generated'),
@@ -266,6 +287,7 @@ export const planExport = defineCommand({
       stats: e.stats,
       warnings: [...e.warnings],
       softLimitChecked: e.softLimitChecked,
+      ...(e.softLimitChecked ? {} : { softLimitNote: SOFT_LIMIT_NOTE }),
       regenerated: [...e.regenerated],
     })
   },

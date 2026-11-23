@@ -40,17 +40,17 @@ Symbols follow Sandvik Coromant (ISO): `vc` surface speed, `D` tool diameter, `z
 
 **Output** `CuttingSuggestion`: each of the five fields is `Option<{ value, derivation }>`; `derivation` lists formula id, inputs and result per step (rendered as formulas and tooltips in the UI, returned verbatim to agents). Derived display values: `vc` actual, `fz` actual, `Q`, `Pc`, spindle load %. Plus `warnings[]`.
 
-| Warning code            | When                                                                     | Effect                                                                       |
-| ----------------------- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| `feeds.rpmAboveMachine` | `n > spindle.maxSpeed` (small tools, aluminum)                           | `n` = max; `vf` keeps `fz` (F2), actual `vc` shown lower                     |
-| `feeds.rpmBelowMachine` | `n < spindle.minSpeed` (large tools, steel, router spindles)             | `n` = min; actual `vc` too high → heat/wear warning; `fz` kept               |
-| `feeds.feedClamped`     | `vf > min(maxFeedRate.x, .y)`                                            | `vf` = max; `n` lowered to keep `fz` while `n ≥ minSpeed`, else `fz` drops   |
-| `feeds.rubbing`         | actual `fz` < data minimum after clamping                                | warn: chips too thin, tool rubs and heats                                    |
-| `feeds.chipLoadHigh`    | actual `fz` > data maximum (only with a locked or entered feed or speed) | warn: chips too thick, the tool may break or chatter                         |
-| `feeds.powerExceeded`   | `Pc > Pavail` (F7 vs. [machine check](#hobby-machine-realism))           | calculator-owned `stepdown` reduced to fit; else an unlocked feed; else warn |
-| `feeds.noData`          | `materialClass = other`, `toolMaterial` unset/`other`, `D` outside bands | no suggestion (`None`); fallback or `plan.check` error as today              |
-| `feeds.powerSkipped`    | milling without `spindle.power` (or without a machine)                   | info only: power check skipped; `Pc` still shown                             |
-| `feeds.lockInactive`    | a stored lock breaks an [impossible-lock](#impossible-locks) rule now    | the lock is ignored (plan mode adds it, with `field` and the rule)           |
+| Warning code            | When                                                                     | Effect                                                                                                                        |
+| ----------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| `feeds.rpmAboveMachine` | `n > spindle.maxSpeed` (small tools, aluminum)                           | `n` = max; `vf` keeps `fz` (F2), actual `vc` shown lower                                                                      |
+| `feeds.rpmBelowMachine` | `n < spindle.minSpeed` (large tools, steel, router spindles)             | `n` = min; actual `vc` too high → heat/wear warning; `fz` kept                                                                |
+| `feeds.feedClamped`     | `vf > min(maxFeedRate.x, .y)`                                            | `vf` = max; `n` lowered to keep `fz` while `n ≥ minSpeed`, else `fz` drops ([DF56](#feed-clamp-and-chip-load-hardening-df56)) |
+| `feeds.rubbing`         | actual `fz` < data minimum after clamping                                | warn: chips too thin, tool rubs and heats                                                                                     |
+| `feeds.chipLoadHigh`    | actual `fz` > data maximum (only with a locked or entered feed or speed) | warn: chips too thick, the tool may break or chatter                                                                          |
+| `feeds.powerExceeded`   | `Pc > Pavail` (F7 vs. [machine check](#hobby-machine-realism))           | calculator-owned `stepdown` reduced to fit; else an unlocked feed; else warn                                                  |
+| `feeds.noData`          | `materialClass = other`, `toolMaterial` unset/`other`, `D` outside bands | no suggestion (`None`); fallback or `plan.check` error as today                                                               |
+| `feeds.powerSkipped`    | milling without `spindle.power` (or without a machine)                   | info only: power check skipped; `Pc` still shown                                                                              |
+| `feeds.lockInactive`    | a stored lock breaks an [impossible-lock](#impossible-locks) rule now    | the lock is ignored (plan mode adds it, with `field` and the rule)                                                            |
 
 All warnings join `plan.warning.list` (chip load and power from the [final-value check](#final-value-check)); none is an error. Plan-mode machine checks are unchanged ([plan record](../modes/plan-v0.1.md#plan-record)).
 
@@ -178,6 +178,21 @@ A lock is **unavailable** (the plan refuses it; the UI shows the lock disabled w
 ### Final-value check
 
 Because entered values are not inputs, the calculator's own warnings describe its recommendation, not what will run. After resolution `checkCutting(input, final values)` re-runs the coupling checks on the values that will be used: chip load against the data range at the final engagement (`feeds.rubbing`, `feeds.chipLoadHigh`, `field: feedRate`) and power at the final `ae`, `ap`, `vf` (`feeds.powerExceeded`, `field: stepdown`; helix: `feedRate`). It runs in auto and preset mode whenever there is data. These warnings replace the calculator's `feeds.rubbing`, `feeds.chipLoadHigh` and `feeds.powerExceeded` in `plan.warning.list`; the calculator's warnings stay in its derivation. Spindle range and feed limits of the final values are plan mode's existing machine checks (`plan.machine`), not repeated here. `cuttingAt(input, final values)` derives the display values (`dCalc`, `vc`, `fz` after chip thinning, `chipThinning`, `Q`, `Pc`, `spindleLoad`) at the same values, for the plan's [feeds explanation](../modes/plan-v0.1.md#feeds-explanation-v02).
+
+### Feed clamp and chip load (hardening DF56)
+
+The rule (since task 2.12, [warnings table](#inputs-and-outputs)): when the machine's max feed caps the calculated feed, the calculator keeps the chip load by lowering the spindle speed with the feed, `n = vf_max / (z·fz_prog)` (drilling: `vf_max / fn`), but not below `spindle.minSpeed`. A **locked** spindle speed stays, and so does an **entered** one (it replaces only its own field, [Locked inputs](#locked-inputs)); then the chip load drops, and the [final-value check](#final-value-check) warns `feeds.rubbing` when it falls below the data range.
+
+The agent test of 2026-11-23 (TG #232) read the old `feeds.feedClamped` warning ("Feed rate limited to the machine maximum (X/Y).", params `suggested` 6400.8, `spindleSpeed` 8436) as "the speed stayed, the chip load fell 53 %": `spindleSpeed` was already the lowered speed (from 18,000 rpm), and the chip load was kept. So DF56 changes only what the warning says:
+
+- **Message** (unit-free, like every calculator message) says what happened to the speed and the chip load, in one of three forms:
+  - lowered: "Feed rate limited to the machine maximum (X/Y); spindle speed lowered with it, so the chip load stays."
+  - at the floor: "…; the spindle speed stops at the machine minimum, so the chip load drops by 23 %."
+  - locked: "…; the spindle speed is locked, so the chip load drops by 53 %."
+    Drilling says "Drilling feed limited to the machine maximum (Z)" with the same endings (feed per revolution instead of chip load).
+- **Params:** `suggested` (the unclamped feed) and `maxFeedRate` as before; `spindleSpeed` is the speed used, `suggestedSpindleSpeed` the speed before the clamp, `chipLoad` and `suggestedChipLoad` the programmed chip load (`vf / (n·z)`, mm per tooth; drilling `vf / n`, mm per revolution) after and before, `chipLoadDrop` the drop in % (0 when kept).
+- The plunge clamp (`maxFeedRate.z`) changes no speed and keeps its message.
+- Presets and entered feeds are not calculated, so they are never clamped: a feed above the machine maximum is the `plan.machine` finding `maxFeedRate`.
 
 ## Live vs. saved
 

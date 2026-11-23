@@ -9,7 +9,7 @@
 import type { Issue } from '../../../shared/errors/app-error'
 import { fail, Ok, type AppResult } from '../../../shared/result'
 import type { Vec3 } from '../../toolpath/model'
-import type { Block, MachiningProgram } from '../program'
+import type { Block, MachiningProgram, SetupHeader } from '../program'
 import {
   commentLine,
   formatNumber,
@@ -170,7 +170,8 @@ class Writer {
   private header(): void {
     const p = this.p
     this.comment(`Program: ${p.name}`)
-    this.comment(`Setup: ${p.setupName}`)
+    if (p.setup === undefined) this.comment(`Setup: ${p.setupName}`)
+    else this.setupComments(p.setup)
     this.comment(`Units: ${p.units === 'in' ? 'inch' : 'mm'}`)
     const seen = new Set<number>()
     for (const b of p.blocks) {
@@ -182,6 +183,19 @@ class Writer {
     this.comment(`Generator: ${this.opts.generator}`)
     this.modes()
     this.clearance()
+  }
+
+  /** The setup instructions (DF58): docs/architecture/grbl.md#setup-header-hardening-df58. */
+  private setupComments(h: SetupHeader): void {
+    const [x, y, z] = h.stock.map((v) => this.coord(v))
+    const corner = h.corner.replace(' ', '-')
+    this.comment(`Setup ${h.number} of ${h.count}: ${this.p.setupName}`)
+    this.comment(`Stock X ${x} Y ${y} Z ${z} ${this.p.units} on the machine`)
+    this.comment(`Faces: ${h.up} up, ${h.front} towards you, ${h.right} on the right`)
+    if (h.fromFirst !== undefined) this.comment(`From setup 1: ${h.fromFirst}`)
+    this.comment(`Work zero G54 X0 Y0: ${corner} corner of the ${h.up} face`)
+    this.comment('That corner sits front left on the machine')
+    this.comment(`Z0 on the ${h.up} face: the stock surface facing up`)
   }
 
   private modes(): void {

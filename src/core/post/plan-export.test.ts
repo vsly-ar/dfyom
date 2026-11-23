@@ -11,7 +11,7 @@ import { planSetup, type PlanSetup } from '../plan/plan.fixture'
 import { createToolpathCache, type ToolpathCache } from '../toolpath/cache'
 import type { Toolpath } from '../toolpath/model'
 import type { GeneratorRequest } from '../toolpath/request'
-import { exportPlan, type ExportFiles, type PlanExport } from './plan-export'
+import { exportPlan, SOFT_LIMIT_NOTE, type ExportFiles, type PlanExport } from './plan-export'
 
 const ui = uiSource()
 
@@ -59,6 +59,7 @@ interface Setup {
 type Result = Omit<PlanExport, 'program' | 'lines' | 'text'> & {
   filePath: string
   lines: number
+  softLimitNote?: string
 }
 
 async function setup(
@@ -126,6 +127,9 @@ describe('plan.export', () => {
     expect(r.regenerated).toEqual(t.order)
     expect(r.filePath).toBe('/out/plan.nc')
     expect(r.softLimitChecked).toBe(false)
+    // DF58: without the check the result says how to check
+    expect(r.softLimitNote).toBe(SOFT_LIMIT_NOTE)
+    expect(r.softLimitNote).toContain('run.job.check')
     expect(Array.isArray(r.warnings)).toBe(true)
     expect(r.stats.cutLength).toBeGreaterThan(0)
     expect(r.stats.toolChanges).toBeGreaterThan(0)
@@ -137,7 +141,12 @@ describe('plan.export', () => {
     // the plan's name, its setup, its tool copies' names and the operations' names
     const plan = t.s.plan(t.planId)
     expect(text).toContain(`(Program: ${plan.name})`)
-    expect(text).toContain(`(Setup: ${plan.setups[0]!.name})`)
+    expect(text).toContain(`(Setup 1 of 1: ${plan.setups[0]!.name})`)
+    // DF58: the setup instructions (an unrotated top setup)
+    expect(text).toContain('(Faces: top up, front towards you, right on the right)')
+    expect(text).toContain('(Work zero G54 X0 Y0: front-left corner of the top face)')
+    expect(text).toContain('(Z0 on the top face: the stock surface facing up)')
+    expect(text).toMatch(/^\(Stock X \d+ Y \d+ Z \d+ mm on the machine\)$/m)
     const toolNames = plan.snapshots.filter((c) => c.kind === 'tool').map((c) => c.values.name)
     for (const name of toolNames) expect(text).toContain(name)
     const design = plan.design.part.operations

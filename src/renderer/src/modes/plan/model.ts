@@ -19,6 +19,7 @@ import type {
   PlanStatus,
   SetupDTO,
 } from '../../../../core/plan/plan.dto'
+import { setupCorner as coreSetupCorner } from '../../../../core/plan/setup-header'
 import { setupDirection, setupRotation } from '../../../../core/plan/setups'
 import { STRATEGY_KEYS, type StrategyKey } from '../../../../core/plan/strategy'
 import { ALLOWED, TRANSITIONS } from '../../../../core/plan/status'
@@ -155,20 +156,11 @@ export function setupPlacement(setup: SetupDTO, stock: StockSize): Placement {
 }
 
 /**
- * The part corner the setup's work zero (G54) sits at, named by the part faces that meet there
- * besides the up face: "front left" for an unrotated top setup, "back left" for the bottom. On
- * the machine it is always the front-left corner of the up face.
+ * The part corner the setup's work zero (G54) sits at ("front left" for an unrotated top setup,
+ * "back left" for the bottom): the core's, which the gCode header uses too (DF58).
  */
-export function setupCorner(setup: SetupDTO, stock: StockSize): string {
-  const o = setupPlacement(setup, stock).origin
-  const zero = (a: number) => Math.abs(a) < 1e-9
-  const axis = setupDirection(setup)[1]
-  const words: string[] = []
-  if (axis !== 'z') words.push(zero(o[2]) ? 'top' : 'bottom')
-  if (axis !== 'y') words.push(zero(o[1]) ? 'front' : 'back')
-  if (axis !== 'x') words.push(zero(o[0]) ? 'left' : 'right')
-  return words.join(' ')
-}
+export const setupCorner = (setup: SetupDTO, stock: StockSize): string =>
+  coreSetupCorner(setup, stock)
 
 /** A setup's direction (absent = `+z`). */
 export const directionOfSetup = (setup: SetupDTO): Direction => setupDirection(setup)

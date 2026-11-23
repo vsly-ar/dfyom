@@ -12,7 +12,7 @@ import { fail, Ok, type AppResult, type Option } from '../../shared/result'
 import { arcSweep, expandDrill, PECK_CLEARANCE } from '../toolpath/stats'
 import type { Move, Toolpath, Vec3 } from '../toolpath/model'
 import { DEFAULT_SPIN_UP_SECONDS, postGrblLines, type PostOptions } from './grbl/post'
-import type { Block, MachiningProgram, ProgramTool } from './program'
+import type { Block, MachiningProgram, ProgramTool, SetupHeader } from './program'
 
 /** One plan operation's toolpath with its tool copy, in machining order. */
 export interface ExportOperation {
@@ -31,7 +31,12 @@ export interface ExportOperation {
 export interface ExportInput {
   /** Plan name. */
   readonly name: string
-  readonly setup: { readonly name: string; readonly clearanceHeight: number }
+  readonly setup: {
+    readonly name: string
+    readonly clearanceHeight: number
+    /** Setup instructions for the header (DF58). */
+    readonly header?: SetupHeader
+  }
   readonly operations: readonly ExportOperation[]
   /** The plan's machine copy; export requires one (`post.noMachine`). */
   readonly machine: Option<Machine>
@@ -167,6 +172,7 @@ export function toMachiningProgram(
   return Ok({
     name: input.name,
     setupName: input.setup.name,
+    ...(input.setup.header === undefined ? {} : { setup: input.setup.header }),
     units,
     spindleControl: machine.spindle.control,
     clearanceZ,
