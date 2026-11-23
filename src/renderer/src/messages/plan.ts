@@ -201,6 +201,11 @@ export const planMessages = {
     noSelection: 'Select a plan operation to choose its tool and feeds and speeds.',
     noPlan: 'Create the plan in the view to start.',
     summary: (n: number) => plural(n, 'operation', 'operations'),
+    /** The count's tooltip (DF44): equal holes and chamfers share one plan operation. */
+    summaryTip: (n: number, design: number) =>
+      n === design
+        ? `${plural(n, 'plan operation', 'plan operations')}, one per design operation.`
+        : `${plural(n, 'plan operation', 'plan operations')} from the design's ${plural(design, 'operation', 'operations')}: equal holes and chamfers (clones too) are machined together as one.`,
     commandFailed: 'The change was not applied.',
     groups: { tool: 'Tool', strategy: 'Strategy', feeds: 'Feeds and speeds' },
     // plan-only edits (task E3b): docs/modes/plan-v0.2.md#plan-only-edits-and-the-snapshot-scene

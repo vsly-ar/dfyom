@@ -31,6 +31,7 @@ import {
   type IconName,
   type Reorder,
 } from '../../ui'
+import { partOperationIcon } from '../design/operation-icon'
 import { DirectionIcon } from './DirectionIcon'
 import {
   allows,
@@ -38,7 +39,6 @@ import {
   isError,
   isWarning,
   operationStep,
-  planOperationKind,
   planOperationName,
   planStockSize,
   rowStale,
@@ -53,11 +53,14 @@ import { findingsOf, useCurrentSetup, usePlanSelection } from './usePlan'
 
 const m = planMessages
 
-export const KIND_ICON: Record<string, IconName> = {
-  facing: 'facing',
-  pocket: 'pocket',
-  drilling: 'drilling',
-  profile: 'profile',
+/**
+ * A plan operation's row icon: its first design operation's, as the design navigator shows it
+ * (DF44: a countersink or chamfer never reads as a facing, a counterbore never as a pocket).
+ */
+export function planOperationIcon(plan: PlanDTO, designOperationIds: readonly string[]): IconName {
+  const part = plan.design.part
+  const op = part.operations.find((o) => o.id === designOperationIds[0])
+  return op === undefined ? 'facing' : partOperationIcon(part, op)
 }
 
 /** One line of a setup row: "Bottom · G54 back left · 0°"; without the face when the name is the face. */
@@ -385,7 +388,6 @@ function OperationRow({
   onMoveTo: (setup: SetupDTO) => void
 }): React.JSX.Element {
   const name = planOperationName(plan, op.designOperationIds)
-  const kind = planOperationKind(plan, op.designOperationIds) ?? 'facing'
   const findings = findingsOf(data?.warnings ?? [], op.id)
   const errors = findings.filter(isError).length
   const warnings = findings.filter(isWarning).length
@@ -438,10 +440,10 @@ function OperationRow({
         onClick={onSelect}
         onKeyDown={onKeyDown}
       >
-        <Icon name={KIND_ICON[kind] ?? 'facing'} />
+        <Icon name={planOperationIcon(plan, op.designOperationIds)} />
         <span className={styles['opText']}>
           <span className={styles['opName']} title={name}>
-            {name}
+            <NameWords name={name} />
           </span>
           <span className={styles['opMeta']}>
             <span className={styles['opTool']}>{tool ?? m.operations.noTool}</span>
@@ -488,6 +490,27 @@ function OperationRow({
         </span>
       ) : null}
     </li>
+  )
+}
+
+/**
+ * A plan operation's name for its row: a count or instance number stays with its sign when the
+ * name wraps ("Bolt hole 2 · drill × 6", never "× / 6"; DF44). The text is unchanged.
+ */
+function NameWords({ name }: { name: string }): React.JSX.Element {
+  const parts = name.split(/( (?:×|·) \d+)(?=,|$)/)
+  return (
+    <>
+      {parts.map((p, i) =>
+        i % 2 === 1 ? (
+          <span key={i} className={styles['nowrap']}>
+            {p}
+          </span>
+        ) : (
+          p
+        ),
+      )}
+    </>
   )
 }
 

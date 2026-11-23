@@ -28,6 +28,21 @@ export const MATERIAL_CLASSES = [
 export type MaterialClass = (typeof MATERIAL_CLASSES)[number]
 export const MaterialClassSchema = z.enum(MATERIAL_CLASSES)
 
+/**
+ * A material class in words, lower case, for core-built visible text (reasons, warnings): never
+ * the enum key (DF44; ui.md § Copy and terminology). The renderer's own labels are capitalized.
+ */
+export const MATERIAL_CLASS_WORDS: Record<MaterialClass, string> = {
+  softwood: 'softwood',
+  hardwood: 'hardwood',
+  sheetGood: 'sheet good',
+  plastic: 'plastic',
+  aluminum: 'aluminium',
+  brass: 'brass',
+  steel: 'steel',
+  other: 'other',
+}
+
 export const NAME_MAX = 120
 export const NOTES_MAX = 4000
 /**

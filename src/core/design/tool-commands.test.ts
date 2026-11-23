@@ -391,7 +391,7 @@ describe('design.tool.candidates', () => {
     await s.pocket()
     const c = s.candidates('pocket1')
     expect(c.fitting.map((f) => f.toolLibraryItemId)).toEqual([preset, big, small])
-    expect(c.fitting[0]?.reasons[0]).toBe('has a preset for aluminum')
+    expect(c.fitting[0]?.reasons[0]).toBe('has a preset for aluminium')
     expect(c.generalized).toMatchObject({ kind: 'generalized', type: 'flatEndMill' })
     expect(src((c.generalized as { diameter: unknown }).diameter)).toBe('8 mm')
     expect(c.current).toBeNull()

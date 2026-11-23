@@ -520,7 +520,7 @@ const TOOL_CANDIDATES = [
     value: 'lib:t1',
     label: 'Flat 6 · Ø 6 mm',
     group: 'Library tools that fit',
-    description: 'Has a preset for aluminum',
+    description: 'Has a preset for aluminium',
   },
   { value: 'lib:t2', label: 'Flat 4 · Ø 4 mm', group: 'Library tools that fit' },
 ]

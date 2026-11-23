@@ -60,7 +60,11 @@ export const designMessages = {
         .join(', '),
     source: 'Source',
     sourceOf: (name: string) => `Source of ${name}`,
-    clonesGroup: 'Clones',
+    /** The Clones row's instance group (DF44: not "Clones 5", which reads like a feature). */
+    clonesGroup: (n: number) => (n === 1 ? '1 clone' : `${n} clones`),
+    /** An instance row's position (DF44): "X 196.50 · Y 115.59 mm" (u · v off the top face). */
+    instanceAt: (u: string, v: string, axes: { u: string; v: string }, unit: string) =>
+      `${axes.u} ${u} · ${axes.v} ${v} ${unit}`,
     rows: 'Rows',
     instancesOf: (name: string) => `Instances of ${name}`,
     instance: (n: number) => `Clone ${n}`,
@@ -359,6 +363,14 @@ export const designMessages = {
 
   navigator: {
     operations: 'Operations',
+    /**
+     * The Operations header count's tooltip (DF44): the count is the list's rows, as shown; the
+     * tooltip adds the operations in all when features hold more.
+     */
+    countTip: (rows: number, ops: number) =>
+      rows === ops
+        ? `${ops === 1 ? '1 operation' : `${ops} operations`} in design order.`
+        : `${rows === 1 ? '1 row' : `${rows} rows`} in the list; ${ops === 1 ? '1 operation' : `${ops} operations`} in all, counting each hole's operations and every clone.`,
     listLabel: 'Operations in design order',
     empty: {
       title: 'No operations yet',

@@ -269,13 +269,6 @@ export function findingNames(plan: PlanDTO): FindingNames {
   }
 }
 
-export function planOperationKind(
-  plan: PlanDTO,
-  designOperationIds: readonly string[],
-): OperationKind | undefined {
-  return plan.design.part.operations.find((o) => o.id === designOperationIds[0])?.kind
-}
-
 // ── queries ───────────────────────────────────────────────────────────────────────────────
 
 /** Lock of a feeds field (docs/modes/plan-v0.1.md#locks-and-auto-mode). */

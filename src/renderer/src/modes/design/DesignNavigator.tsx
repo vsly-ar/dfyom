@@ -27,6 +27,7 @@ import styles from './Design.module.css'
 import { failingOperation, type DesignPart } from './model'
 import { useAddOperation } from './useAddOperation'
 import { OperationList } from './OperationList'
+import { operationUnits } from './feature-view'
 import { stockReadout } from './PartSetupDialogs'
 import { useDesignEvaluation, useDesignSelection, useDesignWarnings } from './useDesign'
 
@@ -119,6 +120,8 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
   ]
 
   const readout = stockReadout(part)
+  // the list's rows: plain operations and features (a hole's or a Clones' operations nest)
+  const rows = operationUnits(part).length
   const openDialog = useUi((st) => st.setDesignDialog)
 
   return (
@@ -148,7 +151,11 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
       </section>
       <PanelHeader
         title={m.navigator.operations}
-        meta={ops.length > 0 ? String(ops.length) : undefined}
+        meta={
+          ops.length > 0 ? (
+            <span title={m.navigator.countTip(rows, ops.length)}>{rows}</span>
+          ) : undefined
+        }
         actions={
           <Menu label={m.addMenu} items={addItems}>
             <IconButton label={m.addMenu} icon={<Icon name="add" />} />

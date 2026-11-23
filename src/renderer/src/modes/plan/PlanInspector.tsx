@@ -172,7 +172,14 @@ function PlanSummary({
   const machine = snapshotName(plan, plan.machine)
   return (
     <div className={styles['inspector']}>
-      <PanelHeader title={t.plan} meta={t.summary(ops.length)} />
+      <PanelHeader
+        title={t.plan}
+        meta={
+          <span title={t.summaryTip(ops.length, plan.design.part.operations.length)}>
+            {t.summary(ops.length)}
+          </span>
+        }
+      />
       <div className={styles['fields']}>
         <NameField
           label={t.name}
