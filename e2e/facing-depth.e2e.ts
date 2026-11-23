@@ -73,7 +73,10 @@ test('facing depth from the reference: Add facing and the Depth field suggest it
   await setField(setup, 'Length (X)', '260')
   await setField(setup, 'Width (Y)', '190')
   await setField(setup, 'Thickness (Z)', '40')
-  await setup.getByRole('button', { name: 'Create part' }).click()
+  await page
+    .getByRole('dialog', { name: 'Stock' })
+    .getByRole('button', { name: 'Create part' })
+    .click()
 
   // import in the Reference panel (fitted to the top), then lower it 0.5 mm into the stock
   const panel = await openReferencePanel(page)

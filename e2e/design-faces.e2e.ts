@@ -35,7 +35,10 @@ test('face picking and anchors: on by direction, side-face fields, anchor picker
   await setField(setup, 'Length (X)', '100')
   await setField(setup, 'Width (Y)', '60')
   await setField(setup, 'Thickness (Z)', '20')
-  await setup.getByRole('button', { name: 'Create part' }).click()
+  await page
+    .getByRole('dialog', { name: 'Stock' })
+    .getByRole('button', { name: 'Create part' })
+    .click()
 
   // ── F1: the `on` dropdown groups the face targets by direction ───────────────────────────
   await navigator.getByRole('button', { name: 'Add pocket' }).click()

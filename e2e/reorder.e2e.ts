@@ -52,7 +52,10 @@ test('reorder (D45): drag operation rows by their grip; a refused drop says why'
   await setField(setup, 'Length (X)', '100')
   await setField(setup, 'Width (Y)', '60')
   await setField(setup, 'Thickness (Z)', '20')
-  await setup.getByRole('button', { name: 'Create part' }).click()
+  await page
+    .getByRole('dialog', { name: 'Stock' })
+    .getByRole('button', { name: 'Create part' })
+    .click()
   await navigator.getByRole('button', { name: 'Add facing' }).click()
   // the pocket's default `on` is the facing's floor: it can't go before the facing
   for (const kind of ['Pocket', 'Profile']) {

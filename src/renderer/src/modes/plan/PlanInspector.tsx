@@ -189,7 +189,7 @@ function PlanSummary({
           <StatusChip tone={plan.status === 'draft' ? 'neutral' : 'success'}>
             {m.statuses[plan.status]}
           </StatusChip>{' '}
-          {machine === undefined ? m.export.noMachine : `${m.machine.title}: ${machine}`}
+          {machine === undefined ? m.machine.missing : `${m.machine.title}: ${machine}`}
         </p>
         <p className={styles['muted']}>{t.noSelection}</p>
         <section aria-label={m.warnings.title} className={styles['warnings']}>

@@ -129,7 +129,10 @@ test('v0.2 golden path through the UI: reference, faces, setups, export and run 
   await setup.getByRole('textbox', { name: 'Material name' }).fill('Walnut')
   await setup.getByRole('combobox', { name: 'Material class' }).click()
   await page.getByRole('option', { name: 'Hardwood' }).click()
-  await setup.getByRole('button', { name: 'Create part' }).click()
+  await page
+    .getByRole('dialog', { name: 'Stock' })
+    .getByRole('button', { name: 'Create part' })
+    .click()
   await expect(navigator.getByText(/^Stock: 255 × 185 × 40/)).toBeVisible()
 
   // ── Import the STL reference (read as mm, fitted centre + top), onto the bottom ──────────

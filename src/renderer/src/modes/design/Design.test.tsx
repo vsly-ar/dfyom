@@ -103,7 +103,14 @@ describe('design mode', () => {
     )
     const length = within(form).getByRole('combobox', { name: 'Length (X)' })
     await retype(user, length, '120{Enter}')
-    await user.click(within(form).getByRole('button', { name: 'Create part' }))
+    // the primary Create part is in the footer beside Cancel, not in the body (DF12 re-report)
+    const create = within(dialog).getByRole('button', { name: 'Create part' })
+    const cancel = within(dialog).getByRole('button', { name: 'Cancel' })
+    expect(within(form).queryByRole('button', { name: 'Create part' })).toBeNull()
+    expect(create.parentElement).toBe(cancel.parentElement)
+    expect(create.parentElement!.lastElementChild).toBe(create)
+    expect(create.parentElement!.contains(form)).toBe(false)
+    await user.click(create)
     // Create part closes it; the sidebar starts with the part row, then the operations (DF15)
     await waitFor(() => expect(dialog).not.toBeInTheDocument())
     await within(navigator()).findByRole('heading', { name: 'No operations yet' })
@@ -206,7 +213,7 @@ describe('design mode', () => {
         parentId: root.id,
       }),
     )
-    await user.click(within(form).getByRole('button', { name: 'Create part' }))
+    await user.click(within(dialog).getByRole('button', { name: 'Create part' }))
     await waitFor(() => expect(dialog).not.toBeInTheDocument())
     const part = Object.values(d.doc.parts)[0]!
     expect(d.doc.snapshots[part.stock]!.libraryItemId).toBe(variant.id)

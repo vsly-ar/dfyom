@@ -31,7 +31,10 @@ test('shape editor: add a shape, drag a handle, edit a field, undo', async ({ df
   await setField(setup, 'Length (X)', '100')
   await setField(setup, 'Width (Y)', '60')
   await setField(setup, 'Thickness (Z)', '20')
-  await setup.getByRole('button', { name: 'Create part' }).click()
+  await page
+    .getByRole('dialog', { name: 'Stock' })
+    .getByRole('button', { name: 'Create part' })
+    .click()
 
   // ── add a rectangle from the Shapes dialog (D45): it is selected, the dialog closes ──────
   let shapes = await openPartSetup(page, 'Shapes')

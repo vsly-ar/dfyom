@@ -46,7 +46,10 @@ test('shapes on operations: import SVG, pick a named shape, drag a tab, undo', a
   await setField(setup, 'Length (X)', '120')
   await setField(setup, 'Width (Y)', '80')
   await setField(setup, 'Thickness (Z)', '20')
-  await setup.getByRole('button', { name: 'Create part' }).click()
+  await page
+    .getByRole('dialog', { name: 'Stock' })
+    .getByRole('button', { name: 'Create part' })
+    .click()
 
   // ── Import SVG… from the Shapes dialog (D45) ─────────────────────────────────────────────
   const shapes = await openPartSetup(page, 'Shapes')
