@@ -54,6 +54,7 @@ export const SHORTCUTS: readonly { group: keyof typeof m.groups; items: [string,
     group: 'design',
     items: [
       [`${alt}↑ ${alt}↓`, m.what.move],
+      [`${shift}F10`, m.what.rowMenu],
       [`${alt}drag`, m.what.noSnap],
       [`${shift}drag`, m.what.angleStep],
     ],

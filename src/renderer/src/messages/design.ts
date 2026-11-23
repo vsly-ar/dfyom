@@ -23,12 +23,23 @@ export const designMessages = {
     })[kind],
   /** The operation list's one Add menu (v0.4 task U1: was "Add operation"). */
   addMenu: 'Add',
+  /** The Add menu's tooltips (dogfood DF18): what each item makes, one line. */
+  describe: {
+    facing: 'Flattens the stock top to an even height.',
+    pocket: 'Clears the area inside a shape down to a depth.',
+    drilling: 'Drills round holes, blind or through.',
+    profile: 'Cuts along a shape’s outline: around it, inside it or on the line.',
+    chamfer: 'Bevels the top edge of a drilling or round pocket.',
+    hole: 'A hole for a screw or bolt: simple, counterbored or countersunk, sized from the fastener.',
+  } satisfies Record<OperationKind | 'hole', string>,
 
   /** Features in the navigator and inspector (v0.4 task U1, ui.md § Features (v0.4)). */
   features: {
     groups: { operations: 'Operations', features: 'Features' },
-    addHole: 'Add hole',
-    addChamfer: 'Add chamfer',
+    /** The Add menu's feature item (DF17: the hole feature is a "Bolt hole"; kind stays `hole`). */
+    addHole: 'Bolt hole',
+    /** The row menu's actions (dogfood DF16). */
+    chamfer: 'Chamfer',
     makeClones: 'Make Clones…',
     cloneReasons: {
       select: 'Select a hole, pocket, drilling, chamfer or inside profile to clone.',
@@ -71,7 +82,7 @@ export const designMessages = {
     readOnly: (featureName: string, kindLabel: string) =>
       `Part of ${featureName}: change it in the ${kindLabel.toLowerCase()}.`,
     fixIn: (featureName: string) => `Fix in ${featureName}`,
-    kindLabel: (kind: string) => ({ hole: 'Hole', clones: 'Clones' })[kind] ?? kind,
+    kindLabel: (kind: string) => ({ hole: 'Bolt hole', clones: 'Clones' })[kind] ?? kind,
     /** The minimal feature inspector until the kind's own (hole: U2). */
     placeholder: 'Its values are shown here; editing them in this panel comes next.',
     findings: 'Findings',
@@ -315,6 +326,8 @@ export const designMessages = {
       description: 'Add an operation to remove material from the stock, starting with facing.',
     },
     remove: (name: string) => `Remove ${name}`,
+    /** The row menu's Remove (DF16). */
+    removeItem: 'Remove',
     actions: (name: string) => `Actions for ${name}`,
     warnings: (n: number) => (n === 1 ? '1 warning' : `${n} warnings`),
     failed: 'Evaluation failed here',

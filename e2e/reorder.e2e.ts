@@ -55,7 +55,7 @@ test('reorder (D45): drag operation rows by their grip; a refused drop says why'
   await setup.getByRole('button', { name: 'Create part' }).click()
   await navigator.getByRole('button', { name: 'Add facing' }).click()
   // the pocket's default `on` is the facing's floor: it can't go before the facing
-  for (const kind of ['Add pocket', 'Add profile']) {
+  for (const kind of ['Pocket', 'Profile']) {
     await navigator.getByRole('button', { name: 'Add', exact: true }).click()
     await page.getByRole('menuitem', { name: kind }).click()
   }

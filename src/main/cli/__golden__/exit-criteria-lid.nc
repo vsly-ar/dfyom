@@ -8,7 +8,7 @@
 G90 G94 G17 G21
 G54
 G0 Z10
-(Hole 1 - drill x 4)
+(Bolt hole 1 - drill x 4)
 (DFYOM TOOL CHANGE 1: Flat 3)
 M3 S18000
 (Set spindle to 18000 rpm)
@@ -837,7 +837,7 @@ Y55.9 I0 J0.2
 Y55.5 I0 J-0.2
 G1 Y55.7
 G0 Z10
-(Hole 2 - counterbore)
+(Bolt hole 2 - counterbore)
 (Clones 2 #1)
 X205.5 Y98.8
 Z2
@@ -913,7 +913,7 @@ Y97.5 I0 J-2.5
 G1 Y97.7
 G0 Z2
 Z10
-(Hole 2 - counterbore - 2)
+(Bolt hole 2 - counterbore - 2)
 (Clones 2 #2)
 X196.5 Y114.388
 Z2
@@ -989,7 +989,7 @@ Y113.088 I0 J-2.5
 G1 Y113.288
 G0 Z2
 Z10
-(Hole 2 - counterbore - 3)
+(Bolt hole 2 - counterbore - 3)
 (Clones 2 #3)
 X178.5 Y114.388
 Z2
@@ -1065,7 +1065,7 @@ Y113.088 I0 J-2.5
 G1 Y113.288
 G0 Z2
 Z10
-(Hole 2 - counterbore - 4)
+(Bolt hole 2 - counterbore - 4)
 (Clones 2 #4)
 X169.5 Y98.8
 Z2
@@ -1141,7 +1141,7 @@ Y97.5 I0 J-2.5
 G1 Y97.7
 G0 Z2
 Z10
-(Hole 2 - counterbore - 5)
+(Bolt hole 2 - counterbore - 5)
 (Clones 2 #5)
 X178.5 Y83.212
 Z2
@@ -1217,7 +1217,7 @@ Y81.912 I0 J-2.5
 G1 Y82.112
 G0 Z2
 Z10
-(Hole 2 - counterbore - 6)
+(Bolt hole 2 - counterbore - 6)
 (Clones 2 #6)
 X196.5 Y83.212
 Z2
@@ -1293,7 +1293,7 @@ Y81.912 I0 J-2.5
 G1 Y82.112
 G0 Z2
 Z10
-(Hole 2 - drill x 6)
+(Bolt hole 2 - drill x 6)
 (Clones 2 #4)
 X169.5 Y99.25
 Z-2.2
@@ -1857,7 +1857,7 @@ Y92 I0 J-8
 G1 Y92.2
 G0 Z2
 Z10
-(Hole 1 - countersink x 4)
+(Bolt hole 1 - countersink x 4)
 M5
 (Stop the spindle)
 (DFYOM TOOL CHANGE 3: Chamfer 90 x 12)

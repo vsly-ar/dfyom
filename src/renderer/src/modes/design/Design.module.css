@@ -167,6 +167,12 @@
   list-style: none;
 }
 
+/* the design operation list reserves the grip's slot before the row icons (DF24); nested rows
+   indent from it */
+.opsGrip {
+  --grip-slot: 14px;
+}
+
 .op {
   position: relative;
   display: grid;
@@ -191,7 +197,7 @@
   gap: var(--space-2);
   align-items: center;
   min-height: var(--control-md);
-  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
+  padding: var(--space-1) var(--space-2) var(--space-1) calc(var(--grip-slot, 0px) + var(--space-3));
   border: 0;
   background: none;
   font: inherit;
@@ -250,6 +256,28 @@
   height: var(--icon-sm);
 }
 
+/* the grip before the row icon (DF24): in the row's start gutter, shown with the row's actions */
+.op > .rowGrip {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  left: 0;
+  width: var(--grip-slot, 14px);
+  height: var(--control-md);
+  border-radius: var(--radius-xs);
+  opacity: 0;
+  transition:
+    opacity var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
+}
+
+.op:hover > .rowGrip,
+.op:focus-within > .rowGrip,
+.op[data-selected] > .rowGrip,
+.ops[data-dragging] .rowGrip {
+  opacity: 1;
+}
+
 .opActions {
   /* over the row's end while hovered, focused or selected, so names keep the full width */
   position: absolute;
@@ -302,7 +330,7 @@
 .chevron {
   position: absolute;
   top: 50%;
-  left: 0;
+  left: var(--grip-slot, 0px);
   display: inline-grid;
   place-items: center;
   width: var(--space-3);
@@ -374,7 +402,7 @@
   position: absolute;
   top: 0;
   bottom: var(--space-1);
-  left: calc(var(--space-3) + 2px + var(--space-1));
+  left: calc(var(--grip-slot, 0px) + var(--space-3) + 2px + var(--space-1));
   width: 1px;
   background: var(--border);
 }
@@ -383,7 +411,7 @@
 .op[data-owned] .opSelect,
 .op[data-nested] .opSelect,
 .featureItem[data-nested] > .op > .opSelect {
-  padding-left: calc(var(--space-3) + var(--space-2));
+  padding-left: calc(var(--grip-slot, 0px) + var(--space-3) + var(--space-2));
 }
 
 .op[data-owned] .opSelect,
@@ -392,18 +420,19 @@
 }
 
 .featureItem[data-nested] .chevron {
-  left: var(--space-2);
+  left: calc(var(--grip-slot, 0px) + var(--space-2));
 }
 
 /* a nested feature's own children: one more step */
 .featureItem[data-nested] .owned .op[data-owned] .opSelect {
-  padding-left: calc(var(--space-3) + 2 * var(--space-2));
+  padding-left: calc(var(--grip-slot, 0px) + var(--space-3) + 2 * var(--space-2));
 }
 
 /* Clones groups (Source, Clones) */
 .subgroupTitle {
   margin: 0;
-  padding: var(--space-1) var(--space-3) 0 calc(var(--space-3) + var(--space-2));
+  padding: var(--space-1) var(--space-3) 0
+    calc(var(--grip-slot, 0px) + var(--space-3) + var(--space-2));
   font-size: var(--text-xs);
   line-height: var(--lh-xs);
   font-weight: var(--weight-medium);
@@ -415,7 +444,8 @@
   gap: var(--space-1);
   align-items: center;
   min-height: var(--control-sm);
-  padding: var(--space-1) var(--space-3) var(--space-1) calc(var(--space-3) + var(--space-2));
+  padding: var(--space-1) var(--space-3) var(--space-1)
+    calc(var(--grip-slot, 0px) + var(--space-3) + var(--space-2));
   border: 0;
   background: none;
   font: inherit;
@@ -481,7 +511,10 @@
   align-items: baseline;
   min-height: var(--control-sm);
   padding: var(--space-0-5) var(--space-3) var(--space-0-5)
-    calc(var(--space-3) + var(--space-2) + var(--icon-md) + var(--space-2) - 2px);
+    calc(
+      var(--grip-slot, 0px) + var(--space-3) + var(--space-2) + var(--icon-md) + var(--space-2) -
+        2px
+    );
   border: 0;
   background: none;
   font: inherit;
@@ -763,7 +796,8 @@
 
 .shapeReason {
   margin: 0;
-  padding: 0 var(--space-3) var(--space-1) calc(var(--space-3) + var(--icon-md) + var(--space-2));
+  padding: 0 var(--space-3) var(--space-1)
+    calc(var(--grip-slot, 0px) + var(--space-3) + var(--icon-md) + var(--space-2));
   font-size: var(--text-xs);
   line-height: var(--lh-xs);
   color: var(--text-muted);

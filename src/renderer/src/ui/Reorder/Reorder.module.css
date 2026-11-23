@@ -77,7 +77,8 @@
   }
 }
 
-/* the dotted grip: 2 × 3 dots, a pointer convenience (the row's Alt+↑/↓ is the keyboard path) */
+/* the dotted grip: 2 × 3 small dots (DF24), a pointer convenience (the row's Alt+↑/↓ is the
+   keyboard path) */
 .grip {
   display: inline-grid;
   flex: none;
@@ -93,10 +94,10 @@
 
 .grip::before {
   content: '';
-  width: 8px;
-  height: 14px;
-  background-image: radial-gradient(circle, currentColor 1.1px, transparent 1.4px);
-  background-size: 4px 5px;
+  width: 6px;
+  height: 12px;
+  background-image: radial-gradient(circle, currentColor 0.75px, transparent 1.05px);
+  background-size: 3px 4px;
   background-position: 0 0;
 }
 

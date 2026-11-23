@@ -562,7 +562,7 @@ function customSizeNotes(h: Hole, ownedId: (role: string) => string): DfmWarning
 export const holeSpec: FeatureKindSpec<Hole> = {
   kind: 'hole',
   idPrefix: 'hole',
-  label: 'Hole',
+  label: 'Bolt hole',
   fromDTO: holeFromDTO,
   toDTO: holeToDTO,
   invariants: holeInvariants,

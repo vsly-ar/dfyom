@@ -314,7 +314,7 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
   await expect(inspector.getByRole('heading', { name: 'Facing 1' })).toBeVisible()
   await setField(inspector, 'Depth', '1')
 
-  await addOperation(page, 'Add pocket', 'Pocket 1')
+  await addOperation(page, 'Pocket', 'Pocket 1')
   await pickOn(page, /^Facing 1 floor/)
   await pickShape(page, 'cavity')
   await setField(inspector, 'Position X', PLACE.cavity[0])
@@ -443,7 +443,7 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
   await expect(editor).toHaveCount(0)
 
   // its pocket across the back wall, rotated 90°
-  await addOperation(page, 'Add pocket', 'Pocket 2')
+  await addOperation(page, 'Pocket', 'Pocket 2')
   await pickOn(page, /^Facing 1 floor/)
   await pickShape(page, 'Cable notch')
   await setField(inspector, 'Position X', PLACE.notch[0])
@@ -453,7 +453,7 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
   await setField(inspector, 'Depth', '10')
 
   // ── the outline as an outside profile: four tabs along the loop, the library's Flat 12 locked
-  await addOperation(page, 'Add profile', 'Profile 1')
+  await addOperation(page, 'Profile', 'Profile 1')
   await pickShape(page, 'outline')
   await setField(inspector, 'Position X', PLACE.outline[0])
   await setField(inspector, 'Position Y', PLACE.outline[1])
@@ -506,7 +506,7 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
     ['216', '136.8'],
   ] as const
   for (const [i, [u, v]] of holes.entries()) {
-    await addOperation(page, 'Add drilling', `Drilling ${i + 1}`)
+    await addOperation(page, 'Drilling', `Drilling ${i + 1}`)
     await pickOn(page, /^Stock bottom/)
     await setField(inspector, 'Center u', u)
     await setField(inspector, 'Center v', v)
@@ -541,7 +541,7 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
   await page.keyboard.press('Escape')
   await expect(editor).toHaveCount(0)
 
-  await addOperation(page, 'Add profile', 'Profile 2')
+  await addOperation(page, 'Profile', 'Profile 2')
   await pickOn(page, /^Stock bottom/)
   // an open path is cut on the line only: picked while the side is Outside, the side turns On
   // in the same step, with a notice (X2 finding: it was refused at the picker before)

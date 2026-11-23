@@ -26,6 +26,15 @@ export const shellMessages = {
   },
   settings: 'Settings',
   library: 'Library',
+  /** The toolbar's File group (dogfood DF14): the File menu's New / Open / Save. */
+  file: {
+    toolbar: 'File',
+    newProject: 'New project…',
+    open: 'Open project…',
+    save: 'Save',
+    /** Save while the project has unsaved changes (the icon shows a dot). */
+    saveDirty: 'Save (unsaved changes)',
+  },
 
   modes: { design: 'Design', plan: 'Plan', run: 'Run' } satisfies Record<AppMode, string>,
 

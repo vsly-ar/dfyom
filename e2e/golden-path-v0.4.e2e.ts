@@ -4,9 +4,9 @@
 // tools with plywood presets (Flat 6, Flat 3 and the chamfer mill 90° × Ø 12) drafted and saved in
 // the Library window; a project on a 255 × 200 × 6 plywood board (D40); "Import SVG…" of the
 // v0.3 drawing, the cavity removed so the outline stays; the outline profiled outside with six
-// tabs (two relocate, D42); the countersunk M3 hole through "Add › Features › Add hole" with the
+// tabs (two relocate, D42); the countersunk M3 hole through "Add › Features › Bolt hole" with the
 // fastener picker and a Make Clones… grid 2 × 2; the Ø 22 cutout as an inside circle profile with
-// a standalone chamfer on its edge (Add chamfer, X2), the counterbored M3 hole 18 mm right of it
+// a standalone chamfer on its edge (Chamfer in its row menu, X2), the counterbored M3 hole 18 mm right of it
 // and an arc Clones round it; the vent slot drawn as an obround, its inside profile and an offset
 // Clones with instance 4 skipped by clicking its marker; the bolt-circle source M3 → M4 in the
 // hole inspector (the Apply button counts 1 change, all six instances follow; undo restores M3 in
@@ -90,12 +90,21 @@ async function choose(page: Page, scope: Locator, label: string, option: string)
   await page.getByRole('option', { name: option, exact: true }).click()
 }
 
-/** Opens the navigator's Add menu and picks `item` (operations, Chamfer, Features). */
+/** Opens the navigator's Add menu and picks `item` (operations, Bolt hole). */
 async function addFromMenu(page: Page, item: string): Promise<void> {
   await page
     .getByRole('navigation', { name: 'Navigator' })
     .getByRole('button', { name: 'Add', exact: true })
     .click()
+  await page.getByRole('menu').getByRole('menuitem', { name: item }).click()
+}
+
+/** Right-clicks the navigator row named `row` and picks `item` from its menu (DF16). */
+async function fromRowMenu(page: Page, row: RegExp, item: string): Promise<void> {
+  await page
+    .getByRole('navigation', { name: 'Navigator' })
+    .getByRole('button', { name: row })
+    .click({ button: 'right' })
   await page.getByRole('menu').getByRole('menuitem', { name: item }).click()
 }
 
@@ -255,7 +264,7 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
   await closeDialog(shapes)
 
   // ── the outline as an outside profile with six tabs; two relocate (D42, TB1) ─────────────
-  await addFromMenu(page, 'Add profile')
+  await addFromMenu(page, 'Profile')
   await expect(heading('Profile 1')).toBeVisible()
   const picker = inspector.getByRole('combobox', { name: 'Shape', exact: true })
   await picker.click()
@@ -280,9 +289,9 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
     ),
   ).toBeVisible()
 
-  // ── the countersunk M3 hole: Add › Features › Add hole, the fastener picker ──────────────
-  await addFromMenu(page, 'Add hole')
-  await expect(heading('Hole 1')).toBeVisible()
+  // ── the countersunk M3 hole: Add › Features › Bolt hole, the fastener picker ──────────────
+  await addFromMenu(page, 'Bolt hole')
+  await expect(heading('Bolt hole 1')).toBeVisible()
   const [sx, sy] = at(SCREWS.source)
   await setField(inspector, 'Center X', sx)
   await setField(inspector, 'Center Y', sy)
@@ -295,10 +304,12 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
   await expect(inspector.getByRole('img', { name: /^Section:/ })).toHaveAccessibleName(
     /^Section: Ø 3\.4 mm through; countersink Ø 7\.12 mm, 90°/,
   )
-  await expect(navigator.getByRole('button', { name: /^Hole 1, M3 countersink/ })).toBeVisible()
+  await expect(
+    navigator.getByRole('button', { name: /^Bolt hole 1, M3 countersink/ }),
+  ).toBeVisible()
 
-  // ── Make Clones… grid 2 × 2 of the hole ──────────────────────────────────────────────────
-  await addFromMenu(page, 'Make Clones…')
+  // ── Make Clones… grid 2 × 2 of the hole (its row menu) ───────────────────────────────────
+  await fromRowMenu(page, /^Bolt hole 1,/, 'Make Clones…')
   await expect(inspector.getByText('New Clones')).toBeVisible()
   await inspector.getByRole('button', { name: 'Add row' }).click()
   await page.getByRole('menuitem', { name: 'Grid' }).click()
@@ -316,7 +327,7 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
   )
 
   // ── the Ø 22 cutout: an inside circle profile (a through opening, cleared like a pocket) ─
-  await addFromMenu(page, 'Add profile')
+  await addFromMenu(page, 'Profile')
   await expect(heading('Profile 2')).toBeVisible()
   await picker.click()
   await page.getByRole('listbox').getByRole('option', { name: 'Circle', exact: true }).click()
@@ -331,8 +342,8 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
   await setField(inspector, 'Slot width', `${CUTOUT.diameter / 2}`)
   await setField(inspector, 'Tab count', '0')
 
-  // ── a standalone chamfer on the cutout's edge: Add chamfer on the selected profile ───────
-  await addFromMenu(page, 'Add chamfer')
+  // ── a standalone chamfer on the cutout's edge: Chamfer in the profile row's menu ─────────
+  await fromRowMenu(page, /^Profile 2/, 'Chamfer')
   await expect(heading('Chamfer 1')).toBeVisible()
   await expect(inspector.getByRole('combobox', { name: 'Edge' })).toContainText('Profile 2 · Ø 22')
   // 1.5 mm × 45° (sized by width, D45): the default 0.5 mm is too shallow for the mill's plywood
@@ -342,8 +353,8 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
   await expect(input(inspector, 'Diameter')).toHaveValue(`Ø ${CUTOUT.chamfer} mm`)
 
   // ── the counterbored M3 hole 18 mm right of the cutout and its arc Clones ────────────────
-  await addFromMenu(page, 'Add hole')
-  await expect(heading('Hole 2')).toBeVisible()
+  await addFromMenu(page, 'Bolt hole')
+  await expect(heading('Bolt hole 2')).toBeVisible()
   const [bx, by] = at(BOLT_CIRCLE.source)
   await setField(inspector, 'Center X', bx)
   await setField(inspector, 'Center Y', by)
@@ -353,8 +364,10 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
     .getByRole('listbox')
     .getByRole('option', { name: BOLT_CIRCLE.fastener, exact: true })
     .click()
-  await expect(navigator.getByRole('button', { name: /^Hole 2, M3 counterbore/ })).toBeVisible()
-  await addFromMenu(page, 'Make Clones…')
+  await expect(
+    navigator.getByRole('button', { name: /^Bolt hole 2, M3 counterbore/ }),
+  ).toBeVisible()
+  await fromRowMenu(page, /^Bolt hole 2,/, 'Make Clones…')
   await expect(inspector.getByText('New Clones')).toBeVisible()
   await inspector.getByRole('button', { name: 'Add row' }).click()
   await page.getByRole('menuitem', { name: 'Arc' }).click()
@@ -387,7 +400,7 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
   await page.keyboard.press('Escape')
   await expect(editor).toHaveCount(0)
 
-  await addFromMenu(page, 'Add profile')
+  await addFromMenu(page, 'Profile')
   await expect(heading('Profile 3')).toBeVisible()
   await picker.click()
   await page
@@ -405,7 +418,7 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
   // covers the slot (≥ half its width) and takes the Ø 3 mill
   await setField(inspector, 'Slot width', `${LID_TOOLS.mill.diameter}`)
   await setField(inspector, 'Tab count', '0')
-  await addFromMenu(page, 'Make Clones…')
+  await fromRowMenu(page, /^Profile 3/, 'Make Clones…')
   await expect(inspector.getByText('New Clones')).toBeVisible()
   await expect(inspector.getByRole('button', { name: /^Row 1: Offset/ })).toBeVisible()
   await setField(inspector, 'Count', `${VENTS.offset.count}`)
@@ -426,9 +439,9 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
   await navigator.getByRole('button', { name: /^Clones 2, ×6/ }).press('ArrowRight')
   await navigator
     .getByRole('list', { name: 'Source of Clones 2' })
-    .getByRole('button', { name: /^Hole 2, M3 counterbore/ })
+    .getByRole('button', { name: /^Bolt hole 2, M3 counterbore/ })
     .click()
-  await expect(heading('Hole 2')).toBeVisible()
+  await expect(heading('Bolt hole 2')).toBeVisible()
   await inspector.getByRole('combobox', { name: 'Size' }).click()
   await page
     .getByRole('listbox')
@@ -438,15 +451,21 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
   await expect(page.getByRole('button', { name: 'Apply 1 change' })).toBeVisible()
   await page.getByRole('button', { name: 'Apply 1 change' }).click()
   await expect(applyButton).toHaveCount(0)
-  await expect(navigator.getByRole('button', { name: /^Hole 2, M4 counterbore/ })).toBeVisible()
+  await expect(
+    navigator.getByRole('button', { name: /^Bolt hole 2, M4 counterbore/ }),
+  ).toBeVisible()
   await expect(inspector.getByRole('img', { name: /^Section:/ })).toHaveAccessibleName(
     /^Section: Ø 4\.5 mm through; counterbore Ø /,
   )
   // undo restores M3 on the source and its instances in one step; redo brings M4 back
   await page.keyboard.press('ControlOrMeta+z')
-  await expect(navigator.getByRole('button', { name: /^Hole 2, M3 counterbore/ })).toBeVisible()
+  await expect(
+    navigator.getByRole('button', { name: /^Bolt hole 2, M3 counterbore/ }),
+  ).toBeVisible()
   await page.keyboard.press('ControlOrMeta+Shift+z')
-  await expect(navigator.getByRole('button', { name: /^Hole 2, M4 counterbore/ })).toBeVisible()
+  await expect(
+    navigator.getByRole('button', { name: /^Bolt hole 2, M4 counterbore/ }),
+  ).toBeVisible()
   if (await applyButton.isVisible()) await applyButton.click()
   await expect(applyButton).toHaveCount(0)
 
@@ -482,14 +501,14 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
     .getByRole('list', { name: 'Plan operations in machining order' })
     .getByRole('button', { name: /^(Hole|Profile|Chamfer) \d/ })
   await expect(planned).toHaveText([
-    /^Hole 1 · drill × 4\s*Flat 3/,
-    /^Hole 2 · counterbore\s*Flat 3/,
-    ...[2, 3, 4, 5, 6].map((n) => new RegExp(`^Hole 2 · counterbore · ${n}\\s*Flat 3`)),
-    /^Hole 2 · drill × 6\s*Flat 3/,
+    /^Bolt hole 1 · drill × 4\s*Flat 3/,
+    /^Bolt hole 2 · counterbore\s*Flat 3/,
+    ...[2, 3, 4, 5, 6].map((n) => new RegExp(`^Bolt hole 2 · counterbore · ${n}\\s*Flat 3`)),
+    /^Bolt hole 2 · drill × 6\s*Flat 3/,
     /^Profile 3\s*Flat 3/,
     ...[2, 3, 5, 6, 7].map((n) => new RegExp(`^Profile 3 · ${n}\\s*Flat 3`)),
     /^Profile 2\s*Flat 6/,
-    /^Hole 1 · countersink × 4\s*Chamfer 90 × 12/,
+    /^Bolt hole 1 · countersink × 4\s*Chamfer 90 × 12/,
     /^Chamfer 1\s*Chamfer 90 × 12/,
     /^Profile 1\s*Flat 6/,
   ])
@@ -515,14 +534,14 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
   const program = await exportTop(page)
   // tool by tool (plan order v2): Flat 3, Flat 6 for the cutout, the chamfer mill, the outline
   expect([...new Set(sections(program))]).toEqual([
-    'Hole 1 - drill x 4',
-    'Hole 2 - counterbore',
-    ...[2, 3, 4, 5, 6].map((n) => `Hole 2 - counterbore - ${n}`),
-    'Hole 2 - drill x 6',
+    'Bolt hole 1 - drill x 4',
+    'Bolt hole 2 - counterbore',
+    ...[2, 3, 4, 5, 6].map((n) => `Bolt hole 2 - counterbore - ${n}`),
+    'Bolt hole 2 - drill x 6',
     'Profile 3',
     ...[2, 3, 5, 6, 7].map((n) => `Profile 3 - ${n}`),
     'Profile 2',
-    'Hole 1 - countersink x 4',
+    'Bolt hole 1 - countersink x 4',
     'Chamfer 1',
     'Profile 1',
   ])
@@ -602,9 +621,9 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
     await expect(page2).toHaveTitle('Enclosure lid')
     // the features, their sizes and clone counts
     for (const row of [
-      /^Hole 1, M3 countersink/,
+      /^Bolt hole 1, M3 countersink/,
       /^Clones 1, ×4/,
-      /^Hole 2, M4 counterbore/,
+      /^Bolt hole 2, M4 counterbore/,
       /^Clones 2, ×6/,
       /^Clones 3, ×6/,
     ])

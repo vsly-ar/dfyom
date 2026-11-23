@@ -85,6 +85,7 @@ export const projectMessages = {
       orbit: 'Orbit (Shift: pan)',
       zoom: 'Zoom',
       move: 'Move the operation up or down',
+      rowMenu: 'Open the focused row’s menu (Chamfer, Make Clones…, Remove)',
       measure: 'Measure (dimension): point to point (Esc ends)',
       noSnap: 'Drag a handle or tab without snapping',
       angleStep: 'Drag a handle in 15° steps (no snapping)',

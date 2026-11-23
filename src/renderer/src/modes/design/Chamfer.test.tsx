@@ -102,14 +102,26 @@ const addEdges = async (d: Dispatcher) => {
 }
 
 describe('chamfer UI (U4)', () => {
-  it('Add chamfer is disabled with its reason while the part has no drilling, circle pocket or inside circle profile', async () => {
-    const { openAdd } = await renderDesign()
-    const menu = await openAdd()
-    const item = within(menu).getByRole('menuitem', { name: 'Add chamfer' })
-    expect(item).toHaveAttribute('aria-disabled', 'true')
-    expect(item).toHaveAccessibleDescription(
-      'Add a drilling, a circular pocket or a circular opening first: a chamfer breaks its edge.',
-    )
+  it('Chamfer is in the row menu of edges only, not in the Add menu (DF16)', async () => {
+    const { user, openAdd } = await renderDesign(async (d) => {
+      ;(await d.dispatch('design.facing.add', { partId: partId(d), depth: '0.5' }, ui)).unwrap()
+      await addEdges(d)
+    })
+    const add = await openAdd()
+    expect(within(add).queryByRole('menuitem', { name: /Chamfer/ })).toBeNull()
+    await user.keyboard('{Escape}')
+    // a facing: neither Chamfer nor Make Clones…, only Remove
+    const facing = await within(navigator()).findByRole('button', { name: /^Facing 1/ })
+    await user.pointer({ keys: '[MouseRight]', target: facing })
+    const menu = await screen.findByRole('menu', { name: 'Actions for Facing 1' })
+    expect(
+      within(menu)
+        .getAllByRole('menuitem')
+        .map((i) => i.textContent),
+    ).toEqual(['Remove'])
+    await user.keyboard('{Escape}')
+    // focus goes back to the row
+    await waitFor(() => expect(facing).toHaveFocus())
   })
 
   it('chooses the selected edge, else the last one in design order', async () => {
@@ -140,11 +152,14 @@ describe('chamfer UI (U4)', () => {
     expect(chamferEdgeChoice(part, null)).toEqual({ ok: true, edgeOf: pocket!.id })
   })
 
-  it('adds a chamfer on the selected drilling and edits it in its inspector', async () => {
-    const { user, openAdd, part, chamfer } = await renderDesign(addEdges)
-    await user.click(await within(navigator()).findByRole('button', { name: /^Drilling 1/ }))
-    const menu = await openAdd()
-    await user.click(within(menu).getByRole('menuitem', { name: 'Add chamfer' }))
+  it('adds a chamfer on a drilling from its row menu and edits it in its inspector', async () => {
+    const { user, part, chamfer } = await renderDesign(addEdges)
+    // right-click on the drilling's row (DF16)
+    const drilling = await within(navigator()).findByRole('button', { name: /^Drilling 1/ })
+    await user.pointer({ keys: '[MouseRight]', target: drilling })
+    const menu = await screen.findByRole('menu', { name: 'Actions for Drilling 1' })
+    await expectNoAxeViolations()
+    await user.click(within(menu).getByRole('menuitem', { name: 'Chamfer' }))
 
     await waitFor(() => expect(chamfer()).toBeDefined())
     expect(chamfer().edgeOf).toBe(part().operations[0]!.id)
@@ -205,7 +220,7 @@ describe('chamfer UI (U4)', () => {
   })
 
   it('shows dfm.chamferNoTool at the tool field with "New tool…" prefilled with a chamfer mill', async () => {
-    const { user, openAdd, chamfer } = await renderDesign(async (d) => {
+    const { user, chamfer } = await renderDesign(async (d) => {
       await addEdges(d)
       ;(
         await d.dispatch(
@@ -225,8 +240,11 @@ describe('chamfer UI (U4)', () => {
         )
       ).unwrap()
     })
-    const menu = await openAdd()
-    await user.click(within(menu).getByRole('menuitem', { name: 'Add chamfer' }))
+    // the row's actions (…) button (DF16)
+    ;(await within(navigator()).findByRole('button', { name: 'Actions for Pocket 1' })).focus()
+    await user.keyboard('{Enter}')
+    const menu = await screen.findByRole('menu', { name: 'Actions for Pocket 1' })
+    await user.click(within(menu).getByRole('menuitem', { name: 'Chamfer' }))
     await waitFor(() => expect(chamfer()).toBeDefined())
     const tool = await within(inspector()).findByRole('region', { name: 'Tool' })
     const message = await within(tool).findByText(/The library has no 90° chamfer mill/)
@@ -252,12 +270,12 @@ describe('chamfer UI (U4)', () => {
         )
       ).unwrap()
     })
-    const row = await within(navigator()).findByRole('button', { name: /^Hole 1,/ })
+    const row = await within(navigator()).findByRole('button', { name: /^Bolt hole 1,/ })
     row.focus()
     await user.keyboard('{ArrowRight}')
     await user.click(
       await within(navigator()).findByRole('button', {
-        name: /countersink, edited through Hole 1/,
+        name: /countersink, edited through Bolt hole 1/,
       }),
     )
     expect(within(inspector()).getByRole('combobox', { name: 'Edge' })).toBeDisabled()
