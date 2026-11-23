@@ -16,6 +16,9 @@ import { machineKeyOf } from './machine-key'
 import { MachineClient } from './host/client'
 import { inProcessHostFactory } from './host/in-process'
 import type { MachineService, RunStatus } from './service'
+import { loopbackSerialPorts, type LoopbackOptions } from './grbl/loopback.fixture'
+import { machineSettings } from './grbl/emulator/settings'
+import { Machine } from '../library/machine'
 
 const agent = agentSource()
 const ui = uiSource()
@@ -44,6 +47,8 @@ async function setup(
     bottom?: boolean
     /** Wraps the client as the dispatcher's machine port (e.g. to delay a reply). */
     wrap?: (client: MachineClient) => MachineService
+    /** Loopback serial ports; the emulator gets the library machine's settings plus these. */
+    serial?: (settings: Record<number, number>) => LoopbackOptions
   } = {},
 ) {
   const s: PlanSetup = await planSetup()
@@ -58,8 +63,18 @@ async function setup(
       planOperationId: op.id,
       overrides: { spindleSpeed: '3000', feedRate: '150', plungeRate: '150' },
     })
+  const found = s.library.lookup('machine', s.machineId)
+  const libMachine =
+    found.state === 'found' && found.item.values instanceof Machine ? found.item.values : undefined
+  const serial =
+    opts.serial === undefined || libMachine === undefined
+      ? undefined
+      : loopbackSerialPorts(systemTimerHost, opts.serial({ ...machineSettings(libMachine) }))
   const client = new MachineClient({
-    factory: inProcessHostFactory({ timers: systemTimerHost }),
+    factory: inProcessHostFactory({
+      timers: systemTimerHost,
+      ...(serial === undefined ? {} : { serial }),
+    }),
     logLevel: 'warn',
   })
   clients.push(client)
@@ -461,7 +476,137 @@ describe('machine client', () => {
     await waitFor(() => client.status().connection.state === 'closed', 1000)
     expect(client.status().connection.state).toBe('closed')
     expect(client.target).toBeUndefined()
-    expectOk(await client.connect({ ...target, machineKey: 'k' }))
+    // the windows learn that the machine was let go of without a reset (run-machine.md M2)
+    expect(client.status().connection.lost).toEqual({ target: 'virtual' })
+    const again = client.connect({ ...target, machineKey: 'k' })
+    // the next connect clears it (this fake host then loses it again)
+    expect(client.status().connection.lost).toBeUndefined()
+    expectOk(await again)
     expect(spawned).toBe(2)
+  })
+})
+
+describe('run commands on a serial target (loopback)', { timeout: 60_000 }, () => {
+  const PATH = '/dev/cu.usbmodem1101'
+  const serialOpen = (t: Awaited<ReturnType<typeof setup>>, over: object = {}, source = ui) =>
+    t.run(
+      'run.connection.open',
+      { target: 'serial', path: PATH, planId: t.planId, ...over },
+      source,
+    )
+  const finalize = async (t: Awaited<ReturnType<typeof setup>>) => {
+    for (const status of ['settledDesign', 'finalized'])
+      expectOk(await t.run('plan.status.set', { planId: t.planId, status }, ui))
+  }
+
+  it('lists ports for anyone; only the UI opens one', async () => {
+    const t = await setup({ serial: (settings) => ({ emulator: { settings } }) })
+    const { ports } = expectOk(await t.run('run.ports.scan', {})) as { ports: { path: string }[] }
+    expect(ports[0]?.path).toBe(PATH)
+    const denied = await serialOpen(t, {}, agent)
+    expectErrCode(denied, 'permission.denied')
+    expect(denied.unwrapErr().message).toContain('real machine')
+    expect(t.status().connection.state).toBe('closed')
+  })
+
+  it('validates the serial arguments', async () => {
+    const t = await setup({ serial: (settings) => ({ emulator: { settings } }) })
+    const noPath = await t.run('run.connection.open', { target: 'serial', planId: t.planId }, ui)
+    expectErrCode(noPath, 'input.malformed')
+    expect(noPath.unwrapErr().issues[0]?.rule).toBe('required')
+    const prepared = await serialOpen(t, { prepare: true })
+    expectErrCode(prepared, 'input.malformed')
+    expect(prepared.unwrapErr().issues[0]?.rule).toBe('virtualOnly')
+  })
+
+  it('a matching controller: settingsCheck matches; agents may only stop', async () => {
+    const t = await setup({ serial: (settings) => ({ emulator: { settings } }) })
+    const info = expectOk(await serialOpen(t)) as {
+      target: string
+      homed: boolean
+      settingsCheck: { matches: boolean; against: string }
+    }
+    expect(info).toMatchObject({ target: 'serial', homed: false })
+    expect(info.settingsCheck).toMatchObject({ matches: true, against: 'plan' })
+    expect(t.status().connection).toMatchObject({
+      target: 'serial',
+      port: { path: PATH, baud: 115_200 },
+    })
+    // Q50: agents read status and stop; they do not move a real machine
+    expectErrCode(await t.run('run.machine.home', {}), 'permission.denied')
+    expectErrCode(await t.run('run.machine.unlock', {}), 'permission.denied')
+    expectErrCode(await t.run('run.job.start', { planId: t.planId }), 'permission.denied')
+    expectErrCode(await t.run('run.connection.close', {}), 'permission.denied')
+    expectOk(await t.run('run.machine.jogCancel', {}))
+    // a real machine runs finalized plans only
+    const { jobId } = expectOk(await t.run('run.job.start', { planId: t.planId }, ui)) as {
+      jobId: string
+    }
+    const draft = await t.d.job(jobId).unwrap().result
+    expectErrCode(draft, 'plan.status')
+    expectOk(await t.run('run.connection.close', {}, ui))
+  })
+
+  it('a differing controller: the connection opens, real runs are refused', async () => {
+    const t = await setup({
+      serial: (settings) => ({ emulator: { settings: { ...settings, 130: 123 } } }),
+    })
+    const info = expectOk(await serialOpen(t)) as {
+      settingsCheck: { matches: boolean; differences: { setting: string }[] }
+    }
+    expect(info.settingsCheck.matches).toBe(false)
+    expect(info.settingsCheck.differences.map((d) => d.setting)).toEqual(['$130'])
+    await finalize(t)
+    const { jobId } = expectOk(await t.run('run.job.start', { planId: t.planId }, ui)) as {
+      jobId: string
+    }
+    const r = await t.d.job(jobId).unwrap().result
+    expectErrCode(r, 'run.state')
+    expect(r.unwrapErr().issues[0]?.rule).toBe('settingsMismatch')
+    expect(r.unwrapErr().message).toContain('$130')
+    expectOk(await t.run('run.connection.close', {}, ui))
+  })
+
+  it('a real run needs homing in this connection and passes the soft-limit check (M2)', async () => {
+    const t = await setup({ serial: (settings) => ({ emulator: { settings } }) })
+    expectOk(await serialOpen(t))
+    await finalize(t)
+    const start = async () => {
+      const { jobId } = expectOk(await t.run('run.job.start', { planId: t.planId }, ui)) as {
+        jobId: string
+      }
+      return t.d.job(jobId).unwrap().result
+    }
+    // never assumed homed on connect
+    let r = await start()
+    expect(expectErrCode(r, 'run.state').toJSON().frames[0]?.data).toMatchObject({ homed: false })
+    // unlocking is not homing
+    expectOk(await t.run('run.machine.unlock', {}, ui))
+    r = await start()
+    expect(expectErrCode(r, 'run.state').toJSON().frames[0]?.data).toMatchObject({ homed: false })
+    const { jobId } = expectOk(await t.run('run.machine.home', {}, ui)) as { jobId: string }
+    expectOk(await t.d.job(jobId).unwrap().result)
+    // G54 at the home position: the program leaves the travel, refused before a line is sent
+    r = await start()
+    expectErrCode(r, 'run.softLimit')
+    expect(t.status().job).toBeUndefined()
+    expectOk(await t.run('run.connection.close', {}, ui))
+  })
+
+  it('homing off on the controller ($22=0) refuses real runs', async () => {
+    const t = await setup({
+      serial: (settings) => ({ emulator: { settings, homing: false } }),
+    })
+    const info = expectOk(await serialOpen(t)) as {
+      settingsCheck: { matches: boolean; homingEnabled: boolean }
+    }
+    expect(info.settingsCheck).toMatchObject({ matches: false, homingEnabled: false })
+    await finalize(t)
+    const { jobId } = expectOk(await t.run('run.job.start', { planId: t.planId }, ui)) as {
+      jobId: string
+    }
+    const r = await t.d.job(jobId).unwrap().result
+    expect(r.unwrapErr().message).toContain('$22=0')
+    expectOk(await t.run('run.connection.close', {}, ui))
   })
 })

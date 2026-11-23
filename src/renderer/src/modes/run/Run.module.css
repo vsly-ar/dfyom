@@ -28,6 +28,17 @@
   justify-self: stretch;
 }
 
+/* continuous jog: the hint in the step control's place, at its height (the pad does not move) */
+.holdHint {
+  display: flex;
+  align-items: center;
+  min-height: var(--control-sm);
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-muted);
+}
+
 /* (specific enough to beat the small SegmentedControl's item padding) */
 .jog .jogSteps[data-size] > button {
   flex: 1 1 auto;
@@ -108,6 +119,43 @@
 .notice > div {
   display: grid;
   gap: var(--space-1);
+}
+
+/* serial port select + refresh (run-machine.md#ports-and-the-port-picker) */
+.portRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* the settings check of a real connection failed: runs are refused (run-machine.md) */
+.settingsWarning {
+  display: grid;
+  grid-template-columns: var(--icon-sm) minmax(0, 1fr);
+  gap: var(--space-2);
+  align-items: start;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-sm);
+  background: var(--warning-subtle);
+}
+
+.settingsWarning > svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  margin-top: calc((var(--lh-sm) - var(--icon-sm)) / 2);
+  color: var(--warning);
+}
+
+.settingsWarning > div {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-1);
+}
+
+.settingsWarning .why {
+  color: var(--text);
 }
 
 .mono {
@@ -330,7 +378,8 @@
   display: inline-flex;
 }
 
-.virtualChip {
+.virtualChip,
+.serialChip {
   display: inline-flex;
   align-items: center;
   height: 22px;
@@ -395,4 +444,59 @@
 
 .workZeroDot {
   fill: var(--vp-tool);
+}
+
+/* a real machine: solid border (the virtual machine's is dashed) */
+.serialChip {
+  border-style: solid;
+  color: var(--text);
+}
+
+/* the alarm panel and the lost-connection warning at the end of the navigator (run-machine.md M2, M3) */
+.alarmPanel {
+  display: grid;
+  grid-template-columns: var(--icon-sm) minmax(0, 1fr);
+  gap: var(--space-2);
+  align-items: start;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  background: var(--danger-subtle);
+}
+
+.alarmPanel > svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  margin-top: calc((var(--lh-sm) - var(--icon-sm)) / 2);
+  color: var(--danger);
+}
+
+.alarmPanel > div {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.alarmTitle {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.alarmNext {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.alarmSteps {
+  margin: 0;
+  padding-inline-start: 1.25em;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text);
 }

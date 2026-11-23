@@ -233,9 +233,9 @@ const DiffSchema = z.object({
       field: z.string(),
       value: z.number(),
       rule: z
-        .enum(['softLimitsOff', 'manualSpindle', 'notPositive', 'allAxes'])
+        .enum(['softLimitsOff', 'manualSpindle', 'notPositive', 'allAxes', 'zHomesDown'])
         .describe(
-          'softLimitsOff: travel needs $20=1; manualSpindle: $30/$31 need a gcode spindle; allAxes: all three axes or none',
+          'softLimitsOff: travel needs $20=1; manualSpindle: $30/$31 need a gcode spindle; allAxes: all three axes or none; zHomesDown: $23 homes Z down, not supported',
         ),
     }),
   ),
@@ -244,7 +244,7 @@ const DiffSchema = z.object({
 
 const publicDiff = (d: SettingsDiff): z.output<typeof DiffSchema> => ({
   ...d,
-  changes: d.changes.map(({ quantity: _q, together, ...c }) =>
+  changes: d.changes.map(({ stored: _s, together, ...c }) =>
     together === undefined ? c : { ...c, together: [...together] },
   ),
   unchanged: [...d.unchanged],

@@ -54,9 +54,7 @@ describe('machineView', () => {
 
 describe('runGates', () => {
   it('explains every disabled control', () => {
-    expect(runGates(closedStatus(), { planChosen: true }).jog).toBe(
-      'Connect to the virtual machine first.',
-    )
+    expect(runGates(closedStatus(), { planChosen: true }).jog).toBe('Connect to a machine first.')
     const alarm = runGates(open({ state: 'Alarm', homed: false }), { planChosen: true })
     expect(alarm).toMatchObject({ home: null, unlock: null, jog: 'Home the machine first.' })
     expect(alarm.start).toBe('Home the machine first.')
@@ -92,7 +90,7 @@ describe('formatting', () => {
 
 describe('stopGate (DF35)', () => {
   it.each([
-    [closedStatus(), 'Connect to the virtual machine first.'],
+    [closedStatus(), 'Connect to a machine first.'],
     [open(), 'Nothing to stop: the machine is not moving.'],
     [open({ state: 'Alarm' }), 'Nothing to stop: the machine is not moving.'],
     [open({ ...job('done') }), 'Nothing to stop: the machine is not moving.'],

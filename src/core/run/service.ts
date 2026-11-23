@@ -7,15 +7,19 @@ import { z } from 'zod'
 import type { AppResult, AsyncAppResult } from '../../shared/result'
 import type { TimeScale } from './clock'
 import type { RunSummary, SenderProgram } from './grbl/sender'
+import type { SerialPortInfo } from './serial'
 import {
   HostStatusSchema,
+  PortSchema,
+  TARGET_KINDS,
   RUN_PHASES,
   TimeScaleSchema,
   ToolChangeSchema,
   type ConnectedInfo,
   type JobControlAction,
+  type ConnectTarget,
   type MachineAction,
-  type VirtualTarget,
+  type TargetKind,
 } from './host/protocol'
 
 export const CONNECTION_STATES = ['closed', 'connecting', 'open'] as const
@@ -24,8 +28,17 @@ export const CONNECTION_STATES = ['closed', 'connecting', 'open'] as const
 export const RunStatusSchema = HostStatusSchema.omit({ job: true, timeScale: true }).extend({
   connection: z.object({
     state: z.enum(CONNECTION_STATES),
-    target: z.literal('virtual').exactOptional(),
+    target: z.enum(TARGET_KINDS).exactOptional(),
+    /** Serial connections: the port (docs/modes/run-machine.md#connect). */
+    port: PortSchema.exactOptional(),
     timeScale: TimeScaleSchema,
+    /**
+     * Closed: the last open connection was lost rather than closed by DFYOM (no reset reached the
+     * controller); cleared by the next connect (docs/modes/run-machine.md#lost-connection-m2).
+     */
+    lost: z
+      .object({ target: z.enum(TARGET_KINDS), port: PortSchema.exactOptional() })
+      .exactOptional(),
   }),
   job: z
     .object({
@@ -72,14 +85,18 @@ export interface RunningJob {
 }
 
 export interface MachineService {
-  /** Target of the connection while connecting or open; undefined when closed. */
-  readonly target: 'virtual' | undefined
+  /** Target of the open connection as the host reported it; undefined while connecting or closed. */
+  readonly target: TargetKind | undefined
   /** Identity of the machine copy the virtual machine emulates (decision 6). */
   readonly machineKey: string | undefined
+  /** The controller's `$$` of the open connection, by setting number; undefined when closed. */
+  readonly controllerSettings: Readonly<Record<string, number>> | undefined
   status(): RunStatus
   onStatus(listener: (s: RunStatus) => void): () => void
-  /** `target.machineKey` names the machine copy emulated (decision 6). */
-  connect(target: VirtualTarget): AsyncAppResult<ConnectedInfo>
+  /** `target.machineKey` names the machine copy emulated or checked against (decision 6). */
+  connect(target: ConnectTarget): AsyncAppResult<ConnectedInfo>
+  /** The serial ports the machine host sees (spawns the host if none runs). */
+  listPorts(): AsyncAppResult<SerialPortInfo[]>
   disconnect(): AsyncAppResult<void>
   /** `setWorkZero` answers the new G54 (`Vec3`), the others nothing. */
   machine(action: MachineAction): AsyncAppResult<unknown>

@@ -10,7 +10,7 @@ import type { ProjectDoc } from '../../../../core/project/document'
 import type { SetupOrientation } from '../../../../core/toolpath/wcs'
 import { runMessages } from '../../messages/run'
 import { Icon, Button, Dialog } from '../../ui'
-import { JogPad } from './JogPad'
+import { JogPad, useJogMode } from './JogPad'
 import { formatLength, runGates } from './machine-state'
 import { planRunInfo, setupPlacement } from './plan-info'
 import { useRun, useRunStore } from './run-store'
@@ -27,6 +27,7 @@ export function SetupChangeDialog({ doc }: { doc: ProjectDoc }): React.JSX.Eleme
   const planId = useRun((s) => s.planId)
   const status = useRun((s) => s.status)
   const jogStep = useRun((s) => s.jogStep)
+  const jogMode = useJogMode()
   const pending = useRun((s) => s.pending)
   const ids = { jog: useId(), zero: useId(), start: useId() }
   const plan = planId === undefined ? undefined : doc.plans[planId]
@@ -69,6 +70,7 @@ export function SetupChangeDialog({ doc }: { doc: ProjectDoc }): React.JSX.Eleme
         ))}
       </ol>
       <JogPad
+        {...jogMode}
         units={units}
         step={jogStep}
         onStep={a.setJogStep}

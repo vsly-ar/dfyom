@@ -48,6 +48,12 @@ export interface EmulatorOptions {
    * (docs/architecture/grbl.md#homing-and-machine-coordinates). The app passes the travel centre.
    */
   readonly position?: Vec3
+  /**
+   * GRBL-exact homing (default false): no status report while `$H` runs; the `?`s received meanwhile
+   * are answered once when the cycle ends. The default reports during homing (DFYOM's deviation,
+   * docs/architecture/grbl.md#homing-and-machine-coordinates).
+   */
+  readonly silentHoming?: boolean
 }
 
 export interface EmulatorStatus {
@@ -139,6 +145,8 @@ export class GrblEmulator {
   private dwellEndsAt: number | undefined
   private dwellRemaining: number | undefined
   private homingEndsAt: number | undefined
+  /** `silentHoming`: a `?` came during the cycle; answered when it ends. */
+  private reportAfterHoming = false
   /** The homing cycle's moves while homing (`$H`), for the position in `Home` reports. */
   private homingPath: readonly HomingMove[] | undefined
   private restoreEndsAt: number | undefined
@@ -161,6 +169,7 @@ export class GrblEmulator {
     private readonly settings: Settings,
     private readonly tracing: boolean,
     position: Vec3,
+    private readonly silentHoming = false,
   ) {
     const s = settings
     this.planner = new Planner({
@@ -183,7 +192,14 @@ export class GrblEmulator {
 
   static create(options: EmulatorOptions = {}): AppResult<GrblEmulator> {
     return Settings.create(options.settings ?? {}, options.homing ?? true).andThen((s) =>
-      Ok(new GrblEmulator(s, options.trace ?? true, options.position ?? zero)),
+      Ok(
+        new GrblEmulator(
+          s,
+          options.trace ?? true,
+          options.position ?? zero,
+          options.silentHoming ?? false,
+        ),
+      ),
     )
   }
 
@@ -598,6 +614,10 @@ export class GrblEmulator {
       this.parser = { ...this.parser, position: this.mpos }
       this.state = 'Idle'
       this.sample()
+      if (this.reportAfterHoming) {
+        this.reportAfterHoming = false
+        this.statusReport()
+      }
       return this.run()
     }
     if (this.restoreEndsAt !== undefined && this.restoreEndsAt <= t) {
@@ -790,6 +810,7 @@ export class GrblEmulator {
     this.lineComment = this.lineSemicolon = this.lineOverflow = false
     this.dwellEndsAt = this.dwellRemaining = this.homingEndsAt = this.restoreEndsAt = undefined
     this.homingPath = undefined
+    this.reportAfterHoming = false
     this.doorAfterJog = false
     this.spindle = { dir: 'off', rpm: 0 }
     this.spindleSuspended = this.spindleStopOverride = false
@@ -987,6 +1008,10 @@ export class GrblEmulator {
 
   private statusReport(): void {
     if (this.critical) return
+    if (this.silentHoming && this.state === 'Home') {
+      this.reportAfterHoming = true
+      return
+    }
     const mask = this.settings.get(10)
     const pos = this.position()
     const busy = ['Home', 'Run', 'Hold', 'Jog', 'Door'].includes(this.state)

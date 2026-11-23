@@ -266,6 +266,7 @@ export class GrblSender {
   private readonly timers: TimerHost
   private connected = false
   private unsubscribe: (() => void) | undefined
+  private unsubscribeClose: (() => void) | undefined
   private rxText = ''
   private inches = false
 
@@ -380,6 +381,11 @@ export class GrblSender {
     if (this.connected || this.unsubscribe !== undefined)
       return fail('run.busy', 'the sender is already connected', { where })
     this.unsubscribe = this.transport.onData((b) => this.onData(b))
+    // a serial port that closes by itself (cable pulled) fails the connection at once
+    this.unsubscribeClose = this.transport.onClose?.((reason) => {
+      if (this.connected) this.connectionLost(`port closed: ${reason}`)
+      else this.bannerWaiter?.(false)
+    })
     let banner = await this.waitForBanner()
     if (!banner) {
       this.log.warn('no banner; sending a soft reset')
@@ -604,11 +610,12 @@ export class GrblSender {
 
   /**
    * Stops polling, fails what is pending and closes the transport. During a run the controller is
-   * reset first (`0x18`: motion and spindle stop, GRBL's buffers are flushed).
+   * reset first (`0x18`: motion and spindle stop, GRBL's buffers are flushed), and so is it with
+   * `reset` (a real machine: disconnect = reset, docs/modes/run.md#6-lost-connection-disconnect-and-reconnect).
    */
-  async close(): AsyncAppResult<void> {
+  async close(opts: { readonly reset?: boolean } = {}): AsyncAppResult<void> {
     const run = this.run_
-    if (run !== undefined && this.connected) {
+    if ((run !== undefined || opts.reset === true) && this.connected) {
       this.expectingReset = true
       const reset = await this.transport.write(Uint8Array.of(REALTIME.reset))
       if (reset.isErr())
@@ -668,6 +675,9 @@ export class GrblSender {
   private settle(cmd: PendingCommand, r: AppResult<readonly GrblLine[]>): void {
     if (cmd.settled) return
     cmd.settled = true
+    // the poll outstanding through a silent homing cycle gets a fresh limit (homingInFlight)
+    if (cmd.line === '$H' && this.pollOutstandingSince !== undefined)
+      this.pollOutstandingSince = this.timers.now()
     cmd.cancelTimeout?.()
     cmd.cancelTimeout = undefined
     cmd.resolve(r)
@@ -1137,7 +1147,12 @@ export class GrblSender {
     const limit = this.opts.statusTimeoutMs ?? 2000
     const watch = () => {
       const since = this.pollOutstandingSince
-      if (since !== undefined && !this.critical && this.timers.now() - since > limit) {
+      if (
+        since !== undefined &&
+        !this.critical &&
+        !this.homingInFlight() &&
+        this.timers.now() - since > limit
+      ) {
         this.log.warn({ ms: this.timers.now() - since }, 'status reply missing')
         this.connectionLost('no status reply')
         return
@@ -1145,6 +1160,15 @@ export class GrblSender {
       this.cancelWatchdog = this.timers.setTimeout(watch, limit / 4)
     }
     this.cancelWatchdog = this.timers.setTimeout(watch, limit / 4)
+  }
+
+  /**
+   * Real GRBL runs no realtime protocol inside the homing cycle, so no `?` is answered until `$H`
+   * ends: the status watchdog waits while `$H` is in flight; the `$H` command timeout still applies
+   * (docs/modes/run.md#5-watchdogs).
+   */
+  private homingInFlight(): boolean {
+    return this.inflight.some((s) => s.kind === 'command' && s.cmd.line === '$H' && !s.cmd.settled)
   }
 
   private waitForBanner(): Promise<boolean> {
@@ -1199,7 +1223,8 @@ export class GrblSender {
     this.cancelHoldTimeout?.()
     this.cancelPoll = this.cancelWatchdog = this.cancelHoldTimeout = undefined
     this.unsubscribe?.()
-    this.unsubscribe = undefined
+    this.unsubscribeClose?.()
+    this.unsubscribe = this.unsubscribeClose = undefined
   }
 }
 
