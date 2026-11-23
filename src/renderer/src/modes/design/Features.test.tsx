@@ -307,13 +307,21 @@ describe('feature UI (U1)', () => {
     await user.keyboard('{ArrowRight}')
     const source = within(navigator()).getByRole('list', { name: 'Source of Clones 1' })
     expect(within(source).getByRole('button', { name: /^Pocket 1/ })).toBeInTheDocument()
-    const group = within(navigator()).getByRole('button', { name: /^Clones\s*1$/ })
+    const group = within(navigator()).getByRole('button', { name: /^1 clone$/ })
     expect(group).toHaveAttribute('aria-expanded', 'false')
     await user.click(group)
     const instances = within(navigator()).getByRole('list', { name: 'Instances of Clones 1' })
     expect(within(instances).getByText('Clone 2')).toBeInTheDocument()
     // the source pocket (10 mm) plus a gap of its tool's diameter along u (U3)
-    expect(within(instances).getByText(/^\d+\.\d{2}, 30\.00$/)).toBeInTheDocument()
+    // axes and unit named (DF44): X and Y on the top face
+    expect(within(instances).getByText(/^X \d+\.\d{2} · Y 30\.00 mm$/)).toBeInTheDocument()
+    // the Operations count is the rows shown; its tooltip says what else it holds (DF44)
+    const count = within(navigator()).getByTitle(/^1 row in the list/)
+    expect(count).toHaveTextContent(/^1$/)
+    expect(count).toHaveAttribute(
+      'title',
+      "1 row in the list; 2 operations in all, counting each hole's operations and every clone.",
+    )
     await expectNoAxeViolations()
   })
 })

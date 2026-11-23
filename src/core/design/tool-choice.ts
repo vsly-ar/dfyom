@@ -20,7 +20,7 @@ import {
 } from '../geometry/model'
 import { FIT_SLACK, shapeMeasure, type ShapeMeasure } from '../geometry/shape-measure'
 import { toolFit, type ToolUnfit } from '../geometry/tool-fit'
-import type { MaterialClass } from '../library/item'
+import { MATERIAL_CLASS_WORDS, type MaterialClass } from '../library/item'
 import type { LibraryItem } from '../library/library-item'
 import { snapshotFromRecord } from './frozen-memo'
 import { Tool } from '../library/tool'
@@ -187,7 +187,7 @@ export function fittingLibraryTools(input: ChoiceInput): LibraryCandidate[] {
     const rest = leavesRest(t, input)
     const reasons = [
       ...(rest ? ['leaves rest material'] : []),
-      ...(hasPreset ? [`has a preset for ${input.materialClass}`] : []),
+      ...(hasPreset ? [`has a preset for ${MATERIAL_CLASS_WORDS[input.materialClass]}`] : []),
       `diameter ${tool.diameter.canonical} mm`,
     ]
     out.push({ item, tool, hasPreset, leavesRest: rest, reasons })

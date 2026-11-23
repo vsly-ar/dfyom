@@ -20,19 +20,22 @@
 /* the sidebar's one-line part and stock read-out above the Operations header (D45, DF15) */
 .partLine {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: var(--space-2);
+  gap: 0 var(--space-2);
   min-width: 0;
   padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--border);
 }
 
+/* the name wins (DF44): it keeps the line and wraps when longer than the panel; the stock
+   read-out moves to a second line when both don't fit, and ellipsizes only there */
 .partLine .partName {
-  flex: none;
-  max-width: 50%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  text-align: left;
+  overflow-wrap: anywhere;
 }
 
 .stockReadout {
@@ -221,10 +224,15 @@
   stroke: none;
 }
 
+/* a row's name wins over its read-out and actions (DF44): one line while it fits, else it wraps
+   to a second line; past two lines it ellipsizes (its full name is in the tooltip) */
 .opName {
+  display: -webkit-box;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 
 .opBadge,
@@ -293,6 +301,14 @@
   pointer-events: auto;
 }
 
+/* while the actions show, the row's content gives them room: the read-out ellipsizes first and
+   the name keeps its words (DF44); at rest the actions take no width */
+.op[data-top]:hover > .opSelect,
+.op[data-top]:focus-within > .opSelect,
+.op[data-top][data-selected] > .opSelect {
+  padding-right: calc(2 * var(--control-md) + 2 * var(--space-1));
+}
+
 .op[data-selected] .opActions {
   background: var(--accent-subtle);
 }
@@ -343,9 +359,15 @@
   min-width: 0;
 }
 
-/* a narrow row gives up the read-out before the name (DF25 re-report) */
+/* a narrow row gives up the read-out before the name (DF25 re-report, DF44): the name never
+   shrinks below its words while the read-out has width to give */
+.featureText > .opName {
+  flex: 0 0 auto;
+  max-width: 100%;
+}
+
 .featureText > .featureReadout {
-  flex-shrink: 100;
+  flex: 0 1 auto;
 }
 
 .featureReadout {
@@ -490,7 +512,8 @@
 
 .instanceSelect {
   display: flex;
-  gap: var(--space-2);
+  flex-wrap: wrap;
+  gap: 0 var(--space-2);
   align-items: baseline;
   min-height: var(--control-sm);
   padding: var(--space-0-5) var(--space-3) var(--space-0-5)
@@ -504,6 +527,13 @@
   color: inherit;
   text-align: left;
   cursor: pointer;
+}
+
+/* "Clone 2" keeps its words; its position ("X 35.52 · Y 20.00 mm") moves under it when both
+   don't fit the row, and only there ellipsizes (DF44) */
+.instanceSelect > :first-child {
+  flex: none;
+  white-space: nowrap;
 }
 
 .instanceActions {

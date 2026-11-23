@@ -100,7 +100,7 @@ async function expandInstances(user: ReturnType<typeof renderUi>['user']) {
   const row = await within(navigator()).findByRole('button', { name: /^Clones 1, ×/ })
   row.focus()
   await user.keyboard('{ArrowRight}')
-  await user.click(within(navigator()).getByRole('button', { name: /^Clones\s*\d+$/ }))
+  await user.click(within(navigator()).getByRole('button', { name: /^\d+ clones?$/ }))
 }
 
 describe('Clones UI (U3)', () => {

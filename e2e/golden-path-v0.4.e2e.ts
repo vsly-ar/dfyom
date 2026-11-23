@@ -36,6 +36,43 @@ const SVG = resolve('src/core/design/__fixtures__/enclosure-sections.svg')
 /** X1's golden program: the same lid built through the UI exports the same bytes. */
 const GOLDEN = resolve('src/main/cli/__golden__/exit-criteria-lid.nc')
 
+const RENDERS = process.env['DFYOM_RENDERS'] === '1'
+const rendersDir = resolve(__dirname, '../design/features/renders')
+
+/**
+ * With DFYOM_RENDERS=1: light and dark review renders of the navigators (DF44: names win, one
+ * icon per meaning, counts), the theme attribute set directly and put back after.
+ */
+async function render(page: Page, name: string): Promise<void> {
+  if (!RENDERS) return
+  // runs in the renderer; this tsconfig has no DOM lib, hence `globalThis`
+  const setTheme = (t: string | null) =>
+    page.evaluate((v) => {
+      const root = (
+        globalThis as unknown as {
+          document: {
+            documentElement: {
+              getAttribute(n: string): string | null
+              setAttribute(n: string, v: string): void
+              removeAttribute(n: string): void
+            }
+          }
+        }
+      ).document.documentElement
+      const before = root.getAttribute('data-theme')
+      if (v === null) root.removeAttribute('data-theme')
+      else root.setAttribute('data-theme', v)
+      return before
+    }, t)
+  const before = await setTheme('light')
+  for (const theme of ['light', 'dark'] as const) {
+    await setTheme(theme)
+    await page.waitForTimeout(500)
+    await page.screenshot({ path: `${rendersDir}/df44-${name}-${theme}.png` })
+  }
+  await setTheme(before)
+}
+
 /** A layout point (from the board's centre) as typed face coordinates. */
 const at = (p: readonly [number, number]): [string, string] =>
   onBoard([p[0], p[1]]).map((c) => `${c}`) as [string, string]
@@ -478,6 +515,13 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
   await expect(status.getByText('Part up to date')).toBeAttached({ timeout: 60_000 })
   // the outline, each hole's 2 operations and their clones' 6 + 10, the cutout, its chamfer, 6 vents
   await expect(viewport).toHaveAccessibleDescription(/Part with 29 operations/)
+  if (RENDERS) {
+    // the bolt circle's Clones open, its source hole selected (DF44 review render)
+    await navigator.getByRole('button', { name: /^Clones 2,/ }).press('ArrowRight')
+    await navigator.getByRole('button', { name: /^5 clones$/ }).click()
+    await navigator.getByRole('button', { name: /^Bolt hole 2,/ }).click()
+    await render(page, 'design-list')
+  }
 
   // ── Plan: a machine from "New machine…", one setup ───────────────────────────────────────
   await page.keyboard.press('ControlOrMeta+2')
@@ -520,6 +564,7 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
     /^Chamfer 1\s*Chamfer 90 × 12/,
     /^Profile 1\s*Flat 6/,
   ])
+  await render(page, 'plan-list')
 
   // ── Toolpaths; the program byte for byte X1's golden ─────────────────────────────────────
   await navigator.getByRole('button', { name: 'Generate toolpaths' }).click()

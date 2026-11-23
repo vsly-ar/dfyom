@@ -30,7 +30,7 @@ import {
   type WarningView,
 } from '../../ui'
 import styles from './Design.module.css'
-import { featureOfWarning, ownerFeature } from './feature-view'
+import { featureOfWarning, operationUnits, ownerFeature } from './feature-view'
 import { FeatureInspector, OwnedOperationInspector, useFixIn, type FixIn } from './FeatureInspector'
 import { CloneInstanceInspector, ClonesDraft, ClonesInspector } from './ClonesInspector'
 import { parseInstanceId } from './clones-view'
@@ -195,7 +195,16 @@ function PartInspector({
   const fixIn = useFixIn(part)
   return (
     <div className={styles['inspector']}>
-      <PanelHeader title={t.part} meta={t.partSummary(part.dto.operations.length)} />
+      <PanelHeader
+        title={t.part}
+        meta={
+          <span
+            title={m.navigator.countTip(operationUnits(part).length, part.dto.operations.length)}
+          >
+            {t.partSummary(part.dto.operations.length)}
+          </span>
+        }
+      />
       <div className={styles['fields']}>
         <NameField
           label={t.name}

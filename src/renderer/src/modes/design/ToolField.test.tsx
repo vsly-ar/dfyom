@@ -183,7 +183,7 @@ describe('tool field', () => {
       expect.stringMatching(/^Flat 5 · Ø 5 mm/),
       expect.stringMatching(/^Flat 8 · Ø 8 mm/),
     ])
-    expect(library[0]).toHaveAccessibleDescription('2 flutes · Has a preset for aluminum')
+    expect(library[0]).toHaveAccessibleDescription('2 flutes · Has a preset for aluminium')
     expect(library[1]).toHaveAccessibleDescription('2 flutes')
     expect(library[2]).toHaveAccessibleDescription(
       '2 flutes · Doesn’t fit: too wide for the 3 mm corner',

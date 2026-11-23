@@ -302,7 +302,7 @@ test('features: add a hole, expand its row, the owned inspector is read-only, Ma
   await expect(navigator.getByRole('list', { name: 'Source of Clones 1' })).toContainText(
     'Bolt hole 1',
   )
-  await navigator.getByRole('button', { name: /^Clones\s*\d+$/ }).click()
+  await navigator.getByRole('button', { name: /^\d+ clones?$/ }).click()
   await expect(navigator.getByRole('list', { name: 'Instances of Clones 1' })).toContainText(
     'Clone 2',
   )

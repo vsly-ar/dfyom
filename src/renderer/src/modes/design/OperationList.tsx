@@ -32,7 +32,6 @@ import {
   openContextMenu,
   ReorderStatus,
   useReorder,
-  type IconName,
   type MenuEntry,
   type Reorder,
 } from '../../ui'
@@ -51,40 +50,19 @@ import {
   type FeatureUnit,
   type OperationUnit,
 } from './feature-view'
-import type { DesignPart } from './model'
+import { axisNames, surfaceDirection, type DesignPart } from './model'
 import { useCommand } from './useDesign'
 import { useRowActions } from './row-actions'
 import { useSkipToggle } from './ClonesInspector'
 import { instanceId } from './clones-view'
+import { featureIcon, partOperationIcon } from './operation-icon'
+
+export { featureIcon, operationIcon } from './operation-icon'
 
 const m = designMessages
 const f = m.features
 const r = m.reorder
 const c = f.clones
-
-const ICON: Record<OperationDTO['kind'], IconName> = {
-  facing: 'facing',
-  pocket: 'pocket',
-  drilling: 'drilling',
-  profile: 'profile',
-  chamfer: 'chamfer',
-}
-
-/** A profile cut on its line is a groove (B22-5: the bent slot). */
-export function operationIcon(op: OperationDTO): IconName {
-  return op.kind === 'profile' && op.side === 'on' ? 'groove' : ICON[op.kind]
-}
-
-/** A feature's icon (L1, ui.md § Icons (v0.4)): the hole type, or Clones. */
-export function featureIcon(feature: Pick<FeatureDTO, 'kind'> & Record<string, unknown>): IconName {
-  if (feature.kind === 'clones') return 'clones'
-  if (feature.kind !== 'hole') return 'design'
-  return feature['type'] === 'counterbore'
-    ? 'hole-counterbore'
-    : feature['type'] === 'countersink'
-      ? 'hole-countersink'
-      : 'hole-simple'
-}
 
 /** The disclosure key of a Clones row's instance group (ui store `expandedFeatures`). */
 export const instancesKey = (featureId: string): string => `${featureId}#instances`
@@ -470,8 +448,10 @@ function OperationRow({
           onClick={() => ctx.select(op.id)}
           onKeyDown={(e) => ctx.key(e, op.id)}
         >
-          <Icon name={operationIcon(op)} />
-          <span className={styles['opName']}>{op.name}</span>
+          <Icon name={partOperationIcon(ctx.part.dto, op)} />
+          <span className={styles['opName']} title={op.name}>
+            {op.name}
+          </span>
           <RowMarkers failed={ctx.failedAt === op.id} count={n} />
         </button>
         {actions ? <MoveRemove name={op.name} actions={actions} /> : null}
@@ -545,7 +525,9 @@ function FeatureRow({
             <Chevron open={open} name={feature.name} onToggle={() => ctx.toggle(feature.id)} />
             <Icon name={featureIcon(feature)} />
             <span className={styles['featureText']}>
-              <span className={styles['opName']}>{feature.name}</span>
+              <span className={styles['opName']} title={feature.name}>
+                {feature.name}
+              </span>
               {readout.length > 0 ? (
                 <span className={styles['featureReadout']}>{readout}</span>
               ) : null}
@@ -640,8 +622,10 @@ function OwnedRow({
           onClick={() => ctx.select(op.id)}
           onKeyDown={(e) => ctx.key(e, op.id)}
         >
-          <Icon name={operationIcon(op)} />
-          <span className={styles['opName']}>{roleLabel(featureName, op.name)}</span>
+          <Icon name={partOperationIcon(ctx.part.dto, op)} />
+          <span className={styles['opName']} title={roleLabel(featureName, op.name)}>
+            {roleLabel(featureName, op.name)}
+          </span>
           <RowMarkers failed={ctx.failedAt === op.id} count={n} />
         </button>
       </li>
@@ -649,10 +633,18 @@ function OwnedRow({
   )
 }
 
-/** "9.00, 15.59" (mm) or "0.354, 0.614" (in): an instance's reference point. */
-function position(at: CloneInstanceRow['at'], units: UnitSystem): string {
-  const fmt = (mm: number) => (units === 'inch' ? (mm / 25.4).toFixed(3) : mm.toFixed(2))
-  return `${fmt(at.u)}, ${fmt(at.v)}`
+/**
+ * "X 9.00 · Y 15.59 mm" or "u 0.354 · v 0.614 in": an instance's reference point, with its axes
+ * (X/Y on the top face) and unit (DF44).
+ */
+function position(
+  at: CloneInstanceRow['at'],
+  units: UnitSystem,
+  axes: { u: string; v: string },
+): string {
+  const inch = units === 'inch'
+  const fmt = (mm: number) => (inch ? (mm / 25.4).toFixed(3) : mm.toFixed(2))
+  return f.instanceAt(fmt(at.u), fmt(at.v), axes, inch ? 'in' : 'mm')
 }
 
 /**
@@ -674,6 +666,10 @@ function ClonesChildren({
   const key = instancesKey(unit.id)
   const open = ctx.expanded.has(key)
   const listId = `${unit.id}-instances`
+  const on = (unit.feature as { on?: unknown }).on
+  const axes = axisNames(
+    surfaceDirection(ctx.part.table, typeof on === 'string' ? on : 'stock.top'),
+  )
   return (
     <>
       <p className={styles['subgroupTitle']}>{f.source}</p>
@@ -698,8 +694,7 @@ function ClonesChildren({
         <span className={styles['chevronInline']} data-open={open || undefined}>
           <Icon name="chevron-down" />
         </span>
-        {f.clonesGroup}
-        <span className={styles['featureReadout']}>{instances.length}</span>
+        {f.clonesGroup(instances.length)}
       </button>
       <div className={styles['ownedWrap']} data-open={open || undefined} inert={!open}>
         <ol
@@ -729,7 +724,7 @@ function ClonesChildren({
                   <span>{f.instance(x.n)}</span>
                   <span className={styles['featureReadout']}>
                     {x.kind === 'clone'
-                      ? position(x.at, ctx.part.units)
+                      ? position(x.at, ctx.part.units, axes)
                       : x.kind === 'skipped'
                         ? f.skipped
                         : f.duplicate}

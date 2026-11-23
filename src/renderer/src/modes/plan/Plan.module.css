@@ -495,20 +495,45 @@
   align-items: center;
 }
 
-/* its one action, the menu (move up / move down / move to …), sits in a slot at the row's end
-   that name and status icons never run into (shown on hover, focus or selection) */
-.op[data-actions] > .planRow {
-  padding-right: calc(var(--control-md) + var(--space-2));
-}
-
+/* its one action, the menu (move up / move down / move to …), shows over the status icons at
+   the row's end on hover, focus or selection; at rest it takes no width, so names keep it (DF44) */
 .rowActions {
   position: absolute;
   top: 50%;
-  right: var(--space-1);
+  right: 0;
   display: inline-flex;
+  padding: 0 var(--space-1);
+  background: var(--bg-chrome);
   transform: translateY(-50%);
   opacity: 0;
+  pointer-events: none;
   transition: opacity var(--motion-fast) var(--ease-standard);
+}
+
+.op[data-selected] .rowActions {
+  background: var(--accent-subtle);
+}
+
+.op:hover .rowActions,
+.op:focus-within .rowActions,
+.op[data-selected] .rowActions,
+.rowActions:has([aria-expanded='true']) {
+  pointer-events: auto;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+/* a plan operation's name wraps to a second line rather than ellipsize (DF44: rows of one
+   feature differ at their end, "Bolt hole 2 · counterbore × 6"); its tool line ellipsizes */
+.planRow .opName {
+  display: -webkit-box;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 
 .op:hover .rowActions,

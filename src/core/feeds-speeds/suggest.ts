@@ -6,10 +6,11 @@
  * Float64 throughout (see formulas.ts); values are in canonical units (rpm, mm/min, mm).
  */
 import { None, Option, Some } from '../../shared/result'
-import type { MaterialClass } from '../library/item'
+import { MATERIAL_CLASS_WORDS, type MaterialClass } from '../library/item'
 import type { Machine } from '../library/machine'
 import type { Rigidity } from '../library/machine.dto'
 import type { Tool } from '../library/tool'
+import { TOOL_TYPE_LABEL } from '../design/tool'
 import {
   bandOf,
   DEFAULT_RIGIDITY,
@@ -207,6 +208,9 @@ export function noDataFor(
   return 'noData' in found ? Option.nonNull(found.noData.warnings[0]) : None
 }
 
+/** Tool materials in words for visible text (DF44): never the enum key. */
+const TOOL_MATERIAL_WORDS = { carbide: 'carbide', hss: 'HSS', other: 'other' } as const
+
 type Lookup = { readonly ctx: Ctx } | { readonly noData: CuttingSuggestion }
 
 function contextOf(input: CuttingInput, data: readonly MaterialRow[]): Lookup {
@@ -217,23 +221,29 @@ function contextOf(input: CuttingInput, data: readonly MaterialRow[]): Lookup {
   })
   const isChamfer = tool.type === 'chamferMill'
   if (isDrill !== (engagement.kind === 'drill') || isChamfer !== (engagement.kind === 'chamfer'))
-    return none(`engagement "${engagement.kind}" does not fit a ${tool.type}`, {
+    return none(`a ${engagement.kind} cut does not fit a ${TOOL_TYPE_LABEL[tool.type]}`, {
       engagement: engagement.kind,
       toolType: tool.type,
     })
-  if (materialClass === 'other') return none('no data for material class "other"', {})
+  if (materialClass === 'other') return none('no data for the material class "other"', {})
   const toolMaterial = tool.toolMaterial.unwrapOr('other')
   if (toolMaterial === 'other')
     return none('tool material is not set (carbide or HSS needed)', { toolMaterial })
   const row = findRow(data, materialClass, toolMaterial)
   if (row === undefined)
-    return none(`no data for ${toolMaterial} in ${materialClass}`, {
-      materialClass,
-      toolMaterial,
-    })
+    return none(
+      `no data for ${TOOL_MATERIAL_WORDS[toolMaterial]} in ${MATERIAL_CLASS_WORDS[materialClass]}`,
+      {
+        materialClass,
+        toolMaterial,
+      },
+    )
   const speed = speedOf(row)
   if (speed === undefined)
-    return none(`no speed data for ${toolMaterial} in ${materialClass}`, { materialClass })
+    return none(
+      `no speed data for ${TOOL_MATERIAL_WORDS[toolMaterial]} in ${MATERIAL_CLASS_WORDS[materialClass]}`,
+      { materialClass },
+    )
   // a chamfer mill is treated as a flat end mill of its effective diameter at the depth (F10)
   const chamfer = engagement.kind === 'chamfer' ? chamferStep(tool, engagement.depth) : undefined
   const D = chamfer?.result ?? tool.diameter.canonical

@@ -6,6 +6,7 @@
  * docs/modes/plan-v0.2.md#tool-resolution-from-the-design-tool-field
  */
 import type { Region2dPort } from '../geometry/2d/port'
+import { MATERIAL_CLASS_WORDS } from '../library/item'
 import type { LibraryItem } from '../library/library-item'
 import { Tool } from '../library/tool'
 import type { PlanWarning } from './checks'
@@ -24,7 +25,7 @@ export interface ToolSuggestion {
   readonly matchesDesign: boolean
   readonly hasPreset: boolean
   readonly usedInPlan: boolean
-  /** Why it ranks where it does, e.g. "has a preset for aluminum". */
+  /** Why it ranks where it does, e.g. "has a preset for aluminium". */
   readonly reasons: readonly string[]
 }
 
@@ -82,7 +83,7 @@ export function suggestTools(
     const label = design.mapOr('', (d) => d.label)
     const reasons = [
       ...(designTool ? ["the design's tool"] : matches ? [`matches the design's ${label}`] : []),
-      ...(hasPreset ? [`has a preset for ${materialClass}`] : []),
+      ...(hasPreset ? [`has a preset for ${MATERIAL_CLASS_WORDS[materialClass]}`] : []),
       ...(usedInPlan ? ['already used in this plan (fewer tool changes)'] : []),
       `diameter ${tool.diameter.canonical} mm`,
     ]
