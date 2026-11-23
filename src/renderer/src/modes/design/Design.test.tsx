@@ -392,9 +392,15 @@ describe('design mode', () => {
     expect(
       await within(inspector()).findByText('A sharp inside corner cannot be cut by a round tool.'),
     ).toBeInTheDocument()
-    expect(await within(status()).findByRole('button', { name: '1 warning' })).toBeInTheDocument()
+    // and no tool fits it at all (DF52), said at the Tool field
+    expect(
+      await within(inspector()).findByText(
+        'No tool fits this operation, not even the smallest standard one. Corner radius 0 mm is smaller than the radius of the 1 mm flat end mill (0.5 mm).',
+      ),
+    ).toBeInTheDocument()
+    expect(await within(status()).findByRole('button', { name: '2 warnings' })).toBeInTheDocument()
     const row = within(navigator()).getByRole('button', { name: /^Pocket 1/ })
-    expect(row).toHaveTextContent('1 warning')
+    expect(row).toHaveTextContent('2 warnings')
   })
 
   it('moves operations with Alt+↑/↓ (announced) and removes one with an undo toast', async () => {

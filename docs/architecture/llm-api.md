@@ -366,6 +366,17 @@ No new tools: every change is a reserved-arg default, a shaped result, a field i
 - **Merged operations in program comments (F10).** A plan operation that merges design operations of several features is labelled per repeated operation, "Bolt circle screw · drill × 6, Bolt circle 2 screw · drill × 6", as one repeated operation already was ([plan-v0.4.md § Plan side](../modes/plan-v0.4.md#plan-side)); a comment line that is still too long for GRBL is cut at the last word boundary, not mid-word.
 - **Not done:** F3 (cloning a group of features, a model change; DF40), F6 (re-choosing generalized tools when library tools arrive; a model/auto-choice change, left in the intake) and F9 (giving the exit part's SVG to black-box agents; acceptance-run docs).
 
+## Amendment (hardening DF51, DF52, DF54, DF55): tool choice
+
+Status: **draft for review** (implemented on the hardening branch) · Source: the agent's two-setup enclosure test (TG #232, findings I-3, I-6, I-7, I-8) · Rows: DF51, DF52, DF54, DF55 in the [hardening plan](../plans/hardening.md) intake · Spec: [design-v0.2.md § Tool choice fixes](../modes/design-v0.2.md#tool-choice-fixes-df51-df52-df54-df55)
+
+No new tools. What an agent sees:
+
+- **`design_profile_add` without `slotWidth`** gets 6 mm / 1/4″, or, when no library tool fits that, the narrowest wider library flat end mill that fits (its Ø rounded up); the `slotWidth` description says so. The result's `placed.box` shows the slot.
+- **No fitting tool** is a DFM warning `dfm.noFittingTool` (parameter `tool`, `params.rule` and the rule's values as `dfm.toolUnfit`) in the add/update result's `warnings` and in `applied`, instead of silent `toolChanges: []`.
+- **`applied.toolChanges[].reason`** can be `libraryFits`: a generalized tool replaced by a library tool that fits after the edit.
+- **`design_tool_candidates.fitting`** is in the new auto-choice order (size, then shortest stickout) and each entry's `reasons` names the reach ("stickout 31 mm").
+
 ## Amendment (hardening A3, A6): frames, placed bounds, snap and measure
 
 Status: **draft for review** (implemented on the hardening branch; reviewed with the [hardening plan](../plans/hardening.md) task 1.3, like the [A1–A7 part](#amendment-hardening-a1-a2-a5-a7-agent-friction)) · Source: the LLM-first black-box test (finding F9: frames not described where an agent looks), the v0.3 X1 finding "snap and measure have no headless command" ([plans/v0.3.md](../plans/v0.3.md#known-issues-and-risks)) · Tasks: [hardening.md § 4](../plans/hardening.md) A3 (the follow-up's A4 in [v0.4-llm-first.md](../plans/v0.4-llm-first.md)) and A6

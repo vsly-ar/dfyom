@@ -131,6 +131,9 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
   'dfm.toolUnfit': (p, L) =>
     toolUnfitText(p, L) + (p['locked'] === true ? ' Unlock it or pick another tool.' : ''),
   'dfm.toolNotInLibrary': (p) => `Plan needs a ${String(p['tool'])}: add one to the library.`,
+  // no tool fits at all (hardening DF52): the blocking rule, worded for the smallest standard tool
+  'dfm.noFittingTool': (p, L) =>
+    `No tool fits this operation, not even the smallest standard one. ${toolUnfitText(p, L)}`,
   // v0.3 shapes (design-v0.3.md § DFM checks for shapes)
   'dfm.restMaterial': (p) =>
     num(p['pieces']) > 1

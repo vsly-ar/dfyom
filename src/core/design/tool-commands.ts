@@ -480,7 +480,8 @@ export function autoChooseTools(
               : 'followsHole'
             : old.isNone()
               ? 'unresolved'
-              : (fitOf(old.unwrap(), input)?.rule ?? 'unfit')
+              : // DF54: a fitting generalized tool gave way to a library tool
+                (fitOf(old.unwrap(), input)?.rule ?? 'libraryFits')
       writeTool(draft, partId, i, to, undefined)
       written.set(op.id, to)
       changes.push({ partId, operationId: op.id, from, to: designToolToDTO(to), reason })

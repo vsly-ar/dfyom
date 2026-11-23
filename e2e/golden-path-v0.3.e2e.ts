@@ -489,17 +489,12 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
     await expect(input(inspector, `Tab ${i + 1}`)).toHaveValue(new RegExp(`^${p}`))
   const toolField = inspector.getByRole('region', { name: 'Tool' })
   const toolCombo = toolField.getByRole('combobox', { name: 'Tool' })
-  await toolCombo.click()
-  await page
-    .getByRole('listbox')
-    .getByRole('option', { name: /^Flat 12 · Ø 12/ })
-    .click()
+  // the 12 mm slot's Apply already took the library's Flat 12 over a generalized tool (DF54)
   await expect(toolCombo).toHaveText(/^Flat 12 · Ø 12/)
-  await expect(toolField.getByRole('button', { name: 'Lock tool' })).toHaveAttribute(
-    'aria-pressed',
-    'true',
-  )
-  // picking locks (one command, commit only); Apply runs the tool choice of the others
+  const toolLock = toolField.getByRole('button', { name: 'Lock tool' })
+  await toolLock.click()
+  await expect(toolLock).toHaveAttribute('aria-pressed', 'true')
+  // locking pins it (one command, commit only); Apply runs the tool choice of the others
   await applyButton.click()
   await expect(applyButton).toHaveCount(0)
 

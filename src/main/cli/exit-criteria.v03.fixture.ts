@@ -312,6 +312,8 @@ export async function exitCriteriaV03Flow(call: Call, dir: string): Promise<Flow
   ).toEqual([
     ['dfm.cornerTooSmall', expect.closeTo(1, 9)],
     ['dfm.cornerTooSmall', expect.closeTo(0.25, 9)],
+    // the 0.25 mm corner is below even the 1 mm end mill's radius: no tool fits (DF52)
+    ['dfm.noFittingTool', expect.closeTo(0.25, 9)],
   ])
   expect(cavity.usedBy).toEqual([pocket.operationId])
 
@@ -448,14 +450,15 @@ export async function exitCriteriaV03Flow(call: Call, dir: string): Promise<Flow
     tabs: { positions: tabPositions.map(Number) },
   })
   expect(byId.get(grooveOp.operationId)).toMatchObject({ side: 'on', depth: 1 })
-  // what the design still says: the filleted corners are below every end mill's radius, the
-  // 2.75 mm board margin is narrower than the 12 mm slot (so the tabs hold to nothing), and two
+  // what the design still says: the filleted corners are below every end mill's radius (so no
+  // tool fits the cavity, DF52), the 2.75 mm board margin is narrower than the 12 mm slot (so the tabs hold to nothing), and two
   // setups are needed
   const designWarnings = (await ok<{ warnings: Warning[] }>('design.warning.list', { partId }))
     .value.warnings
   expect(designWarnings.map((w) => [w.code, w.operation])).toEqual([
     ['dfm.cornerTooSmall', pocket.operationId],
     ['dfm.cornerTooSmall', pocket.operationId],
+    ['dfm.noFittingTool', pocket.operationId],
     ['dfm.slotLeavesStock', profile.operationId],
     ['dfm.setups', holes[0]!.operationId],
   ])
