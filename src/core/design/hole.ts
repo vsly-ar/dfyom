@@ -18,6 +18,7 @@ import { quantityDto, quantityFromDTO } from '../library/item'
 import type { UnitSystem } from '../project/document'
 import { Quantity } from '../quantity/quantity'
 import { Rational } from '../quantity/rational'
+import { Tolerance } from '../quantity/tolerance'
 import { FASTENER_FITS, FASTENER_TABLE, type FastenerFit, type FastenerRow } from './fastener/data'
 import type { ExpandedOperation, ExpansionContext, FeatureBase, FeatureKindSpec } from './feature'
 import { FeatureDtoSchema, type FeatureDTO } from './feature.dto'
@@ -372,8 +373,12 @@ function expandHole(h: Hole, ctx: ExpansionContext): AppResult<readonly Expanded
   })
   if (h.head.type === 'simple') return Ok([drill(h.on, h.depth)])
   if (h.head.type === 'countersink') {
-    // the chamfer stores its width (D45): (csDiameter − diameter) / 2, exact
-    const width = derivedLength(h.head.csDiameter.exact.sub(h.diameter.exact).mul(HALF), ctx.units)
+    // the chamfer stores its width (D45): (csDiameter − diameter) / 2, exact, with half
+    // csDiameter's tolerance (B5: the mill sets the outer circle from the nominal edge)
+    const cs = h.head.csDiameter
+    const width = halfTolerance(cs.tolerance).andThen((tolerance) =>
+      derivedLength(cs.exact.sub(h.diameter.exact).mul(HALF), ctx.units, tolerance),
+    )
     if (width.isErr()) return width
     return Ok([
       drill(h.on, h.depth),
@@ -393,11 +398,11 @@ function expandHole(h: Hole, ctx: ExpansionContext): AppResult<readonly Expanded
   const { cbDiameter, cbDepth } = h.head
   const below: AppResult<Option<Quantity>> = h.depth.isNone()
     ? Ok(None)
-    : derivedLength(
-        h.depth.unwrap().exact.sub(cbDepth.exact),
-        ctx.units,
-        h.depth.unwrap().tolerance,
-      ).map(Some)
+    : belowTolerance(h.depth.unwrap().tolerance, cbDepth.tolerance)
+        .andThen((tolerance) =>
+          derivedLength(h.depth.unwrap().exact.sub(cbDepth.exact), ctx.units, tolerance),
+        )
+        .map(Some)
   if (below.isErr()) return below
   return Ok([
     {
@@ -412,6 +417,33 @@ function expandHole(h: Hole, ctx: ExpansionContext): AppResult<readonly Expanded
     },
     drill(`${ctx.ownedId('counterbore')}.floor`, below.unwrap()),
   ])
+}
+
+/** `csDiameter`'s explicit tolerance halved, for the countersink width (design-v0.4.md § B5). */
+function halfTolerance(t: Option<Tolerance>): AppResult<Option<Tolerance>> {
+  if (t.isNone()) return Ok(None)
+  const { notation, upper, lower } = t.unwrap()
+  return Tolerance.create({ notation, upper: upper.mul(HALF), lower: lower.mul(HALF) }).map(Some)
+}
+
+/**
+ * The tolerance of the drill below a blind counterbore (design-v0.4.md § Tolerances of derived
+ * sizes, B5: absolute bottom): the deviations that make the floor's band plus the segment's equal
+ * the hole depth's; a zero band at their midpoint when `cbDepth`'s band is the wider. An
+ * untoleranced hole depth stays untoleranced.
+ */
+function belowTolerance(
+  depth: Option<Tolerance>,
+  cbDepth: Option<Tolerance>,
+): AppResult<Option<Tolerance>> {
+  if (depth.isNone()) return Ok(None)
+  const d = depth.unwrap()
+  if (cbDepth.isNone()) return Ok(depth)
+  const cb = cbDepth.unwrap()
+  let upper = d.upper.sub(cb.upper)
+  let lower = d.lower.sub(cb.lower)
+  if (upper.compare(lower) < 0) upper = lower = upper.add(lower).mul(HALF)
+  return Tolerance.create({ notation: 'deviations', upper, lower }).map(Some)
 }
 
 /** Owned operation parameter → hole field (design-v0.4.md#implementation-f3). */

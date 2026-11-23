@@ -11,7 +11,7 @@ Loading saved data: DTOs, the load pipeline, step-by-step schema migrations.
 Until then (pre-alpha and alpha), persisted app data – project and library files, settings, caches, anything the app writes – does **not** have to survive changes to its shape or meaning:
 
 - **Don't bump `schemaVersion`** (every document stays at `1`), don't freeze old DTO types, and don't write migrations. Change the current Zod schema in place.
-- Data that no longer loads (`input.malformed`, `model.invariant`, `persist.migration`) is **reset instead of repaired**: the UI shows what failed and offers "Discard and start fresh", which deletes the data only after the user confirms. Agents and the CLI may reset only with an explicit confirmation flag; nothing is ever wiped automatically.
+- Data that no longer loads (`input.malformed`, `model.invariant`, `persist.migration`) is **reset instead of repaired**: the UI shows what failed and offers "Discard and start fresh", which deletes the data only after the user confirms. Agents and the CLI may reset only with an explicit confirmation flag; nothing is ever wiped automatically. Project files: `project.open { reset: true }` ([persistence.md § Open](../../architecture/persistence.md#open)); a newer `schemaVersion` is still refused, never reset.
 - Everything else here still applies: DTOs + `toDTO()`, the load pipeline (it simply runs no migration steps), `parseWith` before `Model.create`, and refusing a newer `schemaVersion`.
 - When preservation starts, the schemas at that moment become the `schemaVersion: 1` baseline. Data written before then needs no upgrade path.
 

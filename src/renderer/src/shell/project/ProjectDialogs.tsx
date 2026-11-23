@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react'
 import { useStore } from 'zustand'
 import type { UnitSystem } from '../../../../core/project/document'
+import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { projectMessages as m } from '../../messages/project'
 import {
   Icon,
@@ -35,6 +36,10 @@ export function ProjectDialogs(): React.JSX.Element | null {
       return <RecoveryDialog keyName={dialog.key} file={dialog.file} onOpenChange={onOpenChange} />
     case 'locked':
       return <LockedDialog onOpenChange={onOpenChange} />
+    case 'incompatible':
+      return (
+        <IncompatibleDialog file={dialog.file} error={dialog.error} onOpenChange={onOpenChange} />
+      )
     case 'error':
       return (
         <Dialog
@@ -170,6 +175,56 @@ function RecoveryDialog({
         </>
       }
     />
+  )
+}
+
+/** Pre-alpha reset (hardening B6): the file's data no longer loads. docs/conventions/ui.md#project-files */
+function IncompatibleDialog({
+  file,
+  error,
+  onOpenChange,
+}: {
+  file: string
+  error: AppErrorData
+  onOpenChange: (open: boolean) => void
+}): React.JSX.Element {
+  const { files } = useShell()
+  const busy = useStore(files, (s) => s.busy)
+  const [confirm, setConfirm] = useState(false)
+  const name = file.split(/[\\/]/).pop() ?? file
+  if (confirm)
+    return (
+      <ConfirmDialog
+        open
+        onOpenChange={(o) => {
+          if (!o) setConfirm(false)
+        }}
+        title={m.incompatible.confirmTitle(name)}
+        description={m.incompatible.confirmDescription}
+        confirmLabel={m.incompatible.reset}
+        destructive
+        onConfirm={() => void files.getState().resetFile(file)}
+      />
+    )
+  return (
+    <Dialog
+      open
+      onOpenChange={onOpenChange}
+      title={m.incompatible.title}
+      description={m.incompatible.description(name)}
+      footer={
+        <>
+          <DialogClose>
+            <Button>{m.incompatible.cancel}</Button>
+          </DialogClose>
+          <Button variant="danger" disabled={busy} onClick={() => setConfirm(true)}>
+            {m.incompatible.reset}
+          </Button>
+        </>
+      }
+    >
+      <ErrorMessage error={error} />
+    </Dialog>
   )
 }
 

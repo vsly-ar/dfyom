@@ -21,6 +21,8 @@ import { deepEqual } from '../../library/snapshot'
 import type { ProjectDoc } from '../../project/document'
 import { Fields, invalid, load, PartArg, settle, shapeEnv, Src } from '../commands'
 import { DfmWarningSchema } from '../warnings'
+import { toGeometryInput } from '../geometry-input'
+import { shapesOf } from '../operation'
 import { featureSpan, materialize, ownedOperationId, type FeatureKindSpec } from '../feature'
 import { featureKindCommands, type FeatureCommandSpec } from '../feature-commands'
 import { FeatureIdSchema } from '../feature.dto'
@@ -252,7 +254,7 @@ const clonesPreview = defineQuery({
     // into changes against the part's last warnings (llm-api.md#result-size)
     warnings: z.array(DfmWarningSchema).describe("The Clones' own warnings (clone*)"),
   }),
-  run(doc, args) {
+  run(doc, args, ctx) {
     const where = 'design.clones.preview'
     const loaded = load(doc as Draft<ProjectDoc>, args.partId, where)
     if (loaded.isErr()) return loaded
@@ -298,6 +300,17 @@ const clonesPreview = defineQuery({
     const issues = [...rowIssues(rows, shapes), ...sourceIssues(draft, ops, l.features)]
     if (issues.length > 0) return invalid(issues, where)
     const path = featurePath(draft, ops, shapes)
+    // the source's footprint reads the placed shapes (B3)
+    const region2d = ctx.services.region2d
+    const input = shapesOf(ops, l.dto).andThen((placed) =>
+      toGeometryInput(
+        { ...l.part, ...(placed.size === 0 ? {} : { shapes: placed }) },
+        l.stock,
+        region2d,
+      ),
+    )
+    if (input.isErr()) return Err(input.unwrapErr().withContext(where))
+    const geometry = { operations: input.unwrap().operations, region2d }
     const uv = (p: { u: number; v: number }): [number, number] => [p.u, p.v]
     return Ok({
       on: draft.on,
@@ -313,7 +326,7 @@ const clonesPreview = defineQuery({
           ...(p.number === undefined ? {} : { n: p.number }),
         })),
       })),
-      warnings: clonesWarnings(draft, ops, l.stock, l.units, shapes),
+      warnings: clonesWarnings(draft, ops, l.stock, l.units, shapes, geometry),
     })
   },
 })

@@ -8,6 +8,7 @@
 // docs/architecture/persistence.md#open, #crash-recovery, #lock
 import { createStore, type StoreApi } from 'zustand/vanilla'
 import type { UnitSystem } from '../../../../core/project/document'
+import { isIncompatibleProject } from '../../../../core/project/layout'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import type { CallReply, PreloadApi } from '../../../../shared/preload-api'
 import type { ReplicaState } from '../../state/replica'
@@ -25,6 +26,8 @@ export type FilesDialog =
       /** Clock time of the scheduled retry, while one waits. */
       readonly retryAt?: number
     }
+  /** Data of an earlier pre-alpha version that no longer loads (hardening B6): offer a reset. */
+  | { readonly kind: 'incompatible'; readonly file: string; readonly error: AppErrorData }
   | {
       readonly kind: 'error'
       readonly title: 'open' | 'save' | 'create'
@@ -52,6 +55,8 @@ export interface FilesState {
   save(): Promise<boolean>
   saveAs(): Promise<boolean>
   recover(key: string, action: 'restore' | 'discard'): Promise<void>
+  /** "Discard and start fresh" (confirmed): `project.open { file, reset: true }`. */
+  resetFile(file: string): Promise<void>
   /** Retry the locked open now, or schedule it after `LOCK_RETRY_MS`. */
   retryLocked(later: boolean): void
   refreshRecoverable(): Promise<void>
@@ -104,6 +109,10 @@ export function createProjectFiles({ bridge, replica, now = Date.now }: Deps): P
       }
       if (e.code === 'persist.locked' && file !== null) {
         set({ dialog: { kind: 'locked', file, error: e } })
+        return
+      }
+      if (kind !== 'create' && file !== null && isIncompatibleProject(e)) {
+        set({ dialog: { kind: 'incompatible', file, error: e } })
         return
       }
       set({ dialog: { kind: 'error', title: kind === 'recover' ? 'open' : kind, error: e } })
@@ -167,6 +176,11 @@ export function createProjectFiles({ bridge, replica, now = Date.now }: Deps): P
             action,
             ...(action === 'discard' ? { confirm: true } : {}),
           }),
+        )
+      },
+      resetFile(file) {
+        return opening('open', file, () =>
+          bridge.window.openProject('project.open', { file, reset: true }),
         )
       },
       retryLocked(later) {

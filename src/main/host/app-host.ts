@@ -7,7 +7,7 @@
  * No Electron import: the GUI adds windows and IPC, MCP and the CLI their framing.
  */
 import { hostname } from 'node:os'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import {
   AgentSession,
   SESSION_TOOLS,
@@ -39,7 +39,8 @@ import {
 } from '../../core/design/evaluation'
 import { Library } from '../../core/library/library'
 import type { ExportFiles } from '../../core/post/plan-export'
-import { newProjectDoc } from '../../core/project/document'
+import { newProjectDoc, type UnitSystem } from '../../core/project/document'
+import { INCOMPATIBLE_PROJECT, isIncompatibleProject } from '../../core/project/layout'
 import type { HostPort, OpenedResult, OpenProjectInfo } from '../../core/project/lifecycle'
 import {
   attachSession,
@@ -314,13 +315,18 @@ class Host implements AppHost {
   async open(
     file: string,
     source: Source,
+    reset = false,
   ): AsyncAppResult<OpenedResult & { alreadyOpen: boolean }> {
     const where = 'host.open'
     const already = await this.findOpen(file)
     if (already !== undefined)
       return Ok({ key: already.key, revision: already.dispatcher.revision, alreadyOpen: true })
     const opened = await this.storage.open(file)
-    if (opened.isErr()) return Err(await this.withConnectHint(opened.unwrapErr()))
+    if (opened.isErr()) {
+      const e = opened.unwrapErr()
+      if (reset && isIncompatibleProject(e)) return this.resetFile(file, e, source)
+      return Err(await this.withConnectHint(e))
+    }
     const outcome = opened.unwrap()
     if (outcome.kind === 'recoverable') {
       const r = outcome.recoverable
@@ -334,6 +340,35 @@ class Host implements AppHost {
       )
     }
     return Ok({ ...this.start(outcome.project, source), alreadyOpen: false })
+  }
+
+  /**
+   * Pre-alpha reset (hardening B6): replaces a file whose data no longer loads with a new, empty
+   * project of the same name and unit system (Save As over it, confirmed by the caller), then
+   * opens it. docs/architecture/persistence.md#open
+   */
+  private async resetFile(
+    file: string,
+    failed: AppError,
+    source: Source,
+  ): AsyncAppResult<OpenedResult & { alreadyOpen: boolean }> {
+    const old = failed.frames.find((f) => f.where === INCOMPATIBLE_PROJECT)?.data ?? {}
+    const oldName = typeof old['name'] === 'string' ? old['name'].trim().slice(0, 200) : ''
+    const name = oldName === '' ? basename(file).replace(/\.dfyom$/i, '') || 'Untitled' : oldName
+    const unitSystem: UnitSystem = old['unitSystem'] === 'inch' ? 'inch' : 'mm'
+    const created = await this.storage.create(newProjectDoc({ name, unitSystem }))
+    if (created.isErr()) return Err(created.unwrapErr().withContext('host.reset', { file }))
+    const project = created.unwrap()
+    const saved = await project.session.save(project.doc, { target: file, confirm: true })
+    if (saved.isErr()) {
+      await this.storage.close(project.session.key)
+      return Err(saved.unwrapErr().withContext('host.reset', { file }))
+    }
+    this.o.log.warn(
+      { file, key: project.session.key, err: failed.toJSON() },
+      'incompatible project file reset',
+    )
+    return Ok({ ...this.start(project, source), alreadyOpen: false })
   }
 
   async openKey(file: string): Promise<string | undefined> {

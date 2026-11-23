@@ -5,7 +5,7 @@
 // tests. Docs: docs/conventions/ui-library-window.md, docs/conventions/testing.md#end-to-end
 import { resolve } from 'node:path'
 import type { Locator, Page } from '@playwright/test'
-import { expect, test } from './app.fixture'
+import { closeApp, closeDialog, expect, test } from './app.fixture'
 
 const RENDERS = process.env['DFYOM_RENDERS'] === '1'
 const rendersDir = resolve(__dirname, '../design/features/renders')
@@ -105,10 +105,8 @@ test('library window: a new chamfer mill with its angle, tip and drawing (U4)', 
   const dialog = page.getByRole('dialog', { name: 'New project' })
   await dialog.getByRole('textbox', { name: 'Project name' }).fill('Chamfer mills')
   await dialog.getByRole('button', { name: 'Create project' }).click()
-  await page
-    .getByRole('region', { name: 'Set up the part' })
-    .getByRole('button', { name: 'Create part' })
-    .click()
+  // no part (B1: the app used to be closed with a part only, see the last test)
+  await closeDialog(page.getByRole('dialog', { name: 'Stock' }), 'Cancel')
 
   const opened = dfyom.app.waitForEvent('window')
   await page.getByRole('button', { name: 'Library', exact: true }).click()
@@ -143,9 +141,38 @@ test('library window: a new chamfer mill with its angle, tip and drawing (U4)', 
   await expect(editor.getByRole('combobox', { name: 'Tool material' })).toBeVisible()
   await render(page, lib, 'df1-tool-details')
   await editor.getByRole('button', { name: 'Save' }).click()
+  // the saved row is listed a moment before the draft row goes: wait for the draft row to go
+  await expect(grid.getByRole('row', { name: /Unsaved/ })).toHaveCount(0)
   const row = grid.getByRole('row', { name: /Chamfer 90° Ø12/ })
   await expect(row).toHaveAttribute('aria-selected', 'true')
   await expect(row).toContainText('90°')
   await expect(row).not.toContainText('Unsaved')
+  expect(dfyom.rendererErrors).toEqual([])
+})
+
+test('quitting with no part and an unsaved draft asks in the Library window, then quits (B1)', async ({
+  dfyom,
+}) => {
+  const page = await dfyom.app.firstWindow()
+  await page.waitForLoadState('domcontentloaded')
+  await page
+    .getByRole('navigation', { name: 'Navigator' })
+    .getByRole('button', { name: 'New project' })
+    .click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  await dialog.getByRole('textbox', { name: 'Project name' }).fill('No part')
+  await dialog.getByRole('button', { name: 'Create project' }).click()
+  await closeDialog(page.getByRole('dialog', { name: 'Stock' }), 'Cancel')
+  const opened = dfyom.app.waitForEvent('window')
+  await page.getByRole('button', { name: 'Library', exact: true }).click()
+  const lib = await opened
+  await lib.waitForLoadState('domcontentloaded')
+  await lib.getByRole('button', { name: 'New tool' }).click()
+  await expect(
+    lib.getByRole('grid', { name: 'Tools' }).getByRole('row', { name: /Unsaved/ }),
+  ).toBeVisible()
+  // the quit waits for the draft's Save / Discard / Cancel; Discard lets it finish
+  expect(await closeApp(dfyom.app)).toBe(1)
+  expect(dfyom.app.windows()).toHaveLength(0)
   expect(dfyom.rendererErrors).toEqual([])
 })
