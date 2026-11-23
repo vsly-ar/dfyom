@@ -1,6 +1,6 @@
 # Run on a real machine
 
-Status: draft (hardening 1.2, 2026-11-23; awaits the user's answers to [Q49–Q52](../plans/hardening.md#questions-for-the-user); [M1](#implementation-m1), [M2](#implementation-m2) and [M3](#implementation-m3) implemented on branches) · Safety rules: [run.md § Safety](run.md#safety) · Base: [run-v0.1.md](run-v0.1.md) · Protocol facts: [grbl.md](../architecture/grbl.md) · Decision: [ADR 0013](../decisions/0013-grbl-first-controller.md) · Tasks: [hardening](../plans/hardening.md#5-real-machine) M1–M8
+Status: draft (hardening 1.2, 2026-11-23; awaits the user's answers to [Q49–Q52](../plans/hardening.md#questions-for-the-user); [M1](#implementation-m1), [M2](#implementation-m2), [M3](#implementation-m3), [M4](#implementation-m4), [M6](#implementation-m6) and [M8](#fault-injection-m8) implemented on branches) · Safety rules: [run.md § Safety](run.md#safety) · Base: [run-v0.1.md](run-v0.1.md) · Protocol facts: [grbl.md](../architecture/grbl.md) · Decision: [ADR 0013](../decisions/0013-grbl-first-controller.md) · Tasks: [hardening](../plans/hardening.md#5-real-machine) M1–M8
 
 Run mode on a real GRBL controller over a USB serial port: the same sender, host, commands and UI as the [virtual machine](run-v0.1.md), with a `SerialTransport` under the sender, a port picker, the controller's settings checked against the machine copy, and the real-machine rules of [run.md § Safety](run.md#safety). This doc specifies DFYOM's side; GRBL facts stay in [grbl.md](../architecture/grbl.md).
 
@@ -8,7 +8,7 @@ Run mode on a real GRBL controller over a USB serial port: the same sender, host
 
 Until the user answers Q49–Q52, this doc assumes ([run.md § Safety](run.md#safety) A1–A5):
 
-- **Machine (Q49):** a GRBL 1.1–compatible controller (an Arduino-class board: banner `Grbl 1.1…`, 115200 baud by default) on USB serial, with homing switches (`$22=1`) and soft limits on; a fixed-gantry router that homes to the **back right with Z up** (`$23=0`, the [`fixedGantry`](../architecture/library.md#machine) preset); a hand-switched router or a PWM spindle (`M3 S`). No probe is assumed; a Z touch plate is optional (M4).
+- **Machine (Q49):** a GRBL 1.1–compatible controller (an Arduino-class board: banner `Grbl 1.1…`, 115200 baud by default) on USB serial, with homing switches (`$22=1`) and soft limits on; a fixed-gantry router that homes to the **back right with Z up** (`$23=0`, the [`fixedGantry`](../architecture/library.md#machine) preset); a hand-switched router or a PWM spindle (`M3 S`). No probe is assumed; a Z touch plate on the controller's probe input is optional (M4).
 - **Agents (Q50):** machine-moving commands on a real connection come from the UI only.
 - **First cuts (Q51):** step 1 with the user's own sender (X0), step 2 through DFYOM (X1).
 - **Scope (Q52):** as recommended ([Scope](#scope)).
@@ -142,12 +142,21 @@ Real GRBL sends no status report during `$H` ([grbl.md](../architecture/grbl.md#
 
 ## Probing and re-zero (M4)
 
-Planned design; implemented with M4 and accepted with it.
+A Z touch plate replaces the nominal-thickness assumption for Z0 ([v0.2 known issues](../plans/v0.2.md#known-issues-and-risks)): the plate lies on the stock, its clip on the bit, and a probe move stops on contact. Implemented with M4 ([below](#implementation-m4)).
 
-- **Command** `run.machine.probeZ { plateThickness, maxTravel?: 25, feed?: 50, retract?: 2 }` (UI only on a real machine): `G38.2 Z-<maxTravel> F<feed>` from the current position, then on contact the host reads `[PRB:x,y,z:1]`, sets G54 Z so the contact point is `plateThickness` (`G10 L20 P1 Z<thickness>`), and retracts `G91 G0 Z<retract>`. No contact within `maxTravel` → GRBL's `ALARM:5` (probe fail) → `machine.alarm` with the next step ("Check the plate and its clip, then unlock").
-- Before probing the UI asks "Is the plate under the tool and the clip on the bit?" (confirm "Probe"); the spindle must be off (GRBL refuses nothing here, so the host checks `FS` spindle = 0, else `run.state`).
-- **Where:** the Work zero section ("Probe Z"), the tool-change dialog (after a tool change: replaces "Set Z zero here" when a plate thickness is set) and the setup-change prompt (after a flip). The plate thickness is a machine field (`probe.plateThickness`, library.md) so it is set once.
-- The emulator learns `G38.2`/`G38.3` with a test hook for the plate height and `[PRB:…]` in `$#` (grbl.md's "not emulated" list shrinks).
+- **Plate thickness** is a machine field, `probe.plateThickness` ([library.md](../architecture/library.md#machine)), set once in the Library window ("Plate thickness", group "Touch plate"). Run mode takes it from the plan's machine copy, else from the library machine the copy was taken from (the plate belongs to the workshop, not the plan; setting it in the library needs no plan update), and on a manual connection from the chosen library machine. Without a plate thickness no probe control shows; "Set Z zero here" stays.
+- **Command** `run.machine.probeZ { plateThickness, maxTravel?: 25, feed?: 50, retract?: 2 }` (a `job`, like homing: a probe takes up to half a minute; `machine: true`, UI only on a real machine, [run.md § Safety 2](run.md#2-who-may-command-a-real-connection-q50)) → `{ workZero, contact }` (G54 and the contact point, machine coordinates, mm).
+- **Host sequence:**
+  1. Allowed when Idle without a run, or while a run waits at a tool change; else `run.state`. The spindle must report 0 rpm (`FS`), else `run.state`, rule `spindleOn` (a hand-switched router is the operator's: the confirmation asks). With soft limits on, the probe distance is cut to the travel (the probe never targets below `−$132`); less than 1 mm left → `run.travel`.
+  2. `$G` is read (the modal state to restore), then `G21 G90 G38.2 Z<wpos.z − distance> F<feed>`, with a command timeout of the probe's duration plus 10 s.
+  3. GRBL stops on contact and answers `[PRB:x,y,z:1]` (machine coordinates of the contact) and `ok`. The host sets G54 Z so the contact is at Z = plate thickness: `G10 L2 P1 Z<prb.z − plateThickness>` (exact: independent of how far the machine coasted past the contact while decelerating).
+  4. Retract: `G53 G0 Z<min(prb.z + retract, 0)>`.
+  5. Restore the modal state `$G` reported: units (`G20`/`G21`), distance (`G90`/`G91`) and motion: `G1 F<feed>` when it was `G1`–`G3` with a feed set, else `G0` (GRBL cannot set `G2`/`G3` without an arc; DFYOM's post restates the motion word after a tool change anyway, [grbl.md](../architecture/grbl.md#output-dialect)). Then `G4 P0` (its `ok` waits for the retract: `$#` needs Idle) and `$#` is read again.
+- **Probe fails:** no contact within the distance → GRBL's `ALARM:5`; the probe input already closed before moving (the clip touches the plate, a wiring fault) → `ALARM:4`. `run.machine.probeZ` fails with `machine.alarm` (`data.code`); the alarm panel says what to do ([alarm table](#machine-readiness-m3): check the plate and clip, unlock, probe again). Neither alarm loses the position: `homed` stays. The modal state is restored after the unlock (`$X`), since GRBL refuses gCode in Alarm.
+- **At a tool change** a probe alarm does not end the run: nothing of the program is in GRBL's buffers while it waits there (the sender waits for every `ok` and Idle first), so the sender keeps the run waiting; the operator unlocks, fixes the clip, probes again (or sets Z by hand) and continues. Any other alarm during a run still fails it.
+- **Confirmation:** "Probe Z?" with "Put the touch plate on the stock under the bit and the clip on the bit. The spindle must be off. The bit moves down until it touches the plate (at most 25 mm)." and the plate thickness; confirm "Probe" ([run.md § Safety 3](run.md#3-confirmations-before-motion)). Every probe is confirmed, on the virtual machine too (the same muscle memory).
+- **Where:** the Work zero section ("Probe Z", under the zero buttons), the tool-change dialog (next to "Set Z zero here") and the setup-change prompt (after a flip the stock's top is at its real thickness, not the nominal one). The live G54 under the controls shows the result; the alarm panel shows a failure.
+- **Virtual machine:** the emulator learns `G38.2`–`G38.5` with a simulated plate ([grbl.md](../architecture/grbl.md#probing)); the host lays the virtual plate on the stock top at the current work zero Z (plate top = G54 Z + plate thickness), or 10 mm below the tool when that is not below it (an unset work zero), just before probing. The loopback port of the end-to-end tests has a fixed plate (top at MPos Z −60).
 
 ## Section resume (M5)
 
@@ -159,10 +168,21 @@ Planned design; implemented with M5.
 
 ## Overrides (M6)
 
-Planned design; implemented with M6.
+Feed, rapid and spindle overrides through GRBL's real-time bytes, while a run streams or the machine is idle. Implemented with M6 ([below](#implementation-m6)).
 
-- Commands `run.override.feed { action: 'reset' | '+10' | '-10' | '+1' | '-1' }` and `run.override.spindle { … }` (the same steps) send GRBL's real-time bytes (`0x90–0x94`, `0x99–0x9D`); rapid overrides (`0x95–0x97`) as `run.override.rapid { percent: 100 | 50 | 25 }`. Allowed while connected; on a real machine UI only, except `reset` (back to 100 %), which every source may send.
-- `RunStatus.overrides { feed, rapid, spindle }` from the status report's `Ov` field (every 10–20 reports, and after each change); the inspector shows them next to the progress with − / + / reset buttons.
+- **Command** `run.override.set { feed?, spindle?, rapid? }` (`effect`, `urgent`: it skips the project queue like the stop paths and runs during a run job; `machine: true`; one command rather than three keeps the agent tool list within its budget): `feed` and `spindle` take `'reset' | '+10' | '-10' | '+1' | '-1'` (`0x90`–`0x94`, `0x99`–`0x9D`), `rapid` takes `100 | 50 | 25` (`0x95`–`0x97`); at least one, sent in that order → `{ overrides? }` as next reported. GRBL clamps feed and spindle to 10–200 %; DFYOM sends the byte and shows what GRBL reports. Allowed while connected (`run.notConnected` otherwise), not during a critical alarm (`run.state`).
+- **Permission (Q50):** on a real machine UI only, every action including `reset` (back to 100 % can speed a machine up: it is not a stop path); on the virtual machine every source.
+- **Status:** `RunStatus.overrides { feed, rapid, spindle }` (percent) from the status report's `Ov` field, which GRBL sends every 10–20 reports and on the next report after a change; DFYOM keeps the last values between reports; a controller reset sets them to 100 % (GRBL restores them then, and at program end `M2`/`M30`, which the next `Ov` reports). Absent until the first `Ov`.
+- **UI:** an "Overrides" section in the run inspector under the progress, while connected: two rows, "Feed" and "Spindle", each with the percentage in mono digits, "−10 %", "+10 %" and "Reset" (small text buttons with full accessible names; the 1 % steps are for agents and the API only), and "Rapids" as a segmented control 100 / 50 / 25 %. A value other than 100 % is marked in the warning tone with the hint "Overrides apply until reset or the program ends." The 3D view and the progress estimate are not rescaled.
+- The machine toolbar's chip is unchanged; overrides are run-mode controls, not a global safety control.
+
+## Fault injection (M8)
+
+The new failure paths are tested end to end without hardware: commands → dispatcher → `MachineClient` → machine host → sender → loopback serial port → GRBL emulator.
+
+- **Emulator hooks** ([grbl.md](../architecture/grbl.md#fault-injection)): `setProbePlate(z | undefined)` (the plate's top in MPos Z, or no plate: a probe finds nothing → `ALARM:5`; a tool already at or below the plate → `ALARM:4`), `triggerHardLimit()` (a limit switch closes: `ALARM:1`, critical, `[MSG:Reset to continue]`, like GRBL's limit pin interrupt) and `setSilent(true)` (the controller stops answering: no `ok`, no status report, as a hung board).
+- **Loopback hooks:** `unplug()` (the port closes, existing) and the emulator's hooks above; `timeScale` runs the loopback's emulator faster than real time (`'max'`), so a whole program runs in a test while the sender keeps its real-time watchdogs.
+- **Paths covered** (`src/core/run/commands.test.ts`, "fault injection on a real run"; the probe paths of the host in `host-serial.test.ts`, the emulator's in `emulator/probe.test.ts`): a lost connection mid-run (cable pulled: `machine.connection`, `connection.lost`, the run fails at once; a silent controller: the status watchdog's `machine.connection`); an alarm mid-run (hard limit: `machine.alarm` code 1, not homed, critical until reset); probe fail (`ALARM:5` on an idle machine, `ALARM:4` in the emulator; `ALARM:5` at a tool change keeps the run waiting, then unlock, probe again and continue to the end). The UI paths have component tests (`RunMode.test.tsx`) and the loopback e2e (`e2e/run-serial.e2e.ts`: a probe that misses, the alarm panel, unlock, a probe that touches).
 
 ## Testing
 
@@ -171,25 +191,29 @@ Per [testing.md](../conventions/testing.md); no hardware in CI.
 - **Loopback serial:** `loopbackSerialPorts` (`src/core/run/grbl/loopback.fixture.ts`) is a `SerialPorts` whose `open()` returns a `ControllerTransport` wired to a `GrblEmulator` like a serial line: bytes are delivered asynchronously and in arbitrary chunks, the emulator may start silent (no banner until `0x18`) or with a delayed banner (Arduino reset), and the port can be "unplugged" (close event). The host, `MachineClient` and the run commands run over it in-process: connect with handshake, settings check (match and mismatch), homing with the silent-homing emulator (no watchdog failure), jog, a job on a finalized plan, refusals (draft plan, mismatch), unplug mid-run → `machine.connection`, disconnect sends `0x18`.
 - **SerialTransport itself** (`serial-transport.test.ts`): against `serialport`'s `MockBinding` (`@serialport/binding-mock`, shipped with `serialport`): open, write and drain, data, close by DFYOM and by the device (`onClose`), open failure → `machine.connection`.
 - **Permission:** `permission.test.ts` and `dispatcher.test.ts`: the [table](run.md#2-who-may-command-a-real-connection-q50) per source, including `job.resume` of a run job.
-- **In the app (e2e):** with `DFYOM_LOOPBACK_SERIAL=1` the machine host offers one loopback port (`/dev/cu.usbmodem1101`, an emulator with GRBL's default settings, silent homing, a 300 ms banner delay) instead of the OS's ports; only end-to-end tests set it (`e2e/run-serial.e2e.ts`: picker, connect, chip, settings warning, Home confirmation; renders `design/features/renders/m1-{serial-picker,settings-warning,home-confirm}-{light,dark}.png` with `DFYOM_RENDERS=1`). It also keeps the OS's device names out of committed renders.
+- **In the app (e2e):** with `DFYOM_LOOPBACK_SERIAL=1` the machine host offers one loopback port (`/dev/cu.usbmodem1101`, an emulator with GRBL's default settings, silent homing, a 300 ms banner delay) instead of the OS's ports; only end-to-end tests set it (`e2e/run-serial.e2e.ts`: picker, connect, chip, settings warning, Home confirmation; renders `design/features/renders/m1-{serial-picker,settings-warning,home-confirm}-{light,dark}.png` with `DFYOM_RENDERS=1`; M4/M6: a probe that misses, unlock, jog, a probe that touches, the overrides, renders `m4-probe-{confirm,alarm}` and `m6-overrides`). It also keeps the OS's device names out of committed renders. The loopback controller has a touch plate with its top at MPos Z −60; `DFYOM_LOOPBACK_TIMESCALE=<1–100>` runs its clock faster than real time (the probe test: a 50 mm/min probe that misses would take 30 s).
 - **Manual with hardware:** the checklist in [testing.md](../conventions/testing.md) (hardening 1.3) before X1.
 
 ## Files
 
-| File                                          | Contents                                                           |
-| --------------------------------------------- | ------------------------------------------------------------------ |
-| `src/core/run/serial.ts`                      | `SerialPorts` port, `SerialPortInfo`, port sorting                 |
-| `src/core/run/transport.ts`                   | `ControllerTransport` (+ optional `onClose`)                       |
-| `src/core/run/settings-check.ts`              | `settingsCheck(machine, settings)`: the `$$` comparison at connect |
-| `src/core/run/grbl/loopback.fixture.ts`       | Loopback serial ports over the emulator (tests)                    |
-| `src/main/machine/serial-transport.ts`        | `SerialTransport`, `nodeSerialPorts` (lazy `serialport`)           |
-| `src/main/machine/serve.ts`                   | Passes `nodeSerialPorts` to the host                               |
-| `src/renderer/src/modes/run/SerialPicker.tsx` | Connect-to choice, port and baud selects, settings warning         |
-| `src/core/run/commands.ts`                    | `run.connection.open` serial target, `run.ports.scan`              |
-| `src/core/run/job.ts`                         | Real-machine run checks (`realMachineChecks`)                      |
-| `src/core/commands/permission.ts`             | Q50 policy (`STOP_COMMANDS`)                                       |
-| `src/renderer/src/modes/run/AlarmPanel.tsx`   | Alarm panel: what happened and the next steps (M3)                 |
-| `src/renderer/src/modes/run/JogPad.tsx`       | Step and continuous jog (M3)                                       |
+| File                                              | Contents                                                           |
+| ------------------------------------------------- | ------------------------------------------------------------------ |
+| `src/core/run/serial.ts`                          | `SerialPorts` port, `SerialPortInfo`, port sorting                 |
+| `src/core/run/transport.ts`                       | `ControllerTransport` (+ optional `onClose`)                       |
+| `src/core/run/settings-check.ts`                  | `settingsCheck(machine, settings)`: the `$$` comparison at connect |
+| `src/core/run/grbl/loopback.fixture.ts`           | Loopback serial ports over the emulator (tests)                    |
+| `src/main/machine/serial-transport.ts`            | `SerialTransport`, `nodeSerialPorts` (lazy `serialport`)           |
+| `src/main/machine/serve.ts`                       | Passes `nodeSerialPorts` to the host                               |
+| `src/renderer/src/modes/run/SerialPicker.tsx`     | Connect-to choice, port and baud selects, settings warning         |
+| `src/core/run/commands.ts`                        | `run.connection.open` serial target, `run.ports.scan`              |
+| `src/core/run/job.ts`                             | Real-machine run checks (`realMachineChecks`)                      |
+| `src/core/commands/permission.ts`                 | Q50 policy (`STOP_COMMANDS`)                                       |
+| `src/renderer/src/modes/run/AlarmPanel.tsx`       | Alarm panel: what happened and the next steps (M3)                 |
+| `src/renderer/src/modes/run/JogPad.tsx`           | Step and continuous jog (M3)                                       |
+| `src/core/run/grbl/emulator/emulator.ts`          | Probe cycles, simulated plate, fault hooks (M4, M8)                |
+| `src/core/run/host/host.ts`                       | `probeZ` sequence, modal restore, override bytes (M4, M6)          |
+| `src/renderer/src/modes/run/ProbeZButton.tsx`     | "Probe Z" with its confirmation (M4)                               |
+| `src/renderer/src/modes/run/OverridesSection.tsx` | Inspector "Overrides" section (M6)                                 |
 
 ## Implementation (M1)
 
@@ -217,3 +241,17 @@ Decisions and findings of M1, where this doc left room:
 - **DRO and per-axis zero** already existed (3.12, E2); M3 adds continuous jog and the alarm panel.
 - **Continuous jog as an absolute move to the travel edge** rather than a long relative jog: the target is exact (`0` or `−travel`), so GRBL's own soft-limit check (`target > 0` or `< −travel`) never trips on rounding, and the host's travel estimate (`jogEnd`) is exact too.
 - **Jog mode per window**, in the run store (`jogMode`), shared by the navigator's and the tool-change and setup-change dialogs' jog pads.
+
+## Implementation (M4)
+
+- **Plate thickness in the model:** `Machine.plateThickness` (Option, positive length), DTO `probe.plateThickness`; optional, so existing machine keys are unchanged.
+- **Probe defaults** (`PROBE_DEFAULTS` in `host/protocol.ts`): 25 mm down, 50 mm/min, 2 mm retract; the UI uses them, agents may pass others on the virtual machine.
+- **Unlock at a tool-change wait** is allowed (the only alarm that can be pending there is a probe's); `$X` then puts the modal state back and the host waits for a fresh status, so a probe right after the unlock sees Idle.
+- **Emulator:** the contact is found on the executing block's motion profile (bisection on distance), the stop decelerates like a motion cancel, `[PRB]` holds the latched contact. G38.x in a jog is `error:16` as GRBL's `$J=` accepts only G1-style moves.
+- **Not verified on hardware:** the sequence follows GRBL 1.1's documented probe behaviour; a real plate's debounce and probe pin polarity (`$6`) are untested.
+
+## Implementation (M6)
+
+- **One command** (`run.override.set`) instead of three: the agent tool list is close to its size budget.
+- **Overrides pass a reserved client** (a job checking its program) like the stop paths: a real-time byte never interleaves with a line.
+- **The reply** waits for one fresh status report, so it carries the `Ov` after the change.

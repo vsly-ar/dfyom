@@ -64,6 +64,11 @@ export const MachineValuesDtoSchema = z.object({
   ),
   pullOff: quantityDto('length').optional().describe('$27 homing pull-off; unset = 1 mm'),
   softLimits: z.boolean().optional().describe('$20 soft limits; unset = on'),
+  // Z touch plate (docs/modes/run-machine.md#probing-and-re-zero-m4)
+  probe: z
+    .object({ plateThickness: quantityDto('length') })
+    .optional()
+    .describe('Touch plate'),
   programUnits: z.enum(['mm', 'in']).describe('G21/G20 in exported gCode'),
   toolChanger: z.literal('none').describe('Manual tool change (M0)'),
 })

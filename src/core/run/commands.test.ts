@@ -11,7 +11,7 @@ import { libraryInput, machineValues } from '../library/library.fixture'
 import { planSetup, type PlanSetup } from '../plan/plan.fixture'
 import { createToolpathCache } from '../toolpath/cache'
 import { systemTimerHost } from './clock'
-import { checkNoRunJob } from './commands'
+import { checkNoRunJob, prepareWorkZero } from './commands'
 import { machineKeyOf } from './machine-key'
 import { MachineClient } from './host/client'
 import { inProcessHostFactory } from './host/in-process'
@@ -101,7 +101,7 @@ async function setup(
   }
   const open = (over: object = {}) =>
     run('run.connection.open', { target: 'virtual', planId, timeScale: 'max', ...over })
-  return { s, planId, d, client, run, status, job, open }
+  return { s, planId, d, client, run, status, job, open, serial }
 }
 
 describe('run commands', { timeout: 60_000 }, () => {
@@ -282,6 +282,30 @@ describe('run commands', { timeout: 60_000 }, () => {
     }
     expect(zero.workZero).toEqual([-50, -21, -11])
     expect(t.status().wpos).toEqual([0, 0, 0])
+  })
+
+  it('an agent probes Z on the virtual machine and sets overrides (M4, M6)', async () => {
+    const t = await setup()
+    expectOk(await t.open({ prepare: true }))
+    const before = t.status().workZero
+    // the virtual plate lies on the stock top: the work zero comes back where prepare put it
+    const r = expectOk(
+      await (
+        await t.job('run.machine.probeZ', { plateThickness: 10, feed: 500 })
+      ).result,
+    ) as { workZero: number[]; contact: number[] }
+    expect(r.workZero[2]).toBeCloseTo(before[2], 3)
+    expect(r.contact[2]).toBeCloseTo(before[2] + 10, 3)
+    expect(t.status().mpos[2]).toBeCloseTo(before[2] + 12, 3)
+    expectErrCode(await t.run('run.machine.probeZ', { plateThickness: 0 }), 'input.malformed')
+    const ov = expectOk(await t.run('run.override.set', { rapid: 50, feed: '+10' })) as {
+      overrides?: { rapid: number }
+    }
+    expect(ov.overrides?.rapid).toBe(50)
+    expect(await waitFor(() => t.status().overrides?.rapid === 50)).toBe(true)
+    expect(t.status().overrides?.feed).toBe(110)
+    expectErrCode(await t.run('run.override.set', { rapid: 75 }), 'input.malformed')
+    expectErrCode(await t.run('run.override.set', {}), 'input.malformed')
   })
 
   it('refuses a start that is not homed, a soft-limit violation and another machine copy', async () => {
@@ -538,6 +562,15 @@ describe('run commands on a serial target (loopback)', { timeout: 60_000 }, () =
     expectErrCode(await t.run('run.job.start', { planId: t.planId }), 'permission.denied')
     expectErrCode(await t.run('run.connection.close', {}), 'permission.denied')
     expectOk(await t.run('run.machine.jogCancel', {}))
+    // probing and overrides move or speed up a real machine: the UI only (M4, M6)
+    expectErrCode(await t.run('run.machine.probeZ', { plateThickness: 5 }), 'permission.denied')
+    expectErrCode(await t.run('run.override.set', { feed: 'reset' }), 'permission.denied')
+    expectErrCode(await t.run('run.override.set', { rapid: 100 }), 'permission.denied')
+    expect(
+      expectOk(await t.run('run.override.set', { feed: '-10' }, ui)) as {
+        overrides?: { feed: number }
+      },
+    ).toMatchObject({ overrides: { feed: 90 } })
     // a real machine runs finalized plans only
     const { jobId } = expectOk(await t.run('run.job.start', { planId: t.planId }, ui)) as {
       jobId: string
@@ -608,5 +641,132 @@ describe('run commands on a serial target (loopback)', { timeout: 60_000 }, () =
     const r = await t.d.job(jobId).unwrap().result
     expect(r.unwrapErr().message).toContain('$22=0')
     expectOk(await t.run('run.connection.close', {}, ui))
+  })
+})
+
+// M8: the failure paths of a real run, end to end (commands → host → loopback controller), with
+// the controller's clock at max. Spec: docs/modes/run-machine.md#fault-injection-m8
+describe('fault injection on a real run (loopback, M8)', { timeout: 60_000 }, () => {
+  const PATH = '/dev/cu.usbmodem1101'
+
+  /** Opens the loopback port (UI), finalizes the plan, homes, places G54 and starts the run. */
+  async function realRun(emulator: LoopbackOptions['emulator'] = {}) {
+    const t = await setup({
+      serial: (settings) => ({ emulator: { settings, ...emulator }, timeScale: 'max' }),
+    })
+    expectOk(
+      await t.run('run.connection.open', { target: 'serial', path: PATH, planId: t.planId }, ui),
+    )
+    for (const status of ['settledDesign', 'finalized'])
+      expectOk(await t.run('plan.status.set', { planId: t.planId, status }, ui))
+    const home = expectOk(await t.run('run.machine.home', {}, ui)) as { jobId: string }
+    expectOk(await t.d.job(home.jobId).unwrap().result)
+    const wz = expectOk(prepareWorkZero(t.s.d.doc, t.planId, 'test'))
+    const m = t.status().mpos
+    const values = [m[0] - wz[0], m[1] - wz[1], m[2] - wz[2]]
+    expectOk(await t.run('run.workZero.set', { axes: ['x', 'y', 'z'], values }, ui))
+    const { jobId } = expectOk(await t.run('run.job.start', { planId: t.planId }, ui)) as {
+      jobId: string
+    }
+    const result = t.d.job(jobId).unwrap().result
+    let settled: AppResult<unknown> | undefined
+    void result.then((r) => (settled = r))
+    const port = () => t.serial!.opened[0]!
+    /** Continues every operator wait (manual spindle prompts, tool changes) until `until`. */
+    const advance = async (until: () => boolean) => {
+      for (;;) {
+        const reached = await waitFor(() => {
+          const p = t.status().job?.phase
+          return until() || settled !== undefined || p === 'toolChange' || p === 'programPause'
+        })
+        expect(reached).toBe(true)
+        if (until() || settled !== undefined) return
+        const job = t.status().job!
+        const which =
+          job.phase === 'toolChange' ? { toolChange: job.toolChange!.n } : { pause: job.pause! }
+        expectOk(await t.run('run.job.continue', which, ui))
+        await waitFor(() => settled !== undefined || t.status().job?.phase === 'streaming')
+      }
+    }
+    /** Mid-run: right after the first operator wait is continued, the program streams again. */
+    const streaming = async () => {
+      const waits = () => {
+        const p = t.status().job?.phase
+        return p === 'toolChange' || p === 'programPause'
+      }
+      expect(await waitFor(() => settled !== undefined || waits())).toBe(true)
+      expect(settled).toBeUndefined()
+      const job = t.status().job!
+      const which =
+        job.phase === 'toolChange' ? { toolChange: job.toolChange!.n } : { pause: job.pause! }
+      expectOk(await t.run('run.job.continue', which, ui))
+      expect(settled).toBeUndefined()
+    }
+    return { t, jobId, result, port, done: () => settled !== undefined, streaming, advance }
+  }
+
+  it('a pulled cable mid-run fails the job (machine.connection) and closes the connection', async () => {
+    const r = await realRun()
+    await r.streaming()
+    r.port().unplug()
+    expectErrCode(await r.result, 'machine.connection')
+    expect(await waitFor(() => r.t.status().connection.state === 'closed')).toBe(true)
+  })
+
+  it('a controller that stops answering mid-run trips the watchdog', async () => {
+    const r = await realRun()
+    await r.streaming()
+    r.port().emulator.setSilent(true)
+    expectErrCode(await r.result, 'machine.connection')
+    expect(await waitFor(() => r.t.status().connection.state === 'closed')).toBe(true)
+  })
+
+  it('a hard limit mid-run: ALARM:1 fails the job, the position counts as lost', async () => {
+    const r = await realRun()
+    await r.streaming()
+    r.port().emulator.triggerHardLimit()
+    const e = expectErrCode(await r.result, 'machine.alarm')
+    expect(e.message).toContain('ALARM:1')
+    expect(r.t.status()).toMatchObject({ homed: false, alarm: { code: 1 } })
+    expect(r.t.status().job).toBeUndefined()
+    // a real run is refused until the controller is reset and homed again
+    const { jobId } = expectOk(await r.t.run('run.job.start', { planId: r.t.planId }, ui)) as {
+      jobId: string
+    }
+    expectErrCode(await r.t.d.job(jobId).unwrap().result, 'run.state')
+  })
+
+  it('a probe miss at a tool change keeps the run waiting: unlock, probe again, continue', async () => {
+    const r = await realRun()
+    const { t } = r
+    await r.advance(() => t.status().job?.phase === 'toolChange')
+    expect(r.done()).toBe(false)
+    const n = t.status().job!.toolChange!.n
+    // no plate under the tool: ALARM:5
+    const probe = (args: object) =>
+      t.run('run.machine.probeZ', args, ui).then(async (started) => {
+        if (started.isErr()) return started
+        const { jobId } = started.unwrap() as { jobId: string }
+        return t.d.job(jobId).unwrap().result
+      })
+    const miss = await probe({ plateThickness: 5, maxTravel: 2 })
+    expect(expectErrCode(miss, 'machine.alarm').message).toContain('ALARM:5')
+    expect(t.status()).toMatchObject({ homed: true, alarm: { code: 5 } })
+    expect(t.status().job).toMatchObject({ phase: 'toolChange' })
+    expectErrCode(await t.run('run.job.continue', { toolChange: n }, ui), 'run.state')
+    expectOk(await t.run('run.machine.unlock', {}, ui))
+    // the plate laid 3 mm below the tool
+    const z = t.status().mpos[2]
+    const before = t.status().workZero
+    r.port().emulator.setProbePlate(z - 3)
+    const probed = expectOk(await probe({ plateThickness: 5, feed: 500 })) as {
+      workZero: number[]
+    }
+    expect(probed.workZero[2]).toBeCloseTo(z - 8, 3)
+    expect(probed.workZero[0]).toBe(before[0])
+    // continue every remaining wait: the run completes
+    expectOk(await t.run('run.job.continue', { toolChange: n }, ui))
+    await r.advance(() => false)
+    expectOk(await r.result)
   })
 })

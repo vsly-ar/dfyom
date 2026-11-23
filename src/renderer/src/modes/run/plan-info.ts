@@ -5,6 +5,8 @@
 import type { Direction } from '../../../../core/geometry/face'
 import type { Placement } from '../../../../core/geometry/model'
 import { loadPlanDTO } from '../../../../core/plan/plan'
+import { QuantityDtoSchema } from '../../../../core/quantity/quantity.dto'
+import { Quantity } from '../../../../core/quantity/quantity'
 import type { PlanDTO, SetupDTO } from '../../../../core/plan/plan.dto'
 import { setupDirection, setupRotation } from '../../../../core/plan/setups'
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
@@ -86,4 +88,33 @@ export function setupPlacement(
     frame: setupFrame(direction, rotation, stock),
     orientation: setupOrientation(direction, rotation, stock),
   }
+}
+
+/** A `probe.plateThickness` in mm, if the values carry a valid one. */
+function plateOf(values: unknown): number | undefined {
+  const dto = QuantityDtoSchema.safeParse(
+    (values as { probe?: { plateThickness?: unknown } } | undefined)?.probe?.plateThickness,
+  )
+  if (!dto.success) return undefined
+  const q = Quantity.fromDTO(dto.data)
+  return q.isOk() && q.unwrap().kind === 'length' && q.unwrap().canonical > 0
+    ? q.unwrap().canonical
+    : undefined
+}
+
+/**
+ * The touch plate thickness (mm) for a probe (docs/modes/run-machine.md#probing-and-re-zero-m4):
+ * the plan's machine copy, else the library machine it was copied from; without a plan the chosen
+ * library machine. Undefined: no plate set (no probe control).
+ */
+export function plateThickness(
+  plan: PlanDTO | undefined,
+  machines: readonly { readonly id: string; readonly [field: string]: unknown }[] | undefined,
+  machineId: string | undefined,
+): number | undefined {
+  const lib = (id: string | undefined) => plateOf(machines?.find((x) => x.id === id))
+  if (plan === undefined) return lib(machineId)
+  const copy = plan.snapshots.find((x) => x.id === plan.machine)
+  if (copy === undefined) return undefined
+  return plateOf(copy.values) ?? lib(copy.libraryItemId)
 }

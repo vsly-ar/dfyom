@@ -124,6 +124,10 @@ export interface RunState {
   jogHoldStart(axis: Axis, sign: 1 | -1, feed: number): Promise<void>
   jogHoldEnd(): void
   setWorkZero(axes: readonly Axis[]): Promise<void>
+  /** Z touch plate (`run.machine.probeZ`, M4): a job; a miss shows in the alarm panel. */
+  probeZ(plateThickness: number): Promise<void>
+  /** `run.override.set` (M6). */
+  override(change: OverrideChange): Promise<void>
   reset(): Promise<void>
   /** `setupId`: the setup to run (default: the chosen one; the server needs it for several). */
   startRun(setupId?: string): Promise<void>
@@ -131,6 +135,13 @@ export interface RunState {
   resume(): Promise<void>
   stop(): Promise<void>
   continueWait(): Promise<void>
+}
+
+/** One override change (docs/modes/run-machine.md#overrides-m6). */
+export interface OverrideChange {
+  readonly feed?: 'reset' | '+10' | '-10'
+  readonly spindle?: 'reset' | '+10' | '-10'
+  readonly rapid?: 100 | 50 | 25
 }
 
 export type RunStore = StoreApi<RunState> & {
@@ -319,6 +330,8 @@ export function createRunStore(bridge: PreloadApi): RunStore {
         void call('run.machine.jogCancel', {}, { keepError: true })
       },
       setWorkZero: async (axes) => void (await call('run.workZero.set', { axes: [...axes] })),
+      probeZ: (plateThickness) => job('run.machine.probeZ', { plateThickness }),
+      override: async (change) => void (await call('run.override.set', change)),
       reset: async () => void (await call('run.machine.reset')),
       async startRun(chosen) {
         const planId = get().planId

@@ -4,6 +4,7 @@
 import { act, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { planSetup } from '../../../../core/plan/plan.fixture'
+import { libraryInput, machineValues } from '../../../../core/library/library.fixture'
 import { closedStatus, type RunStatus } from '../../../../core/run/service'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import type { CallReply } from '../../../../shared/preload-api'
@@ -88,15 +89,26 @@ function scriptMachine(bridge: FakeBridge): Machine {
   bridge.handle('job.abort', () => ok({}))
   bridge.handle('run.job.continue', () => ok({}))
   bridge.handle('run.machine.reset', () => ok({}))
+  bridge.handle('run.machine.probeZ', () => ok({ jobId: 'probe-1' }))
+  bridge.handle('run.override.set', () => ok({}))
   return Object.assign(m, { job })
 }
 
-async function renderRun(opts: { bottom?: boolean } = {}) {
+async function renderRun(opts: { bottom?: boolean; plate?: string } = {}) {
   const s = await planSetup()
+  // a touch plate on the library machine, copied into the plan (M4)
+  if (opts.plate !== undefined)
+    await s.run('library.machine.update', {
+      id: s.machineId,
+      revision: 1,
+      values: { ...libraryInput(machineValues()), probe: { plateThickness: opts.plate } },
+    })
   // a bottom facing too: setups Bottom, Top (task E2)
   if (opts.bottom === true)
     await s.run('design.facing.add', { partId: s.partId, on: 'stock.bottom', depth: '0.5' })
-  const planId = await s.create()
+  const planId = await s.create(
+    opts.plate === undefined ? {} : { machineLibraryItemId: s.machineId },
+  )
   const bridge = createFakeBridge()
   bridge.bind(s.d)
   const machine = scriptMachine(bridge) as Machine & {
@@ -524,6 +536,85 @@ describe('Run mode', () => {
     t.machine.status = next
     t.machine.push({ state: 'Idle', homed: true })
     expect(nav.queryByRole('region', { name: 'Alarm' })).toBeNull()
+  })
+
+  it('probes Z with the touch plate after a confirmation (M4)', async () => {
+    const none = await renderRun()
+    await connectAndHome(none)
+    // no plate thickness on the machine: no probe control
+    expect(within(none.nav()).queryByRole('button', { name: 'Probe Z' })).toBeNull()
+    none.unmount()
+
+    const t = await renderRun({ plate: '10' })
+    await connectAndHome(t)
+    const nav = within(t.nav())
+    expect(nav.getByText(/Touch plate 10(\.0+)? mm/)).toBeInTheDocument()
+    await t.user.click(nav.getByRole('button', { name: 'Probe Z' }))
+    const confirm = screen.getByRole('alertdialog', { name: 'Probe Z?' })
+    expect(within(confirm).getByText(/clip on the bit/)).toBeInTheDocument()
+    expect(within(confirm).getByRole('button', { name: 'Cancel' })).toHaveFocus()
+    await expectNoAxeViolations()
+    await t.user.click(within(confirm).getByRole('button', { name: 'Probe' }))
+    expect(t.callsOf('run.machine.probeZ')).toEqual([{ plateThickness: 10 }])
+  })
+
+  it('at a tool change: Probe Z in the dialog; a miss shows its alarm and Unlock there (M4)', async () => {
+    const t = await renderRun({ plate: '10' })
+    await connectAndHome(t)
+    t.machine.push({
+      state: 'Idle',
+      ...t.machine.job('toolChange', { toolChange: { n: 2, name: 'Drill 6' } }),
+    })
+    const dialog = await screen.findByRole('dialog', { name: 'Tool change 2' })
+    await t.user.click(within(dialog).getByRole('button', { name: 'Probe Z' }))
+    await t.user.click(
+      within(screen.getByRole('alertdialog', { name: 'Probe Z?' })).getByRole('button', {
+        name: 'Probe',
+      }),
+    )
+    expect(t.callsOf('run.machine.probeZ')).toEqual([{ plateThickness: 10 }])
+    t.machine.push({
+      state: 'Alarm',
+      alarm: {
+        code: 5,
+        text: 'Probe fail. Probe did not contact the workpiece within the programmed travel.',
+      },
+    })
+    const panel = within(dialog).getByRole('region', { name: 'Alarm' })
+    expect(within(panel).getByText('Unlock and probe again.')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Probe Z' })).toBeDisabled()
+    await expectNoAxeViolations()
+    await t.user.click(within(dialog).getByRole('button', { name: 'Unlock' }))
+    expect(t.callsOf('run.machine.unlock')).toHaveLength(1)
+  })
+
+  it('overrides in the inspector: ±10 %, reset, rapids; a changed value is explained (M6)', async () => {
+    const t = await renderRun()
+    await connectAndHome(t)
+    await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
+    const inspector = within(screen.getByRole('complementary', { name: 'Inspector' }))
+    const section = within(inspector.getByRole('region', { name: 'Overrides' }))
+    // not reported yet
+    expect(section.queryByText('Overrides apply until reset or the program ends.')).toBeNull()
+    t.machine.push({ overrides: { feed: 120, rapid: 100, spindle: 100 } })
+    const feed = within(section.getByRole('group', { name: 'Feed' }))
+    expect(feed.getByText('120 %')).toHaveAttribute('data-changed')
+    expect(
+      section.getByText('Overrides apply until reset or the program ends.'),
+    ).toBeInTheDocument()
+    await expectNoAxeViolations(t.container)
+    await t.user.click(feed.getByRole('button', { name: 'Increase feed override by 10 %' }))
+    await t.user.click(feed.getByRole('button', { name: 'Reset feed override to 100 %' }))
+    const spindle = within(section.getByRole('group', { name: 'Spindle' }))
+    expect(spindle.getByRole('button', { name: 'Reset spindle override to 100 %' })).toBeDisabled()
+    await t.user.click(spindle.getByRole('button', { name: 'Decrease spindle override by 10 %' }))
+    await t.user.click(section.getByRole('radio', { name: '25 %' }))
+    expect(t.callsOf('run.override.set')).toEqual([
+      { feed: '+10' },
+      { feed: 'reset' },
+      { spindle: '-10' },
+      { rapid: 25 },
+    ])
   })
 
   it('stop without a run cancels a jog', async () => {

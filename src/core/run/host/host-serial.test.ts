@@ -165,3 +165,83 @@ describe('machine host: serial target (loopback)', { timeout: 30_000 }, () => {
     expect(port.isClosed).toBe(true)
   })
 })
+
+describe('machine host: probing and overrides (M4, M6)', { timeout: 30_000 }, () => {
+  const probe = { kind: 'probeZ', plateThickness: 5, maxTravel: 25, feed: 300, retract: 2 }
+  const sentText = (h: ReturnType<typeof harness>, from = 0) =>
+    String.fromCharCode(...h.ports.opened[0]!.written.slice(from))
+
+  it('probes Z: G38.2, G54 Z = contact − plate, retract, modal state back', async () => {
+    const h = harness({ emulator: { probePlate: -10 } })
+    expectOk(await h.connect())
+    expectOk(await h.request({ type: 'machine', action: { kind: 'home' } }))
+    const before = h.ports.opened[0]!.written.length
+    const r = expectOk(await h.request({ type: 'machine', action: probe })) as {
+      workZero: number[]
+      contact: number[]
+    }
+    expect(r.contact[2]).toBeCloseTo(-10, 3)
+    expect(r.workZero[2]).toBeCloseTo(-15, 3)
+    const sent = sentText(h, before)
+    expect(sent).toMatch(/G21 G90 G38\.2 Z-26(\.0+)? F300/)
+    expect(sent).toContain('G21 G10 L2 P1 Z-15')
+    expect(sent).toContain('G21 G53 G0 Z-8')
+    expect(sent).toContain('G21 G90 G0\n')
+    const s = h.of('status').at(-1)!.status
+    expect(s).toMatchObject({ state: 'Idle', homed: true })
+    expect(s.mpos[2]).toBeCloseTo(-8, 3)
+    expect(s.workZero[2]).toBeCloseTo(-15, 3)
+  })
+
+  it('a miss is ALARM:5 (homed kept); unlock puts the modal state back', async () => {
+    const h = harness()
+    expectOk(await h.connect())
+    expectOk(await h.request({ type: 'machine', action: { kind: 'home' } }))
+    const r = await h.request({ type: 'machine', action: probe })
+    expectErrCode(r, 'machine.alarm')
+    expect(r.unwrapErr().frames[0]?.data).toMatchObject({ code: 5 })
+    expect(h.of('status').at(-1)!.status).toMatchObject({ homed: true, alarm: { code: 5 } })
+    // GRBL refuses gCode in Alarm: nothing else moves
+    expectErrCode(
+      await h.request({ type: 'machine', action: { kind: 'jog', by: [0, 0, 1], feed: 500 } }),
+      'run.state',
+    )
+    const before = h.ports.opened[0]!.written.length
+    expectOk(await h.request({ type: 'machine', action: { kind: 'unlock' } }))
+    expect(sentText(h, before)).toMatch(/\$X\nG21 G90 G0\n/)
+    expect(await h.pump(() => h.of('status').at(-1)?.status.alarm === undefined)).toBe(true)
+  })
+
+  it('the probe never targets below the travel', async () => {
+    const h = harness({ emulator: { settings: { ...FAST, 132: 20 } } })
+    expectOk(await h.connect())
+    expectOk(await h.request({ type: 'machine', action: { kind: 'home' } }))
+    const before = h.ports.opened[0]!.written.length
+    // from Z −1 with 20 mm travel: at most 18.99 mm down, a miss without a soft-limit alarm
+    const r = await h.request({ type: 'machine', action: probe })
+    expect(r.unwrapErr().frames[0]?.data).toMatchObject({ code: 5 })
+    expect(sentText(h, before)).toMatch(/G38\.2 Z-19\.99/)
+  })
+
+  it('overrides send one real-time byte and report Ov; a reset puts them at 100 %', async () => {
+    const h = harness()
+    expectOk(await h.connect())
+    const port = h.ports.opened[0]!
+    const ov = (which: string, action: string) =>
+      h.request({ type: 'machine', action: { kind: 'override', which, action } })
+    expect(expectOk(await ov('feed', '+10'))).toMatchObject({ overrides: { feed: 110 } })
+    expect(port.written).toContain(0x91)
+    expect(expectOk(await ov('rapid', '25'))).toMatchObject({ overrides: { rapid: 25 } })
+    expect(expectOk(await ov('spindle', '-10'))).toMatchObject({
+      overrides: { feed: 110, rapid: 25, spindle: 90 },
+    })
+    expectErrCode(await ov('rapid', '+10'), 'input.malformed')
+    expectOk(await h.request({ type: 'machine', action: { kind: 'reset' } }))
+    expect(await h.pump(() => h.of('status').at(-1)?.status.overrides?.feed === 100)).toBe(true)
+    expect(h.of('status').at(-1)!.status.overrides).toEqual({
+      feed: 100,
+      rapid: 100,
+      spindle: 100,
+    })
+  })
+})

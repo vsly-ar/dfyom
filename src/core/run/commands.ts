@@ -22,6 +22,9 @@ import { hashJson } from '../plan/snapshot'
 import {
   AXES,
   ControllerInfoSchema,
+  OVERRIDE_STEPS,
+  PROBE_DEFAULTS,
+  type RapidOverride,
   TimeScaleSchema,
   Vec3Schema,
   type MachineAction,
@@ -506,6 +509,104 @@ export function checkNoRunJob(jobs: JobDirectory): AppResult<void> {
   })
 }
 
+export const runMachineProbeZ = defineCommand({
+  kind: 'job',
+  name: 'run.machine.probeZ',
+  summary:
+    'Touch plate: probe Z down (G38.2), set G54 Z so the plate top is Z = plateThickness, retract. Idle or at a tool change. A miss is ALARM:5.',
+  title: () => 'Probe Z',
+  machine: true,
+  args: z.object({
+    plateThickness: z.number().positive().max(100).describe('mm (machine probe.plateThickness)'),
+    maxTravel: z
+      .number()
+      .positive()
+      .max(1000)
+      .optional()
+      .describe(`mm down at most, default ${PROBE_DEFAULTS.maxTravel}`),
+    feed: z
+      .number()
+      .positive()
+      .max(10_000)
+      .optional()
+      .describe(`mm/min, default ${PROBE_DEFAULTS.feed}`),
+    retract: z
+      .number()
+      .min(0)
+      .max(100)
+      .optional()
+      .describe(`mm lift after contact, default ${PROBE_DEFAULTS.retract}`),
+  }),
+  result: z.object({
+    workZero: Vec3Schema.describe('New G54, MPos mm'),
+    contact: Vec3Schema.describe('Contact, MPos mm'),
+  }),
+  async run(_doc, args, ctx) {
+    const r = await act(
+      ctx.services,
+      {
+        kind: 'probeZ',
+        plateThickness: args.plateThickness,
+        maxTravel: args.maxTravel ?? PROBE_DEFAULTS.maxTravel,
+        feed: args.feed ?? PROBE_DEFAULTS.feed,
+        retract: args.retract ?? PROBE_DEFAULTS.retract,
+      },
+      'run.machine.probeZ',
+    )
+    if (r.isErr()) return r
+    return Ok(r.unwrap() as { workZero: Vec3; contact: Vec3 })
+  },
+})
+
+const OverridesResult = z.object({
+  overrides: z
+    .object({ feed: z.number(), rapid: z.number(), spindle: z.number() })
+    .optional()
+    .describe('% as reported'),
+})
+
+/** One real-time byte per given override, in the order feed, spindle, rapid. */
+export const runOverrideSet = defineCommand({
+  kind: 'effect',
+  name: 'run.override.set',
+  summary: 'Feed/spindle override: reset (100 %), ±10 or ±1 %; rapids 100, 50 or 25 %.',
+  title: () => 'Override',
+  machine: true,
+  urgent: true,
+  args: z.object({
+    feed: z.enum(OVERRIDE_STEPS).optional(),
+    spindle: z.enum(OVERRIDE_STEPS).optional(),
+    rapid: z.union([z.literal(100), z.literal(50), z.literal(25)]).optional(),
+  }),
+  result: OverridesResult,
+  async run(_doc, args, ctx) {
+    const where = 'run.override.set'
+    const actions: MachineAction[] = []
+    if (args.feed !== undefined)
+      actions.push({ kind: 'override', which: 'feed', action: args.feed })
+    if (args.spindle !== undefined)
+      actions.push({ kind: 'override', which: 'spindle', action: args.spindle })
+    if (args.rapid !== undefined)
+      actions.push({
+        kind: 'override',
+        which: 'rapid',
+        action: String(args.rapid) as RapidOverride,
+      })
+    if (actions.length === 0)
+      return fail('input.malformed', 'give feed, spindle or rapid', {
+        where,
+        issues: [{ path: ['feed'], rule: 'required', message: 'give feed, spindle or rapid' }],
+      })
+    let last: unknown = {}
+    for (const a of actions) {
+      const r = await act(ctx.services, a, where)
+      if (r.isErr()) return r
+      last = r.unwrap()
+    }
+    return Ok(last as z.output<typeof OverridesResult>)
+  },
+})
+
 export const RUN_COMMANDS: readonly AnyCommand[] = [
   runConnectionOpen,
   runConnectionClose,
@@ -516,6 +617,8 @@ export const RUN_COMMANDS: readonly AnyCommand[] = [
   runMachineJogCancel,
   runWorkZeroSet,
   runMachineReset,
+  runMachineProbeZ,
+  runOverrideSet,
   runJobStart,
   runJobContinue,
   runTimeScaleSet,

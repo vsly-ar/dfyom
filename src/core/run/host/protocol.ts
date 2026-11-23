@@ -79,6 +79,8 @@ export const HostStatusSchema = z.object({
   feed: Num,
   spindle: Num,
   buffer: z.object({ blocks: z.number(), rx: z.number() }).exactOptional(),
+  /** Feed, rapid, spindle overrides in % from the last `Ov` (docs/modes/run-machine.md#overrides-m6). */
+  overrides: z.object({ feed: Num, rapid: Num, spindle: Num }).exactOptional(),
   alarm: z.object({ code: z.number().int(), text: z.string() }).exactOptional(),
   lastMessage: z.string().max(500).exactOptional(),
   /** What the controller enforces, from its `$$` (docs/modes/run.md#machine-coordinates-and-the-homing-corner-df33). */
@@ -142,6 +144,15 @@ export type ConnectTarget = z.output<typeof ConnectTargetSchema>
 
 export const AXES = ['x', 'y', 'z'] as const
 
+/** Feed and spindle override steps; rapids take `100`/`50`/`25` (docs/modes/run-machine.md#overrides-m6). */
+export const OVERRIDE_STEPS = ['reset', '+10', '-10', '+1', '-1'] as const
+export const RAPID_OVERRIDES = ['100', '50', '25'] as const
+export type OverrideStep = (typeof OVERRIDE_STEPS)[number]
+export type RapidOverride = (typeof RAPID_OVERRIDES)[number]
+
+/** Probe defaults (docs/modes/run-machine.md#probing-and-re-zero-m4), mm and mm/min. */
+export const PROBE_DEFAULTS = { maxTravel: 25, feed: 50, retract: 2 } as const
+
 export const MachineActionSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('home') }),
   z.object({ kind: z.literal('unlock') }),
@@ -163,6 +174,20 @@ export const MachineActionSchema = z.discriminatedUnion('kind', [
     values: Vec3Schema.exactOptional(),
   }),
   z.object({ kind: z.literal('reset') }),
+  /** Z touch plate (M4): G38.2 down, G54 Z at the contact minus the plate, retract. */
+  z.object({
+    kind: z.literal('probeZ'),
+    plateThickness: z.number().positive().max(100),
+    maxTravel: z.number().positive().max(1000),
+    feed: z.number().positive().max(10_000),
+    retract: z.number().min(0).max(100),
+  }),
+  /** Overrides (M6): one real-time byte. `rapid` takes a percentage, the others a step. */
+  z.object({
+    kind: z.literal('override'),
+    which: z.enum(['feed', 'spindle', 'rapid']),
+    action: z.enum([...OVERRIDE_STEPS, ...RAPID_OVERRIDES]),
+  }),
 ])
 export type MachineAction = z.output<typeof MachineActionSchema>
 

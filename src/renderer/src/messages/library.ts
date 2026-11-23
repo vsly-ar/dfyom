@@ -335,6 +335,9 @@ export const libraryMessages = {
     pullOff: 'Pull-off',
     pullOffNote: 'Optional ($27): unset = 1 mm.',
     softLimits: 'Soft limits ($20)',
+    probe: 'Touch plate',
+    plateThickness: 'Plate thickness',
+    plateThicknessNote: 'Optional: set it to probe Z with a touch plate in Run.',
     rigidity: 'Rigidity',
     rigidities: {
       extrusion: 'Aluminium extrusion',

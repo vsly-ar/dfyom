@@ -1,6 +1,7 @@
 // Run mode inspector (ui.md#app-shell: "In run mode: DRO, run progress, run controls"): the DRO,
 // the run's progress (lines done/total, section label, elapsed), "Start run" (through the
-// pre-flight dialog), the wait the run is at, how the last run ended, and "Reset (immediate)".
+// pre-flight dialog), the wait the run is at, how the last run ended, the overrides (M6) and
+// "Reset (immediate)".
 // Feed hold, resume and Stop live in the main toolbar (MachineToolbar).
 // Doc: docs/conventions/ui.md#run-mode-safety-ui, #jobs-and-progress
 import { useId } from 'react'
@@ -8,6 +9,7 @@ import type { ProjectDoc } from '../../../../core/project/document'
 import { runMessages } from '../../messages/run'
 import { Icon, Button, PanelHeader, Progress } from '../../ui'
 import { Dro } from './Dro'
+import { OverridesSection } from './OverridesSection'
 import { planRunInfo } from './plan-info'
 import { pauseMessage } from './RunDialogs'
 import { activeJob, isConnected, runGates } from './machine-state'
@@ -96,6 +98,10 @@ export function RunInspector({ doc }: { doc: ProjectDoc }): React.JSX.Element {
             </>
           ) : null}
         </section>
+
+        {isConnected(status) ? (
+          <OverridesSection status={status} onChange={(c) => void a.override(c)} />
+        ) : null}
 
         {isConnected(status) ? (
           <section className={styles['section']} aria-label={runMessages.controls.reset}>

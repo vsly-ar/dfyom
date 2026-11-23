@@ -22,15 +22,17 @@ import { ScaledClock, type TimerHost, type TimeScale } from '../clock'
 import { GrblEmulator } from '../grbl/emulator/emulator'
 import {
   GrblSender,
+  OVERRIDE,
   preflight,
   REALTIME,
+  type RealtimeCommand,
   type PhaseChange,
   type RunPhase,
   type SenderEvent,
   type ToolChangeInfo,
 } from '../grbl/sender'
 import { envelopeOf, travelViolation, type Envelope, type TravelViolation } from '../grbl/envelope'
-import { POSITION_ALARMS } from '../grbl/status'
+import { alarmText, POSITION_ALARMS } from '../grbl/status'
 import { VirtualGrblTransport } from '../grbl/virtual-transport'
 import { sortPorts, type SerialPorts } from '../serial'
 import type { ControllerTransport } from '../transport'
@@ -43,6 +45,7 @@ import {
   type HostStatus,
   type MachineAction,
   type ConnectTarget,
+  type OverrideStep,
   type MainRequest,
   type SerialTarget,
   type TargetKind,
@@ -108,6 +111,66 @@ interface Connection {
    * while jogs queue. Cleared by anything else that moves or questions the position.
    */
   jogEnd?: Vec3 | undefined
+  /** The virtual machine's emulator (its touch plate is laid before each probe, M4). */
+  readonly emulator?: GrblEmulator | undefined
+  /** `$13=1`: GRBL reports in inch. */
+  readonly inches: boolean
+  /** gCode that restores the modal state a failed probe left (sent after `$X`/`$H`, M4). */
+  restoreModes?: readonly string[] | undefined
+}
+
+type ProbeZ = Extract<MachineAction, { kind: 'probeZ' }>
+type OverrideAction = Extract<MachineAction, { kind: 'override' }>
+
+/** Feed and spindle steps → their real-time bytes; rapids by percent. */
+const OVERRIDE_BYTES: Readonly<
+  Record<'feed' | 'spindle', Readonly<Record<OverrideStep, RealtimeCommand>>>
+> = {
+  feed: {
+    reset: OVERRIDE.feedReset,
+    '+10': OVERRIDE.feedPlus10,
+    '-10': OVERRIDE.feedMinus10,
+    '+1': OVERRIDE.feedPlus1,
+    '-1': OVERRIDE.feedMinus1,
+  },
+  spindle: {
+    reset: OVERRIDE.spindleReset,
+    '+10': OVERRIDE.spindlePlus10,
+    '-10': OVERRIDE.spindleMinus10,
+    '+1': OVERRIDE.spindlePlus1,
+    '-1': OVERRIDE.spindleMinus1,
+  },
+}
+const RAPID_BYTES: Readonly<Record<string, RealtimeCommand>> = {
+  '100': OVERRIDE.rapid100,
+  '50': OVERRIDE.rapid50,
+  '25': OVERRIDE.rapid25,
+}
+
+/** `[PRB:x,y,z:flag]` → the contact (report units) and whether the probe touched. */
+function probeResult(lines: readonly string[]): { pos: Vec3; ok: boolean } | undefined {
+  for (const l of lines) {
+    const m = /^\[PRB:([-\d.]+),([-\d.]+),([-\d.]+):([01])\]$/.exec(l)
+    if (m) return { pos: [Number(m[1]), Number(m[2]), Number(m[3])], ok: m[4] === '1' }
+  }
+  return undefined
+}
+
+/**
+ * The gCode that puts back what a probe changes in the modal state `$G` reported: units,
+ * distance mode and motion (`G1 F…` for a feed motion with a feed set, else `G0`: GRBL cannot set
+ * `G2`/`G3` without an arc). Docs: docs/modes/run-machine.md#probing-and-re-zero-m4
+ */
+function modalRestore(words: readonly string[], inches: boolean): string[] {
+  const has = (w: string) => words.includes(w)
+  const motion = words.find((w) => /^G(0|1|2|3|38\.[2-5])$/.test(w)) ?? 'G0'
+  const f = Number(words.find((w) => w.startsWith('F'))?.slice(1) ?? '0')
+  const feed = (Number.isFinite(f) ? f : 0) * (inches ? 25.4 : 1)
+  const feedMotion = motion === 'G1' || motion === 'G2' || motion === 'G3'
+  const move = feedMotion && feed > 0 ? `G1 F${fmt(feed)}` : 'G0'
+  const lines = [`G21 ${has('G91') ? 'G91' : 'G90'} ${move}`]
+  if (has('G20')) lines.push('G20')
+  return lines
 }
 
 const fmt = (v: number) => {
@@ -174,6 +237,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
       feed: s?.feed ?? 0,
       spindle: s?.spindle ?? 0,
       ...(s?.buffer === undefined ? {} : { buffer: s.buffer }),
+      ...(s?.overrides === undefined ? {} : { overrides: s.overrides }),
       ...(conn.alarm === undefined ? {} : { alarm: conn.alarm }),
       ...(conn.lastMessage === undefined ? {} : { lastMessage: conn.lastMessage }),
       ...(conn.envelope === undefined
@@ -264,7 +328,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     const transport = new VirtualGrblTransport(emu, clock)
     const sender = new GrblSender(transport, clock, { timers, log })
     clock.setBusy(() => emu.nextEventAt() !== undefined || sender.needsStatus)
-    const c = await finishConnect(target, clock, sender, transport, !target.homing, undefined)
+    const c = await finishConnect(target, clock, sender, transport, !target.homing, undefined, emu)
     if (c.isErr() || target.prepare === undefined || conn === undefined) return c
     const prepared = await prepare(conn, target.prepare.workZero)
     if (prepared.isErr()) return Err(prepared.unwrapErr())
@@ -280,6 +344,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     transport: ControllerTransport,
     homed: boolean,
     port: { path: string; baud: number } | undefined,
+    emulator?: GrblEmulator,
   ): Promise<AppResult<ConnectedInfo>> {
     const info = await sender.connect()
     connecting = false
@@ -297,6 +362,8 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
       homed,
       workZero: info.unwrap().workZero,
       envelope: envelopeOf(info.unwrap().settings),
+      emulator,
+      inches: info.unwrap().settings['13'] === 1,
     }
     conn = c
     sender.onStatus((s) => {
@@ -360,6 +427,8 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     c.homed = true
     c.alarm = undefined
     log.info('homing done')
+    const restored = await restoreModes(c)
+    if (restored.isErr()) return restored
     return (await readWorkZero(c)).map(() => undefined)
   }
 
@@ -378,10 +447,17 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
           return stateError(`cannot home in state ${state}`, state)
         return home(c)
       case 'unlock': {
-        if (c.job !== undefined) return stateError('cannot unlock during a run', state)
+        // at a tool-change wait only a probe alarm can be pending (run-machine.md#probing-and-re-zero-m4)
+        if (jobBusy) return stateError('cannot unlock during a run', state)
         const r = await c.sender.command('$X')
-        if (r.isOk()) c.alarm = undefined
-        return r.map(() => undefined)
+        if (r.isErr()) return Err(r.unwrapErr())
+        c.alarm = undefined
+        const restored = await restoreModes(c)
+        if (restored.isErr()) return restored
+        // the next action sees Idle, not the Alarm of the last report
+        await c.sender.freshStatus()
+        status.now()
+        return Ok(undefined)
       }
       case 'jog': {
         if (jobBusy || (state !== 'Idle' && !state.startsWith('Jog')))
@@ -436,7 +512,129 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
       case 'reset':
         c.jogEnd = undefined
         return c.sender.realtime(REALTIME.reset)
+      case 'probeZ':
+        return probeZ(c, action)
+      case 'override':
+        return override(c, action)
     }
+  }
+
+  /** After a probe alarm: the modal state the probe changed, once GRBL takes gCode again. */
+  async function restoreModes(c: Connection): Promise<AppResult<void>> {
+    const lines = c.restoreModes
+    c.restoreModes = undefined
+    for (const l of lines ?? []) {
+      const r = await c.sender.command(l)
+      if (r.isErr()) return Err(r.unwrapErr())
+    }
+    return Ok(undefined)
+  }
+
+  /**
+   * Z touch plate (docs/modes/run-machine.md#probing-and-re-zero-m4): `G38.2` down from here, G54 Z
+   * so the contact is at Z = plate thickness, retract, restore the modal state.
+   */
+  async function probeZ(c: Connection, a: ProbeZ): Promise<AppResult<unknown>> {
+    const where = 'machineHost.probeZ'
+    const state = machineState(c)
+    if (c.job !== undefined && c.job.phase !== 'toolChange')
+      return stateError('cannot probe during a run', state)
+    if (state !== 'Idle') return stateError(`cannot probe in state ${state}`, state)
+    const s = c.sender.status
+    if (s === undefined) return stateError('no status report yet', state)
+    if (s.spindle > 0)
+      return fail('run.state', 'the spindle is on: stop it before probing', {
+        where,
+        data: { state, spindle: s.spindle },
+        issues: [{ path: ['spindle'], rule: 'spindleOn', message: 'turn the spindle off' }],
+      })
+    let distance = a.maxTravel
+    const env = c.envelope
+    if (env?.softLimits === true) {
+      // never target below the travel: GRBL would raise a soft-limit alarm before moving
+      distance = Math.min(distance, s.mpos[2] + env.travel[2] - 0.01)
+      if (distance < 1)
+        return fail('run.travel', 'Z is at the bottom of its travel: no room to probe', {
+          where,
+          data: { axis: 'z', target: s.mpos[2], min: -env.travel[2], max: 0, atEdge: true },
+        })
+    }
+    if (c.emulator !== undefined) {
+      // the virtual plate lies on the stock top at the work zero, else just below the tool
+      const top = c.workZero[2] + a.plateThickness
+      c.emulator.setProbePlate(top < s.mpos[2] - 1e-3 ? top : s.mpos[2] - 10)
+    }
+    c.jogEnd = undefined
+    const gc = await c.sender.command('$G')
+    if (gc.isErr()) return Err(gc.unwrapErr())
+    const modes = gc.unwrap().find((l) => l.startsWith('[GC:'))
+    const restore = modalRestore(modes?.slice(4, -1).split(' ') ?? [], c.inches)
+    let alarm: number | undefined
+    const off = c.sender.onEvent((e) => {
+      if (e.kind === 'alarm') alarm = e.code
+    })
+    const ms = (distance / a.feed) * 60_000 + 10_000
+    log.info({ distance, feed: a.feed }, 'probing Z')
+    const probed = await c.sender.command(
+      `G21 G90 G38.2 Z${fmt(s.wpos[2] - distance)} F${fmt(a.feed)}`,
+      { timeoutMs: ms },
+    )
+    off()
+    if (probed.isErr()) return Err(probed.unwrapErr().withContext(where))
+    const k = c.inches ? 25.4 : 1
+    const result = probeResult(probed.unwrap())
+    if (alarm !== undefined || result?.ok !== true) {
+      // GRBL refuses gCode in Alarm: the modal state goes back after the unlock
+      c.restoreModes = restore
+      const code = alarm ?? 5
+      return fail('machine.alarm', `ALARM:${code} ${alarmText(code)}`, {
+        where,
+        data: { code, text: alarmText(code) },
+      })
+    }
+    const contact: Vec3 = [result.pos[0] * k, result.pos[1] * k, result.pos[2] * k]
+    for (const line of [
+      `G21 G10 L2 P1 Z${fmt(contact[2] - a.plateThickness)}`,
+      `G21 G53 G0 Z${fmt(Math.min(contact[2] + a.retract, 0))}`,
+      ...restore,
+      // the ok of a dwell waits for the retract: `$#` needs Idle
+      'G4 P0',
+    ]) {
+      const r = await c.sender.command(line)
+      if (r.isErr()) return Err(r.unwrapErr().withContext(where))
+    }
+    const wz = await readWorkZero(c)
+    if (wz.isErr()) return Err(wz.unwrapErr())
+    log.info({ contact, workZero: wz.unwrap() }, 'probed Z')
+    return Ok({ workZero: wz.unwrap(), contact })
+  }
+
+  /** One override byte (docs/modes/run-machine.md#overrides-m6); answers the overrides reported. */
+  async function override(c: Connection, a: OverrideAction): Promise<AppResult<unknown>> {
+    const where = 'machineHost.override'
+    const byte =
+      a.which === 'rapid'
+        ? RAPID_BYTES[a.action]
+        : (OVERRIDE_BYTES[a.which] as Partial<Record<string, RealtimeCommand>>)[a.action]
+    if (byte === undefined)
+      return fail('input.malformed', `${a.action} is not a ${a.which} override`, {
+        where,
+        issues: [
+          {
+            path: ['action'],
+            rule: 'overrideStep',
+            message: a.which === 'rapid' ? 'give 100, 50 or 25' : 'give reset, +10, -10, +1 or -1',
+          },
+        ],
+      })
+    if (c.alarm !== undefined && (c.alarm.code === 1 || c.alarm.code === 2))
+      return stateError('the controller is in a critical alarm: reset it first', machineState(c))
+    const sent = c.sender.realtime(byte)
+    if (sent.isErr()) return sent
+    // GRBL reports `Ov` on the next status after a change
+    const fresh = await c.sender.freshStatus()
+    status.now()
+    return Ok({ overrides: fresh?.overrides ?? c.sender.status?.overrides })
   }
 
   /**

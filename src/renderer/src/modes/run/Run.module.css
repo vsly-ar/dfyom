@@ -500,3 +500,63 @@
   line-height: var(--lh-sm);
   color: var(--text);
 }
+
+/* inspector overrides (M6): label, value, −10/+10/100 % in one row; a changed value is marked */
+.overrideRow {
+  display: grid;
+  grid-template-columns: 3.75rem 3rem minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.overrideButtons {
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.overrideRapidsRow {
+  grid-template-columns: 3.75rem minmax(0, 1fr);
+}
+
+.overrideRapids {
+  justify-self: start;
+}
+
+.overrideLabel {
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-muted);
+}
+
+.overrideValue {
+  justify-self: start;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text);
+  transition:
+    background-color var(--motion-base) var(--ease-standard),
+    border-color var(--motion-base) var(--ease-standard);
+}
+
+.overrideValue[data-changed] {
+  border-color: var(--warning);
+  background: var(--warning-subtle);
+}
+
+.overrideHint {
+  margin: 0;
+  padding-left: var(--space-2);
+  border-left: 2px solid var(--warning);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text);
+}

@@ -223,8 +223,11 @@ export class MachineClient implements MachineService {
 
   async machine(action: MachineAction): AsyncAppResult<unknown> {
     if (this.conn?.state !== 'open') return this.notConnected()
-    // the emergency paths always pass; anything else waits while a job checks its program
-    if (this.reserved !== undefined && action.kind !== 'reset' && action.kind !== 'jogCancel')
+    // the emergency paths and overrides (real-time bytes) always pass; anything else waits while
+    // a job checks its program
+    const passes =
+      action.kind === 'reset' || action.kind === 'jogCancel' || action.kind === 'override'
+    if (this.reserved !== undefined && !passes)
       return fail('run.busy', `job ${this.reserved} is starting`, {
         where: `${WHERE}.machine`,
         data: { jobId: this.reserved },

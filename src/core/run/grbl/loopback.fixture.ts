@@ -3,7 +3,7 @@
 // unplugging). Exercises the real-machine path (serial target, handshake, settings check, silent
 // homing, port closed) without hardware. Not app code. Doc: docs/modes/run-machine.md#testing
 import { fail, Ok, type AsyncAppResult } from '../../../shared/result'
-import { ScaledClock, type TimerHost } from '../clock'
+import { ScaledClock, type TimeScale, type TimerHost } from '../clock'
 import { sortPorts, type SerialPortInfo, type SerialPorts } from '../serial'
 import type { ControllerTransport } from '../transport'
 import { GrblEmulator, type EmulatorOptions } from './emulator/emulator'
@@ -18,6 +18,8 @@ export interface LoopbackOptions {
   readonly silentUntilReset?: boolean
   /** Opening fails with this OS message (e.g. "Resource busy"). */
   readonly openError?: string
+  /** The controller's clock against the timers (default 1: real time; tests: faster). */
+  readonly timeScale?: TimeScale
 }
 
 export class LoopbackPort implements ControllerTransport {
@@ -93,7 +95,7 @@ export class LoopbackPort implements ControllerTransport {
   }
 }
 
-/** Ports `paths` (USB), each opening a fresh emulator on the given wall timers at 1×. */
+/** Ports `paths` (USB), each opening a fresh emulator on the given wall timers (1× by default). */
 export function loopbackSerialPorts(
   timers: TimerHost,
   opts: LoopbackOptions = {},
@@ -126,7 +128,7 @@ export function loopbackSerialPorts(
       const created = GrblEmulator.create({ trace: false, silentHoming: true, ...opts.emulator })
       if (created.isErr())
         return Promise.resolve(fail('internal.unexpected', 'emulator', { where }))
-      const clock = new ScaledClock(timers, { scale: 1 })
+      const clock = new ScaledClock(timers, { scale: opts.timeScale ?? 1 })
       const emu = created.unwrap()
       const inner = new VirtualGrblTransport(emu, clock)
       clock.setBusy(() => emu.nextEventAt() !== undefined)

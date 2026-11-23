@@ -101,6 +101,7 @@ The permission policy ([commands.md](../architecture/commands.md#dispatcher-pipe
 | Stop paths: `job.pause`, `job.abort`, `run.machine.jogCancel`, `run.machine.reset`                                                                  | yes                      | yes                                                                      |
 | `run.connection.open { target: 'serial' }`; `run.connection.close` of a real connection                                                             | yes                      | **no** (`permission.denied`)                                             |
 | Motion and machine state: `run.machine.home`, `.unlock`, `.jog`, `run.workZero.set`, `run.job.start`, `run.job.continue`, `job.resume` of a run job | yes                      | **no** (`permission.denied`)                                             |
+| Probing and overrides: `run.machine.probeZ` (M4), `run.override.set` – `reset` included (M6)                                                        | yes                      | **no** (`permission.denied`)                                             |
 | Anything on the virtual machine                                                                                                                     | yes                      | yes (unchanged, [grbl.md](../architecture/grbl.md#transport-and-sender)) |
 
 - Deny by default: a command the table does not name, a connection still opening, an unknown target or a process without a machine port counts as real.
@@ -118,6 +119,7 @@ Machine motion the operator has not seen coming is confirmed once, where it star
 | Unlock without homing                            | As today ([ui.md](../conventions/ui.md#run-mode-safety-ui)): the position is unknown until homed.                                                                                                                                                                       | existing                                                                                |
 | **Start run** on a real connection               | The pre-flight names the real target ("Serial port /dev/cu.usbmodem1101 at 115200 baud") and, beyond today's contents, the plan status and the air-cut hint ("First run: spindle off, Z zero raised above the stock"); its primary button reads "Start on the machine". | M1 target line; rest M2 ([run-machine.md](run-machine.md#pre-flight-on-a-real-machine)) |
 | **Continue** after a tool change or setup change | The dialog states the Z zero to set and that the spindle starts again; continuing is the confirmation.                                                                                                                                                                  | existing                                                                                |
+| **Probe Z** (touch plate, M4), every connection  | "Probe Z?": put the plate on the stock under the bit and the clip on the bit, spindle off; the bit moves down until it touches (at most the probe distance); the plate thickness. Confirm "Probe" ([run-machine.md](run-machine.md#probing-and-re-zero-m4)).            | M4                                                                                      |
 | Resume after a feed hold                         | No dialog; a deliberate click, never a single key ([ui.md](../conventions/ui.md#confirmations)).                                                                                                                                                                        | existing                                                                                |
 
 Jogs are not confirmed: they are short, cancellable, refused outside the travel (`run.travel`) and start only from a click.
@@ -163,7 +165,7 @@ A lost USB link **cannot be made safe by DFYOM**: GRBL keeps executing what is i
 
 ### Testing the rules
 
-Without hardware: the sender and the host over a loopback serial stream against the GRBL emulator in its GRBL-exact silent-homing mode ([run-machine.md § Testing](run-machine.md#testing)); the permission table per source (`permission.test.ts`); fault injection (lost port, alarm mid-run) with M8. With hardware: the manual checklist of [testing.md](../conventions/testing.md) (hardening 1.3) before X1.
+Without hardware: the sender and the host over a loopback serial stream against the GRBL emulator in its GRBL-exact silent-homing mode ([run-machine.md § Testing](run-machine.md#testing)); the permission table per source (`permission.test.ts`); fault injection (lost port, silent controller, hard limit mid-run, probe fail) with M8 ([run-machine.md § Fault injection](run-machine.md#fault-injection-m8)). With hardware: the manual checklist of [testing.md](../conventions/testing.md) (hardening 1.3) before X1.
 
 ## Open questions
 

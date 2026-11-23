@@ -16,6 +16,8 @@ import { activeJob, formatLength, runGates } from './machine-state'
 import { planRunInfo } from './plan-info'
 import { useRun, useRunStore, waitKey } from './run-store'
 import { WorkZeroButtons } from './RunNavigator'
+import { AlarmPanel, inAlarm } from './AlarmPanel'
+import { ProbeZButton, usePlateThickness } from './ProbeZButton'
 import { RunDialogFooter } from './RunStop'
 import { SetupChangeDialog } from './SetupChangeDialog'
 import styles from './Run.module.css'
@@ -27,7 +29,7 @@ export function RunDialogs(): React.JSX.Element {
     <>
       {doc ? <PreflightDialog doc={doc} /> : null}
       {doc ? <SetupChangeDialog doc={doc} /> : null}
-      <WaitDialog units={doc?.unitSystem ?? 'mm'} />
+      <WaitDialog doc={doc} />
       <FailureDialog />
       <Announcer doc={doc} />
     </>
@@ -149,7 +151,9 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
 }
 
 /** Tool change or program pause: instructions, jog and Z zero inside; Continue is the primary. */
-function WaitDialog({ units }: { units: ProjectDoc['unitSystem'] }): React.JSX.Element | null {
+function WaitDialog({ doc }: { doc: ProjectDoc | undefined }): React.JSX.Element | null {
+  const units = doc?.unitSystem ?? 'mm'
+  const plate = usePlateThickness(doc)
   const store = useRunStore()
   const status = useRun((s) => s.status)
   const dismissed = useRun((s) => s.dismissedWait)
@@ -213,6 +217,28 @@ function WaitDialog({ units }: { units: ProjectDoc['unitSystem'] }): React.JSX.E
           reasonId={ids.zero}
           onZero={(axes) => void a.setWorkZero(axes)}
         />
+        <ProbeZButton
+          thickness={plate}
+          gate={gates.workZero}
+          reasonId={ids.zero}
+          units={units}
+          busy={pending.includes('run.machine.probeZ')}
+          hint={false}
+          onProbe={(t) => void a.probeZ(t)}
+        />
+        {/* a probe that missed: the alarm and its unlock right here (the navigator is behind) */}
+        {inAlarm(status) ? (
+          <>
+            <AlarmPanel status={status} />
+            {status.alarm?.code === 4 || status.alarm?.code === 5 ? (
+              <div className={styles['buttons']}>
+                <Button size="lg" onClick={() => void a.unlock()}>
+                  {runMessages.navigator.unlock}
+                </Button>
+              </div>
+            ) : null}
+          </>
+        ) : null}
       </Dialog>
     )
   }

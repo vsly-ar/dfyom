@@ -21,6 +21,7 @@ import { actionText, formatLength, isConnected, runGates } from './machine-state
 import { runnablePlans } from './plan-info'
 import { NO_PLAN, useRun, useRunStore, type Axis } from './run-store'
 import { SerialPicker, SettingsWarning } from './SerialPicker'
+import { ProbeZButton, usePlateThickness } from './ProbeZButton'
 import styles from './Run.module.css'
 
 const m = runMessages.navigator
@@ -100,6 +101,7 @@ export function RunNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
   const a = store.getState()
 
   const machineId = useRun((s) => s.machineId)
+  const plate = usePlateThickness(doc)
   const plans = runnablePlans(doc)
   // the chosen plan (or manual control), else the first runnable one, else manual control (DF31)
   const chosen =
@@ -322,6 +324,14 @@ export function RunNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
           reasonId={ids.zero}
           reasonShown={false}
           onZero={(axes) => void a.setWorkZero(axes)}
+        />
+        <ProbeZButton
+          thickness={plate}
+          gate={gates.workZero}
+          reasonId={ids.zero}
+          units={units}
+          busy={busy('run.machine.probeZ')}
+          onProbe={(t) => void a.probeZ(t)}
         />
         {connected ? (
           <p className={styles['hint']}>

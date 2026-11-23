@@ -2,7 +2,7 @@
 // process's timers and handles uncaught errors: logged `fatal`, then the process or thread exits
 // and main fails the run with `machine.connection`. Serial ports through `nodeSerialPorts`.
 // Doc: docs/modes/run-v0.1.md#processes, docs/modes/run-machine.md#serial-transport
-import { systemTimerHost } from '../../core/run/clock'
+import { isTimeScale, systemTimerHost } from '../../core/run/clock'
 import { runMachineHost, type MachineHost } from '../../core/run/host/host'
 import type { Endpoint } from '../../core/workers/protocol'
 import { serializeErr, type Logger } from '../../shared/logging'
@@ -17,9 +17,15 @@ import { nodeSerialPorts } from './serial-transport'
  * Doc: docs/modes/run-machine.md#testing
  */
 function serialPorts(): SerialPorts {
-  return process.env['DFYOM_LOOPBACK_SERIAL'] === '1'
-    ? loopbackSerialPorts(systemTimerHost, { bannerDelayMs: 300 })
-    : nodeSerialPorts
+  if (process.env['DFYOM_LOOPBACK_SERIAL'] !== '1') return nodeSerialPorts
+  // `DFYOM_LOOPBACK_TIMESCALE`: the controller's clock faster than real time (slow probe feeds)
+  const scale = Number(process.env['DFYOM_LOOPBACK_TIMESCALE'] ?? '1')
+  return loopbackSerialPorts(systemTimerHost, {
+    bannerDelayMs: 300,
+    // a touch plate under the tool for the probe flow (docs/modes/run-machine.md#testing)
+    emulator: { probePlate: -60 },
+    ...(isTimeScale(scale) ? { timeScale: scale } : {}),
+  })
 }
 
 export function serveMachineHost(

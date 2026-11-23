@@ -229,6 +229,33 @@ export const runMessages = {
     confirm: 'Home',
   },
 
+  /** Z touch plate (docs/modes/run-machine.md#probing-and-re-zero-m4). */
+  probe: {
+    button: 'Probe Z',
+    hint: (thickness: string) => `Touch plate ${thickness}: Z0 on the stock top.`,
+    confirmTitle: 'Probe Z?',
+    confirmDescription: (thickness: string) =>
+      `Put the touch plate on the stock under the bit and the clip on the bit. The spindle must be off. The bit moves down until it touches the plate (at most 25 mm). Plate thickness: ${thickness}.`,
+    confirm: 'Probe',
+  },
+
+  /** Feed, spindle and rapid overrides (docs/modes/run-machine.md#overrides-m6). */
+  overrides: {
+    title: 'Overrides',
+    feed: 'Feed',
+    spindle: 'Spindle',
+    rapids: 'Rapids',
+    minus: '−10 %',
+    plus: '+10 %',
+    reset: 'Reset',
+    minusLabel: (what: string) => `Decrease ${what.toLowerCase()} override by 10 %`,
+    plusLabel: (what: string) => `Increase ${what.toLowerCase()} override by 10 %`,
+    resetLabel: (what: string) => `Reset ${what.toLowerCase()} override to 100 %`,
+    percent: (v: number) => `${Math.round(v)} %`,
+    unknown: '–',
+    hint: 'Overrides apply until reset or the program ends.',
+  },
+
   unlockConfirm: {
     title: 'Unlock without homing?',
     description:

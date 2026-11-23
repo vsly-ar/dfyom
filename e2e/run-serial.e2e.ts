@@ -215,3 +215,121 @@ test('real machine (M2, M3): alarm panel, home, hold to jog, the real-machine pr
     await rm(dataDir, { recursive: true, force: true })
   }
 })
+
+test('touch plate and overrides (M4, M6): a probe that misses, unlock, a probe that touches', async () => {
+  test.setTimeout(120_000)
+  const dataDir = await realpath(await mkdtemp(join(tmpdir(), 'dfyom-e2e-')))
+  process.env['DFYOM_LOOPBACK_SERIAL'] = '1'
+  // 10× controller clock: a 25 mm probe at 50 mm/min takes 3 s instead of 30 s
+  process.env['DFYOM_LOOPBACK_TIMESCALE'] = '10'
+  const { app, rendererErrors } = await launchApp(dataDir).finally(() => {
+    delete process.env['DFYOM_LOOPBACK_SERIAL']
+    delete process.env['DFYOM_LOOPBACK_TIMESCALE']
+  })
+  try {
+    const page = await app.firstWindow()
+    await page.waitForLoadState('domcontentloaded')
+    const machineItem = await bridgeCall<{ id: string }>(page, 'library.machine.add', {
+      values: { ...MACHINE, probe: { plateThickness: '10' } },
+    })
+    const stock = await bridgeCall<{ id: string }>(page, 'library.stock.add', {
+      values: {
+        name: 'Block',
+        shape: 'block',
+        length: '100',
+        width: '60',
+        thickness: '20',
+        material: { name: '6061-T6', class: 'aluminum' },
+      },
+    })
+    await bridgeCall(page, 'project.create', { name: 'Probe', unitSystem: 'mm' })
+    const { partId } = await bridgeCall<{ partId: string }>(page, 'design.part.add', {
+      name: 'Part',
+      stockLibraryItemId: stock.id,
+    })
+    await expect(page.getByRole('dialog', { name: 'Stock' })).toBeHidden()
+    await bridgeCall(page, 'plan.create', { partId, machineLibraryItemId: machineItem.id })
+    await page.getByRole('radio', { name: 'Run' }).click()
+    const navigator = page.getByRole('navigation', { name: 'Navigator' })
+    const inspector = page.getByRole('complementary', { name: 'Inspector' })
+    const machine = page.getByRole('group', { name: 'Machine' })
+    const cell = (name: string) =>
+      inspector.getByRole('table', { name: 'Position' }).getByRole('cell', { name })
+
+    await navigator.getByRole('radio', { name: 'Serial port' }).click()
+    await navigator.getByRole('button', { name: 'Connect to machine' }).click()
+    await expect(machine.getByText(`Serial · ${PORT}`)).toBeVisible()
+    await navigator.getByRole('button', { name: 'Home' }).click()
+    await page
+      .getByRole('alertdialog', { name: 'Home the machine?' })
+      .getByRole('button', { name: 'Home' })
+      .click()
+    await expect(machine.getByText('Idle')).toBeVisible({ timeout: 60_000 })
+
+    // M6: feed +10 % and rapids 50 % in the inspector, as GRBL reports them (Ov)
+    const overrides = inspector.getByRole('region', { name: 'Overrides' })
+    const feed = overrides.getByRole('group', { name: 'Feed' })
+    await feed.getByRole('button', { name: 'Increase feed override by 10 %' }).click()
+    await expect(feed.getByText('110 %')).toBeVisible()
+    await expect(
+      overrides.getByText('Overrides apply until reset or the program ends.'),
+    ).toBeVisible()
+    await overrides.getByRole('radio', { name: '50 %' }).click()
+    await expect(overrides.getByRole('radio', { name: '50 %' })).toBeChecked()
+    await overrides.scrollIntoViewIfNeeded()
+    await render(page, 'm6-overrides')
+    await feed.getByRole('button', { name: 'Reset feed override to 100 %' }).click()
+    await overrides.getByRole('radio', { name: '100 %' }).click()
+    await expect(feed.getByText('100 %', { exact: true }).first()).toBeVisible()
+
+    // M4: the plate is 59 mm below the tool: a 25 mm probe misses (ALARM:5)
+    await expect(navigator.getByText(/Touch plate 10\.000 mm/)).toBeVisible()
+    await navigator.getByRole('button', { name: 'Probe Z' }).click()
+    const confirm = page.getByRole('alertdialog', { name: 'Probe Z?' })
+    await expect(confirm.getByText(/Plate thickness: 10\.000 mm/)).toBeVisible()
+    await render(page, 'm4-probe-confirm')
+    await confirm.getByRole('button', { name: 'Probe' }).click()
+    const alarm = navigator.getByRole('region', { name: 'Alarm' })
+    await expect(alarm.getByRole('heading', { name: 'Alarm 5: probe fail' })).toBeVisible({
+      timeout: 30_000,
+    })
+    await expect(alarm.getByText('Unlock and probe again.')).toBeVisible()
+    await alarm.scrollIntoViewIfNeeded()
+    await render(page, 'm4-probe-alarm')
+    // still homed: a probe miss does not lose the position
+    await expect(navigator.getByText('Homed', { exact: true })).toBeVisible()
+
+    await navigator.getByRole('button', { name: 'Unlock' }).click()
+    await page
+      .getByRole('alertdialog', { name: 'Unlock without homing?' })
+      .getByRole('button', { name: 'Unlock' })
+      .click()
+    await expect(alarm).toBeHidden()
+    await expect(machine.getByText('Idle')).toBeVisible()
+    await expect(cell('Machine position Z')).toHaveText('-26.000')
+
+    // jog 20 mm down: the plate is now 14 mm below the tool
+    await navigator.getByRole('radio', { name: '10 mm' }).click()
+    const jogZ = navigator.getByRole('button', { name: 'Jog Z−' })
+    await jogZ.click()
+    await expect(cell('Machine position Z')).toHaveText('-36.000')
+    await jogZ.click()
+    await expect(cell('Machine position Z')).toHaveText('-46.000')
+    await navigator.getByRole('button', { name: 'Probe Z' }).click()
+    await page
+      .getByRole('alertdialog', { name: 'Probe Z?' })
+      .getByRole('button', { name: 'Probe' })
+      .click()
+    // contact at MPos Z −60: Z0 is 10 mm (the plate) below, retracted 2 mm above the contact
+    await expect(cell('Machine position Z')).toHaveText('-58.000', { timeout: 30_000 })
+    await expect(cell('Work position Z')).toHaveText(/^12\.000/)
+    await expect(navigator.getByText(/G54 .* · -70\.000 mm/)).toBeVisible()
+
+    await navigator.getByRole('button', { name: 'Disconnect' }).click()
+    await expect(navigator.getByRole('button', { name: 'Connect to machine' })).toBeEnabled()
+    expect(rendererErrors).toEqual([])
+  } finally {
+    await app.close()
+    await rm(dataDir, { recursive: true, force: true })
+  }
+})
