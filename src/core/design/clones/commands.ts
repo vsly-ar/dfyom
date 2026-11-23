@@ -27,7 +27,8 @@ import { featureSpan, materialize, ownedOperationId, type FeatureKindSpec } from
 import { featureKindCommands, type FeatureCommandSpec } from '../feature-commands'
 import { FeatureIdSchema } from '../feature.dto'
 import { loadPart } from '../load'
-import { operationToDTO } from '../operation'
+import { operationToDTO, recordOf } from '../operation'
+import { baseOf, isFrozenRecord } from '../frozen-memo'
 import { ShapeIdSchema } from '../shape.dto'
 import { SurfaceTable } from '../surfaces'
 import { parseWith } from '../../../shared/parse'
@@ -148,7 +149,10 @@ export function followClones(draft: Draft<ProjectDoc>, ctx: CommandContext): App
     let ops = l.part.operations
     let changed = false
     const ons = new Map<string, string>()
-    for (const lf of l.features) {
+    // the records the part was loaded from: unchanged ones are frozen (P5, frozen-memo.ts)
+    const records = baseOf(draft.parts[partId]!)
+    const stockRecord = baseOf(draft.snapshots[records.stock])
+    for (const [k, lf] of l.features.entries()) {
       if (lf.spec !== (clonesSpec as unknown as FeatureKindSpec)) continue
       const c = lf.feature as Clones
       const issues = sourceIssues(c, ops, l.features)
@@ -157,6 +161,16 @@ export function followClones(draft: Draft<ProjectDoc>, ctx: CommandContext): App
       const on = sourceFace(sourceOperations(c.source, ops))
       if (on !== undefined && on !== c.on) ons.set(c.id, on)
       const span = featureSpan(ops, lf)
+      // inputs and block as a committed document had them, already in line: nothing to redo
+      const key = changed
+        ? undefined
+        : [stockRecord, l.units, records.shapes, ...records.operations.slice(0, span.end)]
+      const record = records.features?.[k]
+      const cacheable =
+        key !== undefined &&
+        isFrozenRecord(record) &&
+        key.every((x) => typeof x !== 'object' || Object.isFrozen(x))
+      if (cacheable && sameKey(followed.get(record), key)) continue
       const expanded = expandClones(c, {
         units: l.units,
         stock: l.stock,
@@ -171,7 +185,10 @@ export function followClones(draft: Draft<ProjectDoc>, ctx: CommandContext): App
       const same =
         owned.unwrap().length === prevBlock.length &&
         owned.unwrap().every((o, i) => deepEqual(operationToDTO(o), operationToDTO(prevBlock[i]!)))
-      if (same) continue
+      if (same) {
+        if (cacheable) followed.set(record, key)
+        continue
+      }
       ops = [...ops.slice(0, span.ownedStart), ...owned.unwrap(), ...ops.slice(span.end)]
       changed = true
     }
@@ -186,11 +203,14 @@ export function followClones(draft: Draft<ProjectDoc>, ctx: CommandContext): App
       )
       if (settled.isErr()) return settled
       const list = draft.parts[partId]!.operations
-      const byId = new Map(list.map((o) => [o.id, o]))
+      const base = baseOf(list)
+      const byId = new Map(list.map((o, i) => [o.id, { prev: o, record: base[i] }]))
       const next = settled.unwrap().map((op) => {
+        const was = byId.get(op.id)
+        // loaded from the record it writes back as (P5): kept without converting
+        if (was !== undefined && recordOf(op) === was.record) return was.prev
         const dto = operationToDTO(op)
-        const prev = byId.get(op.id)
-        return prev !== undefined && deepEqual(prev, dto) ? prev : dto
+        return was !== undefined && deepEqual(was.prev, dto) ? was.prev : dto
       })
       if (next.length !== list.length || next.some((o, i) => o !== list[i]))
         list.splice(0, list.length, ...next)
@@ -203,12 +223,22 @@ export function followClones(draft: Draft<ProjectDoc>, ctx: CommandContext): App
   return Ok(undefined)
 }
 
+/**
+ * The inputs (stock snapshot, units, shape records, the operation records up to the end of its
+ * block) with which a Clones feature record was found in line with its source, all frozen: the
+ * same inputs again need no expansion and comparison (hardening P5).
+ */
+const followed = new WeakMap<object, readonly unknown[]>()
+
+const sameKey = (a: readonly unknown[] | undefined, b: readonly unknown[]) =>
+  a !== undefined && a.length === b.length && a.every((x, i) => x === b[i])
+
 /** After every document command (commands.md#document-hooks). */
 export const clonesFollowHook: DocumentHook = {
   name: 'design.clonesFollow',
   after: (draft, command, ctx) =>
-    // a feature or undo-free command that cannot touch a source still costs one load per part
-    // with Clones; `design.clones.*` already wrote the expansion
+    // every part with Clones is loaded, from cached models of its unchanged records, and a Clones
+    // whose inputs are all unchanged is skipped (P5); `design.clones.*` already wrote the expansion
     command.name.startsWith('design.clones.') ? Ok(undefined) : followClones(draft, ctx),
 }
 

@@ -367,10 +367,9 @@ const MIN_LOBE_AREA = MIN_ELEMENT_LENGTH * MIN_ELEMENT_LENGTH
 function lobes(l: Loop): Loop[] {
   const n = l.elements.length
   const sign = Math.sign(area(l))
-  const key = (p: Vec2) => `${Math.round(p[0] * 1e6)},${Math.round(p[1] * 1e6)}`
-  const seen = new Map<string, number>()
+  const seen = new TouchIndex()
   for (let i = 0; i < n; i++) {
-    const k = key(l.elements[i]!.a)
+    const k = l.elements[i]!.a
     const j = seen.get(k)
     if (j !== undefined) {
       const first: Loop = { elements: l.elements.slice(j, i) }
@@ -384,17 +383,36 @@ function lobes(l: Loop): Loop[] {
   return [l]
 }
 
-/** Point key of the self-touch tests (1 nm grid, as `lobes`). */
-const touchKey = (p: Vec2) => `${Math.round(p[0] * 1e6)},${Math.round(p[1] * 1e6)}`
+/**
+ * Element indices by start point on the 1 nm grid of the self-touch tests (`lobes`,
+ * `dropSpikes`): the rounded coordinates as nested map keys, not a key string per vertex (P5:
+ * these run on every loop the 2D library returns).
+ */
+class TouchIndex {
+  private readonly byX = new Map<number, Map<number, number>>()
+  get(p: Vec2): number | undefined {
+    return this.byX.get(Math.round(p[0] * 1e6))?.get(Math.round(p[1] * 1e6))
+  }
+  set(p: Vec2, i: number): void {
+    const x = Math.round(p[0] * 1e6)
+    let ys = this.byX.get(x)
+    if (ys === undefined) this.byX.set(x, (ys = new Map()))
+    ys.set(Math.round(p[1] * 1e6), i)
+  }
+}
 
 /**
  * Whether elements (a closed chain) enclose no width: mean width 2·|area| / perimeter below
  * `OFFSET_EPSILON`, as a spike traced out and back or a lens of a tiny arc and its chord.
  */
-export function isSliver(elements: readonly Loop['elements'][number][]): boolean {
+export function isSliver(
+  elements: readonly Loop['elements'][number][],
+  /** `signedArea({ elements })` when the caller has it. */
+  area: number = signedArea({ elements }),
+): boolean {
   let perimeter = 0
   for (const e of elements) perimeter += elementLength(e)
-  return 2 * Math.abs(signedArea({ elements })) < OFFSET_EPSILON * perimeter
+  return 2 * Math.abs(area) < OFFSET_EPSILON * perimeter
 }
 
 /**
@@ -410,9 +428,9 @@ export function dropSpikes(l: Loop): Loop {
   let els = l.elements
   for (;;) {
     let cut: Loop['elements'] | undefined
-    const seen = new Map<string, number>()
+    const seen = new TouchIndex()
     for (let i = 0; i < els.length && cut === undefined; i++) {
-      const k = touchKey(els[i]!.a)
+      const k = els[i]!.a
       const j = seen.get(k)
       if (j !== undefined) {
         const inner = els.slice(j, i)

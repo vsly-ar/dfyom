@@ -24,6 +24,8 @@ import type {
 } from './part.dto'
 import { shapeFromDTO as namedShapeFromDTO, type NamedShape } from './shape'
 import { designToolFromDTO, designToolToDTO, type DesignTool } from './tool'
+import { deepEqual } from '../library/snapshot'
+import { baseOf, isFrozenRecord } from './frozen-memo'
 
 export type Point = readonly [Quantity, Quantity]
 
@@ -434,8 +436,34 @@ export function generalToleranceToDTO(t: GeneralTolerance): GeneralToleranceDTO 
   } as GeneralToleranceDTO
 }
 
-/** Builds the operation from a shape-checked DTO; quantity issues carry parameter paths. */
+const parsedRecords = new WeakMap<object, AppResult<Operation>>()
+const recordOfOperation = new WeakMap<Operation, OperationDTO>()
+
+/**
+ * Builds the operation from a shape-checked DTO; quantity issues carry parameter paths. Cached
+ * per frozen record (frozen-memo.ts, hardening P5): an unchanged operation of a committed document
+ * is parsed once, and loads to the same model object every time.
+ */
 export function operationFromDTO(dto: OperationDTO): AppResult<Operation> {
+  const base = baseOf(dto)
+  if (!isFrozenRecord(base)) return parseOperation(base)
+  const hit = parsedRecords.get(base)
+  if (hit !== undefined) return hit
+  const r = parseOperation(base)
+  parsedRecords.set(base, r)
+  // a record that writes back as itself: writing the model back can keep the record
+  if (r.isOk() && deepEqual(operationToDTO(r.unwrap()), base))
+    recordOfOperation.set(r.unwrap(), base)
+  return r
+}
+
+/**
+ * The frozen record `op` was loaded from, if `operationToDTO(op)` equals it (`writeOperationList`
+ * then keeps the record instead of converting and comparing).
+ */
+export const recordOf = (op: Operation): OperationDTO | undefined => recordOfOperation.get(op)
+
+function parseOperation(dto: OperationDTO): AppResult<Operation> {
   const tol = generalToleranceFromDTO(dto.generalTolerance)
   if (tol.isErr()) return tol
   const tool =
