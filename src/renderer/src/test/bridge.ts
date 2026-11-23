@@ -17,6 +17,7 @@ import type { AppErrorData } from '../../../shared/errors/app-error'
 import type {
   AgentSessionInfo,
   CallReply,
+  ConnectInfo,
   LocalHttpState,
   MenuAction,
   PartEvaluationView,
@@ -94,6 +95,10 @@ export interface FakeBridge extends PreloadApi {
   /** Push a part evaluation (main's mesh push); `get` / `getPlan` answer the last one per subject. */
   emitEvaluation(view: PartEvaluationView): void
   emitMenu(action: MenuAction): void
+  /** Main hands the window a file to open (Finder, a launch argument; hardening U5). */
+  emitOpenFile(file: string): void
+  /** Answers `agents.connectInfo` (Help → Connect an agent…). */
+  setConnectInfo(info: ConnectInfo): void
   /** Answers of the native file dialogs (null = cancelled, the default). */
   setFileChoice(choice: {
     open?: string | null
@@ -186,6 +191,16 @@ export function createFakeBridge(
   const runStatus = channel<RunStatus>()
   const evaluationPush = channel<PartEvaluationView>()
   const menu = channel<MenuAction>()
+  const openFiles = channel<string>()
+  let connectInfo: ConnectInfo = {
+    connect:
+      'claude mcp add --scope user dfyom -- /Applications/DFYOM.app/Contents/Resources/bin/dfyom mcp --connect',
+    headless:
+      'claude mcp add --scope user dfyom -- /Applications/DFYOM.app/Contents/Resources/bin/dfyom mcp',
+    cli: '/Applications/DFYOM.app/Contents/Resources/bin/dfyom',
+    development: false,
+    localAgents: true,
+  }
   const evaluations = new Map<string, PartEvaluationView>()
   const saveDialogNames: string[] = []
   const exportDialogNames: string[] = []
@@ -262,6 +277,7 @@ export function createFakeBridge(
       list: () => Promise.resolve(agents),
       onSessions: sessions.on,
       localHttp: () => Promise.resolve(localHttp),
+      connectInfo: () => Promise.resolve(connectInfo),
     },
     settings: {
       initial,
@@ -349,6 +365,10 @@ export function createFakeBridge(
       evaluationPush.emit(view)
     },
     emitMenu: menu.emit,
+    emitOpenFile: openFiles.emit,
+    setConnectInfo(info) {
+      connectInfo = info
+    },
     setFileChoice(choice) {
       fileChoice = { ...fileChoice, ...choice }
     },
@@ -358,6 +378,7 @@ export function createFakeBridge(
         return bridge.call(name, args)
       },
       onCloseRequest: closeRequests.on,
+      onOpenFile: openFiles.on,
       close(confirm) {
         closeCalls.push(confirm)
         return Promise.resolve({ ok: true, value: {}, revision: 0 })

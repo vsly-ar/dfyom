@@ -7,6 +7,7 @@ import {
   SETTINGS_ARG,
   type AgentSessionInfo,
   type CallReply,
+  type ConnectInfo,
   type LocalHttpState,
   type MenuAction,
   type PartEvaluationView,
@@ -44,6 +45,17 @@ function initialSettings(): AppSettings | undefined {
   }
 }
 
+/**
+ * Files main hands this window to open (hardening U5). Main sends them once the page loaded, which
+ * can be before the shell subscribes, so they wait here for the first listener.
+ */
+const openFiles: { queued: string[]; listener?: (file: string) => void } = { queued: [] }
+ipcRenderer.on(IPC.windowOpenFile, (_e, file: unknown) => {
+  if (typeof file !== 'string') return
+  if (openFiles.listener === undefined) openFiles.queued.push(file)
+  else openFiles.listener(file)
+})
+
 const api: PreloadApi = {
   windowKind: flagValue(process.argv, WINDOW_KIND_ARG) === 'library' ? 'library' : 'project',
   versions: {
@@ -68,6 +80,7 @@ const api: PreloadApi = {
     list: () => ipcRenderer.invoke(IPC.agentsList) as Promise<readonly AgentSessionInfo[]>,
     onSessions: (listener) => on<readonly AgentSessionInfo[]>(IPC.agentSessions, listener),
     localHttp: () => ipcRenderer.invoke(IPC.localHttpGet) as Promise<LocalHttpState>,
+    connectInfo: () => ipcRenderer.invoke(IPC.agentsConnectInfo) as Promise<ConnectInfo>,
   },
   settings: {
     initial: initialSettings(),
@@ -113,6 +126,13 @@ const api: PreloadApi = {
     close: (confirm) => ipcRenderer.invoke(IPC.windowClose, confirm) as Promise<CallReply>,
     openProject: (name, args) =>
       ipcRenderer.invoke(IPC.windowOpenProject, name, args) as Promise<CallReply>,
+    onOpenFile(listener) {
+      openFiles.listener = listener
+      for (const file of openFiles.queued.splice(0)) listener(file)
+      return () => {
+        if (openFiles.listener === listener) delete openFiles.listener
+      }
+    },
   },
 }
 

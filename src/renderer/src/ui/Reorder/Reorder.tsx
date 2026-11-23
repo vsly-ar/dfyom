@@ -1,7 +1,9 @@
 // Drag to reorder (D45): `useReorder` (native pointer events, no dependency) lifts a row by its
 // grip, shows the drop indicator line, refuses a drop it knows is invalid, glides rows to their new
 // places after a move (pointer or Alt+↑/↓, FLIP) and shakes a refused row; `DragGrip` is the dotted
-// grip, `ReorderStatus` the polite announcement and the visible refusal under the list.
+// grip, `ReorderStatus` the polite announcement and the visible refusal under the list. A drag near
+// the top or bottom edge of the list's scrolling container scrolls it (hardening U3), and the drop
+// gap and the lifted row follow the scroll.
 // Doc: docs/conventions/ui.md#reordering-lists-d45
 import {
   useCallback,
@@ -14,7 +16,7 @@ import {
 } from 'react'
 import { Icon } from '../icons/Icon'
 import { useReducedMotion } from '../motion'
-import { dropGap, dropIndex, movedFrom } from './drop'
+import { dropGap, dropIndex, edgeScrollSpeed, movedFrom } from './drop'
 import styles from './Reorder.module.css'
 
 /** Pointer travel (px) before a press on the grip becomes a drag. */
@@ -83,6 +85,15 @@ export interface Reorder {
 }
 
 const now = (el: Element): number => el.getBoundingClientRect().top
+
+/** The nearest ancestor of `el` that scrolls vertically, if any. */
+export function scrollParent(el: HTMLElement | null): HTMLElement | null {
+  for (let p = el?.parentElement ?? null; p !== null; p = p.parentElement) {
+    const y = getComputedStyle(p).overflowY
+    if ((y === 'auto' || y === 'scroll') && p.scrollHeight > p.clientHeight) return p
+  }
+  return null
+}
 
 export function useReorder(options: ReorderOptions): Reorder {
   const opts = useRef(options)
@@ -198,17 +209,42 @@ export function useReorder(options: ReorderOptions): Reorder {
         return r.top + r.height / 2
       })
       const startY = e.clientY
+      // the scrolling container: rows' middles and the lifted row follow its scroll (U3)
+      const scroller = scrollParent(list.current)
+      const scrollTop0 = scroller?.scrollTop ?? 0
+      const scrolled = () => (scroller?.scrollTop ?? scrollTop0) - scrollTop0
+      let pointerY = startY
+      let frame: number | null = null
       let last: DragState | null = null
-      const move = (ev: PointerEvent) => {
-        const dy = ev.clientY - startY
-        if (last === null && Math.abs(dy) < DRAG_THRESHOLD_PX) return
-        const gap = dropGap(mids, ev.clientY)
+      const update = () => {
+        const dy = pointerY - startY + scrolled()
+        if (last === null && Math.abs(pointerY - startY) < DRAG_THRESHOLD_PX) return
+        const gap = dropGap(mids, pointerY + scrolled())
         const to = dropIndex(i, gap)
         const refused = to === i ? undefined : opts.current.refusal?.(i, to)
         last = { from: i, gap, dy, refused, phase: 'drag', order: opts.current.order }
         setDrag(last)
       }
+      const tick = () => {
+        frame = null
+        if (scroller === null || last === null) return
+        const r = scroller.getBoundingClientRect()
+        const speed = edgeScrollSpeed(pointerY, r.top, r.bottom)
+        if (speed === 0) return
+        const before = scroller.scrollTop
+        scroller.scrollTop = before + speed
+        if (scroller.scrollTop === before) return // at the end
+        update()
+        frame = requestAnimationFrame(tick)
+      }
+      const move = (ev: PointerEvent) => {
+        pointerY = ev.clientY
+        update()
+        if (frame === null && scroller !== null) frame = requestAnimationFrame(tick)
+      }
       const stop = (commit: boolean) => {
+        if (frame !== null) cancelAnimationFrame(frame)
+        frame = null
         window.removeEventListener('pointermove', move)
         window.removeEventListener('pointerup', up)
         window.removeEventListener('pointercancel', cancel)

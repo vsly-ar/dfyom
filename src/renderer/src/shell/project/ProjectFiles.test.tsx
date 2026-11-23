@@ -273,4 +273,61 @@ describe('project files', () => {
       `${key}Settings`,
     )
   })
+
+  it('a file from Finder takes the path of File → Open: the window choice and the lock prompt (U5)', async () => {
+    const bridge = createFakeBridge()
+    bridge.handle('project.recovery.list', () => ok({ projects: [] }))
+    const opened: unknown[] = []
+    bridge.handle('project.open', (args) => {
+      opened.push(args)
+      return errorReply(
+        {
+          code: 'persist.locked',
+          message: 'the project is open in another instance',
+          issues: [],
+          frames: [{ where: 'lock.acquire', data: { holder: 'i-2', host: 'other' } }],
+        },
+        true,
+      )
+    })
+    const { user } = renderApp(bridge)
+    await screen.findByRole('heading', { name: 'No project open' })
+    act(() => bridge.emitOpenFile('/p/bracket.dfyom'))
+    const dialog = await screen.findByRole('dialog', { name: 'The project is open elsewhere' })
+    // no native dialog: the path came from main
+    expect(opened).toEqual([{ file: '/p/bracket.dfyom' }])
+    await user.click(within(dialog).getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(opened).toHaveLength(2))
+    expect(opened[1]).toEqual({ file: '/p/bracket.dfyom' })
+  })
+
+  it('files handed over together open one after the other (U5)', async () => {
+    const bridge = createFakeBridge()
+    bridge.handle('project.recovery.list', () => ok({ projects: [] }))
+    const order: string[] = []
+    let release: (() => void) | undefined
+    bridge.handle('project.open', async (args) => {
+      const file = (args as { file: string }).file
+      order.push(`start ${file}`)
+      if (release === undefined) await new Promise<void>((r) => (release = r))
+      order.push(`end ${file}`)
+      return ok({ key: file, revision: 0, window: 'new' })
+    })
+    renderApp(bridge)
+    await screen.findByRole('heading', { name: 'No project open' })
+    act(() => {
+      bridge.emitOpenFile('/p/a.dfyom')
+      bridge.emitOpenFile('/p/b.dfyom')
+    })
+    await waitFor(() => expect(order).toEqual(['start /p/a.dfyom']))
+    act(() => release?.())
+    await waitFor(() =>
+      expect(order).toEqual([
+        'start /p/a.dfyom',
+        'end /p/a.dfyom',
+        'start /p/b.dfyom',
+        'end /p/b.dfyom',
+      ]),
+    )
+  })
 })

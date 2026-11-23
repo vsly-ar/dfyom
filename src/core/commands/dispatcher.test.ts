@@ -358,13 +358,10 @@ describe('gestures (live edits)', () => {
     expect(d.doc.name).toBe('C')
   })
 
-  it('a different gesture, command or source, or a commit in between, starts a new entry', async () => {
+  it('a different gesture or source, or a commit in between, starts a new entry', async () => {
     const { d } = setup()
     expectOk(await step(d, 'A', 'g1'))
     expectOk(await step(d, 'B', 'g2'))
-    expectOk(
-      await d.dispatch('project.unitSystem.update', { unitSystem: 'inch' }, ui, { gesture: 'g2' }),
-    )
     expectOk(d.query('project.doc.get', {}, agent))
     expectOk(await step(d, 'C', 'g2', agent))
     expectOk(await step(d, 'D', 'g3'))
@@ -375,11 +372,28 @@ describe('gestures (live edits)', () => {
       'g1',
       'g2',
       'g2',
-      'g2',
       'g3',
       '-',
       'g3',
     ])
+  })
+
+  it('a compound gesture (steps of different commands) is one entry named by its first step', async () => {
+    const { d } = setup()
+    expectOk(await rename(d, 'Start'))
+    expectOk(await step(d, 'A', 'g1'))
+    expectOk(
+      await d.dispatch('project.unitSystem.update', { unitSystem: 'inch' }, ui, { gesture: 'g1' }),
+    )
+    expect(d.history.undoable).toHaveLength(2)
+    const entry = d.history.undoable.at(-1)
+    expect(entry?.command).toBe('project.name.update')
+    expect(entry?.args).toEqual({ name: 'A' })
+    expectOk(await d.dispatch('history.undo', {}, ui))
+    expect(d.doc.name).toBe('Start')
+    expect(d.doc.unitSystem).toBe('mm')
+    expectOk(await d.dispatch('history.redo', {}, ui))
+    expect([d.doc.name, d.doc.unitSystem]).toEqual(['A', 'inch'])
   })
 
   it('an undo between steps ends the merge; every step clears redo', async () => {

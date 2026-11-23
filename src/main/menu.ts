@@ -1,6 +1,6 @@
 // The native application menu (ui.md decision 12): the macOS app menu (with Settings… Cmd+,), File
 // (Settings… Ctrl+, on Windows and Linux), Edit, View, Window (with Library), Help (with
-// Open-source licences) with accelerators. Items that act on a project or the shell are sent to the focused window (`IPC.menuAction`), which
+// Connect an agent…, Open-source licences) with accelerators. Items that act on a project or the shell are sent to the focused window (`IPC.menuAction`), which
 // runs them like the matching button or key, so menu, toolbar and shortcuts dispatch the same
 // commands. Text editing (cut, copy, paste, select all) and window items use Electron's roles.
 // Without any window (macOS), New / Open open an empty window; other items do nothing.
@@ -11,7 +11,7 @@ import { IPC, type MenuAction } from '../shared/preload-api'
 /** Menu actions that open an empty window when there is none (its start panel offers both). */
 const WITHOUT_WINDOW: readonly MenuAction[] = ['project.new', 'project.open']
 /** Menu actions that open a dialog: their window comes to the front (it may not be the focused one). */
-const TO_FRONT: readonly MenuAction[] = ['app.settings']
+const TO_FRONT: readonly MenuAction[] = ['app.settings', 'help.connectAgent']
 
 /** What the menu needs from the app (src/main/index.ts). */
 export interface MenuHooks {
@@ -155,6 +155,8 @@ export function menuTemplate(
       role: 'help',
       submenu: [
         item('Keyboard shortcuts', 'help.shortcuts'),
+        // the `claude mcp add` lines with this installation's launcher (ui.md#connect-an-agent-hardening-a4)
+        item('Connect an agent…', 'help.connectAgent'),
         { type: 'separator' },
         { label: 'Open-source licences', click: () => hooks.openLicences?.() },
       ],

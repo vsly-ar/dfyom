@@ -74,6 +74,30 @@ describe('menu actions', () => {
     expect(openLicences).toHaveBeenCalledOnce()
   })
 
+  it('Help → Connect an agent… sends help.connectAgent and brings its window to the front (A4)', () => {
+    const send = vi.fn()
+    const focus = vi.fn()
+    const target = {
+      isDestroyed: () => false,
+      isVisible: () => true,
+      isFocused: () => false,
+      focus,
+      webContents: { send },
+    } as never
+    const template = menuTemplate('darwin', false, {
+      noWindow: vi.fn(),
+      openLibrary: vi.fn(),
+      target: () => target,
+    })
+    const items = template.find((m) => m.role === 'help')?.submenu as {
+      label?: string
+      click?: () => void
+    }[]
+    items.find((i) => i.label === 'Connect an agent…')?.click?.()
+    expect(send).toHaveBeenCalledWith('dfyom:menu.action', 'help.connectAgent')
+    expect(focus).toHaveBeenCalledOnce()
+  })
+
   it('Settings… (Ctrl/Cmd+,): the macOS app menu, else File; it sends app.settings', () => {
     type Item = {
       label?: string

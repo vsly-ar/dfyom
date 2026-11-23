@@ -108,7 +108,11 @@ export default {
   extraResources: [
     { from: 'LICENSE', to: 'LICENSE.txt' },
     { from: 'out/THIRD_PARTY_NOTICES.txt', to: 'THIRD_PARTY_NOTICES.txt' },
+    // the `dfyom` launcher of the headless CLI / MCP server (packaging.md#launcher, hardening A4)
+    { from: 'build/bin/dfyom', to: 'bin/dfyom' },
   ],
+  // `.dfyom` project files open with the app from Finder (packaging.md#file-association, U5)
+  fileAssociations: [{ ext: 'dfyom', name: 'DFYOM Project', role: 'Editor', rank: 'Owner' }],
   // pure JS and WASM, plus serialport's N-API prebuilds (ABI-stable): nothing to rebuild
   npmRebuild: false,
   mac: {

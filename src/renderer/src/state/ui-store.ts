@@ -59,6 +59,9 @@ export interface UiState {
   /** The keyboard shortcut list (`?`, Help menu). */
   readonly shortcutsOpen: boolean
   setShortcutsOpen(open: boolean): void
+  /** Help → Connect an agent… (ui.md#connect-an-agent-hardening-a4). */
+  readonly connectAgentOpen: boolean
+  setConnectAgentOpen(open: boolean): void
   /** The open part-setup dialog of design mode (ui.md § Design sidebar and setup dialogs), or null. */
   readonly designDialog: DesignDialog | null
   setDesignDialog(dialog: DesignDialog | null): void
@@ -229,6 +232,8 @@ export function createUiStore(initial: Partial<Pick<UiState, 'mode'>> = {}): UiS
     setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
     shortcutsOpen: false,
     setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
+    connectAgentOpen: false,
+    setConnectAgentOpen: (connectAgentOpen) => set({ connectAgentOpen }),
     designDialog: null,
     setDesignDialog: (designDialog) => set({ designDialog }),
     stockOfferedFor: null,

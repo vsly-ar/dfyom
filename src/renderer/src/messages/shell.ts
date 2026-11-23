@@ -72,6 +72,30 @@ export const shellMessages = {
       'Agents act through the same commands as you; their changes appear in place and can be undone.',
   },
 
+  connectAgent: {
+    title: 'Connect an agent',
+    description:
+      'Run one of these lines in a terminal to give Claude Code the DFYOM tools. Other MCP clients take the same command.',
+    connectTitle: 'Work in this app',
+    connectHint:
+      'Recommended. The agent works on the projects open here, while you watch; DFYOM must be running.',
+    localAgentsOff: '“Allow local agents to connect” is off, so this line cannot connect yet.',
+    openSettings: 'Open settings',
+    headlessTitle: 'Without the app',
+    headlessHint:
+      'The agent opens projects on its own. A project open here stays locked to the app.',
+    cliTitle: 'Command line',
+    cliHint: 'The launcher itself, for the command line: add “tools” to list the commands.',
+    development: 'Development build: the lines run the built CLI from this checkout with node.',
+    copy: 'Copy',
+    copyLabel: (what: string) => `Copy: ${what}`,
+    copied: 'Copied',
+    copiedAnnounce: (what: string) => `${what} copied to the clipboard.`,
+    copyFailed: 'Could not copy. Select the line and copy it.',
+    loading: 'Reading the installation…',
+    close: 'Close',
+  },
+
   settingsDialog: {
     title: 'Settings',
     description: 'Settings apply to every window and are kept for the next start.',

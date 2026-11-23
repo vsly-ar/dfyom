@@ -5,6 +5,7 @@
 // The native title carries the version; window bounds and dialog folders survive a restart.
 // UI selectors are roles and accessible names (docs/conventions/ui.md#testing).
 // Doc: docs/conventions/testing.md#end-to-end
+import { execFile } from 'node:child_process'
 import { mkdir, readdir, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { CallReply, PreloadApi } from '../src/shared/preload-api'
@@ -88,6 +89,19 @@ test('app opens its window, renders without console errors and quits', async ({ 
         asar: a.getAppPath().endsWith('app.asar'),
       })),
     ).toEqual({ packaged: true, name: 'DFYOM', asar: true })
+    // the `.dfyom` document type (packaging.md#file-association, U5)
+    const plist = await readFile(join(resources, '..', 'Info.plist'), 'utf8')
+    expect(plist).toContain('<string>dfyom</string>')
+    expect(plist).toContain('<string>DFYOM Project</string>')
+    // the launcher runs the headless CLI with the app's binary (packaging.md#launcher, A4)
+    const launcher = join(resources, 'bin', 'dfyom')
+    expect((await stat(launcher)).mode & 0o111).toBe(0o111)
+    const tools = await new Promise<string>((resolve, reject) =>
+      execFile(launcher, ['tools'], { env: { PATH: process.env['PATH'] ?? '' } }, (e, out) =>
+        e ? reject(e) : resolve(out),
+      ),
+    )
+    expect(tools).toContain('project.open')
   }
 })
 
