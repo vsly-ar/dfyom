@@ -326,7 +326,7 @@ function OperationInspector({
     )
     setFailed(r.ok ? undefined : r.error)
   }
-  /** `gesture` for a live adjust-popover step (one undo step per popover session). */
+  /** `gesture` for a live adjust-panel step (one undo step per panel session). */
   const update = (args: object, gesture?: string) =>
     void send('plan.operation.update', args, gesture)
 

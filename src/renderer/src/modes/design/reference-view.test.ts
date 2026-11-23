@@ -7,11 +7,15 @@ import type { Box } from '../../../../core/design/stl'
 import { fieldContext } from '../../../../core/design/operation'
 import { Quantity } from '../../../../core/quantity/quantity'
 import {
+  fitPreview,
   ghostMatrix,
+  lengthSource,
   liveWarnings,
   middleDepth,
   referencePlacement,
+  scaleAbout,
   sectionMatrix,
+  sizeText,
   sourceSize,
 } from './reference-view'
 
@@ -156,5 +160,48 @@ describe('reference section (U3)', () => {
     expect(middleDepth(box, frame, 0)).toBeCloseTo(19.5)
     expect(middleDepth(box, frame, -5)).toBeCloseTo(14.5)
     expect(middleDepth({ min: { x: 0, y: 0, z: 2 }, max: { x: 1, y: 1, z: 6 } }, frame, 0)).toBe(0)
+  })
+})
+
+describe('Reference panel helpers (DF5–DF7)', () => {
+  const box: Box = { min: { x: 0, y: 0, z: 0 }, max: { x: 20, y: 10, z: 5 } }
+  const stock = { length: 100, width: 60, thickness: 20 }
+  const p: Placement = {
+    sourceUnit: 'mm',
+    scale: 1,
+    rotation: { x: 0, y: 0, z: 0 },
+    position: { x: 40, y: 25, z: -5 },
+  }
+
+  it('fitPreview scales (rounded down) and places as the command does', () => {
+    const fit = { anchor: {}, z: 'top' as const, margin: 0, scaleTo: ['x', 'y'] as const }
+    expect(fitPreview(box, p, stock, fit)).toEqual({
+      ok: true,
+      placement: { ...p, scale: 5, position: { x: 0, y: 5, z: -25 } },
+    })
+    expect(fitPreview(box, p, stock, { ...fit, scaleTo: null, margin: 5 })).toEqual({
+      ok: true,
+      placement: { ...p, position: { x: 40, y: 25, z: -5 } },
+    })
+    expect(fitPreview(box, p, stock, { ...fit, margin: 30 })).toEqual({
+      ok: false,
+      problem: 'marginTooLarge',
+    })
+    const third = fitPreview(box, p, { ...stock, length: 20 / 3 }, { ...fit, scaleTo: ['x'] })
+    expect(third.ok && third.placement.scale).toBe(0.333333)
+  })
+
+  it('scaleAbout keeps the anchor point in X/Y and the top in Z', () => {
+    expect(scaleAbout(box, p, 2, {})).toEqual({ x: 30, y: 20, z: -10 })
+    expect(scaleAbout(box, p, 2, { u: 'min', v: 'max' })).toEqual({ x: 40, y: 15, z: -10 })
+    expect(scaleAbout(box, p, 0.5, { u: 'max', v: 'min' })).toEqual({ x: 50, y: 25, z: -2.5 })
+  })
+
+  it('sizeText and lengthSource write project units', () => {
+    expect(sizeText({ x: 249.5, y: 177.12, z: 39 }, 'mm')).toBe('249.5 × 177.1 × 39 mm')
+    expect(sizeText({ x: 25.4, y: 50.8, z: 12.7 }, 'inch')).toBe('1 × 2 × 0.5 in')
+    expect(lengthSource(41.46971, 'mm')).toBe('41.4697 mm')
+    expect(lengthSource(-0.00001, 'mm')).toBe('0 mm')
+    expect(lengthSource(25.4, 'inch')).toBe('1"')
   })
 })

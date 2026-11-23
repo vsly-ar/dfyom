@@ -279,7 +279,6 @@ export const designMessages = {
     done: 'Done',
     stockDescription: 'The block the part is cut from.',
     shapesDescription: 'Outlines that pockets and profiles can cut. Choose one to edit it.',
-    referenceDescription: 'Models shown on the stock as a ghost. Choose one to place it.',
     part: 'Part',
     size: 'Size (X × Y × Z)',
     material: 'Material',
@@ -364,6 +363,8 @@ export const designMessages = {
     cornerRadius: 'Corner radius',
     depth: 'Depth',
     floorRadius: 'Floor fillet radius',
+    /** A facing's recommended depth (DF4): "0.48 mm, down to the top of Enclosure". */
+    facingToReference: (depth: string, reference: string) => `${depth}, down to ${reference}`,
     on: 'On',
     /** `on` dropdown groups, in the order of ui.md#design-and-plan-controls-v02. */
     directions: {

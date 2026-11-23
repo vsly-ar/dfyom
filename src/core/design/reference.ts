@@ -3,9 +3,13 @@
  * reference warnings. Doc: docs/modes/reference-model.md#placement-math-task-r2
  *
  * Pure numbers in canonical units (mm, degrees). The mesh is never re-read: placement works on
- * the source bounds stored with the record.
+ * the source bounds stored with the record. The facing depth suggestion (DF4) takes any box of the
+ * reference in the part frame: the placed box here, the mesh's own box where a caller has it.
+ * Doc: docs/modes/reference-model.md#facing-depth-from-the-reference-df4
  */
 import { z } from 'zod'
+import { DIRECTION, stockFaceLevel, type Direction } from '../geometry/face'
+import type { UnitSystem } from '../project/document'
 import type { Box, Xyz } from './stl'
 
 export type SourceUnit = 'mm' | 'inch'
@@ -162,14 +166,60 @@ export type FitZ = (typeof FIT_Z)[number]
 const along = (point: AnchorPoint, size: number, extent: number) =>
   point === 'min' ? 0 : point === 'max' ? size - extent : (size - extent) / 2
 
-/** `position` (mm) that puts the placed box on the stock at `anchor` and `z`. */
-export function fitPosition(extent: Xyz, stock: StockSize, anchor: Anchor, z: FitZ): Xyz {
+/**
+ * `position` (mm) that puts the placed box on the stock at `anchor` and `z`; `margin` (mm, ≥ 0)
+ * is kept free on each side in X and Y (the fit rectangle is the top face shrunk by it).
+ */
+export function fitPosition(
+  extent: Xyz,
+  stock: StockSize,
+  anchor: Anchor,
+  z: FitZ,
+  margin = 0,
+): Xyz {
   const t = stock.thickness
   return {
-    x: along(anchor.u ?? 'centre', stock.length, extent.x),
-    y: along(anchor.v ?? 'centre', stock.width, extent.y),
+    x: margin + along(anchor.u ?? 'centre', stock.length - 2 * margin, extent.x),
+    y: margin + along(anchor.v ?? 'centre', stock.width - 2 * margin, extent.y),
     z: z === 'top' ? -extent.z : z === 'bottom' ? -t : -(t + extent.z) / 2,
   }
+}
+
+export const FIT_AXES = ['x', 'y', 'z'] as const
+export type FitAxis = (typeof FIT_AXES)[number]
+
+/** Why a scale to fit is impossible (the command's rule ids). */
+export type FitScaleProblem = 'marginTooLarge' | 'zeroExtent'
+
+/**
+ * Scale to fit (docs/modes/reference-model.md#fit-to-stock): the largest factor `k` such that
+ * `k × unitExtent` fits, along every axis of `axes`, the fit rectangle (stock length and width
+ * minus `2 × margin`) and the stock thickness. `unitExtent` is the placed extent at scale 1.
+ * Axes along which the model has no extent are skipped. Not rounded.
+ */
+export function fitScale(
+  unitExtent: Xyz,
+  stock: StockSize,
+  axes: readonly FitAxis[],
+  margin = 0,
+): { ok: true; scale: number } | { ok: false; problem: FitScaleProblem } {
+  const room: Xyz = {
+    x: stock.length - 2 * margin,
+    y: stock.width - 2 * margin,
+    z: stock.thickness,
+  }
+  if (room.x <= 0 || room.y <= 0) return { ok: false, problem: 'marginTooLarge' }
+  let k = Infinity
+  for (const a of axes) if (unitExtent[a] > 1e-12) k = Math.min(k, room[a] / unitExtent[a])
+  return Number.isFinite(k) ? { ok: true, scale: k } : { ok: false, problem: 'zeroExtent' }
+}
+
+/** A scale factor rounded down to 6 significant digits (a fitted box never sticks out). */
+export function roundScaleDown(k: number): number {
+  const e = Math.floor(Math.log10(k)) - 5
+  // the tiny bias keeps exact factors (2, 0.5) exact despite float noise
+  const n = Math.floor(k * 10 ** -e * (1 + 1e-12))
+  return Number((n * 10 ** e).toPrecision(6))
 }
 
 // ── warnings ──────────────────────────────────────────────────────────────────────────────
@@ -217,4 +267,91 @@ export function exceedsStock(
     referenceId,
     params: { x: o.x, y: o.y, z: o.z },
   }
+}
+
+// ── facing depth from the reference (DF4) ─────────────────────────────────────────────────
+
+/** A reference's box in the part frame (mm): its placed box, or the mesh's own box. */
+export interface ReferenceBox {
+  readonly referenceId: string
+  readonly box: Box
+}
+
+export interface FacingDepthSuggestion {
+  /** mm, exact (before rounding). */
+  readonly depth: number
+  /** The depth as a literal in the project's units, rounded down (never into the reference). */
+  readonly source: string
+  /** The reference that decided it (the closest to the face). */
+  readonly referenceId: string
+}
+
+const AXES = ['x', 'y', 'z'] as const
+
+/** Stock box per axis in the part frame: x ∈ [0, L], y ∈ [0, W], z ∈ [−T, 0]. */
+const stockRange = (stock: StockSize, a: 'x' | 'y' | 'z'): [number, number] =>
+  a === 'x' ? [0, stock.length] : a === 'y' ? [0, stock.width] : [-stock.thickness, 0]
+
+/**
+ * Distance (mm) from the stock face of `direction` to the reference's extreme point along the
+ * face's outward normal: what a facing on that face removes to reach the reference. Undefined when
+ * the box does not overlap the face rectangle (nothing to face down to). May be ≤ 0 or beyond the
+ * stock; `suggestFacingDepth` applies the limits.
+ */
+export function depthToReference(
+  direction: Direction,
+  stock: StockSize,
+  box: Box,
+): number | undefined {
+  const d = DIRECTION[direction]
+  for (const a of AXES) {
+    if (a === d.axis) continue
+    const [lo, hi] = stockRange(stock, a)
+    if (box.max[a] <= lo || box.min[a] >= hi) return undefined
+  }
+  // n · p of the reference's extreme point along n
+  const extreme = d.sign > 0 ? box.max[d.axis] : -box.min[d.axis]
+  return stockFaceLevel(direction, stock) - extreme
+}
+
+const trimNumber = (s: string) => (s.includes('.') ? s.replace(/0+$/, '').replace(/\.$/, '') : s)
+
+/**
+ * A facing depth (mm) as a literal in the project's units, **rounded down** to 0.001 mm or
+ * 0.0001 in so the facing never reaches into the reference: "0.48 mm", `0.0189"`.
+ */
+export function facingDepthSource(mm: number, units: UnitSystem): string {
+  // a tiny slack, so 0.4800000001 is not rounded down to 0.479
+  const down = (v: number, decimals: number) => {
+    const f = 10 ** decimals
+    return Math.floor(v * f + 1e-6) / f
+  }
+  return units === 'mm'
+    ? `${trimNumber(down(mm, 3).toFixed(3))} mm`
+    : `${trimNumber(down(mm / 25.4, 4).toFixed(4))}"`
+}
+
+/**
+ * The depth a facing on the stock face of `direction` takes to face down to the closest of the
+ * `references` (the smallest depth, so it reaches into none of them). Only a sensible value is
+ * suggested: positive after rounding down to the project's unit and less than the stock's extent
+ * along the normal (the facing's own limit); else undefined.
+ */
+export function suggestFacingDepth(
+  direction: Direction,
+  stock: StockSize,
+  references: readonly ReferenceBox[],
+  units: UnitSystem,
+): FacingDepthSuggestion | undefined {
+  let best: { depth: number; referenceId: string } | undefined
+  for (const r of references) {
+    const depth = depthToReference(direction, stock, r.box)
+    if (depth === undefined || !Number.isFinite(depth)) continue
+    if (best === undefined || depth < best.depth) best = { depth, referenceId: r.referenceId }
+  }
+  if (best === undefined) return undefined
+  const source = facingDepthSource(best.depth, units)
+  const rounded = Number.parseFloat(source)
+  if (!(rounded > 0) || best.depth >= stock[DIRECTION[direction].extent]) return undefined
+  return { depth: best.depth, source, referenceId: best.referenceId }
 }

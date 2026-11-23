@@ -22,6 +22,11 @@ export interface SegmentedControlProps<V extends string> {
   onValueChange: (value: V) => void
   size?: 'sm' | 'md'
   disabled?: boolean
+  /**
+   * False: the options are out of the Tab order and arrow keys are left to the owner, which moves
+   * focus itself (the field's adjust panel, ui.md#field). Default true: Radix roving focus.
+   */
+  tabbable?: boolean
   /** Layout only; appended to the wrapper's class. */
   className?: string | undefined
 }
@@ -33,6 +38,7 @@ export function SegmentedControl<V extends string>({
   onValueChange,
   size = 'md',
   disabled = false,
+  tabbable = true,
   className,
 }: SegmentedControlProps<V>): React.JSX.Element {
   const root = useRef<HTMLDivElement>(null)
@@ -48,6 +54,7 @@ export function SegmentedControl<V extends string>({
         if (v) onValueChange(v as V)
       }}
       disabled={disabled}
+      rovingFocus={tabbable}
       data-size={size}
       className={[styles['root'], className].filter(Boolean).join(' ')}
     >
@@ -57,6 +64,7 @@ export function SegmentedControl<V extends string>({
           key={o.value}
           value={o.value}
           disabled={o.disabled ?? false}
+          {...(tabbable ? {} : { tabIndex: -1 })}
           className={styles['item']}
         >
           {o.icon !== undefined ? (

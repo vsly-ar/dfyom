@@ -6,7 +6,7 @@ import { expectErrCode, expectOk } from '../../shared/testing/result'
 import { createInProcessWorkers, memoryFiles } from '../commands/jobs'
 import { aborted } from '../workers/steps'
 import { referenceSection, stlMesh } from '../workers/tasks'
-import { featureEdges, meshSection } from './mesh-section'
+import { featureEdges, meshBounds, meshSection } from './mesh-section'
 import { parseStl } from './stl'
 import { binaryStl, boxSoup, ENCLOSURE_TRIANGLES, enclosureStl } from './stl.testing'
 
@@ -99,6 +99,20 @@ function readPositions(bytes: Uint8Array): Float32Array {
     for (let k = 0; k < 9; k++) out[t * 9 + k] = view.getFloat32(84 + t * 50 + 12 + k * 4, true)
   return out
 }
+
+describe('meshBounds (DF4)', () => {
+  const box = Float32Array.from(boxSoup(40, 20, 10))
+
+  it('is the box of the triangles after the matrix', () => {
+    // 90° about Z (x' = −y, y' = x), then moved by (5, 6, −12)
+    const m = [0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1, 0, 5, 6, -12, 1]
+    expect(meshBounds(box, m)).toEqual({
+      min: { x: -15, y: 6, z: -12 },
+      max: { x: 5, y: 46, z: -2 },
+    })
+    expect(meshBounds(new Float32Array(0), IDENTITY)).toBeUndefined()
+  })
+})
 
 describe('featureEdges', () => {
   it('finds the 12 edges of a box, not the face diagonals', () => {

@@ -80,6 +80,11 @@ export interface OperationFieldsContext {
    * fix instead of "Use …" ("Fix in Hole 1": select the feature, focus the mapped field).
    */
   readonly fixElsewhere?: ((w: DfmWarning) => { label: string; onApply: () => void }) | undefined
+  /**
+   * Recommended values by parameter path (the facing's depth down to the reference, DF4): the
+   * field's adjust panel offers "Use …" (QuantityInput `recommended`); never on read-only fields.
+   */
+  readonly recommended?: Readonly<Record<string, { source: string; text: string }>> | undefined
 }
 
 /**
@@ -610,6 +615,7 @@ export function ParamField({
       }),
   ]
   const fieldId = `${op.id}:${path}`
+  const recommended = ctx.recommended?.[path]
   return (
     <QuantityInput
       label={label}
@@ -623,6 +629,7 @@ export function ParamField({
       {...(placeholder !== undefined ? { placeholder } : {})}
       references={references}
       readOnly={ctx.readOnly}
+      {...(recommended !== undefined && !ctx.readOnly ? { recommended } : {})}
       picking={ctx.pickable && pick?.owner === fieldId}
       {...(table ? { resolver: table.resolver(index) } : {})}
       {...(table && kind === 'length' && ctx.pickable && !ctx.readOnly
@@ -638,6 +645,7 @@ export function ParamField({
                 },
               })
             },
+            onPickCancel: () => setPick(null),
           }
         : {})}
     />

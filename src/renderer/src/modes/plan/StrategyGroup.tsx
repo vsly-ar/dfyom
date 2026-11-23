@@ -95,7 +95,7 @@ export function StrategyGroup({
   units: UnitSystem
   readOnly: boolean
   findings: readonly PlanWarning[]
-  /** One `plan.operation.update`; `gesture` for a live adjust-popover step. */
+  /** One `plan.operation.update`; `gesture` for a live adjust-panel step. */
   onUpdate: (args: object, gesture?: string) => void
   /** Escape in a field's adjust popover (QuantityInput `onCancelGesture`). */
   onCancelGesture: (gesture: string) => Promise<boolean>

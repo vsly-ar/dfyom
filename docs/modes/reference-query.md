@@ -75,7 +75,7 @@ Errors: no reference or its asset unreadable (`input.malformed`, rules `noRefere
 
 ## UI (summary)
 
-- Reference inspector: a "Depths" list from `levels` (depth, facing, area); clicking one sets the Shape Editor's section depth.
+- Reference panel ([ui.md § Reference panel](../conventions/ui.md#reference-panel-hardening-df2df8); the reference inspector until DF3): a "Depths" list from `levels` (depth, facing, area); clicking one sets the Shape Editor's section depth.
 - Shape Editor: "Section to shape" ([above](#section-to-shape)).
 - Detected holes as markers on the ghost: later, with assisted recreation.
 

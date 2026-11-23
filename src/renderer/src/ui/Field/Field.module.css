@@ -1,4 +1,4 @@
-/* Field, FieldInput, FieldAdjustButton. Look: ui-design-system.html (.field, .qi, .qa, .fs).
+/* Field, FieldInput. Look: ui-design-system.html (.field, .qi, .qa, .fs).
    Doc: docs/conventions/ui.md#field */
 .field {
   display: grid;
@@ -65,10 +65,9 @@
   flex: 0 0 auto;
 }
 
-/* quick actions: lock (between label and input), dismiss, pencil */
+/* quick actions: lock (between label and input), dismiss */
 .lock,
-.quick,
-.pen {
+.quick {
   width: 20px;
   height: 20px;
   flex: none;
@@ -92,8 +91,7 @@
 }
 
 .lock svg,
-.quick svg,
-.pen svg {
+.quick svg {
   width: var(--icon-sm);
   height: var(--icon-sm);
   fill: none;
@@ -130,43 +128,12 @@
   margin-left: 2px;
 }
 
-.pen {
-  margin-left: 8px;
-  background: var(--bg-active);
-  color: var(--text-muted);
-}
-
-.pen:hover {
-  background: color-mix(in oklab, var(--text) 16%, transparent);
-  color: var(--text);
-}
-
-.pen[aria-expanded='true'] {
-  background: color-mix(in oklab, var(--text) 18%, transparent);
-  color: var(--text);
-}
-
-.pen[data-fix] {
-  color: var(--accent-border);
-  background: color-mix(in oklab, var(--accent) 24%, transparent);
-}
-
-.pen[data-fix]:hover {
-  background: color-mix(in oklab, var(--accent) 36%, transparent);
-}
-
-.pen[data-fix] [data-accent] {
-  stroke: var(--accent-icon);
-  fill: var(--accent-icon);
-  filter: var(--accent-icon-edge);
-}
-
 /* FieldInput box */
 .box {
   display: flex;
   align-items: center;
   height: var(--control-md);
-  padding: 0 4px 0 8px;
+  padding: 0 8px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-control);
   background: var(--bg-field);
@@ -176,10 +143,6 @@
   transition:
     border-color var(--motion-fast),
     box-shadow var(--motion-base);
-}
-
-.box:not(:has(.pen)) {
-  padding-right: 8px;
 }
 
 .box:hover {

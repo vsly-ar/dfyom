@@ -4,9 +4,10 @@
 // error marker at the failing operation, pick mode for the inspector's fields (normal glyphs on
 // every eligible face), and for the selected operation its face-frame axes (task F1) and anchor
 // marker (task F2), and the visible references as ghosts (task R3); named and rotated shapes'
-// outlines through the renderer's 2D port (task U1).
+// outlines through the renderer's 2D port (task U1); while the Reference panel is open, Fit mode's
+// preview placement and "See through stock" (dogfood DF2, DF5).
 // Doc: docs/conventions/ui.md#selection-and-picking, #evaluation-status-pending-outdated-failed,
-// #design-and-plan-controls-v02, #reference-ghost-v02
+// #design-and-plan-controls-v02, #reference-ghost-v02, #reference-panel-hardening-df2df8
 import { useMemo } from 'react'
 import { placedBox } from '../../../../core/design/reference'
 import { toPartFrame } from '../../../../core/geometry/face'
@@ -43,13 +44,16 @@ export function useDesignScene(): SceneProps {
   const setPick = useUi((s) => s.setPick)
   const status = evaluation?.status ?? 'pending'
   const references = useDesignReferences(part)
+  const preview = useUi((s) => s.referencePreview)
+  const panel = useUi((s) => s.referencePanel)
+  const seeThroughStock = useUi((s) => s.seeThroughStock)
   // named and rotated shapes are placed through the renderer's 2D port (task U1)
   const port = useRegion2d()
 
   const ghosts = useMemo(
     () =>
       references.flatMap(({ ref, visible, mesh }) => {
-        const p = referencePlacement(ref)
+        const p = preview?.referenceId === ref.id ? preview.placement : referencePlacement(ref)
         if (!visible || mesh?.status !== 'done' || p === undefined) return []
         const matrix = ghostMatrix(ref.asset.bounds, p)
         const box = placedBox(ref.asset.bounds, p)
@@ -66,7 +70,7 @@ export function useDesignScene(): SceneProps {
           },
         ]
       }),
-    [references],
+    [references, preview],
   )
   const referenceSummary = references
     .filter((r) => r.visible)
@@ -163,6 +167,7 @@ export function useDesignScene(): SceneProps {
     selectedAlso: clones.selectedAlso,
     announcement,
     ghosts,
+    seeThrough: panel && seeThroughStock && ghosts.length > 0,
     snap: snapOn,
     ...(part === undefined ? {} : { units: part.units }),
     ...(part === undefined

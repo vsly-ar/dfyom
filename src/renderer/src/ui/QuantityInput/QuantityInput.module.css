@@ -33,45 +33,6 @@
   color: var(--text-faint);
 }
 
-/* pick button: a quick action inside the box, before the pencil */
-.pick {
-  width: 20px;
-  height: 20px;
-  flex: none;
-  margin-left: 8px;
-  border: 0;
-  padding: 0;
-  border-radius: var(--radius-xs);
-  background: transparent;
-  color: var(--text-faint);
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-  transition:
-    background var(--motion-fast),
-    color var(--motion-fast);
-}
-
-.pick:hover {
-  background: var(--bg-hover);
-  color: var(--text);
-}
-
-.pick[aria-pressed='true'] {
-  background: var(--bg-active);
-  color: var(--text);
-}
-
-.pick svg {
-  width: var(--icon-sm);
-  height: var(--icon-sm);
-  stroke-width: var(--icon-stroke);
-}
-
-.pick + * {
-  margin-left: 2px;
-}
-
 /* reference autocomplete */
 .list {
   position: absolute;
@@ -121,8 +82,30 @@
   text-overflow: ellipsis;
 }
 
-/* adjust popover */
+/* adjust panel (ui.md#field): under the whole field (below the support area), aligned to the
+   input's end, always below; the Popover surface (ui-design-system.html .stepper) */
+.panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: var(--z-popover);
+  width: max-content;
+  min-width: 200px;
+  max-width: min(320px, 100%);
+  padding: 10px;
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-2);
+  display: grid;
+  gap: 10px;
+  transform-origin: top right;
+  animation: pop var(--motion-base) var(--ease-emphasized);
+}
+
 .title {
+  font-weight: var(--weight-bold);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -194,4 +177,33 @@
     opacity: 1;
     transform: none;
   }
+}
+
+/* pick toggle: pressed while pick mode runs for this field (DF10); the icon turns amber */
+.pickToggle {
+  justify-self: start;
+}
+
+.pickToggle[aria-pressed='true'] {
+  background: var(--bg-active);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+/* as IconButton: the icon's accent part turns amber while pressed */
+.pickToggle[aria-pressed='true'] [data-accent] {
+  stroke: var(--accent-icon);
+  filter: var(--accent-icon-edge);
+  stroke-width: 1.6px;
+}
+
+.pickToggle[aria-pressed='true'] [data-accent][data-fill] {
+  fill: var(--accent-icon);
+  stroke: none;
+}
+
+.pickToggle kbd {
+  margin-left: 6px;
+  font: var(--text-xs) var(--font-mono);
+  color: var(--text-faint);
 }

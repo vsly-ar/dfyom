@@ -36,6 +36,8 @@ export const viewportMessages = {
   /** The current view at the end of the text summary, announced politely when it changes. */
   shownView: (name: string | null): string => `View: ${name ?? 'custom'}.`,
   pickCancel: 'Esc to cancel',
+  /** Announced politely when pick mode ends without a pick (Escape, the pick toggle again). */
+  pickCancelled: 'Pick cancelled.',
   keys: 'Keys: 1 to 4 Top, Front, Right and Isometric view, Shift and 1 to 3 Bottom, Back and Left view, F fit, arrows orbit, Shift and arrows pan, plus and minus zoom.',
   /** Default text summary (the shell may pass a richer one, ui.md#accessibility). */
   summary: (p: { operations: number; status: 'done' | 'pending' | 'failed' | 'empty' }): string => {

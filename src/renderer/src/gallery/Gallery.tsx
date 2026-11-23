@@ -20,7 +20,6 @@ import {
   ErrorMessage,
   Field,
   FIELD_ICON_NAMES,
-  FieldAdjustButton,
   FieldIcon,
   FieldInput,
   IconButton,
@@ -539,7 +538,7 @@ function Fields(): React.JSX.Element {
     { id: 'agent', severity: 'info', text: 'Changed by agent 2 min ago' },
   ]
   return (
-    <Row label="Field · illustration (full colour focused or not, grey when read-only), lock (feeds fields in auto mode only; disabled with its reason), input with pencil, support area under the input">
+    <Row label="Field · illustration (full colour focused or not, grey when read-only), lock (feeds fields in auto mode only; disabled with its reason), input (the adjust panel opens on focus: QuantityInput below), support area under the input">
       <div className={styles['fields']}>
         <Field
           label="Stepdown"
@@ -547,11 +546,7 @@ function Fields(): React.JSX.Element {
           lock={lockOff}
           messages={stepdown}
         >
-          <FieldInput
-            defaultValue="1.50"
-            unit="mm"
-            adjust={<FieldAdjustButton label="Adjust Stepdown" fix />}
-          />
+          <FieldInput defaultValue="1.50" unit="mm" />
         </Field>
         <Field
           label="Corner R"
@@ -565,29 +560,17 @@ function Fields(): React.JSX.Element {
             },
           ]}
         >
-          <FieldInput
-            defaultValue="1.50"
-            unit="mm"
-            adjust={<FieldAdjustButton label="Adjust Corner radius" fix />}
-          />
+          <FieldInput defaultValue="1.50" unit="mm" />
         </Field>
         <Field label="Chamfer" illustration={<FieldIcon name="chamfer" />}>
-          <FieldInput
-            defaultValue="45"
-            unit="°"
-            adjust={<FieldAdjustButton label="Adjust Chamfer angle" />}
-          />
+          <FieldInput defaultValue="45" unit="°" />
         </Field>
         <Field
           label="Width"
           illustration={<FieldIcon name="width" />}
           echo="= 1.588 mm · ±0.1 mm from part"
         >
-          <FieldInput
-            defaultValue={'1/16"'}
-            unit="mm"
-            adjust={<FieldAdjustButton label="Adjust Width" />}
-          />
+          <FieldInput defaultValue={'1/16"'} unit="mm" />
         </Field>
         <Field
           label="Depth"
@@ -601,11 +584,7 @@ function Fields(): React.JSX.Element {
             },
           ]}
         >
-          <FieldInput
-            defaultValue="3..5"
-            unit="mm"
-            adjust={<FieldAdjustButton label="Adjust Depth" />}
-          />
+          <FieldInput defaultValue="3..5" unit="mm" />
         </Field>
         <Field
           label="Spindle speed"
@@ -719,6 +698,7 @@ function QuantityFields(): React.JSX.Element {
               setPicking(false)
             }, 900)
           }}
+          onPickCancel={() => setPicking(false)}
           {...on}
         />
         <QuantityInput

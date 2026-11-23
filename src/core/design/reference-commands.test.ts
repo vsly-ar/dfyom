@@ -246,6 +246,26 @@ describe('design.reference.update / remove / list', () => {
     expect(s.d.doc).toEqual(before)
   })
 
+  it('lists the facing depth down to the reference per stock face (DF4)', async () => {
+    const { s, upd } = await imported()
+    // fitted to the top: nothing to face on the top
+    const [fitted] = await list(s)
+    expect((fitted as unknown as { facingDepth: object }).facingDepth).not.toHaveProperty(
+      'stock.top',
+    )
+    // 20 × 10 × 5 at x 40..60, y 25..35, its top 0.48 below the stock top (stock 100 × 60 × 20)
+    await upd({ position: { z: '-5.48' } })
+    const [l] = await list(s)
+    expect((l as unknown as { facingDepth: object }).facingDepth).toEqual({
+      'stock.top': '0.48 mm',
+      'stock.bottom': '14.52 mm',
+      'stock.side[0]': '25 mm',
+      'stock.side[1]': '40 mm',
+      'stock.side[2]': '25 mm',
+      'stock.side[3]': '40 mm',
+    })
+  })
+
   it('turn adds exact 90° steps; fit moves onto the stock after the other changes', async () => {
     const { s, id, upd } = await imported()
     await upd({ turn: { axis: 'x', turns: 1 } })
@@ -258,6 +278,83 @@ describe('design.reference.update / remove / list', () => {
     expect(sources(ref(s, id)).position).toEqual(['40 mm', '0 mm', '-17.5 mm'])
     expect(w.warnings).toEqual([])
     expect(s.d.history.undoable.at(-1)?.title).toBe('Fit reference to stock')
+  })
+
+  it('fit with margin and scaleTo scales to fit, then places (one step)', async () => {
+    const { s, id, upd } = await imported()
+    // BOX 20 × 10 × 5 on stock 100 × 60 × 20; margin 5 → room 90 × 50 (Z not shrunk)
+    const w = await upd({ fit: { margin: '5', scaleTo: ['x', 'y', 'z'] } })
+    // min(90/20, 50/10, 20/5) = 4 → 80 × 40 × 20, centred in the room, top at the stock top
+    expect(sources(ref(s, id))).toMatchObject({
+      scale: '4',
+      position: ['10 mm', '10 mm', '-20 mm'],
+    })
+    expect(w.warnings).toEqual([])
+    expect(s.d.history.undoable.at(-1)?.title).toBe('Fit reference to stock')
+    // only X and Y govern: 4.5 → Z sticks out; the margin also applies to min / max anchors
+    const w2 = await upd({
+      fit: { margin: '5 mm', scaleTo: ['x', 'y'], anchor: { u: 'min', v: 'max' } },
+    })
+    expect(sources(ref(s, id))).toMatchObject({
+      scale: '4.5',
+      position: ['5 mm', '10 mm', '-22.5 mm'],
+    })
+    expect(w2.warnings[0]).toMatchObject({ code: 'reference.exceedsStock' })
+    // a margin alone keeps the scale
+    await upd({ fit: { margin: '10', anchor: { u: 'min', v: 'min' } } })
+    expect(sources(ref(s, id))).toMatchObject({
+      scale: '4.5',
+      position: ['10 mm', '10 mm', '-22.5 mm'],
+    })
+  })
+
+  it('fit scaleTo writes the scale rounded down, so the box never sticks out', async () => {
+    const { s, id, upd } = await imported()
+    // room Y = 60 - 2 × 0.35 = 59.3 → 59.3 / 10 = 5.93 (X 118.6 sticks out: not governed)
+    await upd({ fit: { margin: '0.35', scaleTo: ['y'] } })
+    expect(sources(ref(s, id)).scale).toBe('5.93')
+    // a free angle gives an irrational factor: written with at most 6 significant digits
+    await upd({ rotation: { z: '30' } })
+    await upd({ fit: { scaleTo: ['x'] } })
+    const scale = Number(sources(ref(s, id)).scale)
+    expect(
+      String(scale)
+        .replace(/^0\.|\./, '')
+        .replace(/^0+/, '').length,
+    ).toBeLessThanOrEqual(6)
+    const [l] = await list(s)
+    const box = l!.placed as { min: { x: number }; max: { x: number } }
+    expect(box.max.x - box.min.x).toBeLessThanOrEqual(100)
+    expect(box.max.x - box.min.x).toBeGreaterThan(99.99)
+  })
+
+  it('refuses invalid fits', async () => {
+    const { s, id } = await imported()
+    const args = (a: object) => ({ partId: s.partId, referenceId: id, ...a })
+    const both = await s.fail(
+      'design.reference.update',
+      args({ scale: '2', fit: { scaleTo: ['x'] } }),
+      'input.malformed',
+    )
+    expect(both.issues[0]?.rule).toBe('fitWithScale')
+    const negative = await s.fail(
+      'design.reference.update',
+      args({ fit: { margin: '-1' } }),
+      'model.invariant',
+    )
+    expect(negative.issues[0]).toMatchObject({ path: ['fit', 'margin'], rule: 'nonNegative' })
+    const wide = await s.fail(
+      'design.reference.update',
+      args({ fit: { margin: '30', scaleTo: ['x'] } }),
+      'model.invariant',
+    )
+    expect(wide.issues[0]).toMatchObject({ path: ['fit', 'margin'], rule: 'marginTooLarge' })
+    const unit = await s.fail(
+      'design.reference.update',
+      args({ fit: { margin: '5°' } }),
+      'quantity.unit',
+    )
+    expect(unit.issues[0]?.path.slice(0, 2)).toEqual(['fit', 'margin'])
   })
 
   it('warns when the placed reference exceeds the stock', async () => {

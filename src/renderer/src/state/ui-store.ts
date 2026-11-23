@@ -4,7 +4,7 @@
 // Doc: docs/conventions/ui.md#where-things-live, #mode-switching, #selection-and-picking,
 // docs/modes/reference-model.md#display
 import { createStore, type StoreApi } from 'zustand/vanilla'
-import type { ReferenceWarning } from '../../../core/design/reference'
+import type { Placement, ReferenceWarning } from '../../../core/design/reference'
 import type { ShapeItem } from '../../../core/design/shape.dto'
 import type { SvgImportReport } from '../../../core/import/svg'
 import type { Issue } from '../../../shared/errors/app-error'
@@ -65,9 +65,29 @@ export interface UiState {
   /** The project key the Stock dialog opened by itself for (once per project and window). */
   readonly stockOfferedFor: string | null
   markStockOffered(key: string): void
-  /** Each mode keeps its own selection (an operation or, in design, a reference id; or null). */
+  /**
+   * Each mode keeps its own selection (an operation or, in design, a reference id; or null). A
+   * design selection of another id closes the Reference panel (ui.md § Reference panel).
+   */
   readonly selection: Readonly<Record<AppMode, string | null>>
   select(mode: AppMode, id: string | null): void
+  /**
+   * The Reference panel in the right sidebar (dogfood DF3, ui.md § Reference panel): open while
+   * true; its reference is the design selection.
+   */
+  readonly referencePanel: boolean
+  /** Opens the panel with this reference selected (null: none yet) and shows the inspector. */
+  openReferencePanel(referenceId: string | null): void
+  /** Closes the panel; a selected reference is deselected (the inspector shows the part). */
+  closeReferencePanel(): void
+  /** "See through stock" (DF2): per window, on at start. */
+  readonly seeThroughStock: boolean
+  setSeeThroughStock(on: boolean): void
+  /** Fit mode's live preview (DF5): the ghost's placement while fitting, view state only. */
+  readonly referencePreview: ReferencePreview | null
+  setReferencePreview(preview: ReferencePreview | null): void
+  /** Bumped to ask the shell to show a collapsed inspector (the Reference panel opened). */
+  readonly inspectorRequest: number
   /** Active pick mode, or null. */
   readonly pick: PickRequestState | null
   setPick(pick: PickRequestState | null): void
@@ -188,7 +208,13 @@ export interface LastImport {
 }
 
 /** Design mode's part-setup dialogs (D45): set once per project, opened from the toolbar. */
-export type DesignDialog = 'stock' | 'shapes' | 'reference'
+export type DesignDialog = 'stock' | 'shapes'
+
+/** A reference's placement while Fit mode previews it (mm, degrees; DF5). */
+export interface ReferencePreview {
+  readonly referenceId: string
+  readonly placement: Placement
+}
 
 export type UiStore = StoreApi<UiState>
 
@@ -205,7 +231,34 @@ export function createUiStore(initial: Partial<Pick<UiState, 'mode'>> = {}): UiS
     stockOfferedFor: null,
     markStockOffered: (stockOfferedFor) => set({ stockOfferedFor }),
     selection: { design: null, plan: null, run: null },
-    select: (mode, id) => set((s) => ({ selection: { ...s.selection, [mode]: id } })),
+    select: (mode, id) =>
+      set((s) => ({
+        selection: { ...s.selection, [mode]: id },
+        ...(mode === 'design' && s.referencePanel && id !== s.selection.design
+          ? { referencePanel: false, referencePreview: null }
+          : {}),
+      })),
+    referencePanel: false,
+    openReferencePanel: (id) =>
+      set((s) => ({
+        referencePanel: true,
+        selection: { ...s.selection, design: id },
+        inspectorRequest: s.referencePanel ? s.inspectorRequest : s.inspectorRequest + 1,
+      })),
+    closeReferencePanel: () =>
+      set((s) => ({
+        referencePanel: false,
+        referencePreview: null,
+        selection: {
+          ...s.selection,
+          design: s.referencePanel ? null : s.selection.design,
+        },
+      })),
+    seeThroughStock: true,
+    setSeeThroughStock: (seeThroughStock) => set({ seeThroughStock }),
+    referencePreview: null,
+    setReferencePreview: (referencePreview) => set({ referencePreview }),
+    inspectorRequest: 0,
     pick: null,
     setPick: (pick) => set({ pick }),
     hiddenReferences: new Set(),

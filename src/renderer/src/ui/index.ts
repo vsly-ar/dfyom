@@ -28,12 +28,7 @@ export {
   type FieldProps,
   type FieldSeverity,
 } from './Field/Field'
-export {
-  FieldAdjustButton,
-  FieldInput,
-  type FieldAdjustButtonProps,
-  type FieldInputProps,
-} from './Field/FieldInput'
+export { FieldInput, type FieldInputProps } from './Field/FieldInput'
 export { IconButton, type IconButtonProps } from './IconButton/IconButton'
 export { FIELD_ICON_NAMES, FieldIcon, type FieldIconName } from './icons/field/FieldIcon'
 export {
