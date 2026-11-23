@@ -809,6 +809,8 @@ describe('queries', () => {
         severity: 'error',
         field: 'spindleSpeed',
         rule: 'unresolved',
+        // DF43: the field in words ("Spindle speed"), its key only in `field`
+        message: 'spindle speed has no entered, preset or calculator value',
       }),
     )
     const drill1 = opsOf(s.plan(planId)).find((o) => o.designOperationIds[0] === 'drill1')!.id

@@ -137,6 +137,7 @@ export interface Stale {
   partRemoved: boolean
   partChanged: string[]
   rebuildBlocked: string | null
+  rebuildBlockedFields: string[]
   operations: {
     operationId: string
     changedInDesign: boolean
@@ -149,6 +150,7 @@ export interface Stale {
     kind: string
     status: string
     blocked: string | null
+    blockedFields: string[]
   }[]
 }
 export const stale = (s: PlanSetup, planId: string) =>

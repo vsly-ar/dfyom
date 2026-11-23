@@ -120,7 +120,8 @@ const UNIT: Record<FeedField, ResolvedFeed['unit']> = {
   stepover: 'mm',
 }
 
-const LABEL: Record<FeedField, string> = {
+/** A feed field in words, for visible text ("Feed rate", never `feedRate`; DF43). */
+export const FEED_FIELD_LABEL: Readonly<Record<FeedField, string>> = {
   spindleSpeed: 'Spindle speed',
   feedRate: 'Feed rate',
   plungeRate: 'Plunge rate',
@@ -453,7 +454,7 @@ function inactive(
   return {
     code: 'feeds.lockInactive',
     severity: 'warning',
-    message: `${LABEL[field]} lock is inactive: ${reason}`,
+    message: `${FEED_FIELD_LABEL[field]} lock is inactive: ${reason}`,
     params: { ...params, reason: rule },
     field,
     rule,

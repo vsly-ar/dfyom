@@ -313,6 +313,11 @@ describe('rebuild and blocker checks with the 2D port', () => {
     item.length = structuredClone(item.width)
     const plan = doc.plans[planId]!
     expect(rebuildBlocker(plan, doc)).toBeUndefined()
-    expect(rebuildBlocker(plan, doc, region2d)).toMatch(/rebuild blocked.*tab/i)
+    const blocked = rebuildBlocker(plan, doc, region2d)
+    expect(blocked?.reason).toMatch(/rebuild blocked.*tab/i)
+    // DF43: the profile by name and the field in words; the path stays in `fields` for agents
+    expect(blocked?.reason).toContain('Profile 1 tab 2 position')
+    expect(blocked?.reason).not.toMatch(/profile1|operations\.|tabs\.positions/)
+    expect(blocked?.fields).toContain('operations.profile1.tabs.positions.1')
   })
 })

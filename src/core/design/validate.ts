@@ -361,9 +361,10 @@ export function operationIssues(
         { actual: op.edgeOf },
       )
       if (edge !== undefined)
-        c.check(edge.on === op.on, 'on', 'chamferOn', `must be the face of ${edge.id}`, {
+        c.check(edge.on === op.on, 'on', 'chamferOn', `must be the face of ${edge.name}`, {
           allowed: [edge.on],
           actual: op.on,
+          edgeOf: edge.id,
         })
       c.positive(op.width, 'width')
       c.check(

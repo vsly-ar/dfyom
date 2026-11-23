@@ -14,6 +14,7 @@ import type { Region2dPort } from '../geometry/2d/port'
 import type { PlanOperationInput } from '../plan/inputs'
 import { defineCommand, defineQuery } from '../commands/define'
 import { planOperationInputs } from '../plan/inputs'
+import { planOperationLabel, UNKNOWN_OPERATION } from '../plan/labels'
 import { planPendingApply } from '../plan/pending'
 import { PlanIdSchema, PlanRecordIdSchema } from '../plan/plan.dto'
 import { toolpathGenerate } from '../workers/tasks'
@@ -112,11 +113,22 @@ export const toolpathGenerateJob = defineCommand({
     const completed: string[] = []
     const abortedJob = () =>
       fail('op.aborted', `${where} was aborted`, { where, data: { completed } })
+    const part = Object.hasOwn(doc.plans, args.planId)
+      ? doc.plans[args.planId]?.design.part
+      : undefined
     for (const [i, input] of all.entries()) {
       const id = input.planOperationId
+      // progress names the operation, never its id (DF43)
+      const label =
+        part === undefined
+          ? UNKNOWN_OPERATION
+          : planOperationLabel(
+              part,
+              input.operations.map((o) => o.id),
+            )
       const cp = await tryAsync(() => ctx.checkpoint(), 'op.aborted', 'checkpoint')
       if (cp.isErr()) return abortedJob()
-      ctx.progress({ done: i, total, label: id })
+      ctx.progress({ done: i, total, label })
       const tp = await ensureToolpath(
         cache.unwrap(),
         ctx.services.workers,
@@ -129,7 +141,7 @@ export const toolpathGenerateJob = defineCommand({
             ctx.progress({
               done: i,
               total,
-              label: p.label === undefined ? id : `${id}: ${p.label}`,
+              label: p.label === undefined ? label : `${label}: ${p.label}`,
             }),
         },
         ctx.services.region2d,
