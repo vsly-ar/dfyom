@@ -15,7 +15,7 @@ import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { ERROR_CODES } from '../../../../shared/errors/codes'
 import { designMessages } from '../../messages/design'
 import { dfmMessages } from '../../messages/dfm'
-import { pendingApply, quantityOf, surfaceLabel, type DesignPart } from './model'
+import { itemName, pendingApply, quantityOf, surfaceLabel, type DesignPart } from './model'
 
 /** One row of the operation list: a plain operation or a feature with its span. */
 export type OperationUnit = OperationRowUnit | FeatureUnit
@@ -215,7 +215,7 @@ export function moveRefusal(part: Pick<DesignPart, 'dto'>, error: AppErrorData):
   const nameOf = (id: string) => {
     const op = part.dto.operations.find((o) => o.id === id)
     const owner = op === undefined ? undefined : ownerFeature(part.dto, op)
-    return owner?.name ?? op?.name ?? id
+    return owner?.name ?? op?.name ?? itemName(part.dto, id)
   }
   const issue = error.issues?.[0]
   if (error.code === 'design.referenced' && issue !== undefined) {
@@ -225,13 +225,12 @@ export function moveRefusal(part: Pick<DesignPart, 'dto'>, error: AppErrorData):
       const edge = part.dto.operations.find((o) => o.id === reference)
       return edge !== undefined
         ? t.edgeFirst(nameOf(user), nameOf(reference))
-        : t.surfaceFirst(nameOf(user), reference)
+        : t.surfaceFirst(nameOf(user), surfaceLabel(part.dto, surfaceOfReference(reference)))
     }
   }
   if (issue?.rule === 'insideFeature') {
     const featureId = String(issue.params?.['featureId'] ?? '')
-    const feature = part.dto.features?.find((f) => f.id === featureId)
-    return t.insideFeature(feature?.name ?? featureId)
+    return t.insideFeature(itemName(part.dto, featureId))
   }
   return t.refused(ERROR_CODES[error.code]?.userMessage ?? error.message)
 }
@@ -406,7 +405,7 @@ export function featureRemoveBlocked(
   if (typeof reference !== 'string') return undefined
   const users = [...new Set(issues.map((i) => String(i.params?.['operationId'] ?? '')))]
     .filter((id) => id.length > 0)
-    .map((id) => part.dto.operations.find((o) => o.id === id)?.name ?? id)
+    .map((id) => itemName(part.dto, id))
   return designMessages.features.referenced(
     surfaceLabel(part.dto, surfaceOfReference(reference)),
     users,

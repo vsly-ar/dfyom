@@ -429,7 +429,7 @@ describe('design mode', () => {
       // over the gap above the facing the indicator turns red and says why, before the drop
       const pocket = rowOf(/^Pocket 1/)
       dragTo(gripOf(pocket), 35, true)
-      const why = 'Not moved: Pocket 1 uses facing1.floor, which has to come before it.'
+      const why = 'Not moved: Pocket 1 uses Facing 1 floor, which has to come before it.'
       expect(within(navigator()).getByText(why)).toBeInTheDocument()
       const facingItem = rowOf(/^Facing 1/).closest('[data-reorder-item]')!
       expect(facingItem).toHaveAttribute('data-drop', 'before')
@@ -526,9 +526,7 @@ describe('design mode', () => {
     const { user, part, addFromMenu } = await renderDesign()
     await user.click(await within(navigator()).findByRole('button', { name: 'Add facing' }))
     await within(inspector()).findByRole('heading', { name: 'Facing 1' })
-    expect(within(inspector()).getByRole('combobox', { name: 'On' })).toHaveTextContent(
-      'Stock top · stock.top',
-    )
+    expect(within(inspector()).getByRole('combobox', { name: 'On' })).toHaveTextContent('Stock top')
     await addFromMenu('Profile')
     await within(inspector()).findByRole('heading', { name: 'Profile 1' })
     const on = within(inspector()).getByRole('combobox', { name: 'On' })
@@ -536,12 +534,12 @@ describe('design mode', () => {
     await user.keyboard('{Enter}')
     const options = within(await screen.findByRole('listbox')).getAllByRole('option')
     expect(options.map((o) => o.textContent)).toEqual([
-      'Stock top · stock.top',
-      'Stock bottom · stock.bottom',
-      'Stock front side · stock.side[0]',
-      'Stock right side · stock.side[1]',
-      'Stock back side · stock.side[2]',
-      'Stock left side · stock.side[3]',
+      'Stock top',
+      'Stock bottom',
+      'Stock front side',
+      'Stock right side',
+      'Stock back side',
+      'Stock left side',
     ])
     await user.click(options[1]!)
     await waitFor(() => expect(part().operations[1]).toMatchObject({ on: 'stock.bottom' }))

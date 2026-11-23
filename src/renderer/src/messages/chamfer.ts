@@ -7,8 +7,11 @@ export const chamferMessages = {
   edgeOption: (name: string, diameter: string) => `${name} · Ø ${diameter}`,
   pickEdge: 'Pick the edge in the viewport',
   pickEdgeField: 'Edge',
-  /** The edge operation is gone or not round any more (the command refuses such an edge). */
-  edgeMissing: (id: string) => `${id} (not a drilling, circular pocket or circular opening)`,
+  /**
+   * The edge operation is gone or not round any more (the command refuses such an edge): its name,
+   * never its id (DF43; "Unknown operation" when gone).
+   */
+  edgeMissing: (name: string) => `${name} (not a drilling, circular pocket or circular opening)`,
   /** D45: the chamfer's size is its width at the face ("1.5 × 45°"); depth is the alternative. */
   width: 'Width',
   angle: 'Angle',

@@ -33,7 +33,7 @@ import { TOOL_TYPE_ICON } from '../../library/toolTypeIcon'
 import { Field, FieldIcon, Icon, Select, type FieldMessage, type SelectOption } from '../../ui'
 import { chamferDiameter } from './chamfer-view'
 import styles from './Design.module.css'
-import { pendingApply, quantityAt, type DesignPart } from './model'
+import { dfmNames, pendingApply, quantityAt, type DesignPart } from './model'
 import { useCommand } from './useDesign'
 
 const t = designMessages.tool
@@ -459,7 +459,6 @@ export function ToolField({
     onApply: () => setAdding(true),
   }
 
-  const name = (id: string) => part.dto.operations.find((o) => o.id === id)?.name ?? id
   const messages: FieldMessage[] = [
     ...(error === undefined
       ? []
@@ -468,7 +467,7 @@ export function ToolField({
       // v0.4 U4: no library tool fits the chamfer – shown here, its fix is "New tool…"
       .filter((w) => w.parameter === 'tool' || w.code === 'dfm.chamferNoTool')
       .map((w): FieldMessage => {
-        const text = dfmMessages.text(w, part.units, name)
+        const text = dfmMessages.text(w, part.units, dfmNames(part.dto))
         return pendingApply(w)
           ? {
               id: w.code,

@@ -9,10 +9,12 @@ import {
   axisNames,
   designPart,
   failingOperation,
+  itemName,
   onChoices,
   referenceChoices,
   roundLength,
   shapeKindArgs,
+  surfaceLabel,
   updateArgs,
 } from './model'
 import { anchorPoint, frameAxes, markerPoint, operationOutline, shapeLoop } from './outline'
@@ -120,6 +122,25 @@ describe('design model', () => {
       'stock.side[2].y',
       'stock.side[3].x',
     ])
+    // labels never carry an id (DF43); two operations with one name are told apart by position
+    const twins = {
+      ...part.dto,
+      operations: part.dto.operations.map((o) =>
+        o.id === 'pocket1' ? { ...o, name: 'Facing 1' } : o,
+      ),
+    }
+    const labels = onChoices(twins, part.table!, 2, 'drilling').map((c) => c.label)
+    expect(labels.slice(0, 3)).toEqual([
+      'Stock top',
+      'Facing 1 floor (operation 1)',
+      'Facing 1 floor (operation 2)',
+    ])
+    expect(referenceChoices(twins, part.table!, 2).map((c) => c.label)).toContain(
+      'Facing 1 floor (operation 2)',
+    )
+    for (const label of labels) expect(label).not.toMatch(/stock\.|facing1|pocket1/)
+    expect(surfaceLabel(part.dto, 'gone1.floor')).toBe('Unknown operation floor')
+    expect(itemName(part.dto, 'hole9')).toBe('Unknown operation')
     expect(axisNames('+z')).toEqual({ u: 'X', v: 'Y' })
     expect(axisNames('+x')).toEqual({ u: 'u', v: 'v' })
   })

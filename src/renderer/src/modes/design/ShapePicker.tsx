@@ -18,7 +18,7 @@ import { useRegion2d } from '../../shell/ShellContext'
 import { Icon, Button, Field, Select, type FieldMessage } from '../../ui'
 import { chainPath, fitView, unplacePoint } from '../../viewport/flat-view'
 import styles from './Design.module.css'
-import { quantityOf, updateArgs } from './model'
+import { dfmNames, quantityOf, updateArgs } from './model'
 import {
   cornerPoints,
   isCornerWarning,
@@ -237,7 +237,7 @@ export function ShapePicker({
       .map((w, i): FieldMessage => {
         const corner = cornerFix(w)
         const fix = corner?.fix
-        const base = dfmMessages.text(w, ctx.units, (id) => id)
+        const base = dfmMessages.text(w, ctx.units, dfmNames(ctx.part.dto))
         const noFix =
           isCornerWarning(w) && corner === undefined && shape.kind === 'named' && !ctx.readOnly
         return {

@@ -68,6 +68,7 @@ import {
   referenceChoices,
   surfaceDirection,
   type DesignPart,
+  dfmNames,
 } from './model'
 import { useCommand, useDesignSelection, type DesignWarnings } from './useDesign'
 
@@ -275,11 +276,10 @@ export function HoleInspector({
             },
           }
         const source = dfmMessages.suggestionSource(w, units)
-        const name = (id: string) => part.dto.operations.find((o) => o.id === id)?.name ?? id
         return {
           id: `${w.code}:${w.operation}:${path}`,
           severity: dfmMessages.tier(w),
-          text: dfmMessages.text(w, units, name),
+          text: dfmMessages.text(w, units, dfmNames(part.dto)),
           ...(source !== undefined && w.suggestion !== undefined && FIXABLE_FIELDS.has(path)
             ? {
                 fix: {
@@ -356,7 +356,7 @@ export function HoleInspector({
         <Select
           options={ons.map((c) => ({
             value: c.id,
-            label: t.surface(c.id, c.label),
+            label: c.label,
             group: c.group,
           }))}
           value={hole.on}

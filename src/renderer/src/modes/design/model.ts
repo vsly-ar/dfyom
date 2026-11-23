@@ -26,6 +26,7 @@ import { Quantity } from '../../../../core/quantity/quantity'
 import type { QuantityDTO } from '../../../../core/quantity/quantity.dto'
 import type { UnitId } from '../../../../core/quantity/units'
 import { designMessages as m } from '../../messages/design'
+import type { DfmNames } from '../../messages/dfm'
 
 export interface DesignPart {
   readonly doc: ProjectDoc
@@ -271,18 +272,37 @@ export interface SurfaceChoice {
   readonly group: string
 }
 
-/** Human name of a surface id from the part's operation names. */
+/**
+ * The readable name of an operation or feature id ("Pocket 1", "Hole 2", "Stock"); never the id
+ * (ui.md § Selection and picking: visible text shows no internal ids). An id the part no longer
+ * has (a stale finding) reads "Unknown operation".
+ */
+export function itemName(part: PartDTO, id: string): string {
+  if (id === 'stock') return m.stockName
+  return (
+    part.operations.find((o) => o.id === id)?.name ??
+    part.features?.find((f) => f.id === id)?.name ??
+    m.unknownOperation
+  )
+}
+
+/** The readable names a DFM finding's text uses for the ids in its params (DF43). */
+export const dfmNames = (part: PartDTO): DfmNames => ({
+  item: (id) => itemName(part, id),
+  surface: (id) => surfaceLabel(part, id),
+})
+
+/** Human name of a surface id from the part's operation names ("Pocket 1 floor", "Stock top"). */
 export function surfaceLabel(part: PartDTO, id: string): string {
   const dot = id.indexOf('.')
-  const owner = id.slice(0, dot)
-  const role = id.slice(dot + 1)
+  const owner = dot < 0 ? id : id.slice(0, dot)
+  const role = dot < 0 ? '' : id.slice(dot + 1)
   const tab = /^tab\[(\d+)\]\.top$/.exec(role)
   const roleText = tab
     ? m.surfaceRoles.tabTop(Number(tab[1]))
-    : (((m.surfaceRoles as Record<string, unknown>)[role] as string | undefined) ?? role)
-  const name =
-    owner === 'stock' ? m.stockName : (part.operations.find((o) => o.id === owner)?.name ?? owner)
-  return m.surfaceLabel(name, roleText)
+    : (((m.surfaceRoles as Record<string, unknown>)[role] as string | undefined) ??
+      m.surfaceRoles.unknown)
+  return m.surfaceLabel(itemName(part, owner), roleText)
 }
 
 const choice = (part: PartDTO, e: SurfaceEntry): SurfaceChoice => ({
@@ -291,6 +311,26 @@ const choice = (part: PartDTO, e: SurfaceEntry): SurfaceChoice => ({
   direction: e.direction,
   group: m.inspector.directions[e.direction],
 })
+
+const ownerOfSurface = (id: string): string => id.split('.')[0] ?? id
+
+/**
+ * Two surfaces of operations that share a name read the same: each such label gets its owner's
+ * place in the design order ("Pocket floor (operation 3)"), never the id (DF43).
+ */
+function disambiguate<T extends { readonly label: string }>(
+  part: PartDTO,
+  items: readonly T[],
+  surface: (item: T) => string,
+): T[] {
+  const counts = new Map<string, number>()
+  for (const c of items) counts.set(c.label, (counts.get(c.label) ?? 0) + 1)
+  return items.map((c) => {
+    if ((counts.get(c.label) ?? 0) < 2) return c
+    const index = part.operations.findIndex((o) => o.id === ownerOfSurface(surface(c)))
+    return index < 0 ? c : { ...c, label: m.surfaceAt(c.label, index + 1) }
+  })
+}
 
 const byDirection = (a: SurfaceChoice, b: SurfaceChoice) =>
   DIRECTIONS.indexOf(a.direction) - DIRECTIONS.indexOf(b.direction)
@@ -308,11 +348,12 @@ export function onChoices(
   kind: OperationKind,
 ): SurfaceChoice[] {
   const stockOnly = kind === 'facing' || kind === 'profile'
-  return table
+  const choices = table
     .before(index)
     .filter((e) => (stockOnly ? STOCK_FACES.includes(e.id) : e.onTarget))
     .map((e) => choice(part, e))
     .toSorted(byDirection)
+  return disambiguate(part, choices, (c) => c.id)
 }
 
 export interface ReferenceChoice {
@@ -328,10 +369,11 @@ export function referenceChoices(
   table: SurfaceTable,
   index: number,
 ): ReferenceChoice[] {
-  return table
+  const choices = table
     .before(index)
     .toSorted((a, b) => DIRECTIONS.indexOf(a.direction) - DIRECTIONS.indexOf(b.direction))
     .map((e) => ({ id: coordinateName(e), surface: e.id, label: surfaceLabel(part, e.id) }))
+  return disambiguate(part, choices, (c) => c.surface)
 }
 
 /** The direction of a surface (the stock top when unknown). */

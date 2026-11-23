@@ -389,6 +389,8 @@ export const designMessages = {
     floorRadius: 'Floor fillet radius',
     /** A facing's recommended depth (DF4): "0.48 mm, down to the top of Enclosure". */
     facingToReference: (depth: string, reference: string) => `${depth}, down to ${reference}`,
+    /** A reference model without a name in `facingToReference` (never its id, DF43). */
+    referenceModel: 'the reference model',
     on: 'On',
     /** `on` dropdown groups, in the order of ui.md#design-and-plan-controls-v02. */
     directions: {
@@ -411,7 +413,6 @@ export const designMessages = {
     tabsCount: 'Tab count',
     tabsWidth: 'Tab width',
     tabsThickness: 'Tab thickness',
-    surface: (id: string, label: string) => `${label} · ${id}`,
     commandFailed: 'The change was not applied.',
     /** The shape picker and placement of a pocket or profile (task U2, ui.md § Shapes v0.3). */
     picker: {
@@ -423,6 +424,7 @@ export const designMessages = {
       editShape: 'Edit shape',
       convert: 'Convert to shape',
       converted: (name: string) => `Converted to ${name}`,
+      convertedUnnamed: 'Converted to a shape',
       rotation: 'Rotation',
       rotationNone: '0°',
       mirror: 'Mirror (flip x)',
@@ -454,8 +456,12 @@ export const designMessages = {
     },
   },
 
-  /** Human names of surfaces (ui.md#selection-and-picking: id plus operation name). */
+  /** Human names of surfaces (ui.md#selection-and-picking: operation name and role, never the id). */
   surfaceLabel: (operationName: string, role: string) => `${operationName} ${role}`,
+  /** Two surfaces that would read the same, told apart by their operation's place (DF43). */
+  surfaceAt: (label: string, position: number) => `${label} (operation ${position})`,
+  /** An operation id the part no longer has (a stale finding); the id itself is never shown. */
+  unknownOperation: 'Unknown operation',
   surfaceRoles: {
     top: 'top',
     bottom: 'bottom',
@@ -465,6 +471,7 @@ export const designMessages = {
     'side[1]': 'right side',
     'side[2]': 'back side',
     'side[3]': 'left side',
+    unknown: 'surface',
   },
 
   /**

@@ -44,15 +44,30 @@ const list = (items: readonly string[]): string =>
     ? (items[0] ?? '')
     : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
 
+/**
+ * A retained region of `dfm.retainedRemoved` by name ("the floor fillet", "tab 2"), never its key
+ * (`floorFillet`, `tab[1]`; src/core/geometry/operations.ts) (DF43).
+ */
+const regionName = (key: string): string => {
+  const tab = /^tab\[(\d+)\]$/.exec(key)
+  if (tab) return `tab ${Number(tab[1]) + 1}`
+  return key === 'floorFillet' ? 'the floor fillet' : 'a retained region'
+}
+
 /** A Clones warning's instance numbers: "3, 7 and 12". */
 const numbers = (p: DfmWarning['params']): string =>
   list(((p['numbers'] as readonly number[] | undefined) ?? []).map(String))
 
-type Render = (
-  p: DfmWarning['params'],
-  L: (mm: unknown) => string,
-  name: (id: string) => string,
-) => string
+/**
+ * Readable names of the ids a finding's params carry (DF43: visible text never shows an id):
+ * `item` an operation or feature id, `surface` a surface id ("Pocket 1 floor").
+ */
+export interface DfmNames {
+  readonly item: (id: string) => string
+  readonly surface: (id: string) => string
+}
+
+type Render = (p: DfmWarning['params'], L: (mm: unknown) => string, name: DfmNames) => string
 
 const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
   'dfm.loosePiece': (p) =>
@@ -60,12 +75,12 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
       ? 'An offcut is not held and comes loose. Add tabs or make them thicker.'
       : 'A piece of the part is not held and comes loose. Check the cut that separates it.',
   'dfm.retainedRemoved': (p, _L, name) => {
-    const by = typeof p['by'] === 'string' ? name(p['by']) : 'Another operation'
-    const regions = (p['regions'] as readonly string[] | undefined) ?? []
+    const by = typeof p['by'] === 'string' ? name.item(p['by']) : 'Another operation'
+    const regions = ((p['regions'] as readonly string[] | undefined) ?? []).map(regionName)
     return `${by} cuts away ${regions.length > 0 ? list(regions) : 'retained regions'} of this operation. Move one of them.`
   },
-  'dfm.surfaceMissing': (p) =>
-    `It starts from or refers to ${String(p['surface'])}, which the part no longer has. Pick another surface.`,
+  'dfm.surfaceMissing': (p, _L, name) =>
+    `It starts from or refers to ${typeof p['surface'] === 'string' ? name.surface(p['surface']) : 'a surface'}, which the part no longer has. Pick another surface.`,
   'dfm.facingDeep': (p, L) =>
     `A facing depth of ${L(p['depth'])} removes a lot of material. Check the stock thickness.`,
   'dfm.pocketNoToolFits': (p, L) =>
@@ -140,10 +155,12 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
   'dfm.clonesHeavy': (p) =>
     `${num(p['operations'])} cloned operations: the part updates more slowly.`,
   // v0.4 chamfer (design-v0.4.md § Chamfer operation)
-  'dfm.chamferTooDeep': (p, L) =>
-    p['floor'] === 1
-      ? `The chamfer is ${L(p['depth'])} deep and cuts through the ${L(p['edgeDepth'])} floor above ${String(p['edgeOf'])}.`
-      : `The chamfer is ${L(p['depth'])} deep, deeper than ${String(p['edgeOf'])} (${L(p['edgeDepth'])}).`,
+  'dfm.chamferTooDeep': (p, L, name) => {
+    const edge = name.item(String(p['edgeOf']))
+    return p['floor'] === 1
+      ? `The chamfer is ${L(p['depth'])} deep and cuts through the ${L(p['edgeDepth'])} floor above ${edge}.`
+      : `The chamfer is ${L(p['depth'])} deep, deeper than ${edge} (${L(p['edgeDepth'])}).`
+  },
   'dfm.chamferNoTool': (p, L) =>
     p['stepped'] === 1
       ? `The library has no flat end mill smaller than Ø${L(p['edgeDiameter'])} for the stepped countersink.`
@@ -222,7 +239,7 @@ export type WarningTier = 'soft' | 'hard' | 'error'
 
 export const dfmMessages = {
   /** The warning's sentence in the project unit system (fallback: the core's English text). */
-  text(w: DfmWarning, units: UnitSystem, name: (operationId: string) => string): string {
+  text(w: DfmWarning, units: UnitSystem, name: DfmNames): string {
     const render = TEXT[w.code]
     const L = (mm: unknown) => {
       const n = num(mm)
