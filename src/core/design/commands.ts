@@ -179,7 +179,11 @@ const profileParams = {
   slotWidth: Src.optional().describe(
     'Default 6 mm / 1/4"; when no library tool fits that, the Ø of the narrowest wider library flat end mill that fits',
   ),
-  depth: Src.nullable().optional().describe('on only: blind groove depth; null = through'),
+  depth: Src.nullable()
+    .optional()
+    .describe(
+      'Blind depth below on: a groove (side on) or a step/rebate (outside/inside); null = through',
+    ),
   tabs: TabsArg.optional(),
 }
 

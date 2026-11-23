@@ -621,7 +621,6 @@ describe('generateRegionProfile: errors and abort', () => {
       code: 'model.invariant',
       rules: ['openNeedsOn'],
     })
-    expect(rules(input(bracket(), { through: false })).rules).toContain('onlyOn')
     expect(
       rules(
         input(hook(), {
@@ -811,6 +810,34 @@ describe('coverage oracle (heightmap)', () => {
     expect(cov.leftover).toBeLessThan(0.05)
     expect(cov.rest).toBeLessThan(expectedRest + 0.5)
   })
+
+  it(
+    'a step (blind outside and inside, DF53): no gouge, no leftover, stops at its depth',
+    {
+      timeout: 60_000,
+    },
+    () => {
+      for (const side of ['outside', 'inside'] as const) {
+        const inp = input(bracket(20, 20), {
+          side,
+          through: false,
+          depth: 2,
+          slotWidth: 9,
+          stepdown: 1,
+        })
+        const { cov, expectedRest, rules } = cover(inp, { length: 85, width: 75 }, 0.1)
+        expect(rules).toEqual([])
+        expect(cov.gouge).toBe(0)
+        expect(cov.belowFloor).toBe(0)
+        expect(cov.leftover).toBeLessThan(0.05)
+        expect(cov.rest).toBeLessThan(expectedRest + 0.5)
+        const tp = generateRegionProfile(inp, port).unwrap()
+        const zs = walk(tp).map((s) => s.move.to[2])
+        // no breakthrough: the step's floor is the lowest point
+        expect(Math.min(...zs)).toBeCloseTo(-2, 9)
+      }
+    },
+  )
 
   it(
     'bracket outside and on, wide slots, with tabs: no gouge, no leftover',

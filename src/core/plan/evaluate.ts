@@ -192,6 +192,7 @@ export function evaluateOperation(
       {
         ops,
         part: plan.part,
+        stock: plan.stock,
         tool: t,
         strategy,
         helixSet: op.strategy.helixDiameter !== undefined,

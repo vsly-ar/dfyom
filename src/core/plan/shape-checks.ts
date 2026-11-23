@@ -9,9 +9,17 @@
 import { isGeneralShape, type Operation, type Part } from '../design/operation'
 import { placeShape } from '../design/placement'
 import type { Region2dPort } from '../geometry/2d/port'
-import type { OperationGeometry } from '../geometry/model'
-import { FIT_SLACK, shapeMeasure, type ShapeMeasure } from '../geometry/shape-measure'
+import { localStock } from '../geometry/face'
+import type { OperationGeometry, Vec2 } from '../geometry/model'
+import {
+  FIT_SLACK,
+  shapeMeasure,
+  smallestWallCorner,
+  type ShapeMeasure,
+} from '../geometry/shape-measure'
+import type { Stock } from '../library/stock'
 import type { Tool } from '../library/tool'
+import { surfaceDirection } from './order'
 import type { PlanWarning } from './checks'
 import type { ResolvedStrategy } from './strategy'
 
@@ -33,7 +41,7 @@ export function generalShapeMeasure(
   op: Operation,
   part: Part,
   port: Region2dPort,
-): ShapeMeasure | undefined {
+): { readonly measure: ShapeMeasure; readonly centre: Vec2 } | undefined {
   if (op.kind !== 'pocket' && op.kind !== 'profile') return undefined
   if (!isGeneralShape(op.shape)) return undefined
   if (op.kind === 'profile' && op.side === 'on') return undefined
@@ -59,12 +67,15 @@ export function generalShapeMeasure(
           slotWidth: op.slotWidth.canonical,
           tabs: { count: 0, width: 0, thickness: 0 },
         }
-  return shapeMeasure(port, geometry)
+  const measure = shapeMeasure(port, geometry)
+  return measure === undefined ? undefined : { measure, centre }
 }
 
 export interface ShapeCheckInput {
   readonly ops: readonly Operation[]
   readonly part: Part
+  /** The plan's stock: corners whose leftover lies beyond it do not count (DF53). */
+  readonly stock?: Stock
   readonly tool: Tool
   readonly strategy: ResolvedStrategy
   /** The plan operation sets `helixDiameter` itself (the v0.1 helix check runs only then). */
@@ -80,9 +91,11 @@ export function shapeToolFindings(i: ShapeCheckInput, port: Region2dPort): Shape
   const out: ShapeFinding[] = []
   const D = i.tool.diameter.canonical
   const R = D / 2
+  const byId = new Map(i.part.operations.map((o) => [o.id, o]))
   for (const op of i.ops) {
-    const m = generalShapeMeasure(op, i.part, port)
-    if (m === undefined) continue
+    const placed = generalShapeMeasure(op, i.part, port)
+    if (placed === undefined) continue
+    const m = placed.measure
     const opening = m.side === 'inside'
     if (m.side !== 'outside' && !m.fits(R - FIT_SLACK)) {
       const width = m.narrowest()
@@ -95,13 +108,22 @@ export function shapeToolFindings(i: ShapeCheckInput, port: Region2dPort): Shape
       })
       continue
     }
-    // rotated rectangles keep the v0.1 corner rule (an error); named shapes warn
-    if (
-      'shape' in op &&
-      op.shape.kind === 'named' &&
-      m.smallestCornerRadius < R - CORNER_TOLERANCE
-    ) {
-      const corner = m.smallestCornerRadius
+    // rotated rectangles keep the v0.1 corner rule (an error); named shapes warn; corners whose
+    // leftover lies beyond the stock do not count (DF53)
+    const corner =
+      i.stock === undefined || !('on' in op)
+        ? m.smallestCornerRadius
+        : smallestWallCorner(
+            m,
+            placed.centre,
+            localStock(surfaceDirection(op.on, byId), {
+              length: i.stock.length.canonical,
+              width: i.stock.width.canonical,
+              thickness: i.stock.thickness.canonical,
+            }),
+            R,
+          )
+    if ('shape' in op && op.shape.kind === 'named' && corner < R - CORNER_TOLERANCE) {
       out.push({
         severity: 'warning',
         field: 'tool',

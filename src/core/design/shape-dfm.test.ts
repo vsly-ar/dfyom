@@ -154,9 +154,83 @@ describe('the auto tool choice for shapes', () => {
     })) as { warnings: DfmWarning[] }
     expect(r.warnings.map((w) => w.code)).toEqual([
       'dfm.shapeOutsideFace',
-      ...Array<string>(4).fill('dfm.cornerSharp'),
+      // the two corners 5 mm beyond the stock's right side leave material only in air (DF53)
+      ...Array<string>(2).fill('dfm.cornerSharp'),
       // sharp corners: no tool fits at all (DF52)
       'dfm.noFittingTool',
     ])
+    expect(r.warnings[0]).toMatchObject({ severity: 'info', params: { by: 5 } })
+  })
+})
+
+describe('ring pockets round the stock edge (DF53)', () => {
+  /** A sharp rectangle of `outer` minus a rounded r4 rectangle of `inner`, both centred. */
+  const ring = (outer: [string, string], inner: [string, string]) => [
+    {
+      kind: 'rectangle',
+      op: 'add',
+      center: ['0', '0'],
+      length: outer[0],
+      width: outer[1],
+      cornerRadius: '0',
+    },
+    {
+      kind: 'rectangle',
+      op: 'subtract',
+      center: ['0', '0'],
+      length: inner[0],
+      width: inner[1],
+      cornerRadius: '4',
+    },
+  ]
+  const ringPocket = async (outer: [string, string], inner: [string, string]) => {
+    const s = await setup()
+    await s.run('design.shape.add', { partId: s.partId, items: ring(outer, inner) })
+    await s.run('design.pocket.add', {
+      partId: s.partId,
+      shape: { kind: 'named', shapeId: 'shape2', center: ['50', '30'] },
+      depth: '2',
+    })
+    await s.run('project.apply', {})
+    return s
+  }
+
+  it('corners beyond the stock are open: no corner warning, the margin is no wall', async () => {
+    // outer corners 5 mm beyond the stock, a 4 mm stock margin (9 mm of region) to the inner loop
+    const s = await ringPocket(['110', '70'], ['92', '52'])
+    const codes = s.warnings().map((w) => w.code)
+    expect(codes).not.toContain('dfm.cornerSharp')
+    expect(codes).not.toContain('dfm.noFittingTool')
+    expect(codes).not.toContain('dfm.restMaterial')
+    expect(s.warnings().find((w) => w.code === 'dfm.shapeOutsideFace')).toMatchObject({
+      severity: 'info',
+    })
+    // the 6 mm tool fits the 9 mm of region and leaves nothing: ranked first and chosen
+    const c = expectOk(
+      s.d.query('design.tool.candidates', { partId: s.partId, operationId: 'pocket1' }, ui),
+    ).value as { fitting: { toolLibraryItemId: string; reasons: string[] }[] }
+    expect(c.fitting.map((f) => f.toolLibraryItemId)).toEqual([s.tools['6'], s.tools['3']])
+    expect(c.fitting[0]!.reasons).not.toContain('leaves rest material')
+    const snapshot = (s.op('pocket1').tool as { snapshotId: string }).snapshotId
+    expect(JSON.stringify(s.d.doc.snapshots[snapshot])).toContain('6 mm flat')
+  })
+
+  it('a corner whose leftover reaches into the stock stays a wall corner', async () => {
+    // corners 1 mm beyond each side: √2 mm away, under the smallest tool's radius 1.5
+    const s = await ringPocket(['102', '62'], ['80', '40'])
+    expect(s.warnings().filter((w) => w.code === 'dfm.cornerSharp')).toHaveLength(4)
+  })
+
+  it('a shape wholly outside the face warns that it cuts nothing', async () => {
+    const s = await setup()
+    const r = (await s.run('design.pocket.add', {
+      partId: s.partId,
+      shape: { kind: 'named', shapeId: 'shape1', center: ['150', '30'] },
+      depth: '2',
+    })) as { warnings: DfmWarning[] }
+    expect(r.warnings.find((w) => w.code === 'dfm.shapeOutsideFace')).toMatchObject({
+      severity: 'warning',
+      params: { wholly: true },
+    })
   })
 })

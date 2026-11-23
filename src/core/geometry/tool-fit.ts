@@ -18,7 +18,7 @@ import {
   type StockGeometry,
 } from './model'
 import { inradius } from './operations'
-import { FIT_SLACK, type ShapeMeasure } from './shape-measure'
+import { FIT_SLACK, smallestWallCorner, type ShapeMeasure } from './shape-measure'
 
 /** Sizes compare within this (mm), as the DFM tool rules (`TOOL_MATCH_TOLERANCE` in dfm.ts). */
 const TOL = 0.01
@@ -110,9 +110,13 @@ export function toolFit(
           need: { relation: 'atLeast', value: dc },
           values: { toolDiameter: dc, size, feature },
         }
-  // a shape's smallest inside corner of the cut (0: sharp); none (Infinity) fits every tool
-  const shapeCorner = (m: ShapeMeasure): ToolUnfit | undefined =>
-    Number.isFinite(m.smallestCornerRadius) ? corner(m.smallestCornerRadius) : undefined
+  // a shape's smallest inside corner of the cut (0: sharp); none (Infinity) fits every tool;
+  // corners whose leftover lies beyond the stock do not count (DF53)
+  const shapeCorner = (m: ShapeMeasure): ToolUnfit | undefined => {
+    if (!('shape' in op)) return undefined
+    const r = smallestWallCorner(m, op.shape.center, stock, dc / 2)
+    return Number.isFinite(r) ? corner(r) : undefined
+  }
   let unfit: ToolUnfit | undefined
   switch (op.kind) {
     case 'facing':

@@ -299,9 +299,10 @@ export function operationIssues(
       )
       const blind = op.depth.isSome()
       if (blind) {
+        // any side may stop at a depth: a blind groove (`on`) or a step (DF53,
+        // docs/modes/design-v0.3.md#steps-blind-side-profiles-df53)
         const depth = op.depth.unwrap()
-        c.check(on, 'depth', 'onlyOn', 'only a profile on can stop at a depth')
-        if (on && c.positive(depth, 'depth'))
+        if (c.positive(depth, 'depth'))
           c.check(
             depth.exact.compare(T.exact) < 0,
             'depth',
