@@ -63,7 +63,15 @@ export interface PendingState {
    * bound in this window), keyed `partId:operationId`.
    */
   readonly toolChanges: ReadonlyMap<string, ToolChangeView>
+  /**
+   * The last Apply (any source) that re-chose tools because of the library (reasons
+   * `libraryFits`, `libraryRemoved`; X2 F6), for Design's toast; `seq` counts them.
+   */
+  readonly rechosen: { readonly seq: number; readonly changes: readonly ToolChangeView[] } | null
 }
+
+/** Tool-change reasons that come from the library, not from an edit of the operation (X2 F6). */
+export const LIBRARY_REASONS: ReadonlySet<string> = new Set(['libraryFits', 'libraryRemoved'])
 
 /** Key of `PendingState.toolChanges`. */
 export const toolChangeKey = (partId: string, operationId: string): string =>
@@ -94,6 +102,7 @@ const EMPTY: PendingState = {
   appliedBy: null,
   version: 0,
   toolChanges: new Map(),
+  rechosen: null,
 }
 
 /** Another source's `project.apply` that applied something (not a window's own). */
@@ -210,15 +219,19 @@ export function createPending(
         const changes = toolChangesOf(e)
         if (changes.length > 0) {
           const next = new Map(state.toolChanges)
-          for (const c of changes) {
+          const views = changes.map((c): ToolChangeView => {
             const fromName =
               c.from?.kind === 'specific' ? toolNames.get(c.from.snapshotId) : undefined
-            next.set(toolChangeKey(c.partId, c.operationId), {
-              ...c,
-              ...(fromName === undefined ? {} : { fromName }),
-            })
-          }
-          set({ toolChanges: next })
+            return { ...c, ...(fromName === undefined ? {} : { fromName }) }
+          })
+          for (const v of views) next.set(toolChangeKey(v.partId, v.operationId), v)
+          const library = views.filter((v) => LIBRARY_REASONS.has(v.reason))
+          set({
+            toolChanges: next,
+            ...(library.length > 0
+              ? { rechosen: { seq: (state.rechosen?.seq ?? 0) + 1, changes: library } }
+              : {}),
+          })
         }
         const by = appliedByOther(e)
         if (by !== null) {

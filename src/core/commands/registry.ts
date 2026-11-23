@@ -9,7 +9,7 @@ import {
   DESIGN_TOOL_COMMANDS,
   DESIGN_TOOL_QUERIES,
   designToolAutoChoice,
-  toolScan,
+  toolRechoicePending,
 } from '../design/tool-commands'
 import { REFERENCE_COMMANDS, REFERENCE_QUERIES } from '../design/reference-commands'
 import { SHAPE_COMMANDS, SHAPE_QUERIES } from '../design/shape-commands'
@@ -132,15 +132,16 @@ export const APPLY_HOOKS: readonly ApplyHook[] = [
 /** Apply jobs of the app (docs/architecture/apply.md#apply-jobs): toolpaths of kept-current plans. */
 export const APPLY_JOBS: readonly ApplyJob[] = [toolpathApplyJob]
 
-/** Pending keys beyond the design diff (docs/architecture/apply.md#what-is-pending). */
-export const PENDING_SOURCES: readonly PendingSource[] = PLAN_PENDING_SOURCES
-
 /**
- * The consistency scan on open (docs/architecture/apply.md#opening-and-recovery): unfit or absent
- * auto tools. `draft` plans that do not follow their part and changed library copies of `draft`
- * plans are pending through `PENDING_SOURCES` (derived on every read), so they need no scan.
+ * Pending keys beyond the design diff (docs/architecture/apply.md#what-is-pending): the tool
+ * re-choice after a library change or on open (X2 F6), then the plan ones. They are derived on
+ * every read, so opening needs no consistency scan of its own (the registry's `openScan` stays
+ * for later checks).
  */
-export const OPEN_SCAN: OpenScan = toolScan
+export const PENDING_SOURCES: readonly PendingSource[] = [
+  toolRechoicePending,
+  ...PLAN_PENDING_SOURCES,
+]
 
 /** `ApplyOutcome.warnings`: `design.warning.list` of each affected part (parts it cannot read are left out). */
 export const designApplyWarnings: ApplyWarnings = (doc, partIds, ctx) => {
@@ -162,7 +163,6 @@ const APPLY_DEFS = {
   applyJobs: APPLY_JOBS,
   applyWarnings: designApplyWarnings,
   pendingSources: PENDING_SOURCES,
-  openScan: OPEN_SCAN,
 }
 
 export interface Registry {

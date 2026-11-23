@@ -153,6 +153,28 @@ describe('tool field', () => {
     await expectNoAxeViolations()
   })
 
+  it('X2 F6: a library tool added later is chosen on the next Apply, with a toast saying why', async () => {
+    const { group, combo, apply, addTool, shell } = await renderPocket()
+    await apply()
+    await waitFor(() => expect(combo()).toHaveTextContent('6 mm flat end mill'))
+    await addTool('Flat 5', '5')
+    shell.pending.refresh()
+    await waitFor(() => expect(within(group()).getByText('Chosen again on Apply.')).toBeVisible())
+    await apply()
+    await waitFor(() => expect(combo()).toHaveTextContent('Flat 5'))
+    expect(
+      await screen.findByText(
+        'Tool of Pocket 1 changed: a library tool fits now instead of the 6 mm flat end mill.',
+      ),
+    ).toBeInTheDocument()
+    expect(
+      within(group()).getByText(
+        'Chosen automatically: a library tool fits now instead of the 6 mm flat end mill.',
+      ),
+    ).toBeInTheDocument()
+    await expectNoAxeViolations()
+  })
+
   it('locks and unlocks as one undo step each; picking a library tool locks it', async () => {
     const { user, d, group, combo, lock, apply, op, addTool } = await renderPocket()
     await apply()
@@ -368,6 +390,15 @@ describe('tool field helpers', () => {
         doc,
       ),
     ).toBe('a library tool fits now instead of the 1 mm flat end mill')
+    // X2 F6: a library tool removed from the library gave way to another one
+    expect(
+      autoChangeReason(
+        change({ fromName: 'Flat 3', reason: 'libraryRemoved' }),
+        drilling,
+        'mm',
+        doc,
+      ),
+    ).toBe('the Flat 3 is no longer in the library')
   })
 
   it('counts the operation’s own pending changes and its part’s stock or addition', () => {
