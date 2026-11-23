@@ -119,17 +119,30 @@ export class Heightmap {
   /** Lower every cell the tool at `p` (tip) reaches. */
   stamp(tool: ToolpathTool, p: Vec3): void {
     const R = tool.diameter / 2
-    const i0 = Math.max(0, Math.floor((p[0] - R) / this.cell))
-    const i1 = Math.min(this.nx - 1, Math.ceil((p[0] + R) / this.cell))
-    const j0 = Math.max(0, Math.floor((p[1] - R) / this.cell))
-    const j1 = Math.min(this.ny - 1, Math.ceil((p[1] + R) / this.cell))
-    for (let i = i0; i <= i1; i++)
-      for (let j = j0; j <= j1; j++) {
-        const [x, y] = this.center(i, j)
-        const h = p[2] + toolSurface(tool, Math.sqrt((x - p[0]) ** 2 + (y - p[1]) ** 2))
-        const k = j * this.nx + i
-        if (h < this.z[k]!) this.z[k] = h
+    const { cell, nx, z } = this
+    const i0 = Math.max(0, Math.floor((p[0] - R) / cell))
+    const i1 = Math.min(nx - 1, Math.ceil((p[0] + R) / cell))
+    const j0 = Math.max(0, Math.floor((p[1] - R) / cell))
+    const j1 = Math.min(this.ny - 1, Math.ceil((p[1] + R) / cell))
+    // the same numbers as center() and toolSurface() cell by cell, without an array per cell and
+    // row by row in memory: sweeps stamp millions of cells (docs/conventions/testing.md, Load-stable tests)
+    // a flat end: toolSurface is 0 up to R + 1e-12 and Infinity beyond, so the cell takes the tip's Z
+    const flat = tool.type !== 'chamferMill' && tool.type !== 'drill' && tool.cornerRadius === 0
+    const reach = R + 1e-12
+    for (let j = j0; j <= j1; j++) {
+      const dy2 = ((j + 0.5) * cell - p[1]) ** 2
+      const row = j * nx
+      if (flat) {
+        for (let i = i0; i <= i1; i++)
+          if (Math.sqrt(((i + 0.5) * cell - p[0]) ** 2 + dy2) <= reach && p[2] < z[row + i]!)
+            z[row + i] = p[2]
+        continue
       }
+      for (let i = i0; i <= i1; i++) {
+        const h = p[2] + toolSurface(tool, Math.sqrt(((i + 0.5) * cell - p[0]) ** 2 + dy2))
+        if (h < z[row + i]!) z[row + i] = h
+      }
+    }
   }
 
   /** Sweep every feed move of a toolpath (rapids are checked separately: they never cut). */

@@ -138,9 +138,15 @@ describe('run commands', { timeout: 60_000 }, () => {
       if (job.phase === 'toolChange') {
         // touch off 1 mm lower; the new tool has the same length: Z keeps its offset
         const before = t.status().workZero
+        const zBefore = t.status().mpos[2]
         expectOk(await t.run('run.machine.jog', { by: [0, 0, -1], feed: 300 }))
-        await waitFor(() => t.status().state === 'Idle')
-        await sleep(20)
+        // the jog's ok comes before its motion: wait for a report of it done, not the Idle before it
+        expect(
+          await waitFor(
+            () =>
+              t.status().state === 'Idle' && Math.abs(t.status().mpos[2] - (zBefore - 1)) < 5e-4,
+          ),
+        ).toBe(true)
         const z = t.status().wpos[2]
         expect(z).toBeCloseTo(t.status().mpos[2] - before[2], 6)
         const set = expectOk(await t.run('run.workZero.set', { axes: ['z'], values: [0, 0, z] }))

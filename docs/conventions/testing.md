@@ -27,6 +27,16 @@ Status: draft · Principle: [principles.md §2](../principles.md#2-testability)
 - `npm run e2e` – builds the app (`electron-vite build`) and runs the Playwright-for-Electron tests ([app tests](#app-playwright-for-electron)); not part of `check`, CI runs it as its own job ([CI e2e job](#ci-e2e-job)). Run it after changes to main, preload, the renderer entry, workers or the build.
 - **CI** ([`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)) runs two jobs on every push and pull request to `main`, with Node from `.nvmrc`: `check` (`npm ci` + `npm run check`) and `e2e` (`npm run e2e` under a virtual display, [below](#ci-e2e-job)).
 
+## Load-stable tests
+
+`npm run check` and the hidden e2e suite must pass while the machine is busy (measured with ten `yes` CPU hogs on a 10-core Mac plus other work: load average 60–100). Under that load a test takes 3–6× as long as idle, with outliers of 20–30× for a few seconds, so a test that is only "fast enough" fails at random. Rules (hardening P1–P3):
+
+- **Find the race first.** A test that fails "under load" usually waits on a stale state or on wall time. Wait for the state the step produces, not for a state that was already true before it: after a jog, a report showing the jog's end position, not just `Idle` (`run/commands.test.ts`). No `sleep`; poll a condition (`waitFor`) or use fake timers (`FakeTimers`, `host.test.ts`). The run-job race found this way was a product bug (a stop during the start's checks was lost, [run-v0.1.md](../modes/run-v0.1.md#review-of-39)).
+- **Make oracles cheap, not timeouts long.** Test-only checks must not be quadratic: distances to many segments go through `segmentGrid` (`src/core/geometry/2d/testing/oracles.ts`, exact, used by the SVG import oracle and region coverage); the heightmap's `stamp` works row by row without an allocation per cell and has a flat-end fast path (same numbers); the docs lint computes each target's headings once. Several independent heavy cases are separate `it`s (`stepped-chamfer.test.ts`), so one budget covers one sweep.
+- **Timeouts** stay as in [Commands](#commands): only an intrinsically heavy test sets its own, with why and the measured time in a comment.
+- **e2e:** web-first assertions wait up to 15 s (`expect.timeout` in `playwright.config.ts`): many steps wait on UI state that follows main-process work (a library write, an evaluation), measured at over 5 s for a ≈ 0.2 s step under load. Waits stay on state, never on time.
+- **Reproduce** with `for i in $(seq 10); do yes > /dev/null & done` and `npm run check` (or several `npx vitest run --reporter=json --outputFile=…` at once to find the next weakest test); kill the hogs afterwards (`pkill yes`).
+
 ## End-to-end
 
 The [v0.1 exit criteria](../plans/v0.1.md#exit-criteria) as tests (task 3.11). **Headless (done):** `src/main/cli/exit-criteria.fixture.ts` holds the flow once, with an assertion per criterion; two transports run it against the bundled CLI (`node_modules/.cache`, built by the Vitest global setup) with a temp `--data-dir`:

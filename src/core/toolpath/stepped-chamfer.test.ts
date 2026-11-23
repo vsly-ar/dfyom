@@ -114,11 +114,17 @@ describe('generateChamfer, stepped (F7)', () => {
     await expect(render(tp)).toMatchFileSnapshot('__golden__/chamfer-stepped.txt')
   })
 
+  // one sweep per case (each its own test: three heightmap sweeps in one test took 5–6 s under load)
   it('terraces: corners on the cone, the cone cleared, at most one terrace past it', () => {
     expect(chamferTerraces(sink(), 1)).toMatchObject({ count: 2 })
     checkTerraces(stepped(sink(), 2.5))
-    // a stepdown that divides the cone unevenly, a smaller tool (several rings), 82°, conventional
+  })
+
+  it('terraces: a stepdown that divides the cone unevenly, a smaller tool (several rings)', () => {
     checkTerraces(stepped(sink({ stepdown: 0.4, onZ: -0.5 }), 1.8))
+  })
+
+  it('terraces: 82°, a wider hole and chamfer, conventional', () => {
     checkTerraces(
       stepped(sink({ edgeDiameter: 6.4, diameter: 14, angle: 82, stepdown: 1.2 }), 3.5, {
         direction: 'conventional',
