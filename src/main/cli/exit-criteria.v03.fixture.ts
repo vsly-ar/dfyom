@@ -505,7 +505,9 @@ export async function exitCriteriaV03Flow(call: Call, dir: string): Promise<Flow
     'Flat 6',
   ])
   // the only finding: the cavity's 0.25 mm fillet keeps the 12 mm tool's radius
-  const findings = (await ok<{ warnings: Finding[] }>('plan.warning.list', { planId })).value
+  const findings = (
+    await ok<{ warnings: Finding[] }>('plan.warning.list', { planId, detail: 'full' })
+  ).value
   expect(findings.warnings.map((f) => [f.severity, f.rule, f.params['operation']])).toEqual([
     ['warning', 'cornerRadius', pocket.operationId],
   ])

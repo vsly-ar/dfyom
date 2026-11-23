@@ -237,14 +237,20 @@ function contextOf(input: CuttingInput, data: readonly MaterialRow[]): Lookup {
   // a chamfer mill is treated as a flat end mill of its effective diameter at the depth (F10)
   const chamfer = engagement.kind === 'chamfer' ? chamferStep(tool, engagement.depth) : undefined
   const D = chamfer?.result ?? tool.diameter.canonical
-  // a chamfer's De below the smallest charted diameter: that chart's fz, scaled by De (fzScale)
-  const scaled = chamfer !== undefined && D > 0 && D < CHART_MIN_DIAMETER
-  const band = bandOf(row, scaled ? CHART_MIN_DIAMETER : D)
+  if (!isDrill && chamfer === undefined && D > 0 && D < MIN_END_MILL_DIAMETER)
+    return none(`end mills under ${MIN_END_MILL_DIAMETER} mm need entered values`, {
+      diameter: D,
+    })
+  // below the smallest charted diameter (a chamfer's De: 1/8"; an end mill: 1/16"), that chart's
+  // fz scaled by the diameter (fzScale; feeds-speeds.md#small-end-mills-hardening-df39)
+  const chartD = chamfer !== undefined ? CHART_MIN_DIAMETER : SMALL_CHART_DIAMETER
+  const scaled = !isDrill && D > 0 && D < chartD
+  const band = bandOf(row, scaled ? chartD : D)
   const chart = band === undefined ? undefined : isDrill ? band.fn : band.fz
   if (band === undefined || chart === undefined)
     return none(`no ${isDrill ? 'fn' : 'fz'} data for a ${D} mm tool`, { diameter: D })
-  const factor = D / CHART_MIN_DIAMETER
-  const fzScale = scaled ? { chart, factor } : undefined
+  const factor = D / chartD
+  const fzScale = scaled ? { chart, factor, chartDiameter: chartD } : undefined
   const range = fzScale === undefined ? chart : { min: chart.min * factor, max: chart.max * factor }
   const rigidity = input.machine.mapOr(DEFAULT_RIGIDITY, (m) => m.rigidity)
   const locked = input.locked ?? {}
@@ -270,6 +276,13 @@ function contextOf(input: CuttingInput, data: readonly MaterialRow[]): Lookup {
  * chip load × De / 3.175 (chip load proportional to the effective diameter).
  */
 export const CHART_MIN_DIAMETER = 3.175
+/**
+ * The smallest charted end-mill diameter (1/16", the ≤ 3 mm band's representative in the router
+ * rows): an end mill below it takes that chip load × D / 1.5875 (hardening DF39).
+ */
+export const SMALL_CHART_DIAMETER = 1.5875
+/** End mills below this diameter (mm) get no calculator data: slender tools break (DF39). */
+export const MIN_END_MILL_DIAMETER = 1
 
 /** F10: the chamfer mill's effective diameter at `depth` below its tip. */
 function chamferStep(tool: Tool, depth: number): DerivationStep {
@@ -299,8 +312,15 @@ interface Ctx {
   readonly locked: LockedInputs
   /** Chamfer engagement: the F10 step that gave `D`. */
   readonly chamfer?: DerivationStep
-  /** De below the smallest charted diameter: the chart's `fz` range and the factor De / 3.175. */
-  readonly fzScale?: { readonly chart: Range; readonly factor: number }
+  /**
+   * D (a chamfer's De) below the smallest charted diameter: the chart's `fz` range and the factor
+   * D / chartDiameter (3.175 for a chamfer's De, 1.5875 for an end mill).
+   */
+  readonly fzScale?: {
+    readonly chart: Range
+    readonly factor: number
+    readonly chartDiameter: number
+  }
 }
 
 type MillEngagement = Exclude<Engagement, { kind: 'drill' }>
@@ -395,8 +415,14 @@ function millAt(
           dataStep(row, 'fz', pick(c.fzScale.chart, pos), 'mm', c.fzScale.chart),
           {
             step: 'fzScale' as const,
-            formula: `fz = fz(${CHART_MIN_DIAMETER} mm) · De / ${CHART_MIN_DIAMETER}`,
-            inputs: { fz: pick(c.fzScale.chart, pos), De: D, factor: c.fzScale.factor },
+            formula:
+              c.chamfer === undefined
+                ? `fz = fz(${c.fzScale.chartDiameter} mm) · D / ${c.fzScale.chartDiameter}`
+                : `fz = fz(${c.fzScale.chartDiameter} mm) · De / ${c.fzScale.chartDiameter}`,
+            inputs:
+              c.chamfer === undefined
+                ? { fz: pick(c.fzScale.chart, pos), D, factor: c.fzScale.factor }
+                : { fz: pick(c.fzScale.chart, pos), De: D, factor: c.fzScale.factor },
             result: fz,
             unit: 'mm',
           },

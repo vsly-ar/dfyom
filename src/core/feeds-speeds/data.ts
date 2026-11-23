@@ -87,9 +87,12 @@ const sfm = (min: number, max = min): Range => ({ min: min * FOOT, max: max * FO
 /** Machine unit horsepower (hp per in³/min) → W·s/mm³ (F7). */
 const unitHp = (hp: number): number => hp * KP_TO_UNIT_POWER
 
-/** Bands ≤ 6, ≤ 12, ≤ 25 mm filled from the chart's 1/8", 1/4", 1/2" values; ≤ 3 mm left empty (doc). */
-const bandsFrom = (b6: Range, b12: Range, b25: Range): BandData[] => [
-  { maxDiameter: 3 },
+/**
+ * Bands ≤ 6, ≤ 12, ≤ 25 mm filled from the chart's 1/8", 1/4", 1/2" values; ≤ 3 mm from its 1/16"
+ * value when given (router rows, hardening DF39), else left empty (doc).
+ */
+const bandsFrom = (b6: Range, b12: Range, b25: Range, b3?: Range): BandData[] => [
+  b3 === undefined ? { maxDiameter: 3 } : { maxDiameter: 3, fz: b3 },
   { maxDiameter: 6, fz: b6 },
   { maxDiameter: 12, fz: b12 },
   { maxDiameter: 25, fz: b25 },
@@ -102,7 +105,7 @@ const HARVEY_13900 =
 const MMS_UNIT_HP =
   'Modern Machine Shop, "Start With The Right Speeds And Feeds", Table I "Unit Horsepower" – https://www.mmsonline.com/articles/start-with-the-right-speeds-and-feeds'
 const AMANA_BALL =
-  'Amana Tool, 2 Flute Solid Carbide CNC Spiral Ball Nose Router Bits speed chart: "CNC Operating Spindle Speed: 18,000 RPM / Depth of Cut: 1 x Tool Diameter", chip load per tooth at 1/8", 1/4", 1/2", "Ramp Down: Feed Rate IPM / # of flutes" – https://www.amanatool.com/pub/media/productattachments/Spiral-Ball-Nose-Speed-Chart-v6.pdf'
+  'Amana Tool, 2 Flute Solid Carbide CNC Spiral Ball Nose Router Bits speed chart: "CNC Operating Spindle Speed: 18,000 RPM / Depth of Cut: 1 x Tool Diameter", chip load per tooth at 1/16", 1/8", 1/4", 1/2", "Ramp Down: Feed Rate IPM / # of flutes" – https://www.amanatool.com/pub/media/productattachments/Spiral-Ball-Nose-Speed-Chart-v6.pdf'
 const AMANA_BALL_PLASTIC =
   'Amana Tool, 2 & 4 Flute Solid Carbide Spiral Ball Nose for Plastics speed chart: 18,000 RPM, 1 x D, 2 Flute chip load at 6mm-1/4" and 12mm-1/2" – https://www.amanatool.com/pub/media/productattachments/Spiral-Ball-Nose-for-Plastics-Speed_Chart-v7.pdf'
 const onsrud = (title: string, page: number, series: string, file: string): string =>
@@ -166,24 +169,26 @@ function metalRow(
 /**
  * The material table: carbide end mills only (HSS rows and drill `fn` bands have no curated
  * source yet → `feeds.noData`). Each range is the conservative envelope of its sources
- * (min = lowest printed minimum, max = lowest printed maximum); bands ≤ 3 mm are empty.
+ * (min = lowest printed minimum, max = lowest printed maximum). Bands ≤ 3 mm: the router rows
+ * take Amana's 1/16" column (the only cited chart printing one; sheetGood ← MDF), metal rows are
+ * empty (docs/architecture/feeds-speeds.md#small-end-mills-hardening-df39).
  */
 export const MATERIAL_DATA: readonly MaterialRow[] = [
   routerRow(
     'softwood',
-    bandsFrom(ipt(0.005, 0.007), ipt(0.007, 0.009), ipt(0.009, 0.011)),
+    bandsFrom(ipt(0.005, 0.007), ipt(0.007, 0.009), ipt(0.009, 0.011), ipt(0.003, 0.005)),
     [onsrud('Soft Wood', 114, '52-200/57-200', 'Soft%20Wood')],
     [AMANA_BALL],
   ),
   routerRow(
     'hardwood',
-    bandsFrom(ipt(0.003, 0.005), ipt(0.005, 0.007), ipt(0.007, 0.009)),
+    bandsFrom(ipt(0.003, 0.005), ipt(0.005, 0.007), ipt(0.007, 0.009), ipt(0.002, 0.004)),
     [onsrud('Hard Wood', 115, '52-200/57-200', 'Hard%20Wood')],
     [AMANA_BALL],
   ),
   routerRow(
     'sheetGood',
-    bandsFrom(ipt(0.005, 0.007), ipt(0.006, 0.008), ipt(0.008, 0.01)),
+    bandsFrom(ipt(0.005, 0.007), ipt(0.006, 0.008), ipt(0.008, 0.01), ipt(0.003, 0.005)),
     [
       onsrud('MDF', 116, '52-200/57-200', 'MDF'),
       onsrud('Soft Plywood', 117, '52-200/57-200', 'Soft%20Plywood'),
@@ -193,7 +198,7 @@ export const MATERIAL_DATA: readonly MaterialRow[] = [
   ),
   routerRow(
     'plastic',
-    bandsFrom(ipt(0.002, 0.004), ipt(0.003, 0.005), ipt(0.006, 0.008)),
+    bandsFrom(ipt(0.002, 0.004), ipt(0.003, 0.005), ipt(0.006, 0.008), ipt(0.002, 0.004)),
     [
       onsrud('Soft Plastic', 120, '52-200B/BL', 'Soft%20Plastic'),
       onsrud('Hard Plastic', 121, '52-200B/BL', 'Hard%20Plastic'),

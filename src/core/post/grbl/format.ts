@@ -58,11 +58,18 @@ export function sanitizeComment(text: string): string {
   return out.replace(/ {2,}/g, ' ').trim()
 }
 
-/** A comment line `(text)`, sanitized and truncated to MAX_LINE_BYTES. */
+/**
+ * A comment line `(text)`, sanitized and truncated to MAX_LINE_BYTES; a cut text ends at its last
+ * word boundary (a space, after a comma) instead of mid-word, unless that drops over half of it.
+ */
 export function commentLine(text: string): string {
-  return `(${sanitizeComment(text)
-    .slice(0, MAX_LINE_BYTES - 2)
-    .trimEnd()})`
+  const clean = sanitizeComment(text)
+  const room = MAX_LINE_BYTES - 2
+  if (clean.length <= room) return `(${clean})`
+  const cut = clean.slice(0, room)
+  const space = clean[room] === ' ' ? room : cut.lastIndexOf(' ')
+  const head = space > room / 2 ? cut.slice(0, space) : cut
+  return `(${head.trimEnd().replace(/,$/, '')})`
 }
 
 /** Marker of a DFYOM tool change (the whole line; the sender rule in grbl.md matches it). */
