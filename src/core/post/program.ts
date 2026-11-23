@@ -35,10 +35,32 @@ export type Block =
     }
   | { readonly kind: 'comment'; readonly text: string }
 
+/**
+ * How the stock sits for the program's setup (hardening DF58), for the header comments:
+ * docs/architecture/grbl.md#setup-header-hardening-df58. Built by `setupHeader` (plan side).
+ */
+export interface SetupHeader {
+  /** Position in machining order (1, 2, …) and the plan's setup count. */
+  readonly number: number
+  readonly count: number
+  /** Part faces up (machine +Z), towards the operator (−Y) and on the right (+X): "bottom". */
+  readonly up: string
+  readonly front: string
+  readonly right: string
+  /** The move from setup 1's orientation ("flip about X"); absent for setup 1. */
+  readonly fromFirst?: string
+  /** The part corner at the work zero, besides the up face: "back left". */
+  readonly corner: string
+  /** Stock extents along machine X, Y, Z (mm). */
+  readonly stock: Vec3
+}
+
 export interface MachiningProgram {
   /** Plan name (header comment). */
   readonly name: string
   readonly setupName: string
+  /** The setup instructions of the header; absent = only the setup name. */
+  readonly setup?: SetupHeader
   /** Text units (the machine's `programUnits`); block values stay mm. */
   readonly units: 'mm' | 'in'
   /** The machine's `spindle.control`: `manual` pauses for the user to set the speed. */

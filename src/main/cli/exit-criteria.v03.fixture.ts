@@ -538,7 +538,7 @@ export async function exitCriteriaV03Flow(call: Call, dir: string): Promise<Flow
     })
     const gcode = readFileSync(target, 'utf8')
     await expect(gcode).toMatchFileSnapshot(GOLDEN_V03[i]!)
-    expect(gcode).toContain(`(Setup: ${setup.name})`)
+    expect(gcode).toContain(`(Setup ${i + 1} of ${plan.setups.length}: ${setup.name})`)
     expect(gcode.split('\n').filter((l) => l !== '')).toHaveLength(exported.lines)
     expect(gcode.trimEnd().endsWith('M30')).toBe(true)
     programs.push(gcode)

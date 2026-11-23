@@ -415,6 +415,8 @@ describe('plan.get', () => {
           {
             id: 's1',
             name: 'Top',
+            direction: '+z',
+            rotation: 0,
             clearanceHeight: 10,
             retractHeight: 2,
             operations: [

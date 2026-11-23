@@ -418,7 +418,9 @@ describe('export per setup (E2)', () => {
     for (const setup of p.setups) {
       const e = expectOk(await exportPlan(s.d.doc, planId, services(), { setupId: setup.id }))
       expect(e.setupId).toBe(setup.id)
-      expect(e.lines).toContain(`(Setup: ${setup.name})`)
+      expect(e.lines).toContain(
+        `(Setup ${p.setups.indexOf(setup) + 1} of ${p.setups.length}: ${setup.name})`,
+      )
       // the program machines exactly this setup's operations, in order
       const labels = e.program.blocks.flatMap((b) => (b.kind === 'comment' ? [b.text] : []))
       const own = setup.operations.map((o) =>
