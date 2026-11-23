@@ -45,6 +45,7 @@ import {
   feedUnit,
   FEED_KIND,
   lengthText,
+  findingNames,
   planOperationName,
   snapshotName,
   type PlanOperationView,
@@ -91,7 +92,7 @@ export function planWarningView(
   return {
     id: `${w.code}:${w.planOperationId ?? ''}:${w.field ?? ''}:${w.rule}:${index}`,
     tier: TIER[w.severity],
-    text: findingText(w, units),
+    text: findingText(w, units, findingNames(plan)),
     ...(op === undefined ? {} : { subject: planOperationName(plan, op.designOperationIds) }),
     ...(op !== undefined && onSelect ? { onSelect: () => onSelect(op.id) } : {}),
   }
@@ -340,7 +341,7 @@ function OperationInspector({
     toolOptions.push({ value: current.libraryItemId, label: t.otherTool(current.name) })
   const chosen = suggestions?.find((s) => s.toolLibraryItemId === current?.libraryItemId)
   const toolMessages: FieldMessage[] = [
-    ...fieldMessages(findings, 'tool'),
+    ...fieldMessages(findings, 'tool', units, findingNames(plan)),
     ...(suggestions !== undefined && suggestions.length === 0
       ? [{ id: 'noSuggestion', severity: 'info' as const, text: t.noSuggestion }]
       : []),

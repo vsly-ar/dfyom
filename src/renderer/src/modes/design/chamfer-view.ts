@@ -12,7 +12,7 @@ import type { Quantity } from '../../../../core/quantity/quantity'
 import { chamferMessages } from '../../messages/chamfer'
 import { lengthSource } from '../../messages/dfm'
 import type { ChamferSectionValues } from '../../viewport/chamfer-section'
-import { quantityOf, type DesignPart } from './model'
+import { itemName, quantityOf, type DesignPart } from './model'
 import { operationFace } from './outline'
 
 type ChamferDTO = Extract<OperationDTO, { kind: 'chamfer' }>
@@ -95,7 +95,10 @@ export function edgeOptions(part: PartDTO, chamfer: ChamferDTO, units: UnitSyste
     label: chamferMessages.edgeOption(o.name, lengthSource(edgeDiameter(o), units)),
   }))
   if (!options.some((o) => o.value === chamfer.edgeOf))
-    options.push({ value: chamfer.edgeOf, label: chamferMessages.edgeMissing(chamfer.edgeOf) })
+    options.push({
+      value: chamfer.edgeOf,
+      label: chamferMessages.edgeMissing(itemName(part, chamfer.edgeOf)),
+    })
   return options
 }
 

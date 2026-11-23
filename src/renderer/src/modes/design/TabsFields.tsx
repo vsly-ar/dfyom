@@ -12,7 +12,7 @@ import { dfmMessages, lengthSource } from '../../messages/dfm'
 import { useRegion2d } from '../../shell/ShellContext'
 import { Icon, Button, FieldIcon, IconButton, QuantityInput, type FieldMessage } from '../../ui'
 import styles from './Design.module.css'
-import { defaultUnit, quantityOf } from './model'
+import { defaultUnit, dfmNames, quantityOf } from './model'
 import type { OperationFieldsContext } from './OperationFields'
 import { settleTabKeyRun } from './tab-key-run'
 import { newTabPosition, profileTabs } from './tabs-model'
@@ -47,7 +47,7 @@ export function TabPositions({ ctx }: { ctx: OperationFieldsContext }): React.JS
     .map((w) => ({
       id: w.code,
       severity: dfmMessages.tier(w),
-      text: dfmMessages.text(w, ctx.units, (id) => id),
+      text: dfmMessages.text(w, ctx.units, dfmNames(ctx.part.dto)),
     }))
   const send = (
     next: readonly string[] | null,

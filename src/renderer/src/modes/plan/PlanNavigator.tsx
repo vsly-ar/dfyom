@@ -292,7 +292,7 @@ function StaleNotices({
         </>
       ) : null}
       {copies.map((c) => {
-        const name = snapshotName(plan, c.snapshotId) ?? c.libraryItemId
+        const name = snapshotName(plan, c.snapshotId) ?? m.stale.unnamed
         const kind = m.stale.kinds[c.kind] ?? c.kind
         const text =
           c.status === 'libraryChanged'
@@ -348,7 +348,7 @@ function MachineSection({
   if (copy !== undefined && !options.some((o) => o.value === copy.libraryItemId))
     options.push({
       value: copy.libraryItemId,
-      label: snapshotName(plan, copy.id) ?? copy.libraryItemId,
+      label: snapshotName(plan, copy.id) ?? m.machine.unnamed,
     })
   return (
     <Section title={m.machine.title} icon="machine">

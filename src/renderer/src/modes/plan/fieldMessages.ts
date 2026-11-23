@@ -4,7 +4,7 @@
 // Doc: docs/conventions/ui.md#plan-mode-task-37 (Checks)
 import type { PlanWarning } from '../../../../core/plan/checks'
 import type { UnitSystem } from '../../../../core/project/document'
-import { findingText } from '../../messages/plan'
+import { findingText, type FindingNames } from '../../messages/plan'
 import type { FieldMessage, FieldSeverity } from '../../ui'
 
 const SEVERITY: Record<PlanWarning['severity'], FieldSeverity> = {
@@ -18,11 +18,13 @@ export const fieldMessages = (
   findings: readonly PlanWarning[],
   field: string,
   units: UnitSystem = 'mm',
+  /** Readable names for the ids in a finding's params (DF43); generic words without them. */
+  names?: FindingNames,
 ): FieldMessage[] =>
   findings
     .filter((w) => w.field === field)
     .map((w, i) => ({
       id: `${w.code}:${w.rule}:${i}`,
       severity: SEVERITY[w.severity],
-      text: findingText(w, units),
+      text: findingText(w, units, names),
     }))

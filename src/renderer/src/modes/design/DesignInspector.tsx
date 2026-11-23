@@ -48,6 +48,7 @@ import {
   shapeArgs,
   updateArgs,
   type DesignPart,
+  dfmNames,
 } from './model'
 import { newItemArgs } from './shape-model'
 import type { ShapeActions } from './ShapePicker'
@@ -90,10 +91,7 @@ export function warningView(
   fixIn?: FixIn,
 ): WarningView {
   // a finding names an operation, or a feature (F5: Clones notes carry the feature id)
-  const name = (id: string) =>
-    part.dto.operations.find((o) => o.id === id)?.name ??
-    part.dto.features?.find((f) => f.id === id)?.name ??
-    id
+  const names = dfmNames(part.dto)
   const source = dfmMessages.suggestionSource(w, part.units)
   const elsewhere = fixIn?.(w)
   if (elsewhere !== undefined || featureOfWarning(part, w) !== undefined) apply = undefined // an owned operation is fixed in its feature, never directly
@@ -101,8 +99,8 @@ export function warningView(
     id: `${w.code}:${w.operation}:${w.parameter ?? ''}`,
     tier: pendingApply(w) ? 'soft' : dfmMessages.tier(w),
     ...(pendingApply(w) ? { pendingApply: applyMessages.warningPending } : {}),
-    text: dfmMessages.text(w, part.units, name),
-    subject: name(w.operation),
+    text: dfmMessages.text(w, part.units, names),
+    subject: names.item(w.operation),
     ...(onSelect && w.operation !== 'stock' ? { onSelect: () => onSelect(w.operation) } : {}),
     ...(apply && source !== undefined && w.suggestion
       ? {
@@ -358,8 +356,11 @@ function OperationInspector({
                 partId: part.dto.id,
                 shapeId: id,
               })
-              const name = got.ok ? (got.value as { shape: { name: string } }).shape.name : id
-              ui.getState().setRemovedToast(t.picker.converted(name))
+              ui.getState().setRemovedToast(
+                got.ok
+                  ? t.picker.converted((got.value as { shape: { name: string } }).shape.name)
+                  : t.picker.convertedUnnamed,
+              )
             })(),
           updateItems: (shapeId, fixes) =>
             void (async () => {
@@ -412,10 +413,7 @@ function OperationInspector({
           recommended: {
             depth: {
               source: facingDepth.source,
-              text: t.facingToReference(
-                facingDepth.source,
-                facingReference ?? facingDepth.referenceId,
-              ),
+              text: t.facingToReference(facingDepth.source, facingReference ?? t.referenceModel),
             },
           },
         }
