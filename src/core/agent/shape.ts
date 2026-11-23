@@ -1,8 +1,10 @@
 /**
  * Result shaping for agents at the MCP and `dfyom batch` boundary: summaries of the large reads
- * (`plan.get`, `plan.toolpath.get`), DFM warnings as changes, compact quantities and numbers.
- * The command layer, the GUI's IPC and one-shot CLI calls keep the full results.
- * Doc: docs/architecture/llm-api.md#result-size
+ * (`plan.get`, `plan.toolpath.get`, `plan.warning.list`, `design.operation.list`,
+ * `design.clones.preview`), DFM warnings as changes, tools by name, compact quantities and
+ * numbers. The command layer, the GUI's IPC and one-shot CLI calls keep the full results.
+ * Doc: docs/architecture/llm-api.md#result-size,
+ * #amendment-hardening-df38-df39-df41-x2-agent-friction
  */
 import type { z } from 'zod'
 import { Err, fail, Ok, type AppResult } from '../../shared/result'
@@ -24,6 +26,9 @@ export const DETAIL_DEFAULT: ReadonlyMap<string, 'summary' | 'full'> = new Map([
   ['plan.get', 'summary'],
   ['plan.toolpath.get', 'summary'],
   ['design.shape.get', 'full'],
+  ['plan.warning.list', 'summary'],
+  ['design.operation.list', 'summary'],
+  ['design.clones.preview', 'summary'],
 ])
 /** Tools whose result is summarized unless `detail: "full"`. */
 export const SUMMARIZED = new Set(
@@ -47,6 +52,8 @@ export interface ShaperSession {
   peek(name: string, args: object): AppResult<unknown>
   /** The registry result schema of a tool, if it is a command or query. */
   resultSchema(name: string): z.ZodType | undefined
+  /** A library snapshot of the bound project (`ProjectDoc.snapshots`), to name tools. */
+  snapshot?(id: string): unknown
 }
 
 type Obj = Record<string, unknown>
@@ -92,6 +99,8 @@ export function splitDetail(
 export class ResultShaper {
   private key: string | undefined
   private seen = new Map<string, Map<string, string>>()
+  /** Running `design.part.evaluate` jobs → their part, to shape the outcome's warnings. */
+  private evaluations = new Map<string, string>()
 
   constructor(private readonly session: ShaperSession) {}
 
@@ -101,19 +110,29 @@ export class ResultShaper {
     if (this.session.boundKey !== this.key) {
       this.key = this.session.boundKey
       this.seen.clear()
+      this.evaluations.clear()
     }
     const outcome = call.result.unwrap()
     let value = outcome.value
-    if (view.detail === 'summary' && call.name === 'plan.get') value = this.planSummary(value)
+    const summary = view.detail === 'summary'
+    if (summary && call.name === 'plan.get') value = this.planSummary(value)
     if (call.name === 'plan.toolpath.get')
-      value = view.detail === 'summary' ? toolpathSummary(value) : toolpathRange(value, view)
-    if (view.detail === 'summary' && call.name === 'design.shape.get') value = shapeSummary(value)
+      value = summary ? toolpathSummary(value) : toolpathRange(value, view)
+    if (summary && call.name === 'design.shape.get') value = shapeSummary(value)
+    if (call.name === 'plan.warning.list')
+      value = summary ? findingGroups(value) : withFindingNext(value)
+    if (summary && call.name === 'design.operation.list') value = operationSummary(value)
+    if (summary && call.name === 'design.clones.preview') value = previewSummary(value)
     const partId = isObj(args) && typeof args['partId'] === 'string' ? args['partId'] : undefined
     if (call.name === 'design.warning.list' && partId !== undefined && isObj(value))
       this.remember(partId, value['warnings'])
     else if (partId !== undefined && isObj(value) && this.carriesDfmWarnings(call.name))
       value = { ...value, warnings: this.delta(partId, value['warnings']) }
-    const applied = outcome.applied as Obj | undefined
+    if (call.name === 'design.part.evaluate' && partId !== undefined && isObj(value))
+      if (typeof value['jobId'] === 'string') this.evaluations.set(value['jobId'], partId)
+    if (call.name === 'job.wait' || call.name === 'job.get') value = this.evaluationOutcome(value)
+    value = this.namedTools(value)
+    const applied = this.namedTools(outcome.applied) as Obj | undefined
     const shapedApplied =
       applied !== undefined && Array.isArray(applied['warnings'])
         ? {
@@ -129,6 +148,54 @@ export class ResultShaper {
     if (shapedApplied !== undefined)
       (shaped as { applied?: unknown }).applied = compact(shapedApplied)
     return { ...call, result: Ok(shaped) }
+  }
+
+  /**
+   * A finished `design.part.evaluate` job (`job.wait`, `job.get`): its outcome's warnings as
+   * changes, like an edit's (llm-api.md, DF41 F8).
+   */
+  private evaluationOutcome(value: unknown): unknown {
+    if (!isObj(value) || typeof value['jobId'] !== 'string') return value
+    const partId = this.evaluations.get(value['jobId'])
+    const outcome = value['outcome']
+    if (partId === undefined || !isObj(outcome)) return value
+    this.evaluations.delete(value['jobId'])
+    const result = outcome['value']
+    if (outcome['ok'] !== true || !isObj(result) || !Array.isArray(result['warnings'])) return value
+    return {
+      ...value,
+      outcome: {
+        ...outcome,
+        value: { ...result, warnings: this.delta(partId, result['warnings']) },
+      },
+    }
+  }
+
+  /**
+   * Specific tool references `{ kind: "specific", snapshotId }` with the snapshot's `name` and
+   * `diameter`, at any depth (llm-api.md, DF41 F5).
+   */
+  private namedTools(v: unknown): unknown {
+    const session = this.session
+    if (session.snapshot === undefined) return v
+    const walk = (x: unknown): unknown => {
+      if (Array.isArray(x)) return x.map(walk)
+      if (!isObj(x)) return x
+      if (x['kind'] === 'specific' && typeof x['snapshotId'] === 'string') {
+        const snap = session.snapshot?.(x['snapshotId'])
+        const values = isObj(snap) ? snap['values'] : undefined
+        if (!isObj(values)) return x
+        return {
+          ...x,
+          ...(typeof values['name'] === 'string' ? { name: values['name'] } : {}),
+          ...(values['diameter'] === undefined ? {} : { diameter: values['diameter'] }),
+        }
+      }
+      const out: Obj = {}
+      for (const [k, y] of Object.entries(x)) out[k] = walk(y)
+      return out
+    }
+    return walk(v)
   }
 
   private carriesDfmWarnings(name: string): boolean {
@@ -404,6 +471,210 @@ function toolpathRange(value: unknown, view: View): unknown {
       total,
       next: end < total ? end : null,
     },
+  }
+}
+
+// ── plan findings, design operations, Clones previews (DF38, DF39, F11) ──────────────────
+
+/** At most this many groups, and this many plan operation ids per group, in a findings summary. */
+export const MAX_FINDING_GROUPS = 40
+export const MAX_GROUP_OPERATIONS = 20
+
+/** The next step of an unresolved feed (DF39): the library preset first, it fixes every operation. */
+export const FEEDS_NEXT =
+  "add a feeds preset for the stock's material class to the library tool (library_tool_update; draft plans follow the library) or enter the values per plan operation (plan_operation_update)"
+
+function findingNext(f: Obj): string | undefined {
+  return (f['code'] === 'plan.check' && f['rule'] === 'unresolved') || f['code'] === 'feeds.noData'
+    ? FEEDS_NEXT
+    : undefined
+}
+
+/** `plan.warning.list` with `detail: "full"`: every finding, with `next` where there is one. */
+function withFindingNext(value: unknown): unknown {
+  if (!isObj(value) || !Array.isArray(value['warnings'])) return value
+  return {
+    ...value,
+    warnings: value['warnings'].map((f: unknown) => {
+      if (!isObj(f)) return f
+      const next = findingNext(f)
+      return next === undefined ? f : { ...f, next }
+    }),
+  }
+}
+
+/** JSON with sorted keys: equal values give equal strings whatever their key order. */
+function stableJson(v: unknown): string {
+  return JSON.stringify(v, (_k, x: unknown) =>
+    isObj(x)
+      ? Object.fromEntries(
+          Object.keys(x)
+            .sort()
+            .map((k) => [k, x[k]]),
+        )
+      : x,
+  )
+}
+
+/**
+ * `plan.warning.list` summary: findings grouped by everything but their plan operation, with a
+ * count, the first ids and `next`; counts by severity of all findings (llm-api.md, DF38).
+ */
+function findingGroups(value: unknown): unknown {
+  if (!isObj(value) || !Array.isArray(value['warnings'])) return value
+  const groups = new Map<string, { finding: Obj; count: number; ids: string[] }>()
+  const counts: Record<string, number> = {}
+  for (const f of value['warnings'] as unknown[]) {
+    if (!isObj(f)) continue
+    const { planOperationId, ...finding } = f
+    const severity = String(finding['severity'])
+    counts[severity] = (counts[severity] ?? 0) + 1
+    const key = stableJson(finding)
+    const g = groups.get(key) ?? { finding, count: 0, ids: [] }
+    groups.set(key, g)
+    g.count++
+    if (typeof planOperationId === 'string') g.ids.push(planOperationId)
+  }
+  const all = [...groups.values()]
+  const shown = all.slice(0, MAX_FINDING_GROUPS).map(({ finding, count, ids }) => {
+    const { code, severity, rule, field, message, params, ...rest } = finding
+    const next = findingNext(finding)
+    return {
+      code,
+      severity,
+      rule,
+      ...(field === undefined ? {} : { field }),
+      message,
+      ...(isObj(params) && Object.keys(params).length > 0 ? { params } : {}),
+      ...rest,
+      ...(next === undefined ? {} : { next }),
+      count,
+      ...(ids.length > 0 ? { planOperationIds: ids.slice(0, MAX_GROUP_OPERATIONS) } : {}),
+      ...(ids.length > MAX_GROUP_OPERATIONS ? { more: ids.length - MAX_GROUP_OPERATIONS } : {}),
+    }
+  })
+  const cut = all.slice(MAX_FINDING_GROUPS)
+  return {
+    counts,
+    groups: shown,
+    ...(cut.length > 0
+      ? { moreGroups: { groups: cut.length, findings: cut.reduce((n, g) => n + g.count, 0) } }
+      : {}),
+    ...(value['pendingApply'] === undefined ? {} : { pendingApply: value['pendingApply'] }),
+    detail: 'summary: findings grouped across plan operations; detail: "full" lists each finding',
+  }
+}
+
+/** A quantity DTO or number as mm; undefined otherwise. */
+const mm = (q: unknown): number | undefined =>
+  typeof q === 'number' ? q : isObj(q) ? rational(q['exact']) : undefined
+
+/** An operation's position: `center`, or its shape's `center`. */
+function positionOf(op: Obj): [number, number] | undefined {
+  const shape = op['shape']
+  const c: unknown = Array.isArray(op['center'])
+    ? op['center']
+    : isObj(shape) && Array.isArray(shape['center'])
+      ? shape['center']
+      : undefined
+  if (!Array.isArray(c)) return undefined
+  const u = mm(c[0])
+  const v = mm(c[1])
+  return u === undefined || v === undefined ? undefined : [u, v]
+}
+
+/** An operation without what a Clones instance changes: ids, name, references and position. */
+function unmoved(op: Obj): string {
+  const {
+    id: _id,
+    name: _n,
+    featureId: _f,
+    featureRole: _r,
+    on: _on,
+    edgeOf: _e,
+    center: _c,
+    ...rest
+  } = op
+  const shape = rest['shape']
+  if (isObj(shape)) {
+    const { center: _sc, ...unplaced } = shape
+    rest['shape'] = unplaced
+  }
+  return stableJson(rest)
+}
+
+const mmRound = (x: number): number => Math.round(x * 1000) / 1000
+
+/**
+ * `design.operation.list` summary: Clones instance operations that only move are listed per
+ * Clones feature as `{ n, offset }` (id `<featureId>_<n>_<sourceOperationId>`); the others in
+ * full (llm-api.md, DF38).
+ */
+function operationSummary(value: unknown): unknown {
+  if (!isObj(value) || !Array.isArray(value['operations'])) return value
+  const ops = (value['operations'] as unknown[]).filter(isObj)
+  const byId = new Map(ops.map((o) => [o['id'], o]))
+  const clones = new Map<
+    string,
+    { sources: string[]; instances: Map<number, [number, number] | null> }
+  >()
+  const operations: Obj[] = []
+  for (const op of ops) {
+    const featureId = op['featureId']
+    const role =
+      typeof op['featureRole'] === 'string' ? /^(\d+)_(.+)$/.exec(op['featureRole']) : null
+    const sourceId = role?.[2]
+    const source = sourceId === undefined ? undefined : byId.get(sourceId)
+    if (
+      typeof featureId !== 'string' ||
+      role === null ||
+      sourceId === undefined ||
+      source === undefined ||
+      op['id'] !== `${featureId}_${role[1]}_${sourceId}` ||
+      unmoved(op) !== unmoved(source)
+    ) {
+      operations.push(op)
+      continue
+    }
+    const entry = clones.get(featureId) ?? { sources: [] as string[], instances: new Map() }
+    clones.set(featureId, entry)
+    if (!entry.sources.includes(sourceId)) entry.sources.push(sourceId)
+    const n = Number(role[1])
+    const at = positionOf(op)
+    const from = positionOf(source)
+    const offset: [number, number] | null =
+      at === undefined || from === undefined
+        ? null
+        : [mmRound(at[0] - from[0]), mmRound(at[1] - from[1])]
+    if ((entry.instances.get(n) ?? null) === null) entry.instances.set(n, offset)
+  }
+  if (clones.size === 0) return value
+  return {
+    ...value,
+    operations,
+    clones: [...clones].map(([featureId, e]) => ({
+      featureId,
+      sourceOperationIds: e.sources,
+      instances: [...e.instances]
+        .sort(([a], [b]) => a - b)
+        .map(([n, offset]) => ({ n, ...(offset === null ? {} : { offset }) })),
+    })),
+    detail:
+      'summary: Clones instances that only move are under clones as { n, offset } (id <featureId>_<n>_<sourceOperationId>); detail: "full" lists every operation',
+  }
+}
+
+/** `design.clones.preview` summary: rows without their drawn `path` (llm-api.md, F11). */
+function previewSummary(value: unknown): unknown {
+  if (!isObj(value) || !Array.isArray(value['rows'])) return value
+  return {
+    ...value,
+    rows: (value['rows'] as unknown[]).map((r) => {
+      if (!isObj(r)) return r
+      const { path: _path, ...rest } = r
+      return rest
+    }),
+    detail: 'summary: rows without path; detail: "full" keeps it',
   }
 }
 

@@ -58,13 +58,19 @@ function baseName(op: OpDTO, part: PartDTO): string {
 /**
  * A plan operation's label: its design operation's name (owned ones default to "Hole 1 ·
  * counterbore", Clones instances to "Hole 1 · counterbore · 3"); a group repeating one operation
- * (Clones instances and their source) is "Hole 1 · drill × 6"; other groups list the names.
+ * (Clones instances and their source) is "Hole 1 · drill × 6", and a group of several repeated
+ * operations names each once with its count, "Hole 1 · drill × 6, Hole 2 · drill × 6" (X2 F10);
+ * single operations keep their names.
  */
 export function planOperationLabel(part: PartDTO, designOperationIds: readonly string[]): string {
   const ops = designOperationIds.map((id) => part.operations.find((o) => o.id === id))
   const names = ops.map((o, i) => o?.name ?? designOperationIds[i]!)
   if (ops.length < 2 || ops.some((o) => o === undefined)) return names.join(', ')
-  const bases = new Set(ops.map((o) => baseName(o!, part)))
-  const [base] = bases
-  return bases.size === 1 ? `${base} × ${ops.length}` : names.join(', ')
+  const counts = new Map<string, number>()
+  for (const o of ops) {
+    const base = baseName(o!, part)
+    counts.set(base, (counts.get(base) ?? 0) + 1)
+  }
+  if (counts.size === ops.length) return names.join(', ')
+  return [...counts].map(([base, n]) => (n === 1 ? base : `${base} × ${n}`)).join(', ')
 }

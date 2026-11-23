@@ -423,6 +423,14 @@ export class AgentSession {
       .map((o) => o.value)
   }
 
+  /** A library snapshot of the bound project, to name tools in results (shape.ts). */
+  snapshot(id: string): unknown {
+    const bound = this.bound()
+    if (bound.isNone()) return undefined
+    const snapshots = bound.unwrap().doc.snapshots
+    return Object.hasOwn(snapshots, id) ? snapshots[id] : undefined
+  }
+
   /** One tool call, inside `atBoundary` (entry kind = the source's kind). Never rejects. */
   async call(name: string, rawArgs: unknown, opts: CallOptions = {}): Promise<SessionCallResult> {
     const kind = this.kindOf(name) ?? 'command'

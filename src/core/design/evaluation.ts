@@ -640,7 +640,7 @@ export const partEvaluate = defineCommand({
   kind: 'job',
   name: 'design.part.evaluate',
   summary:
-    "Evaluate a part's geometry now and wait for its DFM warnings (joins a running evaluation; a newer edit of the part aborts it).",
+    "Evaluate a part's geometry now; the job's outcome has its DFM warnings, as changes (joins a running evaluation; a newer edit of the part aborts it).",
   title: () => 'Evaluate part',
   machine: false,
   args: z.object({ partId: PartIdSchema }),

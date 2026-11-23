@@ -144,14 +144,36 @@ describe('shipped material table: golden cases against the cited charts', () => 
     expect(value(s.stepdown)).toBeCloseTo(6.35 * 0.75, 9)
   })
 
-  it('HSS, drills and tools ≤ 3 mm have no data (feeds.noData → strategy/preset fallback)', () => {
+  it('HSS, drills, end mills ≤ 3 mm in metal and under 1 mm have no data (feeds.noData → strategy/preset fallback)', () => {
     const drill = tool({ type: 'drill', diameter: len('5'), pointAngle: deg('118') })
     for (const s of [
       shipped({ tool: tool({ toolMaterial: 'hss' }) }),
       shipped({ tool: drill, engagement: { kind: 'drill' } }),
-      shipped({ tool: tool({ diameter: len('3') }), materialClass: 'softwood' }),
+      shipped({ tool: tool({ diameter: len('3') }) }), // aluminium: Harvey prints nothing below 1/8"
+      shipped({ tool: tool({ diameter: len('0.8') }), materialClass: 'softwood' }),
     ])
       expect(codes(s)).toEqual(['feeds.noData'])
+  })
+
+  it('3 mm 2F carbide flat slotting plywood, hobby: Amana MDF 1/16" chip load (DF39)', () => {
+    const s = shipped({ tool: tool({ diameter: len('3') }), materialClass: 'sheetGood' })
+    expect(codes(s)).toEqual(['feeds.powerSkipped'])
+    expect(value(s.spindleSpeed)).toBe(18_000) // Amana: 18,000 RPM
+    const fzIn = s.display.unwrap().fz / IN
+    expect(fzIn).toBeCloseTo(0.0035, 9) // Amana MDF 1/16": .003–.005 at rangePos 0.25
+    const vfIpm = value(s.feedRate) / IN
+    expect(vfIpm).toBeGreaterThanOrEqual(110) // Amana MDF 1/16" feed rate 110–190 IPM
+    expect(vfIpm).toBeLessThanOrEqual(190)
+    expect(s.feedRate.unwrap().derivation.map((d) => d.step)).not.toContain('fzScale')
+  })
+
+  it('1.5 mm end mill in hardwood: the 1/16" chip load × D / 1.5875 (fzScale, DF39)', () => {
+    const s = shipped({ tool: tool({ diameter: len('1.5') }), materialClass: 'hardwood' })
+    const fzIn = s.display.unwrap().fz / IN
+    expect(fzIn).toBeCloseTo(0.0025 * (1.5 / 1.5875), 9) // Amana hardwood 1/16": .002–.004
+    const scale = s.feedRate.unwrap().derivation.find((d) => d.step === 'fzScale')
+    expect(scale?.inputs).toMatchObject({ D: 1.5 })
+    expect(scale?.formula).toContain('1.5875')
   })
 
   it('ships carbide rows only, one per material class except other', () => {
