@@ -28,7 +28,12 @@ import type { QuantityKind, UnitId } from '../../../../core/quantity/units'
 import type { Toolpath } from '../../../../core/toolpath/model'
 import { setupFrame } from '../../../../core/toolpath/wcs'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
-import type { FeedSource, ToolpathState } from '../../messages/plan'
+import {
+  planMessages as m,
+  type FeedSource,
+  type FindingNames,
+  type ToolpathState,
+} from '../../messages/plan'
 import type { DesignPart } from '../design/model'
 
 /** Plans the picker offers: every plan of the project, archived ones last. */
@@ -249,6 +254,19 @@ export function defaultPresetName(
 /** A plan operation's name: its feature label ("Hole 1 · drill × 6", plan-v0.4.md § Plan side). */
 export function planOperationName(plan: PlanDTO, designOperationIds: readonly string[]): string {
   return planOperationLabel(plan.design.part, designOperationIds)
+}
+
+/** Readable names for the ids in a plan finding's params (DF43: never the id itself). */
+export function findingNames(plan: PlanDTO): FindingNames {
+  const part = plan.design.part
+  return {
+    design: (id) => part.operations.find((o) => o.id === id)?.name ?? m.unknownOperation,
+    planOperation: (id) => {
+      const op = allPlanOperations(plan).find((o) => o.id === id)
+      return op === undefined ? m.unknownOperation : planOperationName(plan, op.designOperationIds)
+    },
+    setup: (id) => plan.setups.find((s) => s.id === id)?.name ?? m.unknownSetup,
+  }
 }
 
 export function planOperationKind(

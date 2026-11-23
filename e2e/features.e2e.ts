@@ -4,7 +4,8 @@
 // opens the Clones draft (U3: read-out, a 2 x 2 grid row, Make clones, skip clone 3 by clicking its
 // marker in the viewport, the instance inspector) with Source and Clones groups under the Clones
 // row; the hole inspector (U2) sets type and fastener, draws the section and offers the
-// custom-size fix and a stepped countersink (F7). Task U4: Add → Chamfer on a drilling opens the chamfer inspector (Edge,
+// custom-size fix and a stepped countersink (F7); its On select names surfaces without ids (DF43,
+// render df43-hole-on). Task U4: Add → Chamfer on a drilling opens the chamfer inspector (Edge,
 // Width, Depth, Angle, the read-only Diameter and the section, D45). Windows stay hidden
 // (app.fixture.ts). With DFYOM_RENDERS=1 it also writes the light and dark review renders to
 // design/features/renders/ (ui.md § Features (v0.4), visuals reviewed in L2).
@@ -49,7 +50,7 @@ async function render(
  * With DFYOM_RENDERS=1: light and dark renders without touching the page (an open menu stays
  * open); the theme attribute is set directly and put back to the setting's after.
  */
-async function renderOpen(page: Page, name: string, task: 'df16' | 'df18'): Promise<void> {
+async function renderOpen(page: Page, name: string, task: 'df16' | 'df18' | 'df43'): Promise<void> {
   if (!RENDERS) return
   const setTheme = (t: string | null) =>
     // runs in the renderer; this tsconfig has no DOM lib, hence `globalThis`
@@ -217,6 +218,17 @@ test('features: add a hole, expand its row, the owned inspector is read-only, Ma
     navigator.getByRole('button', { name: /^Bolt hole 1, M3 counterbore/ }),
   ).toBeVisible()
   await render(page, 'hole-inspector', 'u2')
+  // DF43: the On select names surfaces, never their ids ("Stock top", not "Stock top · stock.top")
+  const on = inspector.getByRole('combobox', { name: 'On' })
+  await expect(on).toContainText('Stock top')
+  await expect(on).not.toContainText('stock.')
+  await on.click()
+  const onList = page.getByRole('listbox')
+  await expect(onList.getByRole('option', { name: 'Stock top', exact: true })).toBeVisible()
+  await expect(onList).not.toContainText('stock.')
+  await renderOpen(page, 'hole-on', 'df43')
+  await page.keyboard.press('Escape')
+  await expect(onList).toBeHidden()
   // the focused field's part of the section is amber with its value chip
   await inspector
     .getByLabel('Counterbore depth', { exact: true })

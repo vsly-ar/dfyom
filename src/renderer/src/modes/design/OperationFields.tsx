@@ -46,6 +46,7 @@ import {
   shapeArgs,
   updateArgs,
   type DesignPart,
+  dfmNames,
 } from './model'
 
 const t = designMessages.inspector
@@ -600,7 +601,6 @@ export function ParamField({
   const table = part.table
   const choices = table ? referenceChoices(part.dto, table, index) : []
   const references = choices.map((c) => ({ id: c.id, label: c.label }))
-  const name = (id: string) => part.dto.operations.find((o) => o.id === id)?.name ?? id
   const messages: FieldMessage[] = [
     ...ctx.errors
       .filter((e) => e.path === path)
@@ -612,7 +612,7 @@ export function ParamField({
         return {
           id: `${w.code}:${w.parameter ?? ''}`,
           severity: dfmMessages.tier(w),
-          text: dfmMessages.text(w, part.units, name),
+          text: dfmMessages.text(w, part.units, dfmNames(part.dto)),
           ...(source !== undefined && w.suggestion && w.parameter === path && !ctx.readOnly
             ? {
                 fix: {
@@ -685,7 +685,7 @@ function OnField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Element | 
       .map((w): FieldMessage => ({
         id: w.code,
         severity: dfmMessages.tier(w),
-        text: dfmMessages.text(w, part.units, (id) => id),
+        text: dfmMessages.text(w, part.units, dfmNames(part.dto)),
       })),
   ]
   return (
@@ -694,7 +694,7 @@ function OnField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Element | 
         <Select
           options={choices.map((c) => ({
             value: c.id,
-            label: t.surface(c.id, c.label),
+            label: c.label,
             group: c.group,
           }))}
           value={onOf(op)}

@@ -19,7 +19,7 @@ import { useRegion2d, useShell } from '../../shell/ShellContext'
 import { Button, Icon, IconButton, Menu, type MenuEntry } from '../../ui'
 import styles from './Design.module.css'
 import { ImportReportDialog, type ImportReportStep } from './ImportReportDialog'
-import type { DesignPart } from './model'
+import { itemName, type DesignPart } from './model'
 import { shapeLoops } from './ShapePicker'
 import { newItemArgs } from './shape-model'
 import { ShapeKindIcon } from './ShapeKindIcon'
@@ -147,7 +147,7 @@ export function ShapeList({
   const [selected, select] = useDesignSelection()
   const rows = useShapeList(part)
   const svg = useSvgImport(part, onChosen)
-  const opName = (id: string) => part.dto.operations.find((o) => o.id === id)?.name ?? id
+  const opName = (id: string) => itemName(part.dto, id)
   const rowButtons = useRef(new Map<string, HTMLButtonElement>())
   const addButton = useRef<HTMLButtonElement>(null)
 
