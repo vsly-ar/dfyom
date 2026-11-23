@@ -8,7 +8,7 @@
  */
 import type { Vec2 } from '../../geometry/model'
 import { chainBounds, regionLoops, type Loop, type Region } from '../../geometry/2d/model'
-import { flattenLoop } from '../../geometry/2d/testing/oracles'
+import { flattenLoop, segmentGrid } from '../../geometry/2d/testing/oracles'
 import type { Toolpath, ToolpathTool } from '../model'
 import { Heightmap } from './oracles'
 
@@ -57,20 +57,11 @@ function inSpans(xs: readonly number[], x: number): boolean {
   return n % 2 === 1
 }
 
-function distToPolys(polys: readonly Poly[], p: Vec2): number {
-  let best = Infinity
-  for (const pts of polys)
-    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
-      const a = pts[j]!
-      const b = pts[i]!
-      const dx = b[0] - a[0]
-      const dy = b[1] - a[1]
-      const len2 = dx * dx + dy * dy
-      const t =
-        len2 === 0 ? 0 : Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2))
-      best = Math.min(best, Math.hypot(p[0] - a[0] - dx * t, p[1] - a[1] - dy * t))
-    }
-  return best
+/** Distance to the nearest polygon edge (closing edges included), exact, through a segment grid. */
+function distToPolys(polys: readonly Poly[]): (p: Vec2) => number {
+  return segmentGrid(
+    polys.flatMap((pts) => pts.map((b, i) => [pts[i === 0 ? pts.length - 1 : i - 1]!, b] as const)),
+  )
 }
 
 /**
@@ -93,6 +84,8 @@ export function regionCoverage(
   hm.sweep(tool, tp, cell)
   const regionPolys = regionLoops(region).map((l) => flattenLoop(l, 0.001))
   const c0Polys = regionLoops(c0).map((l) => flattenLoop(l, 0.001))
+  const toRegion = distToPolys(regionPolys)
+  const toC0 = distToPolys(c0Polys)
   const R = tool.diameter / 2
   const area = cell * cell
   let leftover = 0
@@ -117,10 +110,10 @@ export function regionCoverage(
         if (tabs !== undefined && tabs.nearBand(p)) continue
         if (h < floor - 1e-6) belowFloor += area
         if (h <= floor + 1e-6) continue
-        const d = inSpans(c0Spans, p[0]) ? 0 : distToPolys(c0Polys, p)
+        const d = inSpans(c0Spans, p[0]) ? 0 : toC0(p)
         if (d <= R - tol) leftover += area
         else rest += area
-      } else if (h < -1e-9 && distToPolys(regionPolys, p) > tol) gouge += area
+      } else if (h < -1e-9 && toRegion(p) > tol) gouge += area
     }
   }
   return { leftover, rest, gouge, belowFloor, tabCut, tabKept }

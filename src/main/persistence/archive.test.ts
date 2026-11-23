@@ -20,8 +20,8 @@ import {
   loadArchiveBytes as loadArchive,
   readArchiveBytes as readArchive,
 } from './archive.testing'
-import { nodeFs, type PersistFs } from './fs'
-import { useTempDir } from './fs.testing'
+import type { PersistFs } from './fs'
+import { testFs, useTempDir } from './fs.testing'
 
 /** `project.json` as written: the document without its record collections. */
 const projectJson = (d: object) => fileContent(d, 'project.json').unwrap()
@@ -170,21 +170,21 @@ describe('assets (streamed)', () => {
     const calls: string[] = []
     let max = 0
     return {
-      ...nodeFs,
+      ...testFs,
       calls,
       maxChunk: () => max,
       readFile: (p) => {
         calls.push(`readFile ${p}`)
-        return nodeFs.readFile(p)
+        return testFs.readFile(p)
       },
       readRange: async (p, o, l) => {
-        const r = await nodeFs.readRange(p, o, l)
+        const r = await testFs.readRange(p, o, l)
         max = Math.max(max, r.length)
         return r
       },
       appendFile: (p, d) => {
         max = Math.max(max, d.length)
-        return nodeFs.appendFile(p, d)
+        return testFs.appendFile(p, d)
       },
     }
   }
@@ -237,9 +237,9 @@ describe('assets (streamed)', () => {
     })
     const a = await asset(big)
     const archive = join(tmp.dir, 'sig.dfyom')
-    expectOk(await writeArchive(nodeFs, archive, files(), [a], info))
+    expectOk(await writeArchive(testFs, archive, files(), [a], info))
     const out = join(tmp.dir, 'out')
-    expectOk(await loadArchiveFile(nodeFs, archive, { extract: { dir: out, want: () => true } }))
+    expectOk(await loadArchiveFile(testFs, archive, { extract: { dir: out, want: () => true } }))
     expect(sha256(await readFile(join(out, a.path)))).toBe(sha256(big))
   })
 
@@ -330,6 +330,6 @@ describe('assets (streamed)', () => {
   it('reads a file larger than one chunk that is not a zip as malformed', async () => {
     const path = join(tmp.dir, 'noise.dfyom')
     await writeFile(path, randomBytes(CHUNK_BYTES + 5))
-    expectErrCode(await readArchiveFile(nodeFs, path), 'input.malformed')
+    expectErrCode(await readArchiveFile(testFs, path), 'input.malformed')
   })
 })
