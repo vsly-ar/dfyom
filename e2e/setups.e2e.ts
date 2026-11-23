@@ -1,11 +1,14 @@
 // The setup panel in the real app (v0.2 task F6): a part machined from the top and the bottom is
 // built and planned through the bridge (keeps this test on the panel; the whole flow through the
 // UI is golden-path-v0.2.e2e.ts); then, through plan mode's UI only: the setups in machining order
-// with their direction, WCS corner and rotation and their nested operations, reorder with Alt+↑/↓,
+// with their direction, WCS corner and rotation and their nested operations, reorder with Alt+↑/↓
+// and by the setup's drag grip (hardening U3; with DFYOM_RENDERS=1 light and dark review renders of
+// the held drag go to design/features/renders/hu3-plan-drag-*.png),
 // the setup inspector's rotation, toolpath generation and one gCode program per setup exported
 // from the panel. Windows stay hidden (fixture). Selectors are roles and accessible names.
 // Docs: docs/conventions/ui.md#design-and-plan-controls-v02, docs/conventions/testing.md#end-to-end
 import { existsSync, readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import type { ElectronApplication, Page } from '@playwright/test'
 import type { CallReply, PreloadApi } from '../src/shared/preload-api'
 import { expect, test } from './app.fixture'
@@ -18,6 +21,27 @@ async function bridgeCall<T>(page: Page, name: string, args: object = {}): Promi
   )
   expect(r.ok, `${name}: ${JSON.stringify(r)}`).toBe(true)
   return (r as Extract<CallReply, { ok: true }>).value as T
+}
+
+const RENDERS = process.env['DFYOM_RENDERS'] === '1'
+const rendersDir = resolve(__dirname, '../design/features/renders')
+
+/** Light and dark renders without touching the page (a drag is held meanwhile). */
+async function render(page: Page, name: string): Promise<void> {
+  if (!RENDERS) return
+  for (const theme of ['light', 'dark'] as const) {
+    // runs in the renderer; this tsconfig has no DOM lib, hence `globalThis`
+    await page.evaluate((t) => {
+      const doc = (
+        globalThis as unknown as {
+          document: { documentElement: { setAttribute(n: string, v: string): void } }
+        }
+      ).document
+      doc.documentElement.setAttribute('data-theme', t)
+    }, theme)
+    await page.waitForTimeout(300)
+    await page.screenshot({ path: `${rendersDir}/${name}-${theme}.png` })
+  }
 }
 
 /** The export dialog answers the suggested file name in `dir`. */
@@ -98,6 +122,7 @@ test('setup panel: setups in machining order, reorder, rotation and one program 
   test.setTimeout(90_000)
   const page = await dfyom.app.firstWindow()
   await page.waitForLoadState('domcontentloaded')
+  if (RENDERS) await page.setViewportSize({ width: 1280, height: 800 })
   await stubExportDialog(dfyom.app, dfyom.dataDir)
   await bottomAndTopPlan(page)
 
@@ -120,6 +145,23 @@ test('setup panel: setups in machining order, reorder, rotation and one program 
   await page.keyboard.press('Alt+ArrowDown')
   await expect(setupRow(/^1\. Top/)).toBeVisible()
   await expect(setupRow(/^2\. Bottom/)).toBeFocused()
+  await page.keyboard.press('Alt+ArrowUp')
+  await expect(setupRow(/^1\. Bottom/)).toBeFocused()
+
+  // reorder by the setup's grip in its start gutter (U3): Bottom below Top, then back by keys
+  const items = setups.locator(':scope > li')
+  await items.first().hover()
+  const grip = (await items.first().locator('[data-reorder-grip]').first().boundingBox())!
+  const below = (await items.nth(1).boundingBox())!
+  await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(grip.x + grip.width / 2, below.y + below.height - 4, { steps: 8 })
+  await expect(items.nth(1)).toHaveAttribute('data-drop', 'after')
+  await render(page, 'hu3-plan-drag')
+  await page.mouse.up()
+  await expect(setupRow(/^1\. Top/)).toBeVisible()
+  await expect(navigator.getByText('Moved Bottom to position 2 of 2.')).toBeAttached()
+  await setupRow(/^2\. Bottom/).focus()
   await page.keyboard.press('Alt+ArrowUp')
   await expect(setupRow(/^1\. Bottom/)).toBeFocused()
 

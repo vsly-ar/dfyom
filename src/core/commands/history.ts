@@ -246,14 +246,19 @@ export class History {
   /**
    * A gesture step merged into the top entry (`mergeTop`'s caller checked it may merge): patches
    * appended, inverse patches prepended; args, title, revisionAfter and at from the step; seq and
-   * revisionBefore kept. Clears redo like `push`; the step's size is added to the entry.
+   * revisionBefore kept. A step of another command (a compound gesture) keeps the entry's command,
+   * args and title: the first step names the gesture. Clears redo like `push`; the step's size is
+   * added to the entry.
    */
   mergeTop(step: HistoryEntry, size: number): void {
     const top = this.undoStack.pop()
     if (top === undefined) return this.push(step, size)
     const e = top.entry
+    const named =
+      step.command === e.command ? {} : { command: e.command, args: e.args, title: e.title }
     const merged: HistoryEntry = {
       ...step,
+      ...named,
       seq: e.seq,
       revisionBefore: e.revisionBefore,
       patches: freeze([...e.patches, ...step.patches], true),

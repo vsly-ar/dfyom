@@ -5,9 +5,11 @@
 // shape" offers the primitives, a path and Import SVG… (task U2: the file dialog, the options step
 // of the import dialog, `design.shape.import`, then its report; "Edit shape" selects the first
 // created shape). Adding or choosing a shape selects it, which opens the Shape Editor, and closes
-// the dialog (`onChosen`). Doc: docs/conventions/ui.md#navigator-and-add,
+// the dialog (`onChosen`). Keyboard (hardening U2): Remove is the row's next tab stop and shows
+// while the row has focus; `Delete` (or `Backspace`) on a row removes an unused shape, and focus
+// goes to the next row (else the previous one, else "Add shape"). Doc: docs/conventions/ui.md#navigator-and-add,
 // docs/conventions/ui.md#design-sidebar-and-setup-dialogs-v04-d45, docs/modes/design-v0.3.md#what-a-shape-is
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { ShapeItemKind } from '../../../../core/design/shape.dto'
 import { chainBounds } from '../../../../core/geometry/2d/model'
 import type { SvgImportReport, SvgSplit, SvgUnit } from '../../../../core/import/svg'
@@ -146,6 +148,8 @@ export function ShapeList({
   const rows = useShapeList(part)
   const svg = useSvgImport(part, onChosen)
   const opName = (id: string) => part.dto.operations.find((o) => o.id === id)?.name ?? id
+  const rowButtons = useRef(new Map<string, HTMLButtonElement>())
+  const addButton = useRef<HTMLButtonElement>(null)
 
   const add = async (kind: ShapeItemKind) => {
     const r = await call('design.shape.add', {
@@ -159,17 +163,23 @@ export function ShapeList({
     onChosen()
   }
   const remove = async (id: string, name: string) => {
+    // the row focus lands on once this one is gone
+    const ids = rows.map((r) => r.id)
+    const at = ids.indexOf(id)
+    const next = ids[at + 1] ?? ids[at - 1]
     const r = await call('design.shape.remove', { partId: part.dto.id, shapeId: id })
     if (!r.ok) return
     if (selected === id) select(null)
     onRemoved(name)
+    const target = next === undefined ? addButton.current : rowButtons.current.get(next)
+    target?.focus()
   }
 
   return (
     <div className={styles['setupList']}>
       <div className={styles['setupActions']}>
         <Menu label={m.add} items={addShapeEntries((k) => void add(k), svg.start)}>
-          <Button size="sm" icon={<Icon name="add" />}>
+          <Button ref={addButton} size="sm" icon={<Icon name="add" />}>
             {m.add}
           </Button>
         </Menu>
@@ -190,8 +200,19 @@ export function ShapeList({
               >
                 <button
                   type="button"
+                  ref={(el) => {
+                    if (el) rowButtons.current.set(row.id, el)
+                    else rowButtons.current.delete(row.id)
+                  }}
                   className={styles['opSelect']}
                   aria-pressed={selected === row.id}
+                  aria-keyshortcuts="Delete"
+                  {...(reason ? { 'aria-describedby': `${row.id}-reason` } : {})}
+                  onKeyDown={(e) => {
+                    if (e.key !== 'Delete' && e.key !== 'Backspace') return
+                    e.preventDefault()
+                    if (!used) void remove(row.id, row.name)
+                  }}
                   onClick={() => {
                     if (selected !== row.id) {
                       ui.getState().selectShapeItem(row.id, 0)

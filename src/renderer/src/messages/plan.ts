@@ -84,6 +84,14 @@ export const planMessages = {
     empty: 'The machine library is empty. Add a machine to export gCode.',
   },
 
+  /** Drag to reorder setups and plan operations (hardening U3, ui.md § Reordering lists). */
+  reorder: {
+    grip: 'Drag to reorder (Alt+↑/↓)',
+    /** "Moved Top to position 1 of 2." */
+    moved: (name: string, position: number, of: number) =>
+      `Moved ${name} to position ${position} of ${of}.`,
+  },
+
   // setup panel (v0.2 task F6): docs/conventions/ui.md#design-and-plan-controls-v02
   setup: {
     title: 'Setups',

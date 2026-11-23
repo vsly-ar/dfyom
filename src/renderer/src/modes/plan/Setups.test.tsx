@@ -14,6 +14,7 @@ import { App } from '../../App'
 import { createShell, ShellProvider } from '../../shell/ShellContext'
 import { createFakeBridge } from '../../test/bridge'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
+import { dragTo, gripOf, layOutRows } from '../../test/reorder'
 import type { PlanOperationDTO } from '../../../../core/plan/plan.dto'
 import type { RunScene } from '../../viewport'
 import { planStockSize } from './model'
@@ -152,6 +153,46 @@ describe('Setup panel', () => {
     await t.user.keyboard('{ArrowDown}')
     expect(document.activeElement).toHaveTextContent('2. Top')
     expect(top).toBeDefined()
+  })
+
+  it('reorders setups and plan operations within a setup by their grip (U3)', async () => {
+    const t = await renderSetups()
+    const [bottom] = t.plan().setups
+    const top = t.plan().setups[1]!
+    const [facing, drilling1, drilling34] = top.operations as [
+      PlanOperationDTO,
+      PlanOperationDTO,
+      PlanOperationDTO,
+    ]
+    const restore = layOutRows()
+    try {
+      // Bottom (setup 1) dragged below Top
+      dragTo(gripOf(t.setupRows()[0]!), 75)
+      await waitFor(() => expect(t.plan().setups.map((s) => s.name)).toEqual(['Top', 'Bottom']))
+      expect(t.callsOf('plan.setup.move')).toEqual([
+        { planId: t.planId, setupId: bottom!.id, toIndex: 1 },
+      ])
+      expect(await screen.findByText('Moved Bottom to position 2 of 2.')).toBeInTheDocument()
+      // Drilling 1 (second in Top) dragged below Drilling 3, Drilling 4
+      const row = within(t.opsOf('Top')).getAllByRole('button', { name: /^Drilling/ })[0]!
+      dragTo(gripOf(row), 90)
+      await waitFor(() =>
+        expect(
+          t
+            .plan()
+            .setups[0]!.operations.map((o) => o.id)
+            .slice(0, 3),
+        ).toEqual([facing.id, drilling34.id, drilling1.id]),
+      )
+      expect(t.callsOf('plan.operation.move').at(-1)).toEqual({
+        planId: t.planId,
+        planOperationId: drilling1.id,
+        toIndex: 2,
+      })
+    } finally {
+      restore()
+    }
+    await expectNoAxeViolations(t.nav())
   })
 
   it('moves an operation from its menu, the row’s only action button', async () => {

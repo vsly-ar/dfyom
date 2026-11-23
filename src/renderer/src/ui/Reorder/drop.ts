@@ -29,3 +29,27 @@ export function moveItem<T>(list: readonly T[], from: number, to: number): T[] {
   next.splice(to, 0, it)
   return next
 }
+
+/** Auto-scroll band (px) at the top and bottom of the scrolling container while dragging (U3). */
+export const EDGE_ZONE_PX = 32
+/** Fastest auto-scroll (px per frame), with the pointer at or past the container's edge. */
+export const EDGE_MAX_PX = 14
+
+/**
+ * Auto-scroll speed (px per frame, negative = up) for a pointer at `y` over a container spanning
+ * `top`…`bottom` on screen: zero outside the edge bands, growing linearly to `max` at the edge
+ * and beyond (U3). A container too short for two bands gets half its height each.
+ */
+export function edgeScrollSpeed(
+  y: number,
+  top: number,
+  bottom: number,
+  zone = EDGE_ZONE_PX,
+  max = EDGE_MAX_PX,
+): number {
+  const band = Math.min(zone, (bottom - top) / 2)
+  if (band <= 0) return 0
+  if (y < top + band) return -Math.ceil(max * Math.min(1, (top + band - y) / band))
+  if (y > bottom - band) return Math.ceil(max * Math.min(1, (y - (bottom - band)) / band))
+  return 0
+}

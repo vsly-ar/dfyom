@@ -2,9 +2,11 @@
 // confirming button names the action ("Remove plan", never "OK"); Cancel is focused first.
 // Doc: docs/conventions/ui.md#confirmations (decision 11)
 import { AlertDialog } from 'radix-ui'
-import type { ReactElement, ReactNode } from 'react'
+import { useRef, type ReactElement, type ReactNode } from 'react'
 import { Button } from '../Button/Button'
+import { useOpenState } from '../Dialog/Dialog'
 import styles from '../Dialog/Dialog.module.css'
+import { useModalStack } from '../Dialog/modal-stack'
 import { MODAL_ATTR } from '../ApplyButton/ApplyScope'
 import { usePortalContainer } from '../UiProvider/UiProvider'
 
@@ -38,16 +40,20 @@ export function ConfirmDialog({
   onOpenChange,
 }: ConfirmDialogProps): React.JSX.Element {
   const container = usePortalContainer()
+  const [isOpen, setOpen] = useOpenState(open, defaultOpen, onOpenChange)
+  const content = useRef<HTMLDivElement>(null)
+  useModalStack(isOpen, content, () => setOpen(false))
   return (
-    <AlertDialog.Root
-      {...(open !== undefined ? { open } : {})}
-      {...(defaultOpen !== undefined ? { defaultOpen } : {})}
-      {...(onOpenChange ? { onOpenChange } : {})}
-    >
+    <AlertDialog.Root open={isOpen} onOpenChange={setOpen}>
       {trigger ? <AlertDialog.Trigger asChild>{trigger}</AlertDialog.Trigger> : null}
       <AlertDialog.Portal container={container}>
         <AlertDialog.Overlay className={styles['overlay']} />
-        <AlertDialog.Content className={styles['content']} data-size="sm" {...{ [MODAL_ATTR]: '' }}>
+        <AlertDialog.Content
+          ref={content}
+          className={styles['content']}
+          data-size="sm"
+          {...{ [MODAL_ATTR]: '' }}
+        >
           <AlertDialog.Title className={styles['title']}>{title}</AlertDialog.Title>
           <AlertDialog.Description className={styles['body']}>
             {description}

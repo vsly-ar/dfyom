@@ -682,3 +682,39 @@
   margin: 0 0 var(--space-1);
   color: var(--text);
 }
+
+/* drag to reorder (hardening U3, ui.md#reordering-lists-d45): as the design operation list, a
+   setup list or plan operation list that can move reserves a grip slot before the row icons, and
+   the grip shows there with the row's actions (hover, focus, selection, a running drag) */
+.gripped {
+  --grip-slot: 14px;
+}
+
+.gripped .opSelect {
+  padding-left: calc(var(--grip-slot) + var(--space-3));
+}
+
+.gripped .setupSelect {
+  padding-left: calc(var(--grip-slot) + var(--space-1));
+}
+
+.op > .rowGrip {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  left: 0;
+  width: var(--grip-slot, 14px);
+  height: var(--control-md);
+  border-radius: var(--radius-xs);
+  opacity: 0;
+  transition:
+    opacity var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
+}
+
+.op:hover > .rowGrip,
+.op:focus-within > .rowGrip,
+.op[data-selected] > .rowGrip,
+.gripped[data-dragging] .rowGrip {
+  opacity: 1;
+}

@@ -178,6 +178,42 @@ describe('shape editor', () => {
     }
   })
 
+  it('reaches shape and item row actions by keyboard (U2): Tab to Remove, Delete on a row', async () => {
+    const { user, part, shape, addShape } = await renderShapes()
+    await addShape('Rectangle')
+    await addShape('Circle')
+    await waitFor(() => expect(part().shapes).toHaveLength(2))
+    // Shapes dialog: Remove is the row's next tab stop
+    const dialog = await shapesGroup()
+    const first = within(dialog).getByRole('button', { name: /^Shape 1/ })
+    first.focus()
+    await user.tab()
+    expect(document.activeElement).toBe(
+      within(dialog).getByRole('button', { name: 'Remove Shape 1' }),
+    )
+    // Delete on a row removes the shape; focus goes to the next row
+    first.focus()
+    await user.keyboard('{Delete}')
+    await waitFor(() => expect(part().shapes?.map((s) => s.name)).toEqual(['Shape 2']))
+    expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: /^Shape 2/ }))
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    // item list: Delete on an item row removes it, focus stays in the list
+    await user.click(within(inspector()).getByRole('button', { name: 'Add item' }))
+    await user.click(await screen.findByRole('menuitem', { name: 'Rectangle' }))
+    await waitFor(() => expect(shape().items).toHaveLength(2))
+    const items = within(inspector()).getByRole('list', { name: 'Items in order' })
+    within(items)
+      .getByRole('button', { name: /^Rectangle 2/ })
+      .focus()
+    await user.keyboard('{Delete}')
+    await waitFor(() => expect(shape().items.map((i) => i.kind)).toEqual(['circle']))
+    expect(document.activeElement).toBe(within(items).getByRole('button', { name: /^Circle 1/ }))
+    // the last item stays: Delete does nothing
+    await user.keyboard('{Delete}')
+    expect(shape().items).toHaveLength(1)
+  })
+
   it('commits a field as one design.shape.item.update and undoes it', async () => {
     const { user, bridge, shape, addShape } = await renderShapes()
     await addShape('Rectangle')
