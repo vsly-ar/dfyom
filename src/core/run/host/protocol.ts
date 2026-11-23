@@ -7,6 +7,7 @@ import { z } from 'zod'
 import { ResultWireSchema } from '../../../shared/errors/schema'
 import { LOG_LEVELS } from '../../../shared/logging'
 import { MAX_TIME_SCALE } from '../clock'
+import { SerialPortInfoSchema } from '../serial'
 
 export const PROTOCOL_VERSION = 1
 
@@ -42,9 +43,21 @@ export const RunSummarySchema = z.object({
   pauses: z.number().int(),
 })
 
+/** The kinds of connection (docs/modes/run-machine.md#connect). */
+export const TARGET_KINDS = ['virtual', 'serial'] as const
+export type TargetKind = (typeof TARGET_KINDS)[number]
+
+/** A serial port as connected. */
+export const PortSchema = z.object({
+  path: z.string().min(1).max(500),
+  baud: z.number().int().min(300).max(4_000_000),
+})
+
 export const ControllerInfoSchema = z.object({
   /** What the host connected to (reported by the host, never assumed by main). */
-  target: z.literal('virtual'),
+  target: z.enum(TARGET_KINDS),
+  /** Serial connections: the port. */
+  port: PortSchema.exactOptional(),
   version: z.string(),
   settings: z.record(z.string(), Num),
   workZero: Vec3Schema,
@@ -111,6 +124,22 @@ export const VirtualTargetSchema = z.object({
 })
 export type VirtualTarget = z.output<typeof VirtualTargetSchema>
 
+/** A real controller on a serial port (docs/modes/run-machine.md#connect). */
+export const SerialTargetSchema = z.object({
+  kind: z.literal('serial'),
+  path: PortSchema.shape.path,
+  baud: PortSchema.shape.baud,
+  /** Identity of the machine copy the controller is checked against (decision 6). */
+  machineKey: z.string().max(200),
+})
+export type SerialTarget = z.output<typeof SerialTargetSchema>
+
+export const ConnectTargetSchema = z.discriminatedUnion('kind', [
+  VirtualTargetSchema,
+  SerialTargetSchema,
+])
+export type ConnectTarget = z.output<typeof ConnectTargetSchema>
+
 export const AXES = ['x', 'y', 'z'] as const
 
 export const MachineActionSchema = z.discriminatedUnion('kind', [
@@ -149,7 +178,9 @@ const request = <K extends string, T extends z.ZodRawShape>(type: K, shape: T) =
 
 export const MainMessage = z.discriminatedUnion('type', [
   InitMessage,
-  request('connect', { target: VirtualTargetSchema }),
+  request('connect', { target: ConnectTargetSchema }),
+  /** The serial ports the OS reports (docs/modes/run-machine.md#ports-and-the-port-picker). */
+  request('listPorts', {}),
   request('disconnect', {}),
   request('machine', { action: MachineActionSchema }),
   request('jobStart', {
@@ -159,7 +190,7 @@ export const MainMessage = z.discriminatedUnion('type', [
     expect: z.object({
       workZero: Vec3Schema,
       machineKey: z.string().max(200),
-      target: z.literal('virtual'),
+      target: z.enum(TARGET_KINDS),
     }),
   }),
   request('jobControl', {
@@ -209,3 +240,5 @@ export const HostMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('log'), batch: z.array(z.unknown()) }),
 ])
 export type HostMessage = z.output<typeof HostMessage>
+
+export const PortListSchema = z.array(SerialPortInfoSchema)

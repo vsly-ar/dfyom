@@ -9,4 +9,9 @@ export interface ControllerTransport {
   /** Registers a listener for received bytes; returns the unsubscribe function. */
   onData(listener: (bytes: Uint8Array) => void): () => void
   close(): AsyncAppResult<void>
+  /**
+   * Serial only: registers a listener for the port closing without being asked (cable pulled,
+   * board unpowered); returns the unsubscribe function. Doc: docs/modes/run-machine.md#serial-transport
+   */
+  onClose?(listener: (reason: string) => void): () => void
 }

@@ -600,6 +600,75 @@ describe('permission policy for machine commands', () => {
     expectErrCode(check(jogMachine, {}, services()), 'permission.denied')
   })
 
+  it('Q50: on a real connection other sources may only stop (run.md § Safety 2)', () => {
+    const serial = {
+      target: 'serial',
+      status: () => ({ connection: { state: 'open' } }),
+    } as unknown as NonNullable<Services['machine']>
+    const s: Services = { workers: inProcessWorkers, machine: serial }
+    const as = (name: string) => ({ ...jogMachine, name })
+    const check = (name: string, args: unknown = {}) =>
+      defaultPermissionPolicy.check(as(name), args, agent, s) as AppResult<void>
+    expectOk(check('run.machine.jogCancel'))
+    expectOk(check('run.machine.reset'))
+    for (const name of [
+      'run.machine.jog',
+      'run.machine.home',
+      'run.machine.unlock',
+      'run.workZero.set',
+      'run.job.start',
+      'run.job.continue',
+      'run.connection.close',
+    ]) {
+      const r = check(name)
+      expectErrCode(r, 'permission.denied')
+      expect(r.unwrapErr().message).toContain('real machine')
+      expect(r.unwrapErr().frames[0]?.data).toMatchObject({ command: name, target: 'serial' })
+    }
+    // the UI may do everything
+    expectOk(defaultPermissionPolicy.check(as('run.machine.jog'), {}, ui, s) as AppResult<void>)
+  })
+
+  it('job.resume of a machine job asks the policy with the job command; pause and abort pass', async () => {
+    let release: () => void = () => {}
+    const runJob = defineCommand({
+      kind: 'job',
+      name: 'run.job.start',
+      summary: 'test run job',
+      title: () => 'Run',
+      machine: true,
+      args: z.object({}),
+      result: z.object({}),
+      run: async () => {
+        await new Promise<void>((r) => (release = r))
+        return Ok({})
+      },
+    })
+    let target = 'virtual'
+    const machine = {
+      get target() {
+        return target
+      },
+      status: () => ({ connection: { state: 'open' } }),
+    } as unknown as NonNullable<Services['machine']>
+    const { d } = setup([runJob], { services: { workers: inProcessWorkers, machine } })
+    const started = expectOk(await d.dispatch('run.job.start', {}, ui)).value as {
+      jobId: string
+    }
+    const jobId = started.jobId
+    target = 'serial'
+    expectOk(await d.dispatch('job.pause', { jobId }, agent))
+    const resumed = await d.dispatch('job.resume', { jobId }, agent)
+    expectErrCode(resumed, 'permission.denied')
+    expect(resumed.unwrapErr().frames[0]?.data).toMatchObject({ command: 'run.job.start' })
+    expectOk(await d.dispatch('job.resume', { jobId }, ui))
+    target = 'virtual'
+    expectOk(await d.dispatch('job.pause', { jobId }, agent))
+    expectOk(await d.dispatch('job.resume', { jobId }, agent))
+    expectOk(await d.dispatch('job.abort', { jobId }, agent))
+    release()
+  })
+
   it('uses the injected policy with the parsed args and source', async () => {
     const check = vi.fn(() => fail('permission.denied', 'no'))
     const { d, events } = setup([], { policy: { check } })

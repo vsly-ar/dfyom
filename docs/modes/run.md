@@ -4,7 +4,7 @@ Status: draft · Terms: [glossary.md](../glossary.md)
 
 **Goal:** interact with the CNC machine. The baseline is running gCode; the mode goes far beyond that by integrating external devices.
 
-The v0.1 subset (streaming to the virtual machine, utility process, run commands, progress) is specified in [run-v0.1.md](run-v0.1.md).
+The v0.1 subset (streaming to the virtual machine, utility process, run commands, progress) is specified in [run-v0.1.md](run-v0.1.md); the real machine over a serial port in [run-machine.md](run-machine.md), under the [safety rules](#safety).
 
 ## Devices
 
@@ -65,7 +65,105 @@ Stop is enabled while there is something to stop: a run job (any phase, includin
 
 ## Safety
 
-To be specified before any real-machine control is implemented: e-stop semantics, what automation/LLMs may never do without confirmation, watchdogs.
+Status: draft (hardening 1.1, 2026-11-23; awaits the user's answers to [Q49–Q52](../plans/hardening.md#questions-for-the-user)) · Real-machine lane: [run-machine.md](run-machine.md) · Virtual-machine rules: [run-v0.1.md § Safety (v0.1)](run-v0.1.md#safety-v01) · Protocol facts: [grbl.md](../architecture/grbl.md#transport-and-sender)
+
+The rules every connection to a **real machine** (a controller on a serial port) follows, for every source and every window. The [virtual machine](run-v0.1.md#safety-v01) keeps its looser rules (no hardware moves). Each rule names where it is implemented: M1 (done on this branch) or the [hardening task](../plans/hardening.md#5-real-machine) that still implements it.
+
+**Assumptions until Q49–Q52 are answered** (a different answer reopens this section):
+
+- **A1 (Q49):** a GRBL 1.1–compatible controller (banner `Grbl 1.1…`, `$I` `1.1…`) on USB serial, with homing switches (`$22=1`), on a fixed-gantry machine that homes to the back right with Z up (`$23=0`); a spindle switched by hand or by `M3 S`. grblHAL extras and FluidNC are out.
+- **A2:** the machine has a **hardware emergency stop** within the operator's reach that removes power from the spindle and the stepper drivers (at least the spindle) without software. DFYOM's Stop is not an emergency stop.
+- **A3 (Q50):** machine-moving commands on a real connection come **from the UI only**; agents read, wait, hold and stop.
+- **A4 (Q51):** the first cuts happen in two steps: DFYOM's exported program through the user's existing sender first, then through DFYOM's sender.
+- **A5 (Q52):** the real-machine lane has the scope Q52 recommends ([run-machine.md § Scope](run-machine.md#scope)).
+
+### 1. Emergency stop, stop and reset
+
+| Control                                       | What it does                                                                                                                                                                                                                                                            | Who may use it on a real connection |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| **Hardware e-stop** (A2)                      | Cuts power outside DFYOM; works when the app, the USB link or the controller hangs. The only stop the operator can rely on once DFYOM has lost the connection.                                                                                                          | The operator                        |
+| **Stop** (`job.abort`, toolbar, every dialog) | Controlled stop: feed hold `!`, wait for `Hold:0` (≤ 5 s), then soft reset `0x18`; the position survives, the spindle stops, GRBL's buffers are flushed ([run-v0.1.md](run-v0.1.md#stop-errors-and-alarms)). Without a job: jog cancel, or a reset while homing (DF35). | Every source                        |
+| **Feed hold** (`job.pause`, `Esc`)            | `!`: decelerates and holds; the **spindle keeps turning** (GRBL). Resume (`~`) is motion and follows the motion rules of § 2.                                                                                                                                           | Every source                        |
+| **Jog cancel** (`run.machine.jogCancel`)      | `0x85`: ends every queued jog.                                                                                                                                                                                                                                          | Every source                        |
+| **Reset (immediate)** (`run.machine.reset`)   | `0x18` at once. During motion GRBL raises `ALARM:3` (position lost: home again).                                                                                                                                                                                        | Every source                        |
+
+- **Stopping is never refused and never confirmed** ([ui.md](../conventions/ui.md#confirmations)): stop, hold, jog cancel and reset are allowed for every source on every connection, skip the command queue (`urgent`) and need no plan, no homing and no reservation.
+- **Reset:** GRBL keeps G54 over a reset (EEPROM) and loses the position only when the reset interrupts motion (`ALARM:3`); after any position alarm DFYOM marks the machine **not homed**, which blocks runs until `$H` ([run-v0.1.md](run-v0.1.md#implementation-task-39)). A reset never restarts a program.
+- **Critical alarms** (`ALARM:1` hard limit, `ALARM:2` soft limit): GRBL answers nothing until a reset; DFYOM refuses every other command until then and shows the alarm with the next step (reset, then home; wording in M3).
+
+### 2. Who may command a real connection (Q50)
+
+The permission policy ([commands.md](../architecture/commands.md#dispatcher-pipeline) step 5, `src/core/commands/permission.ts`) decides per command and source. **M1.**
+
+| Command                                                                                                                                             | UI (a person at the app) | Agents, CLI, automation, system                                          |
+| --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------ |
+| Reading: `run.status.get`, `run.ports.scan`, `job.get`, `job.list`, `job.wait`; plan and export commands                                            | yes                      | yes                                                                      |
+| Stop paths: `job.pause`, `job.abort`, `run.machine.jogCancel`, `run.machine.reset`                                                                  | yes                      | yes                                                                      |
+| `run.connection.open { target: 'serial' }`; `run.connection.close` of a real connection                                                             | yes                      | **no** (`permission.denied`)                                             |
+| Motion and machine state: `run.machine.home`, `.unlock`, `.jog`, `run.workZero.set`, `run.job.start`, `run.job.continue`, `job.resume` of a run job | yes                      | **no** (`permission.denied`)                                             |
+| Anything on the virtual machine                                                                                                                     | yes                      | yes (unchanged, [grbl.md](../architecture/grbl.md#transport-and-sender)) |
+
+- Deny by default: a command the table does not name, a connection still opening, an unknown target or a process without a machine port counts as real.
+- `job.resume` is not a machine command, but resuming a held run is motion: before resuming a job whose command is a machine command, the dispatcher asks the policy with that command (`run.job.start`).
+- The refusal says why: `permission.denied`, `data: { command, source, target }`, message "agent sources may not run run.machine.jog on a real machine; the user runs it from the app". The exit criterion's agent variant ends at `plan.export`; the user runs it from the app.
+- **Later** (not in hardening): agent-started real runs, each confirmed in the app by the user, with a watchdog that holds the run when the agent stops polling.
+
+### 3. Confirmations before motion
+
+Machine motion the operator has not seen coming is confirmed once, where it starts.
+
+| When                                             | Asks                                                                                                                                                                                                                                                                    | Status                  |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| **Home** on a real connection while not homed    | "Home the machine? It moves to its home corner. Keep hands clear and know where the emergency stop is." Confirm "Home".                                                                                                                                                 | M1                      |
+| Unlock without homing                            | As today ([ui.md](../conventions/ui.md#run-mode-safety-ui)): the position is unknown until homed.                                                                                                                                                                       | existing                |
+| **Start run** on a real connection               | The pre-flight names the real target ("Serial port /dev/cu.usbmodem1101 at 115200 baud") and, beyond today's contents, the plan status and the air-cut hint ("First run: spindle off, Z zero raised above the stock"); its primary button reads "Start on the machine". | M1 target line; rest M2 |
+| **Continue** after a tool change or setup change | The dialog states the Z zero to set and that the spindle starts again; continuing is the confirmation.                                                                                                                                                                  | existing                |
+| Resume after a feed hold                         | No dialog; a deliberate click, never a single key ([ui.md](../conventions/ui.md#confirmations)).                                                                                                                                                                        | existing                |
+
+Jogs are not confirmed: they are short, cancellable, refused outside the travel (`run.travel`) and start only from a click.
+
+### 4. Before a real run streams
+
+Checked by `run.job.start` (main) and again by the host at `jobStart` ([run-v0.1.md § Run job](run-v0.1.md#run-job)); any failure refuses the start before a byte is sent.
+
+1. The plan is `finalized` or `inUse` ([run-machine.md amendment of decision 5](run-machine.md#amendments-to-run-v01md)). **M1.**
+2. The controller's `$$` matches the connection's machine copy in every mapped setting and has homing enabled ([run-machine.md § Settings check](run-machine.md#settings-check)); else `run.state`, rule `settingsMismatch`. **M1.**
+3. Idle, homed in this connection, the work zero re-read (`$#`) and unchanged since the check, the soft-limit check passed (existing).
+4. The connection is reserved for the job from its checks to its stream (existing).
+
+### 5. Watchdogs
+
+| Watchdog             | Limit                                                                                                                                                                                                                                                       | On expiry                                                                                                                     |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Status reply         | 2 s wall per `?` (polled at 5 Hz)                                                                                                                                                                                                                           | `machine.connection` ("no status reply"): a lost connection (§ 6)                                                             |
+| **Homing exception** | none while `$H` is in flight: real GRBL runs no realtime protocol inside the homing cycle and answers `?` only after it ([grbl.md](../architecture/grbl.md#homing-and-machine-coordinates)). After `$H` ends the outstanding poll gets a fresh 2 s. **M1.** | The `$H` command timeout still applies; Stop (reset → `ALARM:6`) always works, since GRBL checks for a reset inside the cycle |
+| Command reply        | 10 s; `$H` 10 min                                                                                                                                                                                                                                           | `machine.connection`                                                                                                          |
+| Lost `ok`            | Idle reported while a line waits, for 5 s plus the dwells in flight                                                                                                                                                                                         | `machine.connection`                                                                                                          |
+| Port closed          | the serial port reports `close` (cable pulled, board without power). **M1.**                                                                                                                                                                                | `machine.connection` at once                                                                                                  |
+| Critical alarm       | the status watchdog is suspended until the reset (GRBL is silent)                                                                                                                                                                                           | –                                                                                                                             |
+| Banner mid-session   | the controller restarted on its own                                                                                                                                                                                                                         | a running job fails (`machine.connection`, or `machine.alarm` 3 during motion); not homed                                     |
+| Host exit            | the machine host process ended                                                                                                                                                                                                                              | as a lost connection                                                                                                          |
+
+The windows are not watched: the host streams without them ([run-v0.1.md § Processes](run-v0.1.md#processes)), a frozen window never stops a run, and every window offers Stop. No agent watchdog is needed while agents cannot start motion (§ 2).
+
+### 6. Lost connection, disconnect and reconnect
+
+A lost USB link **cannot be made safe by DFYOM**: GRBL keeps executing what is in its buffers (up to 15 planned motion blocks and 128 bytes of lines: seconds of cutting, more for long moves) with the spindle on, then stops with the spindle still on (no `M5` arrives).
+
+- DFYOM fails the job with `machine.connection`, closes the connection (no automatic reconnect: the controller's state is unknown) and says so: "Connection to the machine lost. It may still be moving and the spindle may still be on: use the emergency stop." (wording in the real-target failure dialog: M2).
+- **Reconnect = reset:** opening the port resets most Arduino-based GRBL boards (DTR); otherwise the handshake sends `0x18` when no banner comes. Either way buffered motion ends and GRBL starts locked (`$22=1`): the new connection is **not homed** and must home before a run.
+- **Disconnect = reset:** closing a real connection on purpose (`run.connection.close`, app quit) sends `0x18` before closing the port, also when Idle, so no queued jog or line runs on after DFYOM let go. A running job is stopped first (hold, then reset), as on the virtual machine. **M1.**
+- App quit during a run asks first, then stops the run (existing, [run-v0.1.md](run-v0.1.md#implementation-task-312-run-mode-ui)).
+
+### 7. What DFYOM never does on a real machine
+
+- Write GRBL settings (`$x=`), send raw gCode or `$` lines (no MDI console, Q52), restart a program at an arbitrary line, or reconnect on its own.
+- Stream a program it did not export, in the same job, from a finalized plan at the live work zero.
+- Change a plan's machine copy to match the controller silently ([library.md](../architecture/library.md#grbl--import)).
+
+### Testing the rules
+
+Without hardware: the sender and the host over a loopback serial stream against the GRBL emulator in its GRBL-exact silent-homing mode ([run-machine.md § Testing](run-machine.md#testing)); the permission table per source (`permission.test.ts`); fault injection (lost port, alarm mid-run) with M8. With hardware: the manual checklist of [testing.md](../conventions/testing.md) (hardening 1.3) before X1.
 
 ## Open questions
 

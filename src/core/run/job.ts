@@ -11,10 +11,12 @@ import type { JobContext, Services } from '../commands/context'
 import { defineCommand } from '../commands/define'
 import { PlanWarningSchema, type PlanWarning } from '../plan/checks'
 import { PlanIdSchema, PlanRecordIdSchema, type SetupDTO } from '../plan/plan.dto'
-import { findPlanDTO } from '../plan/plan'
+import { findPlanDTO, snapshotById } from '../plan/plan'
 import { machineKeyOf } from './machine-key'
 import { chooseSetup, setupDirection, setupRotation } from '../plan/setups'
-import { checkAllowed } from '../plan/status'
+import { checkAllowed, statusError } from '../plan/status'
+import type { MachineValuesDTO } from '../library/machine.dto'
+import { settingsCheck } from './settings-check'
 import type { ProjectDoc } from '../project/document'
 import { commentLine } from '../post/grbl/format'
 import type { GrblExport } from '../post/export'
@@ -50,7 +52,7 @@ export function programSections(e: GrblExport): SenderProgram['sections'] {
 export function machineOf(services: Services, where: string): AppResult<MachineService> {
   const m = services.machine
   if (m?.target === undefined)
-    return fail('run.notConnected', 'connect to the virtual machine first', { where })
+    return fail('run.notConnected', 'connect to a machine first', { where })
   return Ok(m)
 }
 
@@ -80,6 +82,48 @@ export function nextSetupOf(setup: SetupDTO): z.output<typeof NextSetupSchema> {
     direction: setupDirection(setup),
     rotation: setupRotation(setup),
   }
+}
+
+/** Plan statuses a real machine runs (run-machine.md amendment of decision 5). */
+const REAL_MACHINE_STATUSES: readonly string[] = ['finalized', 'inUse']
+
+/** The real-machine rules of `run.job.start` beyond the virtual machine's (run.md § Safety 4). */
+function realMachineChecks(
+  plan: Parameters<typeof snapshotById>[0],
+  m: MachineService,
+  planId: string,
+  state: string,
+  where: string,
+): AppResult<void> {
+  if (!REAL_MACHINE_STATUSES.includes(plan.status))
+    return statusError(
+      planId,
+      plan.status,
+      where,
+      'a real machine runs only finalized or inUse plans',
+    ).mapErr((e) => e.withContext(where, { target: 'serial' }))
+  const snap = plan.machine === undefined ? undefined : snapshotById(plan, plan.machine)
+  const settings = m.controllerSettings
+  if (snap === undefined || settings === undefined)
+    return fail('run.state', "the controller's settings are not known", {
+      where,
+      data: { state },
+    })
+  const check = settingsCheck(snap.values as MachineValuesDTO, settings, 'plan')
+  if (check.matches) return Ok(undefined)
+  const message = check.homingEnabled
+    ? `the controller's settings differ from the plan's machine: ${check.differences
+        .map(
+          (d) =>
+            `${d.setting} ${d.field} is ${d.controller} on the controller, ${d.machine} in the plan`,
+        )
+        .join('; ')}`
+    : 'homing is off on the controller ($22=0): DFYOM runs only on a homed machine'
+  return fail('run.state', message, {
+    where,
+    data: { state, differences: check.differences, homingEnabled: check.homingEnabled },
+    issues: [{ path: ['planId'], rule: 'settingsMismatch', message }],
+  })
 }
 
 /** Maps `job.pause`/`job.resume` to hold/resume and `job.abort` to the controlled stop. */
@@ -118,15 +162,6 @@ async function runJob(
         where,
       },
     )
-  if (status.state !== 'Idle' || !status.homed)
-    return fail(
-      'run.state',
-      `the machine must be Idle and homed (is ${status.state}${status.homed ? '' : ', not homed'})`,
-      {
-        where,
-        data: { state: status.state, homed: status.homed },
-      },
-    )
   const plan = findPlanDTO(doc, planId, where)
   if (plan.isErr()) return plan
   const allowed = checkAllowed(planId, plan.unwrap().status, where)
@@ -140,7 +175,7 @@ async function runJob(
   if (key.unwrap() === undefined)
     return fail('post.noMachine', 'the plan has no machine', { where, data: { planId } })
   if (key.unwrap() !== m.machineKey)
-    return fail('run.state', "the virtual machine emulates another machine than this plan's", {
+    return fail('run.state', "the connection is for another machine than this plan's", {
       where,
       data: { state: status.state },
       issues: [
@@ -151,6 +186,21 @@ async function runJob(
         },
       ],
     })
+  // a real machine: finalized plans only, and the controller's $$ must match the machine copy
+  // (docs/modes/run.md#4-before-a-real-run-streams)
+  if (m.target === 'serial') {
+    const real = realMachineChecks(plan.unwrap(), m, planId, status.state, where)
+    if (real.isErr()) return real
+  }
+  if (status.state !== 'Idle' || !status.homed)
+    return fail(
+      'run.state',
+      `the machine must be Idle and homed (is ${status.state}${status.homed ? '' : ', not homed'})`,
+      {
+        where,
+        data: { state: status.state, homed: status.homed },
+      },
+    )
   // From here to the stream the connection is held for this job: no jog or work-zero change
   // slips in between the soft-limit check and the start (the host re-checks the G54 anyway).
   const reserved = m.reserve(ctx.jobId)

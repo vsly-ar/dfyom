@@ -88,7 +88,11 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
         <dt>{m.machine}</dt>
         <dd>{info?.machine ?? '–'}</dd>
         <dt>{m.target}</dt>
-        <dd>{m.virtualTarget(runMessages.timeScale(timeScale))}</dd>
+        <dd>
+          {status.connection.target === 'serial' && status.connection.port !== undefined
+            ? m.serialTarget(status.connection.port.path, status.connection.port.baud)
+            : m.virtualTarget(runMessages.timeScale(timeScale))}
+        </dd>
         <dt>{m.workZero}</dt>
         <dd className={styles['mono']}>
           {status.workZero.map((v) => formatLength(v, units)).join(' · ')}{' '}

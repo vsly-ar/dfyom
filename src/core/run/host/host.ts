@@ -32,6 +32,8 @@ import {
 import { envelopeOf, travelViolation, type Envelope, type TravelViolation } from '../grbl/envelope'
 import { POSITION_ALARMS } from '../grbl/status'
 import { VirtualGrblTransport } from '../grbl/virtual-transport'
+import { sortPorts, type SerialPorts } from '../serial'
+import type { ControllerTransport } from '../transport'
 import {
   AXES,
   MainMessage,
@@ -40,9 +42,18 @@ import {
   type HostMessage,
   type HostStatus,
   type MachineAction,
+  type ConnectTarget,
   type MainRequest,
+  type SerialTarget,
+  type TargetKind,
   type VirtualTarget,
 } from './protocol'
+
+/**
+ * Banner wait on a serial port: opening it resets most Arduino-based boards, whose bootloader
+ * needs 1–2 s before GRBL prints its banner (docs/modes/run-machine.md#connect).
+ */
+export const SERIAL_BANNER_MS = 3000
 
 export interface MachineHostOptions {
   readonly timers: TimerHost
@@ -52,6 +63,8 @@ export interface MachineHostOptions {
   readonly throttleMs?: number
   /** Called after `disconnect` was answered: the process may exit. */
   readonly onDisconnected?: () => void
+  /** Serial ports (Node `serialport` in the host entries, a loopback in tests); absent = none. */
+  readonly serial?: SerialPorts
 }
 
 export interface MachineHost {
@@ -78,6 +91,8 @@ interface Job {
 }
 
 interface Connection {
+  readonly target: TargetKind
+  readonly port?: { readonly path: string; readonly baud: number } | undefined
   readonly machineKey: string
   readonly clock: ScaledClock
   readonly sender: GrblSender
@@ -202,9 +217,38 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     return fail('run.notConnected', 'no machine connection', { where: 'machineHost' })
   }
 
-  async function connect(target: VirtualTarget): Promise<AppResult<ConnectedInfo>> {
+  async function connect(target: ConnectTarget): Promise<AppResult<ConnectedInfo>> {
     if (conn !== undefined || connecting)
       return fail('run.busy', 'already connected', { where: 'machineHost.connect' })
+    return target.kind === 'serial' ? connectSerial(target) : connectVirtual(target)
+  }
+
+  /** A real controller on a serial port (docs/modes/run-machine.md#connect). */
+  async function connectSerial(target: SerialTarget): Promise<AppResult<ConnectedInfo>> {
+    const where = 'machineHost.connect'
+    if (opts.serial === undefined)
+      return fail('machine.connection', 'serial ports are not available here', { where })
+    connecting = true
+    const opened = await opts.serial.open(target.path, target.baud)
+    if (opened.isErr()) {
+      connecting = false
+      return Err(opened.unwrapErr().withContext(where, { path: target.path }))
+    }
+    const transport = opened.unwrap()
+    // a real controller runs in real time (decision 3 is virtual-only)
+    const clock = new ScaledClock(timers, { scale: 1 })
+    const sender = new GrblSender(transport, clock, {
+      timers,
+      log,
+      bannerTimeoutMs: SERIAL_BANNER_MS,
+    })
+    clock.setBusy(() => sender.needsStatus)
+    const port = { path: target.path, baud: target.baud }
+    // never assumed homed: GRBL with $22=1 starts locked, and the position is unknown
+    return finishConnect(target, clock, sender, transport, false, port)
+  }
+
+  async function connectVirtual(target: VirtualTarget): Promise<AppResult<ConnectedInfo>> {
     const settings: Record<number, number> = {}
     for (const [k, v] of Object.entries(target.settings)) settings[Number(k)] = v
     const created = GrblEmulator.create({
@@ -220,17 +264,37 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     const transport = new VirtualGrblTransport(emu, clock)
     const sender = new GrblSender(transport, clock, { timers, log })
     clock.setBusy(() => emu.nextEventAt() !== undefined || sender.needsStatus)
+    const c = await finishConnect(target, clock, sender, transport, !target.homing, undefined)
+    if (c.isErr() || target.prepare === undefined || conn === undefined) return c
+    const prepared = await prepare(conn, target.prepare.workZero)
+    if (prepared.isErr()) return Err(prepared.unwrapErr())
+    status.now()
+    return Ok({ ...c.unwrap(), workZero: conn.workZero, homed: conn.homed })
+  }
+
+  /** The handshake and the connection's bookkeeping, for every target. */
+  async function finishConnect(
+    target: ConnectTarget,
+    clock: ScaledClock,
+    sender: GrblSender,
+    transport: ControllerTransport,
+    homed: boolean,
+    port: { path: string; baud: number } | undefined,
+  ): Promise<AppResult<ConnectedInfo>> {
     const info = await sender.connect()
     connecting = false
     if (info.isErr()) {
       clock.dispose()
+      if (target.kind === 'serial') await transport.close()
       return Err(info.unwrapErr())
     }
     const c: Connection = {
+      target: target.kind,
+      ...(port === undefined ? {} : { port }),
       machineKey: target.machineKey,
       clock,
       sender,
-      homed: !target.homing,
+      homed,
       workZero: info.unwrap().workZero,
       envelope: envelopeOf(info.unwrap().settings),
     }
@@ -243,15 +307,22 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     })
     sender.onEvent((e) => onSenderEvent(c, e))
     log.info(
-      { target: 'virtual', version: info.unwrap().version, timeScale: target.timeScale },
+      {
+        target: target.kind,
+        version: info.unwrap().version,
+        timeScale: clock.scale,
+        ...(port === undefined ? {} : { path: port.path, baud: port.baud }),
+      },
       'connected',
     )
-    if (target.prepare !== undefined) {
-      const prepared = await prepare(c, target.prepare.workZero)
-      if (prepared.isErr()) return Err(prepared.unwrapErr())
-    }
     status.now()
-    return Ok({ ...info.unwrap(), target: 'virtual', workZero: c.workZero, homed: c.homed })
+    return Ok({
+      ...info.unwrap(),
+      target: target.kind,
+      ...(port === undefined ? {} : { port }),
+      workZero: c.workZero,
+      homed: c.homed,
+    })
   }
 
   /** Decision 7: home at `max` speed, then G54 at the given MPos. */
@@ -390,7 +461,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
   async function jobStart(
     jobId: string,
     program: { lines: string[]; sections: { fromLine: number; label: string }[] },
-    expect: { workZero: Vec3; machineKey: string; target: 'virtual' },
+    expect: { workZero: Vec3; machineKey: string; target: TargetKind },
   ): Promise<AppResult<void>> {
     const where = 'machineHost.jobStart'
     const c = conn
@@ -420,7 +491,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     c: Connection,
     job: Job,
     program: { lines: string[]; sections: { fromLine: number; label: string }[] },
-    expect: { workZero: Vec3; machineKey: string; target: 'virtual' },
+    expect: { workZero: Vec3; machineKey: string; target: TargetKind },
   ): Promise<AppResult<void>> {
     const where = 'machineHost.jobStart'
     const jobId = job.jobId
@@ -438,7 +509,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         data: { state: machineState(c), ...data },
         issues: [{ path: ['expect'], rule, message }],
       })
-    if (expect.target !== 'virtual')
+    if (expect.target !== c.target)
       return refuse(mismatch('targetMismatch', 'the job was checked for another target', {}))
     if (expect.machineKey !== c.machineKey)
       return refuse(
@@ -565,7 +636,9 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     conn = undefined
     status.cancel()
     progress.cancel()
-    const closed = await c.sender.close()
+    // disconnect = reset on a real machine: no queued jog or line runs on after we let go
+    // (docs/modes/run.md#6-lost-connection-disconnect-and-reconnect)
+    const closed = await c.sender.close({ reset: c.target === 'serial' })
     c.clock.dispose()
     log.info('disconnected')
     return closed
@@ -628,9 +701,24 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         return jobStart(m.jobId, m.program, m.expect)
       case 'jobControl':
         return jobControl(m.jobId, m.action, m.expect)
+      case 'listPorts': {
+        if (opts.serial === undefined)
+          return fail('machine.connection', 'serial ports are not available here', {
+            where: 'machineHost.listPorts',
+          })
+        return (await opts.serial.list()).map(sortPorts)
+      }
       case 'timeScale': {
         const c = conn
         if (c === undefined) return notConnected()
+        if (c.target !== 'virtual')
+          return fail('run.state', 'the time scale is for the virtual machine only', {
+            where: 'machineHost.timeScale',
+            data: { state: machineState(c) },
+            issues: [
+              { path: ['scale'], rule: 'virtualOnly', message: 'a real machine runs at 1×' },
+            ],
+          })
         c.clock.setScale(m.scale as TimeScale)
         log.debug({ timeScale: m.scale }, 'time scale')
         status.now()

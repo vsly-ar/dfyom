@@ -128,7 +128,7 @@ v0.1: a 3-axis router or mill on a GRBL-family controller ([ADR 0013](../decisio
 
 ## GRBL `$$` import
 
-Status: implemented (paste import, D30) · planned: automatic diff on a real-machine connect · Origin: ported from the user's cnc-code `grblSettings.ts` (relicensed GPL-3.0-or-later)
+Status: implemented (paste import, D30; diff on a real-machine connect, hardening M1, draft) · Origin: ported from the user's cnc-code `grblSettings.ts` (relicensed GPL-3.0-or-later)
 
 The user pastes GRBL's `$$` answer (from any sender or terminal); DFYOM shows what it would change in a library machine and applies only the changes the user accepts. **DFYOM never writes settings to GRBL** (writing `$x=` would be a separate, explicit command).
 
@@ -138,21 +138,23 @@ The user pastes GRBL's `$$` answer (from any sender or terminal); DFYOM shows wh
 - Unknown ids (`$999=1`, grblHAL extras) are read and returned as `ignored`; text with no setting at all is `input.malformed` (rule `noSettings`, path `text`).
 - `$$` values are always mm, mm/min, mm/s² and rpm (`$13` changes only reports).
 
-**Mapping** to machine fields (`src/core/library/grbl-import.ts`, rules ported from cnc-code; `$20` and `$23` are read but not yet mapped to `softLimits` / `homingCorner`, set those in the editor):
+**Mapping** to machine fields (`src/core/library/grbl-import.ts`, rules ported from cnc-code; `$20` and `$23` mapped since hardening M1):
 
-| Setting      | Field                               | Rule                                                                                                                         |
-| ------------ | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `$11`, `$12` | `junctionDeviation`, `arcTolerance` | –                                                                                                                            |
-| `$100–$102`  | `stepsPerMm.x/y/z`                  | All three together when the machine has none (rule `allAxes`).                                                               |
-| `$110–$112`  | `maxFeedRate.x/y/z`                 | –                                                                                                                            |
-| `$120–$122`  | `acceleration.x/y/z`                | All three together when the machine has none (rule `allAxes`).                                                               |
-| `$130–$132`  | `travel.x/y/z`                      | Only with soft limits on (`$20=1`); else skipped (`softLimitsOff`): GRBL never uses them and they may be its defaults.       |
-| `$30`, `$31` | `spindle.maxSpeed`, `.minSpeed`     | Only for a `gcode` spindle; a manual dial ignores `S`, skipped (`manualSpindle`). `$31=0` means "no minimum" and is skipped. |
-| `$27`        | `pullOff`                           | –                                                                                                                            |
+| Setting      | Field                               | Rule                                                                                                                                                                                                      |
+| ------------ | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `$11`, `$12` | `junctionDeviation`, `arcTolerance` | –                                                                                                                                                                                                         |
+| `$100–$102`  | `stepsPerMm.x/y/z`                  | All three together when the machine has none (rule `allAxes`).                                                                                                                                            |
+| `$110–$112`  | `maxFeedRate.x/y/z`                 | –                                                                                                                                                                                                         |
+| `$120–$122`  | `acceleration.x/y/z`                | All three together when the machine has none (rule `allAxes`).                                                                                                                                            |
+| `$130–$132`  | `travel.x/y/z`                      | Only with soft limits on (`$20=1`); else skipped (`softLimitsOff`): GRBL never uses them and they may be its defaults.                                                                                    |
+| `$30`, `$31` | `spindle.maxSpeed`, `.minSpeed`     | Only for a `gcode` spindle; a manual dial ignores `S`, skipped (`manualSpindle`). `$31=0` means "no minimum" and is skipped.                                                                              |
+| `$27`        | `pullOff`                           | –                                                                                                                                                                                                         |
+| `$20`        | `softLimits`                        | `1` → on, `0` → off. Unchanged when it equals the stored value or, with none stored, the default (on).                                                                                                    |
+| `$23`        | `homingCorner`                      | Bits 0–1 → `backRight` (0), `backLeft` (1), `frontRight` (2), `frontLeft` (3); bit 2 set (Z homes down) is skipped (`zHomesDown`). Unchanged when it equals the stored corner or, with none, `backRight`. |
 
-- A value ≤ 0 of a mapped setting is skipped (`notPositive`); a value equal to the stored one within GRBL's printed precision (0.0005) is `unchanged`.
+- A value ≤ 0 of a mapped quantity setting is skipped (`notPositive`); a value equal to the stored one within GRBL's printed precision (0.0005) is `unchanged`.
 - A new value is written in the machine's own unit system ([`itemUnitSystem`](#command-input)): a bare number in an mm machine, the GRBL unit written out in an inch machine (`5000 mm/min`), never converted.
-- **Diff entry:** `{ setting: '$110', field: 'maxFeedRate.x', value: 5000, from: '3000 mm/min' | null, to: '5000 mm/min', together: ['$120','$121','$122']? }`; `from`/`to` are display texts with their unit. Skipped entries carry `{ setting, field, value, rule }`; the UI words the rule.
+- **Diff entry:** `{ setting: '$110', field: 'maxFeedRate.x', value: 5000, from: '3000 mm/min' | null, to: '5000 mm/min', together: ['$120','$121','$122']? }`; `from`/`to` are display texts with their unit (`on`/`off` for `$20`, the corner name such as `backRight` for `$23`). Skipped entries carry `{ setting, field, value, rule }`; the UI words the rule.
 - `machineSettingsDiff(machineValues, settings)` takes a parsed `Map<number, number>`, so the connect path can call it with `ControllerInfo.settings` (planned below).
 
 **Commands** (app scope, like the other library commands):
@@ -161,7 +163,7 @@ The user pastes GRBL's `$$` answer (from any sender or terminal); DFYOM shows wh
 - Command `library.machine.settings.import { id, revision, text, accept }` (`effect`, not undoable): re-parses `text`, applies the accepted changes (`accept`: setting names from `changes`, at least one) and stores the machine; result `{ item, applied }`. An `accept` entry that is not a change is `input.malformed` (`notAChange`, path `accept.<i>`); accepting part of a `together` group is `input.malformed` (`allAxes`); the new machine is checked by the model like any update; a stale `revision` is `command.conflict`.
 - **UI:** "Import $$…" in the Library window's machine editor ([ui-library-window.md](../conventions/ui-library-window.md#implementation-task-l1)).
 
-**Planned: diff on connect** (needs the real serial transport, after v0.3). On `run.connection.open` against a real controller, compare the handshake's `$$` (`ControllerInfo.settings`) with the library machine through `machineSettingsDiff`; on any change show a non-blocking "Machine settings differ: Review" that opens the same diff view. The plan's machine snapshot is never changed silently, and nothing is written to GRBL.
+**Diff on connect** (hardening M1, [run-machine.md § Settings check](../modes/run-machine.md#settings-check)): `run.connection.open` against a real controller compares the handshake's `$$` (`ControllerInfo.settings`) with the connection's machine copy (the plan's, or the library machine) through `machineSettingsDiff`; a difference does not refuse the connection but refuses real runs until the copy matches. The plan's machine snapshot is never changed silently, and nothing is written to GRBL.
 
 ## Snapshots
 
