@@ -496,7 +496,7 @@ export const designMessages = {
     noChoice: 'No tool can make this operation.',
     groups: {
       generalized: 'Generalized tool',
-      library: 'Library tools that fit',
+      library: 'Library',
       current: 'Current tool',
       add: 'Add',
     },
@@ -505,6 +505,31 @@ export const designMessages = {
     addToLibrary: 'Add to library',
     generalizedNote: 'Type and size only: Plan uses a matching library tool.',
     library: (name: string, diameter: string) => `${name} · Ø ${diameter}`,
+    /** A library option's geometry (its description's start): "RE 1 mm · 2 flutes". */
+    flutes: (n: number) => (n === 1 ? '1 flute' : `${n} flutes`),
+    cornerRadius: (radius: string) => `RE ${radius}`,
+    /** A library tool of the operation's type that fails another fit rule (DF42). */
+    unfit: (why: string) => `Doesn’t fit: ${why}`,
+    unfitWhy: {
+      slot: (width: string | undefined) =>
+        `wider than the ${width === undefined ? '' : `${width} `}slot`,
+      pocket: 'wider than the pocket at its narrowest',
+      cornerRadius: (corner: string | undefined) =>
+        `too wide for the ${corner === undefined ? '' : `${corner} `}corner`,
+      floorRadius: (radius: string | undefined) =>
+        radius === undefined
+          ? 'leaves a fillet on the sharp floor'
+          : `doesn’t match the ${radius} floor radius`,
+      diameter: (hole: string | undefined) =>
+        `doesn’t fit the ${hole === undefined ? '' : `Ø ${hole} `}hole`,
+      reach: 'too short for the depth',
+      angle: 'another angle',
+      other: 'too small for the chamfer',
+    },
+    /** `dfm.toolNotInLibrary`'s fix: the library's nearest tool of the type (DF42). */
+    useNear: (name: string, diameter: string) => `Use ${name} (${diameter})`,
+    /** `dfm.toolUnfit` of a locked tool wider than the slot: widen it to the tool (DF42). */
+    widenSlot: (width: string) => `Widen slot to ${width}`,
     current: (label: string) => `${label} (current)`,
     currentUnfit: 'Doesn’t fit this operation.',
     /** The source note (ui.md § Design and plan controls (v0.2): tool field). */

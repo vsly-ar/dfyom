@@ -100,6 +100,33 @@ describe('Field', () => {
     expect(screen.queryByRole('button', { name: 'Dismiss warning' })).toBeNull()
   })
 
+  it('shows an alternative action after the fix (DF42)', async () => {
+    const fix = vi.fn()
+    const other = vi.fn()
+    const { user } = renderUi(
+      <Field
+        label="Tool"
+        messages={[
+          {
+            id: 'dfm.toolNotInLibrary',
+            severity: 'info',
+            text: 'Plan needs a 6 mm flat end mill: add one to the library.',
+            fix: { label: 'Use Flat 6.22 (6.22 mm)', onApply: fix },
+            alternative: { label: 'Add to library', onApply: other, icon: <Icon name="add" /> },
+          },
+        ]}
+      >
+        <input />
+      </Field>,
+    )
+    const buttons = screen.getAllByRole('button').map((b) => b.textContent)
+    expect(buttons).toEqual(['Use Flat 6.22 (6.22 mm)', 'Add to library'])
+    await user.click(screen.getByRole('button', { name: 'Add to library' }))
+    expect(other).toHaveBeenCalledOnce()
+    expect(fix).not.toHaveBeenCalled()
+    await expectNoAxeViolations()
+  })
+
   it('draws a check on a warning’s fix unless the fix brings its own icon', () => {
     renderUi(
       <>

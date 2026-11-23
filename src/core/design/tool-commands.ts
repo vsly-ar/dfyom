@@ -43,7 +43,9 @@ import {
   fitOf,
   fittingLibraryTools,
   generalizedChoice,
+  nearLibraryTool,
   resolveDesignTool,
+  unfitLibraryTools,
   type ChoiceInput,
 } from './tool-choice'
 
@@ -284,18 +286,41 @@ const snapshotUpdate = defineCommand({
 
 // ── candidates ────────────────────────────────────────────────────────────────────────────
 
+/** A library tool as the tool field lists it: what tells tools apart at a glance. */
+const LibraryToolEntry = {
+  toolLibraryItemId: z.string(),
+  name: z.string(),
+  type: z.enum(TOOL_TYPES).describe('Tool type (the tool picker shows its icon)'),
+  diameter: z.number().describe('mm'),
+  cornerRadius: z.number().optional().describe('mm, bull nose only'),
+  fluteCount: z.number(),
+}
+
 const CandidatesResult = z.object({
   fitting: z
+    .array(z.object({ ...LibraryToolEntry, reasons: z.array(z.string()) }))
+    .describe('Fitting library tools in auto-choice order'),
+  unfitting: z
     .array(
       z.object({
-        toolLibraryItemId: z.string(),
-        name: z.string(),
-        type: z.enum(TOOL_TYPES).describe('Tool type (the tool picker shows its icon)'),
-        diameter: z.number().describe('mm'),
-        reasons: z.array(z.string()),
+        ...LibraryToolEntry,
+        rule: z.string().describe('The failed fit rule (never `type`)'),
+        detail: z.string(),
       }),
     )
-    .describe('Fitting library tools in auto-choice order'),
+    .describe(
+      'Library tools of a type that can make the operation but failing another fit rule, nearest ' +
+        'in diameter to the current (else the generalized) tool first; design.operation.tool.set ' +
+        'takes them too (it locks; dfm.toolUnfit then says what does not fit)',
+    ),
+  nearMatch: z
+    .string()
+    .nullable()
+    .describe(
+      'For a generalized current tool no library tool matches (dfm.toolNotInLibrary): the id of ' +
+        'the library tool of its type nearest in diameter (within 20 %), offered, never taken ' +
+        'automatically; null otherwise',
+    ),
   generalized: DesignToolDtoSchema.nullable().describe('The generalized tool auto would pick'),
   current: z
     .object({
@@ -309,9 +334,23 @@ const CandidatesResult = z.object({
     .describe('The current tool and its fit; null: none chosen yet'),
 })
 
+/** The listed values of a library tool (canonical mm). */
+function entryOf(item: LibraryItem, tool: Tool) {
+  return {
+    toolLibraryItemId: item.id,
+    name: tool.name,
+    type: tool.type,
+    diameter: tool.diameter.canonical,
+    ...(tool.cornerRadius.isSome() && { cornerRadius: tool.cornerRadius.unwrap().canonical }),
+    fluteCount: tool.fluteCount.canonical,
+  }
+}
+
 const toolCandidates = defineQuery({
   name: 'design.tool.candidates',
-  summary: "The tools that can make an operation (the tool field's list) and the current one.",
+  summary:
+    "The tools that can make an operation (the tool field's list), the library tools of its " +
+    'type that do not fit, the near match of a generalized tool, and the current one.',
   args: z.object(OpArg),
   result: CandidatesResult,
   run(doc, args, ctx) {
@@ -327,8 +366,8 @@ const toolCandidates = defineQuery({
     const g = generalizedChoice(input)
     const op = input.op
     let current: z.output<typeof CandidatesResult>['current'] = null
+    const resolved = op.tool.andThen((t) => resolveDesignTool(t, doc.snapshots))
     if (op.tool.isSome()) {
-      const resolved = resolveDesignTool(op.tool.unwrap(), doc.snapshots)
       const unfit = resolved.isSome() ? fitOf(resolved.unwrap(), input) : undefined
       current = {
         tool: designToolToDTO(op.tool.unwrap()),
@@ -337,14 +376,30 @@ const toolCandidates = defineQuery({
         ...(unfit === undefined ? {} : { rule: unfit.rule, detail: unfit.detail }),
       }
     }
+    const own = op.tool.isSome() ? op.tool.unwrap() : undefined
+    const near =
+      own?.kind === 'generalized'
+        ? nearLibraryTool(own, input)
+            .map((i) => i.id)
+            .into()
+        : undefined
+    // nearest to the current tool, else to the one auto would pick
+    const reference = resolved.isSome()
+      ? resolved.unwrap().diameter
+      : g.isSome()
+        ? g.unwrap().diameter.canonical
+        : undefined
     return Ok({
       fitting: fittingLibraryTools(input).map((c) => ({
-        toolLibraryItemId: c.item.id,
-        name: c.tool.name,
-        type: c.tool.type,
-        diameter: c.tool.diameter.canonical,
+        ...entryOf(c.item, c.tool),
         reasons: [...c.reasons],
       })),
+      unfitting: unfitLibraryTools(input, reference).map((m) => ({
+        ...entryOf(m.item, m.tool),
+        rule: m.unfit.rule,
+        detail: m.unfit.detail,
+      })),
+      nearMatch: near ?? null,
       generalized: g.isSome() ? designToolToDTO(g.unwrap()) : null,
       current,
     })

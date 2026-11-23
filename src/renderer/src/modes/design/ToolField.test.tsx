@@ -28,7 +28,7 @@ vi.mock('../../viewport/Scene', () => ({
 
 const UI = { kind: 'ui', id: 'test' } as const
 
-async function renderPocket() {
+async function renderPocket(kind: 'pocket' | 'profile' = 'pocket') {
   const bridge = createFakeBridge()
   const d: Dispatcher = await designDispatcher()
   const stock = await d.dispatch(
@@ -59,9 +59,11 @@ async function renderPocket() {
   )
   await r.user.click(screen.getByRole('button', { name: 'Inspector' }))
   const nav = screen.getByRole('navigation', { name: 'Navigator' })
-  await r.user.click(await within(nav).findByRole('button', { name: 'Add pocket' }))
+  await r.user.click(await within(nav).findByRole('button', { name: `Add ${kind}` }))
   const inspector = () => screen.getByRole('complementary', { name: 'Inspector' })
-  await within(inspector()).findByRole('heading', { name: 'Pocket 1' })
+  await within(inspector()).findByRole('heading', {
+    name: kind === 'pocket' ? 'Pocket 1' : 'Profile 1',
+  })
   const op = (): OperationDTO => Object.values(d.doc.parts)[0]!.operations[0]!
   const group = () => within(inspector()).getByRole('region', { name: 'Tool' })
   const combo = () => within(group()).getByRole('combobox', { name: 'Tool' })
@@ -69,7 +71,12 @@ async function renderPocket() {
   const apply = async () => {
     await shell.pending.apply()
   }
-  const addTool = async (name: string, diameter: string, presets: unknown[] = []) =>
+  const addTool = async (
+    name: string,
+    diameter: string,
+    presets: unknown[] = [],
+    extra: Record<string, string> = {},
+  ) =>
     (
       (
         await d.dispatch(
@@ -83,6 +90,7 @@ async function renderPocket() {
               overallLength: '60',
               fluteCount: '2',
               presets,
+              ...extra,
             },
           },
           UI,
@@ -156,22 +164,31 @@ describe('tool field', () => {
     await user.click(await screen.findByRole('button', { name: /^Undo Lock tool/ }))
     await waitFor(() => expect(lock()).toHaveAttribute('aria-pressed', 'false'))
 
-    // library tools that fit, in auto-choice order (preset first), with their reasons
+    // the library's tools of the type: those that fit in auto-choice order (preset first) with
+    // their reasons, then the others nearest first, saying what does not fit (DF42)
     const flat3 = await addTool('Flat 3', '3', [ALU_PRESET])
     await addTool('Flat 5', '5')
-    await addTool('Flat 8', '8') // too wide for the 3 mm corner: not offered
+    await addTool('Flat 8', '8') // too wide for the 3 mm corner: listed, last
     await user.click(combo())
     const list = await screen.findByRole('listbox')
     // the list re-reads the candidates when it opens (library edits change no revision)
     await waitFor(() => expect(within(list).getAllByRole('group')).toHaveLength(3))
     const groups = within(list).getAllByRole('group')
     expect(within(groups[0]!).getByText('Generalized tool')).toBeInTheDocument()
+    expect(within(groups[1]!).getByText('Library')).toBeInTheDocument()
+    await waitFor(() => expect(within(groups[1]!).getAllByRole('option')).toHaveLength(3))
     const library = within(groups[1]!).getAllByRole('option')
     expect(library.map((o) => o.textContent)).toEqual([
       expect.stringMatching(/^Flat 3 · Ø 3 mm/),
       expect.stringMatching(/^Flat 5 · Ø 5 mm/),
+      expect.stringMatching(/^Flat 8 · Ø 8 mm/),
     ])
-    expect(library[0]).toHaveAccessibleDescription('Has a preset for aluminum')
+    expect(library[0]).toHaveAccessibleDescription('2 flutes · Has a preset for aluminum')
+    expect(library[1]).toHaveAccessibleDescription('2 flutes')
+    expect(library[2]).toHaveAccessibleDescription(
+      '2 flutes · Doesn’t fit: too wide for the 3 mm corner',
+    )
+    await expectNoAxeViolations()
     await user.click(library[0]!)
     await waitFor(() => expect(combo()).toHaveTextContent('Flat 3 · Ø 3 mm'))
     expect(lock()).toHaveAttribute('aria-pressed', 'true')
@@ -199,6 +216,78 @@ describe('tool field', () => {
     await waitFor(() => expect(combo()).toHaveTextContent('4 mm flat end mill'))
     expect(op().toolLocked).toBe(true)
     expect(within(group()).queryByText(/Unlock it or pick another tool/)).toBeNull()
+  })
+})
+
+describe('tool field: library tools of the type (DF42)', () => {
+  const WEXME = { fluteCount: '1', fluteLength: '20', stickout: '30.9', shankDiameter: '6.35' }
+
+  it('offers the nearest library tool of the type beside Add to library; using it locks it', async () => {
+    const { user, inspector, group, combo, lock, apply, op, addTool, d } =
+      await renderPocket('profile')
+    // a 7.6 mm flat is 27 % off the 6 mm: listed, never offered as the near match
+    await addTool('Flat 7.6', '7.6')
+    const wexme = await addTool('wexme 1/4" 1F', '6.22', [], WEXME)
+    await apply()
+    // the default 6 mm slot: the library's tools are wider, auto takes the generalized 6 mm
+    await waitFor(() => expect(combo()).toHaveTextContent('6 mm flat end mill'))
+    expect(within(group()).getByText(/Plan needs a 6 mm flat end mill/)).toBeInTheDocument()
+    const use = await within(group()).findByRole('button', { name: 'Use wexme 1/4" 1F (6.22 mm)' })
+    expect(within(group()).getByRole('button', { name: 'Add to library' })).toBeInTheDocument()
+    await expectNoAxeViolations()
+
+    // the list: every flat end mill of the library, nearest the 6 mm first, with why it doesn't fit
+    await user.click(combo())
+    const list = await screen.findByRole('listbox')
+    const library = within(list).getAllByRole('group')[1]!
+    const options = within(library).getAllByRole('option')
+    expect(options.map((o) => o.textContent)).toEqual([
+      expect.stringMatching(/^wexme 1\/4" 1F · Ø 6.22 mm/),
+      expect.stringMatching(/^Flat 7.6 · Ø 7.6 mm/),
+    ])
+    expect(options[0]).toHaveAccessibleDescription(
+      '1 flute · Doesn’t fit: wider than the 6 mm slot',
+    )
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('listbox')).toBeNull())
+
+    await user.click(use)
+    await waitFor(() => expect(combo()).toHaveTextContent('wexme 1/4" 1F · Ø 6.22 mm'))
+    expect(lock()).toHaveAttribute('aria-pressed', 'true')
+    const snap = d.doc.snapshots[(op().tool as { snapshotId: string }).snapshotId]!
+    expect(snap.libraryItemId).toBe(wexme)
+
+    // wider than the slot: widening it is the user's explicit choice, the generalized tool the other
+    await within(group()).findByText(/is wider than the slot \(6 mm\)/)
+    expect(within(group()).getByRole('button', { name: 'Use 6 mm flat end mill' })).toBeVisible()
+    await user.click(within(group()).getByRole('button', { name: 'Widen slot to 6.22 mm' }))
+    await waitFor(() =>
+      expect((op() as { slotWidth: { source: string } }).slotWidth.source).toBe('6.22 mm'),
+    )
+    await waitFor(() => expect(within(group()).queryByText(/is wider than the slot/)).toBeNull())
+    expect(combo()).toHaveTextContent('wexme 1/4" 1F · Ø 6.22 mm')
+    expect(within(inspector()).getByLabelText('Slot width', { selector: 'input' })).toHaveValue(
+      '6.22 mm',
+    )
+  })
+
+  it('picking a tool that does not fit locks it and the check says why', async () => {
+    const { user, group, combo, lock, apply, addTool } = await renderPocket()
+    await apply()
+    await waitFor(() => expect(combo()).toHaveTextContent('6 mm flat end mill'))
+    await addTool('Flat 8', '8')
+    await user.click(combo())
+    await user.click(await screen.findByRole('option', { name: /^Flat 8 · Ø 8 mm/ }))
+    await waitFor(() => expect(combo()).toHaveTextContent('Flat 8 · Ø 8 mm'))
+    expect(lock()).toHaveAttribute('aria-pressed', 'true')
+    // a pocket has no single width to widen: the fix is the generalized tool that fits
+    expect(
+      await within(group()).findByText(
+        /Corner radius 3 mm is smaller than the radius of the Flat 8/,
+      ),
+    ).toBeInTheDocument()
+    expect(within(group()).getByRole('button', { name: 'Use 6 mm flat end mill' })).toBeVisible()
+    expect(within(group()).queryByRole('button', { name: /^Widen/ })).toBeNull()
   })
 })
 

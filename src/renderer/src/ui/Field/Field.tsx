@@ -53,6 +53,11 @@ export interface FieldMessage {
    * "Add to library").
    */
   fix?: { label: string; onApply: () => void; icon?: ReactNode }
+  /**
+   * A second, plain action after the fix (e.g. "Add to library" beside "Use wexme 1/4″ 1F"):
+   * shown only with a `fix`, on a non-error message.
+   */
+  alternative?: { label: string; onApply: () => void; icon?: ReactNode }
   /** Replaces the severity's icon (e.g. a lock for read-only notes). */
   icon?: ReactNode
 }
@@ -290,6 +295,15 @@ export function Field({
                       {primary.fix.label}
                     </Button>
                   )
+                ) : null}
+                {primary.fix && primary.alternative && primary.severity !== 'error' ? (
+                  <Button
+                    size="sm"
+                    {...(primary.alternative.icon ? { icon: primary.alternative.icon } : {})}
+                    onClick={primary.alternative.onApply}
+                  >
+                    {primary.alternative.label}
+                  </Button>
                 ) : null}
                 {primary.severity === 'soft' ? (
                   <Tooltip content="Dismiss">

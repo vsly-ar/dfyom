@@ -340,6 +340,28 @@
   display: none;
 }
 
+/* a fix with an alternative action: both go under the text, at its start, wrapping if needed */
+.item:has(> .actions > :not(.quick) + :not(.quick)) {
+  grid-template-columns: 14px minmax(0, 1fr);
+  padding-bottom: 4px;
+}
+.item:has(> .actions > :not(.quick) + :not(.quick)) > .actions {
+  grid-column: 1 / -1;
+  justify-self: stretch;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+/* a label longer than the support area (a tool's name) wraps inside its button, never overflows */
+.item:has(> .actions > :not(.quick) + :not(.quick)) > .actions > button:not(.quick) {
+  max-width: 100%;
+  height: auto;
+  min-height: var(--control-sm);
+  padding-block: 2px;
+  white-space: normal;
+  text-align: start;
+}
+
 /* below 260 px a fix button wraps under the text; a lone dismiss (an icon) stays at its end */
 @container (max-width: 260px) {
   .item:has(> .actions > :not(.quick)) {
