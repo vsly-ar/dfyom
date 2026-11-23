@@ -57,6 +57,7 @@ The virtual machine plays GRBL's homing cycle in time (Z, then X and Y together;
 
 - The navigator's notice of why controls are disabled sits between the connection and homing sections in a **reserved status line** (two lines high, always present, `role="status"`; with nothing disabled it says "Ready to jog." — short texts only, so it never grows), so a reason appearing while the machine jogs or homes never shifts the jog pad.
 - A refused action (`ErrorMessage`) shows **at the end of the navigator**, below the work-zero section, never above the controls.
+- The navigator (and inspector) panel **reserves its scroll-bar gutter** (`scrollbar-gutter: stable`): with always-visible scroll bars (macOS "Show scroll bars: Always", or automatic with a mouse attached) a refusal overflowing the panel would otherwise add a scroll bar, narrow the panel, wrap "Unlock" under "Home" and drop the jog pad a row (hardening P6). The e2e forces classic scroll bars so the check runs the same on every machine.
 - **Repeated step jogs queue:** jog stays enabled while jogging (GRBL plans `$J=` lines behind each other); every click sends one `$J=G91 …` that GRBL appends; a click whose target leaves the travel is refused in words (above) and the earlier jogs continue. "Stop jog" (`0x85`) cancels them all. There is no continuous (hold-to-jog) mode yet ([hardening M3](../plans/hardening.md#5-real-machine)).
 
 ### Stop only when something can be stopped (DF35)

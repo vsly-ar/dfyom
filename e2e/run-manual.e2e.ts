@@ -125,7 +125,13 @@ test('manual control without a plan: home top right, jog to the travel end, zero
     await expect(cell(`Machine position ${axis}`)).toHaveText('-1.000')
   await expect(navigator.getByText(/The work zero is at machine 0/)).toBeVisible()
 
-  // DF34: +X in 0.1 mm steps, queued; neither the moving state nor a message moves the jog pad
+  // DF34: +X in 0.1 mm steps, queued; neither the moving state nor a message moves the jog pad.
+  // P6: the refusal below overflows the panel; with always-visible scroll bars (macOS "Show scroll
+  // bars: Always", or automatic with a mouse attached) the new scroll bar narrowed the panel,
+  // Unlock wrapped under Home and the pad dropped a row (y 491.4 → 505.1), so the check flaked
+  // with the machine's scroll-bar setting. Classic scroll bars are forced here (after the renders)
+  // so it runs the same everywhere; the panel reserves the gutter (Run.module.css).
+  await page.addStyleTag({ content: '::-webkit-scrollbar { width: 15px; height: 15px }' })
   await navigator.getByRole('radio', { name: '0.1 mm' }).click()
   const jogX = navigator.getByRole('button', { name: 'Jog X+' })
   const box = await jogX.boundingBox()

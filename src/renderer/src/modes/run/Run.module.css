@@ -5,6 +5,10 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
+  /* P6/DF34: with always-visible scroll bars (macOS "Show scroll bars: Always", or a mouse
+     attached) a refusal at the end overflowing the panel added a scroll bar, the narrower panel
+     wrapped Home/Unlock and the jog pad moved down a row; the gutter is reserved up front */
+  scrollbar-gutter: stable;
   display: grid;
   /* the sections take the panel's width, never their widest control's (the 16 rem navigator) */
   grid-template-columns: minmax(0, 1fr);
