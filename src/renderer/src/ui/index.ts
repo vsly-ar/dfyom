@@ -85,6 +85,7 @@ export {
   ECHO_DELAY_MS,
   ERROR_DELAY_MS,
   QuantityInput,
+  newGestureId,
   STEP_SIZES,
   type QuantityCommitProps,
   type QuantityInputProps,

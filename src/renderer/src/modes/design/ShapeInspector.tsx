@@ -5,7 +5,7 @@
 // the summary and the shape's users from the query.
 // Doc: docs/conventions/ui.md#shape-editor, #reordering-lists-d45,
 // docs/modes/design-v0.3.md#shape-definition
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type {
   ShapeDTO,
   ShapeItemDTO,
@@ -142,12 +142,12 @@ export function ShapeInspector({
     ;(list[0] as { op: ShapeOp }).op = 'add'
     return sendItems(list, to)
   }
-  const remove = (n: number) => {
-    if (shape.items.length <= 1) return
+  const remove = async (n: number) => {
+    if (shape.items.length <= 1) return false
     const list = sources()
     list.splice(n, 1)
     ;(list[0] as { op: ShapeOp }).op = 'add'
-    void sendItems(list, Math.max(0, Math.min(index, list.length - 1)))
+    return sendItems(list, Math.max(0, Math.min(index, list.length - 1)))
   }
   const addItem = (kind: ShapeItemKind) =>
     void sendItems([...sources(), newItemArgs(kind, part.units)], shape.items.length)
@@ -295,9 +295,16 @@ export function ShapeItemList({
   onOp(n: number, op: ShapeOp): void
   /** Item `n` to index `to`; resolves false when refused. */
   onMove(n: number, to: number): Promise<boolean>
-  onRemove(n: number): void
+  /** Removes item `n`; resolves false when refused (or it is the last item). */
+  onRemove(n: number): Promise<boolean>
 }): React.JSX.Element {
   const count = shape.items.length
+  const buttons = useRef<(HTMLButtonElement | null)[]>([])
+  /** Delete on a row or its Remove button: focus stays on the row now at `n` (the last: before it). */
+  const removeAt = async (n: number, refocus: boolean) => {
+    const ok = await onRemove(n)
+    if (ok && refocus) buttons.current[Math.min(n, count - 2)]?.focus()
+  }
   const [announcement, setAnnouncement] = useState('')
   const moveTo = async (n: number, to: number) => {
     const label = t.itemLabel(shape.items[n]!.kind, n + 1)
@@ -339,12 +346,20 @@ export function ShapeItemList({
                 className={styles['itemSelect']}
                 aria-pressed={n === selected}
                 aria-label={`${label}: ${itemSummaryText(item, units)}`}
-                aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+                aria-keyshortcuts={
+                  count > 1 ? 'Alt+ArrowUp Alt+ArrowDown Delete' : 'Alt+ArrowUp Alt+ArrowDown'
+                }
+                ref={(el) => {
+                  buttons.current[n] = el
+                }}
                 onClick={() => onSelect(n)}
                 onKeyDown={(e) => {
                   if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
                     e.preventDefault()
                     step(n, e.key === 'ArrowUp' ? -1 : 1)
+                  } else if (e.key === 'Delete' || e.key === 'Backspace') {
+                    e.preventDefault()
+                    if (count > 1) void removeAt(n, true)
                   }
                 }}
               >
@@ -372,7 +387,7 @@ export function ShapeItemList({
                   label={count <= 1 ? `${t.removeItem(label)}. ${t.lastItem}` : t.removeItem(label)}
                   icon={<Icon name="delete" />}
                   disabled={count <= 1}
-                  onClick={() => onRemove(n)}
+                  onClick={() => void removeAt(n, true)}
                 />
               </span>
             </li>

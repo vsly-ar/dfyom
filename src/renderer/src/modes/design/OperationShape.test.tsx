@@ -17,11 +17,30 @@ import { createShell, ShellProvider } from '../../shell/ShellContext'
 import { createFakeBridge, designDispatcher, type FakeBridge } from '../../test/bridge'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
 import { registerTabKeyRun } from './tab-key-run'
+import type { TabOverlay } from '../../viewport'
 
+/** The tab overlay the viewport last handed the (stubbed) scene, to drive the markers' keys. */
+const scene = vi.hoisted(() => ({ tabs: null as TabOverlay | null }))
+/** The `tabs` prop of the first element under `node` that has one. */
+function tabsIn(node: unknown): TabOverlay | null | undefined {
+  if (Array.isArray(node)) {
+    for (const n of node) {
+      const t = tabsIn(n)
+      if (t !== undefined) return t
+    }
+    return undefined
+  }
+  if (node === null || typeof node !== 'object' || !('props' in node)) return undefined
+  const props = (node as { props: Record<string, unknown> }).props
+  if ('tabs' in props) return props['tabs'] as TabOverlay | null
+  return tabsIn(props['children'])
+}
 vi.mock('@react-three/fiber', () => ({
-  Canvas: ({ children: _c, ...rest }: { children: ReactNode; 'data-testid'?: string }) => (
-    <div data-testid={rest['data-testid']} />
-  ),
+  Canvas: ({ children, ...rest }: { children: ReactNode; 'data-testid'?: string }) => {
+    const t = tabsIn(children)
+    if (t !== undefined) scene.tabs = t
+    return <div data-testid={rest['data-testid']} />
+  },
 }))
 vi.mock('../../viewport/Scene', () => ({
   Scene: () => null,
@@ -149,6 +168,23 @@ describe('operation inspector for shapes', () => {
     expect(within(inspector()).getByRole('button', { name: 'Convert to shape' })).toBeVisible()
   })
 
+  it('"New shape…" adds a shape, places it and opens it as one undo step (U4)', async () => {
+    const { user, d, part } = await renderOps()
+    await user.click(await within(navigator()).findByRole('button', { name: 'Add pocket' }))
+    await within(inspector()).findByRole('heading', { name: 'Pocket 1' })
+    const before = d.history.undoable.length
+    await choose(user, 'Shape', 'New shape…')
+    await waitFor(() =>
+      expect(part().operations[0]).toMatchObject({ shape: { kind: 'named', shapeId: 'shape1' } }),
+    )
+    expect(part().shapes).toHaveLength(1)
+    expect(d.history.undoable).toHaveLength(before + 1)
+    expect(d.history.undoable.at(-1)?.title).toBe('Add shape')
+    await d.dispatch('history.undo', {}, src)
+    expect(part().shapes).toBeUndefined()
+    expect(part().operations[0]).toMatchObject({ shape: { kind: 'rectangle' } })
+  })
+
   it('cuts an open named path on the line only', async () => {
     const { user, d, part, partId, bridge } = await renderOps()
     await d.dispatch(
@@ -217,6 +253,19 @@ describe('operation inspector for shapes', () => {
       expect(op.kind === 'profile' && op.tabs.positions).toBeUndefined()
     })
     expect(within(inspector()).getByLabelText('Tab count', { selector: 'input' })).toBeVisible()
+  })
+
+  it('announces a marker moved by keys politely (U2)', async () => {
+    const { user } = await renderOps()
+    await user.click(await within(navigator()).findByRole('button', { name: 'Add profile' }))
+    await within(inspector()).findByRole('heading', { name: 'Profile 1' })
+    await user.click(await within(inspector()).findByRole('button', { name: 'Add tab' }))
+    await waitFor(() => expect(scene.tabs?.markers.length).toBeGreaterThan(0))
+    const before = scene.tabs!.markers[0]!.label
+    act(() => scene.tabs!.onNudge(0, 10))
+    const region = await screen.findByText(/^Tab 1, .* from the start$/)
+    expect(region).toHaveAttribute('aria-live', 'polite')
+    expect(region.textContent).not.toBe(before)
   })
 
   it('a typed tab position ends an open key run of the markers first (X2)', async () => {

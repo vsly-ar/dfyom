@@ -7,6 +7,8 @@
 // marker move it along the loop; a run of keys (ended 500 ms after the last) is one gesture. A
 // position typed in the Tabs fields ends the run first (`tab-key-run.ts`), so its last step cannot
 // overwrite the typed value.
+// Hardening U2: every key step and the end of a drag announce the marker's new place politely
+// ("Tab 2, 84.5 mm from the start", the ui store's viewport announcement).
 // Task U3: a drag snaps to the loop's corners and side middles, else to the grid along the loop
 // (`snapAlong`); Alt or the "Snap" toggle off drags freely.
 // Doc: docs/conventions/ui.md#tab-markers, docs/modes/design-v0.3.md#tabs-on-shapes
@@ -80,6 +82,8 @@ interface Gesture {
   /** Sources at the drag's start (the entered ones, or the count rule's in project units). */
   readonly sources: readonly string[]
   pending: number | null
+  /** The tab's centre after the last step (mm), for the announcement at the drag's end. */
+  last: number | undefined
   lastSent: number
   sent: boolean
   /** The positions of the last step applied (sources). */
@@ -98,6 +102,14 @@ export function useTabMarkers(
   const [preview, setPreview] = useState<{ index: number; centres: number[] } | null>(null)
   const [snapped, setSnapped] = useState<{ at: [number, number]; kind: SnapKind } | null>(null)
   const snapOn = useUi((s) => s.snapOn)
+  const announceUi = useUi((s) => s.announce)
+  const units = part?.units
+  const announce = useCallback(
+    (index: number, at: number) => {
+      if (units !== undefined) announceUi(tt.at(index + 1, lengthText(at, units)))
+    },
+    [announceUi, units],
+  )
   const gridSetting = useSettings((s) => s.settings.snapGrid)
   const gesture = useRef<Gesture | null>(null)
   const keyRun = useRef<{ g: Gesture; at: number; timer: ReturnType<typeof setTimeout> } | null>(
@@ -154,6 +166,7 @@ export function useTabMarkers(
         base: tabs.centres,
         sources: entered,
         pending: null,
+        last: undefined,
         lastSent: 0,
         sent: false,
         lastSources: undefined,
@@ -218,8 +231,9 @@ export function useTabMarkers(
       setPreview({ index, centres })
       run.g.pending = at
       schedule(run.g)
+      announce(index, at)
     },
-    [tabs, begin, endKeyRun, schedule],
+    [tabs, begin, endKeyRun, schedule, announce],
   )
 
   const onDrag = useCallback(
@@ -245,12 +259,14 @@ export function useTabMarkers(
         centres[index] = at
         setPreview({ index, centres })
         g.pending = at
+        g.last = at
         schedule(g)
         return
       }
       gesture.current = null
       setSnapped(null)
       if (phase === 'end') {
+        if (g.last !== undefined) announce(index, g.last)
         flush(g)
         void g.chain.then(() => setPreview(null))
         return
@@ -260,7 +276,7 @@ export function useTabMarkers(
       setPreview(null)
       void g.chain.then(() => (g.sent ? cancelGesture(g.id) : undefined))
     },
-    [tabs, face, part, begin, schedule, flush, cancelGesture, snapOn, gridSetting],
+    [tabs, face, part, begin, schedule, flush, cancelGesture, snapOn, gridSetting, announce],
   )
 
   // a drag still open when the selection goes away is sent as it stands. Only on unmount: `flush`

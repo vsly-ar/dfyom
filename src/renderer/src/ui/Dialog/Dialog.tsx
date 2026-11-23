@@ -3,10 +3,25 @@
 // ConfirmDialog. Enter in a field inside never applies, and Cmd/Ctrl+Enter is inactive while a
 // modal one is open (docs/architecture/apply.md#keyboard). Doc: docs/conventions/ui.md#radix-wrapping-pattern, #elevation
 import { Dialog as RadixDialog, VisuallyHidden } from 'radix-ui'
-import type { ReactElement, ReactNode } from 'react'
+import { useRef, useState, type ReactElement, type ReactNode } from 'react'
 import { ApplyScope, MODAL_ATTR } from '../ApplyButton/ApplyScope'
 import { usePortalContainer } from '../UiProvider/UiProvider'
 import styles from './Dialog.module.css'
+import { useModalStack } from './modal-stack'
+
+/** Controlled or uncontrolled open state, so a toast's Escape can close the dialog (U1). */
+export function useOpenState(
+  open: boolean | undefined,
+  defaultOpen: boolean | undefined,
+  onOpenChange: ((open: boolean) => void) | undefined,
+): [boolean, (open: boolean) => void] {
+  const [inner, setInner] = useState(defaultOpen ?? false)
+  const change = (o: boolean) => {
+    if (open === undefined) setInner(o)
+    onOpenChange?.(o)
+  }
+  return [open ?? inner, change]
+}
 
 export interface DialogProps {
   title: ReactNode
@@ -45,17 +60,16 @@ export function Dialog({
   onCloseAutoFocus,
 }: DialogProps): React.JSX.Element {
   const container = usePortalContainer()
+  const [isOpen, setOpen] = useOpenState(open, defaultOpen, onOpenChange)
+  const content = useRef<HTMLDivElement>(null)
+  useModalStack(isOpen && modal, content, () => setOpen(false))
   return (
-    <RadixDialog.Root
-      modal={modal}
-      {...(open !== undefined ? { open } : {})}
-      {...(defaultOpen !== undefined ? { defaultOpen } : {})}
-      {...(onOpenChange ? { onOpenChange } : {})}
-    >
+    <RadixDialog.Root modal={modal} open={isOpen} onOpenChange={setOpen}>
       {trigger ? <RadixDialog.Trigger asChild>{trigger}</RadixDialog.Trigger> : null}
       <RadixDialog.Portal container={container}>
         <RadixDialog.Overlay className={styles['overlay']} />
         <RadixDialog.Content
+          ref={content}
           className={styles['content']}
           {...(description === undefined ? { 'aria-describedby': undefined } : {})}
           {...(modal ? { [MODAL_ATTR]: '' } : {})}

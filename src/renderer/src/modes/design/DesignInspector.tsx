@@ -22,6 +22,7 @@ import { useCancelGesture } from '../../shell/hooks'
 import { useShell, useUi } from '../../shell/ShellContext'
 import {
   ErrorMessage,
+  newGestureId,
   PanelHeader,
   QuantityInput,
   StatusChip,
@@ -322,19 +323,25 @@ function OperationInspector({
       ? {
           newShape: () =>
             void (async () => {
-              // two commands, two undo steps: the shape, then its use here
-              const added = await call('design.shape.add', {
-                partId: part.dto.id,
-                items: [newItemArgs('rectangle', part.units)],
-              })
+              // two commands, one compound gesture, one undo step (U4): the shape, then its use here
+              const gesture = { gesture: newGestureId() }
+              const added = await call(
+                'design.shape.add',
+                { partId: part.dto.id, items: [newItemArgs('rectangle', part.units)] },
+                gesture,
+              )
               if (failed(added) || !added.ok) return
               const shapeId = (added.value as { shapeId: string }).shapeId
               const center = shapeArgs(op.shape)['center']
-              const used = await call(`design.${op.kind}.update`, {
-                partId: part.dto.id,
-                operationId: op.id,
-                shape: { kind: 'named', shapeId, center },
-              })
+              const used = await call(
+                `design.${op.kind}.update`,
+                {
+                  partId: part.dto.id,
+                  operationId: op.id,
+                  shape: { kind: 'named', shapeId, center },
+                },
+                gesture,
+              )
               failed(used)
               openShape(shapeId)
             })(),

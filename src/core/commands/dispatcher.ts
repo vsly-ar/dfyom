@@ -78,7 +78,7 @@ export interface DispatchOptions {
   readonly expectedRevision?: number
   /**
    * A step of a live-edit gesture (UI only): merged into the top undo entry when it is the same
-   * gesture, source and command with nothing committed since (commands.md#gestures-live-edits).
+   * gesture and source with nothing committed since (commands.md#gestures-live-edits).
    */
   readonly gesture?: string
   /**
@@ -744,7 +744,7 @@ class ProjectDispatcher implements Dispatcher {
     const { title, size } = prepared.unwrap()
     const source = freeze({ kind: ctx.source.kind, id: ctx.source.id }, true)
     const revisionBefore = this.rev
-    const merges = gesture !== undefined && this.continuesGesture(gesture, source, def.name)
+    const merges = gesture !== undefined && this.continuesGesture(gesture, source)
     this.commit(ran.next, source, ran.patches)
     const outcome = Ok({ value, revision: this.rev })
     const event = this.emit(source, {
@@ -774,16 +774,16 @@ class ProjectDispatcher implements Dispatcher {
   }
 
   /**
-   * The top undo entry is this gesture's, by this source and command, with nothing committed
-   * since and no Apply in between (an Apply without changes marks the top entry).
+   * The top undo entry is this gesture's, by this source, with nothing committed since and no
+   * Apply in between (an Apply without changes marks the top entry). The command may differ: a
+   * compound gesture ("New shape…": add the shape, then place it) is one undo step too.
    */
-  private continuesGesture(gesture: string, source: Source, command: string): boolean {
+  private continuesGesture(gesture: string, source: Source): boolean {
     const top = this.undo.peekUndo()
     return (
       top !== undefined &&
       !this.undo.topApplied() &&
       top.gesture === gesture &&
-      top.command === command &&
       sourceKey(top.source) === sourceKey(source) &&
       top.revisionAfter === this.rev
     )

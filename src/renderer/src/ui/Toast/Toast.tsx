@@ -1,9 +1,11 @@
 // Toast: undo offers and neutral notices ("Removed Pocket 2 · Undo"), announced politely; never
 // for errors that need action. ToastRegion is placed once (shell, 3.3b) and holds the viewport.
+// Escape closes an open modal dialog before the toast (U1, ui/Dialog/modal-stack.ts).
 // Doc: docs/conventions/ui.md#undo-and-redo, #errors, #radix-wrapping-pattern
 import { Toast as RadixToast } from 'radix-ui'
 import type { ReactNode } from 'react'
 import { Button } from '../Button/Button'
+import { closeTopModal } from '../Dialog/modal-stack'
 import styles from './Toast.module.css'
 
 export interface ToastRegionProps {
@@ -48,6 +50,10 @@ export function Toast({
       {...(defaultOpen !== undefined ? { defaultOpen } : {})}
       {...(onOpenChange ? { onOpenChange } : {})}
       {...(duration !== undefined ? { duration } : {})}
+      // a toast over a modal dialog: Escape closes the dialog first, the toast stays (U1)
+      onEscapeKeyDown={(e) => {
+        if (closeTopModal(document.activeElement)) e.preventDefault()
+      }}
     >
       <RadixToast.Description className={styles['message']}>{message}</RadixToast.Description>
       {action ? (

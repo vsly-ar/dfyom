@@ -5,19 +5,32 @@
 // (`plan.setup.move`) and merge from their menu with setups of the same direction
 // (`plan.setup.merge`); plan operations move from their menu and with Alt+↑/↓ within their setup
 // and across into a neighbouring setup of the same direction (`plan.operation.move`), and split
-// off into a new setup or move to another setup of the same direction from their menu. ↑/↓ move
+// off into a new setup or move to another setup of the same direction from their menu. Setups, and
+// plan operations within their setup, also reorder by dragging their grip in the row's start gutter
+// (hardening U3, `ui/Reorder`, as the design operation list); every move is announced. ↑/↓ move
 // the focus over every row. Each row's actions sit in its one menu button, in a reserved slot at
 // the row's end (a setup's on its name line), so names, subtitles and status icons stay readable
 // in a narrow navigator. Selecting a setup opens it in the inspector; the selected setup (or the
 // selected operation's) is the one previewed and exported. Doc: docs/conventions/ui.md#design-and-plan-controls-v02,
-// docs/modes/plan-v0.2.md#merge-split-reorder
-import { useRef, useState, type KeyboardEvent } from 'react'
+// docs/modes/plan-v0.2.md#merge-split-reorder, docs/conventions/ui.md#reordering-lists-d45
+import { useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
 import { DIRECTION_LABEL } from '../../../../core/geometry/face'
 import type { PlanDTO, PlanOperationDTO, SetupDTO } from '../../../../core/plan/plan.dto'
 import type { ProjectDoc } from '../../../../core/project/document'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { planMessages } from '../../messages/plan'
-import { ErrorMessage, IconButton, Menu, Icon, type MenuEntry, type IconName } from '../../ui'
+import {
+  DragGrip,
+  ErrorMessage,
+  IconButton,
+  Menu,
+  Icon,
+  ReorderStatus,
+  useReorder,
+  type MenuEntry,
+  type IconName,
+  type Reorder,
+} from '../../ui'
 import { DirectionIcon } from './DirectionIcon'
 import {
   allows,
@@ -84,18 +97,50 @@ export function SetupList({
   /** Every row in the order shown, for ↑/↓. */
   const order = plan.setups.flatMap((s) => [s.id, ...s.operations.map((o) => o.id)])
   const focus = (id: string) => rows.current.get(id)?.focus()
+  const [announcement, setAnnouncement] = useState('')
 
-  const moveSetup = async (setup: SetupDTO, by: -1 | 1) => {
-    const to = plan.setups.findIndex((s) => s.id === setup.id) + by
-    if (to < 0 || to >= plan.setups.length) return
+  /** Setup `from` to index `to` (a drop or Alt+↑/↓): one `plan.setup.move`; false: refused. */
+  const setupTo = async (from: number, to: number) => {
+    const setup = plan.setups[from]
+    if (setup === undefined || to < 0 || to >= plan.setups.length || to === from) return false
     const r = await call('plan.setup.move', { planId: plan.id, setupId: setup.id, toIndex: to })
-    if (r.ok) focus(setup.id)
+    if (!r.ok) return false
+    setAnnouncement(m.reorder.moved(setup.name, to + 1, plan.setups.length))
+    focus(setup.id)
+    return true
+  }
+  const setupReorder = useReorder({
+    count: plan.setups.length,
+    order: plan.setups.map((s) => s.id).join(' '),
+    onMove: setupTo,
+  })
+  const { attachList: attachSetups } = setupReorder
+  const moveSetup = async (setup: SetupDTO, by: -1 | 1) => {
+    const from = plan.setups.findIndex((s) => s.id === setup.id)
+    const to = from + by
+    if (to < 0 || to >= plan.setups.length) return
+    setupReorder.glide(from, to)
+    if (!(await setupTo(from, to))) setupReorder.shake(from)
+  }
+  /** Plan operation `id` to index `toIndex` of its setup or of `toSetupId`; false: refused. */
+  const operationTo = async (id: string, step: { toIndex: number; toSetupId?: string }) => {
+    const r = await call('plan.operation.move', { planId: plan.id, planOperationId: id, ...step })
+    if (!r.ok) return false
+    const name = planOperationName(plan, planOperationOf(plan, id)?.designOperationIds ?? [])
+    const target = plan.setups.find((s) =>
+      step.toSetupId === undefined
+        ? s.operations.some((o) => o.id === id)
+        : s.id === step.toSetupId,
+    )
+    const of = (target?.operations.length ?? 0) + (step.toSetupId === undefined ? 0 : 1)
+    setAnnouncement(m.reorder.moved(name, step.toIndex + 1, of))
+    focus(id)
+    return true
   }
   const moveOperation = async (id: string, by: -1 | 1) => {
     const step = operationStep(plan, id, by)
     if (step === undefined) return
-    const r = await call('plan.operation.move', { planId: plan.id, planOperationId: id, ...step })
-    if (r.ok) focus(id)
+    await operationTo(id, step)
   }
   const onKey = (e: KeyboardEvent, id: string, move: (by: -1 | 1) => void) => {
     if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
@@ -115,19 +160,25 @@ export function SetupList({
 
   return (
     <>
-      <ol className={styles['setups']} aria-label={m.setup.listLabel}>
+      <ol
+        ref={attachSetups}
+        className={`${styles['setups']} ${canMove ? styles['gripped'] : ''} ${setupReorder.listClass}`}
+        aria-label={m.setup.listLabel}
+        {...setupReorder.listProps}
+      >
         {plan.setups.map((setup, si) => {
           const name = setup.name
           const merges = sameDirectionSetups(plan, setup)
           const isCurrent = several && setup.id === current.id
           return (
-            <li key={setup.id} className={styles['setupItem']}>
+            <li key={setup.id} {...setupReorder.itemProps(si)} className={styles['setupItem']}>
               <div
                 className={`${styles['op']} ${styles['setupRow']}`}
                 data-actions={canMove ? '' : undefined}
                 data-selected={selected === setup.id ? '' : undefined}
                 data-current={isCurrent ? '' : undefined}
               >
+                {canMove && several ? <RowGrip grip={setupReorder.gripProps(si)} /> : null}
                 <button
                   type="button"
                   ref={ref(setup.id)}
@@ -196,11 +247,13 @@ export function SetupList({
                   </span>
                 ) : null}
               </div>
-              <ol
-                className={styles['ops']}
-                aria-label={several ? m.operations.setupListLabel(name) : m.operations.listLabel}
+              <SetupOperations
+                label={several ? m.operations.setupListLabel(name) : m.operations.listLabel}
+                setup={setup}
+                canMove={canMove}
+                onMove={(id, to) => operationTo(id, { toIndex: to })}
               >
-                {setup.operations.map((op) => (
+                {(op, reorder, i) => (
                   <OperationRow
                     key={op.id}
                     plan={plan}
@@ -210,9 +263,18 @@ export function SetupList({
                     failure={failures[op.id]}
                     selected={selected === op.id}
                     canMove={canMove}
+                    reorder={reorder}
+                    index={i}
                     rowRef={ref(op.id)}
                     onSelect={() => select(selected === op.id ? null : op.id)}
-                    onKeyDown={(e) => onKey(e, op.id, (by) => void moveOperation(op.id, by))}
+                    onKeyDown={(e) =>
+                      onKey(e, op.id, (by) => {
+                        // a step within the setup glides; one into a neighbouring setup does not
+                        const to = i + by
+                        if (to >= 0 && to < setup.operations.length) reorder.glide(i, to)
+                        void moveOperation(op.id, by)
+                      })
+                    }
                     onMove={(by) => void moveOperation(op.id, by)}
                     onSplit={() =>
                       void call('plan.setup.split', {
@@ -230,14 +292,61 @@ export function SetupList({
                       })
                     }
                   />
-                ))}
-              </ol>
+                )}
+              </SetupOperations>
             </li>
           )
         })}
       </ol>
+      <ReorderStatus refusal={undefined} announcement={announcement} />
       {error ? <ErrorMessage error={error} message={m.inspector.commandFailed} /> : null}
     </>
+  )
+}
+
+/** The plan operation's DTO by id, in any setup. */
+function planOperationOf(plan: PlanDTO, id: string): PlanOperationDTO | undefined {
+  for (const s of plan.setups) for (const o of s.operations) if (o.id === id) return o
+  return undefined
+}
+
+/** The grip in a row's start gutter (as the design operation list, DF24). */
+function RowGrip({ grip }: { grip: { onPointerDown(e: PointerEvent): void } }): React.JSX.Element {
+  return <DragGrip title={m.reorder.grip} className={styles['rowGrip']} {...grip} />
+}
+
+/** A setup's plan operations: their own reorderable list (a drag stays within the setup). */
+function SetupOperations({
+  label,
+  setup,
+  canMove,
+  onMove,
+  children,
+}: {
+  label: string
+  setup: SetupDTO
+  canMove: boolean
+  onMove(id: string, to: number): Promise<boolean>
+  children: (op: PlanOperationDTO, reorder: Reorder, index: number) => React.JSX.Element
+}): React.JSX.Element {
+  const reorder = useReorder({
+    count: setup.operations.length,
+    order: setup.operations.map((o) => o.id).join(' '),
+    onMove: (from, to) => {
+      const op = setup.operations[from]
+      return op === undefined || to === from ? false : onMove(op.id, to)
+    },
+  })
+  const { attachList } = reorder
+  return (
+    <ol
+      ref={attachList}
+      className={`${styles['ops']} ${canMove ? styles['gripped'] : ''} ${reorder.listClass}`}
+      aria-label={label}
+      {...reorder.listProps}
+    >
+      {setup.operations.map((op, i) => children(op, reorder, i))}
+    </ol>
   )
 }
 
@@ -249,6 +358,8 @@ function OperationRow({
   failure,
   selected,
   canMove,
+  reorder,
+  index,
   rowRef,
   onSelect,
   onKeyDown,
@@ -263,6 +374,9 @@ function OperationRow({
   failure: AppErrorData | undefined
   selected: boolean
   canMove: boolean
+  /** The setup's operation list reorder (its grip and row props). */
+  reorder: Reorder
+  index: number
   rowRef: (el: HTMLButtonElement | null) => void
   onSelect: () => void
   onKeyDown: (e: KeyboardEvent) => void
@@ -309,10 +423,12 @@ function OperationRow({
   ]
   return (
     <li
+      {...reorder.itemProps(index)}
       className={styles['op']}
       data-actions={canMove ? '' : undefined}
       data-selected={selected ? '' : undefined}
     >
+      {canMove && setup.operations.length > 1 ? <RowGrip grip={reorder.gripProps(index)} /> : null}
       <button
         type="button"
         ref={rowRef}
