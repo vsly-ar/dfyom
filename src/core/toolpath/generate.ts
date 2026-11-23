@@ -42,10 +42,17 @@ export function cacheOf(
     : Ok(services.toolpaths)
 }
 
+/** What to try when the geometry kernel fails on an operation (llm-api.md#a7-refusals-that-say-what-to-do). */
+const GEOMETRY_HINT =
+  'the 2D offset failed at this geometry: change a size, offset or stepover of the operation slightly (e.g. 0.01 mm) and generate again'
+
 const failed = (planOperationId: string, e: AppError): OperationOutcome => ({
   planOperationId,
   status: 'failed',
-  error: e.toWireData(),
+  error: (e.code === 'geometry.evaluation'
+    ? e.withContext('plan.toolpath.generate', { planOperationId, hint: GEOMETRY_HINT })
+    : e
+  ).toWireData(),
 })
 
 /**
@@ -159,7 +166,9 @@ export const toolpathGet = defineQuery({
     const plan = doc.plans[args.planId]
     if (plan === undefined || !Object.hasOwn(doc.plans, args.planId))
       return fail('input.malformed', `plan ${args.planId} does not exist`, {
-        issues: [{ path: ['planId'], rule: 'unknownPlan', message: 'no such plan' }],
+        issues: [
+          { path: ['planId'], rule: 'unknownPlan', message: 'no such plan; plan_list lists them' },
+        ],
         where,
       })
     if (!plan.setups.some((s) => s.operations.some((o) => o.id === args.planOperationId)))
@@ -168,7 +177,7 @@ export const toolpathGet = defineQuery({
           {
             path: ['planOperationId'],
             rule: 'unknownPlanOperation',
-            message: 'no such plan operation',
+            message: 'no such plan operation; plan_operation_list lists them',
           },
         ],
         where,

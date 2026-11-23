@@ -6,7 +6,7 @@
  * docs/modes/design-v0.2.md#dfm-access-checks (limits along the face normal),
  * docs/modes/design-v0.3.md#operations-that-take-a-shape (named shapes, `on`, tab positions)
  */
-import type { Issue } from '../../shared/errors/app-error'
+import { type Issue, issueSummary } from '../../shared/errors/app-error'
 import { fail, Ok, type AppResult, type Option } from '../../shared/result'
 import type { Direction } from '../geometry/face'
 import type { Stock } from '../library/stock'
@@ -410,7 +410,7 @@ export function checkOperations(
   })
   const issues = [...own, ...others]
   if (issues.length === 0) return Ok(undefined)
-  return fail('model.invariant', `${issues.length} invalid value(s)`, {
+  return fail('model.invariant', issueSummary(issues), {
     issues,
     where: 'checkOperations',
   })

@@ -141,7 +141,7 @@ export const SESSION_TOOLS: readonly SessionToolDef[] = [
   {
     name: 'job.wait',
     summary:
-      'Wait until a job finishes or the timeout passes; returns job.get (timedOut: true if still running). Cancelling the wait never stops the job (job_abort does).',
+      'Wait until a job finishes, a run waits for the operator (waiting: what, and the next call) or the timeout passes; returns job.get (timedOut: true if still running). Cancelling the wait never stops the job.',
     args: z.object({
       jobId: z.string().describe('Id returned when the job started'),
       timeoutSeconds: z
@@ -151,9 +151,89 @@ export const SESSION_TOOLS: readonly SessionToolDef[] = [
         .default(30)
         .describe(`Max wait (default 30, max ${MAX_WAIT_SECONDS})`),
     }),
-    result: JobInfoSchema.extend({ timedOut: z.boolean() }),
+    result: JobInfoSchema.extend({
+      timedOut: z.boolean(),
+      waiting: z
+        .object({
+          kind: z.enum(['toolChange', 'programPause', 'setupChange']),
+          toolChange: z.object({ n: z.number().int(), name: z.string() }).optional(),
+          pause: z.number().int().optional(),
+          setup: z.record(z.string(), z.unknown()).optional().describe('The next setup'),
+          next: z
+            .object({ name: z.string(), args: z.record(z.string(), z.unknown()) })
+            .describe('The call that goes on after the operator step'),
+        })
+        .optional()
+        .describe('A run waits for the operator: tool change, program pause or setup change'),
+    }),
   },
 ]
+
+/** The run job: `job.wait` also returns at its operator waits. */
+const RUN_JOB = 'run.job.start'
+/** How often `job.wait` reads the machine status while it waits on a run. */
+export const WAIT_POLL_MS = 250
+
+interface OperatorWait {
+  readonly kind: 'toolChange' | 'programPause' | 'setupChange'
+  readonly toolChange?: { readonly n: number; readonly name: string }
+  readonly pause?: number
+  readonly setup?: Record<string, unknown>
+  readonly next: { readonly name: string; readonly args: Record<string, unknown> }
+}
+
+/**
+ * The tool change or program pause run `jobId` waits at, unless a logged `run.job.continue`
+ * already ended it (the machine status may still show it for a moment).
+ */
+function operatorWait(d: Dispatcher, source: Source, jobId: string): OperatorWait | undefined {
+  const status = d.query('run.status.get', {}, source)
+  if (status.isErr()) return undefined
+  const job = (status.unwrap().value as { job?: Record<string, unknown> } | null)?.job
+  if (job?.['jobId'] !== jobId) return undefined
+  const tc = job['toolChange'] as { n: number; name: string } | undefined
+  const which =
+    job['phase'] === 'toolChange' && tc !== undefined
+      ? { toolChange: tc.n }
+      : job['phase'] === 'programPause' && typeof job['pause'] === 'number'
+        ? { pause: job['pause'] }
+        : undefined
+  if (which === undefined) return undefined
+  const ended = d.log.since(0, { withPatches: false, names: ['run.job.continue'] }).some((e) => {
+    if (e.type !== 'command' || !e.outcome.ok) return false
+    const v = e.outcome.value as Record<string, unknown> | null
+    return (
+      v?.['jobId'] === jobId &&
+      ('toolChange' in which ? v['toolChange'] === which.toolChange : v['pause'] === which.pause)
+    )
+  })
+  if (ended) return undefined
+  return 'toolChange' in which
+    ? {
+        kind: 'toolChange',
+        toolChange: { n: tc!.n, name: tc!.name },
+        next: { name: 'run.job.continue', args: { jobId, toolChange: which.toolChange } },
+      }
+    : {
+        kind: 'programPause',
+        pause: which.pause,
+        next: { name: 'run.job.continue', args: { jobId, pause: which.pause } },
+      }
+}
+
+/** A finished run whose plan has another setup: the setup change, then `run.job.start`. */
+function setupChange(info: unknown): OperatorWait | undefined {
+  const outcome = (info as { outcome?: { ok: boolean; value?: unknown } } | null)?.outcome
+  if (outcome?.ok !== true) return undefined
+  const v = outcome.value as { planId?: unknown; next?: Record<string, unknown> } | null
+  const next = v?.next
+  if (next === undefined || typeof v?.planId !== 'string') return undefined
+  return {
+    kind: 'setupChange',
+    setup: next,
+    next: { name: RUN_JOB, args: { planId: v.planId, setupId: next['setupId'] } },
+  }
+}
 
 const SESSION_TOOL_NAMES = new Set(SESSION_TOOLS.map((t) => t.name))
 
@@ -270,7 +350,13 @@ export class AgentSession {
     if (d.isNone())
       return fail('input.malformed', `no open project ${key}`, {
         where: 'project.bind',
-        issues: [{ path: ['key'], rule: 'unknownProject', message: 'see project.list' }],
+        issues: [
+          {
+            path: ['key'],
+            rule: 'unknownProject',
+            message: 'no such open project; project_list lists them',
+          },
+        ],
       })
     const dispatcher = d.unwrap()
     this.key = key
@@ -361,6 +447,15 @@ export class AgentSession {
       .map((c) => c.kind === 'document')
       .unwrapOr(false)
     if (!takesApply && isPlainObject(rawArgs) && APPLY_KEY in rawArgs) return misplacedApply(name)
+    // project.close without a key closes the bound project (llm-api.md#a5-unknown-arguments-and-projectclose)
+    const boundKey = this.boundKey
+    if (
+      name === 'project.close' &&
+      isPlainObject(rawArgs) &&
+      rawArgs['key'] === undefined &&
+      boundKey !== undefined
+    )
+      rawArgs = { ...rawArgs, key: boundKey }
     if (app.command(name).isSome()) {
       const r = await this.host.app.dispatch(name, rawArgs, this.source)
       const def = app.command(name).unwrap()
@@ -484,7 +579,9 @@ export class AgentSession {
     const job = d.job(args.jobId)
     if (job.isNone())
       return fail('input.malformed', `no job ${args.jobId}`, {
-        issues: [{ path: ['jobId'], rule: 'unknownJob', message: 'no such job' }],
+        issues: [
+          { path: ['jobId'], rule: 'unknownJob', message: 'no such job; job_list lists them' },
+        ],
         where: 'job.wait',
       })
     const handle = job.unwrap()
@@ -497,13 +594,32 @@ export class AgentSession {
     this.waits.add(own)
     const onAbort = () => own.abort()
     opts.signal?.addEventListener('abort', onAbort, { once: true })
-    const waited = await new Promise<'done' | 'timeout' | 'cancelled'>((resolve) => {
+    // A run also returns at an operator wait (llm-api.md#a2-jobwait-at-operator-waits).
+    const isRun = handle.name === RUN_JOB
+    let operator: OperatorWait | undefined
+    let poll: unknown
+    let offWaitTicks: (() => void) | undefined
+    const waited = await new Promise<'done' | 'timeout' | 'cancelled' | 'waiting'>((resolve) => {
       if (opts.signal?.aborted === true) return resolve('cancelled')
       timer = this.timers.set(() => resolve('timeout'), args.timeoutSeconds * 1000)
       own.signal.addEventListener('abort', () => resolve('cancelled'), { once: true })
       void handle.result.then(() => resolve('done'))
+      if (!isRun) return
+      const check = () => {
+        if (handle.state === 'finished') return
+        operator = operatorWait(d, this.source, args.jobId)
+        if (operator !== undefined) resolve('waiting')
+      }
+      const tick = () => {
+        check()
+        poll = this.timers.set(tick, WAIT_POLL_MS)
+      }
+      offWaitTicks = handle.onProgress(check)
+      tick()
     })
     this.timers.clear(timer)
+    this.timers.clear(poll)
+    offWaitTicks?.()
     this.waits.delete(own)
     opts.signal?.removeEventListener('abort', onAbort)
     offProgress?.()
@@ -513,10 +629,17 @@ export class AgentSession {
         data: { jobId: args.jobId },
       })
     const info = d.query('job.get', { jobId: args.jobId }, this.source)
-    return info.map((o) => ({
-      value: { ...(o.value as object), timedOut: waited === 'timeout' },
-      revision: o.revision,
-    }))
+    return info.map((o) => {
+      const waiting = waited === 'waiting' ? operator : isRun ? setupChange(o.value) : undefined
+      return {
+        value: {
+          ...(o.value as object),
+          timedOut: waited === 'timeout',
+          ...(waiting === undefined ? {} : { waiting }),
+        },
+        revision: o.revision,
+      }
+    })
   }
 
   /**

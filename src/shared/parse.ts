@@ -1,6 +1,6 @@
 // Zod → AppResult. Doc: docs/conventions/error-handling/helpers.md#parsing-untrusted-data-zod
 import type { z } from 'zod'
-import { AppError, type Issue } from './errors/app-error'
+import { AppError, issueSummary, type Issue } from './errors/app-error'
 import { Err, Ok, type AppResult } from './result'
 
 /** Shape check of untrusted data (files, IPC, agent input) → AppResult. Domain invariants stay in models. */
@@ -16,7 +16,8 @@ export function parseWith<S extends z.ZodType>(
     rule: i.code,
     message: i.message,
   }))
+  // the first issue in the message: field and what was expected (llm-api.md#a7)
   return Err(
-    new AppError('input.malformed', `${issues.length} malformed value(s)`, { issues, where }),
+    new AppError('input.malformed', `${where}: ${issueSummary(issues)}`, { issues, where }),
   )
 }

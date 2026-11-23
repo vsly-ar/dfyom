@@ -1,7 +1,13 @@
 // The app's only import site of oxide.ts; app code imports Result/Option from here.
 // Doc: docs/conventions/error-handling/helpers.md
 import { Err, None, Ok, Option, Result, Some } from 'oxide.ts'
-import { AppError, type AppErrorData, type AppErrorOptions, type Issue } from './errors/app-error'
+import {
+  AppError,
+  type AppErrorData,
+  type AppErrorOptions,
+  type Issue,
+  issueSummary,
+} from './errors/app-error'
 import type { ErrorCode } from './errors/codes'
 
 export { Err, None, Ok, Option, Result, Some }
@@ -71,7 +77,7 @@ export function collect<T>(results: readonly AppResult<T>[]): AppResult<T[]> {
   }
   return issues.length === 0
     ? Ok(values)
-    : fail('model.invariant', `${issues.length} invalid value(s)`, { issues })
+    : fail('model.invariant', issueSummary(issues), { issues })
 }
 
 /** Wire format for Results crossing IPC / worker / agent boundaries (oxide values do not survive cloning). */

@@ -11,7 +11,7 @@
  */
 import type { Draft } from 'immer'
 import { z } from 'zod'
-import type { Issue } from '../../shared/errors/app-error'
+import { type Issue, issueSummary } from '../../shared/errors/app-error'
 import {
   collect,
   Err,
@@ -268,7 +268,11 @@ export class Fields {
         this.results.push(
           fail('input.malformed', `shape ${a.shapeId} does not exist in the part`, {
             issues: [
-              { path: ['shape', 'shapeId'], rule: 'unknownShape', message: 'no such shape' },
+              {
+                path: ['shape', 'shapeId'],
+                rule: 'unknownShape',
+                message: "no such shape; design_shape_list lists the part's shapes",
+              },
             ],
           }),
         )
@@ -327,7 +331,13 @@ export class Fields {
     const dto = this.env.dto.shapes?.find((s) => s.id === shape.shapeId)
     if (dto === undefined)
       return fail('input.malformed', `shape ${shape.shapeId} does not exist in the part`, {
-        issues: [{ path: ['shape', 'shapeId'], rule: 'unknownShape', message: 'no such shape' }],
+        issues: [
+          {
+            path: ['shape', 'shapeId'],
+            rule: 'unknownShape',
+            message: "no such shape; design_shape_list lists the part's shapes",
+          },
+        ],
       })
     return namedShapeFromDTO(dto).map((n) => new Map([[shape.shapeId, n]]))
   }
@@ -445,7 +455,7 @@ export function load(
 }
 
 export function invalid(issues: Issue[], where: string): AppResult<never> {
-  return fail('model.invariant', `${issues.length} invalid value(s)`, { issues, where })
+  return fail('model.invariant', issueSummary(issues), { issues, where })
 }
 
 /**
