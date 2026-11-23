@@ -156,6 +156,10 @@ User decision D13 (2026-11-21), specified in [apply.md](../architecture/apply.md
 - Implemented by task P2 ([apply.md § Implementation (task P2)](../architecture/apply.md#implementation-task-p2)).
 - Draft plans follow **library** edits on Apply too, and Apply regenerates stale toolpaths of plans whose toolpaths the user generated ([apply.md decisions](../architecture/apply.md#decisions) 4 and 5).
 
+## Proposed amendment (alignment phase 1)
+
+Status: draft, **not in force** (2026-11-23; proposal [Q58–Q69](../plans/proposal-multi-setup-alignment.md#questions-for-the-user)). Nothing in the sections above changes until [alignment.md](alignment.md) is accepted; then it is folded in here. What it would change: aid plan operations without a design operation, kept across rebuilds, and their order across setups ([alignment.md § Amendment to plan-v0.2.md](alignment.md#amendment-to-plan-v02md-proposed-alignment-phase-1)); a setup work zero anywhere, negative work X/Y included, instead of always the face frame origin ([alignment.md § Setup work zero](alignment.md#setup-work-zero-q61)); and the alignment step in the setup-change prompt ([alignment.md § Amendment to the setup-change prompt](alignment.md#amendment-to-the-setup-change-prompt-proposed-alignment-phase-1)).
+
 ## Later
 
 Not built in v0.2; picked up by a later plan.

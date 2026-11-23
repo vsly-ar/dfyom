@@ -406,6 +406,12 @@ No new tools and no change to `tools/list`: the launcher and the dialog are pack
 - **Help → Connect an agent…** in the app shows these lines with the real path of the running installation (`process.resourcesPath` + `bin/dfyom`; in development `node` + the built `cli.js`), shell-quoted, each with a Copy button, and says when local agents are switched off ([ui.md § Connect an agent](../conventions/ui.md#connect-an-agent-hardening-a4)). Main builds the lines (`src/main/connect-agent.ts`, unit-tested) and returns them with `window.dfyom.agents.connectInfo()`; a packaged build on another platform (none is built yet) shows the binary with `-e ELECTRON_RUN_AS_NODE=1` instead of the launcher.
 - **Not covered:** a `dfyom` on the `PATH` (the user links it; no installer writes outside the bundle), launchers for Windows and Linux (no packages for them yet), one-click registration with a client (writing a client's config file is the client's business; the dialog gives the line to run).
 
+## Amendment (alignment phase 1, proposed)
+
+Status: draft, **not in force** (2026-11-23; proposal task 1.5, [Q64](../plans/proposal-multi-setup-alignment.md#questions-for-the-user)) · Spec: [alignment.md § Agent API](../modes/alignment.md#agent-api)
+
+Four new tools (`plan.alignment.set`, `plan.aid.set`, `run.align.goto`, `run.align.tick`) and a `zero` arg on `plan.setup.update`: about **2.9 K** characters of `tools/list` (target ≤ 3 K), against 13.2 K headroom after A8 (10.7 K with `machine-lane`, before the v0.4 follow-up's ≈ 5 K, [Q41](../plans/v0.4-llm-first.md#questions-for-the-user)). The run tools are `machine: true` and UI only on a real connection ([alignment.md § Amendment to run.md § Safety](../modes/alignment.md#amendment-to-runmd--safety-proposed-alignment-phase-1)). Measured and logged under [Implementation](#implementation-task-310) when built.
+
 ## Implementation (task 3.10)
 
 Decisions and findings of the implementation, where this doc left room or proved wrong:
