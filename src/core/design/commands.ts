@@ -90,6 +90,7 @@ import { designChangeTargets } from './shape-users'
 import { featureOwnedError, nestingFeature, spanUnits, type LoadedFeature } from './feature'
 import { mapFeatureIssues, settleFeatures } from './feature-sync'
 import { derivedLength } from './hole'
+import { placedOperation, PlacedSchema } from './placed'
 
 // ── arg schemas ───────────────────────────────────────────────────────────────────────────
 
@@ -440,6 +441,30 @@ export function withWarnings<R extends object>(
     )
     .map((warnings) => ({ ...value, warnings }))
     .mapErr((e) => e.withContext(where))
+}
+
+/**
+ * `placed` (hardening A3) added to an operation add/update result: where operation `id` landed
+ * after the edit (docs/architecture/llm-api.md#a3-frames-in-the-primer-placed-bounds).
+ */
+function withPlaced<R extends object>(
+  result: AppResult<R>,
+  loaded: LoadedPart,
+  operations: readonly Operation[],
+  id: string,
+  port: Region2dPort | undefined,
+): AppResult<R> {
+  return result.map((value) => {
+    const shapes = shapesOf(operations, loaded.dto)
+    if (shapes.isErr()) return value
+    const part = {
+      ...loaded.part,
+      operations,
+      ...(shapes.unwrap().size === 0 ? {} : { shapes: shapes.unwrap() }),
+    }
+    const placed = placedOperation(part, loaded.stock, id, port)
+    return placed === undefined ? value : { ...value, placed }
+  })
 }
 
 // ── part editing ──────────────────────────────────────────────────────────────────────────
@@ -835,6 +860,7 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
       tool: DesignToolDtoSchema.optional().describe('Absent: chosen on Apply'),
       toolLocked: z.boolean(),
       warnings: Warnings,
+      placed: PlacedSchema.optional(),
     }),
     run(draft, rawArgs, ctx) {
       const where = `design.${spec.kind}.add`
@@ -877,7 +903,13 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
         ...(op.tool.isSome() ? { tool: designToolToDTO(op.tool.unwrap()) } : {}),
         toolLocked: op.toolLocked,
       }
-      return withWarnings(result, loaded.unwrap(), settled.unwrap(), ctx, where)
+      return withPlaced(
+        withWarnings(result, loaded.unwrap(), settled.unwrap(), ctx, where),
+        loaded.unwrap(),
+        settled.unwrap(),
+        id,
+        ctx.services.region2d,
+      )
     },
   })
 
@@ -895,7 +927,7 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
       ...(lean ? {} : { generalTolerance: ToleranceArg.optional() }),
       ...optionalParams,
     }),
-    result: z.object({ warnings: Warnings }),
+    result: z.object({ warnings: Warnings, placed: PlacedSchema.optional() }),
     run(draft, rawArgs, ctx) {
       const where = `design.${spec.kind}.update`
       const args = rawArgs as { partId: string; operationId: string } & UpdateArgs<P>
@@ -923,7 +955,13 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
       const { ops, features, changed } = synced.unwrap()
       writeOperations(draft, args.partId, ops)
       writeFeatures(draft, args.partId, features, changed)
-      return withWarnings({}, l, ops, ctx, where, features)
+      return withPlaced(
+        withWarnings({}, l, ops, ctx, where, features),
+        l,
+        ops,
+        args.operationId,
+        ctx.services.region2d,
+      )
     },
   })
   return [add, update]
