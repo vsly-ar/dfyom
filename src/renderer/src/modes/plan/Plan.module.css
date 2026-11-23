@@ -1,5 +1,93 @@
 /* Plan mode: navigator, inspector, export dialog, status (task 3.7). Tokens only; row, field and
    status rules follow design mode (Design.module.css). */
+
+/* Plan start (DF29): "Plan the part" as a card over the 3D view; the layer lets pointer events
+   through around the card, so the view still orbits */
+.startLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
+  pointer-events: none;
+}
+
+.startCard {
+  pointer-events: auto;
+  width: min(26rem, 100%);
+  display: grid;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  box-shadow: var(--shadow-2);
+  animation: start-in var(--motion-slow) var(--ease-emphasized);
+}
+
+.startBody {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+  padding: var(--space-4) var(--space-4) var(--space-3);
+}
+
+.startIcon {
+  display: inline-grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: var(--radius-md);
+  background: var(--bg-active);
+  color: var(--text-muted);
+}
+
+.startIcon svg {
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+}
+
+.startTitle {
+  margin: 0;
+  font-size: var(--text-lg);
+  line-height: var(--lh-lg);
+  font-weight: var(--weight-bold);
+}
+
+.startText {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+}
+
+.startMachine {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+}
+
+.startFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
+}
+
+@keyframes start-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+
+.emptyNote {
+  margin: 0;
+  padding: var(--space-3);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-muted);
+}
 .navigator,
 .inspector {
   display: grid;
@@ -67,13 +155,6 @@
   font-size: var(--text-lg);
   line-height: var(--lh-lg);
   font-weight: var(--weight-bold);
-}
-
-.emptyOps {
-  display: grid;
-  gap: var(--space-3);
-  justify-items: center;
-  padding: var(--space-3);
 }
 
 .addRow {

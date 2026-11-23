@@ -155,7 +155,7 @@ export function MachineFields({
             m.arcTolerance,
             'length',
             values.arcTolerance,
-            'corner',
+            'arcTolerance',
             (arcTolerance) => set({ arcTolerance }),
             { optional: true, note: m.arcToleranceNote },
           )}
@@ -173,15 +173,22 @@ export function MachineFields({
             onValueChange={(control) => spindle({ control })}
           />
         </Choice>
-        {q('spindle.maxSpeed', m.maxSpeed, 'spindleSpeed', values.spindle.maxSpeed, 'feed', (v) => {
-          if (v !== undefined) spindle({ maxSpeed: v })
-        })}
+        {q(
+          'spindle.maxSpeed',
+          m.maxSpeed,
+          'spindleSpeed',
+          values.spindle.maxSpeed,
+          'spindle',
+          (v) => {
+            if (v !== undefined) spindle({ maxSpeed: v })
+          },
+        )}
         {q(
           'spindle.minSpeed',
           m.minSpeed,
           'spindleSpeed',
           values.spindle.minSpeed,
-          'feed',
+          'spindle',
           (minSpeed) => spindle({ minSpeed }),
           { optional: true, note: m.minSpeedNote },
         )}

@@ -24,10 +24,20 @@
 .illustration {
   display: inline-flex;
   color: var(--text-muted);
+  /* the 28 px drawing overhangs the control-height label row instead of growing it: a taller
+     first row pushed the support area off the input's bottom edge (DF27) */
+  margin-block: calc((var(--control-md) - var(--icon-xl)) / 2);
   transition:
     color var(--motion-slow),
     filter var(--motion-emphasis) var(--ease-emphasized),
     opacity var(--motion-slow);
+}
+
+/* a label that wraps runs on beside the support area, so the support area stays tucked under the
+   input (DF27); without a support area the label keeps one row (no empty gap track) */
+.field:has(> .support) > .label {
+  grid-row: 1 / span 2;
+  align-self: start;
 }
 
 .field:focus-within .illustration [data-accent] {
@@ -105,7 +115,8 @@
   grid-column: 2;
   grid-row: 1;
   align-self: start;
-  margin: 4px 0 0;
+  /* centred on the control row without growing it (DF27) */
+  margin: calc((var(--control-md) - 20px) / 2) 0 0;
 }
 
 .lock[aria-pressed='true'] {
@@ -397,8 +408,10 @@
   .field {
     grid-template-columns: auto minmax(0, 1fr);
   }
-  .label {
+  .label,
+  .field:has(> .support) > .label {
     grid-column: 1 / -1;
+    grid-row: 1;
   }
   .lock {
     grid-column: 1;

@@ -203,6 +203,9 @@ async function libraryTool(lib: Page, tool: ToolSpec): Promise<void> {
   await expect(grid.getByRole('row', { name: /Unsaved/ })).toBeVisible()
   await choose(lib, editor, 'Type', tool.type)
   await editor.getByRole('textbox', { name: 'Name' }).fill(tool.name)
+  // the overall length waits in the collapsed Details group (DF26; kept open across items)
+  const details = editor.getByRole('button', { name: /^Details/ })
+  if ((await details.getAttribute('aria-expanded')) === 'false') await details.click()
   for (const [label, value] of tool.values) await setField(editor, label, value)
   await editor.getByRole('button', { name: 'Add preset' }).click()
   await choose(lib, editor, 'Material of Preset 1', 'Hardwood')
@@ -591,7 +594,9 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
   // ── Plan: a machine from "New machine…", two setups (Bottom, Top) ────────────────────────
   await page.keyboard.press('ControlOrMeta+2')
   await expect(page.getByRole('radio', { name: 'Plan' })).toBeChecked()
-  await navigator.getByRole('button', { name: 'New machine…' }).click()
+  // no plan yet: "Plan the part" is a card over the view (DF29)
+  const planStart = page.getByRole('dialog', { name: 'Plan the part' })
+  await planStart.getByRole('button', { name: 'New machine…' }).click()
   const newMachine = page.getByRole('dialog', { name: 'New machine' })
   await newMachine.getByRole('textbox', { name: 'Name' }).fill('Router')
   for (const [label, value] of [
@@ -606,7 +611,7 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
     await setField(newMachine, label, value)
   await newMachine.getByRole('button', { name: 'Add machine' }).click()
   await expect(newMachine).toBeHidden()
-  await navigator.getByRole('button', { name: 'Create plan' }).click()
+  await planStart.getByRole('button', { name: 'Create plan' }).click()
   const setups = navigator.getByRole('list', { name: 'Setups in machining order' })
   const setupRow = (i: number) =>
     setups.getByRole('button', { name: new RegExp(`^${i + 1}\\. ${SETUPS[i]}`) })

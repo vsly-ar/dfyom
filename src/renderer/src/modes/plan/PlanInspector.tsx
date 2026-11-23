@@ -280,11 +280,11 @@ function useSuggestions(planId: string, planOperationId: string): Suggestion[] |
 }
 
 const FEED_ICON: Record<FeedField, FieldIconName> = {
-  spindleSpeed: 'corner',
-  feedRate: 'length',
-  plungeRate: 'depth',
-  stepdown: 'depth',
-  stepover: 'width',
+  spindleSpeed: 'spindle',
+  feedRate: 'feed',
+  plungeRate: 'plunge',
+  stepdown: 'stepdown',
+  stepover: 'stepover',
 }
 
 const DEFAULT_PRESET = '__default'
@@ -452,7 +452,7 @@ function OperationInspector({
               kind="length"
               defaultUnit={lengthUnit}
               value={stickoutValue}
-              illustration={<FieldIcon name="depth" />}
+              illustration={<FieldIcon name="stickout" />}
               readOnly={readOnly}
               messages={[
                 ...fieldMessages(findings, 'stickout'),

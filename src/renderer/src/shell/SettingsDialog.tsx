@@ -18,12 +18,16 @@ import {
   DialogClose,
   QuantityInput,
   SegmentedControl,
+  Select,
   Switch,
 } from '../ui'
 import styles from './AppShell.module.css'
 import { useSettings, useShell, useUi } from './ShellContext'
 
 const m = shellMessages.settingsDialog
+
+/** Auto-apply delays offered (s; 0 = off, DF28); a stored value outside the list is kept as an option. */
+const AUTO_APPLY_DELAYS = [0, 3, 5, 10, 30, 60] as const
 
 /** The stored grid step (a number in `unit`) as a field value. */
 const gridValue = (n: number, unit: UnitId): Quantity | undefined => {
@@ -48,6 +52,12 @@ export function SettingsDialog(): React.JSX.Element {
   const agentsHint = useId()
   const anchorHint = useId()
   const gridHint = useId()
+  const autoApplyHint = useId()
+  const delays: readonly number[] = AUTO_APPLY_DELAYS.includes(
+    settings.autoApplyDelay as (typeof AUTO_APPLY_DELAYS)[number],
+  )
+    ? AUTO_APPLY_DELAYS
+    : [...AUTO_APPLY_DELAYS, settings.autoApplyDelay].toSorted((a, b) => a - b)
 
   // the server's state follows the setting asynchronously: re-read it when either changes
   useEffect(() => {
@@ -110,6 +120,26 @@ export function SettingsDialog(): React.JSX.Element {
           />
           <p id={agentsHint} className={styles['settingHint']}>
             {m.allowAgentsHint(http?.enabled === true ? http.port : undefined)}
+          </p>
+        </div>
+        <div className={styles['settingRow']}>
+          <span className={styles['settingLabel']} aria-hidden="true">
+            {m.autoApply}
+          </span>
+          <div className={styles['settingSelect']}>
+            <Select<string>
+              aria-label={m.autoApply}
+              aria-describedby={autoApplyHint}
+              options={delays.map((s) => ({
+                value: String(s),
+                label: s === 0 ? m.autoApplyOff : m.autoApplySeconds(s),
+              }))}
+              value={String(settings.autoApplyDelay)}
+              onValueChange={(v) => update({ autoApplyDelay: Number(v) })}
+            />
+          </div>
+          <p id={autoApplyHint} className={styles['settingHint']}>
+            {m.autoApplyHint}
           </p>
         </div>
         <div className={styles['settingRow']}>

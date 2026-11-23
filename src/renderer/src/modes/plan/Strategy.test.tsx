@@ -156,6 +156,34 @@ describe('Plan inspector: strategy', () => {
     await expectNoAxeViolations()
   })
 
+  it('through profile: cut depth and breakthrough are linked (DF23)', async () => {
+    const t = await renderPlan()
+    const group = await t.open('Profile 1')
+    const g = within(group)
+    const depth = g.getByLabelText('Cut depth', { selector: 'input' })
+    const breakthrough = g.getByLabelText('Breakthrough', { selector: 'input' })
+    const material = Number.parseFloat(
+      String(depth.getAttribute('value') ?? (depth as HTMLInputElement).value),
+    )
+    const extra = Number.parseFloat((breakthrough as HTMLInputElement).value)
+    expect(material - extra).toBeGreaterThan(0)
+    // entering the depth stores the breakthrough below the material
+    await t.user.clear(depth)
+    await t.user.type(depth, `${material - extra + 2}{Enter}`)
+    await waitFor(() =>
+      expect(t.callsOf('plan.operation.update')).toContainEqual(
+        expect.objectContaining({ strategy: { breakthrough: '2 mm' } }),
+      ),
+    )
+    await waitFor(() => expect(breakthrough).toHaveValue('2 mm'))
+    // shallower than the material is refused at the field
+    await t.user.clear(depth)
+    await t.user.type(depth, '1{Enter}')
+    await waitFor(() => expect(depth).toHaveAttribute('aria-invalid', 'true'))
+    expect(t.callsOf('plan.operation.update')).toHaveLength(1)
+    await expectNoAxeViolations()
+  })
+
   it('facing in a finalized plan: choices disabled, lengths read-only', async () => {
     const t = await renderPlan((s, planId) => s.toStatus(planId, 'finalized'))
     const group = await t.open('Facing 1')

@@ -167,6 +167,13 @@ describe('AppShell', () => {
     await user.click(within(anchor).getByRole('radio', { name: 'Front left' }))
     expect(bridge.settingsPatches.at(-1)).toEqual({ defaultAnchor: { u: 'min', v: 'min' } })
     expect(within(anchor).getByRole('radio', { name: 'Front left' })).toBeChecked()
+    // auto-apply after a quiet spell (DF28): 10 s by default, Off turns it off
+    const auto = within(dialog).getByRole('combobox', { name: 'Auto-apply after' })
+    expect(auto).toHaveTextContent('10 s')
+    await user.click(auto)
+    await user.click(await screen.findByRole('option', { name: 'Off' }))
+    expect(bridge.settingsPatches.at(-1)).toEqual({ autoApplyDelay: 0 })
+    await expectNoAxeViolations()
   })
 
   it('follows settings changed in another window', async () => {
@@ -180,6 +187,8 @@ describe('AppShell', () => {
         defaultAnchor: { u: 'centre', v: 'centre' },
         libraryUnits: 'mm',
         snapGrid: { mm: 1, inch: 1 / 16 },
+        autoApplyDelay: 10,
+        sidePanels: {},
       }),
     )
     await waitFor(() => expect(document.documentElement.dataset['theme']).toBe('light'))
@@ -258,6 +267,27 @@ describe('AppShell', () => {
     await user.click(await screen.findByRole('button', { name: 'Cancel Evaluate part' }))
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Evaluate part' })).toBeNull())
     expect(bridge.calls.map((c) => c.name)).toContain('job.abort')
+  })
+
+  it('remembers per mode whether the navigator is shown (DF30)', async () => {
+    const { user, bridge } = renderShell()
+    const toggle = () => screen.getByRole('button', { name: 'Navigator' })
+    const mode = (name: string) => screen.getByRole('radio', { name })
+    // jsdom lays nothing out, so the panels do not collapse here: the toggle writes the mode's
+    // choice, and the e2e suite (shell.e2e.ts) checks the panels following it
+    await user.click(toggle())
+    expect(bridge.settingsPatches.at(-1)).toEqual({
+      sidePanels: { design: { navigator: false, inspector: true } },
+    })
+    await user.click(mode('Plan'))
+    await user.click(toggle())
+    expect(bridge.settingsPatches.at(-1)).toMatchObject({
+      sidePanels: { plan: { inspector: true } },
+    })
+    expect(screen.getByRole('navigation', { name: 'Navigator' })).toHaveAttribute(
+      'data-side',
+      'navigator',
+    )
   })
 
   it('opens the inspector over the viewport in a narrow window', async () => {

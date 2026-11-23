@@ -22,7 +22,7 @@ import {
 } from '../commands/define'
 import type { PlanApply } from '../commands/apply'
 import { OPERATION_UPDATE_ARGS, updateOperation, writeOperationList } from '../design/commands'
-import { fieldContext, partFromDTO } from '../design/operation'
+import { fieldContext, partFromDTO, type Operation } from '../design/operation'
 import { OperationIdSchema, PartIdSchema } from '../design/part.dto'
 import { ItemIdSchema, NAME_MAX, type LibraryItemKind } from '../library/item'
 import type { LibraryItem } from '../library/library-item'
@@ -1186,6 +1186,17 @@ const lockDTO = (l: LockState) =>
     ? { state: l.state, rule: l.rule, reason: l.reason }
     : { state: l.state }
 
+/**
+ * The material a through profile cuts below the stock face (mm; DF23): the stock thickness, as the
+ * tool checks count it; the cut goes `breakthrough` further. Null for a blind groove or another kind.
+ * Doc: docs/modes/plan-v0.1.md#profile-with-tabs
+ */
+export function throughDepthOf(ops: readonly Operation[], thickness: number): number | null {
+  return ops.length > 0 && ops.every((o) => o.kind === 'profile' && o.depth.isNone())
+    ? thickness
+    : null
+}
+
 const operationList = defineQuery({
   name: 'plan.operation.list',
   summary:
@@ -1218,6 +1229,12 @@ const operationList = defineQuery({
         strategy: z
           .record(z.string(), z.union([z.number(), z.string()]))
           .describe('Resolved strategy parameters (mm, °)'),
+        throughDepth: z
+          .number()
+          .nullable()
+          .describe(
+            'mm; a through profile: the material it cuts through below the stock face. Cut depth = throughDepth + strategy.breakthrough; to cut to depth D set breakthrough = D − throughDepth. Null otherwise',
+          ),
       }),
     ),
   }),
@@ -1266,6 +1283,7 @@ const operationList = defineQuery({
           feeds,
           chipLoad: e.feeds.andThen((f) => f.chipLoad).unwrapOr(null as unknown as number),
           strategy: strategy as Record<string, number | string>,
+          throughDepth: throughDepthOf(e.ops, plan.stock.thickness.canonical),
         }
       }),
     })

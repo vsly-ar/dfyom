@@ -56,7 +56,7 @@ export {
 } from './MachineStateBadge/MachineStateBadge'
 export { Menu, type MenuEntry, type MenuGroup, type MenuItem, type MenuProps } from './Menu/Menu'
 export { ModeSwitcher, type ModeSwitcherProps } from './ModeSwitcher/ModeSwitcher'
-export { useReducedMotion } from './motion'
+export { motionMs, useReducedMotion } from './motion'
 export {
   Panel,
   PanelGroup,

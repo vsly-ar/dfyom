@@ -85,6 +85,11 @@ export const shellMessages = {
     snapGridHint:
       'Handles and tab markers snap to grid points this far apart when nothing nearer is in reach.',
     snapGridPositive: 'Must be greater than 0.',
+    autoApply: 'Auto-apply after',
+    autoApplyOff: 'Off',
+    autoApplySeconds: (s: number) => `${s} s`,
+    autoApplyHint:
+      'Pending edits apply by themselves after this long without another edit, as if you pressed Apply; the button shows the countdown. Off: Enter in a field, the shortcut or the button apply.',
     done: 'Done',
   },
 

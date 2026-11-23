@@ -156,9 +156,11 @@ test('exit criteria through the UI: design, plan, export, run, save, close and r
   // ── Plan one setup ───────────────────────────────────────────────────────────────────────
   await page.keyboard.press('ControlOrMeta+2')
   await expect(page.getByRole('radio', { name: 'Plan' })).toBeChecked()
-  // a fresh install: the machine library is empty, so the machine is added first
-  await expect(navigator.getByText('The machine library is empty.', { exact: false })).toBeVisible()
-  await navigator.getByRole('button', { name: 'New machine…' }).click()
+  // no plan yet: "Plan the part" is a card over the view (DF29); a fresh install: the machine
+  // library is empty, so the machine is added first
+  const planStart = page.getByRole('dialog', { name: 'Plan the part' })
+  await expect(planStart.getByText('The machine library is empty.', { exact: false })).toBeVisible()
+  await planStart.getByRole('button', { name: 'New machine…' }).click()
   const newMachine = page.getByRole('dialog', { name: 'New machine' })
   await newMachine.getByRole('textbox', { name: 'Name' }).fill('Shapeoko')
   for (const [label, value] of [
@@ -173,15 +175,12 @@ test('exit criteria through the UI: design, plan, export, run, save, close and r
     await setField(newMachine, label, value)
   await newMachine.getByRole('button', { name: 'Add machine' }).click()
   await expect(newMachine).toBeHidden()
-  await navigator.getByRole('button', { name: 'Create plan' }).click()
+  await planStart.getByRole('button', { name: 'Create plan' }).click()
   await expect(planRows(page)).toHaveCount(4)
   await expect(navigator.getByRole('combobox', { name: 'Machine' })).toHaveText('Shapeoko')
 
   // the tools: each added from its operation's "New tool…" (and assigned), the profile reuses Flat 6
-  const lengths = [
-    ['Flute length', '25'],
-    ['Overall length', '60'],
-  ] as const
+  const lengths = [['Flute length', '25']] as const
   await planRows(page).nth(0).click()
   await expect(inspector.getByRole('heading', { name: 'Facing 1' })).toBeVisible()
   await newTool(page, inspector, { values: [['Diameter', '6'], ...lengths] })
@@ -207,7 +206,6 @@ test('exit criteria through the UI: design, plan, export, run, save, close and r
     values: [
       ['Diameter', '6'],
       ['Flute length', '30'],
-      ['Overall length', '66'],
       ['Point angle', '118'],
     ],
   })

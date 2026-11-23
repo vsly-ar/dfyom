@@ -31,6 +31,7 @@ export const planMessages = {
     description:
       'A plan turns the part into toolpaths: a setup per face it is machined from, a tool for every operation, feeds and speeds.',
     action: 'Create plan',
+    navigator: 'No plan yet: create one in the view.',
   },
 
   picker: {
@@ -179,7 +180,7 @@ export const planMessages = {
     plan: 'Plan',
     name: 'Plan name',
     noSelection: 'Select a plan operation to choose its tool and feeds and speeds.',
-    noPlan: 'Create the plan in the navigator to start.',
+    noPlan: 'Create the plan in the view to start.',
     summary: (n: number) => plural(n, 'operation', 'operations'),
     commandFailed: 'The change was not applied.',
     groups: { tool: 'Tool', strategy: 'Strategy', feeds: 'Feeds and speeds' },
@@ -267,6 +268,12 @@ export const planMessages = {
         entry: { helix: 'Helix', ramp: 'Ramp', plunge: 'Plunge', contour: 'Contour' },
         cycle: { simple: 'Simple', peck: 'Peck', chipBreak: 'Chip break', helix: 'Helical boring' },
       } as Record<string, Record<string, string>>,
+      /** DF23: a through profile's depth, linked to its breakthrough. */
+      cutDepth: 'Cut depth',
+      cutDepthNote: (material: string) =>
+        `Or enter the depth: the breakthrough follows. The material is ${material}.`,
+      cutDepthTooShallow: (material: string) =>
+        `A through cut goes at least through the material, ${material}.`,
       notForTool: (label: string) => `${label} (doesn’t fit the tool)`,
       default: 'Default.',
       entered: 'Entered by you.',
