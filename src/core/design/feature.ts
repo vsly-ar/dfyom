@@ -11,7 +11,8 @@
  */
 import type { Issue, IssuePath } from '../../shared/errors/app-error'
 import { Err, fail, None, Ok, Some, type AppResult, type Option } from '../../shared/result'
-import type { DfmWarning } from '../geometry/model'
+import type { Region2dPort } from '../geometry/2d/port'
+import type { DfmWarning, OperationGeometry } from '../geometry/model'
 import type { Stock } from '../library/stock'
 import type { Quantity } from '../quantity/quantity'
 import type { UnitSystem } from '../project/document'
@@ -154,7 +155,18 @@ export interface FeatureKindSpec<F extends FeatureBase = FeatureBase> {
     stock: Stock,
     units: UnitSystem,
     shapes: readonly ShapeDTO[],
+    geometry: SpanGeometry,
   ): readonly DfmWarning[]
+}
+
+/**
+ * What span warnings read beside the design (hardening B3, Clones footprints): the part's
+ * geometry input operations (`toGeometryInput`, placed shapes) and the 2D port when the host has
+ * one.
+ */
+export interface SpanGeometry {
+  readonly operations: readonly OperationGeometry[]
+  readonly region2d?: Region2dPort | undefined
 }
 
 // ── kind registry ──────────────────────────────────────────────────────────────────────────

@@ -245,11 +245,12 @@ describe('design.clones.add', () => {
     await withSource(s)
     const out = await addClones(s, [offsetRow(5, '20'), offsetRow(1, '-100')])
     const clone = out.warnings.filter((w) => w.code.startsWith('dfm.clone'))
+    // footprints (B3): instance 5's Ø10 pocket is centred on the stock's right edge (u = 100)
     expect(clone).toEqual([
       expect.objectContaining({
         code: 'dfm.cloneOutsideStock',
         operation: 'clones1',
-        params: { count: 1, numbers: [6] },
+        params: { count: 2, numbers: [5, 6] },
       }),
       expect.objectContaining({ code: 'dfm.cloneDuplicate', params: { count: 1, numbers: [7] } }),
     ])
@@ -263,6 +264,71 @@ describe('design.clones.add', () => {
     expect(list.warnings.filter((w) => w.code === 'dfm.cloneOverlap')).toEqual([
       expect.objectContaining({ params: { count: 2, numbers: [1, 2] } }),
     ])
+  })
+})
+
+describe('footprints (B3)', () => {
+  const preview = (s: DesignSetup, rows: object[], operationIds = ['pocket1', 'drill1']) =>
+    expectOk(
+      s.d.query(
+        'design.clones.preview',
+        { partId: s.partId, source: { operationIds }, rows },
+        uiSource(),
+      ),
+    ).value as { warnings: { code: string; params: { numbers: number[] } }[] }
+  const numbers = (
+    w: { warnings: { code: string; params: { numbers: number[] } }[] },
+    code: string,
+  ) => w.warnings.find((x) => x.code === code)?.params.numbers ?? []
+
+  it('outside: a footprint past the edge, though its reference point is inside', async () => {
+    const s = await setup()
+    await withSource(s)
+    // the Ø10 pocket at u = 20 + 77 reaches u = 102 on a 100 mm stock; at + 75 it ends at 100
+    expect(numbers(preview(s, [offsetRow(1, '77')]), 'dfm.cloneOutsideStock')).toEqual([2])
+    expect(numbers(preview(s, [offsetRow(1, '75')]), 'dfm.cloneOutsideStock')).toEqual([])
+  })
+
+  it('outside: a source open to an edge may be repeated along it, not further out', async () => {
+    const s = await setup()
+    await s.run('design.pocket.add', {
+      partId: s.partId,
+      shape: { kind: 'circle', center: ['0', '20'], diameter: '10' },
+      depth: '3',
+    })
+    const along = { kind: 'offset', count: 2, du: '0', dv: '15' }
+    expect(numbers(preview(s, [along], ['pocket1']), 'dfm.cloneOutsideStock')).toEqual([])
+    const out = { kind: 'offset', count: 1, du: '-2', dv: '15' }
+    expect(numbers(preview(s, [out], ['pocket1']), 'dfm.cloneOutsideStock')).toEqual([2])
+  })
+
+  it('overlap: circles by their distance, not their boxes', async () => {
+    const s = await setup()
+    await withSource(s)
+    const diag = (d: string) => [{ kind: 'offset', count: 1, du: d, dv: d }]
+    // 7.2 · √2 = 10.18 > Ø10: the boxes overlap, the pockets do not
+    expect(numbers(preview(s, diag('7.2')), 'dfm.cloneOverlap')).toEqual([])
+    expect(numbers(preview(s, diag('7')), 'dfm.cloneOverlap')).toEqual([1, 2])
+  })
+
+  it('overlap: a turned shape is intersected in the 2D layer', async () => {
+    const s = await designSetup({ services: { region2d: nodeRegion2d() } })
+    await s.run('design.pocket.add', {
+      partId: s.partId,
+      shape: {
+        kind: 'rectangle',
+        center: ['50', '30'],
+        length: '20',
+        width: '2',
+        cornerRadius: '0',
+        rotation: '45',
+      },
+      depth: '2',
+    })
+    const row = (du: string, dv: string) => [{ kind: 'offset', count: 1, du, dv }]
+    // across the strip (4.24 mm apart, 2 wide): no overlap; along it: overlap
+    expect(numbers(preview(s, row('-3', '3'), ['pocket1']), 'dfm.cloneOverlap')).toEqual([])
+    expect(numbers(preview(s, row('3', '3'), ['pocket1']), 'dfm.cloneOverlap')).toEqual([1, 2])
   })
 })
 

@@ -27,7 +27,6 @@ import { QuantityDtoSchema } from '../../quantity/quantity.dto'
 import { Rational } from '../../quantity/rational'
 import { UNITS } from '../../quantity/units'
 import { isExpression, shiftLiteral } from '../anchor'
-import { chamferEdge } from '../geometry-input'
 // types only: feature.ts registers this kind (BUILT_IN_KINDS) and imports this module
 import type {
   ExpandedOperation,
@@ -35,13 +34,15 @@ import type {
   FeatureBase,
   FeatureKindSpec,
   LoadedFeature,
+  SpanGeometry,
 } from '../feature'
 import type { FeatureDTO } from '../feature.dto'
 import { NAME_MAX } from '../../library/item'
-import { quantityParams, withParam, type FieldKind, type Operation, type Shape } from '../operation'
+import { quantityParams, withParam, type FieldKind, type Operation } from '../operation'
 import type { ShapeDTO } from '../shape.dto'
 import { definitionOf, shapeFromDTO } from '../shape'
 import { itemChain } from '../shape-items'
+import { footprintBounds, footprintsOverlap, sourceFootprint } from './footprint'
 import {
   alongStations,
   clonePath,
@@ -603,60 +604,21 @@ function faceSize(
   return on === 'stock.side[0]' || on === 'stock.side[2]' ? [L, T] : [W, T]
 }
 
-/** The source's footprint box around its reference point (axis-aligned shapes; others a point). */
-function footprint(
-  src: readonly Operation[],
-  ref: UV,
-): { u0: number; u1: number; v0: number; v1: number } {
-  const box = { u0: 0, u1: 0, v0: 0, v1: 0 }
-  const grow = (cu: number, cv: number, hu: number, hv: number) => {
-    box.u0 = Math.min(box.u0, cu - hu - ref.u)
-    box.u1 = Math.max(box.u1, cu + hu - ref.u)
-    box.v0 = Math.min(box.v0, cv - hv - ref.v)
-    box.v1 = Math.max(box.v1, cv + hv - ref.v)
-  }
-  const shapeBox = (s: Shape) => {
-    const shift = (p: 'min' | 'centre' | 'max', h: number) =>
-      p === 'min' ? h : p === 'max' ? -h : 0
-    const [hu, hv] =
-      s.kind === 'circle'
-        ? [s.diameter.canonical / 2, s.diameter.canonical / 2]
-        : s.kind === 'rectangle' && s.rotation.mapOr(0, (r) => r.canonical) === 0
-          ? [s.length.canonical / 2, s.width.canonical / 2]
-          : [0, 0]
-    grow(
-      s.center[0].canonical + shift(s.anchor.u, hu),
-      s.center[1].canonical + shift(s.anchor.v, hv),
-      hu,
-      hv,
-    )
-  }
-  for (const op of src)
-    if (op.kind === 'drilling') {
-      const r = op.diameter.canonical / 2
-      grow(op.center[0].canonical, op.center[1].canonical, r, r)
-    } else if (op.kind === 'chamfer') {
-      const edge = chamferEdge(src, op.edgeOf)
-      if (edge !== undefined) {
-        const r = edge.diameter / 2 + op.width.canonical
-        grow(...edge.center, r, r)
-      }
-    } else if (op.kind !== 'facing') shapeBox(op.shape)
-  return box
-}
-
 /**
  * The feature's own DFM warnings (features.md § Checks and DFM): `dfm.cloneOutsideStock`
- * (reference points off the stock face), `dfm.cloneDuplicate` (positions on an earlier instance),
- * `dfm.cloneOverlap` (info: instance footprints overlap), `dfm.clonesHeavy` (info: many owned
- * operations slow the part update, S6). Their `operation` is the feature id.
+ * (instance footprints further past a stock face edge than the source's, B3),
+ * `dfm.cloneDuplicate` (positions on an earlier instance), `dfm.cloneOverlap` (info: instance
+ * footprints overlap, footprint.ts), `dfm.clonesHeavy` (info: many owned operations slow the part
+ * update, S6). Their `operation` is the feature id. `geometry` holds the source operations'
+ * geometry input (placed shapes).
  */
 export function clonesWarnings(
   feature: Clones,
   ops: readonly Operation[],
   stock: Stock,
   _units: UnitSystem,
-  shapes: CloneShapes = [],
+  shapes: CloneShapes,
+  geometry: SpanGeometry,
 ): DfmWarning[] {
   const src = sourceOperations(feature.source, ops)
   if (src.length === 0) return []
@@ -670,8 +632,27 @@ export function clonesWarnings(
     params: DfmWarning['params'],
   ) => out.push({ code, severity, message, operation: feature.id, parameter: 'rows', params })
   const [fu, fv] = faceSize(stock, src, ops)
+  const ids = new Set(src.map((o) => o.id))
+  const port = geometry.region2d
+  const parts = sourceFootprint(
+    geometry.operations.filter((g) => ids.has(g.id)),
+    port,
+  )
+  // how far past each face edge the footprint reaches (0: inside); the source's own overhang is
+  // allowed (a source open to an edge on purpose), an instance reaching further is outside
+  const overhang = (d: UV): [number, number, number, number] => {
+    const b = footprintBounds(parts, d)
+    if (b === undefined) return [0, 0, 0, 0]
+    return [
+      Math.max(0, -b.min[0]),
+      Math.max(0, b.max[0] - fu),
+      Math.max(0, -b.min[1]),
+      Math.max(0, b.max[1] - fv),
+    ]
+  }
+  const own = overhang({ u: 0, v: 0 })
   const outside = path.instances
-    .filter((i) => i.number > 1 && (i.at.u < 0 || i.at.u > fu || i.at.v < 0 || i.at.v > fv))
+    .filter((i) => i.number > 1 && overhang(i.offset).some((x, k) => x > own[k]! + SAME_SPOT))
     .map((i) => i.number)
   if (outside.length > 0)
     w(
@@ -687,14 +668,23 @@ export function clonesWarnings(
       `${path.duplicates.length} position(s) on an earlier instance left out (${path.duplicates.join(', ')})`,
       { count: path.duplicates.length, numbers: path.duplicates },
     )
-  const box = footprint(src, ref)
   const overlapping = new Set<number>()
   const list = path.instances
+  // instances are translations: the answer depends on the offset between them only
+  const seen = new Map<string, boolean>()
+  const overlaps = (d: UV) => {
+    const key = `${Math.round(d.u * 1e6)},${Math.round(d.v * 1e6)}`
+    let o = seen.get(key)
+    if (o === undefined) seen.set(key, (o = footprintsOverlap(parts, d, port)))
+    return o
+  }
   for (let a = 0; a < list.length; a++)
     for (let b = a + 1; b < list.length; b++) {
-      const du = Math.abs(list[a]!.offset.u - list[b]!.offset.u)
-      const dv = Math.abs(list[a]!.offset.v - list[b]!.offset.v)
-      if (du < box.u1 - box.u0 - 1e-9 && dv < box.v1 - box.v0 - 1e-9) {
+      const d = {
+        u: list[b]!.offset.u - list[a]!.offset.u,
+        v: list[b]!.offset.v - list[a]!.offset.v,
+      }
+      if (overlaps(d)) {
         overlapping.add(list[a]!.number)
         overlapping.add(list[b]!.number)
       }
