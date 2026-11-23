@@ -101,7 +101,12 @@ const RENDERS = process.env['DFYOM_RENDERS'] === '1'
 const rendersDir = resolve(__dirname, '../design/features/renders')
 
 /** With DFYOM_RENDERS=1: light and dark; `before` restores what the Settings dialog closed. */
-async function render(page: Page, name: string, before: () => Promise<void>): Promise<void> {
+async function render(
+  page: Page,
+  name: string,
+  before: () => Promise<void>,
+  after: () => Promise<void> = async () => {},
+): Promise<void> {
   if (!RENDERS) return
   const settings = page.getByRole('dialog', { name: 'Settings' })
   for (const theme of ['light', 'dark'] as const) {
@@ -113,6 +118,7 @@ async function render(page: Page, name: string, before: () => Promise<void>): Pr
     await before()
     await page.waitForTimeout(400)
     await page.screenshot({ path: `${rendersDir}/${name}-${theme}.png` })
+    await after()
   }
 }
 
@@ -136,7 +142,10 @@ test('tool field: library tools of the type, the near match, widen the slot (DF4
   await setField(setup, 'Length (X)', '100')
   await setField(setup, 'Width (Y)', '60')
   await setField(setup, 'Thickness (Z)', '20')
-  await setup.getByRole('button', { name: 'Create part' }).click()
+  await page
+    .getByRole('dialog', { name: 'Stock' })
+    .getByRole('button', { name: 'Create part' })
+    .click()
   const added = await page.evaluate(
     (values) =>
       (globalThis as unknown as { dfyom: PreloadApi }).dfyom.call('library.tool.add', { values }),
@@ -172,12 +181,21 @@ test('tool field: library tools of the type, the near match, widen the slot (DF4
   await expect(option).toHaveAccessibleDescription(
     '1 flute · Doesn’t fit: wider than the 6 mm slot',
   )
-  await render(page, 'df42-library-list', async () => {
-    if (!(await list.isVisible())) await combo.click()
-    await expect(option).toBeVisible()
-  })
   await page.keyboard.press('Escape')
   await expect(list).toBeHidden()
+  // the open list is modal (Settings is out of reach): open it per theme, close it after
+  await render(
+    page,
+    'df42-library-list',
+    async () => {
+      await combo.click()
+      await expect(option).toBeVisible()
+    },
+    async () => {
+      await page.keyboard.press('Escape')
+      await expect(list).toBeHidden()
+    },
+  )
 
   // using it locks it; it is wider than the slot, so widening the slot is offered
   await use.click()
