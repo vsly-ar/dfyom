@@ -460,6 +460,11 @@ export const designMessages = {
       inline: 'Inline',
       named: 'Shapes',
       newShape: 'New shape…',
+      /** DF49: imports a drawing and uses its first shape here (ui.md § Import SVG where it is looked for). */
+      importSvg: 'Import SVG…',
+      importUsed: (op: string, shape: string) => `${op} now cuts ${shape}.`,
+      importNotUsed: (op: string, shape: string) =>
+        `${op} could not use ${shape}; the reason shows at its Shape field.`,
       usedBy: (n: number) => (n === 0 ? 'Not used' : `Used by ${n}`),
       editShape: 'Edit shape',
       convert: 'Convert to shape',

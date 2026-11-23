@@ -2,8 +2,9 @@
 // kind and label, drag grip (D45; Alt+↑/↓) and remove), the selected item's fields (every commit one
 // `design.shape.item.update`, issues at their field), the path's segment table and the summary
 // from `design.shape.get` (area, size, smallest inside radius). Item values come from the replica;
-// the summary and the shape's users from the query.
-// Doc: docs/conventions/ui.md#shape-editor, #reordering-lists-d45,
+// the summary and the shape's users from the query. The header has "Import SVG…" (DF49: into new
+// shapes, the report's "Edit shape" opens the first) and "Import report" for an imported shape.
+// Doc: docs/conventions/ui.md#shape-editor, #reordering-lists-d45, #import-svg-where-it-is-looked-for-df49,
 // docs/modes/design-v0.3.md#shape-definition
 import { useRef, useState } from 'react'
 import type {
@@ -43,7 +44,7 @@ import { defaultUnit, quantityOf, type DesignPart } from './model'
 import { NameField } from './NameField'
 import { SegmentTable } from './SegmentTable'
 import { ImportReportDialog } from './ImportReportDialog'
-import { addShapeEntries } from './ShapeList'
+import { addShapeEntries, useSvgImport } from './ShapeList'
 import { shapeLoops } from './ShapePicker'
 import { ShapeKindIcon } from './ShapeKindIcon'
 import {
@@ -100,6 +101,7 @@ export function ShapeInspector({
   const cancelGesture = useCancelGesture()
   const { ui } = useShell()
   const info = useShapeInfo(part, shape.id)
+  const svg = useSvgImport(part)
   const editor = useUi((s) => s.shapeEditor)
   const [errors, setErrors] = useState<ShapeFieldErrors | undefined>(undefined)
   const [top, setTop] = useState<AppErrorData | undefined>(undefined)
@@ -169,7 +171,16 @@ export function ShapeInspector({
       <PanelHeader
         title={shape.name}
         itemId={shape.id}
-        actions={<LastImportButton part={part} shapeId={shape.id} />}
+        actions={
+          <>
+            <IconButton
+              label={shapeMessages.navigator.importSvg}
+              icon={<Icon name="shape-import" />}
+              onClick={svg.start}
+            />
+            <LastImportButton part={part} shapeId={shape.id} />
+          </>
+        }
       />
       <div className={styles['fields']}>
         {top ? <ErrorMessage error={top} message={t.commandFailed} /> : null}
@@ -184,10 +195,7 @@ export function ShapeInspector({
         <section className={styles['group']} aria-label={t.items}>
           <div className={styles['groupHead']}>
             <h3 className={styles['groupTitle']}>{t.items}</h3>
-            <Menu
-              label={t.addItem}
-              items={addShapeEntries(addItem).filter((e) => e !== 'separator')}
-            >
+            <Menu label={t.addItem} items={addShapeEntries(addItem)}>
               <IconButton label={t.addItem} icon={<Icon name="add" />} />
             </Menu>
           </div>
@@ -257,6 +265,7 @@ export function ShapeInspector({
           ) : null}
         </section>
       </div>
+      {svg.dialog}
     </div>
   )
 }
