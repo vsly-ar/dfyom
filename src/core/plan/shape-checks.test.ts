@@ -108,6 +108,16 @@ describe('tool checks of general shapes', () => {
     expectOk(planOperationInputs(s.d.doc, planId, undefined, region2d))
   })
 
+  it('corners whose leftover lies beyond the stock do not warn (DF53)', async () => {
+    // the 60 mm wide stock with every corner 5 mm beyond it; a 1 mm corner 1 mm in still warns
+    const open = await onePlan([rect('110', '70', '1')], { kind: 'pocket', args: { depth: '2' } })
+    expect(ofOp(warnings(open.s, open.planId), open.planOp)).toEqual([])
+    const wall = await onePlan([rect('98', '58', '1')], { kind: 'pocket', args: { depth: '2' } })
+    expect(ofOp(warnings(wall.s, wall.planId), wall.planOp).map((f) => f.rule)).toEqual([
+      'cornerRadius',
+    ])
+  })
+
   it('an inside profile checks its opening; outside and on profiles have no width rule', async () => {
     const inside = await onePlan([rect('5', '5', '0')], {
       kind: 'profile',

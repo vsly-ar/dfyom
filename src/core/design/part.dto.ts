@@ -157,7 +157,7 @@ export const ProfileDtoSchema = z.object({
   shape: OperationShapeDtoSchema,
   side: z.enum(PROFILE_SIDES),
   slotWidth: length(),
-  /** `on` only: a blind groove's depth below `on`; absent = through (as every v0.2 profile). */
+  /** A blind groove's or step's (DF53) depth below `on`; absent = through (as every v0.2 profile). */
   depth: length().optional(),
   tabs: z.object({
     count: quantityDto('scalar'),

@@ -324,7 +324,7 @@ export function OperationFields({
                 onValueChange={(side) => ctx.send({ side }, 'side')}
               />
             </Field>
-            {op.side === 'on' ? <GrooveDepthField ctx={ctx} /> : null}
+            <GrooveDepthField ctx={ctx} />
           </ShapeGroup>
           {toolGroup}
           {g(
@@ -504,7 +504,10 @@ function RotationField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Elem
   )
 }
 
-/** A groove's blind depth below `on` (side On only); empty = through (`depth: null`). */
+/**
+ * A profile's blind depth below `on`: a groove (side On) or a step (Outside/Inside, DF53,
+ * docs/modes/design-v0.3.md#steps-blind-side-profiles-df53); empty = through (`depth: null`).
+ */
 function GrooveDepthField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Element | null {
   const op = ctx.op
   if (op.kind !== 'profile') return null
