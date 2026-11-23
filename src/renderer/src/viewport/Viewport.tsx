@@ -259,6 +259,19 @@ export function Viewport({
   const down = useRef<{ x: number; y: number } | null>(null)
   const summaryId = useId()
   const reducedMotion = useReducedMotion()
+  // pick mode ending without a pick (Escape, the pressed pick toggle again) is announced politely
+  // (ui.md#selection-and-picking, DF10); a click pick sets `picked` before the request clears
+  const [shownPick, setShownPick] = useState(pick)
+  const [picked, setPicked] = useState(false)
+  const [pickNote, setPickNote] = useState('')
+  if (pick !== shownPick) {
+    setShownPick(pick)
+    if (pick !== null) setPickNote('')
+    else if (shownPick !== null) {
+      setPickNote(picked ? '' : msg.pickCancelled)
+      setPicked(false)
+    }
+  }
   const tokens = useTokens(regionRef, TOKEN_NAMES)
   const palette = useMemo(() => paletteFrom(tokens), [tokens])
   const cube = useMemo(() => cubeColours(tokens), [tokens])
@@ -637,7 +650,9 @@ export function Viewport({
             if (!isClick(down.current, { x: e.nativeEvent.clientX, y: e.nativeEvent.clientY }))
               return
             if (pick) {
-              if (pick.eligible.has(target.surface)) onPick?.(target)
+              if (!pick.eligible.has(target.surface)) return
+              setPicked(true)
+              onPick?.(target)
             } else onSelect?.(target)
           }}
         />
@@ -733,6 +748,9 @@ export function Viewport({
       </p>
       <p className={styles['srOnly']} aria-live="polite">
         {announcement ?? ''}
+      </p>
+      <p className={styles['srOnly']} aria-live="polite">
+        {pickNote}
       </p>
     </div>
   )

@@ -199,10 +199,10 @@ describe('Clones UI (U3)', () => {
     const { user, part } = await openDraft()
     await user.click(within(inspector()).getByRole('button', { name: 'Add row' }))
     await user.click(await screen.findByRole('menuitem', { name: 'Grid' }))
-    const cols = within(inspector()).getByRole('textbox', { name: 'Columns' })
+    const cols = within(inspector()).getByRole('combobox', { name: 'Columns' })
     await user.clear(cols)
     await user.type(cols, '10{Enter}')
-    const rowsField = within(inspector()).getByRole('textbox', { name: 'Rows' })
+    const rowsField = within(inspector()).getByRole('combobox', { name: 'Rows' })
     await user.clear(rowsField)
     await user.type(rowsField, '10{Enter}')
     await waitFor(() =>

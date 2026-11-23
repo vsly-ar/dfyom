@@ -6,7 +6,7 @@ import { expectNoAxeViolations, renderUi } from '../../test/render'
 import { Checkbox } from '../Checkbox/Checkbox'
 import { FieldIcon } from '../icons/field/FieldIcon'
 import { Field, type FieldMessage } from './Field'
-import { FieldAdjustButton, FieldInput } from './FieldInput'
+import { FieldInput } from './FieldInput'
 
 const soft: FieldMessage = {
   id: 'stepdown.above',
@@ -206,13 +206,27 @@ describe('Field', () => {
     expect(screen.getByRole('textbox', { name: 'Feed' })).toHaveAttribute('readonly')
   })
 
-  it('names the pencil inside the input', () => {
+  it('draws nothing but the text and unit in the input box (no pencil since DF9)', () => {
     renderUi(
       <Field label="Width">
-        <FieldInput defaultValue="12.00" adjust={<FieldAdjustButton label="Adjust Width" fix />} />
+        <FieldInput defaultValue="12.00" unit="mm" />
       </Field>,
     )
-    expect(screen.getByRole('button', { name: 'Adjust Width' })).toHaveAttribute('data-fix')
+    expect(screen.queryByRole('button')).toBeNull()
+  })
+
+  it('renders a popup after the support area', () => {
+    renderUi(
+      <Field
+        label="Width"
+        messages={[note]}
+        popup={<div role="dialog" aria-label="Adjust Width" />}
+      >
+        <FieldInput defaultValue="12.00" />
+      </Field>,
+    )
+    const dialog = screen.getByRole('dialog', { name: 'Adjust Width' })
+    expect(dialog.previousElementSibling).toHaveTextContent(String(note.text))
   })
 
   it('has no axe violations in its states', async () => {
@@ -224,11 +238,7 @@ describe('Field', () => {
           lock={{ locked: false, onLockedChange: () => {} }}
           messages={[soft, note, agent]}
         >
-          <FieldInput
-            defaultValue="1.50"
-            unit="mm"
-            adjust={<FieldAdjustButton label="Adjust Stepdown" fix />}
-          />
+          <FieldInput defaultValue="1.50" unit="mm" />
         </Field>
         <Field
           label="Depth"

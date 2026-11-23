@@ -204,6 +204,8 @@ test('features: add a hole, expand its row, the owned inspector is read-only, Ma
       .and(inspector.locator('input'))
       .focus(),
   )
+  // the focused field's adjust panel covers the controls under it (DF9): Escape closes it
+  await page.keyboard.press('Escape')
   // stepped (F7): terraces by the hole's end mill, the stepdown field, the shared tool
   await inspector.getByRole('radio', { name: 'Stepped' }).click()
   await expect(section).toHaveAccessibleName(/stepped in 2 steps of 0\.93 mm/)

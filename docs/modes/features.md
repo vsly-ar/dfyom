@@ -136,7 +136,7 @@ All answered (D30, D34); kept with the original questions for the record.
 
 ## Undo
 
-One feature command is one undo step, the expansion included: add, update, remove (removes its owned operations), move. An adjust-popover session on a feature field is one [gesture](../architecture/commands.md#gestures-live-edits) as for operations. Undoing a feature update restores the owned operations by their inverse patches; the expansion is never re-run on undo or redo (handlers are not re-run, [commands.md](../architecture/commands.md#undo--redo)).
+One feature command is one undo step, the expansion included: add, update, remove (removes its owned operations), move. An adjust-panel session on a feature field is one [gesture](../architecture/commands.md#gestures-live-edits) as for operations. Undoing a feature update restores the owned operations by their inverse patches; the expansion is never re-run on undo or redo (handlers are not re-run, [commands.md](../architecture/commands.md#undo--redo)).
 
 ## Persistence (high level)
 
