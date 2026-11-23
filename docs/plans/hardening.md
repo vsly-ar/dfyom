@@ -21,7 +21,7 @@ Each with a recommendation; "Q49 ok" takes it. Numbering continues after the [v0
 
 ## Next up
 
-Waiting for the dogfood feedback and Q49–Q56. Meanwhile (no user input needed): 1.1–1.3 doc drafts, P1–P3 (flaky tests), the known bugs B1–B6.
+Dogfood batches DF1–DF36 merged (DF25–DF30 in progress). Doing, on the Q49–Q56 recommendations: bugs B1, B3–B6; AX A1, A2, A5, A7 with the 1.3 llm-api amendment; machine docs 1.1, 1.2 and M1 (serial) on a branch until the docs are accepted. Next: A6, B2, M2–M3.
 
 ## Exit criteria
 
@@ -46,9 +46,9 @@ Waiting for the dogfood feedback and Q49–Q56. Meanwhile (no user input needed)
 
 | #   | Task                                                                                                                                                                                                                | Status | Notes                                                               |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------- |
-| 1.1 | Real-machine safety spec in [run.md § Safety](../modes/run.md#safety) → accepted: e-stop and reset semantics, who may command a real connection (Q50), confirmations, watchdogs, what a lost connection does        | todo   | Blocks M1 ([grbl.md](../architecture/grbl.md#transport-and-sender)) |
-| 1.2 | Run on a real machine (new `modes/run-machine.md`): `SerialTransport`, port picker, real-machine checks, probing, re-zero, section resume, overrides; amends [run-v0.1.md](../modes/run-v0.1.md) decisions 1, 5, 11 | todo   | Q49, Q52                                                            |
-| 1.3 | [llm-api.md](../architecture/llm-api.md) amendment for A1–A6 and snap/measure queries; [testing.md](../conventions/testing.md) real-machine row (manual checklist, opt-in)                                          | todo   | Q53                                                                 |
+| 1.1 | Real-machine safety spec in [run.md § Safety](../modes/run.md#safety) → accepted: e-stop and reset semantics, who may command a real connection (Q50), confirmations, watchdogs, what a lost connection does        | doing  | Blocks M1 ([grbl.md](../architecture/grbl.md#transport-and-sender)) |
+| 1.2 | Run on a real machine (new `modes/run-machine.md`): `SerialTransport`, port picker, real-machine checks, probing, re-zero, section resume, overrides; amends [run-v0.1.md](../modes/run-v0.1.md) decisions 1, 5, 11 | doing  | Q49, Q52                                                            |
+| 1.3 | [llm-api.md](../architecture/llm-api.md) amendment for A1–A6 and snap/measure queries; [testing.md](../conventions/testing.md) real-machine row (manual checklist, opt-in)                                          | doing  | Q53                                                                 |
 | 1.4 | [ui.md](../conventions/ui.md) amendment for the run panel on a real machine (connect, probe, overrides, resume) and the UX fixes that change behaviour                                                              | todo   | With 1.2                                                            |
 
 ## 2. Dogfood intake
@@ -106,12 +106,12 @@ Batch 1: TG #196 (2026-11-22, from the installed 0.3.2). One row per finding; id
 
 | #   | Task                                                                                                                                                          | Status | Notes                                                                                                     |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------- |
-| B1  | Closing a project with no part hangs Electron teardown                                                                                                        | todo   | [v0.4](v0.4.md#known-issues-found-in-v04) U4                                                              |
+| B1  | Closing a project with no part hangs Electron teardown                                                                                                        | doing  | [v0.4](v0.4.md#known-issues-found-in-v04) U4                                                              |
 | B2  | Region offsets fail with raw stack traces at specific offsets (F3); 2D growing regions with non-tangent concave arcs give `resultInvalid`                     | todo   | Follow-up S10 + K-R moved here (Q53)                                                                      |
-| B3  | `dfm.cloneOutsideStock` checks reference points, not footprints; `dfm.cloneOverlap` uses bounding boxes                                                       | todo   | v0.4 F5                                                                                                   |
-| B4  | `dfm.chamferTooDeep` misses a chamfer through a thin pocket floor                                                                                             | todo   | v0.4 C2                                                                                                   |
-| B5  | Tolerances: a countersink's derived chamfer width has none; the drill below a blind counterbore ignores the counterbore depth's tolerance (stack-up decision) | todo   | v0.4 L2-C, F3                                                                                             |
-| B6  | Projects saved before D45 must show the pre-alpha reset prompt, not a raw load error                                                                          | todo   | [migrations.md](../conventions/error-handling/migrations.md#pre-alpha-exception-no-data-preservation-yet) |
+| B3  | `dfm.cloneOutsideStock` checks reference points, not footprints; `dfm.cloneOverlap` uses bounding boxes                                                       | doing  | v0.4 F5                                                                                                   |
+| B4  | `dfm.chamferTooDeep` misses a chamfer through a thin pocket floor                                                                                             | doing  | v0.4 C2                                                                                                   |
+| B5  | Tolerances: a countersink's derived chamfer width has none; the drill below a blind counterbore ignores the counterbore depth's tolerance (stack-up decision) | doing  | v0.4 L2-C, F3                                                                                             |
+| B6  | Projects saved before D45 must show the pre-alpha reset prompt, not a raw load error                                                                          | doing  | [migrations.md](../conventions/error-handling/migrations.md#pre-alpha-exception-no-data-preservation-yet) |
 
 ## 4. UX and AX
 
@@ -126,13 +126,13 @@ Batch 1: TG #196 (2026-11-22, from the installed 0.3.2). One row per finding; id
 | U7  | Lid tool runs: a second Flat 6 run (D44) costs a manual tool change on a real machine; revisit the order rule                                                                     | UX    | todo   | v0.4 X2; only if the user minds                                  |
 | U8  | Grid row end (zigzag-last cell, D46): keep or change after dogfood                                                                                                                | UX    | todo   | v0.4 L2-B                                                        |
 | U9  | Design review in one batch for S3 findings and U1–U8 visuals                                                                                                                      | UX    | todo   | Like v0.4 L2                                                     |
-| A1  | Result compaction: no `stack` in agent results, warnings as a delta plus a count, one copy per result, `detail: 'summary'` on `plan.get`, `plan.toolpath.get`, `design.shape.get` | AX    | todo   | Follow-up A2                                                     |
-| A2  | `job.wait` returns at operator waits; `run.job.continue` defaults to the only waiting run                                                                                         | AX    | todo   | Follow-up A3; also M-lane                                        |
+| A1  | Result compaction: no `stack` in agent results, warnings as a delta plus a count, one copy per result, `detail: 'summary'` on `plan.get`, `plan.toolpath.get`, `design.shape.get` | AX    | doing  | Follow-up A2                                                     |
+| A2  | `job.wait` returns at operator waits; `run.job.continue` defaults to the only waiting run                                                                                         | AX    | doing  | Follow-up A3; also M-lane                                        |
 | A3  | Frames in the server primer; `placed` bounds in operation results                                                                                                                 | AX    | todo   | Follow-up A4                                                     |
 | A4  | Launcher: `bin/dfyom` in the bundle, Help → "Connect an agent" with a ready `claude mcp add` line                                                                                 | AX    | todo   | Follow-up A5                                                     |
-| A5  | Unknown-argument hints; `project.close` defaults to the bound project                                                                                                             | AX    | todo   | Follow-up A6                                                     |
+| A5  | Unknown-argument hints; `project.close` defaults to the bound project                                                                                                             | AX    | doing  | Follow-up A6                                                     |
 | A6  | Headless snap and measure for existing UI actions (query only)                                                                                                                    | AX    | todo   | v0.3 X1 backlog                                                  |
-| A7  | Error messages reviewed for agents: every refusal names the field, the rule and a next step                                                                                       | AX    | todo   | From X2's agent run                                              |
+| A7  | Error messages reviewed for agents: every refusal names the field, the rule and a next step                                                                                       | AX    | doing  | From X2's agent run                                              |
 | A8  | `tools/list` at 112.7 K of 120 K: A1–A6 fit without new tools; fold or consolidate (Q32 option B) only if a fix needs more                                                        | AX    | todo   | [llm-api.md](../architecture/llm-api.md#implementation-task-310) |
 
 ## 5. Real machine
@@ -141,7 +141,7 @@ What exists ([run-v0.1.md](../modes/run-v0.1.md)): `GrblSender` (character count
 
 | #   | Task                                                                                                                                                                                                  | Status | Depends on |
 | --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ---------- |
-| M1  | `SerialTransport` (`serialport` in the utility process), port list and picker, `run.connection.open { target: 'serial', path, baud }`, handshake and `$$` checked against the plan's machine copy     | todo   | 1.1, 1.2   |
+| M1  | `SerialTransport` (`serialport` in the utility process), port list and picker, `run.connection.open { target: 'serial', path, baud }`, handshake and `$$` checked against the plan's machine copy     | doing  | 1.1, 1.2   |
 | M2  | Real-machine rules: plan `finalized`/`inUse` only, homed, soft-limit check, the permission policy of Q50, confirmation before the first motion, disconnect = reset                                    | todo   | M1         |
 | M3  | Machine readiness in the UI: DRO in work and machine coordinates, jog by step and continuous with cancel, set zero per axis, alarm text with the next step (home, unlock, check limit)                | todo   | M1         |
 | M4  | Z touch plate: `G38.2` probe with plate thickness, also at tool changes and after a flip (replaces the nominal-thickness assumption, [v0.2](v0.2.md#known-issues-and-risks)); emulator learns `G38.x` | todo   | M3         |
