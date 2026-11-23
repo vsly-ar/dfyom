@@ -19,6 +19,7 @@ import { planMessages, sentence } from '../../messages/plan'
 import { useCancelGesture } from '../../shell/hooks'
 import {
   ErrorMessage,
+  Field,
   FieldIcon,
   PanelHeader,
   QuantityInput,
@@ -101,7 +102,13 @@ export function SetupInspector({
             ) : null}
           </dl>
         </div>
-        <div className={styles['group']}>
+        <Field
+          label={m.rotation}
+          kind="toggle"
+          illustration={<FieldIcon name="rotation" />}
+          readOnly={readOnly}
+          messages={[{ id: 'rotationHint', severity: 'note', text: m.rotationHint }]}
+        >
           <SegmentedControl<string>
             label={m.rotation}
             options={SETUP_ROTATIONS.map((r) => ({ value: String(r), label: `${r}°` }))}
@@ -112,8 +119,7 @@ export function SetupInspector({
               if (rotation !== (setup.rotation ?? 0)) void update({ rotation })
             }}
           />
-          <p className={styles['caption']}>{m.rotationHint}</p>
-        </div>
+        </Field>
         <QuantityInput
           label={m.clearanceHeight}
           kind="length"

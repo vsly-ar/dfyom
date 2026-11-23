@@ -241,6 +241,14 @@ const ICONS = {
       <path data-accent="" d="M10 14V10.66" />
     </>
   ),
+  // DF45: the Plan start card's machine choice; a gantry router, the cutter is the amber part
+  machine: (
+    <>
+      <path d="M2 17H18M4 17V4H16V17" />
+      <rect x="8" y="4" width="4" height="6" />
+      <path data-accent="" d="M10 10V14" />
+    </>
+  ),
   'stock-length': stockSize('stock-length'),
   'stock-width': stockSize('stock-width'),
   'stock-thickness': stockSize('stock-thickness'),

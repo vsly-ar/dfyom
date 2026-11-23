@@ -29,6 +29,9 @@ export interface SegmentedControlProps<V extends string> {
   tabbable?: boolean
   /** Layout only; appended to the wrapper's class. */
   className?: string | undefined
+  /** Set by a wrapping `Field` (DF45): its support area (hint, status) describes the group. */
+  id?: string
+  'aria-describedby'?: string
 }
 
 export function SegmentedControl<V extends string>({
@@ -40,6 +43,8 @@ export function SegmentedControl<V extends string>({
   disabled = false,
   tabbable = true,
   className,
+  id,
+  'aria-describedby': describedBy,
 }: SegmentedControlProps<V>): React.JSX.Element {
   const root = useRef<HTMLDivElement>(null)
   const thumb = useSlidingIndicator(root, '[data-state="on"]', value)
@@ -48,6 +53,8 @@ export function SegmentedControl<V extends string>({
       ref={root}
       type="single"
       aria-label={label}
+      {...(id === undefined ? {} : { id })}
+      {...(describedBy === undefined ? {} : { 'aria-describedby': describedBy })}
       value={value}
       // a single choice is always set: ignore Radix's deselect (empty value)
       onValueChange={(v) => {

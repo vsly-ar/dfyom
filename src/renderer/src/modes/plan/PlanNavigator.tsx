@@ -336,6 +336,9 @@ function MachineSection({
   units: ProjectDoc['unitSystem']
 }): React.JSX.Element {
   const call = usePlanCommand()
+  // the machine chosen here is the Plan start card's next preselection (DF45, `lastMachine`)
+  const { settings } = useShell()
+  const remember = (id: string) => settings.getState().update({ lastMachine: id })
   const canSet = allows(plan, 'plan.machine.set')
   const machines = useLibraryItems('machine', plan.machine)
   // machine copies always come from the library (only a part's stock may be its own, DF13)
@@ -361,7 +364,10 @@ function MachineSection({
           options={options}
           {...(copy === undefined ? {} : { value: copy.libraryItemId })}
           disabled={!canSet}
-          onValueChange={(id) => void send('plan.machine.set', { machineLibraryItemId: id })}
+          onValueChange={(id) => {
+            remember(id)
+            void send('plan.machine.set', { machineLibraryItemId: id })
+          }}
         />
       )}
       <div className={styles['libraryActions']}>
@@ -376,6 +382,7 @@ function MachineSection({
                 planId: plan.id,
                 machineLibraryItemId: id,
               })
+              if (r.ok) remember(id)
               return r.ok ? undefined : r.error
             }}
           />
@@ -421,6 +428,12 @@ function ToolpathSection({
         : (several ? setupExportBlocked(data?.warnings ?? [], setup) : blocked)
           ? m.export.blocked
           : null
+  // DF45: the next step is the primary – Generate until every toolpath is up to date, then
+  // Export. Export regenerates missing and outdated toolpaths itself, so it stays enabled and
+  // its hint says so.
+  const allReady = ready === ops.length
+  const exportNote =
+    exportWhy ?? (allReady || busy ? null : m.export.generatesFirst(ops.length - ready))
 
   return (
     <Section title={m.toolpaths.title} icon="toolpath">
@@ -442,6 +455,7 @@ function ToolpathSection({
       ) : null}
       <div className={styles['actions']}>
         <Button
+          variant={allReady ? 'default' : 'primary'}
           icon={<Icon name="refresh" />}
           disabled={busy || generateWhy !== null}
           {...(generateWhy === null ? {} : { 'aria-describedby': ids.generate })}
@@ -455,10 +469,10 @@ function ToolpathSection({
           </p>
         ) : null}
         <Button
-          variant="primary"
+          variant={allReady ? 'primary' : 'default'}
           icon={<Icon name="export-gcode" />}
           disabled={exporting || busy || exportWhy !== null}
-          {...(exportWhy === null ? {} : { 'aria-describedby': ids.export })}
+          {...(exportNote === null ? {} : { 'aria-describedby': ids.export })}
           onClick={() =>
             void store.getState().exportPlan(
               plan.id,
@@ -474,9 +488,9 @@ function ToolpathSection({
         >
           {exporting ? m.export.busy : several ? m.export.actionSetup(setup.name) : m.export.action}
         </Button>
-        {exportWhy !== null ? (
+        {exportNote !== null ? (
           <p id={ids.export} className={styles['why']}>
-            {exportWhy}
+            {exportNote}
           </p>
         ) : null}
       </div>
