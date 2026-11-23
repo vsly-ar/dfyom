@@ -4,10 +4,18 @@
 // Doc: docs/modes/reference-model.md#display, #placement-math-task-r2
 import {
   exceedsStock,
+  fitPosition,
+  fitScale,
   guessUnit,
   placedBox,
+  placedExtent,
   rotationMatrix,
+  roundScaleDown,
   UNIT_MM,
+  type Anchor,
+  type FitAxis,
+  type FitScaleProblem,
+  type FitZ,
   type Placement,
   type ReferenceWarning,
   type StockSize,
@@ -15,7 +23,7 @@ import {
 } from '../../../../core/design/reference'
 import type { ReferenceDTO } from '../../../../core/design/reference.dto'
 import type { Box } from '../../../../core/design/stl'
-import type { ProjectDoc } from '../../../../core/project/document'
+import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
 import { Quantity } from '../../../../core/quantity/quantity'
 import type { QuantityDTO } from '../../../../core/quantity/quantity.dto'
 import type { DesignPart } from './model'
@@ -114,6 +122,77 @@ export function sourceSize(bounds: Box): string {
   return `${f(bounds.max.x - bounds.min.x)} × ${f(bounds.max.y - bounds.min.y)} × ${f(
     bounds.max.z - bounds.min.z,
   )}`
+}
+
+// ── the Reference panel (dogfood DF5–DF7) ─────────────────────────────────────────────────
+
+const sig4 = (v: number) => String(Number(v.toPrecision(4)))
+
+/** "249.5 × 177.1 × 39 mm" (or in inch): a placed extent in the project units (DF6). */
+export function sizeText(extent: { x: number; y: number; z: number }, units: UnitSystem): string {
+  const k = units === 'mm' ? 1 : 1 / 25.4
+  const unit = units === 'mm' ? 'mm' : 'in'
+  return `${sig4(extent.x * k)} × ${sig4(extent.y * k)} × ${sig4(extent.z * k)} ${unit}`
+}
+
+/** A length in mm as a literal in the project's units (0.0001 mm / 0.00001 in), as fit writes. */
+export function lengthSource(mm: number, units: UnitSystem): string {
+  const trim = (s: string) => {
+    const t = s.includes('.') ? s.replace(/0+$/, '').replace(/\.$/, '') : s
+    return t === '-0' ? '0' : t
+  }
+  return units === 'mm' ? `${trim(mm.toFixed(4))} mm` : `${trim((mm / 25.4).toFixed(5))}"`
+}
+
+/** Fit mode's settings (ui.md § Reference panel): `scaleTo` null = keep the scale. */
+export interface FitSettings {
+  readonly anchor: Anchor
+  readonly z: FitZ
+  /** mm, ≥ 0. */
+  readonly margin: number
+  readonly scaleTo: readonly FitAxis[] | null
+}
+
+/**
+ * The placement `design.reference.update { fit }` would write (core `fitScale` / `fitPosition`,
+ * the scale rounded down as the command does), for Fit mode's live preview.
+ */
+export function fitPreview(
+  bounds: Box,
+  p: Placement,
+  stock: StockSize,
+  f: FitSettings,
+): { ok: true; placement: Placement } | { ok: false; problem: FitScaleProblem } {
+  if (2 * f.margin >= stock.length || 2 * f.margin >= stock.width)
+    return { ok: false, problem: 'marginTooLarge' }
+  let scale = p.scale
+  if (f.scaleTo !== null) {
+    const k = fitScale(placedExtent(bounds, { ...p, scale: 1 }), stock, f.scaleTo, f.margin)
+    if (!k.ok) return k
+    scale = roundScaleDown(k.scale)
+  }
+  const next = { ...p, scale }
+  const position = fitPosition(placedExtent(bounds, next), stock, f.anchor, f.z, f.margin)
+  return { ok: true, placement: { ...next, position } }
+}
+
+const at = (point: Anchor['u'], min: number, size: number) =>
+  point === 'min' ? min : point === 'max' ? min + size : min + size / 2
+
+/**
+ * Scale about the anchor (DF7): the position (mm) that keeps the anchor point of the placed box
+ * in X/Y and its top in Z where they are when the scale becomes `scale`.
+ */
+export function scaleAbout(bounds: Box, p: Placement, scale: number, anchor: Anchor) {
+  const before = placedExtent(bounds, p)
+  const after = placedExtent(bounds, { ...p, scale })
+  const u = anchor.u ?? 'centre'
+  const v = anchor.v ?? 'centre'
+  return {
+    x: at(u, p.position.x, before.x) - at(u, 0, after.x),
+    y: at(v, p.position.y, before.y) - at(v, 0, after.y),
+    z: p.position.z + before.z - after.z,
+  }
 }
 
 // ── the reference section (task U3) ───────────────────────────────────────────────────────

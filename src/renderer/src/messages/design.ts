@@ -279,7 +279,6 @@ export const designMessages = {
     done: 'Done',
     stockDescription: 'The block the part is cut from.',
     shapesDescription: 'Outlines that pockets and profiles can cut. Choose one to edit it.',
-    referenceDescription: 'Models shown on the stock as a ghost. Choose one to place it.',
     part: 'Part',
     size: 'Size (X × Y × Z)',
     material: 'Material',

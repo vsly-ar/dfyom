@@ -1,9 +1,11 @@
-// Reference model UI (task R3) against the fake bridge bound to a real project runtime with an
-// in-memory project session and file-reading in-process workers: import through the file dialog,
-// the Reference dialog's row (D45) and its per-window eye (no command, no undo step), the inspector (unit, scale,
-// 90° turns, angles, fit) as one command per edit, remove with undo, errors, and the ghost's mesh
-// read once per asset. The viewport canvas is stubbed.
-// Doc: docs/modes/reference-model.md#display, docs/conventions/ui.md#reference-ghost-v02
+// Reference model UI (task R3; the Reference panel since dogfood DF2–DF8) against the fake bridge
+// bound to a real project runtime with an in-memory project session and file-reading in-process
+// workers: the toolbar toggle and when the panel closes, import / replace / remove through the
+// panel, the per-window eye and "See through stock" (no command, no undo step), the size read-out,
+// unit, scale about the anchor, 90° turns, angles as one command per edit, Fit mode (preview,
+// Apply, Cancel, closing cancels), errors, and the ghost's mesh read once per asset. The viewport
+// canvas is stubbed; the preview and see-through state are read from the UI store.
+// Doc: docs/conventions/ui.md#reference-panel-hardening-df2df8, docs/modes/reference-model.md#display
 import { act, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
@@ -31,6 +33,8 @@ vi.mock('../../viewport/Scene', () => ({
 const BOX = '/models/box.stl'
 /** A 20 × 10 × 5 mm box: read as mm on a 100 × 60 × 20 stock. */
 const BOX_STL = binaryStl(boxSoup(20, 10, 5))
+const BIG = '/models/big.stl'
+const BIG_STL = binaryStl(boxSoup(40, 20, 10))
 
 /** A session that copies the "user's" files into an in-memory work folder (asset store). */
 function fakeProject(sources: Record<string, Uint8Array>) {
@@ -55,9 +59,34 @@ function fakeProject(sources: Record<string, Uint8Array>) {
   return { session, workers: createInProcessWorkers({ files: memoryFiles(files) }) }
 }
 
+const inspector = () => screen.getByRole('complementary', { name: 'Inspector' })
+const viewport = () => screen.getByRole('region', { name: '3D viewport' })
+const field = (label: string) => within(inspector()).getByLabelText(label, { selector: 'input' })
+const fitRegion = () => within(inspector()).getByRole('region', { name: 'Fit to stock' })
+const toggle = () =>
+  within(screen.getByRole('toolbar', { name: 'Part setup' })).getByRole('button', {
+    name: 'Reference',
+  })
+
+/** Presses the toolbar's Reference toggle (in jsdom a click lands on the panel separator). */
+async function pressToggle(): Promise<void> {
+  await act(async () => {
+    toggle().click()
+    await Promise.resolve()
+  })
+}
+
+/** Opens the Reference panel unless it is open (the narrow test window's overlay opens with it). */
+async function openPanel(): Promise<void> {
+  if (toggle().getAttribute('aria-pressed') !== 'true') await pressToggle()
+  await waitFor(() =>
+    expect(within(inspector()).getByRole('heading', { name: 'Reference' })).toBeVisible(),
+  )
+}
+
 async function renderReference() {
   const bridge = createFakeBridge()
-  const p = fakeProject({ [BOX]: BOX_STL })
+  const p = fakeProject({ [BOX]: BOX_STL, [BIG]: BIG_STL })
   const d = await designDispatcher('Bracket', 'mm', { project: p.session, workers: p.workers })
   const src = { kind: 'ui', id: 'test' } as const
   const stock = await d.dispatch(
@@ -86,17 +115,17 @@ async function renderReference() {
       <App />
     </ShellProvider>,
   )
-  // test windows are narrow: the inspector is an overlay, opened by its toggle
-  await r.user.click(screen.getByRole('button', { name: 'Inspector' }))
+  await screen.findByRole('toolbar', { name: 'Part setup' })
   const refs = () => Object.values(d.doc.references) as ReferenceDTO[]
-  // a finished import selects the reference and closes the dialog (D45)
+  const ui = () => shell.ui.getState()
+  /** Opens the panel (unless open) and imports BOX; the panel shows it. */
   const importBox = async () => {
     bridge.setFileChoice({ reference: BOX })
-    const dialog = await referenceGroup()
-    await r.user.click(within(dialog).getByRole('button', { name: 'Import STL…' }))
-    await waitFor(() => expect(dialog).not.toBeInTheDocument())
+    await openPanel()
+    await r.user.click(within(inspector()).getByRole('button', { name: 'Import STL…' }))
+    await waitFor(() => expect(within(inspector()).getByTitle('box')).toBeVisible())
   }
-  return { ...r, bridge, d, shell, refs, importBox }
+  return { ...r, bridge, d, shell, refs, ui, importBox }
 }
 
 async function retype(
@@ -111,88 +140,97 @@ async function retype(
   await user.type(el, text, { skipClick: true })
 }
 
-/** The Reference dialog (D45), opened from the toolbar's Part setup group unless it is open. */
-async function referenceGroup(): Promise<HTMLElement> {
-  const open = screen.queryByRole('dialog', { name: 'Reference' })
-  if (open !== null) return open
-  const tools = screen.getByRole('toolbar', { name: 'Part setup' })
-  act(() => within(tools).getByRole('button', { name: 'Reference' }).click())
-  return screen.findByRole('dialog', { name: 'Reference' })
-}
-/** Closes the open dialog by Done (the inspector is hidden from queries while a modal is open). */
-async function closeDialog(user: { click(e: Element): Promise<void> }): Promise<void> {
-  const dialog = screen.getByRole('dialog')
-  await user.click(within(dialog).getByRole('button', { name: 'Done' }))
-  await waitFor(() => expect(dialog).not.toBeInTheDocument())
-}
-const inspector = () => screen.getByRole('complementary', { name: 'Inspector' })
-const viewport = () => screen.getByRole('region', { name: '3D viewport' })
-const field = (label: string) => within(inspector()).getByLabelText(label, { selector: 'input' })
-
 describe('reference model UI', () => {
-  it('imports an STL through the file dialog: row, inspector, ghost mesh read once', async () => {
-    const { user, bridge, refs, importBox } = await renderReference()
-    expect(
-      within(await referenceGroup()).getByText(/Import an STL to show it on the stock/),
-    ).toBeInTheDocument()
+  it('the toolbar toggle opens the panel in the sidebar; another selection closes it', async () => {
+    const { user, ui } = await renderReference()
+    expect(toggle()).toHaveAttribute('aria-pressed', 'false')
+    await openPanel()
+    expect(toggle()).toHaveAttribute('aria-pressed', 'true')
+    expect(within(inspector()).getByText(/Import an STL to show it on the stock/)).toBeVisible()
+    await expectNoAxeViolations()
+    // pressing it again closes it: the part shows
+    await pressToggle()
+    expect(toggle()).toHaveAttribute('aria-pressed', 'false')
+    expect(within(inspector()).getByRole('heading', { name: 'Part' })).toBeInTheDocument()
+    // another selection needs the sidebar: the panel closes
+    await openPanel()
+    await user.click(
+      await within(screen.getByRole('navigation', { name: 'Navigator' })).findByRole('button', {
+        name: 'Add pocket',
+      }),
+    )
+    await waitFor(() => expect(toggle()).toHaveAttribute('aria-pressed', 'false'))
+    expect(ui().referencePanel).toBe(false)
+    expect(within(inspector()).getByRole('heading', { name: 'Pocket 1' })).toBeInTheDocument()
+  })
+
+  it('imports an STL through the file dialog: file line, size, fields, ghost mesh read once', async () => {
+    const { user, bridge, refs, ui, importBox } = await renderReference()
+    await openPanel()
     // a cancelled dialog imports nothing
-    await user.click(within(await referenceGroup()).getByRole('button', { name: 'Import STL…' }))
+    await user.click(within(inspector()).getByRole('button', { name: 'Import STL…' }))
     expect(bridge.calls.filter((c) => c.name === 'design.reference.import')).toHaveLength(0)
 
     await importBox()
     expect(bridge.calls.filter((c) => c.name === 'design.reference.import')).toEqual([
       { name: 'design.reference.import', args: { partId: expect.any(String), path: BOX } },
     ])
-    const row = within(await referenceGroup()).getByRole('button', { name: /^box/ })
-    expect(row).toHaveAttribute('aria-pressed', 'true') // selected: the inspector follows
-    expect(row).toHaveTextContent('12 triangles')
-    // the name is its own line (ellipsis with a tooltip), the count under it
-    expect(within(row).getByTitle('box')).toHaveTextContent(/^box$/)
-    await expectNoAxeViolations()
-    await closeDialog(user)
-    expect(within(inspector()).getByRole('heading', { name: 'box' })).toBeInTheDocument()
-    expect(within(inspector()).getByText('STL · 12 triangles · 20 × 10 × 5')).toBeInTheDocument()
+    // the file name (no name field, DF8) and the size in project units (DF6)
+    expect(within(inspector()).getByTitle('box')).toHaveTextContent(/^box$/)
+    expect(within(inspector()).queryByLabelText('Name')).not.toBeInTheDocument()
+    expect(within(inspector()).getByText('STL · 12 triangles')).toBeInTheDocument()
+    // placed size and file size agree at scale 1
+    expect(within(inspector()).getAllByText('20 × 10 × 5 mm', { selector: 'dd' })).toHaveLength(2)
     expect(within(inspector()).getByText(/Unit guess: Read as mm/)).toBeInTheDocument()
+    // the reference is the selection while the panel is open
+    expect(ui().selection.design).toBe(refs()[0]!.id)
     // fitted centre + top: min corner (40, 25, −5)
     expect(field('Position X')).toHaveValue('40 mm')
     expect(field('Position Y')).toHaveValue('25 mm')
     expect(field('Position Z')).toHaveValue('-5 mm')
-    expect(refs()).toHaveLength(1)
-    // the ghost: its triangles asked for once, then drawn (the viewport says so)
     await waitFor(() =>
       expect(viewport()).toHaveAccessibleDescription(/Reference box shown as a ghost\./),
     )
     expect(bridge.referenceMeshCalls).toEqual([refs()[0]!.id])
     await expectNoAxeViolations()
+    // closing deselects it; reopening shows it again
+    await pressToggle()
+    expect(ui().selection.design).toBeNull()
+    await openPanel()
+    await waitFor(() => expect(ui().selection.design).toBe(refs()[0]!.id))
   })
 
-  it('the eye hides the ghost in this window only: no command, no undo step, mesh kept', async () => {
-    const { user, bridge, d, importBox } = await renderReference()
+  it('the eye and See through stock are window state only: no command, no undo step', async () => {
+    const { user, bridge, d, ui, importBox } = await renderReference()
     await importBox()
     await waitFor(() => expect(viewport()).toHaveAccessibleDescription(/Reference box shown/))
     const calls = bridge.calls.length
     const revision = d.revision
-    const eye = within(await referenceGroup()).getByRole('button', { name: 'Show reference' })
+    const eye = within(inspector()).getByRole('button', { name: 'Show reference' })
     expect(eye).toHaveAttribute('aria-pressed', 'true')
     await user.click(eye)
     expect(eye).toHaveAttribute('aria-pressed', 'false')
-    expect(within(await referenceGroup()).getByRole('button', { name: /^box/ })).toHaveTextContent(
-      'hidden',
-    )
-    await closeDialog(user)
+    expect(within(inspector()).getByText('hidden')).toBeInTheDocument()
     expect(viewport()).not.toHaveAccessibleDescription(/Reference box/)
     expect(within(inspector()).getByText('Hidden in this window.')).toBeInTheDocument()
-    await user.click(within(await referenceGroup()).getByRole('button', { name: 'Show reference' }))
-    await closeDialog(user)
+    await user.click(eye)
     await waitFor(() => expect(viewport()).toHaveAccessibleDescription(/Reference box shown/))
+    // see through stock: on by default, off by the checkbox
+    const see = within(inspector()).getByRole('checkbox', { name: 'See through stock' })
+    expect(see).toBeChecked()
+    expect(ui().seeThroughStock).toBe(true)
+    await user.click(see)
+    expect(ui().seeThroughStock).toBe(false)
+    await user.click(see)
+    expect(ui().seeThroughStock).toBe(true)
     // nothing reached the project; the mesh was not read again
     expect(bridge.calls).toHaveLength(calls)
     expect(d.revision).toBe(revision)
     expect(bridge.referenceMeshCalls).toHaveLength(1)
   })
 
-  it('turns by 90° (one undo step each), edits angles, scale and unit, and fits to the stock', async () => {
-    const { user, bridge, d, refs, importBox } = await renderReference()
+  it('turns by 90° (one undo step each), edits angles and unit; scale keeps the anchor', async () => {
+    const { user, d, refs, importBox } = await renderReference()
     await importBox()
     const ref = () => refs()[0]!
     const undoable = d.history.undoable.length
@@ -202,41 +240,110 @@ describe('reference model UI', () => {
     expect(field('Rotation Z')).toHaveValue('90°')
     expect(d.history.undoable).toHaveLength(undoable + 1)
     expect(await screen.findByRole('button', { name: /^Undo Rotate reference/ })).toBeVisible()
-    await user.click(within(inspector()).getByRole('button', { name: 'Turn −90° about X' }))
-    await waitFor(() => expect(ref().rotation.x.source).toBe('-90°'))
-
+    await user.click(within(inspector()).getByRole('button', { name: 'Turn −90° about Z' }))
+    await waitFor(() => expect(ref().rotation.z.source).toBe('0°'))
     await retype(user, field('Rotation Y'), '15{Enter}')
     await waitFor(() => expect(ref().rotation.y.source).toBe('15'))
-    await retype(user, field('Scale'), '2{Enter}')
-    await waitFor(() => expect(ref().scale.source).toBe('2'))
+    await retype(user, field('Rotation Y'), '0{Enter}')
+    await waitFor(() => expect(ref().rotation.y.source).toBe('0'))
     await user.click(within(inspector()).getByRole('radio', { name: 'inch' }))
     await waitFor(() => expect(ref().sourceUnit).toBe('inch'))
-    // 20 × 10 × 5 in at scale 2, turned: far outside the stock
     expect(await within(inspector()).findByText(/sticks out of the stock/)).toBeInTheDocument()
-
-    // back to mm, no rotation, scale 1; fit front-left at the bottom
     await user.click(within(inspector()).getByRole('radio', { name: 'mm' }))
+    await waitFor(() => expect(ref().sourceUnit).toBe('mm'))
+
+    // the anchor sits with the scale, with its hint; scale 2 about the centre: 40 × 20 × 10 with
+    // the centre (50, 30) and the top (0) kept → min corner (30, 20, −10), one undo step
+    const anchors = within(inspector()).getByRole('radiogroup', { name: 'Anchor' })
+    expect(within(inspector()).getByText(/stays in place when the scale changes/)).toBeVisible()
+    const before = d.history.undoable.length
+    await retype(user, field('Scale'), '2{Enter}')
+    await waitFor(() => expect(ref().scale.source).toBe('2'))
+    expect(field('Position X')).toHaveValue('30 mm')
+    expect(field('Position Y')).toHaveValue('20 mm')
+    expect(field('Position Z')).toHaveValue('-10 mm')
+    expect(within(inspector()).getByText('40 × 20 × 10 mm', { selector: 'dd' })).toBeVisible()
+    expect(d.history.undoable).toHaveLength(before + 1)
+    // about the front-left corner: (30, 20) stays, the top stays
+    await user.click(within(anchors).getByRole('radio', { name: 'Front left' }))
     await retype(user, field('Scale'), '1{Enter}')
-    for (const axis of ['X', 'Y', 'Z']) await retype(user, field(`Rotation ${axis}`), '0{Enter}')
-    await waitFor(() => expect(ref().rotation.y.source).toBe('0'))
-    await user.click(
-      within(within(inspector()).getByRole('radiogroup', { name: 'Anchor' })).getByRole('radio', {
-        name: 'Front left',
-      }),
+    await waitFor(() => expect(ref().scale.source).toBe('1'))
+    expect(field('Position X')).toHaveValue('30 mm')
+    expect(field('Position Y')).toHaveValue('20 mm')
+    expect(field('Position Z')).toHaveValue('-5 mm')
+  })
+
+  it('Fit mode: settings with a live preview, Apply as one command, Cancel sends none', async () => {
+    const { user, bridge, d, refs, ui, importBox } = await renderReference()
+    await importBox()
+    const ref = () => refs()[0]!
+    await user.click(within(inspector()).getByRole('button', { name: 'Fit to stock…' }))
+    const region = fitRegion()
+    // position and rotation cannot be edited while fitting
+    expect(within(inspector()).queryByLabelText('Position X')).not.toBeInTheDocument()
+    expect(within(inspector()).queryByLabelText('Rotation Z')).not.toBeInTheDocument()
+    expect(within(region).getByRole('checkbox', { name: 'Scale to fit' })).toHaveFocus()
+    // default: scale to fit X and Y, margin 0, centre, top: min(100/20, 60/10) = 5
+    expect(within(region).getByRole('status')).toHaveTextContent('Scale 5 · 100 × 50 × 25 mm')
+    expect(ui().referencePreview).toMatchObject({ referenceId: ref().id })
+    expect(ui().referencePreview!.placement.scale).toBe(5)
+    await expectNoAxeViolations()
+    // thickness governs too: 20/5 = 4; with a margin of 5: min(90/20, 50/10, 4) = 4
+    await user.click(within(region).getByRole('checkbox', { name: 'Thickness (Z)' }))
+    await retype(user, within(region).getByLabelText('Margin', { selector: 'input' }), '5{Enter}')
+    await waitFor(() =>
+      expect(within(region).getByRole('status')).toHaveTextContent('Scale 4 · 80 × 40 × 20 mm'),
     )
-    await user.click(within(inspector()).getByRole('radio', { name: 'Bottom' }))
-    await user.click(within(inspector()).getByRole('button', { name: 'Fit to stock' }))
-    await waitFor(() => expect(field('Position X')).toHaveValue('0 mm'))
-    expect(field('Position Y')).toHaveValue('0 mm')
-    expect(field('Position Z')).toHaveValue('-20 mm')
+    expect(ui().referencePreview!.placement.position).toEqual({ x: 10, y: 10, z: -20 })
+    await user.click(within(region).getByRole('radio', { name: 'Bottom' }))
+    expect(within(region).getByText(/Which face of the model lines up/)).toBeVisible()
+    // Cancel: no command, preview dropped, focus back on Fit to stock…
+    const calls = bridge.calls.length
+    await user.click(within(region).getByRole('button', { name: 'Cancel' }))
+    expect(bridge.calls).toHaveLength(calls)
+    expect(ui().referencePreview).toBeNull()
+    expect(within(inspector()).getByRole('button', { name: 'Fit to stock…' })).toHaveFocus()
+    expect(ref().scale.source).toBe('1')
+
+    // Apply: one update with the fit, one undo step
+    await user.click(within(inspector()).getByRole('button', { name: 'Fit to stock…' }))
+    await user.click(within(fitRegion()).getByRole('checkbox', { name: 'Width (Y)' }))
+    // X alone governs and cannot be unchecked: 100/20 = 5 → 100 × 50 × 25
+    expect(within(fitRegion()).getByRole('checkbox', { name: 'Length (X)' })).toBeDisabled()
+    const undoable = d.history.undoable.length
+    await user.click(within(fitRegion()).getByRole('button', { name: 'Apply' }))
+    await waitFor(() => expect(ref().scale.source).toBe('5'))
     expect(bridge.calls.filter((c) => c.name === 'design.reference.update').at(-1)!.args).toEqual({
       partId: expect.any(String),
       referenceId: ref().id,
-      fit: { anchor: { u: 'min', v: 'min' }, z: 'bottom' },
+      fit: { anchor: { u: 'centre', v: 'centre' }, z: 'top', scaleTo: ['x'] },
     })
-    expect(within(inspector()).getByText('The reference fits inside the stock.')).toBeVisible()
-    // placement edits never read the mesh again
+    expect(d.history.undoable).toHaveLength(undoable + 1)
+    expect(
+      await screen.findByRole('button', { name: /^Undo Fit reference to stock/ }),
+    ).toBeVisible()
+    expect(within(inspector()).queryByRole('region', { name: 'Fit to stock' })).toBeNull()
+    expect(field('Position Z')).toHaveValue('-25 mm')
+    expect(ui().referencePreview).toBeNull()
     expect(bridge.referenceMeshCalls).toHaveLength(1)
+  })
+
+  it('closing the panel cancels the fit; Escape cancels it too', async () => {
+    const { user, bridge, ui, importBox } = await renderReference()
+    await importBox()
+    const calls = bridge.calls.length
+    await user.click(within(inspector()).getByRole('button', { name: 'Fit to stock…' }))
+    expect(ui().referencePreview).not.toBeNull()
+    await user.keyboard('{Escape}')
+    expect(within(inspector()).queryByRole('region', { name: 'Fit to stock' })).toBeNull()
+    expect(ui().referencePreview).toBeNull()
+    await user.click(within(inspector()).getByRole('button', { name: 'Fit to stock…' }))
+    expect(ui().referencePreview).not.toBeNull()
+    await pressToggle()
+    expect(ui().referencePreview).toBeNull()
+    await openPanel()
+    expect(within(inspector()).queryByRole('region', { name: 'Fit to stock' })).toBeNull()
+    expect(bridge.calls).toHaveLength(calls)
   })
 
   it('shows a command error at its field and keeps the record', async () => {
@@ -250,27 +357,39 @@ describe('reference model UI', () => {
   it('an unreadable file shows the import error and adds nothing', async () => {
     const { user, bridge, refs } = await renderReference()
     bridge.setFileChoice({ reference: '/models/missing.stl' })
-    await user.click(within(await referenceGroup()).getByRole('button', { name: 'Import STL…' }))
+    await openPanel()
+    await user.click(within(inspector()).getByRole('button', { name: 'Import STL…' }))
     expect(
-      await within(await referenceGroup()).findByText('The reference could not be imported.'),
+      await within(inspector()).findByText('The reference could not be imported.'),
     ).toBeInTheDocument()
     expect(refs()).toHaveLength(0)
   })
 
-  it('removes a reference with an undo toast', async () => {
-    const { user, refs, importBox } = await renderReference()
+  it('replaces the STL: the new file is imported and selected, the old record removed', async () => {
+    const { user, bridge, refs, ui, importBox } = await renderReference()
     await importBox()
-    await user.click(within(await referenceGroup()).getByRole('button', { name: 'Remove box' }))
-    await waitFor(() => expect(refs()).toHaveLength(0))
-    // Remove keeps the dialog open; the undo toast is there once it closes
-    await closeDialog(user)
-    expect(within(inspector()).getByRole('heading', { name: 'Part' })).toBeInTheDocument()
-    await user.click(await findToastAction('Undo'))
-    await waitFor(() => expect(refs()).toHaveLength(1))
-    expect(within(await referenceGroup()).getByRole('button', { name: /^box/ })).toBeInTheDocument()
+    const old = refs()[0]!.id
+    bridge.setFileChoice({ reference: BIG })
+    await user.click(within(inspector()).getByRole('button', { name: 'Replace STL…' }))
+    await waitFor(() => expect(refs().map((r) => r.name)).toEqual(['big']))
+    expect(refs()[0]!.id).not.toBe(old)
+    expect(ui().selection.design).toBe(refs()[0]!.id)
+    expect(await within(inspector()).findByTitle('big')).toBeInTheDocument()
+    expect(ui().referencePanel).toBe(true)
   })
 
-  it('a failed mesh read says so in the inspector and the viewport', async () => {
+  it('removes a reference with an undo toast; the panel shows its empty state', async () => {
+    const { user, refs, importBox } = await renderReference()
+    await importBox()
+    await user.click(within(inspector()).getByRole('button', { name: 'Remove reference' }))
+    await waitFor(() => expect(refs()).toHaveLength(0))
+    expect(within(inspector()).getByText(/Import an STL to show it on the stock/)).toBeVisible()
+    await user.click(await findToastAction('Undo'))
+    await waitFor(() => expect(refs()).toHaveLength(1))
+    expect(await within(inspector()).findByTitle('box')).toBeInTheDocument()
+  })
+
+  it('a failed mesh read says so in the panel and the viewport', async () => {
     const { bridge, importBox } = await renderReference()
     bridge.setReferenceMesh(() => ({
       ok: false,

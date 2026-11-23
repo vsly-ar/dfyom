@@ -11,7 +11,7 @@
 // Docs: docs/conventions/ui.md#features-v04, docs/modes/features.md
 import { resolve } from 'node:path'
 import type { Locator, Page } from '@playwright/test'
-import { closeDialog, expect, openPartSetup, test } from './app.fixture'
+import { closeDialog, expect, openPartSetup, openReferencePanel, test } from './app.fixture'
 
 async function setField(scope: Locator, label: string, value: string): Promise<void> {
   const field = scope.getByLabel(label, { exact: true }).and(scope.locator('input'))
@@ -26,7 +26,7 @@ const rendersDir = resolve(__dirname, '../design/features/renders')
 async function render(
   page: Page,
   name: string,
-  task: 'u1' | 'u2' | 'u3' | 'u4' = 'u1',
+  task: 'u1' | 'u2' | 'u3' | 'u4' | 'd45' = 'u1',
   // run after the Settings dialog closed (it takes focus): refocus a field
   before?: () => Promise<void>,
 ): Promise<void> {
@@ -102,7 +102,15 @@ test('features: add a hole, expand its row, the owned inspector is read-only, Ma
   await expect(inspector.getByRole('heading', { name: 'Pocket 1' })).toBeVisible()
   await renderDialog(page, 'stock', () => openPartSetup(page, 'Stock'))
   await renderDialog(page, 'shapes', () => openPartSetup(page, 'Shapes'))
-  await renderDialog(page, 'reference', () => openPartSetup(page, 'Reference'))
+  if (RENDERS) {
+    // the Reference panel in the right sidebar (DF3; the Reference dialog until then), empty
+    await openReferencePanel(page)
+    await render(page, 'reference', 'd45')
+    await page
+      .getByRole('toolbar', { name: 'Part setup' })
+      .getByRole('button', { name: 'Reference' })
+      .click()
+  }
 
   // ── Add → Features → Add hole ────────────────────────────────────────────────────────────
   await navigator.getByRole('button', { name: 'Add', exact: true }).click()

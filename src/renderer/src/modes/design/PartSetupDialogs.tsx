@@ -1,9 +1,10 @@
-// Design mode's part setup (D45): stock, shapes and reference models are set once per project, so
-// they live in dialogs opened from the main toolbar's "Part setup" group instead of the sidebar.
-// The Stock dialog opens by itself once per project and window while the project has no part (a
-// new project starts there); choosing a shape or a reference selects it and closes its dialog, so
-// the Shape Editor or the reference inspector shows as before.
-// Doc: docs/conventions/ui.md#design-sidebar-and-setup-dialogs-v04-d45
+// Design mode's part setup (D45): stock and shapes are set once per project, so they live in
+// dialogs opened from the main toolbar's "Part setup" group instead of the sidebar; its
+// "Reference" button toggles the Reference panel in the right sidebar (dogfood DF3). The Stock
+// dialog opens by itself once per project and window while the project has no part (a new
+// project starts there); choosing a shape selects it and closes its dialog, so the Shape Editor
+// shows as before.
+// Doc: docs/conventions/ui.md#design-sidebar-and-setup-dialogs-v04-d45, #reference-panel-hardening-df2df8
 import { useEffect, useLayoutEffect, useRef } from 'react'
 import type { ProjectDoc } from '../../../../core/project/document'
 import { LibraryLink } from '../../library/LibraryLink'
@@ -13,7 +14,7 @@ import { useReplica, useUi } from '../../shell/ShellContext'
 import { Button, Dialog, DialogClose, Icon, Toolbar, ToolbarButton } from '../../ui'
 import styles from './Design.module.css'
 import { designPart, type DesignPart } from './model'
-import { ReferenceRows } from './ReferenceRows'
+import { partReferences } from './reference-view'
 import { ShapeList } from './ShapeList'
 import { StockSetup } from './StockSetup'
 import { useDesignSelection } from './useDesign'
@@ -22,8 +23,13 @@ const m = designMessages.setup
 const s = designMessages.stock
 
 /** The main toolbar's "Part setup" group (design mode with a project open). */
-export function PartSetupTools(): React.JSX.Element {
+export function PartSetupTools({ doc }: { doc: ProjectDoc }): React.JSX.Element {
   const open = useUi((st) => st.setDesignDialog)
+  const panel = useUi((st) => st.referencePanel)
+  const openPanel = useUi((st) => st.openReferencePanel)
+  const closePanel = useUi((st) => st.closeReferencePanel)
+  const [selected] = useDesignSelection()
+  const part = designPart(doc)
   return (
     <Toolbar label={m.toolbar} className={styles['setupTools']}>
       <ToolbarButton
@@ -41,8 +47,13 @@ export function PartSetupTools(): React.JSX.Element {
       <ToolbarButton
         label={m.reference}
         icon={<Icon name="reference" />}
-        aria-haspopup="dialog"
-        onClick={() => open('reference')}
+        pressed={panel}
+        onClick={() => {
+          if (panel) return closePanel()
+          const refs = part === undefined ? [] : partReferences(doc, part.dto.id)
+          // keep a selected reference, else the first one
+          openPanel(refs.find((r) => r.id === selected)?.id ?? refs[0]?.id ?? null)
+        }}
       />
     </Toolbar>
   )
@@ -183,20 +194,6 @@ export function PartSetupDialogs({
           needPart
         ) : (
           <ShapeList part={part} onRemoved={onRemoved} onChosen={close} />
-        )}
-      </Dialog>
-      <Dialog
-        title={m.reference}
-        description={m.referenceDescription}
-        open={dialog === 'reference'}
-        onOpenChange={onOpenChange}
-        onCloseAutoFocus={returnFocus}
-        footer={done}
-      >
-        {part === undefined ? (
-          needPart
-        ) : (
-          <ReferenceRows part={part} onRemoved={onRemoved} onChosen={close} />
         )}
       </Dialog>
     </>

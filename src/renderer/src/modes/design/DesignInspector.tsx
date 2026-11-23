@@ -4,8 +4,9 @@
 // step); `on` and formula references can be picked
 // in the viewport (pick mode) or chosen from a list. Without a selection: the part (name, stock,
 // general tolerance) and all its warnings. Command errors show at their field (or at the top);
-// DFM warnings at the blamed parameter, with "Use …" for a suggestion. A selected reference model
-// shows its own inspector (ReferenceInspector.tsx, task R3), a selected shape the Shape Editor's
+// DFM warnings at the blamed parameter, with "Use …" for a suggestion. While the toolbar's
+// Reference toggle is pressed the Reference panel shows instead (ReferencePanel.tsx, dogfood DF3;
+// the R3 reference inspector until then), a selected shape the Shape Editor's
 // (ShapeInspector.tsx, task U1); a Clones feature, its instances and the Make Clones… draft their
 // own (ClonesInspector.tsx, v0.4 task U3).
 // Doc: docs/conventions/ui.md#panels-and-inspectors, #quantity-and-expression-input,
@@ -34,7 +35,7 @@ import { CloneInstanceInspector, ClonesDraft, ClonesInspector } from './ClonesIn
 import { parseInstanceId } from './clones-view'
 import { HoleInspector } from './HoleInspector'
 import { NameField } from './NameField'
-import { ReferenceInspector } from './ReferenceInspector'
+import { ReferencePanel } from './ReferencePanel'
 import { ShapeInspector } from './ShapeInspector'
 import { ToolField } from './ToolField'
 import {
@@ -115,12 +116,14 @@ export function DesignInspector({ part }: { part: DesignPart | undefined }): Rea
   const [selected] = useDesignSelection()
   const warnings = useDesignWarnings(part)
   const draft = useUi((s) => s.clonesDraft)
+  const referencePanel = useUi((s) => s.referencePanel)
   const setDraft = useUi((s) => s.setClonesDraft)
   // the Make Clones… draft belongs to what was selected when it opened (ui.md § Clones)
   const stale = draft !== null && (draft.openedFor !== selected || draft.partId !== part?.dto.id)
   useEffect(() => {
     if (stale) setDraft(null)
   }, [stale, setDraft])
+  if (referencePanel) return <ReferencePanel part={part} />
   if (part === undefined)
     return (
       <>
@@ -128,11 +131,6 @@ export function DesignInspector({ part }: { part: DesignPart | undefined }): Rea
         <p className={styles['note']}>{t.noPart}</p>
       </>
     )
-  const ref = Object.hasOwn(part.doc.references, selected ?? '')
-    ? part.doc.references[selected!]
-    : undefined
-  if (ref !== undefined && ref.partId === part.dto.id)
-    return <ReferenceInspector key={ref.id} part={part} reference={ref} />
   if (draft !== null && !stale) return <ClonesDraft part={part} draft={draft} />
   const shape = part.dto.shapes?.find((s) => s.id === selected)
   if (shape !== undefined) return <ShapeInspector key={shape.id} part={part} shape={shape} />

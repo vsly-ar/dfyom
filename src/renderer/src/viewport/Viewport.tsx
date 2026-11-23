@@ -149,6 +149,8 @@ export interface ViewportProps {
   units?: UnitSystem
   /** The window's "Snap" toggle: the measure tool snaps to vertices and stock corners (task U3). */
   snap?: boolean
+  /** Draw the part translucent so a reference ghost inside shows ("See through stock", DF2). */
+  seeThrough?: boolean
   /** Run mode (task 3.12): toolpath playback, tool marker at `wpos`, work zero; `null` = none. */
   run?: RunScene | null
   /**
@@ -246,6 +248,7 @@ export function Viewport({
   mousePreset = 'default',
   units = 'mm',
   snap = true,
+  seeThrough = false,
   run = null,
   insetRight = 0,
   summary,
@@ -624,6 +627,7 @@ export function Viewport({
           clonePath={pick ? null : clonePath}
           guide={guide}
           ghosts={ghosts}
+          seeThrough={seeThrough}
           reducedMotion={reducedMotion}
           controlsRef={controls}
           run={run}

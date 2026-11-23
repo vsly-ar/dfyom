@@ -91,7 +91,7 @@ export function ModeNavigator({ mode, doc, onMode }: ModePanelProps): React.JSX.
 
 /** The mode's tools in the main toolbar after undo/redo (design: the part-setup group, D45). */
 export function ModeTools({ mode, doc }: Omit<ModePanelProps, 'onMode'>): React.JSX.Element | null {
-  return mode === 'design' && doc !== undefined ? <PartSetupTools /> : null
+  return mode === 'design' && doc !== undefined ? <PartSetupTools doc={doc} /> : null
 }
 
 /** The mode's dialogs, kept mounted with the shell (design: the part-setup dialogs, D45). */

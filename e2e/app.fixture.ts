@@ -142,20 +142,53 @@ export const test = base.extend<{ dfyom: AppFixture }>({
 })
 
 /**
- * Opens one of design mode's part-setup dialogs (D45: Stock, Shapes, Reference) from the main
+ * Opens one of design mode's part-setup dialogs (D45: Stock, Shapes) from the main
  * toolbar, unless it is open; returns the dialog. While a modal dialog is open the rest of the
  * window is hidden from role queries: close it (`closeDialog`) before using the navigator or the
  * inspector. Doc: docs/conventions/ui.md#design-sidebar-and-setup-dialogs-v04-d45
  */
-export async function openPartSetup(
-  page: Page,
-  name: 'Stock' | 'Shapes' | 'Reference',
-): Promise<Locator> {
+export async function openPartSetup(page: Page, name: 'Stock' | 'Shapes'): Promise<Locator> {
   const dialog = page.getByRole('dialog', { name })
   if (!(await dialog.isVisible()))
     await page.getByRole('toolbar', { name: 'Part setup' }).getByRole('button', { name }).click()
   await expect(dialog).toBeVisible()
   return dialog
+}
+
+/**
+ * Opens the Reference panel in the right sidebar (dogfood DF3: the toolbar's "Reference" toggle)
+ * unless it is open; returns the inspector that shows it.
+ * Doc: docs/conventions/ui.md#reference-panel-hardening-df2df8
+ */
+export async function openReferencePanel(page: Page): Promise<Locator> {
+  const toggle = page.getByRole('toolbar', { name: 'Part setup' }).getByRole('button', {
+    name: 'Reference',
+  })
+  if ((await toggle.getAttribute('aria-pressed')) !== 'true') await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+  const inspector = page.getByRole('complementary', { name: 'Inspector' })
+  await expect(inspector.getByRole('heading', { name: 'Reference', exact: true })).toBeVisible()
+  return inspector
+}
+
+/**
+ * Fits the panel's reference to the stock through Fit mode (DF5): `scale` false keeps the scale,
+ * else the checked stock dimensions govern (default X and Y); `height` Top / Centre / Bottom.
+ */
+export async function fitReference(
+  panel: Locator,
+  opts: { height?: 'Top' | 'Centre' | 'Bottom'; scale?: false } = {},
+): Promise<void> {
+  await panel.getByRole('button', { name: 'Fit to stock…' }).click()
+  const fit = panel.getByRole('region', { name: 'Fit to stock' })
+  if (opts.scale === false) await fit.getByRole('checkbox', { name: 'Scale to fit' }).click()
+  if (opts.height)
+    await fit
+      .getByRole('radiogroup', { name: 'Height' })
+      .getByRole('radio', { name: opts.height })
+      .click()
+  await fit.getByRole('button', { name: 'Apply' }).click()
+  await expect(fit).toBeHidden()
 }
 
 /** Closes an open dialog by its "Done" (or `button`) and waits until it is gone. */

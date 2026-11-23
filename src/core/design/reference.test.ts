@@ -1,7 +1,15 @@
 // Reference placement math: unit guess, placed extent, fit, exceedsStock.
 // Spec: docs/modes/reference-model.md#source-unit-guess, #fit-to-stock, #placement-math-task-r2
 import { describe, expect, it } from 'vitest'
-import { exceedsStock, fitPosition, guessUnit, placedExtent, rotationMatrix } from './reference'
+import {
+  exceedsStock,
+  fitPosition,
+  fitScale,
+  guessUnit,
+  placedExtent,
+  rotationMatrix,
+  roundScaleDown,
+} from './reference'
 
 const stock = { length: 100, width: 60, thickness: 20 }
 const box = (x: number, y: number, z: number) => ({
@@ -71,6 +79,36 @@ describe('placement', () => {
       y: 0,
       z: -12.5,
     })
+  })
+
+  it('fitPosition keeps a margin free on each side in X and Y', () => {
+    const e = { x: 20, y: 10, z: 5 }
+    expect(fitPosition(e, stock, { u: 'min', v: 'max' }, 'top', 5)).toEqual({ x: 5, y: 45, z: -5 })
+    expect(fitPosition(e, stock, {}, 'bottom', 5)).toEqual({ x: 40, y: 25, z: -20 })
+  })
+
+  it('fitScale: the largest factor fitting the governing axes, margin in X and Y only', () => {
+    const e = { x: 20, y: 10, z: 5 }
+    expect(fitScale(e, stock, ['x'])).toEqual({ ok: true, scale: 5 })
+    expect(fitScale(e, stock, ['x', 'y'], 5)).toEqual({ ok: true, scale: 4.5 })
+    expect(fitScale(e, stock, ['x', 'y', 'z'], 5)).toEqual({ ok: true, scale: 4 })
+    expect(fitScale(e, stock, ['z'], 29)).toEqual({ ok: true, scale: 4 })
+    expect(fitScale(e, stock, ['x'], 30)).toEqual({ ok: false, problem: 'marginTooLarge' })
+    expect(fitScale({ x: 20, y: 10, z: 0 }, stock, ['z'])).toEqual({
+      ok: false,
+      problem: 'zeroExtent',
+    })
+    // a flat axis is skipped when another governs
+    expect(fitScale({ x: 20, y: 10, z: 0 }, stock, ['x', 'z'])).toEqual({ ok: true, scale: 5 })
+  })
+
+  it('roundScaleDown keeps 6 significant digits, never rounding up', () => {
+    expect(roundScaleDown(2)).toBe(2)
+    expect(roundScaleDown(0.5)).toBe(0.5)
+    expect(roundScaleDown(4.965)).toBe(4.965)
+    expect(roundScaleDown(2 / 3)).toBe(0.666666)
+    expect(roundScaleDown(123.4567891)).toBe(123.456)
+    expect(roundScaleDown(0.0123456789)).toBe(0.0123456)
   })
 
   it('exceedsStock reports the overhang per axis, ignoring rounding noise', () => {

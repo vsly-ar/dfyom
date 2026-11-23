@@ -20,7 +20,15 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type { ElectronApplication, Locator, Page } from '@playwright/test'
-import { closeDialog, expect, launchApp, openPartSetup, test } from './app.fixture'
+import {
+  closeDialog,
+  expect,
+  fitReference,
+  launchApp,
+  openPartSetup,
+  openReferencePanel,
+  test,
+} from './app.fixture'
 
 const STL = resolve('src/core/design/__fixtures__/enclosure-wood-base.stl')
 const SVG = resolve('src/core/design/__fixtures__/enclosure-sections.svg')
@@ -268,16 +276,11 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
   await expect(navigator.getByText(/^Stock: 255 × 185 × 40/)).toBeVisible()
 
   // ── Import the STL reference, fitted onto the stock bottom ───────────────────────────────
-  // in the Reference dialog (D45), which closes when the import has selected the reference
-  const references = await openPartSetup(page, 'Reference')
+  // in the Reference panel (DF3); Fit mode without scaling, height Bottom (DF5)
+  const references = await openReferencePanel(page)
   await references.getByRole('button', { name: 'Import STL…' }).click()
-  await expect(references).toBeHidden({ timeout: 30_000 })
-  await expect(inspector.getByRole('heading', { name: 'enclosure-wood-base' })).toBeVisible()
-  await inspector
-    .getByRole('radiogroup', { name: 'Height' })
-    .getByRole('radio', { name: 'Bottom' })
-    .click()
-  await inspector.getByRole('button', { name: 'Fit to stock' }).click()
+  await expect(references.getByTitle('enclosure-wood-base')).toBeVisible({ timeout: 30_000 })
+  await fitReference(references, { scale: false, height: 'Bottom' })
   await expect(input(inspector, 'Position Z')).toHaveValue('-40 mm')
   await expect(inspector.getByText('The reference fits inside the stock.')).toBeVisible()
   await expect(viewport).toHaveAccessibleDescription(
@@ -727,11 +730,9 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
     const inspector2 = page2.getByRole('complementary', { name: 'Inspector' })
     await nav2.getByRole('button', { name: 'Open project' }).click()
     await expect(page2).toHaveTitle('Enclosure shapes')
-    const references2 = await openPartSetup(page2, 'Reference')
-    await expect(references2.getByRole('button', { name: /^enclosure-wood-base/ })).toContainText(
-      '49 806 triangles',
-    )
-    await closeDialog(references2)
+    const references2 = await openReferencePanel(page2)
+    await expect(references2.getByTitle('enclosure-wood-base')).toBeVisible()
+    await expect(references2.getByText('STL · 49 806 triangles')).toBeVisible()
     // the shapes: the cavity's fillets, the notch's two items, the groove's open path; choosing
     // a row selects it and closes the dialog
     let shapes2 = await openPartSetup(page2, 'Shapes')

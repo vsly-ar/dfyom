@@ -153,7 +153,8 @@ describe('design mode', () => {
   it('opens the part-setup dialogs from the toolbar; Escape closes them, focus returns', async () => {
     const { user } = await renderDesign()
     const tools = screen.getByRole('toolbar', { name: 'Part setup' })
-    for (const name of ['Stock', 'Shapes', 'Reference']) {
+    // Reference is a toggle for the Reference panel (DF3, Reference.test.tsx)
+    for (const name of ['Stock', 'Shapes']) {
       const button = within(tools).getByRole('button', { name })
       // by keyboard: in jsdom a click lands on the panel separator (see retype)
       button.focus()

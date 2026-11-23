@@ -162,14 +162,60 @@ export type FitZ = (typeof FIT_Z)[number]
 const along = (point: AnchorPoint, size: number, extent: number) =>
   point === 'min' ? 0 : point === 'max' ? size - extent : (size - extent) / 2
 
-/** `position` (mm) that puts the placed box on the stock at `anchor` and `z`. */
-export function fitPosition(extent: Xyz, stock: StockSize, anchor: Anchor, z: FitZ): Xyz {
+/**
+ * `position` (mm) that puts the placed box on the stock at `anchor` and `z`; `margin` (mm, ≥ 0)
+ * is kept free on each side in X and Y (the fit rectangle is the top face shrunk by it).
+ */
+export function fitPosition(
+  extent: Xyz,
+  stock: StockSize,
+  anchor: Anchor,
+  z: FitZ,
+  margin = 0,
+): Xyz {
   const t = stock.thickness
   return {
-    x: along(anchor.u ?? 'centre', stock.length, extent.x),
-    y: along(anchor.v ?? 'centre', stock.width, extent.y),
+    x: margin + along(anchor.u ?? 'centre', stock.length - 2 * margin, extent.x),
+    y: margin + along(anchor.v ?? 'centre', stock.width - 2 * margin, extent.y),
     z: z === 'top' ? -extent.z : z === 'bottom' ? -t : -(t + extent.z) / 2,
   }
+}
+
+export const FIT_AXES = ['x', 'y', 'z'] as const
+export type FitAxis = (typeof FIT_AXES)[number]
+
+/** Why a scale to fit is impossible (the command's rule ids). */
+export type FitScaleProblem = 'marginTooLarge' | 'zeroExtent'
+
+/**
+ * Scale to fit (docs/modes/reference-model.md#fit-to-stock): the largest factor `k` such that
+ * `k × unitExtent` fits, along every axis of `axes`, the fit rectangle (stock length and width
+ * minus `2 × margin`) and the stock thickness. `unitExtent` is the placed extent at scale 1.
+ * Axes along which the model has no extent are skipped. Not rounded.
+ */
+export function fitScale(
+  unitExtent: Xyz,
+  stock: StockSize,
+  axes: readonly FitAxis[],
+  margin = 0,
+): { ok: true; scale: number } | { ok: false; problem: FitScaleProblem } {
+  const room: Xyz = {
+    x: stock.length - 2 * margin,
+    y: stock.width - 2 * margin,
+    z: stock.thickness,
+  }
+  if (room.x <= 0 || room.y <= 0) return { ok: false, problem: 'marginTooLarge' }
+  let k = Infinity
+  for (const a of axes) if (unitExtent[a] > 1e-12) k = Math.min(k, room[a] / unitExtent[a])
+  return Number.isFinite(k) ? { ok: true, scale: k } : { ok: false, problem: 'zeroExtent' }
+}
+
+/** A scale factor rounded down to 6 significant digits (a fitted box never sticks out). */
+export function roundScaleDown(k: number): number {
+  const e = Math.floor(Math.log10(k)) - 5
+  // the tiny bias keeps exact factors (2, 0.5) exact despite float noise
+  const n = Math.floor(k * 10 ** -e * (1 + 1e-12))
+  return Number((n * 10 ** e).toPrecision(6))
 }
 
 // ── warnings ──────────────────────────────────────────────────────────────────────────────

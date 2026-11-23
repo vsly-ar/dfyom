@@ -27,14 +27,15 @@ import { PartIdSchema } from './part.dto'
 import {
   AnchorSchema,
   exceedsStock,
+  FIT_AXES,
   FIT_Z,
   fitPosition,
+  fitScale,
   guessUnit,
   placedBox,
   placedExtent,
   ReferenceWarningSchema,
-  type Anchor,
-  type FitZ,
+  roundScaleDown,
   type Placement,
   type ReferenceWarning,
   type StockSize,
@@ -52,7 +53,17 @@ const RefArg = { partId: PartIdSchema, referenceId: ReferenceIdSchema }
 const SourceUnitSchema = z.enum(['mm', 'inch'])
 /** POSIX `/…`, Windows `C:\…` or `\\server\…`: the main process has no meaningful cwd. */
 export const ABSOLUTE_PATH = /^(\/|[A-Za-z]:[\\/]|\\\\)/
-const FitArg = z.object({ anchor: AnchorSchema.optional(), z: z.enum(FIT_Z).optional() })
+const FitArg = z.object({
+  anchor: AnchorSchema.optional(),
+  z: z.enum(FIT_Z).optional(),
+  margin: Src.optional().describe('Kept free on each side in X and Y (length)'),
+  scaleTo: z
+    .array(z.enum(FIT_AXES))
+    .min(1)
+    .max(3)
+    .optional()
+    .describe('Scale to the largest size fitting the stock along these axes'),
+})
 
 const Warnings = z.array(ReferenceWarningSchema)
 
@@ -134,17 +145,72 @@ function positionDto(
   return Ok({ x, y, z } as ReferenceDTO['position'])
 }
 
-/** The fitted position (fit to stock) of a reference with this placement. */
+type FitInput = z.output<typeof FitArg>
+
+interface Fitted {
+  readonly position: ReferenceDTO['position']
+  /** The fitted position (mm). */
+  readonly pos: { x: number; y: number; z: number }
+  /** The new scale with `scaleTo`, else undefined (the scale stays). */
+  readonly scale: ReferenceDTO['scale'] | undefined
+  /** The placement after the fit (mm, degrees). */
+  readonly placement: Placement
+}
+
+/**
+ * Fit to stock of a reference with this placement (reference-model.md § Fit to stock): the
+ * margin, then the scale to fit (`scaleTo`, rounded down), then the fitted position.
+ */
 function fitted(
   ref: ReferenceDTO,
   p: Placement,
   l: LoadedPart,
-  anchor: Anchor,
-  z: FitZ,
+  fit: FitInput,
   where: string,
-) {
-  const pos = fitPosition(placedExtent(ref.asset.bounds, p), stockSize(l), anchor, z)
-  return positionDto(pos, l.units, where).map((position) => ({ position, pos }))
+): AppResult<Fitted> {
+  const stock = stockSize(l)
+  const refused = (path: string, rule: string, message: string) =>
+    fail('model.invariant', `fit.${path}: ${message}`, {
+      issues: [{ path: ['fit', path], rule, message }],
+      where,
+    })
+  let margin = 0
+  if (fit.margin !== undefined) {
+    const m = quantityFromSource(fit.margin, fieldContext('length', l.units), stockResolver(l))
+    if (m.isErr()) return Err(m.unwrapErr().prefixIssues('fit', 'margin').withContext(where))
+    margin = m.unwrap().canonical
+    if (margin < 0) return refused('margin', 'nonNegative', 'must be 0 or more')
+  }
+  if (2 * margin >= stock.length || 2 * margin >= stock.width)
+    return refused('margin', 'marginTooLarge', 'leaves no room on the stock')
+  let placement = p
+  let scale: ReferenceDTO['scale'] | undefined
+  if (fit.scaleTo !== undefined) {
+    const unit = placedExtent(ref.asset.bounds, { ...p, scale: 1 })
+    const k = fitScale(unit, stock, fit.scaleTo, margin)
+    if (!k.ok)
+      return k.problem === 'marginTooLarge'
+        ? refused('margin', 'marginTooLarge', 'leaves no room on the stock')
+        : refused('scaleTo', 'zeroExtent', 'the reference has no size along these axes')
+    const factor = roundScaleDown(k.scale)
+    const dto = literal(String(factor), 'scalar', l.units)
+    if (dto.isErr()) return Err(dto.unwrapErr().withContext(where))
+    scale = dto.unwrap() as ReferenceDTO['scale']
+    placement = { ...p, scale: factor }
+  }
+  const pos = fitPosition(
+    placedExtent(ref.asset.bounds, placement),
+    stock,
+    fit.anchor ?? {},
+    fit.z ?? 'top',
+    margin,
+  )
+  return positionDto(pos, l.units, where).map((position) => ({
+    position,
+    pos,
+    scale,
+    placement: { ...placement, position: pos },
+  }))
 }
 
 /** `reference.exceedsStock` of a record (other warnings come from import only). */
@@ -271,16 +337,14 @@ const referenceImport = defineCommand({
       rotation: { x: 0, y: 0, z: 0 },
       position: { x: 0, y: 0, z: 0 },
     }
-    const fit = fitted(
-      base as ReferenceDTO,
-      p,
-      l,
-      args.fit?.anchor ?? {},
-      args.fit?.z ?? 'top',
-      where,
-    )
+    const fit = fitted(base as ReferenceDTO, p, l, args.fit ?? {}, where)
     if (fit.isErr()) return fit
-    const ref: ReferenceDTO = { ...base, position: fit.unwrap().position }
+    const f = fit.unwrap()
+    const ref: ReferenceDTO = {
+      ...base,
+      ...(f.scale ? { scale: f.scale } : {}),
+      position: f.position,
+    }
     draft.references[id] = ref
     const warnings: ReferenceWarning[] = []
     if (args.sourceUnit === undefined)
@@ -307,7 +371,7 @@ const referenceImport = defineCommand({
         referenceId: id,
         params: { triangles: mesh.triangles, limit: STL_LIMITS.warnTriangles },
       })
-    const placed = placedBox(mesh.bounds, { ...p, position: fit.unwrap().pos })
+    const placed = placedBox(mesh.bounds, f.placement)
     const over = exceedsStock(id, placed, stockSize(l))
     if (over !== undefined) warnings.push(over)
     return Ok({ referenceId: id, sourceUnit, guess, warnings })
@@ -376,6 +440,8 @@ const referenceUpdate = defineCommand({
     if (args.turn?.turns === 0) return invalid('turn', 'turns', 'turns must be -1, 1 or 2', where)
     if (args.fit !== undefined && args.position !== undefined)
       return invalid('fit', 'fitWithPosition', 'give either position or fit', where)
+    if (args.fit?.scaleTo !== undefined && args.scale !== undefined)
+      return invalid('fit', 'fitWithScale', 'give either scale or fit.scaleTo', where)
     return edit(draft, args, where, (ref, l) => {
       const resolver = stockResolver(l)
       const parsed: AppResult<unknown>[] = []
@@ -431,11 +497,10 @@ const referenceUpdate = defineCommand({
       }
       if (args.fit !== undefined) {
         const fit = args.fit
-        const pos = placementOf(out, where).andThen((p) =>
-          fitted(out, p, l, fit.anchor ?? {}, fit.z ?? 'top', where),
-        )
-        if (pos.isErr()) return pos
-        out = { ...out, position: pos.unwrap().position }
+        const r = placementOf(out, where).andThen((p) => fitted(out, p, l, fit, where))
+        if (r.isErr()) return r
+        const f = r.unwrap()
+        out = { ...out, ...(f.scale ? { scale: f.scale } : {}), position: f.position }
       }
       const { id: _id, partId: _partId, asset: _asset, ...changed } = out
       return Ok(changed)
