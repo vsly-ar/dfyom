@@ -195,10 +195,10 @@ export const OperationDtoSchema = z.discriminatedUnion('kind', [
 export type OperationDTO = z.output<typeof OperationDtoSchema>
 export type OperationKind = OperationDTO['kind']
 
-export const PartIdSchema = z
-  .string()
-  .regex(/^[A-Za-z0-9_-]{1,128}$/)
-  .describe('Part id')
+/** Part, plan, setup and plan operation ids: file-name safe. */
+export const RECORD_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/
+
+export const PartIdSchema = z.string().regex(RECORD_ID_PATTERN).describe('Part id')
 
 export const PartDtoSchema = z.object({
   id: PartIdSchema,

@@ -96,11 +96,8 @@ import { placedOperation, PlacedSchema } from './placed'
 
 // ── arg schemas ───────────────────────────────────────────────────────────────────────────
 
-export const Src = z
-  .string()
-  .min(1)
-  .max(256)
-  .describe('Literal (`1/16"`, `6 ±0.05`) or formula (`facing1.floor.z - 2`)')
+/** A quantity as entered: literal or formula (the primer explains both once, size budget). */
+export const Src = z.string().min(1).max(256)
 export const PointArg = z.tuple([Src, Src]).describe('[u, v] in the face frame')
 const RotationArg = Src.optional().describe('CCW about the anchor point; default 0°')
 const ShapeArg = z
@@ -128,8 +125,8 @@ export const AnchorArg = AnchorDtoSchema.describe(
 )
 export const ToleranceArg = z
   .object({
-    length: Src.nullable().optional().describe('Lengths, e.g. "0.1 mm"; null clears'),
-    angle: Src.nullable().optional().describe('Angles, e.g. "0.5°"; null clears'),
+    length: Src.nullable().optional().describe('null clears'),
+    angle: Src.nullable().optional().describe('null clears'),
   })
   .describe('General ± for untoleranced values')
 export const NameArg = z.string().min(1).max(NAME_MAX).describe('Display label')

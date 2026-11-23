@@ -11,6 +11,11 @@ import { Ok, type AppResult } from '../../shared/result'
 import type { AnyCommand, QueryDef } from '../commands/define'
 import { toolDescriptor } from '../commands/json-schema'
 import type { Registry } from '../commands/registry'
+import { OPERATION_ID_PATTERN, RECORD_ID_PATTERN } from '../design/part.dto'
+import { FEATURE_ID_PATTERN } from '../design/feature.dto'
+import { SHAPE_ID_PATTERN } from '../design/shape.dto'
+import { ITEM_ID_PATTERN } from '../library/item'
+import { PROJECT_KEY } from '../project/storage'
 
 export type JsonObject = Record<string, unknown>
 
@@ -61,7 +66,9 @@ export const ALWAYS_LISTED_AREAS = ['history', 'job'] as const
  * after the reserved keys left the schemas; 79.6 K after D20, E1, A4 and R2, raised to 100 K
  * for the rest of v0.2's commands (decision D21 in docs/plans/v0.2.md). v0.4: 98.8 K for 111
  * tools at the end of v0.3; raised to 120 K for v0.4's feature tools (Q32 option A, task M1 in
- * docs/plans/v0.4.md), new tools designed folded (`get` as a `list` filter). Raise it deliberately.
+ * docs/plans/v0.4.md), new tools designed folded (`get` as a `list` filter). Hardening A8: 106.8 K
+ * for 124 tools after `withoutValidationOnlyKeywords` and shared descriptions moved to the primer.
+ * Raise it deliberately.
  */
 export const TOOLS_LIST_BUDGET_CHARS = 120_000
 
@@ -265,6 +272,43 @@ export function withoutSafeIntBounds(node: unknown): unknown {
 }
 
 /**
+ * Id patterns of records an agent only ever passes back (ids come from results; the server
+ * generates them): the listing drops them, the command still validates and names the field.
+ */
+const RECORD_ID_PATTERNS = new Set(
+  [
+    RECORD_ID_PATTERN,
+    ITEM_ID_PATTERN,
+    PROJECT_KEY,
+    OPERATION_ID_PATTERN,
+    FEATURE_ID_PATTERN,
+    SHAPE_ID_PATTERN,
+  ].map((r) => r.source),
+)
+
+/** Strings at least this long are never hit by a sensible value; the bound is not listed. */
+const LISTED_MAX_LENGTH_BELOW = 120
+
+/**
+ * Drops keywords that only guard the server, never guide a call (the command validates anyway
+ * and names the field, docs/architecture/llm-api.md#implementation-task-310): record-id
+ * patterns, `minLength: 1` and `maxLength` from 120 up (names, quantity strings, notes, pasted
+ * text). Enums, consts, required keys, item counts and short length limits stay.
+ */
+export function withoutValidationOnlyKeywords(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(withoutValidationOnlyKeywords)
+  if (!isObject(node)) return node
+  const out: JsonObject = {}
+  for (const [k, v] of Object.entries(node)) {
+    if (k === 'pattern' && typeof v === 'string' && RECORD_ID_PATTERNS.has(v)) continue
+    if (k === 'minLength' && v === 1) continue
+    if (k === 'maxLength' && typeof v === 'number' && v >= LISTED_MAX_LENGTH_BELOW) continue
+    out[k] = withoutValidationOnlyKeywords(v)
+  }
+  return out
+}
+
+/**
  * A tuple of equal items (`[x, y]` points: `prefixItems: [A, A], items: false`, `minItems` =
  * `maxItems` = 2) as the equivalent array of A with that length (JSON Schema 2020-12), shorter on
  * every point of every tool (docs/architecture/llm-api.md#implementation-task-310).
@@ -290,12 +334,14 @@ export function withHomogeneousTuples(node: unknown): unknown {
 }
 
 /**
- * Extracts repeated sub-schemas into `$defs`, drops `$schema` and the safe-integer bounds, and
- * writes tuples of equal items as arrays (`withHomogeneousTuples`).
+ * Extracts repeated sub-schemas into `$defs`, drops `$schema`, the safe-integer bounds and the
+ * validation-only keywords (`withoutValidationOnlyKeywords`), and writes tuples of equal items as arrays (`withHomogeneousTuples`).
  * Schemas that already use `$ref`/`$defs` (recursive Zod schemas) are returned without sharing.
  */
 export function compactSchema(schema: JsonObject): JsonObject {
-  const { $schema: _s, ...root } = withHomogeneousTuples(withoutSafeIntBounds(schema)) as JsonObject
+  const { $schema: _s, ...root } = withHomogeneousTuples(
+    withoutValidationOnlyKeywords(withoutSafeIntBounds(schema)),
+  ) as JsonObject
   if (JSON.stringify(root).includes('"$ref"')) return root
   // A repeated node is shared whole (description included) if it repeats as is, else without
   // its description, which then stays beside the `$ref`.

@@ -4,7 +4,12 @@
  * Doc: docs/modes/plan-v0.1.md#plan-record, docs/modes/plan-v0.1.md#plans-are-snapshots
  */
 import { z } from 'zod'
-import { PartDtoSchema, PartIdSchema, OperationIdSchema } from '../design/part.dto'
+import {
+  PartDtoSchema,
+  PartIdSchema,
+  OperationIdSchema,
+  RECORD_ID_PATTERN,
+} from '../design/part.dto'
 import { DIRECTIONS as FACE_DIRECTIONS } from '../geometry/face'
 import { NAME_MAX, quantityDto } from '../library/item'
 import { SnapshotDtoSchema } from '../library/snapshot'
@@ -20,11 +25,8 @@ export const lengthDTO = (q: Quantity): LengthDTO => q.toDTO() as LengthDTO
 const length = () => quantityDto('length')
 
 /** Plan ids, setup ids and plan operation ids are file-name safe like part ids. */
-export const PlanIdSchema = z
-  .string()
-  .regex(/^[A-Za-z0-9_-]{1,128}$/)
-  .describe('Plan id')
-export const PlanRecordIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/)
+export const PlanIdSchema = z.string().regex(RECORD_ID_PATTERN).describe('Plan id')
+export const PlanRecordIdSchema = z.string().regex(RECORD_ID_PATTERN)
 
 /** docs/modes/plan-v0.1.md#plan-status */
 export const PLAN_STATUSES = ['draft', 'settledDesign', 'finalized', 'inUse', 'archived'] as const
