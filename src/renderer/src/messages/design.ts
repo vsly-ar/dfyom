@@ -571,7 +571,7 @@ export const designMessages = {
         profile: 'Add profile here',
         chamfer: 'Add chamfer here',
       })[kind],
-    addHole: 'Add hole here',
+    addHole: 'Add bolt hole here',
     /** The empty part inspector: how operations get onto a face. */
     emptyHint: 'Select a face in the viewport (Alt+click for a floor) to add operations on it.',
     summary: (label: string) => `Selected face: ${label}; operations you add start on it.`,

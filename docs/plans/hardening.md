@@ -53,10 +53,10 @@ Dogfood batches DF1–DF36 merged (DF25–DF30 in progress). Doing, on the Q49�
 
 ## 2. Dogfood intake
 
-| #   | Task                                                                                                                                                                                                                         | Status | Notes        |
-| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ------------ |
-| I1  | Dogfood script for the user: the v0.4 lid golden path step by step in the installed app, with what to watch (wrong numbers, dead ends, slow steps, unclear text)                                                             | doing  | Optional aid |
-| I2  | Triage each batch: an intake row per finding (severity, class, repro), a failing test before the fix where possible, reinstall the app after S1 fixes (`npm run install:local`, [packaging.md](../conventions/packaging.md)) | todo   | Q54          |
+| #   | Task                                                                                                                                                                                                                         | Status | Notes                                                                                                                           |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| I1  | Dogfood script for the user: the v0.4 lid golden path step by step in the installed app, with what to watch (wrong numbers, dead ends, slow steps, unclear text)                                                             | done   | Optional aid · [guides/dogfood-v0.4-lid.md](../guides/dogfood-v0.4-lid.md): 9 steps with what to watch and how to send findings |
+| I2  | Triage each batch: an intake row per finding (severity, class, repro), a failing test before the fix where possible, reinstall the app after S1 fixes (`npm run install:local`, [packaging.md](../conventions/packaging.md)) | todo   | Q54                                                                                                                             |
 
 ### Intake (user feedback goes here)
 
