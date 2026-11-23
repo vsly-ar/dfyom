@@ -204,9 +204,7 @@ function operatorWait(d: Dispatcher, source: Source, jobId: string): OperatorWai
     const v = e.outcome.value as Record<string, unknown> | null
     return (
       v?.['jobId'] === jobId &&
-      ('toolChange' in which
-        ? v['toolChange'] === which.toolChange
-        : v['pause'] === which.pause)
+      ('toolChange' in which ? v['toolChange'] === which.toolChange : v['pause'] === which.pause)
     )
   })
   if (ended) return undefined
@@ -352,7 +350,13 @@ export class AgentSession {
     if (d.isNone())
       return fail('input.malformed', `no open project ${key}`, {
         where: 'project.bind',
-        issues: [{ path: ['key'], rule: 'unknownProject', message: 'see project.list' }],
+        issues: [
+          {
+            path: ['key'],
+            rule: 'unknownProject',
+            message: 'no such open project; project_list lists them',
+          },
+        ],
       })
     const dispatcher = d.unwrap()
     this.key = key
@@ -575,7 +579,9 @@ export class AgentSession {
     const job = d.job(args.jobId)
     if (job.isNone())
       return fail('input.malformed', `no job ${args.jobId}`, {
-        issues: [{ path: ['jobId'], rule: 'unknownJob', message: 'no such job' }],
+        issues: [
+          { path: ['jobId'], rule: 'unknownJob', message: 'no such job; job_list lists them' },
+        ],
         where: 'job.wait',
       })
     const handle = job.unwrap()
@@ -624,8 +630,7 @@ export class AgentSession {
       })
     const info = d.query('job.get', { jobId: args.jobId }, this.source)
     return info.map((o) => {
-      const waiting =
-        waited === 'waiting' ? operator : isRun ? setupChange(o.value) : undefined
+      const waiting = waited === 'waiting' ? operator : isRun ? setupChange(o.value) : undefined
       return {
         value: {
           ...(o.value as object),

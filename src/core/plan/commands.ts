@@ -10,7 +10,7 @@
  */
 import type { Draft } from 'immer'
 import { z } from 'zod'
-import type { Issue } from '../../shared/errors/app-error'
+import { type Issue, issueSummary } from '../../shared/errors/app-error'
 import { collect, Err, fail, Ok, type AppResult } from '../../shared/result'
 import type { CommandContext, Services } from '../commands/context'
 import {
@@ -184,7 +184,7 @@ function writePlan(draft: Draft<ProjectDoc>, plan: PlanDTO): void {
 }
 
 function invalid(issues: Issue[], where: string): AppResult<never> {
-  return fail('model.invariant', `${issues.length} invalid value(s)`, { issues, where })
+  return fail('model.invariant', issueSummary(issues), { issues, where })
 }
 
 function needsDiscard(planId: string, where: string): AppResult<never> {

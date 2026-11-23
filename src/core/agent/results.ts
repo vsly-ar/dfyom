@@ -34,7 +34,6 @@ export function errorText(e: AppError): string {
 /** The next step of codes whose refusal is the same everywhere (llm-api.md#a7-refusals-that-say-what-to-do). */
 const NEXT_STEP: Partial<Record<AppError['code'], string>> = {
   'command.conflict': 'Re-query the project and retry.',
-  'command.unknown': 'Next: list the tools (tools/list) for the right name.',
   'run.notConnected':
     'Next: run_connection_open { target: "virtual", planId } opens the virtual machine.',
   'persist.locked':

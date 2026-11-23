@@ -153,8 +153,6 @@ describe('agent tools', () => {
 
   it(`tools/list stays under the size budget (${TOOLS_LIST_BUDGET_CHARS} chars)`, () => {
     const size = JSON.stringify({ tools: mcpToolList(allTools()) }).length
-    console.log(`TOOLSIZE ${size} ${allTools().length}`)
-    for (const t of mcpToolList(allTools())) if (["job_wait","run_job_continue","project_close"].includes(t.name)) console.log("TOOLSIZE", t.name, JSON.stringify(t).length, JSON.stringify(t))
     expect(size).toBeLessThan(TOOLS_LIST_BUDGET_CHARS)
   })
 

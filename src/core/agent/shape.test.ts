@@ -468,7 +468,16 @@ describe('design.shape.get detail and no stacks (A1)', () => {
       id: 'shape-1',
       name: 'Outline',
       items: [
-        { kind: 'path', op: 'add', closed: true, points: [[0, 0], [1, 0], [1, 1]] },
+        {
+          kind: 'path',
+          op: 'add',
+          closed: true,
+          points: [
+            [0, 0],
+            [1, 0],
+            [1, 1],
+          ],
+        },
         { kind: 'circle', op: 'subtract', center: [0.5, 0.5], diameter: q('0.2', '1', '5') },
       ],
     },
@@ -497,7 +506,11 @@ describe('design.shape.get detail and no stacks (A1)', () => {
       'summary',
     )
     const shaper = new ResultShaper(fakeSession())
-    const full = shaper.shape(call('design.shape.get', shapeValue), {}, { ...SUMMARY, detail: 'full' })
+    const full = shaper.shape(
+      call('design.shape.get', shapeValue),
+      {},
+      { ...SUMMARY, detail: 'full' },
+    )
     expect((valueOf(full)['resolved'] as Record<string, unknown>)['pieces']).toHaveLength(1)
     const r = shaper.shape(call('design.shape.get', shapeValue), {}, SUMMARY)
     expect(valueOf(r)).toEqual({
@@ -525,11 +538,19 @@ describe('design.shape.get detail and no stacks (A1)', () => {
 
   it('drops string stack keys at any depth of a value and of applied', () => {
     const shaper = new ResultShaper(fakeSession())
-    const err = { code: 'geometry.evaluation', message: 'open loop', stack: 'Error\n at x (app.asar)' }
+    const err = {
+      code: 'geometry.evaluation',
+      message: 'open loop',
+      stack: 'Error\n at x (app.asar)',
+    }
     const r = shaper.shape(
-      call('job.get', { jobId: 'j', outcome: { ok: false, error: { ...err, cause: err } } }, {
-        error: err,
-      }),
+      call(
+        'job.get',
+        { jobId: 'j', outcome: { ok: false, error: { ...err, cause: err } } },
+        {
+          error: err,
+        },
+      ),
       {},
       SUMMARY,
     )
@@ -538,7 +559,11 @@ describe('design.shape.get detail and no stacks (A1)', () => {
       jobId: 'j',
       outcome: {
         ok: false,
-        error: { code: 'geometry.evaluation', message: 'open loop', cause: { code: 'geometry.evaluation', message: 'open loop' } },
+        error: {
+          code: 'geometry.evaluation',
+          message: 'open loop',
+          cause: { code: 'geometry.evaluation', message: 'open loop' },
+        },
       },
     })
   })

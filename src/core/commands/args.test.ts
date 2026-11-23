@@ -31,8 +31,13 @@ describe('parseArgs', () => {
 
   it('names the closest valid key of an unknown one', () => {
     for (const wrong of ['timeout', 'timeoutMs', 'timeoutSecond', 'TimeoutSeconds']) {
-      const e = expectErrCode(parseArgs(Wait, { jobId: 'j1', [wrong]: 5 }, 'job.wait'), 'input.malformed')
-      expect(e.message).toBe(`job.wait: unknown argument "${wrong}"; did you mean "timeoutSeconds"?`)
+      const e = expectErrCode(
+        parseArgs(Wait, { jobId: 'j1', [wrong]: 5 }, 'job.wait'),
+        'input.malformed',
+      )
+      expect(e.message).toBe(
+        `job.wait: unknown argument "${wrong}"; did you mean "timeoutSeconds"?`,
+      )
       expect(e.issues[0]).toMatchObject({
         path: [wrong],
         rule: 'unrecognized_keys',
@@ -42,7 +47,10 @@ describe('parseArgs', () => {
   })
 
   it('gives no suggestion for an unrelated key, but lists the valid ones', () => {
-    const e = expectErrCode(parseArgs(Wait, { jobId: 'j', colour: 1 }, 'job.wait'), 'input.malformed')
+    const e = expectErrCode(
+      parseArgs(Wait, { jobId: 'j', colour: 1 }, 'job.wait'),
+      'input.malformed',
+    )
     expect(e.message).toBe('job.wait: unknown argument "colour"')
     expect(e.issues[0]?.params).toEqual({ key: 'colour', valid: ['jobId', 'timeoutSeconds'] })
   })

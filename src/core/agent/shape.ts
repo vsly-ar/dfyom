@@ -363,7 +363,8 @@ function shapeSummary(value: unknown): unknown {
             ? {
                 pieces: pieces.length,
                 holes: pieces.reduce(
-                  (n: number, p) => n + (isObj(p) && Array.isArray(p['holes']) ? p['holes'].length : 0),
+                  (n: number, p) =>
+                    n + (isObj(p) && Array.isArray(p['holes']) ? p['holes'].length : 0),
                   0,
                 ),
               }
@@ -482,6 +483,7 @@ export function compact(v: unknown): unknown {
   if (!isObj(v)) return v
   if (isQuantity(v)) return compactQuantity(v)
   const out: Obj = {}
-  for (const [k, x] of Object.entries(v)) if (k !== 'stack' || typeof x !== 'string') out[k] = compact(x)
+  for (const [k, x] of Object.entries(v))
+    if (k !== 'stack' || typeof x !== 'string') out[k] = compact(x)
   return out
 }

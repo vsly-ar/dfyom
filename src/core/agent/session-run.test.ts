@@ -68,7 +68,11 @@ function setup() {
     summary: 'Test continue.',
     title: () => 'Continue',
     machine: false,
-    args: z.object({ jobId: z.string(), toolChange: z.number().optional(), pause: z.number().optional() }),
+    args: z.object({
+      jobId: z.string(),
+      toolChange: z.number().optional(),
+      pause: z.number().optional(),
+    }),
     result: z.object({}).passthrough(),
     run: async (_doc, args) => Ok(args),
   })
@@ -111,7 +115,10 @@ function setup() {
     app: createDispatcher({
       registry: appRegistry,
       doc: newProjectDoc({ name: '', unitSystem: 'mm' }),
-      services: { host: hostPort },
+      services: {
+        workers: { run: async () => fail('internal.unexpected', 'none') },
+        host: hostPort,
+      },
     }),
     registries: { app: appRegistry, project: registry },
     project: (key) => (projects.has(key) ? Some(projects.get(key)!) : None),
