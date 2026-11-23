@@ -3,9 +3,13 @@
 // default, $23=0) → home → jog +X step by step up to the travel's end (0) and the next step
 // refused in words → zero → the position read-out; Stop disabled with its reason while idle. A
 // second machine homing front left ($23=3) homes to the other corner. Windows stay hidden
-// (fixture). Selectors are roles and accessible names.
+// (fixture). Selectors are roles and accessible names. DF46: the toolbar keeps its height on
+// connect, "Needs homing" and an unknown position before homing; with DFYOM_RENDERS=1 the review
+// renders df46-run-disconnected and df46-run-needs-homing (light and dark).
 // Docs: docs/modes/run.md#machine-frame-and-manual-control-hardening-df31df35,
+// docs/modes/run.md#run-mode-presentation-df46,
 // docs/conventions/testing.md#end-to-end
+import { resolve } from 'node:path'
 import type { Page } from '@playwright/test'
 import type { CallReply, PreloadApi } from '../src/shared/preload-api'
 import { expect, test } from './app.fixture'
@@ -18,6 +22,25 @@ async function bridgeCall<T>(page: Page, name: string, args: object = {}): Promi
   )
   expect(r.ok, `${name}: ${JSON.stringify(r)}`).toBe(true)
   return (r as Extract<CallReply, { ok: true }>).value as T
+}
+
+const RENDERS = process.env['DFYOM_RENDERS'] === '1'
+const rendersDir = resolve(__dirname, '../design/features/renders')
+
+/** With DFYOM_RENDERS=1: `name`-light.png and -dark.png (the theme set as Settings does). */
+async function render(page: Page, name: string): Promise<void> {
+  if (!RENDERS) return
+  for (const theme of ['light', 'dark'] as const) {
+    await page.evaluate((t) => {
+      ;(
+        globalThis as unknown as {
+          document: { documentElement: { dataset: Record<string, string> } }
+        }
+      ).document.documentElement.dataset['theme'] = t
+    }, theme)
+    await page.waitForTimeout(400)
+    await page.screenshot({ path: `${rendersDir}/${name}-${theme}.png` })
+  }
 }
 
 const machineValues = (name: string, homingCorner: string) => ({
@@ -58,6 +81,7 @@ test('manual control without a plan: home top right, jog to the travel end, zero
   await bridgeCall(page, 'design.part.add', { name: 'Part', stockLibraryItemId: stock.id })
 
   await expect(page.getByRole('dialog', { name: 'Stock' })).toBeHidden()
+  if (RENDERS) await page.setViewportSize({ width: 1280, height: 800 })
   await page.getByRole('radio', { name: 'Run' }).click()
   await expect(page.getByRole('radio', { name: 'Run' })).toBeChecked()
   const navigator = page.getByRole('navigation', { name: 'Navigator' })
@@ -74,8 +98,20 @@ test('manual control without a plan: home top right, jog to the travel end, zero
   await page.getByRole('option', { name: 'Top right' }).click()
   await navigator.getByRole('combobox', { name: 'Time scale' }).click()
   await page.getByRole('option', { name: 'Max' }).click()
-  await navigator.getByRole('button', { name: 'Connect to virtual machine' }).click()
+  // DF46: one line (44 px); the toolbar keeps its height when the machine group appears
+  const connect = navigator.getByRole('button', { name: 'Connect', exact: true })
+  expect((await connect.boundingBox())?.height).toBeLessThanOrEqual(45)
+  const banner = page.getByRole('banner')
+  const toolbarHeight = (await banner.boundingBox())?.height
+  await render(page, 'df46-run-disconnected')
+  await connect.click()
   await expect(machine.getByText('Virtual machine · Max')).toBeVisible()
+  expect((await banner.boundingBox())?.height).toBe(toolbarHeight)
+  // DF46: GRBL's start-up lock reads "Needs homing"; the position is unknown until homed
+  await expect(machine.getByText('Needs homing')).toBeVisible()
+  await expect(cell('Machine position X')).toHaveText('—')
+  await expect(inspector.getByText('Position unknown until homed.')).toBeVisible()
+  await render(page, 'df46-run-needs-homing')
 
   // DF35: nothing moves yet, so Stop is disabled and says why
   const stop = machine.getByRole('button', { name: 'Stop' })
@@ -117,10 +153,10 @@ test('manual control without a plan: home top right, jog to the travel end, zero
 
   // a front-left machine homes to the other corner: X and Y at −travel + pull-off
   await navigator.getByRole('button', { name: 'Disconnect' }).click()
-  await expect(navigator.getByRole('button', { name: 'Connect to virtual machine' })).toBeEnabled()
+  await expect(navigator.getByRole('button', { name: 'Connect', exact: true })).toBeEnabled()
   await navigator.getByRole('combobox', { name: 'Machine' }).click()
   await page.getByRole('option', { name: 'Front left' }).click()
-  await navigator.getByRole('button', { name: 'Connect to virtual machine' }).click()
+  await navigator.getByRole('button', { name: 'Connect', exact: true }).click()
   await navigator.getByRole('button', { name: 'Home' }).click()
   await expect(machine.getByText('Idle')).toBeVisible()
   await expect(cell('Machine position X')).toHaveText('-799.000')

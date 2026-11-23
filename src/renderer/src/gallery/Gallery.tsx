@@ -223,6 +223,7 @@ function Specimens({ title }: { title: string }): React.JSX.Element {
           <MachineStateBadge state="moving" />
           <MachineStateBadge state="hold" />
           <MachineStateBadge state="action" />
+          <MachineStateBadge state="needsHoming" />
           <MachineStateBadge state="alarm" label="Alarm 2: soft limit" />
         </div>
       </Row>

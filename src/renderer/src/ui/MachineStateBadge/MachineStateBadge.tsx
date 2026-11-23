@@ -1,12 +1,15 @@
 // MachineStateBadge: every machine state has a label and a shape, so none depends on hue alone.
 // Running is amber with a dot circling the edge; tool change is blue with a turning swap icon and a
-// light band sweeping across; under reduced motion both are static. Safety tokens only.
+// light band sweeping across; under reduced motion both are static. Needs homing (GRBL's start-up
+// lock) is neutral with a house in the hold colour, not the red alarm (DF46). Safety tokens only.
 // Doc: docs/conventions/ui.md#run-mode-safety-ui (decision 20); the live state wiring is task 3.12.
 import type { ReactNode } from 'react'
 import { useReducedMotion } from '../motion'
 import styles from './MachineStateBadge.module.css'
 
-export type MachineState = 'offline' | 'idle' | 'moving' | 'hold' | 'action' | 'alarm'
+/** `needsHoming`: GRBL's start-up lock (Alarm, no alarm code, not homed; DF46), not an error. */
+export type MachineState =
+  'offline' | 'idle' | 'moving' | 'hold' | 'action' | 'needsHoming' | 'alarm'
 
 const DEFAULT_LABEL: Record<MachineState, string> = {
   offline: 'Not connected',
@@ -14,6 +17,7 @@ const DEFAULT_LABEL: Record<MachineState, string> = {
   moving: 'Running',
   hold: 'Feed hold',
   action: 'Tool change',
+  needsHoming: 'Needs homing',
   alarm: 'Alarm',
 }
 
@@ -45,6 +49,16 @@ const SHAPES: Record<MachineState, ReactNode> = {
         strokeLinejoin="round"
       />
     </>
+  ),
+  needsHoming: (
+    <path
+      d="M1.5 6.2 6 2l4.5 4.2M3 5v5h6V5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
   ),
   alarm: (
     <>

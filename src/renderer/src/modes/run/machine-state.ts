@@ -26,6 +26,17 @@ export const isCriticalAlarm = (s: RunStatus): boolean =>
   s.alarm !== undefined && CRITICAL_ALARMS.has(s.alarm.code)
 
 /**
+ * GRBL's start-up lock (DF46, docs/modes/run.md#run-mode-presentation-df46): `Alarm` with no
+ * alarm code on a machine not homed yet. Shown as "Needs homing", not as an error; the gates are
+ * those of Alarm all the same.
+ */
+export const needsHoming = (s: RunStatus): boolean =>
+  isConnected(s) && s.state.startsWith('Alarm') && s.alarm === undefined && !s.homed
+
+/** The position is known only once homed (DF46): the DRO shows "—" until then. */
+export const positionKnown = (s: RunStatus): boolean => isConnected(s) && s.homed
+
+/**
  * Badge state and label (ui.md#run-mode-safety-ui table: label and shape per state). `setupChange`:
  * the window waits for a setup change between two setups' runs (task E2); shown like a tool change
  * while the machine is idle.
@@ -38,6 +49,7 @@ export function machineView(
   if (s.connection.state === 'connecting') return { state: 'offline', label: m.state.connecting }
   const job = activeJob(s)
   const st = s.state
+  if (needsHoming(s)) return { state: 'needsHoming', label: m.state.needsHoming }
   if (st.startsWith('Alarm') || isCriticalAlarm(s))
     return { state: 'alarm', label: m.state.alarm(s.alarm?.code) }
   if (st.startsWith('Jog')) return { state: 'moving', label: m.state.jogging }

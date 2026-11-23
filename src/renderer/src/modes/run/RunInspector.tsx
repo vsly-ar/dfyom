@@ -26,12 +26,14 @@ export function RunInspector({ doc }: { doc: ProjectDoc }): React.JSX.Element {
   const pending = useRun((s) => s.pending)
   const setupChange = useRun((s) => s.setupChange)
   const startWhy = useId()
+  const idleId = useId()
   const resetWhy = useId()
   const a = store.getState()
 
   const job = activeJob(status)
   const gates = runGates(status, { planChosen: planId !== undefined && planId in doc.plans })
   const wait = waitKey(status)
+  const repeatsConnect = gates.start === runMessages.why.notConnected
   const showProgress = job !== undefined || (jobId !== undefined && progress !== undefined)
 
   return (
@@ -54,7 +56,11 @@ export function RunInspector({ doc }: { doc: ProjectDoc }): React.JSX.Element {
             />
           ) : null}
           {job === undefined && ended ? <EndNote ended={ended} /> : null}
-          {job === undefined && !ended ? <p className={styles['hint']}>{m.idle}</p> : null}
+          {job === undefined && !ended ? (
+            <p id={idleId} className={styles['hint']}>
+              {m.idle}
+            </p>
+          ) : null}
 
           {wait !== undefined && job ? (
             <div className={styles['wait']} data-kind={job.phase}>
@@ -80,7 +86,9 @@ export function RunInspector({ doc }: { doc: ProjectDoc }): React.JSX.Element {
                 variant="primary"
                 icon={<Icon name="run" />}
                 disabled={gates.start !== null || pending.includes('run.job.start')}
-                {...(gates.start === null ? {} : { 'aria-describedby': startWhy })}
+                {...(gates.start === null
+                  ? {}
+                  : { 'aria-describedby': repeatsConnect && !ended ? idleId : startWhy })}
                 onClick={() =>
                   // between setups, Start goes through the setup-change prompt (task E2)
                   setupChange === undefined ? a.setPreflightOpen(true) : a.setSetupChangeOpen(true)
@@ -88,7 +96,9 @@ export function RunInspector({ doc }: { doc: ProjectDoc }): React.JSX.Element {
               >
                 {m.startRun}
               </Button>
-              {gates.start === null ? null : (
+              {/* "Connect … first" shows once, in the navigator; "No run yet. Connect, …" says it
+                  here (DF46) */}
+              {gates.start === null || (repeatsConnect && !ended) ? null : (
                 <p id={startWhy} className={styles['why']}>
                   {gates.start}
                 </p>

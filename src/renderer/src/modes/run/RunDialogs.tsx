@@ -4,7 +4,7 @@
 // the blocking failure dialog; tool-change waits and alarms are announced assertively. Each
 // carries its own Stop (RunDialogFooter), reachable by keyboard and screen readers while modal.
 // Doc: docs/conventions/ui.md#confirmations, #run-mode-safety-ui
-import { useId } from 'react'
+import { useEffect, useId, useRef } from 'react'
 import type { ProjectDoc } from '../../../../core/project/document'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { runMessages } from '../../messages/run'
@@ -13,7 +13,7 @@ import { useReplica } from '../../shell/ShellContext'
 import { JogPad } from './JogPad'
 import { activeJob, formatLength, runGates } from './machine-state'
 import { planRunInfo } from './plan-info'
-import { useRun, useRunStore, waitKey } from './run-store'
+import { useRun, useRunStore, waitKey, type PreflightCheck } from './run-store'
 import { WorkZeroButtons } from './RunNavigator'
 import { RunDialogFooter } from './RunStop'
 import { SetupChangeDialog } from './SetupChangeDialog'
@@ -44,9 +44,31 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
   const m = runMessages.preflight
   const plan = planId === undefined ? undefined : doc.plans[planId]
   const info = plan ? planRunInfo(plan, setupId) : undefined
-  const gate = runGates(status, { planChosen: plan !== undefined }).start
+  const machineGate = runGates(status, { planChosen: plan !== undefined }).start
   const units = doc.unitSystem
   const a = store.getState()
+  // the soft-limit result (DF46): checked on open and again when the work zero changes
+  const check = useRun((s) => s.preflightCheck)
+  const checkKey = `${planId ?? ''}|${info?.setup.id ?? ''}|${status.workZero.join(',')}`
+  const setupToCheck = info?.setup.id
+  const canCheck = open && plan !== undefined && machineGate === null
+  useEffect(() => {
+    if (canCheck) void store.getState().checkRun(setupToCheck, checkKey)
+  }, [canCheck, checkKey, setupToCheck, store])
+  const current = check.state !== 'idle' && check.key === checkKey ? check : undefined
+  const passed = current?.state === 'done' && current.findings.length === 0
+  const gate =
+    machineGate ??
+    (current?.state === 'done' && current.findings.length > 0 ? m.softLimitsFix : null)
+  const startable = gate === null && passed
+  // "Start run" takes the focus once the check passes, unless the user moved it (ui.md)
+  const startRef = useRef<HTMLButtonElement>(null)
+  const cancelRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    const active = document.activeElement
+    if (startable && (active === cancelRef.current || active === document.body))
+      startRef.current?.focus()
+  }, [startable])
   return (
     <Dialog
       open={open}
@@ -56,13 +78,20 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
       footer={
         <RunDialogFooter>
           <DialogClose>
-            <Button {...(gate === null ? {} : { autoFocus: true })}>{m.cancel}</Button>
+            <Button ref={cancelRef} {...(startable ? {} : { autoFocus: true })}>
+              {m.cancel}
+            </Button>
           </DialogClose>
           <Button
+            ref={startRef}
             variant="primary"
             icon={<Icon name="run" />}
-            disabled={gate !== null}
-            {...(gate === null ? { autoFocus: true } : { 'aria-describedby': whyId })}
+            disabled={!startable}
+            {...(startable
+              ? { autoFocus: true }
+              : gate === null
+                ? {}
+                : { 'aria-describedby': whyId })}
             onClick={() => void a.startRun(info?.setup.id)}
           >
             {m.start}
@@ -107,7 +136,9 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
           )}
         </dd>
         <dt>{m.softLimits}</dt>
-        <dd>{m.softLimitsText}</dd>
+        <dd aria-live="polite">
+          <SoftLimitResult check={current} units={units} />
+        </dd>
       </dl>
       {gate === null ? null : (
         <p id={whyId} className={styles['why']}>
@@ -115,6 +146,42 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
         </p>
       )}
     </Dialog>
+  )
+}
+
+/** The pre-flight's soft-limit row: checking, inside the travel, the findings, or the failure. */
+function SoftLimitResult({
+  check,
+  units,
+}: {
+  check: Exclude<PreflightCheck, { state: 'idle' }> | undefined
+  units: ProjectDoc['unitSystem']
+}): React.JSX.Element {
+  const m = runMessages.preflight
+  if (check === undefined || check.state === 'checking')
+    return <span className={styles['hint']}>{m.softLimitsChecking}</span>
+  if (check.state === 'failed')
+    return (
+      <>
+        {m.softLimitsFailed} <ErrorMessage error={check.error} />
+      </>
+    )
+  if (check.findings.length === 0) return <>{m.softLimitsOk}</>
+  const len = (v: number | string | undefined) => formatLength(Number(v), units)
+  return (
+    <ul className={styles['findings']}>
+      {check.findings.map((f, i) => (
+        <li key={i}>
+          {m.softLimitsAxis(
+            String(f.params['axis'] ?? '').toUpperCase(),
+            len(f.params['min']),
+            len(f.params['max']),
+            len(f.params['travel']),
+            runMessages.dro.units[units],
+          )}
+        </li>
+      ))}
+    </ul>
   )
 }
 
@@ -209,7 +276,10 @@ function WaitDialog({ units }: { units: ProjectDoc['unitSystem'] }): React.JSX.E
           </Button>
         </RunDialogFooter>
       }
-    />
+    >
+      {/* the gCode term, for who wants it (DF46) */}
+      <p className={styles['hint']}>{m.details}</p>
+    </Dialog>
   )
 }
 

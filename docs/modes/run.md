@@ -32,7 +32,7 @@ Manual control (position read-out, homing, jog, work zero) must work before and 
 ### Connect without a plan (DF31)
 
 - `run.connection.open` takes **either** `planId` (the plan's machine copy, as in v0.1) **or** `machineId` (a library machine), exactly one (`input.malformed`, rule `oneOf`). The machine key of a library machine is the hash of its values, the same hash a plan's unchanged snapshot of it has ([run-v0.1.md decision 6](run-v0.1.md#decisions)), so a plan whose machine copy equals the connected library machine can be run on that connection; any other plan fails with `machineMismatch` as before.
-- **Navigator:** the plan list has "No plan (manual control)" first; the first runnable plan stays the default when one exists. With no plan, a "Machine" select lists the library machines and "Connect to virtual machine" uses it. Home, unlock, jog, work zero, Stop, Reset and the DRO work without a plan; only "Start run" needs one ("Choose a plan first.").
+- **Navigator:** the plan list has "No plan (manual control)" first; the first runnable plan stays the default when one exists. With no plan, a "Machine" select lists the library machines and "Connect" uses it. Home, unlock, jog, work zero, Stop, Reset and the DRO work without a plan; only "Start run" needs one ("Choose a plan first.").
 
 ### Machine coordinates and the homing corner (DF33)
 
@@ -62,6 +62,20 @@ The virtual machine plays GRBL's homing cycle in time (Z, then X and Y together;
 ### Stop only when something can be stopped (DF35)
 
 Stop is enabled while there is something to stop: a run job (any phase, including waits), or the machine moving or held without one (`Jog` → jog cancel; `Home` → reset, `ALARM:6`; `Run`, `Hold`, `Door` without a job → reset). Otherwise (Idle, Alarm, Check, not connected) it is disabled and says why ("Nothing to stop: the machine is not moving."). Feed hold (while streaming), Resume (while held) and "Reset (immediate)" (always, while connected) keep the other paths reachable.
+
+### Run mode presentation (DF46)
+
+Status: implemented (hardening DF46, UX audit 2026-11-23 items 7–9 and 23) · UI rules: [ui.md](../conventions/ui.md#run-mode-safety-ui)
+
+What a first-timer sees from Connect to the first run. Only the presentation changes: every gate, refusal, confirmation and the Stop rules stay as they are.
+
+- **The toolbar never changes height.** The main toolbar always reserves the height of the 44 px run controls (Stop, Feed hold, Resume), so connecting or disconnecting never moves the window content. The run controls stay 44 px.
+- **Position unknown until homed.** While the machine is not homed (or not connected), the DRO shows "—" for every work and machine coordinate, with "Position unknown until homed." under the table. The numbers come back after a successful `$H` (or at once on a machine without homing, which counts as homed). After "Unlock" without homing the position stays unknown, as the unlock confirmation says. The tool marker in the 3D view is unchanged.
+- **Needs homing, not an error.** GRBL with homing enabled starts locked in `Alarm` without an alarm code, because the position is unknown. While the state is `Alarm`, there is no alarm code and the machine is not homed, the badge says **"Needs homing"** (its own shape: a house in the hold colour, not the red octagon) and the navigator's Home is the primary action, with "Home the machine first." in the notice. Any `ALARM:n` (soft or hard limit, reset while moving, homing fail) stays the red "Alarm n: …" badge, and every control is gated exactly as in Alarm.
+- **Connect** reads just "Connect", on one line (the audit saw "Connect to virtual machine" wrap in the 16 rem navigator); the hint under it says what it connects to ("To a virtual machine that simulates …"), and the "Virtual machine · 10×" chip says it once connected. "Connect to the virtual machine first." shows once, in the navigator's notice; the inspector's disabled "Start run" is described by its "No run yet. Connect, home, …" line instead of repeating it.
+- **Program pause** (`M0`): the badge says "Paused by program"; the dialog says the program paused the run, then names `M0` in a small details line. "Later" becomes **"Close (stay paused)"** in the program-pause and tool-change dialogs (the run waits; the inspector's "Show instructions" reopens the dialog). The setup-change prompt keeps "Later": no run is paused there.
+- **Stop jog** uses the default button look (bordered when enabled, dimmed when disabled), like the jog buttons.
+- **Pre-flight shows the soft-limit result.** Opening "Start run?" runs `run.job.check` ([run-v0.1.md](run-v0.1.md#commands-and-queries)): the same checks and export as `run.job.start` up to the soft-limit check, without streaming. The Soft limits row says "Checking…", then "Inside the travel at this work zero." or, per axis, "X leaves the travel: the program spans −812.000 to −12.000 mm, the travel is −800 to 0 mm." "Start run" is enabled only when the check passed; with findings the dialog focuses Cancel and says to move the work zero. The check runs again when the work zero changes while the dialog is open. A failed check (e.g. the program cannot be exported) shows its error in the row and keeps "Start run" disabled, since the start would fail the same way; `run.job.start` still runs every check itself.
 
 ## Safety
 

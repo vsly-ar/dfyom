@@ -43,6 +43,22 @@ export type RunEnd =
 
 export type Axis = 'x' | 'y' | 'z'
 
+/** A `softLimit` finding of `run.job.check` (a plan warning; `params` in mm). */
+export interface SoftLimitFinding {
+  readonly rule: string
+  readonly params: Readonly<Record<string, number | string>>
+}
+
+/**
+ * The pre-flight dialog's soft-limit check (`run.job.check`, DF46): `key` names what was checked
+ * (plan, setup, work zero), so a changed work zero checks again.
+ */
+export type PreflightCheck =
+  | { readonly state: 'idle' }
+  | { readonly state: 'checking'; readonly key: string }
+  | { readonly state: 'done'; readonly key: string; readonly findings: readonly SoftLimitFinding[] }
+  | { readonly state: 'failed'; readonly key: string; readonly error: AppErrorData }
+
 /** `planId` of "No plan (manual control)": connect with a library machine (DF31). */
 export const NO_PLAN = '__noPlan__'
 
@@ -75,6 +91,7 @@ export interface RunState {
   /** Key of the tool change / pause wait the user put off with "Later". */
   readonly dismissedWait: string | undefined
   readonly preflightOpen: boolean
+  readonly preflightCheck: PreflightCheck
   /** Actions in flight, by name (their buttons show busy). */
   readonly pending: readonly string[]
 
@@ -99,6 +116,8 @@ export interface RunState {
   reset(): Promise<void>
   /** `setupId`: the setup to run (default: the chosen one; the server needs it for several). */
   startRun(setupId?: string): Promise<void>
+  /** Runs `run.job.check` for the pre-flight dialog unless `key` is checked or being checked. */
+  checkRun(setupId: string | undefined, key: string): Promise<void>
   hold(): Promise<void>
   resume(): Promise<void>
   stop(): Promise<void>
@@ -176,6 +195,7 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       actionError: undefined,
       dismissedWait: undefined,
       preflightOpen: false,
+      preflightCheck: { state: 'idle' },
       pending: [],
 
       setPlan: (planId) =>
@@ -196,7 +216,10 @@ export function createRunStore(bridge: PreloadApi): RunStore {
           void call('run.timeScale.set', { scale: timeScale })
       },
       setJogStep: (jogStep) => set({ jogStep }),
-      setPreflightOpen: (preflightOpen) => set({ preflightOpen }),
+      setPreflightOpen: (preflightOpen) =>
+        set(
+          preflightOpen ? { preflightOpen } : { preflightOpen, preflightCheck: { state: 'idle' } },
+        ),
       dismissWait: (dismissedWait) => set({ dismissedWait }),
       closeFailure: () => set({ failureOpen: false }),
       clearActionError: () => set({ actionError: undefined }),
@@ -238,6 +261,29 @@ export function createRunStore(bridge: PreloadApi): RunStore {
           setupChange: undefined,
         })
         follow(jobId)
+      },
+      async checkRun(setupId, key) {
+        const planId = get().planId
+        const now = get().preflightCheck
+        if (planId === undefined || planId === NO_PLAN) return
+        if (now.state !== 'idle' && now.key === key) return
+        set({ preflightCheck: { state: 'checking', key } })
+        // not through `call`: a failed check shows in the dialog, not in the action banner
+        const r = await bridge.call('run.job.check', {
+          planId,
+          ...(setupId === undefined ? {} : { setupId }),
+        })
+        const cur = get().preflightCheck
+        if (cur.state !== 'checking' || cur.key !== key) return // closed or superseded
+        set({
+          preflightCheck: r.ok
+            ? {
+                state: 'done',
+                key,
+                findings: (r.value as { findings: SoftLimitFinding[] }).findings,
+              }
+            : { state: 'failed', key, error: r.error },
+        })
       },
       hold: jobControl('job.pause'),
       resume: jobControl('job.resume'),

@@ -29,7 +29,8 @@ export const runMessages = {
     stopping: 'Stopping',
     hold: 'Feed hold',
     door: 'Door open',
-    paused: 'Paused (M0)',
+    paused: 'Paused by program',
+    needsHoming: 'Needs homing',
     toolChange: 'Tool change',
     setupChange: 'Setup change',
     alarm: (code: number | undefined) =>
@@ -69,10 +70,11 @@ export const runMessages = {
     setupHint: 'One program per setup, run in this order.',
     connection: 'Connection',
     timeScale: 'Time scale',
-    connect: 'Connect to virtual machine',
-    connectHint: 'Simulates the plan’s machine: GRBL 1.1 on a virtual machine. No hardware moves.',
+    connect: 'Connect',
+    connectHint:
+      'To a virtual machine that simulates the plan’s machine (GRBL 1.1). No hardware moves.',
     connectHintNoPlan:
-      'Simulates the chosen library machine: GRBL 1.1 on a virtual machine. No hardware moves.',
+      'To a virtual machine that simulates the chosen library machine (GRBL 1.1). No hardware moves.',
     disconnect: 'Disconnect',
     homing: 'Homing',
     home: 'Home',
@@ -124,6 +126,9 @@ export const runMessages = {
     units: { mm: 'mm', inch: 'in' } satisfies Record<UnitSystem, string>,
     feedUnits: { mm: 'mm/min', inch: 'in/min' } satisfies Record<UnitSystem, string>,
     rpm: 'rpm',
+    /** A coordinate while the position is not known (DF46). */
+    unknown: '—',
+    unknownHint: 'Position unknown until homed.',
   },
 
   progress: {
@@ -163,8 +168,13 @@ export const runMessages = {
     tools: 'Tools in order',
     noTools: 'No tools assigned',
     softLimits: 'Soft limits',
-    softLimitsText:
-      'Checked against the machine travel with this work zero when the run starts; a program outside the travel is refused.',
+    softLimitsChecking: 'Checking…',
+    softLimitsOk: 'Inside the travel at this work zero.',
+    /** One `softLimit` finding (DF46), lengths already in the project's unit. */
+    softLimitsAxis: (axis: string, from: string, to: string, travel: string, unit: string) =>
+      `${axis} leaves the travel: the program spans ${from} to ${to} ${unit}, the travel is −${travel} to 0 ${unit}.`,
+    softLimitsFix: 'Move the work zero so the program fits the travel, then start again.',
+    softLimitsFailed: 'The soft-limit check failed:',
     checksTitle: 'Before you start',
     start: 'Start run',
     cancel: 'Cancel',
@@ -181,7 +191,7 @@ export const runMessages = {
     ],
     setZ: 'Set Z zero here',
     continue: 'Continue',
-    later: 'Later',
+    later: 'Close (stay paused)',
     announce: (n: number, name: string) => `Tool change ${n}: change to ${name}. The run waits.`,
   },
 
@@ -207,9 +217,11 @@ export const runMessages = {
 
   pause: {
     title: (n: number) => `Program pause ${n}`,
-    description: (message: string) => `The program paused (M0): ${message}`,
+    description: (message: string) => `The program paused the run: ${message}`,
+    details:
+      'Program pause (M0) in the gCode. Continue runs the next line; Close keeps the run paused, and the Run inspector shows it.',
     continue: 'Continue',
-    later: 'Later',
+    later: 'Close (stay paused)',
     announce: (message: string) => `Program paused: ${message}`,
   },
 
