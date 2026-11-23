@@ -199,11 +199,7 @@ export interface ShapeDTO {
 }
 
 /** Quantity as entered, as for operation parameters (commands.ts `Src`). */
-export const ShapeSrcSchema = z
-  .string()
-  .min(1)
-  .max(256)
-  .describe('Quantity as entered: literal or formula over stock faces (`stock.side[1].x - 10`)')
+export const ShapeSrcSchema = z.string().min(1).max(256).describe('Formulas over stock faces only')
 
 /** An item as command args: quantities as entered, defaults may be left out. */
 export const ShapeItemArgSchema = itemSchema(() => ShapeSrcSchema, 'args').describe(

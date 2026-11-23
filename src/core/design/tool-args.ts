@@ -17,7 +17,7 @@ import { Quantity } from '../quantity/quantity'
 import { fieldContext } from './operation'
 import { checkGeneralizedTool, type DesignTool } from './tool'
 
-const Len = z.string().min(1).max(64).describe('Length as entered, e.g. 1/4" or 6 mm')
+const Len = z.string().min(1).max(64)
 
 export const ToolArg = z
   .discriminatedUnion('kind', [

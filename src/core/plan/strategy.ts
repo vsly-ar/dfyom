@@ -50,7 +50,7 @@ const LENGTH_KEYS = [
 ] as const
 type LengthKey = (typeof LENGTH_KEYS)[number]
 
-const Src = z.string().min(1).max(256).describe('Quantity as entered, e.g. "0.5 mm" or "1/32\\""')
+const Src = z.string().min(1).max(256)
 const clear = <S extends z.ZodType>(s: S) => s.nullable().optional()
 
 /** `strategy` arg of `plan.operation.update`: values as entered; `null` clears (default). */

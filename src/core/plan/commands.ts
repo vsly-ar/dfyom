@@ -78,7 +78,7 @@ import { designToolFindings } from './tool-resolution'
 
 // ── helpers ───────────────────────────────────────────────────────────────────────────────
 
-const Src = z.string().min(1).max(256).describe('Quantity as entered, e.g. "2 mm" or "1/16\\""')
+const Src = z.string().min(1).max(256)
 const PlanArg = { planId: PlanIdSchema }
 const Empty = z.object({})
 const nowIso = (ctx: CommandContext) => new Date(ctx.clock.now()).toISOString()
