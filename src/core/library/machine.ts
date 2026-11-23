@@ -62,6 +62,8 @@ export interface MachineProps {
   readonly pullOff: Option<Quantity>
   /** Soft limits (`$20`); None = on. */
   readonly softLimits: Option<boolean>
+  /** Z touch plate thickness (DTO `probe.plateThickness`, length); None = no plate set. */
+  readonly plateThickness: Option<Quantity>
 }
 
 const AXES = ['x', 'y', 'z'] as const
@@ -90,6 +92,7 @@ export class Machine implements MachineProps {
     readonly homingCorner: Option<HomingCorner>,
     readonly pullOff: Option<Quantity>,
     readonly softLimits: Option<boolean>,
+    readonly plateThickness: Option<Quantity>,
   ) {
     invariants('Machine', (c) => {
       checkNameAndNotes(c, name, notes)
@@ -118,6 +121,8 @@ export class Machine implements MachineProps {
         }
       }
       if (pullOff.isSome()) checkPositive(c, ['pullOff'], pullOff.unwrap(), 'length')
+      if (plateThickness.isSome())
+        checkPositive(c, ['probe', 'plateThickness'], plateThickness.unwrap(), 'length')
       if (spindle.power.isSome())
         checkPositive(c, ['spindle', 'power'], spindle.power.unwrap(), 'power')
     })
@@ -151,6 +156,7 @@ export class Machine implements MachineProps {
           p.homingCorner,
           p.pullOff,
           p.softLimits,
+          p.plateThickness,
         ),
     )
   }
@@ -174,6 +180,7 @@ export class Machine implements MachineProps {
       minSpeed: optionalQuantityFromDTO(dto.spindle.minSpeed, 'spindle', 'minSpeed'),
       power: optionalQuantityFromDTO(dto.spindle.power, 'spindle', 'power'),
       pullOff: optionalQuantityFromDTO(dto.pullOff, 'pullOff'),
+      plateThickness: optionalQuantityFromDTO(dto.probe?.plateThickness, 'probe', 'plateThickness'),
     }).andThen((q) =>
       Machine.create({
         name: dto.name,
@@ -197,6 +204,7 @@ export class Machine implements MachineProps {
         homingCorner: toOption(dto.homingCorner),
         pullOff: q.pullOff,
         softLimits: toOption(dto.softLimits),
+        plateThickness: q.plateThickness,
       }),
     )
   }
@@ -230,6 +238,10 @@ export class Machine implements MachineProps {
       ...optionalField('homingCorner', this.homingCorner),
       ...optionalQuantityDTO('pullOff', this.pullOff),
       ...optionalField('softLimits', this.softLimits),
+      ...optionalField(
+        'probe',
+        this.plateThickness.map((t) => ({ plateThickness: t.toDTO() })),
+      ),
     } as MachineValuesDTO
   }
 

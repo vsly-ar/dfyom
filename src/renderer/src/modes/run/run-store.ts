@@ -10,10 +10,12 @@ import { useStore } from 'zustand'
 import { createStore, type StoreApi } from 'zustand/vanilla'
 import type { TimeScale } from '../../../../core/run/clock'
 import { closedStatus, type RunStatus } from '../../../../core/run/service'
+import { DEFAULT_BAUD, type SerialPortInfo } from '../../../../core/run/serial'
+import type { SettingsCheck } from '../../../../core/run/settings-check'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import type { CallReply, PreloadApi } from '../../../../shared/preload-api'
 import { useShell } from '../../shell/ShellContext'
-import { activeJob } from './machine-state'
+import { activeJob, type JogMode } from './machine-state'
 
 /** Progress poll of the run job (`job.get`) while it runs: progress ticks are not pushed. */
 export const RUN_PROGRESS_POLL_MS = 250
@@ -43,6 +45,9 @@ export type RunEnd =
 
 export type Axis = 'x' | 'y' | 'z'
 
+/** What "Connect" opens: the GRBL emulator or a real controller (docs/modes/run-machine.md#ui). */
+export type ConnectTo = 'virtual' | 'serial'
+
 /** `planId` of "No plan (manual control)": connect with a library machine (DF31). */
 export const NO_PLAN = '__noPlan__'
 
@@ -62,8 +67,19 @@ export interface RunState {
   readonly setupChangeOpen: boolean
   /** Time scale chosen before connecting; while connected the status has the live one. */
   readonly timeScale: TimeScale
+  /** The connect choice (per window). */
+  readonly connectTo: ConnectTo
+  /** Serial port path chosen in the picker; `undefined` = none yet. */
+  readonly portPath: string | undefined
+  readonly baud: number
+  /** Last `run.ports.scan`; `undefined` = not scanned yet. */
+  readonly ports: readonly SerialPortInfo[] | undefined
+  /** The serial connection's settings check (`run.connection.open`), until it closes. */
+  readonly settingsCheck: SettingsCheck | undefined
   /** Jog step in the project unit. */
   readonly jogStep: string
+  /** Step or continuous jogging (M3, per window). */
+  readonly jogMode: JogMode
   /** The run job this window follows (started here, or seen in the status). */
   readonly jobId: string | undefined
   readonly progress: RunProgress | undefined
@@ -83,7 +99,13 @@ export interface RunState {
   setSetup(setupId: string | undefined): void
   setSetupChangeOpen(open: boolean): void
   setTimeScale(scale: TimeScale): void
+  setConnectTo(to: ConnectTo): void
+  setPort(path: string | undefined): void
+  setBaud(baud: number): void
+  /** `run.ports.scan`; keeps the chosen port if still there, else picks the first USB one. */
+  scanPorts(): Promise<void>
   setJogStep(step: string): void
+  setJogMode(mode: JogMode): void
   setPreflightOpen(open: boolean): void
   dismissWait(key: string | undefined): void
   closeFailure(): void
@@ -95,7 +117,17 @@ export interface RunState {
   unlock(): Promise<void>
   jog(axis: Axis, mm: number, feed: number): Promise<void>
   jogCancel(): Promise<void>
+  /**
+   * Hold to jog (docs/modes/run-machine.md#machine-readiness-m3): a continuous jog to the travel
+   * edge; `jogHoldEnd` cancels it, and again once the start is accepted if it was still on its way.
+   */
+  jogHoldStart(axis: Axis, sign: 1 | -1, feed: number): Promise<void>
+  jogHoldEnd(): void
   setWorkZero(axes: readonly Axis[]): Promise<void>
+  /** Z touch plate (`run.machine.probeZ`, M4): a job; a miss shows in the alarm panel. */
+  probeZ(plateThickness: number): Promise<void>
+  /** `run.override.set` (M6). */
+  override(change: OverrideChange): Promise<void>
   reset(): Promise<void>
   /** `setupId`: the setup to run (default: the chosen one; the server needs it for several). */
   startRun(setupId?: string): Promise<void>
@@ -103,6 +135,13 @@ export interface RunState {
   resume(): Promise<void>
   stop(): Promise<void>
   continueWait(): Promise<void>
+}
+
+/** One override change (docs/modes/run-machine.md#overrides-m6). */
+export interface OverrideChange {
+  readonly feed?: 'reset' | '+10' | '-10'
+  readonly spindle?: 'reset' | '+10' | '-10'
+  readonly rapid?: 100 | 50 | 25
 }
 
 export type RunStore = StoreApi<RunState> & {
@@ -130,11 +169,21 @@ export function createRunStore(bridge: PreloadApi): RunStore {
   let poll: ReturnType<typeof setTimeout> | undefined
   let polling: string | undefined
   let live = false
+  /** The continuous jog of this window: still being accepted, and whether released meanwhile. */
+  let held: { released: boolean } | undefined
 
   const store = createStore<RunState>()((set, get) => {
     /** One command; a refusal goes to the action banner (`op.aborted` is never a failure). */
-    const call = async (name: string, args: object = {}): Promise<CallReply> => {
-      set((s) => ({ pending: [...s.pending, name], actionError: undefined }))
+    const call = async (
+      name: string,
+      args: object = {},
+      opts: { keepError?: boolean } = {},
+    ): Promise<CallReply> => {
+      set((s) =>
+        opts.keepError === true
+          ? { pending: [...s.pending, name] }
+          : { pending: [...s.pending, name], actionError: undefined },
+      )
       const r = await bridge.call(name, args)
       set((s) => {
         const i = s.pending.indexOf(name)
@@ -168,7 +217,13 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       setupChange: undefined,
       setupChangeOpen: false,
       timeScale: 1,
+      connectTo: 'virtual',
+      portPath: undefined,
+      baud: DEFAULT_BAUD,
+      ports: undefined,
+      settingsCheck: undefined,
       jogStep: '10',
+      jogMode: 'step',
       jobId: undefined,
       progress: undefined,
       ended: undefined,
@@ -195,18 +250,53 @@ export function createRunStore(bridge: PreloadApi): RunStore {
         if (get().status.connection.state === 'open')
           void call('run.timeScale.set', { scale: timeScale })
       },
+      setConnectTo: (connectTo) => {
+        set({ connectTo })
+        if (connectTo === 'serial' && get().ports === undefined) void get().scanPorts()
+      },
+      setPort: (portPath) => set({ portPath }),
+      setBaud: (baud) => set({ baud }),
+      async scanPorts() {
+        const r = await call('run.ports.scan')
+        if (!r.ok) return
+        const ports = (r.value as { ports: SerialPortInfo[] }).ports
+        set((s) => ({
+          ports,
+          portPath: ports.some((p) => p.path === s.portPath)
+            ? s.portPath
+            : (ports.find((p) => p.usb) ?? ports[0])?.path,
+        }))
+      },
       setJogStep: (jogStep) => set({ jogStep }),
+      setJogMode: (jogMode) => set({ jogMode }),
       setPreflightOpen: (preflightOpen) => set({ preflightOpen }),
       dismissWait: (dismissedWait) => set({ dismissedWait }),
       closeFailure: () => set({ failureOpen: false }),
       clearActionError: () => set({ actionError: undefined }),
 
       async connect() {
-        const { planId, machineId, timeScale } = get()
-        if (planId !== undefined && planId !== NO_PLAN)
-          await call('run.connection.open', { target: 'virtual', planId, timeScale })
-        else if (machineId !== undefined)
-          await call('run.connection.open', { target: 'virtual', machineId, timeScale })
+        const { planId, machineId, timeScale, connectTo, portPath, baud } = get()
+        const what =
+          planId !== undefined && planId !== NO_PLAN
+            ? { planId }
+            : machineId !== undefined
+              ? { machineId }
+              : undefined
+        if (what === undefined) return
+        if (connectTo === 'virtual') {
+          await call('run.connection.open', { target: 'virtual', ...what, timeScale })
+          return
+        }
+        if (portPath === undefined) return
+        set({ settingsCheck: undefined })
+        const r = await call('run.connection.open', {
+          target: 'serial',
+          path: portPath,
+          baud,
+          ...what,
+        })
+        if (r.ok)
+          set({ settingsCheck: (r.value as { settingsCheck?: SettingsCheck }).settingsCheck })
       },
       disconnect: async () => void (await call('run.connection.close')),
       home: () => job('run.machine.home'),
@@ -217,7 +307,31 @@ export function createRunStore(bridge: PreloadApi): RunStore {
         await call('run.machine.jog', { by, feed })
       },
       jogCancel: async () => void (await call('run.machine.jogCancel')),
+      async jogHoldStart(axis, sign, feed) {
+        if (held !== undefined) return
+        const h = { released: false }
+        held = h
+        const by: [number, number, number] = [0, 0, 0]
+        by['xyz'.indexOf(axis)] = sign
+        const r = await call('run.machine.jog', { by, feed, continuous: true })
+        if (held === h) {
+          if (!r.ok) held = undefined
+          return
+        }
+        // released before GRBL accepted the jog: the first 0x85 may have overtaken the $J line
+        if (h.released && r.ok) await call('run.machine.jogCancel', {}, { keepError: true })
+      },
+      jogHoldEnd() {
+        const h = held
+        if (h === undefined) return
+        h.released = true
+        held = undefined
+        // keep a refusal of the start (e.g. at the travel edge) visible
+        void call('run.machine.jogCancel', {}, { keepError: true })
+      },
       setWorkZero: async (axes) => void (await call('run.workZero.set', { axes: [...axes] })),
+      probeZ: (plateThickness) => job('run.machine.probeZ', { plateThickness }),
+      override: async (change) => void (await call('run.override.set', change)),
       reset: async () => void (await call('run.machine.reset')),
       async startRun(chosen) {
         const planId = get().planId
@@ -312,6 +426,8 @@ export function createRunStore(bridge: PreloadApi): RunStore {
   const onStatus = (status: RunStatus): void => {
     store.setState({ status })
     // a closed connection ends the setup sequence (the stock is no longer on a known machine)
+    if (status.connection.state === 'closed' && store.getState().settingsCheck !== undefined)
+      store.setState({ settingsCheck: undefined })
     if (status.connection.state === 'closed' && store.getState().setupChange !== undefined)
       store.setState({ setupChange: undefined, setupChangeOpen: false })
     const job = status.job

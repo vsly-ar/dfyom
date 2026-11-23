@@ -101,4 +101,15 @@ describe('Machine', () => {
     expect(issues({ ...machineValues(), spindle })).toEqual([['spindle.power', 'positive']])
     expectErrCode(load({ ...machineValues(), rigidity: 'granite' }), 'input.malformed')
   })
+
+  it('round-trips the touch plate thickness; it must be > 0 (M4)', () => {
+    const full = { ...machineValues(), probe: { plateThickness: len('12.5') } }
+    const m = expectOk(load(full))
+    expect(m.plateThickness.unwrap().canonical).toBe(12.5)
+    expect(m.toDTO()).toEqual(full)
+    expect(expectOk(load(machineValues())).plateThickness.isNone()).toBe(true)
+    expect(issues({ ...machineValues(), probe: { plateThickness: len('0') } })).toEqual([
+      ['probe.plateThickness', 'positive'],
+    ])
+  })
 })

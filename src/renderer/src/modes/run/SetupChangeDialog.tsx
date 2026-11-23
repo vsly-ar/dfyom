@@ -10,11 +10,12 @@ import type { ProjectDoc } from '../../../../core/project/document'
 import type { SetupOrientation } from '../../../../core/toolpath/wcs'
 import { runMessages } from '../../messages/run'
 import { Icon, Button, Dialog } from '../../ui'
-import { JogPad } from './JogPad'
+import { JogPad, useJogMode } from './JogPad'
 import { formatLength, runGates } from './machine-state'
 import { planRunInfo, setupPlacement } from './plan-info'
 import { useRun, useRunStore } from './run-store'
 import { WorkZeroButtons } from './RunNavigator'
+import { ProbeZButton, usePlateThickness } from './ProbeZButton'
 import { RunDialogFooter } from './RunStop'
 import styles from './Run.module.css'
 
@@ -27,8 +28,10 @@ export function SetupChangeDialog({ doc }: { doc: ProjectDoc }): React.JSX.Eleme
   const planId = useRun((s) => s.planId)
   const status = useRun((s) => s.status)
   const jogStep = useRun((s) => s.jogStep)
+  const jogMode = useJogMode()
   const pending = useRun((s) => s.pending)
   const ids = { jog: useId(), zero: useId(), start: useId() }
+  const plate = usePlateThickness(doc)
   const plan = planId === undefined ? undefined : doc.plans[planId]
   if (setupId === undefined || plan === undefined) return null
   const a = store.getState()
@@ -69,6 +72,7 @@ export function SetupChangeDialog({ doc }: { doc: ProjectDoc }): React.JSX.Eleme
         ))}
       </ol>
       <JogPad
+        {...jogMode}
         units={units}
         step={jogStep}
         onStep={a.setJogStep}
@@ -81,6 +85,15 @@ export function SetupChangeDialog({ doc }: { doc: ProjectDoc }): React.JSX.Eleme
         gate={gates.workZero}
         reasonId={ids.zero}
         onZero={(axes) => void a.setWorkZero(axes)}
+      />
+      <ProbeZButton
+        thickness={plate}
+        gate={gates.workZero}
+        reasonId={ids.zero}
+        units={units}
+        busy={pending.includes('run.machine.probeZ')}
+        hint={false}
+        onProbe={(t) => void a.probeZ(t)}
       />
       <dl className={styles['facts']}>
         <dt>{m.workZero}</dt>

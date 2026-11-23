@@ -41,7 +41,36 @@ export const REALTIME = {
   reset: 0x18,
   jogCancel: 0x85,
 } as const
-export type RealtimeCommand = (typeof REALTIME)[keyof typeof REALTIME]
+
+/**
+ * GRBL 1.1 override bytes (docs/modes/run-machine.md#overrides-m6): feed and spindle in 10 % and
+ * 1 % steps or back to 100 %, rapids at 100/50/25 %.
+ */
+export const OVERRIDE = {
+  feedReset: 0x90,
+  feedPlus10: 0x91,
+  feedMinus10: 0x92,
+  feedPlus1: 0x93,
+  feedMinus1: 0x94,
+  rapid100: 0x95,
+  rapid50: 0x96,
+  rapid25: 0x97,
+  spindleReset: 0x99,
+  spindlePlus10: 0x9a,
+  spindleMinus10: 0x9b,
+  spindlePlus1: 0x9c,
+  spindleMinus1: 0x9d,
+} as const
+export type RealtimeCommand =
+  (typeof REALTIME)[keyof typeof REALTIME] | (typeof OVERRIDE)[keyof typeof OVERRIDE]
+
+/** Feed, rapid and spindle overrides in % (status report `Ov`). */
+export interface Overrides {
+  readonly feed: number
+  readonly rapid: number
+  readonly spindle: number
+}
+const NO_OVERRIDES: Overrides = { feed: 100, rapid: 100, spindle: 100 }
 
 /** DFYOM tool-change marker, matched against a whole line (grbl.md#output-dialect). */
 const MARKER = /^\(DFYOM TOOL CHANGE (\d+): ([^()]*)\)$/
@@ -115,6 +144,8 @@ export interface SenderStatus {
   readonly feed: number
   readonly spindle: number
   readonly buffer?: { readonly blocks: number; readonly rx: number }
+  /** The last `Ov` (GRBL sends it every 10–20 reports); absent until the first. */
+  readonly overrides?: Overrides
 }
 
 export type SenderEvent =
@@ -266,6 +297,7 @@ export class GrblSender {
   private readonly timers: TimerHost
   private connected = false
   private unsubscribe: (() => void) | undefined
+  private unsubscribeClose: (() => void) | undefined
   private rxText = ''
   private inches = false
 
@@ -293,6 +325,7 @@ export class GrblSender {
   /** G54 changed: positions wait for a report with `WCO` (WCO = G54 + G92 + TLO). */
   private wcoPending = true
   private lastG54: Vec3 | undefined
+  private overrides: Overrides | undefined
 
   /** Stop sequence: waiting for `Hold:0` after `!` (report ordinal must exceed the mark). */
   private holdMark: number | undefined
@@ -380,6 +413,11 @@ export class GrblSender {
     if (this.connected || this.unsubscribe !== undefined)
       return fail('run.busy', 'the sender is already connected', { where })
     this.unsubscribe = this.transport.onData((b) => this.onData(b))
+    // a serial port that closes by itself (cable pulled) fails the connection at once
+    this.unsubscribeClose = this.transport.onClose?.((reason) => {
+      if (this.connected) this.connectionLost(`port closed: ${reason}`)
+      else this.bannerWaiter?.(false)
+    })
     let banner = await this.waitForBanner()
     if (!banner) {
       this.log.warn('no banner; sending a soft reset')
@@ -425,9 +463,15 @@ export class GrblSender {
     return Ok(info)
   }
 
-  /** One line when no program streams (or while a tool change waits): `$H`, `$J=`, `G10`, … */
-  async command(line: string): AsyncAppResult<readonly string[]> {
-    const r = await this.request(line)
+  /**
+   * One line when no program streams (or while a tool change waits): `$H`, `$J=`, `G10`, …
+   * `timeoutMs`: clock time to wait for its reply instead of the default (a probe cycle).
+   */
+  async command(
+    line: string,
+    opts: { readonly timeoutMs?: number } = {},
+  ): AsyncAppResult<readonly string[]> {
+    const r = await this.request(line, opts.timeoutMs)
     return r.map((replies) => replies.map(lineText))
   }
 
@@ -604,11 +648,12 @@ export class GrblSender {
 
   /**
    * Stops polling, fails what is pending and closes the transport. During a run the controller is
-   * reset first (`0x18`: motion and spindle stop, GRBL's buffers are flushed).
+   * reset first (`0x18`: motion and spindle stop, GRBL's buffers are flushed), and so is it with
+   * `reset` (a real machine: disconnect = reset, docs/modes/run.md#6-lost-connection-disconnect-and-reconnect).
    */
-  async close(): AsyncAppResult<void> {
+  async close(opts: { readonly reset?: boolean } = {}): AsyncAppResult<void> {
     const run = this.run_
-    if (run !== undefined && this.connected) {
+    if ((run !== undefined || opts.reset === true) && this.connected) {
       this.expectingReset = true
       const reset = await this.transport.write(Uint8Array.of(REALTIME.reset))
       if (reset.isErr())
@@ -629,7 +674,7 @@ export class GrblSender {
 
   // ── Streaming ───────────────────────────────────────────────────────────────────────────
 
-  private request(line: string): AsyncAppResult<readonly GrblLine[]> {
+  private request(line: string, timeoutMs?: number): AsyncAppResult<readonly GrblLine[]> {
     const where = 'GrblSender.command'
     if (!this.connected)
       return Promise.resolve(fail('machine.connection', 'not connected', { where }))
@@ -653,7 +698,7 @@ export class GrblSender {
     if (pf.isErr()) return Promise.resolve(Err(pf.unwrapErr()))
     return new Promise((resolve) => {
       const cmd: PendingCommand = { line, replies: [], resolve, settled: false }
-      const ms = line === '$H' ? 600_000 : (this.opts.commandTimeoutMs ?? 10_000)
+      const ms = timeoutMs ?? (line === '$H' ? 600_000 : (this.opts.commandTimeoutMs ?? 10_000))
       cmd.cancelTimeout = this.clock.schedule(this.clock.now() + ms, () => {
         cmd.cancelTimeout = undefined
         if (cmd.settled) return
@@ -668,6 +713,9 @@ export class GrblSender {
   private settle(cmd: PendingCommand, r: AppResult<readonly GrblLine[]>): void {
     if (cmd.settled) return
     cmd.settled = true
+    // the poll outstanding through a silent homing cycle gets a fresh limit (homingInFlight)
+    if (cmd.line === '$H' && this.pollOutstandingSince !== undefined)
+      this.pollOutstandingSince = this.timers.now()
     cmd.cancelTimeout?.()
     cmd.cancelTimeout = undefined
     cmd.resolve(r)
@@ -829,6 +877,7 @@ export class GrblSender {
       this.wcoPending = false
     }
     const prev = this.latest
+    if (report.overrides !== undefined) this.overrides = report.overrides
     const k = this.inches ? 25.4 : 1
     this.latest = {
       state: stateText(report),
@@ -838,6 +887,7 @@ export class GrblSender {
       feed: report.feed === undefined ? (prev?.feed ?? 0) : report.feed * k,
       spindle: report.spindle ?? prev?.spindle ?? 0,
       ...(report.buffer === undefined ? {} : { buffer: report.buffer }),
+      ...(this.overrides === undefined ? {} : { overrides: this.overrides }),
     }
     for (const l of [...this.statusListeners]) l(this.latest)
     if (this.lostAcknowledgement(report)) return
@@ -922,6 +972,12 @@ export class GrblSender {
       run.failure ??= alarmError(code, run)
       return
     }
+    // a probe at a tool change missed (ALARM:4/5): none of the program is in GRBL's buffers there,
+    // so the run keeps waiting for unlock, another probe and continue (run-machine.md#probing-and-re-zero-m4)
+    if (run.phase === 'toolChange' && (code === 4 || code === 5)) {
+      this.log.debug({ code }, 'probe alarm at a tool change')
+      return
+    }
     this.log.debug({ code }, 'alarm during a run')
     this.finish(run, Err(alarmError(code, run)))
   }
@@ -930,6 +986,8 @@ export class GrblSender {
     const expected = this.expectingReset
     this.expectingReset = false
     this.critical = false
+    // GRBL restores the overrides on a reset
+    if (this.overrides !== undefined) this.overrides = NO_OVERRIDES
     this.holdMark = undefined
     this.freshMark = undefined
     this.cancelHoldTimeout?.()
@@ -1137,7 +1195,12 @@ export class GrblSender {
     const limit = this.opts.statusTimeoutMs ?? 2000
     const watch = () => {
       const since = this.pollOutstandingSince
-      if (since !== undefined && !this.critical && this.timers.now() - since > limit) {
+      if (
+        since !== undefined &&
+        !this.critical &&
+        !this.homingInFlight() &&
+        this.timers.now() - since > limit
+      ) {
         this.log.warn({ ms: this.timers.now() - since }, 'status reply missing')
         this.connectionLost('no status reply')
         return
@@ -1145,6 +1208,15 @@ export class GrblSender {
       this.cancelWatchdog = this.timers.setTimeout(watch, limit / 4)
     }
     this.cancelWatchdog = this.timers.setTimeout(watch, limit / 4)
+  }
+
+  /**
+   * Real GRBL runs no realtime protocol inside the homing cycle, so no `?` is answered until `$H`
+   * ends: the status watchdog waits while `$H` is in flight; the `$H` command timeout still applies
+   * (docs/modes/run.md#5-watchdogs).
+   */
+  private homingInFlight(): boolean {
+    return this.inflight.some((s) => s.kind === 'command' && s.cmd.line === '$H' && !s.cmd.settled)
   }
 
   private waitForBanner(): Promise<boolean> {
@@ -1199,7 +1271,8 @@ export class GrblSender {
     this.cancelHoldTimeout?.()
     this.cancelPoll = this.cancelWatchdog = this.cancelHoldTimeout = undefined
     this.unsubscribe?.()
-    this.unsubscribe = undefined
+    this.unsubscribeClose?.()
+    this.unsubscribe = this.unsubscribeClose = undefined
   }
 }
 

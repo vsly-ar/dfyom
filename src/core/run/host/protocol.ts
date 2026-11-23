@@ -7,6 +7,7 @@ import { z } from 'zod'
 import { ResultWireSchema } from '../../../shared/errors/schema'
 import { LOG_LEVELS } from '../../../shared/logging'
 import { MAX_TIME_SCALE } from '../clock'
+import { SerialPortInfoSchema } from '../serial'
 
 export const PROTOCOL_VERSION = 1
 
@@ -42,9 +43,21 @@ export const RunSummarySchema = z.object({
   pauses: z.number().int(),
 })
 
+/** The kinds of connection (docs/modes/run-machine.md#connect). */
+export const TARGET_KINDS = ['virtual', 'serial'] as const
+export type TargetKind = (typeof TARGET_KINDS)[number]
+
+/** A serial port as connected. */
+export const PortSchema = z.object({
+  path: z.string().min(1).max(500),
+  baud: z.number().int().min(300).max(4_000_000),
+})
+
 export const ControllerInfoSchema = z.object({
   /** What the host connected to (reported by the host, never assumed by main). */
-  target: z.literal('virtual'),
+  target: z.enum(TARGET_KINDS),
+  /** Serial connections: the port. */
+  port: PortSchema.exactOptional(),
   version: z.string(),
   settings: z.record(z.string(), Num),
   workZero: Vec3Schema,
@@ -66,6 +79,8 @@ export const HostStatusSchema = z.object({
   feed: Num,
   spindle: Num,
   buffer: z.object({ blocks: z.number(), rx: z.number() }).exactOptional(),
+  /** Feed, rapid, spindle overrides in % from the last `Ov` (docs/modes/run-machine.md#overrides-m6). */
+  overrides: z.object({ feed: Num, rapid: Num, spindle: Num }).exactOptional(),
   alarm: z.object({ code: z.number().int(), text: z.string() }).exactOptional(),
   lastMessage: z.string().max(500).exactOptional(),
   /** What the controller enforces, from its `$$` (docs/modes/run.md#machine-coordinates-and-the-homing-corner-df33). */
@@ -111,7 +126,32 @@ export const VirtualTargetSchema = z.object({
 })
 export type VirtualTarget = z.output<typeof VirtualTargetSchema>
 
+/** A real controller on a serial port (docs/modes/run-machine.md#connect). */
+export const SerialTargetSchema = z.object({
+  kind: z.literal('serial'),
+  path: PortSchema.shape.path,
+  baud: PortSchema.shape.baud,
+  /** Identity of the machine copy the controller is checked against (decision 6). */
+  machineKey: z.string().max(200),
+})
+export type SerialTarget = z.output<typeof SerialTargetSchema>
+
+export const ConnectTargetSchema = z.discriminatedUnion('kind', [
+  VirtualTargetSchema,
+  SerialTargetSchema,
+])
+export type ConnectTarget = z.output<typeof ConnectTargetSchema>
+
 export const AXES = ['x', 'y', 'z'] as const
+
+/** Feed and spindle override steps; rapids take `100`/`50`/`25` (docs/modes/run-machine.md#overrides-m6). */
+export const OVERRIDE_STEPS = ['reset', '+10', '-10', '+1', '-1'] as const
+export const RAPID_OVERRIDES = ['100', '50', '25'] as const
+export type OverrideStep = (typeof OVERRIDE_STEPS)[number]
+export type RapidOverride = (typeof RAPID_OVERRIDES)[number]
+
+/** Probe defaults (docs/modes/run-machine.md#probing-and-re-zero-m4), mm and mm/min. */
+export const PROBE_DEFAULTS = { maxTravel: 25, feed: 50, retract: 2 } as const
 
 export const MachineActionSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('home') }),
@@ -123,6 +163,8 @@ export const MachineActionSchema = z.discriminatedUnion('kind', [
     by: Vec3Schema.exactOptional(),
     /** mm/min. */
     feed: z.number().positive().max(1e6),
+    /** Hold to jog: to the travel edge in the direction of `by` (one axis), until a jog cancel. */
+    continuous: z.boolean().exactOptional(),
   }),
   z.object({ kind: z.literal('jogCancel') }),
   z.object({
@@ -132,6 +174,20 @@ export const MachineActionSchema = z.discriminatedUnion('kind', [
     values: Vec3Schema.exactOptional(),
   }),
   z.object({ kind: z.literal('reset') }),
+  /** Z touch plate (M4): G38.2 down, G54 Z at the contact minus the plate, retract. */
+  z.object({
+    kind: z.literal('probeZ'),
+    plateThickness: z.number().positive().max(100),
+    maxTravel: z.number().positive().max(1000),
+    feed: z.number().positive().max(10_000),
+    retract: z.number().min(0).max(100),
+  }),
+  /** Overrides (M6): one real-time byte. `rapid` takes a percentage, the others a step. */
+  z.object({
+    kind: z.literal('override'),
+    which: z.enum(['feed', 'spindle', 'rapid']),
+    action: z.enum([...OVERRIDE_STEPS, ...RAPID_OVERRIDES]),
+  }),
 ])
 export type MachineAction = z.output<typeof MachineActionSchema>
 
@@ -149,7 +205,9 @@ const request = <K extends string, T extends z.ZodRawShape>(type: K, shape: T) =
 
 export const MainMessage = z.discriminatedUnion('type', [
   InitMessage,
-  request('connect', { target: VirtualTargetSchema }),
+  request('connect', { target: ConnectTargetSchema }),
+  /** The serial ports the OS reports (docs/modes/run-machine.md#ports-and-the-port-picker). */
+  request('listPorts', {}),
   request('disconnect', {}),
   request('machine', { action: MachineActionSchema }),
   request('jobStart', {
@@ -159,7 +217,7 @@ export const MainMessage = z.discriminatedUnion('type', [
     expect: z.object({
       workZero: Vec3Schema,
       machineKey: z.string().max(200),
-      target: z.literal('virtual'),
+      target: z.enum(TARGET_KINDS),
     }),
   }),
   request('jobControl', {
@@ -209,3 +267,5 @@ export const HostMessage = z.discriminatedUnion('type', [
   z.object({ type: z.literal('log'), batch: z.array(z.unknown()) }),
 ])
 export type HostMessage = z.output<typeof HostMessage>
+
+export const PortListSchema = z.array(SerialPortInfoSchema)

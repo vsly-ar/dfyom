@@ -31,6 +31,8 @@ export const MACHINE_FIELDS: readonly string[] = [
   'homingCorner',
   'pullOff',
   'softLimits',
+  'probe.plateThickness',
+  'probe',
   'travel',
   'maxFeedRate',
   'acceleration',
@@ -168,6 +170,20 @@ export function MachineFields({
             checked={values.softLimits ?? true}
             onCheckedChange={(softLimits) => set({ softLimits })}
           />
+        </Group>
+      ) : null}
+      {full ? (
+        <Group title={m.probe}>
+          {q(
+            'probe.plateThickness',
+            m.plateThickness,
+            'length',
+            values.probe?.plateThickness,
+            'depth',
+            (plateThickness) =>
+              set({ probe: plateThickness === undefined ? undefined : { plateThickness } }),
+            { optional: true, note: m.plateThicknessNote },
+          )}
         </Group>
       ) : null}
       {full

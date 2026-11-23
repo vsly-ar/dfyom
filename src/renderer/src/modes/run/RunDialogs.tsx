@@ -7,14 +7,17 @@
 import { useId } from 'react'
 import type { ProjectDoc } from '../../../../core/project/document'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
+import { planMessages } from '../../messages/plan'
 import { runMessages } from '../../messages/run'
 import { Icon, Button, Dialog, DialogClose, ErrorMessage } from '../../ui'
 import { useReplica } from '../../shell/ShellContext'
-import { JogPad } from './JogPad'
+import { JogPad, useJogMode } from './JogPad'
 import { activeJob, formatLength, runGates } from './machine-state'
 import { planRunInfo } from './plan-info'
 import { useRun, useRunStore, waitKey } from './run-store'
 import { WorkZeroButtons } from './RunNavigator'
+import { AlarmPanel, inAlarm } from './AlarmPanel'
+import { ProbeZButton, usePlateThickness } from './ProbeZButton'
 import { RunDialogFooter } from './RunStop'
 import { SetupChangeDialog } from './SetupChangeDialog'
 import styles from './Run.module.css'
@@ -26,7 +29,7 @@ export function RunDialogs(): React.JSX.Element {
     <>
       {doc ? <PreflightDialog doc={doc} /> : null}
       {doc ? <SetupChangeDialog doc={doc} /> : null}
-      <WaitDialog units={doc?.unitSystem ?? 'mm'} />
+      <WaitDialog doc={doc} />
       <FailureDialog />
       <Announcer doc={doc} />
     </>
@@ -44,7 +47,18 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
   const m = runMessages.preflight
   const plan = planId === undefined ? undefined : doc.plans[planId]
   const info = plan ? planRunInfo(plan, setupId) : undefined
-  const gate = runGates(status, { planChosen: plan !== undefined }).start
+  const settingsCheck = useRun((s) => s.settingsCheck)
+  // a real machine: finalized plans and matching settings only (run-machine.md#pre-flight-on-a-real-machine)
+  const serial = status.connection.target === 'serial'
+  const realGate =
+    !serial || plan === undefined
+      ? null
+      : plan.status !== 'finalized' && plan.status !== 'inUse'
+        ? m.notFinalized
+        : settingsCheck !== undefined && !settingsCheck.matches
+          ? m.settingsMismatch
+          : null
+  const gate = runGates(status, { planChosen: plan !== undefined }).start ?? realGate
   const units = doc.unitSystem
   const a = store.getState()
   return (
@@ -65,14 +79,28 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
             {...(gate === null ? { autoFocus: true } : { 'aria-describedby': whyId })}
             onClick={() => void a.startRun(info?.setup.id)}
           >
-            {m.start}
+            {serial ? m.startMachine : m.start}
           </Button>
         </RunDialogFooter>
       }
     >
+      {serial ? (
+        <div className={styles['notice']} role="note">
+          <Icon name="info" />
+          <div>
+            <p className={styles['why']}>{m.airCut}</p>
+          </div>
+        </div>
+      ) : null}
       <dl className={styles['facts']}>
         <dt>{m.plan}</dt>
         <dd>{info?.name ?? '–'}</dd>
+        {serial && plan !== undefined ? (
+          <>
+            <dt>{m.planStatus}</dt>
+            <dd>{planMessages.statuses[plan.status]}</dd>
+          </>
+        ) : null}
         {info !== undefined && info.setups.length > 1 ? (
           <>
             <dt>{m.setup}</dt>
@@ -88,7 +116,11 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
         <dt>{m.machine}</dt>
         <dd>{info?.machine ?? '–'}</dd>
         <dt>{m.target}</dt>
-        <dd>{m.virtualTarget(runMessages.timeScale(timeScale))}</dd>
+        <dd>
+          {status.connection.target === 'serial' && status.connection.port !== undefined
+            ? m.serialTarget(status.connection.port.path, status.connection.port.baud)
+            : m.virtualTarget(runMessages.timeScale(timeScale))}
+        </dd>
         <dt>{m.workZero}</dt>
         <dd className={styles['mono']}>
           {status.workZero.map((v) => formatLength(v, units)).join(' · ')}{' '}
@@ -119,11 +151,14 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
 }
 
 /** Tool change or program pause: instructions, jog and Z zero inside; Continue is the primary. */
-function WaitDialog({ units }: { units: ProjectDoc['unitSystem'] }): React.JSX.Element | null {
+function WaitDialog({ doc }: { doc: ProjectDoc | undefined }): React.JSX.Element | null {
+  const units = doc?.unitSystem ?? 'mm'
+  const plate = usePlateThickness(doc)
   const store = useRunStore()
   const status = useRun((s) => s.status)
   const dismissed = useRun((s) => s.dismissedWait)
   const jogStep = useRun((s) => s.jogStep)
+  const jogMode = useJogMode()
   const pending = useRun((s) => s.pending)
   const progress = useRun((s) => s.progress)
   const ids = { jog: useId(), zero: useId() }
@@ -167,6 +202,7 @@ function WaitDialog({ units }: { units: ProjectDoc['unitSystem'] }): React.JSX.E
           ))}
         </ol>
         <JogPad
+          {...jogMode}
           units={units}
           step={jogStep}
           onStep={a.setJogStep}
@@ -181,6 +217,28 @@ function WaitDialog({ units }: { units: ProjectDoc['unitSystem'] }): React.JSX.E
           reasonId={ids.zero}
           onZero={(axes) => void a.setWorkZero(axes)}
         />
+        <ProbeZButton
+          thickness={plate}
+          gate={gates.workZero}
+          reasonId={ids.zero}
+          units={units}
+          busy={pending.includes('run.machine.probeZ')}
+          hint={false}
+          onProbe={(t) => void a.probeZ(t)}
+        />
+        {/* a probe that missed: the alarm and its unlock right here (the navigator is behind) */}
+        {inAlarm(status) ? (
+          <>
+            <AlarmPanel status={status} />
+            {status.alarm?.code === 4 || status.alarm?.code === 5 ? (
+              <div className={styles['buttons']}>
+                <Button size="lg" onClick={() => void a.unlock()}>
+                  {runMessages.navigator.unlock}
+                </Button>
+              </div>
+            ) : null}
+          </>
+        ) : null}
       </Dialog>
     )
   }
@@ -243,6 +301,8 @@ function FailureDialog(): React.JSX.Element | null {
   const { error } = ended
   const data = failureData(error)
   const alarm = error.code === 'machine.alarm'
+  // a real connection lost mid-run: the machine may still move (run-machine.md#lost-connection-m2)
+  const lost = error.code === 'machine.connection' && status.connection.lost?.target === 'serial'
   const lostPosition = alarm || !status.homed
   return (
     <Dialog
@@ -250,7 +310,7 @@ function FailureDialog(): React.JSX.Element | null {
       onOpenChange={(o) => {
         if (!o) store.getState().closeFailure()
       }}
-      title={alarm ? m.alarmTitle(data.code) : m.title}
+      title={alarm ? m.alarmTitle(data.code) : lost ? m.lostTitle : m.title}
       footer={
         <RunDialogFooter>
           <DialogClose>
@@ -260,11 +320,12 @@ function FailureDialog(): React.JSX.Element | null {
       }
     >
       <div role="alert" className={styles['failure']}>
+        {lost ? <p>{m.lostText}</p> : null}
         {data.text ? <p>{data.text}</p> : null}
         <ErrorMessage error={error} />
         {data.line === undefined ? null : <p>{m.line(data.line)}</p>}
         {error.code === 'machine.error' || alarm ? <p>{m.didHold}</p> : null}
-        <p>{lostPosition ? m.nextHome : m.nextCheck}</p>
+        <p>{lost ? m.lostNext : lostPosition ? m.nextHome : m.nextCheck}</p>
       </div>
     </Dialog>
   )

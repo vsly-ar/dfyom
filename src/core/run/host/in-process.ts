@@ -13,6 +13,8 @@ export interface InProcessHostOptions {
   readonly throttleMs?: MachineHostOptions['throttleMs']
   /** Sees every message main sends (tests). */
   readonly spy?: (message: unknown) => void
+  /** Serial ports of the host (a loopback in tests). */
+  readonly serial?: MachineHostOptions['serial']
 }
 
 export function inProcessHostFactory(opts: InProcessHostOptions): MachineHostFactory {
@@ -41,6 +43,7 @@ export function inProcessHostFactory(opts: InProcessHostOptions): MachineHostFac
       timers: opts.timers,
       proc: 'worker',
       ...(opts.throttleMs === undefined ? {} : { throttleMs: opts.throttleMs }),
+      ...(opts.serial === undefined ? {} : { serial: opts.serial }),
       onDisconnected: exit,
     })
     return {

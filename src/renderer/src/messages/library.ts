@@ -301,7 +301,12 @@ export const libraryMessages = {
         manualSpindle: 'The spindle is set by hand; a dial router ignores spindle speeds.',
         notPositive: 'Zero or less is not a usable value.',
         allAxes: 'All three axes are needed, and the paste does not give all of them.',
-      } satisfies Record<'softLimitsOff' | 'manualSpindle' | 'notPositive' | 'allAxes', string>,
+        zHomesDown: 'Z homes down on this controller ($23); DFYOM machines home Z up.',
+      } satisfies Record<
+        'softLimitsOff' | 'manualSpindle' | 'notPositive' | 'allAxes' | 'zHomesDown',
+        string
+      >,
+      onOff: { on: 'on', off: 'off' } as Record<string, string>,
       summary: (read: number, unchanged: number) =>
         `${read} ${read === 1 ? 'setting' : 'settings'} read, ${unchanged} unchanged.`,
       ignored: (list: string) => `Not used by DFYOM: ${list}.`,
@@ -330,6 +335,9 @@ export const libraryMessages = {
     pullOff: 'Pull-off',
     pullOffNote: 'Optional ($27): unset = 1 mm.',
     softLimits: 'Soft limits ($20)',
+    probe: 'Touch plate',
+    plateThickness: 'Plate thickness',
+    plateThicknessNote: 'Optional: set it to probe Z with a touch plate in Run.',
     rigidity: 'Rigidity',
     rigidities: {
       extrusion: 'Aluminium extrusion',
