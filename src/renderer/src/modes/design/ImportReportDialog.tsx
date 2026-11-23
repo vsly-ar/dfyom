@@ -1,8 +1,9 @@
 // The SVG import dialog (task U1): the options step (unit for a unitless file, how the drawing
 // splits into shapes), then the report of `design.shape.import` – title, summary line, the facts
 // as a two-column list (what changed the drawing as soft notes with the "i" icon), a mini flat
-// outline, and "Edit shape" / "Close". Presentational: the caller runs the import (the
-// navigator's "Import SVG…", `useSvgImport` in ShapeList.tsx, task U2).
+// outline, and "Edit shape" / "Close"; an import from an operation's shape picker says above the
+// facts which operation now uses the shape (DF49). Presentational: the caller runs the import
+// (`useSvgImport` in ShapeList.tsx, task U2; its entries since DF49 in ui.md#import-svg-where-it-is-looked-for-df49).
 // Doc: docs/conventions/ui.md#import-report, docs/modes/design-v0.3.md#svg-import
 import { useState } from 'react'
 import type { Bounds2, Element } from '../../../../core/geometry/2d/model'
@@ -31,6 +32,8 @@ export type ImportReportStep =
       /** The created shapes' names, in order (the first is the one "Edit shape" selects). */
       readonly shapes: readonly string[]
       readonly preview?: ImportPreview
+      /** DF49: what the import did beyond the shapes ("Profile 1 now cuts outline."). */
+      readonly note?: string
     }
 
 export interface ImportReportDialogProps {
@@ -100,6 +103,7 @@ export function ImportReportDialog(props: ImportReportDialogProps): React.JSX.El
         </>
       }
     >
+      {step.note !== undefined ? <p className={styles['note']}>{step.note}</p> : null}
       <div className={styles['body']}>
         <section aria-label={t.facts}>
           <h3 className={styles['heading']}>{t.facts}</h3>

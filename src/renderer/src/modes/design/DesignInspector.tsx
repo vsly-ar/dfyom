@@ -52,6 +52,9 @@ import {
 } from './model'
 import { newItemArgs } from './shape-model'
 import type { ShapeActions } from './ShapePicker'
+import { useSvgImport } from './ShapeList'
+import { isOpenNamed, shapeChoiceArgs } from './operation-shape'
+import type { ShapeDTO } from '../../../../core/design/shape.dto'
 import {
   OperationFields,
   placeErrors,
@@ -324,6 +327,33 @@ function OperationInspector({
     setSummary(placed.summary)
     return true
   }
+  // the picker's "Import SVG…" (DF49): the first imported shape is used here, in the import's
+  // gesture (one undo step); a profile cutting Outside or Inside switches to On for an open path
+  const svg = useSvgImport(part, {
+    onImported: async (shapeIds, gesture) => {
+      const shapeId = shapeIds[0]
+      if (shapeId === undefined || (op.kind !== 'pocket' && op.kind !== 'profile')) return undefined
+      const got = await bridge.call('design.shape.get', { partId: part.dto.id, shapeId })
+      const shape = got.ok ? (got.value as { shape: ShapeDTO }).shape : undefined
+      const name = shape?.name ?? shapeId
+      const on = op.kind === 'profile' && op.side !== 'on' && isOpenNamed(shape)
+      const r = await call(
+        `design.${op.kind}.update`,
+        {
+          partId: part.dto.id,
+          operationId: op.id,
+          shape: shapeChoiceArgs(op.shape, `named:${shapeId}`, undefined, part.units),
+          ...(on ? { side: 'on' } : {}),
+        },
+        { gesture },
+      )
+      if (failed(r)) return t.picker.importNotUsed(op.name, name)
+      setErrors([])
+      setSummary(undefined)
+      const used = t.picker.importUsed(op.name, name)
+      return on ? `${used} ${t.picker.sideSetOn}` : used
+    },
+  })
   // the shape picker's actions (task U2, ui.md#shape-in-the-operation-inspector)
   const shapeActions: ShapeActions | undefined =
     op.kind === 'pocket' || op.kind === 'profile'
@@ -352,6 +382,7 @@ function OperationInspector({
               failed(used)
               openShape(shapeId)
             })(),
+          importSvg: svg.start,
           editShape: openShape,
           convert: () =>
             void (async () => {
@@ -444,6 +475,7 @@ function OperationInspector({
           />
         ) : null}
       </div>
+      {svg.dialog}
     </div>
   )
 }

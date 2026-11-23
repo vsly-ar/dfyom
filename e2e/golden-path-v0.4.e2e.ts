@@ -289,8 +289,7 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
   // ── Import SVG…: two shapes; the cavity removed, the outline kept ────────────────────────
   // in the Shapes dialog (D45); the import's dialogs stack over it
   let shapes = await openPartSetup(page, 'Shapes')
-  await shapes.getByRole('button', { name: 'Add shape' }).click()
-  await page.getByRole('menuitem', { name: 'Import SVG…' }).click()
+  await shapes.getByRole('button', { name: 'Import SVG…' }).click()
   await page
     .getByRole('dialog', { name: 'Import SVG' })
     .getByRole('button', { name: 'Import' })
