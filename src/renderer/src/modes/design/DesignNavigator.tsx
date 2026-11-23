@@ -28,7 +28,14 @@ import { draftSource, draftSourceOptions, firstRow, firstRowGap } from './clones
 import { addArgs, failingOperation, type DesignPart } from './model'
 import { OperationList } from './OperationList'
 import { stockReadout } from './PartSetupDialogs'
-import { useCommand, useDesignEvaluation, useDesignSelection, useDesignWarnings } from './useDesign'
+import {
+  useCommand,
+  useDesignEvaluation,
+  useDesignReferences,
+  useDesignSelection,
+  useDesignWarnings,
+} from './useDesign'
+import { facingDepthSuggestion } from './facing-depth'
 
 export { operationIcon } from './OperationList'
 
@@ -101,10 +108,14 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
       ? failingOperation(evaluation.error, ids)
       : undefined
 
+  // a new facing faces down to the reference model when there is one (DF4)
+  const references = useDesignReferences(part)
   const add = async (kind: OperationKind) => {
+    const facingDepth = kind === 'facing' ? facingDepthSuggestion(part, references) : undefined
     const r = await call(`design.${kind}.add`, {
       partId: part.dto.id,
       ...addArgs(kind, stockDims(part), part.units, defaultAnchor),
+      ...(facingDepth !== undefined ? { depth: facingDepth.source } : {}),
     })
     if (r.ok) select((r.value as { operationId: string }).operationId)
   }

@@ -129,6 +129,8 @@ export function ItemEditor({
               onChange={(v: ToolDraft) => s.edit(v)}
               autoName={d.autoName}
               onNameTyped={() => s.edit(d.values, { nameTyped: true })}
+              detailsOpen={s.toolDetailsOpen}
+              onDetailsOpenChange={(open) => s.setToolDetailsOpen(open)}
             />
           ) : d.values.kind === 'machine' ? (
             <MachineFields {...form} values={d.values} onChange={(v: MachineDraft) => s.edit(v)} />

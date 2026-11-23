@@ -125,9 +125,10 @@ export const libraryMessages = {
     shapes: { block: 'Block' },
     groups: {
       geometry: 'Geometry',
-      cutting: 'Cutting',
       presets: 'Presets',
       notes: 'Notes',
+      /** The tool form's collapsed group of secondary fields (DF1): material, coating, notes. */
+      details: 'Details',
       travel: 'Travel',
       feedRates: 'Feed rates',
       spindle: 'Spindle',

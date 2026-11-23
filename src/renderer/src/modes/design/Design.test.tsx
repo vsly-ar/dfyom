@@ -95,7 +95,7 @@ describe('design mode', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Stock' })
     const form = within(dialog).getByRole('region', { name: 'Set up the part' })
     await expectNoAxeViolations()
-    const length = within(form).getByRole('textbox', { name: 'Length (X)' })
+    const length = within(form).getByRole('combobox', { name: 'Length (X)' })
     await retype(user, length, '120{Enter}')
     await user.click(within(form).getByRole('button', { name: 'Create part' }))
     // Create part closes it; the sidebar starts with the operations and the stock read-out
@@ -196,14 +196,15 @@ describe('design mode', () => {
     await expectNoAxeViolations()
   })
 
-  it('adjust popover steps update the document live as one undo step; Escape reverts it', async () => {
+  it('adjust panel steps update the document live as one undo step; Escape reverts it', async () => {
     const { user, part, bridge, d } = await renderDesign()
     await user.click(await within(navigator()).findByRole('button', { name: 'Add pocket' }))
     await within(navigator()).findByRole('button', { name: /^Pocket 1/ })
     const depthOf = () => (part().operations[0] as { depth: { source: string } }).depth.source
     const start = depthOf()
     const entries = d.history.undoable.length
-    const adjust = () => within(inspector()).getByRole('button', { name: 'Adjust Depth' })
+    // focusing the field opens its adjust panel (ui.md#field, DF9)
+    const adjust = () => within(inspector()).getByRole('combobox', { name: 'Depth' })
 
     await user.click(adjust())
     await screen.findByRole('dialog', { name: 'Adjust Depth' })
@@ -226,7 +227,8 @@ describe('design mode', () => {
       { name: 'history.undo', args: { gesture: steps[0]!.gesture } },
     ])
 
-    // a click outside keeps the value: one undo step reverts the whole session
+    // a click outside keeps the value: one undo step reverts the whole session (the panel
+    // closed on Escape; a click in the focused input reopens it)
     await user.click(adjust())
     await screen.findByRole('dialog', { name: 'Adjust Depth' })
     await user.click(screen.getByRole('button', { name: 'Increase' }))

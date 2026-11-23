@@ -10,6 +10,7 @@ import {
   Field,
   FieldIcon,
   FieldInput,
+  Icon,
   QuantityInput,
   type FieldIconName,
   type FieldMessage,
@@ -30,17 +31,58 @@ export interface FormProps<V> {
   readonly onFocusField?: ((field: string | undefined) => void) | undefined
 }
 
+/** A group that folds (DF1): its heading is the disclosure button. */
+export interface Collapsible {
+  readonly open: boolean
+  readonly onOpenChange: (open: boolean) => void
+  /** Muted text after the title while closed: what the group holds ("Carbide · TiAlN"). */
+  readonly summary?: string | undefined
+}
+
 export function Group({
   title,
   children,
   aside,
+  collapsible,
 }: {
   title: string
   children: ReactNode
   /** Beside the fields in wide containers (the tool drawing). */
   aside?: ReactNode
+  /**
+   * The group folds under its heading (a disclosure button with a chevron and `aria-expanded`,
+   * as the hole inspector's Defaults group): rarely changed fields start closed (ui.md § Panels).
+   */
+  collapsible?: Collapsible
 }): React.JSX.Element {
   const id = useId()
+  const bodyId = useId()
+  if (collapsible !== undefined) {
+    const { open, onOpenChange, summary } = collapsible
+    return (
+      <section aria-labelledby={id} className={styles['group']}>
+        <h3 className={styles['legend']}>
+          <button
+            id={id}
+            type="button"
+            className={styles['disclosure']}
+            aria-expanded={open}
+            aria-controls={bodyId}
+            onClick={() => onOpenChange(!open)}
+          >
+            <span className={styles['chevron']} data-open={open || undefined}>
+              <Icon name="chevron-down" size="sm" />
+            </span>
+            {title}
+            {!open && summary ? <span className={styles['summary']}>· {summary}</span> : null}
+          </button>
+        </h3>
+        <div id={bodyId} className={styles['fields']} hidden={!open}>
+          {open ? children : null}
+        </div>
+      </section>
+    )
+  }
   return (
     <section aria-labelledby={id} className={styles['group']}>
       <h3 id={id} className={styles['legend']}>

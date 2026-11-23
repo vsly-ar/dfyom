@@ -2,7 +2,7 @@
 
 Status: implemented (v0.2 closed 2026-11-22; user decision D13 of 2026-11-21; details confirmed with the v0.2 review, D18; visuals approved, D25 of 2026-11-22; draw-in of regenerated toolpaths is not built yet, see [§ Implementation (task P3)](#implementation-task-p3)) · Decision: [ADR 0020](../decisions/0020-apply-defers-derived-work.md) · Commands: [commands.md](commands.md) · Workers: [workers.md](workers.md) · Agents: [llm-api.md](llm-api.md) · UI: [ui.md](../conventions/ui.md) · Design: [design-v0.2.md](../modes/design-v0.2.md) · Plan: [plan-v0.1.md](../modes/plan-v0.1.md), [plan-v0.2.md](../modes/plan-v0.2.md) · Terms: [glossary.md](../glossary.md)
 
-Edits commit **live** to the document, as today: one undo step per edit, the viewport follows, and the adjust popover's steps are a live [gesture](commands.md#gestures-live-edits). **Expensive or decision-making derived work waits for Apply**: the automatic tool choice, draft plans following the design and the library, toolpath regeneration, and later verification. The user applies with **Enter** in any field, with **Cmd/Ctrl+Enter**, or with the **"Apply N"** button at the top right of the main toolbar, which shows how many changes are pending. Several fields can be edited (with Tab or a click away) before one Apply. Save, export and starting a run apply first.
+Edits commit **live** to the document, as today: one undo step per edit, the viewport follows, and the adjust panel's steps are a live [gesture](commands.md#gestures-live-edits). **Expensive or decision-making derived work waits for Apply**: the automatic tool choice, draft plans following the design and the library, toolpath regeneration, and later verification. The user applies with **Enter** in any field, with **Cmd/Ctrl+Enter**, or with the **"Apply N"** button at the top right of the main toolbar, which shows how many changes are pending. Several fields can be edited (with Tab or a click away) before one Apply. Save, export and starting a run apply first.
 
 The trade-offs are recorded in [ADR 0020](../decisions/0020-apply-defers-derived-work.md). Tasks: [plans/v0.2.md](../plans/v0.2.md#4-apply) P1–P3.
 
@@ -236,11 +236,13 @@ Windows/Linux show "Ctrl+Enter". Terms (`Term`) link "draft plans" and "toolpath
 
 Replaces the commit bullet of [ui.md § Quantity input](../conventions/ui.md#quantity-and-expression-input) when accepted: "Enter commits a valid value as one command (one undo step) **and applies**; blur commits only; Escape reverts to the stored source." The field shows no per-field pending mark; the button is the one indicator.
 
-### Adjust popover
+### Adjust panel
+
+The field's adjust panel (the popover until DF9, [ui.md § Field](../conventions/ui.md#field)):
 
 - Steps stay live gesture commits (D9); they are pending like any edit.
-- **Closing does not apply** (click outside, the trigger, "Use …"): it is the blur of the popover. **Escape** cancels the gesture as today; if an Apply ran meanwhile (Cmd/Ctrl+Enter inside the popover), the gesture entry is no longer on top, so Escape keeps the value and says so (the existing rule).
-- Cmd/Ctrl+Enter inside the popover applies and keeps it open; Enter on a focused −/+ button presses it. After closing, focus returns to the field, where Enter applies.
+- **Closing does not apply** (focus leaving the field, "Use …"): it is the blur of the field. **Escape** cancels the gesture as today; if an Apply ran meanwhile (Cmd/Ctrl+Enter in the field or the panel), the gesture entry is no longer on top, so Escape keeps the value and says so (the existing rule).
+- Cmd/Ctrl+Enter in the panel applies and keeps it open; Enter on a focused −/+ button presses it. Escape returns focus to the field, where Enter applies.
 
 ### Mode switches
 

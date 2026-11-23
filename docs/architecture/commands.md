@@ -164,7 +164,7 @@ A **document hook** (`DocumentHook` in `define.ts`) runs after every successful 
 
 ### Gestures (live edits)
 
-A **gesture** is one user interaction that commits several steps live, e.g. the −/+ buttons of a field's adjust popover ([ui.md](../conventions/ui.md#quantity-and-expression-input)): the model, viewport, warnings and plans follow every step, yet the session is one undo step. Decided 2026-11-21 (D9).
+A **gesture** is one user interaction that commits several steps live, e.g. the −/+ buttons of a field's adjust panel ([ui.md](../conventions/ui.md#quantity-and-expression-input)): the model, viewport, warnings and plans follow every step, yet the session is one undo step. Decided 2026-11-21 (D9).
 
 - The UI gives each gesture a unique id and dispatches every step with `opts.gesture`. The id lives only in the UI: the dispatcher keeps no gesture state beyond the history entry, so a gesture "ends" simply by no longer being used.
 - **Every step is a full commit:** `revision++`, one action-log `command` event (carrying `gesture`), patches published, [hooks](#document-hooks) run. Evaluation, replicas and agents follow each step.

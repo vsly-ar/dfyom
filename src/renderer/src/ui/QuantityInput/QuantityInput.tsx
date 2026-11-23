@@ -4,9 +4,11 @@
 // shows errors in place (underline, catalogue message, verified fix), commits a valid value on
 // Enter/blur (one `onCommit` = one command = one undo step), reverts on Escape and never commits
 // an invalid value. An optional field (`optional`) commits an emptied field as unset. Steppers
-// (↑/↓, adjust popover), reference autocomplete and the pick button hook (pick mode itself belongs
-// to the viewport) live here too. The adjust popover is a live gesture: each step commits with the
-// session's gesture id (one undo step per session), Escape cancels it, a click outside keeps it.
+// (↑/↓, adjust panel), reference autocomplete and the pick toggle hook (pick mode itself belongs
+// to the viewport) live here too. The adjust panel opens under the field on focus while the input
+// keeps focus (DF9; the input is a combobox controlling it); its steps are a live gesture: each
+// step commits with the session's gesture id (one undo step per session), Escape cancels it,
+// focus leaving keeps it.
 // v0.2 field rule (task P3): Enter commits and applies (the `ApplyScope`'s Apply), blur and Tab
 // commit only. Doc: docs/conventions/ui.md#quantity-and-expression-input, #field,
 // #selection-and-picking; docs/architecture/apply.md#field-rule;
@@ -32,10 +34,8 @@ import { quantityText } from '../../messages/quantity'
 import { useApplyOnEnter } from '../ApplyButton/ApplyScope'
 import { Button } from '../Button/Button'
 import { Field, type FieldControlProps, type FieldMessage, type FieldProps } from '../Field/Field'
-import { FieldAdjustButton, FieldInput } from '../Field/FieldInput'
-import { Popover } from '../Popover/Popover'
+import { FieldInput } from '../Field/FieldInput'
 import { SegmentedControl } from '../SegmentedControl/SegmentedControl'
-import { Tooltip } from '../Tooltip/Tooltip'
 import {
   defaultPrecision,
   describeInherited,
@@ -115,29 +115,32 @@ export interface QuantityInputBaseProps {
   inheritedTolerance?: InheritedTolerance
   /** Shown while empty: what applies without a value ("None: values are exact"). */
   placeholder?: string
-  /** Recommended value: the pencil turns amber and the popover offers "Use …". */
+  /** Recommended value: the adjust panel offers "Use …". */
   recommended?: { source: string; text: ReactNode }
   /**
-   * Escape in the adjust popover after live steps: revert the gesture's commits (a command caller
+   * Escape in the adjust panel after live steps: revert the gesture's commits (a command caller
    * dispatches `history.undo { gesture }`). Resolves false when they were not reverted (the field
    * keeps the value and says so). Without it the field commits the opening value again with the
    * same gesture (local form state).
    */
   onCancelGesture?: (gesture: string) => Promise<boolean>
   /**
-   * Pick button (and Alt+P): enter pick mode for a surface reference. Call `insert` with the
-   * picked reference; it goes in at the caret (replacing the selection) and focus returns.
+   * Pick toggle in the adjust panel (and Alt+P): enter pick mode for a surface reference. Call
+   * `insert` with the picked reference; it goes in at the caret (replacing the selection) and
+   * focus returns.
    */
   onPick?: (insert: (reference: string) => void) => void
-  /** Pick mode is active for this field (pick button pressed). */
+  /** Pick mode is active for this field (pick toggle pressed). */
   picking?: boolean
+  /** The pressed pick toggle (or Alt+P) again while `picking`: leave pick mode (DF10). */
+  onPickCancel?: () => void
   illustration?: ReactNode
   lock?: FieldProps['lock']
   /** Warnings, notes and recommendations from checks; parse errors are added by the field. */
   messages?: readonly FieldMessage[]
   readOnly?: boolean
   /**
-   * A table cell (the Shape Editor's segment table, task U1): no unit suffix and no adjust pencil,
+   * A table cell (the Shape Editor's segment table, task U1): no unit suffix and no adjust panel,
    * so the number keeps the narrow box; the echo still says how the value is read.
    */
   dense?: boolean
@@ -152,17 +155,18 @@ interface ListState {
   active: number
 }
 
-/** One adjust-popover session (a live gesture, ui.md#quantity-and-expression-input). */
+/**
+ * One adjust-panel session (a live gesture, ui.md#quantity-and-expression-input): from the first
+ * step until the panel closes or the user types.
+ */
 interface AdjustSession {
   readonly id: string
-  /** The text when the popover opened: Escape restores it. */
+  /** The text before the first step: Escape restores it. */
   readonly opening: string
-  /** The stored value when the popover opened: unchanged after a failed cancel = nothing landed. */
+  /** The stored value before the first step: unchanged after a failed cancel = nothing landed. */
   readonly openingStored: string
   /** A step was committed with this gesture. */
   stepped: boolean
-  /** The popover is closing by Escape (cancel, not keep). */
-  escaped: boolean
 }
 
 let gestureCounter = 0
@@ -193,6 +197,7 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
     onCancelGesture,
     onPick,
     picking = false,
+    onPickCancel,
     illustration,
     lock,
     messages = [],
@@ -204,7 +209,9 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
   const applyOnEnter = useApplyOnEnter()
   const prec = precision ?? defaultPrecision(defaultUnit)
   const stored = value?.source ?? ''
-  const listId = `${useId()}-references`
+  const baseId = useId()
+  const listId = `${baseId}-references`
+  const panelId = `${baseId}-adjust`
 
   /** What the user typed; null = showing the stored source. */
   const [draft, setDraft] = useState<string | null>(null)
@@ -215,12 +222,19 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
   const [errorsShown, setErrorsShown] = useState(false)
   const [echoText, setEchoText] = useState(stored)
   const [stepSize, setStepSize] = useState<StepSize>(step)
+  /** The adjust panel is open (on focus, ui.md#field). */
   const [adjustOpen, setAdjustOpen] = useState(false)
+  /** An adjust session (live gesture) is running: its steps may still be landing. */
+  const [adjusting, setAdjusting] = useState(false)
   /** An Escape cancel is in flight (its revert has not arrived yet). */
   const [cancelling, setCancelling] = useState(false)
   /** "Kept the adjusted value" after an Escape that could not revert a step that landed. */
   const [kept, setKept] = useState(false)
   const [list, setList] = useState<ListState | null>(null)
+  /** Read-only and dense (table cell) fields have nothing to adjust: no panel (ui.md#field). */
+  const hasPanel = !readOnly && !dense
+  /** The reference list takes the panel's place while it is open. */
+  const panelShown = hasPanel && adjustOpen && list === null
 
   const inputRef = useRef<HTMLInputElement>(null)
   const overlayRef = useRef<HTMLSpanElement>(null)
@@ -228,13 +242,18 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
   const lastSelection = useRef<[number, number] | null>(null)
   const storedRef = useRef(stored)
   const session = useRef<AdjustSession | null>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  /** Focus the panel's first control once it renders (⌘↓ / Ctrl+↓ from the input). */
+  const focusPanel = useRef(false)
+  /** The next focus of the input comes back from the panel: do not reopen it. */
+  const returning = useRef(false)
 
   // The stored value changed (commit landed, undo, agent edit): follow it unless the user is
   // typing something else. During an adjust session (and its cancel) earlier steps land while a
   // later one is shown: wait for the last committed value instead of flicking back.
   if (stored !== seen) {
     setSeen(stored)
-    const stepsInFlight = (adjustOpen || cancelling) && committed !== null && stored !== committed
+    const stepsInFlight = (adjusting || cancelling) && committed !== null && stored !== committed
     if (draft !== null && !stepsInFlight && (draft === committed || !focused)) {
       setDraft(null)
       setCommitted(null)
@@ -284,6 +303,8 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
   }
 
   function edit(next: string, caret: number | null): void {
+    // typing ends an adjust session: the next step starts a new gesture
+    endSession()
     setDraft(next)
     setKept(false)
     setErrorsShown(false)
@@ -369,49 +390,48 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
 
   const steppable = stepSource(text, ctx, Rational.ONE, prec).isSome()
 
-  /** ↑/↓ in the field change the text only; a popover step (`live`) commits it with the gesture. */
+  /** ↑/↓ in the field change the text only; a panel step (`live`) commits it with the gesture. */
   function stepBy(direction: 1 | -1, multiplier: Rational = Rational.ONE, live = false): boolean {
     const delta = stepRational(stepSize)
       .mul(multiplier)
       .mul(Rational.int(BigInt(direction)))
     const next = stepSource(text, ctx, delta, prec)
     if (next.isNone()) return false
-    const gesture = live ? session.current?.id : undefined
-    if (gesture !== undefined) return commitSource(next.unwrap(), gesture)
+    if (live) return commitSource(next.unwrap(), startSession())
     setDraft(next.unwrap())
     setErrorsShown(false)
     return true
   }
 
-  function openAdjust(): void {
-    session.current = {
-      id: newGestureId(),
-      opening: text,
-      openingStored: stored,
-      stepped: false,
-      escaped: false,
-    }
+  /** The running adjust session's gesture id, or a new session from the current text. */
+  function startSession(): string {
+    if (session.current) return session.current.id
+    session.current = { id: newGestureId(), opening: text, openingStored: stored, stepped: false }
+    setAdjusting(true)
     setKept(false)
-    setAdjustOpen(true)
+    return session.current.id
+  }
+
+  function endSession(): AdjustSession | null {
+    const s = session.current
+    session.current = null
+    if (s) setAdjusting(false)
+    return s
+  }
+
+  function openAdjust(): void {
+    if (hasPanel) setAdjustOpen(true)
   }
 
   /**
-   * The popover closed. A click outside (or "Use …") keeps the live value; Escape cancels the
-   * session: nothing committed → just revert the text; else the caller undoes the gesture
+   * The panel closes. Focus leaving (or "Use …") keeps the live value; Escape (`escaped`) cancels
+   * the session: nothing committed → just close; else the caller undoes the gesture
    * (`onCancelGesture`) or, without one, the opening value is committed again.
    */
-  function closeAdjust(commitPending = true): void {
+  function closeAdjust(escaped = false): void {
     setAdjustOpen(false)
-    const s = session.current
-    session.current = null
-    if (s === null || !s.escaped) {
-      if (commitPending) commit()
-      return
-    }
-    if (!s.stepped) {
-      revert()
-      return
-    }
+    const s = endSession()
+    if (s === null || !escaped || !s.stepped) return
     if (onCancelGesture === undefined) {
       if (s.opening !== text) commitSource(s.opening, s.id)
       return
@@ -425,7 +445,7 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
       setCancelling(false)
       if (reverted) return
       // nothing to undo and the stored value never moved: every step failed (the command was
-      // rejected), so the value already is the one from before the popover – no "Kept" note
+      // rejected), so the value already is the one from before the session – no "Kept" note
       const nothingLanded = storedRef.current === s.openingStored
       if (nothingLanded && s.opening !== s.openingStored) {
         setDraft(s.opening)
@@ -437,11 +457,82 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
     })
   }
 
+  /** Focus moved: close the panel when it left both the input and the panel. */
+  function focusLeft(next: EventTarget | null): void {
+    const inside =
+      next instanceof Node &&
+      (next === inputRef.current || (panelRef.current?.contains(next) ?? false))
+    if (!inside) closeAdjust()
+  }
+
+  /** Back to the input from the panel, without reopening it on that focus. */
+  function returnToInput(): void {
+    returning.current = true
+    inputRef.current?.focus()
+    returning.current = false
+  }
+
+  /** ⌘↓ / Ctrl+↓ (or ↓ with nothing to step or list): focus the panel's first control. */
+  function enterPanel(): void {
+    focusPanel.current = true
+    if (panelShown) focusFirstControl()
+    else openAdjust()
+  }
+
+  function panelControls(): HTMLElement[] {
+    const panel = panelRef.current
+    if (!panel) return []
+    return [...panel.querySelectorAll<HTMLElement>('button:not(:disabled)')]
+  }
+
+  function focusFirstControl(): void {
+    focusPanel.current = false
+    panelControls()[0]?.focus()
+  }
+
+  useLayoutEffect(() => {
+    if (focusPanel.current && panelRef.current) focusFirstControl()
+  })
+
+  function onPanelKeyDown(e: KeyboardEvent<HTMLDivElement>): void {
+    if (e.key === 'Escape') {
+      // in pick mode Escape cancels the pick (the viewport listens on the document)
+      if (picking) return
+      e.preventDefault()
+      e.stopPropagation()
+      closeAdjust(true)
+      returnToInput()
+      return
+    }
+    const controls = panelControls()
+    const at = controls.indexOf(document.activeElement as HTMLElement)
+    const n = controls.length
+    if (n === 0) return
+    const to =
+      e.key === 'ArrowRight' || e.key === 'ArrowDown'
+        ? (at + 1) % n
+        : e.key === 'ArrowLeft' || e.key === 'ArrowUp'
+          ? (at - 1 + n) % n
+          : e.key === 'Home'
+            ? 0
+            : e.key === 'End'
+              ? n - 1
+              : null
+    if (to === null) return
+    e.preventDefault()
+    controls[to]?.focus()
+  }
+
   function insert(reference: string): void {
     const input = inputRef.current
+    // the field may never have lost focus (the pick toggle in the panel keeps it): its own caret
+    const selection: [number, number] | null =
+      input !== null && document.activeElement === input
+        ? [input.selectionStart ?? input.value.length, input.selectionEnd ?? input.value.length]
+        : lastSelection.current
     setDraft((d) => {
       const current = d ?? storedRef.current
-      const [from, to] = lastSelection.current ?? [0, current.length]
+      const [from, to] = selection ?? [0, current.length]
       pendingCaret.current = from + reference.length
       return current.slice(0, from) + reference + current.slice(to)
     })
@@ -449,7 +540,8 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
     input?.focus()
   }
 
-  const startPick = (): void => onPick?.(insert)
+  /** The pick toggle: a second press (or Alt+P) while picking leaves pick mode (DF10). */
+  const togglePick = (): void => (picking ? onPickCancel?.() : onPick?.(insert))
 
   function onKeyDown(e: KeyboardEvent<HTMLInputElement>): void {
     const caret = e.currentTarget.selectionStart
@@ -482,17 +574,34 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
     }
     if (onPick && e.altKey && e.code === 'KeyP') {
       e.preventDefault()
-      startPick()
+      togglePick()
+      return
+    }
+    if (e.key === 'ArrowDown' && (e.metaKey || e.ctrlKey) && hasPanel) {
+      e.preventDefault()
+      enterPanel()
       return
     }
     if (e.key === 'Enter') {
       // Enter (and Cmd/Ctrl+Enter) = commit and apply; an invalid value applies nothing
-      // (apply.md#field-rule); blur and Tab commit only
+      // (apply.md#field-rule); blur and Tab commit only. A valid Enter is done editing: the
+      // adjust panel closes (keeping a live session's value), so it no longer covers what is below
       e.preventDefault()
-      if (commit()) applyOnEnter?.()
+      if (commit()) {
+        if (adjustOpen) closeAdjust()
+        applyOnEnter?.()
+      }
       return
     }
     if (e.key === 'Escape') {
+      // pick mode first (the viewport cancels it), then the open panel, then the typed text
+      if (picking) return
+      if (panelShown) {
+        e.preventDefault()
+        e.stopPropagation()
+        closeAdjust(true)
+        return
+      }
       if (draft === null && !errorsShown) return
       e.preventDefault()
       e.stopPropagation()
@@ -502,9 +611,14 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
     if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !readOnly) {
       const multiplier = e.shiftKey ? TEN : e.altKey ? TENTH : Rational.ONE
       if (stepBy(e.key === 'ArrowUp' ? 1 : -1, multiplier)) e.preventDefault()
-      else if (e.key === 'ArrowDown' && references.length > 0 && !e.altKey && !e.shiftKey) {
-        e.preventDefault()
-        updateList(text, caret, true)
+      else if (e.key === 'ArrowDown' && !e.altKey && !e.shiftKey) {
+        if (references.length > 0) {
+          e.preventDefault()
+          updateList(text, caret, true)
+        } else if (hasPanel) {
+          e.preventDefault()
+          enterPanel()
+        }
       }
     }
   }
@@ -586,94 +700,105 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
     recommendedReading.isOk() &&
     (value === undefined || !value.equals(recommendedReading.unwrap().quantity))
 
-  const adjust = readOnly ? null : (
-    <>
-      {onPick ? (
-        <Tooltip content={quantityText.pick(label)} shortcut="⌥P">
-          <button
-            type="button"
-            className={styles['pick']}
-            aria-label={quantityText.pick(label)}
-            aria-pressed={picking}
-            onClick={startPick}
-          >
-            <Icon name="pick" />
-          </button>
-        </Tooltip>
-      ) : null}
-      <Popover
-        label={quantityText.adjust(label)}
-        title={
-          <span className={styles['title']}>
-            {quantityText.adjust(label)}
-            <span>{quantityText.adjustHint()}</span>
+  // the adjust panel (ui.md#field): under the field, opened on focus; a pointer press in it never
+  // takes focus from the input, its controls are out of the Tab order (⌘↓ / Ctrl+↓ moves in)
+  const panel = panelShown ? (
+    <div
+      ref={panelRef}
+      id={panelId}
+      role="dialog"
+      aria-label={quantityText.adjust(label)}
+      className={styles['panel']}
+      onMouseDown={(e) => e.preventDefault()}
+      onKeyDown={onPanelKeyDown}
+      onBlur={(e) => focusLeft(e.relatedTarget)}
+    >
+      <div className={styles['title']}>
+        {quantityText.adjust(label)}
+        <span>{quantityText.adjustHint()}</span>
+      </div>
+      <SegmentedControl
+        label={quantityText.step()}
+        size="sm"
+        tabbable={false}
+        options={STEP_SIZES.map((s) => ({ value: s, label: s.replace(/^0\./, '.') }))}
+        value={stepSize}
+        onValueChange={setStepSize}
+      />
+      <div className={styles['adjust']}>
+        <Button
+          tabIndex={-1}
+          aria-label={quantityText.decrease()}
+          disabled={!steppable}
+          onClick={() => stepBy(-1, Rational.ONE, true)}
+        >
+          −
+        </Button>
+        <output className={styles['value']}>
+          {text}
+          {suffix ? <small>{suffix}</small> : null}
+        </output>
+        <Button
+          tabIndex={-1}
+          aria-label={quantityText.increase()}
+          disabled={!steppable}
+          onClick={() => stepBy(1, Rational.ONE, true)}
+        >
+          +
+        </Button>
+      </div>
+      {steppable ? null : <p className={styles['note']}>{quantityText.stepsNeedNumber()}</p>}
+      {recommended ? (
+        <div className={styles['recommended']}>
+          <span>
+            {quantityText.recommended()} <b>{recommended.text}</b>
           </span>
-        }
-        open={adjustOpen}
-        onOpenChange={(open) => (open ? openAdjust() : closeAdjust())}
-        onEscapeKeyDown={() => {
-          if (session.current) session.current.escaped = true
-        }}
-        content={
-          <>
-            <SegmentedControl
-              label={quantityText.step()}
-              size="sm"
-              options={STEP_SIZES.map((s) => ({ value: s, label: s.replace(/^0\./, '.') }))}
-              value={stepSize}
-              onValueChange={setStepSize}
-            />
-            <div className={styles['adjust']}>
-              <Button
-                aria-label={quantityText.decrease()}
-                disabled={!steppable}
-                onClick={() => stepBy(-1, Rational.ONE, true)}
-              >
-                −
-              </Button>
-              <output className={styles['value']}>
-                {text}
-                {suffix ? <small>{suffix}</small> : null}
-              </output>
-              <Button
-                aria-label={quantityText.increase()}
-                disabled={!steppable}
-                onClick={() => stepBy(1, Rational.ONE, true)}
-              >
-                +
-              </Button>
-            </div>
-            {steppable ? null : <p className={styles['note']}>{quantityText.stepsNeedNumber()}</p>}
-            {recommended ? (
-              <div className={styles['recommended']}>
-                <span>
-                  {quantityText.recommended()} <b>{recommended.text}</b>
-                </span>
-                <Button
-                  size="sm"
-                  variant="primary"
-                  icon={<Icon name="check" />}
-                  disabled={!fixAvailable}
-                  onClick={() => {
-                    commitSource(recommended.source, session.current?.id)
-                    closeAdjust(false)
-                  }}
-                >
-                  {quantityText.fix(recommended.source)}
-                </Button>
-              </div>
-            ) : null}
-          </>
-        }
-      >
-        <FieldAdjustButton label={quantityText.adjust(label)} fix={fixAvailable} />
-      </Popover>
-    </>
-  )
+          <Button
+            tabIndex={-1}
+            size="sm"
+            variant="primary"
+            icon={<Icon name="check" />}
+            disabled={!fixAvailable}
+            onClick={() => {
+              const fromPanel = panelRef.current?.contains(document.activeElement) ?? false
+              commitSource(recommended.source, startSession())
+              closeAdjust()
+              if (fromPanel) returnToInput()
+            }}
+          >
+            {quantityText.fix(recommended.source)}
+          </Button>
+        </div>
+      ) : null}
+      {onPick ? (
+        <Button
+          tabIndex={-1}
+          size="sm"
+          variant="ghost"
+          icon={<Icon name="pick" />}
+          aria-pressed={picking}
+          className={styles['pickToggle']}
+          onClick={togglePick}
+        >
+          {quantityText.pick(label)}
+          <kbd aria-hidden="true">⌥P</kbd>
+        </Button>
+      ) : null}
+    </div>
+  ) : null
 
   const activeId = list ? `${listId}-${list.active}` : undefined
-  const combobox =
-    references.length > 0 && !readOnly
+  // a combobox whose popup is the reference list while it is open, else the adjust panel
+  const combobox = hasPanel
+    ? {
+        role: 'combobox' as const,
+        ...(references.length > 0 ? { 'aria-autocomplete': 'list' as const } : {}),
+        'aria-haspopup': list ? ('listbox' as const) : ('dialog' as const),
+        'aria-expanded': list !== null || panelShown,
+        ...(list ? { 'aria-controls': listId } : panelShown ? { 'aria-controls': panelId } : {}),
+        ...(activeId ? { 'aria-activedescendant': activeId } : {}),
+      }
+    : references.length > 0 && !readOnly
       ? {
           role: 'combobox' as const,
           'aria-autocomplete': 'list' as const,
@@ -703,6 +828,7 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
           : []),
       ]}
       readOnly={readOnly}
+      popup={panel}
       className={className}
     >
       <ControlSlot
@@ -715,16 +841,19 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
               value={text}
               {...(placeholder !== undefined ? { placeholder } : {})}
               {...(suffix !== undefined && !dense ? { unit: suffix } : {})}
-              adjust={dense ? null : adjust}
               overlay={overlay}
               autoComplete="off"
               onChange={(e) => edit(e.target.value, e.target.selectionStart)}
               onKeyDown={onKeyDown}
               onScroll={syncScroll}
               onSelect={syncScroll}
+              onClick={() => {
+                if (!adjustOpen) openAdjust()
+              }}
               onFocus={() => {
                 setFocused(true)
                 setEchoText(text)
+                if (!returning.current) openAdjust()
               }}
               onBlur={(e) => {
                 lastSelection.current = [
@@ -734,6 +863,7 @@ export function QuantityInput(props: QuantityInputProps): React.JSX.Element {
                 setFocused(false)
                 setList(null)
                 commit()
+                focusLeft(e.relatedTarget)
               }}
             />
             {list ? (

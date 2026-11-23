@@ -128,6 +128,49 @@ describe('Library window', () => {
     expect(bridge.libraryReports.at(-1)).toEqual({ draft: null, tab: 'tool' })
   })
 
+  it('keeps material, coating and notes in a collapsed Details group, open across items and tabs (DF1)', async () => {
+    const { user, row, editor, add } = await renderLibrary()
+    await add('tool', {
+      ...TOOL,
+      name: 'Flat 8',
+      diameter: '8',
+      toolMaterial: 'carbide',
+      coating: 'TiAlN',
+      notes: 'From the red box',
+    })
+    await user.click(await waitFor(() => row(/Flat 8/)))
+    const details = () => within(editor()).getByRole('button', { name: /^Details/ })
+    // closed: the cutting geometry and presets show, the secondary fields do not; the heading
+    // names what it holds
+    expect(details()).toHaveAttribute('aria-expanded', 'false')
+    expect(details()).toHaveTextContent('Details· Carbide · TiAlN')
+    expect(within(editor()).getByLabelText('Diameter', { selector: 'input' })).toBeInTheDocument()
+    expect(within(editor()).getByRole('heading', { name: 'Presets' })).toBeInTheDocument()
+    expect(within(editor()).queryByRole('combobox', { name: 'Tool material' })).toBeNull()
+    expect(within(editor()).queryByLabelText('Coating')).toBeNull()
+    expect(within(editor()).queryByLabelText('Notes')).toBeNull()
+    await user.click(details())
+    expect(details()).toHaveAttribute('aria-expanded', 'true')
+    expect(details()).toHaveTextContent(/^Details$/)
+    expect(within(editor()).getByRole('combobox', { name: 'Tool material' })).toHaveTextContent(
+      'Carbide',
+    )
+    expect(within(editor()).getByLabelText('Coating')).toHaveValue('TiAlN')
+    expect(within(editor()).getByLabelText('Notes')).toHaveValue('From the red box')
+    await expectNoAxeViolations()
+    // remembered in this window: another item, another tab and back
+    await user.click(row(/Flat 6/))
+    await waitFor(() =>
+      expect(within(editor()).getByRole('heading', { name: 'Flat 6' })).toBeInTheDocument(),
+    )
+    expect(details()).toHaveAttribute('aria-expanded', 'true')
+    await user.click(screen.getByRole('tab', { name: 'Stock' }))
+    await user.click(screen.getByRole('tab', { name: 'Tools' }))
+    await waitFor(() => expect(details()).toHaveAttribute('aria-expanded', 'true'))
+    await user.click(details())
+    expect(within(editor()).queryByRole('combobox', { name: 'Tool material' })).toBeNull()
+  })
+
   it('a Recommended preset follows the calculator until a value is typed (library.md#recommended-presets)', async () => {
     const { user, row, editor, get, add } = await renderLibrary()
     const id = await add('tool', {
@@ -246,9 +289,10 @@ describe('Library window', () => {
     expect(option).toHaveAccessibleDescription(/V-bit/)
     await user.click(option)
     // angle and tip right after the diameter; the name follows "Chamfer 90° Ø6"
-    const labels = within(editor())
-      .getAllByRole('textbox')
-      .map((i) => i.getAttribute('aria-label') ?? (i as HTMLInputElement).labels?.[0]?.textContent)
+    // value fields are comboboxes (their adjust panel), text fields textboxes: every text input
+    const labels = [...editor().querySelectorAll<HTMLInputElement>('input[type="text"]')].map(
+      (i) => i.getAttribute('aria-label') ?? (i as HTMLInputElement).labels?.[0]?.textContent,
+    )
     expect(labels.indexOf('Included angle')).toBe(labels.indexOf('Diameter') + 1)
     expect(labels.indexOf('Tip diameter')).toBe(labels.indexOf('Diameter') + 2)
     const tip = within(editor()).getByLabelText('Tip diameter', { selector: 'input' })
