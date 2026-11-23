@@ -318,6 +318,13 @@ describe('exportPlan (the path run mode shares)', () => {
       }),
     )
     expect(labels.length).toBeGreaterThanOrEqual(t.order.length)
+    // DF43: progress names the operations ("Export: Pocket 1" in Run), never their ids
+    const ids = Object.values(t.d.doc.plans)[0]!.setups.flatMap((s) =>
+      s.operations.map((o) => o.id),
+    )
+    for (const label of labels) for (const id of ids) expect(label).not.toContain(id)
+    const names = Object.values(t.d.doc.parts)[0]!.operations.map((o) => o.name)
+    expect(labels.some((l) => names.some((n) => l.startsWith(n)))).toBe(true)
     const ac = new AbortController()
     ac.abort()
     expectErrCode(

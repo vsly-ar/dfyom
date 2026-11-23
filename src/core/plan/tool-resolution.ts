@@ -106,7 +106,8 @@ export function designToolFindings(
           params: { ...check, ...a },
         })
       } else if (!d.locked && op.tool !== undefined && !assigned) {
-        const name = plan.tools.get(op.tool)?.name ?? op.tool
+        // a copy the plan no longer has reads "a missing tool", never its id (DF43)
+        const name = plan.tools.get(op.tool)?.name ?? 'a missing tool'
         out.push({
           ...base,
           code: 'plan.designToolReplaced',

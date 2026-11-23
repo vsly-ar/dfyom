@@ -116,7 +116,8 @@ export function reanchor(s: Shape, to: Anchor, extents?: Extents): AppResult<Sha
       issues.push({
         path: ['anchor'],
         rule: 'anchorExpression',
-        message: `${parameter} is a formula: remove it to change the anchor`,
+        // the field in words, never its key (DF43); `params.parameter` keeps the path
+        message: `the shape's centre ${i === 0 ? 'X' : 'Y'} is a formula: remove it to change the anchor`,
         params: { parameter },
       })
       continue

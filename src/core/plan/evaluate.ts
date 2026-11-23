@@ -4,6 +4,7 @@
  * Doc: docs/modes/plan-v0.1.md (Tool assignment and checks, Feeds and speeds, Pass strategies)
  */
 import { None, Option, Some } from '../../shared/result'
+import { partIssueText } from '../design/issue-text'
 import type { Operation } from '../design/operation'
 import type { OperationKind } from '../design/part.dto'
 import { machineLimits } from '../feeds-speeds/suggest'
@@ -13,6 +14,7 @@ import { Quantity } from '../quantity/quantity'
 import { feedFindings, stockFindings, toolFindings, type PlanWarning } from './checks'
 import {
   calculatorNoData,
+  FEED_FIELD_LABEL,
   pickPreset,
   resolveFeeds,
   type Overrides,
@@ -169,7 +171,7 @@ export function evaluateOperation(
       push({
         field,
         rule: 'unresolved',
-        message: `${field}: no entered, preset or calculator value`,
+        message: `${FEED_FIELD_LABEL[field].toLowerCase()} has no entered, preset or calculator value`,
         params: {},
       })
   const stepdown = feeds.fields.stepdown.map((v) => v.value)
@@ -247,7 +249,7 @@ export function planFindings(
         out.push({
           code: 'plan.check',
           severity: 'error',
-          message: `the part does not fit the plan's stock copy: ${issue.message}`,
+          message: `the part does not fit the plan's stock copy: ${partIssueText(plan.dto.design.part, issue)}`,
           field: ['design', ...issue.path].join('.'),
           rule: 'stockFit',
           params: {},

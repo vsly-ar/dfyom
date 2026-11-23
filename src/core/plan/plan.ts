@@ -14,6 +14,7 @@ import { Stock } from '../library/stock'
 import { Tool } from '../library/tool'
 import type { ProjectDoc, UnitSystem } from '../project/document'
 import { feedModeIssues } from './feeds'
+import { planOperationLabel } from './labels'
 import type { PlanDTO, PlanOperationDTO, SetupDTO } from './plan.dto'
 
 export interface LoadedPlan {
@@ -54,10 +55,19 @@ export function snapshotById(plan: PlanDTO, id: string): SnapshotDTO | undefined
   return plan.snapshots.find((s) => s.id === id)
 }
 
-function broken(plan: PlanDTO, message: string, where: string): AppResult<never> {
-  return fail('input.malformed', `plan ${plan.id}: ${message}`, {
+/**
+ * A plan record that does not load. The message is shown as the `plan.broken` finding, so it names
+ * no ids (DF43); they are in `data`.
+ */
+function broken(
+  plan: PlanDTO,
+  message: string,
+  where: string,
+  data: Readonly<Record<string, unknown>> = {},
+): AppResult<never> {
+  return fail('input.malformed', message, {
     where,
-    data: { planId: plan.id },
+    data: { planId: plan.id, ...data },
   })
 }
 
@@ -105,18 +115,27 @@ export function loadPlanDTO(
   for (const [si, setup] of plan.setups.entries())
     for (const op of setup.operations) {
       if (op.tool !== undefined && !tools.has(op.tool))
-        return broken(plan, `the tool copy of ${op.id} is missing`, where)
+        return broken(
+          plan,
+          `the tool copy of ${planOperationLabel(plan.design.part, op.designOperationIds)} is missing`,
+          where,
+          { planOperationId: op.id, snapshotId: op.tool },
+        )
       const kind = operationById(part.unwrap(), op.designOperationIds[0] ?? '')?.kind
       const issues = kind === undefined ? [] : feedModeIssues(op, kind)
       if (issues.length > 0)
-        return fail('model.invariant', `plan ${plan.id}: ${op.id} has invalid locks`, {
-          issues: issues.map((i) => ({
-            ...i,
-            path: ['setups', si, 'operations', op.id, ...i.path],
-          })),
-          where,
-          data: { planId: plan.id },
-        })
+        return fail(
+          'model.invariant',
+          `${planOperationLabel(plan.design.part, op.designOperationIds)} has invalid locks`,
+          {
+            issues: issues.map((i) => ({
+              ...i,
+              path: ['setups', si, 'operations', op.id, ...i.path],
+            })),
+            where,
+            data: { planId: plan.id, planOperationId: op.id },
+          },
+        )
     }
   const { setups } = plan
   const operations = setups.flatMap((x) => x.operations)

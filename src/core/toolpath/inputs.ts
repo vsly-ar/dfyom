@@ -12,7 +12,7 @@ import { isAnalyticOperation, type OperationGeometry, type StockGeometry } from 
 import { pocketRegion, profileChain } from '../geometry/outline'
 import { resolveProfileTabs } from '../geometry/tab-hold'
 import type { Tool } from '../library/tool'
-import type { ResolvedFeeds } from '../plan/feeds'
+import { FEED_FIELD_LABEL, type ResolvedFeeds } from '../plan/feeds'
 import type { PlanOperationInput } from '../plan/inputs'
 import type { FeedField } from '../plan/plan.dto'
 import type {
@@ -70,15 +70,19 @@ function cutting(
     else missing.push(f)
   }
   if (missing.length > 0)
-    return fail('plan.check', `${planOperationId}: unresolved feeds: ${missing.join(', ')}`, {
-      issues: missing.map((f) => ({
-        path: [planOperationId, f],
-        rule: 'unresolved',
-        message: `${f} is not resolved: enter a value or pick a preset (plan_operation_update)`,
-      })),
-      where: WHERE,
-      data: { planOperationId },
-    })
+    return fail(
+      'plan.check',
+      `unresolved feeds: ${missing.map((f) => FEED_FIELD_LABEL[f].toLowerCase()).join(', ')}`,
+      {
+        issues: missing.map((f) => ({
+          path: [planOperationId, f],
+          rule: 'unresolved',
+          message: `${FEED_FIELD_LABEL[f].toLowerCase()} is not resolved: enter a value or pick a preset (plan_operation_update)`,
+        })),
+        where: WHERE,
+        data: { planOperationId },
+      },
+    )
   return Ok(out as Record<FeedField, number>)
 }
 

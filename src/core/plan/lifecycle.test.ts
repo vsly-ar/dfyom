@@ -29,7 +29,13 @@ import {
 
 const ui = uiSource()
 type Warnings = {
-  warnings: { code: string; rule: string; message: string; planOperationId?: string }[]
+  warnings: {
+    code: string
+    rule: string
+    message: string
+    planOperationId?: string
+    params: Record<string, unknown>
+  }[]
 }
 const warnings = (s: PlanSetup, planId: string) =>
   (s.query('plan.warning.list', { planId }) as Warnings).warnings
@@ -107,7 +113,12 @@ describe('library follow on Apply: only draft plans, failures', () => {
       }),
     ])
     expect(copies[0]!.blocked).toContain("can't be applied")
-    expect(warnings(s, planId).map((w) => w.code)).toContain('plan.libraryBlocked')
+    // DF43: the reason names the operation and the field in words; the paths stay for agents
+    expect(copies[0]!.blocked).toContain('Drilling 2 depth: must end above the stock bottom')
+    expect(copies[0]!.blocked).not.toMatch(/drill2|operations\./)
+    expect(copies[0]!.blockedFields).toContain('operations.drill2.depth')
+    const finding = warnings(s, planId).find((w) => w.code === 'plan.libraryBlocked')
+    expect(finding?.params['fields']).toContain('operations.drill2.depth')
   })
 })
 
@@ -131,7 +142,13 @@ describe('rebuild validity against the plan’s own stock copy', () => {
     ])
     expect(s.plan(planId)).toEqual(before)
     expect(stale(s, planId).rebuildBlocked).toContain('rebuild blocked')
-    expect(warnings(s, planId).map((w) => w.code)).toContain('plan.rebuildBlocked')
+    // DF43: "Pocket 1 depth: …", never "operations.pocket1.depth: …"
+    expect(stale(s, planId).rebuildBlocked).toContain('Pocket 1 depth')
+    expect(stale(s, planId).rebuildBlocked).not.toMatch(/pocket1|operations\./)
+    expect(stale(s, planId).rebuildBlockedFields).toContain('operations.pocket1.depth')
+    const finding = warnings(s, planId).find((w) => w.code === 'plan.rebuildBlocked')
+    expect(finding?.message).not.toMatch(/pocket1/)
+    expect(finding?.params['fields']).toContain('operations.pocket1.depth')
   })
 
   it('plan.rebuild of such a design fails with model.invariant', async () => {
@@ -153,6 +170,15 @@ describe('rebuild validity against the plan’s own stock copy', () => {
     ) as Warnings
     expect(r.warnings).toContainEqual(
       expect.objectContaining({ code: 'plan.check', rule: 'stockFit' }),
+    )
+    // DF43: "Pocket 1 depth: …" in the text; the path stays in `field`
+    const fit = r.warnings.filter((w) => w.rule === 'stockFit')
+    expect(fit.map((w) => w.message)).toContainEqual(
+      expect.stringMatching(/^the part does not fit the plan's stock copy: Pocket 1 depth: /),
+    )
+    for (const w of fit) expect(w.message).not.toMatch(/pocket1|drill\d|operations\./)
+    expect(fit.map((w) => (w as { field?: string }).field)).toContain(
+      'design.operations.pocket1.depth',
     )
   })
 })

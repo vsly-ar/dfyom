@@ -8,6 +8,9 @@ import type { PartDTO } from '../design/part.dto'
 
 type OpDTO = PartDTO['operations'][number]
 
+/** The label of an operation id the part no longer has (ui.md § Selection and picking). */
+export const UNKNOWN_OPERATION = 'Unknown operation'
+
 const byIdMemo = new WeakMap<readonly OpDTO[], ReadonlyMap<string, OpDTO>>()
 
 /**
@@ -83,7 +86,8 @@ function baseName(op: OpDTO, part: PartDTO): string {
  */
 export function planOperationLabel(part: PartDTO, designOperationIds: readonly string[]): string {
   const ops = designOperationIds.map((id) => operationOf(part, id))
-  const names = ops.map((o, i) => o?.name ?? designOperationIds[i]!)
+  // an id the part no longer has reads "Unknown operation", never the id (DF43, ui.md)
+  const names = ops.map((o) => o?.name ?? UNKNOWN_OPERATION)
   if (ops.length < 2 || ops.some((o) => o === undefined)) return names.join(', ')
   const counts = new Map<string, number>()
   for (const o of ops) {

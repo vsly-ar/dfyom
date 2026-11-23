@@ -102,6 +102,8 @@ export interface LibraryCopyStale {
   readonly status: Exclude<SnapshotStatus, 'current'>
   /** Why re-importing this changed copy cannot be applied (the part must fit a new stock). */
   readonly blocked: string | null
+  /** The part fields that do not fit the new stock (issue paths, `operations.pocket1.depth`). */
+  readonly blockedFields: readonly string[]
 }
 
 export interface PlanStale {
@@ -114,6 +116,8 @@ export interface PlanStale {
   readonly partChanged: readonly string[]
   /** A `draft` plan that could not follow the design: why (rebuild blocked by its stock copy). */
   readonly rebuildBlocked: string | null
+  /** The design part's fields that block the rebuild (issue paths, `operations.pocket1.depth`). */
+  readonly rebuildBlockedFields: readonly string[]
 }
 
 /**
@@ -181,7 +185,8 @@ export function planStale(
         kind: dto.kind,
         libraryItemId: dto.libraryItemId,
         status,
-        blocked: blocked ?? null,
+        blocked: blocked?.reason ?? null,
+        blockedFields: blocked?.fields ?? [],
       })
     }
   const partChanged =
@@ -197,16 +202,17 @@ export function planStale(
               ),
           )
           .sort()
-  const rebuildBlocked =
+  const blocker =
     plan.status === 'draft' && designChanged(plan, doc)
-      ? (rebuildBlocker(plan, doc, port) ?? null)
-      : null
+      ? rebuildBlocker(plan, doc, port)
+      : undefined
   return {
     operations,
     libraryCopies,
     partRemoved: current === undefined,
     partChanged,
-    rebuildBlocked,
+    rebuildBlocked: blocker?.reason ?? null,
+    rebuildBlockedFields: blocker?.fields ?? [],
   }
 }
 
