@@ -92,6 +92,20 @@ export function AppShell(): React.JSX.Element {
     if (open) ref.current?.collapse()
     else ref.current?.expand()
   }
+  // a panel that lives in the inspector opened (the Reference panel, ui.md § Reference panel):
+  // show a collapsed inspector or the narrow window's overlay
+  const inspectorRequest = useUi((s) => s.inspectorRequest)
+  const [seenRequest, setSeenRequest] = useState(inspectorRequest)
+  if (inspectorRequest !== seenRequest) {
+    setSeenRequest(inspectorRequest)
+    if (!wide) setOverlayOpen(true)
+  }
+  const expandedFor = useRef(inspectorRequest)
+  useEffect(() => {
+    if (inspectorRequest === expandedFor.current) return
+    expandedFor.current = inspectorRequest
+    if (wide && inspector.current?.isCollapsed()) inspector.current.expand()
+  }, [inspectorRequest, wide, inspector])
 
   const onMode = (next: AppMode) => setMode(next)
   // Enter in a field, Cmd/Ctrl+Enter, Edit → Apply changes and the button (apply.md#ui)

@@ -519,19 +519,25 @@
   color: var(--text-muted);
 }
 
-/* reference models (task R3): the Reference dialog's rows (D45) */
-.references {
+/* the Reference panel (dogfood DF2–DF8): the file line, the size read-out, Fit mode */
+.refFile {
   display: grid;
+  grid-template-columns: var(--icon-md) minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: center;
+  color: var(--text);
 }
 
-.referenceError {
-  padding: 0;
+.refFile[data-hidden] {
+  color: var(--text-muted);
 }
 
-/* room for the eye and remove buttons, which stay over the row's end; the name over the count */
-.references .opSelect {
-  grid-template-columns: var(--icon-md) minmax(0, 1fr);
-  padding-right: calc(2 * var(--control-md) + var(--space-2));
+.refFile[data-hidden] > svg {
+  opacity: 0.5;
+}
+
+.refActions {
+  display: inline-flex;
 }
 
 .referenceText {
@@ -549,45 +555,60 @@
   white-space: nowrap;
 }
 
-/* a hidden reference keeps its row, muted (ui.md#reference-ghost-v02) */
-.op[data-hidden] .opSelect {
+.refSize {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.refSize dt {
   color: var(--text-muted);
 }
 
-.op[data-hidden] .opSelect > svg {
-  opacity: 0.5;
+.refSize dd {
+  margin: 0;
+  color: var(--text);
 }
 
-/* the eye stays visible (it is the row's state); remove shows like the operation actions */
-.referenceActions {
-  position: absolute;
-  top: 50%;
-  right: 0;
-  transform: translateY(-50%);
-  display: inline-flex;
-  padding: 0 var(--space-1);
-  background: var(--bg-chrome);
+.fitMode {
+  display: grid;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
 }
 
-.op[data-selected] .referenceActions {
-  background: var(--accent-subtle);
+.fitAxes {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0 0 0 var(--space-4);
+  border: 0;
 }
 
-.op:hover .referenceActions {
-  background: var(--bg-hover);
+.fitLegend {
+  padding: 0;
+  margin-bottom: var(--space-1);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-muted);
 }
 
-.referenceActions > :last-child {
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--motion-fast) var(--ease-standard);
+.fitResult {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
 }
 
-.op:hover .referenceActions > :last-child,
-.op:focus-within .referenceActions > :last-child,
-.op[data-selected] .referenceActions > :last-child {
-  opacity: 1;
-  pointer-events: auto;
+.fitActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
 }
 
 .turnRow {
@@ -600,13 +621,6 @@
 .turnButtons {
   display: inline-flex;
   margin-top: var(--space-0-5);
-}
-
-.fitRow {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: var(--space-2);
-  align-items: center;
 }
 
 .fields {

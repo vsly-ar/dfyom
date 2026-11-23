@@ -65,6 +65,8 @@ export interface SceneProps {
   clonePath?: ClonePathOverlay | null
   /** Reference model ghosts, drawn after the part, never pickable (task R3). */
   ghosts?: readonly ReferenceGhostView[] | null
+  /** The part translucent without depth writes, so a ghost inside shows (DF2). */
+  seeThrough?: boolean
   reducedMotion?: boolean
   controlsRef: Ref<CameraControlsImpl>
   /** Run mode layer (task 3.12). */
@@ -74,6 +76,9 @@ export interface SceneProps {
 }
 
 const noRaycast = (): void => {}
+
+/** The part's opacity while "See through stock" is on (ui.md § Reference panel, DF2). */
+export const SEE_THROUGH_OPACITY = 0.35
 
 /** sRGB token colour → three.js colour (stored linear). */
 function colour(c: Rgb): Color {
@@ -178,6 +183,7 @@ function PartMesh({
   mesh,
   palette,
   surfaceState,
+  seeThrough = false,
   onHover,
   onClick,
 }: SceneProps & { mesh: ViewportMesh }): React.JSX.Element {
@@ -246,7 +252,12 @@ function PartMesh({
         }}
       >
         <meshStandardMaterial
+          // a new material when see-through flips: three compiles transparency per material
+          key={seeThrough ? 'see-through' : 'solid'}
           vertexColors
+          transparent={seeThrough}
+          opacity={seeThrough ? SEE_THROUGH_OPACITY : 1}
+          depthWrite={!seeThrough}
           roughness={0.85}
           metalness={0}
           polygonOffset
