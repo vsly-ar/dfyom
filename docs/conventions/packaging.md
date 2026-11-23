@@ -13,7 +13,7 @@ How the app is packaged as `DFYOM.app` and installed for the developer. Local in
 | `npm run install:local`  | `package`, then [`scripts/install-local.mjs`](../../scripts/install-local.mjs) copies the app to `~/Applications/DFYOM.app` (no sudo)                                       |
 | `npm run smoke:packaged` | The [smoke tests](testing.md#app-playwright-for-electron) on the packaged executable, windows hidden; run after `package`                                                   |
 
-`smoke:packaged` is optional, not part of `npm run check` or CI. **When a milestone is reached** (a plan in [plans/](../plans/) closes), run `npm run install:local`, then `npm run smoke:packaged`, so the installed app is that milestone's version (`package.json` `version`, shown in the window title and Finder's Get Info).
+`smoke:packaged` is optional, not part of `npm run check` or CI. **When a milestone is reached** (a plan in [plans/](../plans/) closes), run `npm run install:local`, then `npm run smoke:packaged`, so the installed app is that milestone's version (`package.json` `version`, shown in the window title and Finder's Get Info). Package from a real `node_modules`: with a **symlinked** `node_modules` (a worktree sharing the main checkout's) electron-builder cannot resolve the transitive dependencies ("cannot find path for dependency") and ships an app without them (pino's `sonic-boom`, serialport's parsers and binding) that does not start; an APFS clone (`cp -c -R`) works.
 
 ## Install
 

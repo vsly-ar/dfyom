@@ -97,7 +97,7 @@ test('serial port (M1): pick the port, connect, settings warning, Home asks firs
     const warning = navigator.getByRole('alert')
     await expect(warning).toContainText("The controller's settings differ from the library machine")
     await expect(warning).toContainText('$110 maxFeedRate.x')
-    await expect(warning).toContainText('and 4 more')
+    await expect(warning).toContainText('and 3 more')
     await expect(warning.getByRole('button', { name: 'Review' })).toBeVisible()
     await render(page, 'settings-warning')
 
