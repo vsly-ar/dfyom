@@ -13,7 +13,7 @@
   padding: var(--space-3);
 }
 
-/* "Connect to virtual machine" wraps in the 16 rem navigator instead of running out of it */
+/* "Connect" fits one line; a larger font wraps it rather than overflowing */
 .wrapButton {
   height: auto;
   min-height: var(--control-lg);
@@ -228,6 +228,20 @@
   padding-left: var(--space-3);
 }
 
+/* not homed (DF46): "—" in every cell and the reason, on a line reserved either way */
+.droTable[data-known='false'] .droWork,
+.droTable[data-known='false'] .droMachine {
+  color: var(--text-muted);
+}
+
+.droUnknown {
+  margin: 0;
+  min-height: var(--lh-sm);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-muted);
+}
+
 .droMeta {
   display: flex;
   gap: var(--space-4);
@@ -298,6 +312,7 @@
   margin: 0;
 }
 
+.findings,
 .tools,
 .steps {
   margin: 0;

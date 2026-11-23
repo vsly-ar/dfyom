@@ -13,6 +13,7 @@ describe('MachineStateBadge', () => {
     ['moving', 'Running'],
     ['hold', 'Feed hold'],
     ['action', 'Tool change'],
+    ['needsHoming', 'Needs homing'],
     ['alarm', 'Alarm'],
   ] satisfies [MachineState, string][])('%s shows the label "%s" and a shape', (state, label) => {
     renderUi(<MachineStateBadge state={state} />)

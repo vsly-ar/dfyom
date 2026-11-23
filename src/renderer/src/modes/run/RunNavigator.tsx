@@ -5,7 +5,7 @@
 // Without a plan ("No plan (manual control)") it connects with a library machine (DF31). The
 // notice keeps a reserved height and a refused action shows at the end of the panel, so messages
 // never move the controls (DF34). Doc: docs/conventions/ui.md#run-mode-safety-ui,
-// docs/modes/run.md#machine-frame-and-manual-control-hardening-df31df35,
+// docs/modes/run.md#machine-frame-and-manual-control-hardening-df31df35, #run-mode-presentation-df46,
 // docs/modes/run-v0.1.md#commands-and-queries
 import { useEffect, useId, useState } from 'react'
 import type { ProjectDoc } from '../../../../core/project/document'
@@ -14,7 +14,7 @@ import { runMessages } from '../../messages/run'
 import { Icon, Button, ConfirmDialog, ErrorMessage, Select, StatusChip } from '../../ui'
 import { JogPad } from './JogPad'
 import { useLibraryItems } from '../plan/usePlan'
-import { actionText, formatLength, isConnected, runGates } from './machine-state'
+import { actionText, formatLength, isConnected, needsHoming, runGates } from './machine-state'
 import { runnablePlans } from './plan-info'
 import { NO_PLAN, useRun, useRunStore, type Axis } from './run-store'
 import styles from './Run.module.css'
@@ -228,6 +228,8 @@ export function RunNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
         <div className={styles['buttons']}>
           <Button
             size="lg"
+            // the next step while GRBL's start-up lock holds (DF46): one primary in the panel
+            {...(needsHoming(status) ? { variant: 'primary' as const } : {})}
             icon={<Icon name="home" />}
             disabled={gates.home !== null || busy('run.machine.home')}
             {...(gates.home === null ? {} : { 'aria-describedby': ids.home })}

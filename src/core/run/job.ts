@@ -99,15 +99,24 @@ function bindJobControl(m: MachineService, ctx: JobContext): () => void {
   }
 }
 
-async function runJob(
+/**
+ * Step 1 of the run job, shared with `run.job.check` (DF46): connected, no job, Idle and homed,
+ * the plan runnable, the setup chosen, the plan's machine copy the connected one.
+ */
+function startChecks(
   doc: ProjectDoc,
   planId: string,
   setupId: string | undefined,
-  ctx: JobContext,
-): AsyncAppResult<RunJobResult> {
-  const where = 'run.job.start'
-  // 1. checks
-  const machine = machineOf(ctx.services, where)
+  services: Services,
+  where: string,
+): AppResult<{
+  m: MachineService
+  workZero: readonly [number, number, number]
+  setup: SetupDTO
+  next: SetupDTO | undefined
+  machineKey: string
+}> {
+  const machine = machineOf(services, where)
   if (machine.isErr()) return machine
   const m = machine.unwrap()
   const status = m.status()
@@ -152,19 +161,25 @@ async function runJob(
         },
       ],
     })
+  return Ok({ m, workZero: status.workZero, setup, next, machineKey: key.unwrap() ?? '' })
+}
+
+async function runJob(
+  doc: ProjectDoc,
+  planId: string,
+  setupId: string | undefined,
+  ctx: JobContext,
+): AsyncAppResult<RunJobResult> {
+  const where = 'run.job.start'
+  // 1. checks
+  const checked = startChecks(doc, planId, setupId, ctx.services, where)
+  if (checked.isErr()) return checked
+  const { m, workZero, setup, next, machineKey } = checked.unwrap()
   // From here to the stream the connection is held for this job: no jog or work-zero change
   // slips in between the soft-limit check and the start (the host re-checks the G54 anyway).
   const reserved = m.reserve(ctx.jobId)
   if (reserved.isErr()) return reserved
-  const started = await checkAndStart(
-    doc,
-    planId,
-    setup.id,
-    ctx,
-    m,
-    status.workZero,
-    key.unwrap() ?? '',
-  )
+  const started = await checkAndStart(doc, planId, setup.id, ctx, m, workZero, machineKey)
   m.release(ctx.jobId)
   if (started.isErr()) return started
   const { running, warnings } = started.unwrap()
@@ -250,4 +265,41 @@ export const runJobStart = defineCommand({
   }),
   result: RunJobResult,
   run: (doc, args, ctx) => runJob(doc, args.planId, args.setupId, ctx),
+})
+
+/**
+ * Steps 1–3 of the run job without the stream (DF46): the pre-flight dialog shows the soft-limit
+ * result before "Start run". Doc: docs/modes/run.md#run-mode-presentation-df46
+ */
+export const runJobCheck = defineCommand({
+  kind: 'effect',
+  name: 'run.job.check',
+  summary:
+    "Check a setup's program against the soft limits at the live work zero, as run.job.start does, without moving the machine.",
+  title: () => 'Check run',
+  machine: false,
+  // the same program run.job.start would export: docs/architecture/apply.md#implicit-apply
+  applyFirst: true,
+  args: z.object({
+    planId: PlanIdSchema,
+    setupId: PlanRecordIdSchema.optional().describe('Required when the plan has several setups'),
+  }),
+  result: z.object({
+    setupId: z.string(),
+    findings: z.array(PlanWarningSchema).describe('softLimit findings; empty = inside the travel'),
+  }),
+  async run(doc, args, ctx) {
+    const where = 'run.job.check'
+    const checked = startChecks(doc, args.planId, args.setupId, ctx.services, where)
+    if (checked.isErr()) return checked
+    const { setup, workZero } = checked.unwrap()
+    const exported = await exportPlan(doc, args.planId, ctx.services, {
+      setupId: setup.id,
+      workZero,
+    })
+    if (exported.isErr())
+      return Err(exported.unwrapErr().withContext(where, { planId: args.planId }))
+    const findings = exported.unwrap().warnings.filter((w) => w.rule === 'softLimit')
+    return Ok({ setupId: setup.id, findings: [...findings] })
+  },
 })

@@ -400,7 +400,7 @@ test('v0.2 golden path through the UI: reference, faces, setups, export and run 
   const machine = page.getByRole('group', { name: 'Machine' })
   await navigator.getByRole('combobox', { name: 'Time scale' }).click()
   await page.getByRole('option', { name: 'Max' }).click()
-  await navigator.getByRole('button', { name: 'Connect to virtual machine' }).click()
+  await navigator.getByRole('button', { name: 'Connect', exact: true }).click()
   await expect(machine.getByText('Virtual machine · Max')).toBeVisible()
   await navigator.getByRole('button', { name: 'Home' }).click()
   await expect(machine.getByText('Idle')).toBeVisible()

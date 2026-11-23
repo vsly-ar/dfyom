@@ -1,10 +1,12 @@
 // DRO: work and machine coordinates per axis in the project's units, mono tabular digits
-// (--text-dro), plus feed and spindle. Doc: docs/conventions/ui.md#run-mode-safety-ui (DRO);
+// (--text-dro), plus feed and spindle; "—" until the machine is homed (DF46, the position is
+// unknown before). Doc: docs/conventions/ui.md#run-mode-safety-ui (DRO);
 // look: ui-design-system.html (.dro)
+import { useId } from 'react'
 import type { UnitSystem } from '../../../../core/project/document'
 import type { RunStatus } from '../../../../core/run/service'
 import { runMessages } from '../../messages/run'
-import { formatFeed, formatLength } from './machine-state'
+import { formatFeed, formatLength, positionKnown } from './machine-state'
 import styles from './Run.module.css'
 
 const m = runMessages.dro
@@ -18,9 +20,17 @@ export function Dro({
   units: UnitSystem
 }): React.JSX.Element {
   const unit = m.units[units]
+  const known = positionKnown(status)
+  const hintId = useId()
+  const show = (mm: number) => (known ? formatLength(mm, units) : m.unknown)
   return (
     <div className={styles['dro']}>
-      <table className={styles['droTable']} aria-label={m.title}>
+      <table
+        className={styles['droTable']}
+        aria-label={m.title}
+        data-known={known ? undefined : 'false'}
+        {...(known ? {} : { 'aria-describedby': hintId })}
+      >
         <thead>
           <tr>
             <th scope="col">
@@ -37,16 +47,20 @@ export function Dro({
                 {axis}
               </th>
               <td className={styles['droWork']} aria-label={`${m.workLabel} ${axis}`}>
-                {formatLength(status.wpos[i]!, units)}
+                {show(status.wpos[i]!)}
                 <small aria-hidden="true">{unit}</small>
               </td>
               <td className={styles['droMachine']} aria-label={`${m.machineLabel} ${axis}`}>
-                {formatLength(status.mpos[i]!, units)}
+                {show(status.mpos[i]!)}
               </td>
             </tr>
           ))}
         </tbody>
       </table>
+      {/* always there, so homing never moves the controls below the DRO (Reset, Start run) */}
+      <p id={hintId} className={styles['droUnknown']} aria-hidden={known ? true : undefined}>
+        {known ? null : m.unknownHint}
+      </p>
       <dl className={styles['droMeta']}>
         <div>
           <dt>{m.feed}</dt>

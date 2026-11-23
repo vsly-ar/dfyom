@@ -139,6 +139,14 @@
   }
 }
 
+/* Needs homing (GRBL's start-up lock, DF46): neutral, a house in the hold colour, not an error */
+.badge[data-state='needsHoming'] {
+  border-color: var(--safety-hold);
+}
+.badge[data-state='needsHoming'] .shape {
+  color: var(--safety-hold);
+}
+
 /* Alarm: red octagon */
 .badge[data-state='alarm'] {
   background: var(--safety-alarm);

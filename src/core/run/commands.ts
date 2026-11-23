@@ -14,7 +14,7 @@ import { setupStockSize } from '../plan/setups'
 import type { ProjectDoc } from '../project/document'
 import type { Vec3 } from '../toolpath/model'
 import { machineSettings } from './grbl/emulator/settings'
-import { machineOf, runJobStart } from './job'
+import { machineOf, runJobCheck, runJobStart } from './job'
 import { machineKeyOf } from './machine-key'
 import { Machine } from '../library/machine'
 import { ItemIdSchema } from '../library/item'
@@ -439,6 +439,7 @@ export const RUN_COMMANDS: readonly AnyCommand[] = [
   runWorkZeroSet,
   runMachineReset,
   runJobStart,
+  runJobCheck,
   runJobContinue,
   runTimeScaleSet,
 ]
