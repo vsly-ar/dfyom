@@ -7,10 +7,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { LibraryItemKind } from '../../../core/library/item'
 import { libraryMessages } from '../messages/library'
 import { sentence } from '../messages/plan'
-import { Icon, Button, ConfirmDialog, ErrorMessage, StatusChip } from '../ui'
+import { Icon, Button, ConfirmDialog, ErrorMessage, StatusChip, type FieldMessage } from '../ui'
 import { useStore } from 'zustand'
 import {
   draftIssues,
+  nameTaken,
   unmatchedIssues,
   type MachineDraft,
   type StockDraft,
@@ -49,7 +50,23 @@ export function ItemEditor({
   const live = useMemo(() => (d === null ? [] : draftIssues(d.values, d.autoName)), [d])
   // the last failed command's issues while the draft is unchanged, else the live ones
   const issues = s.error !== undefined && s.error.issues.length > 0 ? s.error.issues : live
-  const messages = (field: string) => issueMessages(issues, field)
+  const taken = s.otherNames()
+  // a name that repeats another item's is allowed, with a soft warning (DF47)
+  const typedName = d === null || d.autoName ? '' : d.values.name
+  const duplicate: FieldMessage[] =
+    d !== null && nameTaken(typedName, taken)
+      ? [
+          {
+            id: 'nameTaken',
+            severity: 'soft',
+            text: libraryMessages.nameTaken(d.kind, typedName.trim()),
+          },
+        ]
+      : []
+  const messages = (field: string) =>
+    field === 'name'
+      ? [...issueMessages(issues, field), ...duplicate]
+      : issueMessages(issues, field)
 
   useEffect(() => {
     if (s.failures === 0) return
@@ -145,6 +162,7 @@ export function ItemEditor({
               values={d.values}
               onChange={(v: ToolDraft) => s.edit(v)}
               autoName={d.autoName}
+              takenNames={taken}
               onNameTyped={() => s.edit(d.values, { nameTyped: true })}
               detailsOpen={s.toolDetailsOpen}
               onDetailsOpenChange={(open) => s.setToolDetailsOpen(open)}

@@ -328,7 +328,7 @@ export function HoleInspector({
     return (
       <div className={styles['holeField']} {...track(path)}>
         <QuantityInput
-          label={t.position('Center', i === 0 ? names.u : names.v)}
+          label={t.position('Centre', i === 0 ? names.u : names.v)}
           kind="length"
           defaultUnit={defaultUnit('length', units)}
           value={quantityOf(hole.center[i])}

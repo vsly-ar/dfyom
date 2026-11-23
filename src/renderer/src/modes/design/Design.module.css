@@ -1478,6 +1478,32 @@
   gap: var(--space-2);
 }
 
+/* The Clones draft (DF47): its body scrolls, its outcome sits in a footer pinned to the
+   inspector's bottom, styled as a dialog footer (ui.md#radix-wrapping-pattern) */
+.draftInspector {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.draftBody {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  align-content: start;
+}
+
+.draftFooter {
+  display: flex;
+  flex: none;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding: 10px var(--space-3);
+  border-top: 1px solid var(--border);
+  background: var(--bg-chrome);
+}
+
 .instanceGroup {
   display: grid;
   gap: var(--space-2);

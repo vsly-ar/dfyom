@@ -5,7 +5,8 @@
 // Point, Along – Along disabled without a one-item path shape) appends a row placed a step from
 // the last position. Shared by the draft (local rows) and the Clones inspector (each change one
 // `design.clones.update`); the caller decides what a change does. The selected row's segment of
-// the clone path is amber (ui store `clonesRow`).
+// the clone path is amber (ui store `clonesRow`). Each field names the face axis (X/Y on the top
+// face, u/v elsewhere), has its own field illustration and a one-line hint (DF47).
 // Doc: docs/conventions/ui.md#clones, #reordering-lists-d45
 import { useState, type KeyboardEvent } from 'react'
 import type { CloneRowKind } from '../../../../core/design/clones/clones'
@@ -31,6 +32,8 @@ import {
   SegmentedControl,
   Select,
   Field,
+  FieldIcon,
+  type FieldIconName,
   type FieldMessage,
 } from '../../ui'
 import type { ClonePathData } from '../../viewport/clone-path'
@@ -52,13 +55,81 @@ import type { FieldError } from './OperationFields'
 const c = designMessages.features.clones
 const r = designMessages.reorder
 
-/** The label of a row field (offset and polar name their steps differently from a grid). */
-function fieldLabel(kind: CloneRowKind, key: string): string {
-  if (kind === 'offset' && key === 'du') return c.fields.stepU
-  if (kind === 'offset' && key === 'dv') return c.fields.stepV
-  if (kind === 'arc' && key === 'angle') return c.fields.centreAngle
-  return (c.fields as Record<string, string>)[key] ?? key
+/** Names of the face's axes in labels and hints (`axisNames`: X/Y on the top face, else u/v). */
+export interface AxisNames {
+  readonly u: string
+  readonly v: string
 }
+
+/** A row field's label, hint and illustration (DF47, ui.md § Clones). */
+export interface RowFieldText {
+  readonly label: string
+  readonly hint: string
+  readonly icon: FieldIconName
+}
+
+/**
+ * The label, hint and illustration of a row field. Offset names its steps differently from a
+ * grid's spacing (the same quantity, so the same drawing); a point's u/v are positions.
+ */
+export function rowFieldText(kind: CloneRowKind, key: string, axes: AxisNames): RowFieldText {
+  const f = c.fields
+  const h = c.hints
+  switch (key) {
+    case 'cols':
+      return { label: f.cols, hint: h.cols(axes.u), icon: 'cloneColumns' }
+    case 'rows':
+      return { label: f.rows, hint: h.rows(axes.v), icon: 'cloneRows' }
+    case 'du':
+      return kind === 'offset'
+        ? { label: f.stepU(axes.u), hint: h.stepU(axes.u), icon: 'cloneStepU' }
+        : { label: f.du(axes.u), hint: h.du(axes.u), icon: 'cloneStepU' }
+    case 'dv':
+      return kind === 'offset'
+        ? { label: f.stepV(axes.v), hint: h.stepV(axes.v), icon: 'cloneStepV' }
+        : { label: f.dv(axes.v), hint: h.dv(axes.v), icon: 'cloneStepV' }
+    case 'count':
+      return kind === 'along'
+        ? { label: f.count, hint: h.alongCount, icon: 'cloneCount' }
+        : { label: f.count, hint: h.count, icon: 'cloneCount' }
+    case 'angle':
+      return kind === 'arc'
+        ? { label: f.centreAngle, hint: h.centreAngle(axes.u), icon: 'cloneCentreAngle' }
+        : { label: f.angle, hint: h.angle(axes.u), icon: 'cloneDirection' }
+    case 'distance':
+      return { label: f.distance, hint: h.distance, icon: 'cloneDistance' }
+    case 'radius':
+      return { label: f.radius, hint: h.radius, icon: 'cloneRadius' }
+    case 'arc':
+      return { label: f.arc, hint: h.arc, icon: 'cloneSweep' }
+    case 'step':
+      return { label: f.step, hint: h.step, icon: 'cloneStepAngle' }
+    case 'u':
+      return {
+        label: designMessages.inspector.position('Position', axes.u),
+        hint: h.point,
+        icon: 'positionX',
+      }
+    case 'v':
+      return {
+        label: designMessages.inspector.position('Position', axes.v),
+        hint: h.point,
+        icon: 'positionY',
+      }
+    case 'shape':
+      return { label: f.shape, hint: h.shape, icon: 'clonePath' }
+    case 'start':
+      return { label: f.start, hint: h.start, icon: 'cloneStart' }
+    case 'spacing':
+      return { label: f.spacing, hint: h.spacing, icon: 'cloneSpacing' }
+    default:
+      return { label: key, hint: '', icon: 'length' }
+  }
+}
+
+/** The hint as the field's (i) note, after its errors. */
+const hintOf = (t: RowFieldText, path: string): FieldMessage[] =>
+  t.hint === '' ? [] : [{ id: `${path}-hint`, severity: 'note', text: t.hint }]
 
 const NO_REFERENCES: ReferenceResolver = { resolve: () => None }
 
@@ -89,6 +160,7 @@ export function rowSummary(
 export function CloneRowList({
   owner,
   rows,
+  axes,
   units,
   shapes,
   resolver,
@@ -104,6 +176,8 @@ export function CloneRowList({
   /** Whose rows these are (the ui store's row focus): a feature id, or `draft`. */
   owner: string
   rows: readonly RowArg[]
+  /** The face's axis names (`axisNames` of the Clones' face). */
+  axes: AxisNames
   units: UnitSystem
   shapes: readonly ShapeDTO[]
   resolver: ReferenceResolver | undefined
@@ -208,8 +282,16 @@ export function CloneRowList({
     const out: React.JSX.Element[] = []
     if (row.kind === 'along') {
       const by: 'spacing' | 'count' = row['count'] !== undefined ? 'count' : 'spacing'
+      const shapeText = rowFieldText('along', 'shape', axes)
+      const countText = rowFieldText('along', 'count', axes)
+      const spacingText = rowFieldText('along', 'spacing', axes)
       out.push(
-        <Field key="shape" label={c.fields.shape} messages={messagesAt(`rows.${i}.shapeId`)}>
+        <Field
+          key="shape"
+          label={shapeText.label}
+          illustration={<FieldIcon name={shapeText.icon} />}
+          messages={[...messagesAt(`rows.${i}.shapeId`), ...hintOf(shapeText, `rows.${i}.shapeId`)]}
+        >
           <Select
             options={paths.map((s) => ({ value: s.id, label: s.name }))}
             value={String(row['shapeId'])}
@@ -243,38 +325,51 @@ export function CloneRowList({
         by === 'count' ? (
           <QuantityInput
             key="count"
-            label={c.fields.count}
+            label={countText.label}
             kind="scalar"
             defaultUnit="1"
             value={countValue(row['count'])}
             validate={whole}
             onCommit={(q) => setField(i, 'count', q.canonical)}
-            messages={[...messagesAt(`rows.${i}.count`), ...overAt(i, 'count')]}
+            illustration={<FieldIcon name={countText.icon} />}
+            messages={[
+              ...messagesAt(`rows.${i}.count`),
+              ...overAt(i, 'count'),
+              ...hintOf(countText, `rows.${i}.count`),
+            ]}
           />
         ) : (
           <QuantityInput
             key="spacing"
-            label={c.fields.spacing}
+            label={spacingText.label}
+            illustration={<FieldIcon name={spacingText.icon} />}
             kind="length"
             defaultUnit={fieldContext('length', units).defaultUnit}
             value={quantity(row['spacing'], 'length')}
             onCommit={(q, gesture) => setField(i, 'spacing', q.source, gesture)}
             onCancelGesture={onCancelGesture}
-            messages={[...messagesAt(`rows.${i}.spacing`), ...overAt(i, 'spacing')]}
+            messages={[
+              ...messagesAt(`rows.${i}.spacing`),
+              ...overAt(i, 'spacing'),
+              ...hintOf(spacingText, `rows.${i}.spacing`),
+            ]}
             {...(resolver ? { resolver } : {})}
           />
         ),
       )
     }
     for (const f of ROW_FIELD_ORDER[row.kind]) {
-      const label = fieldLabel(row.kind, f.key)
+      const text = rowFieldText(row.kind, f.key, axes)
+      const label = text.label
+      const illustration = <FieldIcon name={text.icon} />
       const path = `rows.${i}.${f.key}`
-      const messages = [...messagesAt(path), ...overAt(i, f.key)]
+      const messages = [...messagesAt(path), ...overAt(i, f.key), ...hintOf(text, path)]
       if (f.kind === 'count')
         out.push(
           <QuantityInput
             key={f.key}
             label={label}
+            illustration={illustration}
             kind="scalar"
             defaultUnit="1"
             value={countValue(row[f.key])}
@@ -288,6 +383,7 @@ export function CloneRowList({
           <QuantityInput
             key={f.key}
             label={label}
+            illustration={illustration}
             kind="length"
             defaultUnit={fieldContext('length', units).defaultUnit}
             value={quantity(row['start'], 'length')}
@@ -312,6 +408,7 @@ export function CloneRowList({
           <QuantityInput
             key={f.key}
             label={label}
+            illustration={illustration}
             kind={f.kind}
             defaultUnit={fieldContext(f.kind, units).defaultUnit}
             value={quantity(row[f.key], f.kind)}

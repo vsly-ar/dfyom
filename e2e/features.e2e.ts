@@ -195,7 +195,7 @@ test('features: add a hole, expand its row, the owned inspector is read-only, Ma
   await expect(inspector.getByRole('heading', { name: 'Bolt hole 1' })).toBeVisible()
   // the hole inspector (U2) focused the field behind the drill's first one
   await expect(
-    inspector.getByLabel('Center X', { exact: true }).and(inspector.locator('input')),
+    inspector.getByLabel('Centre X', { exact: true }).and(inspector.locator('input')),
   ).toBeFocused()
 
   // ── the hole inspector: type, fastener, section, sizes (U2) ────────────────────────────

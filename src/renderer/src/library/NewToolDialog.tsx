@@ -3,14 +3,21 @@
 // (plan mode assigns it to the plan operation; design mode locks the operation's tool field). The
 // core validates; its issues show at their field, the rest above the fields.
 // Doc: docs/conventions/ui-library-window.md#context-links, docs/conventions/ui.md#plan-mode-task-37
-import { useState, type ReactElement } from 'react'
+import { useEffect, useState, type ReactElement } from 'react'
 import type { OperationKind } from '../../../core/design/part.dto'
 import type { UnitSystem } from '../../../core/project/document'
 import type { AppErrorData } from '../../../shared/errors/app-error'
 import { libraryMessages } from '../messages/library'
 import { useCall } from '../shell/hooks'
-import { Icon, Button, Dialog, DialogClose } from '../ui'
-import { commandInput, defaultToolValues, type ToolDraft, type ToolPrefill } from './form'
+import { useShell } from '../shell/ShellContext'
+import { Icon, Button, Dialog, DialogClose, type FieldMessage } from '../ui'
+import {
+  commandInput,
+  defaultToolValues,
+  nameTaken,
+  type ToolDraft,
+  type ToolPrefill,
+} from './form'
 import { LibraryFormBody, useLibraryForm } from './LibraryForm'
 import { TOOL_FIELDS, ToolFields } from './ToolFields'
 import styles from './LibraryForm.module.css'
@@ -49,6 +56,32 @@ export function NewToolDialog({
   const [autoName, setAutoName] = useState(true)
   const f = useLibraryForm(TOOL_FIELDS)
   const isOpen = controlled ?? f.open
+  // the library's tool names, read on each opening: the suggested name avoids them (DF47)
+  const { bridge } = useShell()
+  const [taken, setTaken] = useState<readonly string[]>([])
+  useEffect(() => {
+    if (!isOpen) return
+    let live = true
+    void bridge.call('library.tool.list', {}).then((r) => {
+      if (live && r.ok)
+        setTaken((r.value as { items: { name: string }[] }).items.map((i) => i.name))
+    })
+    return () => {
+      live = false
+    }
+  }, [isOpen, bridge])
+  const duplicate: FieldMessage[] =
+    !autoName && nameTaken(values.name, taken)
+      ? [
+          {
+            id: 'nameTaken',
+            severity: 'soft',
+            text: libraryMessages.nameTaken('tool', values.name.trim()),
+          },
+        ]
+      : []
+  const messages = (field: string) =>
+    field === 'name' ? [...f.messages(field), ...duplicate] : f.messages(field)
 
   const open = (o: boolean) => {
     if (o) {
@@ -69,7 +102,7 @@ export function NewToolDialog({
 
   const submit = () =>
     f.submit(async () => {
-      const added = await call('library.tool.add', commandInput(values, { units, autoName }))
+      const added = await call('library.tool.add', commandInput(values, { units, autoName, taken }))
       if (!added.ok) return added.error
       const e = await onAdded((added.value as { id: string }).id)
       if (e === undefined) onOpenChange?.(false)
@@ -110,9 +143,10 @@ export function NewToolDialog({
           values={values}
           onChange={setValues}
           units={units}
-          messages={f.messages}
+          messages={messages}
           variant="quick"
           autoName={autoName}
+          takenNames={taken}
           onNameTyped={() => setAutoName(false)}
         />
       </LibraryFormBody>

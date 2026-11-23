@@ -174,14 +174,14 @@ describe('feature UI (U1)', () => {
     expect(
       await within(inspector()).findByRole('heading', { name: 'Bolt hole 1' }),
     ).toBeInTheDocument()
-    // the hole inspector (U2) focuses the Center X input
+    // the hole inspector (U2) focuses the Centre X input
     await waitFor(() =>
       expect(document.activeElement?.closest('[data-feature-field]')).toHaveAttribute(
         'data-feature-field',
         'center.0',
       ),
     )
-    expect(document.activeElement).toHaveAccessibleName('Center X')
+    expect(document.activeElement).toHaveAccessibleName('Centre X')
   })
 
   it('moves the whole block over a neighbour, keeps focus on the owned row, removes with a toast', async () => {

@@ -58,12 +58,15 @@ export function ToolFields({
   messages,
   variant,
   autoName = false,
+  takenNames = [],
   onNameTyped,
   detailsOpen: detailsOpenProp,
   onDetailsOpenChange,
 }: FormProps<ToolDraft> & {
   /** The name follows type and diameter (`toolName`) until the user types one. */
   autoName?: boolean
+  /** The other tools' names: the suggested name avoids them ("Flat 6 (2)", DF47). */
+  takenNames?: readonly string[]
   onNameTyped?: () => void
   /** The Details group is open (`full`; the window keeps it across items, DF1); else local. */
   detailsOpen?: boolean
@@ -173,7 +176,7 @@ export function ToolFields({
 
   const name = (
     <NameField
-      value={autoName && values.name === '' ? toolName(values) : values.name}
+      value={autoName && values.name === '' ? toolName(values, takenNames) : values.name}
       messages={messages('name')}
       onChange={(n) => {
         onNameTyped?.()

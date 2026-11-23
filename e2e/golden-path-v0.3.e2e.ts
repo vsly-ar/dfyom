@@ -514,8 +514,8 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
   for (const [i, [u, v]] of holes.entries()) {
     await addOperation(page, 'Drilling', `Drilling ${i + 1}`)
     await pickOn(page, /^Stock bottom/)
-    await setField(inspector, 'Center u', u)
-    await setField(inspector, 'Center v', v)
+    await setField(inspector, 'Centre u', u)
+    await setField(inspector, 'Centre v', v)
     await setField(inspector, 'Diameter', '3')
     await inspector.getByRole('combobox', { name: 'Bottom' }).click()
     await page.getByRole('option', { name: 'Drill point' }).click()
