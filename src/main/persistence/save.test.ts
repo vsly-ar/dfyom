@@ -7,8 +7,8 @@ import { noopLogger } from '../../shared/logging'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
 import { sha256 } from './archive'
 import { buildArchive, loadArchiveBytes as loadArchive } from './archive.testing'
-import { nodeFs, type PersistFs } from './fs'
-import { faultFs, useTempDir } from './fs.testing'
+import type { PersistFs } from './fs'
+import { faultFs, testFs, useTempDir } from './fs.testing'
 import { addToHistory, writeVerifiedArchive } from './save'
 
 const tmp = useTempDir()
@@ -43,7 +43,7 @@ const siblings = async () => (await readdir(join(tmp.dir, 'docs'))).sort()
 describe('writeVerifiedArchive', () => {
   it('replaces the target with a verified archive and leaves no temp file', async () => {
     await original()
-    const built = expectOk(await write(nodeFs))
+    const built = expectOk(await write(testFs))
     const bytes = await readFile(target())
     expect(sha256(bytes)).toBe(built.sha256)
     expect(expectOk(await loadArchive(bytes)).doc).toEqual(v2)
@@ -52,7 +52,7 @@ describe('writeVerifiedArchive', () => {
 
   it('creates a new target (Save As / first save)', async () => {
     await mkdir(join(tmp.dir, 'docs'))
-    expectOk(await write(nodeFs))
+    expectOk(await write(testFs))
     expect(expectOk(await loadArchive(await readFile(target()))).doc).toEqual(v2)
   })
 
@@ -77,9 +77,9 @@ describe('writeVerifiedArchive', () => {
   it('a corrupt temp archive fails verification (persist.verify); the target is untouched', async () => {
     const before = await original()
     const corrupting: PersistFs = {
-      ...nodeFs,
+      ...testFs,
       appendFile: (p, d) =>
-        nodeFs.appendFile(p, p.includes('.tmp-') ? d.map((b, i) => (i === 40 ? b ^ 0xff : b)) : d),
+        testFs.appendFile(p, p.includes('.tmp-') ? d.map((b, i) => (i === 40 ? b ^ 0xff : b)) : d),
     }
     expectErrCode(await write(corrupting), 'persist.verify')
     expect(new Uint8Array(await readFile(target()))).toEqual(before)
@@ -123,7 +123,7 @@ describe('writeVerifiedArchive', () => {
     await original()
     await writeFile(`${target()}.tmp-0123abcd`, 'half')
     await writeFile(join(tmp.dir, 'docs', 'other.dfyom.tmp-0123abcd'), 'not ours')
-    expectOk(await write(nodeFs))
+    expectOk(await write(testFs))
     expect(await siblings()).toEqual(['bracket.dfyom', 'other.dfyom.tmp-0123abcd'])
   })
 })
@@ -135,7 +135,7 @@ describe('addToHistory', () => {
     const bytes = await readFile(target())
     const a = expectOk(
       await addToHistory({
-        fs: nodeFs,
+        fs: testFs,
         saves,
         source: target(),
         manifest: expectOk(await loadArchive(bytes)).manifest,
@@ -145,7 +145,7 @@ describe('addToHistory', () => {
     expect(a.unwrap()).toBe('2026-11-17T10-00-01.000Z-r1.dfyom')
     const again = expectOk(
       await addToHistory({
-        fs: nodeFs,
+        fs: testFs,
         saves,
         source: target(),
         manifest: expectOk(await loadArchive(bytes)).manifest,
