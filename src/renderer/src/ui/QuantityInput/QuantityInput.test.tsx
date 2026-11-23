@@ -1,6 +1,6 @@
 // Spec: docs/conventions/ui.md#quantity-and-expression-input (task 3.4); grammar edge cases from
 // the plan's known issues (`+1/2` deviation pair, `D -1/2`, Greek mu).
-import { act, screen, waitFor } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import type { ReferenceResolver } from '../../../../core/expression/evaluate'
@@ -776,6 +776,26 @@ describe('QuantityInput: adjust panel on focus (DF9)', () => {
     await user.type(input, '5')
     expect(input).toHaveValue('3.005')
     expect(panel).toHaveTextContent('3.005')
+  })
+
+  it('shows the recommended value in the panel; "Use …" only while the value differs', async () => {
+    const { user, input, onCommit } = setup({
+      recommended: { source: '0.5 mm', text: '0.5 mm, down to enclosure' },
+    })
+    await user.click(input)
+    const panel = screen.getByRole('dialog', { name: 'Adjust Width' })
+    expect(panel).toHaveTextContent('Recommended 0.5 mm, down to enclosure')
+    const use = within(panel).getByRole('button', { name: 'Use 0.5 mm' })
+    expect(use).toBeEnabled()
+    await user.click(use)
+    expect(committed(onCommit)).toEqual(['0.5 mm = 1/2'])
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await user.click(input)
+    expect(
+      within(screen.getByRole('dialog', { name: 'Adjust Width' })).getByRole('button', {
+        name: 'Use 0.5 mm',
+      }),
+    ).toBeDisabled()
   })
 
   it('has no pencil or other button in the input: Tab goes from field to field', async () => {

@@ -82,7 +82,7 @@ export interface OperationFieldsContext {
   readonly fixElsewhere?: ((w: DfmWarning) => { label: string; onApply: () => void }) | undefined
   /**
    * Recommended values by parameter path (the facing's depth down to the reference, DF4): the
-   * field's pencil offers "Use …" (QuantityInput `recommended`); never on read-only fields.
+   * field's adjust panel offers "Use …" (QuantityInput `recommended`); never on read-only fields.
    */
   readonly recommended?: Readonly<Record<string, { source: string; text: string }>> | undefined
 }
