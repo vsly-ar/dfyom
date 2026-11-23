@@ -3,8 +3,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { noopLogger } from '../../shared/logging'
 import { expectOk } from '../../shared/testing/result'
-import { nodeFs } from './fs'
-import { useTempDir } from './fs.testing'
+import { testFs, useTempDir } from './fs.testing'
 import { projectPaths } from './paths'
 import {
   applyRetention,
@@ -80,14 +79,14 @@ describe('applyRetention', () => {
     for (const f of files) await writeFile(join(a.saves, f), 'x')
     await writeFile(join(a.saves, 'notes.txt'), 'x')
     await mkdir(projectPaths(tmp.dir, 'b').folder, { recursive: true })
-    const r = expectOk(await applyRetention({ fs: nodeFs, appData: tmp.dir, log: noopLogger }))
+    const r = expectOk(await applyRetention({ fs: testFs, appData: tmp.dir, log: noopLogger }))
     expect(r.deleted.map((d) => d.name)).toEqual([files[0]])
     expect((await readdir(a.saves)).length).toBe(21)
   })
 
   it('is fine without a projects folder', async () => {
     expect(
-      expectOk(await applyRetention({ fs: nodeFs, appData: tmp.dir, log: noopLogger })).deleted,
+      expectOk(await applyRetention({ fs: testFs, appData: tmp.dir, log: noopLogger })).deleted,
     ).toEqual([])
   })
 })

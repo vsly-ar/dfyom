@@ -4,8 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { fakeClock } from '../../core/commands/testing'
 import { noopLogger, type Logger } from '../../shared/logging'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
-import { nodeFs } from './fs'
-import { faultFs, jitterFs, useTempDir } from './fs.testing'
+import { faultFs, jitterFs, testFs, useTempDir } from './fs.testing'
 import {
   acquireLock,
   inspectLock,
@@ -29,7 +28,7 @@ function deps(
   observed: LockObservations = new Map(),
 ) {
   return {
-    fs: nodeFs,
+    fs: testFs,
     path: lockPath(),
     owner,
     clock,

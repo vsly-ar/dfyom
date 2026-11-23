@@ -80,7 +80,15 @@ describe('docs lint', () => {
 
   it('has only resolvable relative links and #anchors', () => {
     const files = [...docs, join(ROOT, 'README.md'), join(ROOT, 'CLAUDE.md')].filter(existsSync)
-    const broken = files.flatMap((f) => brokenLinks(f).map((p) => `${rel(f)}: ${p}`))
+    // each target's headings once: re-slugging a big doc per link took seconds (timed out under load)
+    const anchorsByFile = new Map()
+    const anchorsOf = (f) => {
+      if (!anchorsByFile.has(f)) anchorsByFile.set(f, anchors(read(f)))
+      return anchorsByFile.get(f)
+    }
+    const broken = files.flatMap((f) =>
+      brokenLinks(f, read, anchorsOf).map((p) => `${rel(f)}: ${p}`),
+    )
     expect(broken).toEqual([])
   })
 })
