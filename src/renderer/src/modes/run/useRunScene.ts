@@ -68,7 +68,9 @@ export function useRunScene(mode: AppMode): RunScene | null {
   // playback: a cursor that only moves forward during one run
   const cursor = useRef({ jobId: undefined as string | undefined, done: 0 })
   const job = activeJob(status)
-  const tool = isConnected(status) ? status.wpos : null
+  const wpos = isConnected(status) ? status.wpos : null
+  // by value: a status that moved nothing (a tool-change wait's elapsed time) redraws nothing (P7)
+  const tool = useMemo(() => wpos, [wpos === null, wpos?.[0], wpos?.[1], wpos?.[2]])
   let done = 0
   if (lines !== null) {
     if (job !== undefined && tool !== null) {

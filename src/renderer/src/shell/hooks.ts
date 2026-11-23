@@ -1,9 +1,9 @@
 // Shell hooks over the bridge and the replica: undo/redo steps, jobs, agent sessions, the window
 // title. Doc: docs/conventions/ui.md#undo-and-redo, #jobs-and-progress, #app-shell
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
-import type { AgentSessionInfo, CallOpts, CallReply } from '../../../shared/preload-api'
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import type { AgentSessionInfo, CallOpts, CallReply, PreloadApi } from '../../../shared/preload-api'
 import { shellMessages as m } from '../messages/shell'
-import { isDirty } from '../state/replica'
+import { isDirty, type Replica } from '../state/replica'
 import type { JobView } from '../ui'
 import { useReplica, useShell } from './ShellContext'
 
@@ -108,53 +108,100 @@ export interface Jobs {
 
 const NO_JOBS: readonly JobView[] = []
 
-/** Running and paused jobs of the bound project: read on job events, polled while any runs. */
+/**
+ * One window's `job.list` reads, shared by every `useJobs` (the status bar and the Apply button):
+ * read on job events and on `refresh`, polled every `JOB_POLL_MS` while a job runs, never while
+ * none does (P7, idle cost: before, each reader polled on its own). Overlapping reads coalesce.
+ * Doc: docs/conventions/ui.md#jobs-and-progress
+ */
+export interface JobsFeed {
+  subscribe(listener: () => void): () => void
+  get(): readonly JobView[]
+  refresh(): void
+}
+
+export function createJobsFeed(
+  bridge: Pick<PreloadApi, 'call'>,
+  events: Pick<Replica, 'onEvent'>,
+): JobsFeed {
+  let jobs: readonly JobView[] = NO_JOBS
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let reading = false
+  let again = false
+  let offEvents: (() => void) | undefined
+  const listeners = new Set<() => void>()
+  const read = (): void => {
+    if (listeners.size === 0) return
+    if (reading) {
+      again = true
+      return
+    }
+    clearTimeout(timer)
+    timer = undefined
+    reading = true
+    void bridge.call('job.list', {}).then((r) => {
+      reading = false
+      if (listeners.size === 0) return
+      const list = r.ok ? ((r.value as { jobs?: JobInfo[] }).jobs ?? []) : []
+      jobs = list
+        .filter((j) => j.state !== 'finished')
+        .map((j): JobView => ({
+          id: j.jobId,
+          label: m.jobs.labels[j.name] ?? j.name,
+          state: j.state === 'paused' ? 'paused' : 'running',
+          progress: j.progress,
+        }))
+      for (const l of [...listeners]) l()
+      if (again) {
+        again = false
+        read()
+      } else if (jobs.some((j) => j.state === 'running')) timer = setTimeout(read, JOB_POLL_MS)
+    })
+  }
+  return {
+    subscribe(listener) {
+      listeners.add(listener)
+      offEvents ??= events.onEvent((e) => {
+        if (e.type === 'job') read()
+      })
+      return () => {
+        listeners.delete(listener)
+        if (listeners.size > 0) return
+        offEvents?.()
+        offEvents = undefined
+        clearTimeout(timer)
+        timer = undefined
+        again = false
+        jobs = NO_JOBS
+      }
+    },
+    get: () => jobs,
+    refresh: read,
+  }
+}
+
+const jobsFeeds = new WeakMap<Replica, JobsFeed>()
+
+/** Running and paused jobs of the bound project, from the window's shared `JobsFeed`. */
 export function useJobs(): Jobs {
   const { bridge, replica } = useShell()
   const state = useReplica()
   const key = state.status === 'open' ? state.key : undefined
-  const [jobs, setJobs] = useState<readonly JobView[]>([])
-  const [tick, setTick] = useState(0)
-
-  useEffect(
-    () =>
-      replica.onEvent((e) => {
-        if (e.type === 'job') setTick((t) => t + 1)
-      }),
-    [replica],
-  )
+  const feed = useMemo(() => {
+    let f = jobsFeeds.get(replica)
+    if (f === undefined) jobsFeeds.set(replica, (f = createJobsFeed(bridge, replica)))
+    return f
+  }, [bridge, replica])
+  const jobs = useSyncExternalStore(feed.subscribe, feed.get)
   useEffect(() => {
-    if (key === undefined) return
-    let live = true
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const read = () => {
-      void bridge.call('job.list', {}).then((r) => {
-        if (!live) return
-        const list = r.ok ? ((r.value as { jobs?: JobInfo[] }).jobs ?? []) : []
-        const active = list
-          .filter((j) => j.state !== 'finished')
-          .map((j): JobView => ({
-            id: j.jobId,
-            label: m.jobs.labels[j.name] ?? j.name,
-            state: j.state === 'paused' ? 'paused' : 'running',
-            progress: j.progress,
-          }))
-        setJobs(active)
-        if (active.some((j) => j.state === 'running')) timer = setTimeout(read, JOB_POLL_MS)
-      })
-    }
-    read()
-    return () => {
-      live = false
-      clearTimeout(timer)
-    }
-  }, [bridge, key, tick])
+    if (key !== undefined) feed.refresh()
+  }, [feed, key])
 
   const control = useCallback(
     (name: string) => (id: string) => {
-      void bridge.call(name, { jobId: id }).then(() => setTick((t) => t + 1))
+      void bridge.call(name, { jobId: id }).then(() => feed.refresh())
     },
-    [bridge],
+    [bridge, feed],
   )
   return {
     jobs: key === undefined ? NO_JOBS : jobs,

@@ -5,14 +5,15 @@
 // second machine homing front left ($23=3) homes to the other corner. Windows stay hidden
 // (fixture). Selectors are roles and accessible names. DF46: the toolbar keeps its height on
 // connect, "Needs homing" and an unknown position before homing; with DFYOM_RENDERS=1 the review
-// renders df46-run-disconnected and df46-run-needs-homing (light and dark).
+// renders df46-run-disconnected and df46-run-needs-homing (light and dark). P7: connected and
+// idle, the window draws no viewport frame and receives no status push.
 // Docs: docs/modes/run.md#machine-frame-and-manual-control-hardening-df31df35,
 // docs/modes/run.md#run-mode-presentation-df46,
 // docs/conventions/testing.md#end-to-end
 import { resolve } from 'node:path'
 import type { Page } from '@playwright/test'
 import type { CallReply, PreloadApi } from '../src/shared/preload-api'
-import { expect, test } from './app.fixture'
+import { expect, idleActivity, test } from './app.fixture'
 
 async function bridgeCall<T>(page: Page, name: string, args: object = {}): Promise<T> {
   // Runs in the renderer; this tsconfig has no DOM lib, hence `globalThis`.
@@ -156,6 +157,12 @@ test('manual control without a plan: home top right, jog to the travel end, zero
   for (const axis of ['X', 'Y', 'Z'])
     await expect(cell(`Work position ${axis}`)).toHaveText(/^0\.000/)
   await expect(cell('Machine position Y')).toHaveText('-11.000')
+
+  // P7, idle cost: connected and idle, the window draws no frame and gets no status push (the
+  // host polls at 5 Hz but posts changes only; the viewport renders on demand). The motion of the
+  // zeroing (selection pulse, panel fades) is over after a moment.
+  await page.waitForTimeout(1500)
+  expect(await idleActivity(page)).toEqual({ frames: 0, statusPushes: 0 })
 
   // a front-left machine homes to the other corner: X and Y at −travel + pull-off
   await navigator.getByRole('button', { name: 'Disconnect' }).click()

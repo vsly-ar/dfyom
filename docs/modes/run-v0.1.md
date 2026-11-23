@@ -133,14 +133,14 @@ SenderProgram = { lines: readonly string[]; sections: readonly { fromLine: numbe
 
 ### Host → main
 
-| `type`     | Fields                                                                                 | Rate                                             |
-| ---------- | -------------------------------------------------------------------------------------- | ------------------------------------------------ |
-| `status`   | `RunStatus` ([below](#status))                                                         | ≤ 10 per wall second, plus on every state change |
-| `progress` | `jobId`, `done`, `total`, `label`                                                      | ≤ 10 per wall second, plus the last              |
-| `phase`    | `jobId`, `phase`, `toolChange?: { n, name }`, `message?`                               | on change                                        |
-| `jobEnd`   | `jobId`, `result: ResultWire<RunSummary>`                                              | once per job                                     |
-| `event`    | `kind`: `alarm` · `error` · `message` (`[MSG:…]`) · `reset` · `connectionLost`, `data` | on occurrence                                    |
-| `log`      | `batch` from `createLogForwarder` ([Logging](#logging))                                | per the forwarder                                |
+| `type`     | Fields                                                                                 | Rate                                                                                                                        |
+| ---------- | -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `status`   | `RunStatus` ([below](#status))                                                         | ≤ 10 per wall second, plus on every state change; never an unchanged one ([idle cost](../research/2026-11-23-idle-cost.md)) |
+| `progress` | `jobId`, `done`, `total`, `label`                                                      | ≤ 10 per wall second, plus the last                                                                                         |
+| `phase`    | `jobId`, `phase`, `toolChange?: { n, name }`, `message?`                               | on change                                                                                                                   |
+| `jobEnd`   | `jobId`, `result: ResultWire<RunSummary>`                                              | once per job                                                                                                                |
+| `event`    | `kind`: `alarm` · `error` · `message` (`[MSG:…]`) · `reset` · `connectionLost`, `data` | on occurrence                                                                                                               |
+| `log`      | `batch` from `createLogForwarder` ([Logging](#logging))                                | per the forwarder                                                                                                           |
 
 - The program's lines travel once, in `jobStart` (a few hundred KB at most for v0.1 parts); the host streams without main, so main's event loop (Zod, workers' messages) never starves the sender.
 - **Host exit** (crash or kill) while connected: main fails the job with `machine.connection`, marks the connection `closed`, logs `error`; no automatic reconnect (a controller's state after a host crash is unknown). The next `run.connection.open` starts a fresh host.
