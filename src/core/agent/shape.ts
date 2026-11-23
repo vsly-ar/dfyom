@@ -19,8 +19,16 @@ export const COUNT_KEY = 'count'
 export const DEFAULT_MOVE_COUNT = 500
 export const MAX_MOVE_COUNT = 5000
 
+/** Tools that take the reserved `detail` arg, with their default. */
+export const DETAIL_DEFAULT: ReadonlyMap<string, 'summary' | 'full'> = new Map([
+  ['plan.get', 'summary'],
+  ['plan.toolpath.get', 'summary'],
+  ['design.shape.get', 'full'],
+])
 /** Tools whose result is summarized unless `detail: "full"`. */
-export const SUMMARIZED = new Set(['plan.get', 'plan.toolpath.get'])
+export const SUMMARIZED = new Set(
+  [...DETAIL_DEFAULT].filter(([, d]) => d === 'summary').map(([name]) => name),
+)
 
 export interface View {
   readonly detail: 'summary' | 'full'
@@ -49,8 +57,9 @@ export function splitDetail(
   name: string,
   rawArgs: unknown,
 ): AppResult<{ args: unknown; view: View }> {
-  const view: View = { detail: 'summary', from: 0, count: DEFAULT_MOVE_COUNT }
-  if (!SUMMARIZED.has(name) || !isObj(rawArgs)) return Ok({ args: rawArgs, view })
+  const dflt = DETAIL_DEFAULT.get(name)
+  const view: View = { detail: dflt ?? 'full', from: 0, count: DEFAULT_MOVE_COUNT }
+  if (dflt === undefined || !isObj(rawArgs)) return Ok({ args: rawArgs, view })
   const keys = name === 'plan.toolpath.get' ? [DETAIL_KEY, FROM_KEY, COUNT_KEY] : [DETAIL_KEY]
   const args: Obj = {}
   const reserved: Obj = {}
@@ -60,7 +69,7 @@ export function splitDetail(
       where: 'AgentSession',
       issues: [{ path: [path], rule, message }],
     })
-  const detail = reserved[DETAIL_KEY] ?? 'summary'
+  const detail = reserved[DETAIL_KEY] ?? dflt
   if (detail !== 'summary' && detail !== 'full')
     return issue(DETAIL_KEY, 'enum', 'detail must be "summary" or "full"')
   const int = (k: string, dflt: number, max: number): AppResult<number> => {
@@ -98,6 +107,7 @@ export class ResultShaper {
     if (view.detail === 'summary' && call.name === 'plan.get') value = this.planSummary(value)
     if (call.name === 'plan.toolpath.get')
       value = view.detail === 'summary' ? toolpathSummary(value) : toolpathRange(value, view)
+    if (view.detail === 'summary' && call.name === 'design.shape.get') value = shapeSummary(value)
     const partId = isObj(args) && typeof args['partId'] === 'string' ? args['partId'] : undefined
     if (call.name === 'design.warning.list' && partId !== undefined && isObj(value))
       this.remember(partId, value['warnings'])
@@ -327,6 +337,49 @@ function toolpathSummary(value: unknown): unknown {
   }
 }
 
+/**
+ * `design.shape.get` with `detail: "summary"`: the items' kinds and scalar fields (lists as
+ * their lengths), the resolved shape's numbers without its loops.
+ */
+function shapeSummary(value: unknown): unknown {
+  if (!isObj(value) || !isObj(value['shape'])) return value
+  const shape = value['shape']
+  const items = Array.isArray(shape['items'])
+    ? shape['items'].map((item) =>
+        isObj(item)
+          ? Object.fromEntries(
+              Object.entries(item).map(([k, x]) => [k, Array.isArray(x) ? x.length : x]),
+            )
+          : item,
+      )
+    : shape['items']
+  const r = value['resolved']
+  const resolved = isObj(r)
+    ? (() => {
+        const { pieces, path: _path, ...rest } = r
+        return {
+          ...rest,
+          ...(Array.isArray(pieces)
+            ? {
+                pieces: pieces.length,
+                holes: pieces.reduce(
+                  (n: number, p) =>
+                    n + (isObj(p) && Array.isArray(p['holes']) ? p['holes'].length : 0),
+                  0,
+                ),
+              }
+            : {}),
+        }
+      })()
+    : r
+  return {
+    ...value,
+    shape: { ...shape, items },
+    ...(resolved === undefined ? {} : { resolved }),
+    detail: 'summary; detail: "full" (the default) returns the items and resolved loops',
+  }
+}
+
 /** `plan.toolpath.get` with `detail: "full"`: the moves `from`…`from + count` across passes. */
 function toolpathRange(value: unknown, view: View): unknown {
   if (!isObj(value) || !isObj(value['toolpath'])) return value
@@ -420,13 +473,17 @@ function isQuantity(v: Obj): boolean {
   )
 }
 
-/** Quantities compacted and floats rounded, recursively (a copy; the input is not changed). */
+/**
+ * Quantities compacted, floats rounded and string `stack` keys dropped (an error kept as data
+ * inside a result; llm-api.md#a1-compact-results), recursively (a copy; the input is not changed).
+ */
 export function compact(v: unknown): unknown {
   if (typeof v === 'number') return round(v)
   if (Array.isArray(v)) return v.map(compact)
   if (!isObj(v)) return v
   if (isQuantity(v)) return compactQuantity(v)
   const out: Obj = {}
-  for (const [k, x] of Object.entries(v)) out[k] = compact(x)
+  for (const [k, x] of Object.entries(v))
+    if (k !== 'stack' || typeof x !== 'string') out[k] = compact(x)
   return out
 }

@@ -220,7 +220,8 @@ describe('run commands', { timeout: 60_000 }, () => {
         const job = t.status().job!
         const which =
           job.phase === 'toolChange' ? { toolChange: job.toolChange!.n } : { pause: job.pause! }
-        expectOk(await t.run('run.job.continue', { jobId, ...which }))
+        // defaults: the run and the wait it is at (llm-api.md#a2-jobwait-at-operator-waits)
+        expect(expectOk(await t.run('run.job.continue', {}))).toEqual({ jobId, ...which })
         await waitFor(() => finished || t.status().job?.phase === 'streaming')
       }
       return expectOk(await result) as { setupId: string; next?: object; lines: number }

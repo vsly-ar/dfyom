@@ -866,7 +866,9 @@ class ProjectDispatcher implements Dispatcher {
         args,
         source,
         fail('input.malformed', `no job ${jobId}`, {
-          issues: [{ path: ['jobId'], rule: 'unknownJob', message: 'no such job' }],
+          issues: [
+            { path: ['jobId'], rule: 'unknownJob', message: 'no such job; job_list lists them' },
+          ],
           where: def.name,
         }),
       )

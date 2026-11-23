@@ -308,7 +308,9 @@ export const jobGet = defineQuery({
       return j.isSome()
         ? Ok(jobInfo(j.unwrap()))
         : fail('input.malformed', `no job ${args.jobId}`, {
-            issues: [{ path: ['jobId'], rule: 'unknownJob', message: 'no such job' }],
+            issues: [
+              { path: ['jobId'], rule: 'unknownJob', message: 'no such job; job_list lists them' },
+            ],
             where,
           })
     })

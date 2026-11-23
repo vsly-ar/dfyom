@@ -366,37 +366,68 @@ export const runJobContinue = defineCommand({
   machine: true,
   args: z
     .object({
-      jobId: z.string().min(1).describe('Id returned by run.job.start'),
+      jobId: z.string().min(1).optional().describe('Id from run.job.start; default: the run'),
       toolChange: z
         .number()
         .int()
         .optional()
-        .describe('At a tool change: its number, from run.status.get job.toolChange.n'),
+        .describe('Tool change number (job.toolChange.n); default: the current wait'),
       pause: z
         .number()
         .int()
         .optional()
-        .describe('At a program pause (M0): its number, from run.status.get job.pause'),
+        .describe('Program pause (M0) number (job.pause); default: the current wait'),
     })
     .refine(
-      (a) => (a.toolChange === undefined) !== (a.pause === undefined),
-      'name the wait to end: toolChange or pause',
+      (a) => a.toolChange === undefined || a.pause === undefined,
+      'name one wait to end: toolChange or pause',
     ),
-  result: Done,
+  result: z
+    .object({
+      jobId: z.string(),
+      toolChange: z.number().int().optional(),
+      pause: z.number().int().optional(),
+    })
+    .describe('The wait that was ended'),
   async run(_doc, args, ctx) {
     const where = 'run.job.continue'
     const m = machineOf(ctx.services, where)
     if (m.isErr()) return m
     const job = m.unwrap().status().job
-    if (job?.jobId !== args.jobId || (job.phase !== 'toolChange' && job.phase !== 'programPause'))
-      return fail('run.state', `job ${args.jobId} is not waiting at a tool change or pause`, {
-        where,
-        data: { state: m.unwrap().status().state, ...(job ? { phase: job.phase } : {}) },
-      })
-    // the host checks the named wait against the one it is at (a retried continue skips nothing)
+    const waiting = job?.phase === 'toolChange' || job?.phase === 'programPause'
+    if (job === undefined || !waiting || (args.jobId !== undefined && job.jobId !== args.jobId))
+      return fail(
+        'run.state',
+        args.jobId === undefined
+          ? 'no run is waiting at a tool change or pause'
+          : `job ${args.jobId} is not waiting at a tool change or pause`,
+        {
+          where,
+          issues: [
+            {
+              path: args.jobId === undefined ? [] : ['jobId'],
+              rule: 'notWaiting',
+              message:
+                'call job_wait { jobId } until it returns waiting, or run_status_get for the phase',
+            },
+          ],
+          data: { state: m.unwrap().status().state, ...(job ? { phase: job.phase } : {}) },
+        },
+      )
+    // Defaults: the wait the run is at (llm-api.md#a2-jobwait-at-operator-waits). The host
+    // checks a named wait against the one it is at, so a retried continue naming it skips nothing.
     const expect =
-      args.toolChange !== undefined ? { toolChange: args.toolChange } : { pause: args.pause ?? 0 }
-    return (await m.unwrap().controlJob(args.jobId, 'continue', expect)).map(() => ({}))
+      args.toolChange !== undefined
+        ? { toolChange: args.toolChange }
+        : args.pause !== undefined
+          ? { pause: args.pause }
+          : job.phase === 'toolChange'
+            ? { toolChange: job.toolChange?.n ?? 0 }
+            : { pause: job.pause ?? 0 }
+    return (await m.unwrap().controlJob(job.jobId, 'continue', expect)).map(() => ({
+      jobId: job.jobId,
+      ...expect,
+    }))
   },
 })
 

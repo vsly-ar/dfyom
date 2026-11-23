@@ -67,6 +67,7 @@ const RunJobResult = RunSummarySchema.extend({
   warnings: z
     .array(PlanWarningSchema)
     .describe('plan.machine findings of the export other than softLimit'),
+  planId: z.string().describe('The plan this run machined'),
   setupId: z.string().describe('The setup this run machined'),
   next: NextSetupSchema.optional().describe(
     'The next setup: re-fixture, set its work zero, then run.job.start with its setupId',
@@ -226,6 +227,7 @@ async function runJob(
   return Ok({
     ...ended.unwrap(),
     warnings,
+    planId,
     setupId: setup.id,
     ...(next === undefined ? {} : { next: nextSetupOf(next) }),
   })

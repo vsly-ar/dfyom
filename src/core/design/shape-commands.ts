@@ -52,6 +52,7 @@ import { ABSOLUTE_PATH } from './reference-commands'
 import { svgShapeItems } from './shape-import'
 import type { SvgImport } from '../import/svg'
 import { svgImportTask, SvgImportReportSchema } from '../import/svg/task'
+import { issueSummary } from '../../shared/errors/app-error'
 
 // ── args ────────────────────────────────────────────────────────────────────────────────────
 
@@ -128,7 +129,7 @@ function parseItems(
   if (bad.every((e) => e.code === 'model.invariant') || bad.length > 1) {
     // one error with every issue (the first error's code when they differ)
     const issues = bad.flatMap((e) => e.issues)
-    return fail(bad[0]!.code, `${issues.length} invalid value(s)`, { issues })
+    return fail(bad[0]!.code, issueSummary(issues), { issues })
   }
   return Err(bad[0]!)
 }

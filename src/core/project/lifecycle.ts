@@ -118,7 +118,7 @@ export const projectClose = defineCommand({
   title: () => 'Close project',
   machine: false,
   args: z.object({
-    key: KeySchema,
+    key: KeySchema.optional().describe('Project key; default: the bound project'),
     confirm: z
       .boolean()
       .default(false)
@@ -126,8 +126,22 @@ export const projectClose = defineCommand({
   }),
   result: z.object({ key: z.string() }),
   async run(_doc, args, ctx) {
-    const closed = await withHost(ctx, 'project.close', (h) => h.close(args.key, args.confirm))
-    return closed.map(() => ({ key: args.key }))
+    const where = 'project.close'
+    // agent sessions fill in the bound project's key (llm-api.md#a5-unknown-arguments-and-projectclose)
+    const key = args.key
+    if (key === undefined)
+      return fail('input.malformed', `${where}: no key and no project bound to this session`, {
+        where,
+        issues: [
+          {
+            path: ['key'],
+            rule: 'noProject',
+            message: 'pass key (from project_list), or bind a project (project_bind)',
+          },
+        ],
+      })
+    const closed = await withHost(ctx, where, (h) => h.close(key, args.confirm))
+    return closed.map(() => ({ key }))
   },
 })
 

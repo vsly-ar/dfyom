@@ -104,6 +104,17 @@ describe('tool results', () => {
       ].join('\n'),
     )
   })
+
+  // Spec: docs/architecture/llm-api.md#a7-refusals-that-say-what-to-do
+  it('ends a refusal with the next step for codes whose fix is generic', () => {
+    const text = (code: ErrorCode) =>
+      toToolResult({ name: 'x', kind: 'command', result: Err(new AppError(code, 'm')) }).content[0]
+        ?.text
+    expect(text('run.notConnected')).toContain('Next: run_connection_open { target: "virtual"')
+    expect(text('op.timeout')).toContain('Next: job_get')
+    expect(text('persist.locked')).toContain('dfyom mcp --connect')
+    expect(text('input.malformed')).toBe('input.malformed: m')
+  })
 })
 
 describe('CLI exit codes', () => {

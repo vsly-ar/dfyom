@@ -26,8 +26,19 @@ export function errorText(e: AppError): string {
     const path = i.path.length > 0 ? i.path.join('.') : '(args)'
     lines.push(`- ${path}: ${i.message} (${i.rule})`)
   }
-  if (e.code === 'command.conflict') lines.push('Re-query the project and retry.')
+  const next = NEXT_STEP[e.code]
+  if (next !== undefined) lines.push(next)
   return lines.join('\n')
+}
+
+/** The next step of codes whose refusal is the same everywhere (llm-api.md#a7-refusals-that-say-what-to-do). */
+const NEXT_STEP: Partial<Record<AppError['code'], string>> = {
+  'command.conflict': 'Re-query the project and retry.',
+  'run.notConnected':
+    'Next: run_connection_open { target: "virtual", planId } opens the virtual machine.',
+  'persist.locked':
+    'Next: another instance holds the project; attach to it (dfyom mcp --connect, see the error data) or close it there.',
+  'op.timeout': 'Next: job_get { jobId } shows the job; it may still be running.',
 }
 
 /** Results up to this size are repeated in full as text; larger ones as an outline. */
