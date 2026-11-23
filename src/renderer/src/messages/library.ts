@@ -100,6 +100,12 @@ export const libraryMessages = {
     allTypes: 'All types',
     typeFilter: 'Tool type',
     duplicate: 'Duplicate',
+    /** Stock variants (DF13, ui-library-window.md#stock-variants-df13). */
+    newVariant: 'New variant',
+    variantName: (parent: string) => `${parent} variant`,
+    variantOf: (parent: string) => `Variant of ${parent}`,
+    variantRow: (name: string, parent: string) => `${name}, variant of ${parent}`,
+    hasVariants: 'Remove its variants first.',
     remove: 'Remove…',
     revert: 'Revert',
     save: 'Save',

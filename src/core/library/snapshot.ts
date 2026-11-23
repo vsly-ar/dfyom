@@ -17,7 +17,9 @@ const snapshotOf = <K extends LibraryItemKind>(kind: K) =>
   z.object({
     id: z.string().min(1).describe('Snapshot id (referenced by parts and plans)'),
     kind: z.literal(kind),
-    libraryItemId: ItemIdSchema.describe('The library item the values were copied from'),
+    libraryItemId: ItemIdSchema.optional().describe(
+      "The library item the values were copied from; none for a part's own stock",
+    ),
     takenAt: z.iso.datetime({ offset: true }).describe('When the values were copied'),
     values: VALUES_SCHEMAS[kind],
   })
@@ -31,7 +33,8 @@ export type SnapshotDTO = z.output<typeof SnapshotDtoSchema>
 
 export interface SnapshotProps {
   readonly id: string
-  readonly libraryItemId: string
+  /** None: the project's own values, not from the library (a part's own stock, DF13). */
+  readonly libraryItemId: string | undefined
   readonly takenAt: string
   readonly values: ItemValues
 }
@@ -39,13 +42,18 @@ export interface SnapshotProps {
 export class Snapshot implements SnapshotProps {
   private constructor(
     readonly id: string,
-    readonly libraryItemId: string,
+    readonly libraryItemId: string | undefined,
     readonly takenAt: string,
     readonly values: ItemValues,
   ) {
     invariants('Snapshot', (c) => {
       c.check(id.length > 0, ['id'], 'nonEmpty', 'must not be empty')
-      c.check(libraryItemId.length > 0, ['libraryItemId'], 'nonEmpty', 'must not be empty')
+      c.check(
+        libraryItemId === undefined || libraryItemId.length > 0,
+        ['libraryItemId'],
+        'nonEmpty',
+        'must not be empty',
+      )
       c.check(!Number.isNaN(Date.parse(takenAt)), ['takenAt'], 'isoDate', 'must be an ISO time')
     })
     Object.freeze(this)
@@ -77,7 +85,7 @@ export class Snapshot implements SnapshotProps {
     return {
       id: this.id,
       kind: this.kind,
-      libraryItemId: this.libraryItemId,
+      ...(this.libraryItemId === undefined ? {} : { libraryItemId: this.libraryItemId }),
       takenAt: this.takenAt,
       values: this.values.toDTO(),
     } as SnapshotDTO
@@ -87,6 +95,11 @@ export class Snapshot implements SnapshotProps {
 /** Shape check + model of an untrusted snapshot (project files, command args). */
 export function parseSnapshot(raw: unknown, where: string): AppResult<Snapshot> {
   return parseWith(SnapshotDtoSchema, raw, where).andThen(Snapshot.fromDTO)
+}
+
+/** The project's own values in a new snapshot, linked to no library item (DF13). */
+export function ownSnapshot(values: ItemValues, id: string, takenAt: string): AppResult<Snapshot> {
+  return Snapshot.create({ id, libraryItemId: undefined, takenAt, values })
 }
 
 /** Copy an item's values into a new snapshot. */
@@ -126,6 +139,8 @@ export type ItemLookup = (kind: LibraryItemKind, id: string) => ItemLookupResult
 export type SnapshotStatus = 'current' | 'libraryChanged' | 'libraryRemoved' | 'libraryUnreadable'
 
 export function snapshotStatus(snapshot: Snapshot, lookup: ItemLookup): SnapshotStatus {
+  // the project's own values follow no library item (DF13)
+  if (snapshot.libraryItemId === undefined) return 'current'
   const r = lookup(snapshot.kind, snapshot.libraryItemId)
   if (r.state === 'missing') return 'libraryRemoved'
   if (r.state === 'unreadable') return 'libraryUnreadable'
@@ -147,7 +162,7 @@ export function usedItemNotices(
   const notices: LibraryChangeNotice[] = []
   for (const s of snapshots) {
     const status = snapshotStatus(s, lookup)
-    if (status !== 'current')
+    if (status !== 'current' && s.libraryItemId !== undefined)
       notices.push({ snapshotId: s.id, kind: s.kind, libraryItemId: s.libraryItemId, status })
   }
   return notices

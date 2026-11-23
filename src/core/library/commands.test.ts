@@ -186,6 +186,56 @@ describe('library commands', () => {
     )
   })
 
+  it('stock variants (DF13): one level under a root stock; kept on update; block remove', async () => {
+    const { d } = await setup()
+    const root = await add(d, 'stock', libraryInput(stockValues()))
+    const input = { ...libraryInput(stockValues()), name: 'Plate 200 × 150' }
+    const variant = expectOk(
+      await d.dispatch('library.stock.add', { values: input, parentId: root.id }, agent),
+    ).value as { id: string; parentId?: string }
+    expect(variant.parentId).toBe(root.id)
+    const up = expectOk(
+      await d.dispatch(
+        'library.stock.update',
+        { id: variant.id, revision: 1, values: { ...input, name: 'Plate cut' } },
+        agent,
+      ),
+    ).value as { parentId?: string; revision: number }
+    expect(up).toMatchObject({ parentId: root.id, revision: 2 })
+    const nested = await d.dispatch(
+      'library.stock.add',
+      { values: input, parentId: variant.id },
+      agent,
+    )
+    expect(expectErrCode(nested, 'input.malformed').issues[0]?.rule).toBe('nestedVariant')
+    const unknown = await d.dispatch(
+      'library.stock.add',
+      { values: input, parentId: 'nope' },
+      agent,
+    )
+    expect(expectErrCode(unknown, 'input.malformed').issues[0]?.rule).toBe('unknownItem')
+    const blocked = await d.dispatch(
+      'library.stock.remove',
+      { id: root.id, revision: 1, confirm: true },
+      uiSource(),
+    )
+    expect(expectErrCode(blocked, 'input.malformed').issues[0]?.rule).toBe('hasVariants')
+    expectOk(
+      await d.dispatch(
+        'library.stock.remove',
+        { id: variant.id, revision: 2, confirm: true },
+        uiSource(),
+      ),
+    )
+    expectOk(
+      await d.dispatch(
+        'library.stock.remove',
+        { id: root.id, revision: 1, confirm: true },
+        uiSource(),
+      ),
+    )
+  })
+
   it('remove requires confirm: true', async () => {
     const { d } = await setup()
     const { id } = await add(d, 'stock', libraryInput(stockValues()))

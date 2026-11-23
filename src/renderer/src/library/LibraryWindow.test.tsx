@@ -276,6 +276,69 @@ describe('Library window', () => {
     await expectNoAxeViolations()
   })
 
+  it('lists stock variants under their parent; New variant; a parent with variants is kept (DF13)', async () => {
+    const { user, editor, add, library } = await renderLibrary()
+    const block = {
+      shape: 'block',
+      length: '300',
+      width: '200',
+      thickness: '10',
+      material: { name: '5083', class: 'aluminum' },
+    }
+    await add('stock', { ...block, name: 'Zinc plate' })
+    const plate = await add('stock', { ...block, name: 'Aluminium plate 10' })
+    await user.click(screen.getByRole('tab', { name: 'Stock' }))
+    const grid = () => screen.getByRole('grid', { name: 'Stock' })
+    const rows = () =>
+      within(grid())
+        .getAllByRole('row')
+        .slice(1)
+        .map((r) => r.getAttribute('aria-label') ?? r.textContent)
+    await user.click(await within(grid()).findByRole('row', { name: /^Aluminium plate 10/ }))
+    await user.click(within(editor()).getByRole('button', { name: 'New variant' }))
+    await waitFor(() =>
+      expect(
+        within(editor()).getByRole('heading', { name: 'Aluminium plate 10 variant' }),
+      ).toBeInTheDocument(),
+    )
+    const length = within(editor()).getByLabelText('Length (X)', { selector: 'input' })
+    await user.clear(length)
+    await user.type(length, '150{Enter}')
+    await user.click(within(editor()).getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(
+        library
+          .list('stock')
+          .items.find((i) => i.parentId.isSome())
+          ?.parentId.unwrap(),
+      ).toBe(plate),
+    )
+    // the variant follows its parent (before Zinc plate), named as a variant of it
+    await waitFor(() =>
+      expect(rows()).toEqual([
+        expect.stringMatching(/^Aluminium plate 10/),
+        'Aluminium plate 10 variant, variant of Aluminium plate 10',
+        expect.stringMatching(/^Zinc plate/),
+      ]),
+    )
+    expect(
+      within(editor()).getByRole('button', { name: 'Variant of Aluminium plate 10' }),
+    ).toBeInTheDocument()
+    await expectNoAxeViolations()
+    // the parent link selects the parent; with a variant it cannot be removed
+    await user.click(
+      within(editor()).getByRole('button', { name: 'Variant of Aluminium plate 10' }),
+    )
+    await waitFor(() =>
+      expect(
+        within(editor()).getByRole('heading', { name: 'Aluminium plate 10' }),
+      ).toBeInTheDocument(),
+    )
+    const remove = within(editor()).getByRole('button', { name: 'Remove…' })
+    expect(remove).toBeDisabled()
+    expect(remove).toHaveAttribute('title', 'Remove its variants first.')
+  })
+
   it('a new chamfer mill (U4): offered type with its V-bit hint, angle and tip fields, drawing, Angle column, V-bit search', async () => {
     const { user, row, grid, editor, library } = await renderLibrary()
     await user.click(screen.getByRole('button', { name: 'New tool' }))

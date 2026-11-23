@@ -1,6 +1,7 @@
 // The Library window's item editor: every field of the selected item's kind (ToolFields /
 // MachineFields / StockFields, `full`), validated as typed by the core models (L3), the draft's
-// "Unsaved" state, a conflict note with Reload / Overwrite, and the actions Duplicate, Remove…,
+// "Unsaved" state, a variant's parent (DF13), a conflict note with Reload / Overwrite, and the
+// actions Duplicate, New variant (stock), Remove…,
 // Import $$… (machines), Revert and Save. Doc: docs/conventions/ui-library-window.md#layout, #behaviour-with-projects
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { LibraryItemKind } from '../../../core/library/item'
@@ -63,6 +64,11 @@ export function ItemEditor({
   }
 
   const name = s.draftName()
+  // stock variants (DF13): the parent's name, and the variants that block removing a parent
+  const parent =
+    d.parentId === undefined ? undefined : s.lists.stock.items.find((i) => i.id === d.parentId)
+  const hasVariants =
+    d.kind === 'stock' && d.id !== null && s.lists.stock.items.some((i) => i.parentId === d.id)
   const rest = s.error === undefined ? [] : unmatchedIssues(s.error.issues, FIELDS[d.kind])
   const showError = s.error !== undefined && (s.error.issues.length === 0 || rest.length > 0)
   const form = {
@@ -82,6 +88,17 @@ export function ItemEditor({
           </span>
         ) : null}
       </div>
+      {parent !== undefined ? (
+        <p className={styles['variantOf']}>
+          <button
+            type="button"
+            className={styles['variantLink']}
+            onClick={() => s.select('stock', parent.id)}
+          >
+            {w.variantOf(parent.name)}
+          </button>
+        </p>
+      ) : null}
       {s.conflict !== null ? (
         <div role="alert" className={styles['conflict']}>
           <p>{s.conflict === 'stale' ? w.conflictStale : w.conflictRemoved}</p>
@@ -149,6 +166,17 @@ export function ItemEditor({
         >
           {w.duplicate}
         </Button>
+        {d.kind === 'stock' ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={<Icon name="add" />}
+            disabled={d.id === null}
+            onClick={() => s.newVariant()}
+          >
+            {w.newVariant}
+          </Button>
+        ) : null}
         <ConfirmDialog
           title={w.removeTitle(name)}
           description={w.removeDescription}
@@ -162,7 +190,8 @@ export function ItemEditor({
               size="sm"
               variant="ghost"
               icon={<Icon name="delete" />}
-              disabled={d.id === null}
+              disabled={d.id === null || hasVariants}
+              title={hasVariants ? w.hasVariants : undefined}
             >
               {w.remove}
             </Button>

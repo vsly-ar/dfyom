@@ -47,6 +47,8 @@ export interface Draft {
   readonly base: DraftValues | null
   /** A new tool's empty name means the suggested one ("Flat 6"). */
   readonly autoName: boolean
+  /** A stock variant's parent (DF13): kept by updates, sent with the add of a new variant. */
+  readonly parentId?: string | undefined
 }
 
 export type Conflict = 'stale' | 'removed'
@@ -87,6 +89,8 @@ export interface LibraryActions {
   select(kind: LibraryItemKind, id: string): void
   newItem(kind?: LibraryItemKind): void
   duplicate(): void
+  /** A new stock variant of the selected stock (or a sibling of the selected variant), DF13. */
+  newVariant(): void
   edit(values: DraftValues, opts?: { nameTyped?: boolean }): void
   revert(): void
   save(): Promise<boolean>
@@ -136,6 +140,7 @@ function draftOf(item: LibraryItemDTO): Draft {
     values,
     base: values,
     autoName: false,
+    parentId: item.parentId,
   }
 }
 
@@ -236,7 +241,10 @@ export function createLibraryStore(deps: {
       set({ saving: true, error: undefined })
       const r =
         d.id === null
-          ? await call(`library.${d.kind}.add`, input)
+          ? await call(`library.${d.kind}.add`, {
+              ...input,
+              ...(d.parentId === undefined ? {} : { parentId: d.parentId }),
+            })
           : await call(`library.${d.kind}.update`, { ...input, id: d.id, revision })
       set({ saving: false })
       if (!r.ok) {
@@ -368,7 +376,40 @@ export function createLibraryStore(deps: {
           const values = { ...d.values, name: copyName(get().draftName()) } as DraftValues
           patch({
             selected: { ...get().selected, [d.kind]: NEW },
-            draft: { kind: d.kind, id: null, revision: null, values, base: null, autoName: false },
+            // a duplicated variant stays under the same parent
+            draft: {
+              kind: d.kind,
+              id: null,
+              revision: null,
+              values,
+              base: null,
+              autoName: false,
+              parentId: d.parentId,
+            },
+            error: undefined,
+            conflict: null,
+          })
+        })
+      },
+
+      newVariant() {
+        const d = get().draft
+        if (d === null || d.kind !== 'stock' || d.id === null) return
+        const root = d.parentId ?? d.id
+        const rootName = get().lists.stock.items.find((i) => i.id === root)?.name ?? d.values.name
+        guard(() => {
+          const values = { ...d.values, name: libraryMessages.window.variantName(rootName) }
+          patch({
+            selected: { ...get().selected, stock: NEW },
+            draft: {
+              kind: 'stock',
+              id: null,
+              revision: null,
+              values: values as DraftValues,
+              base: null,
+              autoName: false,
+              parentId: root,
+            },
             error: undefined,
             conflict: null,
           })
@@ -408,8 +449,12 @@ export function createLibraryStore(deps: {
         const d = get().draft
         if (d === null) return false
         if (get().conflict === 'removed' || d.id === null) {
-          // the item is gone: save the draft as a new item
-          set({ draft: { ...d, id: null, revision: null, base: null }, conflict: null })
+          // the item is gone: save the draft as a new item (its parent may be gone too)
+          const parentId =
+            d.parentId !== undefined && get().lists.stock.items.some((i) => i.id === d.parentId)
+              ? d.parentId
+              : undefined
+          set({ draft: { ...d, id: null, revision: null, base: null, parentId }, conflict: null })
           return send(null)
         }
         const current = reply<LibraryItemDTO>(await call(`library.${d.kind}.get`, { id: d.id }))

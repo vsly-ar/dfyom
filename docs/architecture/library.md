@@ -14,6 +14,7 @@ The library holds the user's **stock**, **tools** and **machines**. It is global
 | `notes`     | string                           | no   | ≤ 4000 chars      | Vendor, product number, where it is stored.                   |
 | `revision`  | integer                          | yes  | ≥ 1, +1 per write | Stale-write check across app instances ([Storage](#storage)). |
 | `updatedAt` | ISO 8601 string                  | yes  | –                 | Sorting; "library changed since snapshot" hint.               |
+| `parentId`  | item id                          | no   | a root stock      | Stock only: the parent of a [variant](#stock-variants-df13).  |
 
 ## Stock
 
@@ -29,6 +30,15 @@ v0.1 has one shape, the rectangular **block**; `shape` is a discriminant so roun
 | `material.class` | `MaterialClass` enum | yes  | –           | Key for feeds-and-speeds presets and DFM hints. Users cannot add classes.                                                  |
 
 `MaterialClass` (fixed enum): `softwood`, `hardwood`, `sheetGood` (MDF, plywood), `plastic`, `aluminum`, `brass`, `steel`, `other`.
+
+### Stock variants (DF13)
+
+The user's request ([hardening.md](../plans/hardening.md) intake DF13): a stock in the library may have **variants**, e.g. "Aluminium plate 10" with its cut sizes "Aluminium plate 10 · 200 × 150 × 10" and "· 300 × 200 × 10". A variant is an ordinary stock item (all fields of its own, written and snapshotted like any other) with `parentId`, the id of its parent stock.
+
+- **One level:** the parent is a stock without `parentId`; a variant of a variant is refused (`library.stock.add` fails with `input.malformed`, issue `parentId` rule `nestedVariant`; an unknown parent is rule `unknownItem`). `parentId` is set when the item is added and kept by every update; it is library bookkeeping like `revision`, so it is not part of the values a snapshot copies.
+- **Remove:** a stock that still has variants cannot be removed (`library.stock.remove` fails with `input.malformed`, rule `hasVariants`: remove the variants first). A variant whose parent file is gone or does not load is listed as a stock of its own.
+- **Only stock** has variants; `parentId` on another kind is refused (`notStock`). Stored as an optional field of the item file, so older files load unchanged (no reset, [pre-alpha rule](../conventions/error-handling/migrations.md#pre-alpha-exception-no-data-preservation-yet)).
+- UI: the Library window lists variants under their parent ([ui-library-window.md § Stock variants](../conventions/ui-library-window.md#stock-variants-df13)); the design Stock dialog saves a changed library stock as an update or a new variant ([ui.md § Stock dialog](../conventions/ui.md#stock-dialog-df11df13)).
 
 ## Tool
 
@@ -153,8 +163,9 @@ The user pastes GRBL's `$$` answer (from any sender or terminal); DFYOM shows wh
 
 The snapshot record and rule are owned by [persistence.md](persistence.md#library-references). This doc fixes:
 
-- `kind` is the item's `kind`; `values` is the item's DTO without `id`, `revision` and `updatedAt`, parsed with the same Zod schema and built with the same `Model.create()`. A snapshot never reads the library.
+- `kind` is the item's `kind`; `values` is the item's DTO without `id`, `revision`, `updatedAt` and `parentId`, parsed with the same Zod schema and built with the same `Model.create()`. A snapshot never reads the library.
 - "Library changed" is shown when the item's current values differ from `values` (deep compare); no extra field.
+- **Own stock (DF13):** a part's stock snapshot may have no `libraryItemId`: the project's own block, entered in the Stock dialog without saving it to the library, or a library stock whose sizes were changed there (a piece cut from it). `design.part.add { stock }` takes it from the values; it is never stale, has no "Update from library", and the plans' copies of it neither.
 - Commands that take a snapshot (e.g. choosing stock in design mode, assigning a tool or machine in plan mode) and `project.snapshot.update` ("update from library") are project document commands, one undo step each.
 - When a library item used by the open project changes, the app notifies the user and suggests re-importing it. Each plan holds its own copies; they are updated per item and per plan (`plan.libraryItem.update`, [plan-v0.1.md](../modes/plan-v0.1.md#plans-are-snapshots)); `draft` plans follow library changes automatically, all other plans only on request. The notice is the query `plan.stale.list` (`libraryCopies`); draft plans re-import on the project's next Apply ([apply.md](apply.md#implementation-task-p2); v0.1 dispatched `followLibraryChanges` per change).
 
@@ -170,7 +181,7 @@ The app host opens the library once per instance (`Library.open` over `<appData>
 - Writes are atomic per file (temp + fsync + rename), like the [working folder](persistence.md#working-folder-writes). Every instance shares the folder; a write whose `revision` differs from the file on disk fails with `command.conflict`.
 - An item that does not load is listed with its error and never deleted or overwritten automatically ([pre-alpha rule](../conventions/error-handling/migrations.md#pre-alpha-exception-no-data-preservation-yet)).
 - Commands: `library.{stock,tool,machine}.{add,update,remove}`; queries `.get` and `.list` ([naming](commands.md#naming)); the `$$` import adds `library.machine.settings.{preview,import}` ([GRBL `$$` import](#grbl--import)). The commands are `effect` commands ([kinds](commands.md#command-definition)): written to disk at once, **not undoable**, no history entry, still logged in the action log.
-- **UI (v0.1):** the stock setup adds a block ([design.md](../modes/design.md#workflow)); plan mode's "New tool…" and "New machine…" forms add a tool or machine with the fields v0.1 needs ([ui.md](../conventions/ui.md#plan-mode-task-37)). Editing and removing items needs the library editor (later milestone; drafted as the [Library window](../conventions/ui-library-window.md), B24).
+- **UI (v0.1):** the stock setup adds a block ([design.md](../modes/design.md#workflow); since DF13 only on "Save to library", [ui.md § Stock dialog](../conventions/ui.md#stock-dialog-df11df13)); plan mode's "New tool…" and "New machine…" forms add a tool or machine with the fields v0.1 needs ([ui.md](../conventions/ui.md#plan-mode-task-37)). Editing and removing items needs the library editor (later milestone; drafted as the [Library window](../conventions/ui-library-window.md), B24).
 - `add`/`update` take [quantity strings](#command-input), not stored quantity objects; results are the stored item DTO.
 - `remove` asks for confirmation: its args schema requires `confirm: true` (`z.literal(true)`), so a call without it fails with `input.malformed`. The UI sets it after a confirmation dialog; agents and CLI pass it explicitly. Projects keep their snapshots of a removed item.
 

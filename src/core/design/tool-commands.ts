@@ -243,6 +243,9 @@ const snapshotUpdate = defineCommand({
       : undefined
     if (dto === undefined) return malformed('unknownSnapshot', 'no such snapshot')
     if (dto.kind === 'machine') return malformed('snapshotKind', 'not a tool or stock snapshot')
+    // a part's own stock follows no library item (DF13)
+    if (dto.libraryItemId === undefined)
+      return malformed('ownStock', "the stock is the project's own, not from the library")
     const library = ctx.services.library
     if (library === undefined)
       return fail('internal.unexpected', 'no library service configured', { where })

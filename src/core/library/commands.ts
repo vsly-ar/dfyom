@@ -75,13 +75,19 @@ function forKind(kind: LibraryItemKind): { commands: AnyCommand[]; queries: Quer
   const toValuesDTO = (v: object) => ({ ...v, kind }) as ItemValuesDTO
   const now = (ms: number) => new Date(ms).toISOString()
 
+  const addArgs = z.object({
+    values: valuesArg,
+    units: UNITS_ARG,
+    parentId: ItemIdSchema.optional().describe('Add as a variant of this root stock'),
+  })
   const add = defineCommand({
     kind: 'effect',
     name: `library.${kind}.add`,
     summary: `Add a ${label} to the library (not undoable).`,
     title: () => `Add ${label} to library`,
     machine: false,
-    args: z.object({ values: valuesArg, units: UNITS_ARG }),
+    // stock variants (library.md#stock-variants-df13): only the stock add lists a parent
+    args: kind === 'stock' ? addArgs : (addArgs.omit({ parentId: true }) as typeof addArgs),
     result: itemResult,
     async run(_doc, args, ctx) {
       const where = `library.${kind}.add`
@@ -89,10 +95,12 @@ function forKind(kind: LibraryItemKind): { commands: AnyCommand[]; queries: Quer
       if (lib.isErr()) return lib
       const values = modelValues(args.values, args.units)
       if (values.isErr()) return Err(values.unwrapErr().withContext(where))
-      const item = await lib
-        .unwrap()
-        .add(values.unwrap(), { id: ctx.ids.next(kind), updatedAt: now(ctx.clock.now()) })
-      return item.map((i) => i.toDTO())
+      const item = await lib.unwrap().add(values.unwrap(), {
+        id: ctx.ids.next(kind),
+        updatedAt: now(ctx.clock.now()),
+        parentId: args.parentId,
+      })
+      return item.map((i) => i.toDTO()).mapErr((e) => e.withContext(where))
     },
   })
 
