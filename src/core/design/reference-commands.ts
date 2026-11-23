@@ -33,6 +33,7 @@ import {
   placedBox,
   placedExtent,
   ReferenceWarningSchema,
+  suggestFacingDepth,
   type Anchor,
   type FitZ,
   type Placement,
@@ -42,6 +43,7 @@ import {
 import { ReferenceDtoSchema, type ReferenceDTO } from './reference.dto'
 import { STL_LIMITS, type StlSummary } from './stl'
 import { SurfaceTable } from './surfaces'
+import { DIRECTIONS, STOCK_FACE } from '../geometry/face'
 
 // ── args ──────────────────────────────────────────────────────────────────────────────────
 
@@ -467,12 +469,17 @@ const BoxSchema = z.object({
 
 const referenceList = defineQuery({
   name: 'design.reference.list',
-  summary: "List a part's references with placed bounds (mm).",
+  summary: "List a part's references with placed bounds (mm) and facing depths.",
   args: z.object({ partId: PartIdSchema }),
   result: z.object({
     references: z.array(
       ReferenceDtoSchema.extend({
         placed: BoxSchema.describe('Placed bounding box in the part frame, mm'),
+        facingDepth: z
+          .record(z.string(), z.string())
+          .describe(
+            'By stock face id: the facing depth that faces down to this reference (project units, rounded down); only faces with a sensible value',
+          ),
         warnings: Warnings,
       }),
     ),
@@ -486,8 +493,15 @@ const referenceList = defineQuery({
       refs.map((ref) =>
         placementOf(ref, where).map((p) => {
           const placed = placedBox(ref.asset.bounds, p)
-          const w = exceedsStock(ref.id, placed, stockSize(loaded.unwrap()))
-          return { ...ref, placed, warnings: w === undefined ? [] : [w] }
+          const stock = stockSize(loaded.unwrap())
+          const w = exceedsStock(ref.id, placed, stock)
+          const boxes = [{ referenceId: ref.id, box: placed }]
+          const facingDepth: Record<string, string> = {}
+          for (const d of DIRECTIONS) {
+            const s = suggestFacingDepth(d, stock, boxes, loaded.unwrap().units)
+            if (s !== undefined) facingDepth[STOCK_FACE[d]] = s.source
+          }
+          return { ...ref, placed, facingDepth, warnings: w === undefined ? [] : [w] }
         }),
       ),
     ).map((references) => ({ references }))

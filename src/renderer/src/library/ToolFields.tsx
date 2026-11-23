@@ -1,7 +1,7 @@
 // The tool form, shared by the Library window's editor (`full`: every field of library.md#tool in
-// the groups Geometry with the tool drawing, Cutting, Presets, Notes) and the quick "New tool…"
-// dialog (`quick`: the fields v0.1 needs). Per-type fields show for their type only (corner radius
-// for a bull nose, point angle for a drill). Doc: docs/conventions/ui-library-window.md#layout, L4
+// the groups Geometry with the tool drawing, Presets, and Details collapsed: material, coating,
+// notes, DF1) and the quick "New tool…" dialog (`quick`: the fields v0.1 needs). Per-type fields
+// show for their type only (corner radius for a bull nose, point angle for a drill). Doc: docs/conventions/ui-library-window.md#layout, L4
 import { useState } from 'react'
 import { TOOL_MATERIALS, TOOL_TYPES, type ToolMaterial } from '../../../core/library/tool.dto'
 import type { QuantityDTO } from '../../../core/quantity/quantity.dto'
@@ -36,6 +36,9 @@ export const TOOL_FIELDS: readonly string[] = [
   'notes',
 ]
 
+/** The full form's collapsed Details group (DF1): secondary fields, the cutting geometry stays open. */
+const DETAIL_FIELDS: readonly string[] = ['toolMaterial', 'coating', 'notes']
+
 const DIMENSIONS: ReadonlySet<string> = new Set([
   'diameter',
   'cornerRadius',
@@ -56,12 +59,28 @@ export function ToolFields({
   variant,
   autoName = false,
   onNameTyped,
+  detailsOpen: detailsOpenProp,
+  onDetailsOpenChange,
 }: FormProps<ToolDraft> & {
   /** The name follows type and diameter (`toolName`) until the user types one. */
   autoName?: boolean
   onNameTyped?: () => void
+  /** The Details group is open (`full`; the window keeps it across items, DF1); else local. */
+  detailsOpen?: boolean
+  onDetailsOpenChange?: (open: boolean) => void
 }): React.JSX.Element {
   const full = variant === 'full'
+  const [detailsLocal, setDetailsLocal] = useState(false)
+  const detailsOpen = detailsOpenProp ?? detailsLocal
+  const setDetailsOpen = onDetailsOpenChange ?? setDetailsLocal
+  const detailsInvalid = DETAIL_FIELDS.some((f) => messages(f).some((x) => x.severity === 'error'))
+  const detailsSummary =
+    [
+      values.toolMaterial === undefined ? undefined : m.materials[values.toolMaterial],
+      values.coating,
+    ]
+      .filter((x) => x !== undefined && x !== '')
+      .join(' · ') || undefined
   const chamfer = values.type === 'chamferMill'
   const [focused, setFocused] = useState<ToolDimension | undefined>(undefined)
   // recommended presets follow every change of the tool (library.md#recommended-presets)
@@ -176,7 +195,24 @@ export function ToolFields({
       >
         {geometry}
       </Group>
-      <Group title={libraryMessages.window.groups.cutting}>
+      <Group title={libraryMessages.window.groups.presets}>
+        <PresetTable
+          presets={values.presets}
+          tool={values}
+          units={units}
+          messages={messages}
+          onChange={(presets) => set({ presets })}
+        />
+      </Group>
+      <Group
+        title={libraryMessages.window.groups.details}
+        collapsible={{
+          // a field inside with an issue opens it: Save focuses the first invalid field
+          open: detailsOpen || detailsInvalid,
+          onOpenChange: (open) => setDetailsOpen(open),
+          summary: detailsSummary,
+        }}
+      >
         {material}
         <Field
           label={m.coating}
@@ -191,17 +227,6 @@ export function ToolFields({
             onChange={(e) => set({ coating: e.target.value === '' ? undefined : e.target.value })}
           />
         </Field>
-      </Group>
-      <Group title={libraryMessages.window.groups.presets}>
-        <PresetTable
-          presets={values.presets}
-          tool={values}
-          units={units}
-          messages={messages}
-          onChange={(presets) => set({ presets })}
-        />
-      </Group>
-      <Group title={libraryMessages.window.groups.notes}>
         <NotesField
           value={values.notes}
           messages={messages('notes')}

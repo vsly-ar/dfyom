@@ -92,6 +92,50 @@
   color: var(--text-muted);
 }
 
+/* a collapsible group's heading (DF1): the legend's look, as the hole inspector's Defaults */
+.disclosure {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+
+.disclosure:hover {
+  color: var(--text);
+}
+
+.disclosure:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+.chevron {
+  display: inline-grid;
+  place-items: center;
+}
+
+.chevron > svg {
+  width: 10px;
+  height: 10px;
+  transform: rotate(-90deg);
+  transition: transform var(--motion-base) var(--ease-standard);
+}
+
+.chevron[data-open] > svg {
+  transform: none;
+}
+
+.summary {
+  font-weight: var(--weight-regular);
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;

@@ -9,6 +9,7 @@
  */
 import { Ok, type AppResult } from '../../shared/result'
 import { noSteps, type Steps } from '../workers/steps'
+import type { Box } from './stl'
 
 /** Triangles between two `steps.step()` calls (≈ 25 ms each at most, measured on the enclosure ×20). */
 export const STEP_TRIANGLES = 25_000
@@ -62,6 +63,32 @@ export function meshSection(
     if (found !== 2) out.length -= 2 * found
   }
   return Ok(Float32Array.from(out))
+}
+
+/**
+ * The axis-aligned box (mm) of a triangle soup after `matrix` (column-major 4 × 4, source units →
+ * the part frame, the ghost's matrix): the reference's exact extent, where the placed box is
+ * larger for free angles (DF4's facing depth). Undefined for an empty mesh. One pass, no steps:
+ * ~10 ms per million vertices.
+ * Doc: docs/modes/reference-model.md#facing-depth-from-the-reference-df4
+ */
+export function meshBounds(positions: Float32Array, matrix: readonly number[]): Box | undefined {
+  const m = matrix
+  const lo = [Infinity, Infinity, Infinity]
+  const hi = [-Infinity, -Infinity, -Infinity]
+  const count = Math.floor(positions.length / 3)
+  for (let i = 0; i < count; i++) {
+    const x = positions[3 * i]!
+    const y = positions[3 * i + 1]!
+    const z = positions[3 * i + 2]!
+    for (let r = 0; r < 3; r++) {
+      const v = m[r]! * x + m[4 + r]! * y + m[8 + r]! * z + m[12 + r]!
+      if (v < lo[r]!) lo[r] = v
+      if (v > hi[r]!) hi[r] = v
+    }
+  }
+  if (count === 0) return undefined
+  return { min: { x: lo[0]!, y: lo[1]!, z: lo[2]! }, max: { x: hi[0]!, y: hi[1]!, z: hi[2]! } }
 }
 
 /** Faces meeting at a smaller angle than this are smooth (as the part mesh, viewport/mesh.ts). */

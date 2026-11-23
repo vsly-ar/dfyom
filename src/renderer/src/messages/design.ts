@@ -364,6 +364,8 @@ export const designMessages = {
     cornerRadius: 'Corner radius',
     depth: 'Depth',
     floorRadius: 'Floor fillet radius',
+    /** A facing's recommended depth (DF4): "0.48 mm, down to the top of Enclosure". */
+    facingToReference: (depth: string, reference: string) => `${depth}, down to ${reference}`,
     on: 'On',
     /** `on` dropdown groups, in the order of ui.md#design-and-plan-controls-v02. */
     directions: {
