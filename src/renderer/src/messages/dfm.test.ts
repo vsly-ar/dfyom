@@ -46,6 +46,21 @@ describe('dfm messages', () => {
     expect(lengthSource(25.4, 'inch')).toBe('1"')
   })
 
+  it('a chamfer through a thin floor names the cut under it (B4)', () => {
+    const tooDeep = (params: DfmWarning['params']) =>
+      dfmMessages.text(
+        w({ code: 'dfm.chamferTooDeep', operation: 'chamfer1', parameter: 'width', params }),
+        'mm',
+        (id) => id,
+      )
+    expect(tooDeep({ depth: 2, edgeDepth: 1.5, edgeOf: 'pocket1', floor: 1 })).toBe(
+      'The chamfer is 2 mm deep and cuts through the 1.5 mm floor above pocket1.',
+    )
+    expect(tooDeep({ depth: 2, edgeDepth: 1, edgeOf: 'drill1' })).toBe(
+      'The chamfer is 2 mm deep, deeper than drill1 (1 mm).',
+    )
+  })
+
   it('words the tool checks by their fit rule, in the project units (F5)', () => {
     const unfit = (params: DfmWarning['params']) =>
       w({

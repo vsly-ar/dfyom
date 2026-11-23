@@ -262,6 +262,49 @@ describe('chamfer DFM', () => {
     expect(warnings(s).some((x) => x.code === 'dfm.chamferTooDeep')).toBe(false)
   })
 
+  it('dfm.chamferTooDeep through a thin floor left by a pocket from the bottom (B4)', async () => {
+    const s = await designSetup()
+    // the Ø6 through hole at (30, 30) on top; a 40 × 40 pocket 18.5 deep from the bottom under
+    // it (the bottom face frame: u = x, v = 60 − y) leaves a 1.5 mm floor around the hole
+    await drill(s)
+    await s.run('design.pocket.add', {
+      partId: s.partId,
+      on: 'stock.bottom',
+      shape: { kind: 'rectangle', center: ['30', '30'], length: '40', width: '40' },
+      depth: '18.5',
+    })
+    await chamfer(s, { width: '2' })
+    const w = warnings(s).find((x) => x.code === 'dfm.chamferTooDeep')
+    expect(w).toMatchObject({
+      operation: 'chamfer1',
+      parameter: 'width',
+      params: { edgeOf: 'pocket1', edgeDepth: expect.closeTo(1.5, 9) },
+    })
+    expect(w?.suggestion).toMatchObject({ relation: 'atMost', value: expect.closeTo(1.5, 9) })
+    await s.run('design.chamfer.update', { partId: s.partId, operationId: 'chamfer1', width: '1' })
+    expect(warnings(s).some((x) => x.code === 'dfm.chamferTooDeep')).toBe(false)
+  })
+
+  it('a floor beside the hole counts where the cone reaches over it (B4)', async () => {
+    const s = await designSetup()
+    await drill(s)
+    // a pocket from the bottom whose wall is 3.5 mm from the hole's axis, 18.6 deep: 1.4 floor;
+    // the 2 mm chamfer (Ø10) is 1.5 deep at r = 3.5, the 1 mm one (Ø8) 0.5
+    await s.run('design.pocket.add', {
+      partId: s.partId,
+      on: 'stock.bottom',
+      shape: { kind: 'rectangle', center: ['43.5', '30'], length: '20', width: '20' },
+      depth: '18.6',
+    })
+    await chamfer(s, { width: '2' })
+    const w = warnings(s).find((x) => x.code === 'dfm.chamferTooDeep')
+    expect(w?.params).toMatchObject({ edgeOf: 'pocket1' })
+    // 1.4 × tan 45° + (3.5 − 3)
+    expect(w?.suggestion).toMatchObject({ value: expect.closeTo(1.9, 9) })
+    await s.run('design.chamfer.update', { partId: s.partId, operationId: 'chamfer1', width: '1' })
+    expect(warnings(s).some((x) => x.code === 'dfm.chamferTooDeep')).toBe(false)
+  })
+
   it('dfm.chamferNoTool when the library has tools but no chamfer mill fits', async () => {
     const s = await designSetup()
     await s.run('library.tool.add', {

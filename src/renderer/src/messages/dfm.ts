@@ -141,7 +141,9 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
     `${num(p['operations'])} cloned operations: the part updates more slowly.`,
   // v0.4 chamfer (design-v0.4.md § Chamfer operation)
   'dfm.chamferTooDeep': (p, L) =>
-    `The chamfer is ${L(p['depth'])} deep, deeper than ${String(p['edgeOf'])} (${L(p['edgeDepth'])}).`,
+    p['floor'] === 1
+      ? `The chamfer is ${L(p['depth'])} deep and cuts through the ${L(p['edgeDepth'])} floor above ${String(p['edgeOf'])}.`
+      : `The chamfer is ${L(p['depth'])} deep, deeper than ${String(p['edgeOf'])} (${L(p['edgeDepth'])}).`,
   'dfm.chamferNoTool': (p, L) =>
     p['stepped'] === 1
       ? `The library has no flat end mill smaller than Ø${L(p['edgeDiameter'])} for the stepped countersink.`

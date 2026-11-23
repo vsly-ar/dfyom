@@ -113,6 +113,81 @@ describe('design.hole.add', () => {
   })
 })
 
+describe('tolerances of derived sizes (B5)', () => {
+  const ratio = (r: { num: string; den: string }) => Number(r.num) / Number(r.den)
+  const tol = (q: unknown) => {
+    const t = (q as { tolerance?: { notation: string; upper: never; lower: never } }).tolerance
+    return t === undefined
+      ? undefined
+      : { notation: t.notation, upper: ratio(t.upper), lower: ratio(t.lower) }
+  }
+
+  it("a countersink's width takes half csDiameter's tolerance, not the drill's", async () => {
+    const s = await designSetup()
+    await addHole(s, {
+      type: 'countersink',
+      diameter: '6 ±0.05',
+      csDiameter: '12 ±0.1',
+      csAngle: '90',
+    })
+    expect(exact(opField(s, 'hole1_countersink', 'width'))).toBe(3)
+    expect(tol(opField(s, 'hole1_countersink', 'width'))).toEqual({
+      notation: 'symmetric',
+      upper: 0.05,
+      lower: -0.05,
+    })
+    await s.run('design.hole.update', { partId: s.partId, featureId: 'hole1', csDiameter: '12' })
+    expect(tol(opField(s, 'hole1_countersink', 'width'))).toBeUndefined()
+  })
+
+  it('the drill below a blind counterbore: the bottom keeps the hole depth tolerance (absolute)', async () => {
+    const s = await designSetup()
+    await addHole(s, {
+      type: 'counterbore',
+      diameter: '5',
+      cbDiameter: '9',
+      cbDepth: '3 ±0.02',
+      bottom: 'flat',
+      depth: '10 +0.1/-0.05',
+    })
+    const drill = tol(opField(s, 'hole1_drill', 'depth'))!
+    expect(drill.upper).toBeCloseTo(0.08, 12)
+    expect(drill.lower).toBeCloseTo(-0.03, 12)
+    // the floor's band plus the drill's is the hole depth's: 3 ±0.02 + 7 +0.08/−0.03
+    expect(drill.upper + 0.02).toBeCloseTo(0.1, 12)
+    expect(drill.lower - 0.02).toBeCloseTo(-0.05, 12)
+  })
+
+  it("a counterbore band wider than the hole depth's: a zero band at the midpoint", async () => {
+    const s = await designSetup()
+    await addHole(s, {
+      type: 'counterbore',
+      diameter: '5',
+      cbDiameter: '9',
+      cbDepth: '3 ±0.1',
+      bottom: 'flat',
+      depth: '10 +0.02/-0.01',
+    })
+    const drill = tol(opField(s, 'hole1_drill', 'depth'))!
+    // (0.02 − 0.1 + (−0.01 + 0.1)) / 2 = 0.005
+    expect(drill.upper).toBeCloseTo(0.005, 12)
+    expect(drill.lower).toBeCloseTo(0.005, 12)
+  })
+
+  it('an untoleranced hole depth leaves the drill untoleranced (general tolerance)', async () => {
+    const s = await designSetup()
+    await addHole(s, {
+      type: 'counterbore',
+      diameter: '5',
+      cbDiameter: '9',
+      cbDepth: '3 ±0.1',
+      bottom: 'flat',
+      depth: '10',
+    })
+    expect(tol(opField(s, 'hole1_drill', 'depth'))).toBeUndefined()
+  })
+})
+
 describe('invariants and issue paths (at the hole fields)', () => {
   const rules = (e: { issues: readonly { path: readonly unknown[]; rule: string }[] }) =>
     e.issues.map((i) => [i.path.join('.'), i.rule])

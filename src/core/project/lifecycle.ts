@@ -43,8 +43,16 @@ export interface HostPort {
     init: { name: string; unitSystem: UnitSystem },
     source: Source,
   ): AsyncAppResult<OpenedResult>
-  /** A file already open in this instance returns its key with `alreadyOpen: true`. */
-  open(file: string, source: Source): AsyncAppResult<OpenedResult & { alreadyOpen: boolean }>
+  /**
+   * A file already open in this instance returns its key with `alreadyOpen: true`. `reset`: a
+   * file with incompatible pre-alpha data (`isIncompatibleProject`) is replaced by an empty
+   * project of the same name and opened (callers confirm first); ignored for a file that loads.
+   */
+  open(
+    file: string,
+    source: Source,
+    reset?: boolean,
+  ): AsyncAppResult<OpenedResult & { alreadyOpen: boolean }>
   /** Unsaved changes need `confirm`; `run.busy` while a run job runs. */
   close(key: string, confirm: boolean): AsyncAppResult<void>
   list(): readonly OpenProjectInfo[]
@@ -102,12 +110,18 @@ export const projectOpen = defineCommand({
       .min(1)
       .refine(isProjectFileName, 'must be a .dfyom file')
       .describe('Path of the .dfyom project file'),
+    reset: z
+      .boolean()
+      .default(false)
+      .describe(
+        'Only after the user confirmed: when the file holds data of an earlier pre-alpha version that no longer loads (error frame project.incompatible), replace it with an empty project of the same name and open that',
+      ),
   }),
   result: OpenedSchema.extend({
     alreadyOpen: z.boolean().describe('The file was already open in this instance'),
   }),
   async run(_doc, args, ctx) {
-    return withHost(ctx, 'project.open', (h) => h.open(args.file, ctx.source))
+    return withHost(ctx, 'project.open', (h) => h.open(args.file, ctx.source, args.reset))
   },
 })
 

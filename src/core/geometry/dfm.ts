@@ -15,8 +15,17 @@
  */
 import type { ToolType } from '../library/tool.dto'
 import type { Region2dPort } from './2d/port'
-import type { Bounds2 } from './2d/model'
-import { adjacentStockFaces, DIRECTION_LABEL, localStock, type Direction } from './face'
+import { regionLoops, type Bounds2 } from './2d/model'
+import { closestOnChains, regionContains } from './2d/measure'
+import {
+  adjacentStockFaces,
+  DIRECTION,
+  DIRECTION_LABEL,
+  DIRECTIONS,
+  faceFrame,
+  localStock,
+  type Direction,
+} from './face'
 import {
   chamferDepth,
   CHORD_TOLERANCE,
@@ -27,6 +36,10 @@ import {
   type OperationGeometry,
   type PartGeometryInput,
   type StockGeometry,
+  type Shape as OperationShape,
+  type Vec2,
+  applyPlacement,
+  unapplyPlacement,
   isAnalyticOperation,
   type AnalyticOperation,
 } from './model'
@@ -171,7 +184,7 @@ export function parameterChecks(
         return [...drilling(op, stock, lib), ...reach(op, stock, lib, own), ...tool]
       case 'chamfer':
         return [
-          ...chamfer(op, input.operations, stock, lib),
+          ...chamfer(op, input.operations, stock, input.stock, lib),
           ...reach(op, stock, lib, own),
           ...tool,
         ]
@@ -570,10 +583,14 @@ function chamfer(
   op: Op<'chamfer'>,
   all: readonly OperationGeometry[],
   stock: StockGeometry,
+  partStock: StockGeometry,
   lib: Library,
 ): DfmWarning[] {
   const out: DfmWarning[] = []
   const edge = all.find((o) => o.id === op.edgeOf)
+  const through =
+    (edge?.kind === 'drilling' && edge.bottom.kind === 'through') ||
+    (edge?.kind === 'profile' && edge.depth === undefined)
   const edgeDepth =
     edge?.kind === 'pocket'
       ? edge.depth
@@ -585,20 +602,48 @@ function chamfer(
           ? (edge.depth ?? op.onZ + stock.thickness)
           : undefined
   const depth = chamferDepth(op)
-  if (edgeDepth !== undefined && depth >= edgeDepth - EPSILON) {
-    const tan = Math.tan(((op.angle / 2) * Math.PI) / 180)
+  const tan = Math.tan(((op.angle / 2) * Math.PI) / 180)
+  // the widest chamfer that stays above each limit (D45: sized by width); the smallest wins
+  const limits: { width: number; edgeDepth: number; edgeOf: string; floor: boolean }[] = []
+  if (edgeDepth !== undefined && depth >= edgeDepth - EPSILON)
+    limits.push({ width: edgeDepth * tan, edgeDepth, edgeOf: op.edgeOf, floor: false })
+  // B4: a through edge can still end in a thin floor left by a cut from the opposite face
+  if (through)
+    for (const f of floorsUnder(op, all, partStock)) {
+      const outside = Math.max(0, f.radius - op.edgeDiameter / 2)
+      if (
+        (op.diameter / 2 - Math.max(f.radius, op.edgeDiameter / 2)) / tan >=
+        f.thickness - EPSILON
+      )
+        limits.push({
+          width: Math.max(0, f.thickness * tan + outside),
+          edgeDepth: f.thickness,
+          edgeOf: f.id,
+          floor: true,
+        })
+    }
+  const limit = limits.reduce<(typeof limits)[number] | undefined>(
+    (a, b) => (a === undefined || b.width < a.width ? b : a),
+    undefined,
+  )
+  if (limit !== undefined)
     out.push(
       warning(
         'dfm.chamferTooDeep',
         op,
         'width',
-        `the chamfer is ${mm(depth)} deep, ${op.edgeOf} only ${mm(edgeDepth)}`,
-        { depth, edgeDepth, edgeOf: op.edgeOf },
-        // the widest chamfer that stays above the edge's bottom (D45: sized by width)
-        { suggestion: atMost(edgeDepth * tan) },
+        limit.floor
+          ? `the chamfer is ${mm(depth)} deep, through the ${mm(limit.edgeDepth)} floor above ${limit.edgeOf}`
+          : `the chamfer is ${mm(depth)} deep, ${op.edgeOf} only ${mm(limit.edgeDepth)}`,
+        {
+          depth,
+          edgeDepth: limit.edgeDepth,
+          edgeOf: limit.edgeOf,
+          ...(limit.floor && { floor: 1 }),
+        },
+        { suggestion: atMost(limit.width) },
       ),
     )
-  }
   if (!lib.empty && candidates(op, lib).length === 0)
     out.push(
       warning(
@@ -618,6 +663,58 @@ function chamfer(
       ),
     )
   return out
+}
+
+/**
+ * The floors under a chamfer (hardening B4, design-v0.4.md § Implementation C2, DFM): pockets and
+ * blind drillings cut from the face opposite the chamfer's, with the material left between the
+ * chamfer's face and the cut's bottom (`thickness`, ≤ 0 when the cut reaches the face) and the
+ * cut's nearest distance to the chamfer's axis (`radius`, 0 when it lies under the axis). Cuts
+ * farther than the chamfer's outer radius are left out.
+ */
+function floorsUnder(
+  op: Op<'chamfer'>,
+  all: readonly OperationGeometry[],
+  stock: StockGeometry,
+): { id: string; thickness: number; radius: number }[] {
+  const dir = directionOf(op)
+  const n = DIRECTION[dir].n
+  const opposite = DIRECTIONS.find((d) => DIRECTION[d].n.every((c, i) => c === -n[i]!))!
+  const axis = applyPlacement(faceFrame(dir, stock), [op.center[0], op.center[1], op.onZ])
+  const [u, v, w] = unapplyPlacement(faceFrame(opposite, stock), axis)
+  const out: { id: string; thickness: number; radius: number }[] = []
+  for (const o of all) {
+    if (directionOf(o) !== opposite) continue
+    let bottom: number
+    let radius: number
+    if (o.kind === 'drilling' && o.bottom.kind !== 'through') {
+      bottom = o.onZ - o.bottom.depth
+      radius = Math.max(0, Math.hypot(u - o.center[0], v - o.center[1]) - o.diameter / 2)
+    } else if (o.kind === 'pocket') {
+      bottom = o.onZ - o.depth
+      radius = distanceToShape(o.shape, [u, v])
+    } else continue
+    if (radius >= op.diameter / 2 - EPSILON) continue
+    out.push({ id: o.id, thickness: bottom - w, radius })
+  }
+  return out
+}
+
+/** Distance from `p` to the area of a placed shape (0 inside), face frame. */
+function distanceToShape(shape: OperationShape, p: Vec2): number {
+  const c = shape.contour
+  const [cx, cy] = shape.center
+  if (c.kind === 'circle') return Math.max(0, Math.hypot(p[0] - cx, p[1] - cy) - c.radius)
+  if (c.kind === 'rectangle') {
+    const r = Math.min(c.cornerRadius, c.length / 2, c.width / 2)
+    const dx = Math.max(0, Math.abs(p[0] - cx) - (c.length / 2 - r))
+    const dy = Math.max(0, Math.abs(p[1] - cy) - (c.width / 2 - r))
+    return Math.max(0, Math.hypot(dx, dy) - r)
+  }
+  if (c.kind !== 'region') return Infinity
+  const local: Vec2 = [p[0] - cx, p[1] - cy]
+  if (regionContains(c.region, local)) return 0
+  return closestOnChains(regionLoops(c.region), local)?.distance ?? Infinity
 }
 
 /**

@@ -333,6 +333,7 @@ New / Open / Save in the window (task 3.6; `shell/project/`, shared by every mod
 - **Save** writes to the project file; an untitled project goes to **Save as**: the native save dialog (default name from the project, `.dfyom` added), then `project.save { target, confirm: true }` – the OS dialog already asked before replacing a file. The replica takes the new file from the save's outcome (`filePath`).
 - **Recovery prompt:** `project.open` answering `persist.recovery` opens "Restore unsaved changes?" with "Restore changes" (primary) and "Discard changes" (danger, confirmed): `project.recovery.resolve`.
 - **Foreign lock:** `persist.locked` opens "The project is open elsewhere" with the error, "Try again", and "Retry in 2 min" (a countdown, then it opens again by itself): a lock of a stopped instance on another computer can be taken over after 2 minutes ([persistence.md](../architecture/persistence.md#lock)).
+- **Incompatible project (pre-alpha, hardening B6):** `project.open` failing with incompatible data ([persistence.md § Open](../architecture/persistence.md#open)) opens "This project can't be opened": it was saved by an earlier pre-alpha version whose data no longer loads, and pre-alpha versions don't upgrade projects; the `ErrorMessage` shows what failed. "Cancel" and "Discard and start fresh" (danger), which asks again ("Discard the content of “file”?": the file is replaced by an empty project of the same name, for good) before `project.open { file, reset: true }`.
 - Other failures show the `ErrorMessage` in a dialog ("The project could not be opened / saved / created").
 
 ### Keyboard shortcuts
@@ -686,7 +687,7 @@ Soft tier ([severities](#warnings-and-dfm)): neutral, "i" icon, dismissible, wit
 Tests, written with U1–U3:
 
 - Component tests for `ShapeItemList`, `SegmentTable`, `ShapePicker` and `ImportReportDialog`, against the fake bridge with a real design runtime.
-- Unit tests for the handle, marker and snap maths, kept in pure functions (`viewport/shape-handles.ts`, `viewport/snap.ts`).
+- Unit tests for the handle, marker and snap maths, kept in pure functions (`viewport/shape-handles.ts`; the snap engine in core, `src/core/geometry/snap.ts`, re-exported by `viewport/snap.ts`).
 - An e2e Shape Editor flow in hidden windows for the canvas.
 
 #### Implementation (U1)
@@ -720,7 +721,7 @@ Code: `modes/design/` (`ShapePicker`, `TabsFields`, `useTabMarkers`, the pure `o
 
 #### Implementation (U3)
 
-Code: `viewport/` (the pure `snap.ts`, `SnapGlyph`, `MeasureTool` with `Dimension2d` and `MeasureChip`, `Measure3d`, snapping and measuring in `ShapeView`, the tab drag's scale in `TabMarkers`), `modes/design/` (`useReferenceSection`, `sectionMatrix` and `middleDepth` in `reference-view.ts`, `snapAlong` in `tabs-model.ts`) and core (`design/mesh-section.ts`, worker task `reference.section`, [workers.md](../architecture/workers.md#what-runs-on-a-worker)). How it differs from the rules above, or settles what they left open:
+Code: core `geometry/snap.ts` (the pure snap engine, moved from the renderer in hardening A6 so agents rank targets the same way; `viewport/snap.ts` re-exports it) and `geometry/measure.ts` (`measureBetween`, `angleAt`), `viewport/` (`SnapGlyph`, `MeasureTool` with `Dimension2d` and `MeasureChip`, `Measure3d`, snapping and measuring in `ShapeView`, the tab drag's scale in `TabMarkers`), `modes/design/` (`useReferenceSection`, `sectionMatrix` and `middleDepth` in `reference-view.ts`, `snapAlong` in `tabs-model.ts`) and core (`design/mesh-section.ts`, worker task `reference.section`, [workers.md](../architecture/workers.md#what-runs-on-a-worker)). How it differs from the rules above, or settles what they left open:
 
 - **Snap engine** (`snapPoint`): candidates within `SNAP_PX` = 8 screen px (so the reach in mm follows the zoom); the best priority wins, then the nearest: ends and stock corners, then centres, midpoints, edges (stock edges and the reference section), then the grid. A handle's own start point is excluded, so a drag does not stick where it began. `Shift` (15° steps) and `Alt` drag freely, as does the "Snap" toggle off.
 - **Snap values.** A snap to a shape point, stock edge or corner or the grid is exact: the handle's value is written to 0.1 µm in the field's unit (`SNAP_STEP_MM`), so a 1/16 in grid point reads `0.0625"` and not a pixel-rounded number. A reference snap keeps the pixel rounding of free drags, since the mesh's vertices are not design values.
@@ -732,6 +733,7 @@ Code: `viewport/` (the pure `snap.ts`, `SnapGlyph`, `MeasureTool` with `Dimensio
 - **Measure in the 3D viewport:** "Measure" in the main toolbar (not in Run; in the view toolbar until DF19) and `D` on the region. Clicks raycast the part and the shown references (the ghost stays unpickable for selection; the measure raycasts meshes tagged `userData.measure`), snapping to the hit triangle's vertices and the stock corners within 8 px. The dimension line draws on top, the chip shows the distance with ΔX, ΔY, ΔZ on a second line in project units (drei's `Html` overlays render outside the app's providers, so no tooltip there); the measure button sat in the view toolbar until DF19 moved it to the main toolbar (`measuring` in the ui store, so the toolbar and the viewport share it; the Viewport keeps its own state when no `measuring` prop is passed); a drag still orbits; selection clicks are off while measuring; pick mode wins over it.
 - **Review fixes (U3):** in a narrow inspector (a container query on the table, below 34rem) the segment table puts each segment on two lines (type, end X, end Y; radius, direction, large arc, fillet; # spans both) with smaller mono numbers, so 4 integer digits and 3 decimals show without horizontal scroll; wider inspectors keep one line. A shape row's "Used by n" fades while the row's actions show (hover, focus, selected), as the operation id does, instead of running under the delete button.
 - **Not built:** point-to-edge distances (the rules mention them; point to point covered the review cases), and snapping in the 3D viewport beyond the measure tool (the viewport has no other drags).
+- **Headless (hardening A6):** `design.measure` gives agents the same snap and measure without the UI: snap candidates near a part-frame point (mesh vertices, stock corners, part zero, hole and face centres, the nearest feature edge) ranked by `SNAP_PRIORITY` within a radius in mm instead of `SNAP_PX`, and distances (with ΔX, ΔY, ΔZ) or angles between points ([llm-api.md § A6](../architecture/llm-api.md#a6-designmeasure-headless-snap-and-measure)). The viewport's behaviour is unchanged.
 
 ### Features (v0.4)
 

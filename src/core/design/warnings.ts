@@ -14,7 +14,7 @@ import type { Stock } from '../library/stock'
 import { Tool } from '../library/tool'
 import type { ProjectDoc, UnitSystem } from '../project/document'
 import { toGeometryInput } from './geometry-input'
-import { featureBlock, ownedOperationId, type LoadedFeature } from './feature'
+import { featureBlock, ownedOperationId, type LoadedFeature, type SpanGeometry } from './feature'
 import type { Part } from './operation'
 import type { ShapeDTO } from './shape.dto'
 import { dfmTool, operationTools } from './tool-choice'
@@ -53,7 +53,10 @@ export function partWarnings(
         operationTools: operationTools(part.operations, snapshots),
         ...(region2d !== undefined && { region2d }),
       }),
-      featureWarnings(part.operations, features, stock, units, shapes),
+      featureWarnings(part.operations, features, stock, units, shapes, {
+        operations: input.operations,
+        region2d,
+      }),
     ),
   )
 }
@@ -69,13 +72,14 @@ function featureWarnings(
   stock: Stock,
   units: UnitSystem,
   shapes: readonly ShapeDTO[],
+  geometry: SpanGeometry,
 ): DfmWarning[] {
   return features.flatMap(({ spec, feature }) => {
     const { start, end } = featureBlock(ops, feature.id)
     if (start === end) return []
     return [
       ...(spec.warnings?.(feature, (role) => ownedOperationId(feature.id, role)) ?? []),
-      ...(spec.spanWarnings?.(feature, ops, stock, units, shapes) ?? []),
+      ...(spec.spanWarnings?.(feature, ops, stock, units, shapes, geometry) ?? []),
     ]
   })
 }

@@ -47,6 +47,16 @@ export const projectMessages = {
     waiting: (s: number) => `Retrying in ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`,
     cancel: 'Cancel',
   },
+  incompatible: {
+    title: 'This project can’t be opened',
+    description: (file: string) =>
+      `“${file}” was saved by an earlier pre-alpha version of DFYOM, and its data no longer loads. Pre-alpha versions don’t upgrade projects: discard its content and start fresh with an empty project of the same name, or keep the file as it is.`,
+    reset: 'Discard and start fresh',
+    cancel: 'Cancel',
+    confirmTitle: (file: string) => `Discard the content of “${file}”?`,
+    confirmDescription:
+      'The file is replaced by an empty project with the same name and units. Its parts and plans are deleted for good.',
+  },
   failed: {
     open: 'The project could not be opened',
     save: 'The project could not be saved',

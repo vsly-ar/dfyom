@@ -13,6 +13,7 @@ import {
 } from '../design/tool-commands'
 import { REFERENCE_COMMANDS, REFERENCE_QUERIES } from '../design/reference-commands'
 import { SHAPE_COMMANDS, SHAPE_QUERIES } from '../design/shape-commands'
+import { designMeasure } from '../design/measure'
 import { FASTENER_QUERIES } from '../design/fastener/commands'
 import { FEATURE_COMMANDS, FEATURE_QUERIES } from '../design/feature-commands'
 import {
@@ -88,6 +89,7 @@ export const PROJECT_COMMANDS: readonly AnyCommand[] = [
 ]
 export const PROJECT_QUERIES: readonly QueryDef[] = [
   ...DESIGN_QUERIES,
+  designMeasure,
   ...DESIGN_TOOL_QUERIES,
   ...SHAPE_QUERIES,
   ...FEATURE_QUERIES,

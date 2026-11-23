@@ -169,7 +169,17 @@ describe('operations: add with defaults, update, undo/redo', () => {
   it('facing: default depth 0.5 mm, id facing1, name "Facing 1"', async () => {
     const s = await designSetup()
     const r = await expectUndoRedo(s, 'design.facing.add', { partId: s.partId })
-    expect(r).toEqual({ operationId: 'facing1', toolLocked: false, warnings: [] })
+    expect(r).toEqual({
+      operationId: 'facing1',
+      toolLocked: false,
+      warnings: [],
+      placed: {
+        face: 'stock.top',
+        min: [0, 0],
+        max: [100, 60],
+        box: { min: [0, 0, -0.5], max: [100, 60, 0] },
+      },
+    })
     expect(s.op('facing1')).toMatchObject({ kind: 'facing', name: 'Facing 1' })
     expect(s.op('facing1')).toMatchObject({ depth: { source: '0.5 mm', defaultUnit: 'mm' } })
     await expectUndoRedo(s, 'design.facing.update', {
@@ -236,7 +246,8 @@ describe('operations: add with defaults, update, undo/redo', () => {
       center: ['10', '10'],
       diameter: '6',
     })
-    expect(r).toEqual({ operationId: 'drill1', toolLocked: false, warnings: [] })
+    expect(r).toMatchObject({ operationId: 'drill1', toolLocked: false, warnings: [] })
+    expect(r).toHaveProperty('placed.face', 'stock.top')
     expect(s.op('drill1')).toEqual(expect.objectContaining({ bottom: 'through', on: 'stock.top' }))
     expect(s.op('drill1')).not.toHaveProperty('depth')
     const id = { partId: s.partId, operationId: 'drill1' }
