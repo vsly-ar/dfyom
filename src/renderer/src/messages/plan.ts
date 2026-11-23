@@ -473,6 +473,9 @@ export function findingText(
       const profile = str('profile')
       const inside = str('operation')
       if (profile === undefined || inside === undefined) return sentence(w.message)
+      // DF57: an operation after the cut that releases the part
+      if (w.rule === 'releaseFirst')
+        return `${capital(names.design(profile))} releases the part before ${names.design(inside)}: the part is held only by its tabs.`
       return `${capital(names.design(profile))} is cut before ${names.design(inside)} inside it: the piece may be loose.`
     }
     case 'plan.cutoutBeforeSetup': {

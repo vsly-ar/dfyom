@@ -102,6 +102,11 @@ export interface ToolCheckInput {
   readonly ops: readonly Operation[]
   readonly part: Part
   readonly stock: Stock
+  /**
+   * Through depth (mm) by design operation id of the through profiles over material an earlier
+   * setup cleared (DF50, `planThroughDepths`); the others cut the stock thickness.
+   */
+  readonly throughDepths?: ReadonlyMap<string, number>
   readonly tool: Tool
   /** Resolved stickout, mm. */
   readonly stickout: number
@@ -238,7 +243,8 @@ export function toolFindings(i: ToolCheckInput): Finding[] {
       case 'profile': {
         // a blind `on` groove (v0.3) cuts to its depth below the stock face, without breakthrough
         const breakthrough = i.strategy.kind === 'profile' ? i.strategy.breakthrough : 0
-        const cut = op.depth.mapOr(thickness + breakthrough, (d) => d.canonical)
+        const material = i.throughDepths?.get(op.id) ?? thickness
+        const cut = op.depth.mapOr(material + breakthrough, (d) => d.canonical)
         const what = op.depth.isSome() ? 'groove depth' : 'thickness + breakthrough'
         if (D > op.slotWidth.canonical + EPS)
           add('tool', 'slotWidth', 'tool diameter must be at most the slot width', {

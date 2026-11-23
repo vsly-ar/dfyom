@@ -275,6 +275,25 @@ describe('evaluatePart: pieces', () => {
 })
 
 describe('evaluatePart: retainedRemoved', () => {
+  it('DF50: tabs on the material an earlier setup left are not cut away by its pocket', () => {
+    // a 5 mm relief over the whole underside: the outline cuts 15 mm, its tabs stand on z −15
+    const relief = pocket({
+      id: 'pocket2',
+      direction: '-z',
+      shape: {
+        center: [50, 30],
+        contour: { kind: 'rectangle', length: 100, width: 60, cornerRadius: 4 },
+      },
+      depth: 5,
+      floorRadius: 0,
+    })
+    // measured from the raw bottom the 3 mm tabs lie inside the relief
+    expect(only(evaluate(part(profile(), relief)), 'dfm.retainedRemoved')).toHaveLength(1)
+    const e = evaluate(part(profile({ throughDepth: 15 }), relief))
+    expect(only(e, 'dfm.retainedRemoved')).toEqual([])
+    expect(e.pieces).toBe(1) // the tabs hold the part
+  })
+
   it('warns when another operation cuts a tab away, naming both operations', () => {
     // tab[0] sits at x 46..54 in the front slot (y 2..8), up to z −17
     const e = evaluate(

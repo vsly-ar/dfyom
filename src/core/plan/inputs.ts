@@ -23,6 +23,7 @@ import type { ResolvedFeeds } from './feeds'
 import type { SetupRotation } from './plan.dto'
 import { setupDirection, setupRotation } from './setups'
 import { loadPlan, setupOf } from './plan'
+import { planThroughDepths } from './through'
 import { hashJson } from './snapshot'
 import type { ResolvedStrategy } from './strategy'
 
@@ -53,6 +54,11 @@ export interface PlanOperationInput {
   readonly feeds: ResolvedFeeds
   readonly strategy: ResolvedStrategy
   readonly machine: Option<Machine>
+  /**
+   * A through profile over material an earlier setup of the plan cleared from the opposite face:
+   * the material it cuts (mm; DF50, `planThroughDepths`). Absent = the stock extent.
+   */
+  readonly throughDepth?: number
   /** The operation before it in the machining order (where the tool starts); none for the first. */
   readonly previousPlanOperationId?: string
   /**
@@ -132,6 +138,8 @@ export function planOperationInputs(
     previous = op.id
     if (!wanted(op.id)) return
     const e = evaluateOperation(plan, op)
+    const throughDepth =
+      e.kind === 'profile' ? planThroughDepths(plan, port).get(e.ops[0]?.id ?? '') : undefined
     // no error findings: tool, stickout and feeds are present
     const toolSnapshotId = op.tool!
     out.push({
@@ -148,6 +156,7 @@ export function planOperationInputs(
       feeds: e.feeds.unwrap(),
       strategy: e.strategy,
       machine: plan.machine,
+      ...(throughDepth === undefined ? {} : { throughDepth }),
       ...(previousPlanOperationId === undefined ? {} : { previousPlanOperationId }),
       inputHash: chain,
     })

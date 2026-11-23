@@ -187,6 +187,12 @@ export type OperationGeometry = FacePlacement &
         readonly slotWidth: number
         /** v0.3, `on` only: a blind groove's depth below the stock face; absent = through. */
         readonly depth?: number
+        /**
+         * A through cut's depth below the stock face when an earlier setup already cleared
+         * material under its whole slot from the opposite face (DF50, `throughDepths`); absent =
+         * the stock extent along the normal. Tabs stand on this level.
+         */
+        readonly throughDepth?: number
         readonly tabs: {
           readonly count: number
           readonly width: number
@@ -307,6 +313,8 @@ export const DFM_WARNING_CODES = [
   'dfm.tabsNone',
   'dfm.tabsUnused',
   'dfm.tabsThin',
+  // material removed by earlier setups (DF50): docs/modes/plan-v0.2.md#material-removed-by-earlier-setups
+  'dfm.tabsThick',
   // face access checks (v0.2): docs/modes/design-v0.2.md#dfm-access-checks
   'dfm.reach',
   'dfm.setups',

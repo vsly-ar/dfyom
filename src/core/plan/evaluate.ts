@@ -22,6 +22,7 @@ import {
 } from './feeds'
 import { orderFindings } from './order'
 import { setupFindings, setupStockSize } from './setups'
+import { planThroughDepths } from './through'
 import { checkPartFits } from './validity'
 import { shapeToolFindings } from './shape-checks'
 import type { Region2dPort } from '../geometry/2d/port'
@@ -179,6 +180,7 @@ export function evaluateOperation(
     ops,
     part: plan.part,
     stock: plan.stock,
+    throughDepths: planThroughDepths(plan, port),
     tool: t,
     stickout,
     ...(stepdown.isSome() ? { stepdown: stepdown.unwrap() } : {}),

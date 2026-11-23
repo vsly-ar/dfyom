@@ -116,6 +116,9 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
     p['thickness'] !== undefined
       ? `Tabs ${L(p['thickness'])} thick are too thin to hold the piece.`
       : `Tabs ${L(p['width'])} wide are too narrow to hold the piece.`,
+  // DF50: an earlier setup cleared material under the slot from the opposite face
+  'dfm.tabsThick': (p, L) =>
+    `Tabs ${L(p['thickness'])} thick reach the stock face: an earlier setup leaves only ${L(p['material'])} of material under the slot. Make them thinner.`,
   // v0.4 TB1 (design-v0.4.md § Tabs relocate off free sides)
   'dfm.tabsRelocated': (p) =>
     `${num(p['moved'])} of ${num(p['count'])} tabs moved off sides where the slot leaves no stock beyond the cut.`,
