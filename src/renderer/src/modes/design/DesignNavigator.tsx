@@ -35,16 +35,17 @@ export { operationIcon } from './OperationList'
 
 const m = designMessages
 const f = m.features
-/** The empty list's buttons (design order of a typical part). */
-const KINDS: readonly OperationKind[] = ['facing', 'pocket', 'drilling', 'profile']
-/** The Add menu's Operations group (ui.md § Feature rows and Add). */
+/**
+ * The Add menu's Operations group (ui.md § Feature rows and Add); the empty list's buttons follow
+ * the same order, then Add bolt hole (DF48).
+ */
 const MENU_KINDS: readonly OperationKind[] = ['facing', 'pocket', 'profile', 'drilling']
 const ICON: Record<OperationKind, IconName> = {
   facing: 'facing',
   pocket: 'pocket',
   drilling: 'drilling',
   profile: 'profile',
-  // not in KINDS: a chamfer needs an edge (the row menu's Chamfer, DF16)
+  // not in MENU_KINDS: a chamfer needs an edge (the row menu's Chamfer, DF16)
   chamfer: 'chamfer',
 }
 
@@ -171,11 +172,18 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
             headingLevel={3}
           />
           <div className={styles['addRow']}>
-            {KINDS.map((k) => (
+            {MENU_KINDS.map((k) => (
               <Button key={k} size="sm" icon={<Icon name={ICON[k]} />} onClick={() => void add(k)}>
                 {m.add(k)}
               </Button>
             ))}
+            <Button
+              size="sm"
+              icon={<Icon name="hole-counterbore" />}
+              onClick={() => void addHole()}
+            >
+              {m.navigator.empty.addHole}
+            </Button>
           </div>
         </div>
       ) : (

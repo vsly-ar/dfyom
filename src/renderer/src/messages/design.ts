@@ -290,6 +290,8 @@ export const designMessages = {
     /** DF13: one screen, the library stock optional. */
     fromLibrary: 'From library',
     notSelected: 'Not selected',
+    /** DF48: the From library select with nothing to choose. */
+    libraryEmpty: 'No stock in the library yet: Save to library adds one.',
     variantOf: (parent: string) => `Variant of ${parent}`,
     materialLocked: 'From the library stock. Choose Not selected to change the material.',
     saveToLibrary: 'Save to library',
@@ -332,7 +334,11 @@ export const designMessages = {
     reference: 'Reference',
     done: 'Done',
     stockDescription: 'The block the part is cut from.',
-    shapesDescription: 'Outlines that pockets and profiles can cut. Choose one to edit it.',
+    /** "Choose one" only while there is one to choose (DF48). */
+    shapesDescription: (any: boolean) =>
+      any
+        ? 'Outlines that pockets and profiles can cut. Choose one to edit it.'
+        : 'Outlines that pockets and profiles can cut.',
     part: 'Part',
     size: 'Size (X × Y × Z)',
     material: 'Material',
@@ -374,7 +380,9 @@ export const designMessages = {
     listLabel: 'Operations in design order',
     empty: {
       title: 'No operations yet',
-      description: 'Add an operation to remove material from the stock, starting with facing.',
+      // DF48: no "starting with facing" (wrong for sheet goods); features are offered too
+      description: 'Add an operation or a feature to cut the stock.',
+      addHole: 'Add bolt hole',
     },
     remove: (name: string) => `Remove ${name}`,
     /** The row menu's Remove (DF16). */

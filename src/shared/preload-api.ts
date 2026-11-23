@@ -71,6 +71,11 @@ export const IPC = {
   fileChooseSave: 'dfyom:file.chooseSave',
   /** Renderer → main (invoke): the native "Export gCode" dialog; the chosen path or null (3.7). */
   fileChooseExport: 'dfyom:file.chooseExport',
+  /**
+   * Renderer → main (invoke): reveal an exported file in Finder / the file manager (DF48); only a
+   * path this window chose in its "Export gCode" dialog. Whether it was shown.
+   */
+  fileShowInFolder: 'dfyom:file.showInFolder',
   /** Renderer → main (invoke): the native "Import reference" dialog (STL); the path or null (R3). */
   fileChooseReference: 'dfyom:file.chooseReference',
   /** Renderer → main (invoke): the native "Import SVG" dialog; the path or null (I1). */
@@ -386,6 +391,8 @@ export interface PreloadApi {
     chooseReference(): Promise<string | null>
     /** An SVG to import as shapes (I1); the window then calls `design.shape.import`. */
     chooseSvg(): Promise<string | null>
+    /** Reveals an exported file (a path from `chooseExport`) in Finder (DF48); whether it did. */
+    showInFolder(path: string): Promise<boolean>
   }
   /** Reference models of the window's project: the ghost's triangles (R3), a section (U3). */
   readonly reference: {

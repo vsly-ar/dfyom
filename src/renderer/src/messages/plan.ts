@@ -184,7 +184,11 @@ export const planMessages = {
     archived: 'Archived plans cannot be exported.',
     blocked: 'Fix the errors before exporting.',
     doneTitle: 'gCode exported',
+    /** DF48: the file name here; its folder on its own line, the full path as its tooltip. */
     doneDescription: (file: string) => `The GRBL program was written to ${file}.`,
+    folder: (folder: string) => `In ${folder}`,
+    /** DF48: reveals the file; "Show in folder" off macOS. */
+    showInFolder: (mac: boolean) => (mac ? 'Show in Finder' : 'Show in folder'),
     failedTitle: 'The gCode could not be exported',
     lines: (n: number) => `${n} lines`,
     time: (seconds: number) => `About ${formatDuration(seconds)} without tool changes`,
@@ -219,7 +223,9 @@ export const planMessages = {
       title: 'Part (plan copy)',
       edited: 'Edited in plan',
       revert: 'Revert to design',
-      draftHint: 'Set the plan status to settled design to edit this operation for this plan only.',
+      // DF48: what the draft does first, then how to edit (UX audit: it read twice-over)
+      draftHint:
+        'This plan follows the design while it is a draft. To edit this operation for this plan only, set the plan status to settled design.',
       settledHint: 'Changes here apply to this plan only, not to the design.',
     },
     tool: 'Tool',

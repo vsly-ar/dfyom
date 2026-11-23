@@ -24,7 +24,11 @@ export interface ImportPreview {
 }
 
 export type ImportReportStep =
-  | { readonly kind: 'options' }
+  | {
+      readonly kind: 'options'
+      /** The chosen file's path: the dialog names it (DF48). */
+      readonly path?: string
+    }
   | { readonly kind: 'refused'; readonly error: AppErrorData }
   | {
       readonly kind: 'report'
@@ -87,6 +91,7 @@ export function ImportReportDialog(props: ImportReportDialogProps): React.JSX.El
       modal={props.modal ?? true}
       title={t.title(step.shapes)}
       description={summary}
+      size="lg"
       footer={
         <>
           <Button onClick={close}>{t.close}</Button>
@@ -98,7 +103,7 @@ export function ImportReportDialog(props: ImportReportDialogProps): React.JSX.El
               close()
             }}
           >
-            {t.edit}
+            {t.edit(step.shapes)}
           </Button>
         </>
       }
@@ -161,6 +166,9 @@ function Fact({
   )
 }
 
+/** The file name of a path (either separator). */
+const baseName = (path: string): string => path.split(/[\\/]/).at(-1) ?? path
+
 const PREVIEW_W = 220
 const PREVIEW_H = 140
 
@@ -212,6 +220,12 @@ function OptionsStep(props: ImportReportDialogProps): React.JSX.Element {
       }
     >
       <div className={styles['options']}>
+        {props.step.kind === 'options' && props.step.path !== undefined ? (
+          <p className={styles['file']} title={props.step.path}>
+            <span className={styles['fileLabel']}>{t.file}</span>
+            <span className={styles['fileName']}>{baseName(props.step.path)}</span>
+          </p>
+        ) : null}
         <Field label={t.unit}>
           <Select
             id="svg-import-unit"

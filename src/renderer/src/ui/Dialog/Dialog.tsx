@@ -44,6 +44,8 @@ export interface DialogProps {
    * Radix from focusing the body.
    */
   onCloseAutoFocus?: (event: Event) => void
+  /** Width: `md` 420 px (default); `lg` 560 px for reports with a list beside a picture (DF48). */
+  size?: 'md' | 'lg'
 }
 
 export function Dialog({
@@ -58,6 +60,7 @@ export function Dialog({
   onOpenChange,
   modal = true,
   onCloseAutoFocus,
+  size,
 }: DialogProps): React.JSX.Element {
   const container = usePortalContainer()
   const [isOpen, setOpen] = useOpenState(open, defaultOpen, onOpenChange)
@@ -71,6 +74,7 @@ export function Dialog({
         <RadixDialog.Content
           ref={content}
           className={styles['content']}
+          {...(size !== undefined && size !== 'md' ? { 'data-size': size } : {})}
           {...(description === undefined ? { 'aria-describedby': undefined } : {})}
           {...(modal ? { [MODAL_ATTR]: '' } : {})}
           {...(onCloseAutoFocus ? { onCloseAutoFocus } : {})}

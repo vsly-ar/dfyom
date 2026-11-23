@@ -27,7 +27,7 @@ import { shapeLoops } from './ShapePicker'
 import { newItemArgs } from './shape-model'
 import { ShapeKindIcon } from './ShapeKindIcon'
 import { useCommand, useDesignSelection } from './useDesign'
-import { useShapeList } from './useShapes'
+import { useShapeList, type ShapeRow } from './useShapes'
 
 const m = shapeMessages.navigator
 export const SHAPE_KINDS: readonly ShapeItemKind[] = [
@@ -194,6 +194,23 @@ export function ShapeList({
   }
 
   const empty = (part.dto.shapes?.length ?? 0) === 0
+  /** A row's item kind (one item) and read-out "Path · 250 × 178" (DF48). */
+  const rowLook = (row: ShapeRow): { single?: ShapeItemKind; readout: string } => {
+    const items = part.dto.shapes?.find((s) => s.id === row.id)?.items ?? []
+    const single = items.length === 1 ? items[0]?.kind : undefined
+    const kind =
+      single === 'path' && row.kind === 'path'
+        ? m.openPath
+        : single !== undefined
+          ? shapeMessages.kinds[single]
+          : m.items(items.length || row.items)
+    const b = row.bounds
+    const size = b === undefined ? undefined : ([b.max[0] - b.min[0], b.max[1] - b.min[1]] as const)
+    return {
+      ...(single === undefined ? {} : { single }),
+      readout: m.readout(kind, size, part.units),
+    }
+  }
   // with no shapes the explanation comes first and its actions follow it (DF49); else the
   // actions head the list
   const actions = (
@@ -216,7 +233,8 @@ export function ShapeList({
       {actions}
       {empty ? null : (
         <ul className={styles['ops']} aria-label={m.listLabel}>
-          {rows.map((row) => {
+          {rows.map((listed) => {
+            const row = { ...listed, ...rowLook(listed) }
             const used = row.usedBy.length > 0
             const failed = row.kind === undefined
             const reason = used ? m.referenced(row.usedBy.map(opName)) : undefined
@@ -249,8 +267,21 @@ export function ShapeList({
                     onChosen()
                   }}
                 >
-                  <Icon name="shapes" />
-                  <span className={styles['opName']}>{row.name}</span>
+                  {/* the kind's icon and a read-out tell shapes apart (DF48) */}
+                  {row.single !== undefined ? (
+                    <ShapeKindIcon kind={row.single} />
+                  ) : (
+                    <Icon name="shapes" />
+                  )}
+                  <span className={styles['featureText']}>
+                    <span className={styles['opName']} title={row.name}>
+                      {row.name}
+                    </span>
+                    <span className={styles['featureReadout']}>
+                      <span className={styles['srOnly']}>{', '}</span>
+                      {row.readout}
+                    </span>
+                  </span>
                   {used ? (
                     <span className={styles['shapeUse']}>{m.usedBy(row.usedBy.length)}</span>
                   ) : null}

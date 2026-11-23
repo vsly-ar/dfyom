@@ -210,7 +210,8 @@ export const runMessages = {
       'Start the setup.',
     ],
     start: (n: number) => `Start setup ${n}`,
-    later: 'Later',
+    /** Like the pauses' "Close (stay paused)" (DF46): says what closing does (DF48). */
+    later: 'Close (start later)',
     announce: (n: number, name: string) =>
       `Setup ${n - 1} done. Setup change to setup ${n}, ${name}: turn the stock and set the work zero.`,
   },

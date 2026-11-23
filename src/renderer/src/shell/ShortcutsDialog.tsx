@@ -76,7 +76,7 @@ export const SHORTCUTS: readonly { group: keyof typeof m.groups; items: [string,
       ['↑ ↓', m.what.step],
       [shortcutLabel('↓'), m.what.adjust],
       [`${alt}P`, m.what.pick],
-      ['Ctrl+Space', m.what.references],
+      [IS_MAC ? '⌃Space' : 'Ctrl+Space', m.what.references],
     ],
   },
 ]

@@ -475,6 +475,17 @@
   color: var(--text-muted);
 }
 
+/* the exported file's folder on one line (DF48), the full path as its tooltip */
+.exportFolder {
+  overflow: hidden;
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .stats {
   display: grid;
   gap: var(--space-1);

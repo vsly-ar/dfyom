@@ -101,6 +101,9 @@ describe('design mode', () => {
     expect(within(form).getByRole('combobox', { name: 'From library' })).toHaveTextContent(
       'Not selected',
     )
+    // an empty library: nothing to choose, and the note says how to add one (DF48)
+    expect(within(form).getByRole('combobox', { name: 'From library' })).toBeDisabled()
+    expect(within(form).getByText(/No stock in the library yet/)).toBeVisible()
     const length = within(form).getByRole('combobox', { name: 'Length (X)' })
     await retype(user, length, '120{Enter}')
     // the primary Create part is in the footer beside Cancel, not in the body (DF12 re-report)
@@ -114,6 +117,20 @@ describe('design mode', () => {
     // Create part closes it; the sidebar starts with the part row, then the operations (DF15)
     await waitFor(() => expect(dialog).not.toBeInTheDocument())
     await within(navigator()).findByRole('heading', { name: 'No operations yet' })
+    // the empty state offers the Add menu's operations in its order, then the bolt hole (DF48)
+    const empty = within(navigator())
+      .getAllByRole('button', { name: /^Add (facing|pocket|profile|drilling|bolt hole)$/ })
+      .map((b) => b.textContent)
+    expect(empty).toEqual([
+      'Add facing',
+      'Add pocket',
+      'Add profile',
+      'Add drilling',
+      'Add bolt hole',
+    ])
+    expect(
+      within(navigator()).getByText('Add an operation or a feature to cut the stock.'),
+    ).toBeVisible()
     expect(within(navigator()).getAllByRole('heading')[0]).toHaveTextContent('Operations')
     const partRow = within(navigator()).getByRole('region', { name: 'Part' })
     expect(
