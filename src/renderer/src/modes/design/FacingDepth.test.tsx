@@ -1,5 +1,5 @@
 // The facing depth down to the reference model (DF4) in the Design window: Add facing takes it as
-// the new facing's depth, the Depth field offers it as its recommended value ("Use …"), and a
+// the new facing's depth, the Depth field's adjust panel (opened on focus) offers it as its recommended value ("Use …"), and a
 // reference at the stock top suggests nothing. Fake bridge bound to a real project runtime with an
 // in-memory asset store and file-reading in-process workers; the viewport canvas is stubbed.
 // Doc: docs/modes/reference-model.md#facing-depth-from-the-reference-df4
@@ -110,11 +110,13 @@ describe('facing depth from the reference (DF4)', () => {
     const depth = within(inspector()).getByLabelText('Depth', { selector: 'input' })
     expect(depth).toHaveValue('0.48 mm')
 
-    // a different depth: the pencil offers the reference's depth again
+    // a different depth (Enter closes the adjust panel): clicking the field reopens it, offering
+    // the reference's depth again
     await user.clear(depth)
     await user.type(depth, '1{Enter}', { skipClick: true })
     await waitFor(() => expect(depthOf()).toBe('1'))
-    await user.click(within(inspector()).getByRole('button', { name: 'Adjust Depth' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Adjust Depth' })).toBeNull())
+    await user.click(depth)
     const dialog = await screen.findByRole('dialog', { name: 'Adjust Depth' })
     expect(within(dialog).getByText(/0\.48 mm, down to box/)).toBeInTheDocument()
     await expectNoAxeViolations()
@@ -127,7 +129,7 @@ describe('facing depth from the reference (DF4)', () => {
     await user.click(await within(navigator()).findByRole('button', { name: 'Add facing' }))
     await within(inspector()).findByRole('heading', { name: 'Facing 1' })
     expect(depthOf()).toBe('0.5 mm')
-    await user.click(within(inspector()).getByRole('button', { name: 'Adjust Depth' }))
+    await user.click(within(inspector()).getByLabelText('Depth', { selector: 'input' }))
     const dialog = await screen.findByRole('dialog', { name: 'Adjust Depth' })
     expect(within(dialog).queryByText(/down to/)).toBeNull()
   })

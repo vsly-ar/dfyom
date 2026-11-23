@@ -1,11 +1,11 @@
 // The facing depth down to the reference model (DF4) in the built app: the enclosure STL is placed
 // 0.5 mm under the stock top, Add facing takes 0.5 mm as its depth, and after another depth the
-// Depth field's pencil offers "Use 0.5 mm" again. Windows stay hidden (app.fixture.ts). With
+// Depth field's adjust panel (opened by focusing the field, DF9) offers "Use 0.5 mm" again. Windows stay hidden (app.fixture.ts). With
 // DFYOM_RENDERS=1 it writes the light and dark review renders df4-facing-depth-{light,dark}.png.
 // Docs: docs/modes/reference-model.md#facing-depth-from-the-reference-df4
 import { join, resolve } from 'node:path'
 import type { ElectronApplication, Locator, Page } from '@playwright/test'
-import { expect, openPartSetup, test } from './app.fixture'
+import { expect, openReferencePanel, test } from './app.fixture'
 
 const STL = resolve('src/core/design/__fixtures__/enclosure-wood-base.stl')
 const RENDERS = process.env['DFYOM_RENDERS'] === '1'
@@ -75,13 +75,13 @@ test('facing depth from the reference: Add facing and the Depth field suggest it
   await setField(setup, 'Thickness (Z)', '40')
   await setup.getByRole('button', { name: 'Create part' }).click()
 
-  // import (fitted to the top), then lower it 0.5 mm into the stock
-  const group = await openPartSetup(page, 'Reference')
-  await group.getByRole('button', { name: 'Import STL…' }).click()
-  await expect(group).toBeHidden({ timeout: 30_000 })
-  await expect(input(inspector, 'Position Z')).toHaveValue('-39 mm')
-  await setField(inspector, 'Position Z', '-39.5 mm')
-  await expect(input(inspector, 'Position Z')).toHaveValue('-39.5 mm')
+  // import in the Reference panel (fitted to the top), then lower it 0.5 mm into the stock
+  const panel = await openReferencePanel(page)
+  await panel.getByRole('button', { name: 'Import STL…' }).click()
+  await expect(panel.getByTitle('enclosure-wood-base')).toBeVisible({ timeout: 30_000 })
+  await expect(input(panel, 'Position Z')).toHaveValue('-39 mm')
+  await setField(panel, 'Position Z', '-39.5 mm')
+  await expect(input(panel, 'Position Z')).toHaveValue('-39.5 mm')
 
   // a new facing faces down to the reference's top
   await navigator.getByRole('button', { name: 'Add facing' }).click()
@@ -89,15 +89,14 @@ test('facing depth from the reference: Add facing and the Depth field suggest it
   const depth = input(inspector, 'Depth')
   await expect(depth).toHaveValue('0.5 mm')
 
-  // another depth: the pencil offers the reference's depth again
+  // another depth: the adjust panel (opened by focusing the field) offers the reference's again
   await setField(inspector, 'Depth', '1')
   await expect(depth).toHaveValue('1')
-  const adjust = inspector.getByRole('button', { name: 'Adjust Depth' })
   const popover = page.getByRole('dialog', { name: 'Adjust Depth' })
-  await adjust.click()
+  await depth.click()
   await expect(popover.getByText(/0\.5 mm, down to enclosure-wood-base/)).toBeVisible()
   await render(page, 'df4-facing-depth', async () => {
-    await adjust.click()
+    await depth.click()
     await expect(popover).toBeVisible()
   })
   await popover.getByRole('button', { name: 'Use 0.5 mm' }).click()
