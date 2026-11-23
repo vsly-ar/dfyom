@@ -60,11 +60,20 @@ Waiting for the dogfood feedback and Q49–Q56. Meanwhile (no user input needed)
 
 ### Intake (user feedback goes here)
 
-**Awaiting the user's dogfood feedback.** One row per finding; ids `DF1`, `DF2`, … Severity per [Q54](#questions-for-the-user).
+Batch 1: TG #196 (2026-11-22, from the installed 0.3.2). One row per finding; ids `DF1`, `DF2`, … Severity per [Q54](#questions-for-the-user).
 
-| Id  | Finding (user's words, short) | Severity | Class | Task | Status |
-| --- | ----------------------------- | -------- | ----- | ---- | ------ |
-| –   | –                             | –        | –     | –    | –      |
+| Id   | Finding (user's words, short)                                                                                                                                                                                                             | Severity | Class | Task      | Status |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ----- | --------- | ------ |
+| DF1  | Tool library: secondary parameters (material, coating, …) under an accordion when creating/editing a tool                                                                                                                                 | S3       | UX    | DFB-lib   | doing  |
+| DF2  | Reference selected → stock semi-transparent to see the model inside; a checkbox (on by default) in the reference panel                                                                                                                    | S2       | UX    | DFB-ref   | doing  |
+| DF3  | Reference panel: toolbar Reference button toggles a right-sidebar Reference panel (closes when something else needs the sidebar); import/delete STL there; visibility toggle                                                              | S2       | UX    | DFB-ref   | doing  |
+| DF4  | Facing depth: suggest the depth that faces the stock top down to the reference's closest (top) point                                                                                                                                      | S2       | UX    | DFB-face  | doing  |
+| DF5  | "Fit to stock" sat below the fold; expected it to scale the model too. Fit becomes a mode in the right sidebar: fit settings (scale, anchor, height Top/Centre/Bottom with hints), 3D preview, Apply/Cancel; closing the panel cancels it | S2       | UX    | DFB-ref   | doing  |
+| DF6  | Show the scaled reference size in the reference panel                                                                                                                                                                                     | S3       | UX    | DFB-ref   | doing  |
+| DF7  | Anchor unclear (no hint, far from Scale); Height unclear and not grouped with Fit; add (i) hints                                                                                                                                          | S3       | UX    | DFB-ref   | doing  |
+| DF8  | Reference name field unimportant: drop it, use the file name                                                                                                                                                                              | S3       | UX    | DFB-ref   | doing  |
+| DF9  | Value fields: focusing opens the pencil (expression/pick) dropdown with the input kept focused; clicks inside keep focus; hide the pencil button (fixes Tab stopping on it)                                                               | S2       | UX    | DFB-field | doing  |
+| DF10 | "Pick X in the viewport" doesn't toggle off on a second click (only Esc)                                                                                                                                                                  | S2       | bug   | DFB-field | doing  |
 
 ## 3. Bugs (known before dogfood)
 
