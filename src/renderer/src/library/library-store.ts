@@ -74,6 +74,8 @@ export interface LibraryState {
   readonly closeRequest: LibraryCloseRequest | null
   /** The remove confirmation is open. */
   readonly removing: boolean
+  /** The tool form's Details group is open (DF1): kept across items and tabs in this window. */
+  readonly toolDetailsOpen: boolean
 }
 
 export interface LibraryActions {
@@ -91,6 +93,7 @@ export interface LibraryActions {
   reload(): Promise<void>
   overwrite(): Promise<boolean>
   setRemoving(open: boolean): void
+  setToolDetailsOpen(open: boolean): void
   remove(): Promise<void>
   promptSave(): Promise<void>
   promptDiscard(): void
@@ -267,6 +270,8 @@ export function createLibraryStore(deps: {
       prompt: null,
       closeRequest: null,
       removing: false,
+      toolDetailsOpen: false,
+      setToolDetailsOpen: (toolDetailsOpen) => set({ toolDetailsOpen }),
 
       start() {
         let live = true

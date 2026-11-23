@@ -246,6 +246,26 @@ describe('design.reference.update / remove / list', () => {
     expect(s.d.doc).toEqual(before)
   })
 
+  it('lists the facing depth down to the reference per stock face (DF4)', async () => {
+    const { s, upd } = await imported()
+    // fitted to the top: nothing to face on the top
+    const [fitted] = await list(s)
+    expect((fitted as unknown as { facingDepth: object }).facingDepth).not.toHaveProperty(
+      'stock.top',
+    )
+    // 20 × 10 × 5 at x 40..60, y 25..35, its top 0.48 below the stock top (stock 100 × 60 × 20)
+    await upd({ position: { z: '-5.48' } })
+    const [l] = await list(s)
+    expect((l as unknown as { facingDepth: object }).facingDepth).toEqual({
+      'stock.top': '0.48 mm',
+      'stock.bottom': '14.52 mm',
+      'stock.side[0]': '25 mm',
+      'stock.side[1]': '40 mm',
+      'stock.side[2]': '25 mm',
+      'stock.side[3]': '40 mm',
+    })
+  })
+
   it('turn adds exact 90° steps; fit moves onto the stock after the other changes', async () => {
     const { s, id, upd } = await imported()
     await upd({ turn: { axis: 'x', turns: 1 } })

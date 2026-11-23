@@ -2,13 +2,16 @@
 // Spec: docs/modes/reference-model.md#source-unit-guess, #fit-to-stock, #placement-math-task-r2
 import { describe, expect, it } from 'vitest'
 import {
+  depthToReference,
   exceedsStock,
+  facingDepthSource,
   fitPosition,
   fitScale,
   guessUnit,
   placedExtent,
   rotationMatrix,
   roundScaleDown,
+  suggestFacingDepth,
 } from './reference'
 
 const stock = { length: 100, width: 60, thickness: 20 }
@@ -124,5 +127,72 @@ describe('placement', () => {
       params: { x: 3, y: 0, z: 3 },
       message: 'The reference sticks out of the stock by X 3, Z 3 mm',
     })
+  })
+})
+
+describe('facing depth from the reference (DF4)', () => {
+  // a 60 × 40 × 10 part centred in the 100 × 60 × 20 stock, its top 0.5 below the stock top
+  const part = { min: { x: 20, y: 10, z: -10.5 }, max: { x: 80, y: 50, z: -0.5 } }
+  const one = [{ referenceId: 'reference1', box: part }]
+
+  it('measures from each stock face to the reference along its normal', () => {
+    expect(depthToReference('+z', stock, part)).toBeCloseTo(0.5)
+    expect(depthToReference('-z', stock, part)).toBeCloseTo(9.5)
+    expect(depthToReference('+x', stock, part)).toBe(20)
+    expect(depthToReference('-x', stock, part)).toBe(20)
+    expect(depthToReference('+y', stock, part)).toBe(10)
+    expect(depthToReference('-y', stock, part)).toBe(10)
+    // beside the stock: nothing under the face
+    const beside = { min: { x: 120, y: 10, z: -5 }, max: { x: 140, y: 20, z: -1 } }
+    expect(depthToReference('+z', stock, beside)).toBeUndefined()
+  })
+
+  it('suggests a positive depth under the stock extent, in project units, rounded down', () => {
+    expect(suggestFacingDepth('+z', stock, one, 'mm')).toEqual({
+      depth: 0.5,
+      source: '0.5 mm',
+      referenceId: 'reference1',
+    })
+    // 0.5 mm = 0.019685…″ → 0.0196″ (down, never into the part)
+    expect(suggestFacingDepth('+z', stock, one, 'inch')?.source).toBe('0.0196"')
+    expect(facingDepthSource(0.4999, 'mm')).toBe('0.499 mm')
+    expect(facingDepthSource(0.48000000001, 'mm')).toBe('0.48 mm')
+    expect(facingDepthSource(25.4, 'inch')).toBe('1"')
+  })
+
+  it('gives nothing for a reference at or above the face, or as deep as the stock', () => {
+    const atTop = { ...part, max: { ...part.max, z: 0 } }
+    expect(
+      suggestFacingDepth('+z', stock, [{ referenceId: 'r', box: atTop }], 'mm'),
+    ).toBeUndefined()
+    const above = { ...part, max: { ...part.max, z: 2 } }
+    expect(
+      suggestFacingDepth('+z', stock, [{ referenceId: 'r', box: above }], 'mm'),
+    ).toBeUndefined()
+    // under 0.001 mm rounds down to 0
+    const hair = { ...part, max: { ...part.max, z: -0.0004 } }
+    expect(suggestFacingDepth('+z', stock, [{ referenceId: 'r', box: hair }], 'mm')).toBeUndefined()
+    // a reference below the stock: depth ≥ thickness
+    const below = { min: { x: 20, y: 10, z: -40 }, max: { x: 80, y: 50, z: -20 } }
+    expect(
+      suggestFacingDepth('+z', stock, [{ referenceId: 'r', box: below }], 'mm'),
+    ).toBeUndefined()
+    expect(suggestFacingDepth('+z', stock, [], 'mm')).toBeUndefined()
+  })
+
+  it('takes the closest of several references', () => {
+    const higher = { ...part, max: { ...part.max, z: -0.25 } }
+    const s = suggestFacingDepth(
+      '+z',
+      stock,
+      [...one, { referenceId: 'reference2', box: higher }],
+      'mm',
+    )
+    expect(s).toMatchObject({ source: '0.25 mm', referenceId: 'reference2' })
+    // one sticking out above the top: facing to the other would cut into it
+    const out = { ...part, max: { ...part.max, z: 1 } }
+    expect(
+      suggestFacingDepth('+z', stock, [...one, { referenceId: 'r', box: out }], 'mm'),
+    ).toBeUndefined()
   })
 })

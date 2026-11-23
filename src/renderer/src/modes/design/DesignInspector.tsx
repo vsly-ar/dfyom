@@ -58,10 +58,12 @@ import {
 import {
   useCommand,
   useDesignEvaluation,
+  useDesignReferences,
   useDesignSelection,
   useDesignWarnings,
   type DesignWarnings,
 } from './useDesign'
+import { facingDepthSuggestion } from './facing-depth'
 
 const m = designMessages
 const t = m.inspector
@@ -275,6 +277,12 @@ function OperationInspector({
   const [errors, setErrors] = useState<readonly FieldError[]>([])
   const [summary, setSummary] = useState<AppErrorData | undefined>(undefined)
   const opWarnings = warnings.warnings.filter((w) => w.operation === op.id)
+  // a facing's depth down to the reference model (DF4), offered as the Depth field's recommended value
+  const references = useDesignReferences(part)
+  const facingDepth =
+    op.kind === 'facing' ? facingDepthSuggestion(part, references, op.on) : undefined
+  const facingReference =
+    facingDepth === undefined ? undefined : part.doc.references[facingDepth.referenceId]?.name
 
   const send = async (
     args: Record<string, unknown>,
@@ -385,6 +393,19 @@ function OperationInspector({
     send: (args, path, gesture) => void send(args, path, gesture),
     cancelGesture,
     shapeActions,
+    ...(facingDepth !== undefined
+      ? {
+          recommended: {
+            depth: {
+              source: facingDepth.source,
+              text: t.facingToReference(
+                facingDepth.source,
+                facingReference ?? facingDepth.referenceId,
+              ),
+            },
+          },
+        }
+      : {}),
   }
   const unplaced = opWarnings.filter((w) => warningPath(w, op) === undefined)
 
