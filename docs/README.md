@@ -58,6 +58,7 @@ The docs are the **source of truth**. Code implements what is documented here; w
 | Research     | [research/s4-offset-clearing.md](research/s4-offset-clearing.md) – spike S4: offset clearing of regions (ring tree, step cap, links, entries) measured by heightmap; step ≤ R recommended, proposed changes to plan-v0.3.md          | draft       |
 | Research     | [research/s5-biarc-fitting.md](research/s5-biarc-fitting.md) – spike S5: biarc fitting of Béziers and elliptical arcs within 0.01 mm; three methods compared, recommendation, proposed changes to shapes.md                          | draft       |
 | Research     | [research/s6-clone-budgets.md](research/s6-clone-budgets.md) – spike S6: 100 / 500 / 1000 clone instances against the evaluation and command budgets, levers measured, limit and approach recommended                                | draft       |
+| Research     | [research/2026-11-23-x2-agent-variant.md](research/2026-11-23-x2-agent-variant.md) – hardening X2: a fresh agent changes, plans and exports the lid over the installed app's MCP; constraints met, findings F1–F11                   | draft       |
 | Decisions    | [decisions/](decisions/) – architecture decision records (ADRs)                                                                                                                                                                      | –           |
 
 ## Status values
