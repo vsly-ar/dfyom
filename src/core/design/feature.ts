@@ -435,8 +435,8 @@ export function loadFeatures(dto: Pick<PartDTO, 'features'>): AppResult<LoadedFe
 const expansionCache = new WeakMap<object, { key: readonly unknown[]; roles: readonly string[] }>()
 
 /**
- * The frozen records a part was loaded from (a committed document), for the expansion cache;
- * absent (a command's draft after an edit) = no caching.
+ * The records a part was loaded from (`baseOf` of a draft's part), for the expansion cache;
+ * only the frozen ones among them are used as keys.
  */
 export interface FrozenRecords {
   readonly features: readonly object[]
@@ -457,12 +457,16 @@ function expansionOf(
   record: object | undefined,
   records: FrozenRecords | undefined,
 ): AppResult<readonly string[]> {
+  // only frozen records key the cache: a committed document's, and a draft's unmodified ones
+  // (a command's load after an edit before this feature's block expands it anew)
   const key =
-    records === undefined
+    records === undefined || record === undefined || !Object.isFrozen(record)
       ? undefined
       : [records.stock, units, records.shapes, ...records.operations.slice(0, start)]
-  const hit = record === undefined ? undefined : expansionCache.get(record)
-  if (hit !== undefined && key !== undefined && sameKey(hit.key, key)) return Ok(hit.roles)
+  const cacheable =
+    key !== undefined && key.every((k) => typeof k !== 'object' || Object.isFrozen(k))
+  const hit = cacheable ? expansionCache.get(record!) : undefined
+  if (hit !== undefined && sameKey(hit.key, key!)) return Ok(hit.roles)
   return spec
     .expand(feature, {
       units,
@@ -473,7 +477,7 @@ function expansionOf(
     })
     .map((list) => {
       const roles = list.map((e) => `${e.role}:${e.operation.kind}`)
-      if (record !== undefined && key !== undefined) expansionCache.set(record, { key, roles })
+      if (cacheable) expansionCache.set(record!, { key: key!, roles })
       return roles
     })
 }

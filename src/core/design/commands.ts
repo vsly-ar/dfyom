@@ -46,6 +46,7 @@ import {
   KIND_LABEL,
   operationToDTO,
   isGeneralShape,
+  recordOf,
   shapesOf,
   type Anchor,
   type FeatureOwner,
@@ -55,6 +56,7 @@ import {
   type Part,
   type Shape,
 } from './operation'
+import { baseOf } from './frozen-memo'
 import {
   AnchorDtoSchema,
   DesignToolDtoSchema,
@@ -530,7 +532,11 @@ function writeOperations(draft: Draft<ProjectDoc>, partId: string, ops: readonly
  * plan's design snapshot); the list must not be longer than `ops`.
  */
 export function writeOperationList(list: OperationDTO[], ops: readonly Operation[]): void {
+  // an operation loaded from the record it would write back is unchanged (P5: no conversion and
+  // comparison for every operation of the part)
+  const records = baseOf(list)
   ops.forEach((op, i) => {
+    if (i < records.length && recordOf(op) === records[i]) return
     const dto = operationToDTO(op)
     if (i >= list.length) list.push(dto)
     else if (!deepEqual(list[i], dto)) list[i] = dto

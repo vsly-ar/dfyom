@@ -6,6 +6,7 @@
  */
 import { type AppError, issueSummary } from '../../shared/errors/app-error'
 import { Err, fail, Ok, type AppResult } from '../../shared/result'
+import type { ReferenceResolver } from '../expression/evaluate'
 import { reevaluate } from '../expression/quantity'
 import { deepEqual } from '../library/snapshot'
 import type { Stock } from '../library/stock'
@@ -72,7 +73,13 @@ export function recalculateFeatures(
     if (spec.reevaluate === undefined) continue
     const { start, end } = featureBlock(next, feature.id)
     if (start === end) continue
-    const resolver = SurfaceTable.build(next, stock).resolver(start)
+    // the surface table only when a field reads a surface (P5: most fields are plain values)
+    const before = next
+    let table: ReferenceResolver | undefined
+    const resolver: ReferenceResolver = {
+      resolve: (name) =>
+        (table ??= SurfaceTable.build(before, stock).resolver(start)).resolve(name),
+    }
     const fresh = spec.reevaluate(feature, (q, path) =>
       reevaluate(q, resolver).mapErr((e) =>
         e.prefixIssues('features', feature.id, ...toPath(path)),

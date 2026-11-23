@@ -5,11 +5,10 @@
 import { Err, fail, Ok, type AppResult } from '../../shared/result'
 import type { Region2dPort } from '../geometry/2d/port'
 import type { PartGeometryInput } from '../geometry/model'
-import { Snapshot } from '../library/snapshot'
 import { Stock } from '../library/stock'
 import type { ProjectDoc, UnitSystem } from '../project/document'
-import { current, isDraft } from 'immer'
 import { checkFeatures, type FrozenRecords, type LoadedFeature } from './feature'
+import { baseOf, snapshotFromRecord } from './frozen-memo'
 import { toGeometryInput } from './geometry-input'
 import { partFromDTO, type Part } from './operation'
 import type { PartDTO } from './part.dto'
@@ -36,15 +35,20 @@ export function unknownPart(partId: string, where: string): AppResult<never> {
 export function loadPart(doc: ProjectDoc, partId: string, where: string): AppResult<LoadedPart> {
   const dto = Object.hasOwn(doc.parts, partId) ? doc.parts[partId] : undefined
   if (dto === undefined) return unknownPart(partId, where)
-  const part = partFromDTO(dto)
+  // read the records, not the draft's proxies; unmodified ones are a committed document's frozen
+  // objects, whose parsed models and expansions are cached (P5, frozen-memo.ts)
+  const records = baseOf(dto)
+  const part = partFromDTO(records)
   if (part.isErr()) return Err(part.unwrapErr().prefixIssues('parts', partId).withContext(where))
-  const snap = Object.hasOwn(doc.snapshots, dto.stock) ? doc.snapshots[dto.stock] : undefined
+  const snap = Object.hasOwn(doc.snapshots, dto.stock)
+    ? baseOf(doc.snapshots[dto.stock])
+    : undefined
   if (snap === undefined || snap.kind !== 'stock')
     return fail('input.malformed', `stock snapshot ${dto.stock} of part ${partId} is missing`, {
       where,
       data: { partId, snapshotId: dto.stock },
     })
-  const stock = Snapshot.fromDTO(snap).andThen((s) =>
+  const stock = snapshotFromRecord(snap).andThen((s) =>
     s.values instanceof Stock
       ? Ok(s.values)
       : fail('input.malformed', 'part stock is not a stock snapshot', { where }),
@@ -66,7 +70,7 @@ export function loadPart(doc: ProjectDoc, partId: string, where: string): AppRes
     part.unwrap().operations,
     stock.unwrap(),
     doc.unitSystem,
-    frozenRecords(dto, snap),
+    frozenRecords(records, snap),
   )
   if (features.isErr())
     return Err(features.unwrapErr().prefixIssues('parts', partId).withContext(where, { partId }))
@@ -81,15 +85,17 @@ export function loadPart(doc: ProjectDoc, partId: string, where: string): AppRes
 }
 
 /**
- * The committed (frozen) records of a part, for the consistency check's expansion cache: a
- * draft's unmodified records are its base objects; anything modified or never frozen gives none.
+ * The records of a part (`baseOf`: a draft's unmodified records are the committed document's
+ * frozen objects), for the consistency check's expansion cache, which uses only frozen ones.
  */
-function frozenRecords(dto: PartDTO, snap: object): FrozenRecords | undefined {
-  if (dto.features === undefined) return undefined
-  const base = (isDraft(dto) ? current(dto) : dto) as PartDTO
-  const stock = isDraft(snap) ? current(snap) : snap
-  if (!Object.isFrozen(base) || !Object.isFrozen(stock)) return undefined
-  return { features: base.features ?? [], operations: base.operations, stock, shapes: base.shapes }
+function frozenRecords(records: PartDTO, stock: object): FrozenRecords | undefined {
+  if (records.features === undefined) return undefined
+  return {
+    features: records.features,
+    operations: records.operations,
+    stock,
+    shapes: records.shapes,
+  }
 }
 
 /** The geometry input of a part of the document (for evaluation, task 2.8/2.9). */

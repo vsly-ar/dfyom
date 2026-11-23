@@ -21,7 +21,7 @@ import { FIT_SLACK, shapeMeasure, type ShapeMeasure } from '../geometry/shape-me
 import { toolFit, type ToolUnfit } from '../geometry/tool-fit'
 import type { MaterialClass } from '../library/item'
 import type { LibraryItem } from '../library/library-item'
-import { Snapshot } from '../library/snapshot'
+import { snapshotFromRecord } from './frozen-memo'
 import { Tool } from '../library/tool'
 import { isEndMillType, type ToolType } from '../library/tool.dto'
 import type { ProjectDoc, UnitSystem } from '../project/document'
@@ -52,7 +52,7 @@ export function dfmTool(tool: Tool): DfmTool {
 export function snapshotTool(snapshots: ProjectDoc['snapshots'], id: string): Option<Tool> {
   const dto = Object.hasOwn(snapshots, id) ? snapshots[id] : undefined
   if (dto?.kind !== 'tool') return None
-  const s = Snapshot.fromDTO(dto)
+  const s = snapshotFromRecord(dto)
   return s.isOk() && s.unwrap().values instanceof Tool ? Some(s.unwrap().values as Tool) : None
 }
 

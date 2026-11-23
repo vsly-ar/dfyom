@@ -6,7 +6,7 @@
  * their centres from `resolveProfileTabs`. Pure and deterministic; no port call.
  * Doc: docs/modes/design-v0.4.md#tabs-relocate-off-free-sides-tb1
  */
-import { chainLength, chainPointAt } from './2d/measure'
+import { chainLength, chainSampler } from './2d/measure'
 import { chainBounds, signedArea, type Loop } from './2d/model'
 import { EPSILON, isAnalyticOperation, type OperationGeometry, type Vec2 } from './model'
 import { profileChain, tabCentres } from './outline'
@@ -92,9 +92,10 @@ export function holdTest(input: TabHoldInput): (s: number) => boolean {
     const m = Math.min(...t)
     return t.some((x, k) => x <= m + tol && !free[k])
   }
+  const pointAt = chainSampler(chain, true)
   return (s) => {
     if (allFree) return false
-    const r = chainPointAt(chain, s, true)
+    const r = pointAt(s)
     if (r.isErr()) return false
     const { point: p, tangent: t } = r.unwrap()
     const n: Vec2 = [sign * t[1], -sign * t[0]]

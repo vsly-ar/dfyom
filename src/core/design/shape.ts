@@ -26,6 +26,7 @@ import { insideCorners } from '../geometry/shape-measure'
 import { quantityFromDTO } from '../library/item'
 import type { Quantity } from '../quantity/quantity'
 import type { QuantityDTO } from '../quantity/quantity.dto'
+import { memoByRecord } from './frozen-memo'
 import { AREA_EPSILON, itemChain } from './shape-items'
 import type {
   ShapeDTO,
@@ -138,8 +139,14 @@ export function itemQuantities<A>(item: ShapeItem<A>): { path: ParamPath; value:
 
 // ── DTO ↔ model ─────────────────────────────────────────────────────────────────────────────
 
-/** The shape from its DTO; quantity issues carry `items.<n>.<param>` paths. */
-export function shapeFromDTO(dto: ShapeDTO): AppResult<NamedShape> {
+/**
+ * The shape from its DTO; quantity issues carry `items.<n>.<param>` paths. Cached per frozen
+ * record (frozen-memo.ts, hardening P5): a shape of hundreds of items is parsed once, not by every
+ * `shapesOf` of every command.
+ */
+export const shapeFromDTO: (dto: ShapeDTO) => AppResult<NamedShape> = memoByRecord(parseShape)
+
+function parseShape(dto: ShapeDTO): AppResult<NamedShape> {
   const results: AppResult<unknown>[] = []
   const items = dto.items.map((item, n) =>
     mapItem(item, (q: QuantityDTO, path) => {

@@ -85,6 +85,51 @@ export function chainPointAt(c: Loop, s: number, closed: boolean): AppResult<Cha
   return Err(region2dError('empty', 'the chain has no elements', where))
 }
 
+/**
+ * `chainPointAt` for many distances along one chain (the tab hold test samples a loop every
+ * 0.25 mm): the element lengths and their running sums are taken once and each point is found by
+ * a binary search, O(log n) instead of O(n) per point (hardening P5). Same rules and errors; a
+ * point may differ from `chainPointAt`'s in the last bits (sums instead of a running difference).
+ */
+export function chainSampler(c: Loop, closed: boolean): (s: number) => AppResult<ChainPoint> {
+  const where = 'region2d.pointAt'
+  const n = c.elements.length
+  const lengths = c.elements.map(elementLength)
+  // starts[i]: the distance at which element i starts, summed in order as chainLength sums
+  const starts = new Float64Array(n)
+  let total = 0
+  for (let i = 0; i < n; i++) {
+    starts[i] = total
+    total += lengths[i]!
+  }
+  return (s) => {
+    if (n === 0) return Err(region2dError('empty', 'the chain has no elements', where))
+    if (!Number.isFinite(s))
+      return Err(region2dError('notFinite', 'the distance is not finite', where))
+    let rest = s
+    if (closed) rest = total > 0 ? ((s % total) + total) % total : 0
+    else if (s < -POSITION_EPSILON || s > total + POSITION_EPSILON)
+      return Err(
+        region2dError('outOfRange', 'the distance lies outside the path', where, {
+          s,
+          length: total,
+        }),
+      )
+    rest = Math.min(Math.max(rest, 0), total)
+    // the first element that ends at or beyond `rest` (else the last one), as chainPointAt walks
+    let lo = 0
+    let hi = n - 1
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if (rest - starts[mid]! <= lengths[mid]!) hi = mid
+      else lo = mid + 1
+    }
+    const len = lengths[lo]!
+    const t = len > 0 ? Math.min(Math.max((rest - starts[lo]!) / len, 0), 1) : 0
+    return Ok({ ...elementPointAt(c.elements[lo]!, t), element: lo })
+  }
+}
+
 /** Closest point of an element to `p`. */
 export function elementClosest(e: Element, p: Vec2): Vec2 {
   if (e.kind === 'line') {

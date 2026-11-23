@@ -99,12 +99,30 @@ function bulge(e: Element): number {
   return e.kind === 'line' ? 0 : Math.tan(arcSweep(e) / 4)
 }
 
+const wires = new WeakMap<
+  readonly Element[],
+  { readonly closed: boolean; readonly wire: WireLoop }
+>()
+
 /**
  * Elements to wire vertices: full circles become two half arcs, elements shorter than
  * `MIN_ELEMENT_LENGTH` are merged into their neighbours. Fails on invalid input or when nothing
- * is left.
+ * is left. Converted once per element list (loops are immutable; a region's loops go to the
+ * library once per boolean or offset they take part in, hardening P5).
  */
 export function toWire(
+  elements: readonly Element[],
+  closed: boolean,
+  where: string,
+): AppResult<WireLoop> {
+  const hit = wires.get(elements)
+  if (hit !== undefined && hit.closed === closed) return Ok(hit.wire)
+  const r = convert(elements, closed, where)
+  if (r.isOk()) wires.set(elements, { closed, wire: r.unwrap() })
+  return r
+}
+
+function convert(
   elements: readonly Element[],
   closed: boolean,
   where: string,
