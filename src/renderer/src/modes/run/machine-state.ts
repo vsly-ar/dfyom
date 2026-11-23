@@ -3,6 +3,7 @@
 // docs/modes/run-v0.1.md#status
 import type { UnitSystem } from '../../../../core/project/document'
 import type { RunStatus } from '../../../../core/run/service'
+import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { runMessages as m } from '../../messages/run'
 import type { MachineState } from '../../ui'
 
@@ -111,6 +112,33 @@ export function runGates(s: RunStatus, opts: { planChosen: boolean }): RunGates 
               : m.why.noPlan),
     disconnect: job ? m.why.running : null,
   }
+}
+
+/**
+ * Stop's gate (DF35, docs/modes/run.md#stop-only-when-something-can-be-stopped-df35): allowed with
+ * a run job or while the machine moves or is held; otherwise why there is nothing to stop.
+ */
+export function stopGate(s: RunStatus): Gate {
+  if (!isConnected(s)) return m.why.notConnected
+  if (activeJob(s) !== undefined) return null
+  return /^(Jog|Home|Run|Hold|Door)/.test(s.state) ? null : m.why.nothingToStop
+}
+
+/** The navigator's text for a refused action; `undefined` = the code's own message. */
+export function actionText(e: AppErrorData, units: UnitSystem): string | undefined {
+  if (e.code !== 'run.travel') return undefined
+  const d = e.frames[0]?.data as
+    { axis?: string; target?: number; min?: number; max?: number } | undefined
+  if (d?.axis === undefined || d.target === undefined || d.min === undefined || d.max === undefined)
+    return m.travelUnknown
+  const high = d.target > d.max
+  return m.travel(
+    d.axis.toUpperCase(),
+    high ? 'max' : 'min',
+    formatLength(high ? d.max : d.min, units),
+    formatLength(d.target, units),
+    m.dro.units[units],
+  )
 }
 
 const MM_PER_INCH = 25.4

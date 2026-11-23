@@ -1,8 +1,8 @@
 // Feature UI in design mode (v0.4 task U1) against the fake bridge bound to a real project
-// runtime: the Add menu's groups (Hole, Make Clones… with its reason, Chamfer disabled), feature
+// runtime: the Add menu's groups (kinds without "Add", Bolt hole, tooltips; DF16–DF18), feature
 // rows collapsed by default with nested owned operations (keyboard: → / ←, Alt+↑/↓ moving the
 // whole block), the rolled-up badge, remove with its toast, the read-only owned-operation
-// inspector ("Edited through Hole 1", read-only fields with the reason, focusing the feature's
+// inspector ("Edited through Bolt hole 1", read-only fields with the reason, focusing the feature's
 // driving field), and a Clones row with its Source and Clones groups. The canvas is stubbed.
 // Doc: docs/conventions/ui.md#features-v04
 import { screen, waitFor, within } from '@testing-library/react'
@@ -80,59 +80,62 @@ const addCounterbore = async (d: Dispatcher) => {
 }
 
 describe('feature UI (U1)', () => {
-  it('Add has Operations and Features groups; Hole adds and selects a collapsed feature row', async () => {
+  it('Add has Operations and Features groups named without "Add", with tooltips; Bolt hole adds and selects a collapsed feature row', async () => {
     const { user, openAdd, part } = await renderDesign()
     const menu = await openAdd()
     const ops = within(menu).getByRole('group', { name: 'Operations' })
-    expect(
-      within(ops)
+    // DF16/DF17: kinds alone; Chamfer and Make Clones… are in the row menu
+    const labels = (group: HTMLElement) =>
+      within(group)
         .getAllByRole('menuitem')
-        .map((i) => i.getAttribute('aria-label') ?? i.textContent),
-    ).toEqual(['Add facing', 'Add pocket', 'Add profile', 'Add drilling', 'Add chamfer'])
-    const chamfer = within(ops).getByRole('menuitem', { name: 'Add chamfer' })
-    expect(chamfer).toHaveAttribute('aria-disabled', 'true')
+        .map((i) => i.querySelector('span')?.textContent)
+    expect(labels(ops)).toEqual(['Facing', 'Pocket', 'Profile', 'Drilling'])
     const features = within(menu).getByRole('group', { name: 'Features' })
-    const clones = within(features).getByRole('menuitem', { name: 'Make Clones…' })
-    expect(clones).toHaveAttribute('aria-disabled', 'true')
-    expect(clones).toHaveAccessibleDescription(
-      'Select a hole, pocket, drilling, chamfer or inside profile to clone.',
-    )
+    expect(labels(features)).toEqual(['Bolt hole'])
+    expect(within(menu).queryByRole('menuitem', { name: /Chamfer|Make Clones/ })).toBeNull()
+    // DF18: the focused item's one-line description as a tooltip
+    const facing = within(ops).getByRole('menuitem', { name: 'Facing' })
+    expect(facing).toHaveFocus()
+    expect(facing).toHaveAttribute('data-highlighted')
+    expect(facing).toHaveAccessibleDescription('Flattens the stock top to an even height.')
     await expectNoAxeViolations()
-    await user.click(within(features).getByRole('menuitem', { name: 'Add hole' }))
+    await user.click(within(features).getByRole('menuitem', { name: 'Bolt hole' }))
 
     await waitFor(() => expect(part().features).toHaveLength(1))
     const row = await within(navigator()).findByRole('button', {
-      name: 'Hole 1, Ø 6 mm simple, 1 operation',
+      name: 'Bolt hole 1, Ø 6 mm simple, 1 operation',
     })
     expect(row).toHaveAttribute('aria-pressed', 'true')
     expect(row).toHaveAttribute('aria-expanded', 'false')
-    expect(within(inspector()).getByRole('heading', { name: 'Hole 1' })).toBeInTheDocument()
+    expect(within(inspector()).getByRole('heading', { name: 'Bolt hole 1' })).toBeInTheDocument()
     // collapsed: the owned row sits in an inert group (out of the tab order and the a11y tree;
     // jsdom does not apply `inert` to role queries)
-    const owned = within(navigator()).getByRole('button', { name: /edited through Hole 1/ })
+    const owned = within(navigator()).getByRole('button', { name: /edited through Bolt hole 1/ })
     expect(owned.closest('[inert]')).not.toBeNull()
   })
 
   it('expands by keyboard, walks into the owned rows and shows the read-only owned inspector', async () => {
     const { user } = await renderDesign(addCounterbore)
-    const row = await within(navigator()).findByRole('button', { name: /^Hole 1, M3 counterbore/ })
+    const row = await within(navigator()).findByRole('button', {
+      name: /^Bolt hole 1, M3 counterbore/,
+    })
     row.focus()
     await user.keyboard('{ArrowRight}')
     expect(row).toHaveAttribute('aria-expanded', 'true')
     const cb = within(navigator()).getByRole('button', {
-      name: 'Hole 1 · counterbore, edited through Hole 1',
+      name: 'Bolt hole 1 · counterbore, edited through Bolt hole 1',
     })
-    // the role name drops the "Hole 1 · " prefix
+    // the role name drops the "Bolt hole 1 · " prefix
     expect(cb).toHaveTextContent(/^counterbore/)
     // owned rows have no actions
     expect(
-      within(navigator()).queryByRole('button', { name: 'Remove Hole 1 · counterbore' }),
+      within(navigator()).queryByRole('button', { name: 'Remove Bolt hole 1 · counterbore' }),
     ).toBeNull()
     await user.keyboard('{ArrowRight}')
     expect(cb).toHaveFocus()
     await user.keyboard('{ArrowDown}')
     const drill = within(navigator()).getByRole('button', {
-      name: 'Hole 1 · drill, edited through Hole 1',
+      name: 'Bolt hole 1 · drill, edited through Bolt hole 1',
     })
     expect(drill).toHaveFocus()
     await user.keyboard('{ArrowLeft}')
@@ -140,7 +143,9 @@ describe('feature UI (U1)', () => {
     await user.click(cb)
 
     const insp = inspector()
-    expect(within(insp).getByRole('heading', { name: 'Hole 1 · counterbore' })).toBeInTheDocument()
+    expect(
+      within(insp).getByRole('heading', { name: 'Bolt hole 1 · counterbore' }),
+    ).toBeInTheDocument()
     const crumbs = within(insp).getByRole('navigation', { name: 'Breadcrumb' })
     expect(within(crumbs).getByRole('button', { name: 'counterbore' })).toHaveAttribute(
       'aria-current',
@@ -149,7 +154,9 @@ describe('feature UI (U1)', () => {
     expect(within(insp).getByText(/^Edited through/)).toBeInTheDocument()
     const diameter = within(insp).getByLabelText('Diameter', { selector: 'input' })
     expect(diameter).toHaveAttribute('readonly')
-    expect(diameter).toHaveAccessibleDescription(/Part of Hole 1: change it in the hole\./)
+    expect(diameter).toHaveAccessibleDescription(
+      /Part of Bolt hole 1: change it in the bolt hole\./,
+    )
     // name and tool stay editable (A4)
     expect(within(insp).getByLabelText('Name', { selector: 'input' })).not.toHaveAttribute(
       'readonly',
@@ -157,10 +164,12 @@ describe('feature UI (U1)', () => {
     expect(within(insp).getByRole('combobox', { name: 'Tool' })).toBeInTheDocument()
     await expectNoAxeViolations()
 
-    // "Edited through Hole 1" selects the feature and focuses the field behind the first one shown
+    // "Edited through Bolt hole 1" selects the feature and focuses the field behind the first one shown
     const note = within(insp).getByText(/^Edited through/)
-    await user.click(within(note).getByRole('button', { name: 'Hole 1' }))
-    expect(await within(inspector()).findByRole('heading', { name: 'Hole 1' })).toBeInTheDocument()
+    await user.click(within(note).getByRole('button', { name: 'Bolt hole 1' }))
+    expect(
+      await within(inspector()).findByRole('heading', { name: 'Bolt hole 1' }),
+    ).toBeInTheDocument()
     // the hole inspector (U2) focuses the Center X input
     await waitFor(() =>
       expect(document.activeElement?.closest('[data-feature-field]')).toHaveAttribute(
@@ -184,9 +193,11 @@ describe('feature UI (U1)', () => {
       )
       await addCounterbore(d)
     })
-    const row = await within(navigator()).findByRole('button', { name: /^Hole 1, M3 counterbore/ })
-    await user.click(within(row).getByTitle('Expand Hole 1'))
-    const drill = within(navigator()).getByRole('button', { name: /^Hole 1 · drill/ })
+    const row = await within(navigator()).findByRole('button', {
+      name: /^Bolt hole 1, M3 counterbore/,
+    })
+    await user.click(within(row).getByTitle('Expand Bolt hole 1'))
+    const drill = within(navigator()).getByRole('button', { name: /^Bolt hole 1 · drill/ })
     drill.focus()
     await user.keyboard('{Alt>}{ArrowUp}{/Alt}')
     await waitFor(() =>
@@ -197,7 +208,9 @@ describe('feature UI (U1)', () => {
       ]),
     )
     await waitFor(() =>
-      expect(within(navigator()).getByRole('button', { name: /^Hole 1 · drill/ })).toHaveFocus(),
+      expect(
+        within(navigator()).getByRole('button', { name: /^Bolt hole 1 · drill/ }),
+      ).toHaveFocus(),
     )
     // moving the pocket up steps over the whole block
     within(navigator())
@@ -206,15 +219,15 @@ describe('feature UI (U1)', () => {
     await user.keyboard('{Alt>}{ArrowUp}{/Alt}')
     await waitFor(() => expect(part().operations[0]!.id).toBe('pocket1'))
 
-    await user.click(within(navigator()).getByRole('button', { name: 'Remove Hole 1' }))
+    await user.click(within(navigator()).getByRole('button', { name: 'Remove Bolt hole 1' }))
     await waitFor(() => expect(part().features).toBeUndefined())
     expect(await findToastAction('Undo')).toBeInTheDocument()
-    expect(screen.getByText('Removed Hole 1 and its 2 operations')).toBeInTheDocument()
+    expect(screen.getByText('Removed Bolt hole 1 and its 2 operations')).toBeInTheDocument()
     expect(d.doc.parts).toBeDefined()
   })
 
-  it('Make Clones… clones the selected pocket; the Clones row nests Source and Clones', async () => {
-    const { user, openAdd, part } = await renderDesign(async (d) => {
+  it('Make Clones… from the row menu (Shift+F10) clones the pocket; the Clones row nests Source and Clones', async () => {
+    const { user, part } = await renderDesign(async (d) => {
       await d.dispatch(
         'design.pocket.add',
         {
@@ -225,11 +238,18 @@ describe('feature UI (U1)', () => {
         ui,
       )
     })
-    await user.click(await within(navigator()).findByRole('button', { name: /^Pocket 1/ }))
-    const menu = await openAdd()
-    const make = within(menu).getByRole('menuitem', { name: 'Make Clones…' })
-    expect(make).not.toHaveAttribute('aria-disabled')
-    await user.click(make)
+    // DF16: Shift+F10 on the row opens its menu: Chamfer (a circle pocket's edge), Make Clones…
+    const pocket = await within(navigator()).findByRole('button', { name: /^Pocket 1/ })
+    pocket.focus()
+    await user.keyboard('{Shift>}{F10}{/Shift}')
+    const menu = await screen.findByRole('menu', { name: 'Actions for Pocket 1' })
+    expect(
+      within(menu)
+        .getAllByRole('menuitem')
+        .map((i) => i.textContent),
+    ).toEqual(['Chamfer', 'Make Clones…', 'Remove'])
+    await user.click(within(menu).getByRole('menuitem', { name: 'Make Clones…' }))
+    expect(pocket).toHaveAttribute('aria-pressed', 'true')
     // the draft (U3) writes nothing until Make clones
     const makeButton = await within(inspector()).findByRole('button', { name: 'Make clones' })
     expect(part().features ?? []).toHaveLength(0)

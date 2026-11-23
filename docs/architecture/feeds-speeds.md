@@ -181,15 +181,18 @@ Because entered values are not inputs, the calculator's own warnings describe it
 
 ### Machine rigidity presets
 
-`machine.rigidity` is one of five presets (lowest = default). `apFactor` multiplies `apSlot` for the suggested stepdown; `rangePos` is the position within every `vc`, `n`, `fz` and `fn` range (0 = low end, 1 = high end). Calibrating a machine's own factors by test cuts in Run mode is later (not v0.1).
+`machine.rigidity` is one of six presets (lowest = default). `apFactor` multiplies `apSlot` for the suggested stepdown; `rangePos` is the position within every `vc`, `n`, `fz` and `fn` range (0 = low end, 1 = high end). Calibrating a machine's own factors by test cuts in Run mode is later (not v0.1).
 
-| Preset      | `apFactor` | `rangePos` | Example                                                                       |
-| ----------- | ---------- | ---------- | ----------------------------------------------------------------------------- |
-| `extrusion` | 0.3        | 0          | 2020 aluminium-extrusion frame, printed plastic parts, belts or leadscrews.   |
-| `hobby`     | 0.5        | 0.25       | Aluminium-plate gantry on heavier extrusions, V-wheels or small rails, belts. |
-| `prosumer`  | 0.75       | 0.5        | Steel or thick-plate router frame, linear rails, ball screws.                 |
-| `benchMill` | 0.9        | 0.75       | Converted cast-iron benchtop mill (column and knee or bed type), ball screws. |
-| `rigidMill` | 1.0        | 1.0        | Industrial cast-iron or steel mill / VMC; vendor data apply unscaled.         |
+`fixedGantry` (hardening DF36): a fixed gantry removes the cantilevered moving-gantry mass and its racking, and a solid plate frame is far stiffer than extrusions, so its stiffness (`apFactor`) sits close to a converted bench mill: 0.85. Aluminium is about half as stiff as cast iron (E ≈ 70 vs 110–140 GPa) and damps much less, so chatter limits speeds and chip loads earlier than on cast iron: `rangePos` 0.6, a step above `prosumer` (0.5) but short of `benchMill` (0.75). Users with test cuts may still pick `benchMill`.
+
+| Preset        | `apFactor` | `rangePos` | Example                                                                                                                         |
+| ------------- | ---------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `extrusion`   | 0.3        | 0          | 2020 aluminium-extrusion frame, printed plastic parts, belts or leadscrews.                                                     |
+| `hobby`       | 0.5        | 0.25       | Aluminium-plate gantry on heavier extrusions, V-wheels or small rails, belts.                                                   |
+| `prosumer`    | 0.75       | 0.5        | Steel or thick-plate router frame, linear rails, ball screws.                                                                   |
+| `fixedGantry` | 0.85       | 0.6        | Fixed gantry (moving table) on a solid aluminium plate or block frame, no extrusions, linear rails and ball screws on all axes. |
+| `benchMill`   | 0.9        | 0.75       | Converted cast-iron benchtop mill (column and knee or bed type), ball screws.                                                   |
+| `rigidMill`   | 1.0        | 1.0        | Industrial cast-iron or steel mill / VMC; vendor data apply unscaled.                                                           |
 
 ## API
 

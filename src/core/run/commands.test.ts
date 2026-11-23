@@ -12,9 +12,10 @@ import { planSetup, type PlanSetup } from '../plan/plan.fixture'
 import { createToolpathCache } from '../toolpath/cache'
 import { systemTimerHost } from './clock'
 import { checkNoRunJob } from './commands'
+import { machineKeyOf } from './machine-key'
 import { MachineClient } from './host/client'
 import { inProcessHostFactory } from './host/in-process'
-import type { RunStatus } from './service'
+import type { MachineService, RunStatus } from './service'
 
 const agent = agentSource()
 const ui = uiSource()
@@ -26,15 +27,25 @@ afterEach(() => {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+/** Polls `cond` until it holds or `ms` of wall time passed (not a count of polls: a loaded
+ * machine stretches each 5 ms sleep, and the budget must stay below the test's timeout). */
 async function waitFor(cond: () => boolean, ms = 30_000): Promise<boolean> {
-  for (let t = 0; t < ms; t += 5) {
+  const end = Date.now() + ms
+  while (Date.now() < end) {
     if (cond()) return true
     await sleep(5)
   }
   return cond()
 }
 
-async function setup(opts: { machine?: boolean; bottom?: boolean } = {}) {
+async function setup(
+  opts: {
+    machine?: boolean
+    bottom?: boolean
+    /** Wraps the client as the dispatcher's machine port (e.g. to delay a reply). */
+    wrap?: (client: MachineClient) => MachineService
+  } = {},
+) {
   const s: PlanSetup = await planSetup()
   // a bottom facing too: setups Bottom, Top (task E2)
   if (opts.bottom === true)
@@ -62,7 +73,7 @@ async function setup(opts: { machine?: boolean; bottom?: boolean } = {}) {
       library: s.library,
       toolpaths: createToolpathCache(),
       exportFiles: { write: async (target) => Ok({ filePath: target }) },
-      ...(opts.machine === false ? {} : { machine: client }),
+      ...(opts.machine === false ? {} : { machine: opts.wrap?.(client) ?? client }),
     },
   })
   const run = async (name: string, args: object, source = agent): Promise<AppResult<unknown>> =>
@@ -138,9 +149,15 @@ describe('run commands', { timeout: 60_000 }, () => {
       if (job.phase === 'toolChange') {
         // touch off 1 mm lower; the new tool has the same length: Z keeps its offset
         const before = t.status().workZero
+        const zBefore = t.status().mpos[2]
         expectOk(await t.run('run.machine.jog', { by: [0, 0, -1], feed: 300 }))
-        await waitFor(() => t.status().state === 'Idle')
-        await sleep(20)
+        // the jog's ok comes before its motion: wait for a report of it done, not the Idle before it
+        expect(
+          await waitFor(
+            () =>
+              t.status().state === 'Idle' && Math.abs(t.status().mpos[2] - (zBefore - 1)) < 5e-4,
+          ),
+        ).toBe(true)
         const z = t.status().wpos[2]
         expect(z).toBeCloseTo(t.status().mpos[2] - before[2], 6)
         const set = expectOk(await t.run('run.workZero.set', { axes: ['z'], values: [0, 0, z] }))
@@ -201,6 +218,54 @@ describe('run commands', { timeout: 60_000 }, () => {
     expect(second.setupId).toBe(top!.id)
     expect(second.next).toBeUndefined()
     expect(second.lines).toBeGreaterThan(first.lines)
+  })
+
+  it('connects without a plan (library machine): home, jog, travel refusal in words, zero (DF31, DF33)', async () => {
+    const t = await setup()
+    expectErrCode(
+      await t.run('run.connection.open', { target: 'virtual', timeScale: 'max' }),
+      'input.malformed',
+    )
+    expectErrCode(
+      await t.run('run.connection.open', {
+        target: 'virtual',
+        machineId: 'machine-missing',
+        timeScale: 'max',
+      }),
+      'input.malformed',
+    )
+    expectOk(
+      await t.run('run.connection.open', {
+        target: 'virtual',
+        machineId: t.s.machineId,
+        timeScale: 'max',
+      }),
+    )
+    // the same identity as the plan's unchanged copy of that machine: its runs are allowed
+    expect(t.client.machineKey).toBe(expectOk(machineKeyOf(t.s.d.doc, t.planId, 'test')))
+    // powers up at the centre of the travel, reports the envelope from $$
+    const travel = t.status().envelope?.travel
+    expect(t.status().envelope).toMatchObject({ homingMask: 0, pullOff: 1, softLimits: true })
+    expect(t.status().mpos).toEqual([-travel![0] / 2, -travel![1] / 2, -travel![2] / 2])
+    expectOk(await (await t.job('run.machine.home', {})).result)
+    expect(t.status().mpos).toEqual([-1, -1, -1])
+    expectOk(await t.run('run.machine.jog', { by: [1, 0, 0], feed: 2000 }))
+    const refused = expectErrCode(
+      await t.run('run.machine.jog', { by: [1, 0, 0], feed: 2000 }),
+      'run.travel',
+    )
+    expect(refused.message).toContain('X would leave the travel: max 0 mm')
+    expect(refused.toJSON().frames[0]?.data).toMatchObject({ axis: 'x', target: 1, max: 0 })
+    expect(await waitFor(() => t.status().state === 'Idle' && t.status().mpos[0] === 0)).toBe(true)
+    expectOk(await t.run('run.machine.jog', { by: [-50, -20, -10], feed: 5000 }))
+    expect(await waitFor(() => t.status().state === 'Idle' && t.status().mpos[0] === -50)).toBe(
+      true,
+    )
+    const zero = expectOk(await t.run('run.workZero.set', { axes: ['x', 'y', 'z'] })) as {
+      workZero: number[]
+    }
+    expect(zero.workZero).toEqual([-50, -21, -11])
+    expect(t.status().wpos).toEqual([0, 0, 0])
   })
 
   it('refuses a start that is not homed, a soft-limit violation and another machine copy', async () => {
@@ -315,6 +380,32 @@ describe('run commands', { timeout: 60_000 }, () => {
     expect(t.status().workZero).toEqual(before)
     expectOk(await t.run('job.abort', { jobId }))
     expectErrCode(await result, 'op.aborted')
+  })
+
+  it('a job.abort while the start reply is on its way still stops the job (op.aborted)', async () => {
+    // The host already streams; the abort lands before the client's startJob has resolved, so
+    // before the job binds its controls. It was lost: the job ran on into its M0 pause and hung.
+    let abortNow = async (_jobId: string): Promise<void> => {}
+    const t = await setup({
+      wrap: (c) =>
+        new Proxy(c, {
+          get: (target, key) => {
+            if (key === 'startJob')
+              return async (...a: Parameters<MachineClient['startJob']>) => {
+                const r = await target.startJob(...a)
+                await abortNow(a[0])
+                return r
+              }
+            const v = Reflect.get(target, key) as unknown
+            return typeof v === 'function' ? (v as () => unknown).bind(target) : v
+          },
+        }),
+    })
+    abortNow = async (jobId) => void expectOk(await t.run('job.abort', { jobId }))
+    expectOk(await t.open({ prepare: true }))
+    const { result } = await t.job('run.job.start', { planId: t.planId })
+    expectErrCode(await result, 'op.aborted')
+    expect(await waitFor(() => t.status().job === undefined)).toBe(true)
   })
 
   it('app quit (shutdown) stops a running job with the reset, then ends the host', async () => {

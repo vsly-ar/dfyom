@@ -163,7 +163,12 @@ export interface OperationFace {
 
 /** The `on` face of an operation; the stock top when the surface is unknown. */
 export function operationFace(op: Operation, stock: Stock, table: SurfaceTable): OperationFace {
-  const entry = table.get(op.on).or(table.get(STOCK_FACE['+z']))
+  return surfaceFace(op.on, stock, table)
+}
+
+/** The face of a surface id (a face target, or a selected face, DF22); the stock top when unknown. */
+export function surfaceFace(on: string, stock: Stock, table: SurfaceTable): OperationFace {
+  const entry = table.get(on).or(table.get(STOCK_FACE['+z']))
   const direction = entry.mapOr<Direction>('+z', (e) => e.direction)
   const size = stockSize(stock)
   const d = DIRECTION[direction]
@@ -279,7 +284,12 @@ export interface FrameAxes {
 
 /** The face frame of the operation's `on` face, at that face's level (design-v0.2.md#face-frame). */
 export function frameAxes(op: Operation, stock: Stock, table: SurfaceTable): FrameAxes {
-  const face = operationFace(op, stock, table)
+  return surfaceAxes(op.on, stock, table)
+}
+
+/** The face frame of a surface at its level (a selected face's axes, DF22). */
+export function surfaceAxes(on: string, stock: Stock, table: SurfaceTable): FrameAxes {
+  const face = surfaceFace(on, stock, table)
   const { u, v, n } = face.frame
   return {
     origin: toPartFrame(face.frame, [0, 0, face.w]),

@@ -7,6 +7,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { chromium } from '@playwright/test'
 import { ICONS, iconSvg } from './b22/icons.mjs'
+import { STOCK_SIZE_ICONS } from '../../src/renderer/src/ui/icons/field/stockSize.ts'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(HERE, '../..')
@@ -184,6 +185,42 @@ function l1Sheet(theme) {
   return page(theme, body, css)
 }
 
+// ---------- DF11 stock size field illustrations ----------
+// From the app's single source (stockSize.ts); drawn like FieldIcon: 1 px grey, amber edge
+// (1.4 px, 1.6 px focused), replacing the slot's length/width/depth in the Stock dialog.
+const SLOT = {
+  length: ['M2 6H18V14H2Z', 'M2 10H18'],
+  width: ['M2 6H18V14H2Z', 'M10 6V14'],
+  depth: ['M2 6H6V14H14V6H18', 'M6 6V14'],
+}
+const fieldSvg = ([d, accent], size, focused = false) =>
+  `<svg viewBox="0 0 20 20" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">` +
+  `<path d="${d}"/><path d="${accent}" stroke="var(--accent-icon)" stroke-width="${focused ? 1.6 : 1.4}" stroke-linecap="butt"/></svg>`
+function df11Sheet(theme) {
+  const rows = [
+    ['stock-length', 'Length (X)', 'length'],
+    ['stock-width', 'Width (Y)', 'width'],
+    ['stock-thickness', 'Thickness (Z)', 'depth'],
+  ]
+    .map(([id, label, was]) => {
+      const icon = [STOCK_SIZE_ICONS[id].d, STOCK_SIZE_ICONS[id].accent]
+      const sizes = [16, 20, 28, 32]
+        .map((s) => `<span class="ic">${fieldSvg(icon, s)}</span>`)
+        .join('')
+      return `<div class="r"><span class="lab"><span class="ic">${fieldSvg(icon, 28)}</span>${label}</span>
+      <span class="lab"><span class="ic">${fieldSvg(icon, 28, true)}</span>focused</span>${sizes}
+      <span class="was">was</span><span class="ic">${fieldSvg(SLOT[was], 28)}</span><code>${id}</code></div>`
+    })
+    .join('')
+  const body = `<div class="sheet"><h1>DF11 stock size icons (${theme})</h1>
+  <p>Field illustrations of the Stock dialog and the Library window's stock form: at 28 px beside the label, at rest and focused,
+  then 16 / 20 / 28 / 32 px, then the slot drawing they replace.</p>${rows}</div>`
+  const css = `.sheet{padding:20px 24px;width:820px}.r{display:flex;align-items:center;gap:14px;height:52px;border-bottom:1px solid var(--border)}
+  .lab{display:flex;flex:none;align-items:center;gap:8px;width:150px;color:var(--text)}.ic svg{display:block}
+  .was{margin-left:12px;color:var(--text-faint);font-size:11px}code{margin-left:auto;color:var(--text-faint);font-size:11px}`
+  return page(theme, body, css)
+}
+
 // ---------- B21 small sizes ----------
 function smallSizes() {
   const rows = CONCEPTS.map(
@@ -257,6 +294,11 @@ for (const theme of ['light', 'dark']) {
   await shot(l1Sheet(theme), `l1-contact-${theme}.png`, {
     width: 960,
     height: 900,
+    selector: '.sheet',
+  })
+  await shot(df11Sheet(theme), `df11-stock-size-${theme}.png`, {
+    width: 860,
+    height: 300,
     selector: '.sheet',
   })
 }

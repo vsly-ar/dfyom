@@ -108,7 +108,7 @@ test('exit criteria through the UI: design, plan, export, run, save, close and r
   await expect(inspector.getByRole('heading', { name: 'Facing 1' })).toBeVisible()
   await setField(inspector, 'Depth', '0.5')
 
-  await addFromMenu(page, 'Add pocket')
+  await addFromMenu(page, 'Pocket')
   await expect(inspector.getByRole('heading', { name: 'Pocket 1' })).toBeVisible()
   await setField(inspector, 'Depth', '6')
   // the adjust panel (opened by focusing the field, DF9) commits each step live (one gesture);
@@ -129,11 +129,11 @@ test('exit criteria through the UI: design, plan, export, run, save, close and r
   await setField(inspector, 'Floor fillet radius', '2')
   await expect(inspector.getByLabel('Floor fillet radius', { exact: true })).toHaveValue('2')
 
-  await addFromMenu(page, 'Add drilling')
+  await addFromMenu(page, 'Drilling')
   await expect(inspector.getByRole('heading', { name: 'Drilling 1' })).toBeVisible()
   await setField(inspector, 'Diameter', '6')
 
-  await addFromMenu(page, 'Add profile')
+  await addFromMenu(page, 'Profile')
   await expect(inspector.getByRole('heading', { name: 'Profile 1' })).toBeVisible()
   await setField(inspector, 'Tab count', '4')
   // Tab commits only: the change waits for Apply in the toolbar (apply.md § Apply button)

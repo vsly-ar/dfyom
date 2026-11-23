@@ -28,7 +28,10 @@ import type { CommandContext } from '../commands/context'
 import type { ReferenceResolver } from '../expression/evaluate'
 import { quantityFromSource } from '../expression/quantity'
 import { ItemIdSchema, NAME_MAX } from '../library/item'
-import { deepEqual, SnapshotDtoSchema, takeSnapshot } from '../library/snapshot'
+import { valuesFromDTO, type ItemValuesDTO } from '../library/library-item'
+import { deepEqual, ownSnapshot, SnapshotDtoSchema, takeSnapshot } from '../library/snapshot'
+import { StockValuesDtoSchema } from '../library/stock.dto'
+import { valuesFromInput, valuesInputSchema } from '../library/values-input'
 import type { Stock } from '../library/stock'
 import type { ProjectDoc, UnitSystem } from '../project/document'
 import { Quantity } from '../quantity/quantity'
@@ -957,28 +960,62 @@ function applyUpdate<P extends z.ZodRawShape, O extends Operation>(
 
 // ── part and shared operation commands ────────────────────────────────────────────────────
 
+/** A part's own stock (DF13): the block values of `library.stock.add`, quantity strings. */
+const STOCK_VALUES = StockValuesDtoSchema.omit({ kind: true })
+const StockArg = valuesInputSchema(STOCK_VALUES).describe(
+  'Own block, not from the library: values as library.stock.add, bare numbers in project units',
+)
+
 const partAdd = defineCommand({
   kind: 'document',
   name: 'design.part.add',
-  summary: 'Create the part from a block stock of the library (v0.1: one part per project).',
+  summary:
+    'Create the part from a library block (stockLibraryItemId) or its own block (stock); one part per project.',
   title: () => 'Add part',
   machine: false,
   args: z.object({
     name: NameArg,
-    stockLibraryItemId: ItemIdSchema.describe('Library stock to take a snapshot of'),
+    stockLibraryItemId: ItemIdSchema.optional().describe('Library stock to take a snapshot of'),
+    stock: StockArg.optional() as z.ZodOptional<z.ZodType<object>>,
   }),
   result: z.object({ partId: PartIdSchema }),
   run(draft, args, ctx) {
     const where = 'design.part.add'
     if (Object.keys(draft.parts).length > 0)
       return invalid([{ path: [], rule: 'onePart', message: 'v0.1 projects have one part' }], where)
+    if ((args.stockLibraryItemId === undefined) === (args.stock === undefined))
+      return fail('input.malformed', 'pass exactly one of stockLibraryItemId and stock', {
+        issues: [
+          {
+            path: ['stock'],
+            rule: 'stockSource',
+            message: 'pass exactly one of stockLibraryItemId and stock',
+          },
+        ],
+        where,
+      })
+    const snapshotId = ctx.ids.next('snapshot')
+    const takenAt = new Date(ctx.clock.now()).toISOString()
+    if (args.stock !== undefined) {
+      // the project's own block, linked to no library item (library.md#snapshots)
+      const own = valuesFromInput(STOCK_VALUES, args.stock, draft.unitSystem, ['stock'])
+        .andThen((v) => valuesFromDTO({ ...(v as object), kind: 'stock' } as ItemValuesDTO))
+        .mapErr((e) => (e.issues.some((i) => i.path[0] === 'stock') ? e : e.prefixIssues('stock')))
+        .andThen((values) => ownSnapshot(values, snapshotId, takenAt))
+      if (own.isErr()) return Err(own.unwrapErr().withContext(where))
+      const partId = ctx.ids.next('part')
+      draft.snapshots[snapshotId] = own.unwrap().toDTO()
+      draft.parts[partId] = { id: partId, name: args.name, stock: snapshotId, operations: [] }
+      return Ok({ partId })
+    }
+    const stockLibraryItemId = args.stockLibraryItemId!
     // a synchronous, read-only library lookup (docs/architecture/commands.md#command-definition)
     const library = ctx.services.library
     if (library === undefined)
       return fail('internal.unexpected', 'no library service configured', { where })
-    const found = library.lookup('stock', args.stockLibraryItemId)
+    const found = library.lookup('stock', stockLibraryItemId)
     if (found.state !== 'found')
-      return fail('input.malformed', `stock ${args.stockLibraryItemId} is not in the library`, {
+      return fail('input.malformed', `stock ${stockLibraryItemId} is not in the library`, {
         issues: [
           {
             path: ['stockLibraryItemId'],
@@ -989,9 +1026,8 @@ const partAdd = defineCommand({
         ],
         where,
       })
-    const snapshotId = ctx.ids.next('snapshot')
     const partId = ctx.ids.next('part')
-    const snap = takeSnapshot(found.item, snapshotId, new Date(ctx.clock.now()).toISOString())
+    const snap = takeSnapshot(found.item, snapshotId, takenAt)
     if (snap.isErr()) return Err(snap.unwrapErr().withContext(where))
     draft.snapshots[snapshotId] = snap.unwrap().toDTO()
     draft.parts[partId] = { id: partId, name: args.name, stock: snapshotId, operations: [] }

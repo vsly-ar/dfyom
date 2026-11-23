@@ -8,7 +8,7 @@
  */
 import { AppError } from '../../shared/errors/app-error'
 import { fail, Ok, type AppResult, type AsyncAppResult } from '../../shared/result'
-import { LIBRARY_ITEM_KINDS, type LibraryItemKind } from './item'
+import { LIBRARY_ITEM_KINDS, toOption, type LibraryItemKind } from './item'
 import { LibraryItem, parseLibraryItem, type ItemValues } from './library-item'
 import type { ItemLookup, ItemLookupResult } from './snapshot'
 import type { LibraryStorage, StoredEntry } from './storage'
@@ -87,9 +87,23 @@ export class Library {
     return () => this.listeners.delete(listener)
   }
 
-  add(values: ItemValues, meta: { id: string; updatedAt: string }): AsyncAppResult<LibraryItem> {
+  /** Adds an item; `parentId` files a stock under a root stock (library.md#stock-variants-df13). */
+  add(
+    values: ItemValues,
+    meta: { id: string; updatedAt: string; parentId?: string | undefined },
+  ): AsyncAppResult<LibraryItem> {
     return this.serial(async () => {
-      const item = LibraryItem.create({ ...meta, revision: 1, values })
+      const { parentId, ...rest } = meta
+      if (parentId !== undefined) {
+        const parent = this.checkParent(values.kind, parentId)
+        if (parent.isErr()) return parent
+      }
+      const item = LibraryItem.create({
+        ...rest,
+        revision: 1,
+        values,
+        parentId: toOption(parentId),
+      })
       if (item.isErr()) return item
       const written = await this.write(item.unwrap(), null)
       if (written.isOk())
@@ -128,9 +142,25 @@ export class Library {
     })
   }
 
-  /** Deletes the item file; without `revision` also an unreadable one (user decision). */
+  /**
+   * Deletes the item file; without `revision` also an unreadable one (user decision). A stock with
+   * variants is refused: remove them first.
+   */
   remove(kind: LibraryItemKind, id: string, revision?: number): AsyncAppResult<void> {
     return this.serial(async () => {
+      const variants = this.variantsOf(kind, id)
+      if (variants.length > 0)
+        return fail('input.malformed', `${kind} ${id} has variants; remove them first`, {
+          issues: [
+            {
+              path: ['id'],
+              rule: 'hasVariants',
+              message: 'remove its variants first',
+            },
+          ],
+          where: 'Library.remove',
+          data: { variants },
+        })
       const r = await this.storage.remove(kind, id, revision)
       if (r.isErr()) {
         await this.reload(kind, id)
@@ -140,6 +170,32 @@ export class Library {
       this.emit({ kind, id, change: 'removed' })
       return r
     })
+  }
+
+  /** Ids of the loaded items filed under `id`. */
+  variantsOf(kind: LibraryItemKind, id: string): string[] {
+    return this.list(kind)
+      .items.filter((i) => i.parentId.isSome() && i.parentId.unwrap() === id)
+      .map((i) => i.id)
+  }
+
+  /** A variant's parent: a loaded stock that is no variant itself (one level). */
+  private checkParent(kind: LibraryItemKind, parentId: string): AppResult<void> {
+    const issue = (rule: string, message: string) =>
+      fail('input.malformed', `parent ${parentId}: ${message}`, {
+        issues: [{ path: ['parentId'], rule, message }],
+        where: 'Library.add',
+      })
+    if (kind !== 'stock') return issue('notStock', 'only stock has variants')
+    const found = this.lookup(kind, parentId)
+    if (found.state !== 'found')
+      return issue(
+        found.state === 'missing' ? 'unknownItem' : 'unreadableItem',
+        found.state === 'missing' ? 'no such library stock' : 'the stock file does not load',
+      )
+    if (found.item.parentId.isSome())
+      return issue('nestedVariant', 'is a variant itself; variants have one level')
+    return Ok(undefined)
   }
 
   private async write(item: LibraryItem, expected: number | null): AsyncAppResult<LibraryItem> {

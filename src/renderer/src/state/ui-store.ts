@@ -127,6 +127,9 @@ export interface UiState {
   /** The last SVG import's report (task U2), reopened from the shape inspector; not persisted. */
   readonly lastImport: LastImport | null
   setLastImport(last: LastImport | null): void
+  /** The viewport's measure tool is on (the main toolbar's Measure and `D`, DF19; per window). */
+  readonly measuring: boolean
+  setMeasuring(on: boolean): void
   /** The "Snap" toggle of the Shape Editor and the viewport (task U3; per window, on at start). */
   readonly snapOn: boolean
   setSnapOn(on: boolean): void
@@ -289,6 +292,8 @@ export function createUiStore(initial: Partial<Pick<UiState, 'mode'>> = {}): UiS
     setRotationGuide: (rotationGuide) => set({ rotationGuide }),
     lastImport: null,
     setLastImport: (lastImport) => set({ lastImport }),
+    measuring: false,
+    setMeasuring: (measuring) => set({ measuring }),
     snapOn: true,
     setSnapOn: (snapOn) => set({ snapOn }),
     sectionDepth: null,

@@ -1,5 +1,5 @@
 // Feature and Clones operations in a plan (v0.4 P1): equal chamfers group into one plan operation,
-// labels name the feature ("Hole 1 · drill × 3"), Clones of a counterbored hole cut tool by tool
+// labels name the feature ("Bolt hole 1 · drill × 3"), Clones of a counterbored hole cut tool by tool
 // (D34, one tool change), and the program comments each clone position.
 // Spec: docs/modes/plan-v0.4.md (P-B, P-E, Plan side), docs/modes/features.md#plan-and-cut-order
 import { describe, expect, it } from 'vitest'
@@ -70,25 +70,27 @@ describe('feature operations in a plan', () => {
       ['hole1_drill', 'clones1_2_hole1_drill', 'clones1_3_hole1_drill'],
     ])
     expect(rows.map((r) => r.label)).toEqual([
-      'Hole 1 · counterbore',
-      'Hole 1 · counterbore · 2',
-      'Hole 1 · counterbore · 3',
-      'Hole 1 · drill × 3',
+      'Bolt hole 1 · counterbore',
+      'Bolt hole 1 · counterbore · 2',
+      'Bolt hole 1 · counterbore · 3',
+      'Bolt hole 1 · drill × 3',
     ])
     // two distinct tools, kept adjacent: one tool change (X1's assertion, D34)
     expect(new Set(rows.slice(0, 3).map((r) => r.tool)).size).toBe(1)
     expect(rows[3]!.tool).not.toBe(rows[0]!.tool)
     const e = await t.exported()
     expect(e.stats.toolChanges).toBe(1)
-    const comments = e.lines.filter((l) => l.startsWith('(Hole 1') || l.startsWith('(Clones 1'))
+    const comments = e.lines.filter(
+      (l) => l.startsWith('(Bolt hole 1') || l.startsWith('(Clones 1'),
+    )
     expect(comments).toEqual([
-      '(Hole 1 - counterbore)',
+      '(Bolt hole 1 - counterbore)',
       '(Clones 1 #1)',
-      '(Hole 1 - counterbore - 2)',
+      '(Bolt hole 1 - counterbore - 2)',
       '(Clones 1 #2)',
-      '(Hole 1 - counterbore - 3)',
+      '(Bolt hole 1 - counterbore - 3)',
       '(Clones 1 #3)',
-      '(Hole 1 - drill x 3)',
+      '(Bolt hole 1 - drill x 3)',
       '(Clones 1 #1)',
       '(Clones 1 #2)',
       '(Clones 1 #3)',
@@ -99,7 +101,10 @@ describe('feature operations in a plan', () => {
     const t = await setup({ type: 'countersink', diameter: '6', csDiameter: '10', csAngle: '90' })
     expect(t.errors()).toEqual([])
     const rows = t.rows()
-    expect(rows.map((r) => r.label)).toEqual(['Hole 1 · drill × 3', 'Hole 1 · countersink × 3'])
+    expect(rows.map((r) => r.label)).toEqual([
+      'Bolt hole 1 · drill × 3',
+      'Bolt hole 1 · countersink × 3',
+    ])
     expect(rows[1]!.ids).toEqual([
       'hole1_countersink',
       'clones1_2_hole1_countersink',

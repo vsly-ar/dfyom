@@ -8,7 +8,7 @@ import { PlanStartOverlay } from '../modes/plan'
 import { useModeScene } from '../modes/ModePanels'
 import { Viewport } from '../viewport'
 import styles from './AppShell.module.css'
-import { useReplica } from './ShellContext'
+import { useReplica, useUi } from './ShellContext'
 
 export function ShellViewport({
   mode,
@@ -21,9 +21,18 @@ export function ShellViewport({
   const scene = useModeScene(mode)
   const replica = useReplica()
   const doc = replica.status === 'open' ? replica.doc : undefined
+  // the main toolbar's Measure (DF19) and the viewport share the tool's on state
+  const measuring = useUi((s) => s.measuring)
+  const setMeasuring = useUi((s) => s.setMeasuring)
   return (
     <>
-      <Viewport {...scene} insetRight={insetRight} className={styles['viewportCanvas']} />
+      <Viewport
+        {...scene}
+        measuring={measuring && mode !== 'run'}
+        onMeasuringChange={setMeasuring}
+        insetRight={insetRight}
+        className={styles['viewportCanvas']}
+      />
       {mode === 'design' ? <ShapeEditorLayer insetRight={insetRight} /> : null}
       {mode === 'plan' && doc !== undefined ? (
         <PlanStartOverlay doc={doc} insetRight={insetRight} />

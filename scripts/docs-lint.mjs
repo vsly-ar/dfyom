@@ -72,8 +72,13 @@ const isExternal = (target) => /^[a-z][a-z0-9+.-]*:/i.test(target)
 /**
  * Broken relative links of one markdown file: missing files, and `#anchors` that match
  * no heading in the target markdown file (anchors into non-markdown files are not checked).
+ * `read` and `anchorsOf` can be memoized by a caller checking many files.
  */
-export function brokenLinks(file, read = (f) => readFileSync(f, 'utf8')) {
+export function brokenLinks(
+  file,
+  read = (f) => readFileSync(f, 'utf8'),
+  anchorsOf = (f) => anchors(read(f)),
+) {
   const problems = []
   for (const target of extractLinks(read(file))) {
     if (isExternal(target)) continue
@@ -89,7 +94,7 @@ export function brokenLinks(file, read = (f) => readFileSync(f, 'utf8')) {
     }
     if (fragment === undefined || fragment === '' || !stat.isFile() || !resolved.endsWith('.md'))
       continue
-    if (!anchors(read(resolved)).has(decodeURIComponent(fragment).toLowerCase()))
+    if (!anchorsOf(resolved).has(decodeURIComponent(fragment).toLowerCase()))
       problems.push(
         `${target}: no heading for #${fragment} in ${relative(dirname(file), resolved) || 'this file'}`,
       )

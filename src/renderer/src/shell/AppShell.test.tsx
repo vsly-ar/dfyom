@@ -112,6 +112,32 @@ describe('AppShell', () => {
     await waitFor(() => expect(document.title).toBe('Bracket — Edited'))
   })
 
+  it('has New / Open / Save in the toolbar; Save shows unsaved changes (DF14)', async () => {
+    const bridge = createFakeBridge()
+    bridge.bind(fixtureDispatcher('Bracket'), 'p1', { file: '/p/bracket.dfyom' })
+    const { user, shell } = renderShell(bridge)
+    await closeStockDialog(user)
+    const file = screen.getByRole('toolbar', { name: 'File' })
+    expect(within(file).getByRole('button', { name: 'Save' })).toBeEnabled()
+    expect(within(file).getByRole('button', { name: 'Open project…' })).toBeEnabled()
+    // New project… opens the same dialog as File → New project…
+    await user.click(within(file).getByRole('button', { name: 'New project…' }))
+    expect(shell.files.getState().dialog).toEqual({ kind: 'new' })
+    await act(async () => shell.files.getState().closeDialog())
+    await act(async () => {
+      await bridge.call('project.name.update', { name: 'Plate' })
+    })
+    const save = await within(file).findByRole('button', { name: 'Save (unsaved changes)' })
+    await user.click(save)
+    await waitFor(() => expect(bridge.calls.some((c) => c.name === 'project.save')).toBe(true))
+  })
+
+  it('disables Save without a project (DF14)', async () => {
+    renderShell()
+    const file = await screen.findByRole('toolbar', { name: 'File' })
+    expect(within(file).getByRole('button', { name: 'Save' })).toBeDisabled()
+  })
+
   it('names the agent when the top step is not the user’s', async () => {
     const bridge = createFakeBridge()
     const d = fixtureDispatcher()
@@ -135,10 +161,13 @@ describe('AppShell', () => {
     bridge.bind(fixtureDispatcher())
     const { user } = renderShell(bridge)
     await closeStockDialog(user)
+    // Run needs no plan: manual control of a library machine (DF31)
     await user.click(screen.getByRole('radio', { name: 'Run' }))
-    await user.click(await screen.findByRole('button', { name: 'Go to Plan' }))
-    expect(screen.getByRole('radio', { name: 'Plan' })).toBeChecked()
-    await user.click(screen.getByRole('button', { name: 'Go to Design' }))
+    expect(await screen.findByRole('combobox', { name: 'Plan' })).toHaveTextContent(
+      'No plan (manual control)',
+    )
+    await user.click(screen.getByRole('radio', { name: 'Plan' }))
+    await user.click(await screen.findByRole('button', { name: 'Go to Design' }))
     expect(screen.getByRole('radio', { name: 'Design' })).toBeChecked()
   })
 

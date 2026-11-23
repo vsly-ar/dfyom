@@ -1,9 +1,11 @@
 // Menu: row and viewport actions in a dropdown, with shortcuts; destructive items in --danger-text.
 // v0.4 (task U1): labelled groups ("Operations", "Features") and items disabled with a stated
 // reason (`aria-disabled`, still focusable, the reason under the label and in its description).
+// Dogfood DF18: an item's one-line `description` shows as a tooltip beside it while highlighted. DF16:
+// `ContextMenu` (right-click; same entries and look) and `openContextMenu` (Shift+F10 / Menu key).
 // Doc: docs/conventions/ui.md#radix-wrapping-pattern, #inventory-v01, #feature-rows-and-add
-import { DropdownMenu } from 'radix-ui'
-import { useId, type ReactElement, type ReactNode } from 'react'
+import { ContextMenu as RadixContextMenu, DropdownMenu } from 'radix-ui'
+import { useId, type ComponentType, type ReactElement, type ReactNode } from 'react'
 import { usePortalContainer } from '../UiProvider/UiProvider'
 import styles from './Menu.module.css'
 
@@ -19,6 +21,12 @@ export interface MenuItem {
    * nothing, and the reason shows under its label (ui.md: disabled actions say why).
    */
   disabledReason?: string | undefined
+  /**
+   * One line on what the item does: a tooltip beside the item while it is highlighted (hover or
+   * keyboard focus) and its accessible description (DF18). Drawn by the menu itself, not a Radix
+   * tooltip, so a single Escape still closes the menu.
+   */
+  description?: string | undefined
 }
 
 /** A labelled group of items (`role="group"` named by its label). */
@@ -70,44 +78,123 @@ export function Menu({
           collisionPadding={8}
           {...(label ? { 'aria-label': label } : {})}
         >
-          {items.map((item, i) =>
-            item === 'separator' ? (
-              <DropdownMenu.Separator key={`sep-${i}`} className={styles['separator']} />
-            ) : 'group' in item ? (
-              <Group key={`group-${item.group}`} group={item} />
-            ) : (
-              <Item key={item.label} item={item} />
-            ),
-          )}
+          <Entries p={DROPDOWN} items={items} />
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
   )
 }
 
-function Group({ group }: { group: MenuGroup }): React.JSX.Element {
-  const id = useId()
+export interface ContextMenuProps {
+  /** The element right-click (or `openContextMenu`) opens the menu on (Radix `asChild`). */
+  children: ReactElement
+  items: readonly MenuEntry[]
+  /** Accessible name of the menu. */
+  label: string
+  /** Where focus goes when the menu closes (the row it was opened on). */
+  onCloseAutoFocus?: (e: Event) => void
+}
+
+/** The right-click menu of an element: the same entries and look as `Menu`, at the pointer. */
+export function ContextMenu({
+  children,
+  items,
+  label,
+  onCloseAutoFocus,
+}: ContextMenuProps): React.JSX.Element {
+  const container = usePortalContainer()
   return (
-    <DropdownMenu.Group className={styles['group']} aria-labelledby={id}>
-      <DropdownMenu.Label id={id} className={styles['label']}>
-        {group.group}
-      </DropdownMenu.Label>
-      {group.items.map((item) => (
-        <Item key={item.label} item={item} />
-      ))}
-    </DropdownMenu.Group>
+    <RadixContextMenu.Root>
+      <RadixContextMenu.Trigger asChild>{children}</RadixContextMenu.Trigger>
+      <RadixContextMenu.Portal container={container}>
+        <RadixContextMenu.Content
+          className={`${styles['content']} ${styles['context']}`}
+          collisionPadding={8}
+          aria-label={label}
+          {...(onCloseAutoFocus ? { onCloseAutoFocus } : {})}
+        >
+          <Entries p={CONTEXT} items={items} />
+        </RadixContextMenu.Content>
+      </RadixContextMenu.Portal>
+    </RadixContextMenu.Root>
   )
 }
 
-function Item({ item }: { item: MenuItem }): React.JSX.Element {
-  const reasonId = useId()
-  const reason = item.disabledReason
+/**
+ * Opens the `ContextMenu` of `el` from the keyboard (`Shift+F10`, the Menu key): a `contextmenu`
+ * event at its start edge, as a right-click there would send (macOS Chromium sends none itself).
+ */
+export function openContextMenu(el: Element): void {
+  const r = el.getBoundingClientRect()
+  el.dispatchEvent(
+    new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      clientX: r.left + Math.min(24, r.width / 2),
+      clientY: r.top + r.height,
+    }),
+  )
+}
+
+/** `Shift+F10` or the Menu key: the key that opens a context menu. */
+export const isContextMenuKey = (e: { key: string; shiftKey: boolean }): boolean =>
+  e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)
+
+/** The Radix parts an entry renders with (DropdownMenu's and ContextMenu's share their props). */
+interface Parts {
+  Item: ComponentType<DropdownMenu.DropdownMenuItemProps>
+  Group: ComponentType<DropdownMenu.DropdownMenuGroupProps>
+  Label: ComponentType<DropdownMenu.DropdownMenuLabelProps>
+  Separator: ComponentType<DropdownMenu.DropdownMenuSeparatorProps>
+}
+const DROPDOWN: Parts = DropdownMenu
+const CONTEXT = RadixContextMenu as unknown as Parts
+
+function Entries({ p, items }: { p: Parts; items: readonly MenuEntry[] }): React.JSX.Element {
   return (
-    <DropdownMenu.Item
+    <>
+      {items.map((item, i) =>
+        item === 'separator' ? (
+          <p.Separator key={`sep-${i}`} className={styles['separator']} />
+        ) : 'group' in item ? (
+          <Group key={`group-${item.group}`} p={p} group={item} />
+        ) : (
+          <Item key={item.label} p={p} item={item} />
+        ),
+      )}
+    </>
+  )
+}
+
+function Group({ p, group }: { p: Parts; group: MenuGroup }): React.JSX.Element {
+  const id = useId()
+  return (
+    <p.Group className={styles['group']} aria-labelledby={id}>
+      <p.Label id={id} className={styles['label']}>
+        {group.group}
+      </p.Label>
+      {group.items.map((item) => (
+        <Item key={item.label} p={p} item={item} />
+      ))}
+    </p.Group>
+  )
+}
+
+function Item({ p, item }: { p: Parts; item: MenuItem }): React.JSX.Element {
+  const reasonId = useId()
+  const descriptionId = useId()
+  const reason = item.disabledReason
+  const description = item.description
+  return (
+    <p.Item
       className={styles['item']}
       data-danger={item.danger || undefined}
       data-reason={reason !== undefined || undefined}
       disabled={item.disabled ?? false}
+      {...(description !== undefined && reason === undefined
+        ? { 'aria-describedby': descriptionId }
+        : {})}
+      {...(description !== undefined ? { 'aria-label': item.label } : {})}
       {...(reason !== undefined
         ? {
             'aria-label': item.label,
@@ -132,6 +219,11 @@ function Item({ item }: { item: MenuItem }): React.JSX.Element {
         ) : null}
       </span>
       {item.shortcut ? <kbd className={styles['kbd']}>{item.shortcut}</kbd> : null}
-    </DropdownMenu.Item>
+      {description !== undefined ? (
+        <span id={descriptionId} role="tooltip" className={styles['description']}>
+          {description}
+        </span>
+      ) : null}
+    </p.Item>
   )
 }

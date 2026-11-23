@@ -78,7 +78,8 @@ export type DraftValues = ToolDraft | MachineDraft | StockDraft
 
 /** The values of a stored item (its meta dropped). */
 export function itemValues(item: LibraryItemDTO): ItemValuesDTO {
-  const { id: _id, revision: _revision, updatedAt: _updatedAt, ...values } = item
+  // a stock variant's parentId is library bookkeeping, not a value (DF13)
+  const { id: _id, revision: _revision, updatedAt: _updatedAt, parentId: _parent, ...values } = item
   return values as ItemValuesDTO
 }
 

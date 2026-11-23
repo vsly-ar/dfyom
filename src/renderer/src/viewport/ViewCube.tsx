@@ -2,7 +2,8 @@
 // HUD layer (drei's `Hud`: its own scene and orthographic camera in px, rendered after the scene)
 // that turns with the camera in lockstep. 26 clickable regions, face labels in the face frame,
 // the amber outline of the current view, the axis triad at part zero and, in Plan and Run, the
-// spindle glyph on the setup's up face. Colours come from tokens (props); what a click does is
+// spindle glyph on the setup's up face. Translucent until the pointer is over its square (DF19):
+// a depth-only pass of the regions first, so only the front faces blend with the scene. Colours come from tokens (props); what a click does is
 // the Viewport's business. Doc: docs/conventions/ui-view-cube.md, ADR 0010
 import { Hud, Line, OrthographicCamera } from '@react-three/drei'
 import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
@@ -26,6 +27,8 @@ import {
   CHAMFER,
   CUBE_BOX_PX,
   CUBE_HALF_EDGE_PX,
+  CUBE_IDLE_OPACITY,
+  CUBE_TOOLBAR_PX,
   CUBE_MARGIN_PX,
   CUBE_REGIONS,
   faceRight,
@@ -55,6 +58,8 @@ export interface ViewCubeProps {
   setupFace: CubeRegion | null
   /** Px of the viewport's right edge covered (the inspector overlay): the cube moves left. */
   insetRight: number
+  /** The pointer is over the cube's square, or a press on it is held: opaque (DF19). */
+  active: boolean
   reducedMotion: boolean
   onHover: (region: CubeRegion | null) => void
   onClick: (region: CubeRegion, event: MouseEvent) => void
@@ -66,6 +71,8 @@ const noRaycast = (): void => {}
 /** `--motion-fast` (hover tints) and `--motion-base` (moving beside the overlay), in seconds. */
 const HOVER_S = 0.12
 const SLIDE_S = 0.18
+/** `--motion-base`: the fade between translucent and opaque (DF19). */
+const FADE_S = 0.18
 
 function colour(c: Rgb): Color {
   return new Color().setRGB(c[0], c[1], c[2], SRGBColorSpace)
@@ -116,11 +123,13 @@ function CubeHud({
   current,
   setupFace,
   insetRight,
+  active,
   reducedMotion,
   onHover,
   onClick,
   onCamera,
 }: ViewCubeProps & { main: Camera }): React.JSX.Element {
+  const opacity = useRef(active ? 1 : CUBE_IDLE_OPACITY)
   const size = useThree((s) => s.size)
   const invalidate = useThree((s) => s.invalidate)
   const group = useRef<Group>(null)
@@ -161,7 +170,10 @@ function CubeHud({
   )
   useEffect(() => () => Object.values(letters).forEach((t) => t?.dispose()), [letters])
 
-  useEffect(() => invalidate(), [colours, hovered, current, setupFace, insetRight, invalidate])
+  useEffect(
+    () => invalidate(),
+    [colours, hovered, current, setupFace, insetRight, active, invalidate],
+  )
 
   useFrame((_, delta) => {
     const g = group.current
@@ -174,7 +186,7 @@ function CubeHud({
     const gap = insetRight - offset.current
     offset.current = Math.abs(gap) <= step ? insetRight : offset.current + Math.sign(gap) * step
     if (offset.current !== insetRight) moving = true
-    const x = size.width / 2 - CUBE_MARGIN_PX - CUBE_BOX_PX / 2 - offset.current
+    const x = size.width / 2 - CUBE_MARGIN_PX - CUBE_TOOLBAR_PX - CUBE_BOX_PX / 2 - offset.current
     const y = size.height / 2 - CUBE_MARGIN_PX - CUBE_BOX_PX / 2
     g.position.set(x, y, 0)
     catcher.current?.position.set(x, y, -100)
@@ -191,6 +203,21 @@ function CubeHud({
       const c = regionColour(r, colours, now)
       materials.current.get(key)?.color.setRGB(c[0], c[1], c[2], SRGBColorSpace)
     }
+    // translucent until hovered (--motion-base; instant under reduced motion)
+    const goal = active ? 1 : CUBE_IDLE_OPACITY
+    const fade = reducedMotion ? Infinity : (delta / FADE_S) * (1 - CUBE_IDLE_OPACITY)
+    const was = opacity.current
+    opacity.current = Math.abs(goal - was) <= fade ? goal : was + Math.sign(goal - was) * fade
+    if (opacity.current !== goal) moving = true
+    g.traverse((o) => {
+      const m = (o as { material?: unknown }).material
+      if (m === undefined || o.userData['depthOnly'] === true) return
+      for (const mat of Array.isArray(m) ? m : [m]) {
+        const material = mat as { opacity: number; transparent: boolean }
+        material.transparent = true
+        material.opacity = opacity.current
+      }
+    })
     const back = new Vector3(0, 0, 1).applyQuaternion(main.quaternion)
     // the triad only while its corner faces the camera (from below it would stick out behind)
     if (triad.current) triad.current.visible = back.dot(TRIAD_CORNER) > -0.2
@@ -230,6 +257,23 @@ function CubeHud({
         </mesh>
       </group>
       <group ref={group} scale={CUBE_HALF_EDGE_PX}>
+        {/* depth only, drawn first (opaque queue): the translucent faces blend only at the front */}
+        {geometries.map((g, i) => (
+          <mesh
+            key={`depth:${i}`}
+            geometry={g}
+            raycast={noRaycast}
+            userData={{ depthOnly: true }}
+            renderOrder={-1}
+          >
+            <meshBasicMaterial
+              colorWrite={false}
+              polygonOffset
+              polygonOffsetFactor={1}
+              polygonOffsetUnits={1}
+            />
+          </mesh>
+        ))}
         {CUBE_REGIONS.map((r, i) => (
           <mesh
             key={regionKey(r)}
@@ -248,6 +292,7 @@ function CubeHud({
                 else materials.current.delete(regionKey(r))
               }}
               color={restColours[i]!}
+              transparent
               polygonOffset
               polygonOffsetFactor={1}
               polygonOffsetUnits={1}

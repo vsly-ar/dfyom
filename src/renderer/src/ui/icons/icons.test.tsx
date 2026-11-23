@@ -45,6 +45,9 @@ describe('field illustrations', () => {
       'clearance',
       'retract',
       'arcTolerance',
+      'stock-length',
+      'stock-width',
+      'stock-thickness',
     ])
   })
 

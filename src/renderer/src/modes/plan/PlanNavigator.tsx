@@ -338,7 +338,12 @@ function MachineSection({
   const call = usePlanCommand()
   const canSet = allows(plan, 'plan.machine.set')
   const machines = useLibraryItems('machine', plan.machine)
-  const copy = plan.snapshots.find((s) => s.id === plan.machine)
+  // machine copies always come from the library (only a part's stock may be its own, DF13)
+  const found = plan.snapshots.find((s) => s.id === plan.machine)
+  const copy =
+    found?.libraryItemId === undefined
+      ? undefined
+      : { id: found.id, libraryItemId: found.libraryItemId }
   const options = (machines ?? []).map((i) => ({ value: i.id, label: i.name }))
   if (copy !== undefined && !options.some((o) => o.value === copy.libraryItemId))
     options.push({

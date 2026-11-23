@@ -314,6 +314,23 @@
   overflow: hidden;
 }
 
+/* a stock variant (DF13): indented under its parent with a thin branch line */
+.row[data-variant] .nameCell {
+  position: relative;
+  padding-left: var(--space-4);
+}
+
+.row[data-variant] .nameCell::before {
+  content: '';
+  position: absolute;
+  left: var(--space-1);
+  top: 0;
+  width: calc(var(--space-4) - var(--space-2));
+  height: 50%;
+  border-bottom: 1px solid var(--border-control);
+  border-left: 1px solid var(--border-control);
+}
+
 /* the name ellipsizes (full name in its tooltip); the chips beside it keep their size, and the name
    column's minimum width reserves room for the name beside both chips (as the plan setup rows
    reserve their action slot), so they never squeeze it to nothing */
@@ -417,6 +434,29 @@
   /* as tall with the "Unsaved" chip as without, so the fields never jump */
   min-height: calc(var(--control-md) + var(--space-3) + var(--space-2));
   padding: var(--space-3) var(--space-4) var(--space-2);
+}
+
+/* a stock variant's parent under the heading (DF13) */
+.variantOf {
+  margin: calc(var(--space-2) * -1) 0 0;
+  padding: 0 var(--space-4) var(--space-2);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+}
+
+.variantLink {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--text-muted);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.variantLink:hover {
+  color: var(--text);
 }
 
 .editorTitle {

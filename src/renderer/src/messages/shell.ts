@@ -26,6 +26,17 @@ export const shellMessages = {
   },
   settings: 'Settings',
   library: 'Library',
+  /** The toolbar's File group (dogfood DF14): the File menu's New / Open / Save. */
+  file: {
+    toolbar: 'File',
+    newProject: 'New project…',
+    open: 'Open project…',
+    save: 'Save',
+    /** Save while the project has unsaved changes (the icon shows a dot). */
+    saveDirty: 'Save (unsaved changes)',
+  },
+  /** The main toolbar's group of viewport tools (Measure, DF19). */
+  viewTools: 'Tools',
 
   modes: { design: 'Design', plan: 'Plan', run: 'Run' } satisfies Record<AppMode, string>,
 
@@ -125,12 +136,7 @@ export const shellMessages = {
       inspector: 'Design a part to plan it.',
     },
     run: {
-      noPlan: {
-        title: 'Create a plan to run',
-        description: 'Run mode runs a plan on the machine. Create one in Plan.',
-        action: 'Go to Plan',
-      },
-      inspector: 'The DRO, run progress and run controls show here once there is a plan.',
+      inspector: 'The DRO, run progress and run controls show here once a project is open.',
     },
     noProject: 'No project open.',
   },

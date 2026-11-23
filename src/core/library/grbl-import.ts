@@ -42,6 +42,7 @@ const DEFS: readonly SettingDef[] = [
   ...axes(120, 'acceleration', 'scalar', { scalarUnit: 'mm/s²', group: 'acceleration' }),
   { n: 11, path: ['junctionDeviation'], kind: 'length' },
   { n: 12, path: ['arcTolerance'], kind: 'length' },
+  { n: 27, path: ['pullOff'], kind: 'length' },
   ...axes(130, 'travel', 'length', { needs: 'softLimits' }),
   { n: 30, path: ['spindle', 'maxSpeed'], kind: 'spindleSpeed', needs: 'gcodeSpindle' },
   { n: 31, path: ['spindle', 'minSpeed'], kind: 'spindleSpeed', needs: 'gcodeSpindle' },

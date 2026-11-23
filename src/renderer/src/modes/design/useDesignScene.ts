@@ -5,7 +5,8 @@
 // every eligible face), and for the selected operation its face-frame axes (task F1) and anchor
 // marker (task F2), and the visible references as ghosts (task R3); named and rotated shapes'
 // outlines through the renderer's 2D port (task U1); while the Reference panel is open, Fit mode's
-// preview placement and "See through stock" (dogfood DF2, DF5).
+// preview placement and "See through stock" (dogfood DF2, DF5); a selected face (DF22): a stock
+// face click or Alt+click on a floor selects it, drawn selected with its face-frame axes.
 // Doc: docs/conventions/ui.md#selection-and-picking, #evaluation-status-pending-outdated-failed,
 // #design-and-plan-controls-v02, #reference-ghost-v02, #reference-panel-hardening-df2df8
 import { useMemo } from 'react'
@@ -18,7 +19,15 @@ import { referenceMessages } from '../../messages/reference'
 import type { ViewportProps } from '../../viewport'
 import type { Vec3 } from '../../viewport/mesh'
 import { failingOperation, surfaceLabel } from './model'
-import { anchorPoint, frameAxes, markerPoint, operationFace, operationOutline } from './outline'
+import {
+  anchorPoint,
+  frameAxes,
+  markerPoint,
+  operationFace,
+  operationOutline,
+  surfaceAxes,
+} from './outline'
+import { clickedFace, faceSelectionId, selectedFace } from './face-selection'
 import { ghostMatrix, referencePlacement } from './reference-view'
 import { useTabMarkers } from './useTabMarkers'
 import { useClonesScene } from './useClonesScene'
@@ -137,6 +146,16 @@ export function useDesignScene(): SceneProps {
       }),
     }
   }, [selectedOp, part, port, rotationGuide])
+  // a selected face (DF22): its face frame axes, its name in the summary
+  const face = selectedFace(part, selected)
+  const faceId = face?.id
+  const faceOverlay = useMemo(() => {
+    if (faceId === undefined || part?.loaded === undefined || part.table === undefined) return null
+    return {
+      ...surfaceAxes(faceId, part.loaded.stock, part.table),
+      labels: designMessages.inspector.frameAxes,
+    }
+  }, [faceId, part])
   const selectedDto = part?.dto.operations.find((o) => o.id === selected)
   const tabs = useTabMarkers(part, selectedDto)
   const clones = useClonesScene(part, selected, warnings)
@@ -159,7 +178,9 @@ export function useDesignScene(): SceneProps {
     selectedOperation: selected,
     outline: overlays?.outline ?? null,
     marker,
-    frame: overlays?.frame ?? null,
+    frame: overlays?.frame ?? faceOverlay,
+    selectedSurface: faceId ?? null,
+    stockFaces: true,
     anchor: overlays?.anchor ?? null,
     tabs,
     guide: overlays?.guide ? [overlays.guide] : clones.guide,
@@ -180,6 +201,7 @@ export function useDesignScene(): SceneProps {
               status,
             }),
             overlays?.describe,
+            face === undefined ? undefined : designMessages.face.summary(face.label),
             clones.summary,
             ...referenceSummary,
           ]
@@ -188,8 +210,12 @@ export function useDesignScene(): SceneProps {
         }),
     // a clone instance's surface selects the instance, a second click its Clones; an owned
     // operation's second click selects its feature (ui.md § Feature selection in the viewport)
-    onSelect: (target) => {
-      if (target === null || target.operation === 'stock') return select(null)
+    onSelect: (target, modifiers) => {
+      if (target === null) return select(null)
+      // a stock face, or Alt+click on a floor or tab top, selects the face (DF22)
+      const clicked = clickedFace(part, target.surface, modifiers?.alt === true)
+      if (clicked !== undefined) return select(faceSelectionId(clicked.id))
+      if (target.operation === 'stock') return select(null)
       const inst = part === undefined ? undefined : instanceOfOperation(part, target.operation)
       if (inst !== undefined) {
         const id = instanceId(inst.feature.id, inst.n)

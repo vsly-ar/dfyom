@@ -40,11 +40,15 @@ export const ITEM_ID_RULE = 'must be 1–120 lowercase letters, digits, _ or -'
 // The pattern states the characters; repeating them costs tools/list size (llm-api.md#implementation-task-310).
 export const ItemIdSchema = z.string().regex(ITEM_ID_PATTERN).describe('Library item id')
 
-/** `id`, `revision`, `updatedAt`: library bookkeeping, not part of a snapshot's `values`. */
+/**
+ * `id`, `revision`, `updatedAt` and a stock variant's `parentId`: library bookkeeping, not part of
+ * a snapshot's `values` (library.md#stock-variants-df13).
+ */
 export const ItemMetaDtoSchema = z.object({
   id: ItemIdSchema,
   revision: z.number().int().min(1).describe('Increments by 1 on every write'),
   updatedAt: z.iso.datetime({ offset: true }).describe('ISO 8601 time of the last write'),
+  parentId: ItemIdSchema.optional().describe('Stock variants: the parent stock'),
 })
 export type ItemMetaDTO = z.output<typeof ItemMetaDtoSchema>
 

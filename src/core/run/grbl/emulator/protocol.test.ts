@@ -1,6 +1,6 @@
 // Protocol conformance of the virtual machine. Spec: docs/architecture/grbl.md#protocol-subset
 import { describe, expect, it } from 'vitest'
-import { expectErrCode } from '../../../../shared/testing/result'
+import { expectErrCode, expectOk } from '../../../../shared/testing/result'
 import { bytes, emulator, outLines, send, settle, statusOf } from '../emulator.fixture'
 import { GrblEmulator } from './emulator'
 
@@ -263,14 +263,55 @@ describe('homing, alarms and reset', () => {
     expect(send(emu, '$H\n')).toEqual([])
     expect(emu.status().state).toBe('Home')
     expect(send(emu, 'G0 X-1\n')).toEqual([]) // waits in RX until homing is done
-    // Z then XY cycle, each 2 × $27 / $24 = 2 × 1 / 25 min of locating at MPos 0.
-    emu.advanceTo(9599)
+    // Z then XY cycle from the switches (MPos 0): each pulls off 1 mm at $25 = 500 mm/min,
+    // locates 1 mm at $24 = 25 mm/min and pulls off again: 0.12 + 2.4 + 0.12 s = 2.64 s.
+    emu.advanceTo(5279)
     expect(outLines(emu)).toEqual([])
-    emu.advanceTo(9600)
+    emu.advanceTo(5280)
     expect(outLines(emu)).toEqual(['ok', 'ok'])
     expect(emu.trace.samples.find((x) => x.state === 'Idle')?.mpos).toEqual([-1, -1, -1])
     expect(emu.status().state).toBe('Idle') // G0 X-1 from X-1: nothing to do
     expect(emu.trace.transitions.map((t) => t.to)).toEqual(['Home', 'Idle'])
+  })
+
+  it('homes per the homing direction mask ($23) and pull-off ($27), moving in Home reports', () => {
+    // travel 200 (defaults); X and Z home to +, Y to − ($23=2: front), pull-off 2 mm
+    const emu = expectOk(
+      GrblEmulator.create({
+        homing: true,
+        settings: { 23: 2, 27: 2 },
+        position: [-100, -100, -50],
+      }),
+    )
+    emu.readOutput()
+    expect(emu.status().mpos).toEqual([-100, -100, -50])
+    send(emu, '$H\n')
+    // Z approaches its switch at 0 first (50 mm at 500 mm/min = 6 s): halfway after 3 s
+    emu.advanceTo(3000)
+    expect(emu.status()).toMatchObject({ state: 'Home', mpos: [-100, -100, -25] })
+    const zDone = 6000 + (2 / 500 + 2 / 25 + 2 / 500) * 60_000
+    // XY together: X to + (100 mm), Y to − (100 mm to −200), each at $25
+    emu.advanceTo(zDone + 6000)
+    const mid = emu.status().mpos
+    expect(mid[0]).toBeCloseTo(-50, 6)
+    expect(mid[1]).toBeCloseTo(-150, 6)
+    expect(mid[2]).toBeCloseTo(-2, 6)
+    settle(emu)
+    expect(outLines(emu)).toEqual(['ok'])
+    expect(emu.status()).toMatchObject({ state: 'Idle', mpos: [-2, -198, -2] })
+    // soft limits stay [−travel, 0] for every direction: Y−3 leaves the travel
+    expect(send(emu, '$J=G91 Y-3 F100\n')).toEqual(['error:15'])
+    expect(send(emu, '$J=G91 Y-2 F100\n')).toEqual(['ok'])
+  })
+
+  it('a reset while homing (ALARM:6) leaves the position where the cycle was', () => {
+    const emu = expectOk(GrblEmulator.create({ homing: true, position: [-100, -100, -50] }))
+    emu.readOutput()
+    send(emu, '$H\n')
+    emu.advanceTo(3000)
+    expect(send(emu, '\x18')[0]).toBe('ALARM:6')
+    expect(emu.status().mpos).toEqual([-100, -100, -25])
+    expect(emu.nextEventAt()).toBeUndefined()
   })
 
   it('soft reset during motion raises ALARM:3 and locks', () => {

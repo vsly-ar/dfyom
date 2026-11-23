@@ -35,8 +35,8 @@ const NavigatorIcon = (
 
 export function ModeNavigator({ mode, doc, onMode }: ModePanelProps): React.JSX.Element {
   const title = shellMessages.modes[mode]
-  // run mode UI (3.12) once there is a plan to run
-  if (mode === 'run' && doc !== undefined && Object.keys(doc.plans).length > 0)
+  // run mode UI (3.12) with any project: without a plan it is manual control (DF31)
+  if (mode === 'run' && doc !== undefined)
     return (
       <>
         <PanelHeader title={title} />
@@ -65,19 +65,8 @@ export function ModeNavigator({ mode, doc, onMode }: ModePanelProps): React.JSX.
           <PlanNavigator doc={doc} />
         )
       case 'run':
-        // with a plan, run mode shows its own navigator (above)
-        return (
-          <EmptyState
-            icon={NavigatorIcon}
-            title={m.run.noPlan.title}
-            description={m.run.noPlan.description}
-            action={{
-              label: m.run.noPlan.action,
-              icon: <Icon name="arrow-right" />,
-              onClick: () => onMode('plan'),
-            }}
-          />
-        )
+        // with a project, run mode shows its own navigator (above)
+        return null
     }
   })()
   return (
@@ -106,8 +95,7 @@ export function ModeInspector({ mode, doc }: Omit<ModePanelProps, 'onMode'>): Re
   if (mode === 'design' && doc !== undefined) return <DesignInspector part={designPart(doc)} />
   if (mode === 'plan' && doc !== undefined && Object.keys(doc.parts).length > 0)
     return <PlanInspector doc={doc} />
-  if (mode === 'run' && doc !== undefined && Object.keys(doc.plans).length > 0)
-    return <RunInspector doc={doc} />
+  if (mode === 'run' && doc !== undefined) return <RunInspector doc={doc} />
   return (
     <>
       <PanelHeader title={shellMessages.regions.inspector} />

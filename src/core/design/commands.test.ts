@@ -84,6 +84,51 @@ describe('design.part.add / update', () => {
     expect(u.issues[0]).toMatchObject({ path: ['stockLibraryItemId'], rule: 'unknownItem' })
   })
 
+  it('own stock (DF13): takes the block values, linked to no library item, never stale', async () => {
+    const s = await designSetup()
+    await s.undo()
+    const { partId } = (await s.run('design.part.add', {
+      name: 'Own',
+      stock: {
+        name: 'Block 120 × 80 × 12',
+        shape: 'block',
+        length: '120',
+        width: '80',
+        thickness: '12',
+        material: { name: 'Birch plywood', class: 'sheetGood' },
+      },
+    })) as { partId: string }
+    const snap = s.d.doc.snapshots[s.d.doc.parts[partId]!.stock]!
+    expect(snap.libraryItemId).toBeUndefined()
+    expect(snap.values).toMatchObject({ kind: 'stock', material: { class: 'sheetGood' } })
+    expect(src((snap.values as { length: unknown }).length)).toBe('120')
+    const up = await s.fail('design.snapshot.update', { snapshotId: snap.id }, 'input.malformed')
+    expect(up.issues[0]?.rule).toBe('ownStock')
+  })
+
+  it('own stock: exactly one source; bad sizes are issues under stock', async () => {
+    const s = await designSetup()
+    await s.undo()
+    const both = await s.fail('design.part.add', { name: 'X' }, 'input.malformed')
+    expect(both.issues[0]?.rule).toBe('stockSource')
+    const e = await s.fail(
+      'design.part.add',
+      {
+        name: 'X',
+        stock: {
+          name: 'B',
+          shape: 'block',
+          length: '0',
+          width: '80',
+          thickness: '12',
+          material: { name: 'Pine', class: 'softwood' },
+        },
+      },
+      'model.invariant',
+    )
+    expect(e.issues[0]).toMatchObject({ path: ['stock', 'length'], rule: 'positive' })
+  })
+
   it('updates name and general tolerance; null clears; a negative deviation is invalid', async () => {
     const s = await designSetup()
     await expectUndoRedo(s, 'design.part.update', {

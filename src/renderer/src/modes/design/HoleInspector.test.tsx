@@ -60,8 +60,8 @@ async function renderHole(hole: Record<string, unknown> = {}, thickness = '20') 
   )
   await r.user.click(screen.getByRole('button', { name: 'Inspector' }))
   const navigator = screen.getByRole('navigation', { name: 'Navigator' })
-  await r.user.click(await within(navigator).findByRole('button', { name: /^Hole 1, / }))
-  await within(insp()).findByRole('heading', { name: 'Hole 1' })
+  await r.user.click(await within(navigator).findByRole('button', { name: /^Bolt hole 1, / }))
+  await within(insp()).findByRole('heading', { name: 'Bolt hole 1' })
   const hole1 = () =>
     (Object.values(d.doc.parts)[0] as PartDTO).features![0]! as Record<
       string,
@@ -117,7 +117,7 @@ describe('hole inspector (U2)', () => {
     // the row's read-out marks the custom size
     expect(
       await within(screen.getByRole('navigation', { name: 'Navigator' })).findByRole('button', {
-        name: /^Hole 1, M3 simple Ø 3\.6 \(custom\), 1 operation/,
+        name: /^Bolt hole 1, M3 simple Ø 3\.6 \(custom\), 1 operation/,
       }),
     ).toBeInTheDocument()
     const use = await within(insp()).findByRole('button', { name: 'Use 3.4 mm' })

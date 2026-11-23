@@ -25,6 +25,11 @@ export const snapMessages = {
     tool: 'Measure',
     prompt: 'Click two points to measure. Esc ends.',
     second: 'Click the second point.',
+    /** The 3D viewport's second-point prompt (DF20: Shift locks the line to an axis). */
+    secondAxis: 'Click the second point. Hold Shift to lock to an axis.',
+    along: (axis: 'x' | 'y' | 'z') => `Along ${axis.toUpperCase()}. Click the second point.`,
+    /** Two points set: the next click or Esc clears them (DF21). */
+    clear: 'Click or press Esc to clear.',
     distance: (mm: number, units: UnitSystem) => `Distance ${lengthText(mm, units)}`,
     chip: (mm: number, units: UnitSystem) => lengthText(mm, units),
     /** Tooltip of the chip: the components along the frame's axes ("ΔX 12.00 mm, ΔY 5.00 mm"). */

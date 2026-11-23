@@ -23,12 +23,23 @@ export const designMessages = {
     })[kind],
   /** The operation list's one Add menu (v0.4 task U1: was "Add operation"). */
   addMenu: 'Add',
+  /** The Add menu's tooltips (dogfood DF18): what each item makes, one line. */
+  describe: {
+    facing: 'Flattens the stock top to an even height.',
+    pocket: 'Clears the area inside a shape down to a depth.',
+    drilling: 'Drills round holes, blind or through.',
+    profile: 'Cuts along a shape’s outline: around it, inside it or on the line.',
+    chamfer: 'Bevels the top edge of a drilling or round pocket.',
+    hole: 'A hole for a screw or bolt: simple, counterbored or countersunk, sized from the fastener.',
+  } satisfies Record<OperationKind | 'hole', string>,
 
   /** Features in the navigator and inspector (v0.4 task U1, ui.md § Features (v0.4)). */
   features: {
     groups: { operations: 'Operations', features: 'Features' },
-    addHole: 'Add hole',
-    addChamfer: 'Add chamfer',
+    /** The Add menu's feature item (DF17: the hole feature is a "Bolt hole"; kind stays `hole`). */
+    addHole: 'Bolt hole',
+    /** The row menu's actions (dogfood DF16). */
+    chamfer: 'Chamfer',
     makeClones: 'Make Clones…',
     cloneReasons: {
       select: 'Select a hole, pocket, drilling, chamfer or inside profile to clone.',
@@ -71,7 +82,7 @@ export const designMessages = {
     readOnly: (featureName: string, kindLabel: string) =>
       `Part of ${featureName}: change it in the ${kindLabel.toLowerCase()}.`,
     fixIn: (featureName: string) => `Fix in ${featureName}`,
-    kindLabel: (kind: string) => ({ hole: 'Hole', clones: 'Clones' })[kind] ?? kind,
+    kindLabel: (kind: string) => ({ hole: 'Bolt hole', clones: 'Clones' })[kind] ?? kind,
     /** The minimal feature inspector until the kind's own (hole: U2). */
     placeholder: 'Its values are shown here; editing them in this panel comes next.',
     findings: 'Findings',
@@ -242,11 +253,22 @@ export const designMessages = {
       'Pick the stock the part is cut from. The part starts as the whole stock; operations remove material from it.',
     partName: 'Part name',
     defaultPartName: 'Part',
-    source: 'Stock',
-    newStock: 'New block',
+    /** DF12: the project name followed by " 1" ("Part 1" without a name). */
+    firstPartName: (project: string) => `${project.trim() === '' ? 'Part' : project.trim()} 1`,
+    /** DF13: one screen, the library stock optional. */
     fromLibrary: 'From library',
-    libraryItem: 'Library stock',
-    noLibrary: 'The stock library is empty: define a new block.',
+    notSelected: 'Not selected',
+    variantOf: (parent: string) => `Variant of ${parent}`,
+    materialLocked: 'From the library stock. Choose Not selected to change the material.',
+    saveToLibrary: 'Save to library',
+    unchanged: 'Matches the library stock.',
+    saveTitle: 'Save to library',
+    saveDescription: (name: string) =>
+      `${name} is changed. Update it in the library, or keep it and save these sizes as a variant of it.`,
+    updateStock: 'Update stock',
+    saveVariant: 'Save as variant',
+    variantName: (parent: string, summary: string) => `${parent} · ${summary}`,
+    saveFailed: 'The stock was not saved to the library.',
     name: 'Stock name',
     defaultName: (l: string, w: string, t: string) => `Block ${l} × ${w} × ${t}`,
     length: 'Length (X)',
@@ -315,6 +337,8 @@ export const designMessages = {
       description: 'Add an operation to remove material from the stock, starting with facing.',
     },
     remove: (name: string) => `Remove ${name}`,
+    /** The row menu's Remove (DF16). */
+    removeItem: 'Remove',
     actions: (name: string) => `Actions for ${name}`,
     warnings: (n: number) => (n === 1 ? '1 warning' : `${n} warnings`),
     failed: 'Evaluation failed here',
@@ -519,6 +543,38 @@ export const designMessages = {
     status: (s: EvaluationStatus) =>
       s === 'pending' ? 'Updating…' : s === 'failed' ? 'Evaluation failed' : 'Part up to date',
     failedAt: (name: string) => `Evaluation failed at ${name}`,
+  },
+
+  /** A selected face (DF22, ui.md § Selection and picking): the inspector and the summary. */
+  face: {
+    title: (label: string) => `Face: ${label}`,
+    /** "Facing up (+Z)": where the face's outward normal points. */
+    direction: (direction: Direction) =>
+      ({
+        '+z': 'Facing up (+Z)',
+        '-z': 'Facing down (−Z)',
+        '-y': 'Facing front (−Y)',
+        '+x': 'Facing right (+X)',
+        '+y': 'Facing back (+Y)',
+        '-x': 'Facing left (−X)',
+      })[direction],
+    /** The face frame's axes in part-frame terms ("u → +X, v → +Y"). */
+    axes: (u: string, v: string) => `u → ${u}, v → ${v}`,
+    hint: 'Operations you add now start on this face.',
+    /** A facing or profile takes a stock face: the one of the same direction. */
+    stockFaceNote: (stockFace: string) => `Facings and profiles start on ${stockFace}.`,
+    addHere: (kind: OperationKind) =>
+      ({
+        facing: 'Add facing here',
+        pocket: 'Add pocket here',
+        drilling: 'Add drilling here',
+        profile: 'Add profile here',
+        chamfer: 'Add chamfer here',
+      })[kind],
+    addHole: 'Add hole here',
+    /** The empty part inspector: how operations get onto a face. */
+    emptyHint: 'Select a face in the viewport (Alt+click for a floor) to add operations on it.',
+    summary: (label: string) => `Selected face: ${label}; operations you add start on it.`,
   },
 
   /** The selected operation in the viewport's text summary (face frame and anchor shown). */

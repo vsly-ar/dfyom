@@ -2,7 +2,7 @@ import { screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
 import { Button } from '../Button/Button'
-import { Menu } from './Menu'
+import { ContextMenu, isContextMenuKey, Menu, openContextMenu } from './Menu'
 
 describe('Menu', () => {
   it('opens from its trigger by keyboard, moves with arrows and runs the chosen item', async () => {
@@ -75,6 +75,62 @@ describe('Menu', () => {
     await expectNoAxeViolations()
     await user.keyboard('{ArrowUp}{Enter}')
     expect(hole).toHaveBeenCalledOnce()
+  })
+
+  it('describes an item in a tooltip beside it while highlighted (DF18)', async () => {
+    const { user } = renderUi(
+      <Menu
+        items={[
+          { label: 'Facing', description: 'Flattens the stock top.', onSelect: () => {} },
+          { label: 'Pocket', description: 'Clears an area.', onSelect: () => {} },
+        ]}
+      >
+        <Button>Add</Button>
+      </Menu>,
+    )
+    await user.tab()
+    await user.keyboard('{Enter}')
+    const facing = screen.getByRole('menuitem', { name: 'Facing' })
+    expect(facing).toHaveFocus()
+    expect(facing).toHaveAttribute('data-highlighted')
+    expect(facing).toHaveAccessibleDescription('Flattens the stock top.')
+    expect(screen.getByRole('menuitem', { name: 'Pocket' })).toHaveAccessibleDescription(
+      'Clears an area.',
+    )
+    await expectNoAxeViolations()
+    // one Escape closes the menu (the tooltip is the menu's own, not a layer of its own)
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('menu')).toBeNull()
+  })
+
+  it('a context menu opens by right-click and by Shift+F10 through openContextMenu (DF16)', async () => {
+    const chamfer = vi.fn()
+    const { user } = renderUi(
+      <ContextMenu label="Actions for Drilling 1" items={[{ label: 'Chamfer', onSelect: chamfer }]}>
+        <button
+          type="button"
+          onKeyDown={(e) => {
+            if (isContextMenuKey(e)) openContextMenu(e.currentTarget)
+          }}
+        >
+          Drilling 1
+        </button>
+      </ContextMenu>,
+    )
+    const row = screen.getByRole('button', { name: 'Drilling 1' })
+    await user.pointer({ keys: '[MouseRight]', target: row })
+    expect(await screen.findByRole('menu', { name: 'Actions for Drilling 1' })).toBeInTheDocument()
+    await expectNoAxeViolations()
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('menu')).toBeNull()
+    row.focus()
+    await user.keyboard('{Shift>}{F10}{/Shift}')
+    const menu = await screen.findByRole('menu', { name: 'Actions for Drilling 1' })
+    expect(menu).toBeInTheDocument()
+    await user.keyboard('{Enter}')
+    expect(chamfer).toHaveBeenCalledOnce()
+    expect(isContextMenuKey({ key: 'ContextMenu', shiftKey: false })).toBe(true)
+    expect(isContextMenuKey({ key: 'F10', shiftKey: false })).toBe(false)
   })
 
   it('has no axe violations while open', async () => {

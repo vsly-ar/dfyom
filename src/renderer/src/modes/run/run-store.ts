@@ -43,10 +43,15 @@ export type RunEnd =
 
 export type Axis = 'x' | 'y' | 'z'
 
+/** `planId` of "No plan (manual control)": connect with a library machine (DF31). */
+export const NO_PLAN = '__noPlan__'
+
 export interface RunState {
   readonly status: RunStatus
-  /** Plan chosen in the navigator (per window). */
+  /** Plan chosen in the navigator (per window); `NO_PLAN` = manual control without a plan. */
   readonly planId: string | undefined
+  /** Library machine to emulate without a plan (DF31, docs/modes/run.md#connect-without-a-plan-df31). */
+  readonly machineId: string | undefined
   /** Setup of the plan whose program runs; `undefined` = the first (one program per setup). */
   readonly setupId: string | undefined
   /**
@@ -74,6 +79,7 @@ export interface RunState {
   readonly pending: readonly string[]
 
   setPlan(planId: string | undefined): void
+  setMachine(machineId: string | undefined): void
   setSetup(setupId: string | undefined): void
   setSetupChangeOpen(open: boolean): void
   setTimeScale(scale: TimeScale): void
@@ -157,6 +163,7 @@ export function createRunStore(bridge: PreloadApi): RunStore {
     return {
       status: closedStatus(),
       planId: undefined,
+      machineId: undefined,
       setupId: undefined,
       setupChange: undefined,
       setupChangeOpen: false,
@@ -177,6 +184,7 @@ export function createRunStore(bridge: PreloadApi): RunStore {
             ? {}
             : { planId, setupId: undefined, setupChange: undefined, setupChangeOpen: false },
         ),
+      setMachine: (machineId) => set({ machineId }),
       setSetup: (setupId) =>
         set((s) =>
           s.setupId === setupId ? {} : { setupId, setupChange: undefined, setupChangeOpen: false },
@@ -194,9 +202,11 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       clearActionError: () => set({ actionError: undefined }),
 
       async connect() {
-        const { planId, timeScale } = get()
-        if (planId === undefined) return
-        await call('run.connection.open', { target: 'virtual', planId, timeScale })
+        const { planId, machineId, timeScale } = get()
+        if (planId !== undefined && planId !== NO_PLAN)
+          await call('run.connection.open', { target: 'virtual', planId, timeScale })
+        else if (machineId !== undefined)
+          await call('run.connection.open', { target: 'virtual', machineId, timeScale })
       },
       disconnect: async () => void (await call('run.connection.close')),
       home: () => job('run.machine.home'),
@@ -213,7 +223,7 @@ export function createRunStore(bridge: PreloadApi): RunStore {
         const planId = get().planId
         const setupId = chosen ?? get().setupId
         set({ preflightOpen: false, setupChangeOpen: false })
-        if (planId === undefined) return
+        if (planId === undefined || planId === NO_PLAN) return
         const r = await call('run.job.start', {
           planId,
           ...(setupId === undefined ? {} : { setupId }),
@@ -233,8 +243,9 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       resume: jobControl('job.resume'),
       /**
        * Stop is never confirmed (ui.md decision 11). With a run job: `job.abort` (controlled stop:
-       * hold, then reset). Without one: a jog is cancelled, a homing cycle (which GRBL stops only
-       * by a reset) is reset; otherwise nothing moves and nothing is sent.
+       * hold, then reset). Without one: a jog is cancelled; a homing cycle (which GRBL stops only
+       * by a reset), a Run, Hold or Door state is reset; otherwise nothing is sent (Stop is then
+       * disabled, `stopGate`, DF35).
        */
       async stop() {
         const s = get().status
@@ -244,7 +255,7 @@ export function createRunStore(bridge: PreloadApi): RunStore {
           return
         }
         if (s.state.startsWith('Jog')) await call('run.machine.jogCancel')
-        else if (s.state.startsWith('Home')) await call('run.machine.reset')
+        else if (/^(Home|Run|Hold|Door)/.test(s.state)) await call('run.machine.reset')
       },
       async continueWait() {
         const job = activeJob(get().status)

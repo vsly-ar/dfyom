@@ -54,7 +54,17 @@ export {
   type MachineState,
   type MachineStateBadgeProps,
 } from './MachineStateBadge/MachineStateBadge'
-export { Menu, type MenuEntry, type MenuGroup, type MenuItem, type MenuProps } from './Menu/Menu'
+export {
+  ContextMenu,
+  isContextMenuKey,
+  Menu,
+  openContextMenu,
+  type ContextMenuProps,
+  type MenuEntry,
+  type MenuGroup,
+  type MenuItem,
+  type MenuProps,
+} from './Menu/Menu'
 export { ModeSwitcher, type ModeSwitcherProps } from './ModeSwitcher/ModeSwitcher'
 export { motionMs, useReducedMotion } from './motion'
 export {

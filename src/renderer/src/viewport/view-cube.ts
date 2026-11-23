@@ -330,12 +330,20 @@ export function regionColour(r: CubeRegion, colours: CubeColours, hover = 0): Rg
 export const CUBE_BOX_PX = 88
 /** Its distance from the viewport's top and right edges (`--space-2`). */
 export const CUBE_MARGIN_PX = 8
+/**
+ * The vertical Fit / Views toolbar right of the cube (DF19): its width (a 28 px button, 2 px
+ * padding and a 1 px border each side) plus the `--space-1` gap before the cube's square.
+ */
+export const CUBE_TOOLBAR_PX = 38
+/** Opacity of the cube while the pointer is outside its square (DF19). */
+export const CUBE_IDLE_OPACITY = 0.5
 /** Half the cube's edge in px: the chamfered silhouette (radius ≈ 1.35 × this) stays inside the box. */
 export const CUBE_HALF_EDGE_PX = 28
 
 /**
  * True when a pointer at `(x, y)` (client px) is inside the cube's square of a viewport whose
- * client rect is `rect`, with `insetRight` px of its right edge covered (the inspector overlay).
+ * client rect is `rect`, with `insetRight` px of its right edge covered (the inspector overlay);
+ * the square sits left of the cube's toolbar (`CUBE_TOOLBAR_PX`, DF19).
  */
 export function inCubeBox(
   x: number,
@@ -343,7 +351,7 @@ export function inCubeBox(
   rect: { readonly top: number; readonly right: number },
   insetRight = 0,
 ): boolean {
-  const right = rect.right - CUBE_MARGIN_PX - insetRight
+  const right = rect.right - CUBE_MARGIN_PX - CUBE_TOOLBAR_PX - insetRight
   const top = rect.top + CUBE_MARGIN_PX
   return x <= right && x >= right - CUBE_BOX_PX && y >= top && y <= top + CUBE_BOX_PX
 }

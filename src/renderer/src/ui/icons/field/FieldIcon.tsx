@@ -3,6 +3,15 @@
 // Shapes from the approved design system (FI map). Doc: docs/conventions/ui.md#field
 import type { ReactNode } from 'react'
 import styles from './FieldIcon.module.css'
+import { STOCK_SIZE_ICONS } from './stockSize'
+
+/** The stock's length, width and thickness (DF11), from their data in stockSize.ts. */
+const stockSize = (name: keyof typeof STOCK_SIZE_ICONS) => (
+  <>
+    <path d={STOCK_SIZE_ICONS[name].d} />
+    <path data-accent="" d={STOCK_SIZE_ICONS[name].accent} />
+  </>
+)
 
 const ICONS = {
   length: (
@@ -232,6 +241,9 @@ const ICONS = {
       <path data-accent="" d="M10 14V10.66" />
     </>
   ),
+  'stock-length': stockSize('stock-length'),
+  'stock-width': stockSize('stock-width'),
+  'stock-thickness': stockSize('stock-thickness'),
 } satisfies Record<string, ReactNode>
 
 export type FieldIconName = keyof typeof ICONS

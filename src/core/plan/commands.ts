@@ -474,6 +474,11 @@ function refreshCopy(
       issues: [{ path: ['snapshotId'], rule: 'unknownSnapshot', message: 'no such copy' }],
       where,
     })
+  if (dto.libraryItemId === undefined)
+    return fail('input.malformed', `copy ${snapshotId} is the project's own stock`, {
+      issues: [{ path: ['snapshotId'], rule: 'ownStock', message: 'not from the library' }],
+      where,
+    })
   const item = libraryItem(ctx, dto.kind, dto.libraryItemId, 'snapshotId', where)
   if (item.isErr()) return item
   const refreshed = Snapshot.fromDTO(dto).andThen((s) =>
@@ -1274,7 +1279,8 @@ const operationList = defineQuery({
               ? null
               : {
                   snapshotId: snap.id,
-                  libraryItemId: snap.libraryItemId,
+                  // tool copies always come from the library
+                  libraryItemId: snap.libraryItemId ?? '',
                   name: e.tool.unwrap().name,
                 },
           presetName: e.preset.mapOr(null, (p) => p.name),

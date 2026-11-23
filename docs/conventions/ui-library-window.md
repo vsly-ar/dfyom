@@ -62,6 +62,15 @@ The user's finding ([hardening.md](../plans/hardening.md) intake DF1): the tool 
 - The quick "New tool…" dialog is unchanged (its few fields include the tool material, which recommended presets need).
 - **Stickout, not overall length** (DF26, user's dogfood finding: "Overall length" read as the length set up in the machine): the length people set is the stickout, so Geometry shows "Stickout" (optional; placeholder "Flute length"; note "Length below the collet; plans may override it.") where the overall length was, and the overall length, which only bounds the stickout, moves into Details. Both are distinct library fields ([library.md](../architecture/library.md#tool)); the data keys (`stickout`, `overallLength`) are unchanged. The quick dialog shows Stickout instead of Overall length ([ui.md § Plan mode](ui.md#plan-mode-task-37), New tool).
 
+## Stock variants (DF13)
+
+Stock items may have variants, one level deep ([library.md § Stock variants](../architecture/library.md#stock-variants-df13)).
+
+- **List:** a variant row follows its parent, its name indented by `--space-4` with a thin branch line, in the parent's position of any sort (the variants of one parent sort among themselves by the same column); a search hit on a variant shows its parent too. The row's accessible name ends with ", variant of Aluminium plate 10".
+- **Editor:** a variant's heading has the muted line "Variant of Aluminium plate 10" (a link button that selects the parent). A saved stock's action bar has **New variant** (`add` icon): an unsaved draft with the stock's values, named "Aluminium plate 10 variant", whose parent is the stock (or the variant's parent, so a variant of a variant is a sibling). Duplicate of a variant keeps its parent.
+- **Remove:** a stock with variants keeps "Remove…" disabled with the reason "Remove its variants first." as tooltip; the command refuses it as well (`hasVariants`).
+- Variants are written by the design Stock dialog's "Save to library" too ([ui.md § Stock dialog](ui.md#stock-dialog-df11df13)); the window shows them at once (`Library.subscribe`).
+
 ## Behaviour with projects
 
 - A saved library change reaches projects through the existing paths only: the instant library DFM checks re-run, design tool candidates re-read, specific tool and stock snapshots show "library changed" with "Update from library" (`design.snapshot.update`, `plan.libraryItem.update`), and copies held by `draft` plans become [pending](../architecture/apply.md#what-is-pending) and follow on the next Apply. The window itself never changes a project.

@@ -1,13 +1,21 @@
 // The viewport's run scene (`<Viewport run={useRunScene(mode)} />`): the chosen setup's toolpaths
 // (`plan.toolpath.get` per plan operation, re-read when a run starts, since the run regenerates
 // stale ones), the done part from following `wpos` along them, and the tool marker at `wpos`, all
-// placed on the part by the setup's frame (task E2: one program per setup, in its WCS).
+// placed on the part by the setup's frame (task E2: one program per setup, in its WCS), and the
+// machine travel with its home position in work coordinates while connected (DF33).
 // `null` outside run mode. Doc: docs/conventions/ui.md#viewport-task-35 (run scene)
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AppMode } from '../../../../core/modes'
 import type { Toolpath } from '../../../../core/toolpath/model'
 import { useReplica, useShell } from '../../shell/ShellContext'
-import { advancePlayback, toolpathLines, type RunScene, type ToolpathLines } from '../../viewport'
+import { homedPosition } from '../../../../core/run/grbl/envelope'
+import {
+  advancePlayback,
+  toolpathLines,
+  type RunEnvelope,
+  type RunScene,
+  type ToolpathLines,
+} from '../../viewport'
 import { activeJob, isConnected } from './machine-state'
 import { planRunInfo, setupPlacement } from './plan-info'
 import { useRun } from './run-store'
@@ -73,8 +81,39 @@ export function useRunScene(mode: AppMode): RunScene | null {
       done = cursor.current.done
     }
   }
+  const env = isConnected(status) ? status.envelope : undefined
+  const wz = status.workZero
+  const envelope = useMemo((): RunEnvelope | undefined => {
+    if (env === undefined) return undefined
+    const w = (v: number, i: number) => v - (wz[i] ?? 0)
+    const home = homedPosition(env)
+    return {
+      min: [w(-env.travel[0], 0), w(-env.travel[1], 1), w(-env.travel[2], 2)],
+      max: [w(0, 0), w(0, 1), w(0, 2)],
+      home: [w(home[0], 0), w(home[1], 1), w(home[2], 2)],
+    }
+    // workZero values, not the array identity (a new status each report)
+  }, [
+    env?.travel[0],
+    env?.travel[1],
+    env?.travel[2],
+    env?.homingMask,
+    env?.pullOff,
+    wz[0],
+    wz[1],
+    wz[2],
+  ])
   return useMemo(
-    () => (active ? { lines, done, tool, ...(frame === undefined ? {} : { frame }) } : null),
-    [active, lines, done, tool, frame],
+    () =>
+      active
+        ? {
+            lines,
+            done,
+            tool,
+            ...(frame === undefined ? {} : { frame }),
+            ...(envelope === undefined ? {} : { envelope }),
+          }
+        : null,
+    [active, lines, done, tool, frame, envelope],
   )
 }

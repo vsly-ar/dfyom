@@ -2,7 +2,9 @@
 // reference picks a point (snapped to the nearest vertex of the triangle under the pointer or a
 // stock corner within `SNAP_PX`, unless Alt is held or snapping is off); two points show a
 // dimension line (always on top) and the distance chip with ΔX, ΔY, ΔZ on a second line. A drag
-// still orbits. Nothing is stored. The reference ghost is not pickable for selection, so this
+// still orbits. Nothing is stored. After the first point, holding Shift locks the line to the
+// nearest part-frame axis with a dashed guide in that axis colour (DF20); a click that hits nothing
+// reports `null`, so the Viewport can clear two set points (DF21). The reference ghost is not pickable for selection, so this
 // raycasts the meshes tagged `userData.measure` itself.
 // Doc: docs/conventions/ui.md#snap-and-measure
 import { Html, Line } from '@react-three/drei'
@@ -23,6 +25,7 @@ import type { UnitSystem } from '../../../core/project/document'
 import { snapMessages } from '../messages/snap'
 import type { Palette } from './colours'
 import { MeasureChip, measureBetween } from './MeasureTool'
+import { AXES, closestOnAxis, lockAxis, projectOnAxis, type AxisName } from './measure-axis'
 import type { Box, Vec3 } from './mesh'
 import { snapPoint, type SnapKind, type SnapPoint } from './snap'
 import { SnapGlyph } from './SnapGlyph'
@@ -49,6 +52,16 @@ function corners(b: Box): Vec3[] {
 interface Hover {
   readonly at: Vec3
   readonly kind: SnapKind | null
+  /** The axis the line is locked to (Shift after the first point, DF20). */
+  readonly axis?: AxisName
+}
+
+/** What `pointAt` reads of a pointer or key event. */
+interface PointerState {
+  readonly clientX: number
+  readonly clientY: number
+  readonly altKey: boolean
+  readonly shiftKey: boolean
 }
 
 export function Measure3d({
@@ -59,30 +72,58 @@ export function Measure3d({
   units,
   palette,
   onHover,
+  onAxis,
 }: {
   points: MeasurePoints
-  onPick(p: Vec3): void
+  /** A click: the picked point, or null when it hit nothing (DF21: clears two set points). */
+  onPick(p: Vec3 | null): void
   stock: Box | null
   snap: boolean
   units: UnitSystem
   palette: Palette
   /** The point under the pointer (for the live distance), or null. */
   onHover?(p: Vec3 | null): void
+  /** The axis the line is locked to while Shift is held, or null. */
+  onAxis?(axis: AxisName | null): void
 }): React.JSX.Element {
   const gl = useThree((s) => s.gl)
   const getState = useThree((s) => s.get)
   const invalidate = useThree((s) => s.invalidate)
   const [hover, setHover] = useState<Hover | null>(null)
   const down = useRef<{ x: number; y: number } | null>(null)
-  const latest = useRef({ onPick, onHover, stock, snap })
+  const latest = useRef({ onPick, onHover, onAxis, stock, snap, points })
   useLayoutEffect(() => {
-    latest.current = { onPick, onHover, stock, snap }
+    latest.current = { onPick, onHover, onAxis, stock, snap, points }
   })
 
   useEffect(() => {
     const el = gl.domElement
     const raycaster = new Raycaster()
-    const pointAt = (e: PointerEvent): Hover | null => {
+    const pointAt = (e: PointerState): Hover | null => {
+      const free = pointFree(e)
+      const { a, b } = latest.current.points
+      if (!e.shiftKey || a === null || b !== null) return free
+      // Shift after the first point: lock to the axis nearest the pointer's direction (DF20)
+      const { camera, size } = getState()
+      const r = el.getBoundingClientRect()
+      const px: [number, number] = [e.clientX - r.left, e.clientY - r.top]
+      const toPx = (p: Vec3): [number, number] => {
+        const v = new Vector3(...p).project(camera)
+        return [((v.x + 1) / 2) * size.width, ((1 - v.y) / 2) * size.height]
+      }
+      const probe = Math.max(1e-3, camera.position.distanceTo(new Vector3(...a)) * 0.05)
+      const axis = lockAxis(a, px, toPx, probe)
+      if (axis === null) return free
+      if (free?.kind != null) return { at: projectOnAxis(a, axis, free.at), kind: free.kind, axis }
+      raycaster.setFromCamera(
+        new Vector2((px[0] / size.width) * 2 - 1, -(px[1] / size.height) * 2 + 1),
+        camera,
+      )
+      const o = raycaster.ray.origin
+      const d = raycaster.ray.direction
+      return { at: closestOnAxis(a, axis, [o.x, o.y, o.z], [d.x, d.y, d.z]), kind: null, axis }
+    }
+    const pointFree = (e: PointerState): Hover | null => {
       const { camera, scene, size } = getState()
       const r = el.getBoundingClientRect()
       const px: [number, number] = [e.clientX - r.left, e.clientY - r.top]
@@ -122,11 +163,20 @@ export function Measure3d({
       }
       return hit ? { at: [hit.point.x, hit.point.y, hit.point.z], kind: null } : null
     }
-    const move = (e: PointerEvent) => {
+    let last: PointerState | null = null
+    const show = (e: PointerState) => {
+      last = e
       const h = pointAt(e)
       setHover(h)
       latest.current.onHover?.(h?.at ?? null)
+      latest.current.onAxis?.(h?.axis ?? null)
       invalidate()
+    }
+    const move = (e: PointerEvent) => show(e)
+    // pressing or releasing Shift re-evaluates the point under the resting pointer
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== 'Shift' || last === null) return
+      show({ ...last, shiftKey: e.type === 'keydown' })
     }
     const press = (e: PointerEvent) => {
       if (e.button === 0) down.current = { x: e.clientX, y: e.clientY }
@@ -135,18 +185,23 @@ export function Measure3d({
       const d = down.current
       down.current = null
       if (d === null || Math.hypot(e.clientX - d.x, e.clientY - d.y) >= CLICK_PX) return
-      const h = pointAt(e)
-      if (h !== null) latest.current.onPick(h.at)
+      latest.current.onPick(pointAt(e)?.at ?? null)
     }
     const leave = () => {
+      last = null
       setHover(null)
       latest.current.onHover?.(null)
+      latest.current.onAxis?.(null)
     }
     el.addEventListener('pointermove', move)
     el.addEventListener('pointerdown', press)
     el.addEventListener('pointerup', release)
     el.addEventListener('pointerleave', leave)
+    window.addEventListener('keydown', key)
+    window.addEventListener('keyup', key)
     return () => {
+      window.removeEventListener('keydown', key)
+      window.removeEventListener('keyup', key)
       el.removeEventListener('pointermove', move)
       el.removeEventListener('pointerdown', press)
       el.removeEventListener('pointerup', release)
@@ -159,9 +214,37 @@ export function Measure3d({
   const result = a !== null && b !== null ? measureBetween(a, b) : null
   const edge = useMemo(() => new Color().setRGB(...palette.edge, SRGBColorSpace), [palette.edge])
   useEffect(() => invalidate(), [points, invalidate])
+  // the axis guide (DF20): a dashed line through the first point along the locked axis
+  const axis = points.b === null ? hover?.axis : undefined
+  const guide = useMemo(() => {
+    if (a === null || axis === undefined) return null
+    const d = AXES[axis]
+    const span = stock ? Math.hypot(...stock.max.map((v, i) => v - stock.min[i]!)) * 1.5 : 200
+    const c = palette[axis === 'x' ? 'axisX' : axis === 'y' ? 'axisY' : 'axisZ']
+    return {
+      points: [
+        [a[0] - d[0] * span, a[1] - d[1] * span, a[2] - d[2] * span],
+        [a[0] + d[0] * span, a[1] + d[1] * span, a[2] + d[2] * span],
+      ] as [number, number, number][],
+      colour: new Color().setRGB(c[0], c[1], c[2], SRGBColorSpace),
+    }
+  }, [a, axis, stock, palette])
 
   return (
     <group>
+      {guide ? (
+        <Line
+          points={guide.points}
+          color={guide.colour}
+          lineWidth={1}
+          dashed
+          dashSize={2}
+          gapSize={2}
+          depthTest={false}
+          renderOrder={7}
+          raycast={noRaycast}
+        />
+      ) : null}
       {a !== null && b !== null ? (
         <Line
           points={[

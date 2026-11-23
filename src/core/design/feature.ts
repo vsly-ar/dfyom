@@ -87,7 +87,7 @@ export interface FeatureKindSpec<F extends FeatureBase = FeatureBase> {
   readonly kind: string
   /** Id prefix (`hole` → `hole1`); never an operation kind's prefix. */
   readonly idPrefix: string
-  /** Display label: default names ("Hole 1"), command titles. */
+  /** Display label: default names ("Bolt hole 1"), command titles ("Add bolt hole"). */
   readonly label: string
   /** The model from a stored record (the kind's full schema); issues at its field paths. */
   fromDTO(dto: FeatureDTO): AppResult<F>

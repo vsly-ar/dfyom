@@ -224,6 +224,7 @@ export const RIGIDITY_FACTORS: Readonly<Record<Rigidity, RigidityFactors>> = {
   extrusion: { apFactor: 0.3, rangePos: 0 },
   hobby: { apFactor: 0.5, rangePos: 0.25 },
   prosumer: { apFactor: 0.75, rangePos: 0.5 },
+  fixedGantry: { apFactor: 0.85, rangePos: 0.6 },
   benchMill: { apFactor: 0.9, rangePos: 0.75 },
   rigidMill: { apFactor: 1.0, rangePos: 1.0 },
 }

@@ -5,8 +5,7 @@ import { newProjectDoc } from '../../core/project/document'
 import { docToFiles, fileContent, type ProjectLayout } from '../../core/project/layout'
 import { noopLogger } from '../../shared/logging'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
-import { nodeFs } from './fs'
-import { faultFs, useTempDir } from './fs.testing'
+import { faultFs, testFs, useTempDir } from './fs.testing'
 import { projectPaths } from './paths'
 import { readState, readWork, unpack, WorkingFolder, type ProjectState } from './working-folder'
 
@@ -37,20 +36,20 @@ describe('unpack / readWork / readState', () => {
     expect(await read(join(paths().work, 'project.json'))).toBe(projectJson(doc))
     expect(JSON.parse(await read(paths().state))).toEqual(state)
     expect(fs.calls.at(-4)).toMatch(/^writeFile .*state\.json\.tmp$/)
-    expect(expectOk(await readWork(nodeFs, paths())).get('project.json')).toBe(projectJson(doc))
-    expect(expectOk(await readState(nodeFs, paths())).unwrap()).toEqual(state)
+    expect(expectOk(await readWork(testFs, paths())).get('project.json')).toBe(projectJson(doc))
+    expect(expectOk(await readState(testFs, paths())).unwrap()).toEqual(state)
   })
 
   it('replaces an existing work/ and leaves no temp folders', async () => {
     await mkdir(paths().work, { recursive: true })
     await writeFile(join(paths().work, 'old.json'), '{}')
-    expectOk(await unpack(nodeFs, paths(), expectOk(docToFiles(doc)), state))
+    expectOk(await unpack(testFs, paths(), expectOk(docToFiles(doc)), state))
     expect(await readdir(paths().work)).toEqual(['project.json'])
     expect((await readdir(paths().folder)).sort()).toEqual(['state.json', 'work'])
   })
 
   it('a crash while unpacking leaves the previous work/ and state intact', async () => {
-    expectOk(await unpack(nodeFs, paths(), expectOk(docToFiles(doc)), state))
+    expectOk(await unpack(testFs, paths(), expectOk(docToFiles(doc)), state))
     const other = newProjectDoc({ name: 'Other', unitSystem: 'inch' })
     for (let n = 1; ; n++) {
       const fs = faultFs((op, _p, i) => (i === n && op !== 'readdir' ? 'crash' : undefined))
@@ -60,8 +59,8 @@ describe('unpack / readWork / readState', () => {
       })
       if (!fs.crashed) break
       expect(r.isErr()).toBe(true)
-      const st = expectOk(await readState(nodeFs, paths())).unwrap()
-      const work = await readWork(nodeFs, paths())
+      const st = expectOk(await readState(testFs, paths())).unwrap()
+      const work = await readWork(testFs, paths())
       // Either the old pair is intact, or the new work/ is in place but state is not yet
       // updated (not dirty, so the next open unpacks again) – never a dirty, broken mix.
       expect(st.dirty).toBe(false)
@@ -72,25 +71,25 @@ describe('unpack / readWork / readState', () => {
 
   it('readWork ignores leftover *.tmp files and finds collection records', async () => {
     const files = expectOk(docToFiles(partsDoc, withParts))
-    expectOk(await unpack(nodeFs, paths(), files, state))
+    expectOk(await unpack(testFs, paths(), files, state))
     await writeFile(join(paths().work, 'project.json.tmp'), 'half')
-    const work = expectOk(await readWork(nodeFs, paths()))
+    const work = expectOk(await readWork(testFs, paths()))
     expect([...work.keys()].sort()).toEqual(['parts/part-1.json', 'project.json'])
   })
 
   it('readState: None when missing, persist.migration when newer', async () => {
-    expect(expectOk(await readState(nodeFs, paths())).isNone()).toBe(true)
+    expect(expectOk(await readState(testFs, paths())).isNone()).toBe(true)
     await mkdir(paths().folder, { recursive: true })
     await writeFile(paths().state, JSON.stringify({ ...state, schemaVersion: 2 }))
-    expectErrCode(await readState(nodeFs, paths()), 'persist.migration')
+    expectErrCode(await readState(testFs, paths()), 'persist.migration')
     await writeFile(paths().state, '{')
-    expectErrCode(await readState(nodeFs, paths()), 'input.malformed')
+    expectErrCode(await readState(testFs, paths()), 'input.malformed')
   })
 })
 
 describe('WorkingFolder', () => {
-  const open = async (fs = nodeFs, layout?: ProjectLayout, start: object = doc) => {
-    expectOk(await unpack(nodeFs, paths(), expectOk(docToFiles(start, layout)), state))
+  const open = async (fs = testFs, layout?: ProjectLayout, start: object = doc) => {
+    expectOk(await unpack(testFs, paths(), expectOk(docToFiles(start, layout)), state))
     return new WorkingFolder({
       fs,
       paths: paths(),
@@ -113,7 +112,7 @@ describe('WorkingFolder', () => {
   })
 
   it('deletes the file of a removed record and writes added ones', async () => {
-    const wf = await open(nodeFs, withParts, partsDoc)
+    const wf = await open(testFs, withParts, partsDoc)
     const next = { ...partsDoc, parts: { 'part-2': { id: 'part-2' } } }
     wf.changed(
       [
@@ -128,9 +127,9 @@ describe('WorkingFolder', () => {
   })
 
   it('debounces: writes after the delay without an explicit flush', async () => {
-    expectOk(await unpack(nodeFs, paths(), expectOk(docToFiles(doc)), state))
+    expectOk(await unpack(testFs, paths(), expectOk(docToFiles(doc)), state))
     const wf = new WorkingFolder({
-      fs: nodeFs,
+      fs: testFs,
       paths: paths(),
       state,
       files: expectOk(docToFiles(doc)),
@@ -149,7 +148,7 @@ describe('WorkingFolder', () => {
     let failing = true
     const fs = faultFs((op) => (failing && op === 'rename' ? 'fail' : undefined))
     const warnings: string[] = []
-    expectOk(await unpack(nodeFs, paths(), expectOk(docToFiles(doc)), state))
+    expectOk(await unpack(testFs, paths(), expectOk(docToFiles(doc)), state))
     const wf = new WorkingFolder({
       fs,
       paths: paths(),
@@ -177,9 +176,9 @@ describe('WorkingFolder', () => {
       const wf = await open(fs)
       wf.changed([{ op: 'replace', path: ['name'], value: 'Renamed' }], next, 4)
       await wf.flush()
-      const work = expectOk(await readWork(nodeFs, paths()))
+      const work = expectOk(await readWork(testFs, paths()))
       expect([projectJson(doc), projectJson(next)]).toContain(work.get('project.json'))
-      const st = expectOk(await readState(nodeFs, paths())).unwrap()
+      const st = expectOk(await readState(testFs, paths())).unwrap()
       // state.json is written last: dirty only once the documents are on disk.
       if (st.dirty) expect(work.get('project.json')).toBe(projectJson(next))
       if (!fs.crashed) break

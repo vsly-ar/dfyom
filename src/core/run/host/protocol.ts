@@ -68,6 +68,15 @@ export const HostStatusSchema = z.object({
   buffer: z.object({ blocks: z.number(), rx: z.number() }).exactOptional(),
   alarm: z.object({ code: z.number().int(), text: z.string() }).exactOptional(),
   lastMessage: z.string().max(500).exactOptional(),
+  /** What the controller enforces, from its `$$` (docs/modes/run.md#machine-coordinates-and-the-homing-corner-df33). */
+  envelope: z
+    .object({
+      travel: Vec3Schema,
+      homingMask: z.number().int().min(0).max(7),
+      pullOff: Num,
+      softLimits: z.boolean(),
+    })
+    .exactOptional(),
   timeScale: TimeScaleSchema,
   job: z
     .object({
@@ -95,6 +104,8 @@ export const VirtualTargetSchema = z.object({
   timeScale: TimeScaleSchema,
   /** Identity of the machine copy emulated (decision 6); a job must name the same. */
   machineKey: z.string().max(200),
+  /** MPos at power-up (the virtual machine's physical position; grbl.md#homing-and-machine-coordinates). */
+  position: Vec3Schema.exactOptional(),
   /** Home at `max` speed, then set G54 to this MPos (docs/modes/run-v0.1.md decision 7). */
   prepare: z.object({ workZero: Vec3Schema }).exactOptional(),
 })
