@@ -127,6 +127,10 @@ describe('feature UI (U1)', () => {
     })
     // the role name drops the "Bolt hole 1 · " prefix
     expect(cb).toHaveTextContent(/^counterbore/)
+    // rows show names, never ids (DF25 re-report: "c… hole1_counterbore")
+    expect(
+      within(navigator()).getByRole('list', { name: 'Operations in design order' }),
+    ).not.toHaveTextContent(/hole1/)
     // owned rows have no actions
     expect(
       within(navigator()).queryByRole('button', { name: 'Remove Bolt hole 1 · counterbore' }),
@@ -224,6 +228,48 @@ describe('feature UI (U1)', () => {
     expect(await findToastAction('Undo')).toBeInTheDocument()
     expect(screen.getByText('Removed Bolt hole 1 and its 2 operations')).toBeInTheDocument()
     expect(d.doc.parts).toBeDefined()
+  })
+
+  it('nested rows of a Clones of a hole show their long names whole, without ids (DF25 re-report)', async () => {
+    const long = 'Lid hinge counterbore for the left side of the enclosure'
+    const { user, d } = await renderDesign(async (d) => {
+      await addCounterbore(d)
+      const hole = Object.values(d.doc.parts)[0]!.features![0]!
+      ;(
+        await d.dispatch(
+          'design.hole.update',
+          { partId: partId(d), featureId: hole.id, name: long },
+          ui,
+        )
+      ).unwrap()
+      ;(
+        await d.dispatch(
+          'design.clones.add',
+          {
+            partId: partId(d),
+            source: { featureId: hole.id },
+            rows: [{ kind: 'grid', cols: 2, rows: 1, du: '30', dv: '20' }],
+          },
+          ui,
+        )
+      ).unwrap()
+    })
+    const clones = await within(navigator()).findByRole('button', { name: /^Clones 1,/ })
+    clones.focus()
+    await user.keyboard('{ArrowRight}')
+    const source = within(navigator()).getByRole('list', { name: 'Source of Clones 1' })
+    const hole = within(source).getByRole('button', { name: new RegExp(`^${long},`) })
+    hole.focus()
+    await user.keyboard('{ArrowRight}')
+    const owned = within(navigator()).getByRole('list', { name: long })
+    const rows = within(owned).getAllByRole('button')
+    expect(rows.map((r) => r.textContent)).toEqual(['counterbore', 'drill'])
+    // the hole row's text is its name and read-out, its button holds no id
+    expect(hole).toHaveTextContent(new RegExp(`^${long}`))
+    const ids = Object.values(d.doc.parts)[0]!.operations.map((o) => o.id)
+    const list = within(navigator()).getByRole('list', { name: 'Operations in design order' })
+    for (const id of ids) expect(list).not.toHaveTextContent(id)
+    await expectNoAxeViolations()
   })
 
   it('Make Clones… from the row menu (Shift+F10) clones the pocket; the Clones row nests Source and Clones', async () => {

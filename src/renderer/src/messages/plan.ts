@@ -81,7 +81,11 @@ export const planMessages = {
     title: 'Machine',
     label: 'Machine',
     placeholder: 'Choose a machine',
-    empty: 'The machine library is empty. Add a machine to export gCode.',
+    // dogfood re-report of DF29: the machine is needed to plan, not only to export
+    empty:
+      'The machine library is empty. Add a machine: the plan checks the stock and clearance height against its travel and the feeds against its limits, and exports gCode for it.',
+    /** The plan inspector without a machine (DF29). */
+    missing: 'No machine: the plan cannot check travel and feed limits or export gCode.',
   },
 
   /** Drag to reorder setups and plan operations (hardening U3, ui.md § Reordering lists). */

@@ -5,7 +5,8 @@
 // row per instance number from 2, skipped ones muted). Feature rows are collapsed by default (per
 // window, ui store `expandedFeatures`). Plain rows and feature rows reorder by dragging their grip
 // (D45) and by Alt+↑/↓, over whole neighbouring spans, and remove with an undo toast; a refused
-// move says why under the list and every move is announced. The grip sits before the row icon
+// move says why under the list and every move is announced. Rows show names, never ids (the
+// name ellipsizes in the row's width; DF25 re-report). The grip sits before the row icon
 // (DF24). Owned and nested rows have no actions (Alt+↑/↓ there moves the outer feature). ↑/↓ walk
 // the visible rows, → expands or enters, ← collapses or goes to the parent row. Every row with an
 // applicable action has the row menu (DF16: Chamfer, Make Clones…, Remove): right-click,
@@ -471,7 +472,6 @@ function OperationRow({
         >
           <Icon name={operationIcon(op)} />
           <span className={styles['opName']}>{op.name}</span>
-          <span className={actions ? styles['opId'] : styles['ownedId']}>{op.id}</span>
           <RowMarkers failed={ctx.failedAt === op.id} count={n} />
         </button>
         {actions ? <MoveRemove name={op.name} actions={actions} /> : null}
@@ -610,7 +610,7 @@ function Chevron({
   )
 }
 
-/** An owned operation of a hole: role name, id, its own badge; no actions, no action slot. */
+/** An owned operation of a hole: role name, its own badge; no id, no actions, no action slot. */
 function OwnedRow({
   ctx,
   op,
@@ -642,7 +642,6 @@ function OwnedRow({
         >
           <Icon name={operationIcon(op)} />
           <span className={styles['opName']}>{roleLabel(featureName, op.name)}</span>
-          <span className={styles['ownedId']}>{op.id}</span>
           <RowMarkers failed={ctx.failedAt === op.id} count={n} />
         </button>
       </li>

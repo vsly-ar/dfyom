@@ -100,7 +100,10 @@ test('exit criteria through the UI: design, plan, export, run, save, close and r
   await setField(setup, 'Length (X)', '100')
   await setField(setup, 'Width (Y)', '60')
   await setField(setup, 'Thickness (Z)', '20')
-  await setup.getByRole('button', { name: 'Create part' }).click()
+  await page
+    .getByRole('dialog', { name: 'Stock' })
+    .getByRole('button', { name: 'Create part' })
+    .click()
   await expect(navigator.getByText(/^Stock: 100 × 60 × 20/)).toBeVisible()
 
   // ── Facing, pocket (corner radius, floor fillet), drilling, profile with tabs ────────────

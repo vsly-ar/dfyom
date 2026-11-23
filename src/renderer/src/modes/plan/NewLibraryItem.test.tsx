@@ -66,7 +66,7 @@ describe('New machine', () => {
         await s.run('library.machine.remove', { id: s.machineId, revision: 1, confirm: true })
       },
     })
-    await screen.findByText('The machine library is empty. Add a machine to export gCode.')
+    await screen.findByText(/^The machine library is empty\. Add a machine: the plan checks/)
     await t.user.click(within(t.start()).getByRole('button', { name: 'New machine…' }))
     const dialog = await screen.findByRole('dialog', { name: 'New machine' })
     await expectNoAxeViolations()

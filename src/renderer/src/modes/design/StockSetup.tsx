@@ -4,9 +4,11 @@
 // and material, "Save to library" (add, or for a changed library stock: update it or save a
 // variant of it) and "Create part" (`design.part.add`: a linked copy of an unchanged library
 // stock, else the project's own block; nothing is added to the library by itself). Since D45 the
-// body of the Stock dialog, which titles and describes it; `onCreated` closes the dialog.
+// Stock dialog without a part: it renders the whole dialog (the caller titles and describes it),
+// so "Create part" sits beside Cancel in the footer (dialog actions, DF12 re-report);
+// `onCreated` closes the dialog.
 // Doc: docs/conventions/ui.md#stock-dialog-df11df13, docs/modes/design.md#workflow,
-// docs/architecture/library.md#stock-variants-df13
+// docs/architecture/library.md#stock-variants-df13, docs/conventions/ui.md#radix-wrapping-pattern
 import { useEffect, useRef, useState } from 'react'
 import { MATERIAL_CLASSES, type MaterialClass } from '../../../../core/library/item'
 import type { LibraryItemDTO } from '../../../../core/library/library-item'
@@ -27,6 +29,7 @@ import {
   Button,
   Dialog,
   DialogClose,
+  type DialogProps,
   ErrorMessage,
   Field,
   FieldIcon,
@@ -80,16 +83,24 @@ export function stockOrder(items: readonly LibraryStock[]): LibraryStock[] {
     .flatMap((r) => [r, ...items.filter((i) => !isRoot(i) && i.parentId === r.id).sort(byName)])
 }
 
+/** The dialog's own props (title, description, open state, focus return). */
+type StockDialogProps = Pick<
+  DialogProps,
+  'title' | 'description' | 'open' | 'onOpenChange' | 'onCloseAutoFocus'
+>
+
 export function StockSetup({
   units,
   projectName,
   onCreated,
+  dialog,
 }: {
   units: UnitSystem
   /** The project's name: the part is named after it (DF12). */
   projectName: string
   /** The part was created. */
   onCreated?: () => void
+  dialog: StockDialogProps
 }): React.JSX.Element {
   const call = useCommand()
   const [partName, setPartName] = useState(() => m.firstPartName(projectName))
@@ -274,90 +285,101 @@ export function StockSetup({
   const locked = item !== undefined
   const saveDisabled = busy || (item !== undefined && !changed)
 
+  // the dialog's outcome in its footer: Cancel, then the primary Create part at the end edge
+  const footer = (
+    <>
+      <DialogClose>
+        <Button>{designMessages.setup.cancel}</Button>
+      </DialogClose>
+      <Button
+        variant="primary"
+        onClick={() => void create()}
+        icon={<Icon name="stock" />}
+        disabled={busy}
+      >
+        {m.create}
+      </Button>
+    </>
+  )
+
   return (
-    // not a <form>: Enter in a field commits that field (QuantityInput), it does not submit; local
-    // form state, so Enter never applies (apply.md#keyboard)
-    <ApplyScope onApply={null}>
-      <section ref={section} className={styles['setup']} aria-label={m.setupTitle}>
-        <Field label={m.partName}>
-          <FieldInput value={partName} onChange={(e) => setPartName(e.target.value)} />
-        </Field>
-        <Field label={m.fromLibrary}>
-          <Select options={options} value={itemId ?? NONE} onValueChange={(id) => choose(id)} />
-        </Field>
-        {sizeField(0, m.length)}
-        {sizeField(1, m.width)}
-        {sizeField(2, m.thickness)}
-        <Field
-          label={m.materialName}
-          readOnly={locked}
-          messages={
-            locked ? [{ id: 'materialLocked', severity: 'note', text: m.materialLocked }] : []
-          }
-        >
-          <FieldInput
-            value={material}
+    <Dialog {...dialog} footer={footer}>
+      {/* not a <form>: Enter in a field commits that field (QuantityInput), it does not submit; local
+        form state, so Enter never applies (apply.md#keyboard) */}
+      <ApplyScope onApply={null}>
+        <section ref={section} className={styles['setup']} aria-label={m.setupTitle}>
+          <Field label={m.partName}>
+            <FieldInput value={partName} onChange={(e) => setPartName(e.target.value)} />
+          </Field>
+          <Field label={m.fromLibrary}>
+            <Select options={options} value={itemId ?? NONE} onValueChange={(id) => choose(id)} />
+          </Field>
+          {sizeField(0, m.length)}
+          {sizeField(1, m.width)}
+          {sizeField(2, m.thickness)}
+          <Field
+            label={m.materialName}
             readOnly={locked}
-            onChange={(e) => setMaterial(e.target.value)}
-          />
-        </Field>
-        <Field label={m.materialClass} readOnly={locked}>
-          <Select<MaterialClass>
-            options={MATERIAL_CLASSES.map((c) => ({ value: c, label: m.classes[c] }))}
-            value={materialClass}
-            disabled={locked}
-            onValueChange={setMaterialClass}
-          />
-        </Field>
-        <div>
-          <LibraryLink
-            target={{ kind: 'stock', ...(itemId === null ? {} : { itemId }) }}
-            label={libraryMessages.links.open}
-          />
-        </div>
-        {rest !== undefined ? <ErrorMessage error={rest} /> : null}
-        <div className={styles['setupButtons']}>
-          <Button
-            icon={<Icon name="library" />}
-            disabled={saveDisabled}
-            title={item !== undefined && !changed ? m.unchanged : undefined}
-            onClick={() => (item !== undefined ? setAsking(true) : void save('add'))}
+            messages={
+              locked ? [{ id: 'materialLocked', severity: 'note', text: m.materialLocked }] : []
+            }
           >
-            {m.saveToLibrary}
-          </Button>
-          <Button
-            variant="primary"
-            onClick={() => void create()}
-            icon={<Icon name="stock" />}
-            disabled={busy}
-          >
-            {m.create}
-          </Button>
-        </div>
-      </section>
-      {item !== undefined ? (
-        <Dialog
-          title={m.saveTitle}
-          description={m.saveDescription(item.name)}
-          open={asking}
-          onOpenChange={setAsking}
-          footer={
-            <>
-              <DialogClose>
-                <Button>{libraryMessages.cancel}</Button>
-              </DialogClose>
-              <Button onClick={() => void save('update')}>{m.updateStock}</Button>
-              <Button
-                variant="primary"
-                icon={<Icon name="add" />}
-                onClick={() => void save('variant')}
-              >
-                {m.saveVariant}
-              </Button>
-            </>
-          }
-        />
-      ) : null}
-    </ApplyScope>
+            <FieldInput
+              value={material}
+              readOnly={locked}
+              onChange={(e) => setMaterial(e.target.value)}
+            />
+          </Field>
+          <Field label={m.materialClass} readOnly={locked}>
+            <Select<MaterialClass>
+              options={MATERIAL_CLASSES.map((c) => ({ value: c, label: m.classes[c] }))}
+              value={materialClass}
+              disabled={locked}
+              onValueChange={setMaterialClass}
+            />
+          </Field>
+          <div>
+            <LibraryLink
+              target={{ kind: 'stock', ...(itemId === null ? {} : { itemId }) }}
+              label={libraryMessages.links.open}
+            />
+          </div>
+          <div className={styles['setupButtons']}>
+            <Button
+              icon={<Icon name="library" />}
+              disabled={saveDisabled}
+              title={item !== undefined && !changed ? m.unchanged : undefined}
+              onClick={() => (item !== undefined ? setAsking(true) : void save('add'))}
+            >
+              {m.saveToLibrary}
+            </Button>
+          </div>
+          {rest !== undefined ? <ErrorMessage error={rest} /> : null}
+        </section>
+        {item !== undefined ? (
+          <Dialog
+            title={m.saveTitle}
+            description={m.saveDescription(item.name)}
+            open={asking}
+            onOpenChange={setAsking}
+            footer={
+              <>
+                <DialogClose>
+                  <Button>{libraryMessages.cancel}</Button>
+                </DialogClose>
+                <Button onClick={() => void save('update')}>{m.updateStock}</Button>
+                <Button
+                  variant="primary"
+                  icon={<Icon name="add" />}
+                  onClick={() => void save('variant')}
+                >
+                  {m.saveVariant}
+                </Button>
+              </>
+            }
+          />
+        ) : null}
+      </ApplyScope>
+    </Dialog>
   )
 }

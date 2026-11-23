@@ -91,7 +91,10 @@ test('stock dialog: library stock, save as variant, own block, part row above Op
   // the variant unchanged: Create part links the part's copy to it
   stock = await openPartSetup(page, 'Stock')
   await choose(page, setup, 'From library', 'Block 100 × 60 × 20 · 50 × 60 × 20')
-  await setup.getByRole('button', { name: 'Create part' }).click()
+  await page
+    .getByRole('dialog', { name: 'Stock' })
+    .getByRole('button', { name: 'Create part' })
+    .click()
   await expect(stock).toBeHidden()
 
   // DF15: the part row heads the sidebar, above the Operations header

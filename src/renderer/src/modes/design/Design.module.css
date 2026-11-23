@@ -130,7 +130,7 @@
   color: var(--text);
 }
 
-/* Save to library and Create part (DF13), at the end of the Stock dialog's body */
+/* Save to library (DF13), at the end of the Stock dialog's body; Create part is in its footer */
 .setupButtons {
   display: flex;
   flex-wrap: wrap;
@@ -191,7 +191,8 @@
 
 .opSelect {
   display: grid;
-  grid-template-columns: var(--icon-md) minmax(0, 1fr) auto auto auto;
+  /* icon, name (takes the width, ellipsis), failed marker, warning badge; no id (DF25 re-report) */
+  grid-template-columns: var(--icon-md) minmax(0, 1fr) auto auto;
   gap: var(--space-2);
   align-items: center;
   min-height: var(--control-md);
@@ -224,11 +225,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.opId {
-  font: var(--text-xs) / var(--lh-xs) var(--font-mono);
-  color: var(--text-muted);
 }
 
 .opBadge,
@@ -301,18 +297,6 @@
   background: var(--accent-subtle);
 }
 
-/* the id is the first thing the actions cover: it fades with them showing, so no clipped
-   fragment ("p") peeks out beside the buttons (the inspector header still shows it) */
-.opId {
-  transition: opacity var(--motion-fast) var(--ease-standard);
-}
-
-.op:hover .opId,
-.op:focus-within .opId,
-.op[data-selected] .opId {
-  opacity: 0;
-}
-
 /* feature rows (v0.4 task U1, ui.md#feature-rows-and-add; visuals draft until L2): the chevron
    sits in the row's left gutter so the feature icon lines up with plain operation icons; owned
    rows sit one 8 px step in, along a thin guide line, and slide down when the row opens */
@@ -359,9 +343,15 @@
   min-width: 0;
 }
 
+/* a narrow row gives up the read-out before the name (DF25 re-report) */
+.featureText > .featureReadout {
+  flex-shrink: 100;
+}
+
 .featureReadout {
   overflow: hidden;
   flex-shrink: 1;
+  min-width: 0;
   font-size: var(--text-xs);
   line-height: var(--lh-xs);
   color: var(--text-muted);
@@ -410,11 +400,6 @@
 .op[data-nested] .opSelect,
 .featureItem[data-nested] > .op > .opSelect {
   padding-left: calc(var(--grip-slot, 0px) + var(--space-3) + var(--space-2));
-}
-
-.op[data-owned] .opSelect,
-.op[data-nested] .opSelect {
-  grid-template-columns: var(--icon-md) minmax(0, 1fr) auto auto auto;
 }
 
 .featureItem[data-nested] .chevron {
@@ -543,11 +528,6 @@
 
 .instance[data-selected] .instanceActions {
   background: var(--accent-subtle);
-}
-
-.ownedId {
-  font: var(--text-xs) / var(--lh-xs) var(--font-mono);
-  color: var(--text-muted);
 }
 
 /* the Reference panel (dogfood DF2–DF8): the file line, the size read-out, Fit mode */

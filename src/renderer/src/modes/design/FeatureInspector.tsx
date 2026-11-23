@@ -300,8 +300,7 @@ export function FeatureInspector({
                   >
                     <Icon name={operationIcon(o)} size="sm" />
                     {roleLabel(feature.name, o.name)}
-                  </button>{' '}
-                  <span className={styles['opId']}>{o.id}</span>
+                  </button>
                 </li>
               ))}
             </ul>
