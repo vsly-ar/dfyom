@@ -20,6 +20,8 @@
 }
 
 .item {
+  /* its description tooltip (DF18) is placed from it */
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -29,6 +31,44 @@
   cursor: pointer;
   outline: none;
   user-select: none;
+}
+
+/* an item's description (DF18): the tooltip look (ui/Tooltip) beside the menu, after the
+   tooltip delay */
+.description {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: calc(100% + 14px);
+  width: max-content;
+  max-width: 22rem;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--text);
+  color: var(--bg-app);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  font-weight: var(--weight-medium);
+  box-shadow: var(--shadow-2);
+  white-space: normal;
+  pointer-events: none;
+  visibility: hidden;
+  opacity: 0;
+  transform: translate(-4px, -50%);
+  transition:
+    opacity var(--motion-fast) var(--ease-exit),
+    transform var(--motion-fast) var(--ease-exit),
+    visibility 0s linear var(--motion-fast);
+}
+
+.item[data-highlighted] > .description {
+  visibility: visible;
+  opacity: 1;
+  transform: translate(0, -50%);
+  transition:
+    opacity var(--motion-base) var(--ease-emphasized) var(--delay-tooltip, 0ms),
+    transform var(--motion-base) var(--ease-emphasized) var(--delay-tooltip, 0ms),
+    visibility 0s linear var(--delay-tooltip, 0ms);
 }
 
 .item svg {
@@ -123,4 +163,9 @@
   to {
     opacity: 0;
   }
+}
+
+/* the right-click menu grows from the pointer (DF16) */
+.context {
+  transform-origin: var(--radix-context-menu-content-transform-origin);
 }

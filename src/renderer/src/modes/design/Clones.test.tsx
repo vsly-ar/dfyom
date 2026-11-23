@@ -86,8 +86,10 @@ const readout = () => within(inspector()).getAllByText(/instances? ·|limited to
 
 async function openDraft() {
   const r = await renderDesign(addPocket)
-  await r.user.click(await within(navigator()).findByRole('button', { name: /^Pocket 1/ }))
-  const menu = await r.openAdd()
+  // the row menu's Make Clones… (DF16: right-click on the row)
+  const row = await within(navigator()).findByRole('button', { name: /^Pocket 1/ })
+  await r.user.pointer({ keys: '[MouseRight]', target: row })
+  const menu = await screen.findByRole('menu', { name: 'Actions for Pocket 1' })
   await r.user.click(within(menu).getByRole('menuitem', { name: 'Make Clones…' }))
   await within(inspector()).findByRole('button', { name: 'Make clones' })
   await waitFor(() => expect(readout()).toHaveTextContent('1 + 1 clone = 2 instances · 0 skipped'))

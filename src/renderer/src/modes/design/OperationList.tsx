@@ -5,11 +5,13 @@
 // row per instance number from 2, skipped ones muted). Feature rows are collapsed by default (per
 // window, ui store `expandedFeatures`). Plain rows and feature rows reorder by dragging their grip
 // (D45) and by Alt+↑/↓, over whole neighbouring spans, and remove with an undo toast; a refused
-// move says why under the list and every move is announced. Owned and nested rows have no actions
-// (Alt+↑/↓ there moves the outer feature). ↑/↓ walk the visible rows, → expands or enters, ←
-// collapses or goes to the parent row.
+// move says why under the list and every move is announced. The grip sits before the row icon
+// (DF24). Owned and nested rows have no actions (Alt+↑/↓ there moves the outer feature). ↑/↓ walk
+// the visible rows, → expands or enters, ← collapses or goes to the parent row. Every row with an
+// applicable action has the row menu (DF16: Chamfer, Make Clones…, Remove): right-click,
+// Shift+F10 / the Menu key, and on top-level rows the actions (…) button.
 // Doc: docs/conventions/ui.md#feature-rows-and-add, #clones-in-the-navigator,
-// #reordering-lists-d45, #panels-and-inspectors, #confirmations;
+// #reordering-lists-d45, #panels-and-inspectors, #confirmations, row menu in #feature-rows-and-add;
 // docs/modes/design.md#ordering-and-composition
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import type { FeatureDTO } from '../../../../core/design/feature.dto'
@@ -20,12 +22,17 @@ import { designMessages } from '../../messages/design'
 import { useUi } from '../../shell/ShellContext'
 import {
   Button,
+  ContextMenu,
   DragGrip,
   Icon,
   IconButton,
+  isContextMenuKey,
+  Menu,
+  openContextMenu,
   ReorderStatus,
   useReorder,
   type IconName,
+  type MenuEntry,
   type Reorder,
 } from '../../ui'
 import styles from './Design.module.css'
@@ -45,6 +52,7 @@ import {
 } from './feature-view'
 import type { DesignPart } from './model'
 import { useCommand } from './useDesign'
+import { useRowActions } from './row-actions'
 import { useSkipToggle } from './ClonesInspector'
 import { instanceId } from './clones-view'
 
@@ -127,8 +135,12 @@ interface ListContext {
   select(id: string): void
   key(e: KeyboardEvent, rowId: string): void
   rowRef(id: string): (el: HTMLButtonElement | null) => void
+  /** Focus row `id`'s button. */
+  focus(id: string): void
   /** Skip or restore a clone instance (v0.4 task U3). */
   toggleSkip(feature: FeatureDTO, n: number): void
+  /** The row menu of an owned or nested row (no Remove; DF16). */
+  rowMenu(id: string): MenuEntry[]
 }
 
 export function OperationList({
@@ -149,6 +161,7 @@ export function OperationList({
 }): React.JSX.Element {
   const call = useCommand()
   const toggleSkip = useSkipToggle(part)
+  const rowActions = useRowActions(part)
   const expanded = useUi((s) => s.expandedFeatures)
   const setExpanded = useUi((s) => s.setFeatureExpanded)
   const rows = useRef(new Map<string, HTMLButtonElement>())
@@ -243,6 +256,13 @@ export function OperationList({
     const row = visible.find((v) => v.id === rowId)
     const unit = units.find((u) => u.id === row?.unit)
     if (row === undefined || unit === undefined) return
+    // Shift+F10 / the Menu key: the row's menu, at the row (DF16)
+    if (isContextMenuKey(e)) {
+      const el = e.currentTarget.closest('[data-row-menu]')
+      if (el === null) return
+      e.preventDefault()
+      return openContextMenu(el)
+    }
     if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
       e.preventDefault()
       const by = e.key === 'ArrowUp' ? -1 : 1
@@ -279,26 +299,31 @@ export function OperationList({
     toggle: (key) => setExpanded(key, !expanded.has(key)),
     select: (id) => select(selected === id ? null : id),
     key: onKey,
+    focus: focusRow,
     rowRef: (id) => (el) => {
       if (el) rows.current.set(id, el)
       else rows.current.delete(id)
     },
     toggleSkip,
+    rowMenu: (id) => rowActions(id),
   }
 
   return (
     <>
       <ol
         ref={attachList}
-        className={`${styles['ops']} ${reorder.listClass}`}
+        className={`${styles['ops']} ${styles['opsGrip']} ${reorder.listClass}`}
         aria-label={m.navigator.listLabel}
         {...reorder.listProps}
       >
         {units.map((unit, i) => {
+          const name = unitName(unit)
+          const blocked = unit.kind === 'feature' ? featureRemoveBlocked(part, unit.id) : undefined
           const actions: RowActions = {
             item: reorder.itemProps(i),
             grip: units.length > 1 ? reorder.gripProps(i) : undefined,
             onRemove: () => void remove(unit),
+            menu: rowActions(unit.id, { name, onRemove: () => void remove(unit), blocked }),
           }
           return unit.kind === 'operation' ? (
             <OperationRow key={unit.id} ctx={ctx} op={unit.op} actions={actions} />
@@ -317,6 +342,48 @@ interface RowActions {
   readonly item: ReturnType<Reorder['itemProps']>
   readonly grip: ReturnType<Reorder['gripProps']> | undefined
   onRemove(): void
+  /** The row menu (DF16): the … button and right-click. */
+  readonly menu: readonly MenuEntry[]
+}
+
+/**
+ * A row's right-click menu (DF16) around its `.op` element, marked `data-row-menu` for the
+ * Shift+F10 path; none without entries. Focus goes back to the row's button when it closes.
+ */
+function RowMenu({
+  ctx,
+  id,
+  name,
+  items,
+  children,
+}: {
+  ctx: ListContext
+  id: string
+  name: string
+  items: readonly MenuEntry[]
+  children: React.JSX.Element
+}): React.JSX.Element {
+  if (items.length === 0) return children
+  return (
+    <ContextMenu
+      label={m.navigator.actions(name)}
+      items={items}
+      onCloseAutoFocus={(e) => {
+        e.preventDefault()
+        ctx.focus(id)
+      }}
+    >
+      {children}
+    </ContextMenu>
+  )
+}
+
+/** The grip before the row icon (DF24); a row of a one-row list keeps the empty slot. */
+function RowGrip({ actions }: { actions: RowActions | undefined }): React.JSX.Element | null {
+  if (actions === undefined) return null
+  return actions.grip ? (
+    <DragGrip title={r.grip} className={styles['rowGrip']} {...actions.grip} />
+  ) : null
 }
 
 function RowMarkers({ failed, count }: { failed: boolean; count: number }): React.JSX.Element {
@@ -353,7 +420,9 @@ function MoveRemove({
 }): React.JSX.Element {
   return (
     <span className={styles['opActions']}>
-      {actions.grip ? <DragGrip title={r.grip} {...actions.grip} /> : null}
+      <Menu label={m.navigator.actions(name)} align="end" items={actions.menu}>
+        <IconButton label={m.navigator.actions(name)} icon={<Icon name="more" />} />
+      </Menu>
       <IconButton
         label={m.navigator.remove(name)}
         icon={<Icon name="delete" />}
@@ -379,29 +448,35 @@ function OperationRow({
   actions?: RowActions
 }): React.JSX.Element {
   const n = rolledUpCount({ kind: 'operation', id: op.id, op, start: 0, end: 1 }, ctx.warnings)
+  const menu = actions?.menu ?? ctx.rowMenu(op.id)
   return (
-    <li
-      {...actions?.item}
-      className={styles['op']}
-      data-nested={actions === undefined ? '' : undefined}
-      data-selected={ctx.selected === op.id ? '' : undefined}
-    >
-      <button
-        type="button"
-        ref={ctx.rowRef(op.id)}
-        className={styles['opSelect']}
-        aria-pressed={ctx.selected === op.id}
-        aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
-        onClick={() => ctx.select(op.id)}
-        onKeyDown={(e) => ctx.key(e, op.id)}
+    <RowMenu ctx={ctx} id={op.id} name={op.name} items={menu}>
+      <li
+        {...actions?.item}
+        className={styles['op']}
+        data-nested={actions === undefined ? '' : undefined}
+        data-top={actions !== undefined ? '' : undefined}
+        data-row-menu={menu.length > 0 ? '' : undefined}
+        data-selected={ctx.selected === op.id ? '' : undefined}
       >
-        <Icon name={operationIcon(op)} />
-        <span className={styles['opName']}>{op.name}</span>
-        <span className={actions ? styles['opId'] : styles['ownedId']}>{op.id}</span>
-        <RowMarkers failed={ctx.failedAt === op.id} count={n} />
-      </button>
-      {actions ? <MoveRemove name={op.name} actions={actions} /> : null}
-    </li>
+        <RowGrip actions={actions} />
+        <button
+          type="button"
+          ref={ctx.rowRef(op.id)}
+          className={styles['opSelect']}
+          aria-pressed={ctx.selected === op.id}
+          aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+          onClick={() => ctx.select(op.id)}
+          onKeyDown={(e) => ctx.key(e, op.id)}
+        >
+          <Icon name={operationIcon(op)} />
+          <span className={styles['opName']}>{op.name}</span>
+          <span className={actions ? styles['opId'] : styles['ownedId']}>{op.id}</span>
+          <RowMarkers failed={ctx.failedAt === op.id} count={n} />
+        </button>
+        {actions ? <MoveRemove name={op.name} actions={actions} /> : null}
+      </li>
+    </RowMenu>
   )
 }
 
@@ -431,6 +506,7 @@ function FeatureRow({
   const failed = ctx.failedAt !== undefined && unit.ops.some((o) => o.id === ctx.failedAt)
   const open = ctx.expanded.has(feature.id)
   const blocked = actions ? featureRemoveBlocked(part, feature.id) : undefined
+  const menu = actions?.menu ?? ctx.rowMenu(feature.id)
   const reasonId = `${feature.id}-remove-reason`
   const childrenId = `${feature.id}-children`
   const name = f.rowName({
@@ -446,43 +522,51 @@ function FeatureRow({
       data-nested={actions === undefined ? '' : undefined}
       data-open={open || undefined}
     >
-      <div className={styles['op']} data-selected={selected === feature.id ? '' : undefined}>
-        <button
-          type="button"
-          ref={ctx.rowRef(feature.id)}
-          className={`${styles['opSelect']} ${styles['featureSelect']}`}
-          aria-pressed={selected === feature.id}
-          aria-expanded={open}
-          aria-controls={childrenId}
-          aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown ArrowRight ArrowLeft"
-          aria-label={name}
-          onClick={() => ctx.select(feature.id)}
-          onKeyDown={(e) => ctx.key(e, feature.id)}
+      <RowMenu ctx={ctx} id={feature.id} name={feature.name} items={menu}>
+        <div
+          className={styles['op']}
+          data-top={actions !== undefined ? '' : undefined}
+          data-row-menu={menu.length > 0 ? '' : undefined}
+          data-selected={selected === feature.id ? '' : undefined}
         >
-          <Chevron open={open} name={feature.name} onToggle={() => ctx.toggle(feature.id)} />
-          <Icon name={featureIcon(feature)} />
-          <span className={styles['featureText']}>
-            <span className={styles['opName']}>{feature.name}</span>
-            {readout.length > 0 ? (
-              <span className={styles['featureReadout']}>{readout}</span>
-            ) : null}
-          </span>
-          <RowMarkers failed={failed} count={count} />
-        </button>
-        {actions ? (
-          <MoveRemove
-            name={feature.name}
-            actions={actions}
-            removeBlocked={blocked}
-            reasonId={reasonId}
-          />
-        ) : null}
-        {blocked !== undefined ? (
-          <p id={reasonId} className={styles['shapeReason']}>
-            {blocked}
-          </p>
-        ) : null}
-      </div>
+          <RowGrip actions={actions} />
+          <button
+            type="button"
+            ref={ctx.rowRef(feature.id)}
+            className={`${styles['opSelect']} ${styles['featureSelect']}`}
+            aria-pressed={selected === feature.id}
+            aria-expanded={open}
+            aria-controls={childrenId}
+            aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown ArrowRight ArrowLeft"
+            aria-label={name}
+            onClick={() => ctx.select(feature.id)}
+            onKeyDown={(e) => ctx.key(e, feature.id)}
+          >
+            <Chevron open={open} name={feature.name} onToggle={() => ctx.toggle(feature.id)} />
+            <Icon name={featureIcon(feature)} />
+            <span className={styles['featureText']}>
+              <span className={styles['opName']}>{feature.name}</span>
+              {readout.length > 0 ? (
+                <span className={styles['featureReadout']}>{readout}</span>
+              ) : null}
+            </span>
+            <RowMarkers failed={failed} count={count} />
+          </button>
+          {actions ? (
+            <MoveRemove
+              name={feature.name}
+              actions={actions}
+              removeBlocked={blocked}
+              reasonId={reasonId}
+            />
+          ) : null}
+          {blocked !== undefined ? (
+            <p id={reasonId} className={styles['shapeReason']}>
+              {blocked}
+            </p>
+          ) : null}
+        </div>
+      </RowMenu>
       {/* closed: inert (out of the tab order and the accessibility tree) while it slides shut */}
       <div className={styles['ownedWrap']} data-open={open || undefined} inert={!open}>
         <div id={childrenId} className={styles['owned']}>
@@ -537,28 +621,32 @@ function OwnedRow({
   featureName: string
 }): React.JSX.Element {
   const n = rolledUpCount({ kind: 'operation', id: op.id, op, start: 0, end: 1 }, ctx.warnings)
+  const menu = ctx.rowMenu(op.id)
   return (
-    <li
-      className={styles['op']}
-      data-owned=""
-      data-selected={ctx.selected === op.id ? '' : undefined}
-    >
-      <button
-        type="button"
-        ref={ctx.rowRef(op.id)}
-        className={styles['opSelect']}
-        aria-pressed={ctx.selected === op.id}
-        aria-label={f.ownedName(op.name, featureName)}
-        aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown ArrowLeft"
-        onClick={() => ctx.select(op.id)}
-        onKeyDown={(e) => ctx.key(e, op.id)}
+    <RowMenu ctx={ctx} id={op.id} name={op.name} items={menu}>
+      <li
+        className={styles['op']}
+        data-owned=""
+        data-row-menu={menu.length > 0 ? '' : undefined}
+        data-selected={ctx.selected === op.id ? '' : undefined}
       >
-        <Icon name={operationIcon(op)} />
-        <span className={styles['opName']}>{roleLabel(featureName, op.name)}</span>
-        <span className={styles['ownedId']}>{op.id}</span>
-        <RowMarkers failed={ctx.failedAt === op.id} count={n} />
-      </button>
-    </li>
+        <button
+          type="button"
+          ref={ctx.rowRef(op.id)}
+          className={styles['opSelect']}
+          aria-pressed={ctx.selected === op.id}
+          aria-label={f.ownedName(op.name, featureName)}
+          aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown ArrowLeft"
+          onClick={() => ctx.select(op.id)}
+          onKeyDown={(e) => ctx.key(e, op.id)}
+        >
+          <Icon name={operationIcon(op)} />
+          <span className={styles['opName']}>{roleLabel(featureName, op.name)}</span>
+          <span className={styles['ownedId']}>{op.id}</span>
+          <RowMarkers failed={ctx.failedAt === op.id} count={n} />
+        </button>
+      </li>
+    </RowMenu>
   )
 }
 

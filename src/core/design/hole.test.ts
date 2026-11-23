@@ -42,11 +42,11 @@ describe('design.hole.add', () => {
       diameter: { source: '3.4 mm' },
       featureId: 'hole1',
       featureRole: 'drill',
-      name: 'Hole 1 · drill',
+      name: 'Bolt hole 1 · drill',
     })
     expect(feature(s)).toMatchObject({
       kind: 'hole',
-      name: 'Hole 1',
+      name: 'Bolt hole 1',
       type: 'simple',
       fastener: 'M3',
       purpose: 'clearance',
@@ -184,11 +184,11 @@ describe('design.hole.update', () => {
     const keys = () => pendingChanges(s.d.doc, base).map((c) => c.label)
     await s.run('design.hole.update', { partId: s.partId, featureId: 'hole1', fastener: 'M4' })
     expect(exact(feature(s)['cbDiameter'])).toBe(8)
-    expect(keys()).toEqual(['Hole 1: fastener'])
+    expect(keys()).toEqual(['Bolt hole 1: fastener'])
     await s.run('project.apply', {})
     base = s.d.doc
     await s.run('design.hole.update', { partId: s.partId, featureId: 'hole1', cbDiameter: '9' })
-    expect(keys()).toEqual(['Hole 1: cbDiameter'])
+    expect(keys()).toEqual(['Bolt hole 1: cbDiameter'])
   })
 
   it('choosing fit or purpose refills the sizes; explicit sizes in the same command win', async () => {

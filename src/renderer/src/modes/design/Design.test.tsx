@@ -376,7 +376,7 @@ describe('design mode', () => {
   it('moves operations with Alt+↑/↓ (announced) and removes one with an undo toast', async () => {
     const { user, part, addFromMenu } = await renderDesign()
     await user.click(await within(navigator()).findByRole('button', { name: 'Add facing' }))
-    await addFromMenu('Add profile')
+    await addFromMenu('Profile')
     await waitFor(() => expect(part().operations.map((o) => o.id)).toEqual(['facing1', 'profile1']))
     // D45: no move buttons, a drag grip instead
     expect(within(navigator()).queryByRole('button', { name: /^Move / })).toBeNull()
@@ -401,14 +401,17 @@ describe('design mode', () => {
     const { user, part, addFromMenu } = await renderDesign()
     await user.click(await within(navigator()).findByRole('button', { name: 'Add facing' }))
     // the pocket's default `on` is the facing's floor, so it can't go before the facing
-    await addFromMenu('Add pocket')
-    await addFromMenu('Add profile')
+    await addFromMenu('Pocket')
+    await addFromMenu('Profile')
     await waitFor(() =>
       expect(part().operations.map((o) => o.id)).toEqual(['facing1', 'pocket1', 'profile1']),
     )
     const restore = layOutRows()
     try {
       const rowOf = (name: RegExp) => within(navigator()).getByRole('button', { name })
+      // the grip sits before the row icon, at the row's start (DF24)
+      const profileRow = rowOf(/^Profile 1/)
+      expect(profileRow.previousElementSibling).toBe(gripOf(profileRow))
       // the profile to the top: one design.operation.move, announced
       dragTo(gripOf(rowOf(/^Profile 1/)), 5)
       await waitFor(() =>
@@ -446,7 +449,7 @@ describe('design mode', () => {
   it('picks the on surface in the viewport (pick mode) or from the list', async () => {
     const { user, part, shell, addFromMenu } = await renderDesign()
     await user.click(await within(navigator()).findByRole('button', { name: 'Add facing' }))
-    await addFromMenu('Add pocket')
+    await addFromMenu('Pocket')
     await within(inspector()).findByRole('heading', { name: 'Pocket 1' })
     // the default `on` is the last facing's floor
     expect(part().operations[1]).toMatchObject({ on: 'facing1.floor' })
@@ -519,7 +522,7 @@ describe('design mode', () => {
     expect(within(inspector()).getByRole('combobox', { name: 'On' })).toHaveTextContent(
       'Stock top · stock.top',
     )
-    await addFromMenu('Add profile')
+    await addFromMenu('Profile')
     await within(inspector()).findByRole('heading', { name: 'Profile 1' })
     const on = within(inspector()).getByRole('combobox', { name: 'On' })
     on.focus()

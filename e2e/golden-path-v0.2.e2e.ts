@@ -162,7 +162,7 @@ test('v0.2 golden path through the UI: reference, faces, setups, export and run 
   await expect(inspector.getByRole('heading', { name: 'Facing 1' })).toBeVisible()
   await setField(inspector, 'Depth', '1')
 
-  await addOperation(page, 'Add pocket', 'Pocket 1')
+  await addOperation(page, 'Pocket', 'Pocket 1')
   await pickOn(page, /^Facing 1 floor/)
   const anchor = inspector.getByRole('radiogroup', { name: 'Anchor' })
   await anchor.getByRole('radio', { name: 'Front left' }).click()
@@ -176,7 +176,7 @@ test('v0.2 golden path through the UI: reference, faces, setups, export and run 
   await setField(inspector, 'Corner radius', '8')
   await setField(inspector, 'Depth', '34.8')
 
-  await addOperation(page, 'Add profile', 'Profile 1')
+  await addOperation(page, 'Profile', 'Profile 1')
   await setField(inspector, 'Position X', '127.5')
   await setField(inspector, 'Position Y', '92.5')
   await setField(inspector, 'Length (X)', '249.5')
@@ -199,7 +199,7 @@ test('v0.2 golden path through the UI: reference, faces, setups, export and run 
     ['Drilling 1', '72.5'],
     ['Drilling 2', '112.5'],
   ] as const) {
-    await addOperation(page, 'Add drilling', name)
+    await addOperation(page, 'Drilling', name)
     await pickOn(page, /^Stock right side/)
     await setField(inspector, 'Center u', u)
     await setField(inspector, 'Center v', '20')
@@ -210,7 +210,7 @@ test('v0.2 golden path through the UI: reference, faces, setups, export and run 
   }
 
   // ── Bottom (u = part X, v = part −Y): a label recess, centred ────────────────────────────
-  await addOperation(page, 'Add pocket', 'Pocket 2')
+  await addOperation(page, 'Pocket', 'Pocket 2')
   await pickOn(page, /^Stock bottom/)
   await setField(inspector, 'Position u', '127.5')
   await setField(inspector, 'Position v', '92.5')

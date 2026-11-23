@@ -1,4 +1,4 @@
-// The window layout (task 3.3b): main toolbar (undo/redo and mode tools – design's part setup, D45 – · mode switcher in the
+// The window layout (task 3.3b): main toolbar (File: New / Open / Save, DF14; undo/redo and mode tools – design's part setup, D45 – · mode switcher in the
 // centre · Apply (P3), machine group, panel toggles and settings), navigator | viewport | inspector in resizable, collapsible
 // panels, the Library window and settings), status bar. Below 1280 px the inspector overlays the viewport instead of shrinking it.
 // Landmarks: banner, navigation (modes, navigator), main (viewport), complementary (inspector),
@@ -27,6 +27,7 @@ import styles from './AppShell.module.css'
 import { CloseProjectDialog } from './CloseProjectDialog'
 import { useHistorySteps, useMediaQuery, useWindowTitle } from './hooks'
 import { SettingsDialog } from './SettingsDialog'
+import { isDirty } from '../state/replica'
 import { useReplica, useSettings, useShell, useUi } from './ShellContext'
 import { REGION_ATTR, shortcutLabel, useShellShortcuts } from './shortcuts'
 import { StatusBar } from './StatusBar'
@@ -44,9 +45,10 @@ const LAYOUT_SAVE_MS = 400
 const region = { [REGION_ATTR]: '', tabIndex: -1 }
 
 export function AppShell(): React.JSX.Element {
-  const { settings, pending, bridge } = useShell()
+  const { settings, pending, bridge, files } = useShell()
   const replica = useReplica()
   const doc = replica.status === 'open' ? replica.doc : undefined
+  const dirty = replica.status === 'open' && isDirty(replica)
   const mode = useUi((s) => s.mode)
   const setMode = useUi((s) => s.setMode)
   const openSettings = useUi((s) => s.setSettingsOpen)
@@ -127,6 +129,32 @@ export function AppShell(): React.JSX.Element {
       <div className={styles['shell']}>
         <header className={styles['toolbar']} aria-label={m.regions.toolbar} {...region}>
           <div className={styles['toolbarStart']}>
+            {/* the File menu's New / Open / Save, same handlers and shortcuts (DF14) */}
+            <Toolbar label={m.file.toolbar}>
+              <ToolbarButton
+                label={m.file.newProject}
+                shortcut={shortcutLabel('N')}
+                icon={<Icon name="file-new" />}
+                onClick={() => files.getState().newProject()}
+              />
+              <ToolbarButton
+                label={m.file.open}
+                shortcut={shortcutLabel('O')}
+                icon={<Icon name="open" />}
+                onClick={() => void files.getState().open()}
+              />
+              <ToolbarButton
+                label={dirty ? m.file.saveDirty : m.file.save}
+                shortcut={shortcutLabel('S')}
+                icon={
+                  <span className={styles['saveIcon']} data-dirty={dirty || undefined}>
+                    <Icon name="save" />
+                  </span>
+                }
+                disabled={doc === undefined}
+                onClick={() => void files.getState().save()}
+              />
+            </Toolbar>
             <Toolbar label="Edit">
               <UndoRedo
                 undo={history.undo}

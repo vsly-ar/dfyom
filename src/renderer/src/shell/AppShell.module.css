@@ -39,6 +39,31 @@
   justify-content: flex-end;
 }
 
+/* Save in the File toolbar (DF14): a small amber dot on the icon while there are unsaved changes */
+.saveIcon {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+}
+
+.saveIcon::after {
+  content: '';
+  position: absolute;
+  top: -2px;
+  right: -3px;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--accent-icon);
+  box-shadow: 0 0 0 1.5px var(--bg-chrome);
+  transform: scale(0);
+  transition: transform var(--motion-base) var(--ease-emphasized);
+}
+
+.saveIcon[data-dirty]::after {
+  transform: scale(1);
+}
+
 .modes {
   display: flex;
   justify-content: center;

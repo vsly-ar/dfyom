@@ -273,14 +273,17 @@ export function useReorder(options: ReorderOptions): Reorder {
 export function DragGrip({
   title,
   onPointerDown,
+  className,
 }: {
   /** Tooltip: "Drag to reorder (Alt+↑/↓)". */
   title: string
   onPointerDown(e: ReactPointerEvent): void
+  /** Layout only (the navigator places it before the row icon, DF24); appended to its class. */
+  className?: string | undefined
 }): React.JSX.Element {
   return (
     <span
-      className={styles['grip']}
+      className={[styles['grip'], className].filter(Boolean).join(' ')}
       title={title}
       aria-hidden="true"
       data-reorder-grip=""
