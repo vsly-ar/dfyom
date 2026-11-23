@@ -99,7 +99,10 @@ export function planOperationInputs(
     Quantity.fromDTO(dto).mapOr(0, (q) => q.canonical)
   const out: PlanOperationInput[] = []
   // Chained over the machining order: an operation starts where the previous one ended, so its
-  // hash covers its position and everything before it.
+  // hash covers its position and everything before it. The whole part (`on` surfaces and
+  // formulas depend on other operations) enters by its hash, taken once: hashing it per plan
+  // operation made every export quadratic in operations (hardening P4).
+  const part = hashJson(plan.dto.design.part)
   let chain = ''
   let previous: string | undefined
   plan.operations.forEach((op, index) => {
@@ -118,8 +121,7 @@ export function planOperationInputs(
     chain = hashJson({
       previous: chain,
       index,
-      // the whole part: `on` surfaces and formulas depend on other operations
-      part: plan.dto.design.part,
+      part,
       planOperation: op,
       snapshots: used,
       setup: { ...own, operations: undefined },

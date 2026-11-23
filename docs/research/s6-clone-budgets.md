@@ -93,7 +93,7 @@ Subtraction order does not change the solid ([geometry.md § Building the solids
 2. **F5 expands into plain operations** (as features.md specifies): read-only instances, ids by role and Plan untouched. The spike found no reason to keep instances virtual for 100 instances; the costs above are in evaluation and in O(N) / O(N²) document code, not in the expansion itself.
 3. **Evaluation (with F5, small):** put the instances of one clone source operation into **one subtraction layer** regardless of `UNION_CHUNK` (they are disjoint by construction, `dfm.cloneOverlap` aside), capped so a step stays near 100 ms (≈ 100 instances); and **keep the part after the clone layers** as one kept solid keyed by the clone groups, so edits elsewhere cost ≈ 17 ms more instead of ≈ 200 ms. Raise `KEPT_TRIANGLES` with it, or key the prefix separately, because a 100-hole prefix is already 30 000 triangles.
 4. **Instancing by `transform` is optional.** It saves build and compose (≈ 10 %) for a label pass by position; take it only if F5's measurements on an idle machine show compose mattering. It moves x/y by a float64 offset of float32 vertices (z untouched, so floors stay coplanar exactly); instances that meet other operations' walls would need the sliver test of G1. `translateMesh` is not worth its code.
-5. **Before raising the limit** (backlog, independent of Clones): make `plan.create` / `planOperationInputs` linear (hash each operation's own inputs once and chain the hashes; compare snapshot values once per copy, not per operation), and make design commands incremental (load and check only the operations a command touches plus their dependants, cache the parsed part per document revision). Then re-measure with this harness.
+5. **Before raising the limit** (backlog, independent of Clones; plan side done in [P4](#follow-up-p4), commands in P5): make `plan.create` / `planOperationInputs` linear (hash each operation's own inputs once and chain the hashes; compare snapshot values once per copy, not per operation), and make design commands incremental (load and check only the operations a command touches plus their dependants, cache the parsed part per document revision). Then re-measure with this harness.
 
 ## Changes the draft docs should take
 
@@ -127,6 +127,37 @@ Production `evaluatePart` before (no `cloneGroups`) and after, N counterbored ho
 - Not taken: instancing by `transform` (recommendation 4) – compose is still ≈ 10 %.
 
 Run: `npx vitest run -c spikes/clones/vitest.config.mts spikes/clones/layers.test.ts --silent=false` (`S6_COUNTS`, `S6_RUNS`).
+
+## Follow-up: P4
+
+Hardening P4 (2026-11-23, [plans/hardening.md](../plans/hardening.md)), recommendation 5 on the plan side. Measured by [`clones.perf.ts`](../../src/core/design/clones/clones.perf.ts) (`npm run perf`) through the real commands: a counterbored M3 hole as the source of a 10 × 10 Clones grid at a 10 mm pitch on a 6 mm board, once (100 instances, 200 operations) and four times (400 instances in four Clones features – the limit stays 100 per feature – 800 operations), Apply's tool choice, a machine copy. Same M1 Pro under load average 8–25 from parallel agents; lowest of three medians of three runs (generation: one run before, as the S6 table), before → after:
+
+| Measure                                  | 100 instances | 400 instances  |
+| ---------------------------------------- | ------------- | -------------- |
+| `plan.create`                            | 216 → 42 ms   | 3 321 → 164 ms |
+| `planOperationInputs` (every export)     | 225 → 10 ms   | 3 608 → 49 ms  |
+| Generate + export (empty toolpath cache) | 316 → 58 ms   | 5 797 → 183 ms |
+| Export, all toolpaths cached             | 238 → 20 ms   | 3 752 → 83 ms  |
+| Fresh evaluation (unchanged)             | 159 ms        | 800 ms         |
+| Longest clone layer step (unchanged)     | 91–95 ms      | 130–134 ms     |
+
+The program (4 028 / 16 028 lines) and every golden are byte-identical; only the toolpath cache key (`inputHash`, in memory, never stored) has other values.
+
+**Plan side: linear.** The time went into whole-part work repeated per plan operation:
+
+- `planOperationInputs` chained `hashJson` over the whole part for every plan operation (the quadratic S6 named); the part now enters the chain by its hash, taken once. The chain still covers position, the part, the plan operation, its copies, setup and units.
+- The tool checks (`toolFindings`) and hole depths (`holeDepth`) built the part's surface table per plan operation, and `plan.create` resolves every operation's tool through them, export checks every operation twice: `SurfaceTable.of(ops, stock)` builds it once per (operations array, stock), both immutable models.
+- `plan.create`'s tool resolution reloaded the plan (the whole part's parse) per plan operation: it now parses the part once and each copy once (`PlanLoadCache` of `loadPlanDTO`).
+- Generation mapped the whole part (`toGeometryInput`) per plan operation; it is mapped once per (part, stock, 2D port) of the plan.
+- Scans per operation became lookups by id: the plan's design operations, its stale indicators (`planStale`, which every Apply's pending check runs), the program's labels and clone position comments.
+
+**Evaluation: at the boolean floor.** 85 % of a fresh evaluation at 400 instances is the clone layers' subtraction (compose ≈ 9 %, building operations ≈ 2 %, labels and checks ≈ 1.5 %). 100 → 400 instances costs ≈ 5×: each layer costs a part-size term on top of its tools (counterbore layers 43, 57, 72, 86 ms; drill layers 86, 102, 116, 130 ms, the k-th Clones feature's layers ≈ 15 ms × k slower), because a boolean copies and re-indexes the whole part – ≈ 20 % of the 400-instance time. No order with bounded steps avoids it; measured alternatives on the same part, none taken:
+
+- All clone layers unioned first, then one subtraction from the stock: not faster (union of overlapping counterbore and drill layers costs as much as subtracting them) and one 0.7–0.9 s step.
+- Each instance's counterbore and drill unioned first, one layer of 100 holes per feature: 0.90 s against 0.80 s, steps 180–250 ms.
+- Instancing by `transform` (recommendation 4): compose is still ≈ 9 %, and transformed instances keep the source's original id (labels by position) and round differently from built ones, so the part would not stay identical.
+
+The guards (`npm run perf`) allow about twice the after medians: at 100 / 400 instances `plan.create` ≤ 100 / 400 ms, `planOperationInputs` ≤ 25 / 100 ms, generate + export ≤ 150 / 450 ms, cached export ≤ 50 / 250 ms, fresh evaluation ≤ 350 / 1 600 ms, the longest subtraction step ≤ 200 / 280 ms. Raising the Clones limit past 100 is now an evaluation question only (≈ 2 ms per counterbored hole at 400, steps up to ≈ 130 ms); design commands remain linear in the part's operations (P5, [shapes.md](../architecture/shapes.md#design-commands-p5)).
 
 ## Open questions
 

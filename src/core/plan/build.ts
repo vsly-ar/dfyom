@@ -30,7 +30,7 @@ import {
   repairOrder,
   surfaceDirection,
 } from './order'
-import { findPlanOperation, loadPlanDTO } from './plan'
+import { findPlanOperation, loadPlanDTO, type PlanLoadCache } from './plan'
 import {
   lengthDTO,
   type LengthDTO,
@@ -221,8 +221,11 @@ function resolveAndAssign(
   planOperationIds: readonly string[],
   c: BuildContext,
 ): AppResult<void> {
+  // the part is not changed here: parsed once; the copies are reloaded per operation (a tool
+  // assignment adds or prunes them), each parsed once
+  const cache: PlanLoadCache = { snapshots: new Map() }
   for (const id of planOperationIds) {
-    const loaded = loadPlanDTO(plan, c.units, 'plan.toolResolution')
+    const loaded = loadPlanDTO(plan, c.units, 'plan.toolResolution', cache)
     if (loaded.isErr()) return Err(loaded.unwrapErr())
     const ref = findPlanOperation(plan, id, 'plan.toolResolution')
     if (ref.isErr()) continue

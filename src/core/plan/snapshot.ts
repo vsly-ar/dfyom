@@ -139,9 +139,17 @@ export function planStale(
     tool: o?.tool,
     locked: o?.toolLocked === true,
   })
+  // by id, the first of each (a scan per operation was quadratic, hardening P4)
+  const byId = (ops: readonly PartDTO['operations'][number][] = []) => {
+    const m = new Map<string, PartDTO['operations'][number]>()
+    for (const o of ops) if (!m.has(o.id)) m.set(o.id, o)
+    return m
+  }
+  const takenById = byId(plan.design.taken.operations)
+  const nowById = byId(current?.operations)
   for (const op of plan.design.part.operations) {
-    const taken = plan.design.taken.operations.find((o) => o.id === op.id)
-    const now = current?.operations.find((o) => o.id === op.id)
+    const taken = takenById.get(op.id)
+    const now = nowById.get(op.id)
     const s: OperationStale = {
       operationId: op.id,
       changedInDesign:
