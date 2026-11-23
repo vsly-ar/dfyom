@@ -1,7 +1,7 @@
-// Snap engine (task U3): priority, tolerance in screen pixels, grid in inch, shape and stock targets.
+// Snap engine (task U3, in core since hardening A6): priority, tolerance in screen pixels, grid in inch, shape and stock targets.
 // Doc: docs/conventions/ui.md#snap-and-measure
 import { describe, expect, it } from 'vitest'
-import type { Element } from '../../../core/geometry/2d/model'
+import type { Element } from './2d/model'
 import {
   isExactSnap,
   shapePoints,

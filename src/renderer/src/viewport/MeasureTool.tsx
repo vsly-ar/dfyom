@@ -10,14 +10,8 @@ import styles from './SnapGlyph.module.css'
 
 const mm = snapMessages.measure
 
-/** Distance and per-axis components (b − a) of two points of the same dimension. */
-export function measureBetween(
-  a: readonly number[],
-  b: readonly number[],
-): { distance: number; deltas: number[] } {
-  const deltas = a.map((v, i) => (b[i] ?? 0) - v)
-  return { distance: Math.hypot(...deltas), deltas }
-}
+/** Distance and per-axis components (core since hardening A6, shared with `design.measure`). */
+export { measureBetween } from '../../../core/geometry/measure'
 
 /** The dimension line between two screen points: the line, end ticks across it, end circles. */
 export function Dimension2d({

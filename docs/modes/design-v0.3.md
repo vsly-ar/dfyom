@@ -263,7 +263,7 @@ Fixed on the way:
 Not built in v0.3 (later, or by decision):
 
 - A constraint solver and references between shapes (Q22), offset items, mirror items, ellipse and text primitives, a shape library across projects ([Shape definition](#shape-definition)); DXF import (Q25: right after v0.3).
-- Shape Editor handles for rotation, fillets and the polygon corner radius (fields only, [U1](#implementation-u1)); point-to-edge measure and snapping in the 3D viewport beyond the measure tool ([U3](#implementation-u3)); snap and measure have no headless command (an agent reads `design.shape.get`).
+- Shape Editor handles for rotation, fillets and the polygon corner radius (fields only, [U1](#implementation-u1)); point-to-edge measure and snapping in the 3D viewport beyond the measure tool ([U3](#implementation-u3)); snap and measure had no headless command (an agent reads `design.shape.get`); hardening A6 adds `design.measure` for the 3D measure's snap and point measures ([llm-api.md § A6](../architecture/llm-api.md#a6-designmeasure-headless-snap-and-measure)).
 - "Round corners" has no fix for corners made where items meet, and rounds corners one after another (two corners sharing a short side: the first takes what fits, the second the rest); "New shape…" takes two undo steps; a moved tab marker has no live announcement and markers are not locked for positions written as expressions ([plans/v0.3.md § Known issues](../plans/v0.3.md#known-issues-and-risks)).
 
 ## Answered questions
