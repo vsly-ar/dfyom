@@ -65,6 +65,15 @@ interface Job {
   phase: RunPhase
   toolChange?: ToolChangeInfo | undefined
   readonly startedAt: number
+  /** The start's checks passed and the sender streams: a stop goes to the sender. */
+  streaming: boolean
+  /**
+   * A stop (`stop`, disconnect) came while the start's checks ran: the start refuses with
+   * `op.aborted` instead of streaming (docs/modes/run-v0.1.md#review-of-39).
+   */
+  stopRequested: boolean
+  /** Settles when the start has streamed or refused. */
+  readonly checked: Promise<void>
 }
 
 interface Connection {
@@ -312,7 +321,8 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
   /**
    * Starts streaming after re-checking what main checked the program against: the target, the
    * machine copy and the G54 (read again with `$#`), on a status report taken now. The job is
-   * registered first, so no jog or work-zero change slips in between.
+   * registered first, so no jog or work-zero change slips in between; a stop or disconnect during
+   * the checks makes the start refuse with `op.aborted` (the sender never streams).
    */
   async function jobStart(
     jobId: string,
@@ -325,12 +335,38 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     if (c.job !== undefined) return fail('run.busy', `job ${c.job.jobId} is running`, { where })
     const pf = preflight(program.lines, where)
     if (pf.isErr()) return pf
-    const job: Job = { jobId, phase: 'streaming', startedAt: c.clock.now() }
+    let checked: () => void = () => {}
+    const job: Job = {
+      jobId,
+      phase: 'streaming',
+      startedAt: c.clock.now(),
+      streaming: false,
+      stopRequested: false,
+      checked: new Promise<void>((r) => (checked = r)),
+    }
     c.job = job
+    try {
+      return await checkAndStream(c, job, program, expect)
+    } finally {
+      checked()
+    }
+  }
+
+  async function checkAndStream(
+    c: Connection,
+    job: Job,
+    program: { lines: string[]; sections: { fromLine: number; label: string }[] },
+    expect: { workZero: Vec3; machineKey: string; target: 'virtual' },
+  ): Promise<AppResult<void>> {
+    const where = 'machineHost.jobStart'
+    const jobId = job.jobId
     const refuse = (r: AppResult<never>): AppResult<void> => {
       if (c.job === job) c.job = undefined
       status.now()
-      return r
+      // stopped while checking: the stop wins over whatever the checks ran into (a closed sender)
+      return job.stopRequested
+        ? fail('op.aborted', 'the run was stopped before it started', { where })
+        : r
     }
     const mismatch = (rule: string, message: string, data: Record<string, unknown>) =>
       fail('run.state', message, {
@@ -361,6 +397,8 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
       )
     if (c.job !== job || conn !== c)
       return refuse(fail('run.busy', 'the start was overtaken', { where }))
+    if (job.stopRequested) return refuse(fail('op.aborted', 'stopped while starting', { where }))
+    job.streaming = true
     log.info({ jobId, lines: program.lines.length }, 'job started')
     void c.sender
       .run(program, {
@@ -443,7 +481,9 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         return c.sender.continueProgram()
       }
       case 'stop':
-        void c.sender.stop()
+        // during the start's checks the sender has no run yet: the start refuses instead
+        if (!c.job.streaming) c.job.stopRequested = true
+        else void c.sender.stop()
         return Ok(undefined)
     }
   }
@@ -451,7 +491,13 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
   async function disconnect(): Promise<AppResult<void>> {
     const c = conn
     if (c === undefined) return Ok(undefined)
-    if (c.job !== undefined) await c.sender.stop()
+    const job = c.job
+    if (job?.streaming === true) await c.sender.stop()
+    else if (job !== undefined) {
+      // a start still checking: let it refuse (op.aborted) before the sender closes under it
+      job.stopRequested = true
+      await job.checked
+    }
     conn = undefined
     status.cancel()
     progress.cancel()
