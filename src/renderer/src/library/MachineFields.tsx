@@ -2,11 +2,11 @@
 // planning `$11`/`$12`, steps per mm and notes)
 // and the quick "New machine…" dialog (`quick`: the v0.1 fields). GRBL controller and manual tool
 // change are fixed values (library.md#machine). Doc: docs/conventions/ui-library-window.md#layout, L4
-import { RIGIDITY_PRESETS } from '../../../core/library/machine.dto'
+import { HOMING_CORNERS, RIGIDITY_PRESETS } from '../../../core/library/machine.dto'
 import type { QuantityDTO } from '../../../core/quantity/quantity.dto'
 import type { QuantityKind } from '../../../core/quantity/units'
 import { libraryMessages } from '../messages/library'
-import { Field, SegmentedControl, Select, type FieldIconName } from '../ui'
+import { Field, SegmentedControl, Select, Switch, type FieldIconName } from '../ui'
 import { AXES, type Axis, type MachineDraft, type QDto } from './form'
 import { FixedField, Group, NameField, NotesField, QuantityField, type FormProps } from './fields'
 import styles from './LibraryForm.module.css'
@@ -28,6 +28,9 @@ export const MACHINE_FIELDS: readonly string[] = [
   'spindle.minSpeed',
   'spindle.power',
   'rigidity',
+  'homingCorner',
+  'pullOff',
+  'softLimits',
   'travel',
   'maxFeedRate',
   'acceleration',
@@ -136,6 +139,37 @@ export function MachineFields({
       />
       <Group title={m.travel}>{axes('travel', 'length', m.travelAxis)}</Group>
       <Group title={m.maxFeed}>{axes('maxFeedRate', 'feedRate', m.maxFeedAxis)}</Group>
+      {full ? (
+        <Group title={m.homing}>
+          <Field
+            label={m.homingCorner}
+            messages={[
+              ...messages('homingCorner'),
+              { id: 'homingCornerNote', severity: 'note', text: m.homingCornerNote },
+            ]}
+          >
+            <Select
+              options={HOMING_CORNERS.map((c) => ({ value: c, label: m.homingCorners[c] }))}
+              value={values.homingCorner ?? 'backRight'}
+              onValueChange={(homingCorner) => set({ homingCorner })}
+            />
+          </Field>
+          {q(
+            'pullOff',
+            m.pullOff,
+            'length',
+            values.pullOff,
+            'depth',
+            (pullOff) => set({ pullOff }),
+            { optional: true, note: m.pullOffNote },
+          )}
+          <Switch
+            label={m.softLimits}
+            checked={values.softLimits ?? true}
+            onCheckedChange={(softLimits) => set({ softLimits })}
+          />
+        </Group>
+      ) : null}
       {full
         ? scalarAxes('acceleration', m.acceleration, m.accelerationAxis, m.accelerationNote)
         : null}

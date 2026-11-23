@@ -18,6 +18,7 @@ import {
 } from './gcode'
 import { Planner, type Vec3 } from './planner'
 import { holdProfile, sampleProfile, trapezoid, type Profile } from './profile'
+import { homedPosition, homesNegative, switchAt, travelViolation } from '../envelope'
 import { Settings, type SettingValues } from './settings'
 import { emptyTrace, type MutableTrace, type Trace, type ViolationKind } from './trace'
 
@@ -42,6 +43,11 @@ export interface EmulatorOptions {
   readonly settings?: SettingValues
   /** Record the trace (default true). */
   readonly trace?: boolean
+  /**
+   * MPos at power-up (default 0,0,0): the virtual machine's physical position in the homed frame
+   * (docs/architecture/grbl.md#homing-and-machine-coordinates). The app passes the travel centre.
+   */
+  readonly position?: Vec3
 }
 
 export interface EmulatorStatus {
@@ -75,6 +81,16 @@ interface Exec {
 }
 
 const zero: Vec3 = [0, 0, 0]
+
+/** One move of the homing cycle: each axis from → to at its own duration (ms), together. */
+interface HomingMove {
+  readonly from: Vec3
+  readonly to: Vec3
+  /** Per axis, ms (0 for an axis that does not move). */
+  readonly ms: Vec3
+  readonly startsAt: number
+  readonly endsAt: number
+}
 
 function current(steps: readonly Step[], line: number): Current {
   let lastMove = -1
@@ -123,6 +139,8 @@ export class GrblEmulator {
   private dwellEndsAt: number | undefined
   private dwellRemaining: number | undefined
   private homingEndsAt: number | undefined
+  /** The homing cycle's moves while homing (`$H`), for the position in `Home` reports. */
+  private homingPath: readonly HomingMove[] | undefined
   private restoreEndsAt: number | undefined
   /** Door pin open (test hook); `0x84` alone has no pin, so the door counts as closed. */
   private doorAjar = false
@@ -142,6 +160,7 @@ export class GrblEmulator {
   private constructor(
     private readonly settings: Settings,
     private readonly tracing: boolean,
+    position: Vec3,
   ) {
     const s = settings
     this.planner = new Planner({
@@ -155,7 +174,8 @@ export class GrblEmulator {
         return s.get(11)
       },
     })
-    this.parser = initialParserState(zero, zero)
+    this.mpos = position
+    this.parser = initialParserState(position, zero)
     this.state = s.get(22) ? 'Alarm' : 'Idle'
     this.banner()
     this.noteState()
@@ -163,7 +183,7 @@ export class GrblEmulator {
 
   static create(options: EmulatorOptions = {}): AppResult<GrblEmulator> {
     return Settings.create(options.settings ?? {}, options.homing ?? true).andThen((s) =>
-      Ok(new GrblEmulator(s, options.trace ?? true)),
+      Ok(new GrblEmulator(s, options.trace ?? true, options.position ?? zero)),
     )
   }
 
@@ -418,6 +438,7 @@ export class GrblEmulator {
   // ── Motion ──────────────────────────────────────────────────────────────────────────────
 
   private position(): Vec3 {
+    if (this.homingPath !== undefined) return this.homingPosition(this.homingPath)
     const b = this.planner.blocks[0]
     if (!this.exec || !b) return this.mpos
     const { s } = sampleProfile(this.exec.profile, (this.now - this.exec.startedAt) / 1000)
@@ -529,8 +550,7 @@ export class GrblEmulator {
 
   private outsideSoftLimits(t: Vec3): boolean {
     if (!this.settings.get(20)) return false
-    const travel = [this.settings.get(130), this.settings.get(131), this.settings.get(132)]
-    return t.some((v, i) => v > 1e-6 || v < -(travel[i] ?? 0) - 1e-6)
+    return travelViolation(this.travel(), t) !== undefined
   }
 
   private softLimit(): void {
@@ -569,8 +589,12 @@ export class GrblEmulator {
     }
     if (this.homingEndsAt !== undefined && this.homingEndsAt <= t) {
       this.homingEndsAt = undefined
-      const pulloff = -this.settings.get(27)
-      this.mpos = [pulloff, pulloff, pulloff]
+      this.homingPath = undefined
+      this.mpos = homedPosition({
+        travel: this.travel(),
+        homingMask: this.settings.get(23),
+        pullOff: this.settings.get(27),
+      })
       this.parser = { ...this.parser, position: this.mpos }
       this.state = 'Idle'
       this.sample()
@@ -765,6 +789,7 @@ export class GrblEmulator {
     this.lineRawLength = 0
     this.lineComment = this.lineSemicolon = this.lineOverflow = false
     this.dwellEndsAt = this.dwellRemaining = this.homingEndsAt = this.restoreEndsAt = undefined
+    this.homingPath = undefined
     this.doorAfterJog = false
     this.spindle = { dir: 'off', rpm: 0 }
     this.spindleSuspended = this.spindleStopOverride = false
@@ -864,16 +889,58 @@ export class GrblEmulator {
     this.current = current([{ kind: 'jog', target: jog.target, feed: jog.feed }], line)
   }
 
-  /** `$H`: Z cycle, then XY, each seeking at `$25` plus locate and pull-off at `$24`/`$27`. */
+  /**
+   * `$H` as GRBL limits_go_home(): a Z cycle, then X and Y together; each approaches its switch at
+   * `$25`, pulls off `$27` at `$25`, locates at `$24` and pulls off again at `$25`
+   * (docs/architecture/grbl.md#homing-and-machine-coordinates).
+   */
   private home(line: number): void {
-    const p = this.position()
-    const seek = this.settings.get(25)
-    const locate = (2 * this.settings.get(27)) / Math.max(this.settings.get(24), 1e-6)
-    const minutes =
-      Math.abs(p[2]) / seek + locate + Math.max(Math.abs(p[0]), Math.abs(p[1])) / seek + locate
+    const e = { travel: this.travel(), homingMask: this.settings.get(23) }
+    const pull = this.settings.get(27)
+    const seek = Math.max(this.settings.get(25), 1e-6)
+    const feed = Math.max(this.settings.get(24), 1e-6)
+    const moves: HomingMove[] = []
+    let at = this.position()
+    let t = this.now
+    const move = (axes: readonly number[], target: (i: number) => number, rate: number) => {
+      const to = [...at] as [number, number, number]
+      const ms: [number, number, number] = [0, 0, 0]
+      for (const i of axes) {
+        to[i] = target(i)
+        ms[i] = (Math.abs(to[i] - at[i]!) / rate) * 60_000
+      }
+      const d = Math.max(...ms)
+      moves.push({ from: at, to, ms, startsAt: t, endsAt: t + d })
+      at = to
+      t += d
+    }
+    const off = (i: number) => switchAt(e, i) + (homesNegative(e.homingMask, i) ? pull : -pull)
+    for (const axes of [[2], [0, 1]]) {
+      move(axes, (i) => switchAt(e, i), seek)
+      move(axes, off, seek)
+      move(axes, (i) => switchAt(e, i), feed)
+      move(axes, off, seek)
+    }
     this.state = 'Home'
-    this.homingEndsAt = this.now + minutes * 60_000
+    this.homingPath = moves
+    this.homingEndsAt = t
     this.current = current([], line)
+  }
+
+  private homingPosition(path: readonly HomingMove[]): Vec3 {
+    const m = path.find((x) => this.now < x.endsAt) ?? path[path.length - 1]
+    if (m === undefined) return this.mpos
+    const dt = Math.max(0, this.now - m.startsAt)
+    const axis = (i: number) => {
+      const ms = m.ms[i]!
+      const f = ms <= 0 ? 1 : Math.min(1, dt / ms)
+      return m.from[i]! + (m.to[i]! - m.from[i]!) * f
+    }
+    return [axis(0), axis(1), axis(2)]
+  }
+
+  private travel(): Vec3 {
+    return [this.settings.get(130), this.settings.get(131), this.settings.get(132)]
   }
 
   // ── Reports ─────────────────────────────────────────────────────────────────────────────

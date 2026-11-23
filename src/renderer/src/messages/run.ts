@@ -56,12 +56,23 @@ export const runMessages = {
     title: 'Run',
     plan: 'Plan',
     planPlaceholder: 'Choose a plan',
+    noPlan: 'No plan (manual control)',
+    machine: 'Machine',
+    machinePlaceholder: 'Choose a library machine',
+    noMachines: 'No machine in the library yet. Add one in the Library window.',
+    status: 'Status',
+    ready: 'Ready to jog.',
+    readyNoPlan: 'Ready to jog (manual control).',
+    workZeroAtHome:
+      'The work zero is at machine 0, the home corner: jog to the stock’s zero corner and set it.',
     setup: 'Setup',
     setupHint: 'One program per setup, run in this order.',
     connection: 'Connection',
     timeScale: 'Time scale',
     connect: 'Connect to virtual machine',
     connectHint: 'Simulates the plan’s machine: GRBL 1.1 on a virtual machine. No hardware moves.',
+    connectHintNoPlan:
+      'Simulates the chosen library machine: GRBL 1.1 on a virtual machine. No hardware moves.',
     disconnect: 'Disconnect',
     homing: 'Homing',
     home: 'Home',
@@ -86,8 +97,14 @@ export const runMessages = {
     running: 'Not while a run is going.',
     criticalAlarm: 'Reset the machine first (Reset (immediate)), then home it.',
     noPlan: 'Choose a plan first.',
+    nothingToStop: 'Nothing to stop: the machine is not moving.',
     otherPlan: 'The connection emulates another plan’s machine. Disconnect to switch plans.',
   },
+
+  /** A jog refused for leaving the travel (`run.travel`, docs/modes/run.md DF33), in the project's unit. */
+  travel: (axis: string, side: 'max' | 'min', limit: string, target: string, unit: string) =>
+    `${axis} would leave the travel: ${side} ${limit} ${unit}, the jog would end at ${target} ${unit}.`,
+  travelUnknown: 'The jog would leave the machine travel (soft limits).',
 
   unlockConfirm: {
     title: 'Unlock without homing?',

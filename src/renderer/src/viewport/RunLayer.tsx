@@ -29,6 +29,31 @@ export interface RunScene {
    * the layer is drawn through it, so a bottom or side setup lands on the part. Absent = identity.
    */
   readonly frame?: Placement
+  /**
+   * The machine travel in work coordinates (`[−travel, 0] − G54`, DF33) with the home position,
+   * drawn as a box outline and a ring; absent without a connection or a reported envelope.
+   */
+  readonly envelope?: RunEnvelope | undefined
+}
+
+/** The travel box and home position in work coordinates (mm). */
+export interface RunEnvelope {
+  readonly min: readonly [number, number, number]
+  readonly max: readonly [number, number, number]
+  readonly home: readonly [number, number, number]
+}
+
+/** The 12 edges of the box as line-segment vertices (24 × xyz). Pure. */
+export function boxEdges(min: readonly number[], max: readonly number[]): Float32Array {
+  const c = (i: number) => [
+    i & 1 ? max[0]! : min[0]!,
+    i & 2 ? max[1]! : min[1]!,
+    i & 4 ? max[2]! : min[2]!,
+  ]
+  const out: number[] = []
+  for (let i = 0; i < 8; i++)
+    for (const bit of [1, 2, 4]) if ((i & bit) === 0) out.push(...c(i), ...c(i | bit))
+  return Float32Array.from(out)
 }
 
 /** The placement as a three.js matrix (columns u, v, n, origin). */
@@ -93,7 +118,7 @@ export function segmentColours(
 
 export function RunLayer({ run, palette }: { run: RunScene; palette: Palette }): React.JSX.Element {
   const invalidate = useThree((s) => s.invalidate)
-  const { lines, done, tool, frame, outdated } = run
+  const { lines, done, tool, frame, outdated, envelope } = run
   const matrix = useMemo(() => (frame === undefined ? undefined : frameMatrix(frame)), [frame])
   const geometry = useMemo(() => {
     if (lines === null || lines.segments === 0) return null
@@ -112,6 +137,14 @@ export function RunLayer({ run, palette }: { run: RunScene; palette: Palette }):
     invalidate()
   }, [geometry, lines, done, outdated, palette, invalidate])
   useEffect(() => invalidate(), [tool, invalidate])
+  const travel = useMemo(() => {
+    if (envelope === undefined) return null
+    const g = new BufferGeometry()
+    g.setAttribute('position', new BufferAttribute(boxEdges(envelope.min, envelope.max), 3))
+    return g
+  }, [envelope])
+  useEffect(() => () => travel?.dispose(), [travel])
+  const travelColour = useMemo(() => colour(palette.gridMajor), [palette])
 
   const toolColour = useMemo(() => colour(palette.tool), [palette])
   return (
@@ -120,6 +153,21 @@ export function RunLayer({ run, palette }: { run: RunScene; palette: Palette }):
         <lineSegments geometry={geometry} raycast={noRaycast} renderOrder={2}>
           <lineBasicMaterial vertexColors />
         </lineSegments>
+      ) : null}
+      {travel && envelope ? (
+        // machine travel (box outline) and the home position (a small ring), DF33
+        <group raycast={noRaycast}>
+          <lineSegments geometry={travel} raycast={noRaycast}>
+            <lineBasicMaterial color={travelColour} />
+          </lineSegments>
+          <mesh
+            position={[envelope.home[0], envelope.home[1], envelope.home[2]]}
+            raycast={noRaycast}
+          >
+            <ringGeometry args={[4, 5, 32]} />
+            <meshBasicMaterial color={travelColour} />
+          </mesh>
+        </group>
       ) : null}
       {/* work zero: a ring with a dot at the WCS origin */}
       <group raycast={noRaycast}>

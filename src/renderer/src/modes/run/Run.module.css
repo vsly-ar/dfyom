@@ -93,6 +93,8 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-chrome);
+  /* reserved for two lines, so a reason appearing never moves the controls below (DF34) */
+  min-height: calc(2 * var(--lh-sm) + var(--space-1) + 2 * var(--space-2) + 2px);
 }
 
 .notice > svg {

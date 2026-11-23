@@ -373,6 +373,73 @@ describe('Run mode', () => {
     expect(t.callsOf('run.job.start').at(-1)).toEqual({ planId: t.plan().id, setupId: top!.id })
   })
 
+  it('without a plan: connects with a library machine; homing, jog and zero work (DF31)', async () => {
+    const t = await renderRun()
+    // by keyboard: open the plan list, up to the first option (manual control), choose it
+    within(t.nav()).getByRole('combobox', { name: 'Plan' }).focus()
+    await t.user.keyboard('{Enter}')
+    await screen.findByRole('option', { name: 'No plan (manual control)' })
+    await t.user.keyboard('{ArrowUp}{Enter}')
+    const machine = await screen.findByRole('combobox', { name: 'Machine' })
+    await waitFor(() => expect(machine).toHaveTextContent(/.+/))
+    await connectAndHome(t)
+    expect(t.callsOf('run.connection.open')).toEqual([
+      { target: 'virtual', machineId: expect.any(String), timeScale: 1 },
+    ])
+    expect(within(t.nav()).getByRole('combobox', { name: 'Plan' })).toBeDisabled()
+    await t.user.click(within(t.nav()).getByRole('button', { name: 'Jog X+' }))
+    await t.user.click(within(t.nav()).getByRole('button', { name: 'Jog X+' }))
+    expect(t.callsOf('run.machine.jog')).toHaveLength(2)
+    await t.user.click(within(t.nav()).getByRole('button', { name: 'Zero X Y Z' }))
+    expect(t.callsOf('run.workZero.set')).toEqual([{ axes: ['x', 'y', 'z'] }])
+    await expectNoAxeViolations()
+  })
+
+  it('a travel refusal is worded at the end of the panel; the notice keeps its place (DF33, DF34)', async () => {
+    const t = await renderRun()
+    await connectAndHome(t)
+    const notice = within(t.nav()).getByRole('status', { name: 'Status' })
+    expect(notice).toHaveTextContent('Ready to jog.')
+    expect(within(t.nav()).getByText(/The work zero is at machine 0/)).toBeInTheDocument()
+    t.bridge.handle('run.machine.jog', () => ({
+      ok: false,
+      retryable: false,
+      error: {
+        code: 'run.travel',
+        message: 'X would leave the travel: max 0 mm, the jog would end at 1 mm',
+        issues: [],
+        frames: [{ where: 'machineHost.jog', data: { axis: 'x', target: 1, min: -800, max: 0 } }],
+      },
+    }))
+    await t.user.click(within(t.nav()).getByRole('button', { name: 'Jog X+' }))
+    const alert = await within(t.nav()).findByText(
+      'X would leave the travel: max 0.000 mm, the jog would end at 1.000 mm.',
+    )
+    // after every control: nothing above it moved
+    const panelChildren = [...t.nav().querySelectorAll('section, [role="status"]')]
+    for (const el of panelChildren)
+      expect(el.compareDocumentPosition(alert) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(within(t.nav()).getByRole('status', { name: 'Status' })).toBe(notice)
+    await expectNoAxeViolations()
+  })
+
+  it('Stop is disabled with its reason when nothing moves, enabled while jogging (DF35)', async () => {
+    const t = await renderRun()
+    await connectAndHome(t)
+    const stop = within(machineGroup()!).getByRole('button', { name: 'Stop' })
+    expect(stop).toHaveAttribute('aria-disabled', 'true')
+    expect(stop).toHaveAccessibleDescription('Nothing to stop: the machine is not moving.')
+    await t.user.click(stop)
+    expect(t.callsOf('run.machine.reset')).toHaveLength(0)
+    t.machine.push({ state: 'Jog' })
+    await waitFor(() =>
+      expect(within(machineGroup()!).getByRole('button', { name: 'Stop' })).not.toHaveAttribute(
+        'aria-disabled',
+      ),
+    )
+    await expectNoAxeViolations()
+  })
+
   it('stop without a run cancels a jog', async () => {
     const t = await renderRun()
     await connectAndHome(t)

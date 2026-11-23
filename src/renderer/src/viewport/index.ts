@@ -13,7 +13,7 @@ export { useToken, useTokens } from './useTokens'
 export type { AnchorOverlay, FrameOverlay } from './Overlays'
 export type { TabDragPhase, TabMarkerView, TabOverlay } from './TabMarkers'
 export type { ReferenceGhostView } from './ReferenceGhost'
-export { RunLayer, segmentColours, type RunScene } from './RunLayer'
+export { RunLayer, boxEdges, segmentColours, type RunEnvelope, type RunScene } from './RunLayer'
 export {
   advancePlayback,
   linesBounds,

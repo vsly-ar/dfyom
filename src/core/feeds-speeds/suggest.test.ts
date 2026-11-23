@@ -176,6 +176,7 @@ describe('suggestCutting: rigidity scaling', () => {
       ['extrusion', 100, 0.02, 0.9],
       ['hobby', 150, 0.03, 1.5],
       ['prosumer', 200, 0.04, 2.25],
+      ['fixedGantry', 220, 0.044, 2.55],
       ['benchMill', 250, 0.05, 2.7],
       ['rigidMill', 300, 0.06, 3],
     ]

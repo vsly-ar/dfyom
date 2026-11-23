@@ -1,17 +1,23 @@
 // The run Stop: the one StopControl wired to the run store's stop (job.abort with a run job; jog
-// cancel or homing reset without one). The machine toolbar and every run dialog render this, so
+// cancel or reset without one; disabled with its reason when nothing can be stopped, DF35). The machine toolbar and every run dialog render this, so
 // keyboard and screen-reader users reach Stop without closing a modal first; the stop logic lives
 // only in run-store.ts. Doc: docs/conventions/ui.md#run-mode-safety-ui
 import type { ReactNode } from 'react'
 import { runMessages } from '../../messages/run'
 import { StopControl } from '../../ui'
-import { useRunStore } from './run-store'
+import { stopGate } from './machine-state'
+import { useRun, useRunStore } from './run-store'
 import styles from './Run.module.css'
 
 export function RunStop(): React.JSX.Element {
   const store = useRunStore()
+  const gate = useRun((s) => stopGate(s.status))
   return (
-    <StopControl label={runMessages.controls.stop} onStop={() => void store.getState().stop()} />
+    <StopControl
+      label={runMessages.controls.stop}
+      disabledReason={gate}
+      onStop={() => void store.getState().stop()}
+    />
   )
 }
 

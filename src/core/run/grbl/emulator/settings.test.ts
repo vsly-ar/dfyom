@@ -26,6 +26,8 @@ describe('settings', () => {
       132: 100,
       30: 24000,
       31: 8000,
+      23: 0,
+      27: 1,
     })
     const emu = expectOk(GrblEmulator.create({ settings: machineSettings(m) }))
     emu.receive(Uint8Array.from('$$\n', (c) => c.charCodeAt(0)))
@@ -34,6 +36,22 @@ describe('settings', () => {
     expect(out).toContain('$20=1\r\n')
     expect(out).toContain('$132=100.000\r\n')
     expect(out).toContain('$31=8000\r\n')
+  })
+
+  it('takes the homing corner ($23), pull-off ($27) and soft limits off ($20=0)', () => {
+    const corners = [
+      ['backRight', 0],
+      ['backLeft', 1],
+      ['frontRight', 2],
+      ['frontLeft', 3],
+    ] as const
+    for (const [homingCorner, mask] of corners) {
+      const m = expectOk(Machine.fromDTO({ ...machineValues(), homingCorner, pullOff: len('2') }))
+      expect(machineSettings(m)).toMatchObject({ 23: mask, 27: 2 })
+      expect(machineSettings(m)[20]).toBeUndefined()
+    }
+    const off = expectOk(Machine.fromDTO({ ...machineValues(), softLimits: false }))
+    expect(machineSettings(off)[20]).toBe(0)
   })
 
   it('takes junction deviation, arc tolerance and steps/mm when the machine sets them', () => {

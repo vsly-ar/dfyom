@@ -4,7 +4,7 @@
 // docs/glossary.md. Doc: docs/conventions/ui-library-window.md, docs/conventions/ui.md#plan-mode-task-37,
 // #internationalization
 import type { LibraryItemKind, MaterialClass } from '../../../core/library/item'
-import type { Rigidity } from '../../../core/library/machine.dto'
+import type { HomingCorner, Rigidity } from '../../../core/library/machine.dto'
 import type { ToolMaterial, ToolType } from '../../../core/library/tool.dto'
 
 const classes = {
@@ -309,11 +309,24 @@ export const libraryMessages = {
     power: 'Spindle power',
     minSpeedNote: 'Optional: flags speeds below the spindle’s range.',
     powerNote: 'Optional: enables the feeds-and-speeds power check.',
+    homing: 'Homing',
+    homingCorner: 'Homing corner',
+    homingCornerNote: 'Where X and Y home ($23); Z always homes up.',
+    homingCorners: {
+      backRight: 'Back right (GRBL default)',
+      backLeft: 'Back left',
+      frontRight: 'Front right',
+      frontLeft: 'Front left',
+    } satisfies Record<HomingCorner, string>,
+    pullOff: 'Pull-off',
+    pullOffNote: 'Optional ($27): unset = 1 mm.',
+    softLimits: 'Soft limits ($20)',
     rigidity: 'Rigidity',
     rigidities: {
       extrusion: 'Aluminium extrusion',
       hobby: 'Hobby router',
       prosumer: 'Prosumer router',
+      fixedGantry: 'Fixed gantry, solid frame',
       benchMill: 'Bench mill',
       rigidMill: 'Rigid mill',
     } satisfies Record<Rigidity, string>,

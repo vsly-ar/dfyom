@@ -12,6 +12,7 @@ import { planSetup, type PlanSetup } from '../plan/plan.fixture'
 import { createToolpathCache } from '../toolpath/cache'
 import { systemTimerHost } from './clock'
 import { checkNoRunJob } from './commands'
+import { machineKeyOf } from './machine-key'
 import { MachineClient } from './host/client'
 import { inProcessHostFactory } from './host/in-process'
 import type { RunStatus } from './service'
@@ -201,6 +202,54 @@ describe('run commands', { timeout: 60_000 }, () => {
     expect(second.setupId).toBe(top!.id)
     expect(second.next).toBeUndefined()
     expect(second.lines).toBeGreaterThan(first.lines)
+  })
+
+  it('connects without a plan (library machine): home, jog, travel refusal in words, zero (DF31, DF33)', async () => {
+    const t = await setup()
+    expectErrCode(
+      await t.run('run.connection.open', { target: 'virtual', timeScale: 'max' }),
+      'input.malformed',
+    )
+    expectErrCode(
+      await t.run('run.connection.open', {
+        target: 'virtual',
+        machineId: 'machine-missing',
+        timeScale: 'max',
+      }),
+      'input.malformed',
+    )
+    expectOk(
+      await t.run('run.connection.open', {
+        target: 'virtual',
+        machineId: t.s.machineId,
+        timeScale: 'max',
+      }),
+    )
+    // the same identity as the plan's unchanged copy of that machine: its runs are allowed
+    expect(t.client.machineKey).toBe(expectOk(machineKeyOf(t.s.d.doc, t.planId, 'test')))
+    // powers up at the centre of the travel, reports the envelope from $$
+    const travel = t.status().envelope?.travel
+    expect(t.status().envelope).toMatchObject({ homingMask: 0, pullOff: 1, softLimits: true })
+    expect(t.status().mpos).toEqual([-travel![0] / 2, -travel![1] / 2, -travel![2] / 2])
+    expectOk(await (await t.job('run.machine.home', {})).result)
+    expect(t.status().mpos).toEqual([-1, -1, -1])
+    expectOk(await t.run('run.machine.jog', { by: [1, 0, 0], feed: 2000 }))
+    const refused = expectErrCode(
+      await t.run('run.machine.jog', { by: [1, 0, 0], feed: 2000 }),
+      'run.travel',
+    )
+    expect(refused.message).toContain('X would leave the travel: max 0 mm')
+    expect(refused.toJSON().frames[0]?.data).toMatchObject({ axis: 'x', target: 1, max: 0 })
+    expect(await waitFor(() => t.status().state === 'Idle' && t.status().mpos[0] === 0)).toBe(true)
+    expectOk(await t.run('run.machine.jog', { by: [-50, -20, -10], feed: 5000 }))
+    expect(await waitFor(() => t.status().state === 'Idle' && t.status().mpos[0] === -50)).toBe(
+      true,
+    )
+    const zero = expectOk(await t.run('run.workZero.set', { axes: ['x', 'y', 'z'] })) as {
+      workZero: number[]
+    }
+    expect(zero.workZero).toEqual([-50, -21, -11])
+    expect(t.status().wpos).toEqual([0, 0, 0])
   })
 
   it('refuses a start that is not homed, a soft-limit violation and another machine copy', async () => {

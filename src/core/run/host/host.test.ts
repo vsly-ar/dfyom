@@ -217,6 +217,42 @@ describe('machine host', () => {
     await h.pump(() => lastStatus(h)?.wpos[2] === 5)
   })
 
+  it('machine frame: envelope, power-up position, queued jogs checked against the travel (DF33, DF34)', async () => {
+    const h = harness()
+    await connectedHost(h, {
+      settings: { ...SETTINGS, '20': 1, '23': 2, '27': 2 },
+      position: [-500, -500, -500],
+      timeScale: 1,
+    })
+    expect(lastStatus(h)).toMatchObject({
+      mpos: [-500, -500, -500],
+      envelope: { travel: [1000, 1000, 1000], homingMask: 2, pullOff: 2, softLimits: true },
+    })
+    expectOk(await h.request({ type: 'machine', action: { kind: 'home' } }))
+    // front homing on Y: −travel + pull-off; X and Z: −pull-off
+    expect(lastStatus(h)).toMatchObject({ state: 'Idle', mpos: [-2, -998, -2] })
+    // three +X 0.8 mm steps sent at once: each checked from where the queued ones end
+    const step = { type: 'machine', action: { kind: 'jog', by: [0.8, 0, 0], feed: 100 } }
+    expectOk(await h.request(step))
+    expectOk(await h.request(step))
+    const refused = expectErrCode(await h.request(step), 'run.travel')
+    expect(refused.message).toBe('X would leave the travel: max 0 mm, the jog would end at 0.4 mm')
+    expect(refused.toJSON().frames[0]?.data).toMatchObject({
+      axis: 'x',
+      target: expect.closeTo(0.4, 6),
+      min: -1000,
+      max: 0,
+    })
+    await h.pump(() => lastStatus(h)?.state === 'Idle')
+    expect(lastStatus(h)?.mpos[0]).toBeCloseTo(-0.4, 6)
+    // the other end, in words too
+    const low = expectErrCode(
+      await h.request({ type: 'machine', action: { kind: 'jog', by: [0, -3, 0], feed: 100 } }),
+      'run.travel',
+    )
+    expect(low.message).toContain('Y would leave the travel: min -1000 mm')
+  })
+
   it('prepare: homes at max speed and places G54', async () => {
     const h = harness()
     const info = await connectedHost(h, { timeScale: 1, prepare: { workZero: [-400, -400, -20] } })

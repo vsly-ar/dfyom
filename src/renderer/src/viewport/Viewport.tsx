@@ -284,16 +284,22 @@ export function Viewport({
   )
   const runLines = run?.lines ?? null
   const runFrame = run?.frame
+  const runEnvelope = run?.envelope
   const bounds = useMemo(
     () =>
       (ghosts ?? []).reduce<Box | undefined>(
         (b, g) => unionBox(b, g.box),
         unionBox(
           unionBox(mesh ? meshBounds(mesh) : undefined, stock ?? undefined),
-          runLines ? placeBox(linesBounds(runLines), runFrame) : undefined,
+          unionBox(
+            runLines ? placeBox(linesBounds(runLines), runFrame) : undefined,
+            runEnvelope
+              ? placeBox({ min: [...runEnvelope.min], max: [...runEnvelope.max] }, runFrame)
+              : undefined,
+          ),
         ),
       ),
-    [mesh, stock, runLines, runFrame, ghosts],
+    [mesh, stock, runLines, runFrame, runEnvelope, ghosts],
   )
 
   // pick mode: a normal glyph on every eligible face (ui.md#design-and-plan-controls-v02)

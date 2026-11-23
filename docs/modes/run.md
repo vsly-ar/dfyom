@@ -23,6 +23,46 @@ The v0.1 subset (streaming to the virtual machine, utility process, run commands
 
 Automations can be scripts (JS/TS/Python/Lua) authored by users or LLMs, and/or an active LLM session watching the run via hooks and periodic checks. → [architecture/llm-api.md](../architecture/llm-api.md)
 
+## Machine frame and manual control (hardening DF31–DF35)
+
+Status: implemented (hardening, dogfood batch 1: DF31–DF35) · Spec of the v0.1 flow: [run-v0.1.md](run-v0.1.md) · GRBL facts and the virtual machine: [grbl.md](../architecture/grbl.md#homing-and-machine-coordinates) · Machine fields: [library.md](../architecture/library.md#machine) · UI: [ui.md](../conventions/ui.md#run-mode-safety-ui)
+
+Manual control (position read-out, homing, jog, work zero) must work before and without a plan, and the 3D view must show where the spindle, the travel and the stock really are.
+
+### Connect without a plan (DF31)
+
+- `run.connection.open` takes **either** `planId` (the plan's machine copy, as in v0.1) **or** `machineId` (a library machine), exactly one (`input.malformed`, rule `oneOf`). The machine key of a library machine is the hash of its values, the same hash a plan's unchanged snapshot of it has ([run-v0.1.md decision 6](run-v0.1.md#decisions)), so a plan whose machine copy equals the connected library machine can be run on that connection; any other plan fails with `machineMismatch` as before.
+- **Navigator:** the plan list has "No plan (manual control)" first; the first runnable plan stays the default when one exists. With no plan, a "Machine" select lists the library machines and "Connect to virtual machine" uses it. Home, unlock, jog, work zero, Stop, Reset and the DRO work without a plan; only "Start run" needs one ("Choose a plan first.").
+
+### Machine coordinates and the homing corner (DF33)
+
+GRBL 1.1 without `HOMING_FORCE_SET_ORIGIN` (the default build) always puts the travel in **negative space**: machine coordinates span `[−travel, 0]` on every axis, whatever the homing direction ([grbl.md](../architecture/grbl.md#homing-and-machine-coordinates)). Where the machine homes only decides the machine position after `$H`:
+
+| Axis homes towards      | `$23` bit | Switch at MPos | MPos after `$H`    |
+| ----------------------- | --------- | -------------- | ------------------ |
+| + (right, back, top)    | clear     | 0              | −pull-off (`$27`)  |
+| − (left, front, bottom) | set       | −travel        | −travel + pull-off |
+
+- The machine profile names the **homing corner** in XY (`backRight` = GRBL's default `$23=0`, `backLeft`, `frontRight`, `frontLeft`; Z always homes up), the **pull-off** (`$27`) and **soft limits** (`$20`), next to the travel (`$130–$132`) it already had ([library.md](../architecture/library.md#machine)). They configure the virtual machine; for a real controller they must match its `$$` (checked on connect with the real-machine lane, [hardening M1](../plans/hardening.md#5-real-machine)).
+- Example (the dogfood machine, top-right homing, i.e. `backRight`, pull-off 1 mm): after homing the DRO reads −1/−1/−1. +X can move 1 mm (to 0); a further +X jog would leave the travel. That is correct; what was wrong was the view and the message.
+- **Soft-limit refusals in words:** before sending a jog, the host computes its target (relative jogs from the last report, or from the end of the jogs it already queued while jogging) and, with soft limits on, refuses one outside `[−travel, 0]` with `run.travel` (`data: { axis, target, min, max }`), e.g. "X would leave the travel: max 0 mm, the jog would end at 1 mm." If GRBL still answers `error:15` (the estimate can lag a queued jog), the reply becomes the same `run.travel`. The navigator words it with the project's units.
+- **3D view:** the run scene draws the **machine travel** (the work envelope `[−travel, 0]`, as a box outline) and the home position (a marker at the homing corner), placed through the work zero: in work coordinates the travel is `[−travel, 0] − G54`, so the travel, the stock at its work zero and the spindle at `wpos` are consistent with machine coordinates. A stock outside the travel shows where it is; with G54 still at 0 (never set) the Work zero section's G54 line adds "The work zero is at machine 0, the home corner: jog to the stock's zero corner and set it." The travel box widens the framing bounds.
+- The travel, homing mask, pull-off and soft-limit flag come from the controller's `$$` at connect (`RunStatus.envelope`), never from the plan, so the view shows what the controller enforces.
+
+### Homing on the virtual machine moves (DF32)
+
+The virtual machine plays GRBL's homing cycle in time (Z, then X and Y together; seek, pull-off, locate, pull-off at `$25`/`$24`) and reports the moving position in `Home` state, so the tool marker travels to the home corner. It powers up at the centre of its travel (the app passes the start position; real GRBL reports 0,0,0 until homed, and the position is unknown either way). Details and the deviation from GRBL (which sends no status reports during homing) in [grbl.md](../architecture/grbl.md#homing-and-machine-coordinates).
+
+### Messages never move controls; repeated jog clicks (DF34)
+
+- The navigator's notice of why controls are disabled sits between the connection and homing sections in a **reserved status line** (two lines high, always present, `role="status"`; with nothing disabled it says "Ready to jog." — short texts only, so it never grows), so a reason appearing while the machine jogs or homes never shifts the jog pad.
+- A refused action (`ErrorMessage`) shows **at the end of the navigator**, below the work-zero section, never above the controls.
+- **Repeated step jogs queue:** jog stays enabled while jogging (GRBL plans `$J=` lines behind each other); every click sends one `$J=G91 …` that GRBL appends; a click whose target leaves the travel is refused in words (above) and the earlier jogs continue. "Stop jog" (`0x85`) cancels them all. There is no continuous (hold-to-jog) mode yet ([hardening M3](../plans/hardening.md#5-real-machine)).
+
+### Stop only when something can be stopped (DF35)
+
+Stop is enabled while there is something to stop: a run job (any phase, including waits), or the machine moving or held without one (`Jog` → jog cancel; `Home` → reset, `ALARM:6`; `Run`, `Hold`, `Door` without a job → reset). Otherwise (Idle, Alarm, Check, not connected) it is disabled and says why ("Nothing to stop: the machine is not moving."). Feed hold (while streaming), Resume (while held) and "Reset (immediate)" (always, while connected) keep the other paths reachable.
+
 ## Safety
 
 To be specified before any real-machine control is implemented: e-stop semantics, what automation/LLMs may never do without confirmation, watchdogs.
