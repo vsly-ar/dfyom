@@ -16,7 +16,7 @@ Two pure, synchronous steps in `src/core/post/`, composed by `exportGrbl` (the [
 ```ts
 // src/core/post/export.ts
 exportGrbl(input: ExportInput, opts: PostOptions): AppResult<GrblExport>
-ExportInput = { name, setup: { name, clearanceHeight }, operations: { toolpath, tool, label, positions? }[],
+ExportInput = { name, setup: { name, clearanceHeight, header? }, operations: { toolpath, tool, label, positions? }[],
                 machine: Option<Machine>, workZero?: Vec3 }
 GrblExport  = { program, lines, text, stats, warnings }   // warnings: plan.machine findings
 PostOptions = { generator: string, spinUpSeconds?: number /* 3 */, firstToolLoaded?: boolean /* true */ }
@@ -49,7 +49,7 @@ PostOptions = { generator: string, spinUpSeconds?: number /* 3 */, firstToolLoad
 
 - **Modal suppression:** a word is emitted only when it changes (motion code, unchanged axis words, `F`). "Unchanged" compares the written text, so a move whose every axis word is unchanged after rounding is dropped (its `F` stays pending for the next feed move). The first `G1`/`G2`/`G3` after any `F` change always carries `F` (GRBL has no default feed: `error:22`). An arc needs at least one axis word in the plane (GRBL `error:32` otherwise): a full circle in the program (end = start in X and Y) writes both `X` and `Y`. `I` and `J` are always written.
 - **Arcs as GRBL reads them:** `I`/`J` = center − the _written_ start, so GRBL's center is the intended one within rounding. Toolpath arcs sweep at most 180°, so an arc whose written chord is under 10 resolution steps (0.01 mm, 0.001″) is written as `G1`: GRBL would read near-equal ends as a full circle. An arc (not a full circle) whose sagitta is at most half a resolution step is written as one `G1` too (it is a line in the text), and an arc of radius over 10 m (`ARC_HUGE_RADIUS`; GRBL computes in float32 and `I`/`J` would leave the 5-digit range) as `G1` chords within 0.001 mm, Z interpolated (v0.3 T3, [plan-v0.3.md § Arcs](../modes/plan-v0.3.md#arcs-in-g2g3-out)). If GRBL's end-on-circle check (`error:33`: 0.005 mm and 0.1 % of the radius) would fail after rounding (possible with 4 inch decimals at radii under ~5 mm), the post takes the neighbouring `I`/`J` (± one step) closest to the end; an arc that still fails fails the export with `model.invariant`. A second guard compares the sweep GRBL computes from the text with the intended one: it fails the export only when the difference times the radius exceeds 0.005 mm + 4 resolution steps (0.009 mm in mm, 0.0152 mm in inch), i.e. a wrap-around or direction flip, not rounding (a 162° inch arc of r 8.1 mm differs by 0.0055 mm, and its written end lies 0.0016 mm from the intended one). Random-toolpath fuzzing (300 inch programs) exports without failures.
-- **Header:** comment lines (`Program:`, `Setup:`, `Units:`, `Tool n: name, dia D mm|in` in order of use, `Generator:` from `opts`), then `G90 G94 G17 G21|G20`, `G54`, `G0 Z<clearanceZ>`.
+- **Header:** comment lines (`Program:`, `Setup:`, `Units:`, `Tool n: name, dia D mm|in` in order of use, `Generator:` from `opts`), then `G90 G94 G17 G21|G20`, `G54`, `G0 Z<clearanceZ>`. With `MachiningProgram.setup` (every plan export since DF58) the `Setup:` line becomes the [setup instructions](#setup-header-hardening-df58).
 - **First tool:** treated like a tool change without the `M0` when `opts.firstToolLoaded` (default true): the marker comment (informational: no `M0` follows, so no sender stops), `M3 S…`, dwell. With `firstToolLoaded: false` it pauses like any tool change.
 - **After a tool change's `M0`** the user has jogged and re-zeroed Z, so the post forgets the position, motion code and `F`: it states the modes again (`G90 G94 G17 G21|G20`, `G54`, in case the user ran MDI in another mode), writes `G0 Z<clearanceZ>` (in the new WCS, before the spindle starts) and the next move carries `X`, `Y` and `F` again. The retracts before a tool change and in the footer are suppressed like any move when Z is already at clearance (toolpaths end there); the header's and the post-`M0` retract are always written.
 - **Validation:** non-finite values or magnitudes over 99 999 as written (lengths and feeds in text units, `S` in rpm), a feed that rounds to 0, an `S` that rounds to 0, a feed move with the spindle off, an arc without a radius or from an unknown position, a non-finite or oversized tool diameter, and `spinUpSeconds` outside 0–3600 fail with `model.invariant` (issues name the block; after a failed arc the post continues from its end, so each bad block is reported once). `toMachiningProgram` requires `clearanceHeight` > 0 and ≥ the highest Z of every toolpath (`model.invariant`, rule `clearance`): the tool-change and footer retracts must never move down.
@@ -83,6 +83,31 @@ Same input and options → byte-identical output: LF line endings, final newline
 - **End to end** (`emulator-run.test.ts`): the [geometry test part](geometry.md#testing)'s program (5 tools, the drill twice) streamed by `GrblSender` with character counting through the virtual machine after `$H` and a `G54` 750/750/50 mm into the table: no `error:` and no alarm, no protocol violation, the final position as programmed (mm and inch); with the DFYOM tool-change rule the sender stops at all 5 markers, the test jogs and re-zeroes Z, and each resumes with the modes, `G54` and `G0 Z<clearanceZ>` before `M3`; another sender's run (the markers turned into plain comments) pauses at each `M0` (Hold:0) and resumes with `~`; a machine with too little Z travel for the first tool gets the `softLimit` warning and `ALARM:2`.
 - **Time:** with 400/400/200 mm/s² acceleration the virtual machine needs 626.6 s for the test part (without the tool-change pauses) against 591.4 s estimated (`stats.estimatedSeconds`, incl. 18 s of dwells): **ratio 1.06** (1.09 against the sum of the toolpath estimates, 572.5 s, which leave out dwells and the moves between operations). The test asserts 1 < ratio < 1.5.
 
+### Setup header (hardening DF58)
+
+The agent test of 2026-11-23 (TG #232) exported a bottom and a top setup whose headers named only the program, setup and tools: nothing said how to turn the stock, where the work zero is or which face Z0 is on. Since DF58 `exportPlan` passes `setup.header` (`SetupHeader` in [`program.ts`](../../src/core/post/program.ts), built by `setupHeader` in [`src/core/plan/setup-header.ts`](../../src/core/plan/setup-header.ts)) and the post writes, in place of `(Setup: name)`:
+
+```text
+(Program: Enclosure)
+(Setup 2 of 2: Top)
+(Stock X 250 Y 100 Z 20 mm on the machine)
+(Faces: top up, front towards you, right on the right)
+(From setup 1: flip about X)
+(Work zero G54 X0 Y0: front-left corner of the top face)
+(That corner sits front left on the machine)
+(Z0 on the top face: the stock surface facing up)
+(Units: mm)
+(Tool 1: …)
+```
+
+- **Number** in machining order and the plan's setup count.
+- **Stock:** its extents along machine X, Y, Z in this setup's orientation (`setupOrientation`, a 90°/270° turn swaps X and Y), in program units. Not its name: the library name differs between flows that build the same stock (the UI's "Block 255 x 185 x 40", the headless "Walnut board"), and the same part must give the same file; the sizes are what the operator checks.
+- **Faces:** the part faces up, towards the operator (−Y) and on the right (+X), as the run-mode setup-change picture names them ([plan-v0.2.md § Implementation (task E2)](../modes/plan-v0.2.md#implementation-task-e2)).
+- **From setup 1** (setups 2 and later): the move from setup 1's orientation, from the two setups' machine axes (`R = A_k · A_1ᵀ`, rows of `setupFrame`). First the side that comes up: none, `flip about X` (the up face goes down) or `tip its front|back|right|left side up` (sides as they sat in setup 1, front = towards the operator); then the rest as a turn about the spindle axis: `turn 90 deg CCW`, `turn 180 deg`, `turn 90 deg CW` (seen from above). A flip about X followed by a half turn is written `flip about Y`; no change is `same orientation`. A test checks every pair of directions and rotations: the described moves, applied in order, give the second setup's orientation.
+- **Work zero:** the part corner at G54 X0 Y0, named by the faces that meet there besides the up face (`setupCorner`, the setup panel's corner name, now in core): on the machine it is always the front-left corner of the up face. Z0 is on the up face. When the user may choose the setup zero (alignment proposal, Q61), these lines follow that choice.
+- **GRBL-safe:** each a comment line through `commentLine` (printable ASCII, no `()`, `;` or realtime characters, at most 70 bytes); the words are fixed English like the other header comments. Programs without `setup` (post unit tests) keep `(Setup: name)`.
+- **Goldens:** every exit-criteria program and the per-setup goldens gained these lines; nothing below the header changed.
+
 ### Implementation (task 2.11)
 
 - **One file per plan:** v0.1 plans have one setup, so "one file per setup" is one per plan; DFYOM's sender guides the tool changes inside it.
@@ -99,19 +124,19 @@ exportPlan(doc: ProjectDoc, planId: string, services: Pick<Services, 'workers' |
 PlanExport = GrblExport & { setupId: string, regenerated: string[], softLimitChecked: boolean }
 
 plan.export { planId, setupId?, target, confirm = false }   // effect command
-  → { filePath, setupId, lines /* count */, stats, warnings /* plan.machine */, softLimitChecked, regenerated }
+  → { filePath, setupId, lines /* count */, stats, warnings /* plan.machine */, softLimitChecked, softLimitNote?, regenerated }
 ```
 
 1. **Checks before any generator runs:** the plan exists, its status allows export (every status but `archived`: `plan.status`), it has a machine copy (`post.noMachine`), the setup is known (**one program per setup**, v0.2 task E2: `setupId` names it and may be left out only when the plan has one setup, else `plan.setup` rule `setupRequired`; an unknown id `input.malformed` rule `unknownSetup`; [plan-v0.2.md](../modes/plan-v0.2.md#implementation-task-e2)), `planOperationInputs` has no error findings for the setup's operations (`plan.check`/`plan.order`), and the setup has at least one operation (`plan.check`, rule `empty`). Every error from `exportPlan` carries a `plan.export` context frame with `planId` (and `planOperationId` for a generator error).
 2. **Toolpaths:** for each plan operation of the setup in machining order, the [toolpath cache](workers.md#toolpath-cache) entry for its current `inputHash`; a missing or stale one is generated on the `toolpath` lane and cached (`ensureToolpath`, shared with `plan.toolpath.generate`), so export never uses a stale toolpath. Unlike the job, the first generator error fails the export (a program without one of its operations is not a valid program); the error's context names the plan operation, and toolpaths generated before it stay cached. `regenerated` lists the generated ones.
-3. **Mapping:** plan name and setup name for the header; per operation the tool copy's name and diameter (`ProgramTool`) and as label its feature label ([plan-v0.4.md § Implementation (P1)](../modes/plan-v0.4.md#implementation-p1): the design operation names joined with `, `, or "Hole 1 · drill × 6" for a group repeating one operation) with the clone position comments; `clearanceHeight` from the setup. The generator string is `DFYOM` without a version, so the same plan gives the same file.
+3. **Mapping:** plan name, setup name and the [setup instructions](#setup-header-hardening-df58) for the header; per operation the tool copy's name and diameter (`ProgramTool`) and as label its feature label ([plan-v0.4.md § Implementation (P1)](../modes/plan-v0.4.md#implementation-p1): the design operation names joined with `, `, or "Hole 1 · drill × 6" for a group repeating one operation) with the clone position comments; `clearanceHeight` from the setup. The generator string is `DFYOM` without a version, so the same plan gives the same file.
 4. **Write** (command only): `text` goes to `target` through the `ExportFiles` port (`services.exportFiles`), so `src/core` stays headless. `src/main/persistence/export-file.ts` follows the user-folder protocol of [Save As](persistence.md#save): it writes `<file>.tmp-<8 hex>` next to the target (created exclusively, so no existing entry is touched), fsyncs it and renames it over the target; on a failure it unlinks only that temp file (never recursively) and the target is untouched. Errors carry `target` (and `plan.export` adds `planId`).
    - **Target:** an absolute, normalized path (on Windows with a drive or UNC root: no drive-relative `\out\a.nc` or `C:out`, no `:` after the root, i.e. no alternate data streams) whose file name has a stem and ends in `.nc`, `.gcode` or `.ngc` (any case).
    - **Existing entries** (checked with `lstat`, so a symlink counts, dangling or not) are replaced only with `confirm: true` (`input.malformed`, rule `confirmOverwrite`, as Save As); a folder never (`notAFile`). As Save As, the path is resolved with `canonicalPath`: through a symlink the real file is written and the link kept; `filePath` in the result is that real path. A dangling link is never replaced (`danglingLink`).
    - Nothing is written when the export fails.
 
 - **Effect, not job:** export holds the project queue like `project.save`, so the program matches one revision; regenerating the test part's toolpaths takes well under a second ([workers.md](workers.md#performance-budgets)). Effects are not subject to the stale-write baseline ([commands.md](commands.md#stale-writes)) and change no document (toolpaths are derived data).
-- **Soft limits:** `plan.export` passes no `workZero` until run mode supplies the connected G54 ([run-v0.1.md](../modes/run-v0.1.md#work-zero-and-the-soft-limit-check)); `softLimitChecked` says whether the check ran. The result does not carry the text: the file is the output (agents and run mode use `exportPlan`).
+- **Soft limits:** `plan.export` passes no `workZero` until run mode supplies the connected G54 ([run-v0.1.md](../modes/run-v0.1.md#work-zero-and-the-soft-limit-check)); `softLimitChecked` says whether the check ran; when it did not, `softLimitNote` (DF58) says how to check before running: set the work zero, then `run.job.check` or the Run pre-flight (`run.job.start` checks too). The GUI's export dialog has its own sentence. The result does not carry the text: the file is the output (agents and run mode use `exportPlan`).
 
 ## Virtual machine (task 3.8)
 
@@ -210,15 +235,16 @@ Hard limits and limit pins, probing (`G38.x`, `$#` PRB), `G28`/`G30`/`G92`/`G93`
 
 Implemented (task 3.8): `src/core/run/clock.ts`, `transport.ts`, `grbl/emulator/*.ts` (`emulator.ts` state machine, `gcode.ts` parser subset, `planner.ts` and `profile.ts` timing, `settings.ts`, `trace.ts`), `grbl/virtual-transport.ts`; `grbl/emulator.fixture.ts` holds byte-level test helpers. Implemented (task 2.11): `src/core/post/program.ts`, `export.ts`, `grbl/post.ts`, `grbl/format.ts`; `post.fixture.ts` holds test inputs. Implemented (task 3.9): `grbl/sender.ts`, `grbl/status.ts`, the machine host and `src/main/machine/` ([run-v0.1.md](../modes/run-v0.1.md#files)). `SerialTransport` comes after v0.1.
 
-| File                                       | Contents                                                      |
-| ------------------------------------------ | ------------------------------------------------------------- |
-| `src/core/post/program.ts`                 | `MachiningProgram` and block types (the plan → post contract) |
-| `src/core/post/export.ts`                  | `exportGrbl`, `toMachiningProgram`, export checks, stats      |
-| `src/core/post/grbl/post.ts`, `format.ts`  | `postGrbl`, number and comment formatting                     |
-| `src/core/run/clock.ts`                    | `Clock` port, `VirtualClock`, `ScaledClock`                   |
-| `src/core/run/transport.ts`                | `ControllerTransport` port                                    |
-| `src/core/run/grbl/sender.ts`, `status.ts` | Streaming sender; status-report and response parsers          |
-| `src/core/run/grbl/emulator/*.ts`          | Parser subset, planner/timing, state machine, trace           |
-| `src/core/run/grbl/virtual-transport.ts`   | `VirtualGrblTransport`                                        |
-| `src/main/machine/utility.ts`              | Utility-process entry of the machine host                     |
-| `src/main/machine/serial-transport.ts`     | `SerialTransport` (Node `serialport`; after v0.1)             |
+| File                                       | Contents                                                                            |
+| ------------------------------------------ | ----------------------------------------------------------------------------------- |
+| `src/core/post/program.ts`                 | `MachiningProgram` and block types (the plan → post contract)                       |
+| `src/core/post/export.ts`                  | `exportGrbl`, `toMachiningProgram`, export checks, stats                            |
+| `src/core/post/grbl/post.ts`, `format.ts`  | `postGrbl`, number and comment formatting                                           |
+| `src/core/plan/setup-header.ts`            | `setupHeader`, `setupMotion`, `setupCorner`: the header's setup instructions (DF58) |
+| `src/core/run/clock.ts`                    | `Clock` port, `VirtualClock`, `ScaledClock`                                         |
+| `src/core/run/transport.ts`                | `ControllerTransport` port                                                          |
+| `src/core/run/grbl/sender.ts`, `status.ts` | Streaming sender; status-report and response parsers                                |
+| `src/core/run/grbl/emulator/*.ts`          | Parser subset, planner/timing, state machine, trace                                 |
+| `src/core/run/grbl/virtual-transport.ts`   | `VirtualGrblTransport`                                                              |
+| `src/main/machine/utility.ts`              | Utility-process entry of the machine host                                           |
+| `src/main/machine/serial-transport.ts`     | `SerialTransport` (Node `serialport`; after v0.1)                                   |

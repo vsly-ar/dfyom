@@ -448,6 +448,40 @@ describe('postGrbl', () => {
     )
   })
 
+  // docs/architecture/grbl.md#setup-header-hardening-df58
+  it('writes the setup instructions in the header: GRBL-safe comments of at most 70 bytes', () => {
+    const setup = {
+      number: 2,
+      count: 2,
+      up: 'top',
+      front: 'front',
+      right: 'right',
+      fromFirst: 'flip about X, then turn 90 deg CCW',
+      corner: 'front left',
+      stock: [254, 101.6, 19.05] as Vec3,
+    }
+    const header = (units: 'mm' | 'in') =>
+      expectOk(postGrbl(program([tool(), spin()], { setup, setupName: 'Top', units }), OPTS))
+        .split('\n')
+        .slice(0, 9)
+    expect(header('mm')).toEqual([
+      '(Program: P)',
+      '(Setup 2 of 2: Top)',
+      '(Stock X 254 Y 101.6 Z 19.05 mm on the machine)',
+      '(Faces: top up, front towards you, right on the right)',
+      '(From setup 1: flip about X, then turn 90 deg CCW)',
+      '(Work zero G54 X0 Y0: front-left corner of the top face)',
+      '(That corner sits front left on the machine)',
+      '(Z0 on the top face: the stock surface facing up)',
+      '(Units: mm)',
+    ])
+    expect(header('in')[2]).toBe('(Stock X 10 Y 4 Z 0.75 in on the machine)')
+    for (const line of [...header('mm'), ...header('in')]) {
+      expect(line.length).toBeLessThanOrEqual(70)
+      expect(line).toMatch(/^\([^()]*\)$/)
+    }
+  })
+
   it('tool change: M5, retract, marker, M0, retract in the new WCS, spindle; forgets the position', () => {
     const lines = expectOk(
       postGrblLines(

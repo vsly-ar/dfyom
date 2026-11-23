@@ -52,6 +52,7 @@ function suggest(over: Partial<CuttingInput> = {}): CuttingSuggestion {
 
 const value = (f: Option<{ value: number }>): number => f.unwrap().value
 const codes = (s: CuttingSuggestion) => s.warnings.map((w) => w.code)
+const clamped = (s: CuttingSuggestion) => s.warnings.find((w) => w.code === 'feeds.feedClamped')!
 
 describe('suggestCutting: data lookup', () => {
   it('flat 6 mm 2F carbide in aluminum, lowest rigidity: n from vc.min, vf from fz.min, ap = apSlot·D·0.3', () => {
@@ -279,6 +280,21 @@ describe('suggestCutting: engagement and chip thinning', () => {
     expect(s.stepdown.isNone() && s.stepover.isNone()).toBe(true)
   })
 
+  it('drill feed clamped to the Z maximum: n lowered to keep fn, the warning says so (DF56)', () => {
+    const drill = tool({ type: 'drill', diameter: len('5'), pointAngle: deg('118') })
+    const s = suggest({
+      tool: drill,
+      engagement: { kind: 'drill' },
+      machine: limits({ maxFeedZ: 50 }),
+    })
+    expect(value(s.feedRate)).toBe(50)
+    expect(value(s.spindleSpeed)).toBeCloseTo(50 / 0.05, 6)
+    expect(clamped(s).message).toBe(
+      'Drilling feed limited to the machine maximum (Z); spindle speed lowered with it, so the feed per revolution stays.',
+    )
+    expect(clamped(s).params['chipLoad']).toBeCloseTo(0.05, 9)
+  })
+
   it('drill engagement with an end mill (or the reverse) has no data', () => {
     expect(codes(suggest({ engagement: { kind: 'drill' } }))).toEqual(['feeds.noData'])
     const drill = tool({ type: 'drill', diameter: len('5'), pointAngle: deg('118') })
@@ -355,6 +371,16 @@ describe('suggestCutting: machine clamps', () => {
     expect(s.display.unwrap().fz).toBeCloseTo(0.02, 9)
     expect(codes(s)).toContain('feeds.feedClamped')
     expect(codes(s)).not.toContain('feeds.rubbing')
+    // DF56: the warning says the speed came down and the chip load stayed
+    const w = clamped(s)
+    expect(w.message).toBe(
+      'Feed rate limited to the machine maximum (X/Y); spindle speed lowered with it, so the chip load stays.',
+    )
+    expect(w.params['spindleSpeed']).toBeCloseTo(100 / (2 * 0.02), 6)
+    expect(w.params['suggestedSpindleSpeed']).toBeGreaterThan(w.params['spindleSpeed'] as number)
+    expect(w.params['chipLoad']).toBeCloseTo(0.02, 9)
+    expect(w.params['suggestedChipLoad']).toBeCloseTo(0.02, 9)
+    expect(w.params['chipLoadDrop']).toBe(0)
   })
 
   it('feed clamped below the rpm floor: fz drops and the tool rubs', () => {
@@ -363,6 +389,14 @@ describe('suggestCutting: machine clamps', () => {
     expect(value(s.feedRate)).toBe(100)
     expect(s.display.unwrap().fz).toBeCloseTo(100 / (10_000 * 2), 9)
     expect(codes(s)).toEqual(expect.arrayContaining(['feeds.feedClamped', 'feeds.rubbing']))
+    // DF56: the warning names the floor and the resulting chip load
+    const w = clamped(s)
+    expect(w.message).toBe(
+      'Feed rate limited to the machine maximum (X/Y); the spindle speed stops at the machine minimum, so the chip load drops by 75 %.',
+    )
+    expect(w.params['chipLoad']).toBeCloseTo(0.005, 9)
+    expect(w.params['suggestedChipLoad']).toBeCloseTo(0.02, 9)
+    expect(w.params['chipLoadDrop']).toBeCloseTo(75, 6)
   })
 
   it('plunge rate is clamped to the Z maximum', () => {
@@ -544,6 +578,11 @@ describe('suggestCutting: locked inputs', () => {
     expect(value(s.feedRate)).toBe(100)
     expect(s.display.unwrap().fz).toBeCloseTo(100 / (5000 * 2), 9)
     expect(codes(s)).toEqual(expect.arrayContaining(['feeds.feedClamped', 'feeds.rubbing']))
+    expect(clamped(s).message).toBe(
+      'Feed rate limited to the machine maximum (X/Y); the spindle speed is locked, so the chip load drops by 50 %.',
+    )
+    expect(clamped(s).params['spindleSpeed']).toBe(5000)
+    expect(clamped(s).params['suggestedSpindleSpeed']).toBe(5000)
   })
 
   it('locked vf: n = vf / (z·fz) from the data chip load', () => {

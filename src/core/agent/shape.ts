@@ -309,8 +309,8 @@ export class ResultShaper {
       return {
         id: s['id'],
         name: s['name'],
-        ...(s['direction'] === undefined ? {} : { direction: s['direction'] }),
-        ...(s['rotation'] === undefined ? {} : { rotation: s['rotation'] }),
+        direction: s['direction'] ?? '+z',
+        rotation: s['rotation'] ?? 0,
         clearanceHeight: s['clearanceHeight'],
         retractHeight: s['retractHeight'],
         operations,
