@@ -85,7 +85,7 @@ export const projectMessages = {
       orbit: 'Orbit (Shift: pan)',
       zoom: 'Zoom',
       move: 'Move the operation up or down',
-      measure: 'Measure (dimension): point to point (Esc ends)',
+      measure: 'Measure (dimension): point to point; Shift locks to an axis, Esc clears, then ends',
       noSnap: 'Drag a handle or tab without snapping',
       angleStep: 'Drag a handle in 15° steps (no snapping)',
       commit: 'Commit the value (one undo step) and apply',

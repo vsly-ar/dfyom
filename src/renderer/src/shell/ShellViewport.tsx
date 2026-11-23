@@ -6,6 +6,7 @@ import type { AppMode } from '../../../core/modes'
 import { ShapeEditorLayer } from '../modes/design/ShapeEditorView'
 import { useModeScene } from '../modes/ModePanels'
 import { Viewport } from '../viewport'
+import { useUi } from './ShellContext'
 import styles from './AppShell.module.css'
 
 export function ShellViewport({
@@ -17,9 +18,18 @@ export function ShellViewport({
   insetRight?: number
 }): React.JSX.Element {
   const scene = useModeScene(mode)
+  // the main toolbar's Measure (DF19) and the viewport share the tool's on state
+  const measuring = useUi((s) => s.measuring)
+  const setMeasuring = useUi((s) => s.setMeasuring)
   return (
     <>
-      <Viewport {...scene} insetRight={insetRight} className={styles['viewportCanvas']} />
+      <Viewport
+        {...scene}
+        measuring={measuring && mode !== 'run'}
+        onMeasuringChange={setMeasuring}
+        insetRight={insetRight}
+        className={styles['viewportCanvas']}
+      />
       {mode === 'design' ? <ShapeEditorLayer insetRight={insetRight} /> : null}
     </>
   )

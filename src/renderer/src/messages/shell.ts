@@ -26,6 +26,8 @@ export const shellMessages = {
   },
   settings: 'Settings',
   library: 'Library',
+  /** The main toolbar's group of viewport tools (Measure, DF19). */
+  viewTools: 'Tools',
 
   modes: { design: 'Design', plan: 'Plan', run: 'Run' } satisfies Record<AppMode, string>,
 

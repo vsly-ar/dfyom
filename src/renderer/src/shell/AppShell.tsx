@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AppMode } from '../../../core/modes'
 import { shellMessages as m } from '../messages/shell'
+import { snapMessages } from '../messages/snap'
 import { ModeDialogs, ModeInspector, ModeNavigator, ModeTools } from '../modes/ModePanels'
 import { MachineToolbar } from '../modes/run'
 import {
@@ -51,6 +52,8 @@ export function AppShell(): React.JSX.Element {
   const setMode = useUi((s) => s.setMode)
   const openSettings = useUi((s) => s.setSettingsOpen)
   const layouts = useSettings((s) => s.settings.layouts)
+  const measuring = useUi((s) => s.measuring)
+  const setMeasuring = useUi((s) => s.setMeasuring)
   const history = useHistorySteps()
   const wide = useMediaQuery(WIDE_QUERY)
   useWindowTitle()
@@ -138,6 +141,18 @@ export function AppShell(): React.JSX.Element {
               />
             </Toolbar>
             <ModeTools mode={mode} doc={doc} />
+            {/* the viewport's tools (DF19): Measure, not in Run */}
+            {mode === 'run' ? null : (
+              <Toolbar label={m.viewTools}>
+                <ToolbarButton
+                  label={snapMessages.measure.tool}
+                  shortcut="D"
+                  icon={<Icon name="measure" />}
+                  pressed={measuring}
+                  onClick={() => setMeasuring(!measuring)}
+                />
+              </Toolbar>
+            )}
           </div>
           <nav aria-label="Modes" className={styles['modes']}>
             <ModeSwitcher value={mode} onValueChange={onMode} />

@@ -8,7 +8,7 @@
 // #confirmations, #undo-and-redo; docs/modes/design.md#ordering-and-composition
 import type { OperationKind } from '../../../../core/design/part.dto'
 import { designMessages } from '../../messages/design'
-import { useSettings, useShell, useUi } from '../../shell/ShellContext'
+import { useShell, useUi } from '../../shell/ShellContext'
 import {
   Button,
   EmptyState,
@@ -25,17 +25,11 @@ import styles from './Design.module.css'
 import { chamferEdgeChoice } from './chamfer-view'
 import { clonesSource } from './feature-view'
 import { draftSource, draftSourceOptions, firstRow, firstRowGap } from './clones-view'
-import { addArgs, failingOperation, type DesignPart } from './model'
+import { failingOperation, type DesignPart } from './model'
+import { useAddOperation } from './useAddOperation'
 import { OperationList } from './OperationList'
 import { stockReadout } from './PartSetupDialogs'
-import {
-  useCommand,
-  useDesignEvaluation,
-  useDesignReferences,
-  useDesignSelection,
-  useDesignWarnings,
-} from './useDesign'
-import { facingDepthSuggestion } from './facing-depth'
+import { useCommand, useDesignEvaluation, useDesignSelection, useDesignWarnings } from './useDesign'
 
 export { operationIcon } from './OperationList'
 
@@ -82,14 +76,6 @@ function NoPart(): React.JSX.Element {
   )
 }
 
-/** The stock's size (mm) new operations are placed in; a default block without a stock. */
-function stockDims(part: DesignPart): { length: number; width: number; thickness: number } {
-  const s = part.loaded?.stock
-  return s
-    ? { length: s.length.canonical, width: s.width.canonical, thickness: s.thickness.canonical }
-    : { length: 100, width: 60, thickness: 20 }
-}
-
 function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
   const { bridge } = useShell()
   const call = useCommand()
@@ -99,8 +85,6 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
   // the undo toast lives in the ui store: the inspector's segment table removes rows too
   const removed = useUi((st) => st.removedToast)
   const setRemovedToast = useUi((st) => st.setRemovedToast)
-  // the default-anchor setting places new pockets and profiles (design-v0.2.md#placement-anchors)
-  const defaultAnchor = useSettings((s) => s.settings.defaultAnchor)
   const ops = part.dto.operations
   const ids = ops.map((o) => o.id)
   const failedAt =
@@ -108,24 +92,8 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
       ? failingOperation(evaluation.error, ids)
       : undefined
 
-  // a new facing faces down to the reference model when there is one (DF4)
-  const references = useDesignReferences(part)
-  const add = async (kind: OperationKind) => {
-    const facingDepth = kind === 'facing' ? facingDepthSuggestion(part, references) : undefined
-    const r = await call(`design.${kind}.add`, {
-      partId: part.dto.id,
-      ...addArgs(kind, stockDims(part), part.units, defaultAnchor),
-      ...(facingDepth !== undefined ? { depth: facingDepth.source } : {}),
-    })
-    if (r.ok) select((r.value as { operationId: string }).operationId)
-  }
-  // a hole with the core defaults (simple, 6 mm / 1/4" through) where a new drilling goes; the
-  // feature is selected so its inspector is what the user sees next (ui.md § Feature rows)
-  const addHole = async () => {
-    const { center } = addArgs('drilling', stockDims(part), part.units) as { center: string[] }
-    const r = await call('design.hole.add', { partId: part.dto.id, center })
-    if (r.ok) select((r.value as { featureId: string }).featureId)
-  }
+  // Add puts operations on the selected face, if any (DF22; useAddOperation)
+  const { add, addHole } = useAddOperation(part)
   // Make Clones… opens the draft in the inspector (ui.md § Clones): nothing is written until
   // "Make clones"; its first row puts one clone beside the source, a tool diameter apart
   const cloneChoice = clonesSource(part, selected)

@@ -14,6 +14,7 @@ import type { UnitSystem } from '../../../core/project/document'
 import { snapMessages } from '../messages/snap'
 import { viewportMessages as msg } from '../messages/viewport'
 import { measureBetween } from './MeasureTool'
+import type { AxisName } from './measure-axis'
 import { Measure3d, type MeasurePoints } from './Measure3d'
 import {
   Menu,
@@ -134,8 +135,18 @@ export interface ViewportProps {
   clonePath?: ClonePathOverlay | null
   /** Polite announcement under the viewport ("Clone 4 skipped."; task U3). */
   announcement?: string | null
-  /** Click on a surface → its target; click on empty space or Escape → `null`. */
-  onSelect?: (target: SurfaceTarget | null) => void
+  /**
+   * Click on a surface → its target (with the click's modifiers: Alt+click selects a face, DF22);
+   * click on empty space or Escape → `null`.
+   */
+  onSelect?: (target: SurfaceTarget | null, modifiers?: { readonly alt: boolean }) => void
+  /** One surface drawn selected (a selected face, DF22), besides `selectedOperation`. */
+  selectedSurface?: SurfaceId | null
+  /**
+   * Stock surfaces are selected per face (design, DF22): hovering the stock highlights only the
+   * stock face under the pointer.
+   */
+  stockFaces?: boolean
   /** Pointer hover over a surface (for a navigator row highlight); `null` when it leaves. */
   onHover?: (target: SurfaceTarget | null) => void
   /** Pick mode: crosshair, eligible surfaces highlighted, others dimmed. */
@@ -147,6 +158,12 @@ export interface ViewportProps {
   mousePreset?: MousePreset
   /** Project units of the measure tool's distances (task U3). */
   units?: UnitSystem
+  /**
+   * The measure tool's on state when the shell owns it (the main toolbar's Measure, DF19); absent:
+   * the Viewport keeps its own.
+   */
+  measuring?: boolean
+  onMeasuringChange?: (on: boolean) => void
   /** The window's "Snap" toggle: the measure tool snaps to vertices and stock corners (task U3). */
   snap?: boolean
   /** Draw the part translucent so a reference ghost inside shows ("See through stock", DF2). */
@@ -242,11 +259,15 @@ export function Viewport({
   announcement = null,
   onSelect,
   onHover,
+  selectedSurface = null,
+  stockFaces = false,
   pick = null,
   onPick,
   onPickCancel,
   mousePreset = 'default',
   units = 'mm',
+  measuring: measuringProp,
+  onMeasuringChange,
   snap = true,
   seeThrough = false,
   run = null,
@@ -286,6 +307,8 @@ export function Viewport({
   const surfaceState = useMemo<SurfaceState>(
     () => ({
       selectedOperation,
+      selectedSurface,
+      stockFaces,
       hovered: hovered?.surface ?? null,
       pickEligible: pick?.eligible ?? null,
       outdated,
@@ -293,7 +316,17 @@ export function Viewport({
       tinted,
       selectedAlso,
     }),
-    [selectedOperation, hovered, pick, outdated, pulse, tinted, selectedAlso],
+    [
+      selectedOperation,
+      selectedSurface,
+      stockFaces,
+      hovered,
+      pick,
+      outdated,
+      pulse,
+      tinted,
+      selectedAlso,
+    ],
   )
   const runLines = run?.lines ?? null
   const runFrame = run?.frame
@@ -409,22 +442,63 @@ export function Viewport({
     [isSetupFace, setup, goTo],
   )
   const [pressing, setPressing] = useState(false)
-  // the measure tool (task U3): on/off and the picked points, never stored
-  const [measuring, setMeasuring] = useState(false)
+  // the pointer over the cube's square: the cube turns opaque (DF19)
+  const [overCube, setOverCube] = useState(false)
+  // the measure tool (task U3): on/off (the shell's when it passes `measuring`, DF19) and the
+  // picked points, never stored
+  const [ownMeasuring, setOwnMeasuring] = useState(false)
+  const measuring = measuringProp ?? ownMeasuring
+  const setMeasuring = useCallback(
+    (on: boolean) => {
+      setOwnMeasuring(on)
+      onMeasuringChange?.(on)
+    },
+    [onMeasuringChange],
+  )
   const [measurePoints, setMeasurePoints] = useState<MeasurePoints>({ a: null, b: null })
-  // pick mode wins over the measure tool while it runs
-  const measureOn = measuring && !pick
-  const endMeasure = useCallback(() => {
-    setMeasuring(false)
-    setMeasurePoints({ a: null, b: null })
+  const [measureAxis, setMeasureAxis] = useState<AxisName | null>(null)
+  // the points go when the tool ends, wherever it was ended (the main toolbar, DF19)
+  const [measuredWhile, setMeasuredWhile] = useState(measuring)
+  if (measuredWhile !== measuring) {
+    setMeasuredWhile(measuring)
+    if (!measuring) {
+      setMeasurePoints({ a: null, b: null })
+      setMeasureAxis(null)
+    }
+  }
+  // pick mode wins over the measure tool while it runs; run mode has none
+  const measureOn = measuring && !pick && !run
+  const endMeasure = useCallback(() => setMeasuring(false), [setMeasuring])
+  const toggleMeasure = useCallback(() => setMeasuring(!measuring), [measuring, setMeasuring])
+  // two points set: the next click only clears them (DF21)
+  const measurePick = useCallback((p: Vec3 | null) => {
+    setMeasurePoints((m) =>
+      m.b !== null
+        ? { a: null, b: null }
+        : p === null
+          ? m
+          : m.a === null
+            ? { a: p, b: null }
+            : { a: m.a, b: p },
+    )
   }, [])
-  const toggleMeasure = useCallback(() => {
-    if (measuring) endMeasure()
-    else setMeasuring(true)
-  }, [measuring, endMeasure])
-  const measurePick = useCallback((p: Vec3) => {
-    setMeasurePoints((m) => (m.a === null || m.b !== null ? { a: p, b: null } : { a: m.a, b: p }))
-  }, [])
+  // Escape while measuring clears the points first, then ends the tool (DF21); on the document,
+  // since the Measure button lives in the main toolbar, outside the viewport region (DF19)
+  const measureHasPoints = measurePoints.a !== null
+  useEffect(() => {
+    if (!measureOn) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return
+      const t = e.target
+      if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement) return
+      if (t instanceof Element && t.closest('[role="dialog"],[role="menu"]')) return
+      e.preventDefault()
+      if (measureHasPoints) setMeasurePoints({ a: null, b: null })
+      else endMeasure()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [measureOn, measureHasPoints, endMeasure])
   useEffect(() => {
     if (!pressing) return
     const up = (): void => setPressing(false)
@@ -532,7 +606,8 @@ export function Viewport({
       !e.metaKey &&
       !e.altKey &&
       !e.shiftKey &&
-      !pick
+      !pick &&
+      !run
     ) {
       e.preventDefault()
       toggleMeasure()
@@ -542,11 +617,7 @@ export function Viewport({
     if (!key) return
     if (key.kind === 'escape') {
       if (pick) return // handled by the document listener
-      if (measuring) {
-        e.preventDefault()
-        endMeasure()
-        return
-      }
+      if (measureOn) return // handled by the document listener (DF21)
       e.preventDefault()
       onSelect?.(null)
       return
@@ -593,6 +664,13 @@ export function Viewport({
       data-measuring={measureOn ? '' : undefined}
       data-hover={hovered && (!pick || pick.eligible.has(hovered.surface)) ? '' : undefined}
       onKeyDown={onKeyDown}
+      onPointerMove={(e) => {
+        const rect = e.currentTarget.getBoundingClientRect()
+        const over =
+          e.target instanceof HTMLCanvasElement && inCubeBox(e.clientX, e.clientY, rect, insetRight)
+        if (over !== overCube) setOverCube(over)
+      }}
+      onPointerLeave={() => setOverCube(false)}
       onPointerDownCapture={(e) => {
         down.current = { x: e.clientX, y: e.clientY }
         const rect = e.currentTarget.getBoundingClientRect()
@@ -653,13 +731,14 @@ export function Viewport({
               if (!pick.eligible.has(target.surface)) return
               setPicked(true)
               onPick?.(target)
-            } else onSelect?.(target)
+            } else onSelect?.(target, { alt: e.nativeEvent.altKey })
           }}
         />
         {measureOn ? (
           <Measure3d
             points={measurePoints}
             onPick={measurePick}
+            onAxis={setMeasureAxis}
             stock={stock}
             snap={snap}
             units={units}
@@ -676,6 +755,7 @@ export function Viewport({
           current={along}
           setupFace={setup ? setupFace : null}
           insetRight={insetRight}
+          active={overCube || pressing}
           reducedMotion={reducedMotion}
           onHover={onCubeHover}
           onClick={onCubeClick}
@@ -694,24 +774,25 @@ export function Viewport({
         >
           <span className={styles['cubeAnchor']} aria-hidden="true" />
         </Tooltip>
-        <Toolbar label={msg.toolbar} floating className={styles['toolbar']}>
+        <Toolbar label={msg.toolbar} floating orientation="vertical" className={styles['toolbar']}>
           <ToolbarButton
             label={msg.fit}
             shortcut="F"
             icon={<Icon name="fit" />}
-            tooltipSide="bottom"
+            tooltipSide="left"
             onClick={fit}
           />
           <Menu label={msg.views} align="end" items={viewItems}>
-            <ToolbarButton label={msg.views} icon={<Icon name="iso" />} tooltipSide="bottom" />
+            <ToolbarButton label={msg.views} icon={<Icon name="iso" />} tooltipSide="left" />
           </Menu>
-          {run ? null : (
+          {/* the shell's main toolbar owns Measure (DF19); without it (gallery, tests) it is here */}
+          {run || measuringProp !== undefined ? null : (
             <ToolbarButton
               label={snapMessages.measure.tool}
               shortcut="D"
               icon={<Icon name="measure" />}
               pressed={measureOn}
-              tooltipSide="bottom"
+              tooltipSide="left"
               onClick={toggleMeasure}
             />
           )}
@@ -724,9 +805,13 @@ export function Viewport({
       ) : null}
       {measureOn ? (
         <div className={styles['banner']} role="status">
-          {measurePoints.a !== null && measurePoints.b === null
-            ? snapMessages.measure.second
-            : snapMessages.measure.prompt}
+          {measurePoints.b !== null
+            ? snapMessages.measure.clear
+            : measurePoints.a !== null
+              ? measureAxis !== null
+                ? snapMessages.measure.along(measureAxis)
+                : snapMessages.measure.secondAxis
+              : snapMessages.measure.prompt}
         </div>
       ) : null}
       <p id={summaryId} className={styles['srOnly']}>

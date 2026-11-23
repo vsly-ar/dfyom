@@ -16,9 +16,13 @@ async function bridgeCall<T>(page: Page, name: string, args: object = {}): Promi
   return (r as Extract<CallReply, { ok: true }>).value as T
 }
 
-/** ui-view-cube.md: the cube's square is 88 px, 8 px from the viewport's top and right. */
+/**
+ * ui-view-cube.md: the cube's square is 88 px, 8 px from the viewport's top, left of its vertical
+ * toolbar (DF19: CUBE_TOOLBAR_PX 38 px), which sits 8 px from the right edge.
+ */
 const BOX = 88
 const MARGIN = 8
+const TOOLBAR = 38
 /** Half the cube's edge in px (CUBE_HALF_EDGE_PX) and the chamfer (18 % of the edge). */
 const HALF = 28
 const FACE = HALF * (1 - 0.36)
@@ -42,13 +46,21 @@ test('view cube: keys, a click on an edge, the Views menu, a drag', async ({ dfy
   const viewport = page.getByRole('region', { name: '3D viewport' })
   await expect(viewport).toHaveAccessibleDescription(/Part with/)
   const box = (await viewport.boundingBox())!
-  const cx = box.x + box.width - MARGIN - BOX / 2
+  const cx = box.x + box.width - MARGIN - TOOLBAR - BOX / 2
   const cy = box.y + MARGIN + BOX / 2
 
-  // the toolbar under the cube keeps Fit and adds Views (and Measure, U3); no Top/Front/Right/Iso
+  // the toolbar right of the cube keeps Fit and Views (DF19: Measure moved to the main toolbar);
+  // no Top/Front/Right/Iso
   const toolbar = viewport.getByRole('toolbar', { name: 'View' })
-  await expect(toolbar.getByRole('button')).toHaveText(['', '', ''])
+  await expect(toolbar.getByRole('button')).toHaveText(['', ''])
   await expect(toolbar.getByRole('button', { name: 'Fit' })).toBeVisible()
+  const bar = (await toolbar.boundingBox())!
+  // at the right edge (within the region's border), the cube's square left of it
+  expect(Math.abs(bar.x + bar.width - (box.x + box.width - MARGIN))).toBeLessThan(3)
+  expect(bar.x).toBeGreaterThan(cx + BOX / 2 - 1)
+  await expect(
+    page.getByRole('toolbar', { name: 'Tools' }).getByRole('button', { name: /Measure/ }),
+  ).toBeVisible()
 
   await viewport.focus()
   await page.keyboard.press('2')

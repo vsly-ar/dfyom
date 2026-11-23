@@ -33,10 +33,16 @@ vi.mock('./Scene', () => ({
 }))
 vi.mock('./ViewCube', () => ({ ViewCube: () => null }))
 // the 3D measure layer raycasts the scene: stubbed, its picks driven through `measurePick`
-const measure = vi.hoisted(() => ({ pick: null as null | ((p: [number, number, number]) => void) }))
+type Pick = (p: [number, number, number] | null) => void
+type OnAxis = (axis: 'x' | 'y' | 'z' | null) => void
+const measure = vi.hoisted(() => ({
+  pick: null as null | Pick,
+  axis: null as null | OnAxis,
+}))
 vi.mock('./Measure3d', () => ({
-  Measure3d: ({ onPick }: { onPick: (p: [number, number, number]) => void }) => {
+  Measure3d: ({ onPick, onAxis }: { onPick: Pick; onAxis: OnAxis }) => {
     measure.pick = onPick
+    measure.axis = onAxis
     return <div data-testid="measure-3d" />
   },
 }))
@@ -151,7 +157,7 @@ describe('Viewport', () => {
     expect(onSelect).toHaveBeenCalledWith(null)
   })
 
-  it('D (Dimension) measures point to point (task U3): banner, live distance, Escape ends it first', () => {
+  it('D (Dimension) measures point to point (task U3): banner, live distance; Escape clears, then ends (DF21)', () => {
     const onSelect = vi.fn()
     renderUi(<Viewport mesh={mesh} units="mm" onSelect={onSelect} />)
     const region = screen.getByRole('region')
@@ -161,11 +167,66 @@ describe('Viewport', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Click two points to measure')
     act(() => measure.pick?.([0, 0, 0]))
     expect(screen.getByRole('status')).toHaveTextContent('Click the second point')
+    expect(screen.getByRole('status')).toHaveTextContent('Hold Shift to lock to an axis')
+    // Shift locks the line to an axis (DF20): the banner names it
+    act(() => measure.axis?.('y'))
+    expect(screen.getByRole('status')).toHaveTextContent('Along Y')
+    act(() => measure.axis?.(null))
     act(() => measure.pick?.([3, 4, 12]))
     expect(region).toHaveTextContent('Distance 13.00 mm (ΔX 3.00 mm, ΔY 4.00 mm, ΔZ 12.00 mm).')
+    expect(screen.getByRole('status')).toHaveTextContent('Click or press Esc to clear')
+    // with two points, Escape clears them and keeps the tool (DF21)
+    fireEvent.keyDown(region, { key: 'Escape' })
+    expect(region).not.toHaveTextContent('Distance 13.00 mm')
+    expect(screen.getByTestId('measure-3d')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Click two points to measure')
+    // with none, Escape ends the tool
     fireEvent.keyDown(region, { key: 'Escape' })
     expect(screen.queryByTestId('measure-3d')).toBeNull()
     expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it('with two points set, the next click only clears them, also on empty space (DF21)', () => {
+    renderUi(<Viewport mesh={mesh} units="mm" />)
+    const region = screen.getByRole('region')
+    fireEvent.keyDown(region, { key: 'd' })
+    act(() => measure.pick?.([0, 0, 0]))
+    act(() => measure.pick?.([3, 4, 0]))
+    expect(region).toHaveTextContent('Distance 5.00 mm')
+    act(() => measure.pick?.([9, 9, 9]))
+    expect(region).not.toHaveTextContent('Distance')
+    expect(screen.getByRole('status')).toHaveTextContent('Click two points to measure')
+    // a click on nothing with one point keeps it; with two it clears
+    act(() => measure.pick?.([0, 0, 0]))
+    act(() => measure.pick?.(null))
+    expect(screen.getByRole('status')).toHaveTextContent('Click the second point')
+    act(() => measure.pick?.([0, 0, 2]))
+    act(() => measure.pick?.(null))
+    expect(screen.getByRole('status')).toHaveTextContent('Click two points to measure')
+  })
+
+  it('a shell-owned measure (DF19): no Measure button here, the prop drives the tool', () => {
+    const onMeasuringChange = vi.fn()
+    function Host(): React.JSX.Element {
+      const [on, setOn] = useState(false)
+      return (
+        <Viewport
+          mesh={mesh}
+          measuring={on}
+          onMeasuringChange={(next) => {
+            onMeasuringChange(next)
+            setOn(next)
+          }}
+        />
+      )
+    }
+    renderUi(<Host />)
+    expect(screen.queryByRole('button', { name: /Measure/ })).toBeNull()
+    fireEvent.keyDown(screen.getByRole('region'), { key: 'd' })
+    expect(onMeasuringChange).toHaveBeenCalledWith(true)
+    expect(screen.getByRole('region')).toHaveAttribute('data-measuring')
+    fireEvent.keyDown(screen.getByRole('region'), { key: 'Escape' })
+    expect(onMeasuringChange).toHaveBeenLastCalledWith(false)
   })
 
   it('pick mode shows the banner and Escape cancels from anywhere', () => {
