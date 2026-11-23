@@ -818,7 +818,8 @@ function slotTool(op: Op<'profile'>, lib: Library): DfmWarning[] {
 
 /**
  * Tab rules of a through cut of a closed loop with `count` tabs (`tabs.positions` count as
- * theirs): `dfm.tabsUnused` when the slot covers the whole opening, `dfm.tabsNone`, `dfm.tabsThin`.
+ * theirs): `dfm.tabsUnused` when the slot covers the whole opening, `dfm.tabsNone`, `dfm.tabsThin`,
+ * `dfm.tabsThick` (DF50).
  */
 function tabRules(
   op: Op<'profile'>,
@@ -869,6 +870,21 @@ function tabRules(
             { suggestion: atLeast(limit) },
           ),
         )
+    // DF50: tabs stand on the material an earlier setup left under the slot; at or above its
+    // top they leave nothing to cut (the stock extent itself is a validation error)
+    const material = op.throughDepth
+    if (material !== undefined && op.tabs.thickness >= material - EPSILON)
+      out.push(
+        warning(
+          'dfm.tabsThick',
+          op,
+          'tabs.thickness',
+          `tabs.thickness ${mm(op.tabs.thickness)} reaches the stock face: an earlier setup ` +
+            `leaves only ${mm(material)} of material under the slot`,
+          { thickness: op.tabs.thickness, material },
+          { suggestion: atMost(material) },
+        ),
+      )
   }
   return out
 }

@@ -26,7 +26,8 @@ export function useTempDir(): { dir: string } {
     state.dir = await mkdtemp(join(tmpdir(), 'dfyom-persist-'))
   })
   afterEach(async () => {
-    await rm(state.dir, { recursive: true, force: true })
+    // retries: a store's write may still land while the directory is removed (ENOTEMPTY, X3)
+    await rm(state.dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
   return state
 }

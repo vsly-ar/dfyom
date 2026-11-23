@@ -384,7 +384,9 @@ function shapeTab(
     const k = hits.length === 1 || dist(start) <= dist(end) ? hits[0]! : hits[1]!
     return ends[k]!
   }
-  const tabTop = -T + op.tabs.thickness
+  // tabs stand on the material left under the slot (`throughDepth`, DF50)
+  const floor = -(op.throughDepth ?? T)
+  const tabTop = floor + op.tabs.thickness
   const band = prism(
     bandRegion.unwrap(),
     'shrink',
@@ -393,7 +395,14 @@ function shapeTab(
     { wall, top: topFace, bottom: AIR },
     ctx,
   )
-  const nominal = prism(slot, 'shrink', tabTop, -T, { wall: () => AIR, top: AIR, bottom: AIR }, ctx)
+  const nominal = prism(
+    slot,
+    'shrink',
+    tabTop,
+    floor,
+    { wall: () => AIR, top: AIR, bottom: AIR },
+    ctx,
+  )
   return band.andThen((m) => nominal.map((n) => ({ band: m, nominal: n })))
 }
 

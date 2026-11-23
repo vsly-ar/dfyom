@@ -21,7 +21,8 @@ export function generateProfile(input: ProfileInput, steps: Steps = noSteps): Ap
   const { tool, cutting, heights, stock, operation: op, strategy: st } = input
   const shape = op.shape.contour
   const c = op.shape.center
-  const T = stock.thickness
+  // the material left under the slot (DF50): earlier setups may have cleared some from below
+  const T = op.throughDepth ?? stock.thickness
   const R = tool.diameter / 2
   const sw = op.slotWidth
   const issues = commonIssues(input)
@@ -54,7 +55,7 @@ export function generateProfile(input: ProfileInput, steps: Steps = noSteps): Ap
         'invariant',
         'operation.tabs.thickness',
         'range',
-        'tabs.thickness must be > 0 and < stock thickness',
+        'tabs.thickness must be > 0 and < the material it cuts through',
         {
           thickness: op.tabs.thickness,
         },

@@ -105,6 +105,7 @@ export const ProfileGeometrySchema = z.object({
   side: z.enum(['outside', 'inside', 'on']),
   slotWidth: z.number(),
   depth: z.number().exactOptional(),
+  throughDepth: z.number().exactOptional(),
   tabs: z.object({
     count: z.number(),
     width: z.number(),
