@@ -224,11 +224,15 @@ Task 1.4. `run.md` § Safety is drafted on `machine-lane` (hardening 1.1); on `m
 - **Run (in-process host, virtual machine):** the cycle's moves land at each target in machine coordinates, also after a re-zero at a shifted position; ticks cleared by a G54 change from another source; `notAtPoint`, `spindleOn`, `alignmentPending`; permission per source on a loopback serial connection (`machine-lane`).
 - **UI:** component tests of the step in the prompt; the hidden e2e of the phase 1 exit ([proposal](../plans/proposal-multi-setup-alignment.md#exit-criteria-per-phase)).
 
+## Decided by the user (2026-11-23, "AL ok")
+
+- **AL1:** "not placed at all" means DFYOM need not suggest a zero; the default stays the up face's front-left corner.
+- **AL2:** Z0 stays on the up face; only X/Y are free (Q61).
+- **AL3:** the `alignmentPending` gate applies on every connection, the virtual machine included.
+- **AL4:** pointer moves are sent as `$J=` jogs, so jog cancel and Stop end them and a move outside the travel is refused with a message.
+
 ## Open questions
 
-- **Zero "not placed at all":** read here as "DFYOM need not suggest a zero; the default stays the corner". Does the user also want a setup with no zero shown until the operator picks one?
-- **Z zero:** Q61 frees X/Y; Z0 stays on the up face. Is a Z zero elsewhere (the table, a step) wanted?
 - **Edge points on side setups:** a notch across the edge between the top and the front is reachable from both; is a mark on a face that is vertical in the new setup ever usable other than by its edge (the outline rule says only on the outline)?
 - **One dialog or a panel:** does the step belong in the setup-change prompt or in its own Run panel the prompt opens? (UI review.)
 - **Flip axis of registration holes:** holes for a flip need the flip axis fixed in the machine frame (dowels in the spoilboard); how is the axis shown and checked when the zero corner moves to the other side after the flip?
-- **Gate on the virtual machine:** `alignmentPending` applies on every connection for one muscle memory; agents on the virtual machine must then tick or `skipUnticked`. Acceptable?
