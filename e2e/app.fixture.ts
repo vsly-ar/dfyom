@@ -24,13 +24,8 @@ export interface AppFixture {
 /** Record a Playwright trace of every launch (CI, or DFYOM_E2E_TRACE=1); kept only for a failed test. */
 const TRACE = !!process.env['CI'] || process.env['DFYOM_E2E_TRACE'] === '1'
 
-/**
- * Launches the built app on `dataDir` and collects its windows' console errors. The fixture uses
- * it; a test may launch again on the same data dir to close and reopen the app.
- */
-export async function launchApp(
-  dataDir: string,
-): Promise<{ app: ElectronApplication; rendererErrors: string[] }> {
+/** The environment of an app launch: the built renderer, windows hidden. */
+export function launchEnv(): Record<string, string> {
   // Without ELECTRON_RENDERER_URL the app loads the built renderer, not a dev server.
   const env = Object.fromEntries(
     Object.entries(process.env).filter(
@@ -40,13 +35,26 @@ export async function launchApp(
   )
   // Windows stay hidden (no pop-ups, no focus stealing); DFYOM_E2E_SHOW=1 shows them for debugging.
   if (process.env['DFYOM_E2E_SHOW'] !== '1') env['DFYOM_HIDE_WINDOWS'] = '1'
+  return env
+}
+
+/**
+ * Launches the built app on `dataDir` and collects its windows' console errors. The fixture uses
+ * it; a test may launch again on the same data dir to close and reopen the app. `args` follow
+ * `--data-dir` (e.g. a project file to open, hardening U5).
+ */
+export async function launchApp(
+  dataDir: string,
+  args: readonly string[] = [],
+): Promise<{ app: ElectronApplication; rendererErrors: string[] }> {
+  const env = launchEnv()
   // DFYOM_E2E_APP runs the tests on a packaged app's executable instead (npm run smoke:packaged,
   // docs/conventions/packaging.md#smoke-test).
   const packaged = process.env['DFYOM_E2E_APP']
   const app = await electron.launch(
     packaged
-      ? { executablePath: packaged, args: [`--data-dir=${dataDir}`], env }
-      : { args: ['out/main/index.js', `--data-dir=${dataDir}`], env },
+      ? { executablePath: packaged, args: [`--data-dir=${dataDir}`, ...args], env }
+      : { args: ['out/main/index.js', `--data-dir=${dataDir}`, ...args], env },
   )
   const rendererErrors: string[] = []
   const watched = new WeakSet<Page>()

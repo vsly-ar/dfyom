@@ -1,6 +1,7 @@
 // The window's app commands from the native menu and the keyboard (task 3.6): New / Open / Save /
 // Save as (Ctrl/Cmd+N, O, S, Shift+S), undo/redo, modes, panel toggles, the shortcut list (`?`)
-// Apply (Ctrl/Cmd+Enter, task P3) and Settings (Ctrl/Cmd+,). Menu items and keys run the same handlers as the buttons. A key the window handled is not
+// Apply (Ctrl/Cmd+Enter, task P3), Settings (Ctrl/Cmd+,), Help → Connect an agent… (A4) and files
+// handed over by main to open (U5). Menu items and keys run the same handlers as the buttons. A key the window handled is not
 // run again when the menu's accelerator reports it too (platforms differ in who sees it first).
 // Doc: docs/conventions/ui.md#app-shell, #keyboard-shortcuts
 import { useEffect, useRef } from 'react'
@@ -59,6 +60,8 @@ export function useAppCommands(handlers: AppCommandHandlers): void {
           return h.onToggleInspector()
         case 'help.shortcuts':
           return ui.getState().setShortcutsOpen(true)
+        case 'help.connectAgent':
+          return ui.getState().setConnectAgentOpen(true)
         case 'app.settings':
           return ui.getState().setSettingsOpen(true)
         case 'project.apply': {
@@ -76,6 +79,12 @@ export function useAppCommands(handlers: AppCommandHandlers): void {
     }
     const offMenu = bridge.menu.onAction((action) => {
       if (!isKeyEcho(action)) run(action)
+    })
+    // Files from Finder, launch arguments or a second launch (ui.md#project-files, U5) take File →
+    // Open's own path, one after the other: each sees the window as the one before left it.
+    let opening: Promise<void> = Promise.resolve()
+    const offOpenFile = bridge.window.onOpenFile((file) => {
+      opening = opening.then(() => files.getState().openFile(file))
     })
 
     const onKey = (e: KeyboardEvent) => {
@@ -119,6 +128,7 @@ export function useAppCommands(handlers: AppCommandHandlers): void {
     window.addEventListener('keydown', onKey)
     return () => {
       offMenu()
+      offOpenFile()
       window.removeEventListener('keydown', onKey)
     }
   }, [bridge, files, ui])

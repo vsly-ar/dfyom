@@ -15,6 +15,7 @@ import {
   IPC,
   type AgentSessionInfo,
   type CallReply,
+  type ConnectInfo,
   type LocalHttpState,
   type OpenedWindow,
   type ProjectSnapshot,
@@ -24,6 +25,7 @@ import {
 } from '../shared/preload-api'
 import type { Dispatcher } from '../core/commands/dispatcher'
 import type { OpenProjectInfo } from '../core/project/lifecycle'
+import { connectInfo, type Installation } from './connect-agent'
 import { evaluationView, followEvaluations, planEvaluationView } from './evaluation-push'
 import {
   chooseExportFile,
@@ -107,9 +109,9 @@ function inWindow(r: CallReply, window: OpenedWindow): CallReply {
 export interface WindowSessions {
   /**
    * A new window as a session, bound to `key` if given, shown when ready; ended when the window
-   * closes. Cascaded from the focused window.
+   * closes. Cascaded from the focused window. Returns the window.
    */
-  open(key?: string): void
+  open(key?: string): BrowserWindow
   /**
    * The app quits now (every quit question answered, src/main/index.ts): windows close without
    * closing their project first; host.shutdown closes them (unsaved changes stay recoverable).
@@ -138,6 +140,7 @@ export function registerProjectIpc(
   settings: SettingsStore,
   windows: WindowFactory,
   folders: DialogFolders,
+  installation: Installation,
 ): WindowSessions {
   const byContents = new Map<number, WindowSession>()
   // App quit closes every project itself (host.shutdown, unsaved changes stay recoverable); set
@@ -227,6 +230,10 @@ export function registerProjectIpc(
     if (sessionOf(event) === undefined || http.server === undefined) return { enabled: false }
     return { enabled: true, port: http.server.port }
   })
+  // Help → Connect an agent… (docs/conventions/ui.md#connect-an-agent-hardening-a4)
+  ipcMain.handle(IPC.agentsConnectInfo, (event): ConnectInfo | null =>
+    sessionOf(event) === undefined ? null : connectInfo(installation, http.server !== undefined),
+  )
   ipcMain.handle(IPC.projectSnapshot, (event): ProjectSnapshot | null => {
     const ws = sessionOf(event)
     if (ws === undefined) return null
@@ -510,6 +517,7 @@ export function registerProjectIpc(
       const win = windows.create(BrowserWindow.getFocusedWindow() ?? undefined)
       attach(win, key)
       windows.reveal(win)
+      return win
     },
     attachLibrary(win) {
       attach(win, undefined)

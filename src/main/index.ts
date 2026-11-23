@@ -4,7 +4,7 @@
 import { app, BrowserWindow, dialog, screen } from 'electron'
 import { join, resolve } from 'node:path'
 import { RENDERER_LOG_LEVEL_ARG, type Logger, type LogLevel } from '../shared/logging'
-import { SETTINGS_ARG, WINDOW_KIND_ARG, type WindowKind } from '../shared/preload-api'
+import { IPC, SETTINGS_ARG, WINDOW_KIND_ARG, type WindowKind } from '../shared/preload-api'
 import type { AppSettings } from '../shared/settings'
 import { createAppHost } from './host/app-host'
 import { registerProjectIpc, type WindowFactory, type WindowSessions } from './ipc'
@@ -15,6 +15,7 @@ import { createMachineClient } from './machine/spawn'
 import { createLocalHttpControl, localHttpSetting } from './mcp/http'
 import { libraryHandlesMenuAction } from './library-context'
 import { installAppMenu } from './menu'
+import { createFileQueue, fileRoute, projectFilesFromArgv, takesInstanceLock } from './open-file'
 import { createExportFiles } from './persistence/export-file'
 import { resolveAppData } from './persistence/paths'
 import {
@@ -55,6 +56,8 @@ if (hideWindows && process.platform === 'darwin') app.setActivationPolicy('acces
 const ready = new WeakMap<BrowserWindow, boolean>()
 /** How each window starts; maximized / full screen apply when it is shown (never in hidden runs). */
 const starts = new WeakMap<BrowserWindow, WindowStart>()
+/** Windows whose page finished loading: their preload listens for files to open. */
+const loaded = new WeakSet<BrowserWindow>()
 
 /**
  * A window, not shown yet (`windowFactory` shows it). A project window is cascaded from `from`
@@ -111,6 +114,7 @@ function createAppWindow(
   ready.set(win, false)
   starts.set(win, start)
   win.once('ready-to-show', () => ready.set(win, true))
+  win.webContents.once('did-finish-load', () => loaded.add(win))
   // The native title adds the app name and version to the document title (ui.md#app-shell).
   win.on('page-title-updated', (event, title) => {
     event.preventDefault()
@@ -200,7 +204,32 @@ if (dataDir !== undefined) {
   app.setAppLogsPath(join(resolve(dataDir), 'logs'))
 }
 
+// Opening `.dfyom` files from Finder (docs/conventions/ui.md#project-files, hardening U5): macOS
+// sends `open-file` before `ready` when a file launched the app, so files wait in a queue until
+// the first window exists; so do the first launch's file arguments.
+const fileQueue = createFileQueue()
+app.on('open-file', (event, path) => {
+  event.preventDefault()
+  fileQueue.push(path)
+})
+for (const file of projectFilesFromArgv(process.argv, process.cwd())) fileQueue.push(file)
+
+// One app instance per data folder: a second launch hands its arguments to this one and quits
+// (Electron keys the lock by `userData`, set above). Not taken by the development build without
+// `--data-dir`, so `npm run dev` never hands itself to an installed DFYOM.
+const primary = !takesInstanceLock(app.isPackaged, dataDir) || app.requestSingleInstanceLock()
+/** A second launch without files: bring a window to the front (set once the app is ready). */
+let onBareSecondLaunch: (() => void) | undefined
+app.on('second-instance', (_event, argv, workingDirectory) => {
+  const files = projectFilesFromArgv(argv, workingDirectory)
+  if (files.length === 0) onBareSecondLaunch?.()
+  for (const file of files) fileQueue.push(file)
+})
+if (!primary) app.quit()
+
 void app.whenReady().then(async () => {
+  // a second instance quits without starting anything
+  if (!primary) return
   const { log, level, instance, forward, report } = await startLogging()
   // The 2D port: synchronously for the dispatcher, the same bytes for the worker lanes
   // (docs/architecture/shapes.md#where-the-2d-layer-runs). The module ships with the app.
@@ -296,7 +325,13 @@ void app.whenReady().then(async () => {
     appState,
     (win) => library.current?.isLibrary(win) === true,
   )
-  const sessions: WindowSessions = registerProjectIpc(host, http, settings, windows, appState)
+  const sessions: WindowSessions = registerProjectIpc(host, http, settings, windows, appState, {
+    packaged: app.isPackaged,
+    platform: process.platform,
+    resourcesPath: process.resourcesPath,
+    execPath: process.execPath,
+    mainDir: __dirname,
+  })
   // The one Library window (docs/conventions/ui-library-window.md): created hidden, shown by the
   // factory (never in hidden test runs).
   const libraryWindows = createLibraryWindows(host, sessions, {
@@ -353,6 +388,49 @@ void app.whenReady().then(async () => {
     // the licences window alone is not an app window
     if (BrowserWindow.getAllWindows().every((w) => licences.isLicences(w))) sessions.open()
   })
+
+  // Files from Finder, launch arguments and second launches (ui.md#project-files, U5): one project
+  // window runs File → Open's own path with each (recovery, lock and error prompts included).
+  // oldest first, so "the first project window" is the one opened first
+  const projectWindows = () =>
+    BrowserWindow.getAllWindows()
+      .filter(
+        (w) =>
+          !w.isDestroyed() &&
+          sessions.isWindow(w.webContents.id) &&
+          !libraryWindows.isLibrary(w) &&
+          !licences.isLicences(w),
+      )
+      .sort((a, b) => a.id - b.id)
+  const liveLastProject = () =>
+    lastProjectWindow !== undefined && !lastProjectWindow.isDestroyed()
+      ? lastProjectWindow
+      : undefined
+  fileQueue.start((file) => {
+    const wins = projectWindows()
+    const route = fileRoute(
+      wins.map((w) => ({
+        id: w.id,
+        hasProject: sessions.boundProject(w.webContents.id) !== undefined,
+      })),
+      liveLastProject()?.id,
+    )
+    const win =
+      (route.kind === 'window' ? wins.find((w) => w.id === route.id) : undefined) ?? sessions.open()
+    log.info({ win: win.id, route: route.kind }, 'project file handed to a window')
+    windows.focus(win)
+    const send = () => {
+      if (!win.isDestroyed()) win.webContents.send(IPC.windowOpenFile, file)
+    }
+    if (loaded.has(win)) send()
+    else win.webContents.once('did-finish-load', send)
+  })
+  onBareSecondLaunch = () => {
+    const win = liveLastProject() ?? projectWindows()[0]
+    if (win === undefined) sessions.open()
+    else windows.focus(win)
+    if (!hideWindows) app.focus({ steal: true })
+  }
 
   // Quitting asks first (docs/conventions/ui.md#confirmations): during a run whether to stop it
   // (docs/modes/run-v0.1.md#machine-host-and-protocol; quitting anyway stops it under control

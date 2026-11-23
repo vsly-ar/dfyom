@@ -1,0 +1,23 @@
+#!/bin/sh
+# dfyom: the headless CLI / MCP server of the installed DFYOM.app (hardening A4).
+# Runs the app's own binary as Node (ELECTRON_RUN_AS_NODE) on the CLI entry in the asar and
+# passes every argument on: `dfyom mcp`, `dfyom mcp --connect`, `dfyom tools`, `dfyom <name> …`.
+# Ships as DFYOM.app/Contents/Resources/bin/dfyom; may be symlinked onto the PATH.
+# Doc: docs/conventions/packaging.md#launcher, docs/architecture/llm-api.md#cli
+set -e
+
+# This script's real path, following symlinks (macOS readlink has no -f before 12.3).
+self=$0
+while [ -L "$self" ]; do
+  target=$(readlink "$self")
+  case $target in
+    /*) self=$target ;;
+    *) self=$(dirname "$self")/$target ;;
+  esac
+done
+bin=$(cd "$(dirname "$self")" && pwd -P)
+contents=$(dirname "$(dirname "$bin")")
+
+ELECTRON_RUN_AS_NODE=1
+export ELECTRON_RUN_AS_NODE
+exec "$contents/MacOS/DFYOM" "$contents/Resources/app.asar/out/main/cli.js" "$@"

@@ -35,6 +35,7 @@ import { StatusBar } from './StatusBar'
 import { ProjectDialogs } from './project/ProjectDialogs'
 import { ShellViewport } from './ShellViewport'
 import { ShortcutsDialog } from './ShortcutsDialog'
+import { ConnectAgentDialog } from './ConnectAgentDialog'
 import { useAppCommands } from './useAppCommands'
 import { sidePanelsOf, useModePanels } from './useModePanels'
 
@@ -320,6 +321,7 @@ export function AppShell(): React.JSX.Element {
         <CloseProjectDialog />
         <ProjectDialogs />
         <ShortcutsDialog />
+        <ConnectAgentDialog />
         <ModeDialogs mode={mode} doc={doc} />
       </div>
     </ApplyScope>
