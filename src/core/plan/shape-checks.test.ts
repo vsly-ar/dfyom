@@ -220,7 +220,10 @@ describe('order checks of general shapes', () => {
       shape: { kind: 'named', shapeId: 'shape2', center: ['74', '30'], rotation: '10' },
     })
     await s.run('plan.operation.move', { planId, planOperationId: profile, toIndex: 0 })
-    expect(loose()).toEqual([])
+    // not inside it any more, but still after the cut that releases the part (DF57)
+    expect(loose()).toEqual([
+      expect.objectContaining({ planOperationId: pocket, rule: 'releaseFirst' }),
+    ])
   })
 })
 

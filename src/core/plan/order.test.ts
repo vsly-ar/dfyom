@@ -107,6 +107,31 @@ describe('default order: the freeing cut last', () => {
     expect(warnings(s, planId).filter((w) => w.code === 'plan.loosePiece')).toEqual([])
   })
 
+  it('DF57: the outline releases the part, so it comes after operations outside its box', async () => {
+    const s = await planSetup({ part: false })
+    // a 6 mm pocket inside the outline, then a 4 mm rebate across its back edge (centre outside
+    // the outline's box, y 54 > 52): the freeing rule alone let the 6 mm run cut the outline first
+    await pocket(s, rect('50', '30', '20', '20', '4'))
+    await outline(s)
+    await pocket(s, rect('50', '54', '20', '10', '2'))
+    await s.run('project.apply', {})
+    const planId = await s.create()
+    expect(designIds(s.plan(planId))).toEqual(['pocket2', 'pocket1', 'profile1'])
+    expect(runs(s.plan(planId))).toHaveLength(2)
+    expect(warnings(s, planId).filter((w) => w.code === 'plan.loosePiece')).toEqual([])
+    // a user's order that releases the part first warns for the rebate after it
+    const outlineOp = opsOf(s.plan(planId))[2]!.id
+    const rebateOp = opsOf(s.plan(planId))[0]!.id
+    await s.run('plan.operation.move', { planId, planOperationId: outlineOp, toIndex: 0 })
+    expect(warnings(s, planId).filter((w) => w.code === 'plan.loosePiece')).toEqual([
+      expect.objectContaining({ planOperationId: rebateOp, rule: 'releaseFirst' }),
+      expect.objectContaining({
+        rule: 'profileFirst',
+        params: { profile: 'profile1', operation: 'pocket1' },
+      }),
+    ])
+  })
+
   it('an inside cutout is cut before the outline enclosing it', async () => {
     const s = await planSetup({ part: false })
     await outline(s)

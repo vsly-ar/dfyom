@@ -6,15 +6,15 @@
 import { fail, Ok, type AppResult } from '../../shared/result'
 import type { IdGenerator } from '../commands/context'
 import type { Part } from '../design/operation'
-import { DIRECTION, DIRECTION_LABEL, type Direction } from '../geometry/face'
+import { DIRECTION, DIRECTION_LABEL, SETUP_ORDER, type Direction } from '../geometry/face'
 import type { Region2dPort } from '../geometry/2d/port'
 import type { Stock } from '../library/stock'
 import type { PlanWarning } from './checks'
 import { defaultOrder, operationDirections, orderFindings } from './order'
 import type { PlanDTO, PlanOperationDTO, SetupDTO, SetupRotation } from './plan.dto'
 
-/** Default setup order (decision 3): the bottom first as a datum, the sides 0–3, the top last. */
-export const SETUP_ORDER: readonly Direction[] = ['-z', '-y', '+x', '+y', '-x', '+z']
+/** Default setup order (decision 3), defined with the face model (design reads it too, DF50). */
+export { SETUP_ORDER }
 
 export const setupDirection = (s: Pick<SetupDTO, 'direction'>): Direction => s.direction ?? '+z'
 export const setupRotation = (s: Pick<SetupDTO, 'rotation'>): SetupRotation => s.rotation ?? 0

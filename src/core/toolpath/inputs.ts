@@ -112,7 +112,8 @@ export function nearestNeighbourOrder<T extends { readonly center: readonly [num
 
 /**
  * A general profile (v0.3 T2 wiring) as `generateRegionProfile` takes it, in the face frame: K3's
- * chain from its start point, through cuts from the stock face (Z 0) down `thickness`, blind `on`
+ * chain from its start point, through cuts from the stock face (Z 0) down `throughDepth` (DF50) or
+ * `thickness`, blind `on`
  * grooves down their depth; tab centres only on a closed loop cut through, resolved on the local
  * `stock` (tabs off free sides, `resolveProfileTabs`).
  * Doc: docs/modes/plan-v0.3.md#wiring-t1-t2, docs/modes/design-v0.4.md#tabs-relocate-off-free-sides-tb1
@@ -129,7 +130,8 @@ export function regionProfileOperation(
     side: op.side,
     slotWidth: op.slotWidth,
     onZ: 0,
-    depth: op.depth ?? stock.thickness,
+    // a through cut: the material left under the slot (DF50), else the stock extent
+    depth: op.depth ?? op.throughDepth ?? stock.thickness,
     through,
     tabs: {
       positions: closed && through ? [...resolveProfileTabs(op, stock).centres] : [],
@@ -209,9 +211,16 @@ export function toGeneratorInputs(
           data: { planOperationId: id, operation: op.id },
         },
       )
-    // generators stay top-down: the operation as read in its face frame, without the direction
+    // generators stay top-down: the operation as read in its face frame, without the direction;
+    // a through profile cuts the material the plan's earlier setups left (DF50: the plan's setup
+    // order, not the design's default one)
     const { direction: _, ...local } = g
-    ops.push(local)
+    if (local.kind === 'profile') {
+      const { throughDepth: __, ...rest } = local
+      ops.push(
+        input.throughDepth === undefined ? rest : { ...rest, throughDepth: input.throughDepth },
+      )
+    } else ops.push(local)
   }
   // the stock as seen in the setup: face rectangle on X/Y, extent along `n` as the thickness
   const stock: StockGeometry = localStock(input.setup.direction, partStock)

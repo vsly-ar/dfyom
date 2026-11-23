@@ -453,7 +453,9 @@ function profile(op: AnalyticOperation<'profile'>, stock: StockGeometry): AppRes
     cut.push({ mesh: kept.unwrap(), at })
   }
 
-  // tabs: offset bands across the slot plus ov on both sides, up from below the stock bottom
+  // tabs: offset bands across the slot plus ov on both sides, up from below the stock bottom to
+  // the tab top above the material left under the slot (`throughDepth`, DF50)
+  const tabTop = -(op.throughDepth ?? T) + op.tabs.thickness
   const room = inradius(shape)
   const inner = outside ? Math.min(OVERSHOOT, room / 2) : s + Math.min(OVERSHOOT, (room - s) / 2)
   const outer = outside ? -s - OVERSHOOT : -OVERSHOOT
@@ -466,18 +468,19 @@ function profile(op: AnalyticOperation<'profile'>, stock: StockGeometry): AppRes
     const along = { from: c - op.tabs.width / 2, to: c + op.tabs.width / 2 }
     const band = offsetBand(
       shape,
-      { ...along, inner, outer, bottom: -T - 2 * OVERSHOOT, top: -T + op.tabs.thickness },
+      { ...along, inner, outer, bottom: -T - 2 * OVERSHOOT, top: tabTop },
       { top: tabTable[i]!.top, bottom: AIR, side: AIR, end: tabTable[i]!.end },
     )
-    // nominal tab: exactly across the slot, from the stock bottom to the tab top
+    // nominal tab: exactly across the slot, from the bottom of the material left under it (the
+    // stock bottom unless an earlier setup cleared some, DF50) to the tab top
     const exact = offsetBand(
       shape,
       {
         ...along,
         inner: outside ? 0 : s,
         outer: outside ? -s : 0,
-        bottom: -T,
-        top: -T + op.tabs.thickness,
+        bottom: -(op.throughDepth ?? T),
+        top: tabTop,
       },
       { top: AIR, bottom: AIR, side: AIR, end: [AIR, AIR] },
     )

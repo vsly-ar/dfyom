@@ -112,7 +112,7 @@ New checks (codes to register with the implementation):
 | `dfm.reach`     | pocket, drilling, profile (`depth`; profile: `on`) | Depth from the stock's outer face of the direction to the deepest point > the reach of the operation's [tool](#operation-tool) (specific: `stickout`, else `fluteLength`; generalized: the longest of the matching library tools; none matching: skipped). | warning  |
 | `dfm.setups`    | part                                               | The part uses more than one approach direction: "needs N setups (top, right, bottom)". Information for beginners; Plan derives them.                                                                                                                       | info     |
 
-Out of v0.2 DFM (Q15): workholding and clamping access, material already removed by an earlier setup, and thin walls between features from opposite faces (a geometry check later).
+Out of v0.2 DFM (Q15): workholding and clamping access, material already removed by an earlier setup, and thin walls between features from opposite faces (a geometry check later). Since hardening DF50 a through profile's depth and tabs count the material that opposite facings and pockets of an earlier setup cleared under its slot ([plan-v0.2.md § Material removed by earlier setups](plan-v0.2.md#material-removed-by-earlier-setups)); `dfm.reach` measures a through profile by that depth.
 
 ### Implementation (task A1)
 
