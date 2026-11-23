@@ -18,6 +18,25 @@
   position: static;
 }
 
+/* DF45: in the shell's 3D view, bottom-centre; never over the navigator or the inspector */
+.anchor {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-toast);
+  pointer-events: none;
+}
+
+.viewport[data-anchored] {
+  position: absolute;
+  right: auto;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  justify-items: center;
+  max-width: min(420px, calc(100% - 32px));
+  pointer-events: auto;
+}
+
 .toast {
   display: flex;
   align-items: center;

@@ -561,9 +561,10 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
   await expect(
     inspector.getByRole('radiogroup', { name: 'Side' }).getByRole('radio', { name: 'On line' }),
   ).toBeChecked()
+  // the toast shows over the 3D view since DF45, not over the navigator
   await expect(
     page
-      .getByTestId('navigator')
+      .getByRole('region', { name: /^Notifications/ })
       .getByText('Side set to On line: an open path is cut on the line.'),
   ).toBeVisible()
   // a blind 1 mm groove

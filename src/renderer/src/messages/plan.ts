@@ -88,6 +88,8 @@ export const planMessages = {
     unnamed: 'Unnamed machine',
     label: 'Machine',
     placeholder: 'Choose a machine',
+    /** Plan start card, several machines and none remembered (DF45): why Create plan waits. */
+    choose: 'Choose the machine to plan for.',
     // dogfood re-report of DF29: the machine is needed to plan, not only to export
     empty:
       'The machine library is empty. Add a machine: the plan checks the stock and clearance height against its travel and the feeds against its limits, and exports gCode for it.',
@@ -125,7 +127,8 @@ export const planMessages = {
       ]
         .filter((x) => x !== undefined)
         .join(' · '),
-    rotation: 'Rotation',
+    /** DF45: a field label, not only the group's name (the control had no visible label). */
+    rotation: 'Rotation on the table',
     rotationHint: 'About the spindle axis; the work zero moves to the new front-left corner.',
     clearanceHeight: 'Clearance height',
     retractHeight: 'Retract height',
@@ -192,6 +195,9 @@ export const planMessages = {
     warnings: 'Export warnings',
     noWarnings: 'No machine warnings.',
     close: 'Close',
+    /** DF45: Export works with outdated toolpaths; its hint says it regenerates them. */
+    generatesFirst: (n: number) =>
+      `Export generates the ${plural(n, 'missing or outdated toolpath', 'missing or outdated toolpaths')} first.`,
     regenerated: (n: number) => `${plural(n, 'toolpath was', 'toolpaths were')} generated first.`,
   },
 

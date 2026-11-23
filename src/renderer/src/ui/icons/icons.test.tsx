@@ -60,6 +60,7 @@ describe('field illustrations', () => {
       'clonePath',
       'cloneStart',
       'cloneSpacing',
+      'machine',
       'stock-length',
       'stock-width',
       'stock-thickness',

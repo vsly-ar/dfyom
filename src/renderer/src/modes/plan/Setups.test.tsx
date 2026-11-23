@@ -289,6 +289,13 @@ describe('Setup panel', () => {
     expect(within(insp).getByText('1 of 2')).toBeInTheDocument()
     expect(within(insp).getByText('Bottom face up to the spindle')).toBeInTheDocument()
     expect(within(insp).getByText(/G54 at the back left corner of the bottom/)).toBeInTheDocument()
+    // DF45: a labelled field, its hint in the support area describes the choice
+    expect(within(insp).getByText('Rotation on the table', { selector: 'label' })).toBeVisible()
+    expect(
+      within(insp).getByRole('radiogroup', { name: 'Rotation on the table' }),
+    ).toHaveAccessibleDescription(
+      'About the spindle axis; the work zero moves to the new front-left corner.',
+    )
     await t.user.click(within(insp).getByRole('radio', { name: '90°' }))
     await waitFor(() => expect(t.plan().setups[0]!.rotation).toBe(90))
     expect(t.callsOf('plan.setup.update')).toContainEqual({
