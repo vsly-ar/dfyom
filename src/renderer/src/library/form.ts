@@ -130,6 +130,26 @@ export function defaultToolValues(
 }
 
 /**
+ * The quick dialog's hidden overall length (DF26): it shows Stickout in place of Overall length,
+ * so the overall length is raised to stay longer than the stickout and the flute length (by a
+ * collet grip of 10 mm or ½″, rounded up to 1 mm or ⅛″) and never fails for a value the user
+ * cannot see. The Library window shows both fields and leaves them as entered.
+ */
+export function withQuickOverall(values: ToolDraft, units: UnitSystem): ToolDraft {
+  const oal = quantityOf(values.overallLength)?.canonical
+  const longest = Math.max(
+    ...[values.stickout, values.fluteLength].map((q) =>
+      q === undefined ? 0 : (quantityOf(q)?.canonical ?? 0),
+    ),
+  )
+  if (oal === undefined || longest < oal) return values
+  const total = longest + (units === 'mm' ? 10 : 12.7)
+  const source =
+    units === 'mm' ? String(Math.ceil(total)) : String(Math.ceil((total / 25.4) * 8) / 8)
+  return { ...values, overallLength: qdto('length', source, units) }
+}
+
+/**
  * A pointed chamfer mill's cutting edge (the cone's slant from tip to DC, design-v0.4.md
  * Implementation C1), rounded up to 0.5 mm or 1/16″ so a chamfer the tool can plunge also fits.
  */

@@ -70,11 +70,11 @@ function cutting(
     else missing.push(f)
   }
   if (missing.length > 0)
-    return fail('plan.check', `unresolved feeds: ${missing.join(', ')}`, {
+    return fail('plan.check', `${planOperationId}: unresolved feeds: ${missing.join(', ')}`, {
       issues: missing.map((f) => ({
         path: [planOperationId, f],
         rule: 'unresolved',
-        message: `${f} is not resolved`,
+        message: `${f} is not resolved: enter a value or pick a preset (plan_operation_update)`,
       })),
       where: WHERE,
       data: { planOperationId },

@@ -37,6 +37,8 @@ describe('settings store', () => {
       defaultAnchor: { u: 'centre', v: 'centre' },
       libraryUnits: 'mm',
       snapGrid: { mm: 1, inch: 1 / 16 },
+      autoApplyDelay: 10,
+      sidePanels: {},
     })
 
     await writeFile(join(tmp.dir, SETTINGS_FILE), JSON.stringify({ reduceMotion: true }))

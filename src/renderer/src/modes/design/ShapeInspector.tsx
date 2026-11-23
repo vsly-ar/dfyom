@@ -445,8 +445,8 @@ function ItemFields({ ctx }: { ctx: ItemEditContext }): React.JSX.Element {
   const item = ctx.dto
   const centre = (
     <div className={styles['pair']}>
-      <ItemQuantity ctx={ctx} path={['center', 0]} label={t.centerX} />
-      <ItemQuantity ctx={ctx} path={['center', 1]} label={t.centerY} />
+      <ItemQuantity ctx={ctx} path={['center', 0]} label={t.centerX} icon="positionX" />
+      <ItemQuantity ctx={ctx} path={['center', 1]} label={t.centerY} icon="positionY" />
     </div>
   )
   switch (item.kind) {
@@ -457,14 +457,14 @@ function ItemFields({ ctx }: { ctx: ItemEditContext }): React.JSX.Element {
           <ItemQuantity ctx={ctx} path={['length']} label={t.length} icon="length" />
           <ItemQuantity ctx={ctx} path={['width']} label={t.width} icon="width" />
           <ItemQuantity ctx={ctx} path={['cornerRadius']} label={t.cornerRadius} icon="corner" />
-          <ItemQuantity ctx={ctx} path={['rotation']} label={t.rotation} optional />
+          <ItemQuantity ctx={ctx} path={['rotation']} label={t.rotation} icon="rotation" optional />
         </>
       )
     case 'circle':
       return (
         <>
           {centre}
-          <ItemQuantity ctx={ctx} path={['diameter']} label={t.diameter} icon="width" />
+          <ItemQuantity ctx={ctx} path={['diameter']} label={t.diameter} icon="diameter" />
         </>
       )
     case 'obround':
@@ -473,7 +473,7 @@ function ItemFields({ ctx }: { ctx: ItemEditContext }): React.JSX.Element {
           {centre}
           <ItemQuantity ctx={ctx} path={['length']} label={t.length} icon="length" />
           <ItemQuantity ctx={ctx} path={['width']} label={t.width} icon="width" />
-          <ItemQuantity ctx={ctx} path={['rotation']} label={t.rotation} optional />
+          <ItemQuantity ctx={ctx} path={['rotation']} label={t.rotation} icon="rotation" optional />
         </>
       )
     case 'polygon':
@@ -481,7 +481,7 @@ function ItemFields({ ctx }: { ctx: ItemEditContext }): React.JSX.Element {
         <>
           {centre}
           <ItemQuantity ctx={ctx} path={['sides']} label={t.sides} />
-          <ItemQuantity ctx={ctx} path={['diameter']} label={t.diameter} icon="width" />
+          <ItemQuantity ctx={ctx} path={['diameter']} label={t.diameter} icon="diameter" />
           <Field label={t.across} kind="toggle">
             <SegmentedControl
               label={t.across}
@@ -501,7 +501,7 @@ function ItemFields({ ctx }: { ctx: ItemEditContext }): React.JSX.Element {
             icon="corner"
             optional
           />
-          <ItemQuantity ctx={ctx} path={['rotation']} label={t.rotation} optional />
+          <ItemQuantity ctx={ctx} path={['rotation']} label={t.rotation} icon="rotation" optional />
         </>
       )
     case 'path': {
@@ -512,8 +512,8 @@ function ItemFields({ ctx }: { ctx: ItemEditContext }): React.JSX.Element {
       return (
         <>
           <div className={styles['pair']}>
-            <ItemQuantity ctx={ctx} path={['start', 0]} label={t.startX} />
-            <ItemQuantity ctx={ctx} path={['start', 1]} label={t.startY} />
+            <ItemQuantity ctx={ctx} path={['start', 0]} label={t.startX} icon="positionX" />
+            <ItemQuantity ctx={ctx} path={['start', 1]} label={t.startY} icon="positionY" />
           </div>
           <Field
             label={t.closed}

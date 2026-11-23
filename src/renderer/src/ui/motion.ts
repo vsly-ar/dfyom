@@ -26,3 +26,14 @@ function snapshot(): boolean {
 export function useReducedMotion(): boolean {
   return useSyncExternalStore(subscribe, snapshot, () => false)
 }
+
+/**
+ * A motion token in ms from the root style (`--motion-fast`, …); 0 when reduced motion zeroes it,
+ * it is unset (tests without tokens.css) or there is no DOM: callers then skip the motion.
+ */
+export function motionMs(name: string): number {
+  if (typeof document === 'undefined') return 0
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  const n = Number.parseFloat(v)
+  return Number.isFinite(n) ? (v.endsWith('ms') ? n : n * 1000) : 0
+}

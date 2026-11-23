@@ -18,7 +18,6 @@ import {
   Icon,
   Button,
   ConfirmDialog,
-  EmptyState,
   ErrorMessage,
   IconButton,
   Menu,
@@ -80,9 +79,7 @@ function Section({
 export function PlanNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
   const [plan, choose] = useChosenPlan(doc)
   const call = usePlanCommand()
-  const [error, setError] = useState<AppErrorData | undefined>(undefined)
-  const [machinesAdded, setMachinesAdded] = useState(0)
-  const machines = useLibraryItems('machine', machinesAdded)
+  const machines = useLibraryItems('machine')
   const part = Object.values(doc.parts)[0]
 
   const create = async () => {
@@ -92,38 +89,14 @@ export function PlanNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
       partId: part.id,
       ...(machine === undefined ? {} : { machineLibraryItemId: machine.id }),
     })
-    setError(r.ok ? undefined : r.error)
     if (r.ok) choose((r.value as { planId: string }).planId)
   }
 
+  // no plan yet: "Plan the part" is a card over the view (DF29, PlanStart.tsx)
   if (plan === undefined)
     return (
       <div className={styles['navigator']}>
-        <div className={styles['emptyOps']}>
-          <EmptyState
-            icon={<Icon name="toolpath" />}
-            title={m.empty.title}
-            description={m.empty.description}
-            action={{
-              label: m.empty.action,
-              icon: <Icon name="add" />,
-              onClick: () => void create(),
-            }}
-          />
-          {machines?.length === 0 ? (
-            <>
-              <p className={styles['why']}>{m.machine.empty}</p>
-              <NewMachineDialog
-                units={doc.unitSystem}
-                onAdded={async () => {
-                  setMachinesAdded((n) => n + 1)
-                  return undefined
-                }}
-              />
-            </>
-          ) : null}
-          {error ? <ErrorMessage error={error} /> : null}
-        </div>
+        <p className={styles['emptyNote']}>{m.empty.navigator}</p>
       </div>
     )
   return <PlanView key={plan.id} doc={doc} plan={plan} choose={choose} onCreate={create} />

@@ -87,6 +87,39 @@
   background: var(--bg-app);
 }
 
+/* mode switch (DF30): the old mode's content slides out toward its window edge, the new one
+   slides in from there; reduced motion zeroes the durations (no phase is set then) */
+.side[data-phase='out'] {
+  animation: side-out var(--motion-fast) var(--ease-exit) forwards;
+  pointer-events: none;
+}
+
+.side[data-phase='in'] {
+  animation: side-in var(--motion-base) var(--ease-emphasized);
+}
+
+.side[data-side='navigator'] {
+  --side-shift: -1.5rem;
+}
+
+.side[data-side='inspector'] {
+  --side-shift: 1.5rem;
+}
+
+@keyframes side-out {
+  to {
+    opacity: 0;
+    transform: translateX(var(--side-shift));
+  }
+}
+
+@keyframes side-in {
+  from {
+    opacity: 0;
+    transform: translateX(var(--side-shift));
+  }
+}
+
 .side:focus-visible,
 .viewport:focus-visible {
   outline-offset: -2px;
@@ -278,6 +311,11 @@
   gap: var(--space-2);
   width: 100%;
   --field-label-width: 12rem;
+}
+
+/* a short choice (auto-apply delay, DF28) */
+.settingSelect {
+  width: 10rem;
 }
 
 .settingLabel {

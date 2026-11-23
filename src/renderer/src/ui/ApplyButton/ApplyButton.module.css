@@ -32,7 +32,42 @@
 }
 
 .button {
+  position: relative;
+  overflow: hidden;
   font-variant-numeric: tabular-nums;
+}
+
+/* auto-apply wait (DF28): a thin amber bar along the bottom drains until the changes apply;
+   static (full, dimmed) under reduced motion */
+.countdown {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--accent-icon);
+  opacity: 0.7;
+  transform-origin: left;
+  transform: scaleX(0);
+  animation-name: drain;
+  animation-timing-function: linear;
+  animation-fill-mode: both;
+  pointer-events: none;
+}
+
+.countdown[data-static] {
+  transform: none;
+  opacity: 0.4;
+  animation: none;
+}
+
+@keyframes drain {
+  from {
+    transform: scaleX(var(--countdown-from, 1));
+  }
+  to {
+    transform: scaleX(0);
+  }
 }
 
 /* the count: a tabular badge that rolls in when it changes (keyed by the count) */

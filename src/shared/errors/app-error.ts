@@ -130,3 +130,15 @@ export function withoutStack(d: AppErrorData): AppErrorData {
   if (cause === undefined) return rest
   return { ...rest, cause: 'code' in cause ? withoutStack(cause) : cause }
 }
+
+/**
+ * A message naming the first issue (field and rule text) and how many more there are, for
+ * refusals agents read (docs/architecture/llm-api.md#a7-refusals-that-say-what-to-do).
+ */
+export function issueSummary(issues: readonly Issue[]): string {
+  const first = issues[0]
+  if (first === undefined) return 'invalid value'
+  const path = first.path.length > 0 ? first.path.join('.') : '(value)'
+  const more = issues.length > 1 ? ` (+ ${issues.length - 1} more)` : ''
+  return `${path}: ${first.message}${more}`
+}

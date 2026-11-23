@@ -248,6 +248,17 @@ The field's adjust panel (the popover until DF9, [ui.md § Field](../conventions
 
 Switching modes **does not apply** ([decision 1](#decisions)): switching stays instant and never blocked ([mode switching](../conventions/ui.md#mode-switching)), and modes are per window. Plan mode shows the [pending notice](#stale-derived-results) on affected `draft` plans with an "Apply now" link; Run's pre-flight applies first through `run.job.start`.
 
+### Auto-apply (DF28)
+
+User's dogfood finding: pending edits apply by themselves after a quiet spell, so the follow-up work catches up without a keypress. Enter, Cmd/Ctrl+Enter and the button keep working as before.
+
+- **Setting:** "Auto-apply after" in the settings dialog: Off, 3, 5, 10 (default), 30 or 60 s (`autoApplyDelay` in seconds, 0 = Off, [ui.md § Settings](../conventions/ui.md#settings)); per app instance, every window follows it.
+- **Debounce:** the wait starts with the first pending edit and restarts with every further edit (the pending state's `version`), so it runs out only after that long without editing. It applies the window's project with `project.apply` exactly as the button does (the same undo entry, the same failure state).
+- **Armed only while it can help:** something is pending and known, no Apply is being sent or running, and the last Apply did not fail (a failure waits for the user: retrying it by itself would repeat the error). An agent's or another window's Apply that clears the pending state cancels the wait.
+- **Never under a modal dialog:** when the wait runs out while a modal dialog is open (`data-modal-dialog`: stock setup, New tool, a confirmation), it waits again for the full delay, so a form is never applied under the user.
+- **Shown on the button** while it waits: a 2 px amber bar along the button's bottom edge drains from the share of the wait that is left to empty (linear over the remaining time, restarted with each edit; `aria-hidden`). The tooltip adds "Applies by itself after 10 s without another edit (Settings)." Under reduced motion the bar stays full and does not drain; the tooltip still says it.
+- `shell/useAutoApply.ts` (timer and arming), `ApplyControl` (setting and call), `ApplyButton`'s `autoApply` prop (bar and tooltip).
+
 ### Windows and projects
 
 One project per window, so the button applies the window's project. Agents' edits update the count live; another project's pending changes never show.

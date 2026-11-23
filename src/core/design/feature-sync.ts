@@ -4,7 +4,7 @@
  * expanded again), and owned operations' issue paths are mapped back to the feature's fields.
  * Doc: docs/modes/design-v0.4.md#implementation-f3, docs/modes/features.md#validation-and-dfm
  */
-import type { AppError } from '../../shared/errors/app-error'
+import { type AppError, issueSummary } from '../../shared/errors/app-error'
 import { Err, fail, Ok, type AppResult } from '../../shared/result'
 import { reevaluate } from '../expression/quantity'
 import { deepEqual } from '../library/snapshot'
@@ -83,7 +83,7 @@ export function recalculateFeatures(
     if (deepEqual(spec.toDTO(f), spec.toDTO(feature))) continue
     const issues = spec.invariants(f)
     if (issues.length > 0)
-      return fail('model.invariant', `${feature.id}: ${issues.length} invalid value(s)`, {
+      return fail('model.invariant', `${feature.id}: ${issueSummary(issues)}`, {
         issues: issues.map((i) => ({ ...i, path: ['features', feature.id, ...i.path] })),
         where: 'recalculateFeatures',
         data: { featureId: feature.id },

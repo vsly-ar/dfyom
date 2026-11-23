@@ -16,7 +16,7 @@
  *   instance (path.ts), so skipping keeps ids, references and tool fields of the others.
  */
 import { z } from 'zod'
-import type { Issue, IssuePath } from '../../../shared/errors/app-error'
+import { type Issue, type IssuePath, issueSummary } from '../../../shared/errors/app-error'
 import { parseWith } from '../../../shared/parse'
 import { collect, Err, fail, Ok, type AppResult } from '../../../shared/result'
 import type { DfmWarning } from '../../geometry/model'
@@ -738,8 +738,7 @@ function arrangeClones(
 ): AppResult<{ ops: readonly Operation[]; start: number; end: number }> {
   const where = 'design.clones'
   const issues = [...sourceIssues(feature, ops, features), ...alongIssues(feature.rows, shapes)]
-  if (issues.length > 0)
-    return fail('model.invariant', `${issues.length} invalid value(s)`, { issues, where })
+  if (issues.length > 0) return fail('model.invariant', issueSummary(issues), { issues, where })
   const nested = new Set(sourceOperations(feature.source, ops).map((o) => o.id))
   const old = new Set(prev === undefined ? [] : sourceOperations(prev.source, ops).map((o) => o.id))
   const indices = ops.flatMap((o, i) =>
@@ -772,7 +771,7 @@ function arrangeClones(
   const path = featurePath(feature, next, shapes)
   const limit = limitIssues(path)
   if (limit.length > 0)
-    return fail('model.invariant', `${limit.length} invalid value(s)`, { issues: limit, where })
+    return fail('model.invariant', issueSummary(limit), { issues: limit, where })
   return Ok({ ops: next, start, end: start + owned })
 }
 

@@ -351,6 +351,27 @@ describe('agent session: reads and runtimes', () => {
     expect(t.value((await a.call('project.doc.get', {})).result)).toMatchObject({ name: 'A again' })
   })
 
+  // Spec: docs/architecture/llm-api.md#a5-unknown-arguments-and-projectclose
+  it('project.close without a key closes the bound project; unbound it names the fix', async () => {
+    const t = setup()
+    const s = t.session()
+    const none = expectErrCode((await s.call('project.close', {})).result, 'input.malformed')
+    expect(none.issues[0]).toMatchObject({ path: ['key'], rule: 'noProject' })
+    t.value((await s.call('project.create', { name: 'A', unitSystem: 'mm' })).result)
+    expect(t.value((await s.call('project.close', {})).result)).toEqual({ key: 'p1' })
+    expect(s.boundKey).toBeUndefined()
+    expect(t.projects.has('p1')).toBe(false)
+  })
+
+  it('an unknown argument names the closest valid one', async () => {
+    const t = setup()
+    const s = t.session()
+    t.value((await s.call('project.create', { name: 'A', unitSystem: 'mm' })).result)
+    const r = await s.call('job.wait', { jobId: 'j', timeout: 5 })
+    const e = expectErrCode(r.result, 'input.malformed')
+    expect(e.message).toContain('did you mean "timeoutSeconds"?')
+  })
+
   it('abortWaits ends pending job.wait calls (op.aborted); the job keeps running', async () => {
     const t = setup()
     const s = t.session()
