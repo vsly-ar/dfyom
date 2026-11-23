@@ -38,6 +38,7 @@ describe('machineSettingsDiff', () => {
       ['$122', null, '10 mm/s²'],
       ['$11', null, '0.01 mm'],
       ['$12', null, '0.002 mm'],
+      ['$27', null, '1 mm'],
       ['$130', '800 mm', '200 mm'],
       ['$131', '800 mm', '200 mm'],
       ['$132', '100 mm', '200 mm'],
@@ -53,7 +54,7 @@ describe('machineSettingsDiff', () => {
     expect(d.skipped).toEqual([
       { setting: '$31', field: 'spindle.minSpeed', value: 0, rule: 'notPositive' },
     ])
-    expect(d.ignored).toEqual([0, 1, 2, 3, 4, 5, 6, 10, 13, 21, 22, 23, 24, 25, 26, 27, 32])
+    expect(d.ignored).toEqual([0, 1, 2, 3, 4, 5, 6, 10, 13, 21, 22, 23, 24, 25, 26, 32])
   })
 
   it('skips travel without soft limits and the spindle range of a manual spindle', () => {

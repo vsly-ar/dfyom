@@ -23,4 +23,20 @@ describe('StopControl', () => {
     await user.keyboard('{Enter}')
     expect(onStop).toHaveBeenCalledTimes(1)
   })
+
+  it('with nothing to stop: aria-disabled, says why, clicks do nothing (DF35)', async () => {
+    const onStop = vi.fn()
+    const { user } = renderUi(
+      <StopControl onStop={onStop} disabledReason="Nothing to stop: the machine is not moving." />,
+    )
+    const stop = screen.getByRole('button', { name: 'Stop' })
+    expect(stop).toHaveAttribute('aria-disabled', 'true')
+    expect(stop).toHaveAccessibleDescription('Nothing to stop: the machine is not moving.')
+    await user.click(stop)
+    expect(onStop).not.toHaveBeenCalled()
+    // focusable, so keyboard and screen-reader users hear the reason
+    expect(stop).not.toHaveAttribute('disabled')
+    expect(stop).toHaveFocus()
+    await expectNoAxeViolations()
+  })
 })

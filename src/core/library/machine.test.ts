@@ -73,6 +73,29 @@ describe('Machine', () => {
     expect(expectOk(load(machineValues())).rigidity.isNone()).toBe(true)
   })
 
+  it('round-trips the homing corner, pull-off and soft limits; fixedGantry rigidity (DF33, DF36)', () => {
+    const full = {
+      ...machineValues(),
+      rigidity: 'fixedGantry' as const,
+      homingCorner: 'frontLeft' as const,
+      pullOff: len('3'),
+      softLimits: false,
+    }
+    const m = expectOk(load(full))
+    expect(m.homingCorner.unwrap()).toBe('frontLeft')
+    expect(m.pullOff.unwrap().canonical).toBe(3)
+    expect(m.softLimits.unwrap()).toBe(false)
+    expect(m.toDTO()).toEqual(full)
+    const plain = expectOk(load(machineValues()))
+    expect([
+      plain.homingCorner.isNone(),
+      plain.pullOff.isNone(),
+      plain.softLimits.isNone(),
+    ]).toEqual([true, true, true])
+    expect(issues({ ...machineValues(), pullOff: len('0') })).toEqual([['pullOff', 'positive']])
+    expectErrCode(load({ ...machineValues(), homingCorner: 'topRight' }), 'input.malformed')
+  })
+
   it('spindle power must be > 0; rigidity must be a preset', () => {
     const spindle = { control: 'gcode', maxSpeed: rpm('24000'), power: watt('0') }
     expect(issues({ ...machineValues(), spindle })).toEqual([['spindle.power', 'positive']])

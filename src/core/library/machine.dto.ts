@@ -13,11 +13,20 @@ export const RIGIDITY_PRESETS = [
   'extrusion',
   'hobby',
   'prosumer',
+  'fixedGantry',
   'benchMill',
   'rigidMill',
 ] as const
 export type Rigidity = (typeof RIGIDITY_PRESETS)[number]
 export const RigiditySchema = z.enum(RIGIDITY_PRESETS)
+
+/**
+ * XY corner the machine homes to (Z always homes up); GRBL `$23` bits 0 (X to −) and 1 (Y to −).
+ * Doc: docs/modes/run.md#machine-coordinates-and-the-homing-corner-df33
+ */
+export const HOMING_CORNERS = ['backRight', 'backLeft', 'frontRight', 'frontLeft'] as const
+export type HomingCorner = (typeof HOMING_CORNERS)[number]
+export const HomingCornerSchema = z.enum(HOMING_CORNERS)
 
 const axes = <S extends z.ZodType>(s: S) => z.object({ x: s, y: s, z: s })
 
@@ -50,6 +59,11 @@ export const MachineValuesDtoSchema = z.object({
   rigidity: RigiditySchema.optional().describe(
     'Frame rigidity preset for feeds and speeds; unset = extrusion (lowest)',
   ),
+  homingCorner: HomingCornerSchema.optional().describe(
+    'XY corner the machine homes to ($23; Z homes up); unset = backRight (GRBL $23=0)',
+  ),
+  pullOff: quantityDto('length').optional().describe('$27 homing pull-off; unset = 1 mm'),
+  softLimits: z.boolean().optional().describe('$20 soft limits; unset = on'),
   programUnits: z.enum(['mm', 'in']).describe('G21/G20 in exported gCode'),
   toolChanger: z.literal('none').describe('Manual tool change (M0)'),
 })

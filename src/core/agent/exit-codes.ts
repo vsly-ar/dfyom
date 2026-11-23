@@ -53,6 +53,7 @@ const BY_CODE: Record<ErrorCode, ExitCode> = {
   'run.state': EXIT.other,
   'run.program': EXIT.other,
   'run.softLimit': EXIT.other,
+  'run.travel': EXIT.other,
   'plan.status': EXIT.other,
   'plan.order': EXIT.other,
   'plan.setup': EXIT.other,

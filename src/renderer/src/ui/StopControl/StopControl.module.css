@@ -38,3 +38,12 @@
   height: var(--icon-lg);
   flex: none;
 }
+
+/* nothing to stop (DF35): hollow, offline outline, still focusable for its reason */
+.stop[aria-disabled='true'],
+.stop[aria-disabled='true']:hover {
+  background: transparent;
+  border-color: var(--safety-offline);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}

@@ -3,6 +3,7 @@
  * Doc: docs/architecture/grbl.md#virtual-machine-task-38
  */
 import type { Machine } from '../../../library/machine'
+import { homingMaskOf } from '../envelope'
 import { fail, Ok, type AppResult } from '../../../../shared/result'
 import type { Issue } from '../../../../shared/errors/app-error'
 
@@ -60,7 +61,10 @@ const BOOLEAN = new Set([4, 5, 6, 13, 20, 21, 22, 32])
 
 export type SettingValues = Readonly<Record<number, number>>
 
-/** `$110–$132`, `$30/$31` and, when set, `$11`, `$12`, `$100–$102` from a machine snapshot (library.md#machine). */
+/**
+ * `$110–$132`, `$30/$31`, `$20`, `$23`, `$27` and, when set, `$11`, `$12`, `$100–$102` from a
+ * machine snapshot (library.md#machine; homing: grbl.md#homing-and-machine-coordinates).
+ */
 export function machineSettings(m: Machine): SettingValues {
   const out: Record<number, number> = {
     110: m.maxFeedRate.x.canonical,
@@ -71,7 +75,11 @@ export function machineSettings(m: Machine): SettingValues {
     132: m.travel.z.canonical,
     30: m.spindle.maxSpeed.canonical,
     31: m.spindle.minSpeed.mapOr(0, (q) => q.canonical),
+    23: homingMaskOf(m.homingCorner.unwrapOr('backRight')),
+    27: m.pullOff.mapOr(1, (q) => q.canonical),
   }
+  // `$20=1` is the default and needs homing; only "off" is passed, so `homing: false` still works
+  if (!m.softLimits.unwrapOr(true)) out[20] = 0
   if (m.acceleration.isSome()) {
     const a = m.acceleration.unwrap()
     out[120] = a.x.canonical

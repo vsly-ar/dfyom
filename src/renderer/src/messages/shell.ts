@@ -131,12 +131,7 @@ export const shellMessages = {
       inspector: 'Design a part to plan it.',
     },
     run: {
-      noPlan: {
-        title: 'Create a plan to run',
-        description: 'Run mode runs a plan on the machine. Create one in Plan.',
-        action: 'Go to Plan',
-      },
-      inspector: 'The DRO, run progress and run controls show here once there is a plan.',
+      inspector: 'The DRO, run progress and run controls show here once a project is open.',
     },
     noProject: 'No project open.',
   },

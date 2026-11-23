@@ -165,6 +165,12 @@ export const ERROR_CODES = {
     userMessage: 'The program contains lines the machine cannot receive.',
     retryable: false,
   },
+  // Hardening DF33: docs/modes/run.md#machine-coordinates-and-the-homing-corner-df33
+  'run.travel': {
+    severity: 'warn',
+    userMessage: 'The move would leave the machine travel (soft limits).',
+    retryable: false,
+  },
   'run.softLimit': {
     severity: 'warn',
     userMessage:

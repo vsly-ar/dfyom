@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { closedStatus, type RunStatus } from '../../../../core/run/service'
-import { formatFeed, formatLength, machineView, runGates, stepToMm } from './machine-state'
+import {
+  actionText,
+  formatFeed,
+  formatLength,
+  machineView,
+  runGates,
+  stepToMm,
+  stopGate,
+} from './machine-state'
 
 const open = (patch: Partial<RunStatus> = {}): RunStatus => ({
   ...closedStatus(),
@@ -79,5 +87,45 @@ describe('formatting', () => {
     expect(formatLength(25.4, 'inch')).toBe('1.0000')
     expect(formatFeed(2540, 'inch')).toBe('100.0')
     expect(stepToMm('0.1', 'inch')).toBeCloseTo(2.54)
+  })
+})
+
+describe('stopGate (DF35)', () => {
+  it.each([
+    [closedStatus(), 'Connect to the virtual machine first.'],
+    [open(), 'Nothing to stop: the machine is not moving.'],
+    [open({ state: 'Alarm' }), 'Nothing to stop: the machine is not moving.'],
+    [open({ ...job('done') }), 'Nothing to stop: the machine is not moving.'],
+    [open({ state: 'Jog' }), null],
+    [open({ state: 'Home' }), null],
+    [open({ state: 'Run' }), null],
+    [open({ state: 'Hold:1' }), null],
+    [open({ state: 'Door:0' }), null],
+    [open({ ...job('toolChange') }), null],
+  ] as const)('%#', (status, reason) => {
+    expect(stopGate(status)).toBe(reason)
+  })
+})
+
+describe('actionText (DF33)', () => {
+  const travel = (data: Record<string, unknown>) => ({
+    code: 'run.travel' as const,
+    message: 'm',
+    issues: [],
+    frames: [{ where: 'machineHost.jog', data }],
+  })
+  it('words a travel refusal in the project unit; other codes keep their message', () => {
+    expect(actionText(travel({ axis: 'x', target: 1, min: -800, max: 0 }), 'mm')).toBe(
+      'X would leave the travel: max 0.000 mm, the jog would end at 1.000 mm.',
+    )
+    expect(actionText(travel({ axis: 'y', target: -812.8, min: -800, max: 0 }), 'inch')).toBe(
+      'Y would leave the travel: min -31.4961 in, the jog would end at -32.0000 in.',
+    )
+    expect(actionText(travel({}), 'mm')).toBe(
+      'The jog would leave the machine travel (soft limits).',
+    )
+    expect(
+      actionText({ code: 'run.state', message: 'm', issues: [], frames: [] }, 'mm'),
+    ).toBeUndefined()
   })
 })

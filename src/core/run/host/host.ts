@@ -29,6 +29,7 @@ import {
   type SenderEvent,
   type ToolChangeInfo,
 } from '../grbl/sender'
+import { envelopeOf, travelViolation, type Envelope, type TravelViolation } from '../grbl/envelope'
 import { POSITION_ALARMS } from '../grbl/status'
 import { VirtualGrblTransport } from '../grbl/virtual-transport'
 import {
@@ -85,6 +86,13 @@ interface Connection {
   alarm?: { readonly code: number; readonly text: string } | undefined
   lastMessage?: string | undefined
   job?: Job | undefined
+  /** From the controller's `$$` at connect; undefined when it reports no travel. */
+  readonly envelope: Envelope | undefined
+  /**
+   * End (MPos) of the last jog GRBL accepted; the base of the next relative jog's travel check
+   * while jogs queue. Cleared by anything else that moves or questions the position.
+   */
+  jogEnd?: Vec3 | undefined
 }
 
 const fmt = (v: number) => {
@@ -153,6 +161,16 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
       ...(s?.buffer === undefined ? {} : { buffer: s.buffer }),
       ...(conn.alarm === undefined ? {} : { alarm: conn.alarm }),
       ...(conn.lastMessage === undefined ? {} : { lastMessage: conn.lastMessage }),
+      ...(conn.envelope === undefined
+        ? {}
+        : {
+            envelope: {
+              travel: conn.envelope.travel,
+              homingMask: conn.envelope.homingMask,
+              pullOff: conn.envelope.pullOff,
+              softLimits: conn.envelope.softLimits,
+            },
+          }),
       timeScale: conn.clock.scale,
       ...(job === undefined
         ? {}
@@ -189,7 +207,12 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
       return fail('run.busy', 'already connected', { where: 'machineHost.connect' })
     const settings: Record<number, number> = {}
     for (const [k, v] of Object.entries(target.settings)) settings[Number(k)] = v
-    const created = GrblEmulator.create({ settings, homing: target.homing, trace: false })
+    const created = GrblEmulator.create({
+      settings,
+      homing: target.homing,
+      trace: false,
+      ...(target.position === undefined ? {} : { position: target.position }),
+    })
     if (created.isErr()) return Err(created.unwrapErr().withContext('machineHost.connect'))
     const emu = created.unwrap()
     connecting = true
@@ -209,6 +232,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
       sender,
       homed: !target.homing,
       workZero: info.unwrap().workZero,
+      envelope: envelopeOf(info.unwrap().settings),
     }
     conn = c
     sender.onStatus((s) => {
@@ -259,6 +283,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
   }
 
   async function home(c: Connection): Promise<AppResult<void>> {
+    c.jogEnd = undefined
     const r = await c.sender.command('$H')
     if (r.isErr()) return Err(r.unwrapErr())
     c.homed = true
@@ -298,9 +323,32 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         const v = action.to ?? action.by ?? [0, 0, 0]
         const mode = action.to !== undefined ? 'G53 G90' : 'G91'
         const line = `$J=G21 ${mode} X${fmt(v[0])} Y${fmt(v[1])} Z${fmt(v[2])} F${fmt(action.feed)}`
-        return (await c.sender.command(line)).map(() => undefined)
+        // the jog's end in MPos: relative jogs from the end of the queued ones, else the report
+        const base = c.jogEnd ?? c.sender.status?.mpos
+        const end: Vec3 | undefined =
+          action.to ??
+          (base === undefined ? undefined : [base[0] + v[0], base[1] + v[1], base[2] + v[2]])
+        const env = c.envelope
+        const outside =
+          env?.softLimits === true && end !== undefined
+            ? travelViolation(env.travel, end)
+            : undefined
+        if (outside !== undefined) return travelError(outside)
+        const r = await c.sender.command(line)
+        if (r.isErr()) {
+          const e = r.unwrapErr()
+          // GRBL's own check (error:15) when the estimate lagged: the same refusal in words
+          if (e.code === 'machine.error' && e.frames[0]?.data?.['code'] === 15)
+            return travelError(
+              env !== undefined && end !== undefined ? travelViolation(env.travel, end) : undefined,
+            )
+          return Err(e)
+        }
+        c.jogEnd = end
+        return Ok(undefined)
       }
       case 'jogCancel':
+        c.jogEnd = undefined
         return c.sender.realtime(REALTIME.jogCancel)
       case 'setWorkZero': {
         if (jobBusy || state !== 'Idle')
@@ -314,8 +362,23 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         return readWorkZero(c)
       }
       case 'reset':
+        c.jogEnd = undefined
         return c.sender.realtime(REALTIME.reset)
     }
+  }
+
+  /** `run.travel`: a jog outside `[−travel, 0]`, in words (docs/modes/run.md DF33). */
+  function travelError(v: TravelViolation | undefined): AppResult<never> {
+    const where = 'machineHost.jog'
+    if (v === undefined)
+      return fail('run.travel', 'the jog would leave the machine travel (GRBL error 15)', { where })
+    const A = v.axis.toUpperCase()
+    const limit = v.target > v.max ? `max ${fmt(v.max)} mm` : `min ${fmt(v.min)} mm`
+    return fail(
+      'run.travel',
+      `${A} would leave the travel: ${limit}, the jog would end at ${fmt(v.target)} mm`,
+      { where, data: { axis: v.axis, target: v.target, min: v.min, max: v.max } },
+    )
   }
 
   /**
@@ -345,6 +408,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
       checked: new Promise<void>((r) => (checked = r)),
     }
     c.job = job
+    c.jogEnd = undefined
     try {
       return await checkAndStream(c, job, program, expect)
     } finally {
@@ -510,6 +574,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
   function onSenderEvent(c: Connection, e: SenderEvent): void {
     switch (e.kind) {
       case 'alarm':
+        c.jogEnd = undefined
         c.alarm = { code: e.code, text: e.text }
         if (POSITION_ALARMS.has(e.code)) c.homed = false
         post({ type: 'event', kind: 'alarm', data: { code: e.code, text: e.text } })
@@ -526,6 +591,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         post({ type: 'event', kind: 'message', data: { text: e.text } })
         break
       case 'reset':
+        c.jogEnd = undefined
         post({ type: 'event', kind: 'reset', data: { expected: e.expected } })
         // GRBL keeps G54 over a reset; read it again anyway (docs/modes/run-v0.1.md#work-zero-and-the-soft-limit-check)
         if (c.job === undefined || c.job.phase === 'stopping')

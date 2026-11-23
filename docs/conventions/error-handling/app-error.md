@@ -26,7 +26,7 @@ One `as const` object is the **single list of codes**. Codes are `area.reason`, 
 
 Implementation: [`src/shared/errors/codes.ts`](../../../src/shared/errors/codes.ts)
 
-Run mode added `machine.error`, `machine.alarm` and `run.*` ([run-v0.1.md](../../modes/run-v0.1.md#stop-errors-and-alarms)). Expected future areas (add when the feature's doc is written): more `machine.*` (limit), `device.*` (MCU/sensor), `plan.*` (collision, unreachable, tool not found), `geometry.*`, `script.*`, `agent.*` (permission denial is `permission.denied`, [commands.md](../../architecture/commands.md#dispatcher-pipeline)).
+Run mode added `machine.error`, `machine.alarm` and `run.*` ([run-v0.1.md](../../modes/run-v0.1.md#stop-errors-and-alarms)). Hardening added `run.travel` (a jog that would leave the machine travel, [run.md](../../modes/run.md#machine-coordinates-and-the-homing-corner-df33)). Expected future areas (add when the feature's doc is written): more `machine.*` (limit), `device.*` (MCU/sensor), `plan.*` (collision, unreachable, tool not found), `geometry.*`, `script.*`, `agent.*` (permission denial is `permission.denied`, [commands.md](../../architecture/commands.md#dispatcher-pipeline)).
 
 ## Enrichment rules
 

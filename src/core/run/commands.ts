@@ -16,6 +16,9 @@ import type { Vec3 } from '../toolpath/model'
 import { machineSettings } from './grbl/emulator/settings'
 import { machineOf, runJobStart } from './job'
 import { machineKeyOf } from './machine-key'
+import { Machine } from '../library/machine'
+import { ItemIdSchema } from '../library/item'
+import { hashJson } from '../plan/snapshot'
 import {
   AXES,
   ControllerInfoSchema,
@@ -66,16 +69,65 @@ async function act(
   return r.mapErr((e) => e.withContext(where))
 }
 
+/**
+ * The machine a connection emulates: the plan's machine copy or a library machine (DF31,
+ * docs/modes/run.md#connect-without-a-plan-df31), with its identity (machine key).
+ */
+function connectionMachine(
+  doc: ProjectDoc,
+  services: Services,
+  args: { planId?: string | undefined; machineId?: string | undefined },
+  where: string,
+): AppResult<{ machine: Machine; key: string }> {
+  if ((args.planId === undefined) === (args.machineId === undefined))
+    return fail('input.malformed', 'give exactly one of planId or machineId', {
+      where,
+      issues: [{ path: ['planId'], rule: 'oneOf', message: 'give planId or machineId' }],
+    })
+  if (args.planId !== undefined) {
+    const planId = args.planId
+    const loaded = loadPlan(doc, planId, where)
+    if (loaded.isErr()) return Err(loaded.unwrapErr())
+    const machine = loaded.unwrap().machine
+    if (machine.isNone())
+      return fail('post.noMachine', 'the plan has no machine to emulate', {
+        where,
+        data: { planId },
+      })
+    return machineKeyOf(doc, planId, where).map((key) => ({
+      machine: machine.unwrap(),
+      key: key ?? '',
+    }))
+  }
+  const id = args.machineId!
+  const lib = services.library
+  if (lib === undefined) return fail('internal.unexpected', 'no library service', { where })
+  const found = lib.lookup('machine', id)
+  if (found.state !== 'found' || !(found.item.values instanceof Machine))
+    return fail('input.malformed', `machine ${id} does not exist or does not load`, {
+      where,
+      issues: [{ path: ['machineId'], rule: 'unknownItem', message: 'no such library machine' }],
+    })
+  const machine = found.item.values
+  // the same hash a plan's unchanged snapshot of this machine has (machine-key.ts)
+  return Ok({ machine, key: hashJson(machine.toDTO()) })
+}
+
 export const runConnectionOpen = defineCommand({
   kind: 'effect',
   name: 'run.connection.open',
   summary:
-    "Connect to the virtual machine, emulating the plan's machine copy; prepare: true homes it at once and centres the stock on the table.",
+    "Connect to the virtual machine, emulating the plan's machine copy (planId) or a library machine (machineId, no plan needed); prepare: true (plans only) homes it at once and centres the stock on the table.",
   title: () => 'Connect to the virtual machine',
   machine: true,
   args: z.object({
     target: z.literal('virtual').describe('Only the virtual machine (GRBL emulator) in v0.1'),
-    planId: PlanIdSchema.describe('The plan whose machine copy the virtual machine emulates'),
+    planId: PlanIdSchema.optional().describe(
+      'The plan whose machine copy the virtual machine emulates; or give machineId',
+    ),
+    machineId: ItemIdSchema.optional().describe(
+      'A library machine to emulate without a plan (manual control); or give planId',
+    ),
     homing: z
       .boolean()
       .default(true)
@@ -92,34 +144,38 @@ export const runConnectionOpen = defineCommand({
     const m = ctx.services.machine
     if (m === undefined) return fail('run.notConnected', 'no machine service', { where })
     if (m.target !== undefined) return fail('run.busy', 'a connection is already open', { where })
-    const loaded = loadPlan(doc, args.planId, where)
-    if (loaded.isErr()) return loaded
-    const machine = loaded.unwrap().machine
-    if (machine.isNone())
-      return fail('post.noMachine', 'the plan has no machine to emulate', {
-        where,
-        data: { planId: args.planId },
-      })
-    const key = machineKeyOf(doc, args.planId, where)
-    if (key.isErr()) return key
+    const chosen = connectionMachine(doc, ctx.services, args, where)
+    if (chosen.isErr()) return chosen
+    const { machine, key } = chosen.unwrap()
     let prepare: { workZero: Vec3 } | undefined
     if (args.prepare) {
+      if (args.planId === undefined)
+        return fail('input.malformed', 'prepare needs a plan (its stock)', {
+          where,
+          issues: [{ path: ['prepare'], rule: 'needsPlan', message: 'prepare needs planId' }],
+        })
       const wz = prepareWorkZero(doc, args.planId, where)
       if (wz.isErr()) return wz
       prepare = { workZero: wz.unwrap() }
     }
     const settings = Object.fromEntries(
-      Object.entries(machineSettings(machine.unwrap())).map(([k, v]) => [k, v]),
+      Object.entries(machineSettings(machine)).map(([k, v]) => [k, v]),
     )
+    const t = machine.travel
+    const position: Vec3 = [-t.x.canonical / 2, -t.y.canonical / 2, -t.z.canonical / 2]
     const info = await m.connect({
       kind: 'virtual',
       settings,
       homing: args.homing,
       timeScale: args.timeScale,
-      machineKey: key.unwrap() ?? '',
+      machineKey: key,
+      // powers up at the centre of its travel (grbl.md#homing-and-machine-coordinates)
+      ...(args.homing ? { position } : {}),
       ...(prepare === undefined ? {} : { prepare }),
     })
-    return info.mapErr((e) => e.withContext(where, { planId: args.planId }))
+    const ctxData =
+      args.planId === undefined ? { machineId: args.machineId } : { planId: args.planId }
+    return info.mapErr((e) => e.withContext(where, ctxData))
   },
 })
 

@@ -20,7 +20,7 @@ import {
   quantityFromDTO,
   toOption,
 } from './item'
-import type { MachineValuesDTO, Rigidity } from './machine.dto'
+import type { HomingCorner, MachineValuesDTO, Rigidity } from './machine.dto'
 import type { QuantityDTO } from '../quantity/quantity.dto'
 
 export interface Axes<T> {
@@ -56,6 +56,12 @@ export interface MachineProps {
   readonly toolChanger: 'none'
   /** Feeds-and-speeds rigidity preset; None = lowest (`extrusion`). */
   readonly rigidity: Option<Rigidity>
+  /** XY homing corner (`$23`); None = `backRight` (GRBL default). */
+  readonly homingCorner: Option<HomingCorner>
+  /** Homing pull-off (`$27`, length); None = 1 mm. */
+  readonly pullOff: Option<Quantity>
+  /** Soft limits (`$20`); None = on. */
+  readonly softLimits: Option<boolean>
 }
 
 const AXES = ['x', 'y', 'z'] as const
@@ -81,6 +87,9 @@ export class Machine implements MachineProps {
     readonly programUnits: 'mm' | 'in',
     readonly toolChanger: 'none',
     readonly rigidity: Option<Rigidity>,
+    readonly homingCorner: Option<HomingCorner>,
+    readonly pullOff: Option<Quantity>,
+    readonly softLimits: Option<boolean>,
   ) {
     invariants('Machine', (c) => {
       checkNameAndNotes(c, name, notes)
@@ -108,6 +117,7 @@ export class Machine implements MachineProps {
             )
         }
       }
+      if (pullOff.isSome()) checkPositive(c, ['pullOff'], pullOff.unwrap(), 'length')
       if (spindle.power.isSome())
         checkPositive(c, ['spindle', 'power'], spindle.power.unwrap(), 'power')
     })
@@ -138,6 +148,9 @@ export class Machine implements MachineProps {
           p.programUnits,
           p.toolChanger,
           p.rigidity,
+          p.homingCorner,
+          p.pullOff,
+          p.softLimits,
         ),
     )
   }
@@ -160,6 +173,7 @@ export class Machine implements MachineProps {
       maxSpeed: quantityFromDTO(dto.spindle.maxSpeed, 'spindle', 'maxSpeed'),
       minSpeed: optionalQuantityFromDTO(dto.spindle.minSpeed, 'spindle', 'minSpeed'),
       power: optionalQuantityFromDTO(dto.spindle.power, 'spindle', 'power'),
+      pullOff: optionalQuantityFromDTO(dto.pullOff, 'pullOff'),
     }).andThen((q) =>
       Machine.create({
         name: dto.name,
@@ -180,6 +194,9 @@ export class Machine implements MachineProps {
         programUnits: dto.programUnits,
         toolChanger: dto.toolChanger,
         rigidity: toOption(dto.rigidity),
+        homingCorner: toOption(dto.homingCorner),
+        pullOff: q.pullOff,
+        softLimits: toOption(dto.softLimits),
       }),
     )
   }
@@ -210,6 +227,9 @@ export class Machine implements MachineProps {
       programUnits: this.programUnits,
       toolChanger: this.toolChanger,
       ...optionalField('rigidity', this.rigidity),
+      ...optionalField('homingCorner', this.homingCorner),
+      ...optionalQuantityDTO('pullOff', this.pullOff),
+      ...optionalField('softLimits', this.softLimits),
     } as MachineValuesDTO
   }
 

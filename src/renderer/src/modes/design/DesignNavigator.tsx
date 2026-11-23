@@ -28,7 +28,7 @@ import { failingOperation, type DesignPart } from './model'
 import { useAddOperation } from './useAddOperation'
 import { OperationList } from './OperationList'
 import { stockReadout } from './PartSetupDialogs'
-import { useCommand, useDesignEvaluation, useDesignSelection, useDesignWarnings } from './useDesign'
+import { useDesignEvaluation, useDesignSelection, useDesignWarnings } from './useDesign'
 
 export { operationIcon } from './OperationList'
 
@@ -77,7 +77,6 @@ function NoPart(): React.JSX.Element {
 
 function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
   const { bridge } = useShell()
-  const call = useCommand()
   const [selected, select] = useDesignSelection()
   const { warnings } = useDesignWarnings(part)
   const evaluation = useDesignEvaluation(part)

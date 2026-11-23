@@ -637,11 +637,11 @@ describe('design mode', () => {
     expect(within(inspector()).queryByText('Face: Stock right side')).toBeNull()
     // Add from the menu with a face selected: a facing takes the stock face of its direction
     act(() => shell.ui.getState().select('design', 'face:stock.bottom'))
-    await addFromMenu('Add facing')
+    await addFromMenu('Facing')
     expect(part().operations.at(-1)).toMatchObject({ kind: 'facing', on: 'stock.bottom' })
     // without a face, Add keeps its default
     act(() => shell.ui.getState().select('design', null))
-    await addFromMenu('Add pocket')
+    await addFromMenu('Pocket')
     expect(part().operations.at(-1)).toMatchObject({ kind: 'pocket', on: 'stock.top' })
   })
 

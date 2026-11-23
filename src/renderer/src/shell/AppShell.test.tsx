@@ -161,10 +161,13 @@ describe('AppShell', () => {
     bridge.bind(fixtureDispatcher())
     const { user } = renderShell(bridge)
     await closeStockDialog(user)
+    // Run needs no plan: manual control of a library machine (DF31)
     await user.click(screen.getByRole('radio', { name: 'Run' }))
-    await user.click(await screen.findByRole('button', { name: 'Go to Plan' }))
-    expect(screen.getByRole('radio', { name: 'Plan' })).toBeChecked()
-    await user.click(screen.getByRole('button', { name: 'Go to Design' }))
+    expect(await screen.findByRole('combobox', { name: 'Plan' })).toHaveTextContent(
+      'No plan (manual control)',
+    )
+    await user.click(screen.getByRole('radio', { name: 'Plan' }))
+    await user.click(await screen.findByRole('button', { name: 'Go to Design' }))
     expect(screen.getByRole('radio', { name: 'Design' })).toBeChecked()
   })
 
