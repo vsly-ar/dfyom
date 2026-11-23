@@ -28,7 +28,7 @@ Toolbar **Library** (`Cmd+Shift+L`) → **Tools** tab → **New tool** for each;
 | Name            | Type          | Geometry                                 | Preset (rpm / feed / plunge / stepdown / stepover) |
 | --------------- | ------------- | ---------------------------------------- | -------------------------------------------------- |
 | Flat 6          | Flat end mill | Ø 6, flute length 22                     | 18000 / 4800 / 800 / 3 / 3                         |
-| Flat 3          | Flat end mill | Ø 3, flute length 12                     | 18000 / 1200 / 300 / 1.5 / 1.2                     |
+| Flat 3          | Flat end mill | Ø 3, flute length 12                     | 18000 / 3600 / 300 / 1.5 / 1.2                     |
 | Chamfer 90 × 12 | Chamfer mill  | Ø 12, included angle 90°, flute length 8 | 12000 / 3800 / 600                                 |
 
 Watch: **Stickout** (was "Overall length", DF26) and whether the **Details** accordion keeps its open state; hints right under their inputs (DF27); the row stays "Unsaved" until Save.

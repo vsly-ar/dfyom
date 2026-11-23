@@ -143,7 +143,7 @@ const TOOLS: readonly ToolSpec[] = [
     ],
     preset: [
       ['Spindle speed', '18000'],
-      ['Feed rate', '1200'],
+      ['Feed rate', '3600'],
       ['Plunge rate', '300'],
       ['Stepdown', '1.5'],
       ['Stepover', '1.2'],
