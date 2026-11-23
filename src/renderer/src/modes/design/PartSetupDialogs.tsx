@@ -154,25 +154,32 @@ export function PartSetupDialogs({
 
   return (
     <>
-      <Dialog
-        title={m.stock}
-        description={part === undefined ? s.setupDescription : m.stockDescription}
-        open={dialog === 'stock'}
-        onOpenChange={onOpenChange}
-        onCloseAutoFocus={returnFocus}
-        footer={
-          part === undefined ? (
-            <DialogClose>
-              <Button>{m.cancel}</Button>
-            </DialogClose>
-          ) : (
-            done
-          )
-        }
-      >
-        {part === undefined ? (
-          <StockSetup units={doc.unitSystem} projectName={doc.name} onCreated={close} />
-        ) : (
+      {part === undefined ? (
+        // the setup renders its own dialog, so Create part sits in the footer beside Cancel;
+        // mounted while open only, so each opening starts from fresh form state
+        dialog === 'stock' ? (
+          <StockSetup
+            units={doc.unitSystem}
+            projectName={doc.name}
+            onCreated={close}
+            dialog={{
+              title: m.stock,
+              description: s.setupDescription,
+              open: true,
+              onOpenChange,
+              onCloseAutoFocus: returnFocus,
+            }}
+          />
+        ) : null
+      ) : (
+        <Dialog
+          title={m.stock}
+          description={m.stockDescription}
+          open={dialog === 'stock'}
+          onOpenChange={onOpenChange}
+          onCloseAutoFocus={returnFocus}
+          footer={done}
+        >
           <StockFacts
             part={part}
             onShowPart={() => {
@@ -180,8 +187,8 @@ export function PartSetupDialogs({
               close()
             }}
           />
-        )}
-      </Dialog>
+        </Dialog>
+      )}
       <Dialog
         title={m.shapes}
         description={m.shapesDescription}

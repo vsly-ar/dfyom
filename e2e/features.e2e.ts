@@ -26,7 +26,7 @@ const rendersDir = resolve(__dirname, '../design/features/renders')
 async function render(
   page: Page,
   name: string,
-  task: 'u1' | 'u2' | 'u3' | 'u4' | 'd45' = 'u1',
+  task: 'u1' | 'u2' | 'u3' | 'u4' | 'd45' | 'df25' = 'u1',
   // run after the Settings dialog closed (it takes focus): refocus a field
   before?: () => Promise<void>,
 ): Promise<void> {
@@ -130,7 +130,10 @@ test('features: add a hole, expand its row, the owned inspector is read-only, Ma
   await setField(setup, 'Length (X)', '100')
   await setField(setup, 'Width (Y)', '60')
   await setField(setup, 'Thickness (Z)', '20')
-  await setup.getByRole('button', { name: 'Create part' }).click()
+  await page
+    .getByRole('dialog', { name: 'Stock' })
+    .getByRole('button', { name: 'Create part' })
+    .click()
   await expect(stock).toBeHidden()
   await navigator.getByRole('button', { name: 'Add pocket' }).click()
   await expect(inspector.getByRole('heading', { name: 'Pocket 1' })).toBeVisible()
@@ -295,6 +298,33 @@ test('features: add a hole, expand its row, the owned inspector is read-only, Ma
   await expect(inspector.getByText('Clone 2 of Clones 1')).toBeVisible()
   await render(page, 'instance', 'u3')
 
+  // ── DF25 re-report: nested rows show readable names, never ids, in the default sidebar ────
+  const source = navigator.getByRole('list', { name: 'Source of Clones 1' })
+  const nestedHole = source.getByRole('button', { name: /^Bolt hole 1,/ })
+  await nestedHole.click()
+  await expect(inspector.getByRole('heading', { name: 'Bolt hole 1' })).toBeVisible()
+  const long = 'Lid hinge counterbore, left side'
+  await setField(inspector, 'Name', long)
+  const renamed = source.getByRole('button', { name: new RegExp(`^${long},`) })
+  await expect(renamed).toBeVisible()
+  await renamed.press('ArrowRight')
+  const owned = navigator.getByRole('list', { name: long })
+  await expect(owned.getByRole('button')).not.toHaveCount(0)
+  // no op id ("hole1_counterbore") in any row; the names get the row's width, not one letter
+  await expect(
+    navigator.getByRole('list', { name: 'Operations in design order' }),
+  ).not.toContainText(/\b(hole|pocket|drilling|clones)\d+(_\w+)?\b/)
+  for (const row of await owned.getByRole('button').all()) {
+    const width = await row.evaluate((el) => {
+      const name = (el as unknown as { querySelector(s: string): unknown }).querySelector(
+        '[class*="opName"]',
+      ) as { getBoundingClientRect(): { width: number } } | null
+      return name?.getBoundingClientRect().width ?? 0
+    })
+    expect(width).toBeGreaterThan(60)
+  }
+  await render(page, 'long-names', 'df25')
+
   expect(dfyom.rendererErrors).toEqual([])
 })
 
@@ -312,8 +342,10 @@ test('chamfer: add a drilling, add a chamfer from Add, edit it in its inspector'
   const dialog = page.getByRole('dialog', { name: 'New project' })
   await dialog.getByRole('textbox', { name: 'Project name' }).fill('Chamfers')
   await dialog.getByRole('button', { name: 'Create project' }).click()
-  const setup = page.getByRole('region', { name: 'Set up the part' })
-  await setup.getByRole('button', { name: 'Create part' }).click()
+  await page
+    .getByRole('dialog', { name: 'Stock' })
+    .getByRole('button', { name: 'Create part' })
+    .click()
 
   await navigator.getByRole('button', { name: 'Add drilling' }).click()
   await expect(inspector.getByRole('heading', { name: 'Drilling 1' })).toBeVisible()

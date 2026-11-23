@@ -275,7 +275,10 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
   await setup.getByRole('textbox', { name: 'Material name' }).fill('Walnut')
   await setup.getByRole('combobox', { name: 'Material class' }).click()
   await page.getByRole('option', { name: 'Hardwood' }).click()
-  await setup.getByRole('button', { name: 'Create part' }).click()
+  await page
+    .getByRole('dialog', { name: 'Stock' })
+    .getByRole('button', { name: 'Create part' })
+    .click()
   await expect(navigator.getByText(/^Stock: 255 × 185 × 40/)).toBeVisible()
 
   // ── Import the STL reference, fitted onto the stock bottom ───────────────────────────────

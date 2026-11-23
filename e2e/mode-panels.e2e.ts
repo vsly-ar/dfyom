@@ -45,7 +45,7 @@ test('mode switch: side panels per mode, the Plan start card, the auto-apply set
   await dialog.getByRole('textbox', { name: 'Project name' }).fill('Panels')
   await dialog.getByRole('button', { name: 'Create project' }).click()
   await page
-    .getByRole('region', { name: 'Set up the part' })
+    .getByRole('dialog', { name: 'Stock' })
     .getByRole('button', { name: 'Create part' })
     .click()
 

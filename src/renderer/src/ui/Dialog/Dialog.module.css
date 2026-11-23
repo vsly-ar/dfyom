@@ -47,6 +47,10 @@
 }
 
 .footer {
+  /* pinned to the bottom edge while a tall body scrolls: the actions stay in view (ui.md#radix-wrapping-pattern) */
+  position: sticky;
+  z-index: 1;
+  bottom: 0;
   display: flex;
   justify-content: flex-end;
   gap: 8px;

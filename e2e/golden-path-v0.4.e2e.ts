@@ -243,7 +243,10 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
   await setup.getByRole('textbox', { name: 'Material name' }).fill('Birch plywood')
   await setup.getByRole('combobox', { name: 'Material class' }).click()
   await page.getByRole('option', { name: 'Sheet good' }).click()
-  await setup.getByRole('button', { name: 'Create part' }).click()
+  await page
+    .getByRole('dialog', { name: 'Stock' })
+    .getByRole('button', { name: 'Create part' })
+    .click()
   await expect(navigator.getByText(/^Stock: 255 × 200 × 6/)).toBeVisible()
 
   // ── Import SVG…: two shapes; the cavity removed, the outline kept ────────────────────────

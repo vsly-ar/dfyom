@@ -45,8 +45,10 @@ test('library window: add and edit a tool, see it in the design tool field', asy
   const dialog = page.getByRole('dialog', { name: 'New project' })
   await dialog.getByRole('textbox', { name: 'Project name' }).fill('Shop')
   await dialog.getByRole('button', { name: 'Create project' }).click()
-  const setup = page.getByRole('region', { name: 'Set up the part' })
-  await setup.getByRole('button', { name: 'Create part' }).click()
+  await page
+    .getByRole('dialog', { name: 'Stock' })
+    .getByRole('button', { name: 'Create part' })
+    .click()
   await navigator.getByRole('button', { name: 'Add pocket' }).click()
   await expect(inspector.getByRole('heading', { name: 'Pocket 1' })).toBeVisible()
   await page.keyboard.press('ControlOrMeta+Enter')

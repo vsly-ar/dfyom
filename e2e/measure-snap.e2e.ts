@@ -32,7 +32,10 @@ test('snap a handle to a stock edge, then measure two points', async ({ dfyom })
   await setField(setup, 'Length (X)', '100')
   await setField(setup, 'Width (Y)', '60')
   await setField(setup, 'Thickness (Z)', '20')
-  await setup.getByRole('button', { name: 'Create part' }).click()
+  await page
+    .getByRole('dialog', { name: 'Stock' })
+    .getByRole('button', { name: 'Create part' })
+    .click()
 
   // ── a pocket's rectangle as a named shape, opened face-on ────────────────────────────────
   await navigator.getByRole('button', { name: 'Add pocket' }).click()
