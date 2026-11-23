@@ -222,7 +222,7 @@ describe('machine host', () => {
     await connectedHost(h, {
       settings: { ...SETTINGS, '20': 1, '23': 2, '27': 2 },
       position: [-500, -500, -500],
-      timeScale: 1,
+      timeScale: 'max',
     })
     expect(lastStatus(h)).toMatchObject({
       mpos: [-500, -500, -500],
