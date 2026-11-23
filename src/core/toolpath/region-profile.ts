@@ -52,9 +52,9 @@ export interface RegionProfileOperation {
   readonly slotWidth: number
   /** Z of the surface the cut starts on. */
   readonly onZ: number
-  /** Down to the stock bottom for a through cut, else a blind `on` groove's depth. */
+  /** Down to the stock bottom for a through cut, else a blind groove's or step's depth. */
   readonly depth: number
-  /** Through cuts go `breakthrough` below the depth; only `on` may be blind. */
+  /** Through cuts go `breakthrough` below the depth; any side may be blind (a step, DF53). */
   readonly through: boolean
   readonly tabs: {
     /**
@@ -157,8 +157,6 @@ export function generateRegionProfile(
     })
   if (!op.closed && !on)
     issues.rule('invariant', 'operation.side', 'openNeedsOn', 'an open path needs side "on"')
-  if (!op.through && !on)
-    issues.rule('invariant', 'operation.through', 'onlyOn', 'only a profile on can stop at a depth')
   const tabs = op.tabs
   if (tabs.positions.length > 0) {
     if (!op.closed || !op.through)

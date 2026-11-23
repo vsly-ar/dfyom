@@ -143,7 +143,9 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
       ? `The ${String(p['tool'])} leaves material uncut in ${num(p['pieces'])} places narrower than the tool.`
       : `The ${String(p['tool'])} leaves material uncut in a neck narrower than the tool.`,
   'dfm.shapeOutsideFace': (p, L) =>
-    `The shape reaches ${L(p['by'])} outside the stock face at the ${list(((p['sides'] as readonly string[] | undefined) ?? []).map((s) => SIDE[s] ?? s))}.`,
+    p['wholly'] === true
+      ? 'The shape lies outside the stock face, so the pocket cuts nothing.'
+      : `The shape reaches ${L(p['by'])} outside the stock face at the ${list(((p['sides'] as readonly string[] | undefined) ?? []).map((s) => SIDE[s] ?? s))}: an open-sided pocket.`,
   'dfm.shapeHeavy': (p) =>
     `This shape has ${num(p['chords'])} segments after flattening, so the part updates more slowly.`,
   'dfm.holeCustomSize': (p, L) => {

@@ -185,7 +185,7 @@ export type OperationGeometry = FacePlacement &
         readonly shape: Shape
         readonly side: 'outside' | 'inside' | 'on'
         readonly slotWidth: number
-        /** v0.3, `on` only: a blind groove's depth below the stock face; absent = through. */
+        /** A blind groove's (v0.3) or step's (DF53) depth below the stock face; absent = through. */
         readonly depth?: number
         /**
          * A through cut's depth below the stock face when an earlier setup already cleared

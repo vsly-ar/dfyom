@@ -137,7 +137,7 @@ export interface Profile extends Common {
   readonly shape: Shape
   readonly side: ProfileSide
   readonly slotWidth: Quantity
-  /** `on` only: a blind groove's depth below `on`; None = through. */
+  /** A blind groove's (`on`) or step's (`outside`/`inside`, DF53) depth below `on`; None = through. */
   readonly depth: Option<Quantity>
   readonly tabs: {
     readonly count: Quantity
