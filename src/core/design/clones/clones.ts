@@ -293,9 +293,22 @@ export function sourceIssues(
       (l) => l.feature.id !== feature.id && l.spec.nested?.(l.feature, ops).includes(id) === true,
     )
   if ('featureId' in s) {
-    if (CLONES_ID.test(s.featureId))
-      at(['featureId'], 'clonesNested', 'Clones of Clones are not allowed')
-    else if (!features.some((l) => l.feature.id === s.featureId))
+    if (CLONES_ID.test(s.featureId)) {
+      // the next step (llm-api.md, DF41 F4): a row on that Clones, or its source in a new one
+      const nested = features.find((l) => l.feature.id === s.featureId)?.feature
+      const inner = nested?.kind === 'clones' ? (nested as Clones).source : undefined
+      const source =
+        inner === undefined
+          ? ''
+          : 'featureId' in inner
+            ? ` (featureId ${inner.featureId})`
+            : ` (operationIds ${inner.operationIds.join(', ')})`
+      at(
+        ['featureId'],
+        'clonesNested',
+        `Clones of Clones are not allowed: add a row to ${s.featureId}, or clone its source${source} in a new Clones`,
+      )
+    } else if (!features.some((l) => l.feature.id === s.featureId))
       at(['featureId'], 'unknownFeature', 'no such feature')
   } else {
     if (new Set(s.operationIds).size !== s.operationIds.length)

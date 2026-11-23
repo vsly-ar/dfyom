@@ -311,7 +311,9 @@ export async function exitCriteriaV02Flow(call: Call, dir: string): Promise<Flow
   )!
   expect(profilePlanOp).toMatchObject({ toolSource: 'design' })
   expect(snapshotName(plan, profilePlanOp.tool)).toBe('Flat 12')
-  const findings = (await ok<{ warnings: Finding[] }>('plan.warning.list', { planId })).value
+  const findings = (
+    await ok<{ warnings: Finding[] }>('plan.warning.list', { planId, detail: 'full' })
+  ).value
   // no errors, and no machine or feeds warnings (the presets keep the chip load in range)
   expect(findings.warnings).toEqual([])
 

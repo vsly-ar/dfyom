@@ -181,6 +181,10 @@ describe('design.clones.add', () => {
       'model.invariant',
     )
     expect(e.issues.map((i) => i.rule)).toContain('clonesNested')
+    // with the next step: a row on that Clones, or its source in a new one (X2 F4)
+    expect(e.issues.find((i) => i.rule === 'clonesNested')?.message).toMatch(
+      /add a row to clones1, or clone its source \((featureId|operationIds) [^)]+\) in a new Clones/,
+    )
   })
 
   it('refuses facings, outside profiles, taken, owned and two-face sources', async () => {

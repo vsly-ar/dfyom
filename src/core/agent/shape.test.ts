@@ -568,3 +568,51 @@ describe('design.shape.get detail and no stacks (A1)', () => {
     })
   })
 })
+
+describe('evaluate jobs and tool names (llm-api.md, DF41 F5, F8)', () => {
+  it('a finished design.part.evaluate outcome lists its warnings as changes', () => {
+    const shaper = new ResultShaper(fakeSession())
+    const a = warn('dfm.cornerSharp', 'pocket1')
+    const b = warn('dfm.toolUnfit', 'pocket1', 'unfit', 'tool')
+    shaper.shape(call('design.warning.list', { warnings: [a] }), { partId: 'P' }, SUMMARY)
+    shaper.shape(call('design.part.evaluate', { jobId: 'job-1' }), { partId: 'P' }, SUMMARY)
+    const job = (warnings: unknown[]) => ({
+      jobId: 'job-1',
+      name: 'design.part.evaluate',
+      state: 'finished',
+      outcome: { ok: true, value: { evaluation: 'done', warnings } },
+    })
+    const waited = valueOf(shaper.shape(call('job.wait', job([a, b])), { jobId: 'job-1' }, SUMMARY))
+    expect(waited['outcome']).toEqual({
+      ok: true,
+      value: { evaluation: 'done', warnings: { count: 2, added: [b] } },
+    })
+    // other jobs pass as they are
+    const other = { ...job([a]), jobId: 'job-2' }
+    expect(valueOf(shaper.shape(call('job.get', other), { jobId: 'job-2' }, SUMMARY))).toEqual(
+      other,
+    )
+  })
+
+  it('names specific tools by their snapshot, in the value and in applied', () => {
+    const snapshots: Record<string, unknown> = {
+      's-1': { id: 's-1', values: { name: 'Flat 3', diameter: q('3 mm', '3') } },
+    }
+    const shaper = new ResultShaper({ ...fakeSession(), snapshot: (id) => snapshots[id] })
+    const tool = { kind: 'specific', snapshotId: 's-1' }
+    const shapedCall = shaper.shape(
+      call(
+        'design.operation.list',
+        { operations: [{ id: 'pocket1', tool }] },
+        { toolChanges: [{ operationId: 'pocket1', to: tool }] },
+      ),
+      { partId: 'P' },
+      SUMMARY,
+    )
+    const named = { ...tool, name: 'Flat 3', diameter: 3 }
+    expect(valueOf(shapedCall)['operations']).toEqual([{ id: 'pocket1', tool: named }])
+    const applied = (expectOk(shapedCall.result) as { applied?: { toolChanges: unknown[] } })
+      .applied
+    expect(applied?.toolChanges).toEqual([{ operationId: 'pocket1', to: named }])
+  })
+})

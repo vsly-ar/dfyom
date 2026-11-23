@@ -54,6 +54,14 @@ describe('comments', () => {
     expect(l).toMatch(/^\(x+\)$/)
   })
 
+  it('a cut comment ends at a word boundary, not mid-word (X2 F10)', () => {
+    const l = commentLine(
+      'Bolt circle screw - drill, Bolt circle screw - drill - 2, Bolt circle screw - drill - 3',
+    )
+    expect(l).toBe('(Bolt circle screw - drill, Bolt circle screw - drill - 2, Bolt)')
+    expect(l.length).toBeLessThanOrEqual(70)
+  })
+
   it('tool-change marker matches the sender rule, also with a long or odd name', () => {
     const rule = /^\(DFYOM TOOL CHANGE (\d+): ([^()]*)\)$/
     for (const name of ['6 mm flat (2F)', 'y'.repeat(200), '', 'Ø3″ drill'])

@@ -505,8 +505,16 @@ export async function exitCriteriaV04Flow(rawCall: Call, dir: string): Promise<F
     LID_TOOLS.chamfer.name,
     LID_TOOLS.profile.name,
   ])
-  const findings = (await ok<{ warnings: Finding[] }>('plan.warning.list', { planId })).value
-  expect(findings.warnings).toEqual([])
+  // DF39: Flat 3 has calculator data now (the ≤ 3 mm band, Amana 1/16″ in MDF: .003–.005″); the
+  // preset's 1200 mm/min at 18,000 rpm, 2 flutes (fz 0.033 mm) is below its minimum (0.0762 mm),
+  // so each Flat 3 operation warns feeds.rubbing. The preset still wins: the program is unchanged
+  const findings = (
+    await ok<{ warnings: Finding[] }>('plan.warning.list', { planId, detail: 'full' })
+  ).value
+  const flat3Ops = planned.filter((o) => o[1] === LID_TOOLS.mill.name).length
+  expect(findings.warnings.map((f) => [f.severity, f.rule, f.params['chipLoad']])).toEqual(
+    Array.from({ length: flat3Ops }, () => ['warning', 'feeds.rubbing', 0.03333333333]),
+  )
 
   const gen = await ok<{ jobId: string }>('plan.toolpath.generate', { planId })
   const generated = (await waitJob(gen.value.jobId)) as {
