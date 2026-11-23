@@ -6,7 +6,8 @@
 // notice keeps a reserved height and a refused action shows at the end of the panel, so messages
 // never move the controls (DF34). Doc: docs/conventions/ui.md#run-mode-safety-ui,
 // docs/modes/run.md#machine-frame-and-manual-control-hardening-df31df35,
-// docs/modes/run-v0.1.md#commands-and-queries
+// docs/modes/run-v0.1.md#commands-and-queries; serial port and real-machine confirmations:
+// docs/modes/run-machine.md#ports-and-the-port-picker, docs/modes/run.md#3-confirmations-before-motion
 import { useEffect, useId, useState } from 'react'
 import type { ProjectDoc } from '../../../../core/project/document'
 import type { TimeScale } from '../../../../core/run/clock'
@@ -17,6 +18,7 @@ import { useLibraryItems } from '../plan/usePlan'
 import { actionText, formatLength, isConnected, runGates } from './machine-state'
 import { runnablePlans } from './plan-info'
 import { NO_PLAN, useRun, useRunStore, type Axis } from './run-store'
+import { SerialPicker, SettingsWarning } from './SerialPicker'
 import styles from './Run.module.css'
 
 const m = runMessages.navigator
@@ -85,6 +87,12 @@ export function RunNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
   const pending = useRun((s) => s.pending)
   const actionError = useRun((s) => s.actionError)
   const [unlockOpen, setUnlockOpen] = useState(false)
+  const [homeOpen, setHomeOpen] = useState(false)
+  const connectTo = useRun((s) => s.connectTo)
+  const ports = useRun((s) => s.ports)
+  const portPath = useRun((s) => s.portPath)
+  const baud = useRun((s) => s.baud)
+  const settingsCheck = useRun((s) => s.settingsCheck)
   const whyBase = useId()
   const a = store.getState()
 
@@ -109,6 +117,8 @@ export function RunNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
   const connected = isConnected(status)
   const gates = runGates(status, { planChosen: chosen !== undefined && !manual })
   const liveScale = connected ? status.connection.timeScale : timeScale
+  // the open connection's target decides, else the choice
+  const serial = connected ? status.connection.target === 'serial' : connectTo === 'serial'
   const units = doc.unitSystem
   const busy = (name: string) => pending.includes(name)
   // one line per distinct reason (home, jog, work zero, disconnect), in that order
@@ -175,20 +185,36 @@ export function RunNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
       ) : null}
 
       <Section title={m.connection}>
-        <div className={styles['row']}>
-          <span className={styles['rowLabel']} aria-hidden="true">
-            {m.timeScale}
-          </span>
-          <Select
-            aria-label={m.timeScale}
-            options={TIME_SCALES.map((s) => ({
-              value: scaleValue(s),
-              label: runMessages.timeScale(s),
-            }))}
-            value={scaleValue(liveScale)}
-            onValueChange={(v) => a.setTimeScale(parseScale(v))}
+        {connected ? null : (
+          <SerialPicker
+            connectTo={connectTo}
+            ports={ports}
+            portPath={portPath}
+            baud={baud}
+            scanning={busy('run.ports.scan')}
+            disabled={status.connection.state !== 'closed'}
+            onConnectTo={a.setConnectTo}
+            onPort={a.setPort}
+            onBaud={a.setBaud}
+            onScan={() => void a.scanPorts()}
           />
-        </div>
+        )}
+        {serial ? null : (
+          <div className={styles['row']}>
+            <span className={styles['rowLabel']} aria-hidden="true">
+              {m.timeScale}
+            </span>
+            <Select
+              aria-label={m.timeScale}
+              options={TIME_SCALES.map((s) => ({
+                value: scaleValue(s),
+                label: runMessages.timeScale(s),
+              }))}
+              value={scaleValue(liveScale)}
+              onValueChange={(v) => a.setTimeScale(parseScale(v))}
+            />
+          </div>
+        )}
         {connected ? (
           <>
             <Button
@@ -200,6 +226,9 @@ export function RunNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
             >
               {m.disconnect}
             </Button>
+            {serial && settingsCheck !== undefined ? (
+              <SettingsWarning check={settingsCheck} machineId={manual ? machineId : undefined} />
+            ) : null}
           </>
         ) : (
           <>
@@ -210,14 +239,17 @@ export function RunNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
               icon={<Icon name="connect" />}
               disabled={
                 (manual ? machineChosen === undefined : chosen === undefined) ||
+                (serial && portPath === undefined) ||
                 status.connection.state !== 'closed' ||
                 busy('run.connection.open')
               }
               onClick={() => void a.connect()}
             >
-              {m.connect}
+              {serial ? m.connectSerial : m.connect}
             </Button>
-            <p className={styles['hint']}>{manual ? m.connectHintNoPlan : m.connectHint}</p>
+            <p className={styles['hint']}>
+              {serial ? m.connectHintSerial : manual ? m.connectHintNoPlan : m.connectHint}
+            </p>
           </>
         )}
       </Section>
@@ -231,7 +263,8 @@ export function RunNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
             icon={<Icon name="home" />}
             disabled={gates.home !== null || busy('run.machine.home')}
             {...(gates.home === null ? {} : { 'aria-describedby': ids.home })}
-            onClick={() => void a.home()}
+            // a real machine not yet homed moves to its corner: confirmed once (run.md § Safety 3)
+            onClick={() => (serial && !status.homed ? setHomeOpen(true) : void a.home())}
           >
             {m.home}
           </Button>
@@ -248,6 +281,14 @@ export function RunNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
             </StatusChip>
           ) : null}
         </div>
+        <ConfirmDialog
+          open={homeOpen}
+          onOpenChange={setHomeOpen}
+          title={runMessages.homeConfirm.title}
+          description={runMessages.homeConfirm.description}
+          confirmLabel={runMessages.homeConfirm.confirm}
+          onConfirm={() => void a.home()}
+        />
         <ConfirmDialog
           open={unlockOpen}
           onOpenChange={setUnlockOpen}

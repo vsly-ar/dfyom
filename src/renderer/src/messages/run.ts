@@ -39,6 +39,7 @@ export const runMessages = {
   /** Badge region (polite live region; alarms are announced assertively by the dialog). */
   machineRegion: 'Machine',
   virtualChip: (scale: string) => `Virtual machine · ${scale}`,
+  serialChip: (path: string) => `Serial · ${path}`,
   timeScale: (scale: number | 'max') => (scale === 'max' ? 'Max' : `${scale}×`),
 
   controls: {
@@ -70,6 +71,9 @@ export const runMessages = {
     connection: 'Connection',
     timeScale: 'Time scale',
     connect: 'Connect to virtual machine',
+    connectSerial: 'Connect to machine',
+    connectHintSerial:
+      'A real GRBL controller on this port. The machine moves only when you start it here.',
     connectHint: 'Simulates the plan’s machine: GRBL 1.1 on a virtual machine. No hardware moves.',
     connectHintNoPlan:
       'Simulates the chosen library machine: GRBL 1.1 on a virtual machine. No hardware moves.',
@@ -91,7 +95,7 @@ export const runMessages = {
 
   /** Why a control is disabled (ui.md: disabled controls explain why). */
   why: {
-    notConnected: 'Connect to the virtual machine first.',
+    notConnected: 'Connect to a machine first.',
     homeFirst: 'Home the machine first.',
     busy: 'Not while the machine is moving.',
     running: 'Not while a run is going.',
@@ -105,6 +109,47 @@ export const runMessages = {
   travel: (axis: string, side: 'max' | 'min', limit: string, target: string, unit: string) =>
     `${axis} would leave the travel: ${side} ${limit} ${unit}, the jog would end at ${target} ${unit}.`,
   travelUnknown: 'The jog would leave the machine travel (soft limits).',
+
+  /** Connect to a real controller (docs/modes/run-machine.md#ports-and-the-port-picker). */
+  serial: {
+    connectTo: 'Connect to',
+    virtual: 'Virtual machine',
+    serialPort: 'Serial port',
+    port: 'Serial port',
+    portPlaceholder: 'Choose a port',
+    noPortsShort: 'No serial ports',
+    noPorts: 'No serial ports found. Connect the controller by USB and refresh.',
+    refresh: 'Refresh ports',
+    baud: 'Baud',
+    mismatch: (
+      against: 'plan' | 'machine',
+      differences: readonly {
+        setting: string
+        field: string
+        controller: string
+        machine: string
+      }[],
+    ) =>
+      `The controller's settings differ from the ${against === 'plan' ? 'plan’s machine' : 'library machine'}: ${differences
+        .slice(0, 3)
+        .map(
+          (d) =>
+            `${d.setting} ${d.field} is ${d.controller} on the controller, ${d.machine} in the ${against === 'plan' ? 'plan' : 'library'}`,
+        )
+        .join(
+          '; ',
+        )}${differences.length > 3 ? `; and ${differences.length - 3} more` : ''}. Runs are refused until they match.`,
+    homingOff: 'Homing is off on the controller ($22=0): DFYOM runs only on a homed machine.',
+    review: 'Review',
+  },
+
+  /** Home on a real connection while not homed (run.md § Safety 3). */
+  homeConfirm: {
+    title: 'Home the machine?',
+    description:
+      'It moves to its home corner. Keep hands clear and know where the emergency stop is.',
+    confirm: 'Home',
+  },
 
   unlockConfirm: {
     title: 'Unlock without homing?',
@@ -159,6 +204,7 @@ export const runMessages = {
     machine: 'Machine',
     target: 'Target',
     virtualTarget: (scale: string) => `Virtual machine at ${scale}`,
+    serialTarget: (path: string, baud: number) => `Serial port ${path} at ${baud} baud`,
     workZero: 'Work zero (G54, machine coordinates)',
     tools: 'Tools in order',
     noTools: 'No tools assigned',

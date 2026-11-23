@@ -10,6 +10,8 @@ import { useStore } from 'zustand'
 import { createStore, type StoreApi } from 'zustand/vanilla'
 import type { TimeScale } from '../../../../core/run/clock'
 import { closedStatus, type RunStatus } from '../../../../core/run/service'
+import { DEFAULT_BAUD, type SerialPortInfo } from '../../../../core/run/serial'
+import type { SettingsCheck } from '../../../../core/run/settings-check'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import type { CallReply, PreloadApi } from '../../../../shared/preload-api'
 import { useShell } from '../../shell/ShellContext'
@@ -43,6 +45,9 @@ export type RunEnd =
 
 export type Axis = 'x' | 'y' | 'z'
 
+/** What "Connect" opens: the GRBL emulator or a real controller (docs/modes/run-machine.md#ui). */
+export type ConnectTo = 'virtual' | 'serial'
+
 /** `planId` of "No plan (manual control)": connect with a library machine (DF31). */
 export const NO_PLAN = '__noPlan__'
 
@@ -62,6 +67,15 @@ export interface RunState {
   readonly setupChangeOpen: boolean
   /** Time scale chosen before connecting; while connected the status has the live one. */
   readonly timeScale: TimeScale
+  /** The connect choice (per window). */
+  readonly connectTo: ConnectTo
+  /** Serial port path chosen in the picker; `undefined` = none yet. */
+  readonly portPath: string | undefined
+  readonly baud: number
+  /** Last `run.ports.scan`; `undefined` = not scanned yet. */
+  readonly ports: readonly SerialPortInfo[] | undefined
+  /** The serial connection's settings check (`run.connection.open`), until it closes. */
+  readonly settingsCheck: SettingsCheck | undefined
   /** Jog step in the project unit. */
   readonly jogStep: string
   /** The run job this window follows (started here, or seen in the status). */
@@ -83,6 +97,11 @@ export interface RunState {
   setSetup(setupId: string | undefined): void
   setSetupChangeOpen(open: boolean): void
   setTimeScale(scale: TimeScale): void
+  setConnectTo(to: ConnectTo): void
+  setPort(path: string | undefined): void
+  setBaud(baud: number): void
+  /** `run.ports.scan`; keeps the chosen port if still there, else picks the first USB one. */
+  scanPorts(): Promise<void>
   setJogStep(step: string): void
   setPreflightOpen(open: boolean): void
   dismissWait(key: string | undefined): void
@@ -168,6 +187,11 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       setupChange: undefined,
       setupChangeOpen: false,
       timeScale: 1,
+      connectTo: 'virtual',
+      portPath: undefined,
+      baud: DEFAULT_BAUD,
+      ports: undefined,
+      settingsCheck: undefined,
       jogStep: '10',
       jobId: undefined,
       progress: undefined,
@@ -195,6 +219,23 @@ export function createRunStore(bridge: PreloadApi): RunStore {
         if (get().status.connection.state === 'open')
           void call('run.timeScale.set', { scale: timeScale })
       },
+      setConnectTo: (connectTo) => {
+        set({ connectTo })
+        if (connectTo === 'serial' && get().ports === undefined) void get().scanPorts()
+      },
+      setPort: (portPath) => set({ portPath }),
+      setBaud: (baud) => set({ baud }),
+      async scanPorts() {
+        const r = await call('run.ports.scan')
+        if (!r.ok) return
+        const ports = (r.value as { ports: SerialPortInfo[] }).ports
+        set((s) => ({
+          ports,
+          portPath: ports.some((p) => p.path === s.portPath)
+            ? s.portPath
+            : (ports.find((p) => p.usb) ?? ports[0])?.path,
+        }))
+      },
       setJogStep: (jogStep) => set({ jogStep }),
       setPreflightOpen: (preflightOpen) => set({ preflightOpen }),
       dismissWait: (dismissedWait) => set({ dismissedWait }),
@@ -202,11 +243,28 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       clearActionError: () => set({ actionError: undefined }),
 
       async connect() {
-        const { planId, machineId, timeScale } = get()
-        if (planId !== undefined && planId !== NO_PLAN)
-          await call('run.connection.open', { target: 'virtual', planId, timeScale })
-        else if (machineId !== undefined)
-          await call('run.connection.open', { target: 'virtual', machineId, timeScale })
+        const { planId, machineId, timeScale, connectTo, portPath, baud } = get()
+        const what =
+          planId !== undefined && planId !== NO_PLAN
+            ? { planId }
+            : machineId !== undefined
+              ? { machineId }
+              : undefined
+        if (what === undefined) return
+        if (connectTo === 'virtual') {
+          await call('run.connection.open', { target: 'virtual', ...what, timeScale })
+          return
+        }
+        if (portPath === undefined) return
+        set({ settingsCheck: undefined })
+        const r = await call('run.connection.open', {
+          target: 'serial',
+          path: portPath,
+          baud,
+          ...what,
+        })
+        if (r.ok)
+          set({ settingsCheck: (r.value as { settingsCheck?: SettingsCheck }).settingsCheck })
       },
       disconnect: async () => void (await call('run.connection.close')),
       home: () => job('run.machine.home'),
@@ -312,6 +370,8 @@ export function createRunStore(bridge: PreloadApi): RunStore {
   const onStatus = (status: RunStatus): void => {
     store.setState({ status })
     // a closed connection ends the setup sequence (the stock is no longer on a known machine)
+    if (status.connection.state === 'closed' && store.getState().settingsCheck !== undefined)
+      store.setState({ settingsCheck: undefined })
     if (status.connection.state === 'closed' && store.getState().setupChange !== undefined)
       store.setState({ setupChange: undefined, setupChangeOpen: false })
     const job = status.job

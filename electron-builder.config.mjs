@@ -18,6 +18,8 @@ export const MAIN_EXTERNALS = [
   'oxide.ts',
   'pino',
   'pino-roll',
+  // native (N-API prebuilds), loaded only in the machine host: packaging.md#native-modules
+  'serialport',
   'zod',
 ]
 /** Packages whose own dependencies are not loaded: the app uses only manifold.js + manifold.wasm. */
@@ -90,6 +92,8 @@ export default {
     buildResources: 'build',
   },
   asar: true,
+  // a native binding cannot load from inside the asar (packaging.md#native-modules)
+  asarUnpack: ['node_modules/@serialport/bindings-cpp/prebuilds/**'],
   files: [
     'out/**',
     'package.json',
@@ -105,7 +109,7 @@ export default {
     { from: 'LICENSE', to: 'LICENSE.txt' },
     { from: 'out/THIRD_PARTY_NOTICES.txt', to: 'THIRD_PARTY_NOTICES.txt' },
   ],
-  // pure JS and WASM dependencies only: nothing to rebuild against Electron's Node
+  // pure JS and WASM, plus serialport's N-API prebuilds (ABI-stable): nothing to rebuild
   npmRebuild: false,
   mac: {
     target: [{ target: 'dir', arch: 'arm64' }],

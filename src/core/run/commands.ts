@@ -27,6 +27,9 @@ import {
   type MachineAction,
 } from './host/protocol'
 import { RunStatusSchema } from './service'
+import { BAUD_RATES, DEFAULT_BAUD, SerialPortInfoSchema } from './serial'
+import { settingsCheck, SettingsCheckSchema } from './settings-check'
+import type { MachineValuesDTO } from '../library/machine.dto'
 
 /** Margin between the clearance plane and the top of the machine travel in `prepare` (mm). */
 export const PREPARE_TOP_MARGIN = 5
@@ -117,11 +120,31 @@ export const runConnectionOpen = defineCommand({
   kind: 'effect',
   name: 'run.connection.open',
   summary:
-    "Connect to the virtual machine, emulating the plan's machine copy (planId) or a library machine (machineId, no plan needed); prepare: true (plans only) homes it at once and centres the stock on the table.",
-  title: () => 'Connect to the virtual machine',
+    "Connect to the virtual machine, emulating the plan's machine copy (planId) or a library machine (machineId, no plan needed); prepare: true (plans only) homes it at once and centres the stock on the table. target 'serial' (a real GRBL controller on path) is for the user in the app only.",
+  title: (a) =>
+    (a as { target?: string }).target === 'serial'
+      ? 'Connect to the machine'
+      : 'Connect to the virtual machine',
   machine: true,
   args: z.object({
-    target: z.literal('virtual').describe('Only the virtual machine (GRBL emulator) in v0.1'),
+    target: z
+      .enum(['virtual', 'serial'])
+      .describe(
+        'virtual: the GRBL emulator; serial: a real controller (UI only, docs/modes/run-machine.md)',
+      ),
+    path: z
+      .string()
+      .min(1)
+      .max(500)
+      .optional()
+      .describe('Serial port path from run.ports.scan (target serial)'),
+    baud: z
+      .number()
+      .int()
+      .min(300)
+      .max(4_000_000)
+      .default(DEFAULT_BAUD)
+      .describe(`Baud rate (target serial), e.g. ${BAUD_RATES.join(', ')}`),
     planId: PlanIdSchema.optional().describe(
       'The plan whose machine copy the virtual machine emulates; or give machineId',
     ),
@@ -138,7 +161,11 @@ export const runConnectionOpen = defineCommand({
       .default(false)
       .describe('Home at once and set the work zero so the stock sits centred on the table'),
   }),
-  result: ControllerInfoSchema,
+  result: ControllerInfoSchema.extend({
+    settingsCheck: SettingsCheckSchema.optional().describe(
+      "Serial: the controller's $$ against the machine copy; a real run needs matches",
+    ),
+  }),
   async run(doc, args, ctx) {
     const where = 'run.connection.open'
     const m = ctx.services.machine
@@ -147,6 +174,33 @@ export const runConnectionOpen = defineCommand({
     const chosen = connectionMachine(doc, ctx.services, args, where)
     if (chosen.isErr()) return chosen
     const { machine, key } = chosen.unwrap()
+    const ctxData =
+      args.planId === undefined ? { machineId: args.machineId } : { planId: args.planId }
+    if (args.target === 'serial') {
+      if (args.path === undefined)
+        return fail('input.malformed', 'a serial connection needs the port path', {
+          where,
+          issues: [{ path: ['path'], rule: 'required', message: 'give the port path' }],
+        })
+      if (args.prepare)
+        return fail('input.malformed', 'prepare is for the virtual machine only', {
+          where,
+          issues: [{ path: ['prepare'], rule: 'virtualOnly', message: 'not for a real machine' }],
+        })
+      const info = await m.connect({
+        kind: 'serial',
+        path: args.path,
+        baud: args.baud,
+        machineKey: key,
+      })
+      if (info.isErr()) return Err(info.unwrapErr().withContext(where, ctxData))
+      const check = settingsCheck(
+        machine.toDTO() as MachineValuesDTO,
+        info.unwrap().settings,
+        args.planId === undefined ? 'machine' : 'plan',
+      )
+      return Ok({ ...info.unwrap(), settingsCheck: check })
+    }
     let prepare: { workZero: Vec3 } | undefined
     if (args.prepare) {
       if (args.planId === undefined)
@@ -173,8 +227,6 @@ export const runConnectionOpen = defineCommand({
       ...(args.homing ? { position } : {}),
       ...(prepare === undefined ? {} : { prepare }),
     })
-    const ctxData =
-      args.planId === undefined ? { machineId: args.machineId } : { planId: args.planId }
     return info.mapErr((e) => e.withContext(where, ctxData))
   },
 })
@@ -394,6 +446,23 @@ export const runTimeScaleSet = defineCommand({
   },
 })
 
+export const runPortsScan = defineCommand({
+  kind: 'effect',
+  name: 'run.ports.scan',
+  summary:
+    'List the serial ports the machine host sees (USB ports first), for run.connection.open { target: serial }. Opens nothing.',
+  title: () => 'Scan serial ports',
+  machine: false,
+  args: Empty,
+  result: z.object({ ports: z.array(SerialPortInfoSchema) }),
+  async run(_doc, _args, ctx) {
+    const where = 'run.ports.scan'
+    const m = ctx.services.machine
+    if (m === undefined) return fail('machine.connection', 'no machine service', { where })
+    return (await m.listPorts()).map((ports) => ({ ports })).mapErr((e) => e.withContext(where))
+  },
+})
+
 export const runStatusGet = defineQuery({
   name: 'run.status.get',
   summary:
@@ -432,6 +501,7 @@ export function checkNoRunJob(jobs: JobDirectory): AppResult<void> {
 export const RUN_COMMANDS: readonly AnyCommand[] = [
   runConnectionOpen,
   runConnectionClose,
+  runPortsScan,
   runMachineHome,
   runMachineUnlock,
   runMachineJog,

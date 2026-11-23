@@ -133,7 +133,7 @@ async function connectAndHome(t: Awaited<ReturnType<typeof renderRun>>) {
 describe('Run mode', () => {
   it('says once why the disconnected controls are disabled, and each control points at it', async () => {
     const t = await renderRun()
-    const why = within(t.nav()).getByText('Connect to the virtual machine first.')
+    const why = within(t.nav()).getByText('Connect to a machine first.')
     for (const name of ['Home', 'Jog X+', 'Zero X', 'Zero X Y Z']) {
       const button = within(t.nav()).getByRole('button', { name })
       expect(button).toBeDisabled()
@@ -447,5 +447,86 @@ describe('Run mode', () => {
     await within(machineGroup()!).findByText('Jogging')
     await t.user.click(within(machineGroup()!).getByRole('button', { name: 'Stop' }))
     expect(t.callsOf('run.machine.jogCancel')).toHaveLength(1)
+  })
+})
+
+describe('Run mode: serial port (docs/modes/run-machine.md#ports-and-the-port-picker)', () => {
+  const PORT = '/dev/cu.usbmodem1101'
+  function scriptSerial(t: Awaited<ReturnType<typeof renderRun>>, matches: boolean) {
+    t.bridge.handle('run.ports.scan', () =>
+      ok({
+        ports: [
+          { path: PORT, manufacturer: 'Arduino (www.arduino.cc)', vendorId: '2341', usb: true },
+          { path: '/dev/tty.Bluetooth-Incoming-Port', usb: false },
+        ],
+      }),
+    )
+    t.bridge.handle('run.connection.open', (args) => {
+      const { path, baud } = args as { path: string; baud: number }
+      queueMicrotask(() =>
+        t.machine.push({
+          connection: { state: 'open', target: 'serial', timeScale: 1, port: { path, baud } },
+          state: 'Alarm',
+        }),
+      )
+      return ok({
+        target: 'serial',
+        settingsCheck: {
+          against: 'plan',
+          matches,
+          homingEnabled: true,
+          notInMachine: [],
+          differences: matches
+            ? []
+            : [{ setting: '$130', field: 'travel.x', controller: '400 mm', machine: '300 mm' }],
+        },
+      })
+    })
+  }
+
+  it('picks a USB port, connects, warns about differing settings and confirms the first Home', async () => {
+    const t = await renderRun()
+    scriptSerial(t, false)
+    const nav = within(t.nav())
+    await t.user.click(nav.getByRole('radio', { name: 'Serial port' }))
+    // the USB port is chosen; the time scale is the virtual machine's only
+    await waitFor(() =>
+      expect(nav.getByRole('combobox', { name: 'Serial port' })).toHaveTextContent(
+        `${PORT} · Arduino`,
+      ),
+    )
+    expect(nav.queryByRole('combobox', { name: 'Time scale' })).toBeNull()
+    expect(nav.getByRole('combobox', { name: 'Baud' })).toHaveTextContent('115200')
+    await expectNoAxeViolations(t.container)
+    await t.user.click(nav.getByRole('button', { name: 'Connect to machine' }))
+    expect(t.callsOf('run.connection.open').at(-1)).toMatchObject({
+      target: 'serial',
+      path: PORT,
+      baud: 115_200,
+    })
+    const group = await screen.findByRole('group', { name: 'Machine' })
+    expect(within(group).getByText(`Serial · ${PORT}`)).toBeInTheDocument()
+    const alert = await nav.findByRole('alert')
+    expect(alert).toHaveTextContent('$130 travel.x is 400 mm on the controller, 300 mm in the plan')
+    expect(within(alert).getByRole('button', { name: 'Review' })).toBeInTheDocument()
+    await expectNoAxeViolations(t.container)
+    // Home on a real machine that is not homed asks first
+    await t.user.click(nav.getByRole('button', { name: 'Home' }))
+    const dialog = await screen.findByRole('alertdialog', { name: 'Home the machine?' })
+    expect(t.callsOf('run.machine.home')).toHaveLength(0)
+    await t.user.click(within(dialog).getByRole('button', { name: 'Home' }))
+    await waitFor(() => expect(t.callsOf('run.machine.home')).toHaveLength(1))
+  })
+
+  it('says when no port is found', async () => {
+    const t = await renderRun()
+    t.bridge.handle('run.ports.scan', () => ok({ ports: [] }))
+    const nav = within(t.nav())
+    await t.user.click(nav.getByRole('radio', { name: 'Serial port' }))
+    expect(
+      await nav.findByText('No serial ports found. Connect the controller by USB and refresh.'),
+    ).toBeInTheDocument()
+    expect(nav.getByRole('button', { name: 'Connect to machine' })).toBeDisabled()
+    await expectNoAxeViolations(t.container)
   })
 })

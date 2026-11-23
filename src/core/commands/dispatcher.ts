@@ -485,10 +485,12 @@ class ProjectDispatcher implements Dispatcher {
     // 4. Revision check
     const stale = this.checkRevision(def, source, opts)
     if (stale.isErr()) return this.logged(def.name, args, source, stale)
-    // 5. Permission
-    if (def.machine) {
+    // 5. Permission; resuming a machine job (a held run) is motion too: its command decides
+    // (docs/modes/run.md#2-who-may-command-a-real-connection-q50)
+    const checked = def.machine ? def : this.resumedMachineCommand(def, args)
+    if (checked !== undefined) {
       const allowed = await tryAsync(
-        async () => this.policy.check(def, args, source, this.services),
+        async () => this.policy.check(checked, def === checked ? args : {}, source, this.services),
         'internal.unexpected',
         'permission policy threw',
       )
@@ -809,6 +811,15 @@ class ProjectDispatcher implements Dispatcher {
       const [root, id] = p.path
       this.touched.set(`${String(root)}/${id === undefined ? '*' : String(id)}`, by)
     }
+  }
+
+  /** `job.resume` of a job whose command is a machine command: that command, else undefined. */
+  private resumedMachineCommand(def: AnyCommand, args: unknown): AnyCommand | undefined {
+    if (def.name !== 'job.resume') return undefined
+    const job = this.runs.get((args as { jobId?: string } | null)?.jobId ?? '')
+    if (job === undefined) return undefined
+    const jobDef = this.registry.command(job.name)
+    return jobDef.isSome() && jobDef.unwrap().machine ? jobDef.unwrap() : undefined
   }
 
   private runBuiltin(
