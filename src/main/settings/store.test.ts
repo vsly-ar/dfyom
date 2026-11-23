@@ -47,7 +47,7 @@ describe('settings store', () => {
     expect(await loadSettings(tmp.dir, log)).toEqual({ ...DEFAULT_SETTINGS, reduceMotion: true })
   })
 
-  it('notifies listeners with the previous settings', () => {
+  it('notifies listeners with the previous settings', async () => {
     const store = createSettingsStore({
       appData: tmp.dir,
       initial: DEFAULT_SETTINGS,
@@ -57,9 +57,10 @@ describe('settings store', () => {
     store.onChange(listener)
     const next = expectOk(store.update({ reduceMotion: true }))
     expect(listener).toHaveBeenCalledWith(next, DEFAULT_SETTINGS)
+    await store.flush()
   })
 
-  it('rejects unknown fields and wrong values without changing anything', () => {
+  it('rejects unknown fields and wrong values without changing anything', async () => {
     const store = createSettingsStore({
       appData: tmp.dir,
       initial: DEFAULT_SETTINGS,
@@ -71,6 +72,7 @@ describe('settings store', () => {
     expect(store.get()).toEqual(DEFAULT_SETTINGS)
     const next = expectOk(store.update({ defaultAnchor: { u: 'min', v: 'max' } }))
     expect(next.defaultAnchor).toEqual({ u: 'min', v: 'max' })
+    await store.flush()
   })
 
   it('falls back to the defaults for an invalid file, with a warning', async () => {
