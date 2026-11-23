@@ -57,7 +57,7 @@ The virtual machine plays GRBL's homing cycle in time (Z, then X and Y together;
 
 - The navigator's notice of why controls are disabled sits between the connection and homing sections in a **reserved status line** (two lines high, always present, `role="status"`; with nothing disabled it says "Ready to jog." — short texts only, so it never grows), so a reason appearing while the machine jogs or homes never shifts the jog pad.
 - A refused action (`ErrorMessage`) shows **at the end of the navigator**, below the work-zero section, never above the controls.
-- **Repeated step jogs queue:** jog stays enabled while jogging (GRBL plans `$J=` lines behind each other); every click sends one `$J=G91 …` that GRBL appends; a click whose target leaves the travel is refused in words (above) and the earlier jogs continue. "Stop jog" (`0x85`) cancels them all. There is no continuous (hold-to-jog) mode yet ([hardening M3](../plans/hardening.md#5-real-machine)).
+- **Repeated step jogs queue:** jog stays enabled while jogging (GRBL plans `$J=` lines behind each other); every click sends one `$J=G91 …` that GRBL appends; a click whose target leaves the travel is refused in words (above) and the earlier jogs continue. "Stop jog" (`0x85`) cancels them all. A continuous (hold-to-jog) mode jogs to the travel edge while a button is held and cancels on release ([run-machine.md § Machine readiness](run-machine.md#machine-readiness-m3), M3).
 
 ### Stop only when something can be stopped (DF35)
 
@@ -89,7 +89,7 @@ The rules every connection to a **real machine** (a controller on a serial port)
 
 - **Stopping is never refused and never confirmed** ([ui.md](../conventions/ui.md#confirmations)): stop, hold, jog cancel and reset are allowed for every source on every connection, skip the command queue (`urgent`) and need no plan, no homing and no reservation.
 - **Reset:** GRBL keeps G54 over a reset (EEPROM) and loses the position only when the reset interrupts motion (`ALARM:3`); after any position alarm DFYOM marks the machine **not homed**, which blocks runs until `$H` ([run-v0.1.md](run-v0.1.md#implementation-task-39)). A reset never restarts a program.
-- **Critical alarms** (`ALARM:1` hard limit, `ALARM:2` soft limit): GRBL answers nothing until a reset; DFYOM refuses every other command until then and shows the alarm with the next step (reset, then home; wording in M3).
+- **Critical alarms** (`ALARM:1` hard limit, `ALARM:2` soft limit): GRBL answers nothing until a reset; DFYOM refuses every other command until then and shows the alarm with the next step (reset, then home; wording: [run-machine.md § Machine readiness](run-machine.md#machine-readiness-m3), M3).
 
 ### 2. Who may command a real connection (Q50)
 
@@ -112,13 +112,13 @@ The permission policy ([commands.md](../architecture/commands.md#dispatcher-pipe
 
 Machine motion the operator has not seen coming is confirmed once, where it starts.
 
-| When                                             | Asks                                                                                                                                                                                                                                                                    | Status                  |
-| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
-| **Home** on a real connection while not homed    | "Home the machine? It moves to its home corner. Keep hands clear and know where the emergency stop is." Confirm "Home".                                                                                                                                                 | M1                      |
-| Unlock without homing                            | As today ([ui.md](../conventions/ui.md#run-mode-safety-ui)): the position is unknown until homed.                                                                                                                                                                       | existing                |
-| **Start run** on a real connection               | The pre-flight names the real target ("Serial port /dev/cu.usbmodem1101 at 115200 baud") and, beyond today's contents, the plan status and the air-cut hint ("First run: spindle off, Z zero raised above the stock"); its primary button reads "Start on the machine". | M1 target line; rest M2 |
-| **Continue** after a tool change or setup change | The dialog states the Z zero to set and that the spindle starts again; continuing is the confirmation.                                                                                                                                                                  | existing                |
-| Resume after a feed hold                         | No dialog; a deliberate click, never a single key ([ui.md](../conventions/ui.md#confirmations)).                                                                                                                                                                        | existing                |
+| When                                             | Asks                                                                                                                                                                                                                                                                    | Status                                                                                  |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| **Home** on a real connection while not homed    | "Home the machine? It moves to its home corner. Keep hands clear and know where the emergency stop is." Confirm "Home".                                                                                                                                                 | M1                                                                                      |
+| Unlock without homing                            | As today ([ui.md](../conventions/ui.md#run-mode-safety-ui)): the position is unknown until homed.                                                                                                                                                                       | existing                                                                                |
+| **Start run** on a real connection               | The pre-flight names the real target ("Serial port /dev/cu.usbmodem1101 at 115200 baud") and, beyond today's contents, the plan status and the air-cut hint ("First run: spindle off, Z zero raised above the stock"); its primary button reads "Start on the machine". | M1 target line; rest M2 ([run-machine.md](run-machine.md#pre-flight-on-a-real-machine)) |
+| **Continue** after a tool change or setup change | The dialog states the Z zero to set and that the spindle starts again; continuing is the confirmation.                                                                                                                                                                  | existing                                                                                |
+| Resume after a feed hold                         | No dialog; a deliberate click, never a single key ([ui.md](../conventions/ui.md#confirmations)).                                                                                                                                                                        | existing                                                                                |
 
 Jogs are not confirmed: they are short, cancellable, refused outside the travel (`run.travel`) and start only from a click.
 
@@ -128,7 +128,7 @@ Checked by `run.job.start` (main) and again by the host at `jobStart` ([run-v0.1
 
 1. The plan is `finalized` or `inUse` ([run-machine.md amendment of decision 5](run-machine.md#amendments-to-run-v01md)). **M1.**
 2. The controller's `$$` matches the connection's machine copy in every mapped setting and has homing enabled ([run-machine.md § Settings check](run-machine.md#settings-check)); else `run.state`, rule `settingsMismatch`. **M1.**
-3. Idle, homed in this connection, the work zero re-read (`$#`) and unchanged since the check, the soft-limit check passed (existing).
+3. Idle, homed in this connection (not after an unexpected controller reset: M2), the work zero re-read (`$#`) and unchanged since the check, the soft-limit check passed (existing; covered on the serial path in M2).
 4. The connection is reserved for the job from its checks to its stream (existing).
 
 ### 5. Watchdogs
@@ -150,7 +150,7 @@ The windows are not watched: the host streams without them ([run-v0.1.md § Proc
 
 A lost USB link **cannot be made safe by DFYOM**: GRBL keeps executing what is in its buffers (up to 15 planned motion blocks and 128 bytes of lines: seconds of cutting, more for long moves) with the spindle on, then stops with the spindle still on (no `M5` arrives).
 
-- DFYOM fails the job with `machine.connection`, closes the connection (no automatic reconnect: the controller's state is unknown) and says so: "Connection to the machine lost. It may still be moving and the spindle may still be on: use the emergency stop." (wording in the real-target failure dialog: M2).
+- DFYOM fails the job with `machine.connection`, closes the connection (no automatic reconnect: the controller's state is unknown) and says so: "Connection to the machine lost. It may still be moving and the spindle may still be on: use the emergency stop." (the real-target failure dialog and the navigator: [run-machine.md § Lost connection](run-machine.md#lost-connection-m2), M2).
 - **Reconnect = reset:** opening the port resets most Arduino-based GRBL boards (DTR); otherwise the handshake sends `0x18` when no banner comes. Either way buffered motion ends and GRBL starts locked (`$22=1`): the new connection is **not homed** and must home before a run.
 - **Disconnect = reset:** closing a real connection on purpose (`run.connection.close`, app quit) sends `0x18` before closing the port, also when Idle, so no queued jog or line runs on after DFYOM let go. A running job is stopped first (hold, then reset), as on the virtual machine. **M1.**
 - App quit during a run asks first, then stops the run (existing, [run-v0.1.md](run-v0.1.md#implementation-task-312-run-mode-ui)).

@@ -440,6 +440,92 @@ describe('Run mode', () => {
     await expectNoAxeViolations()
   })
 
+  it('continuous jog: hold to jog, cancelled on release, key up and window blur (M3)', async () => {
+    const t = await renderRun()
+    await connectAndHome(t)
+    const nav = within(t.nav())
+    await t.user.click(nav.getByRole('radio', { name: 'Continuous' }))
+    // the step control gives way to the hint
+    expect(nav.queryByRole('radio', { name: '10 mm' })).toBeNull()
+    expect(nav.getByText('Hold to jog; release to stop.')).toBeInTheDocument()
+    const xPlus = nav.getByRole('button', { name: 'Jog X+' })
+    await t.user.pointer({ keys: '[MouseLeft>]', target: xPlus })
+    await waitFor(() =>
+      expect(t.callsOf('run.machine.jog')).toEqual([
+        { by: [1, 0, 0], feed: 2000, continuous: true },
+      ]),
+    )
+    expect(t.callsOf('run.machine.jogCancel')).toHaveLength(0)
+    await t.user.pointer({ keys: '[/MouseLeft]', target: xPlus })
+    await waitFor(() => expect(t.callsOf('run.machine.jogCancel')).toHaveLength(1))
+    // keyboard: Space held on a focused button, released
+    const zMinus = nav.getByRole('button', { name: 'Jog Z−' })
+    zMinus.focus()
+    await t.user.keyboard('[Space>]')
+    await waitFor(() =>
+      expect(t.callsOf('run.machine.jog').at(-1)).toEqual({
+        by: [0, 0, -1],
+        feed: 500,
+        continuous: true,
+      }),
+    )
+    await t.user.keyboard('[/Space]')
+    await waitFor(() => expect(t.callsOf('run.machine.jogCancel')).toHaveLength(2))
+    // the window losing focus ends a hold
+    await t.user.pointer({ keys: '[MouseLeft>]', target: xPlus })
+    await waitFor(() => expect(t.callsOf('run.machine.jog')).toHaveLength(3))
+    act(() => void window.dispatchEvent(new Event('blur')))
+    await waitFor(() => expect(t.callsOf('run.machine.jogCancel')).toHaveLength(3))
+    await t.user.pointer({ keys: '[/MouseLeft]', target: xPlus })
+    expect(t.callsOf('run.machine.jogCancel')).toHaveLength(3)
+    await expectNoAxeViolations(t.container)
+  })
+
+  it('a hold released before the jog is accepted cancels again once it is (M3)', async () => {
+    const t = await renderRun()
+    await connectAndHome(t)
+    let accept: (r: CallReply) => void = () => {}
+    t.bridge.handle('run.machine.jog', () => new Promise<CallReply>((r) => (accept = r)))
+    const nav = within(t.nav())
+    await t.user.click(nav.getByRole('radio', { name: 'Continuous' }))
+    const yPlus = nav.getByRole('button', { name: 'Jog Y+' })
+    await t.user.pointer({ keys: '[MouseLeft>]', target: yPlus })
+    await t.user.pointer({ keys: '[/MouseLeft]', target: yPlus })
+    await waitFor(() => expect(t.callsOf('run.machine.jogCancel')).toHaveLength(1))
+    await act(async () => accept(ok({})))
+    await waitFor(() => expect(t.callsOf('run.machine.jogCancel')).toHaveLength(2))
+  })
+
+  it('in Alarm the panel at the end of the navigator says what happened and what to do (M3)', async () => {
+    const t = await renderRun()
+    await t.user.click(within(t.nav()).getByRole('button', { name: 'Connect to virtual machine' }))
+    const nav = within(t.nav())
+    // locked at start ($22=1), no alarm code
+    let panel = await nav.findByRole('region', { name: 'Alarm' })
+    expect(within(panel).getByText('Locked (Alarm)')).toBeInTheDocument()
+    expect(within(panel).getByText('Home the machine.')).toBeInTheDocument()
+    // a hard limit: reset first, then check the switch, then home
+    t.machine.push({
+      state: 'Alarm',
+      alarm: { code: 1, text: 'Hard limit triggered. Machine position is likely lost.' },
+    })
+    panel = nav.getByRole('region', { name: 'Alarm' })
+    expect(within(panel).getByRole('heading', { name: 'Alarm 1: hard limit' })).toBeInTheDocument()
+    const steps = within(panel)
+      .getAllByRole('listitem')
+      .map((li) => li.textContent)
+    expect(steps[0]).toBe('Reset (immediate).')
+    expect(steps.at(-1)).toBe('Home the machine.')
+    expect(within(panel).getByText(/Controller: Hard limit triggered/)).toBeInTheDocument()
+    await expectNoAxeViolations(t.container)
+    // reset and homed: the panel goes
+    const next = { ...t.machine.status }
+    delete next.alarm
+    t.machine.status = next
+    t.machine.push({ state: 'Idle', homed: true })
+    expect(nav.queryByRole('region', { name: 'Alarm' })).toBeNull()
+  })
+
   it('stop without a run cancels a jog', async () => {
     const t = await renderRun()
     await connectAndHome(t)
@@ -516,6 +602,76 @@ describe('Run mode: serial port (docs/modes/run-machine.md#ports-and-the-port-pi
     expect(t.callsOf('run.machine.home')).toHaveLength(0)
     await t.user.click(within(dialog).getByRole('button', { name: 'Home' }))
     await waitFor(() => expect(t.callsOf('run.machine.home')).toHaveLength(1))
+  })
+
+  it('the real-machine pre-flight: plan status, air-cut hint, "Start on the machine" (M2)', async () => {
+    const t = await renderRun()
+    scriptSerial(t, true)
+    const nav = within(t.nav())
+    await t.user.click(nav.getByRole('radio', { name: 'Serial port' }))
+    await waitFor(() =>
+      expect(nav.getByRole('button', { name: 'Connect to machine' })).toBeEnabled(),
+    )
+    await t.user.click(nav.getByRole('button', { name: 'Connect to machine' }))
+    await screen.findByRole('group', { name: 'Machine' })
+    t.machine.push({ state: 'Idle', homed: true })
+    await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
+    const inspector = screen.getByRole('complementary', { name: 'Inspector' })
+    await t.user.click(within(inspector).getByRole('button', { name: 'Start run' }))
+    const preflight = screen.getByRole('dialog', { name: 'Start run?' })
+    expect(within(preflight).getByText(`Serial port ${PORT} at 115200 baud`)).toBeInTheDocument()
+    expect(within(preflight).getByText(/Run it in the air: spindle off/)).toBeInTheDocument()
+    expect(within(preflight).getByText('Plan status')).toBeInTheDocument()
+    expect(within(preflight).getByText('Draft')).toBeInTheDocument()
+    // a draft plan does not run on a real machine: said before the click
+    const start = within(preflight).getByRole('button', { name: 'Start on the machine' })
+    expect(start).toBeDisabled()
+    expect(
+      within(preflight).getByText(/A real machine runs only finalized plans/),
+    ).toBeInTheDocument()
+    await expectNoAxeViolations(t.container)
+  })
+
+  it('a lost real connection says the machine may still move, in the navigator and the failure dialog (M2)', async () => {
+    const t = await renderRun()
+    scriptSerial(t, true)
+    const nav = within(t.nav())
+    await t.user.click(nav.getByRole('radio', { name: 'Serial port' }))
+    await waitFor(() =>
+      expect(nav.getByRole('button', { name: 'Connect to machine' })).toBeEnabled(),
+    )
+    await t.user.click(nav.getByRole('button', { name: 'Connect to machine' }))
+    await screen.findByRole('group', { name: 'Machine' })
+    t.machine.push({ state: 'Idle', homed: true })
+    t.machine.push({ state: 'Run', ...t.machine.job('streaming') })
+    // the run fails with machine.connection and the connection closes as lost
+    t.machine.outcome = {
+      ok: false,
+      error: {
+        code: 'machine.connection',
+        message: 'port closed',
+        issues: [],
+        frames: [{ where: 'GrblSender', data: { reason: 'device disconnected' } }],
+      },
+    }
+    const closed = closedStatus()
+    t.machine.push({
+      ...closed,
+      connection: {
+        ...closed.connection,
+        lost: { target: 'serial', port: { path: PORT, baud: 115_200 } },
+      },
+    })
+    const dialog = await screen.findByRole('dialog', { name: 'Connection to the machine lost' })
+    expect(within(dialog).getByText(/use the emergency stop/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/connect again and home the machine/)).toBeInTheDocument()
+    await t.user.click(within(dialog).getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    // the navigator keeps the warning until the next connect
+    expect(within(t.nav()).getByRole('alert')).toHaveTextContent(
+      'Connection to the machine lost. It may still be moving',
+    )
+    await expectNoAxeViolations(t.container)
   })
 
   it('says when no port is found', async () => {

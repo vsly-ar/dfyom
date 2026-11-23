@@ -7,13 +7,15 @@
 // never move the controls (DF34). Doc: docs/conventions/ui.md#run-mode-safety-ui,
 // docs/modes/run.md#machine-frame-and-manual-control-hardening-df31df35,
 // docs/modes/run-v0.1.md#commands-and-queries; serial port and real-machine confirmations:
-// docs/modes/run-machine.md#ports-and-the-port-picker, docs/modes/run.md#3-confirmations-before-motion
+// docs/modes/run-machine.md#ports-and-the-port-picker, docs/modes/run.md#3-confirmations-before-motion;
+// continuous jog and the alarm panel: docs/modes/run-machine.md#machine-readiness-m3
 import { useEffect, useId, useState } from 'react'
 import type { ProjectDoc } from '../../../../core/project/document'
 import type { TimeScale } from '../../../../core/run/clock'
 import { runMessages } from '../../messages/run'
 import { Icon, Button, ConfirmDialog, ErrorMessage, Select, StatusChip } from '../../ui'
-import { JogPad } from './JogPad'
+import { AlarmPanel, LostConnectionWarning } from './AlarmPanel'
+import { JogPad, useJogMode } from './JogPad'
 import { useLibraryItems } from '../plan/usePlan'
 import { actionText, formatLength, isConnected, runGates } from './machine-state'
 import { runnablePlans } from './plan-info'
@@ -84,6 +86,7 @@ export function RunNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
   const setupId = useRun((s) => s.setupId)
   const timeScale = useRun((s) => s.timeScale)
   const jogStep = useRun((s) => s.jogStep)
+  const jogMode = useJogMode()
   const pending = useRun((s) => s.pending)
   const actionError = useRun((s) => s.actionError)
   const [unlockOpen, setUnlockOpen] = useState(false)
@@ -301,6 +304,7 @@ export function RunNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
 
       <Section title={m.jog}>
         <JogPad
+          {...jogMode}
           units={units}
           step={jogStep}
           onStep={a.setJogStep}
@@ -330,7 +334,9 @@ export function RunNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
         )}
       </Section>
 
-      {/* at the end: a refusal never moves the controls above it (DF34) */}
+      {/* at the end: an alarm, a lost connection or a refusal never moves the controls (DF34) */}
+      <AlarmPanel status={status} />
+      <LostConnectionWarning status={status} />
       {actionError ? (
         <ErrorMessage
           error={actionError}

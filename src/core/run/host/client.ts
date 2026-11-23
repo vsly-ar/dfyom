@@ -97,6 +97,11 @@ export class MachineClient implements MachineService {
         settings?: Readonly<Record<string, number>> | undefined
       }
     | undefined
+  /**
+   * The last open connection ended without DFYOM closing it (host reported it lost, or the host
+   * exited): shown until the next connect (docs/modes/run-machine.md#lost-connection-m2).
+   */
+  private lost: { target: TargetKind; port?: { path: string; baud: number } } | undefined
   /** Job that checks and exports before it streams: machine actions wait (run.busy). */
   private reserved: string | undefined
   private hostStatus: HostStatus | undefined
@@ -129,6 +134,11 @@ export class MachineClient implements MachineService {
     const h = this.hostStatus
     if (conn === undefined || h === undefined) {
       const s = closedStatus(this.timeScale)
+      if (conn === undefined && this.lost !== undefined)
+        s.connection.lost = {
+          target: this.lost.target,
+          ...(this.lost.port === undefined ? {} : { port: { ...this.lost.port } }),
+        }
       return conn === undefined
         ? s
         : {
@@ -161,7 +171,9 @@ export class MachineClient implements MachineService {
     const machineKey = target.machineKey
     if (this.conn !== undefined)
       return fail('run.busy', 'a machine connection is already open', { where: `${WHERE}.connect` })
-    this.conn = { state: 'connecting', machineKey }
+    // the kind is known from the start, so a connection lost while opening is reported too
+    this.conn = { state: 'connecting', machineKey, target: target.kind }
+    this.lost = undefined
     // a real controller always runs at 1× (docs/modes/run-machine.md#amendments-to-run-v01md)
     this.timeScale = target.kind === 'virtual' ? target.timeScale : 1
     this.notify()
@@ -397,6 +409,7 @@ export class MachineClient implements MachineService {
         if (m.kind === 'connectionLost') {
           // the host has dropped the connection: closed here too, and a fresh host next time
           this.log.warn({ ...m.data }, 'machine connection lost')
+          this.markLost()
           host.expectExit = true
           this.conn = undefined
           this.hostStatus = undefined
@@ -421,8 +434,10 @@ export class MachineClient implements MachineService {
       where: WHERE,
       data: { exitCode: code },
     })
-    if (!host.expectExit && this.conn !== undefined)
+    if (!host.expectExit && this.conn !== undefined) {
       this.log.error({ err: e.toJSON() }, 'machine host exited unexpectedly')
+      this.markLost()
+    }
     host.resolveReady(Err(e))
     for (const resolve of this.pending.values()) resolve(Err(e))
     this.pending.clear()
@@ -433,6 +448,12 @@ export class MachineClient implements MachineService {
     this.hostStatus = undefined
     this.reserved = undefined
     this.notify()
+  }
+
+  private markLost(): void {
+    const c = this.conn
+    if (c?.target === undefined) return
+    this.lost = { target: c.target, ...(c.port === undefined ? {} : { port: { ...c.port } }) }
   }
 
   private request(m: MainMessage & { requestId: string }): AsyncAppResult<unknown> {

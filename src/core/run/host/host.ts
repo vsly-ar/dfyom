@@ -391,6 +391,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
             where: 'machineHost.jog',
             issues: [{ path: ['to'], rule: 'oneOf', message: 'give to or by' }],
           })
+        if (action.continuous === true) return jogToEdge(c, action.by ?? [0, 0, 0], action.feed)
         const v = action.to ?? action.by ?? [0, 0, 0]
         const mode = action.to !== undefined ? 'G53 G90' : 'G91'
         const line = `$J=G21 ${mode} X${fmt(v[0])} Y${fmt(v[1])} Z${fmt(v[2])} F${fmt(action.feed)}`
@@ -436,6 +437,44 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         c.jogEnd = undefined
         return c.sender.realtime(REALTIME.reset)
     }
+  }
+
+  /**
+   * Continuous jog (hold to jog, docs/modes/run-machine.md#machine-readiness-m3): an absolute
+   * machine move to the travel edge in the direction of `by` (one axis), ended by a jog cancel.
+   * The exact edge (`0` or `−travel`) never trips GRBL's soft-limit check on rounding.
+   */
+  async function jogToEdge(c: Connection, by: Vec3, feed: number): Promise<AppResult<unknown>> {
+    const where = 'machineHost.jog'
+    const axes = [0, 1, 2].filter((i) => by[i] !== 0)
+    if (axes.length !== 1)
+      return fail('input.malformed', 'a continuous jog moves exactly one axis', {
+        where,
+        issues: [{ path: ['by'], rule: 'oneAxis', message: 'give one non-zero axis' }],
+      })
+    const i = axes[0]!
+    const env = c.envelope
+    if (env === undefined) return stateError('the machine travel is not known yet', machineState(c))
+    const edge = by[i]! > 0 ? 0 : -env.travel[i]!
+    const base = c.jogEnd ?? c.sender.status?.mpos
+    const axis = AXES[i]!
+    if (base !== undefined && (by[i]! > 0 ? base[i]! >= edge - 1e-3 : base[i]! <= edge + 1e-3))
+      return fail('run.travel', `${axis.toUpperCase()} is at the end of its travel`, {
+        where,
+        data: { axis, target: base[i]!, min: -env.travel[i]!, max: 0, atEdge: true },
+      })
+    const r = await c.sender.command(
+      `$J=G21 G53 G90 ${axis.toUpperCase()}${fmt(edge)} F${fmt(feed)}`,
+    )
+    if (r.isErr()) {
+      const e = r.unwrapErr()
+      if (e.code === 'machine.error' && e.frames[0]?.data?.['code'] === 15)
+        return travelError(undefined)
+      return Err(e)
+    }
+    const at = (k: number) => (k === i ? edge : (base?.[k] ?? 0))
+    c.jogEnd = base === undefined ? undefined : [at(0), at(1), at(2)]
+    return Ok(undefined)
   }
 
   /** `run.travel`: a jog outside `[−travel, 0]`, in words (docs/modes/run.md DF33). */
@@ -665,6 +704,9 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         break
       case 'reset':
         c.jogEnd = undefined
+        // a controller that restarted on its own (power glitch, USB reset) lost its position:
+        // home again before a run (docs/modes/run-machine.md#real-machine-run-rules)
+        if (!e.expected) c.homed = false
         post({ type: 'event', kind: 'reset', data: { expected: e.expected } })
         // GRBL keeps G54 over a reset; read it again anyway (docs/modes/run-v0.1.md#work-zero-and-the-soft-limit-check)
         if (c.job === undefined || c.job.phase === 'stopping')

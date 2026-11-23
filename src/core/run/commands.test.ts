@@ -476,7 +476,12 @@ describe('machine client', () => {
     await waitFor(() => client.status().connection.state === 'closed', 1000)
     expect(client.status().connection.state).toBe('closed')
     expect(client.target).toBeUndefined()
-    expectOk(await client.connect({ ...target, machineKey: 'k' }))
+    // the windows learn that the machine was let go of without a reset (run-machine.md M2)
+    expect(client.status().connection.lost).toEqual({ target: 'virtual' })
+    const again = client.connect({ ...target, machineKey: 'k' })
+    // the next connect clears it (this fake host then loses it again)
+    expect(client.status().connection.lost).toBeUndefined()
+    expectOk(await again)
     expect(spawned).toBe(2)
   })
 })
@@ -559,6 +564,32 @@ describe('run commands on a serial target (loopback)', { timeout: 60_000 }, () =
     expectErrCode(r, 'run.state')
     expect(r.unwrapErr().issues[0]?.rule).toBe('settingsMismatch')
     expect(r.unwrapErr().message).toContain('$130')
+    expectOk(await t.run('run.connection.close', {}, ui))
+  })
+
+  it('a real run needs homing in this connection and passes the soft-limit check (M2)', async () => {
+    const t = await setup({ serial: (settings) => ({ emulator: { settings } }) })
+    expectOk(await serialOpen(t))
+    await finalize(t)
+    const start = async () => {
+      const { jobId } = expectOk(await t.run('run.job.start', { planId: t.planId }, ui)) as {
+        jobId: string
+      }
+      return t.d.job(jobId).unwrap().result
+    }
+    // never assumed homed on connect
+    let r = await start()
+    expect(expectErrCode(r, 'run.state').toJSON().frames[0]?.data).toMatchObject({ homed: false })
+    // unlocking is not homing
+    expectOk(await t.run('run.machine.unlock', {}, ui))
+    r = await start()
+    expect(expectErrCode(r, 'run.state').toJSON().frames[0]?.data).toMatchObject({ homed: false })
+    const { jobId } = expectOk(await t.run('run.machine.home', {}, ui)) as { jobId: string }
+    expectOk(await t.d.job(jobId).unwrap().result)
+    // G54 at the home position: the program leaves the travel, refused before a line is sent
+    r = await start()
+    expectErrCode(r, 'run.softLimit')
+    expect(t.status().job).toBeUndefined()
     expectOk(await t.run('run.connection.close', {}, ui))
   })
 

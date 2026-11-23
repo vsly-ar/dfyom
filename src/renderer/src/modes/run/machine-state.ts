@@ -128,9 +128,19 @@ export function stopGate(s: RunStatus): Gate {
 export function actionText(e: AppErrorData, units: UnitSystem): string | undefined {
   if (e.code !== 'run.travel') return undefined
   const d = e.frames[0]?.data as
-    { axis?: string; target?: number; min?: number; max?: number } | undefined
+    { axis?: string; target?: number; min?: number; max?: number; atEdge?: boolean } | undefined
   if (d?.axis === undefined || d.target === undefined || d.min === undefined || d.max === undefined)
     return m.travelUnknown
+  if (d.atEdge === true) {
+    // a continuous jog from the end of the travel (docs/modes/run-machine.md#machine-readiness-m3)
+    const atMax = Math.abs(d.target - d.max) <= Math.abs(d.target - d.min)
+    return m.travelAtEdge(
+      d.axis.toUpperCase(),
+      atMax ? 'max' : 'min',
+      formatLength(atMax ? d.max : d.min, units),
+      m.dro.units[units],
+    )
+  }
   const high = d.target > d.max
   return m.travel(
     d.axis.toUpperCase(),
@@ -155,6 +165,9 @@ export function formatLength(mm: number, units: UnitSystem): string {
 export function formatFeed(mmPerMin: number, units: UnitSystem): string {
   return units === 'inch' ? (mmPerMin / MM_PER_INCH).toFixed(1) : mmPerMin.toFixed(0)
 }
+
+/** How the jog pad jogs: one step per click, or while a button is held (M3). */
+export type JogMode = 'step' | 'continuous'
 
 /** Jog steps per unit system, in the project unit (inch values are converted to mm to send). */
 export const JOG_STEPS: Readonly<Record<UnitSystem, readonly string[]>> = {

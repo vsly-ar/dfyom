@@ -87,6 +87,13 @@ export const runMessages = {
     step: 'Jog step',
     jogButton: (axis: string, dir: '+' | '−') => `Jog ${axis}${dir}`,
     cancelJog: 'Stop jog',
+    /** Step or continuous (hold to jog) jogging (docs/modes/run-machine.md#machine-readiness-m3). */
+    jogMode: 'Jog mode',
+    jogModeStep: 'Step',
+    jogModeContinuous: 'Continuous',
+    holdHint: 'Hold to jog; release to stop.',
+    /** After a real connection was lost without a reset (run-machine.md#lost-connection-m2). */
+    lost: 'Connection to the machine lost. It may still be moving and the spindle may still be on: use the emergency stop.',
     workZero: 'Work zero',
     zeroAxis: (axis: string) => `Zero ${axis}`,
     zeroAll: 'Zero X Y Z',
@@ -109,6 +116,77 @@ export const runMessages = {
   travel: (axis: string, side: 'max' | 'min', limit: string, target: string, unit: string) =>
     `${axis} would leave the travel: ${side} ${limit} ${unit}, the jog would end at ${target} ${unit}.`,
   travelUnknown: 'The jog would leave the machine travel (soft limits).',
+  /** A continuous jog from the end of the travel (`run.travel`, `atEdge`). */
+  travelAtEdge: (axis: string, side: 'max' | 'min', limit: string, unit: string) =>
+    `${axis} is at the end of its travel (${side} ${limit} ${unit}).`,
+
+  /**
+   * The alarm panel: what happened and the next steps per GRBL alarm
+   * (docs/modes/run-machine.md#machine-readiness-m3). `0` = locked without an alarm code.
+   */
+  alarm: {
+    region: 'Alarm',
+    lockedTitle: 'Locked (Alarm)',
+    next: 'Next',
+    grbl: 'Controller',
+    codes: {
+      0: {
+        what: 'The controller starts locked until it is homed.',
+        next: ['Home the machine.', 'Unlock only to jog an axis off a limit switch first.'],
+      },
+      1: {
+        what: 'A limit switch tripped while moving; the position is lost.',
+        next: [
+          'Reset (immediate).',
+          'Check what tripped it: a crash, chips, a loose wire.',
+          'If an axis rests on its switch, unlock and jog it off.',
+          'Home the machine.',
+        ],
+      },
+      2: {
+        what: 'A move would have left the travel; the controller stopped it and kept the position.',
+        next: [
+          'Reset (immediate).',
+          'Home the machine.',
+          'Check the work zero and the program before the next run.',
+        ],
+      },
+      3: {
+        what: 'The controller was reset during motion; steps may be lost.',
+        next: ['Home the machine.', 'Check the work zero.'],
+      },
+      4: {
+        what: 'The probe was already triggered before probing.',
+        next: ['Check the probe or plate wiring and that nothing touches it.', 'Unlock.'],
+      },
+      5: {
+        what: 'The probe made no contact within its travel.',
+        next: ['Check the plate and its clip on the bit.', 'Unlock and probe again.'],
+      },
+      6: { what: 'Homing was reset before it finished.', next: ['Home the machine again.'] },
+      7: {
+        what: 'The safety door opened during homing.',
+        next: ['Close the door.', 'Home the machine again.'],
+      },
+      8: {
+        what: 'Homing could not pull off a limit switch.',
+        next: [
+          'Check the limit switch and its wiring.',
+          'Unlock, jog the axis off the switch, home again.',
+          'The pull-off ($27) may be too short: change it with your controller’s tool.',
+        ],
+      },
+      9: {
+        what: 'Homing found no limit switch within the search distance.',
+        next: ['Check the limit switches and their wiring.', 'Home again.'],
+      },
+      10: {
+        what: 'Homing found no second switch for a self-squared axis.',
+        next: ['Check both switches of the axis.', 'Home again.'],
+      },
+    } as Readonly<Record<number, { what: string; next: readonly string[] }>>,
+    other: { what: '', next: ['Reset (immediate), then home the machine.'] },
+  },
 
   /** Connect to a real controller (docs/modes/run-machine.md#ports-and-the-port-picker). */
   serial: {
@@ -213,6 +291,13 @@ export const runMessages = {
       'Checked against the machine travel with this work zero when the run starts; a program outside the travel is refused.',
     checksTitle: 'Before you start',
     start: 'Start run',
+    /** Real connection (docs/modes/run-machine.md#pre-flight-on-a-real-machine). */
+    startMachine: 'Start on the machine',
+    planStatus: 'Plan status',
+    airCut:
+      'First run of this program? Run it in the air: spindle off, Z zero raised above the stock.',
+    notFinalized: 'A real machine runs only finalized plans. Finalize the plan in Plan mode first.',
+    settingsMismatch: 'The controller’s settings differ from the plan’s machine (see Connection).',
     cancel: 'Cancel',
   },
 
@@ -267,6 +352,11 @@ export const runMessages = {
     didHold: 'DFYOM held the feed and reset the controller, so no later line ran.',
     nextHome: 'Home the machine again and check the work zero before the next run.',
     nextCheck: 'Check the work zero and the program, then start the run again.',
+    /** A real connection lost during the run (run-machine.md#lost-connection-m2). */
+    lostTitle: 'Connection to the machine lost',
+    lostText: 'It may still be moving and the spindle may still be on: use the emergency stop.',
+    lostNext:
+      'Check the cable and the controller’s power, then connect again and home the machine before the next run.',
     close: 'Close',
   },
 

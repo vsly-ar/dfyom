@@ -152,6 +152,8 @@ export const MachineActionSchema = z.discriminatedUnion('kind', [
     by: Vec3Schema.exactOptional(),
     /** mm/min. */
     feed: z.number().positive().max(1e6),
+    /** Hold to jog: to the travel edge in the direction of `by` (one axis), until a jog cancel. */
+    continuous: z.boolean().exactOptional(),
   }),
   z.object({ kind: z.literal('jogCancel') }),
   z.object({

@@ -277,7 +277,7 @@ export const runMachineJog = defineCommand({
   kind: 'effect',
   name: 'run.machine.jog',
   summary:
-    'Jog to a machine position (to) or by a distance (by) in mm at feed mm/min; resolves when GRBL accepted it, motion continues.',
+    'Jog to a machine position (to) or by a distance (by) in mm at feed mm/min, or continuously to the travel edge (continuous); resolves when GRBL accepted it, motion continues.',
   title: () => 'Jog',
   machine: true,
   args: z
@@ -285,8 +285,15 @@ export const runMachineJog = defineCommand({
       to: Vec3Schema.optional().describe('Target in machine coordinates (mm)'),
       by: Vec3Schema.optional().describe('Relative move (mm)'),
       feed: z.number().positive().max(100_000).describe('mm/min'),
+      continuous: z
+        .boolean()
+        .optional()
+        .describe(
+          'Hold to jog: with by (one axis, its sign the direction) move to the travel edge until run.machine.jogCancel',
+        ),
     })
-    .refine((a) => (a.to === undefined) !== (a.by === undefined), 'give exactly one of to or by'),
+    .refine((a) => (a.to === undefined) !== (a.by === undefined), 'give exactly one of to or by')
+    .refine((a) => a.continuous !== true || a.by !== undefined, 'a continuous jog takes by'),
   result: Done,
   run: async (_doc, args, ctx) =>
     (
@@ -297,6 +304,7 @@ export const runMachineJog = defineCommand({
           feed: args.feed,
           ...(args.to === undefined ? {} : { to: args.to }),
           ...(args.by === undefined ? {} : { by: args.by }),
+          ...(args.continuous === true ? { continuous: true } : {}),
         },
         'run.machine.jog',
       )

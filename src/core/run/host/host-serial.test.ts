@@ -97,6 +97,55 @@ describe('machine host: serial target (loopback)', { timeout: 30_000 }, () => {
     expect(h.of('status').at(-1)?.status).toMatchObject({ state: 'Idle', homed: true })
   })
 
+  it('a controller that resets on its own is no longer homed (M2)', async () => {
+    const h = harness()
+    expectOk(await h.connect())
+    expectOk(await h.request({ type: 'machine', action: { kind: 'home' } }))
+    expect(h.of('status').at(-1)?.status.homed).toBe(true)
+    // a power glitch or USB reset: a banner DFYOM did not ask for
+    h.ports.opened[0]!.emulator.receive(Uint8Array.of(0x18))
+    expect(
+      await h.pump(
+        () =>
+          h.of('event').some((e) => e.kind === 'reset' && e.data['expected'] === false) &&
+          h.of('status').at(-1)?.status.homed === false,
+      ),
+    ).toBe(true)
+  })
+
+  it('a continuous jog goes to the travel edge until cancelled (M3)', async () => {
+    const h = harness()
+    expectOk(await h.connect())
+    expectOk(await h.request({ type: 'machine', action: { kind: 'home' } }))
+    const port = h.ports.opened[0]!
+    const jog = (by: number[]) =>
+      h.request({ type: 'machine', action: { kind: 'jog', by, feed: 2000, continuous: true } })
+    // one axis only
+    const two = await jog([1, 1, 0])
+    expectErrCode(two, 'input.malformed')
+    expect(two.unwrapErr().issues[0]?.rule).toBe('oneAxis')
+    // -X: to -travel ($130), an absolute machine move
+    const before = port.written.length
+    expectOk(await jog([-1, 0, 0]))
+    const sent = String.fromCharCode(...port.written.slice(before))
+    expect(sent).toMatch(/\$J=G21 G53 G90 X-\d+(\.\d+)? F2000/)
+    const x0 = h.of('status').at(-1)!.status.mpos[0]
+    expect(await h.pump(() => (h.of('status').at(-1)?.status.mpos[0] ?? 0) < x0 - 5)).toBe(true)
+    expectOk(await h.request({ type: 'machine', action: { kind: 'jogCancel' } }))
+    expect(await h.pump(() => h.of('status').at(-1)?.status.state === 'Idle')).toBe(true)
+    // +X runs to 0, then +X again is at the edge
+    expectOk(await jog([1, 0, 0]))
+    expect(
+      await h.pump(() => {
+        const s = h.of('status').at(-1)?.status
+        return s?.state === 'Idle' && Math.abs(s.mpos[0]) < 1e-3
+      }),
+    ).toBe(true)
+    const edge = await jog([1, 0, 0])
+    expectErrCode(edge, 'run.travel')
+    expect(edge.unwrapErr().frames[0]?.data).toMatchObject({ axis: 'x', atEdge: true, max: 0 })
+  })
+
   it('a pulled cable is a lost connection', async () => {
     const h = harness()
     expectOk(await h.connect())

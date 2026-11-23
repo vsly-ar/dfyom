@@ -32,6 +32,13 @@ export const RunStatusSchema = HostStatusSchema.omit({ job: true, timeScale: tru
     /** Serial connections: the port (docs/modes/run-machine.md#connect). */
     port: PortSchema.exactOptional(),
     timeScale: TimeScaleSchema,
+    /**
+     * Closed: the last open connection was lost rather than closed by DFYOM (no reset reached the
+     * controller); cleared by the next connect (docs/modes/run-machine.md#lost-connection-m2).
+     */
+    lost: z
+      .object({ target: z.enum(TARGET_KINDS), port: PortSchema.exactOptional() })
+      .exactOptional(),
   }),
   job: z
     .object({

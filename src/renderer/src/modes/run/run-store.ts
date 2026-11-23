@@ -15,7 +15,7 @@ import type { SettingsCheck } from '../../../../core/run/settings-check'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import type { CallReply, PreloadApi } from '../../../../shared/preload-api'
 import { useShell } from '../../shell/ShellContext'
-import { activeJob } from './machine-state'
+import { activeJob, type JogMode } from './machine-state'
 
 /** Progress poll of the run job (`job.get`) while it runs: progress ticks are not pushed. */
 export const RUN_PROGRESS_POLL_MS = 250
@@ -78,6 +78,8 @@ export interface RunState {
   readonly settingsCheck: SettingsCheck | undefined
   /** Jog step in the project unit. */
   readonly jogStep: string
+  /** Step or continuous jogging (M3, per window). */
+  readonly jogMode: JogMode
   /** The run job this window follows (started here, or seen in the status). */
   readonly jobId: string | undefined
   readonly progress: RunProgress | undefined
@@ -103,6 +105,7 @@ export interface RunState {
   /** `run.ports.scan`; keeps the chosen port if still there, else picks the first USB one. */
   scanPorts(): Promise<void>
   setJogStep(step: string): void
+  setJogMode(mode: JogMode): void
   setPreflightOpen(open: boolean): void
   dismissWait(key: string | undefined): void
   closeFailure(): void
@@ -114,6 +117,12 @@ export interface RunState {
   unlock(): Promise<void>
   jog(axis: Axis, mm: number, feed: number): Promise<void>
   jogCancel(): Promise<void>
+  /**
+   * Hold to jog (docs/modes/run-machine.md#machine-readiness-m3): a continuous jog to the travel
+   * edge; `jogHoldEnd` cancels it, and again once the start is accepted if it was still on its way.
+   */
+  jogHoldStart(axis: Axis, sign: 1 | -1, feed: number): Promise<void>
+  jogHoldEnd(): void
   setWorkZero(axes: readonly Axis[]): Promise<void>
   reset(): Promise<void>
   /** `setupId`: the setup to run (default: the chosen one; the server needs it for several). */
@@ -149,11 +158,21 @@ export function createRunStore(bridge: PreloadApi): RunStore {
   let poll: ReturnType<typeof setTimeout> | undefined
   let polling: string | undefined
   let live = false
+  /** The continuous jog of this window: still being accepted, and whether released meanwhile. */
+  let held: { released: boolean } | undefined
 
   const store = createStore<RunState>()((set, get) => {
     /** One command; a refusal goes to the action banner (`op.aborted` is never a failure). */
-    const call = async (name: string, args: object = {}): Promise<CallReply> => {
-      set((s) => ({ pending: [...s.pending, name], actionError: undefined }))
+    const call = async (
+      name: string,
+      args: object = {},
+      opts: { keepError?: boolean } = {},
+    ): Promise<CallReply> => {
+      set((s) =>
+        opts.keepError === true
+          ? { pending: [...s.pending, name] }
+          : { pending: [...s.pending, name], actionError: undefined },
+      )
       const r = await bridge.call(name, args)
       set((s) => {
         const i = s.pending.indexOf(name)
@@ -193,6 +212,7 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       ports: undefined,
       settingsCheck: undefined,
       jogStep: '10',
+      jogMode: 'step',
       jobId: undefined,
       progress: undefined,
       ended: undefined,
@@ -237,6 +257,7 @@ export function createRunStore(bridge: PreloadApi): RunStore {
         }))
       },
       setJogStep: (jogStep) => set({ jogStep }),
+      setJogMode: (jogMode) => set({ jogMode }),
       setPreflightOpen: (preflightOpen) => set({ preflightOpen }),
       dismissWait: (dismissedWait) => set({ dismissedWait }),
       closeFailure: () => set({ failureOpen: false }),
@@ -275,6 +296,28 @@ export function createRunStore(bridge: PreloadApi): RunStore {
         await call('run.machine.jog', { by, feed })
       },
       jogCancel: async () => void (await call('run.machine.jogCancel')),
+      async jogHoldStart(axis, sign, feed) {
+        if (held !== undefined) return
+        const h = { released: false }
+        held = h
+        const by: [number, number, number] = [0, 0, 0]
+        by['xyz'.indexOf(axis)] = sign
+        const r = await call('run.machine.jog', { by, feed, continuous: true })
+        if (held === h) {
+          if (!r.ok) held = undefined
+          return
+        }
+        // released before GRBL accepted the jog: the first 0x85 may have overtaken the $J line
+        if (h.released && r.ok) await call('run.machine.jogCancel', {}, { keepError: true })
+      },
+      jogHoldEnd() {
+        const h = held
+        if (h === undefined) return
+        h.released = true
+        held = undefined
+        // keep a refusal of the start (e.g. at the travel edge) visible
+        void call('run.machine.jogCancel', {}, { keepError: true })
+      },
       setWorkZero: async (axes) => void (await call('run.workZero.set', { axes: [...axes] })),
       reset: async () => void (await call('run.machine.reset')),
       async startRun(chosen) {
