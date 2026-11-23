@@ -219,7 +219,7 @@ describe('Apply', () => {
       </ShellProvider>,
     )
     const form = await screen.findByRole('region', { name: 'Set up the part' })
-    const length = within(form).getByRole('textbox', { name: 'Length (X)' })
+    const length = within(form).getByRole('combobox', { name: 'Length (X)' })
     await user.clear(length)
     await user.type(length, '120{Enter}', { skipClick: true })
     expect(length).toHaveValue('120')

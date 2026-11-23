@@ -104,6 +104,12 @@ export interface FieldProps {
   kind?: 'value' | 'toggle'
   /** The control; receives `FieldControlProps`. */
   children: ReactElement<FieldControlProps>
+  /**
+   * A popup under the whole field (below the support area), positioned by its own class against
+   * the field: QuantityInput's adjust panel (ui.md#field). Comes after the support area in DOM
+   * and Tab order.
+   */
+  popup?: ReactNode
   /** Layout only; appended to the wrapper's class. */
   className?: string | undefined
 }
@@ -117,6 +123,7 @@ export function Field({
   readOnly = false,
   kind = 'value',
   children,
+  popup,
   className,
 }: FieldProps): React.JSX.Element {
   const base = useId()
@@ -349,6 +356,7 @@ export function Field({
           ) : null}
         </div>
       ) : null}
+      {popup}
     </div>
   )
 }

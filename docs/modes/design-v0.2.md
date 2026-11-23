@@ -24,7 +24,7 @@ Settled with the user when this doc was accepted (D18, 2026-11-22: Q12–Q16 as 
 10. **Facing and profile `on` (E):** stock faces only in v0.2; a profile or facing from a floor is later, so through-cut and tab rules stay unchanged.
 11. **`tool.*` in design expressions (F):** unknown in v0.2 ([§ Expressions and the tool](#expressions-and-the-tool)).
 12. **Changing `on` to another direction (G):** keeps the `[u, v]` numbers; the [access checks](#dfm-access-checks) warn if the feature no longer fits.
-13. **Auto choice during adjust-popover steps (H):** none; the choice waits for Apply (D13, [apply.md § Adjust popover](../architecture/apply.md#adjust-popover)).
+13. **Auto choice during adjust-panel steps (H):** none; the choice waits for Apply (D13, [apply.md § Adjust panel](../architecture/apply.md#adjust-panel)).
 14. **Generalized drill (I):** takes the operation's `pointAngle`; it stores none of its own.
 15. **Updating a specific tool from the library (J):** a new command `design.snapshot.update { snapshotId }` for tool and stock snapshots, one explicit, undoable path for every design snapshot, as plans have `plan.libraryItem.update` ([§ Commands](#commands-and-queries-v02)).
 

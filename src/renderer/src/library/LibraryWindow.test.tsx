@@ -246,9 +246,10 @@ describe('Library window', () => {
     expect(option).toHaveAccessibleDescription(/V-bit/)
     await user.click(option)
     // angle and tip right after the diameter; the name follows "Chamfer 90° Ø6"
-    const labels = within(editor())
-      .getAllByRole('textbox')
-      .map((i) => i.getAttribute('aria-label') ?? (i as HTMLInputElement).labels?.[0]?.textContent)
+    // value fields are comboboxes (their adjust panel), text fields textboxes: every text input
+    const labels = [...editor().querySelectorAll<HTMLInputElement>('input[type="text"]')].map(
+      (i) => i.getAttribute('aria-label') ?? (i as HTMLInputElement).labels?.[0]?.textContent,
+    )
     expect(labels.indexOf('Included angle')).toBe(labels.indexOf('Diameter') + 1)
     expect(labels.indexOf('Tip diameter')).toBe(labels.indexOf('Diameter') + 2)
     const tip = within(editor()).getByLabelText('Tip diameter', { selector: 'input' })

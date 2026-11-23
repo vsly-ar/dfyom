@@ -864,6 +864,7 @@ svg.fi .ext { stroke-dasharray: 1.5 1.5; opacity: 0.7; }
         <li><b>2026-11-22 · Planned v0.3 components</b> <span class="planned-badge">Planned · not designed yet</span>: placeholders for the Shape UI (<a href="#planned-v03">list</a>); specimens come with U1–U3 and are approved in L3.</li>
         <li><b>2026-11-22 · v0.3 Shape UI approved</b> (L3, D33): the Shape UI visuals, the library window, the view cube and the plan-edit tint approved as built; changes: a path with more than 20 segments shows only the selected segment's handles, the SVG import's split choice is a dropdown, measure is <span class="code">D</span>, a gap below the view cube.</li>
         <li><b>2026-11-22 · Planned v0.4 components</b> <span class="planned-badge">Planned · not designed yet</span>: placeholders for the feature UI (<a href="#planned-v04">list</a>); specimens come with U1–U4 and L1 and are approved in L2.</li>
+        <li><b>2026-11-22 · Adjust panel replaces the pencil</b> <span class="changed-badge">Changed since approval</span> (DF9, decided by the user): focusing a value field opens its adjust panel (step size, −/+, recommended value, pick toggle) under the field while the input keeps focus; the pencil and the pick button inside the input are gone, so Tab goes from field to field and the amber "fix available" pencil with them. The specimens on this page still show the pencil; the rules are in <a href="ui.md#field">ui.md § Field</a>.</li>
       </ol>
     </section>
   </main>
@@ -908,7 +909,7 @@ svg.fi .ext { stroke-dasharray: 1.5 1.5; opacity: 0.7; }
       <input class="range" type="range" min="1" max="100" value="10" aria-label="Time scale">
     </div>
   </div>
-  <div class="spec-row"><span class="lbl">Field · illustration icon (one amber line is the dimension; full colour focused or not <span class="changed-badge">Changed since approval</span>, grey when read-only or disabled), lock (only on feeds fields in auto mode; disabled with its reason as tooltip and visible text), input with adjust (pencil), support area under the input</span>
+  <div class="spec-row"><span class="lbl">Field · illustration icon (one amber line is the dimension; full colour focused or not <span class="changed-badge">Changed since approval</span>, grey when read-only or disabled), lock (only on feeds fields in auto mode; disabled with its reason as tooltip and visible text), input with adjust (pencil; <span class="changed-badge">Changed since approval</span> in the app the pencil is gone: the adjust panel opens under the field on focus, see the changelog), support area under the input</span>
     <div style="display:grid;gap:12px;max-width:520px">
       <div class="field" data-step="0.1" data-dec="2" data-name="Stepdown" data-rec="1.20" data-rec-text="≤ 1.20 mm for 6061 with a 6 mm cutter">
         <label><svg class="i fi" data-fi="stepdown" viewBox="0 0 20 20"></svg><span class="term" title="Depth removed in each pass">Stepdown</span></label>

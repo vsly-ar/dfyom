@@ -111,10 +111,11 @@ test('exit criteria through the UI: design, plan, export, run, save, close and r
   await addFromMenu(page, 'Add pocket')
   await expect(inspector.getByRole('heading', { name: 'Pocket 1' })).toBeVisible()
   await setField(inspector, 'Depth', '6')
-  // the adjust popover commits each step live (one gesture); Escape reverts the whole session,
-  // which needs the gesture id to reach the dispatcher through preload and main (ui.md, D9)
+  // the adjust panel (opened by focusing the field, DF9) commits each step live (one gesture);
+  // Escape reverts the whole session, which needs the gesture id to reach the dispatcher through
+  // preload and main (ui.md, D9)
   const depth = inspector.getByLabel('Depth', { exact: true }).and(inspector.locator('input'))
-  await inspector.getByRole('button', { name: 'Adjust Depth' }).click()
+  await depth.click()
   const adjust = page.getByRole('dialog', { name: 'Adjust Depth' })
   await adjust.getByRole('button', { name: 'Increase' }).click()
   await adjust.getByRole('button', { name: 'Increase' }).click()

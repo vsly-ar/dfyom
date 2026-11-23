@@ -59,7 +59,8 @@ function Harness({ initial, optional, onCommit, ...props }: HarnessProps): React
 function setup(props: HarnessProps = {}) {
   const onCommit = vi.fn<(v: Quantity | undefined) => void>()
   const r = renderUi(<Harness initial="3.00" onCommit={onCommit} {...props} />)
-  const input = screen.getByRole(props.references ? 'combobox' : 'textbox', { name: 'Width' })
+  // an editable value field is a combobox: its popup is the adjust panel (ui.md#field, DF9)
+  const input = screen.getByRole('combobox', { name: 'Width' })
   return { ...r, onCommit, input: input as HTMLInputElement }
 }
 
@@ -158,7 +159,7 @@ describe('QuantityInput: echo collapse after a click', () => {
   it('keeps the echo while the pointer that blurred the field is down, collapses after the click', async () => {
     const onClick = vi.fn()
     const { user } = renderUi(<WithButton onClick={onClick} />)
-    const input = screen.getByRole('textbox', { name: 'Width' })
+    const input = screen.getByRole('combobox', { name: 'Width' })
     await retype(user, input, '1/16"')
     expect(await screen.findByText('= 1.588 mm')).toBeInTheDocument()
 
@@ -208,9 +209,12 @@ describe('QuantityInput: commit and revert', () => {
     expect(onCommit).not.toHaveBeenCalled()
   })
 
-  it('reverts to the stored source on Escape', async () => {
+  it('reverts to the stored source on Escape (the first one closes the adjust panel)', async () => {
     const { user, input, onCommit } = setup()
     await retype(user, input, '3..5')
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(input).toHaveValue('3..5')
     await user.keyboard('{Escape}')
     expect(input).toHaveValue('3.00')
     expect(input).not.toHaveAttribute('aria-invalid')
@@ -275,7 +279,7 @@ describe('QuantityInput: commit and revert', () => {
       )
     }
     const { user } = renderUi(<External />)
-    const input = screen.getByRole('textbox', { name: 'Width' })
+    const input = screen.getByRole('combobox', { name: 'Width' })
     await user.click(screen.getByRole('button', { name: 'Agent edit' }))
     expect(input).toHaveValue('7')
   })
@@ -290,7 +294,7 @@ describe('QuantityInput: commit and revert', () => {
         onCommit={() => {}}
       />,
     )
-    const input = screen.getByRole('textbox', { name: 'Width' })
+    const input = screen.getByRole('combobox', { name: 'Width' })
     expect(input).toHaveAttribute('aria-invalid', 'true')
     expect(input).toHaveAccessibleDescription('Unknown reference “D”.')
   })
@@ -432,7 +436,7 @@ describe('QuantityInput: optional (empty = unset)', () => {
     expect(onCommit).not.toHaveBeenCalled()
     expect(input).toHaveAttribute('aria-invalid', 'true')
     await retype(user, input, '')
-    await user.keyboard('{Escape}')
+    await user.keyboard('{Escape}{Escape}')
     expect(input).toHaveValue('3.00')
     await user.tab()
     expect(onCommit).not.toHaveBeenCalled()
@@ -524,16 +528,17 @@ function gestureSetup(props: Partial<React.ComponentProps<typeof GestureHarness>
   const onCommit = vi.fn<(v: Quantity, gesture: string | undefined) => void>()
   const onCancel = vi.fn<(gesture: string) => void>()
   const r = renderUi(<GestureHarness onCommit={onCommit} onCancel={onCancel} {...props} />)
-  const input = screen.getByRole('textbox', { name: 'Width' }) as HTMLInputElement
+  const input = screen.getByRole('combobox', { name: 'Width' }) as HTMLInputElement
+  // focusing (or clicking) the field opens its adjust panel
   const open = async () => {
-    await r.user.click(screen.getByRole('button', { name: 'Adjust Width' }))
+    await r.user.click(input)
     await screen.findByRole('dialog', { name: 'Adjust Width' })
   }
   const steps = () => onCommit.mock.calls.map(([v, g]) => [v.source, g])
   return { ...r, input, onCommit, onCancel, open, steps }
 }
 
-describe('QuantityInput: adjust popover (live gesture)', () => {
+describe('QuantityInput: adjust panel (live gesture)', () => {
   it('commits every step live with one gesture id; a click outside keeps the value', async () => {
     const { user, input, open, steps, onCancel } = gestureSetup()
     await open()
@@ -555,7 +560,7 @@ describe('QuantityInput: adjust popover (live gesture)', () => {
     expect(input).toHaveValue('23.00')
   })
 
-  it('Escape cancels the gesture and restores the value from before the popover', async () => {
+  it('Escape cancels the gesture and restores the value from before the first step', async () => {
     const { user, input, open, steps, onCancel } = gestureSetup()
     await open()
     await user.click(screen.getByRole('button', { name: 'Increase' }))
@@ -597,7 +602,7 @@ describe('QuantityInput: adjust popover (live gesture)', () => {
     expect(screen.queryByText(/Escape could not revert it/)).toBeNull()
   })
 
-  it('the popover hint names only keys that act in the popover', async () => {
+  it('the panel hint names only keys that act in the panel', async () => {
     const { open } = gestureSetup()
     await open()
     const dialog = screen.getByRole('dialog', { name: 'Adjust Width' })
@@ -682,14 +687,15 @@ describe('QuantityInput: references and picking', () => {
     expect(input).toHaveValue('')
   })
 
-  it('hands the pick button an insert callback; the picked reference goes in at the caret', async () => {
+  it('hands the pick toggle an insert callback; the picked reference goes in at the caret', async () => {
     const onPick = vi.fn<(insert: (reference: string) => void) => void>()
-    const { user, input } = setup({ onPick, picking: true })
+    const { user, input } = setup({ onPick })
     await retype(user, input, ' / 2')
     await user.keyboard('{Home}')
     const pick = screen.getByRole('button', { name: 'Pick Width in the viewport' })
-    expect(pick).toHaveAttribute('aria-pressed', 'true')
+    expect(pick).toHaveAttribute('aria-pressed', 'false')
     await user.click(pick)
+    expect(input).toHaveFocus() // a press in the panel keeps the field focused
     expect(onPick).toHaveBeenCalledTimes(1)
     const insert = onPick.mock.calls[0]?.[0]
     act(() => insert?.('pocket1.floor.z'))
@@ -698,12 +704,185 @@ describe('QuantityInput: references and picking', () => {
     expect(input.selectionStart).toBe('pocket1.floor.z'.length)
   })
 
+  it('the pressed pick toggle cancels pick mode on a second press (DF10)', async () => {
+    const onPick = vi.fn()
+    const onPickCancel = vi.fn()
+    const { user, input } = setup({ onPick, onPickCancel, picking: true })
+    await user.click(input)
+    const pick = screen.getByRole('button', { name: 'Pick Width in the viewport' })
+    expect(pick).toHaveAttribute('aria-pressed', 'true')
+    await expectNoAxeViolations()
+    await user.click(pick)
+    expect(onPickCancel).toHaveBeenCalledTimes(1)
+    expect(onPick).not.toHaveBeenCalled()
+    expect(input).toHaveFocus()
+  })
+
   it('enters pick mode with Alt+P', async () => {
     const onPick = vi.fn()
     const { user, input } = setup({ onPick })
     await user.click(input)
     await user.keyboard('{Alt>}p{/Alt}')
     expect(onPick).toHaveBeenCalledTimes(1)
+  })
+
+  it('Alt+P while picking cancels pick mode', async () => {
+    const onPick = vi.fn()
+    const onPickCancel = vi.fn()
+    const { user, input } = setup({ onPick, onPickCancel, picking: true })
+    await user.click(input)
+    await user.keyboard('{Alt>}p{/Alt}')
+    expect(onPickCancel).toHaveBeenCalledTimes(1)
+    expect(onPick).not.toHaveBeenCalled()
+  })
+
+  it('in pick mode Escape is left to the viewport (the panel stays, nothing reverts)', async () => {
+    const onKey = vi.fn()
+    document.addEventListener('keydown', onKey)
+    const { user, input } = setup({ onPick: vi.fn(), onPickCancel: vi.fn(), picking: true })
+    await user.click(input)
+    await user.keyboard('{Escape}')
+    expect(onKey).toHaveBeenCalledWith(expect.objectContaining({ key: 'Escape' }))
+    expect(screen.getByRole('dialog', { name: 'Adjust Width' })).toBeInTheDocument()
+    document.removeEventListener('keydown', onKey)
+  })
+
+  it("the reference list takes the adjust panel's place while it is open", async () => {
+    const { user, input } = setup({ references })
+    await user.click(input)
+    expect(screen.getByRole('dialog', { name: 'Adjust Width' })).toBeInTheDocument()
+    await retype(user, input, 'po')
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(input).toHaveAttribute('aria-haspopup', 'listbox')
+    expect(input).toHaveAttribute(
+      'aria-controls',
+      screen.getByRole('listbox', { name: 'References for Width' }).id,
+    )
+  })
+})
+
+describe('QuantityInput: adjust panel on focus (DF9)', () => {
+  it('opens under the field on focus while the input keeps focus and takes the typing', async () => {
+    const { user, input } = setup()
+    expect(input).toHaveAttribute('aria-haspopup', 'dialog')
+    expect(input).toHaveAttribute('aria-expanded', 'false')
+    expect(input).not.toHaveAttribute('aria-controls')
+    await user.click(input)
+    const panel = screen.getByRole('dialog', { name: 'Adjust Width' })
+    expect(input).toHaveFocus()
+    expect(input).toHaveAttribute('aria-expanded', 'true')
+    expect(input).toHaveAttribute('aria-controls', panel.id)
+    await expectNoAxeViolations()
+    await user.type(input, '5')
+    expect(input).toHaveValue('3.005')
+    expect(panel).toHaveTextContent('3.005')
+  })
+
+  it('has no pencil or other button in the input: Tab goes from field to field', async () => {
+    const { user } = renderUi(
+      <>
+        <Harness initial="3.00" onPick={() => {}} />
+        <QuantityInput
+          label="Depth"
+          kind="length"
+          defaultUnit="mm"
+          value={q('2')}
+          onCommit={() => {}}
+        />
+      </>,
+    )
+    expect(screen.queryByRole('button')).toBeNull()
+    await user.click(screen.getByRole('combobox', { name: 'Width' }))
+    await user.tab()
+    expect(screen.getByRole('combobox', { name: 'Depth' })).toHaveFocus()
+    // the first panel closed with its field, the second opened
+    expect(screen.getAllByRole('dialog')).toHaveLength(1)
+    expect(screen.getByRole('dialog', { name: 'Adjust Depth' })).toBeInTheDocument()
+  })
+
+  it('closes when focus leaves; a click in the input reopens it', async () => {
+    const { user, input } = setup()
+    await user.click(input)
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(input).toHaveFocus()
+    await user.click(input)
+    expect(screen.getByRole('dialog', { name: 'Adjust Width' })).toBeInTheDocument()
+    await user.click(document.body)
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('a valid Enter closes the panel (done editing); an invalid one keeps it', async () => {
+    const { user, input } = setup()
+    await retype(user, input, '3..5')
+    await user.keyboard('{Enter}')
+    expect(screen.getByRole('dialog', { name: 'Adjust Width' })).toBeInTheDocument()
+    await retype(user, input, '4')
+    await user.keyboard('{Enter}')
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(input).toHaveFocus()
+  })
+
+  it('a press in the panel keeps the input focused', async () => {
+    const { user, input } = setup()
+    await user.click(input)
+    await user.click(screen.getByRole('radio', { name: '10' }))
+    expect(input).toHaveFocus()
+    expect(screen.getByRole('radio', { name: '10' })).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('⌘↓ / Ctrl+↓ moves into the panel; arrows move, Escape returns to the input', async () => {
+    const { user, input } = setup()
+    await user.click(input)
+    await user.keyboard('{Meta>}{ArrowDown}{/Meta}')
+    expect(input).toHaveValue('3.00') // not a step
+    const radios = screen.getAllByRole('radio')
+    expect(radios[0]).toHaveFocus()
+    await user.keyboard('{ArrowRight}')
+    expect(radios[1]).toHaveFocus()
+    await user.keyboard('{End}')
+    expect(screen.getByRole('button', { name: 'Increase' })).toHaveFocus()
+    await user.keyboard('{Enter}')
+    expect(input).toHaveValue('4.00')
+    await user.keyboard('{Escape}')
+    expect(input).toHaveFocus()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(input).toHaveValue('3.00') // Escape cancelled the session's step
+  })
+
+  it('↓ moves into the panel when the text cannot step and there is nothing to list', async () => {
+    const { user, input } = setup()
+    await retype(user, input, 'D / 2')
+    await user.keyboard('{ArrowDown}')
+    expect(screen.getAllByRole('radio')[0]).toHaveFocus()
+    // Shift+Tab goes back to the input; the panel's controls are not Tab stops
+    await user.tab({ shift: true })
+    expect(input).toHaveFocus()
+  })
+
+  it('Ctrl+↓ opens a closed panel and moves into it', async () => {
+    const { user, input } = setup()
+    await user.click(input)
+    await user.keyboard('{Escape}')
+    await user.keyboard('{Control>}{ArrowDown}{/Control}')
+    expect(screen.getAllByRole('radio')[0]).toHaveFocus()
+  })
+
+  it('opens nothing for a dense cell', async () => {
+    const { user } = renderUi(
+      <QuantityInput
+        label="Length"
+        kind="length"
+        defaultUnit="mm"
+        value={q('2')}
+        onCommit={() => {}}
+        dense
+      />,
+    )
+    const input = screen.getByRole('textbox', { name: 'Length' })
+    await user.click(input)
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(input).not.toHaveAttribute('aria-expanded')
   })
 })
 

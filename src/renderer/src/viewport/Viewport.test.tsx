@@ -2,7 +2,7 @@
 // (region, toolbar, pick banner, keys) is tested here, the scene's logic in the pure modules.
 // Doc: docs/conventions/ui.md#testing
 import { act, fireEvent, screen, within } from '@testing-library/react'
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Vector3 } from 'three'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { expectNoAxeViolations, renderUi } from '../test/render'
@@ -184,5 +184,22 @@ describe('Viewport', () => {
     fireEvent.keyDown(document.body, { key: 'Escape' })
     expect(onPickCancel).toHaveBeenCalledTimes(1)
     expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it('announces politely when pick mode ends without a pick (Escape, the toggle again; DF10)', () => {
+    const pick = { eligible: SAMPLE_PICK_ELIGIBLE, field: 'Depth' }
+    let setPick: (p: typeof pick | null) => void = () => {}
+    function Host(): React.JSX.Element {
+      const [p, set] = useState<typeof pick | null>(pick)
+      setPick = set
+      return <Viewport mesh={mesh} pick={p} />
+    }
+    renderUi(<Host />)
+    expect(screen.queryByText('Pick cancelled.')).toBeNull()
+    act(() => setPick(null))
+    expect(screen.getByText('Pick cancelled.')).toHaveAttribute('aria-live', 'polite')
+    // a new pick clears the note, so the next cancel is announced again
+    act(() => setPick(pick))
+    expect(screen.queryByText('Pick cancelled.')).toBeNull()
   })
 })

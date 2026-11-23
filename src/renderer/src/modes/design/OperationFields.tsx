@@ -638,6 +638,7 @@ export function ParamField({
                 },
               })
             },
+            onPickCancel: () => setPick(null),
           }
         : {})}
     />
