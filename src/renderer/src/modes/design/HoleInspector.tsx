@@ -93,14 +93,14 @@ const FIELD_LABEL: Record<HoleSizeField, string> = {
   headSink: h.headSink,
 }
 const FIELD_ICON: Record<HoleSizeField, FieldIconName> = {
-  diameter: 'width',
+  diameter: 'diameter',
   depth: 'depth',
-  cbDiameter: 'width',
-  cbDepth: 'depth',
-  csDiameter: 'width',
+  cbDiameter: 'counterboreDiameter',
+  cbDepth: 'counterboreDepth',
+  csDiameter: 'countersinkDiameter',
   csAngle: 'chamfer',
-  csStepdown: 'depth',
-  headSink: 'depth',
+  csStepdown: 'stepdown',
+  headSink: 'headSink',
 }
 
 /** `design.fastener.list` once per window (static table). */
@@ -338,7 +338,7 @@ export function HoleInspector({
             void update({ center }, path, gesture)
           }}
           onCancelGesture={cancelGesture}
-          illustration={<FieldIcon name={i === 0 ? 'length' : 'width'} />}
+          illustration={<FieldIcon name={i === 0 ? 'positionX' : 'positionY'} />}
           messages={messagesAt(path)}
           references={references}
           {...(resolver ? { resolver } : {})}

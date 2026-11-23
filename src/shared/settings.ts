@@ -9,6 +9,7 @@
 import { z } from 'zod'
 import { AnchorDtoSchema } from '../core/design/part.dto'
 import { UnitSystemSchema } from '../core/project/document'
+import { APP_MODES } from '../core/modes'
 
 export const THEMES = ['system', 'light', 'dark'] as const
 export type ThemeSetting = (typeof THEMES)[number]
@@ -41,6 +42,19 @@ const fields = {
    * markers snap to it in projects of that system (task U3, docs/conventions/ui.md#snap-and-measure).
    */
   snapGrid: z.object({ mm: z.number().positive().finite(), inch: z.number().positive().finite() }),
+  /**
+   * Seconds without a new edit after which a window applies its pending changes by itself
+   * (DF28, docs/architecture/apply.md#auto-apply-df28); 0 = off (Apply by hand only).
+   */
+  autoApplyDelay: z.number().int().min(0).max(600),
+  /**
+   * Side panels shown per mode (DF30, docs/conventions/ui.md#mode-switching): a mode without an
+   * entry shows both. Only the panel toggles write it.
+   */
+  sidePanels: z.partialRecord(
+    z.enum(APP_MODES),
+    z.object({ navigator: z.boolean(), inspector: z.boolean() }),
+  ),
 }
 
 /** The settings file; a missing field takes its default (new settings need no migration). */
@@ -52,6 +66,8 @@ export const AppSettingsSchema = z.object({
   defaultAnchor: fields.defaultAnchor.default({ u: 'centre', v: 'centre' }),
   libraryUnits: fields.libraryUnits.default('mm'),
   snapGrid: fields.snapGrid.default({ mm: 1, inch: 1 / 16 }),
+  autoApplyDelay: fields.autoApplyDelay.default(10),
+  sidePanels: fields.sidePanels.default({}),
 })
 
 export type AppSettings = Readonly<z.output<typeof AppSettingsSchema>>
@@ -62,7 +78,7 @@ export type AppSettingsPatch = Readonly<z.input<typeof AppSettingsPatchSchema>>
 
 export const DEFAULT_SETTINGS: AppSettings = AppSettingsSchema.parse({})
 
-/** Applies a validated patch: plain fields replace, `layouts` merges by group id. */
+/** Applies a validated patch: plain fields replace, `layouts` and `sidePanels` merge by key. */
 export function mergeSettings(
   current: AppSettings,
   patch: z.output<typeof AppSettingsPatchSchema>,
@@ -75,5 +91,7 @@ export function mergeSettings(
     defaultAnchor: patch.defaultAnchor ?? current.defaultAnchor,
     libraryUnits: patch.libraryUnits ?? current.libraryUnits,
     snapGrid: patch.snapGrid ?? current.snapGrid,
+    autoApplyDelay: patch.autoApplyDelay ?? current.autoApplyDelay,
+    sidePanels: { ...current.sidePanels, ...(patch.sidePanels ?? {}) },
   }
 }

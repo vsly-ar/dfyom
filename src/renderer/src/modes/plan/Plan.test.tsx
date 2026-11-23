@@ -42,6 +42,8 @@ async function renderPlan(opts: { plan?: boolean; setup?: (s: PlanSetup) => Prom
   // test windows are narrow: the inspector is an overlay, opened by its toggle
   await r.user.click(screen.getByRole('button', { name: 'Inspector' }))
   const nav = () => screen.getByRole('navigation', { name: 'Navigator' })
+  // plan mode without a plan: the Plan start card over the view (DF29)
+  const start = () => screen.getByRole('dialog', { name: 'Plan the part' })
   const inspector = () => screen.getByRole('complementary', { name: 'Inspector' })
   const callsOf = (name: string) => bridge.calls.filter((c) => c.name === name).map((c) => c.args)
   const rows = () =>
@@ -49,7 +51,7 @@ async function renderPlan(opts: { plan?: boolean; setup?: (s: PlanSetup) => Prom
       .getByRole('list', { name: 'Plan operations in machining order' })
       .querySelectorAll(':scope > li > button')
   const planId = () => Object.keys(s.d.doc.plans)[0]!
-  return { ...r, s, bridge, nav, inspector, callsOf, rows, planId }
+  return { ...r, s, bridge, nav, start, inspector, callsOf, rows, planId }
 }
 
 // multi-step user flows through the whole mode (~2 s each alone, more under a parallel `npm test`,
@@ -57,8 +59,16 @@ async function renderPlan(opts: { plan?: boolean; setup?: (s: PlanSetup) => Prom
 describe('Plan mode', () => {
   it('creates a plan of the part with the machine and lists its operations in machining order', async () => {
     const t = await renderPlan({ plan: false })
-    await t.user.click(await within(t.nav()).findByRole('button', { name: 'Create plan' }))
+    // DF29: "Plan the part" is a non-modal card over the view, the action in its footer
+    const card = await screen.findByRole('dialog', { name: 'Plan the part' })
+    expect(card).toHaveAttribute('aria-modal', 'false')
+    expect(card).toHaveAccessibleDescription(/A plan turns the part into toolpaths/)
+    expect(within(t.nav()).getByText('No plan yet: create one in the view.')).toBeVisible()
+    expect(within(t.nav()).queryByRole('button', { name: 'Create plan' })).toBeNull()
+    await expectNoAxeViolations()
+    await t.user.click(within(card).getByRole('button', { name: 'Create plan' }))
     await waitFor(() => expect(t.rows().length).toBeGreaterThan(0))
+    expect(screen.queryByRole('dialog', { name: 'Plan the part' })).toBeNull()
     expect(t.callsOf('plan.create')).toEqual([
       { partId: t.s.partId, machineLibraryItemId: t.s.machineId },
     ])

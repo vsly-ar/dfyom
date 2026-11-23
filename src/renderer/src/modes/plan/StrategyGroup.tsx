@@ -8,7 +8,9 @@ import type { PlanWarning } from '../../../../core/plan/checks'
 import type { PlanDTO, PlanOperationDTO } from '../../../../core/plan/plan.dto'
 import type { StrategyKey } from '../../../../core/plan/strategy'
 import type { UnitSystem } from '../../../../core/project/document'
+import type { Quantity } from '../../../../core/quantity/quantity'
 import type { QuantityDTO } from '../../../../core/quantity/quantity.dto'
+import { fail, Ok, type AppResult } from '../../../../shared/result'
 import { planMessages } from '../../messages/plan'
 import {
   Field,
@@ -55,14 +57,14 @@ function choiceValues(key: StrategyKey, kind: PlanOperationView['kind']): readon
 
 const ICON: Partial<Record<StrategyKey, FieldIconName>> = {
   overshoot: 'length',
-  helixDiameter: 'width',
+  helixDiameter: 'diameter',
   rampAngle: 'chamfer',
-  finishAllowance: 'width',
-  finishStepdown: 'stepdown',
+  finishAllowance: 'allowance',
+  finishStepdown: 'finishStepdown',
   peckDepth: 'depth',
-  chipBreakBack: 'depth',
+  chipBreakBack: 'chipBreak',
   helixPitch: 'stepdown',
-  breakthrough: 'depth',
+  breakthrough: 'breakthrough',
 }
 
 /** Paths of the strategy findings the group shows at a field (the rest join the list below). */
@@ -76,6 +78,8 @@ export function shownStrategyFields(plan: PlanDTO, view: PlanOperationView): Set
 
 function isThrough(plan: PlanDTO, view: PlanOperationView): boolean {
   const design = plan.design.part.operations.find((o) => o.id === view.designOperationIds[0])
+  // a through profile has no depth (a blind `on` groove stops at its depth: no breakthrough)
+  if (design?.kind === 'profile') return (design as { depth?: unknown }).depth === undefined
   return (design as { bottom?: string } | undefined)?.bottom === 'through'
 }
 
@@ -146,7 +150,21 @@ export function StrategyGroup({
             </div>
           )
         const stored = op.strategy[key] as QuantityDTO | undefined
-        return (
+        const throughDepth = view.throughDepth ?? null
+        const cutDepth =
+          key === 'breakthrough' && throughDepth !== null && typeof resolved === 'number' ? (
+            <CutDepthField
+              key="cutDepth"
+              throughDepth={throughDepth}
+              breakthrough={resolved}
+              units={units}
+              readOnly={readOnly}
+              onSet={(v, gesture) => set('breakthrough', v, gesture)}
+              onCancelGesture={onCancelGesture}
+            />
+          ) : null
+        return [
+          cutDepth,
           <StrategyQuantity
             key={key}
             strategyKey={key}
@@ -158,10 +176,59 @@ export function StrategyGroup({
             findings={fieldMessages(findings, `strategy.${key}`)}
             onSet={(v, gesture) => set(key, v, gesture)}
             onCancelGesture={onCancelGesture}
-          />
-        )
+          />,
+        ]
       })}
     </section>
+  )
+}
+
+/**
+ * A through profile's cut depth (DF23), the alternative input of Breakthrough as the chamfer's
+ * Depth is of its Width: it shows the material below the stock face + the breakthrough; a commit
+ * stores the breakthrough that depth gives (one `plan.operation.update`). Less than the material
+ * is refused at the field.
+ */
+function CutDepthField({
+  throughDepth,
+  breakthrough,
+  units,
+  readOnly,
+  onSet,
+  onCancelGesture,
+}: {
+  /** mm */
+  throughDepth: number
+  /** Resolved breakthrough, mm. */
+  breakthrough: number
+  units: UnitSystem
+  readOnly: boolean
+  onSet: (source: string, gesture?: string) => void
+  onCancelGesture: (gesture: string) => Promise<boolean>
+}): React.JSX.Element {
+  const material = strategyQuantity('breakthrough', throughDepth, units)?.source ?? ''
+  const validate = (q: Quantity): AppResult<Quantity> =>
+    q.canonical >= throughDepth - 1e-9
+      ? Ok(q)
+      : fail('model.invariant', 'shallower than the material', {
+          issues: [{ path: ['exact'], rule: 'min', message: s.cutDepthTooShallow(material) }],
+        })
+  return (
+    <QuantityInput
+      label={s.cutDepth}
+      kind="length"
+      defaultUnit={defaultUnit('length', units)}
+      value={strategyQuantity('breakthrough', throughDepth + breakthrough, units)}
+      illustration={<FieldIcon name="depth" />}
+      readOnly={readOnly}
+      validate={validate}
+      messages={[{ id: 'cutDepth.note', severity: 'note', text: s.cutDepthNote(material) }]}
+      onCommit={(q, gesture) => {
+        const b = strategyQuantity('breakthrough', Math.max(0, q.canonical - throughDepth), units)
+        if (b !== undefined) onSet(b.source, gesture)
+      }}
+      onCancelGesture={onCancelGesture}
+    />
   )
 }
 

@@ -165,7 +165,7 @@ function DiameterField({ ctx }: { ctx: OperationFieldsContext }): React.JSX.Elem
   return (
     <Field
       label={t.diameter}
-      illustration={<FieldIcon name="width" />}
+      illustration={<FieldIcon name="diameter" />}
       readOnly
       messages={[{ id: 'derived', severity: 'note', text: t.diameterNote }]}
     >

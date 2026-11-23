@@ -36,6 +36,8 @@ async function renderPlan(opts: { plan?: boolean; setup?: (s: PlanSetup) => Prom
   )
   await r.user.click(screen.getByRole('button', { name: 'Inspector' }))
   const nav = () => screen.getByRole('navigation', { name: 'Navigator' })
+  // plan mode without a plan: the Plan start card over the view (DF29)
+  const start = () => screen.getByRole('dialog', { name: 'Plan the part' })
   const inspector = () => screen.getByRole('complementary', { name: 'Inspector' })
   const callsOf = (name: string) => bridge.calls.filter((c) => c.name === name).map((c) => c.args)
   const rows = () =>
@@ -43,7 +45,7 @@ async function renderPlan(opts: { plan?: boolean; setup?: (s: PlanSetup) => Prom
       .getByRole('list', { name: 'Plan operations in machining order' })
       .querySelectorAll(':scope > li > button')
   const planId = () => Object.keys(s.d.doc.plans)[0]!
-  return { ...r, s, nav, inspector, callsOf, rows, planId }
+  return { ...r, s, nav, start, inspector, callsOf, rows, planId }
 }
 
 type T = Awaited<ReturnType<typeof renderPlan>>
@@ -64,8 +66,8 @@ describe('New machine', () => {
         await s.run('library.machine.remove', { id: s.machineId, revision: 1, confirm: true })
       },
     })
-    await within(t.nav()).findByText('The machine library is empty. Add a machine to export gCode.')
-    await t.user.click(within(t.nav()).getByRole('button', { name: 'New machine…' }))
+    await screen.findByText('The machine library is empty. Add a machine to export gCode.')
+    await t.user.click(within(t.start()).getByRole('button', { name: 'New machine…' }))
     const dialog = await screen.findByRole('dialog', { name: 'New machine' })
     await expectNoAxeViolations()
     const name = within(dialog).getByRole('textbox', { name: 'Name' })
@@ -76,7 +78,7 @@ describe('New machine', () => {
     await t.user.click(within(dialog).getByRole('radio', { name: 'By gCode' }))
     await fill(t, dialog, 'Spindle power', '800')
     await t.user.click(within(dialog).getByRole('button', { name: 'Add machine' }))
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'New machine' })).toBeNull())
 
     const [added] = t.callsOf('library.machine.add') as {
       values: Record<string, never>
@@ -93,9 +95,9 @@ describe('New machine', () => {
       toolChanger: 'none',
     })
     await waitFor(() =>
-      expect(within(t.nav()).queryByText(/The machine library is empty/)).toBeNull(),
+      expect(within(t.start()).queryByText(/The machine library is empty/)).toBeNull(),
     )
-    await t.user.click(within(t.nav()).getByRole('button', { name: 'Create plan' }))
+    await t.user.click(within(t.start()).getByRole('button', { name: 'Create plan' }))
     await waitFor(() => expect(t.callsOf('plan.create')).toHaveLength(1))
     expect(t.callsOf('plan.create')[0]).toMatchObject({ machineLibraryItemId: expect.any(String) })
     expect(await within(t.nav()).findByRole('combobox', { name: 'Machine' })).toHaveTextContent(
@@ -217,12 +219,12 @@ describe('New tool', () => {
     await t.user.click(within(dialog).getByRole('combobox', { name: 'Type' }))
     await t.user.click(await screen.findByRole('option', { name: 'Bull nose end mill' }))
     await fill(t, dialog, 'Corner radius', '3')
-    await fill(t, dialog, 'Overall length', '10')
+    await fill(t, dialog, 'Flute length', '0')
     await t.user.click(within(dialog).getByRole('button', { name: 'Add tool' }))
     const re = within(dialog).getByLabelText('Corner radius', { selector: 'input' })
     await waitFor(() => expect(re).toHaveAttribute('aria-invalid', 'true'))
     expect(re).toHaveFocus()
-    expect(within(dialog).getByLabelText('Overall length', { selector: 'input' })).toHaveAttribute(
+    expect(within(dialog).getByLabelText('Flute length', { selector: 'input' })).toHaveAttribute(
       'aria-invalid',
       'true',
     )

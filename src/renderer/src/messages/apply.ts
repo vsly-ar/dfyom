@@ -69,6 +69,9 @@ export const applyMessages = {
       `Press Enter in a field, or ${shortcut}, to apply. Saving and exporting apply first.`,
     applying: 'Regenerating toolpaths. The job list can cancel it.',
     failedRetry: 'Click to try again.',
+    /** DF28: the auto-apply wait (Settings → Auto-apply after). */
+    auto: (seconds: number) =>
+      `Applies by itself after ${seconds} s without another edit (Settings).`,
   },
 
   /** Polite live region. */
