@@ -175,15 +175,20 @@ describe('offset (spike S1 fixtures)', () => {
 
   /**
    * `d` = r + e past arcs of radius r: never empty, exact (offset oracle) from e = 0.1; closer
-   * to r the library's own epsilons apply (near-tangent joins, OFFSET_EPSILON = 1e-4).
+   * to r the library's own epsilons apply (near-tangent joins, OFFSET_EPSILON = 1e-4), and
+   * within 2e-3 of r a failed offset is retried at r itself (error up to |e|, B2).
    */
-  function pastRadius(name: string, region: Region, d: number, e: number, loops?: number): void {
+  function pastRadius(name: string, region: Region, d: number, e: number, loops?: number): Region {
     const out = port.offset(region, d).unwrap()
     expect(out.pieces.length, name).toBeGreaterThan(0)
     expectValid(out)
     if (loops !== undefined) expect(regionLoops(out), name).toHaveLength(loops)
-    const tol = Math.abs(e) >= 0.1 ? ORACLE : 2 * OFFSET_EPSILON
+    const tol =
+      Math.abs(e) >= 0.1
+        ? ORACLE
+        : Math.max(2 * OFFSET_EPSILON, Math.abs(e) <= 2e-3 ? Math.abs(e) + 1e-9 : 0)
     expect(maxOffsetError(regionLoops(region), regionLoops(out), d), name).toBeLessThan(tol)
+    return out
   }
   const JUST_PAST = [1e-6, 1e-5, 3e-5, 1e-4, 2e-4, 1e-3, 0.1, 1, 3]
 
@@ -195,7 +200,11 @@ describe('offset (spike S1 fixtures)', () => {
         const closed = port.offset(norm(rect(-30, -30, 110, 60), hole(dumbbell(h))), -R).unwrap()
         for (const e of JUST_PAST) {
           pastRadius(`open h=${h} R=${R} e=${e}`, open, -(R + e), e)
-          pastRadius(`close h=${h} R=${R} e=${e}`, closed, R + e, e)
+          // the islands stay: past the rounded corners' radius the library used to drop them
+          // (B2: d = 2.5002 on h = 1), which the port now detects (the shrink grew) and retries
+          const out = pastRadius(`close h=${h} R=${R} e=${e}`, closed, R + e, e)
+          expect(regionArea(out), `close h=${h} R=${R} e=${e}`).toBeLessThan(regionArea(closed))
+          expect(out.pieces[0]!.holes.length, `close h=${h} R=${R} e=${e}`).toBeGreaterThan(0)
         }
       }
   })
@@ -254,8 +263,13 @@ describe('offset (spike S1 fixtures)', () => {
     })
     const err = expectErr(failing.offset(eroded, -4), 'geometry.evaluation')
     expect(err.issues[0]?.rule).toBe('resultInvalid')
-    // once, then the first step (by the arcs' radius 3) already loses everything
-    expect(calls).toBe(2)
+    expect(err.message).toBe(
+      'growing the region by 4 mm failed in the 2D library (growing the region lost a piece), also with the offset nudged by up to 0.002 mm; change the offset or the shape slightly (e.g. by 0.01 mm) and try again',
+    )
+    expect(err.issues[0]?.params).toMatchObject({ d: -4 })
+    // per try: once, then the first step (by the arcs' radius 3) already loses everything; the
+    // offset and its six nudges are tried (no arc radius lies within 2e-3 of 4)
+    expect(calls).toBe(2 * 7)
   })
 
   it('zero offset returns the region; a non-finite offset is refused', () => {

@@ -61,6 +61,8 @@ Two CavalierContours defects reproduced in the JS port are **upstream 0.7.0 bugs
 
 Found later (v0.3, LLM black-box test F3): the **spike defect** of 0.9.0's offset. An element much shorter than the offset between near-tangent neighbours (a 1 µm closing line between two arcs, left by an inset whose ends were rounded to 0.1 µm) has a raw offset that runs backwards; the crate keeps it, as it lies at the offset distance within its epsilons, so the result loop runs out and back along a few µm (a zero-width spike). Offsets of such a loop compound into open result loops and holes outside their outer loop. The port cuts the spikes out ([shapes.md § Implementation (K1)](../architecture/shapes.md#implementation-k1)); fixture: [`region-inset-fuzz.test.ts`](../../src/core/toolpath/region-inset-fuzz.test.ts).
 
+Found later (hardening B2): the **collapse defect** of 0.9.0's offset. At offsets within about 1e-3 mm of the radius of an arc they collapse, the near-coincident intersections make the per-loop offset's slice stitching fail; it returns an open polyline, which the shape offset uses anyway (debug builds hit a `debug_assert` in `PlineViewData::from_slice_points`; the release WASM returns loops that cross, overlap or lie up to 10 mm off). About 8 % of such offsets of random regions failed; the WASM and native builds differ case by case (their math libraries round differently). Separately, a shrink past the radius of the arcs that round a hole's corners (a closing) returns no loop for that hole, at any offset. The port checks every offset result and retries in steps or with the offset nudged by up to 2e-3 mm ([shapes.md § Implementation (K1)](../architecture/shapes.md#implementation-k1)); corpus: [`offset-fuzz.test.ts`](../../src/core/geometry/2d/cavalier/offset-fuzz.test.ts).
+
 ### Speed (median ms)
 
 Fixture: filleted star with n outer segments (half arcs) + 2 islands; "20 offsets" = 20 successive rings, stepover 0.4.
@@ -107,4 +109,5 @@ All three licences are compatible with GPL-3.0-or-later ([ADR 0014](0014-gpl-3-o
 
 - Report the touching-island defect upstream with the spike fixture.
 - Report the spike defect upstream (the enclosure inset fixture, reduced).
+- Report the collapse defect upstream (a reduced case from the B2 corpus: the open polyline of `parallel_offset` at d = an arc's radius ± 1e-6, and the lost hole of a closing).
 - Ellipses and elliptical SVG arcs: biarc approximation on import (lane D), not in the 2D library.
