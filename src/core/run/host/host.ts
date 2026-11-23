@@ -136,9 +136,17 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
   }
 
   let lastState = ''
+  /** The last `status` posted, serialized: an unchanged report is not posted again (P7, idle cost). */
+  let lastPosted: string | undefined
   const status = throttled(() => {
     const s = hostStatus()
-    if (s !== undefined) post({ type: 'status', status: s })
+    if (s === undefined) return
+    // Polled at 5 Hz while connected (run-v0.1.md#behaviour), but an idle machine reports the
+    // same thing every time: main and the windows only hear about changes (docs/research/2026-11-23-idle-cost.md).
+    const key = JSON.stringify(s)
+    if (key === lastPosted) return
+    lastPosted = key
+    post({ type: 'status', status: s })
   })
   let lastProgress: { jobId: string; done: number; total: number; label: string } | undefined
   const progress = throttled(() => {
@@ -235,6 +243,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
       envelope: envelopeOf(info.unwrap().settings),
     }
     conn = c
+    lastPosted = undefined
     sender.onStatus((s) => {
       if (s.state !== lastState) {
         lastState = s.state

@@ -262,6 +262,21 @@ describe('machine host', () => {
     expect(lastStatus(h)?.timeScale).toBe(1)
   })
 
+  it('an idle connection keeps polling but posts no unchanged status (P7, idle cost)', async () => {
+    const h = harness()
+    await connectedHost(h, { timeScale: 1, homing: false })
+    await h.pump(() => false, 2000)
+    const before = h.of('status').length
+    // 10 s of wall time idle: 50 polls at 5 Hz, the same report every time
+    await h.pump(() => false, 10_000)
+    expect(h.of('status').length).toBe(before)
+    // a change is posted at once
+    expectOk(
+      await h.request({ type: 'machine', action: { kind: 'jog', by: [1, 0, 0], feed: 500 } }),
+    )
+    expect(await h.pump(() => h.of('status').length > before)).toBe(true)
+  })
+
   it('runs a job: progress, phases, a tool change and throttled status', async () => {
     const h = harness()
     await connectedHost(h, { timeScale: 1, prepare: { workZero: [-500, -500, -50] } })
