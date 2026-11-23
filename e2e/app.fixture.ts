@@ -94,6 +94,39 @@ async function stubMessageBoxes(app: ElectronApplication): Promise<void> {
   })
 }
 
+/**
+ * Closes the app through its normal quit path (`app.close()` quits it). The Library window asks
+ * about an unsaved draft in the window itself (Save / Discard / Cancel), not in a native message
+ * box, so nothing stubbed answers it; left alone, the quit waits for it forever and the worker's
+ * teardown hangs (hardening B1). While the app quits, such a prompt is answered with Discard;
+ * returns how many were.
+ * Doc: docs/conventions/testing.md#end-to-end
+ */
+export async function closeApp(app: ElectronApplication): Promise<number> {
+  let done = false
+  let answered = 0
+  const closed = app.close().finally(() => {
+    done = true
+  })
+  const discard = async () => {
+    for (const w of app.windows()) {
+      const prompt = w.getByRole('dialog', { name: /^Save changes to / })
+      if (await prompt.isVisible().catch(() => false))
+        await prompt
+          .getByRole('button', { name: 'Discard' })
+          .click({ timeout: 1000 })
+          .then(() => answered++)
+          .catch(() => undefined)
+    }
+  }
+  while (!done) {
+    await Promise.race([closed, new Promise((r) => setTimeout(r, 200))])
+    if (!done) await discard()
+  }
+  await closed
+  return answered
+}
+
 /** The next native message boxes press the button labelled `label`. */
 export async function answerMessageBoxes(app: ElectronApplication, label: string): Promise<void> {
   await app.evaluate((_e, l) => {
@@ -135,7 +168,7 @@ export const test = base.extend<{ dfyom: AppFixture }>({
           () => undefined,
         )
       }
-      await app.close()
+      await closeApp(app)
       await rm(dataDir, { recursive: true, force: true })
     }
   },
