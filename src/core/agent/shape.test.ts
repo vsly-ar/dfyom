@@ -460,3 +460,86 @@ describe('plan.get', () => {
     expect(v.plan.setups[0]!.clearanceHeight).toBe(10)
   })
 })
+
+// Spec: docs/architecture/llm-api.md#a1-compact-results
+describe('design.shape.get detail and no stacks (A1)', () => {
+  const shapeValue = {
+    shape: {
+      id: 'shape-1',
+      name: 'Outline',
+      items: [
+        { kind: 'path', op: 'add', closed: true, points: [[0, 0], [1, 0], [1, 1]] },
+        { kind: 'circle', op: 'subtract', center: [0.5, 0.5], diameter: q('0.2', '1', '5') },
+      ],
+    },
+    usedBy: ['pocket1'],
+    resolved: {
+      kind: 'region',
+      pieces: [{ outer: [{}, {}, {}], holes: [[{}], [{}]] }],
+      elements: 5,
+      area: 0.4685840735,
+      bounds: { min: [0, 0], max: [1, 1] },
+      length: 3.2,
+    },
+  }
+
+  it('takes detail, default full; "summary" drops the item lists and resolved loops', () => {
+    expect(expectOk(splitDetail('design.shape.get', { partId: 'P', shapeId: 's' }))).toEqual({
+      args: { partId: 'P', shapeId: 's' },
+      view: { detail: 'full', from: 0, count: 500 },
+    })
+    expect(
+      expectOk(splitDetail('design.shape.get', { partId: 'P', shapeId: 's', detail: 'summary' }))
+        .view.detail,
+    ).toBe('summary')
+    // plan reads accept "summary" too
+    expect(expectOk(splitDetail('plan.get', { planId: 'p', detail: 'summary' })).view.detail).toBe(
+      'summary',
+    )
+    const shaper = new ResultShaper(fakeSession())
+    const full = shaper.shape(call('design.shape.get', shapeValue), {}, { ...SUMMARY, detail: 'full' })
+    expect((valueOf(full)['resolved'] as Record<string, unknown>)['pieces']).toHaveLength(1)
+    const r = shaper.shape(call('design.shape.get', shapeValue), {}, SUMMARY)
+    expect(valueOf(r)).toEqual({
+      shape: {
+        id: 'shape-1',
+        name: 'Outline',
+        items: [
+          { kind: 'path', op: 'add', closed: true, points: 3 },
+          { kind: 'circle', op: 'subtract', center: 2, diameter: 0.2 },
+        ],
+      },
+      usedBy: ['pocket1'],
+      resolved: {
+        kind: 'region',
+        pieces: 1,
+        holes: 2,
+        elements: 5,
+        area: 0.4685840735,
+        bounds: { min: [0, 0], max: [1, 1] },
+        length: 3.2,
+      },
+      detail: expect.stringContaining('detail: "full"'),
+    })
+  })
+
+  it('drops string stack keys at any depth of a value and of applied', () => {
+    const shaper = new ResultShaper(fakeSession())
+    const err = { code: 'geometry.evaluation', message: 'open loop', stack: 'Error\n at x (app.asar)' }
+    const r = shaper.shape(
+      call('job.get', { jobId: 'j', outcome: { ok: false, error: { ...err, cause: err } } }, {
+        error: err,
+      }),
+      {},
+      SUMMARY,
+    )
+    expect(JSON.stringify(expectOk(r.result))).not.toContain('stack')
+    expect(valueOf(r)).toEqual({
+      jobId: 'j',
+      outcome: {
+        ok: false,
+        error: { code: 'geometry.evaluation', message: 'open loop', cause: { code: 'geometry.evaluation', message: 'open loop' } },
+      },
+    })
+  })
+})

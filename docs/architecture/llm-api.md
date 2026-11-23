@@ -1,6 +1,6 @@
 # LLM / agent API
 
-Status: implemented ([below](#implementation-task-310)) · Task: 1.6 of the [v0.1 plan](../plans/v0.1.md#1-docs-and-decisions-accepted-before-implementation) (implementation: 3.10, end-to-end: 3.11) · Principle: [principles.md §1](../principles.md#1-llm-first) · Decision: [ADR 0011](../decisions/0011-mcp-and-cli-agent-api.md) · Commands: [commands.md](commands.md)
+Status: implemented ([below](#implementation-task-310)); the [hardening amendment](#amendment-hardening-a1-a2-a5-a7-agent-friction) (A1, A2, A5, A7) is a draft for review · Task: 1.6 of the [v0.1 plan](../plans/v0.1.md#1-docs-and-decisions-accepted-before-implementation) (implementation: 3.10, end-to-end: 3.11) · Principle: [principles.md §1](../principles.md#1-llm-first) · Decision: [ADR 0011](../decisions/0011-mcp-and-cli-agent-api.md) · Commands: [commands.md](commands.md)
 
 How agents reach DFYOM: an **MCP server** (stdio for a headless instance, local HTTP for attaching to a running app) and a **CLI**, both thin adapters over the [command layer](commands.md). This doc maps commands, queries, jobs, errors and the action log onto MCP and the CLI, and defines agent sessions, project binding, coexistence with the GUI and safety. The [decisions](#decisions) were settled with the user; the sections after them specify them.
 
@@ -66,7 +66,7 @@ Today every command runs on a project dispatcher, so the library is unusable wit
 | -------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `project.create`           | `{ name, unitSystem }`     | `{ key, revision }`; untitled until `project.save { target }`.                                                                                                                                                                                                                                    |
 | `project.open`             | `{ file }`                 | `{ key, revision, alreadyOpen }`. A file already open **in this instance** returns its key instead of `persist.locked` (the storage rule is unchanged; the host checks its open map first). Recovery case → `persist.recovery` (new code, added to `ERROR_CODES` in 3.10) with the key in `data`. |
-| `project.close`            | `{ key, confirm?: true }`  | Unsaved changes need `confirm: true` (else `input.malformed`, rule `unsavedChanges`); the working folder then stays recoverable ([persistence.md](persistence.md#crash-recovery)). `run.busy` while a run job runs.                                                                               |
+| `project.close`            | `{ key?, confirm?: true }` | `key` defaults to the session's bound project ([A5](#amendment-hardening-a1-a2-a5-a7-agent-friction)). Unsaved changes need `confirm: true` (else `input.malformed`, rule `unsavedChanges`); the working folder then stays recoverable ([persistence.md](persistence.md#crash-recovery)). `run.busy` while a run job runs.                                                                               |
 | `project.list`             | `{}` (query)               | Open projects: `key`, file, name, `dirty`, `revision`, bound sources.                                                                                                                                                                                                                             |
 | `project.recovery.list`    | `{}` (read-only effect)    | Wraps `listRecovery` ([persistence.md](persistence.md#crash-recovery)); an effect, since queries are synchronous ([implementation](#implementation-task-310)).                                                                                                                                    |
 | `project.recovery.resolve` | `{ key, action, confirm }` | Wraps `resolveRecovery`; `restore` opens the project.                                                                                                                                                                                                                                             |
@@ -79,7 +79,7 @@ A few tools are not registry entries because they depend on the session, not on 
 | ------------------ | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
 | `project.bind`     | `{ key }`                                  | Binds the session to an open project (`project.open`/`create`/`recovery.resolve` bind automatically).        |
 | `project.log.list` | `{ afterSeq?, sources?, names?, limit? }`  | Action-log events of the bound project ([Action log](#action-log-and-user-actions)); `gap: true` if evicted. |
-| `job.wait`         | `{ jobId, timeoutSeconds?: 30 }` (max 300) | The `job.get` value once finished, or the current one on timeout (`timedOut: true`) ([Jobs](#jobs)).         |
+| `job.wait`         | `{ jobId, timeoutSeconds?: 30 }` (max 300) | The `job.get` value once finished, at an operator wait of a run (`waiting`, [A2](#amendment-hardening-a1-a2-a5-a7-agent-friction)), or the current one on timeout (`timedOut: true`) ([Jobs](#jobs)). |
 
 ## Exposure: commands and queries as MCP tools
 
@@ -157,7 +157,7 @@ Measured on the logged flow (the saved test project reopened over stdio MCP, the
 ### Jobs
 
 - A `job` command's tool returns `{ jobId }` at once, as the dispatcher does ([commands.md](commands.md#long-running-commands-jobs)). `job_get`, `job_list`, `job_pause`, `job_resume`, `job_abort` are the registry entries.
-- **`job.wait`** ([decision 8](#decisions)) blocks until the job finishes or `timeoutSeconds` passes and returns the `job.get` value. If the call carries `_meta.progressToken`, the server sends `notifications/progress` from `JobHandle.onProgress` (`progress` = `done`, `total`, `message` = `label`; already throttled by the dispatcher). Cancelling the MCP request (`notifications/cancelled`) ends the wait, **not** the job (`job_abort` does that).
+- **`job.wait`** ([decision 8](#decisions)) blocks until the job finishes, a run reaches an operator wait ([A2](#amendment-hardening-a1-a2-a5-a7-agent-friction)) or `timeoutSeconds` passes and returns the `job.get` value. If the call carries `_meta.progressToken`, the server sends `notifications/progress` from `JobHandle.onProgress` (`progress` = `done`, `total`, `message` = `label`; already throttled by the dispatcher). Cancelling the MCP request (`notifications/cancelled`) ends the wait, **not** the job (`job_abort` does that).
 - A job's completion is also an action-log `job` event, so it shows up in the [digest](#action-log-and-user-actions) of the agent's next call.
 - **Follow-up document commands:** ([decision 14](#decisions)) no v0.1 job needs one (toolpaths are derived, [plan-v0.1.md](../modes/plan-v0.1.md); evaluation and runs change no document). Adapters never dispatch follow-ups; this closes the plan known issue for v0.1.
 
@@ -289,6 +289,41 @@ Per [testing.md](../conventions/testing.md); everything runs in `npm run check` 
 | Coexistence    | 3.10 | Two hosts in one test with temp data dirs: second open → `persist.locked` with the connect hint; `--connect` bridge reaches the first host's dispatcher; same-instance re-open returns `alreadyOpen`.                                                                                                                                                                                                                   |
 | CLI            | 3.10 | Spawn the built CLI with `--data-dir` (temp): one-shot save/`--no-save`, `batch` across lines, exit codes, stdout holds only results (no log lines).                                                                                                                                                                                                                                                                    |
 | End to end     | 3.11 | The [exit criterion](../plans/v0.1.md#exit-criteria) headless: an SDK client spawns `dfyom mcp` (built output, temp data dir) and runs create → design ops → plan → export (gCode compared with the golden file) → virtual run at `max` with `job_wait` and `run_job_continue` → save → close → reopen → compare. A CLI `batch` variant runs the same script. Done: [testing.md](../conventions/testing.md#end-to-end). |
+
+## Amendment (hardening A1, A2, A5, A7): agent friction
+
+Status: **draft for review** (implemented on the hardening branch; the user reviews it with the [hardening plan](../plans/hardening.md) task 1.3) · Source: the LLM-first black-box test of 2026-11-22 (`.continuous/research/2026-11-22-llm-first-test.md`, findings F3, F5, F8, F13) · Tasks: [hardening.md § 4](../plans/hardening.md) A1, A2, A5, A7 (the follow-up's A2, A3, A6 in [v0.4-llm-first.md](../plans/v0.4-llm-first.md))
+
+No new tools ([A8](../plans/hardening.md)): every change is a default, a reserved arg, a field in an existing result or message text. The size of `tools/list` is logged under [Implementation](#implementation-task-310).
+
+### A1: compact results
+
+Most of F5 was fixed in v0.4 ([Result size](#result-size)); this closes the rest.
+
+- **No stack, anywhere.** Errors already reach agents without `stack` ([Errors for agents](#implementation-task-310)). The shaper also drops a string `stack` key at any depth of a shaped value and of `applied` (an error kept as data inside a result, e.g. a toolpath failure in a job outcome), so no agent result carries one, whatever produced it. Stacks stay in the log.
+- **Warnings as a delta plus a count:** as in [rule 3](#result-size). Within one result a part's warnings are listed once: `applied.warnings` of the part an edit's `value.warnings` already listed is `{ partId, count }` only.
+- **One copy per result.** `structuredContent` and the text block hold the same result, as the MCP spec asks (a SHOULD for clients without structured output). That is one copy for the model: clients pass one of them to it (Claude Code passes `content`). Large results are outlined in text ([rule 6](#result-size)); the result itself never repeats an item.
+- **`detail` on `design.shape.get`.** The reserved `detail` arg extends to `design.shape.get`, whose default stays `"full"` (agents read a shape's resolved loops to place features). `detail: "summary"` returns the shape's id, name, `source` and per item its kind and scalar fields (lists as their lengths: `points: 84`), `usedBy`, and `resolved` without `pieces` and `path` (kind, loop and hole counts, `elements`, `area`, `bounds`, `length`, `smallestInsideRadius`), or the `issues`. `plan.get` and `plan.toolpath.get` keep `"summary"` as their default ([rule 2](#result-size)); `detail: "summary"` is accepted on all three.
+
+### A2: `job.wait` at operator waits
+
+- **Returns at a wait.** While a run job (`run.job.start`) waits for the operator at a tool change or a program pause (M0), `job.wait` returns at once (`timedOut: false`, `state` still `running`) with `waiting`: `{ kind: 'toolChange', toolChange: { n, name } }` or `{ kind: 'programPause', pause }`, plus `next: { name: 'run.job.continue', args: { jobId, toolChange | pause } }`, the call that ends the wait after the operator's step (zero the new tool, or the step the M0 message asks for). A wait ended by a `run.job.continue` already logged is not reported again, so a `job_wait` right after a continue does not return the same wait while the machine leaves it.
+- **Setup change.** A run job ends after its setup; when the plan has another one its outcome has `next` ([run-v0.1.md](../modes/run-v0.1.md#amendment-v02-task-e2-one-program-per-setup)). `job.wait` then adds `waiting: { kind: 'setupChange', setup: next, next: { name: 'run.job.start', args: { planId, setupId } } }` (the run result gains `planId`): re-fixture, set the work zero, then start that setup.
+- **`run.job.continue` defaults.** `jobId` defaults to the run job of the connection; `toolChange` / `pause` default to the wait the run is at. Naming them stays the safe form: a retried call that names its wait never ends the next one, an unnamed retry may ([run-v0.1.md decision 9](../modes/run-v0.1.md#decisions)). The GUI always names the wait. `run.state` as before when the run waits at nothing.
+- How: `job.wait` checks the machine status (`run.status.get`) when it starts, on each progress tick and every 250 ms while it waits on a `run.job.start` job; other jobs are unchanged.
+
+### A5: unknown arguments and `project.close`
+
+- **Unknown-argument hints.** `parseArgs` names the closest valid key of the same object when one is close (edit distance at most a third of the longer name, or one name contains the other): `unknown argument "timeout"; did you mean "timeoutSeconds"?`. The issue keeps rule `unrecognized_keys` and gains `params: { key, suggestion?, valid }` (`valid`: the object's keys, at most 20). It applies to every caller of `parseArgs` (agents, CLI, GUI); the GUI never sends unknown keys. Only schema keys are suggested; the reserved keys are named by the primer.
+- **`project.close` without `key`** closes the session's bound project; with no bound project it fails with `input.malformed` (rule `noProject`, the usual hint). The session fills the key before dispatch, so the action log shows it.
+
+### A7: refusals that say what to do
+
+Every agent-facing refusal names the **field** (the issue `path`, or the arg in the message), the **rule** (the issue `rule`, or a code that names it) and a **next step** (a tool to call, a value to pass, or a value range). The general paths:
+
+- `parseArgs`/`parseWith` (`input.malformed`): the message names the first issue (`job.wait: jobId: expected string, received undefined`, then `(+ n more)`), not only a count; each issue line keeps path, message and rule.
+- The text of an `AppError` result (`errorText`) ends with a `Next:` line for codes whose next step is generic: `command.conflict` (re-query and retry, as before), `run.notConnected` (`run_connection_open { target: "virtual" }`), `persist.locked` (the `--connect` hint), `command.unknown` (`tools/list`), `op.timeout`/`op.aborted` for job waits (`job_get`, the job keeps running).
+- Command-specific refusals found by the X2 agent run and the scan of `AppError` construction sites are fixed where they lacked one of the three; the [implementation log](#implementation-task-310) lists what changed and what remains.
 
 ## Implementation (task 3.10)
 

@@ -16,7 +16,12 @@ export function parseWith<S extends z.ZodType>(
     rule: i.code,
     message: i.message,
   }))
-  return Err(
-    new AppError('input.malformed', `${issues.length} malformed value(s)`, { issues, where }),
-  )
+  // the first issue in the message: field, rule and what was expected (llm-api.md#a7)
+  const first = issues[0]
+  const head =
+    first === undefined
+      ? 'malformed value'
+      : `${first.path.length > 0 ? first.path.join('.') : '(value)'}: ${first.message}`
+  const more = issues.length > 1 ? ` (+ ${issues.length - 1} more)` : ''
+  return Err(new AppError('input.malformed', `${where}: ${head}${more}`, { issues, where }))
 }
