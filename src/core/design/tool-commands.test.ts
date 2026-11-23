@@ -413,8 +413,13 @@ describe('design.tool.candidates', () => {
     const eight = await s.addTool('flatEndMill', '8')
     await s.addTool('bullNoseEndMill', '6') // a profile needs a flat end mill: not listed
     await s.addTool('drill', '6') // nor a drill
-    // the default 6 mm slot: only a tool ≤ 6 mm fits, so auto takes the generalized 6 mm
-    await s.run('design.profile.add', { partId: s.partId, shape: rect('84', '44', '5') })
+    // a 6 mm slot (given: by default it would follow the library, DF51): only a tool ≤ 6 mm
+    // fits, so auto takes the generalized 6 mm
+    await s.run('design.profile.add', {
+      partId: s.partId,
+      shape: rect('84', '44', '5'),
+      slotWidth: '6',
+    })
     await s.apply()
     expect(toolOf(s, 'profile1')).toMatchObject({ kind: 'generalized', type: 'flatEndMill' })
     const c = s.candidates('profile1')
@@ -457,15 +462,30 @@ describe('design.tool.candidates', () => {
       shankDiameter: '6.35',
     })
     const c = s.candidates('profile1')
-    // auto keeps the fitting generalized tool; the library tool is listed and offered
+    // a library edit changes no tool; the library tool is listed and offered
     expect(c.fitting.map((f) => f.toolLibraryItemId)).toEqual([wexme])
     expect(c.nearMatch).toBe(wexme)
+    // DF54: the next Apply of an edit of the operation takes the library tool
+    await s.run('design.profile.update', {
+      partId: s.partId,
+      operationId: 'profile1',
+      tabs: { count: '3' },
+    })
+    const out = await s.apply()
+    expect(snapshotOf(s, 'profile1')).toMatchObject({ libraryItemId: wexme })
+    expect(out.toolChanges).toEqual([
+      expect.objectContaining({ operationId: 'profile1', reason: 'libraryFits' }),
+    ])
   })
 
   it('near match: same type (bull nose: same RE), within 20 %, an exact match none', async () => {
     const s = await setup()
     await s.addTool('flatEndMill', '7.5') // 25 % off the 6 mm: too far
-    await s.run('design.profile.add', { partId: s.partId, shape: rect('84', '44', '5') })
+    await s.run('design.profile.add', {
+      partId: s.partId,
+      shape: rect('84', '44', '5'),
+      slotWidth: '6',
+    })
     await s.apply()
     const near = () => s.candidates('profile1').nearMatch
     expect(near()).toBeNull()
@@ -736,5 +756,153 @@ describe('auto choice for a chamfer', () => {
     const t = toolOf(s, 'chamfer1') as { kind: string; type: string; angle?: unknown }
     expect(t).toMatchObject({ kind: 'generalized', type: 'chamferMill' })
     expect(src(t.angle)).toBe('90°')
+  })
+})
+
+// Doc: docs/modes/design-v0.2.md#tool-choice-fixes-df51-df52-df54-df55 (agent test TG #232)
+describe('tool choice fixes (DF51, DF52, DF54, DF55)', () => {
+  /** The user's 1/4″ end mills: wexme 1F (stickout 31) and the extralong (stickout 62). */
+  const quarterInch = async (s: Setup, wexmeStickout = '31') => ({
+    wexme: await s.addTool('flatEndMill', '6.22', {
+      name: 'wexme 1/4 1F',
+      fluteCount: '1',
+      fluteLength: '22',
+      stickout: wexmeStickout,
+      overallLength: '50',
+    }),
+    extralong: await s.addTool('flatEndMill', '6.31', {
+      name: 'extralong 1/4',
+      fluteLength: '45',
+      stickout: '62',
+      overallLength: '100',
+    }),
+  })
+  const slot = (s: Setup) => src((s.op('profile1') as { slotWidth?: unknown }).slotWidth)
+  const profile = (s: Setup, extra: object = {}) =>
+    s.run('design.profile.add', { partId: s.partId, shape: rect('84', '44', '5'), ...extra })
+
+  it('DF51: the default slot widens to the narrowest wider library end mill that fits', async () => {
+    const s = await setup()
+    const { wexme } = await quarterInch(s)
+    await profile(s)
+    expect(slot(s)).toBe('6.22 mm')
+    await s.apply()
+    // 6.31 is wider than the 6.22 mm slot: the wexme is the only fit
+    expect(snapshotOf(s, 'profile1')).toMatchObject({ libraryItemId: wexme })
+    expect(s.warnings().filter((w) => w.parameter === 'tool')).toEqual([])
+  })
+
+  it('DF51: a narrower tool that does not reach is skipped; given, fitting or no tools keep it', async () => {
+    const s = await setup()
+    // 15 mm stickout: short of the 20 mm stock + breakthrough
+    const { extralong } = await quarterInch(s, '15')
+    await profile(s)
+    expect(slot(s)).toBe('6.31 mm')
+    await s.apply()
+    expect(snapshotOf(s, 'profile1')).toMatchObject({ libraryItemId: extralong })
+    // a given slot width is the user's
+    const given = await setup()
+    await quarterInch(given)
+    await profile(given, { slotWidth: '6' })
+    expect(slot(given)).toBe('6')
+    // a library tool fits 6 mm: the default stays
+    const fitting = await setup()
+    await quarterInch(fitting)
+    await fitting.addTool('flatEndMill', '3.175')
+    await profile(fitting)
+    expect(slot(fitting)).toBe('6 mm')
+    // an empty library: the default
+    const empty = await setup()
+    await profile(empty)
+    expect(slot(empty)).toBe('6 mm')
+  })
+
+  it('DF51: inch projects round up to 0.001″; a given wider flat end mill sets the slot', async () => {
+    const s = await setup('inch')
+    // the 1/4″ default slot takes both 1/4″ tools
+    await quarterInch(s)
+    await profile(s)
+    expect(slot(s)).toBe('1/4"')
+    const wide = await setup('inch')
+    await wide.addTool('flatEndMill', '6.5')
+    await profile(wide)
+    // 6.5 mm = 0.25591″
+    expect(slot(wide)).toBe('0.256"')
+    const t = await setup()
+    const { extralong } = await quarterInch(t)
+    await profile(t, { tool: { kind: 'specific', toolLibraryItemId: extralong } })
+    expect(slot(t)).toBe('6.31 mm')
+    expect(t.warnings().filter((w) => w.code === 'dfm.toolUnfit')).toEqual([])
+  })
+
+  it('DF52: an operation no tool fits gets none and dfm.noFittingTool names the rule', async () => {
+    const s = await setup()
+    await s.addTool('flatEndMill', '6')
+    const added = (await s.pocket({ shape: rect('40', '25', '0') })) as { warnings: DfmWarning[] }
+    expect(added.warnings.find((w) => w.code === 'dfm.noFittingTool')).toMatchObject({
+      operation: 'pocket1',
+      parameter: 'tool',
+      severity: 'warning',
+      params: { rule: 'cornerRadius', cornerRadius: 0, tool: '1 mm flat end mill' },
+    })
+    const out = await s.apply()
+    expect(out.toolChanges).toEqual([])
+    expect(s.op('pocket1').tool).toBeUndefined()
+    // rounding the corners makes a tool fit: the warning goes, Apply chooses one
+    await s.run('design.pocket.update', {
+      partId: s.partId,
+      operationId: 'pocket1',
+      shape: rect('40', '25', '3'),
+    })
+    expect(s.warnings().some((w) => w.code === 'dfm.noFittingTool')).toBe(false)
+    await s.apply()
+    expect(s.op('pocket1').tool).toBeDefined()
+  })
+
+  it('DF54: a hole edited so a library end mill fits drops its generalized tool', async () => {
+    const s = await setup()
+    const sixteenth = await s.addTool('flatEndMill', '1.5875')
+    await s.run('design.drilling.add', {
+      partId: s.partId,
+      center: ['20', '20'],
+      diameter: '1.33',
+      bottom: 'flat',
+      depth: '3',
+    })
+    await s.apply()
+    // 1.5875 is wider than the Ø 1.33 hole: the generalized 1 mm bores it
+    expect(toolOf(s, 'drill1')).toMatchObject({ kind: 'generalized', type: 'flatEndMill' })
+    await s.run('design.drilling.update', {
+      partId: s.partId,
+      operationId: 'drill1',
+      diameter: '1.6',
+    })
+    const out = await s.apply()
+    expect(snapshotOf(s, 'drill1')).toMatchObject({ libraryItemId: sixteenth })
+    expect(out.toolChanges).toEqual([
+      expect.objectContaining({ operationId: 'drill1', reason: 'libraryFits' }),
+    ])
+    expect(s.warnings().some((w) => w.code === 'dfm.toolNotInLibrary')).toBe(false)
+    // a locked generalized tool stays
+    await s.run('design.operation.tool.set', {
+      partId: s.partId,
+      operationId: 'drill1',
+      tool: generalized('flatEndMill', '1'),
+    })
+    await s.run('design.drilling.update', { partId: s.partId, operationId: 'drill1', depth: '4' })
+    await s.apply()
+    expect(toolOf(s, 'drill1')).toMatchObject({ kind: 'generalized' })
+  })
+
+  it('DF55: within a size the shortest reach wins, the size first', async () => {
+    const s = await setup()
+    const { wexme, extralong } = await quarterInch(s)
+    const eighth = await s.addTool('flatEndMill', '3.175', { stickout: '12' })
+    await s.run('design.facing.add', { partId: s.partId, depth: '1' })
+    await s.apply()
+    expect(snapshotOf(s, 'facing1')).toMatchObject({ libraryItemId: wexme })
+    const c = s.candidates('facing1')
+    expect(c.fitting.map((f) => f.toolLibraryItemId)).toEqual([wexme, extralong, eighth])
+    expect(c.fitting[0]!.reasons).toContain('stickout 31 mm')
   })
 })

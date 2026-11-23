@@ -347,6 +347,27 @@ describe('tool field helpers', () => {
     expect(
       autoChangeReason(change({ from: null, reason: 'unset' }), drilling, 'mm', doc),
     ).toBeUndefined()
+    // DF54: a fitting generalized tool gave way to a library tool
+    expect(
+      autoChangeReason(
+        change({
+          from: {
+            kind: 'generalized',
+            type: 'flatEndMill',
+            diameter: {
+              kind: 'length',
+              source: '1 mm',
+              defaultUnit: 'mm',
+              exact: { num: '1', den: '1' },
+            },
+          } as unknown as ToolChangeView['from'],
+          reason: 'libraryFits',
+        }),
+        drilling,
+        'mm',
+        doc,
+      ),
+    ).toBe('a library tool fits now instead of the 1 mm flat end mill')
   })
 
   it('counts the operation’s own pending changes and its part’s stock or addition', () => {

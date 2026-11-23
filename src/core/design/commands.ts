@@ -82,6 +82,9 @@ import {
 import { DfmWarningSchema, libraryTools, partWarnings } from './warnings'
 import { ToolArg, toolFromArg, type ToolArgs } from './tool-args'
 import { designToolToDTO, type DesignTool } from './tool'
+import { defaultSlotWidth, lengthSourceUp, resolveDesignTool } from './tool-choice'
+import { toGeometryInput } from './geometry-input'
+import { Tool } from '../library/tool'
 import { reanchor, type Extents } from './anchor'
 import type { Region2dPort } from '../geometry/2d/port'
 import { exactExtents, placeShape, shapeFacts } from './placement'
@@ -173,7 +176,9 @@ const profileParams = {
   shape: ShapeArg,
   anchor: AnchorArg.optional(),
   side: z.enum(PROFILE_SIDES).optional().describe('Default outside; on: centred on the line'),
-  slotWidth: Src.optional().describe('Default 6 mm / 1/4"'),
+  slotWidth: Src.optional().describe(
+    'Default 6 mm / 1/4"; when no library tool fits that, the Ø of the narrowest wider library flat end mill that fits',
+  ),
   depth: Src.nullable().optional().describe('on only: blind groove depth; null = through'),
   tabs: TabsArg.optional(),
 }
@@ -824,6 +829,57 @@ function chamferWidthOfDepth(depth: Quantity, angle: Quantity, units: UnitSystem
 }
 
 /**
+ * The slot width (a source in the project units) a new profile `id` added without `slotWidth`
+ * takes instead of the default (hardening DF51, design-v0.2.md § Tool choice fixes): with a given
+ * tool, its Ø rounded up when it is a flat end mill wider than the slot; else the narrowest wider
+ * library flat end mill that fits when no library tool fits the default (`defaultSlotWidth`).
+ * None: keep the default (also when the part's geometry input does not build: the add reports it).
+ */
+function librarySlotWidth(
+  doc: ProjectDoc,
+  loaded: LoadedPart,
+  ops: readonly Operation[],
+  id: string,
+  ctx: CommandContext,
+): Option<string> {
+  const index = ops.findIndex((o) => o.id === id)
+  const op = ops[index]
+  if (op?.kind !== 'profile') return None
+  if (op.tool.isSome()) {
+    const t = resolveDesignTool(op.tool.unwrap(), doc.snapshots)
+    return t.isSome() &&
+      t.unwrap().type === 'flatEndMill' &&
+      t.unwrap().diameter > op.slotWidth.canonical
+      ? Some(lengthSourceUp(t.unwrap().diameter, loaded.units))
+      : None
+  }
+  const library = ctx.services.library
+  if (library === undefined) return None
+  const items = library.list('tool').items.filter((i) => i.values instanceof Tool)
+  if (items.length === 0) return None
+  const shapes = shapesOf(ops, loaded.dto)
+  if (shapes.isErr()) return None
+  const part = {
+    ...loaded.part,
+    operations: ops,
+    ...(shapes.unwrap().size === 0 ? {} : { shapes: shapes.unwrap() }),
+  }
+  const input = toGeometryInput(part, loaded.stock, ctx.services.region2d)
+  if (input.isErr()) return None
+  const g = input.unwrap()
+  return defaultSlotWidth({
+    op,
+    geometry: g.operations[index]!,
+    stock: g.stock,
+    units: loaded.units,
+    materialClass: loaded.stock.material.class,
+    library: items,
+    snapshots: doc.snapshots,
+    ...(ctx.services.region2d !== undefined && { region2d: ctx.services.region2d }),
+  })
+}
+
+/**
  * `lean` (v0.4 chamfer, tools/list budget): no `tool` and `generalTolerance` args (the tool via
  * `design.operation.tool.set` or Apply's auto choice, tolerances on the values themselves).
  */
@@ -898,8 +954,24 @@ function kindCommands<P extends z.ZodRawShape, O extends Operation>(
         toolLocked: args.tool !== undefined,
         owner: None as Option<FeatureOwner>,
       } as O
-      const settled = settle([...ops, op], stock, id, false, where, env)
+      let settled = settle([...ops, op], stock, id, false, where, env)
       if (settled.isErr()) return settled
+      // DF51: a profile's default slot is widened to the library's tool when none fits it
+      if (spec.kind === 'profile' && (args as { slotWidth?: unknown }).slotWidth === undefined) {
+        const wider = librarySlotWidth(
+          draft as ProjectDoc,
+          loaded.unwrap(),
+          settled.unwrap(),
+          id,
+          ctx,
+        )
+        const q = wider.map((w) => Quantity.parse(w, fieldContext('length', units)))
+        if (q.isSome() && q.unwrap().isOk()) {
+          const widened = { ...op, slotWidth: q.unwrap().unwrap() } as O
+          const again = settle([...ops, widened], stock, id, false, where, env)
+          if (again.isOk()) settled = again
+        }
+      }
       writeOperations(draft, args.partId, settled.unwrap())
       const result = {
         operationId: id,

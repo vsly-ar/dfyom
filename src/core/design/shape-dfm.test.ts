@@ -155,6 +155,8 @@ describe('the auto tool choice for shapes', () => {
     expect(r.warnings.map((w) => w.code)).toEqual([
       'dfm.shapeOutsideFace',
       ...Array<string>(4).fill('dfm.cornerSharp'),
+      // sharp corners: no tool fits at all (DF52)
+      'dfm.noFittingTool',
     ])
   })
 })

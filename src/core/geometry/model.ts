@@ -321,6 +321,8 @@ export const DFM_WARNING_CODES = [
   // the operation's own tool (v0.2): docs/modes/design-v0.2.md#dfm-with-the-tool
   'dfm.toolUnfit',
   'dfm.toolNotInLibrary',
+  // no tool fits at all (hardening DF52): docs/modes/design-v0.2.md#tool-choice-fixes-df51-df52-df54-df55
+  'dfm.noFittingTool',
   // shapes (v0.3): docs/modes/design-v0.3.md#dfm-checks-for-shapes
   'dfm.restMaterial',
   'dfm.shapeOutsideFace',

@@ -617,6 +617,8 @@ export const designMessages = {
       type: (tool: string, kind: string) => `the ${tool} can’t make a ${kind}`,
       reach: (tool: string) => `the ${tool} didn’t reach the depth`,
       unresolved: 'the previous tool could not be read',
+      /** DF54: a fitting generalized tool gave way to a library tool. */
+      libraryFits: (tool: string) => `a library tool fits now instead of the ${tool}`,
       other: (tool: string) => `the ${tool} didn’t fit`,
     },
   },

@@ -136,9 +136,10 @@ describe('plan.create resolves tools from the design tool field', () => {
     )
   })
 
-  it('an unlocked generalized tool: the first suggestion, matching tools first', async () => {
+  it('a generalized tool: matching tools first; unlocked, Apply takes a library tool (DF54)', async () => {
     const s = await planSetup()
-    await setTool(s, 'profile1', { kind: 'generalized', type: 'flatEndMill', diameter: '4' }, false)
+    // locked: an unlocked generalized tool gives way to a fitting library tool on Apply (DF54)
+    await setTool(s, 'profile1', { kind: 'generalized', type: 'flatEndMill', diameter: '4' })
     const planId = await s.create()
     // Flat 6 has the aluminum preset, but Flat 4 matches the design's 4 mm end mill
     expect(toolName(s, planId, 'profile1')).toBe('Flat 4')
@@ -154,6 +155,8 @@ describe('plan.create resolves tools from the design tool field', () => {
       { kind: 'generalized', type: 'flatEndMill', diameter: '3' },
       false,
     )
+    // the Apply replaced the unlocked generalized tool with the first fitting library tool
+    expect(designSnapshot(s2, 'profile1')).toBeDefined()
     const p2 = await s2.create()
     expect(toolName(s2, p2, 'profile1')).toBe('Flat 6')
     expect(warnings(s2, p2).filter((w) => w.code === 'plan.toolUnresolved')).toEqual([])
