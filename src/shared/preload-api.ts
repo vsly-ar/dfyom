@@ -49,6 +49,13 @@ export const IPC = {
   windowClose: 'dfyom:window.close',
   /** Renderer → main (invoke): run an opening command in the window that should show it. */
   windowOpenProject: 'dfyom:window.openProject',
+  /**
+   * Main → renderer: open this project file as File → Open would (from Finder, a launch argument
+   * or a second launch; docs/conventions/ui.md#project-files, hardening U5).
+   */
+  windowOpenFile: 'dfyom:window.openFile',
+  /** Renderer → main (invoke): the "Connect an agent" lines (`ConnectInfo`, hardening A4). */
+  agentsConnectInfo: 'dfyom:agents.connectInfo',
   /** Renderer → main (invoke): a part's evaluation (mesh included when done), or null. */
   evaluationGet: 'dfyom:evaluation.get',
   /** Renderer → main (invoke): a plan's part evaluation (snapshot scene, task E3b), or null. */
@@ -213,6 +220,7 @@ export const MENU_ACTIONS = [
   'view.navigator',
   'view.inspector',
   'help.shortcuts',
+  'help.connectAgent',
   'app.settings',
 ] as const
 export type MenuAction = (typeof MENU_ACTIONS)[number]
@@ -242,6 +250,23 @@ export interface AgentSessionInfo {
   readonly client?: string
   /** The project it is bound to. */
   readonly key?: string
+}
+
+/**
+ * Help → Connect an agent… (docs/conventions/ui.md#connect-an-agent-hardening-a4): shell lines
+ * with this installation's real launcher path, built by main (src/main/connect-agent.ts).
+ */
+export interface ConnectInfo {
+  /** `claude mcp add … -- <launcher> mcp --connect`: attach to this running app. */
+  readonly connect: string
+  /** `claude mcp add … -- <launcher> mcp`: a headless server with its own projects. */
+  readonly headless: string
+  /** The launcher itself, for the command line. */
+  readonly cli: string
+  /** A development build (`node out/main/cli.js`), not an installed app. */
+  readonly development: boolean
+  /** "Allow local agents to connect" is on (the `--connect` line needs it). */
+  readonly localAgents: boolean
 }
 
 export interface LocalHttpState {
@@ -322,6 +347,8 @@ export interface PreloadApi {
     list(): Promise<readonly AgentSessionInfo[]>
     onSessions(listener: (sessions: readonly AgentSessionInfo[]) => void): () => void
     localHttp(): Promise<LocalHttpState>
+    /** The "Connect an agent" lines for this installation (window plumbing). */
+    connectInfo(): Promise<ConnectInfo>
   }
   /**
    * App settings (docs/conventions/ui.md#settings): GUI preferences owned by main, mirrored by
@@ -405,6 +432,12 @@ export interface PreloadApi {
       name: 'project.open' | 'project.create' | 'project.recovery.resolve',
       args: unknown,
     ): Promise<CallReply>
+    /**
+     * Files main hands this window to open as File → Open would (Finder, launch arguments, a
+     * second launch: hardening U5). Files that arrived before the first listener are delivered to
+     * it at once. Returns the unsubscribe function.
+     */
+    onOpenFile(listener: (file: string) => void): () => void
   }
 }
 
