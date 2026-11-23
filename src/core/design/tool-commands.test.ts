@@ -101,6 +101,8 @@ async function setup(units: UnitSystem = 'mm') {
   const candidates = (operationId: string) =>
     expectOk(d.query('design.tool.candidates', { partId, operationId }, ui)).value as {
       fitting: { toolLibraryItemId: string; reasons: string[] }[]
+      unfitting: { toolLibraryItemId: string; rule: string; fluteCount: number }[]
+      nearMatch: string | null
       generalized: DesignToolDTO | null
       current: { tool: DesignToolDTO; locked: boolean; fits: boolean; rule?: string } | null
     }
@@ -403,6 +405,74 @@ describe('design.tool.candidates', () => {
       fits: false,
       rule: 'cornerRadius',
     })
+  })
+
+  it('lists the library tools of the type that do not fit, nearest first, and the near match (DF42)', async () => {
+    const s = await setup()
+    const wexme = await s.addTool('flatEndMill', '6.22', { fluteCount: '1' })
+    const eight = await s.addTool('flatEndMill', '8')
+    await s.addTool('bullNoseEndMill', '6') // a profile needs a flat end mill: not listed
+    await s.addTool('drill', '6') // nor a drill
+    // the default 6 mm slot: only a tool ≤ 6 mm fits, so auto takes the generalized 6 mm
+    await s.run('design.profile.add', { partId: s.partId, shape: rect('84', '44', '5') })
+    await s.apply()
+    expect(toolOf(s, 'profile1')).toMatchObject({ kind: 'generalized', type: 'flatEndMill' })
+    const c = s.candidates('profile1')
+    expect(c.fitting).toEqual([])
+    expect(c.unfitting.map((u) => [u.toolLibraryItemId, u.rule, u.fluteCount])).toEqual([
+      [wexme, 'width', 1],
+      [eight, 'width', 2],
+    ])
+    // 6.22 mm is within 20 % of 6 mm; offered, never taken: the slot is 6 mm wide
+    expect(c.nearMatch).toBe(wexme)
+    expect(s.warnings().some((w) => w.code === 'dfm.toolNotInLibrary')).toBe(true)
+    // the agent's way: tool.set takes the listed id, locks it, and the fit check warns
+    await s.run('design.operation.tool.set', {
+      partId: s.partId,
+      operationId: 'profile1',
+      tool: { kind: 'specific', toolLibraryItemId: wexme },
+    })
+    expect(s.op('profile1').toolLocked).toBe(true)
+    expect(s.warnings().find((w) => w.code === 'dfm.toolUnfit')).toMatchObject({
+      params: { rule: 'width', toolDiameter: 6.22, size: 6 },
+    })
+    // a specific tool has no near match
+    expect(s.candidates('profile1').nearMatch).toBeNull()
+  })
+
+  it('the dogfood case: a 6.42 mm slot keeps its generalized 6 mm; the 6.22 mm tool fits and is the near match', async () => {
+    const s = await setup()
+    await s.run('design.profile.add', {
+      partId: s.partId,
+      shape: rect('84', '44', '5'),
+      slotWidth: '6.42',
+    })
+    await s.apply()
+    // the largest standard size ≤ 6.42 mm (the series has no 6.42; next is 8)
+    expect(src((toolOf(s, 'profile1') as { diameter: unknown }).diameter)).toBe('6 mm')
+    const wexme = await s.addTool('flatEndMill', '6.22', {
+      fluteCount: '1',
+      fluteLength: '20',
+      stickout: '30.9',
+      shankDiameter: '6.35',
+    })
+    const c = s.candidates('profile1')
+    // auto keeps the fitting generalized tool; the library tool is listed and offered
+    expect(c.fitting.map((f) => f.toolLibraryItemId)).toEqual([wexme])
+    expect(c.nearMatch).toBe(wexme)
+  })
+
+  it('near match: same type (bull nose: same RE), within 20 %, an exact match none', async () => {
+    const s = await setup()
+    await s.addTool('flatEndMill', '7.5') // 25 % off the 6 mm: too far
+    await s.run('design.profile.add', { partId: s.partId, shape: rect('84', '44', '5') })
+    await s.apply()
+    const near = () => s.candidates('profile1').nearMatch
+    expect(near()).toBeNull()
+    const close = await s.addTool('flatEndMill', '6.35')
+    expect(near()).toBe(close)
+    await s.addTool('flatEndMill', '6.005') // matches within 0.01 mm: the plan takes it
+    expect(near()).toBeNull()
   })
 })
 

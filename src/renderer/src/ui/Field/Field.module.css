@@ -340,6 +340,18 @@
   display: none;
 }
 
+/* a fix with an alternative action: both go under the text, at its start, wrapping if needed */
+.item:has(> .actions > :not(.quick) + :not(.quick)) {
+  grid-template-columns: 14px minmax(0, 1fr);
+  padding-bottom: 4px;
+}
+.item:has(> .actions > :not(.quick) + :not(.quick)) > .actions {
+  grid-column: 2;
+  justify-self: start;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
 /* below 260 px a fix button wraps under the text; a lone dismiss (an icon) stays at its end */
 @container (max-width: 260px) {
   .item:has(> .actions > :not(.quick)) {
