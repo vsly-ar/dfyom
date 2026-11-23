@@ -1,6 +1,6 @@
 # Run on a real machine
 
-Status: draft (hardening 1.2, 2026-11-23; awaits the user's answers to [Q49–Q52](../plans/hardening.md#questions-for-the-user); [M1](#implementation-m1), [M2](#implementation-m2), [M3](#implementation-m3), [M4](#implementation-m4), [M6](#implementation-m6) and [M8](#fault-injection-m8) implemented on branches) · Safety rules: [run.md § Safety](run.md#safety) · Base: [run-v0.1.md](run-v0.1.md) · Protocol facts: [grbl.md](../architecture/grbl.md) · Decision: [ADR 0013](../decisions/0013-grbl-first-controller.md) · Tasks: [hardening](../plans/hardening.md#5-real-machine) M1–M8
+Status: draft (hardening 1.2, 2026-11-23; awaits the user's answers to [Q49–Q52](../plans/hardening.md#questions-for-the-user); [M1](#implementation-m1), [M2](#implementation-m2), [M3](#implementation-m3), [M4](#implementation-m4), [M5](#implementation-m5), [M6](#implementation-m6), [M7](#implementation-m7) and [M8](#fault-injection-m8) implemented on branches) · Safety rules: [run.md § Safety](run.md#safety) · Base: [run-v0.1.md](run-v0.1.md) · Protocol facts: [grbl.md](../architecture/grbl.md) · Decision: [ADR 0013](../decisions/0013-grbl-first-controller.md) · Tasks: [hardening](../plans/hardening.md#5-real-machine) M1–M8
 
 Run mode on a real GRBL controller over a USB serial port: the same sender, host, commands and UI as the [virtual machine](run-v0.1.md), with a `SerialTransport` under the sender, a port picker, the controller's settings checked against the machine copy, and the real-machine rules of [run.md § Safety](run.md#safety). This doc specifies DFYOM's side; GRBL facts stay in [grbl.md](../architecture/grbl.md).
 
@@ -160,11 +160,29 @@ A Z touch plate replaces the nominal-thickness assumption for Z0 ([v0.2 known is
 
 ## Section resume (M5)
 
-Planned design; implemented with M5.
+After a run stopped or failed, the operator restarts the setup's program at the **start of an operation** (its tool change included), never in the middle of one. Implemented with M5 ([below](#implementation-m5)).
 
-- After a run stopped or failed, `run.job.start { planId, setupId, from: { section } }` restarts the setup's program at a **section boundary**: a tool change marker or an operation start ([`programSections`](run-v0.1.md#progress)). The sections are offered in the failure dialog and the pre-flight ("Resume at: pocket1 · tool 2"), defaulting to the section the run stopped in.
-- **Safe re-entry** (prepended by the post, not hand-written): the program's preamble (units, modes, `G54`), the section's tool change prompt when the tool differs from the one in the spindle, spindle on with its dwell, a rapid to the clearance height, then XY to the section's first point, then the section. Lines before the section are not sent; their modal state is restated by the preamble.
-- Checked on the emulator: the resumed program's motion from the section on equals the full program's (trace comparison).
+- **Command:** `run.job.start { planId, setupId?, from: planOperationId }` (one optional argument on the existing command, not a new tool: the agent tool list is near its budget). `from` names a plan operation of the setup; another id is `input.malformed` (rule `unknownOperation`). Without `from` the whole program runs, as before. Every other rule of `run.job.start` applies unchanged (Idle and homed, the real-machine rules, the soft-limit check at the live G54, Q50: UI only on a real connection).
+- **The resumed program** is exported by the post, not spliced from the full program's text, so modal suppression never leaves a word unstated. The operations before `from` are left out; the rest is the full program's from that operation on, behind a **re-entry**:
+  1. The header: comments (the tools from `from` on, numbered as in the full program), `G90 G94 G17 G21|G20`, `G54`, `G0 Z<clearance>` (units, distance mode, feed mode, plane and WCS stated; Z up first, at the current XY).
+  2. The operation's label comment, `M5`, then its tool's **tool-change marker and `M0`**: a resume always waits at the tool, whether or not it changes. A stop is often a broken or worn bit, the bit may have been pulled to clear chips, and the wait is the place to check it, change it and re-zero Z (by hand or with the touch plate, [M4](#probing-and-re-zero-m4)). DFYOM's sender guides it like any tool change ("Tool change n: name", Continue).
+  3. After the wait (the post's existing post-`M0` restatement): `G90 G94 G17 G21|G20`, `G54`, `G0 Z<clearance>`, then the spindle: `M3 S<rpm>` and the spin-up dwell `G4 P<s>` (a manual spindle: the set-speed prompt and `M0`).
+  4. `G0 X<x> Y<y>` to the operation's first point at the clearance height, then the operation's own moves: its rapid down to the retract height, the plunge, its first feed move carrying `G1` and `F`.
+  - Modal state restored: units, distance mode, feed mode, plane, WCS, spindle direction and speed, feed (with the first feed move), the motion word. Coolant: DFYOM's post emits none, so there is none to restore.
+- **The soft-limit check** runs on the resumed program at the live G54, like any run; as after any tool change that waits, Z is not checked past the wait (the operator may re-zero there, [grbl.md](../architecture/grbl.md#export-checks)).
+- **Progress** counts the resumed program's lines; the section labels are its own (the same labels as in the full program).
+- **Where the run stopped:** `RunStatus.lastRun` (kept until the next run starts, also across a lost connection and a reconnect) names the run that ended last: `{ jobId, planId, setupId, outcome: 'done' | 'stopped' | 'failed', planOperationId? }`. `planOperationId` is the **earliest operation GRBL may still have been executing**: the operation holding the line 16 lines before the last acknowledged one (GRBL plans up to 15 motion blocks ahead of the one moving, [run.md § Safety 6](run.md#6-lost-connection-disconnect-and-reconnect)), or the operation of the tool change the run waited at. Erring early re-cuts air; erring late would leave material.
+- **UI:** after a stopped or failed run of the chosen plan and setup, the inspector shows **"Resume from…"** under "Start run" (and the failure dialog a "Resume from…" button next to Close). It opens the pre-flight in resume mode: title "Resume run?", a **"Resume at"** select of the setup's operations in machining order (`label · tool n: name`, the stopped one preselected and marked "(stopped here)"), the note "The run waits at the tool first: check or change it and set Z zero, then continue. The spindle starts and the machine moves to the operation's start at the clearance height.", the usual facts and gates (on a real machine: plan status, settings, air-cut hint not shown), and the primary button **"Resume run"** (real machine: "Resume on the machine"). Everything else as the [pre-flight](#pre-flight-on-a-real-machine).
+- **Checked on the emulator:** for each operation of the [test part](../architecture/geometry.md#testing), the resumed program streamed through the virtual machine moves exactly as the full program from that operation's first point on (the end position of every motion line, in work coordinates, within the text resolution), including a resume whose tool-change wait re-zeroes Z with a `G38.2` probe on the emulator's plate; and end to end through the commands: a run stopped mid-operation, `lastRun`, a resume at that operation with Probe Z at the wait, run to the end.
+
+## Run status and the zero to set (M7)
+
+A run started in another window or by an agent, and the setup change after it, must say which plan and setup it is. Implemented with M7 ([below](#implementation-m7)).
+
+- **`RunStatus.job.plan`** `{ planId, planName, setupId, setupName, setup, setups }` (`setup` the 1-based number of the setup, `setups` their count) and `job.planOperationId` (the operation of the line being acknowledged): set by `run.job.start` for the host's job, so every window and agent reads them from the status, also a window of another project (whose `job.get` cannot reach the job).
+- **Inspector:** while a run job runs, the progress section names it above the bar: "Plan 1 · setup 2 of 2: Top" ("Plan 1" alone for a one-setup plan), and for a run this window did not start "Started in another window or by an agent." The navigator's plan and setup selects stay as the user left them.
+- **Setup change after a run started elsewhere:** when the run this window follows ends with a `next` setup, the window's plan becomes the run's plan (`planId` in the result), so the prompt describes the right plan.
+- **The zero to set:** the setup-change prompt adds a **"Zero to set"** row: "X0 Y0 at the front-left corner of the top, Z0 on the top surface" and the part corner that is (from the setup's work zero definition, [plan-v0.2.md § WCS corner](plan-v0.2.md#implementation-task-e2)): "This is the part's back-left corner." (the corner named by the part faces that meet there besides the up face), plus the stock's size on the machine "X 120 × Y 80 × Z 20 mm" to check the clamping. The picture's work-zero ring gets the label "X0 Y0". `run.job.start`'s `next` gains `corner` (that part corner, e.g. `back left`) for agents.
 
 ## Overrides (M6)
 
@@ -196,24 +214,28 @@ Per [testing.md](../conventions/testing.md); no hardware in CI.
 
 ## Files
 
-| File                                              | Contents                                                           |
-| ------------------------------------------------- | ------------------------------------------------------------------ |
-| `src/core/run/serial.ts`                          | `SerialPorts` port, `SerialPortInfo`, port sorting                 |
-| `src/core/run/transport.ts`                       | `ControllerTransport` (+ optional `onClose`)                       |
-| `src/core/run/settings-check.ts`                  | `settingsCheck(machine, settings)`: the `$$` comparison at connect |
-| `src/core/run/grbl/loopback.fixture.ts`           | Loopback serial ports over the emulator (tests)                    |
-| `src/main/machine/serial-transport.ts`            | `SerialTransport`, `nodeSerialPorts` (lazy `serialport`)           |
-| `src/main/machine/serve.ts`                       | Passes `nodeSerialPorts` to the host                               |
-| `src/renderer/src/modes/run/SerialPicker.tsx`     | Connect-to choice, port and baud selects, settings warning         |
-| `src/core/run/commands.ts`                        | `run.connection.open` serial target, `run.ports.scan`              |
-| `src/core/run/job.ts`                             | Real-machine run checks (`realMachineChecks`)                      |
-| `src/core/commands/permission.ts`                 | Q50 policy (`STOP_COMMANDS`)                                       |
-| `src/renderer/src/modes/run/AlarmPanel.tsx`       | Alarm panel: what happened and the next steps (M3)                 |
-| `src/renderer/src/modes/run/JogPad.tsx`           | Step and continuous jog (M3)                                       |
-| `src/core/run/grbl/emulator/emulator.ts`          | Probe cycles, simulated plate, fault hooks (M4, M8)                |
-| `src/core/run/host/host.ts`                       | `probeZ` sequence, modal restore, override bytes (M4, M6)          |
-| `src/renderer/src/modes/run/ProbeZButton.tsx`     | "Probe Z" with its confirmation (M4)                               |
-| `src/renderer/src/modes/run/OverridesSection.tsx` | Inspector "Overrides" section (M6)                                 |
+| File                                                      | Contents                                                           |
+| --------------------------------------------------------- | ------------------------------------------------------------------ |
+| `src/core/run/serial.ts`                                  | `SerialPorts` port, `SerialPortInfo`, port sorting                 |
+| `src/core/run/transport.ts`                               | `ControllerTransport` (+ optional `onClose`)                       |
+| `src/core/run/settings-check.ts`                          | `settingsCheck(machine, settings)`: the `$$` comparison at connect |
+| `src/core/run/grbl/loopback.fixture.ts`                   | Loopback serial ports over the emulator (tests)                    |
+| `src/main/machine/serial-transport.ts`                    | `SerialTransport`, `nodeSerialPorts` (lazy `serialport`)           |
+| `src/main/machine/serve.ts`                               | Passes `nodeSerialPorts` to the host                               |
+| `src/renderer/src/modes/run/SerialPicker.tsx`             | Connect-to choice, port and baud selects, settings warning         |
+| `src/core/run/commands.ts`                                | `run.connection.open` serial target, `run.ports.scan`              |
+| `src/core/run/job.ts`                                     | Real-machine run checks (`realMachineChecks`)                      |
+| `src/core/commands/permission.ts`                         | Q50 policy (`STOP_COMMANDS`)                                       |
+| `src/renderer/src/modes/run/AlarmPanel.tsx`               | Alarm panel: what happened and the next steps (M3)                 |
+| `src/renderer/src/modes/run/JogPad.tsx`                   | Step and continuous jog (M3)                                       |
+| `src/core/run/grbl/emulator/emulator.ts`                  | Probe cycles, simulated plate, fault hooks (M4, M8)                |
+| `src/core/run/host/host.ts`                               | `probeZ` sequence, modal restore, override bytes (M4, M6)          |
+| `src/renderer/src/modes/run/ProbeZButton.tsx`             | "Probe Z" with its confirmation (M4)                               |
+| `src/renderer/src/modes/run/OverridesSection.tsx`         | Inspector "Overrides" section (M6)                                 |
+| `src/core/post/export.ts`, `src/core/post/plan-export.ts` | Resumed program (`resumeFrom`), `operationLines` (M5)              |
+| `src/core/run/host/client.ts`                             | `job.plan`, `lastRun`, `stoppedOperation` (M5, M7)                 |
+| `src/renderer/src/modes/run/RunDialogs.tsx`               | Pre-flight resume mode, failure dialog "Resume from…" (M5)         |
+| `src/renderer/src/modes/run/SetupChangeDialog.tsx`        | Zero to set, part corner, stock on the machine (M7)                |
 
 ## Implementation (M1)
 
@@ -255,3 +277,18 @@ Decisions and findings of M1, where this doc left room:
 - **One command** (`run.override.set`) instead of three: the agent tool list is close to its size budget.
 - **Overrides pass a reserved client** (a job checking its program) like the stop paths: a real-time byte never interleaves with a line.
 - **The reply** waits for one fresh status report, so it carries the `Ov` after the change.
+
+## Implementation (M5)
+
+- **In the post's input, not the text:** `ExportInput.resumeFrom` (an index into the operations) makes `toMachiningProgram` leave out the operations before it (tools keep their numbers) and prepend `M5`, the forced tool change and spindle blocks and a rapid to the first point at the clearance height; `exportPlan({ resumeFrom: planOperationId })` maps the id and passes `firstToolLoaded: false`, so the post's own tool-change path writes the marker, `M0` and the restated modes. No new post code path; the machine checks look at the operations that run.
+- **Always a tool-change wait** rather than an option to skip it: one argument instead of two in the tool list (+118 characters, 119,350 of 120,000), and the wait is where the bit is checked and Z re-zeroed after a stop. The cost: as after any waiting tool change, Z is not soft-limit checked past it.
+- **`PlanExport.operationLines`** (each operation's first line, matched on its label comment in order) feed `JobAbout`, which `run.job.start` hands to `MachineService.startJob`; `MachineClient` keeps the acknowledged line count from the progress and the last waiting phase, and records `lastRun` when the job ends (`PLANNER_LINES` = 16 lines back, or the tool change's operation).
+- **UI:** "Resume from…" in the inspector (under "Start run", gated like it) and in the failure dialog; the pre-flight's resume mode is `resumeFrom` in the run store (`openResume()`), the points from `resumePoints(plan, setupId)` (`plan-info.ts`).
+- **Tests:** `src/core/post/grbl/resume-run.test.ts` (the re-entry lines; every operation of the test part resumed and compared with the full run's motion on the emulator, one with a `G38.2` re-zero at its wait), `commands.test.ts` ("a stopped run is resumed at its operation": stop at a tool change, `lastRun`, `unknownOperation`, resume with Probe Z at the wait, to the end), `host/resume-point.test.ts`, `RunMode.test.tsx` (inspector and failure dialog paths, axe).
+- **Not verified on hardware** (as M1).
+
+## Implementation (M7)
+
+- **The status carries the names** (`job.plan`), not only ids: a window of another project cannot look the plan up.
+- **"Started elsewhere"** is any followed run whose job id this window did not start (`startedHere` in the run store).
+- **The part corner** moved to core (`setupZeroCorner` in `toolpath/wcs.ts`), shared by Plan's setup inspector, the setup-change prompt and `run.job.start`'s `next.corner`.

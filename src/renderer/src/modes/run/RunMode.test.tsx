@@ -369,7 +369,13 @@ describe('Run mode', () => {
     t.machine.push({ state: 'Idle', ...t.machine.job('done') })
     const prompt = await screen.findByRole('dialog', { name: 'Setup change: setup 2, Top' })
     expect(within(prompt).getByRole('img', { name: /top face up/ })).toBeInTheDocument()
-    expect(within(prompt).getByText(/front-left corner/)).toBeInTheDocument()
+    expect(within(prompt).getByText(/front-left corner, Z on its surface/)).toBeInTheDocument()
+    // the zero to set and the part corner it is (M7)
+    expect(within(prompt).getByText('Zero to set')).toBeInTheDocument()
+    expect(
+      within(prompt).getByText(/X0 Y0 at the front-left corner of the top.*front left corner/),
+    ).toBeInTheDocument()
+    expect(within(prompt).getByText('Stock on the machine')).toBeInTheDocument()
     expect(within(prompt).getByRole('button', { name: 'Zero X Y Z' })).toBeEnabled()
     expect(within(prompt).getByRole('button', { name: 'Stop' })).toBeInTheDocument()
     expect(within(machineGroup()!).getByText('Setup change')).toBeInTheDocument()
@@ -383,6 +389,100 @@ describe('Run mode', () => {
     const again = await screen.findByRole('dialog', { name: 'Setup change: setup 2, Top' })
     await t.user.click(within(again).getByRole('button', { name: 'Start setup 2' }))
     expect(t.callsOf('run.job.start').at(-1)).toEqual({ planId: t.plan().id, setupId: top!.id })
+  })
+
+  it('a run started elsewhere names its plan; once stopped, "Resume from…" restarts at an operation (M5, M7)', async () => {
+    const t = await renderRun()
+    await connectAndHome(t)
+    const plan = t.plan()
+    const setup = plan.setups[0]!
+    const ops = setup.operations
+    await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
+    const inspector = screen.getByRole('complementary', { name: 'Inspector' })
+    // another window (or an agent) starts a run: the status names its plan
+    t.machine.push({
+      state: 'Run',
+      ...t.machine.job('streaming', {
+        jobId: 'other-1',
+        plan: {
+          planId: plan.id,
+          planName: plan.name,
+          setupId: setup.id,
+          setupName: setup.name,
+          setup: 1,
+          setups: 1,
+        },
+        planOperationId: ops[1]!.id,
+      }),
+    })
+    expect(await within(inspector).findByText(plan.name)).toBeInTheDocument()
+    expect(within(inspector).getByText('Started in another window or by an agent.')).toBeVisible()
+    expect(within(inspector).queryByRole('button', { name: 'Resume from…' })).toBeNull()
+    // it is stopped in the second operation
+    t.machine.outcome = {
+      ok: false,
+      error: { code: 'op.aborted', message: 'aborted', issues: [], frames: [] },
+    }
+    const { job: _job, ...idle } = t.machine.status
+    t.machine.status = idle
+    t.machine.push({
+      state: 'Idle',
+      lastRun: {
+        jobId: 'other-1',
+        planId: plan.id,
+        setupId: setup.id,
+        outcome: 'stopped',
+        planOperationId: ops[1]!.id,
+      },
+    })
+    const resume = await within(inspector).findByRole('button', { name: 'Resume from…' })
+    await t.user.click(resume)
+    const dialog = await screen.findByRole('dialog', { name: 'Resume run?' })
+    const at = within(dialog).getByRole('combobox', { name: 'Resume at' })
+    expect(at).toHaveTextContent(/\(stopped here\)/)
+    expect(within(dialog).getByText(/The run waits at the tool first/)).toBeInTheDocument()
+    await expectNoAxeViolations()
+    await t.user.click(within(dialog).getByRole('button', { name: 'Resume run' }))
+    expect(t.callsOf('run.job.start')).toEqual([
+      { planId: plan.id, setupId: setup.id, from: ops[1]!.id },
+    ])
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
+
+  it('the failure dialog offers "Resume from…" after a failed run (M5)', async () => {
+    const t = await renderRun()
+    await connectAndHome(t)
+    const plan = t.plan()
+    const setup = plan.setups[0]!
+    await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
+    const inspector = screen.getByRole('complementary', { name: 'Inspector' })
+    await t.user.click(within(inspector).getByRole('button', { name: 'Start run' }))
+    const preflight = screen.getByRole('dialog', { name: 'Start run?' })
+    await t.user.click(within(preflight).getByRole('button', { name: 'Start run' }))
+    await within(machineGroup()!).findByText('Running')
+    t.machine.outcome = {
+      ok: false,
+      error: { code: 'machine.error', message: 'error:20', issues: [], frames: [] },
+    }
+    const { job: _job, ...idle } = t.machine.status
+    t.machine.status = idle
+    t.machine.push({
+      state: 'Idle',
+      lastRun: { jobId: 'run-1', planId: plan.id, setupId: setup.id, outcome: 'failed' },
+    })
+    const dialog = await screen.findByRole('dialog', { name: /stopped with an error/ })
+    await t.user.click(within(dialog).getByRole('button', { name: 'Resume from…' }))
+    const resume = await screen.findByRole('dialog', { name: 'Resume run?' })
+    // no operation known: the first is offered
+    expect(within(resume).getByRole('combobox', { name: 'Resume at' })).not.toHaveTextContent(
+      /stopped here/,
+    )
+    await t.user.click(within(resume).getByRole('button', { name: 'Resume run' }))
+    expect(t.callsOf('run.job.start').at(-1)).toEqual({
+      planId: plan.id,
+      setupId: setup.id,
+      from: setup.operations[0]!.id,
+    })
   })
 
   it('without a plan: connects with a library machine; homing, jog and zero work (DF31)', async () => {

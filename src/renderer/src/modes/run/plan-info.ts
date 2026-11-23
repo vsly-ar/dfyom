@@ -4,13 +4,20 @@
 // Doc: docs/modes/run-v0.1.md#run-job (decision 5), docs/modes/plan-v0.2.md#setup-change-in-run
 import type { Direction } from '../../../../core/geometry/face'
 import type { Placement } from '../../../../core/geometry/model'
+import { planOperationLabel } from '../../../../core/plan/labels'
 import { loadPlanDTO } from '../../../../core/plan/plan'
 import { QuantityDtoSchema } from '../../../../core/quantity/quantity.dto'
 import { Quantity } from '../../../../core/quantity/quantity'
 import type { PlanDTO, SetupDTO } from '../../../../core/plan/plan.dto'
 import { setupDirection, setupRotation } from '../../../../core/plan/setups'
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
-import { setupFrame, setupOrientation, type SetupOrientation } from '../../../../core/toolpath/wcs'
+import type { RunStatus } from '../../../../core/run/service'
+import {
+  setupFrame,
+  setupOrientation,
+  setupZeroCorner,
+  type SetupOrientation,
+} from '../../../../core/toolpath/wcs'
 
 /** Plans that may run on the virtual machine: every status but `archived` (decision 5). */
 export function runnablePlans(doc: ProjectDoc): PlanDTO[] {
@@ -60,11 +67,54 @@ export function planRunInfo(plan: PlanDTO, setupId?: string): PlanRunInfo {
   }
 }
 
+/** An operation start a stopped run may resume at (M5): the program's label and tool. */
+export interface ResumePoint {
+  readonly planOperationId: string
+  /** The operation's label comment in the program. */
+  readonly label: string
+  /** Tool number as in the program (by first use in the setup) and the tool's name. */
+  readonly tool: number
+  readonly toolName: string
+}
+
+/** The setup's operations in machining order, as "Resume at" offers them (run-machine.md#section-resume-m5). */
+export function resumePoints(plan: PlanDTO, setupId: string | undefined): ResumePoint[] {
+  const numbers = new Map<string, number>()
+  return runSetup(plan, setupId).operations.map((op) => {
+    const key = op.tool ?? ''
+    const n = numbers.get(key) ?? numbers.size + 1
+    numbers.set(key, n)
+    return {
+      planOperationId: op.id,
+      label: planOperationLabel(plan.design.part, op.designOperationIds),
+      tool: n,
+      toolName: snapshotName(plan, op.tool) ?? '–',
+    }
+  })
+}
+
+/** "Resume from…" is offered after a stopped or failed run of this plan and setup (M5). */
+export function canResume(
+  lastRun: RunStatus['lastRun'],
+  plan: PlanDTO | undefined,
+  setupId: string | undefined,
+): boolean {
+  return (
+    lastRun !== undefined &&
+    plan !== undefined &&
+    lastRun.outcome !== 'done' &&
+    lastRun.planId === plan.id &&
+    lastRun.setupId === runSetup(plan, setupId).id
+  )
+}
+
 /** A setup on the part: its WCS in the part frame and the stock as it sits on the machine. */
 export interface SetupPlacement {
   /** WCS → part frame (identity for an unrotated top setup). */
   readonly frame: Placement
   readonly orientation: SetupOrientation
+  /** The part corner at the work zero, e.g. "back left" (M7). */
+  readonly corner: string
 }
 
 /** `undefined` when the plan's stock copy does not load. */
@@ -87,6 +137,7 @@ export function setupPlacement(
   return {
     frame: setupFrame(direction, rotation, stock),
     orientation: setupOrientation(direction, rotation, stock),
+    corner: setupZeroCorner(direction, rotation, stock),
   }
 }
 

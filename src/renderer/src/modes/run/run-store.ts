@@ -32,7 +32,8 @@ export interface RunSummaryView {
   readonly elapsedSeconds: number
   readonly toolChanges: number
   readonly pauses: number
-  /** The setup the run machined, and the one after it (task E2). */
+  /** The plan and setup the run machined, and the setup after it (task E2). */
+  readonly planId?: string
   readonly setupId?: string
   readonly next?: { readonly setupId: string; readonly name: string }
 }
@@ -91,6 +92,13 @@ export interface RunState {
   /** Key of the tool change / pause wait the user put off with "Later". */
   readonly dismissedWait: string | undefined
   readonly preflightOpen: boolean
+  /**
+   * The pre-flight is in resume mode (M5) at this plan operation while defined ('' = the first);
+   * docs/modes/run-machine.md#section-resume-m5.
+   */
+  readonly resumeFrom: string | undefined
+  /** The run job this window started (M7: a followed run it did not start was started elsewhere). */
+  readonly startedHere: string | undefined
   /** Actions in flight, by name (their buttons show busy). */
   readonly pending: readonly string[]
 
@@ -107,6 +115,9 @@ export interface RunState {
   setJogStep(step: string): void
   setJogMode(mode: JogMode): void
   setPreflightOpen(open: boolean): void
+  /** Opens the pre-flight in resume mode at the operation the last run stopped in (M5). */
+  openResume(): void
+  setResumeFrom(planOperationId: string): void
   dismissWait(key: string | undefined): void
   closeFailure(): void
   clearActionError(): void
@@ -129,8 +140,11 @@ export interface RunState {
   /** `run.override.set` (M6). */
   override(change: OverrideChange): Promise<void>
   reset(): Promise<void>
-  /** `setupId`: the setup to run (default: the chosen one; the server needs it for several). */
-  startRun(setupId?: string): Promise<void>
+  /**
+   * `setupId`: the setup to run (default: the chosen one; the server needs it for several);
+   * `from`: resume at that plan operation (M5).
+   */
+  startRun(setupId?: string, from?: string): Promise<void>
   hold(): Promise<void>
   resume(): Promise<void>
   stop(): Promise<void>
@@ -231,6 +245,8 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       actionError: undefined,
       dismissedWait: undefined,
       preflightOpen: false,
+      resumeFrom: undefined,
+      startedHere: undefined,
       pending: [],
 
       setPlan: (planId) =>
@@ -269,7 +285,14 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       },
       setJogStep: (jogStep) => set({ jogStep }),
       setJogMode: (jogMode) => set({ jogMode }),
-      setPreflightOpen: (preflightOpen) => set({ preflightOpen }),
+      setPreflightOpen: (preflightOpen) =>
+        set(preflightOpen ? { preflightOpen, resumeFrom: undefined } : { preflightOpen }),
+      openResume: () =>
+        set({
+          preflightOpen: true,
+          resumeFrom: get().status.lastRun?.planOperationId ?? '',
+        }),
+      setResumeFrom: (resumeFrom) => set({ resumeFrom }),
       dismissWait: (dismissedWait) => set({ dismissedWait }),
       closeFailure: () => set({ failureOpen: false }),
       clearActionError: () => set({ actionError: undefined }),
@@ -333,19 +356,21 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       probeZ: (plateThickness) => job('run.machine.probeZ', { plateThickness }),
       override: async (change) => void (await call('run.override.set', change)),
       reset: async () => void (await call('run.machine.reset')),
-      async startRun(chosen) {
+      async startRun(chosen, from) {
         const planId = get().planId
         const setupId = chosen ?? get().setupId
-        set({ preflightOpen: false, setupChangeOpen: false })
+        set({ preflightOpen: false, setupChangeOpen: false, resumeFrom: undefined })
         if (planId === undefined || planId === NO_PLAN) return
         const r = await call('run.job.start', {
           planId,
           ...(setupId === undefined ? {} : { setupId }),
+          ...(from === undefined || from === '' ? {} : { from }),
         })
         if (!r.ok) return
         const { jobId } = r.value as { jobId: string }
         set({
           jobId,
+          startedHere: jobId,
           progress: undefined,
           ended: undefined,
           failureOpen: false,
@@ -412,8 +437,11 @@ export function createRunStore(bridge: PreloadApi): RunStore {
         store.setState({ ended, failureOpen: ended.kind === 'failed', dismissedWait: undefined })
         // one program per setup: the next setup is chosen and its setup change prompted (E2)
         const next = ended.kind === 'done' ? ended.summary.next : undefined
+        // the run's plan (M7: it may have been started elsewhere, for another plan than chosen here)
+        const runPlan = ended.kind === 'done' ? ended.summary.planId : undefined
         if (next !== undefined)
           store.setState({
+            ...(runPlan === undefined ? {} : { planId: runPlan }),
             setupId: next.setupId,
             setupChange: next.setupId,
             setupChangeOpen: true,

@@ -1,9 +1,11 @@
 // The setup-change prompt (v0.2 task E2): between two setups' runs, built like the tool-change
 // dialog: the next setup's name and direction, a picture of the stock in its new orientation, the
 // steps (turn and clamp the stock, set the work zero at the front-left corner of the new top,
-// start), jog and work-zero controls inside, "Start setup n" as the only primary action and the
-// run dialogs' Stop. It never continues by itself; "Later" puts it off to the inspector.
-// Doc: docs/modes/plan-v0.2.md#setup-change-in-run, docs/conventions/ui.md#run-mode-safety-ui
+// start), the zero to set and the part corner it is (M7), jog and work-zero controls inside,
+// "Start setup n" as the only primary action and the run dialogs' Stop. It never continues by
+// itself; "Later" puts it off to the inspector.
+// Doc: docs/modes/plan-v0.2.md#setup-change-in-run, docs/conventions/ui.md#run-mode-safety-ui,
+// docs/modes/run-machine.md#run-status-and-the-zero-to-set-m7
 import { useId } from 'react'
 import { DIRECTION_LABEL } from '../../../../core/geometry/face'
 import type { ProjectDoc } from '../../../../core/project/document'
@@ -96,6 +98,22 @@ export function SetupChangeDialog({ doc }: { doc: ProjectDoc }): React.JSX.Eleme
         onProbe={(t) => void a.probeZ(t)}
       />
       <dl className={styles['facts']}>
+        <dt>{m.zeroToSet}</dt>
+        <dd>
+          {m.zeroText}
+          {placed ? ` ${m.zeroCorner(placed.corner)}` : ''}
+        </dd>
+        {placed ? (
+          <>
+            <dt>{m.stockOnMachine}</dt>
+            <dd className={styles['mono']}>
+              {placed.orientation.size
+                .map((v, i) => `${'XYZ'[i]} ${formatLength(v, units)}`)
+                .join(' × ')}{' '}
+              {runMessages.dro.units[units]}
+            </dd>
+          </>
+        ) : null}
         <dt>{m.workZero}</dt>
         <dd className={styles['mono']}>
           {status.workZero.map((v) => formatLength(v, units)).join(' · ')}{' '}
@@ -198,6 +216,9 @@ export function SetupPicture({
         />
         <circle className={styles['workZeroRing']} cx={zero[0]} cy={zero[1]} r={6} />
         <circle className={styles['workZeroDot']} cx={zero[0]} cy={zero[1]} r={2.2} />
+        <text className={styles['workZeroLabel']} x={zero[0] - 8} y={zero[1] - 10}>
+          {m.zeroLabel}
+        </text>
       </svg>
       <figcaption>
         <dl className={styles['facts']}>

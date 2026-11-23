@@ -19,6 +19,7 @@ import type { ProjectDoc } from '../project/document'
 import { cacheOf, ensureToolpath } from '../toolpath/generate'
 import type { Vec3 } from '../toolpath/model'
 import { exportGrbl, type ExportOperation, type GrblExport } from './export'
+import { commentLine } from './grbl/format'
 import { machineKeyOf } from '../run/machine-key'
 
 /** The generator string of exported programs' header (no version: same input, same file). */
@@ -60,6 +61,12 @@ export interface PlanExportOptions {
   readonly signal?: AbortSignal
   /** Per plan operation while toolpaths are checked or regenerated. */
   readonly progress?: (p: JobProgress) => void
+  /**
+   * Section resume (hardening M5): the plan operation of the setup to start at, with the safe
+   * re-entry (docs/modes/run-machine.md#section-resume-m5); another id is `input.malformed`, rule
+   * `unknownOperation`.
+   */
+  readonly resumeFrom?: string
 }
 
 export interface PlanExport extends GrblExport {
@@ -69,6 +76,11 @@ export interface PlanExport extends GrblExport {
   readonly regenerated: readonly string[]
   /** Whether the soft-limit check ran (only with `workZero`). */
   readonly softLimitChecked: boolean
+  /** The first line (1-based) of each plan operation in the program, in machining order. */
+  readonly operationLines: readonly {
+    readonly planOperationId: string
+    readonly fromLine: number
+  }[]
 }
 
 const neverAborted = new AbortController().signal
@@ -109,6 +121,18 @@ export async function exportPlan(
   )
   if (inputs.isErr()) return inputs
   const all = inputs.unwrap()
+  const resumeFrom =
+    opts.resumeFrom === undefined
+      ? undefined
+      : all.findIndex((x) => x.planOperationId === opts.resumeFrom)
+  if (resumeFrom === -1)
+    return fail('input.malformed', `operation ${opts.resumeFrom} is not in this setup`, {
+      where,
+      data: { planId, setupId: setup.id },
+      issues: [
+        { path: ['from'], rule: 'unknownOperation', message: 'not an operation of the setup' },
+      ],
+    })
   if (all.length === 0)
     return fail('plan.check', `plan ${planId} has no operations to export`, {
       where,
@@ -169,8 +193,13 @@ export async function exportPlan(
       operations,
       machine: plan.machine,
       ...(opts.workZero === undefined ? {} : { workZero: opts.workZero }),
+      ...(resumeFrom === undefined ? {} : { resumeFrom }),
     },
-    { generator: opts.generator ?? PROGRAM_GENERATOR },
+    {
+      generator: opts.generator ?? PROGRAM_GENERATOR,
+      // a resume always waits at its tool (run-machine.md#section-resume-m5)
+      ...(resumeFrom === undefined ? {} : { firstToolLoaded: false }),
+    },
   )
   return exported
     .map((e) => ({
@@ -178,8 +207,33 @@ export async function exportPlan(
       setupId: setup.id,
       regenerated,
       softLimitChecked: opts.workZero !== undefined,
+      operationLines: operationLines(
+        e.lines,
+        operations.slice(resumeFrom ?? 0).map((o) => o.label),
+        all.slice(resumeFrom ?? 0).map((x) => x.planOperationId),
+      ),
     }))
     .mapErr((e) => e.withContext(where, { planId }))
+}
+
+/**
+ * Each operation's first line (1-based): its label comment, matched in machining order (a label
+ * text may repeat; position comments come after their operation's label).
+ */
+function operationLines(
+  lines: readonly string[],
+  labels: readonly string[],
+  ids: readonly string[],
+): { planOperationId: string; fromLine: number }[] {
+  const out: { planOperationId: string; fromLine: number }[] = []
+  let at = 0
+  labels.forEach((label, k) => {
+    const i = lines.indexOf(commentLine(label), at)
+    if (i < 0) return
+    out.push({ planOperationId: ids[k]!, fromLine: i + 1 })
+    at = i + 1
+  })
+  return out
 }
 
 /**

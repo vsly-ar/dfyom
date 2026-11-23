@@ -26,7 +26,7 @@ import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
 import { Quantity } from '../../../../core/quantity/quantity'
 import type { QuantityKind, UnitId } from '../../../../core/quantity/units'
 import type { Toolpath } from '../../../../core/toolpath/model'
-import { setupFrame } from '../../../../core/toolpath/wcs'
+import { setupFrame, setupZeroCorner } from '../../../../core/toolpath/wcs'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import type { FeedSource, ToolpathState } from '../../messages/plan'
 import type { DesignPart } from '../design/model'
@@ -155,14 +155,7 @@ export function setupPlacement(setup: SetupDTO, stock: StockSize): Placement {
  * the machine it is always the front-left corner of the up face.
  */
 export function setupCorner(setup: SetupDTO, stock: StockSize): string {
-  const o = setupPlacement(setup, stock).origin
-  const zero = (a: number) => Math.abs(a) < 1e-9
-  const axis = setupDirection(setup)[1]
-  const words: string[] = []
-  if (axis !== 'z') words.push(zero(o[2]) ? 'top' : 'bottom')
-  if (axis !== 'y') words.push(zero(o[1]) ? 'front' : 'back')
-  if (axis !== 'x') words.push(zero(o[0]) ? 'left' : 'right')
-  return words.join(' ')
+  return setupZeroCorner(setupDirection(setup), setupRotation(setup), stock)
 }
 
 /** A setup's direction (absent = `+z`). */

@@ -20,9 +20,12 @@ import type { Vec3 } from '../../toolpath/model'
 import type { RunSummary, SenderProgram } from '../grbl/sender'
 import {
   closedStatus,
+  type JobAbout,
   type JobListener,
+  type LastRun,
   type MachineService,
   type RunningJob,
+  type RunPlan,
   type RunStatus,
 } from '../service'
 import type { SerialPortInfo } from '../serial'
@@ -80,6 +83,42 @@ interface Job {
   readonly listener: JobListener
   readonly startedAt: string
   readonly end: (r: AppResult<RunSummary>) => void
+  readonly about: JobAbout | undefined
+  /** Lines acknowledged (last progress). */
+  done: number
+  /** Waiting at a tool change (last phase). */
+  atToolChange: boolean
+}
+
+/** Phases that say where a run is (the end phases keep the last of these). */
+const WAIT_OR_STREAM: readonly string[] = ['streaming', 'held', 'programPause', 'toolChange']
+
+/**
+ * Motion lines GRBL may hold besides the one moving: its planner plans up to 15 blocks ahead
+ * (docs/modes/run.md#6-lost-connection-disconnect-and-reconnect); one more for margin.
+ */
+export const PLANNER_LINES = 16
+
+/** The plan operation holding 1-based `line`; the first one for a line before it. */
+export function operationAt(about: JobAbout, line: number): string | undefined {
+  let id = about.operations[0]?.planOperationId
+  for (const o of about.operations) {
+    if (o.fromLine > line) break
+    id = o.planOperationId
+  }
+  return id
+}
+
+/**
+ * Where a run that ended stopped (docs/modes/run-machine.md#section-resume-m5): the operation of
+ * the tool change it waited at, else the earliest one GRBL may still have been executing.
+ */
+export function stoppedOperation(
+  about: JobAbout,
+  done: number,
+  atToolChange: boolean,
+): string | undefined {
+  return operationAt(about, atToolChange ? done + 1 : Math.max(1, done - PLANNER_LINES))
 }
 
 const WHERE = 'MachineClient'
@@ -106,6 +145,8 @@ export class MachineClient implements MachineService {
   private reserved: string | undefined
   private hostStatus: HostStatus | undefined
   private job: Job | undefined
+  /** The run that ended last (M5): kept until the next run starts, across connections. */
+  private lastRun: LastRun | undefined
   private timeScale: TimeScale = 1
   private readonly listeners = new Set<(s: RunStatus) => void>()
   private readonly log: Logger
@@ -132,8 +173,9 @@ export class MachineClient implements MachineService {
   status(): RunStatus {
     const conn = this.conn
     const h = this.hostStatus
+    const last = this.lastRun === undefined ? {} : { lastRun: { ...this.lastRun } }
     if (conn === undefined || h === undefined) {
-      const s = closedStatus(this.timeScale)
+      const s: RunStatus = { ...closedStatus(this.timeScale), ...last }
       if (conn === undefined && this.lost !== undefined)
         s.connection.lost = {
           target: this.lost.target,
@@ -158,7 +200,30 @@ export class MachineClient implements MachineService {
       },
       ...(job === undefined || this.job?.jobId !== job.jobId
         ? {}
-        : { job: { ...job, startedAt: this.job.startedAt } }),
+        : { job: { ...job, startedAt: this.job.startedAt, ...this.aboutJob(this.job, job.line) } }),
+      ...last,
+    }
+  }
+
+  /** The plan, setup and current operation of a job (M7). */
+  private aboutJob(job: Job, line: number): { plan?: RunPlan; planOperationId?: string } {
+    const about = job.about
+    if (about === undefined) return {}
+    const op = operationAt(about, Math.max(1, line))
+    return { plan: { ...about.plan }, ...(op === undefined ? {} : { planOperationId: op }) }
+  }
+
+  /** Records how a job ended (M5). */
+  private ended(job: Job, r: AppResult<RunSummary>): void {
+    const about = job.about
+    if (about === undefined) return
+    const op = r.isOk() ? undefined : stoppedOperation(about, job.done, job.atToolChange)
+    this.lastRun = {
+      jobId: job.jobId,
+      planId: about.plan.planId,
+      setupId: about.plan.setupId,
+      outcome: r.isOk() ? 'done' : r.unwrapErr().code === 'op.aborted' ? 'stopped' : 'failed',
+      ...(op === undefined ? {} : { planOperationId: op }),
     }
   }
 
@@ -253,16 +318,30 @@ export class MachineClient implements MachineService {
     program: SenderProgram,
     listener: JobListener,
     expect: { readonly workZero: Vec3; readonly machineKey: string },
+    about?: JobAbout,
   ): AsyncAppResult<RunningJob> {
     if (this.conn?.state !== 'open' || this.conn.target === undefined) return this.notConnected()
     if (this.job !== undefined || (this.reserved !== undefined && this.reserved !== jobId))
       return fail('run.busy', `job ${this.job?.jobId ?? this.reserved} is running`, {
         where: `${WHERE}.startJob`,
       })
-    let end: (r: AppResult<RunSummary>) => void = () => {}
-    const ended = new Promise<AppResult<RunSummary>>((resolve) => (end = resolve))
-    const job: Job = { jobId, listener, startedAt: new Date(this.now()).toISOString(), end }
+    let resolveEnd: (r: AppResult<RunSummary>) => void = () => {}
+    const ended = new Promise<AppResult<RunSummary>>((resolve) => (resolveEnd = resolve))
+    const job: Job = {
+      jobId,
+      listener,
+      startedAt: new Date(this.now()).toISOString(),
+      end: (r) => {
+        this.ended(job, r)
+        resolveEnd(r)
+      },
+      about,
+      done: 0,
+      atToolChange: false,
+    }
     this.job = job
+    // a new run replaces the record of the last one
+    if (about !== undefined) this.lastRun = undefined
     const r = await this.request({
       type: 'jobStart',
       requestId: '',
@@ -386,10 +465,14 @@ export class MachineClient implements MachineService {
         this.notify()
         return
       case 'progress':
-        if (this.job?.jobId === m.jobId)
+        if (this.job?.jobId === m.jobId) {
+          this.job.done = m.done
           this.job.listener.progress({ done: m.done, total: m.total, label: m.label })
+        }
         return
       case 'phase':
+        if (this.job?.jobId === m.jobId && WAIT_OR_STREAM.includes(m.phase))
+          this.job.atToolChange = m.phase === 'toolChange'
         if (this.job?.jobId === m.jobId)
           this.job.listener.phase({
             phase: m.phase,

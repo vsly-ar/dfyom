@@ -9,11 +9,11 @@ import type { ProjectDoc } from '../../../../core/project/document'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { planMessages } from '../../messages/plan'
 import { runMessages } from '../../messages/run'
-import { Icon, Button, Dialog, DialogClose, ErrorMessage } from '../../ui'
+import { Icon, Button, Dialog, DialogClose, ErrorMessage, Select } from '../../ui'
 import { useReplica } from '../../shell/ShellContext'
 import { JogPad, useJogMode } from './JogPad'
 import { activeJob, formatLength, runGates } from './machine-state'
-import { planRunInfo } from './plan-info'
+import { canResume, planRunInfo, resumePoints } from './plan-info'
 import { useRun, useRunStore, waitKey } from './run-store'
 import { WorkZeroButtons } from './RunNavigator'
 import { AlarmPanel, inAlarm } from './AlarmPanel'
@@ -30,7 +30,7 @@ export function RunDialogs(): React.JSX.Element {
       {doc ? <PreflightDialog doc={doc} /> : null}
       {doc ? <SetupChangeDialog doc={doc} /> : null}
       <WaitDialog doc={doc} />
-      <FailureDialog />
+      <FailureDialog doc={doc} />
       <Announcer doc={doc} />
     </>
   )
@@ -44,9 +44,16 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
   const setupId = useRun((s) => s.setupId)
   const timeScale = status.connection.timeScale
   const whyId = useId()
+  const resumeId = useId()
+  const resumeFrom = useRun((s) => s.resumeFrom)
   const m = runMessages.preflight
   const plan = planId === undefined ? undefined : doc.plans[planId]
   const info = plan ? planRunInfo(plan, setupId) : undefined
+  // resume mode (M5): the setup's operation starts, the stopped one preselected
+  const points = plan !== undefined && resumeFrom !== undefined ? resumePoints(plan, setupId) : []
+  const resume = points.length > 0
+  const stoppedIn = status.lastRun?.planOperationId
+  const from = points.find((x) => x.planOperationId === resumeFrom) ?? points[0]
   const settingsCheck = useRun((s) => s.settingsCheck)
   // a real machine: finalized plans and matching settings only (run-machine.md#pre-flight-on-a-real-machine)
   const serial = status.connection.target === 'serial'
@@ -65,8 +72,8 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
     <Dialog
       open={open}
       onOpenChange={a.setPreflightOpen}
-      title={m.title}
-      description={m.description}
+      title={resume ? m.resumeTitle : m.title}
+      description={resume ? m.resumeDescription : m.description}
       footer={
         <RunDialogFooter>
           <DialogClose>
@@ -77,14 +84,43 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
             icon={<Icon name="run" />}
             disabled={gate !== null}
             {...(gate === null ? { autoFocus: true } : { 'aria-describedby': whyId })}
-            onClick={() => void a.startRun(info?.setup.id)}
+            onClick={() =>
+              void a.startRun(info?.setup.id, resume ? from?.planOperationId : undefined)
+            }
           >
-            {serial ? m.startMachine : m.start}
+            {resume ? (serial ? m.resumeMachine : m.resume) : serial ? m.startMachine : m.start}
           </Button>
         </RunDialogFooter>
       }
     >
-      {serial ? (
+      {resume ? (
+        <>
+          <div className={styles['row']}>
+            <label htmlFor={resumeId} className={styles['rowLabel']}>
+              {m.resumeAt}
+            </label>
+            <Select
+              id={resumeId}
+              options={points.map((x) => {
+                const label = m.resumePoint(x.label, x.tool, x.toolName)
+                return {
+                  value: x.planOperationId,
+                  label: x.planOperationId === stoppedIn ? m.stoppedHere(label) : label,
+                }
+              })}
+              {...(from === undefined ? {} : { value: from.planOperationId })}
+              onValueChange={(v) => a.setResumeFrom(v)}
+            />
+          </div>
+          <div className={styles['notice']} role="note">
+            <Icon name="info" />
+            <div>
+              <p className={styles['why']}>{m.resumeNote}</p>
+            </div>
+          </div>
+        </>
+      ) : null}
+      {serial && !resume ? (
         <div className={styles['notice']} role="note">
           <Icon name="info" />
           <div>
@@ -291,12 +327,17 @@ function failureData(error: AppErrorData): { code?: number; line?: number; text?
 }
 
 /** Blocking dialog for a failed run (ui.md#errors: `machine.*` during a run). */
-function FailureDialog(): React.JSX.Element | null {
+function FailureDialog({ doc }: { doc: ProjectDoc | undefined }): React.JSX.Element | null {
   const store = useRunStore()
   const ended = useRun((s) => s.ended)
   const open = useRun((s) => s.failureOpen)
   const status = useRun((s) => s.status)
+  const planId = useRun((s) => s.planId)
+  const setupId = useRun((s) => s.setupId)
   if (ended?.kind !== 'failed') return null
+  const plan = planId === undefined ? undefined : doc?.plans[planId]
+  // M5: resume after the cause is fixed (the pre-flight gates still apply)
+  const resumable = canResume(status.lastRun, plan, setupId)
   const m = runMessages.failure
   const { error } = ended
   const data = failureData(error)
@@ -313,6 +354,16 @@ function FailureDialog(): React.JSX.Element | null {
       title={alarm ? m.alarmTitle(data.code) : lost ? m.lostTitle : m.title}
       footer={
         <RunDialogFooter>
+          {resumable ? (
+            <Button
+              onClick={() => {
+                store.getState().closeFailure()
+                store.getState().openResume()
+              }}
+            >
+              {runMessages.progress.resumeFrom}
+            </Button>
+          ) : null}
           <DialogClose>
             <Button autoFocus>{m.close}</Button>
           </DialogClose>

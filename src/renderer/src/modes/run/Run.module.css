@@ -316,6 +316,17 @@
   font-size: var(--text-sm);
 }
 
+/* Whose run (M7): plan · setup above the progress bar */
+.runOf {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.runOf .hint {
+  font-weight: 400;
+}
+
 .endNote {
   margin: 0;
 }
@@ -444,6 +455,13 @@
 
 .workZeroDot {
   fill: var(--vp-tool);
+}
+
+/* "X0 Y0" next to the work-zero ring (M7) */
+.workZeroLabel {
+  fill: var(--text);
+  font-family: var(--font-mono);
+  font-size: 9px;
 }
 
 /* a real machine: solid border (the virtual machine's is dashed) */

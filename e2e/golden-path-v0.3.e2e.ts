@@ -38,6 +38,26 @@ const GOLDEN = [
   resolve('src/main/cli/__golden__/exit-criteria-shapes-2-top.nc'),
 ]
 
+const RENDERS = process.env['DFYOM_RENDERS'] === '1'
+const rendersDir = resolve(__dirname, '../design/features/renders')
+
+/** With DFYOM_RENDERS=1, the light and dark review renders (as run-serial.e2e.ts). */
+async function render(page: Page, name: string): Promise<void> {
+  if (!RENDERS) return
+  for (const theme of ['light', 'dark'] as const) {
+    await page.evaluate((t) => {
+      const doc = (
+        globalThis as unknown as {
+          document: { documentElement: { setAttribute(n: string, v: string): void } }
+        }
+      ).document
+      doc.documentElement.setAttribute('data-theme', t)
+    }, theme)
+    await page.waitForTimeout(300)
+    await page.screenshot({ path: `${rendersDir}/${name}-${theme}.png` })
+  }
+}
+
 /** The setups in machining order. */
 const SETUPS = ['Bottom', 'Top'] as const
 
@@ -696,9 +716,28 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
   await expect(preflight.getByText('Bottom (1 of 2)')).toBeVisible()
   await expect(preflight.getByText('Router')).toBeVisible()
   await preflight.getByRole('button', { name: 'Start run' }).click()
+  // M7: the inspector names the running plan and setup
+  await expect(inspector.getByText(/ · setup 1 of 2: Bottom$/)).toBeVisible()
+  // M5: stopped at its first wait, the run resumes at that operation's start ("Resume from…")
+  const firstWait = page.getByRole('dialog', { name: /^(Tool change|Program pause) \d+$/ })
+  await expect(firstWait).toBeVisible({ timeout: 90_000 })
+  await firstWait.getByRole('button', { name: 'Stop' }).click()
+  await expect(firstWait).toBeHidden()
+  await expect(machine.getByText('Idle')).toBeVisible()
+  await inspector.getByRole('button', { name: 'Resume from…' }).click()
+  const resume = page.getByRole('dialog', { name: 'Resume run?' })
+  await expect(resume.getByRole('combobox', { name: 'Resume at' })).toHaveText(
+    /^Drilling 1, .+ · tool 1: Drill 3 \(stopped here\)$/,
+  )
+  await render(page, 'm5-resume-preflight')
+  // the first operation: the whole program, but waiting at the first tool too
+  await resume.getByRole('button', { name: 'Resume run' }).click()
+  await expect(page.getByRole('dialog', { name: 'Tool change 1' })).toBeVisible()
   for (const i of SETUPS.keys()) {
-    // each run waits at its tool changes; it ends complete with every line of its program
-    const complete = page.getByText(new RegExp(`^Run complete: ${lineCounts[i]} lines in`))
+    // each run waits at its tool changes; it ends complete with every line of its program (the
+    // resumed bottom run: a few more, its first tool change)
+    const lines = i === 0 ? String.raw`\d+` : String(lineCounts[i])
+    const complete = page.getByText(new RegExp(`^Run complete: ${lines} lines in`))
     for (;;) {
       const wait = page.getByRole('dialog', { name: /^(Tool change|Program pause) \d+$/ })
       await expect(wait.or(complete)).toBeVisible({ timeout: 90_000 })
@@ -712,6 +751,11 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
     const change = page.getByRole('dialog', { name: `Setup change: setup ${i + 2}, ${next}` })
     await expect(change).toBeVisible()
     await expect(change.getByRole('img', { name: /^The stock on the machine:/ })).toBeVisible()
+    // M7: the zero to set and the part corner it is
+    await expect(
+      change.getByText(/^X0 Y0 at the front-left corner of the top.* corner\.$/),
+    ).toBeVisible()
+    await render(page, 'm7-setup-change')
     await change.getByRole('button', { name: `Start setup ${i + 2}` }).click()
     await expect(change).toBeHidden()
   }

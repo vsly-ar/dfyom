@@ -228,7 +228,13 @@ describe('run commands', { timeout: 60_000 }, () => {
     }
     const first = await runSetup(bottom!.id)
     expect(first.setupId).toBe(bottom!.id)
-    expect(first.next).toEqual({ setupId: top!.id, name: 'Top', direction: '+z', rotation: 0 })
+    expect(first.next).toEqual({
+      setupId: top!.id,
+      name: 'Top',
+      direction: '+z',
+      rotation: 0,
+      corner: 'front left',
+    })
     // the bottom program alone: fewer lines than the top's
     const second = await runSetup(top!.id)
     expect(second.setupId).toBe(top!.id)
@@ -389,6 +395,76 @@ describe('run commands', { timeout: 60_000 }, () => {
     expect(
       checkNoRunJob({ get: () => t.d.job(jobId), list: () => [t.d.job(jobId).unwrap()] }).isOk(),
     ).toBe(true)
+  })
+
+  it('a stopped run is resumed at its operation: waits at the tool, probe Z, runs to the end (M5, M7)', async () => {
+    const t = await setup()
+    expectOk(await t.open({ prepare: true }))
+    const ops = t.s.plan(t.planId).setups[0]!.operations
+    const full = expectOk(await t.run('plan.export', { planId: t.planId, target: '/x.nc' })) as {
+      lines: number
+    }
+    // stop at the first tool change that waits: the run stopped in that tool's operation
+    const first = await t.job('run.job.start', { planId: t.planId })
+    for (;;) {
+      // the manual spindle's speed prompts (M0) come first
+      expect(await waitFor(() => /toolChange|programPause/.test(t.status().job?.phase ?? ''))).toBe(
+        true,
+      )
+      if (t.status().job?.phase === 'toolChange') break
+      expectOk(await t.run('run.job.continue', {}))
+      await waitFor(() => t.status().job?.phase === 'streaming')
+    }
+    const waiting = t.status().job!
+    expect(waiting.plan).toEqual({
+      planId: t.planId,
+      planName: t.s.plan(t.planId).name,
+      setupId: t.s.plan(t.planId).setups[0]!.id,
+      setupName: t.s.plan(t.planId).setups[0]!.name,
+      setup: 1,
+      setups: 1,
+    })
+    const stoppedIn = waiting.planOperationId!
+    expect(ops.findIndex((o) => o.id === stoppedIn)).toBeGreaterThan(0)
+    expectOk(await t.run('job.abort', { jobId: first.jobId }))
+    expectErrCode(await first.result, 'op.aborted')
+    expect(await waitFor(() => t.status().job === undefined)).toBe(true)
+    expect(t.status().lastRun).toEqual({
+      jobId: first.jobId,
+      planId: t.planId,
+      setupId: t.s.plan(t.planId).setups[0]!.id,
+      outcome: 'stopped',
+      planOperationId: stoppedIn,
+    })
+    // not an operation of the setup
+    const bad = await t.job('run.job.start', { planId: t.planId, from: 'nope' })
+    expect(expectErrCode(await bad.result, 'input.malformed').issues[0]?.rule).toBe(
+      'unknownOperation',
+    )
+    // resume: the run waits at the operation's tool first, even if it is in the spindle
+    const resumed = await t.job('run.job.start', { planId: t.planId, from: stoppedIn })
+    let finished = false
+    void resumed.result.then(() => (finished = true))
+    expect(await waitFor(() => t.status().job?.phase === 'toolChange')).toBe(true)
+    expect(t.status().lastRun).toBeUndefined()
+    expect(t.status().job?.planOperationId).toBe(stoppedIn)
+    const before = t.status().workZero
+    // the virtual plate on the stock top, under the tool at the clearance height
+    const probe = await t.job('run.machine.probeZ', { plateThickness: 5, feed: 500 })
+    const probed = expectOk(await probe.result) as { workZero: number[] }
+    expect(probed.workZero[2]).toBeCloseTo(before[2], 3)
+    for (;;) {
+      const job = t.status().job
+      if (finished) break
+      if (job?.phase === 'toolChange' || job?.phase === 'programPause') {
+        expectOk(await t.run('run.job.continue', {}))
+        await waitFor(() => finished || t.status().job?.phase === 'streaming')
+      } else await waitFor(() => finished || t.status().job?.phase !== 'streaming', 5_000)
+    }
+    const summary = expectOk(await resumed.result) as { lines: number }
+    expect(summary.lines).toBeLessThan(full.lines)
+    expect(t.status().lastRun).toMatchObject({ jobId: resumed.jobId, outcome: 'done' })
+    expect(t.status().lastRun?.planOperationId).toBeUndefined()
   })
 
   it('the host exiting fails the job with machine.connection and closes the connection', async () => {

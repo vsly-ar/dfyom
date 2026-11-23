@@ -24,6 +24,32 @@ import {
 
 export const CONNECTION_STATES = ['closed', 'connecting', 'open'] as const
 
+/**
+ * The plan and setup a run job machines (hardening M7,
+ * docs/modes/run-machine.md#run-status-and-the-zero-to-set-m7).
+ */
+export const RunPlanSchema = z.object({
+  planId: z.string(),
+  planName: z.string(),
+  setupId: z.string(),
+  setupName: z.string(),
+  /** 1-based number of the setup in machining order, and the plan's setup count. */
+  setup: z.number().int(),
+  setups: z.number().int(),
+})
+export type RunPlan = z.output<typeof RunPlanSchema>
+
+/** How the last run job ended (hardening M5, docs/modes/run-machine.md#section-resume-m5). */
+export const LastRunSchema = z.object({
+  jobId: z.string(),
+  planId: z.string(),
+  setupId: z.string(),
+  outcome: z.enum(['done', 'stopped', 'failed']),
+  /** The earliest operation GRBL may still have been executing when the run ended. */
+  planOperationId: z.string().exactOptional(),
+})
+export type LastRun = z.output<typeof LastRunSchema>
+
 /** Main's mirror (docs/modes/run-v0.1.md#status). */
 export const RunStatusSchema = HostStatusSchema.omit({ job: true, timeScale: true }).extend({
   connection: z.object({
@@ -51,8 +77,14 @@ export const RunStatusSchema = HostStatusSchema.omit({ job: true, timeScale: tru
       /** ISO time, main's clock. */
       startedAt: z.string(),
       elapsedSeconds: z.number(),
+      /** The run's plan and setup (M7); absent for a job started without them. */
+      plan: RunPlanSchema.exactOptional(),
+      /** The operation of the line being acknowledged (M7). */
+      planOperationId: z.string().exactOptional(),
     })
     .exactOptional(),
+  /** The run that ended last; kept until the next run starts, across connections (M5). */
+  lastRun: LastRunSchema.exactOptional(),
 })
 export type RunStatus = z.output<typeof RunStatusSchema>
 
@@ -77,6 +109,13 @@ export interface JobListener {
     toolChange?: { n: number; name: string }
     message?: string
   }) => void
+}
+
+/** What `run.job.start` tells the machine port about its run (M5, M7). */
+export interface JobAbout {
+  readonly plan: RunPlan
+  /** The first line (1-based) of each plan operation in the program streamed. */
+  readonly operations: readonly { readonly planOperationId: string; readonly fromLine: number }[]
 }
 
 export interface RunningJob {
@@ -115,6 +154,7 @@ export interface MachineService {
     program: SenderProgram,
     listener: JobListener,
     expect: { readonly workZero: readonly [number, number, number]; readonly machineKey: string },
+    about?: JobAbout,
   ): AsyncAppResult<RunningJob>
   /** `continue` names the wait it ends (`toolChange` n or `pause` n). */
   controlJob(

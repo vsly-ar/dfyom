@@ -298,6 +298,12 @@ export const runMessages = {
     openWait: 'Show instructions',
     waitingSetupChange: (n: number, name: string) =>
       `Next: setup ${n}, ${name}. Turn the stock and set the work zero.`,
+    /** Section resume (M5, docs/modes/run-machine.md#section-resume-m5). */
+    resumeFrom: 'Resume from…',
+    /** Whose run (M7): plan and setup of the running job. */
+    runOf: (plan: string, setup: number, setups: number, setupName: string) =>
+      setups > 1 ? `${plan} · setup ${setup} of ${setups}: ${setupName}` : plan,
+    startedElsewhere: 'Started in another window or by an agent.',
   },
 
   preflight: {
@@ -326,6 +332,17 @@ export const runMessages = {
     notFinalized: 'A real machine runs only finalized plans. Finalize the plan in Plan mode first.',
     settingsMismatch: 'The controller’s settings differ from the plan’s machine (see Connection).',
     cancel: 'Cancel',
+    /** Resume mode (M5, docs/modes/run-machine.md#section-resume-m5). */
+    resumeTitle: 'Resume run?',
+    resumeDescription: 'Restart the program at the start of an operation, never inside one.',
+    resumeAt: 'Resume at',
+    resumePoint: (label: string, tool: number, toolName: string) =>
+      `${label} · tool ${tool}: ${toolName}`,
+    stoppedHere: (point: string) => `${point} (stopped here)`,
+    resumeNote:
+      'The run waits at the tool first: check or change it and set Z zero, then continue. The spindle starts and the machine moves to the operation’s start at the clearance height.',
+    resume: 'Resume run',
+    resumeMachine: 'Resume on the machine',
   },
 
   toolChange: {
@@ -351,6 +368,12 @@ export const runMessages = {
       `The stock on the machine: ${up} face up, ${front} face towards you, ${right} face on the right. The work zero is the front-left corner of the top.`,
     faces: { up: 'Up', front: 'Front', right: 'Right' },
     workZero: 'Work zero',
+    /** The zero to set (M7, docs/modes/run-machine.md#run-status-and-the-zero-to-set-m7). */
+    zeroToSet: 'Zero to set',
+    zeroText: 'X0 Y0 at the front-left corner of the top, Z0 on the top surface.',
+    zeroCorner: (corner: string) => `This is the part’s ${corner} corner.`,
+    stockOnMachine: 'Stock on the machine',
+    zeroLabel: 'X0 Y0',
     steps: (up: string) => [
       'Raise the spindle clear of the stock (jog Z+).',
       `Turn the stock so its ${up} face is up, as in the picture, and clamp it.`,

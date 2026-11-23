@@ -1,7 +1,7 @@
 // Run mode inspector (ui.md#app-shell: "In run mode: DRO, run progress, run controls"): the DRO,
-// the run's progress (lines done/total, section label, elapsed), "Start run" (through the
-// pre-flight dialog), the wait the run is at, how the last run ended, the overrides (M6) and
-// "Reset (immediate)".
+// the run's progress (whose run it is (M7), lines done/total, section label, elapsed), "Start run"
+// (through the pre-flight dialog) and "Resume from…" after a stopped or failed run (M5), the wait
+// the run is at, how the last run ended, the overrides (M6) and "Reset (immediate)".
 // Feed hold, resume and Stop live in the main toolbar (MachineToolbar).
 // Doc: docs/conventions/ui.md#run-mode-safety-ui, #jobs-and-progress
 import { useId } from 'react'
@@ -10,7 +10,7 @@ import { runMessages } from '../../messages/run'
 import { Icon, Button, PanelHeader, Progress } from '../../ui'
 import { Dro } from './Dro'
 import { OverridesSection } from './OverridesSection'
-import { planRunInfo } from './plan-info'
+import { canResume, planRunInfo } from './plan-info'
 import { pauseMessage } from './RunDialogs'
 import { activeJob, isConnected, runGates } from './machine-state'
 import { useRun, useRunStore, waitKey, type RunEnd } from './run-store'
@@ -27,6 +27,8 @@ export function RunInspector({ doc }: { doc: ProjectDoc }): React.JSX.Element {
   const jobId = useRun((s) => s.jobId)
   const pending = useRun((s) => s.pending)
   const setupChange = useRun((s) => s.setupChange)
+  const setupId = useRun((s) => s.setupId)
+  const startedHere = useRun((s) => s.startedHere)
   const startWhy = useId()
   const resetWhy = useId()
   const a = store.getState()
@@ -35,6 +37,8 @@ export function RunInspector({ doc }: { doc: ProjectDoc }): React.JSX.Element {
   const gates = runGates(status, { planChosen: planId !== undefined && planId in doc.plans })
   const wait = waitKey(status)
   const showProgress = job !== undefined || (jobId !== undefined && progress !== undefined)
+  const plan = planId === undefined ? undefined : doc.plans[planId]
+  const resumable = setupChange === undefined && canResume(status.lastRun, plan, setupId)
 
   return (
     <>
@@ -44,6 +48,14 @@ export function RunInspector({ doc }: { doc: ProjectDoc }): React.JSX.Element {
 
         <section className={styles['section']} aria-label={m.title}>
           <h3 className={styles['sectionTitle']}>{m.title}</h3>
+          {job?.plan ? (
+            <p className={styles['runOf']}>
+              {m.runOf(job.plan.planName, job.plan.setup, job.plan.setups, job.plan.setupName)}
+              {startedHere === job.jobId ? null : (
+                <span className={styles['hint']}> {m.startedElsewhere}</span>
+              )}
+            </p>
+          ) : null}
           {showProgress ? (
             <RunProgressView
               done={progress?.done ?? 0}
@@ -90,6 +102,17 @@ export function RunInspector({ doc }: { doc: ProjectDoc }): React.JSX.Element {
               >
                 {m.startRun}
               </Button>
+              {resumable ? (
+                <Button
+                  size="lg"
+                  icon={<Icon name="run" />}
+                  disabled={gates.start !== null || pending.includes('run.job.start')}
+                  {...(gates.start === null ? {} : { 'aria-describedby': startWhy })}
+                  onClick={() => a.openResume()}
+                >
+                  {m.resumeFrom}
+                </Button>
+              ) : null}
               {gates.start === null ? null : (
                 <p id={startWhy} className={styles['why']}>
                   {gates.start}

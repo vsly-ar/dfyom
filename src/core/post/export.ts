@@ -40,6 +40,14 @@ export interface ExportInput {
    * enables the soft-limit check. Without it only the program's extent is checked.
    */
   readonly workZero?: Vec3
+  /**
+   * Section resume (hardening M5): the index in `operations` to start at. The operations before
+   * it are left out (tools keep their numbers) and the program re-enters safely: spindle off, the
+   * operation's tool change (the caller passes `firstToolLoaded: false` to the post: a resume
+   * always waits at the tool), spindle on, a rapid to the operation's first point at the
+   * clearance height. Doc: docs/modes/run-machine.md#section-resume-m5
+   */
+  readonly resumeFrom?: number
 }
 
 export interface ProgramStats {
@@ -140,13 +148,23 @@ export function toMachiningProgram(
     }
     pos = m.to
   }
-  for (const op of input.operations) {
+  const resumeFrom = input.resumeFrom ?? 0
+  if (!Number.isInteger(resumeFrom) || resumeFrom < 0 || resumeFrom >= input.operations.length)
+    return fail('model.invariant', 'no operation to resume at', {
+      where: 'toMachiningProgram',
+      issues: [{ path: ['resumeFrom'], rule: 'range', message: 'must name an operation' }],
+    })
+  for (const [k, op] of input.operations.entries()) {
     const tp = op.toolpath
+    const n = numbers.get(tp.tool) ?? numbers.size + 1
+    numbers.set(tp.tool, n)
+    // left out before the resume point: only the tool numbers count
+    if (k < resumeFrom) continue
+    const resume = k === resumeFrom && resumeFrom > 0
     blocks.push({ kind: 'comment', text: op.label })
-    if (tp.tool !== tool) {
+    if (resume) blocks.push({ kind: 'spindle', rpm: 'off' })
+    if (tp.tool !== tool || resume) {
       tool = tp.tool
-      const n = numbers.get(tp.tool) ?? numbers.size + 1
-      numbers.set(tp.tool, n)
       blocks.push({ kind: 'toolChange', number: n, tool: op.tool })
       rpm = undefined
     }
@@ -154,6 +172,7 @@ export function toMachiningProgram(
       rpm = tp.spindleSpeed
       blocks.push({ kind: 'spindle', rpm })
     }
+    const opStart = blocks.length
     let position: string | undefined
     for (const pass of tp.passes) {
       const text = pass.operationId === undefined ? undefined : op.positions?.[pass.operationId]
@@ -163,6 +182,10 @@ export function toMachiningProgram(
         if (m.kind === 'drill') expandDrill(m, peckClearance).forEach(push)
         else push(m)
     }
+    // re-entry: to the operation's first point at the clearance height, then its own moves
+    const first = blocks.slice(opStart).find((b) => b.kind !== 'comment')
+    if (resume && first !== undefined && 'to' in first)
+      blocks.splice(opStart, 0, { kind: 'rapid', to: [first.to[0], first.to[1], clearanceZ] })
   }
   return Ok({
     name: input.name,
@@ -330,12 +353,14 @@ export function machineChecks(
   const out: PlanWarning[] = []
   const warn = (w: Omit<PlanWarning, 'code' | 'severity'>) =>
     out.push({ code: 'plan.machine', severity: 'warning', ...w })
+  // a resumed program (M5) checks only the operations it runs
+  const ops = input.operations.slice(input.resumeFrom ?? 0)
 
   // Spindle range and feed rates per operation.
   const min = machine.spindle.minSpeed.mapOr(0, (q) => q.canonical)
   const max = machine.spindle.maxSpeed.canonical
   const rates = AXES.map((a) => machine.maxFeedRate[a].canonical)
-  for (const op of input.operations) {
+  for (const op of ops) {
     const id = op.toolpath.planOperationId
     const rpm = op.toolpath.spindleSpeed
     if (rpm < min - EPS || rpm > max + EPS)
@@ -350,7 +375,7 @@ export function machineChecks(
   // Per axis: the move's speed along it (feed × the axis' share of the direction), where GRBL
   // starts to slow the move down. An arc may run along X and along Y at its full XY speed.
   const worst = new Map<string, { feed: number; axis: string; speed: number; max: number }>()
-  for (const op of input.operations) {
+  for (const op of ops) {
     const id = op.toolpath.planOperationId
     let from: Vec3 | undefined
     const visit = (m: Exclude<Move, { kind: 'drill' }>) => {
