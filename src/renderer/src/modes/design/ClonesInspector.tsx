@@ -31,7 +31,7 @@ import {
   WarningList,
 } from '../../ui'
 import type { ClonePathData } from '../../viewport/clone-path'
-import { CloneRowList } from './CloneRowList'
+import { CloneRowList, type AxisNames } from './CloneRowList'
 import {
   clonesSourceOf,
   draftSource,
@@ -50,7 +50,7 @@ import styles from './Design.module.css'
 import { operationUnits } from './feature-view'
 import { NameField } from './NameField'
 import { OperationFields, placeErrors, type FieldError } from './OperationFields'
-import type { DesignPart } from './model'
+import { axisNames, surfaceDirection, type DesignPart } from './model'
 import { useCommand, useDesignSelection, type DesignWarnings } from './useDesign'
 
 const m = designMessages
@@ -166,6 +166,15 @@ function useThrottledPreview(
   }, [bridge, part.dto.id, key, revision])
 }
 
+/** The axis names of the face an item sits on (X/Y on the top face, else u/v; DF47). */
+function faceAxes(part: DesignPart, id: string): AxisNames {
+  const on =
+    part.dto.features?.find((f) => f.id === id)?.on ??
+    part.dto.operations.find((o) => o.id === id)?.on ??
+    'stock.top'
+  return axisNames(surfaceDirection(part.table, on))
+}
+
 export function ClonesDraft({
   part,
   draft,
@@ -229,9 +238,9 @@ export function ClonesDraft({
   const resolver = part.table?.resolver(sourceIndex(part, ids))
 
   return (
-    <div className={styles['inspector']} onKeyDown={onKeyDown}>
+    <div className={styles['draftInspector']} onKeyDown={onKeyDown}>
       <PanelHeader title={c.draftTitle} meta={c.draftMeta} />
-      <div className={styles['fields']}>
+      <div className={`${styles['fields']} ${styles['draftBody']}`}>
         {summary ? <ErrorMessage error={summary} message={m.inspector.commandFailed} /> : null}
         <section className={styles['group']} aria-label={c.source}>
           <h3 className={styles['groupTitle']}>{c.source}</h3>
@@ -272,6 +281,7 @@ export function ClonesDraft({
           <CloneRowList
             owner="draft"
             rows={draft.rows}
+            axes={faceAxes(part, draft.openedFor)}
             units={part.units}
             shapes={part.dto.shapes ?? []}
             resolver={resolver}
@@ -287,19 +297,20 @@ export function ClonesDraft({
             }
           />
         </section>
-        <div className={styles['draftActions']}>
-          <Button
-            variant="primary"
-            icon={<Icon name="clones" />}
-            onClick={() => void make()}
-            disabled={busy}
-          >
-            {c.make}
-          </Button>
-          <Button onClick={cancel} aria-keyshortcuts="Escape">
-            {c.cancel}
-          </Button>
-        </div>
+      </div>
+      {/* the draft's outcome, as a dialog footer: Cancel, then the primary at the end (DF47) */}
+      <div role="group" aria-label={c.actions} className={styles['draftFooter']}>
+        <Button variant="ghost" onClick={cancel} aria-keyshortcuts="Escape">
+          {c.cancel}
+        </Button>
+        <Button
+          variant="primary"
+          icon={<Icon name="clones" />}
+          onClick={() => void make()}
+          disabled={busy}
+        >
+          {c.make}
+        </Button>
       </div>
     </div>
   )
@@ -494,6 +505,7 @@ export function ClonesInspector({
           <CloneRowList
             owner={feature.id}
             rows={rows}
+            axes={axisNames(surfaceDirection(part.table, feature.on))}
             units={part.units}
             shapes={part.dto.shapes ?? []}
             resolver={resolver}

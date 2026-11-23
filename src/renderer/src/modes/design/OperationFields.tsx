@@ -218,14 +218,14 @@ export function OperationFields({
               <ParamField
                 ctx={ctx}
                 path="center.0"
-                label={t.position('Center', axes(ctx).u)}
+                label={t.position('Centre', axes(ctx).u)}
                 kind="length"
                 icon="positionX"
               />
               <ParamField
                 ctx={ctx}
                 path="center.1"
-                label={t.position('Center', axes(ctx).v)}
+                label={t.position('Centre', axes(ctx).v)}
                 kind="length"
                 icon="positionY"
               />

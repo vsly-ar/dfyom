@@ -13,6 +13,28 @@ const stockSize = (name: keyof typeof STOCK_SIZE_ICONS) => (
   </>
 )
 
+/**
+ * A Clones instance in the row-field drawings (DF47): a 4 × 4 rounded square centred on (x, y),
+ * the source solid, a copy dashed.
+ */
+const inst = (x: number, y: number, copy = false) => (
+  <rect
+    x={x - 2}
+    y={y - 2}
+    width="4"
+    height="4"
+    rx="1"
+    {...(copy ? { strokeDasharray: '1.5 1' } : {})}
+  />
+)
+
+/** The centre of an arc in the Clones drawings: a small cross. */
+const centre = (x: number, y: number) => (
+  <path
+    d={`M${x - 1.2} ${y - 1.2}L${x + 1.2} ${y + 1.2}M${x + 1.2} ${y - 1.2}L${x - 1.2} ${y + 1.2}`}
+  />
+)
+
 const ICONS = {
   length: (
     <>
@@ -239,6 +261,117 @@ const ICONS = {
     <>
       <path d="M3 14H17M3 14A9 9 0 0 1 17 14" />
       <path data-accent="" d="M10 14V10.66" />
+    </>
+  ),
+  // DF47: the Clones row fields (ui.md § Clones); instances as squares, the source solid
+  cloneColumns: (
+    <>
+      {inst(4, 8)}
+      {inst(10, 8, true)}
+      {inst(16, 8, true)}
+      <path data-accent="" d="M2 14H18" />
+    </>
+  ),
+  cloneRows: (
+    <>
+      {inst(8, 16)}
+      {inst(8, 10, true)}
+      {inst(8, 4, true)}
+      <path data-accent="" d="M14 18V2" />
+    </>
+  ),
+  cloneStepU: (
+    <>
+      {inst(4, 10)}
+      {inst(16, 10, true)}
+      <path data-accent="" d="M6 10H14" />
+    </>
+  ),
+  cloneStepV: (
+    <>
+      {inst(10, 16)}
+      {inst(10, 4, true)}
+      <path data-accent="" d="M10 14V6" />
+    </>
+  ),
+  cloneCount: (
+    <>
+      {inst(4, 12)}
+      {inst(10, 8, true)}
+      {inst(16, 4, true)}
+      <path data-accent="" d="M2 17H18" />
+    </>
+  ),
+  cloneDirection: (
+    <>
+      {inst(4, 16)}
+      {inst(16, 6, true)}
+      <path d="M6 16H18M5.5 14.75L14.5 7.25" />
+      <path data-accent="" d="M11 16A7 7 0 0 0 9.4 11.5" />
+    </>
+  ),
+  cloneDistance: (
+    <>
+      {inst(4, 16)}
+      {inst(16, 6, true)}
+      <path d="M6 16H18" />
+      <path data-accent="" d="M5.5 14.75L14.5 7.25" />
+    </>
+  ),
+  cloneRadius: (
+    <>
+      {inst(4, 10)}
+      {centre(11, 10)}
+      <path d="M11 3A7 7 0 0 1 11 17" strokeDasharray="1.5 1.5" />
+      <path data-accent="" d="M6 10H9.5" />
+    </>
+  ),
+  cloneCentreAngle: (
+    <>
+      {inst(4, 16)}
+      {centre(14, 8)}
+      <path d="M6 16H18M5.6 14.7L12.8 9" />
+      <path data-accent="" d="M10 16A6 6 0 0 0 8.7 12.3" />
+    </>
+  ),
+  cloneSweep: (
+    <>
+      {inst(3, 10)}
+      {centre(10, 10)}
+      <path d="M10 3A7 7 0 0 0 3.5 7.5" strokeDasharray="1.5 1.5" />
+      <path data-accent="" d="M3.5 12.5A7 7 0 1 0 10 3" />
+    </>
+  ),
+  cloneStepAngle: (
+    <>
+      {centre(4, 16)}
+      {inst(16, 16)}
+      {inst(12.5, 7.5, true)}
+      <path d="M5.5 16H14M5.1 14.9L11.1 8.9" />
+      <path data-accent="" d="M10 16A6 6 0 0 0 8.2 11.8" />
+    </>
+  ),
+  clonePath: (
+    <>
+      {inst(3, 14)}
+      {inst(17, 6, true)}
+      <path data-accent="" d="M4 12C7 4 13 16 16 8" />
+    </>
+  ),
+  cloneStart: (
+    <>
+      <circle cx="2.5" cy="16" r="1" />
+      {inst(9, 8, true)}
+      <path d="M11 8L14 12L18 4" />
+      <path data-accent="" d="M3.1 15.2L7.4 10" />
+    </>
+  ),
+  cloneSpacing: (
+    <>
+      <path d="M2 16L5 10M14.8 12L18 4" />
+      {inst(6, 8, true)}
+      {inst(14, 14, true)}
+      <path data-accent="" d="M7.6 9.2L12.4 12.8" />
     </>
   ),
   'stock-length': stockSize('stock-length'),

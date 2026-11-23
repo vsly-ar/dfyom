@@ -204,8 +204,8 @@ test('v0.2 golden path through the UI: reference, faces, setups, export and run 
   ] as const) {
     await addOperation(page, 'Drilling', name)
     await pickOn(page, /^Stock right side/)
-    await setField(inspector, 'Center u', u)
-    await setField(inspector, 'Center v', '20')
+    await setField(inspector, 'Centre u', u)
+    await setField(inspector, 'Centre v', '20')
     await setField(inspector, 'Diameter', '6')
     await inspector.getByRole('combobox', { name: 'Bottom' }).click()
     await page.getByRole('option', { name: 'Drill point' }).click()

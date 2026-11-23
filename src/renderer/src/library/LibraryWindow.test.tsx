@@ -249,8 +249,9 @@ describe('Library window', () => {
   it('adds a new tool, duplicates it and removes the copy after confirming', async () => {
     const { user, row, editor, library } = await renderLibrary()
     await user.click(screen.getByRole('button', { name: 'New tool' }))
+    // the library has a Flat 6: the default name never repeats it (DF47)
     await waitFor(() =>
-      expect(within(editor()).getByRole('heading', { name: 'Flat 6' })).toBeInTheDocument(),
+      expect(within(editor()).getByRole('heading', { name: 'Flat 6 (2)' })).toBeInTheDocument(),
     )
     const d = within(editor()).getByLabelText('Diameter', { selector: 'input' })
     await user.clear(d)
@@ -274,6 +275,29 @@ describe('Library window', () => {
       expect(library.list('tool').items.map((i) => i.toDTO().name)).not.toContain('Flat 8 copy'),
     )
     await expectNoAxeViolations()
+  })
+
+  it('DF47: a typed name that repeats another item’s saves, with a soft warning at Name', async () => {
+    const { user, row, editor, library } = await renderLibrary()
+    await user.click(screen.getByRole('button', { name: 'New tool' }))
+    const name = await within(editor()).findByRole('textbox', { name: 'Name' })
+    expect(name).toHaveValue('Flat 6 (2)')
+    expect(within(editor()).queryByText(/already named/)).toBeNull()
+    await user.clear(name)
+    await user.type(name, 'flat 6 ')
+    expect(
+      within(editor()).getByText(
+        'Another tool is already named flat 6: a different name tells them apart in lists.',
+      ),
+    ).toBeInTheDocument()
+    await expectNoAxeViolations()
+    await user.click(within(editor()).getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(library.list('tool').items.map((i) => i.toDTO().name)).toEqual(
+        expect.arrayContaining(['Flat 6', 'flat 6']),
+      ),
+    )
+    expect(row(/^flat 6/)).toHaveAttribute('aria-selected', 'true')
   })
 
   it('lists stock variants under their parent; New variant; a parent with variants is kept (DF13)', async () => {
@@ -342,8 +366,9 @@ describe('Library window', () => {
   it('a new chamfer mill (U4): offered type with its V-bit hint, angle and tip fields, drawing, Angle column, V-bit search', async () => {
     const { user, row, grid, editor, library } = await renderLibrary()
     await user.click(screen.getByRole('button', { name: 'New tool' }))
+    // the library has a Flat 6: the default name never repeats it (DF47)
     await waitFor(() =>
-      expect(within(editor()).getByRole('heading', { name: 'Flat 6' })).toBeInTheDocument(),
+      expect(within(editor()).getByRole('heading', { name: 'Flat 6 (2)' })).toBeInTheDocument(),
     )
     within(editor()).getByRole('combobox', { name: 'Type' }).focus()
     await user.keyboard('{Enter}')

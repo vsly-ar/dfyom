@@ -214,16 +214,45 @@ export function defaultValues(kind: LibraryItemKind, units: UnitSystem): DraftVa
       : defaultStockValues(units)
 }
 
+/** Names compare trimmed and case-insensitively (ui-library-window.md § Names, DF47). */
+const nameKey = (name: string) => name.trim().toLocaleLowerCase()
+
+/** True if `name` repeats one of `taken` (the kind's other items). */
+export function nameTaken(name: string, taken: readonly string[]): boolean {
+  const key = nameKey(name)
+  return key !== '' && taken.some((t) => nameKey(t) === key)
+}
+
+/**
+ * `base`, or with the first free " (2)", " (3)" … suffix when another item has it, so a suggested
+ * name never repeats one (DF47: "Flat 6 (2)"); within the name limit.
+ */
+export function uniqueName(base: string, taken: readonly string[]): string {
+  if (!nameTaken(base, taken)) return base
+  for (let n = 2; ; n++) {
+    const suffix = ` (${n})`
+    const name = `${base.slice(0, 120 - suffix.length)}${suffix}`
+    if (!nameTaken(name, taken)) return name
+  }
+}
+
 /**
  * The suggested name: short type and diameter as entered ("Flat 6", "Drill 1/4"); a chamfer mill
- * with its angle ("Chamfer 90° Ø12", ui.md § Chamfer mill in the Library window).
+ * with its angle ("Chamfer 90° Ø12", ui.md § Chamfer mill in the Library window); made unique
+ * among `taken`, the other tools' names ("Flat 6 (2)", DF47).
  */
-export function toolName(v: Pick<ToolDraft, 'type' | 'diameter' | 'angle'>): string {
+export function toolName(
+  v: Pick<ToolDraft, 'type' | 'diameter' | 'angle'>,
+  taken: readonly string[] = [],
+): string {
   const short = libraryMessages.tool.shortTypes[v.type]
   const d = v.diameter.source.trim()
-  if (v.type !== 'chamferMill') return `${short} ${d}`
+  if (v.type !== 'chamferMill') return uniqueName(`${short} ${d}`, taken)
   const a = v.angle === undefined ? undefined : quantityOf(v.angle)?.canonical
-  return a === undefined ? `${short} Ø${d}` : `${short} ${Number(a.toFixed(2))}° Ø${d}`
+  return uniqueName(
+    a === undefined ? `${short} Ø${d}` : `${short} ${Number(a.toFixed(2))}° Ø${d}`,
+    taken,
+  )
 }
 
 /** The tool with another type; a bull nose, drill or chamfer mill gets its RE / SIG / angle if none. */
@@ -242,25 +271,27 @@ export function withToolType(v: ToolDraft, type: ToolType, units: UnitSystem): T
   }
 }
 
-/** "Flat 6 copy" (Duplicate), within the name limit. */
-export function copyName(name: string): string {
-  return `${name} ${libraryMessages.copySuffix}`.slice(0, 120)
+/** "Flat 6 copy" (Duplicate), within the name limit; "Flat 6 copy (2)" if taken (DF47). */
+export function copyName(name: string, taken: readonly string[] = []): string {
+  return uniqueName(`${name} ${libraryMessages.copySuffix}`.slice(0, 120), taken)
 }
 
 /**
- * The values the library stores: the suggested name when it is empty (`autoName`), a tool's
- * per-type fields only for their type, empty notes dropped, a machine's acceleration all or none
- * (some axes only: an issue at `acceleration`).
+ * The values the library stores: the suggested name when it is empty (`autoName`; unique among
+ * `taken`, the kind's other names), a tool's per-type fields only for their type, empty notes
+ * dropped, a machine's acceleration all or none (some axes only: an issue at `acceleration`).
  */
 export function cleanValues(
   values: DraftValues,
   autoName = false,
+  taken: readonly string[] = [],
 ): { values: ItemValuesDTO; issues: Issue[] } {
   const issues: Issue[] = []
   const notes = values.notes?.trim() === '' ? undefined : values.notes
   if (values.kind === 'tool') {
     const { cornerRadius, pointAngle, angle, tipDiameter, coating, ...rest } = values
-    const name = autoName && values.name.trim() === '' ? toolName(values) : values.name.trim()
+    const name =
+      autoName && values.name.trim() === '' ? toolName(values, taken) : values.name.trim()
     return {
       values: {
         ...rest,
@@ -362,10 +393,12 @@ export function commandInput(
     readonly units: UnitSystem
     readonly base?: object | undefined
     readonly autoName?: boolean
+    /** The kind's other names: a suggested name avoids them (DF47). */
+    readonly taken?: readonly string[]
   },
 ): { values: Record<string, unknown>; units: UnitSystem } {
   const units = opts.base === undefined ? opts.units : itemUnitSystem(opts.base, opts.units)
-  const clean = cleanValues(values, opts.autoName ?? false).values
+  const clean = cleanValues(values, opts.autoName ?? false, opts.taken ?? []).values
   return { values: valuesInputFromDTO(clean, units), units }
 }
 

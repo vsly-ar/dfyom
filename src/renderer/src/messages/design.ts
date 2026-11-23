@@ -93,6 +93,7 @@ export const designMessages = {
       draftMeta: 'Draft',
       make: 'Make clones',
       cancel: 'Cancel',
+      actions: 'Clones draft actions',
       source: 'Source',
       rows: 'Rows',
       /** "1 + 5 clones = 6 instances · 0 skipped" */
@@ -118,26 +119,53 @@ export const designMessages = {
       rowNamed: (i: number) => `row ${i + 1}`,
       remove: (i: number) => `Remove row ${i + 1}`,
       removeLast: 'A Clones needs at least one row.',
+      /**
+       * Row field labels and hints (DF47, ui.md § Clones): axis names follow the face (`X`/`Y` on
+       * the top face, `u`/`v` elsewhere, `axisNames`).
+       */
       fields: {
         cols: 'Columns',
         rows: 'Rows',
-        du: 'Spacing u',
-        dv: 'Spacing v',
+        du: (u: string) => `Column spacing (${u})`,
+        dv: (v: string) => `Row spacing (${v})`,
         count: 'Count',
-        stepU: 'Step u',
-        stepV: 'Step v',
-        angle: 'Angle per step',
+        stepU: (u: string) => `Step ${u}`,
+        stepV: (v: string) => `Step ${v}`,
+        angle: 'Direction',
         distance: 'Distance per step',
         radius: 'Radius',
         centreAngle: 'Centre angle',
         arc: 'Sweep',
         step: 'Step angle',
-        u: 'u',
-        v: 'v',
         shape: 'Shape',
         start: 'Start offset',
         by: 'Place by',
         spacing: 'Spacing',
+      },
+      hints: {
+        cols: (u: string) => `How many positions across, along ${u}.`,
+        rows: (v: string) => `How many positions up, along ${v}.`,
+        du: (u: string) =>
+          `Distance between neighbouring columns, along ${u}. Negative goes the other way.`,
+        dv: (v: string) =>
+          `Distance between neighbouring rows, along ${v}. Negative goes the other way.`,
+        count: 'How many clones, each one step further on.',
+        stepU: (u: string) =>
+          `How far each clone sits from the one before, along ${u}. Negative goes the other way.`,
+        stepV: (v: string) =>
+          `How far each clone sits from the one before, along ${v}. Negative goes the other way.`,
+        angle: (u: string) => `Angle of the line the clones follow, from ${u}, counter-clockwise.`,
+        distance: 'How far each clone sits from the one before, along that line.',
+        radius: 'From the previous position to the arc’s centre.',
+        centreAngle: (u: string) =>
+          `Direction from the previous position to the arc’s centre, from ${u}, counter-clockwise.`,
+        arc: 'How far the arc turns, up to ±360°: positive is counter-clockwise.',
+        step: 'Angle between neighbouring positions, seen from the centre.',
+        point: 'Where this clone goes, from the face’s origin (a jump: no path between).',
+        shape: 'Positions follow this path from its start point.',
+        start: 'Distance along the path before the first position. Empty: 0.',
+        spacing: 'Distance between positions along the path.',
+        alongCount: 'How many positions, spread evenly along the path.',
       },
       countError: 'Enter a whole number from 1 to 100.',
       skipped: 'Skipped',
@@ -369,16 +397,16 @@ export const designMessages = {
     generalToleranceNone: 'None: lengths are exact',
     shapeKind: 'Shape',
     shapes: { rectangle: 'Rectangle', circle: 'Circle' },
-    centerX: 'Center X',
-    centerY: 'Center Y',
+    centerX: 'Centre X',
+    centerY: 'Centre Y',
     length: 'Length (X)',
     width: 'Width (Y)',
     /**
      * Position and size labels in the face frame: the top face reads X and Y (its `u` and `v`),
-     * every other face `u` and `v` (design-v0.2.md#face-frame). `point` is "Center" for a
+     * every other face `u` and `v` (design-v0.2.md#face-frame). `point` is "Centre" for a
      * drilling (a hole is a point), "Position" for an anchored shape.
      */
-    position: (point: 'Center' | 'Position', axis: string) => `${point} ${axis}`,
+    position: (point: 'Centre' | 'Position', axis: string) => `${point} ${axis}`,
     lengthAlong: (axis: string) => `Length (${axis})`,
     widthAlong: (axis: string) => `Width (${axis})`,
     anchor: 'Anchor',

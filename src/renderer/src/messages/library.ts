@@ -33,6 +33,9 @@ export const libraryMessages = {
   saveFailed: 'The item was not saved.',
   unnamed: 'Name it, or leave it empty for the suggested name.',
   copySuffix: 'copy',
+  /** A typed name that repeats another item's (DF47): allowed, with this soft warning. */
+  nameTaken: (kind: LibraryItemKind, name: string) =>
+    `Another ${kind === 'stock' ? 'stock block' : kindWord[kind]} is already named ${name}: a different name tells them apart in lists.`,
   /** Context links that open the Library window (L2). */
   links: { edit: 'Edit in library', open: 'Open library' },
   classes,
