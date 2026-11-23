@@ -384,6 +384,33 @@ describe('machine host', () => {
     expectOk(await start({}))
   })
 
+  it('a stop or disconnect while the start checks makes the start refuse (op.aborted), never stream', async () => {
+    const h = harness()
+    await connectedHost(h, { prepare: { workZero: [-500, -500, -50] } })
+    const workZero = lastStatus(h)!.workZero
+    const program = { lines: ['G21 G91', 'G1 X-10 F3000'], sections: [] }
+    const expect_ = { workZero, machineKey: KEY, target: 'virtual' }
+    const reply = (id: string) => {
+      const r = h.out.find((x) => x.type === 'reply' && x.requestId === id)
+      return r?.type === 'reply' ? fromWire(r.result) : undefined
+    }
+    // job.abort in the same tick as the start: the host is still checking (fresh report, $#)
+    h.send({ type: 'jobStart', requestId: 's1', jobId: 'j1', program, expect: expect_ })
+    h.send({ type: 'jobControl', requestId: 'x1', jobId: 'j1', action: 'stop' })
+    expect(await h.pump(() => reply('s1') !== undefined && reply('x1') !== undefined)).toBe(true)
+    expectOk(reply('x1')!)
+    expectErrCode(reply('s1')!, 'op.aborted')
+    expect(h.of('phase')).toEqual([])
+    expect(lastStatus(h)?.job).toBeUndefined()
+    // disconnect (app quit) in the same tick: the start refuses before the sender closes
+    h.send({ type: 'jobStart', requestId: 's2', jobId: 'j2', program, expect: expect_ })
+    h.send({ type: 'disconnect', requestId: 'd1' })
+    expect(await h.pump(() => reply('s2') !== undefined && reply('d1') !== undefined)).toBe(true)
+    expectOk(reply('d1')!)
+    expectErrCode(reply('s2')!, 'op.aborted')
+    expect(h.of('jobEnd')).toEqual([])
+  })
+
   it('a job start right after a jog sees the jog (no stale Idle)', async () => {
     const h = harness()
     await connectedHost(h, { timeScale: 1, prepare: { workZero: [-500, -500, -50] } })

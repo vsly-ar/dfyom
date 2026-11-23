@@ -110,3 +110,63 @@ export function crossings(loops: readonly Loop[], tol = 0.002): number {
       }
   return count
 }
+
+/**
+ * Exact distance from a point to the nearest of `segs`, through a uniform grid searched in rings
+ * until no unvisited cell can hold anything closer. Same result as the brute-force scan, which was
+ * quadratic (the SVG import's enclosure test took ≈ 1 s per shape idle and timed out under load).
+ */
+export function segmentGrid(
+  segs: readonly (readonly [Vec2, Vec2])[],
+  cell = 1,
+): (q: Vec2) => number {
+  const cells = new Map<string, number[]>()
+  const ix = (v: number) => Math.floor(v / cell)
+  let lo = [Infinity, Infinity]
+  let hi = [-Infinity, -Infinity]
+  segs.forEach(([a, b], n) => {
+    const [x0, x1] = [ix(Math.min(a[0], b[0])), ix(Math.max(a[0], b[0]))]
+    const [y0, y1] = [ix(Math.min(a[1], b[1])), ix(Math.max(a[1], b[1]))]
+    lo = [Math.min(lo[0]!, x0), Math.min(lo[1]!, y0)]
+    hi = [Math.max(hi[0]!, x1), Math.max(hi[1]!, y1)]
+    for (let x = x0; x <= x1; x++)
+      for (let y = y0; y <= y1; y++) {
+        const key = `${x},${y}`
+        const list = cells.get(key)
+        if (list === undefined) cells.set(key, [n])
+        else list.push(n)
+      }
+  })
+  return (q) => {
+    const [cx, cy] = [ix(q[0]), ix(q[1])]
+    // rings beyond this reach hold no cell at all
+    const reach = Math.max(
+      Math.abs(cx - lo[0]!),
+      Math.abs(cx - hi[0]!),
+      Math.abs(cy - lo[1]!),
+      Math.abs(cy - hi[1]!),
+    )
+    let best = Infinity
+    for (let r = 0; r <= reach; r++) {
+      for (let x = cx - r; x <= cx + r; x++)
+        for (let y = cy - r; y <= cy + r; y++) {
+          if (Math.max(Math.abs(x - cx), Math.abs(y - cy)) !== r) continue
+          for (const n of cells.get(`${x},${y}`) ?? []) {
+            const [a, b] = segs[n]!
+            best = Math.min(best, distToSeg(q, a, b))
+          }
+        }
+      // every cell not yet searched is at least r cells (r · cell mm) from q
+      if (best <= r * cell) return best
+    }
+    return best
+  }
+}
+
+function distToSeg(p: Vec2, a: Vec2, b: Vec2): number {
+  const vx = b[0] - a[0]
+  const vy = b[1] - a[1]
+  const l2 = vx * vx + vy * vy
+  const t = l2 === 0 ? 0 : Math.max(0, Math.min(1, ((p[0] - a[0]) * vx + (p[1] - a[1]) * vy) / l2))
+  return Math.hypot(p[0] - a[0] - t * vx, p[1] - a[1] - t * vy)
+}

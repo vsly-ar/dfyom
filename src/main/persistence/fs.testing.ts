@@ -5,6 +5,20 @@ import { join } from 'node:path'
 import { afterEach, beforeEach } from 'vitest'
 import { nodeFs, type PersistFs } from './fs'
 
+/**
+ * The real file system without the flushes: `fsync`/`fsyncDir` resolve at once. Tests of what
+ * persistence does (open, save, recover, lock races) use it; under a busy disk a single flush took
+ * up to 80 ms and flushes were 75–85 % of an open's time even idle, which made these tests time out
+ * on a loaded machine (docs/conventions/testing.md#load-stable-tests). That the flushes happen, in
+ * order, is checked through `faultFs(…).calls` (still recorded); that a real flush works, by
+ * fs.test.ts on `nodeFs`.
+ */
+export const testFs: PersistFs = {
+  ...nodeFs,
+  fsync: async () => undefined,
+  fsyncDir: async () => undefined,
+}
+
 /** A fresh temp folder per test; read `.dir` inside tests. */
 export function useTempDir(): { dir: string } {
   const state = { dir: '' }
@@ -34,7 +48,7 @@ export interface FaultFs extends PersistFs {
 
 export function faultFs(
   inject: (op: FsOp, path: string, n: number) => Fault,
-  base: PersistFs = nodeFs,
+  base: PersistFs = testFs,
 ): FaultFs {
   const calls: string[] = []
   let crashed = false
@@ -80,7 +94,7 @@ export function faultFs(
 }
 
 /** Waits 0–`maxMs` ms (random) before every call: interleaves concurrent races in tests. */
-export function jitterFs(maxMs = 3, base: PersistFs = nodeFs): PersistFs {
+export function jitterFs(maxMs = 3, base: PersistFs = testFs): PersistFs {
   const wait = () => new Promise((r) => setTimeout(r, Math.random() * maxMs))
   return Object.fromEntries(
     Object.entries(base).map(([op, fn]) => [

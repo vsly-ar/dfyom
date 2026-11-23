@@ -25,8 +25,7 @@ import { Ok } from '../../shared/result'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
 import { sha256 } from './archive'
 import { buildArchive, loadArchiveBytes as loadArchive } from './archive.testing'
-import { nodeFs } from './fs'
-import { faultFs, useTempDir } from './fs.testing'
+import { faultFs, testFs, useTempDir } from './fs.testing'
 import { LOCK_HEARTBEAT_MS, LOCK_STALE_MS, type LockOwner } from './lock'
 import { projectPaths } from './paths'
 import { readState } from './working-folder'
@@ -44,7 +43,7 @@ const file = () => join(realpathSync(tmp.dir), 'docs', 'bracket.dfyom')
 function storage(owner = A, over: Partial<StorageOptions> = {}) {
   let n = 0
   return createProjectStorage({
-    fs: nodeFs,
+    fs: testFs,
     appData: appData(),
     appVersion: '0.0.8',
     owner,
@@ -96,7 +95,7 @@ describe('open', () => {
     expect(p.session.dirty).toBe(false)
     const paths = projectPaths(appData(), 'project-x')
     expect(await readdir(paths.work)).toEqual(['project.json'])
-    expect(expectOk(await readState(nodeFs, paths)).unwrap()).toMatchObject({
+    expect(expectOk(await readState(testFs, paths)).unwrap()).toMatchObject({
       filePath: file(),
       dirty: false,
       workingRevision: 4,
@@ -227,7 +226,7 @@ describe('edit, flush and save', () => {
       '2026-11-16T09-00-00.000Z-r4.dfyom',
       '2026-11-17T10-00-00.000Z-r5.dfyom',
     ])
-    expect(expectOk(await readState(nodeFs, paths)).unwrap()).toMatchObject({
+    expect(expectOk(await readState(testFs, paths)).unwrap()).toMatchObject({
       dirty: false,
       savedRevision: 5,
       savedSha256: sha256(await readFile(file())),
