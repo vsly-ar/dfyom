@@ -69,6 +69,20 @@ describe('surface colours', () => {
     )
   })
 
+  it('a selected face: that one surface tinted and outlined; stock hover per face (DF22)', () => {
+    const face = { selectedSurface: 'stock.top', stockFaces: true }
+    const tint = mix(palette.part, palette.selected, MIX.selected)
+    expect(surfaceColour('stock.top', face, palette)).toEqual(tint)
+    expect(surfaceColour('stock.side[0]', face, palette)).toEqual(palette.part)
+    expect(isOutlined('stock.top', face)).toBe(true)
+    expect(isOutlined('stock.side[0]', face)).toBe(false)
+    const hover = { stockFaces: true, hovered: 'stock.side[1]' }
+    expect(surfaceColour('stock.side[1]', hover, palette)).toEqual(palette.hover)
+    expect(surfaceColour('stock.top', hover, palette)).toEqual(palette.part)
+    // without stockFaces the whole stock previews, as in plan mode
+    expect(surfaceColour('stock.top', { hovered: 'stock.side[1]' }, palette)).toEqual(palette.hover)
+  })
+
   it('tints operations edited in the plan lightly; selection and hover stay on top', () => {
     const tinted = new Set(['pocket1'])
     expect(surfaceColour('pocket1.floor', { tinted }, palette)).toEqual(

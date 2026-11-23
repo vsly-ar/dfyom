@@ -545,6 +545,38 @@ export const designMessages = {
     failedAt: (name: string) => `Evaluation failed at ${name}`,
   },
 
+  /** A selected face (DF22, ui.md § Selection and picking): the inspector and the summary. */
+  face: {
+    title: (label: string) => `Face: ${label}`,
+    /** "Facing up (+Z)": where the face's outward normal points. */
+    direction: (direction: Direction) =>
+      ({
+        '+z': 'Facing up (+Z)',
+        '-z': 'Facing down (−Z)',
+        '-y': 'Facing front (−Y)',
+        '+x': 'Facing right (+X)',
+        '+y': 'Facing back (+Y)',
+        '-x': 'Facing left (−X)',
+      })[direction],
+    /** The face frame's axes in part-frame terms ("u → +X, v → +Y"). */
+    axes: (u: string, v: string) => `u → ${u}, v → ${v}`,
+    hint: 'Operations you add now start on this face.',
+    /** A facing or profile takes a stock face: the one of the same direction. */
+    stockFaceNote: (stockFace: string) => `Facings and profiles start on ${stockFace}.`,
+    addHere: (kind: OperationKind) =>
+      ({
+        facing: 'Add facing here',
+        pocket: 'Add pocket here',
+        drilling: 'Add drilling here',
+        profile: 'Add profile here',
+        chamfer: 'Add chamfer here',
+      })[kind],
+    addHole: 'Add hole here',
+    /** The empty part inspector: how operations get onto a face. */
+    emptyHint: 'Select a face in the viewport (Alt+click for a floor) to add operations on it.',
+    summary: (label: string) => `Selected face: ${label}; operations you add start on it.`,
+  },
+
   /** The selected operation in the viewport's text summary (face frame and anchor shown). */
   selectionSummary: (p: { name: string; on: string; anchor: string | undefined }) =>
     `Selected: ${p.name} on ${p.on}, face axes u and v shown${

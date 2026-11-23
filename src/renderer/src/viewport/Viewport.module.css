@@ -23,16 +23,17 @@
 }
 
 /* the view cube's square (drawn in the canvas, ViewCube.tsx: 88 px = CUBE_BOX_PX, top and right
-   --space-2 = CUBE_MARGIN_PX) with Fit and Views under it; moves left beside the inspector
+   --space-2 = CUBE_MARGIN_PX) with Fit and Views in a vertical toolbar to its right (DF19: the
+   toolbar's 34 px plus the --space-1 gap = CUBE_TOOLBAR_PX); moves left beside the inspector
    overlay (inline transform) over --motion-base. The square passes the pointer to the canvas. */
 .cube {
   position: absolute;
   top: var(--space-2);
   right: var(--space-2);
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  width: 5.5rem;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: var(--space-1);
   pointer-events: none;
   transition: transform var(--motion-base) var(--ease-standard);
 }
@@ -49,12 +50,7 @@
 }
 
 .toolbar {
-  /* one row (Fit, Views, Measure: wider than the cube), flush with the cube's right edge; a small
-     gap below the cube's square (L3-22, D33): with --space-1 it touched the cube's lower edge in
-     some views */
-  align-self: flex-end;
-  width: max-content;
-  margin-top: var(--space-3);
+  /* one column (Fit, Views) at the viewport's right edge, top aligned with the cube (DF19) */
   pointer-events: auto;
 }
 

@@ -125,6 +125,10 @@ export const MIX = {
 export interface SurfaceState {
   /** Operation (or `stock`) whose surfaces are selected. */
   readonly selectedOperation?: string | null | undefined
+  /** One surface drawn selected besides `selectedOperation` (a selected face, DF22). */
+  readonly selectedSurface?: SurfaceId | null | undefined
+  /** Stock surfaces are selected per face (DF22): hover on the stock highlights one surface. */
+  readonly stockFaces?: boolean | undefined
   /** Surface under the pointer. */
   readonly hovered?: SurfaceId | null | undefined
   /** Pick mode: the eligible surfaces; `null`/absent outside pick mode. */
@@ -156,9 +160,18 @@ export function surfaceColour(surface: SurfaceId, state: SurfaceState, palette: 
     const p = Math.min(1, Math.max(0, state.pulse ?? 0))
     return mix(base, palette.selected, MIX.selected + p * (MIX.pulse - MIX.selected))
   }
-  if (state.hovered != null && surfaceOwner(state.hovered) === owner) return palette.hover
+  if (state.selectedSurface != null && state.selectedSurface === surface)
+    return mix(base, palette.selected, MIX.selected)
+  if (state.hovered != null && hoverShows(surface, owner, state)) return palette.hover
   if (state.tinted?.has(owner)) return mix(base, palette.info, MIX.tinted)
   return base
+}
+
+/** Hover previews what a click selects: the hovered operation, or one stock face (DF22). */
+function hoverShows(surface: SurfaceId, owner: string, state: SurfaceState): boolean {
+  const hovered = state.hovered!
+  if (state.stockFaces === true && owner === 'stock') return hovered === surface
+  return surfaceOwner(hovered) === owner
 }
 
 /** Linear vertex colours for the non-indexed render geometry (9 floats per triangle). */
@@ -181,7 +194,11 @@ export function vertexColours(
 export function isOutlined(surface: SurfaceId, state: SurfaceState): boolean {
   if (state.pickEligible) return state.hovered === surface && state.pickEligible.has(surface)
   const owner = surfaceOwner(surface)
-  return isSelectedOwner(owner, state.selectedOperation) || state.selectedAlso?.has(owner) === true
+  return (
+    isSelectedOwner(owner, state.selectedOperation) ||
+    state.selectedAlso?.has(owner) === true ||
+    (state.selectedSurface != null && state.selectedSurface === surface)
+  )
 }
 
 /**

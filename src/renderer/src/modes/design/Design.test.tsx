@@ -615,6 +615,47 @@ describe('design mode', () => {
     ).toBeChecked()
   })
 
+  it('a selected face shows in the inspector and Add puts operations on it (DF22)', async () => {
+    const { user, shell, part, addFromMenu, container } = await renderDesign()
+    // the empty part inspector says how to get there
+    expect(
+      within(inspector()).getByText(/Select a face in the viewport \(Alt\+click for a floor\)/),
+    ).toBeInTheDocument()
+    act(() => shell.ui.getState().select('design', 'face:stock.side[1]')) // as a stock click does
+    expect(within(inspector()).getByText('Face: Stock right side')).toBeInTheDocument()
+    expect(
+      within(inspector()).getByText(/Facing right \(\+X\) · u → \+Y, v → \+Z/),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '3D viewport' })).toHaveAccessibleDescription(
+      /Selected face: Stock right side/,
+    )
+    await expectNoAxeViolations(container)
+    await user.click(within(inspector()).getByRole('button', { name: 'Add drilling here' }))
+    const drill = part().operations.at(-1)!
+    expect(drill).toMatchObject({ kind: 'drilling', on: 'stock.side[1]' })
+    // the new operation is selected: its inspector shows
+    expect(within(inspector()).queryByText('Face: Stock right side')).toBeNull()
+    // Add from the menu with a face selected: a facing takes the stock face of its direction
+    act(() => shell.ui.getState().select('design', 'face:stock.bottom'))
+    await addFromMenu('Add facing')
+    expect(part().operations.at(-1)).toMatchObject({ kind: 'facing', on: 'stock.bottom' })
+    // without a face, Add keeps its default
+    act(() => shell.ui.getState().select('design', null))
+    await addFromMenu('Add pocket')
+    expect(part().operations.at(-1)).toMatchObject({ kind: 'pocket', on: 'stock.top' })
+  })
+
+  it('Measure sits in the main toolbar (DF19) and toggles the viewport tool', async () => {
+    const { user } = await renderDesign()
+    const toolbar = screen.getByRole('toolbar', { name: 'Tools' })
+    const button = within(toolbar).getByRole('button', { name: /Measure/ })
+    await user.click(button)
+    expect(button).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('region', { name: '3D viewport' })).toHaveAttribute('data-measuring')
+    await user.click(button)
+    expect(button).toHaveAttribute('aria-pressed', 'false')
+  })
+
   it('selection follows the viewport, and evaluation status reaches the status bar', async () => {
     const { user, shell, bridge, part } = await renderDesign()
     await user.click(await within(navigator()).findByRole('button', { name: 'Add pocket' }))

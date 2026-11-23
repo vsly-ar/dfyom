@@ -34,6 +34,8 @@ import { FeatureInspector, OwnedOperationInspector, useFixIn, type FixIn } from 
 import { CloneInstanceInspector, ClonesDraft, ClonesInspector } from './ClonesInspector'
 import { parseInstanceId } from './clones-view'
 import { HoleInspector } from './HoleInspector'
+import { FaceInspector } from './FaceInspector'
+import { selectedFace } from './face-selection'
 import { NameField } from './NameField'
 import { ReferencePanel } from './ReferencePanel'
 import { ShapeInspector } from './ShapeInspector'
@@ -153,6 +155,9 @@ export function DesignInspector({ part }: { part: DesignPart | undefined }): Rea
         n={instance.n}
       />
     )
+  // a selected face (DF22): Add puts operations on it
+  const face = selectedFace(part, selected)
+  if (face !== undefined) return <FaceInspector key={face.id} part={part} face={face} />
   const op = part.dto.operations.find((o) => o.id === selected)
   if (op === undefined) return <PartInspector part={part} warnings={warnings} />
   const owner = ownerFeature(part.dto, op)
@@ -219,6 +224,8 @@ function PartInspector({
         />
         {error ? <ErrorMessage error={error} /> : null}
         <EvaluationLine status={evaluation?.status} />
+        {/* how operations get onto a face (DF22) */}
+        <p className={styles['muted']}>{m.face.emptyHint}</p>
         <section aria-label={dfmMessages.listTitle} className={styles['warnings']}>
           <h3 className={styles['groupTitle']}>{dfmMessages.listTitle}</h3>
           <WarningList

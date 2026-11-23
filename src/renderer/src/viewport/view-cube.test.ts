@@ -23,6 +23,7 @@ import {
   faceRegionOf,
   faceRight,
   inCubeBox,
+  CUBE_TOOLBAR_PX,
   PRESET_REGION,
   presetDirection,
   regionAlong,
@@ -286,9 +287,9 @@ describe('look and layout', () => {
     expect(hovered[0]).toBeCloseTo(rest[0] * 0.94 + (28 / 255) * 0.06, 6)
   })
 
-  it('takes the pointer only inside its square at the top right', () => {
+  it('takes the pointer only inside its square, left of its toolbar at the top right', () => {
     const rect = { top: 100, right: 1000 }
-    const right = 1000 - CUBE_MARGIN_PX
+    const right = 1000 - CUBE_MARGIN_PX - CUBE_TOOLBAR_PX
     const top = 100 + CUBE_MARGIN_PX
     expect(inCubeBox(right - 1, top + 1, rect)).toBe(true)
     expect(inCubeBox(right - CUBE_BOX_PX + 1, top + CUBE_BOX_PX - 1, rect)).toBe(true)
@@ -298,5 +299,7 @@ describe('look and layout', () => {
     // moved left beside an overlay
     expect(inCubeBox(right - 1, top + 1, rect, 300)).toBe(false)
     expect(inCubeBox(right - 301, top + 1, rect, 300)).toBe(true)
+    // the toolbar's column (DF19) is not the cube's
+    expect(inCubeBox(1000 - CUBE_MARGIN_PX - 2, top + 1, rect)).toBe(false)
   })
 })

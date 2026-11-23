@@ -35,6 +35,8 @@ export const shellMessages = {
     /** Save while the project has unsaved changes (the icon shows a dot). */
     saveDirty: 'Save (unsaved changes)',
   },
+  /** The main toolbar's group of viewport tools (Measure, DF19). */
+  viewTools: 'Tools',
 
   modes: { design: 'Design', plan: 'Plan', run: 'Run' } satisfies Record<AppMode, string>,
 
