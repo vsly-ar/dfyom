@@ -9,6 +9,7 @@
 // Doc: docs/conventions/ui.md#reference-tools-df60, docs/modes/reference-tools.md#ui
 import { useEffect, useMemo, useState } from 'react'
 import { STOCK_FACE, faceFrame, type Direction } from '../../../../core/geometry/face'
+import { setupDirection } from '../../../../core/plan/setups'
 import { Quantity } from '../../../../core/quantity/quantity'
 import type { QuantityDTO } from '../../../../core/quantity/quantity.dto'
 import type { ReferenceDTO } from '../../../../core/design/reference.dto'
@@ -32,6 +33,7 @@ import { defaultUnit, type DesignPart } from './model'
 import { keepLoop, type ReferenceOverlayState } from './reference-overlay'
 import {
   ghostMatrix,
+  lengthQuantity,
   lengthSource,
   middleDepth,
   referenceBox,
@@ -40,8 +42,31 @@ import {
   stockSizeOf,
 } from './reference-view'
 import { useCommand } from './useDesign'
+import { ReferenceCompare } from './ReferenceCompare'
 
 const t = referenceMessages.tools
+
+/** A setup of the part's plans, offered in "Read from" (DF60 P2). */
+export interface SetupFace {
+  readonly id: string
+  readonly name: string
+  readonly plan: string
+  readonly direction: Direction
+}
+
+/** The setups of the plans of `part`, in plan then machining order. */
+export function partSetups(part: DesignPart): SetupFace[] {
+  return Object.values(part.doc.plans ?? {}).flatMap((p) =>
+    p.design.partId !== part.dto.id
+      ? []
+      : p.setups.map((x) => ({
+          id: x.id,
+          name: x.name,
+          plan: p.name,
+          direction: setupDirection(x),
+        })),
+  )
+}
 const FACES: readonly Direction[] = ['+z', '-z', '-y', '+x', '+y', '-x']
 /** A level chosen in the list sets the section this far inside the walls that bound it (mm). */
 export const LEVEL_INSET_MM = 0.01
@@ -189,14 +214,6 @@ function useSmallestEndMillRadius(): number | undefined {
   return radius
 }
 
-const lengthQuantity = (mm: number, units: DesignPart['units']) => {
-  const q = Quantity.parse(lengthSource(mm, units), {
-    kind: 'length',
-    defaultUnit: units === 'mm' ? 'mm' : 'in',
-  })
-  return q.isOk() ? q.unwrap() : undefined
-}
-
 export function ReferenceTools({
   part,
   reference: ref,
@@ -206,7 +223,13 @@ export function ReferenceTools({
 }): React.JSX.Element {
   const call = useCommand()
   const units = part.units
-  const [direction, setDirection] = useState<Direction>('+z')
+  // a stock face direction, or `setup:<id>` (a setup of the part's plans, DF60 P2)
+  const [choice, setChoice] = useState<string>('+z')
+  const setups = useMemo(() => partSetups(part), [part])
+  const setup = setups.find((x) => `setup:${x.id}` === choice)
+  // a setup reads as its direction's stock face; one that disappeared falls back to Top
+  const direction: Direction =
+    setup?.direction ?? (FACES.includes(choice as Direction) ? (choice as Direction) : '+z')
   const storedDepth = useUi((s) => s.sectionDepth)
   const setDepth = useUi((s) => s.setSectionDepth)
   const [loops, setLoops] = useState<'all' | 'outer' | 'holes'>('all')
@@ -219,6 +242,8 @@ export function ReferenceTools({
   >(null)
   const stock = stockSizeOf(part)
   const face = STOCK_FACE[direction]
+  const setupId = setup?.id
+  const faceArg = setupId === undefined ? face : { setupId }
   const box = referenceBox(ref)
   const depth =
     storedDepth ??
@@ -226,22 +251,20 @@ export function ReferenceTools({
       ? middleDepth(box, faceFrame(direction, stock), 0)
       : 0)
   // what the reads depend on: the record (placement, asset), the stock and the face
-  const base = useMemo(
-    () =>
-      stock === undefined
-        ? null
-        : JSON.stringify([
-            ref.asset.sha256,
-            ref.scale,
-            ref.rotation,
-            ref.position,
-            ref.sourceUnit,
-            stock,
-            face,
-          ]),
-    [ref, stock, face],
-  )
-  const args = { partId: part.dto.id, referenceId: ref.id, face }
+  const base =
+    stock === undefined
+      ? null
+      : JSON.stringify([
+          ref.asset.sha256,
+          ref.scale,
+          ref.rotation,
+          ref.position,
+          ref.sourceUnit,
+          stock,
+          face,
+          setupId ?? null,
+        ])
+  const args = { partId: part.dto.id, referenceId: ref.id, face: faceArg }
   const levels = useFind<FoundLevels>(base, { ...args, kind: 'levels' })
   const depthSource = lengthSource(depth, units)
   const section = useFind<FoundSection>(base === null ? null : `${base}|${depthSource}|${loops}`, {
@@ -295,7 +318,7 @@ export function ReferenceTools({
       split,
       from: {
         referenceId: ref.id,
-        face,
+        face: faceArg,
         depth: depthSource,
         loops,
         ...(round && radius !== undefined ? { roundInside: radius.source } : {}),
@@ -346,7 +369,7 @@ export function ReferenceTools({
     setHolesAdded({ n, bolt: s.command === 'design.hole.add' })
   }
 
-  const faceName = t.faces[face] ?? face
+  const faceName = setup?.name ?? t.faces[face] ?? face
   const oppositeName =
     levels.answer?.ok === true ? (t.faces[levels.answer.value.opposite] ?? '') : ''
   const levelRows = (facing: FoundLevel['facing']) => {
@@ -408,9 +431,20 @@ export function ReferenceTools({
       <Field label={t.face} kind="toggle">
         <Select
           aria-label={t.face}
-          options={FACES.map((d) => ({ value: d, label: t.faces[STOCK_FACE[d]] ?? d }))}
-          value={direction}
-          onValueChange={(d) => setDirection(d as Direction)}
+          options={[
+            ...FACES.map((d) => ({
+              value: d as string,
+              label: t.faces[STOCK_FACE[d]] ?? d,
+              ...(setups.length > 0 ? { group: t.stockGroup } : {}),
+            })),
+            ...setups.map((x) => ({
+              value: `setup:${x.id}`,
+              label: t.setupFace(x.name, x.plan),
+              group: t.setupsGroup,
+            })),
+          ]}
+          value={setup === undefined ? direction : choice}
+          onValueChange={setChoice}
         />
       </Field>
 
@@ -557,6 +591,8 @@ export function ReferenceTools({
           <ErrorMessage error={holesAdded.error} message={t.addFailed} />
         )}
       </section>
+
+      <ReferenceCompare part={part} reference={ref} />
     </>
   )
 }

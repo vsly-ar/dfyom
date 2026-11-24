@@ -23,6 +23,8 @@ import type {
   PartEvaluationView,
   PreloadApi,
   ProjectSnapshot,
+  ReferenceCompareViewReply,
+  ReferenceCompareViewRequest,
   ReferenceMeshReply,
   ReferenceSectionReply,
   ReferenceSectionRequest,
@@ -124,6 +126,14 @@ export interface FakeBridge extends PreloadApi {
     handler: (
       request: ReferenceSectionRequest,
     ) => ReferenceSectionReply | Promise<ReferenceSectionReply>,
+  ): void
+  /** The compare overlay's requests (`reference.compareView`, DF60 P5), in order. */
+  readonly referenceCompareViewCalls: ReferenceCompareViewRequest[]
+  /** Answers `reference.compareView` (default: every distance 0, no missing pieces). */
+  setReferenceCompareView(
+    handler: (
+      request: ReferenceCompareViewRequest,
+    ) => ReferenceCompareViewReply | Promise<ReferenceCompareViewReply>,
   ): void
   /**
    * The app-scope dispatcher calls go to while no project is bound (the Library window's
@@ -227,6 +237,13 @@ export function createFakeBridge(
     ok: true,
     segments: new Float32Array(0),
   })
+  const referenceCompareViewCalls: ReferenceCompareViewRequest[] = []
+  let referenceCompareView = (
+    r: ReferenceCompareViewRequest,
+  ): ReferenceCompareViewReply | Promise<ReferenceCompareViewReply> => ({
+    ok: true,
+    distances: new Float32Array(r.positions.length / 3),
+  })
   const handlers = new Map<string, Handler>()
   const calls: { name: string; args: unknown; gesture?: string }[] = []
   const settingsPatches: unknown[] = []
@@ -327,6 +344,10 @@ export function createFakeBridge(
         referenceSectionCalls.push(request)
         return Promise.resolve(referenceSection(request))
       },
+      compareView: (request) => {
+        referenceCompareViewCalls.push(request)
+        return Promise.resolve(referenceCompareView(request))
+      },
     },
     referenceMeshCalls,
     setReferenceMesh(handler) {
@@ -335,6 +356,10 @@ export function createFakeBridge(
     referenceSectionCalls,
     setReferenceSection(handler) {
       referenceSection = handler
+    },
+    referenceCompareViewCalls,
+    setReferenceCompareView(handler) {
+      referenceCompareView = handler
     },
     menu: { onAction: menu.on },
     library: {

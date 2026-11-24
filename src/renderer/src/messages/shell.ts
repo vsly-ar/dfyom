@@ -141,6 +141,7 @@ export const shellMessages = {
     /** Job command → label; unknown jobs show their command name. */
     labels: {
       'design.part.evaluate': 'Evaluate part',
+      'design.reference.compare': 'Compare with reference',
       'plan.toolpath.generate': 'Generate toolpaths',
       'run.job.start': 'Run plan',
       'run.machine.home': 'Home',

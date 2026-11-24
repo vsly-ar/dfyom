@@ -98,6 +98,10 @@ export const referenceMessages = {
       'stock.side[2]': 'Back',
       'stock.side[3]': 'Left',
     } as Record<string, string>,
+    stockGroup: 'Stock',
+    setupsGroup: 'Setups',
+    /** A setup in "Read from": "Bottom · Plan 1". */
+    setupFace: (setup: string, plan: string) => `${setup} · ${plan}`,
     levels: 'Levels',
     levelsHint: 'Flat floors of the model. Choose one to cut the section just inside it.',
     fromFace: (face: string) => `From ${face.toLowerCase()}`,
@@ -171,6 +175,51 @@ export const referenceMessages = {
       (sharp === 0
         ? '.'
         : `, ${sharp === 1 ? '1 sharp inside corner' : `${sharp} sharp inside corners`}.`),
+  },
+
+  /** The compare overlay (DF60 P5, ui.md § Reference tools). */
+  compare: {
+    title: 'Compare',
+    show: 'Show on the part',
+    hint: 'Colours the part where it differs from the reference: red where material is missing, blue where there is extra. Updates after each edit.',
+    threshold: 'Threshold',
+    comparing: 'Comparing with the reference…',
+    failed: 'The design could not be compared.',
+    within: (threshold: string) => `The design matches the reference within ${threshold}.`,
+    /** "2 regions over 0.1 mm · worst 0.42 mm missing". */
+    summary: (n: number, threshold: string, worst: string, kind: 'missing' | 'extra') =>
+      `${n === 1 ? '1 region' : `${n} regions`} over ${threshold} · worst ${worst} ${kind}`,
+    heightmap: 'Height maps: the reference mesh is open. Walls and undercuts are not compared.',
+    regions: 'Regions',
+    kind: { missing: 'Missing', extra: 'Extra' } as Record<'missing' | 'extra', string>,
+    noOperation: 'no operation',
+    fillet: 'fillet by design',
+    /** A region row: "Missing 0.42 mm · Pocket 1". */
+    region: (kind: 'missing' | 'extra', dev: string, op: string | undefined) =>
+      `${kind === 'missing' ? 'Missing' : 'Extra'} ${dev}${op === undefined ? '' : ` · ${op}`}`,
+    regionName: (row: string, volume: string) => `${row}, ${volume}`,
+    volume: (mm3: number) => `${count(Math.round(mm3))} mm³`,
+    more: (n: number) => `${n} more regions not shown.`,
+    below: (n: number) =>
+      `${n === 1 ? '1 smaller deviation' : `${n} smaller deviations`} under the threshold.`,
+    /** The viewport's legend (`role="img"`): its accessible name and the end labels. */
+    legend: 'Compare legend',
+    legendText: (missing: string, threshold: string, extra: string) =>
+      `Missing up to ${missing} in red, within ± ${threshold} unchanged, extra up to ${extra} in blue.`,
+    missingEnd: (v: string) => `Missing ${v}`,
+    extraEnd: (v: string) => `Extra ${v}`,
+    band: (v: string) => `± ${v}`,
+    overlayTitle: 'Compare with reference',
+    hide: 'Hide',
+    /** The viewport's text summary while the overlay is on. */
+    viewport: (
+      n: number,
+      threshold: string,
+      worst?: { readonly dev: string; readonly kind: 'missing' | 'extra'; readonly op?: string },
+    ) =>
+      n === 0 || worst === undefined
+        ? `Compare: within ${threshold} of the reference.`
+        : `Compare: ${n === 1 ? '1 region' : `${n} regions`} over ${threshold}, worst ${worst.dev} ${worst.kind}${worst.op === undefined ? '' : ` at ${worst.op}`}.`,
   },
 
   /** The viewport's text summary for the visible references. */

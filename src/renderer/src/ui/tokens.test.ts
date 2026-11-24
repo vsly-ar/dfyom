@@ -209,6 +209,9 @@ const PAIRS: [fg: string, bg: string, role: Role, where: string][] = [
   ['--vp-axis-y', '--bg-viewport', 'mark', 'Y axis'],
   ['--vp-axis-z', '--bg-viewport', 'mark', 'Z axis'],
   ['--danger', '--bg-viewport', 'mark', 'error marker in the viewport'],
+  // the compare map's ends against the neutral part (DF60 P5, ui.md § Reference tools)
+  ['--danger', '--vp-part', 'mark', 'compare map: missing material at full colour'],
+  ['--info', '--vp-part', 'mark', 'compare map: extra material at full colour'],
 ]
 
 const themes = { light, dark }
