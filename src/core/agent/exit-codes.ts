@@ -36,6 +36,7 @@ const BY_CODE: Record<ErrorCode, ExitCode> = {
   'permission.denied': EXIT.permission,
   'op.aborted': EXIT.aborted,
   'op.timeout': EXIT.aborted,
+  'job.notPausable': EXIT.other,
   'internal.unexpected': EXIT.internal,
   'persist.migration': EXIT.other,
   'persist.io': EXIT.other,

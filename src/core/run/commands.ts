@@ -6,7 +6,7 @@
 import { z } from 'zod'
 import { Err, fail, Ok, type AppResult } from '../../shared/result'
 import { defineCommand, defineQuery, type AnyCommand, type QueryDef } from '../commands/define'
-import type { JobDirectory, Services } from '../commands/context'
+import type { JobContext, JobDirectory, Services } from '../commands/context'
 import { loadPlan } from '../plan/plan'
 import { PlanIdSchema } from '../plan/plan.dto'
 import { setupStockSize } from '../plan/setups'
@@ -84,6 +84,41 @@ async function act(
   if (m.isErr()) return m
   const r = await m.unwrap().machine(action)
   return r.mapErr((e) => e.withContext(where))
+}
+
+/**
+ * A machine action run by a job (homing, Probe Z): `job.abort` stops the machine with a reset
+ * (`0x18`), as Stop does without a run job (GRBL stops a homing cycle only by a reset, DF35;
+ * docs/modes/run.md#1-emergency-stop-stop-and-reset). Before, the abort only marked the job and
+ * the cycle ran on (and the job with it) until the machine finished. `holdable` (Probe Z, DF82):
+ * `job.pause` is a feed hold, paused once the controller reports `Hold:0`; `job.resume` a cycle
+ * start (the job's `handled` pause policy).
+ */
+async function actStoppable(
+  ctx: JobContext,
+  action: MachineAction,
+  where: string,
+  holdable = false,
+): Promise<AppResult<unknown>> {
+  const m = machineOf(ctx.services, where)
+  if (m.isErr()) return m
+  if (ctx.signal.aborted) return fail('op.aborted', `${where} was aborted`, { where })
+  const machine = m.unwrap()
+  const stop = () => void machine.machine({ kind: 'reset' })
+  ctx.signal.addEventListener('abort', stop, { once: true })
+  const offPause = holdable
+    ? ctx.onPause({
+        hold: async () => (await machine.machine({ kind: 'feedHold' })).map(() => undefined),
+        resume: async () => (await machine.machine({ kind: 'cycleStart' })).map(() => undefined),
+      })
+    : undefined
+  try {
+    const r = await machine.machine(action)
+    return r.mapErr((e) => e.withContext(where))
+  } finally {
+    offPause?.()
+    ctx.signal.removeEventListener('abort', stop)
+  }
 }
 
 /**
@@ -264,10 +299,12 @@ export const runMachineHome = defineCommand({
   summary: 'Home the machine ($H); takes seconds, so it is a job.',
   title: () => 'Home',
   machine: true,
+  // GRBL ignores a feed hold during a homing cycle (DF82): only Stop (a reset) stops it
+  pause: { kind: 'refuse', message: "Homing can't be paused; use Stop (it resets the controller)" },
   args: Empty,
   result: z.object({ workZero: Vec3Schema.describe('G54 in machine coordinates (mm)') }),
   async run(_doc, _args, ctx) {
-    const r = await act(ctx.services, { kind: 'home' }, 'run.machine.home')
+    const r = await actStoppable(ctx, { kind: 'home' }, 'run.machine.home')
     if (r.isErr()) return r
     return Ok({ workZero: [...(ctx.services.machine?.status().workZero ?? [0, 0, 0])] as Vec3 })
   },
@@ -525,6 +562,8 @@ export const runMachineProbeZ = defineCommand({
     'Touch plate: probe Z down (G38.2), set G54 Z so the plate top is Z = plateThickness, retract. Idle or at a tool change. A miss is ALARM:5.',
   title: () => 'Probe Z',
   machine: true,
+  // job.pause is a feed hold, paused once the controller reports Hold:0 (DF82)
+  pause: { kind: 'handled' },
   args: z.object({
     plateThickness: z.number().positive().max(100).describe('mm (machine probePlateThickness)'),
     maxTravel: z
@@ -551,8 +590,8 @@ export const runMachineProbeZ = defineCommand({
     contact: Vec3Schema.describe('Contact, MPos mm'),
   }),
   async run(_doc, args, ctx) {
-    const r = await act(
-      ctx.services,
+    const r = await actStoppable(
+      ctx,
       {
         kind: 'probeZ',
         plateThickness: args.plateThickness,
@@ -561,6 +600,7 @@ export const runMachineProbeZ = defineCommand({
         retract: args.retract ?? PROBE_DEFAULTS.retract,
       },
       'run.machine.probeZ',
+      true,
     )
     if (r.isErr()) return r
     return Ok(r.unwrap() as { workZero: Vec3; contact: Vec3 })

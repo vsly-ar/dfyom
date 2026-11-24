@@ -305,7 +305,11 @@ export class MachineClient implements MachineService {
     // the emergency paths and overrides (real-time bytes) always pass; anything else waits while
     // a job checks its program
     const passes =
-      action.kind === 'reset' || action.kind === 'jogCancel' || action.kind === 'override'
+      action.kind === 'reset' ||
+      action.kind === 'jogCancel' ||
+      action.kind === 'override' ||
+      action.kind === 'feedHold' ||
+      action.kind === 'cycleStart'
     if (this.reserved !== undefined && !passes)
       return fail('run.busy', `job ${this.reserved} is starting`, {
         where: `${WHERE}.machine`,

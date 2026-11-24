@@ -16,6 +16,8 @@ export interface JobView {
   /** User-facing label ("Evaluate part"). */
   readonly label: string
   readonly state: 'running' | 'paused'
+  /** False: `job.pause` is refused (homing, DF82), so no Pause button. Default true. */
+  readonly pausable?: boolean
   /** Determinate when `total` is known. */
   readonly progress?: { readonly done: number; readonly total?: number | undefined } | undefined
 }
@@ -52,7 +54,7 @@ export function JobList({ jobs, onPause, onResume, onCancel }: JobListProps): Re
                   icon={<Icon name="play" />}
                   onClick={() => onResume(j.id)}
                 />
-              ) : (
+              ) : j.pausable === false ? null : (
                 <IconButton
                   label={`Pause ${j.label}`}
                   icon={<Icon name="pause" />}

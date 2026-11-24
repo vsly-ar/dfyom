@@ -29,11 +29,12 @@ import type {
   JobContext,
   JobDirectory,
   JobProgress,
+  PauseHandler,
   PauseState,
   QueryContext,
   Source,
 } from './context'
-import { defineQuery, type BuiltinCommand, type JobCommand } from './define'
+import { defineQuery, type BuiltinCommand, type JobCommand, type JobPausePolicy } from './define'
 
 /** Worker lanes, one worker each (docs/architecture/workers.md#lanes-and-pool). */
 export const LANES = ['geometry', 'toolpath'] as const
@@ -248,7 +249,7 @@ const control = (name: string, summary: string, title: string): JobControl => ({
 
 export const jobPause = control(
   'job.pause',
-  'Pause a running job at its next checkpoint.',
+  'Pause a running job at its next checkpoint (a Probe Z job: feed hold; homing: refused).',
   'Pause job',
 )
 export const jobResume = control('job.resume', 'Resume a paused job.', 'Resume job')
@@ -270,6 +271,7 @@ export const JobInfoSchema = z.object({
   jobId: z.string(),
   name: z.string().describe('The job command'),
   state: z.enum(JOB_STATES),
+  pausable: z.literal(false).optional().describe('Present when job.pause is refused'),
   progress: JobProgressSchema.optional(),
   startRevision: z.number().describe('Revision when the job started'),
   outcome: ResultWireSchema.optional().describe(
@@ -283,6 +285,7 @@ function jobInfo(j: JobHandle): z.output<typeof JobInfoSchema> {
     jobId: j.id,
     name: j.name,
     state: j.state,
+    ...(j.pausable ? {} : { pausable: false as const }),
     ...(j.progress === undefined ? {} : { progress: j.progress }),
     startRevision: j.startRevision,
     ...(outcome === undefined ? {} : { outcome: toDataWire(outcome) }),
@@ -337,6 +340,8 @@ export interface JobHandle<R = unknown> {
   /** Revision when the job started: pass it as `expectedRevision` to the follow-up document command. */
   readonly startRevision: number
   readonly state: JobState
+  /** False when `job.pause` is refused (`JobPausePolicy` `refuse`). */
+  readonly pausable: boolean
   /** Latest progress (unthrottled). */
   readonly progress: JobProgress | undefined
   /** Throttled progress stream (at most one tick per interval, plus completion ticks). */
@@ -370,6 +375,9 @@ export class JobRun<R = unknown> implements JobHandle<R> {
   private lastEmitMs = Number.NEGATIVE_INFINITY
   private readonly listeners = new Set<(p: JobProgress) => void>()
   private readonly pauseListeners = new Set<(paused: boolean) => void>()
+  private readonly pausePolicy: JobPausePolicy
+  /** The `handled` policy's current hold (`JobContext.onPause`). */
+  private pauseHandler: PauseHandler | undefined
   private readonly controller = new AbortController()
   /** Every checkpoint currently parked (a job may await several at once). */
   private waiters: (() => void)[] = []
@@ -386,6 +394,7 @@ export class JobRun<R = unknown> implements JobHandle<R> {
     this.name = def.name
     this.source = ctx.source
     this.startRevision = opts.startRevision
+    this.pausePolicy = def.pause ?? { kind: 'checkpoint' }
     const started = new Promise<void>((resolve) => (this.begin = resolve))
     const isPaused = () => this.currentState === 'paused'
     const pause: PauseState = {
@@ -406,12 +415,22 @@ export class JobRun<R = unknown> implements JobHandle<R> {
       progress: (p) => this.report(p, ctx.clock.now()),
       checkpoint: () => this.checkpoint(),
       pause,
+      onPause: (handler) => {
+        this.pauseHandler = handler
+        return () => {
+          if (this.pauseHandler === handler) this.pauseHandler = undefined
+        }
+      },
     }
     this.result = started.then(() => this.execute(doc, args, jobCtx))
   }
 
   get state(): JobState {
     return this.currentState
+  }
+
+  get pausable(): boolean {
+    return this.pausePolicy.kind !== 'refuse'
   }
 
   get progress(): JobProgress | undefined {
@@ -434,8 +453,36 @@ export class JobRun<R = unknown> implements JobHandle<R> {
     this.begin()
   }
 
+  /**
+   * What must happen before `job.pause` / `job.resume` changes the state (the dispatcher logs
+   * its event after it, then calls `pause`/`resume`): a refusal (`refuse` policy, or a `handled`
+   * job with nothing to hold right now), or the handler's hold or resume.
+   * Doc: docs/architecture/commands.md#pausing-a-job
+   */
+  async prepareControl(action: 'pause' | 'resume'): AsyncAppResult<void> {
+    const where = `job.${action}`
+    const policy = this.pausePolicy
+    if (action === 'pause') {
+      if (this.currentState !== 'running') return Ok(undefined)
+      if (policy.kind === 'refuse')
+        return fail('job.notPausable', policy.message, { where, data: { jobId: this.id } })
+      if (policy.kind !== 'handled') return Ok(undefined)
+      const handler = this.pauseHandler
+      if (handler === undefined)
+        return fail('job.notPausable', `${this.name} has nothing to hold right now`, {
+          where,
+          data: { jobId: this.id },
+        })
+      return (await handler.hold()).mapErr((e) => e.withContext(where, { jobId: this.id }))
+    }
+    if (this.currentState !== 'paused' || policy.kind !== 'handled') return Ok(undefined)
+    const handler = this.pauseHandler
+    if (handler === undefined) return Ok(undefined)
+    return (await handler.resume()).mapErr((e) => e.withContext(where, { jobId: this.id }))
+  }
+
   pause(): void {
-    if (this.currentState !== 'running') return
+    if (this.currentState !== 'running' || this.controller.signal.aborted) return
     this.currentState = 'paused'
     this.opts.onLifecycle('paused')
     this.notifyPause(true)
@@ -496,6 +543,7 @@ export class JobRun<R = unknown> implements JobHandle<R> {
     this.currentState = 'finished'
     this.finalOutcome = result
     this.pauseListeners.clear()
+    this.pauseHandler = undefined
     this.opts.onLifecycle('finished', result)
     return result
   }
