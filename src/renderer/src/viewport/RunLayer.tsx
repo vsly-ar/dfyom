@@ -11,6 +11,7 @@ import { BufferAttribute, BufferGeometry, Color, Matrix4, SRGBColorSpace } from 
 import type { Placement } from '../../../core/geometry/model'
 import { MIX, mix, toLinear, type Palette, type Rgb } from './colours'
 import { SEGMENT, type ToolpathLines } from './toolpath-lines'
+import { AlignmentLayer, type AlignmentMarker } from './AlignmentLayer'
 import { ZRefLayer, type ZRefOverlay } from './ZRefLayer'
 
 /** What the run scene shows (`Viewport` prop `run`). */
@@ -41,6 +42,8 @@ export interface RunScene {
    * absent: none.
    */
   readonly zRef?: ZRefOverlay | undefined
+  /** The setup's alignment points (plan scene, DF78), in work coordinates; absent: none. */
+  readonly alignment?: readonly AlignmentMarker[] | undefined
 }
 
 /** The travel box and home position in work coordinates (mm). */
@@ -186,6 +189,9 @@ export function RunLayer({
       ) : null}
       {run.zRef ? (
         <ZRefLayer zRef={run.zRef} palette={palette} reducedMotion={reducedMotion} />
+      ) : null}
+      {run.alignment && run.alignment.length > 0 ? (
+        <AlignmentLayer points={run.alignment} palette={palette} reducedMotion={reducedMotion} />
       ) : null}
       {/* work zero: a ring with a dot at the WCS origin */}
       <group raycast={noRaycast}>

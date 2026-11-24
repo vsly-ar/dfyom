@@ -584,12 +584,14 @@ function findingNext(f: Obj): string | undefined {
 
 /**
  * `plan.warning.list` with `detail: "full"`: every finding, with `next` where there is one; the
- * Z references without their viewport outline (DF69, docs/modes/z-reference.md#implementation-notes-df69).
+ * Z references without their viewport outline (DF69, docs/modes/z-reference.md#implementation-notes-df69),
+ * without the inspector's alignment sources (DF78).
  */
 function withFindingNext(value: unknown): unknown {
   if (!isObj(value) || !Array.isArray(value['warnings'])) return value
+  const { alignmentSources: _sources, ...rest } = value
   return {
-    ...value,
+    ...rest,
     ...(Array.isArray(value['zRefs'])
       ? {
           zRefs: value['zRefs'].map((r: unknown) => {

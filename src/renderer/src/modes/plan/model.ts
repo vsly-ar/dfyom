@@ -151,9 +151,65 @@ export function planStockSize(doc: ProjectDoc, plan: PlanDTO): StockSize | undef
     : { length: s.length.canonical, width: s.width.canonical, thickness: s.thickness.canonical }
 }
 
-/** A setup's WCS in the part frame (`setupFrame`), for the per-setup preview. */
-export function setupPlacement(setup: SetupDTO, stock: StockSize): Placement {
-  return setupFrame(setupDirection(setup), setupRotation(setup), stock)
+/**
+ * A setup's WCS in the part frame (`setupFrame`), for the per-setup preview: its origin at the
+ * work zero (`zero`, setup frame mm; DF78), absent = the front-left corner of the up face.
+ */
+export function setupPlacement(
+  setup: SetupDTO,
+  stock: StockSize,
+  zero?: readonly [number, number],
+): Placement {
+  return setupFrame(
+    setupDirection(setup),
+    setupRotation(setup),
+    stock,
+    zero === undefined ? undefined : [zero[0], zero[1]],
+  )
+}
+
+/** DF78: what the plan knows of a setup's zero and points (`PlanData.alignment`). */
+export interface SetupAlignmentInfo {
+  readonly zero: readonly [number, number]
+  readonly zeroPoint?: string | undefined
+  readonly points: readonly {
+    readonly id: string
+    readonly name: string
+    readonly wcs: readonly [number, number] | null
+  }[]
+}
+
+/**
+ * The setup's work zero in the setup frame (mm): the plan's resolved one (a `{ point }` zero
+ * follows its point), else the stored offset while the plan re-reads, else the corner.
+ */
+export function setupZeroOf(
+  setup: SetupDTO,
+  info: SetupAlignmentInfo | undefined,
+): readonly [number, number] {
+  if (info !== undefined) return info.zero
+  return setup.zero !== undefined && 'at' in setup.zero ? setup.zero.at : [0, 0]
+}
+
+/**
+ * The work zero as words (N6): the part corner when it is one ("front left"), else the offset
+ * from it or the point it is on; `length` formats mm in the user's units.
+ */
+export function setupZeroWords(
+  setup: SetupDTO,
+  stock: StockSize,
+  info: SetupAlignmentInfo | undefined,
+  length: (mm: number) => string,
+): {
+  readonly corner: string
+  readonly offset?: readonly [string, string]
+  readonly point?: string
+} {
+  const corner = setupCorner(setup, stock)
+  const point = info?.points.find((p) => p.id === info.zeroPoint)
+  if (point !== undefined) return { corner, point: point.name }
+  const [x, y] = setupZeroOf(setup, info)
+  return x === 0 && y === 0 ? { corner } : { corner, offset: [length(x), length(y)] }
 }
 
 /**

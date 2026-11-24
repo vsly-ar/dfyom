@@ -731,3 +731,93 @@
 .gripped[data-dragging] .rowGrip {
   opacity: 1;
 }
+
+/* DF78: the setup's work zero and alignment points (AlignmentFields), docs/modes/alignment.md#plan-ui */
+.alignGroup {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.alignActions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.alignList {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.alignRow {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: start;
+  padding: var(--space-1) var(--space-1) var(--space-1) 0;
+  border-left: 2px solid transparent;
+  border-radius: var(--radius-xs);
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard);
+}
+
+.alignRow:hover,
+.alignRow:focus-within {
+  background: var(--bg-hover);
+  border-left-color: var(--accent-border);
+}
+
+.alignRow[data-error] {
+  border-left-color: var(--danger);
+}
+
+.alignIndex {
+  padding-top: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.alignBody {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.alignMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  color: var(--text-muted);
+}
+
+.alignZero {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-family: var(--font-ui);
+  color: var(--text);
+}
+
+.alignFinding {
+  display: flex;
+  gap: var(--space-1);
+  align-items: flex-start;
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  color: var(--text-muted);
+}
+
+.alignFinding[data-severity='error'] {
+  color: var(--danger-text);
+}

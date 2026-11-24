@@ -1,11 +1,13 @@
 // Setup inspector (v0.2 task F6): a setup selected in the setup panel – its name, the face up to
-// the spindle (direction icon and word), the work zero G54 at its part corner, how far the tool
+// the spindle (direction icon and word), the work zero G54 (its corner, offset or point), how far the tool
 // reaches past the stock (DF59), the rotation about the spindle axis (0/90/180/270°), the safe
 // heights (clearance with the clamp note, retract; moved here from the navigator), the Z headroom
 // estimate (DF68), the tool changes (DF66, `ToolChanges`: the tool runs, reorderable) and the
-// machine checks of this setup. Each change is one `plan.setup.update`.
+// machine checks of this setup. Each change is one `plan.setup.update`. DF78: the work zero and
+// the alignment points (`AlignmentFields`).
 // Read-only (with the plan's reason in the navigator) outside draft and settled design.
-// Doc: docs/conventions/ui.md#design-and-plan-controls-v02, docs/modes/plan-v0.2.md#setups-from-face-directions
+// Doc: docs/conventions/ui.md#design-and-plan-controls-v02, docs/modes/plan-v0.2.md#setups-from-face-directions,
+// docs/modes/alignment.md#plan-ui
 import { useState } from 'react'
 import { DIRECTION_LABEL } from '../../../../core/geometry/face'
 import type { PlanWarning } from '../../../../core/plan/checks'
@@ -42,17 +44,19 @@ import {
   allows,
   directionOfSetup,
   planStockSize,
-  setupCorner,
   setupOverreach,
+  setupZeroWords,
   type ToolpathEntry,
 } from './model'
-import { usePlanCommand } from './plan-store'
+import { AlignmentFields } from './AlignmentFields'
+import { usePlanCommand, usePlanState } from './plan-store'
 import styles from './Plan.module.css'
 import { NameField, planWarningLabels, planWarningView } from './PlanInspector'
 import { ToolChanges } from './ToolChanges'
 import { usePlanSelection } from './usePlan'
 
 const m = planMessages.setup
+const NO_SOURCES: readonly never[] = []
 
 export function SetupInspector({
   doc,
@@ -82,6 +86,10 @@ export function SetupInspector({
   const mine = warnings.filter((w) => w.params['setupId'] === setup.id)
   const headroom = zHeadroomText(plan, mine, warnings)
   const reach = reachText(setupOverreach(setup, toolpaths), units)
+  const info = usePlanState((s) => s.data?.alignment.find((a) => a.setupId === setup.id))
+  const sources = usePlanState(
+    (s) => s.data?.alignmentSources.find((a) => a.setupId === setup.id)?.sources,
+  )
   const clearance = quantityOf(setup.clearanceHeight)
   const clampNote: FieldMessage[] =
     clearance === undefined
@@ -129,7 +137,12 @@ export function SetupInspector({
             {stock !== undefined ? (
               <>
                 <dt>{m.workOffset}</dt>
-                <dd>{m.workOffsetValue(setupCorner(setup, stock), face)}</dd>
+                <dd>
+                  {m.workOffsetValue(
+                    setupZeroWords(setup, stock, info, (mm) => formatHeight(mm, units)),
+                    face,
+                  )}
+                </dd>
               </>
             ) : null}
             <dt>{m.reach}</dt>
@@ -181,6 +194,15 @@ export function SetupInspector({
           messages={messages('retractHeight')}
           onCommit={(q, gesture) => void update({ retractHeight: q.source }, gesture)}
           onCancelGesture={cancelGesture}
+        />
+        <AlignmentFields
+          plan={plan}
+          setup={setup}
+          units={units}
+          readOnly={readOnly}
+          info={info}
+          sources={sources ?? NO_SOURCES}
+          warnings={mine}
         />
         <ToolChanges plan={plan} setup={setup} units={units} toolpaths={toolpaths} />
         {mine.length > 0 ? (

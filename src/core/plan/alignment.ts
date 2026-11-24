@@ -21,7 +21,13 @@ import {
 } from '../geometry/model'
 import { shapeOutline } from '../geometry/outline'
 import { setupFrame } from '../toolpath/wcs'
-import type { AlignmentPointDTO, AlignmentSourceDTO, SetupZeroDTO } from './alignment.dto'
+import {
+  STOCK_CORNERS,
+  STOCK_EDGES,
+  type AlignmentPointDTO,
+  type AlignmentSourceDTO,
+  type SetupZeroDTO,
+} from './alignment.dto'
 import type { PlanWarning } from './checks'
 import { planOperationLabel } from './labels'
 import type { LoadedPlan } from './plan'
@@ -211,22 +217,15 @@ function locate(plan: LoadedPlan, source: AlignmentSourceDTO, port?: Region2dPor
 const frameOf = (input: PartGeometryInput, g: OperationGeometry) =>
   faceFrame(g.direction ?? '+z', input.stock)
 
-const memo = new WeakMap<LoadedPlan, Map<string, SetupAlignment>>()
+type Placed = Omit<AlignmentPosition, 'wcs'>
 
-/**
- * The setup's zero and its points' expected positions (setup frame and WCS), with the
- * `notYetCut` and reachability verdicts. A `{ point }` zero follows the point (S4); a missing one
- * leaves the zero at the corner.
- */
-export function setupAlignment(
+/** Each point's position in the setup frame (before the zero) with its verdicts (S2). */
+function placePoints(
   plan: LoadedPlan,
   setup: SetupDTO,
+  list: readonly AlignmentPointDTO[],
   port?: Region2dPort,
-): SetupAlignment {
-  let bySetup = memo.get(plan)
-  if (bySetup === undefined) memo.set(plan, (bySetup = new Map()))
-  const hit = bySetup.get(setup.id)
-  if (hit !== undefined) return hit
+): Placed[] {
   const stock = stockSize(plan)
   const frame = cornerFrame(setup, stock)
   const local = localStock(setupDirection(setup), stock)
@@ -234,7 +233,7 @@ export function setupAlignment(
   const [L, W] = turned ? [local.width, local.length] : [local.length, local.width]
   const first = plan.operations.findIndex((o) => setup.operations.some((x) => x.id === o.id))
   const firstIndex = first < 0 ? plan.operations.length : first
-  const raw = (setup.alignment ?? []).map((p: AlignmentPointDTO) => {
+  return list.map((p): Placed => {
     const at = locate(plan, p.source, port)
     let point = at.part === undefined ? undefined : unapplyPlacement(frame, at.part)
     // a hole seen through from the other side: its centre on the up face
@@ -266,6 +265,25 @@ export function setupAlignment(
       reachable: point === undefined || onTop || onOutline,
     }
   })
+}
+
+const memo = new WeakMap<LoadedPlan, Map<string, SetupAlignment>>()
+
+/**
+ * The setup's zero and its points' expected positions (setup frame and WCS), with the
+ * `notYetCut` and reachability verdicts. A `{ point }` zero follows the point (S4); a missing one
+ * leaves the zero at the corner.
+ */
+export function setupAlignment(
+  plan: LoadedPlan,
+  setup: SetupDTO,
+  port?: Region2dPort,
+): SetupAlignment {
+  let bySetup = memo.get(plan)
+  if (bySetup === undefined) memo.set(plan, (bySetup = new Map()))
+  const hit = bySetup.get(setup.id)
+  if (hit !== undefined) return hit
+  const raw = placePoints(plan, setup, setup.alignment ?? [], port)
   const z: SetupZeroDTO | undefined = setup.zero
   let zero: Vec2 = [0, 0]
   let zeroPoint: string | undefined
@@ -287,6 +305,59 @@ export function setupAlignment(
     points,
   }
   bySetup.set(setup.id, out)
+  return out
+}
+
+/** A source the setup may use, with its default name and setup-frame X/Y (mm). */
+export interface AlignmentSourceOption {
+  readonly source: AlignmentSourceDTO
+  readonly name: string
+  readonly kind: AlignmentKind
+  readonly frame: Vec2
+}
+
+/** Sources offered at most per setup (the inspector's add menu). */
+export const ALIGNMENT_SOURCES_MAX = 64
+
+/**
+ * The sources a setup can use (the inspector's add menu, S1): the stock corners and edge middles
+ * on the up face or the outline, then the holes and outline vertices of the plan operations cut
+ * before it, each kept when it is reachable (S2); the first `ALIGNMENT_SOURCES_MAX`.
+ */
+export function alignmentSources(
+  plan: LoadedPlan,
+  setup: SetupDTO,
+  port?: Region2dPort,
+): AlignmentSourceOption[] {
+  const candidates: AlignmentSourceDTO[] = [
+    ...STOCK_CORNERS.map((corner) => ({ corner })),
+    ...STOCK_EDGES.map((edge) => ({ edge })),
+  ]
+  const first = plan.operations.findIndex((o) => setup.operations.some((x) => x.id === o.id))
+  const input = geometry(plan, port)
+  if (input !== undefined)
+    for (const op of plan.operations.slice(0, first < 0 ? plan.operations.length : first)) {
+      const own = op.designOperationIds.flatMap((id) => input.operations.filter((g) => g.id === id))
+      const holes = holeCentres({ ...input, operations: own }).length
+      const vertices = own.reduce((n, g) => n + operationVertices(g).length, 0)
+      for (let hole = 0; hole < holes; hole++) candidates.push({ operation: op.id, hole })
+      for (let vertex = 0; vertex < vertices; vertex++)
+        candidates.push({ operation: op.id, vertex })
+    }
+  const placed = placePoints(
+    plan,
+    setup,
+    candidates.map((source, i) => ({ id: `c${i}`, source })),
+    port,
+  )
+  const out: AlignmentSourceOption[] = []
+  for (const p of placed) {
+    if (out.length >= ALIGNMENT_SOURCES_MAX) break
+    if (p.frame === undefined || !p.reachable || p.notYetCut) continue
+    // a stock corner or edge below the up face: its top end at the same X/Y is offered instead
+    if (p.frame[2] < -ON_EPS && !('operation' in p.source)) continue
+    out.push({ source: p.source, name: p.name, kind: p.kind, frame: [p.frame[0], p.frame[1]] })
+  }
   return out
 }
 

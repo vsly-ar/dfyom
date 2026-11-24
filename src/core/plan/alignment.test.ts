@@ -334,4 +334,26 @@ describe('toolpaths, export and findings with a moved zero (A11)', { timeout: 60
     expect(merged.zero).toEqual({ at: [5, 5] })
     expect(merged.alignment?.map((x) => x.id)).toEqual(['al1', 'al2'])
   })
+
+  it('offers the up face corners and edges and the holes cut before the setup (the add menu)', async () => {
+    const { s, planId } = await twoSided()
+    type Sources = { setupId: string; sources: { source: object; name: string; at: number[] }[] }[]
+    const list = () =>
+      (s.query('plan.warning.list', { planId }) as { alignmentSources: Sources }).alignmentSources
+    const p = s.plan(planId)
+    const bottom = setupNamed(p, 'Bottom')
+    const top = setupNamed(p, 'Top')
+    const of = (id: string) => list().find((x) => x.setupId === id)!.sources
+    // the first setup: stock corners and edges on its up face only, nothing cut yet
+    const first = of(bottom.id)
+    expect(first.every((o) => !('operation' in o.source))).toBe(true)
+    expect(first.map((o) => o.name)).toContain('Bottom front-left corner')
+    expect(first.some((o) => o.name.startsWith('Top'))).toBe(false)
+    // move Top first: the Bottom then offers Top's through holes, seen from below
+    await s.run('plan.setup.move', { planId, setupId: top.id, toIndex: 0 })
+    const later = of(bottom.id)
+    const holes = later.filter((o) => 'hole' in o.source)
+    expect(holes.length).toBeGreaterThan(0)
+    expect(holes.map((o) => o.at)).toContainEqual([15, 45])
+  })
 })

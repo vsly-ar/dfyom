@@ -1,9 +1,11 @@
 // What run mode reads from the replica's plans: runnable plans, a plan's setups, and one setup's
 // machine copy and tools in machining order (pre-flight), its WCS on the part (run scene) and the
-// stock's orientation on the machine (setup-change prompt). One program per setup (task E2). Pure.
+// stock's orientation on the machine (setup-change prompt), with the setup's work zero (DF78, N7).
+// One program per setup (task E2). Pure.
 // Doc: docs/modes/run-v0.1.md#run-job (decision 5), docs/modes/plan-v0.2.md#setup-change-in-run
 import type { Direction } from '../../../../core/geometry/face'
-import type { Placement } from '../../../../core/geometry/model'
+import type { Placement, Vec2 } from '../../../../core/geometry/model'
+import { setupAlignment } from '../../../../core/plan/alignment'
 import { loadPlanDTO } from '../../../../core/plan/plan'
 import type { PlanDTO, SetupDTO } from '../../../../core/plan/plan.dto'
 import { setupDirection, setupRotation } from '../../../../core/plan/setups'
@@ -60,9 +62,13 @@ export function planRunInfo(plan: PlanDTO, setupId?: string): PlanRunInfo {
 
 /** A setup on the part: its WCS in the part frame and the stock as it sits on the machine. */
 export interface SetupPlacement {
-  /** WCS → part frame (identity for an unrotated top setup). */
+  /** WCS → part frame (identity for an unrotated top setup), its origin at the work zero. */
   readonly frame: Placement
   readonly orientation: SetupOrientation
+  /** DF78 (N7): the work zero in the setup frame (mm from the front-left corner of the top). */
+  readonly zero: Vec2
+  /** The alignment point the zero is on, by name; absent = an offset or the corner. */
+  readonly zeroPoint?: string
 }
 
 /** `undefined` when the plan's stock copy does not load. */
@@ -82,8 +88,12 @@ export function setupPlacement(
   const setup = runSetup(plan, setupId)
   const direction = setupDirection(setup)
   const rotation = setupRotation(setup)
+  const a = setupAlignment(loaded.unwrap(), setup)
+  const point = a.points.find((p) => p.id === a.zeroPoint)
   return {
-    frame: setupFrame(direction, rotation, stock),
+    frame: setupFrame(direction, rotation, stock, a.zero),
     orientation: setupOrientation(direction, rotation, stock),
+    zero: a.zero,
+    ...(point === undefined ? {} : { zeroPoint: point.name }),
   }
 }

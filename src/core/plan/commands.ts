@@ -83,7 +83,8 @@ import { checkAllowed, nextStatus } from './status'
 import { applyStrategyArgs, StrategyArgSchema, strategyIssues, resolveStrategy } from './strategy'
 import { suggestTools } from './suggest'
 import { designToolFindings } from './tool-resolution'
-import { alignmentFindings } from './alignment'
+import { alignmentFindings, alignmentSources } from './alignment'
+import { AlignmentSourceDtoSchema } from './alignment.dto'
 import {
   alignmentView,
   applySetupZero,
@@ -1697,6 +1698,21 @@ const warningList = defineQuery({
     alignment: z
       .array(SetupAlignmentSchema)
       .describe('Work zero and alignment points of each setup that has either (alignment phase 1)'),
+    alignmentSources: z
+      .array(
+        z.object({
+          setupId: z.string(),
+          sources: z.array(
+            z.object({
+              source: AlignmentSourceDtoSchema,
+              name: z.string(),
+              kind: z.enum(['point', 'hole', 'edge']),
+              at: z.tuple([z.number(), z.number()]).describe('X, Y in the setup frame (mm)'),
+            }),
+          ),
+        }),
+      )
+      .describe('Sources each setup may use for a point (the inspector menu; not in plan_get)'),
   }),
   run(doc, args, ctx) {
     const where = 'plan.warning.list'
@@ -1763,6 +1779,20 @@ const warningList = defineQuery({
           outline: r.outline === undefined ? null : outlineDTO(r.outline),
         })),
       alignment: loaded.isOk() ? alignmentView(loaded.unwrap(), ctx.services.region2d) : [],
+      alignmentSources: loaded.isOk()
+        ? loaded.unwrap().setups.map((s) => ({
+            setupId: s.id,
+            sources: alignmentSources(loaded.unwrap(), s, ctx.services.region2d).map((o) => ({
+              source: o.source,
+              name: o.name,
+              kind: o.kind,
+              at: [
+                Math.round(o.frame[0] * 1000) / 1000 || 0,
+                Math.round(o.frame[1] * 1000) / 1000 || 0,
+              ] as [number, number],
+            })),
+          }))
+        : [],
     })
   },
 })

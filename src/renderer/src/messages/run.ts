@@ -201,14 +201,28 @@ export const runMessages = {
     title: (n: number, name: string) => `Setup change: setup ${n}, ${name}`,
     description: (face: string) =>
       `The previous setup is done. Turn the stock so its ${face} face is up, set the work zero, then start.`,
-    picture: (up: string, front: string, right: string) =>
-      `The stock on the machine: ${up} face up, ${front} face towards you, ${right} face on the right. The work zero is the front-left corner of the top.`,
+    picture: (
+      up: string,
+      front: string,
+      right: string,
+      zero = 'the front-left corner of the top',
+    ) =>
+      `The stock on the machine: ${up} face up, ${front} face towards you, ${right} face on the right. The work zero is ${zero}.`,
+    /** DF78 (N7): where the setup's work zero is, in words for the picture and the steps. */
+    zeroAt: (zero: { readonly offset?: readonly [string, string]; readonly point?: string }) =>
+      zero.point !== undefined
+        ? `on ${zero.point}`
+        : zero.offset !== undefined
+          ? `X ${zero.offset[0]}, Y ${zero.offset[1]} from the front-left corner of the top`
+          : 'the front-left corner of the top',
     faces: { up: 'Up', front: 'Front', right: 'Right' },
     workZero: 'Work zero',
-    steps: (up: string) => [
+    steps: (up: string, zero = 'the front-left corner of the top') => [
       'Raise the spindle clear of the stock (jog Z+).',
       `Turn the stock so its ${up} face is up, as in the picture, and clamp it.`,
-      'Set the work zero on the new top: X and Y at its front-left corner, Z on its surface.',
+      zero === 'the front-left corner of the top'
+        ? 'Set the work zero on the new top: X and Y at its front-left corner, Z on its surface.'
+        : `Set the work zero on the new top: X and Y ${zero.replace(/^the /, 'at the ')}, Z on its surface.`,
       'Start the setup.',
     ],
     start: (n: number) => `Start setup ${n}`,
