@@ -5,12 +5,16 @@ import { describe, expect, it } from 'vitest'
 import { rect } from '../geometry/2d/testing/fixtures'
 import { nodeRegion2d } from '../geometry/2d/testing/node-wasm'
 import { cutLevels, levels } from './common'
+import { generateDrilling } from './drilling'
 import { generateFacing } from './facing'
+import type { Toolpath } from './model'
 import { generatePocket } from './pocket'
 import { generateProfile } from './profile'
 import { generateRegionPocket } from './region-pocket'
 import {
   cutting,
+  drill,
+  drillingInput,
   endMill,
   facingInput,
   HEIGHTS,
@@ -131,5 +135,27 @@ describe('generators over a material band', () => {
     expect(plain).toHaveLength(4)
     const tp = generateProfile({ ...input, material: { top: -1.5 } }).unwrap()
     expect(cuttingLevels(tp, 'rough')).toEqual([-4.5, -7.5, -10.5])
+  })
+
+  it('drilling: a hole below a cleared level pecks from the material, the retract follows', () => {
+    const op = {
+      kind: 'drilling' as const,
+      id: 'drill1',
+      onZ: 0,
+      center: [30, 20] as [number, number],
+      diameter: 3,
+      bottom: { kind: 'drillPoint' as const, depth: 6, pointAngle: 118 },
+    }
+    const input = drillingInput(stock, op, drill(3), {
+      cycle: 'peck',
+      breakthrough: 0,
+      peckDepth: 1,
+    })
+    const cycle = (tp: Toolpath) =>
+      tp.passes.flatMap((p) => p.moves).find((m) => m.kind === 'drill')
+    const plain = cycle(generateDrilling(input).unwrap())
+    const over = cycle(generateDrilling({ ...input, material: { top: -4 } }).unwrap())
+    if (plain?.kind !== 'drill' || over?.kind !== 'drill') throw new Error('no drill cycle')
+    expect(over).toEqual({ ...plain, top: -4, retract: plain.retract - 4 })
   })
 })

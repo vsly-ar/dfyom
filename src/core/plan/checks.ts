@@ -16,6 +16,9 @@ import type { ResolvedFeeds } from './feeds'
 import type { ResolvedStrategy } from './strategy'
 import { chamferCuts, holeDepth } from './strategy'
 import { chamferFit } from '../geometry/tool-fit'
+import { localStock, type Direction } from '../geometry/face'
+import { rectangleWallCorner } from '../geometry/open-sides'
+import { shapeCentre } from '../design/anchor'
 
 export const PLAN_WARNING_CODES = [
   'plan.check',
@@ -167,7 +170,27 @@ export function toolFindings(i: ToolCheckInput): Finding[] {
         break
       case 'pocket': {
         const s = op.shape
-        if (s.kind === 'rectangle' && D / 2 > s.cornerRadius.canonical + EPS)
+        if (
+          s.kind === 'rectangle' &&
+          D / 2 > s.cornerRadius.canonical + EPS &&
+          // corners on or beyond the stock edge are open (DF61 follow-up)
+          rectangleWallCorner(
+            shapeCentre(s),
+            {
+              length: s.length.canonical,
+              width: s.width.canonical,
+              cornerRadius: s.cornerRadius.canonical,
+            },
+            localStock(
+              table.get(op.on).mapOr('+z' as Direction, (e) => e.direction),
+              {
+                length: stock.length.canonical,
+                width: stock.width.canonical,
+                thickness,
+              },
+            ),
+          )
+        )
           add('tool', 'cornerRadius', 'tool radius must be at most the corner radius', {
             radius: D / 2,
             cornerRadius: s.cornerRadius.canonical,

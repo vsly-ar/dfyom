@@ -18,6 +18,7 @@ import {
   type StockGeometry,
 } from './model'
 import { inradius } from './operations'
+import { rectangleWallCorner } from './open-sides'
 import { FIT_SLACK, smallestWallCorner, type ShapeMeasure } from './shape-measure'
 
 /** Sizes compare within this (mm), as the DFM tool rules (`TOOL_MATCH_TOLERANCE` in dfm.ts). */
@@ -140,7 +141,10 @@ export function toolFit(
       unfit =
         c.kind === 'rectangle' || c.kind === 'circle'
           ? (wider(2 * inradius(c), 'pocket at its narrowest', 'pocket') ??
-            (c.kind === 'rectangle' ? corner(c.cornerRadius) : undefined))
+            // a corner on or beyond the stock edge is open (DF61 follow-up)
+            (c.kind === 'rectangle' && rectangleWallCorner(op.shape.center, c, stock)
+              ? corner(c.cornerRadius)
+              : undefined))
           : measure === undefined
             ? undefined
             : measure.fits(dc / 2 - FIT_SLACK)

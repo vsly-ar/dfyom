@@ -130,6 +130,12 @@ describe('parameterChecks', () => {
     const [sharp, ...rest] = run(pocket({ shape: rect(40, 25, 0) }), empty)
     expect(rest).toEqual([])
     expect(sharp!.code).toBe('dfm.cornerSharp')
+    // DF61 follow-up: a slot across the whole stock (corners beyond its ends) has no wall corner
+    expect(codes(run(pocket({ shape: rect(120, 25, 0) })))).toEqual([])
+    // one end beyond the stock, the other inside: those corners are walls
+    expect(codes(run(pocket({ shape: { ...rect(60, 25, 0), center: [80, 30] } })))).toEqual([
+      'dfm.cornerSharp',
+    ])
     expect(sharp).not.toHaveProperty('suggestion')
   })
 

@@ -411,4 +411,37 @@ describe('open sides of pockets (DF61)', () => {
     })
     expect(ofOp(warnings(s, planId), planOp).map((f) => f.rule)).toEqual(['pocketSize'])
   })
+
+  // follow-up: the v0.1 rectangle's corner radius rule knows open sides
+  const rectPlan = async (center: [string, string], length = '40') => {
+    const s = await planSetup({ part: false, services: services() })
+    await s.run('design.pocket.add', {
+      partId: s.partId,
+      // 1 mm corners, below the 6 mm tool's radius
+      shape: { kind: 'rectangle', center, length, width: '20', cornerRadius: '1' },
+      depth: '2',
+      floorRadius: '0',
+    })
+    await s.run('project.apply', {})
+    const planId = await s.create({ machineLibraryItemId: s.machineId })
+    const planOp = s.plan(planId).setups[0]!.operations[0]!.id
+    await s.run('plan.tool.assign', {
+      planId,
+      planOperationId: planOp,
+      toolLibraryItemId: s.tools.flat6,
+    })
+    return ofOp(warnings(s, planId), planOp).map((f) => f.rule)
+  }
+
+  it('a v0.1 rectangle whose corners all lie on or beyond the stock edge takes any tool', async () => {
+    // inside the stock: the corner radius rule holds
+    expect(await rectPlan(['50', '30'])).toEqual(['cornerRadius'])
+    // a 120 mm slot across the 100 mm stock: every corner lies beyond its ends
+    expect(await rectPlan(['50', '30'], '120')).toEqual([])
+    // ends exactly on the stock edge: the corners' arcs lie inside – still walls
+    expect(await rectPlan(['50', '30'], '100')).toEqual(['cornerRadius'])
+    // a slot 40 × 20 centred on the left edge: its left corners are beyond it, the right ones
+    // still inside – they are walls
+    expect(await rectPlan(['0', '30'])).toEqual(['cornerRadius'])
+  })
 })
