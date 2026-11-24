@@ -29,6 +29,7 @@ import {
   openReferencePanel,
   test,
 } from './app.fixture'
+import { withoutAppVersion } from '../src/core/post/plan-export'
 
 const STL = resolve('src/core/design/__fixtures__/enclosure-wood-base.stl')
 const SVG = resolve('src/core/design/__fixtures__/enclosure-sections.svg')
@@ -660,7 +661,8 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
   // the top program follows the oval with arcs
   expect(programs[1]!.match(/^G[23] /gm)?.length ?? 0).toBeGreaterThan(100)
   // the same part as X1's headless flow: the same programs
-  for (const [i, gcode] of programs.entries()) expect(gcode).toBe(readFileSync(GOLDEN[i]!, 'utf8'))
+  for (const [i, gcode] of programs.entries())
+    expect(withoutAppVersion(gcode)).toBe(readFileSync(GOLDEN[i]!, 'utf8'))
   const lineCounts = programs.map((g) => g.trimEnd().split('\n').length)
 
   // ── Run both setups on the virtual machine at Max, the setup change between ──────────────

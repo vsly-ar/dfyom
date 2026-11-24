@@ -11,7 +11,14 @@ import { planSetup, type PlanSetup } from '../plan/plan.fixture'
 import { createToolpathCache, type ToolpathCache } from '../toolpath/cache'
 import type { Toolpath } from '../toolpath/model'
 import type { GeneratorRequest } from '../toolpath/request'
-import { exportPlan, SOFT_LIMIT_NOTE, type ExportFiles, type PlanExport } from './plan-export'
+import {
+  exportPlan,
+  programGenerator,
+  SOFT_LIMIT_NOTE,
+  withoutAppVersion,
+  type ExportFiles,
+  type PlanExport,
+} from './plan-export'
 
 const ui = uiSource()
 
@@ -361,5 +368,20 @@ describe('exportPlan (the path run mode shares)', () => {
       ),
       'op.aborted',
     )
+  })
+})
+
+// The app version in the header's Generator line (TG #242): docs/architecture/grbl.md#plan-export-command
+describe('generator line', () => {
+  it('names the injected app version; without one just DFYOM', () => {
+    expect(programGenerator('0.3.106')).toBe('DFYOM 0.3.106')
+    expect(programGenerator(undefined)).toBe('DFYOM')
+    expect(programGenerator('')).toBe('DFYOM')
+  })
+
+  it('golden comparisons drop the version from that one line', () => {
+    const text = '(Program: P)\n(Generator: DFYOM 0.3.106)\nG90 G94 G17 G21\n'
+    expect(withoutAppVersion(text)).toBe('(Program: P)\n(Generator: DFYOM)\nG90 G94 G17 G21\n')
+    expect(withoutAppVersion('(Generator: DFYOM)\n')).toBe('(Generator: DFYOM)\n')
   })
 })

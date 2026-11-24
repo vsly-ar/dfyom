@@ -31,6 +31,7 @@ import {
   VENTS,
 } from '../src/core/design/enclosure-lid.testing'
 import { closeDialog, expect, launchApp, openPartSetup, test } from './app.fixture'
+import { withoutAppVersion } from '../src/core/post/plan-export'
 
 const SVG = resolve('src/core/design/__fixtures__/enclosure-sections.svg')
 /** X1's golden program: the same lid built through the UI exports the same bytes. */
@@ -606,7 +607,8 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
   expect(program).toContain('(Clones 3 #7)')
   expect(program).not.toContain('(Clones 3 #4)')
   // the same lid as X1's headless flow: the same program
-  expect(program).toBe(readFileSync(GOLDEN, 'utf8'))
+  expect(withoutAppVersion(program)).toBe(readFileSync(GOLDEN, 'utf8'))
+  expect(program).toMatch(/^\(Generator: DFYOM \d+\.\d+\.\d+[^)]*\)$/m) // app version
   const lineCount = program.trimEnd().split('\n').length
 
   // ── Run on the virtual machine at Max ────────────────────────────────────────────────────

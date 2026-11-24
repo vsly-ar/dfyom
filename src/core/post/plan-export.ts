@@ -24,8 +24,23 @@ import { exportGrbl, type ExportOperation, type GrblExport } from './export'
 import { gcodeFileStem } from './file-name'
 import { machineKeyOf } from '../run/machine-key'
 
-/** The generator string of exported programs' header (no version: same input, same file). */
+/** The generator string of exported programs' header, without the app version. */
 export const PROGRAM_GENERATOR = 'DFYOM'
+
+/** `DFYOM <version>` (the app's version, injected as `services.appVersion`), else `DFYOM`. */
+export function programGenerator(appVersion: string | undefined): string {
+  return appVersion === undefined || appVersion === ''
+    ? PROGRAM_GENERATOR
+    : `${PROGRAM_GENERATOR} ${appVersion}`
+}
+
+/**
+ * gCode with its `Generator:` header line reduced to `DFYOM` (no version), so golden files stay
+ * stable across version bumps (tests only compare programs this way).
+ */
+export function withoutAppVersion(gcode: string): string {
+  return gcode.replace(/^\(Generator: DFYOM [^)]*\)$/m, `(Generator: ${PROGRAM_GENERATOR})`)
+}
 
 /** gCode file extensions `plan.export` writes (case-insensitive). */
 export const GCODE_EXTENSIONS = ['.nc', '.gcode', '.ngc'] as const
@@ -91,7 +106,7 @@ const neverAborted = new AbortController().signal
 export async function exportPlan(
   doc: ProjectDoc,
   planId: string,
-  services: Pick<Services, 'workers' | 'toolpaths' | 'region2d'>,
+  services: Pick<Services, 'workers' | 'toolpaths' | 'region2d' | 'appVersion'>,
   opts: PlanExportOptions = {},
 ): AsyncAppResult<PlanExport> {
   const where = 'plan.export'
@@ -200,7 +215,7 @@ export async function exportPlan(
       machine: plan.machine,
       ...(opts.workZero === undefined ? {} : { workZero: opts.workZero }),
     },
-    { generator: opts.generator ?? PROGRAM_GENERATOR },
+    { generator: opts.generator ?? programGenerator(services.appVersion) },
   )
   return exported
     .map((e) => ({

@@ -9,6 +9,7 @@ import { expect } from 'vitest'
 import { testStock } from '../../core/design/design.fixture'
 import { libraryInput, machineValues } from '../../core/library/library.fixture'
 import { bull6, drill6, flat4, flat6 } from '../../core/plan/plan.fixture'
+import { withoutAppVersion } from '../../core/post/plan-export'
 
 /**
  * The exported gCode of the test project, compared byte for byte (path relative to the test
@@ -238,7 +239,9 @@ export async function exitCriteriaFlow(call: Call, dir: string): Promise<FlowRes
   const exported = (await ok<ExportResult>('plan.export', { planId, target })).value
   expect(exported).toMatchObject({ softLimitChecked: true, warnings: [], regenerated: [] })
   const gcode = readFileSync(target, 'utf8')
-  await expect(gcode).toMatchFileSnapshot(GOLDEN)
+  await expect(withoutAppVersion(gcode)).toMatchFileSnapshot(GOLDEN)
+  // the app version in the header (TG #242); goldens keep `DFYOM` alone
+  expect(gcode).toMatch(/^\(Generator: DFYOM \d+\.\d+\.\d+[^)]*\)$/m)
   expect(gcode.split('\n').filter((l) => l !== '')).toHaveLength(exported.lines)
   expect(gcode).toMatch(/^G90 G94 G17 G21$/m)
   expect(gcode.trimEnd().endsWith('M30')).toBe(true)
