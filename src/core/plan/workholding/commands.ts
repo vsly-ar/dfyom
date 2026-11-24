@@ -11,7 +11,8 @@ import { fieldContext } from '../../design/operation'
 import { NAME_MAX } from '../../library/item'
 import type { ProjectDoc, UnitSystem } from '../../project/document'
 import { Quantity } from '../../quantity/quantity'
-import { PlanWarningSchema } from '../checks'
+import { PlanWarningSchema, type PlanWarning } from '../checks'
+import type { Services } from '../../commands/context'
 import { findPlanDTO, loadPlanDTO } from '../plan'
 import {
   lengthDTO,
@@ -22,7 +23,10 @@ import {
 } from '../plan.dto'
 import { unknownSetup } from '../setups'
 import { checkAllowed } from '../status'
-import { staticWorkholdingFindings } from './findings'
+import { baseOf } from '../../design/frozen-memo'
+import { planOperationInputs } from '../inputs'
+import { planOpLabel } from '../labels'
+import { checkedWorkholdingFindings } from './findings'
 import {
   BASE_TYPES,
   defaultItemName,
@@ -311,9 +315,16 @@ export const workholdingSet = defineCommand({
       }),
     ),
     clearanceHeight: z.string().describe("The setup program's clearance height"),
-    findings: z.array(PlanWarningSchema).describe("This setup's workholding findings"),
+    findings: z
+      .array(PlanWarningSchema)
+      .describe("This setup's workholding findings, moves of current toolpaths checked as export"),
+    movesUnchecked: z
+      .array(z.string())
+      .describe(
+        'Operations whose toolpaths must regenerate first: plan_toolpath_generate, then plan_warning_list',
+      ),
   }),
-  run(draft, args) {
+  run(draft, args, ctx) {
     const where = 'plan.workholding.set'
     const found = findPlanDTO(draft as ProjectDoc, args.planId, where)
     if (found.isErr()) return found
@@ -427,12 +438,39 @@ export const workholdingSet = defineCommand({
         }
       }),
       clearanceHeight: projectLength(h.clearance, units),
-      findings: staticWorkholdingFindings(updated, after.id).map((f) => ({
-        ...f,
-        params: { ...f.params },
-      })),
+      // DF90: the export's move check on the toolpaths still current (a profile or drilling does
+      // not depend on the items; a facing or pocket keeps out of them and regenerates)
+      ...setFindings(baseOf(draft as ProjectDoc), updated, after, ctx.services),
     })
   },
 })
 
 const plainCopy = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T
+
+/** The set result's findings of `setup` and the operations whose moves wait for toolpaths. */
+function setFindings(
+  doc: ProjectDoc,
+  plan: Parameters<typeof checkedWorkholdingFindings>[0],
+  setup: SetupDTO,
+  services: Services,
+): { findings: PlanWarning[]; movesUnchecked: string[] } {
+  const inputs = planOperationInputs(doc, plan.dto.id, undefined, services.region2d)
+  const cache = services.toolpaths
+  const r = checkedWorkholdingFindings(
+    plan,
+    inputs.isOk() ? inputs.unwrap() : undefined,
+    (i) => cache?.get(i.inputHash),
+    services.region2d,
+    setup.id,
+    true,
+    (i) => cache?.last(i.planId, i.planOperationId)?.toolpath,
+  )
+  return {
+    findings: r.findings.map((f) => ({ ...f, params: { ...f.params } })),
+    movesUnchecked: r.unchecked.map((i) =>
+      planOpLabel(plan.dto.design.part, {
+        designOperationIds: i.operations.map((o) => o.id),
+      }),
+    ),
+  }
+}

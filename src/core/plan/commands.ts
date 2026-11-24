@@ -88,6 +88,7 @@ import { checkPart, sameValue } from './validity'
 import { StepSchema, stepToDTO } from '../feeds-speeds/commands'
 import { workholdingSet } from './workholding/commands'
 import { workholdingFindings } from './workholding/findings'
+import { setupWorkholding } from './workholding/setup'
 import { defaultClearance } from './build'
 import { DEFAULT_RIGIDITY } from '../feeds-speeds/data'
 import { machineLimits } from '../feeds-speeds/suggest'
@@ -1306,11 +1307,51 @@ const planGet = defineQuery({
   name: 'plan.get',
   summary: 'Get a plan record: status, design snapshot, library copies and setup.',
   args: z.object(PlanArg),
-  result: z.object({ plan: PlanDtoSchema }),
+  result: z.object({
+    plan: PlanDtoSchema,
+    effectiveClearance: z
+      .array(
+        z.object({
+          setupId: z.string(),
+          clearanceHeight: z.number().describe('mm above Z0'),
+          reason: z.enum(['set', 'default', 'workholding']),
+          item: z.string().optional().describe('workholding: the highest item (top + margin)'),
+          margin: z.number().optional().describe('mm'),
+        }),
+      )
+      .describe(
+        "The setups' programmed clearance heights; setups[].clearanceHeight is the setting",
+      ),
+  }),
   run(doc, args) {
-    return findPlanDTO(doc, args.planId, 'plan.get').map((plan) => ({ plan }))
+    const where = 'plan.get'
+    return findPlanDTO(doc, args.planId, where).map((plan) => ({
+      plan,
+      effectiveClearance: effectiveClearances(plan, doc.unitSystem),
+    }))
   },
 })
+
+/**
+ * The clearance height each setup's program uses (DF90): the stored setting, or raised by the
+ * workholding (workholding.md#links-and-safe-heights); none for a plan that does not load.
+ */
+function effectiveClearances(plan: PlanDTO, units: UnitSystem) {
+  const loaded = loadPlanDTO(plan, units, 'plan.get')
+  if (loaded.isErr()) return []
+  const stock = loaded.unwrap().stock
+  return plan.setups.map((setup) => {
+    const h = setupWorkholding(setup, stock)
+    const from = h.items.find((i) => i.id === h.clearanceFrom)
+    return {
+      setupId: setup.id,
+      clearanceHeight: h.clearance,
+      ...(from !== undefined
+        ? { reason: 'workholding' as const, item: from.name, margin: h.margin }
+        : { reason: h.clearanceSet ? ('set' as const) : ('default' as const) }),
+    }
+  })
+}
 
 const FeedValue = z
   .object({

@@ -89,6 +89,24 @@ export interface GrblExport {
   readonly stats: ProgramStats
   /** Machine checks (`plan.machine` warnings); they never block the export. */
   readonly warnings: readonly PlanWarning[]
+  /**
+   * Per axis the work-zero positions (machine coordinates, soft limits [−travel, 0]) at which the
+   * program stays inside the travel (DF90, docs/architecture/grbl.md#export-checks): the offline
+   * check before a homed connection gives the actual work zero.
+   */
+  readonly travelFit: readonly TravelFit[]
+}
+
+/** One axis of `GrblExport.travelFit`. */
+export interface TravelFit {
+  readonly axis: 'x' | 'y' | 'z'
+  /** The program's extent along the axis (work coordinates, mm). */
+  readonly min: number
+  readonly max: number
+  readonly travel: number
+  /** The work zero's machine position must lie in [from, to]; `from > to`: no position fits. */
+  readonly from: number
+  readonly to: number
 }
 
 const MM_PER_INCH = 25.4
@@ -111,6 +129,7 @@ export function exportGrbl(input: ExportInput, opts: PostOptions): AppResult<Grb
     text: `${lines.join('\n')}\n`,
     stats: programStats(program, machine, opts),
     warnings: machineChecks(input, program, machine, opts.firstToolLoaded !== false),
+    travelFit: travelFit(programExtent(program, opts.firstToolLoaded !== false), machine),
   }))
 }
 
@@ -476,36 +495,7 @@ export function machineChecks(
     })
 
   // Extent and soft limits.
-  // The Z soft limits use the Z zero `workZero` was taken with: it holds until the first tool
-  // change that pauses (the user re-zeroes Z for the new tool's length).
-  const lo = [Infinity, Infinity, p.clearanceZ]
-  const hi = [-Infinity, -Infinity, p.clearanceZ]
-  const head = p.blocks.find((b) => b.kind === 'toolChange')
-  // a first tool that pauses (not loaded, or its Z0 off the up face, DF69): Z is zeroed again
-  let zeroKnown = head === undefined || !toolChangePauses(head, true, firstToolLoaded)
-  const zLo = [zeroKnown ? p.clearanceZ : Infinity]
-  const zHi = [zeroKnown ? p.clearanceZ : -Infinity]
-  let tools = 0
-  walk(
-    p,
-    firstToolLoaded,
-    (from, b) => {
-      const pts = b.kind === 'arc' && known(from) ? arcBounds(from, b) : [b.to]
-      for (const q of pts)
-        q.forEach((v, k) => {
-          if (Number.isNaN(v)) return
-          lo[k] = Math.min(lo[k]!, v)
-          hi[k] = Math.max(hi[k]!, v)
-          if (k === 2 && zeroKnown) {
-            zLo[0] = Math.min(zLo[0]!, v)
-            zHi[0] = Math.max(zHi[0]!, v)
-          }
-        })
-    },
-    (b) => {
-      if (b.kind === 'toolChange' && ++tools > 1) zeroKnown = false
-    },
-  )
+  const { lo, hi, zLo, zHi } = programExtent(p, firstToolLoaded)
   AXES.forEach((axis, k) => {
     const travel = machine.travel[axis].canonical
     const size = hi[k]! - lo[k]!
@@ -519,8 +509,8 @@ export function machineChecks(
       })
     const zero = input.workZero?.[k]
     if (zero === undefined) return
-    const from = zero + (k === 2 ? zLo[0]! : lo[k]!)
-    const to = zero + (k === 2 ? zHi[0]! : hi[k]!)
+    const from = zero + (k === 2 ? zLo : lo[k]!)
+    const to = zero + (k === 2 ? zHi : hi[k]!)
     if (!Number.isFinite(from - to)) return
     if (from < -travel - EPS || to > EPS)
       warn({
@@ -531,6 +521,66 @@ export function machineChecks(
       })
   })
   out.push(...zHeadroomChecks(input, p, machine))
+  return out
+}
+
+/**
+ * The program's extent per axis (work coordinates), and the Z extent while the first Z zero holds:
+ * until the first tool change that pauses (the user re-zeroes Z for the new tool's length).
+ */
+function programExtent(
+  p: MachiningProgram,
+  firstToolLoaded: boolean,
+): { lo: number[]; hi: number[]; zLo: number; zHi: number } {
+  const lo = [Infinity, Infinity, p.clearanceZ]
+  const hi = [-Infinity, -Infinity, p.clearanceZ]
+  const head = p.blocks.find((b) => b.kind === 'toolChange')
+  // a first tool that pauses (not loaded, or its Z0 off the up face, DF69): Z is zeroed again
+  let zeroKnown = head === undefined || !toolChangePauses(head, true, firstToolLoaded)
+  let zLo = zeroKnown ? p.clearanceZ : Infinity
+  let zHi = zeroKnown ? p.clearanceZ : -Infinity
+  let tools = 0
+  walk(
+    p,
+    firstToolLoaded,
+    (from, b) => {
+      const pts = b.kind === 'arc' && known(from) ? arcBounds(from, b) : [b.to]
+      for (const q of pts)
+        q.forEach((v, k) => {
+          if (Number.isNaN(v)) return
+          lo[k] = Math.min(lo[k]!, v)
+          hi[k] = Math.max(hi[k]!, v)
+          if (k === 2 && zeroKnown) {
+            zLo = Math.min(zLo, v)
+            zHi = Math.max(zHi, v)
+          }
+        })
+    },
+    (b) => {
+      if (b.kind === 'toolChange' && ++tools > 1) zeroKnown = false
+    },
+  )
+  return { lo, hi, zLo, zHi }
+}
+
+/**
+ * Per axis the window of work-zero machine positions that keep the program inside the soft
+ * limits [−travel, 0] (DF90): zero + min ≥ −travel and zero + max ≤ 0. Z uses the extent of the
+ * first Z zero, the program's whole Z extent when that is unknown.
+ */
+function travelFit(
+  e: { lo: number[]; hi: number[]; zLo: number; zHi: number },
+  machine: Machine,
+): TravelFit[] {
+  const out: TravelFit[] = []
+  AXES.forEach((axis, k) => {
+    const zKnown = k === 2 && Number.isFinite(e.zHi - e.zLo)
+    const min = zKnown ? e.zLo : e.lo[k]!
+    const max = zKnown ? e.zHi : e.hi[k]!
+    if (!Number.isFinite(max - min)) return
+    const travel = machine.travel[axis].canonical
+    out.push({ axis, min, max, travel, from: -travel - min, to: -max })
+  })
   return out
 }
 

@@ -147,13 +147,16 @@ export const designMessages = {
         spacing: 'Spacing',
       },
       hints: {
-        cols: (u: string) => `How many positions across, along ${u}.`,
-        rows: (v: string) => `How many positions up, along ${v}.`,
+        cols: (u: string) =>
+          `How many positions across, along ${u}, counting the one the row starts from.`,
+        rows: (v: string) =>
+          `How many positions up, along ${v}, counting the one the row starts from.`,
         du: (u: string) =>
           `Distance between neighbouring columns, along ${u}. Negative goes the other way.`,
         dv: (v: string) =>
           `Distance between neighbouring rows, along ${v}. Negative goes the other way.`,
-        count: 'How many clones, each one step further on.',
+        count:
+          'How many clones, each one step further on (not counting the position the row starts from).',
         stepU: (u: string) =>
           `How far each clone sits from the one before, along ${u}. Negative goes the other way.`,
         stepV: (v: string) =>

@@ -529,8 +529,10 @@ export function rowIssues(rows: readonly CloneRow[], shapes?: CloneShapes): Issu
   for (const [i, r] of rows.entries()) {
     switch (r.kind) {
       case 'grid':
-        if (r.du.canonical === 0) at(i, 'du', 'nonZero', 'must not be 0')
-        if (r.dv.canonical === 0) at(i, 'dv', 'nonZero', 'must not be 0')
+        // a step only separates cells along a direction with more than one (DF90: a 2 × 1 grid
+        // with dv 0 is what design.reference.find suggests for a row of holes)
+        if (r.cols > 1 && r.du.canonical === 0) at(i, 'du', 'nonZero', 'must not be 0')
+        if (r.rows > 1 && r.dv.canonical === 0) at(i, 'dv', 'nonZero', 'must not be 0')
         break
       case 'offset':
         if (r.du.canonical === 0 && r.dv.canonical === 0)

@@ -133,6 +133,7 @@ The original file bytes are stored with the project as a content-addressed **ass
 - The **placed bounding box** is the axis-aligned box of the 8 corners of the source bounds, times `scale × (1 mm or 25.4 mm)`, rotated; its min corner is `position`. Exact for 90° steps; for free angles it is larger than the mesh's own box, because the mesh is never re-read. So `reference.fit` and `exceedsStock` are conservative for free angles; the U3 snap and measure tools use the exact mesh (the worker's section and the ghost's triangles) instead of the box. R3's renderer must use the same box to turn `position` into its matrix.
 - The unit guess compares **sorted** extents ("fits within the stock" regardless of how the model lies in the file), and the reasons read "Read as inch: 2 × 1.5 × 0.5 in mm would be 50× smaller than the stock" or "Read as mm: … mm".
 - `exceedsStock` ignores overhangs under 0.001 mm (fitted positions are rounded).
+- The placed box's corners are rounded to 0.001 mm (hardening DF90): a scaled or turned box whose top lands on Z0 reads `max.z: 0`, not float noise such as `0.0000146`.
 
 ## Ghost mesh (task R3)
 

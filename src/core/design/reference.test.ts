@@ -8,6 +8,7 @@ import {
   fitPosition,
   fitScale,
   guessUnit,
+  placedBox,
   placedExtent,
   rotationMatrix,
   roundScaleDown,
@@ -127,6 +128,24 @@ describe('placement', () => {
       params: { x: 3, y: 0, z: 3 },
       message: 'The reference sticks out of the stock by X 3, Z 3 mm',
     })
+  })
+})
+
+describe('placed box rounding (DF90)', () => {
+  it("a top fitted at half scale reads 0, not the stored position's rounding left-over", () => {
+    const bounds = { min: { x: 0, y: 0, z: 0 }, max: { x: 249.5, y: 177.06, z: 60.52402923 } }
+    const p = { ...flat, scale: 0.5 }
+    const z = fitPosition(
+      placedExtent(bounds, p),
+      { length: 250, width: 100, thickness: 40 },
+      {},
+      'top',
+    ).z
+    // the record stores the position to 0.0001 mm
+    const stored = Math.round(z * 1e4) / 1e4
+    const b = placedBox(bounds, { ...p, position: { x: 0, y: 0, z: stored } })
+    expect(b.max.z).toBe(0)
+    expect(b.min.z).toBe(-30.262)
   })
 })
 

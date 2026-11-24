@@ -321,6 +321,8 @@ export const DFM_WARNING_CODES = [
   'dfm.tabsThin',
   // material removed by earlier setups (DF50): docs/modes/plan-v0.2.md#material-removed-by-earlier-setups
   'dfm.tabsThick',
+  // tabs over half the material (DF90): docs/modes/design.md#profile-with-tabs
+  'dfm.tabsTall',
   // face access checks (v0.2): docs/modes/design-v0.2.md#dfm-access-checks
   'dfm.reach',
   'dfm.setups',
