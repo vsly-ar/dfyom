@@ -1,9 +1,9 @@
 /**
  * The run job (`run.job.start { planId, setupId? }`): checks, export of the setup's program with the
  * connected G54, the soft-limit refusal, streaming on the machine host with progress, and the
- * job's pause/abort mapping. One job per setup: the result names the next setup, which the
- * setup-change prompt runs after re-fixturing (task E2). `from` resumes at an operation's start
- * (hardening M5); the job tells the machine port its plan and setup for the status (M7).
+ * job's pause (a feed hold confirmed at `Hold:0`, DF82) and abort mapping. One job per setup: the
+ * result names the next setup, which the setup-change prompt runs after re-fixturing (task E2).
+ * `from` resumes at an operation's start (hardening M5); the job tells the machine port its plan and setup for the status (M7).
  * Doc: docs/modes/run-v0.1.md#run-job, docs/modes/plan-v0.2.md#implementation-task-e2,
  * docs/modes/run-machine.md#section-resume-m5
  */
@@ -157,20 +157,96 @@ function realMachineChecks(
   })
 }
 
-/** Maps `job.pause`/`job.resume` to hold/resume and `job.abort` to the controlled stop. */
-function bindJobControl(m: MachineService, ctx: JobContext): () => void {
-  const off = ctx.pause.onChange((paused) => {
-    void m.controlJob(ctx.jobId, paused ? 'hold' : 'resume')
-  })
+/** Maps `job.abort` to the controlled stop. */
+function bindJobAbort(m: MachineService, ctx: JobContext): () => void {
   const abort = () => void m.controlJob(ctx.jobId, 'stop')
   // An abort while the start was in flight (the host already streams, its reply not yet here)
   // has fired before this listener existed: stop now, or the job runs on (hardening P1).
   if (ctx.signal.aborted) abort()
   else ctx.signal.addEventListener('abort', abort, { once: true })
-  return () => {
-    off()
-    ctx.signal.removeEventListener('abort', abort)
+  return () => ctx.signal.removeEventListener('abort', abort)
+}
+
+/**
+ * The run job's pause (the `handled` policy, hardening DF82): the job is paused only once nothing
+ * moves. Before the stream starts, a pause parks the job at the start gate; once it streams,
+ * `job.pause` is a feed hold the machine host confirms at `Hold:0` (at a tool change or `M0` wait
+ * at once) and `job.resume` a cycle start. A pause while the start is in flight waits for it.
+ * Doc: docs/architecture/commands.md#pausing-a-job
+ */
+class RunPause {
+  private stage: 'preparing' | 'starting' | 'streaming' | 'over' = 'preparing'
+  private gate: { readonly wait: Promise<void>; readonly open: () => void } | undefined
+  private startSettled: Promise<void> = Promise.resolve()
+  private settleStart: () => void = () => {}
+
+  constructor(
+    private readonly m: () => MachineService | undefined,
+    private readonly ctx: JobContext,
+  ) {}
+
+  register(): () => void {
+    return this.ctx.onPause({ hold: () => this.hold(), resume: () => this.resume() })
   }
+
+  /**
+   * Just before the stream starts: waits while paused at the gate (an abort ends the wait), then
+   * marks the start in flight. Synchronous from the gate check to the mark, so a pause is either
+   * held at the gate or waits for the start.
+   */
+  async beforeStart(): Promise<void> {
+    while (this.gate !== undefined && !this.ctx.signal.aborted)
+      await Promise.race([this.gate.wait, aborted(this.ctx.signal)])
+    this.stage = 'starting'
+    this.startSettled = new Promise((resolve) => (this.settleStart = resolve))
+  }
+
+  /** The start settled: streaming, or over when it failed. */
+  started(ok: boolean): void {
+    this.stage = ok ? 'streaming' : 'over'
+    this.settleStart()
+  }
+
+  over(): void {
+    this.stage = 'over'
+    this.settleStart()
+  }
+
+  private async hold(): AsyncAppResult<void> {
+    if (this.stage === 'preparing') {
+      if (this.gate === undefined) {
+        let open = () => {}
+        const wait = new Promise<void>((resolve) => (open = resolve))
+        this.gate = { wait, open }
+      }
+      return Ok(undefined)
+    }
+    await this.startSettled
+    const m = this.m()
+    if (this.stage !== 'streaming' || m === undefined)
+      return fail('run.state', 'the run is not streaming', { where: 'run.job.start' })
+    return m.controlJob(this.ctx.jobId, 'hold')
+  }
+
+  private async resume(): AsyncAppResult<void> {
+    const gate = this.gate
+    if (gate !== undefined) {
+      this.gate = undefined
+      gate.open()
+      return Ok(undefined)
+    }
+    const m = this.m()
+    if (this.stage !== 'streaming' || m === undefined) return Ok(undefined)
+    return m.controlJob(this.ctx.jobId, 'resume')
+  }
+}
+
+/** Resolves once `signal` aborts. */
+function aborted(signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) resolve()
+    else signal.addEventListener('abort', () => resolve(), { once: true })
+  })
 }
 
 /**
@@ -259,6 +335,24 @@ async function runJob(
   from: string | undefined,
   ctx: JobContext,
 ): AsyncAppResult<RunJobResult> {
+  const pause = new RunPause(() => ctx.services.machine, ctx)
+  const unregister = pause.register()
+  try {
+    return await runJobSteps(doc, planId, setupId, from, ctx, pause)
+  } finally {
+    pause.over()
+    unregister()
+  }
+}
+
+async function runJobSteps(
+  doc: ProjectDoc,
+  planId: string,
+  setupId: string | undefined,
+  from: string | undefined,
+  ctx: JobContext,
+  pause: RunPause,
+): AsyncAppResult<RunJobResult> {
   const where = 'run.job.start'
   // 1. checks
   const checked = startChecks(doc, planId, setupId, ctx.services, where)
@@ -287,14 +381,15 @@ async function runJob(
     m,
     workZero,
     machineKey,
+    pause,
   )
   m.release(ctx.jobId)
   if (started.isErr()) return started
   const { running, warnings } = started.unwrap()
-  const unbind = bindJobControl(m, ctx)
-  if (ctx.pause.paused) void m.controlJob(ctx.jobId, 'hold')
+  const unbind = bindJobAbort(m, ctx)
   // 5. end
   const ended = await running.ended
+  pause.over()
   unbind()
   if (ended.isErr()) return Err(ended.unwrapErr().withContext(where, { planId }))
   const loaded = loadPlanDTO(p, doc.unitSystem, where)
@@ -324,6 +419,7 @@ async function checkAndStart(
   m: MachineService,
   workZero: readonly [number, number, number],
   machineKey: string,
+  pause: RunPause,
 ): AsyncAppResult<{ running: RunningJob; warnings: PlanWarning[] }> {
   const where = 'run.job.start'
   const { planId, setupId, from } = run
@@ -346,8 +442,12 @@ async function checkAndStart(
       data: { planId, workZero: [...status.workZero], findings: soft },
     })
   const warnings: PlanWarning[] = e.warnings.filter((w) => w.rule !== 'softLimit')
-  if (ctx.signal.aborted)
+  // a pause before the stream parks the job here, before anything moves (DF82)
+  await pause.beforeStart()
+  if (ctx.signal.aborted) {
+    pause.started(false)
     return fail('op.aborted', 'the run was aborted before it started', { where })
+  }
   // 4. stream
   // notes (`info`, e.g. DF68's zHeadroomUnknown) are not warnings
   const counted = warnings.filter((w) => w.severity === 'warning').length
@@ -367,6 +467,7 @@ async function checkAndStart(
     { workZero, machineKey },
     about,
   )
+  pause.started(started.isOk())
   if (started.isErr()) return Err(started.unwrapErr().withContext(where, { planId }))
   return Ok({ running: started.unwrap(), warnings })
 }
@@ -378,6 +479,8 @@ export const runJobStart = defineCommand({
     "Run a plan's program (one setup) on the connected machine: exports it with the live work zero, refuses soft-limit violations, streams it and waits at each tool change for run.job.continue.",
   title: () => 'Run plan',
   machine: true,
+  // job.pause is a feed hold, paused once the controller reports Hold:0 (DF82)
+  pause: { kind: 'handled' },
   // apply first: docs/architecture/apply.md#implicit-apply
   applyFirst: true,
   args: z.object({

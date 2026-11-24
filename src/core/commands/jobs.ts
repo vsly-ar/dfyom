@@ -249,7 +249,7 @@ const control = (name: string, summary: string, title: string): JobControl => ({
 
 export const jobPause = control(
   'job.pause',
-  'Pause a running job at its next checkpoint (a Probe Z job: feed hold; homing: refused).',
+  'Pause a running job at its next checkpoint (a run or Probe Z job: feed hold, answered once the machine stands still at Hold:0; homing: refused).',
   'Pause job',
 )
 export const jobResume = control('job.resume', 'Resume a paused job.', 'Resume job')

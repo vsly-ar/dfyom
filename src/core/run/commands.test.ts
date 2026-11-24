@@ -494,6 +494,106 @@ describe('run commands', { timeout: 60_000 }, () => {
     ).toBe(true)
   })
 
+  it('job.pause of a run is paused only once the controller reports Hold:0, never while decelerating (DF82)', async () => {
+    const t = await setup()
+    expectOk(await t.open({ prepare: true }))
+    expectOk(await t.run('run.timeScale.set', { scale: 1 }))
+    const { jobId, result } = await t.job('run.job.start', { planId: t.planId })
+    const handle = t.d.job(jobId).unwrap()
+    expect(handle.pausable).toBe(true)
+    // the spindle runs up before the first move: hold once the machine moves
+    expect(await waitFor(() => t.status().state === 'Run' && t.status().feed > 0)).toBe(true)
+    // every status the machine reports while job.pause is pending: the job is never paused then
+    const seen: { state: string; job: string }[] = []
+    const off = t.client.onStatus((s) => seen.push({ state: s.state, job: handle.state }))
+    const paused = expectOk(await t.run('job.pause', { jobId }))
+    off()
+    expect(paused).toEqual({ state: 'paused' })
+    expect(handle.state).toBe('paused')
+    expect(t.status().state).toBe('Hold:0')
+    expect(t.status().job?.phase).toBe('held')
+    for (const s of seen) if (s.state !== 'Hold:0') expect(s.job).toBe('running')
+    // job.pause again is a no-op; job.resume is a cycle start
+    expectOk(await t.run('job.pause', { jobId }))
+    expectOk(await t.run('job.resume', { jobId }))
+    expect(handle.state).toBe('running')
+    expect(await waitFor(() => t.status().job?.phase === 'streaming')).toBe(true)
+    expect(await waitFor(() => t.status().state === 'Run')).toBe(true)
+    expectOk(await t.run('run.timeScale.set', { scale: 'max' }))
+    expectOk(await t.run('job.abort', { jobId }))
+    expectErrCode(await result, 'op.aborted')
+  })
+
+  it('job.pause before the stream starts parks the run before anything moves; resume starts it (DF82)', async () => {
+    let pausing: Promise<AppResult<unknown>> | undefined
+    let pauseNow: (jobId: string) => void = () => {}
+    const t = await setup({
+      wrap: (c) =>
+        new Proxy(c, {
+          get: (target, key) => {
+            if (key === 'reserve')
+              return (jobId: string) => {
+                const r = target.reserve(jobId)
+                // while the program is exported (the job prepares, nothing streams yet)
+                pauseNow(jobId)
+                return r
+              }
+            const v = Reflect.get(target, key) as unknown
+            return typeof v === 'function' ? (v as () => unknown).bind(target) : v
+          },
+        }),
+    })
+    pauseNow = (jobId) => {
+      pausing = t.run('job.pause', { jobId })
+    }
+    expectOk(await t.open({ prepare: true }))
+    const { jobId, result } = await t.job('run.job.start', { planId: t.planId })
+    expect(await waitFor(() => pausing !== undefined)).toBe(true)
+    expect(expectOk(await pausing!)).toEqual({ state: 'paused' })
+    // parked: the export finishes, but the stream waits for job.resume
+    await sleep(300)
+    expect(t.d.job(jobId).unwrap().state).toBe('paused')
+    expect(t.status().job).toBeUndefined()
+    expect(t.status().state).toBe('Idle')
+    expectOk(await t.run('job.resume', { jobId }))
+    expect(await waitFor(() => t.status().job?.jobId === jobId)).toBe(true)
+    expectOk(await t.run('job.abort', { jobId }))
+    expectErrCode(await result, 'op.aborted')
+  })
+
+  it('job.abort of a run parked before its stream ends it without moving (DF82)', async () => {
+    let pausing: Promise<AppResult<unknown>> | undefined
+    let pauseNow: (jobId: string) => void = () => {}
+    const t = await setup({
+      wrap: (c) =>
+        new Proxy(c, {
+          get: (target, key) => {
+            if (key === 'reserve')
+              return (jobId: string) => {
+                const r = target.reserve(jobId)
+                pauseNow(jobId)
+                return r
+              }
+            const v = Reflect.get(target, key) as unknown
+            return typeof v === 'function' ? (v as () => unknown).bind(target) : v
+          },
+        }),
+    })
+    pauseNow = (jobId) => {
+      pausing = t.run('job.pause', { jobId })
+    }
+    expectOk(await t.open({ prepare: true }))
+    const { jobId, result } = await t.job('run.job.start', { planId: t.planId })
+    expect(await waitFor(() => pausing !== undefined)).toBe(true)
+    expectOk(await pausing!)
+    expectOk(await t.run('job.abort', { jobId }))
+    expectErrCode(await result, 'op.aborted')
+    expect(t.status().job).toBeUndefined()
+    expect(t.status().state).toBe('Idle')
+    // the reservation is released: the machine takes commands again
+    expectOk(await t.run('run.machine.jog', { by: [0, 0, -1], feed: 300 }, ui))
+  })
+
   it('a stopped run is resumed at its operation: waits at the tool, probe Z, runs to the end (M5, M7)', async () => {
     const t = await setup()
     expectOk(await t.open({ prepare: true }))

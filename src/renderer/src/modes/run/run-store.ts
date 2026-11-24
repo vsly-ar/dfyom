@@ -118,6 +118,11 @@ export interface RunState {
   readonly preflightCheck: PreflightCheck
   /** Actions in flight, by name (their buttons show busy). */
   readonly pending: readonly string[]
+  /**
+   * The Probe Z job this window started, while it runs: the toolbar's Resume resumes it once it
+   * is held (DF82, docs/modes/run.md#1-emergency-stop-stop-and-reset).
+   */
+  readonly probeJobId: string | undefined
 
   setPlan(planId: string | undefined): void
   setMachine(machineId: string | undefined): void
@@ -180,6 +185,7 @@ export interface RunState {
   /** Runs `run.job.check` for the pre-flight dialog unless `key` is checked or being checked. */
   checkRun(setupId: string | undefined, key: string): Promise<void>
   hold(): Promise<void>
+  /** `job.resume` of the held run job, else of this window's held Probe Z job (DF82). */
   resume(): Promise<void>
   stop(): Promise<void>
   continueWait(): Promise<void>
@@ -243,10 +249,22 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       return r
     }
     /** A job command: waits for its outcome; a failure goes to the banner. */
-    const job = async (name: string, args: object = {}): Promise<void> => {
+    const job = async (
+      name: string,
+      args: object = {},
+      track?: (jobId: string | undefined) => Partial<RunState>,
+    ): Promise<void> => {
       const r = await call(name, args)
       if (!r.ok) return
       const { jobId } = r.value as { jobId: string }
+      if (track !== undefined) set(track(jobId))
+      try {
+        await waitJob(jobId)
+      } finally {
+        if (track !== undefined) set(track(undefined))
+      }
+    }
+    const waitJob = async (jobId: string): Promise<void> => {
       // job.wait caps one wait at MAX_WAIT_SECONDS (300); a run job can last hours, so wait again
       // while it is still running (the previous 600 s argument failed validation silently)
       let w = await bridge.call('job.wait', { jobId, timeoutSeconds: 300 })
@@ -287,6 +305,7 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       startedHere: undefined,
       preflightCheck: { state: 'idle' },
       pending: [],
+      probeJobId: undefined,
 
       setPlan: (planId) =>
         set((s) =>
@@ -396,7 +415,8 @@ export function createRunStore(bridge: PreloadApi): RunStore {
         void call('run.machine.jogCancel', {}, { keepError: true })
       },
       setWorkZero: async (axes) => void (await call('run.workZero.set', { axes: [...axes] })),
-      probeZ: (plateThickness) => job('run.machine.probeZ', { plateThickness }),
+      probeZ: (plateThickness) =>
+        job('run.machine.probeZ', { plateThickness }, (probeJobId) => ({ probeJobId })),
       async moveTo(moves) {
         for (const { to, feed } of moves) {
           const r = await call('run.machine.jog', { to: [...to], feed })
@@ -461,7 +481,17 @@ export function createRunStore(bridge: PreloadApi): RunStore {
         })
       },
       hold: jobControl('job.pause'),
-      resume: jobControl('job.resume'),
+      async resume() {
+        const s = get().status
+        const run = activeJob(s)
+        const probe = get().probeJobId
+        // a Probe Z held without a held run (DF82): its job, which the toolbar's Resume shows for
+        const id =
+          run?.phase !== 'held' && probe !== undefined && s.state.startsWith('Hold')
+            ? probe
+            : (run?.jobId ?? get().jobId)
+        if (id !== undefined) await call('job.resume', { jobId: id })
+      },
       /**
        * Stop is never confirmed (ui.md decision 11). With a run job: `job.abort` (controlled stop:
        * hold, then reset). Without one: a jog is cancelled; a homing cycle (which GRBL stops only
