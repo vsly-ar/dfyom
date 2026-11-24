@@ -64,6 +64,12 @@ export const MachineValuesDtoSchema = z.object({
   ),
   pullOff: quantityDto('length').optional().describe('$27 homing pull-off; unset = 1 mm'),
   softLimits: z.boolean().optional().describe('$20 soft limits; unset = on'),
+  noseToTable: quantityDto('length')
+    .optional()
+    .describe('Spindle nose to table top with Z homed; for the Z headroom check'),
+  spoilboardThickness: quantityDto('length')
+    .optional()
+    .describe('Spoilboard on the table, 0 = none; for the Z headroom check'),
   programUnits: z.enum(['mm', 'in']).describe('G21/G20 in exported gCode'),
   toolChanger: z.literal('none').describe('Manual tool change (M0)'),
 })

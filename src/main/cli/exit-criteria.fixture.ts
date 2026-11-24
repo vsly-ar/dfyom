@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect } from 'vitest'
 import { testStock } from '../../core/design/design.fixture'
-import { libraryInput, machineValues } from '../../core/library/library.fixture'
+import { len, libraryInput, machineValues } from '../../core/library/library.fixture'
 import { bull6, drill6, flat4, flat6 } from '../../core/plan/plan.fixture'
 import { withoutAppVersion } from '../../core/post/plan-export'
 
@@ -118,7 +118,12 @@ export async function exitCriteriaFlow(call: Call, dir: string): Promise<FlowRes
   const stock = (await ok<{ id: string }>('library.stock.add', { values: testStock() })).value.id
   for (const t of [flat6(), flat4(), bull6(), drill6()])
     await ok('library.tool.add', { values: libraryInput(t) })
-  const m = libraryInput(machineValues())
+  // with the Z headroom fields (DF68), so the export checks the headroom and finds none short
+  const m = libraryInput({
+    ...machineValues(),
+    noseToTable: len('110'),
+    spoilboardThickness: len('10'),
+  })
   const machine = (await ok<{ id: string }>('library.machine.add', { values: m })).value.id
 
   // ── Criterion: create a project with a rectangular stock ──────────────────────────────────

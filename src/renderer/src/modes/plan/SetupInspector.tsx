@@ -1,7 +1,8 @@
 // Setup inspector (v0.2 task F6): a setup selected in the setup panel – its name, the face up to
 // the spindle (direction icon and word), the work zero G54 at its part corner, how far the tool
 // reaches past the stock (DF59), the rotation about the spindle axis (0/90/180/270°), the safe
-// heights (clearance with the clamp note, retract; moved here from the navigator) and the
+// heights (clearance with the clamp note, retract; moved here from the navigator), the Z headroom
+// estimate (DF68), the tool changes (DF66, `ToolChanges`: the tool runs, reorderable) and the
 // machine checks of this setup. Each change is one `plan.setup.update`.
 // Read-only (with the plan's reason in the navigator) outside draft and settled design.
 // Doc: docs/conventions/ui.md#design-and-plan-controls-v02, docs/modes/plan-v0.2.md#setups-from-face-directions
@@ -17,7 +18,13 @@ import {
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
 import type { Overreach } from '../../../../core/toolpath/overreach'
 import type { AppErrorData, Issue } from '../../../../shared/errors/app-error'
-import { formatHeight, formatReach, planMessages, sentence } from '../../messages/plan'
+import {
+  formatHeight,
+  formatReach,
+  planMessages,
+  sentence,
+  zHeadroomNote,
+} from '../../messages/plan'
 import { useCancelGesture } from '../../shell/hooks'
 import {
   ErrorMessage,
@@ -42,6 +49,7 @@ import {
 import { usePlanCommand } from './plan-store'
 import styles from './Plan.module.css'
 import { NameField, planWarningLabels, planWarningView } from './PlanInspector'
+import { ToolChanges } from './ToolChanges'
 import { usePlanSelection } from './usePlan'
 
 const m = planMessages.setup
@@ -72,6 +80,7 @@ export function SetupInspector({
   const stock = planStockSize(doc, plan)
   // per-setup machine checks carry the setup (plan-v0.2.md#implementation-task-e1)
   const mine = warnings.filter((w) => w.params['setupId'] === setup.id)
+  const headroom = zHeadroomText(plan, mine, warnings)
   const reach = reachText(setupOverreach(setup, toolpaths), units)
   const clearance = quantityOf(setup.clearanceHeight)
   const clampNote: FieldMessage[] =
@@ -125,6 +134,12 @@ export function SetupInspector({
             ) : null}
             <dt>{m.reach}</dt>
             <dd>{reach}</dd>
+            {headroom !== undefined ? (
+              <>
+                <dt>{m.zHeadroom}</dt>
+                <dd>{headroom}</dd>
+              </>
+            ) : null}
           </dl>
         </div>
         <Field
@@ -167,6 +182,7 @@ export function SetupInspector({
           onCommit={(q, gesture) => void update({ retractHeight: q.source }, gesture)}
           onCancelGesture={cancelGesture}
         />
+        <ToolChanges plan={plan} setup={setup} units={units} toolpaths={toolpaths} />
         {mine.length > 0 ? (
           <section aria-label={m.findings} className={styles['warnings']}>
             <h3 className={styles['groupTitle']}>{m.findings}</h3>
@@ -180,6 +196,22 @@ export function SetupInspector({
       </div>
     </div>
   )
+}
+
+/**
+ * DF68: the setup's Z headroom as a sentence from its findings and the plan's `zHeadroomUnknown`
+ * note; undefined without a machine copy (nothing is estimated).
+ */
+function zHeadroomText(
+  plan: PlanDTO,
+  mine: readonly PlanWarning[],
+  all: readonly PlanWarning[],
+): string | undefined {
+  if (plan.machine === undefined) return undefined
+  const short = mine.some((w) => w.rule === 'zHeadroom')
+  const note = zHeadroomNote(all)
+  if (note === undefined) return short ? m.zHeadroomShort : m.zHeadroomOk
+  return note.partly ? m.zHeadroomPartly(note.missing, short) : m.zHeadroomUnknown(note.missing)
 }
 
 /** The setup's reach past the stock as a sentence (DF59), or why it is not known yet. */

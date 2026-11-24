@@ -642,6 +642,16 @@ function writeSetups(
   return Ok(undefined)
 }
 
+function pastSetupEnd(setup: SetupDTO, index: number, where: string): AppResult<never> {
+  const max = setup.operations.length - index
+  return fail('input.malformed', 'count runs past the end of the setup', {
+    issues: [
+      { path: ['count'], rule: 'range', message: `must be at most ${max}`, params: { max } },
+    ],
+    where,
+  })
+}
+
 function pastEnd(max: number, where: string): AppResult<never> {
   return fail('input.malformed', 'toIndex is past the end of the list', {
     issues: [
@@ -992,13 +1002,19 @@ const operationMove = defineCommand({
   kind: 'document',
   name: 'plan.operation.move',
   summary:
-    'Move a plan operation in the machining order, also into another setup of the same direction; it must stay after the operations whose surfaces it starts from.',
+    'Move a plan operation (or, with count, a block such as a tool run) in the machining order, also into another setup of the same direction; it must stay after the operations whose surfaces it starts from.',
   title: () => 'Move plan operation',
   machine: false,
   args: z.object({
     ...PlanOpArg,
     toIndex: z.number().int().min(0).describe('New 0-based position in the target setup'),
     toSetupId: PlanRecordIdSchema.optional().describe('Same direction; default its own setup'),
+    count: z
+      .number()
+      .int()
+      .min(1)
+      .optional()
+      .describe('Move this many consecutive operations from it as a block (a tool run); default 1'),
   }),
   result: Empty,
   run(draft, args) {
@@ -1016,12 +1032,15 @@ const operationMove = defineCommand({
     if (target === undefined) return unknownSetup(args.toSetupId ?? '', 'toSetupId', where)
     if (setupDirection(target) !== setupDirection(source))
       return directionMismatch(setupDirection(source), setupDirection(target), 'toSetupId', where)
-    const max = ti === si ? target.operations.length - 1 : target.operations.length
+    // a block of `count` (DF66: a tool run); `toIndex` is its first position after the move
+    const count = args.count ?? 1
+    if (index + count > source.operations.length) return pastSetupEnd(source, index, where)
+    const max = ti === si ? target.operations.length - count : target.operations.length
     if (args.toIndex > max) return pastEnd(max, where)
     if (ti === si && index === args.toIndex) return Ok({})
     const setups = plan.setups.map((x) => ({ ...x, operations: [...x.operations] }))
-    const [moved] = setups[si]!.operations.splice(index, 1)
-    setups[ti]!.operations.splice(args.toIndex, 0, moved!)
+    const moved = setups[si]!.operations.splice(index, count)
+    setups[ti]!.operations.splice(args.toIndex, 0, ...moved)
     const written = writeSetups(draft, plan, setups, 'toIndex', where)
     return written.isErr() ? written : Ok({})
   },

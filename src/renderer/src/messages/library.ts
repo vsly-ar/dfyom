@@ -343,6 +343,12 @@ export const libraryMessages = {
     pullOff: 'Pull-off',
     pullOffNote: 'Optional ($27): unset = 1 mm.',
     softLimits: 'Soft limits ($20)',
+    zHeight: 'Z height',
+    noseToTable: 'Spindle nose to table',
+    noseToTableNote:
+      'Optional: with Z homed, from the collet nut (where stickout is measured) down to the table. Checks that retracts stay below the Z+ limit.',
+    spoilboardThickness: 'Spoilboard thickness',
+    spoilboardThicknessNote: 'Optional: the board the stock sits on; 0 if none.',
     rigidity: 'Rigidity',
     rigidities: {
       extrusion: 'Aluminium extrusion',

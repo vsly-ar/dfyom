@@ -58,8 +58,8 @@ export function defaultSetupIndex(setups: readonly SetupDTO[], direction: Direct
 
 /**
  * Setups of `plan.create`: one per direction in use, in the default setup order, each in the
- * default machining order (`port`: general shapes in the freeing test). No operations: one `+z`
- * setup.
+ * default machining order (`port`: general shapes in the freeing test), a setup after the first
+ * preferring the last tool of the one before (DF65). No operations: one `+z` setup.
  */
 export function deriveSetups(
   planOps: readonly PlanOperationDTO[],
@@ -73,7 +73,8 @@ export function deriveSetups(
     const ops = planOps.filter((p) => dir.get(p.id) === d)
     if (ops.length === 0) continue
     const s = make(d, setups)
-    s.operations = defaultOrder(ops, part, port)
+    // DF65: start with the tool still in the spindle when that costs no tool run
+    s.operations = defaultOrder(ops, part, port, setups.at(-1)?.operations.at(-1)?.tool)
     setups.push(s)
   }
   if (setups.length === 0) setups.push(make('+z', setups))

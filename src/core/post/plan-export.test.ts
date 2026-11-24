@@ -7,6 +7,7 @@ import { createDispatcher } from '../commands/dispatcher'
 import { createInProcessWorkers, type WorkerPort } from '../commands/jobs'
 import { createAppRegistry } from '../commands/registry'
 import { fakeIds, uiSource } from '../commands/testing'
+import { libraryInput, machineValues } from '../library/library.fixture'
 import { planSetup, type PlanSetup } from '../plan/plan.fixture'
 import { createToolpathCache, type ToolpathCache } from '../toolpath/cache'
 import type { Toolpath } from '../toolpath/model'
@@ -74,13 +75,23 @@ async function setup(
     hook?: (request: GeneratorRequest) => unknown
     services?: Partial<Services>
     machine?: boolean
+    /** Extra machine values (library command input), e.g. the Z headroom fields. */
+    machineExtra?: object
     part?: boolean
     port?: WorkerPort
     writeError?: () => AsyncAppResult<{ filePath: string }>
   } = {},
 ): Promise<Setup> {
   const s = await planSetup(opts.part === false ? { part: false } : {})
-  const planId = await s.create(opts.machine === false ? {} : { machineLibraryItemId: s.machineId })
+  const machineId =
+    opts.machineExtra === undefined
+      ? s.machineId
+      : (
+          (await s.run('library.machine.add', {
+            values: { ...libraryInput(machineValues()), ...opts.machineExtra },
+          })) as { id: string }
+        ).id
+  const planId = await s.create(opts.machine === false ? {} : { machineLibraryItemId: machineId })
   const ops = s.plan(planId).setups[0]!.operations
   for (const op of ops.filter((o) => o.tool === ops[1]!.tool))
     await s.run('plan.operation.update', {
@@ -170,6 +181,39 @@ describe('plan.export', () => {
       t.d.query('plan.toolpath.get', { planId: t.planId, planOperationId: t.order[0] }, ui),
     ).value as { stale: boolean }
     expect(got.stale).toBe(false)
+  })
+
+  it('checks the Z headroom per tool when the machine has the fields (DF68)', async () => {
+    const rules = (ws: readonly { rule: string; params: object }[]) =>
+      ws.filter((w) => w.rule.startsWith('zHeadroom') || w.rule === 'zReach')
+    // no fields: the program is still written, with the note what to enter
+    const plain = expectOk(await (await setup()).exportCmd()) as Result
+    expect(rules(plain.warnings)).toMatchObject([
+      {
+        severity: 'info',
+        rule: 'zHeadroomUnknown',
+        params: { missing: 'noseToTable,spoilboardThickness' },
+      },
+    ])
+    // a spindle nose too close to the table: every retract would hit the Z+ limit
+    const low = await setup({ machineExtra: { noseToTable: '40', spoilboardThickness: '5' } })
+    const setupId = low.s.plan(low.planId).setups[0]!.id
+    const r = expectOk(await low.exportCmd()) as Result
+    const found = rules(r.warnings)
+    expect(found.length).toBeGreaterThan(0)
+    expect(found.every((w) => w.rule === 'zHeadroom')).toBe(true)
+    expect(found[0]).toMatchObject({
+      severity: 'warning',
+      params: { setupId, clearanceHeight: 10 },
+    })
+    // plan.warning.list says the same before the export (the top only)
+    const listed = expectOk(low.d.query('plan.warning.list', { planId: low.planId }, ui)).value as {
+      warnings: { rule: string; params: object }[]
+    }
+    expect(rules(listed.warnings).map((w) => w.rule)).toEqual(found.map((w) => w.rule))
+    // a plausible desktop machine: enough headroom and reach, nothing to say
+    const ok = await setup({ machineExtra: { noseToTable: '120', spoilboardThickness: '5' } })
+    expect(rules((expectOk(await ok.exportCmd()) as Result).warnings)).toEqual([])
   })
 
   it('uses cached toolpaths and regenerates only stale ones', async () => {
