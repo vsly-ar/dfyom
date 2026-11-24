@@ -11,7 +11,6 @@
  */
 import type { Draft } from 'immer'
 import { z } from 'zod'
-import { parseWith } from '../../shared/parse'
 import { Err, fail, Ok, type AppResult } from '../../shared/result'
 import { defineCommand, defineQuery, type AnyCommand, type QueryDef } from '../commands/define'
 import type { CommandContext } from '../commands/context'
@@ -271,8 +270,8 @@ export interface FeatureCommandSpec<
   readonly addSummary?: string
   /**
    * Short update-tool schemas for params whose full schema is long ("As design.<kind>.add"):
-   * the full one is shown once, on add, and checked in the update's `run` (tools/list budget,
-   * llm-api.md § Implementation). Absent: the update takes the full schemas.
+   * the full one is listed once, on add; the update lists these (`listedArgs`) and validates
+   * the full ones (tools/list budget, llm-api.md#schemas). Absent: the update lists them in full.
    */
   readonly updateParams?: { readonly [K in keyof P]?: z.ZodType }
   /** The feature from args as entered (parsed through `c.f`) and its previous version. */
@@ -349,22 +348,15 @@ export function featureKindCommands<P extends z.ZodRawShape, F extends FeatureBa
       name: NameArg.optional(),
       ...(spec.onArg === false ? {} : { on: OnArg.optional() }),
       ...optional(false),
-      ...Object.fromEntries(
-        Object.entries(spec.updateParams ?? {}).map(([k, s]) => [k, (s as z.ZodType).optional()]),
-      ),
     }),
+    // the long params are sketched in tools/list only; the args above validate them in full
+    ...(spec.updateParams === undefined
+      ? {}
+      : { listedArgs: spec.updateParams as Readonly<Record<string, z.ZodType>> }),
     result: FeatureResult,
     run(draft, rawArgs, ctx) {
       const where = `design.${spec.kind}.update`
-      const args = { ...(rawArgs as Args & { featureId: string }) }
-      // the params the update tool only sketches get their full schema here
-      for (const k of Object.keys(spec.updateParams ?? {})) {
-        const raw = (args as Record<string, unknown>)[k]
-        if (raw === undefined) continue
-        const full = parseWith(spec.params[k] as z.ZodType, raw, where)
-        if (full.isErr()) return Err(full.unwrapErr().prefixIssues(k))
-        ;(args as Record<string, unknown>)[k] = full.unwrap()
-      }
+      const args = rawArgs as Args & { featureId: string }
       const loaded = load(draft, args.partId, where)
       if (loaded.isErr()) return loaded
       const l = loaded.unwrap()

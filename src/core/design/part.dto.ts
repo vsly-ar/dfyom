@@ -104,7 +104,7 @@ export type DesignToolDTO = z.output<typeof DesignToolDtoSchema>
 
 const common = {
   id: OperationIdSchema,
-  name: z.string().min(1).max(NAME_MAX).describe('Display label'),
+  name: z.string().min(1).max(NAME_MAX),
   generalTolerance: GeneralToleranceDtoSchema.optional(),
   /** Absent = auto, nothing chosen yet (v0.1 records); the next Apply chooses one. */
   tool: DesignToolDtoSchema.optional(),
@@ -198,7 +198,8 @@ export type OperationKind = OperationDTO['kind']
 /** Part, plan, setup and plan operation ids: file-name safe. */
 export const RECORD_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/
 
-export const PartIdSchema = z.string().regex(RECORD_ID_PATTERN).describe('Part id')
+// No description: the primer says once that ids come from results (llm-api.md#schemas).
+export const PartIdSchema = z.string().regex(RECORD_ID_PATTERN)
 
 export const PartDtoSchema = z.object({
   id: PartIdSchema,

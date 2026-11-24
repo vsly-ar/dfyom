@@ -187,7 +187,7 @@ export const ShapeSourceDtoSchema = z.object({
 /** A part's named shape (docs/modes/design-v0.3.md#what-a-shape-is). */
 export const ShapeDtoSchema = z.object({
   id: ShapeIdSchema,
-  name: z.string().min(1).max(NAME_MAX).describe('Display label'),
+  name: z.string().min(1).max(NAME_MAX),
   items: z.array(ShapeItemDtoSchema).min(1).max(SHAPE_ITEMS_MAX),
   source: ShapeSourceDtoSchema.optional().describe('Import origin, information only'),
 })

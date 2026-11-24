@@ -11,6 +11,7 @@ import { z } from 'zod'
 import { Err, fail, Ok, type AppResult } from '../../shared/result'
 import type { Services } from '../commands/context'
 import { defineCommand, defineQuery, type AnyCommand, type QueryDef } from '../commands/define'
+import { listedAs } from '../commands/json-schema'
 import { ItemIdSchema, ItemMetaDtoSchema, type LibraryItemKind } from './item'
 import type { Library } from './library'
 import { valuesFromDTO, type ItemValuesDTO, type LibraryItemDTO } from './library-item'
@@ -114,6 +115,8 @@ function forKind(kind: LibraryItemKind): { commands: AnyCommand[]; queries: Quer
       values: valuesArg,
       units: UNITS_ARG,
     }),
+    // listed in full on library.<kind>.add only (tools/list budget, llm-api.md#schemas)
+    listedArgs: { values: listedAs('object', `library.${kind}.add values (all of them)`) },
     result: itemResult,
     async run(_doc, args, ctx) {
       const where = `library.${kind}.update`
