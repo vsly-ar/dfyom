@@ -53,7 +53,8 @@ export const ITEM_ID_PATTERN = /^[a-z0-9_-]{1,120}$/
 export const ITEM_ID_RULE = 'must be 1–120 lowercase letters, digits, _ or -'
 
 // The pattern states the characters; repeating them costs tools/list size (llm-api.md#implementation-task-310).
-export const ItemIdSchema = z.string().regex(ITEM_ID_PATTERN).describe('Library item id')
+// No description: the primer says once that ids come from results (llm-api.md#schemas).
+export const ItemIdSchema = z.string().regex(ITEM_ID_PATTERN)
 
 /**
  * `id`, `revision`, `updatedAt` and a stock variant's `parentId`: library bookkeeping, not part of

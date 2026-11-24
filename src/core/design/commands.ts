@@ -132,7 +132,8 @@ export const ToleranceArg = z
     angle: Src.nullable().optional().describe('null clears'),
   })
   .describe('General ± for untoleranced values')
-export const NameArg = z.string().min(1).max(NAME_MAX).describe('Display label')
+// No description: the primer says once that ids come from results and names are labels (llm-api.md#schemas).
+export const NameArg = z.string().min(1).max(NAME_MAX)
 export const OnArg = SurfaceIdSchema.describe(
   'Start face: stock.top/bottom/side[0..3] or an earlier floor / tab top; default last top facing floor',
 )

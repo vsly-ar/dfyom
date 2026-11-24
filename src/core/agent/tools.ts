@@ -40,7 +40,10 @@ export interface AgentTool {
   readonly area: string
   readonly kind: AnyCommand['kind'] | 'query' | 'session'
   readonly description: string
+  /** As listed in `tools/list`: args in `listedArgs` are sketches (llm-api.md#schemas). */
   readonly inputSchema: JsonObject
+  /** Every arg in full; served by `dfyom://schema/{name}` and `dfyom tools`. */
+  readonly fullInputSchema: JsonObject
   /** Served by `dfyom://schema/{name}` and `dfyom tools`, never listed in `tools/list`. */
   readonly outputSchema: JsonObject
   readonly annotations: ToolAnnotations
@@ -68,6 +71,8 @@ export const ALWAYS_LISTED_AREAS = ['history', 'job'] as const
  * tools at the end of v0.3; raised to 120 K for v0.4's feature tools (Q32 option A, task M1 in
  * docs/plans/v0.4.md), new tools designed folded (`get` as a `list` filter). Hardening A8: 106.8 K
  * for 124 tools after `withoutValidationOnlyKeywords` and shared descriptions moved to the primer.
+ * Hardening headroom work: 119.9 → 100.7 K for 133 tools (listed sketches, no id/name
+ * descriptions, sharing only where it pays, equivalent short forms, no hints beside readOnlyHint).
  * Raise it deliberately.
  */
 export const TOOLS_LIST_BUDGET_CHARS = 120_000
@@ -135,7 +140,6 @@ export function annotationsOf(
 function registryTool(def: AnyCommand | AnyQueryDef, scope: ToolScope): AppResult<AgentTool> {
   return toolDescriptor(def).map((d) => {
     const kind: AgentTool['kind'] = 'kind' in def ? def.kind : 'query'
-    const input = compactSchema(d.inputSchema)
     return {
       name: def.name,
       mcpName: toMcpName(def.name),
@@ -145,7 +149,8 @@ function registryTool(def: AnyCommand | AnyQueryDef, scope: ToolScope): AppResul
       description: describe(def, kind),
       // The reserved keys (expectedRevision, apply) are not listed: the primer explains them
       // once, the session strips them (docs/architecture/llm-api.md#schemas).
-      inputSchema: input,
+      inputSchema: compactSchema(d.listedInputSchema),
+      fullInputSchema: compactSchema(d.inputSchema),
       outputSchema: compactSchema(d.outputSchema),
       annotations: annotationsOf(def, d.inputSchema),
     }
@@ -153,6 +158,7 @@ function registryTool(def: AnyCommand | AnyQueryDef, scope: ToolScope): AppResul
 }
 
 function sessionTool(def: SessionToolDef): AgentTool {
+  const input = compactSchema(z.toJSONSchema(def.args, { io: 'input' }) as JsonObject)
   return {
     name: def.name,
     mcpName: toMcpName(def.name),
@@ -160,7 +166,8 @@ function sessionTool(def: SessionToolDef): AgentTool {
     area: def.name.split('.')[0] ?? def.name,
     kind: 'session',
     description: def.summary,
-    inputSchema: compactSchema(z.toJSONSchema(def.args, { io: 'input' }) as JsonObject),
+    inputSchema: input,
+    fullInputSchema: input,
     outputSchema: compactSchema(z.toJSONSchema(def.result, { io: 'output' }) as JsonObject),
     annotations: def.annotations ?? { readOnlyHint: true, idempotentHint: true },
   }
@@ -198,13 +205,23 @@ export function filterAreas(
   return tools.filter((t) => t.scope === 'session' || keep.has(t.area))
 }
 
+/**
+ * The annotations as listed: beside `readOnlyHint: true` the MCP spec gives `destructiveHint` and
+ * `idempotentHint` no meaning, so they are left out (docs: #annotations-and-server-instructions).
+ */
+export function listedAnnotations(a: ToolAnnotations): ToolAnnotations {
+  if (a.readOnlyHint !== true) return { ...a }
+  const { destructiveHint: _d, idempotentHint: _i, ...rest } = a
+  return rest
+}
+
 /** The `tools/list` entries: no `title`, no `outputSchema` (decision 2). */
 export function mcpToolList(tools: readonly AgentTool[]) {
   return tools.map((t) => ({
     name: t.mcpName,
     description: t.description,
     inputSchema: t.inputSchema as { type: 'object'; [k: string]: unknown },
-    annotations: { ...t.annotations },
+    annotations: listedAnnotations(t.annotations),
   }))
 }
 
@@ -334,14 +351,125 @@ export function withHomogeneousTuples(node: unknown): unknown {
 }
 
 /**
- * Extracts repeated sub-schemas into `$defs`, drops `$schema`, the safe-integer bounds and the
- * validation-only keywords (`withoutValidationOnlyKeywords`), and writes tuples of equal items as arrays (`withHomogeneousTuples`).
+ * `{ type: 'string', const: 'x' }` → `{ const: 'x' }`: a `const` already fixes the type, so the
+ * schema accepts exactly the same values (docs/architecture/llm-api.md#schemas, compact emission).
+ */
+export function withoutConstTypes(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(withoutConstTypes)
+  if (!isObject(node)) return node
+  const out: JsonObject = {}
+  for (const [k, v] of Object.entries(node)) out[k] = withoutConstTypes(v)
+  const c = out['const']
+  const t = out['type']
+  const jsonType = c === null ? 'null' : typeof c === 'number' ? 'number' : typeof c
+  if (
+    'const' in out &&
+    typeof t === 'string' &&
+    (t === jsonType || (t === 'integer' && Number.isInteger(c)))
+  ) {
+    const { type: _t, ...rest } = out
+    return rest
+  }
+  return out
+}
+
+/**
+ * Drops keywords that allow everything: `additionalProperties: {}` and, below the root (MCP
+ * wants `properties` on the input schema itself), `properties: {}` (an "As <tool>" sketch is
+ * then just `{ type: 'object' }`).
+ */
+export function withoutNoOpKeywords(node: unknown, root = true): unknown {
+  if (Array.isArray(node)) return node.map((n) => withoutNoOpKeywords(n, false))
+  if (!isObject(node)) return node
+  const out: JsonObject = {}
+  const empty = (v: unknown) => isObject(v) && Object.keys(v).length === 0
+  for (const [k, v] of Object.entries(node)) {
+    if (k === 'additionalProperties' && empty(v)) continue
+    if (k === 'properties' && !root && empty(v)) continue
+    // property names are not schemas: their values are, one level down
+    out[k] =
+      (k === 'properties' || k === '$defs' || k === 'patternProperties') && isObject(v)
+        ? Object.fromEntries(Object.entries(v).map(([p, c]) => [p, withoutNoOpKeywords(c, false)]))
+        : withoutNoOpKeywords(v, false)
+  }
+  return out
+}
+
+/**
+ * Keywords that constrain every instance whatever its type: a branch with one of them cannot
+ * take `null` into its `type` (the others, like `items` or `maxLength`, ignore a null).
+ */
+const NOT_TYPE_SPECIFIC = new Set([
+  'const',
+  'anyOf',
+  'oneOf',
+  'allOf',
+  'not',
+  '$ref',
+  'if',
+  'then',
+  'else',
+  'description',
+  'default',
+  '$defs',
+])
+
+/**
+ * A nullable type, `anyOf: [{ type: T, …T's keywords }, { type: 'null' }]`, as the equivalent
+ * `{ type: [T, 'null'], …T's keywords }` (JSON Schema 2020-12: `items`, `maxLength` and the like
+ * ignore a null; with an enum, `null` joins it): the same values, about 20 chars shorter on every
+ * nullable field (docs/architecture/llm-api.md#schemas).
+ */
+export function withNullableTypes(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(withNullableTypes)
+  if (!isObject(node)) return node
+  const out: JsonObject = {}
+  for (const [k, v] of Object.entries(node)) out[k] = withNullableTypes(v)
+  const any = out['anyOf']
+  if (!Array.isArray(any) || any.length !== 2 || 'type' in out || 'enum' in out) return out
+  const isNull = (x: unknown) => isObject(x) && Object.keys(x).length === 1 && x['type'] === 'null'
+  const nullAt = any.findIndex(isNull)
+  const other: unknown = any[1 - nullAt]
+  if (
+    nullAt < 0 ||
+    !isObject(other) ||
+    typeof other['type'] !== 'string' ||
+    other['type'] === 'null' ||
+    Object.keys(other).some((k) => NOT_TYPE_SPECIFIC.has(k)) ||
+    (other['enum'] !== undefined && !Array.isArray(other['enum']))
+  )
+    return out
+  const { anyOf: _a, ...rest } = out
+  if (Object.keys(other).some((k) => k in rest)) return out
+  const merged: JsonObject = { ...rest, ...other, type: [other['type'], 'null'] }
+  if (Array.isArray(other['enum'])) merged['enum'] = [...(other['enum'] as unknown[]), null]
+  return merged
+}
+
+/** Serialized length of a `{"$ref":"#/$defs/dNN"}` use. */
+const REF_CHARS = 22
+/** Serialized length of a `$defs` entry's key and separators (`"dNN":` and a comma). */
+const DEF_ENTRY_CHARS = 7
+
+/**
+ * Sharing a node of `chars` that occurs `uses` times pays only when its uses save more than the
+ * definition costs: `{"type":"string"}` (17 chars) is never shared, it is shorter than its `$ref`.
+ */
+function sharingPays(chars: number, uses: number): boolean {
+  return uses >= 2 && uses * (chars - REF_CHARS) > chars + DEF_ENTRY_CHARS
+}
+
+/**
+ * Extracts repeated sub-schemas into `$defs` where that is shorter (`sharingPays`), drops
+ * `$schema`, the safe-integer bounds and the validation-only keywords
+ * (`withoutValidationOnlyKeywords`), and writes the equivalent shorter forms: tuples of equal items
+ * as arrays (`withHomogeneousTuples`), `const` without its `type` (`withoutConstTypes`),
+ * nullable simple types as type arrays (`withNullableTypes`), no allow-all keywords
+ * (`withoutNoOpKeywords`).
  * Schemas that already use `$ref`/`$defs` (recursive Zod schemas) are returned without sharing.
  */
 export function compactSchema(schema: JsonObject): JsonObject {
-  const { $schema: _s, ...root } = withHomogeneousTuples(
-    withoutValidationOnlyKeywords(withoutSafeIntBounds(schema)),
-  ) as JsonObject
+  const { $schema: _s, ...root } = equivalentShortForms(schema)
   if (JSON.stringify(root).includes('"$ref"')) return root
   // A repeated node is shared whole (description included) if it repeats as is, else without
   // its description, which then stays beside the `$ref`.
@@ -369,10 +497,12 @@ export function compactSchema(schema: JsonObject): JsonObject {
   }
   const rewrite = (node: JsonObject): JsonObject => {
     const full = JSON.stringify(node)
-    if ((counts.get(`=${full}`) ?? 0) >= 2) return { $ref: share(`~${full}`, node) }
+    if (sharingPays(full.length, counts.get(`=${full}`) ?? 0))
+      return { $ref: share(`~${full}`, node) }
     const bare = withoutDescription(node)
-    const bareKey = `~${JSON.stringify(bare)}`
-    if ((counts.get(bareKey) ?? 0) < 2) return mapChildren(node, rewrite)
+    const bareText = JSON.stringify(bare)
+    const bareKey = `~${bareText}`
+    if (!sharingPays(bareText.length, counts.get(bareKey) ?? 0)) return mapChildren(node, rewrite)
     const ref = share(bareKey, bare)
     const desc = node['description']
     return desc === undefined ? { $ref: ref } : { $ref: ref, description: desc }
@@ -380,4 +510,18 @@ export function compactSchema(schema: JsonObject): JsonObject {
   const body = mapChildren(root, rewrite)
   if (defs.size === 0) return body
   return { ...body, $defs: Object.fromEntries([...defs.values()].map((d) => [d.name, d.body])) }
+}
+
+/**
+ * The schema with only the keywords an agent needs, in the shortest equivalent forms (everything
+ * `compactSchema` does except sharing); the tests compare a compact schema with it.
+ */
+export function equivalentShortForms(schema: JsonObject): JsonObject {
+  return withoutNoOpKeywords(
+    withNullableTypes(
+      withoutConstTypes(
+        withHomogeneousTuples(withoutValidationOnlyKeywords(withoutSafeIntBounds(schema))),
+      ),
+    ),
+  ) as JsonObject
 }
