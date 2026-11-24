@@ -2,13 +2,14 @@
 // the spindle (direction icon and word), the work zero G54 (its corner, offset or point), how far the tool
 // reaches past the stock (DF59), the rotation about the spindle axis (0/90/180/270°), the safe
 // heights (clearance with the clamp note, or the item it follows since workholding.md; retract;
-// moved here from the navigator), the Z headroom estimate (DF68), the tool changes (DF66,
-// `ToolChanges`: the tool runs, reorderable), the workholding (`Workholding`, workholding.md) and
-// the machine checks of this setup. Each change is one `plan.setup.update`. DF78: the work zero and the alignment points
-// (`AlignmentFields`).
+// moved here from the navigator), the links between operations and, without workholding items,
+// the clamp height (DF64), the Z headroom estimate (DF68), the tool changes (DF66, `ToolChanges`:
+// the tool runs, reorderable), the workholding (`Workholding`, workholding.md) and the machine
+// checks of this setup. Each change is one `plan.setup.update`. DF78: the work zero and the
+// alignment points (`AlignmentFields`).
 // Read-only (with the plan's reason in the navigator) outside draft and settled design.
 // Doc: docs/conventions/ui.md#design-and-plan-controls-v02, docs/modes/plan-v0.2.md#setups-from-face-directions,
-// docs/modes/alignment.md#plan-ui
+// docs/modes/safe-links.md#agent-api-and-settings, docs/modes/alignment.md#plan-ui
 import { useState } from 'react'
 import { fieldContext } from '../../../../core/design/operation'
 import { DIRECTION_LABEL } from '../../../../core/geometry/face'
@@ -21,10 +22,12 @@ import {
 } from '../../../../core/plan/plan.dto'
 import { setupWorkholding } from '../../../../core/plan/workholding/setup'
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
+import { RETRACTIONS, type Retraction } from '../../../../core/toolpath/links'
 import { Quantity } from '../../../../core/quantity/quantity'
 import type { Overreach } from '../../../../core/toolpath/overreach'
 import type { AppErrorData, Issue } from '../../../../shared/errors/app-error'
 import {
+  formatDuration,
   formatHeight,
   formatReach,
   planMessages,
@@ -135,6 +138,28 @@ export function SetupInspector({
   // a clearance the user set while items exist can go back to following them
   const canFollow =
     !readOnly && holding !== undefined && holding.clearanceSet && holding.items.length > 0
+  const clampHeight = setup.clampHeight === undefined ? undefined : quantityOf(setup.clampHeight)
+  const retraction: Retraction = setup.retraction ?? 'minimum'
+  const clampHeightNote: FieldMessage[] = [
+    {
+      id: 'clampHeightNote',
+      severity: 'note',
+      text: clampHeight === undefined ? m.clampHeightNoteUnknown : m.clampHeightNote,
+    },
+  ]
+  const links = usePlanState((s) => s.data?.links.find((l) => l.setupId === setup.id)?.links)
+  const linksText =
+    links === undefined || links === null
+      ? m.linksUnknown
+      : retraction === 'full'
+        ? m.linksFull
+        : m.linksValue(
+            links.low,
+            links.count,
+            links.savedSeconds === null || links.savedSeconds <= 0
+              ? undefined
+              : formatDuration(links.savedSeconds),
+          )
 
   const update = async (args: object, gesture?: string) => {
     const r = await call(
@@ -181,6 +206,8 @@ export function SetupInspector({
             ) : null}
             <dt>{m.reach}</dt>
             <dd>{reach}</dd>
+            <dt>{m.links}</dt>
+            <dd>{linksText}</dd>
             {headroom !== undefined ? (
               <>
                 <dt>{m.zHeadroom}</dt>
@@ -240,6 +267,44 @@ export function SetupInspector({
           onCommit={(q, gesture) => void update({ retractHeight: q.source }, gesture)}
           onCancelGesture={cancelGesture}
         />
+        <Field
+          label={m.retraction}
+          kind="toggle"
+          illustration={<FieldIcon name="retract" />}
+          readOnly={readOnly}
+          messages={[
+            { id: 'retractionHint', severity: 'note', text: m.retractionHint[retraction] },
+          ]}
+        >
+          <SegmentedControl<Retraction>
+            label={m.retraction}
+            options={RETRACTIONS.map((r) => ({
+              value: r,
+              label: r === 'minimum' ? m.retractionMinimum : m.retractionFull,
+            }))}
+            value={retraction}
+            disabled={readOnly}
+            onValueChange={(v) => {
+              if (v !== retraction) void update({ retraction: v })
+            }}
+          />
+        </Field>
+        {/* workholding.md#links-and-safe-heights: items supersede the clamp height */}
+        {(holding?.items.length ?? 0) > 0 ? null : (
+          <QuantityInput
+            label={m.clampHeight}
+            kind="length"
+            optional
+            placeholder={m.clampHeightPlaceholder}
+            defaultUnit={defaultUnit('length', units)}
+            value={clampHeight}
+            illustration={<FieldIcon name="clearance" />}
+            readOnly={readOnly}
+            messages={[...messages('clampHeight'), ...clampHeightNote]}
+            onCommit={(q, gesture) => void update({ clampHeight: q?.source ?? null }, gesture)}
+            onCancelGesture={cancelGesture}
+          />
+        )}
         <AlignmentFields
           plan={plan}
           setup={setup}

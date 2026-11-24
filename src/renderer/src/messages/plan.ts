@@ -189,6 +189,31 @@ export const planMessages = {
     /** DF59: the note on the clearance field while the setup has no workholding, with its value. */
     clampNote: (height: string) =>
       `Keep clamps lower than ${height} above the stock top, or add them under Workholding.`,
+    /** DF64 (safe-links.md): how the links between operations of one tool run. */
+    retraction: 'Links',
+    retractionMinimum: 'Minimum',
+    retractionFull: 'Full',
+    retractionHint: {
+      minimum:
+        'Between operations of one tool, the tool crosses low over the cut stock, at the retract height above it.',
+      full: 'Between operations, the tool always rises to the clearance height.',
+    },
+    /** DF64: the clamp height field (setups without workholding items), its placeholder and note. */
+    clampHeight: 'Clamp height',
+    clampHeightPlaceholder: 'Unknown',
+    clampHeightNote:
+      'How far clamps rise above the stock top: links between operations pass over them by the retract height.',
+    clampHeightNoteUnknown: 'Unknown: links stay inside the cut area or at the clearance height.',
+    /** DF64: the setup's links as a fact. */
+    links: 'Link time',
+    linksValue: (low: number, count: number, saved: string | undefined) =>
+      low === 0
+        ? count === 0
+          ? 'No links: every operation follows a tool change.'
+          : `All ${plural(count, 'link', 'links')} at the clearance height.`
+        : `${low} of ${plural(count, 'link', 'links')} low${saved === undefined ? '' : `, ${saved} saved`}.`,
+    linksFull: 'Every link at the clearance height (full retraction).',
+    linksUnknown: 'Generate toolpaths to see the links between operations.',
     /** DF59: how far the tool reaches past the stock sides on the machine. */
     reach: 'Past the stock',
     reachValue: (sides: readonly string[]) =>
@@ -375,6 +400,9 @@ export const planMessages = {
       `Z headroom not checked: enter ${missing.join(' and ')} in the machine.`,
     zHeadroomPartly: (missing: readonly string[]) =>
       `Z headroom checked as if there were no spoilboard: enter ${missing.join(' and ')} in the machine.`,
+    /** DF64 (safe-links.md): links run low; the first real cut gets an air pass. */
+    linksNote:
+      'Links between operations run low over the stock. Before the first real cut with this program, run it once in the air with Z0 set 30 mm above the stock.',
     warnings: 'Export warnings',
     noWarnings: 'No machine warnings.',
     close: 'Close',

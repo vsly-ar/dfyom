@@ -267,6 +267,10 @@ export class ResultShaper {
     const zRefOf = new Map<string, Obj | null>()
     for (const r of (warningList?.['zRefs'] as Obj[] | undefined) ?? [])
       zRefOf.set(r['planOperationId'] as string, (r['zRef'] as Obj | null) ?? null)
+    // DF64: the links summary per setup (null until its toolpaths are current)
+    const linksOf = new Map<string, Obj | null>()
+    for (const r of (warningList?.['links'] as Obj[] | undefined) ?? [])
+      linksOf.set(r['setupId'] as string, (r['links'] as Obj | null) ?? null)
     // DF78: the work zero and alignment points of each setup that has either
     const alignmentOf = new Map<string, Obj>()
     for (const a of (warningList?.['alignment'] as Obj[] | undefined) ?? [])
@@ -336,6 +340,10 @@ export class ResultShaper {
           ...(own.length > 0 ? { findings: countBy(own) } : {}),
         }
       })
+      // DF64: the setup's time is the linked program's (the toolpaths' own stats are at clearance)
+      const saved = linksOf.get(s['id'] as string)?.['savedSeconds']
+      if (setupSeconds !== null && typeof saved === 'number')
+        setupSeconds = Math.max(0, setupSeconds - saved)
       if (setupSeconds === null) planSeconds = null
       else if (planSeconds !== null) planSeconds += setupSeconds
       // DF66: the tool runs and the tool changes the operator makes (setup start included)
@@ -389,6 +397,9 @@ export class ResultShaper {
             }),
         clearanceHeight: s['clearanceHeight'],
         retractHeight: s['retractHeight'],
+        retraction: s['retraction'] ?? 'minimum',
+        clampHeight: s['clampHeight'] ?? null,
+        links: linksOf.get(s['id'] as string) ?? null,
         overreach: reach === null ? null : overreachIn(reach, inch),
         operations,
         seconds: setupSeconds,

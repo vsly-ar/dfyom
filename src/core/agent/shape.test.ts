@@ -420,6 +420,9 @@ describe('plan.get', () => {
             rotation: 0,
             clearanceHeight: 10,
             retractHeight: 2,
+            retraction: 'minimum',
+            clampHeight: null,
+            links: null,
             overreach: null,
             operations: [
               {

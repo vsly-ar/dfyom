@@ -272,7 +272,12 @@ class Writer {
     const step = unit === 'in' ? 100 : 10
     const up = (mm: number) =>
       formatNumber(Math.ceil(mm * this.units.perMm * step - 1e-9) / step, 2)
-    const clearance = `clearance Z ${this.coord(this.p.clearanceZ)} ${unit}`
+    const clamp = this.p.setup?.clamp
+    // DF64: with a clamp height the links pass over the clamps (docs/modes/safe-links.md#clamps)
+    const clearance =
+      clamp === undefined
+        ? `clearance Z ${this.coord(this.p.clearanceZ)} ${unit}`
+        : `Z ${this.coord(clamp.height)} ${unit}: links pass ${this.coord(clamp.margin)} ${unit} above them`
     const sides = (list: readonly [string, number][]) =>
       list.filter(([, v]) => v > 0).map(([name, v]) => `${name} ${up(v)}`)
     const x = sides([
@@ -296,7 +301,12 @@ class Writer {
       this.comment(line(x))
       this.comment(line(y))
     }
-    if (clampNote) this.comment(`Keep clamps clear of those sides, below ${clearance}`)
+    if (!clampNote) return
+    if (clamp === undefined) this.comment(`Keep clamps clear of those sides, below ${clearance}`)
+    else {
+      this.comment('Keep clamps clear of those sides')
+      this.comment(`Keep clamps below ${clearance}`)
+    }
   }
 
   private modes(): void {

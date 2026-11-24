@@ -207,6 +207,13 @@ export const ERROR_CODES = {
     userMessage: 'The tool or the cutting values do not fit this operation.',
     retryable: false,
   },
+  // Safe links (hardening DF64): docs/modes/safe-links.md#verification-on-the-virtual-machine
+  'plan.links.collision': {
+    severity: 'error',
+    userMessage:
+      'A link between operations would pass too close to the material. This is a bug: export with full retraction and report it.',
+    retryable: false,
+  },
   // Post-processor (task 2.11): docs/architecture/grbl.md#export-checks
   'post.noMachine': {
     severity: 'warn',

@@ -57,7 +57,7 @@ The **margin** `workholdingMargin` (setup field, default 2 mm / 0.08″, ≥ 0) 
 
 - **Clearance height** (rapids between operations, tool changes, start, end): its default becomes max(10 mm, highest `zMax` over all prisms + margin), measured from Z0 as before. A value set by the user stays; one below that height is the error `plan.workholding.clearanceLow` (blocks export) naming the item.
 - **Retract height** stays low (default 2 mm above the operation's surface). Inside an operation every rapid on the retract plane and every link that would pass through a keep-out zone below its top is rewritten as a **hop**: straight up to the zone's top (`zMax` + margin; the highest of the zones crossed), across, straight down to the retract plane. A hop never goes above the clearance height (it is at most that by construction).
-- Links between operations over the in-process stock (hardening DF64, draft) are the same kind of post-pass: [safe-links.md](safe-links.md) proposes one pass for both, with the prisms as the floor outside the cleared footprint ([§ Clamps](safe-links.md#clamps)).
+- Links between operations over the in-process stock (hardening DF64, L1–L2 implemented) are the same kind of post-pass: [safe-links.md](safe-links.md) reads `floorAlong` for every link, the items in place of the clamp height ([§ Clamps](safe-links.md#clamps)).
 - The hops are a **post-pass over the setup's ordered toolpaths** (`linkAroundWorkholding`), after generation and before the check: the per-operation toolpath cache keeps its keys, and moving a clamp re-runs only the post-pass and the check. In the black-box test this replaces "clearance 35 / retract 27 on both setups" (+120 s) with a few hops.
 
 ## Keep-out in toolpaths
@@ -130,7 +130,7 @@ Built in hardening DF59 (2026-11-24). Code: `src/core/plan/workholding/` (`items
 
 ### `clampHeight` superseded by items
 
-[safe-links.md](safe-links.md) (DF64) adds an optional per-setup `clampHeight`. When a setup has workholding items, the items are the floor and `clampHeight` is ignored (derived: the highest item top); it stays the fallback for a setup without items. This doc does not change DF64's code; DF64 reads `setupWorkholding(…).prisms.length > 0` to choose.
+[safe-links.md](safe-links.md) (DF64) adds an optional per-setup `clampHeight`. When a setup has workholding items, the items are the floor and `clampHeight` is ignored (derived: the highest item top); it stays the fallback for a setup without items. DF64 reads `setupWorkholding(…).prisms.length > 0` to choose ([safe-links.md § Implementation notes](safe-links.md#implementation-notes-l1l2)).
 
 ### Deferred
 

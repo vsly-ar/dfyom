@@ -111,7 +111,7 @@ export const toolpathGenerateJob = defineCommand({
   kind: 'job',
   name: 'plan.toolpath.generate',
   summary:
-    'Generate the toolpaths of a plan (or of some plan operations) in machining order; reports each operation as generated, cached or failed.',
+    'Generate the toolpaths of a plan (or some plan operations) in machining order; reports each as generated, cached or failed.',
   title: () => 'Generate toolpaths',
   machine: false,
   args: z.object({

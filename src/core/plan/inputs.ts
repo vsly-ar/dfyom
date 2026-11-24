@@ -166,6 +166,7 @@ export function planOperationInputs(
       // the Z reference (DF69) moves only the exported program, never the toolpath
       planOperation: { ...op, zRef: undefined },
       snapshots: used,
+      // the links (DF64) change only the exported program, never the toolpaths;
       // S5: the resolved zero, not the points (docs/modes/alignment.md#implementation-slice-1);
       // workholding enters through the clearance height and region operations' own hash only, so
       // moving a clamp regenerates facings and pockets, not every operation (WH-D)
@@ -175,6 +176,8 @@ export function planOperationInputs(
         alignment: undefined,
         zero: moved ? zero : undefined,
         workholding: undefined,
+        retraction: undefined,
+        clampHeight: undefined,
         workholdingMargin: undefined,
         clearanceHeightSet: undefined,
         ...(holding.clearanceFrom === undefined ? {} : { clearance: holding.clearance }),

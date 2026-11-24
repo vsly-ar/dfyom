@@ -13,6 +13,7 @@ import {
 import { DIRECTIONS as FACE_DIRECTIONS } from '../geometry/face'
 import { NAME_MAX, quantityDto } from '../library/item'
 import { SnapshotDtoSchema } from '../library/snapshot'
+import { RETRACTIONS } from '../toolpath/links'
 import { ALIGNMENT_POINTS_MAX, AlignmentPointDtoSchema, SetupZeroDtoSchema } from './alignment.dto'
 import { PRESET_NAME_MAX } from '../library/tool.dto'
 import type { Quantity } from '../quantity/quantity'
@@ -198,6 +199,13 @@ export const SetupDtoSchema = z.object({
       'The user set the clearance height: it stays as entered; absent = at least the top of the workholding + margin (docs/modes/workholding.md#links-and-safe-heights)',
     ),
   retractHeight: length().describe("Up from the operation's `on` surface"),
+  retraction: z
+    .enum(RETRACTIONS)
+    .optional()
+    .describe('Links between operations (DF64): minimum over the stock, or full; absent = minimum'),
+  clampHeight: length()
+    .optional()
+    .describe('How far clamps rise above the stock top (DF64); absent = unknown'),
   workholding: z
     .array(WorkholdingItemDtoSchema)
     .optional()
