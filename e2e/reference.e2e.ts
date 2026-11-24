@@ -8,7 +8,8 @@
 // With DFYOM_RENDERS=1 it writes the light and dark review renders of the panel and of Fit mode
 // to design/reference/renders/. A second test reads levels and a section of the reference and makes
 // a shape from it, with the fitted loops on the ghost (DF60 P1; renders df-reference-tools and
-// df-reference-level-hover).
+// df-reference-level-hover). A third reads the full enclosure's holes from the bottom and adds
+// the countersunk foot holes as one Bolt hole with Clones (DF60 P3; render df-reference-holes).
 // Docs: docs/conventions/ui.md#reference-panel-hardening-df2df8, docs/modes/reference-model.md#display,
 // docs/conventions/ui.md#reference-tools-df60
 import { existsSync } from 'node:fs'
@@ -24,11 +25,16 @@ import {
 } from './app.fixture'
 
 const STL = resolve('src/core/design/__fixtures__/enclosure-wood-base.stl')
+const FULL_STL = resolve('src/core/design/__fixtures__/enclosure-wood-full.stl')
 const RENDERS = process.env['DFYOM_RENDERS'] === '1'
 const rendersDir = resolve(__dirname, '../design/reference/renders')
 
 /** Open dialogs: "Import reference" answers the STL, anything else the project; save the project. */
-async function stubFileDialogs(app: ElectronApplication, project: string): Promise<void> {
+async function stubFileDialogs(
+  app: ElectronApplication,
+  project: string,
+  stl = STL,
+): Promise<void> {
   await app.evaluate(
     ({ dialog }, f) => {
       const title = (args: unknown[]) => (args.at(-1) as { title?: string } | undefined)?.title
@@ -40,7 +46,7 @@ async function stubFileDialogs(app: ElectronApplication, project: string): Promi
       dialog.showSaveDialog = (() =>
         Promise.resolve({ canceled: false, filePath: f.project })) as typeof dialog.showSaveDialog
     },
-    { stl: STL, project },
+    { stl, project },
   )
 }
 
@@ -258,5 +264,48 @@ test('reference tools (DF60): levels from both sides, a level sets the section, 
   await expect(section.getByText('Shape created.')).toBeVisible({ timeout: 30_000 })
   const shapes = await openPartSetup(page, 'Shapes')
   await expect(shapes.getByText('Section 20 mm').first()).toBeVisible()
+  expect(dfyom.rendererErrors).toEqual([])
+})
+
+test('reference holes (DF60 P3): the foot holes from the bottom, Add as Bolt hole with Clones', async ({
+  dfyom,
+}) => {
+  test.setTimeout(120_000)
+  await stubFileDialogs(dfyom.app, join(dfyom.dataDir, 'holes.dfyom'), FULL_STL)
+  const page = await dfyom.app.firstWindow()
+  await page.waitForLoadState('domcontentloaded')
+  if (RENDERS) await page.setViewportSize({ width: 1280, height: 900 })
+  const navigator = page.getByRole('navigation', { name: 'Navigator' })
+  await navigator.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  await dialog.getByRole('textbox', { name: 'Project name' }).fill('Holes')
+  await dialog.getByRole('button', { name: 'Create project' }).click()
+  const setup = page.getByRole('region', { name: 'Set up the part' })
+  // the stock as thick as the model: the feet sit on the stock's bottom
+  await setField(setup, 'Length (X)', '260')
+  await setField(setup, 'Width (Y)', '190')
+  await setField(setup, 'Thickness (Z)', '60.523')
+  await page
+    .getByRole('dialog', { name: 'Stock' })
+    .getByRole('button', { name: 'Create part' })
+    .click()
+  const panel = await openReferencePanel(page)
+  await panel.getByRole('button', { name: 'Import STL…' }).click()
+  await expect(panel.getByTitle('enclosure-wood-full')).toBeVisible({ timeout: 30_000 })
+
+  await panel.getByRole('combobox', { name: 'Read from' }).click()
+  await page.getByRole('option', { name: 'Bottom' }).click()
+  const holes = panel.getByRole('region', { name: 'Holes' })
+  const feet = holes.getByText(/^4 × Ø 2\.45 mm countersunk .*grid 2 × 2$/)
+  await expect(feet).toBeVisible({ timeout: 30_000 })
+  const viewport = page.getByRole('region', { name: '3D viewport' })
+  await expect(viewport).toHaveAccessibleDescription(/4 holes marked on the reference/, {
+    timeout: 30_000,
+  })
+  await holes.scrollIntoViewIfNeeded()
+  await render(page, 'reference-holes')
+
+  await holes.getByRole('button', { name: /^Add as Bolt hole: 4 ×/ }).click()
+  await expect(holes.getByText('4 Bolt holes added.')).toBeVisible({ timeout: 30_000 })
   expect(dfyom.rendererErrors).toEqual([])
 })

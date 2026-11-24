@@ -81,7 +81,8 @@ const warningLabels = {
 }
 
 const warningView = (w: ReferenceWarning): WarningView => ({
-  id: `${w.code}:${w.referenceId}`,
+  // a scale change can put several hole sizes below the smallest tool (P3): one row each
+  id: `${w.code}:${w.referenceId}${w.code === 'reference.featureBelowTool' ? `:${String(w.params['diameter'])}` : ''}`,
   tier: w.severity === 'info' ? 'soft' : 'hard',
   text: w.message,
 })
@@ -222,6 +223,7 @@ function ReferenceBody({
   const call = useCommand()
   const cancelGesture = useCancelGesture()
   const notes = useUi((s) => s.referenceNotes[ref.id])
+  const setNotes = useUi((s) => s.setReferenceNotes)
   const setVisible = useUi((s) => s.setReferenceVisible)
   const seeThrough = useUi((s) => s.seeThroughStock)
   const setSeeThrough = useUi((s) => s.setSeeThroughStock)
@@ -250,6 +252,16 @@ function ReferenceBody({
       { partId: part.dto.id, referenceId: ref.id, ...args },
       gesture === undefined ? undefined : { gesture },
     )
+    // a size change replaces the notes on holes below the smallest tool (DF60 P3)
+    if (r.ok && ('scale' in args || 'fit' in args || 'sourceUnit' in args)) {
+      const below = (r.value as { warnings?: readonly ReferenceWarning[] }).warnings?.filter(
+        (w) => w.code === 'reference.featureBelowTool',
+      )
+      setNotes(ref.id, [
+        ...(notes ?? []).filter((w) => w.code !== 'reference.featureBelowTool'),
+        ...(below ?? []),
+      ])
+    }
     const placed = r.ok ? undefined : placeErrors(r.error, path)
     setErrors(placed?.errors ?? [])
     setSummary(placed?.summary)

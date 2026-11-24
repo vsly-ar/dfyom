@@ -552,6 +552,29 @@ function mergeSlivers(q: readonly P[], st: Stretch[], tol: number, maxLeft: numb
   }
 }
 
+/**
+ * The circle a cleaned closed polyline is (step 2 of the file comment): at least 8 vertices, every
+ * one within `tolerance` of the least-squares circle and no chord spanning more than 46° of it;
+ * undefined otherwise. Shared with the hole finder (reference-tools.md § Features (holes)).
+ */
+export function circleOf(
+  pts: readonly P[],
+  tolerance: number,
+): { circle: { centre: P; radius: number }; deviation: number } | undefined {
+  const n = pts.length
+  if (n < 8 || ccwArea(pts) === 0) return undefined
+  const c = lsCircle(pts)
+  if (c === undefined) return undefined
+  let dev = 0
+  for (const p of pts) dev = Math.max(dev, Math.abs(dist(p, c.centre) - c.radius))
+  if (dev > tolerance) return undefined
+  // no chord spans more than a faceted circle's (8 chords at least): a straight side whose
+  // ends lie on the circle (a D-shaped hole's flat) has no vertex along it to tell
+  const maxChord = 2 * c.radius * Math.sin(CIRCLE_MAX_CHORD / 2)
+  if (!pts.every((p, i) => dist(p, pts[(i + 1) % n]!) <= maxChord)) return undefined
+  return { circle: c, deviation: dev }
+}
+
 /** Fits a closed polyline (see the file comment). At least three distinct vertices. */
 export function fitClosedPolyline(points: readonly P[], o: PolylineFitOptions): PolylineFit {
   const pts = cleanPolyline(points)
@@ -559,29 +582,20 @@ export function fitClosedPolyline(points: readonly P[], o: PolylineFitOptions): 
   if (n < 3) return { elements: [], corners: [], maxDeviation: 0 }
   const tol = o.tolerance
   // a circle?
-  if (n >= 8) {
-    const c = lsCircle(pts)
-    if (c !== undefined) {
-      let dev = 0
-      for (const p of pts) dev = Math.max(dev, Math.abs(dist(p, c.centre) - c.radius))
-      // no chord spans more than a faceted circle's (8 chords at least): a straight side whose
-      // ends lie on the circle (a D-shaped hole's flat) has no vertex along it to tell
-      const maxChord = 2 * c.radius * Math.sin(CIRCLE_MAX_CHORD / 2)
-      const chordsOk = pts.every((p, i) => dist(p, pts[(i + 1) % n]!) <= maxChord)
-      if (dev <= tol && chordsOk && ccwArea(pts) !== 0) {
-        const ccw = ccwArea(pts) > 0
-        const a: P = [c.centre[0] + c.radius, c.centre[1]]
-        const b: P = [c.centre[0] - c.radius, c.centre[1]]
-        return {
-          elements: [
-            { kind: 'arc', a, b, centre: c.centre, ccw },
-            { kind: 'arc', a: b, b: a, centre: c.centre, ccw },
-          ],
-          corners: [],
-          maxDeviation: dev,
-          circle: c,
-        }
-      }
+  const found = circleOf(pts, tol)
+  if (found !== undefined) {
+    const { circle: c, deviation } = found
+    const ccw = ccwArea(pts) > 0
+    const a: P = [c.centre[0] + c.radius, c.centre[1]]
+    const b: P = [c.centre[0] - c.radius, c.centre[1]]
+    return {
+      elements: [
+        { kind: 'arc', a, b, centre: c.centre, ccw },
+        { kind: 'arc', a: b, b: a, centre: c.centre, ccw },
+      ],
+      corners: [],
+      maxDeviation: deviation,
+      circle: c,
     }
   }
   const turns = pts.map((p, i) => turnAt(pts[(i - 1 + n) % n]!, p, pts[(i + 1) % n]!))

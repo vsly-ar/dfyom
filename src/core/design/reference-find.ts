@@ -25,10 +25,13 @@ import { applyPlacement, unapplyPlacement, type Vec3 } from '../geometry/model'
 import { setupDirection, setupRotation } from '../plan/setups'
 import type { ProjectDoc, UnitSystem } from '../project/document'
 import { setupFrame, type WcsRotation } from '../toolpath/wcs'
+import { Tool } from '../library/tool'
+import { isEndMillType } from '../library/tool.dto'
 import { Quantity } from '../quantity/quantity'
 import type { QuantityDTO } from '../quantity/quantity.dto'
-import { referenceLevels, referenceSection } from '../workers/tasks'
+import { referenceHoles, referenceLevels, referenceSection } from '../workers/tasks'
 import type { LoadedPart } from './load'
+import type { HoleOptions, MeshHoles } from './mesh-holes'
 import type { LevelOptions, MeshLevels } from './mesh-levels'
 import { fieldContext } from './operation'
 import { ghostMatrix, sectionMatrix, type Placement } from './reference'
@@ -249,6 +252,40 @@ export async function referenceLevelsOf(
     { signal: new AbortController().signal, progress: NO_PROGRESS },
   )
   return r.isErr() ? Err(r.unwrapErr().withContext(where, { referenceId: view.ref.id })) : r
+}
+
+/** The holes seen from the face (DF60 P3), largest diameters first. */
+export async function referenceHolesOf(
+  ctx: Pick<QueryContext, 'services'>,
+  view: ReferenceView,
+  options: HoleOptions,
+  where: string,
+): AsyncAppResult<MeshHoles> {
+  const path = assetPath(ctx, view.ref, where)
+  if (path.isErr()) return path
+  const r = await ctx.services.workers.run(
+    referenceHoles,
+    { path: path.unwrap(), triangles: view.ref.asset.triangles, matrix: view.matrix, options },
+    { signal: new AbortController().signal, progress: NO_PROGRESS },
+  )
+  return r.isErr() ? Err(r.unwrapErr().withContext(where, { referenceId: view.ref.id })) : r
+}
+
+/**
+ * The smallest library tool that could make a hole (a drill or an end mill, mm), for the
+ * `noTool` note and `reference.featureBelowTool`; undefined without one (DF60 P3).
+ */
+export function smallestHoleTool(ctx: Pick<QueryContext, 'services'>): number | undefined {
+  const library = ctx.services.library
+  if (library === undefined) return undefined
+  let best: number | undefined
+  for (const item of library.list('tool').items) {
+    const t = item.values
+    if (!(t instanceof Tool) || !(t.type === 'drill' || isEndMillType(t.type))) continue
+    const d = t.diameter.canonical
+    if (d > 0 && (best === undefined || d < best)) best = d
+  }
+  return best
 }
 
 /** Stock surfaces only, as for placement: a reference is read against the stock. */

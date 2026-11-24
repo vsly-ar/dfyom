@@ -97,13 +97,20 @@ export function useDesignScene(): SceneProps {
       faceMatrix: sectionMatrix(matrix, faceFrame(overlayState.direction, stockSize)),
     })
   }, [panel, preview, overlayState, part, references])
-  const overlaySummary =
+  const sectionSummary =
     referenceOverlay === null || overlayState?.loops == null
       ? undefined
       : referenceMessages.tools.viewportSection(
           overlayState.loops.length,
           referenceOverlay.corners.length,
         )
+  const holeCount = referenceOverlay === null ? 0 : (overlayState?.holes?.length ?? 0)
+  const overlaySummary =
+    holeCount === 0
+      ? sectionSummary
+      : [sectionSummary, referenceMessages.tools.viewportHoles(holeCount)]
+          .filter((x) => x !== undefined)
+          .join(' ')
   const referenceSummary = references
     .filter((r) => r.visible)
     .map((r) =>

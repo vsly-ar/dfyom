@@ -285,6 +285,7 @@ export const REFERENCE_WARNING_CODES = [
   'reference.unitGuessed',
   'reference.openMesh',
   'reference.manyTriangles',
+  'reference.featureBelowTool',
 ] as const
 
 export const ReferenceWarningSchema = z.object({
