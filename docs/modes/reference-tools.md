@@ -1,6 +1,6 @@
 # Reference tools: section, levels, holes, compare and fit for a reference model
 
-Status: draft (proposed 2026-11-23 for hardening [DF60](../plans/hardening.md); every decision below is a proposal until the user answers [Q70–Q80](#open-questions-for-the-user)) · Source: black-box test of 2026-11-23 (scaled enclosure in two setups, `.continuous/research/2026-11-23-enclosure-two-setup-test.md`, issues I-5 and I-11) · Base: [reference-model.md](reference-model.md) (import, placement, fit, the [reference-only rule](reference-model.md#rule-reference-only)) · Earlier drafts this builds on: [reference-query.md](reference-query.md) (levels, section, holes) and [deviation.md](deviation.md) (compare), both v0.4 follow-up, awaiting [Q41–Q44](../plans/v0.4-llm-first.md#questions-for-the-user) · Shapes and fitting: [shapes.md](../architecture/shapes.md) · Agent API and budget: [llm-api.md](../architecture/llm-api.md) · Hole feature: [design-v0.4.md § Hole feature](design-v0.4.md#hole-feature) · Terms: [glossary.md](../glossary.md)
+Status: draft (proposed 2026-11-23 for hardening [DF60](../plans/hardening.md); the user answered [Q70–Q80](#open-questions-for-the-user) on 2026-11-24: all recommendations taken; P0 consolidation pending) · Source: black-box test of 2026-11-23 (scaled enclosure in two setups, `.continuous/research/2026-11-23-enclosure-two-setup-test.md`, issues I-5 and I-11) · Base: [reference-model.md](reference-model.md) (import, placement, fit, the [reference-only rule](reference-model.md#rule-reference-only)) · Earlier drafts this builds on: [reference-query.md](reference-query.md) (levels, section, holes) and [deviation.md](deviation.md) (compare), both v0.4 follow-up, awaiting [Q41–Q44](../plans/v0.4-llm-first.md#questions-for-the-user) · Shapes and fitting: [shapes.md](../architecture/shapes.md) · Agent API and budget: [llm-api.md](../architecture/llm-api.md) · Hole feature: [design-v0.4.md § Hole feature](design-v0.4.md#hole-feature) · Terms: [glossary.md](../glossary.md)
 
 ## Problem
 
@@ -218,7 +218,7 @@ New terms (added to [glossary.md](../glossary.md) with this draft): **Missing ma
 
 ## Open questions for the user
 
-Each with a recommendation; "Q70 ok" takes it.
+Each with a recommendation; "Q70 ok" takes it. **Answered by the user 2026-11-24 ("Q70-80 OK"): all recommendations taken.**
 
 1. **Q70 – Slot.** DF60 in hardening takes P1–P3 (levels, section → shape, setup faces, holes), then P4–P5 (compare and overlay), instead of waiting for the v0.4 follow-up's R1–R5 and V1–V3; the simulated-cut compare stays in the follow-up. _Recommendation:_ yes; P1 first, since it removes the slicer and the `smallestInsideRadius: 0` problem in one step.
 2. **Q71 – One doc.** On acceptance, [reference-query.md](reference-query.md) is merged into this doc (it becomes the single owner of levels, section and holes) and [deviation.md](deviation.md) keeps only the simulated-cut source; the follow-up plan's rows 1.2 and 1.4 then point here. And may the black-box test's full enclosure STL become a test fixture? _Recommendation:_ yes to both.
