@@ -78,6 +78,29 @@ export const STILL_STATES: ReadonlySet<string> = new Set(['Hold:0', 'Door:0', 'D
 
 const NO_OVERRIDES: Overrides = { feed: 100, rapid: 100, spindle: 100 }
 
+/** `$H` reply limit when the controller's `$$` gives no homing rates or travel (10 min). */
+export const HOMING_TIMEOUT_FALLBACK_MS = 600_000
+
+/**
+ * Clock time `$H` may wait for its `ok` (DF87): GRBL's worst case for the controller's `$$`, each
+ * axis on its own (forks may home X and Y one after the other): search up to 1.5 × travel at
+ * `$25`, two pull-offs `$27` at `$25`, locate up to 5 × `$27` at `$24`, debounce `$26` four times
+ * per axis; × 1.25 + 30 s, at least 1 min. Without `$24`, `$25` or `$130–$132`: 10 min.
+ * Docs: docs/modes/run.md#5-watchdogs, docs/architecture/grbl.md#homing-and-machine-coordinates
+ */
+export function homingTimeoutMs(settings: ReadonlyMap<number, number>): number {
+  const feed = settings.get(24) ?? 0
+  const seek = settings.get(25) ?? 0
+  const travel = [130, 131, 132].map((n) => settings.get(n) ?? 0)
+  if (!(feed > 0) || !(seek > 0) || travel.some((t) => !(t > 0))) return HOMING_TIMEOUT_FALLBACK_MS
+  const pull = Math.max(0, settings.get(27) ?? 0)
+  const debounce = Math.max(0, settings.get(26) ?? 0)
+  let ms = 0
+  for (const t of travel)
+    ms += ((1.5 * t + 2 * pull) / seek + (5 * pull) / feed) * 60_000 + 4 * debounce
+  return Math.max(60_000, Math.round(ms * 1.25 + 30_000))
+}
+
 /** DFYOM tool-change marker, matched against a whole line (grbl.md#output-dialect). */
 const MARKER = /^\(DFYOM TOOL CHANGE (\d+): ([^()]*)\)$/
 /** The line after a marker: `M0`, or `M0 ;message` since DF63 (grbl.md#output-dialect). */
@@ -239,7 +262,10 @@ export interface SenderOptions {
   readonly statusTimeoutMs?: number
   /** Clock time a controlled stop waits for `Hold:0` before the reset (default 5 s). */
   readonly holdTimeoutMs?: number
-  /** Clock time a command may wait for its reply (default 10 s; `$H` 10 min) → `machine.connection`. */
+  /**
+   * Clock time a command may wait for its reply (default 10 s; `$H`: `homingTimeoutMs` of the
+   * controller's `$$`) → `machine.connection`.
+   */
   readonly commandTimeoutMs?: number
   /**
    * Clock time the machine may report `Idle` while a line waits for its `ok` (default 5 s, plus
@@ -405,6 +431,8 @@ export class GrblSender {
   private wcoPending = true
   private lastG54: Vec3 | undefined
   private overrides: Overrides | undefined
+  /** `$H` reply limit from the handshake's `$$` (DF87). */
+  private homingMs = HOMING_TIMEOUT_FALLBACK_MS
 
   /**
    * Our last `!` (report ordinal when it went out), until a report requested after it shows the
@@ -549,6 +577,7 @@ export class GrblSender {
     if (set.isErr()) return this.connectFailed(set.unwrapErr(), where)
     const settings = parseSettings(set.unwrap())
     this.inches = (settings.get(13) ?? 0) !== 0
+    this.homingMs = homingTimeoutMs(settings)
     const g54 = await this.readWorkZero()
     if (g54.isErr()) return this.connectFailed(g54.unwrapErr(), where)
     const modes = await this.request('$G')
@@ -804,7 +833,8 @@ export class GrblSender {
     if (pf.isErr()) return Promise.resolve(Err(pf.unwrapErr()))
     return new Promise((resolve) => {
       const cmd: PendingCommand = { line, replies: [], resolve, settled: false }
-      const ms = timeoutMs ?? (line === '$H' ? 600_000 : (this.opts.commandTimeoutMs ?? 10_000))
+      const ms =
+        timeoutMs ?? (line === '$H' ? this.homingMs : (this.opts.commandTimeoutMs ?? 10_000))
       const arm = (): (() => void) => {
         const holds = this.holdReports
         return this.clock.schedule(this.clock.now() + ms, () => {
@@ -829,9 +859,9 @@ export class GrblSender {
   private settle(cmd: PendingCommand, r: AppResult<readonly GrblLine[]>): void {
     if (cmd.settled) return
     cmd.settled = true
-    // the poll outstanding through a silent homing cycle gets a fresh limit (homingInFlight)
-    if (cmd.line === '$H' && this.pollOutstandingSince !== undefined)
-      this.pollOutstandingSince = this.timers.now()
+    // DF87: the `?` sent during a silent homing cycle may never be answered (GRBL forks drop it):
+    // poll afresh at once, so the position after homing comes from a report asked for now
+    if (cmd.line === '$H' && this.connected) this.repoll()
     cmd.cancelTimeout?.()
     cmd.cancelTimeout = undefined
     cmd.resolve(r)
@@ -889,6 +919,7 @@ export class GrblSender {
     this.idleWithLineSince = undefined
     this.inflight.push(sent)
     this.used += sent.bytes
+    if (sent.kind === 'command' && line === '$H') this.showHoming()
     if (sent.kind === 'program' && this.log.isLevelEnabled('trace'))
       this.log.trace({ line: sent.index + 1 }, 'line sent')
     this.writeBytes(encode(`${line}\n`))
@@ -986,7 +1017,8 @@ export class GrblSender {
   }
 
   private onStatusReport(report: StatusReport): void {
-    this.reportsSeen++
+    // one report per `?`: an extra one (a dropped poll answered late) never runs ahead of the polls
+    this.reportsSeen = Math.min(this.reportsSeen + 1, this.pollsWritten)
     if (report.state === 'Hold') this.holdReports++
     this.pollOutstandingSince = undefined
     const p = positions(report, this.wco, this.inches)
@@ -1004,8 +1036,10 @@ export class GrblSender {
       this.ownHoldMark = undefined
     if (report.overrides !== undefined) this.overrides = report.overrides
     const k = this.inches ? 25.4 : 1
+    // DF87: while `$H` is out the machine homes, whatever a controller says meanwhile (`Idle`)
+    const homing = report.state === 'Idle' && this.homingInFlight()
     this.latest = {
-      state: stateText(report),
+      state: homing ? 'Home' : stateText(report),
       mpos: p?.mpos ?? prev?.mpos ?? ZERO,
       wpos: p?.wpos ?? prev?.wpos ?? ZERO,
       wco: this.wco,
@@ -1025,7 +1059,10 @@ export class GrblSender {
    * allowance (GRBL reports Idle while it dwells).
    */
   private lostAcknowledgement(report: StatusReport): boolean {
-    const waiting = this.inflight.some((x) => x.kind === 'program' || !x.cmd.settled)
+    // `$H` has its own limit (homingTimeoutMs): a fork may report Idle while it homes (DF87)
+    const waiting = this.inflight.some(
+      (x) => x.kind === 'program' || (!x.cmd.settled && x.cmd.line !== '$H'),
+    )
     if (report.state !== 'Idle' || !waiting || this.reportsSeen <= this.ackMark) {
       this.idleWithLineSince = undefined
       return false
@@ -1143,7 +1180,7 @@ export class GrblSender {
     this.failCommands(
       expected
         ? new AppError('op.aborted', 'the controller was reset', { where: 'GrblSender' })
-        : new AppError('machine.connection', 'the controller reset itself', {
+        : new AppError('machine.reset', 'the controller restarted by itself', {
             where: 'GrblSender',
           }),
       true,
@@ -1161,6 +1198,7 @@ export class GrblSender {
       return
     }
     if (!this.connected) return
+    if (!expected) this.log.warn('the controller restarted by itself (a banner without our reset)')
     this.emit({ kind: 'reset', expected })
     const run = this.run_
     if (run === undefined) {
@@ -1175,7 +1213,7 @@ export class GrblSender {
           ? new AppError('op.aborted', 'the controller was reset during the run', {
               where: 'GrblSender.run',
             })
-          : new AppError('machine.connection', 'the controller reset during the run', {
+          : new AppError('machine.reset', 'the controller restarted during the run', {
               where: 'GrblSender.run',
               data: { line: run.done + 1 },
             })
@@ -1334,6 +1372,24 @@ export class GrblSender {
     this.pollOutstandingSince = this.timers.now()
     this.pollsWritten++
     this.writeBytes(Uint8Array.of(REALTIME.status))
+  }
+
+  /** Forgets an outstanding `?` (maybe never answered) and polls again now. */
+  private repoll(): void {
+    this.pollOutstandingSince = undefined
+    this.reportsSeen = this.pollsWritten
+    this.requestStatus()
+  }
+
+  /**
+   * `$H` is out: the state is `Home` until a report after it (real GRBL answers none during the
+   * cycle, so the last report's `Idle` would stand for the whole cycle; DF87).
+   */
+  private showHoming(): void {
+    const prev = this.latest
+    if (prev === undefined || prev.state === 'Home') return
+    this.latest = { ...prev, state: 'Home' }
+    for (const l of [...this.statusListeners]) l(this.latest)
   }
 
   private startPolling(): void {

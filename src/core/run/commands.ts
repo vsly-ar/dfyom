@@ -585,6 +585,32 @@ export const runStatusGet = defineQuery({
 })
 
 /**
+ * The settings check again, against the machine as it is now (DF87): the window re-asks after a
+ * library or plan change, so a fixed machine clears the warning without reconnecting.
+ * Doc: docs/modes/run-machine.md#settings-check
+ */
+export const runSettingsCheck = defineQuery({
+  name: 'run.settings.check',
+  summary:
+    "A serial connection's settings check now: the controller's $$ against the plan's machine copy (planId) or a library machine (machineId); none without a serial connection.",
+  args: z.object({
+    planId: PlanIdSchema.optional(),
+    machineId: ItemIdSchema.optional(),
+  }),
+  result: z.object({ settingsCheck: SettingsCheckSchema.optional() }),
+  run(doc, args, ctx) {
+    const m = ctx.services.machine
+    const settings = m?.controllerSettings
+    if (m?.target !== 'serial' || settings === undefined) return Ok({})
+    const chosen = connectionMachine(doc, ctx.services, args, 'run.settings.check')
+    if (chosen.isErr()) return Err(chosen.unwrapErr())
+    const against = args.planId === undefined ? 'machine' : 'plan'
+    const values = chosen.unwrap().machine.toDTO() as MachineValuesDTO
+    return Ok({ settingsCheck: settingsCheck(values, settings, against) })
+  },
+})
+
+/**
  * A project whose dispatcher runs a run job cannot close (docs/modes/run-v0.1.md#run-job);
  * whoever closes projects (project IPC, tasks 3.x) calls this first.
  */
@@ -769,7 +795,7 @@ export const RUN_COMMANDS: readonly AnyCommand[] = [
   runJobContinue,
   runTimeScaleSet,
 ]
-export const RUN_QUERIES: readonly QueryDef[] = [runStatusGet]
+export const RUN_QUERIES: readonly QueryDef[] = [runStatusGet, runSettingsCheck]
 
 /**
  * The run commands that read no document: manual machine control, which needs no project

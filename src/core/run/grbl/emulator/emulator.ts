@@ -51,9 +51,10 @@ export interface EmulatorOptions {
   /**
    * GRBL-exact homing (default false): no status report while `$H` runs; the `?`s received meanwhile
    * are answered once when the cycle ends. The default reports during homing (DFYOM's deviation,
-   * docs/architecture/grbl.md#homing-and-machine-coordinates).
+   * docs/architecture/grbl.md#homing-and-machine-coordinates). `'drop'`: as a GRBL fork that drops
+   * the `?`s received during the cycle (never answered, DF87).
    */
-  readonly silentHoming?: boolean
+  readonly silentHoming?: boolean | 'drop'
   /**
    * Simulated touch plate: its top in MPos Z (the probe input is closed while the tool tip is at
    * or below it); absent = no plate, a probe finds nothing (docs/architecture/grbl.md#probing).
@@ -207,7 +208,7 @@ export class GrblEmulator {
     private readonly settings: Settings,
     private readonly tracing: boolean,
     position: Vec3,
-    private readonly silentHoming = false,
+    private readonly silentHoming: boolean | 'drop' = false,
     probePlate: number | undefined = undefined,
   ) {
     this.plate = probePlate
@@ -1202,8 +1203,8 @@ export class GrblEmulator {
 
   private statusReport(): void {
     if (this.critical) return
-    if (this.silentHoming && this.state === 'Home') {
-      this.reportAfterHoming = true
+    if (this.silentHoming !== false && this.state === 'Home') {
+      if (this.silentHoming === true) this.reportAfterHoming = true
       return
     }
     const mask = this.settings.get(10)

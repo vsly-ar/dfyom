@@ -80,9 +80,10 @@ function numbers(text: string): number[] | undefined {
   return parts.every((p) => p.trim() !== '') && out.every(Number.isFinite) ? out : undefined
 }
 
+/** X, Y, Z of a position; builds with more axes (`A`, `B`) send more values (DF87). */
 function vec(text: string): Vec3 | undefined {
   const n = numbers(text)
-  return n !== undefined && n.length === 3 ? [n[0] ?? 0, n[1] ?? 0, n[2] ?? 0] : undefined
+  return n !== undefined && n.length >= 3 ? [n[0] ?? 0, n[1] ?? 0, n[2] ?? 0] : undefined
 }
 
 /** `<State|field|…>`; undefined when malformed. Unknown fields are ignored. */

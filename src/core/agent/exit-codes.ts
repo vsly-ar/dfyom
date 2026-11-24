@@ -47,6 +47,7 @@ const BY_CODE: Record<ErrorCode, ExitCode> = {
   'design.referenced': EXIT.other,
   'design.featureOwned': EXIT.other,
   'machine.connection': EXIT.other,
+  'machine.reset': EXIT.other,
   'machine.error': EXIT.other,
   'machine.alarm': EXIT.other,
   'run.notConnected': EXIT.other,

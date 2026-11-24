@@ -469,16 +469,30 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     return r
   }
 
+  /**
+   * `$H`; homed on its `ok`, posted at once (DF87). Reading G54 afterwards is bookkeeping: a
+   * failure there is logged and does not undo the homing, unless the controller restarted or the
+   * connection ended meanwhile (then homed is false or the connection gone, and the error says so).
+   */
   async function home(c: Connection): Promise<AppResult<void>> {
     c.jogEnd = undefined
     const r = await c.sender.command('$H')
-    if (r.isErr()) return Err(r.unwrapErr())
+    if (r.isErr()) {
+      log.warn({ err: r.unwrapErr().toJSON() }, 'homing failed')
+      return Err(r.unwrapErr())
+    }
     c.homed = true
     c.alarm = undefined
     log.info('homing done')
+    status.now()
     const restored = await restoreModes(c)
     if (restored.isErr()) return restored
-    return (await readWorkZero(c)).map(() => undefined)
+    const read = await readWorkZero(c)
+    if (read.isErr()) {
+      log.warn({ err: read.unwrapErr().toJSON() }, 'work zero not read after homing')
+      if (!c.homed || conn !== c) return Err(read.unwrapErr())
+    }
+    return Ok(undefined)
   }
 
   const machineState = (c: Connection) => c.sender.status?.state ?? 'Unknown'

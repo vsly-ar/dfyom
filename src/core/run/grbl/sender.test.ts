@@ -496,13 +496,13 @@ describe('errors, alarms and the connection', () => {
     expectOk(await drive(r.clock, r.sender.command('$X')))
   })
 
-  it('a banner mid-run (controller reset by itself) fails with machine.connection', async () => {
+  it('a banner mid-run (controller reset by itself) fails with machine.reset (DF87)', async () => {
     const r = await connected(machine())
     const p = start(r, ['G4 P10', 'G0 X1'])
     await until(r.clock, () => r.clock.now() > 1000)
     r.emu.receive(Uint8Array.of(0x18)) // someone else reset it, during a dwell
     r.clock.advance(0)
-    expectErrCode(await drive(r.clock, p), 'machine.connection')
+    expectErrCode(await drive(r.clock, p), 'machine.reset')
     expect(r.events).toContainEqual({ kind: 'reset', expected: false })
     expect(r.sender.isConnected).toBe(true)
     // during motion GRBL reports ALARM:3 first: the run fails with that alarm

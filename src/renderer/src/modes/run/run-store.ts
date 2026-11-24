@@ -245,6 +245,8 @@ export function createRunStore(bridge: PreloadApi): RunStore {
   let live = false
   /** The continuous jog of this window: still being accepted, and whether released meanwhile. */
   let held: { released: boolean } | undefined
+  /** The plan or library machine the open serial connection was checked against (DF87). */
+  let checkedAgainst: { planId: string } | { machineId: string } | undefined
 
   const store = createStore<RunState>()((set, get) => {
     /** One command; a refusal goes to the action banner (`op.aborted` is never a failure). */
@@ -398,6 +400,7 @@ export function createRunStore(bridge: PreloadApi): RunStore {
         }
         if (portPath === undefined) return
         set({ settingsCheck: undefined })
+        checkedAgainst = what
         const r = await call('run.connection.open', {
           target: 'serial',
           path: portPath,
@@ -587,6 +590,19 @@ export function createRunStore(bridge: PreloadApi): RunStore {
     read()
   }
 
+  /**
+   * DF87: the settings check again (`run.settings.check`) after a library change, so a machine
+   * fixed in the Library clears the warning without reconnecting (docs/modes/run-machine.md#settings-check).
+   */
+  const recheckSettings = async (): Promise<void> => {
+    const against = checkedAgainst
+    if (against === undefined || store.getState().settingsCheck === undefined) return
+    const r = await bridge.call('run.settings.check', against)
+    if (!r.ok || checkedAgainst !== against) return
+    const check = (r.value as { settingsCheck?: SettingsCheck }).settingsCheck
+    if (check !== undefined) store.setState({ settingsCheck: check })
+  }
+
   const onStatus = (status: RunStatus): void => {
     store.setState({ status })
     // a closed connection ends the setup sequence (the stock is no longer on a known machine)
@@ -616,6 +632,7 @@ export function createRunStore(bridge: PreloadApi): RunStore {
         pushed = true
         onStatus(s)
       })
+      const offLibrary = bridge.library.onChanged(() => void recheckSettings())
       // the mirror as it is now (a push that arrived meanwhile is newer)
       void bridge.call('run.status.get', {}).then((r) => {
         if (live && !pushed && r.ok) onStatus(r.value as RunStatus)
@@ -630,6 +647,7 @@ export function createRunStore(bridge: PreloadApi): RunStore {
         polling = undefined
         clearTimeout(poll)
         off()
+        offLibrary()
       }
     },
   })

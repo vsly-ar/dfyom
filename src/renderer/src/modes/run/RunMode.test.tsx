@@ -1230,6 +1230,31 @@ describe('Run mode: serial port (docs/modes/run-machine.md#ports-and-the-port-pi
     await waitFor(() => expect(t.callsOf('run.machine.home')).toHaveLength(1))
   })
 
+  it('the settings warning is checked again after a library change (DF87)', async () => {
+    const t = await renderRun()
+    scriptSerial(t, false)
+    const nav = within(t.nav())
+    await t.user.click(nav.getByRole('radio', { name: 'Serial port' }))
+    await waitFor(() => expect(nav.getByRole('button', { name: 'Connect' })).toBeEnabled())
+    await t.user.click(nav.getByRole('button', { name: 'Connect' }))
+    await nav.findByRole('alert')
+    // the user fixed the machine in the Library: the warning goes without reconnecting
+    t.bridge.handle('run.settings.check', () =>
+      ok({
+        settingsCheck: {
+          against: 'plan',
+          matches: true,
+          homingEnabled: true,
+          notInMachine: [],
+          differences: [],
+        },
+      }),
+    )
+    t.bridge.emitLibraryChange({ kind: 'machine', id: 'm', change: 'updated', revision: 2 })
+    await waitFor(() => expect(nav.queryByRole('alert')).toBeNull())
+    expect(t.callsOf('run.settings.check').at(-1)).toMatchObject({ planId: expect.any(String) })
+  })
+
   it('the real-machine pre-flight: plan status, air-cut hint, "Start on the machine" (M2)', async () => {
     const t = await renderRun()
     scriptSerial(t, true)

@@ -97,6 +97,37 @@ describe('machine host: serial target (loopback)', { timeout: 30_000 }, () => {
     expect(h.of('status').at(-1)?.status).toMatchObject({ state: 'Idle', homed: true })
   })
 
+  for (const silentHoming of [true, 'drop'] as const)
+    it(`a real-length silent homing (about 1 min): Homing, then homed with the position (DF87, ${String(silentHoming)})`, async () => {
+      // GRBL defaults for the homing rates, from the middle of the travel: ~1 min with no report
+      const h = harness({
+        emulator: {
+          settings: { ...FAST, 24: 25, 25: 200, 27: 3 },
+          position: [-150, -100, -40],
+          silentHoming,
+        },
+      })
+      expectOk(await h.connect())
+      const t0 = h.w.now()
+      const statuses = () => h.of('status').map((m) => m.status)
+      const home = h.request({ type: 'machine', action: { kind: 'home' } })
+      // the badge's state while $H is out: Home, not the Idle of the last report
+      expect(await h.pump(() => statuses().at(-1)?.state === 'Home')).toBe(true)
+      expect(statuses().at(-1)?.homed).toBe(false)
+      expectOk(await home)
+      expect(h.w.now() - t0).toBeGreaterThan(40_000)
+      expect(h.of('event').filter((e) => e.kind === 'connectionLost')).toEqual([])
+      const last = statuses().at(-1)!
+      expect(last).toMatchObject({ state: 'Idle', homed: true })
+      expect(last.mpos).toEqual([-3, -3, -3])
+      // still connected and polling seconds later
+      await h.pump(() => false, 5000)
+      expect(h.of('event').filter((e) => e.kind === 'connectionLost')).toEqual([])
+      expectOk(
+        await h.request({ type: 'machine', action: { kind: 'jog', by: [-1, 0, 0], feed: 500 } }),
+      )
+    })
+
   it('a controller that resets on its own is no longer homed (M2)', async () => {
     const h = harness()
     expectOk(await h.connect())
