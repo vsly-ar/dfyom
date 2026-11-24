@@ -4,7 +4,7 @@
 // the blocking failure dialog; tool-change waits and alarms are announced assertively. Each
 // carries its own Stop (RunDialogFooter), reachable by keyboard and screen readers while modal.
 // Doc: docs/conventions/ui.md#confirmations, #run-mode-safety-ui
-import { useEffect, useId, useRef } from 'react'
+import { useEffect, useId, useMemo, useRef } from 'react'
 import type { ProjectDoc } from '../../../../core/project/document'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { planMessages } from '../../messages/plan'
@@ -13,7 +13,7 @@ import { Icon, Button, Dialog, DialogClose, ErrorMessage, Select } from '../../u
 import { useReplica } from '../../shell/ShellContext'
 import { JogPad, useJogMode } from './JogPad'
 import { activeJob, formatLength, runGates, surfaceName } from './machine-state'
-import { canResume, planRunInfo, resumePoints } from './plan-info'
+import { canResume, planRunInfo, resumeChanges, resumePoints } from './plan-info'
 import { useRun, useRunStore, waitKey, type PreflightCheck } from './run-store'
 import { WorkZeroButtons } from './RunNavigator'
 import { AlarmPanel, inAlarm } from './AlarmPanel'
@@ -55,6 +55,11 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
   const resume = points.length > 0
   const stoppedIn = status.lastRun?.planOperationId
   const from = points.find((x) => x.planOperationId === resumeFrom) ?? points[0]
+  // DF85: the plan may have been edited (back to Settled design, fixed, finalized) since the stop
+  const changes = useMemo(
+    () => (resume && plan !== undefined ? resumeChanges(status.lastRun, plan, setupId) : undefined),
+    [resume, plan, status.lastRun, setupId],
+  )
   const settingsCheck = useRun((s) => s.settingsCheck)
   // a real machine: finalized plans and matching settings only (run-machine.md#pre-flight-on-a-real-machine)
   const serial = status.connection.target === 'serial'
@@ -142,6 +147,18 @@ function PreflightDialog({ doc }: { doc: ProjectDoc }): React.JSX.Element {
               onValueChange={(v) => a.setResumeFrom(v)}
             />
           </div>
+          {changes !== undefined && (changes.changed || changes.removed || changes.reordered) ? (
+            <div className={styles['notice']} data-tone="warning" role="note">
+              <Icon name="warning" />
+              <div>
+                {changes.changed ? <p className={styles['why']}>{m.planChanged}</p> : null}
+                {changes.removed ? <p className={styles['why']}>{m.stoppedRemoved}</p> : null}
+                {changes.reordered && !changes.removed ? (
+                  <p className={styles['why']}>{m.reordered}</p>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
           <div className={styles['notice']} role="note">
             <Icon name="info" />
             <div>

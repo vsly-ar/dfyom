@@ -34,6 +34,7 @@ import {
 } from '../grbl/sender'
 import { envelopeOf, travelViolation, type Envelope, type TravelViolation } from '../grbl/envelope'
 import { alarmText, POSITION_ALARMS } from '../grbl/status'
+import { overrideLimits, overrideSteps } from '../override'
 import { VirtualGrblTransport } from '../grbl/virtual-transport'
 import { sortPorts, type SerialPorts } from '../serial'
 import type { ControllerTransport } from '../transport'
@@ -115,6 +116,8 @@ interface Connection {
   job?: Job | undefined
   /** From the controller's `$$` at connect; undefined when it reports no travel. */
   readonly envelope: Envelope | undefined
+  /** `$32=1` at connect (DF85). */
+  readonly laserMode: boolean
   /**
    * End (MPos) of the last jog GRBL accepted; the base of the next relative jog's travel check
    * while jogs queue. Cleared by anything else that moves or questions the position.
@@ -130,6 +133,16 @@ interface Connection {
 
 type ProbeZ = Extract<MachineAction, { kind: 'probeZ' }>
 type OverrideAction = Extract<MachineAction, { kind: 'override' }>
+type OverrideToAction = Extract<MachineAction, { kind: 'overrideTo' }>
+
+/**
+ * Between two override bytes (DF85): GRBL keeps one flag per byte kind until its main loop
+ * applies it, so two equal bytes in a row could count once; a gap lets each apply on its own.
+ * The read-back corrects the rest.
+ */
+export const OVERRIDE_BYTE_GAP_MS = 25
+/** Rounds of steps and read-back for one override target. */
+const OVERRIDE_ROUNDS = 3
 
 /** Feed and spindle steps → their real-time bytes; rapids by percent. */
 const OVERRIDE_BYTES: Readonly<
@@ -198,6 +211,8 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
   let forwarder: LogForwarder | undefined
   let conn: Connection | undefined
   let connecting = false
+  /** DF85: override targets run one after another. */
+  let overrideChain: Promise<void> = Promise.resolve()
 
   // ── throttled pushes (wall time) ──────────────────────────────────────────────────────────
 
@@ -261,6 +276,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
       ...(s?.buffer === undefined ? {} : { buffer: s.buffer }),
       ...(s?.overrides === undefined ? {} : { overrides: s.overrides }),
       ...(conn.alarm === undefined ? {} : { alarm: conn.alarm }),
+      ...(conn.laserMode ? { laserMode: true as const } : {}),
       ...(conn.lastMessage === undefined ? {} : { lastMessage: conn.lastMessage }),
       ...(conn.envelope === undefined
         ? {}
@@ -386,6 +402,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
       workZero: info.unwrap().workZero,
       zeroLevel: 0,
       envelope: envelopeOf(info.unwrap().settings),
+      laserMode: info.unwrap().settings['32'] === 1,
       emulator,
       inches: info.unwrap().settings['13'] === 1,
     }
@@ -549,6 +566,15 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         return cycleStart(c)
       case 'override':
         return override(c, action)
+      case 'overrideTo': {
+        // one target at a time: each steps from the `Ov` the last one read back
+        const next = overrideChain.then(() => overrideTo(c, action))
+        overrideChain = next.then(
+          () => undefined,
+          () => undefined,
+        )
+        return next
+      }
     }
   }
 
@@ -743,6 +769,45 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     const fresh = await c.sender.freshStatus()
     status.now()
     return Ok({ overrides: fresh?.overrides ?? c.sender.status?.overrides })
+  }
+
+  /**
+   * Feed or spindle override to a target percent (DF85, docs/modes/run-machine.md#overrides-m6):
+   * the shortest coarse/fine steps from the last reported `Ov` (a reset first when none is
+   * known), a gap between bytes, then a fresh report; a value off target is stepped again from
+   * what was reported (another round), at most `OVERRIDE_ROUNDS` times.
+   */
+  async function overrideTo(c: Connection, a: OverrideToAction): Promise<AppResult<unknown>> {
+    const where = 'machineHost.override'
+    const limits = overrideLimits('grbl')
+    const range = limits[a.which]
+    if (a.percent < range.min || a.percent > range.max)
+      return fail('input.malformed', `${a.which} override ${a.percent} % is out of range`, {
+        where,
+        issues: [
+          {
+            path: [a.which],
+            rule: 'overrideRange',
+            message: `the controller takes ${range.min}–${range.max} %`,
+          },
+        ],
+      })
+    if (c.alarm !== undefined && (c.alarm.code === 1 || c.alarm.code === 2))
+      return stateError('the controller is in a critical alarm: reset it first', machineState(c))
+    for (let round = 0; round < OVERRIDE_ROUNDS; round++) {
+      const steps = overrideSteps(c.sender.status?.overrides?.[a.which], a.percent, range, limits)
+      if (steps.length === 0) break
+      for (const [i, step] of steps.entries()) {
+        if (i > 0) await new Promise<void>((r) => void timers.setTimeout(r, OVERRIDE_BYTE_GAP_MS))
+        const sent = c.sender.realtime(OVERRIDE_BYTES[a.which][step])
+        if (sent.isErr()) return sent
+      }
+      // GRBL reports `Ov` on the next status after a change; without one, no second round
+      const fresh = await c.sender.freshStatus()
+      if (fresh?.overrides === undefined || fresh.overrides[a.which] === a.percent) break
+    }
+    status.now()
+    return Ok({ overrides: c.sender.status?.overrides })
   }
 
   /**

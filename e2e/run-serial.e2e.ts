@@ -274,6 +274,13 @@ test('touch plate and overrides (M4, M6): a probe that misses, unlock, a probe t
     const feed = overrides.getByRole('group', { name: 'Feed' })
     await feed.getByRole('button', { name: 'Increase feed override by 10 %' }).click()
     await expect(feed.getByText('110 %')).toBeVisible()
+    // DF85: the slider, 1 % per arrow key, read back from the controller
+    const feedSlider = feed.getByRole('slider', { name: 'Feed override' })
+    await feedSlider.focus()
+    await feedSlider.press('ArrowRight')
+    await feedSlider.press('ArrowRight')
+    await expect(feedSlider).toHaveAttribute('aria-valuenow', '112')
+    await expect(feed.getByText('112 %')).toBeVisible()
     await expect(
       overrides.getByText('Overrides apply until reset or the program ends.'),
     ).toBeVisible()

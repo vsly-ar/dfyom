@@ -646,27 +646,35 @@ const OverridesResult = z.object({
     .describe('% as reported'),
 })
 
-/** One real-time byte per given override, in the order feed, spindle, rapid. */
+/** A step, or a target percent the host reaches in steps (DF85); the host checks the range. */
+const OverrideArg = z.union([z.enum(OVERRIDE_STEPS), z.number().int()])
+
+/**
+ * Per given override, in the order feed, spindle, rapid: one real-time byte for a step, the
+ * steps to a target percent (DF85, docs/modes/run-machine.md#overrides-m6).
+ */
 export const runOverrideSet = defineCommand({
   kind: 'effect',
   name: 'run.override.set',
-  summary: 'Feed/spindle override: reset (100 %), ±10 or ±1 %; rapids 100, 50 or 25 %.',
+  summary:
+    'Feed/spindle override: a target % (GRBL 10–200), reset (100 %), ±10 or ±1 %; rapids 100, 50 or 25 %.',
   title: () => 'Override',
   machine: true,
   urgent: true,
   args: z.object({
-    feed: z.enum(OVERRIDE_STEPS).optional(),
-    spindle: z.enum(OVERRIDE_STEPS).optional(),
+    feed: OverrideArg.optional(),
+    spindle: OverrideArg.optional(),
     rapid: z.union([z.literal(100), z.literal(50), z.literal(25)]).optional(),
   }),
   result: OverridesResult,
   async run(_doc, args, ctx) {
     const where = 'run.override.set'
     const actions: MachineAction[] = []
-    if (args.feed !== undefined)
-      actions.push({ kind: 'override', which: 'feed', action: args.feed })
-    if (args.spindle !== undefined)
-      actions.push({ kind: 'override', which: 'spindle', action: args.spindle })
+    for (const which of ['feed', 'spindle'] as const) {
+      const v = args[which]
+      if (typeof v === 'number') actions.push({ kind: 'overrideTo', which, percent: v })
+      else if (v !== undefined) actions.push({ kind: 'override', which, action: v })
+    }
     if (args.rapid !== undefined)
       actions.push({
         kind: 'override',

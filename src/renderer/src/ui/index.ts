@@ -104,6 +104,7 @@ export {
 } from './Reorder/Reorder'
 export { dropGap, dropIndex, movedFrom, moveItem } from './Reorder/drop'
 export { SegmentedControl, type SegmentedControlProps } from './SegmentedControl/SegmentedControl'
+export { Slider, type SliderProps } from './Slider/Slider'
 export { groupOptions, Select, type SelectOption, type SelectProps } from './Select/Select'
 export { StatusChip, type StatusChipProps, type StatusTone } from './StatusChip/StatusChip'
 export { StopControl, type StopControlProps } from './StopControl/StopControl'

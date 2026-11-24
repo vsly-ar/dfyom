@@ -28,6 +28,7 @@ import { exportPlan } from '../post/plan-export'
 import type { SenderProgram } from './grbl/sender'
 import { RunSummarySchema } from './host/protocol'
 import { alignmentGate } from './alignment'
+import { runPlanHash } from './plan-hash'
 import type { JobAbout, JobListener, MachineService, RunningJob, RunPlan } from './service'
 
 const MARKER = /^\(DFYOM TOOL CHANGE (\d+): ([^()]*)\)$/
@@ -489,7 +490,17 @@ async function checkAndStart(
   // and this tick must not overwrite them (done never goes back)
   ctx.progress({ done: 0, total: e.lines.length, label: `${prefix}started` })
   // the host refuses if the G54, the machine copy or the target changed since the check
-  const about: JobAbout = { plan: run.runPlan, operations: e.operationLines }
+  const plan = doc.plans[planId]
+  const about: JobAbout = {
+    plan: run.runPlan,
+    operations: e.operationLines,
+    ...(plan === undefined
+      ? {}
+      : {
+          planHash: runPlanHash(plan, setupId),
+          order: (plan.setups.find((s) => s.id === setupId)?.operations ?? []).map((o) => o.id),
+        }),
+  }
   const started = await m.startJob(
     ctx.jobId,
     { lines: e.lines, sections: programSections(e) },

@@ -120,6 +120,15 @@
   color: var(--info);
 }
 
+.notice[data-tone='warning'] {
+  border-color: var(--warning);
+  background: var(--warning-subtle);
+}
+
+.notice[data-tone='warning'] > svg {
+  color: var(--warning);
+}
+
 .notice > div {
   display: grid;
   gap: var(--space-1);
@@ -579,19 +588,54 @@
   color: var(--text);
 }
 
-/* inspector overrides (M6): label, value, −10/+10/100 % in one row; a changed value is marked */
-.overrideRow {
+/* inspector overrides (M6, sliders DF85): per feed and spindle a head (label, value, the
+   resulting F or S, Reset) over the −10 % · slider · +10 % row and the cap's reason; rapids in
+   one row; a changed value is marked */
+.overrideItem {
   display: grid;
-  grid-template-columns: 3.75rem 3rem minmax(0, 1fr);
+  gap: 2px;
+  min-width: 0;
+}
+
+.overrideHead {
+  display: grid;
+  grid-template-columns: 3.75rem 3rem minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--space-1);
   min-width: 0;
 }
 
-.overrideButtons {
-  display: flex;
-  flex-wrap: nowrap;
-  justify-content: flex-end;
+.overrideEffective {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-muted);
+}
+
+.overrideControl {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.overrideReason {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  color: var(--text-muted);
+}
+
+.overrideRow {
+  display: grid;
+  grid-template-columns: 3.75rem 3rem minmax(0, 1fr);
+  align-items: center;
   gap: var(--space-1);
   min-width: 0;
 }

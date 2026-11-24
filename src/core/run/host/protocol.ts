@@ -99,6 +99,8 @@ export const HostStatusSchema = z.object({
   /** Feed, rapid, spindle overrides in % from the last `Ov` (docs/modes/run-machine.md#overrides-m6). */
   overrides: z.object({ feed: Num, rapid: Num, spindle: Num }).exactOptional(),
   alarm: z.object({ code: z.number().int(), text: z.string() }).exactOptional(),
+  /** `$32=1` (DF85): the spindle output drives a laser; no spindle speed override. */
+  laserMode: z.literal(true).exactOptional(),
   lastMessage: z.string().max(500).exactOptional(),
   /** What the controller enforces, from its `$$` (docs/modes/run.md#machine-coordinates-and-the-homing-corner-df33). */
   envelope: z
@@ -217,6 +219,12 @@ export const MachineActionSchema = z.discriminatedUnion('kind', [
     kind: z.literal('override'),
     which: z.enum(['feed', 'spindle', 'rapid']),
     action: z.enum([...OVERRIDE_STEPS, ...RAPID_OVERRIDES]),
+  }),
+  /** DF85: feed or spindle to a target percent; the host sends the steps and reads `Ov` back. */
+  z.object({
+    kind: z.literal('overrideTo'),
+    which: z.enum(['feed', 'spindle']),
+    percent: z.number().int(),
   }),
 ])
 export type MachineAction = z.output<typeof MachineActionSchema>

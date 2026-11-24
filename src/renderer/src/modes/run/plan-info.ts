@@ -14,6 +14,7 @@ import type { PlanDTO, SetupDTO } from '../../../../core/plan/plan.dto'
 import { setupDirection, setupRotation } from '../../../../core/plan/setups'
 import { setupWorkholding } from '../../../../core/plan/workholding/setup'
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
+import { runPlanHash } from '../../../../core/run/plan-hash'
 import type { RunStatus } from '../../../../core/run/service'
 import {
   setupFrame,
@@ -206,4 +207,79 @@ export function plateThickness(
   const copy = plan.snapshots.find((x) => x.id === plan.machine)
   if (copy === undefined) return undefined
   return plateOf(copy.values) ?? lib(copy.libraryItemId)
+}
+
+/** What the machine profile puts on the overrides (DF85, docs/modes/run-machine.md#overrides-m6). */
+export interface MachineOverrideLimits {
+  /** mm/min: the lower of the X and Y max feed rates (the axes a cut mostly moves). */
+  readonly maxFeed?: number
+  /** rpm. */
+  readonly maxSpindle?: number
+  /** `manual`: the spindle speed is set by hand, there is no spindle override. */
+  readonly spindleControl?: 'gcode' | 'manual'
+}
+
+/** A quantity DTO's canonical value of `kind`, if positive. */
+function positive(dto: unknown, kind: string): number | undefined {
+  const parsed = QuantityDtoSchema.safeParse(dto)
+  if (!parsed.success) return undefined
+  const q = Quantity.fromDTO(parsed.data)
+  return q.isOk() && q.unwrap().kind === kind && q.unwrap().canonical > 0
+    ? q.unwrap().canonical
+    : undefined
+}
+
+function limitsOf(values: unknown): MachineOverrideLimits | undefined {
+  if (values === null || typeof values !== 'object') return undefined
+  const v = values as {
+    maxFeedRate?: { x?: unknown; y?: unknown }
+    spindle?: { control?: unknown; maxSpeed?: unknown }
+  }
+  const xy = [positive(v.maxFeedRate?.x, 'feedRate'), positive(v.maxFeedRate?.y, 'feedRate')]
+  const feeds = xy.filter((x): x is number => x !== undefined)
+  const maxSpindle = positive(v.spindle?.maxSpeed, 'spindleSpeed')
+  const control = v.spindle?.control
+  return {
+    ...(feeds.length === 0 ? {} : { maxFeed: Math.min(...feeds) }),
+    ...(maxSpindle === undefined ? {} : { maxSpindle }),
+    ...(control === 'gcode' || control === 'manual' ? { spindleControl: control } : {}),
+  }
+}
+
+/**
+ * The override limits of the plan's machine copy, else of the chosen library machine (without a
+ * plan); empty when neither is known.
+ */
+export function machineOverrideLimits(
+  plan: PlanDTO | undefined,
+  machines: readonly { readonly id: string; readonly [field: string]: unknown }[] | undefined,
+  machineId: string | undefined,
+): MachineOverrideLimits {
+  if (plan === undefined) return limitsOf(machines?.find((x) => x.id === machineId)) ?? {}
+  const copy = plan.snapshots.find((x) => x.id === plan.machine)
+  return (
+    limitsOf(copy?.values) ?? limitsOf(machines?.find((x) => x.id === copy?.libraryItemId)) ?? {}
+  )
+}
+
+/**
+ * How the plan changed since the run that stopped (DF85,
+ * docs/modes/run-machine.md#section-resume-m5): `changed` when what the setup's program is
+ * exported from differs, `removed` when the stopped operation is no longer in the setup,
+ * `reordered` when the operations the stopped run had are in another order now.
+ */
+export function resumeChanges(
+  lastRun: RunStatus['lastRun'],
+  plan: PlanDTO,
+  setupId: string | undefined,
+): { changed: boolean; removed: boolean; reordered: boolean } {
+  const setup = runSetup(plan, setupId)
+  const ids = setup.operations.map((o) => o.id)
+  const changed =
+    lastRun?.planHash !== undefined && lastRun.planHash !== runPlanHash(plan, setup.id)
+  const removed = lastRun?.planOperationId !== undefined && !ids.includes(lastRun.planOperationId)
+  const before = (lastRun?.operations ?? []).filter((id) => ids.includes(id))
+  const now = ids.filter((id) => before.includes(id))
+  const reordered = before.some((id, i) => now[i] !== id)
+  return { changed, removed, reordered }
 }
