@@ -6,16 +6,17 @@ import {
   exceedsStock,
   fitPosition,
   fitScale,
+  ghostMatrix,
   guessUnit,
   placedBox,
   placedExtent,
-  rotationMatrix,
   roundScaleDown,
-  UNIT_MM,
+  sectionMatrix,
   type Anchor,
   type FitAxis,
   type FitScaleProblem,
   type FitZ,
+  type FrameLike,
   type Placement,
   type ReferenceWarning,
   type StockSize,
@@ -27,6 +28,9 @@ import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
 import { Quantity } from '../../../../core/quantity/quantity'
 import type { QuantityDTO } from '../../../../core/quantity/quantity.dto'
 import type { DesignPart } from './model'
+
+// moved to core for the headless reference queries (DF60); re-exported for the views
+export { ghostMatrix, sectionMatrix }
 
 /** The part's references in id order (the v0.2 UI focuses on the first, the model has no limit). */
 export function partReferences(doc: ProjectDoc, partId: string): readonly ReferenceDTO[] {
@@ -59,31 +63,6 @@ export function referencePlacement(ref: ReferenceDTO): Placement | undefined {
     rotation: { x: rx!, y: ry!, z: rz! },
     position: { x: px!, y: py!, z: pz! },
   }
-}
-
-/**
- * The ghost's model matrix (column-major 4 × 4, three.js `Matrix4.fromArray`): scale by
- * `scale × unit`, rotate `Rz · Ry · Rx`, then translate so the placed bounding box's min corner
- * (the box of the 8 rotated corners of the source bounds, as `placedBox` in core) lands on
- * `position`. The same box as fit and `exceedsStock`, so the ghost sits where they say.
- */
-export function ghostMatrix(bounds: Box, p: Placement): number[] {
-  const k = p.scale * UNIT_MM[p.sourceUnit]
-  const m = rotationMatrix(p.rotation)
-  const lo = [Infinity, Infinity, Infinity]
-  for (const x of [bounds.min.x, bounds.max.x])
-    for (const y of [bounds.min.y, bounds.max.y])
-      for (const z of [bounds.min.z, bounds.max.z])
-        for (let r = 0; r < 3; r++)
-          lo[r] = Math.min(lo[r]!, k * (m[r * 3]! * x + m[r * 3 + 1]! * y + m[r * 3 + 2]! * z))
-  const pos = [p.position.x, p.position.y, p.position.z]
-  const out = new Array<number>(16).fill(0)
-  for (let r = 0; r < 3; r++) {
-    for (let c = 0; c < 3; c++) out[c * 4 + r] = k * m[r * 3 + c]!
-    out[12 + r] = pos[r]! - lo[r]!
-  }
-  out[15] = 1
-  return out
 }
 
 /** The part's stock size (mm), if the part loads. */
@@ -196,36 +175,6 @@ export function scaleAbout(bounds: Box, p: Placement, scale: number, anchor: Anc
 }
 
 // ── the reference section (task U3) ───────────────────────────────────────────────────────
-
-/** A face frame (local → part frame: `origin + u·x + v·y + n·z`). */
-interface FrameLike {
-  readonly origin: readonly [number, number, number]
-  readonly u: readonly [number, number, number]
-  readonly v: readonly [number, number, number]
-  readonly n: readonly [number, number, number]
-}
-
-/**
- * The section task's matrix (column-major 4 × 4): the ghost's matrix (source units → part frame)
- * followed by part frame → face frame, so the face normal is the third axis
- * (docs/modes/design-v0.3.md#implementation-u3).
- */
-export function sectionMatrix(ghost: readonly number[], frame: FrameLike): number[] {
-  const axes = [frame.u, frame.v, frame.n]
-  const o = frame.origin
-  const out = new Array<number>(16).fill(0)
-  for (let r = 0; r < 3; r++) {
-    const a = axes[r]!
-    for (let c = 0; c < 4; c++) {
-      // row r of F⁻¹ times column c of G (G's bottom row is 0 0 0 1)
-      let v = a[0] * ghost[c * 4]! + a[1] * ghost[c * 4 + 1]! + a[2] * ghost[c * 4 + 2]!
-      if (c === 3) v -= a[0] * o[0] + a[1] * o[1] + a[2] * o[2]
-      out[c * 4 + r] = v
-    }
-  }
-  out[15] = 1
-  return out
-}
 
 /**
  * The section depth (mm below the face at `w = faceW`) that cuts the placed reference box at its

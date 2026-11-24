@@ -6,12 +6,21 @@
 // to fit with a preview, Apply), save, close the app, reopen the project and find the reference
 // placed as saved, shown again, read from the stored asset. Windows stay hidden (app.fixture.ts).
 // With DFYOM_RENDERS=1 it writes the light and dark review renders of the panel and of Fit mode
-// to design/reference/renders/.
-// Docs: docs/conventions/ui.md#reference-panel-hardening-df2df8, docs/modes/reference-model.md#display
+// to design/reference/renders/. A second test reads levels and a section of the reference and makes
+// a shape from it (DF60 P1; render df-reference-tools).
+// Docs: docs/conventions/ui.md#reference-panel-hardening-df2df8, docs/modes/reference-model.md#display,
+// docs/conventions/ui.md#reference-tools-df60
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type { ElectronApplication, Locator, Page } from '@playwright/test'
-import { expect, fitReference, launchApp, openReferencePanel, test } from './app.fixture'
+import {
+  expect,
+  fitReference,
+  launchApp,
+  openPartSetup,
+  openReferencePanel,
+  test,
+} from './app.fixture'
 
 const STL = resolve('src/core/design/__fixtures__/enclosure-wood-base.stl')
 const RENDERS = process.env['DFYOM_RENDERS'] === '1'
@@ -185,4 +194,59 @@ test('reference model: the Reference panel imports the enclosure STL, ghost, vis
   } finally {
     await second.app.close()
   }
+})
+
+test('reference tools (DF60): levels from both sides, a level sets the section, Create shape', async ({
+  dfyom,
+}) => {
+  test.setTimeout(120_000)
+  await stubFileDialogs(dfyom.app, join(dfyom.dataDir, 'tools.dfyom'))
+  const page = await dfyom.app.firstWindow()
+  await page.waitForLoadState('domcontentloaded')
+  if (RENDERS) await page.setViewportSize({ width: 1280, height: 900 })
+  const navigator = page.getByRole('navigation', { name: 'Navigator' })
+  await navigator.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  await dialog.getByRole('textbox', { name: 'Project name' }).fill('Tools')
+  await dialog.getByRole('button', { name: 'Create project' }).click()
+  const setup = page.getByRole('region', { name: 'Set up the part' })
+  await setField(setup, 'Length (X)', '260')
+  await setField(setup, 'Width (Y)', '190')
+  await setField(setup, 'Thickness (Z)', '40')
+  await page
+    .getByRole('dialog', { name: 'Stock' })
+    .getByRole('button', { name: 'Create part' })
+    .click()
+  const panel = await openReferencePanel(page)
+  await panel.getByRole('button', { name: 'Import STL…' }).click()
+  await expect(panel.getByTitle('enclosure-wood-base')).toBeVisible({ timeout: 30_000 })
+
+  // levels from the top (the rim at 0, the cavity floor) and from the bottom, read in the worker
+  const levels = panel.getByRole('region', { name: 'Levels' })
+  await expect(levels.getByRole('heading', { name: 'From top' })).toBeVisible({ timeout: 30_000 })
+  await expect(levels.getByRole('heading', { name: 'From bottom' })).toBeVisible()
+  const rim = levels.getByRole('button', { name: /^Depth 0 mm, area/ }).first()
+  await expect(rim).toBeVisible()
+
+  // the section at the middle of the model: the outline and the cavity, with corner chips
+  const section = panel.getByRole('region', { name: 'Section' })
+  await expect(section.getByText(/^Outline /)).toBeVisible({ timeout: 30_000 })
+  await expect(section.getByText(/^Cavity /)).toBeVisible()
+  await expect(section.getByText(/elements, within/)).toBeVisible()
+  await section.scrollIntoViewIfNeeded()
+  await render(page, 'reference-tools')
+
+  // a level from the top sets the section just inside it
+  const before = await input(section, 'Section depth').inputValue()
+  await rim.click()
+  await expect(input(section, 'Section depth')).not.toHaveValue(before)
+  await setField(section, 'Section depth', '20')
+  await expect(section.getByText(/^Cavity /)).toBeVisible({ timeout: 30_000 })
+
+  // Create shape: one undoable import; the Shapes dialog lists it
+  await section.getByRole('button', { name: 'Create shape', exact: true }).click()
+  await expect(section.getByText('Shape created.')).toBeVisible({ timeout: 30_000 })
+  const shapes = await openPartSetup(page, 'Shapes')
+  await expect(shapes.getByText('Section 20 mm').first()).toBeVisible()
+  expect(dfyom.rendererErrors).toEqual([])
 })

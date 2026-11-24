@@ -10,9 +10,14 @@
 import type { Draft } from 'immer'
 import { z } from 'zod'
 import { collect, Err, fail, None, Ok, type AppResult } from '../../shared/result'
-import { defineCommand, defineQuery, type AnyCommand, type QueryDef } from '../commands/define'
+import {
+  defineAsyncQuery,
+  defineCommand,
+  defineQuery,
+  type AnyCommand,
+  type AnyQueryDef,
+} from '../commands/define'
 import type { CommandContext } from '../commands/context'
-import type { ReferenceResolver } from '../expression/evaluate'
 import { quantityFromSource } from '../expression/quantity'
 import { NAME_MAX } from '../library/item'
 import type { AssetRef } from '../project/assets'
@@ -43,7 +48,19 @@ import {
 } from './reference'
 import { ReferenceDtoSchema, type ReferenceDTO } from './reference.dto'
 import { STL_LIMITS, type StlSummary } from './stl'
-import { SurfaceTable } from './surfaces'
+import {
+  FaceArg,
+  fitOptions,
+  lengthArg,
+  referenceLevelsOf,
+  referenceView,
+  stockFace,
+  stockResolver,
+  storedPlacement as placementOf,
+  targetReference,
+  fittedSection,
+} from './reference-find'
+import type { FittedLoop } from './reference-section'
 import { DIRECTIONS, STOCK_FACE } from '../geometry/face'
 
 // ── args ──────────────────────────────────────────────────────────────────────────────────
@@ -68,6 +85,22 @@ const FitArg = z.object({
 })
 
 const Warnings = z.array(ReferenceWarningSchema)
+
+const BoxSchema = z.object({
+  min: z.object({ x: z.number(), y: z.number(), z: z.number() }),
+  max: z.object({ x: z.number(), y: z.number(), z: z.number() }),
+})
+const FacingDepthSchema = z
+  .record(z.string(), z.string())
+  .describe(
+    'By stock face id: the facing depth that faces down to this reference (project units, rounded down); only faces with a sensible value',
+  )
+/** What a placement edit leaves (DF60 § Scale and fit): no follow-up `list` needed. */
+const PlacedFields = {
+  scale: z.string().describe('The scale as written'),
+  placed: BoxSchema.describe('Placed bounding box in the part frame, mm'),
+  facingDepth: FacingDepthSchema,
+}
 
 // ── helpers ───────────────────────────────────────────────────────────────────────────────
 
@@ -94,31 +127,6 @@ const stockSize = (l: LoadedPart): StockSize => ({
   width: l.stock.width.canonical,
   thickness: l.stock.thickness.canonical,
 })
-
-/** Stock surfaces only: a reference is placed on the stock, never on operation results. */
-const stockResolver = (l: LoadedPart): ReferenceResolver =>
-  SurfaceTable.build(l.part.operations, l.stock).resolver(0)
-
-function placementOf(ref: ReferenceDTO, where: string): AppResult<Placement> {
-  const q = (dto: QuantityDTO) => Quantity.fromDTO(dto).map((v) => v.canonical)
-  const all = collect([
-    q(ref.scale),
-    q(ref.rotation.x),
-    q(ref.rotation.y),
-    q(ref.rotation.z),
-    q(ref.position.x),
-    q(ref.position.y),
-    q(ref.position.z),
-  ])
-  if (all.isErr()) return Err(all.unwrapErr().withContext(where, { referenceId: ref.id }))
-  const [scale, rx, ry, rz, px, py, pz] = all.unwrap() as [number, ...number[]]
-  return Ok({
-    sourceUnit: ref.sourceUnit,
-    scale,
-    rotation: { x: rx!, y: ry!, z: rz! },
-    position: { x: px!, y: py!, z: pz! },
-  })
-}
 
 /** A length in mm written as a source in the project's units (0.0001 mm / 0.00001 in). */
 function lengthSource(mm: number, units: UnitSystem): string {
@@ -215,12 +223,16 @@ function fitted(
   }))
 }
 
-/** `reference.exceedsStock` of a record (other warnings come from import only). */
-function placementWarnings(ref: ReferenceDTO, l: LoadedPart, where: string) {
-  return placementOf(ref, where).map((p) => {
-    const w = exceedsStock(ref.id, placedBox(ref.asset.bounds, p), stockSize(l))
-    return w === undefined ? [] : [w]
-  })
+/** The placed box and facing depths of a record (as `design.reference.list` gives them). */
+function placedFields(ref: ReferenceDTO, p: Placement, l: LoadedPart) {
+  const placed = placedBox(ref.asset.bounds, p)
+  const facingDepth: Record<string, string> = {}
+  const boxes = [{ referenceId: ref.id, box: placed }]
+  for (const d of DIRECTIONS) {
+    const s = suggestFacingDepth(d, stockSize(l), boxes, l.units)
+    if (s !== undefined) facingDepth[STOCK_FACE[d]] = s.source
+  }
+  return { scale: ref.scale.source, placed, facingDepth }
 }
 
 /** The record as it is in the draft, edited, then checked for `exceedsStock`. */
@@ -229,7 +241,7 @@ function edit(
   args: { partId: string; referenceId: string },
   where: string,
   change: (ref: ReferenceDTO, l: LoadedPart) => AppResult<Partial<ReferenceDTO>>,
-): AppResult<{ warnings: ReferenceWarning[] }> {
+): AppResult<{ warnings: ReferenceWarning[] } & ReturnType<typeof placedFields>> {
   const doc = draft as ProjectDoc
   const loaded = loadPart(doc, args.partId, where)
   if (loaded.isErr()) return loaded
@@ -239,9 +251,12 @@ function edit(
   if (changed.isErr()) return changed
   const target = draft.references[args.referenceId]!
   Object.assign(target, changed.unwrap())
-  return placementWarnings(target as ReferenceDTO, loaded.unwrap(), where).map((warnings) => ({
-    warnings,
-  }))
+  const ref = target as ReferenceDTO
+  const l = loaded.unwrap()
+  return placementOf(ref, where).map((p) => {
+    const w = exceedsStock(ref.id, placedBox(ref.asset.bounds, p), stockSize(l))
+    return { ...placedFields(ref, p, l), warnings: w === undefined ? [] : [w] }
+  })
 }
 
 function baseName(path: string): string {
@@ -274,6 +289,7 @@ const referenceImport = defineCommand({
     referenceId: ReferenceIdSchema,
     sourceUnit: SourceUnitSchema,
     guess: z.object({ unit: SourceUnitSchema, reason: z.string() }),
+    ...PlacedFields,
     warnings: Warnings,
   }),
   async prepare(doc, args, ctx: CommandContext): Promise<AppResult<Imported>> {
@@ -373,10 +389,10 @@ const referenceImport = defineCommand({
         referenceId: id,
         params: { triangles: mesh.triangles, limit: STL_LIMITS.warnTriangles },
       })
-    const placed = placedBox(mesh.bounds, f.placement)
-    const over = exceedsStock(id, placed, stockSize(l))
+    const fields = placedFields(ref, f.placement, l)
+    const over = exceedsStock(id, fields.placed, stockSize(l))
     if (over !== undefined) warnings.push(over)
-    return Ok({ referenceId: id, sourceUnit, guess, warnings })
+    return Ok({ referenceId: id, sourceUnit, guess, ...fields, warnings })
   },
 })
 
@@ -436,7 +452,7 @@ const referenceUpdate = defineCommand({
       .optional(),
     fit: FitArg.optional(),
   }),
-  result: z.object({ warnings: Warnings }),
+  result: z.object({ ...PlacedFields, warnings: Warnings }),
   run(draft, args) {
     const where = 'design.reference.update'
     if (args.turn?.turns === 0) return invalid('turn', 'turns', 'turns must be -1, 1 or 2', where)
@@ -527,11 +543,6 @@ const referenceRemove = defineCommand({
   },
 })
 
-const BoxSchema = z.object({
-  min: z.object({ x: z.number(), y: z.number(), z: z.number() }),
-  max: z.object({ x: z.number(), y: z.number(), z: z.number() }),
-})
-
 const referenceList = defineQuery({
   name: 'design.reference.list',
   summary: "List a part's references with placed bounds (mm) and facing depths.",
@@ -540,11 +551,7 @@ const referenceList = defineQuery({
     references: z.array(
       ReferenceDtoSchema.extend({
         placed: BoxSchema.describe('Placed bounding box in the part frame, mm'),
-        facingDepth: z
-          .record(z.string(), z.string())
-          .describe(
-            'By stock face id: the facing depth that faces down to this reference (project units, rounded down); only faces with a sensible value',
-          ),
+        facingDepth: FacingDepthSchema,
         warnings: Warnings,
       }),
     ),
@@ -557,19 +564,174 @@ const referenceList = defineQuery({
     return collect(
       refs.map((ref) =>
         placementOf(ref, where).map((p) => {
-          const placed = placedBox(ref.asset.bounds, p)
-          const stock = stockSize(loaded.unwrap())
-          const w = exceedsStock(ref.id, placed, stock)
-          const boxes = [{ referenceId: ref.id, box: placed }]
-          const facingDepth: Record<string, string> = {}
-          for (const d of DIRECTIONS) {
-            const s = suggestFacingDepth(d, stock, boxes, loaded.unwrap().units)
-            if (s !== undefined) facingDepth[STOCK_FACE[d]] = s.source
-          }
+          const { placed, facingDepth } = placedFields(ref, p, loaded.unwrap())
+          const w = exceedsStock(ref.id, placed, stockSize(loaded.unwrap()))
           return { ...ref, placed, facingDepth, warnings: w === undefined ? [] : [w] }
         }),
       ),
     ).map((references) => ({ references }))
+  },
+})
+
+// ── find (DF60 P1) ─────────────────────────────────────────────────────────────────────────
+
+const r3 = (v: number): number => {
+  const r = Math.round(v * 1000) / 1000
+  return r === 0 ? 0 : r
+}
+const P2 = z.tuple([z.number(), z.number()])
+/** At most this many loops in a section summary, and sharp corner positions per loop. */
+export const FIND_LOOPS_MAX = 50
+export const SHARP_SHOWN_MAX = 8
+
+const LevelSchema = z.object({
+  depth: z.number(),
+  facing: z.enum(['face', 'opposite']),
+  area: z.number(),
+  visibleArea: z.number(),
+  bounds: z.tuple([P2, P2]),
+  depthFromOpposite: z.number().optional(),
+})
+const LoopSummarySchema = z.object({
+  role: z.enum(['outer', 'hole']),
+  area: z.number(),
+  bounds: z.tuple([P2, P2]),
+  elements: z.number().int(),
+  circle: z.object({ center: P2, diameter: z.number() }).optional(),
+  corners: z.object({
+    minInsideRadius: z.number().optional(),
+    sharp: z.array(P2),
+    sharpCount: z.number().int(),
+  }),
+  maxDeviation: z.number(),
+  open: z.literal(true).optional(),
+})
+export type LoopSummary = z.output<typeof LoopSummarySchema>
+
+/** The compact summary of a fitted loop (RT-G), mm rounded to 0.001. */
+export function loopSummary(l: FittedLoop): LoopSummary {
+  const pt = (p: readonly [number, number]): [number, number] => [r3(p[0]), r3(p[1])]
+  return {
+    role: l.role,
+    area: r3(l.area),
+    bounds: [pt(l.bounds.min), pt(l.bounds.max)],
+    elements: l.loop.elements.length,
+    ...(l.circle
+      ? { circle: { center: pt(l.circle.centre), diameter: r3(l.circle.diameter) } }
+      : {}),
+    corners: {
+      ...(l.minInsideRadius === undefined ? {} : { minInsideRadius: r3(l.minInsideRadius) }),
+      sharp: l.sharp.slice(0, SHARP_SHOWN_MAX).map(pt),
+      sharpCount: l.sharp.length,
+    },
+    maxDeviation: r3(l.maxDeviation),
+    ...(l.open ? { open: true as const } : {}),
+  }
+}
+
+/** The loops a `loops` arg keeps. */
+export function keepLoops(loops: readonly FittedLoop[], which: 'all' | 'outer' | 'holes' = 'all') {
+  return loops.filter((l) => which === 'all' || (which === 'outer') === (l.role === 'outer'))
+}
+
+const referenceFind = defineAsyncQuery({
+  name: 'design.reference.find',
+  async: true,
+  summary:
+    'Read the reference from a stock face (face frame, mm): levels = flat floors seen from the face and its opposite; section = loops at a depth, fitted, with inside corner radii (shapes: design.shape.import from).',
+  args: z.object({
+    partId: PartIdSchema,
+    referenceId: ReferenceIdSchema.optional().describe('Default: the only one'),
+    face: FaceArg.optional(),
+    kind: z.enum(['levels', 'section']),
+    sides: z.enum(['both', 'face']).optional().describe('levels; default both'),
+    minArea: z.number().nonnegative().optional().describe('levels: mm², default 1'),
+    limit: z.number().int().min(1).max(256).optional().describe('levels: default 32'),
+    depth: Src.optional().describe('section (required): below the face, length'),
+    tolerance: z.number().min(0.001).max(1).optional().describe('section: mm, default 0.01'),
+    cornerAngle: z.number().min(1).max(90).optional().describe('section: deg, default 15'),
+    loops: z.enum(['all', 'outer', 'holes']).optional(),
+  }),
+  result: z.object({
+    kind: z.enum(['levels', 'section']),
+    referenceId: ReferenceIdSchema,
+    face: z.string(),
+    opposite: z.string().optional(),
+    levels: z.array(LevelSchema).optional(),
+    depth: z.number().optional(),
+    tolerance: z.number().optional(),
+    loops: z.array(LoopSummarySchema).optional(),
+    fit: z.object({ elements: z.number().int(), maxDeviation: z.number() }).optional(),
+    more: z.number().int().optional(),
+    note: z.string().optional(),
+  }),
+  async run(doc, args, ctx) {
+    const where = 'design.reference.find'
+    const loaded = loadPart(doc, args.partId, where)
+    if (loaded.isErr()) return loaded
+    const l = loaded.unwrap()
+    const found = targetReference(doc, args.partId, args.referenceId, where)
+    if (found.isErr()) return found
+    const ref = found.unwrap()
+    const direction = stockFace(args.face, 'face', where)
+    if (direction.isErr()) return direction
+    const p = placementOf(ref, where)
+    if (p.isErr()) return p
+    const view = referenceView(ref, p.unwrap(), stockSize(l), direction.unwrap())
+    const head = { referenceId: ref.id, face: view.face }
+    if (args.kind === 'levels') {
+      const r = await referenceLevelsOf(
+        ctx,
+        view,
+        {
+          minArea: args.minArea ?? 1,
+          limit: args.limit ?? 32,
+          sides: args.sides ?? 'both',
+        },
+        where,
+      )
+      if (r.isErr()) return r
+      const { levels, more } = r.unwrap()
+      return Ok({
+        kind: 'levels' as const,
+        ...head,
+        opposite: view.opposite,
+        levels: levels.map((x) => ({
+          ...x,
+          bounds: [[...x.bounds[0]], [...x.bounds[1]]],
+        })) as z.output<typeof LevelSchema>[],
+        ...(more === undefined ? {} : { more }),
+      })
+    }
+    if (args.depth === undefined)
+      return fail('input.malformed', 'depth: required for a section', {
+        issues: [{ path: ['depth'], rule: 'required', message: 'required for kind section' }],
+        where,
+      })
+    const depth = lengthArg(args.depth, l, ['depth'], where)
+    if (depth.isErr()) return depth
+    const fit = fitOptions(args)
+    const r = await fittedSection(ctx, view, depth.unwrap(), fit, where)
+    if (r.isErr()) return r
+    const all = keepLoops(r.unwrap(), args.loops)
+    const shown = all.slice(0, FIND_LOOPS_MAX)
+    const closed = all.filter((x) => !x.open)
+    return Ok({
+      kind: 'section' as const,
+      ...head,
+      depth: r3(depth.unwrap()),
+      tolerance: fit.tolerance,
+      loops: shown.map(loopSummary),
+      fit: {
+        elements: closed.reduce((s, x) => s + x.loop.elements.length, 0),
+        maxDeviation: r3(closed.reduce((m, x) => Math.max(m, x.maxDeviation), 0)),
+      },
+      ...(all.length > shown.length ? { more: all.length - shown.length } : {}),
+      ...(all.length === 0 ? { note: 'The plane misses the reference at this depth' } : {}),
+      ...(all.some((x) => x.open)
+        ? { note: 'Open loops (the mesh is not closed): shape import skips them' }
+        : {}),
+    })
   },
 })
 
@@ -579,4 +741,4 @@ export const REFERENCE_COMMANDS: readonly AnyCommand[] = [
   referenceRemove,
 ]
 
-export const REFERENCE_QUERIES: readonly QueryDef[] = [referenceList]
+export const REFERENCE_QUERIES: readonly AnyQueryDef[] = [referenceList, referenceFind]

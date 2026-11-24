@@ -8,7 +8,7 @@
  */
 import { z } from 'zod'
 import { Ok, type AppResult } from '../../shared/result'
-import type { AnyCommand, QueryDef } from '../commands/define'
+import type { AnyCommand, AnyQueryDef } from '../commands/define'
 import { toolDescriptor } from '../commands/json-schema'
 import type { Registry } from '../commands/registry'
 import { OPERATION_ID_PATTERN, RECORD_ID_PATTERN } from '../design/part.dto'
@@ -100,7 +100,7 @@ const KIND_LINES = {
   job: 'Starts a job; returns { jobId }, wait with job_wait.',
 } as const
 
-function describe(def: AnyCommand | QueryDef, kind: AgentTool['kind']): string {
+function describe(def: AnyCommand | AnyQueryDef, kind: AgentTool['kind']): string {
   const lines = [def.summary]
   if (kind === 'effect' && 'readOnly' in def && def.readOnly === true) lines.push('Read-only.')
   else if (kind === 'effect' && 'machine' in def && def.machine) lines.push('Not undoable.')
@@ -118,7 +118,7 @@ function hasConfirm(schema: JsonObject): boolean {
 
 /** Docs: #annotations-and-server-instructions. */
 export function annotationsOf(
-  def: AnyCommand | QueryDef,
+  def: AnyCommand | AnyQueryDef,
   inputSchema: JsonObject,
 ): ToolAnnotations {
   if (!('kind' in def)) return { readOnlyHint: true, idempotentHint: true }
@@ -132,7 +132,7 @@ export function annotationsOf(
   return out
 }
 
-function registryTool(def: AnyCommand | QueryDef, scope: ToolScope): AppResult<AgentTool> {
+function registryTool(def: AnyCommand | AnyQueryDef, scope: ToolScope): AppResult<AgentTool> {
   return toolDescriptor(def).map((d) => {
     const kind: AgentTool['kind'] = 'kind' in def ? def.kind : 'query'
     const input = compactSchema(d.inputSchema)

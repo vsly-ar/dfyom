@@ -4,7 +4,7 @@
  */
 import { z } from 'zod'
 import { ctx, Ok, tryCatch, type AppResult } from '../../shared/result'
-import type { AnyCommand, QueryDef } from './define'
+import type { AnyCommand, AnyQueryDef } from './define'
 import type { Registry } from './registry'
 
 export interface ToolDescriptor {
@@ -15,7 +15,7 @@ export interface ToolDescriptor {
 }
 
 /** One descriptor; schemas that are not JSON-representable (`z.date()`, transforms…) → Err. */
-export function toolDescriptor(def: AnyCommand | QueryDef): AppResult<ToolDescriptor> {
+export function toolDescriptor(def: AnyCommand | AnyQueryDef): AppResult<ToolDescriptor> {
   return tryCatch(
     () => ({
       name: def.name,

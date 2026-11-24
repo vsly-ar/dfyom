@@ -478,14 +478,14 @@ export class AgentSession {
       if (name.startsWith('library.') && write) return this.afterLibraryWrite(r)
       return this.afterLifecycle(name, rawArgs, r)
     }
-    if (app.query(name).isSome()) return this.host.app.query(name, rawArgs, this.source)
+    if (app.query(name).isSome()) return this.host.app.queryAsync(name, rawArgs, this.source)
     const isCommand = project.command(name).isSome()
     if (!isCommand && project.query(name).isNone())
       return fail('command.unknown', `unknown tool ${name}`, { where: 'AgentSession' })
     const bound = this.bound()
     if (bound.isNone()) return noProject(name, this.lostMessage())
     const d = bound.unwrap()
-    if (!isCommand) return d.query(name, rawArgs, this.source)
+    if (!isCommand) return d.queryAsync(name, rawArgs, this.source)
     const split = splitExpectedRevision(rawArgs)
     if (split.isErr()) return split
     const isDocument = project.command(name).unwrap().kind === 'document'
