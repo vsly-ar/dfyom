@@ -34,6 +34,7 @@ export const PLAN_WARNING_CODES = [
   'plan.libraryBlocked',
   'plan.rebuildBlocked',
   'plan.broken',
+  'plan.zRef',
   'feeds.rpmAboveMachine',
   'feeds.rpmBelowMachine',
   'feeds.feedClamped',

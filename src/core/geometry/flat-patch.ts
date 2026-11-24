@@ -1,0 +1,328 @@
+/**
+ * Flat patches of upward surfaces and touch-off spots (hardening DF69): the part of a stock face or
+ * a cut floor still at its level after the cuts machined so far, using the 2D coverage model of the
+ * material bands (DF61, no in-process stock model), and the touch-off spot on a patch: the centre
+ * of its largest inscribed circle after eroding it by the clearance radius, on a grid.
+ * Pure; needs the 2D port.
+ * Doc: docs/modes/z-reference.md#eligible-surfaces, docs/modes/z-reference.md#touch-off-spot
+ */
+import { localStock, STOCK_FACE, type Direction } from './face'
+import type { Region2dPort } from './2d/port'
+import { chainBounds, regionArea, regionLoops, arc, type Region } from './2d/model'
+import { EPSILON, type OperationGeometry, type StockGeometry, type Vec2 } from './model'
+import { pocketRegion } from './outline'
+import {
+  frameMap,
+  holeRegion,
+  isOpening,
+  mapRegion,
+  OPPOSITE,
+  openingRegion,
+  rectangle,
+  slotRegion,
+} from './through-depth'
+import { chamferDepth } from './model'
+
+/** A patch smaller than this (mm²) is gone (boolean slivers). */
+const PATCH_AREA = 1e-2
+
+/** A surface that may be a Z reference and its flat patch so far (face frame of its direction). */
+export interface FlatSurface {
+  /** Surface id: the stock face (`stock.top`) or `<operation id>.floor`. */
+  readonly id: string
+  /** The design operation that cut it; undefined for a stock face. */
+  readonly owner: string | undefined
+  readonly direction: Direction
+  /** z in the face frame of its direction (the stock face at 0), ≤ 0. */
+  readonly level: number
+  /** What is still at the level, clipped to the stock face rectangle. */
+  readonly patch: Region
+}
+
+/** What one cut removes: below `lowest` (face z; −∞ through) over its region. */
+interface Cut {
+  readonly direction: Direction
+  readonly lowest: number
+  readonly region: 'face' | Region | undefined
+}
+
+/** The material a design operation cuts away, for the patches. */
+function cutOf(op: OperationGeometry, stock: StockGeometry, port: Region2dPort): Cut[] {
+  const direction = op.direction ?? '+z'
+  const face = localStock(direction, stock)
+  const clip = (r: Region | undefined) =>
+    r === undefined
+      ? undefined
+      : port.intersect(r, rectangle(face.length, face.width)).mapOr(undefined, (x) => x)
+  switch (op.kind) {
+    case 'facing':
+      return [{ direction, lowest: -op.depth, region: 'face' }]
+    case 'pocket':
+      return [{ direction, lowest: op.onZ - op.depth, region: clip(pocketRegion(op).region) }]
+    case 'drilling':
+      return [
+        {
+          direction,
+          // a drill point reaches below the depth: counted to its full depth (only deeper is safe)
+          lowest: op.bottom.kind === 'through' ? -Infinity : op.onZ - op.bottom.depth - op.diameter,
+          region: holeRegion(op, stock, port),
+        },
+      ]
+    case 'chamfer': {
+      const r = op.diameter / 2
+      const a: Vec2 = [op.center[0] + r, op.center[1]]
+      const disc: Region = {
+        pieces: [{ outer: { elements: [arc(a, a, op.center, true)] }, holes: [] }],
+      }
+      return [{ direction, lowest: op.onZ - chamferDepth(op), region: clip(disc) }]
+    }
+    case 'profile': {
+      const out: Cut[] = [
+        {
+          direction,
+          lowest: op.depth === undefined ? -Infinity : -op.depth,
+          region: slotRegion(op, stock, port),
+        },
+      ]
+      // an opening's slug is no surface to touch off on, loose or not
+      if (isOpening(op))
+        out.push({ direction, lowest: -Infinity, region: openingRegion(op, stock, port) })
+      return out
+    }
+  }
+}
+
+/** The floor a facing, pocket or blind profile leaves (pocket: inset by its floor fillet). */
+function floorOf(
+  op: OperationGeometry,
+  stock: StockGeometry,
+  port: Region2dPort,
+): { level: number; region: Region | undefined } | undefined {
+  const direction = op.direction ?? '+z'
+  const face = localStock(direction, stock)
+  const rect = rectangle(face.length, face.width)
+  if (op.kind === 'facing') return { level: -op.depth, region: rect }
+  if (op.kind === 'pocket') {
+    const own = pocketRegion(op).region
+    const flat =
+      op.floorRadius > 0 ? port.offset(own, op.floorRadius).mapOr(undefined, (x) => x) : own
+    return {
+      level: op.onZ - op.depth,
+      region:
+        flat === undefined ? undefined : port.intersect(flat, rect).mapOr(undefined, (x) => x),
+    }
+  }
+  if (op.kind === 'profile' && op.depth !== undefined)
+    return { level: -op.depth, region: slotRegion(op, stock, port) }
+  return undefined
+}
+
+/**
+ * The flat patches of every upward surface while the cuts are applied in machining order
+ * (`apply`): the six stock faces from the start, a floor once its operation is applied (when the
+ * caller says it is flat). A cut lowers a surface of its own direction where it goes below it, and
+ * one of the opposite direction where it reaches up to it (through cuts always); side directions
+ * are not counted.
+ */
+export class FlatPatches {
+  private readonly surfaces: FlatSurface[] = []
+  private readonly history: Cut[] = []
+
+  constructor(
+    private readonly stock: StockGeometry,
+    private readonly port: Region2dPort,
+    directions: readonly Direction[],
+  ) {
+    for (const d of new Set(directions)) {
+      const face = localStock(d, stock)
+      this.surfaces.push({
+        id: STOCK_FACE[d],
+        owner: undefined,
+        direction: d,
+        level: 0,
+        patch: rectangle(face.length, face.width),
+      })
+    }
+  }
+
+  /** The surfaces of `direction` with a patch left. */
+  of(direction: Direction): readonly FlatSurface[] {
+    return this.surfaces.filter(
+      (s) => s.direction === direction && regionArea(s.patch) > PATCH_AREA,
+    )
+  }
+
+  /** Applies one cut; `flatFloor`: its floor (facing, pocket, blind profile) becomes a surface. */
+  apply(op: OperationGeometry, flatFloor: boolean): void {
+    const cuts = cutOf(op, this.stock, this.port)
+    for (let i = 0; i < this.surfaces.length; i++) {
+      const s = this.surfaces[i]!
+      let patch = s.patch
+      for (const c of cuts) patch = this.lower(s, patch, c)
+      if (patch !== s.patch) this.surfaces[i] = { ...s, patch }
+    }
+    if (flatFloor) {
+      const f = floorOf(op, this.stock, this.port)
+      const direction = op.direction ?? '+z'
+      if (f !== undefined && f.region !== undefined) {
+        const base = { id: `${op.id}.floor`, owner: op.id, direction, level: f.level }
+        let patch: Region = f.region
+        for (const c of this.history) patch = this.lower({ ...base, patch }, patch, c)
+        this.surfaces.push({ ...base, patch })
+      }
+    }
+    this.history.push(...cuts)
+  }
+
+  /** `patch` of `s` less what `c` cuts below its level. */
+  private lower(s: FlatSurface, patch: Region, c: Cut): Region {
+    if (patch.pieces.length === 0) return patch
+    let region: 'face' | Region | undefined
+    if (c.direction === s.direction) {
+      if (!(c.lowest < s.level - EPSILON)) return patch
+      region = c.region
+    } else if (c.direction === OPPOSITE[s.direction]) {
+      const thickness = localStock(s.direction, this.stock).thickness
+      // depth below its own face against our level seen from that face
+      if (!(-c.lowest >= thickness + s.level - EPSILON)) return patch
+      if (c.region === 'face' || c.region === undefined) region = c.region
+      else region = mapRegion(c.region, frameMap(c.direction, s.direction, this.stock))
+    } else return patch
+    if (region === 'face') return { pieces: [] }
+    // a cut whose region the port failed on: the patch is no longer known flat
+    if (region === undefined) return { pieces: [] }
+    return this.port.difference(patch, region).mapOr({ pieces: [] }, (r) => r)
+  }
+}
+
+/** Maps between the face frame and the setup's WCS (identity for an unrotated setup). */
+export interface SpotFrame {
+  readonly toWcs: (p: Vec2) => Vec2
+  readonly fromWcs: (p: Vec2) => Vec2
+}
+
+const IDENTITY: SpotFrame = { toWcs: (p) => p, fromWcs: (p) => p }
+
+/** Distances closer than this (mm) tie: the offsets' arcs and lines are not exact. */
+const TIE = 1e-3
+/** Coarse lattice size per axis before refinement. */
+const COARSE = 40
+/** Coarse points refined at most. */
+const MAX_SEEDS = 64
+/** Lattice points the fallback scans at most (thin patches). */
+const MAX_SCAN = 200_000
+
+export interface TouchSpot {
+  /** WCS position (mm), on the grid. */
+  readonly at: Vec2
+  /** Distance from `at` to the patch boundary (mm). */
+  readonly radius: number
+}
+
+/** The patch eroded by `clearance`; undefined when nothing is left. */
+export function erodedPatch(
+  port: Region2dPort,
+  patch: Region,
+  clearance: number,
+): Region | undefined {
+  const r = port.offset(patch, clearance)
+  if (r.isErr()) return undefined
+  const e = r.unwrap()
+  return e.pieces.length === 0 || regionArea(e) <= 0 ? undefined : e
+}
+
+/**
+ * The touch-off spot: the grid point (multiples of `grid` in the WCS) of the patch eroded by
+ * `clearance` farthest from its boundary (≈ the centre of the largest inscribed circle), ties to
+ * the one nearest the work zero. Undefined when no grid point lies in the eroded patch.
+ */
+export function touchOffSpot(
+  port: Region2dPort,
+  patch: Region,
+  clearance: number,
+  grid: number,
+  frame: SpotFrame = IDENTITY,
+): TouchSpot | undefined {
+  const eroded = erodedPatch(port, patch, clearance)
+  if (eroded === undefined) return undefined
+  const loops = regionLoops(eroded)
+  const b = chainBounds(loops.flatMap((l) => l.elements))
+  if (b === undefined) return undefined
+  const corners = [b.min, [b.max[0], b.min[1]], b.max, [b.min[0], b.max[1]]] as Vec2[]
+  const w = corners.map((c) => frame.toWcs(c))
+  const lo = [Math.min(...w.map((p) => p[0])), Math.min(...w.map((p) => p[1]))]
+  const hi = [Math.max(...w.map((p) => p[0])), Math.max(...w.map((p) => p[1]))]
+  const k0 = [Math.ceil(lo[0]! / grid - 1e-9), Math.ceil(lo[1]! / grid - 1e-9)] as const
+  const k1 = [Math.floor(hi[0]! / grid + 1e-9), Math.floor(hi[1]! / grid + 1e-9)] as const
+  const nx = k1[0] - k0[0] + 1
+  const ny = k1[1] - k0[1] + 1
+  if (nx <= 0 || ny <= 0) return undefined
+  const memo = new Map<string, number>()
+  const score = (i: number, j: number): number => {
+    const key = `${i},${j}`
+    const known = memo.get(key)
+    if (known !== undefined) return known
+    const p = frame.fromWcs([i * grid, j * grid])
+    let v = -1
+    if (port.contains(eroded, p)) v = port.distance(loops, p)?.distance ?? -1
+    memo.set(key, v)
+    return v
+  }
+  type Best = { i: number; j: number; v: number }
+  // ties (a rectangle's whole middle line): nearest the middle of the patch, then the work zero
+  const mid = [(lo[0]! + hi[0]!) / 2 / grid, (lo[1]! + hi[1]!) / 2 / grid]
+  const toMid = (a: Best) => Math.hypot(a.i - mid[0]!, a.j - mid[1]!)
+  const better = (a: Best, c: Best | undefined): boolean => {
+    if (c === undefined) return true
+    if (a.v > c.v + TIE) return true
+    if (a.v < c.v - TIE) return false
+    const m = toMid(a) - toMid(c)
+    if (Math.abs(m) > 1e-9) return m < 0
+    return Math.hypot(a.i, a.j) < Math.hypot(c.i, c.j)
+  }
+  const step = Math.max(1, Math.ceil(Math.max(nx, ny) / COARSE))
+  const seeds: Best[] = []
+  for (let i = k0[0]; i <= k1[0]; i += step)
+    for (let j = k0[1]; j <= k1[1]; j += step) {
+      const v = score(i, j)
+      if (v >= 0) seeds.push({ i, j, v })
+    }
+  let best: Best | undefined
+  if (seeds.length === 0) {
+    if (step === 1 || nx * ny > MAX_SCAN) return undefined
+    for (let i = k0[0]; i <= k1[0]; i++)
+      for (let j = k0[1]; j <= k1[1]; j++) {
+        const c = { i, j, v: score(i, j) }
+        if (c.v >= 0 && better(c, best)) best = c
+      }
+  } else {
+    seeds.sort((a, c) => (better(a, c) ? -1 : better(c, a) ? 1 : 0))
+    // the distance is 1-Lipschitz: the best grid point lies near a seed at most a coarse step
+    // (diagonal) below the best seed
+    const floor = seeds[0]!.v - step * grid * Math.SQRT2 - TIE
+    for (const s of seeds.filter((x) => x.v >= floor).slice(0, MAX_SEEDS)) {
+      if (better(s, best)) best = s
+      if (step === 1) continue
+      for (let i = s.i - step; i <= s.i + step; i++)
+        for (let j = s.j - step; j <= s.j + step; j++) {
+          if (i < k0[0] || i > k1[0] || j < k0[1] || j > k1[1]) continue
+          const c = { i, j, v: score(i, j) }
+          if (c.v >= 0 && better(c, best)) best = c
+        }
+    }
+  }
+  if (best === undefined) return undefined
+  return { at: [best.i * grid + 0, best.j * grid + 0], radius: best.v + clearance }
+}
+
+/** Whether the WCS point `at` lies in the patch eroded by `clearance`. */
+export function spotFits(
+  port: Region2dPort,
+  patch: Region,
+  clearance: number,
+  at: Vec2,
+  frame: SpotFrame = IDENTITY,
+): boolean {
+  const eroded = erodedPatch(port, patch, clearance)
+  return eroded !== undefined && port.contains(eroded, frame.fromWcs(at))
+}

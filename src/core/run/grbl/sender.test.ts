@@ -264,6 +264,36 @@ describe('tool changes and pauses', () => {
     expect(r.emu.trace.lines.map((l) => l.text)).not.toContain(pause)
   })
 
+  // docs/modes/z-reference.md#exported-gcode (DF69)
+  it('a tool change carries the Z reference lines before its marker', async () => {
+    const r = await connected(machine())
+    const p = start(r, [
+      ...head,
+      'M5',
+      'G0 Z5',
+      'X50 Y30',
+      '(Z0 for tool 2: Facing 1 floor, 0.50 below the stock top)',
+      '(Touch off Z here, X50 Y30: set Z0 on that surface)',
+      '(Stop the spindle)',
+      marker,
+      'M0 ;Stop spindle, install T2 3 mm flat, 3 mm flat, then zero Z',
+      ...tail,
+    ])
+    expect(await until(r.clock, () => r.sender.phase === 'toolChange')).toBe(true)
+    expect(r.phases.at(-1)).toEqual({
+      phase: 'toolChange',
+      toolChange: {
+        n: 2,
+        name: '3 mm flat',
+        surface: 'Facing 1 floor, 0.50 below the stock top',
+        spot: 'X50 Y30',
+      },
+    })
+    await drive(r.clock, r.sender.freshStatus())
+    expectOk(r.sender.continueProgram())
+    expect(expectOk(await drive(r.clock, p))).toMatchObject({ toolChanges: 1 })
+  })
+
   it('a plain pause shows the ; message on its M0 line before the comment line above', async () => {
     const r = await connected(machine())
     const p = start(r, ['G0 Z5', '(Other text)', 'M0 ;Set spindle to 10000 rpm', 'G0 X1', 'M30'])

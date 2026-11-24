@@ -16,6 +16,27 @@ import type { PlanOperationView, PlanStale, ToolpathEntry } from './model'
 /** Progress poll of the toolpath job (`job.get`): progress ticks are not pushed (ui.md#jobs). */
 export const GENERATE_POLL_MS = 250
 
+/** A Z reference surface with its touch-off spot (DF69, `plan.warning.list` `zRefs`). */
+export interface ZRefCandidateView {
+  readonly surface: string
+  readonly label: string
+  /** Setup-frame Z, mm (≤ 0). */
+  readonly level: number
+  readonly at: readonly [number, number]
+  readonly area: number
+  readonly small: boolean
+  readonly top: boolean
+}
+
+/** A tool run's Z reference (DF69): docs/modes/z-reference.md#implementation-notes-df69. */
+export interface ZRefRunView {
+  readonly setupId: string
+  readonly planOperationId: string
+  readonly toolNumber: number
+  readonly zRef: (ZRefCandidateView & { readonly chosen: boolean; readonly rule: string }) | null
+  readonly candidates: readonly ZRefCandidateView[]
+}
+
 /** The plan queries of one revision. */
 export interface PlanData {
   readonly planId: string
@@ -23,6 +44,8 @@ export interface PlanData {
   readonly operations: readonly PlanOperationView[] | undefined
   readonly error?: AppErrorData | undefined
   readonly warnings: readonly PlanWarning[]
+  /** DF69: the Z reference per tool run, by its first plan operation. */
+  readonly zRefs: readonly ZRefRunView[]
   readonly stale: PlanStale | undefined
   readonly toolpaths: Readonly<Record<string, ToolpathEntry>>
   /** Its inputs have changes not applied yet (P3: notice, checks outdated, toolpaths dimmed). */
@@ -232,6 +255,7 @@ export function createPlanStore(bridge: Pick<PreloadApi, 'call' | 'files'>): Pla
       operations,
       error: ops.ok ? undefined : ops.error,
       warnings: value<{ warnings: PlanWarning[] }>(warnings)?.warnings ?? [],
+      zRefs: value<{ zRefs?: ZRefRunView[] }>(warnings)?.zRefs ?? [],
       stale: value<PlanStale>(stale),
       toolpaths,
       pendingApply:

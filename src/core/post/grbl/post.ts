@@ -9,7 +9,7 @@
 import type { Issue } from '../../../shared/errors/app-error'
 import { fail, Ok, type AppResult } from '../../../shared/result'
 import type { Vec3 } from '../../toolpath/model'
-import type { Block, MachiningProgram, ProgramTool, SetupHeader } from '../program'
+import type { Block, MachiningProgram, ProgramTool, ProgramZRef, SetupHeader } from '../program'
 import {
   commentLine,
   fitName,
@@ -147,6 +147,11 @@ class Writer {
   private motion: Motion | undefined
   private feed: string | undefined
   private toolLoaded = false
+  /**
+   * Z reference level of the current tool run (mm, setup frame, ≤ 0; DF69): every Z word is
+   * written shifted by −level, so Z0 is on the run's reference surface.
+   */
+  private level = 0
   private readonly issues: Issue[] = []
 
   constructor(
@@ -158,6 +163,8 @@ class Writer {
   }
 
   write(): AppResult<string[]> {
+    const head = this.p.blocks.find((b) => b.kind === 'toolChange')
+    this.level = head?.zRef?.level ?? 0
     this.header()
     this.p.blocks.forEach((b, k) => this.block(b, k))
     this.footer()
@@ -189,7 +196,11 @@ class Writer {
       if (b.kind !== 'toolChange' || seen.has(b.number)) continue
       seen.add(b.number)
       const d = this.coord(b.tool.diameter)
-      this.comment(`Tool ${b.number}: ${b.tool.name}, dia ${d} ${p.units}`)
+      // DF69: a reference off the up face is named (the run where the tool first comes in)
+      if (b.zRef !== undefined && !b.zRef.top) {
+        const tail = `, dia ${d} ${p.units}, Z0 on ${b.zRef.label}`
+        this.lines.push(`(${fitName(`Tool ${b.number}: `, b.tool.name, tail, MAX_LINE_BYTES - 2)})`)
+      } else this.comment(`Tool ${b.number}: ${b.tool.name}, dia ${d} ${p.units}`)
     }
     this.comment(`Generator: ${this.opts.generator}`)
     this.modes()
@@ -206,7 +217,14 @@ class Writer {
     if (h.fromFirst !== undefined) this.comment(`From setup 1: ${h.fromFirst}`)
     this.comment(`Work zero G54 X0 Y0: ${corner} corner of the ${h.up} face`)
     this.comment('That corner sits front left on the machine')
-    this.comment(`Z0 on the ${h.up} face: the stock surface facing up`)
+    // DF69: tool runs touching off elsewhere: docs/modes/z-reference.md#exported-gcode
+    const refs = this.p.blocks.flatMap((b) => (b.kind === 'toolChange' ? [b.zRef] : []))
+    const first = refs[0]
+    if (first !== undefined && !first.top)
+      this.comment(`Z0 for tool 1 on ${first.label}: see the first tool change`)
+    else if (refs.some((z) => z !== undefined && !z.top))
+      this.comment(`Z0 on the ${h.up} face for tool 1, later tools: see each tool change`)
+    else this.comment(`Z0 on the ${h.up} face: the stock surface facing up`)
     if (h.overreach !== undefined) this.reachComments(h.overreach)
   }
 
@@ -265,7 +283,7 @@ class Writer {
       case 'comment':
         return this.comment(b.text)
       case 'toolChange':
-        return this.toolChange(b.number, b.tool)
+        return this.toolChange(b.number, b.tool, b.zRef)
       case 'spindle':
         return this.spindle(b.rpm)
       case 'rapid':
@@ -281,25 +299,35 @@ class Writer {
    * Label, `M5`, retract, marker, `M0 ;Install Tn …`; the first tool only gets the marker unless
    * it is not loaded. Marker and `M0` carry the tool (grbl.md#pause-messages-hardening-df63).
    */
-  private toolChange(number: number, tool: ProgramTool): void {
+  private toolChange(number: number, tool: ProgramTool, zRef: ProgramZRef | undefined): void {
     const first = !this.toolLoaded
     this.toolLoaded = true
     const manual = this.p.spindleControl === 'manual'
+    // DF69: a first tool whose Z0 is off the up face pauses like a tool change
+    const pauses =
+      !first || this.opts.firstToolLoaded === false || (zRef !== undefined && !zRef.top)
     if (!first) {
       this.comment(`Tool change to T${number}: spindle off, retract`)
       this.lines.push('M5')
       this.clearance(false)
-      // Before the marker: the marker line must be followed directly by M0 (sender rule).
-      if (manual) this.comment('Stop the spindle')
     }
+    if (pauses && zRef !== undefined) this.touchOff(number, zRef)
+    // Before the marker: the marker line must be followed directly by M0 (sender rule).
+    if (!first && manual) this.comment('Stop the spindle')
     const spec = `, ${this.coord(tool.diameter)} ${this.p.units} ${TYPE_WORD[tool.type]}`
     this.lines.push(toolChangeMarker(number, tool.name, spec))
-    if (first && this.opts.firstToolLoaded !== false) return
+    if (!pauses) return
     const head = `M0 ;`
     const verb = manual && !first ? `Stop spindle, install T${number} ` : `Install T${number} `
+    const room = MAX_LINE_BYTES - head.length
+    // DF69: the surface on the pause message when the whole name still fits
+    const onSurface = `${spec}, then zero Z on ${zRef?.label ?? ''}`
+    const named =
+      zRef !== undefined && !zRef.top && fitName(verb, tool.name, onSurface, 999).length <= room
     this.lines.push(
-      head + fitName(verb, tool.name, `${spec}, then zero Z`, MAX_LINE_BYTES - head.length),
+      head + fitName(verb, tool.name, named ? onSurface : `${spec}, then zero Z`, room),
     )
+    this.level = zRef?.level ?? 0
     // The user jogged and re-zeroed Z while paused: forget the position and modal motion/feed,
     // and go back to clearance in the new WCS before the spindle starts.
     this.text.fill(undefined)
@@ -309,6 +337,23 @@ class Writer {
     // ... and may have left other modes (MDI in G91, another WCS): state them again.
     this.modes()
     this.clearance()
+  }
+
+  /**
+   * Before a tool change pause (DF69): the rapid to the touch-off spot at the clearance height
+   * and, for a surface other than the up face, where to zero Z
+   * (docs/modes/z-reference.md#exported-gcode).
+   */
+  private touchOff(number: number, z: ProgramZRef): void {
+    if (this.pos[2] === undefined) this.clearance()
+    this.emit('G0', [z.at[0], z.at[1], undefined], [false, false, false], [])
+    if (z.top) return
+    const below = formatNumber(-z.level * this.units.perMm, this.p.units === 'in' ? 4 : 2)
+    const fixed = this.p.units === 'in' ? below : Number(below).toFixed(2)
+    this.comment(`Z0 for tool ${number}: ${z.label}, ${fixed} below the stock top`)
+    this.comment(
+      `Touch off Z here, X${this.coord(z.at[0])} Y${this.coord(z.at[1])}: set Z0 on that surface`,
+    )
   }
 
   private spindle(rpm: number | 'off'): void {
@@ -461,7 +506,7 @@ class Writer {
     AXES.forEach((a, k) => {
       const v = to[k]
       if (v === undefined) return
-      const t = this.coord(v)
+      const t = this.coord(k === 2 ? v - this.level : v)
       if (t !== this.text[k] || force[k]) words.push(`${a}${t}`)
       next[k] = t
     })
@@ -486,7 +531,7 @@ class Writer {
   private skip(to: Vec3): void {
     to.forEach((v, k) => {
       this.pos[k] = v
-      this.text[k] = this.coord(v)
+      this.text[k] = this.coord(k === 2 ? v - this.level : v)
     })
   }
 

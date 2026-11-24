@@ -47,6 +47,11 @@ export type RealtimeCommand = (typeof REALTIME)[keyof typeof REALTIME]
 const MARKER = /^\(DFYOM TOOL CHANGE (\d+): ([^()]*)\)$/
 /** The line after a marker: `M0`, or `M0 ;message` since DF63 (grbl.md#output-dialect). */
 const MARKER_PAUSE = /^M0( ;.*)?$/
+/** DF69: the Z reference lines before a marker (docs/modes/z-reference.md#exported-gcode). */
+const ZREF_LINE = /^\(Z0 for tool \d+: ([^()]*)\)$/
+const SPOT_LINE = /^\(Touch off Z here, (X\S+ Y\S+): [^()]*\)$/
+/** Lines before a marker searched for them (the manual spindle's stop comment sits between). */
+const ZREF_LOOKBACK = 4
 /** A line whose code (comments stripped) contains `M0`/`M00`: GRBL pauses there. */
 const PROGRAM_PAUSE = /M0*0(?![0-9.])/i
 
@@ -63,6 +68,27 @@ export type RunPhase =
 export interface ToolChangeInfo {
   readonly n: number
   readonly name: string
+  /** DF69: the Z reference surface and its level, when not the top face. */
+  readonly surface?: string
+  /** DF69: where to touch off (`X120 Y45`, program units), with `surface`. */
+  readonly spot?: string
+}
+
+/** The tool change at the marker line `i`, with the Z reference lines before it (DF69). */
+function toolChangeAt(lines: readonly string[], i: number, m: RegExpExecArray): ToolChangeInfo {
+  let surface: string | undefined
+  let spot: string | undefined
+  for (let k = Math.max(0, i - ZREF_LOOKBACK); k < i; k++) {
+    const line = lines[k] ?? ''
+    surface = ZREF_LINE.exec(line)?.[1] ?? surface
+    spot = SPOT_LINE.exec(line)?.[1] ?? spot
+  }
+  return {
+    n: Number(m[1]),
+    name: m[2] ?? '',
+    ...(surface === undefined ? {} : { surface }),
+    ...(surface === undefined || spot === undefined ? {} : { spot }),
+  }
 }
 
 export interface PhaseChange {
@@ -716,7 +742,7 @@ export class GrblSender {
       if (line === undefined) return
       const m = MARKER.exec(line)
       if (m && MARKER_PAUSE.test(lines[run.next + 1] ?? '')) {
-        run.pendingToolChange = { n: Number(m[1]), name: m[2] ?? '' }
+        run.pendingToolChange = toolChangeAt(lines, run.next, m)
         this.log.debug({ tool: run.pendingToolChange.n, line: run.next + 1 }, 'tool change ahead')
         this.awaitFresh()
         return

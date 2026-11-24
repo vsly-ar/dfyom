@@ -6,6 +6,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
+import { loadRegion2dSync } from '../../../../core/geometry/2d/cavalier'
 import { planSetup, type PlanSetup } from '../../../../core/plan/plan.fixture'
 import type { CallReply } from '../../../../shared/preload-api'
 import { App } from '../../App'
@@ -24,6 +25,17 @@ vi.mock('../../viewport/Scene', () => ({
   CameraControlsImpl: { ACTION: { NONE: 0, ROTATE: 1, TRUCK: 2, DOLLY: 16 } },
 }))
 
+// the vendored 2D module read from the repo root (jsdom has no file: import.meta.url)
+const fs = (
+  globalThis as unknown as {
+    process: { getBuiltinModule(id: 'node:fs'): { readFileSync(p: string): Uint8Array } }
+  }
+).process.getBuiltinModule('node:fs')
+const nodeRegion2d = () =>
+  loadRegion2dSync(fs.readFileSync('vendor/cavalier-contours/cavalier_contours.wasm')).expect(
+    'the vendored 2D module loads',
+  )
+
 const ok = (value: unknown = {}): CallReply => ({ ok: true, value, revision: 0 })
 
 const toolpath = {
@@ -34,8 +46,12 @@ const toolpath = {
   stats: { cutLength: 1, rapidLength: 0, estimatedSeconds: 65 },
 }
 
-async function renderTop(setup?: (s: PlanSetup, planId: string) => Promise<void>) {
-  const s = await planSetup()
+async function renderTop(
+  setup?: (s: PlanSetup, planId: string) => Promise<void>,
+  opts: { zRefs?: boolean } = {},
+) {
+  // DF69: Z references need the 2D regions (without them `zRefs` is empty: no "Z from")
+  const s = await planSetup(opts.zRefs === true ? { services: { region2d: nodeRegion2d() } } : {})
   await s.run('design.facing.add', { partId: s.partId, on: 'stock.bottom', depth: '0.5' })
   await setup?.(s, '')
   const planId = await s.create({ machineLibraryItemId: s.machineId })
@@ -162,6 +178,38 @@ describe('Tool changes (DF66)', () => {
     await t.user.keyboard('{Alt>}{ArrowUp}{/Alt}')
     expect(await within(t.inspector()).findByText(/^Not moved: /)).toBeInTheDocument()
     expect(designOrder(t.top().operations)).toEqual(before)
+  })
+
+  // DF69: docs/modes/z-reference.md#ui
+  it("shows each run's Z reference; the menu stores a choice and Default resets it", async () => {
+    const t = await renderTop(undefined, { zRefs: true })
+    // the first run touches off on the top face, the later ones on the faced floor (by default)
+    await waitFor(() => expect(t.runs()[1]).toHaveTextContent('Z fromFacing 1 floor · −0.5 mm'))
+    expect(t.runs()[0]).toHaveTextContent('Z fromTop face · 0 mm')
+    const drillRun = t.top().operations[1]!
+    const button = within(t.runs()[1]!).getByRole('button', {
+      name: 'Z from for Drill 6: Facing 1 floor · −0.5 mm (default). Choose the surface',
+    })
+    expect(button).not.toHaveAttribute('data-chosen')
+    await expectNoAxeViolations(t.inspector())
+    await t.user.click(button)
+    const menu = await screen.findByRole('menu')
+    await expectNoAxeViolations(menu)
+    await t.user.click(within(menu).getByRole('menuitem', { name: /^Facing 1 floor/ }))
+    await waitFor(() =>
+      expect(t.callsOf('plan.operation.update')).toEqual([
+        { planId: t.planId, planOperationId: drillRun.id, zRef: { surface: 'facing1.floor' } },
+      ]),
+    )
+    expect(t.plan().setups[1]!.operations[1]!.zRef).toEqual({ surface: 'facing1.floor' })
+    const chosen = await within(t.runs()[1]!).findByRole('button', {
+      name: 'Z from for Drill 6: Facing 1 floor · −0.5 mm. Choose the surface',
+    })
+    expect(chosen).toHaveAttribute('data-chosen')
+    await t.user.click(chosen)
+    const again = await screen.findByRole('menu')
+    await t.user.click(within(again).getByRole('menuitem', { name: /^Default/ }))
+    await waitFor(() => expect(t.plan().setups[1]!.operations[1]!.zRef).toBeUndefined())
   })
 
   it('shows the list read-only outside draft and settled design', async () => {

@@ -25,6 +25,7 @@ Z10
 (op-drill1)
 (Tool change to T2: spindle off, retract)
 M5
+X20 Y15
 (DFYOM TOOL CHANGE 2: 6 mm drill, 6 mm drill)
 M0 ;Install T2 6 mm drill, 6 mm drill, then zero Z
 G90 G94 G17 G21
@@ -58,6 +59,7 @@ Z10
 (op-profile1)
 (Tool change to T3: spindle off, retract)
 M5
+Y20
 (DFYOM TOOL CHANGE 3: 6 mm flat end mill, 6 mm flat)
 M0 ;Install T3 6 mm flat end mill, 6 mm flat, then zero Z
 G90 G94 G17 G21

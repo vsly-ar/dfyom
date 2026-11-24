@@ -42,6 +42,7 @@ Z10
 (Profile 2)
 (Tool change to T2: spindle off, retract)
 M5
+X127 Y92
 (Stop the spindle)
 (DFYOM TOOL CHANGE 2: Flat 6, 6 mm flat)
 M0 ;Stop spindle, install T2 Flat 6, 6 mm flat, then zero Z

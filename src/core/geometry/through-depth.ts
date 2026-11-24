@@ -44,7 +44,7 @@ const COVER_AREA = 1e-3
 /** Material left below a through cut that is not worth a profile (mm): the cut keeps the stock. */
 const MIN_THROUGH = 0.01
 
-const OPPOSITE: Readonly<Record<Direction, Direction>> = {
+export const OPPOSITE: Readonly<Record<Direction, Direction>> = {
   '+z': '-z',
   '-z': '+z',
   '+x': '-x',
@@ -68,7 +68,7 @@ const dot = (a: Vec3, b: Vec3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2
  * directions share their normal axis, so this is a signed swap plus a shift) and whether it keeps
  * the turning sense.
  */
-function frameMap(
+export function frameMap(
   from: Direction,
   to: Direction,
   stock: StockGeometry,
@@ -88,7 +88,7 @@ function frameMap(
   }
 }
 
-function mapRegion(r: Region, m: ReturnType<typeof frameMap>): Region {
+export function mapRegion(r: Region, m: ReturnType<typeof frameMap>): Region {
   const el = (e: Element): Element => {
     if (e.kind === 'line') return line(m.at(e.a), m.at(e.b))
     const a = m.at(e.a)
@@ -101,7 +101,7 @@ function mapRegion(r: Region, m: ReturnType<typeof frameMap>): Region {
   return { pieces: r.pieces.map((p) => ({ outer: loop(p.outer), holes: p.holes.map(loop) })) }
 }
 
-const rectangle = (length: number, width: number): Region => ({
+export const rectangle = (length: number, width: number): Region => ({
   pieces: [
     {
       outer: {
@@ -122,7 +122,11 @@ const rectangle = (length: number, width: number): Region => ({
  * by the slot width, inside it, or the slot width centred on it (`on`, a closed loop or a path).
  * Undefined when the port fails (the caller then counts no pocket).
  */
-function slotRegion(op: Profile, stock: StockGeometry, port: Region2dPort): Region | undefined {
+export function slotRegion(
+  op: Profile,
+  stock: StockGeometry,
+  port: Region2dPort,
+): Region | undefined {
   const { chain, closed } = profileChain(op)
   if (chain.elements.length === 0) return undefined
   const s = op.slotWidth
@@ -143,7 +147,11 @@ function slotRegion(op: Profile, stock: StockGeometry, port: Region2dPort): Regi
 }
 
 /** The hole a drilling makes, in its face frame, within the stock face rectangle. */
-function holeRegion(op: Drilling, stock: StockGeometry, port: Region2dPort): Region | undefined {
+export function holeRegion(
+  op: Drilling,
+  stock: StockGeometry,
+  port: Region2dPort,
+): Region | undefined {
   const r = op.diameter / 2
   const a: Vec2 = [op.center[0] + r, op.center[1]]
   const disc: Region = {
@@ -157,14 +165,18 @@ function holeRegion(op: Drilling, stock: StockGeometry, port: Region2dPort): Reg
  * An inside through profile without tabs (an opening, DF61 follow-up): once cut, its loop's
  * interior (slot and slug) is gone through the whole stock. With tabs the slug and the tabs stay.
  */
-const isOpening = (op: OperationGeometry): op is Profile =>
+export const isOpening = (op: OperationGeometry): op is Profile =>
   isThroughGeometry(op) &&
   op.side === 'inside' &&
   op.tabs.count === 0 &&
   (op.tabs.positions === undefined || op.tabs.positions.length === 0)
 
 /** The region inside an opening's loop, in its face frame, within the stock face rectangle. */
-function openingRegion(op: Profile, stock: StockGeometry, port: Region2dPort): Region | undefined {
+export function openingRegion(
+  op: Profile,
+  stock: StockGeometry,
+  port: Region2dPort,
+): Region | undefined {
   const { chain, closed } = profileChain(op)
   if (!closed || chain.elements.length === 0) return undefined
   const local = localStock(op.direction ?? '+z', stock)

@@ -4,8 +4,11 @@
 // (DF65), its tool runs list in the inspector with their times once toolpaths exist, and a run
 // moves as a block with Alt+↓ and back by its drag grip. With DFYOM_RENDERS=1 light and dark
 // review renders of the list and of the held drag go to design/features/renders/df66-tool-changes{,-drag}-*.png.
+// DF69: with a top facing the later run's "Z from" names the faced floor; its menu chooses the
+// surface (renders df69-z-from{,-menu}-*.png).
 // Windows stay hidden (fixture). Selectors are roles and accessible names.
-// Docs: docs/conventions/ui.md#design-and-plan-controls-v02, docs/modes/plan-v0.4.md#tool-changes-per-setup-hardening-df66
+// Docs: docs/conventions/ui.md#design-and-plan-controls-v02, docs/modes/plan-v0.4.md#tool-changes-per-setup-hardening-df66,
+// docs/modes/z-reference.md#ui
 import { resolve } from 'node:path'
 import type { Page } from '@playwright/test'
 import type { CallReply, PreloadApi } from '../src/shared/preload-api'
@@ -66,7 +69,7 @@ const endMill = (name: string, diameter: string, stepover: string) => ({
 })
 
 /** A bottom facing, a narrow top pocket (Flat 3) and a wide one (Flat 6), and the plan. */
-async function twoToolPlan(page: Page): Promise<void> {
+async function twoToolPlan(page: Page, opts: { topFacing?: boolean } = {}): Promise<void> {
   const call = <T>(name: string, args: object = {}) => bridgeCall<T>(page, name, args)
   const stock = await call<{ id: string }>('library.stock.add', {
     values: {
@@ -114,6 +117,8 @@ async function twoToolPlan(page: Page): Promise<void> {
     depth: '1',
   })
   await call('design.facing.add', { partId, on: 'stock.bottom', depth: '0.5' })
+  if (opts.topFacing === true)
+    await call('design.facing.add', { partId, on: 'stock.top', depth: '0.5' })
   await call('project.apply', {})
   await call('plan.create', { partId, machineLibraryItemId: machine.id })
 }
@@ -168,5 +173,41 @@ test('setup inspector: tool changes listed, a run reordered as a block (DF66, DF
   await page.mouse.up()
   await expect(runs.nth(0)).toContainText('Flat 6')
   await expect(title).toContainText('1 tool change')
+  expect(dfyom.rendererErrors).toEqual([])
+})
+
+test('setup inspector: a later run touches off on the faced floor, chosen in its menu (DF69)', async ({
+  dfyom,
+}) => {
+  test.setTimeout(90_000)
+  const page = await dfyom.app.firstWindow()
+  await page.waitForLoadState('domcontentloaded')
+  if (RENDERS) await page.setViewportSize({ width: 1280, height: 800 })
+  await twoToolPlan(page, { topFacing: true })
+
+  await page.getByRole('radio', { name: 'Plan' }).click()
+  const navigator = page.getByRole('navigation', { name: 'Navigator' })
+  const setups = navigator.getByRole('list', { name: 'Setups in machining order' })
+  await setups.getByRole('button', { name: /^2\. Top/ }).click({ position: { x: 24, y: 12 } })
+  const inspector = page.getByRole('complementary', { name: 'Inspector' })
+  if (!(await inspector.isVisible())) await page.getByRole('button', { name: 'Inspector' }).click()
+
+  const list = inspector.getByRole('list', { name: 'Tool runs of Top in machining order' })
+  const runs = list.locator(':scope > li')
+  await expect(runs).toHaveCount(2)
+  // the facing (Flat 6) touches off on the top face, Flat 3 on the faced floor by default
+  await expect(runs.nth(0)).toContainText('Z fromTop face · 0 mm')
+  const zFrom = runs.nth(1).getByRole('button', { name: /^Z from for Flat 3: Facing 2 floor/ })
+  await expect(zFrom).toHaveAccessibleName(/\(default\)/)
+  await render(page, 'df69-z-from')
+
+  await zFrom.click()
+  const menu = page.getByRole('menu')
+  await expect(menu.getByRole('menuitem', { name: /^Default/ })).toBeVisible()
+  await render(page, 'df69-z-from-menu')
+  await menu.getByRole('menuitem', { name: /^Facing 2 floor/ }).click()
+  await expect(
+    runs.nth(1).getByRole('button', { name: /^Z from for Flat 3: Facing 2 floor/ }),
+  ).not.toHaveAccessibleName(/\(default\)/)
   expect(dfyom.rendererErrors).toEqual([])
 })

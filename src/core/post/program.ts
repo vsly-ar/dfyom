@@ -18,13 +18,35 @@ export interface ProgramTool {
 }
 
 /**
+ * A tool run's Z reference surface and touch-off spot (hardening DF69,
+ * docs/modes/z-reference.md#exported-gcode): the post writes the run's Z shifted by −`level`, so
+ * the operator zeroes Z on the surface, and rapids to the spot before the tool change pause.
+ */
+export interface ProgramZRef {
+  /** As the program writes it: "the top face", "Facing 1 floor". */
+  readonly label: string
+  /** The surface's Z in the setup frame (mm, ≤ 0). */
+  readonly level: number
+  /** Touch-off spot (mm, WCS). */
+  readonly at: readonly [number, number]
+  /** The setup's up face (Z0 of the setup frame): no instruction lines, no first-tool pause. */
+  readonly top: boolean
+}
+
+/**
  * `toolChange`: tool `number` (1, 2, … in order of first use) goes in; the first block of every
  * program is one. `spindle`: start (or change) the spindle at `rpm`, or stop it. `arc`: XY plane,
  * `i`/`j` = center − start (mm); a Z change makes it a helix; `to` equal to the start in X and Y
  * is a full circle.
  */
 export type Block =
-  | { readonly kind: 'toolChange'; readonly number: number; readonly tool: ProgramTool }
+  | {
+      readonly kind: 'toolChange'
+      readonly number: number
+      readonly tool: ProgramTool
+      /** The run's Z reference (DF69); absent = Z0 on the up face, no spot. */
+      readonly zRef?: ProgramZRef
+    }
   | { readonly kind: 'spindle'; readonly rpm: number | 'off' }
   | { readonly kind: 'rapid'; readonly to: Vec3 }
   | { readonly kind: 'feed'; readonly to: Vec3; readonly feed: number }

@@ -16,6 +16,7 @@ import { planOperationLabel, positionComment } from '../plan/labels'
 import { setupHeader } from '../plan/setup-header'
 import { chooseSetup, setupStockSize } from '../plan/setups'
 import { checkAllowed } from '../plan/status'
+import { setupZReferences, zRefText } from '../plan/z-reference'
 import type { ProjectDoc } from '../project/document'
 import { cacheOf, ensureToolpath, inputOverreach } from '../toolpath/generate'
 import type { Vec3 } from '../toolpath/model'
@@ -139,6 +140,23 @@ export async function exportPlan(
       data: { planId },
       issues: [{ path: ['planId'], rule: 'empty', message: 'the plan has no operations' }],
     })
+  // DF69: the setup's Z references; their errors block its program like a plan finding
+  const zRefs = setupZReferences(plan, setup.id, services.region2d)
+  const zErrors = [...zRefs.values()].flatMap((r) =>
+    r.findings.filter((f) => f.severity === 'error'),
+  )
+  const firstZ = zErrors[0]
+  if (firstZ !== undefined)
+    return fail('plan.check', firstZ.message, {
+      where,
+      data: { planId },
+      issues: zErrors.map((f) => ({
+        path: [f.planOperationId ?? planId, 'zRef'],
+        rule: f.rule,
+        message: f.message,
+        params: f.params,
+      })),
+    })
   const total = all.length
   const operations: ExportOperation[] = []
   const reaches: Overreach[] = []
@@ -191,6 +209,7 @@ export async function exportPlan(
       },
       stickout: input.stickout,
       label,
+      ...programZRef(zRefs.get(id)?.zRef),
       ...(Object.keys(positions).length === 0 ? {} : { positions }),
     })
   }
@@ -228,6 +247,14 @@ export async function exportPlan(
       softLimitChecked: opts.workZero !== undefined,
     }))
     .mapErr((e) => e.withContext(where, { planId }))
+}
+
+/** The program's view of a tool run's Z reference (DF69); none without one. */
+function programZRef(
+  z: { label: string; level: number; at: readonly [number, number]; top: boolean } | undefined,
+): { zRef?: NonNullable<ExportOperation['zRef']> } {
+  if (z === undefined) return {}
+  return { zRef: { label: zRefText(z), level: z.level, at: [z.at[0], z.at[1]], top: z.top } }
 }
 
 /**
