@@ -49,7 +49,7 @@ import { profileChain } from './outline'
 import { SHAPE_CHORD_BUDGET, shapeChords } from './shape-solids'
 import { resolveProfileTabs } from './tab-hold'
 import { FIT_SLACK, shapeMeasure, wallCorners, type ShapeMeasure } from './shape-measure'
-import { chamferFit, reachDepth, toolFit } from './tool-fit'
+import { chamferFit, FLUTE_MARGIN, flutesFit, reachDepth, toolFit, wallDepth } from './tool-fit'
 
 /** A library tool as the DFM rules see it (mm). */
 export interface DfmTool {
@@ -63,6 +63,10 @@ export interface DfmTool {
   readonly tipDiameter?: number
   /** How deep it reaches: its default stickout, else its flute length (`dfm.reach`). */
   readonly reach?: number
+  /** Flute length LCF (specific tools only): the wall depth it cuts (fit rule `flutes`, DF89). */
+  readonly fluteLength?: number
+  /** Shank Ø when the library knows it: narrower than the cutter, it clears the wall (DF89). */
+  readonly shankDiameter?: number
 }
 
 /** Flat, bull-nose or ball end mill (not a drill, not a chamfer mill). */
@@ -179,16 +183,20 @@ export function parameterChecks(
           ...(isAnalyticOperation(op)
             ? pocket(op, stock, lib)
             : shapePocket(op, stock, lib, measure)),
-          ...reach(op, stock, lib, own, measure),
+          ...reach(op, stock, lib, own, options.unitSystem, measure),
           ...heavy,
           ...tool,
         ]
       case 'drilling':
-        return [...drilling(op, stock, lib), ...reach(op, stock, lib, own), ...tool]
+        return [
+          ...drilling(op, stock, lib),
+          ...reach(op, stock, lib, own, options.unitSystem),
+          ...tool,
+        ]
       case 'chamfer':
         return [
           ...chamfer(op, input.operations, stock, input.stock, lib),
-          ...reach(op, stock, lib, own),
+          ...reach(op, stock, lib, own, options.unitSystem),
           ...tool,
         ]
       case 'profile':
@@ -198,7 +206,7 @@ export function parameterChecks(
             : options.region2d === undefined
               ? []
               : shapeProfile(op, stock, lib, options.unitSystem, measure)),
-          ...reach(op, stock, lib, own),
+          ...reach(op, stock, lib, own, options.unitSystem),
           ...heavy,
           ...tool,
         ]
@@ -356,42 +364,54 @@ function candidates(
  * `dfm.reach` (warning): the depth from the stock's outer face of the operation's direction to
  * its deepest point exceeds the reach of the operation's tool: a specific tool's own reach
  * (`stickout`, else `fluteLength`), for a generalized one the longest of the matching library
- * tools (none: skipped). Without a tool yet (before the first Apply) the longest reach of the
- * library tools that could make it.
+ * tools (none matching, since DF89: of the library tools that could make it). Without a tool yet
+ * (before the first Apply) the longest reach of the library tools that could make it.
+ * Since DF89 also when the stickout reaches but no tool of that pool cuts a pocket's, profile's or
+ * hole's walls that deep with its flutes (`flutesFit`; params `fluteLength` + `margin`): a
+ * specific tool's own flutes are `dfm.toolUnfit` (rule `flutes`) instead.
  */
 function reach(
   op: Op<'pocket'> | Op<'drilling'> | Op<'profile'> | Op<'chamfer'>,
   stock: StockGeometry,
   lib: Library,
   own: OperationTool | undefined,
+  unitSystem: 'metric' | 'inch',
   measure?: ShapeMeasure,
 ): DfmWarning[] {
-  const pool =
-    own === undefined
-      ? candidates(op, lib, measure)
-      : own.generalized
-        ? matching(own.tool, lib)
-        : [own.tool]
+  const matched = own?.generalized === true ? matching(own.tool, lib) : []
+  const fromLibrary = own === undefined || (own.generalized && matched.length === 0)
+  const pool = fromLibrary ? candidates(op, lib, measure) : own.generalized ? matched : [own.tool]
   const reaches = pool.flatMap((t) => (t.reach === undefined ? [] : [t.reach]))
   if (reaches.length === 0) return []
   const longest = Math.max(...reaches)
   const [depth, parameter] = reachDepth(op, stock)
-  if (depth <= longest + EPSILON) return []
-  const specific = own !== undefined && !own.generalized
-  const what =
-    own === undefined
-      ? 'no tool in the library reaches'
-      : specific
-        ? `the ${own.label} does not reach`
-        : `no ${own.label} in the library reaches`
+  const specific = !fromLibrary && !own.generalized
+  const none = fromLibrary ? 'no tool in the library' : `no ${own.label} in the library`
+  if (depth > longest + EPSILON)
+    return [
+      warning(
+        'dfm.reach',
+        op,
+        parameter,
+        `${specific ? `the ${own.label} does not reach` : `${none} reaches`} ${mm(depth)} deep from the stock face (${specific ? '' : 'longest '}reach ` +
+          `${mm(longest)})`,
+        { depth, reach: longest },
+      ),
+    ]
+  // DF89: the walls need the flutes (a specific tool: dfm.toolUnfit, rule `flutes`)
+  if (specific || op.kind === 'chamfer') return []
+  const wall = wallDepth(op, stock, unitSystem)
+  const reaching = pool.filter((t) => t.reach === undefined || t.reach + EPSILON >= wall)
+  if (reaching.length === 0 || reaching.some((t) => flutesFit(t, wall) === undefined)) return []
+  const flutes = Math.max(...reaching.map((t) => t.fluteLength ?? 0))
   return [
     warning(
       'dfm.reach',
       op,
       parameter,
-      `${what} ${mm(depth)} deep from the stock face (${specific ? '' : 'longest '}reach ` +
-        `${mm(longest)})`,
-      { depth, reach: longest },
+      `${none} cuts walls ${mm(wall)} deep with its flutes (longest flute length ` +
+        `${mm(flutes)}, less ${mm(FLUTE_MARGIN)}; no shank narrower than the cutter)`,
+      { depth: wall, reach: longest, fluteLength: flutes, margin: FLUTE_MARGIN },
     ),
   ]
 }

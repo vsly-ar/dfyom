@@ -390,6 +390,15 @@ No new tools. What an agent sees:
 - **`applied.toolChanges[].reason`** can be `libraryFits`: a generalized tool replaced by a library tool that fits after the edit (since X2 F6 also after a library write or on open, and `libraryRemoved`).
 - **`design_tool_candidates.fitting`** is in the new auto-choice order (size, then shortest stickout) and each entry's `reasons` names the reach ("stickout 31 mm").
 
+## Amendment (hardening DF89): flute rule in the tool fit
+
+Source: the 50 % enclosure test (`.continuous/research/2026-11-24-enclosure-50pct.md`, finding B-1) · Row: DF89 in the [hardening plan](../plans/hardening.md) · Spec: [design-v0.2.md § Flute rule](../modes/design-v0.2.md#flute-rule-hardening-df89).
+
+No new tools; result fields only (`tools/list` unchanged, results are not in it). What an agent sees:
+
+- **`design_tool_candidates`:** every entry has `fluteLength` (mm); a tool whose flutes do not cut a pocket's, profile's or hole's walls (shank not narrower than the cutter) is in `unfitting` with `rule: 'flutes'`, the `detail` and the judged `depth`; `current.fits` is false with that rule; a fitting tool with a stickout lists "flute length 50 mm" among its `reasons` for those cuts.
+- **Warnings:** a tool the agent sets that fails it gets `dfm.toolUnfit` with `params.rule: 'flutes'` (`fluteLength`, `depth`, `margin`, `shankDiameter` when known); when no library tool passes, `dfm.reach` carries `fluteLength` and `margin`. `applied.toolChanges[].reason` can be `flutes`.
+
 ## Amendment (hardening X2 F6): tool re-choice on library change and open
 
 Status: **draft for review** (implemented on the hardening branch) · Source: the X2 agent run ([research note](../research/2026-11-23-x2-agent-variant.md), finding F6) · Row: DF41 (open item F6) in the [hardening plan](../plans/hardening.md) intake · Spec: [design-v0.2.md § Library changes and opening](../modes/design-v0.2.md#library-changes-and-opening-x2-f6)

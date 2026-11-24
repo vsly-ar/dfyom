@@ -32,6 +32,8 @@ export type FitRule =
   | 'floorRadius'
   | 'diameter'
   | 'reach'
+  // the flutes do not cut the wall's depth and the shank is not narrower (hardening DF89)
+  | 'flutes'
   // chamfer (design-v0.4.md § Chamfer operation, Fit)
   | 'angle'
   | 'tip'
@@ -47,10 +49,53 @@ export interface ToolUnfit {
    * The rule's values for messages (lengths in mm), merged into `dfm.toolUnfit`'s params so the
    * UI can word them in the project units (F5): `cornerRadius` + `toolRadius`, `toolDiameter` +
    * `size` + `feature` (`pocket` | `slot`), `floorRadius` + `toolCornerRadius`, `holeDiameter`
-   * (+ `toolDiameter` for a drill, `boring: true` for an end mill), `reach` + `depth`, `needs`; chamfers (v0.4):
+   * (+ `toolDiameter` for a drill, `boring: true` for an end mill), `reach` + `depth`, `needs`;
+   * flutes (DF89): `fluteLength` + `depth` + `margin` (+ `shankDiameter` when known); chamfers (v0.4):
    * `toolAngle` + `angle`, `tipDiameter` + `edgeDiameter`, `cuttingEdge` + `slant`.
    */
   readonly values: Readonly<Record<string, number | string | boolean>>
+}
+
+/**
+ * The flutes must cut a wall this much deeper than the operation (mm; hardening DF89): the flute
+ * run-out at the end of the cutting length cuts poorly, and a library LCF is often rounded.
+ */
+export const FLUTE_MARGIN = 0.5
+
+/**
+ * Whether the tool's shank clears the wall it cuts (DF89, the plan's `shankRub` rule, plan-v0.1.md
+ * § Pocket deeper than the flutes): its shank is narrower than its cutting Ø by more than the
+ * 0.01 mm fit tolerance (a reduced shank or a neck). An unknown shank does not.
+ */
+export const shankClears = (tool: DfmTool): boolean =>
+  tool.shankDiameter !== undefined && tool.shankDiameter < tool.diameter - TOL
+
+/**
+ * The flute rule of a wall-following cut (pocket, profile, hole; hardening DF89): `depth` (mm,
+ * from the stock face) ≤ the flute length − `FLUTE_MARGIN`, unless the shank clears the wall
+ * (`shankClears`: then the stickout alone limits the depth). A tool without a flute length
+ * (a generalized one) passes.
+ */
+export function flutesFit(tool: DfmTool, depth: number): ToolUnfit | undefined {
+  if (tool.fluteLength === undefined || shankClears(tool)) return undefined
+  const cuts = tool.fluteLength - FLUTE_MARGIN
+  if (cuts + EPSILON >= depth) return undefined
+  const shank =
+    tool.shankDiameter === undefined
+      ? 'shank Ø unknown'
+      : `shank Ø${mm(tool.shankDiameter)} not narrower than the cutter`
+  return {
+    rule: 'flutes',
+    detail:
+      `flute length ${mm(tool.fluteLength)} (${shank}) cuts walls ${mm(cuts)} deep, ` +
+      `the operation is ${mm(depth)} deep`,
+    values: {
+      fluteLength: tool.fluteLength,
+      depth,
+      margin: FLUTE_MARGIN,
+      ...(tool.shankDiameter !== undefined && { shankDiameter: tool.shankDiameter }),
+    },
+  }
 }
 
 /** The plan's default `breakthrough` (plan-v0.1.md § Strategy defaults): 0.5 mm / 0.02″. */
@@ -81,8 +126,9 @@ export function reachDepth(op: Cutting, stock: StockGeometry): [number, string] 
 const endMill = (t: DfmTool) => t.type === 'flatEndMill' || t.type === 'bullNoseEndMill'
 
 /**
- * The first failed fit rule of `tool` for `op`, or undefined when it fits. `reach` is checked
- * only for a tool with one (a specific tool); a generalized tool has no length and passes.
+ * The first failed fit rule of `tool` for `op`, or undefined when it fits. `reach` and `flutes`
+ * are checked only for a tool with lengths (a specific tool); a generalized tool has none and
+ * passes. `flutes` (DF89) applies to the wall-following cuts: pocket, profile and hole.
  * `measure` holds a general shape's width and inside corners (`shapeMeasure`).
  */
 export function toolFit(
@@ -239,18 +285,30 @@ export function toolFit(
           }
     }
   }
-  if (tool.reach === undefined) return undefined
+  if (tool.reach === undefined && tool.fluteLength === undefined) return undefined
+  const depth = wallDepth(op, stock, unitSystem)
+  if (tool.reach !== undefined && tool.reach + EPSILON < depth)
+    return {
+      rule: 'reach',
+      detail: `reaches ${mm(tool.reach)}, the operation is ${mm(depth)} deep`,
+      values: { reach: tool.reach, depth },
+    }
+  return flutesFit(tool, depth)
+}
+
+/**
+ * The depth a pocket, profile or hole cuts below the stock face of its direction (mm): its
+ * `reachDepth`, a through profile with the plan's default breakthrough.
+ */
+export function wallDepth(
+  op: Exclude<Cutting, { kind: 'chamfer' }>,
+  stock: StockGeometry,
+  unitSystem: 'metric' | 'inch',
+): number {
   const [base] = reachDepth(op, stock)
   // a through profile breaks through the far face; a blind groove stops at its depth
   const through = op.kind === 'profile' && op.depth === undefined
-  const depth = through ? base + DEFAULT_BREAKTHROUGH[unitSystem] : base
-  return tool.reach + EPSILON >= depth
-    ? undefined
-    : {
-        rule: 'reach',
-        detail: `reaches ${mm(tool.reach)}, the operation is ${mm(depth)} deep`,
-        values: { reach: tool.reach, depth },
-      }
+  return through ? base + DEFAULT_BREAKTHROUGH[unitSystem] : base
 }
 
 /** A circular chamfer as the fit rule sees it (mm, degrees): its edge Ø, chamfer Ø and angle. */

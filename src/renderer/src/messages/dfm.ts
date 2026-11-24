@@ -127,7 +127,9 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
       ? `${num(p['count']) - num(p['held'])} of ${num(p['count'])} tabs lie where the slot leaves no stock beyond the cut, so they hold nothing. Move them to a side with stock.`
       : `Only ${num(p['held'])} of ${num(p['count'])} tabs fit where stock remains beyond the slot. The others hold nothing: use fewer tabs or a larger stock.`,
   'dfm.reach': (p, L) =>
-    `No tool in the library reaches ${L(p['depth'])} deep from the stock face (longest ${L(p['reach'])}).`,
+    typeof p['fluteLength'] === 'number'
+      ? `No tool in the library cuts walls ${L(p['depth'])} deep with its flutes (longest flute length ${L(p['fluteLength'])}, ${L(p['margin'])} kept spare). Below the flutes the shank rubs the wall: add a tool with longer flutes or a reduced shank.`
+      : `No tool in the library reaches ${L(p['depth'])} deep from the stock face (longest ${L(p['reach'])}).`,
   'dfm.setups': (p) =>
     `The part needs ${num(p['count'])} setups (${list((p['directions'] as readonly string[] | undefined) ?? [])}).`,
   // the operation's own tool (v0.2, shown at the tool field: task F5)
@@ -234,6 +236,11 @@ function toolUnfitText(p: DfmWarning['params'], L: (mm: unknown) => string): str
     case 'reach':
       if (has('reach'))
         return `The ${tool} reaches ${L(p['reach'])}; the operation is ${L(p['depth'])} deep.`
+      break
+    // DF89: the walls are deeper than the flutes and the shank is not narrower than the cutter
+    case 'flutes':
+      if (has('fluteLength'))
+        return `The ${tool} has ${L(p['fluteLength'])} flutes; the walls are ${L(p['depth'])} deep (${L(p['margin'])} kept spare) and its shank ${has('shankDiameter') ? `(Ø ${L(p['shankDiameter'])}) is not narrower than the cutter` : 'Ø is not in the library'}, so the shank would rub the wall. Use a tool with longer flutes.`
       break
   }
   return `The ${tool} does not fit.`

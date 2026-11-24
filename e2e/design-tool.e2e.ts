@@ -153,7 +153,8 @@ test('tool field: library tools of the type, the near match, widen the slot (DF4
       name: 'wexme 1/4" 1F',
       type: 'flatEndMill',
       diameter: '6.22',
-      fluteLength: '20',
+      // DF89: the real 20 mm flutes do not cut the 20 mm stock + breakthrough (shank 6.35 > 6.22)
+      fluteLength: '22',
       overallLength: '50',
       stickout: '30.9',
       shankDiameter: '6.35',

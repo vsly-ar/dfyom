@@ -9,7 +9,7 @@ import {
 } from './dfm'
 import type { DfmWarning, OperationGeometry } from './model'
 import { TEST_STOCK } from './testing/test-part'
-import { chamferFit, coneSlant, toolFit } from './tool-fit'
+import { chamferFit, coneSlant, FLUTE_MARGIN, toolFit } from './tool-fit'
 
 type Op<K extends OperationGeometry['kind']> = Extract<OperationGeometry, { kind: K }>
 
@@ -118,6 +118,62 @@ describe('toolFit: the fit table', () => {
     expect(rule(flat(6, 3), groove)).toBe('fits')
     expect(rule(flat(6, 2.9), groove)).toBe('reach')
   })
+
+  // Doc: docs/modes/design-v0.2.md#fit-when-a-tool-can-make-the-operation (hardening DF89)
+  describe('flutes (DF89): a wall deeper than the flutes needs a shank narrower than the cutter', () => {
+    /** The 50 % enclosure's wexme 1/4″ 1F: Ø 6.22, 20 mm flutes, stickout 31. */
+    const tool = (fluteLength: number, shankDiameter?: number): DfmTool => ({
+      ...flat(6.22, 31),
+      fluteLength,
+      ...(shankDiameter !== undefined && { shankDiameter }),
+    })
+    // the 28.169 mm cavity
+    const cavity = pocket({ depth: 28.169, shape: rect(40, 25, 4) })
+
+    it('shank wider than the cutter or unknown: depth ≤ flute length − margin', () => {
+      const unfit = toolFit(tool(20, 6.35), cavity, TEST_STOCK, 'metric')
+      expect(unfit).toMatchObject({
+        rule: 'flutes',
+        values: { fluteLength: 20, depth: 28.169, margin: FLUTE_MARGIN, shankDiameter: 6.35 },
+      })
+      expect(unfit!.detail).toContain('flute length 20 mm')
+      expect(unfit!.detail).toContain('the operation is 28.169 mm deep')
+      // shank unknown: the same
+      expect(rule(tool(20), cavity)).toBe('flutes')
+      expect(toolFit(tool(20), cavity, TEST_STOCK, 'metric')!.values).not.toHaveProperty(
+        'shankDiameter',
+      )
+      // shank equal to the cutter: no clearance, the same (as the plan's shankRub)
+      expect(rule(tool(20, 6.22), cavity)).toBe('flutes')
+      // the margin: 28.669 mm flutes cut 28.169 deep, a hair less does not
+      expect(rule(tool(28.669), cavity)).toBe('fits')
+      expect(rule(tool(28.6), cavity)).toBe('flutes')
+      expect(rule({ ...tool(50, 6.35), reach: 52 }, cavity)).toBe('fits')
+    })
+
+    it('shank narrower than the cutter (neck relief): the stickout alone limits the depth', () => {
+      expect(rule(tool(20, 6), cavity)).toBe('fits')
+      expect(rule({ ...tool(20, 6), reach: 25 }, cavity)).toBe('reach')
+    })
+
+    it('stickout first; every wall-following cut; generalized tools and chamfers pass', () => {
+      // too short a stickout reports reach, not flutes
+      expect(rule({ ...tool(20), reach: 10 }, cavity)).toBe('reach')
+      // a through profile: 20 + 0.5 breakthrough ≤ flutes − 0.5
+      expect(rule({ ...flat(6, 30), fluteLength: 21 }, profile())).toBe('fits')
+      expect(rule({ ...flat(6, 30), fluteLength: 20.9 }, profile())).toBe('flutes')
+      // a through hole (20), drill and helical boring alike
+      const d = { type: 'drill' as const, diameter: 6, reach: 30 }
+      expect(rule({ ...d, fluteLength: 20 }, drill())).toBe('flutes')
+      expect(rule({ ...d, fluteLength: 20.5 }, drill())).toBe('fits')
+      expect(rule({ ...flat(4, 30), fluteLength: 15 }, drill())).toBe('flutes')
+      // a generalized tool has no lengths
+      expect(rule(flat(6.22), cavity)).toBe('fits')
+      // a facing has no depth rule
+      const f: OperationGeometry = { kind: 'facing', id: 'facing1', depth: 5 }
+      expect(rule({ ...flat(6, 30), fluteLength: 1 }, f)).toBe('fits')
+    })
+  })
 })
 
 const own = (tool: DfmTool, extra: Partial<OperationTool> = {}): OperationTool => ({
@@ -191,8 +247,43 @@ describe('DFM with the operation tool', () => {
     expect(find(checks([deep], { pocket1: own(flat(10)) }, library), 'dfm.reach')).toHaveLength(1)
     // generalized 6 mm: the 6 mm one reaches 40
     expect(find(checks([deep], { pocket1: own(flat(6)) }, library), 'dfm.reach')).toEqual([])
-    // generalized with no matching library tool: skipped
+    // generalized with no matching library tool: the library tools that could make it (DF89)
     expect(find(checks([deep], { pocket1: own(flat(8)) }, library), 'dfm.reach')).toEqual([])
+    expect(
+      find(checks([deep], { pocket1: own(flat(8)) }, [flat(10, 15)]), 'dfm.reach'),
+    ).toHaveLength(1)
+  })
+
+  it('dfm.reach (DF89): no pool tool cuts the walls with its flutes; a specific tool is toolUnfit', () => {
+    const cavity = pocket({ depth: 28.169, shape: rect(40, 25, 4) })
+    const short = (d: number, fluteLength: number, shankDiameter?: number): DfmTool => ({
+      ...flat(d, 31),
+      fluteLength,
+      ...(shankDiameter !== undefined && { shankDiameter }),
+    })
+    const library = [short(6.22, 20, 6.35), short(6.31, 25), short(3.175, 13)]
+    // no tool yet: every candidate reaches with its stickout, none cuts 28.169 with its flutes
+    const [w] = find(checks([cavity], {}, library), 'dfm.reach')
+    expect(w).toMatchObject({
+      parameter: 'depth',
+      params: { depth: 28.169, fluteLength: 25, margin: FLUTE_MARGIN },
+    })
+    expect(w!.message).toContain('no tool in the library cuts walls 28.169 mm deep with its flutes')
+    // a 50 mm-flute tool in the library: no warning
+    expect(
+      find(checks([cavity], {}, [...library, { ...short(6.31, 50), reach: 52 }]), 'dfm.reach'),
+    ).toEqual([])
+    // a reduced shank clears the wall: no warning
+    expect(find(checks([cavity], {}, [short(6, 20, 5.5)]), 'dfm.reach')).toEqual([])
+    // generalized 1/4″ (6.35): no 6.35 in the library, judged by the candidates
+    const g = find(checks([cavity], { pocket1: own(flat(6.35)) }, library), 'dfm.reach')
+    expect(g).toHaveLength(1)
+    // the specific wexme: dfm.toolUnfit with rule flutes, no dfm.reach
+    const ws = checks([cavity], { pocket1: own(short(6.22, 20, 6.35)) }, library)
+    expect(find(ws, 'dfm.reach')).toEqual([])
+    expect(find(ws, 'dfm.toolUnfit')[0]).toMatchObject({
+      params: { rule: 'flutes', fluteLength: 20, depth: 28.169, shankDiameter: 6.35 },
+    })
   })
 })
 
