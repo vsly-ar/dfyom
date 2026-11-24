@@ -296,6 +296,7 @@ const LibraryToolEntry = {
   diameter: z.number().describe('mm'),
   cornerRadius: z.number().optional().describe('mm, bull nose only'),
   fluteCount: z.number(),
+  fluteLength: z.number().describe('mm (LCF)'),
 }
 
 const CandidatesResult = z.object({
@@ -306,8 +307,11 @@ const CandidatesResult = z.object({
     .array(
       z.object({
         ...LibraryToolEntry,
-        rule: z.string().describe('The failed fit rule (never `type`)'),
+        rule: z
+          .string()
+          .describe('The failed fit rule (never `type`); `flutes`: shorter than the wall depth'),
         detail: z.string(),
+        depth: z.number().optional().describe('mm, rules reach and flutes: the depth judged'),
       }),
     )
     .describe(
@@ -345,6 +349,7 @@ function entryOf(item: LibraryItem, tool: Tool) {
     diameter: tool.diameter.canonical,
     ...(tool.cornerRadius.isSome() && { cornerRadius: tool.cornerRadius.unwrap().canonical }),
     fluteCount: tool.fluteCount.canonical,
+    fluteLength: tool.fluteLength.canonical,
   }
 }
 
@@ -400,6 +405,7 @@ const toolCandidates = defineQuery({
         ...entryOf(m.item, m.tool),
         rule: m.unfit.rule,
         detail: m.unfit.detail,
+        ...(typeof m.unfit.values['depth'] === 'number' && { depth: m.unfit.values['depth'] }),
       })),
       nearMatch: near ?? null,
       generalized: g.isSome() ? designToolToDTO(g.unwrap()) : null,

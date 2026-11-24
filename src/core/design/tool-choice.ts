@@ -19,7 +19,7 @@ import {
   type StockGeometry,
 } from '../geometry/model'
 import { FIT_SLACK, shapeMeasure, type ShapeMeasure } from '../geometry/shape-measure'
-import { toolFit, type ToolUnfit } from '../geometry/tool-fit'
+import { shankClears, toolFit, type ToolUnfit } from '../geometry/tool-fit'
 import { MATERIAL_CLASS_WORDS, type MaterialClass } from '../library/item'
 import type { LibraryItem } from '../library/library-item'
 import { snapshotFromRecord } from './frozen-memo'
@@ -46,6 +46,8 @@ export function dfmTool(tool: Tool): DfmTool {
     ...(tool.angle.isSome() && { angle: tool.angle.unwrap().canonical }),
     ...(tool.type === 'chamferMill' && { tipDiameter: tool.tipDiameterMm }),
     reach: tool.stickout.mapOr(tool.fluteLength.canonical, (s) => s.canonical),
+    fluteLength: tool.fluteLength.canonical,
+    ...(tool.shankDiameter.isSome() && { shankDiameter: tool.shankDiameter.unwrap().canonical }),
   }
 }
 
@@ -200,19 +202,28 @@ export function sizeClasses(diameters: readonly number[]): Map<number, number> {
 export const toolReach = (tool: Tool): number =>
   tool.stickout.mapOr(tool.fluteLength.canonical, (s) => s.canonical)
 
-/** "stickout 31 mm" / "flute length 25 mm": the reach as a candidate's reason (DF55). */
-function reachReason(tool: Tool): string {
+/**
+ * "stickout 31 mm" / "flute length 25 mm": the reach as a candidate's reason (DF55); with a
+ * stickout, a wall-following cut (pocket, profile, hole) whose walls need the flutes adds
+ * "flute length 50 mm" (DF89).
+ */
+function reachReasons(tool: Tool, input: ChoiceInput): string[] {
   const n = (v: number) => Number(v.toFixed(3))
-  return tool.stickout.isSome()
-    ? `stickout ${n(tool.stickout.unwrap().canonical)} mm`
-    : `flute length ${n(tool.fluteLength.canonical)} mm`
+  const flutes = `flute length ${n(tool.fluteLength.canonical)} mm`
+  if (tool.stickout.isNone()) return [flutes]
+  const walls = input.geometry.kind !== 'facing' && input.geometry.kind !== 'chamfer'
+  return [
+    `stickout ${n(tool.stickout.unwrap().canonical)} mm`,
+    ...(walls && !shankClears(dfmTool(tool)) ? [flutes] : []),
+  ]
 }
 
 /**
  * The library tools that fit, ranked (design-v0.2.md § Auto choice): leaves no rest material
  * (general shapes) → has a preset for the stock's material class → largest size (`sizeClasses`:
  * fewer passes) → shortest reach (stickout, else flute length; every fitting tool reaches, the
- * shortest is the stiffest, DF55) → larger diameter → library id.
+ * shortest is the stiffest, DF55) → larger diameter → library id. Fitting includes the flute rule
+ * (DF89): a tool whose flutes do not cut the walls' depth is never auto-chosen.
  */
 export function fittingLibraryTools(input: ChoiceInput): LibraryCandidate[] {
   const out: LibraryCandidate[] = []
@@ -229,7 +240,7 @@ export function fittingLibraryTools(input: ChoiceInput): LibraryCandidate[] {
       ...(rest ? ['leaves rest material'] : []),
       ...(hasPreset ? [`has a preset for ${MATERIAL_CLASS_WORDS[input.materialClass]}`] : []),
       `diameter ${tool.diameter.canonical} mm`,
-      reachReason(tool),
+      ...reachReasons(tool, input),
     ]
     out.push({ item, tool, hasPreset, leavesRest: rest, reasons })
   }

@@ -135,6 +135,28 @@ describe('dfm messages', () => {
     expect(text({ rule: 'reach', reach: 20, depth: 25 })).toBe(
       'The 6 mm flat end mill reaches 20 mm; the operation is 25 mm deep.',
     )
+    // DF89: the flutes, with and without a known shank
+    expect(
+      text({ rule: 'flutes', fluteLength: 20, depth: 28.169, margin: 0.5, shankDiameter: 6.35 }),
+    ).toBe(
+      'The 6 mm flat end mill has 20 mm flutes; the walls are 28.17 mm deep (0.5 mm kept spare) and its shank (Ø 6.35 mm) is not narrower than the cutter, so the shank would rub the wall. Use a tool with longer flutes.',
+    )
+    expect(text({ rule: 'flutes', fluteLength: 20, depth: 28.169, margin: 0.5 })).toContain(
+      'its shank Ø is not in the library',
+    )
+    expect(
+      dfmMessages.text(
+        w({
+          code: 'dfm.reach',
+          parameter: 'depth',
+          params: { depth: 28.169, reach: 52, fluteLength: 25, margin: 0.5 },
+        }),
+        'mm',
+        names,
+      ),
+    ).toBe(
+      'No tool in the library cuts walls 28.17 mm deep with its flutes (longest flute length 25 mm, 0.5 mm kept spare). Below the flutes the shank rubs the wall: add a tool with longer flutes or a reduced shank.',
+    )
     // values missing (unknown rule): still a sentence naming the tool
     expect(text({ rule: 'other' })).toBe('The 6 mm flat end mill does not fit.')
     expect(

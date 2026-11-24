@@ -219,6 +219,30 @@ describe('tool field', () => {
     expect(snap.libraryItemId).toBe(flat3)
   })
 
+  // Doc: docs/modes/design-v0.2.md#fit-when-a-tool-can-make-the-operation (hardening DF89)
+  it('a tool whose flutes are shorter than the walls is listed as not fitting and warns when picked', async () => {
+    const { user, group, combo, apply, addTool, d } = await renderPocket()
+    // the default pocket: the larger tool's 3 mm flutes (shank wider) do not cut its walls
+    await addTool('Short 1F', '5', [], { fluteLength: '3', shankDiameter: '6', stickout: '20' })
+    const long = await addTool('Long', '4', [], { fluteLength: '25' })
+    await apply()
+    await waitFor(() => expect(combo()).toHaveTextContent('Long · Ø 4 mm'))
+    expect(Object.values(d.doc.snapshots).some((s) => s.libraryItemId === long)).toBe(true)
+    await user.click(combo())
+    const list = await screen.findByRole('listbox')
+    const short = await within(list).findByRole('option', { name: /^Short 1F/ })
+    expect(short).toHaveAccessibleDescription(
+      '2 flutes · Doesn’t fit: 3 mm flutes, too short for the 5 mm walls',
+    )
+    await user.click(short)
+    await waitFor(() => expect(combo()).toHaveTextContent('Short 1F · Ø 5 mm'))
+    expect(
+      await within(group()).findByText(
+        'The Short 1F has 3 mm flutes; the walls are 5 mm deep (0.5 mm kept spare) and its shank (Ø 6 mm) is not narrower than the cutter, so the shank would rub the wall. Use a tool with longer flutes. Unlock it or pick another tool.',
+      ),
+    ).toBeInTheDocument()
+  })
+
   it('a locked tool that stops fitting warns at the field with a fitting tool as its fix', async () => {
     const { user, inspector, group, combo, lock, apply, op } = await renderPocket()
     await apply()

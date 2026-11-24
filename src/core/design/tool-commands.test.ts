@@ -62,7 +62,7 @@ const aluPreset = {
 }
 
 /** A project with one part on the 100 × 60 × 20 test stock, the auto choice as apply hook. */
-async function setup(units: UnitSystem = 'mm', rechoice = false) {
+async function setup(units: UnitSystem = 'mm', rechoice = false, thickness = '20') {
   const library = expectOk(await Library.open(createMemoryLibraryStorage()))
   const registry = expectOk(
     createRegistry({
@@ -85,7 +85,7 @@ async function setup(units: UnitSystem = 'mm', rechoice = false) {
     expectOk(await d.dispatch(name, args, ui)).value as Record<string, unknown>
   const failWith = async (name: string, args: object, code: Parameters<typeof expectErrCode>[1]) =>
     expectErrCode(await d.dispatch(name, args, ui), code)
-  const stock = await run('library.stock.add', { values: testStock() })
+  const stock = await run('library.stock.add', { values: testStock(thickness) })
   const { partId } = (await run('design.part.add', {
     name: 'Bracket',
     stockLibraryItemId: stock['id'],
@@ -465,7 +465,8 @@ describe('design.tool.candidates', () => {
     expect(src((toolOf(s, 'profile1') as { diameter: unknown }).diameter)).toBe('6 mm')
     const wexme = await s.addTool('flatEndMill', '6.22', {
       fluteCount: '1',
-      fluteLength: '20',
+      // DF89: the real 20 mm flutes do not cut the 20 mm stock + breakthrough (shank 6.35 > 6.22)
+      fluteLength: '22',
       stickout: '30.9',
       shankDiameter: '6.35',
     })
@@ -995,5 +996,119 @@ describe('tool choice fixes (DF51, DF52, DF54, DF55)', () => {
     const c = s.candidates('facing1')
     expect(c.fitting.map((f) => f.toolLibraryItemId)).toEqual([wexme, extralong, eighth])
     expect(c.fitting[0]!.reasons).toContain('stickout 31 mm')
+  })
+})
+
+// Doc: docs/modes/design-v0.2.md#fit-when-a-tool-can-make-the-operation (hardening DF89, the 50 %
+// enclosure test's B-1: the 28.169 mm cavity got the wexme 1/4″ 1F with 20 mm flutes)
+describe('DF89: the flutes must cut the walls', () => {
+  /** The enclosure test's library (flute length, shank where the library has it). */
+  const enclosureLibrary = async (s: Setup, withExtralong = true) => ({
+    wexme: await s.addTool('flatEndMill', '6.22', {
+      name: 'wexme 1/4 1F',
+      fluteCount: '1',
+      fluteLength: '20',
+      stickout: '31',
+      shankDiameter: '6.35',
+    }),
+    finishing: await s.addTool('flatEndMill', '6.35', {
+      name: 'Finishing 1/4 3F',
+      fluteCount: '3',
+      fluteLength: '20',
+      stickout: '31',
+    }),
+    long6f: await s.addTool('flatEndMill', '6.35', {
+      name: 'WEXME 1/4 6F Long Finishing',
+      fluteCount: '6',
+      fluteLength: '25',
+      stickout: '35',
+      overallLength: '75',
+    }),
+    eighth: await s.addTool('flatEndMill', '3.175', {
+      name: 'Wexme 1/8 4F',
+      fluteCount: '4',
+      fluteLength: '13',
+      stickout: '31',
+    }),
+    eighth22: await s.addTool('flatEndMill', '3.175', {
+      name: 'WEXME 1/8 22mm 1F',
+      fluteCount: '1',
+      fluteLength: '22',
+      stickout: '31',
+    }),
+    ...(withExtralong && {
+      extralong: await s.addTool('flatEndMill', '6.31', {
+        name: 'extralong 1/4',
+        fluteLength: '50',
+        stickout: '52',
+        overallLength: '100',
+      }),
+    }),
+  })
+  const cavity = (s: Setup) =>
+    s.pocket({ shape: rect('40', '25', '4'), depth: '28.169' }) as Promise<{
+      warnings: DfmWarning[]
+    }>
+
+  it('the 28.169 mm cavity chooses the 50 mm-flute tool; the short-fluted ones do not fit', async () => {
+    const s = await setup('mm', false, '40')
+    const lib = await enclosureLibrary(s)
+    await cavity(s)
+    await s.apply()
+    expect(snapshotOf(s, 'pocket1')).toMatchObject({ libraryItemId: lib.extralong })
+    const c = s.candidates('pocket1')
+    expect(c.fitting.map((f) => f.toolLibraryItemId)).toEqual([lib.extralong])
+    expect(c.current).toMatchObject({ fits: true })
+    const unfit = Object.fromEntries(c.unfitting.map((u) => [u.toolLibraryItemId, u.rule]))
+    expect(unfit).toEqual({
+      [lib.wexme]: 'flutes',
+      [lib.finishing]: 'flutes',
+      [lib.long6f]: 'flutes',
+      [lib.eighth]: 'flutes',
+      [lib.eighth22]: 'flutes',
+    })
+    expect(s.warnings().filter((w) => w.operation === 'pocket1')).toEqual([])
+    // the wexme picked by the user: it locks, current fits false, dfm.toolUnfit names the flutes
+    await s.run('design.operation.tool.set', {
+      partId: s.partId,
+      operationId: 'pocket1',
+      tool: { kind: 'specific', toolLibraryItemId: lib.wexme },
+    })
+    expect(s.candidates('pocket1').current).toMatchObject({ fits: false, rule: 'flutes' })
+    expect(s.warnings().find((w) => w.code === 'dfm.toolUnfit')).toMatchObject({
+      operation: 'pocket1',
+      parameter: 'tool',
+      params: { rule: 'flutes', fluteLength: 20, depth: 28.169, shankDiameter: 6.35 },
+    })
+  })
+
+  it('no tool cuts the walls: the auto choice takes none of them and dfm.reach names the flutes', async () => {
+    const s = await setup('mm', false, '40')
+    const lib = await enclosureLibrary(s, false)
+    const added = await cavity(s)
+    expect(added.warnings.find((w) => w.code === 'dfm.reach')).toMatchObject({
+      operation: 'pocket1',
+      params: { depth: 28.169, fluteLength: 25 },
+    })
+    await s.apply()
+    const chosen = toolOf(s, 'pocket1')
+    expect(chosen).toMatchObject({ kind: 'generalized' })
+    expect(Object.values(lib)).not.toContain(
+      (chosen as { toolLibraryItemId?: string }).toolLibraryItemId,
+    )
+    expect(s.warnings().find((w) => w.code === 'dfm.reach')?.message).toContain(
+      'cuts walls 28.169 mm deep with its flutes (longest flute length 25 mm',
+    )
+  })
+
+  it('a shallow cut still takes a short 1/4″ tool, not the extralong (shortest reach within a size)', async () => {
+    const s = await setup('mm', false, '40')
+    const lib = await enclosureLibrary(s)
+    await s.pocket({ shape: rect('40', '25', '4'), depth: '9.738' })
+    await s.apply()
+    // stickout 31 both; the larger Ø breaks the tie
+    expect(snapshotOf(s, 'pocket1')).toMatchObject({ libraryItemId: lib.finishing })
+    const order = s.candidates('pocket1').fitting.map((f) => f.toolLibraryItemId)
+    expect(order.slice(0, 4)).toEqual([lib.finishing, lib.wexme, lib.long6f, lib.extralong])
   })
 })

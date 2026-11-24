@@ -48,13 +48,19 @@ interface LibraryToolEntry {
   /** mm, bull nose only */
   readonly cornerRadius?: number
   readonly fluteCount: number
+  /** mm (LCF); absent from older results */
+  readonly fluteLength?: number
 }
 
 /** `design.tool.candidates` (src/core/design/tool-commands.ts). */
 export interface ToolCandidates {
   readonly fitting: readonly (LibraryToolEntry & { readonly reasons: readonly string[] })[]
   /** Library tools of a type that can make the operation but failing another fit rule (DF42). */
-  readonly unfitting?: readonly (LibraryToolEntry & { readonly rule: string })[]
+  readonly unfitting?: readonly (LibraryToolEntry & {
+    readonly rule: string
+    /** mm, rules reach and flutes (DF89) */
+    readonly depth?: number
+  })[]
   /** The library tool offered for a generalized tool the library lacks (DF42). */
   readonly nearMatch?: string | null
   readonly generalized: DesignToolDTO | null
@@ -187,6 +193,8 @@ export function autoChangeReason(
       return w.type(from, designMessages.kinds[op.kind].toLowerCase())
     case 'reach':
       return w.reach(from)
+    case 'flutes':
+      return w.flutes(from)
     case 'libraryFits':
       return w.libraryFits(from)
     case 'libraryRemoved':
@@ -200,8 +208,14 @@ export function autoChangeReason(
  * Why a listed library tool does not fit the operation ("wider than the 6 mm slot"), from its
  * failed fit rule and the operation's current values (DF42).
  */
-export function unfitWhy(rule: string, op: OperationDTO, units: UnitSystem): string {
+export function unfitWhy(
+  rule: string,
+  op: OperationDTO,
+  units: UnitSystem,
+  entry: { readonly fluteLength?: number; readonly depth?: number } = {},
+): string {
   const w = t.unfitWhy
+  const L = (mm: number | undefined) => (mm === undefined ? undefined : lengthSource(mm, units))
   switch (rule) {
     case 'width':
       return op.kind === 'profile' ? w.slot(lengthAt(op, 'slotWidth', units)) : w.pocket
@@ -217,6 +231,8 @@ export function unfitWhy(rule: string, op: OperationDTO, units: UnitSystem): str
       return w.diameter(lengthAt(op, 'diameter', units))
     case 'reach':
       return w.reach
+    case 'flutes':
+      return w.flutes(L(entry.fluteLength), L(entry.depth))
     case 'angle':
       return w.angle
     default:
@@ -315,7 +331,7 @@ function listedOptions(
       label: t.library(f.name, lengthSource(f.diameter, part.units)),
       group: t.groups.library,
       ...typeIcon(f.type),
-      description: [...geometry(f), t.unfit(unfitWhy(f.rule, op, part.units))].join(' · '),
+      description: [...geometry(f), t.unfit(unfitWhy(f.rule, op, part.units, f))].join(' · '),
     })
   }
   const current = op.tool

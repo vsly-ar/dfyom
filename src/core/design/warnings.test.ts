@@ -65,11 +65,11 @@ describe('libraryTools: library items → DfmTool (mm)', () => {
     await add(stockValues(), 'stock')
     expect(lib.list('tool').errors.map((e) => e.id)).toEqual(['broken'])
     expect(libraryTools(lib)).toEqual([
-      // reach: the stickout, else the flute length (20 mm here)
-      { type: 'flatEndMill', diameter: 6.35, reach: 20 },
-      { type: 'bullNoseEndMill', diameter: 10, cornerRadius: 1, reach: 20 },
-      { type: 'ballEndMill', diameter: 6, reach: 20 },
-      { type: 'drill', diameter: 5, reach: 20 },
+      // reach: the stickout, else the flute length (20 mm here); no shank Ø given
+      { type: 'flatEndMill', diameter: 6.35, reach: 20, fluteLength: 20 },
+      { type: 'bullNoseEndMill', diameter: 10, cornerRadius: 1, reach: 20, fluteLength: 20 },
+      { type: 'ballEndMill', diameter: 6, reach: 20, fluteLength: 20 },
+      { type: 'drill', diameter: 5, reach: 20, fluteLength: 20 },
     ])
   })
 })
@@ -121,7 +121,8 @@ describe('design.warning.list', () => {
     await addTool(s, 'flatEndMill', '8')
     // no drill of Ø6 and no end mill smaller than it
     expect(codes(warningList(s).warnings)).toEqual(['drill1 dfm.holeNoTool'])
-    await addTool(s, 'drill', '6')
+    // flutes longer than the 20 mm through hole (DF89)
+    await addTool(s, 'drill', '6', { fluteLength: len('25') })
     expect(warningList(s).warnings).toEqual([])
     expect(s.d.revision).toBe(revision)
   })
