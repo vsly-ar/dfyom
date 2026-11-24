@@ -204,6 +204,19 @@ export const planMessages = {
       `Registration holes go on the flip axis to ${next} (the dashed line), for dowels in the spoilboard: the turned-over stock drops onto the same dowels.`,
     aidMarks: 'Add witness marks',
     aidHoles: 'Add registration holes',
+    // DF83: the helpers' choices
+    aidEdges: 'Marks across',
+    aidEdgeChoices: {
+      auto: 'Longer edges',
+      frontBack: 'Front and back',
+      leftRight: 'Left and right',
+    },
+    aidHolesAt: 'Holes',
+    aidHolesAtChoices: { axis: 'On the flip axis', corners: 'At corners' },
+    aidInset: 'Inset',
+    aidInsetDefault: 'Use default',
+    aidInsetHint:
+      'Marks: how far each line runs inside the edge (4 mm). Holes: the wall to the stock edge (3 mm). Empty: the default.',
     clearanceHeight: 'Clearance height',
     /** DF59: the note on the clearance field while the setup has no workholding, with its value. */
     clampNote: (height: string) =>
@@ -451,6 +464,17 @@ export const planMessages = {
     spoilboardDepthHint: 'Below the stock, at most 15 mm.',
     markDiameter: 'Mark width',
     markHint: 'At the face; the V-bit cuts it at the depth its angle needs.',
+    // DF83: the mark's depth by the V-bit's angle, a line's length, the viewport drag
+    markDepth: 'Mark depth',
+    markDepthHint: (angle: string) => `With the ${angle} V-bit; sets the mark width.`,
+    markDepthNone: 'Assign a pointed V-bit (Tool) to set the depth instead of the width.',
+    lineLength: 'Line length',
+    lineLengthHint: 'Along the line from its start; at most 100 mm.',
+    dragHint: 'Drag it in the viewport to move it; holes snap onto the flip axis.',
+    dragCaption: (name: string, x: string, y: string, axis?: string) =>
+      `${name}  X ${x}  Y ${y}${axis === undefined ? '' : `  ·  ${axis}`}`,
+    onAxis: 'on the flip axis',
+    offAxis: (d: string) => `${d} off the flip axis`,
     remove: 'Remove aid',
   },
   inspector: {

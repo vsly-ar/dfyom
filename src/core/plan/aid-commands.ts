@@ -11,7 +11,16 @@ import { fieldContext } from '../design/operation'
 import { Tool } from '../library/tool'
 import type { UnitSystem } from '../project/document'
 import { Quantity } from '../quantity/quantity'
-import { flipPartner, isAid, nextAidName, suggestHoles, suggestMarks } from './aids'
+import {
+  flipPartner,
+  isAid,
+  markDiameterAt,
+  nextAidName,
+  pointedVBitAngle,
+  suggestHoles,
+  suggestMarks,
+  type PlaceOptions,
+} from './aids'
 import { alignmentFindings } from './alignment'
 import { loaded, nextPointIds } from './alignment-commands'
 import {
@@ -102,6 +111,9 @@ const AidArgSchema = z
     center: z.tuple([Src, Src]).optional().describe('Hole centre'),
     diameter: Src.optional().describe('Hole Ø; default 6.2 mm (6 mm dowel)'),
     markDiameter: Src.optional().describe('Mark Ø at the face; default 1 mm'),
+    markDepth: Src.optional().describe(
+      "Or the mark's depth (sets markDiameter by the V-bit angle)",
+    ),
     spoilboardDepth: Src.optional().describe('Below the stock; default 10 mm, max 15'),
   })
   .strict()
@@ -153,6 +165,17 @@ function applyAidArg(
   const markD = len(arg.markDiameter, 'markDiameter')
   const depth = len(arg.spoilboardDepth, 'spoilboardDepth')
   if (issues.length > 0) return fail('input.malformed', issues[0]!.message, { where, issues })
+  // DF83: the mark's depth is set after its V-bit is known (`applyMarkDepth`)
+  if (arg.markDepth !== undefined && arg.markDiameter !== undefined)
+    return fail('input.malformed', 'give markDiameter or markDepth, not both', {
+      where,
+      issues: [{ path: ['aid', 'markDepth'], rule: 'conflict', message: 'one of the two' }],
+    })
+  if (arg.markDepth !== undefined && kind !== 'witnessMark')
+    return fail('plan.aid', 'markDepth is for a witness mark (a hole uses spoilboardDepth)', {
+      where,
+      issues: [{ path: ['aid', 'markDepth'], rule: 'notForKind', message: 'witness marks only' }],
+    })
   const missing = (key: string, message: string) =>
     fail('plan.aid', message, {
       where,
@@ -210,6 +233,52 @@ function applyAidArg(
   return Ok(out)
 }
 
+/**
+ * DF83: a witness mark's `markDepth` arg as its stored Ø at the face, by its V-bit's included
+ * angle (`markDiameter = 2·d·tan(α/2)`); refused without a pointed V-bit (`plan.aid`, rule
+ * `noVBit`) or when the Ø leaves its range.
+ */
+function applyMarkDepth(
+  draft: PlanDTO,
+  plan: LoadedPlan,
+  ids: readonly string[],
+  depthSrc: string,
+  units: UnitSystem,
+  where: string,
+): AppResult<void> {
+  const q = Quantity.parse(depthSrc, fieldContext('length', units))
+  if (q.isErr())
+    return fail('input.malformed', q.unwrapErr().message, {
+      where,
+      issues: [{ path: ['aid', 'markDepth'], rule: 'parse', message: q.unwrapErr().message }],
+    })
+  const depth = q.unwrap().canonical
+  const bad = (rule: string, message: string) =>
+    fail('plan.aid', message, {
+      where,
+      issues: [{ path: ['aid', 'markDepth'], rule, message }],
+    })
+  if (!(depth > 0)) return bad('range', 'a mark depth must be > 0')
+  for (const s of draft.setups)
+    for (const op of s.operations) {
+      if (!ids.includes(op.id) || op.aid?.kind !== 'witnessMark') continue
+      const angle = pointedVBitAngle(op.tool === undefined ? undefined : plan.tools.get(op.tool))
+      if (angle === undefined)
+        return bad(
+          'noVBit',
+          `${op.aid.name} has no pointed V-bit: assign one first, or give markDiameter`,
+        )
+      const d = Math.round(markDiameterAt(depth, angle) * 1e6) / 1e6
+      if (d > AID.markDiameterMax)
+        return bad(
+          'range',
+          `that depth makes a mark ${d} mm wide; at most ${AID.markDiameterMax} mm with this V-bit`,
+        )
+      op.aid = { ...op.aid, markDiameter: d }
+    }
+  return Ok(undefined)
+}
+
 /** Where a new aid goes in its setup: registration holes after the facings, marks last. */
 function aidIndex(setup: SetupDTO, plan: LoadedPlan, aid: AidDTO): number {
   if (aid.kind === 'witnessMark') return setup.operations.length
@@ -241,6 +310,17 @@ export const planAidSet = defineCommand({
         'Add two: line marks across opposite edges, or holes on the flip axis to the later flipped setup (else at opposite corners)',
       ),
     forSetupId: PlanRecordIdSchema.optional().describe('Later setup that aligns on the new aids'),
+    edges: z
+      .enum(['frontBack', 'leftRight'])
+      .optional()
+      .describe('place marks: which edges (default the longer pair)'),
+    holesAt: z
+      .enum(['axis', 'corners'])
+      .optional()
+      .describe('place holes: on the flip axis (default when one exists) or at corners'),
+    inset: Src.optional().describe(
+      'place: marks run this far inside the edge (4 mm); holes keep this wall to the stock edge (3 mm)',
+    ),
   }),
   result: z.object({
     planOperationIds: z.array(z.string()).describe('Added or updated aids'),
@@ -266,6 +346,32 @@ export const planAidSet = defineCommand({
       fail('input.malformed', message, { where, issues: [{ path: [path], rule, message }] })
     const touched: string[] = []
     let pointIds: string[] = []
+    // DF83: the helpers' choices go with `place` only, each with its own helper
+    if (args.place === undefined && (args.edges ?? args.holesAt ?? args.inset) !== undefined)
+      return malformed('place', 'required', 'edges, holesAt and inset choose how place works')
+    if (args.edges !== undefined && args.place !== 'marks')
+      return malformed('edges', 'notForPlace', "edges is for place: 'marks'")
+    if (args.holesAt !== undefined && args.place !== 'holes')
+      return malformed('holesAt', 'notForPlace', "holesAt is for place: 'holes'")
+    let inset: number | undefined
+    if (args.inset !== undefined) {
+      const q = Quantity.parse(args.inset, fieldContext('length', units))
+      if (q.isErr()) return malformed('inset', 'parse', q.unwrapErr().message)
+      inset = q.unwrap().canonical
+      const min = args.place === 'marks' ? 0.1 : 0
+      if (inset < min || inset > AID.insetMax)
+        return fail('plan.aid', `inset must be ${min} to ${AID.insetMax} mm`, {
+          where,
+          issues: [{ path: ['inset'], rule: 'range', message: 'out of range' }],
+        })
+    }
+    if (args.place !== undefined && args.aid?.markDepth !== undefined) {
+      if (args.place === 'holes')
+        return malformed('aid', 'notForKind', 'markDepth is for witness marks')
+      if (args.aid.markDiameter !== undefined)
+        return malformed('aid', 'conflict', 'give markDiameter or markDepth, not both')
+    }
+    const options: PlaceOptions = { edges: args.edges, inset }
     if (args.planOperationId !== undefined) {
       // update or remove
       if (args.place !== undefined || args.setupId !== undefined || args.forSetupId !== undefined)
@@ -318,7 +424,7 @@ export const planAidSet = defineCommand({
       if (args.place === 'marks') {
         const md = parsed(args.aid?.markDiameter, AID.markDiameter)
         if (md.isErr()) return Err(md.unwrapErr().withContext(where))
-        for (const l of suggestMarks(plan, setupDto, md.unwrap(), port)) {
+        for (const l of suggestMarks(plan, setupDto, md.unwrap(), port, options)) {
           const a = applyAidArg(
             undefined,
             {
@@ -340,8 +446,14 @@ export const planAidSet = defineCommand({
         const d = parsed(args.aid?.diameter, AID.holeDiameter)
         if (d.isErr()) return Err(d.unwrapErr().withContext(where))
         // on the flip axis to the later setup that turns the stock over (S25, Q106 assumed)
-        const flip = flipPartner(plan, setupDto, args.forSetupId)
-        for (const c of suggestHoles(plan, setupDto, d.unwrap(), port, flip?.axis)) {
+        const flip =
+          args.holesAt === 'corners' ? undefined : flipPartner(plan, setupDto, args.forSetupId)
+        if (args.holesAt === 'axis' && flip === undefined)
+          return fail('plan.aid', 'no later setup flips the stock: there is no flip axis', {
+            where,
+            issues: [{ path: ['holesAt'], rule: 'noFlipAxis', message: "use 'corners'" }],
+          })
+        for (const c of suggestHoles(plan, setupDto, d.unwrap(), port, flip?.axis, options)) {
           const a = applyAidArg(
             undefined,
             {
@@ -407,6 +519,19 @@ export const planAidSet = defineCommand({
         later.alignment = [...(later.alignment ?? []), ...points]
         pointIds = points.map((p) => p.id)
       }
+    }
+    if (args.aid?.markDepth !== undefined && touched.length > 0) {
+      const now = loaded(draft, args.planId, where)
+      if (now.isErr()) return now
+      const set = applyMarkDepth(
+        target as PlanDTO,
+        now.unwrap(),
+        touched,
+        args.aid.markDepth,
+        units,
+        where,
+      )
+      if (set.isErr()) return set
     }
     const after = loaded(draft, args.planId, where)
     if (after.isErr()) return after

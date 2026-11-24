@@ -119,6 +119,10 @@ export const AID = {
   /** A line mark: this far inside the edge and past it (default 6 mm long). */
   lineInside: 4,
   linePast: 2,
+  /** The hole helper's wall between the stock edge and the hole (DF83: its `inset`). */
+  holeInset: 3,
+  /** A helper inset above this (mm) is a typo (DF83). */
+  insetMax: 50,
   /** A 6 mm dowel + 0.2 mm. */
   holeDiameter: 6.2,
   holeDiameterMax: 50,
