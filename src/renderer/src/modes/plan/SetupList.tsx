@@ -16,7 +16,14 @@
 // exported.
 // Doc: docs/conventions/ui.md#design-and-plan-controls-v02,
 // docs/modes/plan-v0.2.md#merge-split-reorder, docs/conventions/ui.md#reordering-lists-d45
-import { useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from 'react'
+import {
+  useId,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type MouseEvent,
+  type PointerEvent,
+} from 'react'
 import { DIRECTION_LABEL } from '../../../../core/geometry/face'
 import type { PlanDTO, PlanOperationDTO, SetupDTO } from '../../../../core/plan/plan.dto'
 import type { ProjectDoc } from '../../../../core/project/document'
@@ -101,6 +108,11 @@ export function SetupList({
   const store = usePlanStore()
   const rows = useRef(new Map<string, HTMLButtonElement>())
   const canMove = allows(plan, 'plan.operation.move')
+  // rows with a menu are described by one hint (DF70, ui.md decision 27)
+  const hintId = useId()
+  const menuKeys = canMove
+    ? { 'aria-keyshortcuts': 'Alt+ArrowUp Alt+ArrowDown Shift+F10', 'aria-describedby': hintId }
+    : { 'aria-keyshortcuts': 'Alt+ArrowUp Alt+ArrowDown' }
   const several = plan.setups.length > 1
   /** Every row in the order shown, for ↑/↓. */
   const order = plan.setups.flatMap((s) => [s.id, ...s.operations.map((o) => o.id)])
@@ -236,7 +248,7 @@ export function SetupList({
                     ref={ref(setup.id)}
                     className={`${styles['opSelect']} ${styles['setupSelect']}`}
                     aria-pressed={selected === setup.id}
-                    aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+                    {...menuKeys}
                     onClick={() => select(selected === setup.id ? null : setup.id)}
                     onKeyDown={(e) => onKey(e, setup.id, (by) => void moveSetup(setup, by))}
                   >
@@ -274,6 +286,7 @@ export function SetupList({
                     failure={failures[op.id]}
                     selected={selected === op.id}
                     canMove={canMove}
+                    menuKeys={menuKeys}
                     reorder={reorder}
                     index={i}
                     rowRef={ref(op.id)}
@@ -315,6 +328,11 @@ export function SetupList({
           )
         })}
       </ol>
+      {canMove ? (
+        <p id={hintId} className={styles['srOnly']}>
+          {m.rowMenuHint}
+        </p>
+      ) : null}
       <ReorderStatus refusal={undefined} announcement={announcement} />
       {error ? <ErrorMessage error={error} message={m.inspector.commandFailed} /> : null}
     </>
@@ -407,6 +425,7 @@ function OperationRow({
   failure,
   selected,
   canMove,
+  menuKeys,
   reorder,
   index,
   rowRef,
@@ -425,6 +444,8 @@ function OperationRow({
   failure: AppErrorData | undefined
   selected: boolean
   canMove: boolean
+  /** The row button's keys and the row menu hint (DF70). */
+  menuKeys: { 'aria-keyshortcuts': string; 'aria-describedby'?: string }
   /** The setup's operation list reorder (its grip and row props). */
   reorder: Reorder
   index: number
@@ -499,7 +520,7 @@ function OperationRow({
           ref={rowRef}
           className={`${styles['opSelect']} ${styles['planRow']}`}
           aria-pressed={selected}
-          aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+          {...menuKeys}
           onClick={onSelect}
           onKeyDown={onKeyDown}
         >

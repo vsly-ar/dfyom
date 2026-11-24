@@ -131,10 +131,9 @@ describe('feature UI (U1)', () => {
     expect(
       within(navigator()).getByRole('list', { name: 'Operations in design order' }),
     ).not.toHaveTextContent(/hole1/)
-    // owned rows have no actions
-    expect(
-      within(navigator()).queryByRole('button', { name: 'Remove Bolt hole 1 · counterbore' }),
-    ).toBeNull()
+    // owned rows have no remove (DF70: no row has a Remove button; Delete does nothing here)
+    expect(within(navigator()).queryByRole('button', { name: /^Remove / })).toBeNull()
+    expect(cb).not.toHaveAttribute('aria-keyshortcuts', expect.stringContaining('Delete'))
     await user.keyboard('{ArrowRight}')
     expect(cb).toHaveFocus()
     await user.keyboard('{ArrowDown}')
@@ -223,7 +222,11 @@ describe('feature UI (U1)', () => {
     await user.keyboard('{Alt>}{ArrowUp}{/Alt}')
     await waitFor(() => expect(part().operations[0]!.id).toBe('pocket1'))
 
-    await user.click(within(navigator()).getByRole('button', { name: 'Remove Bolt hole 1' }))
+    // Delete on the feature row removes it (DF70)
+    within(navigator())
+      .getByRole('button', { name: /^Bolt hole 1,/ })
+      .focus()
+    await user.keyboard('{Delete}')
     await waitFor(() => expect(part().features).toBeUndefined())
     expect(await findToastAction('Undo')).toBeInTheDocument()
     expect(screen.getByText('Removed Bolt hole 1 and its 2 operations')).toBeInTheDocument()

@@ -4,18 +4,18 @@
 // its Source (the nested operations or source feature, editable as before) and its Clones (one
 // row per instance number from 2, skipped ones muted). Feature rows are collapsed by default (per
 // window, ui store `expandedFeatures`). Plain rows and feature rows reorder by dragging their grip
-// (D45) and by Alt+↑/↓, over whole neighbouring spans, and remove with an undo toast; a refused
-// move says why under the list and every move is announced. Rows show names, never ids (the
-// name ellipsizes in the row's width; DF25 re-report). The grip sits before the row icon
-// (DF24); a row with a warning badge or failed marker keeps its actions' room at rest, so the
-// markers never move on hover (DF67). Owned and nested rows have no actions (Alt+↑/↓ there moves the outer feature). ↑/↓ walk
-// the visible rows, → expands or enters, ← collapses or goes to the parent row. Every row with an
-// applicable action has the row menu (DF16: Chamfer, Make Clones…, Remove): right-click,
-// Shift+F10 / the Menu key, and on top-level rows the actions (…) button.
+// (D45) and by Alt+↑/↓, over whole neighbouring spans, and remove (row menu, Delete) with an undo
+// toast; a refused move says why under the list and every move is announced. Rows show names,
+// never ids (the name ellipsizes in the row's width; DF25 re-report). The grip sits before the
+// row icon (DF24). Owned and nested rows have no move or remove (Alt+↑/↓ there moves the outer
+// feature). ↑/↓ walk the visible rows, → expands or enters, ← collapses or goes to the parent row.
+// Every row with an applicable action has the row menu (DF16: Chamfer, Make Clones…, Remove):
+// right-click, Shift+F10 / the Menu key; rows have no action buttons (DF70, ui.md decision 27), so
+// badges and markers never move on hover, and such rows are described by the list's hint.
 // Doc: docs/conventions/ui.md#feature-rows-and-add, #clones-in-the-navigator,
 // #reordering-lists-d45, #panels-and-inspectors, #confirmations, row menu in #feature-rows-and-add;
 // docs/modes/design.md#ordering-and-composition
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import type { FeatureDTO } from '../../../../core/design/feature.dto'
 import type { OperationDTO } from '../../../../core/design/part.dto'
 import type { UnitSystem } from '../../../../core/project/document'
@@ -27,9 +27,7 @@ import {
   ContextMenu,
   DragGrip,
   Icon,
-  IconButton,
   isContextMenuKey,
-  Menu,
   openContextMenu,
   ReorderStatus,
   useReorder,
@@ -121,6 +119,8 @@ interface ListContext {
   toggleSkip(feature: FeatureDTO, n: number): void
   /** The row menu of an owned or nested row (no Remove; DF16). */
   rowMenu(id: string): MenuEntry[]
+  /** The id of the list's row menu hint ("Right-click or Shift+F10 for actions."; DF70). */
+  readonly hintId: string
 }
 
 export function OperationList({
@@ -147,6 +147,7 @@ export function OperationList({
   const rows = useRef(new Map<string, HTMLButtonElement>())
   const units = operationUnits(part)
   const partId = part.dto.id
+  const hintId = useId()
 
   // a selected owned or nested operation (viewport click, breadcrumb, undo) shows inside its open
   // feature(s)
@@ -243,6 +244,13 @@ export function OperationList({
       e.preventDefault()
       return openContextMenu(el)
     }
+    // Delete / Backspace on a top-level row: remove it, with the undo toast (DF70: the row menu's
+    // Remove; refused silently while blocked, the reason shows under the row)
+    if ((e.key === 'Delete' || e.key === 'Backspace') && row.id === unit.id) {
+      e.preventDefault()
+      if (unit.kind === 'feature' && featureRemoveBlocked(part, unit.id) !== undefined) return
+      return void remove(unit)
+    }
     if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
       e.preventDefault()
       const by = e.key === 'ArrowUp' ? -1 : 1
@@ -286,6 +294,7 @@ export function OperationList({
     },
     toggleSkip,
     rowMenu: (id) => rowActions(id),
+    hintId,
   }
 
   return (
@@ -302,7 +311,6 @@ export function OperationList({
           const actions: RowActions = {
             item: reorder.itemProps(i),
             grip: units.length > 1 ? reorder.gripProps(i) : undefined,
-            onRemove: () => void remove(unit),
             menu: rowActions(unit.id, { name, onRemove: () => void remove(unit), blocked }),
           }
           return unit.kind === 'operation' ? (
@@ -312,6 +320,9 @@ export function OperationList({
           )
         })}
       </ol>
+      <p id={hintId} className={styles['srOnly']}>
+        {m.navigator.rowMenuHint}
+      </p>
       <ReorderStatus refusal={reorder.refusal ?? refusal} announcement={announcement} />
     </>
   )
@@ -321,9 +332,27 @@ interface RowActions {
   /** The row's reorder props (its `<li>`) and its grip's. */
   readonly item: ReturnType<Reorder['itemProps']>
   readonly grip: ReturnType<Reorder['gripProps']> | undefined
-  onRemove(): void
-  /** The row menu (DF16): the … button and right-click. */
+  /** The row menu (DF16): right-click, Shift+F10 / the Menu key; Remove last. */
   readonly menu: readonly MenuEntry[]
+}
+
+/**
+ * The row button's keyboard props (DF70): its keys, with Shift+F10 when it has a menu and Delete
+ * on top-level rows, and the list's hint (plus `reasonId`) as its description.
+ */
+function rowKeys(
+  ctx: ListContext,
+  keys: string,
+  menu: readonly MenuEntry[],
+  top: boolean,
+  reasonId?: string,
+): { 'aria-keyshortcuts': string; 'aria-describedby'?: string } {
+  const all = [keys, menu.length > 0 ? 'Shift+F10' : '', top ? 'Delete' : '']
+  const described = [menu.length > 0 ? ctx.hintId : '', reasonId ?? ''].filter((x) => x !== '')
+  return {
+    'aria-keyshortcuts': all.filter((x) => x !== '').join(' '),
+    ...(described.length > 0 ? { 'aria-describedby': described.join(' ') } : {}),
+  }
 }
 
 /**
@@ -386,34 +415,6 @@ function RowMarkers({ failed, count }: { failed: boolean; count: number }): Reac
   )
 }
 
-function MoveRemove({
-  name,
-  actions,
-  removeBlocked,
-  reasonId,
-}: {
-  name: string
-  actions: RowActions
-  /** Why remove is refused (`aria-disabled`, the reason as visible text under the row). */
-  removeBlocked?: string | undefined
-  reasonId?: string
-}): React.JSX.Element {
-  return (
-    <span className={styles['opActions']}>
-      <Menu label={m.navigator.actions(name)} align="end" items={actions.menu}>
-        <IconButton label={m.navigator.actions(name)} icon={<Icon name="more" />} />
-      </Menu>
-      <IconButton
-        label={m.navigator.remove(name)}
-        icon={<Icon name="delete" />}
-        {...(removeBlocked !== undefined ? { 'aria-disabled': true } : {})}
-        {...(removeBlocked !== undefined && reasonId ? { 'aria-describedby': reasonId } : {})}
-        onClick={() => (removeBlocked !== undefined ? undefined : actions.onRemove())}
-      />
-    </span>
-  )
-}
-
 /**
  * A plain operation row: top level with move and remove, or nested in a Clones' source (no
  * actions: it moves with the Clones).
@@ -435,8 +436,6 @@ function OperationRow({
         {...actions?.item}
         className={styles['op']}
         data-nested={actions === undefined ? '' : undefined}
-        data-top={actions !== undefined ? '' : undefined}
-        data-markers={n > 0 || ctx.failedAt === op.id ? '' : undefined}
         data-row-menu={menu.length > 0 ? '' : undefined}
         data-selected={ctx.selected === op.id ? '' : undefined}
       >
@@ -446,7 +445,7 @@ function OperationRow({
           ref={ctx.rowRef(op.id)}
           className={styles['opSelect']}
           aria-pressed={ctx.selected === op.id}
-          aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+          {...rowKeys(ctx, 'Alt+ArrowUp Alt+ArrowDown', menu, actions !== undefined)}
           onClick={() => ctx.select(op.id)}
           onKeyDown={(e) => ctx.key(e, op.id)}
         >
@@ -456,7 +455,6 @@ function OperationRow({
           </span>
           <RowMarkers failed={ctx.failedAt === op.id} count={n} />
         </button>
-        {actions ? <MoveRemove name={op.name} actions={actions} /> : null}
       </li>
     </RowMenu>
   )
@@ -507,8 +505,6 @@ function FeatureRow({
       <RowMenu ctx={ctx} id={feature.id} name={feature.name} items={menu}>
         <div
           className={styles['op']}
-          data-top={actions !== undefined ? '' : undefined}
-          data-markers={count > 0 || failed ? '' : undefined}
           data-row-menu={menu.length > 0 ? '' : undefined}
           data-selected={selected === feature.id ? '' : undefined}
         >
@@ -520,7 +516,13 @@ function FeatureRow({
             aria-pressed={selected === feature.id}
             aria-expanded={open}
             aria-controls={childrenId}
-            aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown ArrowRight ArrowLeft"
+            {...rowKeys(
+              ctx,
+              'Alt+ArrowUp Alt+ArrowDown ArrowRight ArrowLeft',
+              menu,
+              actions !== undefined,
+              blocked !== undefined ? reasonId : undefined,
+            )}
             aria-label={name}
             onClick={() => ctx.select(feature.id)}
             onKeyDown={(e) => ctx.key(e, feature.id)}
@@ -537,14 +539,6 @@ function FeatureRow({
             </span>
             <RowMarkers failed={failed} count={count} />
           </button>
-          {actions ? (
-            <MoveRemove
-              name={feature.name}
-              actions={actions}
-              removeBlocked={blocked}
-              reasonId={reasonId}
-            />
-          ) : null}
           {blocked !== undefined ? (
             <p id={reasonId} className={styles['shapeReason']}>
               {blocked}
@@ -595,7 +589,7 @@ function Chevron({
   )
 }
 
-/** An owned operation of a hole: role name, its own badge; no id, no actions, no action slot. */
+/** An owned operation of a hole: role name, its own badge; no id, no move or remove. */
 function OwnedRow({
   ctx,
   op,
@@ -621,7 +615,7 @@ function OwnedRow({
           className={styles['opSelect']}
           aria-pressed={ctx.selected === op.id}
           aria-label={f.ownedName(op.name, featureName)}
-          aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown ArrowLeft"
+          {...rowKeys(ctx, 'Alt+ArrowUp Alt+ArrowDown ArrowLeft', menu, false)}
           onClick={() => ctx.select(op.id)}
           onKeyDown={(e) => ctx.key(e, op.id)}
         >

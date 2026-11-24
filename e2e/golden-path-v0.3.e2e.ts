@@ -531,8 +531,15 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
   await choose(page, inspector, 'Segment 2 Type', 'Tangent arc')
   await setField(inspector, 'Segment 2 End X', '60')
   await setField(inspector, 'Segment 2 End Y', '20')
-  await inspector.getByRole('button', { name: 'Actions for segment 3' }).click()
-  await page.getByRole('menuitem', { name: 'Remove segment 3' }).click()
+  // the row's actions are its context menu (DF70): right-click anywhere on the row
+  await inspector
+    .getByRole('row')
+    .filter({ has: page.getByLabel('Segment 3 End X') })
+    .click({ button: 'right' })
+  await page
+    .getByRole('menu', { name: 'Actions for segment 3' })
+    .getByRole('menuitem', { name: 'Remove segment 3' })
+    .click()
   await expect(
     inspector.getByRole('list', { name: 'Items in order' }).getByRole('button', {
       name: /Open path · 2 segments/,

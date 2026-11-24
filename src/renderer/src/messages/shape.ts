@@ -169,7 +169,7 @@ export const shapeMessages = {
     row: (k: number) => `Segment ${k}`,
     cell: (k: number, column: string) => `Segment ${k} ${column}`,
     lastSegment: 'A path needs at least one segment.',
-    keys: 'Arrows move between cells, Enter edits, Alt+↑/↓ moves a row, Delete on # removes it.',
+    keys: "Arrows move between cells, Enter edits, Alt+↑/↓ moves a row, Delete on # removes it. Right-click a row, or press Shift+F10 on a cell, for the row's actions.",
   },
   view: {
     region: 'Shape Editor',

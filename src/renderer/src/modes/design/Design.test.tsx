@@ -401,13 +401,15 @@ describe('design mode', () => {
     expect(await within(status()).findByRole('button', { name: '2 warnings' })).toBeInTheDocument()
     const row = within(navigator()).getByRole('button', { name: /^Pocket 1/ })
     expect(row).toHaveTextContent('2 warnings')
-    // DF67: the badge has its tooltip, and the row keeps its actions' room at rest (CSS
-    // `data-markers`), so the badge never moves when the actions show on hover
+    // DF67: the badge has its tooltip; DF70: the row has no action buttons that could cover or
+    // move it, its actions are the row menu, which its description names
     expect(row.querySelector('[title="2 warnings"]')).not.toBeNull()
-    expect(row.parentElement).toHaveAttribute('data-markers')
+    expect(within(row.parentElement!).getAllByRole('button')).toEqual([row])
+    expect(row).toHaveAccessibleDescription('Right-click or Shift+F10 for actions.')
+    expect(row).toHaveAttribute('aria-keyshortcuts', 'Alt+ArrowUp Alt+ArrowDown Shift+F10 Delete')
   })
 
-  it('moves operations with Alt+↑/↓ (announced) and removes one with an undo toast', async () => {
+  it('moves operations with Alt+↑/↓ (announced) and removes them from the row menu or with Delete', async () => {
     const { user, part, addFromMenu } = await renderDesign()
     await user.click(await within(navigator()).findByRole('button', { name: 'Add facing' }))
     await addFromMenu('Profile')
@@ -424,11 +426,23 @@ describe('design mode', () => {
     await user.keyboard('{Alt>}{ArrowDown}{/Alt}')
     await waitFor(() => expect(part().operations.map((o) => o.id)).toEqual(['facing1', 'profile1']))
 
-    await user.click(within(navigator()).getByRole('button', { name: 'Remove Facing 1' }))
+    // DF70: no Remove button on the row; Remove is the row menu's last item
+    expect(within(navigator()).queryByRole('button', { name: /^Remove / })).toBeNull()
+    const facing = within(navigator()).getByRole('button', { name: /^Facing 1/ })
+    await user.pointer({ keys: '[MouseRight]', target: facing })
+    const menu = await screen.findByRole('menu', { name: 'Actions for Facing 1' })
+    await user.click(within(menu).getByRole('menuitem', { name: 'Remove' }))
     await waitFor(() => expect(part().operations.map((o) => o.id)).toEqual(['profile1']))
     expect(await screen.findByText('Removed Facing 1')).toBeInTheDocument()
     await user.click(await findToastAction('Undo'))
     await waitFor(() => expect(part().operations.map((o) => o.id)).toEqual(['facing1', 'profile1']))
+    // Delete on the focused row removes it too
+    within(navigator())
+      .getByRole('button', { name: /^Profile 1/ })
+      .focus()
+    await user.keyboard('{Delete}')
+    await waitFor(() => expect(part().operations.map((o) => o.id)).toEqual(['facing1']))
+    expect(await screen.findByText('Removed Profile 1')).toBeInTheDocument()
   })
 
   it('drags a row by its grip; a drop the move refuses says why and changes nothing (D45)', async () => {
