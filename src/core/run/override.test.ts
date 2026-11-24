@@ -55,19 +55,54 @@ describe('overrideSteps', () => {
 })
 
 describe('overrideCap', () => {
+  const controller = { min: 10, max: 200, by: 'controller', floorBy: 'controller' }
+
   it('is the controller range without a programmed value or machine maximum', () => {
-    expect(overrideCap(range, undefined, 5000)).toEqual({ min: 10, max: 200, by: 'controller' })
-    expect(overrideCap(range, 0, 5000)).toEqual({ min: 10, max: 200, by: 'controller' })
-    expect(overrideCap(range, 1000, undefined)).toEqual({ min: 10, max: 200, by: 'controller' })
-    expect(overrideCap(range, 1000, 5000)).toEqual({ min: 10, max: 200, by: 'controller' })
+    expect(overrideCap(range, undefined, 5000)).toEqual(controller)
+    expect(overrideCap(range, 0, 5000)).toEqual(controller)
+    expect(overrideCap(range, 1000, undefined)).toEqual(controller)
+    expect(overrideCap(range, 1000, 5000)).toEqual(controller)
   })
 
   it('lowers the top to the machine maximum for the programmed value', () => {
-    expect(overrideCap(range, 3000, 5000)).toEqual({ min: 10, max: 166, by: 'machine' })
-    expect(overrideCap(grbl.spindle, 18000, 24000)).toEqual({ min: 10, max: 133, by: 'machine' })
-    expect(overrideCap(range, 2500, 5000)).toEqual({ min: 10, max: 200, by: 'controller' })
+    expect(overrideCap(range, 3000, 5000)).toEqual({ ...controller, max: 166, by: 'machine' })
+    expect(overrideCap(grbl.spindle, 18000, 24000)).toEqual({
+      ...controller,
+      max: 133,
+      by: 'machine',
+    })
+    expect(overrideCap(range, 2500, 5000)).toEqual(controller)
     // a programmed value far over the maximum: never below the controller's minimum
     expect(overrideCap(range, 1e6, 5000).max).toBe(10)
+  })
+
+  it("raises the bottom to the spindle's minimum speed for the programmed S (DF86)", () => {
+    const sp = grbl.spindle
+    // the user's router: min 6200 rpm, max 24000 rpm; S 18000 → 34.4… % → 35 %
+    expect(overrideCap(sp, 18000, 24000, 6200)).toEqual({
+      min: 35,
+      max: 133,
+      by: 'machine',
+      floorBy: 'machine',
+    })
+    // exact: no rounding up past the floor
+    expect(overrideCap(sp, 12400, undefined, 6200)).toMatchObject({ min: 50, floorBy: 'machine' })
+    // S at the minimum: 100 % is the floor
+    expect(overrideCap(sp, 6200, 24000, 6200).min).toBe(100)
+    // a floor under the controller's minimum leaves the controller's
+    expect(overrideCap(sp, 100000, undefined, 6200)).toMatchObject({
+      min: 10,
+      floorBy: 'controller',
+    })
+    // spindle off (S 0) or no run: no floor
+    expect(overrideCap(sp, 0, 24000, 6200)).toEqual(controller)
+    expect(overrideCap(sp, undefined, 24000, 6200)).toEqual(controller)
+    // no minimum speed in the profile
+    expect(overrideCap(sp, 18000, undefined, undefined)).toEqual(controller)
+    expect(overrideCap(sp, 18000, undefined, 0)).toEqual(controller)
+    // a programmed S far under the minimum: the floor never passes the top
+    expect(overrideCap(sp, 1000, 24000, 6200)).toMatchObject({ min: 200, max: 200 })
+    expect(overrideCap(sp, 3000, 4000, 6200)).toMatchObject({ min: 133, max: 133 })
   })
 
   it('reads the limits per controller kind', () => {

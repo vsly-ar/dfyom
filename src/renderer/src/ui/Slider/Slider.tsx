@@ -1,6 +1,6 @@
 // Slider: one value on a track; arrows move one step, Page Up/Down and Shift+arrows ten. A
-// `limit` below `max` keeps the thumb at or under it and hatches the track past it (the reason
-// is the caller's, through `aria-describedby`). `marks` are ticks (e.g. 100 %).
+// `limit` below `max` keeps the thumb at or under it and hatches the track past it, a `floor`
+// above `min` likewise below it (the reason is the caller's, through `aria-describedby`). `marks` are ticks (e.g. 100 %).
 // Doc: docs/conventions/ui.md#components (Slider; never the only way to enter a quantity)
 import { Slider as RadixSlider } from 'radix-ui'
 import type { Ref } from 'react'
@@ -19,6 +19,8 @@ export interface SliderProps {
   onValueCommit?: (value: number) => void
   /** Highest value that can be reached (≤ `max`); the track past it is hatched. */
   limit?: number | undefined
+  /** Lowest value that can be reached (≥ `min`); the track below it is hatched. */
+  floor?: number | undefined
   /** Values marked with a tick on the track. */
   marks?: readonly number[]
   /** Spoken value, e.g. "120 %, 1440 mm/min". */
@@ -39,6 +41,7 @@ export function Slider({
   onValueChange,
   onValueCommit,
   limit,
+  floor,
   marks = [],
   valueText,
   disabled = false,
@@ -47,7 +50,8 @@ export function Slider({
   ref,
 }: SliderProps): React.JSX.Element {
   const top = limit === undefined ? max : Math.max(min, Math.min(max, limit))
-  const clamp = (v: number) => Math.max(min, Math.min(top, v))
+  const bottom = floor === undefined ? min : Math.max(min, Math.min(top, floor))
+  const clamp = (v: number) => Math.max(bottom, Math.min(top, v))
   const at = (v: number) => `${((v - min) / (max - min)) * 100}%`
   const shown = Math.max(min, Math.min(max, value))
   return (
@@ -76,6 +80,13 @@ export function Slider({
             className={styles['beyond']}
             data-testid="slider-beyond"
             style={{ left: at(top), right: 0 }}
+          />
+        ) : null}
+        {bottom > min ? (
+          <span
+            className={styles['beyond']}
+            data-testid="slider-below"
+            style={{ left: 0, right: `${((max - bottom) / (max - min)) * 100}%` }}
           />
         ) : null}
         {marks.map((v) => (

@@ -32,6 +32,7 @@ import {
   Vec3Schema,
   type MachineAction,
 } from './host/protocol'
+import { overrideCap, overrideLimits } from './override'
 import { RunStatusSchema, type MachineService } from './service'
 import { runAlignGoto, runAlignTick } from './align-commands'
 import { DEFAULT_BAUD, SerialPortInfoSchema } from './serial'
@@ -253,6 +254,14 @@ export const runConnectionOpen = defineCommand({
     const chosen = connectionMachine(doc, ctx.services, args, where)
     if (chosen.isErr()) return chosen
     const { machine, key } = chosen.unwrap()
+    // the spindle override's floor (docs/modes/run-machine.md#overrides-m6); a manual spindle
+    // ignores S and has no spindle override
+    const profile = {
+      spindleMinSpeed:
+        machine.spindle.control === 'gcode'
+          ? machine.spindle.minSpeed.mapOr(undefined, (q) => q.canonical)
+          : undefined,
+    }
     const ctxData =
       args.planId === undefined ? { machineId: args.machineId } : { planId: args.planId }
     if (args.target === 'serial') {
@@ -266,12 +275,10 @@ export const runConnectionOpen = defineCommand({
           where,
           issues: [{ path: ['prepare'], rule: 'virtualOnly', message: 'not for a real machine' }],
         })
-      const info = await m.connect({
-        kind: 'serial',
-        path: args.path,
-        baud: args.baud,
-        machineKey: key,
-      })
+      const info = await m.connect(
+        { kind: 'serial', path: args.path, baud: args.baud, machineKey: key },
+        profile,
+      )
       if (info.isErr()) return Err(info.unwrapErr().withContext(where, ctxData))
       const check = settingsCheck(
         machine.toDTO() as MachineValuesDTO,
@@ -296,16 +303,19 @@ export const runConnectionOpen = defineCommand({
     )
     const t = machine.travel
     const position: Vec3 = [-t.x.canonical / 2, -t.y.canonical / 2, -t.z.canonical / 2]
-    const info = await m.connect({
-      kind: 'virtual',
-      settings,
-      homing: args.homing,
-      timeScale: args.timeScale,
-      machineKey: key,
-      // powers up at the centre of its travel (grbl.md#homing-and-machine-coordinates)
-      ...(args.homing ? { position } : {}),
-      ...(prepare === undefined ? {} : { prepare }),
-    })
+    const info = await m.connect(
+      {
+        kind: 'virtual',
+        settings,
+        homing: args.homing,
+        timeScale: args.timeScale,
+        machineKey: key,
+        // powers up at the centre of its travel (grbl.md#homing-and-machine-coordinates)
+        ...(args.homing ? { position } : {}),
+        ...(prepare === undefined ? {} : { prepare }),
+      },
+      profile,
+    )
     return info.mapErr((e) => e.withContext(where, ctxData))
   },
 })
@@ -650,6 +660,48 @@ const OverridesResult = z.object({
 const OverrideArg = z.union([z.enum(OVERRIDE_STEPS), z.number().int()])
 
 /**
+ * The spindle override's floor (DF86 follow-up, docs/modes/run-machine.md#overrides-m6): a
+ * target, or a −10/−1 step from the reported value, that takes the programmed S of the running
+ * program below the machine's usable minimum speed is refused (`overrideRange`), for the UI and
+ * agents alike. Without a programmed S (no run, spindle off) or a minimum speed nothing is checked.
+ */
+function spindleFloor(
+  services: Services,
+  arg: z.output<typeof OverrideArg> | undefined,
+  where: string,
+): AppResult<void> {
+  const m = services.machine
+  if (arg === undefined || m === undefined) return Ok(undefined)
+  const minSpeed = m.spindleMinSpeed
+  const status = m.status()
+  const s = status.job?.programmed?.spindle
+  const cap = overrideCap(overrideLimits('grbl').spindle, s, undefined, minSpeed)
+  if (cap.floorBy !== 'machine' || minSpeed === undefined || s === undefined) return Ok(undefined)
+  const current = status.overrides?.spindle
+  const target =
+    typeof arg === 'number'
+      ? arg
+      : current === undefined
+        ? undefined
+        : arg === '-10'
+          ? current - 10
+          : arg === '-1'
+            ? current - 1
+            : undefined
+  if (target === undefined || target >= cap.min) return Ok(undefined)
+  return fail('input.malformed', `spindle override ${target} % is below the floor`, {
+    where,
+    issues: [
+      {
+        path: ['spindle'],
+        rule: 'overrideRange',
+        message: `at least ${cap.min} %: S ${s} × ${target} % is below the spindle's minimum speed (minSpeed ${minSpeed} rpm)`,
+      },
+    ],
+  })
+}
+
+/**
  * Per given override, in the order feed, spindle, rapid: one real-time byte for a step, the
  * steps to a target percent (DF85, docs/modes/run-machine.md#overrides-m6).
  */
@@ -686,6 +738,8 @@ export const runOverrideSet = defineCommand({
         where,
         issues: [{ path: ['feed'], rule: 'required', message: 'give feed, spindle or rapid' }],
       })
+    const floor = spindleFloor(ctx.services, args.spindle, where)
+    if (floor.isErr()) return floor
     let last: unknown = {}
     for (const a of actions) {
       const r = await act(ctx.services, a, where)
