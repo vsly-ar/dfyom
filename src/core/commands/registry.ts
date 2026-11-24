@@ -35,6 +35,7 @@ import type {
   DocumentHook,
   OpenScan,
   PendingSource,
+  AnyQueryDef,
   QueryDef,
 } from './define'
 import { projectApply, projectPendingGet } from './apply'
@@ -87,7 +88,7 @@ export const PROJECT_COMMANDS: readonly AnyCommand[] = [
   planExport,
   ...RUN_COMMANDS,
 ]
-export const PROJECT_QUERIES: readonly QueryDef[] = [
+export const PROJECT_QUERIES: readonly AnyQueryDef[] = [
   ...DESIGN_QUERIES,
   designMeasure,
   ...DESIGN_TOOL_QUERIES,
@@ -167,10 +168,10 @@ const APPLY_DEFS = {
 
 export interface Registry {
   command(name: string): Option<AnyCommand>
-  query(name: string): Option<QueryDef>
+  query(name: string): Option<AnyQueryDef>
   /** Built-ins first, then the given commands (queries likewise), in registration order. */
   readonly commands: readonly AnyCommand[]
-  readonly queries: readonly QueryDef[]
+  readonly queries: readonly AnyQueryDef[]
   /** Run after every successful document command, in this order (commands.md#document-hooks). */
   readonly hooks: readonly DocumentHook[]
   /** Run by `project.apply`, in this order (docs/architecture/apply.md#apply-hooks). */
@@ -187,7 +188,7 @@ export interface Registry {
 /** Builds a registry (built-ins included). Invalid definitions are bugs → `internal.unexpected`. */
 export function createRegistry(defs: {
   readonly commands?: readonly AnyCommand[]
-  readonly queries?: readonly QueryDef[]
+  readonly queries?: readonly AnyQueryDef[]
   readonly hooks?: readonly DocumentHook[]
   readonly applyHooks?: readonly ApplyHook[]
   readonly applyJobs?: readonly ApplyJob[]

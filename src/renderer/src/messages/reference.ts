@@ -87,6 +87,50 @@ export const referenceMessages = {
     },
   },
 
+  /** The Levels and Section rows (DF60 P1, ui.md § Reference tools). */
+  tools: {
+    face: 'Read from',
+    faces: {
+      'stock.top': 'Top',
+      'stock.bottom': 'Bottom',
+      'stock.side[0]': 'Front',
+      'stock.side[1]': 'Right',
+      'stock.side[2]': 'Back',
+      'stock.side[3]': 'Left',
+    } as Record<string, string>,
+    levels: 'Levels',
+    levelsHint: 'Flat floors of the model. Choose one to cut the section just inside it.',
+    fromFace: (face: string) => `From ${face.toLowerCase()}`,
+    finding: 'Reading the model…',
+    findFailed: 'The model could not be read.',
+    noLevels: 'No flat floors on this axis.',
+    more: (n: number) => `${n} smaller levels not shown.`,
+    level: (depth: string, area: string, visible: string) =>
+      `Depth ${depth}, area ${area}, visible ${visible}`,
+    undercut: 'Undercut: not reachable from this side',
+    area: (mm2: number) => `${count(Math.round(mm2))} mm²`,
+    section: 'Section',
+    depth: 'Section depth',
+    loops: 'Loops',
+    loopKinds: { all: 'All', outer: 'Outlines', holes: 'Cavities' } as Record<string, string>,
+    noLoops: 'The plane misses the model at this depth.',
+    loop: (role: 'outer' | 'hole', size: string) =>
+      `${role === 'outer' ? 'Outline' : 'Cavity'} ${size}`,
+    circle: (d: string) => `Circle Ø ${d}`,
+    corners: 'Inside corners',
+    radiusChip: (r: string) => `r ${r}`,
+    sharpChip: (n: number) => (n === 1 ? 'r 0' : `r 0 × ${n}`),
+    noInsideCorners: 'none',
+    fit: (elements: number, dev: string) => `${elements} elements, within ${dev}`,
+    roundInside: 'Round sharp inside corners to',
+    roundHint: 'Default: the smallest end mill in the library. Off: the section as the model is.',
+    createShape: 'Create shape',
+    createShapes: 'Create shapes',
+    createHint: 'One shape with its holes, or one shape per outline.',
+    created: (n: number) => (n === 1 ? 'Shape created.' : `${n} shapes created.`),
+    createFailed: 'The shape could not be created.',
+  },
+
   /** The viewport's text summary for the visible references. */
   viewport: (name: string, state: 'loading' | 'done' | 'failed') =>
     state === 'done'

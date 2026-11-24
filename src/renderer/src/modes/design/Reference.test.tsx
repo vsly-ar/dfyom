@@ -11,9 +11,11 @@ import type { ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { createInProcessWorkers, memoryFiles } from '../../../../core/commands/jobs'
 import type { ReferenceDTO } from '../../../../core/design/reference.dto'
+import { Quantity } from '../../../../core/quantity/quantity'
 import { binaryStl, boxSoup } from '../../../../core/design/stl.testing'
 import { assetPathOf, type AssetRef } from '../../../../core/project/assets'
 import type { ProjectSession } from '../../../../core/project/storage'
+import { loadRegion2dSync } from '../../../../core/geometry/2d/cavalier'
 import { fail, Ok } from '../../../../shared/result'
 import { App } from '../../App'
 import { createShell, ShellProvider } from '../../shell/ShellContext'
@@ -59,7 +61,20 @@ function fakeProject(sources: Record<string, Uint8Array>) {
   return { session, workers: createInProcessWorkers({ files: memoryFiles(files) }) }
 }
 
+// jsdom's `import.meta.url` is not a file URL: read the vendored 2D module from the repository root
+const fs = (
+  globalThis as unknown as {
+    process: { getBuiltinModule(id: 'node:fs'): { readFileSync(p: string): Uint8Array } }
+  }
+).process.getBuiltinModule('node:fs')
+const region2d = loadRegion2dSync(
+  fs.readFileSync('vendor/cavalier-contours/cavalier_contours.wasm'),
+).expect('the vendored 2D module loads')
+
 const inspector = () => screen.getByRole('complementary', { name: 'Inspector' })
+/** The commands a bridge got (the Levels and Section rows read through queries meanwhile). */
+const commandsOf = (bridge: { calls: readonly { name: string }[] }) =>
+  bridge.calls.filter((c) => !/\.(find|list|get)$/.test(c.name))
 const viewport = () => screen.getByRole('region', { name: '3D viewport' })
 const field = (label: string) => within(inspector()).getByLabelText(label, { selector: 'input' })
 const fitRegion = () => within(inspector()).getByRole('region', { name: 'Fit to stock' })
@@ -87,7 +102,11 @@ async function openPanel(): Promise<void> {
 async function renderReference() {
   const bridge = createFakeBridge()
   const p = fakeProject({ [BOX]: BOX_STL, [BIG]: BIG_STL })
-  const d = await designDispatcher('Bracket', 'mm', { project: p.session, workers: p.workers })
+  const d = await designDispatcher('Bracket', 'mm', {
+    project: p.session,
+    workers: p.workers,
+    region2d,
+  })
   const src = { kind: 'ui', id: 'test' } as const
   const stock = await d.dispatch(
     'library.stock.add',
@@ -298,9 +317,9 @@ describe('reference model UI', () => {
     await user.click(within(region).getByRole('radio', { name: 'Bottom' }))
     expect(within(region).getByText(/Which face of the model lines up/)).toBeVisible()
     // Cancel: no command, preview dropped, focus back on Fit to stock…
-    const calls = bridge.calls.length
+    const calls = commandsOf(bridge).length
     await user.click(within(region).getByRole('button', { name: 'Cancel' }))
-    expect(bridge.calls).toHaveLength(calls)
+    expect(commandsOf(bridge)).toHaveLength(calls)
     expect(ui().referencePreview).toBeNull()
     expect(within(inspector()).getByRole('button', { name: 'Fit to stock…' })).toHaveFocus()
     expect(ref().scale.source).toBe('1')
@@ -331,7 +350,7 @@ describe('reference model UI', () => {
   it('closing the panel cancels the fit; Escape cancels it too', async () => {
     const { user, bridge, ui, importBox } = await renderReference()
     await importBox()
-    const calls = bridge.calls.length
+    const calls = commandsOf(bridge).length
     await user.click(within(inspector()).getByRole('button', { name: 'Fit to stock…' }))
     expect(ui().referencePreview).not.toBeNull()
     await user.keyboard('{Escape}')
@@ -343,7 +362,82 @@ describe('reference model UI', () => {
     expect(ui().referencePreview).toBeNull()
     await openPanel()
     expect(within(inspector()).queryByRole('region', { name: 'Fit to stock' })).toBeNull()
-    expect(bridge.calls).toHaveLength(calls)
+    expect(commandsOf(bridge)).toHaveLength(calls)
+  })
+
+  it('Levels and Section rows: floors from both sides, a level sets the depth, Create shape sends one import (DF60)', async () => {
+    const { user, bridge, d, importBox } = await renderReference()
+    // one flat end mill Ø 3.175 in the library: the rounding default is its radius
+    const diameter = Quantity.parse('3.175 mm', { kind: 'length', defaultUnit: 'mm' })
+      .unwrap()
+      .toDTO()
+    bridge.handle('library.tool.list', () => ({
+      ok: true,
+      value: {
+        items: [
+          { type: 'flatEndMill', diameter },
+          { type: 'drill', diameter },
+        ],
+      },
+      revision: 0,
+    }))
+    await importBox()
+    const levels = within(inspector()).getByRole('region', { name: 'Levels' })
+    // the box (20 × 10 × 5, fitted centre + top of the 20 thick stock): its top from the top, its
+    // underside from the bottom, 15 up
+    await waitFor(() =>
+      expect(
+        within(levels).getByRole('button', { name: /^Depth 0 mm, area 200 mm², visible 200 mm²/ }),
+      ).toBeVisible(),
+    )
+    expect(within(levels).getByRole('heading', { name: 'From top' })).toBeVisible()
+    expect(within(levels).getByRole('heading', { name: 'From bottom' })).toBeVisible()
+    const underside = within(levels).getByRole('button', { name: /^Depth 15 mm/ })
+
+    // the section at the middle of the box by default: one outline, no inside corners
+    const section = within(inspector()).getByRole('region', { name: 'Section' })
+    expect(within(section).getByLabelText('Section depth', { selector: 'input' })).toHaveValue(
+      '2.5 mm',
+    )
+    await waitFor(() => expect(within(section).getByText('Outline 20 mm × 10 mm')).toBeVisible())
+    expect(within(section).getByText('none')).toBeVisible()
+    await expectNoAxeViolations()
+
+    // choosing the underside level cuts just below it: the plane misses the box
+    await user.click(underside)
+    await waitFor(() =>
+      expect(within(section).getByText('The plane misses the model at this depth.')).toBeVisible(),
+    )
+    await retype(
+      user,
+      within(section).getByLabelText('Section depth', { selector: 'input' }),
+      '3{Enter}',
+    )
+    await waitFor(() => expect(within(section).getByText('Outline 20 mm × 10 mm')).toBeVisible())
+
+    // rounding off by default; on, it offers the end mill's radius
+    await user.click(
+      within(section).getByRole('checkbox', { name: 'Round sharp inside corners to' }),
+    )
+    expect(
+      within(section).getByLabelText('Round sharp inside corners to', { selector: 'input' }),
+    ).toHaveValue('1.5875 mm')
+    const undoable = d.history.undoable.length
+    await user.click(within(section).getByRole('button', { name: 'Create shape' }))
+    await waitFor(() => expect(within(section).getByText('Shape created.')).toBeVisible())
+    expect(bridge.calls.filter((c) => c.name === 'design.shape.import').at(-1)!.args).toEqual({
+      partId: expect.any(String),
+      split: 'file',
+      from: {
+        referenceId: expect.any(String),
+        face: 'stock.top',
+        depth: '3 mm',
+        loops: 'all',
+        roundInside: '1.5875 mm',
+      },
+    })
+    expect(d.history.undoable).toHaveLength(undoable + 1)
+    expect(Object.values(d.doc.parts)[0]!.shapes!.map((s) => s.name)).toEqual(['Section 3 mm'])
   })
 
   it('shows a command error at its field and keeps the record', async () => {

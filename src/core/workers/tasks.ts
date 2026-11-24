@@ -3,9 +3,21 @@
  * fixtures. Doc: docs/architecture/workers.md#what-runs-on-a-worker
  */
 import { z } from 'zod'
-import { Err, tryAsync, type AppResult } from '../../shared/result'
+import { Err, Ok, tryAsync, type AppResult } from '../../shared/result'
 import type { AnyWorkerTask, TaskControl, WorkerTask } from '../commands/jobs'
-import { FEATURE_EDGE_DEG, featureEdges, meshSection } from '../design/mesh-section'
+import {
+  meshLevels,
+  MeshLevelsSchema,
+  type LevelOptions,
+  type MeshLevels,
+} from '../design/mesh-levels'
+import { FEATURE_EDGE_DEG, featureEdges, meshSection, sectionChains } from '../design/mesh-section'
+import {
+  fitSection,
+  FittedLoopSchema,
+  type FittedLoop,
+  type SectionFitOptions,
+} from '../design/reference-section'
 import { createStlParser, STL_LIMITS, StlPositions, type StlSummary } from '../design/stl'
 import { svgImportTask } from '../import/svg/task'
 import { evaluatePart, type PartEvaluation } from '../geometry/evaluate'
@@ -188,8 +200,31 @@ export const stlMesh: WorkerTask<{ path: string; triangles: number }, StlMesh> =
   },
 }
 
-/** The last mesh a section was cut from, kept in the worker: a new depth does not read again. */
-let sectionMesh: { readonly path: string; readonly positions: Float32Array } | undefined
+/**
+ * The last reference mesh read by the section and levels tasks, kept in the worker: a new depth
+ * or face does not read the file again.
+ */
+let keptMesh: { readonly path: string; readonly positions: Float32Array } | undefined
+
+async function referencePositions(
+  path: string,
+  triangles: number,
+  ctl: TaskControl,
+  where: string,
+): Promise<AppResult<Float32Array>> {
+  if (keptMesh?.path !== path) {
+    const read = await readStlPositions(path, triangles, ctl, where)
+    if (read.isErr()) return read
+    keptMesh = { path, positions: read.unwrap() }
+  }
+  return Ok(keptMesh.positions)
+}
+
+/** A Float32Array from any realm (a jsdom test's arrays fail `instanceof` across realms). */
+const FLOAT32 = z.custom<Float32Array>(
+  (v) => Object.prototype.toString.call(v) === '[object Float32Array]',
+  'expected a Float32Array',
+)
 
 export interface SectionInput {
   readonly path: string
@@ -198,29 +233,77 @@ export interface SectionInput {
   readonly matrix: readonly number[]
   /** The plane's height in the face frame (mm): the face's level minus the section depth. */
   readonly level: number
+  /** Also chain, orient and fit the loops (DF60 P1; mm, degrees). */
+  readonly fit?: SectionFitOptions | undefined
+}
+
+export interface SectionOutput {
+  readonly segments: Float32Array
+  readonly loops?: readonly FittedLoop[] | undefined
 }
 
 /**
  * The reference section (task U3, docs/modes/design-v0.3.md#measure-and-snap): a stored
- * reference's mesh cut by a face-parallel plane, as segments in the face frame (mm). The mesh is
- * read once per file and kept for the next depth; only the segments leave the worker.
+ * reference's mesh cut by a face-parallel plane, as segments in the face frame (mm), and with
+ * `fit` the fitted loops (DF60 P1, docs/modes/reference-tools.md#section). The mesh is read once
+ * per file and kept for the next depth; only the segments and loops leave the worker.
  */
-export const referenceSection: WorkerTask<SectionInput, { segments: Float32Array }> = {
+export const referenceSection: WorkerTask<SectionInput, SectionOutput> = {
   name: 'reference.section',
   lane: 'geometry',
-  input: StlReadSchema.extend({ matrix: z.array(z.number()).length(16), level: z.number() }),
-  output: z.object({ segments: z.instanceof(Float32Array) }),
+  input: StlReadSchema.extend({
+    matrix: z.array(z.number()).length(16),
+    level: z.number(),
+    fit: z
+      .object({ tolerance: z.number().positive(), cornerAngle: z.number().positive() })
+      .optional(),
+  }),
+  output: z.object({
+    segments: FLOAT32,
+    loops: z.array(FittedLoopSchema).readonly().optional(),
+  }),
   timeoutMs: 120_000,
   transfer: (r) => [r.segments],
-  async run({ path, triangles, matrix, level }, ctl) {
-    if (sectionMesh?.path !== path) {
-      const read = await readStlPositions(path, triangles, ctl, 'reference.section')
-      if (read.isErr()) return read
-      sectionMesh = { path, positions: read.unwrap() }
-    }
-    return meshSection(sectionMesh.positions, matrix, level, ctl.steps).map((segments) => ({
-      segments,
-    }))
+  async run({ path, triangles, matrix, level, fit }, ctl) {
+    const read = await referencePositions(path, triangles, ctl, 'reference.section')
+    if (read.isErr()) return read
+    const positions = read.unwrap()
+    const segments = meshSection(positions, matrix, level, ctl.steps)
+    if (segments.isErr()) return segments
+    if (fit === undefined) return Ok({ segments: segments.unwrap() })
+    const chains = sectionChains(positions, matrix, level, ctl.steps)
+    if (chains.isErr()) return chains
+    return Ok({ segments: segments.unwrap(), loops: fitSection(chains.unwrap(), fit) })
+  },
+}
+
+export interface LevelsInput {
+  readonly path: string
+  readonly triangles: number
+  /** Column-major 4 × 4: source units → the face frame (mm), the face at w = 0. */
+  readonly matrix: readonly number[]
+  readonly options: LevelOptions
+}
+
+/** The depth levels of a stored reference seen from a face (DF60 P1, `meshLevels`). */
+export const referenceLevels: WorkerTask<LevelsInput, MeshLevels> = {
+  name: 'reference.levels',
+  lane: 'geometry',
+  input: StlReadSchema.extend({
+    matrix: z.array(z.number()).length(16),
+    options: z.object({
+      minArea: z.number().nonnegative(),
+      limit: z.number().int().positive(),
+      sides: z.enum(['both', 'face']),
+      extent: z.number(),
+    }),
+  }),
+  output: MeshLevelsSchema,
+  timeoutMs: 120_000,
+  async run({ path, triangles, matrix, options }, ctl) {
+    const read = await referencePositions(path, triangles, ctl, 'reference.levels')
+    if (read.isErr()) return read
+    return meshLevels(read.unwrap(), matrix, options, ctl.steps)
   },
 }
 
@@ -230,5 +313,6 @@ export const WORKER_TASKS: readonly AnyWorkerTask[] = [
   stlParse,
   stlMesh,
   referenceSection,
+  referenceLevels,
   svgImportTask,
 ]
