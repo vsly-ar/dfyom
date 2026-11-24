@@ -62,8 +62,23 @@ export interface MachineProps {
   readonly pullOff: Option<Quantity>
   /** Soft limits (`$20`); None = on. */
   readonly softLimits: Option<boolean>
-  /** Z touch plate thickness (DTO `probe.plateThickness`, length); None = no plate set. */
-  readonly plateThickness: Option<Quantity>
+  /**
+   * Spindle nose (where stickout is measured) to the table top with Z homed (length); None =
+   * the Z headroom check is skipped (docs/architecture/grbl.md#z-headroom-hardening-df68).
+   */
+  readonly noseToTable: Option<Quantity>
+  /** Spoilboard thickness on the table (length, ≥ 0); None = unknown (Z headroom partly checked). */
+  readonly spoilboardThickness: Option<Quantity>
+  /**
+   * Largest extent of the Z touch plate (length); None = unknown, the touch-off spot then leaves
+   * room for the tool only (docs/modes/z-reference.md#touch-off-spot, hardening DF69).
+   */
+  readonly probePlateSize: Option<Quantity>
+  /**
+   * Z touch plate thickness (length); None = no plate set, Run offers no "Probe Z"
+   * (docs/modes/run-machine.md#probing-and-re-zero-m4, hardening M4).
+   */
+  readonly probePlateThickness: Option<Quantity>
 }
 
 const AXES = ['x', 'y', 'z'] as const
@@ -92,7 +107,10 @@ export class Machine implements MachineProps {
     readonly homingCorner: Option<HomingCorner>,
     readonly pullOff: Option<Quantity>,
     readonly softLimits: Option<boolean>,
-    readonly plateThickness: Option<Quantity>,
+    readonly noseToTable: Option<Quantity>,
+    readonly spoilboardThickness: Option<Quantity>,
+    readonly probePlateSize: Option<Quantity>,
+    readonly probePlateThickness: Option<Quantity>,
   ) {
     invariants('Machine', (c) => {
       checkNameAndNotes(c, name, notes)
@@ -121,10 +139,32 @@ export class Machine implements MachineProps {
         }
       }
       if (pullOff.isSome()) checkPositive(c, ['pullOff'], pullOff.unwrap(), 'length')
-      if (plateThickness.isSome())
-        checkPositive(c, ['probe', 'plateThickness'], plateThickness.unwrap(), 'length')
       if (spindle.power.isSome())
         checkPositive(c, ['spindle', 'power'], spindle.power.unwrap(), 'power')
+      if (probePlateThickness.isSome())
+        checkPositive(c, ['probePlateThickness'], probePlateThickness.unwrap(), 'length')
+      if (noseToTable.isSome()) checkPositive(c, ['noseToTable'], noseToTable.unwrap(), 'length')
+      if (probePlateSize.isSome())
+        checkPositive(c, ['probePlateSize'], probePlateSize.unwrap(), 'length')
+      if (spoilboardThickness.isSome()) {
+        const board = spoilboardThickness.unwrap()
+        const path = ['spoilboardThickness']
+        if (checkKind(c, path, board, 'length')) {
+          const nonNegative = board.exact.compare(Rational.ZERO) >= 0
+          c.check(nonNegative, path, 'nonNegative', 'must be 0 or more', {
+            actual: board.canonical,
+          })
+          const nose = noseToTable.isSome() ? noseToTable.unwrap() : undefined
+          if (nonNegative && nose !== undefined && nose.kind === 'length')
+            c.check(
+              lessThan(board, nose),
+              path,
+              'lessThanNoseToTable',
+              'must be less than the spindle nose to table distance',
+              { max: nose.canonical, actual: board.canonical },
+            )
+        }
+      }
     })
     Object.freeze(travel)
     Object.freeze(maxFeedRate)
@@ -156,7 +196,10 @@ export class Machine implements MachineProps {
           p.homingCorner,
           p.pullOff,
           p.softLimits,
-          p.plateThickness,
+          p.noseToTable,
+          p.spoilboardThickness,
+          p.probePlateSize,
+          p.probePlateThickness,
         ),
     )
   }
@@ -180,7 +223,10 @@ export class Machine implements MachineProps {
       minSpeed: optionalQuantityFromDTO(dto.spindle.minSpeed, 'spindle', 'minSpeed'),
       power: optionalQuantityFromDTO(dto.spindle.power, 'spindle', 'power'),
       pullOff: optionalQuantityFromDTO(dto.pullOff, 'pullOff'),
-      plateThickness: optionalQuantityFromDTO(dto.probe?.plateThickness, 'probe', 'plateThickness'),
+      noseToTable: optionalQuantityFromDTO(dto.noseToTable, 'noseToTable'),
+      spoilboardThickness: optionalQuantityFromDTO(dto.spoilboardThickness, 'spoilboardThickness'),
+      probePlateSize: optionalQuantityFromDTO(dto.probePlateSize, 'probePlateSize'),
+      probePlateThickness: optionalQuantityFromDTO(dto.probePlateThickness, 'probePlateThickness'),
     }).andThen((q) =>
       Machine.create({
         name: dto.name,
@@ -204,7 +250,10 @@ export class Machine implements MachineProps {
         homingCorner: toOption(dto.homingCorner),
         pullOff: q.pullOff,
         softLimits: toOption(dto.softLimits),
-        plateThickness: q.plateThickness,
+        noseToTable: q.noseToTable,
+        spoilboardThickness: q.spoilboardThickness,
+        probePlateSize: q.probePlateSize,
+        probePlateThickness: q.probePlateThickness,
       }),
     )
   }
@@ -238,10 +287,10 @@ export class Machine implements MachineProps {
       ...optionalField('homingCorner', this.homingCorner),
       ...optionalQuantityDTO('pullOff', this.pullOff),
       ...optionalField('softLimits', this.softLimits),
-      ...optionalField(
-        'probe',
-        this.plateThickness.map((t) => ({ plateThickness: t.toDTO() })),
-      ),
+      ...optionalQuantityDTO('noseToTable', this.noseToTable),
+      ...optionalQuantityDTO('spoilboardThickness', this.spoilboardThickness),
+      ...optionalQuantityDTO('probePlateSize', this.probePlateSize),
+      ...optionalQuantityDTO('probePlateThickness', this.probePlateThickness),
     } as MachineValuesDTO
   }
 

@@ -7,7 +7,7 @@ A step-by-step walk through the v0.4 lid golden path in the **installed** app (`
 ## Before you start
 
 - Note the version in the window title ("… — DFYOM 0.0.x"); put it in every report.
-- Have the v0.3 enclosure drawing at hand (the repo's `src/core/design/__fixtures__/enclosure-sections.svg` if you don't have your own copy).
+- Have the v0.3 enclosure drawing at hand ([assets/enclosure-sections.svg](assets/enclosure-sections.svg) if you don't have your own copy; a published copy of the test fixture, kept identical by a test, so black-box agents can import it too, X2 F9).
 - Keep a screenshot shortcut ready (`Cmd+Shift+4`). Note the clock time when something feels slow.
 - The machine library may already hold tools and a machine from earlier sessions: reuse them or add the ones below; both paths are worth a look.
 
@@ -59,7 +59,7 @@ Watch: the Add menu's tooltips (DF18); does the outline land centred on the boar
 All positions are from the board's lower-left corner on the top face (mm).
 
 1. **Add** → **Bolt hole**. **Centre X** 39, **Centre Y** 55.7; type **Countersink**; **Size** M3. The section reads "Ø 3.4 mm through; countersink Ø 7.12 mm, 90°"; the row "Bolt hole 1, M3 countersink".
-2. Right-click the row (or its … button, or `Shift+F10`) → **Make Clones…**. **Add row** → **Grid**, **Remove row 1** (the default offset row); **Columns** 2, **Rows** 2, **Column spacing (X)** 177, **Row spacing (Y)** 88.6. Readout: "1 + 3 clones = 4 instances · 0 skipped". **Make clones** → "Clones 1, ×4".
+2. Right-click the row (or `Shift+F10`) → **Make Clones…**. **Add row** → **Grid**, **Remove row 1** (the default offset row); **Columns** 2, **Rows** 2, **Column spacing (X)** 177, **Row spacing (Y)** 88.6. Readout: "1 + 3 clones = 4 instances · 0 skipped". **Make clones** → "Clones 1, ×4".
 3. **Add** → **Profile**. **Shape** Circle; **Position X** 187.5, **Position Y** 100; **Diameter** 22; **Side** Inside; **Slot width** 11; **Tab count** 0.
 4. Row menu of Profile 2 → **Chamfer**. **Edge** "Profile 2 · Ø 22"; **Width** 1.5 → **Depth** 1.5 and **Diameter** "Ø 25 mm" follow.
 5. **Add** → **Bolt hole**. **Centre X** 205.5, **Centre Y** 100; **Counterbore**; **Size** M3.

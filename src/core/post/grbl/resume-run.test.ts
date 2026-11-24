@@ -124,7 +124,8 @@ describe('section resume on the virtual machine (M5)', { timeout: 120_000 }, () 
       labels[2],
       'M5',
       expect.stringMatching(/^\(DFYOM TOOL CHANGE \d+: /),
-      'M0',
+      // DF63: the pause message names the tool
+      expect.stringMatching(/^M0 ;Install T\d+ .*, then zero Z$/),
       'G90 G94 G17 G21',
       'G54',
       'G0 Z10',

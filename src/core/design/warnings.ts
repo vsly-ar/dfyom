@@ -4,10 +4,10 @@
  * every design command result. The geometry checks come from the evaluation (worker, task 2.9).
  * Doc: docs/modes/design.md#dfm-warnings-task-28-wiring, docs/modes/design-v0.2.md#dfm-with-the-tool
  */
-import type { AppResult } from '../../shared/result'
+import { None, type AppResult } from '../../shared/result'
 import { parameterChecks, type DfmTool } from '../geometry/dfm'
 import type { Region2dPort } from '../geometry/2d/port'
-import type { DfmWarning } from '../geometry/model'
+import type { DfmWarning, PartGeometryInput } from '../geometry/model'
 import { DfmWarningSchema } from '../geometry/schemas'
 import type { Library } from '../library/library'
 import type { Stock } from '../library/stock'
@@ -17,7 +17,8 @@ import { toGeometryInput } from './geometry-input'
 import { featureBlock, ownedOperationId, type LoadedFeature, type SpanGeometry } from './feature'
 import type { Part } from './operation'
 import type { ShapeDTO } from './shape.dto'
-import { dfmTool, operationTools } from './tool-choice'
+import { designToolLabel } from './tool'
+import { dfmTool, noFittingTool, operationTools } from './tool-choice'
 
 /** `DfmWarning` as a result schema (defined with the other boundary schemas). */
 export { DfmWarningSchema }
@@ -53,12 +54,70 @@ export function partWarnings(
         operationTools: operationTools(part.operations, snapshots),
         ...(region2d !== undefined && { region2d }),
       }),
-      featureWarnings(part.operations, features, stock, units, shapes, {
-        operations: input.operations,
-        region2d,
-      }),
+      [
+        ...featureWarnings(part.operations, features, stock, units, shapes, {
+          operations: input.operations,
+          region2d,
+        }),
+        ...noToolWarnings(part, input, stock, units, tools, snapshots, features, region2d),
+      ],
     ),
   )
+}
+
+/**
+ * `dfm.noFittingTool` (hardening DF52, design-v0.2.md § Tool choice fixes): an operation without
+ * a tool that neither a library tool nor a standard generalized tool fits, so the auto choice
+ * leaves it without one. `params` as `dfm.toolUnfit`'s for the smallest generalized tool tried.
+ * Clones instances (read-only, they follow their source) are left out.
+ */
+function noToolWarnings(
+  part: Part,
+  input: PartGeometryInput,
+  stock: Stock,
+  units: UnitSystem,
+  tools: readonly DfmTool[],
+  snapshots: ProjectDoc['snapshots'],
+  features: readonly LoadedFeature[],
+  region2d: Region2dPort | undefined,
+): DfmWarning[] {
+  const readOnly = new Set(
+    features.filter((f) => f.spec.readOnly === true).map((f) => f.feature.id),
+  )
+  return part.operations.flatMap((op, i): DfmWarning[] => {
+    if (op.tool.isSome() || op.owner.mapOr(false, (o) => readOnly.has(o.featureId))) return []
+    // F7: a drilling under a stepped chamfer is bored by the chamfer's end mill
+    const also = input.operations.filter(
+      (g) => g.kind === 'chamfer' && g.stepdown !== undefined && g.edgeOf === op.id,
+    )
+    const why = noFittingTool(
+      {
+        op,
+        geometry: input.operations[i]!,
+        stock: input.stock,
+        units,
+        materialClass: stock.material.class,
+        library: [],
+        snapshots,
+        ...(region2d !== undefined && { region2d }),
+        ...(also.length > 0 && { also }),
+      },
+      tools,
+    )
+    if (why === undefined) return []
+    const label = designToolLabel(why.tool, None)
+    return [
+      {
+        code: 'dfm.noFittingTool',
+        severity: 'warning',
+        message: `${op.id}: no tool fits, not even the ${label}: ${why.unfit.detail}`,
+        operation: op.id,
+        parameter: 'tool',
+        params: { ...why.unfit.values, rule: why.unfit.rule, tool: label },
+        ...(why.unfit.need !== undefined && { suggestion: why.unfit.need }),
+      },
+    ]
+  })
 }
 
 /**

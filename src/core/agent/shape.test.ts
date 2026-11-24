@@ -387,6 +387,7 @@ describe('plan.get', () => {
     'plan.toolpath.get {"planId":"plan-1","planOperationId":"op1"}': {
       toolpath: { stats: { estimatedSeconds: 30 } },
       stale: false,
+      overreach: { xMin: 4.2426, xMax: 0, yMin: 1, yMax: 0 },
     },
     'plan.toolpath.get {"planId":"plan-1","planOperationId":"op2"}': {
       toolpath: null,
@@ -415,8 +416,11 @@ describe('plan.get', () => {
           {
             id: 's1',
             name: 'Top',
+            direction: '+z',
+            rotation: 0,
             clearanceHeight: 10,
             retractHeight: 2,
+            overreach: null,
             operations: [
               {
                 id: 'op1',
@@ -439,6 +443,12 @@ describe('plan.get', () => {
               },
             ],
             seconds: null,
+            // DF66: an operation without a tool is a run of its own
+            toolChanges: 2,
+            toolRuns: [
+              { tool: '6 mm end mill', operations: ['op1'], seconds: 30 },
+              { tool: null, operations: ['op2'], seconds: null },
+            ],
           },
         ],
         seconds: null,
@@ -446,6 +456,104 @@ describe('plan.get', () => {
       },
       detail: expect.stringContaining('detail: "full"'),
     })
+  })
+
+  // DF59: docs/modes/plan-v0.2.md#tool-reach-past-the-stock-and-clamps-hardening-df59-interim
+  it('gives the setup reach past the stock in the project units once every toolpath is current', () => {
+    const current = {
+      ...peeks,
+      'plan.toolpath.get {"planId":"plan-1","planOperationId":"op2"}': {
+        toolpath: { stats: { estimatedSeconds: 5 } },
+        stale: false,
+        overreach: { xMin: 1, xMax: 0, yMin: 2.54, yMax: 0 },
+      },
+    }
+    const reach = (unitSystem: 'mm' | 'inch') => {
+      const shaper = new ResultShaper({ ...fakeSession(current), unitSystem: () => unitSystem })
+      const r = shaper.shape(call('plan.get', { plan }), { planId: 'plan-1' }, SUMMARY)
+      return (valueOf(r) as { plan: { setups: { overreach: unknown }[] } }).plan.setups[0]!
+        .overreach
+    }
+    // the per-side maximum, rounded up to 0.1 mm / 0.01 in
+    expect(reach('mm')).toEqual({ xMin: 4.3, xMax: 0, yMin: 2.6, yMax: 0 })
+    expect(reach('inch')).toEqual({ xMin: 0.17, xMax: 0, yMin: 0.1, yMax: 0 })
+  })
+
+  // DF66: docs/modes/plan-v0.4.md#tool-changes-per-setup-hardening-df66
+  it('gives each setup its tool runs; a tool kept in the spindle is no change', () => {
+    const tool = (id: string) => ({ id, tool: 'snap-tool', overrides: {}, strategy: {} })
+    const two = {
+      ...plan,
+      setups: [
+        { ...plan.setups[0]!, operations: [{ ...tool('op1'), designOperationIds: ['pocket1'] }] },
+        {
+          ...plan.setups[0]!,
+          id: 's2',
+          name: 'Bottom',
+          operations: [{ ...tool('op2'), designOperationIds: ['drill1'] }],
+        },
+      ],
+    }
+    const shaper = new ResultShaper(fakeSession(peeks))
+    const r = shaper.shape(call('plan.get', { plan: two }), { planId: 'plan-1' }, SUMMARY)
+    const setups = (valueOf(r) as { plan: { setups: Record<string, unknown>[] } }).plan.setups
+    expect(setups.map((x) => [x['toolChanges'], x['toolRuns']])).toEqual([
+      [1, [{ tool: '6 mm end mill', operations: ['op1'], seconds: 30 }]],
+      [0, [{ tool: '6 mm end mill', operations: ['op2'], seconds: null }]],
+    ])
+  })
+
+  // DF69: docs/modes/z-reference.md#agent-api-compact
+  it("gives each tool run its Z reference from plan.warning.list's zRefs, in project units", () => {
+    const zRefs = [
+      {
+        setupId: 's1',
+        planOperationId: 'op1',
+        toolNumber: 1,
+        zRef: {
+          surface: 'facing1.floor',
+          label: 'Facing 1 floor',
+          level: -0.5,
+          at: [50.8, 25.4],
+          area: 6000,
+          small: false,
+          top: false,
+          chosen: false,
+          rule: 'facing',
+        },
+        candidates: [],
+      },
+    ]
+    const key = 'plan.warning.list {"planId":"plan-1"}'
+    const withZ = { ...peeks, [key]: { ...peeks[key], zRefs } }
+    const run = (unitSystem: 'mm' | 'inch') => {
+      const shaper = new ResultShaper({ ...fakeSession(withZ), unitSystem: () => unitSystem })
+      const r = shaper.shape(call('plan.get', { plan }), { planId: 'plan-1' }, SUMMARY)
+      const setups = (valueOf(r) as { plan: { setups: { toolRuns: Record<string, unknown>[] }[] } })
+        .plan.setups
+      return setups[0]!.toolRuns.map((t) => t['zRef'])
+    }
+    const z = { surface: 'facing1.floor', label: 'Facing 1 floor', chosen: false }
+    expect(run('mm')).toEqual([{ ...z, level: -0.5, at: [50.8, 25.4] }, undefined])
+    expect(run('inch')).toEqual([{ ...z, level: -0.0197, at: [2, 1] }, undefined])
+  })
+
+  it('plan.warning.list detail "full" leaves the viewport outline out of the Z references', () => {
+    const outline = { patch: [], spotArea: [], clearance: 4, grid: 1 }
+    const value = {
+      warnings: [],
+      pendingApply: false,
+      zRefs: [{ setupId: 's1', planOperationId: 'op1', toolNumber: 1, zRef: null, outline }],
+    }
+    const shaper = new ResultShaper(fakeSession(peeks))
+    const r = shaper.shape(
+      call('plan.warning.list', value),
+      { planId: 'plan-1' },
+      { ...SUMMARY, detail: 'full' },
+    )
+    expect((valueOf(r) as { zRefs: object[] }).zRefs).toEqual([
+      { setupId: 's1', planOperationId: 'op1', toolNumber: 1, zRef: null },
+    ])
   })
 
   it('detail "full" returns the record with compact quantities', () => {

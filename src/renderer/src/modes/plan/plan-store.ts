@@ -16,6 +16,44 @@ import type { PlanOperationView, PlanStale, ToolpathEntry } from './model'
 /** Progress poll of the toolpath job (`job.get`): progress ticks are not pushed (ui.md#jobs). */
 export const GENERATE_POLL_MS = 250
 
+/** A Z reference surface with its touch-off spot (DF69, `plan.warning.list` `zRefs`). */
+export interface ZRefCandidateView {
+  readonly surface: string
+  readonly label: string
+  /** Setup-frame Z, mm (≤ 0). */
+  readonly level: number
+  readonly at: readonly [number, number]
+  readonly area: number
+  readonly small: boolean
+  readonly top: boolean
+}
+
+/** A tool run's Z reference (DF69): docs/modes/z-reference.md#implementation-notes-df69. */
+export interface ZRefRunView {
+  readonly setupId: string
+  readonly planOperationId: string
+  readonly toolNumber: number
+  readonly zRef: (ZRefCandidateView & { readonly chosen: boolean; readonly rule: string }) | null
+  readonly candidates: readonly ZRefCandidateView[]
+  /** The reference's flat patch and spot area for the viewport (setup WCS, mm); null without one. */
+  readonly outline?: ZRefOutlineView | null
+}
+
+/** A region piece as polygons (setup WCS, mm). */
+export interface ZRefPolygonView {
+  readonly outer: readonly (readonly [number, number])[]
+  readonly holes: readonly (readonly (readonly [number, number])[])[]
+}
+
+/** DF69: docs/modes/z-reference.md#implementation-notes-df69 (viewport outline). */
+export interface ZRefOutlineView {
+  readonly patch: readonly ZRefPolygonView[]
+  /** Where the spot may lie (the patch eroded by the clearance radius). */
+  readonly spotArea: readonly ZRefPolygonView[]
+  readonly clearance: number
+  readonly grid: number
+}
+
 /** The plan queries of one revision. */
 export interface PlanData {
   readonly planId: string
@@ -23,6 +61,8 @@ export interface PlanData {
   readonly operations: readonly PlanOperationView[] | undefined
   readonly error?: AppErrorData | undefined
   readonly warnings: readonly PlanWarning[]
+  /** DF69: the Z reference per tool run, by its first plan operation. */
+  readonly zRefs: readonly ZRefRunView[]
   readonly stale: PlanStale | undefined
   readonly toolpaths: Readonly<Record<string, ToolpathEntry>>
   /** Its inputs have changes not applied yet (P3: notice, checks outdated, toolpaths dimmed). */
@@ -55,6 +95,16 @@ export interface PlanState {
   /** Plan operations whose toolpath failed in the last generation, with the error. */
   readonly failures: Readonly<Record<string, AppErrorData>>
   readonly exporting: boolean
+  /**
+   * A navigator row's error or warning count was clicked (DF67): the plan operation whose
+   * inspector focuses its Checks block, once (`findingsShown` clears it).
+   */
+  readonly findingsRequest: string | undefined
+  /**
+   * DF69: the tool run (its first plan operation) whose tool-change row is hovered or focused, or
+   * whose "Z from" is hovered: the viewport shows its Z reference instead of the selection's.
+   */
+  readonly zRefPreview: string | undefined
   /** The export dialog shows this result, or the error. */
   readonly exported:
     | { readonly ok: true; readonly result: PlanExportResult; readonly setup?: string }
@@ -62,6 +112,12 @@ export interface PlanState {
     | undefined
   choose(planId: string | undefined): void
   remember(selection: string): void
+  /** Asks the plan operation's inspector to focus its findings (DF67). */
+  revealFindings(planOperationId: string): void
+  /** The inspector focused them. */
+  findingsShown(): void
+  /** Shows run `planOperationId`'s Z reference in the viewport; undefined: the selection's. */
+  previewZRef(planOperationId: string | undefined): void
   /** Loads the plan queries for `tag` (key, plan, revision, generation) once. */
   want(tag: string, planId: string): void
   generate(planId: string): Promise<void>
@@ -105,10 +161,17 @@ export function createPlanStore(bridge: Pick<PreloadApi, 'call' | 'files'>): Pla
     generateError: undefined,
     failures: {},
     exporting: false,
+    findingsRequest: undefined,
+    zRefPreview: undefined,
     exported: undefined,
     choose: (planId) =>
       set({ planId, lastSelection: undefined, generateError: undefined, failures: {} }),
     remember: (lastSelection) => set({ lastSelection }),
+    revealFindings: (findingsRequest) => set({ findingsRequest }),
+    findingsShown: () => set({ findingsRequest: undefined }),
+    previewZRef: (zRefPreview) => {
+      if (get().zRefPreview !== zRefPreview) set({ zRefPreview })
+    },
     want(next, planId) {
       const t = `${next}:${round}`
       if (t === tag) return
@@ -220,6 +283,7 @@ export function createPlanStore(bridge: Pick<PreloadApi, 'call' | 'files'>): Pla
       operations,
       error: ops.ok ? undefined : ops.error,
       warnings: value<{ warnings: PlanWarning[] }>(warnings)?.warnings ?? [],
+      zRefs: value<{ zRefs?: ZRefRunView[] }>(warnings)?.zRefs ?? [],
       stale: value<PlanStale>(stale),
       toolpaths,
       pendingApply:

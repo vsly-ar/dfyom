@@ -144,7 +144,7 @@ Real GRBL sends no status report during `$H` ([grbl.md](../architecture/grbl.md#
 
 A Z touch plate replaces the nominal-thickness assumption for Z0 ([v0.2 known issues](../plans/v0.2.md#known-issues-and-risks)): the plate lies on the stock, its clip on the bit, and a probe move stops on contact. Implemented with M4 ([below](#implementation-m4)).
 
-- **Plate thickness** is a machine field, `probe.plateThickness` ([library.md](../architecture/library.md#machine)), set once in the Library window ("Plate thickness", group "Touch plate"). Run mode takes it from the plan's machine copy, else from the library machine the copy was taken from (the plate belongs to the workshop, not the plan; setting it in the library needs no plan update), and on a manual connection from the chosen library machine. Without a plate thickness no probe control shows; "Set Z zero here" stays.
+- **Plate thickness** is a machine field, `probePlateThickness` ([library.md](../architecture/library.md#machine)), set once in the Library window ("Touch plate thickness", group "Z height", beside DF69's "Touch plate size"). Run mode takes it from the plan's machine copy, else from the library machine the copy was taken from (the plate belongs to the workshop, not the plan; setting it in the library needs no plan update), and on a manual connection from the chosen library machine. Without a plate thickness no probe control shows; "Set Z zero here" stays.
 - **Command** `run.machine.probeZ { plateThickness, maxTravel?: 25, feed?: 50, retract?: 2 }` (a `job`, like homing: a probe takes up to half a minute; `machine: true`, UI only on a real machine, [run.md § Safety 2](run.md#2-who-may-command-a-real-connection-q50)) → `{ workZero, contact }` (G54 and the contact point, machine coordinates, mm).
 - **Host sequence:**
   1. Allowed when Idle without a run, or while a run waits at a tool change; else `run.state`. The spindle must report 0 rpm (`FS`), else `run.state`, rule `spindleOn` (a hand-switched router is the operator's: the confirmation asks). With soft limits on, the probe distance is cut to the travel (the probe never targets below `−$132`); less than 1 mm left → `run.travel`.
@@ -266,7 +266,7 @@ Decisions and findings of M1, where this doc left room:
 
 ## Implementation (M4)
 
-- **Plate thickness in the model:** `Machine.plateThickness` (Option, positive length), DTO `probe.plateThickness`; optional, so existing machine keys are unchanged.
+- **Plate thickness in the model:** `Machine.probePlateThickness` (Option, positive length), DTO `probePlateThickness` (flat, like DF69's `probePlateSize`); optional, so existing machine keys are unchanged.
 - **Probe defaults** (`PROBE_DEFAULTS` in `host/protocol.ts`): 25 mm down, 50 mm/min, 2 mm retract; the UI uses them, agents may pass others on the virtual machine.
 - **Unlock at a tool-change wait** is allowed (the only alarm that can be pending there is a probe's); `$X` then puts the modal state back and the host waits for a fresh status, so a probe right after the unlock sees Idle.
 - **Emulator:** the contact is found on the executing block's motion profile (bisection on distance), the stop decelerates like a motion cancel, `[PRB]` holds the latched contact. G38.x in a jog is `error:16` as GRBL's `$J=` accepts only G1-style moves.

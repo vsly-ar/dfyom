@@ -7,6 +7,7 @@
  */
 import type { ActionEvent } from '../core/commands/action-log'
 import type { EvaluationStatus } from '../core/design/evaluation'
+import type { FittedLoop } from '../core/design/reference-section'
 import type { PartEvaluation } from '../core/geometry/evaluate'
 import type { ProjectDoc } from '../core/project/document'
 import type { RunStatus } from '../core/run/service'
@@ -87,6 +88,11 @@ export const IPC = {
    * (`ReferenceSectionReply`, U3).
    */
   referenceSection: 'dfyom:reference.section',
+  /**
+   * Renderer → main (invoke): what the compare overlay draws (`ReferenceCompareViewReply`, DF60
+   * P5): signed distances per part vertex and the missing pieces of the last compare.
+   */
+  referenceCompareView: 'dfyom:reference.compareView',
   /** Main → renderer: a native application menu item was chosen (`MenuAction`). */
   menuAction: 'dfyom:menu.action',
   /**
@@ -195,16 +201,40 @@ export type ReferenceMeshReply =
  * A reference's section for the Shape Editor (task U3, docs/modes/design-v0.3.md#measure-and-snap):
  * `matrix` (column-major 4 × 4) takes the STL's source units into the face frame (mm), whose third
  * axis is the face normal; the mesh is cut at `w = level` there. The reply's `segments` are
- * `[u0, v0, u1, v1, …]` in the face frame (mm).
+ * `[u0, v0, u1, v1, …]` in the face frame (mm); with `fit` it also has the section's loops
+ * fitted to lines and arcs with the default tolerance and corner angle (DF60, the Shape Editor
+ * backdrop and the loops drawn on the ghost, docs/modes/reference-tools.md#ui).
  */
 export interface ReferenceSectionRequest {
   readonly referenceId: string
   readonly matrix: readonly number[]
   readonly level: number
+  readonly fit?: boolean
 }
 
 export type ReferenceSectionReply =
-  | { readonly ok: true; readonly segments: Float32Array }
+  | {
+      readonly ok: true
+      readonly segments: Float32Array
+      readonly loops?: readonly FittedLoop[]
+    }
+  | { readonly ok: false; readonly error: AppErrorData }
+
+/**
+ * What the compare overlay draws (DF60 P5, docs/modes/reference-tools.md#overlay-ui): the window
+ * sends the part mesh's vertices it shows (part frame, mm) and the compare's threshold; the reply
+ * has the signed distance of each vertex to the placed reference (+ extra, − missing, mm) and,
+ * when the last compare in the worker was of this mesh and threshold, its missing pieces over the
+ * threshold as a triangle soup (part frame). Window plumbing (RT-G), not an agent capability.
+ */
+export interface ReferenceCompareViewRequest {
+  readonly referenceId: string
+  readonly positions: Float32Array
+  readonly threshold: number
+}
+
+export type ReferenceCompareViewReply =
+  | { readonly ok: true; readonly distances: Float32Array; readonly missing?: Float32Array }
   | { readonly ok: false; readonly error: AppErrorData }
 
 /**
@@ -394,10 +424,14 @@ export interface PreloadApi {
     /** Reveals an exported file (a path from `chooseExport`) in Finder (DF48); whether it did. */
     showInFolder(path: string): Promise<boolean>
   }
-  /** Reference models of the window's project: the ghost's triangles (R3), a section (U3). */
+  /**
+   * Reference models of the window's project: the ghost's triangles (R3), a section (U3), the
+   * compare overlay's distances and missing pieces (DF60 P5).
+   */
   readonly reference: {
     mesh(referenceId: string): Promise<ReferenceMeshReply>
     section(request: ReferenceSectionRequest): Promise<ReferenceSectionReply>
+    compareView(request: ReferenceCompareViewRequest): Promise<ReferenceCompareViewReply>
   }
   /**
    * The Library window (docs/conventions/ui-library-window.md): window plumbing around the

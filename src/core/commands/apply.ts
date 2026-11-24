@@ -342,7 +342,11 @@ export const ToolChangeSchema = z.object({
   operationId: z.string(),
   from: DesignToolDtoSchema.nullable().describe('The tool before Apply; null: none chosen yet'),
   to: DesignToolDtoSchema.describe('The tool after Apply'),
-  reason: z.string().describe('Why the old tool was replaced (its failed fit rule)'),
+  reason: z
+    .string()
+    .describe(
+      'Why the old tool was replaced: its failed fit rule, libraryFits (a library tool now fits) or libraryRemoved (it left the library)',
+    ),
 })
 export type ToolChange = z.output<typeof ToolChangeSchema>
 

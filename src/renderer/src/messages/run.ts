@@ -358,10 +358,12 @@ export const runMessages = {
   toolChange: {
     title: (n: number) => `Tool change ${n}`,
     description: (name: string) => `The run waits. Change to ${name}, set Z zero, then continue.`,
-    steps: (name: string) => [
+    steps: (name: string, surface?: string, spot?: string) => [
       'Raise the spindle clear of the part (jog Z+).',
       `Change to ${name}.`,
-      'Touch off the new tool and set Z zero.',
+      surface === undefined
+        ? 'Touch off the new tool and set Z zero.'
+        : `Touch off the new tool on ${surface}${spot === undefined ? '' : ` at ${spot}`} and set Z zero there.`,
       'Continue the run.',
     ],
     setZ: 'Set Z zero here',

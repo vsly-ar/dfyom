@@ -9,8 +9,10 @@
 import type { z } from 'zod'
 import { Err, fail, Ok, type AppResult } from '../../shared/result'
 import { Warnings } from '../design/commands'
+import { setupToolChanges, toolRuns } from '../plan/tool-runs'
 import { QUANTITY_KINDS, UNITS, type QuantityKind } from '../quantity/units'
 import type { CommandOutcome } from '../commands/dispatcher'
+import type { UnitSystem } from '../project/document'
 import type { SessionCallResult } from './session'
 
 /** Reserved arg of the summarized reads: `"summary"` (default) or `"full"`. */
@@ -54,6 +56,8 @@ export interface ShaperSession {
   resultSchema(name: string): z.ZodType | undefined
   /** A library snapshot of the bound project (`ProjectDoc.snapshots`), to name tools. */
   snapshot?(id: string): unknown
+  /** The bound project's unit system (default mm). */
+  unitSystem?(): UnitSystem | undefined
 }
 
 type Obj = Record<string, unknown>
@@ -242,7 +246,10 @@ export class ResultShaper {
     }
   }
 
-  /** `plan.get` summary: setups and operations with tool, feeds, times and finding counts. */
+  /**
+   * `plan.get` summary: setups and operations with tool, feeds, times and finding counts; per
+   * setup its tool runs and tool changes (DF66).
+   */
   private planSummary(value: unknown): unknown {
     const plan = isObj(value) ? value['plan'] : undefined
     if (!isObj(plan)) return value
@@ -254,7 +261,12 @@ export class ResultShaper {
     const ops = new Map<string, Obj>()
     for (const o of (peek('plan.operation.list', { planId })?.['operations'] as Obj[]) ?? [])
       ops.set(o['id'] as string, o)
-    const findings = (peek('plan.warning.list', { planId })?.['warnings'] as Obj[]) ?? []
+    const warningList = peek('plan.warning.list', { planId })
+    const findings = (warningList?.['warnings'] as Obj[]) ?? []
+    // DF69: the Z reference per tool run, by its first operation
+    const zRefOf = new Map<string, Obj | null>()
+    for (const r of (warningList?.['zRefs'] as Obj[] | undefined) ?? [])
+      zRefOf.set(r['planOperationId'] as string, (r['zRef'] as Obj | null) ?? null)
     const countBy = (list: Obj[]) => {
       const c: Record<string, number> = {}
       for (const f of list) c[f['severity'] as string] = (c[f['severity'] as string] ?? 0) + 1
@@ -269,8 +281,20 @@ export class ResultShaper {
     const design = plan['design'] as Obj
     const taken = isObj(design['taken']) ? design['taken'] : {}
     let planSeconds: number | null = 0
-    const setups = ((plan['setups'] as Obj[]) ?? []).map((s) => {
+    const inch = this.session.unitSystem?.() === 'inch'
+    // DF69: a length (mm) in the project's units
+    const length = (v: number) =>
+      inch ? Math.round((v / 25.4) * 1e4) / 1e4 : Math.round(v * 1e3) / 1e3
+    const rawSetups = ((plan['setups'] as Obj[]) ?? []).map((s) => ({
+      operations: ((s['operations'] as Obj[]) ?? []).map((o) => ({
+        id: o['id'] as string,
+        tool: typeof o['tool'] === 'string' ? o['tool'] : undefined,
+      })),
+    }))
+    const setups = ((plan['setups'] as Obj[]) ?? []).map((s, si) => {
       let setupSeconds: number | null = 0
+      // DF59: the per-side maximum of the current toolpaths' reach past the stock (mm)
+      let reach: Record<Side, number> | null = { xMin: 0, xMax: 0, yMin: 0, yMax: 0 }
       const operations = ((s['operations'] as Obj[]) ?? []).map((o) => {
         const id = o['id'] as string
         const listed = ops.get(id)
@@ -279,6 +303,10 @@ export class ResultShaper {
         const seconds = path?.stats?.estimatedSeconds ?? null
         if (seconds === null || tp?.['stale'] === true) setupSeconds = null
         else if (setupSeconds !== null) setupSeconds += seconds
+        const reachOf = isObj(tp?.['overreach']) ? (tp['overreach'] as Record<Side, number>) : null
+        if (reachOf === null || tp?.['stale'] === true) reach = null
+        else if (reach !== null)
+          for (const k of SIDES) reach[k] = Math.max(reach[k], reachOf[k] ?? 0)
         const feeds = isObj(listed?.['feeds'])
           ? Object.fromEntries(
               Object.entries(listed['feeds'] as Obj).map(([k, f]) => [
@@ -306,15 +334,48 @@ export class ResultShaper {
       })
       if (setupSeconds === null) planSeconds = null
       else if (planSeconds !== null) planSeconds += setupSeconds
+      // DF66: the tool runs and the tool changes the operator makes (setup start included)
+      const secondsOf = new Map(operations.map((o) => [o.id, o.seconds]))
+      const toolRunList = toolRuns(rawSetups[si]?.operations ?? []).map((r) => {
+        let seconds: number | null = 0
+        for (const o of r.operations) {
+          const t = secondsOf.get(o.id) ?? null
+          seconds = t === null || seconds === null ? null : seconds + t
+        }
+        const z = zRefOf.get(r.operations[0]!.id)
+        const at = z?.['at'] as [number, number] | undefined
+        return {
+          tool: nameOf(r.tool),
+          operations: r.operations.map((o) => o.id),
+          seconds,
+          ...(z === undefined
+            ? {}
+            : {
+                zRef:
+                  z === null
+                    ? null
+                    : {
+                        surface: z['surface'],
+                        label: z['label'],
+                        level: length(z['level'] as number),
+                        at: at === undefined ? null : [length(at[0]), length(at[1])],
+                        chosen: z['chosen'],
+                      },
+              }),
+        }
+      })
       return {
         id: s['id'],
         name: s['name'],
-        ...(s['direction'] === undefined ? {} : { direction: s['direction'] }),
-        ...(s['rotation'] === undefined ? {} : { rotation: s['rotation'] }),
+        direction: s['direction'] ?? '+z',
+        rotation: s['rotation'] ?? 0,
         clearanceHeight: s['clearanceHeight'],
         retractHeight: s['retractHeight'],
+        overreach: reach === null ? null : overreachIn(reach, inch),
         operations,
         seconds: setupSeconds,
+        toolChanges: setupToolChanges(rawSetups, si),
+        toolRuns: toolRunList,
       }
     })
     return {
@@ -338,6 +399,19 @@ export class ResultShaper {
       detail: FULL_HINT,
     }
   }
+}
+
+type Side = 'xMin' | 'xMax' | 'yMin' | 'yMax'
+const SIDES: readonly Side[] = ['xMin', 'xMax', 'yMin', 'yMax']
+
+/**
+ * A setup's reach past the stock (mm) in the project's units, rounded up to 0.1 mm or 0.01 in
+ * (DF59, llm-api.md#result-size).
+ */
+function overreachIn(mm: Record<Side, number>, inch: boolean): Record<Side, number> {
+  const [per, step] = inch ? [1 / 25.4, 100] : [1, 10]
+  const up = (v: number) => Math.ceil(v * per * step - 1e-9) / step || 0
+  return { xMin: up(mm.xMin), xMax: up(mm.xMax), yMin: up(mm.yMin), yMax: up(mm.yMax) }
 }
 
 /** Identity of a DFM warning: code, operation, parameter, and its index among equal ones. */
@@ -490,11 +564,23 @@ function findingNext(f: Obj): string | undefined {
     : undefined
 }
 
-/** `plan.warning.list` with `detail: "full"`: every finding, with `next` where there is one. */
+/**
+ * `plan.warning.list` with `detail: "full"`: every finding, with `next` where there is one; the
+ * Z references without their viewport outline (DF69, docs/modes/z-reference.md#implementation-notes-df69).
+ */
 function withFindingNext(value: unknown): unknown {
   if (!isObj(value) || !Array.isArray(value['warnings'])) return value
   return {
     ...value,
+    ...(Array.isArray(value['zRefs'])
+      ? {
+          zRefs: value['zRefs'].map((r: unknown) => {
+            if (!isObj(r)) return r
+            const { outline: _, ...rest } = r
+            return rest
+          }),
+        }
+      : {}),
     warnings: value['warnings'].map((f: unknown) => {
       if (!isObj(f)) return f
       const next = findingNext(f)

@@ -11,6 +11,13 @@ import type { Issue } from '../../../shared/errors/app-error'
 import type { AppMode } from '../../../core/modes'
 import type { CloneRowKind } from '../../../core/design/clones/clones'
 import type { ClonePathData } from '../viewport/clone-path'
+import type { ReferenceOverlayState } from '../modes/design/reference-overlay'
+import {
+  IDLE_COMPARE,
+  type CompareSettings,
+  type CompareState,
+} from '../modes/design/reference-compare-state'
+import type { Box } from '../viewport/mesh'
 
 /** Pick mode: a field asks the viewport for a surface (ui.md#selection-and-picking). */
 export interface PickRequestState {
@@ -142,6 +149,28 @@ export interface UiState {
    */
   readonly sectionDepth: number | null
   setSectionDepth(mm: number | null): void
+  /**
+   * The Reference panel's fitted section and hovered level, drawn on the ghost (DF60; per window,
+   * set while the panel's Levels and Section rows show, null otherwise).
+   */
+  readonly referenceOverlay: ReferenceOverlayState | null
+  setReferenceOverlay(overlay: ReferenceOverlayState | null): void
+  /**
+   * The compare overlay (DF60 P5; per window): on for this reference and threshold while set,
+   * off when null. It outlives the Reference panel (choosing a region selects its operation, and
+   * its edits re-colour the part); the Compare switch and the viewport legend's Hide turn it off.
+   */
+  readonly referenceCompare: CompareSettings | null
+  setReferenceCompare(settings: CompareSettings | null): void
+  /** The compare overlay's last result and its per-vertex view (`useReferenceCompare`). */
+  readonly compareResult: CompareState
+  setCompareResult(state: CompareState): void
+  /** The region chosen in the compare list (its index in the result; a new result clears it). */
+  readonly compareRegion: number | null
+  setCompareRegion(index: number | null): void
+  /** A box to frame the camera on (part frame); `seq` changes for each request (DF60 P5). */
+  readonly viewportFocus: { readonly box: Box; readonly seq: number } | null
+  focusViewport(box: Box): void
   /**
    * Feature rows expanded in the navigator (v0.4 task U1): per window and per feature while the
    * window is open, collapsed by default; no command, never saved.
@@ -303,6 +332,29 @@ export function createUiStore(initial: Partial<Pick<UiState, 'mode'>> = {}): UiS
     setSnapOn: (snapOn) => set({ snapOn }),
     sectionDepth: null,
     setSectionDepth: (sectionDepth) => set({ sectionDepth }),
+    referenceOverlay: null,
+    setReferenceOverlay: (referenceOverlay) => set({ referenceOverlay }),
+    referenceCompare: null,
+    setReferenceCompare: (referenceCompare) =>
+      set((s) => ({
+        referenceCompare,
+        ...(referenceCompare === null ? { compareResult: IDLE_COMPARE, compareRegion: null } : {}),
+        ...(referenceCompare?.referenceId !== s.referenceCompare?.referenceId
+          ? { compareRegion: null }
+          : {}),
+      })),
+    compareResult: IDLE_COMPARE,
+    setCompareResult: (compareResult) =>
+      set((s) =>
+        compareResult.result === s.compareResult.result
+          ? { compareResult }
+          : { compareResult, compareRegion: null },
+      ),
+    compareRegion: null,
+    setCompareRegion: (compareRegion) => set({ compareRegion }),
+    viewportFocus: null,
+    focusViewport: (box) =>
+      set((s) => ({ viewportFocus: { box, seq: (s.viewportFocus?.seq ?? 0) + 1 } })),
     expandedFeatures: new Set(),
     setFeatureExpanded: (id, expanded) =>
       set((s) => {

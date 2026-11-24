@@ -328,7 +328,9 @@ async function checkAndStart(
   if (ctx.signal.aborted)
     return fail('op.aborted', 'the run was aborted before it started', { where })
   // 4. stream
-  const prefix = warnings.length > 0 ? `${warnings.length} machine warning(s) · ` : ''
+  // notes (`info`, e.g. DF68's zHeadroomUnknown) are not warnings
+  const counted = warnings.filter((w) => w.severity === 'warning').length
+  const prefix = counted > 0 ? `${counted} machine warning(s) · ` : ''
   // before the stream starts: the host's progress ticks may arrive before startJob resolves,
   // and this tick must not overwrite them (done never goes back)
   ctx.progress({ done: 0, total: e.lines.length, label: `${prefix}started` })

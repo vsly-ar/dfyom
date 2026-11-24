@@ -146,12 +146,15 @@ const SEARCH_BUDGET = 5000
  * by kind group and design order (a chamfer sharing its edge operation's tool right behind it,
  * F7); the tool of each next run is searched for the fewest runs, candidates tried in the order of
  * their first ready operation, the first minimal order kept. `port`: the 2D port for general
- * shapes in the freeing test (without it they free nothing).
+ * shapes in the freeing test (without it they free nothing). `startTool` (DF65: the last tool of
+ * the setup before): when a minimal order can start with a run of that tool, it does; never at
+ * the cost of a run.
  */
 export function defaultOrder(
   planOps: readonly PlanOperationDTO[],
   part: Part,
   port?: Region2dPort,
+  startTool?: string,
 ): PlanOperationDTO[] {
   const all = infos(planOps, part)
   const freeing = freeingDependencies(planOps, part, port)
@@ -222,10 +225,18 @@ export function defaultOrder(
     return runs
   }
   let done: boolean[] = all.map(() => false)
-  fewest(done)
+  const least = fewest(done)
+  // DF65: the setup before's last tool first, when that costs no run (a tie-break only)
+  let start: string | undefined
+  if (startTool !== undefined && candidates(done).includes(startTool)) {
+    const r = run(done, startTool)
+    if (r.seq.length > 0 && 1 + fewest(r.done) <= least) start = startTool
+  }
   const out: PlanOperationDTO[] = []
   while (!done.every(Boolean)) {
-    const r = run(done, memo.get(keyOf(done))?.tool ?? candidates(done)[0]!)
+    const tool = start ?? memo.get(keyOf(done))?.tool ?? candidates(done)[0]!
+    start = undefined
+    const r = run(done, tool)
     for (const i of r.seq) out.push(all[i]!.op)
     done = r.done
   }
@@ -401,9 +412,9 @@ function centerOf(op: Operation, part: Part, port: Region2dPort | undefined): Ve
 
 type Profile = Extract<Operation, { kind: 'profile' }>
 
-/** A profile that cuts through the stock: `inside` or `outside`, or `on` without a depth. */
+/** A profile that cuts through the stock: any side without a depth (a step, DF53, is blind). */
 export function isThroughProfile(op: Operation): op is Profile {
-  return op.kind === 'profile' && (op.side !== 'on' || op.depth.isNone())
+  return op.kind === 'profile' && op.depth.isNone()
 }
 
 const boxArea = (b: Box) => (b.max[0] - b.min[0]) * (b.max[1] - b.min[1])
@@ -411,24 +422,53 @@ const boxArea = (b: Box) => (b.max[0] - b.min[0]) * (b.max[1] - b.min[1])
 /**
  * Whether a through profile frees `op` (plan-v0.4.md § Machining order v2): a facing always;
  * another profile when its centre lies inside and its bounding box is smaller; any other operation
- * when its centre lies inside (the loose-piece test). The face direction is the caller's.
+ * when its centre lies inside (the loose-piece test). A release profile (`release`, DF57) frees
+ * every operation of its face direction except the other release profiles. The face direction is
+ * the caller's.
  */
 function frees(
   profile: Profile,
   op: Operation,
   part: Part,
   port: Region2dPort | undefined,
+  release: ReadonlySet<string> = new Set(),
 ): boolean {
   if (op.id === profile.id) return false
   // a chamfer on the profile's own edge bevels the rim round it, not material inside it (X2)
   if (op.kind === 'chamfer' && op.edgeOf === profile.id) return false
   if (op.kind === 'facing') return true
+  // DF57: the cut that releases the part comes after everything else of its setup
+  if (release.has(profile.id) && !release.has(op.id)) return true
   const c = centerOf(op, part, port)
   if (c === undefined || !inside(profile.shape, part, port, c)) return false
   if (op.kind !== 'profile') return true
   const own = shapeBox(op.shape, part, port)
   const outer = shapeBox(profile.shape, part, port)
   return own !== undefined && outer !== undefined && boxArea(own) < boxArea(outer)
+}
+
+/**
+ * The release profiles of the plan operations (plan-v0.4.md § Machining order v2, DF57): the
+ * through profiles that no other through profile of their face direction frees, i.e. the
+ * outermost ones, which separate the part from the stock (an outline; not a cutout inside it).
+ */
+export function releaseProfiles(
+  planOps: readonly PlanOperationDTO[],
+  part: Part,
+  port?: Region2dPort,
+): Set<string> {
+  const byId = new Map(part.operations.map((o) => [o.id, o]))
+  const direction = operationDirections(planOps, part)
+  const through = planOps.flatMap((p) =>
+    throughProfiles(p, byId).map((profile) => ({ profile, direction: direction.get(p.id) })),
+  )
+  const out = new Set<string>()
+  for (const t of through)
+    if (
+      !through.some((o) => o.direction === t.direction && frees(o.profile, t.profile, part, port))
+    )
+      out.add(t.profile.id)
+  return out
 }
 
 /** The through profiles of a plan operation. */
@@ -450,6 +490,7 @@ export function freeingDependencies(
 ): Map<string, Set<string>> {
   const byId = new Map(part.operations.map((o) => [o.id, o]))
   const direction = operationDirections(planOps, part)
+  const release = releaseProfiles(planOps, part, port)
   const graph = new Map(infos(planOps, part).map((x) => [x.op.id, new Set(x.deps)]))
   const reaches = (from: string, to: string): boolean => {
     const seen = new Set<string>()
@@ -472,7 +513,7 @@ export function freeingDependencies(
       if (q.id === p.id || direction.get(q.id) !== direction.get(p.id)) continue
       const inside = q.designOperationIds.some((d) => {
         const o = byId.get(d)
-        return o !== undefined && profiles.some((f) => frees(f, o, part, port))
+        return o !== undefined && profiles.some((f) => frees(f, o, part, port, release))
       })
       if (!inside || reaches(q.id, p.id)) continue
       freed.add(q.id)
@@ -497,6 +538,7 @@ export function orderFindings(
 ): PlanWarning[] {
   const out: PlanWarning[] = []
   const direction = operationDirections(planOps, part)
+  const release = releaseProfiles(planOps, part, port)
   const position = new Map(planOps.map((p, i) => [p.id, i]))
   const byId = new Map(part.operations.map((o) => [o.id, o]))
   const list = infos(planOps, part)
@@ -529,13 +571,17 @@ export function orderFindings(
         if (direction.get(later.id) !== direction.get(p.id)) continue
         for (const d of later.designOperationIds) {
           const o = byId.get(d)
-          if (o !== undefined && frees(profile, o, part, port)) {
+          if (o !== undefined && frees(profile, o, part, port, release)) {
+            // inside it, or (DF57) anywhere after the cut that releases the part
+            const within = frees(profile, o, part, port)
             out.push({
               code: 'plan.loosePiece',
               severity: 'warning',
-              message: `${profile.id} is cut before ${o.id} inside it: the piece may be loose`,
+              message: within
+                ? `${profile.id} is cut before ${o.id} inside it: the piece may be loose`
+                : `${profile.id} releases the part before ${o.id}: the part is held only by its tabs`,
               planOperationId: later.id,
-              rule: 'profileFirst',
+              rule: within ? 'profileFirst' : 'releaseFirst',
               params: { profile: profile.id, operation: o.id },
             })
             break

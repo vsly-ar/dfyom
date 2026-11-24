@@ -31,9 +31,7 @@ const VALUES = {
 }
 
 /** Command args take quantities as strings (library.md#command-input); results are stored DTOs. */
-const UNITS_ARG = UnitSystemSchema.default('mm').describe(
-  'Unit system of bare numbers in values (default mm)',
-)
+const UNITS_ARG = UnitSystemSchema.default('mm').describe('Unit of bare numbers in values')
 
 const ITEM_RESULTS = {
   stock: StockValuesDtoSchema.extend(ItemMetaDtoSchema.shape),
@@ -52,7 +50,7 @@ function libraryOf(services: Services, where: string): AppResult<Library> {
 function forKind(kind: LibraryItemKind): { commands: AnyCommand[]; queries: QueryDef[] } {
   const label = LABEL[kind]
   const valuesArg: z.ZodType<object> = valuesInputSchema(VALUES[kind]).describe(
-    `The ${label} values; quantities are strings, e.g. "6 mm", "1/4 in"`,
+    `The ${label} values; quantities as strings`,
   ) as z.ZodType<object>
   /**
    * Parsed quantities, `kind`, recommended presets following the calculator (tools,
@@ -83,7 +81,7 @@ function forKind(kind: LibraryItemKind): { commands: AnyCommand[]; queries: Quer
   const add = defineCommand({
     kind: 'effect',
     name: `library.${kind}.add`,
-    summary: `Add a ${label} to the library (not undoable).`,
+    summary: `Add a ${label} to the library.`,
     title: () => `Add ${label} to library`,
     machine: false,
     // stock variants (library.md#stock-variants-df13): only the stock add lists a parent
@@ -107,7 +105,7 @@ function forKind(kind: LibraryItemKind): { commands: AnyCommand[]; queries: Quer
   const update = defineCommand({
     kind: 'effect',
     name: `library.${kind}.update`,
-    summary: `Replace the values of a library ${label}; pass the revision you read (not undoable).`,
+    summary: `Replace the values of a library ${label}; pass the revision you read.`,
     title: () => `Update library ${label}`,
     machine: false,
     args: z.object({
@@ -133,7 +131,7 @@ function forKind(kind: LibraryItemKind): { commands: AnyCommand[]; queries: Quer
   const remove = defineCommand({
     kind: 'effect',
     name: `library.${kind}.remove`,
-    summary: `Delete a ${label} from the library; requires confirm: true (not undoable). Projects keep their snapshots.`,
+    summary: `Delete a ${label} from the library (confirm: true). Projects keep their snapshots.`,
     title: () => `Remove ${label} from library`,
     machine: false,
     args: z.object({

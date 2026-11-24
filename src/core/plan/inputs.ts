@@ -23,6 +23,8 @@ import type { ResolvedFeeds } from './feeds'
 import type { SetupRotation } from './plan.dto'
 import { setupDirection, setupRotation } from './setups'
 import { loadPlan, setupOf } from './plan'
+import { planMaterialBands, planThroughDepths } from './through'
+import type { MaterialBand, MaterialCover } from '../geometry/through-depth'
 import { hashJson } from './snapshot'
 import type { ResolvedStrategy } from './strategy'
 
@@ -53,6 +55,25 @@ export interface PlanOperationInput {
   readonly feeds: ResolvedFeeds
   readonly strategy: ResolvedStrategy
   readonly machine: Option<Machine>
+  /**
+   * Through profiles (DF50) and through holes (DF61) over material an earlier setup of the plan
+   * cleared from the opposite face: the material each cuts (mm) by design operation id
+   * (`planThroughDepths`). Absent or not listed = the stock extent.
+   */
+  readonly throughDepths?: ReadonlyMap<string, number>
+  /**
+   * The material earlier cuts of the plan left over the region of a facing, pocket or profile
+   * (DF61, `planMaterialBands`): its toolpath skips the passes that lie wholly in air. Absent =
+   * the raw stock from the cut's start level to its floor. A pocket's carries its partial
+   * coverage too (`MaterialCover.partial`).
+   */
+  readonly material?: MaterialCover
+  /**
+   * A drilling's material bands by design operation id (DF61 follow-up): a hole whose whole disc
+   * earlier cuts cleared below its `on` level starts its cycle on the material. Absent or not
+   * listed = from its `on` level.
+   */
+  readonly materials?: ReadonlyMap<string, MaterialBand>
   /** The operation before it in the machining order (where the tool starts); none for the first. */
   readonly previousPlanOperationId?: string
   /**
@@ -122,7 +143,8 @@ export function planOperationInputs(
       previous: chain,
       index,
       part,
-      planOperation: op,
+      // the Z reference (DF69) moves only the exported program, never the toolpath
+      planOperation: { ...op, zRef: undefined },
       snapshots: used,
       setup: { ...own, operations: undefined },
       // strategy defaults depend on the unit system (e.g. overshoot 1 mm vs 0.04")
@@ -132,6 +154,23 @@ export function planOperationInputs(
     previous = op.id
     if (!wanted(op.id)) return
     const e = evaluateOperation(plan, op)
+    const through = planThroughDepths(plan, port)
+    const throughDepths = new Map<string, number>()
+    for (const o of e.ops) {
+      const d = through.get(o.id)
+      if (d !== undefined) throughDepths.set(o.id, d)
+    }
+    // facings, pockets and profiles machine one design operation each
+    const material =
+      e.kind === 'facing' || e.kind === 'pocket' || e.kind === 'profile'
+        ? planMaterialBands(plan, port).get(e.ops[0]?.id ?? '')
+        : undefined
+    const materials = new Map<string, MaterialBand>()
+    if (e.kind === 'drilling')
+      for (const o of e.ops) {
+        const m = planMaterialBands(plan, port).get(o.id)
+        if (m !== undefined) materials.set(o.id, m)
+      }
     // no error findings: tool, stickout and feeds are present
     const toolSnapshotId = op.tool!
     out.push({
@@ -148,6 +187,9 @@ export function planOperationInputs(
       feeds: e.feeds.unwrap(),
       strategy: e.strategy,
       machine: plan.machine,
+      ...(throughDepths.size === 0 ? {} : { throughDepths }),
+      ...(material === undefined ? {} : { material }),
+      ...(materials.size === 0 ? {} : { materials }),
       ...(previousPlanOperationId === undefined ? {} : { previousPlanOperationId }),
       inputHash: chain,
     })

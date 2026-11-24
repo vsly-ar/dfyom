@@ -6,15 +6,15 @@
 import { fail, Ok, type AppResult } from '../../shared/result'
 import type { IdGenerator } from '../commands/context'
 import type { Part } from '../design/operation'
-import { DIRECTION, DIRECTION_LABEL, type Direction } from '../geometry/face'
+import { DIRECTION, DIRECTION_LABEL, SETUP_ORDER, type Direction } from '../geometry/face'
 import type { Region2dPort } from '../geometry/2d/port'
 import type { Stock } from '../library/stock'
 import type { PlanWarning } from './checks'
 import { defaultOrder, operationDirections, orderFindings } from './order'
 import type { PlanDTO, PlanOperationDTO, SetupDTO, SetupRotation } from './plan.dto'
 
-/** Default setup order (decision 3): the bottom first as a datum, the sides 0–3, the top last. */
-export const SETUP_ORDER: readonly Direction[] = ['-z', '-y', '+x', '+y', '-x', '+z']
+/** Default setup order (decision 3), defined with the face model (design reads it too, DF50). */
+export { SETUP_ORDER }
 
 export const setupDirection = (s: Pick<SetupDTO, 'direction'>): Direction => s.direction ?? '+z'
 export const setupRotation = (s: Pick<SetupDTO, 'rotation'>): SetupRotation => s.rotation ?? 0
@@ -58,8 +58,8 @@ export function defaultSetupIndex(setups: readonly SetupDTO[], direction: Direct
 
 /**
  * Setups of `plan.create`: one per direction in use, in the default setup order, each in the
- * default machining order (`port`: general shapes in the freeing test). No operations: one `+z`
- * setup.
+ * default machining order (`port`: general shapes in the freeing test), a setup after the first
+ * preferring the last tool of the one before (DF65). No operations: one `+z` setup.
  */
 export function deriveSetups(
   planOps: readonly PlanOperationDTO[],
@@ -73,7 +73,8 @@ export function deriveSetups(
     const ops = planOps.filter((p) => dir.get(p.id) === d)
     if (ops.length === 0) continue
     const s = make(d, setups)
-    s.operations = defaultOrder(ops, part, port)
+    // DF65: start with the tool still in the spindle when that costs no tool run
+    s.operations = defaultOrder(ops, part, port, setups.at(-1)?.operations.at(-1)?.tool)
     setups.push(s)
   }
   if (setups.length === 0) setups.push(make('+z', setups))

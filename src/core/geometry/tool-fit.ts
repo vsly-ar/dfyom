@@ -18,7 +18,8 @@ import {
   type StockGeometry,
 } from './model'
 import { inradius } from './operations'
-import { FIT_SLACK, type ShapeMeasure } from './shape-measure'
+import { rectangleWallCorner } from './open-sides'
+import { FIT_SLACK, smallestWallCorner, type ShapeMeasure } from './shape-measure'
 
 /** Sizes compare within this (mm), as the DFM tool rules (`TOOL_MATCH_TOLERANCE` in dfm.ts). */
 const TOL = 0.01
@@ -61,18 +62,19 @@ type Cutting = Exclude<OperationGeometry, { kind: 'facing' }>
 
 /**
  * Depth from the stock's outer face of the operation's direction to its deepest point, and the
- * parameter it is measured at: pocket and flat/point hole to the floor, a through hole and a
- * through profile by the stock extent along the normal (`stock` is the local stock), a blind `on`
+ * parameter it is measured at: pocket and flat/point hole to the floor, a through hole by the
+ * stock extent along the normal (`stock` is the local stock), a through profile or hole by its
+ * `throughDepth` (material an earlier setup left, DF50, DF61) else that extent, a blind `on`
  * groove (v0.3) by its depth below the stock face it starts from.
  */
 export function reachDepth(op: Cutting, stock: StockGeometry): [number, string] {
   if (op.kind === 'profile')
-    return op.depth === undefined ? [stock.thickness, 'on'] : [op.depth, 'depth']
+    return op.depth === undefined ? [op.throughDepth ?? stock.thickness, 'on'] : [op.depth, 'depth']
   if (op.kind === 'pocket') return [op.depth - op.onZ, 'depth']
   // the cone's bottom (the tool tip when contoured; a plunged tip goes deeper, `toolFit`)
   if (op.kind === 'chamfer') return [chamferDepth(op) - op.onZ, 'diameter']
   return op.bottom.kind === 'through'
-    ? [stock.thickness, 'on']
+    ? [op.throughDepth ?? stock.thickness, 'on']
     : [op.bottom.depth - op.onZ, 'depth']
 }
 
@@ -109,9 +111,13 @@ export function toolFit(
           need: { relation: 'atLeast', value: dc },
           values: { toolDiameter: dc, size, feature },
         }
-  // a shape's smallest inside corner of the cut (0: sharp); none (Infinity) fits every tool
-  const shapeCorner = (m: ShapeMeasure): ToolUnfit | undefined =>
-    Number.isFinite(m.smallestCornerRadius) ? corner(m.smallestCornerRadius) : undefined
+  // a shape's smallest inside corner of the cut (0: sharp); none (Infinity) fits every tool;
+  // corners whose leftover lies beyond the stock do not count (DF53)
+  const shapeCorner = (m: ShapeMeasure): ToolUnfit | undefined => {
+    if (!('shape' in op)) return undefined
+    const r = smallestWallCorner(m, op.shape.center, stock, dc / 2)
+    return Number.isFinite(r) ? corner(r) : undefined
+  }
   let unfit: ToolUnfit | undefined
   switch (op.kind) {
     case 'facing':
@@ -135,7 +141,10 @@ export function toolFit(
       unfit =
         c.kind === 'rectangle' || c.kind === 'circle'
           ? (wider(2 * inradius(c), 'pocket at its narrowest', 'pocket') ??
-            (c.kind === 'rectangle' ? corner(c.cornerRadius) : undefined))
+            // a corner on or beyond the stock edge is open (DF61 follow-up)
+            (c.kind === 'rectangle' && rectangleWallCorner(op.shape.center, c, stock)
+              ? corner(c.cornerRadius)
+              : undefined))
           : measure === undefined
             ? undefined
             : measure.fits(dc / 2 - FIT_SLACK)

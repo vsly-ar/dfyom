@@ -1,0 +1,173 @@
+(Program: Plan 1)
+(Setup: Setup 1)
+(Units: mm)
+(Tool 1: 10 mm flat end mill, dia 10 mm)
+(Tool 2: 6 mm drill, dia 6 mm, Z0 on Facing 1 floor)
+(Tool 3: 6 mm flat end mill, dia 6 mm, Z0 on Facing 1 floor)
+(Generator: DFYOM test)
+G90 G94 G17 G21
+G54
+G0 Z10
+(op-facing)
+(DFYOM TOOL CHANGE 1: 10 mm flat end mill, 10 mm flat)
+M3 S18000
+G4 P3
+X36 Y4
+Z2
+G1 Z-0.5 F300
+X-6 F1200
+Y10
+X36
+Y16
+X-6
+G0 Z2
+Z10
+(op-drill1)
+(Tool change to T2: spindle off, retract)
+M5
+X20 Y15
+(Z0 for tool 2: Facing 1 floor, 0.50 below the stock top)
+(Touch off Z here, X20 Y15: set Z0 on that surface)
+(DFYOM TOOL CHANGE 2: 6 mm drill, 6 mm drill)
+M0 ;Install T2 6 mm drill, 6 mm drill, then zero Z on Facing 1 floor
+G90 G94 G17 G21
+G54
+G0 Z10.5
+M3 S3000
+G4 P3
+X10 Y15
+Z2.5
+G1 Z-4.5 F150
+G0 Z2.5
+Z-4
+G1 Z-9.5
+G0 Z2.5
+Z-9
+G1 Z-13.303
+G0 Z2.5
+Z10.5
+(op-drill2)
+X30
+Z2.5
+G1 Z-3.5
+G0 Z-3
+G1 Z-7.5
+G0 Z-7
+G1 Z-11.5
+G0 Z-11
+G1 Z-13.303
+G0 Z2.5
+Z10.5
+(op-profile1)
+(Tool change to T3: spindle off, retract)
+M5
+Y20
+(Z0 for tool 3: Facing 1 floor, 0.50 below the stock top)
+(Touch off Z here, X30 Y20: set Z0 on that surface)
+(DFYOM TOOL CHANGE 3: 6 mm flat end mill, 6 mm flat)
+M0 ;Install T3 6 mm flat end mill, 6 mm flat, then zero Z
+G90 G94 G17 G21
+G54
+G0 Z10.5
+M3 S18000
+G4 P3
+X53 Y20
+Z2.5
+G1 Z0.5 F300
+Y12 Z0.081 F1200
+G2 X46 Y5 Z-0.496 I-7 J0
+G1 X40.19 Z-0.8
+X14
+G2 X7 Y12 I0 J7
+G1 Y28
+G2 X14 Y35 I7 J0
+G1 X46
+G2 X53 Y28 I0 J-7
+G1 Y20
+Y12
+G2 X46 Y5 I-7 J0
+G1 X40.19
+G0 Z2.5
+X53 Y20
+G1 Z-0.8 F300
+Y12 Z-1.219 F1200
+G2 X46 Y5 Z-1.796 I-7 J0
+G1 X40.19 Z-2.1
+X14
+G2 X7 Y12 I0 J7
+G1 Y28
+G2 X14 Y35 I7 J0
+G1 X46
+G2 X53 Y28 I0 J-7
+G1 Y20
+Y12
+G2 X46 Y5 I-7 J0
+G1 X40.19
+G0 Z2.5
+X53 Y20
+G1 Z-2.1 F300
+Y12 Z-2.519 F1200
+G2 X46 Y5 Z-3.096 I-7 J0
+G1 X40.19 Z-3.4
+X14
+G2 X7 Y12 I0 J7
+G1 Y28
+G2 X14 Y35 I7 J0
+G1 X46
+G2 X53 Y28 I0 J-7
+G1 Y20
+Y12
+G2 X46 Y5 I-7 J0
+G1 X40.19
+G0 Z2.5
+X53 Y20
+G1 Z-3.4 F300
+Y12 Z-3.819 F1200
+G2 X46 Y5 Z-4.396 I-7 J0
+G1 X40.19 Z-4.7
+X35
+Z-3.5 F300
+X25 F1200
+Z-4.7 F300
+X14 F1200
+G2 X7 Y12 I0 J7
+G1 Y28
+G2 X14 Y35 I7 J0
+G1 X25
+Z-3.5 F300
+X35 F1200
+Z-4.7 F300
+X46 F1200
+G2 X53 Y28 I0 J-7
+G1 Y20
+Y12
+G2 X46 Y5 I-7 J0
+G1 X40.19
+G0 Z2.5
+X53 Y20
+G1 Z-4.7 F300
+Y12 Z-5.119 F1200
+G2 X46 Y5 Z-5.696 I-7 J0
+G1 X40.19 Z-6
+X35
+Z-3.5 F300
+X25 F1200
+Z-6 F300
+X14 F1200
+G2 X7 Y12 I0 J7
+G1 Y28
+G2 X14 Y35 I7 J0
+G1 X25
+Z-3.5 F300
+X35 F1200
+Z-6 F300
+X46 F1200
+G2 X53 Y28 I0 J-7
+G1 Y20
+Y12
+G2 X46 Y5 I-7 J0
+G1 X40.19
+G0 Z2.5
+Z10.5
+M5
+M30

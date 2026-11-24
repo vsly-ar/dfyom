@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { expect } from 'vitest'
 import { agentSession, type Call, programEnd, type RunJobStatus } from './exit-criteria.fixture'
+import { withoutAppVersion } from '../../core/post/plan-export'
 
 /**
  * The user's STL of a wooden enclosure base (249.5 × 177 × 39 mm, a tray with ~7 mm walls and a
@@ -100,6 +101,9 @@ const MACHINE = {
   spindle: { control: 'manual', maxSpeed: '30000' },
   programUnits: 'mm',
   toolChanger: 'none',
+  // the Z headroom fields (DF68): the checks run and find enough headroom
+  noseToTable: '320',
+  spoilboardThickness: '15',
 }
 
 export interface FlowV02Result {
@@ -368,8 +372,8 @@ export async function exitCriteriaV02Flow(call: Call, dir: string): Promise<Flow
       regenerated: [],
     })
     const gcode = readFileSync(target, 'utf8')
-    await expect(gcode).toMatchFileSnapshot(GOLDEN_V02[i]!)
-    expect(gcode).toContain(`(Setup: ${setup.name})`)
+    await expect(withoutAppVersion(gcode)).toMatchFileSnapshot(GOLDEN_V02[i]!)
+    expect(gcode).toContain(`(Setup ${i + 1} of ${plan.setups.length}: ${setup.name})`)
     expect(gcode.split('\n').filter((l) => l !== '')).toHaveLength(exported.lines)
     expect(gcode.trimEnd().endsWith('M30')).toBe(true)
     programs.push(gcode)
@@ -395,7 +399,7 @@ export async function exitCriteriaV02Flow(call: Call, dir: string): Promise<Flow
       toolChanges: exported.stats.toolChanges,
       warnings: [],
     })
-    const markers = [...gcode.matchAll(/^\(DFYOM TOOL CHANGE (\d+): [^)]*\)\nM0$/gm)]
+    const markers = [...gcode.matchAll(/^\(DFYOM TOOL CHANGE (\d+): [^)]*\)\nM0( ;[^\n]*)?$/gm)]
     expect(waits.filter((w) => w.startsWith('toolChange'))).toEqual(
       markers.map((mk) => `toolChange ${mk[1]}`),
     )

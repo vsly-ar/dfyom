@@ -178,24 +178,45 @@ describe('shape editor', () => {
     }
   })
 
-  it('reaches shape and item row actions by keyboard (U2): Tab to Remove, Delete on a row', async () => {
+  it('reaches shape and item row actions by keyboard: row menu (DF70), Delete on a row', async () => {
     const { user, part, shape, addShape } = await renderShapes()
     await addShape('Rectangle')
     await addShape('Circle')
-    await waitFor(() => expect(part().shapes).toHaveLength(2))
-    // Shapes dialog: Remove is the row's next tab stop
+    await addShape('Polygon')
+    await waitFor(() => expect(part().shapes).toHaveLength(3))
+    // Shapes dialog (DF70, ui.md decision 27): rows have no action buttons; their actions are
+    // the row menu, which their description names
     const dialog = await shapesGroup()
     const first = within(dialog).getByRole('button', { name: /^Shape 1/ })
+    expect(within(first.parentElement!).getAllByRole('button')).toEqual([first])
+    expect(within(dialog).queryByRole('button', { name: /^Remove / })).toBeNull()
+    expect(first).toHaveAccessibleDescription('Right-click or Shift+F10 for actions.')
+    expect(first).toHaveAttribute('aria-keyshortcuts', 'Shift+F10 Delete')
+    // Shift+F10 opens it at the row; Escape closes it and focus returns to the row
     first.focus()
-    await user.tab()
-    expect(document.activeElement).toBe(
-      within(dialog).getByRole('button', { name: 'Remove Shape 1' }),
-    )
+    await user.keyboard('{Shift>}{F10}{/Shift}')
+    let menu = await screen.findByRole('menu', { name: 'Actions for Shape 1' })
+    expect(
+      within(menu)
+        .getAllByRole('menuitem')
+        .map((i) => i.textContent),
+    ).toEqual(['RemoveDelete'])
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
+    expect(document.activeElement).toBe(first)
+    expect(screen.getByRole('dialog', { name: 'Shapes' })).toBeInTheDocument()
+    // right-click opens the same menu; its Remove removes the shape and keeps the dialog open
+    fireEvent.contextMenu(first)
+    menu = await screen.findByRole('menu', { name: 'Actions for Shape 1' })
+    await user.click(within(menu).getByRole('menuitem', { name: /^Remove/ }))
+    await waitFor(() => expect(part().shapes?.map((s) => s.name)).toEqual(['Shape 2', 'Shape 3']))
+    expect(screen.getByRole('dialog', { name: 'Shapes' })).toBeInTheDocument()
     // Delete on a row removes the shape; focus goes to the next row
-    first.focus()
+    const second = within(dialog).getByRole('button', { name: /^Shape 2/ })
+    second.focus()
     await user.keyboard('{Delete}')
-    await waitFor(() => expect(part().shapes?.map((s) => s.name)).toEqual(['Shape 2']))
-    expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: /^Shape 2/ }))
+    await waitFor(() => expect(part().shapes?.map((s) => s.name)).toEqual(['Shape 3']))
+    expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: /^Shape 3/ }))
     await user.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     // item list: Delete on an item row removes it, focus stays in the list
@@ -207,8 +228,8 @@ describe('shape editor', () => {
       .getByRole('button', { name: /^Rectangle 2/ })
       .focus()
     await user.keyboard('{Delete}')
-    await waitFor(() => expect(shape().items.map((i) => i.kind)).toEqual(['circle']))
-    expect(document.activeElement).toBe(within(items).getByRole('button', { name: /^Circle 1/ }))
+    await waitFor(() => expect(shape().items.map((i) => i.kind)).toEqual(['polygon']))
+    expect(document.activeElement).toBe(within(items).getByRole('button', { name: /^Polygon 1/ }))
     // the last item stays: Delete does nothing
     await user.keyboard('{Delete}')
     expect(shape().items).toHaveLength(1)
@@ -328,6 +349,46 @@ describe('shape editor', () => {
     )
     expect(itemUpdates(bridge).at(-1)!.args).toMatchObject({ index: 0 })
     expect(await screen.findByText('Removed segment 2')).toBeInTheDocument()
+  })
+
+  it("opens a segment row's actions by right-click and Shift+F10, with no button in the row (DF70)", async () => {
+    const { user, shape, addShape } = await renderShapes()
+    await addShape('Path')
+    const grid = await within(inspector()).findByRole('grid', { name: /Segments of Path 1/ })
+    expect(within(grid).queryByRole('button', { name: /^Actions for segment/ })).toBeNull()
+    expect(grid).toHaveAccessibleDescription(/Right-click a row, or press Shift\+F10 on a cell/)
+    const segs = () => (shape().items[0] as { segments: { to: unknown }[] }).segments
+    const before = segs().map((x) => x.to)
+    // the open menu hides the rest from the accessibility tree (modal), hence `hidden`
+    const rows = () => within(grid).getAllByRole('row', { hidden: true }).slice(1)
+    // right-click on row 3: its menu, the row selected
+    await user.pointer({
+      keys: '[MouseRight]',
+      target: within(rows()[2]!).getAllByRole('gridcell')[2]!,
+    })
+    const menu = await screen.findByRole('menu', { name: 'Actions for segment 3' })
+    expect(
+      within(menu)
+        .getAllByRole('menuitem')
+        .map((i) => i.textContent),
+    ).toEqual(['Move segment 3 upAlt+↑', 'Move segment 3 downAlt+↓', 'Remove segment 3Delete'])
+    expect(within(menu).getByRole('menuitem', { name: /^Move segment 3 down/ })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    )
+    expect(rows()[2]).toHaveAttribute('aria-selected', 'true')
+    await expectNoAxeViolations()
+    await user.click(within(menu).getByRole('menuitem', { name: /^Remove segment 3/ }))
+    await waitFor(() => expect(segs().map((x) => x.to)).toEqual(before.slice(0, 2)))
+    expect(await screen.findByText('Removed segment 3')).toBeInTheDocument()
+    // Shift+F10 on a cell of row 2: the same menu for that row; focus comes back to the cell
+    const cell = within(rows()[1]!).getAllByRole('gridcell', { hidden: true })[0]!
+    cell.focus()
+    await user.keyboard('{Shift>}{F10}{/Shift}')
+    const menu2 = await screen.findByRole('menu', { name: 'Actions for segment 2' })
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(menu2).not.toBeInTheDocument())
+    await waitFor(() => expect(cell).toHaveFocus())
   })
 
   it('has no axe violations in the navigator, inspector and flat view', async () => {

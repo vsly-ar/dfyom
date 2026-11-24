@@ -4,3 +4,5 @@ coverage/
 playwright-report/
 package-lock.json
 docs/conventions/ui-design-system.html
+.continuous/
+temp/

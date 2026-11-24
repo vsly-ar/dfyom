@@ -10,9 +10,14 @@
 import type { Draft } from 'immer'
 import { z } from 'zod'
 import { collect, Err, fail, None, Ok, type AppResult } from '../../shared/result'
-import { defineCommand, defineQuery, type AnyCommand, type QueryDef } from '../commands/define'
+import {
+  defineAsyncQuery,
+  defineCommand,
+  defineQuery,
+  type AnyCommand,
+  type AnyQueryDef,
+} from '../commands/define'
 import type { CommandContext } from '../commands/context'
-import type { ReferenceResolver } from '../expression/evaluate'
 import { quantityFromSource } from '../expression/quantity'
 import { NAME_MAX } from '../library/item'
 import type { AssetRef } from '../project/assets'
@@ -21,13 +26,14 @@ import type { QuantityDTO } from '../quantity/quantity.dto'
 import { Quantity } from '../quantity/quantity'
 import { Rational } from '../quantity/rational'
 import { stlParse } from '../workers/tasks'
-import { loadPart, type LoadedPart } from './load'
+import { loadPart, partGeometryInput, type LoadedPart } from './load'
 import { fieldContext, type FieldKind } from './operation'
 import { PartIdSchema } from './part.dto'
 import {
   AnchorSchema,
   exceedsStock,
   FIT_AXES,
+  ghostMatrix,
   FIT_Z,
   fitPosition,
   fitScale,
@@ -40,11 +46,45 @@ import {
   type Placement,
   type ReferenceWarning,
   type StockSize,
+  UNIT_MM,
 } from './reference'
 import { ReferenceDtoSchema, type ReferenceDTO } from './reference.dto'
+import {
+  HOLE_LIMIT,
+  HOLE_MAX_DIAMETER_MM,
+  HOLE_TOLERANCE,
+  holeGroups,
+  holeSuggestion,
+  type HoleGroup,
+} from './mesh-holes'
 import { STL_LIMITS, type StlSummary } from './stl'
-import { SurfaceTable } from './surfaces'
+import {
+  FaceArg,
+  fitOptions,
+  lengthArg,
+  referenceHolesOf,
+  referenceLevelsOf,
+  referenceView,
+  resolveFace,
+  smallestHoleTool,
+  stockResolver,
+  storedPlacement as placementOf,
+  targetReference,
+  fittedSection,
+  referenceCompareOf,
+} from './reference-find'
+import {
+  COMPARE_LIMIT,
+  COMPARE_PIECES_MAX,
+  COMPARE_THRESHOLD_MM,
+  cornerRadii,
+  isCornerFillet,
+  operationDirections,
+} from './reference-compare'
+import type { FittedLoop } from './reference-section'
 import { DIRECTIONS, STOCK_FACE } from '../geometry/face'
+import type { Vec3 } from '../geometry/model'
+import { TOOL_MATCH_TOLERANCE } from '../geometry/dfm'
 
 // ── args ──────────────────────────────────────────────────────────────────────────────────
 
@@ -68,6 +108,22 @@ const FitArg = z.object({
 })
 
 const Warnings = z.array(ReferenceWarningSchema)
+
+const BoxSchema = z.object({
+  min: z.object({ x: z.number(), y: z.number(), z: z.number() }),
+  max: z.object({ x: z.number(), y: z.number(), z: z.number() }),
+})
+const FacingDepthSchema = z
+  .record(z.string(), z.string())
+  .describe(
+    'By stock face id: the facing depth that faces down to this reference (project units, rounded down); only faces with a sensible value',
+  )
+/** What a placement edit leaves (DF60 § Scale and fit): no follow-up `list` needed. */
+const PlacedFields = {
+  scale: z.string().describe('The scale as written'),
+  placed: BoxSchema.describe('Placed bounding box in the part frame, mm'),
+  facingDepth: FacingDepthSchema,
+}
 
 // ── helpers ───────────────────────────────────────────────────────────────────────────────
 
@@ -94,31 +150,6 @@ const stockSize = (l: LoadedPart): StockSize => ({
   width: l.stock.width.canonical,
   thickness: l.stock.thickness.canonical,
 })
-
-/** Stock surfaces only: a reference is placed on the stock, never on operation results. */
-const stockResolver = (l: LoadedPart): ReferenceResolver =>
-  SurfaceTable.build(l.part.operations, l.stock).resolver(0)
-
-function placementOf(ref: ReferenceDTO, where: string): AppResult<Placement> {
-  const q = (dto: QuantityDTO) => Quantity.fromDTO(dto).map((v) => v.canonical)
-  const all = collect([
-    q(ref.scale),
-    q(ref.rotation.x),
-    q(ref.rotation.y),
-    q(ref.rotation.z),
-    q(ref.position.x),
-    q(ref.position.y),
-    q(ref.position.z),
-  ])
-  if (all.isErr()) return Err(all.unwrapErr().withContext(where, { referenceId: ref.id }))
-  const [scale, rx, ry, rz, px, py, pz] = all.unwrap() as [number, ...number[]]
-  return Ok({
-    sourceUnit: ref.sourceUnit,
-    scale,
-    rotation: { x: rx!, y: ry!, z: rz! },
-    position: { x: px!, y: py!, z: pz! },
-  })
-}
 
 /** A length in mm written as a source in the project's units (0.0001 mm / 0.00001 in). */
 function lengthSource(mm: number, units: UnitSystem): string {
@@ -215,12 +246,16 @@ function fitted(
   }))
 }
 
-/** `reference.exceedsStock` of a record (other warnings come from import only). */
-function placementWarnings(ref: ReferenceDTO, l: LoadedPart, where: string) {
-  return placementOf(ref, where).map((p) => {
-    const w = exceedsStock(ref.id, placedBox(ref.asset.bounds, p), stockSize(l))
-    return w === undefined ? [] : [w]
-  })
+/** The placed box and facing depths of a record (as `design.reference.list` gives them). */
+function placedFields(ref: ReferenceDTO, p: Placement, l: LoadedPart) {
+  const placed = placedBox(ref.asset.bounds, p)
+  const facingDepth: Record<string, string> = {}
+  const boxes = [{ referenceId: ref.id, box: placed }]
+  for (const d of DIRECTIONS) {
+    const s = suggestFacingDepth(d, stockSize(l), boxes, l.units)
+    if (s !== undefined) facingDepth[STOCK_FACE[d]] = s.source
+  }
+  return { scale: ref.scale.source, placed, facingDepth }
 }
 
 /** The record as it is in the draft, edited, then checked for `exceedsStock`. */
@@ -229,7 +264,8 @@ function edit(
   args: { partId: string; referenceId: string },
   where: string,
   change: (ref: ReferenceDTO, l: LoadedPart) => AppResult<Partial<ReferenceDTO>>,
-): AppResult<{ warnings: ReferenceWarning[] }> {
+  more: (ref: ReferenceDTO, p: Placement) => ReferenceWarning[] = () => [],
+): AppResult<{ warnings: ReferenceWarning[] } & ReturnType<typeof placedFields>> {
   const doc = draft as ProjectDoc
   const loaded = loadPart(doc, args.partId, where)
   if (loaded.isErr()) return loaded
@@ -239,9 +275,96 @@ function edit(
   if (changed.isErr()) return changed
   const target = draft.references[args.referenceId]!
   Object.assign(target, changed.unwrap())
-  return placementWarnings(target as ReferenceDTO, loaded.unwrap(), where).map((warnings) => ({
-    warnings,
-  }))
+  const ref = target as ReferenceDTO
+  const l = loaded.unwrap()
+  return placementOf(ref, where).map((p) => {
+    const w = exceedsStock(ref.id, placedBox(ref.asset.bounds, p), stockSize(l))
+    return {
+      ...placedFields(ref, p, l),
+      warnings: [...(w === undefined ? [] : [w]), ...more(ref, p)],
+    }
+  })
+}
+
+// ── small features after a scale change (DF60 P3) ───────────────────────────────────────────
+
+/** The reference's hole sizes before an edit that may scale it (`reference.featureBelowTool`). */
+interface HoleSizes {
+  /** mm per source unit × scale of the stored record. */
+  readonly factor: number
+  /** The smallest library drill or end mill (mm). */
+  readonly smallest: number
+  /** Distinct bore diameters at `factor` (mm), with the largest count seen from one face. */
+  readonly sizes: readonly { readonly diameter: number; readonly count: number }[]
+}
+
+/**
+ * Reads the holes from the six stock faces when an update may change the scale (`scale`,
+ * `fit.scaleTo` or `sourceUnit`) and the library has a drill or end mill; nothing otherwise, or
+ * when the mesh cannot be read (the warning is a hint, never a reason to refuse the edit). The
+ * worker keeps the holes per face, so later scale edits read none again.
+ * Doc: docs/modes/reference-tools.md#4-scale-and-fit
+ */
+async function holeSizes(
+  doc: ProjectDoc,
+  args: { partId: string; referenceId: string },
+  ctx: CommandContext,
+  where: string,
+): Promise<HoleSizes | undefined> {
+  const smallest = smallestHoleTool(ctx)
+  if (smallest === undefined) return undefined
+  const loaded = loadPart(doc, args.partId, where)
+  const found = findReference(doc, args.partId, args.referenceId, where)
+  if (loaded.isErr() || found.isErr()) return undefined
+  const ref = found.unwrap()
+  const p = placementOf(ref, where)
+  if (p.isErr()) return undefined
+  const sizes: { diameter: number; count: number }[] = []
+  for (const d of DIRECTIONS) {
+    const view = referenceView(ref, p.unwrap(), stockSize(loaded.unwrap()), d)
+    const r = await referenceHolesOf(
+      ctx,
+      view,
+      { maxDiameter: HOLE_MAX_DIAMETER_MM, limit: HOLE_LIMIT },
+      where,
+    )
+    if (r.isErr()) return undefined
+    for (const g of holeGroups(r.unwrap().holes).groups) {
+      const same = sizes.find((x) => Math.abs(x.diameter - g.size.diameter) <= HOLE_TOLERANCE)
+      if (same === undefined) sizes.push({ diameter: g.size.diameter, count: g.count })
+      else same.count = Math.max(same.count, g.count)
+    }
+  }
+  return { factor: UNIT_MM[p.unwrap().sourceUnit] * p.unwrap().scale, smallest, sizes }
+}
+
+/** `reference.featureBelowTool` (info) per hole size the new placement puts below the smallest tool. */
+function featureBelowTool(
+  before: HoleSizes | undefined,
+  ref: ReferenceDTO,
+  p: Placement,
+): ReferenceWarning[] {
+  if (before === undefined) return []
+  const ratio = (UNIT_MM[p.sourceUnit] * p.scale) / before.factor
+  const out: ReferenceWarning[] = []
+  for (const s of before.sizes) {
+    const d = s.diameter * ratio
+    if (d >= before.smallest - TOOL_MATCH_TOLERANCE) continue
+    const dia = r3(d)
+    out.push({
+      code: 'reference.featureBelowTool',
+      severity: 'info',
+      message: `At scale ${ref.scale.source} ${s.count === 1 ? 'a hole' : `${s.count} holes`} of Ø ${dia} mm ${s.count === 1 ? 'is' : 'are'} smaller than the smallest drill or end mill in the library (Ø ${r3(before.smallest)} mm)`,
+      referenceId: ref.id,
+      params: {
+        diameter: dia,
+        count: s.count,
+        smallest: r3(before.smallest),
+        scale: ref.scale.source,
+      },
+    })
+  }
+  return out
 }
 
 function baseName(path: string): string {
@@ -274,6 +397,7 @@ const referenceImport = defineCommand({
     referenceId: ReferenceIdSchema,
     sourceUnit: SourceUnitSchema,
     guess: z.object({ unit: SourceUnitSchema, reason: z.string() }),
+    ...PlacedFields,
     warnings: Warnings,
   }),
   async prepare(doc, args, ctx: CommandContext): Promise<AppResult<Imported>> {
@@ -373,10 +497,10 @@ const referenceImport = defineCommand({
         referenceId: id,
         params: { triangles: mesh.triangles, limit: STL_LIMITS.warnTriangles },
       })
-    const placed = placedBox(mesh.bounds, f.placement)
-    const over = exceedsStock(id, placed, stockSize(l))
+    const fields = placedFields(ref, f.placement, l)
+    const over = exceedsStock(id, fields.placed, stockSize(l))
     if (over !== undefined) warnings.push(over)
-    return Ok({ referenceId: id, sourceUnit, guess, warnings })
+    return Ok({ referenceId: id, sourceUnit, guess, ...fields, warnings })
   },
 })
 
@@ -436,77 +560,88 @@ const referenceUpdate = defineCommand({
       .optional(),
     fit: FitArg.optional(),
   }),
-  result: z.object({ warnings: Warnings }),
-  run(draft, args) {
+  result: z.object({ ...PlacedFields, warnings: Warnings }),
+  async prepare(doc, args, ctx): Promise<AppResult<HoleSizes | undefined>> {
+    const scales =
+      args.scale !== undefined || args.fit?.scaleTo !== undefined || args.sourceUnit !== undefined
+    return Ok(scales ? await holeSizes(doc, args, ctx, 'design.reference.update') : undefined)
+  },
+  run(draft, args, _ctx, before: HoleSizes | undefined) {
     const where = 'design.reference.update'
     if (args.turn?.turns === 0) return invalid('turn', 'turns', 'turns must be -1, 1 or 2', where)
     if (args.fit !== undefined && args.position !== undefined)
       return invalid('fit', 'fitWithPosition', 'give either position or fit', where)
     if (args.fit?.scaleTo !== undefined && args.scale !== undefined)
       return invalid('fit', 'fitWithScale', 'give either scale or fit.scaleTo', where)
-    return edit(draft, args, where, (ref, l) => {
-      const resolver = stockResolver(l)
-      const parsed: AppResult<unknown>[] = []
-      const q = (path: (string | number)[], kind: FieldKind, src: string) => {
-        const r = quantityFromSource(src, fieldContext(kind, l.units), resolver)
-          .andThen((v) =>
-            kind === 'scalar' && v.exact.compare(Rational.ZERO) <= 0
-              ? fail('model.invariant', 'scale must be > 0', {
-                  issues: [{ path: [], rule: 'positive', message: 'must be greater than 0' }],
-                })
-              : Ok(v),
-          )
-          .map((v) =>
-            // tolerances mean nothing for a reference: keep the value only
-            Quantity.create({ ...v, tolerance: None })
-              .unwrapOr(v)
-              .toDTO(),
-          )
-          .mapErr((e) => e.prefixIssues(...path))
-        parsed.push(r)
-        return r
-      }
-      const next: Record<string, unknown> = { ...ref }
-      if (args.name !== undefined) next['name'] = args.name
-      if (args.sourceUnit !== undefined) next['sourceUnit'] = args.sourceUnit
-      if (args.scale !== undefined) {
-        const s = q(['scale'], 'scalar', args.scale)
-        if (s.isOk()) next['scale'] = s.unwrap()
-      }
-      for (const [field, kind] of [
-        ['rotation', 'angle'],
-        ['position', 'length'],
-      ] as const) {
-        const a = args[field]
-        if (a === undefined) continue
-        const xyz: Record<string, unknown> = { ...ref[field] }
-        for (const axis of ['x', 'y', 'z'] as const) {
-          const src = a[axis]
-          if (src === undefined) continue
-          const r = q([field, axis], kind, src)
-          if (r.isOk()) xyz[axis] = r.unwrap()
+    return edit(
+      draft,
+      args,
+      where,
+      (ref, l) => {
+        const resolver = stockResolver(l)
+        const parsed: AppResult<unknown>[] = []
+        const q = (path: (string | number)[], kind: FieldKind, src: string) => {
+          const r = quantityFromSource(src, fieldContext(kind, l.units), resolver)
+            .andThen((v) =>
+              kind === 'scalar' && v.exact.compare(Rational.ZERO) <= 0
+                ? fail('model.invariant', 'scale must be > 0', {
+                    issues: [{ path: [], rule: 'positive', message: 'must be greater than 0' }],
+                  })
+                : Ok(v),
+            )
+            .map((v) =>
+              // tolerances mean nothing for a reference: keep the value only
+              Quantity.create({ ...v, tolerance: None })
+                .unwrapOr(v)
+                .toDTO(),
+            )
+            .mapErr((e) => e.prefixIssues(...path))
+          parsed.push(r)
+          return r
         }
-        next[field] = xyz
-      }
-      const all = collect(parsed)
-      if (all.isErr()) return Err(all.unwrapErr().withContext(where))
-      let out = next as ReferenceDTO
-      if (args.turn !== undefined) {
-        const { axis, turns } = args.turn
-        const angle = quarterTurn(out.rotation[axis], turns)
-        if (angle.isErr()) return Err(angle.unwrapErr().withContext(where))
-        out = { ...out, rotation: { ...out.rotation, [axis]: angle.unwrap() } }
-      }
-      if (args.fit !== undefined) {
-        const fit = args.fit
-        const r = placementOf(out, where).andThen((p) => fitted(out, p, l, fit, where))
-        if (r.isErr()) return r
-        const f = r.unwrap()
-        out = { ...out, ...(f.scale ? { scale: f.scale } : {}), position: f.position }
-      }
-      const { id: _id, partId: _partId, asset: _asset, ...changed } = out
-      return Ok(changed)
-    })
+        const next: Record<string, unknown> = { ...ref }
+        if (args.name !== undefined) next['name'] = args.name
+        if (args.sourceUnit !== undefined) next['sourceUnit'] = args.sourceUnit
+        if (args.scale !== undefined) {
+          const s = q(['scale'], 'scalar', args.scale)
+          if (s.isOk()) next['scale'] = s.unwrap()
+        }
+        for (const [field, kind] of [
+          ['rotation', 'angle'],
+          ['position', 'length'],
+        ] as const) {
+          const a = args[field]
+          if (a === undefined) continue
+          const xyz: Record<string, unknown> = { ...ref[field] }
+          for (const axis of ['x', 'y', 'z'] as const) {
+            const src = a[axis]
+            if (src === undefined) continue
+            const r = q([field, axis], kind, src)
+            if (r.isOk()) xyz[axis] = r.unwrap()
+          }
+          next[field] = xyz
+        }
+        const all = collect(parsed)
+        if (all.isErr()) return Err(all.unwrapErr().withContext(where))
+        let out = next as ReferenceDTO
+        if (args.turn !== undefined) {
+          const { axis, turns } = args.turn
+          const angle = quarterTurn(out.rotation[axis], turns)
+          if (angle.isErr()) return Err(angle.unwrapErr().withContext(where))
+          out = { ...out, rotation: { ...out.rotation, [axis]: angle.unwrap() } }
+        }
+        if (args.fit !== undefined) {
+          const fit = args.fit
+          const r = placementOf(out, where).andThen((p) => fitted(out, p, l, fit, where))
+          if (r.isErr()) return r
+          const f = r.unwrap()
+          out = { ...out, ...(f.scale ? { scale: f.scale } : {}), position: f.position }
+        }
+        const { id: _id, partId: _partId, asset: _asset, ...changed } = out
+        return Ok(changed)
+      },
+      (ref, p) => featureBelowTool(before, ref, p),
+    )
   },
 })
 
@@ -527,11 +662,6 @@ const referenceRemove = defineCommand({
   },
 })
 
-const BoxSchema = z.object({
-  min: z.object({ x: z.number(), y: z.number(), z: z.number() }),
-  max: z.object({ x: z.number(), y: z.number(), z: z.number() }),
-})
-
 const referenceList = defineQuery({
   name: 'design.reference.list',
   summary: "List a part's references with placed bounds (mm) and facing depths.",
@@ -540,11 +670,7 @@ const referenceList = defineQuery({
     references: z.array(
       ReferenceDtoSchema.extend({
         placed: BoxSchema.describe('Placed bounding box in the part frame, mm'),
-        facingDepth: z
-          .record(z.string(), z.string())
-          .describe(
-            'By stock face id: the facing depth that faces down to this reference (project units, rounded down); only faces with a sensible value',
-          ),
+        facingDepth: FacingDepthSchema,
         warnings: Warnings,
       }),
     ),
@@ -557,15 +683,8 @@ const referenceList = defineQuery({
     return collect(
       refs.map((ref) =>
         placementOf(ref, where).map((p) => {
-          const placed = placedBox(ref.asset.bounds, p)
-          const stock = stockSize(loaded.unwrap())
-          const w = exceedsStock(ref.id, placed, stock)
-          const boxes = [{ referenceId: ref.id, box: placed }]
-          const facingDepth: Record<string, string> = {}
-          for (const d of DIRECTIONS) {
-            const s = suggestFacingDepth(d, stock, boxes, loaded.unwrap().units)
-            if (s !== undefined) facingDepth[STOCK_FACE[d]] = s.source
-          }
+          const { placed, facingDepth } = placedFields(ref, p, loaded.unwrap())
+          const w = exceedsStock(ref.id, placed, stockSize(loaded.unwrap()))
           return { ...ref, placed, facingDepth, warnings: w === undefined ? [] : [w] }
         }),
       ),
@@ -573,10 +692,570 @@ const referenceList = defineQuery({
   },
 })
 
+// ── find (DF60 P1) ─────────────────────────────────────────────────────────────────────────
+
+const r3 = (v: number): number => {
+  const r = Math.round(v * 1000) / 1000
+  return r === 0 ? 0 : r
+}
+const P2 = z.tuple([z.number(), z.number()])
+/** At most this many loops in a section summary, and sharp corner positions per loop. */
+export const FIND_LOOPS_MAX = 50
+export const SHARP_SHOWN_MAX = 8
+
+/** Point results in a setup's WCS (P2, `frame: 'setup'`): mm, rounded to 0.001. */
+const WcsSchema = z.object({
+  z: z.number().optional(),
+  bounds: z.tuple([P2, P2]).optional(),
+  center: P2.optional(),
+  sharp: z.array(P2).optional(),
+  holes: z.array(P2).optional(),
+})
+type Wcs = z.output<typeof WcsSchema>
+
+/** Face-frame bounds at height w in the WCS (a quarter turn keeps them axis-aligned). */
+function wcsBounds(
+  wcs: (p: Vec3) => Vec3,
+  b: readonly [readonly [number, number], readonly [number, number]],
+  w: number,
+): [[number, number], [number, number]] {
+  const a = wcs([b[0][0], b[0][1], w])
+  const c = wcs([b[1][0], b[1][1], w])
+  return [
+    [r3(Math.min(a[0], c[0])), r3(Math.min(a[1], c[1]))],
+    [r3(Math.max(a[0], c[0])), r3(Math.max(a[1], c[1]))],
+  ]
+}
+const wcsPoint = (wcs: (p: Vec3) => Vec3, p: readonly [number, number], w: number) => {
+  const q = wcs([p[0], p[1], w])
+  return [r3(q[0]), r3(q[1])] as [number, number]
+}
+
+const LevelSchema = z.object({
+  depth: z.number(),
+  facing: z.enum(['face', 'opposite']),
+  area: z.number(),
+  visibleArea: z.number(),
+  bounds: z.tuple([P2, P2]),
+  depthFromOpposite: z.number().optional(),
+  wcs: WcsSchema.optional(),
+})
+const LoopSummarySchema = z.object({
+  role: z.enum(['outer', 'hole']),
+  area: z.number(),
+  bounds: z.tuple([P2, P2]),
+  elements: z.number().int(),
+  circle: z.object({ center: P2, diameter: z.number() }).optional(),
+  corners: z.object({
+    minInsideRadius: z.number().optional(),
+    sharp: z.array(P2),
+    sharpCount: z.number().int(),
+  }),
+  maxDeviation: z.number(),
+  open: z.literal(true).optional(),
+  wcs: WcsSchema.optional(),
+})
+export type LoopSummary = z.output<typeof LoopSummarySchema>
+
+/**
+ * The compact summary of a fitted loop (RT-G), mm rounded to 0.001; with `wcs` (P2) its points
+ * also in the setup's WCS, the loop at face-frame height `w`.
+ */
+export function loopSummary(
+  l: FittedLoop,
+  wcs?: { readonly at: (p: Vec3) => Vec3; readonly w: number },
+): LoopSummary {
+  const pt = (p: readonly [number, number]): [number, number] => [r3(p[0]), r3(p[1])]
+  return {
+    role: l.role,
+    area: r3(l.area),
+    bounds: [pt(l.bounds.min), pt(l.bounds.max)],
+    elements: l.loop.elements.length,
+    ...(l.circle
+      ? { circle: { center: pt(l.circle.centre), diameter: r3(l.circle.diameter) } }
+      : {}),
+    corners: {
+      ...(l.minInsideRadius === undefined ? {} : { minInsideRadius: r3(l.minInsideRadius) }),
+      sharp: l.sharp.slice(0, SHARP_SHOWN_MAX).map(pt),
+      sharpCount: l.sharp.length,
+    },
+    maxDeviation: r3(l.maxDeviation),
+    ...(l.open ? { open: true as const } : {}),
+    ...(wcs === undefined
+      ? {}
+      : {
+          wcs: {
+            bounds: wcsBounds(wcs.at, [l.bounds.min, l.bounds.max], wcs.w),
+            ...(l.circle ? { center: wcsPoint(wcs.at, l.circle.centre, wcs.w) } : {}),
+            sharp: l.sharp.slice(0, SHARP_SHOWN_MAX).map((p) => wcsPoint(wcs.at, p, wcs.w)),
+          } satisfies Wcs,
+        }),
+  }
+}
+
+const HoleSizeSchema = z.object({
+  diameter: z.number(),
+  top: z.number().describe('Mouth level below the face'),
+  depth: z.number(),
+  bottom: z.enum(['through', 'flat', 'cone']),
+  coneAngle: z.number().optional(),
+  mouth: z
+    .union([
+      z.object({ type: z.literal('countersink'), diameter: z.number(), angle: z.number() }),
+      z.object({ type: z.literal('counterbore'), diameter: z.number(), depth: z.number() }),
+    ])
+    .optional(),
+  steps: z.array(z.object({ diameter: z.number(), depth: z.number() })).optional(),
+})
+const Args = z.record(z.string(), z.unknown())
+const HoleGroupSchema = z.object({
+  count: z.number().int(),
+  holes: z.array(P2),
+  size: HoleSizeSchema,
+  pattern: z
+    .union([
+      z.object({
+        kind: z.literal('grid'),
+        origin: P2,
+        pitch: P2,
+        count: z.tuple([z.number().int(), z.number().int()]),
+      }),
+      z.object({
+        kind: z.literal('circle'),
+        center: P2,
+        pitchDiameter: z.number(),
+        count: z.number().int(),
+        startAngle: z.number(),
+      }),
+    ])
+    .optional(),
+  suggest: z.object({
+    command: z.enum(['design.hole.add', 'design.drilling.add']),
+    args: Args.describe('The first hole; add partId'),
+    also: z.array(Args).optional(),
+    clones: z
+      .object({ rows: z.array(Args) })
+      .optional()
+      .describe('design.clones.add rows; source: what the calls made'),
+    note: z.literal('belowFace').optional(),
+  }),
+  note: z.literal('noTool').optional(),
+  smallestTool: z.number().optional(),
+  message: z.string().optional().describe('English: why the notes'),
+  wcs: WcsSchema.optional(),
+})
+export type HoleGroupSummary = z.output<typeof HoleGroupSchema>
+
+/**
+ * A hole group as the find returns it (RT-G, mm rounded to 0.001): its size, pattern, the
+ * ready-to-send suggestion and the notes (`noTool` below the smallest library drill or end mill,
+ * `belowFace` on the suggestion); with `wcs` (P2) the centres also in the setup's WCS.
+ * Doc: docs/modes/reference-tools.md#2-features-holes
+ */
+export function holeGroupSummary(
+  g: HoleGroup,
+  face: string,
+  smallest: number | undefined,
+  wcs?: (p: Vec3) => Vec3,
+): HoleGroupSummary {
+  const pt = (p: readonly [number, number]): [number, number] => [r3(p[0]), r3(p[1])]
+  const s = g.size
+  const suggest = holeSuggestion(g, face)
+  const small = smallest !== undefined && s.diameter < smallest - TOOL_MATCH_TOLERANCE
+  const messages = [
+    ...(small
+      ? [
+          `Ø ${r3(s.diameter)} mm < the smallest drill or end mill in the library, ${r3(smallest)} mm`,
+        ]
+      : []),
+    ...(suggest.note === 'belowFace'
+      ? [
+          `The mouth is ${r3(s.top)} mm below ${face}: set on to the surface there (a facing or pocket floor); the depths are from it`,
+        ]
+      : []),
+  ]
+  const m = s.mouth
+  return {
+    count: g.count,
+    holes: g.holes.map(pt),
+    size: {
+      diameter: r3(s.diameter),
+      top: r3(s.top),
+      depth: r3(s.depth),
+      bottom: s.bottom,
+      ...(s.coneAngle === undefined ? {} : { coneAngle: r3(s.coneAngle) }),
+      ...(m === undefined
+        ? {}
+        : {
+            mouth:
+              m.type === 'countersink'
+                ? { type: m.type, diameter: r3(m.diameter), angle: r3(m.angle) }
+                : { type: m.type, diameter: r3(m.diameter), depth: r3(m.depth) },
+          }),
+      ...(s.steps === undefined
+        ? {}
+        : { steps: s.steps.map((x) => ({ diameter: r3(x.diameter), depth: r3(x.depth) })) }),
+    },
+    ...(g.pattern === undefined
+      ? {}
+      : {
+          pattern:
+            g.pattern.kind === 'grid'
+              ? {
+                  kind: 'grid' as const,
+                  origin: pt(g.pattern.origin),
+                  pitch: pt(g.pattern.pitch),
+                  count: [g.pattern.count[0], g.pattern.count[1]] as [number, number],
+                }
+              : {
+                  kind: 'circle' as const,
+                  center: pt(g.pattern.center),
+                  pitchDiameter: r3(g.pattern.pitchDiameter),
+                  count: g.pattern.count,
+                  startAngle: r3(g.pattern.startAngle),
+                },
+        }),
+    suggest: {
+      command: suggest.command,
+      args: { ...suggest.args },
+      ...(suggest.also === undefined ? {} : { also: suggest.also.map((a) => ({ ...a })) }),
+      ...(suggest.clones === undefined
+        ? {}
+        : { clones: { rows: suggest.clones.rows.map((r) => ({ ...r })) } }),
+      ...(suggest.note === undefined ? {} : { note: suggest.note }),
+    },
+    ...(small ? { note: 'noTool' as const, smallestTool: r3(smallest) } : {}),
+    ...(messages.length > 0 ? { message: messages.join('. ') } : {}),
+    ...(wcs === undefined
+      ? {}
+      : {
+          wcs: {
+            z: r3(wcs([0, 0, -s.top])[2]),
+            holes: g.holes.map((h) => wcsPoint(wcs, h, -s.top)),
+          } satisfies Wcs,
+        }),
+  }
+}
+
+/** The loops a `loops` arg keeps. */
+export function keepLoops(loops: readonly FittedLoop[], which: 'all' | 'outer' | 'holes' = 'all') {
+  return loops.filter((l) => which === 'all' || (which === 'outer') === (l.role === 'outer'))
+}
+
+const referenceFind = defineAsyncQuery({
+  name: 'design.reference.find',
+  async: true,
+  summary:
+    'Read the reference from a stock face (face frame, mm): levels = flat floors seen from the face and its opposite; section = loops at a depth, fitted, with inside corner radii (shapes: design.shape.import from); holes = grouped, with hole/drilling (+ clones) args to send.',
+  args: z.object({
+    partId: PartIdSchema,
+    referenceId: ReferenceIdSchema.optional().describe('Default: the only one'),
+    face: FaceArg.optional(),
+    frame: z.enum(['face', 'setup']).optional().describe('setup ({setupId}): points also in WCS'),
+    kind: z.enum(['levels', 'section', 'holes']),
+    sides: z.enum(['both', 'face']).optional().describe('levels; default both'),
+    minArea: z.number().nonnegative().optional().describe('levels: mm², default 1'),
+    limit: z.number().int().min(1).max(256).optional().describe('levels 32, holes 64'),
+    maxDiameter: z.number().positive().max(500).optional().describe('holes: mm, default 50'),
+    depth: Src.optional().describe('section (required): below the face, length'),
+    tolerance: z.number().min(0.001).max(1).optional().describe('section: mm, default 0.01'),
+    cornerAngle: z.number().min(1).max(90).optional().describe('section: deg, default 15'),
+    loops: z.enum(['all', 'outer', 'holes']).optional(),
+  }),
+  result: z.object({
+    kind: z.enum(['levels', 'section', 'holes']),
+    referenceId: ReferenceIdSchema,
+    face: z.string(),
+    setupId: z.string().optional(),
+    wcs: WcsSchema.optional(),
+    opposite: z.string().optional(),
+    levels: z.array(LevelSchema).optional(),
+    depth: z.number().optional(),
+    tolerance: z.number().optional(),
+    loops: z.array(LoopSummarySchema).optional(),
+    fit: z.object({ elements: z.number().int(), maxDeviation: z.number() }).optional(),
+    groups: z.array(HoleGroupSchema).optional(),
+    holeCount: z.number().int().optional(),
+    more: z.number().int().optional(),
+    note: z.string().optional(),
+  }),
+  async run(doc, args, ctx) {
+    const where = 'design.reference.find'
+    const loaded = loadPart(doc, args.partId, where)
+    if (loaded.isErr()) return loaded
+    const l = loaded.unwrap()
+    const found = targetReference(doc, args.partId, args.referenceId, where)
+    if (found.isErr()) return found
+    const ref = found.unwrap()
+    const face = resolveFace(doc, args.partId, args.face, ['face'], where)
+    if (face.isErr()) return face
+    const { direction, setup } = face.unwrap()
+    if (args.frame === 'setup' && setup === undefined)
+      return fail('input.malformed', "frame: 'setup' needs a setup face", {
+        issues: [
+          {
+            path: ['frame'],
+            rule: 'setupFrameNeedsSetup',
+            message: "frame 'setup' needs face: { setupId }",
+          },
+        ],
+        where,
+      })
+    const p = placementOf(ref, where)
+    if (p.isErr()) return p
+    const view = referenceView(
+      ref,
+      p.unwrap(),
+      stockSize(l),
+      direction,
+      args.frame === 'setup' ? setup?.rotation : undefined,
+    )
+    const head = {
+      referenceId: ref.id,
+      face: view.face,
+      ...(setup === undefined ? {} : { setupId: setup.id }),
+    }
+    const wcs = view.wcs
+    if (args.kind === 'levels') {
+      const r = await referenceLevelsOf(
+        ctx,
+        view,
+        {
+          minArea: args.minArea ?? 1,
+          limit: args.limit ?? 32,
+          sides: args.sides ?? 'both',
+        },
+        where,
+      )
+      if (r.isErr()) return r
+      const { levels, more } = r.unwrap()
+      return Ok({
+        kind: 'levels' as const,
+        ...head,
+        opposite: view.opposite,
+        levels: levels.map((x) => ({
+          ...x,
+          bounds: [[...x.bounds[0]], [...x.bounds[1]]],
+          ...(wcs === undefined
+            ? {}
+            : {
+                wcs: {
+                  z: r3(wcs([0, 0, -x.depth])[2]),
+                  bounds: wcsBounds(wcs, x.bounds, -x.depth),
+                } satisfies Wcs,
+              }),
+        })) as z.output<typeof LevelSchema>[],
+        ...(more === undefined ? {} : { more }),
+      })
+    }
+    if (args.kind === 'holes') {
+      const r = await referenceHolesOf(
+        ctx,
+        view,
+        {
+          maxDiameter: args.maxDiameter ?? HOLE_MAX_DIAMETER_MM,
+          limit: args.limit ?? HOLE_LIMIT,
+        },
+        where,
+      )
+      if (r.isErr()) return r
+      const { holes, more } = r.unwrap()
+      const grouped = holeGroups(holes)
+      const smallest = smallestHoleTool(ctx)
+      const left = (more ?? 0) + (grouped.more ?? 0)
+      return Ok({
+        kind: 'holes' as const,
+        ...head,
+        holeCount: holes.length,
+        groups: grouped.groups.map((g) => holeGroupSummary(g, view.face, smallest, wcs)),
+        ...(left > 0 ? { more: left } : {}),
+        ...(holes.length === 0 ? { note: 'No round holes along the face normal' } : {}),
+      })
+    }
+    if (args.depth === undefined)
+      return fail('input.malformed', 'depth: required for a section', {
+        issues: [{ path: ['depth'], rule: 'required', message: 'required for kind section' }],
+        where,
+      })
+    const depth = lengthArg(args.depth, l, ['depth'], where)
+    if (depth.isErr()) return depth
+    const fit = fitOptions(args)
+    const r = await fittedSection(ctx, view, depth.unwrap(), fit, where)
+    if (r.isErr()) return r
+    const all = keepLoops(r.unwrap(), args.loops)
+    const shown = all.slice(0, FIND_LOOPS_MAX)
+    const closed = all.filter((x) => !x.open)
+    return Ok({
+      kind: 'section' as const,
+      ...head,
+      depth: r3(depth.unwrap()),
+      tolerance: fit.tolerance,
+      ...(wcs === undefined ? {} : { wcs: { z: r3(wcs([0, 0, -depth.unwrap()])[2]) } }),
+      loops: shown.map((x) =>
+        loopSummary(x, wcs === undefined ? undefined : { at: wcs, w: -depth.unwrap() }),
+      ),
+      fit: {
+        elements: closed.reduce((s, x) => s + x.loop.elements.length, 0),
+        maxDeviation: r3(closed.reduce((m, x) => Math.max(m, x.maxDeviation), 0)),
+      },
+      ...(all.length > shown.length ? { more: all.length - shown.length } : {}),
+      ...(all.length === 0 ? { note: 'The plane misses the reference at this depth' } : {}),
+      ...(all.some((x) => x.open)
+        ? { note: 'Open loops (the mesh is not closed): shape import skips them' }
+        : {}),
+    })
+  },
+})
+
+// ── compare (DF60 P4) ──────────────────────────────────────────────────────────────────────
+
+const V3 = z.tuple([z.number(), z.number(), z.number()])
+/** Surfaces named per region. */
+export const COMPARE_SURFACES_SHOWN = 3
+
+const CompareRegionSchema = z.object({
+  kind: z.enum(['missing', 'extra']),
+  volume: z.number(),
+  maxDev: z.number(),
+  at: V3,
+  bounds: z.tuple([V3, V3]),
+  surfaces: z.array(z.string()),
+  operationIds: z.array(z.string()),
+  cause: z.literal('cornerRadius').optional(),
+})
+
+/**
+ * The design against its reference (DF60 P4, docs/modes/reference-tools.md#3-compare): a job,
+ * since a large reference takes a second or two and the overlay (P5) cancels a stale run.
+ */
+const referenceCompare = defineCommand({
+  kind: 'job',
+  name: 'design.reference.compare',
+  summary:
+    'Compare the evaluated part with its reference (part frame, mm): missing (cut away) and extra (left) material as regions over threshold, with the surfaces and operations they touch.',
+  title: () => 'Compare with reference',
+  machine: false,
+  args: z.object({
+    partId: PartIdSchema,
+    referenceId: ReferenceIdSchema.optional().describe('Default: the only one'),
+    source: z.object({ kind: z.literal('part') }).describe('part: the evaluated design'),
+    threshold: z.number().min(0.001).max(10).optional().describe('mm, default 0.1'),
+    limit: z.number().int().min(1).max(COMPARE_PIECES_MAX).optional().describe('default 10'),
+  }),
+  result: z.object({
+    method: z.enum(['boolean', 'heightmap']),
+    threshold: z.number(),
+    stats: z.object({
+      missingVolume: z.number(),
+      extraVolume: z.number(),
+      maxMissing: z.number(),
+      maxExtra: z.number(),
+      referenceVolume: z.number(),
+      partVolume: z.number(),
+    }),
+    regions: z.array(CompareRegionSchema),
+    more: z.number().int().optional(),
+    below: z.object({ count: z.number().int(), volume: z.number() }),
+    offcuts: z.object({ count: z.number().int(), volume: z.number() }).optional(),
+    note: z.string().optional(),
+    evaluation: z.string().describe('Input hash of the evaluation compared; stale after an edit'),
+  }),
+  async run(doc, args, ctx) {
+    const where = 'design.reference.compare'
+    const evaluations = ctx.services.evaluations
+    if (evaluations === undefined)
+      return fail('internal.unexpected', 'no evaluation service configured', { where })
+    const loaded = loadPart(doc, args.partId, where)
+    if (loaded.isErr()) return loaded
+    const l = loaded.unwrap()
+    const found = targetReference(doc, args.partId, args.referenceId, where)
+    if (found.isErr()) return found
+    const ref = found.unwrap()
+    const p = placementOf(ref, where)
+    if (p.isErr()) return p
+    const input = partGeometryInput(doc, args.partId, ctx.services.region2d)
+    if (input.isErr()) return Err(input.unwrapErr().withContext(where))
+    const state = await evaluations.evaluate(args.partId, ctx.signal)
+    if (state.isErr()) return state
+    const { status, evaluation, inputHash, error } = state.unwrap()
+    if (status !== 'done' || evaluation === undefined)
+      return error !== undefined
+        ? Err(error.withContext(where, { partId: args.partId }))
+        : fail('geometry.evaluation', `${args.partId}: the part has no evaluation`, { where })
+    const threshold = args.threshold ?? COMPARE_THRESHOLD_MM
+    const ops = input.unwrap().operations
+    const raw = await referenceCompareOf(
+      ctx,
+      ref,
+      {
+        matrix: ghostMatrix(ref.asset.bounds, p.unwrap()),
+        part: {
+          positions: evaluation.positions,
+          indices: evaluation.indices,
+          triangleSurface: evaluation.triangleSurface,
+        },
+        threshold,
+        stock: stockSize(l),
+        directions: operationDirections(ops),
+      },
+      { signal: ctx.signal, progress: ctx.progress, pause: ctx.pause },
+      where,
+    )
+    if (raw.isErr()) return raw
+    const r = raw.unwrap()
+    const limit = args.limit ?? COMPARE_LIMIT
+    const surfaceId = (i: number) => evaluation.surfaces[i]
+    const radii = cornerRadii(ops)
+    const opIds = new Set(l.part.operations.map((o) => o.id))
+    const regions = r.pieces.slice(0, limit).map((x) => {
+      const surfaces = x.surfaces
+        .map((s) => surfaceId(s.index))
+        .filter((s): s is string => s !== undefined)
+      const operationIds = [
+        ...new Set(surfaces.map((s) => s.split('.')[0]!).filter((o) => opIds.has(o))),
+      ]
+      return {
+        kind: x.kind,
+        volume: r3(x.volume),
+        maxDev: r3(x.maxDev),
+        at: x.at.map(r3) as [number, number, number],
+        bounds: x.bounds.map((b) => b.map(r3)) as [Vec3Tuple, Vec3Tuple],
+        surfaces: surfaces.slice(0, COMPARE_SURFACES_SHOWN),
+        operationIds,
+        ...(isCornerFillet(x, surfaceId, radii) ? { cause: 'cornerRadius' as const } : {}),
+      }
+    })
+    const more = r.pieces.length - regions.length + (r.more ?? 0)
+    return Ok({
+      method: r.method,
+      threshold,
+      stats: {
+        missingVolume: r3(r.stats.missingVolume),
+        extraVolume: r3(r.stats.extraVolume),
+        maxMissing: r3(r.stats.maxMissing),
+        maxExtra: r3(r.stats.maxExtra),
+        referenceVolume: r3(r.stats.referenceVolume),
+        partVolume: r3(r.stats.partVolume),
+      },
+      regions,
+      ...(more > 0 ? { more } : {}),
+      below: { count: r.below.count, volume: r3(r.below.volume) },
+      ...(r.offcuts === undefined
+        ? {}
+        : { offcuts: { count: r.offcuts.count, volume: r3(r.offcuts.volume) } }),
+      ...(r.fallback === undefined ? {} : { note: `Height maps: ${r.fallback}` }),
+      evaluation: inputHash ?? '',
+    })
+  },
+})
+
+type Vec3Tuple = [number, number, number]
+
 export const REFERENCE_COMMANDS: readonly AnyCommand[] = [
   referenceImport as AnyCommand,
   referenceUpdate,
   referenceRemove,
+  referenceCompare,
 ]
 
-export const REFERENCE_QUERIES: readonly QueryDef[] = [referenceList]
+export const REFERENCE_QUERIES: readonly AnyQueryDef[] = [referenceList, referenceFind]

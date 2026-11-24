@@ -24,6 +24,7 @@ import {
   type Point,
   type Shape,
 } from './operation'
+import { throughDepths, withThroughDepths } from '../geometry/through-depth'
 import { placeShape } from './placement'
 import { requirePort } from './shape'
 import { operationReferences, SurfaceTable } from './surfaces'
@@ -99,13 +100,15 @@ export function toGeometryInput(
       references.push({ operation: op.id, parameter: r.param, surface: r.surface })
     }
   }
+  const stockGeometry = {
+    length: stock.length.canonical,
+    width: stock.width.canonical,
+    thickness: stock.thickness.canonical,
+  }
   return Ok({
-    stock: {
-      length: stock.length.canonical,
-      width: stock.width.canonical,
-      thickness: stock.thickness.canonical,
-    },
-    operations,
+    stock: stockGeometry,
+    // through profiles over material an earlier setup cleared (DF50), in the default setup order
+    operations: withThroughDepths(operations, throughDepths(operations, stockGeometry, port)),
     references,
     ...cloneGroups(part.operations),
   })

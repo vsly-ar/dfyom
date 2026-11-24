@@ -265,3 +265,33 @@ button.cloneMarker:not([aria-disabled='true']):hover .cloneDot {
   margin-left: 2px;
   color: var(--warning);
 }
+
+/* the touch-off spot's coordinates (DF69): a chip beside the spot while it is hovered or held,
+   in the axis labels' look */
+.zSpotAnchor {
+  position: relative;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.zSpotChip {
+  position: absolute;
+  left: 14px;
+  bottom: 10px;
+  padding: 0 var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: color-mix(in oklab, var(--bg-raised) 92%, transparent);
+  box-shadow: var(--shadow-1);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.zSpotChip[data-dragging] {
+  border-color: var(--accent-border);
+}

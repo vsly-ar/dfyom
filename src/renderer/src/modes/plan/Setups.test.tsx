@@ -7,6 +7,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import { useEffect, type ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
+import { libraryInput, machineValues } from '../../../../core/library/library.fixture'
 import { planSetup, type PlanSetup } from '../../../../core/plan/plan.fixture'
 import { setupFrame } from '../../../../core/toolpath/wcs'
 import type { CallReply } from '../../../../shared/preload-api'
@@ -58,10 +59,22 @@ const toolpath = {
   stats: { cutLength: 1, rapidLength: 0, estimatedSeconds: 1 },
 }
 
-async function renderSetups(setup?: (s: PlanSetup, planId: string) => Promise<void>) {
+async function renderSetups(
+  setup?: (s: PlanSetup, planId: string) => Promise<void>,
+  /** Extra machine values (library command input) for the plan's machine, e.g. DF68's. */
+  machineExtra?: object,
+) {
   const s = await planSetup()
   await s.run('design.facing.add', { partId: s.partId, on: 'stock.bottom', depth: '0.5' })
-  const planId = await s.create({ machineLibraryItemId: s.machineId })
+  const machineId =
+    machineExtra === undefined
+      ? s.machineId
+      : (
+          (await s.run('library.machine.add', {
+            values: { ...libraryInput(machineValues()), ...machineExtra },
+          })) as { id: string }
+        ).id
+  const planId = await s.create({ machineLibraryItemId: machineId })
   await setup?.(s, planId)
   const bridge = createFakeBridge()
   bridge.bind(s.d)
@@ -90,12 +103,10 @@ async function renderSetups(setup?: (s: PlanSetup, planId: string) => Promise<vo
 }
 
 /** Radix menus open from the keyboard in jsdom (as Design.test.tsx). */
-async function openMenu(
-  t: { user: { keyboard: (k: string) => Promise<void> } },
-  trigger: HTMLElement,
-) {
-  trigger.focus()
-  await t.user.keyboard('{Enter}')
+/** Opens a row's context menu from the keyboard (Shift+F10 on the focused row, DF67). */
+async function openMenu(t: { user: { keyboard: (k: string) => Promise<void> } }, row: HTMLElement) {
+  row.focus()
+  await t.user.keyboard('{Shift>}{F10}{/Shift}')
 }
 
 describe('Setup panel', () => {
@@ -131,7 +142,7 @@ describe('Setup panel', () => {
     const [bottom, top] = t.plan().setups
     // the row's only action button is its menu: nothing overlays the name or the subtitle
     expect(within(t.nav()).queryByRole('button', { name: /^Move setup/ })).toBeNull()
-    await openMenu(t, within(t.nav()).getByRole('button', { name: 'Actions for setup Bottom' }))
+    await openMenu(t, within(t.nav()).getByRole('button', { name: /^\d\. Bottom/ }))
     expect(await screen.findByRole('menuitem', { name: /^Move up/ })).toHaveAttribute(
       'aria-disabled',
       'true',
@@ -195,7 +206,7 @@ describe('Setup panel', () => {
     await expectNoAxeViolations(t.nav())
   })
 
-  it('moves an operation from its menu, the row’s only action button', async () => {
+  it('moves an operation from its context menu: right-click or Shift+F10 (DF67)', async () => {
     const t = await renderSetups()
     const top = t.plan().setups[1]!
     const [facing, drilling1, drilling34] = top.operations as [
@@ -205,7 +216,15 @@ describe('Setup panel', () => {
     ]
     // nothing overlays the name or the status icons: no separate move buttons
     expect(within(t.nav()).queryByRole('button', { name: /^Move / })).toBeNull()
-    const triggers = () => within(t.opsOf('Top')).getAllByRole('button', { name: /^Actions for / })
+    // no action button on the row: its menu is the context menu (DF67)
+    expect(within(t.nav()).queryByRole('button', { name: /^Actions for / })).toBeNull()
+    const triggers = () => [...t.opsOf('Top').querySelectorAll<HTMLElement>(':scope > li > button')]
+    // the row says how to open its menu (DF70)
+    expect(triggers()[0]).toHaveAccessibleDescription('Right-click or Shift+F10 for actions.')
+    expect(triggers()[0]).toHaveAttribute(
+      'aria-keyshortcuts',
+      'Alt+ArrowUp Alt+ArrowDown Shift+F10',
+    )
     // the first operation of Top cannot go up (Bottom faces another way)
     await openMenu(t, triggers()[0]!)
     expect(await screen.findByRole('menuitem', { name: /^Move up/ })).toHaveAttribute(
@@ -213,8 +232,8 @@ describe('Setup panel', () => {
       'true',
     )
     await t.user.keyboard('{Escape}')
-    // Drilling 1 down past Drilling 3, Drilling 4
-    await openMenu(t, triggers()[1]!)
+    // Drilling 1 down past Drilling 3, Drilling 4, from a right-click
+    await t.user.pointer({ keys: '[MouseRight]', target: triggers()[1]! })
     await t.user.click(await screen.findByRole('menuitem', { name: /^Move down/ }))
     await waitFor(() =>
       expect(
@@ -236,7 +255,7 @@ describe('Setup panel', () => {
     const last = top.operations.at(-1)!
     const lastName = within(t.opsOf('Top')).getAllByRole('button', { name: /^Profile/ })[0]!
     // the last operation of Top into a new setup right after it
-    await openMenu(t, within(t.opsOf('Top')).getByRole('button', { name: /^Actions for Profile/ }))
+    await openMenu(t, within(t.opsOf('Top')).getAllByRole('button', { name: /^Profile/ })[0]!)
     expect(screen.queryByRole('menuitem', { name: 'Move to Bottom' })).toBeNull()
     await t.user.click(await screen.findByRole('menuitem', { name: 'Move to new setup' }))
     await waitFor(() =>
@@ -258,23 +277,23 @@ describe('Setup panel', () => {
       toIndex: top.operations.length - 1,
     })
     // split again, then merge from the setup's menu (Bottom offers no merge)
-    await openMenu(t, within(t.opsOf('Top')).getByRole('button', { name: /^Actions for Profile/ }))
+    await openMenu(t, within(t.opsOf('Top')).getAllByRole('button', { name: /^Profile/ })[0]!)
     await t.user.click(await screen.findByRole('menuitem', { name: 'Move to new setup' }))
     await waitFor(() => expect(t.plan().setups).toHaveLength(3))
     const top2 = t.plan().setups[2]!
-    await openMenu(t, within(t.nav()).getByRole('button', { name: 'Actions for setup Bottom' }))
+    await openMenu(t, within(t.nav()).getByRole('button', { name: /^\d\. Bottom/ }))
     expect(
       await screen.findByRole('menuitem', { name: 'No other setup of this face to merge with' }),
     ).toHaveAttribute('aria-disabled', 'true')
     await t.user.keyboard('{Escape}')
-    await openMenu(t, within(t.nav()).getByRole('button', { name: 'Actions for setup Top' }))
+    await openMenu(t, within(t.nav()).getByRole('button', { name: /^\d\. Top(?! 2)/ }))
     await t.user.click(await screen.findByRole('menuitem', { name: 'Merge with Top 2' }))
     await waitFor(() => expect(t.plan().setups.map((s) => s.name)).toEqual(['Bottom', 'Top']))
     expect(t.callsOf('plan.setup.merge')).toEqual([
       { planId: t.planId, setupIds: [top.id, top2.id] },
     ])
     // a split that would break the machining order is refused, with the reason
-    await openMenu(t, within(t.opsOf('Top')).getByRole('button', { name: /^Actions for Facing/ }))
+    await openMenu(t, within(t.opsOf('Top')).getAllByRole('button', { name: /^Facing/ })[0]!)
     await t.user.click(await screen.findByRole('menuitem', { name: 'Move to new setup' }))
     expect(await within(t.nav()).findByText('The change was not applied.')).toBeInTheDocument()
     expect(t.plan().setups).toHaveLength(2)
@@ -321,6 +340,94 @@ describe('Setup panel', () => {
     await expectNoAxeViolations()
   })
 
+  // DF59: docs/modes/plan-v0.2.md#tool-reach-past-the-stock-and-clamps-hardening-df59-interim
+  it('shows how far the tool reaches past the stock and keeps clamps below the clearance', async () => {
+    const t = await renderSetups()
+    await t.user.click(t.setupRows()[0]!)
+    const insp = t.inspector()
+    await within(insp).findByRole('heading', { name: 'Setup' })
+    // toolpaths without a reach (outdated or none): not known yet
+    expect(within(insp).getByText('Past the stock')).toBeInTheDocument()
+    expect(
+      within(insp).getByText('Generate toolpaths to see where the tool leaves the stock.'),
+    ).toBeInTheDocument()
+    expect(
+      within(insp).getByLabelText('Clearance height', { selector: 'input' }),
+    ).toHaveAccessibleDescription(
+      'Keep clamps lower than 10 mm above the stock top; clamps are not modelled yet.',
+    )
+    await expectNoAxeViolations()
+  })
+
+  // DF68: docs/architecture/grbl.md#z-headroom-hardening-df68
+  it('shows the Z headroom: what to enter, too little for a tool, or enough', async () => {
+    const headroom = async (t: Awaited<ReturnType<typeof renderSetups>>) => {
+      await t.user.click(t.setupRows()[0]!)
+      const insp = t.inspector()
+      await within(insp).findByRole('heading', { name: 'Setup' })
+      expect(within(insp).getByText('Z headroom')).toBeInTheDocument()
+      return insp
+    }
+    const plain = await headroom(await renderSetups())
+    expect(
+      within(plain).getByText(
+        'Not checked: enter the spindle nose to table distance and the spoilboard thickness (0 if none) in the machine.',
+      ),
+    ).toBeInTheDocument()
+    await expectNoAxeViolations()
+  })
+
+  it('names the tool that hits the Z+ limit in the setup checks (DF68)', async () => {
+    const t = await renderSetups(undefined, { noseToTable: '40', spoilboardThickness: '5' })
+    await t.user.click(t.setupRows()[0]!)
+    const insp = t.inspector()
+    expect(
+      await within(insp).findByText('Too little for a tool: see the setup checks.'),
+    ).toBeInTheDocument()
+    const checks = within(insp).getByRole('region', { name: 'Setup checks' })
+    expect(
+      within(checks).getAllByText(/would hit the Z\+ limit: lower the clearance height/).length,
+    ).toBeGreaterThan(0)
+    await expectNoAxeViolations()
+  })
+
+  it('says the Z headroom is enough on a machine with room (DF68)', async () => {
+    const t = await renderSetups(undefined, { noseToTable: '120', spoilboardThickness: '5' })
+    await t.user.click(t.setupRows()[0]!)
+    const insp = t.inspector()
+    expect(
+      await within(insp).findByText('Enough above the clearance height for every tool.'),
+    ).toBeInTheDocument()
+  })
+
+  it('names the sides the tool reaches past, rounded up, once every toolpath is current', async () => {
+    const t = await renderSetups()
+    t.bridge.handle('plan.toolpath.get', () =>
+      ok({
+        toolpath,
+        stale: false,
+        overreach: { xMin: 4.2426, xMax: 4.2426, yMin: 0, yMax: 0 },
+      }),
+    )
+    // a revision re-reads the toolpaths
+    await t.user.click(t.setupRows()[0]!)
+    const insp = t.inspector()
+    const name = await within(insp).findByLabelText('Setup name', { selector: 'input' })
+    await t.user.clear(name)
+    await t.user.type(name, 'Datum{Enter}')
+    expect(
+      await within(insp).findByText('Left 4.3 mm, right 4.3 mm; keep clamps clear of these sides.'),
+    ).toBeInTheDocument()
+    t.bridge.handle('plan.toolpath.get', () =>
+      ok({ toolpath, stale: false, overreach: { xMin: 0, xMax: 0, yMin: 0, yMax: 0 } }),
+    )
+    await t.user.clear(name)
+    await t.user.type(name, 'Bottom{Enter}')
+    expect(
+      await within(insp).findByText('The tool stays within the stock outline.'),
+    ).toBeInTheDocument()
+  })
+
   it('exports the window’s setup and previews only its toolpaths, placed by its WCS', async () => {
     // drill feeds entered, so the top setup has no errors (as Plan.test.tsx)
     const t = await renderSetups(async (s, planId) => {
@@ -361,7 +468,7 @@ describe('Setup panel', () => {
     await t.user.click(exportTop)
     const dialog = await screen.findByRole('dialog', { name: 'gCode exported' })
     expect(within(dialog).getByText('Setup Top (2 of 2)')).toBeInTheDocument()
-    expect(t.bridge.exportDialogNames).toEqual(['Plan 1 Top'])
+    expect(t.bridge.exportDialogNames).toEqual(['bracket-s2']) // project slug + setup number (DF62)
     expect(t.callsOf('plan.export')).toEqual([
       { planId: t.planId, setupId: top!.id, target: '/out/Plan 1 Top.nc', confirm: true },
     ])

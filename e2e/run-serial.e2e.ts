@@ -233,7 +233,7 @@ test('touch plate and overrides (M4, M6): a probe that misses, unlock, a probe t
     const page = await app.firstWindow()
     await page.waitForLoadState('domcontentloaded')
     const machineItem = await bridgeCall<{ id: string }>(page, 'library.machine.add', {
-      values: { ...MACHINE, probe: { plateThickness: '10' } },
+      values: { ...MACHINE, probePlateThickness: '10' },
     })
     const stock = await bridgeCall<{ id: string }>(page, 'library.stock.add', {
       values: {

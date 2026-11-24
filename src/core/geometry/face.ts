@@ -11,6 +11,11 @@ import { applyPlacement, type Placement, type Vec3 } from './model'
 /** The six approach directions (outward normal of the face), in the order of the face table. */
 export const DIRECTIONS = ['+z', '-z', '-y', '+x', '+y', '-x'] as const
 export type Direction = (typeof DIRECTIONS)[number]
+/**
+ * Default setup order (plan-v0.2.md decision 3): the bottom first as a datum, the sides 0–3, the
+ * top last. Design reads material removed by earlier setups in this order (DF50).
+ */
+export const SETUP_ORDER: readonly Direction[] = ['-z', '-y', '+x', '+y', '-x', '+z']
 export type Axis = 'x' | 'y' | 'z'
 export type StockDimension = 'length' | 'width' | 'thickness'
 

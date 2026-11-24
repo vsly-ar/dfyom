@@ -1,6 +1,6 @@
 // The machine form, shared by the Library window's editor (`full`: adds acceleration, motion
 // planning `$11`/`$12`, steps per mm and notes)
-// and the quick "New machine…" dialog (`quick`: the v0.1 fields). GRBL controller and manual tool
+// and the quick "New machine…" dialog (`quick`: the v0.1 fields and the Z height of DF68). GRBL controller and manual tool
 // change are fixed values (library.md#machine). Doc: docs/conventions/ui-library-window.md#layout, L4
 import { HOMING_CORNERS, RIGIDITY_PRESETS } from '../../../core/library/machine.dto'
 import type { QuantityDTO } from '../../../core/quantity/quantity.dto'
@@ -31,8 +31,10 @@ export const MACHINE_FIELDS: readonly string[] = [
   'homingCorner',
   'pullOff',
   'softLimits',
-  'probe.plateThickness',
-  'probe',
+  'noseToTable',
+  'spoilboardThickness',
+  'probePlateSize',
+  'probePlateThickness',
   'travel',
   'maxFeedRate',
   'acceleration',
@@ -141,6 +143,47 @@ export function MachineFields({
       />
       <Group title={m.travel}>{axes('travel', 'length', m.travelAxis)}</Group>
       <Group title={m.maxFeed}>{axes('maxFeedRate', 'feedRate', m.maxFeedAxis)}</Group>
+      {/* DF68: the Z headroom estimate's distances, in both variants (a safety check) */}
+      <Group title={m.zHeight}>
+        {q(
+          'noseToTable',
+          m.noseToTable,
+          'length',
+          values.noseToTable,
+          'clearance',
+          (noseToTable) => set({ noseToTable }),
+          { optional: true, note: m.noseToTableNote },
+        )}
+        {q(
+          'spoilboardThickness',
+          m.spoilboardThickness,
+          'length',
+          values.spoilboardThickness,
+          'depth',
+          (spoilboardThickness) => set({ spoilboardThickness }),
+          { optional: true, note: m.spoilboardThicknessNote },
+        )}
+        {/* DF69: room for the touch plate at the Z touch-off spot */}
+        {q(
+          'probePlateSize',
+          m.probePlateSize,
+          'length',
+          values.probePlateSize,
+          'width',
+          (probePlateSize) => set({ probePlateSize }),
+          { optional: true, note: m.probePlateSizeNote },
+        )}
+        {/* M4: Run's "Probe Z" sets Z0 at the contact minus the plate thickness */}
+        {q(
+          'probePlateThickness',
+          m.probePlateThickness,
+          'length',
+          values.probePlateThickness,
+          'depth',
+          (probePlateThickness) => set({ probePlateThickness }),
+          { optional: true, note: m.probePlateThicknessNote },
+        )}
+      </Group>
       {full ? (
         <Group title={m.homing}>
           <Field
@@ -170,20 +213,6 @@ export function MachineFields({
             checked={values.softLimits ?? true}
             onCheckedChange={(softLimits) => set({ softLimits })}
           />
-        </Group>
-      ) : null}
-      {full ? (
-        <Group title={m.probe}>
-          {q(
-            'probe.plateThickness',
-            m.plateThickness,
-            'length',
-            values.probe?.plateThickness,
-            'depth',
-            (plateThickness) =>
-              set({ probe: plateThickness === undefined ? undefined : { plateThickness } }),
-            { optional: true, note: m.plateThicknessNote },
-          )}
         </Group>
       ) : null}
       {full

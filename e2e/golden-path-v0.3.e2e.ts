@@ -29,6 +29,7 @@ import {
   openReferencePanel,
   test,
 } from './app.fixture'
+import { withoutAppVersion } from '../src/core/post/plan-export'
 
 const STL = resolve('src/core/design/__fixtures__/enclosure-wood-base.stl')
 const SVG = resolve('src/core/design/__fixtures__/enclosure-sections.svg')
@@ -509,17 +510,12 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
     await expect(input(inspector, `Tab ${i + 1}`)).toHaveValue(new RegExp(`^${p}`))
   const toolField = inspector.getByRole('region', { name: 'Tool' })
   const toolCombo = toolField.getByRole('combobox', { name: 'Tool' })
-  await toolCombo.click()
-  await page
-    .getByRole('listbox')
-    .getByRole('option', { name: /^Flat 12 · Ø 12/ })
-    .click()
+  // the 12 mm slot's Apply already took the library's Flat 12 over a generalized tool (DF54)
   await expect(toolCombo).toHaveText(/^Flat 12 · Ø 12/)
-  await expect(toolField.getByRole('button', { name: 'Lock tool' })).toHaveAttribute(
-    'aria-pressed',
-    'true',
-  )
-  // picking locks (one command, commit only); Apply runs the tool choice of the others
+  const toolLock = toolField.getByRole('button', { name: 'Lock tool' })
+  await toolLock.click()
+  await expect(toolLock).toHaveAttribute('aria-pressed', 'true')
+  // locking pins it (one command, commit only); Apply runs the tool choice of the others
   await applyButton.click()
   await expect(applyButton).toHaveCount(0)
 
@@ -555,8 +551,15 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
   await choose(page, inspector, 'Segment 2 Type', 'Tangent arc')
   await setField(inspector, 'Segment 2 End X', '60')
   await setField(inspector, 'Segment 2 End Y', '20')
-  await inspector.getByRole('button', { name: 'Actions for segment 3' }).click()
-  await page.getByRole('menuitem', { name: 'Remove segment 3' }).click()
+  // the row's actions are its context menu (DF70): right-click anywhere on the row
+  await inspector
+    .getByRole('row')
+    .filter({ has: page.getByLabel('Segment 3 End X') })
+    .click({ button: 'right' })
+  await page
+    .getByRole('menu', { name: 'Actions for segment 3' })
+    .getByRole('menuitem', { name: 'Remove segment 3' })
+    .click()
   await expect(
     inspector.getByRole('list', { name: 'Items in order' }).getByRole('button', {
       name: /Open path · 2 segments/,
@@ -665,7 +668,7 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
     const done = p.getByRole('dialog', { name: 'gCode exported' })
     await expect(done.getByText(`Setup ${name} (${i + 1} of 2)`)).toBeVisible({ timeout: 30_000 })
     await expect(done.getByText('No machine warnings.')).toBeVisible()
-    const file = join(dfyom.dataDir, `Plan 1 ${name}.nc`)
+    const file = join(dfyom.dataDir, `enclosure-shapes-s${i + 1}.nc`)
     expect(existsSync(file)).toBe(true)
     const gcode = readFileSync(file, 'utf8')
     await expect(done.getByText(`${gcode.trimEnd().split('\n').length} lines`)).toBeVisible()
@@ -685,7 +688,8 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
   // the top program follows the oval with arcs
   expect(programs[1]!.match(/^G[23] /gm)?.length ?? 0).toBeGreaterThan(100)
   // the same part as X1's headless flow: the same programs
-  for (const [i, gcode] of programs.entries()) expect(gcode).toBe(readFileSync(GOLDEN[i]!, 'utf8'))
+  for (const [i, gcode] of programs.entries())
+    expect(withoutAppVersion(gcode)).toBe(readFileSync(GOLDEN[i]!, 'utf8'))
   const lineCounts = programs.map((g) => g.trimEnd().split('\n').length)
 
   // ── Run both setups on the virtual machine at Max, the setup change between ──────────────

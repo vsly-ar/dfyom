@@ -14,6 +14,7 @@ import {
   type PreloadApi,
   type ProjectSnapshot,
   type ReferenceMeshReply,
+  type ReferenceCompareViewReply,
   type ReferenceSectionReply,
   type WindowCloseRequest,
   WINDOW_KIND_ARG,
@@ -109,6 +110,8 @@ const api: PreloadApi = {
       ipcRenderer.invoke(IPC.referenceMesh, referenceId) as Promise<ReferenceMeshReply>,
     section: (request) =>
       ipcRenderer.invoke(IPC.referenceSection, request) as Promise<ReferenceSectionReply>,
+    compareView: (request) =>
+      ipcRenderer.invoke(IPC.referenceCompareView, request) as Promise<ReferenceCompareViewReply>,
   },
   library: {
     open: (target) => ipcRenderer.invoke(IPC.libraryOpen, target ?? {}) as Promise<void>,

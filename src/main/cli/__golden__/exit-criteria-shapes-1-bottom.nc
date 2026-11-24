@@ -1,5 +1,12 @@
 (Program: Plan 1)
-(Setup: Bottom)
+(Setup 1 of 2: Bottom)
+(Stock X 255 Y 185 Z 40 mm on the machine)
+(Faces: bottom up, back towards you, right on the right)
+(Work zero G54 X0 Y0: back-left corner of the bottom face)
+(That corner sits front left on the machine)
+(Z0 on the bottom face: the stock surface facing up)
+(Tool stays within the stock outline)
+(Keep clamps below clearance Z 10 mm)
 (Units: mm)
 (Tool 1: Drill 3, dia 3 mm)
 (Tool 2: Flat 6, dia 6 mm)
@@ -8,10 +15,10 @@ G90 G94 G17 G21
 G54
 G0 Z10
 (Drilling 1, Drilling 2, Drilling 3, Drilling 4)
-(DFYOM TOOL CHANGE 1: Drill 3)
+(DFYOM TOOL CHANGE 1: Drill 3, 3 mm drill)
 M3 S5000
 (Set spindle to 5000 rpm)
-M0
+M0 ;Set spindle to 5000 rpm
 X39 Y48.2
 Z2
 G1 Z-4.801 F250
@@ -33,16 +40,18 @@ G1 Z-4.801
 G0 Z2
 Z10
 (Profile 2)
+(Tool change to T2: spindle off, retract)
 M5
+X127 Y92
 (Stop the spindle)
-(DFYOM TOOL CHANGE 2: Flat 6)
-M0
+(DFYOM TOOL CHANGE 2: Flat 6, 6 mm flat)
+M0 ;Stop spindle, install T2 Flat 6, 6 mm flat, then zero Z
 G90 G94 G17 G21
 G54
 G0 Z10
 M3 S16000
 (Set spindle to 16000 rpm)
-M0
+M0 ;Set spindle to 16000 rpm
 X97.5 Y82.5
 Z2
 G1 Z0 F600
@@ -54,5 +63,5 @@ G0 Z2
 Z10
 M5
 (Stop the spindle)
-M0
+M0 ;Stop the spindle
 M30

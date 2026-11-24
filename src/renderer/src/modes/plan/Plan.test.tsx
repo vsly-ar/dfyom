@@ -381,6 +381,14 @@ describe('Plan mode', () => {
             rule: 'maxFeedRate',
             params: {},
           },
+          {
+            code: 'plan.machine',
+            severity: 'info',
+            message: 'Z headroom only partly checked: enter the spoilboard thickness',
+            field: 'machine',
+            rule: 'zHeadroomUnknown',
+            params: { missing: 'spoilboardThickness' },
+          },
         ],
         softLimitChecked: false,
         regenerated: [],
@@ -388,7 +396,7 @@ describe('Plan mode', () => {
     )
     await t.user.click(within(t.nav()).getByRole('button', { name: 'Export gCode…' }))
     const dialog = await screen.findByRole('dialog', { name: 'gCode exported' })
-    expect(t.bridge.exportDialogNames).toEqual(['Plan 1'])
+    expect(t.bridge.exportDialogNames).toEqual(['bracket']) // short file name (DF62)
     expect(t.callsOf('plan.export')).toEqual([
       { planId: t.planId(), target: '/out/Plan 1.nc', confirm: true },
     ])
@@ -401,6 +409,15 @@ describe('Plan mode', () => {
     expect(within(dialog).getByText('About 12 min 5 s without tool changes')).toBeInTheDocument()
     expect(within(dialog).getByRole('list', { name: 'Export warnings' })).toHaveTextContent(
       'Feed 1200 mm/min exceeds the Z max feed rate 1000 mm/min.',
+    )
+    // DF68: the Z headroom note is a line of its own, not an export warning
+    expect(
+      within(dialog).getByText(
+        'Z headroom checked as if there were no spoilboard: enter the spoilboard thickness (0 if none) in the machine.',
+      ),
+    ).toBeInTheDocument()
+    expect(within(dialog).getByRole('list', { name: 'Export warnings' })).not.toHaveTextContent(
+      'Z headroom',
     )
     await expectNoAxeViolations()
     await t.user.click(within(dialog).getByRole('button', { name: 'Close' }))
@@ -462,6 +479,57 @@ describe('Plan mode', () => {
         'The design’s tool field changed. This plan keeps the tool chosen here.',
       ),
     ).toBeInTheDocument()
+  })
+
+  it('shows an operation’s findings first in its inspector; a row’s count focuses them (DF67)', async () => {
+    const t = await renderPlan({
+      // a drill without cutting data: the drilling has errors (no feeds values)
+      setup: async (s) => {
+        const planId = Object.keys(s.d.doc.plans)[0]!
+        const op = s
+          .plan(planId)
+          .setups.flatMap((x) => x.operations)
+          .find((o) => o.designOperationIds[0] === 'drill1')!
+        await s.run('plan.tool.assign', {
+          planId,
+          planOperationId: op.id,
+          toolLibraryItemId: s.tools.drill6,
+        })
+      },
+    })
+    await waitFor(() => expect(t.rows().length).toBeGreaterThan(0))
+    const row = [...t.rows()].find((b) => /^Drilling 1/.test(b.textContent ?? ''))!
+    // the count's tooltip says what a click does
+    const count = await waitFor(() => {
+      const el = row.querySelector<HTMLElement>('[title*="error"]')
+      expect(el).not.toBeNull()
+      return el!
+    })
+    expect(count.title).toMatch(/^\d+ errors?: click to show them in the inspector$/)
+    // no action button covers it on hover: the row's actions are its context menu
+    expect(within(row.closest('li')!).queryByRole('button', { name: /^Actions for / })).toBeNull()
+    // a click selects the operation (not a toggle) and focuses its Checks block, first in the body
+    await t.user.click(count)
+    const checks = await within(t.inspector()).findByRole('region', { name: 'Checks' })
+    await waitFor(() => expect(checks).toHaveFocus())
+    expect(row).toHaveAttribute('aria-pressed', 'true')
+    const items = within(checks).getAllByRole('listitem')
+    expect(items[0]).toHaveTextContent(/^Error:/)
+    const groups = within(t.inspector()).getAllByRole('region')
+    expect(groups.indexOf(checks)).toBeLessThan(
+      groups.indexOf(within(t.inspector()).getByRole('region', { name: 'Tool' })),
+    )
+    // a second click keeps it selected
+    await t.user.click(count)
+    expect(row).toHaveAttribute('aria-pressed', 'true')
+    await expectNoAxeViolations()
+    // a row without counts has at most notes (core `info`, not counted on the row) in its block
+    const clean = [...t.rows()].find((b) => b.querySelector('[title*="click to show"]') === null)!
+    await t.user.click(clean)
+    await waitFor(() => expect(clean).toHaveAttribute('aria-pressed', 'true'))
+    const notes = within(t.inspector()).queryByRole('region', { name: 'Checks' })
+    for (const item of notes === null ? [] : within(notes).getAllByRole('listitem'))
+      expect(item).toHaveTextContent(/^Note:/)
   })
 
   it('shows a finalized plan read-only with the way out', async () => {

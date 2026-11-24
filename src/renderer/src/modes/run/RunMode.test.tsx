@@ -105,7 +105,7 @@ async function renderRun(opts: { bottom?: boolean; plate?: string } = {}) {
     await s.run('library.machine.update', {
       id: s.machineId,
       revision: 1,
-      values: { ...libraryInput(machineValues()), probe: { plateThickness: opts.plate } },
+      values: { ...libraryInput(machineValues()), probePlateThickness: opts.plate },
     })
   // a bottom facing too: setups Bottom, Top (task E2)
   if (opts.bottom === true)
@@ -326,6 +326,26 @@ describe('Run mode', () => {
     const again = screen.getByRole('dialog', { name: 'Tool change 2' })
     await t.user.click(within(again).getByRole('button', { name: 'Continue' }))
     expect(t.callsOf('run.job.continue')).toEqual([{ jobId: 'run-1', toolChange: 2 }])
+  })
+
+  // docs/modes/z-reference.md#dfyom-run (DF69)
+  it('tool change on a Z reference other than the top face names the surface and the spot', async () => {
+    const t = await renderRun()
+    await connectAndHome(t)
+    const toolChange = {
+      n: 2,
+      name: 'Flat 4',
+      surface: 'Facing 1 floor, 0.50 below the stock top',
+      spot: 'X50 Y30',
+    }
+    t.machine.push({ state: 'Idle', ...t.machine.job('toolChange', { toolChange }) })
+    const dialog = await screen.findByRole('dialog', { name: 'Tool change 2' })
+    expect(
+      within(dialog).getByText(
+        'Touch off the new tool on Facing 1 floor, 0.50 below the stock top at X50 Y30 and set Z zero there.',
+      ),
+    ).toBeInTheDocument()
+    await expectNoAxeViolations()
   })
 
   it('a failed run opens a blocking dialog with what happened and what to do next', async () => {

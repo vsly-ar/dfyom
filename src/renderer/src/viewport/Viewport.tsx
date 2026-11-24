@@ -78,9 +78,11 @@ import {
   type ViewportMesh,
 } from './mesh'
 import type { AnchorOverlay, FrameOverlay } from './Overlays'
+import type { DeviationView } from './deviation'
 import type { TabOverlay } from './TabMarkers'
 import type { ClonePathOverlay } from './clone-path'
 import type { ReferenceGhostView } from './ReferenceGhost'
+import type { ReferenceOverlayView } from './ReferenceOverlay'
 import type { RunScene } from './RunLayer'
 import { CameraControlsImpl, Scene } from './Scene'
 import { linesBounds, placeBox } from './toolpath-lines'
@@ -127,6 +129,15 @@ export interface ViewportProps {
    * part frame) widens the framing bounds.
    */
   ghosts?: readonly (ReferenceGhostView & { readonly box: Box })[] | null
+  /** The Reference panel's section loops, sharp corners and hovered level on the ghost (DF60). */
+  referenceOverlay?: ReferenceOverlayView | null
+  /** The compare overlay on the part (DF60 P5): diverging map, missing volumes, chosen region. */
+  deviation?: DeviationView | null
+  /**
+   * A box to frame (part frame), from the current view direction; a new `seq` frames again (a
+   * compare region chosen in the Reference panel, DF60 P5).
+   */
+  focus?: { readonly box: Box; readonly seq: number } | null
   /** Operations drawn with a light `--info` tint (edited in the plan: the plan scene, task E3b). */
   tinted?: ReadonlySet<string> | null
   /** Operations drawn selected besides `selectedOperation` (a Clones' source, v0.4 task U3). */
@@ -253,6 +264,9 @@ export function Viewport({
   tabs = null,
   guide = null,
   ghosts = null,
+  referenceOverlay = null,
+  deviation = null,
+  focus = null,
   tinted = null,
   selectedAlso = null,
   clonePath = null,
@@ -406,6 +420,18 @@ export function Viewport({
     const tgt = c.getTarget(new Vector3(), true)
     lookFrom(normalize([pos.x - tgt.x, pos.y - tgt.y, pos.z - tgt.z]))
   }, [lookFrom])
+  // a requested box (a compare region, DF60 P5): fitted from the current view direction
+  useEffect(() => {
+    const c = controls.current
+    const f = focus
+    if (!c || f == null) return
+    const camera = c.camera as PerspectiveCamera
+    const pos = c.getPosition(new Vector3(), true)
+    const tgt = c.getTarget(new Vector3(), true)
+    const dir = normalize([pos.x - tgt.x, pos.y - tgt.y, pos.z - tgt.z])
+    const { position: p, target: t } = fitPose(dir, f.box, camera.aspect || 1, FOV_DEG)
+    void c.setLookAt(p[0], p[1], p[2], t[0], t[1], t[2], animate)
+  }, [focus, animate])
 
   // --- view cube: the setup (Plan, Run), the view shown, hover and clicks ---
   const setupFrame: Placement | null = run?.frame ?? null
@@ -724,6 +750,8 @@ export function Viewport({
           clonePath={pick ? null : clonePath}
           guide={guide}
           ghosts={ghosts}
+          referenceOverlay={pick ? null : referenceOverlay}
+          deviation={deviation}
           seeThrough={seeThrough}
           reducedMotion={reducedMotion}
           controlsRef={controls}

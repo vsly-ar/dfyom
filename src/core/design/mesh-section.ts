@@ -65,6 +65,119 @@ export function meshSection(
   return Ok(Float32Array.from(out))
 }
 
+/** A chained section: vertices `[u0, v0, u1, v1, …]` in the frame; `closed` unless the mesh is open. */
+export interface SectionChain {
+  readonly points: Float64Array
+  readonly closed: boolean
+}
+
+/**
+ * The section of a mesh by the plane `w = level` after `matrix` (as `meshSection`) chained into
+ * loops (DF60 P1, promoted from the test slicer `sliceMesh`): each crossing point is keyed by its
+ * mesh edge (the two vertices as read), so neighbouring triangles share it exactly and loops
+ * close without welding by distance. A chain that does not close (an open mesh) comes back with
+ * `closed: false`. Directions are as found; the caller orients loops by nesting.
+ * Doc: docs/modes/reference-tools.md#fitting
+ */
+export function sectionChains(
+  positions: Float32Array,
+  matrix: readonly number[],
+  level: number,
+  steps: Steps = noSteps,
+): AppResult<SectionChain[]> {
+  const m = matrix
+  const n = Math.floor(positions.length / 9)
+  const key = (o: number): string => `${positions[o]},${positions[o + 1]},${positions[o + 2]}`
+  const points = new Map<string, [number, number]>()
+  /** Edge key → the (up to two) edge keys it is joined to by a segment. */
+  const links = new Map<string, string[]>()
+  const link = (a: string, b: string) => {
+    const la = links.get(a)
+    if (la === undefined) links.set(a, [b])
+    else la.push(b)
+  }
+  const u = [0, 0, 0]
+  const v = [0, 0, 0]
+  const w = [0, 0, 0]
+  for (let t = 0; t < n; t++) {
+    if (t % STEP_TRIANGLES === 0 && t > 0) {
+      const s = steps.step({ done: t, total: n, label: 'Reference section' })
+      if (s.isErr()) return s
+    }
+    let above = 0
+    for (let k = 0; k < 3; k++) {
+      const o = 9 * t + 3 * k
+      const x = positions[o]!
+      const y = positions[o + 1]!
+      const z = positions[o + 2]!
+      u[k] = m[0]! * x + m[4]! * y + m[8]! * z + m[12]!
+      v[k] = m[1]! * x + m[5]! * y + m[9]! * z + m[13]!
+      w[k] = m[2]! * x + m[6]! * y + m[10]! * z + m[14]! - level
+      if (w[k]! >= 0) above++
+    }
+    if (above === 0 || above === 3) continue
+    const ends: string[] = []
+    for (let k = 0; k < 3; k++) {
+      const a = k
+      const b = (k + 1) % 3
+      if (w[a]! >= 0 === w[b]! >= 0) continue
+      const ka = key(9 * t + 3 * a)
+      const kb = key(9 * t + 3 * b)
+      const edge = ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`
+      if (!points.has(edge)) {
+        const f = w[a]! / (w[a]! - w[b]!)
+        points.set(edge, [u[a]! + f * (u[b]! - u[a]!), v[a]! + f * (v[b]! - v[a]!)])
+      }
+      ends.push(edge)
+    }
+    if (ends.length !== 2 || ends[0] === ends[1]) continue
+    link(ends[0]!, ends[1]!)
+    link(ends[1]!, ends[0]!)
+  }
+  const seen = new Set<string>()
+  const chains: SectionChain[] = []
+  const walk = (start: string, first: string | undefined): string[] => {
+    const out = [start]
+    seen.add(start)
+    let prev = start
+    let cur = first
+    while (cur !== undefined && !seen.has(cur)) {
+      out.push(cur)
+      seen.add(cur)
+      const next: string | undefined = (links.get(cur) ?? []).find(
+        (x) => x !== prev && !seen.has(x),
+      )
+      prev = cur
+      cur = next
+    }
+    return out
+  }
+  // open chains first, from their ends (an edge key with one link)
+  for (const [k, l] of links)
+    if (!seen.has(k) && l.length === 1) {
+      const keys = walk(k, l[0])
+      chains.push({ points: flat(keys, points), closed: false })
+    }
+  for (const [k, l] of links) {
+    if (seen.has(k)) continue
+    const keys = walk(k, l[0])
+    const last = keys[keys.length - 1]!
+    const closed = keys.length > 2 && (links.get(last) ?? []).includes(k)
+    chains.push({ points: flat(keys, points), closed })
+  }
+  return Ok(chains)
+}
+
+function flat(keys: readonly string[], points: Map<string, [number, number]>): Float64Array {
+  const out = new Float64Array(keys.length * 2)
+  keys.forEach((k, i) => {
+    const p = points.get(k)!
+    out[2 * i] = p[0]
+    out[2 * i + 1] = p[1]
+  })
+  return out
+}
+
 /**
  * The axis-aligned box (mm) of a triangle soup after `matrix` (column-major 4 × 4, source units →
  * the part frame, the ghost's matrix): the reference's exact extent, where the placed box is

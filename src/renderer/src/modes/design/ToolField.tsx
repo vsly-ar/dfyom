@@ -187,6 +187,10 @@ export function autoChangeReason(
       return w.type(from, designMessages.kinds[op.kind].toLowerCase())
     case 'reach':
       return w.reach(from)
+    case 'libraryFits':
+      return w.libraryFits(from)
+    case 'libraryRemoved':
+      return w.libraryRemoved(from)
     default:
       return w.other(from)
   }
@@ -293,7 +297,10 @@ function listedOptions(
     t.flutes(f.fluteCount),
   ]
   for (const f of candidates?.fitting ?? []) {
-    const reasons = f.reasons.filter((r) => !r.startsWith('diameter ')).map(sentenceCase)
+    // the diameter is in the label; the reach reason (DF55, in mm) is for agents' ranking
+    const reasons = f.reasons
+      .filter((r) => !/^(diameter|stickout|flute length) /.test(r))
+      .map(sentenceCase)
     options.push({
       value: `${LIB}${f.toolLibraryItemId}`,
       label: t.library(f.name, lengthSource(f.diameter, part.units)),
@@ -486,7 +493,7 @@ export function ToolField({
                     return { fix: wider, ...(fix !== undefined ? { alternative: fix } : {}) }
                   })()
                 : {}),
-              ...(w.code === 'dfm.chamferNoTool'
+              ...(w.code === 'dfm.chamferNoTool' || w.code === 'dfm.noFittingTool'
                 ? {
                     fix: {
                       label: t.newTool,

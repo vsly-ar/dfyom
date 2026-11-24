@@ -5,7 +5,7 @@
 import { EPSILON, type Vec2 } from '../geometry/model'
 import { Err, Ok, type AppResult } from '../../shared/result'
 import { noSteps, type Steps } from '../workers/steps'
-import { commonIssues, levels, passSteps, toolpath } from './common'
+import { commonIssues, cutLevels, passSteps, toolpath } from './common'
 import type { FacingInput, Toolpath } from './model'
 import { MoveBuilder } from './path'
 
@@ -65,7 +65,7 @@ export function generateFacing(input: FacingInput, steps: Steps = noSteps): AppR
   const retract = heights.retractHeight
   const b = new MoveBuilder()
   const at = (u: number, v: number, z: number): [number, number, number] => [...xy(u, v), z]
-  const zs = levels(0, -op.depth, cutting.stepdown)
+  const zs = cutLevels(0, -op.depth, cutting.stepdown, input.material)
   const pass = passSteps(steps, zs.length)
   for (const [k, z] of zs.entries()) {
     const step = pass(k)

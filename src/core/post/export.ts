@@ -8,11 +8,12 @@
  */
 import type { Machine } from '../library/machine'
 import type { PlanWarning } from '../plan/checks'
+import { zHeadroomFindings, zHeadroomUnknown, type ZHeadroomTool } from '../plan/z-headroom'
 import { fail, Ok, type AppResult, type Option } from '../../shared/result'
 import { arcSweep, expandDrill, PECK_CLEARANCE } from '../toolpath/stats'
 import type { Move, Toolpath, Vec3 } from '../toolpath/model'
 import { DEFAULT_SPIN_UP_SECONDS, postGrblLines, type PostOptions } from './grbl/post'
-import type { Block, MachiningProgram, ProgramTool } from './program'
+import type { Block, MachiningProgram, ProgramTool, ProgramZRef, SetupHeader } from './program'
 
 /** One plan operation's toolpath with its tool copy, in machining order. */
 export interface ExportOperation {
@@ -26,12 +27,28 @@ export interface ExportOperation {
    * the passes naming that operation (`Pass.operationId`) whenever it changes.
    */
   readonly positions?: Readonly<Record<string, string>>
+  /** The tool's stickout (mm), for the Z headroom check (DF68); absent = not checked. */
+  readonly stickout?: number
+  /** Z reference of the tool run this operation starts (DF69); absent = the up face, no spot. */
+  readonly zRef?: ProgramZRef
 }
 
 export interface ExportInput {
   /** Plan name. */
   readonly name: string
-  readonly setup: { readonly name: string; readonly clearanceHeight: number }
+  readonly setup: {
+    readonly name: string
+    readonly clearanceHeight: number
+    /** Setup instructions for the header (DF58). */
+    readonly header?: SetupHeader
+    /** The setup's id, named by the Z headroom findings (`params.setupId`). */
+    readonly id?: string
+    /**
+     * Stock extent along the spindle axis (mm; Z0 on its top): enables the Z headroom check
+     * (DF68, docs/architecture/grbl.md#z-headroom-hardening-df68).
+     */
+    readonly stockThickness?: number
+  }
   readonly operations: readonly ExportOperation[]
   /** The plan's machine copy; export requires one (`post.noMachine`). */
   readonly machine: Option<Machine>
@@ -154,10 +171,17 @@ export function toMachiningProgram(
       where: 'toMachiningProgram',
       issues: [{ path: ['resumeFrom'], rule: 'range', message: 'must name an operation' }],
     })
+  // the tool run's Z reference (DF69) is on its first operation; a resume inside a run needs it
+  let runTool: string | undefined
+  let runZRef: ProgramZRef | undefined
   for (const [k, op] of input.operations.entries()) {
     const tp = op.toolpath
     const n = numbers.get(tp.tool) ?? numbers.size + 1
     numbers.set(tp.tool, n)
+    if (tp.tool !== runTool) {
+      runTool = tp.tool
+      runZRef = op.zRef
+    }
     // left out before the resume point: only the tool numbers count
     if (k < resumeFrom) continue
     const resume = k === resumeFrom && resumeFrom > 0
@@ -165,7 +189,12 @@ export function toMachiningProgram(
     if (resume) blocks.push({ kind: 'spindle', rpm: 'off' })
     if (tp.tool !== tool || resume) {
       tool = tp.tool
-      blocks.push({ kind: 'toolChange', number: n, tool: op.tool })
+      blocks.push({
+        kind: 'toolChange',
+        number: n,
+        tool: op.tool,
+        ...(runZRef === undefined ? {} : { zRef: runZRef }),
+      })
       rpm = undefined
     }
     if (tp.spindleSpeed !== rpm) {
@@ -190,6 +219,7 @@ export function toMachiningProgram(
   return Ok({
     name: input.name,
     setupName: input.setup.name,
+    ...(input.setup.header === undefined ? {} : { setup: input.setup.header }),
     units,
     spindleControl: machine.spindle.control,
     clearanceZ,
@@ -198,6 +228,18 @@ export function toMachiningProgram(
 }
 
 // ── Walking the program ───────────────────────────────────────────────────────────────────
+
+/**
+ * Whether a tool change pauses (`M0`): every one but the first, and the first when it is not
+ * loaded or its Z reference is not the up face (DF69, docs/modes/z-reference.md#exported-gcode).
+ */
+export function toolChangePauses(
+  b: Extract<Block, { kind: 'toolChange' }>,
+  first: boolean,
+  firstToolLoaded: boolean,
+): boolean {
+  return !first || !firstToolLoaded || (b.zRef !== undefined && !b.zRef.top)
+}
 
 type Motion = Extract<Block, { kind: 'rapid' | 'feed' | 'arc' }>
 
@@ -232,7 +274,12 @@ function walk(
       const first = !loaded
       loaded = true
       if (!first) clearance()
-      if (!first || !firstToolLoaded) pos = [undefined, undefined, p.clearanceZ]
+      if (toolChangePauses(b, first, firstToolLoaded)) {
+        // DF69: the rapid to the touch-off spot before the pause
+        if (b.zRef !== undefined)
+          go({ kind: 'rapid', to: [b.zRef.at[0], b.zRef.at[1], p.clearanceZ] })
+        pos = [undefined, undefined, p.clearanceZ]
+      }
     }
   }
   clearance()
@@ -298,7 +345,7 @@ export function programStats(
     (b) => {
       if (b.kind === 'spindle' && b.rpm !== 'off') dwell += spin
       if (b.kind === 'toolChange') {
-        if (loaded || !firstToolLoaded) toolChanges++
+        if (toolChangePauses(b, !loaded, firstToolLoaded)) toolChanges++
         loaded = true
       }
     },
@@ -341,8 +388,9 @@ function arcBounds(from: Vec3, b: Extract<Block, { kind: 'arc' }>): Vec3[] {
 /**
  * `plan.machine` warnings (docs/architecture/grbl.md#export-checks): feed rates against the
  * max feed rate of every axis a move moves, spindle speeds against the spindle range, the
- * program's extent against the travel, and with `workZero` its machine positions against the
- * soft limits [−travel, 0] (GRBL's default homing direction).
+ * program's extent against the travel, with `workZero` its machine positions against the
+ * soft limits [−travel, 0] (GRBL's default homing direction), and with the stock thickness the Z
+ * headroom per tool (DF68).
  */
 export function machineChecks(
   input: ExportInput,
@@ -423,9 +471,11 @@ export function machineChecks(
   // change that pauses (the user re-zeroes Z for the new tool's length).
   const lo = [Infinity, Infinity, p.clearanceZ]
   const hi = [-Infinity, -Infinity, p.clearanceZ]
-  const zLo = [firstToolLoaded ? p.clearanceZ : Infinity]
-  const zHi = [firstToolLoaded ? p.clearanceZ : -Infinity]
-  let zeroKnown = firstToolLoaded
+  const head = p.blocks.find((b) => b.kind === 'toolChange')
+  // a first tool that pauses (not loaded, or its Z0 off the up face, DF69): Z is zeroed again
+  let zeroKnown = head === undefined || !toolChangePauses(head, true, firstToolLoaded)
+  const zLo = [zeroKnown ? p.clearanceZ : Infinity]
+  const zHi = [zeroKnown ? p.clearanceZ : -Infinity]
   let tools = 0
   walk(
     p,
@@ -471,5 +521,46 @@ export function machineChecks(
         params: { axis, min: from, max: to, travel },
       })
   })
+  out.push(...zHeadroomChecks(input, p, machine))
   return out
+}
+
+/**
+ * The Z headroom per tool (DF68): the program's top is its clearance Z (the post requires every
+ * toolpath below it), the lowest Z per tool comes from the toolpaths. Only with the stock
+ * thickness; `zHeadroomUnknown` when the machine lacks a field.
+ */
+function zHeadroomChecks(input: ExportInput, p: MachiningProgram, machine: Machine): PlanWarning[] {
+  const stockThickness = input.setup.stockThickness
+  if (stockThickness === undefined) return []
+  const tools: ZHeadroomTool[] = []
+  for (const op of input.operations) {
+    if (op.stickout === undefined) continue
+    let zMin = Infinity
+    for (const pass of op.toolpath.passes)
+      for (const m of pass.moves) zMin = Math.min(zMin, m.kind === 'drill' ? m.bottom : m.to[2])
+    const name = op.tool.name
+    const same = tools.find((t) => t.toolName === name && t.stickout === op.stickout)
+    if (same !== undefined) {
+      if (Number.isFinite(zMin) && !(zMin >= (same.zMin ?? Infinity)))
+        tools[tools.indexOf(same)] = { ...same, zMin }
+      continue
+    }
+    tools.push({
+      planOperationId: op.toolpath.planOperationId,
+      toolName: name,
+      stickout: op.stickout,
+      ...(Number.isFinite(zMin) ? { zMin } : {}),
+    })
+  }
+  const unknown = zHeadroomUnknown(machine)
+  return [
+    ...zHeadroomFindings(machine, {
+      setupId: input.setup.id ?? '',
+      clearance: p.clearanceZ,
+      stockThickness,
+      tools,
+    }),
+    ...(unknown === undefined ? [] : [unknown]),
+  ]
 }

@@ -44,10 +44,11 @@ import {
   type AnalyticOperation,
 } from './model'
 import { inradius, slotCoversOpening } from './operations'
+import { rectangleWallCorner } from './open-sides'
 import { profileChain } from './outline'
 import { SHAPE_CHORD_BUDGET, shapeChords } from './shape-solids'
 import { resolveProfileTabs } from './tab-hold'
-import { FIT_SLACK, shapeMeasure, type ShapeMeasure } from './shape-measure'
+import { FIT_SLACK, shapeMeasure, wallCorners, type ShapeMeasure } from './shape-measure'
 import { chamferFit, reachDepth, toolFit } from './tool-fit'
 
 /** A library tool as the DFM rules see it (mm). */
@@ -161,7 +162,7 @@ export function parameterChecks(
       options.region2d !== undefined && (op.kind === 'pocket' || op.kind === 'profile')
         ? isAnalyticOperation(op)
           ? undefined
-          : shapeMeasure(options.region2d, op)
+          : shapeMeasure(options.region2d, op, stock)
         : undefined
     const tool =
       own === undefined ? [] : ownTool(op, own, stock, lib, options, notInLibrary, measure)
@@ -175,7 +176,9 @@ export function parameterChecks(
         return [...facing(op, options.unitSystem), ...tool]
       case 'pocket':
         return [
-          ...(isAnalyticOperation(op) ? pocket(op, lib) : shapePocket(op, stock, lib, measure)),
+          ...(isAnalyticOperation(op)
+            ? pocket(op, stock, lib)
+            : shapePocket(op, stock, lib, measure)),
           ...reach(op, stock, lib, own, measure),
           ...heavy,
           ...tool,
@@ -416,10 +419,19 @@ function facing(op: Op<'facing'>, unitSystem: 'metric' | 'inch'): DfmWarning[] {
 const narrowest = (op: Op<'pocket'> | Op<'profile'>): number =>
   isAnalyticOperation(op) ? 2 * inradius(op.shape.contour) : Infinity
 
-/** Inside corners (pocket, inside profile): r = 0 always warns; r below the smallest tool radius. */
-function corners(op: Op<'pocket'> | Op<'profile'>, lib: Library): DfmWarning[] {
+/**
+ * Inside corners (pocket, inside profile): r = 0 always warns; r below the smallest tool radius.
+ * With `stock` (a pocket's local stock) corners on or beyond the stock edge are open and do not
+ * count (DF61 follow-up): a pocket without a wall corner gets no corner warning.
+ */
+function corners(
+  op: Op<'pocket'> | Op<'profile'>,
+  lib: Library,
+  stock?: StockGeometry,
+): DfmWarning[] {
   const c = op.shape.contour
   if (c.kind !== 'rectangle') return []
+  if (stock !== undefined && !rectangleWallCorner(op.shape.center, c, stock)) return []
   const min = lib.minEndMill === undefined ? undefined : lib.minEndMill / 2
   const suggestion = min === undefined ? undefined : atLeast(min)
   if (c.cornerRadius <= EPSILON)
@@ -449,7 +461,7 @@ function corners(op: Op<'pocket'> | Op<'profile'>, lib: Library): DfmWarning[] {
   return []
 }
 
-function pocket(op: AnalyticOperation<'pocket'>, lib: Library): DfmWarning[] {
+function pocket(op: AnalyticOperation<'pocket'>, stock: StockGeometry, lib: Library): DfmWarning[] {
   const out: DfmWarning[] = []
   const size = narrowest(op)
   if (lib.minEndMill !== undefined && size < lib.minEndMill - TOOL_MATCH_TOLERANCE)
@@ -477,7 +489,7 @@ function pocket(op: AnalyticOperation<'pocket'>, lib: Library): DfmWarning[] {
         { suggestion: atMost(deepest) },
       ),
     )
-  out.push(...corners(op, lib), ...floorRadiusRule(op, lib))
+  out.push(...corners(op, lib, stock), ...floorRadiusRule(op, lib))
   return out
 }
 
@@ -554,8 +566,10 @@ function drilling(op: Op<'drilling'>, stock: StockGeometry, lib: Library): DfmWa
         ),
       )
   }
-  // through holes: the material below `on` along the normal
-  const depth = op.bottom.kind === 'through' ? op.onZ + stock.thickness : op.bottom.depth
+  // through holes: the material below `on` along the normal (less what an earlier setup
+  // cleared under the hole, DF61)
+  const depth =
+    op.bottom.kind === 'through' ? op.onZ + (op.throughDepth ?? stock.thickness) : op.bottom.depth
   const deepest = HOLE_DEPTH_RATIO * op.diameter
   if (depth > deepest + EPSILON)
     out.push(
@@ -818,7 +832,8 @@ function slotTool(op: Op<'profile'>, lib: Library): DfmWarning[] {
 
 /**
  * Tab rules of a through cut of a closed loop with `count` tabs (`tabs.positions` count as
- * theirs): `dfm.tabsUnused` when the slot covers the whole opening, `dfm.tabsNone`, `dfm.tabsThin`.
+ * theirs): `dfm.tabsUnused` when the slot covers the whole opening, `dfm.tabsNone`, `dfm.tabsThin`,
+ * `dfm.tabsThick` (DF50).
  */
 function tabRules(
   op: Op<'profile'>,
@@ -869,6 +884,21 @@ function tabRules(
             { suggestion: atLeast(limit) },
           ),
         )
+    // DF50: tabs stand on the material an earlier setup left under the slot; at or above its
+    // top they leave nothing to cut (the stock extent itself is a validation error)
+    const material = op.throughDepth
+    if (material !== undefined && op.tabs.thickness >= material - EPSILON)
+      out.push(
+        warning(
+          'dfm.tabsThick',
+          op,
+          'tabs.thickness',
+          `tabs.thickness ${mm(op.tabs.thickness)} reaches the stock face: an earlier setup ` +
+            `leaves only ${mm(material)} of material under the slot`,
+          { thickness: op.tabs.thickness, material },
+          { suggestion: atMost(material) },
+        ),
+      )
   }
   return out
 }
@@ -885,21 +915,39 @@ const point = (p: readonly number[]): string => `(${mm(p[0]!)}, ${mm(p[1]!)})`
 /**
  * `dfm.shapeOutsideFace`: a general pocket's placed shape reaches outside the face rectangle of
  * its direction (v0.1 rectangles and circles keep v0.2's behaviour: an open-sided pocket is a
- * way to cut a rebate), from the placed loops' exact bounds.
+ * way to cut a rebate), from the placed loops' exact bounds. Since DF53 `info` (an open-sided
+ * pocket) while the shape's box overlaps the face; a warning only when it lies wholly outside.
  */
 function outsideFace(op: Op<'pocket'>, stock: StockGeometry, bounds: Bounds2): DfmWarning[] {
-  const all = boxMargins(op, placed(bounds, op.shape.center), stock)
+  const box = placed(bounds, op.shape.center)
+  const all = boxMargins(op, box, stock)
   const sides = all.filter(([, m]) => m < -EPSILON).map(([s]) => s)
   if (sides.length === 0) return []
   const by = -Math.min(...all.map(([, m]) => m))
+  const off =
+    box.max[0] <= EPSILON ||
+    box.max[1] <= EPSILON ||
+    box.min[0] >= stock.length - EPSILON ||
+    box.min[1] >= stock.width - EPSILON
   return [
-    warning(
-      'dfm.shapeOutsideFace',
-      op,
-      'center',
-      `the shape reaches ${mm(by)} outside the stock face at ${sides.join(', ')}`,
-      { sides, by },
-    ),
+    off
+      ? warning(
+          'dfm.shapeOutsideFace',
+          op,
+          'center',
+          `the shape lies outside the stock face (${mm(by)} beyond ${sides.join(', ')}): ` +
+            'the pocket cuts nothing',
+          { sides, by, wholly: true },
+        )
+      : warning(
+          'dfm.shapeOutsideFace',
+          op,
+          'center',
+          `the shape reaches ${mm(by)} outside the stock face at ${sides.join(', ')}: an ` +
+            'open-sided pocket',
+          { sides, by },
+          { severity: 'info' },
+        ),
   ]
 }
 
@@ -912,9 +960,11 @@ function shapeCorners(
   op: Op<'pocket'> | Op<'profile'>,
   m: ShapeMeasure,
   lib: Library,
+  stock: StockGeometry,
 ): DfmWarning[] {
   const min = lib.minEndMill === undefined ? undefined : lib.minEndMill / 2
-  const bad = m.corners.filter(
+  // corners whose leftover lies beyond the stock are open (DF53): only air is left there
+  const bad = wallCorners(m, op.shape.center, stock, min ?? 0).filter(
     (c) => c.radius <= EPSILON || (min !== undefined && c.radius < min - TOOL_MATCH_TOLERANCE),
   )
   const suggestion = min === undefined ? {} : { suggestion: atLeast(min) }
@@ -1005,7 +1055,7 @@ function shapePocket(
       ),
     )
   }
-  out.push(...shapeCorners(op, m, lib), ...floorRadiusRule(op, lib))
+  out.push(...shapeCorners(op, m, lib, stock), ...floorRadiusRule(op, lib))
   return out
 }
 
@@ -1078,9 +1128,10 @@ function shapeProfile(
 ): DfmWarning[] {
   const out: DfmWarning[] = []
   if (m !== undefined) {
-    if (op.side === 'outside')
+    // a step (blind, DF53) running off the stock is a rebate, and has no tabs to hold
+    if (op.side === 'outside' && op.depth === undefined)
       out.push(...slotStock(op, boxMargins(op, placed(m.bounds, op.shape.center), stock)))
-    out.push(...shapeCorners(op, m, lib))
+    out.push(...shapeCorners(op, m, lib, stock))
   }
   out.push(...slotTool(op, lib))
   const { closed } = profileChain(op)

@@ -14,7 +14,7 @@ import { regionLoops, type Region } from '../geometry/2d/model'
 import type { Region2dPort } from '../geometry/2d/port'
 import { Err, Ok, type AppResult } from '../../shared/result'
 import { noSteps, type Steps } from '../workers/steps'
-import { commonIssues, levels, passSteps, toolpath } from './common'
+import { commonIssues, cutLevels, cutTop, passSteps, toolpath } from './common'
 import type { GeneratorInput, PocketStrategy, Toolpath, ToolpathTool } from './model'
 import { flat, MoveBuilder, segLength, segsLength, slope, walkRing, type Seg } from './path'
 import { TOOL_FIT_TOLERANCE } from './pocket'
@@ -197,13 +197,14 @@ export function generateRegionPocket(
     else if (pos[2] < retract) b.rapid([pos[0], pos[1], retract])
     b.rapid(at(p, retract))
   }
-  const cutRing = (ring: readonly Seg[], z: number) => {
-    for (const s of flat(ring, z)) b.seg(s, feed)
+  const cutRing = (ring: readonly Seg[], z: number, f = feed) => {
+    for (const s of flat(ring, z)) b.seg(s, f)
   }
 
-  const roughZ = levels(op.onZ, floor, cutting.stepdown)
+  // over the material earlier cuts left (DF61): no passes wholly in air
+  const roughZ = cutLevels(op.onZ, floor, cutting.stepdown, input.material)
   const finishing = finishPieces.length > 0
-  const finishZ = finishing ? levels(op.onZ, floor, st.finishStepdown) : []
+  const finishZ = finishing ? cutLevels(op.onZ, floor, st.finishStepdown, input.material) : []
   const pass = passSteps(steps, roughZ.length + finishZ.length)
 
   /** Enter a leaf at level z from `top`; returns the loop index and the started ring. */
@@ -314,7 +315,7 @@ export function generateRegionPocket(
     cutNode(n, z)
   }
 
-  let top = op.onZ
+  let top = cutTop(op.onZ, floor, input.material)
   for (const [k, z] of roughZ.entries()) {
     const s = pass(k)
     if (s.isErr()) return Err(s.unwrapErr())
@@ -332,6 +333,8 @@ export function generateRegionPocket(
 
   if (finishing) {
     b.pass('finish')
+    // DF74: the finishing feed keeps the chip load at the allowance's radial engagement
+    const finishFeed = cutting.finishFeedRate ?? feed
     const finishRegion: Region = { pieces: finishPieces }
     const loops = regionLoops(finishRegion)
       .map((l) => loopRing(l, cw))
@@ -354,10 +357,10 @@ export function generateRegionPocket(
         const s = pass(roughZ.length + k)
         if (s.isErr()) return Err(s.unwrapErr())
         b.line(at(lead.start, z), cutting.plungeRate)
-        for (const sg of flat(lead.leadIn, z)) b.seg(sg, feed)
-        cutRing(lead.ring, z)
-        for (const sg of flat(lead.leadOut, z)) b.seg(sg, feed)
-        if (k < finishZ.length - 1) b.line(at(lead.start, z), feed)
+        for (const sg of flat(lead.leadIn, z)) b.seg(sg, finishFeed)
+        cutRing(lead.ring, z, finishFeed)
+        for (const sg of flat(lead.leadOut, z)) b.seg(sg, finishFeed)
+        if (k < finishZ.length - 1) b.line(at(lead.start, z), finishFeed)
       }
       const pos = b.position!
       b.rapid([pos[0], pos[1], retract])

@@ -148,7 +148,8 @@ export function measureOf(input: ChoiceInput): ShapeMeasure | undefined {
   const g = input.geometry
   if (input.region2d === undefined || (g.kind !== 'pocket' && g.kind !== 'profile'))
     return undefined
-  return isAnalyticOperation(g) ? undefined : shapeMeasure(input.region2d, g)
+  // a pocket on the stock edge is measured with its open sides (DF61)
+  return isAnalyticOperation(g) ? undefined : shapeMeasure(input.region2d, g, localOf(input))
 }
 
 /** The failed fit rule of a tool for the operation, or undefined when it fits. */
@@ -171,8 +172,47 @@ export function leavesRest(tool: DfmTool, input: ChoiceInput): boolean {
 }
 
 /**
- * The library tools that fit, ranked: leaves no rest material (general shapes) → has a preset
- * for the stock's material class → largest diameter (fewer passes) → library id.
+ * Diameters within this share of a size's largest are one size (DF55): 6 mm and 1/4″ are 5.5 %
+ * apart, the widest metric/inch pair of the standard series; 6.22 and 6.31 mm are one 1/4″ size.
+ */
+export const SIZE_SHARE = 0.06
+
+/**
+ * The size class of each diameter (mm), 0 = the largest: sorted from the largest, a diameter
+ * starts a new class when it is more than `SIZE_SHARE` below its class's largest (transitive,
+ * so it can rank a sort).
+ */
+export function sizeClasses(diameters: readonly number[]): Map<number, number> {
+  const out = new Map<number, number>()
+  let cls = -1
+  let top = Number.POSITIVE_INFINITY
+  for (const d of [...new Set(diameters)].sort((a, b) => b - a)) {
+    if (d < top * (1 - SIZE_SHARE)) {
+      cls++
+      top = d
+    }
+    out.set(d, cls)
+  }
+  return out
+}
+
+/** How far a library tool reaches (mm): its stickout, else its flute length. */
+export const toolReach = (tool: Tool): number =>
+  tool.stickout.mapOr(tool.fluteLength.canonical, (s) => s.canonical)
+
+/** "stickout 31 mm" / "flute length 25 mm": the reach as a candidate's reason (DF55). */
+function reachReason(tool: Tool): string {
+  const n = (v: number) => Number(v.toFixed(3))
+  return tool.stickout.isSome()
+    ? `stickout ${n(tool.stickout.unwrap().canonical)} mm`
+    : `flute length ${n(tool.fluteLength.canonical)} mm`
+}
+
+/**
+ * The library tools that fit, ranked (design-v0.2.md § Auto choice): leaves no rest material
+ * (general shapes) → has a preset for the stock's material class → largest size (`sizeClasses`:
+ * fewer passes) → shortest reach (stickout, else flute length; every fitting tool reaches, the
+ * shortest is the stiffest, DF55) → larger diameter → library id.
  */
 export function fittingLibraryTools(input: ChoiceInput): LibraryCandidate[] {
   const out: LibraryCandidate[] = []
@@ -189,13 +229,18 @@ export function fittingLibraryTools(input: ChoiceInput): LibraryCandidate[] {
       ...(rest ? ['leaves rest material'] : []),
       ...(hasPreset ? [`has a preset for ${MATERIAL_CLASS_WORDS[input.materialClass]}`] : []),
       `diameter ${tool.diameter.canonical} mm`,
+      reachReason(tool),
     ]
     out.push({ item, tool, hasPreset, leavesRest: rest, reasons })
   }
+  const size = sizeClasses(out.map((c) => c.tool.diameter.canonical))
+  const cls = (c: LibraryCandidate) => size.get(c.tool.diameter.canonical) ?? 0
   return out.sort(
     (a, b) =>
       Number(a.leavesRest) - Number(b.leavesRest) ||
       Number(b.hasPreset) - Number(a.hasPreset) ||
+      cls(a) - cls(b) ||
+      toolReach(a.tool) - toolReach(b.tool) ||
       b.tool.diameter.canonical - a.tool.diameter.canonical ||
       a.item.id.localeCompare(b.item.id),
   )
@@ -271,16 +316,16 @@ export function nearLibraryTool(g: GeneralizedTool, input: ChoiceInput): Option<
 }
 
 /**
- * The generalized tool the auto choice would pick: the largest standard size that fits (bull
- * nose with RE = `floorRadius`; drill with DC = the hole's diameter), for a general shape the
- * largest that fits and leaves no rest material if one does. None if nothing fits.
+ * The generalized tools the auto choice tries, in its order: a chamfer's standard chamfer mills
+ * at its angle (largest first: it plunges); a pointed hole's drill of its diameter; then end mills
+ * of the standard sizes, largest first (bull nose with RE = `floorRadius`, only sizes with
+ * RE < DC/2).
  */
-export function generalizedChoice(input: ChoiceInput): Option<GeneralizedTool> {
+function generalizedCandidates(input: ChoiceInput): GeneralizedTool[] {
   const { op, units } = input
   const plain = (q: Quantity) => plainLength(q.exact, units)
-  const fits = (t: GeneralizedTool) => fitOf(generalizedDfmTool(t), input) === undefined
+  const out: GeneralizedTool[] = []
   if (op.kind === 'chamfer') {
-    // the standard chamfer mill sizes at the chamfer's own angle (largest first: it plunges)
     const angle = Quantity.create({
       kind: 'angle',
       source: `${Number(op.angle.canonical.toFixed(4))}°`,
@@ -290,54 +335,168 @@ export function generalizedChoice(input: ChoiceInput): Option<GeneralizedTool> {
     }).unwrap()
     for (const size of [...CHAMFER_MILL_STANDARD.sizes[units]].reverse()) {
       const diameter = Quantity.parse(size, { kind: 'length', defaultUnit: 'mm' }).unwrap()
-      const t: GeneralizedTool = {
+      out.push({
         kind: 'generalized',
         type: 'chamferMill',
         diameter,
         cornerRadius: None,
         angle: Some(angle),
-      }
-      if (fits(t)) return Some(t)
+      })
     }
-    return None
+    return out
   }
-  if (op.kind === 'drilling' && op.bottom !== 'flat') {
-    const drill: GeneralizedTool = {
+  if (op.kind === 'drilling' && op.bottom !== 'flat')
+    out.push({
       kind: 'generalized',
       type: 'drill',
       diameter: plain(op.diameter),
       cornerRadius: None,
       angle: None,
-    }
-    if (fits(drill)) return Some(drill)
-  }
+    })
   const bullNose = op.kind === 'pocket' && op.floorRadius.canonical > 0
   const type: ToolType = bullNose ? 'bullNoseEndMill' : 'flatEndMill'
   const cornerRadius: Option<Quantity> = bullNose ? Some(plain(op.floorRadius)) : None
   const sizes = STANDARD_SIZES[units]
-  let fallback: Option<GeneralizedTool> = None
   for (let i = sizes.length - 1; i >= 0; i--) {
     const diameter = Quantity.parse(sizes[i]!, { kind: 'length', defaultUnit: 'mm' }).unwrap()
-    const t: GeneralizedTool = { kind: 'generalized', type, diameter, cornerRadius, angle: None }
     // a bull nose needs RE < DC/2
     if (bullNose && cornerRadius.unwrap().canonical >= diameter.canonical / 2) continue
-    if (!fits(t)) continue
+    out.push({ kind: 'generalized', type, diameter, cornerRadius, angle: None })
+  }
+  return out
+}
+
+/**
+ * The generalized tool the auto choice would pick: the largest standard size that fits (bull
+ * nose with RE = `floorRadius`; drill with DC = the hole's diameter), for a general shape the
+ * largest that fits and leaves no rest material if one does. None if nothing fits.
+ */
+export function generalizedChoice(input: ChoiceInput): Option<GeneralizedTool> {
+  let fallback: Option<GeneralizedTool> = None
+  for (const t of generalizedCandidates(input)) {
+    if (fitOf(generalizedDfmTool(t), input) !== undefined) continue
+    // a chamfer mill and a drill: the first that fits
+    if (t.type === 'chamferMill' || t.type === 'drill') return Some(t)
     if (!leavesRest(generalizedDfmTool(t), input)) return Some(t)
     if (fallback.isNone()) fallback = Some(t)
   }
   return fallback
 }
 
+/** Why no tool at all fits an operation (DF52): the blocking rule and the tool it was found with. */
+export interface NoFit {
+  readonly unfit: ToolUnfit
+  /** The smallest generalized tool the auto choice tries ("1 mm flat end mill"). */
+  readonly tool: GeneralizedTool
+}
+
+/**
+ * `dfm.noFittingTool`'s cause (design-v0.2.md § Tool choice fixes, DF52): undefined when a tool
+ * of `tools` (the library, as the DFM sees it) or a generalized tool of the standard sizes fits;
+ * else the failed rule of the smallest generalized tool the auto choice tries (the most lenient
+ * one), so the text names what blocks every tool. A bull nose with RE ≥ every DC/2 is judged with
+ * the smallest flat end mill (its floor-radius rule).
+ */
+export function noFittingTool(input: ChoiceInput, tools: readonly DfmTool[]): NoFit | undefined {
+  if (tools.some((t) => fitOf(t, input) === undefined)) return undefined
+  if (generalizedChoice(input).isSome()) return undefined
+  const tried = generalizedCandidates(input)
+  const smallest: GeneralizedTool =
+    tried.length > 0
+      ? tried[tried.length - 1]!
+      : {
+          kind: 'generalized',
+          type: 'flatEndMill',
+          diameter: Quantity.parse(STANDARD_SIZES[input.units][0]!, {
+            kind: 'length',
+            defaultUnit: 'mm',
+          }).unwrap(),
+          cornerRadius: None,
+          angle: None,
+        }
+  const unfit = fitOf(generalizedDfmTool(smallest), input)
+  return unfit === undefined ? undefined : { unfit, tool: smallest }
+}
+
+/**
+ * The slot width a new profile takes instead of the default (DF51, design-v0.2.md § Tool choice
+ * fixes), as a source in the project units: None when a library tool fits the profile as given
+ * (`input.geometry`, with the default slot); else the narrowest library flat end mill wider than
+ * the slot that fits with the slot as wide as its Ø rounded up in the project units
+ * (`roundUpLength`); None when none does.
+ */
+export function defaultSlotWidth(input: ChoiceInput): Option<string> {
+  const g = input.geometry
+  if (g.kind !== 'profile') return None
+  if (fittingLibraryTools(input).length > 0) return None
+  const wider = input.library
+    .flatMap((item) => (item.values instanceof Tool ? [{ item, tool: item.values }] : []))
+    .filter((c) => c.tool.type === 'flatEndMill' && c.tool.diameter.canonical > g.slotWidth)
+    .sort(
+      (a, b) =>
+        a.tool.diameter.canonical - b.tool.diameter.canonical ||
+        toolReach(a.tool) - toolReach(b.tool) ||
+        a.item.id.localeCompare(b.item.id),
+    )
+  for (const { tool } of wider) {
+    const width = roundUpLength(tool.diameter.canonical, input.units)
+    const widened: ChoiceInput = { ...input, geometry: { ...g, slotWidth: width } }
+    if (fitOf(dfmTool(tool), widened) === undefined)
+      return Some(lengthSourceUp(tool.diameter.canonical, input.units))
+  }
+  return None
+}
+
+/** Input steps per mm of a length rounded for the project units: 0.01 mm, 0.001″. */
+const STEPS_PER_MM: Record<UnitSystem, number> = { mm: 100, inch: 1000 / 25.4 }
+
+/**
+ * A length (mm) rounded up to the project units' step (0.01 mm, 0.001″), in mm; as the
+ * renderer's "Widen slot to …" rounds (messages/dfm.ts `lengthSource` 'up').
+ */
+export function roundUpLength(mm: number, units: UnitSystem): number {
+  // a tiny slack, so 6.2200000001 stays 6.22
+  return Math.ceil(mm * STEPS_PER_MM[units] - 1e-6) / STEPS_PER_MM[units]
+}
+
+/** `roundUpLength` as a source in the project units: "6.22 mm", `0.245"`. */
+export function lengthSourceUp(mm: number, units: UnitSystem): string {
+  if (units === 'inch') return `${Math.ceil((mm / 25.4) * 1000 - 1e-6) / 1000}"`
+  return `${Math.ceil(mm * 100 - 1e-6) / 100} mm`
+}
+
+/**
+ * Whether the operation's tool is a specific tool whose library item is no longer among the
+ * readable library tools (removed, or it does not load): X2 F6, design-v0.2.md § Library changes
+ * and opening. Its snapshot still describes the tool.
+ */
+export function orphanTool(input: ChoiceInput): boolean {
+  if (input.op.tool.isNone()) return false
+  const t = input.op.tool.unwrap()
+  if (t.kind !== 'specific') return false
+  const snap = Object.hasOwn(input.snapshots, t.snapshotId)
+    ? input.snapshots[t.snapshotId]
+    : undefined
+  const itemId = snap !== undefined && snap.kind === 'tool' ? snap.libraryItemId : undefined
+  return itemId !== undefined && !input.library.some((i) => i.id === itemId)
+}
+
 /**
  * The auto choice for one unlocked operation (design-v0.2.md § Auto choice): keep a current tool
- * that fits; otherwise the first fitting library tool; otherwise the largest fitting generalized
- * tool; nothing fits: `none` (the caller keeps the current tool).
+ * that fits (a generalized one, or one removed from the library, only while no library tool
+ * fits: DF54, X2 F6); otherwise the first fitting library tool; otherwise the largest fitting
+ * generalized tool; nothing fits: `none` (the caller keeps the current tool).
  */
 export function chooseTool(input: ChoiceInput): ToolChoice {
   const current = input.op.tool.andThen((t) => resolveDesignTool(t, input.snapshots))
-  if (current.isSome() && fitOf(current.unwrap(), input) === undefined) return { kind: 'keep' }
+  const fits = current.isSome() && fitOf(current.unwrap(), input) === undefined
+  // DF54: a fitting generalized tool is kept only while no library tool fits; X2 F6: so is a
+  // library tool removed from the library
+  const generalized = input.op.tool.mapOr(false, (t) => t.kind === 'generalized')
+  if (fits && !generalized && !orphanTool(input)) return { kind: 'keep' }
   const library = fittingLibraryTools(input)
   if (library.length > 0) return { kind: 'library', candidate: library[0]! }
+  if (fits) return { kind: 'keep' }
   const g = generalizedChoice(input)
   return g.isSome() ? { kind: 'generalized', tool: g.unwrap() } : { kind: 'none' }
 }

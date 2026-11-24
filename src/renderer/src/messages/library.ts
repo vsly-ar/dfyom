@@ -348,9 +348,17 @@ export const libraryMessages = {
     pullOff: 'Pull-off',
     pullOffNote: 'Optional ($27): unset = 1 mm.',
     softLimits: 'Soft limits ($20)',
-    probe: 'Touch plate',
-    plateThickness: 'Plate thickness',
-    plateThicknessNote: 'Optional: set it to probe Z with a touch plate in Run.',
+    zHeight: 'Z height',
+    noseToTable: 'Spindle nose to table',
+    noseToTableNote:
+      'Optional: with Z homed, from the collet nut (where stickout is measured) down to the table. Checks that retracts stay below the Z+ limit.',
+    spoilboardThickness: 'Spoilboard thickness',
+    spoilboardThicknessNote: 'Optional: the board the stock sits on; 0 if none.',
+    probePlateSize: 'Touch plate size',
+    probePlateSizeNote:
+      'Optional: the largest extent of your Z touch plate. Touch-off spots leave room for it.',
+    probePlateThickness: 'Touch plate thickness',
+    probePlateThicknessNote: 'Optional: set it to probe Z with a touch plate in Run.',
     rigidity: 'Rigidity',
     rigidities: {
       extrusion: 'Aluminium extrusion',

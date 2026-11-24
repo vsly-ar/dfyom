@@ -64,11 +64,19 @@ export const MachineValuesDtoSchema = z.object({
   ),
   pullOff: quantityDto('length').optional().describe('$27 homing pull-off; unset = 1 mm'),
   softLimits: z.boolean().optional().describe('$20 soft limits; unset = on'),
-  // Z touch plate (docs/modes/run-machine.md#probing-and-re-zero-m4)
-  probe: z
-    .object({ plateThickness: quantityDto('length') })
+  noseToTable: quantityDto('length')
     .optional()
-    .describe('Touch plate'),
+    .describe('Spindle nose to table top with Z homed; for the Z headroom check'),
+  spoilboardThickness: quantityDto('length')
+    .optional()
+    .describe('Spoilboard on the table, 0 = none; for the Z headroom check'),
+  probePlateSize: quantityDto('length')
+    .optional()
+    .describe('Largest extent of the Z touch plate; the touch-off spot leaves room for it'),
+  // Z touch plate (docs/modes/run-machine.md#probing-and-re-zero-m4)
+  probePlateThickness: quantityDto('length')
+    .optional()
+    .describe('Z touch plate thickness; unset = no plate, Run offers no Probe Z'),
   programUnits: z.enum(['mm', 'in']).describe('G21/G20 in exported gCode'),
   toolChanger: z.literal('none').describe('Manual tool change (M0)'),
 })

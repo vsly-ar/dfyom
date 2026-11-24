@@ -1,6 +1,13 @@
 // Number and comment formatting. Spec: docs/architecture/grbl.md#numbers-lines-and-comments
 import { describe, expect, it } from 'vitest'
-import { commentLine, formatNumber, sanitizeComment, toolChangeMarker } from './format'
+import {
+  commentLine,
+  fitName,
+  formatNumber,
+  pauseLine,
+  sanitizeComment,
+  toolChangeMarker,
+} from './format'
 
 describe('formatNumber', () => {
   it.each([
@@ -71,5 +78,29 @@ describe('comments', () => {
         expect(m).toMatch(rule)
         expect(rule.exec(m)?.[1]).toBe(String(n))
       }
+  })
+
+  // docs/architecture/grbl.md#pause-messages-hardening-df63
+  it('a marker or pause message cuts the name, never the diameter, type or instruction', () => {
+    const tail = ', 6.22 mm flat, then zero Z'
+    const long = `Wexme ${'very long name '.repeat(8)}(2F)`
+    const m = fitName('Install T3 ', long, tail, 66)
+    expect(m.length).toBeLessThanOrEqual(66)
+    expect(m.startsWith('Install T3 Wexme very long')).toBe(true)
+    expect(m.endsWith(tail)).toBe(true)
+    expect(m).not.toMatch(/[()]/)
+    expect(fitName('Install T3 ', 'Wexme 1/4" 1F', tail, 66)).toBe(
+      'Install T3 Wexme 1/4" 1F, 6.22 mm flat, then zero Z',
+    )
+    expect(toolChangeMarker(3, long, ', 6.22 mm flat')).toMatch(
+      /^\(DFYOM TOOL CHANGE 3: Wexme [^()]*, 6\.22 mm flat\)$/,
+    )
+  })
+
+  it('pause line: M0 with a GRBL-safe ; message of at most 70 bytes', () => {
+    expect(pauseLine('Set spindle to 18000 rpm')).toBe('M0 ;Set spindle to 18000 rpm')
+    const p = pauseLine(`Stop! (now); ${'x '.repeat(60)}`)
+    expect(p.length).toBeLessThanOrEqual(70)
+    expect(p).toMatch(/^M0 ;[^()?!~;]+$/)
   })
 })

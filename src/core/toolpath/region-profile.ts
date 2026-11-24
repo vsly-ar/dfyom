@@ -16,7 +16,7 @@ import { checkChain } from '../geometry/2d/wire'
 import { chainLength, chainPointAt } from '../geometry/2d/measure'
 import { Err, Ok, type AppResult } from '../../shared/result'
 import { noSteps, type Steps } from '../workers/steps'
-import { commonIssues, levels, passSteps, toolpath } from './common'
+import { commonIssues, cutLevels, cutTop, passSteps, toolpath } from './common'
 import { rowPositions } from './facing'
 import type { GeneratorInput, ProfileStrategy, Toolpath, ToolpathTool } from './model'
 import {
@@ -52,9 +52,9 @@ export interface RegionProfileOperation {
   readonly slotWidth: number
   /** Z of the surface the cut starts on. */
   readonly onZ: number
-  /** Down to the stock bottom for a through cut, else a blind `on` groove's depth. */
+  /** Down to the stock bottom for a through cut, else a blind groove's or step's depth. */
   readonly depth: number
-  /** Through cuts go `breakthrough` below the depth; only `on` may be blind. */
+  /** Through cuts go `breakthrough` below the depth; any side may be blind (a step, DF53). */
   readonly through: boolean
   readonly tabs: {
     /**
@@ -134,6 +134,7 @@ export function generateRegionProfile(
   issues.positive('operation.depth', op.depth)
   issues.nonNegative('strategy.breakthrough', st.breakthrough)
   issues.nonNegative('strategy.finishAllowance', st.finishAllowance)
+  if (st.finishStepdown !== undefined) issues.positive('strategy.finishStepdown', st.finishStepdown)
   issues.nonNegative('strategy.leadRadius', st.leadRadius)
   if (!(st.rampAngle >= 0.5 && st.rampAngle <= 30))
     issues.rule('invariant', 'strategy.rampAngle', 'range', 'rampAngle must be 0.5°–30°', {
@@ -157,8 +158,6 @@ export function generateRegionProfile(
     })
   if (!op.closed && !on)
     issues.rule('invariant', 'operation.side', 'openNeedsOn', 'an open path needs side "on"')
-  if (!op.through && !on)
-    issues.rule('invariant', 'operation.through', 'onlyOn', 'only a profile on can stop at a depth')
   const tabs = op.tabs
   if (tabs.positions.length > 0) {
     if (!op.closed || !op.through)
@@ -296,12 +295,12 @@ export function generateRegionProfile(
   const at = (p: Vec2, z: number): Vec3 => [p[0], p[1], z]
   const xy = (): Vec2 => [b.position![0], b.position![1]]
   /** Pieces in order, vertical moves (tab lifts and drops) between them at the plunge rate. */
-  const emit = (pieces: readonly Seg3[]) => {
+  const emit = (pieces: readonly Seg3[], f = feed) => {
     for (const piece of pieces) {
       const pos = b.position!
       if (Math.abs(pos[2] - piece.z0) > EPSILON)
         b.line([pos[0], pos[1], piece.z0], cutting.plungeRate)
-      b.seg(piece, feed)
+      b.seg(piece, f)
     }
   }
   const lineTo = (p: Vec2, z: number): Seg3[] => [
@@ -350,10 +349,15 @@ export function generateRegionProfile(
   const canRamp = (segs: readonly Seg[], drop: number) =>
     st.entry === 'ramp' && drop > EPSILON && segsLength(segs) >= tool.diameter - EPSILON
 
-  const zs = levels(op.onZ, bottom, cutting.stepdown)
+  // over the material earlier cuts left (DF61): no passes wholly in air
+  const zs = cutLevels(op.onZ, bottom, cutting.stepdown, input.material)
   const finishing = passes.finish.length > 0
-  const pass = passSteps(steps, zs.length + (finishing ? 1 : 0))
-  let previous = op.onZ
+  // DF76: finishing levels of `finishStepdown` (absent: one level at full depth)
+  const finishZ = finishing
+    ? cutLevels(op.onZ, bottom, st.finishStepdown ?? Infinity, input.material)
+    : []
+  const pass = passSteps(steps, zs.length + finishZ.length)
+  let previous = cutTop(op.onZ, bottom, input.material)
   let fromStart = true
   for (const [k, z] of zs.entries()) {
     const s = pass(k)
@@ -426,11 +430,11 @@ export function generateRegionProfile(
     previous = z
   }
 
-  // finishing: the part-side pass(es) at full depth, lead arcs from the offcut side (T-D)
+  // finishing: the part-side pass(es) in levels down to full depth, lead arcs from the offcut
+  // side (T-D), at the finishing feed (DF74); each level re-enters from the retract plane
   if (finishing) {
-    const s = pass(zs.length)
-    if (s.isErr()) return Err(s.unwrapErr())
     b.pass('finish')
+    const finishFeed = cutting.finishFeedRate ?? feed
     const todo = [...passes.finish]
     while (todo.length > 0) {
       const here = xy()
@@ -453,9 +457,13 @@ export function generateRegionProfile(
         passes.free,
         passes.straight,
       )
-      goTo(lead.start)
-      b.line(at(lead.start, liftZ(lead.start, bottom)), cutting.plungeRate)
-      emit(lift(flat([...lead.leadIn, ...lead.ring, ...lead.leadOut], bottom)))
+      for (const [k, z] of finishZ.entries()) {
+        const s = pass(zs.length + k)
+        if (s.isErr()) return Err(s.unwrapErr())
+        goTo(lead.start)
+        b.line(at(lead.start, liftZ(lead.start, z)), cutting.plungeRate)
+        emit(lift(flat([...lead.leadIn, ...lead.ring, ...lead.leadOut], z)), finishFeed)
+      }
       b.rapid(at(xy(), retract))
     }
   }

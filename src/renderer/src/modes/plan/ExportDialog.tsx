@@ -1,9 +1,10 @@
 // The gCode export's outcome (task 3.7): after the native "Export gCode" dialog and `plan.export`,
 // a dialog with the setup (v0.2 F6, plans with several setups), the file, lines, estimated time,
-// tool changes, whether soft limits were checked and the export's machine warnings – or the
-// error. Doc: docs/conventions/ui.md#plan-mode-task-37,
+// tool changes, whether soft limits and the Z headroom (DF68) were checked and the export's
+// machine warnings – or the error. Doc: docs/conventions/ui.md#plan-mode-task-37,
 // docs/architecture/grbl.md#plan-export-command
-import { planMessages, sentence } from '../../messages/plan'
+import type { PlanWarning } from '../../../../core/plan/checks'
+import { planMessages, sentence, zHeadroomNote } from '../../messages/plan'
 import { useShell } from '../../shell/ShellContext'
 import { IS_MAC } from '../../shell/shortcuts'
 import { Button, Dialog, DialogClose, ErrorMessage, Icon, WarningList } from '../../ui'
@@ -67,11 +68,12 @@ export function ExportDialog(): React.JSX.Element | null {
         <li>{m.toolChanges(r.stats.toolChanges)}</li>
         {r.regenerated.length > 0 ? <li>{m.regenerated(r.regenerated.length)}</li> : null}
         <li>{r.softLimitChecked ? m.softLimitChecked : m.softLimitNotChecked}</li>
+        <li>{zHeadroomLine(r.warnings)}</li>
       </ul>
       <section aria-label={m.warnings}>
         <WarningList
           labels={{ ...planWarningLabels, list: m.warnings }}
-          items={r.warnings.map((w, i) => ({
+          items={r.warnings.filter(notZNote).map((w, i) => ({
             id: `${w.code}:${w.rule}:${i}`,
             tier: w.severity === 'info' ? 'soft' : 'hard',
             text: sentence(w.message),
@@ -81,4 +83,14 @@ export function ExportDialog(): React.JSX.Element | null {
       </section>
     </Dialog>
   )
+}
+
+/** DF68: the `zHeadroomUnknown` note is the Z headroom line, not a warning of the list. */
+const notZNote = (w: PlanWarning) => !(w.code === 'plan.machine' && w.rule === 'zHeadroomUnknown')
+
+/** DF68: whether the export checked the Z headroom, and what to enter when it did not. */
+function zHeadroomLine(warnings: readonly PlanWarning[]): string {
+  const note = zHeadroomNote(warnings)
+  if (note === undefined) return m.zHeadroomChecked
+  return note.partly ? m.zHeadroomPartly(note.missing) : m.zHeadroomNotChecked(note.missing)
 }

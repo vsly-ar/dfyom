@@ -231,7 +231,11 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       const r = await call(name, args)
       if (!r.ok) return
       const { jobId } = r.value as { jobId: string }
-      const w = await bridge.call('job.wait', { jobId, timeoutSeconds: 600 })
+      // job.wait caps one wait at MAX_WAIT_SECONDS (300); a run job can last hours, so wait again
+      // while it is still running (the previous 600 s argument failed validation silently)
+      let w = await bridge.call('job.wait', { jobId, timeoutSeconds: 300 })
+      while (w.ok && (w.value as { timedOut?: boolean }).timedOut === true)
+        w = await bridge.call('job.wait', { jobId, timeoutSeconds: 300 })
       const info = w.ok ? (w.value as JobInfo) : undefined
       if (info?.outcome && !info.outcome.ok && info.outcome.error.code !== 'op.aborted')
         set({ actionError: info.outcome.error })

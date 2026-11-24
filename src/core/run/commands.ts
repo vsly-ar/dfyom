@@ -515,7 +515,7 @@ export const runMachineProbeZ = defineCommand({
   title: () => 'Probe Z',
   machine: true,
   args: z.object({
-    plateThickness: z.number().positive().max(100).describe('mm (machine probe.plateThickness)'),
+    plateThickness: z.number().positive().max(100).describe('mm (machine probePlateThickness)'),
     maxTravel: z
       .number()
       .positive()

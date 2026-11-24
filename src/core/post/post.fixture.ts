@@ -34,7 +34,7 @@ const TYPE_NAMES: Readonly<Record<ToolpathTool['type'], string>> = {
 }
 
 export function programTool(t: ToolpathTool): ProgramTool {
-  return { name: `${t.diameter} mm ${TYPE_NAMES[t.type]}`, diameter: t.diameter }
+  return { name: `${t.diameter} mm ${TYPE_NAMES[t.type]}`, diameter: t.diameter, type: t.type }
 }
 
 export function operation(toolpath: Toolpath, tool: ToolpathTool, label?: string): ExportOperation {

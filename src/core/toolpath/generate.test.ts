@@ -95,7 +95,12 @@ describe('plan.toolpath.generate', () => {
   it('generates every operation in machining order; a second run is all cached', async () => {
     const { port, runs } = countingPort()
     const t = await setup({ port })
-    expect(t.get(t.order[0]!)).toEqual({ toolpath: null, stale: true, pendingApply: false })
+    expect(t.get(t.order[0]!)).toEqual({
+      toolpath: null,
+      stale: true,
+      pendingApply: false,
+      overreach: null,
+    })
     const first = expectOk(await t.generate()) as Outcome
     expect(first.operations).toEqual(
       t.order.map((id) => ({ planOperationId: id, status: 'generated' })),
@@ -130,7 +135,12 @@ describe('plan.toolpath.generate', () => {
       ),
     )
     // the plan's toolpaths were generated: its edited inputs are pending for Apply
-    expect(t.get(facing)).toEqual({ toolpath: before, stale: true, pendingApply: true })
+    expect(t.get(facing)).toEqual({
+      toolpath: before,
+      stale: true,
+      pendingApply: true,
+      overreach: null,
+    })
     const r = expectOk(await t.generate()) as Outcome
     // the facing and everything after it (chained hash) regenerate
     expect(r.operations.every((o) => o.status === 'generated')).toBe(true)
@@ -155,7 +165,12 @@ describe('plan.toolpath.generate', () => {
       code: 'plan.check',
       message: 'tool does not fit',
     })
-    expect(t.get(failId)).toEqual({ toolpath: null, stale: true, pendingApply: false })
+    expect(t.get(failId)).toEqual({
+      toolpath: null,
+      stale: true,
+      pendingApply: false,
+      overreach: null,
+    })
   })
 
   it('abort mid-job ends in op.aborted with the completed operations; they stay cached', async () => {

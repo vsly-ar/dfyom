@@ -164,10 +164,13 @@ test('tool field: library tools of the type, the near match, widen the slot (DF4
 
   await navigator.getByRole('button', { name: 'Add profile' }).click()
   await expect(inspector.getByRole('heading', { name: 'Profile 1' })).toBeVisible()
-  await page.keyboard.press('ControlOrMeta+Enter')
+  // DF51: no library tool fits the default 6 mm slot, so the new slot is as wide as the 6.22 mm
+  await expect(input(inspector, 'Slot width')).toHaveValue('6.22 mm')
+  // a 6 mm slot set by the user (Enter applies)
+  await setField(inspector, 'Slot width', '6')
   const tool = inspector.getByRole('region', { name: 'Tool' })
   const combo = tool.getByRole('combobox', { name: 'Tool' })
-  // the default 6 mm slot: the 6.22 mm tool is wider, so auto takes the generalized 6 mm
+  // the 6 mm slot: the 6.22 mm tool is wider, so auto takes the generalized 6 mm
   await expect(combo).toHaveText('6 mm flat end mill')
   const use = tool.getByRole('button', { name: 'Use wexme 1/4" 1F (6.22 mm)' })
   await expect(use).toBeVisible()

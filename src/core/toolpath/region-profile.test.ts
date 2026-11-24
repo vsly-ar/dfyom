@@ -281,6 +281,32 @@ function segsLengthOf(es: readonly { a: Vec2; b: Vec2 }[]): number {
   return es.reduce((s, e) => s + Math.hypot(e.b[0] - e.a[0], e.b[1] - e.a[1]), 0)
 }
 
+// docs/modes/plan-v0.1.md#finishing-defaults-hardening-df75-df76,
+// docs/architecture/feeds-speeds.md#finishing-pass-feed-hardening-df74
+describe('generateRegionProfile: finishing levels and feed (DF74, DF76)', () => {
+  it('finishes in levels of finishStepdown at the finishing feed; the rough passes keep theirs', () => {
+    const base = input(bracket(), { slotWidth: 14, stepdown: 7, strategy: { finishStepdown: 3 } })
+    const inp = { ...base, cutting: { ...base.cutting, finishFeedRate: 2345 } }
+    const tp = generateRegionProfile(inp, port).unwrap()
+    // the path rules cap feeds at the feed rate: check them against the faster finishing feed
+    expect(checkRules({ ...inp, cutting: { ...inp.cutting, feedRate: 2345 } }, tp)).toEqual([])
+    expect(cuttingLevels(tp, 'finish')).toEqual(
+      [-6.5 / 3, (-6.5 * 2) / 3, -6.5].map((z) => expect.closeTo(z, 9)),
+    )
+    const feeds = (kind: 'rough' | 'finish') =>
+      new Set(
+        tp.passes
+          .filter((p) => p.kind === kind)
+          .flatMap((p) => p.moves)
+          .flatMap((m) =>
+            m.kind === 'rapid' || m.feed === inp.cutting.plungeRate ? [] : [m.feed],
+          ),
+      )
+    expect([...feeds('finish')]).toEqual([2345])
+    expect(feeds('rough').has(2345)).toBe(false)
+  })
+})
+
 describe('generateRegionProfile: outside and inside', () => {
   it('outside, slot = D: one pass per level on the tool-radius offset, no finishing', () => {
     const inp = input(bracket(), { stepdown: 2 })
@@ -621,7 +647,6 @@ describe('generateRegionProfile: errors and abort', () => {
       code: 'model.invariant',
       rules: ['openNeedsOn'],
     })
-    expect(rules(input(bracket(), { through: false })).rules).toContain('onlyOn')
     expect(
       rules(
         input(hook(), {
@@ -811,6 +836,34 @@ describe('coverage oracle (heightmap)', () => {
     expect(cov.leftover).toBeLessThan(0.05)
     expect(cov.rest).toBeLessThan(expectedRest + 0.5)
   })
+
+  it(
+    'a step (blind outside and inside, DF53): no gouge, no leftover, stops at its depth',
+    {
+      timeout: 60_000,
+    },
+    () => {
+      for (const side of ['outside', 'inside'] as const) {
+        const inp = input(bracket(20, 20), {
+          side,
+          through: false,
+          depth: 2,
+          slotWidth: 9,
+          stepdown: 1,
+        })
+        const { cov, expectedRest, rules } = cover(inp, { length: 85, width: 75 }, 0.1)
+        expect(rules).toEqual([])
+        expect(cov.gouge).toBe(0)
+        expect(cov.belowFloor).toBe(0)
+        expect(cov.leftover).toBeLessThan(0.05)
+        expect(cov.rest).toBeLessThan(expectedRest + 0.5)
+        const tp = generateRegionProfile(inp, port).unwrap()
+        const zs = walk(tp).map((s) => s.move.to[2])
+        // no breakthrough: the step's floor is the lowest point
+        expect(Math.min(...zs)).toBeCloseTo(-2, 9)
+      }
+    },
+  )
 
   it(
     'bracket outside and on, wide slots, with tabs: no gouge, no leftover',

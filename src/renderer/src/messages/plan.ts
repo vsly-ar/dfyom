@@ -19,6 +19,8 @@ export const planMessages = {
   /** An id a finding names that the plan no longer has (DF43: never shown as the id). */
   unknownOperation: 'Unknown operation',
   unknownSetup: 'Unknown',
+  /** The description of a setup panel row with a row menu (DF70, as the design list's). */
+  rowMenuHint: 'Right-click or Shift+F10 for actions.',
   statuses: {
     draft: 'Draft',
     settledDesign: 'Settled design',
@@ -131,6 +133,16 @@ export const planMessages = {
     rotation: 'Rotation on the table',
     rotationHint: 'About the spindle axis; the work zero moves to the new front-left corner.',
     clearanceHeight: 'Clearance height',
+    /** DF59 (interim, no clamp model): the note on the clearance field, with its value. */
+    clampNote: (height: string) =>
+      `Keep clamps lower than ${height} above the stock top; clamps are not modelled yet.`,
+    /** DF59: how far the tool reaches past the stock sides on the machine. */
+    reach: 'Past the stock',
+    reachValue: (sides: readonly string[]) =>
+      `${capital(sides.join(', '))}; keep clamps clear of these sides.`,
+    reachSide: (side: 'left' | 'right' | 'front' | 'back', length: string) => `${side} ${length}`,
+    reachNone: 'The tool stays within the stock outline.',
+    reachUnknown: 'Generate toolpaths to see where the tool leaves the stock.',
     retractHeight: 'Retract height',
     shown: 'Shown in the viewport and exported',
     moveUpItem: 'Move up',
@@ -139,6 +151,53 @@ export const planMessages = {
     merge: (name: string) => `Merge with ${name}`,
     noMerge: 'No other setup of this face to merge with',
     findings: 'Setup checks',
+    /** DF68: the Z headroom estimate of this setup (the warnings are in the setup checks). */
+    zHeadroom: 'Z headroom',
+    zHeadroomOk: 'Enough above the clearance height for every tool.',
+    zHeadroomShort: 'Too little for a tool: see the setup checks.',
+    zHeadroomUnknown: (missing: readonly string[]) =>
+      `Not checked: enter ${missing.join(' and ')} in the machine.`,
+    zHeadroomPartly: (missing: readonly string[], short: boolean) =>
+      `${short ? 'Too little for a tool: see the setup checks' : 'Enough if there is no spoilboard'}; enter ${missing.join(' and ')} in the machine.`,
+  },
+
+  // the setup's tool runs (hardening DF66): docs/modes/plan-v0.4.md#tool-changes-per-setup-hardening-df66
+  toolChanges: {
+    title: 'Tool changes',
+    count: (n: number) => (n === 0 ? 'No tool change' : plural(n, 'tool change', 'tool changes')),
+    listLabel: (setup: string) => `Tool runs of ${setup} in machining order`,
+    /** "Ø 6 mm · Flat end mill" */
+    toolMeta: (diameter: string | undefined, type: string | undefined) =>
+      [diameter === undefined ? undefined : `Ø ${diameter}`, type]
+        .filter((x) => x !== undefined)
+        .join(' · '),
+    noTool: 'No tool',
+    time: (seconds: number) => formatDuration(seconds),
+    timeTitle: 'Estimated time, without tool changes',
+    noTime: 'Generate toolpaths to see the time.',
+    carried: (setup: string) => `Stays in the spindle from ${setup}: no change at the setup start.`,
+    refused: (message: string) => `Not moved: ${message}`,
+    /** DF69: the tool run's Z reference surface (docs/modes/z-reference.md#ui). */
+    zFrom: 'Z from',
+    /** "Facing 1 floor · −0.5 mm" */
+    zValue: (label: string, level: string) => `${label} · ${level}`,
+    zNone: 'No flat surface',
+    zButton: (tool: string, value: string, chosen: boolean) =>
+      `Z from for ${tool}: ${value}${chosen ? '' : ' (default)'}. Choose the surface`,
+    zDefault: (value: string | undefined) =>
+      value === undefined ? 'Default' : `Default (${value})`,
+    zDefaultHint: 'The top face, else the last facing floor, else the largest flat floor',
+    zCandidate: (area: string, spot: string, small: boolean) =>
+      `Touch off at ${spot}, flat patch ${area}${small ? ', too small for the touch plate' : ''}`,
+    zSurfaces: 'Flat surfaces',
+    zRefused: (message: string) => `Not changed: ${message}`,
+    /** The viewport's chip beside the touch-off spot: "X 50 mm  Y 30 mm". */
+    zSpotCaption: (x: string, y: string) => `X ${x}  Y ${y}`,
+    /** Operation inspector (DF69): the touch-off spot's coordinates. */
+    zSpotX: 'Touch-off X',
+    zSpotY: 'Touch-off Y',
+    zSpotMoved: 'Moved by you.',
+    zSpotDefault: 'Use default spot',
   },
 
   operations: {
@@ -154,6 +213,8 @@ export const planMessages = {
     moveTo: (setup: string) => `Move to ${setup}`,
     errors: (n: number) => plural(n, 'error', 'errors'),
     warnings: (n: number) => plural(n, 'warning', 'warnings'),
+    /** A row's error or warning count: its tooltip (DF67, the count shows the findings). */
+    findingsTip: (count: string) => `${count}: click to show them in the inspector`,
   },
 
   toolpaths: {
@@ -196,6 +257,12 @@ export const planMessages = {
     softLimitChecked: 'Soft limits checked at the connected machine’s work zero.',
     softLimitNotChecked:
       'Soft limits are checked when you start a run on a connected machine with its work zero set.',
+    /** DF68: the Z headroom estimate (any shortfall is an export warning). */
+    zHeadroomChecked: 'Z headroom checked from the machine’s Z height.',
+    zHeadroomNotChecked: (missing: readonly string[]) =>
+      `Z headroom not checked: enter ${missing.join(' and ')} in the machine.`,
+    zHeadroomPartly: (missing: readonly string[]) =>
+      `Z headroom checked as if there were no spoilboard: enter ${missing.join(' and ')} in the machine.`,
     warnings: 'Export warnings',
     noWarnings: 'No machine warnings.',
     close: 'Close',
@@ -279,6 +346,8 @@ export const planMessages = {
     reset: 'Reset',
     useToolDefault: 'Use tool default',
     unlock: 'Unlock',
+    /** The operation's findings at the top of its inspector (DF67). */
+    checks: 'Checks',
     unresolved: 'No value: enter one, or add a cutting preset to the tool.',
     strategy: {
       labels: {
@@ -349,6 +418,12 @@ export const planMessages = {
       removalRate: 'Material removal rate',
       cuttingPower: 'Cutting power',
       spindleLoad: 'Spindle load',
+      finish: 'Finishing pass',
+      finishAllowance: 'Radial engagement (allowance)',
+      finishFeed: 'Finishing feed',
+      finishClamped: '(machine feed limit)',
+      finishChipLoad: 'Finishing chip load',
+      finishChipThinning: 'Finishing chip thinning',
       noData: (reason: string) => `No calculator data: ${reason}`,
     },
   },
@@ -425,7 +500,7 @@ const NO_NAMES: FindingNames = {
 }
 
 /** An area (mm²) in the project's units: "12.3 mm²", "0.0191 in²". */
-const areaText = (mm2: number, units: UnitSystem): string =>
+export const areaText = (mm2: number, units: UnitSystem): string =>
   units === 'mm'
     ? `${Math.round(mm2 * 10) / 10} mm²`
     : `${Math.round((mm2 / 645.16) * 10000) / 10000} in²`
@@ -473,6 +548,9 @@ export function findingText(
       const profile = str('profile')
       const inside = str('operation')
       if (profile === undefined || inside === undefined) return sentence(w.message)
+      // DF57: an operation after the cut that releases the part
+      if (w.rule === 'releaseFirst')
+        return `${capital(names.design(profile))} releases the part before ${names.design(inside)}: the part is held only by its tabs.`
       return `${capital(names.design(profile))} is cut before ${names.design(inside)} inside it: the piece may be loose.`
     }
     case 'plan.cutoutBeforeSetup': {
@@ -511,12 +589,73 @@ export function findingText(
         return sentence(w.message)
       return `The tool (${lengthText(diameter, units)}) is too wide for the ${target}: it is ${lengthText(width, units)} at its narrowest.`
     }
+    case 'plan.machine': {
+      // DF68: the Z headroom in the document's units
+      const num = (k: string) => (typeof p[k] === 'number' ? (p[k] as number) : undefined)
+      const len = (k: string) => lengthText(num(k) ?? 0, units)
+      const named = str('tool')
+      if (named === undefined || num('stickout') === undefined) return sentence(w.message)
+      const head = `${named} at ${len('stickout')} stickout`
+      if (w.rule === 'zHeadroom' && num('needed') !== undefined && num('available') !== undefined)
+        return `${head}: the clearance height ${len('clearanceHeight')} needs ${len('needed')} above the stock top, but with Z homed the tool tip is only ${len('available')} above it. Retracts and tool changes would hit the Z+ limit: lower the clearance height or use a shorter stickout${num('spoilboardThickness') === undefined ? ', and enter the spoilboard thickness (checked as 0)' : ''}.`
+      if (w.rule === 'zReach' && num('zMin') !== undefined && num('lowest') !== undefined)
+        return `${head} cannot reach Z${len('zMin')}: the Z travel ends at Z${len('lowest')}. Use a longer stickout or raise the stock on a thicker spoilboard.`
+      return sentence(w.message)
+    }
     default:
       return sentence(w.message)
   }
 }
 
+/** DF68: the machine fields a `zHeadroomUnknown` finding names, as words. */
+const Z_HEADROOM_FIELDS: Readonly<Record<string, string>> = {
+  noseToTable: 'the spindle nose to table distance',
+  spoilboardThickness: 'the spoilboard thickness (0 if none)',
+}
+
+/**
+ * DF68: the plan's or export's `zHeadroomUnknown` note: the missing fields as words, and whether
+ * only the spoilboard is missing (the top was checked as if there were none); undefined without one.
+ */
+export function zHeadroomNote(
+  warnings: readonly PlanWarning[],
+): { readonly missing: readonly string[]; readonly partly: boolean } | undefined {
+  const w = warnings.find((x) => x.code === 'plan.machine' && x.rule === 'zHeadroomUnknown')
+  if (w === undefined) return undefined
+  const keys = String(w.params['missing'] ?? '')
+    .split(',')
+    .filter((f) => f !== '')
+  return {
+    missing: keys.map((f) => Z_HEADROOM_FIELDS[f] ?? f),
+    partly: !keys.includes('noseToTable'),
+  }
+}
+
+/** The words of a `zHeadroomUnknown` finding's missing fields, or undefined without one. */
+export function zHeadroomMissing(warnings: readonly PlanWarning[]): string[] | undefined {
+  const w = warnings.find((x) => x.code === 'plan.machine' && x.rule === 'zHeadroomUnknown')
+  if (w === undefined) return undefined
+  return String(w.params['missing'] ?? '')
+    .split(',')
+    .filter((f) => f !== '')
+    .map((f) => Z_HEADROOM_FIELDS[f] ?? f)
+}
+
 /** "12 min 5 s", "45 s". */
+/**
+ * A length in the document's units rounded up (the tool reaches at most this far, DF59):
+ * 0.1 mm or 0.01 in. "4.3 mm", "0.17 in".
+ */
+export function formatReach(mm: number, units: UnitSystem): string {
+  const [v, step, unit] = units === 'inch' ? [mm / 25.4, 100, 'in'] : [mm, 10, 'mm']
+  return `${Math.ceil(v * step - 1e-9) / step || 0} ${unit}`
+}
+
+/** A height in the document's units without trailing zeros: "10 mm", "0.394 in". */
+export function formatHeight(mm: number, units: UnitSystem): string {
+  return units === 'inch' ? `${+(mm / 25.4).toFixed(3)} in` : `${+mm.toFixed(2)} mm`
+}
+
 export function formatDuration(seconds: number): string {
   const s = Math.max(0, Math.round(seconds))
   const h = Math.floor(s / 3600)

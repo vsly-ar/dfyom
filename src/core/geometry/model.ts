@@ -178,6 +178,12 @@ export type OperationGeometry = FacePlacement &
         readonly center: Vec2
         readonly diameter: number
         readonly bottom: DrillBottom
+        /**
+         * A through hole's depth below the stock face when an earlier setup already cleared
+         * material under the whole hole from the opposite face (DF61, `throughDepths`); absent =
+         * the stock extent along the normal.
+         */
+        readonly throughDepth?: number
       }
     | {
         readonly kind: 'profile'
@@ -185,8 +191,14 @@ export type OperationGeometry = FacePlacement &
         readonly shape: Shape
         readonly side: 'outside' | 'inside' | 'on'
         readonly slotWidth: number
-        /** v0.3, `on` only: a blind groove's depth below the stock face; absent = through. */
+        /** A blind groove's (v0.3) or step's (DF53) depth below the stock face; absent = through. */
         readonly depth?: number
+        /**
+         * A through cut's depth below the stock face when an earlier setup already cleared
+         * material under its whole slot from the opposite face (DF50, `throughDepths`); absent =
+         * the stock extent along the normal. Tabs stand on this level.
+         */
+        readonly throughDepth?: number
         readonly tabs: {
           readonly count: number
           readonly width: number
@@ -307,12 +319,16 @@ export const DFM_WARNING_CODES = [
   'dfm.tabsNone',
   'dfm.tabsUnused',
   'dfm.tabsThin',
+  // material removed by earlier setups (DF50): docs/modes/plan-v0.2.md#material-removed-by-earlier-setups
+  'dfm.tabsThick',
   // face access checks (v0.2): docs/modes/design-v0.2.md#dfm-access-checks
   'dfm.reach',
   'dfm.setups',
   // the operation's own tool (v0.2): docs/modes/design-v0.2.md#dfm-with-the-tool
   'dfm.toolUnfit',
   'dfm.toolNotInLibrary',
+  // no tool fits at all (hardening DF52): docs/modes/design-v0.2.md#tool-choice-fixes-df51-df52-df54-df55
+  'dfm.noFittingTool',
   // shapes (v0.3): docs/modes/design-v0.3.md#dfm-checks-for-shapes
   'dfm.restMaterial',
   'dfm.shapeOutsideFace',

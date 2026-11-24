@@ -9,7 +9,7 @@ import { slotCoversOpening } from '../geometry/operations'
 import { analyticTabCentres } from '../geometry/tab-hold'
 import { Err, Ok, type AppResult } from '../../shared/result'
 import { noSteps, type Steps } from '../workers/steps'
-import { commonIssues, levels, passSteps, toolpath } from './common'
+import { commonIssues, cutLevels, cutTop, passSteps, toolpath } from './common'
 import { rowPositions } from './facing'
 import type { ProfileInput, Toolpath } from './model'
 import { flat, MoveBuilder, ringSegs, segPoint, slope, walkRing, type Seg, type Seg3 } from './path'
@@ -21,13 +21,15 @@ export function generateProfile(input: ProfileInput, steps: Steps = noSteps): Ap
   const { tool, cutting, heights, stock, operation: op, strategy: st } = input
   const shape = op.shape.contour
   const c = op.shape.center
-  const T = stock.thickness
+  // the material left under the slot (DF50): earlier setups may have cleared some from below
+  const T = op.throughDepth ?? stock.thickness
   const R = tool.diameter / 2
   const sw = op.slotWidth
   const issues = commonIssues(input)
   issues.positive('operation.slotWidth', sw)
   issues.nonNegative('strategy.breakthrough', st.breakthrough)
   issues.nonNegative('strategy.finishAllowance', st.finishAllowance)
+  if (st.finishStepdown !== undefined) issues.positive('strategy.finishStepdown', st.finishStepdown)
   if (!(st.rampAngle >= 0.5 && st.rampAngle <= 30))
     issues.rule('invariant', 'strategy.rampAngle', 'range', 'rampAngle must be 0.5°–30°', {
       rampAngle: st.rampAngle,
@@ -54,7 +56,7 @@ export function generateProfile(input: ProfileInput, steps: Steps = noSteps): Ap
         'invariant',
         'operation.tabs.thickness',
         'range',
-        'tabs.thickness must be > 0 and < stock thickness',
+        'tabs.thickness must be > 0 and < the material it cuts through',
         {
           thickness: op.tabs.thickness,
         },
@@ -139,12 +141,12 @@ export function generateProfile(input: ProfileInput, steps: Steps = noSteps): Ap
    * Pieces in order, with vertical moves between them (lifts over tabs and drops after them) at
    * the plunge rate: a purely vertical move never exceeds it (the Z axis is the slowest).
    */
-  const emit = (pieces: readonly Seg3[]) => {
+  const emit = (pieces: readonly Seg3[], f = feed) => {
     for (const piece of pieces) {
       const pos = b.position!
       if (Math.abs(pos[2] - piece.z0) > EPSILON)
         b.line([pos[0], pos[1], piece.z0], cutting.plungeRate)
-      b.seg(piece, feed)
+      b.seg(piece, f)
     }
   }
   const lineTo = (p: Vec2, z: number): Seg3[] => {
@@ -153,9 +155,14 @@ export function generateProfile(input: ProfileInput, steps: Steps = noSteps): Ap
   }
 
   const finishing = first - R > EPSILON
-  const zs = levels(0, bottom, cutting.stepdown)
-  const pass = passSteps(steps, zs.length + (finishing ? 1 : 0))
-  let previous = 0
+  // over the material earlier cuts left (DF61): no passes wholly in air
+  const zs = cutLevels(0, bottom, cutting.stepdown, input.material)
+  // DF76: finishing levels of `finishStepdown` (absent: one level at full depth)
+  const finishZ = finishing
+    ? cutLevels(0, bottom, st.finishStepdown ?? Infinity, input.material)
+    : []
+  const pass = passSteps(steps, zs.length + finishZ.length)
+  let previous = cutTop(0, bottom, input.material)
   for (const [k, z] of zs.entries()) {
     const step = pass(k)
     if (step.isErr()) return Err(step.unwrapErr())
@@ -186,19 +193,23 @@ export function generateProfile(input: ProfileInput, steps: Steps = noSteps): Ap
     previous = z
   }
 
-  // finishing: the part-side ring at full depth, lead-in/out from the part-side rough ring
+  // finishing: the part-side ring in levels down to full depth, lead-in/out from the part-side
+  // rough ring, at the finishing feed (DF74)
   if (finishing) {
-    const step = pass(zs.length)
-    if (step.isErr()) return Err(step.unwrapErr())
     b.pass('finish')
+    const finishFeed = cutting.finishFeedRate ?? feed
     const wall = ring(R, start)
     const leadRing = ring(first, start)
     const lead = leadRing.length > 0 ? segPoint(leadRing[0]!, 0) : c
     b.rapid(at(lead, retract))
-    b.line(at(lead, liftZ(lead, bottom)), cutting.plungeRate)
-    if (wall.length > 0) emit(lift(lineTo(segPoint(wall[0]!, 0), bottom)))
-    emit(lift(flat(wall, bottom)))
-    emit(lift(lineTo(lead, bottom)))
+    for (const [k, z] of finishZ.entries()) {
+      const step = pass(zs.length + k)
+      if (step.isErr()) return Err(step.unwrapErr())
+      b.line(at(lead, liftZ(lead, z)), cutting.plungeRate)
+      if (wall.length > 0) emit(lift(lineTo(segPoint(wall[0]!, 0), z)), finishFeed)
+      emit(lift(flat(wall, z)), finishFeed)
+      emit(lift(lineTo(lead, z)), finishFeed)
+    }
     b.rapid(at(lead, retract))
   }
   b.rapid(at(xy(b.position!), heights.clearanceHeight))

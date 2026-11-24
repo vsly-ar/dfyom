@@ -31,6 +31,7 @@ import {
   VENTS,
 } from '../src/core/design/enclosure-lid.testing'
 import { closeDialog, expect, launchApp, openPartSetup, test } from './app.fixture'
+import { withoutAppVersion } from '../src/core/post/plan-export'
 
 const SVG = resolve('src/core/design/__fixtures__/enclosure-sections.svg')
 /** X1's golden program: the same lid built through the UI exports the same bytes. */
@@ -298,9 +299,12 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
   await expect(report).toBeVisible({ timeout: 30_000 })
   await report.getByRole('button', { name: 'Close' }).first().click()
   await expect(report).toHaveCount(0)
-  // a row's actions show while it is hovered (ui.md § Navigator); Remove keeps the dialog open
-  await shapes.getByRole('button', { name: /^cavity/ }).hover()
-  await shapes.getByRole('button', { name: 'Remove cavity' }).click()
+  // a row's actions are its context menu (DF70, ui.md decision 27); Remove keeps the dialog open
+  await shapes.getByRole('button', { name: /^cavity/ }).click({ button: 'right' })
+  await page
+    .getByRole('menu', { name: 'Actions for cavity' })
+    .getByRole('menuitem', { name: /^Remove/ })
+    .click()
   const shapeRows = shapes.getByRole('list').getByRole('button', { name: /^(outline|cavity)/ })
   await expect(shapeRows).toHaveText([/^outline/])
   await closeDialog(shapes)
@@ -545,7 +549,8 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
   await planStart.getByRole('button', { name: 'Create plan' }).click()
   const setups = navigator.getByRole('list', { name: 'Setups in machining order' })
   await expect(setups.getByRole('button', { name: /^Top G54/ })).toBeVisible()
-  await expect(setups.getByRole('button', { name: /^Actions for setup/ })).toHaveCount(1)
+  // one setup (its row's actions are its context menu, DF67)
+  await expect(setups.locator(':scope > li')).toHaveCount(1)
   // tool by tool (plan order v2), as X1 plans it: equal holes and equal countersinks share one
   // plan operation, every clone instance keeps its source's tool, the outline last
   const planned = setups
@@ -575,7 +580,7 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
       .click()
     const done = p.getByRole('dialog', { name: 'gCode exported' })
     await expect(done.getByText('No machine warnings.')).toBeVisible({ timeout: 30_000 })
-    const file = join(dfyom.dataDir, 'Plan 1.nc')
+    const file = join(dfyom.dataDir, 'enclosure-lid.nc')
     expect(existsSync(file)).toBe(true)
     const gcode = readFileSync(file, 'utf8')
     await expect(done.getByText(`${gcode.trimEnd().split('\n').length} lines`)).toBeVisible()
@@ -598,15 +603,16 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
     'Profile 1',
   ])
   expect(program.match(/^\(DFYOM TOOL CHANGE \d+: .*\)$/gm)).toEqual([
-    '(DFYOM TOOL CHANGE 1: Flat 3)',
-    '(DFYOM TOOL CHANGE 2: Flat 6)',
-    '(DFYOM TOOL CHANGE 3: Chamfer 90 x 12)',
-    '(DFYOM TOOL CHANGE 2: Flat 6)',
+    '(DFYOM TOOL CHANGE 1: Flat 3, 3 mm flat)',
+    '(DFYOM TOOL CHANGE 2: Flat 6, 6 mm flat)',
+    '(DFYOM TOOL CHANGE 3: Chamfer 90 x 12, 12 mm chamfer)',
+    '(DFYOM TOOL CHANGE 2: Flat 6, 6 mm flat)',
   ])
   expect(program).toContain('(Clones 3 #7)')
   expect(program).not.toContain('(Clones 3 #4)')
   // the same lid as X1's headless flow: the same program
-  expect(program).toBe(readFileSync(GOLDEN, 'utf8'))
+  expect(withoutAppVersion(program)).toBe(readFileSync(GOLDEN, 'utf8'))
+  expect(program).toMatch(/^\(Generator: DFYOM \d+\.\d+\.\d+[^)]*\)$/m) // app version
   const lineCount = program.trimEnd().split('\n').length
 
   // ── Run on the virtual machine at Max ────────────────────────────────────────────────────

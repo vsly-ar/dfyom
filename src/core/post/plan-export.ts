@@ -13,17 +13,36 @@ import { planOperationInputs } from '../plan/inputs'
 import { PlanIdSchema, PlanRecordIdSchema } from '../plan/plan.dto'
 import { loadPlan } from '../plan/plan'
 import { planOperationLabel, positionComment } from '../plan/labels'
-import { chooseSetup } from '../plan/setups'
+import { setupHeader } from '../plan/setup-header'
+import { chooseSetup, setupStockSize } from '../plan/setups'
 import { checkAllowed } from '../plan/status'
+import { setupZReferences, zRefText } from '../plan/z-reference'
 import type { ProjectDoc } from '../project/document'
-import { cacheOf, ensureToolpath } from '../toolpath/generate'
+import { cacheOf, ensureToolpath, inputOverreach } from '../toolpath/generate'
 import type { Vec3 } from '../toolpath/model'
+import { maxOverreach, type Overreach } from '../toolpath/overreach'
 import { exportGrbl, type ExportOperation, type GrblExport } from './export'
+import { gcodeFileStem } from './file-name'
 import { commentLine } from './grbl/format'
 import { machineKeyOf } from '../run/machine-key'
 
-/** The generator string of exported programs' header (no version: same input, same file). */
+/** The generator string of exported programs' header, without the app version. */
 export const PROGRAM_GENERATOR = 'DFYOM'
+
+/** `DFYOM <version>` (the app's version, injected as `services.appVersion`), else `DFYOM`. */
+export function programGenerator(appVersion: string | undefined): string {
+  return appVersion === undefined || appVersion === ''
+    ? PROGRAM_GENERATOR
+    : `${PROGRAM_GENERATOR} ${appVersion}`
+}
+
+/**
+ * gCode with its `Generator:` header line reduced to `DFYOM` (no version), so golden files stay
+ * stable across version bumps (tests only compare programs this way).
+ */
+export function withoutAppVersion(gcode: string): string {
+  return gcode.replace(/^\(Generator: DFYOM [^)]*\)$/m, `(Generator: ${PROGRAM_GENERATOR})`)
+}
 
 /** gCode file extensions `plan.export` writes (case-insensitive). */
 export const GCODE_EXTENSIONS = ['.nc', '.gcode', '.ngc'] as const
@@ -32,6 +51,11 @@ export const GCODE_EXTENSIONS = ['.nc', '.gcode', '.ngc'] as const
 export function isGcodeFileName(path: string): boolean {
   const name = (path.split(/[\\/]/).at(-1) ?? '').toLowerCase()
   return GCODE_EXTENSIONS.some((ext) => name.endsWith(ext) && name.length > ext.length)
+}
+
+/** A `plan.export` target naming a folder: it ends in `/` or `\\` (DF62). */
+export function isFolderTarget(path: string): boolean {
+  return /[\\/]$/.test(path)
 }
 
 /**
@@ -95,7 +119,7 @@ const neverAborted = new AbortController().signal
 export async function exportPlan(
   doc: ProjectDoc,
   planId: string,
-  services: Pick<Services, 'workers' | 'toolpaths' | 'region2d'>,
+  services: Pick<Services, 'workers' | 'toolpaths' | 'region2d' | 'appVersion'>,
   opts: PlanExportOptions = {},
 ): AsyncAppResult<PlanExport> {
   const where = 'plan.export'
@@ -112,6 +136,7 @@ export async function exportPlan(
   const chosen = chooseSetup(plan.setups, opts.setupId, where)
   if (chosen.isErr()) return Err(chosen.unwrapErr().withContext(where, { planId }))
   const setup = chosen.unwrap().setup
+  const setupIndex = plan.setups.findIndex((s) => s.id === setup.id)
   // only this setup's findings block its program (as plan.toolpath.generate per operation)
   const inputs = planOperationInputs(
     doc,
@@ -139,8 +164,26 @@ export async function exportPlan(
       data: { planId },
       issues: [{ path: ['planId'], rule: 'empty', message: 'the plan has no operations' }],
     })
+  // DF69: the setup's Z references; their errors block its program like a plan finding
+  const zRefs = setupZReferences(plan, setup.id, services.region2d)
+  const zErrors = [...zRefs.values()].flatMap((r) =>
+    r.findings.filter((f) => f.severity === 'error'),
+  )
+  const firstZ = zErrors[0]
+  if (firstZ !== undefined)
+    return fail('plan.check', firstZ.message, {
+      where,
+      data: { planId },
+      issues: zErrors.map((f) => ({
+        path: [f.planOperationId ?? planId, 'zRef'],
+        rule: f.rule,
+        message: f.message,
+        params: f.params,
+      })),
+    })
   const total = all.length
   const operations: ExportOperation[] = []
+  const reaches: Overreach[] = []
   const regenerated: string[] = []
   const part = plan.dto.design.part
   for (const [i, input] of all.entries()) {
@@ -172,6 +215,7 @@ export async function exportPlan(
       if (text !== undefined) positions[id] = text
     }
     const toolpath = tp.unwrap().toolpath
+    reaches.push(inputOverreach(input, toolpath))
     // a plan operation of one design operation: its passes name it (joined ones already do)
     const only = ids.length === 1 ? ids[0]! : undefined
     operations.push({
@@ -182,8 +226,14 @@ export async function exportPlan(
               ...toolpath,
               passes: toolpath.passes.map((p) => ({ ...p, operationId: p.operationId ?? only })),
             },
-      tool: { name: input.tool.name, diameter: input.tool.diameter.canonical },
+      tool: {
+        name: input.tool.name,
+        diameter: input.tool.diameter.canonical,
+        type: input.tool.type,
+      },
+      stickout: input.stickout,
       label,
+      ...programZRef(zRefs.get(id)?.zRef),
       ...(Object.keys(positions).length === 0 ? {} : { positions }),
     })
   }
@@ -191,14 +241,29 @@ export async function exportPlan(
   const exported = exportGrbl(
     {
       name: plan.dto.name,
-      setup: { name: setup.name, clearanceHeight: all[0]!.setup.clearanceHeight },
+      setup: {
+        name: setup.name,
+        id: setup.id,
+        clearanceHeight: all[0]!.setup.clearanceHeight,
+        stockThickness: setupStockSize(plan.stock, setup).z[1],
+        header: setupHeader(
+          plan.setups,
+          setupIndex,
+          {
+            length: plan.stock.length.canonical,
+            width: plan.stock.width.canonical,
+            thickness: plan.stock.thickness.canonical,
+          },
+          maxOverreach(reaches),
+        ),
+      },
       operations,
       machine: plan.machine,
       ...(opts.workZero === undefined ? {} : { workZero: opts.workZero }),
       ...(resumeFrom === undefined ? {} : { resumeFrom }),
     },
     {
-      generator: opts.generator ?? PROGRAM_GENERATOR,
+      generator: opts.generator ?? programGenerator(services.appVersion),
       // a resume always waits at its tool (run-machine.md#section-resume-m5)
       ...(resumeFrom === undefined ? {} : { firstToolLoaded: false }),
     },
@@ -216,6 +281,14 @@ export async function exportPlan(
       ),
     }))
     .mapErr((e) => e.withContext(where, { planId }))
+}
+
+/** The program's view of a tool run's Z reference (DF69); none without one. */
+function programZRef(
+  z: { label: string; level: number; at: readonly [number, number]; top: boolean } | undefined,
+): { zRef?: NonNullable<ExportOperation['zRef']> } {
+  if (z === undefined) return {}
+  return { zRef: { label: zRefText(z), level: z.level, at: [z.at[0], z.at[1]], top: z.top } }
 }
 
 /**
@@ -255,6 +328,13 @@ export function connectedWorkZero(
   return key.isOk() && key.unwrap() === m.machineKey ? status.workZero : undefined
 }
 
+/**
+ * `plan.export`'s note when the soft limits were not checked (hardening DF58): where to check them.
+ * Doc: docs/architecture/grbl.md#plan-export-command
+ */
+export const SOFT_LIMIT_NOTE =
+  "Soft limits not checked: no homed connection to this plan's machine. Before running, set the work zero and check with run.job.check (or the Run pre-flight); run.job.start checks too."
+
 const ProgramStatsSchema = z.object({
   cutLength: z.number().describe('mm'),
   rapidLength: z.number().describe('mm'),
@@ -277,8 +357,13 @@ export const planExport = defineCommand({
     target: z
       .string()
       .min(1)
-      .refine(isGcodeFileName, `must be a ${GCODE_EXTENSIONS.join(', ')} file`)
-      .describe('Absolute path of the gCode file to write'),
+      .refine(
+        (t) => isGcodeFileName(t) || isFolderTarget(t),
+        `must be a ${GCODE_EXTENSIONS.join(', ')} file or a folder ending in /`,
+      )
+      .describe(
+        'Absolute path of the gCode file to write, or of a folder ending in / to use the short suggested name (project-s1.nc)',
+      ),
     setupId: PlanRecordIdSchema.optional().describe(
       'Setup to export; required when the plan has several',
     ),
@@ -295,6 +380,10 @@ export const planExport = defineCommand({
     softLimitChecked: z
       .boolean()
       .describe('Whether the soft-limit check ran (needs the work zero of a connected machine)'),
+    softLimitNote: z
+      .string()
+      .optional()
+      .describe('Without the check: how to check the soft limits before running'),
     regenerated: z
       .array(z.string())
       .describe('Plan operations whose toolpath was missing or stale and was generated'),
@@ -310,7 +399,10 @@ export const planExport = defineCommand({
     })
     if (exported.isErr()) return exported
     const e = exported.unwrap()
-    const written = await files.write(args.target, e.text, { confirm: args.confirm })
+    const target = isFolderTarget(args.target)
+      ? `${args.target}${gcodeFileStem(doc, args.planId, e.setupId)}.nc`
+      : args.target
+    const written = await files.write(target, e.text, { confirm: args.confirm })
     if (written.isErr())
       return Err(written.unwrapErr().withContext('plan.export', { planId: args.planId }))
     return Ok({
@@ -320,6 +412,7 @@ export const planExport = defineCommand({
       stats: e.stats,
       warnings: [...e.warnings],
       softLimitChecked: e.softLimitChecked,
+      ...(e.softLimitChecked ? {} : { softLimitNote: SOFT_LIMIT_NOTE }),
       regenerated: [...e.regenerated],
     })
   },

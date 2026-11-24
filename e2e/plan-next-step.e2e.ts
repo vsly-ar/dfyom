@@ -62,8 +62,9 @@ test('DF45: undo toast over the view, Plan start machine, next-step primary, set
     await navigator.getByRole('button', { name: 'Add', exact: true }).click()
     await page.getByRole('menuitem', { name: kind }).click()
   }
+  // Delete on the focused row removes it (DF70: rows have no Remove button)
   await navigator.getByRole('button', { name: 'Pocket 2', exact: true }).click()
-  await navigator.getByRole('button', { name: 'Remove Pocket 2' }).click()
+  await page.keyboard.press('Delete')
   const toast = page.getByRole('region', { name: /^Notifications/ }).getByRole('listitem')
   await expect(toast).toContainText('Removed Pocket 2')
   const t = (await toast.boundingBox())!

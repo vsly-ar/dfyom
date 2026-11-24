@@ -5,7 +5,7 @@
 import { EPSILON, type Vec2, type Vec3 } from '../geometry/model'
 import { Err, Ok, type AppResult } from '../../shared/result'
 import { noSteps, type Steps } from '../workers/steps'
-import { commonIssues, levels, toolpath } from './common'
+import { commonIssues, cutTop, levels, toolpath } from './common'
 import type { DrillingInput, Toolpath } from './model'
 import { flat, MoveBuilder, slope, type Seg } from './path'
 import { TOOL_FIT_TOLERANCE } from './pocket'
@@ -126,10 +126,16 @@ export function generateDrilling(
   const ok = issues.result('generateDrilling', input.planOperationId).andThen(() => steps.step())
   if (ok.isErr()) return Err(ok.unwrapErr())
 
-  // z where the hole reaches its full diameter
+  // z where the hole reaches its full diameter; a through hole ends on the material an earlier
+  // setup left under it (DF61), else the far stock face
   const full =
-    op.bottom.kind === 'through' ? -stock.thickness - st.breakthrough : op.onZ - op.bottom.depth
-  const retract = op.onZ + heights.retractHeight
+    op.bottom.kind === 'through'
+      ? -(op.throughDepth ?? stock.thickness) - st.breakthrough
+      : op.onZ - op.bottom.depth
+  // over a hole whose whole disc earlier cuts cleared below its `on` level (DF61 follow-up) the
+  // cycle starts on the material: pecks count from there and the retract plane follows it
+  const top = cutTop(op.onZ, full, input.material)
+  const retract = top + heights.retractHeight
   const at = (p: Vec2, z: number): Vec3 => [p[0], p[1], z]
   const c = op.center
   const b = new MoveBuilder()
@@ -141,7 +147,7 @@ export function generateDrilling(
     b.drill({
       kind: 'drill',
       at: c,
-      top: op.onZ,
+      top,
       bottom: full - tipLength(tool.diameter, tool.pointAngle!),
       cycle: st.cycle,
       ...(st.cycle === 'simple' ? {} : { peck: st.peckDepth }),
@@ -170,15 +176,15 @@ export function generateDrilling(
   b.pass('rough')
   b.rapid(at(start, heights.clearanceHeight))
   b.rapid(at(start, retract))
-  b.line(at(start, op.onZ), cutting.plungeRate)
+  b.line(at(start, top), cutting.plungeRate)
   if (radius < HELIX_MIN_RADIUS) {
-    for (const z of levels(op.onZ, full, st.helixPitch)) b.line(at(start, z), cutting.plungeRate)
+    for (const z of levels(top, full, st.helixPitch)) b.line(at(start, z), cutting.plungeRate)
   } else {
     const pitch = Math.min(st.helixPitch, turn * Math.tan((st.rampAngle * Math.PI) / 180))
-    const turns = Math.max(1, Math.ceil((op.onZ - full) / pitch - 1e-9))
-    const drop = (op.onZ - full) / turns
+    const turns = Math.max(1, Math.ceil((top - full) / pitch - 1e-9))
+    const drop = (top - full) / turns
     const feed = Math.min(cutting.feedRate, (cutting.plungeRate * Math.hypot(turn, drop)) / drop)
-    for (const s of slope(Array<Seg>(turns).fill(circle), op.onZ, full)) b.seg(s, feed)
+    for (const s of slope(Array<Seg>(turns).fill(circle), top, full)) b.seg(s, feed)
   }
   for (const s of flat([circle], full)) b.seg(s, cutting.feedRate)
   b.line(at(c, full), cutting.feedRate)

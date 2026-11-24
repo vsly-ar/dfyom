@@ -4,7 +4,8 @@
  *
  * Built in the host by `toGeneratorInputs` (inputs.ts); run in the worker. Drilling holds one
  * input per hole, in visiting order (chamfers, v0.4 T1, likewise one per chamfer); their toolpaths
- * are joined into one. `regionPocket` and
+ * are joined into one; a partly cleared `regionPocket` holds two (the uncovered part above the
+ * cleared level, then the whole region), joined likewise. `regionPocket` and
  * `regionProfile` (v0.3 T1/T2 wiring) carry general shapes; their generators take the 2D port of
  * the worker (`TaskControl.region2d()`). Doc: docs/modes/plan-v0.3.md#wiring-t1-t2
  */
@@ -73,7 +74,11 @@ export const GeneratorRequestSchema: z.ZodType<GeneratorRequest> = z.discriminat
     wcs,
   }),
   z.object({ kind: z.literal('profile'), inputs: one(ProfileInputSchema), wcs }),
-  z.object({ kind: z.literal('regionPocket'), inputs: one(RegionPocketInputSchema), wcs }),
+  z.object({
+    kind: z.literal('regionPocket'),
+    inputs: z.array(RegionPocketInputSchema).min(1).max(2).readonly(),
+    wcs,
+  }),
   z.object({ kind: z.literal('regionProfile'), inputs: one(RegionProfileInputSchema), wcs }),
   z.object({
     kind: z.literal('chamfer'),
@@ -120,10 +125,25 @@ function generateLocal(
       return joined(request.inputs, generateDrilling, 'hole', steps)
     case 'chamfer':
       return joined(request.inputs, generateChamfer, 'chamfer', steps)
-    case 'regionPocket': {
-      const input = request.inputs[0]!
-      return region2d().andThen((port) => generateRegionPocket(input, port, steps))
-    }
+    case 'regionPocket':
+      return region2d().andThen((port) => {
+        // a partly cleared pocket (DF61 follow-up): the uncovered part above the cleared level,
+        // then the whole region below it, as one toolpath
+        const parts: Toolpath[] = []
+        for (const input of request.inputs) {
+          const tp = generateRegionPocket(input, port, steps)
+          if (tp.isErr()) return tp
+          parts.push(tp.unwrap())
+        }
+        const first = parts[0]!
+        if (parts.length === 1) return Ok(first)
+        const passes = parts.flatMap((t) => t.passes)
+        return Ok({
+          ...first,
+          passes,
+          stats: toolpathStats(passes, request.inputs[0]!.maxFeedRate),
+        })
+      })
     case 'regionProfile': {
       const input = request.inputs[0]!
       return region2d().andThen((port) => generateRegionProfile(input, port, steps))

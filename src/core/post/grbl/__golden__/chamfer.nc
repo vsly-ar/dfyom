@@ -8,7 +8,7 @@ G90 G94 G17 G21
 G54
 G0 Z10
 (op-chamfer1)
-(DFYOM TOOL CHANGE 1: 6 mm chamfer mill)
+(DFYOM TOOL CHANGE 1: 6 mm chamfer mill, 6 mm chamfer)
 M3 S16000
 G4 P3
 X10 Y12
@@ -21,9 +21,10 @@ Y12 I0 J-3
 Y15 I0 J1.5
 G0 Z10
 (op-chamfer2)
+(Tool change to T2: spindle off, retract)
 M5
-(DFYOM TOOL CHANGE 2: 12 mm chamfer mill)
-M0
+(DFYOM TOOL CHANGE 2: 12 mm chamfer mill, 12 mm chamfer)
+M0 ;Install T2 12 mm chamfer mill, 12 mm chamfer, then zero Z
 G90 G94 G17 G21
 G54
 G0 Z10

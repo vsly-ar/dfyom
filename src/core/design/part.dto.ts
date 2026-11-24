@@ -157,7 +157,7 @@ export const ProfileDtoSchema = z.object({
   shape: OperationShapeDtoSchema,
   side: z.enum(PROFILE_SIDES),
   slotWidth: length(),
-  /** `on` only: a blind groove's depth below `on`; absent = through (as every v0.2 profile). */
+  /** A blind groove's or step's (DF53) depth below `on`; absent = through (as every v0.2 profile). */
   depth: length().optional(),
   tabs: z.object({
     count: quantityDto('scalar'),
@@ -195,10 +195,10 @@ export const OperationDtoSchema = z.discriminatedUnion('kind', [
 export type OperationDTO = z.output<typeof OperationDtoSchema>
 export type OperationKind = OperationDTO['kind']
 
-export const PartIdSchema = z
-  .string()
-  .regex(/^[A-Za-z0-9_-]{1,128}$/)
-  .describe('Part id')
+/** Part, plan, setup and plan operation ids: file-name safe. */
+export const RECORD_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/
+
+export const PartIdSchema = z.string().regex(RECORD_ID_PATTERN).describe('Part id')
 
 export const PartDtoSchema = z.object({
   id: PartIdSchema,

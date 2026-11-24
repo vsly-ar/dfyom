@@ -40,30 +40,30 @@ Symbols follow Sandvik Coromant (ISO): `vc` surface speed, `D` tool diameter, `z
 
 **Output** `CuttingSuggestion`: each of the five fields is `Option<{ value, derivation }>`; `derivation` lists formula id, inputs and result per step (rendered as formulas and tooltips in the UI, returned verbatim to agents). Derived display values: `vc` actual, `fz` actual, `Q`, `Pc`, spindle load %. Plus `warnings[]`.
 
-| Warning code            | When                                                                     | Effect                                                                       |
-| ----------------------- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| `feeds.rpmAboveMachine` | `n > spindle.maxSpeed` (small tools, aluminum)                           | `n` = max; `vf` keeps `fz` (F2), actual `vc` shown lower                     |
-| `feeds.rpmBelowMachine` | `n < spindle.minSpeed` (large tools, steel, router spindles)             | `n` = min; actual `vc` too high → heat/wear warning; `fz` kept               |
-| `feeds.feedClamped`     | `vf > min(maxFeedRate.x, .y)`                                            | `vf` = max; `n` lowered to keep `fz` while `n ≥ minSpeed`, else `fz` drops   |
-| `feeds.rubbing`         | actual `fz` < data minimum after clamping                                | warn: chips too thin, tool rubs and heats                                    |
-| `feeds.chipLoadHigh`    | actual `fz` > data maximum (only with a locked or entered feed or speed) | warn: chips too thick, the tool may break or chatter                         |
-| `feeds.powerExceeded`   | `Pc > Pavail` (F7 vs. [machine check](#hobby-machine-realism))           | calculator-owned `stepdown` reduced to fit; else an unlocked feed; else warn |
-| `feeds.noData`          | `materialClass = other`, `toolMaterial` unset/`other`, `D` outside bands | no suggestion (`None`); fallback or `plan.check` error as today              |
-| `feeds.powerSkipped`    | milling without `spindle.power` (or without a machine)                   | info only: power check skipped; `Pc` still shown                             |
-| `feeds.lockInactive`    | a stored lock breaks an [impossible-lock](#impossible-locks) rule now    | the lock is ignored (plan mode adds it, with `field` and the rule)           |
+| Warning code            | When                                                                                                                                   | Effect                                                                                                                        |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `feeds.rpmAboveMachine` | `n > spindle.maxSpeed` (small tools, aluminum)                                                                                         | `n` = max; `vf` keeps `fz` (F2), actual `vc` shown lower                                                                      |
+| `feeds.rpmBelowMachine` | `n < spindle.minSpeed` (large tools, steel, router spindles)                                                                           | `n` = min; actual `vc` too high → heat/wear warning; `fz` kept                                                                |
+| `feeds.feedClamped`     | `vf > min(maxFeedRate.x, .y)`                                                                                                          | `vf` = max; `n` lowered to keep `fz` while `n ≥ minSpeed`, else `fz` drops ([DF56](#feed-clamp-and-chip-load-hardening-df56)) |
+| `feeds.rubbing`         | actual `fz` < data minimum after clamping (also the finishing pass, rule `finishRubbing`: [DF74](#finishing-pass-feed-hardening-df74)) | warn: chips too thin, tool rubs and heats                                                                                     |
+| `feeds.chipLoadHigh`    | actual `fz` > data maximum (only with a locked or entered feed or speed)                                                               | warn: chips too thick, the tool may break or chatter                                                                          |
+| `feeds.powerExceeded`   | `Pc > Pavail` (F7 vs. [machine check](#hobby-machine-realism))                                                                         | calculator-owned `stepdown` reduced to fit; else an unlocked feed; else warn                                                  |
+| `feeds.noData`          | `materialClass = other`, `toolMaterial` unset/`other`, `D` outside bands                                                               | no suggestion (`None`); fallback or `plan.check` error as today                                                               |
+| `feeds.powerSkipped`    | milling without `spindle.power` (or without a machine)                                                                                 | info only: power check skipped; `Pc` still shown                                                                              |
+| `feeds.lockInactive`    | a stored lock breaks an [impossible-lock](#impossible-locks) rule now                                                                  | the lock is ignored (plan mode adds it, with `field` and the rule)                                                            |
 
 All warnings join `plan.warning.list` (chip load and power from the [final-value check](#final-value-check)); none is an error. Plan-mode machine checks are unchanged ([plan record](../modes/plan-v0.1.md#plan-record)).
 
 ## Engagement per strategy
 
-| Strategy (v0.1)  | `ae` used for F3/F6 | `ap`          | Notes                                                                                                    |
-| ---------------- | ------------------- | ------------- | -------------------------------------------------------------------------------------------------------- |
-| Facing           | `stepover`          | `stepdown`    | RCTF only when `stepover < D/2` (default 0.75 D: none).                                                  |
-| Pocket (offset)  | `D` (slot)          | `stepdown`    | First ring and corners are full-width; worst case for feed and power.                                    |
-| Profile          | `D` (slot)          | `stepdown`    | First pass is a slot; finishing pass runs at the same `feedRate` (one feed per op).                      |
-| Drilling (drill) | –                   | –             | F1 with drill `vc`, F8, `plungeRate = vf`; peck parameters are strategy-owned.                           |
-| Drilling (helix) | `D` (slot)          | `helixPitch`  | Treated as a slot on a helix.                                                                            |
-| Chamfer (v0.4)   | `De` (slot)         | chamfer depth | A flat end mill of diameter `De` ([Chamfer mills](#chamfer-mills-v04)); one pass, no stepdown suggested. |
+| Strategy (v0.1)  | `ae` used for F3/F6 | `ap`          | Notes                                                                                                                              |
+| ---------------- | ------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Facing           | `stepover`          | `stepdown`    | RCTF only when `stepover < D/2` (default 0.75 D: none).                                                                            |
+| Pocket (offset)  | `D` (slot)          | `stepdown`    | First ring and corners are full-width; worst case for feed and power. Finishing pass: [DF74](#finishing-pass-feed-hardening-df74). |
+| Profile          | `D` (slot)          | `stepdown`    | First pass is a slot; the finishing pass gets its own feed ([DF74](#finishing-pass-feed-hardening-df74)).                          |
+| Drilling (drill) | –                   | –             | F1 with drill `vc`, F8, `plungeRate = vf`; peck parameters are strategy-owned.                                                     |
+| Drilling (helix) | `D` (slot)          | `helixPitch`  | Treated as a slot on a helix.                                                                                                      |
+| Chamfer (v0.4)   | `De` (slot)         | chamfer depth | A flat end mill of diameter `De` ([Chamfer mills](#chamfer-mills-v04)); one pass, no stepdown suggested.                           |
 
 ### Chamfer mills (v0.4)
 
@@ -178,6 +178,48 @@ A lock is **unavailable** (the plan refuses it; the UI shows the lock disabled w
 ### Final-value check
 
 Because entered values are not inputs, the calculator's own warnings describe its recommendation, not what will run. After resolution `checkCutting(input, final values)` re-runs the coupling checks on the values that will be used: chip load against the data range at the final engagement (`feeds.rubbing`, `feeds.chipLoadHigh`, `field: feedRate`) and power at the final `ae`, `ap`, `vf` (`feeds.powerExceeded`, `field: stepdown`; helix: `feedRate`). It runs in auto and preset mode whenever there is data. These warnings replace the calculator's `feeds.rubbing`, `feeds.chipLoadHigh` and `feeds.powerExceeded` in `plan.warning.list`; the calculator's warnings stay in its derivation. Spindle range and feed limits of the final values are plan mode's existing machine checks (`plan.machine`), not repeated here. `cuttingAt(input, final values)` derives the display values (`dCalc`, `vc`, `fz` after chip thinning, `chipThinning`, `Q`, `Pc`, `spindleLoad`) at the same values, for the plan's [feeds explanation](../modes/plan-v0.1.md#feeds-explanation-v02).
+
+### Feed clamp and chip load (hardening DF56)
+
+The rule (since task 2.12, [warnings table](#inputs-and-outputs)): when the machine's max feed caps the calculated feed, the calculator keeps the chip load by lowering the spindle speed with the feed, `n = vf_max / (z·fz_prog)` (drilling: `vf_max / fn`), but not below `spindle.minSpeed`. A **locked** spindle speed stays, and so does an **entered** one (it replaces only its own field, [Locked inputs](#locked-inputs)); then the chip load drops, and the [final-value check](#final-value-check) warns `feeds.rubbing` when it falls below the data range.
+
+The agent test of 2026-11-23 (TG #232) read the old `feeds.feedClamped` warning ("Feed rate limited to the machine maximum (X/Y).", params `suggested` 6400.8, `spindleSpeed` 8436) as "the speed stayed, the chip load fell 53 %": `spindleSpeed` was already the lowered speed (from 18,000 rpm), and the chip load was kept. So DF56 changes only what the warning says:
+
+- **Message** (unit-free, like every calculator message) says what happened to the speed and the chip load, in one of three forms:
+  - lowered: "Feed rate limited to the machine maximum (X/Y); spindle speed lowered with it, so the chip load stays."
+  - at the floor: "…; the spindle speed stops at the machine minimum, so the chip load drops by 23 %."
+  - locked: "…; the spindle speed is locked, so the chip load drops by 53 %."
+    Drilling says "Drilling feed limited to the machine maximum (Z)" with the same endings (feed per revolution instead of chip load).
+- **Params:** `suggested` (the unclamped feed) and `maxFeedRate` as before; `spindleSpeed` is the speed used, `suggestedSpindleSpeed` the speed before the clamp, `chipLoad` and `suggestedChipLoad` the programmed chip load (`vf / (n·z)`, mm per tooth; drilling `vf / n`, mm per revolution) after and before, `chipLoadDrop` the drop in % (0 when kept).
+- The plunge clamp (`maxFeedRate.z`) changes no speed and keeps its message.
+- Presets and entered feeds are not calculated, so they are never clamped: a feed above the machine maximum is the `plan.machine` finding `maxFeedRate`.
+
+### Finishing pass feed (hardening DF74)
+
+Source: the first real hardwood cut ([research note](../research/2026-11-24-hardwood-tearout.md) § 1 item 4, gaps G2 and G10). The finishing pass of a pocket or profile removes only `finishAllowance` radially, so its chips are thinner than the roughing slot's (F3): at 0.2 mm on a 6.33 mm tool `RCTF` = 2.86, and the research's cavity pass at the roughing feed (3000 mm/min, 6350 rpm, 3 flutes, 0.157 mm/tooth) cut chips of 0.055 mm, under half the hardwood minimum (0.127 mm), on the surface that is seen. Before DF74 the pass ran at the operation's one `feedRate`, and no check looked at it.
+
+**Decision: the finishing pass gets its own computed feed**, derived and never stored (no new field, no lock, no entered value, no schema change):
+
+- `finishFeed = vf · kf / kr`, at most the machine's `min(maxFeedRate.x, .y)`. `vf` is the feed rate used (entered, preset or calculator: the rule keeps _its_ chip load); `kr` is the chip-thinning factor of the roughing values (`chipThinning` of the [final-value check](#final-value-check): F3 × F5 at the slot and the stepdown used); `kf` = F3 at `ae = finishAllowance` (at most `D`) × F5 at `ap` = the finish stepdown, capped at ×3 as always. So the finishing pass makes the same chip as the roughing pass, unless the machine's feed limit stops it. The spindle speed stays the operation's (one `S` per operation).
+- It needs calculator data (as the final-value check); without data, or without a finishing pass (`finishAllowance` 0), the finishing pass runs at `feedRate` as before.
+- Toolpaths: `CuttingParams.finishFeedRate` (optional, mm/min) feeds every cutting move of the `finish` passes (leads, rings, links between levels); plunges stay at `plungeRate`. The post writes the `F` words as for any move. Programs with finishing passes therefore change ([Goldens](#goldens-df74)).
+- Explanation: `plan.operation.feeds.get` returns `finish` (null without a finishing pass or data): `{ allowance, feedRate, chipThinning, fz, clamped }` (mm, mm/min, mm/tooth), shown in the inspector's "Show calculation" as "Finishing pass".
+
+**Check** (`feeds.rubbing`, rule `finishRubbing`, field `spindleSpeed`): when the finishing feed is held at the machine's limit and its chip `fz = finishFeed / (n · z · kf)` falls below **half** the data minimum (`FINISH_RUBBING_FRACTION` = 0.5). The charts' minimum is for a slot at 1 × D; a light finishing pass between half the minimum and the minimum is left alone, since the finishing feed already does all the machine allows and warning there would flag nearly every wood pocket on a 3000–5000 mm/min hobby machine (the shipped v0.2–v0.4 example plans, at 0.069–0.083 mm against 0.076–0.127 mm, stay quiet). The research case, 0.055 mm against 0.127 mm ("under half the hardwood minimum"), warns. Without the clamp the finishing chip equals the roughing chip, which the final-value check already reports, so this warns only when the feed limit is what makes the finish rub. The message names the fixes that work, computed at the values used:
+
+- a finishing allowance of at least `a` (`kf` small enough: `ae/D = (1 − √(1 − 1/k²)) / 2` with `k = vf_max / (n · z · fz_min)`), when that is below `D / 2`;
+- a spindle speed of at most `n' = vf_max / (z · kf · fz_min)` (rounded down to 10 rpm), when `n'` ≥ the spindle minimum (locked in auto mode, the roughing feed follows it and keeps its chip load);
+- a tool with `z' = ⌊z · fz / fz_min⌋` flutes at this spindle speed (≥ 1 and < `z`): fewer flutes, the usual answer on feed-limited hobby machines (research § 2.3).
+
+Example (the research's cavity, 0.2 mm allowance): "Finishing pass rubs: radial chip thinning at the 0.2 mm finishing allowance leaves 0.055 mm chips, under the 0.127 mm minimum, and the machine's 3000 mm/min feed limit (X/Y) stops a faster finishing feed. A finishing allowance of at least 1.3 mm or a tool with 1 flute at this spindle speed makes a real chip." (The spindle minimum, 6200 rpm, rules out the speed fix there: it would need 2755 rpm.) Params: `chipLoad`, `minimum`, `finishAllowance`, `finishFeedRate`, `maxFeedRate`, and when they apply `allowanceForMinimum` (mm), `spindleSpeedForMinimum` (rpm), `flutesForMinimum`.
+
+#### Goldens (DF74)
+
+The finishing feed changes the `F` words of finishing passes in programs whose feeds have calculator data (presets included: the finishing pass keeps the preset's chip load). Regenerated with DF73–DF76:
+
+- `src/core/toolpath/__golden__/setup-bottom.nc`, `setup-bottom.txt`, `setup-bottom-rot90.txt` and `src/main/cli/__golden__/exit-criteria-bracket.nc` (v0.1, aluminium): only the pocket's finishing feed, F800 → F2228.3 and F1929.8 (and the time estimate).
+- `exit-criteria-lid.nc` (v0.4, plywood): the finishing feeds of Flat 3's pocketing passes and Flat 6's profiles rise to the router's 5000 mm/min limit (from 3600 and 4800); the lid's plan now has two `finishRubbing` warnings (0.05 mm chips at the limit, under half the 0.127 mm minimum).
+- `exit-criteria-enclosure-1-bottom.nc`, `exit-criteria-enclosure-3-top.nc` (v0.2/v0.3) and `exit-criteria-shapes-2-top.nc` (v0.3), all walnut (hardwood): the 0.5 mm wood allowance moves the roughing rings in, and the finishing passes run in levels of at most 2·D ([finishing defaults](../modes/plan-v0.1.md#finishing-defaults-hardening-df75-df76)).
 
 ## Live vs. saved
 

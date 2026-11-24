@@ -141,10 +141,10 @@ export function setupPlacement(
   }
 }
 
-/** A `probe.plateThickness` in mm, if the values carry a valid one. */
+/** A `probePlateThickness` in mm, if the values carry a valid one. */
 function plateOf(values: unknown): number | undefined {
   const dto = QuantityDtoSchema.safeParse(
-    (values as { probe?: { plateThickness?: unknown } } | undefined)?.probe?.plateThickness,
+    (values as { probePlateThickness?: unknown } | undefined)?.probePlateThickness,
   )
   if (!dto.success) return undefined
   const q = Quantity.fromDTO(dto.data)

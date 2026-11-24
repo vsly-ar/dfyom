@@ -19,6 +19,7 @@ import type {
   PlanStatus,
   SetupDTO,
 } from '../../../../core/plan/plan.dto'
+import { setupCorner as coreSetupCorner } from '../../../../core/plan/setup-header'
 import { setupDirection, setupRotation } from '../../../../core/plan/setups'
 import { STRATEGY_KEYS, type StrategyKey } from '../../../../core/plan/strategy'
 import { ALLOWED, TRANSITIONS } from '../../../../core/plan/status'
@@ -26,7 +27,8 @@ import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
 import { Quantity } from '../../../../core/quantity/quantity'
 import type { QuantityKind, UnitId } from '../../../../core/quantity/units'
 import type { Toolpath } from '../../../../core/toolpath/model'
-import { setupFrame, setupZeroCorner } from '../../../../core/toolpath/wcs'
+import { maxOverreach, type Overreach } from '../../../../core/toolpath/overreach'
+import { setupFrame } from '../../../../core/toolpath/wcs'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import {
   planMessages as m,
@@ -155,13 +157,11 @@ export function setupPlacement(setup: SetupDTO, stock: StockSize): Placement {
 }
 
 /**
- * The part corner the setup's work zero (G54) sits at, named by the part faces that meet there
- * besides the up face: "front left" for an unrotated top setup, "back left" for the bottom. On
- * the machine it is always the front-left corner of the up face.
+ * The part corner the setup's work zero (G54) sits at ("front left" for an unrotated top setup,
+ * "back left" for the bottom): the core's, which the gCode header uses too (DF58).
  */
-export function setupCorner(setup: SetupDTO, stock: StockSize): string {
-  return setupZeroCorner(setupDirection(setup), setupRotation(setup), stock)
-}
+export const setupCorner = (setup: SetupDTO, stock: StockSize): string =>
+  coreSetupCorner(setup, stock)
 
 /** A setup's direction (absent = `+z`). */
 export const directionOfSetup = (setup: SetupDTO): Direction => setupDirection(setup)
@@ -350,6 +350,26 @@ export interface ToolpathEntry {
   readonly stale: boolean
   /** The plan's inputs have changes not applied yet (P2): outdated until Apply. */
   readonly pendingApply?: boolean
+  /** How far the current toolpath's tool reaches past the stock sides (mm, DF59); null if stale. */
+  readonly overreach?: Overreach | null
+}
+
+/**
+ * A setup's reach past the stock (DF59): the per-side maximum over its plan operations, or
+ * `undefined` while any of their toolpaths is missing or outdated.
+ * Doc: docs/modes/plan-v0.2.md#tool-reach-past-the-stock-and-clamps-hardening-df59-interim
+ */
+export function setupOverreach(
+  setup: SetupDTO,
+  toolpaths: Readonly<Record<string, ToolpathEntry>>,
+): Overreach | undefined {
+  const list: Overreach[] = []
+  for (const op of setup.operations) {
+    const e = toolpaths[op.id]
+    if (e === undefined || toolpathState(e, undefined) !== 'ready' || !e.overreach) return undefined
+    list.push(e.overreach)
+  }
+  return maxOverreach(list)
 }
 
 export function toolpathState(
@@ -480,6 +500,7 @@ export function shownStrategyKeys(
         return true
       case 'profile':
         if (key === 'breakthrough') return through
+        if (key === 'finishStepdown') return Number(resolved['finishAllowance'] ?? 0) > 0
         return key !== 'rampAngle' || entry === 'ramp'
       case 'drilling':
         if (key === 'peckDepth') return cycle === 'peck' || cycle === 'chipBreak'

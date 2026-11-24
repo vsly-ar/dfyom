@@ -7,8 +7,9 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect } from 'vitest'
 import { testStock } from '../../core/design/design.fixture'
-import { libraryInput, machineValues } from '../../core/library/library.fixture'
+import { len, libraryInput, machineValues } from '../../core/library/library.fixture'
 import { bull6, drill6, flat4, flat6 } from '../../core/plan/plan.fixture'
+import { withoutAppVersion } from '../../core/post/plan-export'
 
 /**
  * The exported gCode of the test project, compared byte for byte (path relative to the test
@@ -117,7 +118,12 @@ export async function exitCriteriaFlow(call: Call, dir: string): Promise<FlowRes
   const stock = (await ok<{ id: string }>('library.stock.add', { values: testStock() })).value.id
   for (const t of [flat6(), flat4(), bull6(), drill6()])
     await ok('library.tool.add', { values: libraryInput(t) })
-  const m = libraryInput(machineValues())
+  // with the Z headroom fields (DF68), so the export checks the headroom and finds none short
+  const m = libraryInput({
+    ...machineValues(),
+    noseToTable: len('110'),
+    spoilboardThickness: len('10'),
+  })
   const machine = (await ok<{ id: string }>('library.machine.add', { values: m })).value.id
 
   // ── Criterion: create a project with a rectangular stock ──────────────────────────────────
@@ -238,7 +244,9 @@ export async function exitCriteriaFlow(call: Call, dir: string): Promise<FlowRes
   const exported = (await ok<ExportResult>('plan.export', { planId, target })).value
   expect(exported).toMatchObject({ softLimitChecked: true, warnings: [], regenerated: [] })
   const gcode = readFileSync(target, 'utf8')
-  await expect(gcode).toMatchFileSnapshot(GOLDEN)
+  await expect(withoutAppVersion(gcode)).toMatchFileSnapshot(GOLDEN)
+  // the app version in the header (TG #242); goldens keep `DFYOM` alone
+  expect(gcode).toMatch(/^\(Generator: DFYOM \d+\.\d+\.\d+[^)]*\)$/m)
   expect(gcode.split('\n').filter((l) => l !== '')).toHaveLength(exported.lines)
   expect(gcode).toMatch(/^G90 G94 G17 G21$/m)
   expect(gcode.trimEnd().endsWith('M30')).toBe(true)
@@ -266,12 +274,12 @@ export async function exitCriteriaFlow(call: Call, dir: string): Promise<FlowRes
     warnings: [],
   })
   // every tool change of the program (marker followed by M0) and every other M0 waited once
-  const markers = [...gcode.matchAll(/^\(DFYOM TOOL CHANGE (\d+): [^)]*\)\nM0$/gm)]
+  const markers = [...gcode.matchAll(/^\(DFYOM TOOL CHANGE (\d+): [^)]*\)\nM0( ;[^\n]*)?$/gm)]
   expect(waits.filter((w) => w.startsWith('toolChange'))).toEqual(
     markers.map((mk) => `toolChange ${mk[1]}`),
   )
   expect(waits.filter((w) => w === 'programPause')).toHaveLength(ended.value.pauses)
-  expect(gcode.match(/^M0$/gm)).toHaveLength(markers.length + ended.value.pauses)
+  expect(gcode.match(/^M0( ;.*)?$/gm)).toHaveLength(markers.length + ended.value.pauses)
   // progress: first the job's export (indeterminate: no total, seen only when a poll lands in
   // it, i.e. under load), then lines acknowledged out of the program's lines, never going back,
   // ending complete (docs/modes/run-v0.1.md#progress)

@@ -118,7 +118,8 @@ export function shapePocket(op: Pocket, ctx: ShapeSolidsContext): AppResult<Loca
  *   (`offcut`); none when that is empty (the slot covers the opening: no tabs);
  * - `on`: removal = the band `slotWidth / 2` both sides of the loop (`offset` both ways) or path
  *   (`offsetPath`, round ends), walls labelled by the nearest element of the loop or path; a
- *   blind groove ends at `depth` below the stock face with a `floor`.
+ *   blind groove ends at `depth` below the stock face with a `floor`; so does a blind
+ *   `outside` / `inside` slot (a step, DF53: docs/modes/design-v0.3.md#steps-blind-side-profiles-df53).
  * Tabs (closed loops cut through only) are retained offset bands across the slot.
  */
 export function shapeProfile(
@@ -132,7 +133,8 @@ export function shapeProfile(
   const table = new Table()
   const s = op.slotWidth
   const T = stock.thickness
-  const blind = op.side === 'on' && op.depth !== undefined
+  // a blind `on` groove, or a blind `outside`/`inside` slot: a step (DF53)
+  const blind = op.depth !== undefined
   const offcut = op.side === 'on' ? AIR : table.add('offcut')
   const floor = blind ? table.add('floor') : AIR
   const roles = elementRoles(table, [chain])
@@ -151,7 +153,7 @@ export function shapeProfile(
       if (j < 0 || j >= n) return offcut
       return roles[reversed ? n - 1 - j : j]!
     }
-    return prism(region, 'shrink', top, bottom, { wall, top: AIR, bottom: AIR }, ctx)
+    return prism(region, 'shrink', top, bottom, { wall, top: AIR, bottom: floor }, ctx)
   }
 
   let removal: AppResult<LabelledMesh>
@@ -384,7 +386,9 @@ function shapeTab(
     const k = hits.length === 1 || dist(start) <= dist(end) ? hits[0]! : hits[1]!
     return ends[k]!
   }
-  const tabTop = -T + op.tabs.thickness
+  // tabs stand on the material left under the slot (`throughDepth`, DF50)
+  const floor = -(op.throughDepth ?? T)
+  const tabTop = floor + op.tabs.thickness
   const band = prism(
     bandRegion.unwrap(),
     'shrink',
@@ -393,7 +397,14 @@ function shapeTab(
     { wall, top: topFace, bottom: AIR },
     ctx,
   )
-  const nominal = prism(slot, 'shrink', tabTop, -T, { wall: () => AIR, top: AIR, bottom: AIR }, ctx)
+  const nominal = prism(
+    slot,
+    'shrink',
+    tabTop,
+    floor,
+    { wall: () => AIR, top: AIR, bottom: AIR },
+    ctx,
+  )
   return band.andThen((m) => nominal.map((n) => ({ band: m, nominal: n })))
 }
 

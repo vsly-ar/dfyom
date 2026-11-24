@@ -1,12 +1,12 @@
 /**
  * Operation tool field (v0.2): `design.operation.tool.set/lock/unlock`, `design.snapshot.update`,
  * the `design.tool.candidates` query and the auto choice as the apply hook
- * `design.toolAutoChoice` (registered in `APPLY_HOOKS`), and the tool part of the consistency scan
- * on open.
+ * `design.toolAutoChoice` (registered in `APPLY_HOOKS`), and the tool re-choice pending source
+ * `design.toolRechoice` (X2 F6: library changes and opening).
  * Doc: docs/modes/design-v0.2.md#operation-tool, docs/modes/design-v0.2.md#commands-and-queries-v02,
  * docs/architecture/apply.md#apply-hooks
  */
-import type { Draft } from 'immer'
+import { produce, type Draft } from 'immer'
 import { z } from 'zod'
 import { Err, fail, Ok, Some, type AppResult } from '../../shared/result'
 import type { PendingChange, ToolChange } from '../commands/apply'
@@ -16,6 +16,7 @@ import {
   defineQuery,
   type AnyCommand,
   type ApplyHook,
+  type PendingSource,
   type QueryDef,
 } from '../commands/define'
 import type { Region2dPort } from '../geometry/2d/port'
@@ -44,6 +45,7 @@ import {
   fittingLibraryTools,
   generalizedChoice,
   nearLibraryTool,
+  orphanTool,
   resolveDesignTool,
   unfitLibraryTools,
   type ChoiceInput,
@@ -480,7 +482,12 @@ export function autoChooseTools(
               : 'followsHole'
             : old.isNone()
               ? 'unresolved'
-              : (fitOf(old.unwrap(), input)?.rule ?? 'unfit')
+              : (fitOf(old.unwrap(), input)?.rule ??
+                // X2 F6: a fitting tool removed from the library gave way to a library tool
+                (orphanTool(input)
+                  ? 'libraryRemoved'
+                  : // DF54: a fitting generalized tool gave way to a library tool
+                    'libraryFits'))
       writeTool(draft, partId, i, to, undefined)
       written.set(op.id, to)
       changes.push({ partId, operationId: op.id, from, to: designToolToDTO(to), reason })
@@ -518,37 +525,123 @@ function leaderToolOf(
   return op !== undefined && op.tool.isSome() ? op.tool.unwrap() : undefined
 }
 
+/** Cached dry runs of `rechoices`: by the document's parts, then compared by reference. */
+const rechoiceCache = new WeakMap<
+  object,
+  {
+    snapshots: object
+    library: readonly LibraryItem[]
+    region2d: unknown
+    changes: readonly ToolChange[]
+  }
+>()
+
+/** A context for a dry run: its snapshot ids and times are thrown away with the draft. */
+function dryContext(services: CommandContext['services']): CommandContext {
+  let n = 0
+  return {
+    source: { kind: 'system', id: 'design.toolRechoice' },
+    ids: { next: (prefix) => `${prefix}-rechoice-${++n}` },
+    clock: { now: () => 0 },
+    services,
+  }
+}
+
 /**
- * The tool part of the consistency scan on open (docs/architecture/apply.md#opening-and-recovery):
- * every unlocked operation whose tool is absent or does not fit is pending (key field `tool`),
- * so the next Apply chooses it. A part that does not load is left out (its commands report it).
+ * The tool changes Apply would make if every operation of every part were pending: a dry run of
+ * the auto choice on a throw-away draft (its snapshots are dropped with it). Cached per (parts,
+ * snapshots, library tool items, 2D port) by reference. A part that does not load gives none
+ * (its commands report it).
  */
-export function toolScan(
-  doc: ProjectDoc,
-  ctx: { services: CommandContext['services'] },
-): PendingChange[] {
-  const library = toolItems(ctx)
-  const out: PendingChange[] = []
-  for (const partId of Object.keys(doc.parts)) {
-    const loaded = loadPart(doc, partId, 'project.open')
-    if (loaded.isErr()) continue
-    const l = loaded.unwrap()
-    const inputs = choiceInputs(l, library, doc.snapshots, ctx.services.region2d)
-    if (inputs.isErr()) continue
-    for (const [i, op] of l.part.operations.entries()) {
-      if (op.toolLocked || readOnlyOwned(l, op.id)) continue
-      const tool = op.tool.andThen((t) => resolveDesignTool(t, doc.snapshots))
-      if (tool.isSome() && fitOf(tool.unwrap(), inputs.unwrap()(i, op)) === undefined) continue
+function rechoices(doc: ProjectDoc, services: CommandContext['services']): readonly ToolChange[] {
+  const library = toolItems({ services })
+  const hit = rechoiceCache.get(doc.parts)
+  if (
+    hit !== undefined &&
+    hit.snapshots === doc.snapshots &&
+    hit.region2d === services.region2d &&
+    hit.library.length === library.length &&
+    hit.library.every((item, i) => item === library[i])
+  )
+    return hit.changes
+  const all: PendingChange[] = Object.values(doc.parts).flatMap((part) =>
+    part.operations.map((op) => ({
+      kind: 'design' as const,
+      partId: part.id,
+      operationId: op.id,
+      field: 'tool',
+      label: '',
+    })),
+  )
+  let changes: readonly ToolChange[] = []
+  if (all.length > 0)
+    produce(doc, (draft) => {
+      changes = autoChooseTools(draft, all, dryContext(services)).unwrapOr([])
+    })
+  rechoiceCache.set(doc.parts, {
+    snapshots: doc.snapshots,
+    library,
+    region2d: services.region2d,
+    changes,
+  })
+  return changes
+}
+
+/**
+ * `design.toolRechoice` (X2 F6, docs/modes/design-v0.2.md#library-changes-and-opening-x2-f6): an
+ * unlocked operation whose tool the auto choice would change is pending (key field `tool`), so a
+ * library change (tool added, edited, removed) or opening a project re-chooses it on the next
+ * Apply. Derived on every pending read; an operation Apply already targets through a design key
+ * (its own field, stock, shape, feature, or its leader's) gets none, nor one the choice keeps or
+ * nothing fits.
+ */
+export const toolRechoicePending: PendingSource = {
+  name: 'design.toolRechoice',
+  changes(doc, _baseline, design, ctx) {
+    const changes = rechoices(doc, ctx.services)
+    if (changes.length === 0) return []
+    // per part: the operations Apply already chooses for
+    const targeted = new Map<string, Set<string>>()
+    for (const c of design) {
+      if (c.kind !== 'design' || c.partId === undefined || !Object.hasOwn(doc.parts, c.partId))
+        continue
+      const t = targeted.get(c.partId) ?? new Set<string>()
+      for (const id of designChangeTargets(doc.parts[c.partId]!, c)) t.add(id)
+      targeted.set(c.partId, t)
+    }
+    const out: PendingChange[] = []
+    for (const change of changes) {
+      const part = Object.hasOwn(doc.parts, change.partId) ? doc.parts[change.partId] : undefined
+      const op = part?.operations.find((o) => o.id === change.operationId)
+      if (op === undefined) continue
+      const t = targeted.get(change.partId)
+      if (t !== undefined && (t.has(op.id) || followsTargeted(doc, change.partId, op.id, t)))
+        continue
       out.push({
         kind: 'design',
-        partId,
+        partId: change.partId,
         operationId: op.id,
         field: 'tool',
         label: `${op.name}: tool`,
       })
     }
-  }
-  return out
+    return out
+  },
+}
+
+/** Whether operation `id` follows the tool of an operation in `targeted` (`leaderOf`). */
+function followsTargeted(
+  doc: ProjectDoc,
+  partId: string,
+  id: string,
+  targeted: ReadonlySet<string>,
+): boolean {
+  const loaded = loadPart(doc, partId, 'design.toolRechoice')
+  if (loaded.isErr()) return false
+  const part = loaded.unwrap().part
+  const op = part.operations.find((o) => o.id === id)
+  const leader = op === undefined ? undefined : leaderOf(part, op)
+  return leader !== undefined && targeted.has(leader)
 }
 
 /** `design.toolAutoChoice`, the first apply hook (apply.md § Apply hooks). */

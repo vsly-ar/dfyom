@@ -1,7 +1,8 @@
 /**
  * `plan.tool.suggest`: library tools that pass the tool checks of a plan operation, ranked by
  * the design's tool (its library item → matching type and diameter) → preset for the stock's
- * material class → already used in this plan → largest diameter.
+ * material class → already used in this plan → largest size → shortest reach → largest diameter
+ * (sizes and reach as the design's auto choice, hardening DF55).
  * Doc: docs/modes/plan-v0.1.md#tool-assignment-and-checks,
  * docs/modes/plan-v0.2.md#tool-resolution-from-the-design-tool-field
  */
@@ -9,6 +10,7 @@ import type { Region2dPort } from '../geometry/2d/port'
 import { MATERIAL_CLASS_WORDS } from '../library/item'
 import type { LibraryItem } from '../library/library-item'
 import { Tool } from '../library/tool'
+import { sizeClasses, toolReach } from '../design/tool-choice'
 import type { PlanWarning } from './checks'
 import { isDesignTool, matchesDesign, planDesignTool } from './design-tool'
 import { evaluateOperation } from './evaluate'
@@ -98,12 +100,21 @@ export function suggestTools(
       reasons,
     })
   }
+  // DF55: within a size (diameters within 6 %) the shortest reach, as the design's auto choice
+  const size = sizeClasses(out.map((c) => c.diameter))
+  const cls = (c: ToolSuggestion) => size.get(c.diameter) ?? 0
+  const reachOf = new Map(
+    items.flatMap((i) => (i.values instanceof Tool ? [[i.id, toolReach(i.values)] as const] : [])),
+  )
+  const reach = (c: ToolSuggestion) => reachOf.get(c.toolLibraryItemId) ?? 0
   return out.sort(
     (a, b) =>
       Number(b.designTool) - Number(a.designTool) ||
       Number(b.matchesDesign) - Number(a.matchesDesign) ||
       Number(b.hasPreset) - Number(a.hasPreset) ||
       Number(b.usedInPlan) - Number(a.usedInPlan) ||
+      cls(a) - cls(b) ||
+      reach(a) - reach(b) ||
       b.diameter - a.diameter ||
       a.toolLibraryItemId.localeCompare(b.toolLibraryItemId),
   )

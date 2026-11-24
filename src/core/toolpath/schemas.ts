@@ -121,6 +121,7 @@ const CuttingSchema = z.object({
   plungeRate: z.number(),
   stepdown: z.number(),
   stepover: z.number(),
+  finishFeedRate: z.number().exactOptional(),
 })
 const DrillCuttingSchema = CuttingSchema.pick({
   spindleSpeed: true,
@@ -135,6 +136,9 @@ const base = {
   heights: z.object({ clearanceHeight: z.number(), retractHeight: z.number() }),
   stock: StockGeometrySchema,
   maxFeedRate: Vec3Schema.exactOptional(),
+  material: z
+    .object({ top: z.number().exactOptional(), bottom: z.number().exactOptional() })
+    .exactOptional(),
 }
 
 export const FacingInputSchema: z.ZodType<FacingInput> = z.object({
@@ -201,6 +205,7 @@ const ProfileStrategySchema = z.object({
   rampAngle: z.number(),
   breakthrough: z.number(),
   finishAllowance: z.number(),
+  finishStepdown: z.number().exactOptional(),
   direction: Direction,
 })
 

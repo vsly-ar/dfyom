@@ -300,7 +300,7 @@ function WaitDialog({ doc }: { doc: ProjectDoc | undefined }): React.JSX.Element
         }
       >
         <ol className={styles['steps']}>
-          {m.steps(tc.name).map((s) => (
+          {m.steps(tc.name, tc.surface, tc.spot).map((s) => (
             <li key={s}>{s}</li>
           ))}
         </ol>

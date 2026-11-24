@@ -22,7 +22,7 @@ import {
 } from '../commands/define'
 import type { PlanApply } from '../commands/apply'
 import { OPERATION_UPDATE_ARGS, updateOperation, writeOperationList } from '../design/commands'
-import { fieldContext, partFromDTO, type Operation } from '../design/operation'
+import { fieldContext, partFromDTO } from '../design/operation'
 import { OperationIdSchema, PartIdSchema } from '../design/part.dto'
 import { ItemIdSchema, NAME_MAX, type LibraryItemKind } from '../library/item'
 import type { LibraryItem } from '../library/library-item'
@@ -42,6 +42,14 @@ import {
 import { PlanWarningSchema, type PlanWarning } from './checks'
 import { evaluateOperation, planFindings } from './evaluate'
 import { feedModeIssues, type LockState } from './feeds'
+import { planThroughDepth } from './through'
+import {
+  knownSurfaceId,
+  planZReferences,
+  zRefFindings,
+  type ZRefCandidate,
+  type ZRefOutline,
+} from './z-reference'
 import { findPlanDTO, findPlanOperation, loadPlan, loadPlanDTO, type LoadedPlan } from './plan'
 import {
   checkNoNewOrderViolation,
@@ -78,7 +86,7 @@ import { designToolFindings } from './tool-resolution'
 
 // ── helpers ───────────────────────────────────────────────────────────────────────────────
 
-const Src = z.string().min(1).max(256).describe('Quantity as entered, e.g. "2 mm" or "1/16\\""')
+const Src = z.string().min(1).max(256)
 const PlanArg = { planId: PlanIdSchema }
 const Empty = z.object({})
 const nowIso = (ctx: CommandContext) => new Date(ctx.clock.now()).toISOString()
@@ -641,6 +649,16 @@ function writeSetups(
   return Ok(undefined)
 }
 
+function pastSetupEnd(setup: SetupDTO, index: number, where: string): AppResult<never> {
+  const max = setup.operations.length - index
+  return fail('input.malformed', 'count runs past the end of the setup', {
+    issues: [
+      { path: ['count'], rule: 'range', message: `must be at most ${max}`, params: { max } },
+    ],
+    where,
+  })
+}
+
 function pastEnd(max: number, where: string): AppResult<never> {
   return fail('input.malformed', 'toIndex is past the end of the list', {
     issues: [
@@ -785,7 +803,7 @@ const operationUpdate = defineCommand({
   kind: 'document',
   name: 'plan.operation.update',
   summary:
-    'Change preset or auto mode, stickout, entered feeds-and-speeds values, their locks, or strategy parameters of a plan operation.',
+    'Change preset or auto mode, stickout, entered feeds-and-speeds values, their locks, strategy parameters, or the Z reference of the tool run a plan operation starts.',
   title: () => 'Update plan operation',
   machine: false,
   args: z.object({
@@ -824,6 +842,21 @@ const operationUpdate = defineCommand({
         'Auto mode only. true locks a field (the other recommendations follow it; pins the shown value when none is entered); false unlocks it and keeps the value',
       ),
     strategy: StrategyArgSchema.optional(),
+    zRef: z
+      .object({
+        surface: z
+          .string()
+          .min(1)
+          .max(200)
+          .optional()
+          .describe('stock.top or <operation id>.floor'),
+        at: z.tuple([Src, Src]).optional().describe('Touch-off spot X, Y in the setup WCS'),
+      })
+      .nullable()
+      .optional()
+      .describe(
+        "Z reference of the tool run it starts (plan_get toolRuns[].zRef); surface absent = the default surface's spot moved; null = the default",
+      ),
   }),
   result: Empty,
   run(draft, args) {
@@ -949,6 +982,36 @@ const operationUpdate = defineCommand({
         ...strategyIssues(kind, op.strategy, resolveStrategy(kind, op.strategy, sctx), sctx),
       )
     }
+    if (args.zRef === null) delete op.zRef
+    else if (args.zRef !== undefined) {
+      // docs/modes/z-reference.md#agent-api-compact: an unknown surface id is refused here, the
+      // rest (eligibility, spot) is reported by the plan.zRef findings
+      const { surface, at } = args.zRef
+      if (surface !== undefined && !knownSurfaceId(plan, surface))
+        issues.push({
+          path: ['zRef', 'surface'],
+          rule: 'unknownSurface',
+          message: "no such surface: the setup's stock face (stock.top …) or <operation id>.floor",
+        })
+      let spot: [number, number] | undefined
+      if (at !== undefined) {
+        const xy = at.map((src, k) =>
+          Quantity.parse(src, fieldContext('length', units)).mapErr((e) =>
+            e.prefixIssues('zRef', 'at', k),
+          ),
+        )
+        const both = collect(xy)
+        if (both.isErr()) return Err(both.unwrapErr().withContext(where))
+        const [x, y] = both.unwrap().map((q) => q.canonical)
+        spot = [x!, y!]
+      }
+      if (surface === undefined && spot === undefined) delete op.zRef
+      else
+        op.zRef = {
+          ...(surface === undefined ? {} : { surface }),
+          ...(spot === undefined ? {} : { at: spot }),
+        }
+    }
     if (issues.length > 0) return invalid(issues, where)
     if (args.locks !== undefined) {
       const locks = args.locks
@@ -991,13 +1054,19 @@ const operationMove = defineCommand({
   kind: 'document',
   name: 'plan.operation.move',
   summary:
-    'Move a plan operation in the machining order, also into another setup of the same direction; it must stay after the operations whose surfaces it starts from.',
+    'Move a plan operation (or, with count, a block such as a tool run) in the machining order, also into another setup of the same direction; it must stay after the operations whose surfaces it starts from.',
   title: () => 'Move plan operation',
   machine: false,
   args: z.object({
     ...PlanOpArg,
     toIndex: z.number().int().min(0).describe('New 0-based position in the target setup'),
     toSetupId: PlanRecordIdSchema.optional().describe('Same direction; default its own setup'),
+    count: z
+      .number()
+      .int()
+      .min(1)
+      .optional()
+      .describe('Move this many consecutive operations from it as a block (a tool run); default 1'),
   }),
   result: Empty,
   run(draft, args) {
@@ -1015,12 +1084,15 @@ const operationMove = defineCommand({
     if (target === undefined) return unknownSetup(args.toSetupId ?? '', 'toSetupId', where)
     if (setupDirection(target) !== setupDirection(source))
       return directionMismatch(setupDirection(source), setupDirection(target), 'toSetupId', where)
-    const max = ti === si ? target.operations.length - 1 : target.operations.length
+    // a block of `count` (DF66: a tool run); `toIndex` is its first position after the move
+    const count = args.count ?? 1
+    if (index + count > source.operations.length) return pastSetupEnd(source, index, where)
+    const max = ti === si ? target.operations.length - count : target.operations.length
     if (args.toIndex > max) return pastEnd(max, where)
     if (ti === si && index === args.toIndex) return Ok({})
     const setups = plan.setups.map((x) => ({ ...x, operations: [...x.operations] }))
-    const [moved] = setups[si]!.operations.splice(index, 1)
-    setups[ti]!.operations.splice(args.toIndex, 0, moved!)
+    const moved = setups[si]!.operations.splice(index, count)
+    setups[ti]!.operations.splice(args.toIndex, 0, ...moved)
     const written = writeSetups(draft, plan, setups, 'toIndex', where)
     return written.isErr() ? written : Ok({})
   },
@@ -1191,17 +1263,6 @@ const lockDTO = (l: LockState) =>
     ? { state: l.state, rule: l.rule, reason: l.reason }
     : { state: l.state }
 
-/**
- * The material a through profile cuts below the stock face (mm; DF23): the stock thickness, as the
- * tool checks count it; the cut goes `breakthrough` further. Null for a blind groove or another kind.
- * Doc: docs/modes/plan-v0.1.md#profile-with-tabs
- */
-export function throughDepthOf(ops: readonly Operation[], thickness: number): number | null {
-  return ops.length > 0 && ops.every((o) => o.kind === 'profile' && o.depth.isNone())
-    ? thickness
-    : null
-}
-
 const operationList = defineQuery({
   name: 'plan.operation.list',
   summary:
@@ -1238,18 +1299,19 @@ const operationList = defineQuery({
           .number()
           .nullable()
           .describe(
-            'mm; a through profile: the material it cuts through below the stock face. Cut depth = throughDepth + strategy.breakthrough; to cut to depth D set breakthrough = D − throughDepth. Null otherwise',
+            'mm; a through profile: the material it cuts through below the stock face (less what an earlier setup cleared under its slot from the opposite face). Cut depth = throughDepth + strategy.breakthrough; to cut to depth D set breakthrough = D − throughDepth. Null otherwise',
           ),
       }),
     ),
   }),
-  run(doc, args) {
+  run(doc, args, ctx) {
     const loaded = loadPlan(doc, args.planId, 'plan.operation.list')
     if (loaded.isErr()) return loaded
     const plan = loaded.unwrap()
+    const port = ctx.services.region2d
     return Ok({
       operations: plan.operations.map((op) => {
-        const e = evaluateOperation(plan, op)
+        const e = evaluateOperation(plan, op, undefined, undefined, port)
         const snap = plan.dto.snapshots.find((s) => s.id === op.tool)
         const feeds = Object.fromEntries(
           FEED_FIELDS.map((f) => [
@@ -1289,7 +1351,7 @@ const operationList = defineQuery({
           feeds,
           chipLoad: e.feeds.andThen((f) => f.chipLoad).unwrapOr(null as unknown as number),
           strategy: strategy as Record<string, number | string>,
-          throughDepth: throughDepthOf(e.ops, plan.stock.thickness.canonical),
+          throughDepth: planThroughDepth(plan, e.ops, port),
         }
       }),
     })
@@ -1348,6 +1410,16 @@ const operationFeedsGet = defineQuery({
       })
       .nullable()
       .describe('At the values used; null without calculator data'),
+    finish: z
+      .object({
+        allowance: Num.describe('Finishing allowance (radial engagement), mm'),
+        feedRate: Num.describe('Finishing feed, mm/min'),
+        chipThinning: Num,
+        fz: Num.describe('Finishing chip after chip thinning, mm'),
+        clamped: z.boolean().describe('Held at the machine feed limit'),
+      })
+      .nullable()
+      .describe('Finishing pass (DF74); null without a finishing pass or calculator data'),
   }),
   run(doc, args) {
     const where = 'plan.operation.feeds.get'
@@ -1408,7 +1480,16 @@ const operationFeedsGet = defineQuery({
         Pc: d.Pc.unwrapOr(null as unknown as number),
         spindleLoad: d.spindleLoad.unwrapOr(null as unknown as number),
       }))
-    return Ok({ auto, inputs, fields, used })
+    const finish = e.feeds
+      .andThen((r) => r.finish)
+      .mapOr(null, (f) => ({
+        allowance: f.allowance,
+        feedRate: f.feedRate,
+        chipThinning: f.chipThinning,
+        fz: f.fz,
+        clamped: f.clamped,
+      }))
+    return Ok({ auto, inputs, fields, used, finish })
   },
 })
 
@@ -1518,6 +1599,65 @@ const toolSuggest = defineQuery({
 const fieldsParam = (fields: readonly string[]): Record<string, string> =>
   fields.length === 0 ? {} : { fields: fields.join(',') }
 
+const ZRefCandidateSchema = z.object({
+  surface: z.string(),
+  label: z.string(),
+  level: z.number().describe('Setup-frame Z of the surface, mm (≤ 0)'),
+  at: z.tuple([z.number(), z.number()]).describe('Touch-off spot X, Y in the setup WCS, mm'),
+  area: z.number().describe('Flat patch area, mm²'),
+  small: z.boolean().describe('Room for the tool but not the touch plate'),
+  top: z.boolean().describe("The setup's up face"),
+})
+const ZRefPoint = z.tuple([z.number(), z.number()])
+const ZRefPolygonSchema = z.object({
+  outer: z.array(ZRefPoint),
+  holes: z.array(z.array(ZRefPoint)),
+})
+const ZRefRunSchema = z.object({
+  setupId: z.string(),
+  planOperationId: z.string().describe("The tool run's first operation (stores a choice)"),
+  toolNumber: z.number().int(),
+  zRef: ZRefCandidateSchema.extend({
+    chosen: z.boolean(),
+    rule: z.enum(['top', 'facing', 'largest', 'chosen']),
+  }).nullable(),
+  candidates: z.array(ZRefCandidateSchema),
+  outline: z
+    .object({
+      patch: z.array(ZRefPolygonSchema).describe('The flat patch, setup WCS mm'),
+      spotArea: z
+        .array(ZRefPolygonSchema)
+        .describe('Where the spot may lie: the patch eroded by the clearance radius'),
+      clearance: z.number().describe('Room around the spot for the tool or plate, mm'),
+      grid: z.number().describe('Spot grid, mm'),
+    })
+    .nullable()
+    .describe("The reference's outline for the viewport (left out of agents' results)"),
+})
+
+const candidateDTO = (c: ZRefCandidate): z.output<typeof ZRefCandidateSchema> => ({
+  surface: c.surface,
+  label: c.label,
+  level: c.level,
+  at: [c.at[0], c.at[1]],
+  area: c.area,
+  small: c.small,
+  top: c.top,
+})
+
+const polygonsDTO = (ps: ZRefOutline['patch']) =>
+  ps.map((p) => ({
+    outer: p.outer.map((q): [number, number] => [q[0], q[1]]),
+    holes: p.holes.map((h) => h.map((q): [number, number] => [q[0], q[1]])),
+  }))
+
+const outlineDTO = (o: ZRefOutline) => ({
+  patch: polygonsDTO(o.patch),
+  spotArea: polygonsDTO(o.spotArea),
+  clearance: o.clearance,
+  grid: o.grid,
+})
+
 const warningList = defineQuery({
   name: 'plan.warning.list',
   summary:
@@ -1528,6 +1668,9 @@ const warningList = defineQuery({
     pendingApply: z
       .boolean()
       .describe('Its inputs have changes not applied yet: the checks are outdated until Apply'),
+    zRefs: z
+      .array(ZRefRunSchema)
+      .describe('Z reference and touch-off spot per tool run (DF69); empty without geometry'),
   }),
   run(doc, args, ctx) {
     const where = 'plan.warning.list'
@@ -1541,6 +1684,7 @@ const warningList = defineQuery({
             ? []
             : shapeFindings(loaded.unwrap(), ctx.services.region2d)),
           ...designToolFindings(loaded.unwrap(), libraryTools(ctx.services), ctx.services.region2d),
+          ...zRefFindings(loaded.unwrap(), ctx.services.region2d),
         ]
       : [
           {
@@ -1574,9 +1718,23 @@ const warningList = defineQuery({
         rule: 'partFits',
         params: fieldsParam(stale.rebuildBlockedFields),
       })
+    const runs = loaded.isOk() ? planZReferences(loaded.unwrap(), ctx.services.region2d) : []
     return Ok({
       warnings: findings.map((w) => ({ ...w, params: { ...w.params } })),
       pendingApply: planPendingApply(dto.unwrap(), ctx.apply?.pending() ?? []),
+      zRefs: runs
+        .filter((r) => r.run >= 0)
+        .map((r) => ({
+          setupId: r.setupId,
+          planOperationId: r.planOperationId,
+          toolNumber: r.toolNumber,
+          zRef:
+            r.zRef === undefined
+              ? null
+              : { ...candidateDTO(r.zRef), chosen: r.zRef.chosen, rule: r.zRef.rule },
+          candidates: r.candidates.map(candidateDTO),
+          outline: r.outline === undefined ? null : outlineDTO(r.outline),
+        })),
     })
   },
 })

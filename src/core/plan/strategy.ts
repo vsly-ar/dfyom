@@ -13,6 +13,7 @@ import type { OperationKind } from '../design/part.dto'
 import { chamferEdge } from '../design/geometry-input'
 import { SurfaceTable } from '../design/surfaces'
 import { chamferDepth, chamferTerraces } from '../geometry/model'
+import type { MaterialClass } from '../library/item'
 import type { Stock } from '../library/stock'
 import type { CuttingPreset, Tool } from '../library/tool'
 import type { UnitSystem } from '../project/document'
@@ -33,7 +34,7 @@ export const STRATEGY_KEYS: Readonly<Record<OperationKind, readonly StrategyKey[
   facing: ['direction', 'pattern', 'axis', 'overshoot'],
   pocket: ['direction', 'entry', 'helixDiameter', 'rampAngle', 'finishAllowance', 'finishStepdown'],
   drilling: ['cycle', 'peckDepth', 'chipBreakBack', 'helixPitch', 'rampAngle', 'breakthrough'],
-  profile: ['direction', 'entry', 'rampAngle', 'breakthrough', 'finishAllowance'],
+  profile: ['direction', 'entry', 'rampAngle', 'breakthrough', 'finishAllowance', 'finishStepdown'],
   // plan-v0.4.md § Chamfer toolpath; `dwell` is later (needs a dwell move, T1)
   chamfer: ['entry', 'rampAngle'],
 }
@@ -50,7 +51,7 @@ const LENGTH_KEYS = [
 ] as const
 type LengthKey = (typeof LENGTH_KEYS)[number]
 
-const Src = z.string().min(1).max(256).describe('Quantity as entered, e.g. "0.5 mm" or "1/32\\""')
+const Src = z.string().min(1).max(256)
 const clear = <S extends z.ZodType>(s: S) => s.nullable().optional()
 
 /** `strategy` arg of `plan.operation.update`: values as entered; `null` clears (default). */
@@ -67,8 +68,12 @@ export const StrategyArgSchema = z
     rampAngle: clear(Src).describe(
       'Pocket/profile/drilling (helix)/chamfer (contour): 0.5°–30°, default 3°',
     ),
-    finishAllowance: clear(Src).describe('Pocket/profile: default 0.2 mm / 0.008"; 0 = none'),
-    finishStepdown: clear(Src).describe('Pocket: default the pocket depth'),
+    finishAllowance: clear(Src).describe(
+      'Pocket/profile: default 0.2 mm / 0.008" (wood 0.5 mm / 0.02"); 0 = none',
+    ),
+    finishStepdown: clear(Src).describe(
+      'Pocket/profile: default the depth, ≤ flute length (wood also ≤ 2 D)',
+    ),
     cycle: clear(z.enum(DRILL_CYCLES)).describe(
       'Drilling: simple, peck or chipBreak (drill), helix (end mill)',
     ),
@@ -129,6 +134,8 @@ export function applyStrategyArgs(
 const DEF = {
   overshoot: { mm: 1, inch: 1.016 },
   finishAllowance: { mm: 0.2, inch: 0.2032 },
+  /** Softwood and hardwood stock (DF76): 0.5 mm / 0.02″. */
+  woodFinishAllowance: { mm: 0.5, inch: 0.508 },
   chipBreakBack: { mm: 0.5, inch: 0.508 },
   breakthrough: { mm: 0.5, inch: 0.508 },
 } as const
@@ -183,7 +190,24 @@ export type ResolvedStrategy =
       readonly rampAngle: number
       readonly breakthrough: number
       readonly finishAllowance: number
+      readonly finishStepdown: number
     }
+
+/**
+ * Stock classes with the wood finishing defaults (DF76): grain that tears at the top edge.
+ * Doc: docs/modes/plan-v0.1.md#finishing-defaults-hardening-df75-df76
+ */
+export const WOOD_CLASSES: ReadonlySet<MaterialClass> = new Set(['softwood', 'hardwood'])
+
+/**
+ * Default finish stepdown (DF75, DF76): the cut depth, at most the flute length and, in wood,
+ * at most 2 × D; without a tool the depth. The levels split the depth equally (`levels`).
+ */
+function finishStepdownDefault(depth: number, tool: Option<Tool>, wood: boolean): number {
+  return tool.mapOr(depth, (t) =>
+    Math.min(depth, t.fluteLength.canonical, wood ? 2 * t.diameter.canonical : Infinity),
+  )
+}
 
 export interface StrategyContext {
   readonly ops: readonly Operation[]
@@ -208,10 +232,14 @@ export function holeDepth(
   stock: Stock,
 ): number {
   if (op.bottom !== 'through' && op.depth.isSome()) return op.depth.unwrap().canonical
+  return materialBelow(op.on, allOps, stock)
+}
+
+/** The material below the surface `on` along its normal (mm; the stock thickness on the top). */
+function materialBelow(on: string, allOps: readonly Operation[], stock: Stock): number {
   const table = SurfaceTable.of(allOps, stock)
-  // the material below `on` along its normal (the stock thickness on the top face)
   return table
-    .get(op.on)
+    .get(on)
     .mapOr(stock.thickness.canonical, (e) => e.faceZ.add(table.extent(e.direction)).toNumber())
 }
 
@@ -225,7 +253,10 @@ export function resolveStrategy(
   const u = c.units
   const direction = s.direction ?? 'climb'
   const rampAngle = mm(s.rampAngle).unwrapOr(RAMP_ANGLE)
-  const finishAllowance = mm(s.finishAllowance).unwrapOr(DEF.finishAllowance[u])
+  const wood = WOOD_CLASSES.has(c.stock.material.class)
+  const finishAllowance = mm(s.finishAllowance).unwrapOr(
+    (wood ? DEF.woodFinishAllowance : DEF.finishAllowance)[u],
+  )
   const breakthrough = mm(s.breakthrough).unwrapOr(DEF.breakthrough[u])
   switch (kind) {
     case 'facing':
@@ -246,7 +277,7 @@ export function resolveStrategy(
         helixDiameter: mm(s.helixDiameter).unwrapOr(0.8 * D),
         rampAngle,
         finishAllowance,
-        finishStepdown: mm(s.finishStepdown).unwrapOr(depth),
+        finishStepdown: mm(s.finishStepdown).unwrapOr(finishStepdownDefault(depth, c.tool, wood)),
       }
     }
     case 'drilling': {
@@ -265,7 +296,16 @@ export function resolveStrategy(
         breakthrough,
       }
     }
-    case 'profile':
+    case 'profile': {
+      const op = c.ops[0]
+      // the groove depth, else the material below `on` + breakthrough (the levels split the cut)
+      const depth =
+        op?.kind === 'profile'
+          ? op.depth.mapOr(
+              materialBelow(op.on, c.allOps, c.stock) + breakthrough,
+              (d) => d.canonical,
+            )
+          : 0
       return {
         kind,
         direction,
@@ -273,7 +313,9 @@ export function resolveStrategy(
         rampAngle,
         breakthrough,
         finishAllowance,
+        finishStepdown: mm(s.finishStepdown).unwrapOr(finishStepdownDefault(depth, c.tool, wood)),
       }
+    }
     case 'chamfer': {
       const tool = c.tool.isSome() ? c.tool.unwrap() : undefined
       const plunge = c.ops.every((op) => {
@@ -412,11 +454,19 @@ export function strategyIssues(
     bad('finishAllowance', 'nonNegative', 'must be ≥ 0')
   if ('breakthrough' in r && r.breakthrough < 0) bad('breakthrough', 'nonNegative', 'must be ≥ 0')
   if (r.kind === 'facing' && r.overshoot < 0) bad('overshoot', 'nonNegative', 'must be ≥ 0')
+  if (r.kind === 'pocket' || r.kind === 'profile') {
+    if (set('finishStepdown') && r.finishStepdown <= 0)
+      bad('finishStepdown', 'positive', 'must be > 0')
+    tool.map((t) => {
+      if (set('finishStepdown') && r.finishStepdown > t.fluteLength.canonical)
+        bad('finishStepdown', 'fluteLength', 'must be at most the flute length', {
+          max: t.fluteLength.canonical,
+        })
+    })
+  }
   if (r.kind === 'pocket') {
     if (set('helixDiameter') && r.helixDiameter <= 0)
       bad('helixDiameter', 'positive', 'must be > 0')
-    if (set('finishStepdown') && r.finishStepdown <= 0)
-      bad('finishStepdown', 'positive', 'must be > 0')
     tool.map((t) => {
       const op = c.ops[0]
       // general shapes: the narrowest size needs the 2D layer (T3)
@@ -436,10 +486,6 @@ export function strategyIssues(
             max: narrowest - t.diameter.canonical,
           })
       }
-      if (set('finishStepdown') && r.finishStepdown > t.fluteLength.canonical)
-        bad('finishStepdown', 'fluteLength', 'must be at most the flute length', {
-          max: t.fluteLength.canonical,
-        })
     })
   }
   if (r.kind === 'drilling') {

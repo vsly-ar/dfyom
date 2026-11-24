@@ -40,6 +40,7 @@ import {
   ShapeDtoSchema,
   ShapeIdSchema,
   ShapeItemArgSchema,
+  ShapeSrcSchema,
   SHAPE_ITEMS_MAX,
   type ShapeDTO,
   type ShapeItem,
@@ -49,7 +50,21 @@ import {
 import { featuresUsingShape, operationsUsingShape } from './shape-users'
 import { SurfaceTable } from './surfaces'
 import { ABSOLUTE_PATH } from './reference-commands'
-import { svgShapeItems } from './shape-import'
+import { sectionShapeItems, svgShapeItems } from './shape-import'
+import {
+  FaceArg,
+  fitOptions,
+  fittedSection,
+  lengthArg,
+  referenceView,
+  sectionName,
+  resolveFace,
+  storedPlacement,
+  targetReference,
+} from './reference-find'
+import type { FittedLoop } from './reference-section'
+import { sectionShapes } from './section-shapes'
+import { chainBounds } from '../geometry/2d/model'
 import type { SvgImport } from '../import/svg'
 import { svgImportTask, SvgImportReportSchema } from '../import/svg/task'
 import { issueSummary } from '../../shared/errors/app-error'
@@ -535,52 +550,236 @@ const shapeConvert = defineCommand({
   },
 })
 
+const FromArg = z
+  .object({
+    referenceId: z.string().optional(),
+    face: FaceArg.optional(),
+    depth: ShapeSrcSchema.describe('Below the face (length)'),
+    tolerance: z.number().min(0.001).max(1).optional().describe('mm, default 0.01'),
+    loops: z.enum(['all', 'outer', 'holes']).optional().describe('holes: a shape per cavity'),
+    roundInside: ShapeSrcSchema.optional().describe('Round sharp inside corners (radius)'),
+  })
+  .describe('A reference section instead of a file')
+
+const SectionReportSchema = z.object({
+  referenceId: z.string(),
+  face: z.string(),
+  depth: z.number().describe('mm'),
+  tolerance: z.number(),
+  loops: z.number().int(),
+  lines: z.number().int(),
+  arcs: z.number().int(),
+  circles: z.number().int(),
+  maxDeviation: z.number(),
+  skippedOpen: z.number().int(),
+  rounded: z.object({ corners: z.number().int(), maxChange: z.number() }).optional(),
+  shapes: z.array(
+    z.object({
+      shapeId: ShapeIdSchema,
+      minInsideRadius: z.number().optional().describe('As a pocket; mm'),
+      sharpCount: z.number().int(),
+      placeAt: z.object({
+        center: z.tuple([z.number(), z.number()]),
+        anchor: z.object({ u: z.literal('min'), v: z.literal('min') }),
+      }),
+    }),
+  ),
+})
+
+type Prepared =
+  | { readonly kind: 'svg'; readonly svg: SvgImport }
+  | {
+      readonly kind: 'section'
+      readonly referenceId: string
+      readonly face: string
+      readonly depth: number
+      readonly tolerance: number
+      readonly loops: readonly FittedLoop[]
+    }
+
+const r3 = (v: number) => {
+  const r = Math.round(v * 1000) / 1000
+  return r === 0 ? 0 : r
+}
+
 const shapeImport = defineCommand({
   kind: 'document',
   name: 'design.shape.import',
   summary:
-    'Import an SVG as named shapes of line/arc paths (curves fitted to 0.01 mm); returns an import report.',
-  title: () => 'Import SVG',
+    'Import an SVG (path) or a reference section (from) as named shapes of line/arc paths; returns an import report.',
+  title: (a) => (a.from !== undefined ? 'Section to shape' : 'Import SVG'),
   machine: false,
   args: z.object({
     ...PartArg,
-    path: z.string().max(4096).describe('Absolute local path'),
+    path: z.string().max(4096).optional().describe('Absolute local path'),
+    from: FromArg.optional(),
+    name: NameArg.optional(),
     unit: z.enum(['mm', 'in', 'px96', 'px72']).optional().describe('For unitless files; px96'),
     split: z
       .enum(['element', 'file', 'loop'])
       .optional()
-      .describe('Shape per top-level element (default), file or outer loop'),
+      .describe('Shape per top-level element (SVG default), file (section default) or outer loop'),
   }),
   result: z.object({
     shapeIds: z.array(ShapeIdSchema),
-    report: SvgImportReportSchema,
+    report: SvgImportReportSchema.optional(),
+    section: SectionReportSchema.optional(),
     warnings: Warnings,
   }),
-  async prepare(doc, args, ctx: CommandContext): Promise<AppResult<SvgImport>> {
+  async prepare(doc, args, ctx: CommandContext): Promise<AppResult<Prepared>> {
     const where = 'design.shape.import'
     const c = load(doc, args.partId, ctx, where)
     if (c.isErr()) return c
-    if (!ABSOLUTE_PATH.test(args.path))
-      return fail('input.malformed', `${args.path}: not an absolute path`, {
+    if ((args.path === undefined) === (args.from === undefined))
+      return fail('input.malformed', 'give either path or from', {
+        issues: [{ path: ['from'], rule: 'pathOrFrom', message: 'give either path or from' }],
+        where,
+      })
+    if (args.from !== undefined) {
+      const from = args.from
+      const l = c.unwrap().loaded
+      const ref = targetReference(doc, args.partId, from.referenceId, where)
+      if (ref.isErr()) return Err(ref.unwrapErr().prefixIssues('from'))
+      const face = resolveFace(doc, args.partId, from.face, ['from', 'face'], where)
+      if (face.isErr()) return face
+      const depth = lengthArg(from.depth, l, ['from', 'depth'], where)
+      if (depth.isErr()) return depth
+      const p = storedPlacement(ref.unwrap(), where)
+      if (p.isErr()) return p
+      const stock = {
+        length: l.stock.length.canonical,
+        width: l.stock.width.canonical,
+        thickness: l.stock.thickness.canonical,
+      }
+      const view = referenceView(ref.unwrap(), p.unwrap(), stock, face.unwrap().direction)
+      const fit = fitOptions({ tolerance: from.tolerance })
+      const loops = await fittedSection(ctx, view, depth.unwrap(), fit, where)
+      if (loops.isErr()) return loops
+      return Ok({
+        kind: 'section' as const,
+        referenceId: view.ref.id,
+        face: view.face,
+        depth: depth.unwrap(),
+        tolerance: fit.tolerance,
+        loops: loops.unwrap(),
+      })
+    }
+    const path = args.path!
+    if (!ABSOLUTE_PATH.test(path))
+      return fail('input.malformed', `${path}: not an absolute path`, {
         issues: [{ path: ['path'], rule: 'absolutePath', message: 'must be an absolute path' }],
         where,
       })
     const r = await ctx.services.workers.run(
       svgImportTask,
-      { path: args.path, unit: args.unit, split: args.split },
+      { path, unit: args.unit, split: args.split },
       { signal: new AbortController().signal, progress: () => undefined },
     )
-    return r.isErr() ? Err(r.unwrapErr().withContext(where, { path: args.path })) : r
+    return r.isErr()
+      ? Err(r.unwrapErr().withContext(where, { path }))
+      : Ok({ kind: 'svg' as const, svg: r.unwrap() })
   },
-  run(draft, args, ctx, prepared: SvgImport) {
+  run(draft, args, ctx, prepared: Prepared) {
     const where = 'design.shape.import'
     const c = load(draft as ProjectDoc, args.partId, ctx, where)
     if (c.isErr()) return c
     const { loaded, port, shapes } = c.unwrap()
-    const file = args.path.split(/[\\/]/).pop() || args.path
     let n = nextShapeNumber(shapes)
     const added: ShapeDTO[] = []
-    for (const s of prepared.shapes) {
+    if (prepared.kind === 'section') {
+      const from = args.from!
+      let roundInside: number | undefined
+      if (from.roundInside !== undefined) {
+        const r = lengthArg(from.roundInside, loaded, ['from', 'roundInside'], where)
+        if (r.isErr()) return r
+        if (r.unwrap() < 0)
+          return fail('model.invariant', 'from.roundInside: must be 0 or more', {
+            issues: [
+              { path: ['from', 'roundInside'], rule: 'nonNegative', message: 'must be 0 or more' },
+            ],
+            where,
+          })
+        roundInside = r.unwrap()
+      }
+      const split = args.split === 'loop' ? 'loop' : 'file'
+      const made = sectionShapes(
+        port,
+        prepared.loops,
+        {
+          loops: from.loops ?? 'all',
+          split,
+          roundInside,
+          bounds: (l) => {
+            const b = chainBounds(l.elements)
+            return b === undefined ? undefined : [b.min, b.max]
+          },
+        },
+        where,
+      )
+      if (made.isErr()) return made
+      const m = made.unwrap()
+      if (m.shapes.length === 0)
+        return fail('input.malformed', 'the section has no closed loop to make a shape of', {
+          issues: [
+            {
+              path: ['from', 'depth'],
+              rule: 'emptySection',
+              message:
+                prepared.loops.length === 0
+                  ? 'the plane misses the reference at this depth'
+                  : 'no closed loop of the kind asked for at this depth',
+            },
+          ],
+          where,
+        })
+      const base = args.name ?? sectionName(prepared.depth, loaded.units)
+      const rows: z.output<typeof SectionReportSchema>['shapes'] = []
+      for (const [k, s] of m.shapes.entries()) {
+        const items = sectionShapeItems(s.items, loaded.units)
+        if (items.isErr()) return Err(items.unwrapErr().withContext(where))
+        const dtos = settleItems(port, items.unwrap(), where)
+        if (dtos.isErr()) return dtos
+        const id = `shape${n++}`
+        const name = (k === 0 ? base : `${base} ${k + 1}`).slice(0, NAME_MAX)
+        added.push({ id, name, items: dtos.unwrap() })
+        rows.push({
+          shapeId: id,
+          ...(s.minInsideRadius === undefined ? {} : { minInsideRadius: r3(s.minInsideRadius) }),
+          sharpCount: s.sharpCount,
+          placeAt: { center: [r3(s.min[0]), r3(s.min[1])], anchor: { u: 'min', v: 'min' } },
+        })
+      }
+      draftShapes(draft, args.partId).push(...added)
+      const used = m.shapes.flatMap((s) => s.items)
+      const elements = used.flatMap((i) => (i.circle ? [] : i.loop.elements))
+      const closed = prepared.loops.filter((l) => !l.open)
+      const section = {
+        referenceId: prepared.referenceId,
+        face: prepared.face,
+        depth: r3(prepared.depth),
+        tolerance: prepared.tolerance,
+        loops: used.length,
+        lines: elements.filter((e) => e.kind === 'line').length,
+        arcs: elements.filter((e) => e.kind === 'arc').length,
+        circles: used.filter((i) => i.circle !== undefined).length,
+        maxDeviation: r3(closed.reduce((x, l) => Math.max(x, l.maxDeviation), 0)),
+        skippedOpen: m.skippedOpen,
+        ...(m.rounded
+          ? { rounded: { corners: m.rounded.corners, maxChange: r3(m.rounded.maxChange) } }
+          : {}),
+        shapes: rows,
+      }
+      return withWarnings(
+        { shapeIds: added.map((s) => s.id), section },
+        loaded,
+        loaded.part.operations,
+        ctx,
+        where,
+      )
+    }
+    const path = args.path ?? ''
+    const file = path.split(/[\\/]/).pop() || path
+    for (const s of prepared.svg.shapes) {
       const items = svgShapeItems(s, loaded.units)
       if (items.isErr()) return Err(items.unwrapErr().withContext(where))
       const dtos = settleItems(port, items.unwrap(), where)
@@ -595,7 +794,7 @@ const shapeImport = defineCommand({
       n++
     }
     draftShapes(draft, args.partId).push(...added)
-    const result = { shapeIds: added.map((s) => s.id), report: prepared.report }
+    const result = { shapeIds: added.map((s) => s.id), report: prepared.svg.report }
     return withWarnings(result, loaded, loaded.part.operations, ctx, where)
   },
 })

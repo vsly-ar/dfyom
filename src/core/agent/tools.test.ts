@@ -19,6 +19,7 @@ import {
   type JsonObject,
   withHomogeneousTuples,
   withoutSafeIntBounds,
+  withoutValidationOnlyKeywords,
 } from './tools'
 import { PRIMER } from './primer'
 
@@ -103,6 +104,10 @@ describe('agent tools', () => {
     expect(tool(tools, 'design.part.list')).toMatchObject({
       annotations: { readOnlyHint: true, idempotentHint: true },
     })
+    // an async query (ADR 0021) is a read-only tool like any query
+    expect(tool(tools, 'design.reference.find')).toMatchObject({
+      annotations: { readOnlyHint: true, idempotentHint: true },
+    })
     expect(tool(tools, 'design.pocket.add')).toMatchObject({
       annotations: { destructiveHint: false },
       description: expect.stringMatching(/ Undoable\.$/),
@@ -165,13 +170,35 @@ describe('agent tools', () => {
     }
   })
 
+  it('tools/list has no record-id patterns and no validation-only string bounds (A8)', () => {
+    const text = JSON.stringify(mcpToolList(allTools()))
+    expect(text).not.toContain('"minLength":1,')
+    expect(text).not.toMatch(/"maxLength":(12\d|1[3-9]\d|[2-9]\d\d|\d{4,})\b/)
+    expect(text).not.toContain('{1,128}')
+    expect(text).not.toContain('^shape[')
+    // constraints an agent needs stay: enums, required keys, item counts, short length limits
+    expect(text).toContain('"enum":')
+    expect(text).toContain('"maxItems":20')
+    expect(text).toContain('"maxLength":64')
+    const b = withoutValidationOnlyKeywords({
+      type: 'string',
+      pattern: '^[a-z0-9_-]{1,120}$',
+      minLength: 1,
+      maxLength: 256,
+    })
+    expect(b).toEqual({ type: 'string' })
+    expect(
+      withoutValidationOnlyKeywords({ type: 'string', pattern: '^x$', maxLength: 60 }),
+    ).toEqual({ type: 'string', pattern: '^x$', maxLength: 60 })
+  })
+
   it('compact schemas are equivalent to the generated ones', () => {
     const { app, project } = registries()
     for (const def of [...app.commands, ...app.queries, ...project.commands, ...project.queries]) {
       const d = expectOk(toolDescriptor(def))
       for (const s of [d.inputSchema, d.outputSchema]) {
         const { $schema: _, ...plain } = withHomogeneousTuples(
-          withoutSafeIntBounds(s),
+          withoutValidationOnlyKeywords(withoutSafeIntBounds(s)),
         ) as JsonObject
         if (JSON.stringify(plain).includes('"$ref"')) continue // recursive: kept as generated
         const compact = compactSchema(s)

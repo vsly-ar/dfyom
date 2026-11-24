@@ -21,9 +21,10 @@ import {
   type Timers,
 } from '../commands/context'
 import type { ApplyOutcome } from '../commands/apply'
-import type { CommandOutcome, Dispatcher } from '../commands/dispatcher'
+import type { AppliedResult, CommandOutcome, Dispatcher } from '../commands/dispatcher'
 import { JobInfoSchema } from '../commands/jobs'
 import type { Registry } from '../commands/registry'
+import type { UnitSystem } from '../project/document'
 import { APPLY_KEY, EXPECTED_REVISION, type SessionToolDef } from './tools'
 
 /** What a session needs from the app host. Implemented by src/main/host. */
@@ -423,6 +424,12 @@ export class AgentSession {
       .map((o) => o.value)
   }
 
+  /** The bound project's unit system, for lengths in results (shape.ts). */
+  unitSystem(): UnitSystem | undefined {
+    const bound = this.bound()
+    return bound.isNone() ? undefined : bound.unwrap().doc.unitSystem
+  }
+
   /** A library snapshot of the bound project, to name tools in results (shape.ts). */
   snapshot(id: string): unknown {
     const bound = this.bound()
@@ -471,14 +478,14 @@ export class AgentSession {
       if (name.startsWith('library.') && write) return this.afterLibraryWrite(r)
       return this.afterLifecycle(name, rawArgs, r)
     }
-    if (app.query(name).isSome()) return this.host.app.query(name, rawArgs, this.source)
+    if (app.query(name).isSome()) return this.host.app.queryAsync(name, rawArgs, this.source)
     const isCommand = project.command(name).isSome()
     if (!isCommand && project.query(name).isNone())
       return fail('command.unknown', `unknown tool ${name}`, { where: 'AgentSession' })
     const bound = this.bound()
     if (bound.isNone()) return noProject(name, this.lostMessage())
     const d = bound.unwrap()
-    if (!isCommand) return d.query(name, rawArgs, this.source)
+    if (!isCommand) return d.queryAsync(name, rawArgs, this.source)
     const split = splitExpectedRevision(rawArgs)
     if (split.isErr()) return split
     const isDocument = project.command(name).unwrap().kind === 'document'
@@ -524,12 +531,33 @@ export class AgentSession {
     return Ok({ ...r.unwrap(), applied: applied.unwrap().value as ApplyOutcome })
   }
 
-  /** open/create/restore bind the session; closing the bound project unbinds it. */
-  private afterLifecycle(
+  /**
+   * After an auto-applying session opened a project: `project.apply` when a tool re-choice is
+   * pending (key field `tool`, design-v0.2.md § Library changes and opening), as `applied` and the
+   * revision after it; nothing of that pending, undefined (no Apply).
+   */
+  private async applyRechoice(): Promise<{ applied: AppliedResult; revision: number } | undefined> {
+    const d = this.dispatcher
+    if (d === undefined || !this.autoApplies) return undefined
+    const rechoice = d.applyState.pending().some((c) => c.kind === 'design' && c.field === 'tool')
+    if (!rechoice) return undefined
+    const applied = await d.dispatch('project.apply', {}, this.source)
+    if (applied.isErr())
+      return { applied: { error: applied.unwrapErr().toWireData() }, revision: d.revision }
+    d.markRead(this.source, d.revision)
+    return { applied: applied.unwrap().value as ApplyOutcome, revision: d.revision }
+  }
+
+  /**
+   * open/create/restore bind the session; closing the bound project unbinds it. An auto-applying
+   * session's `project.open` that started the runtime applies it when a tool re-choice is pending
+   * (X2 F6: library tools that arrived since it was saved; docs/architecture/apply.md#agents-mcp-and-cli).
+   */
+  private async afterLifecycle(
     name: string,
     rawArgs: unknown,
     r: AppResult<CommandOutcome>,
-  ): AppResult<CommandOutcome> {
+  ): Promise<AppResult<CommandOutcome>> {
     if (r.isErr()) return r
     const value = r.unwrap().value as {
       key?: unknown
@@ -547,8 +575,13 @@ export class AgentSession {
       if (bound.isErr()) return Err(bound.unwrapErr())
       // This call started the runtime and its result showed the document at `revision`: a read.
       // A project that was already open (someone else's) is not: query before editing.
-      if (value?.alreadyOpen !== true && typeof value?.revision === 'number')
+      if (value?.alreadyOpen !== true && typeof value?.revision === 'number') {
         this.dispatcher?.markRead(this.source, value.revision)
+        if (name === 'project.open') {
+          const applied = await this.applyRechoice()
+          if (applied !== undefined) return Ok({ ...r.unwrap(), ...applied })
+        }
+      }
     }
     if (
       name === 'project.close' &&

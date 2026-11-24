@@ -6,19 +6,37 @@
 // to fit with a preview, Apply), save, close the app, reopen the project and find the reference
 // placed as saved, shown again, read from the stored asset. Windows stay hidden (app.fixture.ts).
 // With DFYOM_RENDERS=1 it writes the light and dark review renders of the panel and of Fit mode
-// to design/reference/renders/.
-// Docs: docs/conventions/ui.md#reference-panel-hardening-df2df8, docs/modes/reference-model.md#display
+// to design/reference/renders/. A second test reads levels and a section of the reference and makes
+// a shape from it, with the fitted loops on the ghost (DF60 P1; renders df-reference-tools and
+// df-reference-level-hover). A third reads the full enclosure's holes from the bottom and adds
+// the countersunk foot holes as one Bolt hole with Clones (DF60 P3; render df-reference-holes).
+// A fourth turns the compare overlay on against the plain stock block (DF60 P5; renders
+// df-reference-compare and df-reference-compare-region).
+// Docs: docs/conventions/ui.md#reference-panel-hardening-df2df8, docs/modes/reference-model.md#display,
+// docs/conventions/ui.md#reference-tools-df60
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type { ElectronApplication, Locator, Page } from '@playwright/test'
-import { expect, fitReference, launchApp, openReferencePanel, test } from './app.fixture'
+import {
+  expect,
+  fitReference,
+  launchApp,
+  openPartSetup,
+  openReferencePanel,
+  test,
+} from './app.fixture'
 
 const STL = resolve('src/core/design/__fixtures__/enclosure-wood-base.stl')
+const FULL_STL = resolve('src/core/design/__fixtures__/enclosure-wood-full.stl')
 const RENDERS = process.env['DFYOM_RENDERS'] === '1'
 const rendersDir = resolve(__dirname, '../design/reference/renders')
 
 /** Open dialogs: "Import reference" answers the STL, anything else the project; save the project. */
-async function stubFileDialogs(app: ElectronApplication, project: string): Promise<void> {
+async function stubFileDialogs(
+  app: ElectronApplication,
+  project: string,
+  stl = STL,
+): Promise<void> {
   await app.evaluate(
     ({ dialog }, f) => {
       const title = (args: unknown[]) => (args.at(-1) as { title?: string } | undefined)?.title
@@ -30,15 +48,21 @@ async function stubFileDialogs(app: ElectronApplication, project: string): Promi
       dialog.showSaveDialog = (() =>
         Promise.resolve({ canceled: false, filePath: f.project })) as typeof dialog.showSaveDialog
     },
-    { stl: STL, project },
+    { stl, project },
   )
 }
 
 /**
  * With DFYOM_RENDERS=1: the window in light and dark. The theme changes through Settings, which
- * leaves the panel (and Fit mode) as they are.
+ * leaves the panel (and Fit mode) as they are; `before` runs after each change (a hover), `after`
+ * after each screenshot (closing a modal list).
  */
-async function render(page: Page, name: string): Promise<void> {
+async function render(
+  page: Page,
+  name: string,
+  before?: () => Promise<void>,
+  after?: () => Promise<void>,
+): Promise<void> {
   if (!RENDERS) return
   const settings = page.getByRole('dialog', { name: 'Settings' })
   for (const theme of ['light', 'dark'] as const) {
@@ -47,8 +71,10 @@ async function render(page: Page, name: string): Promise<void> {
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
     await settings.getByRole('button', { name: 'Done' }).click()
     await expect(settings).toBeHidden()
+    await before?.()
     await page.waitForTimeout(400)
     await page.screenshot({ path: `${rendersDir}/df-${name}-${theme}.png` })
+    await after?.()
   }
 }
 
@@ -185,4 +211,214 @@ test('reference model: the Reference panel imports the enclosure STL, ghost, vis
   } finally {
     await second.app.close()
   }
+})
+
+test('reference tools (DF60): levels from both sides, a level sets the section, Create shape', async ({
+  dfyom,
+}) => {
+  test.setTimeout(120_000)
+  await stubFileDialogs(dfyom.app, join(dfyom.dataDir, 'tools.dfyom'))
+  const page = await dfyom.app.firstWindow()
+  await page.waitForLoadState('domcontentloaded')
+  if (RENDERS) await page.setViewportSize({ width: 1280, height: 900 })
+  const navigator = page.getByRole('navigation', { name: 'Navigator' })
+  await navigator.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  await dialog.getByRole('textbox', { name: 'Project name' }).fill('Tools')
+  await dialog.getByRole('button', { name: 'Create project' }).click()
+  const setup = page.getByRole('region', { name: 'Set up the part' })
+  await setField(setup, 'Length (X)', '260')
+  await setField(setup, 'Width (Y)', '190')
+  await setField(setup, 'Thickness (Z)', '40')
+  await page
+    .getByRole('dialog', { name: 'Stock' })
+    .getByRole('button', { name: 'Create part' })
+    .click()
+  const panel = await openReferencePanel(page)
+  await panel.getByRole('button', { name: 'Import STL…' }).click()
+  await expect(panel.getByTitle('enclosure-wood-base')).toBeVisible({ timeout: 30_000 })
+
+  // levels from the top (the rim at 0, the cavity floor) and from the bottom, read in the worker
+  const levels = panel.getByRole('region', { name: 'Levels' })
+  await expect(levels.getByRole('heading', { name: 'From top' })).toBeVisible({ timeout: 30_000 })
+  await expect(levels.getByRole('heading', { name: 'From bottom' })).toBeVisible()
+  const rim = levels.getByRole('button', { name: /^Depth 0 mm, area/ }).first()
+  await expect(rim).toBeVisible()
+
+  // the section at the middle of the model: the outline and the cavity, with corner chips
+  const section = panel.getByRole('region', { name: 'Section' })
+  await expect(section.getByText(/^Outline /)).toBeVisible({ timeout: 30_000 })
+  await expect(section.getByText(/^Cavity /)).toBeVisible()
+  await expect(section.getByText(/elements, within/)).toBeVisible()
+  // the fitted loops are drawn on the ghost (the viewport's text summary says so)
+  const viewport = page.getByRole('region', { name: '3D viewport' })
+  await expect(viewport).toHaveAccessibleDescription(/Section on the reference: 2 loops/, {
+    timeout: 30_000,
+  })
+  await section.scrollIntoViewIfNeeded()
+  await render(page, 'reference-tools')
+  // pointing at a level highlights its faces on the ghost (render only: the canvas has no text)
+  await render(page, 'reference-level-hover', () => rim.hover())
+  await page.mouse.move(0, 0)
+
+  // a level from the top sets the section just inside it
+  const before = await input(section, 'Section depth').inputValue()
+  await rim.click()
+  await expect(input(section, 'Section depth')).not.toHaveValue(before)
+  await setField(section, 'Section depth', '20')
+  await expect(section.getByText(/^Cavity /)).toBeVisible({ timeout: 30_000 })
+
+  // Create shape: one undoable import; the Shapes dialog lists it
+  await section.getByRole('button', { name: 'Create shape', exact: true }).click()
+  await expect(section.getByText('Shape created.')).toBeVisible({ timeout: 30_000 })
+  const shapes = await openPartSetup(page, 'Shapes')
+  await expect(shapes.getByText('Section 20 mm').first()).toBeVisible()
+  expect(dfyom.rendererErrors).toEqual([])
+})
+
+test('reference holes (DF60 P3): the foot holes from the bottom, Add as Bolt hole with Clones', async ({
+  dfyom,
+}) => {
+  test.setTimeout(120_000)
+  await stubFileDialogs(dfyom.app, join(dfyom.dataDir, 'holes.dfyom'), FULL_STL)
+  const page = await dfyom.app.firstWindow()
+  await page.waitForLoadState('domcontentloaded')
+  if (RENDERS) await page.setViewportSize({ width: 1280, height: 900 })
+  const navigator = page.getByRole('navigation', { name: 'Navigator' })
+  await navigator.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  await dialog.getByRole('textbox', { name: 'Project name' }).fill('Holes')
+  await dialog.getByRole('button', { name: 'Create project' }).click()
+  const setup = page.getByRole('region', { name: 'Set up the part' })
+  // the stock as thick as the model: the feet sit on the stock's bottom
+  await setField(setup, 'Length (X)', '260')
+  await setField(setup, 'Width (Y)', '190')
+  await setField(setup, 'Thickness (Z)', '60.523')
+  await page
+    .getByRole('dialog', { name: 'Stock' })
+    .getByRole('button', { name: 'Create part' })
+    .click()
+  const panel = await openReferencePanel(page)
+  await panel.getByRole('button', { name: 'Import STL…' }).click()
+  await expect(panel.getByTitle('enclosure-wood-full')).toBeVisible({ timeout: 30_000 })
+
+  await panel.getByRole('combobox', { name: 'Read from' }).click()
+  await page.getByRole('option', { name: 'Bottom' }).click()
+  const holes = panel.getByRole('region', { name: 'Holes' })
+  const feetText = /^4 × Ø 2\.45 mm countersunk .*grid 2 × 2$/
+  const feet = holes.getByText(feetText)
+  await expect(feet).toBeVisible({ timeout: 30_000 })
+  const viewport = page.getByRole('region', { name: '3D viewport' })
+  await expect(viewport).toHaveAccessibleDescription(/4 holes marked on the reference/, {
+    timeout: 30_000,
+  })
+  await holes.scrollIntoViewIfNeeded()
+  await render(page, 'reference-holes')
+
+  await holes.getByRole('button', { name: /^Add as Bolt hole: 4 ×/ }).click()
+  await expect(holes.getByText('4 Bolt holes added.')).toBeVisible({ timeout: 30_000 })
+
+  // a plan of the part: its setups join "Read from" (DF60 P5's change, P2 in the panel)
+  await page.keyboard.press('ControlOrMeta+2')
+  await expect(page.getByRole('radio', { name: 'Plan' })).toBeChecked()
+  const planStart = page.getByRole('dialog', { name: 'Plan the part' })
+  await planStart.getByRole('button', { name: 'New machine…' }).click()
+  const newMachine = page.getByRole('dialog', { name: 'New machine' })
+  await newMachine.getByRole('textbox', { name: 'Name' }).fill('Router')
+  for (const [label, value] of [
+    ['Travel X', '800'],
+    ['Travel Y', '800'],
+    ['Travel Z', '100'],
+    ['Max feed rate X', '5000'],
+    ['Max feed rate Y', '5000'],
+    ['Max feed rate Z', '1000'],
+    ['Max spindle speed', '30000'],
+  ] as const)
+    await setField(newMachine, label, value)
+  await newMachine.getByRole('button', { name: 'Add machine' }).click()
+  await expect(newMachine).toBeHidden()
+  await planStart.getByRole('button', { name: 'Create plan' }).click()
+  await expect(planStart).toBeHidden()
+  await page.keyboard.press('ControlOrMeta+1')
+  await expect(page.getByRole('radio', { name: 'Design' })).toBeChecked()
+  const again = await openReferencePanel(page)
+  await again.getByRole('combobox', { name: 'Read from' }).click()
+  const list = page.getByRole('listbox')
+  await expect(list.getByRole('group', { name: 'Setups' })).toBeVisible()
+  const bottom = list.getByRole('option', { name: /^Bottom · Plan 1$/ })
+  await expect(bottom).toBeVisible()
+  if (RENDERS) {
+    // the open list is modal: closed for the theme change, opened again for each render
+    await page.keyboard.press('Escape')
+    await render(
+      page,
+      'reference-setup-faces',
+      async () => {
+        await again.getByRole('combobox', { name: 'Read from' }).click()
+        await expect(bottom).toBeVisible()
+      },
+      () => page.keyboard.press('Escape'),
+    )
+    await again.getByRole('combobox', { name: 'Read from' }).click()
+  }
+  await bottom.click()
+  await expect(again.getByRole('region', { name: 'Holes' }).getByText(feetText)).toBeVisible({
+    timeout: 30_000,
+  })
+  expect(dfyom.rendererErrors).toEqual([])
+})
+
+test('reference compare (DF60 P5): the overlay on the part, regions, a region frames the view, Hide', async ({
+  dfyom,
+}) => {
+  test.setTimeout(180_000)
+  await stubFileDialogs(dfyom.app, join(dfyom.dataDir, 'compare.dfyom'))
+  const page = await dfyom.app.firstWindow()
+  await page.waitForLoadState('domcontentloaded')
+  if (RENDERS) await page.setViewportSize({ width: 1280, height: 900 })
+  const navigator = page.getByRole('navigation', { name: 'Navigator' })
+  await navigator.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  await dialog.getByRole('textbox', { name: 'Project name' }).fill('Compare')
+  await dialog.getByRole('button', { name: 'Create project' }).click()
+  const setup = page.getByRole('region', { name: 'Set up the part' })
+  await setField(setup, 'Length (X)', '260')
+  await setField(setup, 'Width (Y)', '190')
+  await setField(setup, 'Thickness (Z)', '40')
+  await page
+    .getByRole('dialog', { name: 'Stock' })
+    .getByRole('button', { name: 'Create part' })
+    .click()
+  const panel = await openReferencePanel(page)
+  await panel.getByRole('button', { name: 'Import STL…' }).click()
+  await expect(panel.getByTitle('enclosure-wood-base')).toBeVisible({ timeout: 30_000 })
+
+  // off: a hint, nothing runs; on: the job runs on the evaluated part (the plain stock block, so
+  // everything the model leaves away is extra material)
+  const compare = panel.getByRole('region', { name: 'Compare' })
+  await compare.scrollIntoViewIfNeeded()
+  await expect(compare.getByText(/^Colours the part where it differs/)).toBeVisible()
+  await compare.getByRole('switch', { name: 'Show on the part' }).click()
+  await expect(compare.getByText(/regions? over 0\.1 mm · worst .* extra$/)).toBeVisible({
+    timeout: 60_000,
+  })
+  const viewport = page.getByRole('region', { name: '3D viewport' })
+  await expect(viewport).toHaveAccessibleDescription(/Compare: \d+ regions? over 0\.1 mm, worst/)
+  await expect(page.getByRole('img', { name: /^Compare legend: Missing up to/ })).toBeVisible()
+  const rows = compare.getByRole('list', { name: 'Regions' }).getByRole('button')
+  await expect(rows.first()).toHaveAccessibleName(/^Extra .* mm³$/)
+  await compare.scrollIntoViewIfNeeded()
+  await render(page, 'reference-compare')
+
+  // a region (the stock's own surfaces: no operation to select) frames the view and stays chosen
+  await rows.first().click()
+  await expect(rows.first()).toHaveAttribute('aria-pressed', 'true')
+  await render(page, 'reference-compare-region')
+
+  // Hide in the viewport's legend turns it off
+  await page.getByRole('button', { name: 'Hide' }).click()
+  await expect(page.getByRole('img', { name: /^Compare legend/ })).toBeHidden()
+  await expect(compare.getByRole('switch', { name: 'Show on the part' })).not.toBeChecked()
+  await expect(viewport).not.toHaveAccessibleDescription(/Compare:/)
+  expect(dfyom.rendererErrors).toEqual([])
 })

@@ -186,9 +186,34 @@ test('setup panel: setups in machining order, reorder, rotation and one program 
     await expect(done.getByText(`Setup ${name} (${i} of 2)`)).toBeVisible({ timeout: 30_000 })
     await done.getByRole('button', { name: 'Close' }).click()
     await expect(done).toBeHidden()
-    const file = `${dfyom.dataDir}/Plan 1 ${name}.nc`
+    const file = `${dfyom.dataDir}/two-sides-s${i}.nc`
     expect(existsSync(file)).toBe(true)
-    expect(readFileSync(file, 'utf8')).toContain(`(Setup: ${name})`)
+    expect(readFileSync(file, 'utf8')).toContain(`(Setup ${i} of 2: ${name})`)
   }
+
+  // DF67: a feed rate past the machine's limit: the row's count stays put while the row is
+  // hovered (no action button; the row menu is its context menu), and a click on it shows the
+  // operation's findings first in its inspector
+  const pocketRow = navigator.getByRole('button', { name: /^Pocket 1/ })
+  await pocketRow.click({ position: { x: 24, y: 12 } })
+  const feed = inspector.getByLabel('Feed rate', { exact: true })
+  await feed.fill('9000')
+  await feed.press('Enter')
+  const count = pocketRow.locator('[title*="click to show them in the inspector"]').first()
+  await expect(count).toBeVisible()
+  await pocketRow.click({ position: { x: 24, y: 12 } }) // deselect
+  const before = (await count.boundingBox())!
+  await pocketRow.hover()
+  expect(await count.boundingBox()).toEqual(before)
+  await count.click()
+  const checks = inspector.getByRole('region', { name: 'Checks' })
+  await expect(checks).toBeFocused()
+  await expect(pocketRow).toHaveAttribute('aria-pressed', 'true')
+  await render(page, 'df67-findings')
+  // right-click opens the row's menu
+  await pocketRow.click({ button: 'right' })
+  await expect(page.getByRole('menu', { name: /^Actions for Pocket 1/ })).toBeVisible()
+  await render(page, 'df67-row-menu')
+  await page.keyboard.press('Escape')
   expect(dfyom.rendererErrors).toEqual([])
 })

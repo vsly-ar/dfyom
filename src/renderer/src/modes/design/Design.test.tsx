@@ -392,12 +392,24 @@ describe('design mode', () => {
     expect(
       await within(inspector()).findByText('A sharp inside corner cannot be cut by a round tool.'),
     ).toBeInTheDocument()
-    expect(await within(status()).findByRole('button', { name: '1 warning' })).toBeInTheDocument()
+    // and no tool fits it at all (DF52), said at the Tool field
+    expect(
+      await within(inspector()).findByText(
+        'No tool fits this operation, not even the smallest standard one. Corner radius 0 mm is smaller than the radius of the 1 mm flat end mill (0.5 mm).',
+      ),
+    ).toBeInTheDocument()
+    expect(await within(status()).findByRole('button', { name: '2 warnings' })).toBeInTheDocument()
     const row = within(navigator()).getByRole('button', { name: /^Pocket 1/ })
-    expect(row).toHaveTextContent('1 warning')
+    expect(row).toHaveTextContent('2 warnings')
+    // DF67: the badge has its tooltip; DF70: the row has no action buttons that could cover or
+    // move it, its actions are the row menu, which its description names
+    expect(row.querySelector('[title="2 warnings"]')).not.toBeNull()
+    expect(within(row.parentElement!).getAllByRole('button')).toEqual([row])
+    expect(row).toHaveAccessibleDescription('Right-click or Shift+F10 for actions.')
+    expect(row).toHaveAttribute('aria-keyshortcuts', 'Alt+ArrowUp Alt+ArrowDown Shift+F10 Delete')
   })
 
-  it('moves operations with Alt+↑/↓ (announced) and removes one with an undo toast', async () => {
+  it('moves operations with Alt+↑/↓ (announced) and removes them from the row menu or with Delete', async () => {
     const { user, part, addFromMenu } = await renderDesign()
     await user.click(await within(navigator()).findByRole('button', { name: 'Add facing' }))
     await addFromMenu('Profile')
@@ -414,11 +426,23 @@ describe('design mode', () => {
     await user.keyboard('{Alt>}{ArrowDown}{/Alt}')
     await waitFor(() => expect(part().operations.map((o) => o.id)).toEqual(['facing1', 'profile1']))
 
-    await user.click(within(navigator()).getByRole('button', { name: 'Remove Facing 1' }))
+    // DF70: no Remove button on the row; Remove is the row menu's last item
+    expect(within(navigator()).queryByRole('button', { name: /^Remove / })).toBeNull()
+    const facing = within(navigator()).getByRole('button', { name: /^Facing 1/ })
+    await user.pointer({ keys: '[MouseRight]', target: facing })
+    const menu = await screen.findByRole('menu', { name: 'Actions for Facing 1' })
+    await user.click(within(menu).getByRole('menuitem', { name: 'Remove' }))
     await waitFor(() => expect(part().operations.map((o) => o.id)).toEqual(['profile1']))
     expect(await screen.findByText('Removed Facing 1')).toBeInTheDocument()
     await user.click(await findToastAction('Undo'))
     await waitFor(() => expect(part().operations.map((o) => o.id)).toEqual(['facing1', 'profile1']))
+    // Delete on the focused row removes it too
+    within(navigator())
+      .getByRole('button', { name: /^Profile 1/ })
+      .focus()
+    await user.keyboard('{Delete}')
+    await waitFor(() => expect(part().operations.map((o) => o.id)).toEqual(['facing1']))
+    expect(await screen.findByText('Removed Profile 1')).toBeInTheDocument()
   })
 
   it('drags a row by its grip; a drop the move refuses says why and changes nothing (D45)', async () => {

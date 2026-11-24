@@ -196,8 +196,37 @@ const steppedCountersinkOps = (): ExportOperation[] => {
   ]
 }
 
-/** Facing, the two holes, the profile: three tools, the drill at another speed. */
-const multiToolOps = (): ExportOperation[] => [facingOp(), ...drillOps(), profileOp()]
+/**
+ * Facing, the two holes, the profile: three tools, the drill at another speed. Every tool run
+ * touches off on the top face (DF69: the program moves to each spot before the pause).
+ */
+const multiToolOps = (): ExportOperation[] => {
+  const top = (x: number, y: number) =>
+    ({ label: 'the top face', level: 0, at: [x, y], top: true }) as const
+  const [facing, drill1, drill2] = [facingOp(), ...drillOps()]
+  return [
+    { ...facing!, zRef: top(15, 10) },
+    { ...drill1!, zRef: top(20, 15) },
+    drill2!,
+    { ...profileOp(), zRef: top(30, 20) },
+  ]
+}
+
+/**
+ * As `multiToolOps` with the later tools touching off on the 0.5 mm faced floor (DF69): their Z
+ * shifted by +0.5, the instruction lines before each pause.
+ */
+const facedMultiToolOps = (): ExportOperation[] => {
+  const floor = (x: number, y: number) =>
+    ({ label: 'Facing 1 floor', level: -0.5, at: [x, y], top: false }) as const
+  const ops = multiToolOps()
+  return [
+    ops[0]!,
+    { ...ops[1]!, zRef: floor(20, 15) },
+    ops[2]!,
+    { ...ops[3]!, zRef: floor(30, 20) },
+  ]
+}
 
 const program = (blocks: Block[], over: Partial<MachiningProgram> = {}): MachiningProgram => ({
   name: 'P',
@@ -211,7 +240,7 @@ const program = (blocks: Block[], over: Partial<MachiningProgram> = {}): Machini
 const tool = (number = 1): Block => ({
   kind: 'toolChange',
   number,
-  tool: { name: `T${number}`, diameter: 6 },
+  tool: { name: `T${number}`, diameter: 6, type: 'flatEndMill' },
 })
 const spin = (rpm: number | 'off' = 10000): Block => ({ kind: 'spindle', rpm })
 const rapid = (x: number, y: number, z: number): Block => ({ kind: 'rapid', to: [x, y, z] })
@@ -247,6 +276,7 @@ function reparse(lines: readonly string[]): Parsed[] {
   for (const line of lines) {
     const code = line
       .replace(/\([^)]*\)/g, '')
+      .replace(/;.*$/, '')
       .replace(/\s/g, '')
       .toUpperCase()
     if (code === '') continue
@@ -273,13 +303,35 @@ function expectIntendedMotion(p: MachiningProgram, lines: readonly string[]): vo
   const tol = (0.5 * 10 ** -d) / perMm + 1e-9
   const key = (v: Vec3) => v.map((c) => formatNumber(c * perMm, d)).join(' ')
 
-  // Intended: motion blocks with their float start, without those the text cannot show.
+  // Intended: motion blocks with their float start, without those the text cannot show. DF69:
+  // each tool run's Z shifted by −level of its reference, and the rapid to the touch-off spot
+  // (then to the new run's clearance) before a pause.
   const want: { b: Extract<Block, { to: Vec3 }>; from: Vec3 | undefined }[] = []
   let last: string | undefined
   let from: Vec3 | undefined
-  for (const b of p.blocks) {
-    if (b.kind === 'toolChange') last = undefined
-    if (!('to' in b)) continue
+  let level = p.blocks.find((b) => b.kind === 'toolChange')?.zRef?.level ?? 0
+  let first = true
+  for (const raw of p.blocks) {
+    if (raw.kind === 'toolChange') {
+      last = undefined
+      const pauses = !first || (raw.zRef !== undefined && !raw.zRef.top)
+      first = false
+      if (pauses && raw.zRef !== undefined && from !== undefined) {
+        const to: Vec3 = [raw.zRef.at[0], raw.zRef.at[1], from[2]]
+        want.push({ b: { kind: 'rapid', to }, from })
+        from = to
+      }
+      if (pauses && (raw.zRef?.level ?? 0) !== level) {
+        level = raw.zRef?.level ?? 0
+        if (from !== undefined) {
+          const to: Vec3 = [from[0], from[1], p.clearanceZ - level]
+          want.push({ b: { kind: 'rapid', to }, from })
+          from = to
+        }
+      }
+    }
+    if (!('to' in raw)) continue
+    const b = { ...raw, to: [raw.to[0], raw.to[1], raw.to[2] - level] as Vec3 }
     // a full circle (end = start in X and Y) is written although its end is unchanged
     const full =
       b.kind === 'arc' && from !== undefined && b.to[0] === from[0] && b.to[1] === from[1]
@@ -343,9 +395,13 @@ function expectDialect(lines: readonly string[], units: 'mm' | 'in'): void {
   for (const p of reparse(lines))
     if ((p.motion === 2 || p.motion === 3) && /[XYZ]/.test(p.line))
       expect(p.line, 'arc without an in-plane axis word').toMatch(/[XY]/)
-  for (const l of lines) {
-    expect(l.length, l).toBeLessThanOrEqual(70)
-    expect(l, 'printable ASCII').toMatch(/^[\x20-\x7e]+$/)
+  for (const full of lines) {
+    expect(full.length, full).toBeLessThanOrEqual(70)
+    expect(full, 'printable ASCII').toMatch(/^[\x20-\x7e]+$/)
+    // the only `;` comment: a pause's message on its M0 line (DF63)
+    const pause = /^M0 ;([^()?!~;]+)$/.exec(full)
+    if (full.includes(';')) expect(pause, full).not.toBeNull()
+    const l = pause ? 'M0' : full
     expect(l).not.toMatch(/G8\d|G28|G30|G53|G92|G43|M6|M7|M8|M9|^N|%|;|R/)
     if (l.startsWith('(')) {
       expect(l).toMatch(/^\([^()?!~;]*\)$/)
@@ -394,12 +450,13 @@ describe('golden files (also streamed through the virtual machine)', () => {
     ['drilling-peck-chipBreak', drillOps],
     ['profile-tabs', () => [profileOp()]],
     ['multi-tool', multiToolOps],
+    ['multi-tool-faced', facedMultiToolOps],
     ['chamfer', () => chamferOps()],
     ['chamfer-inch', () => chamferOps(true), testMachine({ programUnits: 'in' })],
     ['countersink-stepped', steppedCountersinkOps],
     [
       'multi-tool-inch-manual-spindle',
-      multiToolOps,
+      facedMultiToolOps,
       testMachine({ programUnits: 'in', spindle: { control: 'manual', maxSpeed: rpm('24000') } }),
     ],
   ]
@@ -435,7 +492,7 @@ describe('postGrbl', () => {
         'G90 G94 G17 G21',
         'G54',
         'G0 Z10',
-        '(DFYOM TOOL CHANGE 1: T1)',
+        '(DFYOM TOOL CHANGE 1: T1, 6 mm flat)',
         'M3 S10000',
         'G4 P3',
         'X1 Y2',
@@ -446,6 +503,80 @@ describe('postGrbl', () => {
         '',
       ].join('\n'),
     )
+  })
+
+  // docs/architecture/grbl.md#setup-header-hardening-df58
+  it('writes the setup instructions in the header: GRBL-safe comments of at most 70 bytes', () => {
+    const setup = {
+      number: 2,
+      count: 2,
+      up: 'top',
+      front: 'front',
+      right: 'right',
+      fromFirst: 'flip about X, then turn 90 deg CCW',
+      corner: 'front left',
+      stock: [254, 101.6, 19.05] as Vec3,
+    }
+    const header = (units: 'mm' | 'in') =>
+      expectOk(postGrbl(program([tool(), spin()], { setup, setupName: 'Top', units }), OPTS))
+        .split('\n')
+        .slice(0, 9)
+    expect(header('mm')).toEqual([
+      '(Program: P)',
+      '(Setup 2 of 2: Top)',
+      '(Stock X 254 Y 101.6 Z 19.05 mm on the machine)',
+      '(Faces: top up, front towards you, right on the right)',
+      '(From setup 1: flip about X, then turn 90 deg CCW)',
+      '(Work zero G54 X0 Y0: front-left corner of the top face)',
+      '(That corner sits front left on the machine)',
+      '(Z0 on the top face: the stock surface facing up)',
+      '(Units: mm)',
+    ])
+    expect(header('in')[2]).toBe('(Stock X 10 Y 4 Z 0.75 in on the machine)')
+    for (const line of [...header('mm'), ...header('in')]) {
+      expect(line.length).toBeLessThanOrEqual(70)
+      expect(line).toMatch(/^\([^()]*\)$/)
+    }
+  })
+
+  // docs/architecture/grbl.md#setup-header-hardening-df58 (DF59 reach lines)
+  it('writes how far the tool reaches past the stock, rounded up, and the clamp note', () => {
+    const base = {
+      number: 1,
+      count: 1,
+      up: 'top',
+      front: 'front',
+      right: 'right',
+      corner: 'front left',
+      stock: [100, 50, 20] as Vec3,
+    }
+    const reach = (
+      overreach: { xMin: number; xMax: number; yMin: number; yMax: number },
+      units: 'mm' | 'in' = 'mm',
+    ) =>
+      expectOk(postGrbl(program([tool(), spin()], { setup: { ...base, overreach }, units }), OPTS))
+        .split('\n')
+        .filter((l) => /Tool (reaches|stays)|clamps/.test(l))
+    expect(reach({ xMin: 0, xMax: 0, yMin: 0, yMax: 0 })).toEqual([
+      '(Tool stays within the stock outline)',
+      '(Keep clamps below clearance Z 10 mm)',
+    ])
+    expect(reach({ xMin: 4.2426, xMax: 4.2, yMin: 0, yMax: 0 })).toEqual([
+      '(Tool reaches past stock: left 4.3, right 4.2 mm)',
+      '(Keep clamps clear of those sides, below clearance Z 10 mm)',
+    ])
+    expect(reach({ xMin: 0, xMax: 0, yMin: 0, yMax: 25.4 }, 'in')).toEqual([
+      '(Tool reaches past stock: back 1 in)',
+      '(Keep clamps clear of those sides, below clearance Z 0.3937 in)',
+    ])
+    // four long sides do not fit one line: an X line and a Y line
+    const long = reach({ xMin: 123.41, xMax: 123.41, yMin: 123.41, yMax: 123.41 })
+    expect(long).toEqual([
+      '(Tool reaches past stock: left 123.5, right 123.5 mm)',
+      '(Tool reaches past stock: front 123.5, back 123.5 mm)',
+      '(Keep clamps clear of those sides, below clearance Z 10 mm)',
+    ])
+    for (const line of long) expect(line.length).toBeLessThanOrEqual(70)
   })
 
   it('tool change: M5, retract, marker, M0, retract in the new WCS, spindle; forgets the position', () => {
@@ -466,15 +597,16 @@ describe('postGrbl', () => {
       ),
     )
     expect(body(lines)).toEqual([
-      '(DFYOM TOOL CHANGE 1: T1)',
+      '(DFYOM TOOL CHANGE 1: T1, 6 mm flat)',
       'M3 S10000',
       'G4 P3',
       'X1 Y2',
       'G1 Z-1 F500',
       'G0 Z10',
+      '(Tool change to T2: spindle off, retract)',
       'M5',
-      '(DFYOM TOOL CHANGE 2: T2)',
-      'M0',
+      '(DFYOM TOOL CHANGE 2: T2, 6 mm flat)',
+      'M0 ;Install T2 T2, 6 mm flat, then zero Z',
       'G90 G94 G17 G21',
       'G54',
       'G0 Z10',
@@ -497,8 +629,8 @@ describe('postGrbl', () => {
       }),
     )
     expect(body(lines)).toEqual([
-      '(DFYOM TOOL CHANGE 1: T1)',
-      'M0',
+      '(DFYOM TOOL CHANGE 1: T1, 6 mm flat)',
+      'M0 ;Install T1 T1, 6 mm flat, then zero Z',
       'G90 G94 G17 G21',
       'G54',
       'G0 Z10',
@@ -516,7 +648,11 @@ describe('postGrbl', () => {
         OPTS,
       ),
     )
-    expect(body(lines).slice(1, 4)).toEqual(['M3 S12000', '(Set spindle to 12000 rpm)', 'M0'])
+    expect(body(lines).slice(1, 4)).toEqual([
+      'M3 S12000',
+      '(Set spindle to 12000 rpm)',
+      'M0 ;Set spindle to 12000 rpm',
+    ])
   })
 
   it('suppresses unchanged words, keeps F pending over dropped lines', () => {
@@ -789,7 +925,9 @@ describe('review fixes', () => {
 
   it('a non-finite or huge tool diameter is an Err, not a throw', () => {
     for (const diameter of [Number.NaN, Number.POSITIVE_INFINITY, 1e22]) {
-      const blocks: Block[] = [{ kind: 'toolChange', number: 1, tool: { name: 'T', diameter } }]
+      const blocks: Block[] = [
+        { kind: 'toolChange', number: 1, tool: { name: 'T', diameter, type: 'flatEndMill' } },
+      ]
       const e = expectErrCode(postGrbl(program(blocks), OPTS), 'model.invariant')
       expect(e.issues.map((i) => i.rule)).toEqual(['range'])
     }
@@ -809,13 +947,13 @@ describe('review fixes', () => {
   it('manual spindle: asks to stop the spindle before a tool change and before the end', () => {
     const blocks: Block[] = [tool(1), spin(), rapid(1, 2, 10), tool(2), spin(), rapid(1, 2, 10)]
     const lines = expectOk(postGrblLines(program(blocks, { spindleControl: 'manual' }), OPTS))
-    const k = lines.indexOf('(DFYOM TOOL CHANGE 2: T2)')
+    const k = lines.indexOf('(DFYOM TOOL CHANGE 2: T2, 6 mm flat)')
     expect(lines.slice(k - 1, k + 2)).toEqual([
       '(Stop the spindle)',
-      '(DFYOM TOOL CHANGE 2: T2)',
-      'M0',
+      '(DFYOM TOOL CHANGE 2: T2, 6 mm flat)',
+      'M0 ;Stop spindle, install T2 T2, 6 mm flat, then zero Z',
     ])
-    expect(lines.slice(-4)).toEqual(['M5', '(Stop the spindle)', 'M0', 'M30'])
+    expect(lines.slice(-4)).toEqual(['M5', '(Stop the spindle)', 'M0 ;Stop the spindle', 'M30'])
     // gcode spindles get neither
     const g = expectOk(postGrblLines(program(blocks), OPTS))
     expect(g.filter((l) => l === '(Stop the spindle)')).toEqual([])
@@ -824,8 +962,13 @@ describe('review fixes', () => {
   it('after a tool change M0: modes and G54 again before the retract', () => {
     const blocks: Block[] = [tool(1), spin(), rapid(1, 2, 10), tool(2), spin(), rapid(1, 2, 10)]
     const lines = expectOk(postGrblLines(program(blocks), OPTS))
-    const k = lines.indexOf('(DFYOM TOOL CHANGE 2: T2)')
-    expect(lines.slice(k + 1, k + 5)).toEqual(['M0', 'G90 G94 G17 G21', 'G54', 'G0 Z10'])
+    const k = lines.indexOf('(DFYOM TOOL CHANGE 2: T2, 6 mm flat)')
+    expect(lines.slice(k + 1, k + 5)).toEqual([
+      'M0 ;Install T2 T2, 6 mm flat, then zero Z',
+      'G90 G94 G17 G21',
+      'G54',
+      'G0 Z10',
+    ])
   })
 
   it('the motion check catches a wrong arc direction, also for full circles', () => {

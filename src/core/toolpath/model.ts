@@ -12,6 +12,7 @@ import type {
   Vec2,
   Vec3,
 } from '../geometry/model'
+import type { MaterialBand } from '../geometry/through-depth'
 
 export type { Vec2, Vec3 }
 
@@ -126,6 +127,11 @@ export interface CuttingParams {
   readonly stepdown: number
   /** mm between neighbouring passes. */
   readonly stepover: number
+  /**
+   * mm/min of the finishing passes (DF74: radial chip thinning at the allowance); absent =
+   * `feedRate`. Doc: docs/architecture/feeds-speeds.md#finishing-pass-feed-hardening-df74
+   */
+  readonly finishFeedRate?: number
 }
 
 /** Drilling uses no stepdown or stepover (the peck depth and helix pitch are its strategy's). */
@@ -195,6 +201,8 @@ export interface ProfileStrategy {
   /** Below the stock bottom (mm). */
   readonly breakthrough: number
   readonly finishAllowance: number
+  /** Depth per finishing level (DF76); absent = one level at full depth. */
+  readonly finishStepdown?: number
   readonly direction: CutDirection
 }
 
@@ -210,6 +218,12 @@ export interface GeneratorInput<Op, Strategy, Cutting = CuttingParams> {
   readonly stock: StockGeometry
   readonly operation: Op
   readonly strategy: Strategy
+  /**
+   * The material earlier cuts left over the operation's region (DF61, z in the face frame):
+   * milling generators start their levels at `top` and skip the levels wholly below `bottom`
+   * (`cutLevels`). Absent = from the start level to the floor.
+   */
+  readonly material?: MaterialBand
   /** Without a machine copy rapids are not timed (`estimatedSeconds` covers feed moves only). */
   readonly maxFeedRate?: AxisRates
 }

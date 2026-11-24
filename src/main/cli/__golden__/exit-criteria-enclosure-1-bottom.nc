@@ -1,5 +1,12 @@
 (Program: Plan 1)
-(Setup: Bottom)
+(Setup 1 of 3: Bottom)
+(Stock X 255 Y 185 Z 40 mm on the machine)
+(Faces: bottom up, back towards you, right on the right)
+(Work zero G54 X0 Y0: back-left corner of the bottom face)
+(That corner sits front left on the machine)
+(Z0 on the bottom face: the stock surface facing up)
+(Tool stays within the stock outline)
+(Keep clamps below clearance Z 10 mm)
 (Units: mm)
 (Tool 1: Flat 6, dia 6 mm)
 (Generator: DFYOM)
@@ -7,10 +14,10 @@ G90 G94 G17 G21
 G54
 G0 Z10
 (Pocket 2)
-(DFYOM TOOL CHANGE 1: Flat 6)
+(DFYOM TOOL CHANGE 1: Flat 6, 6 mm flat)
 M3 S16000
 (Set spindle to 16000 rpm)
-M0
+M0 ;Set spindle to 16000 rpm
 X127.5 Y90.1
 Z2
 G1 Z0 F600
@@ -28,49 +35,43 @@ Y94
 X106
 Y91
 X127.5
-Y88.45
-X151.55
-Y96.55
-X103.45
-Y88.45
+Y88
+X152
+Y97
+X103
+Y88
 X127.5
-Y85.9
-X154.1
-Y99.1
-X100.9
-Y85.9
+Y85
+X155
+Y100
+X100
+Y85
 X127.5
-Y83.35
-X156.65
-Y101.65
-X98.35
-Y83.35
+Y82
+X158
+Y103
+X97
+Y82
 X127.5
-Y80.8
-X159.2
-Y104.2
-X95.8
-Y80.8
+Y79
+X161
+Y106
+X94
+Y79
 X127.5
-Y78.25
-X161.75
-Y106.75
-X93.25
-Y78.25
-X127.5
-Y75.7
+Y76
 X163.5
-G3 X164.3 Y76.5 I0 J0.8
+G3 X164 Y76.5 I0 J0.5
 G1 Y108.5
-G3 X163.5 Y109.3 I-0.8 J0
+G3 X163.5 Y109 I-0.5 J0
 G1 X91.5
-G3 X90.7 Y108.5 I0 J-0.8
+G3 X91 Y108.5 I0 J-0.5
 G1 Y76.5
-G3 X91.5 Y75.7 I0.8 J0
+G3 X91.5 Y76 I0.5 J0
 G1 X127.5
 G0 Z2
 G1 Z-2 F600
-Y75.5 F3000
+Y75.5 F5000
 X163.5
 G3 X164.5 Y76.5 I0 J1
 G1 Y108.5
@@ -80,10 +81,10 @@ G3 X90.5 Y108.5 I0 J-1
 G1 Y76.5
 G3 X91.5 Y75.5 I1 J0
 G1 X127.5
-Y75.7
+Y76
 G0 Z2
 Z10
 M5
 (Stop the spindle)
-M0
+M0 ;Stop the spindle
 M30

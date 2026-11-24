@@ -1,5 +1,12 @@
 (Program: Plan 1)
-(Setup: Bottom)
+(Setup 1 of 1: Bottom)
+(Stock X 100 Y 60 Z 20 mm on the machine)
+(Faces: bottom up, back towards you, right on the right)
+(Work zero G54 X0 Y0: back-left corner of the bottom face)
+(That corner sits front left on the machine)
+(Z0 on the bottom face: the stock surface facing up)
+(Tool reaches past stock: left 7, right 7, front 1, back 1 mm)
+(Keep clamps clear of those sides, below clearance Z 10 mm)
 (Units: mm)
 (Tool 1: Flat 6, dia 6 mm)
 (Generator: DFYOM)
@@ -7,10 +14,10 @@ G90 G94 G17 G21
 G54
 G0 Z10
 (Facing 1)
-(DFYOM TOOL CHANGE 1: Flat 6)
+(DFYOM TOOL CHANGE 1: Flat 6, 6 mm flat)
 M3 S18000
 (Set spindle to 18000 rpm)
-M0
+M0 ;Set spindle to 18000 rpm
 X104 Y2
 Z2
 G1 Z-0.5 F200
@@ -115,7 +122,7 @@ Y28.2
 X50
 G0 Z1.5
 G1 Z-3.5 F200
-Y28 F800
+Y28 F2228.3
 X57
 Y32
 X43
@@ -126,5 +133,5 @@ G0 Z1.5
 Z10
 M5
 (Stop the spindle)
-M0
+M0 ;Stop the spindle
 M30

@@ -168,7 +168,7 @@ describe('profiles on shapes', () => {
     ],
   }
 
-  it('cuts an open path on its line only, without tabs; blind only on', async () => {
+  it('cuts an open path on its line only, without tabs; blind on any side (DF53)', async () => {
     const s = await setup()
     await addShape(s, [openPath])
     const shape = { kind: 'named', shapeId: 'shape1', center: ['50', '30'] }
@@ -184,12 +184,19 @@ describe('profiles on shapes', () => {
       'model.invariant',
     )
     expect(t.issues.map((i) => i.rule)).toEqual(['tabsNotAllowed'])
+    // a blind outside profile is a step (DF53); its depth must stay inside the stock
+    await s.run('design.profile.add', {
+      partId: s.partId,
+      shape: { ...rect, center: ['50', '30'] },
+      depth: '2',
+    })
+    expect(geometry(s, 'profile2')).toMatchObject({ kind: 'profile', side: 'outside', depth: 2 })
     const b = await s.fail(
-      'design.profile.add',
-      { partId: s.partId, shape: { ...rect, center: ['50', '30'] }, depth: '2' },
+      'design.profile.update',
+      { partId: s.partId, operationId: 'profile2', depth: '500' },
       'model.invariant',
     )
-    expect(b.issues.map((i) => i.rule)).toEqual(['onlyOn'])
+    expect(b.issues.map((i) => i.rule)).toEqual(['lessThanStockThickness'])
     const p = await s.fail(
       'design.pocket.add',
       { partId: s.partId, shape, depth: '2' },
@@ -216,6 +223,27 @@ describe('profiles on shapes', () => {
     expect(e.pieces).toBe(1)
     for (const id of ['profile1.floor', 'profile1.wall[0]', 'profile1.wall[1]', 'pocket1.floor'])
       expect(e.surfaces).toContain(id)
+  })
+
+  it('a step (blind outside, DF53) has a floor, no tabs, and evaluates', async () => {
+    const s = await setup()
+    await addShape(s, [{ ...rect, cornerRadius }])
+    const shape = { kind: 'named', shapeId: 'shape1', center: ['50', '30'] }
+    await s.run('design.profile.add', { partId: s.partId, shape, depth: '2', slotWidth: '8' })
+    await s.run('design.pocket.add', {
+      partId: s.partId,
+      shape: { kind: 'circle', center: ['50', '16'], diameter: '2' },
+      depth: '1',
+      on: 'profile1.floor',
+    })
+    expect(geometry(s, 'pocket1')).toMatchObject({ kind: 'pocket', onZ: -2, depth: 1 })
+    const input = expectOk(partGeometryInput(s.d.doc, s.partId, region2d))
+    const kernel = expectOk(await loadManifold())
+    const e = expectOk(kernel.withSolids((k) => evaluatePart(input, k, undefined, region2d)))
+    expect(e.pieces).toBe(1)
+    for (const id of ['profile1.floor', 'profile1.wall[0]', 'pocket1.floor'])
+      expect(e.surfaces).toContain(id)
+    expect(e.surfaces.some((id) => id.startsWith('profile1.tab'))).toBe(false)
   })
 
   it('cuts one loop and checks tab positions against its length', async () => {

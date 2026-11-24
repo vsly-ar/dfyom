@@ -15,7 +15,7 @@ import { line, type Loop, type Region } from './2d/model'
 import { circle, dumbbell, rect } from './2d/testing/fixtures'
 import { nodeRegion2d } from './2d/testing/node-wasm'
 import type { DfmWarning, OperationGeometry, StockGeometry, Vec2 } from './model'
-import { CORNER_MIN_TURN, insideCorners, shapeMeasure } from './shape-measure'
+import { CORNER_MIN_TURN, insideCorners, openCorner, shapeMeasure } from './shape-measure'
 import { toolFit } from './tool-fit'
 
 type Op<K extends OperationGeometry['kind']> = Extract<OperationGeometry, { kind: K }>
@@ -155,6 +155,41 @@ describe('inside corners of the cut', () => {
     ]
     const corners = insideCorners([poly(nearlyStraight)], 1)
     expect(corners.filter((c) => c.radius === 0)).toHaveLength(4)
+  })
+  it('opens corners whose leftover lies beyond the stock (DF53)', () => {
+    // a 90° corner spreads r, a 30° one r · tan(75°) ≈ 3.73 r
+    const square = insideCorners(
+      [
+        poly([
+          [0, 0],
+          [10, 0],
+          [10, 10],
+          [0, 10],
+        ]),
+      ],
+      1,
+    )
+    expect(square.map((c) => c.spread)).toEqual([1, 1, 1, 1])
+    const tri = insideCorners(
+      [
+        poly([
+          [0, 0],
+          [20, 0],
+          [20, 20 * Math.tan(Math.PI / 6)],
+        ]),
+      ],
+      1,
+    )
+    const acute = tri.find((c) => c.at[0] === 0 && c.at[1] === 0)!
+    expect(acute.spread).toBeCloseTo(Math.tan((75 * Math.PI) / 180), 9)
+    const face = { length: 100, width: 60 }
+    const corner = { at: [0, 0] as Vec2, radius: 0, spread: 1 }
+    // 3 mm beyond the left side: open for r ≤ 3, a wall for a larger tool, never on the edge
+    expect(openCorner(corner, [-3, 30], face, 3)).toBe(true)
+    expect(openCorner(corner, [-3, 30], face, 3.1)).toBe(false)
+    expect(openCorner(corner, [0, 30], face, 0)).toBe(false)
+    expect(openCorner({ ...acute, at: [0, 0] }, [-3, 30], face, 1)).toBe(false)
+    expect(openCorner(corner, [103, 63], face, 4)).toBe(true)
   })
 })
 

@@ -81,7 +81,27 @@ describe('design.warning.list', () => {
     await s.run('design.facing.add', { partId: s.partId, depth: '4' })
     await s.run('design.pocket.add', { partId: s.partId, ...sharpPocket })
     const { warnings } = warningList(s)
-    expect(codes(warnings)).toEqual(['facing1 dfm.facingDeep', 'pocket1 dfm.cornerSharp'])
+    // a sharp corner: no tool at all fits the pocket (DF52)
+    expect(codes(warnings)).toEqual([
+      'facing1 dfm.facingDeep',
+      'pocket1 dfm.cornerSharp',
+      'pocket1 dfm.noFittingTool',
+    ])
+    expect(warnings[2]).toEqual({
+      code: 'dfm.noFittingTool',
+      severity: 'warning',
+      message:
+        'pocket1: no tool fits, not even the 1 mm flat end mill: cornerRadius 0 mm < tool radius 0.5 mm',
+      operation: 'pocket1',
+      parameter: 'tool',
+      params: {
+        cornerRadius: 0,
+        toolRadius: 0.5,
+        rule: 'cornerRadius',
+        tool: '1 mm flat end mill',
+      },
+      suggestion: { relation: 'atLeast', value: 0.5 },
+    })
     expect(warnings[1]).toEqual({
       code: 'dfm.cornerSharp',
       severity: 'warning',
@@ -147,7 +167,7 @@ describe('design command results carry the warnings of the edited part', () => {
     }
     expect(added.operationId).toBe('pocket1')
     expect(added.warnings).toEqual(warningList(s).warnings)
-    expect(codes(added.warnings)).toEqual(['pocket1 dfm.cornerSharp'])
+    expect(codes(added.warnings)).toEqual(['pocket1 dfm.cornerSharp', 'pocket1 dfm.noFittingTool'])
     expect(added.warnings[0]?.suggestion).toEqual({ relation: 'atLeast', value: 4 })
 
     const updated = (await s.run('design.pocket.update', {
@@ -163,7 +183,8 @@ describe('design command results carry the warnings of the edited part', () => {
     const partId = s.partId
     await s.run('design.facing.add', { partId, depth: '4' })
     await s.run('design.pocket.add', { partId, on: 'stock.top', ...sharpPocket })
-    const both = ['facing1 dfm.facingDeep', 'pocket1 dfm.cornerSharp']
+    const pocket = ['pocket1 dfm.cornerSharp', 'pocket1 dfm.noFittingTool']
+    const both = ['facing1 dfm.facingDeep', ...pocket]
     const part = (await s.run('design.part.update', { partId, name: 'B2' })) as {
       warnings: DfmWarning[]
     }
@@ -173,7 +194,7 @@ describe('design command results carry the warnings of the edited part', () => {
       operationId: 'pocket1',
       toIndex: 0,
     })) as { warnings: DfmWarning[] }
-    expect(codes(moved.warnings)).toEqual([...both].reverse())
+    expect(codes(moved.warnings)).toEqual([...pocket, 'facing1 dfm.facingDeep'])
     const removed = (await s.run('design.operation.remove', {
       partId,
       operationId: 'pocket1',
@@ -193,7 +214,7 @@ describe('design command results carry the warnings of the edited part', () => {
     const r = expectOk(
       await d.dispatch('design.pocket.add', { partId: s.partId, ...sharpPocket }, ui),
     ).value as { warnings: DfmWarning[] }
-    expect(codes(r.warnings)).toEqual(['pocket1 dfm.cornerSharp'])
+    expect(codes(r.warnings)).toEqual(['pocket1 dfm.cornerSharp', 'pocket1 dfm.noFittingTool'])
     expect(r.warnings[0]?.suggestion).toBeUndefined()
   })
 })

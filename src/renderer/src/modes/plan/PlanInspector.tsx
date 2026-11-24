@@ -6,10 +6,12 @@
 // field showing the resolved value and where it came from (preset, calculator, strategy default,
 // or the user's override); the lock pins a value as an override, unlocking returns to the
 // recommendation; "Show calculation" (FeedsCalculation.tsx). Commits are one command each; checks
-// show at their field, the rest under the fields. Read-only (desaturated, with the reason) in
+// show at their field, and all of the operation's findings in the Checks block at the top (DF67;
+// a navigator row's error or warning count focuses it); the first operation of a tool run ends its
+// Tool group with the run's Z reference (ZRefFields.tsx, DF69). Read-only (desaturated, with the reason) in
 // finalized, in-use and archived plans. Doc: docs/conventions/ui.md#plan-mode-task-37,
 // docs/modes/plan-v0.1.md#tool-assignment-and-checks, #feeds-and-speeds
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { PlanWarning } from '../../../../core/plan/checks'
 import type { FeedField, PlanDTO, PlanOperationDTO } from '../../../../core/plan/plan.dto'
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
@@ -57,9 +59,10 @@ import { NewToolDialog } from '../../library/NewToolDialog'
 import { PlanCopyGroup } from './PlanCopyGroup'
 import { SetupInspector } from './SetupInspector'
 import { useCancelGesture } from '../../shell/hooks'
-import { usePlanCommand, usePlanData } from './plan-store'
+import { usePlanCommand, usePlanData, usePlanState, usePlanStore } from './plan-store'
 import styles from './Plan.module.css'
-import { shownStrategyFields, StrategyGroup } from './StrategyGroup'
+import { StrategyGroup } from './StrategyGroup'
+import { ZRefFields } from './ZRefFields'
 import { findingsOf, useChosenPlan, usePlanSelection } from './usePlan'
 
 const m = planMessages
@@ -121,6 +124,7 @@ export function PlanInspector({ doc }: { doc: ProjectDoc }): React.JSX.Element {
         plan={plan}
         setup={setup}
         warnings={data?.warnings ?? []}
+        toolpaths={data?.toolpaths ?? {}}
       />
     )
   return op === undefined ? (
@@ -297,7 +301,7 @@ const FEED_ICON: Record<FeedField, FieldIconName> = {
 
 const DEFAULT_PRESET = '__default'
 const AUTO = '__auto'
-const SHOWN_FIELDS = new Set<string>(['tool', 'stickout', 'presetName'])
+const SEVERITY_ORDER: Record<PlanWarning['severity'], number> = { error: 0, warning: 1, info: 2 }
 
 function OperationInspector({
   doc,
@@ -325,6 +329,18 @@ function OperationInspector({
   const name = planOperationName(plan, op.designOperationIds)
   const kind = view?.kind
   const fields = kind === undefined ? [] : feedFields(kind)
+
+  // a navigator row's error or warning count was clicked (DF67): focus the Checks block, once
+  const store = usePlanStore()
+  const request = usePlanState((s) => s.findingsRequest)
+  const checksRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (request !== op.id) return
+    const block = checksRef.current
+    block?.focus()
+    block?.scrollIntoView?.({ block: 'nearest' })
+    store.getState().findingsShown()
+  }, [request, op.id, store])
 
   const send = async (cmd: string, args: object, gesture?: string) => {
     const r = await call(
@@ -396,15 +412,20 @@ function OperationInspector({
         ? feedQuantity('stepdown', view.stickout, units)
         : undefined
 
-  const strategyFields =
-    current !== null && view !== undefined ? shownStrategyFields(plan, view) : new Set<string>()
-  const rest = findings.filter(
-    (w) =>
-      w.field === undefined ||
-      (!SHOWN_FIELDS.has(w.field) &&
-        !strategyFields.has(w.field) &&
-        !fields.includes(w.field as FeedField)),
-  )
+  // the Checks block (DF67): every finding, errors first; "Unlock" on an inactive lock
+  const checks = [...findings]
+    .sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity])
+    .map((w, i) => {
+      // the header names the operation: no subject
+      const { subject: _, ...item } = planWarningView(w, plan, undefined, i, units)
+      const field = w.field
+      return w.code === 'feeds.lockInactive' && field !== undefined && !readOnly
+        ? {
+            ...item,
+            fix: { label: t.unlock, onApply: () => update({ locks: { [field]: false } }) },
+          }
+        : item
+    })
 
   return (
     <div className={styles['inspector']}>
@@ -413,6 +434,18 @@ function OperationInspector({
       <div className={styles['fields']}>
         {readOnly ? <p className={styles['muted']}>{m.readOnly(plan.status)}</p> : null}
         {failed ? <ErrorMessage error={failed} message={t.commandFailed} /> : null}
+
+        {checks.length > 0 ? (
+          <section
+            ref={checksRef}
+            tabIndex={-1}
+            className={`${styles['group']} ${styles['checks']}`}
+            aria-label={t.checks}
+          >
+            <h3 className={styles['groupTitle']}>{t.checks}</h3>
+            <WarningList labels={planWarningLabels} items={checks} />
+          </section>
+        ) : null}
 
         <section className={styles['group']} aria-label={t.groups.tool}>
           <h3 className={styles['groupTitle']}>{t.groups.tool}</h3>
@@ -516,6 +549,15 @@ function OperationInspector({
               />
             </Field>
           ) : null}
+          {/* DF69: the Z reference of the tool run this operation starts */}
+          <ZRefFields
+            plan={plan}
+            op={op}
+            tool={current?.name ?? m.toolChanges.noTool}
+            units={units}
+            readOnly={readOnly}
+            findings={findings}
+          />
         </section>
 
         <PlanCopyGroup doc={doc} plan={plan} op={op} />
@@ -560,13 +602,6 @@ function OperationInspector({
               presetName={view.presetName}
             />
           </section>
-        ) : null}
-
-        {rest.length > 0 ? (
-          <WarningList
-            labels={planWarningLabels}
-            items={rest.map((w, i) => planWarningView(w, plan, undefined, i, units))}
-          />
         ) : null}
       </div>
     </div>

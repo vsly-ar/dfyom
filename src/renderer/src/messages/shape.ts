@@ -66,7 +66,6 @@ export const shapeMessages = {
     items: (n: number) => plural(n, 'item'),
     openPath: 'Open path',
     failed: 'Does not resolve',
-    remove: (name: string) => `Remove ${name}`,
     removed: (name: string) => `Removed ${name}`,
     referenced: (names: readonly string[]) =>
       `Used by ${names.length <= 2 ? names.join(' and ') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`}.`,
@@ -169,7 +168,7 @@ export const shapeMessages = {
     row: (k: number) => `Segment ${k}`,
     cell: (k: number, column: string) => `Segment ${k} ${column}`,
     lastSegment: 'A path needs at least one segment.',
-    keys: 'Arrows move between cells, Enter edits, Alt+↑/↓ moves a row, Delete on # removes it.',
+    keys: "Arrows move between cells, Enter edits, Alt+↑/↓ moves a row, Delete on # removes it. Right-click a row, or press Shift+F10 on a cell, for the row's actions.",
   },
   view: {
     region: 'Shape Editor',

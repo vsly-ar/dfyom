@@ -99,9 +99,25 @@ function depthRange(g: OperationGeometry, stock: StockGeometry): readonly [numbe
     case 'pocket':
       return [g.onZ - g.depth, g.onZ]
     case 'drilling':
-      return [g.bottom.kind === 'through' ? through : g.onZ - g.bottom.depth, g.onZ]
+      // a through hole ends on the material an earlier setup left (DF61), else the far face
+      return [
+        g.bottom.kind === 'through'
+          ? g.throughDepth === undefined
+            ? through
+            : -g.throughDepth
+          : g.onZ - g.bottom.depth,
+        g.onZ,
+      ]
     case 'profile':
-      return [g.depth === undefined ? through : -g.depth, 0]
+      // a through cut ends on the material an earlier setup left (DF50), else the far face
+      return [
+        g.depth === undefined
+          ? g.throughDepth === undefined
+            ? through
+            : -g.throughDepth
+          : -g.depth,
+        0,
+      ]
     case 'chamfer':
       return [g.onZ - chamferDepth(g), g.onZ]
   }

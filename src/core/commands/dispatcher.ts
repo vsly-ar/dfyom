@@ -155,6 +155,11 @@ export interface Dispatcher {
   ): AsyncAppResult<CommandOutcome>
   /** Side-effect free; reads the latest committed snapshot without queueing; not logged. */
   query(name: string, rawArgs: unknown, source: Source): AppResult<QueryOutcome>
+  /**
+   * Any query, async ones included (ADR 0021): reads the snapshot committed when it starts,
+   * without queueing, so edits go on meanwhile; the outcome names the revision it read.
+   */
+  queryAsync(name: string, rawArgs: unknown, source: Source): AsyncAppResult<QueryOutcome>
   readonly doc: ProjectDoc
   readonly revision: number
   readonly log: ActionLog
@@ -398,19 +403,52 @@ class ProjectDispatcher implements Dispatcher {
     const found = this.registry.query(name)
     if (found.isNone()) return fail('command.unknown', `unknown query ${name}`, { where: 'query' })
     const def = found.unwrap()
+    if (def.async === true)
+      return fail('internal.unexpected', `${name} is an async query: use queryAsync`, {
+        where: 'query',
+      })
     const args = parseArgs(def.args, rawArgs, name)
     if (args.isErr()) return args
     const revision = this.rev
-    const value = def.run(this.current, args.unwrap(), {
+    const value = def.run(this.current, args.unwrap(), this.queryContext(source))
+    if (value.isErr()) return Err(value.unwrapErr())
+    if (def.readsDocument !== false) this.recordBaseline(source, revision)
+    return Ok({ value: value.unwrap(), revision })
+  }
+
+  private queryContext(source: Source) {
+    return {
       source,
       services: this.services,
       jobs: this.jobDirectory,
       history: this.history,
       apply: this.applyView,
-    })
-    if (value.isErr()) return Err(value.unwrapErr())
-    if (def.readsDocument !== false) this.recordBaseline(source, revision)
-    return Ok({ value: value.unwrap(), revision })
+    }
+  }
+
+  /** Never rejects: any stray throw becomes `internal.unexpected`. */
+  async queryAsync(name: string, rawArgs: unknown, source: Source): AsyncAppResult<QueryOutcome> {
+    const found = this.registry.query(name)
+    if (found.isSome() && found.unwrap().async === true) {
+      const ran = await tryAsync(
+        async (): AsyncAppResult<QueryOutcome> => {
+          const def = found.unwrap()
+          const args = parseArgs(def.args, rawArgs, name)
+          if (args.isErr()) return args
+          // the snapshot at the start: edits committed meanwhile do not change what it reads
+          const revision = this.rev
+          const doc = this.current
+          const value = await def.run(doc, args.unwrap(), this.queryContext(source))
+          if (value.isErr()) return Err(value.unwrapErr())
+          if (def.readsDocument !== false) this.recordBaseline(source, revision)
+          return Ok({ value: value.unwrap(), revision })
+        },
+        'internal.unexpected',
+        `query ${name} threw`,
+      )
+      return ran.isOk() ? ran.unwrap() : Err(ran.unwrapErr())
+    }
+    return this.query(name, rawArgs, source)
   }
 
   /** Never rejects: any stray throw becomes `internal.unexpected` (and is logged). */

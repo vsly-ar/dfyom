@@ -1,0 +1,216 @@
+/* "Tool changes" in the setup inspector (hardening DF66, ui.md#design-and-plan-controls-v02):
+   a quiet ordered list of tool runs; the grip and the drop line come from ui/Reorder, the accent
+   only on the drop line and the focus ring. */
+
+.section {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.title {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  font-weight: var(--weight-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.count {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: var(--weight-regular);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.runs {
+  --reorder-gap: 0px;
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--border);
+}
+
+.run {
+  display: grid;
+  grid-template-columns: 1.25rem var(--icon-md) minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: start;
+  padding: var(--space-2) var(--space-1) var(--space-2) var(--space-2);
+  border-bottom: 1px solid var(--border);
+  transition: background-color var(--motion-fast) var(--ease-standard);
+}
+
+.gripped .run {
+  padding-left: calc(14px + var(--space-2));
+}
+
+.run:hover,
+.run:focus-visible {
+  background: var(--bg-hover);
+}
+
+.run:focus-visible {
+  outline-offset: -2px;
+}
+
+.grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 14px;
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-standard);
+}
+
+.run:hover > .grip,
+.run:focus-within > .grip,
+.gripped[data-dragging] .grip {
+  opacity: 1;
+}
+
+.number {
+  padding-top: 1px;
+  font-size: var(--text-xs);
+  line-height: var(--lh-sm);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.icon {
+  display: grid;
+  place-items: center;
+  height: var(--lh-sm);
+  color: var(--text-muted);
+}
+
+.icon > svg {
+  width: var(--icon-md);
+  height: var(--icon-md);
+}
+
+.body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.toolLine {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-2);
+  align-items: baseline;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+}
+
+.tool {
+  font-weight: var(--weight-medium);
+  color: var(--text);
+}
+
+.meta {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.ops {
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.carried {
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  color: var(--text);
+}
+
+.time {
+  font-size: var(--text-xs);
+  line-height: var(--lh-sm);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.time[data-unknown] {
+  color: var(--text-muted);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* DF69: "Z from": the run's Z reference; a default quiet (muted), a choice in the text colour. */
+.zFrom {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  align-items: center;
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+}
+
+.zLabel {
+  color: var(--text-muted);
+}
+
+.zValue {
+  padding: 0 var(--space-1);
+  margin: 0 calc(-1 * var(--space-1));
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font: inherit;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+  text-align: start;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
+}
+
+.zValue[data-chosen] {
+  color: var(--text);
+  font-weight: var(--weight-medium);
+}
+
+button.zValue {
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
+button.zValue:hover,
+button.zValue[data-state='open'] {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.zFinding {
+  display: inline-flex;
+}
+
+.zFinding[data-severity='error'] {
+  color: var(--danger-text);
+}
+
+.zFinding[data-severity='warning'] {
+  color: var(--warning);
+}

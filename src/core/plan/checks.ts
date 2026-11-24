@@ -16,6 +16,9 @@ import type { ResolvedFeeds } from './feeds'
 import type { ResolvedStrategy } from './strategy'
 import { chamferCuts, holeDepth } from './strategy'
 import { chamferFit } from '../geometry/tool-fit'
+import { localStock, type Direction } from '../geometry/face'
+import { rectangleWallCorner } from '../geometry/open-sides'
+import { shapeCentre } from '../design/anchor'
 
 export const PLAN_WARNING_CODES = [
   'plan.check',
@@ -31,6 +34,7 @@ export const PLAN_WARNING_CODES = [
   'plan.libraryBlocked',
   'plan.rebuildBlocked',
   'plan.broken',
+  'plan.zRef',
   'feeds.rpmAboveMachine',
   'feeds.rpmBelowMachine',
   'feeds.feedClamped',
@@ -102,6 +106,12 @@ export interface ToolCheckInput {
   readonly ops: readonly Operation[]
   readonly part: Part
   readonly stock: Stock
+  /**
+   * Through depth (mm) by design operation id of the through profiles (DF50) and through holes
+   * (DF61) over material an earlier setup cleared (`planThroughDepths`); the others cut the
+   * stock thickness.
+   */
+  readonly throughDepths?: ReadonlyMap<string, number>
   readonly tool: Tool
   /** Resolved stickout, mm. */
   readonly stickout: number
@@ -161,7 +171,27 @@ export function toolFindings(i: ToolCheckInput): Finding[] {
         break
       case 'pocket': {
         const s = op.shape
-        if (s.kind === 'rectangle' && D / 2 > s.cornerRadius.canonical + EPS)
+        if (
+          s.kind === 'rectangle' &&
+          D / 2 > s.cornerRadius.canonical + EPS &&
+          // corners on or beyond the stock edge are open (DF61 follow-up)
+          rectangleWallCorner(
+            shapeCentre(s),
+            {
+              length: s.length.canonical,
+              width: s.width.canonical,
+              cornerRadius: s.cornerRadius.canonical,
+            },
+            localStock(
+              table.get(op.on).mapOr('+z' as Direction, (e) => e.direction),
+              {
+                length: stock.length.canonical,
+                width: stock.width.canonical,
+                thickness,
+              },
+            ),
+          )
+        )
           add('tool', 'cornerRadius', 'tool radius must be at most the corner radius', {
             radius: D / 2,
             cornerRadius: s.cornerRadius.canonical,
@@ -191,8 +221,11 @@ export function toolFindings(i: ToolCheckInput): Finding[] {
       }
       case 'drilling': {
         const hole = op.diameter.canonical
-        const depth = holeDepth(op, part.operations, stock)
         const through = op.bottom === 'through'
+        // a through hole over material an earlier setup cleared: what is left below `on` (DF61)
+        const left = through ? i.throughDepths?.get(op.id) : undefined
+        const depth =
+          left === undefined ? holeDepth(op, part.operations, stock) : left - belowTop(table, op.on)
         const breakthrough = through && i.strategy.kind === 'drilling' ? i.strategy.breakthrough : 0
         const fromTop = belowTop(table, op.on) + depth + breakthrough
         if (tool.type === 'drill') {
@@ -238,7 +271,8 @@ export function toolFindings(i: ToolCheckInput): Finding[] {
       case 'profile': {
         // a blind `on` groove (v0.3) cuts to its depth below the stock face, without breakthrough
         const breakthrough = i.strategy.kind === 'profile' ? i.strategy.breakthrough : 0
-        const cut = op.depth.mapOr(thickness + breakthrough, (d) => d.canonical)
+        const material = i.throughDepths?.get(op.id) ?? thickness
+        const cut = op.depth.mapOr(material + breakthrough, (d) => d.canonical)
         const what = op.depth.isSome() ? 'groove depth' : 'thickness + breakthrough'
         if (D > op.slotWidth.canonical + EPS)
           add('tool', 'slotWidth', 'tool diameter must be at most the slot width', {
@@ -287,6 +321,106 @@ export function toolFindings(i: ToolCheckInput): Finding[] {
         break
       }
     }
+  }
+  return out
+}
+
+/**
+ * Room above the stock top the stickout needs beyond the deepest cut (mm): the collet nut
+ * (research 2026-11-24 § 3: 31 mm cut + ~5 mm). Doc:
+ * docs/modes/plan-v0.1.md#reach-and-rigidity-warnings-hardening-df73-df75
+ */
+export const STICKOUT_CLEARANCE = 5
+/** Deflection factor (stickout / needed)³ from which excess stickout warns. */
+export const DEFLECTION_FACTOR_WARN = 2
+/** Excess stickout warns only for slender tools: stickout > this × D. */
+export const SLENDER_STICKOUT = 4
+
+/**
+ * The depth of each cut below the stock face the `reach` rule compares with the stickout (mm):
+ * pocket floor, hole (with breakthrough), profile cut, chamfer tip, facing depth.
+ */
+function reachDepth(op: Operation, i: ToolCheckInput, table: SurfaceTable): number {
+  const { part, stock, tool } = i
+  switch (op.kind) {
+    case 'facing':
+      return belowTop(table, op.on) + op.depth.canonical
+    case 'pocket':
+      return belowTop(table, `${op.id}.floor`)
+    case 'drilling': {
+      const through = op.bottom === 'through'
+      const left = through ? i.throughDepths?.get(op.id) : undefined
+      const depth =
+        left === undefined ? holeDepth(op, part.operations, stock) : left - belowTop(table, op.on)
+      const breakthrough = through && i.strategy.kind === 'drilling' ? i.strategy.breakthrough : 0
+      return belowTop(table, op.on) + depth + breakthrough
+    }
+    case 'profile': {
+      const breakthrough = i.strategy.kind === 'profile' ? i.strategy.breakthrough : 0
+      const material = i.throughDepths?.get(op.id) ?? stock.thickness.canonical
+      return op.depth.mapOr(material + breakthrough, (d) => d.canonical)
+    }
+    case 'chamfer': {
+      const cut = chamferCuts(op, part.operations, stock, tool)
+      if (cut === undefined) return 0
+      const plunged = i.strategy.kind === 'chamfer' && i.strategy.entry === 'plunge'
+      return belowTop(table, op.on) + (plunged ? cut.plungeDepth : cut.contourDepth)
+    }
+  }
+}
+
+/**
+ * The reach and rigidity warnings (hardening DF73, DF75): excess stickout (deflection factor
+ * (stickout / needed)³ ≥ 2 on a slender tool, drills exempt) and a pocket deeper than the flutes
+ * (the shank rubs the wall). Warnings: they never disqualify a tool.
+ * Doc: docs/modes/plan-v0.1.md#reach-and-rigidity-warnings-hardening-df73-df75
+ */
+export function rigidityFindings(i: Omit<ToolCheckInput, 'stepdown'>): Finding[] {
+  const out: Finding[] = []
+  const { tool } = i
+  const table = SurfaceTable.of(i.part.operations, i.stock)
+  const D = tool.diameter.canonical
+  const flute = tool.fluteLength.canonical
+  const r2 = (v: number) => Math.round(v * 100) / 100
+  // DF75: a pocket deeper than the flutes, unless the shank is reduced below D
+  const reduced = tool.shankDiameter.mapOr(false, (s) => s.canonical < D - 0.01)
+  if (!reduced)
+    for (const op of i.ops) {
+      if (op.kind !== 'pocket') continue
+      const depth = belowTop(table, `${op.id}.floor`)
+      if (depth > flute + EPS)
+        out.push({
+          field: 'tool',
+          rule: 'shankRub',
+          message: `pocket depth ${r2(depth)} mm is deeper than the flute length (${r2(flute)} mm): below the flutes the shank rubs the wall; check the flute length in the library or use a tool with longer flutes`,
+          params: { depth, fluteLength: flute },
+        })
+    }
+  // DF73: excess stickout
+  if (tool.type === 'drill' || i.ops.length === 0) return out
+  const depth = Math.max(...i.ops.map((op) => reachDepth(op, i, table)))
+  const needed = depth + STICKOUT_CLEARANCE
+  const factor = (i.stickout / needed) ** 3
+  // the shortest stickout that keeps the collet on the shank
+  const shank = Math.max(needed, flute)
+  const shankFactor = (i.stickout / shank) ** 3
+  if (
+    factor >= DEFLECTION_FACTOR_WARN &&
+    i.stickout > SLENDER_STICKOUT * D + EPS &&
+    // already chucked at the flutes: only a shorter-fluted tool helps, so no warning
+    (shankFactor >= DEFLECTION_FACTOR_WARN || i.stickout > flute + EPS)
+  ) {
+    const onShank = shankFactor >= DEFLECTION_FACTOR_WARN
+    const suggested = Math.ceil((onShank ? shank : needed) - EPS)
+    const flutes = onShank
+      ? ''
+      : ' (the collet then grips the flutes; a tool with shorter flutes is stiffer)'
+    out.push({
+      field: 'stickout',
+      rule: 'excessStickout',
+      message: `stickout ${r2(i.stickout)} mm makes the tool ${Math.round(factor * 10) / 10}× as flexible as the ${r2(needed)} mm the deepest cut (${r2(depth)} mm) needs: chuck the tool deeper, about ${suggested} mm${flutes}`,
+      params: { stickout: i.stickout, depth, needed, factor, suggested },
+    })
   }
   return out
 }

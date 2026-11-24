@@ -11,7 +11,13 @@ import { machineLimits } from '../feeds-speeds/suggest'
 import type { MaterialRow } from '../feeds-speeds/data'
 import type { CuttingPreset, Tool } from '../library/tool'
 import { Quantity } from '../quantity/quantity'
-import { feedFindings, stockFindings, toolFindings, type PlanWarning } from './checks'
+import {
+  feedFindings,
+  rigidityFindings,
+  stockFindings,
+  toolFindings,
+  type PlanWarning,
+} from './checks'
 import {
   calculatorNoData,
   FEED_FIELD_LABEL,
@@ -22,6 +28,8 @@ import {
 } from './feeds'
 import { orderFindings } from './order'
 import { setupFindings, setupStockSize } from './setups'
+import { planThroughDepths } from './through'
+import { zHeadroomFindings, zHeadroomUnknown, type ZHeadroomTool } from './z-headroom'
 import { checkPartFits } from './validity'
 import { shapeToolFindings } from './shape-checks'
 import type { Region2dPort } from '../geometry/2d/port'
@@ -163,6 +171,13 @@ export function evaluateOperation(
       ...(strategy.kind === 'drilling' ? { helixPitch: strategy.helixPitch } : {}),
       // F10 at the deepest point of the cut (plan-v0.4.md P-D)
       ...(strategy.kind === 'chamfer' ? { chamferDepth: strategy.cutDepth } : {}),
+      // DF74: the finishing pass's engagement
+      ...(strategy.kind === 'pocket' || strategy.kind === 'profile'
+        ? {
+            finishAllowance: strategy.finishAllowance,
+            finishStepdown: strategy.finishStepdown,
+          }
+        : {}),
     },
     data,
   )
@@ -175,21 +190,28 @@ export function evaluateOperation(
         params: {},
       })
   const stepdown = feeds.fields.stepdown.map((v) => v.value)
-  for (const f of toolFindings({
+  const checkInput = {
     ops,
     part: plan.part,
     stock: plan.stock,
+    throughDepths: planThroughDepths(plan, port),
     tool: t,
     stickout,
-    ...(stepdown.isSome() ? { stepdown: stepdown.unwrap() } : {}),
     strategy,
+  }
+  for (const f of toolFindings({
+    ...checkInput,
+    ...(stepdown.isSome() ? { stepdown: stepdown.unwrap() } : {}),
   }))
     push(f)
+  // DF73, DF75: warnings, never disqualifying (plan-v0.1.md § Reach and rigidity warnings)
+  for (const f of rigidityFindings(checkInput)) push(f, 'plan.check', 'warning')
   if (port !== undefined)
     for (const { severity, ...f } of shapeToolFindings(
       {
         ops,
         part: plan.part,
+        stock: plan.stock,
         tool: t,
         strategy,
         helixSet: op.strategy.helixDiameter !== undefined,
@@ -224,7 +246,8 @@ export function evaluateOperation(
 
 /**
  * Every finding of the plan: per operation, then order (across setups), then setups, then machine
- * (stock vs. travel per setup; `params.setupId` when the plan has several setups). With the 2D port
+ * (stock vs. travel per setup, `params.setupId` when the plan has several setups; the Z headroom
+ * per setup and tool, always with `params.setupId`, then `zHeadroomUnknown` once). With the 2D port
  * the part's shape checks run as in the design (`tabOutside`, `tabsOverlap`, …); the shape
  * findings that need geometry (`plan.restMaterial`, `plan.stepoverClamped`) are
  * `shapeFindings`' (plan.warning.list only).
@@ -235,8 +258,17 @@ export function planFindings(
   port?: Region2dPort,
 ): PlanWarning[] {
   const out: PlanWarning[] = []
-  for (const op of plan.operations)
-    out.push(...evaluateOperation(plan, op, undefined, data, port).findings)
+  const tools = new Map<string, ZHeadroomTool>()
+  for (const op of plan.operations) {
+    const e = evaluateOperation(plan, op, undefined, data, port)
+    out.push(...e.findings)
+    if (e.tool.isSome() && e.stickout.isSome())
+      tools.set(op.id, {
+        planOperationId: op.id,
+        toolName: e.tool.unwrap().name,
+        stickout: e.stickout.unwrap(),
+      })
+  }
   out.push(...orderFindings(plan.operations, plan.part, port))
   out.push(...setupFindings(plan.setups, plan.part))
   const stock = plan.dto.snapshots.find((x) => x.id === plan.dto.design.part.stock)
@@ -259,14 +291,26 @@ export function planFindings(
     const several = plan.setups.length > 1
     for (const s of plan.setups) {
       const clearance = Quantity.fromDTO(s.clearanceHeight).mapOr(0, (q) => q.canonical)
-      for (const f of stockFindings(setupStockSize(plan.stock, s), clearance, m))
+      const size = setupStockSize(plan.stock, s)
+      for (const f of stockFindings(size, clearance, m))
         out.push({
           ...f,
           code: 'plan.machine',
           severity: 'warning',
           ...(several ? { params: { ...f.params, setupId: s.id } } : {}),
         })
+      // DF68: the top only (the lowest Z needs the toolpath: export checks it)
+      out.push(
+        ...zHeadroomFindings(m, {
+          setupId: s.id,
+          clearance,
+          stockThickness: size.z[1],
+          tools: s.operations.flatMap((o) => tools.get(o.id) ?? []),
+        }),
+      )
     }
+    const unknown = zHeadroomUnknown(m)
+    if (unknown !== undefined) out.push(unknown)
   })
   return out
 }

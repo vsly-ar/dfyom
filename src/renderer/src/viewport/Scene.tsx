@@ -3,7 +3,7 @@
 // comes from props; it computes no geometry (ADR 0010). Doc: docs/conventions/ui.md#selection-and-picking
 import { CameraControls, CameraControlsImpl, Line } from '@react-three/drei'
 import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
-import { useEffect, useLayoutEffect, useMemo, useRef, type Ref } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, type Ref } from 'react'
 import {
   BufferAttribute,
   BufferGeometry,
@@ -38,6 +38,9 @@ import { TabMarkers, type TabOverlay } from './TabMarkers'
 import { ClonePathLayer } from './ClonePath'
 import type { ClonePathOverlay } from './clone-path'
 import { ReferenceGhost, type ReferenceGhostView } from './ReferenceGhost'
+import { ReferenceOverlay, type ReferenceOverlayView } from './ReferenceOverlay'
+import { DeviationLayer, useFadeIn } from './DeviationLayer'
+import { deviationColours, type DeviationView } from './deviation'
 import { RunLayer, type RunScene } from './RunLayer'
 
 export interface SceneProps {
@@ -65,8 +68,12 @@ export interface SceneProps {
   clonePath?: ClonePathOverlay | null
   /** Reference model ghosts, drawn after the part, never pickable (task R3). */
   ghosts?: readonly ReferenceGhostView[] | null
+  /** The Reference panel's read-outs on the ghost (DF60). */
+  referenceOverlay?: ReferenceOverlayView | null
   /** The part translucent without depth writes, so a ghost inside shows (DF2). */
   seeThrough?: boolean
+  /** The compare overlay: the part's diverging map, missing volumes, chosen region (DF60 P5). */
+  deviation?: DeviationView | null
   reducedMotion?: boolean
   controlsRef: Ref<CameraControlsImpl>
   /** Run mode layer (task 3.12). */
@@ -111,6 +118,21 @@ export function Scene(props: SceneProps): React.JSX.Element {
           reducedMotion={props.reducedMotion ?? false}
         />
       ))}
+      {props.referenceOverlay ? (
+        <ReferenceOverlay
+          overlay={props.referenceOverlay}
+          palette={palette}
+          ringSize={Math.min(5, Math.max(0.8, span * 0.012))}
+          reducedMotion={props.reducedMotion ?? false}
+        />
+      ) : null}
+      {props.deviation ? (
+        <DeviationLayer
+          deviation={props.deviation}
+          palette={palette}
+          reducedMotion={props.reducedMotion ?? false}
+        />
+      ) : null}
       {outline ? <LiveOutline loops={outline} colour={palette.selected} /> : null}
       {marker ? <ErrorMarker at={marker} bounds={bounds} colour={palette.danger} /> : null}
       {glyphs && glyphs.length > 0 ? (
@@ -141,7 +163,9 @@ export function Scene(props: SceneProps): React.JSX.Element {
       ) : null}
       {bounds ? <Floor bounds={bounds} palette={palette} /> : null}
       <Axes bounds={bounds} palette={palette} />
-      {props.run ? <RunLayer run={props.run} palette={palette} /> : null}
+      {props.run ? (
+        <RunLayer run={props.run} palette={palette} reducedMotion={props.reducedMotion ?? false} />
+      ) : null}
     </>
   )
 }
@@ -184,6 +208,8 @@ function PartMesh({
   palette,
   surfaceState,
   seeThrough = false,
+  deviation = null,
+  reducedMotion = false,
   onHover,
   onClick,
 }: SceneProps & { mesh: ViewportMesh }): React.JSX.Element {
@@ -203,12 +229,34 @@ function PartMesh({
   const edges = useMemo(() => new EdgesGeometry(geometry, CREASE_ANGLE_DEG), [geometry])
   useEffect(() => () => edges.dispose(), [edges])
 
+  // the surface colours, and over them the compare map (DF60 P5) fading in with each result
+  const base = useMemo(
+    () => vertexColours(mesh, surfaceState, palette),
+    [mesh, surfaceState, palette],
+  )
+  const paint = useCallback(
+    (weight: number) => {
+      const attr = geometry.getAttribute('color') as BufferAttribute
+      const out = attr.array as Float32Array
+      if (deviation === null) out.set(base)
+      else deviationColours(mesh, deviation, palette, weight, base, out)
+      attr.needsUpdate = true
+      invalidate()
+    },
+    [geometry, mesh, base, deviation, palette, invalidate],
+  )
+  const weight = useRef(1)
+  const distances = deviation?.distances
+  // a new result starts from the surface colours (before the paint below)
   useLayoutEffect(() => {
-    const attr = geometry.getAttribute('color') as BufferAttribute
-    vertexColours(mesh, surfaceState, palette, attr.array as Float32Array)
-    attr.needsUpdate = true
-    invalidate()
-  }, [geometry, mesh, surfaceState, palette, invalidate])
+    weight.current = reducedMotion || distances === undefined ? 1 : 0
+  }, [distances, reducedMotion])
+  useLayoutEffect(() => paint(weight.current), [paint])
+  useFadeIn(distances, reducedMotion || distances === undefined, (t) => {
+    if (distances === undefined || weight.current === t) return
+    weight.current = t
+    paint(t)
+  })
 
   // Amber outline around the selected operation (or the hovered pick candidate).
   const outlined = useMemo(

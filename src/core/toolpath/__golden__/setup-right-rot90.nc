@@ -1,5 +1,12 @@
 (Program: Plan 1)
-(Setup: Right)
+(Setup 1 of 1: Right)
+(Stock X 20 Y 60 Z 100 mm on the machine)
+(Faces: right up, front towards you, bottom on the right)
+(Work zero G54 X0 Y0: top-front corner of the right face)
+(That corner sits front left on the machine)
+(Z0 on the right face: the stock surface facing up)
+(Tool stays within the stock outline)
+(Keep clamps below clearance Z 10 mm)
 (Units: mm)
 (Tool 1: Flat 4, dia 4 mm)
 (Generator: DFYOM)
@@ -7,10 +14,10 @@ G90 G94 G17 G21
 G54
 G0 Z10
 (Drilling 1)
-(DFYOM TOOL CHANGE 1: Flat 4)
+(DFYOM TOOL CHANGE 1: Flat 4, 4 mm flat)
 M3 S12128
 (Set spindle to 12128 rpm)
-M0
+M0 ;Set spindle to 12128 rpm
 X11 Y30
 Z2
 G1 Z0 F154
@@ -94,5 +101,5 @@ G1 X10
 G0 Z10
 M5
 (Stop the spindle)
-M0
+M0 ;Stop the spindle
 M30

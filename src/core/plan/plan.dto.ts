@@ -4,7 +4,12 @@
  * Doc: docs/modes/plan-v0.1.md#plan-record, docs/modes/plan-v0.1.md#plans-are-snapshots
  */
 import { z } from 'zod'
-import { PartDtoSchema, PartIdSchema, OperationIdSchema } from '../design/part.dto'
+import {
+  PartDtoSchema,
+  PartIdSchema,
+  OperationIdSchema,
+  RECORD_ID_PATTERN,
+} from '../design/part.dto'
 import { DIRECTIONS as FACE_DIRECTIONS } from '../geometry/face'
 import { NAME_MAX, quantityDto } from '../library/item'
 import { SnapshotDtoSchema } from '../library/snapshot'
@@ -20,11 +25,8 @@ export const lengthDTO = (q: Quantity): LengthDTO => q.toDTO() as LengthDTO
 const length = () => quantityDto('length')
 
 /** Plan ids, setup ids and plan operation ids are file-name safe like part ids. */
-export const PlanIdSchema = z
-  .string()
-  .regex(/^[A-Za-z0-9_-]{1,128}$/)
-  .describe('Plan id')
-export const PlanRecordIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/)
+export const PlanIdSchema = z.string().regex(RECORD_ID_PATTERN).describe('Plan id')
+export const PlanRecordIdSchema = z.string().regex(RECORD_ID_PATTERN)
 
 /** docs/modes/plan-v0.1.md#plan-status */
 export const PLAN_STATUSES = ['draft', 'settledDesign', 'finalized', 'inUse', 'archived'] as const
@@ -112,6 +114,25 @@ export type StrategyDTO = z.output<typeof StrategyDtoSchema>
 export const TOOL_SOURCES = ['design', 'plan'] as const
 export type ToolSource = (typeof TOOL_SOURCES)[number]
 
+/**
+ * The Z reference surface and touch-off spot the user chose for the tool run an operation starts
+ * (hardening DF69, docs/modes/z-reference.md#agent-api-compact): `surface` absent = the default
+ * surface with a chosen spot; `at` absent = the surface's default spot.
+ */
+export const ZRefDtoSchema = z.object({
+  surface: z
+    .string()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe("Surface id: the setup's stock face (stock.top) or <operation id>.floor"),
+  at: z
+    .tuple([z.number(), z.number()])
+    .optional()
+    .describe('Touch-off spot X, Y in the setup WCS (mm)'),
+})
+export type ZRefDTO = z.output<typeof ZRefDtoSchema>
+
 export const PlanOperationDtoSchema = z.object({
   id: PlanRecordIdSchema.describe('Plan operation id'),
   designOperationIds: z
@@ -141,6 +162,9 @@ export const PlanOperationDtoSchema = z.object({
     .describe('Locked feeds fields (auto mode only): the other recommendations follow them'),
   overrides: OverridesDtoSchema,
   strategy: StrategyDtoSchema,
+  zRef: ZRefDtoSchema.optional().describe(
+    'Z reference of the tool run this operation starts; absent = the default rule',
+  ),
 })
 export type PlanOperationDTO = z.output<typeof PlanOperationDtoSchema>
 

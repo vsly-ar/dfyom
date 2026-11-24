@@ -39,6 +39,7 @@ import { loadArchive } from '../persistence/archive'
 import { nodeFs } from '../persistence/fs'
 import { agentSession, type Call, programEnd, type RunJobStatus } from './exit-criteria.fixture'
 import { ENCLOSURE_SVG } from './exit-criteria.v03.fixture'
+import { withoutAppVersion } from '../../core/post/plan-export'
 
 /**
  * The golden program of the lid's one setup (path relative to the test files). Update after an
@@ -116,6 +117,9 @@ const MACHINE = {
   spindle: { control: 'manual', maxSpeed: '24000' },
   programUnits: 'mm',
   toolChanger: 'none',
+  // the Z headroom fields (DF68): the checks run and find enough headroom
+  noseToTable: '115',
+  spoilboardThickness: '10',
 }
 
 /** `first` and `pattern` with `%` replaced by each of `ns`, space-separated (plan rows). */
@@ -507,11 +511,23 @@ export async function exitCriteriaV04Flow(rawCall: Call, dir: string): Promise<F
   ])
   // DF39/Q57: Flat 3 has calculator data (the ≤ 3 mm band, Amana 1/16″ in MDF: .003–.005″); the
   // preset's 3600 mm/min at 18,000 rpm, 2 flutes (fz 0.1 mm) sits in the range's middle, so the
-  // lid's plan has no feeds findings (nor any other)
+  // lid's plan has no roughing feeds findings (nor any other). DF74: Flat 6's two profiles
+  // finish 0.2 mm in plywood at 18,000 rpm; the finishing feed that keeps the preset's chip load
+  // is held at the router's 5000 mm/min, which leaves 0.05 mm chips (under half the 0.127 mm
+  // minimum): a true finishing-rub warning per profile
   const findings = (
     await ok<{ warnings: Finding[] }>('plan.warning.list', { planId, detail: 'full' })
   ).value
-  expect(findings.warnings.map((f) => [f.severity, f.rule, f.params['chipLoad']])).toEqual([])
+  expect(
+    findings.warnings.map((f) => [
+      f.severity,
+      f.rule,
+      Math.round(Number(f.params['chipLoad']) * 1000),
+    ]),
+  ).toEqual([
+    ['warning', 'finishRubbing', 50],
+    ['warning', 'finishRubbing', 50],
+  ])
 
   const gen = await ok<{ jobId: string }>('plan.toolpath.generate', { planId })
   const generated = (await waitJob(gen.value.jobId)) as {
@@ -526,9 +542,14 @@ export async function exitCriteriaV04Flow(rawCall: Call, dir: string): Promise<F
   const target = join(dir, 'lid.nc')
   const exported = (await ok<ExportResult>('plan.export', { planId, setupId: setup.id, target }))
     .value
-  expect(exported).toMatchObject({ setupId: setup.id, softLimitChecked: true, regenerated: [] })
+  expect(exported).toMatchObject({
+    setupId: setup.id,
+    softLimitChecked: true,
+    warnings: [],
+    regenerated: [],
+  })
   const program = readFileSync(target, 'utf8')
-  await expect(program).toMatchFileSnapshot(GOLDEN_V04)
+  await expect(withoutAppVersion(program)).toMatchFileSnapshot(GOLDEN_V04)
   expect(program.split('\n').filter((l) => l !== '')).toHaveLength(exported.lines)
   expect(program.trimEnd().endsWith('M30')).toBe(true)
   // the first tool is loaded at the start, then one change per tool run of the plan (see above)

@@ -116,6 +116,9 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
     p['thickness'] !== undefined
       ? `Tabs ${L(p['thickness'])} thick are too thin to hold the piece.`
       : `Tabs ${L(p['width'])} wide are too narrow to hold the piece.`,
+  // DF50: an earlier setup cleared material under the slot from the opposite face
+  'dfm.tabsThick': (p, L) =>
+    `Tabs ${L(p['thickness'])} thick reach the stock face: an earlier setup leaves only ${L(p['material'])} of material under the slot. Make them thinner.`,
   // v0.4 TB1 (design-v0.4.md § Tabs relocate off free sides)
   'dfm.tabsRelocated': (p) =>
     `${num(p['moved'])} of ${num(p['count'])} tabs moved off sides where the slot leaves no stock beyond the cut.`,
@@ -131,13 +134,18 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
   'dfm.toolUnfit': (p, L) =>
     toolUnfitText(p, L) + (p['locked'] === true ? ' Unlock it or pick another tool.' : ''),
   'dfm.toolNotInLibrary': (p) => `Plan needs a ${String(p['tool'])}: add one to the library.`,
+  // no tool fits at all (hardening DF52): the blocking rule, worded for the smallest standard tool
+  'dfm.noFittingTool': (p, L) =>
+    `No tool fits this operation, not even the smallest standard one. ${toolUnfitText(p, L)}`,
   // v0.3 shapes (design-v0.3.md § DFM checks for shapes)
   'dfm.restMaterial': (p) =>
     num(p['pieces']) > 1
       ? `The ${String(p['tool'])} leaves material uncut in ${num(p['pieces'])} places narrower than the tool.`
       : `The ${String(p['tool'])} leaves material uncut in a neck narrower than the tool.`,
   'dfm.shapeOutsideFace': (p, L) =>
-    `The shape reaches ${L(p['by'])} outside the stock face at the ${list(((p['sides'] as readonly string[] | undefined) ?? []).map((s) => SIDE[s] ?? s))}.`,
+    p['wholly'] === true
+      ? 'The shape lies outside the stock face, so the pocket cuts nothing.'
+      : `The shape reaches ${L(p['by'])} outside the stock face at the ${list(((p['sides'] as readonly string[] | undefined) ?? []).map((s) => SIDE[s] ?? s))}: an open-sided pocket.`,
   'dfm.shapeHeavy': (p) =>
     `This shape has ${num(p['chords'])} segments after flattening, so the part updates more slowly.`,
   'dfm.holeCustomSize': (p, L) => {

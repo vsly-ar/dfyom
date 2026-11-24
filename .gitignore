@@ -29,3 +29,6 @@ Thumbs.db
 # Claude Code local-only settings
 .claude/settings.local.json
 .claude/worktrees/
+
+# user scratch files (models, projects)
+temp/

@@ -74,6 +74,13 @@ const NO_OVERRIDES: Overrides = { feed: 100, rapid: 100, spindle: 100 }
 
 /** DFYOM tool-change marker, matched against a whole line (grbl.md#output-dialect). */
 const MARKER = /^\(DFYOM TOOL CHANGE (\d+): ([^()]*)\)$/
+/** The line after a marker: `M0`, or `M0 ;message` since DF63 (grbl.md#output-dialect). */
+const MARKER_PAUSE = /^M0( ;.*)?$/
+/** DF69: the Z reference lines before a marker (docs/modes/z-reference.md#exported-gcode). */
+const ZREF_LINE = /^\(Z0 for tool \d+: ([^()]*)\)$/
+const SPOT_LINE = /^\(Touch off Z here, (X\S+ Y\S+): [^()]*\)$/
+/** Lines before a marker searched for them (the manual spindle's stop comment sits between). */
+const ZREF_LOOKBACK = 4
 /** A line whose code (comments stripped) contains `M0`/`M00`: GRBL pauses there. */
 const PROGRAM_PAUSE = /M0*0(?![0-9.])/i
 
@@ -90,6 +97,27 @@ export type RunPhase =
 export interface ToolChangeInfo {
   readonly n: number
   readonly name: string
+  /** DF69: the Z reference surface and its level, when not the top face. */
+  readonly surface?: string
+  /** DF69: where to touch off (`X120 Y45`, program units), with `surface`. */
+  readonly spot?: string
+}
+
+/** The tool change at the marker line `i`, with the Z reference lines before it (DF69). */
+function toolChangeAt(lines: readonly string[], i: number, m: RegExpExecArray): ToolChangeInfo {
+  let surface: string | undefined
+  let spot: string | undefined
+  for (let k = Math.max(0, i - ZREF_LOOKBACK); k < i; k++) {
+    const line = lines[k] ?? ''
+    surface = ZREF_LINE.exec(line)?.[1] ?? surface
+    spot = SPOT_LINE.exec(line)?.[1] ?? spot
+  }
+  return {
+    n: Number(m[1]),
+    name: m[2] ?? '',
+    ...(surface === undefined ? {} : { surface }),
+    ...(surface === undefined || spot === undefined ? {} : { spot }),
+  }
 }
 
 export interface PhaseChange {
@@ -280,6 +308,13 @@ export function preflight(
 function commentText(line: string | undefined): string | undefined {
   const m = line === undefined ? null : /^\((.*)\)$/.exec(line.trim())
   return m ? (m[1] ?? '').trim() : undefined
+}
+
+/** The `;` message on a pause line (`M0 ;Set spindle to 18000 rpm`, DF63). */
+function pauseText(line: string | undefined): string | undefined {
+  const m = line === undefined ? null : /;(.*)$/.exec(line)
+  const text = m?.[1]?.trim()
+  return text === undefined || text === '' ? undefined : text
 }
 
 function isProgramPause(line: string | undefined): boolean {
@@ -754,8 +789,8 @@ export class GrblSender {
       const line = lines[run.next]
       if (line === undefined) return
       const m = MARKER.exec(line)
-      if (m && lines[run.next + 1] === 'M0') {
-        run.pendingToolChange = { n: Number(m[1]), name: m[2] ?? '' }
+      if (m && MARKER_PAUSE.test(lines[run.next + 1] ?? '')) {
+        run.pendingToolChange = toolChangeAt(lines, run.next, m)
         this.log.debug({ tool: run.pendingToolChange.n, line: run.next + 1 }, 'tool change ahead')
         this.awaitFresh()
         return
@@ -935,7 +970,10 @@ export class GrblSender {
       if (this.resumeMark !== undefined && this.reportsSeen <= this.resumeMark) return
       const oldest = this.inflight[0]
       if (oldest?.kind === 'program' && isProgramPause(run.program.lines[oldest.index])) {
-        run.message = commentText(run.program.lines[oldest.index - 1]) ?? 'Program paused (M0)'
+        run.message =
+          pauseText(run.program.lines[oldest.index]) ??
+          commentText(run.program.lines[oldest.index - 1]) ??
+          'Program paused (M0)'
         this.setPhase(run, 'programPause')
       } else this.setPhase(run, 'held') // a hold we did not send (door, button)
       return

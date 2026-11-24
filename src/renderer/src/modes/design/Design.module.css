@@ -280,39 +280,6 @@
   opacity: 1;
 }
 
-.opActions {
-  /* over the row's end while hovered, focused or selected, so names keep the full width */
-  position: absolute;
-  top: 50%;
-  right: 0;
-  transform: translateY(-50%);
-  display: inline-flex;
-  padding: 0 var(--space-1);
-  background: var(--bg-chrome);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--motion-fast) var(--ease-standard);
-}
-
-.op:hover .opActions,
-.op:focus-within .opActions,
-.op[data-selected] .opActions {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-/* while the actions show, the row's content gives them room: the read-out ellipsizes first and
-   the name keeps its words (DF44); at rest the actions take no width */
-.op[data-top]:hover > .opSelect,
-.op[data-top]:focus-within > .opSelect,
-.op[data-top][data-selected] > .opSelect {
-  padding-right: calc(2 * var(--control-md) + 2 * var(--space-1));
-}
-
-.op[data-selected] .opActions {
-  background: var(--accent-subtle);
-}
-
 /* feature rows (v0.4 task U1, ui.md#feature-rows-and-add; visuals draft until L2): the chevron
    sits in the row's left gutter so the feature icon lines up with plain operation icons; owned
    rows sit one 8 px step in, along a thin guide line, and slide down when the row opens */
@@ -686,6 +653,131 @@
   color: var(--text-muted);
 }
 
+/* Reference tools (DF60, ui.md § Reference tools): level rows, fitted loops, corner chips */
+.levelGroup {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.levelHeading {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  font-weight: var(--weight-medium);
+  color: var(--text);
+}
+
+.levelList,
+.loopList {
+  display: grid;
+  gap: var(--space-0-5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.levelRow {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: var(--control-sm);
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-standard);
+}
+
+.levelRow:hover {
+  background: var(--bg-hover);
+}
+
+.levelRow:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.levelRow[data-undercut] {
+  color: var(--text-faint);
+}
+
+.levelArea {
+  color: var(--text-muted);
+}
+
+.levelRow[data-undercut] .levelArea {
+  color: var(--text-faint);
+}
+
+.loopRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--control-sm);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.loopName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.loopCorners {
+  display: flex;
+  flex-shrink: 0;
+  gap: var(--space-1);
+}
+
+.cornerChip {
+  padding: 0 var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  color: var(--text-muted);
+}
+
+.cornerChip[data-sharp] {
+  border-color: var(--warning);
+  color: var(--text);
+}
+
+/* DF60 P3: the Holes list, one group per row (text, chips, its add button) */
+.holeList {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.holeRow {
+  display: grid;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.holeActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+
 .warnings {
   display: grid;
   gap: var(--space-2);
@@ -791,15 +883,6 @@
   line-height: var(--lh-xs);
   color: var(--text-muted);
   white-space: nowrap;
-  transition: opacity var(--motion-fast) var(--ease-standard);
-}
-
-/* the row's actions cover its end while hovered, focused or selected: the count fades with them
-   showing (the reason under a used row still names the operations) */
-.op:hover .shapeUse,
-.op:focus-within .shapeUse,
-.op[data-selected] .shapeUse {
-  opacity: 0;
 }
 
 .shapeReason {
@@ -981,19 +1064,13 @@
   min-width: 3.75rem;
 }
 
+/* the row number; the row's actions are its context menu (DF70), so it is plain text */
 .segNumber {
-  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   min-height: var(--control-sm);
-  border: 0;
-  border-radius: var(--radius-xs);
-  background: none;
-  font: inherit;
   color: var(--text-muted);
-  cursor: pointer;
-}
-
-.segNumber:hover {
-  background: var(--bg-hover);
 }
 
 .segSelect {
@@ -1545,4 +1622,97 @@
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
   cursor: pointer;
+}
+
+/* compare overlay (DF60 P5, ui.md § Reference tools) */
+.compareSummary {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.levelRow[aria-pressed='true'] {
+  background: var(--bg-active);
+}
+
+.compareKind {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.swatch {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 1px;
+  background: var(--danger);
+}
+
+.swatch[data-kind='extra'] {
+  background: var(--info);
+}
+
+.compareLegend {
+  position: absolute;
+  left: var(--space-3);
+  bottom: var(--space-3);
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) auto;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-chrome);
+  box-shadow: var(--shadow-1);
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  font-variant-numeric: tabular-nums;
+  animation: compare-legend-in var(--motion-base) var(--ease-standard);
+}
+
+.compareLegendTitle {
+  grid-column: 1;
+  font-weight: var(--weight-medium);
+  color: var(--text);
+}
+
+.compareLegend > [role='img'] {
+  grid-column: 1;
+  display: grid;
+  gap: var(--space-1);
+}
+
+.compareLegend > button {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
+.compareBar {
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(
+    to right,
+    var(--danger),
+    var(--vp-part) 40%,
+    var(--vp-part) 60%,
+    var(--info)
+  );
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.compareEnds {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  color: var(--text-muted);
+}
+
+@keyframes compare-legend-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
 }

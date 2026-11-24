@@ -3,14 +3,15 @@
 // in design order – Add (what needs no target, DF16: Facing, Pocket, Profile, Drilling, Bolt hole,
 // each with a one-line tooltip, DF17/DF18; Chamfer and Make Clones… are in the row menu), select
 // (the viewport and inspector follow), move by drag and Alt+↑/↓, remove with an undo toast
-// instead of a confirmation. Rows carry warning badges and the error marker of a failed
+// instead of a confirmation; tools re-chosen because of the library get a toast too (X2 F6). Rows carry warning badges and the error marker of a failed
 // evaluation. Without a part an empty state opens the Stock dialog. Stock setup, shapes and
 // reference models are in the part-setup dialogs (PartSetupDialogs.tsx, D45).
 // Doc: docs/conventions/ui.md#design-sidebar-and-setup-dialogs-v04-d45, #panels-and-inspectors,
 // #confirmations, #undo-and-redo; docs/modes/design.md#ordering-and-composition
+import { useEffect, useRef } from 'react'
 import type { OperationKind } from '../../../../core/design/part.dto'
 import { designMessages } from '../../messages/design'
-import { useShell, useUi } from '../../shell/ShellContext'
+import { usePending, useShell, useUi } from '../../shell/ShellContext'
 import {
   Button,
   EmptyState,
@@ -26,6 +27,7 @@ import {
 import styles from './Design.module.css'
 import { failingOperation, type DesignPart } from './model'
 import { useAddOperation } from './useAddOperation'
+import { autoChangeReason } from './ToolField'
 import { OperationList } from './OperationList'
 import { operationUnits } from './feature-view'
 import { stockReadout } from './PartSetupDialogs'
@@ -77,6 +79,27 @@ function NoPart(): React.JSX.Element {
   )
 }
 
+/**
+ * Tools re-chosen because of the library (X2 F6, design-v0.2.md § Library changes and opening):
+ * after such an Apply (any source) the undo toast names the operation and the tool field's reason,
+ * or counts them. An Apply from before this navigator mounted is not announced again.
+ */
+function useRechosenToast(part: DesignPart, show: (message: string) => void): void {
+  const { rechosen } = usePending()
+  const shown = useRef(rechosen)
+  useEffect(() => {
+    if (rechosen === null || rechosen === shown.current) return
+    shown.current = rechosen
+    const [first] = rechosen.changes
+    const op =
+      rechosen.changes.length === 1 && first !== undefined && first.partId === part.dto.id
+        ? part.dto.operations.find((o) => o.id === first.operationId)
+        : undefined
+    const why = op === undefined ? undefined : autoChangeReason(first!, op, part.units, part.doc)
+    show(designMessages.tool.rechosen(op?.name, why, rechosen.changes.length))
+  }, [rechosen, part, show])
+}
+
 function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
   const { bridge } = useShell()
   const [selected, select] = useDesignSelection()
@@ -85,6 +108,7 @@ function PartNavigator({ part }: { part: DesignPart }): React.JSX.Element {
   // the undo toast lives in the ui store: the inspector's segment table removes rows too
   const removed = useUi((st) => st.removedToast)
   const setRemovedToast = useUi((st) => st.setRemovedToast)
+  useRechosenToast(part, setRemovedToast)
   const ops = part.dto.operations
   const ids = ops.map((o) => o.id)
   const failedAt =

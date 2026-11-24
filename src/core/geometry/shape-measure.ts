@@ -11,6 +11,7 @@ import { Ok, type AppResult } from '../../shared/result'
 import { elementPointAt } from './2d/measure'
 import {
   arcRadius,
+  arcSweep,
   chainBounds,
   regionLoops,
   type Bounds2,
@@ -19,8 +20,9 @@ import {
 } from './2d/model'
 import type { Region2dPort } from './2d/port'
 import { findRestMaterial, type RestPiece } from './2d/rest-material'
-import type { OperationGeometry, Vec2 } from './model'
-import { profileChain, shapeOutline } from './outline'
+import type { OperationGeometry, StockGeometry, Vec2 } from './model'
+import { ON_EDGE, openReach, openRegion, opensStock } from './open-sides'
+import { pocketRegion, profileChain, shapeOutline } from './outline'
 
 /**
  * A vertex is a sharp corner when its elements turn by more than this (rad, 5°): a smaller kink
@@ -35,6 +37,64 @@ export interface InsideCorner {
   readonly at: Vec2
   /** 0 for a sharp vertex, else the arc's radius. */
   readonly radius: number
+  /**
+   * How far from `at` a tool of radius r leaves material, per unit r (≥ 1): the tangent points
+   * of the tool in the corner lie r · tan(turn / 2) from a sharp vertex (r for 90°; turns capped
+   * at `SPREAD_MAX_TURN`), an arc adds its offset from that vertex. DF53's open corners.
+   */
+  readonly spread: number
+}
+
+/** Turns above this (rad, 170°) count as this for `InsideCorner.spread` (a slot end). */
+const SPREAD_MAX_TURN = (170 * Math.PI) / 180
+
+const spreadOf = (turn: number): number => {
+  const t = Math.min(Math.abs(turn), SPREAD_MAX_TURN) / 2
+  return Math.max(1, Math.tan(t))
+}
+
+/**
+ * Whether the leftover a tool of radius `r` leaves in corner `c` lies wholly beyond the stock:
+ * its point, placed by the shape's `center` in the face frame, lies at least `r · spread`
+ * outside the face rectangle of `face` (the local stock; `r` 0: just outside it). Such a corner
+ * leaves material only in air, so it is not a wall corner (hardening DF53).
+ * Doc: docs/modes/design-v0.3.md#dfm-checks-for-shapes
+ */
+export function openCorner(
+  c: InsideCorner,
+  center: readonly [number, number],
+  face: Pick<StockGeometry, 'length' | 'width'>,
+  r: number,
+): boolean {
+  const u = c.at[0] + center[0]
+  const v = c.at[1] + center[1]
+  const du = Math.max(-u, 0, u - face.length)
+  const dv = Math.max(-v, 0, v - face.width)
+  const outside = Math.hypot(du, dv)
+  return outside > OPEN_EPSILON && outside >= r * c.spread - OPEN_EPSILON
+}
+
+const OPEN_EPSILON = 1e-6
+
+/** The corners of `m` that are walls for a tool of radius `r` (not `openCorner`). */
+export function wallCorners(
+  m: ShapeMeasure,
+  center: readonly [number, number],
+  face: Pick<StockGeometry, 'length' | 'width'>,
+  r: number,
+): InsideCorner[] {
+  return m.corners.filter((c) => !openCorner(c, center, face, r))
+}
+
+/** The smallest radius of the wall corners for a tool of radius `r`; Infinity without any. */
+export function smallestWallCorner(
+  m: ShapeMeasure,
+  center: readonly [number, number],
+  face: Pick<StockGeometry, 'length' | 'width'>,
+  r: number,
+): number {
+  if (m.corners.length === 0) return Infinity
+  return wallCorners(m, center, face, r).reduce((s, c) => Math.min(s, c.radius), Infinity)
 }
 
 /** Which side of the loops the tool works on. */
@@ -78,14 +138,76 @@ const byGeometry = new WeakMap<OperationGeometry, ShapeMeasure | null>()
  * or drilling). Analytic contours are measured too (callers keep their v0.1 rules for them).
  * A port failure leaves the affected answer at its harmless side (fits, no rest material): the
  * region already resolved and normalised, so it is a library fault the evaluation reports.
+ * With `face` (the local stock of the operation's direction) a pocket that reaches the stock edge
+ * is measured with its open sides (DF61, `openMeasure`).
  */
-export function shapeMeasure(port: Region2dPort, op: OperationGeometry): ShapeMeasure | undefined {
+export function shapeMeasure(
+  port: Region2dPort,
+  op: OperationGeometry,
+  face?: Pick<StockGeometry, 'length' | 'width'>,
+): ShapeMeasure | undefined {
   if (op.kind !== 'pocket' && op.kind !== 'profile') return undefined
+  let m: ShapeMeasure | undefined
   const known = byGeometry.get(op)
-  if (known !== undefined) return known ?? undefined
-  const m = measureOf(port, op)
-  byGeometry.set(op, m ?? null)
-  return m
+  if (known !== undefined) m = known ?? undefined
+  else {
+    m = measureOf(port, op)
+    byGeometry.set(op, m ?? null)
+  }
+  if (m === undefined || face === undefined || op.kind !== 'pocket') return m
+  let byFace = openByGeometry.get(op)
+  if (byFace === undefined) openByGeometry.set(op, (byFace = new Map()))
+  const key = `${face.length}×${face.width}`
+  if (!byFace.has(key)) {
+    const placed = pocketRegion(op).region
+    byFace.set(key, opensStock(port, placed, face) ? openMeasure(port, m, op, face) : m)
+  }
+  return byFace.get(key)
+}
+
+const openByGeometry = new WeakMap<OperationGeometry, Map<string, ShapeMeasure>>()
+
+/**
+ * The measures of a pocket with open sides (DF61): the tool enters from beyond the stock edge,
+ * so every tool fits (`fits` true, `narrowest` Infinity, as for an outside profile), and the rest
+ * material is what the tool leaves of the open region (`openRegion` with `openReach`) inside the
+ * stock face. Corners on the stock edge or beyond it are dropped (the tool reaches them from
+ * outside; DF53's `openCorner` already drops those far enough outside); bounds stay the shape's.
+ */
+function openMeasure(
+  port: Region2dPort,
+  base: ShapeMeasure,
+  op: Extract<OperationGeometry, { kind: 'pocket' }>,
+  face: Pick<StockGeometry, 'length' | 'width'>,
+): ShapeMeasure {
+  const restMemo = new Map<number, readonly RestPiece[]>()
+  const [cu, cv] = op.shape.center
+  const inFace = (p: Vec2) => p[0] >= 0 && p[0] <= face.length && p[1] >= 0 && p[1] <= face.width
+  // a corner on the stock edge (or beyond it) is reached from outside the stock
+  const inside = (c: InsideCorner) => {
+    const u = c.at[0] + cu
+    const v = c.at[1] + cv
+    return Math.min(u, v, face.length - u, face.width - v) > ON_EDGE
+  }
+  const corners = base.corners.filter(inside)
+  return {
+    ...base,
+    corners,
+    smallestCornerRadius: corners.reduce((m, c) => Math.min(m, c.radius), Infinity),
+    fits: () => true,
+    narrowest: () => Infinity,
+    rest(r: number) {
+      const known = restMemo.get(r)
+      if (known !== undefined) return known
+      const pieces = openRegion(port, pocketRegion(op).region, face, openReach(r, 0))
+        .andThen((open) => findRestMaterial(port, open, r))
+        .unwrapOr([])
+        .filter((p) => inFace(p.at))
+        .map((p): RestPiece => ({ area: p.area, at: [p.at[0] - cu, p.at[1] - cv] }))
+      restMemo.set(r, pieces)
+      return pieces
+    },
+  }
 }
 
 function measureOf(
@@ -205,8 +327,16 @@ export function insideCorners(loops: readonly Loop[], sense: 1 | -1): InsideCorn
     const els = l.elements
     for (let i = 0; i < els.length; i++) {
       const e = els[i]!
-      if (e.kind === 'arc' && (e.ccw ? 1 : -1) === sense)
-        out.push({ at: elementPointAt(e, 0.5).point, radius: arcRadius(e) })
+      if (e.kind === 'arc' && (e.ccw ? 1 : -1) === sense) {
+        // its middle lies ρ (1 / cos(sweep / 2) − 1) from the virtual vertex, and ρ < r where it
+        // leaves material (a larger arc leaves nothing)
+        const half = Math.min(Math.abs(arcSweep(e)), SPREAD_MAX_TURN) / 2
+        out.push({
+          at: elementPointAt(e, 0.5).point,
+          radius: arcRadius(e),
+          spread: spreadOf(arcSweep(e)) + 1 / Math.cos(half) - 1,
+        })
+      }
       const next = els[(i + 1) % els.length]!
       if (next === e) continue
       const tin = elementPointAt(e, 1).tangent
@@ -215,7 +345,7 @@ export function insideCorners(loops: readonly Loop[], sense: 1 | -1): InsideCorn
         tin[0] * tout[1] - tin[1] * tout[0],
         tin[0] * tout[0] + tin[1] * tout[1],
       )
-      if (sense * turn > CORNER_MIN_TURN) out.push({ at: e.b, radius: 0 })
+      if (sense * turn > CORNER_MIN_TURN) out.push({ at: e.b, radius: 0, spread: spreadOf(turn) })
     }
   }
   return out
