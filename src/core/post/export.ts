@@ -13,7 +13,7 @@ import { fail, Ok, type AppResult, type Option } from '../../shared/result'
 import { arcSweep, expandDrill, PECK_CLEARANCE } from '../toolpath/stats'
 import type { Move, Toolpath, Vec3 } from '../toolpath/model'
 import { DEFAULT_SPIN_UP_SECONDS, postGrblLines, type PostOptions } from './grbl/post'
-import type { Block, MachiningProgram, ProgramTool, SetupHeader } from './program'
+import type { Block, MachiningProgram, ProgramTool, ProgramZRef, SetupHeader } from './program'
 
 /** One plan operation's toolpath with its tool copy, in machining order. */
 export interface ExportOperation {
@@ -29,6 +29,8 @@ export interface ExportOperation {
   readonly positions?: Readonly<Record<string, string>>
   /** The tool's stickout (mm), for the Z headroom check (DF68); absent = not checked. */
   readonly stickout?: number
+  /** Z reference of the tool run this operation starts (DF69); absent = the up face, no spot. */
+  readonly zRef?: ProgramZRef
 }
 
 export interface ExportInput {
@@ -162,7 +164,12 @@ export function toMachiningProgram(
       tool = tp.tool
       const n = numbers.get(tp.tool) ?? numbers.size + 1
       numbers.set(tp.tool, n)
-      blocks.push({ kind: 'toolChange', number: n, tool: op.tool })
+      blocks.push({
+        kind: 'toolChange',
+        number: n,
+        tool: op.tool,
+        ...(op.zRef === undefined ? {} : { zRef: op.zRef }),
+      })
       rpm = undefined
     }
     if (tp.spindleSpeed !== rpm) {
@@ -191,6 +198,18 @@ export function toMachiningProgram(
 }
 
 // ── Walking the program ───────────────────────────────────────────────────────────────────
+
+/**
+ * Whether a tool change pauses (`M0`): every one but the first, and the first when it is not
+ * loaded or its Z reference is not the up face (DF69, docs/modes/z-reference.md#exported-gcode).
+ */
+export function toolChangePauses(
+  b: Extract<Block, { kind: 'toolChange' }>,
+  first: boolean,
+  firstToolLoaded: boolean,
+): boolean {
+  return !first || !firstToolLoaded || (b.zRef !== undefined && !b.zRef.top)
+}
 
 type Motion = Extract<Block, { kind: 'rapid' | 'feed' | 'arc' }>
 
@@ -225,7 +244,12 @@ function walk(
       const first = !loaded
       loaded = true
       if (!first) clearance()
-      if (!first || !firstToolLoaded) pos = [undefined, undefined, p.clearanceZ]
+      if (toolChangePauses(b, first, firstToolLoaded)) {
+        // DF69: the rapid to the touch-off spot before the pause
+        if (b.zRef !== undefined)
+          go({ kind: 'rapid', to: [b.zRef.at[0], b.zRef.at[1], p.clearanceZ] })
+        pos = [undefined, undefined, p.clearanceZ]
+      }
     }
   }
   clearance()
@@ -291,7 +315,7 @@ export function programStats(
     (b) => {
       if (b.kind === 'spindle' && b.rpm !== 'off') dwell += spin
       if (b.kind === 'toolChange') {
-        if (loaded || !firstToolLoaded) toolChanges++
+        if (toolChangePauses(b, !loaded, firstToolLoaded)) toolChanges++
         loaded = true
       }
     },
@@ -415,9 +439,11 @@ export function machineChecks(
   // change that pauses (the user re-zeroes Z for the new tool's length).
   const lo = [Infinity, Infinity, p.clearanceZ]
   const hi = [-Infinity, -Infinity, p.clearanceZ]
-  const zLo = [firstToolLoaded ? p.clearanceZ : Infinity]
-  const zHi = [firstToolLoaded ? p.clearanceZ : -Infinity]
-  let zeroKnown = firstToolLoaded
+  const head = p.blocks.find((b) => b.kind === 'toolChange')
+  // a first tool that pauses (not loaded, or its Z0 off the up face, DF69): Z is zeroed again
+  let zeroKnown = head === undefined || !toolChangePauses(head, true, firstToolLoaded)
+  const zLo = [zeroKnown ? p.clearanceZ : Infinity]
+  const zHi = [zeroKnown ? p.clearanceZ : -Infinity]
   let tools = 0
   walk(
     p,

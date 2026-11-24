@@ -70,6 +70,9 @@ export const MachineValuesDtoSchema = z.object({
   spoilboardThickness: quantityDto('length')
     .optional()
     .describe('Spoilboard on the table, 0 = none; for the Z headroom check'),
+  probePlateSize: quantityDto('length')
+    .optional()
+    .describe('Largest extent of the Z touch plate; the touch-off spot leaves room for it'),
   programUnits: z.enum(['mm', 'in']).describe('G21/G20 in exported gCode'),
   toolChanger: z.literal('none').describe('Manual tool change (M0)'),
 })

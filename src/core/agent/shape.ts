@@ -261,7 +261,12 @@ export class ResultShaper {
     const ops = new Map<string, Obj>()
     for (const o of (peek('plan.operation.list', { planId })?.['operations'] as Obj[]) ?? [])
       ops.set(o['id'] as string, o)
-    const findings = (peek('plan.warning.list', { planId })?.['warnings'] as Obj[]) ?? []
+    const warningList = peek('plan.warning.list', { planId })
+    const findings = (warningList?.['warnings'] as Obj[]) ?? []
+    // DF69: the Z reference per tool run, by its first operation
+    const zRefOf = new Map<string, Obj | null>()
+    for (const r of (warningList?.['zRefs'] as Obj[] | undefined) ?? [])
+      zRefOf.set(r['planOperationId'] as string, (r['zRef'] as Obj | null) ?? null)
     const countBy = (list: Obj[]) => {
       const c: Record<string, number> = {}
       for (const f of list) c[f['severity'] as string] = (c[f['severity'] as string] ?? 0) + 1
@@ -277,6 +282,9 @@ export class ResultShaper {
     const taken = isObj(design['taken']) ? design['taken'] : {}
     let planSeconds: number | null = 0
     const inch = this.session.unitSystem?.() === 'inch'
+    // DF69: a length (mm) in the project's units
+    const length = (v: number) =>
+      inch ? Math.round((v / 25.4) * 1e4) / 1e4 : Math.round(v * 1e3) / 1e3
     const rawSetups = ((plan['setups'] as Obj[]) ?? []).map((s) => ({
       operations: ((s['operations'] as Obj[]) ?? []).map((o) => ({
         id: o['id'] as string,
@@ -334,7 +342,27 @@ export class ResultShaper {
           const t = secondsOf.get(o.id) ?? null
           seconds = t === null || seconds === null ? null : seconds + t
         }
-        return { tool: nameOf(r.tool), operations: r.operations.map((o) => o.id), seconds }
+        const z = zRefOf.get(r.operations[0]!.id)
+        const at = z?.['at'] as [number, number] | undefined
+        return {
+          tool: nameOf(r.tool),
+          operations: r.operations.map((o) => o.id),
+          seconds,
+          ...(z === undefined
+            ? {}
+            : {
+                zRef:
+                  z === null
+                    ? null
+                    : {
+                        surface: z['surface'],
+                        label: z['label'],
+                        level: length(z['level'] as number),
+                        at: at === undefined ? null : [length(at[0]), length(at[1])],
+                        chosen: z['chosen'],
+                      },
+              }),
+        }
       })
       return {
         id: s['id'],

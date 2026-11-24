@@ -349,6 +349,9 @@ export const libraryMessages = {
       'Optional: with Z homed, from the collet nut (where stickout is measured) down to the table. Checks that retracts stay below the Z+ limit.',
     spoilboardThickness: 'Spoilboard thickness',
     spoilboardThicknessNote: 'Optional: the board the stock sits on; 0 if none.',
+    probePlateSize: 'Touch plate size',
+    probePlateSizeNote:
+      'Optional: the largest extent of your Z touch plate. Touch-off spots leave room for it.',
     rigidity: 'Rigidity',
     rigidities: {
       extrusion: 'Aluminium extrusion',
