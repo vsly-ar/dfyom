@@ -308,6 +308,20 @@ export class ResultShaper {
         tool: typeof o['tool'] === 'string' ? o['tool'] : undefined,
       })),
     }))
+    // DF90: the programmed clearance per setup (plan.get), when it differs from the setting
+    const effective = Array.isArray(isObj(value) ? value['effectiveClearance'] : undefined)
+      ? ((value as Obj)['effectiveClearance'] as Obj[])
+      : []
+    const effectiveOf = (setupId: unknown) => {
+      const e = effective.find((x) => x['setupId'] === setupId)
+      if (e === undefined || e['reason'] !== 'workholding') return {}
+      return {
+        effectiveClearance: {
+          value: length(e['clearanceHeight'] as number),
+          reason: `${String(e['item'])} + ${String(length(e['margin'] as number))}`,
+        },
+      }
+    }
     const setups = ((plan['setups'] as Obj[]) ?? []).map((s, si) => {
       let setupSeconds: number | null = 0
       // DF59: the per-side maximum of the current toolpaths' reach past the stock (mm)
@@ -419,6 +433,8 @@ export class ResultShaper {
               })),
             }),
         clearanceHeight: s['clearanceHeight'],
+        // DF90: the height the program uses when the workholding raised it
+        ...effectiveOf(s['id']),
         retractHeight: s['retractHeight'],
         retraction: s['retraction'] ?? 'minimum',
         clampHeight: s['clampHeight'] ?? null,

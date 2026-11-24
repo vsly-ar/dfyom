@@ -12,6 +12,7 @@ import { planSetup, type PlanSetup } from '../plan/plan.fixture'
 import { createToolpathCache, type ToolpathCache } from '../toolpath/cache'
 import type { Toolpath } from '../toolpath/model'
 import type { GeneratorRequest } from '../toolpath/request'
+import type { TravelFit } from './export'
 import {
   exportPlan,
   programGenerator,
@@ -68,6 +69,7 @@ type Result = Omit<PlanExport, 'program' | 'lines' | 'text'> & {
   filePath: string
   lines: number
   softLimitNote?: string
+  travelFit: TravelFit[]
 }
 
 async function setup(
@@ -380,6 +382,29 @@ describe('exportPlan (the path run mode shares)', () => {
     expect(off.text).toBe(without.text)
     expect(off.regenerated).toEqual([])
     expect(without.lines.length).toBeGreaterThan(0)
+  })
+
+  it('gives the work-zero window offline; a zero inside it passes the soft-limit check (DF90)', async () => {
+    const t = await setup()
+    const r = expectOk(await t.exportCmd()) as Result
+    expect(r.travelFit.map((f) => f.axis)).toEqual(['x', 'y', 'z'])
+    for (const f of r.travelFit) {
+      expect(f.max).toBeGreaterThan(f.min)
+      expect(f.from).toBeCloseTo(-f.travel - f.min, 2)
+      expect(f.to).toBeCloseTo(-f.max, 2)
+      expect(f.from).toBeLessThanOrEqual(f.to)
+    }
+    const services = { workers: createInProcessWorkers(), toolpaths: t.cache }
+    const zero = (pick: (f: TravelFit) => number) =>
+      r.travelFit.map(pick) as unknown as [number, number, number]
+    const inside = expectOk(
+      await exportPlan(t.d.doc, t.planId, services, { workZero: zero((f) => (f.from + f.to) / 2) }),
+    )
+    expect(inside.warnings.some((w) => w.rule === 'softLimit')).toBe(false)
+    const past = expectOk(
+      await exportPlan(t.d.doc, t.planId, services, { workZero: zero((f) => f.to + 1) }),
+    )
+    expect(past.warnings.filter((w) => w.rule === 'softLimit')).toHaveLength(3)
   })
 
   it('reports progress per plan operation and stops on an aborted signal', async () => {

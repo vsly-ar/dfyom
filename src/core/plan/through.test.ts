@@ -121,6 +121,22 @@ describe('through profiles after an earlier setup (DF50)', () => {
     ])
   })
 
+  it('design: dfm.tabsTall measures from the material left (DF90)', async () => {
+    const { s } = await relieved()
+    const set = async (thickness: string) =>
+      (
+        (await s.run('design.profile.update', {
+          partId: s.partId,
+          operationId: 'profile1',
+          tabs: { thickness },
+        })) as { warnings: { code: string; params: Record<string, unknown> }[] }
+      ).warnings.filter((w) => w.code === 'dfm.tabsTall')
+    expect(await set('7')).toEqual([])
+    expect(await set('8')).toEqual([
+      expect.objectContaining({ params: { thickness: 8, material: 15 } }),
+    ])
+  })
+
   it('design: dfm.tabsThick when the tabs reach the stock face', async () => {
     const { s } = await relieved()
     const out = (await s.run('design.profile.update', {

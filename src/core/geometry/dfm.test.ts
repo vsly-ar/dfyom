@@ -251,6 +251,23 @@ describe('parameterChecks', () => {
     ])
   })
 
+  it('profile: tabs over half the material and over 5 mm are dfm.tabsTall (DF90)', () => {
+    const tabs = (thickness: number) => profile({ tabs: { count: 4, width: 8, thickness } })
+    // stock 20 thick: 10 is half, 5 is the floor of the rule
+    expect(codes(run(tabs(10)))).toEqual([])
+    expect(run(tabs(10.5))).toEqual([
+      expect.objectContaining({
+        code: 'dfm.tabsTall',
+        severity: 'warning',
+        parameter: 'tabs.thickness',
+        params: { thickness: 10.5, material: 20 },
+        suggestion: { relation: 'atMost', value: 10 },
+      }),
+    ])
+    // a thin sheet: 2 mm tabs on 3 mm are not "tall" (below 5 mm)
+    expect(codes(run(tabs(4.9), { ...metric }))).toEqual([])
+  })
+
   it('profile: tabs thinner or narrower than 1 mm (metric) or 1/32″ (inch)', () => {
     const tabs = (thickness: number, width: number) =>
       profile({ tabs: { count: 4, width, thickness } })

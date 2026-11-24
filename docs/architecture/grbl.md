@@ -170,7 +170,7 @@ exportPlan(doc: ProjectDoc, planId: string, services: Pick<Services, 'workers' |
 PlanExport = GrblExport & { setupId: string, regenerated: string[], softLimitChecked: boolean }
 
 plan.export { planId, setupId?, target /* file or folder */, confirm = false }   // effect command
-  → { filePath, setupId, lines /* count */, stats, warnings /* plan.machine */, softLimitChecked, softLimitNote?, regenerated, linksNote? }
+  → { filePath, setupId, lines /* count */, stats, warnings /* plan.machine */, softLimitChecked, softLimitNote?, travelFit?, regenerated, linksNote? }
 ```
 
 1. **Checks before any generator runs:** the plan exists, its status allows export (every status but `archived`: `plan.status`), it has a machine copy (`post.noMachine`), the setup is known (**one program per setup**, v0.2 task E2: `setupId` names it and may be left out only when the plan has one setup, else `plan.setup` rule `setupRequired`; an unknown id `input.malformed` rule `unknownSetup`; [plan-v0.2.md](../modes/plan-v0.2.md#implementation-task-e2)), `planOperationInputs` has no error findings for the setup's operations (`plan.check`/`plan.order`), and the setup has at least one operation (`plan.check`, rule `empty`). Every error from `exportPlan` carries a `plan.export` context frame with `planId` (and `planOperationId` for a generator error).
@@ -184,7 +184,7 @@ plan.export { planId, setupId?, target /* file or folder */, confirm = false }  
    - Nothing is written when the export fails.
 
 - **Effect, not job:** export holds the project queue like `project.save`, so the program matches one revision; regenerating the test part's toolpaths takes well under a second ([workers.md](workers.md#performance-budgets)). Effects are not subject to the stale-write baseline ([commands.md](commands.md#stale-writes)) and change no document (toolpaths are derived data).
-- **Soft limits:** `plan.export` passes no `workZero` until run mode supplies the connected G54 ([run-v0.1.md](../modes/run-v0.1.md#work-zero-and-the-soft-limit-check)); `softLimitChecked` says whether the check ran; when it did not, `softLimitNote` (DF58) says how to check before running: set the work zero, then `run.job.check` or the Run pre-flight (`run.job.start` checks too). The GUI's export dialog has its own sentence. The result does not carry the text: the file is the output (agents and run mode use `exportPlan`).
+- **Soft limits:** `plan.export` passes no `workZero` until run mode supplies the connected G54 ([run-v0.1.md](../modes/run-v0.1.md#work-zero-and-the-soft-limit-check)); `softLimitChecked` says whether the check ran; when it did not, `softLimitNote` (DF58) says how to check before running: set the work zero, then `run.job.check` or the Run pre-flight (`run.job.start` checks too). With the note comes `travelFit` (hardening DF90, the offline check): per axis the program's extent (`min`, `max`, work coordinates, Z while the first Z zero holds), the `travel`, and the window `[from, to]` of work-zero machine positions that keep it within [−travel, 0] (`from = −travel − min`, `to = −max`; `from > to`: no work zero fits, as `travel` warns). An agent compares its planned G54 with the window without a connection; the real check still runs at the pre-flight. `GrblExport.travelFit` carries it for every export. The GUI's export dialog has its own sentence. The result does not carry the text: the file is the output (agents and run mode use `exportPlan`).
 
 #### File name (hardening DF62)
 

@@ -145,7 +145,9 @@ const OpArg = { partId: PartIdSchema, operationId: OperationIdSchema }
 const TabsArg = z.object({
   count: Src.optional().describe('Whole number ≥ 0; default 4'),
   width: Src.optional().describe('Default 6 mm / 1/4"'),
-  thickness: Src.optional().describe('Up from the opposite stock face; default 2 mm / 1/16"'),
+  thickness: Src.optional().describe(
+    'Up from the slot bottom (the opposite stock face, or what an earlier setup left there); default 2 mm / 1/16"',
+  ),
   positions: z
     .array(Src)
     .nullable()

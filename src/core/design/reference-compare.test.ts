@@ -304,6 +304,18 @@ describe('design.reference.compare (enclosure fixture)', () => {
     expect(JSON.stringify(r).length).toBeLessThan(6000)
   }, 120_000)
 
+  // DF90: the frame held by tabs touches the reference through them; it is waste, not extra
+  it('a frame held by tabs is an offcut, not the largest extra regions; volumes match the regions', async () => {
+    const s = await enclosure('56.338', undefined, { count: '4', thickness: '12' })
+    const r = await compare(s, { limit: 20 })
+    expect(r.offcuts?.count).toBeGreaterThan(0)
+    for (const g of r.regions) expect(g.surfaces.some((x) => x.endsWith('.offcut'))).toBe(false)
+    expect(r.regions[0]!.maxDev).toBeCloseTo(4.27, 1)
+    // nothing over the threshold is missing: no missing volume either (noise is in `below`)
+    expect(r.stats.maxMissing).toBeLessThan(0.1)
+    expect(r.stats.missingVolume).toBe(0)
+  }, 120_000)
+
   it('a cavity 2 mm too deep ranks first, as missing material on the cavity pocket', async () => {
     const s = await enclosure('58.338')
     const r = await compare(s)

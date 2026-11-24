@@ -28,9 +28,9 @@ export interface GridRow extends RowBase {
   readonly kind: 'grid'
   readonly cols: number
   readonly rows: number
-  /** Column to column, mm, not 0; negative grows towards −u. */
+  /** Column to column, mm, not 0 with more than one column; negative grows towards −u. */
   readonly du: number
-  /** Row to row, mm, not 0. */
+  /** Row to row, mm, not 0 with more than one row. */
   readonly dv: number
 }
 /** `count` positions, each a fixed step from the one before. */

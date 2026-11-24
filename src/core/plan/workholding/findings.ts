@@ -247,8 +247,29 @@ export function workholdingFindings(
   port?: Region2dPort,
   setupId?: string,
 ): PlanWarning[] {
+  return checkedWorkholdingFindings(plan, inputs, current, port, setupId, false).findings
+}
+
+/**
+ * `workholdingFindings`, and with `partial` (`plan.workholding.set` answers at once, DF90) the
+ * move check also of a setup whose toolpaths are only partly current: the current ones are
+ * checked whole; an operation without keep-out (a profile, a drilling: its cuts do not depend on
+ * the items, only its retracts on the clearance they raise) by the cuts of its `last` toolpath;
+ * the others are listed in `unchecked` (a facing or pocket keeps out of the items and
+ * regenerates; `plan.warning.list` and the export check them once generated).
+ */
+export function checkedWorkholdingFindings(
+  plan: LoadedPlan,
+  inputs: readonly PlanOperationInput[] | undefined,
+  current: (input: PlanOperationInput) => Toolpath | undefined,
+  port: Region2dPort | undefined,
+  setupId: string | undefined,
+  partial: boolean,
+  last: (input: PlanOperationInput) => Toolpath | undefined = () => undefined,
+): { findings: PlanWarning[]; unchecked: PlanOperationInput[] } {
   const out = staticWorkholdingFindings(plan, setupId)
-  if (inputs === undefined) return out
+  const unchecked: PlanOperationInput[] = []
+  if (inputs === undefined) return { findings: out, unchecked }
   if (port !== undefined)
     out.push(
       ...unmachinedFindings(
@@ -264,15 +285,28 @@ export function workholdingFindings(
     // the items are in the setup frame, the toolpaths in the WCS (DF78, alignment.md#frames)
     const zero = setupZero(plan, setup, port)
     const pairs = mine.map((input) => ({ input, toolpath: current(input) }))
-    if (pairs.some((p) => p.toolpath === undefined)) continue
-    out.push(
-      ...moveFindings(
-        plan,
-        setup,
-        checkOperations(pairs as { input: PlanOperationInput; toolpath: Toolpath }[], zero),
-        zero,
-      ),
-    )
+    type Pair = { input: PlanOperationInput; toolpath: Toolpath }
+    const ready = pairs.filter((p): p is Pair => p.toolpath !== undefined)
+    if (!partial) {
+      if (ready.length === pairs.length)
+        out.push(...moveFindings(plan, setup, checkOperations(ready, zero), zero))
+      else unchecked.push(...pairs.filter((p) => p.toolpath === undefined).map((p) => p.input))
+      continue
+    }
+    const earlier: Pair[] = []
+    for (const p of pairs) {
+      if (p.toolpath !== undefined) continue
+      const tp = p.input.keepOut === undefined ? last(p.input) : undefined
+      if (tp === undefined) unchecked.push(p.input)
+      else earlier.push({ input: p.input, toolpath: tp })
+    }
+    if (ready.length > 0) out.push(...moveFindings(plan, setup, checkOperations(ready, zero), zero))
+    if (earlier.length > 0)
+      out.push(
+        ...moveFindings(plan, setup, checkOperations(earlier, zero), zero).filter(
+          (f) => f.rule === 'cut' || f.code === 'plan.workholding.breakthrough',
+        ),
+      )
   }
-  return out
+  return { findings: out, unchecked }
 }

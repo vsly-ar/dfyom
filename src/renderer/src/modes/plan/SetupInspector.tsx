@@ -144,7 +144,13 @@ export function SetupInspector({
     {
       id: 'clampHeightNote',
       severity: 'note',
-      text: clampHeight === undefined ? m.clampHeightNoteUnknown : m.clampHeightNote,
+      // DF90: items supersede the clamp height (workholding.md#links-and-safe-heights)
+      text:
+        (holding?.items.length ?? 0) > 0
+          ? m.clampHeightNoteItems
+          : clampHeight === undefined
+            ? m.clampHeightNoteUnknown
+            : m.clampHeightNote,
     },
   ]
   const links = usePlanState((s) => s.data?.links.find((l) => l.setupId === setup.id)?.links)

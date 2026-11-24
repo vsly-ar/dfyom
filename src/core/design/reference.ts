@@ -138,11 +138,19 @@ export function placedExtent(bounds: Box, p: Omit<Placement, 'position'>): Xyz {
   return { x: hi[0]! - lo[0]!, y: hi[1]! - lo[1]!, z: hi[2]! - lo[2]! }
 }
 
-/** The placed bounding box in the part frame (mm). */
+/** A placed box coordinate rounded to 0.001 mm, the G-code resolution (DF90); never -0. */
+const snap = (v: number) => Number(v.toFixed(3)) + 0
+
+/**
+ * The placed bounding box in the part frame (mm), rounded to 0.001 mm: the record stores the
+ * position to 0.0001 mm (0.00001″), so a top fitted to the stock top would otherwise read a few
+ * 0.00001 mm above it (DF90: `placed.max.z` 0.0000146 at scale 0.5).
+ */
 export function placedBox(bounds: Box, p: Placement): Box {
   const e = placedExtent(bounds, p)
   const q = p.position
-  return { min: q, max: { x: q.x + e.x, y: q.y + e.y, z: q.z + e.z } }
+  const at = (x: number, y: number, z: number) => ({ x: snap(x), y: snap(y), z: snap(z) })
+  return { min: at(q.x, q.y, q.z), max: at(q.x + e.x, q.y + e.y, q.z + e.z) }
 }
 
 /**

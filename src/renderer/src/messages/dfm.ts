@@ -119,6 +119,9 @@ const TEXT: Readonly<Record<DfmWarningCode, Render>> = {
   // DF50: an earlier setup cleared material under the slot from the opposite face
   'dfm.tabsThick': (p, L) =>
     `Tabs ${L(p['thickness'])} thick reach the stock face: an earlier setup leaves only ${L(p['material'])} of material under the slot. Make them thinner.`,
+  // DF90: tabs are measured up from the slot's bottom, not from a face
+  'dfm.tabsTall': (p, L) =>
+    `Tabs ${L(p['thickness'])} thick are over half the ${L(p['material'])} of material the slot cuts. Tab thickness is measured up from the bottom of the slot: make them thinner.`,
   // v0.4 TB1 (design-v0.4.md § Tabs relocate off free sides)
   'dfm.tabsRelocated': (p) =>
     `${num(p['moved'])} of ${num(p['count'])} tabs moved off sides where the slot leaves no stock beyond the cut.`,
