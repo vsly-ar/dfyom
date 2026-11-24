@@ -1,6 +1,7 @@
 // The run inspector's "Overrides" section (M6, sliders DF85): feed and spindle each with a slider
 // over the controller's override range (GRBL 10–200 %), capped by the machine's max feed and
-// spindle speed for the programmed F and S, "−10 %"/"+10 %" buttons, arrow keys for 1 % and
+// spindle speed for the programmed F and S, the spindle floored at its minimum speed (DF86
+// follow-up), "−10 %"/"+10 %" buttons, arrow keys for 1 % and
 // "Reset" to 100 %; rapids at 100/50/25 %. The values are the ones GRBL reports (`Ov`), next to
 // the resulting F and S while a run streams. A slider drag is debounced and one target is in
 // flight at a time; a value other than 100 % is marked and explained.
@@ -86,6 +87,7 @@ export function OverridesSection({
         range={controller.spindle}
         programmed={programmed?.spindle}
         machineMax={machine.maxSpindle}
+        machineMin={machine.minSpindle}
         disabled={disabled}
         units={units}
         onChange={onChange}
@@ -117,6 +119,7 @@ function OverrideRow({
   range,
   programmed,
   machineMax,
+  machineMin,
   disabled,
   unavailable,
   units,
@@ -129,6 +132,8 @@ function OverrideRow({
   range: { min: number; max: number }
   programmed: number | undefined
   machineMax: number | undefined
+  /** The spindle's usable minimum speed (rpm): the floor of the spindle override. */
+  machineMin?: number | undefined
   disabled: boolean
   /** Why this override does not exist on the machine. */
   unavailable?: string
@@ -136,7 +141,7 @@ function OverrideRow({
   onChange: (change: OverrideChange) => Promise<void> | void
 }): React.JSX.Element {
   const reasonId = useId()
-  const cap = overrideCap(range, programmed, machineMax)
+  const cap = overrideCap(range, programmed, machineMax, machineMin)
   // the target being dragged or sent; the reported value shows once nothing is pending
   const [draft, setDraft] = useState<number | undefined>(undefined)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -194,17 +199,24 @@ function OverrideRow({
         : programmed > 0
           ? m.effectiveSpindle((programmed * pct) / 100)
           : m.spindleOff
-  const reason =
-    unavailable ??
-    (cap.by === 'machine' && machineMax !== undefined
+  const capReason =
+    cap.by === 'machine' && machineMax !== undefined
       ? which === 'feed'
         ? m.capFeed(cap.max, formatFeed(machineMax, units), runMessages.dro.feedUnits[units])
         : m.capSpindle(cap.max, machineMax)
-      : undefined)
-  // ±10 %: GRBL's own coarse step unless the machine cap ends the range first
+      : undefined
+  const floorReason =
+    cap.floorBy === 'machine' && machineMin !== undefined
+      ? m.floorSpindle(cap.min, machineMin)
+      : undefined
+  const reasons = [floorReason, capReason].filter((x) => x !== undefined)
+  const reason = unavailable ?? (reasons.length === 0 ? undefined : reasons.join(' '))
+  // ±10 %: GRBL's own coarse step unless the machine cap or floor ends the range first (a value
+  // below the floor, e.g. set before the run, goes up to the floor at once)
   const step = (dir: 1 | -1) => {
     const v = value ?? 100
     if (dir > 0 && cap.by === 'machine' && v + 10 > cap.max) return sendNow(cap.max)
+    if (cap.floorBy === 'machine' && v + dir * 10 < cap.min) return sendNow(cap.min)
     void send(dir > 0 ? '+10' : '-10')
   }
   return (
@@ -236,7 +248,11 @@ function OverrideRow({
         <Button
           size="sm"
           aria-label={m.minusLabel(label)}
-          disabled={off || (value !== undefined && value - 10 < range.min)}
+          disabled={
+            off ||
+            (value !== undefined &&
+              (cap.floorBy === 'machine' ? value <= cap.min : value - 10 < range.min))
+          }
           onClick={() => step(-1)}
         >
           {m.minus}
@@ -247,6 +263,7 @@ function OverrideRow({
           max={range.max}
           value={pct}
           limit={cap.max}
+          floor={cap.min}
           marks={[100]}
           disabled={off}
           valueText={(v) => m.valueText(v, effective)}

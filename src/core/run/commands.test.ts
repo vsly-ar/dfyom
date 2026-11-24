@@ -7,7 +7,7 @@ import { createDispatcher } from '../commands/dispatcher'
 import { createInProcessWorkers } from '../commands/jobs'
 import { createAppRegistry } from '../commands/registry'
 import { agentSource, fakeIds, uiSource } from '../commands/testing'
-import { libraryInput, machineValues } from '../library/library.fixture'
+import { libraryInput, machineValues, rpm } from '../library/library.fixture'
 import { planSetup, type PlanSetup } from '../plan/plan.fixture'
 import { createToolpathCache } from '../toolpath/cache'
 import { systemTimerHost } from './clock'
@@ -373,6 +373,68 @@ describe('run commands', { timeout: 60_000 }, () => {
     const out = await t.run('run.override.set', { feed: 201 })
     expect(expectErrCode(out, 'input.malformed').issues[0]?.rule).toBe('overrideRange')
     expectErrCode(await t.run('run.override.set', { spindle: 9 }), 'input.malformed')
+  })
+
+  it("refuses a spindle override below the spindle's minimum speed for the programmed S (DF86)", async () => {
+    // the program streaming S 18000 (a status with a run job; the floor is 6200 / 18000 → 35 %)
+    let programmed: number | undefined = 18000
+    const t = await setup({
+      wrap: (c) =>
+        new Proxy(c, {
+          get: (target, key) => {
+            if (key === 'status')
+              return () => {
+                const s = target.status()
+                return programmed === undefined
+                  ? s
+                  : {
+                      ...s,
+                      job: {
+                        jobId: 'run-x',
+                        phase: 'streaming',
+                        line: 10,
+                        startedAt: '2026-11-24T10:00:00.000Z',
+                        elapsedSeconds: 1,
+                        programmed: { feed: 1000, spindle: programmed },
+                      },
+                    }
+              }
+            const v = Reflect.get(target, key) as unknown
+            return typeof v === 'function' ? (v as () => unknown).bind(target) : v
+          },
+        }),
+    })
+    const { kind: _, ...m } = machineValues()
+    const { id } = (await t.s.run('library.machine.add', {
+      values: libraryInput({
+        ...m,
+        spindle: { control: 'gcode', maxSpeed: rpm('24000'), minSpeed: rpm('6200') },
+      }),
+    })) as { id: string }
+    expectOk(
+      await t.run('run.connection.open', { target: 'virtual', machineId: id, timeScale: 'max' }),
+    )
+    // the connection keeps the machine's minimum speed
+    expect(t.client.spindleMinSpeed).toBe(6200)
+    const low = expectErrCode(await t.run('run.override.set', { spindle: 34 }), 'input.malformed')
+    expect(low.issues[0]).toMatchObject({ path: ['spindle'], rule: 'overrideRange' })
+    expect(low.issues[0]?.message).toMatch(/minSpeed 6200 rpm/)
+    // the UI is held to it too
+    expectErrCode(await t.run('run.override.set', { spindle: 20 }, ui), 'input.malformed')
+    const at = expectOk(await t.run('run.override.set', { spindle: 35 })) as {
+      overrides?: { spindle: number }
+    }
+    expect(at.overrides?.spindle).toBe(35)
+    expect(await waitFor(() => t.status().overrides?.spindle === 35)).toBe(true)
+    // a step below the floor from the reported value is refused; up is fine
+    expectErrCode(await t.run('run.override.set', { spindle: '-1' }), 'input.malformed')
+    expectErrCode(await t.run('run.override.set', { spindle: '-10' }), 'input.malformed')
+    expectOk(await t.run('run.override.set', { spindle: '+1' }))
+    // spindle off (S 0) or no run: GRBL's range only
+    programmed = 0
+    expectOk(await t.run('run.override.set', { spindle: 10 }))
+    programmed = undefined
+    expectOk(await t.run('run.override.set', { spindle: 20, feed: 10 }))
   })
 
   it('refuses a start that is not homed, a soft-limit violation and another machine copy', async () => {
@@ -1032,6 +1094,37 @@ describe('run commands on a serial target (loopback)', { timeout: 60_000 }, () =
     expectErrCode(r, 'run.state')
     expect(r.unwrapErr().issues[0]?.rule).toBe('settingsMismatch')
     expect(r.unwrapErr().message).toContain('$130')
+    expectOk(await t.run('run.connection.close', {}, ui))
+  })
+
+  it('the settings check is asked again after the library machine changed (DF87)', async () => {
+    const t = await setup({
+      serial: (settings) => ({ emulator: { settings: { ...settings, 110: 1234 } } }),
+    })
+    const byMachine = { machineId: t.s.machineId }
+    // none without a serial connection
+    expect(expectOk(t.d.query('run.settings.check', byMachine, ui)).value).toEqual({})
+    const info = expectOk(await serialOpen(t, { planId: undefined, ...byMachine })) as {
+      settingsCheck: { matches: boolean; against: string }
+    }
+    expect(info.settingsCheck).toMatchObject({ matches: false, against: 'machine' })
+    const before = expectOk(t.d.query('run.settings.check', byMachine, ui)).value as {
+      settingsCheck: { matches: boolean; differences: { setting: string }[] }
+    }
+    expect(before.settingsCheck.differences.map((d) => d.setting)).toEqual(['$110'])
+    // the user fixes the library machine (here by importing the controller's $110)
+    const found = t.s.library.lookup('machine', t.s.machineId)
+    const revision = found.state === 'found' ? found.item.revision : 0
+    expectOk(
+      await t.run(
+        'library.machine.settings.import',
+        { id: t.s.machineId, revision, text: '$110=1234', accept: ['$110'] },
+        ui,
+      ),
+    )
+    expect(expectOk(t.d.query('run.settings.check', byMachine, ui)).value).toMatchObject({
+      settingsCheck: { matches: true, against: 'machine', differences: [] },
+    })
     expectOk(await t.run('run.connection.close', {}, ui))
   })
 

@@ -215,6 +215,8 @@ export interface MachineOverrideLimits {
   readonly maxFeed?: number
   /** rpm. */
   readonly maxSpindle?: number
+  /** rpm: the spindle's usable minimum (`spindle.minSpeed`), the spindle override's floor. */
+  readonly minSpindle?: number
   /** `manual`: the spindle speed is set by hand, there is no spindle override. */
   readonly spindleControl?: 'gcode' | 'manual'
 }
@@ -233,15 +235,17 @@ function limitsOf(values: unknown): MachineOverrideLimits | undefined {
   if (values === null || typeof values !== 'object') return undefined
   const v = values as {
     maxFeedRate?: { x?: unknown; y?: unknown }
-    spindle?: { control?: unknown; maxSpeed?: unknown }
+    spindle?: { control?: unknown; maxSpeed?: unknown; minSpeed?: unknown }
   }
   const xy = [positive(v.maxFeedRate?.x, 'feedRate'), positive(v.maxFeedRate?.y, 'feedRate')]
   const feeds = xy.filter((x): x is number => x !== undefined)
   const maxSpindle = positive(v.spindle?.maxSpeed, 'spindleSpeed')
+  const minSpindle = positive(v.spindle?.minSpeed, 'spindleSpeed')
   const control = v.spindle?.control
   return {
     ...(feeds.length === 0 ? {} : { maxFeed: Math.min(...feeds) }),
     ...(maxSpindle === undefined ? {} : { maxSpindle }),
+    ...(minSpindle === undefined ? {} : { minSpindle }),
     ...(control === 'gcode' || control === 'manual' ? { spindleControl: control } : {}),
   }
 }
