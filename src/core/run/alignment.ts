@@ -32,6 +32,8 @@ export const AlignmentEntrySchema = z.object({
   /** WCS X, Y (mm). */
   target: Xy,
   ticked: z.boolean(),
+  /** A witness mark on a side wall: it checks this axis only (Q108, assumed). */
+  oneAxis: z.enum(['x', 'y']).exactOptional(),
 })
 export type AlignmentEntry = z.output<typeof AlignmentEntrySchema>
 
@@ -83,6 +85,7 @@ export function alignmentEntries(
               name: p.name,
               target: [p.wcs[0], p.wcs[1]] as [number, number],
               ticked: false,
+              ...(p.oneAxis === undefined ? {} : { oneAxis: p.oneAxis }),
             },
           ],
     ),

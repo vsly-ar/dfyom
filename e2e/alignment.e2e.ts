@@ -3,9 +3,11 @@
 // inspector adds two registration holes and two witness marks for the Bottom, the Bottom's
 // inspector lists them as its points and picks one more in the viewport; toolpaths; Run on the
 // virtual machine at Max: the Top's run, the setup change with the points on the setup picture,
-// the alignment step (zero first, Next wrapping, every point checked where the pointer is, a
-// re-zero clearing the checks, confirm) and the Bottom's run. With DFYOM_RENDERS=1 light and dark
-// renders go to design/features/renders/df78-aids-*.png, df78-pick-*.png, df78-align-step-*.png.
+// the holes on the flip axis (Q106, drawn dashed), the prompt handing over to the docked alignment
+// panel (Q107: zero first, Next wrapping, every point checked where the pointer is, a re-zero with
+// the navigator's jog pad clearing the checks, confirm, back to the prompt) and the Bottom's run.
+// With DFYOM_RENDERS=1 light and dark renders go to design/features/renders/df78-aids-*.png,
+// df78-pick-*.png, df78-flip-axis-*.png, df78-align-panel-*.png.
 // Windows stay hidden (fixture). Selectors are roles and accessible names.
 // Docs: docs/modes/alignment.md#implementation-slice-2, docs/conventions/testing.md#end-to-end
 import { resolve } from 'node:path'
@@ -185,9 +187,17 @@ test('alignment phase 1: aids for the flipped setup, picking, the alignment step
   if (!(await inspector.isVisible())) await page.getByRole('button', { name: 'Inspector' }).click()
   const aids = inspector.getByRole('region', { name: 'Alignment aids' })
   await expect(aids.getByText(/so Bottom can line up on them/)).toBeVisible()
+  await expect(aids.getByText(/go on the flip axis to Bottom/)).toBeVisible()
   await aids.getByRole('button', { name: 'Add registration holes' }).click()
   const topOps = navigator.getByRole('list', { name: 'Plan operations of Top in machining order' })
   await expect(topOps.getByText('Registration hole 2')).toBeVisible()
+  // Q106: both holes on the flip axis (Y 30 of the 100 × 60 top), drawn dashed in the viewport
+  const holes = (await bridgeCall<PlanView>(page, 'plan.get', { planId })).plan.setups[0]!
+    .operations as { aid?: { kind: string; center?: [number, number] } }[]
+  expect(
+    holes.filter((o) => o.aid?.kind === 'registrationHole').map((o) => o.aid!.center![1]),
+  ).toEqual([30, 30])
+  await expect(page.locator('[data-flip-axis]')).toHaveText('Flip axis with Bottom')
   await aids.getByRole('button', { name: 'Add witness marks' }).click()
   await expect(topOps.getByText('Witness mark 2')).toBeVisible()
   await expect(topOps.locator('[data-aid]')).toHaveCount(4)
@@ -200,6 +210,10 @@ test('alignment phase 1: aids for the flipped setup, picking, the alignment step
       planOperationId: op.id,
       overrides: { spindleSpeed: '9000', feedRate: '300', plungeRate: '150' },
     })
+  // the Top with its holes and marks on the dashed flip axis, the aids section in view
+  await aids.scrollIntoViewIfNeeded()
+  await page.getByRole('button', { name: 'Fit' }).click()
+  await render(page, 'df78-flip-axis')
   // an aid's inspector
   await topOps.getByText('Witness mark 1').click()
   const aid = inspector.getByRole('region', { name: 'Alignment aid' })
@@ -268,15 +282,21 @@ test('alignment phase 1: aids for the flipped setup, picking, the alignment step
   const change = page.getByRole('dialog', { name: 'Setup change: setup 2, Bottom' })
   await waitsUntil(change)
 
-  // ── the setup change: the points on the picture, the alignment step ──────────────────────────
+  // ── the setup change points to the docked alignment panel (Q107) ─────────────────────────────
   await expect(change.locator('[data-align-point]')).toHaveCount(5)
   await expect(change.getByRole('button', { name: 'Start setup 2' })).toBeDisabled()
-  await change.getByRole('button', { name: 'Start alignment' }).click()
+  await expect(change.getByRole('button', { name: 'Start alignment' })).toHaveCount(0)
+  await change.getByRole('button', { name: 'Align in the Run panel' }).click()
+  await expect(change).toBeHidden()
+  const panel = inspector.getByRole('region', { name: 'Alignment of Bottom' })
+  await expect(panel).toBeFocused()
+  await expect(panel.locator('[data-align-point]')).toHaveCount(5)
+  await panel.getByRole('button', { name: 'Start alignment' }).click()
   await page
     .getByRole('alertdialog', { name: 'Move the spindle over the alignment points?' })
     .getByRole('button', { name: 'Start alignment' })
     .click()
-  const entries = change.getByRole('list', { name: 'Alignment points' })
+  const entries = panel.getByRole('list', { name: 'Alignment points' })
   await expect(entries.getByRole('listitem')).toHaveCount(6)
   const current = entries.locator('[aria-current="step"]')
   /** Checks the current entry once the pointer is there (its box enables only then). */
@@ -290,33 +310,35 @@ test('alignment phase 1: aids for the flipped setup, picking, the alignment step
     await expect(current).toHaveAttribute('data-align-entry', 'zero')
     await checkHere()
     for (let i = 1; i < 6; i++) {
-      await change.getByRole('button', { name: 'Next', exact: true }).click()
+      await panel.getByRole('button', { name: 'Next', exact: true }).click()
       await expect(current).toHaveAttribute('data-align-entry', /^al/)
-      await expect(change.locator('[data-align-point][data-current]')).toHaveCount(1)
+      await expect(panel.locator('[data-align-point][data-current]')).toHaveCount(1)
       await checkHere()
     }
   }
   await cycle()
-  // the picture with the points, the current one highlighted
-  await change.getByRole('img', { name: /^The stock on the machine/ }).scrollIntoViewIfNeeded()
-  await render(page, 'df78-align-step')
+  // the panel beside the DRO, the navigator's jog pad in view; the current point highlighted
+  await panel.scrollIntoViewIfNeeded()
+  await render(page, 'df78-align-panel')
   // Next wraps to the zero
-  await change.getByRole('button', { name: 'Next', exact: true }).click()
+  await panel.getByRole('button', { name: 'Next', exact: true }).click()
   await expect(current).toHaveAttribute('data-align-entry', 'zero')
   await expect(current.getByRole('checkbox')).toBeEnabled({ timeout: 30_000 })
-  // the stock was nudged: a new X zero (jog 10 mm, Zero X) clears every check
-  await change.getByRole('radio', { name: '10 mm' }).click()
-  await change.getByRole('button', { name: 'Jog X+' }).click()
-  // (the machine group is inert behind the dialog: a short wait for the jog to end)
+  // the stock was nudged: a new X zero (the navigator's jog 10 mm, Zero X) clears every check
+  await navigator.getByRole('radio', { name: '10 mm' }).click()
+  await navigator.getByRole('button', { name: 'Jog X+' }).click()
+  // (the machine chip reads "Setup change" between the runs: a short wait for the jog to end)
   await expect(current.getByRole('checkbox')).toBeChecked()
   await page.waitForTimeout(500)
-  await change.getByRole('button', { name: 'Zero X', exact: true }).click()
+  await navigator.getByRole('button', { name: 'Zero X', exact: true }).click()
   await expect(entries.getByRole('checkbox', { checked: true })).toHaveCount(0)
-  await change.getByRole('button', { name: 'Previous', exact: true }).click()
-  await change.getByRole('button', { name: 'Next', exact: true }).click()
+  await panel.getByRole('button', { name: 'Previous', exact: true }).click()
+  await panel.getByRole('button', { name: 'Next', exact: true }).click()
   await cycle()
-  await change.getByRole('button', { name: 'Confirm alignment' }).click()
-  await expect(change.getByText('Alignment confirmed.')).toBeVisible()
+  await panel.getByRole('button', { name: 'Confirm alignment' }).click()
+  await expect(panel.getByText('Alignment confirmed.')).toBeVisible()
+  await panel.getByRole('button', { name: 'Back to the setup change (start setup 2)' }).click()
+  await expect(change.getByText('Alignment confirmed in the Alignment panel.')).toBeVisible()
   await change.getByRole('button', { name: 'Start setup 2' }).click()
   await expect(change).toBeHidden()
   await waitsUntil(page.getByText(/^Run complete: \d+ lines in/))

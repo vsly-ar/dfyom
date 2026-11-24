@@ -1,8 +1,9 @@
-// The alignment step of the setup-change prompt (hardening DF78, alignment phase 1): "Start
+// The alignment step (hardening DF78, alignment phase 1), docked in the Run inspector's alignment
+// panel (Q107, assumed; AlignmentPanel.tsx) so the DRO and the jog pad stay in view: "Start
 // alignment" (confirmed once per step), the entries (the work zero, then the setup's points) with
 // their WCS X/Y, the current one and a check each, Previous / Next (the pointer's jogs), "Set zero
 // here" at the zero, "Zero on this point" at a point, and "Confirm alignment" (asking once when
-// entries are unchecked). The state is main's (`RunStatus.alignment`), so every window shows the
+// entries are unchecked); a side mark's entry says the one axis it checks (Q108). The state is main's (`RunStatus.alignment`), so every window shows the
 // same step; a G54 X/Y change clears the checks there.
 // Doc: docs/modes/alignment.md#run-the-alignment-step, docs/conventions/ui.md#run-mode-safety-ui
 import { useId, useState } from 'react'
@@ -103,6 +104,13 @@ export function AlignmentStep({
                   <span className={styles['mono']}>
                     {m.at(formatLength(e.target[0], units), formatLength(e.target[1], units))}
                   </span>
+                  {e.oneAxis === undefined ? null : (
+                    // Q108 (assumed): a mark on a side wall checks one axis
+                    <span className={styles['alignAxis']} title={m.oneAxisHint(e.oneAxis)}>
+                      {m.oneAxis(e.oneAxis)}
+                      <span className={styles['srOnly']}>: {m.oneAxisHint(e.oneAxis)}</span>
+                    </span>
+                  )}
                   {isCurrent ? <span className={styles['alignHere']}>{m.current}</span> : null}
                 </li>
               )

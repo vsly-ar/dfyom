@@ -197,6 +197,11 @@ export const planMessages = {
     aidsHint: (next: string) =>
       `Cut in this setup so ${next} can line up on them; each also becomes one of its points.`,
     aidsNone: 'This is the last setup: aids are cut for a later one.',
+    /** Q106 (assumed): holes for a flip go on its axis, drawn dashed in the viewport. */
+    /** The flip axis' label in the viewport (Q106). */
+    flipAxis: (other: string) => `Flip axis with ${other}`,
+    aidsFlipHint: (next: string) =>
+      `Registration holes go on the flip axis to ${next} (the dashed line), for dowels in the spoilboard: the turned-over stock drops onto the same dowels.`,
     aidMarks: 'Add witness marks',
     aidHoles: 'Add registration holes',
     clearanceHeight: 'Clearance height',

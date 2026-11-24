@@ -362,3 +362,20 @@ button.cloneMarker:not([aria-disabled='true']):hover .cloneDot {
   border-color: var(--danger);
   color: var(--danger-text);
 }
+
+/* Q106 (assumed): the flip axis' chip at its far end (AlignmentLayer FlipAxes) */
+.flipAxisChip {
+  position: absolute;
+  left: 6px;
+  bottom: 4px;
+  padding: 0 var(--space-1);
+  border: 1px dashed var(--aid);
+  border-radius: var(--radius-xs);
+  background: color-mix(in oklab, var(--bg-raised) 92%, transparent);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--lh-xs);
+  white-space: nowrap;
+  user-select: none;
+  pointer-events: none;
+}

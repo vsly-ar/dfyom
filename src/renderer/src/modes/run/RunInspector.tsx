@@ -11,6 +11,7 @@ import type { ProjectDoc } from '../../../../core/project/document'
 import { runMessages } from '../../messages/run'
 import { Icon, Button, EmptyState, PanelHeader, Progress } from '../../ui'
 import { useShell } from '../../shell/ShellContext'
+import { AlignmentPanel } from './AlignmentPanel'
 import { Dro } from './Dro'
 import { OverridesSection } from './OverridesSection'
 import { canResume, planRunInfo } from './plan-info'
@@ -63,6 +64,8 @@ export function RunInspector({ doc }: { doc: ProjectDoc | undefined }): React.JS
       <PanelHeader title={runMessages.dro.title} />
       <div className={styles['panel']}>
         <Dro status={status} units={units} />
+        {/* DF78 (Q107): the alignment step docked beside the DRO */}
+        {doc === undefined ? null : <AlignmentPanel doc={doc} />}
 
         <section className={styles['section']} aria-label={m.title}>
           <h3 className={styles['sectionTitle']}>{m.title}</h3>

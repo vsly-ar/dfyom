@@ -732,3 +732,49 @@ describe('Alignment aids and picking points', () => {
     await waitFor(() => expect(probe.scene?.alignmentTargets).toBeUndefined())
   })
 })
+
+// Q106 (assumed): docs/modes/alignment.md#implementation-follow-ups-q106q108
+describe('Registration holes on the flip axis', () => {
+  it('says the holes go on the flip axis and draws it dashed in both setups, in their WCS', async () => {
+    const t = await renderSetups()
+    const [first, second] = t.plan().setups
+    await t.user.click(t.setupRows()[0]!)
+    const insp = t.inspector()
+    await within(insp).findByRole('heading', { name: 'Alignment aids' })
+    expect(
+      within(insp).getByText(new RegExp(`go on the flip axis to ${second!.name}`)),
+    ).toBeInTheDocument()
+    await t.user.click(within(insp).getByRole('button', { name: 'Add registration holes' }))
+    await waitFor(() => expect(t.plan().setups[1]!.alignment).toHaveLength(2))
+    await waitFor(() => expect(probe.scene?.flipAxes).toHaveLength(1))
+    expect(probe.scene!.flipAxes![0]).toMatchObject({
+      key: second!.id,
+      label: `Flip axis with ${second!.name}`,
+    })
+    const axis = probe.scene!.flipAxes![0]!
+    // both holes on it (the first setup's zero is at its corner: WCS = setup frame)
+    const holes = t
+      .plan()
+      .setups[0]!.operations.flatMap((o) =>
+        o.aid?.kind === 'registrationHole' ? [o.aid.center] : [],
+      )
+    const onLine = (p: readonly number[]) =>
+      Math.abs(
+        (p[0]! - axis.from[0]) * (axis.to[1] - axis.from[1]) -
+          (p[1]! - axis.from[1]) * (axis.to[0] - axis.from[0]),
+      ) < 1e-6
+    expect(holes).toHaveLength(2)
+    expect(holes.every(onLine)).toBe(true)
+    await expectNoAxeViolations()
+    // the later setup: the same line, shifted by its moved zero
+    await t.user.click(t.setupRows()[1]!)
+    await waitFor(() => expect(probe.scene?.flipAxes?.[0]?.key).toBe(first!.id))
+    const before = probe.scene!.flipAxes![0]!
+    const x = within(t.inspector()).getByLabelText('Work zero X', { selector: 'input' })
+    await t.user.clear(x)
+    await t.user.type(x, '10{Enter}')
+    await waitFor(() =>
+      expect(probe.scene?.flipAxes?.[0]?.from).toEqual([before.from[0] - 10, before.from[1]]),
+    )
+  })
+})

@@ -105,7 +105,14 @@ function scriptMachine(bridge: FakeBridge): Machine {
       setupId,
       entries: [
         { id: 'zero', name: 'Work zero', target: [0, 0] as [number, number], ticked: false },
-        { id: 'p1', name: 'Back right', target: [80, 50] as [number, number], ticked: false },
+        {
+          id: 'al1',
+          name: 'Back right',
+          target: [80, 50] as [number, number],
+          ticked: false,
+          // Q108: a side mark's entry checks one axis
+          oneAxis: 'y' as const,
+        },
       ],
       confirmed: false,
       skipped: [],
@@ -562,8 +569,9 @@ describe('Run mode', () => {
     expect(t.callsOf('run.job.start').at(-1)).toEqual({ planId: t.plan().id, setupId: top!.id })
   })
 
-  // DF78: docs/modes/alignment.md#run-the-alignment-step
-  it('the setup-change prompt runs the alignment step; Start waits for its confirmation', async () => {
+  // DF78: docs/modes/alignment.md#run-the-alignment-step; Q107 (assumed): the step is docked in
+  // the Run inspector, the prompt points to it and keeps its start gate
+  it('the alignment step runs in the docked Run panel; the prompt hands over and Start waits', async () => {
     const t = await renderRun({ bottom: true, points: true })
     const [bottom, top] = t.plan().setups
     await connectAndHome(t)
@@ -591,7 +599,22 @@ describe('Run mode', () => {
     const start = within(prompt).getByRole('button', { name: 'Start setup 2' })
     expect(start).toBeDisabled()
     expect(start).toHaveAccessibleDescription('Confirm the alignment first.')
-    const step = within(prompt).getByRole('region', { name: 'Alignment' })
+    // the prompt points to the panel; no step inside it
+    const handover = within(prompt).getByRole('region', { name: 'Alignment' })
+    expect(within(handover).getByText(/in the Alignment panel beside the DRO/)).toBeInTheDocument()
+    expect(within(prompt).queryByRole('button', { name: 'Start alignment' })).toBeNull()
+    await expectNoAxeViolations()
+    await t.user.click(within(handover).getByRole('button', { name: 'Align in the Run panel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+
+    // the panel beside the DRO takes the focus; the DRO stays in view
+    const panel = within(inspector).getByRole('region', { name: 'Alignment of Top' })
+    await waitFor(() => expect(panel).toHaveFocus())
+    expect(within(inspector).getAllByText('Position').length).toBeGreaterThan(0)
+    expect(
+      within(panel).getByRole('img', { name: /^The stock on the machine/ }),
+    ).toBeInTheDocument()
+    const step = within(panel).getByRole('region', { name: 'Alignment' })
     expect(within(step).getByText(/the alignment point in turn/)).toBeInTheDocument()
 
     // Start alignment asks once, then sends the pointer to the work zero
@@ -606,20 +629,23 @@ describe('Run mode', () => {
     const list = await within(step).findByRole('list', { name: 'Alignment points' })
     const zero = within(list).getByRole('checkbox', { name: 'Work zero lines up' })
     expect(within(list).getByRole('checkbox', { name: 'Back right lines up' })).toBeDisabled()
+    // Q108: the side mark's entry names the one axis it checks
+    expect(within(list).getByText('Y only')).toBeInTheDocument()
     expect(within(step).getByRole('button', { name: 'Set zero here' })).toBeEnabled()
     await expectNoAxeViolations()
     await t.user.click(zero)
     expect(t.callsOf('run.align.tick')).toEqual([{ entry: 'zero', ticked: true }])
 
-    // Next: the point; "Zero on this point" offered there
+    // Next: the point; "Zero on this point" offered there; the picture highlights it
     await t.user.click(within(step).getByRole('button', { name: 'Next' }))
     expect(t.callsOf('run.align.goto').at(-1)).toMatchObject({ to: 'next' })
     await waitFor(() =>
       expect(within(list).getByRole('checkbox', { name: 'Back right lines up' })).toBeEnabled(),
     )
     expect(within(step).getByRole('button', { name: 'Zero on this point' })).toBeEnabled()
+    expect(panel.querySelector('[data-align-point][data-current]')).not.toBeNull()
 
-    // confirming with an unchecked point asks once; then Start setup 2 is enabled
+    // confirming with an unchecked point asks once; then back to the prompt, Start enabled
     await t.user.click(within(step).getByRole('button', { name: 'Confirm alignment' }))
     const skip = screen.getByRole('alertdialog', {
       name: '1 of 2 points not checked. Continue anyway?',
@@ -627,7 +653,14 @@ describe('Run mode', () => {
     await t.user.click(within(skip).getByRole('button', { name: 'Continue' }))
     expect(t.callsOf('run.align.tick').at(-1)).toEqual({ confirm: true, skipUnticked: true })
     await within(step).findByText('Alignment confirmed, 1 not checked.')
-    expect(within(prompt).getByRole('button', { name: 'Start setup 2' })).toBeEnabled()
+    await t.user.click(
+      within(panel).getByRole('button', { name: 'Back to the setup change (start setup 2)' }),
+    )
+    const again = await screen.findByRole('dialog', { name: 'Setup change: setup 2, Top' })
+    expect(
+      within(again).getByText('Alignment confirmed in the Alignment panel.'),
+    ).toBeInTheDocument()
+    expect(within(again).getByRole('button', { name: 'Start setup 2' })).toBeEnabled()
   })
 
   it('a run started elsewhere names its plan; once stopped, "Resume from…" restarts at an operation (M5, M7)', async () => {
