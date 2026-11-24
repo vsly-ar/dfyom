@@ -1,6 +1,6 @@
 # Reference tools: section, levels, holes, compare and fit for a reference model
 
-Status: accepted (proposed 2026-11-23 for hardening [DF60](../plans/hardening.md); the user answered [Q70–Q80](#open-questions-for-the-user) on 2026-11-24 and took every recommendation); **P1 implemented with its follow-ups** ([§ Implementation (P1)](#implementation-p1)), **P2 implemented** ([§ Implementation (P2)](#implementation-p2)), **P3 implemented** ([§ Implementation (P3)](#implementation-p3)), P4–P5 accepted, not built · Source: black-box test of 2026-11-23 (scaled enclosure in two setups, `.continuous/research/2026-11-23-enclosure-two-setup-test.md`, issues I-5 and I-11) · Base: [reference-model.md](reference-model.md) (import, placement, fit, the [reference-only rule](reference-model.md#rule-reference-only)) · Single owner of levels, sections and holes of a reference since Q71 ([reference-query.md](reference-query.md), the v0.4 follow-up draft, is folded in here); the simulated-cut deviation stays in [deviation.md](deviation.md) · Async queries: [ADR 0021](../decisions/0021-async-queries.md), [commands.md § Async queries](../architecture/commands.md#async-queries) · UI: [ui.md § Reference tools](../conventions/ui.md#reference-tools-df60) · Shapes and fitting: [shapes.md](../architecture/shapes.md) · Agent API and budget: [llm-api.md](../architecture/llm-api.md) · Hole feature: [design-v0.4.md § Hole feature](design-v0.4.md#hole-feature) · Terms: [glossary.md](../glossary.md)
+Status: accepted (proposed 2026-11-23 for hardening [DF60](../plans/hardening.md); the user answered [Q70–Q80](#open-questions-for-the-user) on 2026-11-24 and took every recommendation); **P1 implemented with its follow-ups** ([§ Implementation (P1)](#implementation-p1)), **P2 implemented** ([§ Implementation (P2)](#implementation-p2)), **P3 implemented** ([§ Implementation (P3)](#implementation-p3)), **P4 implemented** ([§ Implementation (P4)](#implementation-p4)), P5 accepted, not built · Source: black-box test of 2026-11-23 (scaled enclosure in two setups, `.continuous/research/2026-11-23-enclosure-two-setup-test.md`, issues I-5 and I-11) · Base: [reference-model.md](reference-model.md) (import, placement, fit, the [reference-only rule](reference-model.md#rule-reference-only)) · Single owner of levels, sections and holes of a reference since Q71 ([reference-query.md](reference-query.md), the v0.4 follow-up draft, is folded in here); the simulated-cut deviation stays in [deviation.md](deviation.md) · Async queries: [ADR 0021](../decisions/0021-async-queries.md), [commands.md § Async queries](../architecture/commands.md#async-queries) · UI: [ui.md § Reference tools](../conventions/ui.md#reference-tools-df60) · Shapes and fitting: [shapes.md](../architecture/shapes.md) · Agent API and budget: [llm-api.md](../architecture/llm-api.md) · Hole feature: [design-v0.4.md § Hole feature](design-v0.4.md#hole-feature) · Terms: [glossary.md](../glossary.md)
 
 ## Problem
 
@@ -172,7 +172,7 @@ In the [Reference panel](../conventions/ui.md#reference-panel-hardening-df2df8),
 ```
 
 - Part frame, mm, rounded to 0.001; `at` is the point of `maxDev`, so the agent can `design.measure` there. ≤ 10 regions ≈ 2 KB.
-- The [deviation.md causes](deviation.md#result) (`toolRadius`, `holeMouth`, …) apply to the plan source; for the design source the only explained kind is `cornerRadius` (a missing region within the design's inside corner radius of a corner whose reference corner is sharper, i.e. the fillet the design chose on purpose), so an agent can tell intended fillets from mistakes.
+- The [deviation.md causes](deviation.md#result) (`toolRadius`, `holeMouth`, …) apply to the plan source; for the design source the only explained kind is `cornerRadius` (an extra region within the design's inside corner radius of a corner whose reference corner is sharper, i.e. the fillet the design chose on purpose: a rounded inside corner leaves material a sharp one does not), so an agent can tell intended fillets from mistakes.
 - Not undoable, changes nothing; stale after any design edit (the result carries the `evaluation` it used).
 
 ### Overlay (UI)
@@ -210,7 +210,7 @@ All analysis is headless core (`src/core`, no Electron, DOM or Node-only imports
 | `src/core/design/mesh-distance.ts`                 | BVH, closest point, signed distance per vertex                                                                     | P4    |
 | `src/core/design/reference-compare.ts`             | boolean method, pieces, attribution; height-map fallback                                                           | P4    |
 
-`reference.compare` runs on the geometry lane with the part's evaluation (the worker that holds the evaluated solid), so the part mesh is not copied; the reference mesh is read there once per asset as `reference.section` does.
+`reference.compare` runs on the geometry lane; the reference mesh is read there once per asset as `reference.section` does. As built (P4) the part mesh is copied to it from the evaluation (see [§ Implementation (P4)](#implementation-p4)).
 
 ## Agent API and budget
 
@@ -221,7 +221,7 @@ All analysis is headless core (`src/core`, no Electron, DOM or Node-only imports
 | `design.shape.import`                 | existing command, gains `from` (P1)    | + 0.7 K measured (659 → ≈ 1.36 K)          |
 | `kind: 'holes'`, `maxDiameter`        | existing args extended (P3)            | + 0.25 K measured                          |
 | `design.reference.update`             | existing; result fields only (P1)      | in the output schema                       |
-| `design.reference.compare`            | job (P4; `source: part` only at first) | ≈ 0.5 K (estimate)                         |
+| `design.reference.compare`            | job (P4; `source: part` only at first) | 0.88 K (measured, P4)                      |
 
 P1 measured: 107 245 → 109 183 characters (124 → 125 tools, + 1.94 K, under the 120 K budget; logged in [llm-api.md § Implementation](../architecture/llm-api.md#implementation-task-310)). Results stay ≤ 5 KB by default (levels ≈ 2.5 KB, section summary ≈ 1–3 KB, holes ≈ 4 KB, compare ≈ 2 KB). The primer's bullet grows with the phases; P1: "Reference: `design_reference_find` (levels, section) → `design_shape_import { from }`"; P3 adds "holes → the suggested `design_hole_add`/`design_drilling_add` (+ `design_clones_add`)".
 
@@ -261,6 +261,26 @@ Implemented 2026-11-24 (hardening DF60 P3); code points back here.
 - Budget: 110 210 → 110 461 characters (+ 0.25 K, no new tool; [llm-api.md § Implementation](../architecture/llm-api.md#implementation-task-310)).
 - Tests: `mesh-holes.test.ts` (bottoms, mouths, from the opposite face, boss and tube, grid, circle, list, belowFace, steps, suggestion round trip through evaluated parts, the enclosure's foot holes), `reference-find.test.ts` (`kind: 'holes'` through the dispatcher, `noTool`, the suggestion sent as it is, `featureBelowTool` on and off), `reference-overlay.test.ts` (rings), `Reference.test.tsx` (Holes list, axe, one undo step per click, belowFace); e2e `reference.e2e.ts` adds the full enclosure's foot holes from the bottom and Add as Bolt hole; render `df-reference-holes` (light and dark).
 
+## Implementation (P4)
+
+Implemented 2026-11-24 (hardening DF60 P4); code points back here.
+
+- **Core:** `mesh-distance.ts` (`MeshBvh`: a median-split BVH over triangles, closest point with an early stop below a bound) and `reference-compare.ts` (weld, closed check, the boolean method, the height-map fallback, `cornerRadii`/`isCornerFillet`). The worker task `reference.compare` (geometry lane, 120 s timeout) reads the reference through the kept mesh, places it with the ghost matrix, welds it (1e-4 mm) and runs the boolean method, or the height maps when the welded mesh is not closed or `fromMesh` refuses it. `design.reference.compare` is a job ([§ 3](#3-compare)) that evaluates the part, sends its mesh with surface labels, maps the surface indices to ids and operations and cuts the result to `limit`.
+- **Result** as [§ Result (agent)](#result-agent), plus: `cause: 'cornerRadius'` on a region, `offcuts: { count, volume }` (extra pieces that never touch the reference: the frame a through profile cuts free; not regions, and left out of `partVolume`), `note` when the height maps were used (why) and `evaluation` = the evaluation's `inputHash`. `threshold` is a plain number in mm (0.001–10), like the find's knobs; `limit` 1–64.
+- **Decisions while building:**
+  - **Regions, not raw pieces.** One boolean piece can join unrelated deviations through a facet-thin sliver along a wall (on the enclosure, the notch, the rebate and the top edge round are one piece of `part − reference`). A piece is split into regions by its _deviating samples_: each own-side triangle is sampled on a barycentric grid (≤ 8 per edge, step max(piece diagonal / 32, threshold)), samples farther than `threshold` from the other surface are kept and joined when they are grid neighbours or within one step of each other. A region's `volume` is the piece's when the region box (its samples grown by its `maxDev` + threshold) holds the whole piece, otherwise the piece's material inside that box (one more boolean).
+  - **`maxDev` is sampled**, not taken at vertices: a missing pocket's floor is farthest from the reference in its middle. The error is below the sample step. A sample is first checked against the piece's own faces on the other surface (an upper bound of the true distance), which rules out most samples of a thin sliver cheaply.
+  - **Noise:** a piece smaller than the threshold (diagonal) or without a deviating sample goes to `below`.
+  - **Attribution:** the part-surface triangles of the piece inside the region box, by area (top 3 surfaces shown; operations are the surfaces' operation ids that exist in the part).
+  - **`cornerRadius`:** an extra region whose part area is ≥ 80 % on corner/fillet surfaces (`.corner[i]`, region arcs, `.floorFillet`) and whose `maxDev` is at most that surface's radius.
+  - **Inside-out reference** (negative volume after welding) is turned over rather than refused. The closed check is done in the worker on the welded mesh, not stored on the reference record.
+  - **The part mesh is copied** to the worker (welded there, 1e-6 mm): the evaluated solid lives in the evaluation service, not in the geometry worker, so reusing it would need a new cross-process handle. Measured cost is small next to the booleans.
+- **Performance:** the full enclosure (77 K triangles) against its approximated design: ≈ 2.1–2.4 s in-process under vitest on the dev machine (`toMesh` of the two boolean results ≈ 1.3 s, regions ≈ 0.7 s); the < 2 s target is not quite met. The next lever is reusing the kept reference solid between runs (`fromMesh` of the reference is repeated per run).
+- **Enclosure check:** with the cavity, the two bottom steps and the outline profile imported from sections, nothing is missing (maxMissing < 0.1 mm); the omitted features come out as extra regions: the top edge round with the notch (4.27 mm) and rebate along it as one region, the back slot (1.09 mm) and the six pilot holes (1.13–1.54 mm) each on their own; the frame the through profile frees is in `offcuts`. A cavity 2 mm too deep ranks first as missing on `pocket1.floor`.
+- **Agent:** the primer's Reference bullet names `design_reference_compare { source: { kind: "part" } }` → `job_wait`.
+- Budget: 111 284 → 112 165 characters (+ 0.88 K, one new tool, 126 tools; [llm-api.md § Implementation](../architecture/llm-api.md#implementation-task-310)).
+- Tests: `reference-compare.test.ts` (BVH against brute force and Voronoi regions, weld/closed/pieces; the test part against itself, a pocket 0.2 mm too deep, a missing pocket within 1 % of its volume, sharp vs r 3 corners as `cornerRadius` with the threshold moving them to `below`, refusals; the height-map fallback for an open mesh; the enclosure approximated and with a too-deep cavity).
+
 ## Performance
 
 The worker keeps the last mesh read per asset. Measured on the full enclosure body (77 112 triangles, dev machine): `levels` ≈ 120 ms (target < 100 ms for 50 K triangles: in line), section chaining 3–8 ms and fitting 2–14 ms (target < 200 ms); `holes` (P3) ≈ 210–225 ms per face (the first read; the worker caches it). At the 1 M triangle warn limit, about ten times that.
@@ -270,7 +290,9 @@ The worker keeps the last mesh read per asset. Measured on the full enclosure bo
 | Item                                                         | Where                                                        |
 | ------------------------------------------------------------ | ------------------------------------------------------------ |
 | `detail: "full"` on `find`                                   | When an agent needs loop geometry without making shapes      |
-| Compare, overlay                                             | [P4–P5](#phases)                                             |
+| Compare overlay                                              | [P5](#phases)                                                |
+| Signed distance per part vertex (`mesh-distance.ts`)         | P5, for the overlay's colours                                |
+| `source: plan` (simulated cut)                               | [deviation.md](deviation.md), the v0.4 follow-up             |
 | Setup faces in the Reference panel's face picker             | When the panel reads against a plan (P2 is agent API only)   |
 | Silhouette (outline of the whole model seen from a face)     | Later; a section near the widest level serves                |
 | Feature recognition into operations                          | Assisted recreation, later                                   |
@@ -301,7 +323,7 @@ Fixtures: the enclosure STL (`src/core/design/__fixtures__/enclosure-wood-base.s
 - **P1 UI** (`Reference.test.tsx`, axe): Levels rows and choosing one sets the depth; Section draws fitted loops with corner chips; Create shape(s) sends the command; e2e with the enclosure fixture (renders behind `DFYOM_RENDERS=1`, hidden windows per the fixture).
 - **P2:** `{ setupId }` of a bottom setup equals `stock.bottom`; `frame: 'setup'` with a 90° rotation matches `setupFrame`.
 - **P3 holes** (`mesh-holes.test.ts`): synthetic through, flat, cone bottoms; counterbore and countersink mouths (angle within 1°); a boss is not a hole; a 2 × 2 grid and a 6-hole circle become patterns, an irregular set a list; suggestions round-trip: sending the suggested args and evaluating gives a part whose hole sections match within 0.02 mm; the enclosure's four foot holes come back as one countersunk group, grid 2 × 2, at (±88.53, ±44.27); `noTool` with a library whose smallest tool is larger.
-- **P4 compare** (`reference-compare.test.ts`): reference = the evaluated test part written as STL → no region over the threshold; a pocket 0.2 mm too deep → one `missing` region, maxDev 0.2 ± 0.01, attributed to that pocket; a missing pocket → one `extra` region with its volume within 1 %; an open mesh → `method: 'heightmap'`; the black-box project's design against its STL lists the eased cavity step (extra, ≈ 1.09 mm) and the omitted wall slots (extra) as the worst regions; perf: enclosure < 2 s on the reference machine (`npm run perf`).
+- **P4 compare** (`reference-compare.test.ts`): reference = the evaluated test part written as STL → no region over the threshold; a pocket 0.2 mm too deep → one `missing` region, maxDev 0.2 ± 0.01, attributed to that pocket; a missing pocket → one `extra` region with its volume within 1 %; an open mesh → `method: 'heightmap'`; the black-box project's design against its STL lists the eased cavity step (extra, ≈ 1.09 mm) and the omitted wall slots (extra) as the worst regions; perf: enclosure < 2 s on the reference machine (`npm run perf`). As built: see [§ Implementation (P4)](#implementation-p4).
 - **P5 overlay:** the overlay's colour per vertex equals core's signed distance for a fixture; toggling runs and stops the job; stale result after an edit is replaced; text summary; renders light and dark for review.
 
 ## Glossary
