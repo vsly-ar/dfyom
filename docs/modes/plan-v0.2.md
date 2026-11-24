@@ -20,7 +20,7 @@ Settled with the user when this doc was accepted (D18, 2026-11-22: Q15 as taken 
 - **Derivation:** `plan.create` and every rebuild group the plan operations by the [approach direction](design-v0.2.md#face) of their design operation's `on` face: **one setup per direction** in use. A part with only top operations keeps exactly one setup, as in v0.1.
 - **Setup record** (extends [plan-v0.1.md § Plan record](plan-v0.1.md#plan-record)): `{ id, name, direction, rotation?, workOffset, clearanceHeight, retractHeight, operations[] }` (`rotation` only if task E1 finds it cheap; absent = 0°). `direction` is the part direction that points up to the spindle (machine +Z). Default name: "Top", "Bottom", "Front", "Right", "Back", "Left" (a second setup of one direction: "Top 2").
 - **Orientation:** the setup's machine axes are the [face frame](design-v0.2.md#face-frame) of its direction: `u` → machine +X, `v` → machine +Y, `n` → machine +Z. For `+z` this is v0.1's fixed orientation ([plan-v0.1.md § Setup](plan-v0.1.md#setup-orientation-work-zero-safe-heights)). A setup may be rotated 0/90/180/270° about the spindle axis if cheap ([decision 2](#decisions)): the rotation turns `u` and `v` about machine +Z, and the work zero moves to the lower-left corner of the rotated face (`plan.setup.update { rotation }`).
-- **Work zero:** `G54` at the face frame origin (the lower-left corner of the up-facing stock face, seen from above on the machine), Z0 on that stock face. Each setup is re-zeroed by the operator after re-fixturing; each exports its own program. The stock's thickness tolerance after a flip absorbs into `breakthrough` for through cuts, as in v0.1.
+- **Work zero:** `G54` at the setup's zero, by default the face frame origin (the lower-left corner of the up-facing stock face, seen from above on the machine), Z0 on that stock face. Since alignment phase 1 the X/Y zero is the user's free choice, negative work X/Y included ([§ Alignment (phase 1)](#alignment-phase-1)). Each setup is re-zeroed by the operator after re-fixturing; each exports its own program. The stock's thickness tolerance after a flip absorbs into `breakthrough` for through cuts, as in v0.1.
 - **Safe heights** per setup as in v0.1, measured from the setup's up-facing stock face and the operation's `on` face.
 - **Machine checks per setup:** the stock size in the setup's orientation (extent along `u`, `v`, `n`) + `clearanceHeight` must fit the travel.
 
@@ -190,6 +190,15 @@ User decision D13 (2026-11-21), specified in [apply.md](../architecture/apply.md
 - `plan.create`, `plan.rebuild` and `plan.status.set` into `draft` (and un-archiving) apply first ([implicit apply](../architecture/apply.md#implicit-apply)).
 - Implemented by task P2 ([apply.md § Implementation (task P2)](../architecture/apply.md#implementation-task-p2)).
 - Draft plans follow **library** edits on Apply too, and Apply regenerates stale toolpaths of plans whose toolpaths the user generated ([apply.md decisions](../architecture/apply.md#decisions) 4 and 5).
+
+## Alignment (phase 1)
+
+Status: accepted (2026-11-24, folded in from [alignment.md](alignment.md), proposal [Q58–Q69](../plans/proposal-multi-setup-alignment.md#questions-for-the-user)); implemented in part ([alignment.md § Implementation (slice 1)](alignment.md#implementation-slice-1)). It changes the sections above as follows; the details are in alignment.md.
+
+- **Setup record** gains `zero?` (the work zero, X/Y anywhere in the setup frame, absent = the face frame origin) and `alignment?` (its alignment points): [alignment.md § Setup work zero](alignment.md#setup-work-zero-q61), [§ Alignment points](alignment.md#alignment-points). Split keeps both on the source setup; merge concatenates the points and keeps the first setup's zero; a rebuild keeps them.
+- **Toolpaths per setup:** after the quarter turn the toolpath is shifted by the zero; no zero = byte-identical toolpaths and gCode.
+- **Aid plan operations** without a design operation, kept across rebuilds, and their order across setups: [alignment.md § Amendment to plan-v0.2.md](alignment.md#amendment-to-plan-v02md-proposed-alignment-phase-1) (not built yet).
+- **Setup change in Run:** the zero the operator sets is the setup's zero, and a setup with alignment points has the alignment step before "Start": [alignment.md § Amendment to the setup-change prompt](alignment.md#amendment-to-the-setup-change-prompt-proposed-alignment-phase-1) (not built yet: waits for `machine-lane`).
 
 ## Later
 

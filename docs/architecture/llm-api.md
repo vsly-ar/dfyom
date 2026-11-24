@@ -439,6 +439,14 @@ Status: implemented (P1–P4; the user answered Q70–Q80 on 2026-11-24, all rec
 - **Fit result fields:** `design_reference_import` and `_update` return `scale`, `placed` and `facingDepth` (output schema only).
 - **Primer:** one bullet, "Reference: `design_reference_find` (levels, section) → `design_shape_import { from }`"; it gains holes (P3: "holes → their suggested hole/drilling (+ clones) args") and compare (P4: "`design_reference_compare { source: { kind: "part" } }` → `job_wait`").
 
+## Amendment (alignment phase 1, proposed)
+
+Status: accepted (2026-11-24, with [alignment.md](../modes/alignment.md)); slice 1 implemented (DF78) · Spec: [alignment.md § Agent API](../modes/alignment.md#agent-api)
+
+Four new tools (`plan.alignment.set`, `plan.aid.set`, `run.align.goto`, `run.align.tick`) and a `zero` arg on `plan.setup.update`: about **2.9 K** characters of `tools/list` (target ≤ 3 K), against 13.2 K headroom after A8 (10.7 K with `machine-lane`, before the v0.4 follow-up's ≈ 5 K, [Q41](../plans/v0.4-llm-first.md#questions-for-the-user)). The run tools are `machine: true` and UI only on a real connection ([alignment.md § Amendment to run.md § Safety](../modes/alignment.md#amendment-to-runmd--safety-proposed-alignment-phase-1)).
+
+- **Slice 1 (DF78):** `plan_alignment_set` and `plan_setup_update { zero }` only (`plan.aid.set` with aids, `run.align.*` with the Run step). Measured: MEASURED_PLACEHOLDER. `plan_get` lists each setup's `zero` (setup frame, mm) and `alignment` (`id`, `name`, `wcs` X/Y). The primer's setup line says WCS = setup frame minus the zero, negative X/Y valid.
+
 ## Implementation (task 3.10)
 
 Decisions and findings of the implementation, where this doc left room or proved wrong:
