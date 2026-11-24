@@ -37,6 +37,7 @@ export const PLAN_WARNING_CODES = [
   'plan.zRef',
   'plan.links.clampHeightUnknown',
   'plan.links.collision',
+  'plan.alignment',
   'plan.workholding.none',
   'plan.workholding.clearanceLow',
   'plan.workholding.collision',

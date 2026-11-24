@@ -195,6 +195,12 @@ export const ERROR_CODES = {
       'Setups of different face directions cannot be joined, and a plan with several setups is not exported as one program.',
     retryable: false,
   },
+  // Alignment phase 1 (DF78): docs/modes/alignment.md#commands
+  'plan.alignment': {
+    severity: 'warn',
+    userMessage: 'This alignment point or work zero cannot be used here.',
+    retryable: false,
+  },
   // Plan mode (task 2.10): docs/modes/plan-v0.1.md#toolpath-generators-task-210
   'plan.check': {
     severity: 'warn',

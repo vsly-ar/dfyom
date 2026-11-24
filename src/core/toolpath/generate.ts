@@ -60,7 +60,14 @@ export function inputOverreach(input: PlanOperationInput, toolpath: Toolpath): O
     thickness: input.stock.thickness.canonical,
   }
   const size = setupOrientation(input.setup.direction, input.setup.rotation, stock).size
-  return toolpathOverreach(toolpath, input.tool.diameter.canonical, [size[0], size[1]])
+  // the stock's front-left corner sits at −zero in a WCS with a moved zero (alignment phase 1)
+  const z = input.setup.zero ?? [0, 0]
+  return toolpathOverreach(
+    toolpath,
+    input.tool.diameter.canonical,
+    [size[0], size[1]],
+    [-z[0] || 0, -z[1] || 0],
+  )
 }
 
 const OverreachSchema = z
@@ -104,7 +111,7 @@ export const toolpathGenerateJob = defineCommand({
   kind: 'job',
   name: 'plan.toolpath.generate',
   summary:
-    'Generate the toolpaths of a plan (or of some plan operations) in machining order; reports each operation as generated, cached or failed.',
+    'Generate the toolpaths of a plan (or some plan operations) in machining order; reports each as generated, cached or failed.',
   title: () => 'Generate toolpaths',
   machine: false,
   args: z.object({

@@ -151,8 +151,9 @@ export interface FieldExtent {
 
 /**
  * The field over `extent` (grown to whole cells anchored at the WCS origin): material top Z0
- * inside the stock rectangle `[0, size[0]] × [0, size[1]]` (a cell touching it counts), none
- * (−∞) outside; no clamp floor known (+∞) anywhere.
+ * inside the stock rectangle `[o, o + size]` (a cell touching it counts), none (−∞) outside; no
+ * clamp floor known (+∞) anywhere. `origin` (o): the stock's front-left corner in the WCS, `−zero`
+ * when the setup's work zero is moved (alignment DF78); default the WCS origin.
  */
 export class StockHeights {
   /** Index of the first cell column / row (cell i spans [i·c, (i+1)·c]). */
@@ -172,22 +173,24 @@ export class StockHeights {
     size: Vec2,
     extent: FieldExtent,
     readonly cell = STOCK_CELL,
+    origin: Vec2 = [0, 0],
   ) {
     const c = cell
-    this.i0 = Math.floor(Math.min(extent.minX, 0) / c) - 1
-    this.j0 = Math.floor(Math.min(extent.minY, 0) / c) - 1
-    this.nx = Math.floor(Math.max(extent.maxX, size[0]) / c) + 2 - this.i0
-    this.ny = Math.floor(Math.max(extent.maxY, size[1]) / c) + 2 - this.j0
+    const [ox, oy] = origin
+    this.i0 = Math.floor(Math.min(extent.minX, ox) / c) - 1
+    this.j0 = Math.floor(Math.min(extent.minY, oy) / c) - 1
+    this.nx = Math.floor(Math.max(extent.maxX, ox + size[0]) / c) + 2 - this.i0
+    this.ny = Math.floor(Math.max(extent.maxY, oy + size[1]) / c) + 2 - this.j0
     const n = this.nx * this.ny
     this.top = new Float64Array(n).fill(-Infinity)
     this.pinned = new Uint8Array(n)
     this.floor = new Float64Array(n).fill(Infinity)
     for (let j = 0; j < this.ny; j++) {
       const y0 = (this.j0 + j) * c
-      if (y0 + c < 0 || y0 > size[1]) continue
+      if (y0 + c < oy || y0 > oy + size[1]) continue
       for (let i = 0; i < this.nx; i++) {
         const x0 = (this.i0 + i) * c
-        if (x0 + c < 0 || x0 > size[0]) continue
+        if (x0 + c < ox || x0 > ox + size[0]) continue
         this.top[j * this.nx + i] = 0
       }
     }

@@ -217,3 +217,62 @@ test('setup panel: setups in machining order, reorder, rotation and one program 
   await page.keyboard.press('Escape')
   expect(dfyom.rendererErrors).toEqual([])
 })
+
+// DF78 (alignment phase 1): the top setup's work zero moved left of the stock (negative X is
+// valid), a stock corner added as an alignment point from the inspector's menu, its marker in the
+// viewport, and the exported program's header naming both. With DFYOM_RENDERS=1 light and dark
+// renders go to design/features/renders/df78-alignment-*.png.
+// Doc: docs/modes/alignment.md#setup-work-zero-q61, docs/conventions/ui.md#design-and-plan-controls-v02
+test('setup work zero and alignment points: inspector, viewport marker, program header', async ({
+  dfyom,
+}) => {
+  test.setTimeout(90_000)
+  const page = await dfyom.app.firstWindow()
+  await page.waitForLoadState('domcontentloaded')
+  if (RENDERS) await page.setViewportSize({ width: 1280, height: 800 })
+  await stubExportDialog(dfyom.app, dfyom.dataDir)
+  await bottomAndTopPlan(page)
+
+  await page.getByRole('radio', { name: 'Plan' }).click()
+  const navigator = page.getByRole('navigation', { name: 'Navigator' })
+  const setups = navigator.getByRole('list', { name: 'Setups in machining order' })
+  const top = setups.getByRole('button', { name: /^2\. Top/ })
+  await top.click({ position: { x: 24, y: 12 } })
+  const inspector = page.getByRole('complementary', { name: 'Inspector' })
+  if (!(await inspector.isVisible())) await page.getByRole('button', { name: 'Inspector' }).click()
+  await expect(inspector.getByRole('heading', { name: 'Work zero' })).toBeVisible()
+
+  // X −20: left of the stock
+  const x = inspector.getByLabel('Work zero X', { exact: true })
+  await x.fill('-20')
+  await x.press('Enter')
+  await expect(top).toContainText('G54 X -20 mm Y 0 mm')
+
+  // the top's back-right corner from the menu: WCS X 120 Y 60
+  await inspector.getByRole('button', { name: 'Add an alignment point' }).click()
+  const menu = page.getByRole('menu', { name: 'Add an alignment point' })
+  await menu.getByRole('menuitem', { name: /Top back-right corner/ }).click()
+  const list = inspector.getByRole('list', {
+    name: 'Alignment points in the order the spindle visits them',
+  })
+  await expect(list.getByLabel('Point 1 name', { exact: true })).toHaveValue(
+    'Top back-right corner',
+  )
+  await expect(list.getByText(/X 120 mm\s+Y 60 mm/)).toBeVisible()
+  await expect(page.locator('[data-align-point]')).toHaveCount(1)
+  await list.getByLabel('Point 1 name', { exact: true }).hover()
+  await render(page, 'df78-alignment')
+
+  // the program names the zero and the point
+  await navigator.getByRole('button', { name: 'Generate toolpaths' }).click()
+  await expect(navigator.getByText('All toolpaths up to date.')).toBeVisible({ timeout: 30_000 })
+  await top.click({ position: { x: 24, y: 12 } })
+  await navigator.getByRole('button', { name: 'Export Top gCode…' }).click()
+  const done = page.getByRole('dialog', { name: 'gCode exported' })
+  await expect(done.getByText('Setup Top (2 of 2)')).toBeVisible({ timeout: 30_000 })
+  await done.getByRole('button', { name: 'Close' }).click()
+  const program = readFileSync(`${dfyom.dataDir}/two-sides-s2.nc`, 'utf8')
+  expect(program).toContain('(Work zero G54 X0 Y0: X -20 Y 0 mm from that corner)')
+  expect(program).toContain('(Align 1: Top back-right corner at X 120 Y 60)')
+  expect(dfyom.rendererErrors).toEqual([])
+})

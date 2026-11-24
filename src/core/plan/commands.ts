@@ -95,6 +95,15 @@ import { checkAllowed, nextStatus } from './status'
 import { applyStrategyArgs, StrategyArgSchema, strategyIssues, resolveStrategy } from './strategy'
 import { suggestTools } from './suggest'
 import { designToolFindings } from './tool-resolution'
+import { alignmentFindings, alignmentSources } from './alignment'
+import { AlignmentSourceDtoSchema } from './alignment.dto'
+import {
+  alignmentView,
+  applySetupZero,
+  planAlignmentSet,
+  SetupAlignmentSchema,
+  SetupZeroArgSchema,
+} from './alignment-commands'
 
 // ── helpers ───────────────────────────────────────────────────────────────────────────────
 
@@ -684,7 +693,7 @@ const setupUpdate = defineCommand({
   kind: 'document',
   name: 'plan.setup.update',
   summary:
-    'Rename or rotate a setup, change its safe heights (clearance above the stock top, retract above on), links between operations or clamp height.',
+    'Rename or rotate a setup, move its work zero, set its safe heights, links or clamp height.',
   title: () => 'Update setup',
   machine: false,
   args: z.object({
@@ -695,16 +704,14 @@ const setupUpdate = defineCommand({
       "Up from the stock top; > retractHeight; 'auto' follows the workholding",
     ),
     retractHeight: Src.optional().describe("Up from the operation's on surface; > 0"),
-    retraction: z
-      .enum(RETRACTIONS)
-      .optional()
-      .describe('Links between operations: minimum (lowest safe level) or full (clearance)'),
-    clampHeight: Src.nullable()
-      .optional()
-      .describe('Clamps up from the stock top, ≥ 0; null = unknown'),
+    retraction: z.enum(RETRACTIONS).optional().describe('full: links at clearance'),
+    clampHeight: Src.nullable().optional().describe('Above stock top; null = unknown'),
+    zero: SetupZeroArgSchema.optional().describe(
+      'At [x, y] from the up face front-left corner (negative ok) or on a point; null = corner',
+    ),
   }),
   result: Empty,
-  run(draft, args) {
+  run(draft, args, ctx) {
     const where = 'plan.setup.update'
     const found = planFor(draft, args.planId, where)
     if (found.isErr()) return found
@@ -757,6 +764,18 @@ const setupUpdate = defineCommand({
     // 0° is stored as absent (v0.1 records)
     if (args.rotation === 0) delete target.rotation
     else if (args.rotation !== undefined) target.rotation = args.rotation
+    // alignment phase 1: docs/modes/alignment.md#setup-work-zero-q61
+    if (args.zero !== undefined) {
+      const z = applySetupZero(
+        draft,
+        args.planId,
+        args.setupId,
+        args.zero,
+        where,
+        ctx.services.region2d,
+      )
+      if (z.isErr()) return z
+    }
     return Ok({})
   },
 })
@@ -1411,7 +1430,7 @@ const FeedExplained = z
 const operationFeedsGet = defineQuery({
   name: 'plan.operation.feeds.get',
   summary:
-    "Explain a plan operation's feeds and speeds: calculator inputs, each field's source and derivation (formulas), and surface speed, chip thinning, power and spindle load at the values used.",
+    "Explain a plan operation's feeds and speeds: calculator inputs, each field's source and formulas, and surface speed, chip thinning, power and spindle load.",
   args: z.object(PlanOpArg),
   result: z.object({
     auto: AutoDTO,
@@ -1599,7 +1618,7 @@ const staleList = defineQuery({
 const toolSuggest = defineQuery({
   name: 'plan.tool.suggest',
   summary:
-    "Rank the library tools that pass the checks of a plan operation (the design's tool, matching the design tool, preset for the material, already used, largest diameter), with reasons.",
+    "Rank the library tools that pass a plan operation's checks (design tool match, material preset, already used, largest diameter), with reasons.",
   args: z.object(PlanOpArg),
   result: z.object({
     tools: z.array(
@@ -1728,6 +1747,24 @@ const warningList = defineQuery({
     links: z
       .array(SetupLinksSchema)
       .describe('Links between operations per setup (DF64); null until its toolpaths are current'),
+    alignment: z
+      .array(SetupAlignmentSchema)
+      .describe('Work zero and alignment points of each setup that has either (alignment phase 1)'),
+    alignmentSources: z
+      .array(
+        z.object({
+          setupId: z.string(),
+          sources: z.array(
+            z.object({
+              source: AlignmentSourceDtoSchema,
+              name: z.string(),
+              kind: z.enum(['point', 'hole', 'edge']),
+              at: z.tuple([z.number(), z.number()]).describe('X, Y in the setup frame (mm)'),
+            }),
+          ),
+        }),
+      )
+      .describe('Sources each setup may use for a point (the inspector menu; not in plan_get)'),
   }),
   run(doc, args, ctx) {
     const where = 'plan.warning.list'
@@ -1742,6 +1779,7 @@ const warningList = defineQuery({
             : shapeFindings(loaded.unwrap(), ctx.services.region2d)),
           ...designToolFindings(loaded.unwrap(), libraryTools(ctx.services), ctx.services.region2d),
           ...zRefFindings(loaded.unwrap(), ctx.services.region2d),
+          ...alignmentFindings(loaded.unwrap(), ctx.services.region2d),
           ...planWorkholdingFindings(doc, loaded.unwrap(), ctx.services),
         ]
       : [
@@ -1817,6 +1855,21 @@ const warningList = defineQuery({
           outline: r.outline === undefined ? null : outlineDTO(r.outline),
         })),
       links,
+      alignment: loaded.isOk() ? alignmentView(loaded.unwrap(), ctx.services.region2d) : [],
+      alignmentSources: loaded.isOk()
+        ? loaded.unwrap().setups.map((s) => ({
+            setupId: s.id,
+            sources: alignmentSources(loaded.unwrap(), s, ctx.services.region2d).map((o) => ({
+              source: o.source,
+              name: o.name,
+              kind: o.kind,
+              at: [
+                Math.round(o.frame[0] * 1000) / 1000 || 0,
+                Math.round(o.frame[1] * 1000) / 1000 || 0,
+              ] as [number, number],
+            })),
+          }))
+        : [],
     })
   },
 })
@@ -1855,6 +1908,7 @@ export const PLAN_COMMANDS: readonly AnyCommand[] = [
   setupSplit,
   setupMerge,
   setupMove,
+  planAlignmentSet,
   operationUpdate,
   operationMove,
   toolAssign,

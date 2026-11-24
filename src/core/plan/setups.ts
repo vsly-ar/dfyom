@@ -10,6 +10,7 @@ import { DIRECTION, DIRECTION_LABEL, SETUP_ORDER, type Direction } from '../geom
 import type { Region2dPort } from '../geometry/2d/port'
 import type { Stock } from '../library/stock'
 import type { PlanWarning } from './checks'
+import { ALIGNMENT_POINTS_MAX } from './alignment.dto'
 import { defaultOrder, operationDirections, orderFindings } from './order'
 import type { PlanDTO, PlanOperationDTO, SetupDTO, SetupRotation } from './plan.dto'
 
@@ -235,10 +236,18 @@ export function mergeSetups(
   for (const s of merged.slice(1))
     if (setupDirection(s) !== setupDirection(into))
       return directionMismatch(setupDirection(into), setupDirection(s), 'setupIds', where)
+  // alignment phase 1: the points of all, the first setup's zero (docs/modes/plan-v0.2.md#alignment-phase-1)
+  const alignment = merged.flatMap((s) => s.alignment ?? []).slice(0, ALIGNMENT_POINTS_MAX)
   return Ok(
     plan.setups.flatMap((s) =>
       s === into
-        ? [{ ...s, operations: allOperations(merged) }]
+        ? [
+            {
+              ...s,
+              operations: allOperations(merged),
+              ...(alignment.length === 0 ? {} : { alignment }),
+            },
+          ]
         : setupIds.includes(s.id)
           ? []
           : [s],

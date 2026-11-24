@@ -8,7 +8,8 @@
 import type { Region2dPort } from '../../geometry/2d/port'
 import type { Toolpath } from '../../toolpath/model'
 import { toGeneratorInputs } from '../../toolpath/inputs'
-import { setupWcs, toWcs } from '../../toolpath/wcs'
+import { setupWcs, toWcs, turnToolpath } from '../../toolpath/wcs'
+import { setupZero } from '../alignment'
 import type { PlanWarning } from '../checks'
 import type { PlanOperationInput } from '../inputs'
 import { planOperationLabel } from '../labels'
@@ -184,11 +185,16 @@ export function unmachinedFindings(
     const setup = plan.setups.find((s) => s.id === input.setup.id)
     if (setup === undefined) continue
     const h = setupWorkholding(setup, plan.stock)
-    const wcs = setupWcs(input.setup.direction, input.setup.rotation, {
-      length: input.stock.length.canonical,
-      width: input.stock.width.canonical,
-      thickness: input.stock.thickness.canonical,
-    })
+    const wcs = setupWcs(
+      input.setup.direction,
+      input.setup.rotation,
+      {
+        length: input.stock.length.canonical,
+        width: input.stock.width.canonical,
+        thickness: input.stock.thickness.canonical,
+      },
+      input.setup.zero,
+    )
     for (const u of list) {
       const corners = [u.bounds[0], u.bounds[1]].map((p) => (wcs === undefined ? p : toWcs(p, wcs)))
       const xs = corners.map((p) => p[0])
@@ -244,7 +250,14 @@ export function workholdingFindings(
     if (setupId !== undefined && setup.id !== setupId) continue
     const mine = inputs.filter((i) => i.setup.id === setup.id)
     if (mine.length === 0) continue
-    const pairs = mine.map((input) => ({ input, toolpath: current(input) }))
+    // the items are in the setup frame, the toolpaths in the WCS: a moved work zero (DF78,
+    // docs/modes/alignment.md#frames) is added back to the moves before the check
+    const [zx, zy] = setupZero(plan, setup, port)
+    const back = (tp: Toolpath | undefined) =>
+      tp === undefined || (zx === 0 && zy === 0)
+        ? tp
+        : turnToolpath(tp, { rotation: 0, size: [0, 0], zero: [-zx, -zy] })
+    const pairs = mine.map((input) => ({ input, toolpath: back(current(input)) }))
     if (pairs.some((p) => p.toolpath === undefined)) continue
     out.push(
       ...moveFindings(

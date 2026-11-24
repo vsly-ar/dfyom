@@ -23,6 +23,7 @@ import type { OperationGeometry, Vec2 } from '../geometry/model'
 import { toGeometryInput } from '../design/geometry-input'
 import { DIRECTION_LABEL } from '../geometry/face'
 import { setupWcs, toWcs, fromWcs } from '../toolpath/wcs'
+import { setupZero } from './alignment'
 import type { PlanWarning } from './checks'
 import { planOperationLabel } from './labels'
 import type { LoadedPlan } from './plan'
@@ -155,7 +156,7 @@ function compute(plan: LoadedPlan, port: Region2dPort): ToolRunZRef[] {
   const out: ToolRunZRef[] = []
   for (const setup of plan.setups) {
     const direction = setupDirection(setup)
-    const wcs = setupWcs(direction, setupRotation(setup), stock)
+    const wcs = setupWcs(direction, setupRotation(setup), stock, setupZero(plan, setup, port))
     const frame: SpotFrame =
       wcs === undefined
         ? { toWcs: (p) => p, fromWcs: (p) => p }

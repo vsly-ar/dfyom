@@ -79,6 +79,15 @@ export interface SetupHeader {
   /** Stock extents along machine X, Y, Z (mm). */
   readonly stock: Vec3
   /**
+   * The work zero's offset from that corner along machine X, Y (mm; alignment phase 1,
+   * docs/modes/alignment.md#export); absent = at the corner (the header as before).
+   */
+  readonly zero?: readonly [number, number]
+  /** The alignment point the zero is on, by name. */
+  readonly zeroOn?: string
+  /** Alignment points in cycle order: name and WCS X, Y (mm); absent or empty = none. */
+  readonly alignment?: readonly { readonly name: string; readonly at: readonly [number, number] }[]
+  /**
    * How far the program's tools reach past the stock sides (mm, hardening DF59); absent = no
    * reach lines.
    */

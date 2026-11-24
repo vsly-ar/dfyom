@@ -1,14 +1,15 @@
 // Setup inspector (v0.2 task F6): a setup selected in the setup panel – its name, the face up to
-// the spindle (direction icon and word), the work zero G54 at its part corner, how far the tool
+// the spindle (direction icon and word), the work zero G54 (its corner, offset or point), how far the tool
 // reaches past the stock (DF59), the rotation about the spindle axis (0/90/180/270°), the safe
 // heights (clearance with the clamp note, or the item it follows since workholding.md; retract;
 // moved here from the navigator), the links between operations and, without workholding items,
 // the clamp height (DF64), the Z headroom estimate (DF68), the tool changes (DF66, `ToolChanges`:
 // the tool runs, reorderable), the workholding (`Workholding`, workholding.md) and the machine
-// checks of this setup. Each change is one `plan.setup.update`.
+// checks of this setup. Each change is one `plan.setup.update`. DF78: the work zero and the
+// alignment points (`AlignmentFields`).
 // Read-only (with the plan's reason in the navigator) outside draft and settled design.
 // Doc: docs/conventions/ui.md#design-and-plan-controls-v02, docs/modes/plan-v0.2.md#setups-from-face-directions,
-// docs/modes/safe-links.md#agent-api-and-settings
+// docs/modes/safe-links.md#agent-api-and-settings, docs/modes/alignment.md#plan-ui
 import { useState } from 'react'
 import { fieldContext } from '../../../../core/design/operation'
 import { DIRECTION_LABEL } from '../../../../core/geometry/face'
@@ -52,10 +53,11 @@ import {
   directionOfSetup,
   planPart,
   planStockSize,
-  setupCorner,
   setupOverreach,
+  setupZeroWords,
   type ToolpathEntry,
 } from './model'
+import { AlignmentFields } from './AlignmentFields'
 import { usePlanCommand, usePlanState } from './plan-store'
 import styles from './Plan.module.css'
 import { NameField, planWarningLabels, planWarningView } from './PlanInspector'
@@ -64,6 +66,7 @@ import { usePlanSelection } from './usePlan'
 import { Workholding } from './Workholding'
 
 const m = planMessages.setup
+const NO_SOURCES: readonly never[] = []
 const wm = planMessages.workholding
 
 /** A length in mm as a quantity in the document's units ("14 mm", "0.551 in"). */
@@ -100,6 +103,10 @@ export function SetupInspector({
   const mine = warnings.filter((w) => w.params['setupId'] === setup.id)
   const headroom = zHeadroomText(plan, mine, warnings)
   const reach = reachText(setupOverreach(setup, toolpaths), units)
+  const info = usePlanState((s) => s.data?.alignment.find((a) => a.setupId === setup.id))
+  const sources = usePlanState(
+    (s) => s.data?.alignmentSources.find((a) => a.setupId === setup.id)?.sources,
+  )
   // workholding.md#links-and-safe-heights: the clearance follows the items unless the user set it
   const planStock = planPart(doc, plan).loaded?.stock
   const holding = planStock === undefined ? undefined : setupWorkholding(setup, planStock)
@@ -189,7 +196,12 @@ export function SetupInspector({
             {stock !== undefined ? (
               <>
                 <dt>{m.workOffset}</dt>
-                <dd>{m.workOffsetValue(setupCorner(setup, stock), face)}</dd>
+                <dd>
+                  {m.workOffsetValue(
+                    setupZeroWords(setup, stock, info, (mm) => formatHeight(mm, units)),
+                    face,
+                  )}
+                </dd>
               </>
             ) : null}
             <dt>{m.reach}</dt>
@@ -293,6 +305,15 @@ export function SetupInspector({
             onCancelGesture={cancelGesture}
           />
         )}
+        <AlignmentFields
+          plan={plan}
+          setup={setup}
+          units={units}
+          readOnly={readOnly}
+          info={info}
+          sources={sources ?? NO_SOURCES}
+          warnings={mine}
+        />
         <ToolChanges plan={plan} setup={setup} units={units} toolpaths={toolpaths} />
         <Workholding doc={doc} plan={plan} setup={setup} />
         {mine.length > 0 ? (

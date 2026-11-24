@@ -109,6 +109,9 @@ export function cachedSetupLinks(
   settings: LinkSettings,
 ): SetupLinks {
   const machine = inputs[0]?.machine
+  // the toolpaths are in the WCS: a moved work zero (alignment DF78) moves the stock and items
+  const zero = inputs[0]?.setup.zero
+  if (zero !== undefined) settings = { ...settings, zero: [zero[0], zero[1]] }
   const key = JSON.stringify([inputs.map((i) => i.inputHash), settings])
   const hit = cache.get(key)
   // the same toolpath objects too (the toolpath cache hands out one object per hash)

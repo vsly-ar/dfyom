@@ -170,6 +170,39 @@ describe('plan.warning.list links', () => {
     expect(out.text).toContain('Every move checked')
     expect(out.text).not.toContain('Keep clamps below')
   })
+
+  // alignment.md S12: the toolpaths are in the WCS, the stock field and the items in the setup frame
+  it('a moved work zero keeps the field and the workholding items in the toolpaths frame', async () => {
+    const { s, planId, setupId } = await onePlan()
+    // a tall block off the stock's left side: clear of the pockets' link in the setup frame, but
+    // under it if the link (shifted −40, −25 into the WCS) were read without the zero added back
+    await s.run('plan.workholding.set', {
+      planId,
+      setupId,
+      items: [{ kind: 'block', center: ['-18', '5'], length: '4', width: '4', top: '8' }],
+    })
+    const generate = async () => {
+      const { jobId } = expectOk(await s.d.dispatch('plan.toolpath.generate', { planId }, ui))
+        .value as { jobId: string }
+      expectOk(await s.d.job(jobId).unwrap().result)
+    }
+    await generate()
+    const levels = (t: string) =>
+      t
+        .split('\n')
+        .filter((l) => /^G0 Z-?[\d.]+$/.test(l))
+        .map((l) => Number(l.slice(4)))
+    const corner = await exported(s, planId)
+    expect(corner.lowLinks).toBeGreaterThan(0)
+    await s.run('plan.setup.update', { planId, setupId, zero: { at: ['40', '25'] } })
+    await generate()
+    const moved = await exported(s, planId)
+    // the same links: the same levels and number of low links, the moves 40, 25 mm over
+    expect(moved.lowLinks).toBe(corner.lowLinks)
+    expect(levels(moved.text)).toEqual(levels(corner.text))
+    // the moves are in the WCS: left of the moved zero
+    expect(moved.text).toMatch(/ X-\d/)
+  })
 })
 
 describe('export with minimum retraction', () => {

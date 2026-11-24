@@ -52,7 +52,10 @@ function linkFloor(
   clamp = clampOf(s),
 ): number {
   const need = corridorFloor(f, a, b, radius, s.margin, clamp)
-  const items = s.obstacles?.floorAlong([a[0], a[1]], [b[0], b[1]], radius) ?? -Infinity
+  // the items are in the setup frame, the moves in the WCS: add a moved zero back (alignment S12)
+  const [zx, zy] = s.zero ?? [0, 0]
+  const items =
+    s.obstacles?.floorAlong([a[0] + zx, a[1] + zy], [b[0] + zx, b[1] + zy], radius) ?? -Infinity
   return Math.max(need, items)
 }
 
@@ -74,6 +77,11 @@ export interface LinkSettings {
   readonly stock: Vec3
   /** The machine's max rate per axis (mm/min), for the link times; absent = not timed. */
   readonly rates?: Vec3
+  /**
+   * The work zero in the setup frame (mm; alignment DF78): the toolpaths are in the WCS, shifted
+   * by it, so the stock sits at `−zero` and the obstacles are read at `+zero`. Absent = [0, 0].
+   */
+  readonly zero?: readonly [number, number]
   /** The field's cell size (mm); default `STOCK_CELL` (tests: coarser never lowers a link). */
   readonly cell?: number
 }
@@ -316,6 +324,7 @@ export function planLinks(ops: readonly LinkOperation[], s: LinkSettings): Setup
       [s.stock[0], s.stock[1]],
       extentOf(ops, rMax + LINK_RADIAL_MARGIN + 2 * (s.cell ?? STOCK_CELL)),
       s.cell ?? STOCK_CELL,
+      [-(s.zero?.[0] ?? 0), -(s.zero?.[1] ?? 0)],
     )
     for (const op of ops) field.clear(op.tool, undefined, flat(op.toolpath), clearance, op.stickout)
   }

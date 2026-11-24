@@ -31,6 +31,7 @@ export const ALLOWED: Readonly<Record<string, readonly PlanStatus[]>> = {
   'plan.design.operation.revert': ['settledDesign'],
   'plan.machine.set': EDITABLE,
   'plan.setup.update': EDITABLE,
+  'plan.alignment.set': EDITABLE,
   'plan.setup.split': EDITABLE,
   'plan.setup.merge': EDITABLE,
   'plan.setup.move': EDITABLE,

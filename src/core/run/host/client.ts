@@ -29,6 +29,7 @@ import {
   type RunStatus,
 } from '../service'
 import type { SerialPortInfo } from '../serial'
+import { reconcileStep, type AlignmentStep } from '../alignment'
 import {
   ControllerInfoSchema,
   HostMessage,
@@ -147,6 +148,8 @@ export class MachineClient implements MachineService {
   private job: Job | undefined
   /** The run that ended last (M5): kept until the next run starts, across connections. */
   private lastRun: LastRun | undefined
+  /** DF78: the alignment step (docs/modes/alignment.md#state); dropped with the connection. */
+  private step: AlignmentStep | undefined
   private timeScale: TimeScale = 1
   private readonly listeners = new Set<(s: RunStatus) => void>()
   private readonly log: Logger
@@ -202,7 +205,17 @@ export class MachineClient implements MachineService {
         ? {}
         : { job: { ...job, startedAt: this.job.startedAt, ...this.aboutJob(this.job, job.line) } }),
       ...last,
+      ...(this.step === undefined ? {} : { alignment: structuredClone(this.step) }),
     }
+  }
+
+  alignmentStep(): AlignmentStep | undefined {
+    return this.step === undefined ? undefined : structuredClone(this.step)
+  }
+
+  setAlignmentStep(step: AlignmentStep | undefined): void {
+    this.step = step === undefined ? undefined : structuredClone(step)
+    this.notify()
   }
 
   /** The plan, setup and current operation of a job (M7). */
@@ -280,6 +293,7 @@ export class MachineClient implements MachineService {
     const r = sent.isErr() && sent.unwrapErr().code === 'machine.connection' ? Ok(undefined) : sent
     this.conn = undefined
     this.hostStatus = undefined
+    this.step = undefined
     host.handle.terminate()
     this.log.info('disconnected')
     this.notify()
@@ -462,6 +476,7 @@ export class MachineClient implements MachineService {
       }
       case 'status':
         this.hostStatus = m.status
+        this.step = reconcileStep(this.step, this.status())
         this.notify()
         return
       case 'progress':
@@ -499,6 +514,7 @@ export class MachineClient implements MachineService {
           host.expectExit = true
           this.conn = undefined
           this.hostStatus = undefined
+          this.step = undefined
           this.reserved = undefined
           host.handle.terminate()
           this.notify()
@@ -532,6 +548,7 @@ export class MachineClient implements MachineService {
     job?.end(Err(e))
     this.conn = undefined
     this.hostStatus = undefined
+    this.step = undefined
     this.reserved = undefined
     this.notify()
   }
@@ -556,6 +573,7 @@ export class MachineClient implements MachineService {
     const host = this.host
     this.conn = undefined
     this.hostStatus = undefined
+    this.step = undefined
     if (host !== undefined) {
       host.expectExit = true
       host.handle.terminate()

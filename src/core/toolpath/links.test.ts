@@ -10,6 +10,7 @@ import { generateProfile } from './profile'
 import { StockHeights, toolSurface } from './stock-heights'
 import { workholdingObstacles } from '../plan/workholding/obstacles'
 import { moveEnd } from './stats'
+import { turnToolpath } from './wcs'
 import {
   bullNose,
   drill,
@@ -259,6 +260,58 @@ describe('planLinks', () => {
     expect(tall.links[0]).toMatchObject({ low: false, level: 10 })
     expect(tall.clampHeightUnknown).toBeUndefined()
     expect(tall.toolpaths).toEqual(ops.map((o) => o.toolpath))
+  })
+
+  // alignment.md S12: a moved work zero shifts the toolpaths into the WCS; the stock field moves
+  // with them (origin −zero) and the items are read at +zero, so every link stays the same
+  it('gives the same links with a moved work zero (toolpaths in the WCS)', () => {
+    const zero = [80, 50] as const
+    const item = workholdingObstacles(
+      [
+        {
+          itemId: 'b',
+          footprint: {
+            kind: 'polygon',
+            points: [
+              [45, 20],
+              [55, 20],
+              [55, 40],
+              [45, 40],
+            ],
+          },
+          zMin: -Infinity,
+          zMax: 4,
+        },
+      ],
+      2,
+    )
+    const shift = (o: LinkOperation): LinkOperation => ({
+      ...o,
+      toolpath: turnToolpath(o.toolpath, { rotation: 0, size: [0, 0], zero: [...zero] }),
+    })
+    const cases: [LinkOperation[], Partial<LinkSettings>][] = [
+      [[op(facing(), D6), op(pocket('a', 25, 30), D6), op(pocket('b', 75, 30), D6)], {}],
+      [[op(pocket('a', 25, 30), D6), op(pocket('b', 75, 30), D6)], {}],
+      [[op(pocket('a', 25, 30), D6), op(pocket('b', 75, 30), D6)], { clampHeight: 0 }],
+      // known clamps, a margin above the retract plane: the uncut stock (the field) sets the level
+      [
+        [op(pocket('a', 25, 30), D6), op(pocket('b', 75, 30), D6)],
+        { obstacles: workholdingObstacles([], 2), margin: 3 },
+      ],
+      [[op(pocket('a', 25, 30), D6), op(pocket('b', 75, 30), D6)], { obstacles: item }],
+    ]
+    const shape = (r: ReturnType<typeof planLinks>) => ({
+      links: r.links.map((l) => [l.low, l.level, Math.round(l.floor * 1e6) / 1e6]),
+      unknown: r.clampHeightUnknown?.links,
+      collisions: r.collisions.length,
+    })
+    for (const [ops, over] of cases) {
+      const corner = planLinks(ops, settings(over))
+      const moved = planLinks(ops.map(shift), settings({ ...over, zero }))
+      expect(shape(moved)).toEqual(shape(corner))
+    }
+    // the case the field decides: over the stock top + 3
+    expect(planLinks(cases[3]![0], settings(cases[3]![1])).links[0]).toMatchObject({ level: 3 })
   })
 
   it('never links across a pause, and full keeps every toolpath', () => {

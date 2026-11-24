@@ -28,7 +28,7 @@ import { DIRECTION_LABEL } from '../../../../core/geometry/face'
 import type { PlanDTO, PlanOperationDTO, SetupDTO } from '../../../../core/plan/plan.dto'
 import type { ProjectDoc } from '../../../../core/project/document'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
-import { planMessages } from '../../messages/plan'
+import { formatHeight, planMessages } from '../../messages/plan'
 import {
   ContextMenu,
   DragGrip,
@@ -54,7 +54,8 @@ import {
   planStockSize,
   rowStale,
   sameDirectionSetups,
-  setupCorner,
+  setupZeroWords,
+  type SetupAlignmentInfo,
   snapshotName,
   toolpathState,
 } from './model'
@@ -74,12 +75,24 @@ export function planOperationIcon(plan: PlanDTO, designOperationIds: readonly st
   return op === undefined ? 'facing' : partOperationIcon(part, op)
 }
 
-/** One line of a setup row: "Bottom · G54 back left · 0°"; without the face when the name is the face. */
-export function setupMeta(doc: ProjectDoc, plan: PlanDTO, setup: SetupDTO): string {
+/**
+ * One line of a setup row: "Bottom · G54 back left · 0°" ("G54 X 40 mm Y 25 mm", "G54 on Hole 1"
+ * when the zero moved, DF78); without the face when the name is the face.
+ */
+export function setupMeta(
+  doc: ProjectDoc,
+  plan: PlanDTO,
+  setup: SetupDTO,
+  info?: SetupAlignmentInfo,
+): string {
   const stock = planStockSize(doc, plan)
   return m.setup.rowMeta(
     DIRECTION_LABEL[directionOfSetup(setup)],
-    stock === undefined ? undefined : setupCorner(setup, stock),
+    stock === undefined
+      ? undefined
+      : m.setup.rowZero(
+          setupZeroWords(setup, stock, info, (mm) => formatHeight(mm, doc.unitSystem)),
+        ),
     setup.rotation ?? 0,
     setup.name,
   )
@@ -197,6 +210,12 @@ export function SetupList({
           const name = setup.name
           const merges = sameDirectionSetups(plan, setup)
           const isCurrent = several && setup.id === current.id
+          const meta = setupMeta(
+            doc,
+            plan,
+            setup,
+            data?.alignment.find((a) => a.setupId === setup.id),
+          )
           return (
             <li key={setup.id} {...setupReorder.itemProps(si)} className={styles['setupItem']}>
               <RowMenu
@@ -261,8 +280,8 @@ export function SetupList({
                         {several ? `${si + 1}. ${name}` : name}
                       </span>
                       <span className={styles['opMeta']}>
-                        <span className={styles['opTool']} title={setupMeta(doc, plan, setup)}>
-                          {setupMeta(doc, plan, setup)}
+                        <span className={styles['opTool']} title={meta}>
+                          {meta}
                         </span>
                       </span>
                     </span>

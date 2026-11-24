@@ -26,6 +26,8 @@ import { loadPlan, setupOf } from './plan'
 import { planMaterialBands, planThroughDepths } from './through'
 import type { MaterialBand, MaterialCover } from '../geometry/through-depth'
 import { hashJson } from './snapshot'
+import { setupZero } from './alignment'
+import type { Vec2 } from '../geometry/model'
 import type { ResolvedStrategy } from './strategy'
 import type { KeepOut } from '../toolpath/keep-out'
 import { setupWorkholding } from './workholding/setup'
@@ -45,6 +47,11 @@ export interface PlanOperationInput {
     readonly direction: Direction
     /** Quarter turn about machine +Z; turns the toolpaths and moves the work zero (task C3). */
     readonly rotation: SetupRotation
+    /**
+     * The work zero in the setup frame (mm; alignment phase 1): the toolpaths are shifted by it.
+     * Absent = the front-left corner of the up face (byte-identical toolpaths).
+     */
+    readonly zero?: Vec2
     readonly workOffset: 'G54'
     readonly clearanceHeight: number
     readonly retractHeight: number
@@ -136,12 +143,15 @@ export function planOperationInputs(
   let previous: string | undefined
   plan.operations.forEach((op, index) => {
     const own = setupOf(plan, op.id)
+    const zero = setupZero(plan, own, port)
+    const moved = zero[0] !== 0 || zero[1] !== 0
     // the clearance height follows the workholding unless the user set it (WH-C)
     const holding = setupWorkholding(own, plan.stock)
     const setup = {
       id: own.id,
       direction: setupDirection(own),
       rotation: setupRotation(own),
+      ...(moved ? { zero } : {}),
       workOffset: own.workOffset,
       clearanceHeight: holding.clearance,
       retractHeight: length(own.retractHeight),
@@ -157,11 +167,14 @@ export function planOperationInputs(
       planOperation: { ...op, zRef: undefined },
       snapshots: used,
       // the links (DF64) change only the exported program, never the toolpaths;
+      // S5: the resolved zero, not the points (docs/modes/alignment.md#implementation-slice-1);
       // workholding enters through the clearance height and region operations' own hash only, so
       // moving a clamp regenerates facings and pockets, not every operation (WH-D)
       setup: {
         ...own,
         operations: undefined,
+        alignment: undefined,
+        zero: moved ? zero : undefined,
         workholding: undefined,
         retraction: undefined,
         clampHeight: undefined,

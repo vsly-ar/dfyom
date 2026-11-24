@@ -91,20 +91,27 @@ const past = (x: number) => (x > NOISE ? x : 0)
 
 /**
  * How far a tool of `toolDiameter` (its largest diameter, mm) reaches beyond each side of the
- * stock rectangle `[0, size[0]] × [0, size[1]]` along `toolpath` (in the setup's WCS, Z0 = stock
- * top), counting only the moves below the top.
+ * stock rectangle `origin + [0, size[0]] × [0, size[1]]` along `toolpath` (in the setup's WCS,
+ * Z0 = stock top; `origin` is the stock's front-left corner, `−zero` with a moved work zero),
+ * counting only the moves below the top.
  */
-export function toolpathOverreach(toolpath: Toolpath, toolDiameter: number, size: Vec2): Overreach {
+export function toolpathOverreach(
+  toolpath: Toolpath,
+  toolDiameter: number,
+  size: Vec2,
+  origin: Vec2 = [0, 0],
+): Overreach {
   const bounds = new Bounds()
   let at: Vec3 | undefined
   for (const pass of toolpath.passes) for (const m of pass.moves) at = addMove(bounds, at, m)
   if (bounds.minX === Infinity) return NO_OVERREACH
   const r = toolDiameter / 2
+  const [ox, oy] = origin
   return {
-    xMin: past(r - bounds.minX),
-    xMax: past(bounds.maxX + r - size[0]),
-    yMin: past(r - bounds.minY),
-    yMax: past(bounds.maxY + r - size[1]),
+    xMin: past(r - (bounds.minX - ox)),
+    xMax: past(bounds.maxX - ox + r - size[0]),
+    yMin: past(r - (bounds.minY - oy)),
+    yMax: past(bounds.maxY - oy + r - size[1]),
   }
 }
 

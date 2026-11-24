@@ -8,7 +8,8 @@
 // copy, its edited operations tinted. `null` outside plan mode. DF69: the shown tool run's Z
 // reference surface and touch-off spot (`RunScene.zRef`, z-spot.ts picks the run); dragging the
 // spot snaps it to the grid inside the flat patch and commits one `plan.operation.update { zRef }`
-// on release; the dropped spot is held until the plan re-reads it.
+// on release; the dropped spot is held until the plan re-reads it. DF78: the frame's origin is
+// the setup's work zero, and its alignment points are drawn (`RunScene.alignment`).
 // Doc: docs/conventions/ui.md#plan-mode-task-37, docs/modes/plan-v0.2.md#plan-only-edits-and-the-snapshot-scene,
 // docs/modes/z-reference.md#implementation-notes-df69. The setup's workholding (items, the open
 // item's keep-out, collision hits; workholding-scene.ts, docs/modes/workholding.md#ui-summary).
@@ -21,6 +22,7 @@ import type { Toolpath } from '../../../../core/toolpath/model'
 import { usePlanEvaluation, useReplica, useUi } from '../../shell/ShellContext'
 import {
   toolpathLines,
+  type AlignmentMarker,
   type Box,
   type RunScene,
   type ViewportMesh,
@@ -37,9 +39,10 @@ import {
   planPart,
   planStockSize,
   setupPlacement,
+  setupZeroOf,
 } from './model'
 import { usePlanCommand, usePlanData, usePlanState } from './plan-store'
-import { workholdingOverlay } from './workholding-scene'
+import { shiftOverlay, workholdingOverlay } from './workholding-scene'
 import { shownZRefRun, snapSpot } from './z-spot'
 
 type P = readonly [number, number]
@@ -68,6 +71,7 @@ export function usePlanScene(mode: AppMode): RunScene | null {
   const selected = useUi((s) => s.selection.plan)
   const last = usePlanState((s) => s.lastSelection)
   const preview = usePlanState((s) => s.zRefPreview)
+  const focusedPoint = usePlanState((s) => s.alignmentPoint)
   const openItem = usePlanState((s) => s.workholdingItem)
   const call = usePlanCommand()
   const [held, setHeld] = useState<HeldSpot | null>(null)
@@ -126,6 +130,30 @@ export function usePlanScene(mode: AppMode): RunScene | null {
       },
     }
   }, [zRun, plan, held, call, units])
+  // DF78: the setup's zero (the frame's origin) and its alignment points
+  const info = data?.alignment.find((a) => a.setupId === setup?.id)
+  const alignment = useMemo((): AlignmentMarker[] => {
+    if (info === undefined) return []
+    const bad = new Set(
+      (data?.warnings ?? [])
+        .filter((w) => w.code === 'plan.alignment' && w.severity === 'error')
+        .map((w) => w.params['alignmentPointId']),
+    )
+    return info.points.flatMap((p, i) =>
+      p.wcs === null
+        ? []
+        : [
+            {
+              id: p.id,
+              at: p.wcs,
+              n: i + 1,
+              name: p.name,
+              error: bad.has(p.id),
+              selected: p.id === focusedPoint,
+            },
+          ],
+    )
+  }, [info, data?.warnings, focusedPoint])
   return useMemo(() => {
     if (data === undefined || plan === undefined || setup === undefined || doc === undefined)
       return null
@@ -143,22 +171,28 @@ export function usePlanScene(mode: AppMode): RunScene | null {
     const workholding =
       planStock === undefined
         ? undefined
-        : workholdingOverlay(
-            setupWorkholding(setup, planStock),
-            setup.id,
-            openItem?.setupId === setup.id ? openItem.itemId : undefined,
-            data.warnings,
+        : shiftOverlay(
+            workholdingOverlay(
+              setupWorkholding(setup, planStock),
+              setup.id,
+              openItem?.setupId === setup.id ? openItem.itemId : undefined,
+              data.warnings,
+            ),
+            setupZeroOf(setup, info),
           )
     return {
       lines: toolpaths.length === 0 ? null : toolpathLines(toolpaths),
       done: 0,
       tool: null,
       ...(outdated.some(Boolean) ? { outdated } : {}),
-      ...(stock === undefined ? {} : { frame: setupPlacement(setup, stock) }),
+      ...(stock === undefined
+        ? {}
+        : { frame: setupPlacement(setup, stock, setupZeroOf(setup, info)) }),
       ...(zRef === undefined ? {} : { zRef }),
+      ...(alignment.length === 0 ? {} : { alignment }),
       ...(workholding === undefined ? {} : { workholding }),
     }
-  }, [data, plan, setup, doc, zRef, openItem])
+  }, [data, plan, setup, doc, zRef, info, alignment, openItem])
 }
 
 /** The plan's part as the plan scene draws it. */

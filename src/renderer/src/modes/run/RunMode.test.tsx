@@ -95,10 +95,52 @@ function scriptMachine(bridge: FakeBridge): Machine {
   bridge.handle('run.machine.reset', () => ok({}))
   bridge.handle('run.machine.probeZ', () => ok({ jobId: 'probe-1' }))
   bridge.handle('run.override.set', () => ok({}))
+  // DF78: the alignment step as main keeps it (the pointer arrives at once)
+  bridge.handle('run.align.goto', (a) => {
+    const { planId, setupId, to } = a as { planId: string; setupId: string; to: string }
+    const step = m.status.alignment ?? {
+      planId,
+      setupId,
+      entries: [
+        { id: 'zero', name: 'Work zero', target: [0, 0] as [number, number], ticked: false },
+        { id: 'p1', name: 'Back right', target: [80, 50] as [number, number], ticked: false },
+      ],
+      confirmed: false,
+      skipped: [],
+      zeroAt: [m.status.workZero[0], m.status.workZero[1]] as [number, number],
+    }
+    const i = step.entries.findIndex((e) => e.id === step.current)
+    const entry =
+      to === 'next'
+        ? step.entries[(i + 1) % step.entries.length]!
+        : step.entries.find((e) => e.id === to)!
+    queueMicrotask(() =>
+      m.push({
+        alignment: { ...step, current: entry.id },
+        wpos: [entry.target[0], entry.target[1], 5],
+      }),
+    )
+    return ok({ current: entry.id, target: entry.target })
+  })
+  bridge.handle('run.align.tick', (a) => {
+    const c = a as { entry?: string; ticked?: boolean; confirm?: true; skipUnticked?: true }
+    const step = m.status.alignment!
+    const entries = step.entries.map((e) =>
+      e.id === c.entry ? { ...e, ticked: c.ticked ?? true } : e,
+    )
+    const next = {
+      ...step,
+      entries,
+      confirmed: c.confirm === true,
+      skipped: c.confirm === true ? entries.filter((e) => !e.ticked).map((e) => e.id) : [],
+    }
+    queueMicrotask(() => m.push({ alignment: next }))
+    return ok(next)
+  })
   return Object.assign(m, { job })
 }
 
-async function renderRun(opts: { bottom?: boolean; plate?: string } = {}) {
+async function renderRun(opts: { bottom?: boolean; plate?: string; points?: boolean } = {}) {
   const s = await planSetup()
   // a touch plate on the library machine, copied into the plan (M4)
   if (opts.plate !== undefined)
@@ -113,6 +155,13 @@ async function renderRun(opts: { bottom?: boolean; plate?: string } = {}) {
   const planId = await s.create(
     opts.plate === undefined ? {} : { machineLibraryItemId: s.machineId },
   )
+  // DF78: an alignment point on the last setup
+  if (opts.points === true)
+    await s.run('plan.alignment.set', {
+      planId,
+      setupId: s.plan(planId).setups.at(-1)!.id,
+      points: [{ name: 'Back right', source: { corner: 'top back right' } }],
+    })
   const bridge = createFakeBridge()
   bridge.bind(s.d)
   const machine = scriptMachine(bridge) as Machine & {
@@ -501,6 +550,74 @@ describe('Run mode', () => {
     const again = await screen.findByRole('dialog', { name: 'Setup change: setup 2, Top' })
     await t.user.click(within(again).getByRole('button', { name: 'Start setup 2' }))
     expect(t.callsOf('run.job.start').at(-1)).toEqual({ planId: t.plan().id, setupId: top!.id })
+  })
+
+  // DF78: docs/modes/alignment.md#run-the-alignment-step
+  it('the setup-change prompt runs the alignment step; Start waits for its confirmation', async () => {
+    const t = await renderRun({ bottom: true, points: true })
+    const [bottom, top] = t.plan().setups
+    await connectAndHome(t)
+    await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
+    const inspector = screen.getByRole('complementary', { name: 'Inspector' })
+    await t.user.click(within(inspector).getByRole('button', { name: 'Start run' }))
+    const preflight = screen.getByRole('dialog', { name: 'Start run?' })
+    await within(preflight).findByText('Inside the travel at this work zero.')
+    await t.user.click(within(preflight).getByRole('button', { name: 'Start run' }))
+    t.machine.outcome = {
+      ok: true,
+      value: {
+        lines: 20,
+        seconds: 60,
+        elapsedSeconds: 65,
+        toolChanges: 0,
+        pauses: 0,
+        warnings: [],
+        setupId: bottom!.id,
+        next: { setupId: top!.id, name: 'Top', direction: '+z', rotation: 0 },
+      },
+    }
+    t.machine.push({ state: 'Idle', ...t.machine.job('done') })
+    const prompt = await screen.findByRole('dialog', { name: 'Setup change: setup 2, Top' })
+    const start = within(prompt).getByRole('button', { name: 'Start setup 2' })
+    expect(start).toBeDisabled()
+    expect(start).toHaveAccessibleDescription('Confirm the alignment first.')
+    const step = within(prompt).getByRole('region', { name: 'Alignment' })
+    expect(within(step).getByText(/the alignment point in turn/)).toBeInTheDocument()
+
+    // Start alignment asks once, then sends the pointer to the work zero
+    await t.user.click(within(step).getByRole('button', { name: 'Start alignment' }))
+    const ask = screen.getByRole('alertdialog', {
+      name: 'Move the spindle over the alignment points?',
+    })
+    await t.user.click(within(ask).getByRole('button', { name: 'Start alignment' }))
+    expect(t.callsOf('run.align.goto')).toEqual([
+      { planId: t.plan().id, setupId: top!.id, to: 'zero' },
+    ])
+    const list = await within(step).findByRole('list', { name: 'Alignment points' })
+    const zero = within(list).getByRole('checkbox', { name: 'Work zero lines up' })
+    expect(within(list).getByRole('checkbox', { name: 'Back right lines up' })).toBeDisabled()
+    expect(within(step).getByRole('button', { name: 'Set zero here' })).toBeEnabled()
+    await expectNoAxeViolations()
+    await t.user.click(zero)
+    expect(t.callsOf('run.align.tick')).toEqual([{ entry: 'zero', ticked: true }])
+
+    // Next: the point; "Zero on this point" offered there
+    await t.user.click(within(step).getByRole('button', { name: 'Next' }))
+    expect(t.callsOf('run.align.goto').at(-1)).toMatchObject({ to: 'next' })
+    await waitFor(() =>
+      expect(within(list).getByRole('checkbox', { name: 'Back right lines up' })).toBeEnabled(),
+    )
+    expect(within(step).getByRole('button', { name: 'Zero on this point' })).toBeEnabled()
+
+    // confirming with an unchecked point asks once; then Start setup 2 is enabled
+    await t.user.click(within(step).getByRole('button', { name: 'Confirm alignment' }))
+    const skip = screen.getByRole('alertdialog', {
+      name: '1 of 2 points not checked. Continue anyway?',
+    })
+    await t.user.click(within(skip).getByRole('button', { name: 'Continue' }))
+    expect(t.callsOf('run.align.tick').at(-1)).toEqual({ confirm: true, skipUnticked: true })
+    await within(step).findByText('Alignment confirmed, 1 not checked.')
+    expect(within(prompt).getByRole('button', { name: 'Start setup 2' })).toBeEnabled()
   })
 
   it('a run started elsewhere names its plan; once stopped, "Resume from…" restarts at an operation (M5, M7)', async () => {

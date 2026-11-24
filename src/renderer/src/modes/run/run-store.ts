@@ -157,6 +157,17 @@ export interface RunState {
   moveTo(
     moves: readonly { readonly to: readonly [number, number, number]; readonly feed: number }[],
   ): Promise<void>
+  /** DF78 alignment step: `run.align.goto` (the pointer to `zero`, a point, `next`, `previous`). */
+  alignGoto(setupId: string, to: string): Promise<void>
+  /** `run.align.tick`: tick or untick an entry, or confirm (`skipUnticked` after the prompt). */
+  alignTick(change: {
+    entry?: string
+    ticked?: boolean
+    confirm?: true
+    skipUnticked?: true
+  }): Promise<void>
+  /** "Zero on this point": G54 X/Y so the current position gets these work coordinates. */
+  setWorkZeroAt(x: number, y: number): Promise<void>
   /** `run.override.set` (M6). */
   override(change: OverrideChange): Promise<void>
   reset(): Promise<void>
@@ -390,6 +401,16 @@ export function createRunStore(bridge: PreloadApi): RunStore {
           const r = await call('run.machine.jog', { to: [...to], feed })
           if (!r.ok) return
         }
+      },
+      async alignGoto(setupId, to) {
+        const planId = get().planId
+        if (planId === undefined || planId === NO_PLAN) return
+        await call('run.align.goto', { planId, setupId, to })
+      },
+      alignTick: async (change) => void (await call('run.align.tick', change)),
+      async setWorkZeroAt(x, y) {
+        const z = get().status.wpos[2]
+        await call('run.workZero.set', { axes: ['x', 'y'], values: [x, y, z] })
       },
       override: async (change) => void (await call('run.override.set', change)),
       reset: async () => void (await call('run.machine.reset')),

@@ -10,8 +10,11 @@ import { defineCommand } from '../commands/define'
 import type { JobProgress, Services } from '../commands/context'
 import { PlanWarningSchema } from '../plan/checks'
 import { planOperationInputs } from '../plan/inputs'
-import { PlanIdSchema, PlanRecordIdSchema } from '../plan/plan.dto'
-import { loadPlan } from '../plan/plan'
+import { PlanIdSchema, PlanRecordIdSchema, type SetupDTO } from '../plan/plan.dto'
+import { loadPlan, type LoadedPlan } from '../plan/plan'
+import { setupAlignment, setupAlignmentErrors } from '../plan/alignment'
+import type { Region2dPort } from '../geometry/2d/port'
+import type { SetupHeader } from './program'
 import { planOperationLabel, positionComment } from '../plan/labels'
 import { setupHeader } from '../plan/setup-header'
 import { chooseSetup, setupStockSize } from '../plan/setups'
@@ -21,6 +24,7 @@ import type { ProjectDoc } from '../project/document'
 import { cacheOf, ensureToolpath, inputOverreach } from '../toolpath/generate'
 import type { Vec3 } from '../toolpath/model'
 import { maxOverreach, type Overreach } from '../toolpath/overreach'
+import { turnToolpath } from '../toolpath/wcs'
 import { exportGrbl, type ExportOperation, type GrblExport } from './export'
 import { gcodeFileStem } from './file-name'
 import { commentLine } from './grbl/format'
@@ -28,7 +32,6 @@ import { machineKeyOf } from '../run/machine-key'
 import { cachedSetupLinks, linkSettings } from '../plan/setup-links'
 import type { LinkSettings } from '../toolpath/links'
 import type { Toolpath } from '../toolpath/model'
-import type { SetupHeader } from './program'
 import {
   checkOperations,
   moveFindings,
@@ -194,6 +197,20 @@ export async function exportPlan(
         params: f.params,
       })),
     })
+  // alignment phase 1: the setup's alignment errors block its program like a plan finding
+  const alignErrors = setupAlignmentErrors(plan, setup.id, services.region2d)
+  const firstAlign = alignErrors[0]
+  if (firstAlign !== undefined)
+    return fail('plan.check', firstAlign.message, {
+      where,
+      data: { planId },
+      issues: alignErrors.map((f) => ({
+        path: [setup.id, 'alignment'],
+        rule: f.rule,
+        message: f.message,
+        params: f.params,
+      })),
+    })
   const total = all.length
   const generated: { toolpath: Toolpath; ids: string[]; label: string }[] = []
   const reaches: Overreach[] = []
@@ -283,7 +300,19 @@ export async function exportPlan(
   })
   opts.progress?.({ done: total, total })
   // the export guard (WH-E): the final moves, links included, against the setup's workholding
-  const checked = all.map((input, i) => ({ input, toolpath: operations[i]!.toolpath }))
+  // the items are in the setup frame, the moves in the WCS: a moved work zero is added back
+  // (docs/modes/alignment.md S12, as workholdingFindings does)
+  const [zx, zy] = all[0]!.setup.zero ?? [0, 0]
+  const checked = all.map((input, i) => {
+    const tp = operations[i]!.toolpath
+    return {
+      input,
+      toolpath:
+        zx === 0 && zy === 0
+          ? tp
+          : turnToolpath(tp, { rotation: 0, size: [0, 0], zero: [-zx, -zy] }),
+    }
+  })
   const guard = [
     ...staticWorkholdingFindings(plan, setup.id),
     ...moveFindings(plan, setup, checkOperations(checked)),
@@ -320,6 +349,7 @@ export async function exportPlan(
               thickness: plan.stock.thickness.canonical,
             },
             maxOverreach(reaches),
+            headerAlignment(plan, setup, services.region2d),
             holding.items.length === 0
               ? undefined
               : {
@@ -365,6 +395,23 @@ function clampLine(s: LinkSettings): Pick<SetupHeader, 'clamp'> {
   const h = s.clampHeight
   if (s.retraction === 'full' || h === undefined || h + s.margin >= s.clearance - 1e-9) return {}
   return { clamp: { height: h, margin: s.margin } }
+}
+
+/** The header's zero and alignment points (alignment phase 1, docs/modes/alignment.md#export). */
+function headerAlignment(
+  plan: LoadedPlan,
+  setup: SetupDTO,
+  port: Region2dPort | undefined,
+): Pick<SetupHeader, 'zero' | 'zeroOn' | 'alignment'> {
+  const a = setupAlignment(plan, setup, port)
+  const zeroOn = a.points.find((p) => p.id === a.zeroPoint)?.name
+  return {
+    zero: a.zero,
+    ...(zeroOn === undefined ? {} : { zeroOn }),
+    alignment: a.points.flatMap((p) =>
+      p.wcs === undefined ? [] : [{ name: p.name, at: [p.wcs[0], p.wcs[1]] as const }],
+    ),
+  }
 }
 
 /** The program's view of a tool run's Z reference (DF69); none without one. */
@@ -438,7 +485,7 @@ export const planExport = defineCommand({
   kind: 'effect',
   name: 'plan.export',
   summary:
-    "Export a plan's GRBL gCode file, one program per setup: regenerates missing or stale toolpaths, writes the program and returns its stats and machine-check warnings.",
+    "Export a plan's GRBL gCode, one program per setup: regenerates stale toolpaths, writes the file, returns stats and machine-check warnings.",
   title: () => 'Export gCode',
   machine: false,
   // apply first: docs/architecture/apply.md#implicit-apply

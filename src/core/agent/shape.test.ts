@@ -541,6 +541,31 @@ describe('plan.get', () => {
     expect(run('inch')).toEqual([{ ...z, level: -0.0197, at: [2, 1] }, undefined])
   })
 
+  // DF78: docs/modes/alignment.md#agent-api
+  it("gives a setup its work zero and alignment points from plan.warning.list's view", () => {
+    const alignment = [
+      {
+        setupId: 's1',
+        zero: [-25.4, 50.8],
+        zeroPoint: 'al1',
+        points: [{ id: 'al1', name: 'Hole 1', kind: 'hole', wcs: [0, 0] }],
+      },
+    ]
+    const key = 'plan.warning.list {"planId":"plan-1"}'
+    const withA = { ...peeks, [key]: { ...peeks[key], alignment } }
+    const run = (unitSystem: 'mm' | 'inch') => {
+      const shaper = new ResultShaper({ ...fakeSession(withA), unitSystem: () => unitSystem })
+      const r = shaper.shape(call('plan.get', { plan }), { planId: 'plan-1' }, SUMMARY)
+      return (valueOf(r) as { plan: { setups: Record<string, unknown>[] } }).plan.setups[0]!
+    }
+    expect(run('mm')).toMatchObject({
+      zero: [-25.4, 50.8],
+      zeroPoint: 'al1',
+      alignment: [{ id: 'al1', name: 'Hole 1', wcs: [0, 0] }],
+    })
+    expect(run('inch')).toMatchObject({ zero: [-1, 2] })
+  })
+
   it('plan.warning.list detail "full" leaves the viewport outline out of the Z references', () => {
     const outline = { patch: [], spotArea: [], clearance: 4, grid: 1 }
     const value = {

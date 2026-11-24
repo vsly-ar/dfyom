@@ -385,23 +385,70 @@ export const runMessages = {
     title: (n: number, name: string) => `Setup change: setup ${n}, ${name}`,
     description: (face: string) =>
       `The previous setup is done. Turn the stock so its ${face} face is up, set the work zero, then start.`,
-    picture: (up: string, front: string, right: string) =>
-      `The stock on the machine: ${up} face up, ${front} face towards you, ${right} face on the right. The work zero is the front-left corner of the top.`,
+    picture: (
+      up: string,
+      front: string,
+      right: string,
+      zero = 'the front-left corner of the top',
+    ) =>
+      `The stock on the machine: ${up} face up, ${front} face towards you, ${right} face on the right. The work zero is ${zero}.`,
+    /** DF78 (N7): where the setup's work zero is, in words for the picture and the steps. */
+    zeroAt: (zero: { readonly offset?: readonly [string, string]; readonly point?: string }) =>
+      zero.point !== undefined
+        ? `on ${zero.point}`
+        : zero.offset !== undefined
+          ? `X ${zero.offset[0]}, Y ${zero.offset[1]} from the front-left corner of the top`
+          : 'the front-left corner of the top',
     faces: { up: 'Up', front: 'Front', right: 'Right' },
     workZero: 'Work zero',
     /** The zero to set (M7, docs/modes/run-machine.md#run-status-and-the-zero-to-set-m7). */
     zeroToSet: 'Zero to set',
-    zeroText: 'X0 Y0 at the front-left corner of the top, Z0 on the top surface.',
+    zeroText: (zero = 'at the front-left corner of the top') =>
+      `X0 Y0 ${zero}, Z0 on the top surface.`,
     zeroCorner: (corner: string) => `This is the part’s ${corner} corner.`,
+    /** DF78 (N9): the zero is offset from the corner. */
+    offsetCorner: (corner: string) => `That corner is the part’s ${corner} corner.`,
     stockOnMachine: 'Stock on the machine',
     zeroLabel: 'X0 Y0',
-    steps: (up: string) => [
+    steps: (up: string, zero = 'the front-left corner of the top') => [
       'Raise the spindle clear of the stock (jog Z+).',
       `Turn the stock so its ${up} face is up, as in the picture, and clamp it.`,
-      'Set the work zero on the new top: X and Y at its front-left corner, Z on its surface.',
+      zero === 'the front-left corner of the top'
+        ? 'Set the work zero on the new top: X and Y at its front-left corner, Z on its surface.'
+        : `Set the work zero on the new top: X and Y ${zero.replace(/^the /, 'at the ')}, Z on its surface.`,
       'Start the setup.',
     ],
     start: (n: number) => `Start setup ${n}`,
+    /** DF78: the alignment step (docs/modes/alignment.md#run-the-alignment-step). */
+    align: {
+      title: 'Alignment',
+      intro: (n: number) =>
+        `After the work zero is set, the spindle points at the zero and ${n === 1 ? 'the alignment point' : `the ${n} alignment points`} in turn. Turn or slide the stock until each lines up, check it, then confirm.`,
+      start: 'Start alignment',
+      confirmTitle: 'Move the spindle over the alignment points?',
+      confirmDescription:
+        'It moves at the clearance height each time you press Previous or Next. Keep your hands clear while it moves; the spindle must be off.',
+      previous: 'Previous',
+      next: 'Next',
+      listLabel: 'Alignment points',
+      at: (x: string, y: string) => `X ${x} · Y ${y}`,
+      current: 'pointer here',
+      linesUp: (name: string) => `${name} lines up`,
+      setZeroHere: 'Set zero here',
+      setZeroHereHint: 'Sets X and Y of the work zero at the pointer; clears every check.',
+      zeroOnPoint: 'Zero on this point',
+      zeroOnPointHint:
+        'For a sawn or cut-away corner: the work zero follows this point. Clears every check.',
+      confirm: 'Confirm alignment',
+      confirmed: (skipped: number) =>
+        skipped === 0 ? 'Alignment confirmed.' : `Alignment confirmed, ${skipped} not checked.`,
+      skipTitle: (unticked: number, all: number) =>
+        `${unticked} of ${all} points not checked. Continue anyway?`,
+      skipDescription: 'The setup starts without them being lined up.',
+      skipConfirm: 'Continue',
+      pending: 'Confirm the alignment first.',
+      zeroName: 'Work zero',
+    },
     /** Like the pauses' "Close (stay paused)" (DF46): says what closing does (DF48). */
     later: 'Close (start later)',
     announce: (n: number, name: string) =>

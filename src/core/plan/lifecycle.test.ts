@@ -356,6 +356,11 @@ describe('undo law of every plan command', () => {
       ['plan.setup.split', { planId, setupId, planOperationIds: [ops.at(-1)!.id] }],
       ['plan.setup.move', { planId, setupId, toIndex: 1 }],
       [
+        'plan.alignment.set',
+        { planId, setupId, points: [{ source: { corner: 'top front left' } }] },
+      ],
+      ['plan.setup.update', { planId, setupId, zero: { at: ['-20', '15'] } }],
+      [
         'plan.workholding.set',
         { planId, setupId, items: [{ kind: 'toeClamp', edge: 'vMin', at: '30', top: '20' }] },
       ],

@@ -13,7 +13,8 @@ import type { JobContext, Services } from '../commands/context'
 import { defineCommand } from '../commands/define'
 import { PlanWarningSchema, type PlanWarning } from '../plan/checks'
 import { PlanIdSchema, PlanRecordIdSchema, type PlanDTO, type SetupDTO } from '../plan/plan.dto'
-import { findPlanDTO, loadPlanDTO, snapshotById } from '../plan/plan'
+import { setupAlignment } from '../plan/alignment'
+import { findPlanDTO, loadPlanDTO, snapshotById, type LoadedPlan } from '../plan/plan'
 import { setupZeroCorner } from '../toolpath/wcs'
 import { machineKeyOf } from './machine-key'
 import { chooseSetup, setupDirection, setupRotation } from '../plan/setups'
@@ -26,6 +27,7 @@ import type { GrblExport } from '../post/export'
 import { exportPlan } from '../post/plan-export'
 import type { SenderProgram } from './grbl/sender'
 import { RunSummarySchema } from './host/protocol'
+import { alignmentGate } from './alignment'
 import type { JobAbout, MachineService, RunningJob, RunPlan } from './service'
 
 const MARKER = /^\(DFYOM TOOL CHANGE (\d+): ([^()]*)\)$/
@@ -70,6 +72,11 @@ const NextSetupSchema = z.object({
     .describe(
       'Part corner at the work zero, e.g. "back left"; on the machine the front-left corner of the top',
     ),
+  zero: z
+    .tuple([z.number(), z.number()])
+    .optional()
+    .describe('Work zero X, Y mm from that corner when the setup moved it (DF78)'),
+  zeroPoint: z.string().optional().describe('Alignment point the work zero is on, by name'),
 })
 
 const RunJobResult = RunSummarySchema.extend({
@@ -88,8 +95,16 @@ type RunJobResult = z.output<typeof RunJobResult>
 export function nextSetupOf(
   setup: SetupDTO,
   stock?: { length: number; width: number; thickness: number },
+  plan?: LoadedPlan,
 ): z.output<typeof NextSetupSchema> {
+  // N9 (DF78): the zero to set is the corner, an offset from it or a point
+  const a = plan === undefined || setup.zero === undefined ? undefined : setupAlignment(plan, setup)
+  const point = a?.points.find((p) => p.id === a.zeroPoint)
   return {
+    ...(a === undefined || (a.zero[0] === 0 && a.zero[1] === 0)
+      ? {}
+      : { zero: [a.zero[0], a.zero[1]] as [number, number] }),
+    ...(point === undefined ? {} : { zeroPoint: point.name }),
     setupId: setup.id,
     name: setup.name,
     direction: setupDirection(setup),
@@ -249,6 +264,10 @@ async function runJob(
   const checked = startChecks(doc, planId, setupId, ctx.services, where)
   if (checked.isErr()) return checked
   const { m, workZero, plan: p, setup, next, machineKey } = checked.unwrap()
+  // DF78: a setup with alignment points runs after its step was confirmed at this G54
+  // (docs/modes/alignment.md#ticks-and-the-confirm-gate); not part of run.job.check
+  const aligned = alignmentGate(m.alignmentStep(), planId, setup, m.status(), where)
+  if (aligned.isErr()) return aligned
   // From here to the stream the connection is held for this job: no jog or work-zero change
   // slips in between the soft-limit check and the start (the host re-checks the G54 anyway).
   const reserved = m.reserve(ctx.jobId)
@@ -291,7 +310,9 @@ async function runJob(
     warnings,
     planId,
     setupId: setup.id,
-    ...(next === undefined ? {} : { next: nextSetupOf(next, stock) }),
+    ...(next === undefined
+      ? {}
+      : { next: nextSetupOf(next, stock, loaded.isOk() ? loaded.unwrap() : undefined) }),
   })
 }
 
