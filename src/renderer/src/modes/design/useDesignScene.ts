@@ -31,6 +31,9 @@ import { clickedFace, faceSelectionId, selectedFace } from './face-selection'
 import { overlayView } from './reference-overlay'
 import { ghostMatrix, referencePlacement, sectionMatrix, stockSizeOf } from './reference-view'
 import { useTabMarkers } from './useTabMarkers'
+import { useReferenceCompare } from './useReferenceCompare'
+import { deviationView, worstRegion } from './reference-compare-state'
+import { lengthSource } from './reference-view'
 import { useClonesScene } from './useClonesScene'
 import { instanceId, instanceOfOperation } from './clones-view'
 import {
@@ -111,6 +114,37 @@ export function useDesignScene(): SceneProps {
       : [sectionSummary, referenceMessages.tools.viewportHoles(holeCount)]
           .filter((x) => x !== undefined)
           .join(' ')
+  // the compare overlay (DF60 P5): runs while on, drawn on the mesh it measured
+  useReferenceCompare(part?.dto.id, evaluation, references)
+  const compare = useUi((s) => s.referenceCompare)
+  const compareResult = useUi((s) => s.compareResult)
+  const compareRegion = useUi((s) => s.compareRegion)
+  const viewportFocus = useUi((s) => s.viewportFocus)
+  const shownPositions = evaluation?.mesh?.positions
+  const deviation = useMemo(
+    () =>
+      compare === null
+        ? null
+        : deviationView(compareResult, compare.threshold, shownPositions, compareRegion),
+    [compare, compareResult, shownPositions, compareRegion],
+  )
+  const compareSummary = useMemo(() => {
+    const r = compareResult.result
+    if (compare === null || r === undefined || part === undefined) return undefined
+    const L = (mm: number) => lengthSource(mm, part.units)
+    const worst = worstRegion(r)
+    const op =
+      worst === undefined
+        ? undefined
+        : part.dto.operations.find((o) => o.id === worst.operationIds[0])?.name
+    return referenceMessages.compare.viewport(
+      r.regions.length + (r.more ?? 0),
+      L(r.threshold),
+      worst === undefined
+        ? undefined
+        : { dev: L(worst.maxDev), kind: worst.kind, ...(op === undefined ? {} : { op }) },
+    )
+  }, [compare, compareResult, part])
   const referenceSummary = references
     .filter((r) => r.visible)
     .map((r) =>
@@ -219,6 +253,8 @@ export function useDesignScene(): SceneProps {
     announcement,
     ghosts,
     referenceOverlay,
+    deviation,
+    focus: viewportFocus,
     seeThrough: panel && seeThroughStock && ghosts.length > 0,
     snap: snapOn,
     ...(part === undefined ? {} : { units: part.units }),
@@ -236,6 +272,7 @@ export function useDesignScene(): SceneProps {
             clones.summary,
             ...referenceSummary,
             overlaySummary,
+            compareSummary,
           ]
             .filter(Boolean)
             .join(' '),

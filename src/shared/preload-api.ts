@@ -88,6 +88,11 @@ export const IPC = {
    * (`ReferenceSectionReply`, U3).
    */
   referenceSection: 'dfyom:reference.section',
+  /**
+   * Renderer → main (invoke): what the compare overlay draws (`ReferenceCompareViewReply`, DF60
+   * P5): signed distances per part vertex and the missing pieces of the last compare.
+   */
+  referenceCompareView: 'dfyom:reference.compareView',
   /** Main → renderer: a native application menu item was chosen (`MenuAction`). */
   menuAction: 'dfyom:menu.action',
   /**
@@ -213,6 +218,23 @@ export type ReferenceSectionReply =
       readonly segments: Float32Array
       readonly loops?: readonly FittedLoop[]
     }
+  | { readonly ok: false; readonly error: AppErrorData }
+
+/**
+ * What the compare overlay draws (DF60 P5, docs/modes/reference-tools.md#overlay-ui): the window
+ * sends the part mesh's vertices it shows (part frame, mm) and the compare's threshold; the reply
+ * has the signed distance of each vertex to the placed reference (+ extra, − missing, mm) and,
+ * when the last compare in the worker was of this mesh and threshold, its missing pieces over the
+ * threshold as a triangle soup (part frame). Window plumbing (RT-G), not an agent capability.
+ */
+export interface ReferenceCompareViewRequest {
+  readonly referenceId: string
+  readonly positions: Float32Array
+  readonly threshold: number
+}
+
+export type ReferenceCompareViewReply =
+  | { readonly ok: true; readonly distances: Float32Array; readonly missing?: Float32Array }
   | { readonly ok: false; readonly error: AppErrorData }
 
 /**
@@ -402,10 +424,14 @@ export interface PreloadApi {
     /** Reveals an exported file (a path from `chooseExport`) in Finder (DF48); whether it did. */
     showInFolder(path: string): Promise<boolean>
   }
-  /** Reference models of the window's project: the ghost's triangles (R3), a section (U3). */
+  /**
+   * Reference models of the window's project: the ghost's triangles (R3), a section (U3), the
+   * compare overlay's distances and missing pieces (DF60 P5).
+   */
   readonly reference: {
     mesh(referenceId: string): Promise<ReferenceMeshReply>
     section(request: ReferenceSectionRequest): Promise<ReferenceSectionReply>
+    compareView(request: ReferenceCompareViewRequest): Promise<ReferenceCompareViewReply>
   }
   /**
    * The Library window (docs/conventions/ui-library-window.md): window plumbing around the

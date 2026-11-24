@@ -280,6 +280,52 @@ export function components(indices: Uint32Array, vertices: number): { of: Int32A
   return { of, n }
 }
 
+/**
+ * The solid pieces of a closed, outward mesh: its connected shells, each inner (void) shell —
+ * negative signed volume — joined to the smallest outer shell whose box holds it. A part that
+ * wholly contains the reference leaves `part − reference` as a block with a void: one piece, not
+ * an outer shell that "never meets the reference" and a void of the reference's volume (DF60 P5).
+ */
+export function solidPieces(p: Float32Array, ix: Uint32Array): { of: Int32Array; n: number } {
+  const raw = components(ix, p.length / 3)
+  const volume = new Float64Array(raw.n)
+  const box: Box[] = Array.from({ length: raw.n }, emptyBox)
+  for (let t = 0; t < raw.of.length; t++) {
+    const k = raw.of[t]!
+    const a = 3 * ix[3 * t]!,
+      b = 3 * ix[3 * t + 1]!,
+      c = 3 * ix[3 * t + 2]!
+    volume[k] =
+      volume[k]! +
+      (p[a]! * (p[b + 1]! * p[c + 2]! - p[b + 2]! * p[c + 1]!) -
+        p[a + 1]! * (p[b]! * p[c + 2]! - p[b + 2]! * p[c]!) +
+        p[a + 2]! * (p[b]! * p[c + 1]! - p[b + 1]! * p[c]!)) /
+        6
+    for (const v of [a, b, c]) grow(box[k]!, p, v / 3)
+  }
+  const holds = (o: Box, i: Box) =>
+    [0, 1, 2].every((k) => o[0][k]! <= i[0][k]! && o[1][k]! >= i[1][k]!)
+  const size = (b: Box) => (b[1][0] - b[0][0]) * (b[1][1] - b[0][1]) * (b[1][2] - b[0][2])
+  const group = new Int32Array(raw.n).fill(-1)
+  let n = 0
+  for (let k = 0; k < raw.n; k++) if (volume[k]! >= 0) group[k] = n++
+  for (let k = 0; k < raw.n; k++) {
+    if (group[k] !== -1) continue
+    let best = -1
+    for (let o = 0; o < raw.n; o++)
+      if (
+        volume[o]! >= 0 &&
+        holds(box[o]!, box[k]!) &&
+        (best < 0 || size(box[o]!) < size(box[best]!))
+      )
+        best = o
+    group[k] = best >= 0 ? group[best]! : n++
+  }
+  const of = new Int32Array(raw.of.length)
+  for (let t = 0; t < of.length; t++) of[t] = group[raw.of[t]!]!
+  return { of, n }
+}
+
 type Box = [[number, number, number], [number, number, number]]
 
 const emptyBox = (): Box => [
@@ -335,6 +381,7 @@ function deviatingSamples(
   h: number,
   stop: number,
   out: Samples,
+  hints: { local: number; other: number },
 ): void {
   const a = 3 * ix[3 * t]!,
     b = 3 * ix[3 * t + 1]!,
@@ -353,8 +400,14 @@ function deviatingSamples(
       const x = w * p[a]! + u * p[b]! + v * p[c]!
       const y = w * p[a + 1]! + u * p[b + 1]! + v * p[c + 1]!
       const z = w * p[a + 2]! + u * p[b + 2]! + v * p[c + 2]!
-      if (local !== undefined && local.closest(x, y, z, stop).distance <= stop) continue
-      const d = other.closest(x, y, z, stop).distance
+      if (local !== undefined) {
+        const l = local.closest(x, y, z, stop, hints.local)
+        hints.local = l.triangle
+        if (l.distance <= stop) continue
+      }
+      const o = other.closest(x, y, z, stop, hints.other)
+      hints.other = o.triangle
+      const d = o.distance
       if (d <= stop) continue
       out.xyz.push(x, y, z)
       out.dev.push(d)
@@ -370,40 +423,51 @@ function deviatingSamples(
 function sampleClusters(s: Samples, link: number): number[][] {
   const count = s.dev.length
   const uf = unionFind(count)
-  const byCell = new Map<string, number>()
+  // numeric keys (string keys were a third of the regions' time on the enclosure, P5)
+  const G = SAMPLES_MAX + 2
+  const cellKey = (t: number, i: number, j: number) => (t * G + i) * G + j
+  const byCell = new Map<number, number>()
   for (let k = 0; k < count; k++)
-    byCell.set(`${s.cell[3 * k]},${s.cell[3 * k + 1]},${s.cell[3 * k + 2]}`, k)
+    byCell.set(cellKey(s.cell[3 * k]!, s.cell[3 * k + 1]!, s.cell[3 * k + 2]!), k)
   for (let k = 0; k < count; k++) {
     const t = s.cell[3 * k]!,
       i = s.cell[3 * k + 1]!,
       j = s.cell[3 * k + 2]!
-    for (const [di, dj] of [
-      [1, 0],
-      [0, 1],
-      [1, -1],
-    ] as const) {
-      const o = byCell.get(`${t},${i + di},${j + dj}`)
-      if (o !== undefined) uf.join(k, o)
+    const a = byCell.get(cellKey(t, i + 1, j))
+    if (a !== undefined) uf.join(k, a)
+    const b = byCell.get(cellKey(t, i, j + 1))
+    if (b !== undefined) uf.join(k, b)
+    if (j > 0) {
+      const c = byCell.get(cellKey(t, i + 1, j - 1))
+      if (c !== undefined) uf.join(k, c)
     }
   }
-  const hash = new Map<string, number[]>()
-  const key = (a: number, b: number, c: number) => `${a},${b},${c}`
+  // a spatial hash on a `link` grid; cells wrap at 2^17 per axis, which only adds candidates
+  // (every candidate's distance is checked)
+  const M = 0x1ffff
+  const key = (a: number, b: number, c: number) => (a & M) * 2 ** 34 + (b & M) * 2 ** 17 + (c & M)
+  const hash = new Map<number, number[]>()
+  const link2 = link * link
+  const xyz = s.xyz
   for (let k = 0; k < count; k++) {
-    const gx = Math.floor(s.xyz[3 * k]! / link),
-      gy = Math.floor(s.xyz[3 * k + 1]! / link),
-      gz = Math.floor(s.xyz[3 * k + 2]! / link)
+    const x = xyz[3 * k]!,
+      y = xyz[3 * k + 1]!,
+      z = xyz[3 * k + 2]!
+    const gx = Math.floor(x / link),
+      gy = Math.floor(y / link),
+      gz = Math.floor(z / link)
     for (let dx = -1; dx <= 1; dx++)
       for (let dy = -1; dy <= 1; dy++)
-        for (let dz = -1; dz <= 1; dz++)
-          for (const o of hash.get(key(gx + dx, gy + dy, gz + dz)) ?? [])
-            if (
-              Math.hypot(
-                s.xyz[3 * k]! - s.xyz[3 * o]!,
-                s.xyz[3 * k + 1]! - s.xyz[3 * o + 1]!,
-                s.xyz[3 * k + 2]! - s.xyz[3 * o + 2]!,
-              ) <= link
-            )
-              uf.join(k, o)
+        for (let dz = -1; dz <= 1; dz++) {
+          const list = hash.get(key(gx + dx, gy + dy, gz + dz))
+          if (list === undefined) continue
+          for (const o of list) {
+            const ex = x - xyz[3 * o]!,
+              ey = y - xyz[3 * o + 1]!,
+              ez = z - xyz[3 * o + 2]!
+            if (ex * ex + ey * ey + ez * ez <= link2) uf.join(k, o)
+          }
+        }
     const own = key(gx, gy, gz)
     const list = hash.get(own)
     if (list === undefined) hash.set(own, [k])
@@ -426,6 +490,8 @@ interface KindRegions {
   readonly max: number
   readonly volume: number
   readonly offcuts: { count: number; volume: number }
+  /** The pieces with regions (deviating samples), by component index. */
+  readonly shown: number[]
 }
 
 /**
@@ -447,7 +513,7 @@ function regionsOf(
   boxVolume: (b: Box) => AppResult<number>,
 ): AppResult<KindRegions> {
   const { positions: p, indices: ix } = m
-  const { of, n } = components(ix, p.length / 3)
+  const { of, n } = solidPieces(p, ix)
   const volume = new Float64Array(n)
   const box: Box[] = []
   const ownTris: number[][] = []
@@ -493,6 +559,7 @@ function regionsOf(
     below: { count: 0, volume: 0 },
     volume: 0,
     offcuts: { count: 0, volume: 0 },
+    shown: [] as number[],
   }
   let max = 0
   for (let k = 0; k < n; k++) {
@@ -523,12 +590,14 @@ function regionsOf(
     near.forEach((t, i) => sub.set(ix.subarray(3 * t, 3 * t + 3), 3 * i))
     const local = near.length === 0 ? undefined : new MeshBvh(p, sub)
     const samples: Samples = { xyz: [], dev: [], cell: [] }
-    for (const t of tris) deviatingSamples(p, ix, t, other, local, h, threshold, samples)
+    const hints = { local: -1, other: -1 }
+    for (const t of tris) deviatingSamples(p, ix, t, other, local, h, threshold, samples, hints)
     if (samples.dev.length === 0) {
       out.below.count++
       out.below.volume += v
       continue
     }
+    out.shown.push(k)
     const clusters = sampleClusters(samples, h)
     for (const members of clusters) {
       const b = emptyBox()
@@ -596,6 +665,23 @@ function regionsOf(
   return Ok({ ...out, max })
 }
 
+/** The triangles of the pieces `shown` of a boolean result as a soup (9 floats each). */
+function pieceSoup(m: MeshOut, shown: readonly number[]): Float32Array {
+  if (shown.length === 0) return new Float32Array(0)
+  const { positions: p, indices: ix } = m
+  const { of } = solidPieces(p, ix)
+  const keep = new Set(shown)
+  const out: number[] = []
+  for (let t = 0; t < of.length; t++) {
+    if (!keep.has(of[t]!)) continue
+    for (let k = 0; k < 3; k++) {
+      const v = 3 * ix[3 * t + k]!
+      out.push(p[v]!, p[v + 1]!, p[v + 2]!)
+    }
+  }
+  return Float32Array.from(out)
+}
+
 const score = (x: ComparePiece) => x.maxDev * x.volume
 
 function ranked(pieces: ComparePiece[]): { pieces: ComparePiece[]; more?: number } {
@@ -654,28 +740,75 @@ function boxMesh(b: Box): IndexedMesh {
 }
 
 /**
+ * The placed reference ready for compares (DF60 P5 performance): the soup in the part frame (for
+ * the height maps), welded, turned outward when it is closed and inside out, with its volume and
+ * a BVH of its surface (for `maxDev` and the overlay's signed distances). The worker keeps it per
+ * file and placement, so a compare after a design edit does not weld or index it again.
+ */
+export interface PreparedReference {
+  readonly placed: Float64Array
+  readonly mesh: IndexedMesh
+  readonly closed: boolean
+  readonly volume: number
+  readonly bvh: MeshBvh
+}
+
+/** Places `soup` (source units) with `matrix` and prepares it (see `PreparedReference`). */
+export function prepareReference(soup: Float32Array, matrix: readonly number[]): PreparedReference {
+  const placed = transformSoup(soup, matrix)
+  const welded = weldSoup(placed)
+  const closed = isClosed(welded)
+  const v = closed ? meshVolume(welded) : 0
+  // an inside-out export (negative volume) would subtract the wrong side
+  const mesh = v < 0 ? flipped(welded) : welded
+  return {
+    placed,
+    mesh,
+    closed,
+    volume: Math.abs(v),
+    bvh: new MeshBvh(mesh.positions, mesh.triangles),
+  }
+}
+
+/** Options of `compareBoolean`. */
+export interface BooleanOptions {
+  /**
+   * Keeps the reference solid in the kernel under this key across runs (`SolidPort.kept`; the
+   * file and placement must identify it), so a re-run does not build it again.
+   */
+  readonly keepAs?: string | undefined
+  /** Receives the missing pieces over the threshold as a soup (part frame), for the overlay. */
+  readonly onMissing?: ((soup: Float32Array) => void) | undefined
+}
+
+/**
  * The boolean method: Err (`geometry.evaluation`) when the solid library refuses a mesh (the
- * caller falls back to the height maps). `placed` is the welded reference in the part frame.
+ * caller falls back to the height maps). `reference` is the prepared, closed reference.
  */
 export function compareBoolean(
   kernel: SolidKernel,
-  placed: IndexedMesh,
+  reference: PreparedReference,
   part: CompareMesh,
   threshold: number,
   steps: Steps,
+  options: BooleanOptions = {},
 ): AppResult<CompareRaw> {
-  // an inside-out export (negative volume) would subtract the wrong side
-  const reference = meshVolume(placed) < 0 ? flipped(placed) : placed
   const welded = weldPart(part)
   const partBvh = new MeshBvh(welded.positions, welded.triangles)
-  const refBvh = new MeshBvh(reference.positions, reference.triangles)
+  const refBvh = reference.bvh
   return kernel.withSolids((s) => {
-    const refId = s.reserveOriginalId()
-    if (refId.isErr()) return Err(refId.unwrapErr())
+    const make = () =>
+      s
+        .reserveOriginalId()
+        .andThen((originalId) =>
+          s.fromMesh(reference.mesh, originalId).map((solid) => ({ solid, originalId })),
+        )
+    const kept = options.keepAs === undefined ? make() : s.kept(options.keepAs, make)
+    if (kept.isErr()) return Err(kept.unwrapErr())
+    const ref = kept.unwrap().solid
+    const refId = kept.unwrap().originalId
     const partId = s.reserveOriginalId()
     if (partId.isErr()) return Err(partId.unwrapErr())
-    const ref = s.fromMesh(reference, refId.unwrap())
-    if (ref.isErr()) return Err(ref.unwrapErr())
     const whole = s.fromMesh(welded, partId.unwrap())
     if (whole.isErr()) return Err(whole.unwrapErr())
     const step = steps.step({ done: 1, total: 3, label: 'Comparing with the reference' })
@@ -689,16 +822,14 @@ export function compareBoolean(
     const results: KindRegions[] = []
     for (const kind of ['missing', 'extra'] as const) {
       const solid =
-        kind === 'missing'
-          ? s.subtract(ref.unwrap(), whole.unwrap())
-          : s.subtract(whole.unwrap(), ref.unwrap())
+        kind === 'missing' ? s.subtract(ref, whole.unwrap()) : s.subtract(whole.unwrap(), ref)
       if (solid.isErr()) return Err(solid.unwrapErr())
       const mesh = s.toMesh(solid.unwrap())
       if (mesh.isErr()) return Err(mesh.unwrapErr())
       const r = regionsOf(
         kind,
         mesh.unwrap(),
-        kind === 'missing' ? refId.unwrap() : partId.unwrap(),
+        kind === 'missing' ? refId : partId.unwrap(),
         partId.unwrap(),
         kind === 'missing' ? partBvh : refBvh,
         threshold,
@@ -706,9 +837,11 @@ export function compareBoolean(
         boxVolume(solid.unwrap()),
       )
       if (r.isErr()) return Err(r.unwrapErr())
+      if (kind === 'missing' && options.onMissing !== undefined)
+        options.onMissing(pieceSoup(mesh.unwrap(), r.unwrap().shown))
       results.push(r.unwrap())
     }
-    const rv = s.volume(ref.unwrap())
+    const rv = s.volume(ref)
     if (rv.isErr()) return Err(rv.unwrapErr())
     const pv = s.volume(whole.unwrap())
     if (pv.isErr()) return Err(pv.unwrapErr())

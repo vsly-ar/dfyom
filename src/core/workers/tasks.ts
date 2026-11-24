@@ -16,12 +16,12 @@ import {
   compareBoolean,
   compareHeightmap,
   CompareRawSchema,
-  isClosed,
-  transformSoup,
-  weldSoup,
+  prepareReference,
   type CompareMesh,
   type CompareRaw,
+  type PreparedReference,
 } from '../design/reference-compare'
+import { signedDistances } from '../design/mesh-distance'
 import { DIRECTIONS, type Direction, type StockSize } from '../geometry/face'
 import { FEATURE_EDGE_DEG, featureEdges, meshSection, sectionChains } from '../design/mesh-section'
 import {
@@ -236,8 +236,52 @@ async function referencePositions(
     if (read.isErr()) return read
     keptMesh = { path, positions: read.unwrap() }
     keptHoles.clear()
+    keptCompare = undefined
+    keptMissing = undefined
   }
   return Ok(keptMesh.positions)
+}
+
+/**
+ * The kept mesh placed for compares (DF60 P5 performance): welded, outward, its volume and BVH,
+ * for the last placement; a compare after a design edit reuses it, and the kernel keeps the
+ * reference solid under `key` (`SolidPort.kept`). Cleared with the mesh.
+ */
+let keptCompare: { readonly key: string; readonly reference: PreparedReference } | undefined
+
+/**
+ * The missing pieces over the threshold of the last boolean compare, for the overlay's volumes
+ * (`reference.compareView`), by reference key, part hash and threshold.
+ */
+let keptMissing: { readonly key: string; readonly soup: Float32Array } | undefined
+
+async function preparedReference(
+  input: { path: string; triangles: number; matrix: readonly number[] },
+  ctl: TaskControl,
+  where: string,
+): Promise<AppResult<{ key: string; reference: PreparedReference }>> {
+  const read = await referencePositions(input.path, input.triangles, ctl, where)
+  if (read.isErr()) return read
+  const key = `reference.compare:${input.path}:${input.matrix.join(',')}`
+  if (keptCompare?.key !== key)
+    keptCompare = { key, reference: prepareReference(read.unwrap(), input.matrix) }
+  return Ok(keptCompare)
+}
+
+/**
+ * A hash of a part mesh's positions (two 32-bit FNV-1a over the float bits): the compare and
+ * the overlay's view of one evaluation agree on it.
+ */
+export function positionsHash(positions: Float32Array): string {
+  const words = new Uint32Array(positions.buffer, positions.byteOffset, positions.length)
+  let a = 0x811c9dc5
+  let b = 0x01000193 ^ words.length
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i]!
+    a = Math.imul(a ^ w, 0x01000193)
+    b = Math.imul(b ^ ((w >>> 16) | (w << 16)), 0x5bd1e995)
+  }
+  return `${(a >>> 0).toString(16)}${(b >>> 0).toString(16)}:${words.length}`
 }
 
 /** A Float32Array from any realm (a jsdom test's arrays fail `instanceof` across realms). */
@@ -404,16 +448,25 @@ export const referenceCompare: WorkerTask<CompareInput, CompareRaw> = {
   output: CompareRawSchema,
   timeoutMs: 120_000,
   async run(input, ctl) {
-    const read = await referencePositions(input.path, input.triangles, ctl, 'reference.compare')
-    if (read.isErr()) return read
-    const placed = transformSoup(read.unwrap(), input.matrix)
+    const prepared = await preparedReference(input, ctl, 'reference.compare')
+    if (prepared.isErr()) return prepared
+    const { key, reference } = prepared.unwrap()
+    const placed = reference.placed
     const opts = { threshold: input.threshold, stock: input.stock, directions: input.directions }
-    const welded = weldSoup(placed)
-    if (!isClosed(welded))
+    if (!reference.closed)
       return compareHeightmap(placed, input.part, opts, ctl.steps, 'the reference mesh is open')
     const kernel = await ctl.solids()
     if (kernel.isErr()) return Err(kernel.unwrapErr())
-    const r = compareBoolean(kernel.unwrap(), welded, input.part, input.threshold, ctl.steps)
+    const solids = kernel.unwrap()
+    // the reference solid is kept with the evaluation's solids (one budget, least recently used)
+    solids.keepSolids(KEPT_TRIANGLES)
+    const missingKey = `${key}|${positionsHash(input.part.positions)}|${input.threshold}`
+    const r = compareBoolean(solids, reference, input.part, input.threshold, ctl.steps, {
+      keepAs: key,
+      onMissing: (soup) => {
+        keptMissing = { key: missingKey, soup }
+      },
+    })
     if (r.isOk() || r.unwrapErr().code !== 'geometry.evaluation') return r
     return compareHeightmap(
       placed,
@@ -422,6 +475,57 @@ export const referenceCompare: WorkerTask<CompareInput, CompareRaw> = {
       ctl.steps,
       `the solid library refused the meshes (${r.unwrapErr().message})`,
     )
+  },
+}
+
+export interface CompareViewInput {
+  readonly path: string
+  readonly triangles: number
+  /** Column-major 4 × 4: source units → the part frame (mm). */
+  readonly matrix: readonly number[]
+  /** The part mesh's vertices as the window draws them (part frame, mm). */
+  readonly positions: Float32Array
+  /** The threshold of the compare whose missing pieces to return. */
+  readonly threshold: number
+}
+
+export interface CompareViewOutput {
+  /** Signed distance per vertex of `positions` to the reference: + extra, − missing (mm). */
+  readonly distances: Float32Array
+  /**
+   * The missing pieces over the threshold (soup, part frame) when the last boolean compare in
+   * this worker was of this mesh, reference and threshold; absent otherwise.
+   */
+  readonly missing?: Float32Array | undefined
+}
+
+/**
+ * What the compare overlay draws (DF60 P5, docs/modes/reference-tools.md#overlay-ui): the signed
+ * distance of each part vertex to the placed reference (the kept BVH) and the missing pieces the
+ * last compare of the same mesh kept. Window plumbing only (RT-G): agents get the regions.
+ */
+export const referenceCompareView: WorkerTask<CompareViewInput, CompareViewOutput> = {
+  name: 'reference.compareView',
+  lane: 'geometry',
+  input: StlReadSchema.extend({
+    matrix: z.array(z.number()).length(16),
+    positions: FLOAT32,
+    threshold: z.number().positive(),
+  }),
+  output: z.object({ distances: FLOAT32, missing: FLOAT32.optional() }),
+  timeoutMs: 120_000,
+  transfer: (r) => (r.missing === undefined ? [r.distances] : [r.distances, r.missing]),
+  async run(input, ctl) {
+    const prepared = await preparedReference(input, ctl, 'reference.compareView')
+    if (prepared.isErr()) return prepared
+    const { key, reference } = prepared.unwrap()
+    const step = ctl.steps.step({ done: 0, total: 1, label: 'Measuring the part' })
+    if (step.isErr()) return step
+    const distances = signedDistances(reference.bvh, input.positions)
+    const missingKey = `${key}|${positionsHash(input.positions)}|${input.threshold}`
+    // a copy: the kept soup must survive the transfer
+    const missing = keptMissing?.key === missingKey ? keptMissing.soup.slice() : undefined
+    return Ok({ distances, ...(missing === undefined ? {} : { missing }) })
   },
 }
 
@@ -434,5 +538,6 @@ export const WORKER_TASKS: readonly AnyWorkerTask[] = [
   referenceLevels,
   referenceHoles,
   referenceCompare,
+  referenceCompareView,
   svgImportTask,
 ]

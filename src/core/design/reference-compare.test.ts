@@ -2,147 +2,33 @@
 // `cornerRadius`, the height-map fallback for an open mesh, and the BVH distances.
 // Spec: docs/modes/reference-tools.md#test-plans (P4 compare)
 import { beforeAll, describe, expect, it } from 'vitest'
-import { fail, Ok } from '../../shared/result'
 import { expectOk } from '../../shared/testing/result'
-import { createInProcessWorkers, memoryFiles } from '../commands/jobs'
-import { nodeRegion2d } from '../geometry/2d/testing/node-wasm'
 import { evaluatePart } from '../geometry/evaluate'
-import { loadManifold } from '../geometry/manifold'
-import { nodeManifoldSource } from '../geometry/testing/node-wasm'
 import type { SolidKernel } from '../geometry/solid-port'
-import { hashJson } from '../plan/snapshot'
-import { assetPathOf, type AssetRef } from '../project/assets'
-import type { ProjectSession } from '../project/storage'
-import { buildTestPart, designSetup, testStock, type DesignSetup } from './design.fixture'
-import type { EvaluationService } from './evaluation'
+import { buildTestPart } from './design.fixture'
 import { partGeometryInput } from './load'
 import { closestOnTriangle, MeshBvh } from './mesh-distance'
 import { components, isClosed, weldSoup } from './reference-compare'
-import { binaryStl, boxSoup, enclosureFullStl, soupOf } from './stl.testing'
+import { ghostMatrix } from './reference'
+import { storedPlacement } from './reference-find'
+import { referenceCompareView } from '../workers/tasks'
+import {
+  compare,
+  compareSetup as setup,
+  enclosureDesign as enclosure,
+  importAt,
+  partStl,
+  region2d,
+  SOURCES,
+  testKernel,
+} from './reference-compare.testing'
+import { binaryStl, boxSoup, soupOf } from './stl.testing'
 
 const ui = { kind: 'ui', id: 'w' } as const
-const region2d = nodeRegion2d()
 let kernel: SolidKernel
 beforeAll(async () => {
-  kernel = expectOk(await loadManifold(nodeManifoldSource()))
+  kernel = await testKernel()
 })
-
-const SOURCES: Record<string, Uint8Array> = {}
-
-const hex = async (bytes: Uint8Array) =>
-  [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes as Uint8Array<ArrayBuffer>))]
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('')
-
-/** The part's evaluation, computed in-process on demand (no debounce, no scheduler). */
-function evaluationsOf(get: () => DesignSetup): EvaluationService {
-  const state = (doc: DesignSetup['d']['doc'], partId: string) => {
-    const input = expectOk(partGeometryInput(doc, partId, region2d))
-    const ev = kernel.withSolids((solids) => evaluatePart(input, solids, undefined, region2d))
-    return ev.isErr()
-      ? { status: 'failed' as const, inputHash: hashJson(input), error: ev.unwrapErr() }
-      : { status: 'done' as const, inputHash: hashJson(input), evaluation: ev.unwrap() }
-  }
-  return {
-    state,
-    evaluate: (partId) => Promise.resolve(Ok(state(get().d.doc, partId))),
-  }
-}
-
-async function setup(stock?: object): Promise<DesignSetup> {
-  const files = new Map<string, Uint8Array>()
-  const session = {
-    async importAsset(source: string) {
-      const bytes = SOURCES[source]
-      if (bytes === undefined) return fail('input.malformed', 'no such file')
-      const sha256 = await hex(bytes)
-      const path = assetPathOf(sha256, 'stl')
-      files.set(`/work/${path}`, bytes)
-      return Ok({ path, sha256, size: bytes.length } satisfies AssetRef)
-    },
-    assetFile: (path: string) => Ok(`/work/${path}`),
-  } as unknown as ProjectSession
-  // the evaluations read `s` only once the setup has returned
-  const s: DesignSetup = await designSetup({
-    ...(stock === undefined ? {} : { stock }),
-    services: {
-      project: session,
-      workers: createInProcessWorkers({
-        files: memoryFiles(files),
-        solids: () => loadManifold(nodeManifoldSource()),
-        region2d: () => Ok(region2d),
-      }),
-      region2d,
-      evaluations: evaluationsOf(() => s),
-    },
-  })
-  return s
-}
-
-/** The evaluated part of `s` as an STL (part frame, mm) and its bounding box minimum. */
-function partStl(s: DesignSetup): { bytes: Uint8Array; min: [number, number, number] } {
-  const input = expectOk(partGeometryInput(s.d.doc, s.partId, region2d))
-  const ev = expectOk(
-    kernel.withSolids((solids) => evaluatePart(input, solids, undefined, region2d)),
-  )
-  const soup = soupOf(ev.positions, ev.indices)
-  const min: [number, number, number] = [Infinity, Infinity, Infinity]
-  for (let i = 0; i < soup.length; i++) min[i % 3] = Math.min(min[i % 3]!, soup[i]!)
-  return { bytes: binaryStl(soup), min }
-}
-
-/** Imports `path` and places its min corner at `min` (part frame). */
-async function importAt(s: DesignSetup, path: string, min: readonly number[]) {
-  const r = (await s.run('design.reference.import', {
-    partId: s.partId,
-    path,
-    sourceUnit: 'mm',
-  })) as { referenceId: string }
-  await s.run('design.reference.update', {
-    partId: s.partId,
-    referenceId: r.referenceId,
-    position: { x: String(min[0]), y: String(min[1]), z: String(min[2]) },
-  })
-  return r.referenceId
-}
-
-interface Region {
-  kind: 'missing' | 'extra'
-  volume: number
-  maxDev: number
-  at: number[]
-  bounds: number[][]
-  surfaces: string[]
-  operationIds: string[]
-  cause?: string
-}
-interface Compared {
-  method: string
-  threshold: number
-  stats: {
-    missingVolume: number
-    extraVolume: number
-    maxMissing: number
-    maxExtra: number
-    referenceVolume: number
-    partVolume: number
-  }
-  regions: Region[]
-  more?: number
-  below: { count: number; volume: number }
-  offcuts?: { count: number; volume: number }
-  note?: string
-  evaluation: string
-}
-
-async function compare(s: DesignSetup, extra: object = {}): Promise<Compared> {
-  const { jobId } = (await s.run('design.reference.compare', {
-    partId: s.partId,
-    source: { kind: 'part' },
-    ...extra,
-  })) as { jobId: string }
-  return expectOk(await s.d.job(jobId).unwrap().result) as Compared
-}
 
 describe('mesh-distance', () => {
   it('finds the closest point on a triangle in each Voronoi region', () => {
@@ -196,7 +82,7 @@ describe('design.reference.compare (boolean)', () => {
   beforeAll(async () => {
     const p = await setup()
     await buildTestPart(p)
-    const stl = partStl(p)
+    const stl = await partStl(p)
     SOURCES[PART] = stl.bytes
     min = stl.min
   })
@@ -232,6 +118,48 @@ describe('design.reference.compare (boolean)', () => {
     expect(g!.at[2]).toBeCloseTo(-8.5, 1) // the reference's floor (8 under the 0.5 facing)
   })
 
+  it('the overlay view: per-vertex signed distances and the missing piece of the last compare (P5)', async () => {
+    const s = await setup()
+    await buildTestPart(s)
+    await importAt(s, PART, min)
+    await s.run('design.pocket.update', { partId: s.partId, operationId: 'pocket1', depth: '8.2' })
+    const r = await compare(s)
+    const state = s.evaluations.state(s.d.doc, s.partId)
+    if (state.evaluation === undefined) throw new Error('no evaluation')
+    const ev = state.evaluation
+    const ref = Object.values(s.d.doc.references)[0]!
+    const view = (positions: Float32Array, threshold: number) =>
+      s.workers.run(
+        referenceCompareView,
+        {
+          path: `/work/${ref.asset.path}`,
+          triangles: ref.asset.triangles,
+          matrix: ghostMatrix(ref.asset.bounds, expectOk(storedPlacement(ref, 'test'))),
+          positions,
+          threshold,
+        },
+        { signal: new AbortController().signal, progress: () => undefined },
+      )
+    const v = expectOk(await view(ev.positions, r.threshold))
+    expect(v.distances).toHaveLength(ev.positions.length / 3)
+    // the pocket's floor vertices lie 0.2 inside the reference (missing material), the rest on it
+    const floor = ev.surfaces.indexOf('pocket1.floor')
+    const onFloor = new Set<number>()
+    for (let t = 0; t < ev.triangleSurface.length; t++)
+      if (ev.triangleSurface[t] === floor)
+        for (let k = 0; k < 3; k++) onFloor.add(ev.indices[3 * t + k]!)
+    for (const i of onFloor) expect(v.distances[i]!).toBeCloseTo(-0.2, 2)
+    let worst = 0
+    for (let i = 0; i < v.distances.length; i++)
+      if (!onFloor.has(i)) worst = Math.max(worst, Math.abs(v.distances[i]!))
+    expect(worst).toBeLessThan(0.2 + 1e-3)
+    // the missing piece (the 0.2 slab) for this mesh at this threshold only
+    expect(v.missing).toBeDefined()
+    expect(v.missing!.length % 9).toBe(0)
+    expect(v.missing!.length).toBeGreaterThan(0)
+    expect(expectOk(await view(ev.positions, 0.5)).missing).toBeUndefined()
+  })
+
   it('a missing pocket is one extra region of the pocket volume', async () => {
     const s = await setup()
     await buildTestPart(s)
@@ -262,7 +190,7 @@ describe('design.reference.compare (boolean)', () => {
     })
     const p = await setup()
     await p.run('design.pocket.add', { ...pocket('0'), partId: p.partId })
-    const stl = partStl(p)
+    const stl = await partStl(p)
     SOURCES[SHARP] = stl.bytes
     const s = await setup()
     await s.run('design.pocket.add', { ...pocket('3'), partId: s.partId })
@@ -279,6 +207,20 @@ describe('design.reference.compare (boolean)', () => {
     const quiet = await compare(s, { threshold: 1.5 })
     expect(quiet.regions).toEqual([])
     expect(quiet.below.count).toBe(4)
+  })
+
+  it('a part that wholly holds the reference is one extra region with a void, not an offcut', async () => {
+    SOURCES['/models/small-box.stl'] ??= binaryStl(boxSoup(20, 10, 5))
+    const s = await setup()
+    // inside the 100 × 60 × 20 block on every side: part − reference is a block with a void
+    await importAt(s, '/models/small-box.stl', [40, 25, -12])
+    const r = await compare(s)
+    expect(r.regions).toHaveLength(1)
+    expect(r.regions[0]).toMatchObject({ kind: 'extra' })
+    expect(r.stats.referenceVolume).toBeCloseTo(1000, 0)
+    expect(r.stats.extraVolume).toBeCloseTo(r.stats.partVolume - 1000, 0)
+    expect(r.stats.missingVolume).toBe(0)
+    expect((r as { offcuts?: unknown }).offcuts).toBeUndefined()
   })
 
   it('names the reference and refuses without one', async () => {
@@ -336,59 +278,6 @@ describe('design.reference.compare (height maps)', () => {
 })
 
 describe('design.reference.compare (enclosure fixture)', () => {
-  const ENCLOSURE = '/models/enclosure.stl'
-  const hardwood = {
-    length: '260',
-    width: '190',
-    thickness: '60.523',
-    material: { name: 'Oak', class: 'hardwood' },
-  }
-  interface Imported {
-    shapeIds: string[]
-    section: { shapes: { placeAt: { center: number[]; anchor: string } }[] }
-  }
-  const named = (r: Imported) => {
-    const at = r.section.shapes[0]!.placeAt
-    return {
-      shape: { kind: 'named', shapeId: r.shapeIds[0], center: at.center.map(String) },
-      anchor: at.anchor,
-    }
-  }
-
-  /**
-   * The enclosure approximated from its reference the way an agent would: shapes from its
-   * sections, the cavity pocket, the two bottom steps and the outline profile (no tabs). The
-   * notch, the rebate, the top edge round, the slot and the pilot holes are left out.
-   */
-  async function enclosure(cavityDepth: string): Promise<DesignSetup> {
-    SOURCES[ENCLOSURE] ??= enclosureFullStl()
-    const s = await setup({ ...testStock(), ...hardwood })
-    const partId = s.partId
-    await s.run('design.reference.import', { partId, path: ENCLOSURE, sourceUnit: 'mm' })
-    const shape = (from: object) =>
-      s.run('design.shape.import', { partId, from }) as Promise<Imported>
-    const outline = await shape({ depth: '30', loops: 'outer' })
-    const cavity = await shape({ depth: '30', loops: 'holes' })
-    const step2 = await shape({ face: 'stock.bottom', depth: '3', loops: 'outer' })
-    const step1 = await shape({ face: 'stock.bottom', depth: '1', loops: 'outer' })
-    const tabs = { count: '0', width: '6', thickness: '2' }
-    await s.run('design.pocket.add', { partId, ...named(cavity), depth: cavityDepth })
-    for (const [step, depth] of [
-      [step1, '1.77'],
-      [step2, '4.19'],
-    ] as const)
-      await s.run('design.profile.add', {
-        partId,
-        on: 'stock.bottom',
-        side: 'outside',
-        ...named(step),
-        depth,
-        tabs,
-      })
-    await s.run('design.profile.add', { partId, side: 'outside', ...named(outline), tabs })
-    return s
-  }
-
   it('an approximating design leaves only what it omits, as separate extra regions', async () => {
     const s = await enclosure('56.338')
     const r = await compare(s, { limit: 20 })

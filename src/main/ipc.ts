@@ -20,6 +20,7 @@ import {
   type OpenedWindow,
   type ProjectSnapshot,
   type ReferenceMeshReply,
+  type ReferenceCompareViewReply,
   type ReferenceSectionReply,
   type WindowCloseRequest,
 } from '../shared/preload-api'
@@ -349,6 +350,31 @@ export function registerProjectIpc(
       if (r.isErr()) return { ok: false, error: agentError(r.unwrapErr()).error }
       const { segments, loops } = r.unwrap()
       return loops === undefined ? { ok: true, segments } : { ok: true, segments, loops }
+    },
+  )
+  // The compare overlay's distances and missing pieces (DF60 P5): measured in the worker against
+  // the kept reference, copied once (docs/modes/reference-tools.md#overlay-ui).
+  ipcMain.handle(
+    IPC.referenceCompareView,
+    async (event, request: unknown): Promise<ReferenceCompareViewReply> => {
+      const ws = sessionOf(event)
+      const key = ws?.session.boundKey
+      const req = request as {
+        referenceId?: unknown
+        positions?: unknown
+        threshold?: unknown
+      } | null
+      if (
+        key === undefined ||
+        typeof req?.referenceId !== 'string' ||
+        !(req.positions instanceof Float32Array) ||
+        typeof req.threshold !== 'number'
+      )
+        return { ok: false, error: NOT_A_WINDOW_ERROR }
+      const r = await host.referenceCompareView(key, req.referenceId, req.positions, req.threshold)
+      if (r.isErr()) return { ok: false, error: agentError(r.unwrapErr()).error }
+      const { distances, missing } = r.unwrap()
+      return missing === undefined ? { ok: true, distances } : { ok: true, distances, missing }
     },
   )
 

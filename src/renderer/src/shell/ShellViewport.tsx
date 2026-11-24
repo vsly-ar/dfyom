@@ -5,6 +5,7 @@
 // show here, bottom-centre over the view, never over the side panels (DF45). Doc: docs/conventions/ui.md#app-shell, #viewport-task-35, #shape-editor
 import type { AppMode } from '../../../core/modes'
 import { ShapeEditorLayer } from '../modes/design/ShapeEditorView'
+import { CompareLegend } from '../modes/design/ReferenceCompare'
 import { PlanStartOverlay } from '../modes/plan'
 import { useModeScene } from '../modes/ModePanels'
 import { ToastAnchor } from '../ui'
@@ -35,6 +36,7 @@ export function ShellViewport({
         insetRight={insetRight}
         className={styles['viewportCanvas']}
       />
+      {mode === 'design' ? <CompareLegend /> : null}
       {mode === 'design' ? <ShapeEditorLayer insetRight={insetRight} /> : null}
       {mode === 'plan' && doc !== undefined ? (
         <PlanStartOverlay doc={doc} insetRight={insetRight} />

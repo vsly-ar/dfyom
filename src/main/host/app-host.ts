@@ -53,12 +53,16 @@ import { checkNoRunJob } from '../../core/run/commands'
 import type { MachineService } from '../../core/run/service'
 import { createToolpathCache } from '../../core/toolpath/cache'
 import {
+  referenceCompareView,
   referenceSection,
   stlMesh,
+  type CompareViewOutput,
   type SectionOutput,
   type StlMesh,
 } from '../../core/workers/tasks'
-import { fitOptions } from '../../core/design/reference-find'
+import { fitOptions, storedPlacement } from '../../core/design/reference-find'
+import { ghostMatrix } from '../../core/design/reference'
+import type { ReferenceDTO } from '../../core/design/reference.dto'
 import type { ErrorReporter } from '../../shared/boundary'
 import type { AppError } from '../../shared/errors/app-error'
 import type { Logger } from '../../shared/logging'
@@ -184,6 +188,16 @@ export interface AppHost extends SessionHost, HostPort {
     level: number,
     fit?: boolean,
   ): AsyncAppResult<SectionOutput>
+  /**
+   * The compare overlay's signed distances for the part mesh `positions` and the missing pieces
+   * of the worker's last compare of that mesh at `threshold` (DF60 P5, window plumbing).
+   */
+  referenceCompareView(
+    key: string,
+    referenceId: string,
+    positions: Float32Array,
+    threshold: number,
+  ): AsyncAppResult<CompareViewOutput>
   /**
    * Stdin end, app quit: abort jobs and close every project (unsaved changes stay recoverable).
    * Returns the projects that had unsaved changes.
@@ -644,12 +658,43 @@ class Host implements AppHost {
     return r.isErr() ? Err(r.unwrapErr().withContext(where, { referenceId })) : r
   }
 
+  /**
+   * The compare overlay's view of the part mesh `positions` (DF60 P5): signed distances to the
+   * reference placed as its record says, and the missing pieces of the worker's last compare of
+   * this mesh at `threshold` (docs/modes/reference-tools.md#overlay-ui).
+   */
+  async referenceCompareView(
+    key: string,
+    referenceId: string,
+    positions: Float32Array,
+    threshold: number,
+  ): AsyncAppResult<CompareViewOutput> {
+    const where = 'reference.compareView'
+    const found = this.referenceFile(key, referenceId, where)
+    if (found.isErr()) return Err(found.unwrapErr())
+    const { file, triangles, ref } = found.unwrap()
+    const placement = storedPlacement(ref, where)
+    if (placement.isErr()) return Err(placement.unwrapErr())
+    const r = await this.o.workers.run(
+      referenceCompareView,
+      {
+        path: file,
+        triangles,
+        matrix: ghostMatrix(ref.asset.bounds, placement.unwrap()),
+        positions,
+        threshold,
+      },
+      { signal: new AbortController().signal, progress: () => undefined },
+    )
+    return r.isErr() ? Err(r.unwrapErr().withContext(where, { referenceId })) : r
+  }
+
   /** The stored STL of a reference of the project `key`, and its triangle count. */
   private referenceFile(
     key: string,
     referenceId: string,
     where: string,
-  ): AppResult<{ file: string; triangles: number }> {
+  ): AppResult<{ file: string; triangles: number; ref: ReferenceDTO }> {
     const rt = this.runtimes.get(key)
     const refs = rt?.dispatcher.doc.references
     const ref =
@@ -661,7 +706,7 @@ class Host implements AppHost {
       })
     const file = rt.session.assetFile(ref.asset.path)
     if (file.isErr()) return Err(file.unwrapErr().withContext(where))
-    return Ok({ file: file.unwrap(), triangles: ref.asset.triangles })
+    return Ok({ file: file.unwrap(), triangles: ref.asset.triangles, ref })
   }
 
   onProjectsChanged(listener: () => void): () => void {

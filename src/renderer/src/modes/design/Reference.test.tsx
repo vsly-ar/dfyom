@@ -616,6 +616,160 @@ describe('reference model UI', () => {
     ])
   })
 
+  it('Read from offers the setups of the part plans; a setup sends face: { setupId } (DF60 P2)', async () => {
+    const { user, bridge, d, importBox } = await renderReference()
+    await importBox()
+    const partId = Object.keys(d.doc.parts)[0]!
+    await d.dispatch('plan.create', { partId }, { kind: 'ui', id: 'test' })
+    const plan = Object.values(d.doc.plans)[0]!
+    const setup = plan.setups[0]!
+    within(inspector()).getByRole('combobox', { name: 'Read from' }).focus()
+    await user.keyboard('{Enter}')
+    const list = await screen.findByRole('listbox')
+    const groups = within(list).getAllByRole('group')
+    expect(groups.map((g) => g.firstElementChild?.textContent)).toEqual(['Stock', 'Setups'])
+    await user.click(
+      within(groups[1]!).getByRole('option', { name: `${setup.name} · ${plan.name}` }),
+    )
+    await waitFor(() =>
+      expect(
+        bridge.calls.some(
+          (c) =>
+            c.name === 'design.reference.find' &&
+            JSON.stringify((c.args as { face: unknown }).face) ===
+              JSON.stringify({ setupId: setup.id }),
+        ),
+      ).toBe(true),
+    )
+    await expectNoAxeViolations()
+  })
+
+  it('Compare: the switch runs the job after each evaluation, colours from the worker, regions frame the view; Hide stops it (DF60 P5)', async () => {
+    const { user, bridge, d, ui, importBox } = await renderReference()
+    await importBox()
+    const partId = Object.keys(d.doc.parts)[0]!
+    const ok = (value: unknown) => ({ ok: true as const, value, revision: 0 })
+    const region = {
+      kind: 'missing' as const,
+      volume: 12.5,
+      maxDev: 0.42,
+      at: [10, 5, -2] as const,
+      bounds: [
+        [8, 4, -3],
+        [12, 6, -1],
+      ] as const,
+      surfaces: ['stock.top'],
+      operationIds: [] as string[],
+    }
+    const result = (evaluation: string, regions: (typeof region)[]) => ({
+      method: 'boolean',
+      threshold: 0.1,
+      stats: {
+        missingVolume: 12.5,
+        extraVolume: 0,
+        maxMissing: 0.42,
+        maxExtra: 0,
+        referenceVolume: 1000,
+        partVolume: 990,
+      },
+      regions,
+      below: { count: 2, volume: 0.1 },
+      evaluation,
+    })
+    const runs: unknown[] = []
+    let answer = result('h1', [region])
+    bridge.handle('design.reference.compare', (args) => {
+      runs.push(args)
+      return ok({ jobId: `j${runs.length}` })
+    })
+    bridge.handle('job.wait', () => ok({ state: 'finished', outcome: { ok: true, value: answer } }))
+    bridge.handle('job.abort', () => ok({}))
+    bridge.setReferenceCompareView((r) => ({
+      ok: true,
+      distances: new Float32Array(r.positions.length / 3).fill(-0.42),
+    }))
+    const mesh = (z: number) => ({
+      positions: new Float32Array([0, 0, z, 10, 0, z, 0, 10, z]),
+      indices: new Uint32Array([0, 1, 2]),
+      triangleSurface: new Uint32Array([0]),
+      surfaces: ['stock.top'],
+    })
+    const first = mesh(0)
+    act(() =>
+      bridge.emitEvaluation({ key: 'p1', partId, status: 'done', inputHash: 'h1', mesh: first }),
+    )
+
+    const compare = within(inspector()).getByRole('region', { name: 'Compare' })
+    // off: nothing runs
+    await new Promise((r) => setTimeout(r, 400))
+    expect(runs).toHaveLength(0)
+    await user.click(within(compare).getByRole('switch', { name: 'Show on the part' }))
+    await waitFor(() =>
+      expect(
+        within(compare).getByText('1 region over 0.1 mm · worst 0.42 mm missing'),
+      ).toBeVisible(),
+    )
+    expect(runs).toEqual([
+      {
+        partId,
+        referenceId: expect.any(String),
+        source: { kind: 'part' },
+        threshold: 0.1,
+        limit: 20,
+      },
+    ])
+    // the per-vertex distances of the mesh shown
+    expect(bridge.referenceCompareViewCalls.at(-1)!.positions).toBe(first.positions)
+    expect(ui().compareResult.view?.distances).toEqual(new Float32Array([-0.42, -0.42, -0.42]))
+    expect(
+      screen.getByRole('img', { name: /^Compare legend: Missing up to 0.42 mm/ }),
+    ).toBeVisible()
+    expect(
+      screen.getByText(/Compare: 1 region over 0.1 mm, worst 0.42 mm missing\./),
+    ).toBeInTheDocument()
+    await expectNoAxeViolations()
+
+    // a region frames the view (at least 10 mm) and is drawn chosen
+    const row = within(compare).getByRole('button', { name: 'Missing 0.42 mm, 13 mm³' })
+    await user.click(row)
+    expect(row).toHaveAttribute('aria-pressed', 'true')
+    expect(ui().viewportFocus?.box).toEqual({ min: [5, 0, -7], max: [15, 10, 3] })
+
+    // an edit: the next evaluation runs again and its result replaces the last
+    answer = result('h2', [])
+    const second = mesh(-1)
+    act(() =>
+      bridge.emitEvaluation({ key: 'p1', partId, status: 'done', inputHash: 'h2', mesh: second }),
+    )
+    await waitFor(() =>
+      expect(
+        within(compare).getByText('The design matches the reference within 0.1 mm.'),
+      ).toBeVisible(),
+    )
+    expect(runs).toHaveLength(2)
+    expect(ui().compareResult.view?.positions).toBe(second.positions)
+    expect(ui().compareRegion).toBeNull()
+
+    // a result of an older evaluation is dropped (an edit landed meanwhile)
+    answer = result('h3-stale', [region])
+    act(() =>
+      bridge.emitEvaluation({ key: 'p1', partId, status: 'done', inputHash: 'h4', mesh: mesh(-2) }),
+    )
+    await waitFor(() => expect(runs).toHaveLength(3))
+    await new Promise((r) => setTimeout(r, 50))
+    expect(ui().compareResult.view?.positions).toBe(second.positions)
+
+    // Hide in the viewport legend turns it off: no more runs
+    await user.click(screen.getByRole('button', { name: 'Hide' }))
+    expect(ui().referenceCompare).toBeNull()
+    expect(within(compare).getByRole('switch', { name: 'Show on the part' })).not.toBeChecked()
+    act(() =>
+      bridge.emitEvaluation({ key: 'p1', partId, status: 'done', inputHash: 'h5', mesh: mesh(-3) }),
+    )
+    await new Promise((r) => setTimeout(r, 400))
+    expect(runs).toHaveLength(3)
+  })
+
   it('shows a command error at its field and keeps the record', async () => {
     const { user, refs, importBox } = await renderReference()
     await importBox()

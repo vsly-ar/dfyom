@@ -195,3 +195,12 @@ export function middleDepth(box: Box, frame: FrameLike, faceW: number): number {
       }
   return Math.max(0, faceW - (lo + hi) / 2)
 }
+
+/** A length in the part's units as a `Quantity` (for a `QuantityInput`), or undefined. */
+export const lengthQuantity = (mm: number, units: UnitSystem): Quantity | undefined => {
+  const q = Quantity.parse(lengthSource(mm, units), {
+    kind: 'length',
+    defaultUnit: units === 'mm' ? 'mm' : 'in',
+  })
+  return q.isOk() ? q.unwrap() : undefined
+}

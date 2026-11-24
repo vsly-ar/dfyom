@@ -1,8 +1,8 @@
 /**
  * Closest-point distances to a triangle mesh (DF60 P4): a bounding volume hierarchy over the
  * triangles and the distance from a point to the nearest one, for compare's `maxDev` (the largest
- * distance of a missing or extra piece's vertices to the other surface). Pure and headless; the
- * signed distance per vertex for the overlay comes with P5.
+ * distance of a missing or extra piece's vertices to the other surface), and the signed distance
+ * of each part vertex to the reference for the compare overlay (P5). Pure and headless.
  * Doc: docs/modes/reference-tools.md#method-rt-f
  */
 
@@ -117,22 +117,37 @@ export class MeshBvh {
   /**
    * The nearest point of the mesh to `p`: its distance and the triangle; `Infinity` for an empty
    * mesh. Stops early once a triangle is closer than `stopBelow` (a caller that only needs to
-   * know the distance is under a bound).
+   * know the distance is under a bound). `hint`, a triangle likely near (the last query's), is
+   * tried first: its distance prunes the search.
    */
   closest(
     px: number,
     py: number,
     pz: number,
     stopBelow = 0,
+    hint = -1,
   ): { distance: number; triangle: number } {
     let best = Infinity
     let bestT = -1
     if (this.triangles === 0) return { distance: Infinity, triangle: -1 }
     const stop2 = stopBelow * stopBelow
-    const stack: number[] = [0]
-    const q = new Float64Array(3)
-    while (stack.length > 0) {
-      const node = stack.pop()!
+    // scratch reused across queries (millions per compare; P5 performance)
+    const stack = this.stack
+    const q = this.q
+    // a nearby query's triangle bounds the search from the start (P5 performance)
+    if (hint >= 0 && hint < this.triangles) {
+      closestOnTriangle(this.corners, hint, px, py, pz, q)
+      const dx = q[0]! - px,
+        dy = q[1]! - py,
+        dz = q[2]! - pz
+      best = dx * dx + dy * dy + dz * dz
+      bestT = hint
+      if (best <= stop2) return { distance: Math.sqrt(best), triangle: bestT }
+    }
+    let top = 0
+    stack[top++] = 0
+    while (top > 0) {
+      const node = stack[--top]!
       if (boxDistance2(this.boxes, node, px, py, pz) >= best) continue
       const c = this.count[node]!
       if (c > 0) {
@@ -156,12 +171,145 @@ export class MeshBvh {
       const da = boxDistance2(this.boxes, a, px, py, pz)
       const db = boxDistance2(this.boxes, a + 1, px, py, pz)
       // nearer child last, so it is popped first
-      if (da < db) stack.push(a + 1, a)
-      else stack.push(a, a + 1)
+      if (da < db) {
+        stack[top++] = a + 1
+        stack[top++] = a
+      } else {
+        stack[top++] = a
+        stack[top++] = a + 1
+      }
     }
     return { distance: Math.sqrt(best), triangle: bestT }
   }
+
+  /**
+   * The signed distance from `p` to the mesh (DF60 P5): negative inside a closed, outward mesh.
+   * The sign is that of `p − q` along the angle-weighted pseudo-normal at the closest point `q`
+   * (Bærentzen and Aanæs 2005): the face normal inside a face, the mean of the faces' normals
+   * on an edge, their angle-weighted mean at a vertex, so concave and convex edges are right.
+   * Triangles within a hair of the nearest distance all count (they share that edge or vertex).
+   */
+  signedDistance(px: number, py: number, pz: number): number {
+    if (this.triangles === 0) return Infinity
+    let best = Infinity
+    let nx = 0,
+      ny = 0,
+      nz = 0
+    let qx = 0,
+      qy = 0,
+      qz = 0
+    const stack = this.stack
+    const q = this.q
+    let top = 0
+    stack[top++] = 0
+    while (top > 0) {
+      const node = stack[--top]!
+      const slack = best * (1 + TIE) + TIE_ABS
+      if (boxDistance2(this.boxes, node, px, py, pz) > slack) continue
+      const c = this.count[node]!
+      if (c > 0) {
+        const s = this.first[node]!
+        for (let i = s; i < s + c; i++) {
+          const t = this.order[i]!
+          const region = closestOnTriangle(this.corners, t, px, py, pz, q)
+          const dx = q[0]! - px,
+            dy = q[1]! - py,
+            dz = q[2]! - pz
+          const d2 = dx * dx + dy * dy + dz * dz
+          if (d2 > best * (1 + TIE) + TIE_ABS) continue
+          if (d2 < best * (1 - TIE) - TIE_ABS) {
+            nx = ny = nz = 0
+          }
+          if (d2 < best) {
+            best = d2
+            qx = q[0]!
+            qy = q[1]!
+            qz = q[2]!
+          }
+          const w = this.weight(t, region)
+          const n = this.normal(t)
+          nx += w * n[0]
+          ny += w * n[1]
+          nz += w * n[2]
+        }
+        continue
+      }
+      const a = this.first[node]!
+      stack[top++] = a
+      stack[top++] = a + 1
+    }
+    const d = Math.sqrt(best)
+    const side = (px - qx) * nx + (py - qy) * ny + (pz - qz) * nz
+    return side < 0 ? -d : d
+  }
+
+  private readonly stack = new Int32Array(256)
+  private readonly q = new Float64Array(3)
+  private normals: Float64Array | undefined
+
+  /** Unit normal of triangle `t` (right-handed corner order). */
+  private normal(t: number): [number, number, number] {
+    if (this.normals === undefined) {
+      const c = this.corners
+      const out = new Float64Array(this.triangles * 3)
+      for (let i = 0; i < this.triangles; i++) {
+        const o = 9 * i
+        const ux = c[o + 3]! - c[o]!,
+          uy = c[o + 4]! - c[o + 1]!,
+          uz = c[o + 5]! - c[o + 2]!
+        const vx = c[o + 6]! - c[o]!,
+          vy = c[o + 7]! - c[o + 1]!,
+          vz = c[o + 8]! - c[o + 2]!
+        const x = uy * vz - uz * vy,
+          y = uz * vx - ux * vz,
+          z = ux * vy - uy * vx
+        const l = Math.hypot(x, y, z) || 1
+        out[3 * i] = x / l
+        out[3 * i + 1] = y / l
+        out[3 * i + 2] = z / l
+      }
+      this.normals = out
+    }
+    const n = this.normals
+    return [n[3 * t]!, n[3 * t + 1]!, n[3 * t + 2]!]
+  }
+
+  /** Pseudo-normal weight of triangle `t` for a closest point in `region` (`closestOnTriangle`). */
+  private weight(t: number, region: number): number {
+    if (region < 1 || region > 3) return 1 // face or edge
+    // a vertex: the triangle's angle there
+    const c = this.corners
+    const o = 9 * t
+    const k = region - 1
+    const a = o + 3 * k,
+      b = o + 3 * ((k + 1) % 3),
+      d = o + 3 * ((k + 2) % 3)
+    const ux = c[b]! - c[a]!,
+      uy = c[b + 1]! - c[a + 1]!,
+      uz = c[b + 2]! - c[a + 2]!
+    const vx = c[d]! - c[a]!,
+      vy = c[d + 1]! - c[a + 1]!,
+      vz = c[d + 2]! - c[a + 2]!
+    const cross = Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx)
+    return Math.atan2(cross, ux * vx + uy * vy + uz * vz)
+  }
 }
+
+/**
+ * The signed distance of every vertex of `positions` (x, y, z each, part frame) to the mesh of
+ * `bvh` (DF60 P5): positive outside it (extra material), negative inside (missing material).
+ */
+export function signedDistances(bvh: MeshBvh, positions: ArrayLike<number>): Float32Array {
+  const n = Math.floor(positions.length / 3)
+  const out = new Float32Array(n)
+  for (let v = 0; v < n; v++)
+    out[v] = bvh.signedDistance(positions[3 * v]!, positions[3 * v + 1]!, positions[3 * v + 2]!)
+  return out
+}
+
+/** Relative and absolute slack (squared mm) for triangles tied at the nearest distance. */
+const TIE = 1e-9
+const TIE_ABS = 1e-18
 
 function boxDistance2(b: Float64Array, node: number, x: number, y: number, z: number): number {
   const o = node * 6
@@ -204,7 +352,7 @@ function selectNth(
 
 /**
  * The point of triangle `t` nearest to p (Ericson, Real-Time Collision Detection § 5.1.5), into
- * `out`.
+ * `out`; returns where it lies: 0 inside the face, 1–3 at corner a, b, c, 4–6 on edge ab, ac, bc.
  */
 export function closestOnTriangle(
   c: Float64Array,
@@ -213,7 +361,7 @@ export function closestOnTriangle(
   py: number,
   pz: number,
   out: Float64Array,
-): void {
+): number {
   const o = 9 * t
   const ax = c[o]!,
     ay = c[o + 1]!,
@@ -227,35 +375,30 @@ export function closestOnTriangle(
   const apx = px - ax,
     apy = py - ay,
     apz = pz - az
-  const set = (x: number, y: number, z: number) => {
-    out[0] = x
-    out[1] = y
-    out[2] = z
-  }
   const d1 = abx * apx + aby * apy + abz * apz
   const d2 = acx * apx + acy * apy + acz * apz
-  if (d1 <= 0 && d2 <= 0) return set(ax, ay, az)
+  if (d1 <= 0 && d2 <= 0) return put(out, ax, ay, az, 1)
   const bpx = px - (ax + abx),
     bpy = py - (ay + aby),
     bpz = pz - (az + abz)
   const d3 = abx * bpx + aby * bpy + abz * bpz
   const d4 = acx * bpx + acy * bpy + acz * bpz
-  if (d3 >= 0 && d4 <= d3) return set(ax + abx, ay + aby, az + abz)
+  if (d3 >= 0 && d4 <= d3) return put(out, ax + abx, ay + aby, az + abz, 2)
   const vc = d1 * d4 - d3 * d2
   if (vc <= 0 && d1 >= 0 && d3 <= 0) {
     const v = d1 / (d1 - d3)
-    return set(ax + v * abx, ay + v * aby, az + v * abz)
+    return put(out, ax + v * abx, ay + v * aby, az + v * abz, 4)
   }
   const cpx = px - (ax + acx),
     cpy = py - (ay + acy),
     cpz = pz - (az + acz)
   const d5 = abx * cpx + aby * cpy + abz * cpz
   const d6 = acx * cpx + acy * cpy + acz * cpz
-  if (d6 >= 0 && d5 <= d6) return set(ax + acx, ay + acy, az + acz)
+  if (d6 >= 0 && d5 <= d6) return put(out, ax + acx, ay + acy, az + acz, 3)
   const vb = d5 * d2 - d1 * d6
   if (vb <= 0 && d2 >= 0 && d6 <= 0) {
     const w = d2 / (d2 - d6)
-    return set(ax + w * acx, ay + w * acy, az + w * acz)
+    return put(out, ax + w * acx, ay + w * acy, az + w * acz, 5)
   }
   const va = d3 * d6 - d5 * d4
   if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) {
@@ -263,10 +406,17 @@ export function closestOnTriangle(
     const bx = ax + abx,
       by = ay + aby,
       bz = az + abz
-    return set(bx + w * (acx - abx), by + w * (acy - aby), bz + w * (acz - abz))
+    return put(out, bx + w * (acx - abx), by + w * (acy - aby), bz + w * (acz - abz), 6)
   }
   const denom = 1 / (va + vb + vc)
   const v = vb * denom
   const w = vc * denom
-  return set(ax + abx * v + acx * w, ay + aby * v + acy * w, az + abz * v + acz * w)
+  return put(out, ax + abx * v + acx * w, ay + aby * v + acy * w, az + abz * v + acz * w, 0)
+}
+
+function put(out: Float64Array, x: number, y: number, z: number, region: number): number {
+  out[0] = x
+  out[1] = y
+  out[2] = z
+  return region
 }
