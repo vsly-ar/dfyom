@@ -538,6 +538,24 @@ describe('plan.get', () => {
     expect(run('inch')).toEqual([{ ...z, level: -0.0197, at: [2, 1] }, undefined])
   })
 
+  it('plan.warning.list detail "full" leaves the viewport outline out of the Z references', () => {
+    const outline = { patch: [], spotArea: [], clearance: 4, grid: 1 }
+    const value = {
+      warnings: [],
+      pendingApply: false,
+      zRefs: [{ setupId: 's1', planOperationId: 'op1', toolNumber: 1, zRef: null, outline }],
+    }
+    const shaper = new ResultShaper(fakeSession(peeks))
+    const r = shaper.shape(
+      call('plan.warning.list', value),
+      { planId: 'plan-1' },
+      { ...SUMMARY, detail: 'full' },
+    )
+    expect((valueOf(r) as { zRefs: object[] }).zRefs).toEqual([
+      { setupId: 's1', planOperationId: 'op1', toolNumber: 1, zRef: null },
+    ])
+  })
+
   it('detail "full" returns the record with compact quantities', () => {
     const shaper = new ResultShaper(fakeSession(peeks))
     const r = shaper.shape(

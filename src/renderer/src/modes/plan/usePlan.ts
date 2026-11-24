@@ -45,6 +45,8 @@ export function usePlanSelection(): [string | null, (id: string | null) => void]
       (id: string | null) => {
         select('plan', id)
         if (id !== null) store.getState().remember(id)
+        // DF69: a new selection shows its own run's Z reference
+        store.getState().previewZRef(undefined)
       },
       [select, store],
     ),

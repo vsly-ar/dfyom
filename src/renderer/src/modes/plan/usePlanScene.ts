@@ -5,16 +5,30 @@
 // toolpaths are drawn, outdated ones (stale or waiting for Apply, task P3) dimmed; operations
 // without one are left out. Snapshot scene (task E3b): the part drawn is the plan's part (its
 // design snapshot with plan-only edits, evaluated as the plan's own subject) on the plan's stock
-// copy, its edited operations tinted. `null` outside plan mode.
-// Doc: docs/conventions/ui.md#plan-mode-task-37, docs/modes/plan-v0.2.md#plan-only-edits-and-the-snapshot-scene
-import { useMemo } from 'react'
+// copy, its edited operations tinted. `null` outside plan mode. DF69: the shown tool run's Z
+// reference surface and touch-off spot (`RunScene.zRef`, z-spot.ts picks the run); dragging the
+// spot snaps it to the grid inside the flat patch and commits one `plan.operation.update { zRef }`
+// on release; the dropped spot is held until the plan re-reads it.
+// Doc: docs/conventions/ui.md#plan-mode-task-37, docs/modes/plan-v0.2.md#plan-only-edits-and-the-snapshot-scene,
+// docs/modes/z-reference.md#implementation-notes-df69
+import { useEffect, useMemo, useState } from 'react'
 import type { EvaluationStatus } from '../../../../core/design/evaluation'
 import type { AppMode } from '../../../../core/modes'
 import type { PlanDTO } from '../../../../core/plan/plan.dto'
 import type { Toolpath } from '../../../../core/toolpath/model'
 import { usePlanEvaluation, useReplica, useUi } from '../../shell/ShellContext'
-import { toolpathLines, type Box, type RunScene, type ViewportMesh } from '../../viewport'
 import {
+  toolpathLines,
+  type Box,
+  type RunScene,
+  type ViewportMesh,
+  type ZRefOverlay,
+} from '../../viewport'
+import { lengthSource } from '../../messages/dfm'
+import { planMessages } from '../../messages/plan'
+import {
+  allPlanOperations,
+  allows,
   chosenPlan,
   currentSetup,
   editedOperations,
@@ -22,7 +36,19 @@ import {
   planStockSize,
   setupPlacement,
 } from './model'
-import { usePlanData, usePlanState } from './plan-store'
+import { usePlanCommand, usePlanData, usePlanState } from './plan-store'
+import { shownZRefRun, snapSpot } from './z-spot'
+
+type P = readonly [number, number]
+
+/** A dragged or dropped spot of run `run` (its first plan operation). */
+interface HeldSpot {
+  readonly run: string
+  readonly at: P
+  readonly dragging: boolean
+}
+
+const same = (a: P, b: P) => Math.abs(a[0] - b[0]) < 1e-6 && Math.abs(a[1] - b[1]) < 1e-6
 
 /** The plan the plan scene shows, or undefined (another mode, no project or no plan). */
 function useScenePlan(mode: AppMode): PlanDTO | undefined {
@@ -38,8 +64,64 @@ export function usePlanScene(mode: AppMode): RunScene | null {
   const data = usePlanData(plan?.id)
   const selected = useUi((s) => s.selection.plan)
   const last = usePlanState((s) => s.lastSelection)
+  const preview = usePlanState((s) => s.zRefPreview)
+  const call = usePlanCommand()
+  const [held, setHeld] = useState<HeldSpot | null>(null)
   const doc = replica.status === 'open' ? replica.doc : undefined
   const setup = plan === undefined ? undefined : currentSetup(plan, selected, last)
+  // DF69: the shown run's reference, only in the window's setup (the scene draws only that one)
+  const runId = plan === undefined ? undefined : shownZRefRun(plan, selected, preview)
+  const zRun = data?.zRefs.find(
+    (r) => r.planOperationId === runId && r.setupId === setup?.id && r.zRef !== null,
+  )
+  const storedAt = zRun?.zRef?.at
+  // a dropped spot is held until the plan re-reads it (or another run is shown)
+  useEffect(() => {
+    if (held === null || held.dragging) return
+    if (held.run !== runId || (storedAt !== undefined && same(storedAt, held.at))) setHeld(null)
+  }, [held, runId, storedAt])
+  const units = doc?.unitSystem ?? 'mm'
+  const zRef = useMemo((): ZRefOverlay | undefined => {
+    const z = zRun?.zRef
+    const outline = zRun?.outline
+    if (plan === undefined || zRun === undefined || z == null || outline == null) return undefined
+    const run = zRun.planOperationId
+    const at = held !== null && held.run === run ? held.at : z.at
+    const stored = allPlanOperations(plan).find((o) => o.id === run)?.zRef
+    const commit = async (to: P) => {
+      setHeld({ run, at: to, dragging: false })
+      const r = await call('plan.operation.update', {
+        planId: plan.id,
+        planOperationId: run,
+        zRef: {
+          ...(stored?.surface === undefined ? {} : { surface: stored.surface }),
+          at: [`${to[0]} mm`, `${to[1]} mm`],
+        },
+      })
+      if (!r.ok) setHeld(null)
+    }
+    return {
+      key: `${run}:${z.surface}`,
+      patch: outline.patch,
+      level: z.level,
+      at,
+      clearance: outline.clearance,
+      caption: planMessages.toolChanges.zSpotCaption(
+        lengthSource(at[0], units),
+        lengthSource(at[1], units),
+      ),
+      draggable: allows(plan, 'plan.operation.update'),
+      dragging: held !== null && held.run === run && held.dragging,
+      onDrag(phase, point) {
+        if (phase === 'cancel') return setHeld(null)
+        if (phase === 'start') return setHeld({ run, at, dragging: true })
+        const to = snapSpot(point, outline.grid, outline.spotArea) ?? at
+        if (phase === 'move') return setHeld({ run, at: to, dragging: true })
+        if (same(to, z.at)) return setHeld(null)
+        void commit(to)
+      },
+    }
+  }, [zRun, plan, held, call, units])
   return useMemo(() => {
     if (data === undefined || plan === undefined || setup === undefined || doc === undefined)
       return null
@@ -58,8 +140,9 @@ export function usePlanScene(mode: AppMode): RunScene | null {
       tool: null,
       ...(outdated.some(Boolean) ? { outdated } : {}),
       ...(stock === undefined ? {} : { frame: setupPlacement(setup, stock) }),
+      ...(zRef === undefined ? {} : { zRef }),
     }
-  }, [data, plan, setup, doc])
+  }, [data, plan, setup, doc, zRef])
 }
 
 /** The plan's part as the plan scene draws it. */

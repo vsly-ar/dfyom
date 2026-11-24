@@ -564,11 +564,23 @@ function findingNext(f: Obj): string | undefined {
     : undefined
 }
 
-/** `plan.warning.list` with `detail: "full"`: every finding, with `next` where there is one. */
+/**
+ * `plan.warning.list` with `detail: "full"`: every finding, with `next` where there is one; the
+ * Z references without their viewport outline (DF69, docs/modes/z-reference.md#implementation-notes-df69).
+ */
 function withFindingNext(value: unknown): unknown {
   if (!isObj(value) || !Array.isArray(value['warnings'])) return value
   return {
     ...value,
+    ...(Array.isArray(value['zRefs'])
+      ? {
+          zRefs: value['zRefs'].map((r: unknown) => {
+            if (!isObj(r)) return r
+            const { outline: _, ...rest } = r
+            return rest
+          }),
+        }
+      : {}),
     warnings: value['warnings'].map((f: unknown) => {
       if (!isObj(f)) return f
       const next = findingNext(f)

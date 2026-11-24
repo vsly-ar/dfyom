@@ -6,7 +6,8 @@
 // a refused move shakes the row back and says why under the list. DF69: each run's "Z from" (its
 // Z reference surface and level; a default in the secondary colour, a choice in the primary) opens
 // a menu of the eligible surfaces with "Default" on top (`plan.operation.update { zRef }` on the
-// run's first operation); a `plan.zRef` finding of the run shows its icon beside it.
+// run's first operation); a `plan.zRef` finding of the run shows its icon beside it. Hovering
+// "Z from" or focusing a row shows that run's reference in the viewport (`previewZRef`).
 // Doc: docs/conventions/ui.md#design-and-plan-controls-v02, docs/modes/plan-v0.4.md#tool-changes-per-setup-hardening-df66,
 // docs/modes/z-reference.md#ui
 import { useRef, useState, type KeyboardEvent } from 'react'
@@ -26,6 +27,7 @@ import { allows, planOperationName, toolpathState, type ToolpathEntry } from './
 import {
   usePlanCommand,
   usePlanState,
+  usePlanStore,
   type ZRefCandidateView,
   type ZRefRunView,
 } from './plan-store'
@@ -79,32 +81,39 @@ const zValue = (c: ZRefCandidateView, units: UnitSystem): string =>
 
 const SEVERITY_RANK: Readonly<Record<string, number>> = { error: 3, warning: 2, info: 1 }
 
-/** DF69: the run's "Z from" with the menu of its eligible surfaces. */
-function ZFrom({
+/**
+ * DF69: the run's Z reference as a button opening the menu of its eligible surfaces ("Default" on
+ * top), or as text when it cannot change. Shared by the tool-change row and the operation
+ * inspector. `storedSurface`: the surface stored on the run's first operation (checked).
+ */
+export function ZRefButton({
   planId,
   run,
   tool,
   units,
   editable,
-  findings,
+  storedSurface,
   onRefused,
+  readOnly: _readOnly,
+  ...control
 }: {
   planId: string
   run: ZRefRunView
   tool: string
   units: UnitSystem
   editable: boolean
-  findings: readonly PlanWarning[]
+  storedSurface: string | undefined
   onRefused: (message: string | undefined) => void
+  /** Field-injected (FieldControlProps): `readOnly` is `editable`'s business here. */
+  id?: string
+  'aria-describedby'?: string
+  'aria-invalid'?: boolean
+  readOnly?: boolean
 }): React.JSX.Element {
   const call = usePlanCommand()
   const z = run.zRef
   const value = z === null ? m.zNone : zValue(z, units)
   const chosen = z?.chosen === true
-  const worst = findings.reduce<PlanWarning | undefined>(
-    (w, f) => ((SEVERITY_RANK[f.severity] ?? 0) > (SEVERITY_RANK[w?.severity ?? ''] ?? 0) ? f : w),
-    undefined,
-  )
   const choose = async (zRef: { surface: string } | null) => {
     const r = await call('plan.operation.update', {
       planId,
@@ -119,7 +128,7 @@ function ZFrom({
     {
       label: m.zDefault(chosen ? undefined : z === null ? undefined : zValue(z, units)),
       description: m.zDefaultHint,
-      icon: chosen ? undefined : <Icon name="check" />,
+      icon: storedSurface !== undefined ? undefined : <Icon name="check" />,
       onSelect: () => void choose(null),
     },
     ...(run.candidates.length > 0
@@ -129,13 +138,43 @@ function ZFrom({
             items: run.candidates.map((c) => ({
               label: zValue(c, units),
               description: m.zCandidate(areaText(c.area, units), spot(c), c.small),
-              icon: chosen && z?.surface === c.surface ? <Icon name="check" /> : undefined,
+              icon: storedSurface === c.surface ? <Icon name="check" /> : undefined,
               onSelect: () => void choose({ surface: c.surface }),
             })),
           },
         ]
       : []),
   ]
+  return editable && (run.candidates.length > 0 || chosen) ? (
+    <Menu items={items}>
+      <button
+        type="button"
+        {...control}
+        className={styles['zValue']}
+        data-chosen={chosen ? '' : undefined}
+        aria-label={m.zButton(tool, value, chosen)}
+      >
+        {value}
+      </button>
+    </Menu>
+  ) : (
+    <span {...control} className={styles['zValue']} data-chosen={chosen ? '' : undefined}>
+      {value}
+    </span>
+  )
+}
+
+/** DF69: the run's "Z from" with the menu of its eligible surfaces and its worst finding. */
+function ZFrom({
+  findings,
+  ...props
+}: Parameters<typeof ZRefButton>[0] & { findings: readonly PlanWarning[] }): React.JSX.Element {
+  const store = usePlanStore()
+  const worst = findings.reduce<PlanWarning | undefined>(
+    (w, f) => ((SEVERITY_RANK[f.severity] ?? 0) > (SEVERITY_RANK[w?.severity ?? ''] ?? 0) ? f : w),
+    undefined,
+  )
+  const id = props.run.planOperationId
   const icon =
     worst === undefined ? null : (
       <span
@@ -152,24 +191,15 @@ function ZFrom({
       </span>
     )
   return (
-    <span className={styles['zFrom']}>
+    <span
+      className={styles['zFrom']}
+      onPointerEnter={() => store.getState().previewZRef(id)}
+      onPointerLeave={() => {
+        if (store.getState().zRefPreview === id) store.getState().previewZRef(undefined)
+      }}
+    >
       <span className={styles['zLabel']}>{m.zFrom}</span>
-      {editable && (run.candidates.length > 0 || chosen) ? (
-        <Menu items={items}>
-          <button
-            type="button"
-            className={styles['zValue']}
-            data-chosen={chosen ? '' : undefined}
-            aria-label={m.zButton(tool, value, chosen)}
-          >
-            {value}
-          </button>
-        </Menu>
-      ) : (
-        <span className={styles['zValue']} data-chosen={chosen ? '' : undefined}>
-          {value}
-        </span>
-      )}
+      <ZRefButton {...props} />
       {icon}
     </span>
   )
@@ -195,6 +225,7 @@ export function ToolChanges({
   const [announcement, setAnnouncement] = useState('')
   const [refusal, setRefusal] = useState<string | undefined>(undefined)
   const rows = useRef(new Map<number, HTMLLIElement>())
+  const store = usePlanStore()
   const zRefs = usePlanState((s) => s.data?.zRefs)
   const warnings = usePlanState((s) => s.data?.warnings)
   const canZ = allows(plan, 'plan.operation.update')
@@ -276,6 +307,14 @@ export function ToolChanges({
               tabIndex={canMove ? 0 : undefined}
               aria-keyshortcuts={canMove ? 'Alt+ArrowUp Alt+ArrowDown' : undefined}
               onKeyDown={canMove ? (e) => onKey(e, i) : undefined}
+              onFocus={() => store.getState().previewZRef(run.operations[0]!.id)}
+              onBlur={(e) => {
+                // focus left for nothing (a press in the viewport, to drag the spot): keep it
+                if (e.relatedTarget === null) return
+                if (e.currentTarget.contains(e.relatedTarget as Node)) return
+                if (store.getState().zRefPreview === run.operations[0]!.id)
+                  store.getState().previewZRef(undefined)
+              }}
             >
               {canMove ? (
                 <DragGrip
@@ -301,6 +340,7 @@ export function ToolChanges({
                     tool={tool.name}
                     units={units}
                     editable={canZ}
+                    storedSurface={run.operations[0]!.zRef?.surface}
                     findings={(warnings ?? []).filter(
                       (w) => w.code === 'plan.zRef' && w.planOperationId === run.operations[0]!.id,
                     )}

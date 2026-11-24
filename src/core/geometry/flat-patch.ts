@@ -8,7 +8,16 @@
  */
 import { localStock, STOCK_FACE, type Direction } from './face'
 import type { Region2dPort } from './2d/port'
-import { chainBounds, regionArea, regionLoops, arc, type Region } from './2d/model'
+import {
+  arc,
+  arcRadius,
+  arcSweep,
+  chainBounds,
+  regionArea,
+  regionLoops,
+  type Loop,
+  type Region,
+} from './2d/model'
 import { EPSILON, type OperationGeometry, type StockGeometry, type Vec2 } from './model'
 import { pocketRegion } from './outline'
 import {
@@ -325,4 +334,52 @@ export function spotFits(
 ): boolean {
   const eroded = erodedPatch(port, patch, clearance)
   return eroded !== undefined && port.contains(eroded, frame.fromWcs(at))
+}
+
+/** A region piece as polygons: the outer ring and its holes, WCS points (mm). */
+export interface PatchPolygon {
+  readonly outer: readonly Vec2[]
+  readonly holes: readonly (readonly Vec2[])[]
+}
+
+/** Chord error of arcs drawn as polygons (mm). */
+const CHORD_ERROR = 0.05
+/** Chords of a full circle at most. */
+const MAX_CHORDS = 64
+
+/** A loop's points (closing point left out), arcs as chords within `CHORD_ERROR`. */
+function loopPoints(l: Loop, map: (p: Vec2) => Vec2): Vec2[] {
+  const out: Vec2[] = []
+  const round = (p: Vec2): Vec2 => {
+    const q = map(p)
+    return [Math.round(q[0] * 1e3) / 1e3 + 0, Math.round(q[1] * 1e3) / 1e3 + 0]
+  }
+  for (const e of l.elements) {
+    out.push(round(e.a))
+    if (e.kind !== 'arc') continue
+    const r = arcRadius(e)
+    const sweep = arcSweep(e)
+    const step = r > CHORD_ERROR ? 2 * Math.acos(1 - CHORD_ERROR / r) : Math.PI
+    const n = Math.min(
+      Math.ceil((MAX_CHORDS * Math.abs(sweep)) / (2 * Math.PI)),
+      Math.max(1, Math.ceil(Math.abs(sweep) / step)),
+    )
+    const a0 = Math.atan2(e.a[1] - e.centre[1], e.a[0] - e.centre[0])
+    for (let i = 1; i < n; i++) {
+      const t = a0 + (sweep * i) / n
+      out.push(round([e.centre[0] + r * Math.cos(t), e.centre[1] + r * Math.sin(t)]))
+    }
+  }
+  return out
+}
+
+/**
+ * A region as polygons for drawing (the viewport's Z reference highlight, DF69): per piece its
+ * outer ring and holes, mapped by `frame.toWcs`, rounded to 0.001 mm.
+ */
+export function patchPolygons(region: Region, frame: SpotFrame = IDENTITY): PatchPolygon[] {
+  return region.pieces.map((p) => ({
+    outer: loopPoints(p.outer, frame.toWcs),
+    holes: p.holes.map((h) => loopPoints(h, frame.toWcs)),
+  }))
 }

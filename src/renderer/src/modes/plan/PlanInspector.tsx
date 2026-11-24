@@ -7,7 +7,8 @@
 // or the user's override); the lock pins a value as an override, unlocking returns to the
 // recommendation; "Show calculation" (FeedsCalculation.tsx). Commits are one command each; checks
 // show at their field, and all of the operation's findings in the Checks block at the top (DF67;
-// a navigator row's error or warning count focuses it). Read-only (desaturated, with the reason) in
+// a navigator row's error or warning count focuses it); the first operation of a tool run ends its
+// Tool group with the run's Z reference (ZRefFields.tsx, DF69). Read-only (desaturated, with the reason) in
 // finalized, in-use and archived plans. Doc: docs/conventions/ui.md#plan-mode-task-37,
 // docs/modes/plan-v0.1.md#tool-assignment-and-checks, #feeds-and-speeds
 import { useEffect, useRef, useState } from 'react'
@@ -61,6 +62,7 @@ import { useCancelGesture } from '../../shell/hooks'
 import { usePlanCommand, usePlanData, usePlanState, usePlanStore } from './plan-store'
 import styles from './Plan.module.css'
 import { StrategyGroup } from './StrategyGroup'
+import { ZRefFields } from './ZRefFields'
 import { findingsOf, useChosenPlan, usePlanSelection } from './usePlan'
 
 const m = planMessages
@@ -547,6 +549,15 @@ function OperationInspector({
               />
             </Field>
           ) : null}
+          {/* DF69: the Z reference of the tool run this operation starts */}
+          <ZRefFields
+            plan={plan}
+            op={op}
+            tool={current?.name ?? m.toolChanges.noTool}
+            units={units}
+            readOnly={readOnly}
+            findings={findings}
+          />
         </section>
 
         <PlanCopyGroup doc={doc} plan={plan} op={op} />

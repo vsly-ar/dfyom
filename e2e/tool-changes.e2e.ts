@@ -5,7 +5,9 @@
 // moves as a block with Alt+↓ and back by its drag grip. With DFYOM_RENDERS=1 light and dark
 // review renders of the list and of the held drag go to design/features/renders/df66-tool-changes{,-drag}-*.png.
 // DF69: with a top facing the later run's "Z from" names the faced floor; its menu chooses the
-// surface (renders df69-z-from{,-menu}-*.png).
+// surface (renders df69-z-from{,-menu}-*.png); with the run's operation selected the operation
+// inspector shows "Z from" and the spot, and the spot drags in the viewport (renders
+// df69-z-inspector-*.png, df69-z-spot-*.png mid-drag).
 // Windows stay hidden (fixture). Selectors are roles and accessible names.
 // Docs: docs/conventions/ui.md#design-and-plan-controls-v02, docs/modes/plan-v0.4.md#tool-changes-per-setup-hardening-df66,
 // docs/modes/z-reference.md#ui
@@ -209,5 +211,51 @@ test('setup inspector: a later run touches off on the faced floor, chosen in its
   await expect(
     runs.nth(1).getByRole('button', { name: /^Z from for Flat 3: Facing 2 floor/ }),
   ).not.toHaveAccessibleName(/\(default\)/)
+  expect(dfyom.rendererErrors).toEqual([])
+})
+
+test('plan viewport: the run touches off on the faced floor; its spot drags, the inspector follows (DF69)', async ({
+  dfyom,
+}) => {
+  test.setTimeout(90_000)
+  const page = await dfyom.app.firstWindow()
+  await page.waitForLoadState('domcontentloaded')
+  if (RENDERS) await page.setViewportSize({ width: 1280, height: 800 })
+  await twoToolPlan(page, { topFacing: true })
+
+  await page.getByRole('radio', { name: 'Plan' }).click()
+  const navigator = page.getByRole('navigation', { name: 'Navigator' })
+  // Pocket 1 is the Flat 3 run's first operation
+  await navigator
+    .getByRole('list', { name: 'Plan operations of Top in machining order' })
+    .getByRole('button', { name: /^Pocket 1/ })
+    .click()
+  const inspector = page.getByRole('complementary', { name: 'Inspector' })
+  if (!(await inspector.isVisible())) await page.getByRole('button', { name: 'Inspector' }).click()
+  await expect(
+    inspector.getByRole('button', { name: /^Z from for Flat 3: Facing 2 floor .*\(default\)/ }),
+  ).toBeVisible()
+  const x = inspector.getByLabel('Touch-off X', { exact: true })
+  const y = inspector.getByLabel('Touch-off Y', { exact: true })
+  await expect(x).toHaveValue(/ mm$/)
+  const before = [await x.inputValue(), await y.inputValue()]
+  await render(page, 'df69-z-inspector')
+
+  // the spot in the viewport: hover shows its coordinates, a drag moves it on the faced floor
+  const spot = page.locator('[data-zref-spot]')
+  await expect(spot).toBeAttached()
+  const at = (await spot.boundingBox())!
+  await page.mouse.move(at.x, at.y)
+  await expect(spot).toContainText(`X ${before[0]}`)
+  await page.mouse.down()
+  await page.mouse.move(at.x + 30, at.y + 12, { steps: 8 })
+  await expect(spot).not.toContainText(`X ${before[0]}  Y ${before[1]}`)
+  await render(page, 'df69-z-spot')
+  await page.mouse.up()
+  await expect(inspector.getByText('Moved by you.')).toBeVisible()
+  await expect.poll(async () => [await x.inputValue(), await y.inputValue()]).not.toEqual(before)
+  // the default spot back, from the inspector
+  await inspector.getByRole('button', { name: 'Use default spot' }).click()
+  await expect.poll(async () => [await x.inputValue(), await y.inputValue()]).toEqual(before)
   expect(dfyom.rendererErrors).toEqual([])
 })

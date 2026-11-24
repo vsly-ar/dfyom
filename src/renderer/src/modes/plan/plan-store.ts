@@ -35,6 +35,23 @@ export interface ZRefRunView {
   readonly toolNumber: number
   readonly zRef: (ZRefCandidateView & { readonly chosen: boolean; readonly rule: string }) | null
   readonly candidates: readonly ZRefCandidateView[]
+  /** The reference's flat patch and spot area for the viewport (setup WCS, mm); null without one. */
+  readonly outline?: ZRefOutlineView | null
+}
+
+/** A region piece as polygons (setup WCS, mm). */
+export interface ZRefPolygonView {
+  readonly outer: readonly (readonly [number, number])[]
+  readonly holes: readonly (readonly (readonly [number, number])[])[]
+}
+
+/** DF69: docs/modes/z-reference.md#implementation-notes-df69 (viewport outline). */
+export interface ZRefOutlineView {
+  readonly patch: readonly ZRefPolygonView[]
+  /** Where the spot may lie (the patch eroded by the clearance radius). */
+  readonly spotArea: readonly ZRefPolygonView[]
+  readonly clearance: number
+  readonly grid: number
 }
 
 /** The plan queries of one revision. */
@@ -83,6 +100,11 @@ export interface PlanState {
    * inspector focuses its Checks block, once (`findingsShown` clears it).
    */
   readonly findingsRequest: string | undefined
+  /**
+   * DF69: the tool run (its first plan operation) whose tool-change row is hovered or focused, or
+   * whose "Z from" is hovered: the viewport shows its Z reference instead of the selection's.
+   */
+  readonly zRefPreview: string | undefined
   /** The export dialog shows this result, or the error. */
   readonly exported:
     | { readonly ok: true; readonly result: PlanExportResult; readonly setup?: string }
@@ -94,6 +116,8 @@ export interface PlanState {
   revealFindings(planOperationId: string): void
   /** The inspector focused them. */
   findingsShown(): void
+  /** Shows run `planOperationId`'s Z reference in the viewport; undefined: the selection's. */
+  previewZRef(planOperationId: string | undefined): void
   /** Loads the plan queries for `tag` (key, plan, revision, generation) once. */
   want(tag: string, planId: string): void
   generate(planId: string): Promise<void>
@@ -138,12 +162,16 @@ export function createPlanStore(bridge: Pick<PreloadApi, 'call' | 'files'>): Pla
     failures: {},
     exporting: false,
     findingsRequest: undefined,
+    zRefPreview: undefined,
     exported: undefined,
     choose: (planId) =>
       set({ planId, lastSelection: undefined, generateError: undefined, failures: {} }),
     remember: (lastSelection) => set({ lastSelection }),
     revealFindings: (findingsRequest) => set({ findingsRequest }),
     findingsShown: () => set({ findingsRequest: undefined }),
+    previewZRef: (zRefPreview) => {
+      if (get().zRefPreview !== zRefPreview) set({ zRefPreview })
+    },
     want(next, planId) {
       const t = `${next}:${round}`
       if (t === tag) return
