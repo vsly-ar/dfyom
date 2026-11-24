@@ -505,6 +505,7 @@ class Host implements AppHost {
       ...(this.o.machine === undefined ? {} : { machine: this.o.machine }),
       ...(this.o.exportFiles === undefined ? {} : { exportFiles: this.o.exportFiles }),
       ...(this.o.region2d === undefined ? {} : { region2d: this.o.region2d }),
+      appVersion: this.o.appVersion,
     }
     const dispatcher = createDispatcher({
       registry: this.registries.project,

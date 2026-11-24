@@ -7,7 +7,7 @@ G90 G94 G17 G21
 G54
 G0 Z10
 (op-drill1)
-(DFYOM TOOL CHANGE 1: 6 mm drill)
+(DFYOM TOOL CHANGE 1: 6 mm drill, 6 mm drill)
 M3 S3000
 G4 P3
 X10 Y15

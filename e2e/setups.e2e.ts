@@ -186,7 +186,7 @@ test('setup panel: setups in machining order, reorder, rotation and one program 
     await expect(done.getByText(`Setup ${name} (${i} of 2)`)).toBeVisible({ timeout: 30_000 })
     await done.getByRole('button', { name: 'Close' }).click()
     await expect(done).toBeHidden()
-    const file = `${dfyom.dataDir}/Plan 1 ${name}.nc`
+    const file = `${dfyom.dataDir}/two-sides-s${i}.nc`
     expect(existsSync(file)).toBe(true)
     expect(readFileSync(file, 'utf8')).toContain(`(Setup ${i} of 2: ${name})`)
   }

@@ -9,12 +9,14 @@
 import type { Issue } from '../../../shared/errors/app-error'
 import { fail, Ok, type AppResult } from '../../../shared/result'
 import type { Vec3 } from '../../toolpath/model'
-import type { Block, MachiningProgram, SetupHeader } from '../program'
+import type { Block, MachiningProgram, ProgramTool, SetupHeader } from '../program'
 import {
   commentLine,
+  fitName,
   formatNumber,
   MAX_ABS_VALUE,
   MAX_LINE_BYTES,
+  pauseLine,
   toolChangeMarker,
 } from './format'
 
@@ -28,6 +30,15 @@ export interface PostOptions {
 }
 
 export const DEFAULT_SPIN_UP_SECONDS = 3
+
+/** The tool-change message's type word (grbl.md#pause-messages-hardening-df63). */
+const TYPE_WORD: Readonly<Record<ProgramTool['type'], string>> = {
+  flatEndMill: 'flat',
+  bullNoseEndMill: 'bull nose',
+  ballEndMill: 'ball',
+  drill: 'drill',
+  chamferMill: 'chamfer',
+}
 
 const MM_PER_INCH = 25.4
 const AXES = ['X', 'Y', 'Z'] as const
@@ -244,8 +255,7 @@ class Writer {
     this.clearance(false)
     this.lines.push('M5')
     if (this.p.spindleControl === 'manual') {
-      this.comment('Stop the spindle')
-      this.lines.push('M0')
+      this.pause('Stop the spindle')
     }
     this.lines.push('M30')
   }
@@ -255,7 +265,7 @@ class Writer {
       case 'comment':
         return this.comment(b.text)
       case 'toolChange':
-        return this.toolChange(b.number, b.tool.name)
+        return this.toolChange(b.number, b.tool)
       case 'spindle':
         return this.spindle(b.rpm)
       case 'rapid':
@@ -267,19 +277,29 @@ class Writer {
     }
   }
 
-  /** `M5`, retract, marker, `M0`; the first tool only gets the marker unless it is not loaded. */
-  private toolChange(number: number, name: string): void {
+  /**
+   * Label, `M5`, retract, marker, `M0 ;Install Tn …`; the first tool only gets the marker unless
+   * it is not loaded. Marker and `M0` carry the tool (grbl.md#pause-messages-hardening-df63).
+   */
+  private toolChange(number: number, tool: ProgramTool): void {
     const first = !this.toolLoaded
     this.toolLoaded = true
+    const manual = this.p.spindleControl === 'manual'
     if (!first) {
+      this.comment(`Tool change to T${number}: spindle off, retract`)
       this.lines.push('M5')
       this.clearance(false)
       // Before the marker: the marker line must be followed directly by M0 (sender rule).
-      if (this.p.spindleControl === 'manual') this.comment('Stop the spindle')
+      if (manual) this.comment('Stop the spindle')
     }
-    this.lines.push(toolChangeMarker(number, name))
+    const spec = `, ${this.coord(tool.diameter)} ${this.p.units} ${TYPE_WORD[tool.type]}`
+    this.lines.push(toolChangeMarker(number, tool.name, spec))
     if (first && this.opts.firstToolLoaded !== false) return
-    this.lines.push('M0')
+    const head = `M0 ;`
+    const verb = manual && !first ? `Stop spindle, install T${number} ` : `Install T${number} `
+    this.lines.push(
+      head + fitName(verb, tool.name, `${spec}, then zero Z`, MAX_LINE_BYTES - head.length),
+    )
     // The user jogged and re-zeroed Z while paused: forget the position and modal motion/feed,
     // and go back to clearance in the new WCS before the spindle starts.
     this.text.fill(undefined)
@@ -299,8 +319,7 @@ class Writer {
     const s = formatNumber(rpm, 0)
     this.lines.push(`M3 S${s}`)
     if (this.p.spindleControl === 'manual') {
-      this.comment(`Set spindle to ${s} rpm`)
-      this.lines.push('M0')
+      this.pause(`Set spindle to ${s} rpm`)
       return
     }
     const p = formatNumber(this.opts.spinUpSeconds ?? DEFAULT_SPIN_UP_SECONDS, 2)
@@ -478,6 +497,12 @@ class Writer {
 
   private comment(text: string): void {
     this.lines.push(commentLine(text))
+  }
+
+  /** `(text)` then `M0 ;text`: the message before the pause and on it (DF63). */
+  private pause(text: string): void {
+    this.comment(text)
+    this.lines.push(pauseLine(text))
   }
 }
 

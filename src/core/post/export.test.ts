@@ -64,15 +64,23 @@ describe('toMachiningProgram', () => {
     const head = p.blocks.filter((b) => b.kind !== 'rapid' && b.kind !== 'feed' && b.kind !== 'arc')
     expect(head).toEqual([
       { kind: 'comment', text: 'Op A' },
-      { kind: 'toolChange', number: 1, tool: { name: '6 mm flat end mill', diameter: 6 } },
+      {
+        kind: 'toolChange',
+        number: 1,
+        tool: { name: '6 mm flat end mill', diameter: 6, type: 'flatEndMill' },
+      },
       { kind: 'spindle', rpm: 12000 },
       { kind: 'comment', text: 'Op B' },
       { kind: 'spindle', rpm: 15000 },
       { kind: 'comment', text: 'Op C' },
-      { kind: 'toolChange', number: 2, tool: { name: '6 mm drill', diameter: 6 } },
+      { kind: 'toolChange', number: 2, tool: { name: '6 mm drill', diameter: 6, type: 'drill' } },
       { kind: 'spindle', rpm: 3000 },
       { kind: 'comment', text: 'Op D' },
-      { kind: 'toolChange', number: 1, tool: { name: '6 mm flat end mill', diameter: 6 } },
+      {
+        kind: 'toolChange',
+        number: 1,
+        tool: { name: '6 mm flat end mill', diameter: 6, type: 'flatEndMill' },
+      },
       { kind: 'spindle', rpm: 12000 },
     ])
     expect(p).toMatchObject({ units: 'mm', spindleControl: 'gcode', clearanceZ: 10 })

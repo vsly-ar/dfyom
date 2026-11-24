@@ -85,6 +85,11 @@ export interface Services {
    * (docs/architecture/shapes.md#where-the-2d-layer-runs); absent = shape commands fail (K2).
    */
   readonly region2d?: Region2dPort
+  /**
+   * The app's version (package.json at runtime), for the gCode header's `Generator:` line
+   * (docs/architecture/grbl.md#plan-export-command); absent (core tests) = `DFYOM` alone.
+   */
+  readonly appVersion?: string
 }
 
 export interface CommandContext {
