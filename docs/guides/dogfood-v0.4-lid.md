@@ -7,7 +7,7 @@ A step-by-step walk through the v0.4 lid golden path in the **installed** app (`
 ## Before you start
 
 - Note the version in the window title ("… — DFYOM 0.0.x"); put it in every report.
-- Have the v0.3 enclosure drawing at hand (the repo's `src/core/design/__fixtures__/enclosure-sections.svg` if you don't have your own copy).
+- Have the v0.3 enclosure drawing at hand ([assets/enclosure-sections.svg](assets/enclosure-sections.svg) if you don't have your own copy; a published copy of the test fixture, kept identical by a test, so black-box agents can import it too, X2 F9).
 - Keep a screenshot shortcut ready (`Cmd+Shift+4`). Note the clock time when something feels slow.
 - The machine library may already hold tools and a machine from earlier sessions: reuse them or add the ones below; both paths are worth a look.
 
