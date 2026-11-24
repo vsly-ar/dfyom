@@ -20,7 +20,7 @@ Settled by [Q37–Q40] (user, 2026-11-24, every recommendation taken)(../plans/v
 
 ## Frame
 
-All positions are in the **setup frame**: the [face frame](design-v0.2.md#face-frame) of the setup's up-facing stock face, which is also the program's work coordinate system ([plan-v0.2.md § Work zero](plan-v0.2.md#setups-from-face-directions)): X = `u`, Y = `v`, Z0 on the up-facing stock face, Z up to the spindle. The stock occupies `[0, L] × [0, W] × [−T, 0]` with L, W, T its extents in that orientation. Values are [quantities](../architecture/quantities.md) (formulas over stock faces allowed, e.g. `stock.length / 2`), canonical mm in checks. Edges are named `uMin`, `uMax`, `vMin`, `vMax` (seen from above on the machine: left, right, front, back).
+All positions are in the **setup frame**: the [face frame](design-v0.2.md#face-frame) of the setup's up-facing stock face, which is the program's work coordinate system shifted by the setup's work zero ([plan-v0.2.md § Work zero](plan-v0.2.md#setups-from-face-directions); the zero is the frame's origin unless the setup moves it, DF78, [alignment.md § Frames](alignment.md#frames)): X = `u`, Y = `v`, Z0 on the up-facing stock face, Z up to the spindle. The stock occupies `[0, L] × [0, W] × [−T, 0]` with L, W, T its extents in that orientation. Values are [quantities](../architecture/quantities.md) (formulas over stock faces allowed, e.g. `stock.length / 2`), canonical mm in checks. Edges are named `uMin`, `uMax`, `vMin`, `vMax` (seen from above on the machine: left, right, front, back).
 
 ## Model
 

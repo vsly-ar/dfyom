@@ -45,7 +45,7 @@ A project has **several plans**. Each plan is a self-contained, runnable "versio
 ## Setup: orientation, work zero, safe heights
 
 - **Stock orientation** is fixed in v0.1: stock bottom on the table, part X along machine X, part Y along machine Y (no rotation, no flip).
-- **Work zero (WCS):** `workOffset` is `G54` (only value in v0.1) at [part zero](design.md#part-and-stock-v01): stock front-left corner, Z0 on the stock top. Through cuts absorb the thickness tolerance with `breakthrough`.
+- **Work zero (WCS):** `workOffset` is `G54` (only value in v0.1) at [part zero](design.md#part-and-stock-v01): stock front-left corner, Z0 on the stock top. Since DF78 a setup may move its zero anywhere in X/Y, negative work coordinates included ([alignment.md § Setup work zero](alignment.md#setup-work-zero-q61)); absent = this corner. Through cuts absorb the thickness tolerance with `breakthrough`.
 - **Safe heights:** `clearanceHeight` is measured up from the stock top, `retractHeight` up from the operation's `on` surface. Plunges start at `retractHeight`; there is no separate feed height.
 
 | Parameter         | Kind   | Default      | Constraints       | Use                                                     |

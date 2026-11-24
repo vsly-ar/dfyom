@@ -32,6 +32,7 @@ import {
   type MachineAction,
 } from './host/protocol'
 import { RunStatusSchema } from './service'
+import { runAlignGoto, runAlignTick } from './align-commands'
 import { DEFAULT_BAUD, SerialPortInfoSchema } from './serial'
 import { settingsCheck, SettingsCheckSchema } from './settings-check'
 import type { MachineValuesDTO } from '../library/machine.dto'
@@ -626,6 +627,8 @@ export const RUN_COMMANDS: readonly AnyCommand[] = [
   runMachineReset,
   runMachineProbeZ,
   runOverrideSet,
+  runAlignGoto,
+  runAlignTick,
   runJobStart,
   runJobCheck,
   runJobContinue,

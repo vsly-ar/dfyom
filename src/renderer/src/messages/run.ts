@@ -419,6 +419,36 @@ export const runMessages = {
       'Start the setup.',
     ],
     start: (n: number) => `Start setup ${n}`,
+    /** DF78: the alignment step (docs/modes/alignment.md#run-the-alignment-step). */
+    align: {
+      title: 'Alignment',
+      intro: (n: number) =>
+        `After the work zero is set, the spindle points at the zero and ${n === 1 ? 'the alignment point' : `the ${n} alignment points`} in turn. Turn or slide the stock until each lines up, check it, then confirm.`,
+      start: 'Start alignment',
+      confirmTitle: 'Move the spindle over the alignment points?',
+      confirmDescription:
+        'It moves at the clearance height each time you press Previous or Next. Keep your hands clear while it moves; the spindle must be off.',
+      previous: 'Previous',
+      next: 'Next',
+      listLabel: 'Alignment points',
+      at: (x: string, y: string) => `X ${x} · Y ${y}`,
+      current: 'pointer here',
+      linesUp: (name: string) => `${name} lines up`,
+      setZeroHere: 'Set zero here',
+      setZeroHereHint: 'Sets X and Y of the work zero at the pointer; clears every check.',
+      zeroOnPoint: 'Zero on this point',
+      zeroOnPointHint:
+        'For a sawn or cut-away corner: the work zero follows this point. Clears every check.',
+      confirm: 'Confirm alignment',
+      confirmed: (skipped: number) =>
+        skipped === 0 ? 'Alignment confirmed.' : `Alignment confirmed, ${skipped} not checked.`,
+      skipTitle: (unticked: number, all: number) =>
+        `${unticked} of ${all} points not checked. Continue anyway?`,
+      skipDescription: 'The setup starts without them being lined up.',
+      skipConfirm: 'Continue',
+      pending: 'Confirm the alignment first.',
+      zeroName: 'Work zero',
+    },
     /** Like the pauses' "Close (stay paused)" (DF46): says what closing does (DF48). */
     later: 'Close (start later)',
     announce: (n: number, name: string) =>

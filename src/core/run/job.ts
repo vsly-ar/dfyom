@@ -27,6 +27,7 @@ import type { GrblExport } from '../post/export'
 import { exportPlan } from '../post/plan-export'
 import type { SenderProgram } from './grbl/sender'
 import { RunSummarySchema } from './host/protocol'
+import { alignmentGate } from './alignment'
 import type { JobAbout, MachineService, RunningJob, RunPlan } from './service'
 
 const MARKER = /^\(DFYOM TOOL CHANGE (\d+): ([^()]*)\)$/
@@ -100,7 +101,9 @@ export function nextSetupOf(
   const a = plan === undefined || setup.zero === undefined ? undefined : setupAlignment(plan, setup)
   const point = a?.points.find((p) => p.id === a.zeroPoint)
   return {
-    ...(a === undefined || (a.zero[0] === 0 && a.zero[1] === 0) ? {} : { zero: [a.zero[0], a.zero[1]] as [number, number] }),
+    ...(a === undefined || (a.zero[0] === 0 && a.zero[1] === 0)
+      ? {}
+      : { zero: [a.zero[0], a.zero[1]] as [number, number] }),
     ...(point === undefined ? {} : { zeroPoint: point.name }),
     setupId: setup.id,
     name: setup.name,
@@ -261,6 +264,10 @@ async function runJob(
   const checked = startChecks(doc, planId, setupId, ctx.services, where)
   if (checked.isErr()) return checked
   const { m, workZero, plan: p, setup, next, machineKey } = checked.unwrap()
+  // DF78: a setup with alignment points runs after its step was confirmed at this G54
+  // (docs/modes/alignment.md#ticks-and-the-confirm-gate); not part of run.job.check
+  const aligned = alignmentGate(m.alignmentStep(), planId, setup, m.status(), where)
+  if (aligned.isErr()) return aligned
   // From here to the stream the connection is held for this job: no jog or work-zero change
   // slips in between the soft-limit check and the start (the host re-checks the G54 anyway).
   const reserved = m.reserve(ctx.jobId)

@@ -20,6 +20,7 @@ import { useRun, useRunStore } from './run-store'
 import { WorkZeroButtons } from './RunNavigator'
 import { ProbeZButton, usePlateThickness } from './ProbeZButton'
 import { RunDialogFooter } from './RunStop'
+import { AlignmentStep, stepOf } from './AlignmentStep'
 import styles from './Run.module.css'
 
 const m = runMessages.setupChange
@@ -45,6 +46,11 @@ export function SetupChangeDialog({ doc }: { doc: ProjectDoc }): React.JSX.Eleme
   const gates = runGates(status, { planChosen: true })
   const units = doc.unitSystem
   const starting = pending.includes('run.job.start')
+  // DF78: a setup with alignment points starts once its step is confirmed (the server's gate)
+  const points = plan.setups.find((s) => s.id === info.setup.id)?.alignment?.length ?? 0
+  const aligned =
+    points === 0 || stepOf(status.alignment, planId, info.setup.id)?.confirmed === true
+  const startGate = gates.start ?? (aligned ? null : m.align.pending)
   // DF78 (N7): the zero's offset or point, in words
   const moved =
     placed !== undefined &&
@@ -78,8 +84,8 @@ export function SetupChangeDialog({ doc }: { doc: ProjectDoc }): React.JSX.Eleme
           <Button
             variant="primary"
             icon={<Icon name="run" />}
-            disabled={gates.start !== null || starting}
-            {...(gates.start === null ? {} : { 'aria-describedby': ids.start })}
+            disabled={startGate !== null || starting}
+            {...(startGate === null ? {} : { 'aria-describedby': ids.start })}
             onClick={() => void a.startRun(info.setup.id)}
           >
             {m.start(n)}
@@ -144,9 +150,16 @@ export function SetupChangeDialog({ doc }: { doc: ProjectDoc }): React.JSX.Eleme
           {runMessages.dro.units[units]}
         </dd>
       </dl>
-      {gates.start === null ? null : (
+      <AlignmentStep
+        setupId={info.setup.id}
+        points={points}
+        gate={gates.jog}
+        reasonId={ids.jog}
+        units={units}
+      />
+      {startGate === null ? null : (
         <p id={ids.start} className={styles['why']}>
-          {gates.start}
+          {startGate}
         </p>
       )}
     </Dialog>
