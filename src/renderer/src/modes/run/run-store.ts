@@ -16,7 +16,7 @@ import type { AppErrorData } from '../../../../shared/errors/app-error'
 import type { CallReply, PreloadApi } from '../../../../shared/preload-api'
 import { useSettings, useShell } from '../../shell/ShellContext'
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
-import { activeJob, isHeld, type JogMode } from './machine-state'
+import { activeJob, isHeld } from './machine-state'
 
 /** Progress poll of the run job (`job.get`) while it runs: progress ticks are not pushed. */
 export const RUN_PROGRESS_POLL_MS = 250
@@ -108,10 +108,15 @@ export interface RunState {
   readonly ports: readonly SerialPortInfo[] | undefined
   /** The serial connection's settings check (`run.connection.open`), until it closes. */
   readonly settingsCheck: SettingsCheck | undefined
-  /** Jog step in the project unit. */
-  readonly jogStep: string
-  /** Step or continuous jogging (M3, per window). */
-  readonly jogMode: JogMode
+  /**
+   * Jog step (mm), per window; `undefined` = the unit's default (DF88,
+   * docs/conventions/ui.md#jog-position-and-probing-df88).
+   */
+  readonly jogStep: number | undefined
+  /** The step picker's custom value (mm), kept while a preset is chosen. */
+  readonly jogCustom: number | undefined
+  /** Jog feed (mm/min) of this window, used without a known library machine (DF88). */
+  readonly jogFeed: number | undefined
   /** The run job this window follows (started here, or seen in the status). */
   readonly jobId: string | undefined
   readonly progress: RunProgress | undefined
@@ -154,8 +159,10 @@ export interface RunState {
   setBaud(baud: number): void
   /** `run.ports.scan`; keeps the chosen port if still there, else picks the first USB one. */
   scanPorts(): Promise<void>
-  setJogStep(step: string): void
-  setJogMode(mode: JogMode): void
+  setJogStep(stepMm: number): void
+  /** Sets the custom step and chooses it. */
+  setJogCustom(stepMm: number): void
+  setJogFeed(feed: number): void
   setPreflightOpen(open: boolean): void
   /** Opens the pre-flight in resume mode at the operation the last run stopped in (M5). */
   openResume(): void
@@ -315,8 +322,9 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       baud: DEFAULT_BAUD,
       ports: undefined,
       settingsCheck: undefined,
-      jogStep: '10',
-      jogMode: 'step',
+      jogStep: undefined,
+      jogCustom: undefined,
+      jogFeed: undefined,
       jobId: undefined,
       progress: undefined,
       ended: undefined,
@@ -368,7 +376,8 @@ export function createRunStore(bridge: PreloadApi): RunStore {
         }))
       },
       setJogStep: (jogStep) => set({ jogStep }),
-      setJogMode: (jogMode) => set({ jogMode }),
+      setJogCustom: (jogCustom) => set({ jogCustom, jogStep: jogCustom }),
+      setJogFeed: (jogFeed) => set({ jogFeed }),
       setPreflightOpen: (preflightOpen) =>
         set(
           preflightOpen

@@ -1,9 +1,11 @@
 // The keyboard shortcut list (`?`, Help → Keyboard shortcuts; ui.md#accessibility).
 // Doc: docs/conventions/ui.md#keyboard-shortcuts
+import type { JogKeyStyle } from '../../../shared/settings'
 import { projectMessages } from '../messages/project'
+import { JOG_KEY_LABELS } from '../modes/run/jog-keys'
 import { Button, Dialog, DialogClose } from '../ui'
 import styles from './AppShell.module.css'
-import { useUi } from './ShellContext'
+import { useSettings, useUi } from './ShellContext'
 import { APPLY_SHORTCUT, IS_MAC, shortcutLabel } from './shortcuts'
 
 const m = projectMessages.shortcuts
@@ -81,9 +83,20 @@ export const SHORTCUTS: readonly { group: keyof typeof m.groups; items: [string,
   },
 ]
 
+/** DF88: the chosen jog hotkey style's keys and Escape (docs/conventions/ui.md#jog-hotkeys). */
+export function jogShortcuts(style: JogKeyStyle): [string, string][] {
+  const keys: [string, string][] =
+    style === 'off'
+      ? [['–', m.what.jogOff]]
+      : JOG_KEY_LABELS[style].map(([dir, key]) => [key, m.what.jog(dir)])
+  return [...keys, ['Esc', m.what.stopJog]]
+}
+
 export function ShortcutsDialog(): React.JSX.Element {
   const open = useUi((s) => s.shortcutsOpen)
   const setOpen = useUi((s) => s.setShortcutsOpen)
+  const jogKeys = useSettings((s) => s.settings.jogKeys)
+  const groups = [...SHORTCUTS, { group: 'runJog' as const, items: jogShortcuts(jogKeys) }]
   return (
     <Dialog
       open={open}
@@ -97,7 +110,7 @@ export function ShortcutsDialog(): React.JSX.Element {
       }
     >
       <div className={styles['shortcuts']}>
-        {SHORTCUTS.map((g) => (
+        {groups.map((g) => (
           <section key={g.group} aria-label={m.groups[g.group]}>
             <h3 className={styles['shortcutGroup']}>{m.groups[g.group]}</h3>
             <dl className={styles['shortcutList']}>

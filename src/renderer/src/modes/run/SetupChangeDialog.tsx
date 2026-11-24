@@ -15,7 +15,7 @@ import type { SetupOrientation } from '../../../../core/toolpath/wcs'
 import { formatHeight } from '../../messages/plan'
 import { runMessages } from '../../messages/run'
 import { Icon, Button, Dialog } from '../../ui'
-import { JogPad, useJogMode } from './JogPad'
+import { JogPad, useJogControls } from './JogPad'
 import { formatLength, runGates } from './machine-state'
 import { planRunInfo, setupPlacement } from './plan-info'
 import { useRun, useRunStore } from './run-store'
@@ -33,8 +33,7 @@ export function SetupChangeDialog({ doc }: { doc: ProjectDoc }): React.JSX.Eleme
   const open = useRun((s) => s.setupChangeOpen)
   const planId = useRun((s) => s.planId)
   const status = useRun((s) => s.status)
-  const jogStep = useRun((s) => s.jogStep)
-  const jogMode = useJogMode()
+  const jog = useJogControls(doc)
   const pending = useRun((s) => s.pending)
   const ids = { jog: useId(), zero: useId(), start: useId() }
   const plate = usePlateThickness(doc)
@@ -109,16 +108,7 @@ export function SetupChangeDialog({ doc }: { doc: ProjectDoc }): React.JSX.Eleme
           <li key={s}>{s}</li>
         ))}
       </ol>
-      <JogPad
-        {...jogMode}
-        units={units}
-        step={jogStep}
-        onStep={a.setJogStep}
-        onJog={(axis, mm, feed) => void a.jog(axis, mm, feed)}
-        onCancel={() => void a.jogCancel()}
-        disabledReason={gates.jog}
-        reasonId={ids.jog}
-      />
+      <JogPad controls={jog} disabledReason={gates.jog} reasonId={ids.jog} />
       <WorkZeroButtons
         gate={gates.workZero}
         reasonId={ids.zero}

@@ -187,14 +187,14 @@ async function renderRun(opts: { bottom?: boolean; plate?: string; points?: bool
   const nav = () => screen.getByRole('navigation', { name: 'Navigator' })
   await within(nav()).findByRole('button', { name: 'Connect' })
   const callsOf = (name: string) => bridge.calls.filter((c) => c.name === name).map((c) => c.args)
-  return { ...r, bridge, machine, nav, callsOf, plan: () => s.plan(planId) }
+  return { ...r, bridge, shell, machine, nav, callsOf, plan: () => s.plan(planId) }
 }
 
 const machineGroup = () => screen.queryByRole('group', { name: 'Machine' })
 
 /** Presses Tab until `target` has the focus (the dialog traps it, so Tab wraps); fails if never. */
 async function tabTo(t: Awaited<ReturnType<typeof renderRun>>, target: HTMLElement) {
-  for (let i = 0; i < 30 && document.activeElement !== target; i++) await t.user.tab()
+  for (let i = 0; i < 60 && document.activeElement !== target; i++) await t.user.tab()
   expect(target).toHaveFocus()
 }
 
@@ -209,11 +209,14 @@ describe('Run mode', () => {
   it('says once why the disconnected controls are disabled, and each control points at it', async () => {
     const t = await renderRun()
     const why = within(t.nav()).getByText('Connect to a machine first.')
-    for (const name of ['Home', 'Jog X+', 'Zero X', 'Zero X Y Z']) {
+    for (const name of ['Home', 'Jog X+']) {
       const button = within(t.nav()).getByRole('button', { name })
       expect(button).toBeDisabled()
-      expect(button).toHaveAttribute('aria-describedby', why.id)
+      expect(button.getAttribute('aria-describedby')?.split(' ')).toContain(why.id)
     }
+    // DF88: no "Zero X Y Z"; the per-axis zero buttons are in the Position table
+    expect(within(t.nav()).queryByRole('button', { name: /^Zero / })).toBeNull()
+    expect(within(t.nav()).getByRole('heading', { name: 'Probing' })).toBeInTheDocument()
   })
 
   it('connects to the virtual machine; the badge, chip and Stop then show in every mode', async () => {
@@ -249,8 +252,16 @@ describe('Run mode', () => {
     const cell = (name: string) => within(dro).getByRole('cell', { name })
     expect(cell('Machine position X')).toHaveTextContent('—')
     expect(dro).toHaveAccessibleDescription('Position unknown until homed.')
-    // "Connect … first" once, in the navigator; the idle line describes Start run
-    expect(screen.getAllByText('Connect to a machine first.')).toHaveLength(1)
+    // "Connect … first" shown once, in the navigator (the zero buttons' copy is for screen
+    // readers only); the idle line describes Start run
+    expect(
+      screen
+        .getAllByText('Connect to a machine first.')
+        .filter((e) => !e.classList.contains('srOnly')),
+    ).toHaveLength(1)
+    expect(within(dro).getByRole('button', { name: 'Set X zero' })).toHaveAccessibleDescription(
+      'Connect to a machine first.',
+    )
     expect(
       within(inspector).getByRole('button', { name: 'Start run' }),
     ).toHaveAccessibleDescription(/^No run yet/)
@@ -273,12 +284,39 @@ describe('Run mode', () => {
     await t.user.click(within(t.nav()).getByRole('radio', { name: '100 mm' }))
     await t.user.click(within(t.nav()).getByRole('button', { name: 'Jog X−' }))
     await t.user.click(within(t.nav()).getByRole('button', { name: 'Jog Z+' }))
+    // DF88: the jog feed (2000 mm/min) on every axis (a plan without a machine: no Z cap)
     expect(t.callsOf('run.machine.jog')).toEqual([
       { by: [-100, 0, 0], feed: 2000 },
-      { by: [0, 0, 100], feed: 500 },
+      { by: [0, 0, 100], feed: 2000 },
     ])
-    await t.user.click(within(t.nav()).getByRole('button', { name: 'Zero X Y Z' }))
-    expect(t.callsOf('run.workZero.set')).toEqual([{ axes: ['x', 'y', 'z'] }])
+    // DF88: the zero buttons in the Position table, one axis each
+    await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
+    const dro = screen.getByRole('table', { name: 'Position' })
+    for (const axis of ['X', 'Y', 'Z'])
+      await t.user.click(within(dro).getByRole('button', { name: `Set ${axis} zero` }))
+    expect(t.callsOf('run.workZero.set')).toEqual([
+      { axes: ['x'] },
+      { axes: ['y'] },
+      { axes: ['z'] },
+    ])
+    await expectNoAxeViolations()
+  })
+
+  it('remembers the jog feed per machine and jogs at it; Z at most its max (DF88)', async () => {
+    // the plan's machine comes from the library (machine fixture: X/Y 5000, Z 1000 mm/min)
+    const t = await renderRun({ plate: '10' })
+    await connectAndHome(t)
+    const slider = within(t.nav()).getByRole('slider', { name: 'Jog feed' })
+    expect(slider).toHaveAttribute('aria-valuemax', '5000')
+    slider.focus()
+    await t.user.keyboard('{ArrowRight}{ArrowRight}')
+    expect(slider).toHaveAttribute('aria-valuetext', '2200 mm/min')
+    const patch = t.bridge.settingsPatches.at(-1) as { jogFeed?: Record<string, number> }
+    expect(Object.values(patch.jogFeed ?? {})).toEqual([2200])
+    await t.user.click(within(t.nav()).getByRole('button', { name: 'Jog Y+' }))
+    expect(t.callsOf('run.machine.jog').at(-1)).toEqual({ by: [0, 10, 0], feed: 2200 })
+    await t.user.click(within(t.nav()).getByRole('button', { name: 'Jog Z−' }))
+    expect(t.callsOf('run.machine.jog').at(-1)).toEqual({ by: [0, 0, -10], feed: 1000 })
   })
 
   it('unlock asks first: the position is not known until homed', async () => {
@@ -555,7 +593,9 @@ describe('Run mode', () => {
       within(prompt).getByText(/X0 Y0 at the front-left corner of the top.*front left corner/),
     ).toBeInTheDocument()
     expect(within(prompt).getByText('Stock on the machine')).toBeInTheDocument()
-    expect(within(prompt).getByRole('button', { name: 'Zero X Y Z' })).toBeEnabled()
+    // DF88: "Zero X Y Z" is gone; the per-axis buttons stay in the prompt
+    expect(within(prompt).getByRole('button', { name: 'Zero X' })).toBeEnabled()
+    expect(within(prompt).queryByRole('button', { name: 'Zero X Y Z' })).toBeNull()
     expect(within(prompt).getByRole('button', { name: 'Stop' })).toBeInTheDocument()
     expect(within(machineGroup()!).getByText('Setup change')).toBeInTheDocument()
     expect(t.callsOf('run.job.start')).toHaveLength(1)
@@ -842,8 +882,9 @@ describe('Run mode', () => {
     await t.user.click(within(t.nav()).getByRole('button', { name: 'Jog X+' }))
     await t.user.click(within(t.nav()).getByRole('button', { name: 'Jog X+' }))
     expect(t.callsOf('run.machine.jog')).toHaveLength(2)
-    await t.user.click(within(t.nav()).getByRole('button', { name: 'Zero X Y Z' }))
-    expect(t.callsOf('run.workZero.set')).toEqual([{ axes: ['x', 'y', 'z'] }])
+    await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
+    await t.user.click(screen.getByRole('button', { name: 'Set Y zero' }))
+    expect(t.callsOf('run.workZero.set')).toEqual([{ axes: ['y'] }])
     await expectNoAxeViolations()
   })
 
@@ -852,7 +893,10 @@ describe('Run mode', () => {
     await connectAndHome(t)
     const notice = within(t.nav()).getByRole('status', { name: 'Status' })
     expect(notice).toHaveTextContent('Ready to jog.')
-    expect(within(t.nav()).getByText(/The work zero is at machine 0/)).toBeInTheDocument()
+    // DF88: the live G54 and its hint under the Position table
+    await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
+    const inspector = screen.getByRole('complementary', { name: 'Inspector' })
+    expect(within(inspector).getByText(/The work zero is at machine 0/)).toBeInTheDocument()
     t.bridge.handle('run.machine.jog', () => ({
       ok: false,
       retryable: false,
@@ -892,24 +936,30 @@ describe('Run mode', () => {
     await expectNoAxeViolations()
   })
 
-  it('continuous jog: hold to jog, cancelled on release, key up and window blur (M3)', async () => {
+  it('click = step, hold = continuous jog, cancelled on release, key up and window blur (M3, DF88)', async () => {
     const t = await renderRun()
     await connectAndHome(t)
     const nav = within(t.nav())
-    await t.user.click(nav.getByRole('radio', { name: 'Continuous' }))
-    // the step control gives way to the hint
-    expect(nav.queryByRole('radio', { name: '10 mm' })).toBeNull()
-    expect(nav.getByText('Hold to jog; release to stop.')).toBeInTheDocument()
+    // no jog mode any more (DF88): the step picker stays
+    expect(nav.queryByRole('radio', { name: 'Continuous' })).toBeNull()
+    expect(nav.getByRole('radio', { name: '10 mm' })).toBeChecked()
     const xPlus = nav.getByRole('button', { name: 'Jog X+' })
+    // a click: one step, never a continuous jog
+    await t.user.click(xPlus)
+    expect(t.callsOf('run.machine.jog')).toEqual([{ by: [10, 0, 0], feed: 2000 }])
+    // a hold past the delay: continuous until released
     await t.user.pointer({ keys: '[MouseLeft>]', target: xPlus })
     await waitFor(() =>
-      expect(t.callsOf('run.machine.jog')).toEqual([
-        { by: [1, 0, 0], feed: 2000, continuous: true },
-      ]),
+      expect(t.callsOf('run.machine.jog').at(-1)).toEqual({
+        by: [1, 0, 0],
+        feed: 2000,
+        continuous: true,
+      }),
     )
     expect(t.callsOf('run.machine.jogCancel')).toHaveLength(0)
     await t.user.pointer({ keys: '[/MouseLeft]', target: xPlus })
     await waitFor(() => expect(t.callsOf('run.machine.jogCancel')).toHaveLength(1))
+    expect(t.callsOf('run.machine.jog')).toHaveLength(2)
     // keyboard: Space held on a focused button, released
     const zMinus = nav.getByRole('button', { name: 'Jog Z−' })
     zMinus.focus()
@@ -917,7 +967,7 @@ describe('Run mode', () => {
     await waitFor(() =>
       expect(t.callsOf('run.machine.jog').at(-1)).toEqual({
         by: [0, 0, -1],
-        feed: 500,
+        feed: 2000,
         continuous: true,
       }),
     )
@@ -925,12 +975,31 @@ describe('Run mode', () => {
     await waitFor(() => expect(t.callsOf('run.machine.jogCancel')).toHaveLength(2))
     // the window losing focus ends a hold
     await t.user.pointer({ keys: '[MouseLeft>]', target: xPlus })
-    await waitFor(() => expect(t.callsOf('run.machine.jog')).toHaveLength(3))
+    await waitFor(() => expect(t.callsOf('run.machine.jog')).toHaveLength(4))
     act(() => void window.dispatchEvent(new Event('blur')))
     await waitFor(() => expect(t.callsOf('run.machine.jogCancel')).toHaveLength(3))
     await t.user.pointer({ keys: '[/MouseLeft]', target: xPlus })
     expect(t.callsOf('run.machine.jogCancel')).toHaveLength(3)
+    expect(t.callsOf('run.machine.jog')).toHaveLength(4)
     await expectNoAxeViolations(t.container)
+  })
+
+  it('jog hotkeys: WASD taps step, Escape stops; not while typing (DF88)', async () => {
+    const t = await renderRun()
+    await connectAndHome(t)
+    await t.user.keyboard('d')
+    expect(t.callsOf('run.machine.jog')).toEqual([{ by: [10, 0, 0], feed: 2000 }])
+    // typing in the custom step field never jogs
+    const field = within(t.nav()).getByRole('textbox', { name: 'Custom jog step (mm)' })
+    // (focus, not a click: in jsdom every rect is 0 × 0, so the panel resize handle takes clicks)
+    act(() => field.focus())
+    await t.user.keyboard('w')
+    expect(field).toHaveValue('w')
+    expect(t.callsOf('run.machine.jog')).toHaveLength(1)
+    act(() => field.blur())
+    t.machine.push({ state: 'Jog' })
+    await t.user.keyboard('{Escape}')
+    expect(t.callsOf('run.machine.jogCancel')).toHaveLength(1)
   })
 
   it('a hold released before the jog is accepted cancels again once it is (M3)', async () => {
@@ -939,9 +1008,10 @@ describe('Run mode', () => {
     let accept: (r: CallReply) => void = () => {}
     t.bridge.handle('run.machine.jog', () => new Promise<CallReply>((r) => (accept = r)))
     const nav = within(t.nav())
-    await t.user.click(nav.getByRole('radio', { name: 'Continuous' }))
     const yPlus = nav.getByRole('button', { name: 'Jog Y+' })
     await t.user.pointer({ keys: '[MouseLeft>]', target: yPlus })
+    // held past the delay: the continuous jog is on its way, not yet accepted
+    await waitFor(() => expect(t.callsOf('run.machine.jog')).toHaveLength(1))
     await t.user.pointer({ keys: '[/MouseLeft]', target: yPlus })
     await waitFor(() => expect(t.callsOf('run.machine.jogCancel')).toHaveLength(1))
     await act(async () => accept(ok({})))
@@ -1230,6 +1300,49 @@ describe('Run mode: serial port (docs/modes/run-machine.md#ports-and-the-port-pi
     await waitFor(() => expect(t.callsOf('run.machine.home')).toHaveLength(1))
   })
 
+  it('"Don\'t ask again" skips the Home confirmation for this machine; Settings asks again (DF88)', async () => {
+    // a library machine in the plan: the key the choice is stored under
+    const t = await renderRun({ plate: '10' })
+    scriptSerial(t, true)
+    const nav = within(t.nav())
+    await t.user.click(nav.getByRole('radio', { name: 'Serial port' }))
+    await waitFor(() => expect(nav.getByRole('button', { name: 'Connect' })).toBeEnabled())
+    await t.user.click(nav.getByRole('button', { name: 'Connect' }))
+    await screen.findByRole('group', { name: 'Machine' })
+    await t.user.click(nav.getByRole('button', { name: 'Home' }))
+    const dialog = await screen.findByRole('alertdialog', { name: 'Home the machine?' })
+    const dontAsk = within(dialog).getByRole('checkbox', {
+      name: 'Don’t ask again for this machine',
+    })
+    expect(dontAsk).not.toBeChecked()
+    await expectNoAxeViolations()
+    await t.user.click(dontAsk)
+    await t.user.click(within(dialog).getByRole('button', { name: 'Home' }))
+    await waitFor(() => expect(t.callsOf('run.machine.home')).toHaveLength(1))
+    const patch = t.bridge.settingsPatches.at(-1) as { skipHomeConfirm?: string[] }
+    expect(patch.skipHomeConfirm).toHaveLength(1)
+    // locked again (not homed): Home again, no question
+    t.machine.push({ state: 'Alarm', homed: false })
+    await t.user.click(nav.getByRole('button', { name: 'Home' }))
+    await waitFor(() => expect(t.callsOf('run.machine.home')).toHaveLength(2))
+    expect(screen.queryByRole('alertdialog', { name: 'Home the machine?' })).toBeNull()
+    // Settings → Homing confirmation → "Ask again for every machine"
+    act(() => t.shell.ui.getState().setSettingsOpen(true))
+    const settings = await screen.findByRole('dialog', { name: 'Settings' })
+    await t.user.click(
+      within(settings).getByRole('button', { name: 'Ask again for every machine' }),
+    )
+    expect(t.bridge.settingsPatches.at(-1)).toEqual({ skipHomeConfirm: [] })
+    expect(
+      within(settings).getByRole('button', { name: 'Ask again for every machine' }),
+    ).toBeDisabled()
+    act(() => t.shell.ui.getState().setSettingsOpen(false))
+    t.machine.push({ state: 'Alarm', homed: false })
+    await t.user.click(nav.getByRole('button', { name: 'Home' }))
+    await screen.findByRole('alertdialog', { name: 'Home the machine?' })
+    expect(t.callsOf('run.machine.home')).toHaveLength(2)
+  })
+
   it('the settings warning is checked again after a library change (DF87)', async () => {
     const t = await renderRun()
     scriptSerial(t, false)
@@ -1399,8 +1512,8 @@ describe('Run mode without a project (DF80)', () => {
     await within(machineGroup()!).findByText('Idle')
     await t.user.click(nav.getByRole('button', { name: 'Jog X+' }))
     expect(t.callsOf('run.machine.jog')).toEqual([{ by: [10, 0, 0], feed: expect.any(Number) }])
-    await t.user.click(nav.getByRole('button', { name: 'Zero X Y Z' }))
-    expect(t.callsOf('run.workZero.set')).toEqual([{ axes: ['x', 'y', 'z'] }])
+    await t.user.click(inspector.getByRole('button', { name: 'Set Z zero' }))
+    expect(t.callsOf('run.workZero.set')).toEqual([{ axes: ['z'] }])
     // the plate thickness comes from the machine profile
     expect(nav.getByText(/Touch plate 10(\.0+)? mm/)).toBeInTheDocument()
     await t.user.click(nav.getByRole('button', { name: 'Probe Z' }))

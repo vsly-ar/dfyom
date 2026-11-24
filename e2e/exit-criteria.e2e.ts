@@ -10,7 +10,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type { ElectronApplication, Locator, Page } from '@playwright/test'
-import { expect, launchApp, test } from './app.fixture'
+import { expect, launchApp, test, zeroXyz } from './app.fixture'
 
 const RENDERS = process.env['DFYOM_RENDERS'] === '1'
 
@@ -274,7 +274,7 @@ test('exit criteria through the UI: design, plan, export, run, save, close and r
     await navigator.getByRole('button', { name: 'Jog Z−' }).click()
     await expect(machine.getByText('Idle')).toBeVisible()
   }
-  await navigator.getByRole('button', { name: 'Zero X Y Z' }).click()
+  await zeroXyz(page)
   const dro = inspector.getByRole('table', { name: 'Position' })
   await expect(dro.getByRole('cell', { name: 'Work position Z' })).toHaveText(/^0\.000/)
 

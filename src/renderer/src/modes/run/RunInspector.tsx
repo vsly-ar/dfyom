@@ -64,7 +64,11 @@ export function RunInspector({ doc }: { doc: ProjectDoc | undefined }): React.JS
     <>
       <PanelHeader title={runMessages.dro.title} />
       <div className={styles['panel']}>
-        <Dro status={status} units={units} />
+        <Dro
+          status={status}
+          units={units}
+          zero={{ gate: gates.workZero, onZero: (axis) => void a.setWorkZero([axis]) }}
+        />
         {/* DF78 (Q107): the alignment step docked beside the DRO */}
         {doc === undefined ? null : <AlignmentPanel doc={doc} />}
 

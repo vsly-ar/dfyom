@@ -1,49 +1,105 @@
-// JogPad: jogs per axis (44 px run controls) by step or continuously (hold to jog, M3), the step in
-// the project's units, and "Stop jog" (jog cancel). Step jogs are relative
-// (`run.machine.jog { by }`); a continuous jog runs to the travel edge while a button is held
-// (`continuous: true`) and is cancelled on release, blur, the window losing focus, the pad turning
-// disabled or unmounting. GRBL caps the feed at the axis' max rate. Used in the navigator and in
-// the tool-change and setup-change dialogs.
-// Doc: docs/conventions/ui.md#run-mode-safety-ui, docs/modes/run-v0.1.md#commands-and-queries,
-// docs/modes/run-machine.md#machine-readiness-m3
-import { useEffect } from 'react'
-import type { UnitSystem } from '../../../../core/project/document'
+// JogPad (DF88): the step picker, the jog feed slider, the X/Y cross and Z column (44 px run
+// controls) and "Stop jog". A press shorter than the hold delay jogs one step; a press held past
+// it jogs continuously to the travel edge until released (jog cancel, `0x85`); a click never
+// starts a continuous jog (`jog-press.ts`). Every other end of a press (pointer cancel, blur, the
+// window losing focus or hiding, the pad turning disabled, unmounting) drops it or cancels the
+// continuous jog. The same pad in the navigator and the tool-change and setup-change dialogs,
+// all fed by `useJogControls`.
+// Doc: docs/conventions/ui.md#jog-position-and-probing-df88, docs/modes/run-machine.md#machine-readiness-m3
+import { useEffect, useId, useRef, useState } from 'react'
+import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
 import { runMessages } from '../../messages/run'
-import { Button, SegmentedControl } from '../../ui'
-import { JOG_STEPS, stepToMm, type JogMode } from './machine-state'
-import { useRun, useRunStore, type Axis } from './run-store'
+import { useSettings } from '../../shell/ShellContext'
+import { Button, Slider } from '../../ui'
+import { useLibraryItems } from '../plan/usePlan'
+import { createJogPress, type JogPressHandlers } from './jog-press'
+import { JogStepPicker } from './JogStepPicker'
+import {
+  clampJogFeed,
+  formatFeed,
+  jogFeedRange,
+  jogStepMm,
+  JOG_FEED_DEFAULT,
+  type JogFeedRange,
+} from './machine-state'
+import { machineJog, type MachineJog } from './plan-info'
+import { NO_PLAN, useRun, useRunStore, useRunUnits, type Axis } from './run-store'
 import styles from './Run.module.css'
 
 const m = runMessages.navigator
 
-/** Jog feeds (mm/min): XY and Z. GRBL limits them to the machine's max rates ($110–$112). */
+/** Feeds (mm/min) of the touch-off moves (DF69): XY and Z. GRBL caps them at $110–$112. */
 export const JOG_FEED = { xy: 2000, z: 500 } as const
 
-/** The window's jog mode and hold handlers from the run store, for a `JogPad`'s props. */
-export function useJogMode(): Pick<JogPadProps, 'mode' | 'onMode' | 'onHoldStart' | 'onHoldEnd'> {
+/** What a jog pad and the jog hotkeys work with: the window's step and feed, and the jogs. */
+export interface JogControls {
+  readonly units: UnitSystem
+  /** The step (mm). */
+  readonly step: number
+  /** The step picker's custom value (mm). */
+  readonly custom: number | undefined
+  /** The jog feed (mm/min) for X and Y. */
+  readonly feed: number
+  readonly feedRange: JogFeedRange
+  setStep(stepMm: number): void
+  setCustom(stepMm: number): void
+  setFeed(feed: number): void
+  /** One step jog. */
+  jog(axis: Axis, sign: 1 | -1): void
+  /** A continuous jog to the travel edge; `holdEnd` cancels it. */
+  holdStart(axis: Axis, sign: 1 | -1): void
+  holdEnd(): void
+  /** "Stop jog": jog cancel. */
+  cancel(): void
+}
+
+/** The jog limits and key of the chosen plan's machine, or the manual-control machine. */
+export function useMachineJog(doc: ProjectDoc | undefined): MachineJog {
+  const planId = useRun((s) => s.planId)
+  const machineId = useRun((s) => s.machineId)
+  const machines = useLibraryItems('machine')
+  const plan = planId === undefined || planId === NO_PLAN ? undefined : doc?.plans[planId]
+  return machineJog(plan, machines, machineId)
+}
+
+/** The window's jog step and feed (the feed remembered per machine) and its jog actions. */
+export function useJogControls(doc: ProjectDoc | undefined): JogControls {
   const store = useRunStore()
-  const mode = useRun((s) => s.jogMode)
+  const units = useRunUnits(doc)
+  const step = useRun((s) => s.jogStep)
+  const custom = useRun((s) => s.jogCustom)
+  const windowFeed = useRun((s) => s.jogFeed)
+  const feeds = useSettings((s) => s.settings.jogFeed)
+  const update = useSettings((s) => s.update)
+  const machine = useMachineJog(doc)
+  const feedRange = jogFeedRange(units, machine.maxFeed)
+  const stored = (machine.key === undefined ? undefined : feeds[machine.key]) ?? windowFeed
+  const feed = clampJogFeed(stored ?? JOG_FEED_DEFAULT, feedRange)
+  const feedOf = (axis: Axis) =>
+    axis === 'z' && machine.maxZ !== undefined ? Math.min(feed, machine.maxZ) : feed
   const a = store.getState()
+  const stepMm = jogStepMm(step, units)
   return {
-    mode,
-    onMode: a.setJogMode,
-    onHoldStart: (axis, sign, feed) => void a.jogHoldStart(axis, sign, feed),
-    onHoldEnd: a.jogHoldEnd,
+    units,
+    step: stepMm,
+    custom,
+    feed,
+    feedRange,
+    setStep: a.setJogStep,
+    setCustom: a.setJogCustom,
+    setFeed: (f) => {
+      a.setJogFeed(f)
+      if (machine.key !== undefined) update({ jogFeed: { [machine.key]: f } })
+    },
+    jog: (axis, sign) => void a.jog(axis, sign * stepMm, feedOf(axis)),
+    holdStart: (axis, sign) => void a.jogHoldStart(axis, sign, feedOf(axis)),
+    holdEnd: a.jogHoldEnd,
+    cancel: () => void a.jogCancel(),
   }
 }
 
 export interface JogPadProps {
-  units: UnitSystem
-  step: string
-  onStep: (step: string) => void
-  onJog: (axis: Axis, mm: number, feed: number) => void
-  onCancel: () => void
-  /** Step (default) or continuous; without `onMode` the pad has no mode choice. */
-  mode?: JogMode
-  onMode?: (mode: JogMode) => void
-  /** Continuous: a button pressed (start a jog to the travel edge) and released (cancel it). */
-  onHoldStart?: (axis: Axis, sign: 1 | -1, feed: number) => void
-  onHoldEnd?: () => void
+  controls: JogControls
   /** Why jogging is not possible now (shown under the pad unless `reasonShown` is false), or null. */
   disabledReason: string | null
   /** Only the Z buttons (tool change: raise and lower). */
@@ -55,122 +111,139 @@ export interface JogPadProps {
 }
 
 export function JogPad({
-  units,
-  step,
-  onStep,
-  onJog,
-  onCancel,
-  mode = 'step',
-  onMode,
-  onHoldStart,
-  onHoldEnd,
+  controls,
   disabledReason,
   zOnly = false,
   reasonId,
   reasonShown = true,
 }: JogPadProps): React.JSX.Element {
   const disabled = disabledReason !== null
-  const continuous = mode === 'continuous' && onHoldStart !== undefined
-  const steps = JOG_STEPS[units]
-  const current = steps.includes(step) ? step : steps[2]!
-  const feedOf = (axis: Axis) => (axis === 'z' ? JOG_FEED.z : JOG_FEED.xy)
-  const jog = (axis: Axis, sign: 1 | -1) =>
-    onJog(axis, sign * stepToMm(current, units), feedOf(axis))
-
-  // The store keeps the one held jog of the window: a start while one is held and an end with
-  // none held do nothing, so every way a hold can end may call `release`.
-  const release = onHoldEnd
-  const press = (axis: Axis, sign: 1 | -1) => onHoldStart?.(axis, sign, feedOf(axis))
-  // the window losing focus or hiding, the pad turning disabled or leaving continuous mode, and
-  // unmounting all end a hold
+  const { units } = controls
+  const hintId = useId()
+  const [holding, setHolding] = useState<string | undefined>(undefined)
+  // the slider's value while dragging; committed at the end of a drag or key press
+  const [dragFeed, setDragFeed] = useState<number | undefined>(undefined)
+  const latest = useRef(controls)
   useEffect(() => {
-    if (release === undefined) return
-    if (!continuous || disabled) {
-      release()
+    latest.current = controls
+  })
+  const [press] = useState(() => {
+    const handlers = (): JogPressHandlers => ({
+      step: (axis, sign) => latest.current.jog(axis, sign),
+      holdStart: (axis, sign) => {
+        setHolding(p.active()?.id)
+        latest.current.holdStart(axis, sign)
+      },
+      holdEnd: () => {
+        setHolding(undefined)
+        latest.current.holdEnd()
+      },
+    })
+    const p = createJogPress(handlers)
+    return p
+  })
+
+  // the window losing focus or hiding, the pad turning disabled, and unmounting end a press
+  useEffect(() => {
+    if (disabled) {
+      press.abort()
       return
     }
+    const abort = () => press.abort()
     const onHidden = () => {
-      if (document.visibilityState === 'hidden') release()
+      if (document.visibilityState === 'hidden') press.abort()
     }
-    window.addEventListener('blur', release)
+    window.addEventListener('blur', abort)
     document.addEventListener('visibilitychange', onHidden)
     return () => {
-      window.removeEventListener('blur', release)
+      window.removeEventListener('blur', abort)
       document.removeEventListener('visibilitychange', onHidden)
-      release()
+      press.abort()
     }
-  }, [continuous, disabled, release])
+  }, [disabled, press])
 
   const button = (axis: Axis, sign: 1 | -1, area: string) => {
     const dir = sign > 0 ? '+' : '−'
-    const hold = continuous
-      ? {
-          onPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => {
-            if (e.button !== 0) return
-            e.currentTarget.setPointerCapture?.(e.pointerId)
-            press(axis, sign)
-          },
-          onPointerUp: () => release?.(),
-          onPointerCancel: () => release?.(),
-          onLostPointerCapture: () => release?.(),
-          onKeyDown: (e: React.KeyboardEvent) => {
-            if (e.key !== ' ' && e.key !== 'Enter') return
-            e.preventDefault()
-            if (!e.repeat) press(axis, sign)
-          },
-          onKeyUp: (e: React.KeyboardEvent) => {
-            if (e.key === ' ' || e.key === 'Enter') release?.()
-          },
-          onBlur: () => release?.(),
-          // a click is the end of a hold here, not a step
-          onClick: (e: React.MouseEvent) => e.preventDefault(),
-        }
-      : { onClick: () => jog(axis, sign) }
+    const id = `${axis}${dir}`
+    const mine = () => press.active()?.id === id
+    const describedBy = disabled ? `${hintId} ${reasonId}` : hintId
     return (
       <Button
-        key={`${axis}${sign}`}
+        key={id}
         size="lg"
         className={styles[area]}
         aria-label={m.jogButton(axis.toUpperCase(), dir)}
+        aria-describedby={describedBy}
         disabled={disabled}
-        {...(disabled ? { 'aria-describedby': reasonId } : {})}
-        {...hold}
+        data-holding={holding === id ? '' : undefined}
+        onPointerDown={(e) => {
+          if (e.button !== 0) return
+          e.currentTarget.setPointerCapture?.(e.pointerId)
+          press.press(id, axis, sign)
+        }}
+        onPointerUp={() => press.release(id)}
+        onPointerCancel={() => {
+          if (mine()) press.abort()
+        }}
+        onLostPointerCapture={() => {
+          if (mine()) press.abort()
+        }}
+        onKeyDown={(e) => {
+          if (e.key !== ' ' && e.key !== 'Enter') return
+          e.preventDefault()
+          if (!e.repeat) press.press(id, axis, sign)
+        }}
+        onKeyUp={(e) => {
+          if (e.key !== ' ' && e.key !== 'Enter') return
+          e.preventDefault()
+          press.release(id)
+        }}
+        onBlur={() => {
+          if (mine()) press.abort()
+        }}
+        // a click without a press (a screen reader's activation) is one step
+        onClick={(e) => {
+          if (e.detail === 0 && press.active() === undefined) controls.jog(axis, sign)
+        }}
       >
-        {axis.toUpperCase()}
-        {dir}
+        <span className={styles['jogAxis']}>{axis.toUpperCase()}</span>
+        <span className={styles['jogDir']}>{dir}</span>
       </Button>
     )
   }
+
+  const feed = dragFeed ?? controls.feed
+  const feedText = `${formatFeed(feed, units)} ${runMessages.dro.feedUnits[units]}`
   return (
-    <div className={styles['jog']}>
-      {onMode === undefined ? null : (
-        <SegmentedControl<JogMode>
-          label={m.jogMode}
-          size="sm"
-          className={styles['jogSteps']}
-          options={[
-            { value: 'step', label: m.jogModeStep },
-            { value: 'continuous', label: m.jogModeContinuous },
-          ]}
-          value={mode}
-          onValueChange={onMode}
+    <div className={styles['jog']} data-jog-pad="">
+      <JogStepPicker
+        units={units}
+        step={controls.step}
+        custom={controls.custom}
+        onStep={controls.setStep}
+        onCustom={controls.setCustom}
+      />
+      <div className={styles['jogFeed']}>
+        <div className={styles['jogFeedHead']}>
+          <span aria-hidden="true">{m.jogFeed}</span>
+          <span className={styles['jogFeedValue']} aria-hidden="true">
+            {feedText}
+          </span>
+        </div>
+        <Slider
+          label={m.jogFeed}
+          min={controls.feedRange.min}
+          max={controls.feedRange.max}
+          step={controls.feedRange.step}
+          value={feed}
+          valueText={() => feedText}
+          onValueChange={setDragFeed}
+          onValueCommit={(v) => {
+            setDragFeed(undefined)
+            controls.setFeed(v)
+          }}
         />
-      )}
-      {continuous ? (
-        <p className={styles['holdHint']}>{m.holdHint}</p>
-      ) : (
-        <SegmentedControl
-          label={m.step}
-          size="sm"
-          className={styles['jogSteps']}
-          options={steps.map((s) => ({
-            value: s,
-            label: `${s} ${units === 'inch' ? 'in' : 'mm'}`,
-          }))}
-          value={current}
-          onValueChange={onStep}
-        />
-      )}
+      </div>
       <div className={styles['jogPad']} data-z-only={zOnly ? '' : undefined}>
         {zOnly
           ? null
@@ -183,10 +256,15 @@ export function JogPad({
         {button('z', 1, 'zPlus')}
         {button('z', -1, 'zMinus')}
       </div>
-      {/* the default look: bordered when enabled, dimmed when disabled (DF46) */}
-      <Button size="sm" disabled={disabled} onClick={onCancel}>
-        {m.cancelJog}
-      </Button>
+      <div className={styles['jogFoot']}>
+        {/* the default look: bordered when enabled, dimmed when disabled (DF46) */}
+        <Button size="sm" disabled={disabled} onClick={controls.cancel}>
+          {m.cancelJog}
+        </Button>
+        <p id={hintId} className={styles['jogHint']}>
+          {m.jogHint}
+        </p>
+      </div>
       {disabledReason !== null && reasonShown ? (
         <p id={reasonId} className={styles['why']}>
           {disabledReason}
