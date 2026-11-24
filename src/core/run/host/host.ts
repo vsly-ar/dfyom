@@ -81,6 +81,8 @@ interface Job {
   readonly jobId: string
   phase: RunPhase
   toolChange?: ToolChangeInfo | undefined
+  /** DF69: the level (mm, < 0) of the tool run's Z reference surface, from its tool change; 0 = top. */
+  level: number
   readonly startedAt: number
   /** The start's checks passed and the sender streams: a stop goes to the sender. */
   streaming: boolean
@@ -101,6 +103,12 @@ interface Connection {
   readonly sender: GrblSender
   homed: boolean
   workZero: Vec3
+  /**
+   * DF69: the level (mm, setup frame, ≤ 0) of the surface G54 Z was last set on: the run's
+   * reference surface when set during a run, else the stock top (0)
+   * (docs/modes/z-reference.md#dfyom-run).
+   */
+  zeroLevel: number
   alarm?: { readonly code: number; readonly text: string } | undefined
   lastMessage?: string | undefined
   job?: Job | undefined
@@ -259,6 +267,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
             },
           }),
       timeScale: conn.clock.scale,
+      ...(conn.zeroLevel === 0 ? {} : { zeroLevel: conn.zeroLevel }),
       ...(job === undefined
         ? {}
         : {
@@ -369,6 +378,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
       sender,
       homed,
       workZero: info.unwrap().workZero,
+      zeroLevel: 0,
       envelope: envelopeOf(info.unwrap().settings),
       emulator,
       inches: info.unwrap().settings['13'] === 1,
@@ -414,6 +424,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
       `G21 G10 L2 P1 X${fmt(workZero[0])} Y${fmt(workZero[1])} Z${fmt(workZero[2])}`,
     )
     if (set.isErr()) return Err(set.unwrapErr())
+    c.zeroLevel = 0
     return (await readWorkZero(c)).map(() => undefined)
   }
 
@@ -516,6 +527,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         })
         const set = await c.sender.command(`G21 G10 L20 P1 ${words.join(' ')}`)
         if (set.isErr()) return Err(set.unwrapErr())
+        if (action.axes.includes('z')) c.zeroLevel = c.job?.level ?? 0
         return readWorkZero(c)
       }
       case 'reset':
@@ -569,8 +581,9 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         })
     }
     if (c.emulator !== undefined) {
-      // the virtual plate lies on the stock top at the work zero, else just below the tool
-      const top = c.workZero[2] + a.plateThickness
+      // the virtual plate lies on the surface to zero on (the run's Z reference, DF69; else the
+      // stock top) below the work zero's stock top, else just below the tool
+      const top = c.workZero[2] - c.zeroLevel + (c.job?.level ?? 0) + a.plateThickness
       c.emulator.setProbePlate(top < s.mpos[2] - 1e-3 ? top : s.mpos[2] - 10)
     }
     c.jogEnd = undefined
@@ -612,6 +625,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
       const r = await c.sender.command(line)
       if (r.isErr()) return Err(r.unwrapErr().withContext(where))
     }
+    c.zeroLevel = c.job?.level ?? 0
     const wz = await readWorkZero(c)
     if (wz.isErr()) return Err(wz.unwrapErr())
     log.info({ contact, workZero: wz.unwrap() }, 'probed Z')
@@ -719,6 +733,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     const job: Job = {
       jobId,
       phase: 'streaming',
+      level: 0,
       startedAt: c.clock.now(),
       streaming: false,
       stopRequested: false,
@@ -790,6 +805,8 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         phase: (p: PhaseChange) => {
           job.phase = p.phase
           job.toolChange = p.toolChange
+          // DF69: the tool run from this tool change on is in its surface's Z
+          if (p.phase === 'toolChange') job.level = p.toolChange?.level ?? 0
           if (p.phase === 'toolChange') log.debug({ tool: p.toolChange?.n }, 'tool change')
           post({
             type: 'phase',

@@ -141,6 +141,12 @@ export function setupPlacement(
   }
 }
 
+/** The setup's clearance height (mm above the stock top), if it reads. */
+export function setupClearance(plan: PlanDTO, setupId: string | undefined): number | undefined {
+  const q = Quantity.fromDTO(runSetup(plan, setupId).clearanceHeight)
+  return q.isOk() && q.unwrap().kind === 'length' ? q.unwrap().canonical : undefined
+}
+
 /** A `probePlateThickness` in mm, if the values carry a valid one. */
 function plateOf(values: unknown): number | undefined {
   const dto = QuantityDtoSchema.safeParse(

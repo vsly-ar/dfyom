@@ -236,9 +236,18 @@ export const runMessages = {
     button: 'Probe Z',
     hint: (thickness: string) => `Touch plate ${thickness}: Z0 on the stock top.`,
     confirmTitle: 'Probe Z?',
-    confirmDescription: (thickness: string) =>
-      `Put the touch plate on the stock under the bit and the clip on the bit. The spindle must be off. The bit moves down until it touches the plate (at most 25 mm). Plate thickness: ${thickness}.`,
+    confirmDescription: (thickness: string, surface?: string) =>
+      `Put the touch plate on ${surface ?? 'the stock'} under the bit and the clip on the bit. The spindle must be off. The bit moves down until it touches the plate (at most 25 mm). Plate thickness: ${thickness}.`,
     confirm: 'Probe',
+  },
+
+  /** DF69: "Move to touch-off spot" at a tool change (docs/modes/z-reference.md#dfyom-run). */
+  touchOff: {
+    button: 'Move to touch-off spot',
+    confirmTitle: 'Move to the touch-off spot?',
+    confirmDescription: (spot: string, surface: string) =>
+      `The spindle must be off. The bit rises to the clearance height if it is lower, then moves to ${spot} over ${surface}. A longer new tool sits lower than the last one: check that it clears the part.`,
+    confirm: 'Move',
   },
 
   /** Feed, spindle and rapid overrides (docs/modes/run-machine.md#overrides-m6). */

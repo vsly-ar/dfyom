@@ -153,6 +153,10 @@ export interface RunState {
   setWorkZero(axes: readonly Axis[]): Promise<void>
   /** Z touch plate (`run.machine.probeZ`, M4): a job; a miss shows in the alarm panel. */
   probeZ(plateThickness: number): Promise<void>
+  /** DF69: jog to the touch-off spot (`touchOffMoves`), one jog after the other. */
+  moveTo(
+    moves: readonly { readonly to: readonly [number, number, number]; readonly feed: number }[],
+  ): Promise<void>
   /** `run.override.set` (M6). */
   override(change: OverrideChange): Promise<void>
   reset(): Promise<void>
@@ -381,6 +385,12 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       },
       setWorkZero: async (axes) => void (await call('run.workZero.set', { axes: [...axes] })),
       probeZ: (plateThickness) => job('run.machine.probeZ', { plateThickness }),
+      async moveTo(moves) {
+        for (const { to, feed } of moves) {
+          const r = await call('run.machine.jog', { to: [...to], feed })
+          if (!r.ok) return
+        }
+      },
       override: async (change) => void (await call('run.override.set', change)),
       reset: async () => void (await call('run.machine.reset')),
       async startRun(chosen, from) {

@@ -79,6 +79,11 @@ const MARKER_PAUSE = /^M0( ;.*)?$/
 /** DF69: the Z reference lines before a marker (docs/modes/z-reference.md#exported-gcode). */
 const ZREF_LINE = /^\(Z0 for tool \d+: ([^()]*)\)$/
 const SPOT_LINE = /^\(Touch off Z here, (X\S+ Y\S+): [^()]*\)$/
+/** The level on the Z reference line (program units) and the spot's coordinates. */
+const ZREF_LEVEL = /, (\d+(?:\.\d+)?) below the stock top$/
+const SPOT_XY = /^X(-?\d+(?:\.\d+)?) Y(-?\d+(?:\.\d+)?)$/
+/** A units word in a line's code (comments stripped). */
+const UNITS_WORD = /G2([01])(?![0-9.])/i
 /** Lines before a marker searched for them (the manual spindle's stop comment sits between). */
 const ZREF_LOOKBACK = 4
 /** A line whose code (comments stripped) contains `M0`/`M00`: GRBL pauses there. */
@@ -101,6 +106,20 @@ export interface ToolChangeInfo {
   readonly surface?: string
   /** DF69: where to touch off (`X120 Y45`, program units), with `surface`. */
   readonly spot?: string
+  /** DF69: the surface's level below the stock top (mm, setup frame, < 0), with `surface`. */
+  readonly level?: number
+  /** DF69: the spot in work coordinates (mm), with `spot`. */
+  readonly at?: readonly [number, number]
+}
+
+/** mm per program unit at line `i`: the last `G20`/`G21` before it (none = mm). */
+function programPerUnit(lines: readonly string[], i: number): number {
+  for (let k = i - 1; k >= 0; k--) {
+    const code = (lines[k] ?? '').replace(/\([^)]*\)/g, '').replace(/;.*$/, '')
+    const u = UNITS_WORD.exec(code)
+    if (u !== null) return u[1] === '0' ? 25.4 : 1
+  }
+  return 1
 }
 
 /** The tool change at the marker line `i`, with the Z reference lines before it (DF69). */
@@ -112,11 +131,16 @@ function toolChangeAt(lines: readonly string[], i: number, m: RegExpExecArray): 
     surface = ZREF_LINE.exec(line)?.[1] ?? surface
     spot = SPOT_LINE.exec(line)?.[1] ?? spot
   }
+  const k = surface === undefined ? 1 : programPerUnit(lines, i)
+  const level = surface === undefined ? undefined : ZREF_LEVEL.exec(surface)
+  const xy = surface === undefined || spot === undefined ? null : SPOT_XY.exec(spot)
   return {
     n: Number(m[1]),
     name: m[2] ?? '',
     ...(surface === undefined ? {} : { surface }),
     ...(surface === undefined || spot === undefined ? {} : { spot }),
+    ...(level == null ? {} : { level: -Number(level[1]) * k || 0 }),
+    ...(xy === null ? {} : { at: [Number(xy[1]) * k, Number(xy[2]) * k] as const }),
   }
 }
 

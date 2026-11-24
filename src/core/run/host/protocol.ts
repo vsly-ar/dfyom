@@ -39,6 +39,9 @@ export const ToolChangeSchema = z.object({
   /** DF69: the Z reference surface and level when not the top face; `spot` where to touch off. */
   surface: z.string().max(500).exactOptional(),
   spot: z.string().max(100).exactOptional(),
+  /** DF69: the surface's level (mm, setup frame, < 0) and the spot in work coordinates (mm). */
+  level: Num.exactOptional(),
+  at: z.tuple([Num, Num]).readonly().exactOptional(),
 })
 
 export const RunSummarySchema = z.object({
@@ -99,6 +102,12 @@ export const HostStatusSchema = z.object({
     })
     .exactOptional(),
   timeScale: TimeScaleSchema,
+  /**
+   * DF69: the level (mm, setup frame, < 0) of the surface the work zero Z was last set on during
+   * a run (Set Z zero, Probe Z at a tool change); absent = the stock top
+   * (docs/modes/z-reference.md#dfyom-run).
+   */
+  zeroLevel: Num.exactOptional(),
   job: z
     .object({
       jobId: Id,

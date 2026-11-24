@@ -12,12 +12,13 @@ import { runMessages } from '../../messages/run'
 import { Icon, Button, Dialog, DialogClose, ErrorMessage, Select } from '../../ui'
 import { useReplica } from '../../shell/ShellContext'
 import { JogPad, useJogMode } from './JogPad'
-import { activeJob, formatLength, runGates } from './machine-state'
+import { activeJob, formatLength, runGates, surfaceName } from './machine-state'
 import { canResume, planRunInfo, resumePoints } from './plan-info'
 import { useRun, useRunStore, waitKey, type PreflightCheck } from './run-store'
 import { WorkZeroButtons } from './RunNavigator'
 import { AlarmPanel, inAlarm } from './AlarmPanel'
 import { ProbeZButton, usePlateThickness } from './ProbeZButton'
+import { TouchOffButton } from './TouchOffButton'
 import { RunDialogFooter } from './RunStop'
 import { SetupChangeDialog } from './SetupChangeDialog'
 import styles from './Run.module.css'
@@ -314,6 +315,8 @@ function WaitDialog({ doc }: { doc: ProjectDoc | undefined }): React.JSX.Element
           disabledReason={gates.jog}
           reasonId={ids.jog}
         />
+        {/* DF69: back over the surface's touch-off spot after jogging away */}
+        <TouchOffButton doc={doc} toolChange={tc} gate={gates.jog} reasonId={ids.jog} />
         <WorkZeroButtons
           only="z"
           gate={gates.workZero}
@@ -327,6 +330,7 @@ function WaitDialog({ doc }: { doc: ProjectDoc | undefined }): React.JSX.Element
           units={units}
           busy={pending.includes('run.machine.probeZ')}
           hint={false}
+          {...(tc.surface === undefined ? {} : { surface: surfaceName(tc.surface) })}
           onProbe={(t) => void a.probeZ(t)}
         />
         {/* a probe that missed: the alarm and its unlock right here (the navigator is behind) */}

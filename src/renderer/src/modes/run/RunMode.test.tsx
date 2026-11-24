@@ -337,8 +337,16 @@ describe('Run mode', () => {
       name: 'Flat 4',
       surface: 'Facing 1 floor, 0.50 below the stock top',
       spot: 'X50 Y30',
+      level: -0.5,
+      at: [50, 30],
     }
-    t.machine.push({ state: 'Idle', ...t.machine.job('toolChange', { toolChange }) })
+    // jogged away from the spot to change the tool, Z above the clearance height
+    t.machine.push({
+      state: 'Idle',
+      workZero: [-400, -300, -60],
+      mpos: [-10, -10, -20],
+      ...t.machine.job('toolChange', { toolChange }),
+    })
     const dialog = await screen.findByRole('dialog', { name: 'Tool change 2' })
     expect(
       within(dialog).getByText(
@@ -346,6 +354,19 @@ describe('Run mode', () => {
       ),
     ).toBeInTheDocument()
     await expectNoAxeViolations()
+    // back over the spot: confirmed, X Y at the current (higher) Z, never down
+    await t.user.click(within(dialog).getByRole('button', { name: 'Move to touch-off spot' }))
+    const confirm = await screen.findByRole('alertdialog', { name: 'Move to the touch-off spot?' })
+    expect(within(confirm).getByText(/moves to X50 Y30 over Facing 1 floor\./)).toBeInTheDocument()
+    await t.user.click(within(confirm).getByRole('button', { name: 'Move' }))
+    await waitFor(() =>
+      expect(t.callsOf('run.machine.jog')).toEqual([{ to: [-350, -270, -20], feed: 2000 }]),
+    )
+    // at the spot: no button
+    t.machine.push({ mpos: [-350, -270, -20] })
+    await waitFor(() =>
+      expect(within(dialog).queryByRole('button', { name: 'Move to touch-off spot' })).toBeNull(),
+    )
   })
 
   it('a failed run opens a blocking dialog with what happened and what to do next', async () => {

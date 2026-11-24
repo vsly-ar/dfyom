@@ -190,3 +190,32 @@ export const JOG_STEPS: Readonly<Record<UnitSystem, readonly string[]>> = {
 export function stepToMm(step: string, units: UnitSystem): number {
   return Number(step) * (units === 'inch' ? MM_PER_INCH : 1)
 }
+
+type Xyz = readonly [number, number, number]
+
+/** Within this (mm) of the spot in X and Y the machine is there: no move offered. */
+const AT_SPOT_MM = 0.01
+
+/**
+ * The jogs (machine coordinates, mm) of "Move to touch-off spot" at a tool-change wait (DF69,
+ * docs/modes/z-reference.md#dfyom-run): up to the setup's clearance height if lower (never down),
+ * then X Y to the spot at that height. The clearance is reckoned from the stock top of the current
+ * work zero (`zeroLevel`) and capped at the machine top. Empty: already at the spot. Pure.
+ */
+export function touchOffMoves(
+  s: Pick<RunStatus, 'mpos' | 'workZero' | 'zeroLevel'>,
+  at: readonly [number, number],
+  clearance: number,
+): Xyz[] {
+  const [x, y, z] = s.mpos
+  const tx = s.workZero[0] + at[0]
+  const ty = s.workZero[1] + at[1]
+  if (Math.abs(x - tx) <= AT_SPOT_MM && Math.abs(y - ty) <= AT_SPOT_MM) return []
+  const safe = Math.min(s.workZero[2] - (s.zeroLevel ?? 0) + clearance, 0)
+  const up = Math.max(z, safe)
+  return [...(up > z + 1e-6 ? [[x, y, up] as Xyz] : []), [tx, ty, up]]
+}
+
+/** A tool change's surface without its level ("Facing 1 floor, 0.50 below …" → "Facing 1 floor"). */
+export const surfaceName = (surface: string): string =>
+  surface.replace(/, [\d.]+ below the stock top$/, '')

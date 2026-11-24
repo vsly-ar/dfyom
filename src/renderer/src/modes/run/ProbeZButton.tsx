@@ -21,6 +21,7 @@ export function ProbeZButton({
   busy = false,
   onProbe,
   hint = true,
+  surface,
 }: {
   /** Plate thickness (mm); undefined: no plate set, nothing shows. */
   thickness: number | undefined
@@ -33,6 +34,8 @@ export function ProbeZButton({
   onProbe: (thickness: number) => void
   /** The line naming the plate under the button. */
   hint?: boolean
+  /** DF69: the surface the plate goes on (a tool run's Z reference); absent = the stock. */
+  surface?: string
 }): React.JSX.Element | null {
   const [open, setOpen] = useState(false)
   if (thickness === undefined) return null
@@ -56,7 +59,7 @@ export function ProbeZButton({
         open={open}
         onOpenChange={setOpen}
         title={m.confirmTitle}
-        description={m.confirmDescription(plate)}
+        description={m.confirmDescription(plate, surface)}
         confirmLabel={m.confirm}
         onConfirm={() => onProbe(thickness)}
       />
