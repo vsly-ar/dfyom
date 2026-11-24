@@ -274,6 +274,20 @@ describe('homing, alarms and reset', () => {
     expect(emu.trace.transitions.map((t) => t.to)).toEqual(['Home', 'Idle'])
   })
 
+  it('silentHoming: no report while $H runs, one after it (GRBL-exact, run-machine.md)', () => {
+    const emu = emulator({ homing: true, silentHoming: true })
+    emu.readOutput()
+    send(emu, '$H\n')
+    expect(send(emu, '?')).toEqual([])
+    expect(send(emu, '?')).toEqual([])
+    settle(emu)
+    const out = outLines(emu)
+    expect(out.filter((l) => l.startsWith('<'))).toHaveLength(1)
+    expect(out.at(-1)).toBe('ok')
+    expect(out[0]).toMatch(/^<Idle\|/)
+    expect(statusOf(emu)).toMatch(/^<Idle\|/)
+  })
+
   it('homes per the homing direction mask ($23) and pull-off ($27), moving in Home reports', () => {
     // travel 200 (defaults); X and Z home to +, Y to − ($23=2: front), pull-off 2 mm
     const emu = expectOk(

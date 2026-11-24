@@ -48,6 +48,17 @@ export interface EmulatorOptions {
    * (docs/architecture/grbl.md#homing-and-machine-coordinates). The app passes the travel centre.
    */
   readonly position?: Vec3
+  /**
+   * GRBL-exact homing (default false): no status report while `$H` runs; the `?`s received meanwhile
+   * are answered once when the cycle ends. The default reports during homing (DFYOM's deviation,
+   * docs/architecture/grbl.md#homing-and-machine-coordinates).
+   */
+  readonly silentHoming?: boolean
+  /**
+   * Simulated touch plate: its top in MPos Z (the probe input is closed while the tool tip is at
+   * or below it); absent = no plate, a probe finds nothing (docs/architecture/grbl.md#probing).
+   */
+  readonly probePlate?: number
 }
 
 export interface EmulatorStatus {
@@ -63,7 +74,7 @@ export interface EmulatorStatus {
   readonly rxFree: number
 }
 
-type Stop = 'hold' | 'jogCancel' | 'softLimit' | 'door'
+type Stop = 'hold' | 'jogCancel' | 'softLimit' | 'door' | 'probe'
 type Step = Action | { readonly kind: 'jog'; readonly target: Vec3; readonly feed: number }
 
 interface Current {
@@ -81,6 +92,27 @@ interface Exec {
 }
 
 const zero: Vec3 = [0, 0, 0]
+
+/** A probe cycle in progress (G38.x). */
+interface Probing {
+  readonly away: boolean
+  readonly noError: boolean
+  /** MPos latched when the input changed (GRBL's sys_probe_position). */
+  contact?: Vec3
+}
+
+/** Time (s) at which `p` has covered `s` mm (bisection; profiles are monotonic in distance). */
+function timeAtDistance(p: Profile, s: number): number {
+  if (s <= 0) return 0
+  let lo = 0
+  let hi = p.duration
+  for (let i = 0; i < 60; i++) {
+    const mid = (lo + hi) / 2
+    if (sampleProfile(p, mid).s < s) lo = mid
+    else hi = mid
+  }
+  return hi
+}
 
 /** One move of the homing cycle: each axis from → to at its own duration (ms), together. */
 interface HomingMove {
@@ -139,12 +171,21 @@ export class GrblEmulator {
   private dwellEndsAt: number | undefined
   private dwellRemaining: number | undefined
   private homingEndsAt: number | undefined
+  /** `silentHoming`: a `?` came during the cycle; answered when it ends. */
+  private reportAfterHoming = false
   /** The homing cycle's moves while homing (`$H`), for the position in `Home` reports. */
   private homingPath: readonly HomingMove[] | undefined
   private restoreEndsAt: number | undefined
   /** Door pin open (test hook); `0x84` alone has no pin, so the door counts as closed. */
   private doorAjar = false
   private doorAfterJog = false
+  /** Touch plate top (MPos Z); undefined = none. */
+  private plate: number | undefined
+  private probing: Probing | undefined
+  /** The last probe, for `$#` (`[PRB:x,y,z:flag]`). */
+  private prb: { readonly pos: Vec3; readonly ok: boolean } = { pos: zero, ok: false }
+  /** Fault hook: a hung controller answers nothing. */
+  private silent = false
 
   private spindle: { dir: SpindleDir; rpm: number } = { dir: 'off', rpm: 0 }
   private spindleSuspended = false
@@ -161,7 +202,10 @@ export class GrblEmulator {
     private readonly settings: Settings,
     private readonly tracing: boolean,
     position: Vec3,
+    private readonly silentHoming = false,
+    probePlate: number | undefined = undefined,
   ) {
+    this.plate = probePlate
     const s = settings
     this.planner = new Planner({
       get maxRate(): Vec3 {
@@ -183,7 +227,15 @@ export class GrblEmulator {
 
   static create(options: EmulatorOptions = {}): AppResult<GrblEmulator> {
     return Settings.create(options.settings ?? {}, options.homing ?? true).andThen((s) =>
-      Ok(new GrblEmulator(s, options.trace ?? true, options.position ?? zero)),
+      Ok(
+        new GrblEmulator(
+          s,
+          options.trace ?? true,
+          options.position ?? zero,
+          options.silentHoming ?? false,
+          options.probePlate,
+        ),
+      ),
     )
   }
 
@@ -200,6 +252,7 @@ export class GrblEmulator {
 
   /** Bytes from the sender, at the current time. */
   receive(bytes: Uint8Array): void {
+    if (this.silent) return
     for (const b of bytes) {
       this.receiveByte(b)
       this.noteState()
@@ -220,6 +273,7 @@ export class GrblEmulator {
       if (v !== undefined && (t === undefined || v < t)) t = v
     }
     if (this.exec) take(this.exec.startedAt + this.exec.profile.duration * 1000)
+    take(this.probeContactAt())
     take(this.dwellEndsAt)
     take(this.homingEndsAt)
     take(this.restoreEndsAt)
@@ -260,6 +314,37 @@ export class GrblEmulator {
     this.doorAjar = open
     if (open) this.door()
     this.noteState()
+  }
+
+  /**
+   * Test hook: lays the touch plate with its top at MPos Z `z`, or removes it (`undefined`: a probe
+   * then finds nothing). Takes effect for the next probe cycle (docs/architecture/grbl.md#probing).
+   */
+  setProbePlate(z: number | undefined): void {
+    this.plate = z
+  }
+
+  /**
+   * Fault hook: a limit switch closes (GRBL's limit pin interrupt): motion stops at once,
+   * `ALARM:1`, critical until a reset; the position counts as lost
+   * (docs/architecture/grbl.md#fault-injection).
+   */
+  triggerHardLimit(): void {
+    if (this.critical || this.silent) return
+    this.stopping = undefined
+    this.holdComplete = false
+    this.probing = undefined
+    this.dwellEndsAt = this.dwellRemaining = this.homingEndsAt = this.restoreEndsAt = undefined
+    if (this.homingPath !== undefined) this.mpos = this.position()
+    this.homingPath = undefined
+    this.criticalAlarm(1)
+    this.sample()
+    this.noteState()
+  }
+
+  /** Fault hook: a hung controller (true): bytes are dropped and nothing is answered. */
+  setSilent(silent: boolean): void {
+    this.silent = silent
   }
 
   // ── Bytes and lines ─────────────────────────────────────────────────────────────────────
@@ -306,7 +391,8 @@ export class GrblEmulator {
       (this.state === 'Hold' && this.holdComplete) ||
       this.state === 'Door' ||
       this.state === 'Home' ||
-      this.dwellEndsAt !== undefined
+      this.dwellEndsAt !== undefined ||
+      this.probing !== undefined
     )
   }
 
@@ -425,6 +511,8 @@ export class GrblEmulator {
           this.holdComplete = true
         }
         return true
+      case 'probe':
+        return check ? true : this.startProbe(s, cur.line)
       case 'programEnd':
         if (!check) {
           this.spindle = { dir: 'off', rpm: this.spindle.rpm }
@@ -506,6 +594,11 @@ export class GrblEmulator {
     }
     this.sample()
     if (this.stopping) return this.stopped()
+    if (this.probing !== undefined) {
+      // the probe move ended without the input changing
+      this.state = 'Idle'
+      return this.finishProbe(false)
+    }
     if (this.state === 'Jog') this.parser = { ...this.parser, position: this.mpos }
     if (this.state === 'Run' || this.state === 'Jog') this.state = 'Idle'
     this.run()
@@ -545,7 +638,100 @@ export class GrblEmulator {
     if (reason === 'door') this.spindleSuspended = true
     this.sample()
     if (reason === 'softLimit') return this.criticalAlarm(2)
+    if (reason === 'probe') {
+      this.planner.clear()
+      this.holdComplete = false
+      this.state = 'Idle'
+      return this.finishProbe(true)
+    }
     this.run()
+  }
+
+  // ── Probing ─────────────────────────────────────────────────────────────────────────────
+
+  /** Probe input: the tool tip at or below the plate. */
+  private probeClosed(at: Vec3): boolean {
+    return this.plate !== undefined && at[2] <= this.plate + 1e-9
+  }
+
+  /**
+   * mc_probe_cycle(): the planner is empty here. The input must start open (toward) or closed
+   * (away), else `ALARM:4`; then one move at the feed, watched for the input to change.
+   * Returns false while the cycle runs (the line's `ok` comes after it).
+   */
+  private startProbe(s: Extract<Action, { kind: 'probe' }>, line: number): boolean {
+    if (this.probeClosed(this.mpos) !== s.away) {
+      this.alarm(4)
+      return true
+    }
+    if (this.outsideSoftLimits(s.target)) {
+      this.softLimit()
+      return false
+    }
+    this.probing = { away: s.away, noError: s.noError }
+    const added = this.planner.add(this.mpos, {
+      target: s.target,
+      rapid: false,
+      feed: s.feed,
+      jog: false,
+      line,
+      lastOfLine: true,
+    })
+    if (!added) {
+      this.finishProbe(false)
+      return true
+    }
+    this.startMotion()
+    return false
+  }
+
+  /** When the probe input changes on the executing move, if it does (ms). */
+  private probeContactAt(): number | undefined {
+    const p = this.probing
+    const b = this.planner.blocks[0]
+    const e = this.exec
+    if (p === undefined || p.contact !== undefined || !b || !e || this.plate === undefined)
+      return undefined
+    const uz = b.unit[2]
+    const z0 = b.start[2]
+    let s: number
+    if (!p.away) {
+      if (uz >= 0) return undefined
+      s = (z0 - this.plate) / -uz
+    } else {
+      if (uz <= 0) return undefined
+      s = (this.plate - z0) / uz
+    }
+    if (s > e.profile.length + 1e-12) return undefined
+    return e.startedAt + timeAtDistance(e.profile, Math.max(0, s)) * 1000
+  }
+
+  /** The input changed: latch the position and stop like a motion cancel (decelerate). */
+  private probeContact(): void {
+    const p = this.probing
+    if (p === undefined) return
+    const at = this.position()
+    p.contact = [at[0], at[1], this.plate ?? at[2]]
+    this.beginStop('probe')
+  }
+
+  /** End of a probe cycle: sync the parser, `ALARM:5` on a miss (G38.2/G38.4), `[PRB]`, then the `ok`. */
+  private finishProbe(found: boolean): void {
+    const p = this.probing
+    this.probing = undefined
+    if (p === undefined) return
+    this.parser = { ...this.parser, position: this.mpos }
+    const pos = found && p.contact !== undefined ? p.contact : this.mpos
+    if (!found && !p.noError) this.alarm(5)
+    this.prb = { pos, ok: found }
+    this.emit(`[PRB:${this.coords(pos)}:${found ? 1 : 0}]`)
+    this.run()
+  }
+
+  /** A non-critical alarm (probe fail): Alarm state, `$X`/`$H` clear it. */
+  private alarm(code: number): void {
+    this.state = 'Alarm'
+    this.emit(`ALARM:${code}`)
   }
 
   private outsideSoftLimits(t: Vec3): boolean {
@@ -578,6 +764,8 @@ export class GrblEmulator {
 
   private handleEvent(): void {
     const t = this.now
+    const contact = this.probeContactAt()
+    if (contact !== undefined && contact <= t) return this.probeContact()
     if (this.exec && this.exec.startedAt + this.exec.profile.duration * 1000 <= t) {
       return this.onBlockEnd()
     }
@@ -598,6 +786,10 @@ export class GrblEmulator {
       this.parser = { ...this.parser, position: this.mpos }
       this.state = 'Idle'
       this.sample()
+      if (this.reportAfterHoming) {
+        this.reportAfterHoming = false
+        this.statusReport()
+      }
       return this.run()
     }
     if (this.restoreEndsAt !== undefined && this.restoreEndsAt <= t) {
@@ -790,7 +982,9 @@ export class GrblEmulator {
     this.lineComment = this.lineSemicolon = this.lineOverflow = false
     this.dwellEndsAt = this.dwellRemaining = this.homingEndsAt = this.restoreEndsAt = undefined
     this.homingPath = undefined
+    this.reportAfterHoming = false
     this.doorAfterJog = false
+    this.probing = undefined
     this.spindle = { dir: 'off', rpm: 0 }
     this.spindleSuspended = this.spindleStopOverride = false
     this.restoreOverrides()
@@ -802,6 +996,7 @@ export class GrblEmulator {
   }
 
   private banner(): void {
+    if (this.silent) return
     this.output.push('\r\n')
     this.emit(BANNER)
     if (this.state === 'Alarm') this.emit("[MSG:'$H'|'$X' to unlock]")
@@ -987,6 +1182,10 @@ export class GrblEmulator {
 
   private statusReport(): void {
     if (this.critical) return
+    if (this.silentHoming && this.state === 'Home') {
+      this.reportAfterHoming = true
+      return
+    }
     const mask = this.settings.get(10)
     const pos = this.position()
     const busy = ['Home', 'Run', 'Hold', 'Jog', 'Door'].includes(this.state)
@@ -1027,13 +1226,17 @@ export class GrblEmulator {
     const lines = [`[G54:${this.coords(this.wco)}]`]
     for (const g of ['G55', 'G56', 'G57', 'G58', 'G59', 'G28', 'G30', 'G92'])
       lines.push(`[${g}:${z}]`)
-    lines.push(`[TLO:${this.inches() ? '0.0000' : '0.000'}]`, `[PRB:${z}:0]`)
+    lines.push(
+      `[TLO:${this.inches() ? '0.0000' : '0.000'}]`,
+      `[PRB:${this.coords(this.prb.pos)}:${this.prb.ok ? 1 : 0}]`,
+    )
     return lines
   }
 
   // ── Output and trace ────────────────────────────────────────────────────────────────────
 
   private emit(text: string): void {
+    if (this.silent) return
     this.output.push(`${text}\r\n`)
     if (this.tracing) this.rec.responses.push({ t: this.now, text })
   }

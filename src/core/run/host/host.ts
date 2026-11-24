@@ -22,16 +22,20 @@ import { ScaledClock, type TimerHost, type TimeScale } from '../clock'
 import { GrblEmulator } from '../grbl/emulator/emulator'
 import {
   GrblSender,
+  OVERRIDE,
   preflight,
   REALTIME,
+  type RealtimeCommand,
   type PhaseChange,
   type RunPhase,
   type SenderEvent,
   type ToolChangeInfo,
 } from '../grbl/sender'
 import { envelopeOf, travelViolation, type Envelope, type TravelViolation } from '../grbl/envelope'
-import { POSITION_ALARMS } from '../grbl/status'
+import { alarmText, POSITION_ALARMS } from '../grbl/status'
 import { VirtualGrblTransport } from '../grbl/virtual-transport'
+import { sortPorts, type SerialPorts } from '../serial'
+import type { ControllerTransport } from '../transport'
 import {
   AXES,
   MainMessage,
@@ -40,9 +44,19 @@ import {
   type HostMessage,
   type HostStatus,
   type MachineAction,
+  type ConnectTarget,
+  type OverrideStep,
   type MainRequest,
+  type SerialTarget,
+  type TargetKind,
   type VirtualTarget,
 } from './protocol'
+
+/**
+ * Banner wait on a serial port: opening it resets most Arduino-based boards, whose bootloader
+ * needs 1–2 s before GRBL prints its banner (docs/modes/run-machine.md#connect).
+ */
+export const SERIAL_BANNER_MS = 3000
 
 export interface MachineHostOptions {
   readonly timers: TimerHost
@@ -52,6 +66,8 @@ export interface MachineHostOptions {
   readonly throttleMs?: number
   /** Called after `disconnect` was answered: the process may exit. */
   readonly onDisconnected?: () => void
+  /** Serial ports (Node `serialport` in the host entries, a loopback in tests); absent = none. */
+  readonly serial?: SerialPorts
 }
 
 export interface MachineHost {
@@ -65,6 +81,8 @@ interface Job {
   readonly jobId: string
   phase: RunPhase
   toolChange?: ToolChangeInfo | undefined
+  /** DF69: the level (mm, < 0) of the tool run's Z reference surface, from its tool change; 0 = top. */
+  level: number
   readonly startedAt: number
   /** The start's checks passed and the sender streams: a stop goes to the sender. */
   streaming: boolean
@@ -78,11 +96,19 @@ interface Job {
 }
 
 interface Connection {
+  readonly target: TargetKind
+  readonly port?: { readonly path: string; readonly baud: number } | undefined
   readonly machineKey: string
   readonly clock: ScaledClock
   readonly sender: GrblSender
   homed: boolean
   workZero: Vec3
+  /**
+   * DF69: the level (mm, setup frame, ≤ 0) of the surface G54 Z was last set on: the run's
+   * reference surface when set during a run, else the stock top (0)
+   * (docs/modes/z-reference.md#dfyom-run).
+   */
+  zeroLevel: number
   alarm?: { readonly code: number; readonly text: string } | undefined
   lastMessage?: string | undefined
   job?: Job | undefined
@@ -93,6 +119,66 @@ interface Connection {
    * while jogs queue. Cleared by anything else that moves or questions the position.
    */
   jogEnd?: Vec3 | undefined
+  /** The virtual machine's emulator (its touch plate is laid before each probe, M4). */
+  readonly emulator?: GrblEmulator | undefined
+  /** `$13=1`: GRBL reports in inch. */
+  readonly inches: boolean
+  /** gCode that restores the modal state a failed probe left (sent after `$X`/`$H`, M4). */
+  restoreModes?: readonly string[] | undefined
+}
+
+type ProbeZ = Extract<MachineAction, { kind: 'probeZ' }>
+type OverrideAction = Extract<MachineAction, { kind: 'override' }>
+
+/** Feed and spindle steps → their real-time bytes; rapids by percent. */
+const OVERRIDE_BYTES: Readonly<
+  Record<'feed' | 'spindle', Readonly<Record<OverrideStep, RealtimeCommand>>>
+> = {
+  feed: {
+    reset: OVERRIDE.feedReset,
+    '+10': OVERRIDE.feedPlus10,
+    '-10': OVERRIDE.feedMinus10,
+    '+1': OVERRIDE.feedPlus1,
+    '-1': OVERRIDE.feedMinus1,
+  },
+  spindle: {
+    reset: OVERRIDE.spindleReset,
+    '+10': OVERRIDE.spindlePlus10,
+    '-10': OVERRIDE.spindleMinus10,
+    '+1': OVERRIDE.spindlePlus1,
+    '-1': OVERRIDE.spindleMinus1,
+  },
+}
+const RAPID_BYTES: Readonly<Record<string, RealtimeCommand>> = {
+  '100': OVERRIDE.rapid100,
+  '50': OVERRIDE.rapid50,
+  '25': OVERRIDE.rapid25,
+}
+
+/** `[PRB:x,y,z:flag]` → the contact (report units) and whether the probe touched. */
+function probeResult(lines: readonly string[]): { pos: Vec3; ok: boolean } | undefined {
+  for (const l of lines) {
+    const m = /^\[PRB:([-\d.]+),([-\d.]+),([-\d.]+):([01])\]$/.exec(l)
+    if (m) return { pos: [Number(m[1]), Number(m[2]), Number(m[3])], ok: m[4] === '1' }
+  }
+  return undefined
+}
+
+/**
+ * The gCode that puts back what a probe changes in the modal state `$G` reported: units,
+ * distance mode and motion (`G1 F…` for a feed motion with a feed set, else `G0`: GRBL cannot set
+ * `G2`/`G3` without an arc). Docs: docs/modes/run-machine.md#probing-and-re-zero-m4
+ */
+function modalRestore(words: readonly string[], inches: boolean): string[] {
+  const has = (w: string) => words.includes(w)
+  const motion = words.find((w) => /^G(0|1|2|3|38\.[2-5])$/.test(w)) ?? 'G0'
+  const f = Number(words.find((w) => w.startsWith('F'))?.slice(1) ?? '0')
+  const feed = (Number.isFinite(f) ? f : 0) * (inches ? 25.4 : 1)
+  const feedMotion = motion === 'G1' || motion === 'G2' || motion === 'G3'
+  const move = feedMotion && feed > 0 ? `G1 F${fmt(feed)}` : 'G0'
+  const lines = [`G21 ${has('G91') ? 'G91' : 'G90'} ${move}`]
+  if (has('G20')) lines.push('G20')
+  return lines
 }
 
 const fmt = (v: number) => {
@@ -167,6 +253,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
       feed: s?.feed ?? 0,
       spindle: s?.spindle ?? 0,
       ...(s?.buffer === undefined ? {} : { buffer: s.buffer }),
+      ...(s?.overrides === undefined ? {} : { overrides: s.overrides }),
       ...(conn.alarm === undefined ? {} : { alarm: conn.alarm }),
       ...(conn.lastMessage === undefined ? {} : { lastMessage: conn.lastMessage }),
       ...(conn.envelope === undefined
@@ -180,6 +267,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
             },
           }),
       timeScale: conn.clock.scale,
+      ...(conn.zeroLevel === 0 ? {} : { zeroLevel: conn.zeroLevel }),
       ...(job === undefined
         ? {}
         : {
@@ -210,9 +298,38 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     return fail('run.notConnected', 'no machine connection', { where: 'machineHost' })
   }
 
-  async function connect(target: VirtualTarget): Promise<AppResult<ConnectedInfo>> {
+  async function connect(target: ConnectTarget): Promise<AppResult<ConnectedInfo>> {
     if (conn !== undefined || connecting)
       return fail('run.busy', 'already connected', { where: 'machineHost.connect' })
+    return target.kind === 'serial' ? connectSerial(target) : connectVirtual(target)
+  }
+
+  /** A real controller on a serial port (docs/modes/run-machine.md#connect). */
+  async function connectSerial(target: SerialTarget): Promise<AppResult<ConnectedInfo>> {
+    const where = 'machineHost.connect'
+    if (opts.serial === undefined)
+      return fail('machine.connection', 'serial ports are not available here', { where })
+    connecting = true
+    const opened = await opts.serial.open(target.path, target.baud)
+    if (opened.isErr()) {
+      connecting = false
+      return Err(opened.unwrapErr().withContext(where, { path: target.path }))
+    }
+    const transport = opened.unwrap()
+    // a real controller runs in real time (decision 3 is virtual-only)
+    const clock = new ScaledClock(timers, { scale: 1 })
+    const sender = new GrblSender(transport, clock, {
+      timers,
+      log,
+      bannerTimeoutMs: SERIAL_BANNER_MS,
+    })
+    clock.setBusy(() => sender.needsStatus)
+    const port = { path: target.path, baud: target.baud }
+    // never assumed homed: GRBL with $22=1 starts locked, and the position is unknown
+    return finishConnect(target, clock, sender, transport, false, port)
+  }
+
+  async function connectVirtual(target: VirtualTarget): Promise<AppResult<ConnectedInfo>> {
     const settings: Record<number, number> = {}
     for (const [k, v] of Object.entries(target.settings)) settings[Number(k)] = v
     const created = GrblEmulator.create({
@@ -228,19 +345,43 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     const transport = new VirtualGrblTransport(emu, clock)
     const sender = new GrblSender(transport, clock, { timers, log })
     clock.setBusy(() => emu.nextEventAt() !== undefined || sender.needsStatus)
+    const c = await finishConnect(target, clock, sender, transport, !target.homing, undefined, emu)
+    if (c.isErr() || target.prepare === undefined || conn === undefined) return c
+    const prepared = await prepare(conn, target.prepare.workZero)
+    if (prepared.isErr()) return Err(prepared.unwrapErr())
+    status.now()
+    return Ok({ ...c.unwrap(), workZero: conn.workZero, homed: conn.homed })
+  }
+
+  /** The handshake and the connection's bookkeeping, for every target. */
+  async function finishConnect(
+    target: ConnectTarget,
+    clock: ScaledClock,
+    sender: GrblSender,
+    transport: ControllerTransport,
+    homed: boolean,
+    port: { path: string; baud: number } | undefined,
+    emulator?: GrblEmulator,
+  ): Promise<AppResult<ConnectedInfo>> {
     const info = await sender.connect()
     connecting = false
     if (info.isErr()) {
       clock.dispose()
+      if (target.kind === 'serial') await transport.close()
       return Err(info.unwrapErr())
     }
     const c: Connection = {
+      target: target.kind,
+      ...(port === undefined ? {} : { port }),
       machineKey: target.machineKey,
       clock,
       sender,
-      homed: !target.homing,
+      homed,
       workZero: info.unwrap().workZero,
+      zeroLevel: 0,
       envelope: envelopeOf(info.unwrap().settings),
+      emulator,
+      inches: info.unwrap().settings['13'] === 1,
     }
     conn = c
     lastPosted = undefined
@@ -252,15 +393,22 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     })
     sender.onEvent((e) => onSenderEvent(c, e))
     log.info(
-      { target: 'virtual', version: info.unwrap().version, timeScale: target.timeScale },
+      {
+        target: target.kind,
+        version: info.unwrap().version,
+        timeScale: clock.scale,
+        ...(port === undefined ? {} : { path: port.path, baud: port.baud }),
+      },
       'connected',
     )
-    if (target.prepare !== undefined) {
-      const prepared = await prepare(c, target.prepare.workZero)
-      if (prepared.isErr()) return Err(prepared.unwrapErr())
-    }
     status.now()
-    return Ok({ ...info.unwrap(), target: 'virtual', workZero: c.workZero, homed: c.homed })
+    return Ok({
+      ...info.unwrap(),
+      target: target.kind,
+      ...(port === undefined ? {} : { port }),
+      workZero: c.workZero,
+      homed: c.homed,
+    })
   }
 
   /** Decision 7: home at `max` speed, then G54 at the given MPos. */
@@ -276,6 +424,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
       `G21 G10 L2 P1 X${fmt(workZero[0])} Y${fmt(workZero[1])} Z${fmt(workZero[2])}`,
     )
     if (set.isErr()) return Err(set.unwrapErr())
+    c.zeroLevel = 0
     return (await readWorkZero(c)).map(() => undefined)
   }
 
@@ -298,6 +447,8 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     c.homed = true
     c.alarm = undefined
     log.info('homing done')
+    const restored = await restoreModes(c)
+    if (restored.isErr()) return restored
     return (await readWorkZero(c)).map(() => undefined)
   }
 
@@ -316,10 +467,17 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
           return stateError(`cannot home in state ${state}`, state)
         return home(c)
       case 'unlock': {
-        if (c.job !== undefined) return stateError('cannot unlock during a run', state)
+        // at a tool-change wait only a probe alarm can be pending (run-machine.md#probing-and-re-zero-m4)
+        if (jobBusy) return stateError('cannot unlock during a run', state)
         const r = await c.sender.command('$X')
-        if (r.isOk()) c.alarm = undefined
-        return r.map(() => undefined)
+        if (r.isErr()) return Err(r.unwrapErr())
+        c.alarm = undefined
+        const restored = await restoreModes(c)
+        if (restored.isErr()) return restored
+        // the next action sees Idle, not the Alarm of the last report
+        await c.sender.freshStatus()
+        status.now()
+        return Ok(undefined)
       }
       case 'jog': {
         if (jobBusy || (state !== 'Idle' && !state.startsWith('Jog')))
@@ -329,6 +487,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
             where: 'machineHost.jog',
             issues: [{ path: ['to'], rule: 'oneOf', message: 'give to or by' }],
           })
+        if (action.continuous === true) return jogToEdge(c, action.by ?? [0, 0, 0], action.feed)
         const v = action.to ?? action.by ?? [0, 0, 0]
         const mode = action.to !== undefined ? 'G53 G90' : 'G91'
         const line = `$J=G21 ${mode} X${fmt(v[0])} Y${fmt(v[1])} Z${fmt(v[2])} F${fmt(action.feed)}`
@@ -368,12 +527,175 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         })
         const set = await c.sender.command(`G21 G10 L20 P1 ${words.join(' ')}`)
         if (set.isErr()) return Err(set.unwrapErr())
+        if (action.axes.includes('z')) c.zeroLevel = c.job?.level ?? 0
         return readWorkZero(c)
       }
       case 'reset':
         c.jogEnd = undefined
         return c.sender.realtime(REALTIME.reset)
+      case 'probeZ':
+        return probeZ(c, action)
+      case 'override':
+        return override(c, action)
     }
+  }
+
+  /** After a probe alarm: the modal state the probe changed, once GRBL takes gCode again. */
+  async function restoreModes(c: Connection): Promise<AppResult<void>> {
+    const lines = c.restoreModes
+    c.restoreModes = undefined
+    for (const l of lines ?? []) {
+      const r = await c.sender.command(l)
+      if (r.isErr()) return Err(r.unwrapErr())
+    }
+    return Ok(undefined)
+  }
+
+  /**
+   * Z touch plate (docs/modes/run-machine.md#probing-and-re-zero-m4): `G38.2` down from here, G54 Z
+   * so the contact is at Z = plate thickness, retract, restore the modal state.
+   */
+  async function probeZ(c: Connection, a: ProbeZ): Promise<AppResult<unknown>> {
+    const where = 'machineHost.probeZ'
+    const state = machineState(c)
+    if (c.job !== undefined && c.job.phase !== 'toolChange')
+      return stateError('cannot probe during a run', state)
+    if (state !== 'Idle') return stateError(`cannot probe in state ${state}`, state)
+    const s = c.sender.status
+    if (s === undefined) return stateError('no status report yet', state)
+    if (s.spindle > 0)
+      return fail('run.state', 'the spindle is on: stop it before probing', {
+        where,
+        data: { state, spindle: s.spindle },
+        issues: [{ path: ['spindle'], rule: 'spindleOn', message: 'turn the spindle off' }],
+      })
+    let distance = a.maxTravel
+    const env = c.envelope
+    if (env?.softLimits === true) {
+      // never target below the travel: GRBL would raise a soft-limit alarm before moving
+      distance = Math.min(distance, s.mpos[2] + env.travel[2] - 0.01)
+      if (distance < 1)
+        return fail('run.travel', 'Z is at the bottom of its travel: no room to probe', {
+          where,
+          data: { axis: 'z', target: s.mpos[2], min: -env.travel[2], max: 0, atEdge: true },
+        })
+    }
+    if (c.emulator !== undefined) {
+      // the virtual plate lies on the surface to zero on (the run's Z reference, DF69; else the
+      // stock top) below the work zero's stock top, else just below the tool
+      const top = c.workZero[2] - c.zeroLevel + (c.job?.level ?? 0) + a.plateThickness
+      c.emulator.setProbePlate(top < s.mpos[2] - 1e-3 ? top : s.mpos[2] - 10)
+    }
+    c.jogEnd = undefined
+    const gc = await c.sender.command('$G')
+    if (gc.isErr()) return Err(gc.unwrapErr())
+    const modes = gc.unwrap().find((l) => l.startsWith('[GC:'))
+    const restore = modalRestore(modes?.slice(4, -1).split(' ') ?? [], c.inches)
+    let alarm: number | undefined
+    const off = c.sender.onEvent((e) => {
+      if (e.kind === 'alarm') alarm = e.code
+    })
+    const ms = (distance / a.feed) * 60_000 + 10_000
+    log.info({ distance, feed: a.feed }, 'probing Z')
+    const probed = await c.sender.command(
+      `G21 G90 G38.2 Z${fmt(s.wpos[2] - distance)} F${fmt(a.feed)}`,
+      { timeoutMs: ms },
+    )
+    off()
+    if (probed.isErr()) return Err(probed.unwrapErr().withContext(where))
+    const k = c.inches ? 25.4 : 1
+    const result = probeResult(probed.unwrap())
+    if (alarm !== undefined || result?.ok !== true) {
+      // GRBL refuses gCode in Alarm: the modal state goes back after the unlock
+      c.restoreModes = restore
+      const code = alarm ?? 5
+      return fail('machine.alarm', `ALARM:${code} ${alarmText(code)}`, {
+        where,
+        data: { code, text: alarmText(code) },
+      })
+    }
+    const contact: Vec3 = [result.pos[0] * k, result.pos[1] * k, result.pos[2] * k]
+    for (const line of [
+      `G21 G10 L2 P1 Z${fmt(contact[2] - a.plateThickness)}`,
+      `G21 G53 G0 Z${fmt(Math.min(contact[2] + a.retract, 0))}`,
+      ...restore,
+      // the ok of a dwell waits for the retract: `$#` needs Idle
+      'G4 P0',
+    ]) {
+      const r = await c.sender.command(line)
+      if (r.isErr()) return Err(r.unwrapErr().withContext(where))
+    }
+    c.zeroLevel = c.job?.level ?? 0
+    const wz = await readWorkZero(c)
+    if (wz.isErr()) return Err(wz.unwrapErr())
+    log.info({ contact, workZero: wz.unwrap() }, 'probed Z')
+    return Ok({ workZero: wz.unwrap(), contact })
+  }
+
+  /** One override byte (docs/modes/run-machine.md#overrides-m6); answers the overrides reported. */
+  async function override(c: Connection, a: OverrideAction): Promise<AppResult<unknown>> {
+    const where = 'machineHost.override'
+    const byte =
+      a.which === 'rapid'
+        ? RAPID_BYTES[a.action]
+        : (OVERRIDE_BYTES[a.which] as Partial<Record<string, RealtimeCommand>>)[a.action]
+    if (byte === undefined)
+      return fail('input.malformed', `${a.action} is not a ${a.which} override`, {
+        where,
+        issues: [
+          {
+            path: ['action'],
+            rule: 'overrideStep',
+            message: a.which === 'rapid' ? 'give 100, 50 or 25' : 'give reset, +10, -10, +1 or -1',
+          },
+        ],
+      })
+    if (c.alarm !== undefined && (c.alarm.code === 1 || c.alarm.code === 2))
+      return stateError('the controller is in a critical alarm: reset it first', machineState(c))
+    const sent = c.sender.realtime(byte)
+    if (sent.isErr()) return sent
+    // GRBL reports `Ov` on the next status after a change
+    const fresh = await c.sender.freshStatus()
+    status.now()
+    return Ok({ overrides: fresh?.overrides ?? c.sender.status?.overrides })
+  }
+
+  /**
+   * Continuous jog (hold to jog, docs/modes/run-machine.md#machine-readiness-m3): an absolute
+   * machine move to the travel edge in the direction of `by` (one axis), ended by a jog cancel.
+   * The exact edge (`0` or `−travel`) never trips GRBL's soft-limit check on rounding.
+   */
+  async function jogToEdge(c: Connection, by: Vec3, feed: number): Promise<AppResult<unknown>> {
+    const where = 'machineHost.jog'
+    const axes = [0, 1, 2].filter((i) => by[i] !== 0)
+    if (axes.length !== 1)
+      return fail('input.malformed', 'a continuous jog moves exactly one axis', {
+        where,
+        issues: [{ path: ['by'], rule: 'oneAxis', message: 'give one non-zero axis' }],
+      })
+    const i = axes[0]!
+    const env = c.envelope
+    if (env === undefined) return stateError('the machine travel is not known yet', machineState(c))
+    const edge = by[i]! > 0 ? 0 : -env.travel[i]!
+    const base = c.jogEnd ?? c.sender.status?.mpos
+    const axis = AXES[i]!
+    if (base !== undefined && (by[i]! > 0 ? base[i]! >= edge - 1e-3 : base[i]! <= edge + 1e-3))
+      return fail('run.travel', `${axis.toUpperCase()} is at the end of its travel`, {
+        where,
+        data: { axis, target: base[i]!, min: -env.travel[i]!, max: 0, atEdge: true },
+      })
+    const r = await c.sender.command(
+      `$J=G21 G53 G90 ${axis.toUpperCase()}${fmt(edge)} F${fmt(feed)}`,
+    )
+    if (r.isErr()) {
+      const e = r.unwrapErr()
+      if (e.code === 'machine.error' && e.frames[0]?.data?.['code'] === 15)
+        return travelError(undefined)
+      return Err(e)
+    }
+    const at = (k: number) => (k === i ? edge : (base?.[k] ?? 0))
+    c.jogEnd = base === undefined ? undefined : [at(0), at(1), at(2)]
+    return Ok(undefined)
   }
 
   /** `run.travel`: a jog outside `[−travel, 0]`, in words (docs/modes/run.md DF33). */
@@ -399,7 +721,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
   async function jobStart(
     jobId: string,
     program: { lines: string[]; sections: { fromLine: number; label: string }[] },
-    expect: { workZero: Vec3; machineKey: string; target: 'virtual' },
+    expect: { workZero: Vec3; machineKey: string; target: TargetKind },
   ): Promise<AppResult<void>> {
     const where = 'machineHost.jobStart'
     const c = conn
@@ -411,6 +733,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     const job: Job = {
       jobId,
       phase: 'streaming',
+      level: 0,
       startedAt: c.clock.now(),
       streaming: false,
       stopRequested: false,
@@ -429,7 +752,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     c: Connection,
     job: Job,
     program: { lines: string[]; sections: { fromLine: number; label: string }[] },
-    expect: { workZero: Vec3; machineKey: string; target: 'virtual' },
+    expect: { workZero: Vec3; machineKey: string; target: TargetKind },
   ): Promise<AppResult<void>> {
     const where = 'machineHost.jobStart'
     const jobId = job.jobId
@@ -447,7 +770,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         data: { state: machineState(c), ...data },
         issues: [{ path: ['expect'], rule, message }],
       })
-    if (expect.target !== 'virtual')
+    if (expect.target !== c.target)
       return refuse(mismatch('targetMismatch', 'the job was checked for another target', {}))
     if (expect.machineKey !== c.machineKey)
       return refuse(
@@ -482,6 +805,8 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         phase: (p: PhaseChange) => {
           job.phase = p.phase
           job.toolChange = p.toolChange
+          // DF69: the tool run from this tool change on is in its surface's Z
+          if (p.phase === 'toolChange') job.level = p.toolChange?.level ?? 0
           if (p.phase === 'toolChange') log.debug({ tool: p.toolChange?.n }, 'tool change')
           post({
             type: 'phase',
@@ -574,7 +899,9 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     conn = undefined
     status.cancel()
     progress.cancel()
-    const closed = await c.sender.close()
+    // disconnect = reset on a real machine: no queued jog or line runs on after we let go
+    // (docs/modes/run.md#6-lost-connection-disconnect-and-reconnect)
+    const closed = await c.sender.close({ reset: c.target === 'serial' })
     c.clock.dispose()
     log.info('disconnected')
     return closed
@@ -601,6 +928,9 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         break
       case 'reset':
         c.jogEnd = undefined
+        // a controller that restarted on its own (power glitch, USB reset) lost its position:
+        // home again before a run (docs/modes/run-machine.md#real-machine-run-rules)
+        if (!e.expected) c.homed = false
         post({ type: 'event', kind: 'reset', data: { expected: e.expected } })
         // GRBL keeps G54 over a reset; read it again anyway (docs/modes/run-v0.1.md#work-zero-and-the-soft-limit-check)
         if (c.job === undefined || c.job.phase === 'stopping')
@@ -637,9 +967,24 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         return jobStart(m.jobId, m.program, m.expect)
       case 'jobControl':
         return jobControl(m.jobId, m.action, m.expect)
+      case 'listPorts': {
+        if (opts.serial === undefined)
+          return fail('machine.connection', 'serial ports are not available here', {
+            where: 'machineHost.listPorts',
+          })
+        return (await opts.serial.list()).map(sortPorts)
+      }
       case 'timeScale': {
         const c = conn
         if (c === undefined) return notConnected()
+        if (c.target !== 'virtual')
+          return fail('run.state', 'the time scale is for the virtual machine only', {
+            where: 'machineHost.timeScale',
+            data: { state: machineState(c) },
+            issues: [
+              { path: ['scale'], rule: 'virtualOnly', message: 'a real machine runs at 1×' },
+            ],
+          })
         c.clock.setScale(m.scale as TimeScale)
         log.debug({ timeScale: m.scale }, 'time scale')
         status.now()

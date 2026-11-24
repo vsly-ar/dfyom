@@ -52,9 +52,24 @@ export function settingFieldLabel(field: string): string {
       return m.arcTolerance
     case 'spindle':
       return axis === 'minSpeed' ? m.minSpeed : m.maxSpeed
+    case 'pullOff':
+      return m.pullOff
+    case 'softLimits':
+      return m.softLimits
+    case 'homingCorner':
+      return m.homingCorner
     default:
       return field
   }
+}
+
+/** A diff value in words: the homing corner's name, soft limits on/off, else as given. */
+export function settingValueText<T extends string | null>(field: string, v: T): string | T {
+  if (v === null) return v
+  if (field === 'homingCorner' && v in m.homingCorners)
+    return m.homingCorners[v as keyof typeof m.homingCorners]
+  if (field === 'softLimits') return t.onOff[v] ?? v
+  return v
 }
 
 export function GrblImportDialog({
@@ -225,7 +240,7 @@ function DiffView({
             {diff.changes.map((c) => (
               <li key={c.setting}>
                 <Checkbox
-                  label={`${settingFieldLabel(c.field)} (${c.setting}): ${c.from ?? t.notSet} → ${c.to}`}
+                  label={`${settingFieldLabel(c.field)} (${c.setting}): ${settingValueText(c.field, c.from) ?? t.notSet} → ${settingValueText(c.field, c.to)}`}
                   checked={accepted.has(c.setting)}
                   onCheckedChange={(on) => onToggle(c.setting, c.together, on === true)}
                 />

@@ -140,9 +140,19 @@ export function stopGate(s: RunStatus): Gate {
 export function actionText(e: AppErrorData, units: UnitSystem): string | undefined {
   if (e.code !== 'run.travel') return undefined
   const d = e.frames[0]?.data as
-    { axis?: string; target?: number; min?: number; max?: number } | undefined
+    { axis?: string; target?: number; min?: number; max?: number; atEdge?: boolean } | undefined
   if (d?.axis === undefined || d.target === undefined || d.min === undefined || d.max === undefined)
     return m.travelUnknown
+  if (d.atEdge === true) {
+    // a continuous jog from the end of the travel (docs/modes/run-machine.md#machine-readiness-m3)
+    const atMax = Math.abs(d.target - d.max) <= Math.abs(d.target - d.min)
+    return m.travelAtEdge(
+      d.axis.toUpperCase(),
+      atMax ? 'max' : 'min',
+      formatLength(atMax ? d.max : d.min, units),
+      m.dro.units[units],
+    )
+  }
   const high = d.target > d.max
   return m.travel(
     d.axis.toUpperCase(),
@@ -168,6 +178,9 @@ export function formatFeed(mmPerMin: number, units: UnitSystem): string {
   return units === 'inch' ? (mmPerMin / MM_PER_INCH).toFixed(1) : mmPerMin.toFixed(0)
 }
 
+/** How the jog pad jogs: one step per click, or while a button is held (M3). */
+export type JogMode = 'step' | 'continuous'
+
 /** Jog steps per unit system, in the project unit (inch values are converted to mm to send). */
 export const JOG_STEPS: Readonly<Record<UnitSystem, readonly string[]>> = {
   mm: ['0.1', '1', '10', '100'],
@@ -177,3 +190,32 @@ export const JOG_STEPS: Readonly<Record<UnitSystem, readonly string[]>> = {
 export function stepToMm(step: string, units: UnitSystem): number {
   return Number(step) * (units === 'inch' ? MM_PER_INCH : 1)
 }
+
+type Xyz = readonly [number, number, number]
+
+/** Within this (mm) of the spot in X and Y the machine is there: no move offered. */
+const AT_SPOT_MM = 0.01
+
+/**
+ * The jogs (machine coordinates, mm) of "Move to touch-off spot" at a tool-change wait (DF69,
+ * docs/modes/z-reference.md#dfyom-run): up to the setup's clearance height if lower (never down),
+ * then X Y to the spot at that height. The clearance is reckoned from the stock top of the current
+ * work zero (`zeroLevel`) and capped at the machine top. Empty: already at the spot. Pure.
+ */
+export function touchOffMoves(
+  s: Pick<RunStatus, 'mpos' | 'workZero' | 'zeroLevel'>,
+  at: readonly [number, number],
+  clearance: number,
+): Xyz[] {
+  const [x, y, z] = s.mpos
+  const tx = s.workZero[0] + at[0]
+  const ty = s.workZero[1] + at[1]
+  if (Math.abs(x - tx) <= AT_SPOT_MM && Math.abs(y - ty) <= AT_SPOT_MM) return []
+  const safe = Math.min(s.workZero[2] - (s.zeroLevel ?? 0) + clearance, 0)
+  const up = Math.max(z, safe)
+  return [...(up > z + 1e-6 ? [[x, y, up] as Xyz] : []), [tx, ty, up]]
+}
+
+/** A tool change's surface without its level ("Facing 1 floor, 0.50 below …" → "Facing 1 floor"). */
+export const surfaceName = (surface: string): string =>
+  surface.replace(/, [\d.]+ below the stock top$/, '')

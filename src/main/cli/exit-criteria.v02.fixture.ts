@@ -413,6 +413,8 @@ export async function exitCriteriaV02Flow(call: Call, dir: string): Promise<Flow
         name: next.name,
         direction: next.direction ?? '+z',
         rotation: 0,
+        // the part corner at the work zero (hardening M7)
+        corner: expect.any(String),
       })
     setupId = ended.value.next?.setupId
     const after = (await ok<RunStatus>('run.status.get')).value
