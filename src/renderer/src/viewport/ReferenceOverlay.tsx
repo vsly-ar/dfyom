@@ -1,6 +1,6 @@
 // The Reference panel's read-outs on the ghost (DF60 P1 follow-ups): the fitted section loops as
 // `--vp-selected` lines (1.5 px) at the section plane, the sharp inside corners as small
-// `--warning` rings in that plane, and the level row under the pointer as its faces in
+// `--warning` rings in that plane, the holes found (P3) as `--vp-selected` rings at their mouths, and the level row under the pointer as its faces in
 // `--vp-hover` (drawn with the ghost's matrix). Drawn over everything, never pickable; it fades
 // in like the ghost. The caller computes the geometry (ADR 0010).
 // Doc: docs/conventions/ui.md#reference-tools-df60
@@ -25,6 +25,8 @@ export interface ReferenceOverlayView {
   readonly lines: Float32Array
   /** Sharp inside corners (part frame, mm). */
   readonly corners: readonly Vec3[]
+  /** Holes found on the reference (DF60 P3): ring centres at their mouths and radii (mm). */
+  readonly holes?: readonly { readonly at: Vec3; readonly radius: number }[]
   /** The section plane's axes (part frame), for the corner rings. */
   readonly axes: { readonly u: Vec3; readonly v: Vec3 }
   /** The hovered level's triangles (source units) and the ghost's model matrix, or null. */
@@ -56,7 +58,7 @@ export function ReferenceOverlay({
 }): React.JSX.Element {
   const invalidate = useThree((s) => s.invalidate)
   useEffect(() => invalidate(), [overlay, invalidate])
-  const { lines, corners, axes, highlight } = overlay
+  const { lines, corners, holes, axes, highlight } = overlay
   const points = useMemo(() => {
     const out: [number, number, number][] = []
     for (let i = 0; i + 5 < lines.length; i += 6)
@@ -82,6 +84,22 @@ export function ReferenceOverlay({
       ),
     [corners, axes, ringSize],
   )
+  const holeRings = useMemo(
+    () =>
+      (holes ?? []).map(({ at, radius }) =>
+        Array.from({ length: 49 }, (_, i) => {
+          const a = (i / 48) * 2 * Math.PI
+          const c = radius * Math.cos(a)
+          const s = radius * Math.sin(a)
+          return [0, 1, 2].map((k) => at[k]! + axes.u[k]! * c + axes.v[k]! * s) as [
+            number,
+            number,
+            number,
+          ]
+        }),
+      ),
+    [holes, axes],
+  )
   const selected = useMemo(() => colour(palette.selected), [palette])
   const warning = useMemo(() => colour(palette.warning), [palette])
   return (
@@ -105,6 +123,17 @@ export function ReferenceOverlay({
           lineWidth={1.5}
           depthTest={false}
           renderOrder={7}
+          raycast={noRaycast}
+        />
+      ))}
+      {holeRings.map((r, i) => (
+        <Line
+          key={`hole${i}`}
+          points={r}
+          color={selected}
+          lineWidth={1.5}
+          depthTest={false}
+          renderOrder={6}
           raycast={noRaycast}
         />
       ))}

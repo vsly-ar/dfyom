@@ -2,7 +2,7 @@
 // levels and section summaries in the face frame, errors), `design.shape.import { from }` (the
 // fitted radius reaches the shape, `roundInside`, scale, undo) and the fit result fields.
 // Spec: docs/modes/reference-tools.md#test-plans
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { fail, Ok } from '../../shared/result'
 import { expectErrCode, expectOk } from '../../shared/testing/result'
 import { createInProcessWorkers, memoryFiles } from '../commands/jobs'
@@ -12,8 +12,12 @@ import type { ProjectSession } from '../project/storage'
 import { faceFrame } from '../geometry/face'
 import { applyPlacement, unapplyPlacement } from '../geometry/model'
 import { setupFrame } from '../toolpath/wcs'
+import { evaluatePart } from '../geometry/evaluate'
+import { loadManifold } from '../geometry/manifold'
+import { nodeManifoldSource } from '../geometry/testing/node-wasm'
 import { designSetup, type DesignSetup } from './design.fixture'
-import { binaryStl, boxSoup } from './stl.testing'
+import { partGeometryInput } from './load'
+import { binaryStl, boxSoup, soupOf } from './stl.testing'
 
 type V2 = [number, number]
 const ui = { kind: 'ui', id: 'w' } as const
@@ -461,5 +465,116 @@ describe('design.reference.import result fields', () => {
     expect(r.scale).toBe('1')
     expect(r.placed).toEqual({ min: { x: 30, y: 20, z: -10 }, max: { x: 70, y: 40, z: 0 } })
     expect(Object.keys(r.facingDepth)).toContain('stock.bottom')
+  })
+})
+
+describe('holes (P3)', () => {
+  const PLATE = '/models/plate.stl' // the 100 × 60 × 20 test block with a 2 × 2 grid of Ø 1.2 holes
+  beforeAll(async () => {
+    const kernel = expectOk(await loadManifold(nodeManifoldSource()))
+    const p = await designSetup()
+    for (const [u, v] of [
+      [20, 15],
+      [50, 15],
+      [20, 40],
+      [50, 40],
+    ])
+      await p.run('design.drilling.add', {
+        partId: p.partId,
+        center: [String(u), String(v)],
+        diameter: '1.2',
+        bottom: 'through',
+      })
+    const input = expectOk(partGeometryInput(p.d.doc, p.partId))
+    const ev = expectOk(kernel.withSolids((solids) => evaluatePart(input, solids)))
+    SOURCES[PLATE] = binaryStl(soupOf(ev.positions, ev.indices))
+  })
+  const addTool = (s: DesignSetup, diameter: string) =>
+    s.run('library.tool.add', {
+      values: {
+        name: `Drill ${diameter}`,
+        type: 'drill',
+        diameter,
+        fluteLength: '25',
+        overallLength: '60',
+        fluteCount: '2',
+        pointAngle: '118',
+      },
+    })
+  const referenceId = (s: DesignSetup) => Object.keys(s.d.doc.references)[0]!
+  type Groups = {
+    holeCount: number
+    groups: {
+      count: number
+      holes: V2[]
+      size: { diameter: number; bottom: string; top: number }
+      pattern?: { kind: string; count: V2 }
+      suggest: { command: string; args: Record<string, unknown>; clones?: object }
+      note?: string
+      smallestTool?: number
+    }[]
+  }
+
+  it('groups the holes with a ready-to-send suggestion; noTool below the smallest library tool', async () => {
+    const s = await setup()
+    await importRef(s, PLATE)
+    const r = (await find(s, { kind: 'holes' })) as unknown as Groups
+    expect(r).toMatchObject({ kind: 'holes', face: 'stock.top', holeCount: 4 })
+    expect(r.groups).toHaveLength(1)
+    const g = r.groups[0]!
+    expect(g).toMatchObject({
+      count: 4,
+      holes: [
+        [20, 15],
+        [50, 15],
+        [20, 40],
+        [50, 40],
+      ],
+      size: { diameter: 1.2, bottom: 'through', top: 0 },
+      pattern: { kind: 'grid', count: [2, 2] },
+      suggest: {
+        command: 'design.drilling.add',
+        args: { on: 'stock.top', center: ['20 mm', '15 mm'], diameter: '1.2 mm' },
+        clones: { rows: [{ kind: 'grid', cols: 2, rows: 2, du: '30 mm', dv: '25 mm' }] },
+      },
+    })
+    expect(g.note).toBeUndefined() // an empty library says nothing
+    // the suggestion is sent as it is
+    const added = (await s.run('design.drilling.add', { partId: s.partId, ...g.suggest.args })) as {
+      operationId: string
+    }
+    await s.run('design.clones.add', {
+      partId: s.partId,
+      source: { operationIds: [added.operationId] },
+      ...(g.suggest.clones as object),
+    })
+    await addTool(s, '1.588')
+    const small = (await find(s, { kind: 'holes' })) as unknown as Groups
+    expect(small.groups[0]).toMatchObject({ note: 'noTool', smallestTool: 1.588 })
+  })
+
+  it('reference.featureBelowTool after a scale change that puts the holes below the smallest tool', async () => {
+    const s = await setup()
+    await importRef(s, PLATE)
+    await addTool(s, '1')
+    const update = async (args: object) =>
+      (
+        (await s.run('design.reference.update', {
+          partId: s.partId,
+          referenceId: referenceId(s),
+          ...args,
+        })) as { warnings: { code: string; severity: string; params: object }[] }
+      ).warnings
+    expect(await update({ name: 'Plate' })).toEqual([])
+    expect(await update({ scale: '0.5' })).toContainEqual(
+      expect.objectContaining({
+        code: 'reference.featureBelowTool',
+        severity: 'info',
+        params: { diameter: 0.6, count: 4, smallest: 1, scale: '0.5' },
+      }),
+    )
+    expect((await update({ scale: '1' })).map((w) => w.code)).not.toContain(
+      'reference.featureBelowTool',
+    )
   })
 })

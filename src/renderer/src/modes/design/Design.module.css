@@ -779,6 +779,30 @@
   color: var(--text);
 }
 
+/* DF60 P3: the Holes list, one group per row (text, chips, its add button) */
+.holeList {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.holeRow {
+  display: grid;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+  line-height: var(--lh-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.holeActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}
+
 .warnings {
   display: grid;
   gap: var(--space-2);

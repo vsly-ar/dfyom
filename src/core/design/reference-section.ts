@@ -111,19 +111,34 @@ export function loopInsideCorners(l: Loop): { minInsideRadius?: number; sharp: V
   return radii.length === 0 ? { sharp } : { minInsideRadius: Math.min(...radii), sharp }
 }
 
-/** Orients and fits the chains of a section (see the file comment); largest loops first. */
-export function fitSection(chains: readonly SectionChain[], o: SectionFitOptions): FittedLoop[] {
-  const closed = chains.filter((c) => c.closed && c.points.length >= 6)
+/**
+ * The role of each closed chain by nesting (inside an even number of larger chains: `outer`, odd:
+ * `hole`), with its signed area (positive counter-clockwise). Shared with the hole finder.
+ */
+export function nestingRoles(closed: readonly SectionChain[]): {
+  areas: number[]
+  roles: ('outer' | 'hole')[]
+} {
   const areas = closed.map((c) => polyArea(c.points))
-  const out: FittedLoop[] = []
-  closed.forEach((c, i) => {
+  const roles = closed.map((c, i) => {
     const x = c.points[0]!
     const y = c.points[1]!
     let depth = 0
     closed.forEach((d, j) => {
       if (j !== i && Math.abs(areas[j]!) > Math.abs(areas[i]!) && inside(d.points, x, y)) depth++
     })
-    const role = depth % 2 === 0 ? 'outer' : 'hole'
+    return depth % 2 === 0 ? ('outer' as const) : ('hole' as const)
+  })
+  return { areas, roles }
+}
+
+/** Orients and fits the chains of a section (see the file comment); largest loops first. */
+export function fitSection(chains: readonly SectionChain[], o: SectionFitOptions): FittedLoop[] {
+  const closed = chains.filter((c) => c.closed && c.points.length >= 6)
+  const { areas, roles } = nestingRoles(closed)
+  const out: FittedLoop[] = []
+  closed.forEach((c, i) => {
+    const role = roles[i]!
     const pts: Vec2[] = []
     for (let k = 0; k < c.points.length; k += 2) pts.push([c.points[k]!, c.points[k + 1]!])
     const wantCcw = role === 'outer'
