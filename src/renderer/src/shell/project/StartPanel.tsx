@@ -1,11 +1,12 @@
-// The navigator without a project (every mode): New project, Open project, and the projects with
-// unsaved changes from an earlier session (restore or discard, persistence.md#crash-recovery).
+// The navigator without a project (Design, Plan): New project, Open project, the projects with
+// unsaved changes from an earlier session (restore or discard, persistence.md#crash-recovery), and
+// "Go to Run": the machine needs no project (DF80, docs/modes/run.md#run-without-a-project-df80).
 // Doc: docs/conventions/ui.md#project-files
 import { useEffect, useState } from 'react'
 import { useStore } from 'zustand'
 import { projectMessages as m } from '../../messages/project'
 import { Icon, Button, ConfirmDialog } from '../../ui'
-import { useShell } from '../ShellContext'
+import { useShell, useUi } from '../ShellContext'
 import styles from './Project.module.css'
 
 const baseName = (path: string) => path.split(/[\\/]/).pop() ?? path
@@ -14,6 +15,7 @@ export function StartPanel(): React.JSX.Element {
   const { files } = useShell()
   const recoverable = useStore(files, (s) => s.recoverable)
   const busy = useStore(files, (s) => s.busy)
+  const setMode = useUi((s) => s.setMode)
   const [discard, setDiscard] = useState<string | undefined>(undefined)
   useEffect(() => {
     void files.getState().refreshRecoverable()
@@ -71,6 +73,15 @@ export function StartPanel(): React.JSX.Element {
           </ul>
         </section>
       ) : null}
+      <section className={styles['machine']} aria-labelledby="start-machine">
+        <h3 id="start-machine" className={styles['subtitle']}>
+          {m.start.machineTitle}
+        </h3>
+        <p className={styles['description']}>{m.start.machineDescription}</p>
+        <Button size="sm" icon={<Icon name="arrow-right" />} onClick={() => setMode('run')}>
+          {m.start.machineAction}
+        </Button>
+      </section>
       {discard !== undefined ? (
         <ConfirmDialog
           open

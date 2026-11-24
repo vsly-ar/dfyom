@@ -29,6 +29,7 @@ import type { Region2dPort } from '../../core/geometry/2d/port'
 import type { PermissionPolicy } from '../../core/commands/permission'
 import {
   createAppScopeRegistry,
+  createMachineScopeRegistry,
   createProjectRegistry,
   type Registry,
 } from '../../core/commands/registry'
@@ -135,6 +136,8 @@ export interface AppHost extends SessionHost, HostPort {
   readonly library: Library
   /** Every agent tool (both registries and the session tools). */
   readonly tools: readonly AgentTool[]
+  /** Manual machine control without a project (DF80, llm-api.md#machine-scope-df80). */
+  readonly machineScope: { readonly dispatcher: Dispatcher; readonly registry: Registry }
   /** A new session for an MCP connection, CLI run or window. */
   openSession(source: Source, client?: string): AgentSession
   /** A unique source id for a transport: `stdio-1`, `http-2`, … */
@@ -217,18 +220,21 @@ export async function createAppHost(o: AppHostOptions): AsyncAppResult<AppHost> 
   }
   const app = createAppScopeRegistry()
   const project = createProjectRegistry()
+  const machine = createMachineScopeRegistry()
   if (app.isErr()) return app
   if (project.isErr()) return project
+  if (machine.isErr()) return machine
   const registries = { app: app.unwrap(), project: project.unwrap() }
   const tools = buildAgentTools(registries, SESSION_TOOLS)
   if (tools.isErr()) return tools
-  return Ok(new Host(o, library, registries, tools.unwrap()))
+  return Ok(new Host(o, library, registries, tools.unwrap(), machine.unwrap()))
 }
 
 class Host implements AppHost {
   readonly instanceId: string
   readonly appData: string
   readonly app: Dispatcher
+  readonly machineScope: { readonly dispatcher: Dispatcher; readonly registry: Registry }
   private readonly storage: ProjectStorage
   private readonly runtimes = new Map<string, ProjectRuntime>()
   private readonly attached = new Map<string, SessionInfo>()
@@ -245,6 +251,7 @@ class Host implements AppHost {
     readonly library: Library,
     readonly registries: { readonly app: Registry; readonly project: Registry },
     readonly tools: readonly AgentTool[],
+    machineRegistry: Registry,
   ) {
     this.instanceId = o.instanceId
     this.appData = o.appData
@@ -263,6 +270,21 @@ class Host implements AppHost {
       services: { workers: o.workers, library, host: this },
       ...this.common(),
     })
+    // Manual machine control without a project (hardening DF80): the instance's one connection
+    // on its own dispatcher (docs/architecture/llm-api.md#machine-scope-df80)
+    this.machineScope = {
+      registry: machineRegistry,
+      dispatcher: createDispatcher({
+        registry: machineRegistry,
+        doc: newProjectDoc({ name: 'machine', unitSystem: 'mm' }),
+        services: {
+          workers: o.workers,
+          library,
+          ...(o.machine === undefined ? {} : { machine: o.machine }),
+        },
+        ...this.common(),
+      }),
+    }
     // Draft plans follow library changes on the next Apply of each project: a changed library
     // item a draft plan copies is pending there (docs/architecture/apply.md#apply-hooks).
   }

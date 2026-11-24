@@ -8,21 +8,21 @@ Every state change or privileged action is a **command**; every read an agent ca
 
 The code is the contract; each file's header links back here. Adapters: IPC, MCP and CLI over the shared session core ([llm-api.md](llm-api.md), task 3.10).
 
-| File                                    | Contents                                                                                                                               |
-| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/core/commands/define.ts`           | `DocumentCommand`, `EffectCommand`, `JobCommand`, `BuiltinCommand`, `QueryDef`, `DocumentHook`, …                                      |
-| `src/core/commands/context.ts`          | `CommandContext`, `JobContext`, `Source`, `IdGenerator`, `Clock`, `Services` (ports)                                                   |
-| `src/core/commands/registry.ts`         | Registries of both scopes ([llm-api.md](llm-api.md#app-scope-and-project-scope)): `PROJECT_*`, `APP_SCOPE_*`, `APP_HOOKS`; name checks |
-| `src/core/commands/dispatcher.ts`       | Per-project queue and pipeline ([below](#dispatcher-pipeline)); `dispatch`, `query`                                                    |
-| `src/core/commands/args.ts`             | `parseArgs`: args shape check that rejects unknown keys ([pipeline](#dispatcher-pipeline))                                             |
-| `src/core/commands/history.ts`          | Immer setup, patch execution, undo/redo stacks, gesture merging; `history.undo`/`history.redo`                                         |
-| `src/core/commands/action-log.ts`       | Event types, ring buffer, subscriptions                                                                                                |
-| `src/core/commands/jobs.ts`             | `JobHandle`, progress, pause/resume/abort, `WorkerPort` (+ in-process stub); `job.*` control commands                                  |
-| `src/core/commands/permission.ts`       | `PermissionPolicy` port and the default policy                                                                                         |
-| `src/core/commands/json-schema.ts`      | Tool descriptors from Zod                                                                                                              |
-| `src/core/commands/testing.ts`          | Test helpers ([Testing](#testing))                                                                                                     |
-| `src/core/commands/commands.fixture.ts` | Test-only commands used by the command-layer tests                                                                                     |
-| `src/core/project/document.ts`          | `ProjectDoc` – the state document commands act on: `{ name, unitSystem, parts, snapshots, plans }`                                     |
+| File                                    | Contents                                                                                                                                                                                                                |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/core/commands/define.ts`           | `DocumentCommand`, `EffectCommand`, `JobCommand`, `BuiltinCommand`, `QueryDef`, `DocumentHook`, …                                                                                                                       |
+| `src/core/commands/context.ts`          | `CommandContext`, `JobContext`, `Source`, `IdGenerator`, `Clock`, `Services` (ports)                                                                                                                                    |
+| `src/core/commands/registry.ts`         | Registries of both scopes ([llm-api.md](llm-api.md#app-scope-and-project-scope)) and the machine scope ([DF80](llm-api.md#machine-scope-df80)): `PROJECT_*`, `APP_SCOPE_*`, `MACHINE_SCOPE_*`, `APP_HOOKS`; name checks |
+| `src/core/commands/dispatcher.ts`       | Per-project queue and pipeline ([below](#dispatcher-pipeline)); `dispatch`, `query`                                                                                                                                     |
+| `src/core/commands/args.ts`             | `parseArgs`: args shape check that rejects unknown keys ([pipeline](#dispatcher-pipeline))                                                                                                                              |
+| `src/core/commands/history.ts`          | Immer setup, patch execution, undo/redo stacks, gesture merging; `history.undo`/`history.redo`                                                                                                                          |
+| `src/core/commands/action-log.ts`       | Event types, ring buffer, subscriptions                                                                                                                                                                                 |
+| `src/core/commands/jobs.ts`             | `JobHandle`, progress, pause/resume/abort, `WorkerPort` (+ in-process stub); `job.*` control commands                                                                                                                   |
+| `src/core/commands/permission.ts`       | `PermissionPolicy` port and the default policy                                                                                                                                                                          |
+| `src/core/commands/json-schema.ts`      | Tool descriptors from Zod                                                                                                                                                                                               |
+| `src/core/commands/testing.ts`          | Test helpers ([Testing](#testing))                                                                                                                                                                                      |
+| `src/core/commands/commands.fixture.ts` | Test-only commands used by the command-layer tests                                                                                                                                                                      |
+| `src/core/project/document.ts`          | `ProjectDoc` – the state document commands act on: `{ name, unitSystem, parts, snapshots, plans }`                                                                                                                      |
 
 ## Naming
 

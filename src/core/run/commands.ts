@@ -636,3 +636,25 @@ export const RUN_COMMANDS: readonly AnyCommand[] = [
   runTimeScaleSet,
 ]
 export const RUN_QUERIES: readonly QueryDef[] = [runStatusGet]
+
+/**
+ * The run commands that read no document: manual machine control, which needs no project
+ * (hardening DF80). The machine-scope dispatcher runs them for sessions without a bound project
+ * (docs/architecture/llm-api.md#machine-scope-df80); `run.connection.open` there takes
+ * `machineId` only. Plan runs (`run.job.start`, `run.job.check`) and `run.align.*` need a project.
+ */
+export const MANUAL_RUN_COMMANDS: readonly AnyCommand[] = [
+  runConnectionOpen,
+  runConnectionClose,
+  runPortsScan,
+  runMachineHome,
+  runMachineUnlock,
+  runMachineJog,
+  runMachineJogCancel,
+  runWorkZeroSet,
+  runMachineReset,
+  runMachineProbeZ,
+  runOverrideSet,
+  runJobContinue,
+  runTimeScaleSet,
+]

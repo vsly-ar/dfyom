@@ -34,6 +34,12 @@ export interface SessionHost {
   readonly registries: { readonly app: Registry; readonly project: Registry }
   /** The dispatcher of an open project. */
   project(key: string): Option<Dispatcher>
+  /**
+   * The instance's machine-scope dispatcher and its registry (hardening DF80): manual machine
+   * control for sessions without a bound project (docs/architecture/llm-api.md#machine-scope-df80).
+   * Absent: such calls answer `noProject` as before.
+   */
+  readonly machineScope?: { readonly dispatcher: Dispatcher; readonly registry: Registry }
   /** A session started, changed its binding (`key`) or ended (`ended`): project.list, indicator. */
   sessionChanged(info: SessionInfo, ended?: boolean): void
 }
@@ -483,7 +489,8 @@ export class AgentSession {
     if (!isCommand && project.query(name).isNone())
       return fail('command.unknown', `unknown tool ${name}`, { where: 'AgentSession' })
     const bound = this.bound()
-    if (bound.isNone()) return noProject(name, this.lostMessage())
+    if (bound.isNone())
+      return this.machineScoped(name, rawArgs, opts) ?? noProject(name, this.lostMessage())
     const d = bound.unwrap()
     if (!isCommand) return d.queryAsync(name, rawArgs, this.source)
     const split = splitExpectedRevision(rawArgs)
@@ -499,6 +506,30 @@ export class AgentSession {
       ...(expectedRevision === undefined ? {} : { expectedRevision }),
       ...(opts.gesture === undefined ? {} : { gesture: opts.gesture }),
       ...(isDocument && this.autoApplies && apply !== false ? { apply: true } : {}),
+    })
+  }
+
+  /**
+   * Without a bound project: a manual-control command or query on the machine-scope dispatcher
+   * (DF80, docs/architecture/llm-api.md#machine-scope-df80); undefined when `name` needs a project
+   * (`run.connection.open` with a `planId` too). `expectedRevision` has nothing to check there.
+   */
+  private machineScoped(
+    name: string,
+    rawArgs: unknown,
+    opts: CallOptions,
+  ): Promise<AppResult<CommandOutcome>> | undefined {
+    const scope = this.host.machineScope
+    if (scope === undefined) return undefined
+    if (name === 'run.connection.open' && isPlainObject(rawArgs) && rawArgs['planId'] !== undefined)
+      return undefined
+    const { dispatcher, registry } = scope
+    if (registry.query(name).isSome()) return dispatcher.queryAsync(name, rawArgs, this.source)
+    if (registry.command(name).isNone()) return undefined
+    const split = splitExpectedRevision(rawArgs)
+    if (split.isErr()) return Promise.resolve(Err(split.unwrapErr()))
+    return dispatcher.dispatch(name, split.unwrap().args, this.source, {
+      ...(opts.gesture === undefined ? {} : { gesture: opts.gesture }),
     })
   }
 
@@ -605,6 +636,14 @@ export class AgentSession {
     const args = parsed.unwrap() as Record<string, unknown>
     if (name === 'project.bind') return this.bind(args['key'] as string)
     const bound = this.bound()
+    // job.wait without a project: the machine scope's homing and probing jobs (DF80)
+    const scope = this.host.machineScope
+    if (bound.isNone() && name !== 'project.log.list' && scope !== undefined)
+      return this.waitJob(
+        scope.dispatcher,
+        args as unknown as { jobId: string; timeoutSeconds: number },
+        opts,
+      )
     if (bound.isNone()) return noProject(name, this.lostMessage())
     const d = bound.unwrap()
     if (name === 'project.log.list')

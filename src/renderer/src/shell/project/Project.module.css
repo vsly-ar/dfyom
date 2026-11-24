@@ -32,6 +32,15 @@
   border-top: 1px solid var(--border);
 }
 
+/* "Machine" (DF80): Run needs no project */
+.machine {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
 .subtitle {
   margin: 0;
   font-size: var(--text-sm);

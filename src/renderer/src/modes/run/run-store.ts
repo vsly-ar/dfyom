@@ -14,7 +14,8 @@ import { DEFAULT_BAUD, type SerialPortInfo } from '../../../../core/run/serial'
 import type { SettingsCheck } from '../../../../core/run/settings-check'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import type { CallReply, PreloadApi } from '../../../../shared/preload-api'
-import { useShell } from '../../shell/ShellContext'
+import { useSettings, useShell } from '../../shell/ShellContext'
+import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
 import { activeJob, type JogMode } from './machine-state'
 
 /** Progress poll of the run job (`job.get`) while it runs: progress ticks are not pushed. */
@@ -607,4 +608,13 @@ export function useRunStore(): RunStore {
 
 export function useRun<T>(selector: (s: RunState) => T): T {
   return useStore(useRunStore(), selector)
+}
+
+/**
+ * The unit system Run shows lengths in: the project's, or without a project (DF80) the one the
+ * Library window uses without a project (`libraryUnits`, docs/modes/run.md#run-without-a-project-df80).
+ */
+export function useRunUnits(doc: ProjectDoc | undefined): UnitSystem {
+  const fallback = useSettings((s) => s.settings.libraryUnits)
+  return doc?.unitSystem ?? fallback
 }

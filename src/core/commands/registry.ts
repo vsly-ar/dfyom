@@ -43,7 +43,7 @@ import { projectSave } from '../project/commands'
 import { toolpathApplyJob } from '../toolpath/apply-job'
 import { toolpathGenerateJob, toolpathGet } from '../toolpath/generate'
 import { planExport } from '../post/plan-export'
-import { RUN_COMMANDS, RUN_QUERIES } from '../run/commands'
+import { MANUAL_RUN_COMMANDS, RUN_COMMANDS, RUN_QUERIES } from '../run/commands'
 import { LIFECYCLE_COMMANDS, LIFECYCLE_QUERIES } from '../project/lifecycle'
 import { historyList, historyRedo, historyUndo } from './history'
 import { jobAbort, jobGet, jobList, jobPause, jobResume } from './jobs'
@@ -112,6 +112,19 @@ export const APP_SCOPE_QUERIES: readonly QueryDef[] = [
   ...FASTENER_QUERIES,
   ...LIFECYCLE_QUERIES,
 ]
+/**
+ * Machine scope (hardening DF80): manual machine control without a project, on the instance's
+ * machine-scope dispatcher (empty document); the job built-ins follow its homing and probing jobs.
+ * A subset of the project scope (same definitions, so no new tools). Doc:
+ * docs/architecture/llm-api.md#machine-scope-df80
+ */
+export const MACHINE_SCOPE_COMMANDS: readonly AnyCommand[] = [
+  jobPause,
+  jobResume,
+  jobAbort,
+  ...MANUAL_RUN_COMMANDS,
+]
+export const MACHINE_SCOPE_QUERIES: readonly AnyQueryDef[] = [jobGet, jobList, ...RUN_QUERIES]
 /**
  * Document hooks of the app (docs/architecture/commands.md#document-hooks): Clones instances
  * follow an edited source in the same command (`design.clonesFollow`, v0.4 F5). The draft
@@ -251,6 +264,15 @@ export function createAppScopeRegistry(): AppResult<Registry> {
   return createRegistry({
     commands: APP_SCOPE_COMMANDS,
     queries: APP_SCOPE_QUERIES,
+    builtins: false,
+  })
+}
+
+/** Registry of the machine-scope dispatcher (DF80): manual-control run commands and job built-ins. */
+export function createMachineScopeRegistry(): AppResult<Registry> {
+  return createRegistry({
+    commands: MACHINE_SCOPE_COMMANDS,
+    queries: MACHINE_SCOPE_QUERIES,
     builtins: false,
   })
 }
