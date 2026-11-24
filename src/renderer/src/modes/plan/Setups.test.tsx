@@ -4,10 +4,16 @@
 // merge (same direction only), moving an operation across setups, the setup inspector (name,
 // rotation, heights), the per-setup export and the per-setup preview placed by the setup's WCS.
 // Doc: docs/conventions/ui.md#design-and-plan-controls-v02, docs/modes/plan-v0.2.md#merge-split-reorder
-import { screen, waitFor, within } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import { useEffect, type ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
-import { libraryInput, machineValues } from '../../../../core/library/library.fixture'
+import {
+  deg,
+  len,
+  libraryInput,
+  machineValues,
+  num,
+} from '../../../../core/library/library.fixture'
 import { planSetup, type PlanSetup } from '../../../../core/plan/plan.fixture'
 import { setupFrame } from '../../../../core/toolpath/wcs'
 import type { CallReply } from '../../../../shared/preload-api'
@@ -776,5 +782,160 @@ describe('Registration holes on the flip axis', () => {
     await waitFor(() =>
       expect(probe.scene?.flipAxes?.[0]?.from).toEqual([before.from[0] - 10, before.from[1]]),
     )
+  })
+})
+
+// DF83: docs/modes/alignment.md#implementation-df83
+describe('Aid parameters (DF83)', () => {
+  const vbit = {
+    name: 'V-bit 90',
+    type: 'chamferMill' as const,
+    diameter: len('6'),
+    angle: deg('90'),
+    fluteLength: len('8'),
+    overallLength: len('50'),
+    fluteCount: num('2'),
+    toolMaterial: 'carbide' as const,
+    presets: [],
+  }
+  const withVBit = async (s: PlanSetup) => {
+    await s.run('library.tool.add', { values: libraryInput(vbit) })
+  }
+
+  it('the helpers take edges, holes at corners and an inset', async () => {
+    const t = await renderSetups(withVBit)
+    const [first, second] = t.plan().setups
+    await t.user.click(t.setupRows()[0]!)
+    const insp = t.inspector()
+    await within(insp).findByRole('heading', { name: 'Alignment aids' })
+    await t.user.click(within(insp).getByRole('radio', { name: 'Left and right' }))
+    await t.user.click(within(insp).getByRole('radio', { name: 'At corners' }))
+    const inset = within(insp).getByLabelText('Inset', { selector: 'input' })
+    await t.user.type(inset, '5{Enter}')
+    await t.user.click(within(insp).getByRole('button', { name: 'Add witness marks' }))
+    await waitFor(() =>
+      expect(t.callsOf('plan.aid.set')).toContainEqual({
+        planId: t.planId,
+        setupId: first!.id,
+        place: 'marks',
+        forSetupId: second!.id,
+        edges: 'leftRight',
+        inset: '5',
+      }),
+    )
+    await t.user.click(within(insp).getByRole('button', { name: 'Add registration holes' }))
+    await waitFor(() =>
+      expect(t.callsOf('plan.aid.set')).toContainEqual({
+        planId: t.planId,
+        setupId: first!.id,
+        place: 'holes',
+        forSetupId: second!.id,
+        holesAt: 'corners',
+        inset: '5',
+      }),
+    )
+    await waitFor(() => expect(t.plan().setups[1]!.alignment).toHaveLength(4))
+    await expectNoAxeViolations()
+  })
+
+  it("edits a mark's depth and line length and a hole's depth, with tool, strategy and feeds", async () => {
+    const t = await renderSetups(withVBit)
+    const first = t.plan().setups[0]!
+    await t.s.run('plan.aid.set', {
+      planId: t.planId,
+      setupId: first.id,
+      aid: { kind: 'witnessMark', from: ['10', '4'], to: ['10', '-2'] },
+    })
+    await t.s.run('plan.aid.set', {
+      planId: t.planId,
+      setupId: first.id,
+      aid: { kind: 'registrationHole', center: ['8', '8'], diameter: '6', spoilboardDepth: '5' },
+    })
+    const ops = () => t.plan().setups[0]!.operations
+    const mark = ops().find((o) => o.aid?.kind === 'witnessMark')!.id
+    const hole = ops().find((o) => o.aid?.kind === 'registrationHole')!.id
+    const aidRows = () =>
+      within(t.opsOf(first.name))
+        .getAllByRole('listitem')
+        .filter((r) => r.hasAttribute('data-aid'))
+    await waitFor(() => expect(aidRows()).toHaveLength(2))
+
+    // the mark: depth by the 90° V-bit sets the width; the length moves the end
+    await t.user.click(
+      within(aidRows().find((r) => r.textContent?.includes('Witness'))!).getAllByRole('button')[0]!,
+    )
+    const markInsp = await within(t.inspector()).findByRole('region', { name: 'Alignment aid' })
+    expect(within(markInsp).getByText(/With the 90° V-bit/)).toBeInTheDocument()
+    const depth = within(markInsp).getByLabelText('Mark depth', { selector: 'input' })
+    await t.user.clear(depth)
+    await t.user.type(depth, '1{Enter}')
+    await waitFor(() =>
+      expect(ops().find((o) => o.id === mark)?.aid).toMatchObject({ markDiameter: 2 }),
+    )
+    const length = within(markInsp).getByLabelText('Line length', { selector: 'input' })
+    await t.user.clear(length)
+    await t.user.type(length, '8{Enter}')
+    await waitFor(() =>
+      expect(ops().find((o) => o.id === mark)?.aid).toMatchObject({ to: [10, -4] }),
+    )
+    // its cut is fixed: no Strategy group
+    expect(within(t.inspector()).queryByRole('region', { name: 'Strategy' })).toBeNull()
+    await expectNoAxeViolations()
+
+    // the hole: depth into the spoilboard, and the drilling's tool, strategy and feeds groups
+    await t.user.click(
+      within(aidRows().find((r) => r.textContent?.includes('Registration'))!).getAllByRole(
+        'button',
+      )[0]!,
+    )
+    const holeInsp = await within(t.inspector()).findByRole('region', { name: 'Alignment aid' })
+    const sb = within(holeInsp).getByLabelText('Into the spoilboard', { selector: 'input' })
+    await t.user.clear(sb)
+    await t.user.type(sb, '3{Enter}')
+    await waitFor(() =>
+      expect(ops().find((o) => o.id === hole)?.aid).toMatchObject({ spoilboardDepth: 3 }),
+    )
+    expect(within(t.inspector()).getByRole('region', { name: 'Tool' })).toBeInTheDocument()
+    expect(within(t.inspector()).getByRole('region', { name: 'Strategy' })).toBeInTheDocument()
+    expect(
+      within(t.inspector()).getByRole('region', { name: 'Feeds and speeds' }),
+    ).toBeInTheDocument()
+    await expectNoAxeViolations()
+  })
+
+  it('drags a hole in the viewport: it snaps onto the flip axis and commits on release', async () => {
+    const t = await renderSetups(withVBit)
+    const first = t.plan().setups[0]!
+    await t.user.click(t.setupRows()[0]!)
+    const insp = t.inspector()
+    await within(insp).findByRole('heading', { name: 'Alignment aids' })
+    await t.user.click(within(insp).getByRole('button', { name: 'Add registration holes' }))
+    await waitFor(() => expect(probe.scene?.aids?.handles).toHaveLength(2))
+    await waitFor(() => expect(probe.scene?.flipAxes).toHaveLength(1))
+    const axis = probe.scene!.flipAxes![0]!
+    const h = probe.scene!.aids!.handles[0]!
+    expect(h.kind).toBe('hole')
+    expect(probe.scene!.aids!.draggable).toBe(true)
+    // 1 mm off the axis (perpendicular): snaps back onto it
+    const dx = axis.to[0] - axis.from[0]
+    const dy = axis.to[1] - axis.from[1]
+    const l = Math.hypot(dx, dy)
+    const along: [number, number] = [h.at[0] + (dx / l) * 4, h.at[1] + (dy / l) * 4]
+    const off: [number, number] = [along[0] - (dy / l) * 1, along[1] + (dx / l) * 1]
+    act(() => probe.scene!.aids!.onDrag('start', h.id, h.at))
+    act(() => probe.scene!.aids!.onDrag('move', h.id, off))
+    await waitFor(() => expect(probe.scene!.aids!.handles[0]!.caption).toMatch(/on the flip axis/))
+    act(() => probe.scene!.aids!.onDrag('end', h.id, off))
+    await waitFor(() => {
+      const c = t.plan().setups[0]!.operations.find((o) => o.id === h.id)?.aid
+      expect(c?.kind === 'registrationHole' ? c.center : undefined).toEqual([
+        expect.closeTo(along[0], 3),
+        expect.closeTo(along[1], 3),
+      ])
+    })
+    // still on the axis: no offAxis finding; a click selects it
+    act(() => probe.scene!.aids!.onSelect(h.id))
+    await within(t.inspector()).findByRole('region', { name: 'Alignment aid' })
+    expect(first.id).toBeDefined()
   })
 })

@@ -2,7 +2,9 @@
 // front-left corner of the up face, negative valid; reset to the corner) and its alignment points
 // in cycle order (add from a menu of the sources this setup can use, rename, reorder, remove,
 // put the zero on one). Each change is one command: `plan.setup.update { zero }` or
-// `plan.alignment.set` with the whole list. Focusing a point marks it in the viewport.
+// `plan.alignment.set` with the whole list. Focusing a point marks it in the viewport. The aids
+// section's helpers place two marks or holes for the next setup with the chosen edges, holes on
+// the flip axis or at corners, and an inset (DF83; `plan.aid.set { place, edges, holesAt, inset }`).
 // Doc: docs/modes/alignment.md#plan-ui, docs/conventions/ui.md#design-and-plan-controls-v02
 import { useEffect, useState } from 'react'
 import type { AlignmentPointDTO } from '../../../../core/plan/alignment.dto'
@@ -23,6 +25,7 @@ import {
   IconButton,
   Menu,
   QuantityInput,
+  SegmentedControl,
   type FieldMessage,
   type MenuEntry,
 } from '../../ui'
@@ -120,6 +123,11 @@ export function AlignmentFields({
   // S18: aids cut here for the next setup
   const index = plan.setups.findIndex((x) => x.id === setup.id)
   const next = plan.setups[index + 1]
+  // DF83: the helpers' choices, kept while the setup is shown
+  const [edges, setEdges] = useState<'auto' | 'frontBack' | 'leftRight'>('auto')
+  const [holesAt, setHolesAt] = useState<'axis' | 'corners'>('axis')
+  const [inset, setInset] = useState<string | undefined>(undefined)
+  const flipNext = next !== undefined && flips(setup, next)
   const placeAids = async (place: 'marks' | 'holes') => {
     if (next === undefined) return
     done(
@@ -128,6 +136,9 @@ export function AlignmentFields({
         setupId: setup.id,
         place,
         forSetupId: next.id,
+        ...(place === 'marks' && edges !== 'auto' ? { edges } : {}),
+        ...(place === 'holes' && flipNext ? { holesAt } : {}),
+        ...(inset === undefined ? {} : { inset }),
       }),
     )
   }
@@ -367,9 +378,61 @@ export function AlignmentFields({
           <p className={styles['muted']}>
             {next === undefined ? m.aidsNone : m.aidsHint(next.name)}
           </p>
-          {next !== undefined && flips(setup, next) ? (
-            <p className={styles['muted']}>{m.aidsFlipHint(next.name)}</p>
-          ) : null}
+          {flipNext ? <p className={styles['muted']}>{m.aidsFlipHint(next.name)}</p> : null}
+          {next === undefined ? null : (
+            <div className={styles['aidChoices']}>
+              <span className={styles['aidChoiceLabel']}>{m.aidEdges}</span>
+              <SegmentedControl
+                size="sm"
+                label={m.aidEdges}
+                options={(['auto', 'frontBack', 'leftRight'] as const).map((v) => ({
+                  value: v,
+                  label: m.aidEdgeChoices[v],
+                }))}
+                value={edges}
+                onValueChange={setEdges}
+              />
+              {flipNext ? (
+                <>
+                  <span className={styles['aidChoiceLabel']}>{m.aidHolesAt}</span>
+                  <SegmentedControl
+                    size="sm"
+                    label={m.aidHolesAt}
+                    options={(['axis', 'corners'] as const).map((v) => ({
+                      value: v,
+                      label: m.aidHolesAtChoices[v],
+                    }))}
+                    value={holesAt}
+                    onValueChange={setHolesAt}
+                  />
+                </>
+              ) : null}
+            </div>
+          )}
+          {next === undefined ? null : (
+            <QuantityInput
+              label={m.aidInset}
+              kind="length"
+              defaultUnit={defaultUnit('length', units)}
+              value={
+                inset === undefined
+                  ? undefined
+                  : Quantity.parse(inset, fieldContext('length', units)).mapOr(undefined, (q) => q)
+              }
+              messages={[
+                {
+                  id: 'insetHint',
+                  severity: 'note',
+                  text: m.aidInsetHint,
+                  ...(inset === undefined
+                    ? {}
+                    : { fix: { label: m.aidInsetDefault, onApply: () => setInset(undefined) } }),
+                },
+              ]}
+              onCommit={(q) => setInset(q.source)}
+              onCancelGesture={cancelGesture}
+            />
+          )}
           {next === undefined ? null : (
             <div className={styles['alignActions']}>
               <Button size="sm" variant="default" onClick={() => void placeAids('marks')}>

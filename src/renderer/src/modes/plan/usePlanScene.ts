@@ -10,7 +10,9 @@
 // spot snaps it to the grid inside the flat patch and commits one `plan.operation.update { zRef }`
 // on release; the dropped spot is held until the plan re-reads it. DF78: the frame's origin is
 // the setup's work zero, and its alignment points are drawn (`RunScene.alignment`), with the flip
-// axis of registration holes dashed (`RunScene.flipAxes`, Q106). DF64 L3: with
+// axis of registration holes dashed (`RunScene.flipAxes`, Q106). DF83: the setup's alignment
+// aids as drag handles (`RunScene.aids`, aid-drag.ts snaps them); a drop commits one
+// `plan.aid.set` and is held until the plan re-reads it, a click selects the aid. DF64 L3: with
 // every toolpath current, the exported moves: the lowered links between operations as rapids
 // (`linkedToolpaths` with `plan.warning.list`'s lowered links, docs/modes/safe-links.md#where-it-runs).
 // Doc: docs/conventions/ui.md#plan-mode-task-37, docs/modes/plan-v0.2.md#plan-only-edits-and-the-snapshot-scene,
@@ -26,6 +28,7 @@ import type { Toolpath } from '../../../../core/toolpath/model'
 import { usePlanEvaluation, useReplica, useUi } from '../../shell/ShellContext'
 import {
   toolpathLines,
+  type AidOverlay,
   type AlignmentMarker,
   type AlignmentTarget,
   type Box,
@@ -51,6 +54,8 @@ import {
 import { usePlanCommand, usePlanData, usePlanState } from './plan-store'
 import { shiftOverlay, workholdingOverlay } from './workholding-scene'
 import { shownZRefRun, snapSpot } from './z-spot'
+import { aidAnchor, movedAidArgs, snapAid } from './aid-drag'
+import { usePlanSelection } from './usePlan'
 
 type P = readonly [number, number]
 
@@ -59,6 +64,14 @@ interface HeldSpot {
   readonly run: string
   readonly at: P
   readonly dragging: boolean
+}
+
+/** A dragged or dropped aid (setup frame), with its distance off the flip axis (holes). */
+interface HeldAid {
+  readonly id: string
+  readonly at: P
+  readonly dragging: boolean
+  readonly offAxis?: number | undefined
 }
 
 const same = (a: P, b: P) => Math.abs(a[0] - b[0]) < 1e-6 && Math.abs(a[1] - b[1]) < 1e-6
@@ -83,6 +96,8 @@ export function usePlanScene(mode: AppMode): RunScene | null {
   const openItem = usePlanState((s) => s.workholdingItem)
   const call = usePlanCommand()
   const [held, setHeld] = useState<HeldSpot | null>(null)
+  const [heldAid, setHeldAid] = useState<HeldAid | null>(null)
+  const [, selectPlan] = usePlanSelection()
   const doc = replica.status === 'open' ? replica.doc : undefined
   const setup = plan === undefined ? undefined : currentSetup(plan, selected, last)
   // DF69: the shown run's reference, only in the window's setup (the scene draws only that one)
@@ -175,6 +190,79 @@ export function usePlanScene(mode: AppMode): RunScene | null {
       ),
     }))
   }, [info, setup, plan])
+  // DF83: the setup's aids as drag handles (setup frame → WCS: less the zero)
+  const aidOps = useMemo(
+    () => (setup?.operations ?? []).filter((o) => o.aid !== undefined),
+    [setup],
+  )
+  useEffect(() => {
+    if (heldAid === null || heldAid.dragging) return
+    const op = aidOps.find((o) => o.id === heldAid.id)
+    if (op === undefined || same(aidAnchor(op.aid!), heldAid.at)) setHeldAid(null)
+  }, [heldAid, aidOps])
+  const aids = useMemo((): AidOverlay | undefined => {
+    if (plan === undefined || setup === undefined || aidOps.length === 0) return undefined
+    const zero = setupZeroOf(setup, info)
+    const axes = info?.flipAxes ?? []
+    const wcs = (p: P): P => [p[0] - zero[0], p[1] - zero[1]]
+    const m = planMessages.aid
+    return {
+      draggable: allows(plan, 'plan.operation.update'),
+      handles: aidOps.map((op) => {
+        const aid = op.aid!
+        const mine = heldAid?.id === op.id ? heldAid : undefined
+        const anchor = mine?.at ?? aidAnchor(aid)
+        const shift: P = [anchor[0] - aidAnchor(aid)[0], anchor[1] - aidAnchor(aid)[1]]
+        const line = aid.kind === 'witnessMark' && 'from' in aid
+        const off =
+          mine?.offAxis ??
+          (aid.kind === 'registrationHole' && axes.length > 0
+            ? snapAid(aid, anchor, axes).offAxis
+            : undefined)
+        return {
+          id: op.id,
+          kind: aid.kind === 'registrationHole' ? 'hole' : line ? 'line' : 'spot',
+          at: wcs(anchor),
+          ...(line ? { to: wcs([aid.to[0] + shift[0], aid.to[1] + shift[1]]) } : {}),
+          radius: aid.kind === 'registrationHole' ? aid.diameter / 2 : (aid.markDiameter ?? 1) / 2,
+          caption: m.dragCaption(
+            aid.name,
+            lengthSource(anchor[0], units),
+            lengthSource(anchor[1], units),
+            off === undefined
+              ? undefined
+              : off < 0.05
+                ? m.onAxis
+                : m.offAxis(lengthSource(off, units)),
+          ),
+          selected: op.id === selected,
+          dragging: mine?.dragging ?? false,
+        }
+      }),
+      onSelect: (id) => selectPlan(id),
+      onDrag(phase, id, point) {
+        const op = aidOps.find((o) => o.id === id)
+        if (op === undefined) return
+        const aid = op.aid!
+        if (phase === 'cancel') return setHeldAid(null)
+        // back to the setup frame (the inspector's positions)
+        const p: P = [point[0] + zero[0], point[1] + zero[1]]
+        if (phase === 'start') return setHeldAid({ id, at: aidAnchor(aid), dragging: true })
+        const snapped = snapAid(aid, p, axes)
+        if (phase === 'move')
+          return setHeldAid({ id, at: snapped.at, dragging: true, offAxis: snapped.offAxis })
+        if (same(snapped.at, aidAnchor(aid))) return setHeldAid(null)
+        setHeldAid({ id, at: snapped.at, dragging: false, offAxis: snapped.offAxis })
+        void call('plan.aid.set', {
+          planId: plan.id,
+          planOperationId: id,
+          aid: movedAidArgs(aid, snapped.at),
+        }).then((r) => {
+          if (!r.ok) setHeldAid(null)
+        })
+      },
+    }
+  }, [plan, setup, aidOps, info, heldAid, selected, units, call, selectPlan])
   // S22: while picking, the setup's valid sources are targets; a click adds that point
   const targets = useMemo((): AlignmentTarget[] => {
     if (plan === undefined || setup === undefined || picking !== setup.id) return []
@@ -244,9 +332,10 @@ export function usePlanScene(mode: AppMode): RunScene | null {
       ...(alignment.length === 0 ? {} : { alignment }),
       ...(targets.length === 0 ? {} : { alignmentTargets: targets }),
       ...(flipAxes.length === 0 ? {} : { flipAxes }),
+      ...(aids === undefined ? {} : { aids }),
       ...(workholding === undefined ? {} : { workholding }),
     }
-  }, [data, plan, setup, doc, zRef, info, alignment, targets, flipAxes, openItem])
+  }, [data, plan, setup, doc, zRef, info, alignment, targets, flipAxes, aids, openItem])
 }
 
 /** The plan's part as the plan scene draws it. */
