@@ -7,7 +7,7 @@ G90 G94 G17 G20
 G54
 G0 Z0.3937
 (profile-on-open)
-(DFYOM TOOL CHANGE 1: 6 mm flat end mill)
+(DFYOM TOOL CHANGE 1: 6 mm flat end mill, 0.2362 in flat)
 M3 S18000
 G4 P3
 X0.5906 Y0.5906

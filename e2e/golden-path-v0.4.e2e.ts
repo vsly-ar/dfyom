@@ -575,7 +575,7 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
       .click()
     const done = p.getByRole('dialog', { name: 'gCode exported' })
     await expect(done.getByText('No machine warnings.')).toBeVisible({ timeout: 30_000 })
-    const file = join(dfyom.dataDir, 'Plan 1.nc')
+    const file = join(dfyom.dataDir, 'enclosure-lid.nc')
     expect(existsSync(file)).toBe(true)
     const gcode = readFileSync(file, 'utf8')
     await expect(done.getByText(`${gcode.trimEnd().split('\n').length} lines`)).toBeVisible()
@@ -598,10 +598,10 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
     'Profile 1',
   ])
   expect(program.match(/^\(DFYOM TOOL CHANGE \d+: .*\)$/gm)).toEqual([
-    '(DFYOM TOOL CHANGE 1: Flat 3)',
-    '(DFYOM TOOL CHANGE 2: Flat 6)',
-    '(DFYOM TOOL CHANGE 3: Chamfer 90 x 12)',
-    '(DFYOM TOOL CHANGE 2: Flat 6)',
+    '(DFYOM TOOL CHANGE 1: Flat 3, 3 mm flat)',
+    '(DFYOM TOOL CHANGE 2: Flat 6, 6 mm flat)',
+    '(DFYOM TOOL CHANGE 3: Chamfer 90 x 12, 12 mm chamfer)',
+    '(DFYOM TOOL CHANGE 2: Flat 6, 6 mm flat)',
   ])
   expect(program).toContain('(Clones 3 #7)')
   expect(program).not.toContain('(Clones 3 #4)')

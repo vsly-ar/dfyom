@@ -7,7 +7,7 @@ G90 G94 G17 G21
 G54
 G0 Z10
 (profile-bracket-outside)
-(DFYOM TOOL CHANGE 1: 6 mm flat end mill)
+(DFYOM TOOL CHANGE 1: 6 mm flat end mill, 6 mm flat)
 M3 S18000
 G4 P3
 X25 Y88

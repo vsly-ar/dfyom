@@ -45,6 +45,8 @@ export type RealtimeCommand = (typeof REALTIME)[keyof typeof REALTIME]
 
 /** DFYOM tool-change marker, matched against a whole line (grbl.md#output-dialect). */
 const MARKER = /^\(DFYOM TOOL CHANGE (\d+): ([^()]*)\)$/
+/** The line after a marker: `M0`, or `M0 ;message` since DF63 (grbl.md#output-dialect). */
+const MARKER_PAUSE = /^M0( ;.*)?$/
 /** A line whose code (comments stripped) contains `M0`/`M00`: GRBL pauses there. */
 const PROGRAM_PAUSE = /M0*0(?![0-9.])/i
 
@@ -249,6 +251,13 @@ export function preflight(
 function commentText(line: string | undefined): string | undefined {
   const m = line === undefined ? null : /^\((.*)\)$/.exec(line.trim())
   return m ? (m[1] ?? '').trim() : undefined
+}
+
+/** The `;` message on a pause line (`M0 ;Set spindle to 18000 rpm`, DF63). */
+function pauseText(line: string | undefined): string | undefined {
+  const m = line === undefined ? null : /;(.*)$/.exec(line)
+  const text = m?.[1]?.trim()
+  return text === undefined || text === '' ? undefined : text
 }
 
 function isProgramPause(line: string | undefined): boolean {
@@ -706,7 +715,7 @@ export class GrblSender {
       const line = lines[run.next]
       if (line === undefined) return
       const m = MARKER.exec(line)
-      if (m && lines[run.next + 1] === 'M0') {
+      if (m && MARKER_PAUSE.test(lines[run.next + 1] ?? '')) {
         run.pendingToolChange = { n: Number(m[1]), name: m[2] ?? '' }
         this.log.debug({ tool: run.pendingToolChange.n, line: run.next + 1 }, 'tool change ahead')
         this.awaitFresh()
@@ -885,7 +894,10 @@ export class GrblSender {
       if (this.resumeMark !== undefined && this.reportsSeen <= this.resumeMark) return
       const oldest = this.inflight[0]
       if (oldest?.kind === 'program' && isProgramPause(run.program.lines[oldest.index])) {
-        run.message = commentText(run.program.lines[oldest.index - 1]) ?? 'Program paused (M0)'
+        run.message =
+          pauseText(run.program.lines[oldest.index]) ??
+          commentText(run.program.lines[oldest.index - 1]) ??
+          'Program paused (M0)'
         this.setPhase(run, 'programPause')
       } else this.setPhase(run, 'held') // a hold we did not send (door, button)
       return

@@ -233,7 +233,7 @@ describe('plan.export', () => {
 
   it('rejects a target without a gCode file name and unknown plans', async () => {
     const t = await setup()
-    for (const target of ['/out/plan.txt', '/o/.nc', '/o.nc/', 'C:\\o\\.gcode', '/out/a.nc/x'])
+    for (const target of ['/out/plan.txt', '/o/.nc', '/o/a.nc.txt', 'C:\\o\\.gcode', '/out/a.nc/x'])
       expect(
         expectErrCode(await t.exportCmd({ target }), 'input.malformed').issues[0]?.path,
         target,
@@ -243,6 +243,15 @@ describe('plan.export', () => {
     expect(e.issues[0]?.rule).toBe('unknownPlan')
     for (const target of ['/out/a.NC', '/out/a.gcode', '/out/a.ngc', 'C:\\o\\b.nc'])
       expectOk(await t.exportCmd({ target, confirm: true }))
+  })
+
+  // docs/architecture/grbl.md#file-name-hardening-df62
+  it('a folder target (ending in / or \\) writes the short suggested file name', async () => {
+    const t = await setup()
+    const r = expectOk(await t.exportCmd({ target: '/out/', confirm: true })) as Result
+    expect(r.filePath).toBe('/out/bracket.nc')
+    expectOk(await t.exportCmd({ target: 'C:\\out\\', confirm: true }))
+    expect(t.written.map((w) => w.target)).toEqual(['/out/bracket.nc', 'C:\\out\\bracket.nc'])
   })
 
   it('changes neither the revision nor the undo history', async () => {

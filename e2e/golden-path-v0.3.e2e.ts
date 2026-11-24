@@ -640,7 +640,7 @@ test('v0.3 golden path through the UI: shapes, Shape Editor, snap and measure, t
     const done = p.getByRole('dialog', { name: 'gCode exported' })
     await expect(done.getByText(`Setup ${name} (${i + 1} of 2)`)).toBeVisible({ timeout: 30_000 })
     await expect(done.getByText('No machine warnings.')).toBeVisible()
-    const file = join(dfyom.dataDir, `Plan 1 ${name}.nc`)
+    const file = join(dfyom.dataDir, `enclosure-shapes-s${i + 1}.nc`)
     expect(existsSync(file)).toBe(true)
     const gcode = readFileSync(file, 'utf8')
     await expect(done.getByText(`${gcode.trimEnd().split('\n').length} lines`)).toBeVisible()

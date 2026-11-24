@@ -388,7 +388,7 @@ describe('Plan mode', () => {
     )
     await t.user.click(within(t.nav()).getByRole('button', { name: 'Export gCode…' }))
     const dialog = await screen.findByRole('dialog', { name: 'gCode exported' })
-    expect(t.bridge.exportDialogNames).toEqual(['Plan 1'])
+    expect(t.bridge.exportDialogNames).toEqual(['bracket']) // short file name (DF62)
     expect(t.callsOf('plan.export')).toEqual([
       { planId: t.planId(), target: '/out/Plan 1.nc', confirm: true },
     ])

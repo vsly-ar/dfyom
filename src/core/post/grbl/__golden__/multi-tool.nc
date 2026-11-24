@@ -9,7 +9,7 @@ G90 G94 G17 G21
 G54
 G0 Z10
 (op-facing)
-(DFYOM TOOL CHANGE 1: 10 mm flat end mill)
+(DFYOM TOOL CHANGE 1: 10 mm flat end mill, 10 mm flat)
 M3 S18000
 G4 P3
 X36 Y4
@@ -23,9 +23,10 @@ X-6
 G0 Z2
 Z10
 (op-drill1)
+(Tool change to T2: spindle off, retract)
 M5
-(DFYOM TOOL CHANGE 2: 6 mm drill)
-M0
+(DFYOM TOOL CHANGE 2: 6 mm drill, 6 mm drill)
+M0 ;Install T2 6 mm drill, 6 mm drill, then zero Z
 G90 G94 G17 G21
 G54
 G0 Z10
@@ -55,9 +56,10 @@ G1 Z-13.803
 G0 Z2
 Z10
 (op-profile1)
+(Tool change to T3: spindle off, retract)
 M5
-(DFYOM TOOL CHANGE 3: 6 mm flat end mill)
-M0
+(DFYOM TOOL CHANGE 3: 6 mm flat end mill, 6 mm flat)
+M0 ;Install T3 6 mm flat end mill, 6 mm flat, then zero Z
 G90 G94 G17 G21
 G54
 G0 Z10

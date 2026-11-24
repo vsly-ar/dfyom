@@ -211,7 +211,7 @@ const program = (blocks: Block[], over: Partial<MachiningProgram> = {}): Machini
 const tool = (number = 1): Block => ({
   kind: 'toolChange',
   number,
-  tool: { name: `T${number}`, diameter: 6 },
+  tool: { name: `T${number}`, diameter: 6, type: 'flatEndMill' },
 })
 const spin = (rpm: number | 'off' = 10000): Block => ({ kind: 'spindle', rpm })
 const rapid = (x: number, y: number, z: number): Block => ({ kind: 'rapid', to: [x, y, z] })
@@ -247,6 +247,7 @@ function reparse(lines: readonly string[]): Parsed[] {
   for (const line of lines) {
     const code = line
       .replace(/\([^)]*\)/g, '')
+      .replace(/;.*$/, '')
       .replace(/\s/g, '')
       .toUpperCase()
     if (code === '') continue
@@ -343,9 +344,13 @@ function expectDialect(lines: readonly string[], units: 'mm' | 'in'): void {
   for (const p of reparse(lines))
     if ((p.motion === 2 || p.motion === 3) && /[XYZ]/.test(p.line))
       expect(p.line, 'arc without an in-plane axis word').toMatch(/[XY]/)
-  for (const l of lines) {
-    expect(l.length, l).toBeLessThanOrEqual(70)
-    expect(l, 'printable ASCII').toMatch(/^[\x20-\x7e]+$/)
+  for (const full of lines) {
+    expect(full.length, full).toBeLessThanOrEqual(70)
+    expect(full, 'printable ASCII').toMatch(/^[\x20-\x7e]+$/)
+    // the only `;` comment: a pause's message on its M0 line (DF63)
+    const pause = /^M0 ;([^()?!~;]+)$/.exec(full)
+    if (full.includes(';')) expect(pause, full).not.toBeNull()
+    const l = pause ? 'M0' : full
     expect(l).not.toMatch(/G8\d|G28|G30|G53|G92|G43|M6|M7|M8|M9|^N|%|;|R/)
     if (l.startsWith('(')) {
       expect(l).toMatch(/^\([^()?!~;]*\)$/)
@@ -435,7 +440,7 @@ describe('postGrbl', () => {
         'G90 G94 G17 G21',
         'G54',
         'G0 Z10',
-        '(DFYOM TOOL CHANGE 1: T1)',
+        '(DFYOM TOOL CHANGE 1: T1, 6 mm flat)',
         'M3 S10000',
         'G4 P3',
         'X1 Y2',
@@ -540,15 +545,16 @@ describe('postGrbl', () => {
       ),
     )
     expect(body(lines)).toEqual([
-      '(DFYOM TOOL CHANGE 1: T1)',
+      '(DFYOM TOOL CHANGE 1: T1, 6 mm flat)',
       'M3 S10000',
       'G4 P3',
       'X1 Y2',
       'G1 Z-1 F500',
       'G0 Z10',
+      '(Tool change to T2: spindle off, retract)',
       'M5',
-      '(DFYOM TOOL CHANGE 2: T2)',
-      'M0',
+      '(DFYOM TOOL CHANGE 2: T2, 6 mm flat)',
+      'M0 ;Install T2 T2, 6 mm flat, then zero Z',
       'G90 G94 G17 G21',
       'G54',
       'G0 Z10',
@@ -571,8 +577,8 @@ describe('postGrbl', () => {
       }),
     )
     expect(body(lines)).toEqual([
-      '(DFYOM TOOL CHANGE 1: T1)',
-      'M0',
+      '(DFYOM TOOL CHANGE 1: T1, 6 mm flat)',
+      'M0 ;Install T1 T1, 6 mm flat, then zero Z',
       'G90 G94 G17 G21',
       'G54',
       'G0 Z10',
@@ -590,7 +596,11 @@ describe('postGrbl', () => {
         OPTS,
       ),
     )
-    expect(body(lines).slice(1, 4)).toEqual(['M3 S12000', '(Set spindle to 12000 rpm)', 'M0'])
+    expect(body(lines).slice(1, 4)).toEqual([
+      'M3 S12000',
+      '(Set spindle to 12000 rpm)',
+      'M0 ;Set spindle to 12000 rpm',
+    ])
   })
 
   it('suppresses unchanged words, keeps F pending over dropped lines', () => {
@@ -863,7 +873,9 @@ describe('review fixes', () => {
 
   it('a non-finite or huge tool diameter is an Err, not a throw', () => {
     for (const diameter of [Number.NaN, Number.POSITIVE_INFINITY, 1e22]) {
-      const blocks: Block[] = [{ kind: 'toolChange', number: 1, tool: { name: 'T', diameter } }]
+      const blocks: Block[] = [
+        { kind: 'toolChange', number: 1, tool: { name: 'T', diameter, type: 'flatEndMill' } },
+      ]
       const e = expectErrCode(postGrbl(program(blocks), OPTS), 'model.invariant')
       expect(e.issues.map((i) => i.rule)).toEqual(['range'])
     }
@@ -883,13 +895,13 @@ describe('review fixes', () => {
   it('manual spindle: asks to stop the spindle before a tool change and before the end', () => {
     const blocks: Block[] = [tool(1), spin(), rapid(1, 2, 10), tool(2), spin(), rapid(1, 2, 10)]
     const lines = expectOk(postGrblLines(program(blocks, { spindleControl: 'manual' }), OPTS))
-    const k = lines.indexOf('(DFYOM TOOL CHANGE 2: T2)')
+    const k = lines.indexOf('(DFYOM TOOL CHANGE 2: T2, 6 mm flat)')
     expect(lines.slice(k - 1, k + 2)).toEqual([
       '(Stop the spindle)',
-      '(DFYOM TOOL CHANGE 2: T2)',
-      'M0',
+      '(DFYOM TOOL CHANGE 2: T2, 6 mm flat)',
+      'M0 ;Stop spindle, install T2 T2, 6 mm flat, then zero Z',
     ])
-    expect(lines.slice(-4)).toEqual(['M5', '(Stop the spindle)', 'M0', 'M30'])
+    expect(lines.slice(-4)).toEqual(['M5', '(Stop the spindle)', 'M0 ;Stop the spindle', 'M30'])
     // gcode spindles get neither
     const g = expectOk(postGrblLines(program(blocks), OPTS))
     expect(g.filter((l) => l === '(Stop the spindle)')).toEqual([])
@@ -898,8 +910,13 @@ describe('review fixes', () => {
   it('after a tool change M0: modes and G54 again before the retract', () => {
     const blocks: Block[] = [tool(1), spin(), rapid(1, 2, 10), tool(2), spin(), rapid(1, 2, 10)]
     const lines = expectOk(postGrblLines(program(blocks), OPTS))
-    const k = lines.indexOf('(DFYOM TOOL CHANGE 2: T2)')
-    expect(lines.slice(k + 1, k + 5)).toEqual(['M0', 'G90 G94 G17 G21', 'G54', 'G0 Z10'])
+    const k = lines.indexOf('(DFYOM TOOL CHANGE 2: T2, 6 mm flat)')
+    expect(lines.slice(k + 1, k + 5)).toEqual([
+      'M0 ;Install T2 T2, 6 mm flat, then zero Z',
+      'G90 G94 G17 G21',
+      'G54',
+      'G0 Z10',
+    ])
   })
 
   it('the motion check catches a wrong arc direction, also for full circles', () => {

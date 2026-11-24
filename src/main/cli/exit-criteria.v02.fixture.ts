@@ -395,7 +395,7 @@ export async function exitCriteriaV02Flow(call: Call, dir: string): Promise<Flow
       toolChanges: exported.stats.toolChanges,
       warnings: [],
     })
-    const markers = [...gcode.matchAll(/^\(DFYOM TOOL CHANGE (\d+): [^)]*\)\nM0$/gm)]
+    const markers = [...gcode.matchAll(/^\(DFYOM TOOL CHANGE (\d+): [^)]*\)\nM0( ;[^\n]*)?$/gm)]
     expect(waits.filter((w) => w.startsWith('toolChange'))).toEqual(
       markers.map((mk) => `toolChange ${mk[1]}`),
     )

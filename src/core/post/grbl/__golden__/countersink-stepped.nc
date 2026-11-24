@@ -7,7 +7,7 @@ G90 G94 G17 G21
 G54
 G0 Z10
 (op-hole1_drill)
-(DFYOM TOOL CHANGE 1: 2.5 mm flat end mill)
+(DFYOM TOOL CHANGE 1: 2.5 mm flat end mill, 2.5 mm flat)
 M3 S3000
 G4 P3
 X15 Y14.55

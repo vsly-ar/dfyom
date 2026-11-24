@@ -16,10 +16,10 @@ G90 G94 G17 G21
 G54
 G0 Z10
 (Facing 1)
-(DFYOM TOOL CHANGE 1: Flat 12)
+(DFYOM TOOL CHANGE 1: Flat 12, 12 mm flat)
 M3 S12000
 (Set spindle to 12000 rpm)
-M0
+M0 ;Set spindle to 12000 rpm
 X262 Y5
 Z2
 G1 Z-1 F800
@@ -5155,16 +5155,17 @@ G3 X121.5 Y156.582 I0 J-6
 G0 Z1
 Z10
 (Pocket 2)
+(Tool change to T2: spindle off, retract)
 M5
 (Stop the spindle)
-(DFYOM TOOL CHANGE 2: Flat 6)
-M0
+(DFYOM TOOL CHANGE 2: Flat 6, 6 mm flat)
+M0 ;Stop spindle, install T2 Flat 6, 6 mm flat, then zero Z
 G90 G94 G17 G21
 G54
 G0 Z10
 M3 S16000
 (Set spindle to 16000 rpm)
-M0
+M0 ;Set spindle to 16000 rpm
 X125.7 Y166.459
 Z1
 G1 Z-1 F600
@@ -5319,16 +5320,17 @@ G3 X128 Y172.056 I-1.5 J0
 G0 Z1
 Z10
 (Profile 1)
+(Tool change to T1: spindle off, retract)
 M5
 (Stop the spindle)
-(DFYOM TOOL CHANGE 1: Flat 12)
-M0
+(DFYOM TOOL CHANGE 1: Flat 12, 12 mm flat)
+M0 ;Stop spindle, install T1 Flat 12, 12 mm flat, then zero Z
 G90 G94 G17 G21
 G54
 G0 Z10
 M3 S12000
 (Set spindle to 12000 rpm)
-M0
+M0 ;Set spindle to 12000 rpm
 X126.089 Y-2.057
 Z2
 G1 Z-1 F800
@@ -6081,5 +6083,5 @@ G0 Z2
 Z10
 M5
 (Stop the spindle)
-M0
+M0 ;Stop the spindle
 M30

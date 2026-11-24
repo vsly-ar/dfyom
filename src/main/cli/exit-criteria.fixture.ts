@@ -266,12 +266,12 @@ export async function exitCriteriaFlow(call: Call, dir: string): Promise<FlowRes
     warnings: [],
   })
   // every tool change of the program (marker followed by M0) and every other M0 waited once
-  const markers = [...gcode.matchAll(/^\(DFYOM TOOL CHANGE (\d+): [^)]*\)\nM0$/gm)]
+  const markers = [...gcode.matchAll(/^\(DFYOM TOOL CHANGE (\d+): [^)]*\)\nM0( ;[^\n]*)?$/gm)]
   expect(waits.filter((w) => w.startsWith('toolChange'))).toEqual(
     markers.map((mk) => `toolChange ${mk[1]}`),
   )
   expect(waits.filter((w) => w === 'programPause')).toHaveLength(ended.value.pauses)
-  expect(gcode.match(/^M0$/gm)).toHaveLength(markers.length + ended.value.pauses)
+  expect(gcode.match(/^M0( ;.*)?$/gm)).toHaveLength(markers.length + ended.value.pauses)
   // progress: first the job's export (indeterminate: no total, seen only when a poll lands in
   // it, i.e. under load), then lines acknowledged out of the program's lines, never going back,
   // ending complete (docs/modes/run-v0.1.md#progress)
