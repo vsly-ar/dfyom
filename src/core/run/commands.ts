@@ -24,11 +24,17 @@ import { hashJson } from '../plan/snapshot'
 import {
   AXES,
   ControllerInfoSchema,
+  OVERRIDE_STEPS,
+  PROBE_DEFAULTS,
+  type RapidOverride,
   TimeScaleSchema,
   Vec3Schema,
   type MachineAction,
 } from './host/protocol'
 import { RunStatusSchema } from './service'
+import { DEFAULT_BAUD, SerialPortInfoSchema } from './serial'
+import { settingsCheck, SettingsCheckSchema } from './settings-check'
+import type { MachineValuesDTO } from '../library/machine.dto'
 
 /** Margin between the clearance plane and the top of the machine travel in `prepare` (mm). */
 export const PREPARE_TOP_MARGIN = 5
@@ -126,11 +132,29 @@ export const runConnectionOpen = defineCommand({
   kind: 'effect',
   name: 'run.connection.open',
   summary:
-    "Connect to the virtual machine, emulating the plan's machine copy (planId) or a library machine (machineId, no plan needed); prepare: true (plans only) homes it at once and centres the stock on the table.",
-  title: () => 'Connect to the virtual machine',
+    "Connect to the virtual machine, emulating the plan's machine copy (planId) or a library machine (machineId, no plan needed); prepare: true (plans only) homes it at once and centres the stock on the table. target 'serial' (a real GRBL controller on path) is for the user in the app only.",
+  title: (a) =>
+    (a as { target?: string }).target === 'serial'
+      ? 'Connect to the machine'
+      : 'Connect to the virtual machine',
   machine: true,
   args: z.object({
-    target: z.literal('virtual').describe('Only the virtual machine (GRBL emulator) in v0.1'),
+    target: z
+      .enum(['virtual', 'serial'])
+      .describe('virtual: the GRBL emulator; serial: a real controller (UI only)'),
+    path: z
+      .string()
+      .min(1)
+      .max(500)
+      .optional()
+      .describe('Serial port path from run.ports.scan (target serial)'),
+    baud: z
+      .number()
+      .int()
+      .min(300)
+      .max(4_000_000)
+      .default(DEFAULT_BAUD)
+      .describe('Baud rate (target serial)'),
     planId: PlanIdSchema.optional().describe(
       'The plan whose machine copy the virtual machine emulates; or give machineId',
     ),
@@ -147,7 +171,11 @@ export const runConnectionOpen = defineCommand({
       .default(false)
       .describe('Home at once and set the work zero so the stock sits centred on the table'),
   }),
-  result: ControllerInfoSchema,
+  result: ControllerInfoSchema.extend({
+    settingsCheck: SettingsCheckSchema.optional().describe(
+      "Serial: the controller's $$ against the machine copy; a real run needs matches",
+    ),
+  }),
   async run(doc, args, ctx) {
     const where = 'run.connection.open'
     const m = ctx.services.machine
@@ -156,6 +184,33 @@ export const runConnectionOpen = defineCommand({
     const chosen = connectionMachine(doc, ctx.services, args, where)
     if (chosen.isErr()) return chosen
     const { machine, key } = chosen.unwrap()
+    const ctxData =
+      args.planId === undefined ? { machineId: args.machineId } : { planId: args.planId }
+    if (args.target === 'serial') {
+      if (args.path === undefined)
+        return fail('input.malformed', 'a serial connection needs the port path', {
+          where,
+          issues: [{ path: ['path'], rule: 'required', message: 'give the port path' }],
+        })
+      if (args.prepare)
+        return fail('input.malformed', 'prepare is for the virtual machine only', {
+          where,
+          issues: [{ path: ['prepare'], rule: 'virtualOnly', message: 'not for a real machine' }],
+        })
+      const info = await m.connect({
+        kind: 'serial',
+        path: args.path,
+        baud: args.baud,
+        machineKey: key,
+      })
+      if (info.isErr()) return Err(info.unwrapErr().withContext(where, ctxData))
+      const check = settingsCheck(
+        machine.toDTO() as MachineValuesDTO,
+        info.unwrap().settings,
+        args.planId === undefined ? 'machine' : 'plan',
+      )
+      return Ok({ ...info.unwrap(), settingsCheck: check })
+    }
     let prepare: { workZero: Vec3 } | undefined
     if (args.prepare) {
       if (args.planId === undefined)
@@ -182,8 +237,6 @@ export const runConnectionOpen = defineCommand({
       ...(args.homing ? { position } : {}),
       ...(prepare === undefined ? {} : { prepare }),
     })
-    const ctxData =
-      args.planId === undefined ? { machineId: args.machineId } : { planId: args.planId }
     return info.mapErr((e) => e.withContext(where, ctxData))
   },
 })
@@ -234,7 +287,7 @@ export const runMachineJog = defineCommand({
   kind: 'effect',
   name: 'run.machine.jog',
   summary:
-    'Jog to a machine position (to) or by a distance (by) in mm at feed mm/min; resolves when GRBL accepted it, motion continues.',
+    'Jog to a machine position (to) or by a distance (by) in mm at feed mm/min, or continuously to the travel edge (continuous); resolves when GRBL accepted it, motion continues.',
   title: () => 'Jog',
   machine: true,
   args: z
@@ -242,8 +295,15 @@ export const runMachineJog = defineCommand({
       to: Vec3Schema.optional().describe('Target in machine coordinates (mm)'),
       by: Vec3Schema.optional().describe('Relative move (mm)'),
       feed: z.number().positive().max(100_000).describe('mm/min'),
+      continuous: z
+        .boolean()
+        .optional()
+        .describe(
+          'Hold to jog: with by (one axis, its sign the direction) move to the travel edge until run.machine.jogCancel',
+        ),
     })
-    .refine((a) => (a.to === undefined) !== (a.by === undefined), 'give exactly one of to or by'),
+    .refine((a) => (a.to === undefined) !== (a.by === undefined), 'give exactly one of to or by')
+    .refine((a) => a.continuous !== true || a.by !== undefined, 'a continuous jog takes by'),
   result: Done,
   run: async (_doc, args, ctx) =>
     (
@@ -254,6 +314,7 @@ export const runMachineJog = defineCommand({
           feed: args.feed,
           ...(args.to === undefined ? {} : { to: args.to }),
           ...(args.by === undefined ? {} : { by: args.by }),
+          ...(args.continuous === true ? { continuous: true } : {}),
         },
         'run.machine.jog',
       )
@@ -403,6 +464,23 @@ export const runTimeScaleSet = defineCommand({
   },
 })
 
+export const runPortsScan = defineCommand({
+  kind: 'effect',
+  name: 'run.ports.scan',
+  summary:
+    'List serial ports (USB first) for run.connection.open { target: serial }. Opens nothing.',
+  title: () => 'Scan serial ports',
+  machine: false,
+  args: Empty,
+  result: z.object({ ports: z.array(SerialPortInfoSchema) }),
+  async run(_doc, _args, ctx) {
+    const where = 'run.ports.scan'
+    const m = ctx.services.machine
+    if (m === undefined) return fail('machine.connection', 'no machine service', { where })
+    return (await m.listPorts()).map((ports) => ({ ports })).mapErr((e) => e.withContext(where))
+  },
+})
+
 export const runStatusGet = defineQuery({
   name: 'run.status.get',
   summary:
@@ -438,15 +516,116 @@ export function checkNoRunJob(jobs: JobDirectory): AppResult<void> {
   })
 }
 
+export const runMachineProbeZ = defineCommand({
+  kind: 'job',
+  name: 'run.machine.probeZ',
+  summary:
+    'Touch plate: probe Z down (G38.2), set G54 Z so the plate top is Z = plateThickness, retract. Idle or at a tool change. A miss is ALARM:5.',
+  title: () => 'Probe Z',
+  machine: true,
+  args: z.object({
+    plateThickness: z.number().positive().max(100).describe('mm (machine probePlateThickness)'),
+    maxTravel: z
+      .number()
+      .positive()
+      .max(1000)
+      .optional()
+      .describe(`mm down at most, default ${PROBE_DEFAULTS.maxTravel}`),
+    feed: z
+      .number()
+      .positive()
+      .max(10_000)
+      .optional()
+      .describe(`mm/min, default ${PROBE_DEFAULTS.feed}`),
+    retract: z
+      .number()
+      .min(0)
+      .max(100)
+      .optional()
+      .describe(`mm lift after contact, default ${PROBE_DEFAULTS.retract}`),
+  }),
+  result: z.object({
+    workZero: Vec3Schema.describe('New G54, MPos mm'),
+    contact: Vec3Schema.describe('Contact, MPos mm'),
+  }),
+  async run(_doc, args, ctx) {
+    const r = await act(
+      ctx.services,
+      {
+        kind: 'probeZ',
+        plateThickness: args.plateThickness,
+        maxTravel: args.maxTravel ?? PROBE_DEFAULTS.maxTravel,
+        feed: args.feed ?? PROBE_DEFAULTS.feed,
+        retract: args.retract ?? PROBE_DEFAULTS.retract,
+      },
+      'run.machine.probeZ',
+    )
+    if (r.isErr()) return r
+    return Ok(r.unwrap() as { workZero: Vec3; contact: Vec3 })
+  },
+})
+
+const OverridesResult = z.object({
+  overrides: z
+    .object({ feed: z.number(), rapid: z.number(), spindle: z.number() })
+    .optional()
+    .describe('% as reported'),
+})
+
+/** One real-time byte per given override, in the order feed, spindle, rapid. */
+export const runOverrideSet = defineCommand({
+  kind: 'effect',
+  name: 'run.override.set',
+  summary: 'Feed/spindle override: reset (100 %), ±10 or ±1 %; rapids 100, 50 or 25 %.',
+  title: () => 'Override',
+  machine: true,
+  urgent: true,
+  args: z.object({
+    feed: z.enum(OVERRIDE_STEPS).optional(),
+    spindle: z.enum(OVERRIDE_STEPS).optional(),
+    rapid: z.union([z.literal(100), z.literal(50), z.literal(25)]).optional(),
+  }),
+  result: OverridesResult,
+  async run(_doc, args, ctx) {
+    const where = 'run.override.set'
+    const actions: MachineAction[] = []
+    if (args.feed !== undefined)
+      actions.push({ kind: 'override', which: 'feed', action: args.feed })
+    if (args.spindle !== undefined)
+      actions.push({ kind: 'override', which: 'spindle', action: args.spindle })
+    if (args.rapid !== undefined)
+      actions.push({
+        kind: 'override',
+        which: 'rapid',
+        action: String(args.rapid) as RapidOverride,
+      })
+    if (actions.length === 0)
+      return fail('input.malformed', 'give feed, spindle or rapid', {
+        where,
+        issues: [{ path: ['feed'], rule: 'required', message: 'give feed, spindle or rapid' }],
+      })
+    let last: unknown = {}
+    for (const a of actions) {
+      const r = await act(ctx.services, a, where)
+      if (r.isErr()) return r
+      last = r.unwrap()
+    }
+    return Ok(last as z.output<typeof OverridesResult>)
+  },
+})
+
 export const RUN_COMMANDS: readonly AnyCommand[] = [
   runConnectionOpen,
   runConnectionClose,
+  runPortsScan,
   runMachineHome,
   runMachineUnlock,
   runMachineJog,
   runMachineJogCancel,
   runWorkZeroSet,
   runMachineReset,
+  runMachineProbeZ,
+  runOverrideSet,
   runJobStart,
   runJobCheck,
   runJobContinue,

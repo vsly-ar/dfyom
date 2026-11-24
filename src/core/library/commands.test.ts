@@ -327,7 +327,7 @@ describe('library.machine.settings (GRBL $$ import)', () => {
         { setting: '$11', field: 'junctionDeviation', value: 0.02, from: null, to: '0.02 mm' },
         { setting: '$130', field: 'travel.x', value: 750, from: '800 mm', to: '750 mm' },
       ],
-      unchanged: ['$111'],
+      unchanged: ['$111', '$20'],
       skipped: [],
       ignored: [999],
     })

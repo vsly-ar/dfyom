@@ -15,7 +15,7 @@ import { parseLiteral } from '../quantity/parse'
 import { Quantity } from '../quantity/quantity'
 import type { QuantityDTO } from '../quantity/quantity.dto'
 import type { QuantityKind, UnitId } from '../quantity/units'
-import type { MachineValuesDTO } from './machine.dto'
+import { HOMING_CORNERS, type HomingCorner, type MachineValuesDTO } from './machine.dto'
 import { itemUnitSystem, libraryUnit } from './values-input'
 
 type Group = 'stepsPerMm' | 'acceleration'
@@ -49,8 +49,8 @@ const DEFS: readonly SettingDef[] = [
   ...axes(100, 'stepsPerMm', 'scalar', { scalarUnit: 'steps/mm', group: 'stepsPerMm' }),
 ]
 
-/** Read but not mapped to a field: `$20` gates travel. */
-const READ = new Set([20])
+/** Mapped outside DEFS (not quantities): `$20` soft limits, `$23` homing corner. */
+const FLAGS = new Set([20, 23])
 
 /** GRBL's own unit per kind (`$$` is always metric). */
 const GRBL_UNIT: Readonly<Record<QuantityKind, UnitId>> = {
@@ -77,11 +77,11 @@ export interface SettingsChange {
   readonly to: string
   /** Settings that must be accepted together with this one (a new all-axes group). */
   readonly together?: readonly string[]
-  /** The value to store (in the machine's unit system). */
-  readonly quantity: QuantityDTO
+  /** The value to store: a quantity in the machine's unit system, `softLimits` or `homingCorner`. */
+  readonly stored: QuantityDTO | boolean | HomingCorner
 }
 
-export type SkipRule = 'softLimitsOff' | 'manualSpindle' | 'notPositive' | 'allAxes'
+export type SkipRule = 'softLimitsOff' | 'manualSpindle' | 'notPositive' | 'allAxes' | 'zHomesDown'
 
 export interface SettingsSkip {
   readonly setting: string
@@ -109,7 +109,7 @@ function at(values: object, path: readonly string[]): QuantityDTO | undefined {
   return v as QuantityDTO | undefined
 }
 
-function setAt<T extends object>(values: T, path: readonly string[], q: QuantityDTO): T {
+function setAt<T extends object>(values: T, path: readonly string[], q: unknown): T {
   const [k, ...rest] = path as [string, ...string[]]
   const inner = (values as Record<string, unknown>)[k]
   return {
@@ -178,7 +178,7 @@ export function machineSettingsDiff(
       ...base,
       from: from === undefined ? null : quantityWithUnit(from, def.scalarUnit),
       to: quantityWithUnit(to.unwrap(), def.scalarUnit),
-      quantity: to.unwrap(),
+      stored: to.unwrap(),
     })
   }
   // a group the machine does not have yet: all three axes together, or none
@@ -195,11 +195,54 @@ export function machineSettingsDiff(
       out.push({ ...c, together: members })
     else skipped.push({ setting: c.setting, field: c.field, value: c.value, rule: 'allAxes' })
   }
+  flagChanges(machine, settings, out, unchanged, skipped)
   const mapped = new Set(DEFS.map((d) => d.n))
   const ignored = [...settings.keys()]
-    .filter((n) => !mapped.has(n) && !READ.has(n))
+    .filter((n) => !mapped.has(n) && !FLAGS.has(n))
     .sort((a, b) => a - b)
   return { read: settings.size, changes: out, unchanged, skipped, ignored }
+}
+
+/**
+ * `$20` → `softLimits` and `$23` → `homingCorner` (bits 0–1; Z homing down is skipped). Equal to the
+ * stored value, or with none stored to DFYOM's default (on, `backRight`), is unchanged.
+ */
+function flagChanges(
+  machine: MachineValuesDTO,
+  settings: ReadonlyMap<number, number>,
+  changes: SettingsChange[],
+  unchanged: string[],
+  skipped: SettingsSkip[],
+): void {
+  const onOff = (v: boolean) => (v ? 'on' : 'off')
+  const soft = settings.get(20)
+  if (soft !== undefined) {
+    const to = soft !== 0
+    const from = machine.softLimits
+    if ((from ?? true) === to) unchanged.push('$20')
+    else
+      changes.push({
+        setting: '$20',
+        field: 'softLimits',
+        value: soft,
+        from: from === undefined ? null : onOff(from),
+        to: onOff(to),
+        stored: to,
+      })
+  }
+  const mask = settings.get(23)
+  if (mask !== undefined) {
+    const bits = Math.trunc(mask)
+    const base = { setting: '$23', field: 'homingCorner', value: mask }
+    // bit 0 X homes −, bit 1 Y homes − (envelope.ts homingMaskOf); bit 2: Z homes down
+    if ((bits & 4) !== 0) skipped.push({ ...base, rule: 'zHomesDown' })
+    else {
+      const to = HOMING_CORNERS[bits & 3]!
+      const from = machine.homingCorner
+      if ((from ?? HOMING_CORNERS[0]) === to) unchanged.push('$23')
+      else changes.push({ ...base, from: from ?? null, to, stored: to })
+    }
+  }
 }
 
 /**
@@ -236,6 +279,6 @@ export function applySettingsChanges(
     })
   let next = machine
   for (const c of diff.changes)
-    if (accept.includes(c.setting)) next = setAt(next, c.field.split('.'), c.quantity)
+    if (accept.includes(c.setting)) next = setAt(next, c.field.split('.'), c.stored)
   return Ok(next)
 }

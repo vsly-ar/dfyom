@@ -1,9 +1,11 @@
 // The setup-change prompt (v0.2 task E2): between two setups' runs, built like the tool-change
 // dialog: the next setup's name and direction, a picture of the stock in its new orientation, the
 // steps (turn and clamp the stock, set the work zero at the front-left corner of the new top or
-// where the setup moved it, DF78 N7; start), jog and work-zero controls inside, "Start setup n" as the only primary action and the
-// run dialogs' Stop. It never continues by itself; "Close (start later)" puts it off to the inspector.
-// Doc: docs/modes/plan-v0.2.md#setup-change-in-run, docs/conventions/ui.md#run-mode-safety-ui
+// where the setup moved it, DF78 N7; start), the zero to set and the part corner it is (M7), jog
+// and work-zero controls inside, "Start setup n" as the only primary action and the run dialogs'
+// Stop. It never continues by itself; "Close (start later)" puts it off to the inspector.
+// Doc: docs/modes/plan-v0.2.md#setup-change-in-run, docs/conventions/ui.md#run-mode-safety-ui,
+// docs/modes/run-machine.md#run-status-and-the-zero-to-set-m7
 import { useId } from 'react'
 import { DIRECTION_LABEL } from '../../../../core/geometry/face'
 import type { ProjectDoc } from '../../../../core/project/document'
@@ -11,11 +13,12 @@ import type { SetupOrientation } from '../../../../core/toolpath/wcs'
 import { formatHeight } from '../../messages/plan'
 import { runMessages } from '../../messages/run'
 import { Icon, Button, Dialog } from '../../ui'
-import { JogPad } from './JogPad'
+import { JogPad, useJogMode } from './JogPad'
 import { formatLength, runGates } from './machine-state'
 import { planRunInfo, setupPlacement } from './plan-info'
 import { useRun, useRunStore } from './run-store'
 import { WorkZeroButtons } from './RunNavigator'
+import { ProbeZButton, usePlateThickness } from './ProbeZButton'
 import { RunDialogFooter } from './RunStop'
 import styles from './Run.module.css'
 
@@ -28,8 +31,10 @@ export function SetupChangeDialog({ doc }: { doc: ProjectDoc }): React.JSX.Eleme
   const planId = useRun((s) => s.planId)
   const status = useRun((s) => s.status)
   const jogStep = useRun((s) => s.jogStep)
+  const jogMode = useJogMode()
   const pending = useRun((s) => s.pending)
   const ids = { jog: useId(), zero: useId(), start: useId() }
+  const plate = usePlateThickness(doc)
   const plan = planId === undefined ? undefined : doc.plans[planId]
   if (setupId === undefined || plan === undefined) return null
   const a = store.getState()
@@ -41,6 +46,9 @@ export function SetupChangeDialog({ doc }: { doc: ProjectDoc }): React.JSX.Eleme
   const units = doc.unitSystem
   const starting = pending.includes('run.job.start')
   // DF78 (N7): the zero's offset or point, in words
+  const moved =
+    placed !== undefined &&
+    (placed.zeroPoint !== undefined || placed.zero[0] !== 0 || placed.zero[1] !== 0)
   const zeroText =
     placed === undefined
       ? undefined
@@ -88,6 +96,7 @@ export function SetupChangeDialog({ doc }: { doc: ProjectDoc }): React.JSX.Eleme
         ))}
       </ol>
       <JogPad
+        {...jogMode}
         units={units}
         step={jogStep}
         onStep={a.setJogStep}
@@ -101,7 +110,34 @@ export function SetupChangeDialog({ doc }: { doc: ProjectDoc }): React.JSX.Eleme
         reasonId={ids.zero}
         onZero={(axes) => void a.setWorkZero(axes)}
       />
+      <ProbeZButton
+        thickness={plate}
+        gate={gates.workZero}
+        reasonId={ids.zero}
+        units={units}
+        busy={pending.includes('run.machine.probeZ')}
+        hint={false}
+        onProbe={(t) => void a.probeZ(t)}
+      />
       <dl className={styles['facts']}>
+        <dt>{m.zeroToSet}</dt>
+        <dd>
+          {m.zeroText(moved ? zeroText?.replace(/^X /, 'at X ') : undefined)}
+          {placed && placed.zeroPoint === undefined
+            ? ` ${moved ? m.offsetCorner(placed.corner) : m.zeroCorner(placed.corner)}`
+            : ''}
+        </dd>
+        {placed ? (
+          <>
+            <dt>{m.stockOnMachine}</dt>
+            <dd className={styles['mono']}>
+              {placed.orientation.size
+                .map((v, i) => `${'XYZ'[i]} ${formatLength(v, units)}`)
+                .join(' × ')}{' '}
+              {runMessages.dro.units[units]}
+            </dd>
+          </>
+        ) : null}
         <dt>{m.workZero}</dt>
         <dd className={styles['mono']}>
           {status.workZero.map((v) => formatLength(v, units)).join(' · ')}{' '}
@@ -212,6 +248,9 @@ export function SetupPicture({
         />
         <circle className={styles['workZeroRing']} cx={ring[0]} cy={ring[1]} r={6} />
         <circle className={styles['workZeroDot']} cx={ring[0]} cy={ring[1]} r={2.2} />
+        <text className={styles['workZeroLabel']} x={ring[0] - 8} y={ring[1] - 10}>
+          {m.zeroLabel}
+        </text>
       </svg>
       <figcaption>
         <dl className={styles['facts']}>

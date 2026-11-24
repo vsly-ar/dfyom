@@ -6,11 +6,20 @@
 import type { Direction } from '../../../../core/geometry/face'
 import type { Placement, Vec2 } from '../../../../core/geometry/model'
 import { setupAlignment } from '../../../../core/plan/alignment'
+import { planOperationLabel } from '../../../../core/plan/labels'
 import { loadPlanDTO } from '../../../../core/plan/plan'
+import { QuantityDtoSchema } from '../../../../core/quantity/quantity.dto'
+import { Quantity } from '../../../../core/quantity/quantity'
 import type { PlanDTO, SetupDTO } from '../../../../core/plan/plan.dto'
 import { setupDirection, setupRotation } from '../../../../core/plan/setups'
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
-import { setupFrame, setupOrientation, type SetupOrientation } from '../../../../core/toolpath/wcs'
+import type { RunStatus } from '../../../../core/run/service'
+import {
+  setupFrame,
+  setupOrientation,
+  setupZeroCorner,
+  type SetupOrientation,
+} from '../../../../core/toolpath/wcs'
 
 /** Plans that may run on the virtual machine: every status but `archived` (decision 5). */
 export function runnablePlans(doc: ProjectDoc): PlanDTO[] {
@@ -60,6 +69,47 @@ export function planRunInfo(plan: PlanDTO, setupId?: string): PlanRunInfo {
   }
 }
 
+/** An operation start a stopped run may resume at (M5): the program's label and tool. */
+export interface ResumePoint {
+  readonly planOperationId: string
+  /** The operation's label comment in the program. */
+  readonly label: string
+  /** Tool number as in the program (by first use in the setup) and the tool's name. */
+  readonly tool: number
+  readonly toolName: string
+}
+
+/** The setup's operations in machining order, as "Resume at" offers them (run-machine.md#section-resume-m5). */
+export function resumePoints(plan: PlanDTO, setupId: string | undefined): ResumePoint[] {
+  const numbers = new Map<string, number>()
+  return runSetup(plan, setupId).operations.map((op) => {
+    const key = op.tool ?? ''
+    const n = numbers.get(key) ?? numbers.size + 1
+    numbers.set(key, n)
+    return {
+      planOperationId: op.id,
+      label: planOperationLabel(plan.design.part, op.designOperationIds),
+      tool: n,
+      toolName: snapshotName(plan, op.tool) ?? '–',
+    }
+  })
+}
+
+/** "Resume from…" is offered after a stopped or failed run of this plan and setup (M5). */
+export function canResume(
+  lastRun: RunStatus['lastRun'],
+  plan: PlanDTO | undefined,
+  setupId: string | undefined,
+): boolean {
+  return (
+    lastRun !== undefined &&
+    plan !== undefined &&
+    lastRun.outcome !== 'done' &&
+    lastRun.planId === plan.id &&
+    lastRun.setupId === runSetup(plan, setupId).id
+  )
+}
+
 /** A setup on the part: its WCS in the part frame and the stock as it sits on the machine. */
 export interface SetupPlacement {
   /** WCS → part frame (identity for an unrotated top setup), its origin at the work zero. */
@@ -69,6 +119,8 @@ export interface SetupPlacement {
   readonly zero: Vec2
   /** The alignment point the zero is on, by name; absent = an offset or the corner. */
   readonly zeroPoint?: string
+  /** The part corner at the work zero, e.g. "back left" (M7). */
+  readonly corner: string
 }
 
 /** `undefined` when the plan's stock copy does not load. */
@@ -95,5 +147,41 @@ export function setupPlacement(
     orientation: setupOrientation(direction, rotation, stock),
     zero: a.zero,
     ...(point === undefined ? {} : { zeroPoint: point.name }),
+    corner: setupZeroCorner(direction, rotation, stock),
   }
+}
+
+/** The setup's clearance height (mm above the stock top), if it reads. */
+export function setupClearance(plan: PlanDTO, setupId: string | undefined): number | undefined {
+  const q = Quantity.fromDTO(runSetup(plan, setupId).clearanceHeight)
+  return q.isOk() && q.unwrap().kind === 'length' ? q.unwrap().canonical : undefined
+}
+
+/** A `probePlateThickness` in mm, if the values carry a valid one. */
+function plateOf(values: unknown): number | undefined {
+  const dto = QuantityDtoSchema.safeParse(
+    (values as { probePlateThickness?: unknown } | undefined)?.probePlateThickness,
+  )
+  if (!dto.success) return undefined
+  const q = Quantity.fromDTO(dto.data)
+  return q.isOk() && q.unwrap().kind === 'length' && q.unwrap().canonical > 0
+    ? q.unwrap().canonical
+    : undefined
+}
+
+/**
+ * The touch plate thickness (mm) for a probe (docs/modes/run-machine.md#probing-and-re-zero-m4):
+ * the plan's machine copy, else the library machine it was copied from; without a plan the chosen
+ * library machine. Undefined: no plate set (no probe control).
+ */
+export function plateThickness(
+  plan: PlanDTO | undefined,
+  machines: readonly { readonly id: string; readonly [field: string]: unknown }[] | undefined,
+  machineId: string | undefined,
+): number | undefined {
+  const lib = (id: string | undefined) => plateOf(machines?.find((x) => x.id === id))
+  if (plan === undefined) return lib(machineId)
+  const copy = plan.snapshots.find((x) => x.id === plan.machine)
+  if (copy === undefined) return undefined
+  return plateOf(copy.values) ?? lib(copy.libraryItemId)
 }

@@ -8,7 +8,7 @@ import { DIRECTION_LABEL, type StockSize } from '../geometry/face'
 import type { Vec3 } from '../geometry/model'
 import type { SetupHeader } from '../post/program'
 import type { Overreach } from '../toolpath/overreach'
-import { setupFrame, setupOrientation } from '../toolpath/wcs'
+import { setupFrame, setupOrientation, setupZeroCorner } from '../toolpath/wcs'
 import type { SetupDTO } from './plan.dto'
 import { setupDirection, setupRotation } from './setups'
 
@@ -36,14 +36,7 @@ export function setupCorner(
   setup: Pick<SetupDTO, 'direction' | 'rotation'>,
   stock: StockSize,
 ): string {
-  const o = setupFrame(setupDirection(setup), setupRotation(setup), stock).origin
-  const zero = (a: number) => Math.abs(a) < 1e-9
-  const axis = setupDirection(setup)[1]
-  const words: string[] = []
-  if (axis !== 'z') words.push(zero(o[2]) ? 'top' : 'bottom')
-  if (axis !== 'y') words.push(zero(o[1]) ? 'front' : 'back')
-  if (axis !== 'x') words.push(zero(o[0]) ? 'left' : 'right')
-  return words.join(' ')
+  return setupZeroCorner(setupDirection(setup), setupRotation(setup), stock)
 }
 
 /** Tips that bring a setup-1 machine side up (old machine direction → T, a rotation). */

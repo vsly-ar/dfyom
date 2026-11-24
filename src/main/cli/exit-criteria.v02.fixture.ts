@@ -318,8 +318,15 @@ export async function exitCriteriaV02Flow(call: Call, dir: string): Promise<Flow
   const findings = (
     await ok<{ warnings: Finding[] }>('plan.warning.list', { planId, detail: 'full' })
   ).value
-  // no errors, and no machine or feeds warnings (the presets keep the chip load in range)
-  expect(findings.warnings).toEqual([])
+  // no errors, and no machine or feeds warnings (the presets keep the chip load in range); the
+  // later faces have no alignment points yet (DF78 info `none`)
+  expect(findings.warnings.filter((f) => f.code !== 'plan.alignment')).toEqual([])
+  expect(
+    findings.warnings.filter((f) => f.code === 'plan.alignment').map((f) => [f.severity, f.rule]),
+  ).toEqual([
+    ['info', 'none'],
+    ['info', 'none'],
+  ])
 
   // ── Criterion: settle the design, edit one operation for this plan only, a strategy ───────
   await ok('plan.status.set', { planId, status: 'settledDesign' })
@@ -412,6 +419,8 @@ export async function exitCriteriaV02Flow(call: Call, dir: string): Promise<Flow
         name: next.name,
         direction: next.direction ?? '+z',
         rotation: 0,
+        // the part corner at the work zero (hardening M7)
+        corner: expect.any(String),
       })
     setupId = ended.value.next?.setupId
     const after = (await ok<RunStatus>('run.status.get')).value
@@ -553,6 +562,7 @@ interface PlanGet {
 interface Finding {
   code: string
   severity: string
+  rule: string
 }
 interface StaleList {
   operations: { editedInPlan?: boolean }[]
