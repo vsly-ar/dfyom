@@ -219,6 +219,12 @@ describe('Setup panel', () => {
     // no action button on the row: its menu is the context menu (DF67)
     expect(within(t.nav()).queryByRole('button', { name: /^Actions for / })).toBeNull()
     const triggers = () => [...t.opsOf('Top').querySelectorAll<HTMLElement>(':scope > li > button')]
+    // the row says how to open its menu (DF70)
+    expect(triggers()[0]).toHaveAccessibleDescription('Right-click or Shift+F10 for actions.')
+    expect(triggers()[0]).toHaveAttribute(
+      'aria-keyshortcuts',
+      'Alt+ArrowUp Alt+ArrowDown Shift+F10',
+    )
     // the first operation of Top cannot go up (Bottom faces another way)
     await openMenu(t, triggers()[0]!)
     expect(await screen.findByRole('menuitem', { name: /^Move up/ })).toHaveAttribute(

@@ -1,10 +1,49 @@
 // v0.3 Shape Editor in the built app (task U1), through roles and labels: a shape added from the
 // Shapes dialog (D45) opens its flat view and inspector; a dimension edited by dragging its
 // handle (one undo step) and by its field (one undo step); undo restores each. Windows stay
-// hidden (app.fixture.ts).
+// hidden (app.fixture.ts). A path's segment table opens a row's actions by right-click and
+// Shift+F10 (DF70); with DFYOM_RENDERS=1 the light and dark renders `df70-segment-menu-*.png`.
 // Docs: docs/modes/design-v0.3.md#shape-definition, docs/conventions/ui.md#shape-editor
-import type { Locator } from '@playwright/test'
+import { resolve } from 'node:path'
+import type { Locator, Page } from '@playwright/test'
 import { expect, openPartSetup, test } from './app.fixture'
+
+const RENDERS = process.env['DFYOM_RENDERS'] === '1'
+const rendersDir = resolve(__dirname, '../design/features/renders')
+
+/**
+ * With DFYOM_RENDERS=1: light and dark renders without touching the page (an open menu stays
+ * open); the theme attribute is set directly and put back after.
+ */
+async function renderOpen(page: Page, name: string): Promise<void> {
+  if (!RENDERS) return
+  // runs in the renderer; this tsconfig has no DOM lib, hence `globalThis`
+  const setTheme = (t: string | null) =>
+    page.evaluate((v) => {
+      const root = (
+        globalThis as unknown as {
+          document: {
+            documentElement: {
+              getAttribute(n: string): string | null
+              setAttribute(n: string, v: string): void
+              removeAttribute(n: string): void
+            }
+          }
+        }
+      ).document.documentElement
+      const before = root.getAttribute('data-theme')
+      if (v === null) root.removeAttribute('data-theme')
+      else root.setAttribute('data-theme', v)
+      return before
+    }, t)
+  const before = await setTheme('light')
+  for (const theme of ['light', 'dark'] as const) {
+    await setTheme(theme)
+    await page.waitForTimeout(500)
+    await page.screenshot({ path: `${rendersDir}/df70-${name}-${theme}.png` })
+  }
+  await setTheme(before)
+}
 
 async function setField(scope: Locator, label: string, value: string): Promise<void> {
   const field = input(scope, label)
@@ -16,13 +55,11 @@ async function setField(scope: Locator, label: string, value: string): Promise<v
 const input = (scope: Locator, label: string) =>
   scope.getByLabel(label, { exact: true }).and(scope.locator('input'))
 
-test('shape editor: add a shape, drag a handle, edit a field, undo', async ({ dfyom }) => {
-  test.setTimeout(120_000)
-  const page = await dfyom.app.firstWindow()
+/** A new project with a 100 × 60 × 20 part; the navigator and the inspector. */
+async function newPart(page: Page): Promise<{ navigator: Locator; inspector: Locator }> {
   await page.waitForLoadState('domcontentloaded')
   const navigator = page.getByRole('navigation', { name: 'Navigator' })
   const inspector = page.getByRole('complementary', { name: 'Inspector' })
-
   await navigator.getByRole('button', { name: 'New project' }).click()
   const dialog = page.getByRole('dialog', { name: 'New project' })
   await dialog.getByRole('textbox', { name: 'Project name' }).fill('Shapes')
@@ -35,6 +72,13 @@ test('shape editor: add a shape, drag a handle, edit a field, undo', async ({ df
     .getByRole('dialog', { name: 'Stock' })
     .getByRole('button', { name: 'Create part' })
     .click()
+  return { navigator, inspector }
+}
+
+test('shape editor: add a shape, drag a handle, edit a field, undo', async ({ dfyom }) => {
+  test.setTimeout(120_000)
+  const page = await dfyom.app.firstWindow()
+  const { inspector } = await newPart(page)
 
   // ── add a rectangle from the Shapes dialog (D45): it is selected, the dialog closes ──────
   let shapes = await openPartSetup(page, 'Shapes')
@@ -83,4 +127,47 @@ test('shape editor: add a shape, drag a handle, edit a field, undo', async ({ df
   await editor.focus()
   await page.keyboard.press('Escape')
   await expect(editor).toHaveCount(0)
+})
+
+test('shape editor: a segment row opens its actions by right-click and Shift+F10 (DF70)', async ({
+  dfyom,
+}) => {
+  test.setTimeout(120_000)
+  const page = await dfyom.app.firstWindow()
+  const { inspector } = await newPart(page)
+  const shapes = await openPartSetup(page, 'Shapes')
+  await shapes.getByRole('button', { name: 'Add shape' }).click()
+  await page.getByRole('menuitem', { name: 'Path' }).click()
+  const grid = inspector.getByRole('grid', { name: /Segments of Path 1/ })
+  await expect(grid).toBeVisible()
+  // no button in the row: its actions are the row's context menu
+  await expect(grid.getByRole('button', { name: /^Actions for segment/ })).toHaveCount(0)
+  // by CSS: the open menu hides the rest from the accessibility tree (modal)
+  const row = (n: number) => grid.locator('tbody tr').nth(n - 1)
+  const table = inspector.locator('table[role="grid"]')
+
+  // right-click on row 2: its menu at the pointer, the row selected
+  await row(2).click({ button: 'right' })
+  const menu = page.getByRole('menu', { name: 'Actions for segment 2' })
+  await expect(menu).toBeVisible()
+  await expect(table.locator('tbody tr').nth(1)).toHaveAttribute('aria-selected', 'true')
+  await expect(menu.getByRole('menuitem')).toHaveText([
+    /^Move segment 2 up/,
+    /^Move segment 2 down/,
+    /^Remove segment 2/,
+  ])
+  await renderOpen(page, 'segment-menu')
+  await page.keyboard.press('Escape')
+  await expect(menu).toBeHidden()
+
+  // Shift+F10 on a cell of row 3: its menu; Escape brings the focus back to the cell
+  const cell = row(3).getByRole('gridcell').first()
+  await cell.focus()
+  await page.keyboard.press('Shift+F10')
+  await expect(page.getByRole('menu', { name: 'Actions for segment 3' })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(cell).toBeFocused()
+  await page.keyboard.press('Shift+F10')
+  await page.getByRole('menuitem', { name: 'Remove segment 3' }).click()
+  await expect(grid.getByRole('row')).toHaveCount(3)
 })

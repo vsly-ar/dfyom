@@ -3,14 +3,28 @@
 // a cell that does not apply to the type is empty. In a narrow inspector each segment takes two
 // lines (type, X, Y; radius, direction, large arc, fillet) so realistic numbers fit unscrolled. Arrows move between cells (roving focus),
 // Enter edits a cell and Enter commits it (back to the cell), Escape leaves the cell's control,
-// Alt+↑/↓ moves a row, Delete on # removes it with an undo toast (the navigator's). Every cell is a QuantityInput
-// (or a choice); every commit is one `design.shape.item.update` of the segment (or fillet) list.
+// Alt+↑/↓ moves a row, Delete on # removes it with an undo toast (the navigator's). A row's actions
+// (move up / down, remove) are its context menu: right-click on the row, Shift+F10 / the Menu key
+// on a cell (DF70, ui.md decision 27; the # cell's "…"-style button until then). Every cell is a
+// QuantityInput (or a choice); every commit is one `design.shape.item.update` of the segment (or
+// fillet) list.
 // Doc: docs/conventions/ui.md#shape-editor, docs/modes/design-v0.3.md#shape-definition
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import type { ShapeSegment } from '../../../../core/design/shape.dto'
 import { shapeMessages } from '../../messages/shape'
 import { useShell } from '../../shell/ShellContext'
-import { Icon, Button, Checkbox, Menu, QuantityInput, SegmentedControl, Select } from '../../ui'
+import {
+  Icon,
+  Button,
+  Checkbox,
+  ContextMenu,
+  isContextMenuKey,
+  openContextMenu,
+  QuantityInput,
+  SegmentedControl,
+  Select,
+  type MenuEntry,
+} from '../../ui'
 import { defaultUnit } from './model'
 import styles from './Design.module.css'
 import { ItemQuantity, type ItemEditContext } from './ShapeInspector'
@@ -41,6 +55,9 @@ export function SegmentTable({
   const { ui } = useShell()
   const [focus, setFocus] = useState<{ row: number; col: number }>({ row: 0, col: 0 })
   const cells = useRef(new Map<string, HTMLTableCellElement>())
+  // the cell focus returns to when a row menu closes (its row follows a move or a removal)
+  const menuReturn = useRef<{ row: number; col: number }>({ row: 0, col: 0 })
+  const keyOpened = useRef(false)
   // a segment picked in the flat view: its row scrolls into view (long imported paths, L3-7)
   useEffect(() => {
     if (selected !== null)
@@ -88,6 +105,7 @@ export function SegmentTable({
     )
     onSelect(to)
     setFocus((f) => ({ ...f, row: to }))
+    menuReturn.current = { ...menuReturn.current, row: to }
   }
   const removeRow = (k: number) => {
     if (n <= 1) return
@@ -100,6 +118,33 @@ export function SegmentTable({
     ui.getState().setRemovedToast(t.removed(k + 1))
     onSelect(null)
     setFocus((f) => ({ ...f, row: Math.max(0, Math.min(f.row, n - 2)) }))
+    menuReturn.current = { ...menuReturn.current, row: Math.max(0, Math.min(k, n - 2)) }
+  }
+  /** Row `k`'s context menu (DF70): move up / down, remove. */
+  const rowMenu = (k: number): MenuEntry[] => {
+    const num = k + 1
+    return [
+      {
+        label: t.moveUp(num),
+        shortcut: 'Alt+↑',
+        disabled: k === 0,
+        onSelect: () => moveRow(k, -1),
+      },
+      {
+        label: t.moveDown(num),
+        shortcut: 'Alt+↓',
+        disabled: k === n - 1,
+        onSelect: () => moveRow(k, 1),
+      },
+      'separator',
+      {
+        label: t.remove(num),
+        shortcut: 'Delete',
+        danger: true,
+        disabled: n <= 1,
+        onSelect: () => removeRow(k),
+      },
+    ]
   }
   const addRow = () => {
     const after = selected ?? n - 1
@@ -131,6 +176,15 @@ export function SegmentTable({
         setTimeout(() => cells.current.get(cellKey(row, col))?.focus())
       }
       return
+    }
+    // Shift+F10 / the Menu key: the row's menu, at the row; focus comes back to this cell
+    if (isContextMenuKey(e)) {
+      const tr = e.currentTarget.closest('tr')
+      if (tr === null) return
+      e.preventDefault()
+      menuReturn.current = { row, col }
+      keyOpened.current = true
+      return openContextMenu(tr)
     }
     if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
       e.preventDefault()
@@ -254,164 +308,147 @@ export function SegmentTable({
                 ctx.errors !== undefined &&
                 [...ctx.errors.byField.keys()].some((f) => f.startsWith(`segments.${k}.`))
               return (
-                <tr
+                <ContextMenu
                   key={k}
-                  role="row"
-                  aria-selected={selected === k}
-                  data-selected={selected === k ? '' : undefined}
-                  data-invalid={bad ? '' : undefined}
+                  label={t.actions(num)}
+                  items={rowMenu(k)}
+                  onCloseAutoFocus={(e) => {
+                    e.preventDefault()
+                    focusCell(menuReturn.current.row, menuReturn.current.col)
+                  }}
                 >
-                  {cell(
-                    k,
-                    'number',
-                    <Menu
-                      label={t.actions(num)}
-                      items={[
-                        {
-                          label: t.moveUp(num),
-                          shortcut: 'Alt+↑',
-                          disabled: k === 0,
-                          onSelect: () => moveRow(k, -1),
-                        },
-                        {
-                          label: t.moveDown(num),
-                          shortcut: 'Alt+↓',
-                          disabled: k === n - 1,
-                          onSelect: () => moveRow(k, 1),
-                        },
-                        'separator',
-                        {
-                          label: t.remove(num),
-                          shortcut: 'Delete',
-                          danger: true,
-                          disabled: n <= 1,
-                          onSelect: () => removeRow(k),
-                        },
-                      ]}
-                    >
-                      <button
-                        type="button"
-                        tabIndex={-1}
-                        className={styles['segNumber']}
-                        aria-label={t.actions(num)}
-                      >
-                        {num}
-                      </button>
-                    </Menu>,
-                    t.row(num),
-                  )}
-                  {cell(
-                    k,
-                    'type',
-                    <Select
-                      aria-label={t.cell(num, t.type)}
-                      className={styles['segSelect']}
-                      options={(['line', 'arc', 'tangentArc'] as const).map((v) => ({
-                        value: v,
-                        label: t.types[v],
-                      }))}
-                      value={s.kind}
-                      onValueChange={(kind) => {
-                        if (kind === s.kind) return
-                        const next = [...segments]
-                        next[k] = retypeSegment(s, kind, chord, ctx.part.units)
-                        sendSegments(next)
-                      }}
-                    />,
-                    t.type,
-                  )}
-                  {cell(
-                    k,
-                    'x',
-                    <ItemQuantity
-                      ctx={ctx}
-                      path={['segments', k, 'to', 0]}
-                      label={t.cell(num, t.x)}
-                      compact
-                    />,
-                    t.x,
-                  )}
-                  {cell(
-                    k,
-                    'y',
-                    <ItemQuantity
-                      ctx={ctx}
-                      path={['segments', k, 'to', 1]}
-                      label={t.cell(num, t.y)}
-                      compact
-                    />,
-                    t.y,
-                  )}
-                  {cell(
-                    k,
-                    'radius',
-                    s.kind === 'arc' ? (
+                  <tr
+                    role="row"
+                    aria-selected={selected === k}
+                    data-selected={selected === k ? '' : undefined}
+                    data-invalid={bad ? '' : undefined}
+                    onContextMenu={() => {
+                      // the menu acts on this row: it is selected (its handles highlight); after a
+                      // right-click focus comes back to its # cell, after Shift+F10 to the cell
+                      if (selected !== k) onSelect(k)
+                      if (!keyOpened.current) menuReturn.current = { row: k, col: 0 }
+                      keyOpened.current = false
+                    }}
+                  >
+                    {cell(
+                      k,
+                      'number',
+                      <span className={styles['segNumber']}>{num}</span>,
+                      t.row(num),
+                    )}
+                    {cell(
+                      k,
+                      'type',
+                      <Select
+                        aria-label={t.cell(num, t.type)}
+                        className={styles['segSelect']}
+                        options={(['line', 'arc', 'tangentArc'] as const).map((v) => ({
+                          value: v,
+                          label: t.types[v],
+                        }))}
+                        value={s.kind}
+                        onValueChange={(kind) => {
+                          if (kind === s.kind) return
+                          const next = [...segments]
+                          next[k] = retypeSegment(s, kind, chord, ctx.part.units)
+                          sendSegments(next)
+                        }}
+                      />,
+                      t.type,
+                    )}
+                    {cell(
+                      k,
+                      'x',
                       <ItemQuantity
                         ctx={ctx}
-                        path={['segments', k, 'radius']}
-                        label={t.cell(num, t.radius)}
+                        path={['segments', k, 'to', 0]}
+                        label={t.cell(num, t.x)}
                         compact
-                      />
-                    ) : null,
-                    t.radius,
-                  )}
-                  {cell(
-                    k,
-                    'direction',
-                    s.kind === 'arc' ? (
-                      <SegmentedControl
-                        label={t.cell(num, t.direction)}
-                        size="sm"
-                        options={[
-                          { value: 'ccw', label: t.ccw },
-                          { value: 'cw', label: t.cw },
-                        ]}
-                        value={s.cw ? 'cw' : 'ccw'}
-                        onValueChange={(v) =>
-                          ctx.send(fieldUpdate(dto, ['segments', k, 'cw'], v === 'cw'))
-                        }
-                      />
-                    ) : null,
-                    t.direction,
-                  )}
-                  {cell(
-                    k,
-                    'large',
-                    s.kind === 'arc' ? (
-                      <Checkbox
-                        label={t.cell(num, t.large)}
-                        className={styles['segCheck']}
-                        checked={Boolean(s.large)}
-                        onCheckedChange={(v) =>
-                          ctx.send(fieldUpdate(dto, ['segments', k, 'large'], v === true))
-                        }
-                      />
-                    ) : null,
-                    t.large,
-                  )}
-                  {cell(
-                    k,
-                    'fillet',
-                    filletable ? (
-                      fi >= 0 ? (
+                      />,
+                      t.x,
+                    )}
+                    {cell(
+                      k,
+                      'y',
+                      <ItemQuantity
+                        ctx={ctx}
+                        path={['segments', k, 'to', 1]}
+                        label={t.cell(num, t.y)}
+                        compact
+                      />,
+                      t.y,
+                    )}
+                    {cell(
+                      k,
+                      'radius',
+                      s.kind === 'arc' ? (
                         <ItemQuantity
                           ctx={ctx}
-                          path={['fillets', fi, 'radius']}
-                          label={t.cell(num, t.fillet)}
+                          path={['segments', k, 'radius']}
+                          label={t.cell(num, t.radius)}
                           compact
-                          optional
                         />
-                      ) : (
-                        <FilletCell
-                          ctx={ctx}
-                          label={t.cell(num, t.fillet)}
-                          onCommit={(source) => setFillet(vertex, source)}
+                      ) : null,
+                      t.radius,
+                    )}
+                    {cell(
+                      k,
+                      'direction',
+                      s.kind === 'arc' ? (
+                        <SegmentedControl
+                          label={t.cell(num, t.direction)}
+                          size="sm"
+                          options={[
+                            { value: 'ccw', label: t.ccw },
+                            { value: 'cw', label: t.cw },
+                          ]}
+                          value={s.cw ? 'cw' : 'ccw'}
+                          onValueChange={(v) =>
+                            ctx.send(fieldUpdate(dto, ['segments', k, 'cw'], v === 'cw'))
+                          }
                         />
-                      )
-                    ) : null,
-                    t.fillet,
-                  )}
-                </tr>
+                      ) : null,
+                      t.direction,
+                    )}
+                    {cell(
+                      k,
+                      'large',
+                      s.kind === 'arc' ? (
+                        <Checkbox
+                          label={t.cell(num, t.large)}
+                          className={styles['segCheck']}
+                          checked={Boolean(s.large)}
+                          onCheckedChange={(v) =>
+                            ctx.send(fieldUpdate(dto, ['segments', k, 'large'], v === true))
+                          }
+                        />
+                      ) : null,
+                      t.large,
+                    )}
+                    {cell(
+                      k,
+                      'fillet',
+                      filletable ? (
+                        fi >= 0 ? (
+                          <ItemQuantity
+                            ctx={ctx}
+                            path={['fillets', fi, 'radius']}
+                            label={t.cell(num, t.fillet)}
+                            compact
+                            optional
+                          />
+                        ) : (
+                          <FilletCell
+                            ctx={ctx}
+                            label={t.cell(num, t.fillet)}
+                            onCommit={(source) => setFillet(vertex, source)}
+                          />
+                        )
+                      ) : null,
+                      t.fillet,
+                    )}
+                  </tr>
+                </ContextMenu>
               )
             })}
           </tbody>

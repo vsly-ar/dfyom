@@ -19,6 +19,8 @@ export const planMessages = {
   /** An id a finding names that the plan no longer has (DF43: never shown as the id). */
   unknownOperation: 'Unknown operation',
   unknownSetup: 'Unknown',
+  /** The description of a setup panel row with a row menu (DF70, as the design list's). */
+  rowMenuHint: 'Right-click or Shift+F10 for actions.',
   statuses: {
     draft: 'Draft',
     settledDesign: 'Settled design',

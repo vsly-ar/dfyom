@@ -384,10 +384,11 @@ export const designMessages = {
       description: 'Add an operation or a feature to cut the stock.',
       addHole: 'Add bolt hole',
     },
-    remove: (name: string) => `Remove ${name}`,
     /** The row menu's Remove (DF16). */
     removeItem: 'Remove',
     actions: (name: string) => `Actions for ${name}`,
+    /** The description of a row with a row menu (DF70: no action buttons on rows). */
+    rowMenuHint: 'Right-click or Shift+F10 for actions.',
     warnings: (n: number) => (n === 1 ? '1 warning' : `${n} warnings`),
     failed: 'Evaluation failed here',
     removed: (name: string) => `Removed ${name}`,

@@ -330,6 +330,46 @@ describe('shape editor', () => {
     expect(await screen.findByText('Removed segment 2')).toBeInTheDocument()
   })
 
+  it("opens a segment row's actions by right-click and Shift+F10, with no button in the row (DF70)", async () => {
+    const { user, shape, addShape } = await renderShapes()
+    await addShape('Path')
+    const grid = await within(inspector()).findByRole('grid', { name: /Segments of Path 1/ })
+    expect(within(grid).queryByRole('button', { name: /^Actions for segment/ })).toBeNull()
+    expect(grid).toHaveAccessibleDescription(/Right-click a row, or press Shift\+F10 on a cell/)
+    const segs = () => (shape().items[0] as { segments: { to: unknown }[] }).segments
+    const before = segs().map((x) => x.to)
+    // the open menu hides the rest from the accessibility tree (modal), hence `hidden`
+    const rows = () => within(grid).getAllByRole('row', { hidden: true }).slice(1)
+    // right-click on row 3: its menu, the row selected
+    await user.pointer({
+      keys: '[MouseRight]',
+      target: within(rows()[2]!).getAllByRole('gridcell')[2]!,
+    })
+    const menu = await screen.findByRole('menu', { name: 'Actions for segment 3' })
+    expect(
+      within(menu)
+        .getAllByRole('menuitem')
+        .map((i) => i.textContent),
+    ).toEqual(['Move segment 3 upAlt+↑', 'Move segment 3 downAlt+↓', 'Remove segment 3Delete'])
+    expect(within(menu).getByRole('menuitem', { name: /^Move segment 3 down/ })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    )
+    expect(rows()[2]).toHaveAttribute('aria-selected', 'true')
+    await expectNoAxeViolations()
+    await user.click(within(menu).getByRole('menuitem', { name: /^Remove segment 3/ }))
+    await waitFor(() => expect(segs().map((x) => x.to)).toEqual(before.slice(0, 2)))
+    expect(await screen.findByText('Removed segment 3')).toBeInTheDocument()
+    // Shift+F10 on a cell of row 2: the same menu for that row; focus comes back to the cell
+    const cell = within(rows()[1]!).getAllByRole('gridcell', { hidden: true })[0]!
+    cell.focus()
+    await user.keyboard('{Shift>}{F10}{/Shift}')
+    const menu2 = await screen.findByRole('menu', { name: 'Actions for segment 2' })
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(menu2).not.toBeInTheDocument())
+    await waitFor(() => expect(cell).toHaveFocus())
+  })
+
   it('has no axe violations in the navigator, inspector and flat view', async () => {
     const { container, addShape } = await renderShapes()
     await addShape('Path')

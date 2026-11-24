@@ -301,17 +301,6 @@
   pointer-events: auto;
 }
 
-/* while the actions show, the row's content gives them room: the read-out ellipsizes first and
-   the name keeps its words (DF44); at rest the actions take no width */
-/* a row with a warning badge or failed marker keeps that room at rest too, so its markers never
-   move when the actions show and their tooltips stay reachable (DF67) */
-.op[data-top]:hover > .opSelect,
-.op[data-top]:focus-within > .opSelect,
-.op[data-top][data-selected] > .opSelect,
-.op[data-top][data-markers] > .opSelect {
-  padding-right: calc(2 * var(--control-md) + 2 * var(--space-1));
-}
-
 .op[data-selected] .opActions {
   background: var(--accent-subtle);
 }
@@ -1085,19 +1074,13 @@
   min-width: 3.75rem;
 }
 
+/* the row number; the row's actions are its context menu (DF70), so it is plain text */
 .segNumber {
-  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   min-height: var(--control-sm);
-  border: 0;
-  border-radius: var(--radius-xs);
-  background: none;
-  font: inherit;
   color: var(--text-muted);
-  cursor: pointer;
-}
-
-.segNumber:hover {
-  background: var(--bg-hover);
 }
 
 .segSelect {
