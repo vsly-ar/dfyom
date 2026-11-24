@@ -343,7 +343,11 @@ export async function exportPlan(
             holding.items.length === 0
               ? undefined
               : {
-                  items: holding.items.map((i) => `${i.name}: ${itemSummary(i, programUnits)}`),
+                  // in the WCS like every other coordinate of the program: what the DRO
+                  // shows (DF81, docs/modes/alignment.md S12)
+                  items: holding.items.map(
+                    (i) => `${i.name}: ${itemSummary(i, programUnits, zero)}`,
+                  ),
                   margin: holding.margin,
                 },
           ),

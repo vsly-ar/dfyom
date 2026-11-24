@@ -374,20 +374,30 @@ export function lengthText(mmValue: number, units: 'mm' | 'in'): string {
 /**
  * One line per item, as the inspector lists it and the program header writes it:
  * "front X125 grip 10 top Z12" (toe clamp: the edge, its position as a machine coordinate).
+ * Positions are the setup-frame values (as the items are entered) less `zero`: the inspector
+ * and `plan.workholding.set` pass none (setup frame, beside the fields), the program header
+ * the setup's work zero, so its lines are in the WCS like every other coordinate of the
+ * program (DF81, docs/modes/alignment.md S12).
  */
-export function itemSummary(item: ResolvedItem, units: 'mm' | 'in'): string {
+export function itemSummary(
+  item: ResolvedItem,
+  units: 'mm' | 'in',
+  zero: readonly [number, number] = [0, 0],
+): string {
   const l = (v: number) => lengthText(v, units)
+  const [zx, zy] = zero
   switch (item.kind) {
     case 'toeClamp': {
-      const axis = item.edge === 'uMin' || item.edge === 'uMax' ? 'Y' : 'X'
-      return `${EDGE_WORD[item.edge]} ${axis}${l(item.at)} grip ${l(item.grip)} top Z${l(item.top)}`
+      const alongY = item.edge === 'uMin' || item.edge === 'uMax'
+      const at = item.at - (alongY ? zy : zx)
+      return `${EDGE_WORD[item.edge]} ${alongY ? 'Y' : 'X'}${l(at)} grip ${l(item.grip)} top Z${l(item.top)}`
     }
     case 'vise':
       return `${item.soft ? 'soft jaws' : 'jaws'} along ${item.axis === 'u' ? 'X' : 'Y'}, stock ${l(item.protrusion)} above them`
     case 'screw':
-      return `X${l(item.center[0])} Y${l(item.center[1])} head ${l(item.headDiameter)} top Z${l(item.top)}`
+      return `X${l(item.center[0] - zx)} Y${l(item.center[1] - zy)} head ${l(item.headDiameter)} top Z${l(item.top)}`
     case 'block':
-      return `X${l(item.center[0])} Y${l(item.center[1])} ${l(item.length)} x ${l(item.width)} top Z${l(item.top)}`
+      return `X${l(item.center[0] - zx)} Y${l(item.center[1] - zy)} ${l(item.length)} x ${l(item.width)} top Z${l(item.top)}`
     case 'base':
       return item.type === 'spoilboard' ? 'spoilboard (sacrificial)' : 'fixture plate'
     case 'surface':

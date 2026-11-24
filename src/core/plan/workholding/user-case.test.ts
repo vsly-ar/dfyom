@@ -151,6 +151,39 @@ describe("the user's case: 2 toe clamps 28 × 28 × 12 on a 250 × 100 × 40 har
     expect(after.filter((f) => f.severity === 'error')).toEqual([])
   })
 
+  // DF81 (docs/modes/alignment.md S12): the header's item positions are in the WCS, as on the DRO
+  it('with a moved work zero the header names the items in the WCS, the set result in the setup frame', async () => {
+    const { s, planId, setupId } = await userCase()
+    const items = [
+      ...USER_CLAMPS,
+      { kind: 'screw', center: ['125', '-20'], headDiameter: '8', top: '0' },
+    ]
+    await s.run('plan.workholding.set', { planId, setupId, items })
+    const header = async () =>
+      withoutAppVersion(expectOk(await exportPlan(s.d.doc, planId, services())).text)
+        .split('\n')
+        .filter((l) => l.startsWith('(Workholding: '))
+    expect(await header()).toEqual([
+      '(Workholding: Toe clamp 1: left Y50 grip 10 top Z12)',
+      '(Workholding: Toe clamp 2: right Y50 grip 10 top Z12)',
+      '(Workholding: Screw 1: X125 Y-20 head 8 top Z0)',
+    ])
+    await s.run('plan.setup.update', { planId, setupId, zero: { at: ['40', '25'] } })
+    // every position shifts by the zero (X −40, Y −25); sizes and heights do not
+    expect(await header()).toEqual([
+      '(Workholding: Toe clamp 1: left Y25 grip 10 top Z12)',
+      '(Workholding: Toe clamp 2: right Y25 grip 10 top Z12)',
+      '(Workholding: Screw 1: X85 Y-45 head 8 top Z0)',
+    ])
+    // the set result echoes the items as entered: the setup frame, beside the fields
+    const r = (await s.run('plan.workholding.set', { planId, setupId, items })) as SetResult
+    expect(r.items.map((i) => i.summary)).toEqual([
+      'left Y50 grip 10 top Z12',
+      'right Y50 grip 10 top Z12',
+      'X125 Y-20 head 8 top Z0',
+    ])
+  })
+
   it('a profile through a clamp is a cut collision that blocks the export', async () => {
     const { s, planId, setupId } = await userCase({ outline: '236' })
     await s.run('plan.workholding.set', { planId, setupId, items: USER_CLAMPS })
