@@ -10,6 +10,7 @@ import { STOCK_FACE, faceFrame, type Direction } from '../../../../core/geometry
 import { Quantity } from '../../../../core/quantity/quantity'
 import type { QuantityDTO } from '../../../../core/quantity/quantity.dto'
 import type { ReferenceDTO } from '../../../../core/design/reference.dto'
+import type { FittedLoop } from '../../../../core/design/reference-section'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { lengthSource as displayLength } from '../../messages/dfm'
 import { referenceMessages } from '../../messages/reference'
@@ -26,7 +27,16 @@ import {
 } from '../../ui'
 import styles from './Design.module.css'
 import { defaultUnit, type DesignPart } from './model'
-import { lengthSource, middleDepth, referenceBox, stockSizeOf } from './reference-view'
+import { keepLoop, type ReferenceOverlayState } from './reference-overlay'
+import {
+  ghostMatrix,
+  lengthSource,
+  middleDepth,
+  referenceBox,
+  referencePlacement,
+  sectionMatrix,
+  stockSizeOf,
+} from './reference-view'
 import { useCommand } from './useDesign'
 
 const t = referenceMessages.tools
@@ -84,6 +94,31 @@ function useFind<T>(key: string | null, args: object): { answer: Answer<T> | nul
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bridge, key])
   return { answer, busy: key !== null && answer?.key !== key }
+}
+
+/**
+ * The fitted loops of the section for the viewport (DF60): the window's `reference.section` with
+ * `fit` (the agent result is a summary, RT-G); the last answer stays while a new one is cut.
+ */
+function useFittedLoops(
+  key: string | null,
+  request: { referenceId: string; matrix: number[]; level: number } | null,
+): readonly FittedLoop[] | null {
+  const { bridge } = useShell()
+  const [answer, setAnswer] = useState<readonly FittedLoop[] | null>(null)
+  useEffect(() => {
+    if (key === null || request === null) return
+    let live = true
+    void bridge.reference.section({ ...request, fit: true }).then((r) => {
+      if (live) setAnswer(r.ok ? (r.loops ?? []) : null)
+    })
+    return () => {
+      live = false
+    }
+    // the request is derived from key
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bridge, key])
+  return answer
 }
 
 /** The smallest radius of the library's end mills (flat, bull nose, ball), if any. */
@@ -169,6 +204,34 @@ export function ReferenceTools({
     depth: depthSource,
     loops,
   })
+  // the fitted loops and the hovered level, drawn on the ghost by the viewport (DF60)
+  const placement = referencePlacement(ref)
+  const sectionKey = base === null ? null : `${base}|${depthSource}`
+  const fitted = useFittedLoops(
+    sectionKey,
+    stock === undefined || placement === undefined
+      ? null
+      : {
+          referenceId: ref.id,
+          matrix: sectionMatrix(
+            ghostMatrix(ref.asset.bounds, placement),
+            faceFrame(direction, stock),
+          ),
+          level: -depth,
+        },
+  )
+  const [hover, setHover] = useState<ReferenceOverlayState['hover']>(null)
+  const setOverlay = useUi((s) => s.setReferenceOverlay)
+  useEffect(() => {
+    setOverlay({
+      referenceId: ref.id,
+      direction,
+      depth,
+      loops: fitted === null ? null : fitted.filter((l) => keepLoop(l, loops)),
+      hover,
+    })
+  }, [setOverlay, ref.id, direction, depth, fitted, loops, hover])
+  useEffect(() => () => setOverlay(null), [setOverlay])
   const radius = roundRadius ?? (endMill !== undefined ? lengthQuantity(endMill, units) : undefined)
 
   const create = async (split: 'file' | 'loop') => {
@@ -219,6 +282,10 @@ export function ReferenceTools({
                     data-undercut={undercut ? '' : undefined}
                     aria-label={undercut ? `${text}. ${t.undercut}` : text}
                     title={undercut ? t.undercut : undefined}
+                    onPointerEnter={() => setHover({ depth: l.depth, facing: l.facing })}
+                    onPointerLeave={() => setHover(null)}
+                    onFocus={() => setHover({ depth: l.depth, facing: l.facing })}
+                    onBlur={() => setHover(null)}
                     onClick={() =>
                       setDepth(
                         Math.max(

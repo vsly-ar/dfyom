@@ -3,8 +3,8 @@
 // Spec: docs/modes/reference-tools.md#test-plans (P1 section and fitting)
 import { describe, expect, it } from 'vitest'
 import type { Vec2 } from '../model'
-import { fitClosedPolyline } from './fit-polyline'
-import { arcRadius, signedArea, type Element } from './model'
+import { fitClosedPolyline, MIN_ELEMENT } from './fit-polyline'
+import { arcRadius, arcSweep, signedArea, type Element } from './model'
 import { insideCorners } from '../shape-measure'
 
 const TOL = 0.01
@@ -55,6 +55,20 @@ describe('fitClosedPolyline', () => {
     // the chords' vertices lie on the circle: the least-squares circle is within the tolerance
     expect(Math.abs(f.circle!.radius - r)).toBeLessThan(TOL)
     expect(f.elements).toHaveLength(2)
+    expect(f.maxDeviation).toBeLessThanOrEqual(TOL)
+  })
+
+  it('a D shape (a flat whose ends lie on the circle, no vertex along it) is not a circle', () => {
+    const r = 3
+    // 64 chords of the circle except a flat spanning 90° (x = r cos 45°)
+    const pts: Vec2[] = Array.from({ length: 49 }, (_, k) => {
+      const a = Math.PI / 4 + ((3 * Math.PI) / 2) * (k / 48)
+      return [r * Math.cos(a), r * Math.sin(a)]
+    })
+    const f = fitClosedPolyline(pts, opts)
+    expect(f.circle).toBeUndefined()
+    expect(f.corners).toHaveLength(2)
+    expect(f.elements.filter((e) => e.kind === 'line')).toHaveLength(1)
     expect(f.maxDeviation).toBeLessThanOrEqual(TOL)
   })
 
@@ -113,4 +127,32 @@ describe('fitClosedPolyline', () => {
     expect(f.maxDeviation).toBeLessThanOrEqual(TOL)
     expect(f.elements.length).toBeLessThan(pts.length / 4)
   })
+
+  // A strip of facets cut at a slant gives long and short chords in turns (S8's feature-rich
+  // heights): each vertex next to a long chord must not be read as a straight side meeting a
+  // fillet, or every short chord becomes a tangent break with a sliver arc.
+  it.each([
+    ['in turns', [3, 0.1]],
+    ['long, short, short', [3, 0.05, 0.05]],
+  ])('a large arc sampled with long and short chords %s: few elements, no sliver', (_, steps) => {
+    const R = 150
+    const pts: Vec2[] = []
+    let s = -40
+    for (let k = 0; s <= 40; k++) {
+      pts.push([R * Math.cos(s / R), R * Math.sin(s / R)])
+      s += steps[k % steps.length]!
+    }
+    // closed by two lines through (100, 0): three sharp corners, not a circle
+    pts.push([100, 0])
+    const f = fitClosedPolyline(pts, opts)
+    expect(f.maxDeviation).toBeLessThanOrEqual(TOL)
+    expect(f.corners).toHaveLength(3)
+    expect(f.elements.length).toBeLessThanOrEqual(6) // two lines and ≤ 4 arcs
+    for (const e of f.elements) expect(MIN_ELEMENT).toBeLessThan(len(e))
+  })
 })
+
+const len = (e: Element) =>
+  e.kind === 'line'
+    ? Math.hypot(e.b[0] - e.a[0], e.b[1] - e.a[1])
+    : Math.abs(arcSweep(e)) * arcRadius(e)

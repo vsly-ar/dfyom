@@ -3,7 +3,9 @@
  * matrix from the STL to that face's frame, and the worker calls for levels and fitted sections.
  * Used by `design.reference.find` (reference-commands.ts) and `design.shape.import { from }`
  * (shape-commands.ts). Results are in the face frame of a stock face, depths positive into the
- * stock from the face (docs/modes/reference-tools.md#faces-and-frames).
+ * stock from the face (docs/modes/reference-tools.md#faces-and-frames). Since P2 a face may be named
+ * by a setup of the part's plans (`{ setupId }`: that setup's direction face, RT-B), and point
+ * results may also be given in that setup's WCS (`frame: 'setup'`).
  * Doc: docs/modes/reference-tools.md
  */
 import { z } from 'zod'
@@ -19,7 +21,10 @@ import {
   type Direction,
   type StockSize,
 } from '../geometry/face'
+import { applyPlacement, unapplyPlacement, type Vec3 } from '../geometry/model'
+import { setupDirection, setupRotation } from '../plan/setups'
 import type { ProjectDoc, UnitSystem } from '../project/document'
+import { setupFrame, type WcsRotation } from '../toolpath/wcs'
 import { Quantity } from '../quantity/quantity'
 import type { QuantityDTO } from '../quantity/quantity.dto'
 import { referenceLevels, referenceSection } from '../workers/tasks'
@@ -46,8 +51,56 @@ const OPPOSITE: Readonly<Record<Direction, Direction>> = {
   '-y': '+y',
 }
 
-/** Checked by `stockFace` (rule `stockFaceOnly`), so no bounds in the schema (tools/list). */
-export const FaceArg = z.string().describe('Stock face, default stock.top')
+/**
+ * A stock face (checked by `stockFace`, rule `stockFaceOnly`, so no bounds in the schema:
+ * tools/list) or a setup of the part's plans (P2, RT-B).
+ */
+export const FaceArg = z
+  .union([z.string(), z.object({ setupId: z.string() })])
+  .describe('Stock face (default stock.top) or {setupId}: its direction face')
+export type FaceArgValue = z.output<typeof FaceArg>
+
+/** A face arg resolved: the direction, and the setup when one named it. */
+export interface ResolvedFace {
+  readonly direction: Direction
+  readonly setup?: { readonly id: string; readonly rotation: WcsRotation }
+}
+
+/**
+ * The face a `face` arg means: a stock face, or `{ setupId }` of a plan of the part (its
+ * direction face; `unknownSetup` otherwise). Issues at `path`.
+ */
+export function resolveFace(
+  doc: ProjectDoc,
+  partId: string,
+  face: FaceArgValue | undefined,
+  path: readonly string[],
+  where: string,
+): AppResult<ResolvedFace> {
+  if (typeof face !== 'object') {
+    const d = stockFace(face, path, where)
+    return d.isErr() ? d : Ok({ direction: d.unwrap() })
+  }
+  for (const plan of Object.values(doc.plans)) {
+    if (plan.design.partId !== partId) continue
+    const setup = plan.setups.find((x) => x.id === face.setupId)
+    if (setup !== undefined)
+      return Ok({
+        direction: setupDirection(setup),
+        setup: { id: setup.id, rotation: setupRotation(setup) },
+      })
+  }
+  return fail('input.malformed', `${face.setupId}: no setup of a plan of ${partId}`, {
+    issues: [
+      {
+        path: [...path, 'setupId'],
+        rule: 'unknownSetup',
+        message: "not a setup of this part's plans (plan.get lists them)",
+      },
+    ],
+    where,
+  })
+}
 
 /**
  * The reference a call means: `referenceId`, or the part's only one (`noReference` without any,
@@ -81,7 +134,7 @@ export function targetReference(
 /** The direction of a stock face target (default the top); other surfaces → `stockFaceOnly`. */
 export function stockFace(
   face: string | undefined,
-  path: string,
+  path: readonly string[],
   where: string,
 ): AppResult<Direction> {
   const name = face ?? STOCK_FACE['+z']
@@ -90,7 +143,7 @@ export function stockFace(
   return fail('input.malformed', `${name}: not a stock face`, {
     issues: [
       {
-        path: [path],
+        path: [...path],
         rule: 'stockFaceOnly',
         message: 'a reference is read from a stock face (stock.top, stock.bottom, stock.side[n])',
       },
@@ -109,6 +162,8 @@ export interface ReferenceView {
   readonly matrix: number[]
   /** The stock's extent along the face normal (mm). */
   readonly extent: number
+  /** With a setup face and `frame: 'setup'`: face frame (u, v, w) → the setup's WCS (X, Y, Z). */
+  readonly wcs?: (p: Vec3) => Vec3
 }
 
 export function referenceView(
@@ -116,8 +171,10 @@ export function referenceView(
   placement: Placement,
   stock: StockSize,
   direction: Direction,
+  wcsRotation?: WcsRotation,
 ): ReferenceView {
   const frame = faceFrame(direction, stock)
+  const setup = wcsRotation === undefined ? undefined : setupFrame(direction, wcsRotation, stock)
   return {
     ref,
     direction,
@@ -125,6 +182,9 @@ export function referenceView(
     opposite: STOCK_FACE[OPPOSITE[direction]],
     matrix: sectionMatrix(ghostMatrix(ref.asset.bounds, placement), frame),
     extent: localStock(direction, stock).thickness,
+    ...(setup === undefined
+      ? {}
+      : { wcs: (p: Vec3) => unapplyPlacement(setup, applyPlacement(frame, p)) }),
   }
 }
 

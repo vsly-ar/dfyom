@@ -6,19 +6,26 @@
  *
  * 1. Clean: duplicate and collinear vertices go (a section crosses each facet's diagonal on the
  *    chord between its two edge points, which carries no information).
- * 2. Circle: every vertex within the tolerance of one least-squares circle → one circle.
+ * 2. Circle: every vertex within the tolerance of one least-squares circle, and no chord spanning
+ *    more than 46° of it (a flat whose ends lie on the circle) → one circle.
  * 3. Corners: a vertex turning more than `cornerAngle` whose neighbours do not turn the same way
  *    by more than half that (an isolated kink), or turning more than `FACET_MAX_TURN` (a single
  *    vertex that sharp is never a facet of a fillet). Same-way turns in a row are a faceted fillet.
- * 4. Tangents: every vertex inside a run gets the direction of the chord of its two neighbours
- *    (the central difference, which averages out the facets' zig-zag); a run's open ends take the
- *    tangent of the circle through their first three vertices.
+ * 4. Tangents: every vertex inside a run gets the tangent of the circle through it and its two
+ *    neighbours (the central chord for even chords; with uneven ones the central chord would lean
+ *    to the longer chord); next to a chord three times longer that goes on into short chords (a
+ *    straight side meeting a fillet's fan) the long chord's direction comes first and the circle
+ *    tangent is the alternative a stretch may end on. A run's open ends take the tangent of the
+ *    circle through their first three vertices.
  * 5. Runs between corners (or the whole loop, from its longest chord) are fitted greedily from
  *    vertex to vertex: the farthest vertex (doubling, then bisection) that one line (both tangents
  *    within 0.5° of the chord) or one biarc with the two vertex tangents reaches with every
  *    vertex in between within the tolerance. Elements join tangentially inside a run; the only
  *    tangent breaks are the corners. (Spike S8: the cubic detour through the SVG fitter turned
  *    faceted fillets into corners and failed on small radii; see reference-tools.md § Fitting.)
+ * 6. Slivers: a stretch holding an element under `MIN_ELEMENT` (0.05 mm) is refitted as one line
+ *    or arc over its vertices (or with a neighbour's), within the tolerance, leaving at most a
+ *    small tangent break (`mergeSlivers`).
  */
 import type { Vec2 } from '../model'
 import { arcSweep, type Element } from './model'
@@ -43,6 +50,8 @@ export interface PolylineFit {
 
 /** A single vertex turning more than this is a corner, whatever its neighbours do. */
 export const FACET_MAX_TURN = (45 * Math.PI) / 180
+/** A circle's chord spans at most this (radians, 46°: eight chords and some slack). */
+const CIRCLE_MAX_CHORD = (46 * Math.PI) / 180
 /** Vertices this close are one (mm). */
 const SAME_POINT = 1e-7
 /** A vertex this close to the chord of its neighbours is dropped (mm; float32 coordinates). */
@@ -255,28 +264,57 @@ function rotate(a: P, angle: number): P {
   return [a[0] * c - a[1] * s, a[0] * s + a[1] * c]
 }
 
+/** Tangent candidates per vertex: `primary` first; `alt` where another reading exists. */
+interface RunTangents {
+  readonly primary: P[]
+  readonly alt: (P | undefined)[]
+}
+
 /**
- * Unit tangents at the run's vertices: the central chord inside (exact for evenly sampled arcs;
- * along a long straight chord next to short fillet chords it stays with the straight one), and at
- * an open run's ends the tangent of the circle through the first (last) three vertices.
+ * Unit tangents at the run's vertices: inside, the tangent of the circle through the vertex and
+ * its two neighbours (the central chord for evenly sampled arcs); along a long chord next to
+ * short ones (a straight side meeting a fillet) the long chord's direction first and the circle's
+ * as the alternative (a slanted strip of facets gives the same pattern on a smooth curve, see
+ * `fitRun`); at an open run's ends the tangent of the circle through the first (last) three
+ * vertices.
  */
-function runTangents(q: readonly P[], closed: boolean): P[] {
+function runTangents(q: readonly P[], closed: boolean): RunTangents {
   const m = q.length - 1
   const t: P[] = []
-  /** Central chord; next to a chord `LONG_CHORD` times longer (a side meeting a fillet), its direction. */
-  const inner = (a: P, p: P, b: P): P => {
+  const alt: (P | undefined)[] = []
+  /** Vertex `i + k` (wrapping on a closed run; undefined past an open run's ends). */
+  const at = (i: number, k: number): P | undefined => {
+    const j = i + k
+    if (closed) return q[(((j % m) + m) % m) as number]
+    return j < 0 || j > m ? undefined : q[j]
+  }
+  /**
+   * The circle tangent; next to a chord `LONG_CHORD` times longer, when the short side goes on
+   * with another short chord (a fillet's fan of chords), the long chord's direction first. Long
+   * and short chords taking turns (a strip of facets cut at a slant) keep the circle tangent only.
+   */
+  const inner = (i: number): void => {
+    const a = at(i, -1)!
+    const p = at(i, 0)!
+    const b = at(i, 1)!
     const la = dist(a, p)
     const lb = dist(p, b)
-    if (la > LONG_CHORD * lb) return unit(sub(p, a))
-    if (lb > LONG_CHORD * la) return unit(sub(b, p))
-    return unit(sub(b, a))
+    const shortOn = (c: P | undefined, d: P, l: number) =>
+      c === undefined || dist(c, d) * LONG_CHORD < l
+    // the tangent of the circle through a, p, b (the central chord when la = lb; with uneven
+    // chords the central chord leans to the longer one by curvature × (la − lb) / 2)
+    const circle = rotate(unit(sub(p, a)), (turnAt(a, p, b) * la) / (la + lb))
+    let side: P | undefined
+    if (la > LONG_CHORD * lb && shortOn(at(i, 2), b, la)) side = unit(sub(p, a))
+    else if (lb > LONG_CHORD * la && shortOn(at(i, -2), a, lb)) side = unit(sub(b, p))
+    t.push(side ?? circle)
+    alt.push(side === undefined ? undefined : circle)
   }
   for (let i = 0; i <= m; i++) {
     if (closed) {
-      const a = q[i === 0 ? m - 1 : i - 1]!
-      const b = q[i === m ? 1 : i + 1]!
-      t.push(inner(a, q[i]!, b))
+      inner(i === m ? 0 : i)
     } else if (i === 0 || i === m) {
+      alt.push(undefined)
       if (m < 2) {
         t.push(unit(sub(q[m]!, q[0]!)))
         continue
@@ -291,9 +329,9 @@ function runTangents(q: readonly P[], closed: boolean): P[] {
           ? rotate(unit(sub(p1, p0)), -(turn * l1) / (l1 + l2) / 2)
           : rotate(unit(sub(p2, p1)), (turn * l2) / (l1 + l2) / 2),
       )
-    } else t.push(inner(q[i - 1]!, q[i]!, q[i + 1]!))
+    } else inner(i)
   }
-  return t
+  return { primary: t, alt }
 }
 
 /** A chord this many times longer than its neighbour is a straight side (`runTangents`). */
@@ -305,24 +343,38 @@ const LINE_TANGENT = (0.5 * Math.PI) / 180
  * Fits run vertices `q[0..m]` with biarcs between chosen vertices (their tangents shared, so the
  * chain is tangent-continuous) or lines where the tangents agree with the chord: greedily the
  * longest stretch that holds every vertex in between within `tol`. A closed run has
- * `q[m]` = `q[0]`.
+ * `q[m]` = `q[0]`. A vertex with an alternative tangent (`runTangents`) takes it when the primary
+ * one does not reach it, and the next stretch goes on from the tangent used, so a smooth curve
+ * cut through a slanted strip of facets is not broken up into a sliver at every short chord.
  */
-function fitRun(q: readonly P[], closed: boolean, tol: number): RunFit {
+function fitRun(q: readonly P[], closed: boolean, tol: number, maxLeft: number): RunFit {
   const m = q.length - 1
-  const tan = runTangents(q, closed)
+  const tans = runTangents(q, closed)
   const out: Element[] = []
+  const stretches: Stretch[] = []
   let worst = 0
   let i = 0
-  const attempt = (j: number): { els: Element[]; dev: number } | undefined => {
+  let ti = tans.primary[0]!
+  type Try = { els: Element[]; dev: number; tj: P }
+  const attempt = (j: number): Try | undefined => {
+    const first = attemptWith(j, tans.primary[j]!)
+    const other = closed && j === m ? undefined : tans.alt[j]
+    return first ?? (other === undefined ? undefined : attemptWith(j, other))
+  }
+  const attemptWith = (j: number, tj: P): Try | undefined => {
+    const r = attemptTangents(j, tj)
+    return r === undefined ? undefined : { ...r, tj }
+  }
+  const attemptTangents = (j: number, tj: P): { els: Element[]; dev: number } | undefined => {
     const inner = q.slice(i + 1, j)
     const chord = unit(sub(q[j]!, q[i]!))
     const along = (t: P) => Math.abs(Math.atan2(cross(t, chord), dot(t, chord))) <= LINE_TANGENT
-    if (along(tan[i]!) && along(tan[j]!)) {
+    if (along(ti) && along(tj)) {
       const ln: Element = { kind: 'line', a: q[i]!, b: q[j]! }
       const dev = deviation(ln, inner, tol)
       if (dev <= tol) return { els: [ln], dev }
     }
-    const bi = biarc(q[i]!, tan[i]!, q[j]!, tan[j]!)
+    const bi = biarc(q[i]!, ti, q[j]!, tj)
     if (bi === undefined) return undefined
     // a nearly straight half (a side meeting a fillet) as a line when the points allow: the
     // tangent break is under SNAP_SWEEP / 2, far below a corner
@@ -343,7 +395,11 @@ function fitRun(q: readonly P[], closed: boolean, tol: number): RunFit {
     let best = attempt(good)
     if (best === undefined) {
       // no biarc reaches the next vertex with these tangents: a line to it (a small tangent break)
-      best = { els: [{ kind: 'line', a: q[i]!, b: q[i + 1]! }], dev: 0 }
+      best = {
+        els: [{ kind: 'line', a: q[i]!, b: q[i + 1]! }],
+        dev: 0,
+        tj: tans.primary[i + 1]!,
+      }
     } else {
       let step = 1
       let bad = -1
@@ -369,11 +425,131 @@ function fitRun(q: readonly P[], closed: boolean, tol: number): RunFit {
           }
         }
     }
-    out.push(...best.els)
-    worst = Math.max(worst, best.dev)
+    stretches.push({ i, j: good, els: best.els, dev: best.dev })
     i = good
+    ti = best.tj
+  }
+  mergeSlivers(q, stretches, tol, maxLeft)
+  for (const st of stretches) {
+    out.push(...st.els)
+    worst = Math.max(worst, st.dev)
   }
   return { elements: out, maxDeviation: worst }
+}
+
+/** Fitted elements over the vertices `q[i..j]`. */
+interface Stretch {
+  i: number
+  j: number
+  els: Element[]
+  dev: number
+}
+
+/** Elements shorter than this (mm) are slivers, merged into their neighbours where the points allow. */
+export const MIN_ELEMENT = 0.05
+/**
+ * A merged sliver may leave a tangent break: a right turn under the sharp-corner limit of the
+ * inside-corner check (`CORNER_MIN_TURN`, 5°), so a merge never makes a sharp inside corner where
+ * the material is on the left (as `fitSection` orients its loops), and a left turn up to half the
+ * corner angle (a turn the corner rule already reads as smooth).
+ */
+const MERGE_RIGHT = (4.5 * Math.PI) / 180 // under CORNER_MIN_TURN in shape-measure.ts
+
+const elementLength = (e: Element): number =>
+  e.kind === 'line' ? dist(e.a, e.b) : Math.abs(arcSweep(e)) * dist(e.a, e.centre)
+
+/** Unit tangent at the start of an element. */
+function startTangent(e: Element): P {
+  if (e.kind === 'line') return unit(sub(e.b, e.a))
+  const r = sub(e.a, e.centre)
+  return unit(e.ccw ? left(r) : mul(left(r), -1))
+}
+
+/** Signed angle from direction a to b (radians, positive = left). */
+const angleBetween = (a: P, b: P): number => Math.atan2(cross(a, b), dot(a, b))
+
+/** The element reversed (same points, opposite travel). */
+function reversed(e: Element): Element {
+  return e.kind === 'line'
+    ? { kind: 'line', a: e.b, b: e.a }
+    : { kind: 'arc', a: e.b, b: e.a, centre: e.centre, ccw: !e.ccw }
+}
+
+/** The arc (or line) through three points; undefined when they are collinear and b is not between. */
+function arcThrough3(a: P, b: P, c: P): Element | undefined {
+  const d = 2 * cross(sub(b, a), sub(c, a))
+  if (Math.abs(d) < 1e-12) return { kind: 'line', a, b: c }
+  const aa = dot(a, a)
+  const bb = dot(b, b)
+  const cc = dot(c, c)
+  const centre: P = [
+    (aa * (b[1] - c[1]) + bb * (c[1] - a[1]) + cc * (a[1] - b[1])) / d,
+    (aa * (c[0] - b[0]) + bb * (a[0] - c[0]) + cc * (b[0] - a[0])) / d,
+  ]
+  return { kind: 'arc', a, b: c, centre, ccw: d > 0 }
+}
+
+/**
+ * Replaces stretches holding a sliver (an element under `MIN_ELEMENT`) by one line or arc over
+ * the same vertices (alone, or joined with a neighbouring stretch when the stretch is itself that
+ * short), keeping every vertex within `tol` and the tangent breaks it leaves at both ends under
+ * the merge limits (`MERGE_RIGHT`, `maxLeft`); of the candidates the one with the smallest break wins. Feature-rich sections
+ * (spike S8) otherwise keep short facets between nearly tangent runs as their own elements.
+ */
+function mergeSlivers(q: readonly P[], st: Stretch[], tol: number, maxLeft: number): void {
+  const breakOk = (t: number) => (t >= 0 ? t <= maxLeft : -t < MERGE_RIGHT)
+  const hasSliver = (s: Stretch) => s.els.some((e) => elementLength(e) < MIN_ELEMENT)
+  const candidates = (i: number, j: number, tIn: P | undefined, tOut: P | undefined) => {
+    const out: Element[] = [{ kind: 'line', a: q[i]!, b: q[j]! }]
+    if (tIn !== undefined) out.push(arcThrough(q[i]!, tIn, q[j]!))
+    if (tOut !== undefined) out.push(reversed(arcThrough(q[j]!, mul(tOut, -1), q[i]!)))
+    if (j - i >= 2) {
+      const mid = arcThrough3(q[i]!, q[(i + j) >> 1]!, q[j]!)
+      if (mid !== undefined) out.push(mid)
+    }
+    return out
+  }
+  /** Best single element over q[i..j] between the neighbours' end and start tangents. */
+  const single = (i: number, j: number, tIn: P | undefined, tOut: P | undefined) => {
+    let best: { e: Element; dev: number; brk: number } | undefined
+    for (const e of candidates(i, j, tIn, tOut)) {
+      if (elementLength(e) < MIN_ELEMENT && dist(q[i]!, q[j]!) >= MIN_ELEMENT) continue
+      const dev = deviation(e, q.slice(i + 1, j), tol)
+      if (!(dev <= tol)) continue
+      const b0 = tIn === undefined ? 0 : angleBetween(tIn, startTangent(e))
+      const b1 = tOut === undefined ? 0 : angleBetween(endTangent(e), tOut)
+      if (!breakOk(b0) || !breakOk(b1)) continue
+      const brk = Math.max(Math.abs(b0), Math.abs(b1))
+      if (best === undefined || brk < best.brk) best = { e, dev, brk }
+    }
+    return best
+  }
+  const tangentIn = (k: number) => (k > 0 ? endTangent(st[k - 1]!.els.at(-1)!) : undefined)
+  const tangentOut = (k: number) =>
+    k + 1 < st.length ? startTangent(st[k + 1]!.els[0]!) : undefined
+  for (let k = 0; k < st.length; k++) {
+    const s = st[k]!
+    if (!hasSliver(s)) continue
+    const alone = single(s.i, s.j, tangentIn(k), tangentOut(k))
+    if (alone !== undefined) {
+      st[k] = { i: s.i, j: s.j, els: [alone.e], dev: alone.dev }
+      continue
+    }
+    // a short stretch: one element with the next or the previous stretch
+    if (k + 1 < st.length) {
+      const n = st[k + 1]!
+      const both = single(s.i, n.j, tangentIn(k), tangentOut(k + 1))
+      if (both !== undefined) {
+        st.splice(k, 2, { i: s.i, j: n.j, els: [both.e], dev: both.dev })
+        continue
+      }
+    }
+    if (k > 0) {
+      const p = st[k - 1]!
+      const both = single(p.i, s.j, tangentIn(k - 1), tangentOut(k))
+      if (both !== undefined) st.splice(k - 1, 2, { i: p.i, j: s.j, els: [both.e], dev: both.dev })
+    }
+  }
 }
 
 /** Fits a closed polyline (see the file comment). At least three distinct vertices. */
@@ -388,7 +564,11 @@ export function fitClosedPolyline(points: readonly P[], o: PolylineFitOptions): 
     if (c !== undefined) {
       let dev = 0
       for (const p of pts) dev = Math.max(dev, Math.abs(dist(p, c.centre) - c.radius))
-      if (dev <= tol && ccwArea(pts) !== 0) {
+      // no chord spans more than a faceted circle's (8 chords at least): a straight side whose
+      // ends lie on the circle (a D-shaped hole's flat) has no vertex along it to tell
+      const maxChord = 2 * c.radius * Math.sin(CIRCLE_MAX_CHORD / 2)
+      const chordsOk = pts.every((p, i) => dist(p, pts[(i + 1) % n]!) <= maxChord)
+      if (dev <= tol && chordsOk && ccwArea(pts) !== 0) {
         const ccw = ccwArea(pts) > 0
         const a: P = [c.centre[0] + c.radius, c.centre[1]]
         const b: P = [c.centre[0] - c.radius, c.centre[1]]
@@ -429,7 +609,7 @@ export function fitClosedPolyline(points: readonly P[], o: PolylineFitOptions): 
       }
     }
     const q = Array.from({ length: n + 1 }, (_, k) => pts[(start + k) % n]!)
-    const r = fitRun(q, true, tol)
+    const r = fitRun(q, true, tol, o.cornerAngle / 2)
     elements.push(...r.elements)
     maxDeviation = r.maxDeviation
   } else {
@@ -438,7 +618,7 @@ export function fitClosedPolyline(points: readonly P[], o: PolylineFitOptions): 
       const to = corners[(k + 1) % corners.length]!
       const count = (to - from + n) % n || n
       const q = Array.from({ length: count + 1 }, (_, s) => pts[(from + s) % n]!)
-      const r = fitRun(q, false, tol)
+      const r = fitRun(q, false, tol, o.cornerAngle / 2)
       elements.push(...r.elements)
       maxDeviation = Math.max(maxDeviation, r.maxDeviation)
     }

@@ -129,6 +129,12 @@ export const referenceMessages = {
     createHint: 'One shape with its holes, or one shape per outline.',
     created: (n: number) => (n === 1 ? 'Shape created.' : `${n} shapes created.`),
     createFailed: 'The shape could not be created.',
+    /** The viewport's text summary while the section is drawn on the ghost. */
+    viewportSection: (loops: number, sharp: number) =>
+      `Section on the reference: ${loops === 1 ? '1 loop' : `${loops} loops`}` +
+      (sharp === 0
+        ? '.'
+        : `, ${sharp === 1 ? '1 sharp inside corner' : `${sharp} sharp inside corners`}.`),
   },
 
   /** The viewport's text summary for the visible references. */
