@@ -265,14 +265,7 @@ test('v0.2 golden path through the UI: reference, faces, setups, export and run 
   await expect(setupOps(page, 'Right')).toHaveText([/^Drilling 1, Drilling 2/])
   await expect(setupOps(page, 'Top')).toHaveText([/^Facing 1/, /^Pocket 1/, /^Profile 1/])
 
-  // the tools: an empty library, so each is added with "New tool…" or picked once it exists
-  const pickTool = async (row: Locator, heading: string, tool: RegExp) => {
-    await row.click()
-    await expect(inspector.getByRole('heading', { name: heading, level: 2 })).toBeVisible()
-    await inspector.getByRole('combobox', { name: 'Tool' }).click()
-    await page.getByRole('option', { name: tool }).click()
-    await expect(row).toHaveText(tool)
-  }
+  // the tools: an empty library, so each is added with "New tool…"
   await setupOps(page, 'Top').nth(0).click()
   await expect(inspector.getByRole('heading', { name: 'Facing 1' })).toBeVisible()
   await newTool(page, [
@@ -311,7 +304,7 @@ test('v0.2 golden path through the UI: reference, faces, setups, export and run 
   await page.getByRole('button', { name: /^Apply \d+ changes?$/ }).click()
   await expect(page.getByRole('button', { name: /^Apply \d+ change/ })).toHaveCount(0)
 
-  // ── Plan: the profile takes the design's tool; the cavity's tool is picked here ──────────
+  // ── Plan: the profile takes the design's tool, the cavity the library tool re-chosen ─────
   await page.keyboard.press('ControlOrMeta+2')
   await expect(page.getByRole('radio', { name: 'Plan' })).toBeChecked()
   const profileRow = setupOps(page, 'Top').nth(2)
@@ -319,8 +312,12 @@ test('v0.2 golden path through the UI: reference, faces, setups, export and run 
   await profileRow.click()
   await expect(inspector.getByRole('heading', { name: 'Profile 1', level: 2 })).toBeVisible()
   await expect(inspector.getByText('From the design’s tool field.')).toBeVisible()
-  await pickTool(setupOps(page, 'Top').nth(1), 'Pocket 1', /Flat 12/)
-  await expect(inspector.getByText('Chosen in this plan.')).toBeVisible()
+  // the cavity's generalized tool was re-chosen to the library's Flat 12 on that Apply (X2 F6)
+  const cavityRow = setupOps(page, 'Top').nth(1)
+  await expect(cavityRow).toHaveText(/Flat 12/)
+  await cavityRow.click()
+  await expect(inspector.getByRole('heading', { name: 'Pocket 1', level: 2 })).toBeVisible()
+  await expect(inspector.getByText('From the design’s tool field.')).toBeVisible()
   // the holes: a drill (the form suggests one for a drilling)
   const drilling = setupOps(page, 'Right').nth(0)
   await drilling.click()

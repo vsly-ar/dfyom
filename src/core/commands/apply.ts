@@ -345,7 +345,7 @@ export const ToolChangeSchema = z.object({
   reason: z
     .string()
     .describe(
-      'Why the old tool was replaced: its failed fit rule, or libraryFits (a library tool now fits)',
+      'Why the old tool was replaced: its failed fit rule, libraryFits (a library tool now fits) or libraryRemoved (it left the library)',
     ),
 })
 export type ToolChange = z.output<typeof ToolChangeSchema>

@@ -364,7 +364,7 @@ No new tools: every change is a reserved-arg default, a shaped result, a field i
 - **`skip` (F7)** keeps its model: per row, 0-based indices of the row's own positions (numbering order), so in the first row instance `n` is index `n − 2` (the source is instance 1). The `rows` description of `design.clones.add` says so; `design.clones.preview` lists each row's `points` in that order, so a point's index in that list is its `skip` index. Accepting instance numbers instead would be a second, overlapping convention on a stored field (a model change): not done.
 - **`design.part.evaluate` (F8)** is described as what it is: it starts the evaluation job and its outcome has the part's DFM warnings. The finished job's outcome (`job_wait`, `job_get`) lists the warnings as changes against what the session last received for that part, like an edit's result ([rule 3](#result-size)): the shaper remembers which part an evaluate job belongs to when it starts.
 - **Merged operations in program comments (F10).** A plan operation that merges design operations of several features is labelled per repeated operation, "Bolt circle screw · drill × 6, Bolt circle 2 screw · drill × 6", as one repeated operation already was ([plan-v0.4.md § Plan side](../modes/plan-v0.4.md#plan-side)); a comment line that is still too long for GRBL is cut at the last word boundary, not mid-word.
-- **Not done:** F3 (cloning a group of features, a model change; DF40), F6 (re-choosing generalized tools when library tools arrive; a model/auto-choice change, left in the intake) and F9 (giving the exit part's SVG to black-box agents; acceptance-run docs).
+- **Not done:** F3 (cloning a group of features, a model change; DF40), F6 (re-choosing generalized tools when library tools arrive; done later, [Amendment (X2 F6)](#amendment-hardening-x2-f6-tool-re-choice-on-library-change-and-open)) and F9 (giving the exit part's SVG to black-box agents; acceptance-run docs).
 
 ## Amendment (hardening DF51, DF52, DF54, DF55): tool choice
 
@@ -374,8 +374,18 @@ No new tools. What an agent sees:
 
 - **`design_profile_add` without `slotWidth`** gets 6 mm / 1/4″, or, when no library tool fits that, the narrowest wider library flat end mill that fits (its Ø rounded up); the `slotWidth` description says so. The result's `placed.box` shows the slot.
 - **No fitting tool** is a DFM warning `dfm.noFittingTool` (parameter `tool`, `params.rule` and the rule's values as `dfm.toolUnfit`) in the add/update result's `warnings` and in `applied`, instead of silent `toolChanges: []`.
-- **`applied.toolChanges[].reason`** can be `libraryFits`: a generalized tool replaced by a library tool that fits after the edit.
+- **`applied.toolChanges[].reason`** can be `libraryFits`: a generalized tool replaced by a library tool that fits after the edit (since X2 F6 also after a library write or on open, and `libraryRemoved`).
 - **`design_tool_candidates.fitting`** is in the new auto-choice order (size, then shortest stickout) and each entry's `reasons` names the reach ("stickout 31 mm").
+
+## Amendment (hardening X2 F6): tool re-choice on library change and open
+
+Status: **draft for review** (implemented on the hardening branch) · Source: the X2 agent run ([research note](../research/2026-11-23-x2-agent-variant.md), finding F6) · Row: DF41 (open item F6) in the [hardening plan](../plans/hardening.md) intake · Spec: [design-v0.2.md § Library changes and opening](../modes/design-v0.2.md#library-changes-and-opening-x2-f6)
+
+No new tools or args. What an agent sees:
+
+- **Library writes** (`library_tool_add`, `_update`, `_remove`) re-choose the bound project's unlocked operation tools that the auto choice would now change: the result's `applied.toolChanges` lists them (`reason` `libraryFits` for a generalized tool replaced by a library tool, `libraryRemoved` for a removed library tool replaced by another, else the old tool's failed fit rule or `unset`). Other open projects have them pending (`project_pending_get`, field `tool`).
+- **`project_open`** of a project that was not open applies it when such a re-choice is pending; the result then has `applied` like an edit's (`toolChanges`, `warnings`, `revision` after the Apply). Nothing to re-choose, no `applied`. `history_undo` reverts the Apply.
+- Locked tools never change; `design_operation_tool_set` stays the way to pin one.
 
 ## Amendment (hardening A3, A6): frames, placed bounds, snap and measure
 
