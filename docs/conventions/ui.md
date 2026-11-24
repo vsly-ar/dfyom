@@ -1051,7 +1051,7 @@ Design evaluation is automatic with a 200 ms trailing debounce ([workers.md](../
 
 ### Jobs and progress
 
-- Jobs ([commands.md](../architecture/commands.md#long-running-commands-jobs)) appear in the status bar `JobIndicator`: count plus the newest job's label and progress; it opens `JobList` with each job's label, progress, pause/resume and cancel.
+- Jobs ([commands.md](../architecture/commands.md#long-running-commands-jobs)) appear in the status bar `JobIndicator`: count plus the newest job's label and progress; it opens `JobList` with each job's label, progress, pause/resume and cancel. A job that refuses `job.pause` (`pausable: false`, homing, DF82: [commands.md](../architecture/commands.md#pausing-a-job)) shows no Pause button.
 - Progress is determinate when `total` is known, indeterminate otherwise; both appear only after `--delay-indicator`.
 - Work tied to an item shows progress at the item too (toolpath generation on the plan operation row).
 - Cancel is always available and immediate in the UI; the outcome `op.aborted` is shown neutrally ("Cancelled").

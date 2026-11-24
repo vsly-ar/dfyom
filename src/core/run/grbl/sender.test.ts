@@ -335,6 +335,23 @@ describe('hold, resume and stop', () => {
     expect(sum.elapsedSeconds - sum.seconds).toBeGreaterThanOrEqual(5)
   })
 
+  // DF82: a paused Probe Z holds its G38.2 line's `ok` back; that is not a lost connection
+  it('a command kept back by a feed hold does not time out; it completes after the cycle start', async () => {
+    const r = await connected(machine({ probePlate: -20 }))
+    // 20 mm at 120 mm/min take 10 s: the timeout covers the travel, as the host's does
+    const p = r.sender.command('G21 G90 G38.2 Z-50 F120', { timeoutMs: 12_000 })
+    await until(r.clock, () => r.emu.status().state === 'Run')
+    expectOk(r.sender.realtime(REALTIME.hold))
+    await until(r.clock, () => r.emu.status().state === 'Hold:0')
+    const z = r.emu.status().mpos[2]
+    await until(r.clock, () => false, 30_000) // well past the timeout
+    expect(r.events.filter((e) => e.kind === 'connectionLost')).toEqual([])
+    expect(r.emu.status().mpos[2]).toBe(z)
+    expectOk(r.sender.realtime(REALTIME.resume))
+    const replies = expectOk(await drive(r.clock, p))
+    expect(replies.some((l) => l.startsWith('[PRB:') && l.endsWith(':1]'))).toBe(true)
+  })
+
   it('stop: hold, then reset; the position is kept and no alarm is raised', async () => {
     const r = await connected(machine())
     const p = start(r, long)

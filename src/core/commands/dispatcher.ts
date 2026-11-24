@@ -864,7 +864,7 @@ class ProjectDispatcher implements Dispatcher {
     def: BuiltinCommand,
     args: unknown,
     source: Source,
-  ): AppResult<CommandOutcome> {
+  ): AppResult<CommandOutcome> | AsyncAppResult<CommandOutcome> {
     if (def.name === 'history.undo' || def.name === 'history.redo') {
       const isUndo = def.name === 'history.undo'
       const gesture = isUndo ? (args as { gesture?: string }).gesture : undefined
@@ -895,7 +895,15 @@ class ProjectDispatcher implements Dispatcher {
       this.emit(source, { type: isUndo ? 'undo' : 'redo', entrySeq: entry.seq, patches })
       return Ok({ value: { entrySeq: entry.seq }, revision: this.rev })
     }
-    // job.pause / job.resume / job.abort
+    return this.controlJob(def, args, source)
+  }
+
+  /** `job.pause` / `job.resume` / `job.abort` (docs/architecture/commands.md#pausing-a-job). */
+  private async controlJob(
+    def: BuiltinCommand,
+    args: unknown,
+    source: Source,
+  ): AsyncAppResult<CommandOutcome> {
     const { jobId } = args as { jobId: string }
     const job = this.runs.get(jobId)
     if (job === undefined)
@@ -910,6 +918,11 @@ class ProjectDispatcher implements Dispatcher {
           where: def.name,
         }),
       )
+    // A refusal, or a hold that must succeed first (a job never claims paused while it moves)
+    if (def.name === 'job.pause' || def.name === 'job.resume') {
+      const ready = await job.prepareControl(def.name === 'job.pause' ? 'pause' : 'resume')
+      if (ready.isErr()) return this.logged(def.name, args, source, Err(ready.unwrapErr()))
+    }
     // The dispatch event comes first; lifecycle events follow.
     const before: JobState = job.state
     const next: JobState =

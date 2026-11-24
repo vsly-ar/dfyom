@@ -16,7 +16,7 @@ import type { ApplyView } from './apply'
 import type { HostPort } from '../project/lifecycle'
 import type { Region2dPort } from '../geometry/2d/port'
 import type { MachineService } from '../run/service'
-import type { Option } from '../../shared/result'
+import type { AsyncAppResult, Option } from '../../shared/result'
 
 /**
  * A per-session identity: one window, MCP session, CLI invocation or script run.
@@ -122,6 +122,20 @@ export interface JobContext extends CommandContext {
   readonly checkpoint: () => Promise<void>
   /** Pass to `workers.run` so a pause also parks the worker mid-task. */
   readonly pause: PauseState
+  /**
+   * For jobs with the `handled` pause policy: how `job.pause`/`job.resume` act while the work can
+   * be held (e.g. a feed hold during a probe cycle); returns the unregister. While none is
+   * registered, `job.pause` fails `job.notPausable`. Doc: docs/architecture/commands.md#pausing-a-job
+   */
+  readonly onPause: (handler: PauseHandler) => () => void
+}
+
+/** Holds and resumes a job's work (`JobContext.onPause`). */
+export interface PauseHandler {
+  /** Resolves once the work stands still; an `Err` leaves the job running. */
+  hold(): AsyncAppResult<void>
+  /** Resolves once the work continues. */
+  resume(): AsyncAppResult<void>
 }
 
 /** The dispatcher's jobs, for `job.get` / `job.list`: running and the retained finished ones. */

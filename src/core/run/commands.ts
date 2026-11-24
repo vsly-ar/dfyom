@@ -90,12 +90,15 @@ async function act(
  * A machine action run by a job (homing, Probe Z): `job.abort` stops the machine with a reset
  * (`0x18`), as Stop does without a run job (GRBL stops a homing cycle only by a reset, DF35;
  * docs/modes/run.md#1-emergency-stop-stop-and-reset). Before, the abort only marked the job and
- * the cycle ran on (and the job with it) until the machine finished.
+ * the cycle ran on (and the job with it) until the machine finished. `holdable` (Probe Z, DF82):
+ * `job.pause` is a feed hold, paused once the controller reports `Hold:0`; `job.resume` a cycle
+ * start (the job's `handled` pause policy).
  */
 async function actStoppable(
   ctx: JobContext,
   action: MachineAction,
   where: string,
+  holdable = false,
 ): Promise<AppResult<unknown>> {
   const m = machineOf(ctx.services, where)
   if (m.isErr()) return m
@@ -103,10 +106,17 @@ async function actStoppable(
   const machine = m.unwrap()
   const stop = () => void machine.machine({ kind: 'reset' })
   ctx.signal.addEventListener('abort', stop, { once: true })
+  const offPause = holdable
+    ? ctx.onPause({
+        hold: async () => (await machine.machine({ kind: 'feedHold' })).map(() => undefined),
+        resume: async () => (await machine.machine({ kind: 'cycleStart' })).map(() => undefined),
+      })
+    : undefined
   try {
     const r = await machine.machine(action)
     return r.mapErr((e) => e.withContext(where))
   } finally {
+    offPause?.()
     ctx.signal.removeEventListener('abort', stop)
   }
 }
@@ -289,6 +299,8 @@ export const runMachineHome = defineCommand({
   summary: 'Home the machine ($H); takes seconds, so it is a job.',
   title: () => 'Home',
   machine: true,
+  // GRBL ignores a feed hold during a homing cycle (DF82): only Stop (a reset) stops it
+  pause: { kind: 'refuse', message: "Homing can't be paused; use Stop (it resets the controller)" },
   args: Empty,
   result: z.object({ workZero: Vec3Schema.describe('G54 in machine coordinates (mm)') }),
   async run(_doc, _args, ctx) {
@@ -550,6 +562,8 @@ export const runMachineProbeZ = defineCommand({
     'Touch plate: probe Z down (G38.2), set G54 Z so the plate top is Z = plateThickness, retract. Idle or at a tool change. A miss is ALARM:5.',
   title: () => 'Probe Z',
   machine: true,
+  // job.pause is a feed hold, paused once the controller reports Hold:0 (DF82)
+  pause: { kind: 'handled' },
   args: z.object({
     plateThickness: z.number().positive().max(100).describe('mm (machine probePlateThickness)'),
     maxTravel: z
@@ -586,6 +600,7 @@ export const runMachineProbeZ = defineCommand({
         retract: args.retract ?? PROBE_DEFAULTS.retract,
       },
       'run.machine.probeZ',
+      true,
     )
     if (r.isErr()) return r
     return Ok(r.unwrap() as { workZero: Vec3; contact: Vec3 })

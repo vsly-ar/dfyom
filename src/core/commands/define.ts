@@ -95,8 +95,24 @@ export interface JobCommand<S extends z.ZodType = z.ZodType, R = unknown> extend
   readonly kind: 'job'
   readonly args: S
   readonly result: z.ZodType<R>
+  /**
+   * How `job.pause` acts on it (default `checkpoint`). A job state never claims paused while the
+   * machine moves (hardening DF82). Doc: docs/architecture/commands.md#pausing-a-job
+   */
+  readonly pause?: JobPausePolicy
   run(doc: ProjectDoc, args: z.output<S>, ctx: JobContext): AsyncAppResult<R>
 }
+
+/**
+ * - `checkpoint`: paused at once; the handler parks at its next checkpoint (`ctx.checkpoint`).
+ * - `refuse`: `job.pause` fails `job.notPausable` with `message` (only an abort stops it).
+ * - `handled`: the handler pauses its work itself (`ctx.onPause`); `job.pause` answers once the
+ *   handler's hold succeeded, and only then is the job paused.
+ */
+export type JobPausePolicy =
+  | { readonly kind: 'checkpoint' }
+  | { readonly kind: 'refuse'; readonly message: string }
+  | { readonly kind: 'handled' }
 
 /**
  * Commands executed by the dispatcher itself (`history.undo`, `job.pause`, …): they act on

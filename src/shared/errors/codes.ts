@@ -83,6 +83,12 @@ export const ERROR_CODES = {
     retryable: false,
   },
   'op.aborted': { severity: 'info', userMessage: 'The operation was cancelled.', retryable: true },
+  // Jobs (hardening DF82): docs/architecture/commands.md#pausing-a-job
+  'job.notPausable': {
+    severity: 'info',
+    userMessage: 'This job cannot be paused; stop it instead.',
+    retryable: false,
+  },
   // Workers (task 2.9): docs/architecture/workers.md#worker-death-timeouts-and-restart
   'op.timeout': {
     severity: 'warn',
