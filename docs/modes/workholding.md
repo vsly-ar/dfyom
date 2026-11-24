@@ -1,12 +1,12 @@
 # Workholding: clamps, vises and screws per setup
 
-Status: draft (proposed 2026-11-22 from the [LLM-first black-box test](../plans/v0.4-llm-first.md#source), finding F2; the v0.4 follow-up milestone (after v0.4, before v0.5); every decision below is a proposal until the user answers Q37–Q40) · Plan of record: [plans/v0.4-llm-first.md](../plans/v0.4-llm-first.md) · Base: [plan.md § Setups](plan.md#setups), [plan-v0.2.md § Setups from face directions](plan-v0.2.md#setups-from-face-directions), [plan-v0.1.md § Safe heights](plan-v0.1.md#setup-orientation-work-zero-safe-heights) · Program: [grbl.md](../architecture/grbl.md) · Terms: [glossary.md](../glossary.md)
+Status: accepted (proposed 2026-11-22 from the [LLM-first black-box test](../plans/v0.4-llm-first.md#source), finding F2; the v0.4 follow-up milestone (after v0.4, before v0.5); the user answered Q37–Q40 on 2026-11-24, TG #270 "ok", every recommendation taken) · Plan of record: [plans/v0.4-llm-first.md](../plans/v0.4-llm-first.md) · Base: [plan.md § Setups](plan.md#setups), [plan-v0.2.md § Setups from face directions](plan-v0.2.md#setups-from-face-directions), [plan-v0.1.md § Safe heights](plan-v0.1.md#setup-orientation-work-zero-safe-heights) · Program: [grbl.md](../architecture/grbl.md) · Terms: [glossary.md](../glossary.md)
 
 Today DFYOM has no idea what holds the stock. In the black-box test the bottom program rapided **through a toe clamp at Z1** (retract 2 mm above the face), and nothing flagged it; the agent had to subtract keep-out rectangles from its own design shapes, raise the retract height everywhere and check the G-code with its own script. This doc gives every setup a list of **workholding items** that become obstacles: toolpaths keep out of them, links go up and over them, the clearance height follows them, and a collision check over every move blocks the export when something still hits.
 
 ## Decisions
 
-Proposed; settled by [Q37–Q40](../plans/v0.4-llm-first.md#questions-for-the-user).
+Settled by [Q37–Q40] (user, 2026-11-24, every recommendation taken)(../plans/v0.4-llm-first.md#questions-for-the-user).
 
 | Id   | Decision                                                                                                                                                                                                                      | Section                                           |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
