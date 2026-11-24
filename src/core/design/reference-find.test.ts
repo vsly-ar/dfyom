@@ -9,6 +9,9 @@ import { createInProcessWorkers, memoryFiles } from '../commands/jobs'
 import { nodeRegion2d } from '../geometry/2d/testing/node-wasm'
 import { assetPathOf, type AssetRef } from '../project/assets'
 import type { ProjectSession } from '../project/storage'
+import { faceFrame } from '../geometry/face'
+import { applyPlacement, unapplyPlacement } from '../geometry/model'
+import { setupFrame } from '../toolpath/wcs'
 import { designSetup, type DesignSetup } from './design.fixture'
 import { binaryStl, boxSoup } from './stl.testing'
 
@@ -231,6 +234,98 @@ describe('design.reference.find', () => {
     await err({ kind: 'section' }, 'required')
     await importRef(s, FRAME)
     await err({ kind: 'levels' }, 'referenceAmbiguous')
+  })
+
+  describe('setup faces (P2)', () => {
+    /** A plan with a top and a bottom setup (a facing on each face). */
+    async function withPlan(s: DesignSetup) {
+      await s.run('design.facing.add', { partId: s.partId, on: 'stock.top', depth: '0.5' })
+      await s.run('design.facing.add', { partId: s.partId, on: 'stock.bottom', depth: '0.5' })
+      const plan = (await s.run('plan.create', { partId: s.partId })) as {
+        planId: string
+        setupIds: string[]
+      }
+      const setups = s.d.doc.plans[plan.planId]!.setups
+      const id = (d: string | undefined) => setups.find((x) => (x.direction ?? '+z') === d)!.id
+      return { planId: plan.planId, top: id('+z'), bottom: id('-z') }
+    }
+
+    it('{ setupId } of a bottom setup reads as stock.bottom (levels and section)', async () => {
+      const s = await setup()
+      await importRef(s, FRAME)
+      const { bottom } = await withPlan(s)
+      const section = { kind: 'section', depth: '15' }
+      const byFace = await find(s, { ...section, face: 'stock.bottom' })
+      const bySetup = await find(s, { ...section, face: { setupId: bottom } })
+      expect(bySetup).toEqual({ ...byFace, setupId: bottom })
+      const levels = await find(s, { kind: 'levels', face: { setupId: bottom } })
+      expect(levels).toEqual({
+        ...(await find(s, { kind: 'levels', face: 'stock.bottom' })),
+        setupId: bottom,
+      })
+      // shapes from it are made on the bottom face's frame, as from stock.bottom
+      const shape = (await s.run('design.shape.import', {
+        partId: s.partId,
+        from: { face: { setupId: bottom }, depth: '15', loops: 'holes' },
+      })) as { section: { face: string } }
+      expect(shape.section.face).toBe('stock.bottom')
+    })
+
+    it("frame: 'setup' with a 90° rotation gives the points in the setup's WCS (setupFrame)", async () => {
+      const s = await setup()
+      await importRef(s, FRAME)
+      const { planId, top } = await withPlan(s)
+      await s.run('plan.setup.update', { planId, setupId: top, rotation: 90 })
+      const r = (await find(s, {
+        kind: 'section',
+        depth: '5',
+        loops: 'holes',
+        face: { setupId: top },
+        frame: 'setup',
+      })) as unknown as {
+        wcs: { z: number }
+        loops: {
+          bounds: [V2, V2]
+          corners: { sharp: V2[] }
+          wcs: { bounds: [V2, V2]; sharp: V2[] }
+        }[]
+      }
+      expect(r.wcs).toEqual({ z: -5 })
+      const stock = { length: 100, width: 60, thickness: 20 }
+      const wcs = setupFrame('+z', 90, stock)
+      const toWcs = (p: V2) => {
+        const q = unapplyPlacement(wcs, applyPlacement(faceFrame('+z', stock), [p[0], p[1], -5]))
+        return [q[0], q[1]].map((v) => Math.round(v * 1000) / 1000 || 0)
+      }
+      const [hole] = r.loops
+      // every sharp corner, and the bounds' corners, where setupFrame puts them
+      expect(hole!.wcs.sharp).toEqual(hole!.corners.sharp.map(toWcs))
+      const corners = [hole!.bounds[0], hole!.bounds[1]].map(toWcs)
+      expect(hole!.wcs.bounds).toEqual([
+        [Math.min(corners[0]![0]!, corners[1]![0]!), Math.min(corners[0]![1]!, corners[1]![1]!)],
+        [Math.max(corners[0]![0]!, corners[1]![0]!), Math.max(corners[0]![1]!, corners[1]![1]!)],
+      ])
+      // a quarter turn: the hole's 10 × 10 face-frame box stays 10 × 10, moved
+      expect(hole!.wcs.bounds).not.toEqual(hole!.bounds)
+      // levels carry their WCS height and bounds
+      const levels = (await find(s, { kind: 'levels', face: { setupId: top }, frame: 'setup' }))
+        .levels as unknown as { depth: number; wcs: { z: number } }[]
+      for (const l of levels) expect(l.wcs.z).toBe(-l.depth || 0)
+    })
+
+    it('refuses an unknown setup and the setup frame without a setup face', async () => {
+      const s = await setup()
+      await importRef(s, FRAME)
+      const err = async (args: object, rule: string) => {
+        const e = expectErrCode(
+          await s.d.queryAsync('design.reference.find', { partId: s.partId, ...args }, ui),
+          'input.malformed',
+        )
+        expect(e.issues.map((i) => [i.rule, i.path.join('.')])).toContainEqual(rule.split(' '))
+      }
+      await err({ kind: 'levels', face: { setupId: 'setup9' } }, 'unknownSetup face.setupId')
+      await err({ kind: 'levels', frame: 'setup' }, 'setupFrameNeedsSetup frame')
+    })
   })
 
   it('is an async query: query() refuses it, queryAsync() also answers synchronous queries', async () => {

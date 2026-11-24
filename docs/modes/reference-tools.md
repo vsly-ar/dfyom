@@ -1,6 +1,6 @@
 # Reference tools: section, levels, holes, compare and fit for a reference model
 
-Status: accepted (proposed 2026-11-23 for hardening [DF60](../plans/hardening.md); the user answered [Q70–Q80](#open-questions-for-the-user) on 2026-11-24 and took every recommendation); **P1 implemented with its follow-ups** ([§ Implementation (P1)](#implementation-p1)), P2–P5 accepted, not built · Source: black-box test of 2026-11-23 (scaled enclosure in two setups, `.continuous/research/2026-11-23-enclosure-two-setup-test.md`, issues I-5 and I-11) · Base: [reference-model.md](reference-model.md) (import, placement, fit, the [reference-only rule](reference-model.md#rule-reference-only)) · Single owner of levels, sections and holes of a reference since Q71 ([reference-query.md](reference-query.md), the v0.4 follow-up draft, is folded in here); the simulated-cut deviation stays in [deviation.md](deviation.md) · Async queries: [ADR 0021](../decisions/0021-async-queries.md), [commands.md § Async queries](../architecture/commands.md#async-queries) · UI: [ui.md § Reference tools](../conventions/ui.md#reference-tools-df60) · Shapes and fitting: [shapes.md](../architecture/shapes.md) · Agent API and budget: [llm-api.md](../architecture/llm-api.md) · Hole feature: [design-v0.4.md § Hole feature](design-v0.4.md#hole-feature) · Terms: [glossary.md](../glossary.md)
+Status: accepted (proposed 2026-11-23 for hardening [DF60](../plans/hardening.md); the user answered [Q70–Q80](#open-questions-for-the-user) on 2026-11-24 and took every recommendation); **P1 implemented with its follow-ups** ([§ Implementation (P1)](#implementation-p1)), **P2 implemented** ([§ Implementation (P2)](#implementation-p2)), P3–P5 accepted, not built · Source: black-box test of 2026-11-23 (scaled enclosure in two setups, `.continuous/research/2026-11-23-enclosure-two-setup-test.md`, issues I-5 and I-11) · Base: [reference-model.md](reference-model.md) (import, placement, fit, the [reference-only rule](reference-model.md#rule-reference-only)) · Single owner of levels, sections and holes of a reference since Q71 ([reference-query.md](reference-query.md), the v0.4 follow-up draft, is folded in here); the simulated-cut deviation stays in [deviation.md](deviation.md) · Async queries: [ADR 0021](../decisions/0021-async-queries.md), [commands.md § Async queries](../architecture/commands.md#async-queries) · UI: [ui.md § Reference tools](../conventions/ui.md#reference-tools-df60) · Shapes and fitting: [shapes.md](../architecture/shapes.md) · Agent API and budget: [llm-api.md](../architecture/llm-api.md) · Hole feature: [design-v0.4.md § Hole feature](design-v0.4.md#hole-feature) · Terms: [glossary.md](../glossary.md)
 
 ## Problem
 
@@ -53,7 +53,7 @@ Decided by the user on 2026-11-24 (Q70–Q80, every recommendation). RT-A takes 
 ## Faces and frames
 
 - `face` is a stock face target (`stock.top`, `stock.bottom`, `stock.side[0]`–`stock.side[3]`; default `stock.top`), or (P2) `{ setupId }` of the part's plan: the face of that setup's direction ([plan-v0.2.md § Setups from face directions](plan-v0.2.md#setups-from-face-directions)). Operation surfaces are refused (rule `stockFaceOnly`).
-- The **face frame** puts w = 0 at the stock face and the stock below it (`faceFrame(direction, stock)`; the section plane is w = −depth). Results are in that face's [face frame](design-v0.2.md#face-frame) (what `design.*.add` takes, so no conversion). With `frame: 'setup'` (only with `{ setupId }`) point results are also given in the setup's WCS (`setupFrame(direction, rotation, stock)` in `src/core/toolpath/wcs.ts`: rotation and work zero applied) under `wcs: [x, y]`, for reading against a program. Shapes are always made in the face frame (shapes live on faces, not setups).
+- The **face frame** puts w = 0 at the stock face and the stock below it (`faceFrame(direction, stock)`; the section plane is w = −depth). Results are in that face's [face frame](design-v0.2.md#face-frame) (what `design.*.add` takes, so no conversion). With `frame: 'setup'` (only with `{ setupId }`) point results are also given in the setup's WCS (`setupFrame(direction, rotation, stock)` in `src/core/toolpath/wcs.ts`: rotation and work zero applied) in a `wcs` object beside the face-frame fields (the section's `z`; per level `z` and `bounds`; per loop `bounds`, circle `center` and `sharp`), for reading against a program. Shapes are always made in the face frame (shapes live on faces, not setups).
 - Depths are from the stock face at the stock level (0 = the face, positive into the stock). After a [facing or an earlier setup](plan-v0.2.md#material-removed-by-earlier-setups) the stock face is still the datum: the query reads the reference, not the remaining stock.
 
 ## 1. Section and levels
@@ -207,12 +207,13 @@ All analysis is headless core (`src/core`, no Electron, DOM or Node-only imports
 
 ## Agent API and budget
 
-| Tool                       | Kind                                   | `tools/list` cost                          |
-| -------------------------- | -------------------------------------- | ------------------------------------------ |
-| `design.reference.find`    | async query (P1)                       | ≈ 1.3 K measured (levels and section args) |
-| `design.shape.import`      | existing command, gains `from` (P1)    | + 0.7 K measured (659 → ≈ 1.36 K)          |
-| `design.reference.update`  | existing; result fields only (P1)      | in the output schema                       |
-| `design.reference.compare` | job (P4; `source: part` only at first) | ≈ 0.5 K (estimate)                         |
+| Tool                                  | Kind                                   | `tools/list` cost                          |
+| ------------------------------------- | -------------------------------------- | ------------------------------------------ |
+| `design.reference.find`               | async query (P1)                       | ≈ 1.3 K measured (levels and section args) |
+| `face: { setupId }`, `frame: 'setup'` | existing args extended (P2)            | + 0.37 K measured                          |
+| `design.shape.import`                 | existing command, gains `from` (P1)    | + 0.7 K measured (659 → ≈ 1.36 K)          |
+| `design.reference.update`             | existing; result fields only (P1)      | in the output schema                       |
+| `design.reference.compare`            | job (P4; `source: part` only at first) | ≈ 0.5 K (estimate)                         |
 
 P1 measured: 107 245 → 109 183 characters (124 → 125 tools, + 1.94 K, under the 120 K budget; logged in [llm-api.md § Implementation](../architecture/llm-api.md#implementation-task-310)). Results stay ≤ 5 KB by default (levels ≈ 2.5 KB, section summary ≈ 1–3 KB, holes ≈ 4 KB, compare ≈ 2 KB). The primer's bullet grows with the phases; P1: "Reference: `design_reference_find` (levels, section) → `design_shape_import { from }`".
 
@@ -232,6 +233,15 @@ Implemented 2026-11-24 (hardening DF60 P1); code points back here.
   - **Shape Editor backdrop:** `useReferenceSection` asks for the fitted loops and draws (and snaps to) them, chorded within 0.002 mm; an open section keeps the raw segments.
   - Tests: `fit-polyline.test.ts` (long and short chords in turns), `reference-section.test.ts` (feature-rich heights), `mesh-levels.test.ts` (`levelTriangles`), `reference-overlay.test.ts`, `Reference.test.tsx`; renders `df-reference-tools` and `df-reference-level-hover`.
 
+## Implementation (P2)
+
+Implemented 2026-11-24 (hardening DF60 P2, agent API only); code points back here.
+
+- **`face`** (`FaceArg` in `reference-find.ts`) is a union of a stock face id and `{ setupId }`, on `design.reference.find` and `design.shape.import.from`. `resolveFace` looks the setup up in the plans of the part (any plan; rule `unknownSetup` at `face.setupId` otherwise) and takes its direction; the result names `setupId` beside `face`. A setup face reads exactly as its stock face does (the same levels, loops and shapes).
+- **`frame: 'setup'`** on the find (rule `setupFrameNeedsSetup` without a setup face) adds the `wcs` object ([§ Faces and frames](#faces-and-frames)): face frame → part frame (`faceFrame`) → WCS (`unapplyPlacement` of `setupFrame` with the setup's rotation). Bounds stay axis-aligned under the quarter turns. Shapes are still made in the face frame, so `design.shape.import.from` takes no `frame`.
+- Budget: 109 838 → 110 210 characters (+ 0.37 K, no new tool; [llm-api.md § Implementation](../architecture/llm-api.md#implementation-task-310)).
+- Tests: `reference-find.test.ts` (a bottom setup's `{ setupId }` equals `stock.bottom` for levels, section and import; `frame: 'setup'` with a 90° rotation matches `setupFrame`; the two refusals).
+
 ## Performance
 
 The worker keeps the last mesh read per asset. Measured on the full enclosure body (77 112 triangles, dev machine): `levels` ≈ 120 ms (target < 100 ms for 50 K triangles: in line), section chaining 3–8 ms and fitting 2–14 ms (target < 200 ms); `holes` (P3) < 1 s. At the 1 M triangle warn limit, about ten times that.
@@ -241,7 +251,8 @@ The worker keeps the last mesh read per asset. Measured on the full enclosure bo
 | Item                                                         | Where                                                        |
 | ------------------------------------------------------------ | ------------------------------------------------------------ |
 | `detail: "full"` on `find`                                   | When an agent needs loop geometry without making shapes      |
-| Setup faces, holes, compare, overlay                         | [P2–P5](#phases)                                             |
+| Holes, compare, overlay                                      | [P3–P5](#phases)                                             |
+| Setup faces in the Reference panel's face picker             | When the panel reads against a plan (P2 is agent API only)   |
 | Silhouette (outline of the whole model seen from a face)     | Later; a section near the widest level serves                |
 | Feature recognition into operations                          | Assisted recreation, later                                   |
 | Holes along other axes than face normals; slots and obrounds | With assisted recreation                                     |
@@ -255,7 +266,7 @@ Smallest useful first; each phase is mergeable on its own and ends with `npm run
 | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------- | ----------------------------------------------------------- |
 | P0    | **Done.** Docs accepted: this doc (and reference-query.md merged into it, Q71), ui.md amendment for the panel rows, llm-api amendment + ADR for async queries (Q72)                                                                                          | Q70–Q80                     | all                                                         |
 | P1    | **Done (implemented).** **Levels + section → shape**: async query kind; `levels` (both sides, visible area); `section` summary; chaining, `fit-polyline`, corner radii; `from` (+ `roundInside`); fit result fields; Reference panel Levels and Section rows | P0; S8 measured in P1       | The black-box flow without a slicer for outlines and depths |
-| P2    | **Setup faces**: `{ setupId }` faces and `frame: 'setup'`                                                                                                                                                                                                    | P1                          | Reading sections against a setup's program                  |
+| P2    | **Done (implemented).** **Setup faces**: `{ setupId }` faces and `frame: 'setup'`                                                                                                                                                                            | P1                          | Reading sections against a setup's program                  |
 | P3    | **Holes**: detection, groups, patterns, suggestions, `noTool`; `reference.featureBelowTool` after a scale (left out of P1: it needs holes); Holes list and ghost rings                                                                                       | P1                          | Bolt holes and drillings from the reference                 |
 | P4    | **Compare (agent)**: `design.reference.compare { source: part }` boolean method, height-map fallback, attribution, `cornerRadius`                                                                                                                            | P1 (`mesh-distance` shared) | A measurable "does the design match"                        |
 | P5    | **Compare overlay**: per-vertex colours, missing volumes, regions list, auto re-run while shown                                                                                                                                                              | P4, ui.md amendment         | –                                                           |
