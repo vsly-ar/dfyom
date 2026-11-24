@@ -15,8 +15,10 @@ import { SEGMENT, type ToolpathLines } from './toolpath-lines'
 import {
   AlignmentLayer,
   AlignmentTargets,
+  FlipAxes,
   type AlignmentMarker,
   type AlignmentTarget,
+  type FlipAxisLine,
 } from './AlignmentLayer'
 import { WorkholdingLayer, type WorkholdingOverlay } from './WorkholdingLayer'
 import { ZRefLayer, type ZRefOverlay } from './ZRefLayer'
@@ -53,6 +55,8 @@ export interface RunScene {
   readonly alignment?: readonly AlignmentMarker[] | undefined
   /** Sources a point can be added from while picking (plan scene, DF78 S22); absent: not picking. */
   readonly alignmentTargets?: readonly AlignmentTarget[] | undefined
+  /** Flip axes of registration holes (plan scene, Q106), in work coordinates; absent: none. */
+  readonly flipAxes?: readonly FlipAxisLine[] | undefined
   /**
    * The setup's workholding items, the open item's keep-out zone and collision hits (plan scene,
    * workholding.md#ui-summary), in work coordinates; absent: none.
@@ -206,6 +210,9 @@ export function RunLayer({
       ) : null}
       {run.zRef ? (
         <ZRefLayer zRef={run.zRef} palette={palette} reducedMotion={reducedMotion} />
+      ) : null}
+      {run.flipAxes && run.flipAxes.length > 0 ? (
+        <FlipAxes axes={run.flipAxes} palette={palette} reducedMotion={reducedMotion} />
       ) : null}
       {run.alignment && run.alignment.length > 0 ? (
         <AlignmentLayer points={run.alignment} palette={palette} reducedMotion={reducedMotion} />

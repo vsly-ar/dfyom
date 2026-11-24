@@ -456,6 +456,18 @@ export const runMessages = {
       skipConfirm: 'Continue',
       pending: 'Confirm the alignment first.',
       zeroName: 'Work zero',
+      /** Q108 (assumed): a mark on a side wall checks one axis. */
+      oneAxis: (axis: 'x' | 'y') => `${axis.toUpperCase()} only`,
+      oneAxisHint: (axis: 'x' | 'y') =>
+        `On a side of the stock: it checks ${axis.toUpperCase()} only. Lower the pointer beside the side to sight it.`,
+      /** Q107 (assumed): the step is a docked Run panel; the prompt points to it. */
+      panelLabel: (setup: string) => `Alignment of ${setup}`,
+      handover: (n: number) =>
+        `Line up the stock in the Alignment panel beside the DRO (${n === 1 ? '1 point' : `${n} points`}): the jog pad and the position stay in view while you nudge it. Come back here to start.`,
+      handoverDone: 'Alignment confirmed in the Alignment panel.',
+      openPanel: 'Align in the Run panel',
+      backToChange: (n: number) => `Back to the setup change (start setup ${n})`,
+      setupFor: (n: number, name: string) => `Setup ${n}, ${name}`,
     },
     /** Like the pauses' "Close (stay paused)" (DF46): says what closing does (DF48). */
     later: 'Close (start later)',

@@ -112,6 +112,155 @@ export function setupXY(setup: SetupDTO, stock: StockSize): [number, number] {
     : [local.length, local.width]
 }
 
+// ── the flip axis (Q106, assumed) ─────────────────────────────────────────────────────────────
+
+/**
+ * Where a point of setup `a`'s up face lands in setup `b`'s frame, seen from above (Z dropped): a
+ * through hole drilled at `p` in `a` is at `setupMap(a, b, stock)(p)` in `b`. An isometry of the
+ * plane; a flip (opposite directions) reverses its orientation.
+ */
+export function setupMap(a: SetupDTO, b: SetupDTO, stock: StockSize): (p: Vec2) => Vec2 {
+  const from = cornerFrame(a, stock)
+  const to = cornerFrame(b, stock)
+  return (p) => {
+    const q = unapplyPlacement(to, applyPlacement(from, [p[0], p[1], 0]))
+    return [q[0], q[1]]
+  }
+}
+
+/** A flip axis: a line of setup `a`'s up face, clipped to the stock, and `b`'s view of it. */
+export interface FlipAxis {
+  /** The axis' ends on the stock outline, setup frame of the setup that drills the holes (mm). */
+  readonly from: Vec2
+  readonly to: Vec2
+  /** The same line in the later (flipped) setup's frame. */
+  readonly later: { readonly from: Vec2; readonly to: Vec2 }
+}
+
+const DIRECTION_VEC: Readonly<Record<string, Vec3>> = {
+  '+x': [1, 0, 0],
+  '-x': [-1, 0, 0],
+  '+y': [0, 1, 0],
+  '-y': [0, -1, 0],
+  '+z': [0, 0, 1],
+  '-z': [0, 0, -1],
+}
+
+const sub = (a: Vec2, b: Vec2): Vec2 => [a[0] - b[0], a[1] - b[1]]
+
+/**
+ * The flip axis between `a` and a later setup `b` that turns the stock over (opposite
+ * directions; Q106, assumed): the line of `a`'s up face whose points keep their place across the
+ * flip up to one shift along it (a reflection's mirror line, a glide reflection's axis), clipped
+ * to `a`'s stock outline. Holes on it, drilled through into dowels in the spoilboard, land on the
+ * same dowels after the flip. In the setup frames, so a moved work zero never moves it.
+ * `undefined` unless `b` flips `a`.
+ */
+export function flipAxis(a: SetupDTO, b: SetupDTO, stock: StockSize): FlipAxis | undefined {
+  const da = DIRECTION_VEC[setupDirection(a)]!
+  const db = DIRECTION_VEC[setupDirection(b)]!
+  if (da[0] + db[0] !== 0 || da[1] + db[1] !== 0 || da[2] + db[2] !== 0) return undefined
+  const map = setupMap(a, b, stock)
+  const t = map([0, 0])
+  const c1 = sub(map([1, 0]), t)
+  const c2 = sub(map([0, 1]), t)
+  if (c1[0] * c2[1] - c1[1] * c2[0] > 0) return undefined
+  // R = I − 2nnᵀ: the columns of (I − R) are 2·n·nᵢ; the longer one gives n
+  const k1: Vec2 = [1 - c1[0], -c1[1]]
+  const k2: Vec2 = [-c2[0], 1 - c2[1]]
+  const k = Math.hypot(...k1) >= Math.hypot(...k2) ? k1 : k2
+  const kl = Math.hypot(...k)
+  const n: Vec2 = [k[0] / kl, k[1] / kl]
+  const d: Vec2 = [-n[1], n[0]]
+  // map(p) − p = −2(p·n)n + t is along d where p·n = t·n / 2
+  const c = (t[0] * n[0] + t[1] * n[1]) / 2
+  const [L, W] = setupXY(a, stock)
+  const ends = clipLine([n[0] * c, n[1] * c], d, L, W)
+  if (ends === undefined) return undefined
+  // stable ends: from the lower X (then the lower Y)
+  const [p, q] = ends.map(round2) as [Vec2, Vec2]
+  const [from, to] = p[0] < q[0] || (p[0] === q[0] && p[1] <= q[1]) ? [p, q] : [q, p]
+  return { from, to, later: { from: round2(map(from)), to: round2(map(to)) } }
+}
+
+/** The part of the line `p + s·d` inside `[0, L] × [0, W]` (Liang–Barsky), if any. */
+function clipLine(p: Vec2, d: Vec2, L: number, W: number): [Vec2, Vec2] | undefined {
+  let lo = -Infinity
+  let hi = Infinity
+  for (const [pi, di, max] of [
+    [p[0], d[0], L],
+    [p[1], d[1], W],
+  ] as const) {
+    if (Math.abs(di) < 1e-12) {
+      if (pi < -1e-9 || pi > max + 1e-9) return undefined
+      continue
+    }
+    const s0 = (0 - pi) / di
+    const s1 = (max - pi) / di
+    lo = Math.max(lo, Math.min(s0, s1))
+    hi = Math.min(hi, Math.max(s0, s1))
+  }
+  if (!(hi - lo > 1e-6)) return undefined
+  return [
+    [p[0] + d[0] * lo, p[1] + d[1] * lo],
+    [p[0] + d[0] * hi, p[1] + d[1] * hi],
+  ]
+}
+
+/**
+ * The later setup the hole helper places for and its flip axis: `forSetupId` when it flips
+ * `setup`, else (no `forSetupId`) the first later setup that does.
+ */
+export function flipPartner(
+  plan: Pick<LoadedPlan, 'stock' | 'setups'>,
+  setup: SetupDTO,
+  forSetupId?: string,
+): { readonly setup: SetupDTO; readonly axis: FlipAxis } | undefined {
+  const stock = stockSizeOf(plan)
+  const i = plan.setups.findIndex((s) => s.id === setup.id)
+  const later =
+    forSetupId === undefined
+      ? plan.setups.slice(i + 1)
+      : plan.setups.filter((s) => s.id === forSetupId)
+  for (const b of later) {
+    const axis = flipAxis(setup, b, stock)
+    if (axis !== undefined) return { setup: b, axis }
+  }
+  return undefined
+}
+
+/**
+ * The flip axes of a plan: for each setup that drills registration holes a later flipped setup
+ * aligns on (or, without such points, the first later flipped setup when it drills any), the
+ * axis in both frames. Drawn dashed in the Plan viewport of either setup.
+ */
+export function planFlipAxes(
+  plan: Pick<LoadedPlan, 'stock' | 'setups'>,
+): { readonly setupId: string; readonly laterSetupId: string; readonly axis: FlipAxis }[] {
+  const stock = stockSizeOf(plan)
+  const out: { setupId: string; laterSetupId: string; axis: FlipAxis }[] = []
+  for (const [i, a] of plan.setups.entries()) {
+    const holes = new Set(
+      a.operations.filter((o) => aidOf(o)?.kind === 'registrationHole').map((o) => o.id),
+    )
+    if (holes.size === 0) continue
+    const users = plan.setups
+      .slice(i + 1)
+      .filter((b) => (b.alignment ?? []).some((p) => 'aid' in p.source && holes.has(p.source.aid)))
+    const partners = users.length > 0 ? users : plan.setups.slice(i + 1)
+    for (const b of partners) {
+      const axis = flipAxis(a, b, stock)
+      if (axis === undefined) continue
+      out.push({ setupId: a.id, laterSetupId: b.id, axis })
+      if (users.length === 0) break
+    }
+  }
+  return out
+}
+
+/** Holes and flip axes match within this (mm). */
+const FLIP_TOL = 0.05
+
 /** The id of the synthetic design operation a registration hole is evaluated as. */
 export const aidOperationId = (planOperationId: string): string =>
   `aid1_${planOperationId.replace(/[^\w]/g, '_')}`
@@ -403,7 +552,73 @@ export function aidPlacementFindings(
       message: `Add a spoilboard to ${setup.name}: ${aid.name} goes ${Math.round(spoilboardDepth(aid) * 100) / 100} mm into the table`,
       params: { setupId: setup.id, depth: spoilboardDepth(aid), setup: setup.name, aid: aid.name },
     })
+  out.push(...flipFindings(plan, setup, op))
   return out
+}
+
+/**
+ * Warning `plan.aid`, rule `offAxis` (Q106, assumed): the registration holes of `setup` that a
+ * later flipped setup aligns on must sit on their dowels after the flip: every hole's image is a
+ * hole shifted by one common vector (true for holes on the flip axis, or mirrored about it).
+ * When they are not, each hole off the axis is reported. Needs two holes or more per later setup.
+ */
+export function flipFindings(
+  plan: Pick<LoadedPlan, 'stock' | 'setups'>,
+  setup: SetupDTO,
+  op: PlanOperationDTO,
+): Omit<PlanWarning, 'planOperationId'>[] {
+  const aid = aidOf(op)
+  if (aid?.kind !== 'registrationHole') return []
+  const stock = stockSizeOf(plan)
+  const holes = new Map<string, Vec2>()
+  for (const o of setup.operations) {
+    const h = aidOf(o)
+    if (h?.kind === 'registrationHole') holes.set(o.id, [h.center[0], h.center[1]])
+  }
+  const out: Omit<PlanWarning, 'planOperationId'>[] = []
+  for (const later of plan.setups) {
+    const used = [
+      ...new Set(
+        (later.alignment ?? []).flatMap((p) =>
+          'aid' in p.source && holes.has(p.source.aid) ? [p.source.aid] : [],
+        ),
+      ),
+    ]
+    if (!used.includes(op.id) || used.length < 2) continue
+    const axis = flipAxis(setup, later, stock)
+    if (axis === undefined) continue
+    const map = setupMap(setup, later, stock)
+    const ps = used.map((id) => holes.get(id)!)
+    const near = (a: Vec2, b: Vec2) => Math.hypot(a[0] - b[0], a[1] - b[1]) <= FLIP_TOL
+    const fits = ps.some((pi) =>
+      ps.some((pj) => {
+        const g = sub(map(pi), pj)
+        return ps.every((pk) => ps.some((pl) => near(sub(map(pk), g), pl)))
+      }),
+    )
+    if (fits) continue
+    const off = distanceToLine([aid.center[0], aid.center[1]], axis.from, axis.to)
+    if (off <= FLIP_TOL) continue
+    out.push({
+      code: 'plan.aid',
+      severity: 'warning',
+      field: 'aid',
+      rule: 'offAxis',
+      message: `${aid.name} is ${Math.round(off * 100) / 100} mm off the flip axis to ${later.name}: after the flip it misses its dowel; move it onto the axis (the dashed line)`,
+      params: {
+        setupId: setup.id,
+        laterSetupId: later.id,
+        distance: Math.round(off * 1000) / 1000,
+      },
+    })
+  }
+  return out
+}
+
+function distanceToLine(p: Vec2, a: Vec2, b: Vec2): number {
+  const dx = b[0] - a[0]
+  const dy = b[1] - a[1]
+  return Math.abs((p[0] - a[0]) * dy - (p[1] - a[1]) * dx) / Math.hypot(dx, dy)
 }
 
 // ── placement helpers (S18) ───────────────────────────────────────────────────────────────────
@@ -462,20 +677,26 @@ export function suggestMarks(
 }
 
 /**
- * Two registration holes near diagonally opposite corners of the up face (front-left and
- * back-right), inset by Ø/2 + 3 mm and moved inward along the diagonal until they stay out of
- * the part when they can (S18). The flip axis for dowels is not used (open question).
+ * Two registration holes (S17). With `axis`, the flip axis to the later setup (S25, Q106
+ * assumed): on the axis, one from each end, in the waste between the stock edge and the part,
+ * so the flipped stock drops onto the same dowels; each Ø/2 + 3 mm from the stock edge when the
+ * waste allows, else centred in the waste run along the axis, never closer than 0.5 mm to the
+ * stock edge (a hole that cannot clear the part keeps its first spot: `inPart`). Without a flip
+ * (a turn), near diagonally opposite corners of the up face (front-left and back-right), inset
+ * by Ø/2 + 3 mm and moved inward along the diagonal until they stay out of the part.
  */
 export function suggestHoles(
   plan: LoadedPlan,
   setup: SetupDTO,
   diameter: number,
   port?: Region2dPort,
+  axis?: Pick<FlipAxis, 'from' | 'to'>,
 ): Vec2[] {
   const size = setupXY(setup, stockSizeOf(plan))
   const [L, W] = size
   const outline = partOutline(plan, setup, port)
   const r = diameter / 2
+  if (axis !== undefined) return axisHoles(axis, r, size, outline)
   const inset = r + 3
   const place = (corner: Vec2, dir: Vec2): Vec2 => {
     const first: Vec2 = [corner[0] + dir[0] * inset, corner[1] + dir[1] * inset]
@@ -487,6 +708,46 @@ export function suggestHoles(
     return first
   }
   return [place([0, 0], [1, 1]), place([L, W], [-1, -1])].map(round2)
+}
+
+/** Grid along the axis the hole helper tries (mm). */
+const AXIS_STEP = 0.25
+
+/** Two holes on the flip axis, one from each end (S25; `suggestHoles`). */
+function axisHoles(
+  axis: Pick<FlipAxis, 'from' | 'to'>,
+  r: number,
+  size: [number, number],
+  outline: Vec2[][] | undefined,
+): Vec2[] {
+  const [L, W] = size
+  const wall = (p: Vec2) => Math.min(p[0], L - p[0], p[1], W - p[1])
+  const clear = (p: Vec2) =>
+    wall(p) >= r + 0.5 - 1e-9 && !touchesPart({ a: p, b: p, r }, outline, size)
+  const [a, b] = [axis.from, axis.to]
+  const len = Math.hypot(b[0] - a[0], b[1] - a[1])
+  const dir: Vec2 = [(b[0] - a[0]) / len, (b[1] - a[1]) / len]
+  const fromEnd = (start: Vec2, d: Vec2): Vec2 => {
+    const at = (s: number): Vec2 => [start[0] + d[0] * s, start[1] + d[1] * s]
+    const max = len / 2
+    // the first run of clear spots from the end (the waste before the part)
+    let lo: number | undefined
+    let hi: number | undefined
+    for (let s = 0; s <= max + 1e-9; s += AXIS_STEP) {
+      const ok = clear(at(s))
+      if (ok) {
+        lo ??= s
+        hi = s
+      } else if (lo !== undefined) break
+    }
+    const inset = (from: number, to: number): number | undefined => {
+      for (let s = from; s <= to + 1e-9; s += AXIS_STEP) if (wall(at(s)) >= r + 3 - 1e-9) return s
+      return undefined
+    }
+    if (lo === undefined || hi === undefined) return at(inset(0, max) ?? Math.min(max, r + 3))
+    return at(inset(lo, hi) ?? (lo + hi) / 2)
+  }
+  return [fromEnd(a, dir), fromEnd(b, [-dir[0], -dir[1]])].map(round2)
 }
 
 const round2 = (p: Vec2): Vec2 => [

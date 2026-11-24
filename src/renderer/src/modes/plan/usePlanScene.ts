@@ -9,7 +9,8 @@
 // reference surface and touch-off spot (`RunScene.zRef`, z-spot.ts picks the run); dragging the
 // spot snaps it to the grid inside the flat patch and commits one `plan.operation.update { zRef }`
 // on release; the dropped spot is held until the plan re-reads it. DF78: the frame's origin is
-// the setup's work zero, and its alignment points are drawn (`RunScene.alignment`). DF64 L3: with
+// the setup's work zero, and its alignment points are drawn (`RunScene.alignment`), with the flip
+// axis of registration holes dashed (`RunScene.flipAxes`, Q106). DF64 L3: with
 // every toolpath current, the exported moves: the lowered links between operations as rapids
 // (`linkedToolpaths` with `plan.warning.list`'s lowered links, docs/modes/safe-links.md#where-it-runs).
 // Doc: docs/conventions/ui.md#plan-mode-task-37, docs/modes/plan-v0.2.md#plan-only-edits-and-the-snapshot-scene,
@@ -28,6 +29,7 @@ import {
   type AlignmentMarker,
   type AlignmentTarget,
   type Box,
+  type FlipAxisLine,
   type RunScene,
   type ViewportMesh,
   type ZRefOverlay,
@@ -160,6 +162,19 @@ export function usePlanScene(mode: AppMode): RunScene | null {
           ],
     )
   }, [info, data?.warnings, focusedPoint])
+  // Q106 (assumed): the flip axes of registration holes, dashed, in the setup's WCS
+  const flipAxes = useMemo((): FlipAxisLine[] => {
+    if (info?.flipAxes === undefined || setup === undefined || plan === undefined) return []
+    const zero = setupZeroOf(setup, info)
+    return info.flipAxes.map((x) => ({
+      key: x.otherSetupId,
+      from: [x.from[0] - zero[0], x.from[1] - zero[1]],
+      to: [x.to[0] - zero[0], x.to[1] - zero[1]],
+      label: planMessages.setup.flipAxis(
+        plan.setups.find((s) => s.id === x.otherSetupId)?.name ?? '',
+      ),
+    }))
+  }, [info, setup, plan])
   // S22: while picking, the setup's valid sources are targets; a click adds that point
   const targets = useMemo((): AlignmentTarget[] => {
     if (plan === undefined || setup === undefined || picking !== setup.id) return []
@@ -228,9 +243,10 @@ export function usePlanScene(mode: AppMode): RunScene | null {
       ...(zRef === undefined ? {} : { zRef }),
       ...(alignment.length === 0 ? {} : { alignment }),
       ...(targets.length === 0 ? {} : { alignmentTargets: targets }),
+      ...(flipAxes.length === 0 ? {} : { flipAxes }),
       ...(workholding === undefined ? {} : { workholding }),
     }
-  }, [data, plan, setup, doc, zRef, info, alignment, targets, openItem])
+  }, [data, plan, setup, doc, zRef, info, alignment, targets, flipAxes, openItem])
 }
 
 /** The plan's part as the plan scene draws it. */
