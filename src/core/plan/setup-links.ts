@@ -22,6 +22,7 @@ import type { Toolpath, Vec3 } from '../toolpath/model'
 import type { PlanWarning } from './checks'
 import type { PlanOperationInput } from './inputs'
 import type { SetupDTO } from './plan.dto'
+import { setupWorkholding } from './workholding/setup'
 import { setupStockSize } from './setups'
 import type { Stock } from '../library/stock'
 
@@ -35,23 +36,28 @@ export function setupClampHeight(s: Pick<SetupDTO, 'clampHeight'>): number | und
   return Quantity.fromDTO(s.clampHeight).mapOr(undefined, (q) => q.canonical)
 }
 
-/** The link settings of a setup (mm). */
+/**
+ * The link settings of a setup (mm). With workholding items their obstacles bound the links and
+ * the clamp height is ignored (it stays the fallback for a setup without items).
+ */
 export function linkSettings(
-  setup: Pick<
-    SetupDTO,
-    'direction' | 'rotation' | 'retraction' | 'clampHeight' | 'clearanceHeight' | 'retractHeight'
-  >,
+  setup: SetupDTO,
   stock: Stock,
   machine: Option<Machine>,
 ): LinkSettings {
   const size = setupStockSize(stock, setup)
   const len = (q: SetupDTO['clearanceHeight']) => Quantity.fromDTO(q).mapOr(0, (v) => v.canonical)
-  const clampHeight = setupClampHeight(setup)
+  // workholding.md#links-and-safe-heights: modelled items are the floor in place of the clamp
+  // height, and the clearance the program uses follows them
+  const holding = setupWorkholding(setup, stock)
+  const items = holding.prisms.length > 0
+  const clampHeight = items ? undefined : setupClampHeight(setup)
   return {
     retraction: setupRetraction(setup),
-    clearance: len(setup.clearanceHeight),
+    clearance: holding.clearance,
     margin: len(setup.retractHeight),
     ...(clampHeight === undefined ? {} : { clampHeight }),
+    ...(items ? { obstacles: holding.obstacles } : {}),
     stock: [size.x[1], size.y[1], size.z[1]],
     ...machine.mapOr<{ rates?: Vec3 }>({}, (m) => ({
       rates: [
@@ -186,11 +192,13 @@ export function linksFindings(setupId: string, links: SetupLinks, timed: boolean
 
 /**
  * DF59's remaining warning (safe-links.md#clamps, Q96): with a clamp height, the clearance height
- * must clear the clamps by the retract height (tool changes, start and end pass over them).
+ * must clear the clamps by the retract height (tool changes, start and end pass over them). Only
+ * for a setup without workholding items.
  */
-export function clampFindings(setup: SetupDTO): PlanWarning[] {
+export function clampFindings(setup: SetupDTO, stock: Stock): PlanWarning[] {
   const clamp = setupClampHeight(setup)
-  if (clamp === undefined) return []
+  // with modelled items, workholding.md's own clearance finding replaces this one
+  if (clamp === undefined || setupWorkholding(setup, stock).prisms.length > 0) return []
   const len = (q: SetupDTO['clearanceHeight']) => Quantity.fromDTO(q).mapOr(0, (v) => v.canonical)
   const clearance = len(setup.clearanceHeight)
   const margin = len(setup.retractHeight)

@@ -351,11 +351,16 @@ describe('Setup panel', () => {
     expect(
       within(insp).getByText('Generate toolpaths to see where the tool leaves the stock.'),
     ).toBeInTheDocument()
-    // DF64: the clamp note sits on the clamp height field
+    // the clamp note on the clearance field (no workholding items); DF64's on the clamp height
+    expect(
+      within(insp).getByLabelText('Clearance height', { selector: 'input' }),
+    ).toHaveAccessibleDescription(
+      'Keep clamps lower than 10 mm above the stock top, or add them under Workholding.',
+    )
     expect(
       within(insp).getByLabelText('Clamp height', { selector: 'input' }),
     ).toHaveAccessibleDescription(
-      'Above the stock top. Unknown: links stay inside the cut area or at the clearance height.',
+      'Unknown: links stay inside the cut area or at the clearance height.',
     )
     await expectNoAxeViolations()
   })
@@ -388,7 +393,7 @@ describe('Setup panel', () => {
     await waitFor(() => expect(t.plan().setups[0]!.clampHeight?.source).toBe('12'))
     await waitFor(() =>
       expect(clamp).toHaveAccessibleDescription(
-        'Above the stock top; tool changes, start and end pass at the clearance height (10 mm), so keep clamps below it by the retract height.',
+        'How far clamps rise above the stock top: links between operations pass over them by the retract height.',
       ),
     )
     // DF59's remaining warning: 12 mm clamps under a 10 mm clearance

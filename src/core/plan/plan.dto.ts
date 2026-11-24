@@ -17,6 +17,7 @@ import { RETRACTIONS } from '../toolpath/links'
 import { PRESET_NAME_MAX } from '../library/tool.dto'
 import type { Quantity } from '../quantity/quantity'
 import type { QuantityDTO } from '../quantity/quantity.dto'
+import { WorkholdingItemDtoSchema } from './workholding/items'
 
 export type LengthDTO = QuantityDTO & { kind: 'length' }
 
@@ -190,6 +191,12 @@ export const SetupDtoSchema = z.object({
     .describe('Degrees about the spindle axis; absent = 0'),
   workOffset: z.literal('G54').describe('Work coordinate system (v0.1: G54 only)'),
   clearanceHeight: length().describe('Up from the stock top'),
+  clearanceHeightSet: z
+    .literal(true)
+    .optional()
+    .describe(
+      'The user set the clearance height: it stays as entered; absent = at least the top of the workholding + margin (docs/modes/workholding.md#links-and-safe-heights)',
+    ),
   retractHeight: length().describe("Up from the operation's `on` surface"),
   retraction: z
     .enum(RETRACTIONS)
@@ -198,6 +205,15 @@ export const SetupDtoSchema = z.object({
   clampHeight: length()
     .optional()
     .describe('How far clamps rise above the stock top (DF64); absent = unknown'),
+  workholding: z
+    .array(WorkholdingItemDtoSchema)
+    .optional()
+    .describe(
+      'What holds the stock in this setup (docs/modes/workholding.md#model); absent = none',
+    ),
+  workholdingMargin: length()
+    .optional()
+    .describe('Kept around every workholding item, sideways and above; absent = 2 mm / 0.08"'),
   operations: z.array(PlanOperationDtoSchema).describe('Machining order'),
 })
 export type SetupDTO = z.output<typeof SetupDtoSchema>

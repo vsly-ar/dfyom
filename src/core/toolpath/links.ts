@@ -32,14 +32,44 @@ export interface LinkOperation {
   readonly pauseBefore: boolean
 }
 
+/** What the links read of the setup's workholding (`WorkholdingObstacles` in plan/workholding). */
+export interface LinkObstacles {
+  /** The lowest safe Z over the items for a tool of `radius` along a→b (XY); −∞ when none is near. */
+  floorAlong(a: readonly [number, number], b: readonly [number, number], radius: number): number
+}
+
+/** The floor outside the cleared footprint: none with modelled items, else the clamp height. */
+const clampOf = (s: LinkSettings): number =>
+  s.obstacles !== undefined ? -Infinity : (s.clampHeight ?? Infinity)
+
+/** The corridor's need: the field and clamps (`corridorFloor`) and the modelled items. */
+function linkFloor(
+  f: StockHeights,
+  a: Vec3,
+  b: Vec3,
+  radius: number,
+  s: LinkSettings,
+  clamp = clampOf(s),
+): number {
+  const need = corridorFloor(f, a, b, radius, s.margin, clamp)
+  const items = s.obstacles?.floorAlong([a[0], a[1]], [b[0], b[1]], radius) ?? -Infinity
+  return Math.max(need, items)
+}
+
 export interface LinkSettings {
   readonly retraction: Retraction
   /** The setup's clearance height above the stock top (mm). */
   readonly clearance: number
   /** Vertical margin: the setup's retract height (mm). */
   readonly margin: number
-  /** How far clamps rise above the stock top (mm); absent = unknown. */
+  /** How far clamps rise above the stock top (mm); absent = unknown. Ignored with `obstacles`. */
   readonly clampHeight?: number
+  /**
+   * The setup's modelled workholding (docs/modes/workholding.md#obstacle-interface-for-df64s-link-pass):
+   * when present the clamps are known, every link stays at or above `floorAlong` of its across
+   * segment, and `clampHeight` is ignored. Its data (prisms, margin) is part of the cache key.
+   */
+  readonly obstacles?: LinkObstacles
   /** The stock as it sits in the setup: X, Y extents and thickness (mm). */
   readonly stock: Vec3
   /** The machine's max rate per axis (mm/min), for the link times; absent = not timed. */
@@ -318,10 +348,10 @@ export function planLinks(ops: readonly LinkOperation[], s: LinkSettings): Setup
         let link = full
         if (field !== undefined && entry[2] < clearance - EPS) {
           const r = op.tool.diameter / 2
-          const needFor = (clamp: number) => corridorFloor(field!, exit, entry, r, s.margin, clamp)
+          const needFor = (clamp: number) => linkFloor(field!, exit, entry, r, s, clamp)
           const levelFor = (need: number) =>
             Math.max(exit[2], entry[2], need === -Infinity ? -Infinity : roundUp(need))
-          const floor = needFor(s.clampHeight ?? Infinity)
+          const floor = needFor(clampOf(s))
           const level = levelFor(floor)
           const seconds = (z: number) =>
             rapidSeconds([exit, [exit[0], exit[1], z], [entry[0], entry[1], z], entry], s.rates)
@@ -331,7 +361,8 @@ export function planLinks(ops: readonly LinkOperation[], s: LinkSettings): Setup
             out[i - 1] = withTail(out[i - 1]!, 1, legs.tail)
             out[i] = withHead(out[i]!, trim, legs.head)
             collisions.push(...guard(field, i, exit, [...legs.tail, ...legs.head], r, s))
-          } else if (s.clampHeight !== undefined) link = { ...full, floor }
+          } else if (s.clampHeight !== undefined || s.obstacles !== undefined)
+            link = { ...full, floor }
           else {
             const zero = levelFor(needFor(0))
             if (zero < clearance - EPS) {
@@ -396,7 +427,7 @@ function guard(
     if (m.kind !== 'rapid' || (!vertical && !horizontal) || to[2] > s.clearance + EPS)
       out.push({ index, from: at, to, needed: s.clearance })
     else if (horizontal && !vertical) {
-      const needed = corridorFloor(f, at, to, radius, s.margin, s.clampHeight ?? Infinity)
+      const needed = linkFloor(f, at, to, radius, s)
       if (to[2] < needed - GUARD_SLACK) out.push({ index, from: at, to, needed })
     }
     at = to

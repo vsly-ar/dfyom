@@ -86,6 +86,9 @@ import { designChanged, hasPlanEdits, planStale } from './snapshot'
 import { shapeFindings } from './shape-findings'
 import { checkPart, sameValue } from './validity'
 import { StepSchema, stepToDTO } from '../feeds-speeds/commands'
+import { workholdingSet } from './workholding/commands'
+import { workholdingFindings } from './workholding/findings'
+import { defaultClearance } from './build'
 import { DEFAULT_RIGIDITY } from '../feeds-speeds/data'
 import { machineLimits } from '../feeds-speeds/suggest'
 import { checkAllowed, nextStatus } from './status'
@@ -688,7 +691,9 @@ const setupUpdate = defineCommand({
     ...SetupArg,
     name: z.string().min(1).max(NAME_MAX).optional(),
     rotation: z.literal(SETUP_ROTATIONS).optional().describe('Degrees about the spindle axis'),
-    clearanceHeight: Src.optional().describe('Up from the stock top; > retractHeight'),
+    clearanceHeight: Src.optional().describe(
+      "Up from the stock top; > retractHeight; 'auto' follows the workholding",
+    ),
     retractHeight: Src.optional().describe("Up from the operation's on surface; > 0"),
     retraction: z
       .enum(RETRACTIONS)
@@ -706,8 +711,12 @@ const setupUpdate = defineCommand({
     const setup = found.unwrap().setups.find((s) => s.id === args.setupId)
     if (setup === undefined) return unknownSetup(args.setupId, 'setupId', where)
     const ctxL = fieldContext('length', draft.unitSystem)
+    // WH-C: 'auto' restores the default, raised to the workholding's top + margin
+    const auto = args.clearanceHeight?.trim().toLowerCase() === 'auto'
     const parse = (key: 'clearanceHeight' | 'retractHeight') => {
       const src = args[key]
+      if (key === 'clearanceHeight' && auto)
+        return Quantity.fromDTO(defaultClearance(draft.unitSystem))
       return src === undefined
         ? Quantity.fromDTO(setup[key])
         : Quantity.parse(src, ctxL).mapErr((e) => e.prefixIssues(key))
@@ -733,7 +742,11 @@ const setupUpdate = defineCommand({
       })
     if (issues.length > 0) return invalid(issues, where)
     const target = draft.plans[args.planId]!.setups.find((s) => s.id === args.setupId)!
-    if (args.clearanceHeight !== undefined) target.clearanceHeight = lengthDTO(clearance)
+    if (args.clearanceHeight !== undefined) {
+      target.clearanceHeight = lengthDTO(clearance)
+      if (auto) delete target.clearanceHeightSet
+      else target.clearanceHeightSet = true
+    }
     if (args.retractHeight !== undefined) target.retractHeight = lengthDTO(retract)
     // DF64: `minimum` and an unknown clamp height are stored as absent
     if (args.retraction === 'minimum') delete target.retraction
@@ -1729,6 +1742,7 @@ const warningList = defineQuery({
             : shapeFindings(loaded.unwrap(), ctx.services.region2d)),
           ...designToolFindings(loaded.unwrap(), libraryTools(ctx.services), ctx.services.region2d),
           ...zRefFindings(loaded.unwrap(), ctx.services.region2d),
+          ...planWorkholdingFindings(doc, loaded.unwrap(), ctx.services),
         ]
       : [
           {
@@ -1776,7 +1790,7 @@ const warningList = defineQuery({
             >(undefined, (v) => v)
       const timed = plan.machine.isSome()
       for (const s of plan.setups) {
-        findings.push(...clampFindings(s))
+        findings.push(...clampFindings(s, plan.stock))
         const own =
           inputs === undefined || cache === undefined
             ? undefined
@@ -1807,6 +1821,25 @@ const warningList = defineQuery({
   },
 })
 
+/**
+ * The workholding findings of a plan (docs/modes/workholding.md#collision-check): the move check
+ * runs on each setup whose toolpaths are all current in the cache.
+ */
+function planWorkholdingFindings(
+  doc: ProjectDoc,
+  plan: LoadedPlan,
+  services: Services,
+): PlanWarning[] {
+  const inputs = planOperationInputs(doc, plan.dto.id, undefined, services.region2d)
+  const cache = services.toolpaths
+  return workholdingFindings(
+    plan,
+    inputs.isOk() ? inputs.unwrap() : undefined,
+    (i) => cache?.get(i.inputHash),
+    services.region2d,
+  )
+}
+
 export const PLAN_COMMANDS: readonly AnyCommand[] = [
   planCreate,
   planDuplicate,
@@ -1825,6 +1858,7 @@ export const PLAN_COMMANDS: readonly AnyCommand[] = [
   operationUpdate,
   operationMove,
   toolAssign,
+  workholdingSet,
 ]
 
 export const PLAN_QUERIES: readonly QueryDef[] = [

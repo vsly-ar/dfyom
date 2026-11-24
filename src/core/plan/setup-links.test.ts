@@ -144,6 +144,32 @@ describe('plan.warning.list links', () => {
     await s.run('plan.setup.update', { planId, setupId, clampHeight: '8' })
     expect(clamp()).toEqual([])
   })
+
+  // workholding.md#links-and-safe-heights: modelled items supersede the clamp height
+  it('with workholding items the links follow them and the clamp height is ignored', async () => {
+    const { s, planId, setupId } = await onePlan()
+    const low = () => list(s, planId).links.find((l) => l.setupId === setupId)!.links?.low
+    await s.run('plan.setup.update', { planId, setupId, clampHeight: '12' })
+    const rules = () => list(s, planId).warnings.map((w) => w.rule)
+    expect(rules()).toContain('clampsAboveClearance')
+    // the link over the uncut stock waits for clamps below the clearance height
+    const before = low()!
+    await s.run('plan.workholding.set', {
+      planId,
+      setupId,
+      items: [{ kind: 'screw', center: ['95', '55'] }],
+    })
+    const { jobId } = expectOk(await s.d.dispatch('plan.toolpath.generate', { planId }, ui))
+      .value as { jobId: string }
+    expectOk(await s.d.job(jobId).unwrap().result)
+    expect(rules()).not.toContain('clampsAboveClearance')
+    expect(rules()).not.toContain('clampHeightUnknown')
+    expect(low()).toBeGreaterThan(before)
+    const out = await exported(s, planId)
+    expect(out.lowLinks).toBeGreaterThan(0)
+    expect(out.text).toContain('Every move checked')
+    expect(out.text).not.toContain('Keep clamps below')
+  })
 })
 
 describe('export with minimum retraction', () => {

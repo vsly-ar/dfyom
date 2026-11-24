@@ -8,6 +8,8 @@ import type { Move, Toolpath, ToolpathTool, Vec3 } from './model'
 import { generatePocket } from './pocket'
 import { generateProfile } from './profile'
 import { StockHeights, toolSurface } from './stock-heights'
+import { workholdingObstacles } from '../plan/workholding/obstacles'
+import { moveEnd } from './stats'
 import {
   bullNose,
   drill,
@@ -215,6 +217,48 @@ describe('planLinks', () => {
     expect(planLinks(ops, settings({ clampHeight: 12 })).links[0]).toMatchObject({ low: false })
     const five = planLinks(ops, settings({ clampHeight: 5 }))
     expect(five.links[0]).toMatchObject({ low: true, level: 7 })
+  })
+
+  // workholding.md#obstacle-interface-for-df64s-link-pass: modelled items replace the clamp height
+  it('keeps links above the workholding items, which supersede the clamp height', () => {
+    const ops = [op(pocket('a', 25, 30), D6), op(pocket('b', 75, 30), D6)]
+    const block = (x0: number, x1: number, top: number) =>
+      workholdingObstacles(
+        [
+          {
+            itemId: 'b',
+            footprint: {
+              kind: 'polygon',
+              points: [
+                [x0, 20],
+                [x1, 20],
+                [x1, 40],
+                [x0, 40],
+              ],
+            },
+            zMin: -Infinity,
+            zMax: top,
+          },
+        ],
+        2,
+      )
+    // an item away from the link: the stock alone bounds it; the clamp height is ignored
+    const far = planLinks(ops, settings({ clampHeight: 12, obstacles: block(140, 150, 30) }))
+    expect(far.links[0]).toMatchObject({ low: true, level: 2 })
+    expect(far.clampHeightUnknown).toBeUndefined()
+    // an item between the pockets, top Z4 + 2 mm margin: the link crosses at Z6
+    const near = planLinks(ops, settings({ obstacles: block(45, 55, 4) }))
+    expect(near.links[0]).toMatchObject({ low: true, level: 6 })
+    expect(near.collisions).toEqual([])
+    const across = allMoves(near.toolpaths[0]!).at(-1)!
+    expect(moveEnd(across)[2]).toBeGreaterThanOrEqual(
+      block(45, 55, 4).floorAlong([25, 30], [75, 30], 3),
+    )
+    // a tall item: the link stays at the clearance height, with no clamp height to ask for
+    const tall = planLinks(ops, settings({ obstacles: block(45, 55, 9) }))
+    expect(tall.links[0]).toMatchObject({ low: false, level: 10 })
+    expect(tall.clampHeightUnknown).toBeUndefined()
+    expect(tall.toolpaths).toEqual(ops.map((o) => o.toolpath))
   })
 
   it('never links across a pause, and full keeps every toolpath', () => {

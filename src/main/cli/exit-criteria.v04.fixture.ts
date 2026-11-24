@@ -519,11 +519,9 @@ export async function exitCriteriaV04Flow(rawCall: Call, dir: string): Promise<F
     await ok<{ warnings: Finding[] }>('plan.warning.list', { planId, detail: 'full' })
   ).value
   expect(
-    findings.warnings.map((f) => [
-      f.severity,
-      f.rule,
-      Math.round(Number(f.params['chipLoad']) * 1000),
-    ]),
+    findings.warnings
+      .filter((f) => f.code !== 'plan.workholding.none')
+      .map((f) => [f.severity, f.rule, Math.round(Number(f.params['chipLoad']) * 1000)]),
   ).toEqual([
     ['warning', 'finishRubbing', 50],
     ['warning', 'finishRubbing', 50],
@@ -779,6 +777,7 @@ interface PlanSummary {
   }
 }
 interface Finding {
+  code: string
   severity: string
   rule: string
   params: Record<string, unknown>

@@ -29,6 +29,13 @@ import { cachedSetupLinks, linkSettings } from '../plan/setup-links'
 import type { LinkSettings } from '../toolpath/links'
 import type { Toolpath } from '../toolpath/model'
 import type { SetupHeader } from './program'
+import {
+  checkOperations,
+  moveFindings,
+  staticWorkholdingFindings,
+} from '../plan/workholding/findings'
+import { itemSummary } from '../plan/workholding/items'
+import { setupWorkholding } from '../plan/workholding/setup'
 
 /** The generator string of exported programs' header, without the app version. */
 export const PROGRAM_GENERATOR = 'DFYOM'
@@ -275,6 +282,26 @@ export async function exportPlan(
     }
   })
   opts.progress?.({ done: total, total })
+  // the export guard (WH-E): the final moves, links included, against the setup's workholding
+  const checked = all.map((input, i) => ({ input, toolpath: operations[i]!.toolpath }))
+  const guard = [
+    ...staticWorkholdingFindings(plan, setup.id),
+    ...moveFindings(plan, setup, checkOperations(checked)),
+  ].filter((f) => f.severity === 'error')
+  const firstHit = guard[0]
+  if (firstHit !== undefined)
+    return fail('plan.check', firstHit.message, {
+      where,
+      data: { planId, setupId: setup.id },
+      issues: guard.map((f) => ({
+        path: [f.planOperationId ?? setup.id, ...(f.field === undefined ? [] : [f.field])],
+        rule: f.code,
+        message: f.message,
+        params: f.params,
+      })),
+    })
+  const holding = setupWorkholding(setup, plan.stock)
+  const programUnits = plan.machine.unwrap().programUnits
   const exported = exportGrbl(
     {
       name: plan.dto.name,
@@ -293,6 +320,12 @@ export async function exportPlan(
               thickness: plan.stock.thickness.canonical,
             },
             maxOverreach(reaches),
+            holding.items.length === 0
+              ? undefined
+              : {
+                  items: holding.items.map((i) => `${i.name}: ${itemSummary(i, programUnits)}`),
+                  margin: holding.margin,
+                },
           ),
           ...clampLine(settings),
         },

@@ -318,8 +318,9 @@ export async function exitCriteriaV02Flow(call: Call, dir: string): Promise<Flow
   const findings = (
     await ok<{ warnings: Finding[] }>('plan.warning.list', { planId, detail: 'full' })
   ).value
-  // no errors, and no machine or feeds warnings (the presets keep the chip load in range)
-  expect(findings.warnings).toEqual([])
+  // no errors, and no machine or feeds warnings (the presets keep the chip load in range); the
+  // flow sets no workholding: one info finding per setup says so (workholding.md#findings)
+  expect(findings.warnings.filter((f) => f.code !== 'plan.workholding.none')).toEqual([])
 
   // ── Criterion: settle the design, edit one operation for this plan only, a strategy ───────
   await ok('plan.status.set', { planId, status: 'settledDesign' })

@@ -88,6 +88,12 @@ export interface SetupHeader {
    * replaces the clearance in the DF59 note; absent = clamps below the clearance height.
    */
   readonly clamp?: { readonly height: number; readonly margin: number }
+  /**
+   * The setup's workholding (docs/modes/workholding.md#program-and-run): one line per item
+   * ("Toe clamp 1: front X125 grip 10 top Z12", program units) and the margin the program keeps
+   * (mm); absent = none modelled (the DF59 clamp note stays).
+   */
+  readonly workholding?: { readonly items: readonly string[]; readonly margin: number }
 }
 
 export interface MachiningProgram {

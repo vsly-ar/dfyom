@@ -130,13 +130,14 @@ export function setupMotion(
 /**
  * The header's setup instructions for `setups[index]` (machining order): its number, the part
  * faces up, in front and on the right, the move from setup 1, the work-zero corner and the stock;
- * with `overreach` the tool's reach past the stock (DF59).
+ * with `overreach` the tool's reach past the stock (DF59), with `workholding` its items (WH-E).
  */
 export function setupHeader(
   setups: readonly Pick<SetupDTO, 'direction' | 'rotation'>[],
   index: number,
   stock: StockSize,
   overreach?: Overreach,
+  workholding?: SetupHeader['workholding'],
 ): SetupHeader {
   const setup = setups[index]!
   const o = setupOrientation(setupDirection(setup), setupRotation(setup), stock)
@@ -150,5 +151,6 @@ export function setupHeader(
     corner: setupCorner(setup, stock),
     stock: o.size,
     ...(overreach === undefined ? {} : { overreach }),
+    ...(workholding === undefined ? {} : { workholding }),
   }
 }
