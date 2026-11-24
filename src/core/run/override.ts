@@ -1,7 +1,7 @@
 /**
  * Feed and spindle override targets (hardening DF85): the controller's override range, the byte
  * steps from the current override to a target, the cap the machine profile puts on it for the
- * programmed F and S, and the programmed F and S along a program.
+ * programmed F and S (and the spindle's floor at its minimum speed, DF86 follow-up), and the programmed F and S along a program.
  * Doc: docs/modes/run-machine.md#overrides-m6
  */
 import type { OverrideStep } from './host/protocol'
@@ -128,23 +128,47 @@ export interface OverrideCap {
   readonly max: number
   /** `machine`: the profile's max feed or spindle speed ends it below the controller's limit. */
   readonly by: 'controller' | 'machine'
+  /**
+   * `machine`: the profile's minimum spindle speed (`spindle.minSpeed`) starts it above the
+   * controller's limit (DF86 follow-up).
+   */
+  readonly floorBy: 'controller' | 'machine'
 }
 
 /**
  * The reachable override range: the controller's, its top lowered so that `programmed` × % stays
- * at or below `machineMax` (mm/min or rpm). Without a programmed value (no run, spindle off) or a
- * machine maximum only the controller limits it. Never below the controller's minimum.
+ * at or below `machineMax` (mm/min or rpm), its bottom raised so that it stays at or above
+ * `machineMin` (rpm: the spindle's usable minimum; a router below it stalls or runs
+ * underpowered). Without a programmed value (no run, spindle off) only the controller limits it.
+ * Never outside the controller's range; the floor never above the top.
  */
 export function overrideCap(
   range: OverrideRange,
   programmed: number | undefined,
   machineMax: number | undefined,
+  machineMin?: number | undefined,
 ): OverrideCap {
-  if (programmed === undefined || !(programmed > 0) || machineMax === undefined)
-    return { min: range.min, max: range.max, by: 'controller' }
-  const pct = Math.floor((machineMax / programmed) * 100 + 1e-9)
-  if (pct >= range.max) return { min: range.min, max: range.max, by: 'controller' }
-  return { min: range.min, max: Math.max(range.min, pct), by: 'machine' }
+  if (programmed === undefined || !(programmed > 0))
+    return { min: range.min, max: range.max, by: 'controller', floorBy: 'controller' }
+  let max = range.max
+  let by: OverrideCap['by'] = 'controller'
+  if (machineMax !== undefined) {
+    const pct = Math.floor((machineMax / programmed) * 100 + 1e-9)
+    if (pct < range.max) {
+      max = Math.max(range.min, pct)
+      by = 'machine'
+    }
+  }
+  let min = range.min
+  let floorBy: OverrideCap['floorBy'] = 'controller'
+  if (machineMin !== undefined && machineMin > 0) {
+    const pct = Math.ceil((machineMin / programmed) * 100 - 1e-9)
+    if (pct > range.min) {
+      min = Math.min(max, pct)
+      floorBy = 'machine'
+    }
+  }
+  return { min, max, by, floorBy }
 }
 
 /** Programmed feed (mm/min) and spindle speed (rpm, 0 while the spindle is off). */

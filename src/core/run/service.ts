@@ -154,8 +154,20 @@ export interface MachineService {
   readonly controllerSettings: Readonly<Record<string, number>> | undefined
   status(): RunStatus
   onStatus(listener: (s: RunStatus) => void): () => void
-  /** `target.machineKey` names the machine copy emulated or checked against (decision 6). */
-  connect(target: ConnectTarget): AsyncAppResult<ConnectedInfo>
+  /**
+   * The usable minimum spindle speed (rpm, the profile's `spindle.minSpeed`) of the machine the
+   * open connection was made for; `run.override.set` keeps the spindle override from taking the
+   * programmed S below it (docs/modes/run-machine.md#overrides-m6). Undefined when closed or unset.
+   */
+  readonly spindleMinSpeed: number | undefined
+  /**
+   * `target.machineKey` names the machine copy emulated or checked against (decision 6);
+   * `profile` what the commands keep from that machine for the connection's lifetime.
+   */
+  connect(
+    target: ConnectTarget,
+    profile?: { readonly spindleMinSpeed?: number | undefined },
+  ): AsyncAppResult<ConnectedInfo>
   /** The serial ports the machine host sees (spawns the host if none runs). */
   listPorts(): AsyncAppResult<SerialPortInfo[]>
   disconnect(): AsyncAppResult<void>

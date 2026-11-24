@@ -145,6 +145,7 @@ export class MachineClient implements MachineService {
     | {
         state: 'connecting' | 'open'
         machineKey: string
+        spindleMinSpeed?: number | undefined
         target?: TargetKind | undefined
         port?: { path: string; baud: number } | undefined
         settings?: Readonly<Record<string, number>> | undefined
@@ -184,6 +185,10 @@ export class MachineClient implements MachineService {
 
   get machineKey(): string | undefined {
     return this.conn?.machineKey
+  }
+
+  get spindleMinSpeed(): number | undefined {
+    return this.conn?.state === 'open' ? this.conn.spindleMinSpeed : undefined
   }
 
   status(): RunStatus {
@@ -267,7 +272,10 @@ export class MachineClient implements MachineService {
     return () => this.listeners.delete(listener)
   }
 
-  async connect(target: ConnectTarget): AsyncAppResult<ConnectedInfo> {
+  async connect(
+    target: ConnectTarget,
+    profile?: { readonly spindleMinSpeed?: number | undefined },
+  ): AsyncAppResult<ConnectedInfo> {
     const machineKey = target.machineKey
     if (this.conn !== undefined)
       return fail('run.busy', 'a machine connection is already open', { where: `${WHERE}.connect` })
@@ -290,6 +298,9 @@ export class MachineClient implements MachineService {
       target: connected.target,
       ...(connected.port === undefined ? {} : { port: connected.port }),
       settings: connected.settings,
+      ...(profile?.spindleMinSpeed === undefined
+        ? {}
+        : { spindleMinSpeed: profile.spindleMinSpeed }),
     }
     this.log.info({ target: connected.target, version: connected.version }, 'connected')
     this.notify()

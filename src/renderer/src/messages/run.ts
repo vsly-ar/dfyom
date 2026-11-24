@@ -290,6 +290,9 @@ export const runMessages = {
       `Up to ${max} %: the machine's max feed is ${value} ${units}.`,
     capSpindle: (max: number, rpm: number) =>
       `Up to ${max} %: the machine's max spindle speed is ${rpm.toFixed(0)} rpm.`,
+    /** DF86 follow-up: the floor at the spindle's usable minimum speed. */
+    floorSpindle: (min: number, rpm: number) =>
+      `From ${min} %: lower is below the spindle's minimum speed (${rpm.toFixed(0)} rpm).`,
     noSpindleManual: 'The spindle speed is set by hand on this machine: no spindle override.',
     noSpindleLaser: 'Laser mode is on ($32=1): no spindle override.',
   },
