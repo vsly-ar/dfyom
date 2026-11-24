@@ -196,6 +196,51 @@ describe('run commands', { timeout: 60_000 }, () => {
     expect(t.status().connection.state).toBe('closed')
   })
 
+  it('keeps the streamed program and estimates the executing line in the status (DF84)', async () => {
+    const t = await setup()
+    expectOk(await t.open({ prepare: true }))
+    const seen: NonNullable<RunStatus['job']>[] = []
+    const off = t.client.onStatus((s) => void (s.job === undefined || seen.push(s.job)))
+    const { jobId, result } = await t.job('run.job.start', { planId: t.planId })
+    let finished = false
+    void result.then(() => (finished = true))
+    for (;;) {
+      expect(
+        await waitFor(() => {
+          const p = t.status().job?.phase
+          return finished || p === 'toolChange' || p === 'programPause'
+        }),
+      ).toBe(true)
+      if (finished) break
+      const job = t.status().job!
+      const which =
+        job.phase === 'toolChange' ? { toolChange: job.toolChange!.n } : { pause: job.pause! }
+      expectOk(await t.run('run.job.continue', { jobId, ...which }))
+      await waitFor(() => finished || t.status().job?.phase === 'streaming')
+    }
+    off()
+    const summary = expectOk(await result) as { lines: number }
+    // the program as streamed, kept after the run ended; only for its own job
+    const program = t.client.program(jobId)!
+    expect(program.lines).toHaveLength(summary.lines)
+    expect(program.sections.length).toBeGreaterThan(0)
+    expect(program.operations.length).toBeGreaterThan(0)
+    expect(t.client.program('another')).toBeUndefined()
+    // sent ≥ acknowledged, the estimate at or before the line being acknowledged, never back
+    const estimated = seen.filter((j) => j.executing !== undefined)
+    expect(estimated.length).toBeGreaterThan(3)
+    let last = 0
+    for (const j of seen) {
+      expect(j).not.toHaveProperty('ackedAtReport')
+      if (j.sent !== undefined) expect(j.sent).toBeGreaterThanOrEqual(j.line - 1)
+      if (j.executing === undefined || j.line === 0) continue
+      expect(j.executing).toBeLessThanOrEqual(j.line)
+      expect(j.executing).toBeGreaterThanOrEqual(last)
+      last = j.executing
+    }
+    expect(last).toBeGreaterThan(summary.lines / 2)
+  })
+
   it('runs one setup per job; the result names the next setup (E2)', async () => {
     const t = await setup({ bottom: true })
     const [bottom, top] = t.s.plan(t.planId).setups

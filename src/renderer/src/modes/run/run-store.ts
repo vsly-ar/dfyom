@@ -65,6 +65,16 @@ export type PreflightCheck =
   | { readonly state: 'done'; readonly key: string; readonly findings: readonly SoftLimitFinding[] }
   | { readonly state: 'failed'; readonly key: string; readonly error: AppErrorData }
 
+/** The gCode panel's window state (DF84): open, height (rem) and whether it follows the run. */
+export interface GcodePanelState {
+  readonly open: boolean
+  readonly height: number
+  readonly follow: boolean
+}
+
+/** Open height of the gCode panel in a new window (rem). */
+export const GCODE_HEIGHT_REM = 12
+
 /** `planId` of "No plan (manual control)": connect with a library machine (DF31). */
 export const NO_PLAN = '__noPlan__'
 
@@ -128,8 +138,11 @@ export interface RunState {
    * is held (DF82, docs/modes/run.md#1-emergency-stop-stop-and-reset).
    */
   readonly probeJobId: string | undefined
+  /** DF84: the gCode panel under the 3D view, per window (docs/modes/run.md#gcode-panel-df84). */
+  readonly gcode: GcodePanelState
 
   setPlan(planId: string | undefined): void
+  setGcode(patch: Partial<GcodePanelState>): void
   setMachine(machineId: string | undefined): void
   setSetup(setupId: string | undefined): void
   setSetupChangeOpen(open: boolean): void
@@ -314,7 +327,9 @@ export function createRunStore(bridge: PreloadApi): RunStore {
       preflightCheck: { state: 'idle' },
       pending: [],
       probeJobId: undefined,
+      gcode: { open: false, height: GCODE_HEIGHT_REM, follow: true },
 
+      setGcode: (patch) => set((s) => ({ gcode: { ...s.gcode, ...patch } })),
       setPlan: (planId) =>
         set((s) =>
           s.planId === planId

@@ -96,6 +96,13 @@ export const RunStatusSchema = HostStatusSchema.omit({ job: true, timeScale: tru
        * acknowledged line, which the overrides scale (docs/modes/run-machine.md#overrides-m6).
        */
       programmed: z.object({ feed: z.number(), spindle: z.number() }).exactOptional(),
+      /** DF84: lines written to the controller so far (docs/modes/run.md#gcode-panel-df84). */
+      sent: z.number().int().exactOptional(),
+      /**
+       * DF84: the 1-based line the machine is estimated to execute (from `Bf`, the acknowledged
+       * lines' planner blocks and the position); absent until estimated.
+       */
+      executing: z.number().int().exactOptional(),
     })
     .exactOptional(),
   /** The run that ended last; kept until the next run starts, across connections (M5). */
@@ -128,6 +135,18 @@ export interface JobListener {
     toolChange?: { n: number; name: string }
     message?: string
   }) => void
+}
+
+/**
+ * The program a run job streamed (DF84), as main keeps it until the next run starts: the lines,
+ * the section starts (progress labels) and each plan operation's first line. Renderer only
+ * (`window.dfyom.run.program`), docs/modes/run.md#gcode-panel-df84.
+ */
+export interface RunProgram {
+  readonly jobId: string
+  readonly lines: readonly string[]
+  readonly sections: readonly { readonly fromLine: number; readonly label: string }[]
+  readonly operations: readonly { readonly planOperationId: string; readonly fromLine: number }[]
 }
 
 /** What `run.job.start` tells the machine port about its run (M5, M7). */

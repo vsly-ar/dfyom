@@ -124,6 +124,10 @@ export const HostStatusSchema = z.object({
       phase: z.enum(RUN_PHASES),
       /** 1-based line being executed (last acknowledged + 1). */
       line: z.number().int(),
+      /** DF84: lines written to the controller (docs/modes/run.md#gcode-panel-df84). */
+      sent: z.number().int().exactOptional(),
+      /** DF84: lines acknowledged when the last status report (its `Bf`, its position) arrived. */
+      ackedAtReport: z.number().int().exactOptional(),
       toolChange: ToolChangeSchema.exactOptional(),
       /** In `programPause`: which pause (1-based) `run.job.continue` ends. */
       pause: z.number().int().exactOptional(),
