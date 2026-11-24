@@ -58,7 +58,7 @@ import {
   lengthArg,
   referenceView,
   sectionName,
-  stockFace,
+  resolveFace,
   storedPlacement,
   targetReference,
 } from './reference-find'
@@ -640,8 +640,8 @@ const shapeImport = defineCommand({
       const l = c.unwrap().loaded
       const ref = targetReference(doc, args.partId, from.referenceId, where)
       if (ref.isErr()) return Err(ref.unwrapErr().prefixIssues('from'))
-      const direction = stockFace(from.face, 'face', where)
-      if (direction.isErr()) return Err(direction.unwrapErr().prefixIssues('from'))
+      const face = resolveFace(doc, args.partId, from.face, ['from', 'face'], where)
+      if (face.isErr()) return face
       const depth = lengthArg(from.depth, l, ['from', 'depth'], where)
       if (depth.isErr()) return depth
       const p = storedPlacement(ref.unwrap(), where)
@@ -651,7 +651,7 @@ const shapeImport = defineCommand({
         width: l.stock.width.canonical,
         thickness: l.stock.thickness.canonical,
       }
-      const view = referenceView(ref.unwrap(), p.unwrap(), stock, direction.unwrap())
+      const view = referenceView(ref.unwrap(), p.unwrap(), stock, face.unwrap().direction)
       const fit = fitOptions({ tolerance: from.tolerance })
       const loops = await fittedSection(ctx, view, depth.unwrap(), fit, where)
       if (loops.isErr()) return loops

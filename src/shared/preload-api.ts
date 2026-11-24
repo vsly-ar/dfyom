@@ -7,6 +7,7 @@
  */
 import type { ActionEvent } from '../core/commands/action-log'
 import type { EvaluationStatus } from '../core/design/evaluation'
+import type { FittedLoop } from '../core/design/reference-section'
 import type { PartEvaluation } from '../core/geometry/evaluate'
 import type { ProjectDoc } from '../core/project/document'
 import type { RunStatus } from '../core/run/service'
@@ -195,16 +196,23 @@ export type ReferenceMeshReply =
  * A reference's section for the Shape Editor (task U3, docs/modes/design-v0.3.md#measure-and-snap):
  * `matrix` (column-major 4 × 4) takes the STL's source units into the face frame (mm), whose third
  * axis is the face normal; the mesh is cut at `w = level` there. The reply's `segments` are
- * `[u0, v0, u1, v1, …]` in the face frame (mm).
+ * `[u0, v0, u1, v1, …]` in the face frame (mm); with `fit` it also has the section's loops
+ * fitted to lines and arcs with the default tolerance and corner angle (DF60, the Shape Editor
+ * backdrop and the loops drawn on the ghost, docs/modes/reference-tools.md#ui).
  */
 export interface ReferenceSectionRequest {
   readonly referenceId: string
   readonly matrix: readonly number[]
   readonly level: number
+  readonly fit?: boolean
 }
 
 export type ReferenceSectionReply =
-  | { readonly ok: true; readonly segments: Float32Array }
+  | {
+      readonly ok: true
+      readonly segments: Float32Array
+      readonly loops?: readonly FittedLoop[]
+    }
   | { readonly ok: false; readonly error: AppErrorData }
 
 /**

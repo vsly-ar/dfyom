@@ -81,6 +81,7 @@ import type { AnchorOverlay, FrameOverlay } from './Overlays'
 import type { TabOverlay } from './TabMarkers'
 import type { ClonePathOverlay } from './clone-path'
 import type { ReferenceGhostView } from './ReferenceGhost'
+import type { ReferenceOverlayView } from './ReferenceOverlay'
 import type { RunScene } from './RunLayer'
 import { CameraControlsImpl, Scene } from './Scene'
 import { linesBounds, placeBox } from './toolpath-lines'
@@ -127,6 +128,8 @@ export interface ViewportProps {
    * part frame) widens the framing bounds.
    */
   ghosts?: readonly (ReferenceGhostView & { readonly box: Box })[] | null
+  /** The Reference panel's section loops, sharp corners and hovered level on the ghost (DF60). */
+  referenceOverlay?: ReferenceOverlayView | null
   /** Operations drawn with a light `--info` tint (edited in the plan: the plan scene, task E3b). */
   tinted?: ReadonlySet<string> | null
   /** Operations drawn selected besides `selectedOperation` (a Clones' source, v0.4 task U3). */
@@ -253,6 +256,7 @@ export function Viewport({
   tabs = null,
   guide = null,
   ghosts = null,
+  referenceOverlay = null,
   tinted = null,
   selectedAlso = null,
   clonePath = null,
@@ -724,6 +728,7 @@ export function Viewport({
           clonePath={pick ? null : clonePath}
           guide={guide}
           ghosts={ghosts}
+          referenceOverlay={pick ? null : referenceOverlay}
           seeThrough={seeThrough}
           reducedMotion={reducedMotion}
           controlsRef={controls}

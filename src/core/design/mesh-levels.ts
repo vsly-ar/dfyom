@@ -257,3 +257,52 @@ export function meshLevels(
   )
   return Ok(more > 0 ? { levels, more } : { levels })
 }
+
+/** A level's triangles are the flat ones within this of its depth (mm; twice the join step). */
+const LEVEL_PICK = 2 * JOIN
+
+/**
+ * The triangles of one level (flat as above, facing its side, within `LEVEL_PICK` of `depth`
+ * below the face), as positions in the source units they came in: the window highlights the
+ * level under the pointer on the ghost with them (ui.md § Reference tools). Pure.
+ */
+export function levelTriangles(
+  positions: Float32Array,
+  matrix: readonly number[],
+  depth: number,
+  facing: MeshLevel['facing'],
+): Float32Array {
+  const m = matrix
+  const n = Math.floor(positions.length / 9)
+  const keep: number[] = []
+  const w = new Float64Array(3)
+  const uv = new Float64Array(6)
+  for (let t = 0; t < n; t++) {
+    for (let k = 0; k < 3; k++) {
+      const x = positions[9 * t + 3 * k]!
+      const y = positions[9 * t + 3 * k + 1]!
+      const z = positions[9 * t + 3 * k + 2]!
+      uv[2 * k] = m[0]! * x + m[4]! * y + m[8]! * z + m[12]!
+      uv[2 * k + 1] = m[1]! * x + m[5]! * y + m[9]! * z + m[13]!
+      w[k] = m[2]! * x + m[6]! * y + m[10]! * z + m[14]!
+    }
+    const level = (w[0]! + w[1]! + w[2]!) / 3
+    if (Math.abs(level + depth) > LEVEL_PICK) continue
+    const ax = uv[2]! - uv[0]!
+    const ay = uv[3]! - uv[1]!
+    const az = w[1]! - w[0]!
+    const bx = uv[4]! - uv[0]!
+    const by = uv[5]! - uv[1]!
+    const bz = w[2]! - w[0]!
+    const nx = ay * bz - az * by
+    const ny = az * bx - ax * bz
+    const nz = ax * by - ay * bx
+    const len = Math.hypot(nx, ny, nz)
+    if (len === 0 || Math.abs(nz) < FLAT_COS * len) continue
+    if (nz > 0 !== (facing === 'face')) continue
+    keep.push(t)
+  }
+  const out = new Float32Array(keep.length * 9)
+  keep.forEach((t, i) => out.set(positions.subarray(9 * t, 9 * t + 9), 9 * i))
+  return out
+}

@@ -52,7 +52,13 @@ import {
 import { checkNoRunJob } from '../../core/run/commands'
 import type { MachineService } from '../../core/run/service'
 import { createToolpathCache } from '../../core/toolpath/cache'
-import { referenceSection, stlMesh, type StlMesh } from '../../core/workers/tasks'
+import {
+  referenceSection,
+  stlMesh,
+  type SectionOutput,
+  type StlMesh,
+} from '../../core/workers/tasks'
+import { fitOptions } from '../../core/design/reference-find'
 import type { ErrorReporter } from '../../shared/boundary'
 import type { AppError } from '../../shared/errors/app-error'
 import type { Logger } from '../../shared/logging'
@@ -167,13 +173,17 @@ export interface AppHost extends SessionHost, HostPort {
    * `unknownReference`) without the project or the reference.
    */
   referenceMesh(key: string, referenceId: string): AsyncAppResult<StlMesh>
-  /** A reference's section by `w = level` after `matrix` (source → face frame), in the worker (U3). */
+  /**
+   * A reference's section by `w = level` after `matrix` (source → face frame), in the worker (U3);
+   * with `fit` also its fitted loops (DF60).
+   */
   referenceSection(
     key: string,
     referenceId: string,
     matrix: readonly number[],
     level: number,
-  ): AsyncAppResult<{ segments: Float32Array }>
+    fit?: boolean,
+  ): AsyncAppResult<SectionOutput>
   /**
    * Stdin end, app quit: abort jobs and close every project (unsaved changes stay recoverable).
    * Returns the projects that had unsaved changes.
@@ -614,14 +624,21 @@ class Host implements AppHost {
     referenceId: string,
     matrix: readonly number[],
     level: number,
-  ): AsyncAppResult<{ segments: Float32Array }> {
+    fit = false,
+  ): AsyncAppResult<SectionOutput> {
     const where = 'reference.section'
     const found = this.referenceFile(key, referenceId, where)
     if (found.isErr()) return Err(found.unwrapErr())
     const { file, triangles } = found.unwrap()
     const r = await this.o.workers.run(
       referenceSection,
-      { path: file, triangles, matrix: [...matrix], level },
+      {
+        path: file,
+        triangles,
+        matrix: [...matrix],
+        level,
+        ...(fit ? { fit: fitOptions({}) } : {}),
+      },
       { signal: new AbortController().signal, progress: () => undefined },
     )
     return r.isErr() ? Err(r.unwrapErr().withContext(where, { referenceId })) : r

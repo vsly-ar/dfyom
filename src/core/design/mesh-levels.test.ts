@@ -3,7 +3,7 @@
 // Spec: docs/modes/reference-tools.md#test-plans (P1 levels)
 import { describe, expect, it } from 'vitest'
 import { expectOk } from '../../shared/testing/result'
-import { meshLevels, type MeshLevel } from './mesh-levels'
+import { levelTriangles, meshLevels, type MeshLevel } from './mesh-levels'
 import { createStlParser, STL_LIMITS, StlPositions } from './stl'
 import { ENCLOSURE_FULL_TRIANGLES, enclosureFullStl } from './stl.testing'
 
@@ -37,6 +37,22 @@ const at = (levels: readonly MeshLevel[], depth: number, facing: MeshLevel['faci
   expect(l, `${facing} level at ${depth}`).toBeDefined()
   return l!
 }
+
+describe('levelTriangles', () => {
+  it('gives the triangles of one level and side, in the source positions (the hover highlight)', () => {
+    const floor = levelTriangles(STEPPED, IDENTITY, 3, 'face')
+    expect(Array.from(floor)).toEqual(quad(10, 0, 20, 10, -3, true))
+    // the overhang's underside faces the opposite side; nothing faces the face at −2
+    expect(levelTriangles(STEPPED, IDENTITY, 2, 'opposite')).toHaveLength(18)
+    expect(levelTriangles(STEPPED, IDENTITY, 2, 'face')).toHaveLength(0)
+    // through a matrix (source in cm, ×10): the same triangles come back unchanged
+    const cm = STEPPED.map((x) => x / 10)
+    const scale = [10, 0, 0, 0, 0, 10, 0, 0, 0, 0, 10, 0, 0, 0, 0, 1]
+    expect(Array.from(levelTriangles(cm, scale, 3, 'face'))).toEqual(
+      Array.from(Float32Array.from(quad(10, 0, 20, 10, -3, true).map((x) => x / 10))),
+    )
+  })
+})
 
 describe('meshLevels', () => {
   it('finds each floor with its depth and area, from both sides, sorted by depth', () => {

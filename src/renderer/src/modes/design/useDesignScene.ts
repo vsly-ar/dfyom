@@ -11,7 +11,7 @@
 // #design-and-plan-controls-v02, #reference-ghost-v02, #reference-panel-hardening-df2df8
 import { useMemo } from 'react'
 import { placedBox } from '../../../../core/design/reference'
-import { toPartFrame } from '../../../../core/geometry/face'
+import { faceFrame, toPartFrame } from '../../../../core/geometry/face'
 import { unapplyPlacement } from '../../../../core/geometry/model'
 import { useRegion2d, useUi } from '../../shell/ShellContext'
 import { designMessages } from '../../messages/design'
@@ -28,7 +28,8 @@ import {
   surfaceAxes,
 } from './outline'
 import { clickedFace, faceSelectionId, selectedFace } from './face-selection'
-import { ghostMatrix, referencePlacement } from './reference-view'
+import { overlayView } from './reference-overlay'
+import { ghostMatrix, referencePlacement, sectionMatrix, stockSizeOf } from './reference-view'
 import { useTabMarkers } from './useTabMarkers'
 import { useClonesScene } from './useClonesScene'
 import { instanceId, instanceOfOperation } from './clones-view'
@@ -81,6 +82,28 @@ export function useDesignScene(): SceneProps {
       }),
     [references, preview],
   )
+  // the Reference panel's section loops, sharp corners and hovered level on the ghost (DF60)
+  const overlayState = useUi((s) => s.referenceOverlay)
+  const referenceOverlay = useMemo(() => {
+    const stockSize = part === undefined ? undefined : stockSizeOf(part)
+    if (!panel || preview !== null || overlayState === null || stockSize === undefined) return null
+    const r = references.find((x) => x.ref.id === overlayState.referenceId)
+    const p = r === undefined ? undefined : referencePlacement(r.ref)
+    if (r === undefined || !r.visible || r.mesh?.status !== 'done' || p === undefined) return null
+    const matrix = ghostMatrix(r.ref.asset.bounds, p)
+    return overlayView(overlayState, stockSize, {
+      positions: r.mesh.positions,
+      matrix,
+      faceMatrix: sectionMatrix(matrix, faceFrame(overlayState.direction, stockSize)),
+    })
+  }, [panel, preview, overlayState, part, references])
+  const overlaySummary =
+    referenceOverlay === null || overlayState?.loops == null
+      ? undefined
+      : referenceMessages.tools.viewportSection(
+          overlayState.loops.length,
+          referenceOverlay.corners.length,
+        )
   const referenceSummary = references
     .filter((r) => r.visible)
     .map((r) =>
@@ -188,6 +211,7 @@ export function useDesignScene(): SceneProps {
     selectedAlso: clones.selectedAlso,
     announcement,
     ghosts,
+    referenceOverlay,
     seeThrough: panel && seeThroughStock && ghosts.length > 0,
     snap: snapOn,
     ...(part === undefined ? {} : { units: part.units }),
@@ -204,6 +228,7 @@ export function useDesignScene(): SceneProps {
             face === undefined ? undefined : designMessages.face.summary(face.label),
             clones.summary,
             ...referenceSummary,
+            overlaySummary,
           ]
             .filter(Boolean)
             .join(' '),

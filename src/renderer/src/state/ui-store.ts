@@ -11,6 +11,7 @@ import type { Issue } from '../../../shared/errors/app-error'
 import type { AppMode } from '../../../core/modes'
 import type { CloneRowKind } from '../../../core/design/clones/clones'
 import type { ClonePathData } from '../viewport/clone-path'
+import type { ReferenceOverlayState } from '../modes/design/reference-overlay'
 
 /** Pick mode: a field asks the viewport for a surface (ui.md#selection-and-picking). */
 export interface PickRequestState {
@@ -142,6 +143,12 @@ export interface UiState {
    */
   readonly sectionDepth: number | null
   setSectionDepth(mm: number | null): void
+  /**
+   * The Reference panel's fitted section and hovered level, drawn on the ghost (DF60; per window,
+   * set while the panel's Levels and Section rows show, null otherwise).
+   */
+  readonly referenceOverlay: ReferenceOverlayState | null
+  setReferenceOverlay(overlay: ReferenceOverlayState | null): void
   /**
    * Feature rows expanded in the navigator (v0.4 task U1): per window and per feature while the
    * window is open, collapsed by default; no command, never saved.
@@ -303,6 +310,8 @@ export function createUiStore(initial: Partial<Pick<UiState, 'mode'>> = {}): UiS
     setSnapOn: (snapOn) => set({ snapOn }),
     sectionDepth: null,
     setSectionDepth: (sectionDepth) => set({ sectionDepth }),
+    referenceOverlay: null,
+    setReferenceOverlay: (referenceOverlay) => set({ referenceOverlay }),
     expandedFeatures: new Set(),
     setFeatureExpanded: (id, expanded) =>
       set((s) => {

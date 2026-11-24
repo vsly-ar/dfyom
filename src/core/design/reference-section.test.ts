@@ -4,7 +4,8 @@
 // Spec: docs/modes/reference-tools.md#test-plans (P1 section and fitting)
 import { describe, expect, it } from 'vitest'
 import { expectOk } from '../../shared/testing/result'
-import { signedArea } from '../geometry/2d/model'
+import { MIN_ELEMENT } from '../geometry/2d/fit-polyline'
+import { arcRadius, arcSweep, signedArea } from '../geometry/2d/model'
 import { insideCorners } from '../geometry/shape-measure'
 import { sectionChains } from './mesh-section'
 import { fitSection } from './reference-section'
@@ -99,6 +100,26 @@ describe('sectionChains + fitSection', () => {
       for (const s of cavity.sharp) expect(s[1]).toBeCloseTo(78.06, 1)
       expect(ms).toBeLessThan(2000) // ≈ 6 ms on the dev machine
     })
+
+    // S8's feature-rich heights (slots, ribs, the lid lip and the bottom chamfer), which missed
+    // the targets in P1 (up to 510 elements, 92 under 0.05 mm) before the circle tangents, the
+    // long-chord alternative and the sliver merge (reference-tools.md § Fitting)
+    it.each([2, 5, 40, 50, 55, 59])(
+      'feature-rich z %i: ≤ 300 elements per loop, none under 0.05 mm',
+      (z) => {
+        for (const l of section(z)) {
+          expect(l.maxDeviation).toBeLessThanOrEqual(0.01)
+          expect(l.loop.elements.length).toBeLessThanOrEqual(300)
+          for (const e of l.loop.elements) {
+            const length =
+              e.kind === 'line'
+                ? Math.hypot(e.b[0] - e.a[0], e.b[1] - e.a[1])
+                : Math.abs(arcSweep(e)) * arcRadius(e)
+            expect(length).toBeGreaterThanOrEqual(MIN_ELEMENT)
+          }
+        }
+      },
+    )
 
     it('near the bottom: the four foot holes are circles of Ø 2.447', () => {
       const holes = section(2).filter((l) => l.role === 'hole')

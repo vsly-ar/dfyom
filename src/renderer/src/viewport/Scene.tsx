@@ -38,6 +38,7 @@ import { TabMarkers, type TabOverlay } from './TabMarkers'
 import { ClonePathLayer } from './ClonePath'
 import type { ClonePathOverlay } from './clone-path'
 import { ReferenceGhost, type ReferenceGhostView } from './ReferenceGhost'
+import { ReferenceOverlay, type ReferenceOverlayView } from './ReferenceOverlay'
 import { RunLayer, type RunScene } from './RunLayer'
 
 export interface SceneProps {
@@ -65,6 +66,8 @@ export interface SceneProps {
   clonePath?: ClonePathOverlay | null
   /** Reference model ghosts, drawn after the part, never pickable (task R3). */
   ghosts?: readonly ReferenceGhostView[] | null
+  /** The Reference panel's read-outs on the ghost (DF60). */
+  referenceOverlay?: ReferenceOverlayView | null
   /** The part translucent without depth writes, so a ghost inside shows (DF2). */
   seeThrough?: boolean
   reducedMotion?: boolean
@@ -111,6 +114,14 @@ export function Scene(props: SceneProps): React.JSX.Element {
           reducedMotion={props.reducedMotion ?? false}
         />
       ))}
+      {props.referenceOverlay ? (
+        <ReferenceOverlay
+          overlay={props.referenceOverlay}
+          palette={palette}
+          ringSize={Math.min(5, Math.max(0.8, span * 0.012))}
+          reducedMotion={props.reducedMotion ?? false}
+        />
+      ) : null}
       {outline ? <LiveOutline loops={outline} colour={palette.selected} /> : null}
       {marker ? <ErrorMarker at={marker} bounds={bounds} colour={palette.danger} /> : null}
       {glyphs && glyphs.length > 0 ? (

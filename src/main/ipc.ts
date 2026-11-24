@@ -326,7 +326,12 @@ export function registerProjectIpc(
     async (event, request: unknown): Promise<ReferenceSectionReply> => {
       const ws = sessionOf(event)
       const key = ws?.session.boundKey
-      const req = request as { referenceId?: unknown; matrix?: unknown; level?: unknown } | null
+      const req = request as {
+        referenceId?: unknown
+        matrix?: unknown
+        level?: unknown
+        fit?: unknown
+      } | null
       if (
         key === undefined ||
         typeof req?.referenceId !== 'string' ||
@@ -334,10 +339,16 @@ export function registerProjectIpc(
         typeof req.level !== 'number'
       )
         return { ok: false, error: NOT_A_WINDOW_ERROR }
-      const r = await host.referenceSection(key, req.referenceId, req.matrix, req.level)
-      return r.isOk()
-        ? { ok: true, segments: r.unwrap().segments }
-        : { ok: false, error: agentError(r.unwrapErr()).error }
+      const r = await host.referenceSection(
+        key,
+        req.referenceId,
+        req.matrix,
+        req.level,
+        req.fit === true,
+      )
+      if (r.isErr()) return { ok: false, error: agentError(r.unwrapErr()).error }
+      const { segments, loops } = r.unwrap()
+      return loops === undefined ? { ok: true, segments } : { ok: true, segments, loops }
     },
   )
 

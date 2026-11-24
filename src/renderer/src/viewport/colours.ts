@@ -25,6 +25,8 @@ export const PALETTE_TOKENS = {
   danger: '--danger',
   /** Tint of operations edited in the plan (snapshot scene, task E3b). */
   info: '--info',
+  /** Sharp inside corners of a reference section on the ghost (DF60). */
+  warning: '--warning',
   // run scene (task 3.12): toolpath playback and the tool marker
   feed: '--vp-feed',
   rapid: '--vp-rapid',

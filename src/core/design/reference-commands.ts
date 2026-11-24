@@ -54,7 +54,7 @@ import {
   lengthArg,
   referenceLevelsOf,
   referenceView,
-  stockFace,
+  resolveFace,
   stockResolver,
   storedPlacement as placementOf,
   targetReference,
@@ -62,6 +62,7 @@ import {
 } from './reference-find'
 import type { FittedLoop } from './reference-section'
 import { DIRECTIONS, STOCK_FACE } from '../geometry/face'
+import type { Vec3 } from '../geometry/model'
 
 // ── args ──────────────────────────────────────────────────────────────────────────────────
 
@@ -584,6 +585,33 @@ const P2 = z.tuple([z.number(), z.number()])
 export const FIND_LOOPS_MAX = 50
 export const SHARP_SHOWN_MAX = 8
 
+/** Point results in a setup's WCS (P2, `frame: 'setup'`): mm, rounded to 0.001. */
+const WcsSchema = z.object({
+  z: z.number().optional(),
+  bounds: z.tuple([P2, P2]).optional(),
+  center: P2.optional(),
+  sharp: z.array(P2).optional(),
+})
+type Wcs = z.output<typeof WcsSchema>
+
+/** Face-frame bounds at height w in the WCS (a quarter turn keeps them axis-aligned). */
+function wcsBounds(
+  wcs: (p: Vec3) => Vec3,
+  b: readonly [readonly [number, number], readonly [number, number]],
+  w: number,
+): [[number, number], [number, number]] {
+  const a = wcs([b[0][0], b[0][1], w])
+  const c = wcs([b[1][0], b[1][1], w])
+  return [
+    [r3(Math.min(a[0], c[0])), r3(Math.min(a[1], c[1]))],
+    [r3(Math.max(a[0], c[0])), r3(Math.max(a[1], c[1]))],
+  ]
+}
+const wcsPoint = (wcs: (p: Vec3) => Vec3, p: readonly [number, number], w: number) => {
+  const q = wcs([p[0], p[1], w])
+  return [r3(q[0]), r3(q[1])] as [number, number]
+}
+
 const LevelSchema = z.object({
   depth: z.number(),
   facing: z.enum(['face', 'opposite']),
@@ -591,6 +619,7 @@ const LevelSchema = z.object({
   visibleArea: z.number(),
   bounds: z.tuple([P2, P2]),
   depthFromOpposite: z.number().optional(),
+  wcs: WcsSchema.optional(),
 })
 const LoopSummarySchema = z.object({
   role: z.enum(['outer', 'hole']),
@@ -605,11 +634,18 @@ const LoopSummarySchema = z.object({
   }),
   maxDeviation: z.number(),
   open: z.literal(true).optional(),
+  wcs: WcsSchema.optional(),
 })
 export type LoopSummary = z.output<typeof LoopSummarySchema>
 
-/** The compact summary of a fitted loop (RT-G), mm rounded to 0.001. */
-export function loopSummary(l: FittedLoop): LoopSummary {
+/**
+ * The compact summary of a fitted loop (RT-G), mm rounded to 0.001; with `wcs` (P2) its points
+ * also in the setup's WCS, the loop at face-frame height `w`.
+ */
+export function loopSummary(
+  l: FittedLoop,
+  wcs?: { readonly at: (p: Vec3) => Vec3; readonly w: number },
+): LoopSummary {
   const pt = (p: readonly [number, number]): [number, number] => [r3(p[0]), r3(p[1])]
   return {
     role: l.role,
@@ -626,6 +662,15 @@ export function loopSummary(l: FittedLoop): LoopSummary {
     },
     maxDeviation: r3(l.maxDeviation),
     ...(l.open ? { open: true as const } : {}),
+    ...(wcs === undefined
+      ? {}
+      : {
+          wcs: {
+            bounds: wcsBounds(wcs.at, [l.bounds.min, l.bounds.max], wcs.w),
+            ...(l.circle ? { center: wcsPoint(wcs.at, l.circle.centre, wcs.w) } : {}),
+            sharp: l.sharp.slice(0, SHARP_SHOWN_MAX).map((p) => wcsPoint(wcs.at, p, wcs.w)),
+          } satisfies Wcs,
+        }),
   }
 }
 
@@ -643,6 +688,7 @@ const referenceFind = defineAsyncQuery({
     partId: PartIdSchema,
     referenceId: ReferenceIdSchema.optional().describe('Default: the only one'),
     face: FaceArg.optional(),
+    frame: z.enum(['face', 'setup']).optional().describe('setup ({setupId}): points also in WCS'),
     kind: z.enum(['levels', 'section']),
     sides: z.enum(['both', 'face']).optional().describe('levels; default both'),
     minArea: z.number().nonnegative().optional().describe('levels: mm², default 1'),
@@ -656,6 +702,8 @@ const referenceFind = defineAsyncQuery({
     kind: z.enum(['levels', 'section']),
     referenceId: ReferenceIdSchema,
     face: z.string(),
+    setupId: z.string().optional(),
+    wcs: WcsSchema.optional(),
     opposite: z.string().optional(),
     levels: z.array(LevelSchema).optional(),
     depth: z.number().optional(),
@@ -673,12 +721,35 @@ const referenceFind = defineAsyncQuery({
     const found = targetReference(doc, args.partId, args.referenceId, where)
     if (found.isErr()) return found
     const ref = found.unwrap()
-    const direction = stockFace(args.face, 'face', where)
-    if (direction.isErr()) return direction
+    const face = resolveFace(doc, args.partId, args.face, ['face'], where)
+    if (face.isErr()) return face
+    const { direction, setup } = face.unwrap()
+    if (args.frame === 'setup' && setup === undefined)
+      return fail('input.malformed', "frame: 'setup' needs a setup face", {
+        issues: [
+          {
+            path: ['frame'],
+            rule: 'setupFrameNeedsSetup',
+            message: "frame 'setup' needs face: { setupId }",
+          },
+        ],
+        where,
+      })
     const p = placementOf(ref, where)
     if (p.isErr()) return p
-    const view = referenceView(ref, p.unwrap(), stockSize(l), direction.unwrap())
-    const head = { referenceId: ref.id, face: view.face }
+    const view = referenceView(
+      ref,
+      p.unwrap(),
+      stockSize(l),
+      direction,
+      args.frame === 'setup' ? setup?.rotation : undefined,
+    )
+    const head = {
+      referenceId: ref.id,
+      face: view.face,
+      ...(setup === undefined ? {} : { setupId: setup.id }),
+    }
+    const wcs = view.wcs
     if (args.kind === 'levels') {
       const r = await referenceLevelsOf(
         ctx,
@@ -699,6 +770,14 @@ const referenceFind = defineAsyncQuery({
         levels: levels.map((x) => ({
           ...x,
           bounds: [[...x.bounds[0]], [...x.bounds[1]]],
+          ...(wcs === undefined
+            ? {}
+            : {
+                wcs: {
+                  z: r3(wcs([0, 0, -x.depth])[2]),
+                  bounds: wcsBounds(wcs, x.bounds, -x.depth),
+                } satisfies Wcs,
+              }),
         })) as z.output<typeof LevelSchema>[],
         ...(more === undefined ? {} : { more }),
       })
@@ -721,7 +800,10 @@ const referenceFind = defineAsyncQuery({
       ...head,
       depth: r3(depth.unwrap()),
       tolerance: fit.tolerance,
-      loops: shown.map(loopSummary),
+      ...(wcs === undefined ? {} : { wcs: { z: r3(wcs([0, 0, -depth.unwrap()])[2]) } }),
+      loops: shown.map((x) =>
+        loopSummary(x, wcs === undefined ? undefined : { at: wcs, w: -depth.unwrap() }),
+      ),
       fit: {
         elements: closed.reduce((s, x) => s + x.loop.elements.length, 0),
         maxDeviation: r3(closed.reduce((m, x) => Math.max(m, x.maxDeviation), 0)),
