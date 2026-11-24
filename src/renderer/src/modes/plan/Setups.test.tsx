@@ -351,12 +351,86 @@ describe('Setup panel', () => {
     expect(
       within(insp).getByText('Generate toolpaths to see where the tool leaves the stock.'),
     ).toBeInTheDocument()
+    // DF64: the clamp note sits on the clamp height field
     expect(
-      within(insp).getByLabelText('Clearance height', { selector: 'input' }),
+      within(insp).getByLabelText('Clamp height', { selector: 'input' }),
     ).toHaveAccessibleDescription(
-      'Keep clamps lower than 10 mm above the stock top; clamps are not modelled yet.',
+      'Above the stock top. Unknown: links stay inside the cut area or at the clearance height.',
     )
     await expectNoAxeViolations()
+  })
+
+  // DF64: docs/modes/safe-links.md#agent-api-and-settings
+  it('sets the links and the clamp height; shows the time the links save', async () => {
+    const t = await renderSetups()
+    const bottom = t.plan().setups[0]!
+    await t.user.click(t.setupRows()[0]!)
+    const insp = t.inspector()
+    await within(insp).findByRole('heading', { name: 'Setup' })
+    expect(
+      within(insp).getByText('Generate toolpaths to see the links between operations.'),
+    ).toBeInTheDocument()
+    const links = within(insp).getByRole('radiogroup', { name: 'Links' })
+    expect(within(links).getByRole('radio', { name: 'Minimum' })).toBeChecked()
+    expect(links).toHaveAccessibleDescription(
+      'Between operations of one tool, the tool crosses low over the cut stock, at the retract height above it.',
+    )
+    await t.user.click(within(links).getByRole('radio', { name: 'Full' }))
+    await waitFor(() => expect(t.plan().setups[0]!.retraction).toBe('full'))
+    expect(t.callsOf('plan.setup.update')).toContainEqual({
+      planId: t.planId,
+      setupId: bottom.id,
+      retraction: 'full',
+    })
+    const clamp = within(insp).getByLabelText('Clamp height', { selector: 'input' })
+    expect(clamp).toHaveAttribute('placeholder', 'Unknown')
+    await t.user.type(clamp, '12{Enter}')
+    await waitFor(() => expect(t.plan().setups[0]!.clampHeight?.source).toBe('12'))
+    await waitFor(() =>
+      expect(clamp).toHaveAccessibleDescription(
+        'Above the stock top; tool changes, start and end pass at the clearance height (10 mm), so keep clamps below it by the retract height.',
+      ),
+    )
+    // DF59's remaining warning: 12 mm clamps under a 10 mm clearance
+    expect(
+      await within(insp).findByText(
+        /the clearance height is less than the retract height above the clamps/i,
+      ),
+    ).toBeInTheDocument()
+    // emptied: unknown again
+    await t.user.clear(clamp)
+    await t.user.keyboard('{Enter}')
+    await waitFor(() => expect(t.plan().setups[0]).not.toHaveProperty('clampHeight'))
+    expect(t.callsOf('plan.setup.update')).toContainEqual({
+      planId: t.planId,
+      setupId: bottom.id,
+      clampHeight: null,
+    })
+    await expectNoAxeViolations()
+  })
+
+  it('shows how many links run low and the time saved (DF64)', async () => {
+    const t = await renderSetups()
+    const bottom = t.plan().setups[0]!.id
+    t.bridge.handle('plan.warning.list', () =>
+      ok({
+        warnings: [],
+        zRefs: [],
+        links: [
+          {
+            setupId: bottom,
+            links: { count: 3, low: 2, atClearance: 1, seconds: 4.2, savedSeconds: 12.4 },
+          },
+        ],
+      }),
+    )
+    await t.user.click(t.setupRows()[0]!)
+    const insp = t.inspector()
+    const name = await within(insp).findByLabelText('Setup name', { selector: 'input' })
+    await t.user.clear(name)
+    await t.user.type(name, 'Datum{Enter}')
+    expect(within(insp).getByText('Link time')).toBeInTheDocument()
+    expect(await within(insp).findByText(/^2 of 3 links low, .* saved\.$/)).toBeInTheDocument()
   })
 
   // DF68: docs/architecture/grbl.md#z-headroom-hardening-df68

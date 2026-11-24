@@ -83,6 +83,11 @@ export interface SetupHeader {
    * reach lines.
    */
   readonly overreach?: Overreach
+  /**
+   * The setup's clamp height and the links' margin above it (mm, hardening DF64): the clamp line
+   * replaces the clearance in the DF59 note; absent = clamps below the clearance height.
+   */
+  readonly clamp?: { readonly height: number; readonly margin: number }
 }
 
 export interface MachiningProgram {

@@ -35,6 +35,8 @@ export const PLAN_WARNING_CODES = [
   'plan.rebuildBlocked',
   'plan.broken',
   'plan.zRef',
+  'plan.links.clampHeightUnknown',
+  'plan.links.collision',
   'feeds.rpmAboveMachine',
   'feeds.rpmBelowMachine',
   'feeds.feedClamped',

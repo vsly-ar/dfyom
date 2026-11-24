@@ -59,6 +59,7 @@ const BY_CODE: Record<ErrorCode, ExitCode> = {
   'plan.setup': EXIT.other,
   'plan.check': EXIT.other,
   'post.noMachine': EXIT.other,
+  'plan.links.collision': EXIT.other,
 }
 
 export function exitCodeOf(code: ErrorCode): ExitCode {

@@ -13,6 +13,7 @@ import {
 import { DIRECTIONS as FACE_DIRECTIONS } from '../geometry/face'
 import { NAME_MAX, quantityDto } from '../library/item'
 import { SnapshotDtoSchema } from '../library/snapshot'
+import { RETRACTIONS } from '../toolpath/links'
 import { PRESET_NAME_MAX } from '../library/tool.dto'
 import type { Quantity } from '../quantity/quantity'
 import type { QuantityDTO } from '../quantity/quantity.dto'
@@ -190,6 +191,13 @@ export const SetupDtoSchema = z.object({
   workOffset: z.literal('G54').describe('Work coordinate system (v0.1: G54 only)'),
   clearanceHeight: length().describe('Up from the stock top'),
   retractHeight: length().describe("Up from the operation's `on` surface"),
+  retraction: z
+    .enum(RETRACTIONS)
+    .optional()
+    .describe('Links between operations (DF64): minimum over the stock, or full; absent = minimum'),
+  clampHeight: length()
+    .optional()
+    .describe('How far clamps rise above the stock top (DF64); absent = unknown'),
   operations: z.array(PlanOperationDtoSchema).describe('Machining order'),
 })
 export type SetupDTO = z.output<typeof SetupDtoSchema>

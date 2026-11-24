@@ -69,6 +69,7 @@ export function ExportDialog(): React.JSX.Element | null {
         {r.regenerated.length > 0 ? <li>{m.regenerated(r.regenerated.length)}</li> : null}
         <li>{r.softLimitChecked ? m.softLimitChecked : m.softLimitNotChecked}</li>
         <li>{zHeadroomLine(r.warnings)}</li>
+        {r.linksNote !== undefined ? <li>{m.linksNote}</li> : null}
       </ul>
       <section aria-label={m.warnings}>
         <WarningList

@@ -24,6 +24,10 @@ import { maxOverreach, type Overreach } from '../toolpath/overreach'
 import { exportGrbl, type ExportOperation, type GrblExport } from './export'
 import { gcodeFileStem } from './file-name'
 import { machineKeyOf } from '../run/machine-key'
+import { cachedSetupLinks, linkSettings } from '../plan/setup-links'
+import type { LinkSettings } from '../toolpath/links'
+import type { Toolpath } from '../toolpath/model'
+import type { SetupHeader } from './program'
 
 /** The generator string of exported programs' header, without the app version. */
 export const PROGRAM_GENERATOR = 'DFYOM'
@@ -93,6 +97,8 @@ export interface PlanExport extends GrblExport {
   readonly regenerated: readonly string[]
   /** Whether the soft-limit check ran (only with `workZero`). */
   readonly softLimitChecked: boolean
+  /** Links lowered below the clearance height (DF64). */
+  readonly lowLinks: number
 }
 
 const neverAborted = new AbortController().signal
@@ -158,7 +164,7 @@ export async function exportPlan(
       })),
     })
   const total = all.length
-  const operations: ExportOperation[] = []
+  const generated: { toolpath: Toolpath; ids: string[]; label: string }[] = []
   const reaches: Overreach[] = []
   const regenerated: string[] = []
   const part = plan.dto.design.part
@@ -185,16 +191,43 @@ export async function exportPlan(
     )
     if (tp.isErr()) return Err(tp.unwrapErr().withContext(where, { planId, planOperationId: id }))
     if (tp.unwrap().status === 'generated') regenerated.push(id)
+    const toolpath = tp.unwrap().toolpath
+    reaches.push(inputOverreach(input, toolpath))
+    generated.push({ toolpath, ids, label })
+  }
+  // DF64: links between operations over the in-process stock (docs/modes/safe-links.md)
+  const settings = linkSettings(setup, plan.stock, plan.machine)
+  const links =
+    settings.retraction === 'full'
+      ? undefined
+      : cachedSetupLinks(
+          all,
+          generated.map((g) => g.toolpath),
+          settings,
+        )
+  const hit = links?.collisions[0]
+  if (hit !== undefined)
+    return fail('plan.links.collision', 'a link between operations would hit the material', {
+      where,
+      data: { planId, setupId: setup.id },
+      issues: links!.collisions.map((c) => ({
+        path: [all[c.index]!.planOperationId, 'link'],
+        rule: 'collision',
+        message: `the link into this operation runs at Z ${c.to[2]}, below the safe Z ${c.needed}`,
+        params: { z: c.to[2], needed: c.needed },
+      })),
+    })
+  const operations: ExportOperation[] = all.map((input, i) => {
+    const { ids, label } = generated[i]!
+    const toolpath = links?.toolpaths[i] ?? generated[i]!.toolpath
     const positions: Record<string, string> = {}
     for (const id of ids) {
       const text = positionComment(part, id)
       if (text !== undefined) positions[id] = text
     }
-    const toolpath = tp.unwrap().toolpath
-    reaches.push(inputOverreach(input, toolpath))
     // a plan operation of one design operation: its passes name it (joined ones already do)
     const only = ids.length === 1 ? ids[0]! : undefined
-    operations.push({
+    return {
       toolpath:
         only === undefined
           ? toolpath
@@ -209,10 +242,10 @@ export async function exportPlan(
       },
       stickout: input.stickout,
       label,
-      ...programZRef(zRefs.get(id)?.zRef),
+      ...programZRef(zRefs.get(input.planOperationId)?.zRef),
       ...(Object.keys(positions).length === 0 ? {} : { positions }),
-    })
-  }
+    }
+  })
   opts.progress?.({ done: total, total })
   const exported = exportGrbl(
     {
@@ -222,16 +255,19 @@ export async function exportPlan(
         id: setup.id,
         clearanceHeight: all[0]!.setup.clearanceHeight,
         stockThickness: setupStockSize(plan.stock, setup).z[1],
-        header: setupHeader(
-          plan.setups,
-          setupIndex,
-          {
-            length: plan.stock.length.canonical,
-            width: plan.stock.width.canonical,
-            thickness: plan.stock.thickness.canonical,
-          },
-          maxOverreach(reaches),
-        ),
+        header: {
+          ...setupHeader(
+            plan.setups,
+            setupIndex,
+            {
+              length: plan.stock.length.canonical,
+              width: plan.stock.width.canonical,
+              thickness: plan.stock.thickness.canonical,
+            },
+            maxOverreach(reaches),
+          ),
+          ...clampLine(settings),
+        },
       },
       operations,
       machine: plan.machine,
@@ -245,8 +281,19 @@ export async function exportPlan(
       setupId: setup.id,
       regenerated,
       softLimitChecked: opts.workZero !== undefined,
+      lowLinks: links?.summary.low ?? 0,
     }))
     .mapErr((e) => e.withContext(where, { planId }))
+}
+
+/**
+ * The header's clamp line (DF64, safe-links.md#clamps): only when links fly over the clamps,
+ * i.e. with `minimum` and a clamp height whose margin stays below the clearance height.
+ */
+function clampLine(s: LinkSettings): Pick<SetupHeader, 'clamp'> {
+  const h = s.clampHeight
+  if (s.retraction === 'full' || h === undefined || h + s.margin >= s.clearance - 1e-9) return {}
+  return { clamp: { height: h, margin: s.margin } }
 }
 
 /** The program's view of a tool run's Z reference (DF69); none without one. */
@@ -280,6 +327,13 @@ export function connectedWorkZero(
  */
 export const SOFT_LIMIT_NOTE =
   "Soft limits not checked: no homed connection to this plan's machine. Before running, set the work zero and check with run.job.check (or the Run pre-flight); run.job.start checks too."
+
+/**
+ * `plan.export`'s note when links run below the clearance height (DF64, Q105): one air pass before
+ * the first real cut. Doc: docs/modes/safe-links.md#verification-on-the-virtual-machine
+ */
+export const LINKS_NOTE =
+  'Links between operations run low over the stock (minimum retraction). Before the first real cut with such a program, run it once in the air with Z0 set 30 mm above the stock.'
 
 const ProgramStatsSchema = z.object({
   cutLength: z.number().describe('mm'),
@@ -333,6 +387,10 @@ export const planExport = defineCommand({
     regenerated: z
       .array(z.string())
       .describe('Plan operations whose toolpath was missing or stale and was generated'),
+    linksNote: z
+      .string()
+      .optional()
+      .describe('With links lowered over the stock (DF64): the air pass advice'),
   }),
   async run(doc, args, ctx) {
     const files = ctx.services.exportFiles
@@ -360,6 +418,7 @@ export const planExport = defineCommand({
       softLimitChecked: e.softLimitChecked,
       ...(e.softLimitChecked ? {} : { softLimitNote: SOFT_LIMIT_NOTE }),
       regenerated: [...e.regenerated],
+      ...(e.lowLinks > 0 ? { linksNote: LINKS_NOTE } : {}),
     })
   },
 })

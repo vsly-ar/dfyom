@@ -73,6 +73,15 @@ import {
   type SetupDTO,
 } from './plan.dto'
 import { planPendingApply } from './pending'
+import { planOperationInputs, type PlanOperationInput } from './inputs'
+import {
+  clampFindings,
+  currentSetupLinks,
+  linksFindings,
+  linksSummaryDTO,
+  setupRetraction,
+} from './setup-links'
+import { RETRACTIONS } from '../toolpath/links'
 import { designChanged, hasPlanEdits, planStale } from './snapshot'
 import { shapeFindings } from './shape-findings'
 import { checkPart, sameValue } from './validity'
@@ -672,7 +681,7 @@ const setupUpdate = defineCommand({
   kind: 'document',
   name: 'plan.setup.update',
   summary:
-    'Rename or rotate a setup, or change its safe heights (clearance above the stock top, retract above on).',
+    'Rename or rotate a setup, change its safe heights (clearance above the stock top, retract above on), links between operations or clamp height.',
   title: () => 'Update setup',
   machine: false,
   args: z.object({
@@ -681,6 +690,13 @@ const setupUpdate = defineCommand({
     rotation: z.literal(SETUP_ROTATIONS).optional().describe('Degrees about the spindle axis'),
     clearanceHeight: Src.optional().describe('Up from the stock top; > retractHeight'),
     retractHeight: Src.optional().describe("Up from the operation's on surface; > 0"),
+    retraction: z
+      .enum(RETRACTIONS)
+      .optional()
+      .describe('Links between operations: minimum (lowest safe level) or full (clearance)'),
+    clampHeight: Src.nullable()
+      .optional()
+      .describe('Clamps up from the stock top, ≥ 0; null = unknown'),
   }),
   result: Empty,
   run(draft, args) {
@@ -699,7 +715,14 @@ const setupUpdate = defineCommand({
     const both = collect([parse('clearanceHeight'), parse('retractHeight')])
     if (both.isErr()) return Err(both.unwrapErr().withContext(where))
     const [clearance, retract] = both.unwrap() as [Quantity, Quantity]
+    const clamp =
+      args.clampHeight === undefined || args.clampHeight === null
+        ? undefined
+        : Quantity.parse(args.clampHeight, ctxL).mapErr((e) => e.prefixIssues('clampHeight'))
+    if (clamp?.isErr()) return Err(clamp.unwrapErr().withContext(where))
     const issues: Issue[] = []
+    if (clamp !== undefined && clamp.unwrap().canonical < 0)
+      issues.push({ path: ['clampHeight'], rule: 'nonNegative', message: 'must be ≥ 0' })
     if (retract.canonical <= 0)
       issues.push({ path: ['retractHeight'], rule: 'positive', message: 'must be > 0' })
     if (clearance.canonical <= retract.canonical)
@@ -712,6 +735,11 @@ const setupUpdate = defineCommand({
     const target = draft.plans[args.planId]!.setups.find((s) => s.id === args.setupId)!
     if (args.clearanceHeight !== undefined) target.clearanceHeight = lengthDTO(clearance)
     if (args.retractHeight !== undefined) target.retractHeight = lengthDTO(retract)
+    // DF64: `minimum` and an unknown clamp height are stored as absent
+    if (args.retraction === 'minimum') delete target.retraction
+    else if (args.retraction !== undefined) target.retraction = args.retraction
+    if (args.clampHeight === null) delete target.clampHeight
+    else if (clamp !== undefined) target.clampHeight = lengthDTO(clamp.unwrap())
     if (args.name !== undefined && args.name !== target.name) target.name = args.name
     // 0° is stored as absent (v0.1 records)
     if (args.rotation === 0) delete target.rotation
@@ -1658,6 +1686,19 @@ const outlineDTO = (o: ZRefOutline) => ({
   grid: o.grid,
 })
 
+const SetupLinksSchema = z.object({
+  setupId: z.string(),
+  links: z
+    .object({
+      count: z.number().int().describe('Links between operations of one tool run, no pause'),
+      low: z.number().int().describe('Lowered below the clearance height'),
+      atClearance: z.number().int(),
+      seconds: z.number().nullable().describe('Their rapid time (s); null without a machine'),
+      savedSeconds: z.number().nullable().describe('Saved against the clearance height (s)'),
+    })
+    .nullable(),
+})
+
 const warningList = defineQuery({
   name: 'plan.warning.list',
   summary:
@@ -1671,6 +1712,9 @@ const warningList = defineQuery({
     zRefs: z
       .array(ZRefRunSchema)
       .describe('Z reference and touch-off spot per tool run (DF69); empty without geometry'),
+    links: z
+      .array(SetupLinksSchema)
+      .describe('Links between operations per setup (DF64); null until its toolpaths are current'),
   }),
   run(doc, args, ctx) {
     const where = 'plan.warning.list'
@@ -1719,6 +1763,29 @@ const warningList = defineQuery({
         params: fieldsParam(stale.rebuildBlockedFields),
       })
     const runs = loaded.isOk() ? planZReferences(loaded.unwrap(), ctx.services.region2d) : []
+    // DF64: the links of every setup whose toolpaths are current, and their findings
+    const links: z.output<typeof SetupLinksSchema>[] = []
+    if (loaded.isOk()) {
+      const plan = loaded.unwrap()
+      const cache = ctx.services.toolpaths
+      const inputs =
+        cache === undefined
+          ? undefined
+          : planOperationInputs(doc, args.planId, undefined, ctx.services.region2d).mapOr<
+              PlanOperationInput[] | undefined
+            >(undefined, (v) => v)
+      const timed = plan.machine.isSome()
+      for (const s of plan.setups) {
+        findings.push(...clampFindings(s))
+        const own =
+          inputs === undefined || cache === undefined
+            ? undefined
+            : currentSetupLinks(inputs, cache, s, plan.stock, plan.machine)
+        if (own !== undefined && setupRetraction(s) === 'minimum')
+          findings.push(...linksFindings(s.id, own, timed))
+        links.push({ setupId: s.id, links: own === undefined ? null : linksSummaryDTO(own, timed) })
+      }
+    }
     return Ok({
       warnings: findings.map((w) => ({ ...w, params: { ...w.params } })),
       pendingApply: planPendingApply(dto.unwrap(), ctx.apply?.pending() ?? []),
@@ -1735,6 +1802,7 @@ const warningList = defineQuery({
           candidates: r.candidates.map(candidateDTO),
           outline: r.outline === undefined ? null : outlineDTO(r.outline),
         })),
+      links,
     })
   },
 })

@@ -1,11 +1,12 @@
 // Setup inspector (v0.2 task F6): a setup selected in the setup panel – its name, the face up to
 // the spindle (direction icon and word), the work zero G54 at its part corner, how far the tool
 // reaches past the stock (DF59), the rotation about the spindle axis (0/90/180/270°), the safe
-// heights (clearance with the clamp note, retract; moved here from the navigator), the Z headroom
-// estimate (DF68), the tool changes (DF66, `ToolChanges`: the tool runs, reorderable) and the
+// heights (clearance, retract; moved here from the navigator), the links between operations and
+// the clamp height with DF59's clamp note (DF64), the Z headroom estimate (DF68), the tool changes (DF66, `ToolChanges`: the tool runs, reorderable) and the
 // machine checks of this setup. Each change is one `plan.setup.update`.
 // Read-only (with the plan's reason in the navigator) outside draft and settled design.
-// Doc: docs/conventions/ui.md#design-and-plan-controls-v02, docs/modes/plan-v0.2.md#setups-from-face-directions
+// Doc: docs/conventions/ui.md#design-and-plan-controls-v02, docs/modes/plan-v0.2.md#setups-from-face-directions,
+// docs/modes/safe-links.md#agent-api-and-settings
 import { useState } from 'react'
 import { DIRECTION_LABEL } from '../../../../core/geometry/face'
 import type { PlanWarning } from '../../../../core/plan/checks'
@@ -16,9 +17,11 @@ import {
   type SetupRotation,
 } from '../../../../core/plan/plan.dto'
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
+import { RETRACTIONS, type Retraction } from '../../../../core/toolpath/links'
 import type { Overreach } from '../../../../core/toolpath/overreach'
 import type { AppErrorData, Issue } from '../../../../shared/errors/app-error'
 import {
+  formatDuration,
   formatHeight,
   formatReach,
   planMessages,
@@ -46,7 +49,7 @@ import {
   setupOverreach,
   type ToolpathEntry,
 } from './model'
-import { usePlanCommand } from './plan-store'
+import { usePlanCommand, usePlanState } from './plan-store'
 import styles from './Plan.module.css'
 import { NameField, planWarningLabels, planWarningView } from './PlanInspector'
 import { ToolChanges } from './ToolChanges'
@@ -83,16 +86,31 @@ export function SetupInspector({
   const headroom = zHeadroomText(plan, mine, warnings)
   const reach = reachText(setupOverreach(setup, toolpaths), units)
   const clearance = quantityOf(setup.clearanceHeight)
-  const clampNote: FieldMessage[] =
-    clearance === undefined
-      ? []
-      : [
-          {
-            id: 'clampNote',
-            severity: 'note',
-            text: m.clampNote(formatHeight(clearance.canonical, units)),
-          },
-        ]
+  const clampHeight = setup.clampHeight === undefined ? undefined : quantityOf(setup.clampHeight)
+  const retraction: Retraction = setup.retraction ?? 'minimum'
+  const clampNote: FieldMessage[] = [
+    {
+      id: 'clampNote',
+      severity: 'note',
+      text:
+        clampHeight === undefined || clearance === undefined
+          ? m.clampNoteUnknown
+          : m.clampNote(formatHeight(clearance.canonical, units)),
+    },
+  ]
+  const links = usePlanState((s) => s.data?.links.find((l) => l.setupId === setup.id)?.links)
+  const linksText =
+    links === undefined || links === null
+      ? m.linksUnknown
+      : retraction === 'full'
+        ? m.linksFull
+        : m.linksValue(
+            links.low,
+            links.count,
+            links.savedSeconds === null || links.savedSeconds <= 0
+              ? undefined
+              : formatDuration(links.savedSeconds),
+          )
 
   const update = async (args: object, gesture?: string) => {
     const r = await call(
@@ -134,6 +152,8 @@ export function SetupInspector({
             ) : null}
             <dt>{m.reach}</dt>
             <dd>{reach}</dd>
+            <dt>{m.links}</dt>
+            <dd>{linksText}</dd>
             {headroom !== undefined ? (
               <>
                 <dt>{m.zHeadroom}</dt>
@@ -167,7 +187,7 @@ export function SetupInspector({
           value={quantityOf(setup.clearanceHeight)}
           illustration={<FieldIcon name="clearance" />}
           readOnly={readOnly}
-          messages={[...messages('clearanceHeight'), ...clampNote]}
+          messages={messages('clearanceHeight')}
           onCommit={(q, gesture) => void update({ clearanceHeight: q.source }, gesture)}
           onCancelGesture={cancelGesture}
         />
@@ -180,6 +200,41 @@ export function SetupInspector({
           readOnly={readOnly}
           messages={messages('retractHeight')}
           onCommit={(q, gesture) => void update({ retractHeight: q.source }, gesture)}
+          onCancelGesture={cancelGesture}
+        />
+        <Field
+          label={m.retraction}
+          kind="toggle"
+          illustration={<FieldIcon name="retract" />}
+          readOnly={readOnly}
+          messages={[
+            { id: 'retractionHint', severity: 'note', text: m.retractionHint[retraction] },
+          ]}
+        >
+          <SegmentedControl<Retraction>
+            label={m.retraction}
+            options={RETRACTIONS.map((r) => ({
+              value: r,
+              label: r === 'minimum' ? m.retractionMinimum : m.retractionFull,
+            }))}
+            value={retraction}
+            disabled={readOnly}
+            onValueChange={(v) => {
+              if (v !== retraction) void update({ retraction: v })
+            }}
+          />
+        </Field>
+        <QuantityInput
+          label={m.clampHeight}
+          kind="length"
+          optional
+          placeholder={m.clampHeightPlaceholder}
+          defaultUnit={defaultUnit('length', units)}
+          value={clampHeight}
+          illustration={<FieldIcon name="clearance" />}
+          readOnly={readOnly}
+          messages={[...messages('clampHeight'), ...clampNote]}
+          onCommit={(q, gesture) => void update({ clampHeight: q?.source ?? null }, gesture)}
           onCancelGesture={cancelGesture}
         />
         <ToolChanges plan={plan} setup={setup} units={units} toolpaths={toolpaths} />

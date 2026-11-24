@@ -392,10 +392,15 @@ describe('Plan mode', () => {
         ],
         softLimitChecked: false,
         regenerated: [],
+        linksNote: 'Links between operations run low over the stock (minimum retraction).',
       }),
     )
     await t.user.click(within(t.nav()).getByRole('button', { name: 'Export gCode…' }))
     const dialog = await screen.findByRole('dialog', { name: 'gCode exported' })
+    // DF64: links run low: one air pass before the first real cut
+    expect(
+      within(dialog).getByText(/run it once in the air with Z0 set 30 mm above/),
+    ).toBeInTheDocument()
     expect(t.bridge.exportDialogNames).toEqual(['bracket']) // short file name (DF62)
     expect(t.callsOf('plan.export')).toEqual([
       { planId: t.planId(), target: '/out/Plan 1.nc', confirm: true },

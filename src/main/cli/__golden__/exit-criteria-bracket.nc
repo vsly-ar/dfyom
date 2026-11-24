@@ -93,9 +93,9 @@ G0 Z2
 Z-17.5
 G1 Z-21.803
 G0 Z2
-Z10.5
-(Drilling 3, Drilling 4)
+Z2.5
 Y45
+(Drilling 3, Drilling 4)
 Z2
 G1 Z-13.803
 G0 Z2

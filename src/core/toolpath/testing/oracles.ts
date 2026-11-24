@@ -6,6 +6,7 @@
 import type { AnalyticContour as Contour, Vec2, Vec3 } from '../../geometry/model'
 import type { Move, Toolpath, ToolpathTool } from '../model'
 import { arcSweep, expandDrill } from '../stats'
+import { toolSurface } from '../stock-heights'
 
 export type FlatMove = Exclude<Move, { kind: 'drill' }>
 
@@ -73,28 +74,8 @@ export function insideDistance(c: Contour, center: Vec2, p: Vec2): number {
   return -(outside + Math.min(Math.max(qx, qy), 0) - r)
 }
 
-/**
- * Height of the tool's lower surface at radial distance `rho` above its tip (Infinity outside): flat,
- * bull nose, ball, a drill's point, a chamfer mill's cone over its tip diameter.
- */
-export function toolSurface(tool: ToolpathTool, rho: number): number {
-  const R = tool.diameter / 2
-  if (rho > R + 1e-12) return Infinity
-  if (tool.type === 'chamferMill') {
-    // a cone of the included angle above a flat tip of `tipDiameter` (v0.4 T1)
-    const tip = (tool.tipDiameter ?? 0) / 2
-    return rho <= tip ? 0 : (rho - tip) / Math.tan(((tool.angle ?? 90) * Math.PI) / 360)
-  }
-  if (tool.type === 'drill') {
-    const half = ((tool.pointAngle ?? 180) * Math.PI) / 360
-    return half >= Math.PI / 2 - 1e-12 ? 0 : rho / Math.tan(half)
-  }
-  const re = tool.cornerRadius
-  const flat = R - re
-  if (rho <= flat) return 0
-  const d = Math.min(re, rho - flat)
-  return re - Math.sqrt(re * re - d * d)
-}
+/** The tool's lower surface (production code since DF64: the field and the oracle share it). */
+export { toolSurface }
 
 /** Heightmap over `0..length × 0..width` (cell centers), starting at the stock top Z0. */
 export class Heightmap {

@@ -54,6 +54,20 @@ export interface ZRefOutlineView {
   readonly grid: number
 }
 
+/** A setup's links (DF64, `plan.warning.list` `links`): docs/modes/safe-links.md#agent-api-and-settings. */
+export interface SetupLinksView {
+  readonly setupId: string
+  /** Null until every toolpath of the setup is current. */
+  readonly links: {
+    readonly count: number
+    readonly low: number
+    readonly atClearance: number
+    /** Null without a machine (no rates). */
+    readonly seconds: number | null
+    readonly savedSeconds: number | null
+  } | null
+}
+
 /** The plan queries of one revision. */
 export interface PlanData {
   readonly planId: string
@@ -63,6 +77,8 @@ export interface PlanData {
   readonly warnings: readonly PlanWarning[]
   /** DF69: the Z reference per tool run, by its first plan operation. */
   readonly zRefs: readonly ZRefRunView[]
+  /** DF64: the links per setup. */
+  readonly links: readonly SetupLinksView[]
   readonly stale: PlanStale | undefined
   readonly toolpaths: Readonly<Record<string, ToolpathEntry>>
   /** Its inputs have changes not applied yet (P3: notice, checks outdated, toolpaths dimmed). */
@@ -76,6 +92,8 @@ export interface PlanExportResult {
   readonly warnings: readonly PlanWarning[]
   readonly softLimitChecked: boolean
   readonly regenerated: readonly string[]
+  /** DF64: present when links run low (minimum retraction): the air-pass advice. */
+  readonly linksNote?: string
 }
 
 export interface PlanState {
@@ -284,6 +302,7 @@ export function createPlanStore(bridge: Pick<PreloadApi, 'call' | 'files'>): Pla
       error: ops.ok ? undefined : ops.error,
       warnings: value<{ warnings: PlanWarning[] }>(warnings)?.warnings ?? [],
       zRefs: value<{ zRefs?: ZRefRunView[] }>(warnings)?.zRefs ?? [],
+      links: value<{ links?: SetupLinksView[] }>(warnings)?.links ?? [],
       stale: value<PlanStale>(stale),
       toolpaths,
       pendingApply:
