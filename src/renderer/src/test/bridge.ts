@@ -11,7 +11,7 @@ import { Library } from '../../../core/library/library'
 import { createMemoryLibraryStorage } from '../../../core/library/memory-storage'
 import { fakeIds } from '../../../core/commands/testing'
 import { newProjectDoc, type UnitSystem } from '../../../core/project/document'
-import type { RunStatus } from '../../../core/run/service'
+import type { RunProgram, RunStatus } from '../../../core/run/service'
 import { agentError } from '../../../core/agent/results'
 import type { AppErrorData } from '../../../shared/errors/app-error'
 import type {
@@ -93,6 +93,8 @@ export interface FakeBridge extends PreloadApi {
   emitCloseRequest(request: WindowCloseRequest): void
   /** Push a machine status, as main does on every change (run mode). */
   emitRunStatus(status: RunStatus): void
+  /** The program main keeps for a run job (`run.program`, DF84); `undefined` forgets it. */
+  setRunProgram(program: RunProgram | undefined): void
   setLocalHttp(state: LocalHttpState): void
   /** Push a part evaluation (main's mesh push); `get` / `getPlan` answer the last one per subject. */
   emitEvaluation(view: PartEvaluationView): void
@@ -201,6 +203,7 @@ export function createFakeBridge(
   const settings = channel<AppSettings>()
   const closeRequests = channel<WindowCloseRequest>()
   const runStatus = channel<RunStatus>()
+  let runProgram: RunProgram | undefined
   const evaluationPush = channel<PartEvaluationView>()
   const menu = channel<MenuAction>()
   const openFiles = channel<string>()
@@ -261,7 +264,10 @@ export function createFakeBridge(
     windowKind,
     versions: { electron: 'test', chrome: 'test', node: 'test' },
     log: { level: 'info', send: () => {} },
-    run: { onStatus: runStatus.on },
+    run: {
+      onStatus: runStatus.on,
+      program: (jobId) => Promise.resolve(runProgram?.jobId === jobId ? runProgram : null),
+    },
     async call(name, args, opts) {
       const gesture = opts?.gesture
       calls.push({ name, args, ...(gesture === undefined ? {} : { gesture }) })
@@ -439,6 +445,9 @@ export function createFakeBridge(
     emitSettings: settings.emit,
     emitCloseRequest: closeRequests.emit,
     emitRunStatus: runStatus.emit,
+    setRunProgram(p) {
+      runProgram = p
+    },
     setLocalHttp(s) {
       localHttp = s
     },

@@ -10,7 +10,7 @@ import type { EvaluationStatus } from '../core/design/evaluation'
 import type { FittedLoop } from '../core/design/reference-section'
 import type { PartEvaluation } from '../core/geometry/evaluate'
 import type { ProjectDoc } from '../core/project/document'
-import type { RunStatus } from '../core/run/service'
+import type { RunProgram, RunStatus } from '../core/run/service'
 import type { LibraryItemKind } from '../core/library/item'
 import type { LibraryChange } from '../core/library/library'
 import type { UnitSystem } from '../core/project/document'
@@ -66,6 +66,11 @@ export const IPC = {
    * design part's or a plan's part's (`planId`).
    */
   evaluationChanged: 'dfyom:evaluation.changed',
+  /**
+   * Renderer → main (invoke): the program a run job streamed (`RunProgram`), or null when it is
+   * no longer kept (DF84, docs/modes/run.md#gcode-panel-df84).
+   */
+  runProgram: 'dfyom:run.program',
   /** Renderer → main (invoke): the native "Open project" dialog; the chosen path or null. */
   fileChooseOpen: 'dfyom:file.chooseOpen',
   /** Renderer → main (invoke): the native "Save project" dialog; the chosen path or null. */
@@ -363,6 +368,11 @@ export interface PreloadApi {
   readonly run: {
     /** Returns the unsubscribe function. */
     onStatus(listener: (status: RunStatus) => void): () => void
+    /**
+     * The program run job `jobId` streamed, kept by main until the next run starts; null
+     * otherwise. Renderer only, no agent tool (DF84, docs/modes/run.md#gcode-panel-df84).
+     */
+    program(jobId: string): Promise<RunProgram | null>
   }
   /**
    * One command, query or session tool by registry name, through this window's session (the same

@@ -26,10 +26,18 @@ import {
   type MachineService,
   type RunningJob,
   type RunPlan,
+  type RunProgram,
   type RunStatus,
 } from '../service'
 import type { SerialPortInfo } from '../serial'
 import { programmedRates, type ProgrammedRates } from '../override'
+import {
+  DEFAULT_ARC_TOLERANCE,
+  estimateExecuting,
+  ProgramTracer,
+  type Executing,
+} from '../executing'
+import { PLANNER_BLOCKS } from '../grbl/emulator/planner'
 import { reconcileStep, type AlignmentStep } from '../alignment'
 import {
   ControllerInfoSchema,
@@ -92,7 +100,16 @@ interface Job {
   atToolChange: boolean
   /** The program's modal F (mm/min) and S (rpm, 0 = off) after each line (DF85). */
   readonly rates: ReturnType<typeof programmedRates>
+  /** DF84: the program's planner blocks, traced in slices after the start. */
+  readonly tracer: ProgramTracer
+  /** DF84: the last executing-line estimate (its block is the next one's floor). */
+  executing?: Executing
+  /** DF84: the work position of the last status, for the direction of motion. */
+  position?: Vec3
 }
+
+/** Lines traced per slice (DF84): ~25 ms of main's time each. */
+const TRACE_SLICE = 5000
 
 /** Phases that say where a run is (the end phases keep the last of these). */
 const WAIT_OR_STREAM: readonly string[] = ['streaming', 'held', 'programPause', 'toolChange']
@@ -135,6 +152,12 @@ function programmedAt(job: Job, line: number): { programmed?: ProgrammedRates } 
   return { programmed: { feed: job.rates.feed[i] ?? 0, spindle: job.rates.spindle[i] ?? 0 } }
 }
 
+/** The host's job status without the estimate's input (`ackedAtReport`, DF84). */
+function statusJob(j: NonNullable<HostStatus['job']>): Omit<typeof j, 'ackedAtReport'> {
+  const { ackedAtReport: _input, ...rest } = j
+  return rest
+}
+
 const WHERE = 'MachineClient'
 
 export class MachineClient implements MachineService {
@@ -162,6 +185,10 @@ export class MachineClient implements MachineService {
   private job: Job | undefined
   /** The run that ended last (M5): kept until the next run starts, across connections. */
   private lastRun: LastRun | undefined
+  /** DF84: the last run's program, kept until the next run starts (renderer only). */
+  private lastProgram: RunProgram | undefined
+  /** DF84: planner blocks when empty: the largest `Bf` free count seen on this connection. */
+  private plannerCapacity: number = PLANNER_BLOCKS
   /** DF78: the alignment step (docs/modes/alignment.md#state); dropped with the connection. */
   private step: AlignmentStep | undefined
   private timeScale: TimeScale = 1
@@ -210,7 +237,10 @@ export class MachineClient implements MachineService {
             connection: { ...s.connection, state: conn.state },
           }
     }
-    const { job, timeScale, ...rest } = h
+    const { job: hostJob, timeScale, ...rest } = h
+    // `ackedAtReport` is the estimate's input, not part of the status (DF84)
+    const job = hostJob === undefined ? undefined : statusJob(hostJob)
+    const executing = this.job?.executing?.line
     return {
       ...rest,
       connection: {
@@ -227,6 +257,7 @@ export class MachineClient implements MachineService {
               startedAt: this.job.startedAt,
               ...this.aboutJob(this.job, job.line),
               ...programmedAt(this.job, job.line),
+              ...(executing === undefined ? {} : { executing }),
             },
           }),
       ...last,
@@ -267,6 +298,43 @@ export class MachineClient implements MachineService {
     }
   }
 
+  /**
+   * DF84: the program of run job `jobId` as streamed, while kept (the current run, or the last
+   * one until the next starts); `undefined` otherwise. Renderer only
+   * (docs/modes/run.md#gcode-panel-df84).
+   */
+  program(jobId: string): RunProgram | undefined {
+    return this.lastProgram?.jobId === jobId ? this.lastProgram : undefined
+  }
+
+  /** DF84: traces the job's program in slices, a macrotask each, while it is the current job. */
+  private traceSlices(job: Job): void {
+    if (this.job !== job || job.tracer.step(TRACE_SLICE)) return
+    setTimeout(() => this.traceSlices(job), 0)
+  }
+
+  /** DF84: the executing line from a host status of the job (docs/modes/run.md#gcode-panel-df84). */
+  private estimate(job: Job, h: HostStatus): void {
+    const j = h.job
+    if (j?.jobId !== job.jobId || j.sent === undefined || j.ackedAtReport === undefined) return
+    const e = estimateExecuting(job.tracer.trace, {
+      acknowledged: j.ackedAtReport,
+      sent: j.sent,
+      blocksFree: h.buffer?.blocks,
+      capacity: this.plannerCapacity,
+      position: h.wpos,
+      previous: job.position,
+      floor: job.executing?.block,
+    })
+    job.position = h.wpos
+    if (e === undefined) return
+    const before = job.executing
+    job.executing = {
+      line: Math.max(e.line, before?.line ?? 0),
+      block: Math.max(e.block, before?.block ?? -1),
+    }
+  }
+
   onStatus(listener: (s: RunStatus) => void): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
@@ -282,6 +350,7 @@ export class MachineClient implements MachineService {
     // the kind is known from the start, so a connection lost while opening is reported too
     this.conn = { state: 'connecting', machineKey, target: target.kind }
     this.lost = undefined
+    this.plannerCapacity = PLANNER_BLOCKS
     // a real controller always runs at 1× (docs/modes/run-machine.md#amendments-to-run-v01md)
     this.timeScale = target.kind === 'virtual' ? target.timeScale : 1
     this.notify()
@@ -391,10 +460,21 @@ export class MachineClient implements MachineService {
       done: 0,
       atToolChange: false,
       rates: programmedRates(program.lines),
+      tracer: new ProgramTracer(program.lines, {
+        arcTolerance: this.conn.settings?.['12'] ?? DEFAULT_ARC_TOLERANCE,
+        ...(this.hostStatus === undefined ? {} : { start: this.hostStatus.wpos }),
+      }),
     }
     this.job = job
     // a new run replaces the record of the last one
     if (about !== undefined) this.lastRun = undefined
+    this.lastProgram = {
+      jobId,
+      lines: program.lines,
+      sections: program.sections,
+      operations: about?.operations ?? [],
+    }
+    this.traceSlices(job)
     const r = await this.request({
       type: 'jobStart',
       requestId: '',
@@ -515,6 +595,9 @@ export class MachineClient implements MachineService {
       }
       case 'status':
         this.hostStatus = m.status
+        if (m.status.buffer !== undefined)
+          this.plannerCapacity = Math.max(this.plannerCapacity, m.status.buffer.blocks)
+        if (this.job !== undefined) this.estimate(this.job, m.status)
         this.step = reconcileStep(this.step, this.status())
         this.notify()
         return

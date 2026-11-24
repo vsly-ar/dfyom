@@ -1,9 +1,9 @@
 // The machine host in an Electron utility process (the app; ADR 0016), and the run-status push
 // to renderers. Doc: docs/modes/run-v0.1.md#processes, #status
-import { BrowserWindow, utilityProcess } from 'electron'
-import type { MachineHostFactory } from '../../core/run/host/client'
-import type { RunStatus } from '../../core/run/service'
-import { RUN_STATUS_IPC_CHANNEL } from '../../shared/preload-api'
+import { BrowserWindow, ipcMain, utilityProcess } from 'electron'
+import type { MachineClient, MachineHostFactory } from '../../core/run/host/client'
+import type { RunProgram, RunStatus } from '../../core/run/service'
+import { IPC, RUN_STATUS_IPC_CHANNEL } from '../../shared/preload-api'
 
 /** Forks `entryPath` (the bundled utility.ts) per connection. */
 export function utilityHostFactory(entryPath: string): MachineHostFactory {
@@ -16,6 +16,21 @@ export function utilityHostFactory(entryPath: string): MachineHostFactory {
       terminate: () => void child.kill(),
     }
   }
+}
+
+/**
+ * DF84: answers a DFYOM window's `window.dfyom.run.program(jobId)` with the program the run job
+ * streamed, or null (docs/modes/run.md#gcode-panel-df84). Renderer only: no command, no agent tool.
+ */
+export function registerRunProgramIpc(
+  machine: Pick<MachineClient, 'program'>,
+  isWindow: (webContentsId: number) => boolean,
+): void {
+  ipcMain.handle(IPC.runProgram, (event, jobId: unknown): RunProgram | null =>
+    isWindow(event.sender.id) && typeof jobId === 'string'
+      ? (machine.program(jobId) ?? null)
+      : null,
+  )
 }
 
 /** Pushes every status change to all windows (renderers subscribe through the preload). */

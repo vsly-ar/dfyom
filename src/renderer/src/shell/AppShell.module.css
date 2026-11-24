@@ -160,6 +160,13 @@
 .viewportCanvas {
   position: absolute;
   inset: 0;
+  /* run mode's gCode panel (DF84) sets the inset on the viewport while it shows */
+  bottom: var(--viewport-inset-bottom, 0px);
+}
+
+/* over the Viewport's own `height: 100%`, so `bottom` decides */
+.viewport > .viewportCanvas {
+  height: auto;
 }
 
 /* Keyboard shortcut list (ShortcutsDialog) */

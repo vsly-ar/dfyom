@@ -468,6 +468,16 @@ export class GrblSender {
       : Math.min(this.run_.done + 1, this.run_.program.lines.length)
   }
 
+  /** The current run's lines written to the controller (DF84, read-only). */
+  get sent(): number | undefined {
+    return this.run_?.next
+  }
+
+  /** The current run's lines acknowledged (DF84, read-only). */
+  get acknowledged(): number | undefined {
+    return this.run_?.done
+  }
+
   /** What `continueProgram()` would end, if the run waits. */
   get wait(): RunWait | undefined {
     const run = this.run_

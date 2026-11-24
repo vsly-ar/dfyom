@@ -123,6 +123,8 @@ interface Connection {
    * while jogs queue. Cleared by anything else that moves or questions the position.
    */
   jogEnd?: Vec3 | undefined
+  /** DF84: the run's lines acknowledged when the last status report arrived. */
+  ackedAtReport?: number | undefined
   /** The virtual machine's emulator (its touch plate is laid before each probe, M4). */
   readonly emulator?: GrblEmulator | undefined
   /** `$13=1`: GRBL reports in inch. */
@@ -297,6 +299,8 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
               jobId: job.jobId,
               phase: job.phase,
               line: conn.sender.line ?? 0,
+              ...(conn.sender.sent === undefined ? {} : { sent: conn.sender.sent }),
+              ...(conn.ackedAtReport === undefined ? {} : { ackedAtReport: conn.ackedAtReport }),
               ...(job.toolChange === undefined ? {} : { toolChange: job.toolChange }),
               ...(job.phase === 'programPause' && wait !== undefined && 'pause' in wait
                 ? { pause: wait.pause }
@@ -409,6 +413,8 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     conn = c
     lastPosted = undefined
     sender.onStatus((s) => {
+      // DF84: the report's `Bf` and position belong to the lines acknowledged so far
+      c.ackedAtReport = sender.acknowledged
       if (s.state !== lastState) {
         lastState = s.state
         status.now()
