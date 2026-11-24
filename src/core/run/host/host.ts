@@ -28,6 +28,7 @@ import {
   type RealtimeCommand,
   type PhaseChange,
   type RunPhase,
+  STILL_STATES,
   type SenderEvent,
   type ToolChangeInfo,
 } from '../grbl/sender'
@@ -184,9 +185,6 @@ function modalRestore(words: readonly string[], inches: boolean): string[] {
 /** Machine time a manual feed hold may take to report `Hold:0` (as the sender's stop, 5 s). */
 const FEED_HOLD_MS = 5000
 
-/** GRBL states in which a held run stands still (`Hold:1` and `Door:2` still decelerate). */
-const STILL_STATES: ReadonlySet<string> = new Set(['Hold:0', 'Door:0', 'Door:1'])
-
 const fmt = (v: number) => {
   const s = v.toFixed(3).replace(/\.?0+$/, '')
   return s === '-0' ? '0' : s
@@ -250,8 +248,10 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     const s = conn.sender.status
     const job = conn.job
     const wait = conn.sender.wait
+    const holdBy = conn.sender.holdBy
     return {
       state: s?.state ?? 'Unknown',
+      ...(holdBy === undefined ? {} : { holdBy }),
       homed: conn.homed,
       mpos: s?.mpos ?? [0, 0, 0],
       wpos: s?.wpos ?? [0, 0, 0],
@@ -546,8 +546,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         // a run's own hold goes through jobControl; a probe at a tool change is a manual cycle
         if (jobBusy) return stateError('a run holds and resumes with job.pause/job.resume', state)
         if (action.kind === 'feedHold') return feedHold(c)
-        if (!state.startsWith('Hold')) return stateError(`nothing is held (state ${state})`, state)
-        return c.sender.realtime(REALTIME.resume)
+        return cycleStart(c)
       case 'override':
         return override(c, action)
     }
@@ -569,12 +568,37 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
     while (c.clock.now() < deadline) {
       const s = await c.sender.freshStatus()
       status.now()
-      if (s?.state === 'Hold:0') return Ok(undefined)
-      if (s !== undefined && !s.state.startsWith('Hold') && !s.state.startsWith('Run'))
+      if (s !== undefined && STILL_STATES.has(s.state)) return Ok(undefined)
+      if (s !== undefined && !/^(Hold|Run|Door)/.test(s.state))
         return stateError(`the controller did not hold (state ${s.state})`, s.state)
       await new Promise<void>((resolve) => c.clock.schedule(c.clock.now() + 50, resolve))
     }
     return stateError('the controller did not report the hold', machineState(c))
+  }
+
+  /**
+   * Cycle start (`~`) of a held manual cycle (Probe Z), on a report taken now. A safety door must be
+   * closed first (GRBL ignores `~` while it is ajar, `Door:1`; DF82). Doc: docs/modes/run.md#external-holds-df82
+   */
+  async function cycleStart(c: Connection): Promise<AppResult<void>> {
+    await c.sender.freshStatus()
+    const state = machineState(c)
+    const door = doorOpen(state)
+    if (door !== undefined) return door
+    if (state !== 'Hold:0' && state !== 'Door:0')
+      return stateError(`nothing is held (state ${state})`, state)
+    return c.sender.realtime(REALTIME.resume)
+  }
+
+  /** `run.state` (rule `doorOpen`) while a safety door is open or still stopping. */
+  function doorOpen(state: string): AppResult<never> | undefined {
+    if (state !== 'Door:1' && state !== 'Door:2') return undefined
+    const message = 'the safety door is open: close it, then resume'
+    return fail('run.state', message, {
+      where: 'machineHost',
+      data: { state },
+      issues: [{ path: [], rule: 'doorOpen', message }],
+    })
   }
 
   /**
@@ -873,6 +897,7 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
             type: 'phase',
             jobId,
             phase: p.phase,
+            ...(p.heldBy === undefined ? {} : { heldBy: p.heldBy }),
             ...(p.toolChange === undefined ? {} : { toolChange: p.toolChange }),
             ...(p.message === undefined ? {} : { message: p.message }),
           })
@@ -920,8 +945,17 @@ export function runMachineHost(endpoint: Endpoint, opts: MachineHostOptions): Ma
         }
         return awaitRunHeld(c, jobId)
       }
-      case 'resume':
+      case 'resume': {
+        // a safety door must be closed first (Door:0); GRBL ignores `~` while it is open (DF82)
+        if (c.sender.phase === 'held') {
+          await c.sender.freshStatus()
+          const door = doorOpen(machineState(c))
+          if (door !== undefined) return door
+          // the controller's cycle-start button was quicker: nothing left to resume
+          if ((c.sender.phase as RunPhase | undefined) === 'streaming') return Ok(undefined)
+        }
         return c.sender.resume()
+      }
       case 'continue': {
         const wait = c.sender.wait
         const named =

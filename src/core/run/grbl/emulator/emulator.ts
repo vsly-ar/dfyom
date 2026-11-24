@@ -317,6 +317,18 @@ export class GrblEmulator {
   }
 
   /**
+   * Test hook for GRBL's feed-hold and cycle-start pins (a machine's hardware buttons, DF82): the
+   * same as the real-time `!` / `~` bytes, but from the controller side, so the sender never sent
+   * them (docs/architecture/grbl.md#fault-injection).
+   */
+  pressButton(button: 'feedHold' | 'cycleStart'): void {
+    if (this.silent) return
+    if (button === 'feedHold') this.feedHold()
+    else this.cycleStart()
+    this.noteState()
+  }
+
+  /**
    * Test hook: lays the touch plate with its top at MPos Z `z`, or removes it (`undefined`: a probe
    * then finds nothing). Takes effect for the next probe cycle (docs/architecture/grbl.md#probing).
    */

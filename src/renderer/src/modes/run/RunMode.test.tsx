@@ -966,6 +966,65 @@ describe('Run mode', () => {
     expect(within(group).queryByRole('button', { name: 'Resume' })).toBeNull()
   })
 
+  // DF82: a hold DFYOM did not send (the machine's hold button, its safety door) is resumed from
+  // the toolbar like the app's own (docs/modes/run.md#external-holds-df82)
+  it("the machine's hold button and safety door: the badge says so; Resume resumes the run", async () => {
+    const t = await renderRun()
+    await connectAndHome(t)
+    await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
+    const inspector = screen.getByRole('complementary', { name: 'Inspector' })
+    await t.user.click(within(inspector).getByRole('button', { name: 'Start run' }))
+    const preflight = screen.getByRole('dialog', { name: 'Start run?' })
+    const start = within(preflight).getByRole('button', { name: 'Start run' })
+    await waitFor(() => expect(start).not.toBeDisabled())
+    await t.user.click(start)
+    const group = machineGroup()!
+    await within(group).findByText('Running', { selector: '[data-state]' })
+    const held = { ...t.machine.status.job!, phase: 'held' as const }
+    // the hold button: decelerating, then held by the machine
+    t.machine.push({ state: 'Hold:1', holdBy: 'machine' })
+    await within(group).findByText('Holding…', { selector: '[data-state]' })
+    t.machine.push({ state: 'Hold:0', holdBy: 'machine', job: held })
+    await within(group).findByText('Held (machine button)', { selector: '[data-state]' })
+    const resume = within(group).getByRole('button', { name: 'Resume' })
+    expect(resume).not.toBeDisabled()
+    await t.user.click(resume)
+    expect(t.callsOf('job.resume')).toEqual([{ jobId: 'run-1' }])
+    // the safety door: no Resume while it is open; once closed, Resume continues
+    t.machine.push({ state: 'Door:1', job: held })
+    await within(group).findByText('Door open', { selector: '[data-state]' })
+    expect(within(group).getByRole('button', { name: 'Resume' })).toBeDisabled()
+    t.machine.push({ state: 'Door:0', job: held })
+    await within(group).findByText('Held (door closed)', { selector: '[data-state]' })
+    await t.user.click(within(group).getByRole('button', { name: 'Resume' }))
+    expect(t.callsOf('job.resume')).toEqual([{ jobId: 'run-1' }, { jobId: 'run-1' }])
+  })
+
+  it("the machine's hold button during this window's Probe Z: Resume resumes the probe (DF82)", async () => {
+    const t = await renderRun({ plate: '10' })
+    await connectAndHome(t)
+    t.bridge.handle('job.wait', () => new Promise(() => {}))
+    await t.user.click(within(t.nav()).getByRole('button', { name: 'Probe Z' }))
+    await t.user.click(
+      within(screen.getByRole('alertdialog', { name: 'Probe Z?' })).getByRole('button', {
+        name: 'Probe',
+      }),
+    )
+    const group = machineGroup()!
+    // the safety door: Resume once it is closed
+    t.machine.push({ state: 'Door:1' })
+    await within(group).findByText('Door open', { selector: '[data-state]' })
+    expect(within(group).getByRole('button', { name: 'Resume' })).toBeDisabled()
+    t.machine.push({ state: 'Door:0' })
+    await within(group).findByText('Held (door closed)', { selector: '[data-state]' })
+    expect(within(group).getByRole('button', { name: 'Resume' })).not.toBeDisabled()
+    // the hold button
+    t.machine.push({ state: 'Hold:0', holdBy: 'machine' })
+    await within(group).findByText('Held (machine button)', { selector: '[data-state]' })
+    await t.user.click(within(group).getByRole('button', { name: 'Resume' }))
+    expect(t.callsOf('job.resume')).toEqual([{ jobId: 'probe-1' }])
+  })
+
   it('at a tool change: Probe Z in the dialog; a miss shows its alarm and Unlock there (M4)', async () => {
     const t = await renderRun({ plate: '10' })
     await connectAndHome(t)

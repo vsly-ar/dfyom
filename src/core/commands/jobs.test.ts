@@ -243,6 +243,7 @@ describe('job pause policies', () => {
   function policySetup(pause: 'refuse' | 'handled', holdFails = false) {
     let release: () => void = () => {}
     let registered = false
+    let adopt: (paused: boolean) => void = () => {}
     const calls: string[] = []
     const job = defineCommand({
       kind: 'job',
@@ -269,6 +270,7 @@ describe('job pause policies', () => {
               },
             })
           : undefined
+        adopt = ctx.adoptPause
         registered = args.register
         await new Promise<void>((r) => (release = r))
         off?.()
@@ -291,7 +293,7 @@ describe('job pause policies', () => {
       while (registered !== register) await settle()
       return d.job(jobId).unwrap()
     }
-    return { d, events, calls, start, release: () => release() }
+    return { d, events, calls, start, release: () => release(), adopt: (p: boolean) => adopt(p) }
   }
 
   it('refuse: job.pause fails job.notPausable, the job runs on; job.list marks it', async () => {
@@ -336,6 +338,44 @@ describe('job pause policies', () => {
       'job:resumed',
       'job:finished',
     ])
+  })
+
+  // DF82: a hold the machine reports that DFYOM did not send (its hold button, its safety door)
+  it('handled: an adopted hold pauses the job; job.resume resumes it through the handler', async () => {
+    const t = policySetup('handled')
+    const job = await t.start()
+    t.adopt(true)
+    expect(job.state).toBe('paused')
+    expect((await t.d.dispatch('job.resume', { jobId: job.id }, ui)).unwrap().value).toEqual({
+      state: 'running',
+    })
+    expect(t.calls).toEqual(['resume'])
+    // the machine's own cycle start after an adopted (or own) hold: running again
+    t.adopt(true)
+    t.adopt(false)
+    expect(job.state).toBe('running')
+    expect(t.calls).toEqual(['resume'])
+    t.release()
+    expectOk(await job.result)
+    expect(t.events.map(shape)).toEqual([
+      'run.test.cycle',
+      'job:started',
+      'job:paused',
+      'job.resume',
+      'job:resumed',
+      'job:paused',
+      'job:resumed',
+      'job:finished',
+    ])
+  })
+
+  it('refuse: adoptPause does nothing', async () => {
+    const t = policySetup('refuse')
+    const job = await t.start()
+    t.adopt(true)
+    expect(job.state).toBe('running')
+    t.release()
+    expectOk(await job.result)
   })
 
   it('handled: a failed hold fails job.pause and leaves the job running', async () => {

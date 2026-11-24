@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { closedStatus, type RunStatus } from '../../../../core/run/service'
 import {
   actionText,
+  canResume,
   formatFeed,
   formatLength,
   machineView,
@@ -47,6 +48,15 @@ describe('machineView', () => {
     [open({ state: 'Run', ...job('held') }), 'hold', 'Holding…'],
     [open({ state: 'Hold:1' }), 'hold', 'Holding…'],
     [open({ state: 'Hold:0', ...job('programPause') }), 'hold', 'Paused by program'],
+    // DF82: holds DFYOM did not send – the machine's hold button, its safety door
+    [open({ state: 'Hold:0', holdBy: 'machine', ...job('held') }), 'hold', 'Held (machine button)'],
+    [open({ state: 'Hold:0', holdBy: 'machine' }), 'hold', 'Held (machine button)'],
+    [open({ state: 'Hold:0', holdBy: 'app', ...job('held') }), 'hold', 'Feed hold'],
+    [open({ state: 'Hold:1', holdBy: 'machine' }), 'hold', 'Holding…'],
+    [open({ state: 'Door:2', ...job('streaming') }), 'hold', 'Door open'],
+    [open({ state: 'Door:1', ...job('held') }), 'hold', 'Door open'],
+    [open({ state: 'Door:0', ...job('held') }), 'hold', 'Held (door closed)'],
+    [open({ state: 'Door:3', ...job('held') }), 'hold', 'Resuming…'],
     [open({ ...job('toolChange', { toolChange: { n: 2, name: 'x' } }) }), 'action', 'Tool change'],
     [open({ state: 'Jog', ...job('toolChange') }), 'moving', 'Jogging'],
     [open({ ...job('done') }), 'idle', 'Idle'],
@@ -64,6 +74,19 @@ describe('machineView', () => {
     expect(machineView(open({ state: 'Run', ...job('streaming') }), setupChange).label).toBe(
       'Running',
     )
+  })
+})
+
+describe('canResume (DF82)', () => {
+  it.each([
+    ['Hold:0', true],
+    ['Door:0', true],
+    ['Hold:1', false],
+    ['Door:1', false],
+    ['Door:2', false],
+    ['Door:3', false],
+  ] as const)('%s: %s', (state, resumable) => {
+    expect(canResume(open({ state, ...job('held') }))).toBe(resumable)
   })
 })
 

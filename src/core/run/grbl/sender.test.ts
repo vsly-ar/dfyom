@@ -393,6 +393,78 @@ describe('hold, resume and stop', () => {
   })
 })
 
+// DF82: holds the sender did not send – the machine's hold and cycle-start buttons, its safety
+// door – injected from the controller side. Spec: docs/modes/run.md#external-holds-df82
+describe('holds the sender did not send (DF82)', () => {
+  const long = ['G21 G90', 'G1 X300 F3000', 'G1 X0', 'M30']
+  /** The controller's own pin or button at the current time. */
+  const press = (r: Rig, act: (e: Rig['emu']) => void) => {
+    r.emu.advanceTo(r.clock.now())
+    act(r.emu)
+  }
+
+  it("the machine's hold button: held by the machine once Hold:0; resume() sends the cycle start", async () => {
+    const r = await connected(machine())
+    const p = start(r, long)
+    await until(r.clock, () => r.clock.now() > 2000)
+    press(r, (e) => e.pressButton('feedHold'))
+    expect(await until(r.clock, () => r.sender.status?.state === 'Hold:1')).toBe(true)
+    // still decelerating: the run is not held yet, but the hold is the machine's
+    expect(r.sender.phase).toBe('streaming')
+    expect(r.sender.holdBy).toBe('machine')
+    expect(await until(r.clock, () => r.sender.phase === 'held')).toBe(true)
+    expect(r.sender.status?.state).toBe('Hold:0')
+    expect(r.phases.at(-1)).toEqual({ phase: 'held', heldBy: 'machine' })
+    expect(r.io.realtime).not.toContain(REALTIME.hold)
+    const x = r.emu.status().mpos[0]
+    await until(r.clock, () => false, 5000)
+    expect(r.emu.status().mpos[0]).toBe(x)
+    expectOk(r.sender.resume())
+    expect(r.io.realtime).toContain(REALTIME.resume)
+    expectOk(await drive(r.clock, p))
+    expect(phaseNames(r)).toEqual(['streaming', 'held', 'streaming', 'done'])
+    expect(r.sender.holdBy).toBeUndefined()
+  })
+
+  it("the machine's cycle-start button ends a hold (its own or ours): the run streams on", async () => {
+    const r = await connected(machine())
+    const p = start(r, long)
+    await until(r.clock, () => r.clock.now() > 2000)
+    press(r, (e) => e.pressButton('feedHold'))
+    expect(await until(r.clock, () => r.sender.phase === 'held')).toBe(true)
+    press(r, (e) => e.pressButton('cycleStart'))
+    expect(await until(r.clock, () => r.sender.phase === 'streaming')).toBe(true)
+    // our own hold, then the machine's cycle start
+    expectOk(r.sender.hold())
+    expect(r.phases.at(-1)).toEqual({ phase: 'held', heldBy: 'app' })
+    expect(await until(r.clock, () => r.sender.status?.state === 'Hold:0')).toBe(true)
+    expect(r.sender.holdBy).toBe('app')
+    press(r, (e) => e.pressButton('cycleStart'))
+    expect(await until(r.clock, () => r.sender.phase === 'streaming')).toBe(true)
+    expect(r.sender.holdBy).toBeUndefined()
+    expectOk(await drive(r.clock, p))
+    expect(phaseNames(r)).toEqual(['streaming', 'held', 'streaming', 'held', 'streaming', 'done'])
+  })
+
+  it('the safety door: held once stopped (Door:1); after closing (Door:0) resume() resumes', async () => {
+    const r = await connected(machine())
+    const p = start(r, long)
+    await until(r.clock, () => r.clock.now() > 2000)
+    press(r, (e) => e.setDoorPin(true))
+    expect(await until(r.clock, () => r.sender.phase === 'held')).toBe(true)
+    expect(r.sender.status?.state).toBe('Door:1')
+    expect(r.phases.at(-1)).toEqual({ phase: 'held', heldBy: 'machine' })
+    // not a Hold: the door says itself who holds
+    expect(r.sender.holdBy).toBeUndefined()
+    press(r, (e) => e.setDoorPin(false))
+    expect(await until(r.clock, () => r.sender.status?.state === 'Door:0')).toBe(true)
+    expect(r.sender.phase).toBe('held')
+    expectOk(r.sender.resume())
+    expectOk(await drive(r.clock, p))
+    expect(phaseNames(r)).toEqual(['streaming', 'held', 'streaming', 'done'])
+  })
+})
+
 describe('errors, alarms and the connection', () => {
   it('error:N holds and resets at once: machine.error with the line', async () => {
     // The emulator applies `!` the instant it arrives, so here no later line starts. On real GRBL

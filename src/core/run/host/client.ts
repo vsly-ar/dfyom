@@ -495,6 +495,7 @@ export class MachineClient implements MachineService {
         if (this.job?.jobId === m.jobId)
           this.job.listener.phase({
             phase: m.phase,
+            ...(m.heldBy === undefined ? {} : { heldBy: m.heldBy }),
             ...(m.toolChange === undefined ? {} : { toolChange: m.toolChange }),
             ...(m.message === undefined ? {} : { message: m.message }),
           })

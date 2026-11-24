@@ -13,6 +13,7 @@ import {
   PortSchema,
   TARGET_KINDS,
   RUN_PHASES,
+  HOLD_SOURCES,
   TimeScaleSchema,
   ToolChangeSchema,
   type ConnectedInfo,
@@ -110,6 +111,8 @@ export interface JobListener {
   readonly progress: (p: { done: number; total: number; label: string }) => void
   readonly phase: (p: {
     phase: (typeof RUN_PHASES)[number]
+    /** In `held`: who held the run (`machine`: the hold button or the safety door, DF82). */
+    heldBy?: (typeof HOLD_SOURCES)[number]
     toolChange?: { n: number; name: string }
     message?: string
   }) => void

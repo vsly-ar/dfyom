@@ -81,6 +81,23 @@ export class LoopbackPort implements ControllerTransport {
     return this.closed
   }
 
+  /**
+   * The machine's own hold or cycle-start button, or its safety door (`open`), at the current time
+   * (DF82: holds DFYOM did not send).
+   */
+  press(button: 'feedHold' | 'cycleStart'): void {
+    this.inner.controllerSide((e) => e.pressButton(button))
+  }
+
+  door(open: boolean): void {
+    this.inner.controllerSide((e) => e.setDoorPin(open))
+  }
+
+  /** The controller's clock against the timers from now on (e.g. 1 to catch a move in Run). */
+  setTimeScale(scale: TimeScale): void {
+    this.clock.setScale(scale)
+  }
+
   /** The cable is pulled: the port reports `close`; the emulator (the controller) runs on. */
   unplug(): void {
     if (this.closed) return

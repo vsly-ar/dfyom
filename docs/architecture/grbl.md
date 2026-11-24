@@ -295,7 +295,7 @@ interface ControllerTransport {
 
 ### Fault injection
 
-Test hooks on `GrblEmulator` for failures hardware produces and the protocol cannot (hardening M8, [run-machine.md](../modes/run-machine.md#fault-injection-m8)): `setProbePlate(z | undefined)` (above), `triggerHardLimit()` (a limit pin closes: motion stops at once, `ALARM:1` and `[MSG:Reset to continue]`, critical like `ALARM:2`; the position counts as lost) and `setSilent(silent)` (a hung controller: input is still consumed but nothing is answered, no `ok`, no report, no realtime reply). The loopback serial port adds `unplug()` ([run-machine.md § Testing](../modes/run-machine.md#testing)).
+Test hooks on `GrblEmulator` for failures hardware produces and the protocol cannot (hardening M8, [run-machine.md](../modes/run-machine.md#fault-injection-m8)): `setProbePlate(z | undefined)` (above), `triggerHardLimit()` (a limit pin closes: motion stops at once, `ALARM:1` and `[MSG:Reset to continue]`, critical like `ALARM:2`; the position counts as lost), `pressButton('feedHold' | 'cycleStart')` (GRBL's feed-hold and cycle-start pins, the machine's own buttons: as `!`/`~`, but never sent by the sender; DF82, [run.md](../modes/run.md#external-holds-df82)) and `setSilent(silent)` (a hung controller: input is still consumed but nothing is answered, no `ok`, no report, no realtime reply). The loopback serial port adds `unplug()` ([run-machine.md § Testing](../modes/run-machine.md#testing)); `VirtualGrblTransport.controllerSide(act)` applies such a hook at the current clock time and delivers what the controller answered.
 
 ### Observability for tests
 

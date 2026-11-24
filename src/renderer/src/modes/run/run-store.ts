@@ -16,7 +16,7 @@ import type { AppErrorData } from '../../../../shared/errors/app-error'
 import type { CallReply, PreloadApi } from '../../../../shared/preload-api'
 import { useSettings, useShell } from '../../shell/ShellContext'
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
-import { activeJob, type JogMode } from './machine-state'
+import { activeJob, isHeld, type JogMode } from './machine-state'
 
 /** Progress poll of the run job (`job.get`) while it runs: progress ticks are not pushed. */
 export const RUN_PROGRESS_POLL_MS = 250
@@ -496,7 +496,7 @@ export function createRunStore(bridge: PreloadApi): RunStore {
         const probe = get().probeJobId
         // a Probe Z held without a held run (DF82): its job, which the toolbar's Resume shows for
         const id =
-          run?.phase !== 'held' && probe !== undefined && s.state.startsWith('Hold')
+          run?.phase !== 'held' && probe !== undefined && isHeld(s)
             ? probe
             : (run?.jobId ?? get().jobId)
         if (id !== undefined) await call('job.resume', { jobId: id })

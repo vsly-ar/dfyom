@@ -56,8 +56,13 @@ export function machineView(
   if (job?.phase === 'toolChange') return { state: 'action', label: m.state.toolChange }
   if (job?.phase === 'programPause') return { state: 'hold', label: m.state.paused }
   if (job?.phase === 'stopping') return { state: 'moving', label: m.state.stopping }
+  if (st === 'Door:0') return { state: 'hold', label: m.state.doorClosed }
+  if (st === 'Door:3') return { state: 'hold', label: m.state.doorResuming }
   if (st.startsWith('Door')) return { state: 'hold', label: m.state.door }
   if (isHolding(s)) return { state: 'hold', label: m.state.holding }
+  // DF82: a hold DFYOM did not send (docs/modes/run.md#external-holds-df82)
+  if (st.startsWith('Hold') && s.holdBy === 'machine')
+    return { state: 'hold', label: m.state.heldByMachine }
   if (st.startsWith('Hold') || job?.phase === 'held') return { state: 'hold', label: m.state.hold }
   if (st.startsWith('Home')) return { state: 'moving', label: m.state.homing }
   if (st.startsWith('Run') || job?.phase === 'streaming')
@@ -77,6 +82,18 @@ export function machineView(
 export function isHolding(s: RunStatus): boolean {
   return s.state === 'Hold:1' || (activeJob(s)?.phase === 'held' && s.state.startsWith('Run'))
 }
+
+/**
+ * Held and standing still, so a cycle start would resume: `Hold:0`, or a safety door closed again
+ * (`Door:0`). Not while the hold decelerates (`isHolding`) or the door is open (`Door:1`/`Door:2`,
+ * GRBL ignores `~` then) or already resuming (`Door:3`). DF82, docs/modes/run.md#external-holds-df82
+ */
+export function canResume(s: RunStatus): boolean {
+  return !isHolding(s) && !/^Door:[123]/.test(s.state)
+}
+
+/** A held machine (feed hold or safety door), whoever held it. */
+export const isHeld = (s: RunStatus): boolean => /^(Hold|Door)/.test(s.state)
 
 /** `null` = allowed; otherwise the reason shown next to the disabled control. */
 export type Gate = string | null
