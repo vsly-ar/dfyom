@@ -83,6 +83,12 @@ export interface SetupHeader {
    * reach lines.
    */
   readonly overreach?: Overreach
+  /**
+   * The setup's workholding (docs/modes/workholding.md#program-and-run): one line per item
+   * ("Toe clamp 1: front X125 grip 10 top Z12", program units) and the margin the program keeps
+   * (mm); absent = none modelled (the DF59 clamp note stays).
+   */
+  readonly workholding?: { readonly items: readonly string[]; readonly margin: number }
 }
 
 export interface MachiningProgram {

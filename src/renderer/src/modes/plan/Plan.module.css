@@ -731,3 +731,9 @@
 .gripped[data-dragging] .rowGrip {
   opacity: 1;
 }
+
+/* workholding.md: "Follow the workholding" under a clearance height the user set */
+.followButton {
+  justify-self: start;
+  margin-top: calc(-1 * var(--space-1));
+}

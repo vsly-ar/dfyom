@@ -354,7 +354,7 @@ describe('Setup panel', () => {
     expect(
       within(insp).getByLabelText('Clearance height', { selector: 'input' }),
     ).toHaveAccessibleDescription(
-      'Keep clamps lower than 10 mm above the stock top; clamps are not modelled yet.',
+      'Keep clamps lower than 10 mm above the stock top, or add them under Workholding.',
     )
     await expectNoAxeViolations()
   })

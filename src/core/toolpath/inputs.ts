@@ -33,8 +33,12 @@ import type {
 import type { RegionProfileOperation } from './region-profile'
 import type { GeneratorRequest } from './request'
 import { setupWcs, toWcs } from './wcs'
+import { facingRegion, keepOutRegion } from './keep-out'
 
 const WHERE = 'toGeneratorInputs'
+
+/** Ramp angle of a facing cleared around workholding (degrees, as the pocket default). */
+const FACING_RAMP_ANGLE = 3
 
 /**
  * Whether cutting a partly cleared pocket in two (`rest` down to `level`, then `region` from
@@ -309,24 +313,61 @@ export function toGeneratorInputs(
   switch (s.kind) {
     case 'facing':
       return single('facing').andThen((operation) =>
-        milling().map((c): GeneratorRequest => ({
-          kind: 'facing',
-          ...turned,
-          inputs: [
-            {
-              ...base,
-              ...material,
-              cutting: c,
-              operation,
-              strategy: {
-                pattern: s.pattern,
-                axis: s.axis,
-                overshoot: s.overshoot,
-                direction: s.direction,
+        milling().andThen((c): AppResult<GeneratorRequest> => {
+          // WH-D: around the workholding, a facing clears its region as a pocket does
+          const kept =
+            region2d === undefined || input.keepOut === undefined
+              ? Ok(undefined)
+              : keepOutRegion(
+                  region2d,
+                  facingRegion(stock.length, stock.width, s.overshoot),
+                  input.keepOut,
+                  -operation.depth,
+                  wcs,
+                )
+          if (kept.isErr()) return Err(kept.unwrapErr())
+          const around = kept.unwrap()
+          if (around !== undefined)
+            return Ok({
+              kind: 'regionPocket',
+              ...turned,
+              unmachined: around.unmachined,
+              inputs: [
+                {
+                  ...base,
+                  ...material,
+                  cutting: c,
+                  operation: { region: around.region, onZ: 0, depth: operation.depth },
+                  strategy: {
+                    entry: 'ramp',
+                    helixDiameter: 0.8 * tool.diameter,
+                    rampAngle: FACING_RAMP_ANGLE,
+                    finishAllowance: 0,
+                    finishStepdown: operation.depth,
+                    direction: s.direction,
+                  },
+                },
+              ],
+            })
+          return Ok({
+            kind: 'facing',
+            ...turned,
+            inputs: [
+              {
+                ...base,
+                ...material,
+                cutting: c,
+                operation,
+                strategy: {
+                  pattern: s.pattern,
+                  axis: s.axis,
+                  overshoot: s.overshoot,
+                  direction: s.direction,
+                },
               },
-            },
-          ],
-        })),
+            ],
+          })
+        }),
       )
     case 'pocket':
       return single('pocket').andThen((op) =>
@@ -345,6 +386,32 @@ export function toGeneratorInputs(
           // open sides (DF61): a pocket reaching the stock edge is cut as its open region, so the
           // tool runs past the edge there
           const open = region2d !== undefined && opensStock(region2d, placed.region, stock)
+          // WH-D: the clearing goes around the workholding (no partial-cover split then)
+          if (region2d !== undefined && input.keepOut !== undefined) {
+            const whole = open
+              ? openRegion(region2d, placed.region, stock, reach)
+              : Ok(placed.region)
+            const kept = whole.andThen((r) =>
+              keepOutRegion(region2d, r, input.keepOut!, placed.onZ - placed.depth, wcs),
+            )
+            if (kept.isErr()) return Err(kept.unwrapErr())
+            const around = kept.unwrap()
+            if (around !== undefined)
+              return Ok({
+                kind: 'regionPocket',
+                ...turned,
+                unmachined: around.unmachined,
+                inputs: [
+                  {
+                    ...base,
+                    ...material,
+                    cutting: c,
+                    operation: { ...placed, region: around.region },
+                    strategy,
+                  },
+                ],
+              })
+          }
           const partial = input.material?.partial
           if (region2d !== undefined && (open || partial !== undefined))
             return (

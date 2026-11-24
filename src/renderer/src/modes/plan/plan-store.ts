@@ -105,6 +105,11 @@ export interface PlanState {
    * whose "Z from" is hovered: the viewport shows its Z reference instead of the selection's.
    */
   readonly zRefPreview: string | undefined
+  /**
+   * The workholding item open in the setup inspector (workholding.md#ui-summary): the viewport
+   * shows its keep-out zone.
+   */
+  readonly workholdingItem: { readonly setupId: string; readonly itemId: string } | undefined
   /** The export dialog shows this result, or the error. */
   readonly exported:
     | { readonly ok: true; readonly result: PlanExportResult; readonly setup?: string }
@@ -118,6 +123,8 @@ export interface PlanState {
   findingsShown(): void
   /** Shows run `planOperationId`'s Z reference in the viewport; undefined: the selection's. */
   previewZRef(planOperationId: string | undefined): void
+  /** Opens a workholding item in the setup inspector; undefined closes it. */
+  selectWorkholding(item: { readonly setupId: string; readonly itemId: string } | undefined): void
   /** Loads the plan queries for `tag` (key, plan, revision, generation) once. */
   want(tag: string, planId: string): void
   generate(planId: string): Promise<void>
@@ -163,6 +170,7 @@ export function createPlanStore(bridge: Pick<PreloadApi, 'call' | 'files'>): Pla
     exporting: false,
     findingsRequest: undefined,
     zRefPreview: undefined,
+    workholdingItem: undefined,
     exported: undefined,
     choose: (planId) =>
       set({ planId, lastSelection: undefined, generateError: undefined, failures: {} }),
@@ -171,6 +179,11 @@ export function createPlanStore(bridge: Pick<PreloadApi, 'call' | 'files'>): Pla
     findingsShown: () => set({ findingsRequest: undefined }),
     previewZRef: (zRefPreview) => {
       if (get().zRefPreview !== zRefPreview) set({ zRefPreview })
+    },
+    selectWorkholding: (workholdingItem) => {
+      const was = get().workholdingItem
+      if (was?.setupId !== workholdingItem?.setupId || was?.itemId !== workholdingItem?.itemId)
+        set({ workholdingItem })
     },
     want(next, planId) {
       const t = `${next}:${round}`

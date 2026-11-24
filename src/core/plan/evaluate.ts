@@ -34,6 +34,7 @@ import { checkPartFits } from './validity'
 import { shapeToolFindings } from './shape-checks'
 import type { Region2dPort } from '../geometry/2d/port'
 import { designOperations, type LoadedPlan } from './plan'
+import { setupWorkholding } from './workholding/setup'
 import { FEED_FIELDS, type PlanOperationDTO } from './plan.dto'
 import {
   resolveStrategy,
@@ -290,7 +291,8 @@ export function planFindings(
   plan.machine.map((m) => {
     const several = plan.setups.length > 1
     for (const s of plan.setups) {
-      const clearance = Quantity.fromDTO(s.clearanceHeight).mapOr(0, (q) => q.canonical)
+      // the clearance height the program uses: it follows the workholding (WH-C)
+      const clearance = setupWorkholding(s, plan.stock).clearance
       const size = setupStockSize(plan.stock, s)
       for (const f of stockFindings(size, clearance, m))
         out.push({
