@@ -11,7 +11,13 @@ import { machineLimits } from '../feeds-speeds/suggest'
 import type { MaterialRow } from '../feeds-speeds/data'
 import type { CuttingPreset, Tool } from '../library/tool'
 import { Quantity } from '../quantity/quantity'
-import { feedFindings, stockFindings, toolFindings, type PlanWarning } from './checks'
+import {
+  feedFindings,
+  rigidityFindings,
+  stockFindings,
+  toolFindings,
+  type PlanWarning,
+} from './checks'
 import {
   calculatorNoData,
   FEED_FIELD_LABEL,
@@ -165,6 +171,13 @@ export function evaluateOperation(
       ...(strategy.kind === 'drilling' ? { helixPitch: strategy.helixPitch } : {}),
       // F10 at the deepest point of the cut (plan-v0.4.md P-D)
       ...(strategy.kind === 'chamfer' ? { chamferDepth: strategy.cutDepth } : {}),
+      // DF74: the finishing pass's engagement
+      ...(strategy.kind === 'pocket' || strategy.kind === 'profile'
+        ? {
+            finishAllowance: strategy.finishAllowance,
+            finishStepdown: strategy.finishStepdown,
+          }
+        : {}),
     },
     data,
   )
@@ -177,17 +190,22 @@ export function evaluateOperation(
         params: {},
       })
   const stepdown = feeds.fields.stepdown.map((v) => v.value)
-  for (const f of toolFindings({
+  const checkInput = {
     ops,
     part: plan.part,
     stock: plan.stock,
     throughDepths: planThroughDepths(plan, port),
     tool: t,
     stickout,
-    ...(stepdown.isSome() ? { stepdown: stepdown.unwrap() } : {}),
     strategy,
+  }
+  for (const f of toolFindings({
+    ...checkInput,
+    ...(stepdown.isSome() ? { stepdown: stepdown.unwrap() } : {}),
   }))
     push(f)
+  // DF73, DF75: warnings, never disqualifying (plan-v0.1.md § Reach and rigidity warnings)
+  for (const f of rigidityFindings(checkInput)) push(f, 'plan.check', 'warning')
   if (port !== undefined)
     for (const { severity, ...f } of shapeToolFindings(
       {

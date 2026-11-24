@@ -47,7 +47,7 @@ pass rough
   rapid 2 104 10
 
 toolpath planOp-21 tool snapshot-9 S18000
-stats cut 397.8551 rapid 48.0684 s 35.1923
+stats cut 397.8551 rapid 48.0684 s 33.4424
 pass rough
   rapid 30 43.2 10
   rapid 30 43.2 1.5
@@ -111,12 +111,12 @@ pass rough
   rapid 31.8 50 1.5
 pass finish
   line 31.8 50 -3.5 F200
-  line 32 50 -3.5 F800
-  line 32 57 -3.5 F800
-  line 28 57 -3.5 F800
-  line 28 43 -3.5 F800
-  line 32 43 -3.5 F800
-  line 32 50 -3.5 F800
-  line 31.8 50 -3.5 F800
+  line 32 50 -3.5 F2228.3441
+  line 32 57 -3.5 F2228.3441
+  line 28 57 -3.5 F2228.3441
+  line 28 43 -3.5 F2228.3441
+  line 32 43 -3.5 F2228.3441
+  line 32 50 -3.5 F2228.3441
+  line 31.8 50 -3.5 F2228.3441
   rapid 31.8 50 1.5
   rapid 31.8 50 10

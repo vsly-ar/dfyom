@@ -893,6 +893,61 @@ export function cuttingAt(
   })
 }
 
+/** The finishing pass's feed and chip at the values used (DF74). */
+export interface FinishingFeed {
+  /** Radial engagement: the finishing allowance (mm, at most D). */
+  readonly allowance: number
+  /** `vf · kf / kr`, at most the machine's X/Y max feed (mm/min). */
+  readonly feedRate: number
+  /** `kf`: F3 at the allowance × F5 at the finish stepdown, capped. */
+  readonly chipThinning: number
+  /** Chip after chip thinning at `feedRate` (mm/tooth). */
+  readonly fz: number
+  /** The machine's feed limit held `feedRate` below the chip-load-keeping feed. */
+  readonly clamped: boolean
+  /** The data range's minimum chip load (mm/tooth). */
+  readonly minimum: number
+}
+
+/**
+ * The finishing pass's own feed (docs/architecture/feeds-speeds.md#finishing-pass-feed-hardening-df74):
+ * the feed that keeps the chip load of the values used at the radial engagement `allowance`
+ * (axial `finishAp`), at most the machine's X/Y feed limit. None without data, without positive
+ * `n` and `vf`, for drills and chamfer engagements, or without an allowance.
+ */
+export function finishingAt(
+  input: CuttingInput,
+  values: CuttingValues,
+  allowance: number,
+  finishAp: number,
+  data: readonly MaterialRow[] = MATERIAL_DATA,
+): Option<FinishingFeed> {
+  const e = input.engagement
+  if (e.kind === 'drill' || e.kind === 'chamfer' || !(allowance > 0)) return None
+  const found = contextOf(input, data)
+  if ('noData' in found || !(values.n > 0) || !(values.vf > 0)) return None
+  const c = found.ctx
+  const D = c.D
+  const RE = input.tool.effectiveCornerRadius.toNumber()
+  const z = input.tool.fluteCount.canonical
+  if (!(z > 0)) return None
+  const ae = e.kind === 'stepover' ? Math.min(values.ae ?? e.ae, D) : D
+  const ap = fixedAp(e) ?? values.ap
+  const kr = chipThinning(rctf(ae, D), ap === undefined ? 1 : actf(RE, ap))
+  const kf = chipThinning(rctf(Math.min(allowance, D), D), actf(RE, finishAp))
+  const wanted = (values.vf * kf) / kr
+  const max = input.machine.mapOr(Infinity, (m) => m.maxFeedXY)
+  const feedRate = Math.min(wanted, max)
+  return Some({
+    allowance: Math.min(allowance, D),
+    feedRate,
+    chipThinning: kf,
+    fz: feedRate / (values.n * z * kf),
+    clamped: wanted > max * (1 + EPS),
+    minimum: c.range.min,
+  })
+}
+
 const lockedStep = (field: 'n' | 'vf', value: number, unit: string): DerivationStep => ({
   step: 'locked',
   formula: `${field} locked by the user`,

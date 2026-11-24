@@ -70,7 +70,7 @@ Strategy parameters as [v0.1 profile](plan-v0.1.md#profile-with-tabs), plus `lea
 - **Entry:** ramp along the first pass as v0.1; on an open path the ramp zigzags along the first stretch.
 - **Tabs:** as v0.1 (lift where the tool disk overlaps a nominal tab band), with the general bands of [shapes.md](../architecture/shapes.md#geometry-for-shape-operations) at the design's positions; boundaries by sampling and bisection along arcs as along lines.
 - **Input (K3):** `profileChain(op)` (the loop or open path in the face frame) and `tabStretches(op)` (tab stretches along it from its start point; none on an open path or a blind groove) in [`outline.ts`](../../src/core/geometry/outline.ts).
-- **Finishing:** the part-side pass at full depth, lead-in and lead-out arcs of `leadRadius` on the offcut side, starting and ending at the start point unless a tab is there (then mid-way to the next tab).
+- **Finishing:** the part-side pass at full depth (in levels of `finishStepdown` since [hardening DF76](plan-v0.1.md#finishing-defaults-hardening-df75-df76)), lead-in and lead-out arcs of `leadRadius` on the offcut side, starting and ending at the start point unless a tab is there (then mid-way to the next tab).
 
 ### Implementation (T2, region-level generator)
 

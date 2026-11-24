@@ -17,6 +17,8 @@ import type { Quantity } from '../quantity/quantity'
 import {
   checkCutting,
   cuttingAt,
+  finishingAt,
+  type FinishingFeed,
   noDataFor,
   suggestCutting,
   type CuttingDisplay,
@@ -74,6 +76,10 @@ export interface FeedsInput {
   readonly helixPitch?: number
   /** Chamfer (v0.4): the cut's depth below the tool tip (mm), the resolved strategy's `cutDepth`. */
   readonly chamferDepth?: number
+  /** Pocket/profile: the resolved finishing allowance (mm; 0 or absent = no finishing pass). */
+  readonly finishAllowance?: number
+  /** Pocket/profile: the resolved finish stepdown (mm), the finishing pass's axial engagement. */
+  readonly finishStepdown?: number
 }
 
 export type FeedWarningCode = CuttingWarningCode | 'feeds.lockInactive'
@@ -108,6 +114,11 @@ export interface ResolvedFeeds {
    * after chip thinning, Q, Pc, spindle load. None without calculator data or speed and feed.
    */
   readonly used: Option<CuttingDisplay>
+  /**
+   * The finishing pass's own feed (DF74), at the values used; None without a finishing pass or
+   * calculator data (the finishing pass then runs at `feedRate`).
+   */
+  readonly finish: Option<FinishingFeed>
   /** Calculator warnings, inactive locks and the final-value check. */
   readonly warnings: readonly FeedWarning[]
 }
@@ -405,6 +416,7 @@ export function resolveFeeds(i: FeedsInput, data?: readonly MaterialRow[]): Reso
   // Final-value check on the values that will be used, entered ones included.
   const value = (f: FeedField) => fields[f].map((r) => r.value)
   let used: Option<CuttingDisplay> = None
+  let finish: Option<FinishingFeed> = None
   if (noData.isNone() && value('spindleSpeed').isSome() && value('feedRate').isSome()) {
     const ap = value('stepdown')
     const ae = value('stepover')
@@ -418,6 +430,19 @@ export function resolveFeeds(i: FeedsInput, data?: readonly MaterialRow[]): Reso
       data === undefined ? checkCutting(base, values) : checkCutting(base, values, data)
     warnings.push(...checked)
     used = data === undefined ? cuttingAt(base, values) : cuttingAt(base, values, data)
+    // DF74: the finishing pass's own feed, and whether the feed limit makes it rub
+    const allowance = i.finishAllowance ?? 0
+    if (allowance > 0) {
+      const finishAp = i.finishStepdown ?? values.ap ?? i.tool.fluteLength.canonical
+      finish =
+        data === undefined
+          ? finishingAt(base, values, allowance, finishAp)
+          : finishingAt(base, values, allowance, finishAp, data)
+      finish.map((f) => {
+        if (f.clamped && f.fz < FINISH_RUBBING_FRACTION * f.minimum * (1 - 1e-9))
+          warnings.push(finishRubbing(f, values.n, i.tool, i.machine))
+      })
+    }
   }
 
   const flutes = i.tool.fluteCount.canonical
@@ -435,7 +460,83 @@ export function resolveFeeds(i: FeedsInput, data?: readonly MaterialRow[]): Reso
     locks,
     chipLoad,
     used,
+    finish,
     warnings,
+  }
+}
+
+/**
+ * The finishing pass warns below this share of the data minimum (DF74): a light finishing cut
+ * between it and the minimum is left alone, the research case (0.055 of 0.127 mm) is below it.
+ * Doc: docs/architecture/feeds-speeds.md#finishing-pass-feed-hardening-df74
+ */
+export const FINISH_RUBBING_FRACTION = 0.5
+
+/** A number for a message: at most `digits` decimals, trailing zeros dropped. */
+const num = (v: number, digits: number): string => String(Number(v.toFixed(digits)))
+
+/**
+ * `feeds.rubbing` rule `finishRubbing` (DF74): the machine's feed limit holds the finishing feed
+ * below the one that keeps the chip load, and the finishing chip falls below the data minimum.
+ * The message names the fixes that work at the values used: a larger allowance, a lower locked
+ * spindle speed, fewer flutes at this speed.
+ * Doc: docs/architecture/feeds-speeds.md#finishing-pass-feed-hardening-df74
+ */
+function finishRubbing(
+  f: FinishingFeed,
+  n: number,
+  tool: Tool,
+  machine: Option<MachineLimits>,
+): FeedWarning {
+  const D = tool.diameter.canonical
+  const z = tool.fluteCount.canonical
+  const maxFeed = f.feedRate
+  const params: Record<string, number> = {
+    chipLoad: f.fz,
+    minimum: f.minimum,
+    finishAllowance: f.allowance,
+    finishFeedRate: f.feedRate,
+    maxFeedRate: maxFeed,
+  }
+  const fixes: string[] = []
+  // F3 inverted: the radial engagement whose thinning still leaves the minimum at this feed
+  const k = maxFeed / (n * z * f.minimum)
+  if (k > 1) {
+    const a = Math.ceil(((D * (1 - Math.sqrt(1 - 1 / (k * k)))) / 2) * 10) / 10
+    if (a < D / 2) {
+      params['allowanceForMinimum'] = a
+      fixes.push(`a finishing allowance of at least ${num(a, 1)} mm`)
+    }
+  }
+  const nMin = Math.floor(maxFeed / (z * f.chipThinning * f.minimum) / 10) * 10
+  if (nMin >= machine.mapOr(0, (m) => m.minSpeed) && nMin > 0) {
+    params['spindleSpeedForMinimum'] = nMin
+    fixes.push(`a spindle speed of at most ${nMin} rpm`)
+  }
+  const zMax = Math.floor((z * f.fz) / f.minimum + 1e-9)
+  if (zMax >= 1 && zMax < z) {
+    params['flutesForMinimum'] = zMax
+    fixes.push(`a tool with ${zMax} ${zMax === 1 ? 'flute' : 'flutes'} at this spindle speed`)
+  }
+  const list =
+    fixes.length <= 1
+      ? (fixes[0] ?? '')
+      : `${fixes.slice(0, -1).join(', ')} or ${fixes[fixes.length - 1]!}`
+  const fix =
+    list.length > 0
+      ? ` ${list[0]!.toUpperCase()}${list.slice(1)} makes a real chip.`
+      : ' No setting of this tool on this machine makes a real chip.'
+  return {
+    code: 'feeds.rubbing',
+    rule: 'finishRubbing',
+    severity: 'warning',
+    field: 'spindleSpeed',
+    message:
+      `Finishing pass rubs: radial chip thinning at the ${num(f.allowance, 3)} mm finishing ` +
+      `allowance leaves ${num(f.fz, 3)} mm chips, under the ${num(f.minimum, 3)} mm minimum, and ` +
+      `the machine's ${num(maxFeed, 0)} mm/min feed limit (X/Y) stops a faster finishing feed.` +
+      fix,
+    params,
   }
 }
 

@@ -287,7 +287,14 @@ export function toGeneratorInputs(
   const material = Object.keys(band).length === 0 ? {} : { material: band }
   const s = input.strategy
   const milling = (): AppResult<CuttingParams> =>
-    cutting(input.feeds, ['spindleSpeed', 'feedRate', 'plungeRate', 'stepdown', 'stepover'], id)
+    cutting(
+      input.feeds,
+      ['spindleSpeed', 'feedRate', 'plungeRate', 'stepdown', 'stepover'],
+      id,
+    ).map((c) =>
+      // DF74: the finishing passes' own feed (pockets and profiles with an allowance)
+      input.feeds.finish.mapOr<CuttingParams>(c, (f) => ({ ...c, finishFeedRate: f.feedRate })),
+    )
   const single = <K extends OperationGeometry['kind']>(
     kind: K,
   ): AppResult<Extract<OperationGeometry, { kind: K }>> => {
@@ -398,6 +405,7 @@ export function toGeneratorInputs(
             rampAngle: s.rampAngle,
             breakthrough: s.breakthrough,
             finishAllowance: s.finishAllowance,
+            finishStepdown: s.finishStepdown,
             direction: s.direction,
           }
           if (isAnalyticOperation(op))
