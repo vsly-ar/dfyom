@@ -246,8 +246,11 @@ export type SenderEvent =
       readonly line?: number
     }
   | { readonly kind: 'message'; readonly text: string }
-  /** The controller restarted (banner): after our reset or by itself. */
-  | { readonly kind: 'reset'; readonly expected: boolean }
+  /**
+   * The controller restarted (banner): after our reset or by itself. `positionLost`: a banner we
+   * did not cause was followed by `Alarm` (or no report), or it ended a run (DF87 follow-up).
+   */
+  | { readonly kind: 'reset'; readonly expected: boolean; readonly positionLost: boolean }
   | { readonly kind: 'connectionLost'; readonly reason: string }
 
 export interface SenderOptions {
@@ -447,6 +450,9 @@ export class GrblSender {
   /** Fresh status needed after this report ordinal (tool change, end of program). */
   private freshMark: number | undefined
   private bannerWaiter: Waiter | undefined
+  /** A banner we did not cause: sending waits for a status report that tells Alarm from not. */
+  private checkingBanner = false
+  private readonly bannerChecks: (() => void)[] = []
 
   private readonly statusListeners = new Set<(s: SenderStatus) => void>()
   private readonly eventListeners = new Set<(e: SenderEvent) => void>()
@@ -875,7 +881,7 @@ export class GrblSender {
 
   /** Sends what fits: queued commands first, then program lines. */
   private fill(): void {
-    if (!this.connected || this.expectingReset) return
+    if (!this.connected || this.expectingReset || this.checkingBanner) return
     for (;;) {
       const cmd = this.commands[0]
       if (cmd !== undefined) {
@@ -952,7 +958,7 @@ export class GrblSender {
       case 'alarm':
         return this.onAlarm(l.code)
       case 'banner':
-        return this.onBanner()
+        return this.onBanner(l.line)
       case 'message':
         if (l.text === 'Reset to continue') this.critical = true
         this.emit({ kind: 'message', text: l.text })
@@ -1166,7 +1172,7 @@ export class GrblSender {
     this.finish(run, Err(alarmError(code, run)))
   }
 
-  private onBanner(): void {
+  private onBanner(line: string): void {
     const expected = this.expectingReset
     this.expectingReset = false
     this.critical = false
@@ -1194,17 +1200,27 @@ export class GrblSender {
     const waiter = this.bannerWaiter
     this.bannerWaiter = undefined
     if (waiter !== undefined) {
+      this.log.debug({ line: line.slice(0, 120) }, 'banner')
       waiter(true)
       return
     }
     if (!this.connected) return
-    if (!expected) this.log.warn('the controller restarted by itself (a banner without our reset)')
-    this.emit({ kind: 'reset', expected })
     const run = this.run_
+    if (!expected)
+      this.log.warn(
+        { line: line.slice(0, 120), run: run?.phase },
+        'the controller sent a banner without our reset',
+      )
     if (run === undefined) {
+      if (expected) this.emit({ kind: 'reset', expected, positionLost: false })
+      // DF87 follow-up: some GRBL forks print the banner at the end of `$H` (or a reset happened
+      // while idle, which keeps the position): ask for the state before calling the position lost
+      else this.checkBanner()
       this.fill()
       return
     }
+    // a run never survives a banner: a reset drops GRBL's buffers
+    this.emit({ kind: 'reset', expected, positionLost: !expected })
     const failure =
       run.phase === 'stopping'
         ? (run.failure ??
@@ -1219,6 +1235,43 @@ export class GrblSender {
             })
     this.finish(run, Err(failure))
     this.fill()
+  }
+
+  /**
+   * A banner we did not cause, outside a run (docs/architecture/grbl.md#banner): sending waits for
+   * a status report requested now. `Alarm` (a reset in motion, a power-up with `$22=1`) or no
+   * report → position lost; any other state → GRBL kept the position (a soft reset while idle, or
+   * a fork that re-prints its banner after `$H`). Then the `reset` event.
+   */
+  private checkBanner(): void {
+    if (this.checkingBanner) return
+    this.checkingBanner = true
+    const mark = this.pollsWritten
+    this.requestStatus()
+    const done = (state: string | undefined): void => {
+      off()
+      cancel()
+      if (!this.checkingBanner) return
+      this.checkingBanner = false
+      const positionLost = state === undefined || state.startsWith('Alarm')
+      if (positionLost)
+        this.log.warn({ state: state ?? 'no report' }, 'the controller restarted: position lost')
+      else
+        this.log.warn({ state }, `the controller printed a banner; state ${state}, position kept`)
+      if (this.connected) this.emit({ kind: 'reset', expected: false, positionLost })
+      for (const f of this.bannerChecks.splice(0)) f()
+      this.fill()
+    }
+    const cancel = this.timers.setTimeout(() => done(undefined), this.opts.statusTimeoutMs ?? 2000)
+    const off = this.onStatus((st) => {
+      if (this.reportsSeen > mark) done(st.state)
+    })
+  }
+
+  /** Resolves once no banner check is under way (at once if none). */
+  bannerChecked(): Promise<void> {
+    if (!this.checkingBanner) return Promise.resolve()
+    return new Promise((resolve) => this.bannerChecks.push(resolve))
   }
 
   // ── Run state ───────────────────────────────────────────────────────────────────────────

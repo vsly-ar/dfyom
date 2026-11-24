@@ -219,6 +219,10 @@ Emulator option `homing` (sets `$22`): `true` (default in the app) starts in Ala
 
 `$H` plays GRBL's homing cycle in time ([below](#homing-and-machine-coordinates)); its `ok` comes when it is done. Emulator option `position` (MPos at power-up, default 0,0,0): the app starts the virtual machine at the centre of its travel.
 
+### Banner
+
+The banner is the whole line `Grbl <version> ['$' for help]` (grblHAL: `GrblHAL <version> ['$' or '$HELP' for help]`); `[VER:…]`, `[MSG:…]`, `[OPT:…]` and other lines that mention Grbl are not (`parseLine` in `src/core/run/grbl/status.ts`). GRBL prints it on power-up and after each soft reset (`0x18`): a reset while idle keeps the machine position, a reset during motion or homing raises `ALARM:3`/`6` and stays in Alarm, and a power-up with `$22=1` starts in Alarm. Some forks also print it at the end of `$H` without losing anything (DF87 follow-up, [run-machine.md](../modes/run-machine.md#homing-on-a-real-controller)). So the sender treats a banner it did not cause (no `0x18` of its own) outside a run as a question: it fails the commands in flight (a real reset dropped them), holds further lines, logs the raw line, and posts `reset` with `positionLost` from the next status report (`Alarm` or none → lost). During a run any banner ends the run. The virtual machine prints the banner on start and on `0x18`, and with option `bannerAfterHoming: true` (`'alarm'`: in Alarm) after the `ok` of `$H`, like that fork.
+
 ### State machine
 
 | State           | Entered by                                               | Left by                                                            |

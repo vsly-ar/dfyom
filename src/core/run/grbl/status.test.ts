@@ -33,10 +33,35 @@ describe('parseLine', () => {
       text: '-750.000,-750.000,-50.000',
     })
     expect(parseLine('$110=5000.000')).toEqual({ kind: 'setting', n: 110, value: 5000 })
-    expect(parseLine("Grbl 1.1h ['$' for help]")).toEqual({ kind: 'banner', version: '1.1h' })
+    expect(parseLine("Grbl 1.1h ['$' for help]")).toEqual({
+      kind: 'banner',
+      version: '1.1h',
+      line: "Grbl 1.1h ['$' for help]",
+    })
     expect(parseLine('')).toEqual({ kind: 'other', text: '' })
     expect(parseLine('<Idle|MPos:x>').kind).toBe('status')
     expect(parseLine('<>')).toEqual({ kind: 'other', text: '<>' })
+  })
+})
+
+describe('the banner (DF87 follow-up)', () => {
+  it('is only the whole Grbl / GrblHAL welcome line', () => {
+    expect(parseLine("Grbl 1.1f ['$' for help]")).toMatchObject({ kind: 'banner', version: '1.1f' })
+    expect(parseLine("GrblHAL 1.1f ['$' or '$HELP' for help]")).toMatchObject({
+      kind: 'banner',
+      version: '1.1f',
+    })
+    expect(parseLine('[VER:1.1f.20250929:]')).toEqual({
+      kind: 'feedback',
+      tag: 'VER',
+      text: '1.1f.20250929:',
+    })
+    expect(parseLine("[MSG:Grbl 1.1f ['$' for help]]").kind).toBe('message')
+    expect(parseLine('[MSG:Homing done]').kind).toBe('message')
+    expect(parseLine('[OPT:V,15,128]').kind).toBe('feedback')
+    expect(parseLine("x Grbl 1.1f ['$' for help]").kind).toBe('other')
+    expect(parseLine("Grbl 1.1f ['$' for help] ").kind).toBe('other')
+    expect(parseLine('Grbl 1.1f').kind).toBe('other')
   })
 })
 

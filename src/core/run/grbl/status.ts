@@ -19,11 +19,15 @@ export type GrblLine =
   /** Other `[TAG:…]` feedback: `$#` (`G54`, …), `$G` (`GC`), `$I` (`VER`, `OPT`), `HLP`. */
   | { readonly kind: 'feedback'; readonly tag: string; readonly text: string }
   | { readonly kind: 'setting'; readonly n: number; readonly value: number }
-  /** `Grbl 1.1h ['$' for help]`: the controller (re)started. */
-  | { readonly kind: 'banner'; readonly version: string }
+  /**
+   * `Grbl 1.1h ['$' for help]` (grblHAL: `GrblHAL 1.1f ['$' or '$HELP' for help]`): the controller
+   * (re)started, or a fork re-printed it (docs/architecture/grbl.md#banner). `line`: as received.
+   */
+  | { readonly kind: 'banner'; readonly version: string; readonly line: string }
   | { readonly kind: 'other'; readonly text: string }
 
-const BANNER = /^Grbl (\S+) \['\$' for help\]$/
+/** The whole line only: never `[VER:…]`, `[MSG:…]` or other feedback that mentions Grbl. */
+const BANNER = /^Grbl(?:HAL)? (\S+) \['\$' (?:or '\$HELP' )?for help\]$/
 const FEEDBACK = /^\[([A-Z0-9]+):(.*)\]$/
 
 export function parseLine(line: string): GrblLine {
@@ -46,7 +50,7 @@ export function parseLine(line: string): GrblLine {
   const setting = parseSettingLine(line)
   if (setting.isSome()) return { kind: 'setting', ...setting.unwrap() }
   m = BANNER.exec(line)
-  if (m) return { kind: 'banner', version: m[1] ?? '' }
+  if (m) return { kind: 'banner', version: m[1] ?? '', line }
   return { kind: 'other', text: line }
 }
 

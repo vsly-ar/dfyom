@@ -360,7 +360,7 @@ describe('hold, resume and stop', () => {
     expectErrCode(await drive(r.clock, p), 'op.aborted')
     expectOk(await stopped)
     expect(r.io.received.filter((l) => l.startsWith('ALARM'))).toEqual([])
-    expect(r.events).toContainEqual({ kind: 'reset', expected: true })
+    expect(r.events).toContainEqual({ kind: 'reset', expected: true, positionLost: false })
     await until(r.clock, () => r.emu.status().state === 'Idle')
     const x = r.emu.status().mpos[0]
     expect(x).toBeGreaterThan(50)
@@ -503,7 +503,7 @@ describe('errors, alarms and the connection', () => {
     r.emu.receive(Uint8Array.of(0x18)) // someone else reset it, during a dwell
     r.clock.advance(0)
     expectErrCode(await drive(r.clock, p), 'machine.reset')
-    expect(r.events).toContainEqual({ kind: 'reset', expected: false })
+    expect(r.events).toContainEqual({ kind: 'reset', expected: false, positionLost: true })
     expect(r.sender.isConnected).toBe(true)
     // during motion GRBL reports ALARM:3 first: the run fails with that alarm
     const q = start(r, ['G1 X300 F3000'])
