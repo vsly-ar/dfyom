@@ -15,6 +15,7 @@ export type { TabDragPhase, TabMarkerView, TabOverlay } from './TabMarkers'
 export type { ReferenceGhostView } from './ReferenceGhost'
 export type { ZRefDragPhase, ZRefOverlay, ZRefPolygon } from './ZRefLayer'
 export type { AlignmentMarker, AlignmentTarget, FlipAxisLine } from './AlignmentLayer'
+export type { AidDragPhase, AidHandle, AidOverlay } from './AidHandles'
 export type { WorkholdingOverlay } from './WorkholdingLayer'
 export { RunLayer, boxEdges, segmentColours, type RunEnvelope, type RunScene } from './RunLayer'
 export {

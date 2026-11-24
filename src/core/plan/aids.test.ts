@@ -245,3 +245,236 @@ describe('alignment aids (S13–S19)', { timeout: 60_000 }, () => {
     expect(p.setups[1]!.alignment).toHaveLength(2)
   })
 })
+
+// DF83: every sensible parameter of an aid is editable like any plan operation
+describe('aid parameters (DF83)', { timeout: 60_000 }, () => {
+  const oneHole = async () => {
+    const { s, planId } = await twoSided()
+    const first = s.plan(planId).setups[0]!
+    const r = await aidSet(s, {
+      planId,
+      setupId: first.id,
+      aid: { kind: 'registrationHole', center: ['8', '8'], diameter: '6', spoilboardDepth: '5' },
+    })
+    const id = r.planOperationIds[0]!
+    await s.run('plan.operation.update', {
+      planId,
+      planOperationId: id,
+      overrides: { spindleSpeed: '9000', feedRate: '600', plungeRate: '300' },
+    })
+    return { s, planId, id, first }
+  }
+  const pathOf = (s: PlanSetup, planId: string, id: string) => {
+    const i = expectOk(planOperationInputs(s.d.doc, planId, [id]))[0]!
+    return { tp: expectOk(generateRequest(expectOk(toGeneratorInputs(i)))), input: i }
+  }
+  const drillMove = (tp: Toolpath) =>
+    tp.passes.flatMap((p) => p.moves).find((m) => m.kind === 'drill') as
+      { cycle: string; peck?: number; at: readonly number[] } | undefined
+
+  it('a hole: centre, Ø and depth into the spoilboard move its toolpath; out of range refused', async () => {
+    const { s, planId, id } = await oneHole()
+    const before = pathOf(s, planId, id)
+    const stock = before.input.stock.thickness.canonical
+    await aidSet(s, {
+      planId,
+      planOperationId: id,
+      aid: { center: ['4', '5'], spoilboardDepth: '3' },
+    })
+    const after = pathOf(s, planId, id)
+    expect(drillMove(after.tp)?.at).not.toEqual(drillMove(before.tp)?.at)
+    expect(zRange(after.tp).min).toBeGreaterThan(-stock - 5)
+    expect(zRange(after.tp).min).toBeLessThanOrEqual(-stock - 3 + 1e-6)
+    // the limit: 15 mm into the spoilboard; a Ø of 0 or over 50 mm
+    for (const aid of [{ spoilboardDepth: '16' }, { diameter: '0' }, { diameter: '60' }]) {
+      const e = await s.failWith('plan.aid.set', { planId, planOperationId: id, aid }, 'plan.aid')
+      expect(e.issues?.[0]?.rule).toBe('range')
+    }
+    expect(opOf(s.plan(planId), id).aid).toMatchObject({ center: [4, 5], spoilboardDepth: 3 })
+  })
+
+  it('a hole: peck cycle and depth on plan.operation.update; breakthrough is spoilboardDepth', async () => {
+    const { s, planId, id } = await oneHole()
+    await s.run('plan.operation.update', {
+      planId,
+      planOperationId: id,
+      strategy: { cycle: 'peck', peckDepth: '2' },
+    })
+    expect(drillMove(pathOf(s, planId, id).tp)).toMatchObject({ cycle: 'peck', peck: 2 })
+    const e = await s.failWith(
+      'plan.operation.update',
+      { planId, planOperationId: id, strategy: { breakthrough: '1' } },
+      'plan.aid',
+    )
+    expect(e.issues?.[0]).toMatchObject({
+      path: ['strategy', 'breakthrough'],
+      rule: 'aidParameter',
+    })
+    const zero = await s.failWith(
+      'plan.operation.update',
+      { planId, planOperationId: id, strategy: { peckDepth: '0' } },
+      'model.invariant',
+    )
+    expect(zero.issues?.[0]?.rule).toBe('positive')
+    // a drill cannot bore a helix
+    const helix = await s.failWith(
+      'plan.operation.update',
+      { planId, planOperationId: id, strategy: { cycle: 'helix' } },
+      'model.invariant',
+    )
+    expect(helix.issues?.[0]?.rule).toBe('toolType')
+  })
+
+  it('a hole: an end mill from the suggestions bores it as a helix', async () => {
+    const { s, planId, id } = await oneHole()
+    const tools = (
+      s.query('plan.tool.suggest', { planId, planOperationId: id }) as {
+        tools: { toolLibraryItemId: string }[]
+      }
+    ).tools.map((t) => t.toolLibraryItemId)
+    expect(tools).toContain(s.tools.drill6)
+    expect(tools).toContain(s.tools.flat4)
+    await s.run('plan.tool.assign', {
+      planId,
+      planOperationId: id,
+      toolLibraryItemId: s.tools.flat4,
+    })
+    await s.run('plan.operation.update', {
+      planId,
+      planOperationId: id,
+      overrides: { spindleSpeed: '18000', feedRate: '800', plungeRate: '200' },
+      strategy: { helixPitch: '0.5' },
+    })
+    const { tp } = pathOf(s, planId, id)
+    expect(drillMove(tp)).toBeUndefined()
+    expect(tp.passes.flatMap((p) => p.moves).length).toBeGreaterThan(3)
+  })
+
+  it('a mark: depth sets its Ø by the V-bit angle; refused without a pointed V-bit or with both', async () => {
+    const { s, planId } = await twoSided()
+    const first = s.plan(planId).setups[0]!
+    const id = (
+      await aidSet(s, {
+        planId,
+        setupId: first.id,
+        aid: { kind: 'witnessMark', at: ['2', '2'], markDepth: '0.75' },
+      })
+    ).planOperationIds[0]!
+    // 90°: Ø = 2·d·tan 45° = 1.5 mm, cut 0.75 mm deep
+    expect(opOf(s.plan(planId), id).aid).toMatchObject({ markDiameter: 1.5 })
+    expect(zRange(pathOf(s, planId, id).tp).min).toBeCloseTo(-0.75, 6)
+    await aidSet(s, { planId, planOperationId: id, aid: { markDepth: '1' } })
+    expect(opOf(s.plan(planId), id).aid).toMatchObject({ markDiameter: 2 })
+    const both = await s.failWith(
+      'plan.aid.set',
+      { planId, planOperationId: id, aid: { markDepth: '1', markDiameter: '2' } },
+      'input.malformed',
+    )
+    expect(both.issues?.[0]?.rule).toBe('conflict')
+    const wide = await s.failWith(
+      'plan.aid.set',
+      { planId, planOperationId: id, aid: { markDepth: '6' } },
+      'plan.aid',
+    )
+    expect(wide.issues?.[0]?.rule).toBe('range')
+    // the cut is fixed: strategy edits are refused
+    const fixed = await s.failWith(
+      'plan.operation.update',
+      { planId, planOperationId: id, strategy: { entry: 'contour' } },
+      'plan.aid',
+    )
+    expect(fixed.issues?.[0]?.rule).toBe('aidParameter')
+    // a flat end mill is no pointed V-bit: a finding, and no depth to set
+    await s.run('plan.tool.assign', {
+      planId,
+      planOperationId: id,
+      toolLibraryItemId: s.tools.flat6,
+    })
+    expect(
+      warnings(s, planId).some((w) => w.planOperationId === id && w.rule === 'pointedVBit'),
+    ).toBe(true)
+    const noV = await s.failWith(
+      'plan.aid.set',
+      { planId, planOperationId: id, aid: { markDepth: '0.5' } },
+      'plan.aid',
+    )
+    expect(noV.issues?.[0]?.rule).toBe('noVBit')
+    // a hole has no mark depth; a line mark stays short
+    const hole = (
+      await aidSet(s, {
+        planId,
+        setupId: first.id,
+        aid: { kind: 'registrationHole', center: ['3', '3'] },
+      })
+    ).planOperationIds[0]!
+    const notMark = await s.failWith(
+      'plan.aid.set',
+      { planId, planOperationId: hole, aid: { markDepth: '1' } },
+      'plan.aid',
+    )
+    expect(notMark.issues?.[0]?.rule).toBe('notForKind')
+    const long = await s.failWith(
+      'plan.aid.set',
+      { planId, planOperationId: id, aid: { from: ['0', '0'], to: ['150', '0'] } },
+      'plan.aid',
+    )
+    expect(long.issues?.[0]?.rule).toBe('range')
+  })
+
+  it('the helpers: which edges, holes at corners or on the axis, the inset', async () => {
+    const { s, planId } = await twoSided()
+    const [first, second] = s.plan(planId).setups
+    // marks across the left and right edges, 6 mm inside (and 2 mm past)
+    const lr = await aidSet(s, {
+      planId,
+      setupId: first!.id,
+      place: 'marks',
+      edges: 'leftRight',
+      inset: '6',
+    })
+    for (const x of lr.planOperationIds) {
+      const m = opOf(s.plan(planId), x).aid as { from: number[]; to: number[] }
+      expect(m.from[1]).toBeCloseTo(m.to[1]!, 6)
+      expect(Math.abs(m.to[0]! - m.from[0]!)).toBeCloseTo(8, 6)
+    }
+    // holes: the default is the flip axis; corners on request, with a 5 mm wall
+    const axis = await aidSet(s, {
+      planId,
+      setupId: first!.id,
+      place: 'holes',
+      aid: { diameter: '6' },
+    })
+    const corners = await aidSet(s, {
+      planId,
+      setupId: first!.id,
+      place: 'holes',
+      holesAt: 'corners',
+      inset: '5',
+      aid: { diameter: '6' },
+    })
+    const at = (ids: string[]) =>
+      ids.map((x) => (opOf(s.plan(planId), x).aid as { center: number[] }).center)
+    expect(at(corners.planOperationIds)[0]).toEqual([8, 8])
+    expect(at(corners.planOperationIds)).not.toEqual(at(axis.planOperationIds))
+    // refusals: a choice without its helper, out of range, a mark depth for holes
+    const cases: [object, 'plan.aid' | 'input.malformed', string][] = [
+      [{ place: 'holes', edges: 'frontBack' }, 'input.malformed', 'notForPlace'],
+      [{ place: 'marks', holesAt: 'axis' }, 'input.malformed', 'notForPlace'],
+      [{ aid: { kind: 'witnessMark', at: ['1', '1'] }, inset: '3' }, 'input.malformed', 'required'],
+      [{ place: 'holes', inset: '80' }, 'plan.aid', 'range'],
+      [{ place: 'marks', inset: '0' }, 'plan.aid', 'range'],
+      [{ place: 'holes', aid: { markDepth: '1' } }, 'input.malformed', 'notForKind'],
+    ]
+    for (const [args, code, rule] of cases) {
+      const e = await s.failWith('plan.aid.set', { planId, setupId: first!.id, ...args }, code)
+      expect(e.issues?.[0]?.rule, JSON.stringify(args)).toBe(rule)
+    }
+    // the last setup has no later one that flips: no axis
+    const noFlip = await s.failWith(
+      'plan.aid.set',
+      { planId, setupId: second!.id, place: 'holes', holesAt: 'axis' },
+      'plan.aid',
+    )
+    expect(noFlip.issues?.[0]?.rule).toBe('noFlipAxis')
+  })
+})

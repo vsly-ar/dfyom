@@ -71,6 +71,18 @@ export function markDepth(diameter: number, angleDeg: number): number {
   return diameter / (2 * Math.tan((angleDeg / 2) * (Math.PI / 180)))
 }
 
+/** The mark Ø at the face a pointed V-bit of included angle `angleDeg` cuts at `depth` (mm). */
+export function markDiameterAt(depth: number, angleDeg: number): number {
+  return 2 * depth * Math.tan((angleDeg / 2) * (Math.PI / 180))
+}
+
+/** The included angle of a pointed V-bit (deg); undefined for any other tool (DF83). */
+export function pointedVBitAngle(tool: Tool | undefined): number | undefined {
+  if (tool === undefined || tool.type !== 'chamferMill') return undefined
+  if (tool.tipDiameter.mapOr(0, (q) => q.canonical) > 1e-9) return undefined
+  return tool.angle.mapOr(undefined, (q) => q.canonical)
+}
+
 /** The mark's cut depth with `tool` (undefined unless it is a chamfer mill with an angle). */
 export function markDepthWith(
   aid: Extract<AidDTO, { kind: 'witnessMark' }>,
@@ -641,18 +653,30 @@ function faceEdges(L: number, W: number): FaceEdge[] {
 
 const T_STEPS = [0.1, 0.15, 0.2, 0.25, 0.3, 0.05, 0.35, 0.4, 0.45]
 
+/** The placement helpers' choices (DF83): which edges, holes on the flip axis or at corners. */
+export interface PlaceOptions {
+  /** Marks: across the front and back edges or the left and right ones (default: the longer pair). */
+  readonly edges?: 'frontBack' | 'leftRight' | undefined
+  /**
+   * Marks: how far the line runs inside the edge (default `AID.lineInside`); holes: the wall
+   * between the stock edge and the hole (default `AID.holeInset`).
+   */
+  readonly inset?: number | undefined
+}
+
 /**
- * Two line marks across opposite edges of the up face of `setup`, each 4 mm inside and 2 mm past
- * the edge, from opposite ends (as far apart as possible), at the first spot whose groove stays
- * out of the part (S18). `seen(p)` says whether a crossing point (setup frame) is on the outline
- * the later setup sees; the front/back pair is tried first, then left/right.
+ * Two line marks across opposite edges of the up face of `setup`, each `inset` (4 mm) inside and
+ * 2 mm past the edge, from opposite ends (as far apart as possible), at the first spot whose
+ * groove stays out of the part (S18). The longer pair of edges unless `edges` names one (DF83).
  */
 export function suggestMarks(
   plan: LoadedPlan,
   setup: SetupDTO,
   markD: number,
   port?: Region2dPort,
+  options: PlaceOptions = {},
 ): { from: Vec2; to: Vec2 }[] {
+  const inside = options.inset ?? AID.lineInside
   const size = setupXY(setup, stockSizeOf(plan))
   const [L, W] = size
   const outline = partOutline(plan, setup, port)
@@ -660,7 +684,7 @@ export function suggestMarks(
   const line = (e: FaceEdge, t: number) => {
     const p = e.at(t)
     return {
-      from: [p[0] + e.inward[0] * AID.lineInside, p[1] + e.inward[1] * AID.lineInside] as Vec2,
+      from: [p[0] + e.inward[0] * inside, p[1] + e.inward[1] * inside] as Vec2,
       to: [p[0] - e.inward[0] * AID.linePast, p[1] - e.inward[1] * AID.linePast] as Vec2,
     }
   }
@@ -672,7 +696,8 @@ export function suggestMarks(
     return line(e, T_STEPS[0]!)
   }
   // the longer pair of edges keeps the marks further apart
-  const [a, b] = L >= W ? [edges[0]!, edges[1]!] : [edges[2]!, edges[3]!]
+  const frontBack = options.edges === undefined ? L >= W : options.edges === 'frontBack'
+  const [a, b] = frontBack ? [edges[0]!, edges[1]!] : [edges[2]!, edges[3]!]
   return [pick(a), pick(b)].map((l) => ({ from: round2(l.from), to: round2(l.to) }))
 }
 
@@ -683,7 +708,8 @@ export function suggestMarks(
  * waste allows, else centred in the waste run along the axis, never closer than 0.5 mm to the
  * stock edge (a hole that cannot clear the part keeps its first spot: `inPart`). Without a flip
  * (a turn), near diagonally opposite corners of the up face (front-left and back-right), inset
- * by Ø/2 + 3 mm and moved inward along the diagonal until they stay out of the part.
+ * by Ø/2 + 3 mm and moved inward along the diagonal until they stay out of the part. DF83:
+ * `options.inset` replaces the 3 mm wall.
  */
 export function suggestHoles(
   plan: LoadedPlan,
@@ -691,13 +717,15 @@ export function suggestHoles(
   diameter: number,
   port?: Region2dPort,
   axis?: Pick<FlipAxis, 'from' | 'to'>,
+  options: PlaceOptions = {},
 ): Vec2[] {
   const size = setupXY(setup, stockSizeOf(plan))
   const [L, W] = size
   const outline = partOutline(plan, setup, port)
   const r = diameter / 2
-  if (axis !== undefined) return axisHoles(axis, r, size, outline)
-  const inset = r + 3
+  const wallMm = options.inset ?? AID.holeInset
+  if (axis !== undefined) return axisHoles(axis, r, size, outline, wallMm)
+  const inset = r + wallMm
   const place = (corner: Vec2, dir: Vec2): Vec2 => {
     const first: Vec2 = [corner[0] + dir[0] * inset, corner[1] + dir[1] * inset]
     for (let k = 0; k < 20; k++) {
@@ -719,6 +747,7 @@ function axisHoles(
   r: number,
   size: [number, number],
   outline: Vec2[][] | undefined,
+  insetMm: number,
 ): Vec2[] {
   const [L, W] = size
   const wall = (p: Vec2) => Math.min(p[0], L - p[0], p[1], W - p[1])
@@ -741,10 +770,11 @@ function axisHoles(
       } else if (lo !== undefined) break
     }
     const inset = (from: number, to: number): number | undefined => {
-      for (let s = from; s <= to + 1e-9; s += AXIS_STEP) if (wall(at(s)) >= r + 3 - 1e-9) return s
+      for (let s = from; s <= to + 1e-9; s += AXIS_STEP)
+        if (wall(at(s)) >= r + insetMm - 1e-9) return s
       return undefined
     }
-    if (lo === undefined || hi === undefined) return at(inset(0, max) ?? Math.min(max, r + 3))
+    if (lo === undefined || hi === undefined) return at(inset(0, max) ?? Math.min(max, r + insetMm))
     return at(inset(lo, hi) ?? (lo + hi) / 2)
   }
   return [fromEnd(a, dir), fromEnd(b, [-dir[0], -dir[1]])].map(round2)

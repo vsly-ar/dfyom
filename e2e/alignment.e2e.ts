@@ -7,9 +7,12 @@
 // panel (Q107: zero first, Next wrapping, every point checked where the pointer is, a re-zero with
 // the navigator's jog pad clearing the checks, confirm, back to the prompt) and the Bottom's run.
 // With DFYOM_RENDERS=1 light and dark renders go to design/features/renders/df78-aids-*.png,
-// df78-pick-*.png, df78-flip-axis-*.png, df78-align-panel-*.png.
+// df78-pick-*.png, df78-flip-axis-*.png, df78-align-panel-*.png. DF83: a registration hole's
+// depth into the spoilboard, peck depth and tool are changed in its inspector and the Top's
+// exported program follows each (renders df83-aid-hole-*.png, df83-aid-mark-*.png).
 // Windows stay hidden (fixture). Selectors are roles and accessible names.
 // Docs: docs/modes/alignment.md#implementation-slice-2, docs/conventions/testing.md#end-to-end
+import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import type { Page } from '@playwright/test'
 import type { CallReply, PreloadApi } from '../src/shared/preload-api'
@@ -218,6 +221,57 @@ test('alignment phase 1: aids for the flipped setup, picking, the alignment step
   await topOps.getByText('Witness mark 1').click()
   const aid = inspector.getByRole('region', { name: 'Alignment aid' })
   await expect(aid.getByLabel('Mark width', { exact: true })).toHaveValue(/^1/)
+  // DF83: the mark's depth by the 90° V-bit (0.5 mm for 1 mm wide)
+  await expect(aid.getByLabel('Mark depth', { exact: true })).toHaveValue(/^0\.5/)
+  await aid.scrollIntoViewIfNeeded()
+  await render(page, 'df83-aid-mark')
+
+  // ── DF83: a hole's depth, peck and tool, each seen in the Top's exported program ─────────────
+  const topId = plan.setups[0]!.id
+  let n = 0
+  /** The Top's program lines of Registration hole 1 (up to the next aid's label). */
+  const holeProgram = async (): Promise<string[]> => {
+    const target = test.info().outputPath(`top-${n++}.nc`)
+    await bridgeCall(page, 'plan.export', { planId, setupId: topId, target, confirm: true })
+    const lines = (await readFile(target, 'utf8')).split('\n')
+    const from = lines.indexOf('(Registration hole 1)')
+    const to = lines.indexOf('(Registration hole 2)')
+    expect(from).toBeGreaterThan(0)
+    expect(to).toBeGreaterThan(from)
+    return lines.slice(from, to)
+  }
+  const minZ = (lines: string[]) =>
+    Math.min(...lines.flatMap((l) => [...l.matchAll(/Z(-?[\d.]+)/g)].map((m) => Number(m[1]))))
+  const before = await holeProgram()
+  await topOps.getByText('Registration hole 1').click()
+  await expect(aid.getByLabel('Centre X', { exact: true })).toBeVisible()
+  const sb = aid.getByLabel('Into the spoilboard', { exact: true })
+  await sb.fill('5')
+  await sb.press('Enter')
+  await expect(sb).toHaveValue(/^5/)
+  const shallower = await holeProgram()
+  expect(minZ(shallower) - minZ(before)).toBeCloseTo(5, 2)
+  // the peck depth (the 25 mm hole is pecked by default, 6.2 mm per peck)
+  const strategy = inspector.getByRole('region', { name: 'Strategy' })
+  await expect(strategy.getByText('Peck', { exact: true })).toBeVisible()
+  const peck = strategy.getByLabel('Peck depth', { exact: true })
+  await peck.fill('2')
+  await peck.press('Enter')
+  await expect(peck).toHaveValue(/^2/)
+  const pecked = await holeProgram()
+  expect(pecked.length).toBeGreaterThan(shallower.length + 10)
+  expect(minZ(pecked)).toBeCloseTo(minZ(shallower), 2)
+  await strategy.scrollIntoViewIfNeeded()
+  await render(page, 'df83-aid-hole')
+  // the tool: the 6 mm end mill bores it as a helix (arcs instead of the drill's pecks)
+  const toolGroup = inspector.getByRole('region', { name: 'Tool' })
+  await toolGroup.getByRole('combobox', { name: 'Tool' }).click()
+  await page.getByRole('option', { name: /^Flat 6 · / }).click()
+  await expect(toolGroup.getByRole('combobox', { name: 'Tool' })).toHaveText(/Flat 6/)
+  await expect(strategy.getByText('Helical boring', { exact: true })).toBeVisible()
+  const bored = await holeProgram()
+  expect(bored.some((l) => /(^|\s)G[23](\s|$)/.test(l))).toBe(true)
+  expect(pecked.some((l) => /(^|\s)G[23](\s|$)/.test(l))).toBe(false)
 
   // ── the Bottom aligns on them; one more point picked in the viewport ───────────────────────
   await bottom.click({ position: { x: 24, y: 12 } })

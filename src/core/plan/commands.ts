@@ -1029,6 +1029,27 @@ const operationUpdate = defineCommand({
     }
     const all = collect(parsed)
     if (all.isErr()) return Err(all.unwrapErr().withContext(where))
+    // DF83: a witness mark's cut is fixed (one plunge or line at the depth of its Ø, S14), and a
+    // registration hole's breakthrough is its spoilboardDepth: both are set with plan.aid.set
+    if (args.strategy !== undefined && op.aid !== undefined) {
+      const keys = Object.keys(args.strategy)
+      const fixed = op.aid.kind === 'witnessMark' ? keys : keys.filter((k) => k === 'breakthrough')
+      if (fixed.length > 0)
+        return fail(
+          'plan.aid',
+          op.aid.kind === 'witnessMark'
+            ? "a witness mark's cut is fixed: set its markDiameter or markDepth with plan.aid.set"
+            : "a registration hole's depth below the stock is its spoilboardDepth (plan.aid.set)",
+          {
+            where,
+            issues: fixed.map((k) => ({
+              path: ['strategy', k],
+              rule: 'aidParameter',
+              message: 'set with plan.aid.set',
+            })),
+          },
+        )
+    }
     if (args.strategy !== undefined) {
       const s = applyStrategyArgs(kind, op.strategy, args.strategy, units)
       if (s.isErr()) return Err(s.unwrapErr().withContext(where))
