@@ -77,6 +77,42 @@ describe('OverridesSection (DF85)', () => {
     await expectNoAxeViolations()
   })
 
+  it("floors the spindle at the spindle's minimum speed for the programmed S (DF86)", async () => {
+    const onChange = vi.fn(async () => {})
+    const machine = { maxSpindle: 24000, minSpindle: 6200, spindleControl: 'gcode' } as const
+    const at = (spindle: number, programmed = 18000) =>
+      statusWith({
+        overrides: { feed: 100, rapid: 100, spindle },
+        job: { ...statusWith().job!, programmed: { feed: 3000, spindle: programmed } },
+      })
+    const view = renderUi(
+      <OverridesSection status={at(40)} onChange={onChange} machine={machine} />,
+    )
+    const reason =
+      "From 35 %: lower is below the spindle's minimum speed (6200 rpm). " +
+      "Up to 133 %: the machine's max spindle speed is 24000 rpm."
+    expect(group('Spindle').getByText(reason)).toBeInTheDocument()
+    const slider = group('Spindle').getByRole('slider', { name: 'Spindle override' })
+    expect(slider).toHaveAccessibleDescription(/below the spindle's minimum speed \(6200 rpm\)/)
+    expect(screen.getAllByTestId('slider-below')).toHaveLength(1)
+    act(() => slider.focus())
+    await view.user.keyboard('{Home}')
+    expect(onChange).toHaveBeenLastCalledWith({ spindle: 35 })
+    // −10 % past the floor goes to the floor; at the floor it is disabled
+    const minus = () =>
+      group('Spindle').getByRole('button', { name: 'Decrease spindle override by 10 %' })
+    await view.user.click(minus())
+    expect(onChange).toHaveBeenLastCalledWith({ spindle: 35 })
+    view.rerender(<OverridesSection status={at(35)} onChange={onChange} machine={machine} />)
+    expect(minus()).toBeDisabled()
+    await expectNoAxeViolations()
+    // spindle off (S 0): no floor, GRBL's range only
+    view.rerender(<OverridesSection status={at(35, 0)} onChange={onChange} machine={machine} />)
+    expect(group('Spindle').queryByText(/minimum speed/)).toBeNull()
+    expect(screen.queryByTestId('slider-below')).toBeNull()
+    expect(minus()).toBeEnabled()
+  })
+
   it('disables the spindle with the reason on a manual spindle or in laser mode', async () => {
     const onChange = vi.fn(async () => {})
     const view = renderUi(

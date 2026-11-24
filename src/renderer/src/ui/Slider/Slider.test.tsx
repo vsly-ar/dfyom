@@ -7,6 +7,7 @@ import { Slider } from './Slider'
 function Controlled(props: {
   start: number
   limit?: number
+  floor?: number
   onCommit?: (v: number) => void
 }): React.JSX.Element {
   const [v, setV] = useState(props.start)
@@ -18,6 +19,7 @@ function Controlled(props: {
       value={v}
       onValueChange={setV}
       limit={props.limit}
+      floor={props.floor}
       marks={[100]}
       valueText={(x) => `${x} %`}
       {...(props.onCommit === undefined ? {} : { onValueCommit: props.onCommit })}
@@ -51,10 +53,22 @@ describe('Slider', () => {
     expect(thumb).toHaveAttribute('aria-valuenow', '166')
   })
 
+  it('stops at the floor and hatches the track below it', async () => {
+    const { user } = renderUi(<Controlled start={40} floor={35} />)
+    const thumb = screen.getByRole('slider', { name: 'Feed override' })
+    expect(screen.getByTestId('slider-below')).toHaveStyle({ left: '0px' })
+    expect(screen.queryByTestId('slider-beyond')).toBeNull()
+    await user.tab()
+    await user.keyboard('{PageDown}')
+    expect(thumb).toHaveAttribute('aria-valuenow', '35')
+    await user.keyboard('{Home}')
+    expect(thumb).toHaveAttribute('aria-valuenow', '35')
+  })
+
   it('has no axe violations', async () => {
     renderUi(
       <>
-        <Controlled start={120} limit={150} />
+        <Controlled start={120} limit={150} floor={30} />
         <Slider
           label="Spindle override"
           min={10}
