@@ -92,18 +92,22 @@ type StockDialogProps = Pick<
 export function StockSetup({
   units,
   projectName,
+  partName: initialName,
   onCreated,
   dialog,
 }: {
   units: UnitSystem
   /** The project's name: the part is named after it (DF12). */
   projectName: string
+  /** The name field's start value (another part, split parts S0); default "<project> 1". */
+  partName?: string
   /** The part was created. */
-  onCreated?: () => void
+  onCreated?: (partId: string) => void
   dialog: StockDialogProps
 }): React.JSX.Element {
   const call = useCommand()
-  const [partName, setPartName] = useState(() => m.firstPartName(projectName))
+  const fallbackName = initialName ?? m.firstPartName(projectName)
+  const [partName, setPartName] = useState(fallbackName)
   const [library, setLibrary] = useState<readonly LibraryStock[]>([])
   const [itemId, setItemId] = useState<string | null>(null)
   const [size, setSize] = useState(() => DEFAULT_SIZE[units].map((s) => parseLength(s, units)))
@@ -180,7 +184,7 @@ export function StockSetup({
   const create = async () => {
     setBusy(true)
     setError(undefined)
-    const name = partName.trim() || m.firstPartName(projectName)
+    const name = partName.trim() || fallbackName
     const r = await call(
       'design.part.add',
       item !== undefined && !changed
@@ -189,7 +193,7 @@ export function StockSetup({
     )
     setBusy(false)
     if (!r.ok) return failed(r.error)
-    onCreated?.()
+    onCreated?.((r.value as { partId: string }).partId)
   }
 
   /** Saves to the library: add (no stock chosen, or a variant) or update the chosen one. */

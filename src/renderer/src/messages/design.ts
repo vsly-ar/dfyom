@@ -356,6 +356,30 @@ export const designMessages = {
     cancel: 'Cancel',
   },
 
+  /** The part menu (split parts S0, ui.md § Part menu): switch, add and remove parts. */
+  parts: {
+    menu: 'Parts',
+    group: 'Parts',
+    switchTo: (name: string) => `Show ${name}`,
+    newPart: 'New part…',
+    newTitle: 'New part',
+    newDescription: 'Another part of this project, cut from its own block.',
+    /** "<project> <n>" with the first number no part uses yet. */
+    nextName: (project: string, used: readonly string[]) => {
+      const base = project.trim() === '' ? 'Part' : project.trim()
+      let n = used.length + 1
+      while (used.includes(`${base} ${n}`)) n += 1
+      return `${base} ${n}`
+    },
+    remove: (name: string) => `Remove ${name}`,
+    inUse: (plan: string) => `${plan} is in use; archive it in Plan first.`,
+    confirmTitle: (name: string) => `Remove ${name}?`,
+    confirmDescription: (plans: number) =>
+      `Its ${plans === 1 ? 'plan is' : `${plans} plans are`} removed too. Undo brings both back.`,
+    confirmAction: 'Remove part',
+    count: (n: number) => (n === 1 ? '1 part' : `${n} parts`),
+  },
+
   /** Drag to reorder and Alt+↑/↓ in the design lists (D45, ui.md § Reordering lists). */
   reorder: {
     grip: 'Drag to reorder (Alt+↑/↓)',

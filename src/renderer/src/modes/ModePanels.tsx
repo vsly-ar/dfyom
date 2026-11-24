@@ -11,13 +11,22 @@ import { DesignInspector } from './design/DesignInspector'
 import { DesignNavigator } from './design/DesignNavigator'
 import { DesignStatus } from './design/DesignStatus'
 import { PartSetupDialogs, PartSetupTools } from './design/PartSetupDialogs'
-import { designPart } from './design/model'
+import { useDesignPartOf } from './design/useDesign'
 import { useDesignScene, type SceneProps } from './design/useDesignScene'
 import styles from './ModePanels.module.css'
 import { PlanInspector, PlanNavigator, PlanStatus, usePlanPartScene, usePlanScene } from './plan'
 import { JogHotkeys, RunInspector, RunNavigator, useRunScene } from './run'
 
 const m = shellMessages.empty
+
+/** Design's navigator and inspector show the window's part (split parts S0: the part menu's choice). */
+function DesignNavigatorOf({ doc }: { doc: ProjectDoc }): React.JSX.Element {
+  return <DesignNavigator part={useDesignPartOf(doc)} />
+}
+
+function DesignInspectorOf({ doc }: { doc: ProjectDoc }): React.JSX.Element {
+  return <DesignInspector part={useDesignPartOf(doc)} />
+}
 
 export interface ModePanelProps {
   mode: AppMode
@@ -48,7 +57,7 @@ export function ModeNavigator({ mode, doc, onMode }: ModePanelProps): React.JSX.
     const parts = Object.values(doc.parts)
     switch (mode) {
       case 'design':
-        return <DesignNavigator part={designPart(doc)} />
+        return <DesignNavigatorOf doc={doc} />
       case 'plan':
         return parts.length === 0 ? (
           <EmptyState
@@ -95,7 +104,7 @@ export function ModeDialogs({
 }
 
 export function ModeInspector({ mode, doc }: Omit<ModePanelProps, 'onMode'>): React.JSX.Element {
-  if (mode === 'design' && doc !== undefined) return <DesignInspector part={designPart(doc)} />
+  if (mode === 'design' && doc !== undefined) return <DesignInspectorOf doc={doc} />
   if (mode === 'plan' && doc !== undefined && Object.keys(doc.parts).length > 0)
     return <PlanInspector doc={doc} />
   if (mode === 'run') return <RunInspector doc={doc} />

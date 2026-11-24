@@ -11,7 +11,8 @@ import type { ProjectDoc } from '../../../../core/project/document'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { NewMachineDialog } from '../../library/NewMachineDialog'
 import { planMessages } from '../../messages/plan'
-import { useShell, useSettings } from '../../shell/ShellContext'
+import { useShell, useSettings, useUi } from '../../shell/ShellContext'
+import { useDesignPartOf } from '../design/useDesign'
 import { Button, ErrorMessage, Field, FieldIcon, Icon, Select } from '../../ui'
 import { usePlanCommand } from './plan-store'
 import styles from './Plan.module.css'
@@ -29,9 +30,10 @@ export function PlanStartOverlay({
   insetRight?: number
 }): React.JSX.Element | null {
   const [plan] = useChosenPlan(doc)
-  const part = Object.values(doc.parts)[0]
+  // the part Design shows (split parts S0); the card's Part field switches it, so the view follows
+  const part = useDesignPartOf(doc)
   if (plan !== undefined || part === undefined) return null
-  return <PlanStartCard doc={doc} partId={part.id} insetRight={insetRight} />
+  return <PlanStartCard doc={doc} partId={part.dto.id} insetRight={insetRight} />
 }
 
 /** The preselected machine: the last one used while it is in the library, else the only one. */
@@ -61,6 +63,8 @@ function PlanStartCard({
   const machines = useLibraryItems('machine', machinesAdded)
   /** The user's choice in this card; until one, the preselection. */
   const [picked, setPicked] = useState<string | undefined>(undefined)
+  const setPart = useUi((s) => s.setDesignPart)
+  const parts = Object.values(doc.parts)
   const titleId = useId()
   const descriptionId = useId()
   const whyId = useId()
@@ -120,6 +124,17 @@ function PlanStartCard({
           <p id={descriptionId} className={styles['startText']}>
             {m.description}
           </p>
+          {parts.length > 1 ? (
+            <div className={styles['startMachine']}>
+              <Field label={m.part} kind="toggle" className={styles['startField']}>
+                <Select
+                  options={parts.map((p) => ({ value: p.id, label: p.name }))}
+                  value={partId}
+                  onValueChange={setPart}
+                />
+              </Field>
+            </div>
+          ) : null}
           {machines === undefined ? null : empty ? (
             <div className={styles['startMachine']}>
               <p id={whyId} className={styles['why']}>

@@ -28,7 +28,7 @@ export type UnitSystem = z.output<typeof UnitSystemSchema>
 export const ProjectDocSchema = z.object({
   name: z.string().describe('Project name'),
   unitSystem: UnitSystemSchema,
-  parts: z.record(z.string(), PartDtoSchema).default({}).describe('Parts by id (v0.1: one)'),
+  parts: z.record(z.string(), PartDtoSchema).default({}).describe('Parts by id'),
   snapshots: z
     .record(z.string(), SnapshotDtoSchema)
     .default({})

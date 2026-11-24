@@ -514,6 +514,17 @@ Decided by the user in the v0.4 UI review (D45, 2026-11-22): stock, shapes and r
 - **Opens by itself:** the Stock dialog opens when a window in Design shows a project without a part, once per project and window (`stockOfferedFor` in the UI store, keyed by the replica's project key): a new project starts there. Closing it without a part leaves the sidebar's empty state; undoing "Create part" does not reopen it. A part made elsewhere while it is open (an agent, another window) closes it; a Stock dialog the user opened stays.
 - **Unchanged elsewhere:** "Edit shape" links and the operation inspector's shape field select shapes as before; selection, the inspectors and the commands are the same. Agents never open these dialogs.
 
+### Part menu (split parts S0)
+
+A project holds several parts ([split-parts.md § Prerequisite](../modes/split-parts.md#prerequisite-several-parts-per-project), Q111). Design shows one part at a time; which one is **window state** (ui-store `designPart`, never saved, no undo step; a removed or unknown part, and a newly bound project, fall back to the first part).
+
+- **Trigger:** a small `chevron-down` icon button "Parts" right after the part name in the [part row](#design-sidebar-and-setup-dialogs-v04-d45) ("Parts (2 parts)" while there are several, so the row says other parts exist). The name button keeps its role (clears the selection).
+- **Menu** (`Menu`, labelled by its trigger): a group "Parts" with every part in document order as `menuitemradio` items, the shown one `aria-checked` with an amber check at the end; then "New part…" and "Remove <part>" (danger). Choosing a part shows it: the operation list, inspector, viewport scene, warnings, stock read-out and the part-setup dialogs follow; the design selection clears and the Reference panel and Shape Editor close. Pieces of a split (4a) will list indented under their source.
+- **New part…:** the [Stock dialog](#stock-dialog-df11df13) titled "New part" ("Another part of this project, cut from its own block."), its name field prefilled "<project> <n>" with the first number no part uses; "Create part" sends `design.part.add` and shows the new part. The first part still comes from the Stock dialog that opens by itself.
+- **Rename:** the part inspector's Name field (`design.part.update { partId, name }`), as before.
+- **Remove:** `design.part.remove`. Without plans: removed at once with the undo toast "Removed <part>" (decision 11). With plans: a `ConfirmDialog` "Remove <part>?" – "Its plan is removed too. Undo brings both back." – with "Remove part", since plans are removed with a confirmation everywhere ([Confirmations](#confirmations)). A plan of the part in use disables the item with the reason ("<plan> is in use; archive it in Plan first.").
+- **Plan:** the [Plan start card](#plan-start-df29) gets a **Part** field while there are several parts (preselected: the part Design shows; choosing one also switches Design's part, so the view behind the card follows); the plan picker names each plan with its part ("Plan 1 · Lid") while there are several, and the plan menu's "New plan" becomes a group "New plan for" listing the parts. Run's plan picker uses the same names, and the setup-change picture is captioned with the plan's part.
+
 ### Stock dialog (DF11–DF13)
 
 The user's dogfood findings ([hardening.md](../plans/hardening.md) intake DF11–DF13) reshape the Stock dialog's setup for a project without a part ([library.md § Stock variants](../architecture/library.md#stock-variants-df13)):
@@ -1085,14 +1096,14 @@ Warnings never block ([design.md](../modes/design.md#dfm-checks), [plan-v0.1.md]
 
 Policy ([decision 11](#decisions)): **undo instead of confirm** for document edits; confirm only what cannot be undone.
 
-| Action                                                                           | Confirmation                                                                                                                                          |
-| -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Document edits incl. removing operations                                         | None; undo toast.                                                                                                                                     |
-| `plan.remove`, library item delete, discard recovery, close with unsaved changes | `ConfirmDialog` naming the item and the consequence; the destructive button names the action ("Remove plan"), never "OK".                             |
-| `run.job.start`                                                                  | Pre-flight dialog before every run, the virtual machine included: plan, machine copy, work zero, tools in order, soft-limit check result, time scale. |
-| `run.machine.unlock` (`$X`)                                                      | Confirm: "Position is not known until homed."                                                                                                         |
-| Quit with unsaved changes or during a run                                        | Native message boxes in main, in order (see below).                                                                                                   |
-| Feed hold, stop, `run.machine.reset`                                             | **Never** confirmed.                                                                                                                                  |
+| Action                                                                                                                      | Confirmation                                                                                                                                          |
+| --------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Document edits incl. removing operations                                                                                    | None; undo toast.                                                                                                                                     |
+| `plan.remove`, `design.part.remove` of a part with plans, library item delete, discard recovery, close with unsaved changes | `ConfirmDialog` naming the item and the consequence; the destructive button names the action ("Remove plan"), never "OK".                             |
+| `run.job.start`                                                                                                             | Pre-flight dialog before every run, the virtual machine included: plan, machine copy, work zero, tools in order, soft-limit check result, time scale. |
+| `run.machine.unlock` (`$X`)                                                                                                 | Confirm: "Position is not known until homed."                                                                                                         |
+| Quit with unsaved changes or during a run                                                                                   | Native message boxes in main, in order (see below).                                                                                                   |
+| Feed hold, stop, `run.machine.reset`                                                                                        | **Never** confirmed.                                                                                                                                  |
 
 `ConfirmDialog` focuses the safe choice (Cancel) first, except the run pre-flight, which focuses "Start run" only after the checks pass.
 

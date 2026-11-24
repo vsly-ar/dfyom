@@ -396,4 +396,13 @@ describe('design.reference.update / remove / list', () => {
     await s.undo()
     expect(s.d.doc).toEqual(before)
   })
+
+  it("design.part.remove removes the part's references with it (split parts S0)", async () => {
+    const { s, id } = await imported()
+    const before = s.d.doc
+    await s.run('design.part.remove', { partId: s.partId })
+    expect(s.d.doc.references[id]).toBeUndefined()
+    await s.undo()
+    expect(s.d.doc).toEqual(before)
+  })
 })

@@ -72,6 +72,13 @@ export interface UiState {
   /** The open part-setup dialog of design mode (ui.md § Design sidebar and setup dialogs), or null. */
   readonly designDialog: DesignDialog | null
   setDesignDialog(dialog: DesignDialog | null): void
+  /**
+   * The part Design shows (split parts S0: window state, not document state); null or a removed
+   * part: the first part. Switching clears the design selection and closes the Reference panel
+   * and the Shape Editor. Doc: docs/modes/split-parts.md#prerequisite-several-parts-per-project
+   */
+  readonly designPart: string | null
+  setDesignPart(partId: string | null): void
   /** The project key the Stock dialog opened by itself for (once per project and window). */
   readonly stockOfferedFor: string | null
   markStockOffered(key: string): void
@@ -110,7 +117,7 @@ export interface UiState {
   /** The import's own warnings (unit guess, open mesh, many triangles) per reference, this window. */
   readonly referenceNotes: Readonly<Record<string, readonly ReferenceWarning[]>>
   setReferenceNotes(id: string, notes: readonly ReferenceWarning[]): void
-  /** The window's project changed: every reference shows again, notes are dropped. */
+  /** The window's project changed: every reference shows again, notes are dropped, Design shows the first part. */
   resetReferenceView(): void
   /** Shape Editor (task U1): selected item and segment, null outside the editor. */
   readonly shapeEditor: ShapeEditorState | null
@@ -243,7 +250,8 @@ export interface LastImport {
 }
 
 /** Design mode's part-setup dialogs (D45): set once per project, opened from the toolbar. */
-export type DesignDialog = 'stock' | 'shapes'
+/** `newPart`: the Stock dialog creating another part (split parts S0). */
+export type DesignDialog = 'stock' | 'shapes' | 'newPart'
 
 /** A reference's placement while Fit mode previews it (mm, degrees; DF5). */
 export interface ReferencePreview {
@@ -265,6 +273,19 @@ export function createUiStore(initial: Partial<Pick<UiState, 'mode'>> = {}): UiS
     setConnectAgentOpen: (connectAgentOpen) => set({ connectAgentOpen }),
     designDialog: null,
     setDesignDialog: (designDialog) => set({ designDialog }),
+    designPart: null,
+    setDesignPart: (designPart) =>
+      set((s) =>
+        s.designPart === designPart
+          ? {}
+          : {
+              designPart,
+              selection: { ...s.selection, design: null },
+              referencePanel: false,
+              referencePreview: null,
+              shapeEditor: null,
+            },
+      ),
     stockOfferedFor: null,
     markStockOffered: (stockOfferedFor) => set({ stockOfferedFor }),
     selection: { design: null, plan: null, run: null },
@@ -310,7 +331,8 @@ export function createUiStore(initial: Partial<Pick<UiState, 'mode'>> = {}): UiS
     referenceNotes: {},
     setReferenceNotes: (id, notes) =>
       set((s) => ({ referenceNotes: { ...s.referenceNotes, [id]: notes } })),
-    resetReferenceView: () => set({ hiddenReferences: new Set(), referenceNotes: {} }),
+    resetReferenceView: () =>
+      set({ hiddenReferences: new Set(), referenceNotes: {}, designPart: null }),
     shapeEditor: null,
     selectShapeItem: (shapeId, item, segment = null) =>
       set({ shapeEditor: { shapeId, item, segment } }),

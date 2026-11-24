@@ -38,6 +38,14 @@
   overflow-wrap: anywhere;
 }
 
+/* the part menu's trigger right after the name (split parts S0): small, kept on the name's line */
+.partLine .partMenu {
+  align-self: center;
+  width: var(--control-sm);
+  height: var(--control-sm);
+  margin: calc(var(--space-1) * -1) 0 calc(var(--space-1) * -1) calc(var(--space-1) * -1);
+}
+
 .stockReadout {
   min-width: 0;
   padding: 0;

@@ -13,11 +13,11 @@ import { libraryMessages } from '../../messages/library'
 import { useReplica, useUi } from '../../shell/ShellContext'
 import { Button, Dialog, DialogClose, Icon, Toolbar, ToolbarButton } from '../../ui'
 import styles from './Design.module.css'
-import { designPart, type DesignPart } from './model'
+import type { DesignPart } from './model'
 import { partReferences } from './reference-view'
 import { ShapeList } from './ShapeList'
 import { StockSetup } from './StockSetup'
-import { useDesignSelection } from './useDesign'
+import { useDesignPartOf, useDesignSelection } from './useDesign'
 
 const m = designMessages.setup
 const s = designMessages.stock
@@ -29,7 +29,7 @@ export function PartSetupTools({ doc }: { doc: ProjectDoc }): React.JSX.Element 
   const openPanel = useUi((st) => st.openReferencePanel)
   const closePanel = useUi((st) => st.closeReferencePanel)
   const [selected] = useDesignSelection()
-  const part = designPart(doc)
+  const part = useDesignPartOf(doc)
   return (
     <Toolbar label={m.toolbar} className={styles['setupTools']}>
       <ToolbarButton
@@ -84,8 +84,9 @@ export function PartSetupDialogs({
   const offeredFor = useUi((st) => st.stockOfferedFor)
   const markOffered = useUi((st) => st.markStockOffered)
   const setRemovedToast = useUi((st) => st.setRemovedToast)
+  const setDesignPart = useUi((st) => st.setDesignPart)
   const [, select] = useDesignSelection()
-  const part = designPart(doc)
+  const part = useDesignPartOf(doc)
   const hasPart = part !== undefined
   // the opener (a toolbar button, the stock read-out) gets the focus back on close: the dialogs
   // have no Radix trigger. A layout effect runs before Radix moves the focus into the dialog.
@@ -157,11 +158,14 @@ export function PartSetupDialogs({
       {part === undefined ? (
         // the setup renders its own dialog, so Create part sits in the footer beside Cancel;
         // mounted while open only, so each opening starts from fresh form state
-        dialog === 'stock' ? (
+        dialog === 'stock' || dialog === 'newPart' ? (
           <StockSetup
             units={doc.unitSystem}
             projectName={doc.name}
-            onCreated={close}
+            onCreated={(partId) => {
+              setDesignPart(partId)
+              close()
+            }}
             dialog={{
               title: m.stock,
               description: s.setupDescription,
@@ -171,6 +175,27 @@ export function PartSetupDialogs({
             }}
           />
         ) : null
+      ) : dialog === 'newPart' ? (
+        // another part (split parts S0): the same stock setup, named "<project> <n>"
+        <StockSetup
+          units={doc.unitSystem}
+          projectName={doc.name}
+          partName={designMessages.parts.nextName(
+            doc.name,
+            Object.values(doc.parts).map((p) => p.name),
+          )}
+          onCreated={(partId) => {
+            setDesignPart(partId)
+            close()
+          }}
+          dialog={{
+            title: designMessages.parts.newTitle,
+            description: designMessages.parts.newDescription,
+            open: true,
+            onOpenChange,
+            onCloseAutoFocus: returnFocus,
+          }}
+        />
       ) : (
         <Dialog
           title={m.stock}

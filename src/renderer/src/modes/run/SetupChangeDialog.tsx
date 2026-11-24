@@ -13,6 +13,7 @@ import { DIRECTION_LABEL } from '../../../../core/geometry/face'
 import type { ProjectDoc } from '../../../../core/project/document'
 import type { SetupOrientation } from '../../../../core/toolpath/wcs'
 import { formatHeight } from '../../messages/plan'
+import { planPartName } from '../plan/model'
 import { runMessages } from '../../messages/run'
 import { Icon, Button, Dialog } from '../../ui'
 import { JogPad, useJogControls } from './JogPad'
@@ -101,6 +102,7 @@ export function SetupChangeDialog({ doc }: { doc: ProjectDoc }): React.JSX.Eleme
           zeroText={zeroText}
           points={placed.points}
           current={stepOf(status.alignment, planId, info.setup.id)?.current}
+          caption={planPartName(doc, plan)}
         />
       ) : null}
       <ol className={styles['steps']}>
@@ -203,6 +205,7 @@ export function SetupPicture({
   points = [],
   current,
   compact = false,
+  caption,
 }: {
   orientation: SetupOrientation
   /** DF78 (N7): the work zero from the front-left corner of the top (mm); the ring is drawn there. */
@@ -219,6 +222,8 @@ export function SetupPicture({
   current?: string | undefined
   /** In the alignment panel (Q107): narrower, without the faces legend. */
   compact?: boolean
+  /** The part on the stock, named while the project has several (split parts S0). */
+  caption?: string | undefined
 }): React.JSX.Element {
   const [X, Y, Z] = orientation.size
   const corners: P3[] = [
@@ -250,6 +255,9 @@ export function SetupPicture({
   const ring = at([zero[0], zero[1], 0]).split(',').map(Number) as [number, number]
   return (
     <figure className={styles['setupPicture']} data-compact={compact || undefined}>
+      {caption !== undefined ? (
+        <figcaption className={styles['pictureCaption']}>{caption}</figcaption>
+      ) : null}
       <svg
         viewBox={`0 0 ${W} ${H}`}
         role="img"

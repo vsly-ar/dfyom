@@ -1145,3 +1145,11 @@
 .gcodeRow[data-state='sent'] .gcodeMark {
   border-color: var(--text-muted);
 }
+
+/* split parts S0: the part on the stock, named while the project has several */
+.pictureCaption {
+  flex-basis: 100%;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  color: var(--text);
+}

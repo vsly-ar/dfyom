@@ -29,7 +29,7 @@ Operations specify tool _requirements_ (e.g. facing: "a fly cutter or any flat e
 
 ## Part and stock (v0.1)
 
-- One **part** per project in v0.1; the data model keeps a list of parts, so several parts need no format change later (record `parts/<id>.json`, [persistence.md](../architecture/persistence.md#working-folder-layout)): `{ id, name, stock, generalTolerance?, operations[] }`.
+- A project holds **several parts** (one until split parts S0 lifted rule `onePart`, [split-parts.md § Prerequisite](split-parts.md#prerequisite-several-parts-per-project)); each is a record `parts/<id>.json` ([persistence.md](../architecture/persistence.md#working-folder-layout)): `{ id, name, stock, generalTolerance?, operations[] }`, with its own stock snapshot. Every design command and query names its part by `partId`; plans pick their part (`plan.create { partId }`). The UI shows one part at a time ([ui.md § Part menu](../conventions/ui.md#part-menu-split-parts-s0)).
 - `stock` is the id of a `block` stock **snapshot** ([library.md](../architecture/library.md#stock)) ([library references](../architecture/persistence.md#library-references)); the stock is the starting body: `part = stock − …` ([geometry.md](../architecture/geometry.md#principle-geometry-comes-from-material-removal)).
 - **Part zero** is the top face's front-left corner: X right, Y back, Z up; the stock occupies `0..length × 0..width × −thickness..0`.
 - Stock surfaces: `stock.top`, `stock.bottom`, `stock.side[0..3]` (0 = front, then counter-clockwise seen from above).
@@ -125,14 +125,15 @@ The removal region is a slot of `slotWidth` beside the shape (outside it for `ou
 
 Names follow [commands.md](../architecture/commands.md#naming); all are `document` commands, one gesture = one command. Quantities are passed as entered (`"1/16\""`); `Shape` as in [Positioning](#positioning-v01).
 
-| Command                                                                | Args                                                                     | Result                      |
-| ---------------------------------------------------------------------- | ------------------------------------------------------------------------ | --------------------------- |
-| `design.part.add`                                                      | `{ name, stockLibraryItemId }` or `{ name, stock }` – takes the snapshot | `{ partId }`                |
-| `design.part.update`                                                   | `{ partId, name?, generalTolerance? }`                                   | `{ warnings }`              |
-| `design.facing.add` / `.pocket.add` / `.drilling.add` / `.profile.add` | `{ partId, name?, on?, …parameters }` – omitted parameters take defaults | `{ operationId, warnings }` |
-| `design.facing.update` / `.pocket.update` / …                          | `{ partId, operationId, …parameters to change }`                         | `{ warnings }`              |
-| `design.operation.remove`                                              | `{ partId, operationId }`                                                | `{ warnings }`              |
-| `design.operation.move`                                                | `{ partId, operationId, toIndex }`                                       | `{ warnings }`              |
+| Command                                                                | Args                                                                             | Result                      |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------- | --------------------------- |
+| `design.part.add`                                                      | `{ name, stockLibraryItemId }` or `{ name, stock }` – takes the snapshot         | `{ partId }`                |
+| `design.part.update`                                                   | `{ partId, name?, generalTolerance? }`                                           | `{ warnings }`              |
+| `design.part.remove` (S0)                                              | `{ partId, confirm? }` – with its references, plans (`confirm: true`), snapshots | `{ removedPlans }`          |
+| `design.facing.add` / `.pocket.add` / `.drilling.add` / `.profile.add` | `{ partId, name?, on?, …parameters }` – omitted parameters take defaults         | `{ operationId, warnings }` |
+| `design.facing.update` / `.pocket.update` / …                          | `{ partId, operationId, …parameters to change }`                                 | `{ warnings }`              |
+| `design.operation.remove`                                              | `{ partId, operationId }`                                                        | `{ warnings }`              |
+| `design.operation.move`                                                | `{ partId, operationId, toIndex }`                                               | `{ warnings }`              |
 
 - v0.1: `design.part.add` fails with `model.invariant` when the project already has a part; `design.drilling.add` adds one hole.
 - `design.part.add` takes exactly one of `stockLibraryItemId` (a linked copy of a library block) and `stock` (since DF13: the block's values as in `library.stock.add`, quantity strings, bare numbers in the project's unit system; the part's own stock with no library link, [library.md § Snapshots](../architecture/library.md#snapshots)). Neither or both is `input.malformed` (rule `stockSource`).
