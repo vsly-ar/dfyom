@@ -9,10 +9,10 @@ G90 G94 G17 G20
 G54
 G0 Z0.3937
 (op-facing)
-(DFYOM TOOL CHANGE 1: 10 mm flat end mill)
+(DFYOM TOOL CHANGE 1: 10 mm flat end mill, 0.3937 in flat)
 M3 S18000
 (Set spindle to 18000 rpm)
-M0
+M0 ;Set spindle to 18000 rpm
 X1.4173 Y0.1575
 Z0.0787
 G1 Z-0.0197 F11.8
@@ -24,16 +24,17 @@ X-0.2362
 G0 Z0.0787
 Z0.3937
 (op-drill1)
+(Tool change to T2: spindle off, retract)
 M5
 (Stop the spindle)
-(DFYOM TOOL CHANGE 2: 6 mm drill)
-M0
+(DFYOM TOOL CHANGE 2: 6 mm drill, 0.2362 in drill)
+M0 ;Stop spindle, install T2 6 mm drill, 0.2362 in drill, then zero Z
 G90 G94 G17 G20
 G54
 G0 Z0.3937
 M3 S3000
 (Set spindle to 3000 rpm)
-M0
+M0 ;Set spindle to 3000 rpm
 X0.3937 Y0.5906
 Z0.0787
 G1 Z-0.1969 F5.9
@@ -58,16 +59,17 @@ G1 Z-0.5434
 G0 Z0.0787
 Z0.3937
 (op-profile1)
+(Tool change to T3: spindle off, retract)
 M5
 (Stop the spindle)
-(DFYOM TOOL CHANGE 3: 6 mm flat end mill)
-M0
+(DFYOM TOOL CHANGE 3: 6 mm flat end mill, 0.2362 in flat)
+M0 ;Stop spindle, install T3 6 mm flat, 0.2362 in flat, then zero Z
 G90 G94 G17 G20
 G54
 G0 Z0.3937
 M3 S18000
 (Set spindle to 18000 rpm)
-M0
+M0 ;Set spindle to 18000 rpm
 X2.0866 Y0.7874
 Z0.0787
 G1 Z0 F11.8
@@ -168,5 +170,5 @@ G0 Z0.0787
 Z0.3937
 M5
 (Stop the spindle)
-M0
+M0 ;Stop the spindle
 M30

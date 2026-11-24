@@ -14,10 +14,10 @@ G90 G94 G17 G21
 G54
 G0 Z10
 (Pocket 2)
-(DFYOM TOOL CHANGE 1: Flat 6)
+(DFYOM TOOL CHANGE 1: Flat 6, 6 mm flat)
 M3 S16000
 (Set spindle to 16000 rpm)
-M0
+M0 ;Set spindle to 16000 rpm
 X127.5 Y90.1
 Z2
 G1 Z0 F600
@@ -92,5 +92,5 @@ G0 Z2
 Z10
 M5
 (Stop the spindle)
-M0
+M0 ;Stop the spindle
 M30

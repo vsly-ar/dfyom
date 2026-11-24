@@ -15,10 +15,10 @@ G90 G94 G17 G21
 G54
 G0 Z10
 (Drilling 1, Drilling 2, Drilling 3, Drilling 4)
-(DFYOM TOOL CHANGE 1: Drill 3)
+(DFYOM TOOL CHANGE 1: Drill 3, 3 mm drill)
 M3 S5000
 (Set spindle to 5000 rpm)
-M0
+M0 ;Set spindle to 5000 rpm
 X39 Y48.2
 Z2
 G1 Z-4.801 F250
@@ -40,16 +40,17 @@ G1 Z-4.801
 G0 Z2
 Z10
 (Profile 2)
+(Tool change to T2: spindle off, retract)
 M5
 (Stop the spindle)
-(DFYOM TOOL CHANGE 2: Flat 6)
-M0
+(DFYOM TOOL CHANGE 2: Flat 6, 6 mm flat)
+M0 ;Stop spindle, install T2 Flat 6, 6 mm flat, then zero Z
 G90 G94 G17 G21
 G54
 G0 Z10
 M3 S16000
 (Set spindle to 16000 rpm)
-M0
+M0 ;Set spindle to 16000 rpm
 X97.5 Y82.5
 Z2
 G1 Z0 F600
@@ -61,5 +62,5 @@ G0 Z2
 Z10
 M5
 (Stop the spindle)
-M0
+M0 ;Stop the spindle
 M30

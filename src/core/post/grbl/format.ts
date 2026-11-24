@@ -46,6 +46,11 @@ const REPLACE: Readonly<Record<string, string>> = {
  * whitespace → space, anything else → `_`.
  */
 export function sanitizeComment(text: string): string {
+  return sanitizeChars(text).replace(/ {2,}/g, ' ').trim()
+}
+
+/** `sanitizeComment` per character, spaces kept as they are. */
+function sanitizeChars(text: string): string {
   let out = ''
   for (const ch of text) {
     const c = ch.codePointAt(0) ?? 0
@@ -55,7 +60,7 @@ export function sanitizeComment(text: string): string {
     else if (/\s/u.test(ch)) out += ' '
     else out += '_'
   }
-  return out.replace(/ {2,}/g, ' ').trim()
+  return out
 }
 
 /**
@@ -63,18 +68,45 @@ export function sanitizeComment(text: string): string {
  * word boundary (a space, after a comma) instead of mid-word, unless that drops over half of it.
  */
 export function commentLine(text: string): string {
+  return `(${fitComment(text, MAX_LINE_BYTES - 2)})`
+}
+
+/** `text` sanitized and cut to `room` bytes at a word boundary (as `commentLine`). */
+function fitComment(text: string, room: number): string {
   const clean = sanitizeComment(text)
-  const room = MAX_LINE_BYTES - 2
-  if (clean.length <= room) return `(${clean})`
+  if (clean.length <= room) return clean
   const cut = clean.slice(0, room)
   const space = clean[room] === ' ' ? room : cut.lastIndexOf(' ')
   const head = space > room / 2 ? cut.slice(0, space) : cut
-  return `(${head.trimEnd().replace(/,$/, '')})`
+  return head.trimEnd().replace(/,$/, '')
+}
+
+/**
+ * `head + name + tail` with the name cut (at its end) so the sanitized whole fits `room` bytes;
+ * the head and tail (tool number, diameter, type, instruction) always survive.
+ */
+export function fitName(head: string, name: string, tail: string, room: number): string {
+  const h = sanitizeChars(head)
+  const t = sanitizeChars(tail)
+  const n = sanitizeComment(name)
+  const left = room - h.length - t.length
+  if (n.length <= left) return `${h}${n}${t}`
+  const part = n.slice(0, Math.max(0, left))
+  const space = n[left] === ' ' ? left : part.lastIndexOf(' ')
+  const cut = (space > left / 2 ? part.slice(0, space) : part).trimEnd()
+  return `${h}${cut}${t}`
 }
 
 /** Marker of a DFYOM tool change (the whole line; the sender rule in grbl.md matches it). */
-export function toolChangeMarker(number: number, name: string): string {
-  const head = `DFYOM TOOL CHANGE ${number}: `
-  const room = MAX_LINE_BYTES - 2 - head.length
-  return `(${head}${sanitizeComment(name).slice(0, Math.max(0, room)).trimEnd()})`
+export function toolChangeMarker(number: number, name: string, tail = ''): string {
+  return `(${fitName(`DFYOM TOOL CHANGE ${number}: `, name, tail, MAX_LINE_BYTES - 2)})`
+}
+
+/**
+ * A pause: `M0 ;text`, the message senders show at the pause (gSender reads the `M0` line's
+ * comment; grbl.md#pause-messages-hardening-df63). Sanitized and cut like `commentLine`.
+ */
+export function pauseLine(text: string): string {
+  const head = 'M0 ;'
+  return `${head}${fitComment(text, MAX_LINE_BYTES - head.length)}`
 }

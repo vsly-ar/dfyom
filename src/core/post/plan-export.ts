@@ -21,10 +21,26 @@ import { cacheOf, ensureToolpath, inputOverreach } from '../toolpath/generate'
 import type { Vec3 } from '../toolpath/model'
 import { maxOverreach, type Overreach } from '../toolpath/overreach'
 import { exportGrbl, type ExportOperation, type GrblExport } from './export'
+import { gcodeFileStem } from './file-name'
 import { machineKeyOf } from '../run/machine-key'
 
-/** The generator string of exported programs' header (no version: same input, same file). */
+/** The generator string of exported programs' header, without the app version. */
 export const PROGRAM_GENERATOR = 'DFYOM'
+
+/** `DFYOM <version>` (the app's version, injected as `services.appVersion`), else `DFYOM`. */
+export function programGenerator(appVersion: string | undefined): string {
+  return appVersion === undefined || appVersion === ''
+    ? PROGRAM_GENERATOR
+    : `${PROGRAM_GENERATOR} ${appVersion}`
+}
+
+/**
+ * gCode with its `Generator:` header line reduced to `DFYOM` (no version), so golden files stay
+ * stable across version bumps (tests only compare programs this way).
+ */
+export function withoutAppVersion(gcode: string): string {
+  return gcode.replace(/^\(Generator: DFYOM [^)]*\)$/m, `(Generator: ${PROGRAM_GENERATOR})`)
+}
 
 /** gCode file extensions `plan.export` writes (case-insensitive). */
 export const GCODE_EXTENSIONS = ['.nc', '.gcode', '.ngc'] as const
@@ -33,6 +49,11 @@ export const GCODE_EXTENSIONS = ['.nc', '.gcode', '.ngc'] as const
 export function isGcodeFileName(path: string): boolean {
   const name = (path.split(/[\\/]/).at(-1) ?? '').toLowerCase()
   return GCODE_EXTENSIONS.some((ext) => name.endsWith(ext) && name.length > ext.length)
+}
+
+/** A `plan.export` target naming a folder: it ends in `/` or `\\` (DF62). */
+export function isFolderTarget(path: string): boolean {
+  return /[\\/]$/.test(path)
 }
 
 /**
@@ -85,7 +106,7 @@ const neverAborted = new AbortController().signal
 export async function exportPlan(
   doc: ProjectDoc,
   planId: string,
-  services: Pick<Services, 'workers' | 'toolpaths' | 'region2d'>,
+  services: Pick<Services, 'workers' | 'toolpaths' | 'region2d' | 'appVersion'>,
   opts: PlanExportOptions = {},
 ): AsyncAppResult<PlanExport> {
   const where = 'plan.export'
@@ -163,7 +184,11 @@ export async function exportPlan(
               ...toolpath,
               passes: toolpath.passes.map((p) => ({ ...p, operationId: p.operationId ?? only })),
             },
-      tool: { name: input.tool.name, diameter: input.tool.diameter.canonical },
+      tool: {
+        name: input.tool.name,
+        diameter: input.tool.diameter.canonical,
+        type: input.tool.type,
+      },
       stickout: input.stickout,
       label,
       ...(Object.keys(positions).length === 0 ? {} : { positions }),
@@ -193,7 +218,7 @@ export async function exportPlan(
       machine: plan.machine,
       ...(opts.workZero === undefined ? {} : { workZero: opts.workZero }),
     },
-    { generator: opts.generator ?? PROGRAM_GENERATOR },
+    { generator: opts.generator ?? programGenerator(services.appVersion) },
   )
   return exported
     .map((e) => ({
@@ -251,8 +276,13 @@ export const planExport = defineCommand({
     target: z
       .string()
       .min(1)
-      .refine(isGcodeFileName, `must be a ${GCODE_EXTENSIONS.join(', ')} file`)
-      .describe('Absolute path of the gCode file to write'),
+      .refine(
+        (t) => isGcodeFileName(t) || isFolderTarget(t),
+        `must be a ${GCODE_EXTENSIONS.join(', ')} file or a folder ending in /`,
+      )
+      .describe(
+        'Absolute path of the gCode file to write, or of a folder ending in / to use the short suggested name (project-s1.nc)',
+      ),
     setupId: PlanRecordIdSchema.optional().describe(
       'Setup to export; required when the plan has several',
     ),
@@ -288,7 +318,10 @@ export const planExport = defineCommand({
     })
     if (exported.isErr()) return exported
     const e = exported.unwrap()
-    const written = await files.write(args.target, e.text, { confirm: args.confirm })
+    const target = isFolderTarget(args.target)
+      ? `${args.target}${gcodeFileStem(doc, args.planId, e.setupId)}.nc`
+      : args.target
+    const written = await files.write(target, e.text, { confirm: args.confirm })
     if (written.isErr())
       return Err(written.unwrapErr().withContext('plan.export', { planId: args.planId }))
     return Ok({

@@ -5,14 +5,16 @@
  * Plain float64 data: lengths in mm in the setup's WCS (Z0 = stock top), feeds in mm/min,
  * spindle speeds in rpm. The post converts units and owns every text detail.
  */
-import type { Vec3 } from '../toolpath/model'
+import type { ToolpathToolType, Vec3 } from '../toolpath/model'
 import type { Overreach } from '../toolpath/overreach'
 
-/** The tool snapshot as the header and tool-change marker show it. */
+/** The tool snapshot as the header, tool-change marker and pause message show it. */
 export interface ProgramTool {
   readonly name: string
   /** mm */
   readonly diameter: number
+  /** For the tool-change message's type word (grbl.md#pause-messages-hardening-df63). */
+  readonly type: ToolpathToolType
 }
 
 /**

@@ -7,7 +7,7 @@ G90 G94 G17 G21
 G54
 G0 Z10
 (op-facing)
-(DFYOM TOOL CHANGE 1: 10 mm flat end mill)
+(DFYOM TOOL CHANGE 1: 10 mm flat end mill, 10 mm flat)
 M3 S18000
 G4 P3
 X36 Y4

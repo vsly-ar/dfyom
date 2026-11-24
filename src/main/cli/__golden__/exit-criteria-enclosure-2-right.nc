@@ -15,10 +15,10 @@ G90 G94 G17 G21
 G54
 G0 Z10
 (Drilling 1, Drilling 2)
-(DFYOM TOOL CHANGE 1: Drill 6)
+(DFYOM TOOL CHANGE 1: Drill 6, 6 mm drill)
 M3 S3000
 (Set spindle to 3000 rpm)
-M0
+M0 ;Set spindle to 3000 rpm
 X72.5 Y20
 Z2
 G1 Z-4 F300
@@ -49,5 +49,5 @@ G0 Z2
 Z10
 M5
 (Stop the spindle)
-M0
+M0 ;Stop the spindle
 M30

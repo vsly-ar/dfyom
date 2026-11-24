@@ -248,6 +248,31 @@ describe('tool changes and pauses', () => {
     expect(r.emu.status().mpos).toEqual([1, 0, 5])
   })
 
+  // docs/architecture/grbl.md#pause-messages-hardening-df63
+  it('a marker followed by M0 with a ; message is a tool change too; the M0 is skipped', async () => {
+    const r = await connected(machine())
+    const pause = 'M0 ;Install T2 3 mm flat, 3 mm flat, then zero Z'
+    const p = start(r, [...head, 'M5', 'G0 Z5', marker, pause, 'M3 S10000', ...tail])
+    expect(await until(r.clock, () => r.sender.phase === 'toolChange')).toBe(true)
+    expect(r.phases.at(-1)).toEqual({
+      phase: 'toolChange',
+      toolChange: { n: 2, name: '3 mm flat' },
+    })
+    await drive(r.clock, r.sender.freshStatus())
+    expectOk(r.sender.continueProgram())
+    expect(expectOk(await drive(r.clock, p))).toMatchObject({ toolChanges: 1, pauses: 0 })
+    expect(r.emu.trace.lines.map((l) => l.text)).not.toContain(pause)
+  })
+
+  it('a plain pause shows the ; message on its M0 line before the comment line above', async () => {
+    const r = await connected(machine())
+    const p = start(r, ['G0 Z5', '(Other text)', 'M0 ;Set spindle to 10000 rpm', 'G0 X1', 'M30'])
+    expect(await until(r.clock, () => r.sender.phase === 'programPause')).toBe(true)
+    expect(r.phases.at(-1)).toEqual({ phase: 'programPause', message: 'Set spindle to 10000 rpm' })
+    expectOk(r.sender.continueProgram())
+    expectOk(await drive(r.clock, p))
+  })
+
   it('manual-spindle prompts pause with their message', async () => {
     const r = await connected(machine())
     const p = start(r, ['M3 S10000', '(Set spindle to 10000 rpm)', 'M0', 'G0 X1', 'M30'])

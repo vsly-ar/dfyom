@@ -10,6 +10,7 @@
 import { useId, useState } from 'react'
 import type { PlanDTO, PlanStatus } from '../../../../core/plan/plan.dto'
 import type { ProjectDoc } from '../../../../core/project/document'
+import { gcodeFileStem } from '../../../../core/post/file-name'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import { applyMessages } from '../../messages/apply'
 import { planMessages, sentence } from '../../messages/plan'
@@ -206,7 +207,7 @@ function PlanView({
       <Section title={m.setup.title} icon="setups">
         <SetupList doc={doc} plan={plan} data={data} />
       </Section>
-      <ToolpathSection plan={plan} data={data} />
+      <ToolpathSection doc={doc} plan={plan} data={data} />
 
       <ConfirmDialog
         open={removeOpen}
@@ -395,9 +396,11 @@ function MachineSection({
 // ── toolpaths and export ──────────────────────────────────────────────────────────────────
 
 function ToolpathSection({
+  doc,
   plan,
   data,
 }: {
+  doc: ProjectDoc
   plan: PlanDTO
   data: PlanData | undefined
 }): React.JSX.Element {
@@ -476,7 +479,7 @@ function ToolpathSection({
           onClick={() =>
             void store.getState().exportPlan(
               plan.id,
-              several ? `${plan.name} ${setup.name}` : plan.name,
+              gcodeFileStem(doc, plan.id, setup.id),
               several
                 ? {
                     id: setup.id,

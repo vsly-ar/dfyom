@@ -468,7 +468,7 @@ describe('Setup panel', () => {
     await t.user.click(exportTop)
     const dialog = await screen.findByRole('dialog', { name: 'gCode exported' })
     expect(within(dialog).getByText('Setup Top (2 of 2)')).toBeInTheDocument()
-    expect(t.bridge.exportDialogNames).toEqual(['Plan 1 Top'])
+    expect(t.bridge.exportDialogNames).toEqual(['bracket-s2']) // project slug + setup number (DF62)
     expect(t.callsOf('plan.export')).toEqual([
       { planId: t.planId, setupId: top!.id, target: '/out/Plan 1 Top.nc', confirm: true },
     ])
