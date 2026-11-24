@@ -3,6 +3,8 @@
 // by tool; `plan.loosePiece` for a user's order. Spec: docs/modes/plan-v0.4.md#machining-order-v2
 import { describe, expect, it } from 'vitest'
 import type { PlanWarning } from './checks'
+import { partFromDTO } from '../design/operation'
+import { defaultOrder } from './order'
 import type { PlanDTO } from './plan.dto'
 import { designIds, opsOf, planSetup, type PlanSetup } from './plan.fixture'
 
@@ -226,5 +228,48 @@ describe('rebuild placement by tool', () => {
     expect(after.at(-1)).toBe('profile1')
     expect(after.indexOf('profile2')).toBeLessThan(after.indexOf('profile1'))
     expect(warnings(s, planId).filter((w) => w.code === 'plan.loosePiece')).toEqual([])
+  })
+})
+
+describe('default order: the setup before’s last tool first (DF65)', () => {
+  const ids = (list: readonly { designOperationIds: readonly string[] }[]) =>
+    list.map((o) => o.designOperationIds.join('+'))
+
+  it('starts with startTool when that costs no run, else keeps the order', async () => {
+    const s = await planSetup({ part: false })
+    await hole(s, '20', '20', '5')
+    await hole(s, '40', '20', '8')
+    await pocket(s, rect('70', '30', '20', '20', '4'))
+    await pocket(s, rect('20', '45', '10', '5', '2'))
+    await s.run('project.apply', {})
+    const p = s.plan(await s.create())
+    const ops = opsOf(p)
+    const part = partFromDTO(p.design.part).unwrap()
+    const [first, second] = runs(p)
+    expect(ids(defaultOrder(ops, part))).toEqual(['drill1', 'pocket2', 'drill2', 'pocket1'])
+    // the 6 mm end mill is still in the spindle: its run goes first, still 2 runs
+    expect(ids(defaultOrder(ops, part, undefined, second))).toEqual([
+      'drill2',
+      'pocket1',
+      'drill1',
+      'pocket2',
+    ])
+    expect(defaultOrder(ops, part, undefined, first)).toEqual(defaultOrder(ops, part))
+    // a tool the setup does not use changes nothing
+    expect(defaultOrder(ops, part, undefined, 'tool-x')).toEqual(defaultOrder(ops, part))
+  })
+
+  it('never adds a run for it: the outline’s tool waits for the cuts it frees', async () => {
+    const s = await planSetup({ part: false })
+    await outline(s)
+    await hole(s, '30', '30', '8')
+    await pocket(s, rect('60', '30', '10', '5', '2'))
+    await s.run('project.apply', {})
+    const p = s.plan(await s.create())
+    const ops = opsOf(p)
+    // starting with Flat 6 (the hole) would need Flat 6 → Flat 4 → Flat 6: 3 runs instead of 2
+    expect(
+      ids(defaultOrder(ops, partFromDTO(p.design.part).unwrap(), undefined, runs(p)[1])),
+    ).toEqual(ids(ops))
   })
 })

@@ -151,6 +151,24 @@ export const planMessages = {
     findings: 'Setup checks',
   },
 
+  // the setup's tool runs (hardening DF66): docs/modes/plan-v0.4.md#tool-changes-per-setup-hardening-df66
+  toolChanges: {
+    title: 'Tool changes',
+    count: (n: number) => (n === 0 ? 'No tool change' : plural(n, 'tool change', 'tool changes')),
+    listLabel: (setup: string) => `Tool runs of ${setup} in machining order`,
+    /** "Ø 6 mm · Flat end mill" */
+    toolMeta: (diameter: string | undefined, type: string | undefined) =>
+      [diameter === undefined ? undefined : `Ø ${diameter}`, type]
+        .filter((x) => x !== undefined)
+        .join(' · '),
+    noTool: 'No tool',
+    time: (seconds: number) => formatDuration(seconds),
+    timeTitle: 'Estimated time, without tool changes',
+    noTime: 'Generate toolpaths to see the time.',
+    carried: (setup: string) => `Stays in the spindle from ${setup}: no change at the setup start.`,
+    refused: (message: string) => `Not moved: ${message}`,
+  },
+
   operations: {
     title: 'Operations',
     listLabel: 'Plan operations in machining order',

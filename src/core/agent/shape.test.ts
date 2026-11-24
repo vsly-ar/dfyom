@@ -443,6 +443,12 @@ describe('plan.get', () => {
               },
             ],
             seconds: null,
+            // DF66: an operation without a tool is a run of its own
+            toolChanges: 2,
+            toolRuns: [
+              { tool: '6 mm end mill', operations: ['op1'], seconds: 30 },
+              { tool: null, operations: ['op2'], seconds: null },
+            ],
           },
         ],
         seconds: null,
@@ -471,6 +477,30 @@ describe('plan.get', () => {
     // the per-side maximum, rounded up to 0.1 mm / 0.01 in
     expect(reach('mm')).toEqual({ xMin: 4.3, xMax: 0, yMin: 2.6, yMax: 0 })
     expect(reach('inch')).toEqual({ xMin: 0.17, xMax: 0, yMin: 0.1, yMax: 0 })
+  })
+
+  // DF66: docs/modes/plan-v0.4.md#tool-changes-per-setup-hardening-df66
+  it('gives each setup its tool runs; a tool kept in the spindle is no change', () => {
+    const tool = (id: string) => ({ id, tool: 'snap-tool', overrides: {}, strategy: {} })
+    const two = {
+      ...plan,
+      setups: [
+        { ...plan.setups[0]!, operations: [{ ...tool('op1'), designOperationIds: ['pocket1'] }] },
+        {
+          ...plan.setups[0]!,
+          id: 's2',
+          name: 'Bottom',
+          operations: [{ ...tool('op2'), designOperationIds: ['drill1'] }],
+        },
+      ],
+    }
+    const shaper = new ResultShaper(fakeSession(peeks))
+    const r = shaper.shape(call('plan.get', { plan: two }), { planId: 'plan-1' }, SUMMARY)
+    const setups = (valueOf(r) as { plan: { setups: Record<string, unknown>[] } }).plan.setups
+    expect(setups.map((x) => [x['toolChanges'], x['toolRuns']])).toEqual([
+      [1, [{ tool: '6 mm end mill', operations: ['op1'], seconds: 30 }]],
+      [0, [{ tool: '6 mm end mill', operations: ['op2'], seconds: null }]],
+    ])
   })
 
   it('detail "full" returns the record with compact quantities', () => {

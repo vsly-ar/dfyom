@@ -105,6 +105,28 @@ describe('setup derivation', () => {
       ['Top', '+z'],
     ])
   })
+
+  it('DF65: a setup starts with the last tool of the setup before when that costs no run', async () => {
+    const s = await planSetup({ part: false })
+    const hole = (on: string, x: string, diameter: string) =>
+      s.run('design.drilling.add', {
+        partId: s.partId,
+        on,
+        center: [x, '30'],
+        diameter,
+        bottom: 'flat',
+        depth: '3',
+      })
+    // the bottom ends with the 6 mm end mill (Ø 8); the top bores Ø 5 (4 mm) and Ø 8 (6 mm)
+    await hole('stock.bottom', '50', '8')
+    await hole('stock.top', '20', '5')
+    await hole('stock.top', '70', '8')
+    await s.run('project.apply', {})
+    const p = s.plan(await s.create())
+    expect(setupsOf(p).map((x) => x.ops)).toEqual([['drill1'], ['drill3', 'drill2']])
+    const [bottom, top] = p.setups
+    expect(top!.operations[0]!.tool).toBe(bottom!.operations.at(-1)!.tool)
+  })
 })
 
 describe('order checks across setups', () => {
