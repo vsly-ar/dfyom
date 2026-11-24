@@ -128,6 +128,9 @@ const MACHINE = {
   spindle: { control: 'manual', maxSpeed: '30000' },
   programUnits: 'mm',
   toolChanger: 'none',
+  // the Z headroom fields (DF68): the checks run and find enough headroom
+  noseToTable: '160',
+  spoilboardThickness: '12',
 }
 
 /** Fillet radii an agent tries at a sharp corner: the tool radius the warning asks for, then less. */

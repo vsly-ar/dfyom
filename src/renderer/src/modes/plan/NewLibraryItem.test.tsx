@@ -77,6 +77,12 @@ describe('New machine', () => {
     await fill(t, dialog, 'Max feed rate Z', '800')
     await t.user.click(within(dialog).getByRole('radio', { name: 'By gCode' }))
     await fill(t, dialog, 'Spindle power', '800')
+    // DF68: the Z headroom distances, with their help text
+    expect(
+      within(dialog).getByLabelText('Spindle nose to table', { selector: 'input' }),
+    ).toHaveAccessibleDescription(/with Z homed, from the collet nut/)
+    await fill(t, dialog, 'Spindle nose to table', '125')
+    await fill(t, dialog, 'Spoilboard thickness', '12')
     await t.user.click(within(dialog).getByRole('button', { name: 'Add machine' }))
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'New machine' })).toBeNull())
 
@@ -93,6 +99,8 @@ describe('New machine', () => {
       spindle: { control: 'gcode', maxSpeed: '30000', power: '800' },
       programUnits: 'mm',
       toolChanger: 'none',
+      noseToTable: '125',
+      spoilboardThickness: '12',
     })
     await waitFor(() =>
       expect(within(t.start()).queryByText(/The machine library is empty/)).toBeNull(),

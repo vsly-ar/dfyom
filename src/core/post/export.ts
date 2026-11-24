@@ -8,6 +8,7 @@
  */
 import type { Machine } from '../library/machine'
 import type { PlanWarning } from '../plan/checks'
+import { zHeadroomFindings, zHeadroomUnknown, type ZHeadroomTool } from '../plan/z-headroom'
 import { fail, Ok, type AppResult, type Option } from '../../shared/result'
 import { arcSweep, expandDrill, PECK_CLEARANCE } from '../toolpath/stats'
 import type { Move, Toolpath, Vec3 } from '../toolpath/model'
@@ -26,6 +27,8 @@ export interface ExportOperation {
    * the passes naming that operation (`Pass.operationId`) whenever it changes.
    */
   readonly positions?: Readonly<Record<string, string>>
+  /** The tool's stickout (mm), for the Z headroom check (DF68); absent = not checked. */
+  readonly stickout?: number
 }
 
 export interface ExportInput {
@@ -36,6 +39,13 @@ export interface ExportInput {
     readonly clearanceHeight: number
     /** Setup instructions for the header (DF58). */
     readonly header?: SetupHeader
+    /** The setup's id, named by the Z headroom findings (`params.setupId`). */
+    readonly id?: string
+    /**
+     * Stock extent along the spindle axis (mm; Z0 on its top): enables the Z headroom check
+     * (DF68, docs/architecture/grbl.md#z-headroom-hardening-df68).
+     */
+    readonly stockThickness?: number
   }
   readonly operations: readonly ExportOperation[]
   /** The plan's machine copy; export requires one (`post.noMachine`). */
@@ -324,8 +334,9 @@ function arcBounds(from: Vec3, b: Extract<Block, { kind: 'arc' }>): Vec3[] {
 /**
  * `plan.machine` warnings (docs/architecture/grbl.md#export-checks): feed rates against the
  * max feed rate of every axis a move moves, spindle speeds against the spindle range, the
- * program's extent against the travel, and with `workZero` its machine positions against the
- * soft limits [−travel, 0] (GRBL's default homing direction).
+ * program's extent against the travel, with `workZero` its machine positions against the
+ * soft limits [−travel, 0] (GRBL's default homing direction), and with the stock thickness the Z
+ * headroom per tool (DF68).
  */
 export function machineChecks(
   input: ExportInput,
@@ -452,5 +463,46 @@ export function machineChecks(
         params: { axis, min: from, max: to, travel },
       })
   })
+  out.push(...zHeadroomChecks(input, p, machine))
   return out
+}
+
+/**
+ * The Z headroom per tool (DF68): the program's top is its clearance Z (the post requires every
+ * toolpath below it), the lowest Z per tool comes from the toolpaths. Only with the stock
+ * thickness; `zHeadroomUnknown` when the machine lacks a field.
+ */
+function zHeadroomChecks(input: ExportInput, p: MachiningProgram, machine: Machine): PlanWarning[] {
+  const stockThickness = input.setup.stockThickness
+  if (stockThickness === undefined) return []
+  const tools: ZHeadroomTool[] = []
+  for (const op of input.operations) {
+    if (op.stickout === undefined) continue
+    let zMin = Infinity
+    for (const pass of op.toolpath.passes)
+      for (const m of pass.moves) zMin = Math.min(zMin, m.kind === 'drill' ? m.bottom : m.to[2])
+    const name = op.tool.name
+    const same = tools.find((t) => t.toolName === name && t.stickout === op.stickout)
+    if (same !== undefined) {
+      if (Number.isFinite(zMin) && !(zMin >= (same.zMin ?? Infinity)))
+        tools[tools.indexOf(same)] = { ...same, zMin }
+      continue
+    }
+    tools.push({
+      planOperationId: op.toolpath.planOperationId,
+      toolName: name,
+      stickout: op.stickout,
+      ...(Number.isFinite(zMin) ? { zMin } : {}),
+    })
+  }
+  const unknown = zHeadroomUnknown(machine)
+  return [
+    ...zHeadroomFindings(machine, {
+      setupId: input.setup.id ?? '',
+      clearance: p.clearanceZ,
+      stockThickness,
+      tools,
+    }),
+    ...(unknown === undefined ? [] : [unknown]),
+  ]
 }

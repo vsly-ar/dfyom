@@ -62,6 +62,13 @@ export interface MachineProps {
   readonly pullOff: Option<Quantity>
   /** Soft limits (`$20`); None = on. */
   readonly softLimits: Option<boolean>
+  /**
+   * Spindle nose (where stickout is measured) to the table top with Z homed (length); None =
+   * the Z headroom check is skipped (docs/architecture/grbl.md#z-headroom-hardening-df68).
+   */
+  readonly noseToTable: Option<Quantity>
+  /** Spoilboard thickness on the table (length, ≥ 0); None = unknown (Z headroom partly checked). */
+  readonly spoilboardThickness: Option<Quantity>
 }
 
 const AXES = ['x', 'y', 'z'] as const
@@ -90,6 +97,8 @@ export class Machine implements MachineProps {
     readonly homingCorner: Option<HomingCorner>,
     readonly pullOff: Option<Quantity>,
     readonly softLimits: Option<boolean>,
+    readonly noseToTable: Option<Quantity>,
+    readonly spoilboardThickness: Option<Quantity>,
   ) {
     invariants('Machine', (c) => {
       checkNameAndNotes(c, name, notes)
@@ -120,6 +129,26 @@ export class Machine implements MachineProps {
       if (pullOff.isSome()) checkPositive(c, ['pullOff'], pullOff.unwrap(), 'length')
       if (spindle.power.isSome())
         checkPositive(c, ['spindle', 'power'], spindle.power.unwrap(), 'power')
+      if (noseToTable.isSome()) checkPositive(c, ['noseToTable'], noseToTable.unwrap(), 'length')
+      if (spoilboardThickness.isSome()) {
+        const board = spoilboardThickness.unwrap()
+        const path = ['spoilboardThickness']
+        if (checkKind(c, path, board, 'length')) {
+          const nonNegative = board.exact.compare(Rational.ZERO) >= 0
+          c.check(nonNegative, path, 'nonNegative', 'must be 0 or more', {
+            actual: board.canonical,
+          })
+          const nose = noseToTable.isSome() ? noseToTable.unwrap() : undefined
+          if (nonNegative && nose !== undefined && nose.kind === 'length')
+            c.check(
+              lessThan(board, nose),
+              path,
+              'lessThanNoseToTable',
+              'must be less than the spindle nose to table distance',
+              { max: nose.canonical, actual: board.canonical },
+            )
+        }
+      }
     })
     Object.freeze(travel)
     Object.freeze(maxFeedRate)
@@ -151,6 +180,8 @@ export class Machine implements MachineProps {
           p.homingCorner,
           p.pullOff,
           p.softLimits,
+          p.noseToTable,
+          p.spoilboardThickness,
         ),
     )
   }
@@ -174,6 +205,8 @@ export class Machine implements MachineProps {
       minSpeed: optionalQuantityFromDTO(dto.spindle.minSpeed, 'spindle', 'minSpeed'),
       power: optionalQuantityFromDTO(dto.spindle.power, 'spindle', 'power'),
       pullOff: optionalQuantityFromDTO(dto.pullOff, 'pullOff'),
+      noseToTable: optionalQuantityFromDTO(dto.noseToTable, 'noseToTable'),
+      spoilboardThickness: optionalQuantityFromDTO(dto.spoilboardThickness, 'spoilboardThickness'),
     }).andThen((q) =>
       Machine.create({
         name: dto.name,
@@ -197,6 +230,8 @@ export class Machine implements MachineProps {
         homingCorner: toOption(dto.homingCorner),
         pullOff: q.pullOff,
         softLimits: toOption(dto.softLimits),
+        noseToTable: q.noseToTable,
+        spoilboardThickness: q.spoilboardThickness,
       }),
     )
   }
@@ -230,6 +265,8 @@ export class Machine implements MachineProps {
       ...optionalField('homingCorner', this.homingCorner),
       ...optionalQuantityDTO('pullOff', this.pullOff),
       ...optionalField('softLimits', this.softLimits),
+      ...optionalQuantityDTO('noseToTable', this.noseToTable),
+      ...optionalQuantityDTO('spoilboardThickness', this.spoilboardThickness),
     } as MachineValuesDTO
   }
 

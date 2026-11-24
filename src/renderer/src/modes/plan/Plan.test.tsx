@@ -381,6 +381,14 @@ describe('Plan mode', () => {
             rule: 'maxFeedRate',
             params: {},
           },
+          {
+            code: 'plan.machine',
+            severity: 'info',
+            message: 'Z headroom only partly checked: enter the spoilboard thickness',
+            field: 'machine',
+            rule: 'zHeadroomUnknown',
+            params: { missing: 'spoilboardThickness' },
+          },
         ],
         softLimitChecked: false,
         regenerated: [],
@@ -401,6 +409,15 @@ describe('Plan mode', () => {
     expect(within(dialog).getByText('About 12 min 5 s without tool changes')).toBeInTheDocument()
     expect(within(dialog).getByRole('list', { name: 'Export warnings' })).toHaveTextContent(
       'Feed 1200 mm/min exceeds the Z max feed rate 1000 mm/min.',
+    )
+    // DF68: the Z headroom note is a line of its own, not an export warning
+    expect(
+      within(dialog).getByText(
+        'Z headroom checked as if there were no spoilboard: enter the spoilboard thickness (0 if none) in the machine.',
+      ),
+    ).toBeInTheDocument()
+    expect(within(dialog).getByRole('list', { name: 'Export warnings' })).not.toHaveTextContent(
+      'Z headroom',
     )
     await expectNoAxeViolations()
     await t.user.click(within(dialog).getByRole('button', { name: 'Close' }))

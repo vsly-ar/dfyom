@@ -149,6 +149,14 @@ export const planMessages = {
     merge: (name: string) => `Merge with ${name}`,
     noMerge: 'No other setup of this face to merge with',
     findings: 'Setup checks',
+    /** DF68: the Z headroom estimate of this setup (the warnings are in the setup checks). */
+    zHeadroom: 'Z headroom',
+    zHeadroomOk: 'Enough above the clearance height for every tool.',
+    zHeadroomShort: 'Too little for a tool: see the setup checks.',
+    zHeadroomUnknown: (missing: readonly string[]) =>
+      `Not checked: enter ${missing.join(' and ')} in the machine.`,
+    zHeadroomPartly: (missing: readonly string[], short: boolean) =>
+      `${short ? 'Too little for a tool: see the setup checks' : 'Enough if there is no spoilboard'}; enter ${missing.join(' and ')} in the machine.`,
   },
 
   operations: {
@@ -206,6 +214,12 @@ export const planMessages = {
     softLimitChecked: 'Soft limits checked at the connected machine’s work zero.',
     softLimitNotChecked:
       'Soft limits are checked when you start a run on a connected machine with its work zero set.',
+    /** DF68: the Z headroom estimate (any shortfall is an export warning). */
+    zHeadroomChecked: 'Z headroom checked from the machine’s Z height.',
+    zHeadroomNotChecked: (missing: readonly string[]) =>
+      `Z headroom not checked: enter ${missing.join(' and ')} in the machine.`,
+    zHeadroomPartly: (missing: readonly string[]) =>
+      `Z headroom checked as if there were no spoilboard: enter ${missing.join(' and ')} in the machine.`,
     warnings: 'Export warnings',
     noWarnings: 'No machine warnings.',
     close: 'Close',
@@ -524,9 +538,56 @@ export function findingText(
         return sentence(w.message)
       return `The tool (${lengthText(diameter, units)}) is too wide for the ${target}: it is ${lengthText(width, units)} at its narrowest.`
     }
+    case 'plan.machine': {
+      // DF68: the Z headroom in the document's units
+      const num = (k: string) => (typeof p[k] === 'number' ? (p[k] as number) : undefined)
+      const len = (k: string) => lengthText(num(k) ?? 0, units)
+      const named = str('tool')
+      if (named === undefined || num('stickout') === undefined) return sentence(w.message)
+      const head = `${named} at ${len('stickout')} stickout`
+      if (w.rule === 'zHeadroom' && num('needed') !== undefined && num('available') !== undefined)
+        return `${head}: the clearance height ${len('clearanceHeight')} needs ${len('needed')} above the stock top, but with Z homed the tool tip is only ${len('available')} above it. Retracts and tool changes would hit the Z+ limit: lower the clearance height or use a shorter stickout${num('spoilboardThickness') === undefined ? ', and enter the spoilboard thickness (checked as 0)' : ''}.`
+      if (w.rule === 'zReach' && num('zMin') !== undefined && num('lowest') !== undefined)
+        return `${head} cannot reach Z${len('zMin')}: the Z travel ends at Z${len('lowest')}. Use a longer stickout or raise the stock on a thicker spoilboard.`
+      return sentence(w.message)
+    }
     default:
       return sentence(w.message)
   }
+}
+
+/** DF68: the machine fields a `zHeadroomUnknown` finding names, as words. */
+const Z_HEADROOM_FIELDS: Readonly<Record<string, string>> = {
+  noseToTable: 'the spindle nose to table distance',
+  spoilboardThickness: 'the spoilboard thickness (0 if none)',
+}
+
+/**
+ * DF68: the plan's or export's `zHeadroomUnknown` note: the missing fields as words, and whether
+ * only the spoilboard is missing (the top was checked as if there were none); undefined without one.
+ */
+export function zHeadroomNote(
+  warnings: readonly PlanWarning[],
+): { readonly missing: readonly string[]; readonly partly: boolean } | undefined {
+  const w = warnings.find((x) => x.code === 'plan.machine' && x.rule === 'zHeadroomUnknown')
+  if (w === undefined) return undefined
+  const keys = String(w.params['missing'] ?? '')
+    .split(',')
+    .filter((f) => f !== '')
+  return {
+    missing: keys.map((f) => Z_HEADROOM_FIELDS[f] ?? f),
+    partly: !keys.includes('noseToTable'),
+  }
+}
+
+/** The words of a `zHeadroomUnknown` finding's missing fields, or undefined without one. */
+export function zHeadroomMissing(warnings: readonly PlanWarning[]): string[] | undefined {
+  const w = warnings.find((x) => x.code === 'plan.machine' && x.rule === 'zHeadroomUnknown')
+  if (w === undefined) return undefined
+  return String(w.params['missing'] ?? '')
+    .split(',')
+    .filter((f) => f !== '')
+    .map((f) => Z_HEADROOM_FIELDS[f] ?? f)
 }
 
 /** "12 min 5 s", "45 s". */
