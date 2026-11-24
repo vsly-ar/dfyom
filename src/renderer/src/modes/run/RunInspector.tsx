@@ -2,23 +2,36 @@
 // the run's progress (whose run it is (M7), lines done/total, section label, elapsed), "Start run"
 // (through the pre-flight dialog) and "Resume from…" after a stopped or failed run (M5), the wait
 // the run is at, how the last run ended, the overrides (M6) and "Reset (immediate)".
-// Feed hold, resume and Stop live in the main toolbar (MachineToolbar).
+// Feed hold, resume and Stop live in the main toolbar (MachineToolbar). Without a project (DF80) the
+// run section is the "Open a project to run a plan" empty state; the DRO, overrides and Reset stay.
+// Doc: docs/modes/run.md#run-without-a-project-df80
 // Doc: docs/conventions/ui.md#run-mode-safety-ui, #jobs-and-progress
 import { useId } from 'react'
 import type { ProjectDoc } from '../../../../core/project/document'
 import { runMessages } from '../../messages/run'
-import { Icon, Button, PanelHeader, Progress } from '../../ui'
+import { Icon, Button, EmptyState, PanelHeader, Progress } from '../../ui'
+import { useShell } from '../../shell/ShellContext'
 import { Dro } from './Dro'
 import { OverridesSection } from './OverridesSection'
 import { canResume, planRunInfo } from './plan-info'
 import { pauseMessage } from './RunDialogs'
 import { activeJob, isConnected, runGates } from './machine-state'
-import { useRun, useRunStore, waitKey, type RunEnd } from './run-store'
+import { useRun, useRunStore, useRunUnits, waitKey, type RunEnd } from './run-store'
 import styles from './Run.module.css'
 
 const m = runMessages.progress
 
-export function RunInspector({ doc }: { doc: ProjectDoc }): React.JSX.Element {
+/** The run section's empty-state icon: a program sheet with the run arrow in the accent. */
+const RunIcon = (
+  <svg viewBox="0 0 16 16" aria-hidden="true">
+    <rect x="2.5" y="2.5" width="11" height="11" rx="2" />
+    <path data-accent="" d="M6.5 5.5v5l4-2.5z" />
+  </svg>
+)
+
+/** `doc` undefined: no project (DF80). */
+export function RunInspector({ doc }: { doc: ProjectDoc | undefined }): React.JSX.Element {
+  const { files } = useShell()
   const store = useRunStore()
   const status = useRun((s) => s.status)
   const planId = useRun((s) => s.planId)
@@ -35,18 +48,21 @@ export function RunInspector({ doc }: { doc: ProjectDoc }): React.JSX.Element {
   const a = store.getState()
 
   const job = activeJob(status)
-  const gates = runGates(status, { planChosen: planId !== undefined && planId in doc.plans })
+  const gates = runGates(status, {
+    planChosen: doc !== undefined && planId !== undefined && planId in doc.plans,
+  })
   const wait = waitKey(status)
   const repeatsConnect = gates.start === runMessages.why.notConnected
   const showProgress = job !== undefined || (jobId !== undefined && progress !== undefined)
-  const plan = planId === undefined ? undefined : doc.plans[planId]
+  const plan = planId === undefined || doc === undefined ? undefined : doc.plans[planId]
+  const units = useRunUnits(doc)
   const resumable = setupChange === undefined && canResume(status.lastRun, plan, setupId)
 
   return (
     <>
       <PanelHeader title={runMessages.dro.title} />
       <div className={styles['panel']}>
-        <Dro status={status} units={doc.unitSystem} />
+        <Dro status={status} units={units} />
 
         <section className={styles['section']} aria-label={m.title}>
           <h3 className={styles['sectionTitle']}>{m.title}</h3>
@@ -70,7 +86,20 @@ export function RunInspector({ doc }: { doc: ProjectDoc }): React.JSX.Element {
             />
           ) : null}
           {job === undefined && ended ? <EndNote ended={ended} /> : null}
-          {job === undefined && !ended ? (
+          {job === undefined && doc === undefined ? (
+            <EmptyState
+              icon={RunIcon}
+              title={m.noProject.title}
+              description={m.noProject.description}
+              headingLevel={4}
+              action={{
+                label: m.noProject.action,
+                icon: <Icon name="open" />,
+                onClick: () => void files.getState().open(),
+              }}
+            />
+          ) : null}
+          {job === undefined && !ended && doc !== undefined ? (
             <p id={idleId} className={styles['hint']}>
               {m.idle}
             </p>
@@ -89,11 +118,11 @@ export function RunInspector({ doc }: { doc: ProjectDoc }): React.JSX.Element {
             </div>
           ) : null}
 
-          {job === undefined && setupChange !== undefined && planId !== undefined ? (
+          {job === undefined && setupChange !== undefined && planId !== undefined && doc ? (
             <SetupChangeNote doc={doc} planId={planId} setupId={setupChange} />
           ) : null}
 
-          {job === undefined ? (
+          {job === undefined && doc !== undefined ? (
             <>
               <Button
                 size="lg"

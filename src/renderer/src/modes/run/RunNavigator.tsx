@@ -2,7 +2,8 @@
 // and, when it has several, the setup (one program per setup, task E2), the virtual machine connection and its time scale, homing and unlock (confirmed), the jog pad
 // and the work zero. Disabled controls say why: once, in one notice above the homing, jog and
 // work-zero sections (one reason usually disables them all), each control described by its line.
-// Without a plan ("No plan (manual control)") it connects with a library machine (DF31). The
+// Without a plan ("No plan (manual control)") it connects with a library machine (DF31). Without a
+// project (DF80) only the machine select shows: manual control. The
 // notice keeps a reserved height and a refused action shows at the end of the panel, so messages
 // never move the controls (DF34). Doc: docs/conventions/ui.md#run-mode-safety-ui,
 // docs/modes/run.md#machine-frame-and-manual-control-hardening-df31df35, #run-mode-presentation-df46,
@@ -19,7 +20,7 @@ import { JogPad, useJogMode } from './JogPad'
 import { useLibraryItems } from '../plan/usePlan'
 import { actionText, formatLength, isConnected, needsHoming, runGates } from './machine-state'
 import { runnablePlans } from './plan-info'
-import { NO_PLAN, useRun, useRunStore, type Axis } from './run-store'
+import { NO_PLAN, useRun, useRunStore, useRunUnits, type Axis } from './run-store'
 import { SerialPicker, SettingsWarning } from './SerialPicker'
 import { ProbeZButton, usePlateThickness } from './ProbeZButton'
 import styles from './Run.module.css'
@@ -80,7 +81,8 @@ function WhyNotice({
   )
 }
 
-export function RunNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
+/** `doc` undefined: no project (DF80), manual control with a library machine only. */
+export function RunNavigator({ doc }: { doc: ProjectDoc | undefined }): React.JSX.Element {
   const store = useRunStore()
   const status = useRun((s) => s.status)
   const planId = useRun((s) => s.planId)
@@ -102,21 +104,25 @@ export function RunNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
 
   const machineId = useRun((s) => s.machineId)
   const plate = usePlateThickness(doc)
-  const plans = runnablePlans(doc)
+  const plans = doc === undefined ? [] : runnablePlans(doc)
   // the chosen plan (or manual control), else the first runnable one, else manual control (DF31)
   const chosen =
     planId === NO_PLAN || plans.some((p) => p.id === planId) ? planId : (plans[0]?.id ?? NO_PLAN)
   const manual = chosen === NO_PLAN
+  // without a project (DF80) the window's plan choice is left unset, not "manual control", so a
+  // project opened later starts at its first runnable plan as usual
+  const stored = doc === undefined && planId !== NO_PLAN ? undefined : chosen
   useEffect(() => {
-    if (chosen !== planId) store.getState().setPlan(chosen)
-  }, [chosen, planId, store])
+    if (stored !== planId) store.getState().setPlan(stored)
+  }, [stored, planId, store])
   const machines = useLibraryItems('machine')
   const machineChosen =
     machines?.some((x) => x.id === machineId) === true ? machineId : machines?.[0]?.id
   useEffect(() => {
     if (manual && machineChosen !== machineId) store.getState().setMachine(machineChosen)
   }, [manual, machineChosen, machineId, store])
-  const setups = chosen === undefined || manual ? [] : (doc.plans[chosen]?.setups ?? [])
+  const setups =
+    chosen === undefined || manual || doc === undefined ? [] : (doc.plans[chosen]?.setups ?? [])
   const setupChosen = setups.some((x) => x.id === setupId) ? setupId : setups[0]?.id
 
   const connected = isConnected(status)
@@ -124,7 +130,7 @@ export function RunNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
   const liveScale = connected ? status.connection.timeScale : timeScale
   // the open connection's target decides, else the choice
   const serial = connected ? status.connection.target === 'serial' : connectTo === 'serial'
-  const units = doc.unitSystem
+  const units = useRunUnits(doc)
   const busy = (name: string) => pending.includes(name)
   // one line per distinct reason (home, jog, work zero, disconnect), in that order
   const gated = [gates.home, gates.jog, gates.workZero, connected ? gates.disconnect : null]
@@ -145,37 +151,54 @@ export function RunNavigator({ doc }: { doc: ProjectDoc }): React.JSX.Element {
 
   return (
     <div className={styles['panel']}>
-      <Section title={m.plan}>
-        <Select
-          aria-label={m.plan}
-          placeholder={m.planPlaceholder}
-          disabled={connected}
-          options={[
-            { value: NO_PLAN, label: m.noPlan },
-            ...plans.map((p) => ({ value: p.id, label: p.name })),
-          ]}
-          {...(chosen === undefined ? {} : { value: chosen })}
-          onValueChange={(v) => a.setPlan(v)}
-        />
-        {manual ? (
-          <div className={styles['row']}>
-            <span className={styles['rowLabel']} aria-hidden="true">
-              {m.machine}
-            </span>
-            <Select
-              aria-label={m.machine}
-              placeholder={m.machinePlaceholder}
-              disabled={connected}
-              options={(machines ?? []).map((x) => ({ value: x.id, label: x.name }))}
-              {...(machineChosen === undefined ? {} : { value: machineChosen })}
-              onValueChange={(v) => a.setMachine(v)}
-            />
-          </div>
-        ) : null}
-        {manual && machines !== undefined && machines.length === 0 ? (
-          <p className={styles['hint']}>{m.noMachines}</p>
-        ) : null}
-      </Section>
+      {doc === undefined ? (
+        // no project (DF80): nothing to run, only the machine to control
+        <Section title={m.machine}>
+          <Select
+            aria-label={m.machine}
+            placeholder={m.machinePlaceholder}
+            disabled={connected}
+            options={(machines ?? []).map((x) => ({ value: x.id, label: x.name }))}
+            {...(machineChosen === undefined ? {} : { value: machineChosen })}
+            onValueChange={(v) => a.setMachine(v)}
+          />
+          <p className={styles['hint']}>
+            {machines !== undefined && machines.length === 0 ? m.noMachines : m.machineHint}
+          </p>
+        </Section>
+      ) : (
+        <Section title={m.plan}>
+          <Select
+            aria-label={m.plan}
+            placeholder={m.planPlaceholder}
+            disabled={connected}
+            options={[
+              { value: NO_PLAN, label: m.noPlan },
+              ...plans.map((p) => ({ value: p.id, label: p.name })),
+            ]}
+            {...(chosen === undefined ? {} : { value: chosen })}
+            onValueChange={(v) => a.setPlan(v)}
+          />
+          {manual ? (
+            <div className={styles['row']}>
+              <span className={styles['rowLabel']} aria-hidden="true">
+                {m.machine}
+              </span>
+              <Select
+                aria-label={m.machine}
+                placeholder={m.machinePlaceholder}
+                disabled={connected}
+                options={(machines ?? []).map((x) => ({ value: x.id, label: x.name }))}
+                {...(machineChosen === undefined ? {} : { value: machineChosen })}
+                onValueChange={(v) => a.setMachine(v)}
+              />
+            </div>
+          ) : null}
+          {manual && machines !== undefined && machines.length === 0 ? (
+            <p className={styles['hint']}>{m.noMachines}</p>
+          ) : null}
+        </Section>
+      )}
 
       {setups.length > 1 ? (
         <Section title={m.setup}>

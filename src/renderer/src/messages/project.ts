@@ -12,6 +12,10 @@ export const projectMessages = {
     untitled: 'Untitled project',
     restore: 'Restore',
     discard: 'Discard',
+    /** DF80: Run mode needs no project. */
+    machineTitle: 'Machine',
+    machineDescription: 'Connect, home and jog the machine without a project.',
+    machineAction: 'Go to Run',
   },
   newDialog: {
     title: 'New project',

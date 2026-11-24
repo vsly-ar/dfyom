@@ -204,7 +204,11 @@ export function registerProjectIpc(
     },
   )
 
-  /** `job.abort` through each other open project until one knows the job; else `refused`. */
+  /**
+   * `job.abort` through the machine scope (a homing or probing job started without a project,
+   * DF80; the stop session is unbound at first) and then each other open project until one knows
+   * the job; else `refused`.
+   */
   const abortElsewhere = async (
     args: unknown,
     ws: WindowSession,
@@ -212,6 +216,10 @@ export function registerProjectIpc(
   ): Promise<CallReply> => {
     const session = host.openSession({ kind: 'ui', id: `stop-${ws.win.id}` })
     try {
+      if (ws.session.boundKey !== undefined) {
+        const r = reply((await session.call('job.abort', args ?? {})).result)
+        if (r.ok) return r
+      }
       for (const p of host.list()) {
         if (p.key === ws.session.boundKey || session.bind(p.key).isErr()) continue
         const r = reply((await session.call('job.abort', args ?? {})).result)

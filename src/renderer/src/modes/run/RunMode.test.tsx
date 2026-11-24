@@ -10,7 +10,9 @@ import type { AppErrorData } from '../../../../shared/errors/app-error'
 import type { CallReply } from '../../../../shared/preload-api'
 import { App } from '../../App'
 import { createShell, ShellProvider } from '../../shell/ShellContext'
-import { createFakeBridge, type FakeBridge } from '../../test/bridge'
+import { createFakeBridge, designDispatcher, type FakeBridge } from '../../test/bridge'
+import { Library } from '../../../../core/library/library'
+import { createMemoryLibraryStorage } from '../../../../core/library/memory-storage'
 import { expectNoAxeViolations, renderUi } from '../../test/render'
 
 const ok = (value: unknown = {}): CallReply => ({ ok: true, value, revision: 0 })
@@ -1099,6 +1101,132 @@ describe('Run mode: serial port (docs/modes/run-machine.md#ports-and-the-port-pi
       await nav.findByText('No serial ports found. Connect the controller by USB and refresh.'),
     ).toBeInTheDocument()
     expect(nav.getByRole('button', { name: 'Connect' })).toBeDisabled()
+    await expectNoAxeViolations(t.container)
+  })
+})
+
+/**
+ * Run without a project (DF80): no project bound, the app-scope dispatcher answers the library
+ * (a machine with a touch plate), the scripted machine the run commands.
+ */
+async function renderNoProject(mode: 'run' | 'design' = 'run') {
+  const library = (await Library.open(createMemoryLibraryStorage())).unwrap()
+  const d = await designDispatcher('App', 'mm', { library })
+  const add = await d.dispatch(
+    'library.machine.add',
+    { values: { ...libraryInput(machineValues()), name: 'Router', probePlateThickness: '10' } },
+    { kind: 'ui', id: 'test' },
+  )
+  const machineId = (add.unwrap().value as { id: string }).id
+  const bridge = createFakeBridge()
+  bridge.appScope(d, library)
+  const machine = scriptMachine(bridge) as Machine & {
+    job: (phase: NonNullable<RunStatus['job']>['phase'], extra?: object) => Partial<RunStatus>
+  }
+  const shell = createShell(bridge)
+  shell.ui.getState().setMode(mode)
+  const r = renderUi(
+    <ShellProvider shell={shell}>
+      <App />
+    </ShellProvider>,
+  )
+  const nav = () => screen.getByRole('navigation', { name: 'Navigator' })
+  const callsOf = (name: string) => bridge.calls.filter((c) => c.name === name).map((c) => c.args)
+  return { ...r, bridge, machine, nav, callsOf, machineId, shell }
+}
+
+describe('Run mode without a project (DF80)', () => {
+  it('controls the machine: library machine, connect, home, jog, zero, probe, overrides, disconnect', async () => {
+    const t = await renderNoProject()
+    const nav = within(t.nav())
+    // no plan to choose: the machine select, with the library's machine chosen
+    const connect = await nav.findByRole('button', { name: 'Connect' })
+    expect(nav.queryByRole('combobox', { name: 'Plan' })).toBeNull()
+    await waitFor(() =>
+      expect(nav.getByRole('combobox', { name: 'Machine' })).toHaveTextContent('Router'),
+    )
+    expect(
+      nav.getByText('The machine profile sets the travel, the soft limits and the probe plate.'),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'No project open' })).toBeNull()
+    // the inspector: the DRO, and the run part as an empty state with Open project
+    await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
+    const inspector = within(screen.getByRole('complementary', { name: 'Inspector' }))
+    expect(inspector.getByRole('table', { name: 'Position' })).toBeInTheDocument()
+    expect(
+      inspector.getByRole('heading', { name: 'Open a project to run a plan' }),
+    ).toBeInTheDocument()
+    expect(inspector.getByRole('button', { name: 'Open project' })).toBeEnabled()
+    expect(inspector.queryByRole('button', { name: 'Start run' })).toBeNull()
+    await expectNoAxeViolations(t.container)
+
+    await waitFor(() => expect(connect).toBeEnabled())
+    await t.user.click(connect)
+    expect(t.callsOf('run.connection.open')).toEqual([
+      { target: 'virtual', machineId: t.machineId, timeScale: 1 },
+    ])
+    await screen.findByRole('group', { name: 'Machine' })
+    await t.user.click(nav.getByRole('button', { name: 'Home' }))
+    await within(machineGroup()!).findByText('Idle')
+    await t.user.click(nav.getByRole('button', { name: 'Jog X+' }))
+    expect(t.callsOf('run.machine.jog')).toEqual([{ by: [10, 0, 0], feed: expect.any(Number) }])
+    await t.user.click(nav.getByRole('button', { name: 'Zero X Y Z' }))
+    expect(t.callsOf('run.workZero.set')).toEqual([{ axes: ['x', 'y', 'z'] }])
+    // the plate thickness comes from the machine profile
+    expect(nav.getByText(/Touch plate 10(\.0+)? mm/)).toBeInTheDocument()
+    await t.user.click(nav.getByRole('button', { name: 'Probe Z' }))
+    await t.user.click(
+      within(screen.getByRole('alertdialog', { name: 'Probe Z?' })).getByRole('button', {
+        name: 'Probe',
+      }),
+    )
+    expect(t.callsOf('run.machine.probeZ')).toEqual([{ plateThickness: 10 }])
+    const overrides = within(inspector.getByRole('region', { name: 'Overrides' }))
+    await t.user.click(
+      within(overrides.getByRole('group', { name: 'Feed' })).getByRole('button', {
+        name: 'Increase feed override by 10 %',
+      }),
+    )
+    expect(t.callsOf('run.override.set')).toEqual([{ feed: '+10' }])
+    await expectNoAxeViolations(t.container)
+    await t.user.click(nav.getByRole('button', { name: 'Disconnect' }))
+    await waitFor(() => expect(machineGroup()).toBeNull())
+    expect(t.callsOf('run.job.start')).toEqual([])
+  })
+
+  it('a run started elsewhere shows from the status; no Start run here (M7)', async () => {
+    const t = await renderNoProject()
+    await within(t.nav()).findByRole('button', { name: 'Connect' })
+    t.machine.push({
+      connection: { state: 'open', target: 'virtual', timeScale: 1 },
+      state: 'Run',
+      homed: true,
+      ...t.machine.job('streaming', {
+        plan: {
+          planId: 'p1',
+          planName: 'Plan 1',
+          setupId: 's1',
+          setupName: 'Top',
+          setup: 1,
+          setups: 1,
+        },
+      }),
+    })
+    await t.user.click(screen.getByRole('button', { name: 'Inspector' }))
+    const inspector = within(screen.getByRole('complementary', { name: 'Inspector' }))
+    expect(await inspector.findByText(/Plan 1/)).toBeInTheDocument()
+    expect(inspector.getByText('Started in another window or by an agent.')).toBeInTheDocument()
+    expect(inspector.queryByRole('heading', { name: 'Open a project to run a plan' })).toBeNull()
+    expect(within(machineGroup()!).getByRole('button', { name: 'Stop' })).toBeEnabled()
+  })
+
+  it('the start panel goes to Run without creating a project', async () => {
+    const t = await renderNoProject('design')
+    const nav = within(t.nav())
+    await nav.findByRole('heading', { name: 'No project open' })
+    await t.user.click(nav.getByRole('button', { name: 'Go to Run' }))
+    expect(screen.getByRole('radio', { name: 'Run' })).toBeChecked()
+    expect(await within(t.nav()).findByRole('combobox', { name: 'Machine' })).toBeInTheDocument()
     await expectNoAxeViolations(t.container)
   })
 })

@@ -62,6 +62,8 @@ export const runMessages = {
     machine: 'Machine',
     machinePlaceholder: 'Choose a library machine',
     noMachines: 'No machine in the library yet. Add one in the Library window.',
+    /** Without a project (DF80): the machine profile gives travel, limits and the probe plate. */
+    machineHint: 'The machine profile sets the travel, the soft limits and the probe plate.',
     status: 'Status',
     ready: 'Ready to jog.',
     readyNoPlan: 'Ready to jog (manual control).',
@@ -303,6 +305,12 @@ export const runMessages = {
     },
     elapsedLabel: 'Elapsed',
     idle: 'No run yet. Connect, home, set the work zero, then start the run.',
+    /** Without a project (DF80): machine control works; only a plan run needs a project. */
+    noProject: {
+      title: 'Open a project to run a plan',
+      description: 'Connecting, homing, jogging and setting the work zero need no project.',
+      action: 'Open project',
+    },
     startRun: 'Start run',
     done: (lines: number, time: string) => `Run complete: ${lines} lines in ${time}.`,
     stopped: 'Run stopped. The machine kept its position.',

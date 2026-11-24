@@ -178,7 +178,7 @@ After a run stopped or failed, the operator restarts the setup's program at the 
 
 ## Run status and the zero to set (M7)
 
-A run started in another window or by an agent, and the setup change after it, must say which plan and setup it is. Implemented with M7 ([below](#implementation-m7)).
+A run started in another window or by an agent, and the setup change after it, must say which plan and setup it is. Implemented with M7 ([below](#implementation-m7)). A window without a project (hardening DF80, [run.md § Run without a project](run.md#run-without-a-project-df80)) follows such a run the same way, from the status only.
 
 - **`RunStatus.job.plan`** `{ planId, planName, setupId, setupName, setup, setups }` (`setup` the 1-based number of the setup, `setups` their count) and `job.planOperationId` (the operation of the line being acknowledged): set by `run.job.start` for the host's job, so every window and agent reads them from the status, also a window of another project (whose `job.get` cannot reach the job).
 - **Inspector:** while a run job runs, the progress section names it above the bar: "Plan 1 · setup 2 of 2: Top" ("Plan 1" alone for a one-setup plan), and for a run this window did not start "Started in another window or by an agent." The navigator's plan and setup selects stay as the user left them.
