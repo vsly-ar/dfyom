@@ -192,6 +192,26 @@ describe('exportGrbl', () => {
       ])
     })
 
+    it('never emits S outside minSpeed..maxSpeed, also with a wider controller PWM range', () => {
+      // $31 = 2930 on the controller would not clamp a 3000 rpm S to the usable 6200 rpm
+      const m = testMachine({
+        spindle: {
+          control: 'gcode',
+          maxSpeed: rpm('24000'),
+          minSpeed: rpm('6200'),
+          controllerMinSpeed: rpm('2930'),
+        },
+      })
+      const ops = [
+        operation(hole('simple'), drill(6)),
+        operation(square('a', 'em6', 30000), endMill(6)),
+      ]
+      const e = expectOk(exportGrbl(exportInput(ops, m), OPTS))
+      const s = e.lines.filter((l) => l.startsWith('M3 S')).map((l) => Number(l.split('S')[1]))
+      expect(s).toEqual([6200, 24000])
+      expect(e.warnings.map((w) => w.rule)).toContain('spindleRange')
+    })
+
     it('program extent against the travel; soft limits once the work zero is known', () => {
       const m = testMachine({ travel: { x: len('100'), y: len('45'), z: len('40') } })
       const tp = testPartExport(m)

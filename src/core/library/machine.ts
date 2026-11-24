@@ -33,6 +33,13 @@ export interface Spindle {
   readonly control: 'gcode' | 'manual'
   readonly maxSpeed: Quantity
   readonly minSpeed: Option<Quantity>
+  /**
+   * The controller's `$30`/`$31` when they differ from the usable range (a speed controller whose
+   * PWM mapping needs another range). Only the `$$` settings check and import read them; DFYOM's
+   * speeds stay within `minSpeed..maxSpeed`. Doc: docs/architecture/library.md#machine
+   */
+  readonly controllerMaxSpeed: Option<Quantity>
+  readonly controllerMinSpeed: Option<Quantity>
   /** Rated output power (kind `power`); None skips the feeds-and-speeds power check. */
   readonly power: Option<Quantity>
 }
@@ -87,6 +94,28 @@ function checkAxes(c: InvariantChecker, field: string, a: Axes<Quantity>, kind: 
   for (const axis of AXES) checkPositive(c, [field, axis], a[axis], kind)
 }
 
+/** `$30`/`$31` as set for the controller: positive max, min ≥ 0 and below the controller's max. */
+function checkControllerRange(c: InvariantChecker, spindle: Spindle) {
+  const max = spindle.controllerMaxSpeed
+  if (max.isSome())
+    checkPositive(c, ['spindle', 'controllerMaxSpeed'], max.unwrap(), 'spindleSpeed')
+  if (spindle.controllerMinSpeed.isNone()) return
+  const min = spindle.controllerMinSpeed.unwrap()
+  const path = ['spindle', 'controllerMinSpeed']
+  if (!checkKind(c, path, min, 'spindleSpeed')) return
+  const nonNegative = min.exact.compare(Rational.ZERO) >= 0
+  c.check(nonNegative, path, 'nonNegative', 'must be 0 or more', { actual: min.canonical })
+  const top = max.unwrapOr(spindle.maxSpeed)
+  if (nonNegative && top.kind === 'spindleSpeed' && top.canonical > 0)
+    c.check(
+      lessThan(min, top),
+      path,
+      'lessThanMaxSpeed',
+      'must be less than the controller maximum speed',
+      { max: top.canonical, actual: min.canonical },
+    )
+}
+
 export class Machine implements MachineProps {
   readonly kind = 'machine'
 
@@ -138,6 +167,7 @@ export class Machine implements MachineProps {
             )
         }
       }
+      checkControllerRange(c, spindle)
       if (pullOff.isSome()) checkPositive(c, ['pullOff'], pullOff.unwrap(), 'length')
       if (spindle.power.isSome())
         checkPositive(c, ['spindle', 'power'], spindle.power.unwrap(), 'power')
@@ -221,6 +251,16 @@ export class Machine implements MachineProps {
           : axesFromDTO(dto.stepsPerMm, 'stepsPerMm').map((a) => Some(a)),
       maxSpeed: quantityFromDTO(dto.spindle.maxSpeed, 'spindle', 'maxSpeed'),
       minSpeed: optionalQuantityFromDTO(dto.spindle.minSpeed, 'spindle', 'minSpeed'),
+      controllerMaxSpeed: optionalQuantityFromDTO(
+        dto.spindle.controllerMaxSpeed,
+        'spindle',
+        'controllerMaxSpeed',
+      ),
+      controllerMinSpeed: optionalQuantityFromDTO(
+        dto.spindle.controllerMinSpeed,
+        'spindle',
+        'controllerMinSpeed',
+      ),
       power: optionalQuantityFromDTO(dto.spindle.power, 'spindle', 'power'),
       pullOff: optionalQuantityFromDTO(dto.pullOff, 'pullOff'),
       noseToTable: optionalQuantityFromDTO(dto.noseToTable, 'noseToTable'),
@@ -242,6 +282,8 @@ export class Machine implements MachineProps {
           control: dto.spindle.control,
           maxSpeed: q.maxSpeed,
           minSpeed: q.minSpeed,
+          controllerMaxSpeed: q.controllerMaxSpeed,
+          controllerMinSpeed: q.controllerMinSpeed,
           power: q.power,
         },
         programUnits: dto.programUnits,
@@ -279,6 +321,8 @@ export class Machine implements MachineProps {
         control: this.spindle.control,
         maxSpeed: this.spindle.maxSpeed.toDTO(),
         ...optionalQuantityDTO('minSpeed', this.spindle.minSpeed),
+        ...optionalQuantityDTO('controllerMaxSpeed', this.spindle.controllerMaxSpeed),
+        ...optionalQuantityDTO('controllerMinSpeed', this.spindle.controllerMinSpeed),
         ...optionalQuantityDTO('power', this.spindle.power),
       },
       programUnits: this.programUnits,

@@ -227,7 +227,11 @@ export const runMessages = {
         )
         .join(
           '; ',
-        )}${differences.length > 3 ? `; and ${differences.length - 3} more` : ''}. Runs are refused until they match.`,
+        )}${differences.length > 3 ? `; and ${differences.length - 3} more` : ''}. Runs are refused until they match.${
+        differences.some((d) => d.setting === '$30' || d.setting === '$31')
+          ? ' If your speed controller needs a $31/$30 other than the usable speed range, set it in the machine’s Controller PWM range ($31 / $30).'
+          : ''
+      }`,
     homingOff: 'Homing is off on the controller ($22=0): DFYOM runs only on a homed machine.',
     review: 'Review',
   },

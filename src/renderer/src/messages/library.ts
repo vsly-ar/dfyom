@@ -334,6 +334,10 @@ export const libraryMessages = {
     maxSpeed: 'Max spindle speed',
     minSpeed: 'Min spindle speed',
     power: 'Spindle power',
+    controllerMinSpeed: 'Controller $31 (PWM min)',
+    controllerMaxSpeed: 'Controller $30 (PWM max)',
+    controllerRangeNote:
+      'Only if your speed controller needs a $31/$30 different from the usable speed range.',
     minSpeedNote: 'Optional: flags speeds below the spindle’s range.',
     powerNote: 'Optional: enables the feeds-and-speeds power check.',
     homing: 'Homing',

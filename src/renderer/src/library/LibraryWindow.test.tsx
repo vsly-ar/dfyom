@@ -552,6 +552,45 @@ describe('Library window', () => {
     )
   })
 
+  it('shows the controller PWM range ($31 / $30) for a gCode spindle only', async () => {
+    const { user, editor, add } = await renderLibrary()
+    const machine = (name: string, spindle: object) =>
+      add('machine', {
+        name,
+        controller: 'grbl',
+        travel: { x: '800', y: '800', z: '100' },
+        maxFeedRate: { x: '5000', y: '5000', z: '1000' },
+        spindle,
+        programUnits: 'mm',
+        toolChanger: 'none',
+      })
+    await machine('Trim router', {
+      control: 'gcode',
+      maxSpeed: '30000',
+      minSpeed: '6200',
+      controllerMinSpeed: '2930',
+    })
+    await machine('Dial router', { control: 'manual', maxSpeed: '30000' })
+    await user.click(screen.getByRole('tab', { name: 'Machines' }))
+    const grid = await screen.findByRole('grid', { name: 'Machines' })
+    await user.click(await within(grid).findByRole('row', { name: /Trim router/ }))
+    await waitFor(() =>
+      expect(
+        within(editor()).getByLabelText('Controller $31 (PWM min)', { selector: 'input' }),
+      ).toHaveValue('2930'),
+    )
+    expect(
+      within(editor()).getByLabelText('Controller $30 (PWM max)', { selector: 'input' }),
+    ).toHaveValue('')
+    expect(within(editor()).getByText(/Only if your speed controller needs/)).toBeInTheDocument()
+    await expectNoAxeViolations()
+    await user.click(within(grid).getByRole('row', { name: /Dial router/ }))
+    await waitFor(() =>
+      expect(within(editor()).getByRole('heading', { name: 'Dial router' })).toBeInTheDocument(),
+    )
+    expect(within(editor()).queryByLabelText('Controller $31 (PWM min)')).toBeNull()
+  })
+
   it('offers Import $$… only for a saved machine without unsaved changes', async () => {
     const { user, editor } = await renderLibrary()
     await user.click(screen.getByRole('tab', { name: 'Machines' }))

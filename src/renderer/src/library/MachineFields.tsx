@@ -26,6 +26,8 @@ export const MACHINE_FIELDS: readonly string[] = [
   ...AXES.map((a) => `stepsPerMm.${a}`),
   'spindle.maxSpeed',
   'spindle.minSpeed',
+  'spindle.controllerMinSpeed',
+  'spindle.controllerMaxSpeed',
   'spindle.power',
   'rigidity',
   'homingCorner',
@@ -271,6 +273,28 @@ export function MachineFields({
           (minSpeed) => spindle({ minSpeed }),
           { optional: true, note: m.minSpeedNote },
         )}
+        {values.spindle.control === 'gcode' ? (
+          <>
+            {q(
+              'spindle.controllerMinSpeed',
+              m.controllerMinSpeed,
+              'spindleSpeed',
+              values.spindle.controllerMinSpeed,
+              'spindle',
+              (controllerMinSpeed) => spindle({ controllerMinSpeed }),
+              { optional: true, note: m.controllerRangeNote },
+            )}
+            {q(
+              'spindle.controllerMaxSpeed',
+              m.controllerMaxSpeed,
+              'spindleSpeed',
+              values.spindle.controllerMaxSpeed,
+              'spindle',
+              (controllerMaxSpeed) => spindle({ controllerMaxSpeed }),
+              { optional: true },
+            )}
+          </>
+        ) : null}
         {q(
           'spindle.power',
           m.power,

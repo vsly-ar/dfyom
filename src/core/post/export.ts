@@ -197,8 +197,11 @@ export function toMachiningProgram(
       })
       rpm = undefined
     }
-    if (tp.spindleSpeed !== rpm) {
-      rpm = tp.spindleSpeed
+    // never below minSpeed nor above maxSpeed: the controller's $30/$31 may span a wider PWM
+    // range (spindle.controllerMin/MaxSpeed), so GRBL's own clamp would not catch it
+    const s = clampRpm(tp.spindleSpeed, machine)
+    if (s !== rpm) {
+      rpm = s
       blocks.push({ kind: 'spindle', rpm })
     }
     const opStart = blocks.length
@@ -225,6 +228,12 @@ export function toMachiningProgram(
     clearanceZ,
     blocks,
   })
+}
+
+/** The spindle speed within the machine's usable range (library.md#machine). */
+function clampRpm(rpm: number, machine: Machine): number {
+  const min = machine.spindle.minSpeed.mapOr(0, (q) => q.canonical)
+  return Math.min(machine.spindle.maxSpeed.canonical, Math.max(min, rpm))
 }
 
 // ── Walking the program ───────────────────────────────────────────────────────────────────
