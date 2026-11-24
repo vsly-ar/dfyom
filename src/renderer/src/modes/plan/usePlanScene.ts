@@ -10,11 +10,13 @@
 // spot snaps it to the grid inside the flat patch and commits one `plan.operation.update { zRef }`
 // on release; the dropped spot is held until the plan re-reads it.
 // Doc: docs/conventions/ui.md#plan-mode-task-37, docs/modes/plan-v0.2.md#plan-only-edits-and-the-snapshot-scene,
-// docs/modes/z-reference.md#implementation-notes-df69
+// docs/modes/z-reference.md#implementation-notes-df69. The setup's workholding (items, the open
+// item's keep-out, collision hits; workholding-scene.ts, docs/modes/workholding.md#ui-summary).
 import { useEffect, useMemo, useState } from 'react'
 import type { EvaluationStatus } from '../../../../core/design/evaluation'
 import type { AppMode } from '../../../../core/modes'
 import type { PlanDTO } from '../../../../core/plan/plan.dto'
+import { setupWorkholding } from '../../../../core/plan/workholding/setup'
 import type { Toolpath } from '../../../../core/toolpath/model'
 import { usePlanEvaluation, useReplica, useUi } from '../../shell/ShellContext'
 import {
@@ -37,6 +39,7 @@ import {
   setupPlacement,
 } from './model'
 import { usePlanCommand, usePlanData, usePlanState } from './plan-store'
+import { workholdingOverlay } from './workholding-scene'
 import { shownZRefRun, snapSpot } from './z-spot'
 
 type P = readonly [number, number]
@@ -65,6 +68,7 @@ export function usePlanScene(mode: AppMode): RunScene | null {
   const selected = useUi((s) => s.selection.plan)
   const last = usePlanState((s) => s.lastSelection)
   const preview = usePlanState((s) => s.zRefPreview)
+  const openItem = usePlanState((s) => s.workholdingItem)
   const call = usePlanCommand()
   const [held, setHeld] = useState<HeldSpot | null>(null)
   const doc = replica.status === 'open' ? replica.doc : undefined
@@ -134,6 +138,17 @@ export function usePlanScene(mode: AppMode): RunScene | null {
     // outdated (stale, or the plan waits for Apply): dimmed until regenerated (P3)
     const outdated = drawn.map((e) => e.stale || e.pendingApply === true || data.pendingApply)
     const stock = planStockSize(doc, plan)
+    // workholding.md#ui-summary: the setup's items, the open item's keep-out, collision hits
+    const planStock = planPart(doc, plan).loaded?.stock
+    const workholding =
+      planStock === undefined
+        ? undefined
+        : workholdingOverlay(
+            setupWorkholding(setup, planStock),
+            setup.id,
+            openItem?.setupId === setup.id ? openItem.itemId : undefined,
+            data.warnings,
+          )
     return {
       lines: toolpaths.length === 0 ? null : toolpathLines(toolpaths),
       done: 0,
@@ -141,8 +156,9 @@ export function usePlanScene(mode: AppMode): RunScene | null {
       ...(outdated.some(Boolean) ? { outdated } : {}),
       ...(stock === undefined ? {} : { frame: setupPlacement(setup, stock) }),
       ...(zRef === undefined ? {} : { zRef }),
+      ...(workholding === undefined ? {} : { workholding }),
     }
-  }, [data, plan, setup, doc, zRef])
+  }, [data, plan, setup, doc, zRef, openItem])
 }
 
 /** The plan's part as the plan scene draws it. */

@@ -1,12 +1,14 @@
 // Setup inspector (v0.2 task F6): a setup selected in the setup panel – its name, the face up to
 // the spindle (direction icon and word), the work zero G54 at its part corner, how far the tool
 // reaches past the stock (DF59), the rotation about the spindle axis (0/90/180/270°), the safe
-// heights (clearance with the clamp note, retract; moved here from the navigator), the Z headroom
-// estimate (DF68), the tool changes (DF66, `ToolChanges`: the tool runs, reorderable) and the
-// machine checks of this setup. Each change is one `plan.setup.update`.
+// heights (clearance with the clamp note, or the item it follows since workholding.md; retract;
+// moved here from the navigator), the Z headroom estimate (DF68), the tool changes (DF66,
+// `ToolChanges`: the tool runs, reorderable), the workholding (`Workholding`, workholding.md) and
+// the machine checks of this setup. Each change is one `plan.setup.update`.
 // Read-only (with the plan's reason in the navigator) outside draft and settled design.
 // Doc: docs/conventions/ui.md#design-and-plan-controls-v02, docs/modes/plan-v0.2.md#setups-from-face-directions
 import { useState } from 'react'
+import { fieldContext } from '../../../../core/design/operation'
 import { DIRECTION_LABEL } from '../../../../core/geometry/face'
 import type { PlanWarning } from '../../../../core/plan/checks'
 import {
@@ -15,7 +17,9 @@ import {
   type SetupDTO,
   type SetupRotation,
 } from '../../../../core/plan/plan.dto'
+import { setupWorkholding } from '../../../../core/plan/workholding/setup'
 import type { ProjectDoc, UnitSystem } from '../../../../core/project/document'
+import { Quantity } from '../../../../core/quantity/quantity'
 import type { Overreach } from '../../../../core/toolpath/overreach'
 import type { AppErrorData, Issue } from '../../../../shared/errors/app-error'
 import {
@@ -27,6 +31,7 @@ import {
 } from '../../messages/plan'
 import { useCancelGesture } from '../../shell/hooks'
 import {
+  Button,
   ErrorMessage,
   Field,
   FieldIcon,
@@ -41,6 +46,7 @@ import { DirectionIcon } from './DirectionIcon'
 import {
   allows,
   directionOfSetup,
+  planPart,
   planStockSize,
   setupCorner,
   setupOverreach,
@@ -51,8 +57,16 @@ import styles from './Plan.module.css'
 import { NameField, planWarningLabels, planWarningView } from './PlanInspector'
 import { ToolChanges } from './ToolChanges'
 import { usePlanSelection } from './usePlan'
+import { Workholding } from './Workholding'
 
 const m = planMessages.setup
+const wm = planMessages.workholding
+
+/** A length in mm as a quantity in the document's units ("14 mm", "0.551 in"). */
+function lengthQuantity(mm: number, units: UnitSystem): Quantity | undefined {
+  const q = Quantity.parse(formatHeight(mm, units), fieldContext('length', units))
+  return q.isOk() ? q.unwrap() : undefined
+}
 
 export function SetupInspector({
   doc,
@@ -82,17 +96,37 @@ export function SetupInspector({
   const mine = warnings.filter((w) => w.params['setupId'] === setup.id)
   const headroom = zHeadroomText(plan, mine, warnings)
   const reach = reachText(setupOverreach(setup, toolpaths), units)
-  const clearance = quantityOf(setup.clearanceHeight)
+  // workholding.md#links-and-safe-heights: the clearance follows the items unless the user set it
+  const planStock = planPart(doc, plan).loaded?.stock
+  const holding = planStock === undefined ? undefined : setupWorkholding(setup, planStock)
+  const from = holding?.items.find((i) => i.id === holding.clearanceFrom)
+  const clearance =
+    holding !== undefined && from !== undefined
+      ? lengthQuantity(holding.clearance, units)
+      : quantityOf(setup.clearanceHeight)
   const clampNote: FieldMessage[] =
     clearance === undefined
       ? []
-      : [
-          {
-            id: 'clampNote',
-            severity: 'note',
-            text: m.clampNote(formatHeight(clearance.canonical, units)),
-          },
-        ]
+      : from !== undefined
+        ? [
+            {
+              id: 'clampNote',
+              severity: 'note',
+              text: wm.clearanceFrom(from.name, formatHeight(holding!.margin, units)),
+            },
+          ]
+        : (holding?.items.length ?? 0) > 0
+          ? []
+          : [
+              {
+                id: 'clampNote',
+                severity: 'note',
+                text: m.clampNote(formatHeight(clearance.canonical, units)),
+              },
+            ]
+  // a clearance the user set while items exist can go back to following them
+  const canFollow =
+    !readOnly && holding !== undefined && holding.clearanceSet && holding.items.length > 0
 
   const update = async (args: object, gesture?: string) => {
     const r = await call(
@@ -164,13 +198,24 @@ export function SetupInspector({
           label={m.clearanceHeight}
           kind="length"
           defaultUnit={defaultUnit('length', units)}
-          value={quantityOf(setup.clearanceHeight)}
+          value={clearance}
           illustration={<FieldIcon name="clearance" />}
           readOnly={readOnly}
           messages={[...messages('clearanceHeight'), ...clampNote]}
           onCommit={(q, gesture) => void update({ clearanceHeight: q.source }, gesture)}
           onCancelGesture={cancelGesture}
         />
+        {canFollow ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            className={styles['followButton']}
+            title={wm.clearanceAutoHint}
+            onClick={() => void update({ clearanceHeight: 'auto' })}
+          >
+            {wm.clearanceAuto}
+          </Button>
+        ) : null}
         <QuantityInput
           label={m.retractHeight}
           kind="length"
@@ -183,6 +228,7 @@ export function SetupInspector({
           onCancelGesture={cancelGesture}
         />
         <ToolChanges plan={plan} setup={setup} units={units} toolpaths={toolpaths} />
+        <Workholding doc={doc} plan={plan} setup={setup} />
         {mine.length > 0 ? (
           <section aria-label={m.findings} className={styles['warnings']}>
             <h3 className={styles['groupTitle']}>{m.findings}</h3>

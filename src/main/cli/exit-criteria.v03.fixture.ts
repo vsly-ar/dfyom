@@ -515,9 +515,11 @@ export async function exitCriteriaV03Flow(call: Call, dir: string): Promise<Flow
   const findings = (
     await ok<{ warnings: Finding[] }>('plan.warning.list', { planId, detail: 'full' })
   ).value
-  expect(findings.warnings.map((f) => [f.severity, f.rule, f.params['operation']])).toEqual([
-    ['warning', 'cornerRadius', pocket.operationId],
-  ])
+  expect(
+    findings.warnings
+      .filter((f) => f.code !== 'plan.workholding.none')
+      .map((f) => [f.severity, f.rule, f.params['operation']]),
+  ).toEqual([['warning', 'cornerRadius', pocket.operationId]])
 
   // Toolpaths (a job; job.wait reports its outcome)
   const gen = await ok<{ jobId: string }>('plan.toolpath.generate', { planId })
@@ -875,6 +877,7 @@ interface PlanGet {
   }
 }
 interface Finding {
+  code: string
   severity: string
   rule: string
   params: Record<string, unknown>

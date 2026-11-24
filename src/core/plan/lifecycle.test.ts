@@ -355,6 +355,10 @@ describe('undo law of every plan command', () => {
       ['plan.setup.update', { planId, setupId, retractHeight: '3', name: 'A', rotation: 90 }],
       ['plan.setup.split', { planId, setupId, planOperationIds: [ops.at(-1)!.id] }],
       ['plan.setup.move', { planId, setupId, toIndex: 1 }],
+      [
+        'plan.workholding.set',
+        { planId, setupId, items: [{ kind: 'toeClamp', edge: 'vMin', at: '30', top: '20' }] },
+      ],
       ['plan.setup.merge', () => ({ planId, setupIds: s.plan(planId).setups.map((x) => x.id) })],
       [
         'plan.operation.update',
