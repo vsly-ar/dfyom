@@ -267,6 +267,27 @@
   gap: var(--space-2);
 }
 
+/* the plan operation's findings, first in its inspector (DF67); a click on a row's error or warning
+   count focuses it with a short accent wash, so the eye lands there */
+.checks {
+  margin: calc(-1 * var(--space-1));
+  padding: var(--space-1);
+  border-radius: var(--radius-sm);
+}
+
+.checks:focus {
+  animation: checksReveal var(--motion-emphasis) var(--ease-standard);
+}
+
+@keyframes checksReveal {
+  from {
+    background: var(--accent-subtle);
+  }
+  to {
+    background: transparent;
+  }
+}
+
 .groupTitle {
   margin: 0;
   font-size: var(--text-xs);
@@ -512,30 +533,9 @@
   align-items: center;
 }
 
-/* its one action, the menu (move up / move down / move to …), shows over the status icons at
-   the row's end on hover, focus or selection; at rest it takes no width, so names keep it (DF44) */
-.rowActions {
-  position: absolute;
-  top: 50%;
-  right: 0;
-  display: inline-flex;
-  padding: 0 var(--space-1);
-  background: var(--bg-chrome);
-  transform: translateY(-50%);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--motion-fast) var(--ease-standard);
-}
-
-.op[data-selected] .rowActions {
-  background: var(--accent-subtle);
-}
-
-.op:hover .rowActions,
-.op:focus-within .rowActions,
-.op[data-selected] .rowActions,
-.rowActions:has([aria-expanded='true']) {
-  pointer-events: auto;
+/* a row's error or warning count shows its findings in the inspector on click (DF67) */
+.opFindings {
+  cursor: pointer;
 }
 
 .nowrap {
@@ -551,13 +551,6 @@
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   line-clamp: 2;
-}
-
-.op:hover .rowActions,
-.op:focus-within .rowActions,
-.op[data-selected] .rowActions,
-.rowActions:has([aria-expanded='true']) {
-  opacity: 1;
 }
 
 .statusIcon[data-error] {
@@ -651,28 +644,6 @@
   font-weight: var(--weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* a setup row's one action, its menu (move up / move down / merge), sits at the end of the name
-   line in a slot the name never runs into; the subtitle below keeps the row's full width */
-.setupRow[data-actions] .setupName {
-  padding-right: calc(var(--control-md) + var(--space-1));
-}
-
-.setupActions {
-  position: absolute;
-  top: var(--space-0-5);
-  right: var(--space-1);
-  display: inline-flex;
-  opacity: 0;
-  transition: opacity var(--motion-fast) var(--ease-standard);
-}
-
-.op:hover .setupActions,
-.op:focus-within .setupActions,
-.op[data-selected] .setupActions,
-.setupActions:has([aria-expanded='true']) {
-  opacity: 1;
 }
 
 /* the setup the viewport shows and the panel exports (several setups only) */

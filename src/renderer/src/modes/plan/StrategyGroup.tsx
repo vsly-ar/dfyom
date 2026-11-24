@@ -67,15 +67,6 @@ const ICON: Partial<Record<StrategyKey, FieldIconName>> = {
   breakthrough: 'breakthrough',
 }
 
-/** Paths of the strategy findings the group shows at a field (the rest join the list below). */
-export function shownStrategyFields(plan: PlanDTO, view: PlanOperationView): Set<string> {
-  return new Set(
-    shownStrategyKeys(view.kind, view.strategy, isThrough(plan, view))
-      .filter((k) => !CHOICE_KEYS.has(k) || k === 'cycle')
-      .map((k) => `strategy.${k}`),
-  )
-}
-
 function isThrough(plan: PlanDTO, view: PlanOperationView): boolean {
   const design = plan.design.part.operations.find((o) => o.id === view.designOperationIds[0])
   // a through profile has no depth (a blind `on` groove stops at its depth: no breakthrough)
