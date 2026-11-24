@@ -106,6 +106,24 @@ describe('default rule (docs/modes/z-reference.md#default-rule)', () => {
     expect(zFindings(s, planId)).toEqual([])
   })
 
+  it("outlines the reference's flat patch and spot area for the viewport, in the WCS", async () => {
+    const { s, planId } = await faced()
+    const r = refs(s, planId)
+    // run 2: the whole faced top (100 × 60), the spot area inset by the clearance radius
+    const o = r[1]!.outline!
+    expect(o.grid).toBe(1)
+    expect(o.patch).toHaveLength(1)
+    const xs = o.patch[0]!.outer.map((p) => p[0])
+    expect([Math.min(...xs), Math.max(...xs)]).toEqual([0, 100])
+    const ax = o.spotArea[0]!.outer.map((p) => p[0])
+    expect(Math.min(...ax)).toBeCloseTo(o.clearance, 3)
+    // run 3: the pocket in the middle is a hole of the patch
+    expect(r[2]!.outline!.patch[0]!.holes.length).toBe(1)
+    // the query carries it, agents do not (shape.ts)
+    const q = s.query('plan.warning.list', { planId }) as { zRefs: { outline: unknown }[] }
+    expect(q.zRefs[1]!.outline).toMatchObject({ grid: 1, clearance: o.clearance })
+  })
+
   it('without a facing every run touches off on the top face, spots around the cuts', async () => {
     const { s, planId } = await faced({ facing: false })
     const r = refs(s, planId)

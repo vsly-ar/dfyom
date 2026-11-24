@@ -2,7 +2,8 @@
 // `--vp-feed`, rapids `--vp-rapid`, plunges `--vp-plunge`, the done part and outdated toolpaths
 // dimmed towards the background), the tool marker at the work position (`wpos`)
 // and the work zero marker at the WCS origin, all in the setup's WCS, placed on the part by the
-// setup's frame (identity for an unrotated top setup; task E2). Props only.
+// setup's frame (identity for an unrotated top setup; task E2); in the plan scene a tool run's Z
+// reference and touch-off spot (DF69, ZRefLayer.tsx). Props only.
 // Doc: docs/conventions/ui.md#viewport-task-35 (run scene), #run-mode-safety-ui
 import { useThree } from '@react-three/fiber'
 import { useEffect, useLayoutEffect, useMemo } from 'react'
@@ -10,6 +11,7 @@ import { BufferAttribute, BufferGeometry, Color, Matrix4, SRGBColorSpace } from 
 import type { Placement } from '../../../core/geometry/model'
 import { MIX, mix, toLinear, type Palette, type Rgb } from './colours'
 import { SEGMENT, type ToolpathLines } from './toolpath-lines'
+import { ZRefLayer, type ZRefOverlay } from './ZRefLayer'
 
 /** What the run scene shows (`Viewport` prop `run`). */
 export interface RunScene {
@@ -34,6 +36,11 @@ export interface RunScene {
    * drawn as a box outline and a ring; absent without a connection or a reported envelope.
    */
   readonly envelope?: RunEnvelope | undefined
+  /**
+   * A tool run's Z reference surface and touch-off spot (plan scene, DF69), in work coordinates;
+   * absent: none.
+   */
+  readonly zRef?: ZRefOverlay | undefined
 }
 
 /** The travel box and home position in work coordinates (mm). */
@@ -116,7 +123,15 @@ export function segmentColours(
   return out
 }
 
-export function RunLayer({ run, palette }: { run: RunScene; palette: Palette }): React.JSX.Element {
+export function RunLayer({
+  run,
+  palette,
+  reducedMotion = false,
+}: {
+  run: RunScene
+  palette: Palette
+  reducedMotion?: boolean
+}): React.JSX.Element {
   const invalidate = useThree((s) => s.invalidate)
   const { lines, done, tool, frame, outdated, envelope } = run
   const matrix = useMemo(() => (frame === undefined ? undefined : frameMatrix(frame)), [frame])
@@ -168,6 +183,9 @@ export function RunLayer({ run, palette }: { run: RunScene; palette: Palette }):
             <meshBasicMaterial color={travelColour} />
           </mesh>
         </group>
+      ) : null}
+      {run.zRef ? (
+        <ZRefLayer zRef={run.zRef} palette={palette} reducedMotion={reducedMotion} />
       ) : null}
       {/* work zero: a ring with a dot at the WCS origin */}
       <group raycast={noRaycast}>

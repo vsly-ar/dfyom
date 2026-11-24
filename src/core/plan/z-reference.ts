@@ -10,10 +10,13 @@ import { STOCK_FACE, type Direction } from '../geometry/face'
 import type { Region2dPort } from '../geometry/2d/port'
 import { regionArea } from '../geometry/2d/model'
 import {
+  erodedPatch,
   FlatPatches,
+  patchPolygons,
   spotFits,
   touchOffSpot,
   type FlatSurface,
+  type PatchPolygon,
   type SpotFrame,
 } from '../geometry/flat-patch'
 import type { OperationGeometry, Vec2 } from '../geometry/model'
@@ -73,6 +76,22 @@ export interface ToolRunZRef {
   /** Every eligible surface, the up face first, then in machining order. */
   readonly candidates: readonly ZRefCandidate[]
   readonly findings: readonly PlanWarning[]
+  /** The reference drawn in the viewport (undefined without a reference). */
+  readonly outline?: ZRefOutline | undefined
+}
+
+/**
+ * The run's reference for the viewport (DF69): its flat patch and the area the touch-off spot may
+ * lie in (the patch eroded by the clearance radius), in the setup WCS.
+ * Doc: docs/modes/z-reference.md#implementation-notes-df69
+ */
+export interface ZRefOutline {
+  readonly patch: readonly PatchPolygon[]
+  readonly spotArea: readonly PatchPolygon[]
+  /** Clearance radius around the spot (mm): room for the tool or the plate. */
+  readonly clearance: number
+  /** The spot grid (mm): 1, or 1.27 on inch machines. */
+  readonly grid: number
 }
 
 const memo = new WeakMap<LoadedPlan, Map<Region2dPort, readonly ToolRunZRef[]>>()
@@ -371,6 +390,18 @@ function runReference(r: RunInput): ToolRunZRef {
       `${zRefText(zRef)} has room for ${toolName} but not for the touch plate: touch off by hand (paper or feeler), or choose another surface`,
       { surface: zRef.surface },
     )
+  let outline: ZRefOutline | undefined
+  const drawn = zRef === undefined ? undefined : patchOf.get(zRef.surface)
+  if (zRef !== undefined && drawn !== undefined) {
+    const clearance = zRef.small ? bare : full
+    const area = erodedPatch(port, drawn.patch, clearance)
+    outline = {
+      patch: patchPolygons(drawn.patch, frame),
+      spotArea: area === undefined ? [] : patchPolygons(area, frame),
+      clearance,
+      grid: r.grid,
+    }
+  }
   return {
     setupId: r.setupId,
     planOperationId: r.op.id,
@@ -379,6 +410,7 @@ function runReference(r: RunInput): ToolRunZRef {
     zRef,
     candidates,
     findings,
+    outline,
   }
 }
 

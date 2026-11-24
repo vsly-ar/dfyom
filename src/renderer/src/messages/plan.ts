@@ -191,6 +191,13 @@ export const planMessages = {
       `Touch off at ${spot}, flat patch ${area}${small ? ', too small for the touch plate' : ''}`,
     zSurfaces: 'Flat surfaces',
     zRefused: (message: string) => `Not changed: ${message}`,
+    /** The viewport's chip beside the touch-off spot: "X 50 mm  Y 30 mm". */
+    zSpotCaption: (x: string, y: string) => `X ${x}  Y ${y}`,
+    /** Operation inspector (DF69): the touch-off spot's coordinates. */
+    zSpotX: 'Touch-off X',
+    zSpotY: 'Touch-off Y',
+    zSpotMoved: 'Moved by you.',
+    zSpotDefault: 'Use default spot',
   },
 
   operations: {

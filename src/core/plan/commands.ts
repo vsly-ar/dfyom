@@ -43,7 +43,13 @@ import { PlanWarningSchema, type PlanWarning } from './checks'
 import { evaluateOperation, planFindings } from './evaluate'
 import { feedModeIssues, type LockState } from './feeds'
 import { planThroughDepth } from './through'
-import { knownSurfaceId, planZReferences, zRefFindings, type ZRefCandidate } from './z-reference'
+import {
+  knownSurfaceId,
+  planZReferences,
+  zRefFindings,
+  type ZRefCandidate,
+  type ZRefOutline,
+} from './z-reference'
 import { findPlanDTO, findPlanOperation, loadPlan, loadPlanDTO, type LoadedPlan } from './plan'
 import {
   checkNoNewOrderViolation,
@@ -1602,6 +1608,11 @@ const ZRefCandidateSchema = z.object({
   small: z.boolean().describe('Room for the tool but not the touch plate'),
   top: z.boolean().describe("The setup's up face"),
 })
+const ZRefPoint = z.tuple([z.number(), z.number()])
+const ZRefPolygonSchema = z.object({
+  outer: z.array(ZRefPoint),
+  holes: z.array(z.array(ZRefPoint)),
+})
 const ZRefRunSchema = z.object({
   setupId: z.string(),
   planOperationId: z.string().describe("The tool run's first operation (stores a choice)"),
@@ -1611,6 +1622,17 @@ const ZRefRunSchema = z.object({
     rule: z.enum(['top', 'facing', 'largest', 'chosen']),
   }).nullable(),
   candidates: z.array(ZRefCandidateSchema),
+  outline: z
+    .object({
+      patch: z.array(ZRefPolygonSchema).describe('The flat patch, setup WCS mm'),
+      spotArea: z
+        .array(ZRefPolygonSchema)
+        .describe('Where the spot may lie: the patch eroded by the clearance radius'),
+      clearance: z.number().describe('Room around the spot for the tool or plate, mm'),
+      grid: z.number().describe('Spot grid, mm'),
+    })
+    .nullable()
+    .describe("The reference's outline for the viewport (left out of agents' results)"),
 })
 
 const candidateDTO = (c: ZRefCandidate): z.output<typeof ZRefCandidateSchema> => ({
@@ -1621,6 +1643,19 @@ const candidateDTO = (c: ZRefCandidate): z.output<typeof ZRefCandidateSchema> =>
   area: c.area,
   small: c.small,
   top: c.top,
+})
+
+const polygonsDTO = (ps: ZRefOutline['patch']) =>
+  ps.map((p) => ({
+    outer: p.outer.map((q): [number, number] => [q[0], q[1]]),
+    holes: p.holes.map((h) => h.map((q): [number, number] => [q[0], q[1]])),
+  }))
+
+const outlineDTO = (o: ZRefOutline) => ({
+  patch: polygonsDTO(o.patch),
+  spotArea: polygonsDTO(o.spotArea),
+  clearance: o.clearance,
+  grid: o.grid,
 })
 
 const warningList = defineQuery({
@@ -1698,6 +1733,7 @@ const warningList = defineQuery({
               ? null
               : { ...candidateDTO(r.zRef), chosen: r.zRef.chosen, rule: r.zRef.rule },
           candidates: r.candidates.map(candidateDTO),
+          outline: r.outline === undefined ? null : outlineDTO(r.outline),
         })),
     })
   },

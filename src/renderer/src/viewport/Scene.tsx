@@ -152,7 +152,9 @@ export function Scene(props: SceneProps): React.JSX.Element {
       ) : null}
       {bounds ? <Floor bounds={bounds} palette={palette} /> : null}
       <Axes bounds={bounds} palette={palette} />
-      {props.run ? <RunLayer run={props.run} palette={palette} /> : null}
+      {props.run ? (
+        <RunLayer run={props.run} palette={palette} reducedMotion={props.reducedMotion ?? false} />
+      ) : null}
     </>
   )
 }
