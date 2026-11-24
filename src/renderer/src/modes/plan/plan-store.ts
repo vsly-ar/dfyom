@@ -6,6 +6,7 @@
 import { useEffect } from 'react'
 import { useStore } from 'zustand'
 import { createStore, type StoreApi } from 'zustand/vanilla'
+import type { AlignmentSourceDTO } from '../../../../core/plan/alignment.dto'
 import type { PlanWarning } from '../../../../core/plan/checks'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
 import type { CallReply, PreloadApi } from '../../../../shared/preload-api'
@@ -54,6 +55,30 @@ export interface ZRefOutlineView {
   readonly grid: number
 }
 
+/** DF78: a setup's work zero and alignment points (`plan.warning.list` `alignment`). */
+export interface SetupAlignmentView {
+  readonly setupId: string
+  /** The work zero in the setup frame (mm from the front-left corner of the up face). */
+  readonly zero: readonly [number, number]
+  readonly zeroPoint?: string
+  readonly points: readonly {
+    readonly id: string
+    readonly name: string
+    readonly kind: 'point' | 'hole' | 'edge'
+    /** Expected X, Y in the WCS (mm); null = its source is missing. */
+    readonly wcs: readonly [number, number] | null
+  }[]
+}
+
+/** DF78: a source a setup may add as a point (`plan.warning.list` `alignmentSources`). */
+export interface AlignmentSourceView {
+  readonly source: AlignmentSourceDTO
+  readonly name: string
+  readonly kind: 'point' | 'hole' | 'edge'
+  /** X, Y in the setup frame (mm). */
+  readonly at: readonly [number, number]
+}
+
 /** The plan queries of one revision. */
 export interface PlanData {
   readonly planId: string
@@ -63,6 +88,13 @@ export interface PlanData {
   readonly warnings: readonly PlanWarning[]
   /** DF69: the Z reference per tool run, by its first plan operation. */
   readonly zRefs: readonly ZRefRunView[]
+  /** DF78: the setups with a work zero or alignment points. */
+  readonly alignment: readonly SetupAlignmentView[]
+  /** DF78: per setup, the sources its add menu offers. */
+  readonly alignmentSources: readonly {
+    readonly setupId: string
+    readonly sources: readonly AlignmentSourceView[]
+  }[]
   readonly stale: PlanStale | undefined
   readonly toolpaths: Readonly<Record<string, ToolpathEntry>>
   /** Its inputs have changes not applied yet (P3: notice, checks outdated, toolpaths dimmed). */
@@ -105,6 +137,8 @@ export interface PlanState {
    * whose "Z from" is hovered: the viewport shows its Z reference instead of the selection's.
    */
   readonly zRefPreview: string | undefined
+  /** DF78: the alignment point focused in the setup inspector (drawn larger in the viewport). */
+  readonly alignmentPoint: string | undefined
   /**
    * The workholding item open in the setup inspector (workholding.md#ui-summary): the viewport
    * shows its keep-out zone.
@@ -123,6 +157,8 @@ export interface PlanState {
   findingsShown(): void
   /** Shows run `planOperationId`'s Z reference in the viewport; undefined: the selection's. */
   previewZRef(planOperationId: string | undefined): void
+  /** Marks an alignment point in the viewport; undefined: none. */
+  focusAlignmentPoint(id: string | undefined): void
   /** Opens a workholding item in the setup inspector; undefined closes it. */
   selectWorkholding(item: { readonly setupId: string; readonly itemId: string } | undefined): void
   /** Loads the plan queries for `tag` (key, plan, revision, generation) once. */
@@ -170,6 +206,7 @@ export function createPlanStore(bridge: Pick<PreloadApi, 'call' | 'files'>): Pla
     exporting: false,
     findingsRequest: undefined,
     zRefPreview: undefined,
+    alignmentPoint: undefined,
     workholdingItem: undefined,
     exported: undefined,
     choose: (planId) =>
@@ -177,6 +214,9 @@ export function createPlanStore(bridge: Pick<PreloadApi, 'call' | 'files'>): Pla
     remember: (lastSelection) => set({ lastSelection }),
     revealFindings: (findingsRequest) => set({ findingsRequest }),
     findingsShown: () => set({ findingsRequest: undefined }),
+    focusAlignmentPoint: (alignmentPoint) => {
+      if (get().alignmentPoint !== alignmentPoint) set({ alignmentPoint })
+    },
     previewZRef: (zRefPreview) => {
       if (get().zRefPreview !== zRefPreview) set({ zRefPreview })
     },
@@ -297,6 +337,10 @@ export function createPlanStore(bridge: Pick<PreloadApi, 'call' | 'files'>): Pla
       error: ops.ok ? undefined : ops.error,
       warnings: value<{ warnings: PlanWarning[] }>(warnings)?.warnings ?? [],
       zRefs: value<{ zRefs?: ZRefRunView[] }>(warnings)?.zRefs ?? [],
+      alignment: value<{ alignment?: SetupAlignmentView[] }>(warnings)?.alignment ?? [],
+      alignmentSources:
+        value<{ alignmentSources?: PlanData['alignmentSources'] }>(warnings)?.alignmentSources ??
+        [],
       stale: value<PlanStale>(stale),
       toolpaths,
       pendingApply:

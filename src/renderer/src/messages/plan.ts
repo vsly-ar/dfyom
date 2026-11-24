@@ -118,8 +118,31 @@ export const planMessages = {
     directionValue: (face: string) => `${capital(face)} face up to the spindle`,
     faceName: (face: string) => capital(face),
     workOffset: 'Work zero',
-    workOffsetValue: (corner: string, face: string) =>
-      `G54 at the ${corner} corner of the ${face}; on the machine, the front-left corner of the top.`,
+    /** N6 (DF78): the corner only when the zero is one, else the offset from it or the point. */
+    workOffsetValue: (
+      zero: {
+        readonly corner: string
+        readonly offset?: readonly [string, string]
+        readonly point?: string
+      },
+      face: string,
+    ) =>
+      zero.point !== undefined
+        ? `G54 on ${zero.point}.`
+        : zero.offset !== undefined
+          ? `G54 at X ${zero.offset[0]}, Y ${zero.offset[1]} from the ${zero.corner} corner of the ${face} (front left on the machine).`
+          : `G54 at the ${zero.corner} corner of the ${face}; on the machine, the front-left corner of the top.`,
+    /** A setup row's work zero: "front left", "X 40 mm Y 25 mm", "on Hole 1". */
+    rowZero: (zero: {
+      readonly corner: string
+      readonly offset?: readonly [string, string]
+      readonly point?: string
+    }) =>
+      zero.point !== undefined
+        ? `on ${zero.point}`
+        : zero.offset !== undefined
+          ? `X ${zero.offset[0]} Y ${zero.offset[1]}`
+          : zero.corner,
     /** The face is left out when the setup's name already says it ("Top" over "G54 front left · 0°"). */
     rowMeta: (face: string, corner: string | undefined, rotation: number, name?: string) =>
       [
@@ -131,7 +154,37 @@ export const planMessages = {
         .join(' · '),
     /** DF45: a field label, not only the group's name (the control had no visible label). */
     rotation: 'Rotation on the table',
-    rotationHint: 'About the spindle axis; the work zero moves to the new front-left corner.',
+    rotationHint:
+      'About the spindle axis; the work zero keeps its offset from the new front-left corner.',
+    // DF78: docs/modes/alignment.md#plan-ui
+    zeroTitle: 'Work zero',
+    zeroX: 'Work zero X',
+    zeroY: 'Work zero Y',
+    zeroHint:
+      'From the front-left corner of the up face on the machine; negative or past the stock is fine.',
+    zeroOnPoint: (name: string) => `On ${name}; a new X or Y takes it off the point.`,
+    zeroReset: 'Reset to corner',
+    zeroResetDone: 'The work zero is at the corner',
+    pointsTitle: 'Alignment points',
+    pointsEmpty:
+      'None. After zeroing, the spindle points at each one in turn so you can line up the stock.',
+    pointsList: 'Alignment points in the order the spindle visits them',
+    pointAdd: 'Add point',
+    pointAddLabel: 'Add an alignment point',
+    pointAddNone: 'Nothing to add',
+    pointGroupStock: 'Stock corners and edges',
+    pointGroupHoles: 'Holes cut before this setup',
+    pointGroupVertices: 'Outline corners cut before this setup',
+    pointName: (n: number) => `Point ${n} name`,
+    pointAt: (x: string, y: string) => `X ${x}  Y ${y}`,
+    pointMissing: 'Its source is gone',
+    pointIsZero: 'Work zero',
+    pointActions: (name: string) => `Actions for ${name}`,
+    pointZeroHere: 'Zero on this point',
+    pointMoveUp: 'Move up',
+    pointMoveDown: 'Move down',
+    pointRemove: 'Remove',
+    pointRemoveZero: 'The work zero is on it: move the zero first',
     clearanceHeight: 'Clearance height',
     /** DF59: the note on the clearance field while the setup has no workholding, with its value. */
     clampNote: (height: string) =>
@@ -583,6 +636,14 @@ export function findingText(
   const tool = String(p['designTool'] ?? 'tool')
   const check = CHECK[String(p['check'])] ?? 'fails a plan check'
   switch (w.code) {
+    case 'plan.alignment': {
+      // DF78: the span in project units; the other rules' core text has no lengths
+      const x = p['spanX']
+      const y = p['spanY']
+      if (w.rule !== 'outsideTravel' || typeof x !== 'number' || typeof y !== 'number')
+        return sentence(w.message)
+      return `The work zero and alignment points span X ${lengthText(x, units)} × Y ${lengthText(y, units)}, more than the machine travel.`
+    }
     case 'plan.designToolReplaced':
       return `The design’s tool, the ${tool}, ${check}: ${String(p['tool'])} is used instead.`
     case 'plan.designToolFailed':

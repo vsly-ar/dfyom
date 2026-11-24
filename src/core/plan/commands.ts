@@ -87,6 +87,15 @@ import { checkAllowed, nextStatus } from './status'
 import { applyStrategyArgs, StrategyArgSchema, strategyIssues, resolveStrategy } from './strategy'
 import { suggestTools } from './suggest'
 import { designToolFindings } from './tool-resolution'
+import { alignmentFindings, alignmentSources } from './alignment'
+import { AlignmentSourceDtoSchema } from './alignment.dto'
+import {
+  alignmentView,
+  applySetupZero,
+  planAlignmentSet,
+  SetupAlignmentSchema,
+  SetupZeroArgSchema,
+} from './alignment-commands'
 
 // ── helpers ───────────────────────────────────────────────────────────────────────────────
 
@@ -676,7 +685,7 @@ const setupUpdate = defineCommand({
   kind: 'document',
   name: 'plan.setup.update',
   summary:
-    'Rename or rotate a setup, or change its safe heights (clearance above the stock top, retract above on).',
+    'Rename or rotate a setup, move its work zero, or change its safe heights (clearance above the stock top, retract above on).',
   title: () => 'Update setup',
   machine: false,
   args: z.object({
@@ -687,9 +696,12 @@ const setupUpdate = defineCommand({
       "Up from the stock top; > retractHeight; 'auto' follows the workholding",
     ),
     retractHeight: Src.optional().describe("Up from the operation's on surface; > 0"),
+    zero: SetupZeroArgSchema.optional().describe(
+      'Work zero: at [x, y] from the up face front-left corner (negative ok) or on a point; null = corner',
+    ),
   }),
   result: Empty,
-  run(draft, args) {
+  run(draft, args, ctx) {
     const where = 'plan.setup.update'
     const found = planFor(draft, args.planId, where)
     if (found.isErr()) return found
@@ -730,6 +742,18 @@ const setupUpdate = defineCommand({
     // 0° is stored as absent (v0.1 records)
     if (args.rotation === 0) delete target.rotation
     else if (args.rotation !== undefined) target.rotation = args.rotation
+    // alignment phase 1: docs/modes/alignment.md#setup-work-zero-q61
+    if (args.zero !== undefined) {
+      const z = applySetupZero(
+        draft,
+        args.planId,
+        args.setupId,
+        args.zero,
+        where,
+        ctx.services.region2d,
+      )
+      if (z.isErr()) return z
+    }
     return Ok({})
   },
 })
@@ -1685,6 +1709,24 @@ const warningList = defineQuery({
     zRefs: z
       .array(ZRefRunSchema)
       .describe('Z reference and touch-off spot per tool run (DF69); empty without geometry'),
+    alignment: z
+      .array(SetupAlignmentSchema)
+      .describe('Work zero and alignment points of each setup that has either (alignment phase 1)'),
+    alignmentSources: z
+      .array(
+        z.object({
+          setupId: z.string(),
+          sources: z.array(
+            z.object({
+              source: AlignmentSourceDtoSchema,
+              name: z.string(),
+              kind: z.enum(['point', 'hole', 'edge']),
+              at: z.tuple([z.number(), z.number()]).describe('X, Y in the setup frame (mm)'),
+            }),
+          ),
+        }),
+      )
+      .describe('Sources each setup may use for a point (the inspector menu; not in plan_get)'),
   }),
   run(doc, args, ctx) {
     const where = 'plan.warning.list'
@@ -1699,6 +1741,7 @@ const warningList = defineQuery({
             : shapeFindings(loaded.unwrap(), ctx.services.region2d)),
           ...designToolFindings(loaded.unwrap(), libraryTools(ctx.services), ctx.services.region2d),
           ...zRefFindings(loaded.unwrap(), ctx.services.region2d),
+          ...alignmentFindings(loaded.unwrap(), ctx.services.region2d),
           ...planWorkholdingFindings(doc, loaded.unwrap(), ctx.services),
         ]
       : [
@@ -1750,6 +1793,21 @@ const warningList = defineQuery({
           candidates: r.candidates.map(candidateDTO),
           outline: r.outline === undefined ? null : outlineDTO(r.outline),
         })),
+      alignment: loaded.isOk() ? alignmentView(loaded.unwrap(), ctx.services.region2d) : [],
+      alignmentSources: loaded.isOk()
+        ? loaded.unwrap().setups.map((s) => ({
+            setupId: s.id,
+            sources: alignmentSources(loaded.unwrap(), s, ctx.services.region2d).map((o) => ({
+              source: o.source,
+              name: o.name,
+              kind: o.kind,
+              at: [
+                Math.round(o.frame[0] * 1000) / 1000 || 0,
+                Math.round(o.frame[1] * 1000) / 1000 || 0,
+              ] as [number, number],
+            })),
+          }))
+        : [],
     })
   },
 })
@@ -1788,6 +1846,7 @@ export const PLAN_COMMANDS: readonly AnyCommand[] = [
   setupSplit,
   setupMerge,
   setupMove,
+  planAlignmentSet,
   operationUpdate,
   operationMove,
   toolAssign,

@@ -35,6 +35,7 @@ export const PLAN_WARNING_CODES = [
   'plan.rebuildBlocked',
   'plan.broken',
   'plan.zRef',
+  'plan.alignment',
   'plan.workholding.none',
   'plan.workholding.clearanceLow',
   'plan.workholding.collision',

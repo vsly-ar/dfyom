@@ -517,9 +517,13 @@ export async function exitCriteriaV03Flow(call: Call, dir: string): Promise<Flow
   ).value
   expect(
     findings.warnings
-      .filter((f) => f.code !== 'plan.workholding.none')
+      .filter((f) => f.code !== 'plan.alignment' && f.code !== 'plan.workholding.none')
       .map((f) => [f.severity, f.rule, f.params['operation']]),
   ).toEqual([['warning', 'cornerRadius', pocket.operationId]])
+  // DF78: the second setup has no alignment points yet (info)
+  expect(findings.warnings.filter((f) => f.code === 'plan.alignment').map((f) => f.rule)).toEqual([
+    'none',
+  ])
 
   // Toolpaths (a job; job.wait reports its outcome)
   const gen = await ok<{ jobId: string }>('plan.toolpath.generate', { planId })

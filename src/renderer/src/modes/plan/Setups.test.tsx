@@ -313,7 +313,7 @@ describe('Setup panel', () => {
     expect(
       within(insp).getByRole('radiogroup', { name: 'Rotation on the table' }),
     ).toHaveAccessibleDescription(
-      'About the spindle axis; the work zero moves to the new front-left corner.',
+      'About the spindle axis; the work zero keeps its offset from the new front-left corner.',
     )
     await t.user.click(within(insp).getByRole('radio', { name: '90°' }))
     await waitFor(() => expect(t.plan().setups[0]!.rotation).toBe(90))
@@ -473,5 +473,74 @@ describe('Setup panel', () => {
       { planId: t.planId, setupId: top!.id, target: '/out/Plan 1 Top.nc', confirm: true },
     ])
     expect(bottom).toBeDefined()
+  })
+})
+
+// DF78: docs/modes/alignment.md#plan-ui
+describe('Setup work zero and alignment points', () => {
+  it('moves the zero (negative too), adds a point, zeroes on it and resets to the corner', async () => {
+    const t = await renderSetups()
+    const top = t.plan().setups[1]!
+    const stock = planStockSize(t.s.d.doc, t.plan())!
+    await t.user.click(t.setupRows()[1]!)
+    const insp = t.inspector()
+    await within(insp).findByRole('heading', { name: 'Work zero' })
+    expect(within(insp).getByRole('button', { name: 'Reset to corner' })).toBeDisabled()
+    expect(within(insp).getByText(/^None\. After zeroing/)).toBeInTheDocument()
+
+    // X −20: the zero lies left of the stock
+    const x = within(insp).getByLabelText('Work zero X', { selector: 'input' })
+    await t.user.clear(x)
+    await t.user.type(x, '-20{Enter}')
+    await waitFor(() => expect(t.plan().setups[1]!.zero).toEqual({ at: [-20, 0] }))
+    expect(t.callsOf('plan.setup.update')).toContainEqual({
+      planId: t.planId,
+      setupId: top.id,
+      zero: { at: ['-20', '0 mm'] },
+    })
+    await waitFor(() => expect(t.setupRows()[1]).toHaveTextContent('G54 X -20 mm Y 0 mm'))
+    expect(
+      within(insp).getByText(/G54 at X -20 mm, Y 0 mm from the front left corner of the top/),
+    ).toBeInTheDocument()
+    // the preview's frame has its origin at the zero
+    await waitFor(() => expect(probe.scene?.frame).toEqual(setupFrame('+z', 0, stock, [-20, 0])))
+
+    // add the top front-left corner from the menu: its WCS position is X 20 Y 0
+    within(insp).getByRole('button', { name: 'Add an alignment point' }).focus()
+    await t.user.keyboard('{Enter}')
+    const menu = await screen.findByRole('menu', { name: 'Add an alignment point' })
+    await t.user.click(within(menu).getByRole('menuitem', { name: /Top front-left corner/ }))
+    await waitFor(() => expect(t.plan().setups[1]!.alignment).toHaveLength(1))
+    const list = within(insp).getByRole('list', {
+      name: 'Alignment points in the order the spindle visits them',
+    })
+    await waitFor(() =>
+      expect(within(list).getByLabelText('Point 1 name', { selector: 'input' })).toHaveValue(
+        'Top front-left corner',
+      ),
+    )
+    await waitFor(() => expect(within(list).getByText(/X 20 mm\s+Y 0 mm/)).toBeInTheDocument())
+    await waitFor(() =>
+      expect(probe.scene?.alignment).toEqual([
+        expect.objectContaining({ at: [20, 0], n: 1, error: false }),
+      ]),
+    )
+
+    // zero on that point: the inspector names it; removing it is refused in the menu
+    within(list).getByRole('button', { name: 'Actions for Top front-left corner' }).focus()
+    await t.user.keyboard('{Enter}')
+    const actions = await screen.findByRole('menu')
+    await t.user.click(within(actions).getByRole('menuitem', { name: 'Zero on this point' }))
+    await waitFor(() =>
+      expect(t.plan().setups[1]!.zero).toEqual({ point: t.plan().setups[1]!.alignment![0]!.id }),
+    )
+    await waitFor(() =>
+      expect(within(insp).getByText('G54 on Top front-left corner.')).toBeInTheDocument(),
+    )
+    await expectNoAxeViolations()
+
+    await t.user.click(within(insp).getByRole('button', { name: 'Reset to corner' }))
+    await waitFor(() => expect(t.plan().setups[1]!.zero).toBeUndefined())
+    await waitFor(() => expect(t.setupRows()[1]).toHaveTextContent('G54 front left'))
   })
 })

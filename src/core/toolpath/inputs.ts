@@ -259,7 +259,7 @@ export function toGeneratorInputs(
   }
   // the stock as seen in the setup: face rectangle on X/Y, extent along `n` as the thickness
   const stock: StockGeometry = localStock(input.setup.direction, partStock)
-  const wcs = setupWcs(input.setup.direction, input.setup.rotation, partStock)
+  const wcs = setupWcs(input.setup.direction, input.setup.rotation, partStock, input.setup.zero)
   const turned = wcs === undefined ? {} : { wcs }
   const tool = toolpathTool(input.tool, input.toolSnapshotId)
   const heights = {
@@ -518,7 +518,7 @@ export function toGeneratorInputs(
                   direction: s.direction,
                 }
       const holes = ops.filter((o): o is DrillingOperation => o.kind === 'drilling')
-      // visiting order from the work zero of the setup's WCS
+      // visiting order from the work zero of the setup's WCS (moved with the setup's zero)
       const visits = nearestNeighbourOrder(
         holes.map((operation) => ({
           operation,

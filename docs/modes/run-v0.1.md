@@ -14,7 +14,7 @@ Settled with the user when this doc was accepted; the sections below specify the
 4. **Runs start from a plan** (`run.job.start { planId }`), exported at start with the live G54 ([Run job](#run-job)).
 5. **Every plan status except `archived`** may run on the virtual machine; real machines will require `finalized`/`inUse`. _Amended (hardening 1.2): a real machine runs only `finalized`/`inUse` plans, [run-machine.md](run-machine.md#amendments-to-run-v01md)._
 6. **The virtual machine emulates the plan's machine copy**, given at connect; a job on another machine copy fails (`machineMismatch`).
-7. **Realistic flow** (starts in Alarm; home, jog, set work zero) **plus an opt-in `prepare: true`** at connect that homes instantly and places G54 so the plan's stock sits centred on the table with its top at a valid Z.
+7. **Realistic flow** (starts in Alarm; home, jog, set work zero) **plus an opt-in `prepare: true`** at connect that homes instantly and places G54 so the plan's stock sits centred on the table with its top at a valid Z. G54 X/Y sits at the setup's work zero, the front-left corner of the up face unless the setup moves it (DF78, [alignment.md § Setup work zero](alignment.md#setup-work-zero-q61)).
 8. **Soft-limit failure refuses the start** with `run.softLimit`; no override ([Work zero](#work-zero-and-the-soft-limit-check)).
 9. **Guided wait at every tool change**, also on the virtual machine; agents and tests call `run.job.continue`.
 10. **Emulator trace off** in the app and headless (`trace: false`); a capped ring buffer comes with a later debug view.

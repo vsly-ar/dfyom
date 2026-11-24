@@ -267,6 +267,10 @@ export class ResultShaper {
     const zRefOf = new Map<string, Obj | null>()
     for (const r of (warningList?.['zRefs'] as Obj[] | undefined) ?? [])
       zRefOf.set(r['planOperationId'] as string, (r['zRef'] as Obj | null) ?? null)
+    // DF78: the work zero and alignment points of each setup that has either
+    const alignmentOf = new Map<string, Obj>()
+    for (const a of (warningList?.['alignment'] as Obj[] | undefined) ?? [])
+      alignmentOf.set(a['setupId'] as string, a)
     const countBy = (list: Obj[]) => {
       const c: Record<string, number> = {}
       for (const f of list) c[f['severity'] as string] = (c[f['severity'] as string] ?? 0) + 1
@@ -364,11 +368,25 @@ export class ResultShaper {
               }),
         }
       })
+      const al = alignmentOf.get(s['id'] as string)
+      const xy = (v: unknown) =>
+        Array.isArray(v) ? [length(v[0] as number), length(v[1] as number)] : null
       return {
         id: s['id'],
         name: s['name'],
         direction: s['direction'] ?? '+z',
         rotation: s['rotation'] ?? 0,
+        ...(al === undefined
+          ? {}
+          : {
+              zero: xy(al['zero']),
+              ...(al['zeroPoint'] === undefined ? {} : { zeroPoint: al['zeroPoint'] }),
+              alignment: ((al['points'] as Obj[]) ?? []).map((p) => ({
+                id: p['id'],
+                name: p['name'],
+                wcs: xy(p['wcs']),
+              })),
+            }),
         clearanceHeight: s['clearanceHeight'],
         retractHeight: s['retractHeight'],
         overreach: reach === null ? null : overreachIn(reach, inch),
@@ -566,12 +584,14 @@ function findingNext(f: Obj): string | undefined {
 
 /**
  * `plan.warning.list` with `detail: "full"`: every finding, with `next` where there is one; the
- * Z references without their viewport outline (DF69, docs/modes/z-reference.md#implementation-notes-df69).
+ * Z references without their viewport outline (DF69, docs/modes/z-reference.md#implementation-notes-df69),
+ * without the inspector's alignment sources (DF78).
  */
 function withFindingNext(value: unknown): unknown {
   if (!isObj(value) || !Array.isArray(value['warnings'])) return value
+  const { alignmentSources: _sources, ...rest } = value
   return {
-    ...value,
+    ...rest,
     ...(Array.isArray(value['zRefs'])
       ? {
           zRefs: value['zRefs'].map((r: unknown) => {

@@ -215,8 +215,11 @@ class Writer {
     this.comment(`Stock X ${x} Y ${y} Z ${z} ${this.p.units} on the machine`)
     this.comment(`Faces: ${h.up} up, ${h.front} towards you, ${h.right} on the right`)
     if (h.fromFirst !== undefined) this.comment(`From setup 1: ${h.fromFirst}`)
-    this.comment(`Work zero G54 X0 Y0: ${corner} corner of the ${h.up} face`)
+    if (h.zero === undefined && h.zeroOn === undefined)
+      this.comment(`Work zero G54 X0 Y0: ${corner} corner of the ${h.up} face`)
+    else this.comment(`Corner: ${corner} corner of the ${h.up} face`)
     this.comment('That corner sits front left on the machine')
+    this.alignmentComments(h)
     // DF69: tool runs touching off elsewhere: docs/modes/z-reference.md#exported-gcode
     const refs = this.p.blocks.flatMap((b) => (b.kind === 'toolChange' ? [b.zRef] : []))
     const first = refs[0]
@@ -237,6 +240,27 @@ class Writer {
     for (const line of w.items) this.comment(`Workholding: ${line}`)
     const margin = formatNumber(Math.round(w.margin * this.units.perMm * 1000) / 1000, 3)
     this.comment(`Every move checked: ${margin} ${this.p.units} clear of the workholding`)
+  }
+
+  /**
+   * The moved work zero and the alignment points (alignment phase 1): docs/modes/alignment.md#export.
+   */
+  private alignmentComments(h: SetupHeader): void {
+    const unit = this.p.units
+    if (h.zero !== undefined || h.zeroOn !== undefined) {
+      const [x, y] = (h.zero ?? [0, 0]).map((v) => this.coord(v))
+      this.comment(`Work zero G54 X0 Y0: X ${x} Y ${y} ${unit} from that corner`)
+    }
+    if (h.zeroOn !== undefined)
+      this.lines.push(`(${fitName('Work zero on ', h.zeroOn, '', MAX_LINE_BYTES - 2)})`)
+    const points = h.alignment ?? []
+    if (points.length === 0) return
+    const n = points.length
+    this.comment(`Align ${n} point${n === 1 ? '' : 's'} after zeroing, spindle off:`)
+    points.forEach((p, i) => {
+      const at = ` at X ${this.coord(p.at[0])} Y ${this.coord(p.at[1])}`
+      this.lines.push(`(${fitName(`Align ${i + 1}: `, p.name, at, MAX_LINE_BYTES - 2)})`)
+    })
   }
 
   /**

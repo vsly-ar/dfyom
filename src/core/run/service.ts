@@ -22,6 +22,8 @@ import {
   type TargetKind,
 } from './host/protocol'
 
+import { AlignmentStepSchema, type AlignmentStep } from './alignment'
+
 export const CONNECTION_STATES = ['closed', 'connecting', 'open'] as const
 
 /**
@@ -85,6 +87,8 @@ export const RunStatusSchema = HostStatusSchema.omit({ job: true, timeScale: tru
     .exactOptional(),
   /** The run that ended last; kept until the next run starts, across connections (M5). */
   lastRun: LastRunSchema.exactOptional(),
+  /** DF78: the alignment step of the open connection (docs/modes/alignment.md#state). */
+  alignment: AlignmentStepSchema.exactOptional(),
 })
 export type RunStatus = z.output<typeof RunStatusSchema>
 
@@ -163,4 +167,11 @@ export interface MachineService {
     expect?: { readonly toolChange?: number; readonly pause?: number },
   ): AsyncAppResult<void>
   setTimeScale(scale: TimeScale): AsyncAppResult<void>
+  /**
+   * DF78: the alignment step of the open connection (docs/modes/alignment.md#state). Every status
+   * report reconciles it (`reconcileStep`: a G54 X/Y change clears the ticks; a lost position or
+   * a closed connection drops it); setting it notifies the status listeners.
+   */
+  alignmentStep(): AlignmentStep | undefined
+  setAlignmentStep(step: AlignmentStep | undefined): void
 }

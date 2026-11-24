@@ -1,15 +1,16 @@
 // The setup-change prompt (v0.2 task E2): between two setups' runs, built like the tool-change
 // dialog: the next setup's name and direction, a picture of the stock in its new orientation, the
-// steps (turn and clamp the stock, set the work zero at the front-left corner of the new top,
-// start), the zero to set and the part corner it is (M7), jog and work-zero controls inside,
-// "Start setup n" as the only primary action and the run dialogs' Stop. It never continues by
-// itself; "Close (start later)" puts it off to the inspector.
+// steps (turn and clamp the stock, set the work zero at the front-left corner of the new top or
+// where the setup moved it, DF78 N7; start), the zero to set and the part corner it is (M7), jog
+// and work-zero controls inside, "Start setup n" as the only primary action and the run dialogs'
+// Stop. It never continues by itself; "Close (start later)" puts it off to the inspector.
 // Doc: docs/modes/plan-v0.2.md#setup-change-in-run, docs/conventions/ui.md#run-mode-safety-ui,
 // docs/modes/run-machine.md#run-status-and-the-zero-to-set-m7
 import { useId } from 'react'
 import { DIRECTION_LABEL } from '../../../../core/geometry/face'
 import type { ProjectDoc } from '../../../../core/project/document'
 import type { SetupOrientation } from '../../../../core/toolpath/wcs'
+import { formatHeight } from '../../messages/plan'
 import { runMessages } from '../../messages/run'
 import { Icon, Button, Dialog } from '../../ui'
 import { JogPad, useJogMode } from './JogPad'
@@ -19,6 +20,7 @@ import { useRun, useRunStore } from './run-store'
 import { WorkZeroButtons } from './RunNavigator'
 import { ProbeZButton, usePlateThickness } from './ProbeZButton'
 import { RunDialogFooter } from './RunStop'
+import { AlignmentStep, stepOf } from './AlignmentStep'
 import styles from './Run.module.css'
 
 const m = runMessages.setupChange
@@ -44,6 +46,30 @@ export function SetupChangeDialog({ doc }: { doc: ProjectDoc }): React.JSX.Eleme
   const gates = runGates(status, { planChosen: true })
   const units = doc.unitSystem
   const starting = pending.includes('run.job.start')
+  // DF78: a setup with alignment points starts once its step is confirmed (the server's gate)
+  const points = plan.setups.find((s) => s.id === info.setup.id)?.alignment?.length ?? 0
+  const aligned =
+    points === 0 || stepOf(status.alignment, planId, info.setup.id)?.confirmed === true
+  const startGate = gates.start ?? (aligned ? null : m.align.pending)
+  // DF78 (N7): the zero's offset or point, in words
+  const moved =
+    placed !== undefined &&
+    (placed.zeroPoint !== undefined || placed.zero[0] !== 0 || placed.zero[1] !== 0)
+  const zeroText =
+    placed === undefined
+      ? undefined
+      : m.zeroAt(
+          placed.zeroPoint !== undefined
+            ? { point: placed.zeroPoint }
+            : placed.zero[0] === 0 && placed.zero[1] === 0
+              ? {}
+              : {
+                  offset: [
+                    formatHeight(placed.zero[0], units),
+                    formatHeight(placed.zero[1], units),
+                  ],
+                },
+        )
   return (
     <Dialog
       open={open}
@@ -58,8 +84,8 @@ export function SetupChangeDialog({ doc }: { doc: ProjectDoc }): React.JSX.Eleme
           <Button
             variant="primary"
             icon={<Icon name="run" />}
-            disabled={gates.start !== null || starting}
-            {...(gates.start === null ? {} : { 'aria-describedby': ids.start })}
+            disabled={startGate !== null || starting}
+            {...(startGate === null ? {} : { 'aria-describedby': ids.start })}
             onClick={() => void a.startRun(info.setup.id)}
           >
             {m.start(n)}
@@ -67,9 +93,11 @@ export function SetupChangeDialog({ doc }: { doc: ProjectDoc }): React.JSX.Eleme
         </RunDialogFooter>
       }
     >
-      {placed ? <SetupPicture orientation={placed.orientation} /> : null}
+      {placed ? (
+        <SetupPicture orientation={placed.orientation} zero={placed.zero} zeroText={zeroText} />
+      ) : null}
       <ol className={styles['steps']}>
-        {m.steps(up).map((s) => (
+        {m.steps(up, zeroText).map((s) => (
           <li key={s}>{s}</li>
         ))}
       </ol>
@@ -100,8 +128,10 @@ export function SetupChangeDialog({ doc }: { doc: ProjectDoc }): React.JSX.Eleme
       <dl className={styles['facts']}>
         <dt>{m.zeroToSet}</dt>
         <dd>
-          {m.zeroText}
-          {placed ? ` ${m.zeroCorner(placed.corner)}` : ''}
+          {m.zeroText(moved ? zeroText?.replace(/^X /, 'at X ') : undefined)}
+          {placed && placed.zeroPoint === undefined
+            ? ` ${moved ? m.offsetCorner(placed.corner) : m.zeroCorner(placed.corner)}`
+            : ''}
         </dd>
         {placed ? (
           <>
@@ -120,9 +150,16 @@ export function SetupChangeDialog({ doc }: { doc: ProjectDoc }): React.JSX.Eleme
           {runMessages.dro.units[units]}
         </dd>
       </dl>
-      {gates.start === null ? null : (
+      <AlignmentStep
+        setupId={info.setup.id}
+        points={points}
+        gate={gates.jog}
+        reasonId={ids.jog}
+        units={units}
+      />
+      {startGate === null ? null : (
         <p id={ids.start} className={styles['why']}>
-          {gates.start}
+          {startGate}
         </p>
       )}
     </Dialog>
@@ -143,13 +180,18 @@ const PAD = 14
 
 /**
  * The stock as it sits on the machine for the setup: its extents on X, Y, Z, the top face marked,
- * the work zero at the front-left corner of the top, and which part faces are up, in front and on
+ * the work zero (the front-left corner of the top unless the setup moves it), and which part faces are up, in front and on
  * the right (legend). Pure SVG with design tokens.
  */
 export function SetupPicture({
   orientation,
+  zero = [0, 0],
+  zeroText,
 }: {
   orientation: SetupOrientation
+  /** DF78 (N7): the work zero from the front-left corner of the top (mm); the ring is drawn there. */
+  zero?: readonly [number, number]
+  zeroText?: string | undefined
 }): React.JSX.Element {
   const [X, Y, Z] = orientation.size
   const corners: P3[] = [
@@ -160,6 +202,8 @@ export function SetupPicture({
     [0, 0, -Z],
     [X, 0, -Z],
     [X, Y, -Z],
+    // the zero may lie off the stock: keep it in the picture
+    [zero[0], zero[1], 0],
   ]
   const flat = corners.map(iso)
   const minX = Math.min(...flat.map((p) => p[0]))
@@ -175,7 +219,7 @@ export function SetupPicture({
   }
   const face = (ps: readonly P3[]) => ps.map(at).join(' ')
   const label = (d: keyof typeof DIRECTION_LABEL) => DIRECTION_LABEL[d]
-  const zero = at([0, 0, 0]).split(',').map(Number) as [number, number]
+  const ring = at([zero[0], zero[1], 0]).split(',').map(Number) as [number, number]
   return (
     <figure className={styles['setupPicture']}>
       <svg
@@ -185,6 +229,7 @@ export function SetupPicture({
           label(orientation.up),
           label(orientation.front),
           label(orientation.right),
+          zeroText,
         )}
       >
         <polygon
@@ -214,9 +259,9 @@ export function SetupPicture({
             [0, Y, 0],
           ])}
         />
-        <circle className={styles['workZeroRing']} cx={zero[0]} cy={zero[1]} r={6} />
-        <circle className={styles['workZeroDot']} cx={zero[0]} cy={zero[1]} r={2.2} />
-        <text className={styles['workZeroLabel']} x={zero[0] - 8} y={zero[1] - 10}>
+        <circle className={styles['workZeroRing']} cx={ring[0]} cy={ring[1]} r={6} />
+        <circle className={styles['workZeroDot']} cx={ring[0]} cy={ring[1]} r={2.2} />
+        <text className={styles['workZeroLabel']} x={ring[0] - 8} y={ring[1] - 10}>
           {m.zeroLabel}
         </text>
       </svg>

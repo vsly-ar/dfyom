@@ -391,6 +391,84 @@ describe('run commands', { timeout: 60_000 }, () => {
     expectErrCode(await d.job(jobId).unwrap().result, 'plan.status')
   })
 
+  // DF78: docs/modes/alignment.md#run-the-alignment-step, #ticks-and-the-confirm-gate
+  it('an agent runs the alignment step on the virtual machine; the start waits for it', async () => {
+    const t = await setup()
+    expectOk(await t.open({ prepare: true }))
+    const setupId = t.s.plan(t.planId).setups[0]!.id
+    expectErrCode(
+      await t.run('run.align.goto', { planId: t.planId, setupId, to: 'zero' }),
+      'run.state',
+    )
+    expectOk(
+      await t.run(
+        'plan.alignment.set',
+        {
+          planId: t.planId,
+          setupId,
+          points: [{ name: 'Back right', source: { corner: 'top back right' } }],
+        },
+        ui,
+      ),
+    )
+    // the gate: a setup with points does not start before its step is confirmed
+    let r = await t.job('run.job.start', { planId: t.planId })
+    expect(expectErrCode(await r.result, 'run.state').issues[0]?.rule).toBe('alignmentPending')
+    const none = expectErrCode(await t.run('run.align.tick', { confirm: true }), 'run.state')
+    expect(none.issues[0]?.rule).toBe('noAlignment')
+    const idleAt = (x: number, y: number) =>
+      waitFor(() => {
+        const s = t.status()
+        return (
+          s.state === 'Idle' && Math.abs(s.wpos[0] - x) < 0.01 && Math.abs(s.wpos[1] - y) < 0.01
+        )
+      })
+    // the work zero first, then the point (next wraps)
+    expect(
+      expectOk(await t.run('run.align.goto', { planId: t.planId, setupId, to: 'zero' })),
+    ).toEqual({ current: 'zero', target: [0, 0] })
+    expect(await idleAt(0, 0)).toBe(true)
+    expect(t.status().alignment).toMatchObject({ setupId, current: 'zero', confirmed: false })
+    const point = t.status().alignment!.entries[1]!
+    expect(point.name).toBe('Back right')
+    const far = expectErrCode(await t.run('run.align.tick', { entry: point.id }), 'run.state')
+    expect(far.issues[0]?.rule).toBe('notAtPoint')
+    expectOk(await t.run('run.align.tick', { entry: 'zero' }))
+    const next = expectOk(
+      await t.run('run.align.goto', { planId: t.planId, setupId, to: 'next' }),
+    ) as { current: string; target: [number, number] }
+    expect(next.current).toBe(point.id)
+    expect(await idleAt(...next.target)).toBe(true)
+    // the pointer stays at the clearance height above the top
+    expect(t.status().wpos[2]).toBeGreaterThan(0)
+    expectOk(await t.run('run.align.tick', { entry: point.id }))
+    expect(
+      expectOk(await t.run('run.align.tick', { confirm: true })) as { confirmed: boolean },
+    ).toMatchObject({ confirmed: true, skipped: [] })
+    // a G54 X/Y change clears the ticks and the confirmation
+    expectOk(
+      await t.run('run.workZero.set', {
+        axes: ['x', 'y'],
+        values: [next.target[0] + 1, next.target[1], 0],
+      }),
+    )
+    expect(await waitFor(() => t.status().alignment?.confirmed === false)).toBe(true)
+    expect(t.status().alignment!.entries.every((e) => !e.ticked)).toBe(true)
+    const unticked = expectErrCode(await t.run('run.align.tick', { confirm: true }), 'run.state')
+    expect(unticked.issues[0]?.rule).toBe('unticked')
+    expect(
+      expectOk(await t.run('run.align.tick', { confirm: true, skipUnticked: true })),
+    ).toMatchObject({ confirmed: true, skipped: ['zero', point.id] })
+    // confirmed at this G54: the run starts
+    r = await t.job('run.job.start', { planId: t.planId })
+    let ended = false
+    void r.result.then(() => (ended = true))
+    expect(await waitFor(() => ended || t.status().job !== undefined)).toBe(true)
+    if (!ended) expectOk(await t.run('job.abort', { jobId: r.jobId }))
+    const outcome = await r.result
+    if (outcome.isErr()) expect(outcome.unwrapErr().code).not.toBe('run.state')
+  })
+
   it('job.pause holds, job.resume resumes, job.abort stops; close is refused while running', async () => {
     const t = await setup()
     expectOk(await t.open({ prepare: true }))
@@ -661,6 +739,13 @@ describe('run commands on a serial target (loopback)', { timeout: 60_000 }, () =
     expectErrCode(await t.run('run.machine.probeZ', { plateThickness: 5 }), 'permission.denied')
     expectErrCode(await t.run('run.override.set', { feed: 'reset' }), 'permission.denied')
     expectErrCode(await t.run('run.override.set', { rapid: 100 }), 'permission.denied')
+    // the alignment step's moves and ticks are the operator's on a real machine (Q64)
+    const setupId = t.s.plan(t.planId).setups[0]!.id
+    expectErrCode(
+      await t.run('run.align.goto', { planId: t.planId, setupId, to: 'zero' }),
+      'permission.denied',
+    )
+    expectErrCode(await t.run('run.align.tick', { confirm: true }), 'permission.denied')
     expect(
       expectOk(await t.run('run.override.set', { feed: '-10' }, ui)) as {
         overrides?: { feed: number }

@@ -10,6 +10,8 @@ import type { JobDirectory, Services } from '../commands/context'
 import { loadPlan } from '../plan/plan'
 import { PlanIdSchema } from '../plan/plan.dto'
 import { setupStockSize } from '../plan/setups'
+import { setupZero } from '../plan/alignment'
+import type { Region2dPort } from '../geometry/2d/port'
 import { setupWorkholding } from '../plan/workholding/setup'
 import type { ProjectDoc } from '../project/document'
 import type { Vec3 } from '../toolpath/model'
@@ -30,6 +32,7 @@ import {
   type MachineAction,
 } from './host/protocol'
 import { RunStatusSchema } from './service'
+import { runAlignGoto, runAlignTick } from './align-commands'
 import { DEFAULT_BAUD, SerialPortInfoSchema } from './serial'
 import { settingsCheck, SettingsCheckSchema } from './settings-check'
 import type { MachineValuesDTO } from '../library/machine.dto'
@@ -41,9 +44,15 @@ export const PREPARE_TOP_MARGIN = 5
  * Decision 7: G54 (MPos) that puts the plan's stock centred on the table (XY) with the clearance
  * plane `PREPARE_TOP_MARGIN` below the top of the travel. Work zero = stock front-left corner,
  * Z0 on the stock top (docs/modes/plan-v0.1.md#setup-orientation-work-zero-safe-heights), for the
- * first setup: the stock in its orientation (v0.2, task E2; a top setup: length × width).
+ * first setup: the stock in its orientation (v0.2, task E2; a top setup: length × width). A moved
+ * work zero (alignment phase 1, N5) is added back, so the stock stays centred.
  */
-export function prepareWorkZero(doc: ProjectDoc, planId: string, where: string): AppResult<Vec3> {
+export function prepareWorkZero(
+  doc: ProjectDoc,
+  planId: string,
+  where: string,
+  port?: Region2dPort,
+): AppResult<Vec3> {
   const loaded = loadPlan(doc, planId, where)
   if (loaded.isErr()) return Err(loaded.unwrapErr())
   const plan = loaded.unwrap()
@@ -54,9 +63,10 @@ export function prepareWorkZero(doc: ProjectDoc, planId: string, where: string):
   // the clearance the program uses (it follows the workholding, workholding.md)
   const clearanceMm = setupWorkholding(first, plan.stock).clearance
   const size = setupStockSize(plan.stock, first)
+  const zero = setupZero(plan, first, port)
   return Ok([
-    -machine.travel.x.canonical / 2 - size.x[1] / 2,
-    -machine.travel.y.canonical / 2 - size.y[1] / 2,
+    -machine.travel.x.canonical / 2 - size.x[1] / 2 + zero[0],
+    -machine.travel.y.canonical / 2 - size.y[1] / 2 + zero[1],
     -PREPARE_TOP_MARGIN - clearanceMm,
   ])
 }
@@ -210,7 +220,7 @@ export const runConnectionOpen = defineCommand({
           where,
           issues: [{ path: ['prepare'], rule: 'needsPlan', message: 'prepare needs planId' }],
         })
-      const wz = prepareWorkZero(doc, args.planId, where)
+      const wz = prepareWorkZero(doc, args.planId, where, ctx.services.region2d)
       if (wz.isErr()) return wz
       prepare = { workZero: wz.unwrap() }
     }
@@ -618,6 +628,8 @@ export const RUN_COMMANDS: readonly AnyCommand[] = [
   runMachineReset,
   runMachineProbeZ,
   runOverrideSet,
+  runAlignGoto,
+  runAlignTick,
   runJobStart,
   runJobCheck,
   runJobContinue,

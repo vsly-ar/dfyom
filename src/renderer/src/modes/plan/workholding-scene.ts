@@ -43,3 +43,24 @@ export function workholdingOverlay(
     hits,
   }
 }
+
+/**
+ * The overlay in the WCS of a setup whose work zero is moved (DF78): items and collision hits are
+ * in the setup frame, the scene's frame has its origin at the zero (docs/modes/alignment.md#frames).
+ */
+export function shiftOverlay(
+  o: WorkholdingOverlay | undefined,
+  zero: readonly [number, number],
+): WorkholdingOverlay | undefined {
+  const [zx, zy] = zero
+  if (o === undefined || (zx === 0 && zy === 0)) return o
+  const at = (p: readonly [number, number]) => [p[0] - zx, p[1] - zy] as const
+  return {
+    ...o,
+    solids: o.solids.map((s) => ({ ...s, outline: s.outline.map(at) })),
+    ...(o.halo === undefined
+      ? {}
+      : { halo: { ...o.halo, outlines: o.halo.outlines.map((l) => l.map(at)) } }),
+    hits: o.hits.map((h) => [h[0] - zx, h[1] - zy, h[2]] as const),
+  }
+}
