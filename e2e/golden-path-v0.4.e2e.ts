@@ -299,9 +299,12 @@ test('v0.4 golden path through the UI: holes, fastener picker, Clones, chamfers,
   await expect(report).toBeVisible({ timeout: 30_000 })
   await report.getByRole('button', { name: 'Close' }).first().click()
   await expect(report).toHaveCount(0)
-  // a row's actions show while it is hovered (ui.md § Navigator); Remove keeps the dialog open
-  await shapes.getByRole('button', { name: /^cavity/ }).hover()
-  await shapes.getByRole('button', { name: 'Remove cavity' }).click()
+  // a row's actions are its context menu (DF70, ui.md decision 27); Remove keeps the dialog open
+  await shapes.getByRole('button', { name: /^cavity/ }).click({ button: 'right' })
+  await page
+    .getByRole('menu', { name: 'Actions for cavity' })
+    .getByRole('menuitem', { name: /^Remove/ })
+    .click()
   const shapeRows = shapes.getByRole('list').getByRole('button', { name: /^(outline|cavity)/ })
   await expect(shapeRows).toHaveText([/^outline/])
   await closeDialog(shapes)

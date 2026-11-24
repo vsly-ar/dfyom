@@ -1,25 +1,36 @@
 // The Shapes dialog's body (task U1; the navigator's "Shapes" group until D45): one row per named shape as
 // `design.shape.list` gives it (shape icon, name, "used by n", the failed marker when it does not
 // resolve), in the operation-row pattern without move actions (shapes have no order). Remove is
-// disabled while an operation uses the shape, with the reason as tooltip and visible text. "Add
+// disabled while an operation uses the shape, with the reason in the menu and as visible text. "Add
 // shape" offers the primitives and a path; "Import SVG…" is a button beside it (DF49; task U2: the
 // file dialog, the options step of the import dialog, `design.shape.import`, then its report;
 // "Edit shape" selects the first created shape). With no shapes the empty-state text comes first
 // and the two buttons follow it. `useSvgImport` also serves the operation shape picker and the
 // Shape Editor (DF49). Adding or choosing a shape selects it, which opens the Shape Editor, and closes
-// the dialog (`onChosen`). Keyboard (hardening U2): Remove is the row's next tab stop and shows
-// while the row has focus; `Delete` (or `Backspace`) on a row removes an unused shape, and focus
-// goes to the next row (else the previous one, else "Add shape"). Doc: docs/conventions/ui.md#navigator-and-add,
+// the dialog (`onChosen`). Row actions are a context menu (DF70, ui.md decision 27): right-click,
+// Shift+F10 / the Menu key on a row open "Actions for Shape 1" (Remove; the row has no action
+// button). `Delete` (or `Backspace`) on a row removes an unused shape, and focus goes to the next
+// row (else the previous one, else "Add shape"). Doc: docs/conventions/ui.md#navigator-and-add,
 // docs/conventions/ui.md#import-svg-where-it-is-looked-for-df49,
 // docs/conventions/ui.md#design-sidebar-and-setup-dialogs-v04-d45, docs/modes/design-v0.3.md#what-a-shape-is
-import { useRef, useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import type { ShapeItemKind } from '../../../../core/design/shape.dto'
 import { chainBounds } from '../../../../core/geometry/2d/model'
 import type { SvgImportReport, SvgSplit, SvgUnit } from '../../../../core/import/svg'
 import type { AppErrorData } from '../../../../shared/errors/app-error'
+import { designMessages } from '../../messages/design'
 import { shapeMessages } from '../../messages/shape'
 import { useRegion2d, useShell } from '../../shell/ShellContext'
-import { Button, Icon, IconButton, Menu, newGestureId, type MenuEntry } from '../../ui'
+import {
+  Button,
+  ContextMenu,
+  Icon,
+  isContextMenuKey,
+  Menu,
+  newGestureId,
+  openContextMenu,
+  type MenuEntry,
+} from '../../ui'
 import styles from './Design.module.css'
 import { ImportReportDialog, type ImportReportStep } from './ImportReportDialog'
 import { itemName, type DesignPart } from './model'
@@ -30,6 +41,7 @@ import { useCommand, useDesignSelection } from './useDesign'
 import { useShapeList, type ShapeRow } from './useShapes'
 
 const m = shapeMessages.navigator
+const nav = designMessages.navigator
 export const SHAPE_KINDS: readonly ShapeItemKind[] = [
   'rectangle',
   'circle',
@@ -168,6 +180,7 @@ export function ShapeList({
   const opName = (id: string) => itemName(part.dto, id)
   const rowButtons = useRef(new Map<string, HTMLButtonElement>())
   const addButton = useRef<HTMLButtonElement>(null)
+  const hintId = useId()
 
   const add = async (kind: ShapeItemKind) => {
     const r = await call('design.shape.add', {
@@ -238,78 +251,102 @@ export function ShapeList({
             const used = row.usedBy.length > 0
             const failed = row.kind === undefined
             const reason = used ? m.referenced(row.usedBy.map(opName)) : undefined
+            const reasonId = `${row.id}-reason`
+            const menu: MenuEntry[] = [
+              {
+                label: nav.removeItem,
+                icon: <Icon name="delete" />,
+                shortcut: 'Delete',
+                danger: true,
+                disabledReason: reason,
+                onSelect: () => void remove(row.id, row.name),
+              },
+            ]
             return (
-              <li
+              <ContextMenu
                 key={row.id}
-                className={styles['op']}
-                data-selected={selected === row.id ? '' : undefined}
+                label={nav.actions(row.name)}
+                items={menu}
+                onCloseAutoFocus={(e) => {
+                  e.preventDefault()
+                  rowButtons.current.get(row.id)?.focus()
+                }}
               >
-                <button
-                  type="button"
-                  ref={(el) => {
-                    if (el) rowButtons.current.set(row.id, el)
-                    else rowButtons.current.delete(row.id)
-                  }}
-                  className={styles['opSelect']}
-                  aria-pressed={selected === row.id}
-                  aria-keyshortcuts="Delete"
-                  {...(reason ? { 'aria-describedby': `${row.id}-reason` } : {})}
-                  onKeyDown={(e) => {
-                    if (e.key !== 'Delete' && e.key !== 'Backspace') return
-                    e.preventDefault()
-                    if (!used) void remove(row.id, row.name)
-                  }}
-                  onClick={() => {
-                    if (selected !== row.id) {
-                      ui.getState().selectShapeItem(row.id, 0)
-                      select(row.id)
-                    }
-                    onChosen()
-                  }}
+                <li
+                  className={styles['op']}
+                  data-row-menu=""
+                  data-selected={selected === row.id ? '' : undefined}
                 >
-                  {/* the kind's icon and a read-out tell shapes apart (DF48) */}
-                  {row.single !== undefined ? (
-                    <ShapeKindIcon kind={row.single} />
-                  ) : (
-                    <Icon name="shapes" />
-                  )}
-                  <span className={styles['featureText']}>
-                    <span className={styles['opName']} title={row.name}>
-                      {row.name}
+                  <button
+                    type="button"
+                    ref={(el) => {
+                      if (el) rowButtons.current.set(row.id, el)
+                      else rowButtons.current.delete(row.id)
+                    }}
+                    className={styles['opSelect']}
+                    aria-pressed={selected === row.id}
+                    aria-keyshortcuts="Shift+F10 Delete"
+                    aria-describedby={reason ? `${hintId} ${reasonId}` : hintId}
+                    onKeyDown={(e) => {
+                      // Shift+F10 / the Menu key: the row's menu, at the row (DF70)
+                      if (isContextMenuKey(e)) {
+                        const el = e.currentTarget.closest('[data-row-menu]')
+                        if (el === null) return
+                        e.preventDefault()
+                        return openContextMenu(el)
+                      }
+                      if (e.key !== 'Delete' && e.key !== 'Backspace') return
+                      e.preventDefault()
+                      if (!used) void remove(row.id, row.name)
+                    }}
+                    onClick={() => {
+                      if (selected !== row.id) {
+                        ui.getState().selectShapeItem(row.id, 0)
+                        select(row.id)
+                      }
+                      onChosen()
+                    }}
+                  >
+                    {/* the kind's icon and a read-out tell shapes apart (DF48) */}
+                    {row.single !== undefined ? (
+                      <ShapeKindIcon kind={row.single} />
+                    ) : (
+                      <Icon name="shapes" />
+                    )}
+                    <span className={styles['featureText']}>
+                      <span className={styles['opName']} title={row.name}>
+                        {row.name}
+                      </span>
+                      <span className={styles['featureReadout']}>
+                        <span className={styles['srOnly']}>{', '}</span>
+                        {row.readout}
+                      </span>
                     </span>
-                    <span className={styles['featureReadout']}>
-                      <span className={styles['srOnly']}>{', '}</span>
-                      {row.readout}
-                    </span>
-                  </span>
-                  {used ? (
-                    <span className={styles['shapeUse']}>{m.usedBy(row.usedBy.length)}</span>
+                    {used ? (
+                      <span className={styles['shapeUse']}>{m.usedBy(row.usedBy.length)}</span>
+                    ) : null}
+                    {failed ? (
+                      <span className={styles['opFailed']} title={m.failed}>
+                        <Icon name="error" />
+                        <span className={styles['srOnly']}>{m.failed}</span>
+                      </span>
+                    ) : null}
+                  </button>
+                  {reason ? (
+                    <p id={reasonId} className={styles['shapeReason']}>
+                      {reason}
+                    </p>
                   ) : null}
-                  {failed ? (
-                    <span className={styles['opFailed']} title={m.failed}>
-                      <Icon name="error" />
-                      <span className={styles['srOnly']}>{m.failed}</span>
-                    </span>
-                  ) : null}
-                </button>
-                <span className={styles['opActions']}>
-                  <IconButton
-                    label={m.remove(row.name)}
-                    icon={<Icon name="delete" />}
-                    aria-disabled={used || undefined}
-                    {...(reason ? { 'aria-describedby': `${row.id}-reason` } : {})}
-                    onClick={() => (used ? undefined : void remove(row.id, row.name))}
-                  />
-                </span>
-                {reason ? (
-                  <p id={`${row.id}-reason`} className={styles['shapeReason']}>
-                    {reason}
-                  </p>
-                ) : null}
-              </li>
+                </li>
+              </ContextMenu>
             )
           })}
         </ul>
+      )}
+      {empty ? null : (
+        <p id={hintId} className={styles['srOnly']}>
+          {nav.rowMenuHint}
+        </p>
       )}
       {svg.dialog}
     </div>

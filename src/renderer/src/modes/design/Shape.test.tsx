@@ -178,24 +178,45 @@ describe('shape editor', () => {
     }
   })
 
-  it('reaches shape and item row actions by keyboard (U2): Tab to Remove, Delete on a row', async () => {
+  it('reaches shape and item row actions by keyboard: row menu (DF70), Delete on a row', async () => {
     const { user, part, shape, addShape } = await renderShapes()
     await addShape('Rectangle')
     await addShape('Circle')
-    await waitFor(() => expect(part().shapes).toHaveLength(2))
-    // Shapes dialog: Remove is the row's next tab stop
+    await addShape('Polygon')
+    await waitFor(() => expect(part().shapes).toHaveLength(3))
+    // Shapes dialog (DF70, ui.md decision 27): rows have no action buttons; their actions are
+    // the row menu, which their description names
     const dialog = await shapesGroup()
     const first = within(dialog).getByRole('button', { name: /^Shape 1/ })
+    expect(within(first.parentElement!).getAllByRole('button')).toEqual([first])
+    expect(within(dialog).queryByRole('button', { name: /^Remove / })).toBeNull()
+    expect(first).toHaveAccessibleDescription('Right-click or Shift+F10 for actions.')
+    expect(first).toHaveAttribute('aria-keyshortcuts', 'Shift+F10 Delete')
+    // Shift+F10 opens it at the row; Escape closes it and focus returns to the row
     first.focus()
-    await user.tab()
-    expect(document.activeElement).toBe(
-      within(dialog).getByRole('button', { name: 'Remove Shape 1' }),
-    )
+    await user.keyboard('{Shift>}{F10}{/Shift}')
+    let menu = await screen.findByRole('menu', { name: 'Actions for Shape 1' })
+    expect(
+      within(menu)
+        .getAllByRole('menuitem')
+        .map((i) => i.textContent),
+    ).toEqual(['RemoveDelete'])
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
+    expect(document.activeElement).toBe(first)
+    expect(screen.getByRole('dialog', { name: 'Shapes' })).toBeInTheDocument()
+    // right-click opens the same menu; its Remove removes the shape and keeps the dialog open
+    fireEvent.contextMenu(first)
+    menu = await screen.findByRole('menu', { name: 'Actions for Shape 1' })
+    await user.click(within(menu).getByRole('menuitem', { name: /^Remove/ }))
+    await waitFor(() => expect(part().shapes?.map((s) => s.name)).toEqual(['Shape 2', 'Shape 3']))
+    expect(screen.getByRole('dialog', { name: 'Shapes' })).toBeInTheDocument()
     // Delete on a row removes the shape; focus goes to the next row
-    first.focus()
+    const second = within(dialog).getByRole('button', { name: /^Shape 2/ })
+    second.focus()
     await user.keyboard('{Delete}')
-    await waitFor(() => expect(part().shapes?.map((s) => s.name)).toEqual(['Shape 2']))
-    expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: /^Shape 2/ }))
+    await waitFor(() => expect(part().shapes?.map((s) => s.name)).toEqual(['Shape 3']))
+    expect(document.activeElement).toBe(within(dialog).getByRole('button', { name: /^Shape 3/ }))
     await user.keyboard('{Escape}')
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
     // item list: Delete on an item row removes it, focus stays in the list
@@ -207,8 +228,8 @@ describe('shape editor', () => {
       .getByRole('button', { name: /^Rectangle 2/ })
       .focus()
     await user.keyboard('{Delete}')
-    await waitFor(() => expect(shape().items.map((i) => i.kind)).toEqual(['circle']))
-    expect(document.activeElement).toBe(within(items).getByRole('button', { name: /^Circle 1/ }))
+    await waitFor(() => expect(shape().items.map((i) => i.kind)).toEqual(['polygon']))
+    expect(document.activeElement).toBe(within(items).getByRole('button', { name: /^Polygon 1/ }))
     // the last item stays: Delete does nothing
     await user.keyboard('{Delete}')
     expect(shape().items).toHaveLength(1)

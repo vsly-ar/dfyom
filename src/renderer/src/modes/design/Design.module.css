@@ -280,31 +280,6 @@
   opacity: 1;
 }
 
-.opActions {
-  /* over the row's end while hovered, focused or selected, so names keep the full width */
-  position: absolute;
-  top: 50%;
-  right: 0;
-  transform: translateY(-50%);
-  display: inline-flex;
-  padding: 0 var(--space-1);
-  background: var(--bg-chrome);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--motion-fast) var(--ease-standard);
-}
-
-.op:hover .opActions,
-.op:focus-within .opActions,
-.op[data-selected] .opActions {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.op[data-selected] .opActions {
-  background: var(--accent-subtle);
-}
-
 /* feature rows (v0.4 task U1, ui.md#feature-rows-and-add; visuals draft until L2): the chevron
    sits in the row's left gutter so the feature icon lines up with plain operation icons; owned
    rows sit one 8 px step in, along a thin guide line, and slide down when the row opens */
@@ -908,15 +883,6 @@
   line-height: var(--lh-xs);
   color: var(--text-muted);
   white-space: nowrap;
-  transition: opacity var(--motion-fast) var(--ease-standard);
-}
-
-/* the row's actions cover its end while hovered, focused or selected: the count fades with them
-   showing (the reason under a used row still names the operations) */
-.op:hover .shapeUse,
-.op:focus-within .shapeUse,
-.op[data-selected] .shapeUse {
-  opacity: 0;
 }
 
 .shapeReason {

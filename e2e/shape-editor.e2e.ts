@@ -2,7 +2,8 @@
 // Shapes dialog (D45) opens its flat view and inspector; a dimension edited by dragging its
 // handle (one undo step) and by its field (one undo step); undo restores each. Windows stay
 // hidden (app.fixture.ts). A path's segment table opens a row's actions by right-click and
-// Shift+F10 (DF70); with DFYOM_RENDERS=1 the light and dark renders `df70-segment-menu-*.png`.
+// Shift+F10 (DF70), and so does a Shapes dialog row; with DFYOM_RENDERS=1 the light and dark
+// renders `df70-{segment,shape}-menu-*.png`.
 // Docs: docs/modes/design-v0.3.md#shape-definition, docs/conventions/ui.md#shape-editor
 import { resolve } from 'node:path'
 import type { Locator, Page } from '@playwright/test'
@@ -170,4 +171,44 @@ test('shape editor: a segment row opens its actions by right-click and Shift+F10
   await page.keyboard.press('Shift+F10')
   await page.getByRole('menuitem', { name: 'Remove segment 3' }).click()
   await expect(grid.getByRole('row')).toHaveCount(3)
+})
+
+test('shapes dialog: a shape row opens its actions by right-click and Shift+F10 (DF70)', async ({
+  dfyom,
+}) => {
+  test.setTimeout(120_000)
+  const page = await dfyom.app.firstWindow()
+  await newPart(page)
+  let shapes = await openPartSetup(page, 'Shapes')
+  for (const kind of ['Rectangle', 'Circle']) {
+    await shapes.getByRole('button', { name: 'Add shape' }).click()
+    await page.getByRole('menuitem', { name: kind }).click()
+    await expect(shapes).toBeHidden()
+    shapes = await openPartSetup(page, 'Shapes')
+  }
+  const row = (name: string) => shapes.getByRole('button', { name: new RegExp(`^${name}`) })
+  // no action button on a row, even hovered: its actions are the row's context menu
+  await row('Shape 1').hover()
+  await expect(shapes.getByRole('button', { name: /^Remove / })).toHaveCount(0)
+
+  // right-click on a row: its menu at the pointer
+  await row('Shape 1').click({ button: 'right' })
+  const menu = page.getByRole('menu', { name: 'Actions for Shape 1' })
+  await expect(menu).toBeVisible()
+  await expect(menu.getByRole('menuitem')).toHaveText([/^Remove/])
+  await renderOpen(page, 'shape-menu')
+  await page.keyboard.press('Escape')
+  await expect(menu).toBeHidden()
+  await expect(shapes).toBeVisible()
+
+  // Shift+F10 on the focused row: the same menu; its Remove keeps the dialog open
+  await row('Shape 2').focus()
+  await page.keyboard.press('Shift+F10')
+  await page
+    .getByRole('menu', { name: 'Actions for Shape 2' })
+    .getByRole('menuitem', { name: /^Remove/ })
+    .click()
+  await expect(row('Shape 2')).toHaveCount(0)
+  await expect(shapes).toBeVisible()
+  await expect(row('Shape 1')).toBeVisible()
 })
